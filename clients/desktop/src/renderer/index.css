@@ -627,3 +627,6 @@ body:hover #orb-rail,
 #last-result { position: absolute; left: 3px; top: 50%; transform: translateY(-50%); opacity: 0; pointer-events: none; }
 body:hover #last-result, #last-result:focus-visible { opacity: 1; pointer-events: auto; }
 #shell[data-bubbles='true'] #last-result { left: max(3px, calc(var(--bubble-orb-x) - 77px)); top: var(--bubble-orb-y); }
+
+/* Keep the result entry out of the orb until its interaction is redesigned. */
+#last-result { display: none; }

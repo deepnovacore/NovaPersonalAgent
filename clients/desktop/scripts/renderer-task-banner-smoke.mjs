@@ -105,7 +105,9 @@ try {
   assert.match(await page.locator('[data-task-status]').innerText(),/正在停止/)
   await page.locator('[data-task-hide]').click()
   assert.equal(await page.locator('#task-banner').isVisible(),false)
-  await page.locator('#last-result').click()
+  assert.equal(await page.locator('#last-result').isVisible(), false)
+  // The entry is hidden; retain coverage of the underlying result controller.
+  await page.locator('#last-result').dispatchEvent('click')
   assert.equal(await page.locator('#task-banner').isVisible(),true)
   await page.evaluate(()=>window.__settingsChanged({palette:'ember',codingProgressNarration:'continuous'}))
   assert.equal(await page.evaluate(()=>window.__sent.filter(s=>s.includes('coding.progress_narration')).length),1)

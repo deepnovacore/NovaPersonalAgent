@@ -100,11 +100,11 @@ test('Qwen joins fragmented tool calls and retains a matched tool result with it
   const requests: Record<string, unknown>[] = []
   const responses = [
     sse([
-      {id: 'provider-tool-1', choices: [{delta: {tool_calls: [
+      {id: 'provider-tool-1', choices: [{delta: {content: '', tool_calls: [
         {index: 0, id: 'call-1', type: 'function', function: {name: 'search__', arguments: '{"q":"'}},
       ]}}]},
-      {choices: [{delta: {tool_calls: [
-        {index: 0, function: {name: 'query', arguments: 'weather"}'}},
+      {choices: [{delta: {content: null, tool_calls: [
+        {index: 0, id: '', function: {name: 'query', arguments: 'weather"}'}},
       ]}, finish_reason: 'tool_calls'}]},
     ]),
     sse([

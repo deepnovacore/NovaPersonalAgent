@@ -565,7 +565,7 @@ test('common choices use compact segmented groups without losing radio semantics
 })
 
 test('the heartbeat slider and model fields carry Main-compatible bounds', () => {
-  assert.match(html, /Codex 播报间隔/)
+  assert.match(html, /Coding 执行器播报间隔/)
   assert.match(html, /<input type="range" id="heartbeat" min="15" max="120" step="1"/)
   assert.match(html, /Qwen 实时模型/)
   assert.match(html, /<input type="text" id="integratedModel" maxlength="64"/)
@@ -714,7 +714,7 @@ test('Codex and Projects is the final collapsed settings disclosure', () => {
   assert.ok(disclosure, 'Codex and Projects closes the settings content')
   assert.doesNotMatch(disclosure, /<details id="codex-projects"[^>]*\sopen(?:\s|>)/)
   assert.match(disclosure, /<div id="codex-manual-settings"[^>]*hidden>/)
-  assert.match(disclosure, /Codex 与工作区/)
+  assert.match(disclosure, /Coding 执行器与工作区/)
 })
 
 test('the panel exposes packaged Codex, Projects, and model endpoint configuration', () => {

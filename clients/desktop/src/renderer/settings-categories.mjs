@@ -5,13 +5,13 @@
 export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'general', label: '通用', sections: Object.freeze([
     'wake-word-section', 'appearance-section', 'notifications-section',
-    'intent-section', 'proactivity-section', 'pacing-section', 'frontend-usage-section',
+    'intent-section', 'proactivity-section', 'frontend-usage-section',
   ])}),
   Object.freeze({id: 'pipeline', label: '语音管线', sections: Object.freeze(['pipeline'])}),
   Object.freeze({id: 'capabilities', label: '能力与 MCP', sections: Object.freeze(['capabilities-section'])}),
   Object.freeze({id: 'knowledge', label: '知识库', sections: Object.freeze(['knowledge-section'])}),
   Object.freeze({id: 'secrets', label: 'API 密钥', sections: Object.freeze(['secrets'])}),
-  Object.freeze({id: 'codex', label: 'Codex 与工作区', sections: Object.freeze([
+  Object.freeze({id: 'codex', label: 'Coding 执行器与工作区', sections: Object.freeze([
     'codex-approval-section', 'codex-projects',
   ])}),
 ])

@@ -113,14 +113,18 @@ try {
       outcome: 'ok', summary: '<b>done</b>', started_at: 0, ended_at: 5, changed_files: 2}})
   })
   await page.locator('#orb').hover()
-  await page.locator('#last-result').click()
+  assert.equal(await page.locator('#last-result').isVisible(), false)
+  // The entry is hidden; retain coverage of the underlying result controller.
+  await page.locator('#last-result').dispatchEvent('click')
   assert.equal(await page.evaluate(() => window.__openedResult.results.length), 2)
   assert.equal(await page.evaluate(() => window.__openedResult.roster[0].running[0].title), '<img src=x>')
   assert.equal(await page.evaluate(() => window.__openedResult.results[0].project), '<alpha>')
   assert.equal(await page.locator('img').count(), 0, 'source markup must remain text')
   await page.evaluate(() => window.__frame({type: 'executor.result', work_id: 'a', result: null}))
   await page.locator('#orb').hover()
-  await page.locator('#last-result').click()
+  assert.equal(await page.locator('#last-result').isVisible(), false)
+  // The entry is hidden; retain coverage of the underlying result controller.
+  await page.locator('#last-result').dispatchEvent('click')
   assert.deepEqual(await page.evaluate(() => window.__openedResult.results.map(result => result.delegateId)), ['b'])
   // A reconnect snapshot must remove previously retained entries, then replay the current set.
   await page.evaluate(() => {
@@ -128,7 +132,9 @@ try {
     window.__frame({type: 'executor.result', work_id: 'c', result: {delegate_id: 'c', executor: 'codex', outcome: 'cancelled', summary: 'Stopped', started_at: 0, ended_at: 5, changed_files: 0}})
   })
   await page.locator('#orb').hover()
-  await page.locator('#last-result').click()
+  assert.equal(await page.locator('#last-result').isVisible(), false)
+  // The entry is hidden; retain coverage of the underlying result controller.
+  await page.locator('#last-result').dispatchEvent('click')
   assert.deepEqual(await page.evaluate(() => window.__openedResult.results.map(result => result.delegateId)), ['c'])
   console.log('project roster and keyed results: concurrent, clear, reconnect, progress off, plain text')
   zoom=1
@@ -137,10 +143,11 @@ try {
   await page.evaluate(()=>window.__frame({type:'executor.progress',delegate_id:'below',executor:'codex',phase:'alert',summary:'正在核对结果',level:'detail',ts:100}))
   await page.waitForFunction(()=>document.querySelectorAll('.progress-bubble').length===1)
   const lower = await page.locator('.progress-bubble').boundingBox()
-  const last = await page.locator('#last-result').boundingBox()
-  assert.ok(last.y+last.height <= lower.y, 'last-result overlaps below bubble')
+  assert.ok(lower, 'the progress bubble still appears while the result entry is hidden')
   await page.locator('#orb').hover()
-  await page.locator('#last-result').click()
+  assert.equal(await page.locator('#last-result').isVisible(), false)
+  // The entry is hidden; retain coverage of the underlying result controller.
+  await page.locator('#last-result').dispatchEvent('click')
   await page.screenshot({path:`${output}/below-last-result.png`})
   await page.locator('.progress-bubble').click()
   inSettings=true

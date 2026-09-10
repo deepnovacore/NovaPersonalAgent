@@ -36,7 +36,7 @@ test('keeps capture playback codex and shell as independent axes', () => {
 
   assert.equal(state.name, 'listening')
   assert.match(state.label, /正在聆听/)
-  assert.equal(state.codexLabel, 'Codex 正在后台工作')
+  assert.equal(state.codexLabel, '')
   assert.equal(state.shellExpanded, true)
   assert.equal(state.aecLabel, '系统级 AEC')
 })
@@ -50,7 +50,7 @@ test('projects voice and Codex state into one compact visible line', () => {
     session: 'Task 1',
   })
 
-  assert.equal(state.statusLine, '聆听中 · Codex 工作中')
+  assert.equal(state.statusLine, '聆听中')
   assert.doesNotMatch(state.statusLine, /工作区|Session|AEC/u)
   assert.equal(state.projectLabel, '工作区 alpha · Session Task 1')
   assert.equal(state.codexMode, 'project')
@@ -138,7 +138,7 @@ test('describes each project action; a proposal without one keeps the generic la
 test('explains incomplete configuration on the visible status line', () => {
   const state = deriveOrbState({ ...base, backendState: 'configuration_required' })
 
-  assert.equal(state.statusLine, '配置不完整 · Codex 空闲')
+  assert.equal(state.statusLine, '配置不完整')
 })
 
 test('uses a readable fallback instead of leaking undefined for a future state', () => {
@@ -175,7 +175,7 @@ test('every orb state carries a compact label on the one visible status line', (
     const state = deriveOrbState(inputs[name])
     assert.equal(state.name, name, `${name} must be reachable`)
     assert.doesNotMatch(state.statusLine, /undefined/u, `${name} needs a compact label`)
-    assert.match(state.statusLine, /^\S.* · Codex /u, `${name} statusLine shape`)
+    assert.equal(state.statusLine, compactOrbLabel(name), `${name} shows only the voice state`)
   }
 })
 

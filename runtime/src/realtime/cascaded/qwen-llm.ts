@@ -106,9 +106,9 @@ class Session implements CascadedLlmSession {
         for (const choice of event.choices) {
           if (!object(choice) || !object(choice.delta)) throw fail('protocol')
           const content = choice.delta.content, calls = choice.delta.tool_calls
-          if (content !== undefined && typeof content !== 'string') throw fail('protocol'); if (calls !== undefined && !Array.isArray(calls)) throw fail('protocol')
+          if (content !== undefined && content !== null && typeof content !== 'string') throw fail('protocol'); if (calls !== undefined && !Array.isArray(calls)) throw fail('protocol')
           if (!started && (content !== undefined || calls !== undefined || choice.finish_reason !== undefined)) { if (responseId === null) throw fail('protocol'); started = true; yield {kind: 'response_started', response_id: responseId} }
-          if (content !== undefined) sawText = true
+          if (typeof content === 'string' && content !== '') sawText = true
           if (typeof content === 'string' && content !== '') { text += content; yield {kind: 'text_delta', text: content} }
           for (const call of calls ?? []) this.#fragment(fragments, call)
           if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
@@ -164,7 +164,7 @@ class Session implements CascadedLlmSession {
     if (!object(value) || typeof value.index !== 'number' || !Number.isSafeInteger(value.index) || value.index !== 0 || (value.function !== undefined && !object(value.function))) throw fail('protocol')
     const index = value.index
     const found = fragments.get(index) ?? {id: null, name: '', arguments: ''}
-    if (value.id !== undefined) { if (!id(value.id) || (found.id !== null && found.id !== value.id)) throw fail('protocol'); found.id = value.id }
+    if (value.id !== undefined && value.id !== '') { if (!id(value.id) || (found.id !== null && found.id !== value.id)) throw fail('protocol'); found.id = value.id }
     const fn = value.function
     if (fn !== undefined) { if (fn.name !== undefined) { if (typeof fn.name !== 'string') throw fail('protocol'); found.name += fn.name }; if (fn.arguments !== undefined) { if (typeof fn.arguments !== 'string') throw fail('protocol'); found.arguments += fn.arguments } }
     fragments.set(index, found)
