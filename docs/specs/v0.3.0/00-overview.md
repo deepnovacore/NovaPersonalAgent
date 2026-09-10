@@ -20,14 +20,28 @@ here propose deltas and never silently rewrite those volumes.
 | [01 多入口与主窗口](01-multi-entry-and-main-window.md) | 文字 / 全双工语音 / 长按草稿共用一个输入框；主窗口从现有桌面长出，悬浮窗为收起态；共享主机状态 | B |
 | [02 需求发现与动态页](02-need-discovery-and-feed.md) | 扩展 Surrogate 输出 proposal；低频检查；主机校验、入池、去重、交付记账；`feed_item` 契约 | A |
 | [03 用户视角记忆](03-user-memory-view.md) | `memory_entry` 投影；来源、stated/inferred；纠正与忘记的回写与传播；概览段落的覆盖声明 | A 与 B 交界 |
-| [04 来源与 connector](04-sources-and-connectors.md) | 用户配置的本地目录优先；一个邮件/日历 provider；授权、暂停、断开、删除；MCP 作为暴露方式；执行生态扩展 | C / D |
+| [04 来源与 connector](04-sources-and-connectors.md) | 用户配置的本地目录优先；一个邮件/日历 provider；授权、暂停、断开、删除；MCP 作为暴露方式 | C |
+| [05 Coding 与 GUI 执行器](05-coding-and-gui-executors.md) | Kimi Code / pi agent；GUI 与 AutoGLM example；agent2agent 真实闭环与发布证据 | D |
 | [STATUS](STATUS.zh-CN.md) | 白话进度页：里程碑、依赖、退出条件、待拍板事项 | 共同 |
+
+## 本版三项明确主线（2026-09-10 规划补充）
+
+1. **Coding 后端扩展：Kimi Code + pi agent。** 接在既有 coding 调度与执行器边界后，
+   分别验证会话、审批、取消与结果，不向快脑增加后端专属原生工具。
+2. **GUI 执行器：AutoGLM example。** 独立于观察型 Vision；用可复现的设备工作展示
+   agent2agent 协作，发布能力以真机证据为准，详见 [05](05-coding-and-gui-executors.md)。
+3. **Surrogate + Proactive + Memory。** 从“选择说什么、何时说”扩展到基于记忆发现需求、
+   主动关心；proposal 经过主机与 Suggestion Pool，推断不构成执行授权，详见 [02](02-need-discovery-and-feed.md)。
+
+此前确认的多入口、主窗口、动态/记忆页与来源管理继续保留，服务于以上目标；
+Kimi Code、pi agent、AutoGLM 不等待本地目录或邮件/日历 connector 完成。
+Home Assistant 是后续扩展候选，不是本版必交付项。以下编号保持不变，新增 M9 子项明确验收。
 
 ## 与 v0.2.0 的关系
 
 - v0.2.0 的收尾项（真人语音验收、Windows 安装包与唤醒词验收、
   [RELEASE-GATE](../v0.2.0/RELEASE-GATE.md)）留在原处，不并入本系列，也不因本系列而降级。
-- v0.2.0 交付的边界继续有效：六工具 FrontBrain 面、执行器端口与角色路由、主机拥有的确认、
+- v0.2.0 定义的基础边界继续有效（具体完成度以其验收台账为准）：六工具 FrontBrain 面、执行器端口与角色路由、主机拥有的确认、
   能力注册表与 MCP、本地知识库、进度气泡、本地唤醒词、级联宿主调度。本系列在其上加层，不重写。
 - 分支策略沿用：dev 分支通过自动化门禁即可集成；合入 `main` 需要本系列各卷的验收台账，
   台账在 M5 开工时另建，本系列不预先声明。
@@ -53,13 +67,14 @@ here propose deltas and never silently rewrite those volumes.
 3. **有依据的主动发现。** 需求来自对话、任务变化、获准访问的资料和个人记忆；每条建议能追溯依据；没有依据时保持沉默。无任务时也能基于记忆主动关心。
 4. **记忆可见、可纠正、可忘记。** 用户看到的是带来源和时间的理解，纠正后检索和未交付建议都看到新状态。
 5. **来源由用户授权、范围可见。** 用户自己选目录、账户和范围；覆盖范围、解析失败与同步状态对用户可见。
+6. **专长执行器可替换。** Kimi Code、pi agent 与 GUI/AutoGLM 共用主机授权和结果事实；用真实 agent2agent 闭环验证边界。
 
 ## Non-goals (v0.3.0)
 
 - 全盘无差别采集、默认持续屏幕录制、独立训练的需求模型、复杂习惯预测系统。
 - 通用 workflow / graph 平台、多 Agent 编排平台、通用事件总线。
 - 电脑关机后仍持续运行的常驻服务器承诺；跨设备身份与同步方案（见"部署边界"）。
-- 一次建成插件市场。Coding、AutoGLM、Home Assistant 等按执行器边界逐项接入，各自真实闭环验收。
+- 一次建成插件市场。Kimi Code、pi agent 与 AutoGLM 按 05 卷逐项验收；Home Assistant 留作后续扩展。
 - 周报问答、员工工作台等组织专属能力进入公共分支。它们留在 internal，公共边界由
   `runtime/test/public-client-boundary.test.ts` 强制。
 - 重写文档解析或检索系统。持续来源管理在现有知识导入与检索能力外围补齐。
@@ -73,14 +88,17 @@ M5-B 文字入桌面 ──┐                          ┌── M6-B 动态页
                   ├── 契约 feed_item /       │
 M5-A proposal 闭环 ┘   memory_entry 钉住 ────┼── M6-A 记忆页
                                               │
-                                              └── M7 本地目录来源 ── M8 邮件/日历 ── M9 执行生态
+                                              └── M7 本地目录来源 ── M8 邮件/日历
+
+v0.2 执行器/审批边界 ── M9-C Kimi Code + pi agent ──┐
+                     └─ M9-G GUI / AutoGLM ─────────┴─ M9-Demo agent2agent
 ```
 
 - **M5-A 与 M5-B 互不依赖，可同时开工。** M5-A 在现有悬浮窗和 iOS 输入框上验证；M5-B 只做输入框三态接线和主窗口骨架（对话列 + 复用 task-banner 的任务 tab）。
 - **M6 两项都依赖契约对象先在 02、03 卷钉住并有 fixtures**，以及 03 卷 §2.1 的 personal-memory
   端口扩展（`list` / `get` / `correct` / `forgetEntry`）与 02 卷的持久化交付 / 忽略台账先落地。契约字段在 02（`feed_item`）和 03（`memory_entry`）给出完整表；本卷只给概念定义。
 - **M7 起属于 C 轨（来源）**，依赖 M6-A 的记忆回写路径（来源删除要传播到记忆与 feed）。
-- **M9 属于 D 轨（执行生态）**，每项按 [07 执行器边界](../v0.2.0/07-executor-boundary.md) 接入，不依赖 M7、M8。
+- **M9 属于 D 轨（执行生态）**，M9-C 与 M9-G 可和 M5/M6 并行，不依赖 M7/M8；依赖 v0.2 执行器与审批契约，各后端验收后进入 M9-Demo。详见 [05](05-coding-and-gui-executors.md)。
 - 不写日期。每个里程碑只写依赖与退出条件，见 [STATUS](STATUS.zh-CN.md)。
 
 ## 契约对象（概念定义）

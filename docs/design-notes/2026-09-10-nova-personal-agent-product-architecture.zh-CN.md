@@ -316,3 +316,14 @@ OAuth scope 与 Nova 内部范围限制分别展示；例如“只处理选定�
 7. **新开 v0.3.0 系列，里程碑从 M5 续编号**：M5-A / M5-B 并行，M6 依赖契约，M7–M8 为来源，M9 为执行生态（[STATUS](../specs/v0.3.0/STATUS.zh-CN.md)）。
 
 本节只记录决策；未改代码。
+
+
+## 13. 版本范围补充（2026-09-10）
+
+本轮版本规划保留上述产品方向，并明确执行生态的交付顺序：v0.2.0 收敛审批、薄快脑/coding
+调度、可替换级联管线、MCP/RAG/中文唤醒、VoiceMem 与 Workspace Graph、iOS/Tailscale 基础；
+v0.3.0 明确加入 Kimi Code、pi agent、GUI/AutoGLM example 与 agent2agent 演示，协同推进
+Surrogate 的记忆驱动需求发现与主动关心。M9 不依赖 M7/M8；Home Assistant 为后续候选。
+以 [版本 roadmap](../archs/09-roadmap.md)、[v0.3 总览](../specs/v0.3.0/00-overview.md) 与
+[执行器规划](../specs/v0.3.0/05-coding-and-gui-executors.md) 为本次补充后的范围入口。
+本节更新规划，不宣布实现或验收完成。

@@ -109,12 +109,8 @@ wake-word Worker; explicit mute stops wake detection. See
 
 ## 5. Roadmap
 
-- [ ] **v0.2.0 (branch `v0.2.0dev`):** M1.5b → M1.5c thin frontend → 03a capability expansion. The M1.5c gate covers the final six-tool surface, Camera MCP + side VLM projection, Vision hidden watch/guard, policy-driven monitoring, and rerun of the 08 live acceptance; live and Windows evidence remain pending. External MCP settings are implemented; live acceptance remains pending. Specs: [docs/specs/v0.2.0](docs/specs/v0.2.0/00-overview.md).
-- [ ] **v0.3.0:** repositions Nova as a general personal agent — text, full-duplex voice and press-to-talk drafts share one runtime; a main window with feed / tasks / memory views that collapses to the orb; evidence-backed need discovery through the existing Surrogate and Suggestion Pool; a user-facing memory view with correct and forget; user-configured local folders and one mail/calendar provider as sources. Specs: [docs/specs/v0.3.0](docs/specs/v0.3.0/00-overview.md).
-- [ ] Support more end-to-end and cascaded frontend pipelines.
-- [ ] Integrate MyContext to support workspace-centric memory.
-- [ ] More coding agents through the executor port.
-- [ ] Cascaded response scheduling is host-owned; human voice and installed Windows wake-word acceptance remain pending.
+- [ ] **v0.2.0 (`v0.2.0dev`):** cross-platform approval forwarding; fewer native FrontBrain tools with workspace/session coordination inside the coding executor; replaceable ASR/LLM/TTS and provider-neutral contracts; custom MCP, search/RAG and the Chinese wake phrase “你好星核”; VoiceMem for personal memory and Workspace Graph for workspace continuity; native iOS connected to a PC runtime through Tailscale. Existing implementation and outstanding acceptance are tracked separately in the [specs](docs/specs/v0.2.0/00-overview.md) and [release gate](docs/specs/v0.2.0/RELEASE-GATE.md).
+- [ ] **v0.3.0:** **Kimi Code + pi agent** coding backends; a **GUI executor with AutoGLM as the first example**, demonstrated through real agent2agent workflows; **Surrogate + Proactive + Memory** for memory-grounded need discovery and considerate follow-up. Retain the planned text/voice main window, feed/tasks/memory views, correctable personal memory and authorized sources; executor integration does not wait for mail/calendar connectors. See [specs](docs/specs/v0.3.0/00-overview.md), [milestones](docs/specs/v0.3.0/STATUS.zh-CN.md) and the [full roadmap](docs/archs/09-roadmap.md).
 
 `v0.2.0dev` integrates after automated gates; `main` requires all feature and supported-platform
 acceptance in the [release ledger](docs/specs/v0.2.0/RELEASE-GATE.md). Linux releases are deferred;

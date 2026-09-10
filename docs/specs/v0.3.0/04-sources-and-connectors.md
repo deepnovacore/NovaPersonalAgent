@@ -1,10 +1,10 @@
 # 04 来源与 connector
 
-> 轨道 C / D。目标：用户自己决定 Nova 能读哪些目录和账户；Nova 在范围内持续、增量地了解变化，
+> 轨道 C。目标：用户自己决定 Nova 能读哪些目录和账户；Nova 在范围内持续、增量地了解变化，
 > 形成有来源的记忆和有依据的发现；覆盖范围、失败与同步状态对用户可见；撤销和删除能传播到
 > 检索、记忆与建议。写操作是可选能力，走既有执行授权路径。
 
-状态：待评审。对应里程碑 M7（本地目录）、M8（一个邮件 / 日历 provider）、M9（执行生态），
+状态：待评审。对应里程碑 M7（本地目录）、M8（一个邮件 / 日历 provider）；执行生态 M9 由 [05 卷](05-coding-and-gui-executors.md) 管理，
 见 [STATUS](STATUS.zh-CN.md)。
 
 ## 1. 现有基础
@@ -82,15 +82,12 @@ provider token 只允许该标签。发信、创建邀请等写权限按实际�
 
 外部内容始终是低信任证据，不是系统指令或用户授权。采集与模型处理范围由主机实际执行，不只写在提示词里。
 
-### 2.5 执行生态（M9）
+### 2.5 与执行生态的边界
 
-Coding（已有）、AutoGLM、Home Assistant 等按 [07 执行器边界](../v0.2.0/07-executor-boundary.md)
-逐项接入：每项一个执行器或直接 MCP，有 manifest、有确认路径、有真实闭环验收，不一次建插件市场。
-
-- AutoGLM：作为设备 / 手机操作执行器，角色待定；`readonly: false`，默认 `confirm` 所有写操作。
-- Home Assistant：优先通过其现有 MCP server 或 REST 以直接 MCP 接入，只读查询默认开放，
-  控制类操作走确认。
-- 周报问答、员工工作台：留在 internal 分支，以同样的执行器 / MCP 边界接入，不进入公共分支。
+Kimi Code、pi agent 与 GUI/AutoGLM 的适配、验收和 agent2agent 演示见
+[05 Coding 与 GUI 执行器](05-coding-and-gui-executors.md)，可独立于 M7/M8 开工。
+Connector 提供获准访问的来源与按需查询；executor 接受已授权工作并执行。
+来源读取权限不自动授予发送、修改或设备操作权限。组织专属服务仍留在 internal。
 
 ## 3. 不做
 

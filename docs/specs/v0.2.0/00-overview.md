@@ -1,6 +1,6 @@
 # Nova Audio Agent v0.2.0 Spec Series
 
-> 摘要：v0.2.0 在 `v0.2.0dev` 分支上推进五组核心能力——跨平台 Codex 审批与 YOLO、多轮意图澄清与规划、能力注册表与 MCP（含 MCP 搜索）、私人知识库 / RAG、桌面进度气泡——并配套统一的设置与配置面。本系列只定边界与验收；实现按**验收里程碑**推进（先交付一条完整的「提出任务 → 必要澄清 → 工作单 → 审批 → 执行 → 可见结果」编码体验，再扩展通用 MCP 与完整 RAG），不在本阶段改产品代码。协议示例以本机 Codex 0.152.0 生成的 schema 为准。
+> 摘要：v0.2.0 交付可靠、模块化、可跨设备使用的 Agent 基础：跨平台审批、薄快脑与 coding 侧调度、可替换级联管线及供应商解耦、自定义 MCP / 搜索 / RAG 与中文唤醒、VoiceMem 个人记忆与 Workspace Graph 工作区记忆、Tailscale 连接 PC runtime 的 iOS 客户端。意图澄清、工作单、设置与进度展示服务于这些闭环。本系列定义边界与验收，不把已有实现等同于已发布。
 >
 > 修订（2026-09-03）：吸收一轮静态评审（7 条 P1/P2 + 4 条产品建议），处置见文末「Review log」。
 
@@ -18,6 +18,8 @@ only after the corresponding volume is agreed.
 | [06 Settings and config](06-settings-and-config.md) | Settings v4, env contract, panel tabs |
 | [07 Executor boundary](07-executor-boundary.md) | Codex as a real plug-in behind `ports.ts`; role-based routing; host-owned confirmations; enforced by lint + script |
 | [08 Project, session and work](08-project-and-work.md) | `dispatch` / `cancel` / `confirm` host tools replace `codex__project`; coordinator sinks into the coding executor; per-project concurrency; explicit cancel; Codex-owned titles |
+| [09 iOS remote client](09-ios-remote-client.md) | Native iOS, Tailscale connectivity, host-owned execution and approvals |
+| [10 iOS media evaluation](10-ios-aoq-evaluation.md) | Optional provider-direct media evaluation; does not replace the PC runtime |
 | [11 Local wake word](11-local-wake-word.md) | Opt-in local KWS, presence epochs, model ownership and desktop-only settings |
 
 The public architecture volumes under [`docs/archs/`](../../archs/00-overview.md)
@@ -31,6 +33,26 @@ acceptance does not block integration. Merging into `main` is the release bounda
 supported features, including M2, M3, M4 and wake word, must complete the single checkable
 [release ledger](RELEASE-GATE.md) before a main PR or formal publication. No pending human
 item is implicitly passed. Linux is deferred from release targets; Ubuntu source CI remains.
+
+## Version scope alignment (2026-09-10)
+
+The six product workstreams and their acceptance boundaries are summarized in the
+[roadmap](../../archs/09-roadmap.md#v020--a-reliable-modular-cross-device-agent-foundation).
+They complement the historical volume/milestone numbering below; they do not reset it.
+
+- Approval forwarding applies when the executor requests permission under its sandbox policy;
+  it is not a promise to intercept every command or ordinary allowed network call. All supported
+  frontends display the same host-owned request and cannot widen its scope independently.
+- Provider-neutral realtime contracts and independently configurable ASR / LLM / TTS are part of
+  this release scope, alongside integrated voice. Configuration support needs actual provider
+  entitlement and end-to-end interruption/turn tests; successful TTS does not establish ASR access.
+- VoiceMem is the personal-memory backend; Workspace Graph preserves workspace-specific context.
+  RAG is source-grounded knowledge retrieval, not a substitute for either memory responsibility.
+- iOS + Tailscale + PC runtime is the baseline remote experience. Pairing should minimize manual
+  endpoint/credential entry while retaining revocation and application authentication. Provider-direct
+  media is a separate optimization; the phone never takes over host execution authority.
+- Kimi Code, pi agent, GUI/AutoGLM and memory-driven demand discovery belong to v0.3.0.
+  Existing v0.2 status/acceptance ledgers remain authoritative; this planning update checks no boxes.
 
 ## Goals
 

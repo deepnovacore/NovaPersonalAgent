@@ -1,54 +1,67 @@
 # 9. Roadmap
 
-The current foundation includes the runtime spine, bounded memory views, executor ports, search,
-Codex with named Workspaces and Sessions, integrated and cascaded realtime voice, the opt-in
-workspace memory graph, the Nova Audio Agent Desktop, local Chinese wake-word detection and host-owned
-cascaded response scheduling. Vision's M1.5c thin-frontend contract and live/Windows acceptance
-remain pending evidence.
+Updated 2026-09-10. The version scope below follows the product roadmap; implementation,
+automated checks, live acceptance and release are separate states. A roadmap item is not a
+claim that the feature has shipped. Package versions change only in an explicit release chore.
 
-Product direction for the next minor line is specified on branch `v0.2.0dev` in
-[`docs/specs/v0.2.0/`](../specs/v0.2.0/00-overview.md): cross-platform Codex approvals and YOLO,
-intake and planning, the capability registry / MCP (MCP search opt-in until verified, then default
-flip), the private knowledge
-base, and progress bubbles. Those specs propose decision-record deltas; they do not land as code
-until each volume’s verification checklist is green.
+## v0.2.0 — a reliable, modular, cross-device agent foundation
 
-The minor line after that is specified in [`docs/specs/v0.3.0/`](../specs/v0.3.0/00-overview.md).
-It repositions Nova as a general personal agent: text, full-duplex voice and press-to-talk drafts
-share one runtime and one cascaded LLM session by default; a main window (feed / tasks / memory)
-collapses to the existing orb; need discovery extends the Surrogate with a nullable proposal and
-reuses the Suggestion Pool; a user-facing memory projection supports correct and forget; sources are
-user-configured local folders and one mail/calendar provider. Two host-owned contract objects,
-`feed_item` and `memory_entry`, are the interface between the two parallel tracks. The series
-defines boundaries and acceptance only; no code lands until each volume is agreed, and it does not
-extend the FrontBrain tool surface or relax any invariant above.
+| Workstream | Planned outcome | Acceptance boundary / specification |
+|---|---|---|
+| Cross-platform approvals | Forward sandbox-blocked network requests, command execution and permission upgrades to the active frontend through the host approval broker. Show the operation, workspace and requested scope; return approval or denial to the originating executor. | macOS and Windows host behavior; Desktop, WebUI and iOS approval presentation. Reject stale, expired and duplicate answers; never widen permission on disconnect. Ordinary operations already permitted by the sandbox remain unprompted. [01](../specs/v0.2.0/01-codex-approvals.md), [09](../specs/v0.2.0/09-ios-remote-client.md) |
+| Thin FrontBrain | Reduce native tools; move workspace/session selection, routing and scheduling into the coding executor. The frontend expresses intent and consumes facts; the host owns authorization and work identity. | The existing six-tool baseline and `dispatch / cancel / confirm`; no model-visible workspace/session state machine. [07](../specs/v0.2.0/07-executor-boundary.md), [08](../specs/v0.2.0/08-project-and-work.md) |
+| Replaceable voice pipeline | Support configurable ASR / LLM / TTS stages alongside integrated voice. Keep the runtime and client contract independent of QwenAudioRealtime; provider-specific events stay in adapters. | Test interruption, cancellation, final transcripts, reconnect and error semantics across adapters, plus real microphone/speaker acceptance. [Implementation ledger](../specs/v0.2.0/IMPLEMENTATION.md), [provider contract](../handoffs/2026-09-05-provider-contract-acceptance.md) |
+| MCP and wake word | Frontend configuration for external MCP; MCP search and local RAG; local Chinese wake phrase **你好星核**. | Configuration recovery, bounded tool projection, grounded citations, permissions, noisy-room and installed-platform wake tests. [03](../specs/v0.2.0/03-capability-registry-and-mcp.md), [04](../specs/v0.2.0/04-knowledge-base.md), [11](../specs/v0.2.0/11-local-wake-word.md) |
+| Two memory purposes | VoiceMem serves the person across conversations; Workspace Graph serves project/workspace continuity. Keep scope, evidence and deletion semantics explicit. | No cross-user/workspace leakage; restart persistence; retrieval and deletion checks. Personal preferences are not inferred from arbitrary workspace content. [Memory architecture](02-memory.md), [implementation ledger](../specs/v0.2.0/IMPLEMENTATION.md) |
+| iOS with a PC runtime | A native iOS thin client connects to the user's PC-hosted runtime through Tailscale. Pairing, connection diagnosis and recovery reduce setup friction; the PC retains execution authority. | Real phone: pair → talk → approve → execute → receive result; reconnect, credential revocation and PC sleep. Tailscale connectivity does not replace application authentication. [09](../specs/v0.2.0/09-ios-remote-client.md), [iOS ledger](../specs/v0.2.0/IOS-IMPLEMENTATION.md) |
 
-## v0.2dev sequencing and evidence
+These workstreams have substantial code in `v0.2.0dev`; use the
+[implementation ledger](../specs/v0.2.0/IMPLEMENTATION.md),
+[iOS ledger](../specs/v0.2.0/IOS-IMPLEMENTATION.md) and
+[release gate](../specs/v0.2.0/RELEASE-GATE.md) for exact evidence and remaining gaps.
+This update does not close existing human-voice, installed-Windows or wake-word gates.
 
-The dependency order is **M1.5b → M1.5c → 03a**. M1.5c is the thin FrontBrain frontend gate:
-the final six-tool surface, built-in Camera MCP plus VLM projection, Vision-owned hidden
-`watch`/`guard`, policy-driven monitoring, and a rerun of the 08 live acceptance checklist must be
-verified before 03a capability expansion. The candidate realtime tool budget `B=24` is a pending
-Qwen live-validation value, not a proven constant; Codex projection is outside that budget.
+The retained engineering order is **M1.5b → M1.5c → 03a**. M1.5c covers the six-tool
+baseline, Camera MCP + VLM projection, hidden Vision watch/guard and policy-driven monitoring.
+The candidate realtime MCP budget `B=24` still requires provider validation; it is not a proven
+universal limit. External MCP implementation is not equivalent to release acceptance.
+`FASTBRAIN_SYSTEM` remains deferred legacy code, not an additional active model.
 
-External MCP settings are not presented as shipped. `FASTBRAIN_SYSTEM` remains deferred legacy/dead
-code rather than a live second model or planning path. Live-provider and Windows gates stay pending
-until their evidence is recorded.
+## v0.3.0 — more executors, memory-grounded initiative
 
-Near-term engineering work that stays evidence-backed regardless of product features:
+Three explicit release workstreams build on that foundation:
 
-1. repeatable live-provider soak tests;
-2. public integration examples using synthetic data;
-3. desktop accessibility and packaging polish;
-4. clearer adapter authoring tests and templates;
-5. measured context and latency optimization.
+1. **Coding backends: Kimi Code and pi agent.** Add adapters to the existing coding executor;
+   reuse workspace/session coordination, approvals, progress, cancellation and result delivery.
+   Validate each backend separately rather than implying Codex feature parity.
+2. **GUI executor: AutoGLM as the first example.** Delegate device interaction through an
+   agent executor with explicit device ownership, permissions, interruption and observable results.
+   Demonstrate **agent2agent** with a reproducible Nova → specialist agent → result loop.
+   This describes collaboration, not a claim of compatibility with a named A2A wire standard.
+3. **Proactive + Memory: extend Surrogate.** In addition to deciding what to say and when,
+   detect evidence-backed needs and opportunities for considerate follow-up from personal memory,
+   workspace state and authorized sources. Reuse Suggestion Pool, host admission and Floor;
+   inferred needs never authorize execution. See [02](../specs/v0.3.0/02-need-discovery-and-feed.md).
 
-New core abstractions are not roadmap items by themselves. They require a demonstrated boundary that
-the current architecture cannot express safely.
+The existing personal-agent plan remains: a desktop main window with text/voice entry, feed,
+tasks and correctable memory, followed by user-selected folders and one mail/calendar provider.
+These are the interaction and source workstreams supporting the three goals, not prerequisites
+for every executor integration. Home Assistant and the earlier MyContext integration idea remain later candidates, not v0.3
+release gates; any memory-backend evaluation must preserve the personal/workspace separation.
+See the [v0.3 overview](../specs/v0.3.0/00-overview.md),
+[milestones](../specs/v0.3.0/STATUS.zh-CN.md) and
+[executor plan](../specs/v0.3.0/05-coding-and-gui-executors.md).
 
-Product-level direction also lives in the README Roadmap section; the items here remain
-evidence-backed engineering improvements alongside the v0.2.0 spec series.
+## Integration and evidence
 
-`v0.2.0dev` integration requires automated checks. Merging into `main` requires all feature
-acceptance in [RELEASE-GATE.md](../specs/v0.2.0/RELEASE-GATE.md), including human voice and
-installed Windows wake-word checks. Linux release artifacts are deferred; Ubuntu source tests remain.
+- Dev integration requires automated checks; `main` and publication require the applicable
+  feature and supported-platform acceptance ledger. Linux release artifacts remain deferred;
+  Ubuntu source checks remain useful.
+- New executors must not add provider-specific native tools to FrontBrain. MCP projections keep
+  explicit allowlists and budgets; the host owns authorization, task identity and delivery.
+- Every release demonstration records backend version, platform, scenario, authorization,
+  observed result and known limitations. A replay, simulated fixture or successful API call alone
+  does not prove a real device workflow.
+- Public examples use synthetic data. Organization-specific services, employee data and pilot
+  workflows stay on `internal` and never flow into public branches.
+- Favor existing ports and measured improvements over speculative core abstractions.

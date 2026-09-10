@@ -103,12 +103,8 @@ Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia`
 
 ## 5. 路线图
 
-- [ ] **v0.2.0（分支 `v0.2.0dev`）：** M1.5b → M1.5c 薄前端 → 03a 能力扩展。M1.5c 需验证最终六工具面、Camera MCP + 侧边 VLM 投影、Vision 隐藏 watch/guard、策略驱动监控并重跑 08 live acceptance；live 与 Windows 证据仍待完成。外部 MCP 设置已实现，真实验收仍待完成。规格：[docs/specs/v0.2.0](docs/specs/v0.2.0/00-overview.md)。
-- [ ] **v0.3.0：** 定位转为通用个人 Agent——文字、全双工语音、长按草稿共用一个 runtime；主窗口提供 动态 / 任务 / 记忆 视图并可收起为悬浮窗；基于现有 Surrogate 与 Suggestion Pool 的有依据需求发现；可纠正、可忘记的用户视角记忆页；用户配置的本地目录与一个邮件 / 日历 provider 作为来源。规格：[docs/specs/v0.3.0](docs/specs/v0.3.0/00-overview.md)。
-- [ ] 支持更多端到端与级联前端管线。
-- [ ] 接入 MyContext，做以工作区为中心的记忆。
-- [ ] 通过 executor 端口接入更多 coding agent。
-- [ ] 级联管线已由宿主调度；真人语音与 Windows 安装包唤醒验收待完成。
+- [ ] **v0.2.0（`v0.2.0dev`）：** 完善跨平台审批；减少快脑原生工具并将 workspace/session 调度下沉到 coding 执行器；支持可替换 ASR/LLM/TTS 及供应商解耦；自定义 MCP、搜索/RAG 与中文唤醒词“你好星核”；VoiceMem 服务个人、Workspace Graph 服务工作区；通过 Tailscale 连接 PC runtime 的原生 iOS 客户端。已有实现与待验收项分别见 [规格](docs/specs/v0.2.0/00-overview.md) 和 [发布门槛](docs/specs/v0.2.0/RELEASE-GATE.md)。
+- [ ] **v0.3.0：** coding 执行器接入 **Kimi Code + pi agent**；接入 **GUI 执行器，以 AutoGLM 为首个 example**，用真实闭环展示 agent2agent；扩展 **Surrogate + Proactive + Memory**，基于记忆发现需求并主动关心。同步保留文字/语音主窗口、动态/任务/记忆页、可纠正/忘记的个人记忆与用户授权来源规划；执行器不等待邮件/日历 connector。见 [规格](docs/specs/v0.3.0/00-overview.md)、[里程碑](docs/specs/v0.3.0/STATUS.zh-CN.md) 和 [完整 roadmap](docs/archs/09-roadmap.md)。
 
 `v0.2.0dev` 通过自动化门禁即可集成；合入 `main` 前须完成
 [发布台账](docs/specs/v0.2.0/RELEASE-GATE.md)中的全部功能与支持平台验收。Linux 暂不发布，保留 Ubuntu 源码测试。
