@@ -1250,3 +1250,33 @@ test('a rejected save leaves the retried key visible', async () => {
   assert.equal(panel.node('#dashscopeApiKey').hidden, false, 'a rejected key stays correctable')
   assert.match(panel.node('#status').textContent, /部分密钥未保存/)
 })
+
+test('a cold open lands on the requested category without any push', async () => {
+  // The panel subscribes only once its module evaluates, so a push sent while
+  // the window is still loading is lost. The category has to arrive on the
+  // reply to the panel's own first request.
+  const panel = await mountSettingsPanel(
+    publicView({focusCategory: 'capabilities'}),
+    {onChanged: () => {}},
+  )
+
+  assert.equal(panel.node('#capabilities-section').hidden, false)
+  assert.equal(panel.node('#category-capabilities').getAttribute('aria-current'), 'true')
+  assert.equal(panel.node('#category-general').getAttribute('aria-current'), 'false')
+})
+
+test('main serves a held category once and drops it with the window', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const handler = source.slice(source.indexOf("ipcMain.handle('nova:settings:get'"))
+  const body = handler.slice(0, handler.indexOf('\n  })'))
+
+  assert.match(body, /const category = pendingSettingsCategory/)
+  assert.match(body, /pendingSettingsCategory = null/, 'the held category is consumed, not sticky')
+  assert.match(body, /return settingsFocusView\(category\)/)
+
+  const open = source.slice(source.indexOf('function openSettingsWindow('))
+  const openBody = open.slice(0, open.indexOf('\n}\n'))
+  assert.match(openBody, /pendingSettingsCategory = category \?\? null/)
+  // A closed window must not leave a category waiting for the next plain open.
+  assert.match(openBody, /settingsWindow = null\n\s*pendingSettingsCategory = null/)
+})

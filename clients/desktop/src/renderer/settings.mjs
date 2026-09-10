@@ -573,7 +573,11 @@ applyCategory(activeCategory)
 
 void (async () => {
   try {
-    controller.setView(await api.get())
+    const initial = await api.get()
+    // A cold open carries its category here rather than on a push, which
+    // would have been sent before this module subscribed.
+    if (isValidCategory(initial?.focusCategory)) applyCategory(initial.focusCategory)
+    controller.setView(initial)
   } catch {
     statusLabel.textContent = '读取设置失败'
   }

@@ -169,6 +169,7 @@ let mainWindow = null
 let boardWindow = null
 let clearingConversation = null
 let settingsWindow = null
+let pendingSettingsCategory = null
 let wakeWord = null
 let tray = null
 let bootstrap = null
@@ -430,6 +431,8 @@ function openSettingsWindow(launchId, { category } = {}) {
     })
     return
   }
+  // Held for the cold-open path, where no push can reach the panel yet.
+  pendingSettingsCategory = category ?? null
   const window = new BrowserWindow(settingsWindowOptions(preload, launchId))
   // Same rule as the board: webContents-level walls only. Re-binding the
   // session's permission handlers here would move the orb's microphone grant
@@ -441,6 +444,7 @@ function openSettingsWindow(launchId, { category } = {}) {
   window.once('ready-to-show', () => window.show())
   window.on('closed', () => {
     settingsWindow = null
+    pendingSettingsCategory = null
   })
   settingsWindow = window
   void refreshManagedWorkspaceCapabilities().then(() => {
@@ -1051,7 +1055,13 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     }
     await refreshManagedWorkspaceCapabilities()
     capabilityEditorCache = null
-    return settingsView()
+    // A cold open cannot be told which category to show by a push: the panel
+    // subscribes only after its module evaluates, and this reply is the first
+    // thing it is guaranteed to receive. Consumed once so a later plain open
+    // does not inherit it.
+    const category = pendingSettingsCategory
+    pendingSettingsCategory = null
+    return settingsFocusView(category)
   })
   ipcMain.handle('nova:codex:rescan', async event => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
