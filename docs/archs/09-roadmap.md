@@ -13,6 +13,16 @@ flip), the private knowledge
 base, and progress bubbles. Those specs propose decision-record deltas; they do not land as code
 until each volume’s verification checklist is green.
 
+The minor line after that is specified in [`docs/specs/v0.3.0/`](../specs/v0.3.0/00-overview.md).
+It repositions Nova as a general personal agent: text, full-duplex voice and press-to-talk drafts
+share one runtime and one cascaded LLM session by default; a main window (feed / tasks / memory)
+collapses to the existing orb; need discovery extends the Surrogate with a nullable proposal and
+reuses the Suggestion Pool; a user-facing memory projection supports correct and forget; sources are
+user-configured local folders and one mail/calendar provider. Two host-owned contract objects,
+`feed_item` and `memory_entry`, are the interface between the two parallel tracks. The series
+defines boundaries and acceptance only; no code lands until each volume is agreed, and it does not
+extend the FrontBrain tool surface or relax any invariant above.
+
 ## v0.2dev sequencing and evidence
 
 The dependency order is **M1.5b → M1.5c → 03a**. M1.5c is the thin FrontBrain frontend gate:

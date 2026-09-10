@@ -104,6 +104,7 @@ Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia`
 ## 5. 路线图
 
 - [ ] **v0.2.0（分支 `v0.2.0dev`）：** M1.5b → M1.5c 薄前端 → 03a 能力扩展。M1.5c 需验证最终六工具面、Camera MCP + 侧边 VLM 投影、Vision 隐藏 watch/guard、策略驱动监控并重跑 08 live acceptance；live 与 Windows 证据仍待完成。外部 MCP 设置已实现，真实验收仍待完成。规格：[docs/specs/v0.2.0](docs/specs/v0.2.0/00-overview.md)。
+- [ ] **v0.3.0：** 定位转为通用个人 Agent——文字、全双工语音、长按草稿共用一个 runtime；主窗口提供 动态 / 任务 / 记忆 视图并可收起为悬浮窗；基于现有 Surrogate 与 Suggestion Pool 的有依据需求发现；可纠正、可忘记的用户视角记忆页；用户配置的本地目录与一个邮件 / 日历 provider 作为来源。规格：[docs/specs/v0.3.0](docs/specs/v0.3.0/00-overview.md)。
 - [ ] 支持更多端到端与级联前端管线。
 - [ ] 接入 MyContext，做以工作区为中心的记忆。
 - [ ] 通过 executor 端口接入更多 coding agent。

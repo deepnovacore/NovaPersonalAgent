@@ -110,6 +110,7 @@ wake-word Worker; explicit mute stops wake detection. See
 ## 5. Roadmap
 
 - [ ] **v0.2.0 (branch `v0.2.0dev`):** M1.5b → M1.5c thin frontend → 03a capability expansion. The M1.5c gate covers the final six-tool surface, Camera MCP + side VLM projection, Vision hidden watch/guard, policy-driven monitoring, and rerun of the 08 live acceptance; live and Windows evidence remain pending. External MCP settings are implemented; live acceptance remains pending. Specs: [docs/specs/v0.2.0](docs/specs/v0.2.0/00-overview.md).
+- [ ] **v0.3.0:** repositions Nova as a general personal agent — text, full-duplex voice and press-to-talk drafts share one runtime; a main window with feed / tasks / memory views that collapses to the orb; evidence-backed need discovery through the existing Surrogate and Suggestion Pool; a user-facing memory view with correct and forget; user-configured local folders and one mail/calendar provider as sources. Specs: [docs/specs/v0.3.0](docs/specs/v0.3.0/00-overview.md).
 - [ ] Support more end-to-end and cascaded frontend pipelines.
 - [ ] Integrate MyContext to support workspace-centric memory.
 - [ ] More coding agents through the executor port.
