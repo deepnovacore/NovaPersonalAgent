@@ -9,6 +9,8 @@ import {
   BACKEND_DRAIN_GRACE_MS,
   READINESS_SOCKET_AUTH_TIMEOUT_MS,
   backendLaunchSpec,
+  resolveSecretConfiguration,
+  capabilityEnvironment,
   createReadinessListener,
   nodeRuntimeEntry,
   parseReadiness,
@@ -1326,4 +1328,25 @@ test('a spawned backend reaches readiness through the launch spec environment', 
     listener.close()
     if (child.exitCode === null) child.kill('SIGKILL')
   }
+})
+
+
+test('dev dotenv keys override saved keys in both public metadata and runtime consumers', () => {
+  const saved = {arkApiKey: 'stored-key'}
+  const environment = {ARK_API_KEY: 'shell-key', DOUBAO_BIGMODEL_API_KEY: 'speech-key'}
+  const dev = {ARK_API_KEY: 'repo-key'}
+  const resolved = resolveSecretConfiguration(saved, environment, dev)
+  assert.equal(resolved.secrets.arkApiKey, 'repo-key')
+  assert.equal(resolved.secretsPresent.arkApiKey, true)
+  assert.equal(resolved.secretSources.arkApiKey, 'dotenv')
+  assert.equal(resolved.secretSources.doubaoBigmodelApiKey, 'environment')
+  assert.equal(capabilityEnvironment({pipelineMode: 'cascaded', cascadedLlmProvider: 'ark'}, resolved.secrets, environment).ARK_API_KEY, 'repo-key')
+  const packaged = resolveSecretConfiguration(saved, environment)
+  assert.equal(packaged.secrets.arkApiKey, 'stored-key')
+  assert.equal(packaged.secretSources.arkApiKey, 'settings')
+  assert.equal(resolveSecretConfiguration({}, environment).secrets.arkApiKey, 'shell-key')
+  assert.equal(resolveSecretConfiguration(saved, environment, {ARK_API_KEY: '  '}).secrets.arkApiKey, 'stored-key')
+  assert.equal(resolveSecretConfiguration(saved, environment, {ARK_API_KEY: 'bad\nkey'}).secrets.arkApiKey, 'stored-key')
+  assert.equal(resolved.secretsPresent.codexApiKey, false)
+  assert.doesNotMatch(JSON.stringify({secretsPresent: resolved.secretsPresent, secretSources: resolved.secretSources}), /repo-key|speech-key|stored-key/)
 })

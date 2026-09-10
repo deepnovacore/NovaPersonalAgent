@@ -1,4 +1,5 @@
-const LABELS = {search: '搜索', camera: '相机与 Vision', coding: 'Coding', knowledge: '知识库'}
+import {channelLabel} from './channel-tabs.mjs'
+const LABELS = {search: '搜索', camera: '相机与视觉', coding: '编程执行', knowledge: '知识库'}
 const PRESET = {url: 'https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp', tool: 'bailian_web_search', headers: {authorization: 'Bearer ${DASHSCOPE_API_KEY}'}}
 const DEFAULT_TOOL = {enabled: false, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2}
 const node = (tag, text, parent) => {const element = document.createElement(tag); if (text) element.textContent = text; parent?.append(element); return element}
@@ -61,7 +62,7 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
     const running = state.runtime
     const count = running?.toolCount
     const summary = running?.state === 'startup_failed' ? '能力服务启动失败' : running?.state === 'running' ? '能力服务运行中' : '等待能力服务启动'
-    stateLabel.textContent = `${summary}${Number.isSafeInteger(count) ? ` · 前台可用 ${count} 个工具（上限 ${running.toolBudget} 个）` : ''}。修改后保存生效。${state.status?.overrides?.length ? '\n部分配置由环境变量指定：' + state.status.overrides.join(', ') : ''}`
+    stateLabel.textContent = `${summary}${Number.isSafeInteger(count) ? ` · 前台可用 ${count} 个工具（上限 ${running.toolBudget} 个）` : ''}。修改后保存，再重启后台生效。${state.status?.overrides?.length ? '\n部分配置由环境变量指定：' + state.status.overrides.join(', ') : ''}`
     problemsLabel.textContent = (state.problems ?? []).join(' · ')
     problemsLabel.hidden = !problemsLabel.textContent
     if (view.capabilitiesDocument === null) {
@@ -73,7 +74,7 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
       }
     }
     const doc = view.capabilitiesDocument ?? {version: 1}
-    const nextSignature = JSON.stringify([doc, state.runtime?.servers, state.status?.servers])
+    const nextSignature = JSON.stringify([doc, state.runtime?.state, state.runtime?.modules, state.runtime?.servers, state.status?.servers])
     if (signature === nextSignature) return
     signature = nextSignature
     const focused = root.contains(document.activeElement) ? document.activeElement.dataset.field : null
@@ -90,29 +91,45 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
     field(root, '前台工具预算上限', doc.frontbrainToolBudget ?? 24, value => update(next => {next.frontbrainToolBudget = value}), {type: 'number', min: 1, max: 256})
     const search = node('fieldset', '', root); node('legend', '搜索连接', search)
     const changeSearch = patch => update(next => {next.modules ??= {}; next.modules.search = {...next.modules.search, ...patch}})
-    field(search, '搜索 provider', modules.search?.provider ?? 'tavily', provider => changeSearch({provider}), {options: ['tavily', 'mcp']})
+    field(search, '搜索服务', modules.search?.provider ?? 'tavily', provider => changeSearch({provider}), {options: ['tavily', 'mcp']})
     if (modules.search?.provider === 'mcp') {
       const mcp = modules.search.mcp ?? PRESET
       const changeMcp = patch => changeSearch({mcp: {...mcp, ...patch}})
       node('p', '百炼预设需 DashScope 凭据；真实接入验证尚未完成，默认搜索仍为 Tavily。', search).className = 'hint'
       button(search, '使用百炼 WebSearch 预设', () => changeSearch({mcp: structuredClone(PRESET)}))
-      field(search, 'MCP URL', mcp.url, url => changeMcp({url}))
+      field(search, 'MCP 地址', mcp.url, url => changeMcp({url}))
       field(search, '原始搜索工具名', mcp.tool, tool => changeMcp({tool}))
-      mapping(search, '搜索 Headers（每行 key=${ENV}）', mcp.headers, headers => changeMcp({headers}))
+      mapping(search, '搜索请求头（每行 key=${ENV}）', mcp.headers, headers => changeMcp({headers}))
       button(search, '检测搜索连接（仅 tools/list）', () => runProbe('$search')).disabled = probeBusy
       node('p', probes.get('$search')?.status ?? '未检测', search)
     }
-    node('p', '外部工具可能产生副作用。新服务器默认仅对 Codex 开放；启用前台工具需显式选择。调用次数与结果字节限制适用于前台；Codex 使用其上下文与原生超时。', root).className = 'hint'
     const statuses = running?.servers ?? state.status?.servers ?? []
+    const live = node('section', '', root)
+    live.className = 'mcp-runtime-list'
+    node('h3', '当前 MCP 服务', live)
+    const statusLabels = {ok: '正常', configured: '已配置', disabled: '已停用', failed: '连接失败'}
+    const liveRow = (name, status) => {
+      const row = node('div', '', live)
+      row.className = 'mcp-runtime-row'
+      node('span', channelLabel(name), row)
+      node('span', status, row).className = 'badge'
+    }
+    if (running?.state === 'running') {
+      if (running.modules?.search?.enabled && running.modules.search.provider === 'mcp') liveRow('search', '内置搜索 · 已启用')
+      if (running.modules?.camera?.enabled) liveRow('mcp__nova_camera', '内置视觉 · 已启用')
+      if (running.modules?.knowledge?.enabled) liveRow('mcp__nova_knowledge', '内置知识库 · 已启用')
+      for (const server of statuses) liveRow(server.name, statusLabels[server.status] ?? '状态未知')
+      if (live.children.length === 1) node('p', '当前未启用 MCP 服务', live).className = 'hint'
+    } else node('p', '等待后端报告服务状态', live).className = 'hint'
     for (const [name, server] of Object.entries(doc.mcpServers ?? {})) {
       const details = node('details', '', root); details.dataset.server = name; details.open = opened.has(name)
       if (!server || typeof server !== 'object' || Array.isArray(server)) {
-        node('summary', `${name} · failed（配置格式无效）`, details)
+        node('summary', `${name} · 配置失败（配置格式无效）`, details)
         button(details, '删除无效服务器', () => update(next => {delete next.mcpServers[name]}))
         continue
       }
       const status = statuses.find(item => item.name === name)
-      node('summary', `${name} · ${server.enabled === false ? 'disabled' : status?.status ?? 'configured'}${status?.codex ? ' · Codex ' + status.codex.status : ''}`, details)
+      node('summary', `${name} · ${server.enabled === false ? '已停用' : ({ready: '已连接', configured: '已配置', failed: '连接失败', disabled: '已停用'}[status?.status] ?? '已配置')}${status?.codex ? ' · Codex ' + status.codex.status : ''}`, details)
       if (status?.reason || status?.codex?.reason) node('p', [status.reason, status.codex?.reason].filter(Boolean).join(' · '), details)
       const change = patch => update(next => {next.mcpServers[name] = {...next.mcpServers[name], ...patch}})
       field(details, `${name} 启用`, server.enabled ?? true, enabled => change({enabled}), {type: 'checkbox'})
@@ -124,12 +141,12 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
       if (server.transport === 'stdio') {
         field(details, `${name} 命令`, server.command, command => change({command}))
         field(details, `${name} 参数（每行一项）`, (server.args ?? []).join('\n'), args => change({args: args ? args.split('\n') : []}), {multiline: true})
-        mapping(details, `${name} Env（每行 KEY=\${ENV}）`, server.env, env => change({env}))
+        mapping(details, `${name} 环境变量（每行 KEY=\${ENV}）`, server.env, env => change({env}))
       } else {
-        field(details, `${name} URL`, server.url, url => change({url}))
-        mapping(details, `${name} Headers（每行 key=\${ENV}）`, server.headers, headers => change({headers}))
+        field(details, `${name} 地址`, server.url, url => change({url}))
+        mapping(details, `${name} 请求头（每行 key=\${ENV}）`, server.headers, headers => change({headers}))
       }
-      for (const consumer of ['frontbrain', 'codex']) field(details, `${name} 对 ${consumer} 开放`, server.exposeTo?.[consumer] ?? consumer === 'codex', enabled => change({exposeTo: {...{frontbrain: false, codex: true}, ...server.exposeTo, [consumer]: enabled}}), {type: 'checkbox'})
+      for (const consumer of ['frontbrain', 'codex']) field(details, `${name} 对 ${consumer === 'frontbrain' ? '前台' : 'Codex'} 开放`, server.exposeTo?.[consumer] ?? consumer === 'codex', enabled => change({exposeTo: {...{frontbrain: false, codex: true}, ...server.exposeTo, [consumer]: enabled}}), {type: 'checkbox'})
       button(details, '检测连接与工具（仅 tools/list）', () => runProbe(name)).disabled = probeBusy
       const discovered = probes.get(name)
       node('p', discovered ? `上次检测 ${discovered.status}${discovered.reason ? ' · ' + discovered.reason : ''} · 修改连接后请重新检测` : '尚未检测连接', details)
@@ -151,18 +168,6 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
       })
       button(details, '删除服务器', () => update(next => {delete next.mcpServers[name]}))
     }
-    const newName = field(root, '新服务器名称（小写字母、数字、下划线）', '', () => {})
-    button(root, '添加外部 MCP 服务器', () => {
-      if (!/^[a-z][a-z0-9_]{0,31}$/u.test(newName.value) || ['nova_camera', 'nova_knowledge'].includes(newName.value)
-        || Object.hasOwn(doc.mcpServers ?? {}, newName.value) || Object.keys(doc.mcpServers ?? {}).length >= 8) {
-        problemsLabel.hidden = false; problemsLabel.textContent = '名称无效、重复或服务器数量已达 8。'; return
-      }
-      const name = newName.value
-      opened.add(name)
-      update(next => {next.mcpServers ??= {}; next.mcpServers[name] = {enabled: false, transport: 'streamable-http', url: 'https://example.com/mcp', headers: {}, tools: {}, exposeTo: {frontbrain: false, codex: true}}})
-      const added = [...root.querySelectorAll('details')].find(item => item.dataset.server === name)
-      if (added) added.open = true
-    })
     if (focused) [...root.querySelectorAll('[data-field]')].find(item => item.dataset.field === focused)?.focus()
   }
   return {render}

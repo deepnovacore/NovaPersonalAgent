@@ -38,6 +38,7 @@ export async function applySettingsTransaction({
   restartBackend,
   publishStatus,
   needsBackendRestart = () => true,
+  deferRestart = false,
   rollback = async () => {},
   complete = async () => {},
 }) {
@@ -68,6 +69,11 @@ export async function applySettingsTransaction({
       try { await complete() } catch { return failed('failed', rejectedSecrets) }
       publishStatus('applied')
       return result(true, 'applied', rejectedSecrets)
+    }
+    if (deferRestart) {
+      try { await complete() } catch { return failed('failed', rejectedSecrets) }
+      publishStatus('pending_restart')
+      return result(true, 'pending_restart', rejectedSecrets)
     }
     publishStatus('refreshing')
     let prepared

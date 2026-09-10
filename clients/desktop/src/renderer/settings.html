@@ -21,13 +21,35 @@
       <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">能力与 MCP</button>
       <button type="button" class="nav-item" id="category-knowledge" data-category="knowledge" aria-current="false" tabindex="-1">知识库</button>
       <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
-      <button type="button" class="nav-item" id="category-codex" data-category="codex" aria-current="false" tabindex="-1">Codex 与 Projects</button>
+      <button type="button" class="nav-item" id="category-codex" data-category="codex" aria-current="false" tabindex="-1">Codex 与工作区</button>
     </nav>
     <main>
       <section class="setting-section" id="frontend-usage-section">
         <h2>本次运行费用</h2>
-        <p id="frontend-usage" role="status" aria-live="polite">本次运行前台估算费用：暂无用量报告</p>
-        <details><summary>用量明细与计费说明</summary><p id="frontend-usage-details"></p></details>
+        <p id="frontend-usage" role="status" aria-live="polite">暂无用量报告</p>
+        <details><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
+      </section>
+      <section class="setting-section" id="appearance-section">
+        <h2>外观</h2>
+        <fieldset id="palette" class="segmented segmented-palette">
+          <legend>光球配色</legend>
+          <label class="choice">
+            <input type="radio" name="palette" value="ember">
+            <span class="swatch swatch-ember" aria-hidden="true"></span>
+            <span class="option">
+              <span class="option-name">暖焰</span>
+              <span class="option-note">暖橙粒子，默认外观</span>
+            </span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="palette" value="graphite">
+            <span class="swatch swatch-graphite" aria-hidden="true"></span>
+            <span class="option">
+              <span class="option-name">月光</span>
+              <span class="option-note">冷银粒子，低调外观</span>
+            </span>
+          </label>
+        </fieldset>
       </section>
       <section class="setting-section" id="capabilities-section">
         <h2>能力</h2>
@@ -38,8 +60,8 @@
       <section class="setting-section" id="knowledge-section">
         <h2>知识库配置</h2>
         <p class="hint">在「能力与 MCP」中启用知识库，保存并重启后生效。文档保存在本机，向量计算与回答会使用所选模型服务。</p>
-        <div class="field"><label for="embeddingProvider">向量服务</label><select id="embeddingProvider"><option value="dashscope">DashScope</option><option value="local" disabled>Local（即将支持）</option></select></div>
-        <div class="field"><label for="embeddingModel">Embedding 模型</label><input id="embeddingModel" type="text"></div>
+        <div class="field"><label for="embeddingProvider">向量服务</label><select id="embeddingProvider"><option value="dashscope">DashScope</option><option value="local" disabled>本地（即将支持）</option></select></div>
+        <div class="field"><label for="embeddingModel">向量模型</label><input id="embeddingModel" type="text"></div>
         <div class="field"><label for="knowledgePath">存储位置</label><input id="knowledgePath" type="text" placeholder="留空使用默认位置"></div>
         <div class="field"><label for="capabilitiesConfigPath">能力配置文件</label><input id="capabilitiesConfigPath" type="text" placeholder="留空使用环境变量或默认配置"></div>
         <div id="knowledge-panel" hidden>
@@ -113,13 +135,9 @@
             <span class="option"><span class="option-name">静默</span></span>
           </label>
         </fieldset>
-        <div class="field">
-          <label for="plannerModel">规划模型</label>
-          <input type="text" id="plannerModel" maxlength="64" autocomplete="off" spellcheck="false" placeholder="留空跟随 FastBrain">
-        </div>
       </section>
       <section class="setting-section" id="notifications-section">
-        <h2>通知</h2>
+        <h2>气泡通知</h2>
         <fieldset id="progress-bubbles" class="segmented segmented-progress">
           <legend>进度气泡</legend>
           <label class="choice">
@@ -136,28 +154,7 @@
           </label>
         </fieldset>
       </section>
-      <section class="setting-section" id="appearance-section">
-        <h2>外观</h2>
-        <fieldset id="palette" class="segmented segmented-palette">
-          <legend>光球配色</legend>
-          <label class="choice">
-            <input type="radio" name="palette" value="ember">
-            <span class="swatch swatch-ember" aria-hidden="true"></span>
-            <span class="option">
-              <span class="option-name">Ember 暖焰</span>
-              <span class="option-note">暖橙粒子，默认外观</span>
-            </span>
-          </label>
-          <label class="choice">
-            <input type="radio" name="palette" value="graphite">
-            <span class="swatch swatch-graphite" aria-hidden="true"></span>
-            <span class="option">
-              <span class="option-name">Graphite 月光</span>
-              <span class="option-note">冷银粒子，低调外观</span>
-            </span>
-          </label>
-        </fieldset>
-      </section>
+
       <section class="setting-section" id="proactivity-section">
         <h2>主动性</h2>
         <label for="coding-progress-narration">编程进度播报</label>
@@ -307,7 +304,7 @@
             <span class="key-usage" id="usage-dashscopeApiKey">当前未使用</span>
             <input type="password" id="dashscopeApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
             <button type="button" class="clear" data-key="dashscopeApiKey">清除</button>
-            <a class="key-link" href="https://bailian.console.aliyun.com/?apiKey=1&amp;tab=model" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
+            <a class="key-link" href="https://bailian.console.aliyun.com/?apiKey=1&amp;tab=model" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
           </div>
           <div class="secret" data-key="tavilyApiKey">
             <label for="tavilyApiKey">Tavily</label>
@@ -315,15 +312,7 @@
             <span class="key-usage" id="usage-tavilyApiKey">当前未使用</span>
             <input type="password" id="tavilyApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
             <button type="button" class="clear" data-key="tavilyApiKey">清除</button>
-            <a class="key-link" href="https://app.tavily.com/" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
-          </div>
-          <div class="secret" data-key="codexApiKey">
-            <label for="codexApiKey">Codex</label>
-            <span class="badge" id="badge-codexApiKey">未设置</span>
-            <span class="key-usage" id="usage-codexApiKey">当前未使用</span>
-            <input type="password" id="codexApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
-            <button type="button" class="clear" data-key="codexApiKey">清除</button>
-            <a class="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
+            <a class="key-link" href="https://app.tavily.com/" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
           </div>
           <div class="secret" data-key="arkApiKey">
             <label for="arkApiKey">Ark</label>
@@ -331,23 +320,23 @@
             <span class="key-usage" id="usage-arkApiKey">当前未使用</span>
             <input type="password" id="arkApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
             <button type="button" class="clear" data-key="arkApiKey">清除</button>
-            <a class="key-link" href="https://console.volcengine.com/ark/apiKey" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
+            <a class="key-link" href="https://console.volcengine.com/ark/apiKey" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
           </div>
           <div class="secret" data-key="doubaoBigmodelApiKey">
-            <label for="doubaoBigmodelApiKey">火山语音 KEY</label>
+            <label for="doubaoBigmodelApiKey">火山语音</label>
             <span class="badge" id="badge-doubaoBigmodelApiKey">未设置</span>
             <span class="key-usage" id="usage-doubaoBigmodelApiKey">当前未使用</span>
             <input type="password" id="doubaoBigmodelApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
             <button type="button" class="clear" data-key="doubaoBigmodelApiKey">清除</button>
-            <a class="key-link" href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
+            <a class="key-link" href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
           </div>
         </div>
       </details>
       <details id="codex-projects" class="secret-disclosure codex-disclosure">
         <summary>
           <span class="summary-copy">
-            <span class="summary-title">Codex 与 Projects</span>
-            <span class="summary-note">Codex CLI 与 workspace 高级设置</span>
+            <span class="summary-title">Codex 与工作区</span>
+            <span class="summary-note">命令行与工作区管理</span>
           </span>
           <span class="summary-chevron" aria-hidden="true"></span>
         </summary>
@@ -364,40 +353,40 @@
               <span class="option"><span class="option-name">手动路径</span></span>
             </label>
           </fieldset>
-          <button type="button" id="codex-rescan">刷新</button>
+          <button type="button" id="codex-rescan">重新检测</button>
           <div id="codex-manual-settings" hidden>
             <div class="field">
               <label for="codexBinaryPath">Codex 原生可执行文件</label>
               <input type="text" id="codexBinaryPath" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="输入绝对路径">
             </div>
             <div class="field">
-              <label for="codexWorkspace">当前 workspace</label>
+              <label for="codexWorkspace">当前工作区</label>
               <input type="text" id="codexWorkspace" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="默认 ~/.nova-audio-agent/workspaces/default">
               <small>当前有效值：<code id="effective-workspace"></code></small>
             </div>
             <div class="field">
-              <label for="codexManagedRoot">workspace 根目录</label>
+              <label for="codexManagedRoot">工作区根目录</label>
               <input type="text" id="codexManagedRoot" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="默认 ~/.nova-audio-agent/workspaces">
               <small>当前有效值：<code id="effective-managed-root"></code></small>
             </div>
-            <button type="button" id="projects-repair">修复 Projects 目录权限</button>
-            <small>仅修复当前设置对应的 state、workspace 根目录和当前 workspace，不接受任意路径。</small>
+            <button type="button" id="projects-repair">修复目录权限</button>
+            <small>仅修复当前设置对应的 状态目录、工作区根目录和当前工作区，不接受任意路径。</small>
           </div>
-          <div class="workspace-actions">
-            <button type="button" id="workspace-open-current">打开当前 workspace</button>
-            <button type="button" id="workspace-clear-current" class="destructive">清空当前 workspace</button>
-            <button type="button" id="workspace-clear-all" class="destructive">清空全部 workspace</button>
-            <button type="button" id="workspace-retry-recovery" hidden>重试 workspace 恢复</button>
+          <div class="workspace-actions"><h3>工作区管理</h3>
+            <button type="button" id="workspace-open-current">打开当前工作区</button>
+            <button type="button" id="workspace-clear-current" class="destructive">清空当前工作区</button>
+            <button type="button" id="workspace-clear-all" class="destructive">清空全部工作区</button>
+            <button type="button" id="workspace-retry-recovery" hidden>重试恢复</button>
           </div>
           <p id="workspace-action-status" class="workspace-action-status" aria-live="polite"></p>
         </div>
       </details>
     </main>
-    <p id="restart-notice" class="warning" hidden></p>
     <footer>
-      <p class="note">更改会暂存在本窗口；点击保存后，后台会自动重启并重新连接。</p>
+      <div class="footer-copy"><p class="note">服务配置保存后，点击重启生效。</p><p id="restart-notice" class="warning" hidden></p></div>
       <button type="button" id="settings-restore" hidden>恢复上次可用设置</button>
-      <button type="button" id="settings-save" disabled>保存并重启</button>
+      <button type="button" id="settings-save" disabled>保存</button>
+      <button type="button" id="settings-restart" title="使用已保存的配置重启后台服务">重启</button>
     </footer>
     <script type="module" src="./settings.mjs"></script>
   </body>

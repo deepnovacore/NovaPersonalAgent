@@ -95,7 +95,7 @@ test('native toolchain preflight reports stable platform-specific setup guidance
   }))
 })
 
-test('client environment loads literal dotenv values while the invoking shell wins', () => {
+test('client environment loads literal dotenv values with repo dotenv taking precedence', () => {
   const environment = parseClientEnvironment({
     contents: [
       'DASHSCOPE_API_KEY=from-file',
@@ -110,7 +110,7 @@ test('client environment loads literal dotenv values while the invoking shell wi
   })
 
   assert.deepEqual(environment, {
-    DASHSCOPE_API_KEY: 'from-shell',
+    DASHSCOPE_API_KEY: 'from-file',
     TAVILY_API_KEY: 'file value',
     LITERAL: '$(touch /tmp/must-not-run)',
     KEEP_ME: 'yes',
@@ -212,7 +212,7 @@ test('client launch plan installs when needed, builds once, and forces the Node 
       ],
     },
   ])
-  assert.equal(plan[3].env.KEEP_ME, 'yes')
+  assert.equal(plan[3].env.KEEP_ME, 'from-file')
   assert.equal(plan[3].env.TAVILY_API_KEY, 'from-file')
   assert.equal(plan[3].env.NOVA_AUDIO_AGENT_BACKEND, 'node')
   assert.equal(plan[3].env.NOVA_AUDIO_AGENT_CODEX_BIN, '/opt/codex/bin/codex')

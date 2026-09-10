@@ -137,6 +137,7 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     // The payload may carry plaintext key values on their way *into* main; the
     // reply never carries any back out.
     set: commit => ipcRenderer.invoke('nova:settings:set', commit),
+    restart: () => ipcRenderer.invoke('nova:settings:set', {settingsPatch: {}}, true),
     probeCapabilities: payload => ipcRenderer.invoke('nova:capabilities:probe', payload),
     knowledgeAction: payload => ipcRenderer.invoke('nova:knowledge:action', payload),
     onChanged: callback => {

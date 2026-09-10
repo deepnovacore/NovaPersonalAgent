@@ -439,7 +439,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
 }
 
 export function backendSettings(settings) {
-  const {wakeWordEnabled, autoHideSeconds, codingProgressNarration, ...backend} = normalizeSettings(settings)
+  const {palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -486,6 +486,7 @@ export function publicSettings(settings) {
 export function orbSettings(settings) {
   const normalized = normalizeSettings(settings)
   return Object.freeze({
+    progressBubbles: normalized.progressBubbles,
     codingProgressNarration: normalized.codingProgressNarration,
     palette: normalized.palette,
     startListeningOnLaunch: normalized.startListeningOnLaunch,

@@ -1,4 +1,4 @@
-import {frontendUsageText} from './frontend-usage.mjs'
+import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
 import {createCapabilitiesEditor} from './capabilities-editor.mjs'
 import {createKnowledgePanel} from './knowledge-panel.mjs'
 // Settings are edited as one local transaction. Public drafts live in the
@@ -23,33 +23,32 @@ import {
 
 const api = window.novaAudioAgentDesktop.settings
 const SECRET_KEYS = [
-  'dashscopeApiKey', 'tavilyApiKey', 'codexApiKey',
+  'dashscopeApiKey', 'tavilyApiKey',
   'arkApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
   dashscopeApiKey: 'DashScope',
   tavilyApiKey: 'Tavily',
-  codexApiKey: 'Codex',
   arkApiKey: 'Ark',
-  doubaoBigmodelApiKey: '火山语音 KEY',
+  doubaoBigmodelApiKey: '火山语音',
 }
 const WORKSPACE_STATUS_TEXT = Object.freeze({
-  opened: '已打开当前 workspace',
-  open_failed: '系统未能打开当前 workspace',
-  cleared: '已清空 workspace',
+  opened: '已打开当前工作区',
+  open_failed: '系统未能打开当前工作区',
+  cleared: '已清空工作区',
   cancelled: '已取消',
-  not_managed: '当前 workspace 不在 Nova workspace 根目录中',
-  empty: '没有可清空的 workspace',
+  not_managed: '当前工作区不在 Nova 工作区根目录中',
+  empty: '没有可清空的工作区',
   busy: '另一项保存或维护操作正在进行',
-  stop_failed: '后台未能安全停止，未清空 workspace',
-  clear_failed: 'workspace 清空未完整完成，可重试清理',
-  restart_failed: 'workspace 已处理，但后台恢复失败，请重试连接',
-  clear_and_restart_failed: 'workspace 清理未完整完成，后台恢复也失败；请重启后重试清理',
-  rollback_pending: 'workspace 原内容尚未安全恢复，后台保持停止；请先处理回滚',
-  cleanup_pending: 'workspace 清理仍在进行，请稍后重试',
-  unavailable: 'workspace 维护状态暂时不可用',
-  recovered: 'workspace 恢复完成，后台已开始重新连接',
-  recovery_failed: 'workspace 恢复尚未完成，后台保持停止；请重试恢复',
+  stop_failed: '后台未能安全停止，未清空工作区',
+  clear_failed: '工作区清空未完整完成，可重试清理',
+  restart_failed: '工作区已处理，但后台恢复失败，请重试连接',
+  clear_and_restart_failed: '工作区清理未完整完成，后台恢复也失败；请重启后重试清理',
+  rollback_pending: '工作区原内容尚未安全恢复，后台保持停止；请先处理回滚',
+  cleanup_pending: '工作区清理仍在进行，请稍后重试',
+  unavailable: '工作区维护状态暂时不可用',
+  recovered: '工作区恢复完成，后台已开始重新连接',
+  recovery_failed: '工作区恢复尚未完成，后台保持停止；请重试恢复',
 })
 
 const secretRevisions = createSecretRevisions(SECRET_KEYS)
@@ -63,6 +62,8 @@ const restartNotice = document.querySelector('#restart-notice')
 const warning = document.querySelector('#keyring-warning')
 const settingsRestore = document.querySelector('#settings-restore')
 const settingsSave = document.querySelector('#settings-save')
+const settingsRestart = document.querySelector('#settings-restart')
+let restarting = false
 const workspaceOpenCurrent = document.querySelector('#workspace-open-current')
 const workspaceClearCurrent = document.querySelector('#workspace-clear-current')
 const workspaceClearAll = document.querySelector('#workspace-clear-all')
@@ -105,7 +106,6 @@ const cascadedTtsProvider = document.querySelector('#cascadedTtsProvider')
 const cascadedTtsVoicePreset = document.querySelector('#cascadedTtsVoicePreset')
 const cascadedTtsVoiceCustom = document.querySelector('#cascadedTtsVoiceCustom')
 const clarificationDepth = document.querySelector('#clarificationDepth')
-const plannerModel = document.querySelector('#plannerModel')
 
 const categoryButtons = SETTINGS_CATEGORIES.map(category => document.querySelector(`#category-${category.id}`))
 let activeCategory = SETTINGS_CATEGORIES[0].id
@@ -166,11 +166,17 @@ populateVoiceOptions(cascadedTtsVoicePreset, VOLCENGINE_TTS_VOICES)
 function secretInput(key) { return document.querySelector(`#${key}`) }
 function secretClearButton(key) { return document.querySelector(`button.clear[data-key="${key}"]`) }
 
-function renderBadges(present) {
+function renderBadges(present, sources) {
   for (const key of SECRET_KEYS) {
     const badge = document.querySelector(`#badge-${key}`)
     const stored = present?.[key] === true
-    badge.textContent = stored ? '已设置' : '未设置'
+    const fromFile = sources?.[key] === 'dotenv'
+    badge.textContent = fromFile ? '来自 .env' : stored ? (sources?.[key] === 'environment' ? '来自环境变量' : '已设置') : '未设置'
+    secretInput(key).hidden = stored && !dirtySecretKeys.has(key)
+    secretInput(key).disabled = fromFile
+    secretClearButton(key).disabled = fromFile
+    secretClearButton(key).title = fromFile ? '此密钥由 .env 管理，请在文件中清除并重启' : '清除并输入新密钥'
+    secretInput(key).placeholder = fromFile ? '在 repo .env 中修改，重启后生效' : '输入新密钥'
     badge.dataset.present = stored ? '1' : '0'
   }
 }
@@ -183,7 +189,7 @@ function keyUsage(view) {
     arkApiKey: view.pipelineMode === 'cascaded'
       && view.cascadedLlmProvider === 'ark' ? '必需' : '当前未使用',
     doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' ? '必需' : '当前未使用',
-    tavilyApiKey: '可选', codexApiKey: '可选',
+    tavilyApiKey: '可选',
   }
 }
 
@@ -222,7 +228,8 @@ function updateButtons() {
     currentManagedAvailable: currentView?.managedWorkspaces?.current?.available === true,
     allManagedAvailable: currentView?.managedWorkspaces?.all?.available === true,
   })
-  settingsSave.disabled = state.saveDisabled
+  settingsSave.disabled = state.saveDisabled || restarting
+  settingsRestart.disabled = controllerState.busy || workspaceBusy || restarting || currentView?.managedWorkspaces?.lifecycleBusy === true
   workspaceOpenCurrent.disabled = state.currentDisabled
   workspaceClearCurrent.disabled = state.currentDisabled
   workspaceClearAll.disabled = state.workspaceDisabled
@@ -232,9 +239,9 @@ function updateButtons() {
 
 function render(view, _drafts, state) {
   if (!view) return
-  const [usageSummary, ...usageDetails] = frontendUsageText(view.frontendUsage).split('\n\n')
+  const [usageSummary] = frontendUsageText(view.frontendUsage).split('\n\n')
   document.getElementById('frontend-usage').textContent = usageSummary
-  document.getElementById('frontend-usage-details').textContent = usageDetails.join('\n\n')
+  renderFrontendUsage(document.getElementById('frontend-usage-details'), view.frontendUsage, document)
   currentView = view
   capabilityEditor.render(view)
   knowledgePanel.render(view)
@@ -242,7 +249,8 @@ function render(view, _drafts, state) {
   controllerState = state
   wakeEnabled.checked = view.wakeWordEnabled === true
   autoHideSeconds.value = String(view.autoHideSeconds ?? 60)
-  wakeStatus.textContent = ({off: '未开启', loading: '正在准备唤醒模型…', ready: '本地唤醒已就绪', error: '唤醒模型不可用，请重试；可用托盘显示窗口。'})[view.wakeWord?.status] ?? ''
+  wakeStatus.hidden = !['loading', 'error'].includes(view.wakeWord?.status)
+  wakeStatus.textContent = ({off: '', loading: '正在准备唤醒模型…', ready: '本地唤醒已就绪', error: '唤醒模型不可用，请重试；可用托盘显示窗口。'})[view.wakeWord?.status] ?? ''
   wakeRetry.hidden = view.wakeWord?.status !== 'error'
 
   for (const input of paletteInputs) input.checked = input.value === view.palette
@@ -256,7 +264,6 @@ function render(view, _drafts, state) {
   for (const input of progressBubblesInputs) input.checked = input.value === view.progressBubbles
   yoloWarning.hidden = view.codexApprovalMode !== 'yolo'
   clarificationDepth.value = view.clarificationDepth
-  plannerModel.value = view.plannerModel ?? ''
   heartbeat.value = String(view.codexHeartbeatSeconds)
   heartbeatValue.textContent = `${view.codexHeartbeatSeconds} 秒`
   for (const input of codexModeInputs) input.checked = input.value === view.codexBinaryMode
@@ -281,7 +288,7 @@ function render(view, _drafts, state) {
   cascadedLlmModel.value = view.cascadedLlmModels?.[view.cascadedLlmProvider] ?? ''
   cascadedTtsProvider.value = view.cascadedTtsProvider
   renderVoice(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
-  renderBadges(view.secretsPresent)
+  renderBadges(view.secretsPresent, view.secretSources)
   renderKeyUsage(view)
   warning.hidden = view.keyringAvailable !== false
   const recoveryStatus = view.managedWorkspaces?.recoveryStatus ?? 'idle'
@@ -369,7 +376,6 @@ for (const input of progressBubblesInputs) {
   bindStage(input, 'change', () => ({progressBubbles: input.value}))
 }
 bindStage(clarificationDepth, 'change', () => ({clarificationDepth: clarificationDepth.value}))
-bindStage(plannerModel, 'input', () => ({plannerModel: plannerModel.value}))
 for (const input of capabilitySettings) bindStage(input, 'change', () => ({[input.id]: input.value}))
 heartbeat.addEventListener('input', () => {
   heartbeatValue.textContent = `${heartbeat.value} 秒`
@@ -418,6 +424,8 @@ for (const key of SECRET_KEYS) {
   secretClearButton(key).addEventListener('click', () => {
     const input = secretInput(key)
     input.value = ''
+    input.hidden = false
+    input.focus()
     secretRevisions.noteInput(key)
     dirtySecretKeys.add(key)
     updateButtons()
@@ -441,6 +449,7 @@ async function saveAll() {
       dirtySecretKeys.delete(key)
     }
   }
+  renderBadges(currentView?.secretsPresent, currentView?.secretSources)
   if (result.rejectedSecrets.length) {
     const labels = result.rejectedSecrets.map(key => SECRET_LABELS[key])
     statusLabel.textContent = `部分密钥未保存(含非法字符): ${labels.join('、')}`
@@ -449,6 +458,18 @@ async function saveAll() {
 }
 
 settingsSave.addEventListener('click', () => { void saveAll() })
+settingsRestart.addEventListener('click', async () => {
+  if (restarting) return
+  restarting = true
+  updateButtons()
+  statusLabel.textContent = '正在重启后台…'
+  try {
+    const view = await api.restart()
+    controller.syncView(view, {trackRestart: false})
+    statusLabel.textContent = view.operationStatus === 'applied' ? '后台已重启' : view.operationStatus === 'busy' ? '另一项操作进行中，请稍后重试' : '重启失败，请检查配置'
+  } catch { statusLabel.textContent = '重启失败，请稍后重试' }
+  finally { restarting = false; updateButtons() }
+})
 
 codexRescan.addEventListener('click', async () => {
   statusLabel.textContent = '正在刷新 Codex…'

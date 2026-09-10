@@ -42,7 +42,8 @@ test('read-only UI distinguishes no reports, partial estimates and actual servic
   usage.add(1,{...report,id:'missing',status:'missing'})
   usage.add(1,{...report,id:'asr',provider:'volcengine',service:'asr',model:'unknown',audioDurationMs:1200,characters:20})
   const text = frontendUsageText(usage.snapshot())
-  for (const phrase of ['部分费用','缺失用量 1 次','未配置价格','音频 1.200 秒','计费字符 20','价格来源：https://help.aliyun.com']) assert.ok(text.includes(phrase),phrase)
+  assert.doesNotMatch(text, /价格来源|官方按量原价/)
+  for (const phrase of ['部分费用','缺少用量 1 次','暂无费用数据','音频 1.200 秒','计费字符 20']) assert.ok(text.includes(phrase),phrase)
 })
 test('Volc 2.0 list prices use exact service units and request tiers', () => {
   const volc = {...report,provider:'volcengine'}

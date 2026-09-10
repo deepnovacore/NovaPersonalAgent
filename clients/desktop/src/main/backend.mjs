@@ -50,7 +50,7 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 // to an override; an absent/empty key is omitted entirely so the user's own
 // `.env` (or parent environment) keeps winning. Names match the Settings
 // aliases accepted by the Node runtime configuration contract exactly.
-const SECRET_ENV_MAP = Object.freeze({
+export const SECRET_ENV_MAP = Object.freeze({
   dashscopeApiKey: 'DASHSCOPE_API_KEY',
   tavilyApiKey: 'TAVILY_API_KEY',
   modelApiKey: 'NOVA_AUDIO_AGENT_MODEL_API_KEY',
@@ -59,6 +59,21 @@ const SECRET_ENV_MAP = Object.freeze({
   doubaoBigmodelApiKey: 'DOUBAO_BIGMODEL_API_KEY',
   doubaoAsrApiKey: 'DOUBAO_ASR_API_KEY',
 })
+
+// Main-only values and a separate public projection share the same precedence.
+export function resolveSecretConfiguration(saved = {}, environment = {}, developmentEnv = {}) {
+  const secrets = {}, secretsPresent = {}, secretSources = {}
+  for (const [key, name] of Object.entries(SECRET_ENV_MAP)) {
+    const candidates = [['dotenv', developmentEnv[name]], ['settings', saved[key]], ['environment', environment[name]]]
+    const selected = candidates.find(([, value]) => typeof value === 'string' && value.trim() && !CONTROL_CHARACTERS.test(value))
+    secretsPresent[key] = Boolean(selected)
+    if (selected) {
+      secrets[key] = selected[1].trim()
+      secretSources[key] = selected[0]
+    }
+  }
+  return {secrets, secretsPresent, secretSources}
+}
 
 const ALWAYS_ACTIVE_SECRET_KEYS = Object.freeze([
   'tavilyApiKey',

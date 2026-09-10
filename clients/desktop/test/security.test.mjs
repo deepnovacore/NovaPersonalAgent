@@ -18,9 +18,9 @@ test('settings links open only fixed API key pages in the external browser', asy
   assert.deepEqual(opened, [allowed])
   const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
   const links = [...html.matchAll(/<a class="key-link" href="([^"]+)" target="_blank" rel="noopener noreferrer"/g)]
-  assert.equal(links.length, 5)
+  assert.equal(links.length, 4)
   for (const [, href] of links) handler({url: href.replaceAll('&amp;', '&')})
-  assert.equal(opened.length, 6)
+  assert.equal(opened.length, 5)
 })
 
 test('accepts only loopback websocket bootstrap with a 128-bit token', () => {
@@ -73,7 +73,7 @@ test('memory board window shares the orb session with the same isolation walls',
   assert.equal(options.height, 760)
   assert.equal(options.minWidth, 720)
   assert.equal(options.minHeight, 520)
-  assert.equal(options.title, 'Memory Board')
+  assert.equal(options.title, '记忆面板')
   assert.equal(options.frame, true)
   assert.equal(options.alwaysOnTop, undefined)
   assert.equal(options.show, false)

@@ -5,6 +5,14 @@ const MAX_BUBBLES = 3
 const PROGRESS_PHASES = new Set(['started', 'working', 'completed', 'failed', 'refused', 'unknown', 'cancelled', 'alert'])
 const RESULT_OUTCOMES = new Set(['ok', 'failed', 'refused', 'unknown', 'cancelled'])
 
+// Captions are complete user-visible replies, unlike path-free executor summaries.
+export function parseConversationBubble(frame, mode) {
+  if (mode !== 'all' || frame?.type !== 'caption' || frame.role !== 'assistant'
+    || frame.final !== true || typeof frame.text !== 'string' || !frame.text.trim()) return null
+  return {kind: 'conversation', delegateId: `reply-${frame.sequence ?? ''}`,
+    summary: frame.text.slice(0, 4000), level: 'milestone'}
+}
+
 export function parseProgressFrame(frame) {
   if (!frame || typeof frame !== 'object'
     || frame.type !== EXECUTOR_PROGRESS
@@ -132,7 +140,9 @@ export function createProgressBubbleController({
   }
 
   async function push(value) {
-    if (!value || !validSummary(value.summary) || !['detail', 'milestone'].includes(value.level)
+    if (!value || !(value.kind === 'conversation'
+      ? typeof value.summary === 'string' && value.summary.length > 0 && value.summary.length <= 4000
+      : validSummary(value.summary)) || !['detail', 'milestone'].includes(value.level)
       || (value.ts !== undefined && !validTimestamp(value.ts))) {
       return false
     }
@@ -144,6 +154,7 @@ export function createProgressBubbleController({
       const item = {
         key: `${delegateId}:${value.ts ?? now()}:${value.summary}`,
         delegateId,
+        kind: value.kind === 'conversation' ? 'conversation' : 'progress',
         summary: value.summary,
         level: value.level,
         ts: Number.isFinite(value.ts) ? value.ts : 0,
@@ -229,6 +240,7 @@ export function mountProgressBubbles({container, reserveBubbleArea, document = w
         bubble.type = 'button'
         bubble.className = 'progress-bubble'
         bubble.dataset.level = item.level
+        bubble.dataset.kind = item.kind
         bubble.textContent = item.summary
         bubble.addEventListener('click', () => { void bubbles.dismiss(item.key) })
         bubble.addEventListener('pointerenter', () => bubbles.pause(item.key))

@@ -13,7 +13,7 @@ const DESKTOP_WORKSPACE = '@nova-audio-agent/desktop'
 const SUPPORTED_PLATFORMS = new Set(['darwin', 'linux', 'win32'])
 
 export function parseClientEnvironment({contents, shellEnv}) {
-  return {...parseEnv(contents), ...shellEnv}
+  return {...shellEnv, ...parseEnv(contents)}
 }
 
 export function assertNativeToolchain({platform, env, pathExists, runVswhere}) {

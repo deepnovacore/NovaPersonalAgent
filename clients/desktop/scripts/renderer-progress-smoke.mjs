@@ -51,7 +51,8 @@ try {
       return layout
     }
     window.novaAudioAgentDesktop={
-      bootstrap:async()=>({backend:{endpoint:'ws://127.0.0.1:9999/',token:'0'.repeat(32)},settings:{palette:'ember'},platform:'darwin',audioMode:'browser',cameraSource:'local',nativeAvailable:false,backendStatus:'connected'}),
+      bootstrap:async()=>({backend:{endpoint:'ws://127.0.0.1:9999/',token:'0'.repeat(32)},settings:{palette:'ember',progressBubbles:'all'},platform:'darwin',audioMode:'browser',cameraSource:'local',nativeAvailable:false,backendStatus:'connected'}),
+      wakeWord:{onChanged:listen,activity:noop,report:noop,audio:noop},
       onBackendExit:listen,onBackendReady:listen,onBackendStatus:listen,
       microphone:{requestPermission:async()=>({status:'denied'}),report:noop,onRetry:listen},
       camera:{requestPermission:async()=>({status:'denied'})},
@@ -68,13 +69,19 @@ try {
   await page.setViewportSize({width:160,height:160})
   await page.goto('http://nova.test/index.html')
   await page.waitForFunction(()=>window.__socket?.readyState===1)
+  await page.evaluate(() => window.__frame({type: 'caption', role: 'assistant', final: false, sequence: 1, text: '准备中'}))
+  assert.equal(await page.locator('[data-kind=conversation]').count(), 0)
+  await page.evaluate(() => window.__frame({type: 'caption', role: 'assistant', final: true, sequence: 2, text: '今天的安排已经整理好了。'}))
+  await page.locator('[data-kind=conversation]').waitFor()
+  await page.screenshot({path: `${output}/conversation-bubble.png`})
+  await page.locator('[data-kind=conversation]').click()
   for (const factor of [1,1.25,1.5]) {
     zoom=factor
     await page.evaluate(z=>document.documentElement.style.zoom=z,zoom)
     await page.evaluate(()=>window.__frame({type:'executor.approval',executor:'codex',display_name:'Codex',pending_approval:true,pending_approval_busy:false,pending_approval_id:'approval',kind:'network',local_detail:{kind:'network',command:'npm install',cwd:'/workspace',scope:'网络：registry.npmjs.org'},operation_summary:'Codex 请求访问网络。',expires_in_seconds:60,allowed_decisions:['accept','acceptForSession','decline']}))
     await page.waitForFunction(()=>!document.querySelector('#codex-allow-session').hidden)
     await page.waitForTimeout(150)
-    for(let i=0;i<3;i++) await page.evaluate(i=>window.__frame({type:'executor.progress',delegate_id:`d-${i}`,executor:'codex',phase:'working',summary:['已开始处理任务','正在检查测试结果','已完成代码修改'][i],level:'milestone',ts:i+1}),i)
+    for(let i=0;i<3;i++) await page.evaluate(i=>window.__frame({type:'executor.progress',delegate_id:`d-${i}`,executor:'codex',phase:'alert',summary:['已开始处理任务','正在检查测试结果','已完成代码修改'][i],level:'milestone',ts:i+1}),i)
     await page.waitForFunction(()=>document.querySelectorAll('.progress-bubble').length===3)
     const boxes=await page.locator('.progress-bubble, #codex-label, #codex-confirm, #codex-allow-session, #codex-cancel, #orb').evaluateAll(nodes=>nodes.map(n=>({id:n.id||n.className,rect:n.getBoundingClientRect().toJSON(),scroll:n.scrollWidth,client:n.clientWidth})))
     const viewport=page.viewportSize()
@@ -105,12 +112,14 @@ try {
       delegate_id: id, executor: 'codex', project: id === 'a' ? '<alpha>' : 'beta', title: id === 'a' ? '<img src=x>' : 'B result',
       outcome: 'ok', summary: '<b>done</b>', started_at: 0, ended_at: 5, changed_files: 2}})
   })
+  await page.locator('#orb').hover()
   await page.locator('#last-result').click()
   assert.equal(await page.evaluate(() => window.__openedResult.results.length), 2)
   assert.equal(await page.evaluate(() => window.__openedResult.roster[0].running[0].title), '<img src=x>')
   assert.equal(await page.evaluate(() => window.__openedResult.results[0].project), '<alpha>')
   assert.equal(await page.locator('img').count(), 0, 'source markup must remain text')
   await page.evaluate(() => window.__frame({type: 'executor.result', work_id: 'a', result: null}))
+  await page.locator('#orb').hover()
   await page.locator('#last-result').click()
   assert.deepEqual(await page.evaluate(() => window.__openedResult.results.map(result => result.delegateId)), ['b'])
   // A reconnect snapshot must remove previously retained entries, then replay the current set.
@@ -118,17 +127,19 @@ try {
     window.__frame({type: 'executor.results.reset'})
     window.__frame({type: 'executor.result', work_id: 'c', result: {delegate_id: 'c', executor: 'codex', outcome: 'cancelled', summary: 'Stopped', started_at: 0, ended_at: 5, changed_files: 0}})
   })
+  await page.locator('#orb').hover()
   await page.locator('#last-result').click()
   assert.deepEqual(await page.evaluate(() => window.__openedResult.results.map(result => result.delegateId)), ['c'])
   console.log('project roster and keyed results: concurrent, clear, reconnect, progress off, plain text')
   zoom=1
   position={x:400,y:0,width:160,height:160}
   await page.evaluate(()=>document.documentElement.style.zoom=1)
-  await page.evaluate(()=>window.__frame({type:'executor.progress',delegate_id:'below',executor:'codex',phase:'working',summary:'正在核对结果',level:'detail',ts:100}))
+  await page.evaluate(()=>window.__frame({type:'executor.progress',delegate_id:'below',executor:'codex',phase:'alert',summary:'正在核对结果',level:'detail',ts:100}))
   await page.waitForFunction(()=>document.querySelectorAll('.progress-bubble').length===1)
   const lower = await page.locator('.progress-bubble').boundingBox()
   const last = await page.locator('#last-result').boundingBox()
   assert.ok(last.y+last.height <= lower.y, 'last-result overlaps below bubble')
+  await page.locator('#orb').hover()
   await page.locator('#last-result').click()
   await page.screenshot({path:`${output}/below-last-result.png`})
   await page.locator('.progress-bubble').click()
@@ -137,8 +148,10 @@ try {
   const settingsBounds = settingsWindowOptions(resolve(root, 'clients/desktop/src/preload/preload.cjs'), 'smoke')
   await page.setViewportSize({width:settingsBounds.width,height:settingsBounds.height})
   await page.goto('http://nova.test/settings.html')
+  await page.locator('#category-codex').click()
   await page.locator('label:has(input[name="codexApprovalMode"][value="yolo"])').click()
   assert.equal(await page.locator('#codex-yolo-warning').isVisible(),true)
+  await page.locator('#category-general').click()
   const choices = await page.locator('#plan-readback label').evaluateAll(nodes => nodes.map(node=>node.getBoundingClientRect().y))
   assert.equal(new Set(choices).size,1,'readback choices should share a row')
   await page.screenshot({path:`${output}/settings-yolo.png`,fullPage:true})

@@ -96,6 +96,14 @@ embeddings.
 `backendLaunchSpec` must map every desktop v4 field that affects the child
 into the corresponding env var (omit empties so parent `.env` can still win,
 matching current secret behaviour).
+
+开发版桌面启动时读取 repo 根目录 `.env`，其环境配置覆盖 shell 中的同名值。
+密钥优先级为：repo `.env` 中有效的非空值 > 桌面保存值 > 继承的环境变量。
+直接运行 Electron 开发入口也遵循此规则；修改 `.env` 后需重启桌面应用。
+打包版不读取 repo `.env`，仍使用桌面保存值 > 继承的环境变量。
+设置面板按实际配置显示「来自 .env」「来自环境变量」或「已设置」，只接收状态与来源，
+不回填密钥明文；`.env` 管理的字段须在文件中修改。状态表示配置存在，不表示服务商鉴权已通过。
+
 `wakeWordEnabled` and `autoHideSeconds` stay in desktop settings and have no
 backend env mapping or restart requirement for a wake-only save.
 
@@ -255,3 +263,13 @@ Land schema + migration stubs early; wire controls as each feature merges:
 
 No new architecture decision beyond those in 01–05. This volume is the
 configuration surface for those decisions.
+
+
+## Desktop presentation (2026-09-10)
+
+- 设置中的「气泡通知」控制屏幕文字提示：关闭不显示任务进度气泡，里程碑过滤详细进度，全部同时显示普通对话的最终回复。主动性另行决定主动开口门槛与冷却时间。
+- 密钥默认只显示配置状态，清除后展开输入框；开发版 `.env` 管理的值在文件中修改。面板不再提供 Codex 密钥或规划模型，也暂不提供新增 MCP 服务器入口；既有服务与运行时配置继续兼容。
+- 费用明细以调用统计、模型费用卡片和用量网格展示，不显示计费规则。
+- 记忆面板的对话使用左右消息布局；JSON 详情仅在悬停或键盘聚焦时显示。
+
+- 底部固定操作栏分别提供「保存」与「重启」：保存仅持久化，需重启的配置标为待重启；重启使用已保存配置，保留面板中尚未保存的草稿。外观与唤醒等桌面设置保存后即时应用。

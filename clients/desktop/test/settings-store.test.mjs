@@ -733,7 +733,7 @@ test('orb settings expose only renderer-owned appearance and activation fields',
     startListeningOnLaunch: true,
     codexBinaryPath: 'C:\\private\\codex.exe',
     modelBaseUrl: 'https://private.example/v1',
-  }), {codingProgressNarration: 'smart', palette: 'graphite', startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
+  }), {progressBubbles: 'milestones', codingProgressNarration: 'smart', palette: 'graphite', startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
 })
 
 test('secretsPresent reports booleans for every key and leaks no ciphertext', () => {
@@ -1307,5 +1307,6 @@ test('coding progress narration round trips and defaults to smart', () => {
 
 test('coding narration mode changes persist without requesting a backend restart', () => {
   assert.deepEqual(backendSettings({codingProgressNarration: 'smart'}), backendSettings({codingProgressNarration: 'continuous'}))
+  assert.deepEqual(backendSettings({palette: 'ember'}), backendSettings({palette: 'graphite'}))
   assert.equal(orbSettings({codingProgressNarration: 'continuous'}).codingProgressNarration, 'continuous')
 })

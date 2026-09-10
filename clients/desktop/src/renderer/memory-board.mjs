@@ -54,7 +54,7 @@ function boardTime(item) {
   return `t=${Number(item.ts).toFixed(1)}s`
 }
 
-function renderItem(item) {
+function renderItem(item, conversation = false) {
   const article = document.createElement('article')
   article.className = 'item'
   const meta = document.createElement('div')
@@ -83,7 +83,22 @@ function renderItem(item) {
   }
   const content = document.createElement('pre')
   content.textContent = itemContent(item.content)
-  article.append(meta, content)
+  if (conversation) {
+    let payload = item.content
+    try { if (typeof payload === 'string') payload = JSON.parse(payload) } catch {}
+    const role = payload?.role === 'user' || item.trust === 'trusted_user' ? 'user' : 'assistant'
+    article.className = `item chat-message chat-${role}`
+    article.tabIndex = 0
+    article.setAttribute('aria-label', role === 'user' ? '你的消息，聚焦查看详情' : 'Nova 的消息，聚焦查看详情')
+    const text = document.createElement('div')
+    text.className = 'chat-text'
+    text.textContent = typeof payload?.text === 'string' ? payload.text
+      : typeof payload === 'string' ? payload : '非文本消息'
+    const debug = document.createElement('div')
+    debug.className = 'chat-debug'
+    debug.append(meta, content)
+    article.append(text, debug)
+  } else article.append(meta, content)
   return article
 }
 
@@ -99,7 +114,7 @@ function renderChannel(channel, index) {
   title.id = `memory-channel-${index}`
   section.setAttribute('aria-labelledby', title.id)
   const shown = channel.items.length
-  title.textContent = channel.name
+  title.textContent = channelLabel(channel.name)
   const count = document.createElement('span')
   count.className = 'channel-count'
   count.textContent = channel.item_count > shown ? `${shown} / ${channel.item_count}` : String(channel.item_count)
@@ -113,7 +128,7 @@ function renderChannel(channel, index) {
   summary.textContent = channel.summary || '尚未生成频道摘要'
 
   const itemsRoot = document.createElement('div')
-  itemsRoot.className = 'channel-items'
+  itemsRoot.className = channel.name === 'conversation' ? 'channel-items chat-messages' : 'channel-items'
   itemsRoot.dataset.scrollKey = `channel:${channel.name}`
   if (!channel.items.length) {
     const empty = document.createElement('p')
@@ -121,8 +136,9 @@ function renderChannel(channel, index) {
     empty.textContent = '暂无记录'
     itemsRoot.append(empty)
   }
-  for (const item of channel.items) itemsRoot.append(renderItem(item))
-  section.append(header, summary, itemsRoot)
+  for (const item of channel.items) itemsRoot.append(renderItem(item, channel.name === 'conversation'))
+  if (channel.name === 'conversation') section.append(header, itemsRoot)
+  else section.append(header, summary, itemsRoot)
   return section
 }
 

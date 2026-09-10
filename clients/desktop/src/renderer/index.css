@@ -59,19 +59,6 @@ html, body {
 }
 .progress-bubble[data-level='milestone'] { border-color: rgba(137, 194, 175, .6); }
 .progress-bubble:focus-visible, #last-result:focus-visible { outline: 2px solid #a6d6ff; outline-offset: -2px; }
-#last-result {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 0;
-  border-radius: 8px;
-  padding: 1px 7px;
-  color: #c9d8ed;
-  background: rgba(19, 22, 31, .9);
-  font: 10px/1.2 system-ui, sans-serif;
-  cursor: pointer;
-}
 #last-result[hidden] { display: none; }
 #shell[data-bubbles='true'] { display: block; }
 #shell[data-bubbles='true'] #orb {
@@ -89,11 +76,7 @@ html, body {
   transform: translateX(-50%);
   margin: 0;
 }
-#shell[data-bubbles='true'] #last-result {
-  top: calc(var(--bubble-orb-y) + 64px);
-  bottom: auto;
-  left: var(--bubble-orb-x);
-}
+
 #shell[data-bubbles='true'] #orb-rail {
   top: var(--bubble-orb-y);
   right: auto;
@@ -269,7 +252,7 @@ body:hover #orb-rail,
   pointer-events: auto;
 }
 
-#orb-rail button {
+#orb-rail button, #last-result {
   display: grid;
   place-items: center;
   width: 24px;
@@ -289,7 +272,7 @@ body:hover #orb-rail,
 
 #orb-rail button:disabled { opacity: .4; cursor: default; }
 
-#orb-rail svg {
+#orb-rail svg, #last-result svg {
   width: 13px;
   height: 13px;
   fill: currentColor;
@@ -629,10 +612,18 @@ body:hover #orb-rail,
     box-shadow: none;
     color: white;
   }
-  #orb-rail button { border: 2px solid white; background: black; color: white; }
+  #orb-rail button, #last-result { border: 2px solid white; background: black; color: white; }
   #mute-toggle[aria-pressed="true"] { color: #ff3b30; border-color: #ff3b30; }
   #speaker-toggle[aria-pressed="false"] { color: #ff3b30; border-color: #ff3b30; }
   #camera-toggle[aria-pressed="true"] { color: #43f1a6; border-color: #43f1a6; }
   #camera-toggle[data-camera-state="denied"],
   #camera-toggle[data-camera-state="unavailable"] { color: #ff3b30; border-color: #ff3b30; }
 }
+
+.progress-bubble[data-kind='conversation'] { overflow-y: auto; white-space: pre-wrap; user-select: text; cursor: text; }
+#last-result[hidden] { display: none; }
+
+/* Result access sits opposite the four existing controls, clear of the workspace pill. */
+#last-result { position: absolute; left: 3px; top: 50%; transform: translateY(-50%); opacity: 0; pointer-events: none; }
+body:hover #last-result, #last-result:focus-visible { opacity: 1; pointer-events: auto; }
+#shell[data-bubbles='true'] #last-result { left: max(3px, calc(var(--bubble-orb-x) - 77px)); top: var(--bubble-orb-y); }

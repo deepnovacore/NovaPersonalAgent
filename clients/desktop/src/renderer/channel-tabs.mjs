@@ -8,9 +8,9 @@ const CHANNEL_LABELS = Object.freeze({
   watch: 'Watch',
   guard: 'Guard',
   codex: 'Codex',
-  search: 'Search',
-  mcp__nova_camera: 'Camera',
-  mcp__nova_knowledge: 'Knowledge',
+  search: '搜索',
+  mcp__nova_camera: '相机',
+  mcp__nova_knowledge: '知识库',
 })
 const MCP_PREFIX = /^mcp__/
 /** A dynamic external server's manifest display_name is the bare server name. */

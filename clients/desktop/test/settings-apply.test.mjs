@@ -283,3 +283,14 @@ test('failed rollback remains recoverable and never reports applied', async () =
   assert.equal(result.operationStatus, 'recovery_failed')
   assert.equal(statuses.includes('applied'), false)
 })
+
+
+test('save-only commits without preparing or restarting and reports pending restart', async () => {
+  const {calls, statuses, options} = harness({deferRestart: true})
+  const saved = await applySettingsTransaction(options)
+  assert.equal(saved.saved, true)
+  assert.equal(saved.restarted, false)
+  assert.equal(saved.operationStatus, 'pending_restart')
+  assert.deepEqual(calls, ['write', 'publish_committed'])
+  assert.deepEqual(statuses, ['saving', 'pending_restart'])
+})

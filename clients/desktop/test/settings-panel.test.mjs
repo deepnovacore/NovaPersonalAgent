@@ -1,4 +1,4 @@
-import {frontendUsageText} from '../src/renderer/frontend-usage.mjs'
+import {frontendUsageText, renderFrontendUsage} from '../src/renderer/frontend-usage.mjs'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -60,7 +60,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   function node(selector) {
     if (!nodes.has(selector)) nodes.set(selector, {
       id: selector.slice(1), value: '', textContent: '', hidden: selector === '#restart-notice', dataset: {},
-      listeners: {}, attributes: {}, tabIndex: 0, focused: 0, append() {},
+      listeners: {}, attributes: {}, tabIndex: 0, focused: 0, children: [], append(...items) {this.children.push(...items)}, replaceChildren(...items) {this.children = items},
       addEventListener(event, listener) { this.listeners[event] = listener },
       setAttribute(name, value) { this.attributes[name] = String(value) },
       getAttribute(name) { return this.attributes[name] ?? null },
@@ -70,12 +70,12 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText,
+    ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
     createKnowledgePanel: () => ({render() {}}),
     document: {
       querySelector: node, querySelectorAll: () => [], getElementById: id => node(`#${id}`),
-      createElement: () => ({}), addEventListener() {},
+      createElement: () => ({children: [], append(...items) {this.children.push(...items)}}), addEventListener() {},
     },
     window: {novaAudioAgentDesktop: {settings: {
       get: async () => initialView, onChanged: listener => { push = listener }, ...apiOverrides,
@@ -528,15 +528,15 @@ test('the settings page ships the same locked-down CSP as the memory board', () 
   const meta = html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]+)">/)
   assert.ok(meta, 'the settings page declares a CSP')
   for (const directive of board) assert.ok(meta[1].includes(directive), `CSP keeps ${directive}`)
-  assert.doesNotMatch(html.replace(/<a class="key-link"[^>]+>获取 API Key ↗<\/a>/g, ''), /https?:\/\//)
+  assert.doesNotMatch(html.replace(/<a class="key-link"[^>]+>获取密钥 ↗<\/a>/g, ''), /https?:\/\//)
   assert.match(html, /<html lang="zh-CN">/)
 })
 
 test('the palette control offers both orb palettes with a live swatch', () => {
   assert.match(html, /<input type="radio" name="palette" value="ember"/)
   assert.match(html, /<input type="radio" name="palette" value="graphite"/)
-  assert.match(html, /Ember 暖焰/)
-  assert.match(html, /Graphite 月光/)
+  assert.match(html, /暖焰/)
+  assert.match(html, /月光/)
   assert.match(html, /class="swatch swatch-ember"/)
   assert.match(html, /class="swatch swatch-graphite"/)
   // The swatches preview the real orb colours rather than inventing new ones.
@@ -594,7 +594,6 @@ test('every API key is a password field with a badge, hint, and clear button', (
   for (const key of [
     'dashscopeApiKey',
     'tavilyApiKey',
-    'codexApiKey',
     'arkApiKey',
     'doubaoBigmodelApiKey',
   ]) {
@@ -607,8 +606,8 @@ test('every API key is a password field with a badge, hint, and clear button', (
   assert.match(html, /Tavily/)
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
-  assert.match(html, /火山语音 KEY/)
-  assert.equal((html.match(/type="password"/g) || []).length, 5)
+  assert.match(html, /火山语音/)
+  assert.equal((html.match(/type="password"/g) || []).length, 4)
 })
 
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {
@@ -663,8 +662,8 @@ test('key usage labels are derived from public pipeline selection only', () => {
 })
 
 test('the panel states what applies immediately and what triggers a controlled reconnect', () => {
-  assert.match(html, /更改会暂存在本窗口/)
-  assert.match(html, /保存并重启/)
+  assert.match(html, /服务配置保存后，点击重启生效/)
+  assert.match(html, /id="settings-restart"/)
   assert.match(html, /<p id="restart-notice" class="warning" hidden><\/p>/)
   assert.match(script, /已保存，后台正在重启并重新连接/u)
   assert.match(script, /设置已生效/u)
@@ -686,13 +685,13 @@ test('settings preserve approval, planning, and progress controls alongside the 
   for (const value of ['summary', 'confirm', 'silent']) {
     assert.match(html, new RegExp(`<input type="radio" name="planReadback" value="${value}"`))
   }
-  assert.match(html, /id="plannerModel"/)
+  assert.doesNotMatch(html, /id="plannerModel"/)
   for (const value of ['off', 'milestones', 'all']) {
     assert.match(html, new RegExp(`<input type="radio" name="progressBubbles" value="${value}"`))
   }
   assert.match(script, /codexApprovalModeInputs/)
   assert.match(script, /yoloWarning\.hidden = view\.codexApprovalMode !== 'yolo'/)
-  assert.match(script, /plannerModel\.value = view\.plannerModel/u)
+  assert.doesNotMatch(script, /plannerModel\.value = view\.plannerModel/u)
   assert.doesNotMatch(html, /searchProvider|MCP 服务器|MCP 编辑器/u)
 })
 
@@ -715,7 +714,7 @@ test('Codex and Projects is the final collapsed settings disclosure', () => {
   assert.ok(disclosure, 'Codex and Projects closes the settings content')
   assert.doesNotMatch(disclosure, /<details id="codex-projects"[^>]*\sopen(?:\s|>)/)
   assert.match(disclosure, /<div id="codex-manual-settings"[^>]*hidden>/)
-  assert.match(disclosure, /Codex 与 Projects/)
+  assert.match(disclosure, /Codex 与工作区/)
 })
 
 test('the panel exposes packaged Codex, Projects, and model endpoint configuration', () => {
@@ -741,10 +740,10 @@ test('the panel exposes packaged Codex, Projects, and model endpoint configurati
 })
 
 test('workspace actions use refresh wording and omit managed terminology from UI copy', () => {
-  assert.match(html, /id="codex-rescan">刷新<\/button>/u)
-  assert.match(html, />打开当前 workspace<\/button>/u)
-  assert.match(html, />清空当前 workspace<\/button>/u)
-  assert.match(html, />清空全部 workspace<\/button>/u)
+  assert.match(html, /id="codex-rescan">重新检测<\/button>/u)
+  assert.match(html, />打开当前工作区<\/button>/u)
+  assert.match(html, />清空当前工作区<\/button>/u)
+  assert.match(html, />清空全部工作区<\/button>/u)
   assert.match(script, /正在刷新 Codex/u)
   assert.match(script, /Codex 刷新完成/u)
   assert.doesNotMatch(html, /重新扫描|托管/u)
@@ -794,7 +793,7 @@ test('all editable settings stage until the single save action', () => {
   assert.match(script, /addEventListener\('change'/)
   assert.match(script, /input\[name="palette"\]/)
   assert.match(script, /\(\{palette: input\.value\}\)/)
-  assert.match(html, /id="settings-save"[^>]*>保存并重启<\/button>/)
+  assert.match(html, /id="settings-save"[^>]*>保存<\/button>/)
   assert.doesNotMatch(script, /saveText\(|controller\.push\(|save-secrets/)
   assert.match(script, /button\.clear/)
 })
@@ -894,9 +893,9 @@ test('one save names any rejected secret by its panel label', () => {
   assert.match(script, /const SECRET_LABELS = \{/)
   assert.match(script, /dashscopeApiKey: 'DashScope',/)
   assert.match(script, /tavilyApiKey: 'Tavily',/)
-  assert.match(script, /codexApiKey: 'Codex',/)
+  assert.doesNotMatch(script, /codexApiKey: 'Codex',/)
   assert.match(script, /arkApiKey: 'Ark',/)
-  assert.match(script, /doubaoBigmodelApiKey: '火山语音 KEY',/)
+  assert.match(script, /doubaoBigmodelApiKey: '火山语音',/)
   // Each exact queued request retains its own rejection list. The renderer
   // names only keys this save submitted, so a coalesced neighbour cannot make
   // a different field's error appear in its status line.
@@ -1008,9 +1007,9 @@ test('usage stays current through a stale save reply and renders a compact summa
   await saving
   assert.equal(renders.at(-1).frontendUsage.requests, 2)
   const panel = await mountSettingsPanel(publicView({frontendUsage: usage}))
-  assert.equal(panel.node('#frontend-usage').textContent, '本次运行前台估算费用：¥0.1200')
+  assert.equal(panel.node('#frontend-usage').textContent, '¥0.1200')
   assert.doesNotMatch(panel.node('#frontend-usage').textContent, /官方按量/)
-  assert.match(panel.node('#frontend-usage-details').textContent, /官方按量/)
+  assert.doesNotMatch(panel.node('#frontend-usage-details').textContent, /官方按量/)
 })
 
 test('every settings block belongs to exactly one sidebar category', () => {
@@ -1121,7 +1120,7 @@ test('an accepted save clears plaintext and keeps the input editable', async () 
   await new Promise(resolve => setImmediate(resolve))
 
   assert.equal(panel.node('#dashscopeApiKey').value, '', 'plaintext never lingers')
-  assert.equal(panel.node('#dashscopeApiKey').hidden, false, 'the input remains editable')
+  assert.equal(panel.node('#dashscopeApiKey').hidden, true, 'the configured key is collapsed')
 })
 
 
@@ -1200,12 +1199,14 @@ test('main serves a held category once and drops it with the window', async () =
   assert.match(openBody, /settingsWindow = null\n\s*pendingSettingsCategory = null/)
 })
 
-test('API keys are directly editable and removed settings never enter a save', async () => {
+test('configured API keys expand on clear and removed settings never enter a save', async () => {
   assert.doesNotMatch(html, /class="change"|id="modelApiKey"|id="modelBaseUrl"|id="doubaoAsrApiKey"/)
   const sent = []
   const panel = await mountSettingsPanel(publicView({secretsPresent: {dashscopeApiKey: true}}), {
     set: async patch => {sent.push(structuredClone(patch)); return publicView({secretsPresent: {dashscopeApiKey: true}, rejectedSecrets: []})},
   })
+  assert.equal(panel.node('#dashscopeApiKey').hidden, true)
+  await panel.click('button.clear[data-key="dashscopeApiKey"]')
   assert.equal(panel.node('#dashscopeApiKey').hidden, false)
   assert.equal(panel.node('#dashscopeApiKey').value, '')
   panel.node('#dashscopeApiKey').value = 'replacement-test-key'
@@ -1214,4 +1215,34 @@ test('API keys are directly editable and removed settings never enter a save', a
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(sent[0].settingsPatch.secrets.dashscopeApiKey, 'replacement-test-key')
   for (const key of ['modelApiKey', 'doubaoAsrApiKey', 'modelBaseUrl']) assert.equal(Object.hasOwn(sent[0].settingsPatch.secrets, key), false)
+})
+
+
+test('dotenv-backed keys show their source without plaintext or ineffective edit controls', async () => {
+  const panel = await mountSettingsPanel(publicView({
+    secretsPresent: {arkApiKey: true}, secretSources: {arkApiKey: 'dotenv'},
+  }))
+  assert.equal(panel.node('#badge-arkApiKey').textContent, '来自 .env')
+  assert.equal(panel.node('#arkApiKey').value, '')
+  assert.equal(panel.node('#arkApiKey').disabled, true)
+  assert.equal(panel.node('button.clear[data-key="arkApiKey"]').disabled, true)
+  panel.push(publicView({secretsPresent: {arkApiKey: true}, secretSources: {arkApiKey: 'settings'}}))
+  assert.equal(panel.node('#arkApiKey').disabled, false)
+  assert.equal(panel.node('#badge-arkApiKey').textContent, '已设置')
+})
+
+
+test('restart uses saved settings independently and keeps unsaved drafts', async () => {
+  let restarts = 0, saves = 0
+  const panel = await mountSettingsPanel(publicView(), {
+    restart: async () => {restarts++; return publicView({operationStatus: 'applied'})},
+    set: async () => {saves++; return publicView()},
+  })
+  panel.node('#codexWorkspace').value = '/draft-workspace'
+  panel.node('#codexWorkspace').listeners.input()
+  await panel.click('#settings-restart')
+  assert.equal(restarts, 1)
+  assert.equal(saves, 0)
+  assert.equal(panel.node('#codexWorkspace').value, '/draft-workspace')
+  assert.equal(panel.node('#settings-save').disabled, false)
 })

@@ -4,15 +4,15 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'none'; img-src 'none'; media-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
-    <title>Nova Audio Agent Memory Board</title>
+    <title>Nova Audio Agent 记忆面板</title>
     <link rel="stylesheet" href="./memory-board.css">
   </head>
   <body>
     <header class="board-header">
       <div class="board-title">
-        <span class="eyebrow">NOVA / CONTEXT OBSERVATORY</span>
-        <h1>Memory Board</h1>
-        <p>按频道查看 Nova 当前持有的上下文快照</p>
+        <span class="eyebrow">NOVA / 记忆</span>
+        <h1>记忆面板</h1>
+        <p>按记录频道查看 Nova 的上下文；频道记录不代表服务当前启用</p>
       </div>
       <div class="board-actions">
         <span id="status" aria-live="polite"></span>
@@ -22,10 +22,10 @@
         <button id="clear-conversation" type="button">清除近期会话记录</button>
       </div>
     </header>
-    <nav class="board-tabs" role="tablist" aria-label="Memory Board 视图">
-      <button id="memory-tab" type="button" role="tab" aria-selected="true" aria-controls="memory-panel">Memory</button>
-      <button id="diagnostics-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostics-panel" tabindex="-1">Diagnostics</button>
-      <button id="graph-tab" type="button" role="tab" aria-selected="false" aria-controls="graph-panel" tabindex="-1">Graph</button>
+    <nav class="board-tabs" role="tablist" aria-label="记忆面板 视图">
+      <button id="memory-tab" type="button" role="tab" aria-selected="true" aria-controls="memory-panel">记忆</button>
+      <button id="diagnostics-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostics-panel" tabindex="-1">诊断</button>
+      <button id="graph-tab" type="button" role="tab" aria-selected="false" aria-controls="graph-panel" tabindex="-1">工作区图谱</button>
     </nav>
     <main>
       <section id="memory-panel" role="tabpanel" aria-labelledby="memory-tab">

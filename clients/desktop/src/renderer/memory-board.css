@@ -444,3 +444,15 @@ button:focus-visible {
   :root { --line: currentColor; --line-strong: currentColor; --shadow: none; }
   .channel-card, .item, .board-actions button { border-width: 2px; }
 }
+
+.chat-messages { display: flex; flex-direction: column; gap: 18px; padding: 24px; }
+.chat-message { position: relative; width: fit-content; max-width: 82%; margin: 0; padding: 0; border: 0; background: transparent; }
+.chat-user { align-self: flex-end; }
+.chat-assistant { align-self: flex-start; }
+.chat-text { padding: 12px 16px; border-radius: 16px 16px 16px 4px; background: #f0f2f5; color: #252a32; font: 14px/1.75 system-ui, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-user .chat-text { border-radius: 16px 16px 4px 16px; background: #e9effa; }
+.chat-debug { display: none; margin-top: 8px; padding: 10px 12px; border: 1px solid #d8dde5; border-radius: 10px; background: #fafbfc; }
+.chat-message:hover .chat-debug, .chat-message:focus-within .chat-debug { display: block; }
+.chat-debug pre { max-height: 180px; overflow: auto; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-message:focus-visible { outline: 2px solid #6d87b1; outline-offset: 4px; border-radius: 16px; }
+@media (max-width: 600px) { .chat-messages { padding: 16px; } .chat-message { max-width: 92%; } }

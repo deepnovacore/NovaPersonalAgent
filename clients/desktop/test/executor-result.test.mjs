@@ -37,14 +37,14 @@ test('rejects malformed results before a native dialog can render them', () => {
   }), null)
 })
 
-test('renders an honest native fallback with Memory Board as an explicit action', () => {
+test('renders an honest native fallback with 记忆面板 as an explicit action', () => {
   const options = executorResultDialogOptions({
     delegateId: 'delegate-7', executor: 'codex', outcome: 'failed', summary: '依赖安装失败',
     startedAt: 10.25, endedAt: 13.5, changedFiles: null,
   })
 
   assert.equal(options.type, 'warning')
-  assert.deepEqual(options.buttons, ['打开 Memory Board', '关闭'])
+  assert.deepEqual(options.buttons, ['打开 记忆面板', '关闭'])
   assert.match(options.detail, /开始：t=10\.3s/u)
   assert.match(options.detail, /结束：t=13\.5s/u)
   assert.match(options.detail, /耗时：3\.3s/u)

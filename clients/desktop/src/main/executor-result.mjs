@@ -50,7 +50,7 @@ export function executorResultDialogOptions(result) {
     title: '任务结果',
     message: outcome,
     detail: `${result.project ?? result.executor} · ${result.title ?? result.delegateId}\n${result.summary}\n\n变更文件：${result.changedFiles === null ? '未知' : result.changedFiles}\n开始：${formatSeconds(result.startedAt)}\n结束：${formatSeconds(result.endedAt)}\n耗时：${formatSeconds(result.endedAt - result.startedAt, false)}`,
-    buttons: ['打开 Memory Board', '关闭'],
+    buttons: ['打开 记忆面板', '关闭'],
     defaultId: 0,
     cancelId: 1,
     noLink: true,

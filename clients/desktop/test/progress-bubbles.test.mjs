@@ -319,3 +319,19 @@ test('renderer routes coding progress by wire identity and preserves coding aler
   send({...frame, executor: 'monitor'})
   assert.equal(shown.length, 2)
 })
+
+
+test('all bubble mode shows only finalized assistant replies, preserving multiline text', async () => {
+  const {parseConversationBubble} = await import('../src/renderer/bubbles.mjs')
+  const frame = {type: 'caption', role: 'assistant', final: true, sequence: 4, text: '已经完成。\n文件在 /tmp/demo'}
+  for (const mode of ['milestones', 'off']) assert.equal(parseConversationBubble(frame, mode), null)
+  assert.equal(parseConversationBubble({...frame, role: 'user'}, 'all'), null)
+  assert.equal(parseConversationBubble({...frame, final: false}, 'all'), null)
+  assert.equal(parseConversationBubble({...frame, text: ''}, 'all'), null)
+  const reply = parseConversationBubble(frame, 'all')
+  assert.equal(reply.summary, frame.text)
+  const controller = createProgressBubbleController({reserveBubbleArea: async () => ({}), render() {}, schedule: () => 1, cancel() {}})
+  assert.equal(await controller.push(reply), true)
+  assert.equal(controller.items[0].kind, 'conversation')
+  await controller.clear()
+})

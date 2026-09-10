@@ -43,7 +43,7 @@ import { deriveOrbState } from './state.mjs'
 import { BackendReconnectController } from './backend-reconnect.mjs'
 import {mountTaskBanner} from './task-banner.mjs'
 import {createTaskAreaReservation} from './task-banner-layout.mjs'
-import {mountProgressBubbles, parseProgressFrame, parseLastResultFrame, parseProjectRoster} from './bubbles.mjs'
+import {mountProgressBubbles, parseConversationBubble, parseProgressFrame, parseLastResultFrame, parseProjectRoster} from './bubbles.mjs'
 
 const PROJECT_CONFIRMATION_TTL_SECONDS = 360
 
@@ -70,13 +70,14 @@ const retainedResults = new Map()
 let projectRoster = []
 let taskBanner = null
 let savedNarrationMode = 'smart'
+let bubbleMode = 'milestones'
 let pendingNarrationMode = null
 function updateResultButton() {
   const tasks = taskBanner?.state()
-  lastResultButton.hidden = retainedResults.size === 0 && projectRoster.length === 0 && !tasks?.tasks.length
-  lastResultButton.textContent = tasks?.tasks.length && !tasks.visible
+  lastResultButton.hidden = retainedResults.size === 0 && !tasks?.tasks.length
+  lastResultButton.title = tasks?.tasks.length && !tasks.visible
     ? `查看任务 · ${tasks.runningCount} 个运行中` : '查看任务结果'
-  lastResultButton.setAttribute('aria-label', lastResultButton.textContent)
+  lastResultButton.setAttribute('aria-label', lastResultButton.title)
 }
 const applyBubbleLayout = layout => {
   const active = layout?.rows > 0 && !layout.suppressed
@@ -862,6 +863,8 @@ async function handleControl(message) {
   } else if (message.type === CLOCK_PING) {
     send({ type: 'clock.pong', ping_id: message.ping_id, t_render_ms: performance.now() })
   } else if (message.type === CAPTION) {
+    const reply = parseConversationBubble(message, bubbleMode)
+    if (reply) void progressBubbles.push(reply)
     captionLabel.textContent = message.text
     captionLabel.dataset.role = message.role
     captionLabel.hidden = !message.text
@@ -1164,6 +1167,7 @@ async function boot() {
     axes.camera = bootstrap.cameraSource === 'file' ? 'file' : 'off'
     axes.audioMode = bootstrap.audioMode
     savedNarrationMode = bootstrap.settings?.codingProgressNarration ?? 'smart'
+    bubbleMode = bootstrap.settings?.progressBubbles ?? 'milestones'
     axes.platform = bootstrap.platform
     taskBanner.setPlatform(bootstrap.platform)
     axes.backendState = typeof bootstrap.backendStatus === 'string'
@@ -1193,6 +1197,10 @@ async function boot() {
     // A narration preference is live host state; do not restart running work.
     window.novaAudioAgentDesktop.settings?.onChanged?.(next => {
       paletteHover.reset(next.palette)
+      if (['off', 'milestones', 'all'].includes(next.progressBubbles)) {
+        bubbleMode = next.progressBubbles
+        if (bubbleMode !== 'all') void progressBubbles.clear()
+      }
       const mode = next.codingProgressNarration
       if (['smart', 'continuous'].includes(mode) && mode !== savedNarrationMode) {
         savedNarrationMode = mode

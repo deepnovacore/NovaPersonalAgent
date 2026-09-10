@@ -35,9 +35,12 @@ import { accessSync, constants, existsSync, readFileSync, realpathSync, statSync
 import { homedir } from 'node:os'
 import path, { dirname, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { parseEnv } from 'node:util'
 
 import {
   backendLaunchSpec,
+  resolveSecretConfiguration,
+  SECRET_ENV_MAP,
   createReadinessListener,
   nodeRuntimeEntry,
   searchProxyUrlFromRules,
@@ -141,6 +144,13 @@ if (process.platform === 'linux') {
 
 const here = dirname(fileURLToPath(import.meta.url))
 const packageRoot = resolve(here, '../..')
+const developmentEnvFile = resolve(packageRoot, '../../.env')
+const developmentEnv = !app.isPackaged && existsSync(developmentEnvFile)
+  ? parseEnv(readFileSync(developmentEnvFile, 'utf8')) : {}
+// Preserve paths and launch flags already normalized by the source launcher.
+for (const name of Object.values(SECRET_ENV_MAP)) {
+  if (developmentEnv[name] !== undefined) process.env[name] = developmentEnv[name]
+}
 const rendererRoot = resolve(packageRoot, 'src/renderer')
 const preload = resolve(packageRoot, 'src/preload/preload.cjs')
 const WINDOW_SIZE = Object.freeze({ width: 160, height: 160 })
@@ -165,6 +175,7 @@ let runtimeCapabilities = null
 let capabilityEditorCache = null
 let backendControl = null
 let settingsApplyStatus = 'idle'
+let settingsRestartPending = false
 let settingsRecoveryAvailable = false
 let mainWindow = null
 let boardWindow = null
@@ -246,7 +257,7 @@ function managedWorkspacesView() {
 }
 
 // The single shape the settings panel is ever told. Key material is reduced to
-// seven booleans here and nowhere else, so no handler can widen it by accident;
+// presence booleans and source labels here, never plaintext;
 // `keyringAvailable` is what turns the plaintext warning line on. It answers
 // for the file as it stands, not merely for today's keyring: an entry written
 // while no keyring existed is still readable by anyone, so the warning stays up
@@ -268,6 +279,14 @@ function settingsView() {
     // Cache only this examined public projection, never decrypted values or a resolved registry.
     capabilityEditorCache = {generation: settingsGeneration, diskVersion: capabilityDiskVersion, view: capabilities}
   }
+  const {secretsPresent: effectivePresence, secretSources} = resolveSecretConfiguration(
+    {}, process.env, developmentEnv)
+  for (const [key, present] of Object.entries(secretsPresent(currentSettings))) {
+    if (present && secretSources[key] !== 'dotenv') {
+      effectivePresence[key] = true
+      secretSources[key] = 'settings'
+    }
+  }
   return {
     capabilitiesDocument: capabilities.document,
     capabilitiesRevision: capabilities.revision ?? null,
@@ -288,7 +307,8 @@ function settingsView() {
       managedRoot: desktopConfig.managedRoot,
       workspace: desktopConfig.workspace,
     }) : null,
-    secretsPresent: secretsPresent(currentSettings),
+    secretsPresent: effectivePresence,
+    secretSources,
     keyringAvailable: secretCodec.available() && !hasPlaintextSecret(currentSettings),
   }
 }
@@ -473,7 +493,7 @@ function activeMcpSubmenu(launchId) {
 
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
-    { label: 'Memory Board', click: () => openMemoryBoard(launchId) },
+    { label: '记忆面板', click: () => openMemoryBoard(launchId) },
     { label: '设置…', click: () => openSettingsWindow(launchId) },
     { label: 'MCP 服务', submenu: activeMcpSubmenu(launchId) },
     { type: 'separator' },
@@ -555,7 +575,7 @@ function decryptSecretsForSpawn(settings, codec) {
       decrypted[key] = plaintext
     }
   }
-  return decrypted
+  return resolveSecretConfiguration(decrypted, process.env, developmentEnv).secrets
 }
 
 async function prepareDesktopConfiguration() {
@@ -1205,18 +1225,21 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     wakeWord?.start()
     return settingsView()
   })
-  ipcMain.handle('nova:settings:set', async (event, payload) => {
+  ipcMain.handle('nova:settings:set', async (event, payload, restart = false) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
       throw new Error('settings update rejected')
     }
     // Plaintext keys travel from the panel into the writer, and are decrypted
     // only in main for validation or backend spawn. Public settings replies
     // contain presence flags and rejected key names, never secret values.
+    if (typeof restart !== 'boolean') throw new Error('invalid restart mode')
+    const pendingRestart = settingsRestartPending
     const previousSettings = currentSettings
     const recoveryPending = settingsRecoveryAvailable
     let capabilitiesChanged = false
     const applied = await applySettingsTransaction({
-      needsBackendRestart: () => recoveryPending || capabilitiesChanged || JSON.stringify(backendSettings(previousSettings))
+      deferRestart: !restart,
+      needsBackendRestart: () => restart || pendingRestart || recoveryPending || capabilitiesChanged || JSON.stringify(backendSettings(previousSettings))
         !== JSON.stringify(backendSettings(currentSettings)),
       coordinator: lifecycleCoordinator,
       patch: payload,
@@ -1258,6 +1281,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       restartBackend: restartSettingsBackend,
       publishStatus: publishSettingsApplyStatus,
     })
+    if (applied.operationStatus === 'pending_restart') settingsRestartPending = true
+    else if (applied.operationStatus === 'applied') settingsRestartPending = false
     return {...settingsView(), ...applied}
   })
   ipcMain.handle('nova:bootstrap', event => {

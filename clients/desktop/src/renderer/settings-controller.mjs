@@ -90,13 +90,13 @@ function publicValue(value) {
   return safe
 }
 
-function presenceMap(value) {
+function presenceMap(value, sources = false) {
   const safe = {}
   if (!isRecord(value)) return safe
   for (const key of SECRET_KEY_NAMES) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key)
     if (!descriptor || !Object.hasOwn(descriptor, 'value')) continue
-    if (typeof descriptor.value === 'boolean') safe[key] = descriptor.value
+    if (sources ? ['dotenv', 'settings', 'environment'].includes(descriptor.value) : typeof descriptor.value === 'boolean') safe[key] = descriptor.value
   }
   return safe
 }
@@ -109,7 +109,7 @@ function publicPatch(value) {
     if (key === 'secrets' || SECRET_KEYS.has(key)) continue
     safe[key] = key === 'secretsPresent'
       ? presenceMap(descriptor.value)
-      : publicValue(descriptor.value)
+      : key === 'secretSources' ? presenceMap(descriptor.value, true) : publicValue(descriptor.value)
   }
   return safe
 }
@@ -307,7 +307,7 @@ export function createSettingsController({ api, render, status, notice = () => {
       const requiresRestart = remoteView?.restarted !== false
       status(!persisted ? remoteView?.operationStatus === 'busy' ? '另一项操作进行中，草稿未保存' : capabilityDocumentChanged ? '能力注册表已在外部修改，请关闭并重新打开设置后重试' : remoteView?.operationStatus === 'invalid' ? '配置校验失败，草稿未保存' + (Array.isArray(remoteView.problems) && remoteView.problems.length ? '：' + remoteView.problems.join(' · ') : '') : remoteView?.settingsRecoveryAvailable === true ? '未生效，已保留上次设置；请恢复后端' : '保存失败'
         : rejectedPublicFields.length > 0 ? '部分设置未保存'
-        : confirmedView?.settingsApplyStatus === 'applied' ? '已生效' : '设置已保存')
+        : confirmedView?.settingsApplyStatus === 'pending_restart' ? '已保存，待重启' : confirmedView?.settingsApplyStatus === 'applied' ? '已生效' : '设置已保存')
       if (
         persisted
         && rejectedPublicFields.length === 0

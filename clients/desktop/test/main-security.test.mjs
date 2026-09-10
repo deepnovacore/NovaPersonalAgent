@@ -70,7 +70,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
   assert.doesNotMatch(source, /sendSync/)
 })
 
-test('Memory Board copy stays in sender-validated main IPC instead of web clipboard permission', async () => {
+test('记忆面板 copy stays in sender-validated main IPC instead of web clipboard permission', async () => {
   const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const renderer = await readFile(new URL('../src/renderer/memory-board.mjs', import.meta.url), 'utf8')
 
@@ -79,7 +79,7 @@ test('Memory Board copy stays in sender-validated main IPC instead of web clipbo
   assert.doesNotMatch(renderer, /navigator\.clipboard/u)
 })
 
-test('Memory Board clear is zero-argument, sender-bound, single-flight, and rechecks its captured owner', async () => {
+test('记忆面板 clear is zero-argument, sender-bound, single-flight, and rechecks its captured owner', async () => {
   const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const preload = await readFile(new URL('../src/preload/preload.cjs', import.meta.url), 'utf8')
   const renderer = await readFile(new URL('../src/renderer/memory-board.mjs', import.meta.url), 'utf8')
@@ -167,7 +167,7 @@ test('main owns the fixed orb menu and validates every menu and board sender', a
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 
   assert.match(source, /ipcMain\.on\('nova:orb-menu:show', event => \{\n\s*if \(mainWindow && event\.sender === mainWindow\.webContents\)/)
-  assert.match(source, /Memory Board/)
+  assert.match(source, /记忆面板/)
   assert.match(source, /退出 Nova Audio Agent/)
   assert.match(source, /click: \(\) => app\.quit\(\)/)
   assert.match(source, /event\.sender !== boardWindow\.webContents/)
@@ -248,7 +248,7 @@ test('settings IPC is sender-validated and answers from main without an orb rela
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 
   assert.match(source, /ipcMain\.handle\('nova:settings:get', async event => \{\n\s*if \(!settingsWindow \|\| event\.sender !== settingsWindow\.webContents\)/)
-  assert.match(source, /ipcMain\.handle\('nova:settings:set', async \(event, payload\) => \{\n\s*if \(!settingsWindow \|\| event\.sender !== settingsWindow\.webContents\)/)
+  assert.match(source, /ipcMain\.handle\('nova:settings:set', async \(event, payload, restart = false\) => \{\n\s*if \(!settingsWindow \|\| event\.sender !== settingsWindow\.webContents\)/)
   assert.match(source, /function publishCommittedSettings\(\) \{[\s\S]*sendToOrb\('nova:settings:changed', orbSettings\(currentSettings\)\)/)
   // No requestId machinery: settings live in main, so nothing round-trips
   // through the orb renderer the way the memory board has to.
@@ -342,7 +342,8 @@ test('no decrypted secret can reach the renderer or a log line', async () => {
   // Only the presence map and the non-secret fields are ever returned to the panel.
   assert.match(source, /function settingsView\(\) \{/)
   assert.match(source, /\.\.\.publicSettings\(currentSettings\)/)
-  assert.match(source, /secretsPresent: secretsPresent\(currentSettings\)/)
+  assert.match(source, /secretsPresent: effectivePresence/)
+  assert.match(source, /Object.entries\(secretsPresent\(currentSettings\)\)/)
   // The warning flag is about the *file*, not only about today's keyring: an
   // entry written while no keyring existed keeps it on until it is re-sealed.
   assert.match(
@@ -835,7 +836,7 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
     const sender = {}
     const context = vm.createContext({
       ipcMain: {handle: (_name, value) => { handler = value }}, settingsWindow: {webContents: sender},
-      currentSettings: {...DEFAULT_SETTINGS}, backendSettings, lifecycleCoordinator: {},
+      currentSettings: {...DEFAULT_SETTINGS}, settingsApplyStatus: 'applied', settingsRestartPending: false, backendSettings, lifecycleCoordinator: {},
       applySettingsTransaction: async options => { await options.write(payload); restart = options.needsBackendRestart(); return {} },
       parseSettingsCommit: value => value,
       settingsWriter: async (patch, prepare) => {

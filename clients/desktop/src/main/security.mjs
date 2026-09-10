@@ -86,7 +86,7 @@ export function boardWindowOptions(preload, launchId) {
     height: 760,
     minWidth: 720,
     minHeight: 520,
-    title: 'Memory Board',
+    title: '记忆面板',
   })
 }
 
