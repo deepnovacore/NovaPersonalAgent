@@ -21,7 +21,7 @@ import {
   type ModelPort,
 } from './causal-runtime.js'
 import { RealClock, type Clock } from './clock.js'
-import { capabilitiesFromSettings, resolveProactivity, type Settings } from './config.js'
+import { capabilitiesFromSettings, resolveModelApiKey, resolveProactivity, type Settings } from './config.js'
 import { MonotonicIdFactory, type IdFactory } from './ids.js'
 import { GatewayCompressor, GatewaySurrogate } from './model-adapters.js'
 import { OpenAIModelGateway, type MetricsSink, type ModelGateway } from './model-gateway.js'
@@ -142,10 +142,10 @@ function resolveExecutors(
 }
 
 function requireApiKey(settings: Settings): string {
-  const key = stripLikePython(settings.model_api_key ?? '')
+  const key = stripLikePython(resolveModelApiKey(settings) ?? '')
   if (key === '') {
     // Never echo configuration values; the name is enough to act on.
-    throw new AssemblyError('缺少 NOVA_AUDIO_AGENT_MODEL_API_KEY')
+    throw new AssemblyError('缺少 DASHSCOPE_API_KEY 或 NOVA_AUDIO_AGENT_MODEL_API_KEY')
   }
   return key
 }

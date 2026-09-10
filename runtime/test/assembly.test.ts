@@ -201,7 +201,7 @@ test('model credential validation wins when both production credentials are abse
       settings: settings({model_api_key: null, tavily_api_key: null}),
     }),
     (error: unknown) => error instanceof AssemblyError
-      && error.message === '缺少 NOVA_AUDIO_AGENT_MODEL_API_KEY',
+      && error.message === '缺少 DASHSCOPE_API_KEY 或 NOVA_AUDIO_AGENT_MODEL_API_KEY',
   )
 })
 

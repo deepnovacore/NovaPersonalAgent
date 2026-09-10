@@ -529,7 +529,7 @@ test('the settings page ships the same locked-down CSP as the memory board', () 
   const meta = html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]+)">/)
   assert.ok(meta, 'the settings page declares a CSP')
   for (const directive of board) assert.ok(meta[1].includes(directive), `CSP keeps ${directive}`)
-  assert.doesNotMatch(html, /https?:\/\//)
+  assert.doesNotMatch(html.replace(/<a class="key-link"[^>]+>获取 API Key ↗<\/a>/g, ''), /https?:\/\//)
   assert.match(html, /<html lang="zh-CN">/)
 })
 
@@ -611,7 +611,7 @@ test('every API key is a password field with a badge, hint, and clear button', (
   assert.match(html, /模型网关/)
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
-  assert.match(html, /豆包大模型/)
+  assert.match(html, /火山语音 KEY/)
   assert.match(html, /豆包 ASR/)
   assert.equal((html.match(/type="password"/g) || []).length, 7)
 })
@@ -918,7 +918,7 @@ test('one save names any rejected secret by its panel label', () => {
   assert.match(script, /modelApiKey: '模型网关',/)
   assert.match(script, /codexApiKey: 'Codex',/)
   assert.match(script, /arkApiKey: 'Ark',/)
-  assert.match(script, /doubaoBigmodelApiKey: '豆包大模型',/)
+  assert.match(script, /doubaoBigmodelApiKey: '火山语音 KEY',/)
   assert.match(script, /doubaoAsrApiKey: '豆包 ASR',/)
   // Each exact queued request retains its own rejection list. The renderer
   // names only keys this save submitted, so a coalesced neighbour cannot make

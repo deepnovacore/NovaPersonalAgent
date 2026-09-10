@@ -427,7 +427,7 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
     extractionModel: requiredSetting(settings.fast_model, 'NOVA_AUDIO_AGENT_FAST_MODEL'),
     embedding: Object.freeze({
       baseUrl: secureEndpoint(settings.model_base_url, 'https', 'NOVA_AUDIO_AGENT_MODEL_BASE_URL'),
-      apiKey: requiredCredential(settings.model_api_key, 'NOVA_AUDIO_AGENT_MODEL_API_KEY'),
+      apiKey: requiredCredential(resolveModelApiKey(settings), 'DASHSCOPE_API_KEY 或 NOVA_AUDIO_AGENT_MODEL_API_KEY'),
       model: requiredSetting(settings.embedding_model, 'NOVA_AUDIO_AGENT_EMBEDDING_MODEL'),
     }),
   })
@@ -486,6 +486,11 @@ export function requireIntegratedRealtime(settings: Settings): QwenRealtimeConfi
     throw new ConfigurationError('缺少 DASHSCOPE_API_KEY')
   }
   return Object.freeze({url, model, voice, apiKey})
+}
+
+export function resolveModelApiKey(settings: Settings): string | null {
+  return stripLikePython(settings.model_api_key ?? '')
+    || (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.dashscope_api_key : null)
 }
 
 /** Keeps a selected provider credential on its fixed compatible endpoint. */

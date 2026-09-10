@@ -198,3 +198,16 @@ export async function resolveMicrophonePermission({ platform, systemPreferences 
       : 'unknown',
   })
 }
+
+const API_KEY_PAGES = new Set(['https://bailian.console.aliyun.com/?apiKey=1&tab=model',
+  'https://platform.openai.com/api-keys',
+  'https://console.volcengine.com/ark/apiKey',
+  'https://console.volcengine.com/speech/new/setting/apikeys',
+  'https://app.tavily.com/'])
+
+export function apiKeyWindowOpenHandler(openExternal) {
+  return ({url}) => {
+    if (API_KEY_PAGES.has(url)) void openExternal(url).catch(() => {})
+    return {action: 'deny'}
+  }
+}

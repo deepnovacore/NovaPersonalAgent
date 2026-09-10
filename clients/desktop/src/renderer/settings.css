@@ -608,7 +608,8 @@ button:disabled { cursor: default; opacity: .45; }
   grid-template-columns: var(--label-col) auto minmax(0, 1fr) auto;
   grid-template-areas:
     "name badge usage clear"
-    "input input input input";
+    "input input input input"
+    "link link link link";
   align-items: center;
   gap: 6px 8px;
   padding: 9px 2px;
@@ -626,7 +627,8 @@ button:disabled { cursor: default; opacity: .45; }
    freed width on both actions. */
 .secret[data-mode="collapsed"] {
   grid-template-columns: var(--label-col) auto minmax(0, 1fr) auto auto;
-  grid-template-areas: "name badge usage change clear";
+  grid-template-areas: "name badge usage change clear"
+    "link link link link link";
 }
 
 .badge {
@@ -803,3 +805,5 @@ footer {
 #capabilities-state, #capabilities-problems, #capabilities-editor p { overflow-wrap: anywhere; }
 
 #frontend-usage, #frontend-usage-details { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+
+.secret > .key-link { grid-area: link; justify-self: end; color: var(--ink-dim); font-size: 11px; }

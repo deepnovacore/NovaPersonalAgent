@@ -1,9 +1,27 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import {readFile} from 'node:fs/promises'
 
 import * as securityModule from '../src/main/security.mjs'
 
 const { browserWindowOptions, validateBootstrap } = securityModule
+
+test('settings links open only fixed API key pages in the external browser', async () => {
+  const opened = []
+  const handler = securityModule.apiKeyWindowOpenHandler(async url => { opened.push(url) })
+  const allowed = 'https://app.tavily.com/'
+  assert.deepEqual(handler({url: allowed}), {action: 'deny'})
+  for (const url of ['javascript:alert(1)', 'file:///tmp/key', `${allowed}?key=secret`, 'https://app.tavily.com.evil.test/']) {
+    assert.deepEqual(handler({url}), {action: 'deny'})
+  }
+  await Promise.resolve()
+  assert.deepEqual(opened, [allowed])
+  const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
+  const links = [...html.matchAll(/<a class="key-link" href="([^"]+)" target="_blank" rel="noopener noreferrer"/g)]
+  assert.equal(links.length, 7)
+  for (const [, href] of links) handler({url: href.replaceAll('&amp;', '&')})
+  assert.equal(opened.length, 8)
+})
 
 test('accepts only loopback websocket bootstrap with a 128-bit token', () => {
   assert.deepEqual(validateBootstrap({

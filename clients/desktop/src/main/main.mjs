@@ -112,6 +112,7 @@ import {
 } from './window-position.mjs'
 import {
   allowRendererNavigation,
+  apiKeyWindowOpenHandler,
   boardWindowOptions,
   browserWindowOptions,
   configureWindowSecurity,
@@ -437,7 +438,7 @@ function openSettingsWindow(launchId, { category } = {}) {
   // Same rule as the board: webContents-level walls only. Re-binding the
   // session's permission handlers here would move the orb's microphone grant
   // onto a panel that has no business holding it.
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  window.webContents.setWindowOpenHandler(apiKeyWindowOpenHandler(url => shell.openExternal(url)))
   window.webContents.on('will-navigate', (event, url) => {
     if (!allowRendererNavigation(url)) event.preventDefault()
   })

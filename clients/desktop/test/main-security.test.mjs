@@ -11,7 +11,7 @@ test('main owns single-instance lifecycle and denies renderer escape', async () 
   assert.match(source, /configureWindowSecurity\(window\)/)
   assert.match(source, /loadAppWindow\(mainWindow/)
   assert.match(source, /Number\.isInteger\(code\) \? code\.toString\(\) : 'none'/)
-  assert.doesNotMatch(source, /shell\.openExternal/)
+  assert.match(source, /apiKeyWindowOpenHandler\(url => shell\.openExternal\(url\)\)/)
 })
 
 test('preload exposes only bounded bootstrap native-audio menu and board channels', async () => {
@@ -235,7 +235,7 @@ test('the settings window is a singleton that never rebinds the shared permissio
   assert.match(source, /let settingsWindow = null/)
   assert.match(body, /if \(settingsWindow\) \{\n\s*settingsWindow\.show\(\)\n\s*settingsWindow\.focus\(\)[\s\S]*refreshManagedWorkspaceCapabilities\(\)[\s\S]*return\n\s*\}/)
   assert.match(body, /settingsWindowOptions\(preload, launchId\)/)
-  assert.match(body, /setWindowOpenHandler\(\(\) => \(\{ action: 'deny' \}\)\)/)
+  assert.match(body, /setWindowOpenHandler\(apiKeyWindowOpenHandler\(url => shell\.openExternal\(url\)\)\)/)
   assert.match(body, /allowRendererNavigation\(url\)/)
   assert.match(body, /settingsWindow = null/)
   assert.match(body, /loadURL\('nova:\/\/orb\/settings\.html'\)/)

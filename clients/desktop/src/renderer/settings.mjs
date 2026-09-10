@@ -33,7 +33,7 @@ const SECRET_LABELS = {
   modelApiKey: '模型网关',
   codexApiKey: 'Codex',
   arkApiKey: 'Ark',
-  doubaoBigmodelApiKey: '豆包大模型',
+  doubaoBigmodelApiKey: '火山语音 KEY',
   doubaoAsrApiKey: '豆包 ASR',
 }
 const WORKSPACE_STATUS_TEXT = Object.freeze({

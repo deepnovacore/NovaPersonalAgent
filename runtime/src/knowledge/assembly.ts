@@ -1,6 +1,6 @@
 import {homedir} from 'node:os'
 import {resolve} from 'node:path'
-import type {Settings} from '../config.js'
+import {resolveModelApiKey, type Settings} from '../config.js'
 import type {CapabilityRegistry, McpServerConfig} from '../capability-registry.js'
 import {DashScopeEmbeddingProvider} from './embeddings.js'
 import {KnowledgeStoreClient} from './store-client.js'
@@ -23,7 +23,7 @@ export async function prepareKnowledge(
   if (settings.embedding_provider !== 'dashscope') throw new Error('embedding_provider_unavailable')
   signal?.throwIfAborted()
   const embedding = new DashScopeEmbeddingProvider({baseUrl: settings.model_base_url,
-    apiKey: settings.model_api_key ?? '', model: settings.embedding_model})
+    apiKey: resolveModelApiKey(settings) ?? '', model: settings.embedding_model})
   const configured = settings.knowledge_path
   const path = resolve(configured.startsWith('~/') ? resolve(homedir(), configured.slice(2)) : configured)
   const service = new KnowledgeService({store: new KnowledgeStoreClient({path}), embedding})

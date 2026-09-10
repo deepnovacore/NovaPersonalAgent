@@ -10,8 +10,17 @@ import {
   requireQwenRealtime,
   requireVolcengineRealtime,
   resolveCascadedSelection,
+  resolveModelApiKey,
   resolveProactivity,
 } from '../src/config.js'
+
+test('DashScope key also configures support models only on the DashScope endpoint', () => {
+  const env = {DASHSCOPE_API_KEY: 'dashscope-test-key'}
+  assert.equal(resolveModelApiKey(loadSettings(env)), env.DASHSCOPE_API_KEY)
+  assert.equal(resolveModelApiKey(loadSettings({...env, NOVA_AUDIO_AGENT_MODEL_BASE_URL: DASHSCOPE_COMPATIBLE_BASE_URL})), env.DASHSCOPE_API_KEY)
+  assert.equal(resolveModelApiKey(loadSettings({...env, NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://example.com/v1'})), null)
+  assert.equal(resolveModelApiKey(loadSettings({...env, NOVA_AUDIO_AGENT_MODEL_API_KEY: 'custom-test-key'})), 'custom-test-key')
+})
 
 test('pipeline defaults are product-shaped and cascaded defaults use Qwen Flash', () => {
   const settings = loadSettings({})
