@@ -7,6 +7,7 @@ import {
   diagnosticScrollKey,
   restoreBoardScrollPositions,
 } from '../src/renderer/board-scroll-state.mjs'
+import * as channelTabs from '../src/renderer/channel-tabs.mjs'
 
 class BoardElement extends EventTarget {
   constructor(id) {
@@ -37,7 +38,7 @@ class BoardDocument extends EventTarget {
       'channels', 'status', 'refresh', 'export', 'copy-json', 'memory-tab',
       'diagnostics-tab', 'graph-tab', 'memory-panel', 'diagnostics-panel',
       'graph-panel', 'diagnostics', 'workspace-graph', 'graph-state',
-      'clear-conversation',
+      'clear-conversation', 'channel-tabs',
     ].map(id => [`#${id}`, new BoardElement(id)]))
   }
 
@@ -279,10 +280,12 @@ test('memory channels render as semantic cards with summary, count, tags, and a 
   assert.match(source, /className = `tag tag-trust trust-\$\{item\.trust\}`/)
   assert.match(source, /className = 'tag tag-outcome'/)
   assert.match(source, /className = 'tag tag-truncated'/)
-  assert.match(css, /#channels\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,/s)
+  assert.match(css, /#channels\s*\{\s*display:\s*block;\s*\}/)
+  assert.doesNotMatch(css, /\.channel-card:nth-child/, 'accents follow the channel, not its slot')
   assert.match(css, /\.channel-items\s*\{[^}]*overflow:\s*auto;/s)
   assert.match(css, /font-family:\s*ui-monospace/)
-  assert.match(css, /@media \(max-width: 760px\)[\s\S]*grid-template-columns:\s*1fr/)
+  assert.match(css, /\.channel-tabs\s*\{[^}]*overflow-x:\s*auto;/s)
+  assert.match(css, /\.channel-tabs \.channel-tab\[aria-selected="true"\]/)
 })
 
 test('export handler saves through a dialog with the atomic write pattern', async () => {
@@ -318,4 +321,158 @@ test('main requests compact board snapshots directly without relaying through th
   const exportBody = source.slice(source.indexOf("ipcMain.handle('nova:memory-board:export'"))
   assert.match(exportBody, /loadMemoryBoardExport\(\)/)
   assert.doesNotMatch(exportBody.slice(0, exportBody.indexOf("ipcMain.handle('nova:settings:get'")), /graph|workspace_graph/u)
+})
+
+test('channel labels mirror the runtime manifests and unwrap dynamic servers', () => {
+  // The wire payload carries no display_name, so these must not drift from
+  // the executor manifests they mirror.
+  assert.equal(channelTabs.channelLabel('conversation'), '对话')
+  assert.equal(channelTabs.channelLabel('watch'), 'Watch')
+  assert.equal(channelTabs.channelLabel('guard'), 'Guard')
+  assert.equal(channelTabs.channelLabel('codex'), 'Codex')
+  assert.equal(channelTabs.channelLabel('search'), 'Search')
+  assert.equal(channelTabs.channelLabel('mcp__nova_camera'), 'Camera')
+  assert.equal(channelTabs.channelLabel('mcp__nova_knowledge'), 'Knowledge')
+  assert.equal(channelTabs.channelLabel('mcp__acme_tools'), 'acme_tools', 'a dynamic server sheds its prefix')
+  assert.equal(channelTabs.channelLabel('unknown_channel'), 'unknown_channel')
+  assert.equal(channelTabs.channelLabel(undefined), '')
+})
+
+test('conversation leads the rail and other channels keep payload order', () => {
+  const ordered = channelTabs.orderChannelsConversationFirst([
+    {name: 'codex'}, {name: 'guard'}, {name: 'conversation'}, {name: 'watch'},
+  ])
+
+  assert.deepEqual(ordered.map(channel => channel.name), ['conversation', 'codex', 'guard', 'watch'])
+  assert.deepEqual(channelTabs.orderChannelsConversationFirst([]), [])
+  assert.deepEqual(channelTabs.orderChannelsConversationFirst(null), [], 'a malformed payload yields no tabs')
+  assert.deepEqual(
+    channelTabs.orderChannelsConversationFirst([{name: 'watch'}, {}]).map(channel => channel.name),
+    ['watch'],
+    'a nameless channel cannot own a tab',
+  )
+})
+
+test('rail navigation rolls over a runtime-sized channel list', () => {
+  const names = ['conversation', 'watch', 'guard']
+
+  assert.equal(channelTabs.channelTabForKey(names, 'conversation', 'ArrowRight'), 'watch')
+  assert.equal(channelTabs.channelTabForKey(names, 'conversation', 'ArrowLeft'), 'guard', 'wraps backwards')
+  assert.equal(channelTabs.channelTabForKey(names, 'guard', 'ArrowRight'), 'conversation', 'wraps forwards')
+  assert.equal(channelTabs.channelTabForKey(names, 'guard', 'Home'), 'conversation')
+  assert.equal(channelTabs.channelTabForKey(names, 'conversation', 'End'), 'guard')
+  assert.equal(channelTabs.channelTabForKey(names, 'conversation', 'Tab'), null, 'other keys pass through')
+  assert.equal(channelTabs.channelTabForKey(names, 'vanished', 'ArrowRight'), null)
+  assert.equal(channelTabs.channelTabForKey([], 'conversation', 'ArrowRight'), null)
+})
+
+test('the selected channel survives a refresh and falls back when it disappears', () => {
+  assert.equal(channelTabs.resolveActiveChannel(['conversation', 'guard'], 'guard'), 'guard')
+  assert.equal(
+    channelTabs.resolveActiveChannel(['conversation', 'watch'], 'guard'),
+    'conversation',
+    'a channel the backend stopped reporting yields to the first',
+  )
+  assert.equal(channelTabs.resolveActiveChannel(['conversation'], null), 'conversation')
+  assert.equal(channelTabs.resolveActiveChannel([], 'guard'), null)
+})
+
+test('a channel accent follows its name, not its position in the rail', () => {
+  assert.equal(channelTabs.channelAccent('watch'), channelTabs.channelAccent('watch'))
+  assert.match(channelTabs.channelAccent('conversation'), /^#[0-9a-f]{6}$/)
+  assert.match(channelTabs.channelAccent(''), /^#[0-9a-f]{6}$/, 'never yields undefined')
+})
+
+test('the memory panel carries a channel rail above its cards', async () => {
+  const html = await readFile(new URL('../src/renderer/memory-board.html', import.meta.url), 'utf8')
+  const panel = html.match(/<section id="memory-panel"[\s\S]*?<\/section>/)?.[0]
+
+  assert.ok(panel, 'the memory panel is present')
+  assert.match(panel, /<nav class="channel-tabs" id="channel-tabs" role="tablist" aria-label="记忆频道"><\/nav>/)
+  assert.ok(
+    panel.indexOf('id="channel-tabs"') < panel.indexOf('id="channels"'),
+    'the rail sits above the card it selects',
+  )
+  // The rail is built from the payload, so it must ship empty.
+  assert.doesNotMatch(panel, /id="channel-tabs"[^>]*>\s*<button/)
+})
+
+test('the rail renders one tab per channel and mounts only the selected card', async t => {
+  const descriptors = Object.fromEntries(['document', 'window', 'setInterval'].map(
+    key => [key, Object.getOwnPropertyDescriptor(globalThis, key)],
+  ))
+  const document = new BoardDocument()
+  const payload = {
+    backend_generation: 3,
+    channels: [
+      {name: 'codex', summary: 'built a thing', item_count: 2, items: [
+        {seq: 1, trust: 'inferred', ts: 1, content: 'codex-one'},
+      ]},
+      {name: 'conversation', summary: null, item_count: 1, items: [
+        {seq: 2, trust: 'trusted_system', ts: 2, content: 'said-hello'},
+      ]},
+      {name: 'mcp__acme_tools', summary: null, item_count: 0, items: []},
+    ],
+    diagnostics: {version: 1, records: []},
+  }
+  Object.defineProperties(globalThis, {
+    document: {configurable: true, value: document},
+    window: {configurable: true, value: {novaAudioAgentDesktop: {
+      memoryBoard: {
+        request: async () => payload,
+        clear: async () => ({canceled: true}),
+        copyJson: async () => ({copied: true}),
+        export: async () => ({canceled: true}),
+      },
+      graphBoard: {request: async () => ({error: 'unavailable'})},
+    }}},
+    setInterval: {configurable: true, value: () => 1},
+  })
+  t.after(() => {
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (descriptor === undefined) delete globalThis[key]
+      else Object.defineProperty(globalThis, key, descriptor)
+    }
+  })
+
+  await import(`../src/renderer/memory-board.mjs?rail-test=${Date.now()}`)
+  await settle()
+
+  const rail = document.querySelector('#channel-tabs')
+  assert.deepEqual(
+    rail.children.map(tab => tab.dataset.channel),
+    ['conversation', 'codex', 'mcp__acme_tools'],
+    'conversation leads regardless of payload order',
+  )
+  assert.deepEqual(
+    rail.children.map(tab => tab.textContent),
+    ['对话 1', 'Codex 2', 'acme_tools 0'],
+    'each tab names its channel and its depth',
+  )
+  for (const tab of rail.children) assert.equal(tab.attributes.get('role'), 'tab')
+  assert.equal(rail.children[0].attributes.get('aria-selected'), 'true')
+  assert.equal(rail.children[0].tabIndex, 0)
+  assert.equal(rail.children[1].attributes.get('aria-selected'), 'false')
+  assert.equal(rail.children[1].tabIndex, -1, 'the rail is one tab stop')
+
+  const cards = document.querySelector('#channels')
+  assert.equal(cards.children.length, 1, 'only the selected channel is mounted')
+
+  // Selecting a channel repaints from the cached payload; it must not read again.
+  rail.children[1].click()
+  await settle()
+  assert.equal(rail.children[1].attributes.get('aria-selected'), 'true')
+  assert.equal(rail.children[0].attributes.get('aria-selected'), 'false')
+  assert.equal(document.querySelector('#channels').children.length, 1)
+})
+
+test('channel selection never issues a backend read', async () => {
+  const source = await readFile(new URL('../src/renderer/memory-board.mjs', import.meta.url), 'utf8')
+  const select = source.slice(source.indexOf('function selectChannel('))
+  const body = select.slice(0, select.indexOf('\n}\n'))
+
+  assert.doesNotMatch(body, /memoryBoard\.request|await|loadOwnership|inFlight/,
+    'selection stays outside the single-flight read path')
+  assert.match(source, /let activeChannel = null/)
+  assert.match(source, /activeChannel = resolveActiveChannel\(/)
 })

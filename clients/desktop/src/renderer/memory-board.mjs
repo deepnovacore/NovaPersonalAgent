@@ -8,8 +8,16 @@ import {
   diagnosticScrollKey,
   restoreBoardScrollPositions,
 } from './board-scroll-state.mjs'
+import {
+  channelAccent,
+  channelLabel,
+  channelTabForKey,
+  orderChannelsConversationFirst,
+  resolveActiveChannel,
+} from './channel-tabs.mjs'
 
 const channelsRoot = document.querySelector('#channels')
+const channelTabsRoot = document.querySelector('#channel-tabs')
 const statusLabel = document.querySelector('#status')
 const refreshButton = document.querySelector('#refresh')
 const copyJsonButton = document.querySelector('#copy-json')
@@ -31,6 +39,7 @@ let copyInFlight = false
 let exportInFlight = false
 let clearInFlight = false
 let activeTab = 'memory'
+let activeChannel = null
 let loadOwnership = 0
 
 function itemContent(raw) {
@@ -81,6 +90,9 @@ function renderItem(item) {
 function renderChannel(channel, index) {
   const section = document.createElement('section')
   section.className = 'channel-card'
+  // Keyed off the name, not the rail position: only one card is mounted, so
+  // the accent has to travel with the channel rather than with its slot.
+  section.style?.setProperty?.('--channel-accent', channelAccent(channel.name))
   const header = document.createElement('header')
   header.className = 'channel-header'
   const title = document.createElement('h2')
@@ -148,6 +160,60 @@ function validDiagnostics(payload) {
     ))
 }
 
+function orderedChannels() {
+  return orderChannelsConversationFirst(latestPayload?.channels ?? [])
+}
+
+function renderActiveChannelCard() {
+  const channel = orderedChannels().find(entry => entry.name === activeChannel)
+  channelsRoot.replaceChildren(...(channel ? [renderChannel(channel, 0)] : []))
+}
+
+function markActiveChannelTab() {
+  for (const tab of channelTabsRoot.children ?? []) {
+    const selected = tab.dataset.channel === activeChannel
+    tab.setAttribute('aria-selected', String(selected))
+    tab.tabIndex = selected ? 0 : -1
+  }
+}
+
+/**
+ * Channel selection re-renders from the payload already in hand and never
+ * issues a request, so it stays outside the single-flight bookkeeping that
+ * guards the backend read.
+ */
+function selectChannel(name) {
+  if (name === activeChannel) return
+  activeChannel = name
+  markActiveChannelTab()
+  renderActiveChannelCard()
+}
+
+function renderChannelTabs() {
+  const ordered = orderedChannels()
+  activeChannel = resolveActiveChannel(ordered.map(channel => channel.name), activeChannel)
+  channelTabsRoot.replaceChildren(...ordered.map(channel => {
+    const tab = document.createElement('button')
+    tab.type = 'button'
+    tab.className = 'channel-tab'
+    tab.id = `channel-tab-${channel.name}`
+    tab.dataset.channel = channel.name
+    tab.setAttribute('role', 'tab')
+    tab.setAttribute('aria-controls', 'channels')
+    tab.textContent = `${channelLabel(channel.name)} ${channel.item_count}`
+    tab.addEventListener('click', () => { selectChannel(channel.name) })
+    tab.addEventListener('keydown', event => {
+      const next = channelTabForKey(ordered.map(entry => entry.name), activeChannel, event.key)
+      if (next === null) return
+      event.preventDefault()
+      selectChannel(next)
+      document.querySelector(`#channel-tab-${next}`)?.focus?.()
+    })
+    return tab
+  }))
+  markActiveChannelTab()
+}
+
 async function load() {
   if (document.hidden) return
   if (clearInFlight) return
@@ -168,7 +234,8 @@ async function load() {
     const scrollPositions = captureBoardScrollPositions(document)
     copyJsonButton.disabled = copyInFlight || activeTab === 'graph'
     exportButton.disabled = exportInFlight || activeTab === 'graph'
-    channelsRoot.replaceChildren(...payload.channels.map(renderChannel))
+    renderChannelTabs()
+    renderActiveChannelCard()
     diagnosticsRoot.replaceChildren(...payload.diagnostics.records.map(record => (
       renderDiagnostic(record, payload.backend_generation)
     )))
@@ -236,6 +303,7 @@ async function clearConversation() {
     if (result?.cleared) {
       latestPayload = null
       channelsRoot.replaceChildren()
+      channelTabsRoot.replaceChildren()
       statusLabel.textContent = '近期会话记录已清除'
     } else if (result?.canceled) statusLabel.textContent = '已取消清除'
     else statusLabel.textContent = '无法确认清除结果，请刷新检查'

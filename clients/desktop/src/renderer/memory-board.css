@@ -162,12 +162,40 @@ button:focus-visible {
 
 [role='tabpanel'][hidden] { display: none; }
 
-#channels {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  align-items: stretch;
+/* A secondary rail below the board's own tabs: one pill per channel, scrolling
+   sideways because the channel count is whatever the backend reports. */
+.channel-tabs {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  overflow-x: auto;
+  margin: 0 0 16px;
+  padding-bottom: 3px;
 }
+
+.channel-tabs .channel-tab {
+  flex: none;
+  padding: 6px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-inset);
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.channel-tabs .channel-tab:hover { border-color: var(--line-strong); }
+
+.channel-tabs .channel-tab[aria-selected="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* One channel is mounted at a time, so the card owns the full width. */
+#channels { display: block; }
 
 #diagnostics {
   display: grid;
@@ -210,7 +238,9 @@ button:focus-visible {
   grid-template-rows: auto auto minmax(112px, 1fr);
   min-width: 0;
   min-height: 270px;
-  max-height: 348px;
+  /* Sized against the viewport rather than a fixed cap: the selected channel
+     is now the only card, so it should use the height a grid column shared. */
+  max-height: calc(100vh - 262px);
   overflow: hidden;
   border: 1px solid var(--line);
   border-top-color: color-mix(in srgb, var(--channel-accent) 46%, var(--line));
@@ -218,9 +248,6 @@ button:focus-visible {
   background: var(--surface-raised);
   box-shadow: var(--shadow);
 }
-
-.channel-card:nth-child(3n + 2) { --channel-accent: #c87986; }
-.channel-card:nth-child(3n) { --channel-accent: #9181a7; }
 
 .channel-header {
   display: flex;
@@ -404,11 +431,9 @@ button:focus-visible {
 
 @media (max-width: 760px) {
   body { padding-inline: 18px; }
-  #channels { grid-template-columns: 1fr; }
   .board-header { align-items: flex-start; }
   .board-actions { min-width: 0; }
   .board-title p, .eyebrow { display: none; }
-  .channel-card { max-height: 380px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
