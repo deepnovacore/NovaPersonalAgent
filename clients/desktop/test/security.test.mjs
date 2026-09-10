@@ -18,9 +18,9 @@ test('settings links open only fixed API key pages in the external browser', asy
   assert.deepEqual(opened, [allowed])
   const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
   const links = [...html.matchAll(/<a class="key-link" href="([^"]+)" target="_blank" rel="noopener noreferrer"/g)]
-  assert.equal(links.length, 7)
+  assert.equal(links.length, 5)
   for (const [, href] of links) handler({url: href.replaceAll('&amp;', '&')})
-  assert.equal(opened.length, 8)
+  assert.equal(opened.length, 6)
 })
 
 test('accepts only loopback websocket bootstrap with a 128-bit token', () => {

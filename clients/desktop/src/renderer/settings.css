@@ -44,8 +44,8 @@ body {
     radial-gradient(circle at 80% -12%, rgba(171, 184, 204, .12), transparent 34%),
     var(--plate);
   color: var(--ink);
-  font-size: 12.5px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 body::-webkit-scrollbar { width: 8px; }
@@ -98,8 +98,8 @@ header h1 {
   color: var(--ink-dim);
   font-size: 11px;
   text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 main {
@@ -203,13 +203,29 @@ main > .setting-section:first-child {
   cursor: pointer;
 }
 
-.toggle-row input[type="checkbox"] {
+input[type="checkbox"] {
+  appearance: none;
   flex: none;
-  width: 15px;
-  height: 15px;
-  margin: 0;
-  accent-color: var(--accent);
+  display: inline-grid;
+  place-content: center;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: var(--plate);
+  cursor: pointer;
 }
+input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid white;
+  border-bottom: 2px solid white;
+  transform: translateY(-1px) rotate(-45deg);
+}
+input[type="checkbox"]:disabled { opacity: .45; cursor: default; }
 
 .setting-section small {
   display: block;
@@ -341,8 +357,8 @@ legend {
   font-size: 12px;
   font-weight: 540;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .segmented .option-note {
@@ -416,15 +432,17 @@ legend {
 input[type="text"],
 input[type="url"],
 input[type="password"],
+input[type="number"],
+textarea,
 select {
   width: 100%;
   min-width: 0;
-  min-height: 31px;
-  padding: 5px 9px;
+  min-height: 40px;
+  padding: 9px 12px;
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   outline: 0;
-  background: var(--plate);
+  background: var(--surface);
   color: var(--ink);
   font: inherit;
   transition: border-color 120ms ease, background-color 120ms ease;
@@ -440,7 +458,7 @@ select:hover {
 
 input::placeholder { color: #9aa2ac; }
 
-:is(input, select, button, summary):focus-visible {
+:is(input, textarea, select, button, summary):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
@@ -564,8 +582,8 @@ button:disabled { cursor: default; opacity: .45; }
   overflow: hidden;
   color: var(--ink-faint);
   font-size: 10.5px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .summary-chevron {
@@ -592,13 +610,6 @@ button:disabled { cursor: default; opacity: .45; }
   border-top: 1px solid var(--line);
 }
 
-.gateway-endpoint {
-  padding: 9px 2px;
-  border-bottom: 1px solid var(--line);
-}
-
-.gateway-endpoint .field { margin: 0; }
-
 #codex-manual-settings {
   padding-top: 2px;
 }
@@ -621,15 +632,6 @@ button:disabled { cursor: default; opacity: .45; }
 .secret > .key-usage { grid-area: usage; }
 .secret > input { grid-area: input; }
 .secret > button { grid-area: clear; }
-.secret > .change { grid-area: change; }
-
-/* A stored key needs no input, so the row collapses to one line and spends the
-   freed width on both actions. */
-.secret[data-mode="collapsed"] {
-  grid-template-columns: var(--label-col) auto minmax(0, 1fr) auto auto;
-  grid-template-areas: "name badge usage change clear"
-    "link link link link link";
-}
 
 .badge {
   padding: 1px 6px;
@@ -650,8 +652,8 @@ button:disabled { cursor: default; opacity: .45; }
   overflow: hidden;
   color: var(--ink-faint);
   font-size: 10px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 #settings-save {
@@ -765,7 +767,7 @@ footer {
 
   .segmented label.choice:has(:checked) { border-color: var(--accent); }
   .settings-nav .nav-item[aria-current="true"] { border-color: var(--accent); }
-  :is(input, select, button, summary):focus-visible,
+  :is(input, textarea, select, button, summary):focus-visible,
   .segmented label.choice:has(:focus-visible) { outline-width: 3px; }
 }
 
@@ -801,9 +803,39 @@ footer {
 #capabilities-editor summary { cursor: pointer; overflow-wrap: anywhere; }
 #capabilities-editor button { margin: 6px 8px 6px 0; }
 #capabilities-editor textarea { width: 100%; min-height: 76px; resize: vertical; font: inherit; }
-#capabilities-editor .field input[type="checkbox"] { width: auto; justify-self: start; }
+
 #capabilities-state, #capabilities-problems, #capabilities-editor p { overflow-wrap: anywhere; }
 
 #frontend-usage, #frontend-usage-details { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
 
 .secret > .key-link { grid-area: link; justify-self: end; color: var(--ink-dim); font-size: 11px; }
+
+/* Form layout: long descriptions wrap, controls have a consistent touch target. */
+main :is(p, small, label, span, summary, td, th) { overflow-wrap: anywhere; }
+main :is(p, small) { line-height: 1.65; }
+.hint { margin: 8px 0 18px; color: var(--ink-dim); font-size: 12px; }
+.setting-section > h2 { font-size: 14px; letter-spacing: 0; color: var(--ink); margin-bottom: 14px; }
+.toggle-row { align-items: flex-start; line-height: 1.6; }
+button { min-height: 36px; padding: 7px 12px; }
+#status { flex-shrink: 1; line-height: 1.5; }
+.secret { padding: 18px 2px; gap: 10px; }
+.secret:last-child { border-bottom: 0; }
+.key-usage { font-size: 11px; text-align: right; }
+#capabilities-state { white-space: pre-line; padding: 14px; border-radius: var(--radius); background: var(--surface); color: var(--ink-dim); }
+#capabilities-editor .field { grid-template-columns: minmax(0, 1fr); gap: 7px; margin-bottom: 16px; }
+#capabilities-editor .checkbox-field { grid-template-columns: minmax(0, 1fr) 22px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+#capabilities-editor legend { position: static; width: auto; height: auto; margin: 0; padding: 0 6px; clip-path: none; white-space: normal; font-weight: 600; }
+#capabilities-editor textarea { padding: 10px 12px; line-height: 1.6; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+#knowledge-section .field { grid-template-columns: minmax(0, 1fr); gap: 6px; margin: 16px 0; }
+#knowledge-section .field > label { font-size: 12px; color: var(--ink); }
+#knowledge-panel { margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--line); }
+.knowledge-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+#knowledge-status { padding: 12px; background: var(--surface); border-radius: var(--radius-sm); color: var(--ink-dim); font-size: 12px; white-space: pre-line; }
+#knowledge-sources { list-style: none; padding: 0; margin: 12px 0; }
+#knowledge-sources li { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+#knowledge-sources li > span { width: 100%; min-width: 0; line-height: 1.6; }
+#knowledge-sources li > button { background: var(--plate); }
+@media (forced-colors: active) {
+  input[type="checkbox"] { appearance: auto; }
+  input[type="checkbox"]::after { content: none; }
+}

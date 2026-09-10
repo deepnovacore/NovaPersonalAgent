@@ -38,7 +38,7 @@ test('an unrecognized server status reports as failure rather than vanishing', (
 })
 
 test('the tool summary waits for a compiled tool count', () => {
-  assert.equal(toolCountLabel(runtime()), '工具 12 / 预算 24')
+  assert.equal(toolCountLabel(runtime()), '前台可用工具：12 个（上限 24 个）')
   assert.equal(toolCountLabel(runtime({toolCount: null})), null, 'a pending compile shows no count')
   assert.equal(toolCountLabel(runtime({toolBudget: undefined})), null)
   assert.equal(toolCountLabel(null), null)
@@ -88,7 +88,7 @@ test('rows lead with the tool summary and only servers are actionable', () => {
   ]}))
 
   assert.deepEqual(rows, [
-    {label: '工具 12 / 预算 24', enabled: false},
+    {label: '前台可用工具：12 个（上限 24 个）', enabled: false},
     {label: 'search · 正常', name: 'search', enabled: true},
     {label: 'acme_tools · 失败', name: 'mcp__acme_tools', enabled: true},
   ])
@@ -111,11 +111,11 @@ test('the orb menu hangs MCP status off a submenu without its own separator', as
   const menu = source.slice(source.indexOf('function showOrbMenu('))
   const body = menu.slice(0, menu.indexOf('.popup('))
 
-  assert.match(body, /\{ label: '活跃 MCP', submenu: activeMcpSubmenu\(launchId\) \}/)
+  assert.match(body, /\{ label: 'MCP 服务', submenu: activeMcpSubmenu\(launchId\) \}/)
   // The template's single separator is what the menu-order contract keys on.
   assert.equal((body.match(/type: 'separator'/g) || []).length, 1)
   assert.ok(
-    body.indexOf("label: '活跃 MCP'") < body.indexOf("{ type: 'separator' }"),
+    body.indexOf("label: 'MCP 服务'") < body.indexOf("{ type: 'separator' }"),
     'MCP status sits above the quit separator',
   )
 

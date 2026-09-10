@@ -475,7 +475,7 @@ function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
     { label: 'Memory Board', click: () => openMemoryBoard(launchId) },
     { label: '设置…', click: () => openSettingsWindow(launchId) },
-    { label: '活跃 MCP', submenu: activeMcpSubmenu(launchId) },
+    { label: 'MCP 服务', submenu: activeMcpSubmenu(launchId) },
     { type: 'separator' },
     { label: '退出 Nova Audio Agent', click: () => app.quit() },
   ]).popup({ window: mainWindow })

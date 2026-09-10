@@ -16,7 +16,7 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
   }
   function field(parent, label, value, change, {type = 'text', options, min, max, multiline = false} = {}) {
     const wrapper = node('label', '', parent)
-    wrapper.className = 'field'
+    wrapper.className = type === 'checkbox' ? 'field checkbox-field' : 'field'
     node('span', label, wrapper)
     const input = node(options ? 'select' : multiline ? 'textarea' : 'input', '', wrapper)
     input.dataset.field = label
@@ -59,8 +59,9 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
     current = view
     const state = view.capabilities ?? {}
     const running = state.runtime
-    const exact = running?.toolCount == null ? '待后端完成编译' : `${running.toolCount}/${running.toolBudget}`
-    stateLabel.textContent = `编辑：草稿 · 磁盘版本 ${state.diskGeneration ?? 0} · 运行版本 ${running?.state === 'running' ? running.diskGeneration : '—'} · 编译版本 ${running?.diskGeneration ?? '—'} · 前台工具 ${exact}${running?.state === 'startup_failed' ? '（启动失败）' : ''}。磁盘解析搜索：${state.status?.modules?.search?.provider ?? '待校验'}。${state.status?.overrides?.length ? '环境变量覆盖：' + state.status.overrides.join(', ') : ''}`
+    const count = running?.toolCount
+    const summary = running?.state === 'startup_failed' ? '能力服务启动失败' : running?.state === 'running' ? '能力服务运行中' : '等待能力服务启动'
+    stateLabel.textContent = `${summary}${Number.isSafeInteger(count) ? ` · 前台可用 ${count} 个工具（上限 ${running.toolBudget} 个）` : ''}。修改后保存生效。${state.status?.overrides?.length ? '\n部分配置由环境变量指定：' + state.status.overrides.join(', ') : ''}`
     problemsLabel.textContent = (state.problems ?? []).join(' · ')
     problemsLabel.hidden = !problemsLabel.textContent
     if (view.capabilitiesDocument === null) {

@@ -56,7 +56,6 @@
     "clients/desktop/src/renderer/release-camera-contract.mjs",
     "clients/desktop/src/renderer/release-camera.mjs",
     "clients/desktop/src/renderer/secret-revisions.mjs",
-    "clients/desktop/src/renderer/secret-row-visibility.mjs",
     "clients/desktop/src/renderer/settings-categories.mjs",
     "clients/desktop/src/renderer/settings-controller.mjs",
     "clients/desktop/src/renderer/settings.mjs",

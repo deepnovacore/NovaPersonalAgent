@@ -6,7 +6,7 @@ export function createKnowledgePanel({document, action}) {
   async function run(input) {
     if (!enabled || busy) return
     if (['files', 'folder', 'url', 'reindex'].includes(input.action)) {
-      if (!node('consent').checked) {node('status').textContent = '请先阅读并同意数据流向说明。'; return}
+      // Consent belongs to this explicit import/reindex action, never background refresh.
       input = {...input, consent: true}
     }
     const revision = epoch
@@ -46,7 +46,7 @@ export function createKnowledgePanel({document, action}) {
     const next = view.capabilities?.runtime?.modules?.knowledge?.enabled === true
     const nextProvider = JSON.stringify([view.embeddingProvider, view.embeddingModel, view.modelBaseUrl])
     if (next !== enabled || nextProvider !== provider) {
-      epoch++; node('consent').checked = false; node('sources').replaceChildren(); node('status').textContent = '点击刷新查看知识库。'
+      epoch++; node('sources').replaceChildren(); node('status').textContent = '点击刷新查看知识库。'
     }
     enabled = next; provider = nextProvider
     node('panel').hidden = !enabled

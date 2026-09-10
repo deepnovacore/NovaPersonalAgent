@@ -34,7 +34,7 @@ export function toolCountLabel(runtime) {
   const count = runtime?.toolCount
   const budget = runtime?.toolBudget
   if (!Number.isSafeInteger(count) || !Number.isSafeInteger(budget)) return null
-  return `工具 ${count} / 预算 ${budget}`
+  return `前台可用工具：${count} 个（上限 ${budget} 个）`
 }
 
 /**

@@ -6,7 +6,6 @@ import {runInNewContext} from 'node:vm'
 import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import * as settingsController from '../src/renderer/settings-controller.mjs'
 import {createSecretRevisions} from '../src/renderer/secret-revisions.mjs'
-import {secretRowCollapsed} from '../src/renderer/secret-row-visibility.mjs'
 import * as voiceChoice from '../src/renderer/voice-choice.mjs'
 
 const { createSettingsController, mergePatch, settingsButtonState } = settingsController
@@ -60,7 +59,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   const nodes = new Map()
   function node(selector) {
     if (!nodes.has(selector)) nodes.set(selector, {
-      id: selector.slice(1), value: '', textContent: '', hidden: true, dataset: {},
+      id: selector.slice(1), value: '', textContent: '', hidden: selector === '#restart-notice', dataset: {},
       listeners: {}, attributes: {}, tabIndex: 0, focused: 0, append() {},
       addEventListener(event, listener) { this.listeners[event] = listener },
       setAttribute(name, value) { this.attributes[name] = String(value) },
@@ -71,7 +70,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, secretRowCollapsed, frontendUsageText,
+    ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText,
     createCapabilitiesEditor: () => ({render() {}}),
     createKnowledgePanel: () => ({render() {}}),
     document: {
@@ -595,30 +594,26 @@ test('every API key is a password field with a badge, hint, and clear button', (
   for (const key of [
     'dashscopeApiKey',
     'tavilyApiKey',
-    'modelApiKey',
     'codexApiKey',
     'arkApiKey',
     'doubaoBigmodelApiKey',
-    'doubaoAsrApiKey',
   ]) {
-    assert.match(html, new RegExp(`<input type="password" id="${key}"[^>]*placeholder="留空保持不变"`))
+    assert.match(html, new RegExp(`<input type="password" id="${key}"[^>]*placeholder="输入新密钥；留空保持不变"`))
     assert.match(html, new RegExp(`<span class="badge" id="badge-${key}">未设置</span>`))
     assert.match(html, new RegExp(`<span class="key-usage" id="usage-${key}">`))
     assert.match(html, new RegExp(`<button type="button" class="clear" data-key="${key}">清除</button>`))
   }
   assert.match(html, /DashScope/)
   assert.match(html, /Tavily/)
-  assert.match(html, /模型网关/)
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
   assert.match(html, /火山语音 KEY/)
-  assert.match(html, /豆包 ASR/)
-  assert.equal((html.match(/type="password"/g) || []).length, 7)
+  assert.equal((html.match(/type="password"/g) || []).length, 5)
 })
 
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {
   assert.match(html, /<details id="secrets" class="secret-disclosure">/)
-  assert.match(html, /<summary>[\s\S]*API 密钥[\s\S]*按需展开[\s\S]*<\/summary>/)
+  assert.match(html, /<summary>[\s\S]*API 密钥[\s\S]*留空保留[\s\S]*<\/summary>/)
   assert.doesNotMatch(html, /<details id="secrets"[^>]*\sopen(?:\s|>)/)
 })
 
@@ -664,7 +659,6 @@ test('key usage labels are derived from public pipeline selection only', () => {
   assert.match(script, /dashscopeApiKey: view\.pipelineMode === 'integrated'/)
   assert.match(script, /arkApiKey: view\.pipelineMode === 'cascaded'/)
   assert.match(script, /doubaoBigmodelApiKey: view\.pipelineMode === 'cascaded'/)
-  assert.match(script, /doubaoAsrApiKey: view\.pipelineMode === 'cascaded'/)
   assert.doesNotMatch(script, /\.secrets\b|ciphertext|decrypt/)
 })
 
@@ -731,7 +725,6 @@ test('the panel exposes packaged Codex, Projects, and model endpoint configurati
     'codex-rescan',
     'codexWorkspace',
     'codexManagedRoot',
-    'modelBaseUrl',
     'effective-workspace',
     'effective-managed-root',
   ]) assert.match(html, new RegExp(`id="${id}"`))
@@ -745,7 +738,6 @@ test('the panel exposes packaged Codex, Projects, and model endpoint configurati
   assert.doesNotMatch(script, /codexProjectsEnabled/)
   assert.match(script, /\(\{codexWorkspace: codexWorkspace\.value\}\)/)
   assert.match(script, /\(\{codexManagedRoot: codexManagedRoot\.value\}\)/)
-  assert.match(script, /\(\{modelBaseUrl: modelBaseUrl\.value\}\)/)
 })
 
 test('workspace actions use refresh wording and omit managed terminology from UI copy', () => {
@@ -759,19 +751,6 @@ test('workspace actions use refresh wording and omit managed terminology from UI
   assert.doesNotMatch(script, /重新扫描|托管/u)
 })
 
-test('the optional model gateway address is grouped with its API key', () => {
-  const secretsStart = html.indexOf('<details id="secrets"')
-  const secretsEnd = html.indexOf('</details>', secretsStart)
-  const baseUrl = html.indexOf('id="modelBaseUrl"')
-  const modelKey = html.indexOf('id="modelApiKey"')
-  assert.ok(secretsStart >= 0 && secretsEnd > secretsStart)
-  assert.ok(baseUrl > secretsStart && baseUrl < secretsEnd)
-  assert.ok(modelKey > secretsStart && modelKey < secretsEnd)
-  assert.doesNotMatch(html, /<h2>模型连接<\/h2>/)
-  assert.match(html, /模型网关地址（高级）/)
-  assert.match(html, /留空使用 DashScope 默认地址/)
-  assert.match(html, /FastBrain/)
-})
 
 test('the panel omits the connection and microphone block while launch listening stays automatic', () => {
   assert.doesNotMatch(html, /连接与麦克风/)
@@ -915,11 +894,9 @@ test('one save names any rejected secret by its panel label', () => {
   assert.match(script, /const SECRET_LABELS = \{/)
   assert.match(script, /dashscopeApiKey: 'DashScope',/)
   assert.match(script, /tavilyApiKey: 'Tavily',/)
-  assert.match(script, /modelApiKey: '模型网关',/)
   assert.match(script, /codexApiKey: 'Codex',/)
   assert.match(script, /arkApiKey: 'Ark',/)
   assert.match(script, /doubaoBigmodelApiKey: '火山语音 KEY',/)
-  assert.match(script, /doubaoAsrApiKey: '豆包 ASR',/)
   // Each exact queued request retains its own rejection list. The renderer
   // names only keys this save submitted, so a coalesced neighbour cannot make
   // a different field's error appear in its status line.
@@ -1116,32 +1093,7 @@ test('an unknown or absent focus request leaves the category alone', async () =>
   assert.equal(panel.node('#category-general').getAttribute('aria-current'), 'true')
 })
 
-test('a stored key hides its input behind 更换 and 清除', async () => {
-  const panel = await mountSettingsPanel(publicView({
-    secretsPresent: {dashscopeApiKey: true, tavilyApiKey: false},
-  }))
 
-  assert.equal(panel.node('#dashscopeApiKey').hidden, true, 'a stored key shows no input')
-  assert.equal(panel.node('button.change[data-key="dashscopeApiKey"]').hidden, false)
-  assert.equal(panel.node('div.secret[data-key="dashscopeApiKey"]').dataset.mode, 'collapsed')
-  assert.equal(panel.node('#badge-dashscopeApiKey').textContent, '已设置')
-
-  assert.equal(panel.node('#tavilyApiKey').hidden, false, 'an unset key keeps its input')
-  assert.equal(panel.node('button.change[data-key="tavilyApiKey"]').hidden, true)
-  assert.equal(panel.node('div.secret[data-key="tavilyApiKey"]').dataset.mode, 'expanded')
-})
-
-test('更换 reveals the input for that key alone and focuses it', async () => {
-  const panel = await mountSettingsPanel(publicView({
-    secretsPresent: {dashscopeApiKey: true, codexApiKey: true},
-  }))
-  await panel.click('button.change[data-key="dashscopeApiKey"]')
-
-  assert.equal(panel.node('#dashscopeApiKey').hidden, false)
-  assert.equal(panel.node('button.change[data-key="dashscopeApiKey"]').hidden, true)
-  assert.equal(panel.node('#dashscopeApiKey').focused, 1, 'the revealed input takes focus')
-  assert.equal(panel.node('#codexApiKey').hidden, true, 'other stored keys stay collapsed')
-})
 
 test('清除 reveals the empty field that saving will commit', async () => {
   const panel = await mountSettingsPanel(publicView({secretsPresent: {dashscopeApiKey: true}}))
@@ -1153,7 +1105,7 @@ test('清除 reveals the empty field that saving will commit', async () => {
   assert.equal(panel.node('#settings-save').disabled, false, 'clearing stages a change')
 })
 
-test('an accepted save collapses the row it just stored', async () => {
+test('an accepted save clears plaintext and keeps the input editable', async () => {
   const panel = await mountSettingsPanel(publicView({secretsPresent: {}}), {
     set: async patch => publicView({
       ...patch,
@@ -1161,7 +1113,6 @@ test('an accepted save collapses the row it just stored', async () => {
       rejectedSecrets: [],
     }),
   })
-  await panel.click('button.change[data-key="dashscopeApiKey"]')
   panel.node('#dashscopeApiKey').value = 'sk-live'
   panel.node('#dashscopeApiKey').listeners.input()
   panel.click('#settings-save')
@@ -1170,36 +1121,10 @@ test('an accepted save collapses the row it just stored', async () => {
   await new Promise(resolve => setImmediate(resolve))
 
   assert.equal(panel.node('#dashscopeApiKey').value, '', 'plaintext never lingers')
-  assert.equal(panel.node('#dashscopeApiKey').hidden, true, 'the stored key re-collapses')
-  assert.equal(panel.node('button.change[data-key="dashscopeApiKey"]').hidden, false)
+  assert.equal(panel.node('#dashscopeApiKey').hidden, false, 'the input remains editable')
 })
 
-test('secret row collapse depends on storage and an explicit reveal', () => {
-  assert.equal(secretRowCollapsed(true, false), true)
-  assert.equal(secretRowCollapsed(true, true), false, 'an explicit reveal wins')
-  assert.equal(secretRowCollapsed(false, false), false, 'an unset key always shows its input')
-  assert.equal(secretRowCollapsed(false, true), false)
-  assert.equal(secretRowCollapsed(undefined, undefined), false, 'absent presence is not stored')
-})
 
-test('the panel ships a 更换 action and a keyed row for every secret', () => {
-  for (const key of [
-    'dashscopeApiKey',
-    'tavilyApiKey',
-    'modelApiKey',
-    'codexApiKey',
-    'arkApiKey',
-    'doubaoBigmodelApiKey',
-    'doubaoAsrApiKey',
-  ]) {
-    assert.match(html, new RegExp(
-      `<button type="button" class="change" data-key="${key}" hidden>更换</button>`,
-    ))
-    assert.match(html, new RegExp(`<div class="secret" data-key="${key}">`))
-  }
-  assert.equal((html.match(/class="change"/g) || []).length, 7)
-  assert.match(css, /\.secret\[data-mode="collapsed"\]/)
-})
 
 test('a save reply never hides a draft typed after that save was sent', async () => {
   // The reveal must survive the reply, or the row collapses over a newer
@@ -1225,11 +1150,6 @@ test('a save reply never hides a draft typed after that save was sent', async ()
 
   assert.equal(input.value, 'SECRET-B', 'the revision guard keeps the newer draft')
   assert.equal(input.hidden, false, 'a staged draft is never hidden')
-  assert.equal(
-    panel.node('div.secret[data-key="dashscopeApiKey"]').dataset.mode,
-    'expanded',
-    'the row stays open while it holds an unsaved value',
-  )
 })
 
 test('a rejected save leaves the retried key visible', async () => {
@@ -1240,7 +1160,6 @@ test('a rejected save leaves the retried key visible', async () => {
       rejectedSecrets: ['dashscopeApiKey'],
     }),
   })
-  await panel.click('button.change[data-key="dashscopeApiKey"]')
   panel.node('#dashscopeApiKey').value = 'badvalue'
   panel.node('#dashscopeApiKey').listeners.input()
   panel.click('#settings-save')
@@ -1279,4 +1198,20 @@ test('main serves a held category once and drops it with the window', async () =
   assert.match(openBody, /pendingSettingsCategory = category \?\? null/)
   // A closed window must not leave a category waiting for the next plain open.
   assert.match(openBody, /settingsWindow = null\n\s*pendingSettingsCategory = null/)
+})
+
+test('API keys are directly editable and removed settings never enter a save', async () => {
+  assert.doesNotMatch(html, /class="change"|id="modelApiKey"|id="modelBaseUrl"|id="doubaoAsrApiKey"/)
+  const sent = []
+  const panel = await mountSettingsPanel(publicView({secretsPresent: {dashscopeApiKey: true}}), {
+    set: async patch => {sent.push(structuredClone(patch)); return publicView({secretsPresent: {dashscopeApiKey: true}, rejectedSecrets: []})},
+  })
+  assert.equal(panel.node('#dashscopeApiKey').hidden, false)
+  assert.equal(panel.node('#dashscopeApiKey').value, '')
+  panel.node('#dashscopeApiKey').value = 'replacement-test-key'
+  panel.node('#dashscopeApiKey').listeners.input()
+  await panel.click('#settings-save')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(sent[0].settingsPatch.secrets.dashscopeApiKey, 'replacement-test-key')
+  for (const key of ['modelApiKey', 'doubaoAsrApiKey', 'modelBaseUrl']) assert.equal(Object.hasOwn(sent[0].settingsPatch.secrets, key), false)
 })

@@ -9,7 +9,6 @@ import {
   settingsButtonState,
 } from './settings-controller.mjs'
 import { createSecretRevisions } from './secret-revisions.mjs'
-import { secretRowCollapsed } from './secret-row-visibility.mjs'
 import {
   SETTINGS_CATEGORIES,
   categoryTabForKey,
@@ -24,17 +23,15 @@ import {
 
 const api = window.novaAudioAgentDesktop.settings
 const SECRET_KEYS = [
-  'dashscopeApiKey', 'tavilyApiKey', 'modelApiKey', 'codexApiKey',
-  'arkApiKey', 'doubaoBigmodelApiKey', 'doubaoAsrApiKey',
+  'dashscopeApiKey', 'tavilyApiKey', 'codexApiKey',
+  'arkApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
   dashscopeApiKey: 'DashScope',
   tavilyApiKey: 'Tavily',
-  modelApiKey: '模型网关',
   codexApiKey: 'Codex',
   arkApiKey: 'Ark',
   doubaoBigmodelApiKey: '火山语音 KEY',
-  doubaoAsrApiKey: '豆包 ASR',
 }
 const WORKSPACE_STATUS_TEXT = Object.freeze({
   opened: '已打开当前 workspace',
@@ -57,8 +54,6 @@ const WORKSPACE_STATUS_TEXT = Object.freeze({
 
 const secretRevisions = createSecretRevisions(SECRET_KEYS)
 const dirtySecretKeys = new Set()
-// Keys the user chose to re-enter this session; cleared once a save lands.
-const revealedSecretKeys = new Set()
 let currentView = null
 let controllerState = {dirty: false, busy: false}
 let workspaceBusy = false
@@ -94,7 +89,6 @@ const codexManualSettings = document.querySelector('#codex-manual-settings')
 const codexRescan = document.querySelector('#codex-rescan')
 const codexWorkspace = document.querySelector('#codexWorkspace')
 const codexManagedRoot = document.querySelector('#codexManagedRoot')
-const modelBaseUrl = document.querySelector('#modelBaseUrl')
 const effectiveWorkspace = document.querySelector('#effective-workspace')
 const effectiveManagedRoot = document.querySelector('#effective-managed-root')
 const integratedSection = document.querySelector('#integrated-pipeline')
@@ -170,20 +164,7 @@ populateVoiceOptions(integratedVoicePreset, QWEN_VOICES)
 populateVoiceOptions(cascadedTtsVoicePreset, VOLCENGINE_TTS_VOICES)
 
 function secretInput(key) { return document.querySelector(`#${key}`) }
-function secretRow(key) { return document.querySelector(`div.secret[data-key="${key}"]`) }
-function secretChangeButton(key) { return document.querySelector(`button.change[data-key="${key}"]`) }
 function secretClearButton(key) { return document.querySelector(`button.clear[data-key="${key}"]`) }
-
-function renderSecretRow(key) {
-  const collapsed = secretRowCollapsed(
-    currentView?.secretsPresent?.[key] === true,
-    revealedSecretKeys.has(key),
-  )
-  secretInput(key).hidden = collapsed
-  secretChangeButton(key).hidden = !collapsed
-  const row = secretRow(key)
-  if (row) row.dataset.mode = collapsed ? 'collapsed' : 'expanded'
-}
 
 function renderBadges(present) {
   for (const key of SECRET_KEYS) {
@@ -202,8 +183,7 @@ function keyUsage(view) {
     arkApiKey: view.pipelineMode === 'cascaded'
       && view.cascadedLlmProvider === 'ark' ? '必需' : '当前未使用',
     doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' ? '必需' : '当前未使用',
-    doubaoAsrApiKey: view.pipelineMode === 'cascaded' ? '可选覆盖' : '当前未使用',
-    tavilyApiKey: '可选', modelApiKey: '可选', codexApiKey: '可选',
+    tavilyApiKey: '可选', codexApiKey: '可选',
   }
 }
 
@@ -287,7 +267,6 @@ function render(view, _drafts, state) {
   codexBinaryPath.value = view.codexBinaryPath ?? ''
   codexWorkspace.value = view.codexWorkspace ?? ''
   codexManagedRoot.value = view.codexManagedRoot ?? ''
-  modelBaseUrl.value = view.modelBaseUrl ?? ''
   effectiveWorkspace.textContent = view.effectivePaths?.workspace ?? ''
   effectiveManagedRoot.textContent = view.effectivePaths?.managedRoot ?? ''
   renderCodexStatus(view)
@@ -303,7 +282,6 @@ function render(view, _drafts, state) {
   cascadedTtsProvider.value = view.cascadedTtsProvider
   renderVoice(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
   renderBadges(view.secretsPresent)
-  for (const key of SECRET_KEYS) renderSecretRow(key)
   renderKeyUsage(view)
   warning.hidden = view.keyringAvailable !== false
   const recoveryStatus = view.managedWorkspaces?.recoveryStatus ?? 'idle'
@@ -401,7 +379,6 @@ for (const input of codexModeInputs) bindStage(input, 'change', () => ({codexBin
 bindStage(codexBinaryPath, 'input', () => ({codexBinaryPath: codexBinaryPath.value}))
 bindStage(codexWorkspace, 'input', () => ({codexWorkspace: codexWorkspace.value}))
 bindStage(codexManagedRoot, 'input', () => ({codexManagedRoot: codexManagedRoot.value}))
-bindStage(modelBaseUrl, 'input', () => ({modelBaseUrl: modelBaseUrl.value}))
 bindStage(integratedProvider, 'change', () => ({integratedProvider: integratedProvider.value}))
 bindStage(integratedModel, 'input', () => ({integratedModel: integratedModel.value}))
 bindStage(cascadedEndpointingProvider, 'change', () => ({cascadedEndpointingProvider: cascadedEndpointingProvider.value}))
@@ -434,11 +411,6 @@ for (const key of SECRET_KEYS) {
   secretInput(key).addEventListener('input', () => {
     secretRevisions.noteInput(key)
     dirtySecretKeys.add(key)
-    // A typed draft pins the row open. Without this a save reply that reports
-    // the key as newly stored would collapse a row whose input still holds a
-    // newer keystroke, hiding plaintext that the next save would still submit.
-    revealedSecretKeys.add(key)
-    renderSecretRow(key)
     updateButtons()
   })
 }
@@ -448,15 +420,7 @@ for (const key of SECRET_KEYS) {
     input.value = ''
     secretRevisions.noteInput(key)
     dirtySecretKeys.add(key)
-    // Reveal so the row shows the empty field that Save will commit.
-    revealedSecretKeys.add(key)
-    renderSecretRow(key)
     updateButtons()
-  })
-  secretChangeButton(key).addEventListener('click', () => {
-    revealedSecretKeys.add(key)
-    renderSecretRow(key)
-    secretInput(key).focus?.()
   })
 }
 
@@ -475,8 +439,6 @@ async function saveAll() {
     if (secretRevisions.matches(key, input.value, submissions[key])) {
       input.value = ''
       dirtySecretKeys.delete(key)
-      revealedSecretKeys.delete(key)
-      renderSecretRow(key)
     }
   }
   if (result.rejectedSecrets.length) {

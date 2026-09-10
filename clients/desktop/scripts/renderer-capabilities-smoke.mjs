@@ -23,8 +23,9 @@ try {
     window.__probeCount = 0
     window.__outcome = 'applied'
     window.__push = patch => {view = {...view, ...patch}; changed?.(view)}
-    window.novaAudioAgentDesktop = {settings: {
+    window.novaAudioAgentDesktop = {wakeWord: {activity() {}}, settings: {
       get: async () => view,
+      knowledgeAction: async () => ({sources: [{id: 'demo', title: '产品资料与使用说明 · 长文件名和中文说明的排版检查.pdf', status: 'ready'}], jobs: [], fts: true}),
       onChanged: callback => {changed = callback; return () => {}},
       probeCapabilities: async payload => {
         window.__probeCount++
@@ -45,7 +46,8 @@ try {
   const bounds = settingsWindowOptions(resolve(root, 'src/preload/preload.cjs'), 'smoke')
   await page.setViewportSize({width: bounds.width, height: bounds.height})
   await page.goto('http://nova.test/settings.html')
-  await page.getByText('前台工具 9/24', {exact: false}).waitFor()
+  await page.locator('#category-capabilities').click()
+  await page.getByText('前台可用 9 个工具', {exact: false}).waitFor()
   assert.equal(await page.locator('#embeddingProvider').inputValue(), 'dashscope')
   assert.equal(await page.locator('#embeddingModel').inputValue(), 'text-embedding-v4')
   await page.getByLabel('搜索 provider', {exact: true}).selectOption('mcp')
@@ -81,17 +83,34 @@ try {
   await page.locator('#settings-save').click()
   commit = await page.evaluate(() => window.__commits.at(-1))
   assert.deepEqual(commit.capabilitiesDocument.mcpServers, {})
-  for (const [outcome, expected] of [['busy', '另一项操作进行中，草稿未保存'], ['invalid', '配置校验失败，草稿未保存'], ['failed', '已保存·未生效'], ['restart_failed', '已保存·后端未启动']]) {
+  for (const [outcome, expected] of [['busy', '另一项操作进行中，草稿未保存'], ['invalid', '配置校验失败，草稿未保存'], ['failed', '设置已保存'], ['restart_failed', '设置已保存']]) {
     await page.evaluate(outcome => {window.__outcome = outcome}, outcome)
     await page.getByLabel('相机与 Vision', {exact: true}).click()
     await page.locator('#settings-save').click()
     assert.equal(await page.locator('#status').textContent(), expected)
   }
   await page.evaluate(() => window.__push({capabilities: {diskGeneration: 7, status: {modules: {search: {provider: 'mcp'}}, overrides: ['NOVA_AUDIO_AGENT_SEARCH_PROVIDER']}, problems: [], runtime: {state: 'startup_failed', diskGeneration: 7, generation: 4, toolCount: 27, toolBudget: 24}}}))
-  assert.match(await page.locator('#capabilities-state').textContent(), /27\/24（启动失败）/u)
+  assert.match(await page.locator('#capabilities-state').textContent(), /启动失败.*27 个工具（上限 24 个）/u)
   await page.evaluate(() => scrollTo(0, 0))
   await page.screenshot({path: `${output}/capability-budget-failure.png`, fullPage: true})
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+  await page.evaluate(() => window.__push({capabilities: {runtime: {state: 'running', modules: {knowledge: {enabled: true}}, toolCount: 9, toolBudget: 24}}}))
+  for (const width of [760, 620]) {
+    await page.setViewportSize({width, height: 720})
+    for (const category of ['knowledge', 'secrets', 'general']) {
+      await page.locator(`#category-${category}`).click()
+      if (category === 'knowledge') {
+        await page.locator('#knowledge-refresh').click()
+      }
+      await page.evaluate(() => scrollTo(0, 0))
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+      if (category === 'secrets') {
+        assert.equal(await page.locator('input[type=password]:visible').count(), 5)
+        assert.equal(await page.locator('button.change, #modelApiKey, #doubaoAsrApiKey, #modelBaseUrl').count(), 0)
+      }
+      await page.screenshot({path: `${output}/${category}-${width}.png`, fullPage: true})
+    }
+  }
   assert.deepEqual(errors, [])
   console.log(JSON.stringify({moduleToggles: true, preset: true, serverCrud: true, toolAllowlist: true, transportFields: true, saveLattice: true, exactBudget: '27/24', horizontalOverflow: false, pageErrors: errors, screenshots: output}))
 } finally {await browser.close()}

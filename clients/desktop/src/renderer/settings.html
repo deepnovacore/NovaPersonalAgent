@@ -37,21 +37,14 @@
       </section>
       <section class="setting-section" id="knowledge-section">
         <h2>知识库配置</h2>
-        <p class="hint">启用开关在「能力」中，保存并重启后生效。本地知识库指本地存储，不代表本地计算。</p>
-        <table><caption>知识库数据流向</caption><thead><tr><th>步骤</th><th>发送的数据</th><th>接收方</th></tr></thead><tbody>
-          <tr><td>导入 / 重建索引</td><td>敏感检查后的完整文本块</td><td>Embedding 服务商（默认 DashScope）</td></tr>
-          <tr><td>知识库检索</td><td>查询；检索片段随后进入实时模型上下文</td><td>Embedding 服务商；实时模型服务商</td></tr>
-          <tr><td>工作单引用 / 片段</td><td>定位符及最多 2 条短片段</td><td>Codex 模型服务商</td></tr>
-          <tr><td>Codex Knowledge MCP</td><td>recall / get_chunk 返回的文本</td><td>Codex 模型服务商</td></tr>
-        </tbody></table>
-        <div class="field"><label for="embeddingProvider">Embedding provider</label><select id="embeddingProvider"><option value="dashscope">DashScope</option><option value="local" disabled>Local（即将支持）</option></select></div>
+        <p class="hint">在「能力与 MCP」中启用知识库，保存并重启后生效。文档保存在本机，向量计算与回答会使用所选模型服务。</p>
+        <div class="field"><label for="embeddingProvider">向量服务</label><select id="embeddingProvider"><option value="dashscope">DashScope</option><option value="local" disabled>Local（即将支持）</option></select></div>
         <div class="field"><label for="embeddingModel">Embedding 模型</label><input id="embeddingModel" type="text"></div>
-        <div class="field"><label for="knowledgePath">知识库路径（留空使用默认）</label><input id="knowledgePath" type="text"></div>
-        <div class="field"><label for="capabilitiesConfigPath">能力注册表路径（留空使用环境变量或默认）</label><input id="capabilitiesConfigPath" type="text"></div>
+        <div class="field"><label for="knowledgePath">存储位置</label><input id="knowledgePath" type="text" placeholder="留空使用默认位置"></div>
+        <div class="field"><label for="capabilitiesConfigPath">能力配置文件</label><input id="capabilitiesConfigPath" type="text" placeholder="留空使用环境变量或默认配置"></div>
         <div id="knowledge-panel" hidden>
-          <label><input id="knowledge-consent" type="checkbox">我了解上述数据流向，同意将导入文本发送给当前 Embedding 服务商。</label>
           <p class="hint">支持文本、Markdown、代码、PDF、DOCX；单文件最多 10 MiB。敏感内容会被拒绝。修改模型后请重建所有来源。</p>
-          <div><button type="button" id="knowledge-files">添加文件</button> <button type="button" id="knowledge-folder">添加文件夹</button> <button type="button" id="knowledge-refresh">刷新</button></div>
+          <div class="knowledge-actions"><button type="button" id="knowledge-files">添加文件</button> <button type="button" id="knowledge-folder">添加文件夹</button> <button type="button" id="knowledge-refresh">刷新</button></div>
           <div class="field"><label for="knowledge-url">公开网页 URL</label><input id="knowledge-url" type="url" maxlength="2048"><button type="button" id="knowledge-add-url">导入网页</button></div>
           <p id="knowledge-status" role="status" aria-live="polite"></p>
           <ul id="knowledge-sources"></ul>
@@ -302,85 +295,52 @@
         <summary>
           <span class="summary-copy">
             <span class="summary-title">API 密钥</span>
-            <span class="summary-note">仅在本机保存 · 按需展开</span>
+            <span class="summary-note">留空保留已保存的密钥</span>
           </span>
           <span class="summary-chevron" aria-hidden="true"></span>
         </summary>
         <div class="secret-content">
-        <p id="keyring-warning" class="warning" hidden>密钥将以明文保存(系统未提供钥匙串)</p>
-        <div class="secret" data-key="dashscopeApiKey">
-          <label for="dashscopeApiKey">DashScope</label>
-          <span class="badge" id="badge-dashscopeApiKey">未设置</span>
-          <span class="key-usage" id="usage-dashscopeApiKey">当前未使用</span>
-          <input type="password" id="dashscopeApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
-          <button type="button" class="clear" data-key="dashscopeApiKey">清除</button>
-          <button type="button" class="change" data-key="dashscopeApiKey" hidden>更换</button>
-          <a class="key-link" href="https://bailian.console.aliyun.com/?apiKey=1&amp;tab=model" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
-        </div>
-        <div class="secret" data-key="tavilyApiKey">
-          <label for="tavilyApiKey">Tavily</label>
-          <span class="badge" id="badge-tavilyApiKey">未设置</span>
-          <span class="key-usage" id="usage-tavilyApiKey">可选</span>
-          <input type="password" id="tavilyApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
-          <button type="button" class="clear" data-key="tavilyApiKey">清除</button>
-          <button type="button" class="change" data-key="tavilyApiKey" hidden>更换</button>
-          <a class="key-link" href="https://app.tavily.com/" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
-        </div>
-        <div class="secret" data-key="modelApiKey">
-          <label for="modelApiKey">模型网关</label>
-          <span class="badge" id="badge-modelApiKey">未设置</span>
-          <span class="key-usage" id="usage-modelApiKey">可选</span>
-          <input type="password" id="modelApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
-          <button type="button" class="clear" data-key="modelApiKey">清除</button>
-          <button type="button" class="change" data-key="modelApiKey" hidden>更换</button>
-          <a class="key-link" href="https://bailian.console.aliyun.com/?apiKey=1&amp;tab=model" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
-        </div>
-        <div class="gateway-endpoint">
-          <div class="field">
-            <label for="modelBaseUrl">模型网关地址（高级）</label>
-            <input type="url" id="modelBaseUrl" maxlength="32768" autocomplete="off" spellcheck="false" placeholder="HTTPS，或本机 loopback HTTP">
-            <small>仅用于 FastBrain 等辅助模型；留空使用 DashScope 默认地址。</small>
+          <p id="keyring-warning" class="warning" hidden>密钥将以明文保存(系统未提供钥匙串)</p>
+          <div class="secret" data-key="dashscopeApiKey">
+            <label for="dashscopeApiKey">DashScope</label>
+            <span class="badge" id="badge-dashscopeApiKey">未设置</span>
+            <span class="key-usage" id="usage-dashscopeApiKey">当前未使用</span>
+            <input type="password" id="dashscopeApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
+            <button type="button" class="clear" data-key="dashscopeApiKey">清除</button>
+            <a class="key-link" href="https://bailian.console.aliyun.com/?apiKey=1&amp;tab=model" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
           </div>
-        </div>
-        <div class="secret" data-key="codexApiKey">
-          <label for="codexApiKey">Codex</label>
-          <span class="badge" id="badge-codexApiKey">未设置</span>
-          <span class="key-usage" id="usage-codexApiKey">可选</span>
-          <input type="password" id="codexApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
-          <button type="button" class="clear" data-key="codexApiKey">清除</button>
-          <button type="button" class="change" data-key="codexApiKey" hidden>更换</button>
-          <a class="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
-        </div>
-        <div class="secret" data-key="arkApiKey">
-          <label for="arkApiKey">Ark</label>
-          <span class="badge" id="badge-arkApiKey">未设置</span>
-          <span class="key-usage" id="usage-arkApiKey">当前未使用</span>
-          <input type="password" id="arkApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
-          <button type="button" class="clear" data-key="arkApiKey">清除</button>
-          <button type="button" class="change" data-key="arkApiKey" hidden>更换</button>
-        </div>
-        <div class="secret" data-key="doubaoBigmodelApiKey">
-          <label for="doubaoBigmodelApiKey">豆包大模型</label>
-          <a class="key-link" href="https://console.volcengine.com/ark/apiKey" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
-        </div>
-        <div class="secret">
-          <label for="doubaoBigmodelApiKey">火山语音 KEY</label>
-          <span class="badge" id="badge-doubaoBigmodelApiKey">未设置</span>
-          <span class="key-usage" id="usage-doubaoBigmodelApiKey">当前未使用</span>
-          <input type="password" id="doubaoBigmodelApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
-          <button type="button" class="clear" data-key="doubaoBigmodelApiKey">清除</button>
-          <button type="button" class="change" data-key="doubaoBigmodelApiKey" hidden>更换</button>
-          <a class="key-link" href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
-        </div>
-        <div class="secret" data-key="doubaoAsrApiKey">
-          <label for="doubaoAsrApiKey">豆包 ASR</label>
-          <span class="badge" id="badge-doubaoAsrApiKey">未设置</span>
-          <span class="key-usage" id="usage-doubaoAsrApiKey">当前未使用</span>
-          <input type="password" id="doubaoAsrApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
-          <button type="button" class="clear" data-key="doubaoAsrApiKey">清除</button>
-          <button type="button" class="change" data-key="doubaoAsrApiKey" hidden>更换</button>
-          <a class="key-link" href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
-        </div>
+          <div class="secret" data-key="tavilyApiKey">
+            <label for="tavilyApiKey">Tavily</label>
+            <span class="badge" id="badge-tavilyApiKey">未设置</span>
+            <span class="key-usage" id="usage-tavilyApiKey">当前未使用</span>
+            <input type="password" id="tavilyApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
+            <button type="button" class="clear" data-key="tavilyApiKey">清除</button>
+            <a class="key-link" href="https://app.tavily.com/" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
+          </div>
+          <div class="secret" data-key="codexApiKey">
+            <label for="codexApiKey">Codex</label>
+            <span class="badge" id="badge-codexApiKey">未设置</span>
+            <span class="key-usage" id="usage-codexApiKey">当前未使用</span>
+            <input type="password" id="codexApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
+            <button type="button" class="clear" data-key="codexApiKey">清除</button>
+            <a class="key-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
+          </div>
+          <div class="secret" data-key="arkApiKey">
+            <label for="arkApiKey">Ark</label>
+            <span class="badge" id="badge-arkApiKey">未设置</span>
+            <span class="key-usage" id="usage-arkApiKey">当前未使用</span>
+            <input type="password" id="arkApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
+            <button type="button" class="clear" data-key="arkApiKey">清除</button>
+            <a class="key-link" href="https://console.volcengine.com/ark/apiKey" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
+          </div>
+          <div class="secret" data-key="doubaoBigmodelApiKey">
+            <label for="doubaoBigmodelApiKey">火山语音 KEY</label>
+            <span class="badge" id="badge-doubaoBigmodelApiKey">未设置</span>
+            <span class="key-usage" id="usage-doubaoBigmodelApiKey">当前未使用</span>
+            <input type="password" id="doubaoBigmodelApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
+            <button type="button" class="clear" data-key="doubaoBigmodelApiKey">清除</button>
+            <a class="key-link" href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" rel="noopener noreferrer">获取 API Key ↗</a>
+          </div>
         </div>
       </details>
       <details id="codex-projects" class="secret-disclosure codex-disclosure">

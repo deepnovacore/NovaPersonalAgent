@@ -14,18 +14,15 @@ function fixture(action) {
   const panel = createKnowledgePanel({document: doc, action})
   return {panel, node: name => doc.querySelector(`#knowledge-${name}`)}
 }
-test('panel requires consent and renders source labels as text, not HTML', async () => {
+test('explicit import carries consent and renders source labels as text, not HTML', async () => {
   const sent = []
   const {panel, node} = fixture(async input => {sent.push(input); return {sources: [{id: 'one', title: '<img onerror=bad>', status: 'ready'}], jobs: []}})
   panel.render({capabilities: {runtime: {modules: {knowledge: {enabled: true}}}}})
   await node('files').listeners.click()
-  assert.equal(sent.length, 0)
-  node('consent').checked = true
-  await node('files').listeners.click()
   assert.deepEqual(sent[0], {action: 'files', consent: true})
   assert.equal(node('sources').children[0].children[0].textContent, '<img onerror=bad> · ready')
 })
-test('disabled module discards late source list and clears consent', async () => {
+test('disabled module discards late source list', async () => {
   let finish
   const {panel, node} = fixture(() => new Promise(resolve => {finish = resolve}))
   panel.render({capabilities: {runtime: {modules: {knowledge: {enabled: true}}}}})
@@ -35,7 +32,6 @@ test('disabled module discards late source list and clears consent', async () =>
   await pending
   assert.equal(node('panel').hidden, true)
   assert.equal(node('sources').children.length, 0)
-  assert.equal(node('consent').checked, false)
 })
 
 test('panel displays FTS availability and its lexical fallback limitation', async () => {
@@ -48,4 +44,14 @@ test('panel displays FTS availability and its lexical fallback limitation', asyn
   await node('refresh').listeners.click()
   assert.match(node('status').textContent, /FTS5 已启用/u)
   assert.doesNotMatch(node('status').textContent, /不可用/u)
+})
+
+test('refresh does not grant import consent and disabled import is refused', async () => {
+  const sent = []
+  const {panel, node} = fixture(async input => {sent.push(input); return {sources: [], jobs: []}})
+  await node('files').listeners.click()
+  assert.equal(sent.length, 0)
+  panel.render({capabilities: {runtime: {modules: {knowledge: {enabled: true}}}}})
+  await node('refresh').listeners.click()
+  assert.deepEqual(sent, [{action: 'status'}])
 })
