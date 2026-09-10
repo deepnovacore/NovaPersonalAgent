@@ -15,8 +15,16 @@
       </div>
       <span id="status" aria-live="polite"></span>
     </header>
+    <nav class="settings-nav" id="settings-nav" aria-label="设置分类">
+      <button type="button" class="nav-item" id="category-general" data-category="general" aria-current="true">通用</button>
+      <button type="button" class="nav-item" id="category-pipeline" data-category="pipeline" aria-current="false" tabindex="-1">语音管线</button>
+      <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">能力与 MCP</button>
+      <button type="button" class="nav-item" id="category-knowledge" data-category="knowledge" aria-current="false" tabindex="-1">知识库</button>
+      <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
+      <button type="button" class="nav-item" id="category-codex" data-category="codex" aria-current="false" tabindex="-1">Codex 与 Projects</button>
+    </nav>
     <main>
-      <section class="setting-section">
+      <section class="setting-section" id="frontend-usage-section">
         <h2>本次运行费用</h2>
         <p id="frontend-usage" role="status" aria-live="polite">本次运行前台估算费用：暂无用量报告</p>
         <details><summary>用量明细与计费说明</summary><p id="frontend-usage-details"></p></details>
@@ -27,7 +35,7 @@
         <p id="capabilities-problems" class="warning" aria-live="polite"></p>
         <div id="capabilities-editor"></div>
       </section>
-      <section class="setting-section">
+      <section class="setting-section" id="knowledge-section">
         <h2>知识库配置</h2>
         <p class="hint">启用开关在「能力」中，保存并重启后生效。本地知识库指本地存储，不代表本地计算。</p>
         <table><caption>知识库数据流向</caption><thead><tr><th>步骤</th><th>发送的数据</th><th>接收方</th></tr></thead><tbody>
@@ -49,7 +57,7 @@
           <ul id="knowledge-sources"></ul>
         </div>
       </section>
-      <section class="setting-section">
+      <section class="setting-section" id="wake-word-section">
         <h2>语音唤醒</h2>
         <fieldset>
           <legend>本地语音唤醒</legend>
@@ -64,7 +72,7 @@
           <button id="wake-word-retry" type="button" hidden>重试唤醒模型</button>
         </fieldset>
       </section>
-      <section class="setting-section">
+      <section class="setting-section" id="codex-approval-section">
         <h2>权限</h2>
         <fieldset id="codex-approval-mode" class="segmented segmented-approval">
           <legend>Codex 审批模式</legend>
@@ -87,7 +95,7 @@
           YOLO 已选中：保存并重启后将关闭沙箱和审批，Codex 可访问主机文件与网络。
         </p>
       </section>
-      <section class="setting-section">
+      <section class="setting-section" id="intent-section">
         <h2>意图理解</h2>
         <div class="field">
           <label for="clarificationDepth">澄清深度</label>
@@ -117,7 +125,7 @@
           <input type="text" id="plannerModel" maxlength="64" autocomplete="off" spellcheck="false" placeholder="留空跟随 FastBrain">
         </div>
       </section>
-      <section class="setting-section">
+      <section class="setting-section" id="notifications-section">
         <h2>通知</h2>
         <fieldset id="progress-bubbles" class="segmented segmented-progress">
           <legend>进度气泡</legend>
@@ -135,7 +143,7 @@
           </label>
         </fieldset>
       </section>
-      <section class="setting-section">
+      <section class="setting-section" id="appearance-section">
         <h2>外观</h2>
         <fieldset id="palette" class="segmented segmented-palette">
           <legend>光球配色</legend>
@@ -157,7 +165,7 @@
           </label>
         </fieldset>
       </section>
-      <section class="setting-section">
+      <section class="setting-section" id="proactivity-section">
         <h2>主动性</h2>
         <label for="coding-progress-narration">编程进度播报</label>
         <select id="coding-progress-narration">
@@ -190,7 +198,7 @@
           </label>
         </fieldset>
       </section>
-      <section class="setting-section">
+      <section class="setting-section" id="pacing-section">
         <h2>节奏与声音</h2>
         <div class="field">
           <label for="heartbeat">Codex 播报间隔</label>
@@ -300,26 +308,29 @@
         </summary>
         <div class="secret-content">
         <p id="keyring-warning" class="warning" hidden>密钥将以明文保存(系统未提供钥匙串)</p>
-        <div class="secret">
+        <div class="secret" data-key="dashscopeApiKey">
           <label for="dashscopeApiKey">DashScope</label>
           <span class="badge" id="badge-dashscopeApiKey">未设置</span>
           <span class="key-usage" id="usage-dashscopeApiKey">当前未使用</span>
           <input type="password" id="dashscopeApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
           <button type="button" class="clear" data-key="dashscopeApiKey">清除</button>
+          <button type="button" class="change" data-key="dashscopeApiKey" hidden>更换</button>
         </div>
-        <div class="secret">
+        <div class="secret" data-key="tavilyApiKey">
           <label for="tavilyApiKey">Tavily</label>
           <span class="badge" id="badge-tavilyApiKey">未设置</span>
           <span class="key-usage" id="usage-tavilyApiKey">可选</span>
           <input type="password" id="tavilyApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
           <button type="button" class="clear" data-key="tavilyApiKey">清除</button>
+          <button type="button" class="change" data-key="tavilyApiKey" hidden>更换</button>
         </div>
-        <div class="secret">
+        <div class="secret" data-key="modelApiKey">
           <label for="modelApiKey">模型网关</label>
           <span class="badge" id="badge-modelApiKey">未设置</span>
           <span class="key-usage" id="usage-modelApiKey">可选</span>
           <input type="password" id="modelApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
           <button type="button" class="clear" data-key="modelApiKey">清除</button>
+          <button type="button" class="change" data-key="modelApiKey" hidden>更换</button>
         </div>
         <div class="gateway-endpoint">
           <div class="field">
@@ -328,33 +339,37 @@
             <small>仅用于 FastBrain 等辅助模型；留空使用 DashScope 默认地址。</small>
           </div>
         </div>
-        <div class="secret">
+        <div class="secret" data-key="codexApiKey">
           <label for="codexApiKey">Codex</label>
           <span class="badge" id="badge-codexApiKey">未设置</span>
           <span class="key-usage" id="usage-codexApiKey">可选</span>
           <input type="password" id="codexApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
           <button type="button" class="clear" data-key="codexApiKey">清除</button>
+          <button type="button" class="change" data-key="codexApiKey" hidden>更换</button>
         </div>
-        <div class="secret">
+        <div class="secret" data-key="arkApiKey">
           <label for="arkApiKey">Ark</label>
           <span class="badge" id="badge-arkApiKey">未设置</span>
           <span class="key-usage" id="usage-arkApiKey">当前未使用</span>
           <input type="password" id="arkApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
           <button type="button" class="clear" data-key="arkApiKey">清除</button>
+          <button type="button" class="change" data-key="arkApiKey" hidden>更换</button>
         </div>
-        <div class="secret">
+        <div class="secret" data-key="doubaoBigmodelApiKey">
           <label for="doubaoBigmodelApiKey">豆包大模型</label>
           <span class="badge" id="badge-doubaoBigmodelApiKey">未设置</span>
           <span class="key-usage" id="usage-doubaoBigmodelApiKey">当前未使用</span>
           <input type="password" id="doubaoBigmodelApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
           <button type="button" class="clear" data-key="doubaoBigmodelApiKey">清除</button>
+          <button type="button" class="change" data-key="doubaoBigmodelApiKey" hidden>更换</button>
         </div>
-        <div class="secret">
+        <div class="secret" data-key="doubaoAsrApiKey">
           <label for="doubaoAsrApiKey">豆包 ASR</label>
           <span class="badge" id="badge-doubaoAsrApiKey">未设置</span>
           <span class="key-usage" id="usage-doubaoAsrApiKey">当前未使用</span>
           <input type="password" id="doubaoAsrApiKey" placeholder="留空保持不变" autocomplete="off" spellcheck="false">
           <button type="button" class="clear" data-key="doubaoAsrApiKey">清除</button>
+          <button type="button" class="change" data-key="doubaoAsrApiKey" hidden>更换</button>
         </div>
         </div>
       </details>

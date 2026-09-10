@@ -3,8 +3,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import {runInNewContext} from 'node:vm'
+import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import * as settingsController from '../src/renderer/settings-controller.mjs'
 import {createSecretRevisions} from '../src/renderer/secret-revisions.mjs'
+import {secretRowCollapsed} from '../src/renderer/secret-row-visibility.mjs'
 import * as voiceChoice from '../src/renderer/voice-choice.mjs'
 
 const { createSettingsController, mergePatch, settingsButtonState } = settingsController
@@ -59,14 +61,17 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   function node(selector) {
     if (!nodes.has(selector)) nodes.set(selector, {
       id: selector.slice(1), value: '', textContent: '', hidden: true, dataset: {},
-      listeners: {}, append() {},
+      listeners: {}, attributes: {}, tabIndex: 0, focused: 0, append() {},
       addEventListener(event, listener) { this.listeners[event] = listener },
+      setAttribute(name, value) { this.attributes[name] = String(value) },
+      getAttribute(name) { return this.attributes[name] ?? null },
+      focus() { this.focused += 1 },
     })
     return nodes.get(selector)
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    ...settingsController, ...voiceChoice, createSecretRevisions, frontendUsageText,
+    ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, secretRowCollapsed, frontendUsageText,
     createCapabilitiesEditor: () => ({render() {}}),
     createKnowledgePanel: () => ({render() {}}),
     document: {
@@ -1029,4 +1034,169 @@ test('usage stays current through a stale save reply and renders a compact summa
   assert.equal(panel.node('#frontend-usage').textContent, '本次运行前台估算费用：¥0.1200')
   assert.doesNotMatch(panel.node('#frontend-usage').textContent, /官方按量/)
   assert.match(panel.node('#frontend-usage-details').textContent, /官方按量/)
+})
+
+test('every settings block belongs to exactly one sidebar category', () => {
+  const sections = settingsCategories.categorySectionIds()
+  assert.equal(new Set(sections).size, sections.length, 'no block is claimed twice')
+  for (const id of sections) {
+    assert.match(html, new RegExp(`id="${id}"`), `${id} exists in the markup`)
+  }
+  // Every top-level block the panel ships is navigable; one left out of the
+  // table would be hidden permanently by applyCategory.
+  const blocks = [...html.matchAll(/<(?:section|details) (?:class="[^"]*" )?id="([^"]+)"/g)]
+    .map(match => match[1])
+    .filter(id => !['integrated-pipeline', 'cascaded-pipeline'].includes(id))
+  for (const id of blocks) assert.ok(sections.includes(id), `${id} is missing from a category`)
+})
+
+test('the sidebar renders one button per category with the first current', () => {
+  assert.match(html, /<nav class="settings-nav" id="settings-nav" aria-label="设置分类">/)
+  for (const category of settingsCategories.SETTINGS_CATEGORIES) {
+    assert.match(html, new RegExp(
+      `<button type="button" class="nav-item" id="category-${category.id}" data-category="${category.id}"`,
+    ))
+    assert.match(html, new RegExp(`${category.label}</button>`))
+  }
+  assert.match(html, /id="category-general" data-category="general" aria-current="true">/)
+  assert.equal((html.match(/class="nav-item"/g) || []).length, 6)
+  assert.equal((html.match(/tabindex="-1"/g) || []).length, 5)
+})
+
+test('sidebar navigation cycles vertically and passes other keys through', () => {
+  const {categoryTabForKey} = settingsCategories
+  assert.equal(categoryTabForKey('general', 'ArrowDown'), 'pipeline')
+  assert.equal(categoryTabForKey('general', 'ArrowUp'), 'codex', 'wraps backwards')
+  assert.equal(categoryTabForKey('codex', 'ArrowDown'), 'general', 'wraps forwards')
+  assert.equal(categoryTabForKey('secrets', 'Home'), 'general')
+  assert.equal(categoryTabForKey('secrets', 'End'), 'codex')
+  assert.equal(categoryTabForKey('general', 'Tab'), null)
+  assert.equal(categoryTabForKey('general', 'Enter'), null)
+  assert.equal(categoryTabForKey('unknown-category', 'ArrowDown'), null)
+})
+
+test('only the selected category is visible and it owns the current marker', async () => {
+  const panel = await mountSettingsPanel(publicView())
+  const every = (category, state) => settingsCategories.SETTINGS_CATEGORIES
+    .find(entry => entry.id === category).sections
+    .every(id => panel.node(`#${id}`).hidden === state)
+
+  assert.ok(every('general', false), 'the panel opens on the first category')
+  assert.ok(every('secrets', true))
+  assert.equal(panel.node('#category-general').getAttribute('aria-current'), 'true')
+  assert.equal(panel.node('#category-general').tabIndex, 0)
+  assert.equal(panel.node('#category-secrets').tabIndex, -1)
+
+  await panel.click('#category-secrets')
+  assert.ok(every('secrets', false))
+  assert.ok(every('general', true), 'switching away hides the previous category')
+  assert.equal(panel.node('#category-secrets').getAttribute('aria-current'), 'true')
+  assert.equal(panel.node('#category-general').getAttribute('aria-current'), 'false')
+  assert.equal(panel.node('#category-secrets').tabIndex, 0)
+})
+
+test('both advanced disclosures open once a category owns the panel', async () => {
+  const panel = await mountSettingsPanel(publicView())
+  assert.equal(panel.node('#secrets').open, true)
+  assert.equal(panel.node('#codex-projects').open, true)
+})
+
+test('a focus request from the orb menu selects that category', async () => {
+  const panel = await mountSettingsPanel(publicView())
+  panel.push(publicView({focusCategory: 'capabilities'}))
+  assert.equal(panel.node('#capabilities-section').hidden, false)
+  assert.equal(panel.node('#category-capabilities').getAttribute('aria-current'), 'true')
+})
+
+test('an unknown or absent focus request leaves the category alone', async () => {
+  const panel = await mountSettingsPanel(publicView())
+  panel.push(publicView({focusCategory: 'not-a-category'}))
+  assert.equal(panel.node('#category-general').getAttribute('aria-current'), 'true')
+  panel.push(publicView())
+  assert.equal(panel.node('#category-general').getAttribute('aria-current'), 'true')
+})
+
+test('a stored key hides its input behind 更换 and 清除', async () => {
+  const panel = await mountSettingsPanel(publicView({
+    secretsPresent: {dashscopeApiKey: true, tavilyApiKey: false},
+  }))
+
+  assert.equal(panel.node('#dashscopeApiKey').hidden, true, 'a stored key shows no input')
+  assert.equal(panel.node('button.change[data-key="dashscopeApiKey"]').hidden, false)
+  assert.equal(panel.node('div.secret[data-key="dashscopeApiKey"]').dataset.mode, 'collapsed')
+  assert.equal(panel.node('#badge-dashscopeApiKey').textContent, '已设置')
+
+  assert.equal(panel.node('#tavilyApiKey').hidden, false, 'an unset key keeps its input')
+  assert.equal(panel.node('button.change[data-key="tavilyApiKey"]').hidden, true)
+  assert.equal(panel.node('div.secret[data-key="tavilyApiKey"]').dataset.mode, 'expanded')
+})
+
+test('更换 reveals the input for that key alone and focuses it', async () => {
+  const panel = await mountSettingsPanel(publicView({
+    secretsPresent: {dashscopeApiKey: true, codexApiKey: true},
+  }))
+  await panel.click('button.change[data-key="dashscopeApiKey"]')
+
+  assert.equal(panel.node('#dashscopeApiKey').hidden, false)
+  assert.equal(panel.node('button.change[data-key="dashscopeApiKey"]').hidden, true)
+  assert.equal(panel.node('#dashscopeApiKey').focused, 1, 'the revealed input takes focus')
+  assert.equal(panel.node('#codexApiKey').hidden, true, 'other stored keys stay collapsed')
+})
+
+test('清除 reveals the empty field that saving will commit', async () => {
+  const panel = await mountSettingsPanel(publicView({secretsPresent: {dashscopeApiKey: true}}))
+  panel.node('#dashscopeApiKey').value = 'unsaved'
+  await panel.click('button.clear[data-key="dashscopeApiKey"]')
+
+  assert.equal(panel.node('#dashscopeApiKey').value, '')
+  assert.equal(panel.node('#dashscopeApiKey').hidden, false, 'the row shows what Save commits')
+  assert.equal(panel.node('#settings-save').disabled, false, 'clearing stages a change')
+})
+
+test('an accepted save collapses the row it just stored', async () => {
+  const panel = await mountSettingsPanel(publicView({secretsPresent: {}}), {
+    set: async patch => publicView({
+      ...patch,
+      secretsPresent: {dashscopeApiKey: true},
+      rejectedSecrets: [],
+    }),
+  })
+  await panel.click('button.change[data-key="dashscopeApiKey"]')
+  panel.node('#dashscopeApiKey').value = 'sk-live'
+  panel.node('#dashscopeApiKey').listeners.input()
+  panel.click('#settings-save')
+  // The save button hands off to a fire-and-forget async path.
+  await new Promise(resolve => setImmediate(resolve))
+  await new Promise(resolve => setImmediate(resolve))
+
+  assert.equal(panel.node('#dashscopeApiKey').value, '', 'plaintext never lingers')
+  assert.equal(panel.node('#dashscopeApiKey').hidden, true, 'the stored key re-collapses')
+  assert.equal(panel.node('button.change[data-key="dashscopeApiKey"]').hidden, false)
+})
+
+test('secret row collapse depends on storage and an explicit reveal', () => {
+  assert.equal(secretRowCollapsed(true, false), true)
+  assert.equal(secretRowCollapsed(true, true), false, 'an explicit reveal wins')
+  assert.equal(secretRowCollapsed(false, false), false, 'an unset key always shows its input')
+  assert.equal(secretRowCollapsed(false, true), false)
+  assert.equal(secretRowCollapsed(undefined, undefined), false, 'absent presence is not stored')
+})
+
+test('the panel ships a 更换 action and a keyed row for every secret', () => {
+  for (const key of [
+    'dashscopeApiKey',
+    'tavilyApiKey',
+    'modelApiKey',
+    'codexApiKey',
+    'arkApiKey',
+    'doubaoBigmodelApiKey',
+    'doubaoAsrApiKey',
+  ]) {
+    assert.match(html, new RegExp(
+      `<button type="button" class="change" data-key="${key}" hidden>更换</button>`,
+    ))
+    assert.match(html, new RegExp(`<div class="secret" data-key="${key}">`))
+  }
+  assert.equal((html.match(/class="change"/g) || []).length, 7)
+  assert.match(css, /\.secret\[data-mode="collapsed"\]/)
 })

@@ -32,6 +32,10 @@ html {
 }
 
 body {
+  display: grid;
+  grid-template-columns: 178px minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  column-gap: 18px;
   min-height: 100vh;
   margin: 0;
   padding: 0 16px 14px;
@@ -53,6 +57,7 @@ body::-webkit-scrollbar-thumb {
 }
 
 header {
+  grid-column: 1 / -1;
   position: sticky;
   top: 0;
   z-index: 4;
@@ -97,7 +102,42 @@ header h1 {
   white-space: nowrap;
 }
 
-main { min-width: 0; }
+main {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+}
+
+.settings-nav {
+  grid-column: 1;
+  grid-row: 2;
+  position: sticky;
+  top: 72px;
+  display: flex;
+  flex-direction: column;
+  align-self: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-nav .nav-item {
+  padding: 8px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-nav .nav-item:hover { background: var(--surface); }
+
+.settings-nav .nav-item[aria-current="true"] {
+  background: var(--accent-wash);
+  color: var(--ink);
+  font-weight: 650;
+}
 
 .setting-section {
   margin: 0 0 16px;
@@ -580,6 +620,14 @@ button:disabled { cursor: default; opacity: .45; }
 .secret > .key-usage { grid-area: usage; }
 .secret > input { grid-area: input; }
 .secret > button { grid-area: clear; }
+.secret > .change { grid-area: change; }
+
+/* A stored key needs no input, so the row collapses to one line and spends the
+   freed width on both actions. */
+.secret[data-mode="collapsed"] {
+  grid-template-columns: var(--label-col) auto minmax(0, 1fr) auto auto;
+  grid-template-areas: "name badge usage change clear";
+}
 
 .badge {
   padding: 1px 6px;
@@ -658,6 +706,30 @@ footer {
   border-top: 1px solid var(--line);
 }
 
+#restart-notice, footer { grid-column: 1 / -1; }
+
+/* Approaching the 620px floor the rail turns into a scrollable strip, the
+   same idiom the memory board's tabs use. */
+@media (max-width: 640px) {
+  body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr) auto auto;
+  }
+
+  .settings-nav {
+    grid-column: 1;
+    grid-row: 2;
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+    margin-bottom: 12px;
+    padding-bottom: 2px;
+  }
+
+  .settings-nav .nav-item { flex: none; }
+  main { grid-column: 1; grid-row: 3; }
+}
+
 .note {
   margin: 0;
   color: var(--ink-faint);
@@ -690,6 +762,7 @@ footer {
   }
 
   .segmented label.choice:has(:checked) { border-color: var(--accent); }
+  .settings-nav .nav-item[aria-current="true"] { border-color: var(--accent); }
   :is(input, select, button, summary):focus-visible,
   .segmented label.choice:has(:focus-visible) { outline-width: 3px; }
 }
@@ -706,6 +779,11 @@ footer {
   }
 
   .badge[data-present="1"] {
+    border-color: Highlight;
+    color: Highlight;
+  }
+
+  .settings-nav .nav-item[aria-current="true"] {
     border-color: Highlight;
     color: Highlight;
   }

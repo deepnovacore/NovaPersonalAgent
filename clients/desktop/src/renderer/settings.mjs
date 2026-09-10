@@ -9,6 +9,12 @@ import {
   settingsButtonState,
 } from './settings-controller.mjs'
 import { createSecretRevisions } from './secret-revisions.mjs'
+import { secretRowCollapsed } from './secret-row-visibility.mjs'
+import {
+  SETTINGS_CATEGORIES,
+  categoryTabForKey,
+  isValidCategory,
+} from './settings-categories.mjs'
 import {
   CUSTOM_VOICE_VALUE,
   QWEN_VOICES,
@@ -51,6 +57,8 @@ const WORKSPACE_STATUS_TEXT = Object.freeze({
 
 const secretRevisions = createSecretRevisions(SECRET_KEYS)
 const dirtySecretKeys = new Set()
+// Keys the user chose to re-enter this session; cleared once a save lands.
+const revealedSecretKeys = new Set()
 let currentView = null
 let controllerState = {dirty: false, busy: false}
 let workspaceBusy = false
@@ -105,6 +113,40 @@ const cascadedTtsVoiceCustom = document.querySelector('#cascadedTtsVoiceCustom')
 const clarificationDepth = document.querySelector('#clarificationDepth')
 const plannerModel = document.querySelector('#plannerModel')
 
+const categoryButtons = SETTINGS_CATEGORIES.map(category => document.querySelector(`#category-${category.id}`))
+let activeCategory = SETTINGS_CATEGORIES[0].id
+
+// Sections are addressed by id from the category table rather than by a markup
+// attribute, so showing a category never depends on document order.
+function applyCategory(id) {
+  if (!isValidCategory(id)) return
+  activeCategory = id
+  for (const category of SETTINGS_CATEGORIES) {
+    const visible = category.id === id
+    for (const sectionId of category.sections) {
+      const section = document.getElementById(sectionId)
+      if (section) section.hidden = !visible
+    }
+  }
+  for (const [index, button] of categoryButtons.entries()) {
+    const selected = SETTINGS_CATEGORIES[index].id === id
+    button.setAttribute('aria-current', selected ? 'true' : 'false')
+    button.tabIndex = selected ? 0 : -1
+  }
+}
+
+for (const [index, button] of categoryButtons.entries()) {
+  const id = SETTINGS_CATEGORIES[index].id
+  button.addEventListener('click', () => { applyCategory(id) })
+  button.addEventListener('keydown', event => {
+    const next = categoryTabForKey(activeCategory, event.key)
+    if (next === null) return
+    event.preventDefault()
+    applyCategory(next)
+    document.querySelector(`#category-${next}`).focus?.()
+  })
+}
+
 const capabilityEditor = createCapabilitiesEditor({root: document.querySelector('#capabilities-editor'),
   stateLabel: document.querySelector('#capabilities-state'), problemsLabel: document.querySelector('#capabilities-problems'),
   stage: patch => controller.stage(patch), probe: payload => api.probeCapabilities(payload)})
@@ -128,6 +170,20 @@ populateVoiceOptions(integratedVoicePreset, QWEN_VOICES)
 populateVoiceOptions(cascadedTtsVoicePreset, VOLCENGINE_TTS_VOICES)
 
 function secretInput(key) { return document.querySelector(`#${key}`) }
+function secretRow(key) { return document.querySelector(`div.secret[data-key="${key}"]`) }
+function secretChangeButton(key) { return document.querySelector(`button.change[data-key="${key}"]`) }
+function secretClearButton(key) { return document.querySelector(`button.clear[data-key="${key}"]`) }
+
+function renderSecretRow(key) {
+  const collapsed = secretRowCollapsed(
+    currentView?.secretsPresent?.[key] === true,
+    revealedSecretKeys.has(key),
+  )
+  secretInput(key).hidden = collapsed
+  secretChangeButton(key).hidden = !collapsed
+  const row = secretRow(key)
+  if (row) row.dataset.mode = collapsed ? 'collapsed' : 'expanded'
+}
 
 function renderBadges(present) {
   for (const key of SECRET_KEYS) {
@@ -247,6 +303,7 @@ function render(view, _drafts, state) {
   cascadedTtsProvider.value = view.cascadedTtsProvider
   renderVoice(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
   renderBadges(view.secretsPresent)
+  for (const key of SECRET_KEYS) renderSecretRow(key)
   renderKeyUsage(view)
   warning.hidden = view.keyringAvailable !== false
   const recoveryStatus = view.managedWorkspaces?.recoveryStatus ?? 'idle'
@@ -301,7 +358,10 @@ const controller = createSettingsController({
   status: note => { statusLabel.textContent = note },
   notice: updateRestartNotice,
 })
-api.onChanged(view => { controller.syncView(view) })
+api.onChanged(view => {
+  if (isValidCategory(view?.focusCategory)) applyCategory(view.focusCategory)
+  controller.syncView(view)
+})
 
 function bindStage(element, event, patch) {
   element.addEventListener(event, () => { controller.stage(patch()) })
@@ -377,14 +437,21 @@ for (const key of SECRET_KEYS) {
     updateButtons()
   })
 }
-for (const button of document.querySelectorAll('button.clear')) {
-  button.addEventListener('click', () => {
-    const key = button.dataset.key
+for (const key of SECRET_KEYS) {
+  secretClearButton(key).addEventListener('click', () => {
     const input = secretInput(key)
     input.value = ''
     secretRevisions.noteInput(key)
     dirtySecretKeys.add(key)
+    // Reveal so the row shows the empty field that Save will commit.
+    revealedSecretKeys.add(key)
+    renderSecretRow(key)
     updateButtons()
+  })
+  secretChangeButton(key).addEventListener('click', () => {
+    revealedSecretKeys.add(key)
+    renderSecretRow(key)
+    secretInput(key).focus?.()
   })
 }
 
@@ -403,6 +470,8 @@ async function saveAll() {
     if (secretRevisions.matches(key, input.value, submissions[key])) {
       input.value = ''
       dirtySecretKeys.delete(key)
+      revealedSecretKeys.delete(key)
+      renderSecretRow(key)
     }
   }
   if (result.rejectedSecrets.length) {
@@ -487,6 +556,15 @@ workspaceRetryRecovery.addEventListener('click', () => {
     }
   })
 })
+
+// Inside a dedicated category a collapsed disclosure is only a second click,
+// so both open on load. Set as a DOM property, never as a markup attribute:
+// the panel contract requires these sections ship closed in the source.
+for (const id of ['#secrets', '#codex-projects']) {
+  const disclosure = document.querySelector(id)
+  if (disclosure) disclosure.open = true
+}
+applyCategory(activeCategory)
 
 void (async () => {
   try {
