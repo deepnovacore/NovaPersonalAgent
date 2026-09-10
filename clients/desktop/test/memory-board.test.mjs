@@ -476,3 +476,64 @@ test('channel selection never issues a backend read', async () => {
   assert.match(source, /let activeChannel = null/)
   assert.match(source, /activeChannel = resolveActiveChannel\(/)
 })
+
+test('a refresh reuses the channel buttons so keyboard focus survives it', async t => {
+  const descriptors = Object.fromEntries(['document', 'window', 'setInterval'].map(
+    key => [key, Object.getOwnPropertyDescriptor(globalThis, key)],
+  ))
+  const document = new BoardDocument()
+  let depth = 1
+  let channels = ['conversation', 'codex']
+  const payload = () => ({
+    backend_generation: 3,
+    channels: channels.map(name => ({
+      name, summary: null, item_count: depth, items: [],
+    })),
+    diagnostics: {version: 1, records: []},
+  })
+  Object.defineProperties(globalThis, {
+    document: {configurable: true, value: document},
+    window: {configurable: true, value: {novaAudioAgentDesktop: {
+      memoryBoard: {
+        request: async () => payload(),
+        clear: async () => ({canceled: true}),
+        copyJson: async () => ({copied: true}),
+        export: async () => ({canceled: true}),
+      },
+      graphBoard: {request: async () => ({error: 'unavailable'})},
+    }}},
+    setInterval: {configurable: true, value: () => 1},
+  })
+  t.after(() => {
+    for (const [key, descriptor] of Object.entries(descriptors)) {
+      if (descriptor === undefined) delete globalThis[key]
+      else Object.defineProperty(globalThis, key, descriptor)
+    }
+  })
+
+  await import(`../src/renderer/memory-board.mjs?reuse-test=${Date.now()}`)
+  await settle()
+
+  const rail = document.querySelector('#channel-tabs')
+  const firstPass = [...rail.children]
+  assert.equal(firstPass.length, 2)
+
+  // A refresh that only changes depth must not replace the focusable nodes:
+  // in a browser, replacing them drops focus and arrow navigation stops.
+  depth = 5
+  document.querySelector('#refresh').click()
+  await settle()
+  assert.deepEqual([...rail.children], firstPass, 'the same button nodes are reused')
+  assert.deepEqual(
+    rail.children.map(tab => tab.textContent),
+    ['对话 5', 'Codex 5'],
+    'labels still restate the current depth',
+  )
+
+  // A genuine channel-set change does rebuild.
+  channels = ['conversation', 'codex', 'guard']
+  document.querySelector('#refresh').click()
+  await settle()
+  assert.equal(rail.children.length, 3)
+  assert.notDeepEqual([...rail.children], firstPass, 'a new channel set rebuilds the rail')
+})

@@ -12,12 +12,12 @@ const CHANNEL_LABELS = Object.freeze({
   mcp__nova_camera: 'Camera',
   mcp__nova_knowledge: 'Knowledge',
 })
-const MCP_PREFIX = 'mcp__'
+const MCP_PREFIX = /^mcp__/
 /** A dynamic external server's manifest display_name is the bare server name. */
 export function channelLabel(name) {
   if (typeof name !== 'string') return ''
   if (CHANNEL_LABELS[name]) return CHANNEL_LABELS[name]
-  return name.startsWith(MCP_PREFIX) ? name.slice(MCP_PREFIX.length) : name
+  return name.replace(MCP_PREFIX, '')
 }
 
 /** Conversation leads the rail; every other channel keeps its payload order. */

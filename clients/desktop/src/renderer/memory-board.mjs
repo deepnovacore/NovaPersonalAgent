@@ -189,28 +189,44 @@ function selectChannel(name) {
   renderActiveChannelCard()
 }
 
+function buildChannelTab(name) {
+  const tab = document.createElement('button')
+  tab.type = 'button'
+  tab.className = 'channel-tab'
+  tab.id = `channel-tab-${name}`
+  tab.dataset.channel = name
+  tab.setAttribute('role', 'tab')
+  tab.setAttribute('aria-controls', 'channels')
+  tab.addEventListener('click', () => { selectChannel(name) })
+  tab.addEventListener('keydown', event => {
+    const names = [...(channelTabsRoot.children ?? [])].map(entry => entry.dataset.channel)
+    const next = channelTabForKey(names, activeChannel, event.key)
+    if (next === null) return
+    event.preventDefault()
+    selectChannel(next)
+    document.querySelector(`#channel-tab-${next}`)?.focus?.()
+  })
+  return tab
+}
+
+/**
+ * Rebuilds only when the channel set itself changes. The board refreshes every
+ * two seconds, and replacing the buttons each time would drop the keyboard
+ * focus sitting on one of them, stopping arrow navigation until the user
+ * tabbed back into the rail.
+ */
 function renderChannelTabs() {
   const ordered = orderedChannels()
-  activeChannel = resolveActiveChannel(ordered.map(channel => channel.name), activeChannel)
-  channelTabsRoot.replaceChildren(...ordered.map(channel => {
-    const tab = document.createElement('button')
-    tab.type = 'button'
-    tab.className = 'channel-tab'
-    tab.id = `channel-tab-${channel.name}`
-    tab.dataset.channel = channel.name
-    tab.setAttribute('role', 'tab')
-    tab.setAttribute('aria-controls', 'channels')
-    tab.textContent = `${channelLabel(channel.name)} ${channel.item_count}`
-    tab.addEventListener('click', () => { selectChannel(channel.name) })
-    tab.addEventListener('keydown', event => {
-      const next = channelTabForKey(ordered.map(entry => entry.name), activeChannel, event.key)
-      if (next === null) return
-      event.preventDefault()
-      selectChannel(next)
-      document.querySelector(`#channel-tab-${next}`)?.focus?.()
-    })
-    return tab
-  }))
+  const names = ordered.map(channel => channel.name)
+  activeChannel = resolveActiveChannel(names, activeChannel)
+  const mounted = [...(channelTabsRoot.children ?? [])].map(tab => tab.dataset.channel)
+  if (mounted.length !== names.length || mounted.some((name, index) => name !== names[index])) {
+    channelTabsRoot.replaceChildren(...names.map(buildChannelTab))
+  }
+  for (const [index, tab] of [...(channelTabsRoot.children ?? [])].entries()) {
+    // Depth changes on nearly every refresh, so the label is always restated.
+    tab.textContent = `${channelLabel(names[index])} ${ordered[index].item_count}`
+  }
   markActiveChannelTab()
 }
 

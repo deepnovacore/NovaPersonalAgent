@@ -2,6 +2,7 @@ import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createBackendControl} from './backend-control.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
+import {activeMcpMenuRows} from './orb-menu.mjs'
 import {parseSettingsCommit, validatePreparedSettings, prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, assertEditorSafe, referencedCapabilitySecrets, capabilityPath, capabilityDocumentRevision, invalidCommit} from './capabilities-settings.mjs'
 import {parseCapabilityRegistry} from '@nova-audio-agent/runtime/desktop'
 import { WakeWordRuntime } from './wake-word/runtime.mjs'
@@ -419,13 +420,13 @@ function openMemoryBoard(launchId) {
   void window.loadURL('nova://orb/memory-board.html')
 }
 
-function openSettingsWindow(launchId) {
+function openSettingsWindow(launchId, { category } = {}) {
   capabilityEditorCache = null
   if (settingsWindow) {
     settingsWindow.show()
     settingsWindow.focus()
     void refreshManagedWorkspaceCapabilities().then(() => {
-      sendToSettings('nova:settings:changed', settingsView())
+      sendToSettings('nova:settings:changed', settingsFocusView(category))
     })
     return
   }
@@ -443,15 +444,33 @@ function openSettingsWindow(launchId) {
   })
   settingsWindow = window
   void refreshManagedWorkspaceCapabilities().then(() => {
-    sendToSettings('nova:settings:changed', settingsView())
+    sendToSettings('nova:settings:changed', settingsFocusView(category))
   })
   void window.loadURL('nova://orb/settings.html')
+}
+
+// The orb's MCP submenu asks for a category; every other caller omits it and
+// gets the panel's own default. Rides the existing push rather than a new
+// channel, so the preload surface stays exactly as wide as it was.
+function settingsFocusView(category) {
+  return category ? { ...settingsView(), focusCategory: category } : settingsView()
+}
+
+// A native menu snapshots its template at popup time and cannot show a hover
+// tooltip on every platform, so the live MCP status hangs off a submenu built
+// from whatever the last backend status reported. Carries no separator of its
+// own: the orb template's single separator is a structural contract.
+function activeMcpSubmenu(launchId) {
+  return activeMcpMenuRows(runtimeCapabilities).map(row => (row.enabled
+    ? { label: row.label, click: () => openSettingsWindow(launchId, { category: 'capabilities' }) }
+    : { label: row.label, enabled: false }))
 }
 
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
     { label: 'Memory Board', click: () => openMemoryBoard(launchId) },
     { label: '设置…', click: () => openSettingsWindow(launchId) },
+    { label: '活跃 MCP', submenu: activeMcpSubmenu(launchId) },
     { type: 'separator' },
     { label: '退出 Nova Audio Agent', click: () => app.quit() },
   ]).popup({ window: mainWindow })

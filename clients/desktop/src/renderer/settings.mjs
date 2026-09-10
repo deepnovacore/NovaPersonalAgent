@@ -434,6 +434,11 @@ for (const key of SECRET_KEYS) {
   secretInput(key).addEventListener('input', () => {
     secretRevisions.noteInput(key)
     dirtySecretKeys.add(key)
+    // A typed draft pins the row open. Without this a save reply that reports
+    // the key as newly stored would collapse a row whose input still holds a
+    // newer keystroke, hiding plaintext that the next save would still submit.
+    revealedSecretKeys.add(key)
+    renderSecretRow(key)
     updateButtons()
   })
 }

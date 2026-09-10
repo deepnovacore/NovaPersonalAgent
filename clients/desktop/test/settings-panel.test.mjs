@@ -1200,3 +1200,53 @@ test('the panel ships a 更换 action and a keyed row for every secret', () => {
   assert.equal((html.match(/class="change"/g) || []).length, 7)
   assert.match(css, /\.secret\[data-mode="collapsed"\]/)
 })
+
+test('a save reply never hides a draft typed after that save was sent', async () => {
+  // The reveal must survive the reply, or the row collapses over a newer
+  // keystroke and the next save ships plaintext the user cannot see.
+  const outbound = []
+  const panel = await mountSettingsPanel(publicView({secretsPresent: {}}), {
+    set: async patch => {
+      outbound.push(structuredClone(patch))
+      return publicView({...patch, secretsPresent: {dashscopeApiKey: true}, rejectedSecrets: []})
+    },
+  })
+  const input = panel.node('#dashscopeApiKey')
+  assert.equal(input.hidden, false, 'an unset key starts visible')
+
+  // Typed straight into the visible input: no 更换 click is involved here.
+  input.value = 'SECRET-A'
+  input.listeners.input()
+  panel.click('#settings-save')
+  input.value = 'SECRET-B'
+  input.listeners.input()
+  await new Promise(resolve => setImmediate(resolve))
+  await new Promise(resolve => setImmediate(resolve))
+
+  assert.equal(input.value, 'SECRET-B', 'the revision guard keeps the newer draft')
+  assert.equal(input.hidden, false, 'a staged draft is never hidden')
+  assert.equal(
+    panel.node('div.secret[data-key="dashscopeApiKey"]').dataset.mode,
+    'expanded',
+    'the row stays open while it holds an unsaved value',
+  )
+})
+
+test('a rejected save leaves the retried key visible', async () => {
+  const panel = await mountSettingsPanel(publicView({secretsPresent: {dashscopeApiKey: true}}), {
+    set: async patch => publicView({
+      ...patch,
+      secretsPresent: {dashscopeApiKey: true},
+      rejectedSecrets: ['dashscopeApiKey'],
+    }),
+  })
+  await panel.click('button.change[data-key="dashscopeApiKey"]')
+  panel.node('#dashscopeApiKey').value = 'badvalue'
+  panel.node('#dashscopeApiKey').listeners.input()
+  panel.click('#settings-save')
+  await new Promise(resolve => setImmediate(resolve))
+  await new Promise(resolve => setImmediate(resolve))
+
+  assert.equal(panel.node('#dashscopeApiKey').hidden, false, 'a rejected key stays correctable')
+  assert.match(panel.node('#status').textContent, /部分密钥未保存/)
+})
