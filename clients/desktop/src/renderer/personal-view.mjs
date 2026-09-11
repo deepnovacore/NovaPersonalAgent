@@ -25,7 +25,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const hint=el('p','','personal-hint');composer.append(draft,inputActions,hint,error);chat.append(history,composer)
  const side=el('section',undefined,'personal-side');side.setAttribute('aria-label','个人空间');columns.append(side)
  const tabs=el('nav',undefined,'personal-tabs');tabs.setAttribute('aria-label','个人空间视图');const panel=el('div',undefined,'personal-panel');side.append(tabs,panel)
- let selected='动态',ignored=false,renderedSnapshot=null,taskRevision=-1
+ let selected='动态',ignored=false,debugEvidence=false,renderedSnapshot=null,taskRevision=-1
  const presented=new Set()
  const tabButtons=new Map();for(const title of ['动态','任务','记忆'])tabButtons.set(title,button(title,()=>{selected=title;renderPanel()},tabs))
  const expand=el('button','展开 Nova');expand.id='personal-expand';expand.type='button';expand.addEventListener('click',()=>run(()=>collapse(false)));document.querySelector('#shell').append(expand)
@@ -33,7 +33,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const chips=(parent,values)=>{const row=el('div',undefined,'personal-chips');for(const value of values.filter(Boolean))row.append(el('span',value));parent.append(row)}
  const card=(title,summary)=>{const a=el('article',undefined,'personal-card');a.append(el('h3',title));if(summary)a.append(el('p',summary));panel.append(a);return a}
  const continueChat=(text)=>{c.draft=`关于「${text}」：`;update();draft.focus()}
- function evidence(parent,refs) {const details=el('details');details.append(el('summary','查看依据'));for(const ref of refs??[])details.append(el('p',typeof ref==='string'?ref:`${ref.type??'记忆'} · ${ref.ref??ref.entry_id??''}${ref.observed_at?' · '+ref.observed_at:''}`));parent.append(details);return details}
+ function evidence(parent,refs,diagnostics=false) {if(!debugEvidence&&!diagnostics)return null;const details=el('details');details.append(el('summary',diagnostics?'同步详情':'查看依据'));for(const ref of refs??[])details.append(el('p',typeof ref==='string'?ref:`${ref.type??'记忆'} · ${ref.ref??ref.entry_id??''}${ref.observed_at?' · '+ref.observed_at:''}`));parent.append(details);return details}
  function renderPanel(){
   panel.replaceChildren();for(const [name,b]of tabButtons)b.setAttribute('aria-current',String(name===selected))
   const s=c.snapshot;const caps=s?.capabilities??{}
@@ -41,7 +41,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
    const heading=el('div',undefined,'personal-section-heading');heading.append(el('h2','动态'));button(ignored?'返回当前':'查看已忽略',()=>{ignored=!ignored;renderPanel()},heading);panel.append(heading)
    const feed=(s?.feed??[]).filter(item=>ignored?item.user_state==='dismissed'||item.user_state==='dismiss':item.user_state!=='dismissed'&&item.user_state!=='dismiss')
    if(!feed.length)card(ignored?'没有已忽略的动态':'暂无动态','有新建议时会显示在这里。')
-   for(const item of feed){if(!c.collapsed&&!item.delivery?.presented_at&&!presented.has(item.id)){presented.add(item.id);void c.command('feed.action',{id:item.id,action:'presented'}).catch(()=>presented.delete(item.id))}const a=card(item.title,item.why_now);chips(a,[item.kind==='question'?'待回应':'建议',({active:'待处理',resolved:'已完成',invalidated:'已失效'}[item.lifecycle]||item.lifecycle),item.task_ref?'关联任务':null]);evidence(a,[...(item.evidence_refs??[]),...(item.memory_refs??[])]).addEventListener('toggle',e=>{if(e.target.open)void run(()=>c.command('feed.action',{id:item.id,action:'expand_evidence'}))});const actions=el('div',undefined,'personal-actions');a.append(actions)
+   for(const item of feed){if(!c.collapsed&&!item.delivery?.presented_at&&!presented.has(item.id)){presented.add(item.id);void c.command('feed.action',{id:item.id,action:'presented'}).catch(()=>presented.delete(item.id))}const a=card(item.title,item.why_now);chips(a,[item.kind==='question'?'待回应':'建议',({active:'待处理',resolved:'已完成',invalidated:'已失效'}[item.lifecycle]||item.lifecycle),item.task_ref?'关联任务':null]);evidence(a,[...(item.evidence_refs??[]),...(item.memory_refs??[])])?.addEventListener('toggle',e=>{if(e.target.open)void run(()=>c.command('feed.action',{id:item.id,action:'expand_evidence'}))});const actions=el('div',undefined,'personal-actions');a.append(actions)
     button('接着聊',async()=>{await c.command('feed.action',{id:item.id,action:'open'});continueChat(item.title)},actions)
     if(item.lifecycle==='active'&&!ignored){button('处理',()=>c.command('feed.action',{id:item.id,action:'act'}),actions);button('稍后',()=>c.command('feed.action',{id:item.id,action:'snooze',snooze_until:new Date(Date.now()+3600000).toISOString()}),actions);button('忽略',()=>c.command('feed.action',{id:item.id,action:'dismiss'}),actions)}
    }
@@ -55,7 +55,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
    const recordDetails=(parent,items,label)=>{
     const records=el('details',undefined,'memory-group-details');records.append(el('summary',label));parent.append(records)
     for(const entry of items){
-     const a=el('details',undefined,'memory-entry-details');a.append(el('summary',entry.topic||entry.content?.slice(0,48)||'记忆'));a.append(el('p',entry.content));chips(a,[entry.origin==='stated'?'你说过':'根据资料',entry.confidence_note]);evidence(a,entry.source_refs);records.append(a)
+     const a=el('article',undefined,'memory-entry-details');a.append(el('h4',entry.topic||entry.content?.slice(0,48)||'记忆'));a.append(el('p',entry.content));chips(a,[entry.origin==='stated'?'你说过':'根据资料',entry.confidence_note]);evidence(a,entry.source_refs);records.append(a)
      const correction=el('textarea');correction.value=entry.content;correction.maxLength=500;correction.setAttribute('aria-label','纠正记忆内容');correction.hidden=true;a.append(correction)
      const edit=button('纠正',async()=>{if(correction.hidden){correction.hidden=false;correction.focus();edit.textContent='保存纠正';return}await c.command('memory.correct',{id:entry.id,expected_version:entry.version,content:correction.value})},a);edit.disabled=!caps.memory?.correct||entry.version==null;edit.title=edit.disabled?'当前后端不支持版本化纠正':''
      const forget=button('忘记',()=>c.command('memory.forget',{id:entry.id,expected_version:entry.version}),a);forget.disabled=!caps.memory?.forgetEntry||entry.version==null;forget.title=forget.disabled?'当前后端不支持按条目忘记':'';button('接着聊',()=>continueChat(entry.content),a)
@@ -67,22 +67,23 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
     const hero=card('记忆');hero.classList.add('memory-hero')
     hero.append(el('p',overview.summary,'memory-overview-copy'))
     if(!overview.generated&&entries.length)hero.append(el('p','摘要尚未生成，先显示已保存的内容。','personal-hint'))
-    hero.append(el('p',overview.coverage,'memory-coverage'))
+    if(debugEvidence)hero.append(el('p',overview.coverage,'memory-coverage'))
     for(const group of overview.groups){
      const a=card(group.title,group.summary);a.classList.add('memory-group')
      chips(a,group.keywords)
-     recordDetails(a,group.entries,'查看依据 · 纠正 / 忘记')
+     if(debugEvidence)recordDetails(a,group.entries,'相关记录')
     }
-    if(entries.length){const a=card('记录');a.classList.add('memory-records');recordDetails(a,entries,'查看全部记录')}
+    if(entries.length){const a=el('div',undefined,'memory-records');panel.append(a);recordDetails(a,entries,'管理记忆')}
    }
    if(s?.memory?.cursor)button('下一页',()=>c.command('memory.list',{cursor:s.memory.cursor,limit:50}),panel)
    if(caps.memory?.list)button('返回第一页',()=>c.command('memory.list',{limit:50}),panel)
   }else{
    panel.append(el('h2','连接与权限'),el('p','只读取你授权的目录。正文可能交由设置中的模型服务处理；读取权限不授予修改或发送权限。','personal-hint'))
+   const debug=el('details',undefined,'personal-debug');debug.append(el('summary','调试'));const debugLabel=el('label',undefined,'personal-consent');const debugCheck=el('input');debugCheck.type='checkbox';debugCheck.checked=debugEvidence;debugLabel.append(debugCheck,document.createTextNode('显示来源与依据'));debug.append(debugLabel);panel.append(debug);debugCheck.addEventListener('change',()=>{debugEvidence=debugCheck.checked;renderPanel()})
    const consent=el('label',undefined,'personal-consent');const check=el('input');check.type='checkbox';consent.append(check,document.createTextNode('允许后台读取所选目录并用于检索与建议'));panel.append(consent)
    const add=button('选择并授权目录',async()=>{const path=await api.personal.chooseDirectory();if(path)await c.command('sources.add',{path,consent:true})},panel);add.disabled=true;check.addEventListener('change',()=>{add.disabled=!check.checked||!caps.sources})
    if(!caps.sources)panel.append(el('p','来源服务不可用，请先在设置中启用知识库。','personal-hint'))
-   for(const source of s?.sources??[]){const a=card(source.path);chips(a,[{connected:'已连接',paused:'已暂停',disconnected:'已断开',error:'异常'}[source.state]||source.state,`扫描 ${source.scanned}`,`本次读取正文 ${source.read}`,`跳过 ${source.skipped}`]);a.append(el('p',`上次同步：${source.last_sync??'尚未同步'}`));evidence(a,[`排除：${(source.excludes??[]).join('、')}`,`跳过原因：${JSON.stringify(source.reasons??{})}`,...(source.failures??[]).map(f=>`${f.path} · ${f.code}`)])
+   for(const source of s?.sources??[]){const a=card(source.path);chips(a,[{connected:'已连接',paused:'已暂停',disconnected:'已断开',error:'异常'}[source.state]||source.state,`扫描 ${source.scanned}`,`本次读取正文 ${source.read}`,`跳过 ${source.skipped}`]);a.append(el('p',`上次同步：${source.last_sync??'尚未同步'}`));evidence(a,[`排除：${(source.excludes??[]).join('、')}`,`跳过原因：${JSON.stringify(source.reasons??{})}`,...(source.failures??[]).map(f=>`${f.path} · ${f.code}`)],true)
     if(source.state!=='disconnected')for(const [label,method]of [[source.state==='paused'?'恢复同步':'暂停同步',source.state==='paused'?'resume':'pause'],['立即同步','sync'],['断开（保留数据）','disconnect']])button(label,()=>c.command(`sources.${method}`,{id:source.id}),a)
     else a.append(el('p','已停止访问；重新授权连接暂不支持。'))
     const deletion=el('div');deletion.hidden=true;deletion.setAttribute('role','group');deletion.setAttribute('aria-label','确认删除来源数据');deletion.append(el('p',`确认删除「${source.path}」的索引与来源记录？依赖此来源的记忆和建议也会更新或撤回；不会删除磁盘原文件。`))
