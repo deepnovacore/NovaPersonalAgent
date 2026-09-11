@@ -87,7 +87,7 @@ export function surrogateSystemPrompt(preset: ProactivityPreset): string {
   if (!composed.includes(SURROGATE_ORACLE_OUTPUT)) {
     throw new Error('surrogate prompt output contract mismatch')
   }
-  return composed.replace(SURROGATE_ORACLE_OUTPUT, SURROGATE_NODE_OUTPUT)
+  return composed.replace(SURROGATE_ORACLE_OUTPUT, SURROGATE_NODE_OUTPUT) + '\nproposal 仅用于专门的需求发现快照；当前工作进展观察请省略或置 null。proposal 不授权执行，也不因 speak=true 自动朗读。'
 }
 
 export const COMPRESSOR_SYSTEM = [

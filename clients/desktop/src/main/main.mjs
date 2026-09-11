@@ -916,9 +916,53 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
         mainWindow.once('closed', () => rejectShown(new Error('source_startup_window_closed')))
       })
     : null
+  let personalCollapsed = false
+  let personalBounds = null
+  const initialOrbBounds = mainWindow.getBounds()
+  const setPersonalCollapsed = value => {
+    if (value === personalCollapsed && personalBounds !== null) return
+    if (value) {
+      personalBounds = mainWindow.getBounds()
+      personalCollapsed = true
+      mainWindow.setResizable(false)
+      mainWindow.setMinimumSize(1, 1)
+      mainWindow.setAlwaysOnTop(true, 'floating')
+      mainWindow.setBounds(initialOrbBounds)
+      orbWindow.sync()
+    } else {
+      personalCollapsed = false
+      const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+      const width = Math.min(1120, area.width), height = Math.min(780, area.height)
+      mainWindow.setMaximumSize(10000, 10000)
+      mainWindow.setResizable(true)
+      mainWindow.setMinimumSize(Math.min(660, area.width), Math.min(520, area.height))
+      mainWindow.setAlwaysOnTop(false)
+      mainWindow.setBounds(personalBounds ?? {x:area.x+Math.round((area.width-width)/2),y:area.y+Math.round((area.height-height)/2),width,height})
+      personalBounds = mainWindow.getBounds()
+    }
+    sendToOrb('nova:personal:collapsed', value)
+  }
+  ipcMain.handle('nova:personal:collapse', (event, value) => {
+    if (event.sender !== mainWindow.webContents || typeof value !== 'boolean') throw new Error('window request rejected')
+    setPersonalCollapsed(value)
+  })
+  ipcMain.handle('nova:personal:wake', event => {
+    if (event.sender !== mainWindow.webContents) throw new Error('wake request rejected')
+    wakeWord?.wake()
+  })
+  ipcMain.handle('nova:personal:directory', async event => {
+    if (event.sender !== mainWindow.webContents) throw new Error('directory request rejected')
+    const result = await dialog.showOpenDialog(mainWindow, {title:'选择允许 Nova 读取的目录', properties:['openDirectory']})
+    return result.canceled ? null : result.filePaths[0] ?? null
+  })
+  mainWindow.on('close', event => {
+    if (app.isQuitting) return
+    event.preventDefault()
+    setPersonalCollapsed(true)
+  })
   const orbWindow = createOrbWindowController({
-    getBounds: () => mainWindow.getBounds(),
-    setBounds: bounds => mainWindow.setBounds(bounds),
+    getBounds: () => personalCollapsed ? mainWindow.getBounds() : initialOrbBounds,
+    setBounds: bounds => { if (personalCollapsed) mainWindow.setBounds(bounds) },
     getZoomFactor: () => mainWindow.webContents.getZoomFactor(),
     getScaleFactor: () => screen.getDisplayNearestPoint(
       screen.getCursorScreenPoint(),
@@ -933,7 +977,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   // render reconciles it. Registered here rather than in the wake-word `show`
   // callback because that one can fire from configure() before `orbWindow` is
   // assigned, which would throw on a const in its temporal dead zone.
-  mainWindow.on('show', () => { orbWindow.setDormant(false) })
+  mainWindow.on('show', () => { if (personalCollapsed) orbWindow.setDormant(false) })
+  setPersonalCollapsed(false)
 
   const dragController = createDragController({
     getCursor: () => screen.getCursorScreenPoint(),

@@ -15,7 +15,7 @@ const NEWLINE = 0x0a
 const SETTINGS_DEFAULTS = Object.freeze({
   proactivity: 'balanced',
   codexHeartbeatSeconds: 30,
-  pipelineMode: 'integrated',
+  pipelineMode: 'cascaded',
   integratedProvider: 'qwen',
   integratedModel: 'qwen-audio-3.0-realtime-plus',
   integratedVoice: 'longanqian',

@@ -1,6 +1,7 @@
 import {blackboardOptionsFromSettings} from './memory/blackboard-session.js'
 import type {UsageReporter} from './realtime/usage.js'
 import {prepareKnowledge} from './knowledge/assembly.js'
+import {LocalDirectorySources} from './personal-agent/sources.js'
 /** Shared production graph for the Electron child and the headless remote service. */
 import {randomUUID} from 'node:crypto'
 import {loadCapabilityRegistry} from './capability-registry.js'
@@ -123,6 +124,20 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       return realtime
     },
   })
+  if (knowledge !== undefined) {
+    const host = composition.realtime.personalAgent
+    host.setSources(new LocalDirectorySources({
+      path: host.path + '.sources.json', knowledge: knowledge.service,
+      onChange: () => host.sourceChanged(),
+      onInvalidate: async ref => {
+        await host.invalidateEvidence(ref)
+        await composition.realtime.personalMemory?.forgetSource?.(ref)
+        await host.revalidate()
+        await host.refreshMemory()
+      },
+      onObserve: async observation => {await composition.realtime.personalMemory?.observeSource?.(observation)},
+    }))
+  }
   ownership.own(() => composition.desktop.server.close())
   publishExecutorApproval = view => { composition.desktop.bridge.onExecutorApproval(view) }
   return {

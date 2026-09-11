@@ -52,6 +52,10 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:native-audio:terminal',
     'nova:orb-menu:show',
     'nova:orb:dormant',
+    'nova:personal:collapse',
+    'nova:personal:collapsed',
+    'nova:personal:directory',
+    'nova:personal:wake',
     'nova:projects:repair',
     'nova:release-camera:result',
     'nova:settings:changed',
@@ -223,11 +227,12 @@ test('a hidden orb window is never shrunk, and comes back at natural size', asyn
   // to refuse, or the hidden window shrinks and pops back as a bubble.
   assert.deepEqual(run(false, true), [], 'a hidden window must not shrink')
   assert.deepEqual(run(true, true), [true], 'a visible window still rests')
+  assert.match(source, /setBounds: bounds => \{ if \(personalCollapsed\) mainWindow\.setBounds\(bounds\) \}/, 'orb size updates do not resize the expanded workspace')
 
   // And whatever was ignored while hidden is undone on the way back.
   assert.match(
     source,
-    /mainWindow\.on\('show', \(\) => \{ orbWindow\.setDormant\(false\) \}\)/,
+    /mainWindow\.on\('show', \(\) => \{ if \(personalCollapsed\) orbWindow\.setDormant\(false\) \}\)/,
   )
 })
 
@@ -780,10 +785,15 @@ test('drag and orb menu paths stay sender validated and bounded', async () => {
   assert.match(rendererSource, /window\.novaAudioAgentDesktop\.orbMenu\.show\(\)/)
 })
 
-test('renderer always activates after microphone preflight and never delegates activation to the orb', async () => {
+test('renderer text startup avoids microphone and explicit voice entry requires preflight', async () => {
   const renderer = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
 
-  assert.match(renderer, /if \(microphone === 'granted'\) \{\s*await activateCapture\(\)\s*\}/)
+  const boot = renderer.slice(renderer.indexOf('async function boot()'), renderer.indexOf('personalView = mountPersonalView'))
+  assert.doesNotMatch(boot, /refreshMicrophonePermission|activateCapture/)
+  assert.match(boot, /axes\.microphone = 'not_requested'/)
+  const voiceEntry = renderer.slice(renderer.indexOf('personalView = mountPersonalView'), renderer.indexOf("orb.addEventListener('pointerdown'"))
+  assert.match(voiceEntry, /await refreshMicrophonePermission\(\) !== 'granted'/)
+  assert.ok(voiceEntry.indexOf('refreshMicrophonePermission') < voiceEntry.indexOf('activateCapture'))
   assert.match(renderer, /async function retryMicrophonePermission\(\)/)
   assert.match(renderer, /const microphone = await refreshMicrophonePermission\(\)/)
   assert.match(renderer, /if \(microphone === 'granted' && !axes\.activated\) await activateCapture\(\)/)
@@ -811,7 +821,7 @@ test('the mute toggle drops microphone input at both ingress points', async () =
   // The gate covers mute itself plus a drain window after unmute, so capture
   // batches that straddle the unmute click (or arrive late from a stalled
   // queue) never leak audio that was recorded while muted.
-  assert.match(renderer, /return axes\.muted \|\| performance\.now\(\) < muteDrainUntil/)
+  assert.match(renderer, /return !\['dictation', 'voice'\]\.includes\(personalView\.controller\.mode\) \|\| axes\.muted \|\| performance\.now\(\) < muteDrainUntil/)
   assert.match(renderer, /const UNMUTE_DRAIN_MS = 120/)
   assert.match(renderer, /muteDrainUntil = performance\.now\(\) \+ UNMUTE_DRAIN_MS/)
   // Deactivation discards the session's mute, and the rail buttons are wired.

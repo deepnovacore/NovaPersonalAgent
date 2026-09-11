@@ -17,7 +17,7 @@ export class KnowledgeService {
   readonly #store: KnowledgeStoreClient
   readonly #embedding: EmbeddingProvider
   readonly #stop = new AbortController()
-  #active: {id: string; abort: AbortController} | undefined
+  #active: {id: string; abort: AbortController; root?: string} | undefined
   #folderBusy = false
   #folderSignal: AbortSignal | undefined
   #queries = 0
@@ -49,6 +49,29 @@ export class KnowledgeService {
       abort.throwIfAborted()
       return hits
     } finally {this.#queries--}
+  }
+
+  /** Directory-source admission retains its grant and cancellation through the actual file read. */
+  async syncFile(locator: string, root: string, signal: AbortSignal, sourceId?: string): Promise<{id: string}> {
+    signal.throwIfAborted()
+    this.#stop.signal.throwIfAborted()
+    if (this.#active || this.#folderBusy) throw failure('knowledge_busy')
+    if (sourceId !== undefined && !idSchema.safeParse(sourceId).success) throw failure('invalid_request')
+    const active: {id: string; abort: AbortController; root: string} = {id: sourceId ?? randomUUID(), abort: new AbortController(), root}
+    this.#active = active
+    const cancel = () => active.abort.abort()
+    signal.addEventListener('abort', cancel, {once: true})
+    try {
+      const old = (await this.#store.listSources()).find(source => source.locator === locator)
+      signal.throwIfAborted()
+      if (old !== undefined) active.id = old.id
+      const result = await this.#index('folder_child', locator, active, old)
+      if ('error' in result) throw failure(result.error)
+      return {id: active.id}
+    } finally {
+      signal.removeEventListener('abort', cancel)
+      if (this.#active === active) this.#active = undefined
+    }
   }
 
   async handle(method: string, params: unknown): Promise<unknown> {
@@ -95,14 +118,14 @@ export class KnowledgeService {
     finally {if (this.#active === active) this.#active = undefined}
   }
 
-  async #index(kind: KnowledgeSource['kind'], locator: string, active: {id: string; abort: AbortController}, old?: KnowledgeSource) {
+  async #index(kind: KnowledgeSource['kind'], locator: string, active: {id: string; abort: AbortController; root?: string}, old?: KnowledgeSource) {
     const signal = AbortSignal.any([active.abort.signal, this.#stop.signal,
       ...(this.#folderSignal === undefined ? [] : [this.#folderSignal]), AbortSignal.timeout(120000)])
     const job = {id: randomUUID(), source_id: active.id, updated_at: Date.now(), error_code: null}
     try {
       signal.throwIfAborted()
       await this.#store.recordJob({...job, state: 'running'})
-      const document = await (kind === 'url' ? fetchKnowledgeUrl(locator, signal) : readKnowledgeFile(locator, signal))
+      const document = await (kind === 'url' ? fetchKnowledgeUrl(locator, signal) : readKnowledgeFile(locator, signal, active.root))
       signal.throwIfAborted()
       if (old === undefined && (await this.#store.listSources()).some(value => value.locator === document.locator)) throw failure('source_exists')
       const chunks = chunkKnowledgeText(document.text)

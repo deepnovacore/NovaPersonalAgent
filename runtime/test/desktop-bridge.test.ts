@@ -1053,3 +1053,58 @@ test('cancelled dictation drops a late transcript and release aborts recognition
   assert.equal(drainJsonFrames(bridge).some(frame => frame.type === 'input.transcription'), false)
   bridge.release()
 })
+
+test('text acceptance uses a required correlated receipt, not captions; reconnect retries do not resubmit', async () => {
+  const {bridge,service,calls}=harness()
+  service.submitText=text=>{calls.push('text:'+text);return Promise.resolve()}
+  bridge.markAuthenticated();drainJsonFrames(bridge)
+  await bridge.receiveControl({type:'input.text',request_id:'text-1',text:'repeat'})
+  const delivery=bridge.takeNextDelivery()!
+  assert.equal(delivery.policy,'required')
+  assert.deepEqual(JSON.parse(String(delivery.frame)),{type:'input.text_result',request_id:'text-1',ok:true})
+  bridge.onCaption({role:'user',text:'repeat',final:true});drainJsonFrames(bridge)
+  bridge.release();bridge.markAuthenticated();drainJsonFrames(bridge)
+  await bridge.receiveControl({type:'input.text',request_id:'text-1',text:'repeat'})
+  assert.deepEqual(calls.filter(c=>c.startsWith('text:')),['text:repeat'])
+  assert.deepEqual(JSON.parse(String(bridge.takeNextFrame())),{type:'input.text_result',request_id:'text-1',ok:true})
+  await bridge.receiveControl({type:'input.text',request_id:'text-1',text:'changed'})
+  assert.deepEqual(JSON.parse(String(bridge.takeNextFrame())),{type:'input.text_result',request_id:'text-1',ok:false,error:'request_id_conflict'})
+  bridge.release()
+})
+
+test('text failure receipts and backend instance fences never turn into repeated submissions', async () => {
+  const {bridge,service,calls}=harness()
+  service.submitText=()=>{calls.push('submit');return Promise.reject(Error('provider unavailable'))}
+  bridge.markAuthenticated();drainJsonFrames(bridge)
+  await bridge.receiveControl({type:'input.text',request_id:'failed',text:'draft'})
+  assert.deepEqual(JSON.parse(String(bridge.takeNextFrame())),{type:'input.text_result',request_id:'failed',ok:false,error:'submission_failed'})
+  await bridge.receiveControl({type:'input.text',request_id:'failed',text:'draft'})
+  drainJsonFrames(bridge);assert.equal(calls.filter(c=>c==='submit').length,1)
+  await bridge.receiveControl({type:'input.text',request_id:'old-instance',input_instance_id:'a-prior-runtime',text:'draft'})
+  assert.deepEqual(JSON.parse(String(bridge.takeNextFrame())),{type:'input.text_result',request_id:'old-instance',ok:false,error:'outcome_unknown'})
+  assert.equal(calls.filter(c=>c==='submit').length,1)
+  bridge.release()
+})
+
+test('caption wire preserves stable source identity even when a previous final is dropped',()=>{
+  const {bridge}=harness();bridge.markAuthenticated();drainJsonFrames(bridge)
+  bridge.onCaption({role:'user',text:'first',final:false,turn_id:'1:user:item-1'})
+  bridge.onCaption({role:'user',text:'next',final:false,turn_id:'1:user:item-2'})
+  const frames=drainJsonFrames(bridge).filter(f=>f.type==='caption') as unknown as {turn_id:string}[]
+  assert.deepEqual(frames.map(f=>f.turn_id),['1:user:item-1','1:user:item-2'])
+  bridge.release()
+})
+
+test('text reconnect while provider submission is pending shares one host operation',async()=>{
+  const {bridge,service}=harness();let submits=0;let finish!:()=>void
+  service.submitText=()=>{submits++;return new Promise<void>(resolve=>{finish=resolve})}
+  bridge.markAuthenticated();drainJsonFrames(bridge)
+  const command={type:'input.text' as const,request_id:'pending',text:'once'}
+  const first=bridge.receiveControl(command);await Promise.resolve()
+  bridge.release();bridge.markAuthenticated();drainJsonFrames(bridge)
+  const retry=bridge.receiveControl(command);finish();await Promise.all([first,retry])
+  assert.equal(submits,1)
+  const receipts=drainJsonFrames(bridge).filter(frame=>frame.type==='input.text_result')
+  assert.equal(receipts.length,2)
+  assert.deepEqual(receipts[0],receipts[1]);bridge.release()
+})

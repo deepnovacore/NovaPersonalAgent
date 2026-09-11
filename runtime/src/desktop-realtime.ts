@@ -30,6 +30,8 @@ export interface DesktopServerTransport {
 }
 
 export interface DesktopRealtimeOptions extends DesktopBridgeOptions {
+  readonly personalCommand?: (command: unknown) => Promise<unknown>
+  readonly personalSnapshot?: () => unknown
   readonly taskPort?: CodingTaskPort
   readonly openTaskDirectory?: (path: string) => Promise<void>
   /** Remote transport errors release the connection; desktop retains its fatal policy. */
@@ -103,6 +105,11 @@ export class DesktopRealtime {
       onControl: async control => {
         const generation = this.#activeGeneration
         if (generation === null) throw new DesktopProtocolError('desktop control is unauthenticated')
+        if (control.type === 'personal.command') {
+          const result = options.personalCommand ? await options.personalCommand(control) : {type:'personal.result',request_id:control.request_id,ok:false,error:'unavailable'}
+          if (this.#activeGeneration === generation) { this.bridge.onPersonalFrame(result); if (options.personalSnapshot) this.bridge.onPersonalFrame(options.personalSnapshot()) }
+          return
+        }
         if (control.type === 'coding.progress_narration') { options.service.setCodingProgressNarration?.(control.mode); return }
         if (control.type !== 'executor.task_action') return this.bridge.receiveControl(control)
         const request = taskActionSchema.parse(control)

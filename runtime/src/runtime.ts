@@ -607,6 +607,8 @@ export class CoreRuntime {
       case 'compress_done':
         this.#applyCompressDone(event)
         break
+      case 'discovery_tick':
+        break
       case 'assistant_spoken':
         this.#appendMemory(CONVERSATION_CHANNEL, {
           ts: event.ts,

@@ -1,3 +1,8 @@
+import {compileContextView} from './context-view.js'
+import {PersonalAgentHost} from './personal-agent/host.js'
+import {tmpdir} from 'node:os'
+import {realpathSync} from 'node:fs'
+import {join} from 'node:path'
 import type {UsageReporter} from './realtime/usage.js'
 import {workspaceGraphServiceFromSettings} from './workspace-graph/factory.js'
 import type {ApprovalController} from './approval-port.js'
@@ -253,6 +258,9 @@ type CleanupResult =
  * lower-level classes expose individually idempotent methods.
  */
 export class RealtimeAssembly {
+  readonly personalAgent: PersonalAgentHost
+  get personalMemory(): PersonalMemoryResource|undefined { return this.#personalMemory }
+
   readonly capabilityStatus: CapabilityStatus
   readonly core: Assembly
   readonly provider: RealtimeProvider
@@ -265,6 +273,7 @@ export class RealtimeAssembly {
   readonly tools: CompiledTools
   readonly workspaceGraph: RealtimeWorkspaceGraph | undefined
 
+  readonly #unsubscribePersonalEvents: () => void
   readonly #onDiagnostic: (line: string) => void
   readonly #projectAdapter: ProjectExecutorAdapter | undefined
   readonly #codexResource: CodingExecutorResource | undefined
@@ -342,6 +351,25 @@ export class RealtimeAssembly {
     this.#idFactory = input.idFactory
     this.#wallClockNow = input.wallClockNow
     this.#unbindSuggestionSelected = input.unbindSuggestionSelected
+    this.personalAgent = new PersonalAgentHost({
+      path: input.core.personalAgentConfig?.path ?? join(realpathSync(tmpdir()), `nova-personal-${randomUUID()}.json`),
+      userScope: input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
+      pool: input.core.runtime.core.suggestions,
+      evidence: ref => { try {const [channel,seq]=parseMemoryRef(ref);const item=input.core.runtime.memory.channels.get(channel)?.items.find(item=>item.seq===seq);if(!item)return null;const work=item.content.work_id??item.content.delegate_id;return {subject_key:typeof work==='string'?'task:'+work:ref,source:{type:typeof work==='string'?'task':'conversation',ref},...(typeof work==='string'?{task_ref:{work_id:work}}:{})}}catch{return null}},
+      context:()=>{const view=compileContextView(input.core.runtime.memory,input.core.runtime.core.floor.state,input.core.runtime.clock.now(),{suggestions:input.core.runtime.core.suggestions.all(),triggerKind:'discovery_tick'});return {...view,channels:view.channels.slice(-8),affordances:view.affordances.slice(-8),in_flight:view.in_flight.slice(-8)}},
+      onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}})},
+      evidenceRefs:()=>[...input.core.runtime.memory.channels.values()].flatMap(channel=>channel.items.slice(-4).map(item=>`${item.channel}:${item.seq}`)).slice(-16),
+      ...(input.core.personalAgentConfig?{discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
+      ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
+    })
+    this.#unsubscribePersonalEvents=input.core.runtime.observe((event,current)=>{
+      if(current===false)return
+      if(event.kind==='handoff'&&input.core.runtime.claimedHandoff(event.seq)){
+        const title=event.payload.outcome==='ok'?'任务已完成':`任务结束：${event.payload.outcome}`
+        void this.personalAgent.taskResult(event.payload.delegate_id,title).catch(()=>{ /* optional host projection failure */ })
+      }
+      if(event.kind==='observation'||event.kind==='handoff')void this.personalAgent.discover().catch(()=>{ /* optional host projection failure */ })
+    })
     this.#personalMemory = input.personalMemory
     this.#createPersonalMemory = input.createPersonalMemory
     this.#personalMemoryTurnTracker = input.personalMemoryTurnTracker
@@ -518,6 +546,7 @@ export class RealtimeAssembly {
         }
       }
       await this.core.start()
+      await this.personalAgent.open()
     } catch (error) {
       if (this.#state === 'starting') {
         await this.#closePersonalMemory()
@@ -571,6 +600,8 @@ export class RealtimeAssembly {
       await this.#settleWithinGrace(starting, 'assembly_start_abandoned')
     }
 
+    this.#unsubscribePersonalEvents()
+    await this.personalAgent.close()
     this.#unbindGraphContext?.()
     this.#unbindSuggestionSelected?.()
 
@@ -916,6 +947,7 @@ export class RealtimeAssembly {
   }
 
   async #closePersonalMemory(): Promise<CleanupResult> {
+    await this.personalAgent.close()
     const personalMemory = this.#personalMemory
     if (personalMemory === undefined) return {kind: 'resolved'}
     this.#personalMemory = undefined
@@ -1064,6 +1096,10 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
           currentSession.providerTurnUserInputRevision(completion.response_id),
           currentSession.userInputRevision,
         )
+      }
+      if (completion.disposition === 'spoken' && completion.started && currentSession !== null && currentIdentity?.epoch === completion.session_epoch) {
+        const ids=currentSession.responseEventIds(completion.response_id).filter(id=>id.startsWith('suggestion:'))
+        if(ids.length===1)void assemblyHolder.current?.personalAgent.spoken(ids[0]!.slice('suggestion:'.length)).catch(()=>{ /* optional host projection failure */ })
       }
       options.onDelivery?.(completion)
     },
@@ -1238,7 +1274,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const unbindSuggestionSelected = core.runtime.bindSuggestionSelected(
     (suggestion: Suggestion, reason: WakeReason) => {
       try { options.onExecutorSuggestion?.(suggestion) } catch { /* observability cannot own speech */ }
-      service.onSuggestionSelected(suggestion, reason)
+      if (typeof suggestion.content.personal_feed_id === 'string') {
+        void assemblyHolder.current?.personalAgent.canDeliver(suggestion.content.personal_feed_id).then(valid=>{if(valid)service.onSuggestionSelected(suggestion,reason)}).catch(()=>{ /* optional host projection failure */ })
+      } else service.onSuggestionSelected(suggestion, reason)
     },
   )
   const workspaceGraph = options.workspaceGraph ?? options.createWorkspaceGraph?.()

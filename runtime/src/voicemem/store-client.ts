@@ -1,3 +1,5 @@
+import {z} from 'zod'
+import {MemoryEntrySchema, MemoryObservationSchema, type MemoryObservation, MemoryPageSchema, MemorySourceRefSchema, MemoryListOptionsSchema, MemoryVersionSchema, type MemoryEntry, type MemoryListOptions, type MemorySourceRef, type MemoryVersion} from '../memory/entry.js'
 import {Worker, type WorkerOptions} from 'node:worker_threads'
 
 import {PersonalMemoryError, type PersonalMemoryRecallScope, type PersonalMemoryRecallResult, type PersonalMemoryRecallHit, type PersonalMemoryAdmissionReceipt, type PersonalMemoryRememberTurn, type PersonalMemoryResource, type PersonalMemoryResponseAdaptation} from '../memory/personal-memory.js'
@@ -67,6 +69,8 @@ export interface VoiceMemOpenResult {
 }
 
 export type PersonalMemoryStoreErrorCode =
+  | 'STORE_CONFLICT'
+  | 'STORE_NOT_FOUND'
   | 'STORE_ALREADY_OPEN'
   | 'STORE_CLOSED'
   | 'STORE_INVALID_INPUT'
@@ -76,13 +80,15 @@ export type PersonalMemoryStoreErrorCode =
 
 export type PersonalMemoryStoreClientErrorCode = PersonalMemoryStoreErrorCode
   | 'CLIENT_CLOSED'
+  /** A sent mutation lost its receipt; callers must reload durable state before deciding to retry. */
+  | 'MUTATION_OUTCOME_UNKNOWN'
   | 'WORKER_ERROR'
   | 'WORKER_EXITED'
   | 'WORKER_PROTOCOL_FAILURE'
 
 export class PersonalMemoryStoreClientError extends PersonalMemoryError {
   constructor(readonly code: PersonalMemoryStoreClientErrorCode) {
-    super(['STORE_READ_FAILED', 'STORE_RECALL_FAILED', 'STORE_INVALID_INPUT'].includes(code) ? 'error' : 'unavailable')
+    super(['STORE_CONFLICT', 'STORE_NOT_FOUND', 'STORE_READ_FAILED', 'STORE_RECALL_FAILED', 'STORE_INVALID_INPUT'].includes(code) ? 'error' : 'unavailable')
     this.name = 'PersonalMemoryStoreClientError'
   }
 }
@@ -110,6 +116,7 @@ interface WorkerResponseAdaptationNotice {
 }
 
 interface Pending<Result> {
+  readonly mutation: boolean
   readonly resolve: (result: Result) => void
   readonly reject: (error: unknown) => void
 }
@@ -153,7 +160,6 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
 
   constructor(options: PersonalMemoryStoreClientOptions) {
     validateOptions(options)
-    if (options.supportsForget === true && options.workerFactory === undefined) throw new Error('Forget requires a worker with durable tombstones')
     this.#workerOptions = {workerData: {
       path: options.path,
       userId: options.userId,
@@ -162,7 +168,38 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
     }}
     this.#workerFactory = options.workerFactory ?? ((url, configured) => new Worker(url, configured))
     if (options.extractionModel !== undefined) this.remember = turn => this.#remember(turn)
-    if (options.supportsForget === true) this.forget = sourceId => this.#forget(sourceId)
+    if (options.workerFactory === undefined || options.supportsForget === true) this.forget = sourceId => this.#forget(sourceId)
+  }
+
+  readonly capabilities = () => ({list:true,get:true,correct:true,forgetEntry:true,forgetSource:true,observeSource:true})
+  async observeSource(input:MemoryObservation) {
+    return this.#entryRequest('observeSource',MemoryObservationSchema.parse(input),MemoryEntrySchema.nullable())
+  }
+  async list(options:MemoryListOptions={}) {
+    return this.#entryRequest('list',MemoryListOptionsSchema.parse(options),MemoryPageSchema)
+  }
+  async get(id:string):Promise<MemoryEntry|null> {
+    return this.#entryRequest('get',{id:this.#entryId(id)},MemoryEntrySchema.nullable())
+  }
+  async correct(id:string,expectedVersion:MemoryVersion,content:string,userSource:MemorySourceRef) {
+    return this.#entryRequest('correct',{id:this.#entryId(id),expectedVersion:MemoryVersionSchema.parse(expectedVersion),content:z.string().trim().min(1).max(500).refine(v=>!v.includes('\0')).parse(content),userSource:MemorySourceRefSchema.parse(userSource)},z.object({previous:MemoryEntrySchema,entry:MemoryEntrySchema}).strict())
+  }
+  async forgetEntry(id:string,expectedVersion:MemoryVersion) {
+    return this.#entryRequest('forgetEntry',{id:this.#entryId(id),expectedVersion:MemoryVersionSchema.parse(expectedVersion)},MemoryEntrySchema)
+  }
+  async forgetSource(ref:string):Promise<void> {
+    await this.#entryRequest('forgetSource',{ref:this.#entryId(ref)},z.null())
+  }
+  #entryId(id:string):string {
+    if(!nonempty(id,256))throw new PersonalMemoryStoreClientError('STORE_INVALID_INPUT')
+    return id
+  }
+  async #entryRequest<T>(operation:string,payload:Record<string,unknown>,schema:z.ZodType<T>):Promise<T> {
+    if(!this.#opened)throw new PersonalMemoryStoreClientError('STORE_CLOSED')
+    const result=await this.#request(operation,payload)
+    const parsed=schema.safeParse(result)
+    if(!parsed.success)throw this.#protocolFailure()
+    return parsed.data
   }
 
   async open(): Promise<void> {
@@ -224,7 +261,8 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
   close(): Promise<void> {
     if (this.#closing !== undefined) return this.#closing
     this.#closed = true
-    this.#rejectPending('CLIENT_CLOSED')
+    // Keep accepted requests alive until the queued close response or bounded termination.
+    // A committed mutation must deliver its receipt instead of becoming a false failure.
     this.#closing = this.#closeFresh()
     return this.#closing
   }
@@ -269,6 +307,7 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
     const promise = new Promise<Result>((resolve, reject) => {
       const timer = setTimeout(() => this.#fail('WORKER_ERROR'), REQUEST_TIMEOUT_MS)
       this.#pending.set(requestId, {
+        mutation: ['remember','forget','correct','forgetEntry','forgetSource','observeSource'].includes(operation),
         resolve: result => { clearTimeout(timer); resolve(result as Result) },
         reject: error => { clearTimeout(timer); reject(error instanceof Error ? error : new Error(String(error))) },
       })
@@ -355,7 +394,9 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
 
   #rejectPending(code: PersonalMemoryStoreClientErrorCode): void {
     const error = new PersonalMemoryStoreClientError(code)
-    for (const pending of this.#pending.values()) pending.reject(error)
+    for (const pending of this.#pending.values()) {
+      pending.reject(pending.mutation ? new PersonalMemoryStoreClientError('MUTATION_OUTCOME_UNKNOWN') : error)
+    }
     this.#pending.clear()
   }
 }
@@ -479,7 +520,7 @@ function parseResponse(value: unknown): WorkerResponse | undefined {
 }
 
 function isStoreCode(value: unknown): value is PersonalMemoryStoreErrorCode {
-  return value === 'STORE_ALREADY_OPEN' || value === 'STORE_CLOSED' || value === 'STORE_INVALID_INPUT'
+  return value === 'STORE_CONFLICT' || value === 'STORE_NOT_FOUND' || value === 'STORE_ALREADY_OPEN' || value === 'STORE_CLOSED' || value === 'STORE_INVALID_INPUT'
     || value === 'STORE_READ_FAILED' || value === 'STORE_WRITE_FAILED' || value === 'STORE_RECALL_FAILED'
 }
 

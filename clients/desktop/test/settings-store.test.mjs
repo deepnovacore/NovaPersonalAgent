@@ -86,7 +86,7 @@ test('the default settings are the documented schema', () => {
     startListeningOnLaunch: false,
     wakeWordEnabled: false,
     autoHideSeconds: 60,
-    pipelineMode: 'integrated',
+    pipelineMode: 'cascaded',
     integratedProvider: 'qwen',
     integratedModel: 'qwen-audio-3.0-realtime-plus',
     integratedVoice: 'longanqian',
@@ -394,7 +394,7 @@ test('normalizeSettings reads only own enumerable top-level data properties', ()
   assert.equal(normalized.codexHeartbeatSeconds, 45)
   assert.equal(normalized.palette, 'ember')
   assert.equal(normalized.proactivity, 'balanced')
-  assert.equal(normalized.pipelineMode, 'integrated')
+  assert.equal(normalized.pipelineMode, 'cascaded')
   assert.equal(normalized.integratedModel, 'qwen-audio-3.0-realtime-plus')
   assert.equal(normalized.integratedVoice, 'longanqian')
 })
@@ -522,7 +522,7 @@ test('normalizeSettings applies descriptor-only rules to caller-supplied base va
 
   assert.equal(getterCalls, 0)
   assert.equal(normalized.palette, 'graphite')
-  assert.equal(normalized.pipelineMode, 'integrated')
+  assert.equal(normalized.pipelineMode, 'cascaded')
   assert.equal(normalized.integratedModel, 'qwen-audio-3.0-realtime-plus')
   assert.equal(normalized.integratedVoice, 'longanqian')
   assert.deepEqual(normalized.cascadedLlmModels, {
@@ -1328,4 +1328,8 @@ test('native vision settings persist independently and device IDs have a bounded
   assert.equal(normalizeSettings({monitorCameraDeviceId:'x'.repeat(257)}).monitorCameraDeviceId,'')
   assert.equal(normalizeSettings({monitorCameraDeviceId:'x\n'}).monitorCameraDeviceId,'')
   assert.equal(normalizeSettings({conversationVisionEnabled:'true'}).conversationVisionEnabled,false)
+})
+
+test('explicit integrated preference is preserved for existing users', () => {
+  assert.equal(normalizeSettings({version:4,pipelineMode:'integrated'}).pipelineMode, 'integrated')
 })

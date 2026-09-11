@@ -544,10 +544,10 @@ test('launch spec falls back to the settings-store defaults when settings is mis
 
   assert.equal(spec.env.NOVA_AUDIO_AGENT_PROACTIVITY_PRESET, 'balanced')
   assert.equal(spec.env.NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL, '30')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_PIPELINE_MODE, 'integrated')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER, 'qwen')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL, 'qwen-audio-3.0-realtime-plus')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE, 'longanqian')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_PIPELINE_MODE, 'cascaded')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER, 'qwen')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL, 'qwen-flash')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_DOUBAO_TTS_VOICE, 'zh_female_vv_uranus_bigtts')
 })
 
 test('launch spec falls back per-field for a partially-populated settings object', () => {
@@ -561,10 +561,10 @@ test('launch spec falls back per-field for a partially-populated settings object
 
   assert.equal(spec.env.NOVA_AUDIO_AGENT_PROACTIVITY_PRESET, 'conservative')
   assert.equal(spec.env.NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL, '30')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_PIPELINE_MODE, 'integrated')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER, 'qwen')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL, 'qwen-audio-3.0-realtime-plus')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE, 'longanqian')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_PIPELINE_MODE, 'cascaded')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER, 'qwen')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL, 'qwen-flash')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_DOUBAO_TTS_VOICE, 'zh_female_vv_uranus_bigtts')
 })
 
 test('launch spec injects decrypted secrets as env overrides when present', () => {
@@ -573,6 +573,7 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
     token: TOKEN,
     readyEndpoint: '127.0.0.1:49152',
     parentEnv: {},
+    settings: {pipelineMode:'integrated'},
     decryptedSecrets: {
       dashscopeApiKey: 'dash-key',
       tavilyApiKey: 'tavily-key',

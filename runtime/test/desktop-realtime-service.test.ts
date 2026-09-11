@@ -1653,6 +1653,10 @@ test('captured composition callbacks preserve clear alert Codex project clock an
   assert.equal(composition.realtime.runtime.clock, clock)
   assert.equal(composition.desktop.bridge.claim(), true)
   composition.desktop.bridge.markAuthenticated()
+  const inputCapabilities=JSON.parse(String(composition.desktop.bridge.takeNextDelivery()?.frame)) as {type:string;capabilities:string[];input_instance_id:string}
+  assert.equal(inputCapabilities.type,'desktop.capabilities')
+  assert.deepEqual(inputCapabilities.capabilities,['text_input','dictation'])
+  assert.match(inputCapabilities.input_instance_id,/^[a-f0-9-]{36}$/u)
   // No coding role: publish an empty task snapshot to clear any prior renderer state.
   assert.deepEqual(JSON.parse(String(composition.desktop.bridge.takeNextDelivery()?.frame)), {
     type: 'executor.tasks', revision: 0, active_project: null, tasks: [],

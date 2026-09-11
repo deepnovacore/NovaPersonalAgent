@@ -1,3 +1,4 @@
+import {randomUUID,createHash} from 'node:crypto'
 import {DesktopTasks, executorTasksSchema, taskActionResultSchema} from './desktop-tasks.js'
 import {EXECUTOR_RESULT, EXECUTOR_RESULTS_RESET, DESKTOP_ACTIVITY, CLOCK_PING, CAPTION, PLAYBACK_TERMINAL} from './desktop-wire.js'
 /**
@@ -74,6 +75,7 @@ export interface DesktopCommand {
 
 /** The service surface the bridge drives. Narrow: six calls and one read. */
 export interface BridgeService {
+  readonly inputCapabilities?: readonly string[]
   readonly executorState: ExecutorState
   setCodingProgressNarration?(mode: 'smart' | 'continuous'): void
   discardInputAudio?(): Promise<void>
@@ -159,6 +161,8 @@ export class DesktopSocketBridge {
   #latestAssistantCaptionSequence = 0
   /** Assistant captions at or below this belong to a cleared turn. */
   #fencedAssistantCaptionSequence = 0
+  readonly #inputInstanceId = randomUUID()
+  readonly #textReceipts = new Map<string,{hash:string;result:Promise<{type:'input.text_result';request_id:string;ok:boolean;error?:string}>}>()
   #draftInput = false
   #dictation: {id: string; chunks: Uint8Array[]; size: number; finishing: boolean; controller: AbortController; timer: ReturnType<typeof setTimeout>} | undefined
   #claimed = false
@@ -408,12 +412,15 @@ export class DesktopSocketBridge {
   }
 
   /** Mark the connection authenticated, which is what unblocks the single-slot queues. */
+  onPersonalFrame(frame: unknown): void { if (this.#authenticated) this.#enqueue(JSON.stringify(frame)) }
+
   markAuthenticated(): void {
     if (this.#everAuthenticated) {
       this.#fencePlaybackForConnectionBoundary({resumeDelivery: true})
     }
     this.#authenticated = true
     this.#everAuthenticated = true
+    if(this.#service.inputCapabilities !== undefined)this.onPersonalFrame({type: 'desktop.capabilities', capabilities: this.#service.inputCapabilities, input_instance_id:this.#inputInstanceId})
     this.#syncExecutorStateDelivery()
     this.#syncProjectDelivery()
     this.#syncApprovalDelivery()
@@ -489,9 +496,27 @@ export class DesktopSocketBridge {
     if (control.type === 'input.audio') { if (this.#dictation) throw new Error('dictation active'); this.#draftInput = false; return }
     if (control.type === 'input.dictation') { this.#dictationControl(control.id, control.action); return }
     if (control.type === 'input.text') {
-      if (this.#dictation) throw new Error('dictation active')
-      if (!this.#service.submitText) throw new Error('text input unavailable')
-      await this.#service.submitText(control.text)
+      const submit=async()=>{
+        if (this.#dictation) throw new Error('dictation active')
+        if (!this.#service.submitText) throw new Error('text input unavailable')
+        await this.#service.submitText(control.text)
+      }
+      if(control.request_id===undefined){await submit();return}
+      const id=control.request_id
+      const result=(ok:boolean,error?:string)=>({type:'input.text_result' as const,request_id:id,ok,...(error===undefined?{}:{error})})
+      let receipt:ReturnType<typeof result>
+      const hash=createHash('sha256').update(control.text).digest('hex')
+      const prior=this.#textReceipts.get(id)
+      if(control.input_instance_id!==undefined&&control.input_instance_id!==this.#inputInstanceId)receipt=result(false,'outcome_unknown')
+      else if(prior)receipt=prior.hash===hash?await prior.result:result(false,'request_id_conflict')
+      else if(this.#textReceipts.size>=256)receipt=result(false,'request_capacity')
+      else {
+        // Record before calling the provider. Reconnect retries share this exact operation.
+        const operation=Promise.resolve().then(submit).then(()=>result(true),()=>result(false,'submission_failed'))
+        this.#textReceipts.set(id,{hash,result:operation})
+        receipt=await operation
+      }
+      if(this.#authenticated)this.#enqueue(JSON.stringify(receipt))
       return
     }
     await this.#receiveCommand(commandFromControl(control))
@@ -525,7 +550,7 @@ export class DesktopSocketBridge {
 
   async #receiveCommand(command: DesktopCommand): Promise<void> {
     if (command.kind === 'input_audio') return this.receiveControl({type: 'input.audio'})
-    if (command.kind === 'input_text') return this.receiveControl({type: 'input.text', text: String(command.payload.text)})
+    if (command.kind === 'input_text') return this.receiveControl({type: 'input.text', text: String(command.payload.text),...(typeof command.payload.request_id==='string'?{request_id:command.payload.request_id}:{}),...(typeof command.payload.input_instance_id==='string'?{input_instance_id:command.payload.input_instance_id}:{})})
     if (command.kind === 'input_dictation') return this.receiveControl({type: 'input.dictation', id: String(command.payload.id), action: command.payload.action as 'start' | 'finish' | 'cancel'})
     if (
       this.#telemetry !== undefined
@@ -1059,11 +1084,12 @@ export function parseClientMessage(
 
 function commandFromControl(control: DesktopControl): DesktopCommand {
   switch (control.type) {
+    case 'personal.command':
     case 'executor.task_action':
     case 'coding.progress_narration':
       throw new DesktopProtocolError('desktop host control requires authenticated transport')
     case 'input.audio': return {kind: 'input_audio', payload: {}}
-    case 'input.text': return {kind: 'input_text', payload: {text: control.text}}
+    case 'input.text': return {kind: 'input_text', payload: {text: control.text,...(control.request_id===undefined?{}:{request_id:control.request_id}),...(control.input_instance_id===undefined?{}:{input_instance_id:control.input_instance_id})}}
     case 'input.dictation': return {kind: 'input_dictation', payload: {id: control.id, action: control.action}}
     case 'speech.onset':
       return {

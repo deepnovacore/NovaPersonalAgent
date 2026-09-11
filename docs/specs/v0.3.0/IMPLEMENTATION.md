@@ -26,9 +26,9 @@
 
 ## Implementation decisions
 
-- Existing left conversation/right Dynamic, Tasks, Memory layout. Fixed responsive columns; reuse current dark/mint visual language. Main/orb view may share a renderer to preserve audio ownership.
+- Existing left conversation/right Dynamic, Tasks, Memory layout. Fixed responsive columns; use the user-provided pale-blue rounded-card and keyword-chip references. Main/orb view may share a renderer to preserve audio ownership.
 - Discovery interval default 30 minutes, configurable and off switch; 24-hour proposal expiry; latest eight delivery summaries. Only questions qualify for passive collapsed notification; no automatic new-proposal speech.
-- No generated memory overview. Show count/source coverage as factual text. Missing backend capabilities disabled with a reason.
+- Summary-first memory view per user feedback: factual overview and keyword chips, grouped summaries, with raw entries/source/correction/forget controls in disclosures. Summaries stay grounded in the loaded entries and explicitly state coverage; directory names do not establish occupation or identity. Missing backend capabilities disabled with a reason.
 - Local folders only, opt-in, polling plus startup/recovery reconciliation. Defaults 200 bodies/20 MiB per scan; exclusions visible and additive. Sensitive paths and out-of-root symlinks always rejected.
 
 ## Task 1: Versioned personal memory (M6-A backend)
@@ -37,10 +37,10 @@
 **Consumes:** existing VoiceMem records/evidence/store, existing Worker ownership.
 **Produces:** exported MemoryEntry schema/type matching spec 03; optional list/get/correct/forgetEntry/capabilities on PersonalMemoryResource, implemented by local Worker. list({cursor?,limit?}) -> {entries,cursor}; get(id) -> MemoryEntry|null; correct(id,expectedVersion,content,userSource) -> {previous,entry}; forgetEntry(id,expectedVersion) -> MemoryEntry. Version conflicts reject; include optional forgetSource(ref) for source dependency removal, preserving other independent refs.
 
-- [ ] Prove pre-implementation failure for correction/forgetting plus recall, persistence, cross-user scope and stale-version conflicts using temporary actual storage.
-- [ ] Implement bounded Worker RPC and projection; preserve tombstones/suppression, no fake success for remote backends.
-- [ ] Verify reopen and correction suppress old recall; forgotten content never returns via reply adaptation.
-- [ ] Independent review then focused fixes.
+- [x] Prove pre-implementation failure for correction/forgetting plus recall, persistence, cross-user scope and stale-version conflicts using temporary actual storage.
+- [x] Implement bounded Worker RPC and projection; preserve tombstones/suppression, no fake success for remote backends.
+- [x] Verify reopen and correction suppress old recall; forgotten content never returns via reply adaptation.
+- [x] Independent review then focused fixes.
 
 Behavior check:
 ```ts
@@ -57,12 +57,12 @@ assert(!(await memory.recall('preference')).hits.some(hit => hit.text === before
 **Consumes:** Task 1 PersonalMemoryResource; existing runtime events, ModelGateway, SuggestionPool/Floor. Optional source service attached by coordinator.
 **Produces:** `personal.command` control `{type,request_id,method,params}`; methods state/feed.action/memory.list/memory.correct/memory.forget/discovery.configure plus sources.* delegated to source service. Snapshot `personal.state` `{type,revision,feed,memory,sources,capabilities,settings}` and result `personal.result` `{type,request_id,ok,error?}`. Runtime zod validates all fields and existing client.command wraps remote requests. Host owns feed, ledger and sources; UI never writes authoritative snapshots.
 
-- [ ] Failing behavioral checks: no evidence rejected; memory-only allowed; stale memory rejected; same matter+date dedupe survives restart/dismissal and unrelated evidence.
-- [ ] Implement persistent feed and separate presented/notified/spoken receipts, invalidation, snooze, dismissal, task-result updates. Revalidate evidence before delivery; no new-proposal speech bypass.
-- [ ] Extend existing Surrogate optional proposal and dedicated bounded discovery opportunity; do not change coding progress semantics. Add persisted/configurable 30-minute tick and async memory snapshot; shut down timers and in-flight requests.
-- [ ] Wire actual desktop/headless production lifecycle and control handlers. Expose the existing opened personal memory resource, no second owner.
-- [ ] Add >=10 positive and >=10 silence cases; distinguish deterministic host checks from model-quality live evaluation.
-- [ ] Run targeted protocol/host tests, review, fix.
+- [x] Failing behavioral checks: no evidence rejected; memory-only allowed; stale memory rejected; same matter+date dedupe survives restart/dismissal and unrelated evidence.
+- [x] Implement persistent feed and separate presented/notified/spoken receipts, invalidation, snooze, dismissal, task-result updates. Revalidate evidence before delivery; no new-proposal speech bypass.
+- [x] Extend existing Surrogate optional proposal and dedicated bounded discovery opportunity; do not change coding progress semantics. Add persisted/configurable 30-minute tick and async memory snapshot; shut down timers and in-flight requests.
+- [x] Wire actual desktop/headless production lifecycle and control handlers. Expose the existing opened personal memory resource, no second owner.
+- [x] Add >=10 positive and >=10 silence cases; distinguish deterministic host checks from model-quality live evaluation.
+- [x] Run targeted protocol/host tests, review, fix.
 
 Behavior check:
 ```ts
@@ -80,12 +80,12 @@ assert.equal(host.snapshot().feed[0].lifecycle, 'active')
 **Consumes:** existing captions, EXECUTOR_TASKS, input.text/dictation/audio; Task 2 personal.state and personal.command/result.
 **Produces:** main view left conversation, right Dynamic/Tasks/Memory, host-backed actions, collapse to existing orb and expand; configurable discovery and source controls.
 
-- [ ] Failing UI/controller check: opening text view never starts mic; switching full duplex to text stops continuous capture; dictation finish fills draft but does not send.
-- [ ] Implement host capability gating, request tracking, loss/error handling, no duplicate connection or audio owner. Preserve existing integrated preference; new desktop installs cascaded.
-- [ ] Render host feed with action/dismiss/snooze/evidence and ignored filter; memory correct/forget with expected version; task list/results/approvals reuse existing controls.
-- [ ] Source settings: native chosen directory, consent and visible coverage/exclusions/pause/disconnect/delete; consumed from sources state.
-- [ ] Test reconnect/stale snapshot, collapse/reopen, refused actions, XSS-safe content and accessible labels. Actual browser/Electron visual acceptance separately.
-- [ ] Review then fix.
+- [x] Failing UI/controller check: opening text view never starts mic; switching full duplex to text stops continuous capture; dictation finish fills draft but does not send.
+- [x] Implement host capability gating, request tracking, loss/error handling, no duplicate connection or audio owner. Preserve existing integrated preference; new desktop installs cascaded.
+- [x] Render host feed with action/dismiss/snooze/evidence and ignored filter; memory correct/forget with expected version; task list/results/approvals reuse existing controls.
+- [x] Source settings: native chosen directory, consent and visible coverage/exclusions/pause/disconnect/delete; consumed from sources state.
+- [x] Test reconnect/stale snapshot, collapse/reopen, refused actions, XSS-safe content and accessible labels. Actual browser/Electron visual acceptance separately.
+- [x] Review then fix.
 
 Behavior check:
 ```js
@@ -101,15 +101,15 @@ assert.equal(sent.some(frame => frame.type === 'input.text'), false)
 **Consumes:** KnowledgeService.handle/listSources; host feed invalidation and memory source propagation.
 **Produces:** source list with id/path/state/scanned/read/skipped/reasons/failures/last_sync, sources.add/pause/resume/disconnect/delete/sync commands, source-change hooks. Host-selected data path; durable authorization.
 
-- [ ] Failing real filesystem checks: exclusions/out-of-root symlink never read; 10,000 metadata entries but <=200 bodies; delete propagates; temporary failure does not imply deletion.
-- [ ] Persist directory grants/state and bounded file metadata; poll with single in-flight reconciliation and cancellation fences. Reuse existing ingest/reindex/remove.
-- [ ] Connect to production host with no scans absent explicit directory consent. Source deletion invalidates feed and forgets only dependent memory provenance.
-- [ ] Test restart, pause during scan, rename/delete, failure recovery and idempotence.
+- [x] Failing real filesystem checks: exclusions/out-of-root symlink never read; 10,000 metadata entries but <=200 bodies; delete propagates; temporary failure does not imply deletion.
+- [x] Persist directory grants/state and bounded file metadata; poll with single in-flight reconciliation and cancellation fences. Reuse existing ingest/reindex/remove.
+- [x] Connect to production host with no scans absent explicit directory consent. Source deletion invalidates feed and forgets only dependent memory provenance.
+- [x] Test restart, pause during scan, rename/delete, failure recovery and idempotence.
 
 ## Task 5: Integration and acceptance ledger
 
-- [ ] Run builds/check and suites serially because runtime/dist is shared.
-- [ ] Trace desktop text -> host -> real runtime; exercise synthetic production composition with isolated storage and fake providers where no credential is authorized.
-- [ ] Review complete diff for provenance, auth, stale actions, durable error handling and public boundary.
-- [ ] Record per-milestone implemented/automated/live/pending states, exact checks and known limitations. Human acceptance is not inferred.
-- [ ] Commit coherent work packages locally; no public push or main merge.
+- [x] Run builds/check and suites serially because runtime/dist is shared.
+- [x] Trace desktop text -> host -> real runtime; exercise synthetic production composition with isolated storage and fake providers where no credential is authorized.
+- [x] Review complete diff for provenance, auth, stale actions, durable error handling and public boundary.
+- [x] Record per-milestone implemented/automated/live/pending states, exact checks and known limitations. Human acceptance is not inferred.
+- [x] Commit coherent work packages locally; no public push or main merge.

@@ -1,3 +1,4 @@
+import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import assert from 'node:assert/strict'
 import {mkdtemp, realpath, rm, writeFile} from 'node:fs/promises'
 import {once} from 'node:events'
@@ -1331,7 +1332,9 @@ test('callbacks route once through the single playback, session, bridge, and ser
   assert.deepEqual(spoken, ['hello'])
   assert.equal(deliveries.length, 1)
   assert.equal(deliveries[0]?.text, 'hello')
-  assert.deepEqual(captions, [
+  assert.ok(captions[0]?.turn_id)
+  assert.equal(captions[0]?.turn_id,captions[1]?.turn_id)
+  assert.deepEqual(captions.map(({role,text,final})=>({role,text,final})), [
     {role: 'assistant', text: 'hel', final: false},
     {role: 'assistant', text: 'hello', final: true},
   ])
@@ -4163,4 +4166,25 @@ test('failed provider connect keeps recovered blackboard owned until retry or fi
     await assert.rejects(core.start(), /persistent assembly cannot restart/u)
     await assert.rejects(core.runtime.openMemory(), /memory is closed/u)
   } finally { await realtime.stop(); await rm(directory, {recursive: true, force: true}) }
+})
+
+test('personal host shares opened memory, persists configuration and closes with production owner', async () => {
+  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-personal-assembly-'))
+  let opens=0,closes=0,lists=0
+  const resource:PersonalMemoryResource={
+    open:()=>{opens++;return Promise.resolve()},close:()=>{closes++;return Promise.resolve()},
+    recall:()=>Promise.resolve({source:'personal',state:'empty',scope:'recent',hits:[],degraded:false}),
+    list:()=>{assert.equal(opens,1);lists++;return Promise.resolve({entries:[],cursor:null})},
+  }
+  const realtime=buildRealtimeAssembly({core:realCore(new RecordingFrameSource(),{path:join(dir,'board.sqlite'),ownerId:'test'}),provider:new AbortAwareProvider(),createPersonalMemory:()=>resource})
+  try {
+    await realtime.start()
+    assert.equal(realtime.personalMemory,resource)
+    assert.equal(opens,1)
+    assert(lists>0)
+    const result=await realtime.personalAgent.command({type:'personal.command',request_id:'configure',method:'discovery.configure',params:{enabled:false}})
+    assert.equal((result as {ok:boolean}).ok,true)
+    assert.equal(realtime.personalAgent.snapshot().settings.discovery_enabled,false)
+  } finally {await realtime.stop();await rm(dir,{recursive:true,force:true})}
+  assert.equal(closes,1)
 })

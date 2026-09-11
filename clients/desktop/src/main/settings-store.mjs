@@ -47,7 +47,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   startListeningOnLaunch: false,
   wakeWordEnabled: false,
   autoHideSeconds: 60,
-  pipelineMode: 'integrated',
+  pipelineMode: 'cascaded',
   integratedProvider: 'qwen',
   integratedModel: 'qwen-audio-3.0-realtime-plus',
   integratedVoice: 'longanqian',

@@ -327,6 +327,11 @@
     "reason": "Existing Codex MCP exposure flag controls locator availability; consumer-specific integration retained."
   },
   {
+    "path": "runtime/src/personal-agent/sources.ts",
+    "pattern": "export const SOURCE_EXCLUDES = ['.git', '.worktrees', '.codex', '.claude', 'node_modules', 'dist', 'build', 'target', '.cache', '__pycache__', '.venv', 'venv', 'Library', 'Browser', 'Chrome', 'Chromium', 'Firefox', 'Safari'] as const",
+    "reason": "Directory privacy exclusion for local agent state; no executor import, routing or provider dependency."
+  },
+  {
     "path": "runtime/src/project-confirmation.ts",
     "pattern": "* Host confirmation for a Codex project boundary change.",
     "reason": "Historical explanatory comment retained; no concrete executor import or identity branch is authorized by this entry."
@@ -705,6 +710,11 @@
     "reason": "Historical prompt constant/export identifiers retained; shared host confirmation behavior uses the generic port."
   },
   {
+    "path": "runtime/src/realtime/frontend-instructions.ts",
+    "pattern": "...(modules.coding === false ? [] : ['本轮用户明确追加或修改正在执行的 coding 任务要求时，立即调用 dispatch（executor=codex），instruction 保留本轮完整要求；不要只回复已收到、已记下或会纳入任务。']),",
+    "reason": "Model-visible coding dispatch routing names the public executor from the tool enum."
+  },
+  {
     "path": "runtime/src/realtime/qwen.ts",
     "pattern": "export {frontendInstructions, FRONTEND_INSTRUCTIONS, CODEX_APPROVAL_FRONTEND_INSTRUCTIONS} from './frontend-instructions.js'",
     "reason": "Compatibility export of the existing frontend prompt constant."
@@ -743,10 +753,5 @@
     "path": "runtime/src/work-tools.ts",
     "pattern": "// ponytail: one app-server child per CODEX_HOME, i.e. per workspace; a settings key is the upgrade",
     "reason": "Comment records the existing process-per-home concurrency ceiling."
-  },
-  {
-    "path": "runtime/src/realtime/frontend-instructions.ts",
-    "pattern": "...(modules.coding === false ? [] : ['本轮用户明确追加或修改正在执行的 coding 任务要求时，立即调用 dispatch（executor=codex），instruction 保留本轮完整要求；不要只回复已收到、已记下或会纳入任务。']),",
-    "reason": "Model-visible coding dispatch routing names the public executor from the tool enum."
   }
 ]

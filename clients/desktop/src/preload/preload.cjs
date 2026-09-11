@@ -1,6 +1,16 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
+  personal: Object.freeze({
+    wake: () => ipcRenderer.invoke('nova:personal:wake'),
+    setCollapsed: value => ipcRenderer.invoke('nova:personal:collapse', value),
+    chooseDirectory: () => ipcRenderer.invoke('nova:personal:directory'),
+    onCollapsed: callback => {
+      const listener = (_event, value) => { if (typeof value === 'boolean') callback(value) }
+      ipcRenderer.on('nova:personal:collapsed', listener)
+      return () => ipcRenderer.removeListener('nova:personal:collapsed', listener)
+    },
+  }),
   wakeWord: Object.freeze({
     report: value => ipcRenderer.send('nova:wake-word:report', value),
     audio: value => ipcRenderer.send('nova:wake-word:audio', value),

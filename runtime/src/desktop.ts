@@ -1,3 +1,4 @@
+import {personalCommandSchema} from './personal-agent/contracts.js'
 export {VISION_MODELS, supportsVision} from './vision-capability.js'
 import {taskActionSchema} from './desktop-tasks.js'
 import { timingSafeEqual } from 'node:crypto'
@@ -139,9 +140,10 @@ const DEFAULT_BOOTSTRAP_TEXT_FRAMES = [
 ] as const
 
 const ordinaryDesktopControlSchema = z.discriminatedUnion('type', [
+  personalCommandSchema,
   z.object({type: z.literal('input.audio')}).strict(),
   z.object({type: z.literal('input.dictation'), id: identifierSchema, action: z.enum(['start', 'finish', 'cancel'])}).strict(),
-  z.object({type: z.literal('input.text'), text: z.string().min(1).max(4000).refine(value => value.trim().length > 0)}).strict(),
+  z.object({type: z.literal('input.text'), request_id: z.string().min(1).max(128).optional(), input_instance_id: z.string().min(1).max(128).optional(), text: z.string().min(1).max(4000).refine(value => value.trim().length > 0)}).strict(),
   z.object({
     type: z.literal('speech.onset'),
     speech_id: identifierSchema,

@@ -644,6 +644,7 @@ function pipelineService(options: {
   readonly intake?: ConstructorParameters<typeof RealtimeService>[0]['intake']
   readonly toolResult?: {readonly accepted: boolean; readonly delegateId: string | null}
   readonly onCaption?: (frame: {
+    readonly turn_id?: string
     readonly role: string
     readonly text: string
     readonly final: boolean
@@ -11046,4 +11047,21 @@ test('received coding summaries deduplicate across smart continuous and repeated
   service.setCodingProgressNarration('continuous')
   service.projectRuntimeEvent(progressEvent({seq: 6, summary: 'B', activity: 6}))
   assert.equal(queued().length, 0, 'withdrawn queued facts are received, not claimed delivered or replayed')
+})
+
+
+test('caption source identity distinguishes adjacent same-role provider turns without final delivery',async()=>{
+  const captions:{turn_id?:string;text:string}[]=[]
+  const {service}=pipelineService({onCaption:frame=>captions.push(frame)})
+  await service.connect()
+  try {
+    const epoch=service.session.sessionEpoch
+    await service.handleEvent({kind:'user_transcript_delta',session_epoch:epoch,item_id:'one',text:'first'})
+    await service.handleEvent({kind:'user_transcript_delta',session_epoch:epoch,item_id:'one',text:' continuation'})
+    await service.handleEvent({kind:'user_transcript_delta',session_epoch:epoch,item_id:'two',text:'second'})
+    assert.equal(captions.length,3)
+    assert.ok(captions[0]!.turn_id)
+    assert.equal(captions[0]!.turn_id,captions[1]!.turn_id)
+    assert.notEqual(captions[0]!.turn_id,captions[2]!.turn_id)
+  } finally {await service.close()}
 })

@@ -99,3 +99,30 @@ All media modes share pairing; the existing `hello` and media protocol are uncha
 - `input.audio`：结束草稿输入模式，显式恢复连续语音；草稿完成后的迟到音频不会自动进入模型。
 
 识别返回 `input.transcription`，包含匹配的 `id` 和 `text`，失败时只返回 `error: recognition_failed`。草稿不是用户轮次，不触发 LLM 或工具；客户端必须显式发送编辑后的 input.text。
+
+### v0.3 personal host and reliable text acceptance
+
+The authenticated desktop socket accepts `personal.command` directly. Remote clients wrap the same payload in `client.command`; outer `client.command_result` acknowledges delivery to the control handler, while `personal.result` reports the domain operation:
+
+```json
+{"type":"personal.command","request_id":"request-uuid","method":"state","params":{}}
+{"type":"personal.result","request_id":"request-uuid","ok":true}
+```
+
+Methods are `state`, `feed.action`, `memory.list`, `memory.correct`, `memory.forget`, `discovery.configure`, and `sources.add/pause/resume/disconnect/delete/sync`. Memory changes require `{id,expected_version}`; correction also requires `content`. Feed actions use `{id,action,snooze_until?}`. Actions are `open`, `act`, `snooze`, `dismiss`, `expand_evidence`, `presented`, and `notified`. Only explicit `act` requests enter the normal user authorization path. Discovery configuration accepts `{enabled?,interval_minutes?}` (5–1440 minutes, default 30). Directory admission requires explicit consent; clients cannot select the user scope or storage path.
+
+The host sends `personal.state` with `{revision,feed,memory:{entries,cursor},sources,capabilities,settings}`. Treat these as authoritative snapshots; capability booleans govern available operations. A domain failure has `ok:false,error`. Request IDs are deduplicated against a bounded durable receipt ledger. Private memory/snapshot bodies are not retained in that ledger: replay of such a receipt includes `reload_required:true`. Request a fresh `state` or `memory.list` with a new request ID instead of assuming missing `data` is a complete result.
+
+Text input retains compatibility with `{type:"input.text",text}`. New clients should use the correlated form:
+
+```json
+{"type":"desktop.capabilities","capabilities":["text_input","dictation"],"input_instance_id":"host-uuid"}
+{"type":"input.text","request_id":"text-uuid","input_instance_id":"host-uuid","text":"Please review my notes"}
+{"type":"input.text_result","request_id":"text-uuid","ok":true}
+```
+
+`input.text_result` is a required, non-droppable receipt. `ok:true` means the host's submission to the current provider resolved; it does not prove a task was completed. Captions, including identical final user text, never acknowledge input. Rejected submissions return `ok:false,error`, including `submission_failed`, `request_id_conflict`, `request_capacity`, or `outcome_unknown`.
+
+The bridge retains at most 256 text request receipts for its runtime lifetime, without evicting accepted requests. Identical request ID/text retries reuse the original operation and receipt, including across renderer reconnect. Keep the original `request_id` and `input_instance_id` when retrieving a lost receipt. A different backend instance rejects the stale instance with `outcome_unknown` and does not submit again; the client must preserve the draft and tell the user acceptance is uncertain before a new manual submission. Legacy clients omitting these optional fields retain their original uncorrelated behavior.
+
+Actual provider transcript captions now optionally carry an opaque `turn_id` derived from host service identity, provider epoch, role, and item/response identity. Caption deltas/finals for the same turn use the same ID; a new ID starts a new message even if a previous final was dropped. Existing role/text/final/sequence fields are unchanged. Empty final captions are reset signals and must close the displayed accumulation even when there is no text to append. Caption bodies remain speculative and droppable.

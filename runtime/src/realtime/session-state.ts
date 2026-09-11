@@ -44,6 +44,7 @@ export type ContinuationRequestResult = 'requested' | 'retryable' | 'rejected'
 
 /** A speculative display-only caption: revisable, never persisted. */
 export interface CaptionFrame {
+  readonly turn_id?: string
   readonly role: 'user' | 'assistant'
   readonly text: string
   readonly final: boolean

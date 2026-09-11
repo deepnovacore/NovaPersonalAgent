@@ -383,6 +383,7 @@ export class RealtimeService {
   readonly #onProviderTerminal: (generation: PlaybackGeneration) => void
   readonly #onExecutorState: (state: ExecutorState) => void
   readonly #onActiveWorkChanged: () => void
+  readonly #captionScope = randomUUID()
   readonly #onCaption: ((frame: CaptionFrame) => void) | undefined
   readonly #onUserTranscriptAccepted: RealtimeServiceOptions['onUserTranscriptAccepted']
   readonly #telemetry: RealtimeTelemetry | undefined
@@ -929,6 +930,8 @@ export class RealtimeService {
     void ready.catch(() => undefined)
     return ready
   }
+
+  get inputCapabilities(): readonly string[] { return [...(this.#provider.submitText ? ['text_input'] : []), ...(this.#provider.transcribeDraft ? ['dictation'] : [])] }
 
   async transcribeDraft(pcm: Uint8Array, signal: AbortSignal): Promise<string> {
     if (!this.#provider.transcribeDraft) throw new Error('dictation unavailable')
@@ -3072,7 +3075,10 @@ export class RealtimeService {
         event,
         event.kind === 'user_transcript_final' ? {accepted} : undefined,
       )
-      if (caption !== null) this.#onCaption(caption)
+      if (caption !== null) {
+        const sourceId='item_id' in event?event.item_id:'response_id' in event?event.response_id:null
+        this.#onCaption({...caption,...(typeof sourceId==='string'?{turn_id:`${this.#captionScope}:${event.session_epoch}:${caption.role}:${sourceId}`}:{})})
+      }
     }
 
     if (event.kind === 'user_speech_started' && accepted) {

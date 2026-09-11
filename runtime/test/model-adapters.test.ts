@@ -175,3 +175,12 @@ test('the compressor strips exactly the whitespace Python strips', async () => {
   })
   assert.equal(await compressor.compress([]), '\ufeffsummary\ufeff')
 })
+
+test('discovery uses bounded existing Surrogate gateway without speech or execution', async () => {
+  const gateway=new ScriptedGateway([],JSON.stringify({proposal:null}))
+  const surrogate=new GatewaySurrogate({gateway,model:'same-model',proactivityPreset:'balanced'})
+  const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'Asia/Shanghai',memory:[],evidence_refs:[],recent_delivery:[]}
+  assert.equal(await surrogate.discover(snapshot,new AbortController().signal),null)
+  const conflicted=new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({speak:true,suggestion_id:'s-1',progress_class:null,reason:'bad',proposal:{kind:'question',summary:'Q',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}})),model:'same-model',proactivityPreset:'balanced'})
+  await assert.rejects(conflicted.watch(emptyView),/契约/)
+})

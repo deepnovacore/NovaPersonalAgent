@@ -1,3 +1,4 @@
+import {proposalSchema} from './personal-agent/contracts.js'
 import { z } from 'zod'
 import { jsonValueSchema, outcomeSchema, trustSchema } from './events.js'
 import { handoffPolicySchema, memoryRefSchema } from './memory.js'
@@ -75,11 +76,12 @@ export const progressClassSchema = z.enum([
 ]).nullable()
 
 export const surrogateOutputSchema = z.object({
+  proposal: proposalSchema.nullable().optional(),
   speak: z.boolean(),
   suggestion_id: z.string().nullable().default(null),
   progress_class: progressClassSchema.default(null),
   reason: z.string().default(''),
-}).strict()
+}).strict().refine(output=>!(output.proposal&&(output.suggestion_id!==null||output.progress_class!==null)))
 
 export const compressorOutputSchema = z.object({
   channel: z.string().min(1),

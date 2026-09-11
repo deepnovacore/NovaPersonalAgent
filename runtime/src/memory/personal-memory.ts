@@ -1,3 +1,6 @@
+import type {MemoryCapabilities, MemoryObservation, MemoryEntry, MemoryListOptions, MemoryPage, MemorySourceRef, MemoryVersion} from './entry.js'
+export * from './entry.js'
+
 /** Nova's durable personal-memory boundary. No provider types or execution authority. */
 export type PersonalMemoryRecallScope = 'recent' | 'any'
 
@@ -75,6 +78,13 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  readonly observeSource?: (input:MemoryObservation) => Promise<MemoryEntry|null>
+  readonly capabilities?: () => MemoryCapabilities
+  readonly list?: (options?: MemoryListOptions) => Promise<MemoryPage>
+  readonly get?: (id: string) => Promise<MemoryEntry | null>
+  readonly correct?: (id: string, expectedVersion: MemoryVersion, content: string, userSource: MemorySourceRef) => Promise<{previous: MemoryEntry; entry: MemoryEntry}>
+  readonly forgetEntry?: (id: string, expectedVersion: MemoryVersion) => Promise<MemoryEntry>
+  readonly forgetSource?: (ref: string) => Promise<void>
   open(): Promise<void>
   close(): Promise<void>
   /** Absent for read-only providers. Resolve only after durable admission, or reject. */

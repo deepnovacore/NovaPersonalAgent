@@ -1,7 +1,7 @@
 import {createHash} from 'node:crypto'
 import {lookup as dnsLookup} from 'node:dns/promises'
 import {constants} from 'node:fs'
-import {basename, extname, isAbsolute} from 'node:path'
+import {basename, extname, isAbsolute, relative} from 'node:path'
 import {BlockList, isIP, type LookupFunction} from 'node:net'
 import {lstat, open, realpath} from 'node:fs/promises'
 import {Worker} from 'node:worker_threads'
@@ -89,7 +89,7 @@ export function chunkKnowledgeText(text: string): KnowledgeChunk[] {
   return chunks
 }
 
-export async function readKnowledgeFile(path: string, signal?: AbortSignal): Promise<KnowledgeDocument> {
+export async function readKnowledgeFile(path: string, signal?: AbortSignal, allowedRoot?: string): Promise<KnowledgeDocument> {
   signal?.throwIfAborted()
   if (!isAbsolute(path) || !pathPolicy.allows(path)) throw new KnowledgeDocumentFailure('path_denied')
 
@@ -101,6 +101,12 @@ export async function readKnowledgeFile(path: string, signal?: AbortSignal): Pro
   }
   signal?.throwIfAborted()
   if (!pathPolicy.allows(canonical)) throw new KnowledgeDocumentFailure('path_denied')
+  if (allowedRoot !== undefined) {
+    const child = relative(allowedRoot, canonical)
+    if (child === '..' || child.startsWith('../') || child.startsWith('..\\') || isAbsolute(child)) {
+      throw new KnowledgeDocumentFailure('path_denied')
+    }
+  }
 
   const format = fileFormat(canonical)
   if (format === null) throw new KnowledgeDocumentFailure('unsupported_mime')

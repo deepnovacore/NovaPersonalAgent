@@ -1,3 +1,4 @@
+import {mountPersonalView} from './personal-view.mjs'
 import { WakeAudioRouter, canAutoSleep } from './wake-audio.mjs'
 import {DESKTOP_ACTIVITY, CLOCK_PING, PLAYBACK_CLEAR, PLAYBACK_ALERT, PLAYBACK_TERMINAL, EXECUTOR_STATE, PROJECT_STATE, EXECUTOR_APPROVAL, CAPTION, EXECUTOR_PROGRESS, EXECUTOR_RESULTS_RESET, EXECUTOR_RESULT, EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT} from './wire-frame-types.mjs'
 import {
@@ -68,6 +69,7 @@ const lastResultButton = document.querySelector('#last-result')
 const retainedResults = new Map()
 let projectRoster = []
 let taskBanner = null
+let personalView = null
 let savedNarrationMode = 'smart'
 let bubbleMode = 'milestones'
 let pendingNarrationMode = null
@@ -108,7 +110,7 @@ const progressBubbles = mountProgressBubbles({
 taskBanner = mountTaskBanner({
   container: document.querySelector('#task-banner'), send,
   reserveArea: active => taskArea.reserveBanner(active),
-  onChange: updateResultButton,
+  onChange: () => { updateResultButton(); personalView?.refresh() },
 })
 const stopBubbleLayout = window.novaAudioAgentDesktop.windowLayout.onBubbleLayout(layout => taskArea.onNativeLayout(layout))
 const stopConfirmationPlacement = window.novaAudioAgentDesktop.windowLayout
@@ -591,7 +593,7 @@ const wakeAudio = new WakeAudioRouter({
   upload: pcm => {
     if (socket?.readyState !== WebSocket.OPEN) return
     socket.send(pcm)
-    detectLocalOnset(pcm)
+    if (personalView.controller.mode === 'voice') detectLocalOnset(pcm)
   },
   detect: value => window.novaAudioAgentDesktop.wakeWord.audio(value),
 })
@@ -621,7 +623,7 @@ function applyWakeState(value) {
 }
 
 function microphoneGated() {
-  return axes.muted || performance.now() < muteDrainUntil
+  return !['dictation', 'voice'].includes(personalView.controller.mode) || axes.muted || performance.now() < muteDrainUntil
 }
 
 function toggleMute() {
@@ -797,6 +799,7 @@ function clearCaption() {
 }
 
 async function handleControl(message) {
+  personalView.receive(message)
   if (message.type === PLAYBACK_CLEAR) {
     clearAssistantCaption()
     const backend = playback.current?.backend
@@ -992,8 +995,10 @@ async function handleControl(message) {
     }
   } else if (message.type === EXECUTOR_TASKS) {
     taskBanner.receive(message)
+    personalView.refresh()
   } else if (message.type === EXECUTOR_TASK_ACTION_RESULT) {
     taskBanner.receiveActionResult(message)
+    personalView.refresh()
   } else if (message.type === EXECUTOR_PROGRESS) {
     const frame = parseProgressFrame(message)
     if (frame !== null && (message.phase === 'alert' || (message.executor !== axes.executorId
@@ -1068,6 +1073,7 @@ function resetRendererConnection(processReplaced, {closeSocket = true} = {}) {
   activeConnection = null
   socket = undefined
   axes.connected = false
+  personalView.controller.disconnect()
   axes.error = ''
   confirmationDecision.deliveryLost()
   codexApprovalDecision.deliveryLost()
@@ -1122,6 +1128,8 @@ function openBackendSocket(connection) {
     nextConnection.delivery.sendText(JSON.stringify({ type: 'hello', token: connection.token }))
     if (pendingNarrationMode && send({type: 'coding.progress_narration', mode: pendingNarrationMode})) pendingNarrationMode = null
     axes.connected = true
+    personalView.controller.connect()
+    void personalView.controller.command('state').catch(error => {personalView.controller.error=error.message;personalView.refresh()})
     axes.error = ''
     backendRecovery.socketOpened()
     render()
@@ -1260,16 +1268,27 @@ async function boot() {
     axes.booting = false
     if (bootstrap.backend) connectBackend(bootstrap.backend)
     else handleBackendExit()
-    const microphone = await refreshMicrophonePermission()
-    if (microphone === 'granted') {
-      await activateCapture()
-    }
+    axes.microphone = 'not_requested'
   } catch {
     axes.booting = false
     axes.error = 'bootstrap'
   }
   render()
 }
+
+personalView = mountPersonalView({send,
+  start: async () => {
+    if (await refreshMicrophonePermission() !== 'granted') throw new Error('麦克风权限不可用，原有草稿已保留')
+    await window.novaAudioAgentDesktop.personal.wake()
+    if (!axes.activated) await activateCapture()
+    if (!axes.activated) throw new Error('麦克风启动失败')
+  },
+  stop: deactivateCapture,
+  taskAction: (id, action) => { taskBanner.select(id); taskBanner.action(action) },
+  tasks: () => taskBanner?.state(), results: () => [...retainedResults.values()],
+  openResults: () => window.novaAudioAgentDesktop.executorResult.open({results: [...retainedResults.values()], roster: projectRoster}),
+  api: window.novaAudioAgentDesktop,
+})
 
 orb.addEventListener('pointerdown', event => {
   if (event.button !== 0) return

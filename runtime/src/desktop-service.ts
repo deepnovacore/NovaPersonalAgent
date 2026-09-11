@@ -157,6 +157,8 @@ export function buildDesktopRealtimeComposition(
     token: options.token,
     ...(options.transportFailure === undefined ? {} : {transportFailure: options.transportFailure}),
     service: realtime.service,
+    personalCommand: command => realtime.personalAgent.command(command),
+    personalSnapshot: () => realtime.personalAgent.snapshot(),
     executor: codingExecutorIdentity(realtime) ?? options.approvalExecutor ?? null,
     ...(() => {
       const adapter = [...realtime.runtime.executors.values()].find(adapter => adapter.manifest.roles.includes('coding'))
@@ -178,12 +180,16 @@ export function buildDesktopRealtimeComposition(
     ...(options.createServer === undefined ? {} : {createServer: options.createServer}),
   })
   holder.desktop = desktop
+  const unsubscribePersonal = realtime.personalAgent.subscribe(() => desktop.bridge.onPersonalFrame(realtime.personalAgent.snapshot()))
+  options.stop.signal.addEventListener('abort', unsubscribePersonal, {once:true})
   startDesktopActivityHeartbeat(realtime.service, idle => desktop.bridge.onActivity(idle), options.stop.signal)
 
   const unsubscribeProgress = realtime.runtime.observe((event, currentConversation) => {
     if (currentConversation === false) return
     const projected = projectExecutorEvent(event, realtime.runtime, channel => realtime.service.agentNameForChannel(channel))
-    if (projected !== null) desktop.bridge.onExecutorProgress(projected.progress, projected.result)
+    if (projected !== null) {
+      desktop.bridge.onExecutorProgress(projected.progress, projected.result)
+    }
   })
   if (options.stop.signal.aborted) unsubscribeProgress()
   else options.stop.signal.addEventListener('abort', unsubscribeProgress, {once: true})
