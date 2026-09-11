@@ -582,3 +582,25 @@ test('captured Max null id delta preserves the established id without accepting 
     } finally { await live.close() }
   }
 })
+
+test('Qwen sends original pixels through tool continuations and strips them from later history', async () => {
+  const requests: string[] = []
+  let call = 0
+  const llm = createQwenCascadedLlmFactory({baseUrl:'https://example.test/v1',apiKey:'test',model:'qwen3-vl-plus',instructions:'test',
+    fetchImpl: (_url, init) => {
+      requests.push(init?.body as string)
+      call++
+      const delta = call === 1 ? {tool_calls:[{index:0,id:'call-1',type:'function',function:{name:'lookup',arguments:'{}'}}]} : {content:'done'}
+      return Promise.resolve(new Response(`data: ${JSON.stringify({id:`r-${call}`,choices:[{delta}]})}\n\ndata: ${JSON.stringify({choices:[{delta:{},finish_reason:call===1?'tool_calls':'stop'}]})}\n\ndata: [DONE]\n\n`, {headers:{'content-type':'text/event-stream'}}))
+    }}).open()
+  const signal = new AbortController().signal, tools = [{name:'lookup',parameters:{type:'object'}}]
+  const image = {payload:new Uint8Array([255,216,255,217]),media_type:'image/jpeg',width:1280,height:720,captured_at:1}
+  await collect(llm.stream({inputs:[{kind:'user_text',text:'look',image}],tools,signal}))
+  await collect(llm.stream({inputs:[{kind:'tool_result',call_id:'call-1',output:{ok:true}}],tools,signal}))
+  await collect(llm.stream({inputs:[{kind:'user_text',text:'next'}],tools,signal}))
+  assert.match(requests[0]!, /image_url.*data:image\/jpeg;base64/u)
+  assert.match(requests[1]!, /image_url.*data:image\/jpeg;base64/u)
+  assert.doesNotMatch(requests[2]!, /image_url|data:image/u)
+  assert.match(requests[2]!, /call-1/u)
+  await llm.close()
+})

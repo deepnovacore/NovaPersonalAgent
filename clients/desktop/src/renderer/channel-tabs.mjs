@@ -9,7 +9,6 @@ const CHANNEL_LABELS = Object.freeze({
   guard: 'Guard',
   codex: 'Codex',
   search: '搜索',
-  mcp__nova_camera: '相机',
   mcp__nova_knowledge: '知识库',
 })
 const MCP_PREFIX = /^mcp__/

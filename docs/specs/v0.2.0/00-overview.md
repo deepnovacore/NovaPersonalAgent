@@ -1,5 +1,7 @@
 # Nova Audio Agent v0.2.0 Spec Series
 
+> Vision update: camera MCP and side-VLM foreground projection below are superseded by [native vision and independent monitoring](../../archs/11-vision.md). The current default foreground has five host/native tools; camera capture is not a tool.
+
 > 摘要：v0.2.0 交付可靠、模块化、可跨设备使用的 Agent 基础：跨平台审批、薄快脑与 coding 侧调度、可替换级联管线及供应商解耦、自定义 MCP / 搜索 / RAG 与中文唤醒、VoiceMem 个人记忆与 Workspace Graph 工作区记忆、Tailscale 连接 PC runtime 的 iOS 客户端。意图澄清、工作单、设置与进度展示服务于这些闭环。本系列定义边界与验收，不把已有实现等同于已发布。
 >
 > 修订（2026-09-03）：吸收一轮静态评审（7 条 P1/P2 + 4 条产品建议），处置见文末「Review log」。

@@ -1,5 +1,7 @@
 # v0.2.0 implementation ledger
 
+> Vision update: camera MCP and side-VLM foreground projection below are superseded by [native vision and independent monitoring](../../archs/11-vision.md). The current default foreground has five host/native tools; camera capture is not a tool.
+
 Branch: `v0.2.0dev`. Contract: [00-overview.md](00-overview.md).
 Implement M1 first, keeping package versions unchanged. Use the existing Node/TypeScript
 runtime, one-shot confirmation controllers, desktop settings transaction and test harness.

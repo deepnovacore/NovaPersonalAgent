@@ -21,9 +21,7 @@ tool budget.
 
 ## Direct MCP and Vision
 
-Search remains a stable `SearchAdapter` contract; MCP is only one transport behind it. The built-in
-Camera MCP is the explicit exception to the old “built-ins are never MCP” non-goal and exposes the
-direct `mcp__nova_camera__snapshot` operation. External MCP tools are user-selected context cost and
+Search remains a stable `SearchAdapter` contract; MCP is only one transport behind it. Camera capture is native, owned by a conversation turn or monitoring task. External MCP tools are user-selected context cost and
 never become agent or intake tools. The Vision controller owns hidden `watch` and `guard` channels;
 the model may dispatch/cancel only the `vision` controller and cannot dispatch those hidden channels.
 

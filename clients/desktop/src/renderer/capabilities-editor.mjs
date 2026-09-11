@@ -1,7 +1,7 @@
 import {channelLabel} from './channel-tabs.mjs'
-const LABELS = {search: '搜索', camera: '相机与视觉', coding: '编程执行', knowledge: '知识库'}
+const LABELS = {search: '搜索', camera: '视觉监控', coding: '编程执行', knowledge: '知识库'}
 const PRESET = {url: 'https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp', tool: 'bailian_web_search', headers: {authorization: 'Bearer ${DASHSCOPE_API_KEY}'}}
-const DESCRIPTIONS = {搜索: '查找网络信息，为回答补充资料', '相机与视觉': '允许使用相机与视觉工具', 编程执行: '执行编程任务与项目操作', 知识库: '检索已导入的本地资料', '知识库对 Codex 开放': '允许 Coding 执行器检索知识库'}
+const DESCRIPTIONS = {搜索: '查找网络信息，为回答补充资料', '视觉监控': '允许独立执行器持续观察并报告命中' , 编程执行: '执行编程任务与项目操作', 知识库: '检索已导入的本地资料', '知识库对 Codex 开放': '允许 Coding 执行器检索知识库'}
 const DEFAULT_TOOL = {enabled: false, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2}
 const node = (tag, text, parent) => {const element = document.createElement(tag); if (text) element.textContent = text; parent?.append(element); return element}
 
@@ -121,7 +121,6 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
     }
     if (running?.state === 'running') {
       if (running.modules?.search?.enabled && running.modules.search.provider === 'mcp') liveRow('search', '内置搜索 · 已启用')
-      if (running.modules?.camera?.enabled) liveRow('mcp__nova_camera', '内置相机 MCP · 已启用')
       if (running.modules?.knowledge?.enabled) liveRow('mcp__nova_knowledge', '内置知识库 · 已启用')
       for (const server of statuses) liveRow(server.name, statusLabels[server.status] ?? '状态未知')
       if (live.children.length === 1) node('p', '当前未启用 MCP 服务', live).className = 'hint'

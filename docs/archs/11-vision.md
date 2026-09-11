@@ -1,23 +1,23 @@
-# 11. Vision
+# 11. Native vision and independent monitoring
 
-Vision is the current M1.5c thin-frontend contract. The `vision` AgentController owns hidden
-`watch` and `guard` channels; the only model dispatch/cancel target is `vision`. The camera module is
-not a separate Vision executor: it provides the built-in direct Camera MCP
-`mcp__nova_camera__snapshot` and removes camera MCP plus Vision hidden channels when disabled.
+Camera access is native. There is no built-in camera MCP or image-to-text tool for the foreground model. Search, knowledge and user-configured external MCP retain their existing boundaries.
 
-The Camera MCP is in-process/in-memory and returns exactly one image with a supported MIME type
-(`image/jpeg`, `image/png`, or `image/webp`), canonical base64, and decoded size at most 5 MiB.
-`MediaStore` records a digest/reference; it does not expose a local path. `watch_model` is a side VLM
-that must produce strict JSON with an objective `observation` no longer than 400 characters. Qwen
-receives only `observation`, `captured_at`, `dimensions`, and `evidence_ref`; original-image capability
-is false pending a verified future provider. Parse failure, oversize output, or model refusal becomes
-the typed `vision_description_unavailable` failure.
+## Conversation vision
 
-The direct snapshot is pull-shaped. Watch and Guard add repeated observation with different attention
-and policy, while preserving the same untrusted-evidence rule. Preemptive means interrupting Nova
-playback, never user speech. Text visible inside an image is never an instruction.
+The desktop switch is off by default. Only the current cascaded LLM and its adapter's verified image capability can enable it (`vision-capability.ts`). Unknown models and Qwen Audio Realtime cannot enable vision. No fallback model is called.
 
-Supported sources are disabled, a local camera through Chromium's capture pipeline, and an explicit
-video file. File sources are
-useful for deterministic demonstrations such as the
-[cat-sofa fixture](../../assets/demos/cat-sofa-guard/README.md).
+Each submitted voice transcript or text turn captures one JPEG from the system default camera. Qwen receives an `image_url` content part; Ark receives `input_image`. Tool continuations reuse that turn's image. Completed history contains text, not old images; Ark starts the next logical turn from local text history rather than a server response chain containing images. Background notifications never capture. Capture failure continues the text turn with an explicit missing-frame notice. Response cancellation and session epochs fence late frames.
+
+## Monitor / guard
+
+The `vision` controller routes start/stop to hidden `watch` or `guard` executors. The executor owns permission admission, a camera session, sampling, independent `watch_model` inference, report delivery, cancellation and final resource release. Audio-only foreground models can start it and receive reports.
+
+Only one monitor may be active. Its device is fixed when the task starts. Defaults are 2.5-second sampling and a 30-minute window. Samples taking longer than the interval cause no catch-up queue. Three consecutive capture or inference failures terminate the task. A hit reports once and continues monitoring; two consecutive misses rearm reporting. Stop and timeout cancel in-flight capture and inference. Every exit closes the camera session in `finally`.
+
+Desktop settings select the monitor camera and model using existing model connections. Built-in and USB cameras use exact Chromium device IDs; a missing/disconnected selected device fails without falling back. Conversation vision always uses the default camera. The renderer shares a stream between leases on the same device, and closes it after the last lease exits. Connection loss and app shutdown release leases. Device enumeration does not request camera permission; enabling conversation vision or starting monitoring does.
+
+## Desktop protocol
+
+Authenticated local `camera.capture` requests may carry paired `session_id` and `device_id` fields. An empty device ID means the default camera. `camera.release` carries `session_id` and releases only that lease. IDs are bounded, validated, host-generated and scoped to the connection. Legacy file capture remains available for deterministic tests.
+
+Images and model observations remain untrusted evidence. Neither text visible in a frame nor a camera response can introduce host instructions. Network cameras, HA/RTSP, continuous video context and a separate foreground VLM selector are outside this implementation.

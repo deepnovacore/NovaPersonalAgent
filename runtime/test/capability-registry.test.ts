@@ -108,7 +108,7 @@ test('production disables Coding by role and preserves Vision host tools; all co
     assert.equal(assembly.runtime.executors.has('codex'), false)
     assert.equal(assembly.core.visionController !== undefined, camera)
     for (const tool of ['dispatch', 'cancel', 'confirm']) assert.equal(assembly.tools.bindings.has(tool), camera)
-    assert.equal(assembly.tools.schemas.length, camera ? 5 : 1)
+    assert.equal(assembly.tools.schemas.length, camera ? 4 : 1)
     await assembly.core.stop()
   }
 })
@@ -117,7 +117,7 @@ test('final provider tool composition enforces exact N/B without partial exposur
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
   assert.throws(() => buildQwenRealtimeAssembly({settings: settings(), capabilities}), error => {
     assert.equal((error as {code: string}).code, 'frontbrain_tool_budget_exceeded')
-    assert.match(String(error), /5\/1/u)
+    assert.match(String(error), /4\/1/u)
     return true
   })
   assert.throws(() => parseCapabilityRegistry({version: 1, frontbrainToolBudget: 0}), /frontbrainToolBudget/u)

@@ -1,5 +1,7 @@
 # 02. Intake and Planning
 
+> Vision update: camera MCP and side-VLM foreground projection below are superseded by [native vision and independent monitoring](../../archs/11-vision.md). The current default foreground has five host/native tools; camera capture is not a tool.
+
 > 摘要：用宿主拥有的 IntakeSession 替代「问一轮就 dispatch」的提示词策略。目标不是多问，而是**少犯错**：只问会改变实现或验收的、属于用户的偏好；技术栈、入口、测试命令等仓库事实交给 Codex 自己探索。廉价槽 `intake.assess` 判断「还要不要问」，并在 [08](08-project-and-work.md) 后兼任 coordinator（选项目 / 选会话 / 定 kind）；「允许规划」与「允许执行」分开；`confirm` 读回绑定既有 proposal，纯确认不 bump revision。拦截的是宿主工具 `dispatch`，由 AgentController registry 决定是否进入 coding intake；非 agent 的直接工具保持原路径。派单经现有 `dispatchExternal` / `dispatchConfirmedExternal`，accepted 后才标记 dispatched。
 >
 > 历史修订（2026-09-03，已取代）：回应评审 P1-3；再修订回应 P1（confirm 循环依赖、全量拦截 `codex__project`）与 P2（admission 拒绝仍标 dispatched、入口 API 名）。

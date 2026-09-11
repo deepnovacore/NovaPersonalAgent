@@ -22,7 +22,7 @@ These workstreams have substantial code in `v0.2.0dev`; use the
 This update does not close existing human-voice, installed-Windows or wake-word gates.
 
 The retained engineering order is **M1.5b → M1.5c → 03a**. M1.5c covers the six-tool
-baseline, Camera MCP + VLM projection, hidden Vision watch/guard and policy-driven monitoring.
+baseline, native conversation vision and independent monitoring, hidden Vision watch/guard and policy-driven monitoring.
 The candidate realtime MCP budget `B=24` still requires provider validation; it is not a proven
 universal limit. External MCP implementation is not equivalent to release acceptance.
 `FASTBRAIN_SYSTEM` remains deferred legacy code, not an additional active model.

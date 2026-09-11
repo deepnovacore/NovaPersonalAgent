@@ -260,3 +260,12 @@ test('camera permission request and result grammars are exact and bounded', () =
       : parseCameraPermissionRequest(invalid))
   }
 })
+
+test('camera sessions require paired bounded device and lease IDs on the local wire', () => {
+  const request = {type:'camera.capture' as const,request_id:REQUEST_ID,source:'local' as const,session_id:'monitor-1',device_id:'usb'}
+  assert.deepEqual(parseCameraCapture(serializeCameraCapture(request)), request)
+  for (const malformed of [
+    {...request,device_id:'x'.repeat(257)}, {...request,device_id:'usb\n'},
+    {...request,session_id:'../other'}, {...request,session_id:undefined}, {...request,device_id:undefined},
+  ]) assert.throws(() => parseCameraCapture(JSON.stringify(malformed)), CameraWireError)
+})

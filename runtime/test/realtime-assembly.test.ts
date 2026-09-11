@@ -359,7 +359,7 @@ class NeverCalledSearch implements SearchTransport {
 }
 
 function realCore(frameSource = new RecordingFrameSource(), blackboard?: BlackboardSessionOptions): Assembly {
-  return buildAssembly({
+  const core = buildAssembly({
     settings: settingsSchema.parse({executors: ['fast_sim']}),
     ...(blackboard === undefined ? {} : {blackboard}),
     clock: new VirtualClock(0),
@@ -367,6 +367,21 @@ function realCore(frameSource = new RecordingFrameSource(), blackboard?: Blackbo
     searchTransport: new NeverCalledSearch(),
     frameSource,
   })
+  // Synthetic core-start dependency for lifecycle ordering/failure tests; production startup is camera-free.
+  const start = core.start.bind(core)
+  let started = false
+  let closed = false
+  let tail = Promise.resolve()
+  return {...core, start() {
+    tail = tail.catch(() => undefined).then(async () => {
+      if (closed || started) return start()
+      if (blackboard) await core.runtime.openMemory()
+      try { await frameSource.start() } catch { throw new AssemblyError('synthetic core startup failed') }
+      await start()
+      started = true
+    })
+    return tail
+  }, async stop() { await tail.catch(() => undefined); await core.stop(); started = false; closed = blackboard !== undefined }}
 }
 
 class AbortAwareProvider implements RealtimeProvider {
@@ -909,7 +924,7 @@ test('a late camera grant cannot arm stale Vision work and a fresh request still
     assert.equal(freshAdmission?.delegate_id, 'watch-fresh')
     await waitNamed('fresh camera permission request', () => source.admissions.length === 2)
     source.admissions[1]?.resolve('granted')
-    await waitNamed('fresh Watch hit', () => gateway.vlmCalls === 1 && core.runtime.ownedTaskCount === 0)
+    await waitNamed('fresh Watch hit', () => gateway.vlmCalls === 1 && events.some(event => event.kind === 'observation' && event.payload.content.state === 'hit'))
 
     const freshEvents = events.filter((event): event is Extract<EventRecord, {kind: 'observation'}> => (
       event.kind === 'observation' && event.payload.delegate_id === 'watch-fresh'
@@ -2367,7 +2382,6 @@ test('workspace graph opens before project initialization, injects only the curr
     'graph:open',
     'project:initialize',
     'graph:workspace',
-    'core:start',
     'provider:connect',
     'provider:events',
   ])
@@ -3620,7 +3634,7 @@ test('personal memory closes without start and is replaced after a failed start'
   })
   await assert.rejects(
     retryable.start(),
-    error => error instanceof AssemblyError && error.message === 'camera MCP startup failed',
+    error => error instanceof AssemblyError && error.message === 'synthetic core startup failed',
   )
   assert.deepEqual(actions.slice(0, 3), ['memory:2:open', 'core:start', 'memory:2:close'])
   await retryable.start()
@@ -3924,7 +3938,7 @@ test('late resolving and rejecting starts are observed without activating servic
     )
     await assert.rejects(
       settleNamed('late rejecting start observation', rejectingStart),
-      error => error instanceof AssemblyError && error.message === 'camera MCP startup failed',
+      error => error instanceof AssemblyError && error.message === 'synthetic core startup failed',
     )
     await waitNamed('late resolving core cleanup', () => resolving.frame.stops === 1)
     assert.equal(resolving.provider.connectCalls, 0)

@@ -296,3 +296,29 @@ test('Ark semantic sessions reject both mixed text and tool orders without forwa
       await session.close()
     }
   })
+
+test('Ark original-image turn chains tools but the next turn uses text-only local history', async () => {
+  const requests: Record<string, unknown>[] = []
+  let call = 0
+  const llm = createArkCascadedLlmFactory({baseUrl:'https://example.test/api/v3',apiKey:'test',model:'doubao-seed-2-0-pro-260215',instructions:'test',
+    fetchImpl: (_url, init) => {
+      requests.push(JSON.parse(init?.body as string) as Record<string, unknown>)
+      call++
+      return Promise.resolve(sse(
+        {type:'response.created',response:{id:`r-${call}`}},
+        ...(call === 1 ? [{type:'response.output_item.done',item:{type:'function_call',id:'item-1',call_id:'call-1',name:'lookup',arguments:'{}'}}] : [{type:'response.output_text.delta',delta:'done'}]),
+        {type:'response.completed',response:{id:`r-${call}`}},
+      ))
+    }}).open()
+  const signal = new AbortController().signal, tools = [{name:'lookup',parameters:{type:'object'}}]
+  const image = {payload:new Uint8Array([255,216,255,217]),media_type:'image/jpeg',width:1280,height:720,captured_at:1}
+  await collect(llm.stream({inputs:[{kind:'user_text',text:'look',image}],tools,signal}))
+  await collect(llm.stream({inputs:[{kind:'tool_result',call_id:'call-1',output:{ok:true}}],tools,signal}))
+  await collect(llm.stream({inputs:[{kind:'user_text',text:'next'}],tools,signal}))
+  assert.match(JSON.stringify(requests[0]), /input_image.*data:image\/jpeg;base64/u)
+  assert.equal(requests[1]?.previous_response_id, 'r-1')
+  assert.equal(requests[2]?.previous_response_id, undefined)
+  assert.doesNotMatch(JSON.stringify(requests[2]), /input_image|data:image/u)
+  assert.match(JSON.stringify(requests[2]), /function_call_output/u)
+  await llm.close()
+})

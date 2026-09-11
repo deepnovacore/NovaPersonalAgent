@@ -1,3 +1,4 @@
+import {VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createBackendControl} from './backend-control.mjs'
@@ -295,6 +296,7 @@ function settingsView() {
     ...publicSettings(currentSettings),
     codexStatus,
     frontendUsage: frontendUsage.snapshot(),
+    visionModels: VISION_MODELS,
     backendStatus: backendStatus.state,
     backendDiagnostic: backendStatus.diagnostic,
     backendRetryInMs: backendStatus.retryInMs,
@@ -946,8 +948,23 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     setTimeout(() => orbWindow.sync(), 0)
   })
   const readBootstrap = createBootstrapAccess(bootstrap, mainWindow.webContents)
+  ipcMain.handle('nova:camera:devices', async event => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents || !mainWindow) throw new Error('camera devices rejected')
+    const id = randomBytes(12).toString('hex')
+    const renderer = mainWindow.webContents
+    return new Promise(resolve => {
+      const done = rows => { clearTimeout(timer); ipcMain.removeListener('nova:camera:devices-result', receive); resolve(rows) }
+      const receive = (reply, value) => {
+        if (reply.sender !== renderer || value?.id !== id) return
+        done((Array.isArray(value.devices) ? value.devices : []).slice(0, 32).filter(item => typeof item.deviceId === 'string' && item.deviceId.length <= 256 && !/[\x00-\x1f]/u.test(item.deviceId)).map((item, index) => ({deviceId: item.deviceId, label: typeof item.label === 'string' ? item.label.slice(0, 128) : `摄像头 ${index + 1}`})))
+      }
+      const timer = setTimeout(() => done([]), 5000)
+      ipcMain.on('nova:camera:devices-result', receive)
+      renderer.send('nova:camera:enumerate', id)
+    })
+  })
   ipcMain.handle('nova:camera:permission', async event => {
-    if (!mainWindow || event.sender !== mainWindow.webContents) {
+    if ((!mainWindow || event.sender !== mainWindow.webContents) && (!settingsWindow || event.sender !== settingsWindow.webContents)) {
       throw new Error('camera permission request rejected')
     }
     return resolveCameraPermission(camera.source, {

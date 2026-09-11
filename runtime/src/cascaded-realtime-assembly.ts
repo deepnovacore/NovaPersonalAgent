@@ -1,3 +1,5 @@
+import {supportsVision} from './vision-capability.js'
+import {captureConversationFrame} from './camera-session.js'
 import {usageReporterForEndpoint, type UsageReporter} from './realtime/usage.js'
 import {capabilitiesFromSettings} from './config.js'
 /** Provider-neutral cascaded production assembly over closed, host-owned node registries. */
@@ -306,6 +308,8 @@ export function buildCascadedRealtimeAssembly(
       : {executors: [...(options.executors ?? []), ...(options.codexResource === undefined ? [] : [options.codexResource.adapter])]}),
   })
   const provider = new CascadedRealtimeProvider({
+    ...(options.settings.conversation_vision_enabled && supportsVision(selection.llmProvider, selection.llmModel)
+      ? {captureFrame: (signal: AbortSignal) => captureConversationFrame(core.frameSource, signal, core.mediaStore)} : {}),
     endpointingFactory,
     asrFactory,
     llmFactory,

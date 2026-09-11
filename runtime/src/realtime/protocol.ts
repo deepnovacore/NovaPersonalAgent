@@ -270,7 +270,7 @@ export type ItemIdentity = z.infer<typeof itemIdentitySchema>
 
 /**
  * A provider must positively attest before original camera bytes may become
- * provider-visible.  Current providers only receive bounded text tool output.
+ * provider-visible. Cascaded adapters attach turn-scoped images; audio realtime stays text-only.
  */
 export type RealtimeProviderMediaCapability =
   | Readonly<{readonly originalImageInput: false}>

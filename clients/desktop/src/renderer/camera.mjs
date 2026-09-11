@@ -34,11 +34,13 @@ export function parseCameraCapture(raw) {
     return null
   }
   if (parsed.value.source === 'local') {
-    if (!hasExactKeys(parsed.value, localKeys)) return null
+    if (!hasExactKeys(parsed.value, parsed.value.session_id === undefined ? localKeys : ['device_id', 'request_id', 'session_id', 'source', 'type'])) return null
+    if (parsed.value.session_id !== undefined && (!validCameraSession(parsed.value.session_id) || typeof parsed.value.device_id !== 'string' || parsed.value.device_id.length > 256 || /[\x00-\x1f]/u.test(parsed.value.device_id))) return null
     return Object.freeze({
       type: CAMERA_CAPTURE,
       request_id: parsed.value.request_id,
       source: 'local',
+      ...(parsed.value.session_id === undefined ? {} : {session_id: parsed.value.session_id, device_id: parsed.value.device_id}),
     })
   }
   if (parsed.value.source !== 'file' || !hasExactKeys(parsed.value, fileKeys)) return null
@@ -282,6 +284,10 @@ export class RendererSocketRouter {
 
   #route(record, event) {
     if (!this.#isCurrent(record)) return
+    if (typeof event?.data === 'string' && parseCameraRelease(event.data)) {
+      this.#cameraController.releaseSession?.(parseCameraRelease(event.data).session_id)
+      return
+    }
     if (typeof event?.data === 'string'
       && classifyCameraCaptureText(event.data).kind !== 'other') {
       const runCamera = () => {
@@ -378,6 +384,8 @@ export class RendererCameraController {
   #preparedLocal = null
   #enableEpoch = 0
   #stoppedTracks = new Set()
+  #devicePool
+  #conversationEnabled = false
   #localAdmissionFailure = 'unavailable'
 
   constructor({
@@ -390,6 +398,7 @@ export class RendererCameraController {
     deadlineMs = RENDERER_CAMERA_DEADLINE_MS,
     maxPositionMs = MAX_CAMERA_POSITION_MS,
   } = {}) {
+    this.#devicePool = new CameraDevicePool(mediaDevices, ImageCapture)
     this.#mediaDevices = mediaDevices
     this.#ImageCapture = ImageCapture
     this.#OffscreenCanvas = OffscreenCanvas
@@ -476,6 +485,18 @@ export class RendererCameraController {
     }
   }
 
+  setConversationEnabled(enabled) {
+    this.#conversationEnabled = enabled === true
+    if (!this.#conversationEnabled) for (const state of this.#states.values()) {
+      for (const id of state.sessions) if (id.startsWith('conversation-')) this.#devicePool.release(id)
+    }
+  }
+
+  releaseSession(id) {
+    this.#devicePool.release(id)
+    for (const state of this.#states.values()) state.sessions.delete(id)
+  }
+
   enqueue(rawText, delivery) {
     if (this.#disposed || !validDelivery(delivery)) return
     if (this.#closedGenerations.has(delivery.generation)) return
@@ -498,6 +519,7 @@ export class RendererCameraController {
       })
       return
     }
+    if (request.session_id) state.sessions.add(request.session_id)
     this.#append(() => this.#capture(request, delivery, state))
   }
 
@@ -506,6 +528,7 @@ export class RendererCameraController {
     const state = this.#states.get(generation)
     if (!state || state.closed) return
     state.closed = true
+    for (const id of state.sessions) this.#devicePool.release(id)
     for (const cancel of [...state.cancels]) cancel()
     state.cancels.clear()
     this.#releaseLocal(state)
@@ -517,6 +540,7 @@ export class RendererCameraController {
     if (this.#disposed) return
     this.#disposed = true
     this.disableLocal()
+    this.#devicePool.dispose()
     for (const generation of [...this.#states.keys()]) this.closeGeneration(generation)
   }
 
@@ -530,7 +554,7 @@ export class RendererCameraController {
     let responseAttempted = false
     try {
       const jpegBytes = request.source === 'local'
-        ? await this.#captureLocal(state, operation)
+        ? await this.#captureLocal(state, operation, request)
         : await this.#captureFile(state, operation, request.position_ms)
       const wire = encodeCameraFrame({requestId: request.request_id, jpeg: jpegBytes})
       if (!operation.active() || state.closed || this.#disposed) return
@@ -547,7 +571,14 @@ export class RendererCameraController {
     }
   }
 
-  async #captureLocal(state, operation) {
+  async #captureLocal(state, operation, request) {
+    if (request.session_id) {
+      if (request.session_id.startsWith('conversation-') && !this.#conversationEnabled) throw new Error('conversation vision disabled')
+      const lease = await operation.wait(this.#devicePool.acquire(request.session_id, request.device_id), () => this.#devicePool.release(request.session_id))
+      const bitmap = await operation.wait(lease.capture.grabFrame(), late => safeCloseBitmap(late))
+      if (!this.#devicePool.has(request.session_id)) { safeCloseBitmap(bitmap); throw new Error('camera session closed') }
+      return this.#encodeDrawable(bitmap, operation, true)
+    }
     if (!this.#localEnabled) throw new Error('unavailable')
     if (!state.localStream) {
       if (this.#preparedLocal) {
@@ -856,6 +887,7 @@ export class RendererCameraController {
 function makeGenerationState() {
   return {
     closed: false,
+    sessions: new Set(),
     cancels: new Set(),
     localStream: null,
     imageCapture: null,
@@ -1075,4 +1107,61 @@ function skipWhitespace(raw, start) {
   let offset = start
   while (offset < raw.length && /[\t\n\r ]/u.test(raw[offset])) offset += 1
   return offset
+}
+
+function validCameraSession(id) { return typeof id === 'string' && /^[a-zA-Z0-9-]{1,80}$/u.test(id) }
+function parseCameraRelease(raw) {
+  try {
+    const value = JSON.parse(raw)
+    return value.type === 'camera.release' && Object.keys(value).length === 2 && validCameraSession(value.session_id) ? value : null
+  } catch { return null }
+}
+
+/** At most two consumers: foreground turns and the single monitor. Tracks close with the last lease. */
+export class CameraDevicePool {
+  #devices; #Capture; #sessions = new Map(); #entries = new Map(); #released = new Set(); #disposed = false
+  constructor(devices, Capture) { this.#devices = devices; this.#Capture = Capture }
+  has(id) { return this.#sessions.has(id) && !this.#released.has(id) }
+  async acquire(id, deviceId = '') {
+    if (this.#disposed || this.#released.has(id)) throw new Error('camera session closed')
+    if (this.#sessions.has(id)) return this.#sessions.get(id)
+    const opening = this.#open(id, deviceId)
+    this.#sessions.set(id, opening)
+    try { return await opening } catch (error) { this.release(id); throw error }
+  }
+  async #open(id, deviceId) {
+    const devices = await this.#devices.enumerateDevices()
+    const selected = devices.find(device => device.kind === 'videoinput' && (!deviceId || device.deviceId === deviceId))
+    if (!selected || !selected.deviceId) throw new Error('selected camera unavailable')
+    if (this.#released.has(id) || this.#disposed) throw new Error('camera session closed')
+    const key = selected.deviceId
+    let entry = this.#entries.get(key)
+    if (!entry) {
+      const stream = await this.#devices.getUserMedia({video: {deviceId: {exact: key}}, audio: false})
+      try {
+        if (this.#released.has(id) || this.#disposed) throw new Error('camera session closed')
+        const track = stream.getVideoTracks()[0]
+        if (!track || track.readyState === 'ended') throw new Error('selected camera unavailable')
+        entry = {stream, capture: new this.#Capture(track), users: new Set()}
+        // Two acquisitions can settle together; retain only one physical stream.
+        const existing = this.#entries.get(key)
+        if (existing) { stream.getTracks().forEach(track => track.stop()); entry = existing }
+        else this.#entries.set(key, entry)
+      } catch (error) { stream.getTracks().forEach(track => track.stop()); throw error }
+    }
+    if (entry.stream.getVideoTracks()[0]?.readyState === 'ended') throw new Error('selected camera disconnected')
+    entry.users.add(id)
+    return entry
+  }
+  release(id) {
+    this.#released.add(id)
+    // ponytail: retain 4096 late-message tombstones; use generation-scoped ids if this window proves insufficient.
+    if (this.#released.size > 4096) this.#released.delete(this.#released.values().next().value)
+    this.#sessions.delete(id)
+    for (const [key, entry] of this.#entries) {
+      entry.users.delete(id)
+      if (!entry.users.size) { entry.stream.getTracks().forEach(track => track.stop()); this.#entries.delete(key) }
+    }
+  }
+  dispose() { this.#disposed = true; for (const id of this.#sessions.keys()) this.release(id) }
 }

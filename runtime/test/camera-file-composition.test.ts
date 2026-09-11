@@ -203,7 +203,7 @@ test('production server/source/shared executors preserve epoch and restart owner
     clock.advanceTo(watchStartedAt + 30)
     const watchResult = await settleWithin('watch injected window', watchRun)
     assert.equal(watchResult.content.reason, 'window_elapsed')
-    assert.deepEqual(renderer.trace.slice(beforeWatch).map(item => item.positionMs), [10_000, 12_000])
+    assert.deepEqual(renderer.trace.slice(beforeWatch).map(item => item.positionMs), [0, 2_000])
     assertGatewayImages(watchGateway.calls)
 
     let guardRestarts = 0

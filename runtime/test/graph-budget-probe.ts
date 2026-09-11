@@ -37,7 +37,7 @@ export function assertBudgetRejectsBeforeGraphWorker(pipeline: 'qwen' | 'cascade
     const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], {encoding: 'utf8', timeout: 15_000})
     assert.equal(child.status, 0, `graph probe failed: ${child.error?.message ?? child.signal ?? 'nonzero exit'}\n${child.stderr}`)
     const result = JSON.parse(child.stdout) as {before: number; after: number; failure: unknown; views: number}
-    assert.deepEqual(result.failure, {code: 'frontbrain_tool_budget_exceeded', count: 5, budget: 1})
+    assert.deepEqual(result.failure, {code: 'frontbrain_tool_budget_exceeded', count: 4, budget: 1})
     assert.equal(result.views, 1)
     assert.equal(result.after, result.before, `${pipeline} budget rejection leaked a graph Worker MessagePort`)
   } finally { rmSync(directory, {recursive: true, force: true}) }

@@ -39,6 +39,16 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     report: result => ipcRenderer.send('nova:release-camera:result', result),
   }),
   camera: Object.freeze({
+    listDevices: () => ipcRenderer.invoke('nova:camera:devices'),
+    onEnumerate: callback => {
+      const listener = async (_event, id) => {
+        let devices = []
+        try { devices = await callback() } catch {}
+        ipcRenderer.send('nova:camera:devices-result', {id, devices})
+      }
+      ipcRenderer.on('nova:camera:enumerate', listener)
+      return () => ipcRenderer.removeListener('nova:camera:enumerate', listener)
+    },
     requestPermission: () => ipcRenderer.invoke('nova:camera:permission'),
   }),
   microphone: Object.freeze({

@@ -27,11 +27,11 @@
       <section class="setting-section" id="frontend-usage-section">
         <h2>用量与费用</h2>
         <div class="usage-overview" aria-label="用量统计范围">
-          <button type="button" class="usage-scope" id="usage-history" aria-pressed="false"><span>历史累计</span><strong id="usage-history-cost">暂无数据</strong><span id="usage-history-count">0 次调用</span></button>
-          <button type="button" class="usage-scope" id="usage-session" aria-pressed="true"><span>本次启动</span><strong id="usage-session-cost">暂无数据</strong><span id="usage-session-count">0 次调用</span></button>
+          <button type="button" class="usage-scope" id="usage-history" aria-pressed="false"><span>历史累计</span><strong id="usage-history-cost">—</strong><span id="usage-history-count">0 次调用</span></button>
+          <button type="button" class="usage-scope" id="usage-session" aria-pressed="true"><span>本次启动</span><strong id="usage-session-cost">—</strong><span id="usage-session-count">0 次调用</span></button>
         </div>
-        <p id="frontend-usage" role="status" aria-live="polite">暂无用量报告</p>
-        <details><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
+        <p id="frontend-usage" role="status" aria-live="polite">开始对话后显示用量</p>
+        <details id="usage-breakdown" hidden><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
       </section>
       <section class="setting-section" id="appearance-section">
         <h2>外观</h2>
@@ -59,6 +59,16 @@
         <h2>能力</h2>
         <p id="capabilities-state" class="hint" aria-live="polite"></p>
         <p id="capabilities-problems" class="warning" aria-live="polite"></p>
+        <div class="vision-settings">
+          <h3>对话视觉</h3>
+          <label class="toggle-row">随对话附上默认摄像头画面<input id="conversation-vision-enabled" type="checkbox" role="switch"></label>
+          <p id="conversation-vision-status" class="hint" role="status"></p>
+          <h3>视觉监控</h3>
+          <div class="field"><label for="monitor-camera">监控摄像头</label><select id="monitor-camera"><option value="">系统默认摄像头</option></select><button type="button" id="camera-refresh">刷新设备</button></div>
+          <p id="camera-devices-status" class="hint" role="status"></p>
+          <div class="field"><label for="watch-model">监控模型</label><input id="watch-model" type="text" maxlength="64" placeholder="默认视觉模型"></div>
+          <p class="hint">监控模型使用现有辅助模型连接。修改后保存并重启生效。</p>
+        </div>
         <div id="capabilities-editor"></div>
       </section>
       <section class="setting-section" id="knowledge-section">

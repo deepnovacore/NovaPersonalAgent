@@ -16,6 +16,7 @@
  * repaired verdict is one this code decided the meaning of.
  */
 
+import {abortable} from '../camera-session.js'
 import { isOtherCategory } from '../unicode-tables.js'
 import { stripLikePython } from '../python-text.js'
 import type { ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff } from '../causal-runtime.js'
@@ -117,16 +118,18 @@ export interface Frame {
 }
 
 export interface FrameSource {
-  /** Acquire capture resources. Assembly calls this once before serving. */
+  /** Acquire this task session lazily before its first capture. */
   start(): Promise<void>
-  /** Release capture resources. Assembly calls this while shutting down. */
+  /** Release this task session; the last lease closes the physical device. */
   stop(): Promise<void>
   /**
    * `null` is "no frame this time", not an error -- a disabled camera reports it every sample.
    * Mirrors `Frame | None` in the oracle (watcher.py:257); the sampling loop treats a null and a
    * thrown snapshot identically, as a capture failure.
    */
-  snapshot(): Promise<Frame | null>
+  snapshot(signal?: AbortSignal): Promise<Frame | null>
+  openSession?(deviceId: string, signal: AbortSignal, purpose?: 'conversation' | 'monitor'): Promise<FrameSource>
+  admitObservation?(): Promise<ObservationAdmission>
 }
 
 const VERDICT_SCHEMA: Readonly<Record<string, JsonValue>> = {
@@ -199,6 +202,8 @@ export class WatchAdapter implements ExecutorAdapter {
   } | undefined
   #source: FrameSource
   #gateway: ModelGateway
+  #task: AbortController | null = null
+  readonly #deviceId: string
   #admissionPending = false
   #running = false
   #stopRequested = false
@@ -211,6 +216,7 @@ export class WatchAdapter implements ExecutorAdapter {
     readonly mediaStore: MediaStore
     readonly model: string
     readonly captureEnabled: boolean
+    readonly deviceId?: string
     readonly prepareObservation?: () => Promise<void>
     readonly admitObservation?: () => Promise<ObservationAdmission>
     readonly onObservationAdmission?: (
@@ -232,11 +238,14 @@ export class WatchAdapter implements ExecutorAdapter {
     this.#mediaStore = options.mediaStore
     this.#model = options.model
     this.#captureEnabled = options.captureEnabled
+    this.#deviceId = options.deviceId ?? ''
     this.#prepareObservation = options.prepareObservation
     this.#admitObservation = options.admitObservation
     this.#onObservationAdmission = options.onObservationAdmission
     this.#onMonitorLifecycle = options.onMonitorLifecycle
   }
+
+  close(): void { this.#stopRequested = true; this.#task?.abort(); this.interruptForTest() }
 
   get status(): WatchStatus {
     return this.#status
@@ -252,7 +261,7 @@ export class WatchAdapter implements ExecutorAdapter {
     readonly source: FrameSource
     readonly gateway: ModelGateway
   }): void {
-    if (this.#running || this.#status.state !== 'idle') {
+    if (this.#task || this.#running || this.#status.state !== 'idle') {
       throw new Error('watch observation ports can only change while idle')
     }
     this.#source = options.source
@@ -270,8 +279,8 @@ export class WatchAdapter implements ExecutorAdapter {
     }
     if (op === 'stop') {
       if (Object.keys(request).length > 0) return failure('invalid_params', op)
-      const wasRunning = this.#running || this.#admissionPending
-      if (wasRunning) this.#stopRequested = true
+      const wasRunning = this.#task !== null
+      if (wasRunning) { this.#stopRequested = true; this.#task?.abort(); this.interruptForTest() }
       // `stopped` reports whether there was anything to stop, which is what tells the model the
       // difference between "I stopped it" and "nothing was running".
       return {outcome: 'ok', trust: 'trusted_system', content: {stopped: wasRunning}}
@@ -280,19 +289,58 @@ export class WatchAdapter implements ExecutorAdapter {
 
     const normalized = normalizeStart(request)
     if (normalized === null) return failure('invalid_params', op)
+    if (this.#task !== null) return failure('busy', op)
+    if (!this.#captureEnabled) return unknown('capture_unavailable')
+    const task = new AbortController()
+    this.#task = task
+    const signal = AbortSignal.any([ctx.signal, task.signal])
+    let expired = false
+    const wake = (): void => this.interruptForTest()
+    signal.addEventListener('abort', wake, {once: true})
+    const timer = setTimeout(() => { expired = true; task.abort(); this.interruptForTest() }, normalized.durationS * 1000)
+    const source = this.#source
+    try {
+      if (source.openSession) this.#source = await source.openSession(this.#deviceId, signal)
+      await abortable(this.#source.start(), signal)
+      const result = await this.#startWindow(request, {...ctx, signal})
+      ctx.signal.throwIfAborted()
+      return expired ? this.#terminal('window_elapsed') : result
+    } catch {
+      ctx.signal.throwIfAborted()
+      if (signal.aborted) return this.#terminal(expired ? 'window_elapsed' : 'stopped')
+      return unknown('capture_unavailable')
+    } finally {
+      clearTimeout(timer)
+      signal.removeEventListener('abort', wake)
+      try { await this.#source.stop() } finally {
+        this.#source = source
+        this.#task = null
+        this.#admissionPending = false
+        this.#running = false
+        this.#stopRequested = false
+        this.#status = idleStatus()
+        this.#notifyTerminal(ctx)
+      }
+    }
+  }
+
+  async #startWindow(request: Readonly<Record<string, JsonValue>>, ctx: ExecutorDispatchContext): Promise<ExecutorHandoff> {
+    const op = 'start'
+    const normalized = normalizeStart(request)
+    if (normalized === null) return failure('invalid_params', op)
     if (!this.#captureEnabled) {
-      this.#notifyTerminal(ctx)
       return unknown('capture_unavailable')
     }
     // One window at a time: two would compete for the camera and each would see half the frames.
     if (this.#running || this.#admissionPending) return failure('busy', op)
     // Without an observation channel a hit has nowhere to go, so the window would run blind.
     if (ctx.observe === undefined) return unknown('observation_unavailable')
-    if (this.#admitObservation !== undefined) {
+    const admit = this.#source.admitObservation?.bind(this.#source) ?? this.#admitObservation
+    if (admit !== undefined) {
       let admission: ObservationAdmission
       this.#admissionPending = true
       try {
-        admission = await this.#admitObservation()
+        admission = await abortable(admit(), ctx.signal)
       } catch {
         admission = 'unavailable'
       } finally {
@@ -302,20 +350,17 @@ export class WatchAdapter implements ExecutorAdapter {
         // Stop and runtime cancellation may race while the OS prompt is open. Cancellation wins,
         // but its abandoned stop must not poison the next admission attempt.
         this.#stopRequested = false
-        this.#notifyTerminal(ctx)
-        ctx.signal.throwIfAborted()
+          ctx.signal.throwIfAborted()
       }
       if (this.#stopRequested) {
         this.#stopRequested = false
-        this.#notifyTerminal(ctx)
-        return this.#terminal('stopped')
+          return this.#terminal('stopped')
       }
       try {
         this.#onObservationAdmission?.(admission, this.manifest.name as 'watch' | 'guard')
       } catch { /* telemetry is advisory */ }
       if (admission === 'denied' || admission === 'restricted') {
-        this.#notifyTerminal(ctx)
-        const task = this.manifest.display_name
+          const task = this.manifest.display_name
         return {
           outcome: 'refused',
           trust: 'trusted_system',
@@ -327,16 +372,14 @@ export class WatchAdapter implements ExecutorAdapter {
         }
       }
       if (admission !== 'granted') {
-        this.#notifyTerminal(ctx)
-        return unknown('capture_unavailable')
+          return unknown('capture_unavailable')
       }
       // `stop` can only be queued through CausalRuntime. The identity fence is synchronous so a
       // permission grant that lost its request/session/revision cannot arm or take one frame first.
       let proceed = false
       try { proceed = this.#onMonitorLifecycle?.admission(ctx.delegate.delegate_id, admission) ?? true } catch { /* deny */ }
       if (!proceed) {
-        this.#notifyTerminal(ctx)
-        return this.#terminal('stopped')
+          return this.#terminal('stopped')
       }
     }
 
@@ -367,7 +410,6 @@ export class WatchAdapter implements ExecutorAdapter {
       }
       return await this.#runWindow(normalized, ctx)
     } finally {
-      this.#notifyTerminal(ctx)
       this.#running = false
       this.#stopRequested = false
       this.#status = idleStatus()
@@ -395,7 +437,7 @@ export class WatchAdapter implements ExecutorAdapter {
       const sampleStartedAt = ctx.clock.now()
       let frame: Frame | null = null
       try {
-        frame = await this.#source.snapshot()
+        frame = await abortable(this.#source.snapshot(ctx.signal), ctx.signal)
       } catch {
         frame = null
       }
@@ -417,7 +459,7 @@ export class WatchAdapter implements ExecutorAdapter {
         captureFailures = 0
         let verdict: WatchVerdict | null = null
         try {
-          verdict = await this.#classify(frame, normalized.condition)
+          verdict = await abortable(this.#classify(frame, normalized.condition, ctx.signal), ctx.signal)
         } catch {
           const afterFailure = this.#boundaryTerminal(ctx, normalized.durationS)
           if (afterFailure !== null) return afterFailure
@@ -507,7 +549,7 @@ export class WatchAdapter implements ExecutorAdapter {
           hit_count: this.#status.hit_count,
         },
       })
-      if (this.#onMonitorLifecycle?.hit(ctx.delegate.delegate_id) === true) return this.#terminal('stopped')
+      this.#onMonitorLifecycle?.hit(ctx.delegate.delegate_id)
       this.#transition(ctx, 'cooling', 0)
     } else if (verdict.hit && this.#status.state === 'waiting_reset') {
       this.#transition(ctx, 'cooling', 0)
@@ -519,9 +561,10 @@ export class WatchAdapter implements ExecutorAdapter {
     return null
   }
 
-  async #classify(frame: Frame, condition: string): Promise<WatchVerdict> {
+  async #classify(frame: Frame, condition: string, signal: AbortSignal): Promise<WatchVerdict> {
     const response = await this.#gateway.complete({
       model: this.#model,
+      signal,
       system: SYSTEM_PROMPT,
       prompt: `监控条件：${condition}`,
       jsonSchema: VERDICT_SCHEMA,
@@ -566,7 +609,7 @@ export class WatchAdapter implements ExecutorAdapter {
 
   /** Whether the window is over, and why. Checked after every await. */
   #boundaryTerminal(ctx: ExecutorDispatchContext, durationS: number): ExecutorHandoff | null {
-    if (this.#stopRequested) return this.#terminal('stopped')
+    if (this.#stopRequested || ctx.signal.aborted) return this.#terminal('stopped')
     const startedAt = this.#status.started_at
     if (startedAt !== null && ctx.clock.now() >= startedAt + durationS) {
       return this.#terminal('window_elapsed')

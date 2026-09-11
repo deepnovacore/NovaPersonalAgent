@@ -1,3 +1,5 @@
+import {randomUUID} from 'node:crypto'
+import {abortable} from '../camera-session.js'
 import type {Clock} from '../clock.js'
 import {
   CAMERA_HEIGHT,
@@ -19,6 +21,8 @@ export interface ChromiumFrameSourceOptions {
   readonly source: ChromiumCameraSource
   readonly transport: CameraCaptureTransport
   readonly clock: Clock
+  readonly sessionId?: string
+  readonly deviceId?: string
 }
 
 interface FileBackedChromiumFrameSource extends ChromiumFrameSource {
@@ -40,6 +44,11 @@ export class ChromiumFrameSource implements FrameSource {
   readonly #source: ChromiumCameraSource
   readonly #transport: CameraCaptureTransport
   readonly #clock: Clock
+  readonly #sessionId: string | undefined
+  readonly #deviceId: string
+  #children = new Set<ChromiumFrameSource>()
+  #parent: ChromiumFrameSource | undefined
+  #controller = new AbortController()
   #state: SourceState = 'new'
   #epoch: number | undefined
   #operationTail: Promise<void> = Promise.resolve()
@@ -51,6 +60,8 @@ export class ChromiumFrameSource implements FrameSource {
     this.#source = options.source
     this.#transport = options.transport
     this.#clock = options.clock
+    this.#sessionId = options.sessionId
+    this.#deviceId = options.deviceId ?? ''
   }
 
   get isFileBackedFrameSource(): boolean {
@@ -60,26 +71,43 @@ export class ChromiumFrameSource implements FrameSource {
   start(): Promise<void> {
     return this.#serialize(() => {
       if (this.#state === 'started') return
+      this.#controller = new AbortController()
       this.#state = 'started'
       this.#epoch = undefined
     })
   }
 
   stop(): Promise<void> {
-    return this.#serialize(() => {
+    this.#controller.abort()
+    const children = [...this.#children].map(child => child.stop())
+    return this.#serialize(async () => {
+      await Promise.all(children)
+      if (this.#parent) this.#parent.#children.delete(this)
       if (this.#state !== 'started') return
+      if (this.#sessionId) await this.#transport.releaseCamera?.(this.#sessionId)
       this.#state = 'stopped'
       this.#epoch = undefined
     })
   }
 
-  snapshot(): Promise<Frame> {
+  openSession(deviceId: string, signal: AbortSignal, purpose: 'conversation' | 'monitor' = 'monitor'): Promise<FrameSource> {
+    signal.throwIfAborted()
+    const session = new ChromiumFrameSource({source: this.#source, transport: this.#transport, clock: this.#clock,
+      sessionId: `${purpose}-${randomUUID()}`, deviceId})
+    session.#parent = this
+    this.#children.add(session)
+    return Promise.resolve(session)
+  }
+
+  snapshot(signal?: AbortSignal): Promise<Frame> {
     return this.#serialize(async () => {
       this.#requireStarted()
+      signal = signal ? AbortSignal.any([signal, this.#controller.signal]) : this.#controller.signal
+      signal.throwIfAborted()
       const request = this.#captureRequest()
       let captured: CapturedCameraFrame
       try {
-        captured = await this.#transport.captureCamera(request)
+        captured = await (signal ? abortable(this.#transport.captureCamera(request), signal) : this.#transport.captureCamera(request))
       } catch (error) {
         if (error instanceof DesktopCameraError) {
           throw new CameraError(CAPTURE_UNAVAILABLE_MESSAGE)
@@ -125,8 +153,11 @@ export class ChromiumFrameSource implements FrameSource {
   }
 
   #captureRequest(): CameraCaptureRequest {
-    if (this.#source === 'local') return {source: 'local'}
-    if (this.#epoch === undefined) return {source: 'file', positionMs: 0}
+    if (this.#source === 'local') return {source: 'local', ...(this.#sessionId ? {sessionId: this.#sessionId, deviceId: this.#deviceId} : {})}
+    if (this.#epoch === undefined) {
+      if (this.#sessionId) this.#epoch = readClock(this.#clock)
+      return {source: 'file', positionMs: 0}
+    }
     // Convert both timestamps before subtraction. This preserves the specified decimal
     // millisecond boundary (10.999 seconds -> 10_999) despite binary-float cancellation.
     const elapsedMs = Math.floor((readClock(this.#clock) * 1000) - (this.#epoch * 1000))

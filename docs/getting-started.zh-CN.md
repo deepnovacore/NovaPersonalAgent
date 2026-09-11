@@ -6,7 +6,7 @@
 
 Node.js 与 TypeScript 是唯一的产品运行时。Codex 只使用 app-server；JSONL 仅为
 fixture-parser，不再拥有生产进程执行路径。v0.2dev 薄前端目标通过 Vision controller 的隐藏
-Watch/Guard 通道投影 Camera MCP 证据；M1.5c、live 与 Windows 验收仍待完成。遗留 HA 或 AutoGLM
+Watch/Guard 通道独立采集和判断摄像头画面；M1.5c、live 与 Windows 验收仍待完成。遗留 HA 或 AutoGLM
 配置会在 provider、进程、设备和桌面构造前返回稳定且
 不泄露凭据的迁移错误。
 
@@ -200,7 +200,9 @@ MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何�
 | `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | 否 | qwen-flash | Surrogate 模型。 |
 | `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | 否 | qwen-flash | 记忆压缩模型。 |
 | `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | 否 | integrated | 产品管线形态：集成或级联。 |
-| `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` | `camera` | 否 | true | 启用内置 Camera MCP 与 Vision 监控模块。 |
+| `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | 否 | false | 为已确认支持图片的级联模型附加默认摄像头画面。 |
+| `NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID` | `camera` | 否 | 无 | 监控摄像头设备 ID；空值使用默认设备。 |
+| `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` | `camera` | 否 | true | 启用独立视觉监控。 |
 | `NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER` | `core` | 否 | qwen | 集成实时提供方。 |
 | `NOVA_AUDIO_AGENT_CASCADE_ENDPOINTING_PROVIDER` | `core` | 否 | auto | 级联端点检测提供方。 |
 | `NOVA_AUDIO_AGENT_CASCADE_ASR_PROVIDER` | `core` | 否 | volcengine | 级联 ASR 提供方。 |

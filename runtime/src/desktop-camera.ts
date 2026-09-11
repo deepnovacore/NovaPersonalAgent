@@ -54,6 +54,8 @@ export interface LocalCameraCapture {
   readonly type: 'camera.capture'
   readonly request_id: string
   readonly source: 'local'
+  readonly session_id?: string
+  readonly device_id?: string
 }
 
 export interface FileCameraCapture {
@@ -150,7 +152,7 @@ export function serializeCameraCapture(input: CameraCaptureInput): string {
   validateRequestId(input.request_id)
   if (input.source === 'local') {
     if ('position_ms' in input) invalid()
-    return JSON.stringify({type: CAMERA_CAPTURE, request_id: input.request_id, source: 'local'})
+    return JSON.stringify({type: CAMERA_CAPTURE, request_id: input.request_id, source: 'local', ...cameraSessionFields(input)})
   }
   if (input.source !== 'file' || !('position_ms' in input)) invalid()
   validatePosition(input.position_ms)
@@ -167,8 +169,8 @@ export function parseCameraCapture(raw: string): CameraCapture {
   if (!isPlainObject(value) || value.type !== CAMERA_CAPTURE) invalid()
   validateRequestId(value.request_id)
   if (value.source === 'local') {
-    if (!hasExactKeys(value, localCaptureKeys)) invalid()
-    return {type: CAMERA_CAPTURE, request_id: value.request_id, source: 'local'}
+    if (!hasExactKeys(value, value.session_id === undefined ? localCaptureKeys : ['device_id', 'request_id', 'session_id', 'source', 'type'])) invalid()
+    return {type: CAMERA_CAPTURE, request_id: value.request_id, source: 'local', ...cameraSessionFields(value)}
   }
   if (value.source !== 'file' || !hasExactKeys(value, fileCaptureKeys)) invalid()
   validatePosition(value.position_ms)
@@ -325,4 +327,11 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
 
 function invalid(): never {
   throw new CameraWireError()
+}
+
+function cameraSessionFields(value: {session_id?: unknown; device_id?: unknown}): {session_id?: string; device_id?: string} {
+  if (value.session_id === undefined && value.device_id === undefined) return {}
+  if (typeof value.session_id !== 'string' || !/^[a-zA-Z0-9-]{1,80}$/u.test(value.session_id)
+    || typeof value.device_id !== 'string' || value.device_id.length > 256 || /[\x00-\x1f]/u.test(value.device_id)) invalid()
+  return {session_id: value.session_id, device_id: value.device_id}
 }

@@ -904,3 +904,5 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; min-height:
 .usage-scope span { color: var(--ink-dim); font-size: 12px; }
 #frontend-usage { font-size: 12px; font-weight: 400; letter-spacing: 0; color: var(--ink-dim); }
 @media (max-width: 480px) { .usage-overview { grid-template-columns: 1fr; } }
+
+.usage-scope[data-empty="true"] strong { color: var(--ink-dim); font-weight: 400; }

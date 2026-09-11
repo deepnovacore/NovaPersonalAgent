@@ -291,7 +291,8 @@ test('snapshot, restart, and stop serialize without half-committed file epochs',
   await Promise.resolve()
   const callsBeforeSettle = transport.calls.length
   held.resolve(validFrame())
-  await settleNamed('stop waits for capture', Promise.all([inFlight, stopping]))
+  await assert.rejects(inFlight, error => error instanceof DOMException && error.name === 'AbortError')
+  await stopping
   await assert.rejects(afterStop, CameraError)
   assert.equal(transport.calls.length, callsBeforeSettle)
 

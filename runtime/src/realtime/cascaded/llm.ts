@@ -1,3 +1,5 @@
+import {MAX_CAMERA_JPEG_BYTES} from '../../desktop-camera.js'
+import type {Frame} from '../../executors/watcher.js'
 import type { JsonValue } from '../../events.js'
 import type { JsonObject } from '../protocol.js'
 
@@ -7,7 +9,7 @@ export const MAX_CASCADED_LLM_HISTORY_CODEPOINTS = 131_072
 export {HOST_ACTIVATION_PREFIX, GUARD_ACTIVATION_PREFIX} from '../frontend-instructions.js'
 
 export type CascadedLlmInput =
-  | {readonly kind: 'user_text'; readonly text: string}
+  | {readonly kind: 'user_text'; readonly text: string; readonly image?: Frame}
   | {readonly kind: 'host_context'; readonly content: string}
   | {readonly kind: 'packed_history'; readonly content: string}
   | {readonly kind: 'tool_result'; readonly call_id: string; readonly output: JsonValue}
@@ -42,4 +44,18 @@ export interface CascadedLlmSession {
 
 export interface CascadedLlmFactory {
   open(): CascadedLlmSession
+}
+
+
+export function validateOriginalImage(image: Frame): void {
+  if (!(image.payload instanceof Uint8Array) || image.payload.byteLength < 4 || image.payload.byteLength > MAX_CAMERA_JPEG_BYTES
+    || image.media_type !== 'image/jpeg' || image.payload[0] !== 0xff || image.payload[1] !== 0xd8
+    || image.payload.at(-2) !== 0xff || image.payload.at(-1) !== 0xd9
+    || !Number.isSafeInteger(image.width) || image.width < 1 || image.width > 1920
+    || !Number.isSafeInteger(image.height) || image.height < 1 || image.height > 1080) throw new Error('invalid camera image')
+}
+
+export function originalImageUrl(image: Frame): string {
+  validateOriginalImage(image)
+  return `data:image/jpeg;base64,${Buffer.from(image.payload).toString('base64')}`
 }

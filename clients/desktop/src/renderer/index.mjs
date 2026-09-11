@@ -26,7 +26,6 @@ import {
   cameraPermissionResultMessage,
   parseCameraPermissionRequest,
   RendererCameraController,
-  RendererCameraToggle,
   RendererSocketRouter,
 } from './camera.mjs'
 import { OrbDragGesture } from './drag-gesture.mjs'
@@ -220,14 +219,7 @@ const axes = {
   cameraSource: 'local',
 }
 
-const cameraToggleController = new RendererCameraToggle({
-  cameraController,
-  requestPermission: () => window.novaAudioAgentDesktop.camera.requestPermission(),
-  onState: state => {
-    axes.camera = state
-    render()
-  },
-})
+window.novaAudioAgentDesktop.camera.onEnumerate?.(async () => (await navigator.mediaDevices.enumerateDevices()).filter(item => item.kind === 'videoinput').map((item, index) => ({deviceId: item.deviceId, label: item.label || `摄像头 ${index + 1}`})))
 
 const confirmationCountdown = new ConfirmationCountdown({
   onTick: seconds => {
@@ -377,17 +369,7 @@ function render() {
   cameraToggle.disabled = axes.booting
     || axes.cameraSource !== 'local'
     || axes.camera === 'requesting'
-  cameraToggle.dataset.cameraState = axes.camera
-  cameraToggle.setAttribute('aria-pressed', String(axes.camera === 'on'))
-  cameraToggle.setAttribute('aria-busy', String(axes.camera === 'requesting'))
-  cameraToggle.setAttribute('aria-label', ({
-    off: '打开摄像头',
-    requesting: '正在请求摄像头权限',
-    on: '关闭摄像头',
-    denied: '摄像头权限被拒绝，点击重试',
-    unavailable: '摄像头不可用，点击重试',
-    file: '使用测试视频源',
-  })[axes.camera] ?? '打开摄像头')
+  cameraToggle.setAttribute('aria-label', '视觉设置')
   visual.setState(state.name, { codexWorking: axes.codex === 'working' })
 }
 
@@ -1037,7 +1019,7 @@ async function handleSocketMessage(event, delivery) {
     const permission = parseCameraPermissionRequest(event.data)
     if (permission !== null) {
       const status = axes.cameraSource === 'local'
-        ? await cameraToggleController.admitForHost()
+        ? await window.novaAudioAgentDesktop.camera.requestPermission()
         : 'unavailable'
       if (delivery?.isCurrent?.()) {
         delivery.sendText(cameraPermissionResultMessage(permission.request_id, status))
@@ -1192,6 +1174,7 @@ async function boot() {
   try {
     const bootstrap = await window.novaAudioAgentDesktop.bootstrap()
     cameraController.setSourceMode(bootstrap.cameraSource)
+    cameraController.setConversationEnabled(bootstrap.settings?.conversationVisionEnabled === true)
     axes.cameraSource = bootstrap.cameraSource
     axes.camera = bootstrap.cameraSource === 'file' ? 'file' : 'off'
     axes.audioMode = bootstrap.audioMode
@@ -1226,6 +1209,7 @@ async function boot() {
     // A narration preference is live host state; do not restart running work.
     window.novaAudioAgentDesktop.settings?.onChanged?.(next => {
       paletteHover.reset(next.palette)
+      cameraController.setConversationEnabled(next.conversationVisionEnabled === true)
       if (['off', 'milestones', 'all'].includes(next.progressBubbles)) {
         bubbleMode = next.progressBubbles
         if (bubbleMode !== 'all') void progressBubbles.clear()
@@ -1338,7 +1322,7 @@ document.body.addEventListener('mouseleave', () => {
 
 muteToggle.addEventListener('click', () => toggleMute())
 speakerToggle.addEventListener('click', () => { void toggleOutputMuted() })
-cameraToggle.addEventListener('click', () => { void cameraToggleController.toggle() })
+cameraToggle.addEventListener('click', () => window.novaAudioAgentDesktop.orbMenu.openSettings())
 openSettingsButton.addEventListener('click', () => window.novaAudioAgentDesktop.orbMenu.openSettings?.())
 confirmationConfirm.addEventListener('click', () => {
   if (!confirmationUnexpired()) return

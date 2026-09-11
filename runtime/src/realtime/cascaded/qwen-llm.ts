@@ -1,3 +1,4 @@
+import {originalImageUrl} from './llm.js'
 import {randomUUID} from 'node:crypto'
 import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
 import type { Clock } from '../../clock.js'
@@ -35,7 +36,7 @@ export interface QwenCascadedLlmFactoryOptions {
   readonly idleTimeoutMs?: number; readonly closeTimeoutMs?: number
 }
 interface Call { readonly id: string; readonly type: 'function'; readonly function: {readonly name: string; readonly arguments: string} }
-interface Message { readonly role: 'system' | 'user' | 'assistant' | 'tool'; readonly content: string | null; readonly tool_calls?: readonly Call[]; readonly tool_call_id?: string }
+interface Message { readonly role: 'system' | 'user' | 'assistant' | 'tool'; readonly content: string | readonly JsonObject[] | null; readonly tool_calls?: readonly Call[]; readonly tool_call_id?: string }
 interface Fragment { id: string | null; name: string; arguments: string }
 interface Active { completion: Promise<void> | null; usageDeadline: number | null; readonly controller: AbortController; reader: ReadableStreamDefaultReader<Uint8Array> | null; failureCode: QwenCascadedLlmFailureCode | null }
 
@@ -45,9 +46,9 @@ function jsonObject(value: unknown): value is JsonObject { return object(value) 
 function id(value: unknown): value is string { return typeof value === 'string' && value.length > 0 }
 function copy(value: JsonValue): JsonValue { return structuredClone(value) }
 function endpoint(baseUrl: string): string { try { const url = new URL(baseUrl); url.pathname = `${url.pathname.replace(/\/+$/u, '')}/chat/completions`; return url.toString() } catch { throw fail('configuration') } }
-function message(input: CascadedLlmInput): Message { return input.kind === 'tool_result' ? {role: 'tool', content: JSON.stringify(copy(input.output)), tool_call_id: input.call_id} : {role: 'user', content: input.kind === 'user_text' ? input.text : input.content} }
+function message(input: CascadedLlmInput): Message { return input.kind === 'tool_result' ? {role: 'tool', content: JSON.stringify(copy(input.output)), tool_call_id: input.call_id} : {role: 'user', content: input.kind === 'user_text' ? (input.image ? [{type: 'text', text: input.text}, {type: 'image_url', image_url: {url: originalImageUrl(input.image)}}] : input.text) : input.content} }
 function schema(tool: CascadedLlmTool): JsonObject { return {type: 'function', function: {name: tool.name, ...(tool.description === undefined ? {} : {description: tool.description}), parameters: copy(tool.parameters)}} }
-function size(units: readonly (readonly Message[])[]): {items: number; codepoints: number} { const all = units.flat(); return {items: all.length, codepoints: all.reduce((sum, item) => sum + codePointLengthLikePython(JSON.stringify(item)), 0)} }
+function size(units: readonly (readonly Message[])[]): {items: number; codepoints: number} { const all = units.flat(); return {items: all.length, codepoints: all.reduce((sum, item) => sum + codePointLengthLikePython(JSON.stringify(withoutImage(item))), 0)} }
 
 class Session implements CascadedLlmSession {
   readonly #onUsage: UsageReporter | undefined
@@ -115,7 +116,7 @@ class Session implements CascadedLlmSession {
             if (typeof choice.finish_reason !== 'string' || responseId === null) throw fail('protocol')
             if (choice.finish_reason === 'stop') {
               if (fragments.size > 0) throw fail('protocol')
-              this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant', content: text}])
+              this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant' as const, content: text}].map(withoutImage))
               this.#unresolved = null; terminal = true
               yield {kind: 'response_completed', response_id: responseId}; return
             } else if (choice.finish_reason === 'tool_calls') {
@@ -229,3 +230,7 @@ class Session implements CascadedLlmSession {
   }
 }
 export function createQwenCascadedLlmFactory(options: QwenCascadedLlmFactoryOptions): CascadedLlmFactory { return {open: () => new Session(options)} }
+
+function withoutImage(message: Message): Message {
+  return Array.isArray(message.content) ? {...message, content: (message.content as readonly JsonObject[]).filter(part => part.type === 'text').map(part => typeof part.text === 'string' ? part.text : '').join('\n')} : message
+}

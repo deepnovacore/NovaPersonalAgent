@@ -44,8 +44,8 @@ export class VisionLifecycleBridge implements VisionLifecycleSink {
     }
     try { return this.#target?.permissionGranted(identity) === true } catch { return false }
   }
-  /** A Vision-owned hit must end its adapter window; terminal releases the controller slot. */
-  hit(delegateId: string): boolean { return this.#identities.has(delegateId) }
+  /** A hit is a report; only stop/timeout/failure releases the task. */
+  hit(delegateId: string): boolean { this.#deliver(delegateId, 'hit'); return false }
   terminal(delegateId: string): void { this.#deliver(delegateId, 'terminal') }
 
   #deliver(delegateId: string, kind: 'hit' | 'terminal'): void {

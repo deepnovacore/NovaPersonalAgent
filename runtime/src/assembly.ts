@@ -26,7 +26,6 @@ import { MonotonicIdFactory, type IdFactory } from './ids.js'
 import { GatewayCompressor, GatewaySurrogate } from './model-adapters.js'
 import { OpenAIModelGateway, type MetricsSink, type ModelGateway } from './model-gateway.js'
 import { classifySurrogateVerdict, runSurrogateCall } from './calls.js'
-import { CameraMcpAdapter, MCP_CAMERA_EXECUTOR } from './executors/mcp-camera.js'
 import {
   VisionAgentController,
   VisionAgentControllerCore,
@@ -47,7 +46,6 @@ import {
   type ObservationAdmission,
 } from './executors/watcher.js'
 import { MediaStore } from './media-store.js'
-import { isPreemptiveMonitorAlert } from './memory.js'
 import type { ExecutorManifest } from './ports.js'
 import type {AgentDescriptor} from './agent-controller.js'
 import { stripLikePython } from './python-text.js'
@@ -217,7 +215,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   const mediaStore = options.mediaStore ?? new MediaStore()
   const frameSource = options.frameSource ?? new DisabledFrameSource()
   const cameraModuleEnabled = options.cameraModuleEnabled ?? capabilities.modules.camera.enabled
-  const cameraReserved = new Set([MCP_CAMERA_EXECUTOR, 'mcp__nova_knowledge', 'watch', 'guard'])
+  const cameraReserved = new Set(['mcp__nova_camera', 'mcp__nova_knowledge', 'watch', 'guard'])
   const suppliedReserved = (options.executors ?? []).find(adapter => cameraReserved.has(adapter.manifest.name))
   const configuredReserved = settings.executors.find(name => cameraReserved.has(name))
   if (suppliedReserved !== undefined || configuredReserved !== undefined) {
@@ -227,9 +225,6 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   const visionLifecycle = cameraModuleEnabled ? new VisionLifecycleBridge() : undefined
 
   const search = searchTransport === undefined ? undefined : new SearchAdapter(searchTransport)
-  const camera = cameraModuleEnabled ? new CameraMcpAdapter({
-    source: frameSource, mediaStore, gateway, model: watchModel,
-  }) : undefined
   const admissionOptions = isAdmissionGatedFrameSource(frameSource)
     ? {
         admitObservation: () => frameSource.admitObservation(),
@@ -253,7 +248,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   const captureEnabled = !(frameSource instanceof DisabledFrameSource)
   const watch = cameraModuleEnabled ? new WatchAdapter({
     manifest: WATCH_MANIFEST, source: frameSource, gateway, mediaStore, model: watchModel,
-    captureEnabled, ...admissionOptions,
+    captureEnabled, deviceId: settings.monitor_camera_device_id, ...admissionOptions,
     ...(visionLifecycle === undefined ? {} : {onMonitorLifecycle: {
       admission: (delegateId, status) => visionLifecycle.admission(delegateId, status),
       hit: delegateId => visionLifecycle.hit(delegateId),
@@ -262,10 +257,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   }) : undefined
   const guard = cameraModuleEnabled ? new WatchAdapter({
     manifest: GUARD_MANIFEST, source: frameSource, gateway, mediaStore, model: watchModel,
-    captureEnabled, ...admissionOptions,
-    ...(isFileBackedFrameSource(frameSource) && isPreemptiveMonitorAlert(GUARD_MANIFEST.policy)
-      ? {prepareObservation: () => frameSource.restart()}
-      : {}),
+    captureEnabled, deviceId: settings.monitor_camera_device_id, ...admissionOptions,
     ...(visionLifecycle === undefined ? {} : {onMonitorLifecycle: {
       admission: (delegateId, status) => visionLifecycle.admission(delegateId, status),
       hit: delegateId => visionLifecycle.hit(delegateId),
@@ -277,7 +269,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     ...(options.knowledge === undefined ? [] : [options.knowledge.adapter]),
     ...options.externalMcp?.adapters ?? [],
     ...(search === undefined ? [] : [search]),
-    ...(camera === undefined || watch === undefined || guard === undefined ? [] : [camera, watch, guard]),
+    ...(watch === undefined || guard === undefined ? [] : [watch, guard]),
     ...configuredExecutors,
   ]
   const manifests = executors.map(adapter => adapter.manifest)
@@ -385,21 +377,6 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
         if (memoryStopped) throw new AssemblyError('persistent assembly cannot restart after stop')
         if (started) return
         if (options.blackboard !== undefined) await runtime.openMemory()
-        if (!cameraModuleEnabled) {
-          started = true
-          return
-        }
-        let frameStarted = false
-        try {
-          await frameSource.start()
-          frameStarted = true
-          await camera!.connect()
-        } catch {
-          if (frameStarted) {
-            try { await frameSource.stop() } catch { /* the setup error is authoritative */ }
-          }
-          throw new AssemblyError('camera MCP startup failed')
-        }
         started = true
       })
     },
@@ -407,14 +384,16 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       return serializeLifecycle(async () => {
         memoryStopped = options.blackboard !== undefined
         const failures: unknown[] = []
+        watch?.close()
+        guard?.close()
         for (const close of [
           () => runtime.closeMemory(),
           () => options.knowledge?.close(),
           () => options.externalMcp?.close(),
           () => searchTransport?.close?.(),
           async () => {
-            if (started && cameraModuleEnabled) {
-              try { await camera!.close() } finally { await frameSource.stop() }
+            if (started && (cameraModuleEnabled || settings.conversation_vision_enabled)) {
+              await frameSource.stop()
             }
             started = false
           },
