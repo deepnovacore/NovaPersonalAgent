@@ -44,7 +44,9 @@
     "test:win": "npm run build && node scripts/test-windows.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke:search:mcp": "npm run build && node scripts/search-mcp-live-smoke.mjs",
-    "smoke:knowledge": "npm run build && node scripts/knowledge-live-smoke.mjs"
+    "smoke:knowledge": "npm run build && node scripts/knowledge-live-smoke.mjs",
+    "test:live": "npm run build && node scripts/live/run.mjs",
+    "test:live:contract": "npm run build && node --test scripts/live/contract.test.mjs"
   },
   "dependencies": {
     "@livekit/agents": "1.6.4",

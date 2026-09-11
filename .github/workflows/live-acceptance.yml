@@ -1,0 +1,53 @@
+name: Live acceptance
+on:
+  workflow_dispatch:
+    inputs:
+      suite:
+        type: choice
+        options: [text-tools, coordinator, cascaded-audio]
+        default: text-tools
+      provider:
+        type: choice
+        options: [qwen, ark]
+        default: qwen
+      model:
+        description: Optional model override; empty uses production provider default
+        type: string
+      repeat:
+        type: choice
+        options: ['1', '3', '5']
+        default: '3'
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:live:contract --workspace @nova-audio-agent/runtime
+      - name: Run selected acceptance suite
+        env:
+          LIVE_SUITE: ${{ inputs.suite }}
+          LIVE_REPEAT: ${{ inputs.repeat }}
+          NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: ${{ inputs.provider }}
+          NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: ${{ inputs.model }}
+          DASHSCOPE_API_KEY: ${{ secrets.DASHSCOPE_API_KEY }}
+          ARK_API_KEY: ${{ secrets.ARK_API_KEY }}
+          DOUBAO_BIGMODEL_API_KEY: ${{ secrets.DOUBAO_BIGMODEL_API_KEY }}
+          DOUBAO_ASR_API_KEY: ${{ secrets.DOUBAO_ASR_API_KEY }}
+        run: |
+          if [ -z "$NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL" ]; then unset NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL; fi
+          node runtime/scripts/live/run.mjs --suite "$LIVE_SUITE" --repeat "$LIVE_REPEAT" --output artifacts/live.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-acceptance-${{ github.run_id }}
+          path: artifacts/live.json
+          if-no-files-found: warn
+          retention-days: 7

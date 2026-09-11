@@ -2,7 +2,7 @@
  * Live coordinator eval (spec 08): the real `surrogate_model` on DashScope decides kind / project /
  * session for a fixed roster. Gated like the Qwen live smokes: skipped without a DashScope key.
  *
- *   NOVA_AUDIO_AGENT_MODEL_API_KEY=… node --test dist/test/coding-coordinator-eval.test.js
+ *   NOVA_LIVE_TESTS=1 NOVA_AUDIO_AGENT_MODEL_API_KEY=… node --test dist/test/coding-coordinator-eval.test.js
  */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
@@ -12,7 +12,8 @@ import {assessSchema, intakeModels, type IntakeKind} from '../src/executors/codi
 import {OpenAIModelGateway} from '../src/model-gateway.js'
 
 const apiKey = process.env.DASHSCOPE_API_KEY ?? process.env.NOVA_AUDIO_AGENT_MODEL_API_KEY
-const skip = apiKey === undefined ? 'set DASHSCOPE_API_KEY or NOVA_AUDIO_AGENT_MODEL_API_KEY for the live coordinator eval' : false
+const skip = process.env.NOVA_LIVE_TESTS !== '1' ? 'run through the live acceptance runner (NOVA_LIVE_TESTS=1)'
+  : apiKey === undefined ? 'set DASHSCOPE_API_KEY or NOVA_AUDIO_AGENT_MODEL_API_KEY for the live coordinator eval' : false
 const model = process.env.NOVA_AUDIO_AGENT_SURROGATE_MODEL ?? 'qwen-flash'
 
 const active = 'nova-audio-agent'

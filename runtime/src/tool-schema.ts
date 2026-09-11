@@ -65,7 +65,7 @@ export function compileToolSchema(
     const wireName = 'memory__recall'
     schemas.push(functionSchema(
       wireName,
-      '从当前会话或跨会话个人记忆中查找与用户问题相关的证据',
+      '从当前会话或跨会话个人记忆中查找此前记录的事实；一般知识解释或方案讨论无需查记忆',
       {
         type: 'object',
         properties: {
@@ -78,7 +78,7 @@ export function compileToolSchema(
           scope: {
             type: 'string',
             enum: ['recent', 'any'],
-            description: 'recent 查所选来源的最近记录；any 在所选来源内扩大查找',
+            description: '时间范围，只能为 recent 或 any，与记忆来源无关：recent 查最近记录，any 扩大查找；查个人记忆也不得填 personal',
           },
           source: {
             type: 'string',
