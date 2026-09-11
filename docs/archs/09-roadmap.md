@@ -27,30 +27,20 @@ The candidate realtime MCP budget `B=24` still requires provider validation; it 
 universal limit. External MCP implementation is not equivalent to release acceptance.
 `FASTBRAIN_SYSTEM` remains deferred legacy code, not an additional active model.
 
-## v0.3.0 — more executors, memory-grounded initiative
+## v0.3.0 — personal-agent loop (M5–M7)
 
-Three explicit release workstreams build on that foundation:
+Text/voice entry and an Electron main window; evidence-grounded Surrogate proposals;
+persistent feed; correctable/forgettable personal memory; user-authorized local folder
+synchronization. Reuse the existing runtime, Suggestion Pool, Floor and knowledge import.
+See [specs](../specs/v0.3.0/00-overview.md) and [milestones](../specs/v0.3.0/STATUS.zh-CN.md).
 
-1. **Coding backends: Kimi Code and pi agent.** Add adapters to the existing coding executor;
-   reuse workspace/session coordination, approvals, progress, cancellation and result delivery.
-   Validate each backend separately rather than implying Codex feature parity.
-2. **GUI executor: AutoGLM as the first example.** Delegate device interaction through an
-   agent executor with explicit device ownership, permissions, interruption and observable results.
-   Demonstrate **agent2agent** with a reproducible Nova → specialist agent → result loop.
-   This describes collaboration, not a claim of compatibility with a named A2A wire standard.
-3. **Proactive + Memory: extend Surrogate.** In addition to deciding what to say and when,
-   detect evidence-backed needs and opportunities for considerate follow-up from personal memory,
-   workspace state and authorized sources. Reuse Suggestion Pool, host admission and Floor;
-   inferred needs never authorize execution. See [02](../specs/v0.3.0/02-need-discovery-and-feed.md).
+## v0.4.0 — account sources and specialist executors (M8 onward)
 
-The existing personal-agent plan remains: a desktop main window with text/voice entry, feed,
-tasks and correctable memory, followed by user-selected folders and one mail/calendar provider.
-These are the interaction and source workstreams supporting the three goals, not prerequisites
-for every executor integration. Home Assistant and the earlier MyContext integration idea remain later candidates, not v0.3
-release gates; any memory-backend evaluation must preserve the personal/workspace separation.
-See the [v0.3 overview](../specs/v0.3.0/00-overview.md),
-[milestones](../specs/v0.3.0/STATUS.zh-CN.md) and
-[executor plan](../specs/v0.3.0/05-coding-and-gui-executors.md).
+Moved from v0.3.0 on 2026-09-11 at the user's request, preserving milestone numbers:
+M8 mail/calendar provider; M9-C Kimi Code and pi agent; M9-G GUI/AutoGLM;
+M9-Demo real agent2agent workflows. Executors need not wait for mail/calendar.
+Home Assistant and MyContext remain later candidates.
+See [specs](../specs/v0.4.0/00-overview.md) and [milestones](../specs/v0.4.0/STATUS.zh-CN.md).
 
 ## Integration and evidence
 

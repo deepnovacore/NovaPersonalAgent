@@ -1,8 +1,8 @@
 # 05 Coding 与 GUI 执行器
 
-> 轨道 D。v0.3.0 明确目标：接入 Kimi Code 与 pi agent；接入 GUI 执行器，
+> 轨道 D。v0.4.0 明确目标：接入 Kimi Code 与 pi agent；接入 GUI 执行器，
 > 以 AutoGLM 作为首个 example；用真实闭环展示 agent2agent 协作。
-> 状态：规划，未实现、未验收。里程碑 M9 保留编号，与 M5/M6 并行，不等待 M7/M8。
+> 状态：规划，未实现、未验收。里程碑 M9 保留编号，移自 v0.3.0；不等待 M8。
 
 ## 1. 复用边界
 

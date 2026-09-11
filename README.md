@@ -110,7 +110,8 @@ wake-word Worker; explicit mute stops wake detection. See
 ## 5. Roadmap
 
 - [ ] **v0.2.0 (`v0.2.0dev`):** cross-platform approval forwarding; fewer native FrontBrain tools with workspace/session coordination inside the coding executor; replaceable ASR/LLM/TTS and provider-neutral contracts; custom MCP, search/RAG and the Chinese wake phrase “你好星核”; VoiceMem for personal memory and Workspace Graph for workspace continuity; native iOS connected to a PC runtime through Tailscale. Existing implementation and outstanding acceptance are tracked separately in the [specs](docs/specs/v0.2.0/00-overview.md) and [release gate](docs/specs/v0.2.0/RELEASE-GATE.md).
-- [ ] **v0.3.0:** **Kimi Code + pi agent** coding backends; a **GUI executor with AutoGLM as the first example**, demonstrated through real agent2agent workflows; **Surrogate + Proactive + Memory** for memory-grounded need discovery and considerate follow-up. Retain the planned text/voice main window, feed/tasks/memory views, correctable personal memory and authorized sources; executor integration does not wait for mail/calendar connectors. See [specs](docs/specs/v0.3.0/00-overview.md), [milestones](docs/specs/v0.3.0/STATUS.zh-CN.md) and the [full roadmap](docs/archs/09-roadmap.md).
+- [ ] **v0.3.0:** M5–M7: text/voice main window, memory-grounded initiative, persistent feed, correctable personal memory and authorized local folders. See [specs](docs/specs/v0.3.0/00-overview.md).
+- [ ] **v0.4.0:** M8 mail/calendar; M9 Kimi Code + pi agent, GUI/AutoGLM and real agent2agent demonstrations. See [specs](docs/specs/v0.4.0/00-overview.md).
 
 `v0.2.0dev` integrates after automated gates; `main` requires all feature and supported-platform
 acceptance in the [release ledger](docs/specs/v0.2.0/RELEASE-GATE.md). Linux releases are deferred;

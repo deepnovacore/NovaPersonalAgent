@@ -53,7 +53,7 @@ They complement the historical volume/milestone numbering below; they do not res
 - iOS + Tailscale + PC runtime is the baseline remote experience. Pairing should minimize manual
   endpoint/credential entry while retaining revocation and application authentication. Provider-direct
   media is a separate optimization; the phone never takes over host execution authority.
-- Kimi Code, pi agent, GUI/AutoGLM and memory-driven demand discovery belong to v0.3.0.
+- Memory-driven demand discovery belongs to v0.3.0; Kimi Code, pi agent and GUI/AutoGLM belong to v0.4.0.
   Existing v0.2 status/acceptance ledgers remain authoritative; this planning update checks no boxes.
 
 ## Goals
