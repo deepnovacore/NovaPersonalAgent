@@ -120,4 +120,4 @@ assert.equal(sent.some(frame => frame.type === 'input.text'), false)
 - [x] Generate optional host summaries through the existing model adapter, validate current entry/version citations, invalidate on source/edit/delete changes, and allow later retries after failure.
 - [x] Render concise overview, up to four sections and keywords; preserve source/correct/forget access and show actual excerpts as fallback.
 - [x] Cover source-version renewal and explicit forgetting with real isolated VoiceMem; verify narrow-window layout in the browser.
-- [ ] Run actual external-model quality acceptance after authorization for the selected README excerpts and configured Qwen destination. Local curated preview is not model evidence.
+- [x] Run authorized external-model acceptance on the selected README excerpts: Plus two-step sample passed independent review and renderer checks; Flash remained unstable. Preview now uses actual Plus output; default-model and broader quality gates remain separate.
