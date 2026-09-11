@@ -108,6 +108,10 @@ export function buildDesktopRealtimeComposition(
       }
       return server.captureCamera(request)
     },
+    async releaseCamera(sessionId: string): Promise<void> {
+      const server = requireDesktop().server
+      if (isCameraCaptureTransport(server)) await server.releaseCamera?.(sessionId)
+    },
     requestCameraPermission(): Promise<CameraPermissionStatus> {
       let server: DesktopServerTransport
       try {

@@ -237,12 +237,79 @@ function updateButtons() {
   settingsRestore.disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
 }
 
+const conversationVision = document.getElementById('conversation-vision-enabled')
+const monitorCamera = document.getElementById('monitor-camera')
+let cameraDevices = []
+function renderVision(view) {
+  const supported = view.pipelineMode === 'cascaded' && view.visionModels?.[view.cascadedLlmProvider]?.includes(view.cascadedLlmModels?.[view.cascadedLlmProvider]) === true
+  conversationVision.checked = supported && view.conversationVisionEnabled === true
+  conversationVision.disabled = !supported
+  document.getElementById('conversation-vision-status').textContent = supported ? '使用当前对话模型与系统默认摄像头' : '当前对话模型不支持视觉'
+  document.getElementById('watch-model').value = view.watchModel ?? ''
+  const selected = view.monitorCameraDeviceId ?? ''
+  monitorCamera.replaceChildren()
+  const rows = [{deviceId: '', label: '系统默认摄像头'}, ...cameraDevices]
+  if (selected && !rows.some(row => row.deviceId === selected)) rows.push({deviceId: selected, label: '已选摄像头（未检测到）'})
+  for (const row of rows) {
+    const option = document.createElement('option'); option.value = row.deviceId; option.textContent = row.label; monitorCamera.append(option)
+  }
+  monitorCamera.value = selected
+}
+conversationVision.addEventListener('change', async () => {
+  const enabled = conversationVision.checked
+  if (enabled) {
+    try { if (await window.novaAudioAgentDesktop.camera.requestPermission() !== 'granted') throw Error('permission') }
+    catch { conversationVision.checked = false; document.getElementById('conversation-vision-status').textContent = '摄像头权限未授予'; return }
+  }
+  if (conversationVision.checked !== enabled || conversationVision.disabled) return
+  controller.stage({conversationVisionEnabled: enabled})
+})
+monitorCamera.addEventListener('change', () => controller.stage({monitorCameraDeviceId: monitorCamera.value}))
+document.getElementById('watch-model').addEventListener('change', event => controller.stage({watchModel: event.target.value.trim()}))
+document.getElementById('camera-refresh').addEventListener('click', async () => {
+  const status = document.getElementById('camera-devices-status')
+  try {
+    cameraDevices = await window.novaAudioAgentDesktop.camera.listDevices()
+    status.textContent = cameraDevices.length ? '' : '未检测到摄像头；授权并连接设备后重试'
+    renderVision(currentView)
+  } catch { status.textContent = '无法获取摄像头列表' }
+})
+
+let usageScope = 'session'
+function renderUsage() {
+  const usage = currentView?.frontendUsage
+  const selected = usageScope === 'history' ? usage?.history : usage
+  for (const scope of ['history', 'session']) {
+    const value = scope === 'history' ? usage?.history : usage
+    const cost = value?.requests && !value?.unavailable ? frontendUsageText(value).split('\n')[0] : '—'
+    document.getElementById(`usage-${scope}-cost`).textContent = cost
+    document.getElementById(`usage-${scope}-count`).textContent = value?.unavailable ? '读取失败' : `${value?.requests ?? 0} 次调用`
+    document.getElementById(`usage-${scope}`).dataset.empty = String(!value?.requests)
+    document.getElementById(`usage-${scope}`).setAttribute('aria-pressed', String(usageScope === scope))
+  }
+  const notices = []
+  if (selected?.missingReports) notices.push(`缺少用量 ${selected.missingReports} 次`)
+  if (selected?.unpricedReports) notices.push(`无法估价 ${selected.unpricedReports} 次`)
+  const status = document.getElementById('frontend-usage')
+  status.textContent = usage?.persistenceError
+    ? (usage.persistenceError === 'read_failed' ? '历史记录读取失败，原文件已保留；当前仅显示本次启动用量。' : '历史用量保存失败，本次用量仍保留在内存中。')
+    : selected?.requests ? notices.join(' · ') : '开始对话后显示用量'
+  status.hidden = !status.textContent
+  const breakdown = document.getElementById('usage-breakdown')
+  breakdown.hidden = !selected?.requests
+  if (breakdown.hidden) breakdown.open = false
+  renderFrontendUsage(document.getElementById('frontend-usage-details'), selected, document)
+}
+for (const scope of ['history', 'session']) document.getElementById(`usage-${scope}`).addEventListener('click', () => {
+  usageScope = scope
+  renderUsage()
+})
+
 function render(view, _drafts, state) {
   if (!view) return
-  const [usageSummary] = frontendUsageText(view.frontendUsage).split('\n\n')
-  document.getElementById('frontend-usage').textContent = usageSummary
-  renderFrontendUsage(document.getElementById('frontend-usage-details'), view.frontendUsage, document)
   currentView = view
+  renderUsage()
+  renderVision(view)
   capabilityEditor.render(view)
   knowledgePanel.render(view)
   for (const input of capabilitySettings) input.value = view[input.id] ?? ''

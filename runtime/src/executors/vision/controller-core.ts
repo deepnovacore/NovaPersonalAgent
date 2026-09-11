@@ -355,13 +355,8 @@ export class VisionAgentControllerCore {
   terminal(identity: VisionIdentity): void { this.#cleanupTerminal({...identity}) }
   onTerminal(identity: VisionIdentity): void { this.terminal(identity) }
 
-  /** Host callback for a detected hit. A hit is terminal for this one monitor window. */
-  hit(identity: VisionIdentity): void {
-    const result = this.#machine.hit({...identity})
-    if (result.code !== 'hit') return
-    this.#machine.cancel({...identity})
-    this.#cleanupTerminal({...identity})
-  }
+  /** Reports do not release the single active monitor reservation. */
+  hit(identity: VisionIdentity): void { this.#machine.hit({...identity}) }
   onHit(identity: VisionIdentity): void { this.hit(identity) }
 
   async #assess(identity: VisionIdentity, request: VisionControllerDispatchRequest): Promise<unknown> {

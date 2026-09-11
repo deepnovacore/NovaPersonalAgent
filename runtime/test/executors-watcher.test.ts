@@ -431,7 +431,7 @@ test('camera admission reserves the pre-arm slot against concurrent starts', asy
   const pending = harness({admitObservation: () => admission})
 
   const first = pending.adapter.dispatch('start', {condition: '有人进入'}, pending.ctx)
-  await Promise.resolve()
+  await new Promise<void>(resolve => setImmediate(resolve))
   const second = await pending.adapter.dispatch('start', {condition: '门被打开'}, pending.ctx)
 
   assert.equal(second.outcome, 'failed')
@@ -447,7 +447,7 @@ test('stop during camera admission wins before the watcher can arm', async () =>
   const pending = harness({admitObservation: () => admission})
 
   const start = pending.adapter.dispatch('start', {condition: '有人进入'}, pending.ctx)
-  await Promise.resolve()
+  await new Promise<void>(resolve => setImmediate(resolve))
   const stopped = await pending.adapter.dispatch('stop', {}, pending.ctx)
   assert.deepEqual(stopped.content, {stopped: true})
   resolveAdmission?.('granted')
@@ -465,7 +465,7 @@ test('runtime cancellation during camera admission wins over its late verdict', 
   const pending = harness({admitObservation: () => admission})
 
   const start = pending.adapter.dispatch('start', {condition: '有人进入'}, pending.ctx)
-  await Promise.resolve()
+  await new Promise<void>(resolve => setImmediate(resolve))
   pending.abort.abort()
   resolveAdmission?.('denied')
 
@@ -481,7 +481,7 @@ test('combined stop and cancellation during admission cannot poison a fresh star
   })
 
   const first = pending.adapter.dispatch('start', {condition: '有人进入'}, pending.ctx)
-  await Promise.resolve()
+  await new Promise<void>(resolve => setImmediate(resolve))
   assert.deepEqual((await pending.adapter.dispatch('stop', {}, pending.ctx)).content, {stopped: true})
   pending.abort.abort()
   admissions.shift()?.('granted')
@@ -489,7 +489,7 @@ test('combined stop and cancellation during admission cannot poison a fresh star
 
   const freshContext = harness().ctx
   const second = pending.adapter.dispatch('start', {condition: '有人进入'}, freshContext)
-  await Promise.resolve()
+  await new Promise<void>(resolve => setImmediate(resolve))
   admissions.shift()?.('denied')
   const result = await second
   assert.equal(result.outcome, 'refused')
@@ -644,4 +644,63 @@ test('watch and guard declare their monitor alert semantics in their manifests',
     {operation_class: guard.operation_class, alert_delivery: guard.alert_delivery},
     {operation_class: 'monitor', alert_delivery: 'preemptive'},
   )
+})
+
+test('task cancellation interrupts a hung capture and releases its bound camera exactly once', async () => {
+  const h = harness()
+  let captures = 0, stops = 0
+  const devices: string[] = []
+  const source: FrameSource = {
+    start: () => Promise.resolve(), stop: () => Promise.resolve(), snapshot: () => Promise.resolve(null),
+    openSession: device => {
+      devices.push(device)
+      return Promise.resolve({start: () => Promise.resolve(), stop: () => {stops++;return Promise.resolve()},
+        snapshot: () => {captures++;return new Promise(() => undefined)}})
+    },
+  }
+  h.adapter.configureObservationPorts({source, gateway: gateway([false])})
+  const running = h.adapter.dispatch('start',{condition:'motion'},h.ctx)
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(captures,1)
+  await h.adapter.dispatch('stop',{},h.ctx)
+  const result = await running
+  assert.equal(result.content.reason,'stopped')
+  assert.equal(stops,1)
+  assert.equal(devices.length,1)
+})
+
+test('stop aborts model inference immediately and prevents a late hit report', async () => {
+  const h = harness()
+  let inferenceSignal: AbortSignal | undefined
+  const late: {resolve?: (value: {text:string}) => void} = {}
+  const model: ModelGateway = {
+    stream: async function* () { await Promise.resolve(); yield* [] },
+    complete: request => {inferenceSignal=request.signal;return new Promise(resolve => {late.resolve=resolve})},
+  }
+  h.adapter.configureObservationPorts({source:frameSource({failures:0}),gateway:model})
+  const running = h.adapter.dispatch('start',{condition:'motion'},h.ctx)
+  await new Promise<void>(resolve => setImmediate(resolve))
+  await h.adapter.dispatch('stop',{},h.ctx)
+  assert.equal((await running).content.reason,'stopped')
+  assert.equal(inferenceSignal?.aborted,true)
+  late.resolve?.({text:'{"hit":true,"observation":"late"}'})
+  await new Promise<void>(resolve => setImmediate(resolve))
+  assert.equal(h.observations.some(item => item.content.state==='hit'),false)
+})
+
+test('the task deadline cancels stalled inference and releases resources even without a new sample', async t => {
+  t.mock.timers.enable({apis:['setTimeout']})
+  const h = harness()
+  let stops = 0, requested = false
+  const source: FrameSource = {start:()=>Promise.resolve(),stop:()=>{stops++;return Promise.resolve()},
+    snapshot:()=>Promise.resolve({payload:new Uint8Array([255,216,255,217]),media_type:'image/jpeg',width:1280,height:720,captured_at:0})}
+  const model: ModelGateway = {stream:async function* () {await Promise.resolve();yield* []},
+    complete:()=>{requested=true;return new Promise(()=>undefined)}}
+  h.adapter.configureObservationPorts({source,gateway:model})
+  const running = h.adapter.dispatch('start',{condition:'motion',duration_s:30},h.ctx)
+  await new Promise<void>(resolve=>setImmediate(resolve))
+  assert.equal(requested,true)
+  t.mock.timers.tick(30_000)
+  assert.equal((await running).content.reason,'window_elapsed')
+  assert.equal(stops,1)
 })

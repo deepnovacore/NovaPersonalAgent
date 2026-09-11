@@ -27,6 +27,9 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:bootstrap',
     'nova:bubble-layout',
     'nova:bubbles:reserve',
+    'nova:camera:devices',
+    'nova:camera:devices-result',
+    'nova:camera:enumerate',
     'nova:camera:permission',
     'nova:capabilities:probe',
     'nova:codex:rescan',
@@ -583,7 +586,7 @@ test('main starts without camera permission and exposes only an explicit sender-
     start,
     /start: camera => startSelectedCamera\(camera, backendKind, releaseSmokeChannel\)/u,
   )
-  assert.match(source, /ipcMain\.handle\('nova:camera:permission', async event => \{\n\s*if \(!mainWindow \|\| event\.sender !== mainWindow\.webContents\)/u)
+  assert.match(source, /ipcMain\.handle\('nova:camera:permission', async event => \{\n\s*if \(\(!mainWindow \|\| event\.sender !== mainWindow\.webContents\) && \(!settingsWindow \|\| event\.sender !== settingsWindow\.webContents\)\)/u)
   assert.match(source, /resolveCameraPermission\(camera\.source, \{/u)
   assert.match(preload, /requestPermission: \(\) => ipcRenderer\.invoke\('nova:camera:permission'\)/u)
 })

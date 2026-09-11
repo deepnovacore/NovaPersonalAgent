@@ -1,3 +1,4 @@
+export {VISION_MODELS, supportsVision} from './vision-capability.js'
 import {taskActionSchema} from './desktop-tasks.js'
 import { timingSafeEqual } from 'node:crypto'
 import { createConnection } from 'node:net'
@@ -218,6 +219,8 @@ export class DesktopCameraError extends Error {
 
 export interface CameraCaptureRequest {
   readonly source: 'local' | 'file'
+  readonly sessionId?: string
+  readonly deviceId?: string
   readonly positionMs?: number
 }
 
@@ -232,6 +235,7 @@ export interface CapturedCameraFrame {
 export interface CameraCaptureTransport {
   captureCamera(request: CameraCaptureRequest): Promise<CapturedCameraFrame>
   requestCameraPermission?(): Promise<CameraPermissionStatus>
+  releaseCamera?(sessionId: string): Promise<void>
 }
 
 export interface DesktopCameraTimer {
@@ -329,7 +333,7 @@ export class NodeDesktopServer {
     this.#cameraSequence += 1n
     const requestId = `camera-${this.#cameraSequence}`
     const raw = serializeCameraCapture(request.source === 'local'
-      ? {request_id: requestId, source: 'local'}
+      ? {request_id: requestId, source: 'local', ...(request.sessionId === undefined ? {} : {session_id: request.sessionId, device_id: request.deviceId ?? ''})}
       : {request_id: requestId, source: 'file', position_ms: request.positionMs!})
     const pending = new PendingCameraCapture(requestId, socket, generation)
     this.#pendingCamera.set(requestId, pending)
@@ -344,6 +348,12 @@ export class NodeDesktopServer {
       this.#rejectCameraCapture(pending, cameraUnavailableError())
     })
     return pending.promise
+  }
+
+  releaseCamera(sessionId: string): Promise<void> {
+    if (!/^[a-zA-Z0-9-]{1,80}$/u.test(sessionId)) return Promise.reject(cameraUnavailableError())
+    if (!this.#canSend()) return Promise.resolve()
+    return this.#enqueueSend(this.#active!, JSON.stringify({type: 'camera.release', session_id: sessionId}))
   }
 
   requestCameraPermission(): Promise<CameraPermissionStatus> {

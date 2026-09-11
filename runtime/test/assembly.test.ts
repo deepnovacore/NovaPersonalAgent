@@ -5,7 +5,7 @@ import { VirtualClock } from '../src/clock.js'
 import { settingsSchema, type Settings } from '../src/config.js'
 import type { ExecutorAdapter, ExecutorDispatchContext } from '../src/causal-runtime.js'
 import type { EventRecord } from '../src/events.js'
-import { CameraMcpAdapter, MCP_CAMERA_EXECUTOR } from '../src/executors/mcp-camera.js'
+const MCP_CAMERA_EXECUTOR = 'mcp__nova_camera'
 import { ChromiumFrameSource } from '../src/executors/chromium-frame-source.js'
 import { DisabledFrameSource } from '../src/executors/frame-source.js'
 import type { SearchTransport } from '../src/executors/search.js'
@@ -104,37 +104,6 @@ class ExplodingLocalChromiumSource extends ChromiumFrameSource {
   }
 }
 
-class DeferredFrameSource implements FrameSource {
-  starts = 0
-  stops = 0
-  readonly #startGate: Promise<void>
-  readonly #releaseStart: () => void
-
-  constructor() {
-    let release = (): void => undefined
-    this.#startGate = new Promise<void>(resolve => { release = resolve })
-    this.#releaseStart = release
-  }
-
-  start(): Promise<void> {
-    this.starts += 1
-    return this.#startGate
-  }
-
-  stop(): Promise<void> {
-    this.stops += 1
-    return Promise.resolve()
-  }
-
-  snapshot(): Promise<Frame | null> {
-    return Promise.resolve(null)
-  }
-
-  releaseStart(): void {
-    this.#releaseStart()
-  }
-}
-
 /** A gateway whose stream and completion answers are scripted per model name. */
 class ScriptedGateway implements ModelGateway {
   readonly streamed: StreamRequest[] = []
@@ -223,11 +192,11 @@ test('the compiled tool schema advertises always-on adapters before configured e
     gateway: new ScriptedGateway([]),
   })
   assert.deepEqual(assembly.manifests.map(manifest => manifest.name), [
-    'search', 'mcp__nova_camera', 'watch', 'guard', 'fast_sim', 'slow_sim',
+    'search', 'watch', 'guard', 'fast_sim', 'slow_sim',
   ])
   const names = [...assembly.tools.bindings.keys()]
   assert.ok(names.includes('search__search'))
-  assert.ok(names.includes('mcp__nova_camera__snapshot'))
+  assert.ok(!names.includes('mcp__nova_camera__snapshot'))
   assert.ok(!names.includes('cam__snapshot'))
   assert.ok(names.includes('watch__start'))
   assert.ok(names.includes('guard__status'))
@@ -258,7 +227,7 @@ test('camera assembly hides Watch and Guard behind the owned Vision controller',
   })
   const names = assembly.tools.schemas.map(schema => String(record(record(schema).function).name))
   assert.deepEqual(names, [
-    'memory__recall', 'search__search', 'mcp__nova_camera__snapshot', 'dispatch', 'cancel', 'confirm',
+    'memory__recall', 'search__search', 'dispatch', 'cancel', 'confirm',
   ])
   assert.deepEqual(assembly.tools.agent_descriptors.map(descriptor => descriptor.name), ['vision'])
   assert.deepEqual(assembly.visionController?.descriptor.ownedChannels, ['watch', 'guard'])
@@ -375,17 +344,13 @@ test('search and camera dispatch through the real runtime and shared media store
     && event.payload.channel === 'search'))
   assert.deepEqual(searchTransport.queries, [{query: 'Nova', maxResults: 1}])
 
-  assert.equal((await assembly.runtime.dispatchExternal({
-    executor: MCP_CAMERA_EXECUTOR, op: 'snapshot', request: {}, origin_ref: originRef,
-  }, reason)).accepted, true)
-  await waitFor(() => events.some(event => event.kind === 'handoff'
-    && event.payload.channel === MCP_CAMERA_EXECUTOR))
+  assert.equal(assembly.runtime.executors.has(MCP_CAMERA_EXECUTOR), false)
   stop.abort()
   await serving
 
   assert.equal(assembly.mediaStore, mediaStore)
   assert.equal(assembly.frameSource, frameSource)
-  assert.equal(mediaStore.peek('media:assembly-frame')?.captured_at, 1_700_000_007)
+  assert.equal(mediaStore.peek('media:assembly-frame'), undefined)
 })
 
 test('camera, watch, and guard share capture while only Guard prepares a restartable source', async () => {
@@ -417,7 +382,7 @@ test('camera, watch, and guard share capture while only Guard prepares a restart
     clock,
   })
 
-  assert.ok(assembly.runtime.executors.get(MCP_CAMERA_EXECUTOR) instanceof CameraMcpAdapter)
+  assert.equal(assembly.runtime.executors.has(MCP_CAMERA_EXECUTOR), false)
   const watch = assembly.runtime.executors.get('watch')
   const guard = assembly.runtime.executors.get('guard')
   assert.ok(watch instanceof WatchAdapter)
@@ -426,7 +391,7 @@ test('camera, watch, and guard share capture while only Guard prepares a restart
   await watch.dispatch('start', {condition: 'motion', duration_s: 30}, watchContext('watch', clock))
   assert.equal(source.restarts, 0, 'Watch must not reset a shared file-like source')
   await guard.dispatch('start', {condition: 'motion', duration_s: 30}, watchContext('guard', clock))
-  assert.equal(source.restarts, 1, 'Guard prepares a restartable source once per observation')
+  assert.equal(source.restarts, 0, 'task-owned sessions do not reset the shared source')
 
   assert.equal(gateway.completed.length, 2)
   assert.deepEqual(gateway.completed.map(request => request.model), ['fast-model', 'fast-model'])
@@ -574,7 +539,7 @@ test('assembly telemetry does not call a non-progress class a host suppression',
   assert.doesNotMatch(JSON.stringify(telemetry), /private summary echo/u)
 })
 
-test('Watch keeps the Chromium file epoch while Guard resets it before observation', async () => {
+test('Watch and Guard each bind a fresh file session', async () => {
   // Source epoch is a WatchAdapter concern. It deliberately bypasses the production Assembly,
   // where raw hidden Watch/Guard dispatches are now fail-closed unless Vision binds an identity.
   const clock = new VirtualClock()
@@ -623,7 +588,7 @@ test('Watch keeps the Chromium file epoch while Guard resets it before observati
     await watch.dispatch('start', {condition: 'motion', duration_s: 30}, watchContext('watch', clock))
     await guard.dispatch('start', {condition: 'motion', duration_s: 30}, watchContext('guard', clock))
     assert.deepEqual(captures, [
-      {source: 'file', positionMs: 10_000},
+      {source: 'file', positionMs: 0},
       {source: 'file', positionMs: 0},
     ])
   } finally {
@@ -678,66 +643,13 @@ test('an unbound raw hidden Watch start in production Assembly fails closed afte
   }
 })
 
-test('assembly owns an idempotent retryable frame-source lifecycle', async () => {
+test('assembly startup does not acquire camera or ask permission', async () => {
   const source = new ScriptedFrameSource(null)
-  const assembly = buildAssembly({
-    settings: settings(),
-    gateway: new ScriptedGateway([]),
-    searchTransport: new ScriptedSearchTransport(),
-    frameSource: source,
-  })
-
-  source.failNextStart = true
-  await assert.rejects(assembly.start(), AssemblyError)
-  await assembly.start()
-  await assembly.start()
-  assert.equal(source.starts, 2, 'a failed start is retried and a successful start is idempotent')
-
-  source.failNextStop = true
-  await assert.rejects(assembly.stop(), /stop failed/u)
+  const assembly = buildAssembly({settings: settings(), gateway: new ScriptedGateway([]),
+    searchTransport: new ScriptedSearchTransport(), frameSource: source})
+  await Promise.all([assembly.start(), assembly.start()])
+  assert.equal(source.starts, 0)
   await assembly.stop()
-  await assembly.stop()
-  assert.equal(source.stops, 2, 'a failed stop remains started and is retried')
-})
-
-test('concurrent assembly starts acquire the frame source exactly once', async () => {
-  const source = new DeferredFrameSource()
-  const assembly = buildAssembly({
-    settings: settings(),
-    gateway: new ScriptedGateway([]),
-    searchTransport: new ScriptedSearchTransport(),
-    frameSource: source,
-  })
-
-  const first = assembly.start()
-  const second = assembly.start()
-  await new Promise<void>(resolve => { setImmediate(resolve) })
-  assert.equal(source.starts, 1)
-  source.releaseStart()
-  await Promise.all([first, second])
-  assert.equal(source.starts, 1)
-})
-
-test('assembly stop waits for an in-flight start and then releases the source', async () => {
-  const source = new DeferredFrameSource()
-  const assembly = buildAssembly({
-    settings: settings(),
-    gateway: new ScriptedGateway([]),
-    searchTransport: new ScriptedSearchTransport(),
-    frameSource: source,
-  })
-
-  const starting = assembly.start()
-  let stopReturned = false
-  const stopping = assembly.stop().then(() => { stopReturned = true })
-  await Promise.resolve()
-  assert.equal(stopReturned, false)
-  assert.equal(source.stops, 0)
-
-  source.releaseStart()
-  await starting
-  await stopping
-  assert.equal(source.starts, 1)
   assert.equal(source.stops, 1)
 })
 
@@ -752,11 +664,8 @@ test('the default disabled source reports unavailable capture and has a no-op li
   assert.ok(assembly.frameSource instanceof DisabledFrameSource)
   const cam = assembly.runtime.executors.get(MCP_CAMERA_EXECUTOR)
   const watch = assembly.runtime.executors.get('watch')
-  assert.ok(cam instanceof CameraMcpAdapter)
+  assert.equal(cam, undefined)
   assert.ok(watch instanceof WatchAdapter)
-  const cameraHandoff = await cam.dispatch('snapshot', {}, watchContext(MCP_CAMERA_EXECUTOR, clock))
-  assert.equal(cameraHandoff.outcome, 'unknown')
-  assert.equal(cameraHandoff.content.error, 'capture_unavailable')
   const watchHandoff = await watch.dispatch(
     'start', {condition: 'motion'}, watchContext('watch', clock),
   )

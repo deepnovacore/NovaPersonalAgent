@@ -6,7 +6,7 @@
 
 Node.js and TypeScript are the only product runtime. Codex is app-server-only; JSONL is
 fixture-parser-only and has no production process execution path. The v0.2dev thin-frontend target
-projects direct Camera MCP evidence through the Vision controller's hidden Watch/Guard channels;
+projects direct camera evidence through the Vision controller's hidden Watch/Guard channels;
 M1.5c/live/Windows acceptance remains pending. Legacy HA and AutoGLM settings produce
 a stable, credential-safe migration error before provider, process, device, or desktop
 construction.
@@ -230,7 +230,9 @@ families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for the
 | `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | No | qwen-flash | Surrogate model. |
 | `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | No | qwen-flash | Memory compressor model. |
 | `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | No | integrated | Product pipeline shape: integrated or cascaded. |
-| `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` | `camera` | No | true | Enable the built-in Camera MCP and Vision monitoring module. |
+| `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | No | false | Attach a default-camera frame to user turns on verified cascaded VLMs. |
+| `NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID` | `camera` | No | None | Exact monitor camera device ID; empty uses the default device. |
+| `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` | `camera` | No | true | Enable independent Vision monitoring. |
 | `NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER` | `core` | No | qwen | Integrated realtime provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_ENDPOINTING_PROVIDER` | `core` | No | auto | Cascaded endpointing provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_ASR_PROVIDER` | `core` | No | volcengine | Cascaded ASR provider. |

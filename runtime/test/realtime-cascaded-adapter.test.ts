@@ -475,7 +475,10 @@ test('cascaded happy path preserves VAD, ASR, LLM, TTS, and normalized event ord
     {kind: 'response_completed', response_id: 'response-1'},
   ])
   const ttsSession = new FakeTtsSession(new Uint8Array([1, 2]))
+  const image = {payload: new Uint8Array([255,216,255,217]), media_type: 'image/jpeg', width:1280,height:720,captured_at:1}
+  let captures = 0
   const adapter = new CascadedRealtimeAdapter({
+    captureFrame: () => { captures++; return Promise.resolve(image) },
     endpointing,
     asr: new FakeAsrClient(asrSession),
     llm,
@@ -507,7 +510,8 @@ test('cascaded happy path preserves VAD, ASR, LLM, TTS, and normalized event ord
   assert.deepEqual(Reflect.get(events.find(event => event.kind === 'response_started')!, 'origin'),
     {kind: 'user_item', item_id: 'item-1'})
   assert.deepEqual(asrSession.appended, [onset])
-  assert.deepEqual(llm.calls[0]?.inputs, [{kind: 'user_text', text: '你好 Nova'}])
+  assert.deepEqual(llm.calls[0]?.inputs, [{kind: 'user_text', text: '你好 Nova', image}])
+  assert.equal(captures, 1)
   assert.deepEqual(ttsSession.texts, ['你好，', '很高兴见到你。'])
   assert.equal(ttsSession.closed, true)
   assert.equal(endpointing.resets, 2, 'connect and utterance completion reset endpointing')
@@ -530,7 +534,10 @@ test('typed input uses the normal user turn and LLM path without invoking ASR', 
     {kind: 'response_completed', response_id: 'response-1'},
   ])
   const ttsSession = new FakeTtsSession(new Uint8Array([1, 2]))
+  const image = {payload: new Uint8Array([255,216,255,217]), media_type: 'image/jpeg', width:1280,height:720,captured_at:1}
+  let captures = 0
   const adapter = new CascadedRealtimeAdapter({
+    captureFrame: () => { captures++; return Promise.resolve(image) },
     endpointing,
     asr: new FakeAsrClient(asrSession),
     llm,
@@ -556,7 +563,8 @@ test('typed input uses the normal user turn and LLM path without invoking ASR', 
     'response_terminal',
   ])
   assert.deepEqual(asrSession.appended, [])
-  assert.deepEqual(llm.calls[0]?.inputs, [{kind: 'user_text', text: '你好 Nova'}])
+  assert.deepEqual(llm.calls[0]?.inputs, [{kind: 'user_text', text: '你好 Nova', image}])
+  assert.equal(captures, 1)
   assert.deepEqual(ttsSession.texts, ['你好，', '很高兴见到你。'])
   assert.equal(ttsSession.closed, true)
   assert.equal(endpointing.resets, 1)
@@ -672,6 +680,7 @@ test('host facts preserve wording and cannot expose user-action tools', async ()
     },
   }
   const adapter = new CascadedRealtimeAdapter({
+    captureFrame: () => { throw new Error('host notifications must not capture') },
     endpointing: new ScriptedEndpointing(),
     asr: new FakeAsrClient(),
     llm,
@@ -832,7 +841,10 @@ test('adapter supplies semantic user text and matching structured tool results t
         {kind: 'response_completed', response_id: 'response-result'},
       ],
     )
+    const image = {payload: new Uint8Array([255,216,255,217]), media_type: 'image/jpeg', width:1280,height:720,captured_at:1}
+    let captures = 0
     const adapter = new CascadedRealtimeAdapter({
+      captureFrame: () => { captures++; return Promise.resolve(image) },
       endpointing,
       asr: new FakeAsrClient(new FakeAsrSession({text: '你好', final: true})),
       llm,
@@ -856,10 +868,11 @@ test('adapter supplies semantic user text and matching structured tool results t
     }, new AbortController().signal)
     await waitFor('semantic tool continuation', () => llm.calls.length === 2)
 
-    assert.deepEqual(llm.calls[0]?.inputs.at(-1), {kind: 'user_text', text: '你好'})
+    assert.deepEqual(llm.calls[0]?.inputs.at(-1), {kind: 'user_text', text: '你好', image})
     assert.deepEqual(llm.calls[1]?.inputs.at(-1), {
       kind: 'tool_result', call_id: 'call-1', output: {temperature: 20},
     })
+    assert.equal(captures, 1)
     assert.equal(llm.abandons, 0)
     await watching.stop()
   })
@@ -2268,4 +2281,34 @@ test('Qwen usage tail does not block immediate cascaded tool continuation after 
     await adapter.close()
     await watching.stop()
   }
+})
+
+test('capture failure keeps text input and explicitly reports this turn has no frame', async () => {
+  const llm = new FakeLlm([{kind:'response_started',response_id:'r-1'}, {kind:'response_completed',response_id:'r-1'}])
+  const adapter = new CascadedRealtimeAdapter({endpointing:new ScriptedEndpointing(),asr:new FakeAsrClient(),llm,
+    tts:new FakeTtsClient(new FakeTtsSession()),captureFrame:() => Promise.reject(new Error('unplugged'))})
+  await adapter.connect({tools:[],signal:new AbortController().signal})
+  const collecting = collectThroughTerminal(adapter)
+  await adapter.submitText('看看',new AbortController().signal)
+  await collecting
+  assert.match(JSON.stringify(llm.calls[0]?.inputs), /本轮未取得画面/u)
+  assert.doesNotMatch(JSON.stringify(llm.calls[0]?.inputs), /image|unplugged/u)
+  await adapter.close()
+})
+
+test('session close fences a camera result arriving after its user turn was cancelled', async () => {
+  const frame = deferred<{payload:Uint8Array;media_type:string;width:number;height:number;captured_at:number}>()
+  const llm = new FakeLlm()
+  let started = false
+  const adapter = new CascadedRealtimeAdapter({endpointing:new ScriptedEndpointing(),asr:new FakeAsrClient(),llm,
+    tts:new FakeTtsClient(),captureFrame:() => {started=true;return frame.promise}})
+  await adapter.connect({tools:[],signal:new AbortController().signal})
+  const watching = observe(adapter)
+  await adapter.submitText('看看',new AbortController().signal)
+  await waitFor('camera pending', () => started)
+  const closing = adapter.close()
+  frame.resolve({payload:new Uint8Array([255,216,255,217]),media_type:'image/jpeg',width:1280,height:720,captured_at:1})
+  await closing
+  assert.equal(llm.calls.length, 0)
+  await watching.stop()
 })

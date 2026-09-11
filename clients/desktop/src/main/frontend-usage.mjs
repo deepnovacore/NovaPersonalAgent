@@ -1,3 +1,7 @@
+import {mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync} from 'node:fs'
+import {dirname} from 'node:path'
+import {randomUUID} from 'node:crypto'
+
 export const USAGE_FIELDS = ['inputTokens', 'outputTokens', 'inputTextTokens', 'inputAudioTokens', 'outputTextTokens', 'outputAudioTokens', 'cachedTokens', 'reasoningTokens', 'audioDurationMs', 'characters']
 export const PRICE_DATE = '2026-09-08'
 export function publicUsageReport(value) {
@@ -55,10 +59,10 @@ export function priceUsage(report) {
 }
 
 /** Main-process lifetime; backend restarts only change the deduplication namespace. */
-export function createFrontendUsage() {
-  const seen = new Set(), rows = new Map()
+function createUsageAccumulator(initial) {
+  const seen = new Set(), rows = new Map((initial?.rows ?? []).map(row => [JSON.stringify([row.provider, row.service, row.model, row.pricingRegion]), {...row}]))
   // Lost lifetime usage stays incomplete after a backend restart.
-  let currentGeneration = -1, truncated = false
+  let currentGeneration = -1, truncated = initial?.truncated === true
   return {
     add(generation, input) {
       if (!Number.isSafeInteger(generation) || generation < currentGeneration) return false
@@ -88,6 +92,66 @@ export function createFrontendUsage() {
       const result = {truncated, costCny:0, requests:0, missingReports:0, unpricedReports:0, pricedReports:0, priceDate:PRICE_DATE, rows:[...rows.values()].map(row => ({...row}))}
       for (const row of result.rows) for (const key of ['costCny','requests','missingReports','unpricedReports','pricedReports']) result[key] += row[key]
       return result
+    },
+  }
+}
+
+// Saved aggregates keep the original per-request estimates, including tiered prices.
+function readHistory(file) {
+  const value = JSON.parse(readFileSync(file, 'utf8'))
+  if (value.version !== 1 || typeof value.startedAt !== 'string' || !Number.isFinite(Date.parse(value.startedAt))
+    || typeof value.truncated !== 'boolean' || !Array.isArray(value.rows) || value.rows.length > 1000) throw Error('invalid usage history')
+  const identities = new Set()
+  const rows = value.rows.map(row => {
+    const report = publicUsageReport({...row, id: 'stored', status: 'complete'})
+    const counters = ['requests', 'missingReports', 'unpricedReports', 'pricedReports']
+    if (!report || counters.some(key => !Number.isSafeInteger(row[key]) || row[key] < 0)
+      || row.requests !== row.missingReports + row.unpricedReports + row.pricedReports
+      || !Number.isFinite(row.costCny) || row.costCny < 0) throw Error('invalid usage row')
+    const {id, status, ...safe} = report
+    const key = JSON.stringify([safe.provider, safe.service, safe.model, safe.pricingRegion])
+    if (identities.has(key)) throw Error('duplicate usage row')
+    identities.add(key)
+    return {...safe, ...Object.fromEntries(counters.map(key => [key, row[key]])), costCny: row.costCny, source: null}
+  })
+  return {startedAt: value.startedAt, truncated: value.truncated, rows}
+}
+
+export function createFrontendUsage({file, now = () => new Date().toISOString()} = {}) {
+  const startedAt = now()
+  let initial, persistenceError = null, unreadable = false
+  if (file) {
+    try { initial = readHistory(file) }
+    catch (error) {
+      if (error.code !== 'ENOENT') { unreadable = true; persistenceError = 'read_failed' }
+    }
+  }
+  const session = createUsageAccumulator()
+  const history = createUsageAccumulator(initial)
+  const historyStartedAt = initial?.startedAt ?? startedAt
+  function persist() {
+    if (!file || unreadable) return
+    const temporary = `${file}.${randomUUID()}.tmp`
+    try {
+      mkdirSync(dirname(file), {recursive: true, mode: 0o700})
+      // ponytail: sync atomic write of at most 1000 aggregate rows; queue writes if measured UI latency warrants it.
+      writeFileSync(temporary, JSON.stringify({version: 1, startedAt: historyStartedAt, ...history.snapshot()}), {mode: 0o600})
+      renameSync(temporary, file)
+      persistenceError = null
+    } catch { persistenceError = 'write_failed' }
+    finally { try { unlinkSync(temporary) } catch {} }
+  }
+  return {
+    add(generation, report) {
+      const changed = session.add(generation, report)
+      if (!changed) return false
+      history.add(generation, report)
+      persist()
+      return true
+    },
+    snapshot() {
+      return {...session.snapshot(), startedAt, persistenceError,
+        history: {...history.snapshot(), startedAt: historyStartedAt, unavailable: unreadable}}
     },
   }
 }

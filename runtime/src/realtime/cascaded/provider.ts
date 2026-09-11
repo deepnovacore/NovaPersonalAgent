@@ -1,3 +1,4 @@
+import type {Frame} from '../../executors/watcher.js'
 import type {
   HostContextItem,
   HostResponseIntent,
@@ -26,6 +27,7 @@ export interface CascadedRealtimeProviderOptions {
   readonly asrFactory: AsrFactory
   readonly llmFactory: CascadedLlmFactory
   readonly ttsFactory: TtsFactory
+  readonly captureFrame?: (signal: AbortSignal) => Promise<Frame>
   readonly telemetry?: RealtimeTelemetry
   readonly idFactory: () => string
 }
@@ -39,6 +41,7 @@ export class CascadedRealtimeProvider implements RealtimeProvider {
   readonly #asrFactory: AsrFactory
   readonly #llmFactory: CascadedLlmFactory
   readonly #ttsFactory: TtsFactory
+  readonly #captureFrame: ((signal: AbortSignal) => Promise<Frame>) | undefined
   readonly #telemetry: RealtimeTelemetry | undefined
   readonly #idFactory: () => string
   #state: ProviderState = 'disconnected'
@@ -54,6 +57,7 @@ export class CascadedRealtimeProvider implements RealtimeProvider {
     this.#asrFactory = options.asrFactory
     this.#llmFactory = options.llmFactory
     this.#ttsFactory = options.ttsFactory
+    this.#captureFrame = options.captureFrame
     this.#telemetry = options.telemetry
     this.#idFactory = options.idFactory
   }
@@ -88,6 +92,7 @@ export class CascadedRealtimeProvider implements RealtimeProvider {
       const tts = this.#ttsFactory.openClient()
       if (signal.aborted) throw abortReason(signal)
       adapter = new CascadedRealtimeAdapter({
+        ...(this.#captureFrame ? {captureFrame: this.#captureFrame} : {}),
         endpointing,
         asr,
         llm,

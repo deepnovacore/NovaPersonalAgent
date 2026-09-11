@@ -214,8 +214,11 @@ export function backendLaunchSpec({
     NOVA_AUDIO_AGENT_PIPELINE_MODE: pipelineMode,
     NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,
+    NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED: String(settings?.conversationVisionEnabled ?? false),
+    NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID: settings?.monitorCameraDeviceId ?? '',
   }
   for (const [name, value] of [
+    ['NOVA_AUDIO_AGENT_WATCH_MODEL', settings?.watchModel ?? ''],
     ['NOVA_AUDIO_AGENT_PLANNER_MODEL', settings?.plannerModel ?? SETTINGS_DEFAULTS.plannerModel],
     ['NOVA_AUDIO_AGENT_EMBEDDING_MODEL', settings?.embeddingModel
       ?? SETTINGS_DEFAULTS.embeddingModel],

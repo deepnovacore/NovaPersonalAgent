@@ -105,6 +105,7 @@ test('the default settings are the documented schema', () => {
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
+    conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
     secrets: {},
   })
   assert.deepEqual([...SECRET_KEYS], ALL_SECRET_KEYS)
@@ -277,6 +278,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
+    conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
     secrets: {},
   })
 })
@@ -336,6 +338,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'codexManagedRoot',
     'codexWorkspace',
     'codingProgressNarration',
+    'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
     'integratedModel',
@@ -343,6 +346,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'integratedVoice',
     'knowledgePath',
     'modelBaseUrl',
+    'monitorCameraDeviceId',
     'palette',
     'pipelineMode',
     'planReadback',
@@ -353,6 +357,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'startListeningOnLaunch',
     'version',
     'wakeWordEnabled',
+    'watchModel',
   ])
 })
 
@@ -707,6 +712,7 @@ test('publicSettings never carries the secrets object', () => {
     'codexManagedRoot',
     'codexWorkspace',
     'codingProgressNarration',
+    'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
     'integratedModel',
@@ -714,6 +720,7 @@ test('publicSettings never carries the secrets object', () => {
     'integratedVoice',
     'knowledgePath',
     'modelBaseUrl',
+    'monitorCameraDeviceId',
     'palette',
     'pipelineMode',
     'planReadback',
@@ -723,6 +730,7 @@ test('publicSettings never carries the secrets object', () => {
     'startListeningOnLaunch',
     'version',
     'wakeWordEnabled',
+    'watchModel',
   ])
   assert.doesNotMatch(JSON.stringify(view), /sk-visible|sealed/)
 })
@@ -733,7 +741,7 @@ test('orb settings expose only renderer-owned appearance and activation fields',
     startListeningOnLaunch: true,
     codexBinaryPath: 'C:\\private\\codex.exe',
     modelBaseUrl: 'https://private.example/v1',
-  }), {progressBubbles: 'milestones', codingProgressNarration: 'smart', palette: 'graphite', startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
+  }), {conversationVisionEnabled: false, progressBubbles: 'milestones', codingProgressNarration: 'smart', palette: 'graphite', startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
 })
 
 test('secretsPresent reports booleans for every key and leaks no ciphertext', () => {
@@ -1309,4 +1317,15 @@ test('coding narration mode changes persist without requesting a backend restart
   assert.deepEqual(backendSettings({codingProgressNarration: 'smart'}), backendSettings({codingProgressNarration: 'continuous'}))
   assert.deepEqual(backendSettings({palette: 'ember'}), backendSettings({palette: 'graphite'}))
   assert.equal(orbSettings({codingProgressNarration: 'continuous'}).codingProgressNarration, 'continuous')
+})
+
+test('native vision settings persist independently and device IDs have a bounded UTF-16 limit', () => {
+  const valid = normalizeSettings({conversationVisionEnabled:true,monitorCameraDeviceId:'usb-device',watchModel:'qwen3-vl-plus'})
+  assert.equal(valid.conversationVisionEnabled,true)
+  assert.equal(valid.monitorCameraDeviceId,'usb-device')
+  assert.equal(valid.watchModel,'qwen3-vl-plus')
+  assert.equal(publicSettings(valid).monitorCameraDeviceId,'usb-device')
+  assert.equal(normalizeSettings({monitorCameraDeviceId:'x'.repeat(257)}).monitorCameraDeviceId,'')
+  assert.equal(normalizeSettings({monitorCameraDeviceId:'x\n'}).monitorCameraDeviceId,'')
+  assert.equal(normalizeSettings({conversationVisionEnabled:'true'}).conversationVisionEnabled,false)
 })

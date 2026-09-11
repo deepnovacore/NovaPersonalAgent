@@ -117,7 +117,7 @@ test('a Vision-owned hit keeps the reservation busy until its exact terminal', a
   })
   lifecycle.attach(value)
   assert.equal((await value.dispatch(request())).code, 'delegated')
-  assert.equal(lifecycle.hit('watch-delegate'), true)
+  assert.equal(lifecycle.hit('watch-delegate'), false)
   assert.equal((await value.dispatch(request())).code, 'busy')
   lifecycle.terminal('watch-delegate')
   assert.equal((await value.dispatch(request())).code, 'delegated')
@@ -405,7 +405,7 @@ test('dispatch stop and public cancel target the sole channel, fence late callba
   assert.equal(viaDispatchCalls.length, 0)
 })
 
-test('successful terminal and hit callbacks clean up only for exact identity', async () => {
+test('a hit keeps the task reserved until its exact terminal callback', async () => {
   const calls: Record<string, unknown>[] = []
   let next = 0
   const value = new VisionAgentControllerCore({
@@ -418,6 +418,8 @@ test('successful terminal and hit callbacks clean up only for exact identity', a
   assert.equal((await value.dispatch(request({originalUserText: 'still busy'}))).code, 'busy')
   value.permissionGranted(identity)
   value.hit(identity)
+  assert.equal((await value.dispatch(request({originalUserText: 'busy after hit'}))).code, 'busy')
+  value.terminal(identity)
   assert.equal((await value.dispatch(request({originalUserText: 'free'}))).code, 'delegated')
 })
 

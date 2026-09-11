@@ -7,7 +7,7 @@
 | Surrogate | A bounded attention policy for unsolicited suggestions; it selects pooled entries and never generates words |
 | Runtime spine | The event loop that applies state and coordinates work |
 | Memory | Canonical per-channel observations, accepted handoffs, and revision-bound intake facts |
-| Channel | One append-only observation stream per capability: `conversation`, `search`, Camera MCP evidence, hidden Vision `watch`/`guard`, plus one per active executor |
+| Channel | One append-only observation stream per capability: `conversation`, `search`, camera evidence, hidden Vision `watch`/`guard`, plus one per active executor |
 | ContextView | A bounded snapshot compiled for a model call |
 | Floor | Speaking-path arbitration with three verdicts: `allow`, `preempt`, `defer` |
 | Priority | Urgency bound to the triggering event, never chosen by the model: user 100, guard 90, active executors 50, ambient observations 40 |

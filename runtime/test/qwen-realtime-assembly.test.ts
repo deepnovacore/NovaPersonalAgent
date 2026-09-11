@@ -255,7 +255,7 @@ test('Qwen factory and plain assembly both leave the fast slot to the realtime o
   const qwenBindings = realtime.tools.bindings
   assert.equal(qwenBindings.has('memory__recall'), true)
   assert.deepEqual([...realtime.core.runtime.executors.keys()].slice(0, 4), [
-    'search', 'mcp__nova_camera', 'watch', 'guard',
+    'search', 'watch', 'guard',
   ])
   const qwenInput = realtime.runtime.core.post({kind: 'user_input', payload: {text: 'hello'}}, 0)
   realtime.runtime.core.apply(qwenInput)
@@ -575,7 +575,7 @@ test('Qwen factory preserves resource identity, explicit Guard settings, and one
   await settleNamed('shared Qwen factory start', Promise.all([firstStart, secondStart]))
   assert.equal(connector.calls.length, 1)
   assert.equal(serveCalls, 1)
-  assert.equal(frame.starts, 1)
+  assert.equal(frame.starts, 0)
   assert.equal(connector.calls[0]?.endpoint, 'wss://qwen.example/realtime?model=qwen-test')
   assert.equal(connector.calls[0]?.headers.Authorization, 'Bearer dash-key')
   const update = JSON.parse(connector.sockets[0]?.sent[0] ?? '{}') as {
@@ -634,6 +634,7 @@ test('desktop Qwen composition shares one clock, Chromium source, and camera ser
 
   await settleNamed('desktop Qwen start before renderer', composition.realtime.start())
   assert.deepEqual(captures, [], 'source start does not capture before desktop readiness/auth')
+  await source.start()
   const frame = await source.snapshot()
   assert.deepEqual(captures, [{source: 'file', positionMs: 0}])
   assert.equal(frame.captured_at, 5)
@@ -844,12 +845,12 @@ test('Qwen connector failure rolls core back safely and permits one later retry'
     settleNamed('first failing Qwen start', realtime.start()),
     error => error instanceof Error && !error.message.includes(sentinel),
   )
-  assert.equal(frame.starts, 1)
+  assert.equal(frame.starts, 0)
   assert.equal(frame.stops, 1)
   assert.equal(connector.calls.length, 1)
 
   await settleNamed('retried Qwen start', realtime.start())
-  assert.equal(frame.starts, 2)
+  assert.equal(frame.starts, 0)
   assert.equal(connector.calls.length, 2)
   await settleNamed('retried Qwen stop', realtime.stop())
   assert.equal(frame.stops, 2)

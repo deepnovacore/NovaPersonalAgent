@@ -4,7 +4,7 @@ import { jsonValueSchema, type JsonValue } from '../../events.js'
 import { codePointLengthLikePython, stripLikePython } from '../../python-text.js'
 import { MAX_REALTIME_TEXT, type JsonObject } from '../protocol.js'
 
-export const MAX_ARK_REQUEST_BYTES = 1_024 * 1_024
+export const MAX_ARK_REQUEST_BYTES = 4 * 1_024 * 1_024
 export const MAX_ARK_SSE_LINE_BYTES = 256 * 1_024
 export const MAX_ARK_SSE_EVENT_BYTES = 512 * 1_024
 export const MAX_ARK_RESPONSE_BYTES = 8 * 1_024 * 1_024

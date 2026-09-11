@@ -1,3 +1,4 @@
+import {originalImageUrl, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
 import { jsonValueSchema, type JsonValue } from '../../events.js'
 import { codePointLengthLikePython, stripLikePython } from '../../python-text.js'
 import { MAX_REALTIME_TEXT, type JsonObject } from '../protocol.js'
@@ -66,7 +67,7 @@ function inputItem(input: CascadedLlmInput): JsonObject {
   if (input.kind === 'tool_result') {
     return {type: 'function_call_output', call_id: input.call_id, output: JSON.stringify(input.output)}
   }
-  return {role: 'user', content: input.kind === 'user_text' ? input.text : input.content}
+  return {role: 'user', content: input.kind === 'user_text' ? (input.image ? [{type: 'input_text', text: input.text}, {type: 'input_image', image_url: originalImageUrl(input.image)}] : input.text) : input.content}
 }
 
 function toolSchema(tool: CascadedLlmTool): JsonObject {
@@ -85,6 +86,9 @@ class Session implements CascadedLlmSession {
   #previousResponseId: string | null = null
   #pendingToolContinuation = false
   #closed = false
+  #visualHistory = false
+  #history: JsonObject[][] = []
+  #turnItems: JsonObject[] = []
 
   constructor(gateway: ArkResponsesGateway) {
     this.#gateway = gateway
@@ -99,15 +103,22 @@ class Session implements CascadedLlmSession {
   }): AsyncIterable<CascadedLlmEvent> {
     if (this.#closed) throw fail('closed')
     if (input.signal.aborted) throw fail('aborted')
+    const current = input.inputs.map(inputItem)
+    if (input.inputs.some(item => item.kind === 'user_text' && item.image)) this.#visualHistory = true
+    const continuing = this.#pendingToolContinuation
+    const localHistory = this.#visualHistory && !continuing
+    if (!continuing) this.#turnItems = []
+    this.#turnItems.push(...input.inputs.map(item => item.kind === 'user_text' ? {role: 'user', content: item.text} : inputItem(item)))
+    let outputText = ''
     let responseId: string | null = null
     let terminal = false
     let textSeen = false
     let pendingTool: Extract<CascadedLlmEvent, {kind: 'tool_call'}> | null = null
     try {
       for await (const event of this.#gateway.stream({
-        inputItems: input.inputs.map(inputItem),
+        inputItems: localHistory ? [...this.#history.flat(), ...current] : current,
         tools: input.tools.map(toolSchema),
-        previousResponseId: this.#previousResponseId,
+        previousResponseId: localHistory ? null : this.#previousResponseId,
         workspaceContext: input.workspaceContext ?? null,
         responseAdaptation: input.responseAdaptation ?? null,
         signal: input.signal,
@@ -120,6 +131,7 @@ class Session implements CascadedLlmSession {
           if (responseId === null) throw fail('protocol')
           if (pendingTool !== null) throw fail('protocol')
           textSeen = true
+          outputText += event.text
           yield event
         } else if (event.kind === 'tool_call') {
           if (responseId === null || textSeen || pendingTool !== null) throw fail('protocol')
@@ -127,7 +139,15 @@ class Session implements CascadedLlmSession {
         } else if (event.kind === 'response_completed') {
           if (responseId === null || event.response_id !== responseId) throw fail('protocol')
           terminal = true
-          if (pendingTool !== null) yield pendingTool
+          if (pendingTool !== null) {
+            this.#turnItems.push({type: 'function_call', call_id: pendingTool.call_id, name: pendingTool.name, arguments: JSON.stringify(pendingTool.arguments)})
+            yield pendingTool
+          }
+          if (pendingTool === null) {
+            this.#history.push([...this.#turnItems, {role: 'assistant', content: outputText}])
+            this.#turnItems = []
+            while (this.#history.length && (this.#history.flat().length > MAX_CASCADED_LLM_HISTORY_ITEMS || codePointLengthLikePython(JSON.stringify(this.#history)) > MAX_CASCADED_LLM_HISTORY_CODEPOINTS)) this.#history.shift()
+          }
           this.#previousResponseId = event.response_id
           this.#pendingToolContinuation = pendingTool !== null
           yield event
@@ -167,6 +187,7 @@ class Session implements CascadedLlmSession {
 
   async close(): Promise<void> {
     this.#closed = true
+    this.#history = []; this.#turnItems = []
     this.#previousResponseId = null
     this.#pendingToolContinuation = false
     await this.#gateway.close()

@@ -630,7 +630,7 @@ test('cascaded assembly preserves one graph, shared resources, and frozen Guard 
   assert.equal(realtime.service.internals.tools, realtime.tools)
   assert.equal(realtime.tools.bindings.has('memory__recall'), true)
   assert.deepEqual([...realtime.runtime.executors.keys()].slice(0, 4), [
-    'search', 'mcp__nova_camera', 'watch', 'guard',
+    'search', 'watch', 'guard',
   ])
   assert.deepEqual(realtime.service.preemptiveAlertConfiguration, {
     controlledReconnect: false, historyRecovery: 'none', historyPairs: 4,
@@ -650,7 +650,7 @@ test('cascaded assembly preserves one graph, shared resources, and frozen Guard 
     'capability', 'asr', 'ark:ark-realtime-distinct', 'tts',
   ])
   assert.equal(serveCalls, 1)
-  assert.equal(frameSource.starts, 1)
+  assert.equal(frameSource.starts, 0)
   assert.ok(ids.calls.includes('cascaded'))
   await settleNamed('cascaded assembly stop', realtime.stop())
   await settleNamed('cascaded assembly repeated stop', realtime.stop())

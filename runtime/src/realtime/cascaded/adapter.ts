@@ -1,3 +1,5 @@
+import {validateOriginalImage} from './llm.js'
+import type {Frame} from '../../executors/watcher.js'
 import { randomUUID } from 'node:crypto'
 import {jsonValueSchema} from '../../events.js'
 import {codePointLengthLikePython, stripLikePython} from '../../python-text.js'
@@ -59,6 +61,7 @@ export interface CascadedRealtimeAdapterOptions {
   /** Opens a fresh LLM session for every adapter connection epoch. */
   readonly llmFactory?: CascadedLlmFactory
   readonly tts: TtsClient
+  readonly captureFrame?: (signal: AbortSignal) => Promise<Frame>
   readonly telemetry?: RealtimeTelemetry
   readonly idFactory?: () => string
   readonly settleTimeoutMs?: number
@@ -279,6 +282,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
   readonly #ttsClient: TtsClient
   readonly #llm: CascadedLlmSession
   readonly #llmFactory: CascadedLlmFactory | undefined
+  readonly #captureFrame: ((signal: AbortSignal) => Promise<Frame>) | undefined
   readonly #telemetry: RealtimeTelemetry
   readonly #idFactory: () => string
   readonly #settleTimeoutMs: number
@@ -296,6 +300,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     this.#ttsClient = options.tts
     this.#llm = options.llm
     this.#llmFactory = options.llmFactory
+    this.#captureFrame = options.captureFrame
     this.#telemetry = options.telemetry ?? new NullTelemetry()
     this.#idFactory = options.idFactory ?? randomUUID
     this.#settleTimeoutMs = options.settleTimeoutMs ?? DEFAULT_CASCADED_SETTLE_MS
@@ -926,8 +931,21 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       await this.#emit(owner, {kind: 'response_started', session_epoch: owner.epoch,
         response_id: active.id, origin: active.origin})
       throwIfAborted(signal)
+      let visualInputs = inputs
+      if (this.#captureFrame && inputs.some(item => item.kind === 'user_text')) {
+        try {
+          const image = await this.#captureFrame(signal)
+          validateOriginalImage(image)
+          throwIfAborted(signal)
+          if (!this.#isCurrent(owner) || owner.response !== active) return
+          visualInputs = inputs.map(item => item.kind === 'user_text' ? {...item, image} : item)
+        } catch {
+          throwIfAborted(signal)
+          visualInputs = inputs.map(item => item.kind === 'user_text' ? {...item, text: item.text + '\n[主机状态：本轮摄像头取帧失败。请明确告诉用户本轮未取得画面，不要假装看到了。]'} : item)
+        }
+      }
       for await (const event of owner.llm.stream({
-        inputs: inputs.map(item => structuredClone(item)),
+        inputs: visualInputs.map(item => structuredClone(item)),
         tools: allowTools ? owner.tools.map(tool => structuredClone(tool)) : [],
         workspaceContext: owner.workspaceContext?.item.content ?? null,
         responseAdaptation: owner.responseAdaptation?.content ?? null,

@@ -1,5 +1,7 @@
 # v0.2.0 进度说明（给同事 review 用）
 
+> Vision update: camera MCP and side-VLM foreground projection below are superseded by [native vision and independent monitoring](../../archs/11-vision.md). The current default foreground has five host/native tools; camera capture is not a tool.
+
 > 日期：2026-09-06 · 分支：`v0.2.0dev` · M4、唤醒词与级联调度已集成；当前 SHA / CI 结果见 IMPLEMENTATION
 > 这份文档用大白话讲"我们做到哪了、怎么验的、接下来干什么、想请你们拍板什么"。
 > 细节以各卷 spec 和 [`IMPLEMENTATION.md`](IMPLEMENTATION.md) 为准。

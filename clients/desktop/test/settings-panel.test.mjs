@@ -1007,7 +1007,7 @@ test('usage stays current through a stale save reply and renders a compact summa
   await saving
   assert.equal(renders.at(-1).frontendUsage.requests, 2)
   const panel = await mountSettingsPanel(publicView({frontendUsage: usage}))
-  assert.equal(panel.node('#frontend-usage').textContent, '¥0.1200')
+  assert.equal(panel.node('#usage-session-cost').textContent, '¥0.1200')
   assert.doesNotMatch(panel.node('#frontend-usage').textContent, /官方按量/)
   assert.doesNotMatch(panel.node('#frontend-usage-details').textContent, /官方按量/)
 })
@@ -1022,7 +1022,7 @@ test('every settings block belongs to exactly one sidebar category', () => {
   // table would be hidden permanently by applyCategory.
   const blocks = [...html.matchAll(/<(?:section|details) (?:class="[^"]*" )?id="([^"]+)"/g)]
     .map(match => match[1])
-    .filter(id => !['integrated-pipeline', 'cascaded-pipeline'].includes(id))
+    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown'].includes(id))
   for (const id of blocks) assert.ok(sections.includes(id), `${id} is missing from a category`)
 })
 
@@ -1245,4 +1245,44 @@ test('restart uses saved settings independently and keeps unsaved drafts', async
   assert.equal(saves, 0)
   assert.equal(panel.node('#codexWorkspace').value, '/draft-workspace')
   assert.equal(panel.node('#settings-save').disabled, false)
+})
+
+
+test('usage scope switches independently and stays selected through live updates', async () => {
+  const usage = {requests: 2, costCny: .12, pricedReports: 2, missingReports: 0, unpricedReports: 0, rows: [], startedAt: '2026-09-11T01:00:00Z'}
+  usage.history = {...usage, requests: 8, costCny: .5, startedAt: '2026-09-10T01:00:00Z'}
+  const panel = await mountSettingsPanel(publicView({frontendUsage: usage}))
+  assert.equal(panel.node('#usage-session-cost').textContent, '¥0.1200')
+  assert.equal(panel.node('#usage-history-cost').textContent, '¥0.5000')
+  await panel.click('#usage-history')
+  assert.equal(panel.node('#usage-history').attributes['aria-pressed'], 'true')
+  panel.push(publicView({frontendUsage: {...usage, history: {...usage.history, requests: 9}}}))
+  assert.equal(panel.node('#usage-history-count').textContent, '9 次调用')
+  assert.equal(panel.node('#usage-history').attributes['aria-pressed'], 'true')
+})
+
+test('conversation vision is unavailable for audio or unknown models and never offers a camera selector', async () => {
+  const base = {visionModels:{qwen:['qwen3-vl-plus']},conversationVisionEnabled:true}
+  const panel = await mountSettingsPanel(publicView(base))
+  assert.equal(panel.node('#conversation-vision-enabled').disabled,true)
+  assert.equal(panel.node('#conversation-vision-enabled').checked,false)
+  panel.push(publicView({...base,pipelineMode:'cascaded',cascadedLlmModels:{qwen:'qwen3-vl-plus'}}))
+  assert.equal(panel.node('#conversation-vision-enabled').disabled,false)
+  assert.equal(panel.node('#conversation-vision-enabled').checked,true)
+  panel.push(publicView({...base,pipelineMode:'cascaded',cascadedLlmModels:{qwen:'unknown-vl'}}))
+  assert.equal(panel.node('#conversation-vision-enabled').disabled,true)
+  assert.doesNotMatch(html,/id="conversation-camera"/u)
+  assert.doesNotMatch(await readFile(new URL('../src/renderer/capabilities-editor.mjs',import.meta.url),'utf8'),/mcp__nova_camera/u)
+})
+
+test('empty usage has quiet card values, one hint, and no empty details disclosure', async () => {
+  const panel = await mountSettingsPanel(publicView({frontendUsage:{requests:0,rows:[],history:{requests:0,rows:[]}}}))
+  assert.equal(panel.node('#usage-history-cost').textContent,'—')
+  assert.equal(panel.node('#usage-session-cost').textContent,'—')
+  assert.equal(panel.node('#frontend-usage').textContent,'开始对话后显示用量')
+  assert.equal(panel.node('#usage-breakdown').hidden,true)
+  panel.push(publicView({frontendUsage:{requests:1,pricedReports:1,costCny:0.01,rows:[],history:{requests:1,pricedReports:1,costCny:0.01,rows:[]}}}))
+  assert.equal(panel.node('#usage-breakdown').hidden,false)
+  assert.equal(panel.node('#frontend-usage').hidden,true)
+  assert.equal(panel.node('#usage-session-cost').textContent,'¥0.0100')
 })

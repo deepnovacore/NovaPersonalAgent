@@ -43,7 +43,7 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 * **Surrogate：** 决定**何时开口**。事件写入 Memory 或建议池后，由它判断值不值得告诉用户。
 * **Memory 与 ContextView：** Memory 短期、分通道；能力证据与 intake facts 受限编译进 ContextView 给 FrontBrain。
 * **Floor：** 说话权。不同事件自带不同优先级。
-* **Executor 与 Controller：** role-based manifest 运行异步工作；AgentController registry 拥有面向模型的 controller 及隐藏的 Vision watch/guard。内置 Camera MCP 直接提供证据，不是 dispatch executor。
+* **Executor 与 Controller：** role-based manifest 运行异步工作；AgentController registry 拥有面向模型的 controller 及隐藏的 Vision watch/guard。主对话直接向当前 VLM 附图；视觉监控独立管理完整循环。
 * **Compressor：** 对话变长后，短期记忆可能撑爆 FrontBrain 和 Surrogate 的上下文，Agent用摘要模型自动压缩。
 
 架构细节见 [架构](docs/architecture.md)。

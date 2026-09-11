@@ -5,8 +5,7 @@ The runtime accepts user input, dispatches work, receives progress or terminal h
 result to memory, and independently decides whether another response is useful.
 
 The v0.2 target keeps Nova's stable host/native voice surface to five tools — `dispatch`, `cancel`,
-`confirm`, `memory__recall`, and `search__search` — plus the built-in direct Camera MCP
-`mcp__nova_camera__snapshot`. External MCP servers are user-selected surface and context cost, not
+`confirm`, `memory__recall`, and `search__search`. External MCP servers are user-selected surface and context cost, not
 something Nova may silently trim. The M1.5c thin-frontend/live and Windows gates remain pending.
 
 ```mermaid

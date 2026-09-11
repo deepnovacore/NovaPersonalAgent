@@ -331,7 +331,7 @@ test('channel labels mirror the runtime manifests and unwrap dynamic servers', (
   assert.equal(channelTabs.channelLabel('guard'), 'Guard')
   assert.equal(channelTabs.channelLabel('codex'), 'Codex')
   assert.equal(channelTabs.channelLabel('search'), '搜索')
-  assert.equal(channelTabs.channelLabel('mcp__nova_camera'), '相机')
+  assert.equal(channelTabs.channelLabel('mcp__nova_camera'), 'nova_camera')
   assert.equal(channelTabs.channelLabel('mcp__nova_knowledge'), '知识库')
   assert.equal(channelTabs.channelLabel('mcp__acme_tools'), 'acme_tools', 'a dynamic server sheds its prefix')
   assert.equal(channelTabs.channelLabel('unknown_channel'), 'unknown_channel')
