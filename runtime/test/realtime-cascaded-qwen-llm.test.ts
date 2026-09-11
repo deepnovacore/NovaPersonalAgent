@@ -1,5 +1,6 @@
 import type {UsageReport} from '../src/realtime/usage.js'
 import assert from 'node:assert/strict'
+import {readFileSync} from 'node:fs'
 import { test } from 'node:test'
 import {
   createQwenCascadedLlmFactory,
@@ -528,5 +529,56 @@ test('Qwen bounds missing metering tail after terminal without changing complete
     assert.equal(reports.length, 1)
     assert.equal(reports[0]?.status, 'missing')
     await session.close()
+  }
+})
+
+
+test('captured Qwen null argument delta preserves a complete call but cannot supply missing JSON', async () => {
+  const captured = JSON.parse(readFileSync(new URL('../../../fixtures/realtime/qwen/v1/tool-null-delta.json', import.meta.url), 'utf8')) as Record<string, unknown>[]
+  for (const nullOnly of [false, true]) {
+    const chunks = nullOnly ? [{id: 'empty', choices: [{delta: {tool_calls: [{index: 0, id: 'empty',
+      function: {name: 'search', arguments: null}}]}, finish_reason: 'tool_calls'}]}] : captured
+    const live = createQwenCascadedLlmFactory({baseUrl: 'https://dashscope.example/v1', apiKey: 'synthetic',
+      model: 'qwen-flash', instructions: 'synthetic', fetchImpl: () => Promise.resolve(sse(chunks))}).open()
+    try {
+      const events = await collect(live.stream({inputs: [{kind: 'user_text', text: '搜索航天新闻'}], tools: [], signal: AbortSignal.timeout(1000)}))
+      if (nullOnly) {
+        assert.equal(events.at(-1)?.kind, 'response_failed')
+        assert.equal(events.some(event => event.kind === 'tool_call'), false)
+      } else {
+        assert.equal(events.at(-1)?.kind, 'response_completed')
+        assert.deepEqual(events.find(event => event.kind === 'tool_call'), {kind: 'tool_call', item_id: 'call-live-null',
+          call_id: 'call-live-null', name: 'search__search', arguments: {k: 3, query: '今天 航天 新闻', origin_ref: 'conversation:1'}})
+      }
+    } finally { await live.close() }
+  }
+})
+
+test('captured Max null id delta preserves the established id without accepting missing or changed ids', async () => {
+  const captured = JSON.parse(readFileSync(new URL('../../../fixtures/realtime/qwen/v1/tool-null-id-delta.json', import.meta.url), 'utf8')) as {choices?: {delta: {tool_calls?: {id?: string | null}[]}}[]}[]
+  for (const mode of ['captured', 'missing', 'changed'] as const) {
+    const chunks = structuredClone(captured)
+    for (const chunk of chunks) for (const choice of chunk.choices ?? []) for (const call of choice.delta.tool_calls ?? []) {
+      if (mode === 'missing' && typeof call.id === 'string') call.id = null
+      if (mode === 'changed' && call.id === null) call.id = 'different-call'
+    }
+    const live = createQwenCascadedLlmFactory({baseUrl: 'https://dashscope.example/v1', apiKey: 'synthetic',
+      model: 'qwen3.8-max', instructions: 'synthetic', fetchImpl: () => Promise.resolve(sse(chunks))}).open()
+    try {
+      const events = await collect(live.stream({inputs: [{kind: 'user_text', text: '追加要求'}], tools: [], signal: AbortSignal.timeout(1000)}))
+      if (mode === 'captured') {
+        assert.equal(events.at(-1)?.kind, 'response_completed')
+        const call = events.find(event => event.kind === 'tool_call')
+        assert.equal(call?.kind, 'tool_call')
+        if (call?.kind === 'tool_call') {
+          assert.equal(call.name, 'dispatch')
+          assert.equal(call.arguments.executor, 'codex')
+          assert.equal(call.arguments.origin_ref, 'conversation:1')
+        }
+      } else {
+        assert.equal(events.at(-1)?.kind, 'response_failed')
+        assert.equal(events.some(event => event.kind === 'tool_call'), false)
+      }
+    } finally { await live.close() }
   }
 })

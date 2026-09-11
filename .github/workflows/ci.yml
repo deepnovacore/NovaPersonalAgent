@@ -41,6 +41,7 @@ jobs:
         if: runner.os != 'Windows'
       - run: npm run test:runtime:win
         if: runner.os == 'Windows'
+      - run: npm run test:live:contract --workspace @nova-audio-agent/runtime
       - run: npm run test:cli
       - run: npm run test:webui
       # npm may restore the Electron package without its platform binary from

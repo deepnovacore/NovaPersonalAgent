@@ -45,7 +45,7 @@ function executorLines(agents: readonly AgentDescriptor[]): string {
 export function dispatchToolSpec(agents: readonly AgentDescriptor[]): HostToolSpec {
   return {
     name: DISPATCH_TOOL,
-    description: `把用户的自然语言需求交给一个 agent 执行器；由宿主判断项目、会话、是否追问。executor 可选：${executorLines(agents)}`,
+    description: `把用户明确的执行要求交给一个 agent 执行器，包括新任务、继续已有任务、追加要求和修改约束。追加要求也必须调用，口头接收不会把要求传给执行器；由宿主判断项目、会话、是否追问。executor 可选：${executorLines(agents)}`,
     params: {
       type: 'object',
       properties: {
@@ -62,7 +62,7 @@ export function dispatchToolSpec(agents: readonly AgentDescriptor[]): HostToolSp
 export function cancelToolSpec(agents: readonly AgentDescriptor[]): HostToolSpec {
   return {
     name: CANCEL_TOOL,
-    description: `停止一个正在执行的任务；用户明确要求停止或取消时调用。executor 可选：${executorLines(agents)}`,
+    description: `停止一个正在执行的任务；用户明确要求停止或取消时必须调用，不要只口头答应。用户说先别停止或只讨论是否停止时不要调用。executor 可选：${executorLines(agents)}`,
     params: {
       type: 'object',
       properties: {
@@ -80,7 +80,7 @@ export const CONFIRM_TOOL_SPEC: HostToolSpec = {
   name: CONFIRM_TOOL,
   description: [
     '对宿主提出的是/否问题作答：待确认的项目操作或权限请求。只有本轮用户明确同意或明确拒绝才调用；',
-    'id 从宿主事实原样复制，accepted=true 表示同意，false 表示拒绝、取消或暂缓；',
+    'id 从宿主事实原样复制，accepted=true 表示同意，false 表示明确拒绝或取消；尚未决定或追问原因不表示拒绝；',
     '只调用一次，同一 response 不输出普通音频或文本，也不调用其他工具；表达含糊时不要调用，等待宿主澄清',
   ].join(''),
   params: {

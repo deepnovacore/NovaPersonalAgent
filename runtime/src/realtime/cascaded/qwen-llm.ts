@@ -164,9 +164,11 @@ class Session implements CascadedLlmSession {
     if (!object(value) || typeof value.index !== 'number' || !Number.isSafeInteger(value.index) || value.index !== 0 || (value.function !== undefined && !object(value.function))) throw fail('protocol')
     const index = value.index
     const found = fragments.get(index) ?? {id: null, name: '', arguments: ''}
-    if (value.id !== undefined && value.id !== '') { if (!id(value.id) || (found.id !== null && found.id !== value.id)) throw fail('protocol'); found.id = value.id }
+    // A null id on a later DashScope delta contributes no new identity; final validation still requires an id.
+    if (value.id !== undefined && value.id !== null && value.id !== '') { if (!id(value.id) || (found.id !== null && found.id !== value.id)) throw fail('protocol'); found.id = value.id }
+    // DashScope may append arguments:null after complete JSON; that delta contributes no bytes.
     const fn = value.function
-    if (fn !== undefined) { if (fn.name !== undefined) { if (typeof fn.name !== 'string') throw fail('protocol'); found.name += fn.name }; if (fn.arguments !== undefined) { if (typeof fn.arguments !== 'string') throw fail('protocol'); found.arguments += fn.arguments } }
+    if (fn !== undefined) { if (fn.name !== undefined) { if (typeof fn.name !== 'string') throw fail('protocol'); found.name += fn.name }; if (fn.arguments !== undefined && fn.arguments !== null) { if (typeof fn.arguments !== 'string') throw fail('protocol'); found.arguments += fn.arguments } }
     fragments.set(index, found)
   }
   #calls(fragments: ReadonlyMap<number, Fragment>): Call[] { if (fragments.size !== 1 || !fragments.has(0)) throw fail('protocol'); return [...fragments.entries()].map(([, part]) => { if (!id(part.id) || !id(part.name)) throw fail('protocol'); let args: unknown; try { args = JSON.parse(part.arguments) } catch { throw fail('protocol') }; if (!jsonObject(args)) throw fail('protocol'); return {id: part.id, type: 'function', function: {name: part.name, arguments: JSON.stringify(copy(args))}} }) }

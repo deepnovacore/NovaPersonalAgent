@@ -1,0 +1,222 @@
+[
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "logprobs": null,
+        "index": 0,
+        "delta": {
+          "content": "",
+          "role": "assistant",
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "call-live-null",
+              "type": "function",
+              "function": {
+                "name": "search__search",
+                "arguments": ""
+              }
+            }
+          ]
+        },
+        "finish_reason": null
+      }
+    ]
+  },
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "delta": {
+          "content": "",
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "",
+              "type": "function",
+              "function": {
+                "arguments": "{\"k\":"
+              }
+            }
+          ]
+        },
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": null
+      }
+    ]
+  },
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "delta": {
+          "content": "",
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "",
+              "type": "function",
+              "function": {
+                "arguments": " 3, \""
+              }
+            }
+          ]
+        },
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": null
+      }
+    ]
+  },
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "delta": {
+          "content": "",
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "",
+              "type": "function",
+              "function": {
+                "arguments": "query\": \"今天"
+              }
+            }
+          ]
+        },
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": null
+      }
+    ]
+  },
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "delta": {
+          "content": "",
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "",
+              "type": "function",
+              "function": {
+                "arguments": " 航天"
+              }
+            }
+          ]
+        },
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": null
+      }
+    ]
+  },
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "delta": {
+          "content": "",
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "",
+              "type": "function",
+              "function": {
+                "arguments": " 新闻\", \""
+              }
+            }
+          ]
+        },
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": null
+      }
+    ]
+  },
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "delta": {
+          "content": "",
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "",
+              "type": "function",
+              "function": {
+                "arguments": "origin_ref\": \""
+              }
+            }
+          ]
+        },
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": null
+      }
+    ]
+  },
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "delta": {
+          "content": "",
+          "tool_calls": [
+            {
+              "index": 0,
+              "id": "",
+              "type": "function",
+              "function": {
+                "arguments": "conversation:1\"}"
+              }
+            }
+          ]
+        },
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": null
+      }
+    ]
+  },
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "delta": {
+          "tool_calls": [
+            {
+              "function": {
+                "arguments": null
+              },
+              "index": 0,
+              "id": "",
+              "type": "function"
+            }
+          ],
+          "content": ""
+        },
+        "index": 0,
+        "finish_reason": null,
+        "logprobs": null
+      }
+    ]
+  },
+  {
+    "id": "response-live-null",
+    "choices": [
+      {
+        "delta": {},
+        "index": 0,
+        "finish_reason": "tool_calls",
+        "logprobs": null
+      }
+    ]
+  }
+]

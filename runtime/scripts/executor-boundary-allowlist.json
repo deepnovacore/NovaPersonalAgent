@@ -743,5 +743,10 @@
     "path": "runtime/src/work-tools.ts",
     "pattern": "// ponytail: one app-server child per CODEX_HOME, i.e. per workspace; a settings key is the upgrade",
     "reason": "Comment records the existing process-per-home concurrency ceiling."
+  },
+  {
+    "path": "runtime/src/realtime/frontend-instructions.ts",
+    "pattern": "...(modules.coding === false ? [] : ['本轮用户明确追加或修改正在执行的 coding 任务要求时，立即调用 dispatch（executor=codex），instruction 保留本轮完整要求；不要只回复已收到、已记下或会纳入任务。']),",
+    "reason": "Model-visible coding dispatch routing names the public executor from the tool enum."
   }
 ]
