@@ -65,7 +65,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
     'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'get', 'knowledgeAction', 'onChanged',
     'openCurrentManagedWorkspace', 'openPairing',
-    'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend',
+    'phoneAction', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend',
     'retryMicrophone', 'set',
   ])
   assert.ok(Object.isFrozen(exposed.settings))

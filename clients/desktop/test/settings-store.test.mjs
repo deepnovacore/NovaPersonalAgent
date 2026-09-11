@@ -106,7 +106,7 @@ test('the default settings are the documented schema', () => {
     capabilitiesConfigPath: '',
     knowledgePath: '',
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
-    phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
+    phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
   assert.deepEqual([...SECRET_KEYS], ALL_SECRET_KEYS)
@@ -280,7 +280,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     capabilitiesConfigPath: '',
     knowledgePath: '',
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
-    phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
+    phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
 })
@@ -350,7 +350,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
-    'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
+    'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'plannerModel',
@@ -725,7 +725,7 @@ test('publicSettings never carries the secrets object', () => {
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
-    'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
+    'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'plannerModel',

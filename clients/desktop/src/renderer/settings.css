@@ -906,3 +906,41 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; min-height:
 @media (max-width: 480px) { .usage-overview { grid-template-columns: 1fr; } }
 
 .usage-scope[data-empty="true"] strong { color: var(--ink-dim); font-weight: 400; }
+
+/* Device link: quiet technical surfaces, real status, no decorative hardware mockup. */
+.phone-heading { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:20px; }
+.phone-heading h2 { margin:0 0 6px; font-size:20px; text-transform:none; letter-spacing:-.4px; }
+.phone-heading p { margin:0; color:var(--ink-faint); font-size:12px; }
+.phone-badge { flex-shrink:0; border:1px solid var(--line); border-radius:5px; padding:6px 10px; color:var(--ink-dim); font-size:10px; }
+.phone-card { display:flex; flex-direction:column; align-items:center; text-align:center; padding:26px 30px 20px; border:1px solid #283342; border-radius:14px; background:#101720; color:#eef5fc; box-shadow:0 12px 30px #1017200d; }
+.phone-art { width:100%; max-width:350px; padding:0 0 18px; margin-bottom:18px; border-bottom:1px solid #283342; font-family:ui-monospace,"SFMono-Regular",monospace; }
+.phone-link-caption { text-align:left; color:#72869a; letter-spacing:2px; font-size:9px; }
+.phone-topology { display:flex; align-items:center; justify-content:center; padding:24px 14px 20px; background-image:radial-gradient(#768b9e35 .6px,transparent .6px); background-size:12px 12px; }
+.phone-node { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; width:68px; height:70px; border:1px solid #406479; border-radius:8px; color:#b9cad9; background:#141f2a; font-size:8px; letter-spacing:1px; }
+.phone-node-mark { color:#a5e6ff; font:500 24px/1 ui-monospace,monospace; }
+.phone-node-remote { border-color:#344555; background:#111a23; }
+.phone-node-remote .phone-node-mark { color:#9eb1c1; }
+.phone-link-line { position:relative; height:1px; width:90px; background:linear-gradient(90deg,#67d5fb,#3a536b); }
+.phone-link-line span { position:absolute; top:-3px; left:42px; width:7px; height:7px; border-radius:50%; background:#89e3ff; box-shadow:0 0 12px #79d9ff70; }
+.phone-link-meta { display:flex; justify-content:space-between; color:#60768b; font-size:8px; letter-spacing:1px; }
+.phone-card h3 { margin:0 0 9px; font-size:20px; letter-spacing:-.4px; font-weight:550; color:#edf4fb; }
+#phone-description { max-width:340px; margin:0 0 20px; color:#97aabd; font-size:12px; line-height:1.9; text-wrap:pretty; }
+#phone-host { margin:0 0 16px; color:#79c8e5; font:11px ui-monospace,monospace; }
+#phone-host:empty { display:none; }
+#phone-qr { object-fit:contain; background:white; border:16px solid white; border-radius:8px; margin:0 0 22px; image-rendering:pixelated; }
+#phone-primary { min-width:180px; min-height:40px; border:1px solid #9be7ff; border-radius:6px; background:#a5e6fa; color:#0c2432; font-weight:600; box-shadow:none; }
+#phone-primary:hover { background:#cef3ff; color:#0c2432; }
+#phone-primary:disabled { background:#263846; color:#92adbe; border-color:#3a5364; }
+.phone-text-button { border:0; background:transparent; box-shadow:none; color:var(--ink-faint); padding:10px; font-size:11px; }
+.phone-card .phone-text-button { color:#8098af; }
+.phone-card .phone-text-button:hover { background:#1b2a38; color:#d4e6f5; }
+.phone-privacy { margin:10px 0 0; color:#637d92; font-size:10px; }
+.phone-bottom { margin-top:16px; display:flex; gap:12px; align-items:baseline; justify-content:space-between; }
+#phone-advanced { flex:1; }
+#phone-advanced summary { color:var(--ink-faint); font-size:11px; cursor:pointer; }
+#phone-advanced[open] { width:100%; }
+#phone-advanced .field { grid-template-columns:95px minmax(0,1fr); }
+#phone-devices { border:1px solid var(--line); border-radius:8px; margin-top:14px; padding:6px 14px; }
+.phone-device { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0; font-size:12px; }
+.phone-device button { color:var(--ink-dim); font-size:11px; }
+.phone-card [hidden], .phone-bottom [hidden] { display:none; }

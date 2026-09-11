@@ -54,6 +54,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:orb-menu:show',
     'nova:orb:dormant',
     'nova:pairing:open',
+    'nova:phone:action',
     'nova:projects:repair',
     'nova:release-camera:result',
     'nova:settings:changed',
@@ -831,7 +832,7 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   let prevented = 0, quits = 0, backendStops = 0
   const event = {preventDefault() { prevented++ }}
   const context = vm.createContext({
-    sourceSmokeStage() {},
+    sourceSmokeStage() {}, cancelPhonePairing: async () => {}, managedPhone: {stop: async () => {}},
     app: {
       on: (name, handler) => { if (name === 'before-quit') beforeQuit = handler },
       quit() { quits++; beforeQuit(event) },
@@ -1074,4 +1075,20 @@ test('sleep and wake IPC reject other windows and unexpected arguments', async (
     handler({sender})
     assert.equal(calls, 1)
   }
+})
+
+test('phone actions require the settings sender and restrict actions and device identifiers', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const {default: vm} = await import('node:vm')
+  const body = source.slice(source.indexOf("  ipcMain.handle('nova:phone:action'"), source.indexOf("  ipcMain.on('nova:pairing:open'"))
+  let handler
+  const sender = {}, calls = []
+  vm.runInNewContext(body, {ipcMain: {handle: (_channel, fn) => {handler = fn}}, settingsWindow: {webContents: sender},
+    phoneEpoch: 0, phoneQueue: Promise.resolve(), phoneAction: async (...args) => {calls.push(args); return {state: 'ready'}}})
+  assert.equal((await handler({sender: {}}, 'enable')).state, 'unavailable')
+  assert.equal((await handler({sender}, 'exec')).state, 'unavailable')
+  assert.equal((await handler({sender}, 'status', 'extra')).state, 'unavailable')
+  assert.equal((await handler({sender}, 'revoke', '../token')).state, 'unavailable')
+  assert.equal((await handler({sender}, 'enable')).state, 'ready')
+  assert.equal(calls.length, 1)
 })

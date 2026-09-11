@@ -351,6 +351,10 @@ npm run server:pair --workspace @nova-audio-agent/runtime -- wss://你的主机.
 
 二维码不设置时间有效期，只有一次兑换机会；刷新使旧码失效。关闭窗口取消尚未兑换的码，异常退出后可重新生成二维码或重启服务，使旧码失效。兑换响应丢失会留下可在窗口中撤销的设备记录，重新扫码即可。撤销独立设备不会影响其他设备凭据；手填共享主机 token 的连接需要轮换主机 token 才能整体撤销。
 
-桌面端（macOS）也可右键悬浮球，选择“连接 iPhone…”。首次会自动打开设置的“连接 iPhone”页，填写本机服务端口、服务认证文件的绝对路径和手机可访问的 WSS 地址，点击“保存并显示二维码”。配置持久化保存，下次直接显示二维码；认证文件仍须符合私有文件权限要求。可在电脑和 iPhone 安装 Tailscale 并加入同一网络，使用 [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) 提供服务的 HTTPS 地址，再以 wss:// 形式填写。
+桌面端（macOS）右键悬浮球，选择“连接 iPhone…”，首次点击“启用手机连接”。Nova 自动管理本机手机服务、默认端口 19876 和私有认证文件，无需终端启动。服务沿用已保存的语音与能力配置，手机运行数据保存在桌面用户数据目录的 `phone` 子目录，避免与桌面后台争用状态。启用状态会保存，下次桌面启动时恢复服务；退出桌面会等待手机服务清理。端口占用时不会接管未知服务。
 
-此入口复用 Swift 配对窗口，需要 Xcode Command Line Tools；独立手机服务仍需先启动，桌面本机后台不会自动开启它。新版无时间有效期二维码需要更新 iOS 客户端，旧客户端不支持省略 `expires_at`。
+页面检测 Tailscale 和已有 HTTPS Serve 转发。电脑与 iPhone 需登录同一网络；没有对应转发时，可点击“开启安全连接”，仅为未占用的 443 入口建立私有 Serve 转发。已有其他服务或公开 Funnel 配置时不会覆盖，页面提供帮助入口。相关配置见 [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)。停用手机连接会停止 Nova 服务，不修改用户的 Tailscale 配置。
+
+服务和安全地址就绪后，二维码直接出现在连接页面。关闭页面取消当前配对码；已兑换的设备凭据保留，并可在页面撤销。二维码不落盘、无时间有效期、仅可兑换一次。高级设置可覆盖 WSS 地址；只有连接已有独立服务才需要同时填写端口和认证文件，留空由 Nova 管理。现有 CLI 配对入口保持可用。
+
+二维码编码复用系统 CoreImage，源码运行需要 Xcode Command Line Tools。新版二维码需要更新 iOS 客户端，旧客户端不支持省略 `expires_at`。

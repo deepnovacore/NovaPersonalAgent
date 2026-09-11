@@ -337,7 +337,6 @@ function render() {
   const dormant = orbDormant({
     stateName: state.name,
     wakeState: axes.wakeState,
-    manualSleep: axes.manualSleep,
     hovered: axes.hovered,
     executorWorking: axes.codex === 'working',
     confirmationVisible: state.confirmationVisible,
@@ -618,10 +617,9 @@ function applyWakeState(value) {
   // was read only for audio routing. It now drives the dormant bubble, so the
   // renderer has to keep it.
   axes.wakeState = typeof value?.state === 'string' ? value.state : 'active'
-  axes.manualSleep = value?.manualSleep === true
   if (axes.wakeState === 'sleeping') axes.hovered = false
-  taskBanner.setSuspended(axes.manualSleep)
-  if (axes.manualSleep) void progressBubbles.clear()
+  taskBanner.setSuspended(axes.wakeState === 'sleeping')
+  if (axes.wakeState === 'sleeping') void progressBubbles.clear()
   sleepButton.title = value?.status === 'ready' && !axes.muted ? '休眠（Ctrl+L）；点击或说“你好星核”唤醒' : '休眠；唤醒词不可用时请点击恢复'
   if (value?.state === 'blocked') {
     axes.muted = true
@@ -885,7 +883,7 @@ async function handleControl(message) {
     send({ type: 'clock.pong', ping_id: message.ping_id, t_render_ms: performance.now() })
   } else if (message.type === CAPTION) {
     const reply = parseConversationBubble(message, bubbleMode)
-    if (reply && !axes.manualSleep) void progressBubbles.push(reply)
+    if (reply && axes.wakeState !== 'sleeping') void progressBubbles.push(reply)
     captionLabel.textContent = message.text
     captionLabel.dataset.role = message.role
     captionLabel.hidden = !message.text
@@ -1006,7 +1004,7 @@ async function handleControl(message) {
     taskBanner.receiveActionResult(message)
   } else if (message.type === EXECUTOR_PROGRESS) {
     const frame = parseProgressFrame(message)
-    if (!axes.manualSleep && frame !== null && (message.phase === 'alert' || (message.executor !== axes.executorId
+    if (axes.wakeState !== 'sleeping' && frame !== null && (message.phase === 'alert' || (message.executor !== axes.executorId
       && !taskBanner.state().tasks.some(task => task.work_id === frame.delegateId)))) void progressBubbles.push(frame)
   } else if (message.type === EXECUTOR_RESULTS_RESET) {
     if (Object.keys(message).length === 1) {
@@ -1323,12 +1321,12 @@ orb.addEventListener('contextmenu', event => {
   event.preventDefault()
   window.novaAudioAgentDesktop.orbMenu.show()
 })
-// Hover lifts dormancy. `mouseenter`/`mouseleave` rather than `mouseover`:
+// Hover expands inactive standby, but explicit sleep waits for a wake action. `mouseenter`/`mouseleave` rather than `mouseover`:
 // they do not bubble from the rail buttons, so crossing between the orb and a
 // control cannot flap the window bounds. The window shrinks around its own
 // centre, so the pointer stays inside the bubble it just shrank onto.
 document.body.addEventListener('mouseenter', () => {
-  if (axes.hovered) return
+  if (axes.hovered || axes.wakeState === 'sleeping') return
   axes.hovered = true
   render()
 })

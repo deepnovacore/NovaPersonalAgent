@@ -1,3 +1,4 @@
+import {createPhonePanel} from './phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
 import {createCapabilitiesEditor} from './capabilities-editor.mjs'
 import {createKnowledgePanel} from './knowledge-panel.mjs'
@@ -111,12 +112,15 @@ const clarificationDepth = document.querySelector('#clarificationDepth')
 
 const categoryButtons = SETTINGS_CATEGORIES.map(category => document.querySelector(`#category-${category.id}`))
 let activeCategory = SETTINGS_CATEGORIES[0].id
+const phonePanel = createPhonePanel({document, api, save: saveAll})
 
 // Sections are addressed by id from the category table rather than by a markup
 // attribute, so showing a category never depends on document order.
 function applyCategory(id) {
   if (!isValidCategory(id)) return
   activeCategory = id
+  phonePanel.setActive(id === 'phone')
+  document.querySelector('footer').hidden = id === 'phone'
   for (const category of SETTINGS_CATEGORIES) {
     const visible = category.id === id
     for (const sectionId of category.sections) {
@@ -531,11 +535,6 @@ async function saveAll() {
   return result
 }
 
-phonePairingOpen.addEventListener('click', async () => {
-  if (controllerState.busy) return
-  const result = await saveAll()
-  if (result.saved) api.openPairing()
-})
 settingsSave.addEventListener('click', () => { void saveAll() })
 settingsRestart.addEventListener('click', async () => {
   if (restarting) return

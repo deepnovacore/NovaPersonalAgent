@@ -68,6 +68,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   conversationVisionEnabled: false,
   monitorCameraDeviceId: '',
   watchModel: '',
+  phoneConnectionEnabled: false,
   phoneServerPort: 0,
   phoneServerTokenFile: '',
   phoneServerUrl: '',
@@ -430,6 +431,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     conversationVisionEnabled: pick(ownEnumerableDataValue(source, 'conversationVisionEnabled'), ownEnumerableDataValue(fallback, 'conversationVisionEnabled'), DEFAULT_SETTINGS.conversationVisionEnabled, validBoolean),
     monitorCameraDeviceId: pick(ownEnumerableDataValue(source, 'monitorCameraDeviceId'), ownEnumerableDataValue(fallback, 'monitorCameraDeviceId'), DEFAULT_SETTINGS.monitorCameraDeviceId, value => typeof value === 'string' && value.length <= 256 && !/[\x00-\x1f]/u.test(value) ? value : null),
     watchModel: pick(ownEnumerableDataValue(source, 'watchModel'), ownEnumerableDataValue(fallback, 'watchModel'), DEFAULT_SETTINGS.watchModel, validModelOrVoice),
+    phoneConnectionEnabled: pick(ownEnumerableDataValue(source, 'phoneConnectionEnabled'), ownEnumerableDataValue(fallback, 'phoneConnectionEnabled'), false, validBoolean),
     phoneServerPort: pick(ownEnumerableDataValue(source, 'phoneServerPort'), ownEnumerableDataValue(fallback, 'phoneServerPort'), 0, value => Number.isInteger(value) && value >= 0 && value <= 65535 ? value : null),
     phoneServerTokenFile: pick(ownEnumerableDataValue(source, 'phoneServerTokenFile'), ownEnumerableDataValue(fallback, 'phoneServerTokenFile'), '', value => { const path = validDesktopString(value); return path !== null && (path === '' || isAbsolute(path)) ? path : null }),
     phoneServerUrl: pick(ownEnumerableDataValue(source, 'phoneServerUrl'), ownEnumerableDataValue(fallback, 'phoneServerUrl'), '', validPhoneServerUrl),
@@ -462,7 +464,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
 }
 
 export function backendSettings(settings) {
-  const {palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
+  const {palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -502,6 +504,7 @@ export function publicSettings(settings) {
     conversationVisionEnabled: normalized.conversationVisionEnabled,
     monitorCameraDeviceId: normalized.monitorCameraDeviceId,
     watchModel: normalized.watchModel,
+    phoneConnectionEnabled: normalized.phoneConnectionEnabled,
     phoneServerPort: normalized.phoneServerPort,
     phoneServerTokenFile: normalized.phoneServerTokenFile,
     phoneServerUrl: normalized.phoneServerUrl,
@@ -692,6 +695,7 @@ export function applySettingsUpdate(current, patch, codec) {
     conversationVisionEnabled: ownEnumerableDataValue(source, 'conversationVisionEnabled'),
     monitorCameraDeviceId: ownEnumerableDataValue(source, 'monitorCameraDeviceId'),
     watchModel: ownEnumerableDataValue(source, 'watchModel'),
+    phoneConnectionEnabled: ownEnumerableDataValue(source, 'phoneConnectionEnabled'),
     phoneServerPort: ownEnumerableDataValue(source, 'phoneServerPort'),
     phoneServerTokenFile: ownEnumerableDataValue(source, 'phoneServerTokenFile'),
     phoneServerUrl: ownEnumerableDataValue(source, 'phoneServerUrl'),

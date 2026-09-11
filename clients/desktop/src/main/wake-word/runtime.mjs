@@ -19,7 +19,7 @@ export class WakeWordRuntime {
     this.queuedBytes = 0
     this.droppedFrames = 0
   }
-  snapshot() { return {state: this.state, status: this.status, epoch: this.epoch, ...(this.state === 'sleeping' && this.sleepReason === 'bubble' ? {manualSleep: true} : {})} }
+  snapshot() { return {state: this.state, status: this.status, epoch: this.epoch} }
   publish() { this.changed(this.snapshot()) }
   reset() {
     this.epoch++
@@ -93,6 +93,7 @@ export class WakeWordRuntime {
   stop() {
     const worker = this.worker
     this.worker = null
+    this.status = 'off'
     this.pending = false
     this.queue = []
     this.queuedBytes = 0
@@ -141,14 +142,13 @@ export class WakeWordRuntime {
     if (this.state !== 'active') return false
     if (reason !== 'bubble' && (!this.enabled || this.status !== 'ready' || !this.activated)) return false
     this.state = 'sleeping'
-    this.sleepReason = reason
     this.reset()
     this.hide(reason)
     return true
   }
   activity() { this.idleSince = null }
   accept(value) {
-    if (!this.enabled || this.status !== 'ready' || this.state !== 'sleeping'
+    if (!this.worker || !this.enabled || this.status !== 'ready' || this.state !== 'sleeping'
       || this.muted || !this.activated || this.now() - this.lastReport > 2500
       || value?.epoch !== this.epoch || !(value.pcm instanceof Uint8Array)
       || value.pcm.length === 0 || value.pcm.length > 6400 || value.pcm.length % 2) return false

@@ -488,3 +488,13 @@ test('Control M toggles the existing microphone path and Control L uses bubble s
   assert.deepEqual(sent, ['nova:microphone:toggle'])
   assert.equal(slept, 1)
 })
+
+test('late sleeping audio after stop cannot reach a terminated wake worker', () => {
+  const s = setup()
+  s.report(); s.time(60000); s.report()
+  const epoch = s.runtime.epoch
+  s.runtime.stop()
+  assert.equal(s.runtime.accept({epoch, pcm: new Uint8Array(640)}), false)
+  assert.equal(s.runtime.status, 'off')
+  assert.equal(s.runtime.pending, false)
+})

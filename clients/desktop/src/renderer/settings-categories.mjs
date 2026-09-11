@@ -12,7 +12,7 @@ export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'knowledge', label: '知识库', sections: Object.freeze(['knowledge-section'])}),
   Object.freeze({id: 'secrets', label: 'API 密钥', sections: Object.freeze(['secrets'])}),
   Object.freeze({id: 'phone', label: '连接 iPhone', sections: Object.freeze(['phone-connection-section'])}),
-  Object.freeze({id: 'codex', label: 'Coding 执行器与工作区', sections: Object.freeze([
+  Object.freeze({id: 'codex', label: '编程', sections: Object.freeze([
     'codex-approval-section', 'codex-projects',
   ])}),
 ])

@@ -232,6 +232,13 @@ if CommandLine.arguments.contains("--check") {
     let result = detector.features(in: CIImage(cgImage: cg)).compactMap { ($0 as? CIQRCodeFeature)?.messageString }
     precondition(result == [String(decoding: payload, as: UTF8.self)])
     print("QR encode/decode PASS")
+} else if CommandLine.arguments.contains("--render-qr") {
+    let input = FileHandle.standardInput.readDataToEndOfFile()
+    guard input.count <= 4096 else { exit(1) }
+    let cg = try qrImage(input)
+    let bitmap = NSBitmapImageRep(cgImage: cg)
+    guard let png = bitmap.representation(using: .png, properties: [:]) else { exit(1) }
+    FileHandle.standardOutput.write(Data(png.base64EncodedString().utf8))
 } else {
     let input = FileHandle.standardInput.readDataToEndOfFile()
     guard let config = try? JSONDecoder().decode(Configuration.self, from: input),

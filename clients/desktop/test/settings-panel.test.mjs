@@ -1,3 +1,4 @@
+import {createPhonePanel} from '../src/renderer/phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from '../src/renderer/frontend-usage.mjs'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -70,7 +71,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
     createKnowledgePanel: () => ({render() {}}),
     document: {
@@ -78,7 +79,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
       createElement: () => ({children: [], append(...items) {this.children.push(...items)}}), addEventListener() {},
     },
     window: {novaAudioAgentDesktop: {settings: {
-      get: async () => initialView, onChanged: listener => { push = listener }, ...apiOverrides,
+      phoneAction: async () => ({state: 'idle'}), get: async () => initialView, onChanged: listener => { push = listener }, ...apiOverrides,
     }}},
   })
   await new Promise(resolve => setImmediate(resolve))
@@ -513,13 +514,13 @@ test('presence booleans stay public while hostile presence accessors are never i
   })
 })
 
-test('the settings page ships the same locked-down CSP as the memory board', () => {
+test('settings allows only inline QR images while keeping network and scripts locked down', () => {
   const board = /* the panel must not loosen anything the board already forbids */ [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
     "connect-src 'none'",
-    "img-src 'none'",
+    "img-src data:",
     "media-src 'none'",
     "object-src 'none'",
     "base-uri 'none'",
@@ -714,7 +715,7 @@ test('Codex and Projects is the final collapsed settings disclosure', () => {
   assert.ok(disclosure, 'Codex and Projects closes the settings content')
   assert.doesNotMatch(disclosure, /<details id="codex-projects"[^>]*\sopen(?:\s|>)/)
   assert.match(disclosure, /<div id="codex-manual-settings"[^>]*hidden>/)
-  assert.match(disclosure, /Coding 执行器与工作区/)
+  assert.match(disclosure, /编程/)
 })
 
 test('the panel exposes packaged Codex, Projects, and model endpoint configuration', () => {
@@ -1022,7 +1023,7 @@ test('every settings block belongs to exactly one sidebar category', () => {
   // table would be hidden permanently by applyCategory.
   const blocks = [...html.matchAll(/<(?:section|details) (?:class="[^"]*" )?id="([^"]+)"/g)]
     .map(match => match[1])
-    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown'].includes(id))
+    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown', 'phone-advanced'].includes(id))
   for (const id of blocks) assert.ok(sections.includes(id), `${id} is missing from a category`)
 })
 
@@ -1296,13 +1297,16 @@ test('phone settings stage together and open pairing only after persistence succ
       savedPatch = settingsPatch
       return publicView({...settingsPatch})
     },
-    openPairing: () => { opened += 1 },
+    phoneAction: async action => { if (action === 'enable') opened += 1; return {state: 'idle'} },
   })
   for (const [id, value] of [['phone-server-port', '18080'], ['phone-server-token-file', '/tmp/nova/token'], ['phone-server-url', 'wss://host.ts.net']]) {
     panel.node(`#${id}`).value = value
     panel.node(`#${id}`).listeners.input()
   }
+  await panel.click('#category-phone')
+  await new Promise(resolve => setImmediate(resolve))
   await panel.click('#phone-pairing-open')
+  await new Promise(resolve => setImmediate(resolve))
   assert.equal(savedPatch.phoneServerPort, 18080)
   assert.equal(savedPatch.phoneServerTokenFile, '/tmp/nova/token')
   assert.equal(savedPatch.phoneServerUrl, 'wss://host.ts.net')
@@ -1310,7 +1314,7 @@ test('phone settings stage together and open pairing only after persistence succ
 
   const failed = await mountSettingsPanel(publicView(), {
     set: async () => { throw new Error('disk unavailable') },
-    openPairing: () => { opened += 1 },
+    phoneAction: async action => { if (action === 'enable') opened += 1; return {state: 'idle'} },
   })
   failed.node('#phone-server-port').value = '18080'
   failed.node('#phone-server-port').listeners.input()

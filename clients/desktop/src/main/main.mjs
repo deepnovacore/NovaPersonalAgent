@@ -3,7 +3,7 @@ import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createBackendControl} from './backend-control.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
-import {launchDevicePairing} from './device-pairing.mjs'
+import {createManagedPhoneService, phoneNetwork, requestPhonePairing, renderPhoneQr} from './phone-connection.mjs'
 import {activeMcpMenuRows} from './orb-menu.mjs'
 import {parseSettingsCommit, validatePreparedSettings, prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, assertEditorSafe, referencedCapabilitySecrets, capabilityPath, capabilityDocumentRevision, invalidCommit} from './capabilities-settings.mjs'
 import {parseCapabilityRegistry} from '@nova-audio-agent/runtime/desktop'
@@ -356,6 +356,7 @@ const settingsWriter = createSettingsWriter({
 })
 
 function publishCommittedSettings() {
+  if (!currentSettings.phoneConnectionEnabled) void managedPhone.stop()
   capabilityEditorCache = null
   wakeWord?.configure(currentSettings)
   settingsGeneration += 1
@@ -468,6 +469,7 @@ function openSettingsWindow(launchId, { category } = {}) {
   })
   window.once('ready-to-show', () => window.show())
   window.on('closed', () => {
+    void cancelPhonePairing()
     settingsWindow = null
     pendingSettingsCategory = null
   })
@@ -495,39 +497,105 @@ function activeMcpSubmenu(launchId) {
     : { label: row.label, enabled: false }))
 }
 
-let pairingWindowOpen = false
-async function openPairingWindow(launchId = activeLaunchId) {
-  if (pairingWindowOpen) return
-  pairingWindowOpen = true
-  try {
-    if (process.platform !== 'darwin') {
-      await dialog.showMessageBox(mainWindow, {type: 'info', message: '请在 Mac 主机上打开配对二维码', detail: '当前配对窗口仅支持 macOS。'})
-      return
-    }
+const phoneRoot = () => resolve(app.getPath('userData'), 'phone')
+let phoneConfig, phonePayload, phoneImage, phoneEpoch = 0
+let phoneIssuedDevices = new Set()
+let phoneQueue = Promise.resolve()
+const managedPhone = createManagedPhoneService({
+  shutdown: child => shutdownBackend(child),
+  launch: async () => {
     const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
-    const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server-config.js')).href)
-    if (!currentSettings.phoneServerPort || !currentSettings.phoneServerTokenFile || !currentSettings.phoneServerUrl) {
-      openSettingsWindow(launchId, {category: 'phone'})
-      return
+    const {initializeServerToken, loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server-config.js')).href)
+    await mkdir(phoneRoot(), {recursive: true, mode: 0o700})
+    const tokenFile = resolve(phoneRoot(), 'host.token')
+    try { initializeServerToken(tokenFile) } catch (error) { if (error.code !== 'EEXIST') throw error }
+    const environment = {NOVA_AUDIO_AGENT_SERVER_PORT: '19876', NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: tokenFile}
+    phoneConfig = loadServerConfig(environment)
+    const spec = backendLaunchSpec({backend: 'node', nodeEntry: entry,
+      nodeResourcesPath: app.isPackaged ? process.resourcesPath : resolve(packageRoot, 'build'),
+      workspace: desktopConfig?.workspace || process.cwd(), token: phoneConfig.token,
+      readyEndpoint: '127.0.0.1:1', parentEnv: process.env, settings: currentSettings,
+      decryptedSecrets: decryptSecretsForSpawn(currentSettings, secretCodec), resolvedConfig: desktopConfig,
+      capabilitiesDocument: readCapabilityDocument(currentSettings, process.env)})
+    if (app.isQuitting || !currentSettings.phoneConnectionEnabled) throw new Error('service_unavailable')
+    return utilityProcess.fork(resolve(dirname(entry), 'phone-desktop-entry.js'), [], {
+      cwd: desktopConfig?.workspace || process.cwd(), stdio: 'pipe', serviceName: 'Nova iPhone Service',
+      env: {...spec.env, ...environment, NOVA_AUDIO_AGENT_SERVER_MEDIA_MODE: 'relay',
+        NOVA_AUDIO_AGENT_BLACKBOARD_PATH: resolve(phoneRoot(), 'blackboard.sqlite'),
+        NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID: 'phone',
+        NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT: resolve(phoneRoot(), 'projects')},
+    })
+  },
+})
+
+async function cancelPhonePairing(invalidate = true) {
+  if (invalidate) phoneEpoch++
+  const config = phoneConfig, code = phonePayload?.code
+  phonePayload = undefined; phoneImage = undefined
+  if (config && code) await requestPhonePairing(config, {type: 'pair.cancel', code}).catch(() => {})
+}
+
+async function phoneAction(action, deviceId, epoch = phoneEpoch) {
+  if (action === 'cancel') { await cancelPhonePairing(); return {state: 'idle'} }
+  if (app.isQuitting) return {state: 'idle'}
+  if (action === 'install') { await shell.openExternal('https://tailscale.com/download'); return {state: 'not_installed'} }
+  if (action === 'login') { await shell.openPath('/Applications/Tailscale.app'); return {state: 'needs_login', service: true} }
+  if (action === 'help') { await shell.openExternal('https://tailscale.com/docs/features/tailscale-serve'); return {state: 'needs_serve'} }
+  if (action === 'disable') {
+    await settingsWriter({phoneConnectionEnabled: false})
+    await cancelPhonePairing(); await managedPhone.stop()
+    return {state: 'idle'}
+  }
+  if (action === 'enable') await settingsWriter({phoneConnectionEnabled: true})
+  if (!currentSettings.phoneConnectionEnabled) return {state: 'idle'}
+  try {
+    if (process.platform !== 'darwin') return {state: 'unsupported'}
+    if (currentSettings.phoneServerPort && currentSettings.phoneServerTokenFile) {
+      await managedPhone.stop()
+      const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
+      const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server-config.js')).href)
+      const external = loadServerConfig({NOVA_AUDIO_AGENT_SERVER_PORT: String(currentSettings.phoneServerPort),
+        NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile})
+      if (phoneConfig?.port !== external.port || phoneConfig?.token !== external.token) await cancelPhonePairing(false)
+      phoneConfig = external
+    } else {
+      if (!managedPhone.running && phonePayload) await cancelPhonePairing(false)
+      await managedPhone.start()
     }
-    let config
-    try {
-      config = {...loadServerConfig({
-        NOVA_AUDIO_AGENT_SERVER_PORT: String(currentSettings.phoneServerPort),
-        NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile,
-      }), server: currentSettings.phoneServerUrl}
-    } catch {
-      openSettingsWindow(launchId, {category: 'phone'})
-      await dialog.showMessageBox(settingsWindow, {type: 'error', message: '请检查手机连接配置',
-        detail: '认证文件必须与运行中的服务一致，且是当前用户拥有的私有文件（权限 0600）。请检查文件路径和服务端口。'})
-      return
+    const config = phoneConfig
+    const network = currentSettings.phoneServerUrl ? {state: 'ready', url: currentSettings.phoneServerUrl}
+      : await phoneNetwork(config.port, action === 'network')
+    if (epoch !== phoneEpoch) return {state: 'idle'}
+    if (network.state !== 'ready') return {...network, service: true}
+    if (action === 'revoke') await requestPhonePairing(config, {type: 'pair.revoke', device_id: deviceId})
+    if (phonePayload && phonePayload.server !== new URL('/client/v1', network.url).href) await cancelPhonePairing(false)
+    if (epoch !== phoneEpoch) return {state: 'idle'}
+    const activeEpoch = epoch
+    if (action === 'refresh' || !phonePayload) {
+      const before = await requestPhonePairing(config, {type: 'pair.list'})
+      if (epoch !== phoneEpoch) return {state: 'idle'}
+      phoneIssuedDevices = new Set(before.devices.map(device => device.id))
+      const payload = await requestPhonePairing(config, {type: 'pair.create', server: network.url})
+      if (activeEpoch !== phoneEpoch) {
+        await requestPhonePairing(config, {type: 'pair.cancel', code: payload.code}).catch(() => {})
+        return {state: 'idle'}
+      }
+      phonePayload = payload; phoneImage = undefined
+      const script = app.isPackaged ? resolve(process.resourcesPath, 'pair-device.swift') : resolve(packageRoot, '../../runtime/scripts/pair-device.swift')
+      phoneImage = await renderPhoneQr(script, payload)
+      if (activeEpoch !== phoneEpoch) { phoneImage = undefined; return {state: 'idle'} }
     }
-    await launchDevicePairing({config, scriptPath: app.isPackaged
-      ? resolve(process.resourcesPath, 'pair-device.swift')
-      : resolve(packageRoot, '../../runtime/scripts/pair-device.swift')})
-  } catch {
-    await dialog.showMessageBox(mainWindow, {type: 'error', message: '无法打开配对窗口', detail: '请确认已安装 Xcode Command Line Tools，并检查手机连接服务是否运行。'})
-  } finally { pairingWindowOpen = false }
+    const result = await requestPhonePairing(config, {type: 'pair.list', code: phonePayload.code})
+    return {state: result.pairing_active ? 'ready' : result.devices.some(device => !phoneIssuedDevices.has(device.id)) ? 'paired' : 'invalidated', image: result.pairing_active ? phoneImage : undefined,
+      host: new URL(network.url).hostname, devices: result.devices, service: true}
+  } catch (error) {
+    await cancelPhonePairing()
+    return {state: error.message === 'qr_unavailable' ? 'qr_unavailable' : 'service_unavailable'}
+  }
+}
+
+function openPairingWindow(launchId = activeLaunchId) {
+  openSettingsWindow(launchId, {category: 'phone'})
 }
 
 function sleepOrb() {
@@ -1039,6 +1107,16 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   ipcMain.on('nova:orb-menu:show', event => {
     if (mainWindow && event.sender === mainWindow.webContents) showOrbMenu(launchId)
   })
+  ipcMain.handle('nova:phone:action', (event, action, deviceId) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents
+      || !['status', 'enable', 'disable', 'network', 'refresh', 'cancel', 'install', 'help', 'login', 'revoke'].includes(action)
+      || (action === 'revoke' ? typeof deviceId !== 'string' || !/^[a-f0-9-]{36}$/.test(deviceId) : deviceId !== undefined)) return {state: 'unavailable'}
+    if (action === 'cancel') return phoneAction(action)
+    const epoch = phoneEpoch
+    const result = phoneQueue.then(() => phoneAction(action, deviceId, epoch))
+    phoneQueue = result.catch(() => {})
+    return result
+  })
   ipcMain.on('nova:pairing:open', (event, ...args) => {
     if (settingsWindow && event.sender === settingsWindow.webContents && args.length === 0) void openPairingWindow(launchId)
   })
@@ -1514,6 +1592,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   if (!shortcutRegistered) {
     console.warn('[nova-audio-agent-desktop] global shortcut unavailable on this session')
   }
+  if (currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
   for (const [key, action] of [
     ['Control+M', () => sendToOrb('nova:microphone:toggle')],
     ['Control+L', sleepOrb],
@@ -1693,7 +1772,6 @@ app.on('before-quit', event => {
   wakeWord?.stop()
   void nativeAudio?.deactivate()
   if (quitDrain) { event.preventDefault(); return }
-  if (!backendSupervisor && !backend && !managedWorkspaceMaintenance) return
   // Hold the quit while the backend drains on the stdin-EOF sentinel: a bare
   // kill would cut the session off mid-teardown, and on Windows there is no
   // graceful signal at all. Resume normal window shutdown after the drain;
@@ -1709,7 +1787,7 @@ app.on('before-quit', event => {
     await maintenance?.close()
     sourceSmokeStage('maintenance_closed')
   }), wait(3000).then(() => sourceSmokeStage('maintenance_deadline'))])
-  const drain = Promise.all([backendDrain, maintenanceDrain])
+  const drain = Promise.all([backendDrain, maintenanceDrain, cancelPhonePairing().then(() => managedPhone.stop())])
   const resumeQuit = () => { quitDrained = true; sourceSmokeStage('quit_resumed'); app.quit() }
   quitDrain = drain.then(resumeQuit, resumeQuit)
 })
