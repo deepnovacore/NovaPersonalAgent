@@ -1,21 +1,14 @@
-const sourceNames={conversation:'对话',file:'文件',mail:'邮件',calendar:'日历',task:'任务'}
-const kindNames={fact:'已知信息',preference:'偏好',plan:'计划',concern:'关注事项'}
-/** Summarize only explicit projection fields; topic names never imply a person's identity. */
-export function memoryOverview(entries) {
+const excerpt=(text,limit=180)=>{const value=String(text??'').replace(/\s+/g,' ').trim();return value.length>limit?`${value.slice(0,limit)}…`:value}
+const text=(value,limit)=>typeof value==='string'&&value.trim().length>0&&value.length<=limit
+/** The host supplies synthesis; the client only checks references and falls back to actual excerpts. */
+export function memoryOverview(entries,provided) {
  const active=entries.filter(entry=>entry.status==='active')
- const topics=[...new Set(active.map(entry=>entry.topic).filter(Boolean))]
- const sources=[...new Set(active.flatMap(entry=>entry.source_refs??[]).map(source=>sourceNames[source.type]).filter(Boolean))]
  const sourceCount=new Set(active.flatMap(entry=>entry.source_refs??[]).map(source=>`${source.type}:${source.ref}`)).size
- const groups=['fact','preference','plan','concern'].flatMap(kind=>{
-  const items=active.filter(entry=>entry.kind===kind)
-  if(!items.length)return []
-  const groupTopics=[...new Set(items.map(entry=>entry.topic).filter(Boolean))]
-  const lead=`${groupTopics.length} 个主题 · ${items.length} 条记录`
-  return [{kind,label:kindNames[kind],entries:items,topics:groupTopics,lead}]
- })
- const stated=active.filter(entry=>entry.origin==='stated').length
- const coverage=`本页 ${active.length} 条 · ${sourceCount} 处${sources.join('、')||'已记录'}来源`
- const summary=topics.length?`涉及 ${topics.slice(0,3).join('、')}${topics.length>3?` 等 ${topics.length} 个主题`:''}。${stated?`${stated} 条来自你说过的内容。`:''}`:active.length?'':'暂无记忆。'
-
- return {topics,sources,sourceCount,groups,stated,coverage,summary}
+ const coverage=`本页 ${active.length} 条记忆 · ${sourceCount} 处来源`
+ const byId=new Map(active.map(entry=>[entry.id,entry]))
+ const valid=provided&&text(provided.summary,1200)&&Array.isArray(provided.sections)&&provided.sections.length>0&&provided.sections.length<=4&&provided.sections.every(section=>
+  section&&text(section.title,80)&&text(section.summary,1200)&&Array.isArray(section.keywords)&&section.keywords.length<=5&&section.keywords.every(word=>text(word,80))&&Array.isArray(section.refs)&&section.refs.length>0&&section.refs.every(ref=>ref&&(typeof ref.version==='string'||typeof ref.version==='number')&&byId.has(ref.entry_id)&&byId.get(ref.entry_id).version===ref.version))
+ if(valid)return {summary:provided.summary,coverage,generated:true,groups:provided.sections.map(section=>({...section,entries:[...new Set(section.refs.map(ref=>ref.entry_id))].map(id=>byId.get(id))}))}
+ const excerpts=[...new Set(active.map(entry=>excerpt(entry.content)).filter(Boolean))].slice(0,3)
+ return {summary:excerpts.join('\n\n')||(active.length?'这些记录暂时没有可显示的正文。':'暂无记忆。'),coverage,generated:false,groups:[]}
 }

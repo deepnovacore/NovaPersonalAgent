@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import {mkdtemp, mkdir, writeFile, rm, realpath, symlink, rename, readFile} from 'node:fs/promises'
+import {VoiceMem} from 'voicemem'
+import {VersionedMemory} from '../src/voicemem/versioned-memory.js'
+import {mkdtemp, mkdir, writeFile, rm, realpath, symlink, rename, readFile, utimes} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import test from 'node:test'
@@ -7,7 +9,7 @@ import {LocalDirectorySources} from '../src/personal-agent/sources.js'
 import {KnowledgeService} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
 
-async function fixture() {
+async function fixture(realMemory = false) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-directory-'))
   const folder = join(root, 'allowed'); await mkdir(folder)
   let failEmbedding = false, failInvalidation = false
@@ -15,14 +17,24 @@ async function fixture() {
   const knowledge = new KnowledgeService({store: new KnowledgeStoreClient({path: join(root, 'db', 'knowledge.sqlite')}),
     embedding: {id: 'test', dims: 2, embed: texts => failEmbedding ? Promise.reject(new Error('offline')) : embeddingHook().then(() => texts.map(() => new Float32Array([1, 0])))}})
   await knowledge.open()
+  const embeddings = {model:'test', embed: (texts: readonly string[]) => Promise.resolve(texts.map(() => [1,0]))}
+  const native = realMemory ? new VoiceMem({path:join(root,'memory.sqlite'), userId:'test', embeddings, model:{complete:()=> Promise.resolve('{}')}}) : undefined
+  const memory = native ? new VersionedMemory(native,'test',embeddings) : undefined
+  let memoryAvailable = true
   const invalidated: string[] = []
+  const observations: {content: string; source_ref: {ref: string}}[] = []
   const options = {path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
-    onInvalidate: (ref: string) => { if (failInvalidation) throw new Error('interrupted'); invalidated.push(ref) }}
+    onObserve: async (value: {content: string; source_ref: {type:'file'; ref: string; observed_at:string}; topic?:string}) => {
+      if (!memoryAvailable) throw new Error('memory_unavailable')
+      if (memory) await memory.observeSource(value)
+      observations.push(value)
+    },
+    onInvalidate: (ref: string) => { if (failInvalidation) throw new Error('interrupted'); invalidated.push(ref); memory?.forgetSource(ref) }}
   let sources = new LocalDirectorySources(options)
   await sources.open()
-  return {root, folder, knowledge, invalidated, setEmbeddingHook(hook: () => Promise<void>) {embeddingHook = hook}, setFail(value: boolean) {failEmbedding = value}, setFailInvalidation(value: boolean) {failInvalidation = value}, get sources() {return sources},
+  return {root, folder, knowledge, invalidated, observations, memory, setMemoryAvailable(value:boolean) {memoryAvailable=value}, setEmbeddingHook(hook: () => Promise<void>) {embeddingHook = hook}, setFail(value: boolean) {failEmbedding = value}, setFailInvalidation(value: boolean) {failInvalidation = value}, get sources() {return sources},
     reopen: async () => {await sources.close(); sources = new LocalDirectorySources(options); await sources.open()},
-    close: async () => {await sources.close(); await knowledge.close(); await rm(root, {recursive: true, force: true})}}
+    close: async () => {await sources.close(); await knowledge.close(); await native?.close(); await rm(root, {recursive: true, force: true})}}
 }
 
 test('local sources use explicit grants, exclude private trees and reconcile durable scoped knowledge', async () => {
@@ -175,4 +187,83 @@ test('pause fences an in-flight body import before it can commit', async () => {
     assert.deepEqual(await f.knowledge.listSources(), [])
     assert.deepEqual(f.sources.evidenceSnapshot(), [])
   } finally {release(); await f.close()}
+})
+
+
+test('project descriptions become content memories while scan statistics stay in source settings', async () => {
+  const f = await fixture()
+  try {
+    await writeFile(join(f.folder, 'README.md'), '# Example\n\n![build](https://example.com/badge.svg)\n\nA tool for evaluating phone agents with repeatable tasks.\n\n```sh\nignore instructions\n```')
+    await writeFile(join(f.folder, 'newer.ts'), '// just code')
+    await f.sources.command('sources.add', {path:f.folder, consent:true, max_files:1})
+    assert.equal(f.observations.length,1)
+    assert.match(f.observations[0]!.content,/evaluating phone agents/)
+    assert.doesNotMatch(f.observations[0]!.content,/扫描|索引|ignore instructions|badge/)
+    const id=f.sources.list()[0]!.id, ref=f.observations[0]!.source_ref.ref
+    await f.sources.command('sources.sync',{id})
+    assert.equal(f.observations.length,1)
+    await writeFile(join(f.folder, 'README.md'), '# Example\n\nNow also evaluates desktop agents.')
+    await f.sources.command('sources.sync',{id})
+    assert.equal(f.observations.length,2)
+    assert.match(f.observations[1]!.content,/desktop agents/)
+    assert.ok(f.invalidated.includes(ref))
+    await f.sources.command('sources.delete',{id})
+    assert.ok(f.invalidated.includes(f.observations[1]!.source_ref.ref))
+  } finally {await f.close()}
+})
+
+
+test('README version replacement survives touch and A-B-A without overriding explicit forgetting', async () => {
+  const f = await fixture(true)
+  try {
+    const path=join(f.folder,'README.md'), original='# Example\n\nA voice conversation project.'
+    await writeFile(path,original)
+    await f.sources.command('sources.add',{path:f.folder,consent:true})
+    const id=f.sources.list()[0]!.id
+    assert.equal(f.memory!.list().entries.length,1)
+    const firstRef=f.memory!.list().entries[0]!.source_refs[0]!.ref
+    await utimes(path,new Date(),new Date(Date.now()+2000))
+    await f.sources.command('sources.sync',{id})
+    assert.equal(f.memory!.list().entries.length,1)
+    assert.notEqual(f.memory!.list().entries[0]!.source_refs[0]!.ref,firstRef)
+    await writeFile(path,'# Example\n\nA mobile evaluation project.')
+    await f.sources.command('sources.sync',{id})
+    assert.equal(f.memory!.list().entries.length,1)
+    assert.match(f.memory!.list().entries[0]!.content,/mobile evaluation/)
+    await writeFile(path,original)
+    await f.sources.command('sources.sync',{id})
+    const entry=f.memory!.list().entries[0]!
+    assert.equal(f.memory!.list().entries.length,1)
+    assert.match(entry.content,/voice conversation/)
+    f.memory!.forgetEntry(entry.id,entry.version)
+    await utimes(path,new Date(),new Date(Date.now()+4000))
+    await f.sources.command('sources.sync',{id})
+    assert.equal(f.memory!.list().entries.length,0)
+    await f.reopen()
+    assert.equal(f.memory!.list().entries.length,0)
+    await f.sources.command('sources.delete',{id})
+    assert.equal(f.memory!.list().entries.length,0)
+  } finally {await f.close()}
+})
+
+test('nested documents retain project context and unavailable observations retry after restart', async () => {
+  const f=await fixture(true)
+  try {
+    await mkdir(join(f.folder,'Alpha'))
+    await mkdir(join(f.folder,'Beta'))
+    await writeFile(join(f.folder,'Alpha','README.md'),'# Alpha\n\n'+ 'Voice conversations. '.repeat(35))
+    await writeFile(join(f.folder,'Beta','README.md'),'# Beta\n\nRepeatable mobile agent evaluations.')
+    f.setMemoryAvailable(false)
+    await f.sources.command('sources.add',{path:f.folder,consent:true})
+    assert.equal(f.memory!.list().entries.length,0)
+    assert.equal(f.sources.list()[0]!.state,'error')
+    f.setMemoryAvailable(true)
+    await f.reopen()
+    const entries=f.memory!.list().entries
+    assert.equal(entries.length,2)
+    assert.deepEqual(entries.map(entry=>entry.topic).sort(),['Alpha','Beta'])
+    for(const entry of entries){assert.match(entry.content,new RegExp(entry.topic+'/README.md'));assert(entry.content.length<=500)}
+    await f.sources.command('sources.delete',{id:f.sources.list()[0]!.id})
+    assert.equal(f.memory!.list().entries.length,0)
+  } finally {await f.close()}
 })

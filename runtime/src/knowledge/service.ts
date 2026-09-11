@@ -3,7 +3,7 @@ import {opendir, realpath} from 'node:fs/promises'
 import {join} from 'node:path'
 import {z} from 'zod'
 import {SensitivePathPolicy} from '../workspace-graph/sensitivity.js'
-import {chunkKnowledgeText, fetchKnowledgeUrl, readKnowledgeFile} from './documents.js'
+import {chunkKnowledgeText, fetchKnowledgeUrl, readKnowledgeFile, knowledgeExcerpt} from './documents.js'
 import type {EmbeddingProvider} from './embeddings.js'
 import type {KnowledgeStoreClient} from './store-client.js'
 import type {KnowledgeSource} from './types.js'
@@ -52,7 +52,7 @@ export class KnowledgeService {
   }
 
   /** Directory-source admission retains its grant and cancellation through the actual file read. */
-  async syncFile(locator: string, root: string, signal: AbortSignal, sourceId?: string): Promise<{id: string}> {
+  async syncFile(locator: string, root: string, signal: AbortSignal, sourceId?: string): Promise<{id: string; excerpt: string}> {
     signal.throwIfAborted()
     this.#stop.signal.throwIfAborted()
     if (this.#active || this.#folderBusy) throw failure('knowledge_busy')
@@ -65,9 +65,10 @@ export class KnowledgeService {
       const old = (await this.#store.listSources()).find(source => source.locator === locator)
       signal.throwIfAborted()
       if (old !== undefined) active.id = old.id
-      const result = await this.#index('folder_child', locator, active, old)
+      let excerpt = ''
+      const result = await this.#index('folder_child', locator, active, old, text => {excerpt = knowledgeExcerpt(text)})
       if ('error' in result) throw failure(result.error)
-      return {id: active.id}
+      return {id: active.id, excerpt}
     } finally {
       signal.removeEventListener('abort', cancel)
       if (this.#active === active) this.#active = undefined
@@ -118,7 +119,7 @@ export class KnowledgeService {
     finally {if (this.#active === active) this.#active = undefined}
   }
 
-  async #index(kind: KnowledgeSource['kind'], locator: string, active: {id: string; abort: AbortController; root?: string}, old?: KnowledgeSource) {
+  async #index(kind: KnowledgeSource['kind'], locator: string, active: {id: string; abort: AbortController; root?: string}, old?: KnowledgeSource, onIndexed?: (text: string) => void) {
     const signal = AbortSignal.any([active.abort.signal, this.#stop.signal,
       ...(this.#folderSignal === undefined ? [] : [this.#folderSignal]), AbortSignal.timeout(120000)])
     const job = {id: randomUUID(), source_id: active.id, updated_at: Date.now(), error_code: null}
@@ -144,6 +145,7 @@ export class KnowledgeService {
           heading_path: [...(chunk.heading_path || title)].slice(0, 256).join(''), vector: [...vectors[index]!]})),
       })
       await this.#store.recordJob({...job, updated_at: Date.now(), state: 'complete'})
+      onIndexed?.(document.text)
       return {ok: true, id: active.id}
     } catch {
       const code = signal.aborted ? 'ingest_cancelled' : 'ingest_failed'

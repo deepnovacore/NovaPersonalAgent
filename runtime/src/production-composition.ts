@@ -135,7 +135,11 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         await host.revalidate()
         await host.refreshMemory()
       },
-      onObserve: async observation => {await composition.realtime.personalMemory?.observeSource?.(observation)},
+      onObserve: async observation => {
+        const memory = composition.realtime.personalMemory
+        if (!memory?.observeSource) throw new Error('memory_unavailable')
+        await memory.observeSource(observation)
+      },
     }))
   }
   ownership.own(() => composition.desktop.server.close())

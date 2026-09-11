@@ -359,7 +359,7 @@ export class RealtimeAssembly {
       context:()=>{const view=compileContextView(input.core.runtime.memory,input.core.runtime.core.floor.state,input.core.runtime.clock.now(),{suggestions:input.core.runtime.core.suggestions.all(),triggerKind:'discovery_tick'});return {...view,channels:view.channels.slice(-8),affordances:view.affordances.slice(-8),in_flight:view.in_flight.slice(-8)}},
       onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}})},
       evidenceRefs:()=>[...input.core.runtime.memory.channels.values()].flatMap(channel=>channel.items.slice(-4).map(item=>`${item.channel}:${item.seq}`)).slice(-16),
-      ...(input.core.personalAgentConfig?{discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
+      ...(input.core.personalAgentConfig?{summarizeMemory:(entries,signal)=>input.core.personalAgentConfig!.surrogate.summarizeMemory(entries,signal),discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
     })
     this.#unsubscribePersonalEvents=input.core.runtime.observe((event,current)=>{

@@ -1,3 +1,4 @@
+import {validateMemoryOverview, type MemoryOverview} from './memory-overview.js';
 import type { ContextView } from '../context-view.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
@@ -43,6 +44,7 @@ export interface HostOptions {
     pool: SuggestionPool;
     evidence: (ref: string) => Evidence | null;
     discover?: (snapshot: DiscoverySnapshot, signal: AbortSignal) => Promise<Proposal | null>;
+    summarizeMemory?: (entries: readonly MemoryEntry[], signal: AbortSignal) => Promise<MemoryOverview | null>;
     evidenceRefs?: () => string[];
     onTick?: (snapshot: DiscoverySnapshot) => void;
     act?: (item: FeedItem) => Promise<void>;
@@ -58,6 +60,7 @@ export class PersonalAgentHost {
     #memory: {
         entries: MemoryEntry[];
         cursor: string | null;
+        overview?: MemoryOverview | null;
     } = { entries: [], cursor: null };
     #sources: PersonalSources | undefined;
     #listeners = new Set<() => void>();
@@ -67,6 +70,46 @@ export class PersonalAgentHost {
     #discovery: Promise<void> | undefined;
     #opened = false;
     #sourceSignature = '';
+    #projectionRevision = 0;
+    #memoryRefresh = 0;
+    #overviewKey = '';
+    #overviewRun: Promise<void> | undefined;
+    #overviewAbort = new AbortController();
+    #overviewCache: {key:string; value:MemoryOverview} | undefined;
+    #notify(): void { this.#projectionRevision = Math.max(this.#projectionRevision, this.#state.revision) + 1; for (const listener of this.#listeners) { try { listener(); } catch { /* observer only */ } } }
+    #invalidateOverview(): void {
+        this.#memoryRefresh++;
+        this.#overviewKey = '';
+        this.#overviewAbort.abort();
+        this.#memory.overview = null;
+        this.#notify();
+    }
+    #summarize(): void {
+        if (this.#overviewRun || !this.#opened || !this.options.summarizeMemory || !this.#overviewKey) return;
+        const key = this.#overviewKey, generation = this.#memoryRefresh;
+        const entries = structuredClone(this.#memory.entries.filter(e => e.status === 'active' && e.version !== null));
+        if (!entries.length) return;
+        const controller = new AbortController();
+        this.#overviewAbort = controller;
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(30000)]);
+        const run = (async () => {
+            let value: MemoryOverview|null = null;
+            try {
+                const result = await Promise.race([
+                    this.options.summarizeMemory!(entries, signal),
+                    new Promise<null>(resolve => signal.addEventListener('abort', () => resolve(null), {once:true})),
+                ]);
+                value = validateMemoryOverview(result, entries);
+            } catch { /* optional summary: keep source entries available */ }
+            if (!this.#opened || key !== this.#overviewKey || controller.signal.aborted) return;
+            if (signal.aborted) value = null;
+            if (value) this.#overviewCache = {key,value};
+            this.#memory.overview = value;
+            this.#notify();
+        })();
+        this.#overviewRun = run;
+        void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
+    }
     constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); }
     get path(): string { return this.options.path; }
     setSources(sources: PersonalSources): void { this.#sources = sources; }
@@ -96,6 +139,8 @@ export class PersonalAgentHost {
     }
     async close(): Promise<void> {
         this.#opened = false;
+        this.#invalidateOverview();
+        this.#overviewCache = undefined;
         clearInterval(this.#timer);
         this.#abort.abort();
         for (const item of this.#state.feed) if (item.suggestion_id) this.options.pool.withdraw(item.suggestion_id);
@@ -114,14 +159,20 @@ export class PersonalAgentHost {
         this.#timer = setInterval(() => { void this.discover().catch(() => { /* optional observer or cleanup already reported */ }); }, this.#state.settings.discovery_interval_minutes * 60000);
         this.#timer.unref();
     } }
-    async refreshMemory(cursor?: string, limit = 100): Promise<void> { const memory = this.options.memory(); this.#memory = memory?.list ? await memory.list({ ...(cursor ? { cursor } : {}), limit }) : { entries: [], cursor: null }; }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, revision: this.#state.revision, feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings } }; }
-    async #commit(next: PersonalState): Promise<void> { next.revision = this.#state.revision + 1; await this.#store.write(next); this.#state = next; for (const listener of this.#listeners) {
-        try {
-            listener();
-        }
-        catch { /* observers do not own persistence */ }
-    } }
+    async refreshMemory(cursor?: string, limit = 100): Promise<void> {
+        this.#invalidateOverview();
+        const refresh = this.#memoryRefresh, memory = this.options.memory();
+        const page = memory?.list ? await memory.list({ ...(cursor ? { cursor } : {}), limit }) : {entries: [], cursor: null};
+        if (refresh !== this.#memoryRefresh || !this.#opened) return;
+        const key = hash(page);
+        this.#overviewAbort.abort();
+        this.#overviewKey = key;
+        this.#memory = {...page, overview: this.#overviewCache?.key === key ? this.#overviewCache.value : null};
+        this.#notify();
+        if (this.#overviewCache?.key !== key) this.#summarize();
+    }
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, revision: Math.max(this.#projectionRevision, this.#state.revision), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings } }; }
+    async #commit(next: PersonalState): Promise<void> { next.revision = this.#state.revision + 1; await this.#store.write(next); this.#state = next; this.#notify(); }
     #evidence(ref: string): Evidence | null { return this.options.evidence(ref) ?? this.#sources?.evidence?.(ref) ?? null; }
     async #valid(p: Pick<Proposal, 'memory_refs' | 'evidence_refs'>): Promise<boolean> { for (const ref of p.evidence_refs)
         if (!this.#evidence(ref))
@@ -170,7 +221,7 @@ export class PersonalAgentHost {
             if (item.suggestion_id)
                 this.options.pool.withdraw(item.suggestion_id);
         } await this.#commit(next); }); }
-    async sourceChanged(): Promise<void> { await this.revalidate(); await this.#serial(() => this.#commit(structuredClone(this.#state))); const signature=hash((this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref).sort());if(signature!==this.#sourceSignature){this.#sourceSignature=signature;await this.discover();} }
+    async sourceChanged(): Promise<void> { await this.refreshMemory(); await this.revalidate(); await this.#serial(() => this.#commit(structuredClone(this.#state))); const signature=hash((this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref).sort());if(signature!==this.#sourceSignature){this.#sourceSignature=signature;await this.discover();} }
     async taskResult(workId: string, title: string): Promise<void> { await this.#serial(async () => { const next = structuredClone(this.#state); let item = next.feed.find(f => f.task_ref?.work_id === workId); if (!item) {
         const now = this.#now().toISOString();
         item = { id: randomUUID(), kind: 'task_result', title: '', why_now: '任务已有结果', evidence_refs: [], memory_refs: [], source: { type: 'task', ref: workId }, task_ref: { work_id: workId }, suggestion_id: null, subject_key: 'task:' + workId, priority: 40, created_at: now, updated_at: now, expires_at: null, user_state: 'new', snooze_until: null, lifecycle: 'resolved', delivery: { presented_at: null, notified_at: null, spoken_at: null } };
@@ -236,11 +287,14 @@ export class PersonalAgentHost {
             const q = z.object({ cursor: z.string().max(256).optional(), limit: z.number().int().min(1).max(100).optional() }).strict().parse(p);
             if (!m?.list)
                 throw Error('unsupported');
+            this.#invalidateOverview();
             await this.refreshMemory(q.cursor, q.limit);
             data = this.#memory;
         }
         else if (command.method === 'memory.correct' || command.method === 'memory.forget') {
             const q = z.object({ id: z.string().min(1).max(256), expected_version: versionSchema, content: z.string().trim().min(1).max(500).optional() }).strict().parse(p);
+            this.#invalidateOverview();
+            this.#overviewCache = undefined;
             if (command.method === 'memory.correct') {
                 if (!m?.correct || !q.content)
                     throw Error('unsupported');

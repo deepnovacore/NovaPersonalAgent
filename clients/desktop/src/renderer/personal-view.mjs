@@ -51,30 +51,29 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
    button('任务控制与结果',openResults,panel)
   }else if(selected==='记忆'){
    const entries=(s?.memory?.entries??[]).filter(m=>m.status==='active')
-   const overview=memoryOverview(entries)
+   const overview=memoryOverview(entries,s?.memory?.overview)
+   const recordDetails=(parent,items,label)=>{
+    const records=el('details',undefined,'memory-group-details');records.append(el('summary',label));parent.append(records)
+    for(const entry of items){
+     const a=el('details',undefined,'memory-entry-details');a.append(el('summary',entry.topic||entry.content?.slice(0,48)||'记忆'));a.append(el('p',entry.content));chips(a,[entry.origin==='stated'?'你说过':'根据资料',entry.confidence_note]);evidence(a,entry.source_refs);records.append(a)
+     const correction=el('textarea');correction.value=entry.content;correction.maxLength=500;correction.setAttribute('aria-label','纠正记忆内容');correction.hidden=true;a.append(correction)
+     const edit=button('纠正',async()=>{if(correction.hidden){correction.hidden=false;correction.focus();edit.textContent='保存纠正';return}await c.command('memory.correct',{id:entry.id,expected_version:entry.version,content:correction.value})},a);edit.disabled=!caps.memory?.correct||entry.version==null;edit.title=edit.disabled?'当前后端不支持版本化纠正':''
+     const forget=button('忘记',()=>c.command('memory.forget',{id:entry.id,expected_version:entry.version}),a);forget.disabled=!caps.memory?.forgetEntry||entry.version==null;forget.title=forget.disabled?'当前后端不支持按条目忘记':'';button('接着聊',()=>continueChat(entry.content),a)
+    }
+    return records
+   }
    if(!caps.memory?.list)card('当前后端不支持记忆列表','连接支持此能力的记忆后端后可查看。')
    else {
-    const hero=card('记忆')
-    hero.classList.add('memory-hero')
+    const hero=card('记忆');hero.classList.add('memory-hero')
     hero.append(el('p',overview.summary,'memory-overview-copy'))
-    const topics=el('div',undefined,'memory-topic-chips')
-    for(const topic of overview.topics){const b=button(topic,()=>{const target=[...panel.querySelectorAll('[data-memory-topic]')].find(node=>node.dataset.memoryTopic===topic);if(target){target.open=true;target.closest('.memory-group-details').open=true;target.scrollIntoView({block:'nearest'});target.querySelector('summary').focus()}},topics);b.className='memory-topic-chip'}
-    hero.append(topics,el('p',overview.coverage,'memory-coverage'))
+    if(!overview.generated&&entries.length)hero.append(el('p','摘要尚未生成，先显示已保存的内容。','personal-hint'))
+    hero.append(el('p',overview.coverage,'memory-coverage'))
     for(const group of overview.groups){
-     const a=card(group.label)
-     a.classList.add('memory-group')
-     a.append(el('p',group.lead))
-     const rows=el('div',undefined,'memory-topic-grid')
-     for(const topic of group.topics){const row=el('div',undefined,'memory-topic-row');row.append(el('span','◈','memory-topic-icon'),el('span',topic));rows.append(row)}
-     a.append(rows)
-     const records=el('details',undefined,'memory-group-details');records.append(el('summary',`查看 ${group.entries.length} 条记录与来源 · 纠正 / 忘记`));a.append(records)
-     for(const entry of group.entries){
-      const a=el('details',undefined,'memory-entry-details');a.dataset.memoryTopic=entry.topic||'';a.append(el('summary',entry.topic||'一条记忆'));a.querySelector('summary').tabIndex=0;a.append(el('p',entry.content));chips(a,[entry.origin==='stated'?'你说过':'根据资料',entry.confidence_note]);evidence(a,entry.source_refs);records.append(a)
-    const correction=el('textarea');correction.value=entry.content;correction.maxLength=500;correction.setAttribute('aria-label','纠正记忆内容');correction.hidden=true;a.append(correction)
-    const edit=button('纠正',async()=>{if(correction.hidden){correction.hidden=false;correction.focus();edit.textContent='保存纠正';return}await c.command('memory.correct',{id:entry.id,expected_version:entry.version,content:correction.value})},a);edit.disabled=!caps.memory?.correct||entry.version==null;edit.title=edit.disabled?'当前后端不支持版本化纠正':''
-    const forget=button('忘记',()=>c.command('memory.forget',{id:entry.id,expected_version:entry.version}),a);forget.disabled=!caps.memory?.forgetEntry||entry.version==null;forget.title=forget.disabled?'当前后端不支持按条目忘记':'';button('接着聊',()=>continueChat(entry.content),a)
-     }
+     const a=card(group.title,group.summary);a.classList.add('memory-group')
+     chips(a,group.keywords)
+     recordDetails(a,group.entries,'查看依据 · 纠正 / 忘记')
     }
+    if(entries.length){const a=card('记录');a.classList.add('memory-records');recordDetails(a,entries,'查看全部记录')}
    }
    if(s?.memory?.cursor)button('下一页',()=>c.command('memory.list',{cursor:s.memory.cursor,limit:50}),panel)
    if(caps.memory?.list)button('返回第一页',()=>c.command('memory.list',{limit:50}),panel)

@@ -513,3 +513,24 @@ function containsBinaryControls(value: string): boolean {
 function codePointsLength(value: string): number {
   return [...value].length
 }
+
+
+/** Bounded extract from screened document prose; never infer facts from a filename. */
+export function knowledgeExcerpt(text: string): string {
+  let fenced = false
+  const lines: string[] = []
+  for (const raw of text.split('\n')) {
+    const line = raw.trim()
+    if (line.startsWith('```') || line.startsWith('~~~')) {fenced = !fenced; continue}
+    if (fenced || !line || /^(?:#|<|\||!\[|\[!\[|---|===)/u.test(line)) continue
+    const plain = line.replace(/!\[[^\]]*\]\([^)]*\)/gu, '').replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1').replace(/[*`_]/gu, '').trim()
+    if (plain) lines.push(plain)
+    if ([...lines.join(' ')].length >= 450) break
+  }
+  let excerpt = ''
+  for (const character of lines.join(' ')) {
+    if (excerpt.length + character.length > 450) break
+    excerpt += character
+  }
+  return excerpt
+}

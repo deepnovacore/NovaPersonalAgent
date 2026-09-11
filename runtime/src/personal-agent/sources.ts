@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto'
 import {acquirePersonalLock} from './store.js'
 import {lstat, opendir, open, readFile, realpath, rename, rm, writeFile} from 'node:fs/promises'
-import {dirname, extname, isAbsolute, join, relative} from 'node:path'
+import {basename, dirname, extname, isAbsolute, join, relative} from 'node:path'
 import {z} from 'zod'
 import {preparePrivateDatabasePath} from '../private-database.js'
 import {SensitivePathPolicy} from '../workspace-graph/sensitivity.js'
@@ -22,13 +22,14 @@ const snapshotSchema = z.object({
 }).strict()
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
-  size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true)}).strict()
+  size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
 const recordSchema = z.object({view: snapshotSchema, files: z.array(trackedSchema).max(20000),
   deleting: z.boolean().default(false), observation: z.string().max(500).default(''),
   pending: z.object({path: pathSchema, size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), previous_updated_at: z.number().nullable()}).strict().nullable().default(null)}).strict()
 type SourceRecord = z.infer<typeof recordSchema>
 const diskSchema = z.object({version: z.literal(1), sources: z.array(recordSchema).max(8)}).strict()
 const supported = new Set(['.txt', '.md', '.markdown', '.json', '.yaml', '.yml', '.csv', '.ts', '.tsx', '.js', '.jsx', '.py', '.rs', '.go', '.java', '.c', '.h', '.cpp', '.pdf', '.docx'])
+const overviewDocument = (path: string) => /^(?:readme(?:[._-][a-z]+)?|overview|about|project)\.(?:md|markdown|txt)$/iu.test(basename(path))
 const refFor = (file: SourceRecord['files'][number]) => `file:${file.id}:${file.fingerprint}`
 const errorCode = (error: unknown) => error instanceof Error && /^(?:knowledge_busy|ingest_failed|source_busy)$/u.test(error.message) ? error.message : 'source_unavailable'
 
@@ -160,7 +161,7 @@ export class LocalDirectorySources {
     const skip = (reason: string) => {view.skipped++; view.reasons[reason] = (view.reasons[reason] ?? 0) + 1}
     const files: {path: string; size: number; mtime: number}[] = []
     const seen = new Set<string>(), excluded = new Set([...SOURCE_EXCLUDES, ...view.excludes].map(name => name.toLowerCase()))
-    const directories = [{path: view.path, depth: 0}], names: string[] = []
+    const directories = [{path: view.path, depth: 0}]
     let complete = true, visited = 0
     try {
       if (await realpath(view.path) !== view.path) throw new Error('path_denied')
@@ -175,7 +176,6 @@ export class LocalDirectorySources {
           if (excluded.has(entry.name.toLowerCase()) || !policy.allows(path)) {skip('excluded'); continue}
           if (entry.isSymbolicLink()) {skip('symbolic_link'); continue}
           if (entry.isDirectory()) {
-            if (directory.depth === 0 && names.length < 12) names.push(entry.name.slice(0, 60))
             if (directory.depth < 16) directories.push({path, depth: directory.depth + 1})
             else {skip('depth_limit'); complete = false}
           } else if (entry.isFile()) {
@@ -196,17 +196,17 @@ export class LocalDirectorySources {
       }
       const known = new Map((await this.#options.knowledge.listSources()).map(item => [item.locator, item]))
       let bytes = 0
-      for (const file of files.sort((a, b) => b.mtime - a.mtime || a.path.localeCompare(b.path))) {
+      for (const file of files.sort((a, b) => Number(overviewDocument(b.path)) - Number(overviewDocument(a.path)) || b.mtime - a.mtime || a.path.localeCompare(b.path))) {
         signal.throwIfAborted()
         const previous = record.files.find(old => old.path === file.path)
-        if (previous?.valid && previous.mtime === file.mtime && previous.size === file.size && known.has(file.path)) continue
+        if (previous?.valid && previous.mtime === file.mtime && previous.size === file.size && known.has(file.path) && (!overviewDocument(file.path) || previous.excerpt !== null)) continue
         if (previous?.valid) {
           previous.valid = false
           await this.#save()
         }
         if (previous) {
           // Retry propagation after interruption before accepting a replacement version.
-          await this.#options.onInvalidate?.(refFor(previous)); await this.#options.onInvalidate?.(previous.id)
+          await this.#invalidateFile(previous)
           if (previous.owned) {await this.#options.knowledge.handle('knowledge.remove', {id: previous.id}); known.delete(file.path)}
         }
         if (file.size > 10 * 1024 * 1024 || file.size === 0) {skip('file_size'); continue}
@@ -219,9 +219,9 @@ export class LocalDirectorySources {
           const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id)
           const indexed = (await this.#options.knowledge.listSources()).find(item => item.id === result.id)
           if (!indexed) throw new Error('ingest_failed')
-          const tracked = {...file, id: result.id, fingerprint: indexed.fingerprint, owned: previous?.owned ?? !known.has(file.path), valid: true}
+          const tracked = {...file, id: result.id, fingerprint: indexed.fingerprint, owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: randomUUID()}
           if (previous && previous.fingerprint !== tracked.fingerprint) {
-            await this.#options.onInvalidate?.(refFor(previous)); await this.#options.onInvalidate?.(previous.id)
+            await this.#invalidateFile(previous)
           }
           record.files = record.files.filter(old => old.path !== file.path); record.files.push(tracked); record.pending = null
           bytes += file.size; view.read++
@@ -235,12 +235,19 @@ export class LocalDirectorySources {
         }
       }
       signal.throwIfAborted()
-      const observation = `授权目录 ${view.path.split(/[/\\]/u).at(-1)}：本次扫描 ${view.scanned} 个文件，已索引 ${record.files.filter(file => file.valid).length} 个正文。${names.length ? `可见子目录：${names.sort().join('、')}。` : ''}仅代表已扫描范围。`.slice(0, 500)
       view.state = view.failures.length > 0 ? 'error' : 'connected'; view.last_sync = new Date().toISOString()
-      if (observation !== record.observation && this.#options.onObserve) {
-        await this.#options.onInvalidate?.(view.id)
-        await this.#options.onObserve({source_ref: {type: 'file', ref: view.id, observed_at: view.last_sync}, content: observation, topic: view.path.split(/[/\\]/u).at(-1)?.slice(0, 80) ?? '本地目录'})
-        record.observation = observation
+      // Scan statistics belong in source settings, not in the user's memory.
+      if (record.observation) {await this.#options.onInvalidate?.(view.id); record.observation = ''; await this.#save()}
+      for (const file of record.files.filter(file => file.valid && overviewDocument(file.path)).slice(0, 8)) {
+        signal.throwIfAborted()
+        if (file.observed || !file.excerpt || !this.#options.onObserve) continue
+        if (!file.observation_ref) {file.observation_ref = randomUUID(); await this.#save()}
+        const document = relative(view.path, file.path), project = dirname(document) === '.' ? basename(view.path) : dirname(document)
+        const context = `文档 ${basename(view.path)}/${document}`.slice(0, 100) + '：'
+        await this.#options.onObserve({source_ref: {type: 'file', ref: file.observation_ref, observed_at: view.last_sync},
+          content: context + file.excerpt.slice(0, 500 - context.length), topic: project.slice(0, 80)})
+        file.observed = true
+        await this.#save()
       }
     } catch (error) {
       if (!signal.aborted) {view.state = 'error'; view.failures.push({path: '', code: errorCode(error)})}
@@ -255,16 +262,19 @@ export class LocalDirectorySources {
     if (indexed && indexed.updated_at !== pending.previous_updated_at) {
       const previous = record.files.find(item => item.path === pending.path)
       if (previous && previous.fingerprint !== indexed.fingerprint) {
-        await this.#options.onInvalidate?.(refFor(previous)); await this.#options.onInvalidate?.(previous.id)
+        await this.#invalidateFile(previous)
       }
       record.files = record.files.filter(item => item.path !== pending.path)
-      record.files.push({path: pending.path, size: pending.size, mtime: pending.mtime, owned: pending.owned, id: indexed.id, fingerprint: indexed.fingerprint, valid: true})
+      record.files.push({path: pending.path, size: pending.size, mtime: pending.mtime, owned: pending.owned, id: indexed.id, fingerprint: indexed.fingerprint, valid: true, excerpt: null, observed: false, observation_ref: randomUUID()})
     }
     record.pending = null
     await this.#save()
   }
+  async #invalidateFile(file: SourceRecord['files'][number]): Promise<void> {
+    for (const ref of new Set([refFor(file), file.id, ...(file.observation_ref ? [file.observation_ref] : [])])) await this.#options.onInvalidate?.(ref)
+  }
   async #removeFile(record: SourceRecord, file: SourceRecord['files'][number]): Promise<void> {
-    await this.#options.onInvalidate?.(refFor(file)); await this.#options.onInvalidate?.(file.id)
+    await this.#invalidateFile(file)
     if (file.owned) await this.#options.knowledge.handle('knowledge.remove', {id: file.id})
     record.files = record.files.filter(item => item.id !== file.id)
     await this.#save()

@@ -113,3 +113,11 @@ assert.equal(sent.some(frame => frame.type === 'input.text'), false)
 - [x] Review complete diff for provenance, auth, stale actions, durable error handling and public boundary.
 - [x] Record per-milestone implemented/automated/live/pending states, exact checks and known limitations. Human acceptance is not inferred.
 - [x] Commit coherent work packages locally; no public push or main merge.
+
+## Follow-up: content-based memory summaries
+
+- [x] Prefer bounded, screened README descriptions over scan statistics; retain relative document context.
+- [x] Generate optional host summaries through the existing model adapter, validate current entry/version citations, invalidate on source/edit/delete changes, and allow later retries after failure.
+- [x] Render concise overview, up to four sections and keywords; preserve source/correct/forget access and show actual excerpts as fallback.
+- [x] Cover source-version renewal and explicit forgetting with real isolated VoiceMem; verify narrow-window layout in the browser.
+- [ ] Run actual external-model quality acceptance after authorization for the selected README excerpts and configured Qwen destination. Local curated preview is not model evidence.
