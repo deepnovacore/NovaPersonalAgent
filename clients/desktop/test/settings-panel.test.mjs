@@ -899,7 +899,7 @@ test('one save names any rejected secret by its panel label', () => {
   // Each exact queued request retains its own rejection list. The renderer
   // names only keys this save submitted, so a coalesced neighbour cannot make
   // a different field's error appear in its status line.
-  assert.match(script, /if \(result\.rejectedSecrets\.length\) \{/)
+  assert.match(script, /if \(result\.rejectedSecrets && result\.rejectedSecrets\.length\) \{/)
   assert.match(
     script,
     /statusLabel\.textContent = `部分密钥未保存\(含非法字符\): \$\{labels\.join\('、'\)\}`/,
@@ -1035,8 +1035,8 @@ test('the sidebar renders one button per category with the first current', () =>
     assert.match(html, new RegExp(`${category.label}</button>`))
   }
   assert.match(html, /id="category-general" data-category="general" aria-current="true">/)
-  assert.equal((html.match(/class="nav-item"/g) || []).length, 6)
-  assert.equal((html.match(/tabindex="-1"/g) || []).length, 5)
+  assert.equal((html.match(/class="nav-item"/g) || []).length, 7)
+  assert.equal((html.match(/tabindex="-1"/g) || []).length, 6)
 })
 
 test('sidebar navigation cycles vertically and passes other keys through', () => {
@@ -1285,4 +1285,35 @@ test('empty usage has quiet card values, one hint, and no empty details disclosu
   assert.equal(panel.node('#usage-breakdown').hidden,false)
   assert.equal(panel.node('#frontend-usage').hidden,true)
   assert.equal(panel.node('#usage-session-cost').textContent,'¥0.0100')
+})
+
+
+test('phone settings stage together and open pairing only after persistence succeeds', async () => {
+  let opened = 0
+  let savedPatch
+  const panel = await mountSettingsPanel(publicView({phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: ''}), {
+    set: async ({settingsPatch}) => {
+      savedPatch = settingsPatch
+      return publicView({...settingsPatch})
+    },
+    openPairing: () => { opened += 1 },
+  })
+  for (const [id, value] of [['phone-server-port', '18080'], ['phone-server-token-file', '/tmp/nova/token'], ['phone-server-url', 'wss://host.ts.net']]) {
+    panel.node(`#${id}`).value = value
+    panel.node(`#${id}`).listeners.input()
+  }
+  await panel.click('#phone-pairing-open')
+  assert.equal(savedPatch.phoneServerPort, 18080)
+  assert.equal(savedPatch.phoneServerTokenFile, '/tmp/nova/token')
+  assert.equal(savedPatch.phoneServerUrl, 'wss://host.ts.net')
+  assert.equal(opened, 1)
+
+  const failed = await mountSettingsPanel(publicView(), {
+    set: async () => { throw new Error('disk unavailable') },
+    openPairing: () => { opened += 1 },
+  })
+  failed.node('#phone-server-port').value = '18080'
+  failed.node('#phone-server-port').listeners.input()
+  await failed.click('#phone-pairing-open')
+  assert.equal(opened, 1)
 })

@@ -146,21 +146,24 @@
       ]
     },
     {
-      "id": "snapshot",
-      "text": "看一下现在摄像头前有什么。",
+      "id": "vision-without-image",
+      "text": "这条消息没有附带图片，也没有开启对话视觉。你能看到摄像头前有什么吗？",
       "context": "<active_project_context>\nworkspace=\"demo\"\nsession=\"验收\"\n</active_project_context>\n当前用户内容 ref=conversation:1",
       "steps": [
         {
           "expect": {
-            "calls": [
-              {
-                "name": "mcp__nova_camera__snapshot",
-                "args": {
-                  "origin_ref": "conversation:1"
-                }
-              }
+            "calls": [],
+            "text": "required",
+            "textAny": [
+              "看不到",
+              "无法",
+              "不能",
+              "没有"
             ],
-            "text": "forbidden"
+            "textNot": [
+              "正在查看",
+              "已经看到"
+            ]
           }
         }
       ]

@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
   wakeWord: Object.freeze({
+    sleep: () => ipcRenderer.send('nova:wake-word:sleep'),
+    wake: () => ipcRenderer.send('nova:wake-word:wake'),
     report: value => ipcRenderer.send('nova:wake-word:report', value),
     audio: value => ipcRenderer.send('nova:wake-word:audio', value),
     activity: () => ipcRenderer.send('nova:wake-word:activity'),
@@ -52,6 +54,12 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     requestPermission: () => ipcRenderer.invoke('nova:camera:permission'),
   }),
   microphone: Object.freeze({
+    onToggle: callback => {
+      if (typeof callback !== 'function') return () => {}
+      const listener = () => callback()
+      ipcRenderer.on('nova:microphone:toggle', listener)
+      return () => ipcRenderer.removeListener('nova:microphone:toggle', listener)
+    },
     requestPermission: () => ipcRenderer.invoke('nova:microphone:permission'),
     report: status => ipcRenderer.send('nova:microphone:status', status),
     onRetry: callback => {
@@ -141,6 +149,7 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     },
   }),
   settings: Object.freeze({
+    openPairing: () => ipcRenderer.send('nova:pairing:open'),
     get: () => ipcRenderer.invoke('nova:settings:get'),
     rescanCodex: () => ipcRenderer.invoke('nova:codex:rescan'),
     retryBackend: () => ipcRenderer.invoke('nova:backend:retry'),

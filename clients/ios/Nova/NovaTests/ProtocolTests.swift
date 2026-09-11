@@ -118,7 +118,8 @@ final class ProtocolTests: XCTestCase {
         qr["version"] = 2; XCTAssertThrowsError(try parse())
         qr["version"] = 1
         qr["expires_at"] = 1000000; XCTAssertThrowsError(try parse())
-        qr["expires_at"] = 1120000
+        qr.removeValue(forKey: "expires_at")
+        XCTAssertNil(try parse().expiresAt)
         qr["code"] = "not a credential"; XCTAssertThrowsError(try parse())
         XCTAssertThrowsError(try PairingCode.parse(String(repeating: "x", count: 4097), now: now))
     }

@@ -63,7 +63,7 @@ session using the actual returned call ID. Calls are captured, never dispatched 
 The current 25 cases cover:
 
 - Ordinary conversation with zero calls.
-- Search, session/personal memory, knowledge retrieval, camera snapshot.
+- Search, session/personal memory, knowledge retrieval, and honest visual limits when no image is supplied. The former camera snapshot MCP was removed by native vision integration; image capture is now a separate per-turn pipeline acceptance, not a text-triggered tool.
 - Coding dispatch/steering/cancel and vision dispatch/cancel.
 - Explicit yes/no and ambiguous project confirmation, plus negated cancellation and discussion-only requests.
 - Requests for each capability with all optional modules disabled (memory remains available).

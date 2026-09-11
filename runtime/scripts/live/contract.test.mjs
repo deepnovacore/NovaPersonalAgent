@@ -13,7 +13,7 @@ test('fixture contract, current built-in surface and expectations cannot silentl
   const parsed = validateFixtures(fixture)
   const full = surface()
   assert.deepEqual(full.tools.map(tool => tool.name).sort(), ['memory__recall','search__search',
-    'mcp__nova_camera__snapshot','mcp__nova_knowledge__recall','dispatch','cancel','confirm'].sort())
+    'mcp__nova_knowledge__recall','dispatch','cancel','confirm'].sort())
   assert.deepEqual(surface(['coding','camera','search','knowledge']).tools.map(tool => tool.name), ['memory__recall'])
   const covered = new Set()
   for (const entry of parsed.cases) for (const step of entry.steps) for (const call of step.expect.calls) {

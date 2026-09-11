@@ -64,7 +64,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
     'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'get', 'knowledgeAction', 'onChanged',
-    'openCurrentManagedWorkspace',
+    'openCurrentManagedWorkspace', 'openPairing',
     'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend',
     'retryMicrophone', 'set',
   ])
@@ -105,7 +105,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
 test('preload exposes a bounded microphone permission lifecycle', async () => {
   const { exposed, ipcRenderer, invokes, sends } = await loadPreload()
 
-  assert.deepEqual(Object.keys(exposed.microphone).sort(), ['onRetry', 'report', 'requestPermission'])
+  assert.deepEqual(Object.keys(exposed.microphone).sort(), ['onRetry', 'onToggle', 'report', 'requestPermission'])
   await exposed.microphone.requestPermission()
   exposed.microphone.report('device_busy')
   const retries = []
@@ -117,6 +117,12 @@ test('preload exposes a bounded microphone permission lifecycle', async () => {
   assert.deepEqual(invokes, [{ channel: 'nova:microphone:permission', payload: undefined }])
   assert.deepEqual(sends, [{ channel: 'nova:microphone:status', payload: 'device_busy' }])
   assert.deepEqual(retries, ['retry'])
+  const toggles = []
+  const stopToggle = exposed.microphone.onToggle(() => toggles.push(true))
+  ipcRenderer.emit('nova:microphone:toggle', {})
+  stopToggle()
+  ipcRenderer.emit('nova:microphone:toggle', {})
+  assert.deepEqual(toggles, [true])
 })
 
 test('preload exposes one bounded native playback mute command', async () => {

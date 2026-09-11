@@ -3,7 +3,6 @@ import {z} from 'zod'
 import {compileToolSchema} from '../../dist/src/tool-schema.js'
 import {frontendInstructions} from '../../dist/src/realtime/frontend-instructions.js'
 import {SEARCH_MANIFEST} from '../../dist/src/executors/search.js'
-import {CAMERA_MCP_MANIFEST} from '../../dist/src/executors/mcp-camera.js'
 import {KNOWLEDGE_MCP_MANIFEST} from '../../dist/src/knowledge/mcp.js'
 import {CODEX_PROJECT_MANIFEST, CODEX_AGENT_SUMMARY} from '../../dist/src/executors/codex/contract.js'
 import {WATCH_MANIFEST, GUARD_MANIFEST} from '../../dist/src/executors/watcher.js'
@@ -16,7 +15,7 @@ export function surface(disabled = []) {
   const modules = Object.fromEntries(['coding', 'camera', 'search', 'knowledge'].map(name => [name, !disabled.includes(name)]))
   const manifests = [
     ...(modules.search ? [SEARCH_MANIFEST] : []),
-    ...(modules.camera ? [CAMERA_MCP_MANIFEST, WATCH_MANIFEST, GUARD_MANIFEST] : []),
+    ...(modules.camera ? [WATCH_MANIFEST, GUARD_MANIFEST] : []),
     ...(modules.knowledge ? [KNOWLEDGE_MCP_MANIFEST] : []),
     ...(modules.coding ? [CODEX_PROJECT_MANIFEST] : []),
   ]

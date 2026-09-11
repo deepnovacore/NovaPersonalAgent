@@ -19,7 +19,7 @@ export class WakeWordRuntime {
     this.queuedBytes = 0
     this.droppedFrames = 0
   }
-  snapshot() { return {state: this.state, status: this.status, epoch: this.epoch} }
+  snapshot() { return {state: this.state, status: this.status, epoch: this.epoch, ...(this.state === 'sleeping' && this.sleepReason === 'bubble' ? {manualSleep: true} : {})} }
   publish() { this.changed(this.snapshot()) }
   reset() {
     this.epoch++
@@ -132,14 +132,16 @@ export class WakeWordRuntime {
     return true
   }
   /**
-   * `reason` separates the two callers, which want opposite things on screen.
+   * `reason` separates idle/bubble sleep from explicit window hiding.
    * An idle timeout should leave a resting bubble behind; an explicit hide
    * (tray, global shortcut) is a "get out of my way" gesture and must still
-   * clear the screen. Both still park the runtime in the same sleeping state.
+   * clear the screen. Bubble sleep also works without the optional detector.
    */
   sleep(reason = 'idle') {
-    if (!this.enabled || this.status !== 'ready' || !this.activated || this.state !== 'active') return false
+    if (this.state !== 'active') return false
+    if (reason !== 'bubble' && (!this.enabled || this.status !== 'ready' || !this.activated)) return false
     this.state = 'sleeping'
+    this.sleepReason = reason
     this.reset()
     this.hide(reason)
     return true

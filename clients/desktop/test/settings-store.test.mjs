@@ -106,6 +106,7 @@ test('the default settings are the documented schema', () => {
     capabilitiesConfigPath: '',
     knowledgePath: '',
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
+    phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
   assert.deepEqual([...SECRET_KEYS], ALL_SECRET_KEYS)
@@ -279,6 +280,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     capabilitiesConfigPath: '',
     knowledgePath: '',
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
+    phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
 })
@@ -348,6 +350,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
+    'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'plannerModel',
@@ -722,6 +725,7 @@ test('publicSettings never carries the secrets object', () => {
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
+    'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'plannerModel',
@@ -1328,4 +1332,21 @@ test('native vision settings persist independently and device IDs have a bounded
   assert.equal(normalizeSettings({monitorCameraDeviceId:'x'.repeat(257)}).monitorCameraDeviceId,'')
   assert.equal(normalizeSettings({monitorCameraDeviceId:'x\n'}).monitorCameraDeviceId,'')
   assert.equal(normalizeSettings({conversationVisionEnabled:'true'}).conversationVisionEnabled,false)
+})
+
+test('phone pairing configuration persists but does not restart or leak into the voice backend', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'nova-phone-settings-'))
+  t.after(() => rm(dir, {recursive: true, force: true}))
+  const fields = {phoneServerPort: 9020, phoneServerTokenFile: '/private/host.token', phoneServerUrl: 'wss://host.example'}
+  const next = applySettingsUpdate(DEFAULT_SETTINGS, fields)
+  const file = join(dir, 'settings.json')
+  await saveSettings(file, next)
+  const loaded = publicSettings(await loadSettings(file))
+  for (const [key, value] of Object.entries(fields)) assert.equal(loaded[key], value)
+  assert.deepEqual(backendSettings(next), backendSettings(DEFAULT_SETTINGS))
+  for (const invalid of [{phoneServerPort: 65536}, {phoneServerTokenFile: '../token'},
+    {phoneServerUrl: 'wss://' + 'x'.repeat(2049)}, {phoneServerUrl: 'ws://host.example'}, {phoneServerUrl: 'wss://u:p@host.example'}, {phoneServerUrl: 'wss://host.example/?token=x'}]) {
+    const rejected = publicSettings(applySettingsUpdate(next, invalid))
+    for (const key of Object.keys(invalid)) assert.equal(rejected[key], fields[key])
+  }
 })

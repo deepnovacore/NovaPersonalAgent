@@ -68,6 +68,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   conversationVisionEnabled: false,
   monitorCameraDeviceId: '',
   watchModel: '',
+  phoneServerPort: 0,
+  phoneServerTokenFile: '',
+  phoneServerUrl: '',
   embeddingProvider: 'dashscope',
   embeddingModel: 'text-embedding-v4',
   capabilitiesConfigPath: '',
@@ -199,6 +202,17 @@ export function validModelBaseUrl(value) {
   } catch {
     return null
   }
+}
+
+function validPhoneServerUrl(value) {
+  const text = validDesktopString(value)
+  if (text === null || text === '') return text
+  if (text.length > 2048) return null
+  try {
+    const url = new URL(text)
+    return url.protocol === 'wss:' && url.hostname && !url.username && !url.password && !url.search && !url.hash
+      && ['', '/', '/client/v1'].includes(url.pathname) ? text : null
+  } catch { return null }
 }
 
 function normalizeCascadedLlmModels(raw, base) {
@@ -416,6 +430,9 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     conversationVisionEnabled: pick(ownEnumerableDataValue(source, 'conversationVisionEnabled'), ownEnumerableDataValue(fallback, 'conversationVisionEnabled'), DEFAULT_SETTINGS.conversationVisionEnabled, validBoolean),
     monitorCameraDeviceId: pick(ownEnumerableDataValue(source, 'monitorCameraDeviceId'), ownEnumerableDataValue(fallback, 'monitorCameraDeviceId'), DEFAULT_SETTINGS.monitorCameraDeviceId, value => typeof value === 'string' && value.length <= 256 && !/[\x00-\x1f]/u.test(value) ? value : null),
     watchModel: pick(ownEnumerableDataValue(source, 'watchModel'), ownEnumerableDataValue(fallback, 'watchModel'), DEFAULT_SETTINGS.watchModel, validModelOrVoice),
+    phoneServerPort: pick(ownEnumerableDataValue(source, 'phoneServerPort'), ownEnumerableDataValue(fallback, 'phoneServerPort'), 0, value => Number.isInteger(value) && value >= 0 && value <= 65535 ? value : null),
+    phoneServerTokenFile: pick(ownEnumerableDataValue(source, 'phoneServerTokenFile'), ownEnumerableDataValue(fallback, 'phoneServerTokenFile'), '', value => { const path = validDesktopString(value); return path !== null && (path === '' || isAbsolute(path)) ? path : null }),
+    phoneServerUrl: pick(ownEnumerableDataValue(source, 'phoneServerUrl'), ownEnumerableDataValue(fallback, 'phoneServerUrl'), '', validPhoneServerUrl),
     embeddingProvider: pick(
       acceptsV4Fields ? ownEnumerableDataValue(source, 'embeddingProvider') : MISSING_PROPERTY,
       acceptsV4Fields ? ownEnumerableDataValue(fallback, 'embeddingProvider') : MISSING_PROPERTY,
@@ -445,7 +462,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
 }
 
 export function backendSettings(settings) {
-  const {palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, ...backend} = normalizeSettings(settings)
+  const {palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -485,6 +502,9 @@ export function publicSettings(settings) {
     conversationVisionEnabled: normalized.conversationVisionEnabled,
     monitorCameraDeviceId: normalized.monitorCameraDeviceId,
     watchModel: normalized.watchModel,
+    phoneServerPort: normalized.phoneServerPort,
+    phoneServerTokenFile: normalized.phoneServerTokenFile,
+    phoneServerUrl: normalized.phoneServerUrl,
     embeddingProvider: normalized.embeddingProvider,
     embeddingModel: normalized.embeddingModel,
     capabilitiesConfigPath: normalized.capabilitiesConfigPath,
@@ -672,6 +692,9 @@ export function applySettingsUpdate(current, patch, codec) {
     conversationVisionEnabled: ownEnumerableDataValue(source, 'conversationVisionEnabled'),
     monitorCameraDeviceId: ownEnumerableDataValue(source, 'monitorCameraDeviceId'),
     watchModel: ownEnumerableDataValue(source, 'watchModel'),
+    phoneServerPort: ownEnumerableDataValue(source, 'phoneServerPort'),
+    phoneServerTokenFile: ownEnumerableDataValue(source, 'phoneServerTokenFile'),
+    phoneServerUrl: ownEnumerableDataValue(source, 'phoneServerUrl'),
     embeddingProvider: ownEnumerableDataValue(source, 'embeddingProvider'),
     embeddingModel: ownEnumerableDataValue(source, 'embeddingModel'),
     capabilitiesConfigPath: ownEnumerableDataValue(source, 'capabilitiesConfigPath'),

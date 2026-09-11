@@ -3,6 +3,7 @@ import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createBackendControl} from './backend-control.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
+import {launchDevicePairing} from './device-pairing.mjs'
 import {activeMcpMenuRows} from './orb-menu.mjs'
 import {parseSettingsCommit, validatePreparedSettings, prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, assertEditorSafe, referencedCapabilitySecrets, capabilityPath, capabilityDocumentRevision, invalidCommit} from './capabilities-settings.mjs'
 import {parseCapabilityRegistry} from '@nova-audio-agent/runtime/desktop'
@@ -494,8 +495,49 @@ function activeMcpSubmenu(launchId) {
     : { label: row.label, enabled: false }))
 }
 
+let pairingWindowOpen = false
+async function openPairingWindow(launchId = activeLaunchId) {
+  if (pairingWindowOpen) return
+  pairingWindowOpen = true
+  try {
+    if (process.platform !== 'darwin') {
+      await dialog.showMessageBox(mainWindow, {type: 'info', message: '请在 Mac 主机上打开配对二维码', detail: '当前配对窗口仅支持 macOS。'})
+      return
+    }
+    const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
+    const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server-config.js')).href)
+    if (!currentSettings.phoneServerPort || !currentSettings.phoneServerTokenFile || !currentSettings.phoneServerUrl) {
+      openSettingsWindow(launchId, {category: 'phone'})
+      return
+    }
+    let config
+    try {
+      config = {...loadServerConfig({
+        NOVA_AUDIO_AGENT_SERVER_PORT: String(currentSettings.phoneServerPort),
+        NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile,
+      }), server: currentSettings.phoneServerUrl}
+    } catch {
+      openSettingsWindow(launchId, {category: 'phone'})
+      await dialog.showMessageBox(settingsWindow, {type: 'error', message: '请检查手机连接配置',
+        detail: '认证文件必须与运行中的服务一致，且是当前用户拥有的私有文件（权限 0600）。请检查文件路径和服务端口。'})
+      return
+    }
+    await launchDevicePairing({config, scriptPath: app.isPackaged
+      ? resolve(process.resourcesPath, 'pair-device.swift')
+      : resolve(packageRoot, '../../runtime/scripts/pair-device.swift')})
+  } catch {
+    await dialog.showMessageBox(mainWindow, {type: 'error', message: '无法打开配对窗口', detail: '请确认已安装 Xcode Command Line Tools，并检查手机连接服务是否运行。'})
+  } finally { pairingWindowOpen = false }
+}
+
+function sleepOrb() {
+  wakeWord?.sleep('bubble')
+}
+
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
+    { label: wakeWord?.state === 'sleeping' ? '唤醒' : '休眠', click: () => wakeWord?.state === 'sleeping' ? wakeWord.wake() : sleepOrb() },
+    { label: '连接 iPhone…', click: () => { void openPairingWindow() } },
     { label: '记忆面板', click: () => openMemoryBoard(launchId) },
     { label: '设置…', click: () => openSettingsWindow(launchId) },
     { label: 'MCP 服务', submenu: activeMcpSubmenu(launchId) },
@@ -997,6 +1039,9 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   ipcMain.on('nova:orb-menu:show', event => {
     if (mainWindow && event.sender === mainWindow.webContents) showOrbMenu(launchId)
   })
+  ipcMain.on('nova:pairing:open', (event, ...args) => {
+    if (settingsWindow && event.sender === settingsWindow.webContents && args.length === 0) void openPairingWindow(launchId)
+  })
   ipcMain.on('nova:settings:open', event => {
     if (mainWindow && event.sender === mainWindow.webContents) openSettingsWindow(launchId)
   })
@@ -1242,6 +1287,12 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   ipcMain.on('nova:wake-word:audio', (event, value) => {
     if (event.sender === mainWindow?.webContents) wakeWord?.accept(value)
   })
+  ipcMain.on('nova:wake-word:sleep', (event, ...args) => {
+    if (mainWindow && event.sender === mainWindow.webContents && args.length === 0) sleepOrb()
+  })
+  ipcMain.on('nova:wake-word:wake', (event, ...args) => {
+    if (mainWindow && event.sender === mainWindow.webContents && args.length === 0) wakeWord?.wake()
+  })
   ipcMain.on('nova:wake-word:activity', event => {
     if (event.sender === mainWindow?.webContents || event.sender === settingsWindow?.webContents) wakeWord?.activity()
   })
@@ -1462,6 +1513,12 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   // that instead of leaving the user to wonder why the hotkey never fires.
   if (!shortcutRegistered) {
     console.warn('[nova-audio-agent-desktop] global shortcut unavailable on this session')
+  }
+  for (const [key, action] of [
+    ['Control+M', () => sendToOrb('nova:microphone:toggle')],
+    ['Control+L', sleepOrb],
+  ]) {
+    if (!globalShortcut.register(key, action)) console.warn(`[nova-audio-agent-desktop] shortcut unavailable: ${key}`)
   }
   backendSupervisor = createBackendSupervisor({
     start: onExit => launchBackend(backendKind, smokeChannel, onExit),

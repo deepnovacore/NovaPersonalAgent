@@ -62,6 +62,8 @@ const restartNotice = document.querySelector('#restart-notice')
 const warning = document.querySelector('#keyring-warning')
 const settingsRestore = document.querySelector('#settings-restore')
 const settingsSave = document.querySelector('#settings-save')
+const phoneFields = {phoneServerPort: document.querySelector('#phone-server-port'), phoneServerTokenFile: document.querySelector('#phone-server-token-file'), phoneServerUrl: document.querySelector('#phone-server-url')}
+const phonePairingOpen = document.querySelector('#phone-pairing-open')
 const settingsRestart = document.querySelector('#settings-restart')
 let restarting = false
 const workspaceOpenCurrent = document.querySelector('#workspace-open-current')
@@ -313,6 +315,8 @@ function render(view, _drafts, state) {
   capabilityEditor.render(view)
   knowledgePanel.render(view)
   for (const input of capabilitySettings) input.value = view[input.id] ?? ''
+  for (const [key, input] of Object.entries(phoneFields)) input.value = String(view[key] || '')
+  phonePairingOpen.disabled = state.busy
   controllerState = state
   wakeEnabled.checked = view.wakeWordEnabled === true
   autoHideSeconds.value = String(view.autoHideSeconds ?? 60)
@@ -419,6 +423,8 @@ function bindStage(element, event, patch) {
   element.addEventListener(event, () => { controller.stage(patch()) })
 }
 
+for (const [key, input] of Object.entries(phoneFields)) bindStage(input, 'input', () => ({[key]: key === 'phoneServerPort' ? Number(input.value) : input.value}))
+
 bindStage(wakeEnabled, 'change', () => ({wakeWordEnabled: wakeEnabled.checked}))
 bindStage(autoHideSeconds, 'change', () => {
   const value = Number(autoHideSeconds.value)
@@ -517,13 +523,19 @@ async function saveAll() {
     }
   }
   renderBadges(currentView?.secretsPresent, currentView?.secretSources)
-  if (result.rejectedSecrets.length) {
+  if (result.rejectedSecrets && result.rejectedSecrets.length) {
     const labels = result.rejectedSecrets.map(key => SECRET_LABELS[key])
     statusLabel.textContent = `部分密钥未保存(含非法字符): ${labels.join('、')}`
   }
   updateButtons()
+  return result
 }
 
+phonePairingOpen.addEventListener('click', async () => {
+  if (controllerState.busy) return
+  const result = await saveAll()
+  if (result.saved) api.openPairing()
+})
 settingsSave.addEventListener('click', () => { void saveAll() })
 settingsRestart.addEventListener('click', async () => {
   if (restarting) return

@@ -51,6 +51,7 @@ const orb = document.querySelector('#orb')
 const muteToggle = document.querySelector('#mute-toggle')
 const speakerToggle = document.querySelector('#speaker-toggle')
 const cameraToggle = document.querySelector('#camera-toggle')
+const sleepButton = document.querySelector('#sleep-orb')
 const openSettingsButton = document.querySelector('#open-settings')
 const stateLabel = document.querySelector('#state-label')
 const codexLabel = document.querySelector('#codex-label')
@@ -319,7 +320,10 @@ const backendRecovery = new BackendReconnectController({
 function render() {
   const state = deriveOrbState(axes)
   shell.dataset.state = state.name
-  setText(stateLabel, state.statusLine)
+  const sleeping = axes.wakeState === 'sleeping'
+  setText(stateLabel, sleeping ? '已休眠 · 点击唤醒' : state.statusLine)
+  setAttribute(orb, 'role', sleeping ? 'button' : 'img')
+  setAttribute(orb, 'tabindex', sleeping ? '0' : '-1')
   setText(codexSummary, state.projectLabel)
   setText(codexOperation, state.confirmationOperation)
   setAttribute(codexOperation, 'title', state.confirmationOperation)
@@ -333,6 +337,7 @@ function render() {
   const dormant = orbDormant({
     stateName: state.name,
     wakeState: axes.wakeState,
+    manualSleep: axes.manualSleep,
     hovered: axes.hovered,
     executorWorking: axes.codex === 'working',
     confirmationVisible: state.confirmationVisible,
@@ -357,7 +362,7 @@ function render() {
   confirmationAllowSession.disabled = !decisionEnabled
   confirmationCancel.disabled = !decisionEnabled
   setText(aecLabel, state.aecLabel)
-  setAttribute(orb, 'aria-label', `${state.label}；${state.accessibleCodexLabel}`)
+  setAttribute(orb, 'aria-label', sleeping ? '已休眠，点击唤醒' : `${state.label}；${state.accessibleCodexLabel}`)
   orb.dataset.captureActive = String(axes.activated)
   muteToggle.disabled = !axes.activated
   muteToggle.setAttribute('aria-pressed', String(axes.muted))
@@ -613,6 +618,11 @@ function applyWakeState(value) {
   // was read only for audio routing. It now drives the dormant bubble, so the
   // renderer has to keep it.
   axes.wakeState = typeof value?.state === 'string' ? value.state : 'active'
+  axes.manualSleep = value?.manualSleep === true
+  if (axes.wakeState === 'sleeping') axes.hovered = false
+  taskBanner.setSuspended(axes.manualSleep)
+  if (axes.manualSleep) void progressBubbles.clear()
+  sleepButton.title = value?.status === 'ready' && !axes.muted ? '休眠（Ctrl+L）；点击或说“你好星核”唤醒' : '休眠；唤醒词不可用时请点击恢复'
   if (value?.state === 'blocked') {
     axes.muted = true
   }
@@ -875,7 +885,7 @@ async function handleControl(message) {
     send({ type: 'clock.pong', ping_id: message.ping_id, t_render_ms: performance.now() })
   } else if (message.type === CAPTION) {
     const reply = parseConversationBubble(message, bubbleMode)
-    if (reply) void progressBubbles.push(reply)
+    if (reply && !axes.manualSleep) void progressBubbles.push(reply)
     captionLabel.textContent = message.text
     captionLabel.dataset.role = message.role
     captionLabel.hidden = !message.text
@@ -996,7 +1006,7 @@ async function handleControl(message) {
     taskBanner.receiveActionResult(message)
   } else if (message.type === EXECUTOR_PROGRESS) {
     const frame = parseProgressFrame(message)
-    if (frame !== null && (message.phase === 'alert' || (message.executor !== axes.executorId
+    if (!axes.manualSleep && frame !== null && (message.phase === 'alert' || (message.executor !== axes.executorId
       && !taskBanner.state().tasks.some(task => task.work_id === frame.delegateId)))) void progressBubbles.push(frame)
   } else if (message.type === EXECUTOR_RESULTS_RESET) {
     if (Object.keys(message).length === 1) {
@@ -1203,6 +1213,7 @@ async function boot() {
       axes.backendState = status.state
       render()
     })
+    window.novaAudioAgentDesktop.microphone.onToggle(toggleMute)
     window.novaAudioAgentDesktop.microphone.onRetry(() => {
       void retryMicrophonePermission()
     })
@@ -1295,8 +1306,15 @@ orb.addEventListener('pointermove', event => {
 function finishDrag(cancelled = false) {
   const result = cancelled ? dragGesture.cancel() : dragGesture.finish()
   if (result.active) window.novaAudioAgentDesktop.windowDrag.end()
+  if (result.active && !cancelled && !result.dragged && axes.wakeState === 'sleeping') window.novaAudioAgentDesktop.wakeWord.wake()
 }
 
+orb.addEventListener('keydown', event => {
+  if (axes.wakeState === 'sleeping' && ['Enter', ' '].includes(event.key)) {
+    event.preventDefault()
+    window.novaAudioAgentDesktop.wakeWord.wake()
+  }
+})
 orb.addEventListener('pointerup', () => finishDrag(false))
 orb.addEventListener('pointercancel', () => finishDrag(true))
 orb.addEventListener('pointerenter', () => paletteHover.enter())
@@ -1323,6 +1341,7 @@ document.body.addEventListener('mouseleave', () => {
 muteToggle.addEventListener('click', () => toggleMute())
 speakerToggle.addEventListener('click', () => { void toggleOutputMuted() })
 cameraToggle.addEventListener('click', () => window.novaAudioAgentDesktop.orbMenu.openSettings())
+sleepButton.addEventListener('click', () => window.novaAudioAgentDesktop.wakeWord.sleep())
 openSettingsButton.addEventListener('click', () => window.novaAudioAgentDesktop.orbMenu.openSettings?.())
 confirmationConfirm.addEventListener('click', () => {
   if (!confirmationUnexpired()) return

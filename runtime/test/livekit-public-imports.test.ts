@@ -246,3 +246,17 @@ test('repository production sources and workspace manifests obey the public boun
   assert.equal(runtimeManifest.dependencies?.['@livekit/agents'], '1.6.4')
   assert.equal(runtimeManifest.dependencies?.['@livekit/rtc-node'], '0.13.33')
 })
+
+test('standalone EOT permits only its isolated public inference adapter and exact runtime pin', () => {
+  const path = 'runtime/src/realtime/volcengine/local-eot-executor.ts'
+  const source = "const load = () => import('@livekit/local-inference')"
+  const inventory = {productionSources: [{path, source}], packageManifests: [{path: 'runtime/package.json',
+    manifest: {dependencies: {'@livekit/local-inference': '0.2.7'}}}]}
+  assert.deepEqual(scanLiveKitPublicSurface(inventory), [])
+  assert.equal(scanLiveKitPublicSurface({...inventory, productionSources: [{path: 'other.ts', source}]}).length, 1)
+  assert.equal(scanLiveKitPublicSurface({...inventory, productionSources: [{path, source: source.replace('local-inference', 'local-inference/private')}]}).length, 1)
+  for (const version of ['^0.2.7', '0.2.8']) {
+    assert.equal(scanLiveKitPublicSurface({productionSources: [], packageManifests: [{path: 'runtime/package.json',
+      manifest: {dependencies: {'@livekit/local-inference': version}}}]}).length, 1)
+  }
+})

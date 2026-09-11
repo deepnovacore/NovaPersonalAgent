@@ -24,7 +24,7 @@ export function pairingEndpoint(text: string): string {
 /** One host process owns this private store. No model credentials or raw device tokens are persisted. */
 export class ClientPairing {
   readonly #devices: Device[]
-  #pending: {hash: string; expires: number} | undefined
+  #pending: {hash: string} | undefined
   readonly #connections = new Map<string, Set<() => void>>()
   #sockets = 0
   #attempts: number[] = []
@@ -59,13 +59,12 @@ export class ClientPairing {
     this.#devices.splice(0, this.#devices.length, ...devices)
   }
 
-  create(server: string): {type: 'nova.pair'; version: 1; server: string; code: string; expires_at: number} {
+  create(server: string): {type: 'nova.pair'; version: 1; server: string; code: string} {
     const endpoint = pairingEndpoint(server)
     if (this.#devices.length >= 32) throw new Error('device limit reached')
     const code = randomBytes(16).toString('hex')
-    const expires_at = this.now() + 120_000
-    this.#pending = {hash: hash(code), expires: expires_at}
-    return {type: 'nova.pair', version: 1, server: endpoint, code, expires_at}
+    this.#pending = {hash: hash(code)}
+    return {type: 'nova.pair', version: 1, server: endpoint, code}
   }
 
   cancel(code: string): void {
@@ -75,7 +74,7 @@ export class ClientPairing {
   redeem(code: string, name: string): {type: 'pair.ready'; token: string; device_id: string} {
     secret.parse(code)
     const deviceName = z.string().trim().min(1).max(80).regex(/^[^\p{Cc}]*$/u).parse(name)
-    if (!this.#pending || this.now() >= this.#pending.expires || !equal(hash(code), this.#pending.hash)
+    if (!this.#pending || !equal(hash(code), this.#pending.hash)
       || this.#devices.length >= 32) throw new Error('pairing unavailable')
     const token = randomBytes(16).toString('hex')
     const device = {id: randomUUID(), name: deviceName, created_at: this.now(), hash: hash(token)}
@@ -121,7 +120,7 @@ export class ClientPairing {
     const timeout = setTimeout(() => socket.terminate(), 5000)
     socket.once('close', () => { clearTimeout(timeout); this.#sockets-- })
     socket.once('message', (data, binary) => {
-      let result: object = {type: 'pair.error', message: '配对失败：二维码已过期、已使用或请求无效。'}
+      let result: object = {type: 'pair.error', message: '配对失败：二维码已失效、已使用或请求无效。'}
       try {
         const bytes = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer)
         if (binary || bytes.byteLength > 4096) throw new Error('invalid pairing frame')
@@ -135,7 +134,7 @@ export class ClientPairing {
             if (frame.type === 'pair.revoke') this.revoke(frame.device_id ?? '')
             if (frame.type === 'pair.cancel') this.cancel(frame.code ?? '')
             result = {type: 'pair.devices', devices: this.list(), pairing_active: Boolean(frame.code && this.#pending
-              && this.now() < this.#pending.expires && equal(hash(frame.code), this.#pending.hash))}
+              && equal(hash(frame.code), this.#pending.hash))}
           }
         } else {
           const now = this.now()

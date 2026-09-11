@@ -24,7 +24,7 @@ export function parseTaskSnapshot(frame) {
 /** View-local selection and pending clicks; task truth always comes from a host snapshot. */
 export function createTaskBannerController({send, onChange = () => {}, now = Date.now, schedule = setTimeout, cancel = clearTimeout}) {
   let tasks = [], selectedId = null, revision = -1, activeProject = null
-  let hidden = false, connected = false, paused = false, sequence = 0
+  let suspended = false, hidden = false, connected = false, paused = false, sequence = 0
   let terminalTimer = null, terminalId = null, terminalDue = 0, remaining = 8000
   const expired = new Set(), pending = new Map(), cancelling = new Set(), errors = new Map()
   const selected = () => tasks.find(task => task.work_id === selectedId) ?? null
@@ -34,7 +34,7 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
     const item = selected()
     if (!item || !AUTO_HIDE.has(item.phase)) { terminalId = null; return }
     if (terminalId !== item.work_id) { terminalId = item.work_id; remaining = 8000 }
-    if (paused || hidden || !connected) return
+    if (paused || hidden || suspended || !connected) return
     terminalDue = now() + remaining
     terminalTimer = schedule(() => {
       expired.add(item.work_id)
@@ -54,7 +54,7 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
   function state() {
     const item = selected()
     return {tasks: tasks.map(task => ({...task})), selected: item ? {...item} : null,
-      visible: !hidden && item !== null, connected, runningCount: tasks.filter(task => RUNNING.has(task.phase)).length,
+      visible: !suspended && !hidden && item !== null, connected, runningCount: tasks.filter(task => RUNNING.has(task.phase)).length,
       cancelling: cancelling.has(selectedId), opening: [...pending.values()].some(p => p.work_id === selectedId && p.action === 'open'),
       error: errors.get(selectedId) ?? ''}
   }
@@ -120,6 +120,11 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
   return Object.freeze({state, receive, select, action, receiveActionResult,
     connect() { revision = -1; connected = false; clearPending(); emit() },
     disconnect() { connected = false; clearPending(); stopTerminal(); emit() },
+    setSuspended(value) {
+      if (suspended === value) return
+      if (terminalTimer !== null) remaining = Math.max(0, terminalDue - now())
+      suspended = value; armTerminal(); emit()
+    },
     dismiss() { hidden = true; stopTerminal(); emit() },
     restore() { if (!tasks.length) return false; hidden = false; expired.clear(); choose(); armTerminal(); emit(); return true },
     pause() { if (paused) return; paused = true; if (terminalTimer !== null) remaining = Math.max(0, terminalDue - now()); stopTerminal() },

@@ -456,3 +456,35 @@ test('blocked manual hide wakes recovery and tray/shortcut dispatch through hide
   assert.equal(hidden, 2)
   assert.equal(woke, 3)
 })
+
+
+test('explicit bubble sleep works without a detector and resumes without changing mute', () => {
+  for (const status of ['off', 'loading', 'ready', 'error']) {
+    const reasons = []
+    const runtime = new WakeWordRuntime({modelRoot: '/unused', hide: reason => reasons.push(reason)})
+    runtime.status = status
+    const muted = runtime.muted
+    assert.equal(runtime.sleep('bubble'), true)
+    assert.equal(runtime.state, 'sleeping')
+    assert.deepEqual(reasons, ['bubble'])
+    assert.equal(runtime.accept({epoch: runtime.epoch, pcm: new Uint8Array(640)}), false)
+    runtime.wake()
+    assert.equal(runtime.state, 'active')
+    assert.equal(runtime.muted, muted)
+  }
+})
+
+test('Control M toggles the existing microphone path and Control L uses bubble sleep', () => {
+  const source = readFileSync(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const start = source.indexOf("for (const [key, action] of [")
+  const end = source.indexOf('\n  backendSupervisor', start)
+  const registered = new Map(), sent = []
+  let slept = 0
+  new Function('globalShortcut', 'sendToOrb', 'sleepOrb', source.slice(start, end))(
+    {register: (key, callback) => { registered.set(key, callback); return true }},
+    channel => sent.push(channel), () => slept++)
+  registered.get('Control+M')()
+  registered.get('Control+L')()
+  assert.deepEqual(sent, ['nova:microphone:toggle'])
+  assert.equal(slept, 1)
+})

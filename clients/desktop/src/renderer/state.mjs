@@ -185,6 +185,9 @@ const RESTABLE_STATES = new Set(['idle', 'inactive'])
  * where an idle-but-working session would rest and hide its own task banner.
  */
 export function orbDormant(input) {
+  if (input?.manualSleep === true && input.wakeState === 'sleeping') {
+    return !input.hovered && !input.confirmationVisible && !input.bubblesVisible
+  }
   if (!RESTABLE_STATES.has(input?.stateName)) return false
   const resting = input.wakeState === 'sleeping' || input.stateName === 'inactive'
   return resting

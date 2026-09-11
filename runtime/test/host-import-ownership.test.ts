@@ -147,11 +147,11 @@ test('actual desktop entry preserves production provider usage through private I
     }
     return next(specifier, context);
   }`
-  const script = `import {register} from 'node:module'; import {EventEmitter} from 'node:events';
+  const script = `import {register} from 'node:module'; import {EventEmitter} from 'node:events'; import {writeSync} from 'node:fs';
     const frames = []; process.parentPort = Object.assign(new EventEmitter(), {postMessage: frame => frames.push(frame)});
     register('data:text/javascript,' + encodeURIComponent(${JSON.stringify(hook)}), import.meta.url);
-    await import(${JSON.stringify(target)});
-    process.stdout.write(JSON.stringify(frames));`
+    process.once('exit', () => writeSync(1, JSON.stringify(frames)));
+    await import(${JSON.stringify(target)});`
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', script], {encoding: 'utf8', timeout: 20_000})
   assert.equal(result.status, 0, result.stderr)
   assert.deepEqual(JSON.parse(result.stdout), [{type: 'nova.usage', report: {...report, pricingRegion: 'cn-beijing'}}])

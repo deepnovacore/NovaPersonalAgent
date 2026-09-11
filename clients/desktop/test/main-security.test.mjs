@@ -44,6 +44,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:microphone:permission',
     'nova:microphone:retry',
     'nova:microphone:status',
+    'nova:microphone:toggle',
     'nova:native-audio:capture',
     'nova:native-audio:clear',
     'nova:native-audio:event',
@@ -52,6 +53,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:native-audio:terminal',
     'nova:orb-menu:show',
     'nova:orb:dormant',
+    'nova:pairing:open',
     'nova:projects:repair',
     'nova:release-camera:result',
     'nova:settings:changed',
@@ -63,6 +65,8 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:wake-word:changed',
     'nova:wake-word:report',
     'nova:wake-word:retry',
+    'nova:wake-word:sleep',
+    'nova:wake-word:wake',
     'nova:window-drag:end',
     'nova:window-drag:move',
     'nova:window-drag:start',
@@ -1051,4 +1055,23 @@ test('workspace cleanup cannot restart a backend while settings recovery is pend
   context.settingsRecoveryAvailable = false
   assert.equal(await callbacks.restartBackendBounded(), true)
   assert.equal(restarts, 1)
+})
+
+
+test('sleep and wake IPC reject other windows and unexpected arguments', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const sender = {}
+  for (const action of ['sleep', 'wake']) {
+    const start = source.indexOf(`ipcMain.on('nova:wake-word:${action}',`)
+    const body = source.slice(start, source.indexOf('\n  })', start) + 5)
+    let handler, calls = 0
+    new Function('ipcMain', 'mainWindow', 'sleepOrb', 'wakeWord', body)(
+      {on: (_name, callback) => { handler = callback }}, {webContents: sender},
+      () => calls++, {wake: () => calls++})
+    handler({sender: {}})
+    handler({sender}, 'unexpected')
+    assert.equal(calls, 0)
+    handler({sender})
+    assert.equal(calls, 1)
+  }
 })

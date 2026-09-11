@@ -77,6 +77,8 @@ mac:
   target:
     - dir
   extraResources:
+    - from: ../../runtime/scripts/pair-device.swift
+      to: pair-device.swift
     - from: build/macos_voice_io
       to: native/macos_voice_io
     - from: build/native/codex-sandbox-probe

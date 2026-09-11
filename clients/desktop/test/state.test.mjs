@@ -411,3 +411,13 @@ test('resting tolerates a missing or partial input', () => {
   assert.equal(orbDormant({}), false)
   assert.equal(orbDormant({ stateName: 'inactive' }), true)
 })
+
+
+test('explicit sleep shrinks muted and working states without hiding confirmation', () => {
+  for (const stateName of ['idle', 'muted', 'speaking']) {
+    const value = {...dormantBase, stateName, wakeState: 'sleeping', manualSleep: true, executorWorking: true}
+    assert.equal(orbDormant(value), true)
+    assert.equal(orbDormant({...value, confirmationVisible: true}), false)
+    assert.equal(orbDormant({...value, hovered: true}), false)
+  }
+})

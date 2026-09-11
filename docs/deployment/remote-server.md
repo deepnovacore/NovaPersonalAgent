@@ -343,10 +343,14 @@ Phone disconnection preserves the host graph and authorized background work whil
 npm run server:pair --workspace @nova-audio-agent/runtime -- wss://你的主机.ts.net
 ```
 
-窗口提供二维码、有效期、已配对设备和撤销按钮。手机在 Nova 的连接设置选择“扫码连接主机”，确认地址后即可保存并连接。此入口适用于 Relay、AOQ Chat 和 AOQ Runtime，旧手填配置继续可用。主机长期 token 只通过子进程 stdin 和 loopback 管理连接传递，不进入二维码、进程参数、日志或图片文件。
+窗口提供二维码、已配对设备和撤销按钮。手机在 Nova 的连接设置选择“扫码连接主机”，确认地址后即可保存并连接。此入口适用于 Relay、AOQ Chat 和 AOQ Runtime，旧手填配置继续可用。主机长期 token 只通过子进程 stdin 和 loopback 管理连接传递，不进入二维码、进程参数、日志或图片文件。
 
 配对使用现有端口的 `/client/pair` WebSocket；管理窗口使用 `/client/pair-admin`，每个管理请求都必须携带原有主机 token，设备 token 无管理权限。Tailscale Serve 需代理整个服务（包括这两个路径和 `/client/v1`），仍使用系统 TLS 校验。配对连接不占用音频连接名额、不构造 AOQ 会话或触发 Runtime 工具。
 
 服务把设备 ID、名称、创建时间和 token 哈希原子写入 `${NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE}.devices.json`（0600），最多 32 台。请继续将 token 及其设备文件放在 0700 私有目录，并保证单个服务进程拥有此目录。不可让多个实例共写设备文件。服务拒绝非私有、损坏或与主机 token 不匹配的设备文件；不要在运行中编辑文件。轮换主机 token 时，停止服务并同时移走旧设备文件，重新初始化、启动后重新配对手机。
 
-二维码有效期为 120 秒，只有一次兑换机会；刷新使旧码失效。关闭窗口取消尚未兑换的码，异常退出依靠到期失效。兑换响应丢失会留下可在窗口中撤销的设备记录，重新扫码即可。撤销独立设备不会影响其他设备凭据；手填共享主机 token 的连接需要轮换主机 token 才能整体撤销。
+二维码不设置时间有效期，只有一次兑换机会；刷新使旧码失效。关闭窗口取消尚未兑换的码，异常退出后可重新生成二维码或重启服务，使旧码失效。兑换响应丢失会留下可在窗口中撤销的设备记录，重新扫码即可。撤销独立设备不会影响其他设备凭据；手填共享主机 token 的连接需要轮换主机 token 才能整体撤销。
+
+桌面端（macOS）也可右键悬浮球，选择“连接 iPhone…”。首次会自动打开设置的“连接 iPhone”页，填写本机服务端口、服务认证文件的绝对路径和手机可访问的 WSS 地址，点击“保存并显示二维码”。配置持久化保存，下次直接显示二维码；认证文件仍须符合私有文件权限要求。可在电脑和 iPhone 安装 Tailscale 并加入同一网络，使用 [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) 提供服务的 HTTPS 地址，再以 wss:// 形式填写。
+
+此入口复用 Swift 配对窗口，需要 Xcode Command Line Tools；独立手机服务仍需先启动，桌面本机后台不会自动开启它。新版无时间有效期二维码需要更新 iOS 客户端，旧客户端不支持省略 `expires_at`。

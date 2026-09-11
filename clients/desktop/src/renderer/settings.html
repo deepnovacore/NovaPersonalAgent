@@ -21,9 +21,23 @@
       <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">能力与 MCP</button>
       <button type="button" class="nav-item" id="category-knowledge" data-category="knowledge" aria-current="false" tabindex="-1">知识库</button>
       <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
+      <button type="button" class="nav-item" id="category-phone" data-category="phone" aria-current="false" tabindex="-1">连接 iPhone</button>
       <button type="button" class="nav-item" id="category-codex" data-category="codex" aria-current="false" tabindex="-1">Coding 执行器与工作区</button>
     </nav>
     <main>
+      <section class="setting-section" id="phone-connection-section">
+        <h2>连接 iPhone</h2>
+        <p>先启动供 iPhone 连接的 Nova 服务，再填写同一服务的连接信息。保存后立即用于配对，无需重启；右键悬浮球选择“连接 iPhone…”即可直接显示二维码。</p>
+        <label for="phone-server-port">本机服务端口</label>
+        <input id="phone-server-port" type="number" min="1" max="65535" placeholder="与 Nova 服务的端口一致">
+        <label for="phone-server-token-file">服务认证文件路径</label>
+        <input id="phone-server-token-file" type="text" placeholder="认证文件的绝对路径" autocomplete="off" spellcheck="false">
+        <p>使用服务的同一份私有认证文件；此处只保存路径。</p>
+        <label for="phone-server-url">手机可访问的 WSS 地址</label>
+        <input id="phone-server-url" type="text" placeholder="wss://你的主机.ts.net" autocomplete="off" spellcheck="false">
+        <p>可在电脑和 iPhone 安装 Tailscale，登录同一网络，再用 Tailscale Serve 为本机服务提供 HTTPS 地址，将地址开头改为 wss:// 填入。二维码仅可使用一次，关闭窗口即取消。</p>
+        <button type="button" id="phone-pairing-open">保存并显示二维码</button>
+      </section>
       <section class="setting-section" id="frontend-usage-section">
         <h2>用量与费用</h2>
         <div class="usage-overview" aria-label="用量统计范围">

@@ -23,6 +23,7 @@ import {
   shutdownBackend,
   shutdownBackendBestEffort,
   watchBackendExit,
+  waitForBackendReadiness,
 } from '../src/main/backend.mjs'
 
 // Keep macOS Unix socket paths short; other platforms use their own temporary directory.
@@ -190,8 +191,12 @@ async function run() {
       '{"type":"executor.state","executor":"codex","display_name":"Codex","state":"idle"}',
     ])
 
+    let forced = false
+    const kill = child.kill.bind(child)
+    child.kill = () => { forced = true; return kill() }
     await shutdownBackend(child, { graceMs: 2000 })
     assert.equal(await exited, 0, diagnostics)
+    assert.equal(forced, false, 'a drained utility must exit without the force-kill deadline')
   } catch (error) {
     const diagnostic = diagnostics.match(/\[(?:runtime|desktop)-diagnostic\] [a-z_]+/u)?.[0] ?? 'unavailable'
     throw new Error(`utility_runtime_smoke_failed diagnostic=${diagnostic}`, {cause: error})
@@ -266,7 +271,7 @@ async function runCapabilityStatus() {
       const context = vm.createContext({readCapabilityDocument, classifyBackendFailure, createBackendDiagnosticCollector, createBackendControl,
         createReadinessListener: options => createReadinessListener({...options, onTimeout: () => {
           readinessTimeouts++; trace('readiness timeout requests child cleanup'); options.onTimeout?.()
-        }}), shutdownBackend, shutdownBackendBestEffort, watchBackendExit, validateBootstrap, backendLaunchSpec, randomBytes, resolve,
+        }}), shutdownBackend, shutdownBackendBestEffort, watchBackendExit, waitForBackendReadiness, validateBootstrap, backendLaunchSpec, randomBytes, resolve,
         process: {env: environment, cwd: () => root}, app: {isPackaged: false, getAppPath: () => packageRoot}, packageRoot,
         currentSettings: {capabilitiesConfigPath: path, pipelineMode: 'integrated'}, desktopConfig: {workspace: root, modelBaseUrl: `https://127.0.0.1:${port}`}, codexStatus: {status: 'ready'},
         settingsGeneration: 9, launchGeneration: 0, runtimeCapabilities: null, backendControl: null, backend: null, backendGeneration: 0,
@@ -319,7 +324,11 @@ async function runCapabilityStatus() {
         outcomes.push({budget, count: value.toolCount, state: value.state, events,
           publicStates: [...new Set(snapshots.map(snapshot => snapshot.runtime?.state).filter(Boolean))], readinessTimeouts, servers: value.servers,
           ...(memoryClear === undefined ? {} : {memoryClear})})
-      } finally {await context.backendSupervisor.stop()}
+      } finally {
+        const started = performance.now()
+        await context.backendSupervisor.stop()
+        assert.ok(performance.now() - started < 2000, 'drained utility exits without the 32-second kill deadline')
+      }
     }
     assert.equal(listed, 2)
     assert.equal(called, 0)

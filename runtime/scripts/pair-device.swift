@@ -3,6 +3,15 @@ import CoreImage.CIFilterBuiltins
 
 struct Configuration: Decodable { let port: Int; let token: String; let server: String }
 
+func pairingAddress(_ text: String) -> String? {
+    guard text.utf8.count <= 2048, var parts = URLComponents(string: text),
+          parts.scheme == "wss", let host = parts.host, !host.isEmpty,
+          parts.user == nil, parts.password == nil, parts.query == nil, parts.fragment == nil,
+          ["", "/", "/client/v1"].contains(parts.path) else { return nil }
+    parts.path = "/client/v1"
+    return parts.url?.absoluteString
+}
+
 func qrImage(_ data: Data) throws -> CGImage {
     let filter = CIFilter.qrCodeGenerator()
     filter.message = data
@@ -16,7 +25,7 @@ func qrImage(_ data: Data) throws -> CGImage {
 }
 
 @MainActor final class PairingWindow: NSObject, NSApplicationDelegate, NSWindowDelegate {
-    let config: Configuration
+    var config: Configuration
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 650),
                           styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
     let image = NSImageView()
@@ -24,7 +33,6 @@ func qrImage(_ data: Data) throws -> CGImage {
     let devices = NSStackView()
     let refresh = NSButton(title: "重新生成二维码", target: nil, action: nil)
     var code: String?
-    var expires = Date.distantPast
     var timer: Timer?
     var busy = false
     var closing = false
@@ -33,6 +41,26 @@ func qrImage(_ data: Data) throws -> CGImage {
     init(config: Configuration) { self.config = config; super.init() }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if config.server.isEmpty {
+            let prompt = NSAlert()
+            prompt.messageText = "连接 iPhone"
+            prompt.informativeText = "输入手机可访问的 Nova 主机地址（wss://）。"
+            let address = NSTextField(frame: NSRect(x: 0, y: 0, width: 360, height: 24))
+            address.placeholderString = "wss://你的主机.ts.net"
+            address.stringValue = UserDefaults.standard.string(forKey: "NovaPairingServer") ?? ""
+            prompt.accessoryView = address
+            prompt.addButton(withTitle: "显示二维码"); prompt.addButton(withTitle: "取消")
+            while true {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                guard prompt.runModal() == .alertFirstButtonReturn else { NSApplication.shared.terminate(nil); return }
+                if let server = pairingAddress(address.stringValue) {
+                    config = Configuration(port: config.port, token: config.token, server: server)
+                    UserDefaults.standard.set(server, forKey: "NovaPairingServer")
+                    break
+                }
+                prompt.informativeText = "请输入有效的 wss:// 主机地址，不能包含账号、密码、查询参数或其他路径。"
+            }
+        }
         window.title = "Nova · 连接手机"
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -108,10 +136,10 @@ func qrImage(_ data: Data) throws -> CGImage {
         Task {
             do {
                 let qr = try await request(["type": "pair.create", "server": config.server])
-                guard let nextCode = qr["code"] as? String, let deadline = qr["expires_at"] as? Double else {
+                guard let nextCode = qr["code"] as? String else {
                     throw NSError(domain: "pairing", code: 4)
                 }
-                code = nextCode; expires = Date(timeIntervalSince1970: deadline / 1000)
+                code = nextCode
                 if closing {
                     _ = try? await request(["type": "pair.cancel", "code": nextCode]); return
                 }
@@ -141,9 +169,7 @@ func qrImage(_ data: Data) throws -> CGImage {
                 try? await reloadDevices()
             }
         }
-        let seconds = max(0, Int(ceil(expires.timeIntervalSinceNow)))
-        if seconds == 0 { image.image = nil; code = nil; status.stringValue = "二维码已过期，请重新生成。" }
-        else if image.image != nil { status.stringValue = "\(seconds) 秒内有效 · 仅可使用一次" }
+        if image.image != nil { status.stringValue = "扫码连接 · 仅可使用一次" }
     }
 
     func reloadDevices() async throws {
@@ -196,7 +222,11 @@ func qrImage(_ data: Data) throws -> CGImage {
 }
 
 if CommandLine.arguments.contains("--check") {
-    let payload = Data(#"{"type":"nova.pair","version":1,"server":"wss://mac.example/client/v1","code":"0123456789abcdef0123456789abcdef","expires_at":9999999999999}"#.utf8)
+    precondition(pairingAddress("wss://mac.example") == "wss://mac.example/client/v1")
+    for invalid in ["ws://mac.example", "wss://u:p@mac.example", "wss://mac.example/?token=x", "wss://mac.example/other"] {
+        precondition(pairingAddress(invalid) == nil)
+    }
+    let payload = Data(#"{"type":"nova.pair","version":1,"server":"wss://mac.example/client/v1","code":"0123456789abcdef0123456789abcdef"}"#.utf8)
     let cg = try qrImage(payload)
     let detector = CIDetector(ofType: CIDetectorTypeQRCode, context: CIContext(), options: [CIDetectorAccuracy: CIDetectorAccuracyHigh])!
     let result = detector.features(in: CIImage(cgImage: cg)).compactMap { ($0 as? CIQRCodeFeature)?.messageString }

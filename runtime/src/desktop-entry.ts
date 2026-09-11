@@ -58,7 +58,9 @@ const exitCode = await runDesktopEntryWithStopSources({
 
 control.dispose()
 process.exitCode = exitCode
-if (exitCode !== 0) {
+// Electron utility processes can retain native/IPC handles after all owned
+// services have drained. Finish only here, after stop-source and control disposal.
+if (exitCode !== 0 || parentPort !== undefined) {
   await new Promise<void>(resolve => process.stderr.write('', () => resolve()))
   process.exit(exitCode)
 }
