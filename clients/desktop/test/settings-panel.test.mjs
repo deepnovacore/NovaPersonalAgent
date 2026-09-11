@@ -1007,7 +1007,7 @@ test('usage stays current through a stale save reply and renders a compact summa
   await saving
   assert.equal(renders.at(-1).frontendUsage.requests, 2)
   const panel = await mountSettingsPanel(publicView({frontendUsage: usage}))
-  assert.equal(panel.node('#frontend-usage').textContent, '¥0.1200')
+  assert.equal(panel.node('#usage-session-cost').textContent, '¥0.1200')
   assert.doesNotMatch(panel.node('#frontend-usage').textContent, /官方按量/)
   assert.doesNotMatch(panel.node('#frontend-usage-details').textContent, /官方按量/)
 })
@@ -1245,4 +1245,18 @@ test('restart uses saved settings independently and keeps unsaved drafts', async
   assert.equal(saves, 0)
   assert.equal(panel.node('#codexWorkspace').value, '/draft-workspace')
   assert.equal(panel.node('#settings-save').disabled, false)
+})
+
+
+test('usage scope switches independently and stays selected through live updates', async () => {
+  const usage = {requests: 2, costCny: .12, pricedReports: 2, missingReports: 0, unpricedReports: 0, rows: [], startedAt: '2026-09-11T01:00:00Z'}
+  usage.history = {...usage, requests: 8, costCny: .5, startedAt: '2026-09-10T01:00:00Z'}
+  const panel = await mountSettingsPanel(publicView({frontendUsage: usage}))
+  assert.equal(panel.node('#usage-session-cost').textContent, '¥0.1200')
+  assert.equal(panel.node('#usage-history-cost').textContent, '¥0.5000')
+  await panel.click('#usage-history')
+  assert.equal(panel.node('#usage-history').attributes['aria-pressed'], 'true')
+  panel.push(publicView({frontendUsage: {...usage, history: {...usage.history, requests: 9}}}))
+  assert.equal(panel.node('#usage-history-count').textContent, '9 次调用')
+  assert.equal(panel.node('#usage-history').attributes['aria-pressed'], 'true')
 })

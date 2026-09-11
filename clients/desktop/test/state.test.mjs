@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import * as orbState from '../src/renderer/state.mjs'
 
-const { compactOrbLabel, deriveOrbState, ORB_STATE_NAMES } = orbState
+const { compactOrbLabel, deriveOrbState, ORB_STATE_NAMES, orbDormant } = orbState
 
 const base = {
   booting: false,
@@ -299,4 +299,115 @@ test('keeps the shorter permission-denied label on non-Windows platforms', () =>
 
   assert.equal(darwin.label, '麦克风权限被拒绝')
   assert.equal(unspecified.label, '麦克风权限被拒绝')
+})
+
+const dormantBase = {
+  stateName: 'idle',
+  wakeState: 'active',
+  hovered: false,
+  confirmationVisible: false,
+  bubblesVisible: false,
+}
+
+test('resting covers a dozing wake word and a session that never started', () => {
+  // Two independent ways of not being in use, one appearance.
+  assert.equal(orbDormant({ ...dormantBase, wakeState: 'sleeping' }), true)
+  assert.equal(orbDormant({ ...dormantBase, stateName: 'inactive' }), true)
+
+  // Everything that is in use stays full size.
+  for (const stateName of ['idle', 'listening', 'speaking', 'candidate', 'muted']) {
+    assert.equal(orbDormant({ ...dormantBase, stateName }), false, stateName)
+  }
+  // Muted is deliberately not resting: the user turned the mic off and is
+  // still sitting in front of a live session.
+  assert.equal(orbDormant({ ...dormantBase, stateName: 'muted' }), false)
+
+  // A wake word that failed is not asleep — it needs to stay legible.
+  assert.equal(orbDormant({ ...dormantBase, wakeState: 'blocked' }), false)
+
+  // Booting must not shrink: the orb has not yet decided what it is, and a
+  // bubble at launch would read as a broken window.
+  assert.equal(orbDormant({ ...dormantBase, stateName: 'booting' }), false)
+})
+
+test('a dozing wake word must not shrink the orb over a state that needs reading', () => {
+  // The wake word's idle timer watches the microphone and knows nothing about
+  // the backend, so it doses off just as happily while the session is broken.
+  // Resting on top of that would collapse the orb to 40px AND hide the pill
+  // naming the fault — the user would lose the only sign anything is wrong.
+  //
+  // Every one of these must be asserted with wakeState 'sleeping': with
+  // 'active' the predicate is already false for an unrelated reason, which is
+  // exactly how this shipped green once before.
+  for (const stateName of [
+    'disconnected', 'error', 'backend-unavailable', 'reconnecting',
+    'configuration-required', 'authentication-failed', 'permission-denied',
+    'microphone-restricted', 'microphone-no-device', 'microphone-busy',
+    'microphone-unavailable', 'audio-pipeline-error', 'booting',
+  ]) {
+    assert.equal(
+      orbDormant({ ...dormantBase, stateName, wakeState: 'sleeping' }),
+      false,
+      `${stateName} must stay legible while the wake word sleeps`,
+    )
+  }
+
+  // Nor may work in progress shrink underneath the user.
+  for (const stateName of ['listening', 'candidate', 'speaking']) {
+    assert.equal(
+      orbDormant({ ...dormantBase, stateName, wakeState: 'sleeping' }),
+      false,
+      `${stateName} is in use`,
+    )
+  }
+
+  // muted is the user's own choice and was deliberately left out of resting.
+  assert.equal(orbDormant({ ...dormantBase, stateName: 'muted', wakeState: 'sleeping' }), false)
+
+  // What may rest: a connected idle session whose wake word dozed off, and a
+  // session that was never activated.
+  assert.equal(orbDormant({ ...dormantBase, stateName: 'idle', wakeState: 'sleeping' }), true)
+  assert.equal(orbDormant({ ...dormantBase, stateName: 'inactive', wakeState: 'active' }), true)
+})
+
+test('a working executor keeps the orb full size, bubbles or not', () => {
+  // A running task leaves the orb state at 'idle' — the executor axis is not
+  // part of deriveOrbState — and the bubble area it reserves only lands after
+  // an async IPC round trip. So bubblesVisible is still false while that is in
+  // flight, and without its own guard the orb would shrink and hide the very
+  // task banner announcing the work.
+  const working = {
+    ...dormantBase, wakeState: 'sleeping', executorWorking: true, bubblesVisible: false,
+  }
+  assert.equal(orbDormant(working), false, 'not even before the reservation lands')
+  assert.equal(orbDormant({ ...working, bubblesVisible: true }), false)
+  assert.equal(orbDormant({ ...working, stateName: 'inactive' }), false)
+
+  // Once the work is done, resting resumes.
+  assert.equal(orbDormant({ ...working, executorWorking: false }), true)
+})
+
+test('hover and the larger surfaces all lift resting', () => {
+  const sleeping = { ...dormantBase, wakeState: 'sleeping' }
+  // Hover has to win, or the rail and the status pill would stay unreachable
+  // at 40% scale inside a 64px window.
+  assert.equal(orbDormant({ ...sleeping, hovered: true }), false)
+  // Both of these reclaim the window bounds on the main side, so the renderer
+  // must agree rather than fight over them.
+  assert.equal(orbDormant({ ...sleeping, confirmationVisible: true }), false)
+  assert.equal(orbDormant({ ...sleeping, bubblesVisible: true }), false)
+
+  // Same for the inactive route into resting.
+  const inactive = { ...dormantBase, stateName: 'inactive' }
+  assert.equal(orbDormant({ ...inactive, hovered: true }), false)
+  assert.equal(orbDormant({ ...inactive, confirmationVisible: true }), false)
+  assert.equal(orbDormant({ ...inactive, bubblesVisible: true }), false)
+})
+
+test('resting tolerates a missing or partial input', () => {
+  // render() passes a freshly built object, but a dropped wake-word frame or an
+  // early call must not throw inside the render path.
+  assert.equal(orbDormant(undefined), false)
+  assert.equal(orbDormant({}), false)
+  assert.equal(orbDormant({ stateName: 'inactive' }), true)
 })

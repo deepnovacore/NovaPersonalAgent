@@ -57,6 +57,7 @@ const RUNTIME_MANIFEST = Object.freeze({
   files: ['dist/src'],
   dependencies: {
     '@livekit/agents': '1.6.4',
+    '@livekit/local-inference': '0.2.7',
     '@livekit/rtc-node': '0.13.33',
     '@modelcontextprotocol/sdk': '1.30.0',
     'voicemem': '0.0.1',
@@ -93,6 +94,7 @@ async function writeArtifactRoot(root, {
     ['node_modules/@nova-audio-agent/runtime/dist/src/desktop-entry.js', 'export {}\n'],
     ['node_modules/@nova-audio-agent/runtime/dist/src/voicemem/store-worker.js', 'export {}\n'],
     ['node_modules/@livekit/agents/package.json', '{"name":"@livekit/agents"}\n'],
+    ['node_modules/@livekit/local-inference/package.json', '{"name":"@livekit/local-inference"}\n'],
     ['node_modules/@livekit/rtc-node/package.json', '{"name":"@livekit/rtc-node"}\n'],
     ['node_modules/@modelcontextprotocol/sdk/package.json', '{"name":"@modelcontextprotocol/sdk"}\n'],
     ['node_modules/voicemem/package.json', '{"name":"voicemem","version":"0.0.1"}\n'],
@@ -176,6 +178,7 @@ function validArtifactFiles() {
     'node_modules/@nova-audio-agent/runtime/dist/src/desktop-entry.js',
     'node_modules/@nova-audio-agent/runtime/dist/src/voicemem/store-worker.js',
     'node_modules/@livekit/agents/package.json',
+    'node_modules/@livekit/local-inference/package.json',
     'node_modules/@livekit/rtc-node/package.json',
     'node_modules/@modelcontextprotocol/sdk/package.json',
     'node_modules/voicemem/package.json',

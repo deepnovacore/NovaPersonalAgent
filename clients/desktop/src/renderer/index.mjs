@@ -39,7 +39,7 @@ import {
   ConfirmationPresentationController,
   parseCodexApprovalMessage,
 } from './confirmation-controls.mjs'
-import { deriveOrbState } from './state.mjs'
+import { deriveOrbState, orbDormant } from './state.mjs'
 import { BackendReconnectController } from './backend-reconnect.mjs'
 import {mountTaskBanner} from './task-banner.mjs'
 import {createTaskAreaReservation} from './task-banner-layout.mjs'
@@ -81,11 +81,18 @@ function updateResultButton() {
 }
 const applyBubbleLayout = layout => {
   const active = layout?.rows > 0 && !layout.suppressed
+  const changed = shell.dataset.bubbles !== String(active)
   shell.dataset.bubbles = String(active)
   if (active) {
     shell.style.setProperty('--bubble-orb-x', `${layout.orbOffsetCssX}px`)
     shell.style.setProperty('--bubble-orb-y', `${layout.orbOffsetCssY}px`)
   }
+  // Bubble mode outranks resting, so flipping it has to recompute dormancy in
+  // the same tick. Writing the attribute alone would leave a stale data-dormant
+  // next to the new data-bubbles: both size and place #orb, and the orb would
+  // be drawn at its resting size against bubble-mode coordinates until some
+  // unrelated state change happened to re-render.
+  if (changed) render()
 }
 const taskArea = createTaskAreaReservation({
   reserve: rows => window.novaAudioAgentDesktop.windowLayout.reserveBubbleArea(rows),
@@ -199,6 +206,10 @@ const axes = {
   pendingOperation: '',
   connected: false,
   backendState: 'stopped',
+  /** Last wake-word runtime state: 'active' | 'sleeping' | 'blocked'. */
+  wakeState: 'active',
+  /** Pointer is over the orb window, which lifts dormancy so the rail is usable. */
+  hovered: false,
   microphone: 'checking',
   error: '',
   shellExpanded: false,
@@ -232,6 +243,7 @@ const confirmationPresentation = new ConfirmationPresentationController()
 let latestProjectConfirmation = null
 let latestCodexApproval = null
 let lastReportedConfirmationMode = null
+let lastReportedDormant = null
 
 let socket
 let activeConnection = null
@@ -325,6 +337,19 @@ function render() {
   if (lastReportedConfirmationMode !== state.confirmationVisible) {
     window.novaAudioAgentDesktop.windowLayout.setConfirmationMode(state.confirmationVisible)
     lastReportedConfirmationMode = state.confirmationVisible
+  }
+  const dormant = orbDormant({
+    stateName: state.name,
+    wakeState: axes.wakeState,
+    hovered: axes.hovered,
+    executorWorking: axes.codex === 'working',
+    confirmationVisible: state.confirmationVisible,
+    bubblesVisible: shell.dataset.bubbles === 'true',
+  })
+  shell.dataset.dormant = dormant ? 'true' : 'false'
+  if (lastReportedDormant !== dormant) {
+    window.novaAudioAgentDesktop.windowLayout.setDormant?.(dormant)
+    lastReportedDormant = dormant
   }
   const activeDecision = axes.pendingConfirmationKind === 'codex'
     ? codexApprovalDecision
@@ -602,6 +627,10 @@ function applyWakeState(value) {
   axes.capture = 'idle'
   // Fence frames already queued in the worklet; the acknowledgement tags subsequent capture.
   processor?.port.postMessage({epoch: wakeAudio.epoch})
+  // Sleeping used to be invisible — main hid the whole window — so the state
+  // was read only for audio routing. It now drives the dormant bubble, so the
+  // renderer has to keep it.
+  axes.wakeState = typeof value?.state === 'string' ? value.state : 'active'
   if (value?.state === 'blocked') {
     axes.muted = true
   }
@@ -1292,6 +1321,21 @@ orb.addEventListener('contextmenu', event => {
   event.preventDefault()
   window.novaAudioAgentDesktop.orbMenu.show()
 })
+// Hover lifts dormancy. `mouseenter`/`mouseleave` rather than `mouseover`:
+// they do not bubble from the rail buttons, so crossing between the orb and a
+// control cannot flap the window bounds. The window shrinks around its own
+// centre, so the pointer stays inside the bubble it just shrank onto.
+document.body.addEventListener('mouseenter', () => {
+  if (axes.hovered) return
+  axes.hovered = true
+  render()
+})
+document.body.addEventListener('mouseleave', () => {
+  if (!axes.hovered) return
+  axes.hovered = false
+  render()
+})
+
 muteToggle.addEventListener('click', () => toggleMute())
 speakerToggle.addEventListener('click', () => { void toggleOutputMuted() })
 cameraToggle.addEventListener('click', () => { void cameraToggleController.toggle() })

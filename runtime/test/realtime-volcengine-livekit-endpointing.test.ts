@@ -315,6 +315,50 @@ function fakeSurface(
 
 const executor: LiveKitExecutor = {doInference: () => Promise.resolve({})}
 
+test('END uses owned audio when LiveKit has already overwritten its shared speech buffer', async () => {
+  const {surface} = fakeSurface((frame, number) => {
+    const samplesIndex = number * FRAME_SAMPLES
+    if (number === 1) return [
+      inference(frame, samplesIndex, 0.9),
+      {...inference(frame, samplesIndex, 0.9), type: TYPES.START_OF_SPEECH,
+        speechDuration: 32, speaking: true},
+    ]
+    return [inference(frame, samplesIndex, 0.1),
+      {...inference(frame, samplesIndex, 0.1), type: TYPES.END_OF_SPEECH,
+        frames: [{...frame, data: new Int16Array(FRAME_SAMPLES).fill(999)}],
+        speechDuration: 32, silenceDuration: 32, speaking: false}]
+  })
+  const endpointing = new LiveKitVolcEndpointing({surface, executor, config: config()})
+  try {
+    const signal = new AbortController().signal
+    await endpointing.feed(pcmWindow(100), signal)
+    const events = await endpointing.feed(pcmWindow(0), signal)
+    assert.ok(events.some(event => event.kind === 'speech_end' && event.commit))
+    for (const event of events) {
+      if (event.kind === 'speech_audio') assert.ok(event.pcm.every(byte => byte === 0))
+    }
+  } finally { await endpointing.close() }
+})
+
+test('60 second cap admits speech past 15 seconds and commits at 60 seconds', async () => {
+  const {surface} = fakeSurface((frame, number) => {
+    const event = inference(frame, number * FRAME_SAMPLES, 0.9)
+    return number === 1 ? [event, {...event, type: TYPES.START_OF_SPEECH,
+      speechDuration: 32, speaking: true}] : [event]
+  })
+  const endpointing = new LiveKitVolcEndpointing({surface, executor,
+    config: config({vadMaxUtteranceMs: 60_000})})
+  try {
+    const signal = new AbortController().signal
+    const frame = pcmWindow(100)
+    for (let index = 0; index < 1_874; index += 1) {
+      const events = await endpointing.feed(frame, signal)
+      assert.ok(!events.some(event => event.kind === 'speech_end'))
+    }
+    assert.ok((await endpointing.feed(frame, signal)).some(event => event.kind === 'speech_end'))
+  } finally { await endpointing.close() }
+})
+
 test('projects copied VAD start, active audio, exact speech pad, and one committed end', async () => {
   const first = pcmWindow(100)
   const second = pcmWindow(200)

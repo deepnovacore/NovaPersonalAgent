@@ -1,3 +1,5 @@
+import { DORMANT_ORB_WINDOW_SIZE } from './window-position.mjs'
+
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/
 
@@ -30,8 +32,12 @@ export function browserWindowOptions(preload, launchId, { opaque = false } = {})
   return {
     width: 160,
     height: 160,
-    minWidth: 160,
-    minHeight: 160,
+    // The floor is the dormant bubble, not the natural orb: Electron clamps
+    // programmatic setBounds to these constraints too, not just user-driven
+    // resizes, so leaving them at the natural 160 would silently pin the
+    // window open when window-position.mjs shrinks it to rest.
+    minWidth: DORMANT_ORB_WINDOW_SIZE.width,
+    minHeight: DORMANT_ORB_WINDOW_SIZE.height,
     maxWidth: 160,
     frame: false,
     // Compositors without a working transparent-visuals path (opted into via

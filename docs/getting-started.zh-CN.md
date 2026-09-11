@@ -254,9 +254,9 @@ MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何�
 | `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_THRESHOLD` | `volcengine` | 否 | 0.5 | VAD 语音阈值。 |
 | `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_PRE_ROLL_MS` | `volcengine` | 否 | 260 | VAD 预滚时长。 |
 | `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MIN_SPEECH_MS` | `volcengine` | 否 | 250 | VAD 最短语音时长。 |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SILENCE_END_MS` | `volcengine` | 否 | 560 | VAD 静音断句时长。 |
+| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SILENCE_END_MS` | `volcengine` | 否 | 300 | VAD 静音断句时长。 |
 | `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SPEECH_PAD_MS` | `volcengine` | 否 | 30 | VAD 语音补边。 |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MAX_UTTERANCE_MS` | `volcengine` | 否 | 15000 | VAD 最长话语时长。 |
+| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MAX_UTTERANCE_MS` | `volcengine` | 否 | 60000 | VAD 最长话语时长。 |
 | `NOVA_AUDIO_AGENT_CODEX_WORKSPACE` | `codex` | 选择该能力时 | 无 | 主机批准的 Codex 工作区。 |
 | `NOVA_AUDIO_AGENT_CODEX_BIN` | `codex` | 否 | codex | 主机批准的 Codex app-server 可执行文件。 |
 | `NOVA_AUDIO_AGENT_CODEX_API_KEY` | `codex` | 否 | Codex login | 可选 Codex 凭据覆盖。 |

@@ -131,11 +131,17 @@ export class WakeWordRuntime {
     }
     return true
   }
-  sleep() {
+  /**
+   * `reason` separates the two callers, which want opposite things on screen.
+   * An idle timeout should leave a resting bubble behind; an explicit hide
+   * (tray, global shortcut) is a "get out of my way" gesture and must still
+   * clear the screen. Both still park the runtime in the same sleeping state.
+   */
+  sleep(reason = 'idle') {
     if (!this.enabled || this.status !== 'ready' || !this.activated || this.state !== 'active') return false
     this.state = 'sleeping'
     this.reset()
-    this.hide()
+    this.hide(reason)
     return true
   }
   activity() { this.idleSince = null }

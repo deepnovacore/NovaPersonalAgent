@@ -224,6 +224,7 @@
     "runtime/src/realtime/volcengine/audio.ts",
     "runtime/src/realtime/volcengine/endpointing-capability.ts",
     "runtime/src/realtime/volcengine/livekit-endpointing.ts",
+    "runtime/src/realtime/volcengine/local-eot-executor.ts",
     "runtime/src/realtime/volcengine/protocol.ts",
     "runtime/src/realtime/volcengine/silence-endpointing.ts",
     "runtime/src/realtime/volcengine/tts.ts",

@@ -26,6 +26,9 @@ const CODEX_DIAGNOSTIC_CODES = new Set([
 const LINE = /\[runtime-diagnostic\]\s+([a-z0-9_]{1,64})/g
 
 export function classifyBackendFailure(code) {
+  if (code === 'backend_start_timeout') {
+    return Object.freeze({kind: 'recoverable', code})
+  }
   if (code === 'configuration_required' || code === 'manual_path_required'
     || code === 'model_base_url_invalid') {
     return Object.freeze({kind: 'configuration_required', code})

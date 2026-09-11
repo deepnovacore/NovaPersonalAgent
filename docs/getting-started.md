@@ -284,9 +284,9 @@ families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for the
 | `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_THRESHOLD` | `volcengine` | No | 0.5 | VAD speech threshold. |
 | `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_PRE_ROLL_MS` | `volcengine` | No | 260 | VAD pre-roll duration. |
 | `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MIN_SPEECH_MS` | `volcengine` | No | 250 | VAD minimum speech duration. |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SILENCE_END_MS` | `volcengine` | No | 560 | VAD silence endpoint duration. |
+| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SILENCE_END_MS` | `volcengine` | No | 300 | VAD silence endpoint duration. |
 | `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SPEECH_PAD_MS` | `volcengine` | No | 30 | VAD speech padding. |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MAX_UTTERANCE_MS` | `volcengine` | No | 15000 | VAD maximum utterance duration. |
+| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MAX_UTTERANCE_MS` | `volcengine` | No | 60000 | VAD maximum utterance duration. |
 | `NOVA_AUDIO_AGENT_CODEX_WORKSPACE` | `codex` | When selected | None | Host-approved Codex workspace. |
 | `NOVA_AUDIO_AGENT_CODEX_BIN` | `codex` | No | codex | Host-approved Codex app-server binary. |
 | `NOVA_AUDIO_AGENT_CODEX_API_KEY` | `codex` | No | Codex login | Optional Codex credential override. |

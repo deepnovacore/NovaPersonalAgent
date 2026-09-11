@@ -263,6 +263,15 @@ export class LiveKitVolcEndpointing implements EndpointingPort {
 
   async #handleVadEvent(epoch: LiveEpoch, event: PublicVadEvent): Promise<void> {
     const position = eventPosition(event)
+    // LiveKit 1.6.4 emits END frames as a view into its speech buffer, then
+    // immediately slides that buffer to retain pre-roll. By the time the async
+    // reader receives END, those bytes have changed. END needs only timing;
+    // all output audio comes from our owned ring and validated inference frames.
+    if (event.type === this.#surface.VADEventType.END_OF_SPEECH) {
+      await this.#endOfSpeech(epoch, event, position)
+      if (epoch.pendingBoundaryPosition === position) epoch.pendingBoundaryPosition = null
+      return
+    }
     const frameRange = this.#validateEventFrames(event, position)
     if (event.type === this.#surface.VADEventType.START_OF_SPEECH) {
       this.#startSpeech(event, frameRange.start, position)
@@ -272,9 +281,6 @@ export class LiveKitVolcEndpointing implements EndpointingPort {
         epoch.pendingBoundaryPosition = position
       }
       this.#inferenceDone(event, frameRange.start, position)
-    } else if (event.type === this.#surface.VADEventType.END_OF_SPEECH) {
-      await this.#endOfSpeech(epoch, event, position)
-      if (epoch.pendingBoundaryPosition === position) epoch.pendingBoundaryPosition = null
     }
   }
 

@@ -243,6 +243,10 @@ export async function deriveLockedProductionClosure({
     if (
       item.name === '@livekit/local-inference'
       && !item.ancestry.includes('@livekit/agents')
+      // Standalone Nova hosts implement the EOT executor with this public API.
+      // Allow only the runtime's pinned dependency; target-native selection and
+      // locked integrity checks below still apply to the entire closure.
+      && !(item.ancestry.at(-1) === '@nova-audio-agent/runtime' && manifest.version === '0.2.7')
     ) throw new ReleaseDependencyError('direct_local_inference_forbidden')
     selected.set(item.installKey, {
       ...lockedIdentity(item.name, item.installKey, manifest),

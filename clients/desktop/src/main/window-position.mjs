@@ -2,6 +2,13 @@ import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
 
 export const MAX_DRAG_DELTA = 2048
 export const NATURAL_ORB_WINDOW_SIZE = Object.freeze({width: 160, height: 160})
+/**
+ * The dormant surface. Unlike the confirmation and bubble layouts below — which
+ * only ever grow around the natural anchor — dormancy shrinks past it, so this
+ * is the one size that must also be reachable by the window's own minWidth /
+ * minHeight constraints (see security.mjs; Electron clamps setBounds to them).
+ */
+export const DORMANT_ORB_WINDOW_SIZE = Object.freeze({width: 64, height: 64})
 const CONFIRMATION_LAYOUT_CSS_HEIGHT = 160
 const CONFIRMATION_ORB_CENTER_BELOW_CSS = 53
 const CONFIRMATION_ORB_CENTER_ABOVE_CSS = 107
@@ -25,6 +32,38 @@ export function clampWindowPosition(position, size, workArea) {
     x: Math.round(Math.min(Math.max(position.x, workArea.x), maxX)),
     y: Math.round(Math.min(Math.max(position.y, workArea.y), maxY)),
   }
+}
+
+/**
+ * Shrink the window around the anchor's centre rather than its origin.
+ *
+ * Keeping the centre fixed is the whole trick: the orb is drawn centred in its
+ * window, so anchoring the shrink anywhere else would make the bubble jump
+ * across the screen on every sleep and wake.
+ */
+export function dormantWindowLayout({normalBounds, workArea}) {
+  if (!validRectangle(normalBounds) || !validRectangle(workArea)) {
+    throw new TypeError('dormant window geometry is invalid')
+  }
+  const centre = rectangleCenter(normalBounds)
+  const origin = clampWindowPosition(
+    {
+      x: Math.round(centre.x - DORMANT_ORB_WINDOW_SIZE.width / 2),
+      y: Math.round(centre.y - DORMANT_ORB_WINDOW_SIZE.height / 2),
+    },
+    DORMANT_ORB_WINDOW_SIZE,
+    workArea,
+  )
+  const bounds = {
+    x: origin.x,
+    y: origin.y,
+    width: DORMANT_ORB_WINDOW_SIZE.width,
+    height: DORMANT_ORB_WINDOW_SIZE.height,
+  }
+  return Object.freeze({
+    bounds: Object.freeze(bounds),
+    renderedOrbScreenCenter: Object.freeze(rectangleCenter(bounds)),
+  })
 }
 
 /**
@@ -294,6 +333,7 @@ export function createOrbWindowController({
   let confirmationActive = false
   let rows = 0
   let activeLayout = null
+  let dormant = false
 
   function ensureNormalBounds() {
     if (normalBounds !== null) return
@@ -308,7 +348,7 @@ export function createOrbWindowController({
   }
 
   function restoreIfNatural() {
-    if (confirmationActive || rows > 0 || normalBounds === null) return false
+    if (confirmationActive || rows > 0 || dormant || normalBounds === null) return false
     setBounds(normalBounds)
     normalBounds = null
     activeLayout = null
@@ -360,8 +400,26 @@ export function createOrbWindowController({
       setBounds(layout.bounds)
       return layout
     }
+    // Dormancy yields to both surfaces above: a confirmation card or a stack of
+    // progress bubbles cannot be shown on a 64px window, and either arriving
+    // means something wants the user's attention, which is the opposite of
+    // resting. It is checked last for exactly that reason.
+    if (dormant) {
+      const layout = dormantWindowLayout({normalBounds, workArea})
+      activeLayout = layout
+      setBounds(layout.bounds)
+      return layout
+    }
     restoreIfNatural()
     return null
+  }
+
+  function setDormant(active) {
+    if (typeof active !== 'boolean') throw new TypeError('dormant mode must be boolean')
+    if (active === dormant) return activeLayout
+    if (active) ensureNormalBounds()
+    dormant = active
+    return sync()
   }
 
   function setConfirmationMode(active) {
@@ -421,11 +479,13 @@ export function createOrbWindowController({
 
   return Object.freeze({
     setConfirmationMode,
+    setDormant,
     reserveBubbleArea,
     sync,
     clampDragPosition,
     finishDrag,
     get active() { return normalBounds !== null },
+    get dormant() { return dormant },
     get bubblesSuppressed() { return rows > 0 && activeLayout?.suppressed === true },
   })
 }

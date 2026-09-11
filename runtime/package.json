@@ -48,6 +48,7 @@
   },
   "dependencies": {
     "@livekit/agents": "1.6.4",
+    "@livekit/local-inference": "0.2.7",
     "@livekit/rtc-node": "0.13.33",
     "@modelcontextprotocol/sdk": "1.30.0",
     "jszip": "3.10.1",

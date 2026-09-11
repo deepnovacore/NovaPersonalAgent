@@ -250,7 +250,11 @@ test('STATE_PARAMS carries the specified per-state behaviour values', () => {
 test('the three terminal states share the alert language but not the behaviour', () => {
   // Shared: all three are a collapsed, dimmed, alert-toned ring — the colour
   // semantics a grayscale viewer cannot tell apart anyway.
-  for (const name of ['disconnected', 'error', 'permission-denied']) {
+  //
+  // `disconnected` is deliberately absent: a backend that stopped is not a
+  // fault the user caused, so it speaks the standby dialect instead (see
+  // 'the standby states rest rather than alarm' below).
+  for (const name of ['backend-unavailable', 'error', 'permission-denied']) {
     const params = STATE_PARAMS[name]
     assert.equal(params.convergence, 0.9, `${name}.convergence`)
     assert.equal(params.alpha, 0.6, `${name}.alpha`)
@@ -262,8 +266,10 @@ test('the three terminal states share the alert language but not the behaviour',
   // Distinct: radius, density, and restlessness carry the difference, so the
   // three read apart in motion and in grayscale rather than only by colour.
   assert.deepEqual(
-    ['ringRadius', 'countRatio', 'orbitSpeed', 'jitter'].map(key => STATE_PARAMS.disconnected[key]),
-    [46, 0.5, 0.03, 0.04],
+    ['ringRadius', 'countRatio', 'orbitSpeed', 'jitter'].map(
+      key => STATE_PARAMS['backend-unavailable'][key],
+    ),
+    [44, 0.45, 0.02, 0.04],
   )
   assert.deepEqual(
     ['ringRadius', 'countRatio', 'orbitSpeed', 'jitter'].map(key => STATE_PARAMS.error[key]),
@@ -277,17 +283,57 @@ test('the three terminal states share the alert language but not the behaviour',
   )
 })
 
-test('muted is a deliberate dim ring, not an alert', () => {
+test('muted rests as a ringless dim cloud, not an alert', () => {
   const params = STATE_PARAMS.muted
   assert.equal(params.tone, 'dim', 'user action, not an error')
-  // Full twinkleSpeed: a muted session is still a live session, so the ring
-  // keeps the same shimmer it has while unmuted.
+  // Ringless is the contract, not an incidental value: a stroked hoop is what
+  // made this state read as a dead grey coin rather than a resting session.
+  assert.equal(params.ringRadius, 0, 'a deliberate mute must not collapse onto a ring')
+  // Half twinkleSpeed: slower than idle's live sparkle, faster than inactive's
+  // occasional glint — a muted session is live and merely unfed.
   assert.deepEqual(
     ['convergence', 'orbitSpeed', 'jitter', 'pulseGain', 'alpha', 'countRatio', 'ringRadius', 'twinkleSpeed'].map(
       key => params[key],
     ),
-    [0.75, 0.03, 0.04, 0, 0.6, 0.6, 32, 1],
+    [0.16, 0.03, 0.07, 0, 0.5, 0.5, 0, 0.5],
   )
+})
+
+test('the standby states rest rather than alarm, and stay tellable apart', () => {
+  // muted and disconnected both left the alert family: one is a deliberate
+  // user action, the other a backend that stopped, and neither is a fault
+  // worth painting red. What they must not do is collapse into each other or
+  // into `inactive`, because colour is the first thing a grayscale display or
+  // a photo of a menu bar throws away.
+  const muted = STATE_PARAMS.muted
+  const disconnected = STATE_PARAMS.disconnected
+  const inactive = STATE_PARAMS.inactive
+
+  for (const [name, params] of [['muted', muted], ['disconnected', disconnected]]) {
+    assert.equal(params.tone, 'dim', `${name} must not borrow the alert red`)
+    assert.equal(params.pulseGain, 0, `${name} has no level to pulse on`)
+    assert.ok(
+      STATE_FPS[name] > 0,
+      `${name} keeps drifting: a frozen frame reads as a crashed app`,
+    )
+    assert.ok(params.convergence < 0.6, `${name} stays a field, not a hard hoop`)
+  }
+
+  // The ring is what separates the two: disconnected settled outward against
+  // an edge and stopped being fed, muted is simply a loose resting cloud.
+  assert.equal(muted.ringRadius, 0)
+  assert.ok(disconnected.ringRadius > 0)
+
+  // Disconnected is the sparser, slower, dimmer-twinkling of the two — the
+  // extra weight the copy calls "已断开".
+  assert.ok(disconnected.countRatio < muted.countRatio, 'disconnected is sparser')
+  assert.ok(disconnected.orbitSpeed < muted.orbitSpeed, 'disconnected is slower')
+  assert.ok(disconnected.twinkleSpeed < muted.twinkleSpeed, 'disconnected glints less')
+
+  // And muted still reads as a live session against a never-started one.
+  assert.ok(muted.countRatio > inactive.countRatio, 'muted is denser than inactive')
+  assert.ok(muted.jitter > inactive.jitter, 'muted is more restless than inactive')
+  assert.ok(muted.twinkleSpeed > inactive.twinkleSpeed, 'muted glints more than inactive')
 })
 
 test('the terminal states render distinct geometry in animated mode too', () => {
@@ -303,14 +349,14 @@ test('the terminal states render distinct geometry in animated mode too', () => 
     return { count: drawnCount(mounted.context), radius: meanRadius(mounted.context) }
   }
 
-  const disconnected = shape('disconnected')
+  const unavailable = shape('backend-unavailable')
   const error = shape('error')
   const denied = shape('permission-denied')
 
   for (const [left, right, label] of [
-    [disconnected, error, 'disconnected vs error'],
+    [unavailable, error, 'backend-unavailable vs error'],
     [error, denied, 'error vs permission-denied'],
-    [disconnected, denied, 'disconnected vs permission-denied'],
+    [unavailable, denied, 'backend-unavailable vs permission-denied'],
   ]) {
     assert.notEqual(left.count, right.count, `${label}: particle density differs`)
     assert.ok(
@@ -798,9 +844,8 @@ test('collapsed alert states carry their own parameters and render distinct cons
   // pixel-identical wherever colour is unavailable. Each now varies radius,
   // density, and restlessness on its own.
   for (const [left, right] of [
-    ['disconnected', 'error'],
     ['error', 'permission-denied'],
-    ['disconnected', 'permission-denied'],
+    ['microphone-busy', 'backend-unavailable'],
   ]) {
     for (const key of ['ringRadius', 'countRatio', 'orbitSpeed']) {
       assert.notEqual(
@@ -813,8 +858,8 @@ test('collapsed alert states carry their own parameters and render distinct cons
 
   const mounted = mount({ seed: 777 })
   resetDraws(mounted.context)
-  mounted.visual.setState('disconnected')
-  const disconnectedPoints = centres(mounted.context)
+  mounted.visual.setState('backend-unavailable')
+  const unavailablePoints = centres(mounted.context)
 
   resetDraws(mounted.context)
   mounted.visual.setState('error')
@@ -824,16 +869,17 @@ test('collapsed alert states carry their own parameters and render distinct cons
   mounted.visual.setState('permission-denied')
   const deniedPoints = centres(mounted.context)
 
-  assert.ok(disconnectedPoints.length > 0)
-  assert.notDeepEqual(errorPoints, disconnectedPoints, 'each terminal state gets its own layout')
-  assert.notDeepEqual(deniedPoints, disconnectedPoints)
+  assert.ok(unavailablePoints.length > 0)
+  assert.notDeepEqual(errorPoints, unavailablePoints, 'each terminal state gets its own layout')
+  assert.notDeepEqual(deniedPoints, unavailablePoints)
   assert.notDeepEqual(deniedPoints, errorPoints)
 
   // Revisiting a state reproduces its exact prior layout: the seed is a pure
-  // function of (seed, state name), not a one-shot mutation.
+  // function of (seed, state name), not a one-shot mutation. Only the zero-fps
+  // states snap like this; an animated state would ease toward its params.
   resetDraws(mounted.context)
-  mounted.visual.setState('disconnected')
-  assert.deepEqual(centres(mounted.context), disconnectedPoints)
+  mounted.visual.setState('backend-unavailable')
+  assert.deepEqual(centres(mounted.context), unavailablePoints)
   mounted.visual.destroy()
 })
 
@@ -1101,14 +1147,17 @@ test('STATE_FPS covers every orb state and tiers them by how much they move', ()
     booting: 30,
     reconnecting: 30,
     idle: 15,
-    // Muted is a live session that is simply not being fed: it keeps moving at
-    // the same tier it will resume into.
-    muted: 15,
+    // Muted is a live session that is simply not being fed, so it drifts at
+    // the resting tier rather than idle's.
+    muted: 10,
     // Inactive drifts on its own slow tier: 50 s per orbit needs far fewer
     // samples than idle's restless field.
     inactive: 10,
+    // A stopped backend still drifts, at the slowest tier that reads as
+    // moving: a frozen disc is indistinguishable from a screenshot of a
+    // crashed app. Its halved density pays for most of those frames.
+    disconnected: 8,
     // Zero means one static frame and no loop at all.
-    disconnected: 0,
     'configuration-required': 0,
     'authentication-failed': 0,
     'backend-unavailable': 0,
@@ -1170,15 +1219,15 @@ test('the resting states run a slow live loop instead of freezing', () => {
   assert.notDeepEqual(centres(mounted.context), field, 'the inactive field drifts between frames')
 
   mounted.visual.setState('muted')
-  assert.equal(mounted.visual.fps, 15, 'muted keeps the tier it resumes into')
+  assert.equal(mounted.visual.fps, 10, 'muted rests at the same tier as inactive')
   assert.equal(mounted.pending.length, 1, 'muted keeps a scheduled frame')
   mounted.settle()
   resetDraws(mounted.context)
   mounted.step()
-  const ring = centres(mounted.context)
+  const cloud = centres(mounted.context)
   resetDraws(mounted.context)
   mounted.step()
-  assert.notDeepEqual(centres(mounted.context), ring, 'the muted ring keeps rotating')
+  assert.notDeepEqual(centres(mounted.context), cloud, 'the muted cloud keeps drifting')
   mounted.visual.destroy()
 })
 
@@ -1196,7 +1245,7 @@ test('slow tiers wait on a timer between frames instead of spinning at display r
 
   mounted.visual.setState('muted')
   mounted.step()
-  assert.equal(mounted.waits.at(-1), 1000 / 15)
+  assert.equal(mounted.waits.at(-1), 100)
 
   // Fast tiers keep the pure rAF path: a 60 fps field has no interval to wait out.
   mounted.visual.setState('listening')

@@ -107,6 +107,11 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
       ipcRenderer.send('nova:confirmation-mode', value)
       return true
     },
+    setDormant: value => {
+      if (typeof value !== 'boolean') return false
+      ipcRenderer.send('nova:orb:dormant', value)
+      return true
+    },
     onConfirmationPlacement: callback => {
       if (typeof callback !== 'function') return () => {}
       const listener = (_event, value) => {

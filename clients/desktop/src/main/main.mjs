@@ -48,6 +48,7 @@ import {
   shutdownBackend,
   shutdownBackendBestEffort,
   watchBackendExit,
+  waitForBackendReadiness,
 } from './backend.mjs'
 import {
   classifyBackendFailure,
@@ -198,7 +199,7 @@ let quitDrained = false
 let releaseSmokeChannel = null
 // Settings and debug boards are main-owned IPC surfaces. Neither relays through
 // the orb renderer or shares the realtime voice socket.
-const frontendUsage = createFrontendUsage()
+const frontendUsage = createFrontendUsage({file: resolve(app.getPath('userData'), 'frontend-usage.json')})
 let currentSettings = null
 let desktopConfig = null
 let codexStatus = Object.freeze({
@@ -542,7 +543,7 @@ function trayImage() {
 
 function hideOrb() {
   if (wakeWord?.state === 'blocked') wakeWord.wake()
-  else if (!wakeWord?.enabled || !wakeWord.sleep()) mainWindow?.hide()
+  else if (!wakeWord?.enabled || !wakeWord.sleep('manual')) mainWindow?.hide()
 }
 
 function createTray() {
@@ -834,11 +835,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
         onExit(diagnostic.failure())
       },
     })
-    try {
-      ready = await listener.readiness
-    } catch {
-      throw diagnostic.failure('backend_unavailable')
-    }
+    ready = await waitForBackendReadiness(spawnedBackend, listener.readiness, diagnostic)
   } finally {
     listener.close()
   }
@@ -894,7 +891,11 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   wakeWord = new WakeWordRuntime({
     modelRoot: resolve(app.getPath('userData'), 'models/wake-word'),
     show: () => { mainWindow?.show(); mainWindow?.focus() },
-    hide: () => mainWindow?.hide(),
+    // An idle timeout no longer clears the screen: the renderer sees the same
+    // 'sleeping' state arrive on nova:wake-word:changed and shrinks the window
+    // to a bubble through nova:orb:dormant, so the window must stay visible for
+    // there to be anything to shrink. Only an explicit hide still hides.
+    hide: reason => { if (reason === 'manual') mainWindow?.hide() },
     changed: value => {
       nativeAudio?.setCaptureEpoch(value.epoch)
       sendToOrb('nova:wake-word:changed', value)
@@ -924,6 +925,13 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     onConfirmationPlacement: placement => sendToOrb('nova:confirmation-placement', placement),
     onBubbleLayout: layout => sendToOrb('nova:bubble-layout', layout),
   })
+
+  // Whatever the renderer believed while the window was hidden was ignored
+  // above, so the window comes back at its natural size and the renderer's next
+  // render reconciles it. Registered here rather than in the wake-word `show`
+  // callback because that one can fire from configure() before `orbWindow` is
+  // assigned, which would throw on a const in its temporal dead zone.
+  mainWindow.on('show', () => { orbWindow.setDormant(false) })
 
   const dragController = createDragController({
     getCursor: () => screen.getCursorScreenPoint(),
@@ -1344,6 +1352,21 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!mainWindow || event.sender !== mainWindow.webContents) return
     if (typeof active !== 'boolean') return
     orbWindow.setConfirmationMode(active)
+  })
+  // The renderer owns the dormancy decision because it is the only side that
+  // sees all three inputs at once — the derived orb state, the wake-word state,
+  // and the pointer. Main owns only the resulting bounds.
+  ipcMain.on('nova:orb:dormant', (event, active) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents) return
+    if (typeof active !== 'boolean') return
+    // A hidden window is gone, not resting. The renderer cannot tell the two
+    // apart — it receives the same 'sleeping' wake state whether the idle timer
+    // fired or the user hit the tray, and Electron keeps reporting the document
+    // as visible while the window is hidden — so the side that actually called
+    // hide() has to make the call. Shrinking a hidden window would only surface
+    // later as a bubble that pops to full size on the next show.
+    if (!mainWindow.isVisible()) return
+    orbWindow.setDormant(active)
   })
   ipcMain.handle('nova:bubbles:reserve', async (event, rows) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) {

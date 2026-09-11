@@ -237,12 +237,31 @@ function updateButtons() {
   settingsRestore.disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
 }
 
+let usageScope = 'session'
+function renderUsage() {
+  const usage = currentView?.frontendUsage
+  const selected = usageScope === 'history' ? usage?.history : usage
+  for (const scope of ['history', 'session']) {
+    const value = scope === 'history' ? usage?.history : usage
+    const cost = value?.unavailable ? '历史不可用' : frontendUsageText(value).split('\n')[0]
+    document.getElementById(`usage-${scope}-cost`).textContent = cost
+    document.getElementById(`usage-${scope}-count`).textContent = `${value?.requests ?? 0} 次调用`
+    document.getElementById(`usage-${scope}`).setAttribute('aria-pressed', String(usageScope === scope))
+  }
+  document.getElementById('frontend-usage').textContent = usage?.persistenceError
+    ? (usage.persistenceError === 'read_failed' ? '历史记录读取失败，原文件已保留；当前仅显示本次启动用量。' : '历史用量保存失败，本次用量仍保留在内存中。')
+    : selected?.requests ? `缺少用量 ${selected.missingReports ?? 0} 次 · 无法估价 ${selected.unpricedReports ?? 0} 次` : '暂无用量报告'
+  renderFrontendUsage(document.getElementById('frontend-usage-details'), selected, document)
+}
+for (const scope of ['history', 'session']) document.getElementById(`usage-${scope}`).addEventListener('click', () => {
+  usageScope = scope
+  renderUsage()
+})
+
 function render(view, _drafts, state) {
   if (!view) return
-  const [usageSummary] = frontendUsageText(view.frontendUsage).split('\n\n')
-  document.getElementById('frontend-usage').textContent = usageSummary
-  renderFrontendUsage(document.getElementById('frontend-usage-details'), view.frontendUsage, document)
   currentView = view
+  renderUsage()
   capabilityEditor.render(view)
   knowledgePanel.render(view)
   for (const input of capabilitySettings) input.value = view[input.id] ?? ''

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {EventEmitter} from 'node:events'
 import test from 'node:test'
 
-import {shutdownBackend} from '../src/main/backend.mjs'
+import {shutdownBackend, waitForBackendReadiness} from '../src/main/backend.mjs'
 import {createBackendDiagnosticCollector} from '../src/main/backend-diagnostics.mjs'
 import {createBackendSupervisor} from '../src/main/backend-supervisor.mjs'
 
@@ -11,6 +11,51 @@ function deferred() {
   const promise = new Promise(next => { resolve = next })
   return {promise, resolve}
 }
+
+test('disconnect survives repeated readiness failures and retires each child before retry', async () => {
+  const timers = []
+  const stopped = []
+  let attempts = 0
+  let exit
+  const supervisor = createBackendSupervisor({
+    start: async onExit => {
+      const child = {id: ++attempts}
+      exit = onExit
+      if (attempts === 2 || attempts === 3) {
+        await waitForBackendReadiness(child, Promise.reject(new Error('readiness timeout')),
+          createBackendDiagnosticCollector(), async candidate => { stopped.push(candidate.id) })
+      }
+      return {backend: child, connection: {endpoint: 'ws://127.0.0.1:7/'}}
+    },
+    stopBackend: async () => {},
+    schedule: callback => { timers.push(callback); return callback },
+    cancel: () => {},
+    onStatus: () => {},
+  })
+  await supervisor.start()
+  exit({kind: 'recoverable', code: 'backend_disconnected'})
+  for (let attempt = 2; attempt <= 4; attempt += 1) {
+    assert.equal(timers.length, 1)
+    timers.shift()()
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(attempts, attempt)
+    assert.equal(supervisor.status().state, attempt === 4 ? 'connected' : 'reconnecting')
+  }
+  assert.deepEqual(stopped, [2, 3])
+  await supervisor.stop()
+})
+
+test('readiness cleanup preserves explicit permanent failures and refuses unconfirmed termination', async () => {
+  const diagnostic = createBackendDiagnosticCollector()
+  diagnostic.push('[runtime-diagnostic] authentication_failed')
+  let stopped = false
+  await assert.rejects(waitForBackendReadiness({}, Promise.reject(new Error('exit')), diagnostic,
+    async () => { stopped = true }), {kind: 'authentication_failed', code: 'authentication_failed'})
+  assert.equal(stopped, true)
+  await assert.rejects(waitForBackendReadiness({}, Promise.reject(new Error('timeout')),
+    createBackendDiagnosticCollector(), async () => { throw new Error('still alive') }),
+  {kind: 'unavailable', code: 'backend_stop_failed'})
+})
 
 test('recoverable starts reconnect with deterministic jitter and then connect', async () => {
   const scheduled = []

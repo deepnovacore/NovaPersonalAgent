@@ -7,6 +7,7 @@ import {fileURLToPath} from 'node:url'
 import type {Clock} from '../../clock.js'
 import {stripLikePython} from '../../python-text.js'
 import type {RealtimeTelemetry} from '../telemetry.js'
+import {localEotExecutor} from './local-eot-executor.js'
 
 export type EndpointingCapabilityReason =
   | 'ready'
@@ -128,26 +129,32 @@ export function createEndpointingCapabilityFactory(options: {
   readonly executor?: LiveKitExecutor
   readonly clock?: Clock
 } = {}): EndpointingCapabilityFactory {
+  let surface: LiveKitAgentsPublicSurface | undefined
+  const loader = async (): Promise<LiveKitAgentsPublicSurface> => {
+    surface ??= await import('@livekit/agents') as unknown as LiveKitAgentsPublicSurface
+    return surface
+  }
+  const executor = options.executor ?? {
+    async doInference(method: string, data: unknown): Promise<unknown> {
+      const loaded = await loader()
+      const delegate = loaded.getJobContext(false)?.inferenceExecutor ?? localEotExecutor
+      return delegate.doInference(method, data)
+    },
+  }
   return async input => {
-    let surface: LiveKitAgentsPublicSurface | undefined
-    const loader = async (): Promise<LiveKitAgentsPublicSurface> => {
-      surface ??= await import('@livekit/agents') as unknown as LiveKitAgentsPublicSurface
-      return surface
-    }
     const result = await probeEndpointingCapability({
       signal: input.signal,
       agentsLoader: loader,
-      ...(options.executor === undefined ? {} : {executor: options.executor}),
+      executor,
       ...(options.clock === undefined ? {} : {clock: options.clock}),
       ...(input.telemetry === undefined ? {} : {telemetry: input.telemetry}),
     })
     if (result.mode !== 'livekit_v1_mini') return {result}
     const loaded = surface ?? await loader()
-    const executor = options.executor ?? loaded.getJobContext(false)?.inferenceExecutor
     return {
       result,
       surface: loaded,
-      ...(executor === undefined ? {} : {executor}),
+      executor,
     }
   }
 }

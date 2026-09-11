@@ -3,6 +3,7 @@ import test from 'node:test'
 import {readFile} from 'node:fs/promises'
 
 import * as securityModule from '../src/main/security.mjs'
+import { DORMANT_ORB_WINDOW_SIZE } from '../src/main/window-position.mjs'
 
 const { browserWindowOptions, validateBootstrap } = securityModule
 
@@ -50,9 +51,14 @@ test('pins BrowserWindow isolation sandbox and ephemeral partition', () => {
 
   assert.equal(options.width, 160)
   assert.equal(options.height, 160)
-  assert.equal(options.minWidth, 160)
+  // The floor is the dormant bubble, not the natural orb: Electron clamps
+  // programmatic setBounds to these too, so pinning them at 160 would stop the
+  // window ever shrinking to rest. Width is still capped at the natural size —
+  // only height grows, for the confirmation and bubble surfaces.
+  assert.equal(options.minWidth, DORMANT_ORB_WINDOW_SIZE.width)
+  assert.equal(options.minHeight, DORMANT_ORB_WINDOW_SIZE.height)
+  assert.ok(options.minWidth < 160 && options.minHeight < 160)
   assert.equal(options.maxWidth, 160)
-  assert.equal(options.minHeight, 160)
   assert.equal(options.maxHeight, undefined)
   assert.equal(options.transparent, true)
   assert.equal(options.frame, false)

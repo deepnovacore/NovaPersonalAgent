@@ -357,23 +357,39 @@ export const STATE_PARAMS = Object.freeze({
     alpha: 1,
     countRatio: 1,
   }),
-  // A deliberate mute: collapsed like the terminal family so it reads as
-  // "not receiving", but dim-toned and mid-sized — the user chose this, so it
-  // must not borrow the alert red. It keeps moving at the tier it resumes
-  // into: a muted session is still a live session, only unfed.
+  // A deliberate mute speaks the standby dialect, not the terminal one: the
+  // user turned the mic off, so the field stays a loose drifting cloud rather
+  // than collapsing onto a ring. Ringless is the whole point — a stroked hoop
+  // is what made this read as a dead grey coin instead of a resting session.
+  // Denser, brighter and twinklier than `inactive`, because a muted session is
+  // live and only unfed, where an inactive one never started.
   muted: stateParams({
-    convergence: 0.75,
+    convergence: 0.16,
     orbitSpeed: 0.03,
-    jitter: 0.04,
+    jitter: 0.07,
     pulseGain: 0,
-    alpha: 0.6,
-    countRatio: 0.6,
-    ringRadius: 32,
+    alpha: 0.5,
+    countRatio: 0.5,
     tone: 'dim',
+    twinkleSpeed: 0.5,
   }),
-  // A dropped backend: the widest, sparsest, slowest ring — the field simply
-  // stopped where it was.
-  disconnected: collapseParams({ ringRadius: RING_RADIUS, countRatio: 0.5, orbitSpeed: 0.03 }),
+  // A dropped backend also rests rather than alarms — dim-toned, never the
+  // alert red, because a backend that stopped is not a fault the user caused.
+  // It keeps a wide ring so it stays tellable apart from both `muted`
+  // (ringless) and `inactive` (ringless): the field settled outward against
+  // its edge and stopped being fed. Sparser and slower than muted carries the
+  // extra weight the copy calls "已断开".
+  disconnected: stateParams({
+    convergence: 0.5,
+    orbitSpeed: 0.025,
+    jitter: 0.05,
+    pulseGain: 0,
+    alpha: 0.55,
+    countRatio: 0.42,
+    ringRadius: 40,
+    tone: 'dim',
+    twinkleSpeed: 0.4,
+  }),
   reconnecting: stateParams({
     convergence: 0.45,
     orbitSpeed: 0.18,
@@ -409,10 +425,16 @@ export const STATE_FPS = Object.freeze({
   candidate: 30,
   booting: 30,
   idle: 15,
-  // A muted session is live, only unfed: it keeps the tier it resumes into.
-  muted: 15,
+  // A muted session is live, only unfed, so it still drifts — just at the
+  // resting tier rather than idle's.
+  muted: 10,
   inactive: 10,
-  disconnected: 0,
+  // A stopped backend drifts too, at the slowest tier that still reads as
+  // moving. Zero would freeze one frame and cost nothing, but a motionless
+  // disc is indistinguishable from a screenshot of a crashed app, which is
+  // exactly the impression this state has to stop giving. The halved density
+  // above pays for most of the frames.
+  disconnected: 8,
   reconnecting: 30,
   'configuration-required': 0,
   'authentication-failed': 0,

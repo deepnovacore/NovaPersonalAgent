@@ -48,6 +48,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:native-audio:playback-muted',
     'nova:native-audio:terminal',
     'nova:orb-menu:show',
+    'nova:orb:dormant',
     'nova:projects:repair',
     'nova:release-camera:result',
     'nova:settings:changed',
@@ -191,6 +192,40 @@ test('workspace graph board is sender-bound on the independent debug channel', a
   for (const source of [main, preload, renderer]) {
     assert.doesNotMatch(source, /workspace-graph-board:(?:export|delete|edit|suppress|merge|switch|inspect)/u)
   }
+})
+
+test('a hidden orb window is never shrunk, and comes back at natural size', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+
+  // Executed rather than pattern-matched: the point is the behaviour, and a
+  // regex would keep passing if the visibility check moved below setDormant.
+  const body = source.match(
+    /ipcMain\.on\('nova:orb:dormant', \(event, active\) => \{([\s\S]*?)\n  \}\)/,
+  )[1]
+  const run = (visible, active) => {
+    const calls = []
+    const webContents = {}
+    const mainWindow = { webContents, isVisible: () => visible }
+    const orbWindow = { setDormant: value => calls.push(value) }
+    new Function('mainWindow', 'orbWindow', 'ipcMain', `
+      const handler = (event, active) => {${body}}
+      handler({sender: mainWindow.webContents}, ${JSON.stringify(active)})
+    `)(mainWindow, orbWindow, {on: () => {}})
+    return calls
+  }
+
+  // The renderer cannot tell an idle doze from a tray hide: it gets the same
+  // 'sleeping' wake state either way, and Electron still reports the document
+  // as visible while the window is hidden. So the side that called hide() has
+  // to refuse, or the hidden window shrinks and pops back as a bubble.
+  assert.deepEqual(run(false, true), [], 'a hidden window must not shrink')
+  assert.deepEqual(run(true, true), [true], 'a visible window still rests')
+
+  // And whatever was ignored while hidden is undone on the way back.
+  assert.match(
+    source,
+    /mainWindow\.on\('show', \(\) => \{ orbWindow\.setDormant\(false\) \}\)/,
+  )
 })
 
 test('registers the orb context-menu channel exactly once', async () => {

@@ -212,6 +212,8 @@ body[data-opaque="1"] {
   transform: translate(-50%, -50%);
   border-radius: 50%;
   pointer-events: none;
+  /* Matches #orb's spring so the drawing and its box shrink as one. */
+  transition: transform 320ms cubic-bezier(.34, 1.42, .64, 1);
 }
 
 .capture-indicator {
@@ -370,7 +372,6 @@ body:hover #orb-rail,
    softens their fixed warning colour. Confirmation keeps its amber treatment
    below for the same reason. */
 #shell:is(
-  [data-state='disconnected'],
   [data-state='error'],
   [data-state='configuration-required'],
   [data-state='authentication-failed'],
@@ -382,6 +383,81 @@ body:hover #orb-rail,
   [data-state='audio-pipeline-error'],
   [data-state='permission-denied']
 ) #state-label { color: #ff777f; }
+
+/* A stopped backend is not a fault the user caused, so its pill leaves the
+   fixed warning red above and takes a restrained amber instead: still clearly
+   "not normal", without the alarm the orb itself no longer carries. Fixed, not
+   wired to --palette-*, for the same reason the warning colour is — a semantic
+   state must not rotate its colour during the hover palette tour. The orb's
+   own weight is carried by geometry (orb-visual.mjs), because the default
+   ember palette is already amber and a second amber there would not read. */
+#shell[data-state='disconnected'] #state-label {
+  color: #f0c07a;
+  border-color: rgba(240, 192, 122, .28);
+}
+
+/* Resting shrinks the disc to a bubble, and the window shrinks with it
+   (window-position.mjs) so it stops reserving a click-blocking square of
+   desktop. This animates the real width and height rather than a transform:
+   a transform scales the painted result but leaves the 98px layout box, which
+   the 64px window then clips into a square with two hard corners — and
+   border-radius, computed on that untouched box, cannot round it back.
+
+   The slight overshoot is the whole character of waking up. Reduced motion
+   neutralizes it through the blanket transition:none below, which is why the
+   spring lives in a transition rather than in keyframes. */
+#orb {
+  transition: width 320ms cubic-bezier(.34, 1.42, .64, 1),
+              height 320ms cubic-bezier(.34, 1.42, .64, 1);
+}
+/* #shell already centres its tracks vertically (align-content) but not
+   horizontally, and once the window is narrower than the orb's 98px column
+   that column overflows to the right rather than straddling the centre —
+   parking the bubble ~28px off-axis. Scoped to dormancy on purpose: at the
+   natural width this would also shrink the track to the status pill's own
+   max-content width, changing where that pill ellipsizes. */
+/* Guarded against bubble mode throughout: that layout absolutely positions the
+   orb against coordinates computed for its full size, and resting sizes it
+   down — at equal specificity the two would silently fight over #orb. The
+   renderer already lifts dormancy when bubbles appear; this keeps a stale
+   attribute from ever rendering as a vanished orb. */
+#shell[data-dormant='true']:not([data-bubbles='true']) { justify-content: center; }
+/* 40px inside a 64px window: the remaining 12px a side is the margin the
+   plate's own glow needs, and it keeps the bubble clear of the screen edge. */
+#shell[data-dormant='true']:not([data-bubbles='true']) #orb { width: 40px; height: 40px; }
+/* The canvas is a fixed 98px child, so it needs the scale the box no longer
+   supplies. Transforming it is safe where transforming #orb was not: it is
+   already clipped to the parent's rounded box rather than defining it. */
+#shell[data-dormant='true']:not([data-bubbles='true']) .orb-canvas { transform: translate(-50%, -50%) scale(.41); }
+/* A resting orb is the bubble and nothing else. Stated as "everything except
+   the disc" rather than a list, because the shell has six siblings that can
+   each appear on their own schedule — the status pill, the workspace pill, the
+   task banner, the caption, the AEC note, the rail — and a list would silently
+   miss whichever one is added next. That is exactly how the workspace pill
+   ended up hanging under a 40px bubble.
+
+   display, not opacity: #shell is a centred grid, so a merely transparent row
+   would still claim space and push the disc off the centre the window shrinks
+   around. The screen-reader-only live region stays: it is already clipped to a
+   pixel, so it costs nothing visually and keeps announcements working. */
+#shell[data-dormant='true']:not([data-bubbles='true']) > :not(#orb, #confirmation-announcement) {
+  display: none;
+}
+/* The capture dot is a child of #orb rather than a sibling, so the rule above
+   does not reach it. It is sized for the full disc: 11px of it covers 28% of a
+   40px bubble, reading as a blemish rather than an indicator, and resting has
+   nothing for it to report — the mic is not capturing, only the local wake
+   word is listening. */
+#shell[data-dormant='true']:not([data-bubbles='true']) .capture-indicator { display: none; }
+
+/* The two standby states let the whole window recede: the particle plate
+   supplies its own dark ground, so the disc does not also need a lit rim and a
+   near-opaque base to sit on. Muted and disconnected are the only states the
+   user leaves sitting on screen indefinitely. */
+#shell:is([data-state='muted'], [data-state='disconnected']) #orb {
+  border-color: rgba(255, 255, 255, .04);
+  background: rgba(7, 6, 11, .72);
+}
 
 #codex-label, #aec-label, #caption { display: none; }
 #shell:has(#codex-label[data-mode='confirmation']) {
@@ -590,6 +666,28 @@ body:hover #orb-rail,
   [data-state="microphone-unavailable"] #orb::after,
   [data-state="audio-pipeline-error"] #orb::after,
   [data-state="permission-denied"] #orb::after { background: #ff3b30; }
+  /* The standby softening (outside this media query) out-specifies the plain
+     #orb rule above — #shell:is([data-state=...]) adds an ID and an attribute —
+     so it must be neutralized here explicitly, exactly like the confirmation
+     title below. Without this, muted and disconnected keep a 4%-opaque border
+     and a translucent ground while the canvas that would have drawn their
+     boundary is hidden, leaving the disc with no visible edge at all. */
+  #shell:is([data-state='muted'], [data-state='disconnected']) #orb {
+    border: 2px solid white;
+    background: black;
+  }
+  /* The inset is a fixed margin around a 98px box, so resting's 40px box turns
+     the same 19px into a 2px speck. Under this media query the canvas is
+     hidden and this disc is the orb's entire content, so an unscaled inset
+     leaves a resting user with an empty white ring. 7px keeps the disc at the
+     same share of the box it sits in. */
+  #shell[data-dormant='true']:not([data-bubbles='true']) #orb::after { inset: 7px; }
+  /* Same cascade problem for the amber standby pill: high contrast is a
+     system-level path, so the semantic colour must yield to it. */
+  #shell[data-state='disconnected'] #state-label {
+    color: white;
+    border: 2px solid white;
+  }
   .capture-indicator { z-index: 1; }
   #state-label, #codex-label, #aec-label, #caption {
     color: white;

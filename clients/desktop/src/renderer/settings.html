@@ -25,7 +25,11 @@
     </nav>
     <main>
       <section class="setting-section" id="frontend-usage-section">
-        <h2>本次运行费用</h2>
+        <h2>用量与费用</h2>
+        <div class="usage-overview" aria-label="用量统计范围">
+          <button type="button" class="usage-scope" id="usage-history" aria-pressed="false"><span>历史累计</span><strong id="usage-history-cost">暂无数据</strong><span id="usage-history-count">0 次调用</span></button>
+          <button type="button" class="usage-scope" id="usage-session" aria-pressed="true"><span>本次启动</span><strong id="usage-session-cost">暂无数据</strong><span id="usage-session-count">0 次调用</span></button>
+        </div>
         <p id="frontend-usage" role="status" aria-live="polite">暂无用量报告</p>
         <details><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
       </section>
@@ -76,8 +80,8 @@
         <h2>语音唤醒</h2>
         <fieldset>
           <legend>本地语音唤醒</legend>
-          <label class="toggle-row" title="空闲后隐藏悬浮球，在本机监听“你好星核”；闭麦时停止唤醒检测。"><input id="wake-word-enabled" type="checkbox">启用“你好星核”唤醒</label>
-          <small>空闲后隐藏悬浮球，仅在本机监听唤醒词；闭麦也会停止唤醒检测。首次开启需下载模型。</small>
+          <label class="toggle-row" title="空闲后悬浮球缩成小气泡，在本机监听“你好星核”；闭麦时停止唤醒检测。"><input id="wake-word-enabled" type="checkbox" role="switch">启用“你好星核”唤醒</label>
+          <small>空闲后悬浮球缩成小气泡，仅在本机监听唤醒词，听到唤醒词即恢复原状；闭麦也会停止唤醒检测。首次开启需下载模型。</small>
           <div class="field">
             <label for="auto-hide-seconds" title="空闲多久后休眠；0 表示不自动休眠。">空闲休眠秒数</label>
             <input id="auto-hide-seconds" type="number" min="0" max="3600" step="1" value="60">

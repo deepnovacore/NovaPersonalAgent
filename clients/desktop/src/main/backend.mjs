@@ -496,6 +496,20 @@ export function watchBackendExit(child, { closeReadiness, onExit }) {
 const drains = new WeakMap()
 const exitedBackends = new WeakSet()
 
+export async function waitForBackendReadiness(child, readiness, diagnostic, stop = shutdownBackend) {
+  try {
+    return await readiness
+  } catch {
+    // No readiness is not proof of a permanent configuration problem. Preserve
+    // explicit runtime diagnostics, but retry an otherwise unexplained timeout.
+    const failure = diagnostic.failure('backend_start_timeout')
+    try { await stop(child) } catch {
+      throw Object.freeze({kind: 'unavailable', code: 'backend_stop_failed'})
+    }
+    throw failure
+  }
+}
+
 /**
  * Shut the backend down on the stdin-EOF sentinel, escalating only if it hangs.
  *

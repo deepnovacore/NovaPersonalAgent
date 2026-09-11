@@ -34,6 +34,7 @@ const REQUIRED_VOICEMEM_WORKER_FILE = `node_modules/${RUNTIME_PACKAGE}/dist/src/
 const REQUIRED_VOICEMEM_ENTRY_FILE = `node_modules/${VOICEMEM_PACKAGE}/dist/src/index.js`
 const EXPECTED_RUNTIME_DEPENDENCIES = Object.freeze([
   '@livekit/agents',
+  '@livekit/local-inference',
   '@livekit/rtc-node',
   '@modelcontextprotocol/sdk',
   'jszip',

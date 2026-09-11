@@ -348,6 +348,68 @@ test('heartbeat expiry while draining discards the remaining queue before new li
 })
 
 
+test('sleeping tells the host why, so an idle doze and an explicit hide differ', () => {
+  const reasons = []
+  const runtime = new WakeWordRuntime({
+    modelRoot: '/unused', WorkerClass: Worker, hide: reason => reasons.push(reason),
+  })
+  runtime.configure({wakeWordEnabled: true, autoHideSeconds: 60})
+  runtime.worker.emit('message', {type: 'ready'})
+  runtime.report({idle: true, muted: false, activated: true, epoch: runtime.epoch})
+
+  // The default is the idle timeout, which leaves a resting bubble on screen.
+  assert.equal(runtime.sleep(), true)
+  assert.deepEqual(reasons, ['idle'])
+  assert.equal(runtime.state, 'sleeping')
+
+  // An explicit hide parks the runtime in the same state but must still clear
+  // the screen, so the reason has to survive the trip to the host.
+  runtime.wake()
+  runtime.report({idle: true, muted: false, activated: true, epoch: runtime.epoch})
+  assert.equal(runtime.sleep('manual'), true)
+  assert.deepEqual(reasons, ['idle', 'manual'])
+  assert.equal(runtime.state, 'sleeping')
+})
+
+test('the idle timeout asks for the resting kind of sleep, not the hiding kind', () => {
+  let now = 0
+  const reasons = []
+  const runtime = new WakeWordRuntime({
+    modelRoot: '/unused', WorkerClass: Worker,
+    now: () => now, hide: reason => reasons.push(reason),
+  })
+  runtime.configure({wakeWordEnabled: true, autoHideSeconds: 60})
+  runtime.worker.emit('message', {type: 'ready'})
+  const report = () => runtime.report({idle: true, muted: false, activated: true, epoch: runtime.epoch})
+
+  // Stepped, not jumped: report() treats a gap over 2500 ms as a stale client
+  // and restarts the idle clock, so a single leap would never time out.
+  const advance = to => { while (now < to) { now = Math.min(to, now + 1000); report() } }
+
+  report()
+  advance(59_000)
+  assert.equal(runtime.state, 'active', 'still short of the configured timeout')
+  advance(60_000)
+
+  // The timeout is the path that has to leave a bubble behind, so it must
+  // reach the host as 'idle' — main only clears the screen for 'manual'.
+  assert.equal(runtime.state, 'sleeping')
+  assert.deepEqual(reasons, ['idle'])
+})
+
+test('manual hide asks for the hiding kind of sleep', () => {
+  const source = readFileSync(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const body = source.match(/function hideOrb\(\) \{([\s\S]*?)\n\}/)[1]
+  const reasons = []
+  new Function('wakeWord', 'mainWindow', body)(
+    {enabled: true, state: 'active', sleep: reason => { reasons.push(reason); return true }},
+    {hide: () => assert.fail('a successful sleep owns the screen')},
+  )
+  // Without this the tray and the global shortcut would only shrink the orb to
+  // a bubble, which is not what "hide" means to someone who just asked for it.
+  assert.deepEqual(reasons, ['manual'])
+})
+
 test('manual hide falls back when sleep is unavailable', () => {
   const source = readFileSync(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const body = source.match(/function hideOrb\(\) \{([\s\S]*?)\n\}/)[1]
