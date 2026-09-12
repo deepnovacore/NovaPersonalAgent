@@ -1,4 +1,4 @@
-import {managedMcpEnvironment, type ManagedCodexMcp} from './managed-mcp.js'
+import {managedMcpConfigToml, managedMcpEnvironment, type ManagedCodexMcp} from './managed-mcp.js'
 import {statSync} from 'node:fs'
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process'
 import {isAbsolute} from 'node:path'
@@ -123,6 +123,8 @@ export function createApprovedCodexSpawnSpec(input: {
   readonly environment: Readonly<Record<string, string>>
   readonly launchProfile?: CodexLaunchProfile
   readonly managedMcp?: ManagedCodexMcp
+  readonly preserveHome?: boolean | undefined
+  readonly sharedHomeOverrides?: readonly string[]
 }): ApprovedSpawnSpec {
   const binary = hostBinaryPath(input.binary)
   const cwd = hostWorkspacePath(input.workspace)
@@ -133,9 +135,11 @@ export function createApprovedCodexSpawnSpec(input: {
     binary,
     argv: Object.freeze([
       ...validateBinaryPrefixArgs(input.prefixArgs),
+      ...(input.preserveHome && input.managedMcp ? ['-c', managedMcpConfigToml(input.managedMcp).trim()] : []),
+      ...(input.sharedHomeOverrides ?? []),
       ...codexAppServerArgv(input.launchProfile ?? resolveCodexLaunchProfile({
         approvalMode: 'ask', project: false, foregroundBroker: false,
-      }), input.managedMcp !== undefined),
+      }), input.managedMcp !== undefined || input.preserveHome === true),
     ]),
     cwd,
     environment,

@@ -55,6 +55,7 @@ export interface ConfirmedProjectOperation {
 }
 
 export interface ProjectConfirmationView {
+  readonly available_sessions?: readonly {readonly project: string; readonly titles: readonly string[]}[]
   readonly pending_confirmation: boolean
   readonly pending_confirmation_busy: boolean
   /** Opaque proposal binding for an exact renderer decision. Present only while pending. */

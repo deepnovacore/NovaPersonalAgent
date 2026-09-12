@@ -1,3 +1,7 @@
+import {basename} from 'node:path'
+import {realpath} from 'node:fs/promises'
+import {readLocalCodexSessions} from './local-sessions.js'
+import {hostPersistentHomeFromConfig, hostWorkspaceFromConfig} from '../../host-paths.js'
 import {hostWorkspacePath} from '../../host-paths.js'
 import type {
   CodexAppServerTransport,
@@ -68,6 +72,8 @@ import {
 const MAX_ROSTER = 10
 
 export interface ProjectTransportBinding {
+  readonly preserveHome?: boolean
+
   readonly workspace: HostWorkspace
   readonly codexHome: HostCodexHome
   readonly resumeThreadId: string | null
@@ -85,6 +91,8 @@ interface RunSlot {
 }
 
 interface ProjectRunInput {
+  readonly session_id?: string
+
   readonly work_order: string
   readonly project: string | null
   readonly session: 'latest' | 'new'
@@ -98,6 +106,8 @@ export interface ProjectTransportFactory {
 export type {CommittedWorkspaceEvent, ProjectCommitResult, ProjectRuntimeDispatch, TerminalWorkOrderEvent}
 
 export interface ProjectCodexAdapterOptions {
+  readonly localCodexHome?: string
+
   readonly store: ProjectStore
   readonly confirmation: ProjectConfirmationController
   readonly transportFactory: ProjectTransportFactory
@@ -119,6 +129,11 @@ interface ConfirmedDelegateBinding {
 
 export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   readonly manifest
+  readonly #localCodexHome: string | undefined
+  #localSessionIds = new Set<string>()
+  #catalogHealthy = false
+  #catalogTimer: ReturnType<typeof setInterval> | null = null
+  #catalogRefresh: Promise<void> | null = null
   readonly #store: ProjectStore
   readonly #confirmation: ProjectConfirmationController
   readonly #transportFactory: ProjectTransportFactory
@@ -160,6 +175,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     this.manifest = options.codexApproval === undefined
       ? CODEX_PROJECT_MANIFEST
       : CODEX_PROJECT_APPROVAL_MANIFEST
+    this.#localCodexHome = options.localCodexHome
     this.#store = options.store
     this.#confirmation = options.confirmation
     this.#transportFactory = options.transportFactory
@@ -173,9 +189,45 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
 
   initialize(): Promise<void> {
     if (this.#initializePromise !== null) return this.#initializePromise
-    const work = this.#refreshProjectViewTolerant()
+    const work = this.#refreshLocalSessions().then(async () => {
+      await this.#refreshProjectViewTolerant()
+      if (this.#localCodexHome && !this.#closed) {
+        this.#catalogTimer = setInterval(() => { void this.#refreshLocalSessions().then(() => this.#refreshProjectViewTolerant()).catch(() => undefined) }, 30_000)
+        this.#catalogTimer.unref()
+      }
+    })
     this.#initializePromise = work
     return work
+  }
+
+  #refreshLocalSessions(): Promise<void> {
+    if (!this.#localCodexHome || this.#closed) return Promise.resolve()
+    if (this.#catalogRefresh) return this.#catalogRefresh
+    const refresh = (async () => {
+      const ids = new Set<string>()
+      try {
+        const home = await realpath(this.#localCodexHome!)
+        const catalog = await readLocalCodexSessions(home)
+        // Keep the same ten-project intake budget. Older projects remain in Codex.
+        const paths = new Set<string>()
+        for (const item of catalog) { if (paths.size < MAX_ROSTER) paths.add(item.cwd) }
+        for (const item of [...catalog].reverse()) {
+          if (this.#closed) return
+          if (!paths.has(item.cwd)) continue
+          try {
+            const workspace = await this.#store.ensureImported([...basename(item.cwd)].slice(0, 80).join('') || 'workspace', hostWorkspaceFromConfig(item.cwd, [item.cwd]))
+            const session = await this.#store.importSession(workspace.workspace_id, {
+              threadId: item.threadId, title: item.title, home: home, updatedAt: item.updatedAt,
+            })
+            ids.add(session.session_id)
+          } catch { /* An unavailable directory or full store must not hide other sessions. */ }
+        }
+        this.#localSessionIds = ids
+        this.#catalogHealthy = true
+      } catch { this.#catalogHealthy = false }
+    })()
+    this.#catalogRefresh = refresh.finally(() => { this.#catalogRefresh = null })
+    return this.#catalogRefresh
   }
 
   async activeCommittedWorkspace(): Promise<WorkspaceRecord | null> {
@@ -214,7 +266,12 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       }
     }
     await this.#store.revalidateWorkspace(workspace.workspace_id)
-    const session = decision.kind === 'work' && decision.session === 'latest' ? await this.#latestReadySession(workspace) : null
+    let session: ProjectSessionRecord | null = null
+    if (decision.kind === 'work' && decision.session === 'latest') {
+      try { session = decision.session_title ? await this.#store.resolveSession(workspace.workspace_id, decision.session_title) : await this.#latestReadySession(workspace) }
+      catch { throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: decision.session_title ?? ''}) }
+      if (session?.executor_home && !this.#localSessionIds.has(session.session_id)) throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: session.display_title})
+    }
     return {
       workspace: workspace.canonical_path,
       action: decision.kind === 'switch' ? 'select' : session === null ? 'reuse' : 'resume',
@@ -232,6 +289,9 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
         name: entry.name,
         last_used_at: entry.last_used_at,
         last_session_title: session?.display_title ?? null,
+        ...(this.#localCodexHome ? {sessions: (snapshot?.sessions ?? [])
+          .filter(item => item.workspace_id === workspace?.workspace_id && item.state === 'ready' && (!item.executor_home || this.#localSessionIds.has(item.session_id)))
+          .sort((a, b) => b.last_used_at - a.last_used_at).slice(0, 20).map(item => item.display_title)} : {}),
         running: this.#runningIn(entry.name),
       }
     })
@@ -293,7 +353,9 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
 
   /** The workspace's active session when it can be resumed (ready with a thread), else `null`. */
   async #latestReadySession(workspace: WorkspaceRecord): Promise<ProjectSessionRecord | null> {
-    if (workspace.active_session_id === null) return null
+    if (workspace.active_session_id === null) return this.#localCodexHome
+      ? (await this.#store.listSessions(workspace)).filter(item => item.state === 'ready' && this.#localSessionIds.has(item.session_id))
+        .sort((a, b) => b.last_used_at - a.last_used_at)[0] ?? null : null
     let session: ProjectSessionRecord
     try {
       session = await this.#store.resolveSession(workspace.workspace_id, null)
@@ -385,7 +447,10 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   ): Promise<ExecutorHandoff> {
     let resumed: ProjectSessionRecord | null = null
     try {
-      if (input.session === 'latest') resumed = await this.#latestReadySession(workspace)
+      if (input.session_id) {
+        resumed = (await this.#store.listSessions(workspace)).find(item => item.session_id === input.session_id && item.state === 'ready') ?? null
+        if (resumed === null) return failureHandoff('resume_unavailable', 'run')
+      } else if (input.session === 'latest') resumed = await this.#latestReadySession(workspace)
     } catch (error) {
       return projectProblemHandoff(projectErrorCode(error))
     }
@@ -557,8 +622,10 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   }
 
   publicProjectView(pendingConfirmation: boolean): PublicProjectView {
+    const available = this.#localCodexHome ? this.roster().filter(entry => entry.sessions?.length).map(entry => ({project: entry.name, titles: entry.sessions!})) : []
     const base = {
       ...this.#publicView,
+      ...(available.length ? {available_sessions: available} : {}),
       roster: this.#publicView.roster.slice(0, MAX_ROSTER).map(entry => ({...entry, running: this.#runningIn(entry.name)})),
     }
     if (!pendingConfirmation) {
@@ -594,6 +661,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   }
 
   close(): Promise<void> {
+    if (this.#catalogTimer) { clearInterval(this.#catalogTimer); this.#catalogTimer = null }
     if (this.#closePromise !== null) return this.#closePromise
     this.#closed = true
     const work = this.#close()
@@ -608,6 +676,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   }
 
   async #close(): Promise<void> {
+    await this.#catalogRefresh
     const slots = [...this.#slots.values()]
     for (const slot of slots) slot.controller.abort()
     let closeFailure: Error | null = null
@@ -743,13 +812,21 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     }
     let session = resumed
     let startRollback: SessionStartRollback | null = null
+    let titleUpdates = Promise.resolve()
     let reportedThreadId: string | null = null
     let bindingMismatch = false
     let result: ExecutorHandoff | null = null
     let resumeRollback: SessionResumeRollback | null = null
     const disposition: {value: ValidatedCodexDisposition | null} = {value: null}
     await this.#store.revalidateWorkspace(workspace.workspace_id)
-    const codexHome = await this.#store.persistentHome(workspace.workspace_id)
+    if (resumed?.executor_home) {
+      await this.#refreshLocalSessions()
+      if (!this.#localCodexHome || !this.#catalogHealthy || !this.#localSessionIds.has(resumed.session_id)
+        || await realpath(this.#localCodexHome) !== resumed.executor_home) return failureHandoff('resume_unavailable', 'run')
+    }
+    const codexHome = resumed?.executor_home
+      ? hostPersistentHomeFromConfig(resumed.executor_home, [await realpath(this.#localCodexHome!)])
+      : await this.#store.persistentHome(workspace.workspace_id)
     let inner: CodexAppServerTransport
     try {
       if (session === null) {
@@ -779,6 +856,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       inner = this.#transportFactory.create(Object.freeze({
         workspace: approvedWorkspace,
         codexHome,
+        preserveHome: resumed?.executor_home !== undefined,
         resumeThreadId: resumed?.codex_thread_id ?? null,
         work: slot.work,
       }))
@@ -817,9 +895,14 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       },
       // Codex may rename the thread; mirror it into the running work and the session title
       // (advisory: the store may still disambiguate against a sibling session).
-      onThreadNamed: name => {
-        slot.work = {...slot.work, title: name}
-        void this.#store.setSessionTitle(sessionId, name).catch(() => false)
+      onThreadNamed: (threadId, name) => {
+        if (threadId !== reportedThreadId || bindingMismatch) return
+        titleUpdates = titleUpdates.then(async () => {
+          if (!await this.#store.setSessionTitle(sessionId, name)) return
+          const saved = (await this.#store.snapshot()).sessions.find(item => item.session_id === sessionId)
+          if (saved) slot.work = {...slot.work, title: saved.display_title}
+          await this.#refreshProjectContextBarrier()
+        }).catch(() => undefined)
       },
     })
     const active = new CodexLiveAdapter(transport, undefined, {
@@ -829,6 +912,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     slot.live = active
     try {
       result = await active.dispatch('run', {work_order: workOrder}, context)
+      await titleUpdates
     } catch (error) {
       if (!slot.cancelled || !(error instanceof Error && error.name === 'AbortError')) throw error
       result = {
@@ -987,7 +1071,7 @@ interface ThreadObservation {
   /** Host-derived title for a NEW thread; null when resuming (Codex already owns the name). */
   readonly threadName: string | null
   readonly onThreadReady: (threadId: string) => void
-  readonly onThreadNamed: (name: string) => void
+  readonly onThreadNamed: (threadId: string, name: string) => void
 }
 
 class ThreadObservingTransport implements CodexAppServerTransport {
@@ -1017,7 +1101,7 @@ class ThreadObservingTransport implements CodexAppServerTransport {
         observer.onThreadReady?.(threadId)
       },
       onThreadNamed: (threadId, name) => {
-        if (name !== null) onThreadNamed(name)
+        if (name !== null) onThreadNamed(threadId, name)
         observer.onThreadNamed?.(threadId, name)
       },
     }, deadline)

@@ -87,6 +87,7 @@ const RUN_PROJECT: OpSpec = {
     properties: {
       work_order: {type: 'string', minLength: 1, maxLength: 4000},
       project: PROJECT,
+      session_id: {type: 'string', minLength: 1, maxLength: 80, description: '宿主已解析的精确会话 ID'},
       session: {type: 'string', enum: ['latest', 'new'], description: 'latest 续用活动会话；new 开新线程'},
       title: {type: 'string', minLength: 1, maxLength: 120, description: '宿主为新会话派生的标题'},
     },
@@ -202,7 +203,7 @@ function projectField(request: Record<string, unknown>, result: Record<string, u
 }
 
 function validateProjectRun(request: Record<string, unknown>): CodexRequestValidation {
-  const allowed = new Set(['work_order', 'project', 'session', 'title'])
+  const allowed = new Set(['work_order', 'project', 'session', 'title', 'session_id'])
   if (Object.keys(request).some(key => !allowed.has(key))) return failure('invalid_params', 'run')
   const workOrder = normalizedString(request.work_order, 4000)
   if (workOrder === null) return failure('invalid_params', 'run')
@@ -211,6 +212,11 @@ function validateProjectRun(request: Record<string, unknown>): CodexRequestValid
   const session = Object.hasOwn(request, 'session') ? request.session : 'latest'
   if (session !== 'latest' && session !== 'new') return failure('invalid_params', 'run')
   result.session = session
+  if (Object.hasOwn(request, 'session_id')) {
+    const id = normalizedString(request.session_id, 80)
+    if (id === null || session !== 'latest') return failure('invalid_params', 'run')
+    result.session_id = id
+  }
   if (Object.hasOwn(request, 'title')) {
     const title = normalizedString(request.title, 120)
     if (title === null) return failure('invalid_params', 'run')

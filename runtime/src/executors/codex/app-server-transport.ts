@@ -1,3 +1,5 @@
+import {sharedHomeOverrides} from './shared-home.js'
+import {generateSessionTitle} from './session-title.js'
 import {managedMcpEnvironment, recordManagedMcpVisibility, type ManagedCodexMcp} from './managed-mcp.js'
 import {Readable, Writable} from 'node:stream'
 
@@ -84,6 +86,8 @@ export type CodexTransportCode =
 
 export interface CodexAppServerLaunchConfig {
   readonly managedMcp?: ManagedCodexMcp
+  readonly generateTitles?: boolean
+  readonly preserveHome?: boolean
   readonly binary: HostBinary
   readonly prefixArgs?: readonly string[]
   readonly workspace: HostWorkspace
@@ -164,7 +168,7 @@ export interface CodexLiveSchemaProbe {
 }
 
 interface CredentialProvider {
-  prepare(input: {readonly codexHome: HostCodexHome; readonly apiKey: string | null; readonly managedMcp?: ManagedCodexMcp}): Promise<CredentialSnapshot>
+  prepare(input: {readonly codexHome: HostCodexHome; readonly apiKey: string | null; readonly managedMcp?: ManagedCodexMcp; readonly preserveHome?: boolean | undefined}): Promise<CredentialSnapshot>
   environment(snapshot: CredentialSnapshot): Readonly<Record<string, string>>
   removeEphemeralHome(home: HostCodexHome): Promise<void>
 }
@@ -196,6 +200,7 @@ interface Session {
   readonly stderrDone: Promise<void>
   readonly settlePumps: () => Promise<void>
   readonly removeListeners: () => void
+  readonly metadataListeners: Set<(method: string, params: Record<string, unknown>) => void>
   readonly threadResponse: unknown
   projection: AppServerTurnProjection | null
   completion: Deferred<TurnCompletion> | null
@@ -290,6 +295,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
   readonly #establishControllers = new Set<AbortController>()
   #lateCleanupFailure: CodexTransportError | null = null
   #credentialCleanupFailure: CodexTransportError | null = null
+  #sharedHomeOverrides: readonly string[] | null = null
   #credentialRemovalRequired = false
   #credentialRemovalAttempt: CredentialRemovalAttempt | null = null
   #credentialPreparations = 0
@@ -377,6 +383,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     this.#sensitiveInputs.splice(0, this.#sensitiveInputs.length, workOrder)
     let session: Session | null = null
     let completion: TurnCompletion | null = null
+    let titleWork: Promise<void> | null = null
     let failureCode: CodexTransportCode | null = null
     try {
       if (this.#prewarmPromise !== null) {
@@ -416,6 +423,8 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
       const threadId = projection.threadId
       if (threadId === null) throw new CodexTransportError('unsupported_protocol')
       try { observer.onThreadReady?.(threadId) } catch { /* advisory */ }
+      const existingName = snapshotJsonRecord(snapshotJsonRecord(session.threadResponse).thread).name
+      if (typeof existingName === 'string' && existingName.trim()) observer.onThreadNamed?.(threadId, existingName)
       if (input.threadName !== undefined) {
         // The host-derived title is advisory: Codex owns the name once set (08), so a rejection
         // never fails the turn.
@@ -445,10 +454,26 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         },
       )
       projection.bindTurnResponse(turnResponse)
+      if (this.#config.generateTitles && input.threadName !== undefined) {
+        const target = session
+        const titleDeadline = {...deadline, expiresAtMs: Math.min(deadline.expiresAtMs, Date.now() + 12_000)}
+        titleWork = generateSessionTitle(workOrder, {
+          mcpServers: Object.keys(this.#config.managedMcp?.servers ?? {}),
+          request: (method, params) => this.#requestWithin(target, method, params, titleDeadline),
+          subscribe: listener => { target.metadataListeners.add(listener); return () => { target.metadataListeners.delete(listener) } },
+        }).then(async name => {
+          if (!name || target.closing) return
+          const current = snapshotJsonRecord(await this.#requestWithin(target, 'thread/read', {threadId}, titleDeadline))
+          if (snapshotJsonRecord(current.thread).name !== input.threadName) return
+          await this.#requestWithin(target, 'thread/name/set', {threadId, name}, titleDeadline)
+          observer.onThreadNamed?.(threadId, name)
+        }).catch(() => undefined)
+      }
       completion = await this.#waitForCompletion(session, deadline)
     } catch (error) {
       failureCode = safeTransportError(error, 'transport_lost').code
     }
+    await titleWork
     this.#hadTurn ||= session?.projection?.turnWasStarted ?? false
     const written = session?.turnStartWritten ?? false
     let cleanup: CleanupResult = {
@@ -672,6 +697,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const credentialWork = Promise.resolve()
       .then(() => this.#credentials.prepare({
         codexHome: this.#config.codexHome,
+        preserveHome: this.#config.preserveHome,
         apiKey: this.#config.apiKey,
         ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
       }))
@@ -719,6 +745,8 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         workspace: this.#config.workspace,
         codexHome: this.#config.codexHome,
         environment,
+        preserveHome: this.#config.preserveHome,
+        sharedHomeOverrides: this.#sharedHomeOverrides ?? [],
         ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
         launchProfile: this.#config.launchProfile,
       })
@@ -813,8 +841,16 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         includeLayers: true,
         cwd: hostWorkspacePath(this.#config.workspace),
       }, deadline)
+      if (this.#config.preserveHome && this.#sharedHomeOverrides === null) {
+        this.#sharedHomeOverrides = sharedHomeOverrides(configResponse, Object.keys(this.#config.managedMcp?.servers ?? {}))
+        const cleanup = await this.#cleanup(session, false)
+        if (!cleanup.complete || !cleanup.treeGone) throw new CodexTransportError('transport_lost')
+        this.#session = null
+        return await this.#establish(deadline)
+      }
       validateEffectiveCodexConfig(configResponse, hostWorkspacePath(this.#config.workspace), {
         allowReplacementInstructions: false,
+        sharedHome: this.#config.preserveHome === true,
         ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
         launchProfile: this.#config.launchProfile,
       })
@@ -906,6 +942,8 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const rpc = new JsonRpcConnection({
       write: async bytes => { await writeDrain(owner.stdin, bytes) },
       onNotification: notification => {
+        for (const listener of session.metadataListeners) listener(notification.method, notification.params)
+
         if (isTurnLifecycleNotification(notification.method) && !session.turnStartAdmitted) {
           this.#failSession(session, new CodexTransportError('unsupported_protocol'))
           return
@@ -1030,6 +1068,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const session: Session = {
       owner,
       rpc,
+      metadataListeners: new Set(),
       credentialSnapshot,
       failure,
       failureCause: null,
@@ -1109,6 +1148,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const persistent = {
       ...common,
       cwd: workspace,
+      ...(this.#config.preserveHome ? {runtimeWorkspaceRoots: [workspace]} : {}),
     }
     if (this.#config.resumeThreadId !== null) {
       return {method: 'thread/resume', params: {
@@ -1562,6 +1602,8 @@ function validateLaunchConfig(config: CodexAppServerLaunchConfig): ValidatedCode
   }
   return Object.freeze({
     ...(config.managedMcp === undefined ? {} : {managedMcp: config.managedMcp}),
+    generateTitles: config.generateTitles === true,
+    preserveHome: config.preserveHome === true,
     binary: config.binary,
     prefixArgs: Object.freeze([...(config.prefixArgs ?? [])]),
     workspace: config.workspace,

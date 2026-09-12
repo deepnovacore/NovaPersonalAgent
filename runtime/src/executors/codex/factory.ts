@@ -56,6 +56,8 @@ export type CodexAssemblyMode = 'ordinary' | 'live' | 'project'
 export type CodexApprovalPolicy = 'never' | 'on-request'
 
 export interface CodexTransportBinding {
+  readonly preserveHome?: boolean
+
   readonly managedMcp?: ManagedCodexMcp
   readonly mode: CodexAssemblyMode
   readonly binary: HostBinary
@@ -99,6 +101,8 @@ export class OwnedCodexBackendTransportFactory implements CodexBackendTransportF
     const transport = new OwnedCodexAppServerTransport({
       config: {
         ...(binding.managedMcp === undefined ? {} : {managedMcp: binding.managedMcp}),
+        generateTitles: project && !binding.preserveHome,
+        preserveHome: binding.preserveHome ?? false,
         binary: binding.binary,
         prefixArgs: binding.binaryPrefixArgs,
         workspace: binding.workspace,
@@ -325,12 +329,14 @@ async function createProjectResource(
     })
     const adapter = new ProjectCodexAdapter({
       store,
+      ...(options.config.localCodexHome === undefined ? {} : {localCodexHome: options.config.localCodexHome}),
       confirmation,
       ...(approvalController === null ? {} : {codexApproval: approvalController}),
       transportFactory: {
         create: binding => {
           const transport = options.transportFactory.create(Object.freeze({
             ...(options.managedMcp === undefined ? {} : {managedMcp: options.managedMcp}),
+            preserveHome: binding.preserveHome ?? false,
             mode: 'project',
             binary: options.config.binary,
             binaryPrefixArgs: options.config.binaryPrefixArgs,

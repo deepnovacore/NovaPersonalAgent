@@ -36,6 +36,8 @@ export interface RunningWork {
 
 /** Coordinator input (spec 08): one roster entry per known project, ordered by `last_used_at`. */
 export interface RosterEntry {
+  readonly sessions?: readonly string[]
+
   readonly name: string
   readonly last_used_at: number
   readonly last_session_title: string | null
@@ -44,12 +46,14 @@ export interface RosterEntry {
 
 /** What `assess` decided about where an objective goes; `project` is a verbatim roster name (or the new name for `create`). */
 export interface CoordinatorDecision {
+  readonly session_title?: string
+
   readonly kind: 'work' | 'switch' | 'create'
   readonly project: string | null
   readonly session: 'latest' | 'new'
 }
 
-export type ProjectResolutionCode = 'unknown_project' | 'ambiguous_project' | 'busy_project' | 'capacity'
+export type ProjectResolutionCode = 'unknown_session' | 'unknown_project' | 'ambiguous_project' | 'busy_project' | 'capacity'
 
 /** Structured, never guessed: the voice model hears the code and the detail, not a stack. */
 export class ProjectResolutionError extends Error {

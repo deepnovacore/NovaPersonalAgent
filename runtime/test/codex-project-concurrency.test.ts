@@ -311,9 +311,16 @@ test('a new thread is named by the host title and a Codex rename is mirrored int
     const transport = value.factory.transports[0]!
     assert.equal(transport.runInputs[0]?.threadName, 'Blog')
     assert.equal(value.adapter.running()[0]?.title, 'Blog')
+    const renamed = new Promise<void>(resolve => {
+      const unsubscribe = value.adapter.observeProjectView(view => {
+        if (view.session_title === 'Blog: draft outline') { unsubscribe(); resolve() }
+      })
+    })
+    transport.observers[0]!.onThreadNamed?.('unrelated-thread', 'Must not replace the title')
     transport.observers[0]!.onThreadNamed?.('thread-1', 'Blog: draft outline')
     transport.observers[0]!.onThreadNamed?.('thread-1', null)
-    assert.equal(titleWrites.length, 1, 'a cleared name is not mirrored')
+    await settleWithin('renamed title reaches the project view', renamed)
+    assert.equal(titleWrites.length, 1, 'cleared and unrelated thread names are not mirrored')
     assert.equal(await titleWrites[0], true)
     assert.equal(value.adapter.running()[0]?.title, 'Blog: draft outline')
     const workspace = await value.store.resolveWorkspace('alpha')
