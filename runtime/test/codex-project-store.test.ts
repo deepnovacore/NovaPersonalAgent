@@ -4283,6 +4283,76 @@ test('session retention prunes unavailable before inactive ready and never prune
   }
 })
 
+test('a discovered session imported into a full workspace evicts like every other insert', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-import-retention-'))
+  const stateRoot = join(root, 'state')
+  const managedRoot = join(root, 'managed')
+  const workspacePath = join(root, 'workspace')
+  const sharedHome = join(root, 'codex-home')
+  await mkdir(stateRoot, {mode: 0o700})
+  await mkdir(managedRoot, {mode: 0o700})
+  await mkdir(workspacePath, {mode: 0o700})
+  await mkdir(sharedHome, {mode: 0o700})
+  const workspaceId = 'workspace-0001'
+  const activeSessionId = 'session-0199'
+  const sessions = Object.fromEntries(Array.from({length: 200}, (_unused, index) => {
+    const sessionId = `session-${String(index).padStart(4, '0')}`
+    return [sessionId, {
+      session_id: sessionId,
+      workspace_id: workspaceId,
+      display_title: `Task ${index}`,
+      normalized_title: `task ${index}`,
+      codex_thread_id: `thread-${index}`,
+      state: index === 0 ? 'unavailable' : 'ready',
+      created_at: index,
+      last_used_at: index,
+    }]
+  }))
+  await writeFile(join(stateRoot, 'codex-projects-v1.json'), JSON.stringify({
+    version: 1,
+    active_workspace_id: workspaceId,
+    workspaces: {
+      [workspaceId]: {
+        workspace_id: workspaceId,
+        display_name: 'alpha',
+        normalized_name: 'alpha',
+        canonical_path: await realpath(workspacePath),
+        origin: 'registered',
+        codex_home_key: `home-${workspaceId}`,
+        active_session_id: activeSessionId,
+        created_at: 0,
+        last_used_at: 199,
+      },
+    },
+    sessions,
+  }), {mode: 0o600})
+  const store = await ProjectStore.open({
+    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
+    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+    nativeLocks: new DescriptorLockAuthority(),
+    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+    idFactory: () => 'session-new1',
+    now: () => 1000,
+  })
+  try {
+    // A full workspace must not permanently freeze out newly discovered CLI sessions.
+    const imported = await store.importSession(workspaceId, {
+      threadId: 'thread-newly-discovered',
+      title: '最新会话',
+      home: await realpath(sharedHome),
+      updatedAt: 5000,
+    })
+    const retained = await store.listSessions(workspaceId)
+    assert.equal(retained.length, 200)
+    assert.equal(retained.some(session => session.session_id === imported.session_id), true)
+    assert.equal(retained.some(session => session.session_id === 'session-0000'), false)
+    assert.equal(retained.some(session => session.session_id === activeSessionId), true)
+  } finally {
+    await store.close()
+    await rm(root, {recursive: true, force: true})
+  }
+})
+
 test('setSessionTitle clips to 120 code points, keeps per-workspace uniqueness, and rejects unknown or empty', async () => {
   const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-session-title-'))
   const stateRoot = join(root, 'state')

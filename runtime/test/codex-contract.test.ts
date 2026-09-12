@@ -114,6 +114,7 @@ test('project manifests carry approvals as a flag and pin run/steer/cancel param
   assert.deepEqual(record(record(run?.params).properties), {
     work_order: {type: 'string', minLength: 1, maxLength: 4000},
     project: {type: ['string', 'null'], minLength: 1, maxLength: 80, description: '目标项目的 roster 名称；null 表示当前活动项目'},
+    session_id: {type: 'string', minLength: 1, maxLength: 80, description: '宿主已解析的精确会话 ID'},
     session: {type: 'string', enum: ['latest', 'new'], description: 'latest 续用活动会话；new 开新线程'},
     title: {type: 'string', minLength: 1, maxLength: 120, description: '宿主为新会话派生的标题'},
   })

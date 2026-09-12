@@ -53,6 +53,8 @@ export const CODEX_INTERRUPT_GRACE_MS = 2_000
 export const CODEX_TREE_GRACE_MS = 5_000
 const CODEX_CONTROL_GRACE_MS = 250
 const CODEX_TREE_PHASE_GRACE_MS = 1_000
+/** A settled turn waits only this long for advisory title metadata before abandoning it. */
+const CODEX_TITLE_GRACE_MS = 1_000
 export const CODEX_STDERR_LIMIT = 64 * 1024
 export const CODEX_WORK_ORDER_LIMIT = 65_536
 export const CODEX_DEVELOPER_INSTRUCTIONS_LIMIT = 4000
@@ -384,6 +386,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     let session: Session | null = null
     let completion: TurnCompletion | null = null
     let titleWork: Promise<void> | null = null
+    const titleAbort = new AbortController()
     let failureCode: CodexTransportCode | null = null
     try {
       if (this.#prewarmPromise !== null) {
@@ -424,7 +427,9 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
       if (threadId === null) throw new CodexTransportError('unsupported_protocol')
       try { observer.onThreadReady?.(threadId) } catch { /* advisory */ }
       const existingName = snapshotJsonRecord(snapshotJsonRecord(session.threadResponse).thread).name
-      if (typeof existingName === 'string' && existingName.trim()) observer.onThreadNamed?.(threadId, existingName)
+      if (typeof existingName === 'string' && existingName.trim()) {
+        try { observer.onThreadNamed?.(threadId, existingName) } catch { /* advisory */ }
+      }
       if (input.threadName !== undefined) {
         // The host-derived title is advisory: Codex owns the name once set (08), so a rejection
         // never fails the turn.
@@ -459,10 +464,11 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         const titleDeadline = {...deadline, expiresAtMs: Math.min(deadline.expiresAtMs, Date.now() + 12_000)}
         titleWork = generateSessionTitle(workOrder, {
           mcpServers: Object.keys(this.#config.managedMcp?.servers ?? {}),
+          signal: titleAbort.signal,
           request: (method, params) => this.#requestWithin(target, method, params, titleDeadline),
           subscribe: listener => { target.metadataListeners.add(listener); return () => { target.metadataListeners.delete(listener) } },
         }).then(async name => {
-          if (!name || target.closing) return
+          if (!name || target.closing || titleAbort.signal.aborted) return
           const current = snapshotJsonRecord(await this.#requestWithin(target, 'thread/read', {threadId}, titleDeadline))
           if (snapshotJsonRecord(current.thread).name !== input.threadName) return
           await this.#requestWithin(target, 'thread/name/set', {threadId, name}, titleDeadline)
@@ -473,7 +479,10 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     } catch (error) {
       failureCode = safeTransportError(error, 'transport_lost').code
     }
-    await titleWork
+    if (titleWork !== null) {
+      const titleGrace = setTimeout(() => { titleAbort.abort() }, CODEX_TITLE_GRACE_MS)
+      try { await titleWork } finally { clearTimeout(titleGrace) }
+    }
     this.#hadTurn ||= session?.projection?.turnWasStarted ?? false
     const written = session?.turnStartWritten ?? false
     let cleanup: CleanupResult = {

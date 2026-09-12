@@ -1437,8 +1437,8 @@ export class ProjectStore {
       if (!state.workspaces.has(workspaceId)) throw new ProjectStateError('workspace_not_found')
       const existing = [...state.sessions.values()].find(session => session.codex_thread_id === threadId && session.executor_home === home)
       if (existing && existing.workspace_id !== workspaceId) throw new ProjectStateError('session_state_conflict')
-      if (!existing && (state.sessions.size >= MAX_PROJECT_SESSIONS_TOTAL
-        || [...state.sessions.values()].filter(session => session.workspace_id === workspaceId).length >= MAX_PROJECT_SESSIONS_PER_WORKSPACE)) throw new ProjectStateError('session_limit')
+      // Evict like every other insert path: a full workspace must not freeze out newer discoveries.
+      if (!existing) pruneForSessionInsert(state, workspaceId)
       const normalized = normalizeProjectSessionTitle(uniqueSessionTitle(
         {...state, sessions: new Map([...state.sessions].filter(([id]) => id !== existing?.session_id))}, workspaceId, title.display,
       ))

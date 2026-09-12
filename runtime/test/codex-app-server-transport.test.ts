@@ -2522,6 +2522,7 @@ class MemoryAppServerOwner {
     readonly bindWorkspace: string | null
     readonly echoSteerInFinal: boolean
     readonly holdServerReplyWrite: boolean
+    readonly stallTitleTurn: boolean
   }
   #delayedTurnRequestId: number | undefined
   #heldInitializeRequestId: number | undefined
@@ -2546,6 +2547,7 @@ class MemoryAppServerOwner {
     readonly bindWorkspace?: string | null
     readonly echoSteerInFinal?: boolean
     readonly holdServerReplyWrite?: boolean
+    readonly stallTitleTurn?: boolean
   } = {}) {
     const pause = this.stdout.pause.bind(this.stdout)
     const resume = this.stdout.resume.bind(this.stdout)
@@ -2569,6 +2571,7 @@ class MemoryAppServerOwner {
       bindWorkspace: options.bindWorkspace ?? null,
       echoSteerInFinal: options.echoSteerInFinal ?? false,
       holdServerReplyWrite: options.holdServerReplyWrite ?? false,
+      stallTitleTurn: options.stallTitleTurn ?? false,
     }
     this.exit = new Promise(resolve => { this.#resolveExit = resolve })
     this.stdin = new Writable({
@@ -2729,6 +2732,7 @@ class MemoryAppServerOwner {
     }
     if (message.method === 'turn/start' && message.params?.threadId === 'title-only-thread') {
       this.#send({id: message.id, result: {turn: {id: 'title-turn'}}})
+      if (this.#options.stallTitleTurn) return
       this.#send({method: 'item/completed', params: {threadId: 'title-only-thread', turnId: 'title-turn', item: {type: 'agentMessage', text: '{"title":"修复登录校验"}'}}})
       this.#send({method: 'turn/completed', params: {threadId: 'title-only-thread', turn: {id: 'title-turn', status: 'completed', items: []}}})
       return
@@ -3077,5 +3081,22 @@ test('shared home reads configuration before resuming the original thread with e
     const resumed = owners[1]!.received.find(item => item.method === 'thread/resume')
     assert.equal(resumed?.params.threadId, 'original-thread')
     assert.deepEqual(resumed?.params.runtimeWorkspaceRoots, [process.cwd()])
+  } finally { await transport.close() }
+})
+
+
+test('a stalled title thread never delays an already completed turn', async () => {
+  const owner = new MemoryAppServerOwner([], {persistent: true, stallTitleTurn: true})
+  const transport = createTransport({spawn: async () => owner}, {persistent: true, generateTitles: true})
+  try {
+    const started = Date.now()
+    const result = await transport.run({workOrder: 'Fix login validation', threadName: 'Temporary title'}, {}, {
+      expiresAtMs: Date.now() + 30_000,
+    })
+    const elapsed = Date.now() - started
+    assert.equal(result.classification, 'completed')
+    assert.equal(result.completion?.final_text, 'bounded result')
+    // Without a bound the settled turn waits out the title's own 10s deadline.
+    assert.ok(elapsed < 5_000, `settled turn waited ${elapsed}ms for advisory title metadata`)
   } finally { await transport.close() }
 })
