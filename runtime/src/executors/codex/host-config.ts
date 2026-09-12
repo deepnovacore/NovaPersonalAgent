@@ -56,6 +56,7 @@ export interface CodexCredentialProfile {
 
 export interface ResolvedCodexHostConfig {
   readonly [resolvedCodexHostConfigBrand]: true
+  readonly localCodexHome?: string
   readonly binary: HostBinary
   readonly binaryPrefixArgs: readonly string[]
   readonly workspace: HostWorkspace
@@ -127,6 +128,7 @@ export function resolveCodexHostConfig(
   }
   return Object.freeze({
     [resolvedCodexHostConfigBrand]: true as const,
+    localCodexHome: join(safeCatalog.homeDirectory, '.codex'),
     binary,
     binaryPrefixArgs,
     workspace,

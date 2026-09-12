@@ -92,22 +92,23 @@ export class CredentialSnapshotter {
     readonly codexHome: HostCodexHome
     readonly apiKey: string | null
     readonly managedMcp?: ManagedCodexMcp
+    readonly preserveHome?: boolean | undefined
   }): Promise<CredentialSnapshot> {
     let phase: CredentialPreparationPhase = 'private_home'
     try {
       const home = hostCodexHomeValue(input.codexHome)
       if (home.ephemeral) await ensureEphemeralDirectory(input.codexHome)
-      else await requirePrivateDirectory(home.path)
+      else await requirePrivateDirectory(home.path, input.preserveHome === true)
       phase = 'api_key'
-      const apiKey = validateApiKey(input.apiKey)
+      const apiKey = validateApiKey(input.preserveHome ? null : input.apiKey)
       phase = 'saved_login'
-      if (apiKey === null) await this.#syncSavedLogin(home.path)
+      if (apiKey === null && !input.preserveHome) await this.#syncSavedLogin(home.path)
       phase = 'environment'
       const environment = this.#childEnvironment(home.path, apiKey)
       const managedEnvironment = managedMcpEnvironment(input.managedMcp)
       if (Object.keys(managedEnvironment).some(key => Object.hasOwn(environment, key))) throw new CodexCredentialError()
       const childEnvironment = Object.freeze({...environment, ...managedEnvironment})
-      await atomicOwnerWrite(join(home.path, 'config.toml'), new TextEncoder().encode(managedMcpConfigToml(input.managedMcp)))
+      if (!input.preserveHome) await atomicOwnerWrite(join(home.path, 'config.toml'), new TextEncoder().encode(managedMcpConfigToml(input.managedMcp)))
       const snapshot = Object.freeze({[credentialSnapshotBrand]: true as const})
       snapshotValues.set(snapshot, Object.freeze({environment: childEnvironment}))
       return snapshot
@@ -310,7 +311,7 @@ export async function prepareCodexCredentialSnapshotForTest(
   return {environment: {...credentialSnapshotEnvironment(snapshot)}}
 }
 
-async function requirePrivateDirectory(path: string): Promise<void> {
+async function requirePrivateDirectory(path: string, shared = false): Promise<void> {
   const [linkInfo, fileInfo] = await Promise.all([
     lstat(path),
     stat(path),
@@ -320,7 +321,7 @@ async function requirePrivateDirectory(path: string): Promise<void> {
     || !fileInfo.isDirectory()
     || realpathSync(path) !== path
     || (!ownerMatches(fileInfo.uid))
-    || (process.platform !== 'win32' && (fileInfo.mode & 0o777) !== 0o700)
+    || (process.platform !== 'win32' && (shared ? (fileInfo.mode & 0o022) !== 0 : (fileInfo.mode & 0o777) !== 0o700))
   ) throw new CodexCredentialError()
 }
 

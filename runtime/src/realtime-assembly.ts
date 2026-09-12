@@ -1175,6 +1175,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
         executor: projectAdapter.manifest.name, op: 'run', origin_ref: intake.origin_ref,
         request: {
           work_order: intake.work_order!, project: intake.target?.workspace_display_name ?? null,
+          ...(intake.target?.session_id ? {session_id: intake.target.session_id} : {}),
           session: intake.decision?.session ?? 'latest', ...(intake.title === null ? {} : {title: intake.title}),
         },
       }, USER_AWAITED_TOOL, undefined, stillWanted),

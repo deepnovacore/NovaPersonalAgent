@@ -694,3 +694,18 @@ test('blank final during an authorized confirmed commit preserves its eventual s
   assert.equal(h.intake.view?.delegate_id, 'confirmed-work')
   assert.equal(h.records.filter(kind => kind === 'intake.dispatch').length, 1)
 })
+
+
+test('an explicitly named session selects its project, but an invented session selection is rejected', async () => {
+  for (const explicit of [true, false]) {
+    const h = harness({
+      roster: () => [{name: 'blog', last_used_at: 1, last_session_title: 'Newest', running: [], sessions: ['修复登录']}],
+      models: {assess: input => Promise.resolve(assessment(input, {project: 'blog', session_title: '修复登录'}))},
+    })
+    h.intake.open(request, explicit ? '继续修复登录这个会话' : '修一下页面', 'user:1', 'epoch1')
+    await h.intake.settled()
+    if (explicit) assert.equal(h.decisions[0]?.session_title, '修复登录')
+    else assert.equal(h.decisions.length, 0)
+    h.intake.cancel()
+  }
+})

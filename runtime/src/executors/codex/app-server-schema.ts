@@ -707,7 +707,7 @@ const SAFE_OPTIONAL_FEATURES: ReadonlySet<string> = new Set([
 export function validateEffectiveCodexConfig(
   response: unknown,
   workspace: string,
-  options: {readonly allowReplacementInstructions: boolean; readonly launchProfile?: CodexLaunchProfile; readonly managedMcp?: ManagedCodexMcp},
+  options: {readonly allowReplacementInstructions: boolean; readonly sharedHome?: boolean; readonly launchProfile?: CodexLaunchProfile; readonly managedMcp?: ManagedCodexMcp},
 ): EffectiveCodexConfigReport {
   try {
     const envelope = snapshotJsonRecord(response)
@@ -728,11 +728,11 @@ export function validateEffectiveCodexConfig(
     // Live 0.152.0 reports an unset `permissions` table as `null`, not `{}` (observed 2026-09-04).
     const permissions = requireObject(yolo && config.permissions === null ? {} : config.permissions)
     if (yolo) {
-      if (Object.keys(permissions).length !== 0 || config.sandbox_mode !== 'danger-full-access') {
+      if ((!options.sharedHome && Object.keys(permissions).length !== 0) || config.sandbox_mode !== 'danger-full-access') {
         throw new TypeError('permission profiles')
       }
     } else {
-      if (!exactKeys(permissions, ['nova_audio_agent'])) throw new TypeError('permission profiles')
+      if (!options.sharedHome && !exactKeys(permissions, ['nova_audio_agent'])) throw new TypeError('permission profiles')
       const profile = requireObject(permissions.nova_audio_agent)
       if (!requiredKeysWithNullExtras(profile, ['filesystem', 'network'])) throw new TypeError('profile')
       const filesystem = requireObject(profile.filesystem)
@@ -747,7 +747,15 @@ export function validateEffectiveCodexConfig(
         throw new TypeError('network')
       }
     }
-    const shell = requireObject(config.shell_environment_policy)
+    const shell = {...requireObject(config.shell_environment_policy)}
+    if (options.sharedHome) {
+      if (shell.set != null && Object.values(requireObject(shell.set)).some(value => value !== '')) throw new TypeError('shell set')
+      if (shell.experimental_use_profile === true || shell.ignore_default_excludes === true) throw new TypeError('shell profile')
+      delete shell.set
+      delete shell.exclude
+      delete shell.experimental_use_profile
+      delete shell.ignore_default_excludes
+    }
     if (!requiredKeysWithNullExtras(shell, ['inherit', 'include_only'])
       || shell.inherit !== 'core' || !exactStringArray(
       shell.include_only,
@@ -765,7 +773,11 @@ export function validateEffectiveCodexConfig(
         throw new TypeError('feature')
       }
     }
-    validateManagedMcpConfig(config.mcp_servers, options.managedMcp)
+    const mcp = {...requireObject(config.mcp_servers)}
+    if (options.sharedHome) for (const [name, entry] of Object.entries(mcp)) {
+      if (!Object.hasOwn(options.managedMcp?.servers ?? {}, name) && requireObject(entry).enabled === false) delete mcp[name]
+    }
+    validateManagedMcpConfig(mcp, options.managedMcp)
     const replacement = config.model_instructions_file
     if (!options.allowReplacementInstructions && replacement !== null && replacement !== undefined) {
       throw new TypeError('instructions')

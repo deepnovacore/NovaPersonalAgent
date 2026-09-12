@@ -395,6 +395,7 @@ export interface Fixture {
 }
 
 export async function fixture(options: {
+  readonly localCodexHome?: string
   readonly preexistingSession?: boolean
   readonly decorateStore?: (store: ProjectStore) => ProjectStore
 } = {}): Promise<Fixture> {
@@ -432,6 +433,7 @@ export async function fixture(options: {
   })
   const factory = new RecordingProjectTransportFactory()
   const adapter = new ProjectCodexAdapter({
+    ...(options.localCodexHome ? {localCodexHome: options.localCodexHome} : {}),
     store: options.decorateStore?.(store) ?? store,
     confirmation,
     transportFactory: factory,

@@ -138,6 +138,9 @@ export interface WorkspaceRecord {
 }
 
 export interface ProjectSessionRecord {
+  /** Only host-discovered external sessions carry an explicit executor home. */
+  readonly executor_home?: string
+
   readonly session_id: string
   readonly workspace_id: string
   readonly display_title: string
@@ -221,6 +224,7 @@ export interface PublicRosterEntry {
 }
 
 export interface PublicProjectView {
+  readonly available_sessions?: readonly {readonly project: string; readonly titles: readonly string[]}[]
   readonly workspace_display_name: string | null
   readonly session_title: string | null
   /** Known projects, most recently used first, with their running works; UI only. */
@@ -1420,6 +1424,35 @@ export class ProjectStore {
         )
       if (record === undefined) throw new ProjectStateError('session_not_found')
       return [record, false]
+    })
+  }
+
+  async importSession(workspaceId: string, input: {
+    readonly threadId: string; readonly title: string; readonly home: string; readonly updatedAt: number
+  }): Promise<ProjectSessionRecord> {
+    const threadId = validateThreadId(input.threadId)
+    const home = realpathSync(input.home)
+    const title = normalizeProjectSessionTitle([...input.title].slice(0, MAX_PROJECT_SESSION_TITLE).join(''))
+    return await this.#transaction(state => {
+      if (!state.workspaces.has(workspaceId)) throw new ProjectStateError('workspace_not_found')
+      const existing = [...state.sessions.values()].find(session => session.codex_thread_id === threadId && session.executor_home === home)
+      if (existing && existing.workspace_id !== workspaceId) throw new ProjectStateError('session_state_conflict')
+      // Evict like every other insert path: a full workspace must not freeze out newer discoveries.
+      if (!existing) pruneForSessionInsert(state, workspaceId)
+      const normalized = normalizeProjectSessionTitle(uniqueSessionTitle(
+        {...state, sessions: new Map([...state.sessions].filter(([id]) => id !== existing?.session_id))}, workspaceId, title.display,
+      ))
+      const session: ProjectSessionRecord = Object.freeze({
+        session_id: existing?.session_id ?? this.#newUniqueId(state), workspace_id: workspaceId,
+        executor_home: home, codex_thread_id: threadId, state: 'ready',
+        display_title: normalized.display, normalized_title: normalized.normalized,
+        created_at: existing?.created_at ?? input.updatedAt,
+        last_used_at: Math.max(existing?.last_used_at ?? 0, input.updatedAt),
+      })
+      state.sessions.set(session.session_id, session)
+      const workspace = state.workspaces.get(workspaceId)!
+      state.workspaces.set(workspaceId, Object.freeze({...workspace, last_used_at: Math.max(workspace.last_used_at, input.updatedAt)}))
+      return [session, JSON.stringify(existing) !== JSON.stringify(session)]
     })
   }
 
@@ -3503,7 +3536,9 @@ function decodeSession(value: unknown): ProjectSessionRecord {
   const raw = exactRecord(value, [
     'session_id', 'workspace_id', 'display_title', 'normalized_title', 'codex_thread_id',
     'state', 'created_at', 'last_used_at',
+    ...(Object.hasOwn(recordValue(value), 'executor_home') ? ['executor_home'] : []),
   ])
+  if (raw.executor_home !== undefined && (typeof raw.executor_home !== 'string' || !isAbsolute(raw.executor_home))) throw new ProjectStateError('state_corrupt')
   const title = normalizeProjectSessionTitle(raw.display_title)
   if (raw.normalized_title !== title.normalized) throw new ProjectStateError('state_corrupt')
   if (raw.state !== 'starting' && raw.state !== 'ready' && raw.state !== 'unavailable') {
@@ -3514,6 +3549,7 @@ function decodeSession(value: unknown): ProjectSessionRecord {
     throw new ProjectStateError('state_corrupt')
   }
   return Object.freeze({
+    ...(typeof raw.executor_home === 'string' ? {executor_home: raw.executor_home} : {}),
     session_id: storedId(raw.session_id),
     workspace_id: storedId(raw.workspace_id),
     display_title: title.display,

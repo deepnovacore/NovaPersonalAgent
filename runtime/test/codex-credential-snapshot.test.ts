@@ -344,3 +344,21 @@ test('credential atomic targets use Windows dirname and basename semantics', () 
     {directory: 'C:\\Users\\nova\\.codex', filename: 'auth.json'},
   )
 })
+
+
+test('shared home preparation preserves configuration, saved login and directory permissions', async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'nova-shared-home-')))
+  try {
+    await chmod(home, 0o755)
+    await writeFile(join(home, 'config.toml'), 'model = "user-model"\n')
+    await writeFile(join(home, 'auth.json'), 'original-login', {mode: 0o600})
+    const credentials = new CredentialSnapshotter({sourceHome: '/not-the-shared-home', environment: {HOME: home, PATH: '/safe-path'}})
+    const capability = hostCodexHomeForTest(home, {ephemeral: false})
+    const snapshot = await credentials.prepare({codexHome: capability, apiKey: 'must-not-override-shared-login', preserveHome: true})
+    await credentials.removeEphemeralHome(capability)
+    assert.equal(await readFile(join(home, 'config.toml'), 'utf8'), 'model = "user-model"\n')
+    assert.equal(await readFile(join(home, 'auth.json'), 'utf8'), 'original-login')
+    assert.equal(credentialSnapshotEnvironment(snapshot).CODEX_API_KEY, undefined)
+    if (process.platform !== 'win32') assert.equal((await lstat(home)).mode & 0o777, 0o755)
+  } finally { await rm(home, {recursive: true, force: true}) }
+})

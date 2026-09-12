@@ -748,5 +748,15 @@
     "path": "runtime/src/realtime/frontend-instructions.ts",
     "pattern": "...(modules.coding === false ? [] : ['本轮用户明确追加或修改正在执行的 coding 任务要求时，立即调用 dispatch（executor=codex），instruction 保留本轮完整要求；不要只回复已收到、已记下或会纳入任务。']),",
     "reason": "Model-visible coding dispatch routing names the public executor from the tool enum."
+  },
+  {
+    "path": "runtime/src/project-store.ts",
+    "pattern": "const existing = [...state.sessions.values()].find(session => session.codex_thread_id === threadId && session.executor_home === home)",
+    "reason": "Import into the existing persisted thread-id field; retained storage compatibility, no executor routing in core."
+  },
+  {
+    "path": "runtime/src/project-store.ts",
+    "pattern": "executor_home: home, codex_thread_id: threadId, state: 'ready',",
+    "reason": "Import into the existing persisted thread-id field; retained storage compatibility, no executor routing in core."
   }
 ]

@@ -118,6 +118,7 @@ export function renderResolutionError(error: ProjectResolutionError): string {
       ? `${text(item.project)}/${text(item.title)}`
       : text(item)).join('、')
     : ''
+  if (error.code === 'unknown_session') return `code=unknown_session：没有找到“${text(detail.title)}”这个可继续的会话，请明确项目和会话名称。任务尚未执行。`
   if (error.code === 'unknown_project') {
     const suggestions = list(detail.suggestions)
     return `code=unknown_project：没有叫“${text(detail.project)}”的项目${suggestions === '' ? '' : `，相近的有：${suggestions}`}。可以请用户确认项目名，或明确要求新建。任务尚未执行。`
@@ -311,10 +312,15 @@ export class IntakeController {
         && /^(是|对|嗯|好|可以|是的|对的|没错|yes|ok|okay)[。！!,.，\s]*$/iu.test(latest.answer.trim())
       if (kind !== 'create' && kind !== 'unclear' && project !== null && project !== active && !affirmed
         && !evidenceOccurs(result.project_evidence ?? '', project,
-          [current.opening, ...current.turns.map(turn => turn.answer)], this.#options.roster().map(entry => entry.name))) {
+          [current.opening, ...current.turns.map(turn => turn.answer)], this.#options.roster().map(entry => entry.name))
+          && !this.#namedSessionEvidence(project, result.session_title, current)) {
         this.#options.diagnostic('intake_project_evidence_missing')
         kind = 'unclear'
         question = `是在 ${project} 里做吗？`
+      }
+      if (result.session_title && project !== null && !this.#namedSessionEvidence(project, result.session_title, current)) {
+        kind = 'unclear'
+        question = '请明确要继续的项目和会话名称。'
       }
       current.kind = kind
       if (kind === 'unclear' || (kind === 'create' && project === null)) {
@@ -351,7 +357,7 @@ export class IntakeController {
           : `code=steer_failed：追加要求未送达：${admission.problem ?? admission.code ?? 'runtime_rejected'}。`)
         return
       }
-      const decision: CoordinatorDecision = {kind: kind === 'switch' ? 'switch' : kind === 'create' ? 'create' : 'work', project, session: result.session}
+      const decision: CoordinatorDecision = {kind: kind === 'switch' ? 'switch' : kind === 'create' ? 'create' : 'work', project, session: result.session, ...(result.session_title ? {session_title: result.session_title} : {})}
       let target: IntakeTarget
       try {
         target = await this.#options.resolveTarget(decision)
@@ -402,6 +408,15 @@ export class IntakeController {
       const current = this.#current(snapshot.intake_id, snapshot.revision)
       if (current !== null) this.#malformed(current)
     } finally { this.#abort.delete(abort) }
+  }
+
+  #namedSessionEvidence(project: string, title: string | null | undefined, current: IntakeSession): boolean {
+    if (!title) return false
+    const roster = this.#options.roster()
+    const namedProject = [current.opening, ...current.turns.map(turn => turn.answer)].some(text => text.includes(project))
+    if (!namedProject && roster.filter(entry => entry.sessions?.includes(title)).length !== 1) return false
+    return roster.some(entry => entry.name === project && entry.sessions?.includes(title))
+      && [current.opening, ...current.turns.map(turn => turn.answer)].some(text => text.includes(title))
   }
 
   async #plan(snapshot: IntakeSession): Promise<void> {

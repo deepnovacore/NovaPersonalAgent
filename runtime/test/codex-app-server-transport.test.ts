@@ -2522,10 +2522,12 @@ class MemoryAppServerOwner {
     readonly bindWorkspace: string | null
     readonly echoSteerInFinal: boolean
     readonly holdServerReplyWrite: boolean
+    readonly stallTitleTurn: boolean
   }
   #delayedTurnRequestId: number | undefined
   #heldInitializeRequestId: number | undefined
   #lastSteer: string | null = null
+  #threadName: string | null = null
   #heldServerReplyWrite: ((error?: Error | null) => void) | null = null
 
   constructor(methods: string[], options: {
@@ -2545,6 +2547,7 @@ class MemoryAppServerOwner {
     readonly bindWorkspace?: string | null
     readonly echoSteerInFinal?: boolean
     readonly holdServerReplyWrite?: boolean
+    readonly stallTitleTurn?: boolean
   } = {}) {
     const pause = this.stdout.pause.bind(this.stdout)
     const resume = this.stdout.resume.bind(this.stdout)
@@ -2568,6 +2571,7 @@ class MemoryAppServerOwner {
       bindWorkspace: options.bindWorkspace ?? null,
       echoSteerInFinal: options.echoSteerInFinal ?? false,
       holdServerReplyWrite: options.holdServerReplyWrite ?? false,
+      stallTitleTurn: options.stallTitleTurn ?? false,
     }
     this.exit = new Promise(resolve => { this.#resolveExit = resolve })
     this.stdin = new Writable({
@@ -2712,6 +2716,27 @@ class MemoryAppServerOwner {
       this.#send({id: message.id, result: this.#options.inventory?.() ?? {data: [], nextCursor: null}})
       return
     }
+    if (message.method === 'thread/name/set') {
+      this.#threadName = String(message.params?.name)
+      this.#send({id: message.id, result: {}})
+      return
+    }
+    if (message.method === 'thread/read') {
+      this.#send({id: message.id, result: {thread: {id: this.#options.threadId, name: this.#threadName}}})
+      return
+    }
+    if (message.method === 'thread/unsubscribe') { this.#send({id: message.id, result: {}}); return }
+    if (message.method === 'thread/start' && message.params?.ephemeral === true && this.#options.persistent) {
+      this.#send({id: message.id, result: {thread: {id: 'title-only-thread'}}})
+      return
+    }
+    if (message.method === 'turn/start' && message.params?.threadId === 'title-only-thread') {
+      this.#send({id: message.id, result: {turn: {id: 'title-turn'}}})
+      if (this.#options.stallTitleTurn) return
+      this.#send({method: 'item/completed', params: {threadId: 'title-only-thread', turnId: 'title-turn', item: {type: 'agentMessage', text: '{"title":"修复登录校验"}'}}})
+      this.#send({method: 'turn/completed', params: {threadId: 'title-only-thread', turn: {id: 'title-turn', status: 'completed', items: []}}})
+      return
+    }
     if (message.method === 'thread/start' || message.method === 'thread/resume') {
       if (message.method === 'thread/resume' && this.#options.rejectResume) {
         this.#send({id: message.id, error: {code: -32001, message: 'resume-private'}})
@@ -2851,6 +2876,8 @@ function createTransport(
     }
     readonly managedMcp?: ManagedCodexMcp
     readonly persistent?: boolean
+    readonly generateTitles?: boolean
+    readonly preserveHome?: boolean
     readonly resumeThreadId?: string
     readonly developerInstructions?: string | null
     readonly prepare?: (input: {readonly apiKey: string | null}) => Promise<never>
@@ -2871,6 +2898,8 @@ function createTransport(
       developerInstructions: overrides.developerInstructions ?? null,
       resumeThreadId: overrides.resumeThreadId ?? null,
       persistent: overrides.persistent ?? false,
+      generateTitles: overrides.generateTitles ?? false,
+      preserveHome: overrides.preserveHome ?? false,
       ...(overrides.approvalPolicy === undefined
         ? {}
         : {approvalPolicy: overrides.approvalPolicy}),
@@ -3015,4 +3044,59 @@ test('managed credentials never reach preflight probes or bounded final output',
   assert.equal(outcome.code, 'completed')
   assert.equal(JSON.stringify(outcome).includes('dummy-mcp-secret'), false)
   assert.ok(probes.every(config => !Object.hasOwn(config as object, 'managedMcp')))
+})
+
+
+test('owned transport generates a title with an auxiliary thread while preserving the main result and binding', async () => {
+  const owner = new MemoryAppServerOwner([], {persistent: true})
+  const ready: string[] = []
+  const names: string[] = []
+  const transport = createTransport({spawn: async () => owner}, {persistent: true, generateTitles: true})
+  try {
+    const result = await transport.run({workOrder: 'Fix login validation', threadName: 'Temporary title'}, {
+      onThreadReady: id => { ready.push(id) },
+      onThreadNamed: (id, name) => { names.push(`${id}:${name}`) },
+    }, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.classification, 'completed')
+    assert.equal(result.completion?.final_text, 'bounded result')
+    assert.deepEqual(ready, ['thread-1'])
+    assert.deepEqual(names, ['thread-1:修复登录校验'])
+    assert.equal(owner.received.filter(item => item.method === 'thread/name/set').at(-1)?.params.threadId, 'thread-1')
+  } finally { await transport.close() }
+})
+
+
+test('shared home reads configuration before resuming the original thread with explicit roots', async () => {
+  const owners: MemoryAppServerOwner[] = []
+  const transport = createTransport({spawn: async () => {
+    const owner = new MemoryAppServerOwner([], {persistent: true, threadId: 'original-thread'})
+    owners.push(owner)
+    return owner
+  }}, {persistent: true, preserveHome: true, resumeThreadId: 'original-thread'})
+  try {
+    const result = await transport.run({workOrder: 'Continue original task'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.classification, 'completed')
+    assert.equal(owners.length, 2)
+    assert.equal(owners[0]!.received.some(item => item.method === 'thread/resume' || item.method === 'thread/start'), false)
+    const resumed = owners[1]!.received.find(item => item.method === 'thread/resume')
+    assert.equal(resumed?.params.threadId, 'original-thread')
+    assert.deepEqual(resumed?.params.runtimeWorkspaceRoots, [process.cwd()])
+  } finally { await transport.close() }
+})
+
+
+test('a stalled title thread never delays an already completed turn', async () => {
+  const owner = new MemoryAppServerOwner([], {persistent: true, stallTitleTurn: true})
+  const transport = createTransport({spawn: async () => owner}, {persistent: true, generateTitles: true})
+  try {
+    const started = Date.now()
+    const result = await transport.run({workOrder: 'Fix login validation', threadName: 'Temporary title'}, {}, {
+      expiresAtMs: Date.now() + 30_000,
+    })
+    const elapsed = Date.now() - started
+    assert.equal(result.classification, 'completed')
+    assert.equal(result.completion?.final_text, 'bounded result')
+    // Without a bound the settled turn waits out the title's own 10s deadline.
+    assert.ok(elapsed < 5_000, `settled turn waited ${elapsed}ms for advisory title metadata`)
+  } finally { await transport.close() }
 })
