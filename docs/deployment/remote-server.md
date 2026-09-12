@@ -337,13 +337,25 @@ Phone disconnection preserves the host graph and authorized background work whil
 
 ## 扫码配对与设备撤销
 
-运行新版服务并保留相同的环境配置，在 Mac 执行：
+运行新版服务并保留相同的环境配置，在 macOS 或 Linux 的另一个交互终端执行：
 
 ```sh
 npm run server:pair --workspace @nova-audio-agent/runtime -- wss://你的主机.ts.net
 ```
 
-窗口提供二维码、已配对设备和撤销按钮。手机在 Nova 的连接设置选择“扫码连接主机”，确认地址后即可保存并连接。此入口适用于 Relay、AOQ Chat 和 AOQ Runtime，旧手填配置继续可用。主机长期 token 只通过子进程 stdin 和 loopback 管理连接传递，不进入二维码、进程参数、日志或图片文件。
+默认直接在终端显示一次性二维码，不需要 Electron、Swift 或图形环境，也不启动第二个 runtime。手机在 Nova 的连接设置选择“扫码连接主机”，确认地址后即可保存并连接。此入口适用于 Relay、AOQ Chat 和 AOQ Runtime，旧手填配置继续可用。主机长期 token 只通过 loopback 管理连接传递，不进入二维码、进程参数、日志或图片文件。
+
+SSH 使用 `ssh -t <主机>`，在远端加载与服务相同的 `NOVA_AUDIO_AGENT_SERVER_PORT` 和 `NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE`，再运行上述命令。配对命令必须和 runtime 在同一台机器；WSS 地址则是 iPhone 能访问的地址。提前配置 Tailscale HTTPS Serve，命令不会登录 Tailscale 或修改已有转发。不要把长期 token 写入命令参数。
+
+命令要求 stdin/stdout 都是交互终端；重定向输出、管道或终端太窄时，会在创建配对码前拒绝运行。二维码只显示一次，每 3 秒静默检查是否已使用或失效；状态改变后退出。重新执行命令可生成新码，使旧码失效。Ctrl+C、SIGTERM 或终端输入关闭会尝试取消本次配对，不停止 runtime。管理请求最多等待 5 秒；异常终止或服务断连时不能保证取消成功，请重新生成或重启服务以使旧码失效。
+
+macOS 如需原来的窗口及设备撤销操作，显式添加 `--window`（此模式仍需要 Xcode Command Line Tools）：
+
+```sh
+npm run server:pair --workspace @nova-audio-agent/runtime -- --window wss://你的主机.ts.net
+```
+
+原生 Windows 主机仍不支持凭据存储；终端二维码功能不改变此限制。Linux 的配对命令支持无显示环境，完整语音/runtime 部署仍需其平台验收。
 
 配对使用现有端口的 `/client/pair` WebSocket；管理窗口使用 `/client/pair-admin`，每个管理请求都必须携带原有主机 token，设备 token 无管理权限。Tailscale Serve 需代理整个服务（包括这两个路径和 `/client/v1`），仍使用系统 TLS 校验。配对连接不占用音频连接名额、不构造 AOQ 会话或触发 Runtime 工具。
 
@@ -357,4 +369,6 @@ npm run server:pair --workspace @nova-audio-agent/runtime -- wss://你的主机.
 
 服务和安全地址就绪后，二维码直接出现在连接页面。关闭页面取消当前配对码；已兑换的设备凭据保留，并可在页面撤销。二维码不落盘、无时间有效期、仅可兑换一次。高级设置可覆盖 WSS 地址；只有连接已有独立服务才需要同时填写端口和认证文件，留空由 Nova 管理。现有 CLI 配对入口保持可用。
 
-二维码编码复用系统 CoreImage，源码运行需要 Xcode Command Line Tools。新版二维码需要更新 iOS 客户端，旧客户端不支持省略 `expires_at`。
+桌面与 `--window` 二维码编码复用系统 CoreImage，需要 Xcode Command Line Tools；默认终端模式使用 Node `qrcode`。新版二维码需要更新 iOS 客户端，旧客户端不支持省略 `expires_at`。
+
+配对回归检查：构建 runtime 后运行 `npm run test:pair --workspace @nova-audio-agent/runtime`。macOS 额外使用 CoreImage 解码终端实际输出，校验 v1 内容。自动测试与真实手机验收分开：终端扫码、主机确认、连接、真实对话及断开重连全部完成后，才能报告端到端通过。
