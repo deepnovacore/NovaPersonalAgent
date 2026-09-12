@@ -2,6 +2,9 @@
 import {spawn} from 'node:child_process'
 import {fileURLToPath, pathToFileURL} from 'node:url'
 import {setTimeout as delay} from 'node:timers/promises'
+
+// An SSH hangup delivers SIGHUP; unhandled it would exit before the invitation is cancelled.
+const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP']
 import QRCode from 'qrcode'
 import {WebSocket} from 'ws'
 import {loadServerConfig} from '../dist/src/server-config.js'
@@ -9,7 +12,7 @@ import {pairingEndpoint} from '../dist/src/client-pairing.js'
 
 function request(config, frame) {
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(`ws://127.0.0.1:${config.port}/client/pair-admin`, {maxPayload: 16384})
+    const socket = new WebSocket(`ws://127.0.0.1:${config.port}/client/pair-admin`, {maxPayload: 65536})
     const timer = setTimeout(() => finish(), 5000)
     let finished = false
     function finish(value) {
@@ -52,7 +55,7 @@ export async function terminalPair(config, {input = process.stdin, output = proc
   }
   const stop = new AbortController()
   const cancel = () => stop.abort()
-  for (const event of ['SIGINT', 'SIGTERM']) events.on(event, cancel)
+  for (const event of SIGNALS) events.on(event, cancel)
   for (const event of ['end', 'close']) input.on(event, cancel)
   input.resume()
   let code
@@ -79,7 +82,7 @@ export async function terminalPair(config, {input = process.stdin, output = proc
       })
     }
     input.pause()
-    for (const event of ['SIGINT', 'SIGTERM']) events.off(event, cancel)
+    for (const event of SIGNALS) events.off(event, cancel)
     for (const event of ['end', 'close']) input.off(event, cancel)
   }
 }

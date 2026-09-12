@@ -57,7 +57,7 @@ test('terminal pairing prints once, polls silently and detects one-time redempti
 })
 
 test('signals and input close cancel only this invitation, leaving the host available', {timeout: 10000}, async t => {
-  for (const event of ['SIGINT', 'SIGTERM', 'end', 'close']) {
+  for (const event of ['SIGINT', 'SIGTERM', 'SIGHUP', 'end', 'close']) {
     const f = await fixture(t)
     const running = terminalPair(f.config, f)
     await f.displayed()
@@ -95,9 +95,10 @@ test('authentication and connection errors do not echo credentials', async t => 
   assert.ok(!f.text.includes(master) && !f.text.includes('b'.repeat(32)))
 })
 
-test('polling and cancellation accept a populated device list', {timeout: 6000}, async t => {
+test('polling and cancellation accept the largest device list the host admits', {timeout: 6000}, async t => {
   const f = await fixture(t)
-  for (let i = 0; i < 24; i++) f.pairing.redeem(f.pairing.create(server).code, '手'.repeat(80))
+  // Lone surrogates pass the host name schema and JSON-escape to six bytes each: 31 devices exceed 16 KB.
+  for (let i = 0; i < 31; i++) f.pairing.redeem(f.pairing.create(server).code, '\ud800'.repeat(80))
   const running = terminalPair(f.config, f)
   await f.displayed()
   await once(f.updates, 'poll')
@@ -116,7 +117,7 @@ test('interrupt during creation cancels the late response without printing a QR'
   assert.throws(() => f.pairing.redeem(f.invitation.code, 'late'))
 })
 
-test('the Linux CLI displays in a PTY without a GUI and Ctrl+C cancels its code', {skip: process.platform !== 'linux', timeout: 10000}, async t => {
+for (const stop of ['ctrl-c', 'SIGHUP']) test(`the Linux CLI displays in a PTY without a GUI and ${stop} cancels its code`, {skip: process.platform !== 'linux', timeout: 10000}, async t => {
   const f = await fixture(t)
   const tokenFile = join(f.dir, 'host.token'); writeFileSync(tokenFile, master, {mode: 0o600})
   const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
@@ -128,7 +129,10 @@ test('the Linux CLI displays in a PTY without a GUI and Ctrl+C cancels its code'
   let printed = '', interrupted = false
   child.stdout.on('data', bytes => {
     printed += bytes
-    if (!interrupted && printed.includes('Ctrl+C')) {interrupted = true; child.stdin.write('\x03')}
+    if (!interrupted && printed.includes('Ctrl+C')) {
+      interrupted = true
+      if (stop === 'SIGHUP') child.kill('SIGHUP'); else child.stdin.write('\x03')
+    }
   })
   const [code] = await exited
   assert.equal(code, 0)
