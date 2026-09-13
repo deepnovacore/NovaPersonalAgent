@@ -309,8 +309,6 @@ families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for the
 
 For a host-managed shared memory service, set `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`, an explicit origin in `NOVA_AUDIO_AGENT_MEMORY_URL`, and its host-issued `NOVA_AUDIO_AGENT_MEMORY_TOKEN`. Only HTTPS or numeric loopback HTTP is accepted; URL paths, query strings, embedded credentials, and redirects are rejected. The token fixes the identity; `MEMORY_PATH` and `MEMORY_USER_ID` apply only to local VoiceMem. Preferences refresh on open and successful remember, recall, or forget calls. This client does not provision the service or expose identity selection to the model.
 
-Current work status and weekly reports must query the workspace ledger tool for the latest active record versions. Personal recall contains historical evidence, including earlier user utterances, and must not replace the ledger or serve as an authoritative fallback when ledger data is unavailable.
-
 ### Optional capability registry and MCP search
 
 Nova loads `~/.nova-audio-agent/capabilities.json`; use `NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG` for another path. A missing default file keeps search/camera/coding enabled and knowledge disabled. An explicit missing or invalid file fails startup with a redacted configuration reason. Registry module values override defaults; explicit `NOVA_AUDIO_AGENT_SEARCH_PROVIDER`, `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED`, `NOVA_AUDIO_AGENT_SEARCH_MCP_URL`, and `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` override the registry and are reported by name. Desktop persists these choices in the registry, not a separate search-provider setting.
@@ -366,13 +364,13 @@ and MCP retrieval passed on 2026-09-05; Windows and human-voice acceptance remai
 
 ### Memory providers and connections
 
-Use `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local` for the local Node Worker and SDK; `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` is optional in this mode. Use `remote` for the shared HTTP service, with its URL and identity-bound token. Do not set `MEMORY_PROVIDER` for a remote connection: its engine is selected by the service. An unavailable remote service reports unavailable; it never creates a local company-memory database.
+Use `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local` for the local Node Worker and SDK; `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` is optional in this mode. Use `remote` for the shared HTTP service, with its URL and identity-bound token. Do not set `MEMORY_PROVIDER` for a remote connection: its engine is selected by the service. An unavailable remote service reports unavailable; it never creates a local fallback database.
 
 Only `MEMORY_CONNECTION` and the local `MEMORY_PROVIDER` selector are supported. `MEMORY_BACKEND` has been removed and is rejected with a migration error. A provider without an enabled local connection is rejected rather than silently enabling memory.
 
 The runtime consumes `PersonalMemoryResource`, including optional `remember`, `forget`, and cached `responseAdaptation`. Adapter methods must only exist when their guarantees can be met. In particular, `stored` means durable admission, not merely acceptance or completed extraction. Evidence IDs must refer to real sources; provider relevance scores are not comparable across engines. The HTTP connector currently requires the documented v1 preferences, remember, recall and forget service contract. An arbitrary mem0 endpoint is not that contract. The native mem0 adapter remains in the integration source branch pending an isolated packaging contract. A read-only provider can be injected through the existing assembly factory without advertising writes.
 
-Company channels use one remote memory authority. The small preference cache is a disposable projection, not another writable memory store. The existing work-record ledger remains authoritative for corrected weekly-report states; historical recall alone cannot guarantee that a withdrawn claim disappears from every earlier utterance.
+The small preference cache is a disposable projection, not another writable memory store.
 
 SDK upgrades must pass the real Worker contract tests before changing the dependency lock. After unpacking/building an SDK candidate, run:
 
