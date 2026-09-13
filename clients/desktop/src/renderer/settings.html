@@ -17,8 +17,9 @@
     </header>
     <nav class="settings-nav" id="settings-nav" aria-label="设置分类">
       <button type="button" class="nav-item" id="category-general" data-category="general" aria-current="true">通用</button>
+      <button type="button" class="nav-item" id="category-usage" data-category="usage" aria-current="false" tabindex="-1">用量</button>
       <button type="button" class="nav-item" id="category-pipeline" data-category="pipeline" aria-current="false" tabindex="-1">语音管线</button>
-      <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">能力与 MCP</button>
+      <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">执行器与 MCP</button>
       <button type="button" class="nav-item" id="category-knowledge" data-category="knowledge" aria-current="false" tabindex="-1">知识库</button>
       <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
       <button type="button" class="nav-item" id="category-phone" data-category="phone" aria-current="false" tabindex="-1">连接 iPhone</button>
@@ -27,20 +28,25 @@
     <main>
       <section class="setting-section" id="phone-connection-section">
         <div class="phone-heading"><div><h2>连接 iPhone</h2><p>将 iPhone 安全连接到这台 Nova。</p></div><span class="phone-badge" id="phone-state">私人设备连接</span></div>
+        <ol class="phone-steps" aria-label="连接步骤">
+          <li id="phone-step-network"><span>1</span>准备网络</li><li id="phone-step-scan"><span>2</span>扫码配对</li><li id="phone-step-done"><span>3</span>开始对话</li>
+        </ol>
         <div class="phone-card">
-          <div class="phone-art" id="phone-illustration" aria-hidden="true">
-            <div class="phone-link-caption">NOVA / DEVICE LINK</div>
-            <div class="phone-topology"><div class="phone-node"><span class="phone-node-mark">N</span><span>DESKTOP</span></div><div class="phone-link-line"><span></span></div><div class="phone-node phone-node-remote"><span class="phone-node-mark">↗</span><span>IPHONE</span></div></div>
-            <div class="phone-link-meta"><span>ENCRYPTED CHANNEL</span><span>01 — 02</span></div>
+          <div class="phone-visual">
+            <div id="phone-illustration" aria-hidden="true">
+              <svg viewBox="0 0 80 80" fill="none"><rect x="24" y="10" width="32" height="60" rx="8" stroke="currentColor" stroke-width="2"/><path d="M35 16h10M36 63h8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="m32 39 6 6 11-12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <img id="phone-qr" alt="使用 iPhone Nova 扫描此二维码连接" width="224" height="224" hidden>
           </div>
-          <img id="phone-qr" alt="使用 iPhone Nova 扫描此二维码连接" width="224" height="224" hidden>
-          <h3 id="phone-title">让 Nova 随你同行</h3>
-          <p id="phone-description">在 iPhone 上继续与这台电脑的 Nova 对话。首次连接只需扫码。</p>
-          <p id="phone-host"></p>
-          <button type="button" id="phone-primary" class="phone-primary">启用手机连接</button>
-          <button type="button" id="phone-recheck" class="phone-text-button">重新检测</button>
-          <p class="phone-privacy">仅配对设备可用 · 二维码仅可使用一次</p>
+          <div class="phone-copy">
+            <h3 id="phone-title">建立设备连接</h3>
+            <p id="phone-description">在 iPhone 上继续与这台电脑的 Nova 对话。首次连接只需扫码。</p>
+            <p id="phone-host"></p>
+            <div class="phone-actions"><button type="button" id="phone-primary" class="phone-primary">启用手机连接</button><button type="button" id="phone-recheck" class="phone-text-button">重新检测</button></div>
+          </div>
         </div>
+        <div class="phone-guide"><span class="phone-guide-icon" aria-hidden="true">↗</span><div><strong>一次配对，随时连接</strong><p>网络就绪后，这里会显示二维码。在 iPhone 的 Nova 中选择「连接主机」扫码即可。</p></div></div>
+        <p class="phone-privacy">仅授权设备可连接 · 配对码仅可使用一次</p>
         <div id="phone-devices" aria-label="已配对设备" hidden></div>
         <div class="phone-bottom"><details id="phone-advanced"><summary>高级设置</summary>
           <p class="note">通常无需修改。自定义地址用于已有安全转发；端口与认证文件仅在连接独立服务时填写，留空由 Nova 管理。</p>
@@ -57,49 +63,37 @@
           <button type="button" class="usage-scope" id="usage-session" aria-pressed="true"><span>本次启动</span><strong id="usage-session-cost">—</strong><span id="usage-session-count">0 次调用</span></button>
         </div>
         <p id="frontend-usage" role="status" aria-live="polite">开始对话后显示用量</p>
-        <details id="usage-breakdown" hidden><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
-      </section>
-      <section class="setting-section" id="appearance-section">
-        <h2>外观</h2>
-        <fieldset id="palette" class="segmented segmented-palette">
-          <legend>光球配色</legend>
-          <label class="choice" title="暖橙色光球。">
-            <input type="radio" name="palette" value="ember">
-            <span class="swatch swatch-ember" aria-hidden="true"></span>
-            <span class="option">
-              <span class="option-name">暖焰</span>
-              <span class="option-note">暖橙粒子，默认外观</span>
-            </span>
-          </label>
-          <label class="choice" title="冷银色光球。">
-            <input type="radio" name="palette" value="graphite">
-            <span class="swatch swatch-graphite" aria-hidden="true"></span>
-            <span class="option">
-              <span class="option-name">月光</span>
-              <span class="option-note">冷银粒子，低调外观</span>
-            </span>
-          </label>
-        </fieldset>
+        <details id="usage-breakdown" open hidden><summary>用量明细</summary><div id="frontend-usage-details"></div></details>
       </section>
       <section class="setting-section" id="capabilities-section">
         <h2>能力</h2>
-        <p id="capabilities-state" class="hint" aria-live="polite"></p>
         <p id="capabilities-problems" class="warning" aria-live="polite"></p>
         <div class="vision-settings">
-          <h3>对话视觉</h3>
-          <label class="toggle-row">随对话附上默认摄像头画面<input id="conversation-vision-enabled" type="checkbox" role="switch"></label>
+          <h3>主 Agent 视觉能力</h3>
+          <label class="toggle-row">允许主 Agent 使用摄像头<input id="conversation-vision-enabled" type="checkbox" role="switch"></label>
           <p id="conversation-vision-status" class="hint" role="status"></p>
-          <h3>视觉监控</h3>
-          <div class="field"><label for="monitor-camera">监控摄像头</label><select id="monitor-camera"><option value="">系统默认摄像头</option></select><button type="button" id="camera-refresh">刷新设备</button></div>
-          <p id="camera-devices-status" class="hint" role="status"></p>
-          <div class="field"><label for="watch-model">监控模型</label><input id="watch-model" type="text" maxlength="64" placeholder="默认视觉模型"></div>
-          <p class="hint">监控模型使用现有辅助模型连接。修改后保存并重启生效。</p>
         </div>
-        <div id="capabilities-editor"></div>
+        <div class="capability-group" id="executors-section">
+          <h3>执行器</h3>
+          <div class="executor-card">
+            <div id="camera-executor-toggle"></div>
+            <div class="field"><label for="monitor-camera">监控摄像头</label><select id="monitor-camera"><option value="">系统默认摄像头</option></select><button type="button" id="camera-refresh">刷新设备</button></div>
+            <p id="camera-devices-status" class="hint" role="status"></p>
+            <div class="field"><label for="watch-model">监控模型</label><select id="watch-model"></select></div>
+          </div>
+          <div class="executor-card">
+            <div id="coding-executor-toggle"></div>
+            <div class="field"><label for="coding-provider">执行器</label><select id="coding-provider" disabled><option value="codex">Codex</option></select><button type="button" id="coding-executor-configure">配置…</button></div>
+          </div>
+        </div>
+        <div class="capability-group" id="mcp-section">
+          <h3>MCP</h3>
+          <div id="capabilities-editor"></div>
+        </div>
       </section>
       <section class="setting-section" id="knowledge-section">
         <h2>知识库配置</h2>
-        <p class="hint">在「能力与 MCP」中启用知识库，保存并重启后生效。文档保存在本机，向量计算与回答会使用所选模型服务。</p>
+        <p class="hint">在「执行器与 MCP」中启用知识库，保存并重启后生效。文档保存在本机，向量计算与回答会使用所选模型服务。</p>
         <div class="field"><label for="embeddingProvider">向量服务</label><select id="embeddingProvider"><option value="dashscope">DashScope</option><option value="local" disabled>本地（即将支持）</option></select></div>
         <div class="field"><label for="embeddingModel">向量模型</label><input id="embeddingModel" type="text"></div>
         <div class="field"><label for="knowledgePath">存储位置</label><input id="knowledgePath" type="text" placeholder="留空使用默认位置"></div>
@@ -164,15 +158,15 @@
           <legend>规划回读</legend>
           <label class="choice" title="执行前简要回读计划。">
             <input type="radio" name="planReadback" value="summary">
-            <span class="option"><span class="option-name">摘要</span></span>
+            <span class="option"><span class="option-name">摘要</span><span class="option-note">简要回读计划</span></span>
           </label>
           <label class="choice" title="执行前回读计划，并等待你确认。">
             <input type="radio" name="planReadback" value="confirm">
-            <span class="option"><span class="option-name">确认</span></span>
+            <span class="option"><span class="option-name">确认</span><span class="option-note">回读后等待确认</span></span>
           </label>
           <label class="choice" title="不朗读计划；仍保留必要的操作审批。">
             <input type="radio" name="planReadback" value="silent">
-            <span class="option"><span class="option-name">静默</span></span>
+            <span class="option"><span class="option-name">静默</span><span class="option-note">不朗读计划</span></span>
           </label>
         </fieldset>
       </section>
@@ -182,15 +176,15 @@
           <legend>进度气泡</legend>
           <label class="choice" title="关闭普通回复与编程进度气泡；必要的审批仍会显示。">
             <input type="radio" name="progressBubbles" value="off">
-            <span class="option"><span class="option-name">关闭</span></span>
+            <span class="option"><span class="option-name">关闭</span><span class="option-note">不显示普通气泡</span></span>
           </label>
           <label class="choice" title="只显示编程任务的重要节点、完成结果和异常。">
             <input type="radio" name="progressBubbles" value="milestones">
-            <span class="option"><span class="option-name">里程碑</span></span>
+            <span class="option"><span class="option-name">里程碑</span><span class="option-note">完成、异常与关键节点</span></span>
           </label>
           <label class="choice" title="显示编程进度，以及正常对话的最终回复。">
             <input type="radio" name="progressBubbles" value="all">
-            <span class="option"><span class="option-name">全部</span></span>
+            <span class="option"><span class="option-name">全部</span><span class="option-note">对话回复与编程进展</span></span>
           </label>
         </fieldset>
       </section>
@@ -203,21 +197,21 @@
             <input type="radio" name="proactivity" value="conservative">
             <span class="option">
               <span class="option-name">保守</span>
-              <span class="option-note">几乎只等你来拉，很少主动推送</span>
+              <span class="option-note">优先等待你询问</span>
             </span>
           </label>
           <label class="choice" title="以询问为主，重要进展和提醒会主动播报。">
             <input type="radio" name="proactivity" value="balanced">
             <span class="option">
               <span class="option-name">均衡</span>
-              <span class="option-note">以你来拉为主，要紧的事才主动推一句</span>
+              <span class="option-note">仅播报重要进展</span>
             </span>
           </label>
           <label class="choice" title="更积极地主动播报进展和提醒。">
             <input type="radio" name="proactivity" value="eager">
             <span class="option">
               <span class="option-name">积极</span>
-              <span class="option-note">不必等你来拉，进展与提醒都主动推送</span>
+              <span class="option-note">主动播报进展与提醒</span>
             </span>
           </label>
         </fieldset>
@@ -228,8 +222,8 @@
             <option value="continuous" title="持续转述新的编程进展，等待你说完后播报；会增加语音用量。">连续转述</option>
           </select>
         </div>
-        <div class="field">
-          <label for="heartbeat" title="后台编程进度播报的最小间隔，避免频繁打断对话。">Coding 执行器播报间隔</label>
+        <div class="field interval-field">
+          <label for="heartbeat" title="后台编程进度播报的最小间隔，避免频繁打断对话。">编程执行器播报间隔</label>
           <input type="range" id="heartbeat" min="15" max="120" step="1" value="30">
           <output id="heartbeat-value" for="heartbeat">30 秒</output>
         </div>
@@ -264,7 +258,12 @@
             </div>
             <div class="field">
               <label for="integratedModel">Qwen 实时模型</label>
-              <input type="text" id="integratedModel" maxlength="64" autocomplete="off" spellcheck="false">
+              <select id="integratedModel">
+                <option value="qwen-audio-3.0-realtime-plus">Qwen Audio 3.0 Plus</option>
+                <option value="qwen-audio-3.0-realtime-flash">Qwen Audio 3.0 Flash</option>
+                <option value="qwen3.5-omni-flash-realtime">Qwen3.5 Omni Flash Realtime</option>
+                <option value="qwen3.5-omni-plus-realtime">Qwen3.5 Omni Plus Realtime</option>
+              </select>
             </div>
             <div class="field">
               <label for="integratedVoicePreset">Qwen 语音音色</label>
@@ -276,17 +275,9 @@
           </div>
         </section>
         <section id="cascaded-pipeline" hidden>
+          <p class="hint">相对集成式管线，多轮对话利用 KV Cache，成本预计可节省约 <strong class="cost-saving">70%</strong>。实际取决于模型、缓存命中率及语音用量。</p>
           <div class="pipeline-card">
-            <h3>1. 自动端点检测</h3>
-            <div class="field">
-              <label for="cascadedEndpointingProvider">服务</label>
-              <select id="cascadedEndpointingProvider">
-                <option value="auto">自动</option>
-              </select>
-            </div>
-          </div>
-          <div class="pipeline-card">
-            <h3>2. 语音识别</h3>
+            <h3>1. 语音识别</h3>
             <div class="field">
               <label for="cascadedAsrProvider">服务</label>
               <select id="cascadedAsrProvider">
@@ -295,7 +286,7 @@
             </div>
           </div>
           <div class="pipeline-card">
-            <h3>3. 对话模型</h3>
+            <h3>2. 对话模型</h3>
             <div class="field">
               <label for="cascadedLlmProvider">服务商</label>
               <select id="cascadedLlmProvider">
@@ -306,11 +297,12 @@
             </div>
             <div class="field">
               <label for="cascadedLlmModel">当前模型</label>
-              <input type="text" id="cascadedLlmModel" maxlength="64" autocomplete="off" spellcheck="false">
+              <datalist id="cascaded-model-presets"></datalist>
+              <input type="text" id="cascadedLlmModel" list="cascaded-model-presets" maxlength="64" autocomplete="off" spellcheck="false">
             </div>
           </div>
           <div class="pipeline-card">
-            <h3>4. 语音合成</h3>
+            <h3>3. 语音合成</h3>
             <div class="field">
               <label for="cascadedTtsProvider">服务</label>
               <select id="cascadedTtsProvider">
@@ -389,7 +381,7 @@
         </summary>
         <div class="codex-content">
           <p id="codex-status" class="connection-status" aria-live="polite">正在检查 Codex…</p>
-          <fieldset class="segmented compact-segmented">
+          <div class="codex-discovery"><fieldset class="segmented compact-segmented">
             <legend>Codex CLI</legend>
             <label class="choice">
               <input type="radio" name="codexBinaryMode" value="auto">
@@ -400,7 +392,8 @@
               <span class="option"><span class="option-name">手动路径</span></span>
             </label>
           </fieldset>
-          <button type="button" id="codex-rescan">重新检测</button>
+          <button type="button" id="codex-rescan" class="icon-button" aria-label="重新检测 Codex" title="重新检测 Codex"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 6.1A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.9 5.9"/></svg></button>
+          </div>
           <div id="codex-manual-settings" hidden>
             <div class="field">
               <label for="codexBinaryPath">Codex 原生可执行文件</label>

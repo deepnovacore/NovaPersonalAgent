@@ -25,12 +25,13 @@ import {
 const api = window.novaAudioAgentDesktop.settings
 const SECRET_KEYS = [
   'dashscopeApiKey', 'tavilyApiKey',
-  'arkApiKey', 'doubaoBigmodelApiKey',
+  'arkApiKey', 'deepseekApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
   dashscopeApiKey: 'DashScope',
   tavilyApiKey: 'Tavily',
   arkApiKey: 'Ark',
+  deepseekApiKey: 'DeepSeek（官方）',
   doubaoBigmodelApiKey: '火山语音',
 }
 const WORKSPACE_STATUS_TEXT = Object.freeze({
@@ -76,7 +77,6 @@ const wakeEnabled = document.querySelector('#wake-word-enabled')
 const autoHideSeconds = document.querySelector('#auto-hide-seconds')
 const wakeStatus = document.querySelector('#wake-word-status')
 const wakeRetry = document.querySelector('#wake-word-retry')
-const paletteInputs = [...document.querySelectorAll('input[name="palette"]')]
 const codingProgressNarrationInput = document.querySelector('#coding-progress-narration')
 const proactivityInputs = [...document.querySelectorAll('input[name="proactivity"]')]
 const pipelineModeInputs = [...document.querySelectorAll('input[name="pipelineMode"]')]
@@ -101,7 +101,6 @@ const integratedProvider = document.querySelector('#integratedProvider')
 const integratedModel = document.querySelector('#integratedModel')
 const integratedVoicePreset = document.querySelector('#integratedVoicePreset')
 const integratedVoiceCustom = document.querySelector('#integratedVoiceCustom')
-const cascadedEndpointingProvider = document.querySelector('#cascadedEndpointingProvider')
 const cascadedAsrProvider = document.querySelector('#cascadedAsrProvider')
 const cascadedLlmProvider = document.querySelector('#cascadedLlmProvider')
 const cascadedLlmModel = document.querySelector('#cascadedLlmModel')
@@ -148,12 +147,18 @@ for (const [index, button] of categoryButtons.entries()) {
 }
 
 const capabilityEditor = createCapabilitiesEditor({root: document.querySelector('#capabilities-editor'),
-  stateLabel: document.querySelector('#capabilities-state'), problemsLabel: document.querySelector('#capabilities-problems'),
+  cameraRoot: document.querySelector('#camera-executor-toggle'), codingRoot: document.querySelector('#coding-executor-toggle'),
+  problemsLabel: document.querySelector('#capabilities-problems'),
   stage: patch => controller.stage(patch), probe: payload => api.probeCapabilities(payload)})
+document.getElementById('coding-executor-configure').addEventListener('click', () => {
+  applyCategory('codex')
+  document.getElementById('codex-projects').open = true
+})
 const capabilitySettings = ['embeddingProvider', 'embeddingModel', 'knowledgePath', 'capabilitiesConfigPath'].map(key => document.getElementById(key))
 const knowledgePanel = createKnowledgePanel({document, action: payload => api.knowledgeAction(payload)})
 
 function populateVoiceOptions(select, presets) {
+  select.replaceChildren()
   for (const preset of presets) {
     const option = document.createElement('option')
     option.value = preset.value
@@ -192,6 +197,7 @@ function keyUsage(view) {
   return {
     dashscopeApiKey: view.pipelineMode === 'integrated'
       || view.cascadedLlmProvider === 'qwen' ? '必需' : '当前未使用',
+    deepseekApiKey: view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'deepseek' ? '必需' : '当前未使用',
     arkApiKey: view.pipelineMode === 'cascaded'
       && view.cascadedLlmProvider === 'ark' ? '必需' : '当前未使用',
     doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' ? '必需' : '当前未使用',
@@ -219,7 +225,7 @@ function renderCodexStatus(view) {
     codexStatus.dataset.ready = '0'
     return
   }
-  codexStatus.textContent = `已连接 ${status.version} · ${status.path}`
+  codexStatus.textContent = `已连接 ${status.version}`
   codexStatus.dataset.ready = '1'
 }
 
@@ -250,8 +256,25 @@ function renderVision(view) {
   const supported = view.pipelineMode === 'cascaded' && view.visionModels?.[view.cascadedLlmProvider]?.includes(view.cascadedLlmModels?.[view.cascadedLlmProvider]) === true
   conversationVision.checked = supported && view.conversationVisionEnabled === true
   conversationVision.disabled = !supported
-  document.getElementById('conversation-vision-status').textContent = supported ? '使用当前对话模型与系统默认摄像头' : '当前对话模型不支持视觉'
-  document.getElementById('watch-model').value = view.watchModel ?? ''
+  document.getElementById('conversation-vision-status').textContent = ''
+  const enabled = view.capabilitiesDocument?.modules?.camera?.enabled !== false
+  const watchSelect = document.getElementById('watch-model')
+  const presets = Object.entries(view.visionModels ?? {}).flatMap(([provider, models]) =>
+    view.secretsPresent?.[({qwen: 'dashscopeApiKey', ark: 'arkApiKey'})[provider]]
+      ? models.map(model => ({value: model, label: `${provider === 'qwen' ? 'Qwen' : '豆包'} · ${model}`})) : [])
+  watchSelect.replaceChildren()
+  for (const row of [{value: '', label: presets.length ? '选择监控模型' : '请先配置视觉模型 API Key'}, ...presets]) {
+    const option = document.createElement('option'); option.value = row.value; option.textContent = row.label
+    option.disabled = row.value === ''; watchSelect.append(option)
+  }
+  if (view.watchModel && !presets.some(row => row.value === view.watchModel)) {
+    const option = document.createElement('option'); option.value = view.watchModel
+    option.textContent = `${view.watchModel}（当前不可选）`; option.disabled = true; watchSelect.append(option)
+  }
+  watchSelect.value = view.watchModel ?? ''
+  watchSelect.disabled = !enabled || presets.length === 0
+  monitorCamera.disabled = !enabled
+  document.getElementById('camera-refresh').disabled = !enabled
   const selected = view.monitorCameraDeviceId ?? ''
   monitorCamera.replaceChildren()
   const rows = [{deviceId: '', label: '系统默认摄像头'}, ...cameraDevices]
@@ -271,7 +294,9 @@ conversationVision.addEventListener('change', async () => {
   controller.stage({conversationVisionEnabled: enabled})
 })
 monitorCamera.addEventListener('change', () => controller.stage({monitorCameraDeviceId: monitorCamera.value}))
-document.getElementById('watch-model').addEventListener('change', event => controller.stage({watchModel: event.target.value.trim()}))
+document.getElementById('watch-model').addEventListener('change', event => {
+  if (!event.target.disabled && event.target.value) controller.stage({watchModel: event.target.value})
+})
 document.getElementById('camera-refresh').addEventListener('click', async () => {
   const status = document.getElementById('camera-devices-status')
   try {
@@ -303,7 +328,7 @@ function renderUsage() {
   status.hidden = !status.textContent
   const breakdown = document.getElementById('usage-breakdown')
   breakdown.hidden = !selected?.requests
-  if (breakdown.hidden) breakdown.open = false
+  if (breakdown.hidden) breakdown.open = true
   renderFrontendUsage(document.getElementById('frontend-usage-details'), selected, document)
 }
 for (const scope of ['history', 'session']) document.getElementById(`usage-${scope}`).addEventListener('click', () => {
@@ -328,7 +353,6 @@ function render(view, _drafts, state) {
   wakeStatus.textContent = ({off: '', loading: '正在准备唤醒模型…', ready: '本地唤醒已就绪', error: '唤醒模型不可用，请重试；可用托盘显示窗口。'})[view.wakeWord?.status] ?? ''
   wakeRetry.hidden = view.wakeWord?.status !== 'error'
 
-  for (const input of paletteInputs) input.checked = input.value === view.palette
   codingProgressNarrationInput.value = view.codingProgressNarration
   for (const input of proactivityInputs) input.checked = input.value === view.proactivity
   for (const input of pipelineModeInputs) input.checked = input.value === view.pipelineMode
@@ -355,11 +379,20 @@ function render(view, _drafts, state) {
   integratedSection.hidden = view.pipelineMode !== 'integrated'
   cascadedSection.hidden = view.pipelineMode !== 'cascaded'
   integratedProvider.value = view.integratedProvider
+  if (view.integratedModel && ![...integratedModel.children].some(option => option.value === view.integratedModel)) {
+    const option = document.createElement('option'); option.value = view.integratedModel; option.textContent = view.integratedModel; integratedModel.append(option)
+  }
   integratedModel.value = view.integratedModel ?? ''
-  renderVoice(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, QWEN_VOICES)
-  cascadedEndpointingProvider.value = view.cascadedEndpointingProvider
+  const voices = view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: 'Ethan（默认）'}] : QWEN_VOICES
+  populateVoiceOptions(integratedVoicePreset, voices)
+  renderVoice(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, voices)
   cascadedAsrProvider.value = view.cascadedAsrProvider
   cascadedLlmProvider.value = view.cascadedLlmProvider
+  const modelPresets = document.querySelector('#cascaded-model-presets')
+  modelPresets.replaceChildren()
+  if (view.cascadedLlmProvider === 'deepseek') {
+    const option = document.createElement('option'); option.value = 'deepseek-flash'; option.label = 'DeepSeek V4.1 Flash'; modelPresets.append(option)
+  }
   cascadedLlmModel.value = view.cascadedLlmModels?.[view.cascadedLlmProvider] ?? ''
   cascadedTtsProvider.value = view.cascadedTtsProvider
   renderVoice(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
@@ -441,7 +474,6 @@ wakeRetry.addEventListener('click', () => { void window.novaAudioAgentDesktop.wa
 for (const event of ['pointerdown', 'keydown']) {
   document.addEventListener(event, () => window.novaAudioAgentDesktop.wakeWord.activity())
 }
-for (const input of paletteInputs) bindStage(input, 'change', () => ({palette: input.value}))
 bindStage(codingProgressNarrationInput, 'change', () => ({codingProgressNarration: codingProgressNarrationInput.value}))
 for (const input of proactivityInputs) bindStage(input, 'change', () => ({proactivity: input.value}))
 for (const input of pipelineModeInputs) bindStage(input, 'change', () => ({pipelineMode: input.value}))
@@ -463,8 +495,11 @@ bindStage(codexBinaryPath, 'input', () => ({codexBinaryPath: codexBinaryPath.val
 bindStage(codexWorkspace, 'input', () => ({codexWorkspace: codexWorkspace.value}))
 bindStage(codexManagedRoot, 'input', () => ({codexManagedRoot: codexManagedRoot.value}))
 bindStage(integratedProvider, 'change', () => ({integratedProvider: integratedProvider.value}))
-bindStage(integratedModel, 'input', () => ({integratedModel: integratedModel.value}))
-bindStage(cascadedEndpointingProvider, 'change', () => ({cascadedEndpointingProvider: cascadedEndpointingProvider.value}))
+bindStage(integratedModel, 'change', () => ({
+  integratedModel: integratedModel.value,
+  ...(integratedModel.value.startsWith('qwen3.5-omni-') !== currentView?.integratedModel?.startsWith('qwen3.5-omni-')
+    ? {integratedVoice: integratedModel.value.startsWith('qwen3.5-omni-') ? 'Ethan' : 'longanqian'} : {}),
+}))
 bindStage(cascadedAsrProvider, 'change', () => ({cascadedAsrProvider: cascadedAsrProvider.value}))
 bindStage(cascadedLlmProvider, 'change', () => ({cascadedLlmProvider: cascadedLlmProvider.value}))
 cascadedLlmModel.addEventListener('input', () => {
@@ -550,6 +585,8 @@ settingsRestart.addEventListener('click', async () => {
 })
 
 codexRescan.addEventListener('click', async () => {
+  codexRescan.disabled = true
+  codexRescan.setAttribute('aria-busy', 'true')
   statusLabel.textContent = '正在刷新 Codex…'
   try {
     const view = await api.rescanCodex()
@@ -560,6 +597,9 @@ codexRescan.addEventListener('click', async () => {
       : view.operationStatus == null ? 'Codex 刷新完成' : 'Codex 刷新未完成'
   } catch {
     statusLabel.textContent = 'Codex 刷新失败'
+  } finally {
+    codexRescan.disabled = false
+    codexRescan.setAttribute('aria-busy', 'false')
   }
 })
 document.querySelector('#projects-repair').addEventListener('click', async () => {

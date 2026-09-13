@@ -4,11 +4,12 @@
 // text that additive attributes would disturb.
 export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'general', label: '通用', sections: Object.freeze([
-    'wake-word-section', 'appearance-section', 'notifications-section',
-    'intent-section', 'proactivity-section', 'frontend-usage-section',
+    'wake-word-section', 'notifications-section',
+    'intent-section', 'proactivity-section',
   ])}),
+  Object.freeze({id: 'usage', label: '用量', sections: Object.freeze(['frontend-usage-section'])}),
   Object.freeze({id: 'pipeline', label: '语音管线', sections: Object.freeze(['pipeline'])}),
-  Object.freeze({id: 'capabilities', label: '能力与 MCP', sections: Object.freeze(['capabilities-section'])}),
+  Object.freeze({id: 'capabilities', label: '执行器与 MCP', sections: Object.freeze(['capabilities-section'])}),
   Object.freeze({id: 'knowledge', label: '知识库', sections: Object.freeze(['knowledge-section'])}),
   Object.freeze({id: 'secrets', label: 'API 密钥', sections: Object.freeze(['secrets'])}),
   Object.freeze({id: 'phone', label: '连接 iPhone', sections: Object.freeze(['phone-connection-section'])}),

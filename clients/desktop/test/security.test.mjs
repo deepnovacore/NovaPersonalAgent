@@ -94,8 +94,8 @@ test('memory board window shares the orb session with the same isolation walls',
 test('settings window shares the orb session with the same isolation walls', () => {
   const options = securityModule.settingsWindowOptions('/app/preload.cjs', 'launch-1')
 
-  assert.equal(options.width, 760)
-  assert.equal(options.height, 620)
+  assert.equal(options.width, 1140)
+  assert.equal(options.height, 930)
   assert.equal(options.minWidth, 620)
   assert.equal(options.minHeight, 520)
   assert.equal(options.title, '设置')

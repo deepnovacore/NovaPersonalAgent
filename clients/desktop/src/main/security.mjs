@@ -97,8 +97,8 @@ export function boardWindowOptions(preload, launchId) {
 
 export function settingsWindowOptions(preload, launchId) {
   return panelWindowOptions(preload, launchId, {
-    width: 760,
-    height: 620,
+    width: 1140,
+    height: 930,
     minWidth: 620,
     minHeight: 520,
     title: '设置',

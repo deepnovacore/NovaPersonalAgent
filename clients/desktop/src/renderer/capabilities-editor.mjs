@@ -1,12 +1,10 @@
-import {channelLabel} from './channel-tabs.mjs'
-const LABELS = {search: '搜索', camera: '视觉监控', coding: '编程执行', knowledge: '知识库'}
 const PRESET = {url: 'https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp', tool: 'bailian_web_search', headers: {authorization: 'Bearer ${DASHSCOPE_API_KEY}'}}
-const DESCRIPTIONS = {搜索: '查找网络信息，为回答补充资料', '视觉监控': '允许独立执行器持续观察并报告命中' , 编程执行: '执行编程任务与项目操作', 知识库: '检索已导入的本地资料', '知识库对 Codex 开放': '允许 Coding 执行器检索知识库'}
+const DESCRIPTIONS = {搜索: '查找网络信息，为回答补充资料', '视觉监控': '观察摄像头画面，在符合条件时通知你', '编程': '执行编程任务与项目操作', 知识库: '检索已导入的本地资料', '向编程执行器开放知识库': '允许编程执行器检索已导入的资料'}
 const DEFAULT_TOOL = {enabled: false, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2}
 const node = (tag, text, parent) => {const element = document.createElement(tag); if (text) element.textContent = text; parent?.append(element); return element}
 
 /** Native controls over the existing controller's one draft; probe metadata never enables a tool. */
-export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage, probe}) {
+export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problemsLabel, stage, probe}) {
   let current
   let signature = ''
   const probes = new Map()
@@ -65,14 +63,13 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
     current = view
     const state = view.capabilities ?? {}
     const running = state.runtime
-    const count = running?.toolCount
-    const summary = running?.state === 'startup_failed' ? '能力服务启动失败' : running?.state === 'running' ? '能力服务运行中' : '等待能力服务启动'
-    stateLabel.textContent = `${summary}${Number.isSafeInteger(count) ? ` · 前台可用 ${count} 个工具（上限 ${running.toolBudget} 个）` : ''}。修改后保存，再重启后台生效。${state.status?.overrides?.length ? '\n部分配置由环境变量指定：' + state.status.overrides.join(', ') : ''}`
     problemsLabel.textContent = (state.problems ?? []).join(' · ')
     problemsLabel.hidden = !problemsLabel.textContent
     if (view.capabilitiesDocument === null) {
       signature = ''
       root.replaceChildren()
+      cameraRoot.replaceChildren()
+      codingRoot.replaceChildren()
       if (typeof view.capabilitiesRevision !== 'string') {
         node('p', '注册表无法安全显示，请在本机修正文件，凭据改用 ${ENV} 引用。' + (state.path ?? ''), root)
         return
@@ -82,19 +79,21 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
     const nextSignature = JSON.stringify([doc, state.runtime?.state, state.runtime?.modules, state.runtime?.servers, state.status?.servers])
     if (signature === nextSignature) return
     signature = nextSignature
-    const focused = root.contains(document.activeElement) ? document.activeElement.dataset.field : null
+    const roots = [root, cameraRoot, codingRoot]
+    const focused = roots.some(target => target.contains(document.activeElement)) ? document.activeElement.dataset.field : null
     const opened = new Set([...root.querySelectorAll('details[open]')].map(item => item.dataset.server))
     root.replaceChildren()
     if (view.capabilitiesDocument === null) node('p', '注册表无法安全显示；修改下方草稿并保存可替换该文件，凭据改用 ${ENV} 引用。' + (state.path ?? ''), root)
     const modules = doc.modules ?? {}
-    for (const [name, label] of Object.entries(LABELS)) {
-      field(root, label, modules[name]?.enabled ?? name !== 'knowledge', enabled => update(next => {
+    for (const [name, label, target] of [['camera', '视觉监控', cameraRoot], ['coding', '编程', codingRoot]]) {
+      target.replaceChildren()
+      field(target, label, modules[name]?.enabled ?? true, enabled => update(next => {
         next.modules ??= {}; next.modules[name] = {...next.modules[name], enabled}
       }), {type: 'checkbox'})
     }
-    field(root, '知识库对 Codex 开放', modules.knowledge?.exposeToCodex ?? false, exposeToCodex => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, exposeToCodex}}), {type: 'checkbox'})
-    field(root, '前台工具预算上限', doc.frontbrainToolBudget ?? 24, value => update(next => {next.frontbrainToolBudget = value}), {type: 'number', min: 1, max: 256})
-    const search = node('fieldset', '', root); node('legend', '搜索连接', search)
+    const searchGroup = node('section', '', root); searchGroup.className = 'mcp-module'; searchGroup.dataset.module = 'search'
+    field(searchGroup, '搜索', modules.search?.enabled ?? true, enabled => update(next => {next.modules ??= {}; next.modules.search = {...next.modules.search, enabled}}), {type: 'checkbox'})
+    const search = node('div', '', searchGroup); search.className = 'mcp-module-config'
     const changeSearch = patch => update(next => {next.modules ??= {}; next.modules.search = {...next.modules.search, ...patch}})
     field(search, '搜索服务', modules.search?.provider ?? 'tavily', provider => changeSearch({provider}), {options: ['tavily', 'mcp']})
     if (modules.search?.provider === 'mcp') {
@@ -109,22 +108,10 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
       node('p', probes.get('$search')?.status ?? '未检测', search)
     }
     const statuses = running?.servers ?? state.status?.servers ?? []
-    const live = node('section', '', root)
-    live.className = 'mcp-runtime-list'
-    node('h3', '当前 MCP 服务', live)
-    const statusLabels = {ok: '正常', configured: '已配置', disabled: '已停用', failed: '连接失败'}
-    const liveRow = (name, status) => {
-      const row = node('div', '', live)
-      row.className = 'mcp-runtime-row'
-      node('span', channelLabel(name), row)
-      node('span', status, row).className = 'badge'
-    }
-    if (running?.state === 'running') {
-      if (running.modules?.search?.enabled && running.modules.search.provider === 'mcp') liveRow('search', '内置搜索 · 已启用')
-      if (running.modules?.knowledge?.enabled) liveRow('mcp__nova_knowledge', '内置知识库 · 已启用')
-      for (const server of statuses) liveRow(server.name, statusLabels[server.status] ?? '状态未知')
-      if (live.children.length === 1) node('p', '当前未启用 MCP 服务', live).className = 'hint'
-    } else node('p', '等待后端报告服务状态', live).className = 'hint'
+    const knowledge = node('section', '', root); knowledge.className = 'mcp-module'; knowledge.dataset.module = 'knowledge'
+    field(knowledge, '知识库', modules.knowledge?.enabled ?? false, enabled => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, enabled}}), {type: 'checkbox'})
+    const knowledgeConfig = node('div', '', knowledge); knowledgeConfig.className = 'mcp-module-config secondary-toggle'
+    field(knowledgeConfig, '向编程执行器开放知识库', modules.knowledge?.exposeToCodex ?? false, exposeToCodex => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, exposeToCodex}}), {type: 'checkbox'})
     for (const [name, server] of Object.entries(doc.mcpServers ?? {})) {
       const details = node('details', '', root); details.dataset.server = name; details.open = opened.has(name)
       if (!server || typeof server !== 'object' || Array.isArray(server)) {
@@ -172,7 +159,7 @@ export function createCapabilitiesEditor({root, stateLabel, problemsLabel, stage
       })
       button(details, '删除服务器', () => update(next => {delete next.mcpServers[name]}))
     }
-    if (focused) [...root.querySelectorAll('[data-field]')].find(item => item.dataset.field === focused)?.focus()
+    if (focused) roots.flatMap(target => [...target.querySelectorAll('[data-field]')]).find(item => item.dataset.field === focused)?.focus()
   }
   return {render}
 }
