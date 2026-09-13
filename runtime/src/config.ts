@@ -1,6 +1,7 @@
 import {parseCapabilityRegistry, type CapabilityRegistry} from './capability-registry.js'
 import { z } from 'zod'
 import { stripLikePython } from './python-text.js'
+import {supportsVision} from './vision-capability.js'
 import {findRetiredConfiguration} from './environment-contract.js'
 
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
@@ -273,6 +274,11 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     tavily_api_key: optionalSecret(environment.TAVILY_API_KEY),
     fast_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_FAST_MODEL),
     watch_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_WATCH_MODEL),
+    ...(supportsVision('qwen', environment.NOVA_AUDIO_AGENT_WATCH_MODEL ?? '')
+      ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
+    ...(supportsVision('ark', environment.NOVA_AUDIO_AGENT_WATCH_MODEL ?? '')
+      ? {ark_api_key: optionalSecret(environment.ARK_API_KEY),
+          volcengine_ark_base_url: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL)} : {}),
     conversation_vision_enabled: optionalBoolean(environment.NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED),
     monitor_camera_device_id: optionalString(environment.NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID),
     surrogate_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_SURROGATE_MODEL),
@@ -495,6 +501,21 @@ export function requireIntegratedRealtime(settings: Settings): QwenRealtimeConfi
 export function resolveModelApiKey(settings: Settings): string | null {
   return stripLikePython(settings.model_api_key ?? '')
     || (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.dashscope_api_key : null)
+}
+
+/** Preset monitor models keep their credential on their own provider endpoint. */
+export function resolveWatchModelConnection(settings: Settings): {readonly baseUrl: string; readonly apiKey: string} | null {
+  const model = stripLikePython(settings.watch_model ?? '')
+  if (supportsVision('qwen', model)) return {
+    baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
+    apiKey: requiredCredential(settings.dashscope_api_key
+      ?? (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null), 'DASHSCOPE_API_KEY'),
+  }
+  if (supportsVision('ark', model)) return {
+    baseUrl: secureEndpoint(settings.volcengine_ark_base_url, 'https', 'NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL'),
+    apiKey: requiredCredential(settings.ark_api_key, 'ARK_API_KEY'),
+  }
+  return null
 }
 
 /** Keeps a selected provider credential on its fixed compatible endpoint. */

@@ -21,7 +21,7 @@ import {
   type ModelPort,
 } from './causal-runtime.js'
 import { RealClock, type Clock } from './clock.js'
-import { capabilitiesFromSettings, resolveModelApiKey, resolveProactivity, type Settings } from './config.js'
+import { capabilitiesFromSettings, resolveModelApiKey, resolveProactivity, resolveWatchModelConnection, type Settings } from './config.js'
 import { MonotonicIdFactory, type IdFactory } from './ids.js'
 import { GatewayCompressor, GatewaySurrogate } from './model-adapters.js'
 import { OpenAIModelGateway, type MetricsSink, type ModelGateway } from './model-gateway.js'
@@ -222,6 +222,10 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     throw new AssemblyError(`built-in executor cannot be overridden: ${suppliedReserved?.manifest.name ?? configuredReserved}`)
   }
   const watchModel = stripLikePython(settings.watch_model ?? '') || settings.fast_model
+  const watchConnection = cameraModuleEnabled ? resolveWatchModelConnection(settings) : null
+  const watchGateway = watchConnection === null ? gateway : new OpenAIModelGateway({
+    ...watchConnection, clock, ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
+  })
   const visionLifecycle = cameraModuleEnabled ? new VisionLifecycleBridge() : undefined
 
   const search = searchTransport === undefined ? undefined : new SearchAdapter(searchTransport)
@@ -247,7 +251,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     : {}
   const captureEnabled = !(frameSource instanceof DisabledFrameSource)
   const watch = cameraModuleEnabled ? new WatchAdapter({
-    manifest: WATCH_MANIFEST, source: frameSource, gateway, mediaStore, model: watchModel,
+    manifest: WATCH_MANIFEST, source: frameSource, gateway: watchGateway, mediaStore, model: watchModel,
     captureEnabled, deviceId: settings.monitor_camera_device_id, ...admissionOptions,
     ...(visionLifecycle === undefined ? {} : {onMonitorLifecycle: {
       admission: (delegateId, status) => visionLifecycle.admission(delegateId, status),
@@ -256,7 +260,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     }}),
   }) : undefined
   const guard = cameraModuleEnabled ? new WatchAdapter({
-    manifest: GUARD_MANIFEST, source: frameSource, gateway, mediaStore, model: watchModel,
+    manifest: GUARD_MANIFEST, source: frameSource, gateway: watchGateway, mediaStore, model: watchModel,
     captureEnabled, deviceId: settings.monitor_camera_device_id, ...admissionOptions,
     ...(visionLifecycle === undefined ? {} : {onMonitorLifecycle: {
       admission: (delegateId, status) => visionLifecycle.admission(delegateId, status),
@@ -337,7 +341,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
   })
   const visionController = visionLifecycle === undefined ? undefined : (() => {
     const vision = new VisionAgentControllerCore({
-      gateway, watchModel, requestIdFactory: () => ids.next('vision'), lifecycleSink: visionLifecycle,
+      gateway: watchGateway, watchModel, requestIdFactory: () => ids.next('vision'), lifecycleSink: visionLifecycle,
       runtimePort: {dispatch: async request => {
         if (!request.stillWanted()) return {accepted: false, delegate_id: null}
         const admission = await runtime.dispatchExternal({
