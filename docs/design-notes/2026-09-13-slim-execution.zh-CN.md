@@ -10,9 +10,9 @@
 | 4 | 完成并集成 | 发布检查收敛到 250 行 verifier，保留实际依赖 staging、原生资源 manifest 和签名路径；真实 macOS 未签名安装副本的后端握手通过。集成桌面 878 通过/3 跳过。签名发布未执行。 |
 | 5 | 完成并集成 | Node 文件系统替代原生文件操作；Windows 实际 MSVC 编译、目录刷盘、锁竞争和进程退出后释放、Node 路径身份测试通过。Claude 最终复审 PASS；集成 check、运行时 2327 通过/8 跳过、桌面 878 通过/3 跳过。 |
 | 6 | 完成并集成 | 四个实际 owner 已迁出，service.ts 1800 行；各阶段 Claude PASS、361 项回归通过。构造期 intake dispatch 的 await 顺序按复审恢复，相关 329 项复验通过。 |
-| 7 | 实现完成，关键复审中 | 隔离分支 b45582a6：共享 HOME、Nova/external 归属、旧私有 HOME 原位兼容、无磁盘凭据覆盖；全量 runtime 2599 通过/8 跳过、desktop 1028 通过/3 跳过。真实 Codex 0.154.0 的隔离 HOME 与假 key 探针验证进程 provider 和配置继承。待集成。 |
-| 8 | 各组实现与审查中 | 桌面传输/assembly、设置/lifecycle、审批、存储 schema、知识库直调各组已通过审查；deadline race 已收敛并修复定时器监听清理。待整批集成。 |
-| 9 | 实现中 | service 按 owner 拆为五组，282 个静态测试调用与 1036 个断言 token 保持；项目存储临时目录 harness 收敛中。不删除现用行为断言。 |
+| 7 | 完成并集成 | 共享 HOME、Nova/external 归属、旧私有 HOME 原位兼容、无磁盘凭据覆盖；Claude 关键复审 PASS。集成 runtime 2326 通过/8 跳过、desktop 878 通过/3 跳过。真实 Windows HOME/env 14 通过/3 POSIX 专属跳过；真实 Codex 0.154.0 的隔离假认证文件/进程 key 探针通过，不冒充真实账户登录验收。 |
+| 8 | 完成并集成 | 桌面传输/assembly、设置/lifecycle、审批、存储 schema、知识库直调、deadline race 各组通过审查。集成 check、runtime 2328 通过/8 跳过、desktop 874 通过/3 跳过。知识库 RRF 新旧 12 组差分一致；存储解码 326 组差分一致。下列误判前提按真实行为修正。 |
+| 9 | 完成并集成 | service 五组 owner 测试+共享 harness 保留 282 个静态测试调用/1036 个断言；存储 harness 保留 85/369；Codex 表展开后保持3个名称/10组预期，四个 mock 测试准确改名。Sol 审查 PASS，集成 check 与 419 项定向回归通过。 |
 | 10 | 未开始 | 必须最后迁移目录并检查发布入口和 worker 路径。 |
 
 ## 实测修正的计划前提

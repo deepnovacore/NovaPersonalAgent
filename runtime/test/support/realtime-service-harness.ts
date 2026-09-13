@@ -5,7 +5,7 @@ import type {AgentController} from '../../src/agent-controller.js'
 import {VirtualClock} from '../../src/clock.js'
 import type {AgentExecutor} from '../../src/coding-executor.js'
 import type {EventRecord, JsonValue} from '../../src/events.js'
-import {CodexApprovalController, type CodexApprovalResolution} from '../../src/executors/codex/approval.js'
+import {HostApprovalController, type ApprovalResolution} from '../../src/approval.js'
 import {
   CODEX_AGENT_SUMMARY,
   CODEX_PROJECT_APPROVAL_MANIFEST,
@@ -496,9 +496,9 @@ export function guardFact(eventId = 'final:d-guard'): Parameters<RealtimeService
 }
 
 export function offerCodexCommand(
-  controller: CodexApprovalController,
+  controller: HostApprovalController,
   signal: AbortSignal = new AbortController().signal,
-): Promise<CodexApprovalResolution | null> {
+): Promise<ApprovalResolution | null> {
   return controller.offer({
     kind: 'command_execution',
     local_detail: {
@@ -873,7 +873,7 @@ export function realtimeServiceHarness(profile: 'pipeline', options?: PipelineOp
   readonly session: RealtimeSession
   readonly clock: VirtualClock
   readonly diagnostics: string[]
-  readonly executorApproval: CodexApprovalController | null
+  readonly executorApproval: HostApprovalController | null
   readonly telemetry: {readonly kind: string; readonly payload: Readonly<Record<string, JsonValue>>}[]
   readonly runtimeDispatches: () => number
 }
@@ -898,7 +898,7 @@ export function realtimeServiceHarness(profile: 'confirmation', options?: Confir
   readonly diagnostics: string[]
   readonly telemetry: {readonly kind: string; readonly payload: Readonly<Record<string, JsonValue>>}[]
   readonly clock: VirtualClock
-  readonly executorApproval: CodexApprovalController | null
+  readonly executorApproval: HostApprovalController | null
 }
 export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projection' | 'guard' | 'confirmation', input?: unknown): unknown {
   switch (profile) {
@@ -965,7 +965,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
         return `id-${idSeq}`
       }
       const executorApproval = options.withExecutorApproval === true
-        ? new CodexApprovalController({clock, idFactory: nextId})
+        ? new HostApprovalController({clock, idFactory: nextId})
         : null
       const playback = new PlaybackRegistry({
         idFactory: nextId,
@@ -1467,7 +1467,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
       })
       const controller = new ProjectConfirmationController({clock, idFactory: nextId})
       const executorApproval = options.withExecutorApproval === true
-        ? new CodexApprovalController({clock, idFactory: nextId})
+        ? new HostApprovalController({clock, idFactory: nextId})
         : null
       let ingested = 0
       const externalCommit = options.commit ?? ((): Promise<{
