@@ -1,6 +1,6 @@
 import {realpath} from 'node:fs/promises'
 import {isAbsolute, relative} from 'node:path'
-import {SensitiveContentPolicy} from '../sensitivity.js'
+import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 import type {WorkOrder} from '../executors/coding/work-order.js'
 
 interface ReferenceBackend {

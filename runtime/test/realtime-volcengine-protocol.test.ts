@@ -3,14 +3,14 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
+import { canonicalJson } from '../src/text/canonical-json.js'
 import {
   ConfigurationError,
   loadSettings,
   requireVolcengineRealtime,
   type Settings,
   type VolcengineRealtimeConfig,
-} from '../src/config.js'
+} from '../src/config/config.js'
 import { volcengineInputPcm } from '../src/realtime/volcengine/audio.js'
 import { MAX_VOLCENGINE_WIRE_FRAME_BYTES } from '../src/realtime/volcengine/audio.js'
 import { MAX_REALTIME_PCM_BYTES } from '../src/realtime/protocol.js'

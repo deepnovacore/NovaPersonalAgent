@@ -1,4 +1,4 @@
-import {snapshotRegularFile, sameSnapshot, type FileSnapshot} from '../../native-resource-snapshot.js'
+import {snapshotRegularFile, sameSnapshot, type FileSnapshot} from '../../storage/native-resource-snapshot.js'
 import {hostCodexHomeValue} from './process-owner.js'
 import {spawn} from 'node:child_process'
 import {randomUUID} from 'node:crypto'
@@ -44,13 +44,13 @@ import {
   type CodexCredentialDiagnosticCode,
 } from './credential-snapshot.js'
 import {expandUserPath, type CodexHostCatalog} from './host-config.js'
-import type {Settings} from '../../config.js'
+import type {Settings} from '../../config/config.js'
 import {
   loadProjectNativeHostFromResources,
   protectDefaultProjectDirectories,
   type ProjectNativeHost,
-} from '../../project-native-resource.js'
-import {stripLikePython} from '../../python-text.js'
+} from '../../projects/project-native-resource.js'
+import {stripLikePython} from '../../text/python-text.js'
 import {admitCodexCliVersion} from './version.js'
 
 const PROBE_ID = 'codex_sandbox_probe'

@@ -7,12 +7,12 @@ import {
   parseAgentActionResult,
   type AgentController,
   type AgentDescriptor,
-} from '../src/agent-controller.js'
+} from '../src/executors/agent-controller.js'
 import {CodexAgentController} from '../src/executors/codex/controller.js'
-import {handoffPolicySchema} from '../src/memory.js'
-import {executorManifestSchema} from '../src/ports.js'
+import {handoffPolicySchema} from '../src/core/memory.js'
+import {executorManifestSchema} from '../src/core/ports.js'
 import {activeExecutorContextData} from '../src/realtime/session-state.js'
-import {compileToolSchema} from '../src/tool-schema.js'
+import {compileToolSchema} from '../src/core/tool-schema.js'
 
 const policy = (channel: string) => handoffPolicySchema.parse({
   channel, priority: 50, wake: 'fast', typical_latency: 5, compress_watermark: 8,

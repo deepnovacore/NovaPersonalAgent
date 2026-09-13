@@ -1,6 +1,6 @@
-import {MAX_CAMERA_JPEG_BYTES} from '../../desktop-camera.js'
+import {MAX_CAMERA_JPEG_BYTES} from '../../desktop/desktop-camera.js'
 import type {Frame} from '../../executors/watcher.js'
-import type { JsonValue } from '../../events.js'
+import type { JsonValue } from '../../core/events.js'
 import type { JsonObject } from '../protocol.js'
 
 export const MAX_CASCADED_LLM_HISTORY_ITEMS = 64

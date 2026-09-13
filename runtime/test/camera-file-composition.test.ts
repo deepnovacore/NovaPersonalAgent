@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {WebSocket, type RawData} from 'ws'
-import type {ExecutorDispatchContext} from '../src/causal-runtime.js'
-import {VirtualClock} from '../src/clock.js'
+import type {ExecutorDispatchContext} from '../src/core/causal-runtime.js'
+import {VirtualClock} from '../src/core/clock.js'
 import {
   CAMERA_FRAME_MAGIC,
   MAX_CAMERA_POSITION_MS,
@@ -10,7 +10,7 @@ import {
   encodeCameraFrame,
   parseCameraCapture,
   serializeCameraError,
-} from '../src/desktop-camera.js'
+} from '../src/desktop/desktop-camera.js'
 import {
   NodeDesktopServer,
   type DesktopCameraTimer,
@@ -22,8 +22,8 @@ import {
   WATCH_MANIFEST,
   WatchAdapter,
 } from '../src/executors/watcher.js'
-import {MediaStore} from '../src/media-store.js'
-import type {CompleteRequest, ModelGateway} from '../src/model-gateway.js'
+import {MediaStore} from '../src/core/media-store.js'
+import type {CompleteRequest, ModelGateway} from '../src/model/model-gateway.js'
 
 const TOKEN = '0123456789abcdef0123456789abcdef'
 const SETTLE_MS = 2_000

@@ -6,10 +6,10 @@
  */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {RealClock} from '../src/clock.js'
-import {DASHSCOPE_COMPATIBLE_BASE_URL} from '../src/config.js'
+import {RealClock} from '../src/core/clock.js'
+import {DASHSCOPE_COMPATIBLE_BASE_URL} from '../src/config/config.js'
 import {assessSchema, intakeModels, type IntakeKind} from '../src/executors/coding/intake-model.js'
-import {OpenAIModelGateway} from '../src/model-gateway.js'
+import {OpenAIModelGateway} from '../src/model/model-gateway.js'
 
 const apiKey = process.env.DASHSCOPE_API_KEY ?? process.env.NOVA_AUDIO_AGENT_MODEL_API_KEY
 const skip = process.env.NOVA_LIVE_TESTS !== '1' ? 'run through the live acceptance runner (NOVA_LIVE_TESTS=1)'

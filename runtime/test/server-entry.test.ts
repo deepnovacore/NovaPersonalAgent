@@ -4,7 +4,7 @@ import {existsSync, mkdtempSync, readFileSync, statSync, chmodSync, rmSync, writ
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {EventEmitter, once} from 'node:events'
-import {runDesktopEntry} from '../src/desktop-session.js'
+import {runDesktopEntry} from '../src/desktop/desktop-session.js'
 
 // The same owner must run without an Electron readiness endpoint.
 test('headless lifecycle starts and cleans up without a parent readiness endpoint', async () => {
@@ -26,7 +26,7 @@ test('headless lifecycle starts and cleans up without a parent readiness endpoin
 })
 
 test('token file is private, valid, never overwritten, and invalid config allocates nothing', {skip: process.platform === 'win32' && 'POSIX remote host private storage'}, async () => {
-  const {initializeServerToken, loadServerConfig} = await import('../src/server-config.js')
+  const {initializeServerToken, loadServerConfig} = await import('../src/server/server-config.js')
   const {runServerEntry} = await import('../src/server-entry.js')
   const dir = mkdtempSync(join(tmpdir(), 'nova-server-'))
   const tokenFile = join(dir, 'token')
@@ -59,7 +59,7 @@ test('token file is private, valid, never overwritten, and invalid config alloca
 })
 
 test('server ignores IPC disconnect, stops on SIGTERM, and removes signal bindings', {skip: process.platform === 'win32' && 'POSIX remote host private storage'}, async () => {
-  const {initializeServerToken} = await import('../src/server-config.js')
+  const {initializeServerToken} = await import('../src/server/server-config.js')
   const {runServerEntry} = await import('../src/server-entry.js')
   const dir = mkdtempSync(join(tmpdir(), 'nova-server-'))
   const tokenFile = join(dir, 'token')
@@ -108,8 +108,8 @@ test('failed headless construction rolls resources back in reverse order', async
 })
 
 test('remote ready audio contract rejects incompatible provider or sample rate before assembly', async () => {
-  const {validateRemoteAudioSettings, remoteClientMedia} = await import('../src/server-config.js')
-  const {settingsSchema} = await import('../src/config.js')
+  const {validateRemoteAudioSettings, remoteClientMedia} = await import('../src/server/server-config.js')
+  const {settingsSchema} = await import('../src/config/config.js')
   assert.doesNotThrow(() => validateRemoteAudioSettings(settingsSchema.parse({executors: [], pipeline_mode: 'integrated'})))
   assert.doesNotThrow(() => validateRemoteAudioSettings(settingsSchema.parse({executors: [], pipeline_mode: 'cascaded'})))
   for (const pipeline_mode of ['integrated', 'cascaded']) {
@@ -121,8 +121,8 @@ test('remote ready audio contract rejects incompatible provider or sample rate b
 })
 
 for (const invalid of ['credential', 'endpoint', 'cascaded-credential'] as const) test(`invalid selected provider ${invalid} starts no external MCP resources`, async t => {
-  const {McpConnection} = await import('../src/mcp-client.js')
-  const {buildProductionComposition} = await import('../src/production-composition.js')
+  const {McpConnection} = await import('../src/executors/mcp-client.js')
+  const {buildProductionComposition} = await import('../src/composition/production-composition.js')
   const discover = t.mock.method(McpConnection.prototype, 'discover', () => Promise.reject(new Error('unexpected discovery')))
   const dir = mkdtempSync(join(tmpdir(), 'nova-server-config-'))
   const config = join(dir, 'capabilities.json')
@@ -154,7 +154,7 @@ test('AOQ entry starts without loading the desktop/provider graph and closes on 
   const {execFile} = await import('node:child_process')
   const {promisify} = await import('node:util')
   const {createServer} = await import('node:net')
-  const {initializeServerToken} = await import('../src/server-config.js')
+  const {initializeServerToken} = await import('../src/server/server-config.js')
   const dir = mkdtempSync(join(tmpdir(), 'nova-aoq-entry-'))
   const tokenFile = join(dir, 'token')
   initializeServerToken(tokenFile)
@@ -200,7 +200,7 @@ test('AOQ entry starts without loading the desktop/provider graph and closes on 
 })
 
 test('Windows rejects remote private storage before creating credentials or allocating resources', {skip: process.platform !== 'win32'}, async t => {
-  const {initializeServerToken, loadServerConfig} = await import('../src/server-config.js')
+  const {initializeServerToken, loadServerConfig} = await import('../src/server/server-config.js')
   const {runServerEntry} = await import('../src/server-entry.js')
   const dir = mkdtempSync(join(tmpdir(), 'nova-server-unsupported-'))
   t.after(() => rmSync(dir, {recursive: true, force: true}))

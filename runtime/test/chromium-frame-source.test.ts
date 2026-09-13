@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import type {ExecutorDispatchContext} from '../src/causal-runtime.js'
-import type {Clock} from '../src/clock.js'
+import type {ExecutorDispatchContext} from '../src/core/causal-runtime.js'
+import type {Clock} from '../src/core/clock.js'
 import {
   CAMERA_HEIGHT,
   CAMERA_WIDTH,
   MAX_CAMERA_POSITION_MS,
-} from '../src/desktop-camera.js'
+} from '../src/desktop/desktop-camera.js'
 import {
   DesktopCameraError,
   type CameraCaptureRequest,
@@ -18,7 +18,7 @@ import {
   ChromiumFrameSource,
   isFileBackedChromiumFrameSource,
 } from '../src/executors/chromium-frame-source.js'
-import {MediaStore} from '../src/media-store.js'
+import {MediaStore} from '../src/core/media-store.js'
 
 const JPEG = new Uint8Array([0xff, 0xd8, 0x01, 0xff, 0xd9])
 

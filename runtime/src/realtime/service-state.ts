@@ -12,7 +12,7 @@
  * which is why each is spelled out with what it protects rather than left to a comment saying "cap".
  */
 
-import type { PlaybackGeneration } from '../playback.js'
+import type { PlaybackGeneration } from './playback.js'
 import type { ToolAcceptance,ToolCallReady } from './bridge.js'
 import type { HostResponseIntent } from './protocol.js'
 

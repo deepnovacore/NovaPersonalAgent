@@ -12,9 +12,9 @@
   backend ([`settings-apply.mjs`](../../../desktop/nova-audio-agent-desktop/src/main/settings-apply.mjs)).
 - Backend env mapping:
   [`desktop/nova-audio-agent-desktop/src/main/backend.mjs`](../../../desktop/nova-audio-agent-desktop/src/main/backend.mjs).
-- Runtime schema: [`runtime/src/config.ts`](../../../runtime/src/config.ts)
+- Runtime schema: [`runtime/src/config/config.ts`](../../../runtime/src/config/config.ts)
   `settingsSchema` +
-  [`runtime/src/environment-contract.ts`](../../../runtime/src/environment-contract.ts).
+  [`runtime/src/config/environment-contract.ts`](../../../runtime/src/config/environment-contract.ts).
 - `novaaudio config` opens the same settings window; there is no separate CLI
   editor for most keys.
 - No keys today for approval mode, clarification, planner, bubbles, MCP

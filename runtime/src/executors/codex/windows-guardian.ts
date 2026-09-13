@@ -1,4 +1,4 @@
-import {snapshotRegularFile, sameSnapshot} from '../../native-resource-snapshot.js'
+import {snapshotRegularFile, sameSnapshot} from '../../storage/native-resource-snapshot.js'
 import {spawn} from 'node:child_process'
 import {closeSync, openSync, readSync, realpathSync, statSync} from 'node:fs'
 import {isAbsolute, resolve} from 'node:path'

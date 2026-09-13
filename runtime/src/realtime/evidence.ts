@@ -1,7 +1,7 @@
-import { validProgressSummary, type JsonValue } from '../events.js'
-import { CONVERSATION_CHANNEL, isMonitorPolicy, type HandoffPolicy, type MemoryItem } from '../memory.js'
-import {pythonFloat} from '../python-number.js'
-import {stripLikePython} from '../python-text.js'
+import { validProgressSummary, type JsonValue } from '../core/events.js'
+import { CONVERSATION_CHANNEL, isMonitorPolicy, type HandoffPolicy, type MemoryItem } from '../core/memory.js'
+import {pythonFloat} from '../text/python-number.js'
+import {stripLikePython} from '../text/python-text.js'
 import { prepareForSpeech, SPEECH_FINAL_LIMIT } from './speech-prep.js'
 
 const GENERIC_SCALAR_KEYS = [

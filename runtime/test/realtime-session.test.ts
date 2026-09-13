@@ -9,12 +9,12 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { VirtualClock } from '../src/clock.js'
+import { VirtualClock } from '../src/core/clock.js'
 import {
   PlaybackRegistry,
   type PlaybackCompletion,
   type PlaybackGeneration,
-} from '../src/playback.js'
+} from '../src/realtime/playback.js'
 import { RealtimeSession, type SessionProvider } from '../src/realtime/session.js'
 import type { HostContextItem, HostResponseIntent } from '../src/realtime/protocol.js'
 

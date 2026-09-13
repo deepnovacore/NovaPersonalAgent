@@ -24,7 +24,7 @@ import {
   type CodexHostCatalog,
 } from '../src/executors/codex/host-config.js'
 import {hostBinaryPath, hostWorkspacePath} from '../src/executors/codex/process-owner.js'
-import {loadSettings} from '../src/config.js'
+import {loadSettings} from '../src/config/config.js'
 
 function hostFixture(t: TestContext): {
   readonly root: string

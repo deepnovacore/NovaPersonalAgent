@@ -102,14 +102,14 @@ test('closing the panel during revoke or pre-create lookup cannot create another
 
 test('desktop-owned phone entry drains on parent shutdown before exiting', async () => {
   const {spawnSync} = await import('node:child_process')
-  const target = new URL('../../../runtime/dist/src/phone-desktop-entry.js', import.meta.url).href
+  const target = new URL('../../../runtime/dist/src/desktop/phone-desktop-entry.js', import.meta.url).href
   const replacement = `import {writeSync} from 'node:fs'; export async function runServerEntry({stop, onDiagnostic}) {
     onDiagnostic('[server-ready] loopback');
     await new Promise(resolve => stop.signal.addEventListener('abort', resolve, {once: true}));
     writeSync(1, 'phone-drained'); return 0;
   }`
   const hook = `export async function resolve(specifier, context, next) {
-    if (context.parentURL === ${JSON.stringify(target)} && specifier === './server-entry.js') return {url: 'data:text/javascript,' + encodeURIComponent(${JSON.stringify(replacement)}), shortCircuit: true};
+    if (context.parentURL === ${JSON.stringify(target)} && specifier === '../server-entry.js') return {url: 'data:text/javascript,' + encodeURIComponent(${JSON.stringify(replacement)}), shortCircuit: true};
     return next(specifier, context);
   }`
   const script = `import {register} from 'node:module'; import {EventEmitter} from 'node:events';

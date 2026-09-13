@@ -34,27 +34,27 @@ import {
   hostProjectRootForTest,
   ProjectStateError,
   type PublicProjectView,
-} from '../../../src/project-store.js'
+} from '../../../src/projects/project-store.js'
 import {hostWorkspaceForTest} from '../../../src/executors/codex/process-owner.js'
-import type {ExecutorDispatchContext} from '../../../src/causal-runtime.js'
-import {VirtualClock} from '../../../src/clock.js'
+import type {ExecutorDispatchContext} from '../../../src/core/causal-runtime.js'
+import {VirtualClock} from '../../../src/core/clock.js'
 import {
   ProjectCodexAdapter,
   type ProjectTransportBinding,
   type ProjectTransportFactory,
 } from '../../../src/executors/codex/adapter-project.js'
-import type {JsonValue} from '../../../src/events.js'
-import {bindHostExecutorCapability} from '../../../src/host-executor-capability.js'
-import type {NativeFileLockAuthority, NativeFileLockResult} from '../../../src/native-file-lock.js'
+import type {JsonValue} from '../../../src/core/events.js'
+import {bindHostExecutorCapability} from '../../../src/executors/host-executor-capability.js'
+import type {NativeFileLockAuthority, NativeFileLockResult} from '../../../src/storage/native-file-lock.js'
 import type {
   ProjectFileIdentity,
   ProjectRootFileAuthority,
   ProjectRootFileCreateResult,
   ProjectRootFileLookupResult,
   ProjectRootFileResult,
-} from '../../../src/project-root-file.js'
-import {delegateSchema} from '../../../src/ports.js'
-import {ProjectConfirmationController} from '../../../src/project-confirmation.js'
+} from '../../../src/projects/project-root-file.js'
+import {delegateSchema} from '../../../src/core/ports.js'
+import {ProjectConfirmationController} from '../../../src/projects/project-confirmation.js'
 
 export const PREFLIGHT: SafePreflightReport = Object.freeze({
   version: '0.145.0',

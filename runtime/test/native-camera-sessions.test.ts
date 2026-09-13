@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {ChromiumFrameSource} from '../src/executors/chromium-frame-source.js'
-import {captureConversationFrame} from '../src/camera-session.js'
-import {supportsVision} from '../src/vision-capability.js'
-import {VirtualClock} from '../src/clock.js'
+import {captureConversationFrame} from '../src/core/camera-session.js'
+import {supportsVision} from '../src/model/vision-capability.js'
+import {VirtualClock} from '../src/core/clock.js'
 import type {CameraCaptureRequest} from '../src/desktop.js'
 
 test('only verified model and adapter pairs enable conversation images', () => {

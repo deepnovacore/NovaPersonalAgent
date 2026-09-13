@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { jsonValueSchema, type JsonValue } from '../events.js'
+import { jsonValueSchema, type JsonValue } from '../core/events.js'
 import { MAX_PACKED_RECOVERY_CONTENT } from './history.js'
 
 export const MAX_REALTIME_TEXT = 4_000

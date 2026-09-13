@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { VirtualClock } from '../src/clock.js'
-import type { ExecutorDispatchContext } from '../src/causal-runtime.js'
-import type { JsonValue } from '../src/events.js'
-import { delegateSchema } from '../src/ports.js'
+import { VirtualClock } from '../src/core/clock.js'
+import type { ExecutorDispatchContext } from '../src/core/causal-runtime.js'
+import type { JsonValue } from '../src/core/events.js'
+import { delegateSchema } from '../src/core/ports.js'
 import {
   FastSim,
   GET_STATE,
@@ -13,7 +13,7 @@ import {
   checkParams,
   fastSimManifest,
   slowSimManifest,
-} from '../src/sims.js'
+} from '../src/core/sims.js'
 
 function contextFor(clock: VirtualClock): ExecutorDispatchContext {
   return {

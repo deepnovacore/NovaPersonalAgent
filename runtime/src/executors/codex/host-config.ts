@@ -19,9 +19,9 @@ import {
   hostProjectRootFromConfig,
   type HostManagedProjectRoot,
   type HostProjectRoot,
-} from '../../project-store.js'
-import type {Settings} from '../../config.js'
-import {isWellFormed, stripLikePython} from '../../python-text.js'
+} from '../../projects/project-store.js'
+import type {Settings} from '../../config/config.js'
+import {isWellFormed, stripLikePython} from '../../text/python-text.js'
 
 const resolvedCodexHostConfigBrand: unique symbol = Symbol('ResolvedCodexHostConfig')
 const codexCredentialProfileBrand: unique symbol = Symbol('CodexCredentialProfile')

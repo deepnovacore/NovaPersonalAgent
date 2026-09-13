@@ -8,8 +8,8 @@ import {CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult} from
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js'
 import {McpSearchTransport} from '../src/executors/search-mcp.js'
 import {SearchAdapter} from '../src/executors/search.js'
-import {VirtualClock} from '../src/clock.js'
-import type {ExecutorDispatchContext} from '../src/causal-runtime.js'
+import {VirtualClock} from '../src/core/clock.js'
+import type {ExecutorDispatchContext} from '../src/core/causal-runtime.js'
 
 async function localMcp(result: (args: unknown) => CallToolResult | Promise<CallToolResult>, name = 'web_search', hangDelete = false, invalidUnselectedOutput = false) {
   const server = new Server({name: 'local-search-test', version: '1'}, {capabilities: {tools: {}}})

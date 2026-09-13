@@ -1,23 +1,23 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type {JsonValue} from '../src/events.js'
-import { MonotonicIdFactory, ScriptedIdFactory } from '../src/ids.js'
+import type {JsonValue} from '../src/core/events.js'
+import { MonotonicIdFactory, ScriptedIdFactory } from '../src/core/ids.js'
 import {
   CONVERSATION_CHANNEL,
   USER_PRIORITY,
   handoffPolicySchema,
-} from '../src/memory.js'
+} from '../src/core/memory.js'
 import {
   executorManifestSchema,
   fastBrainOutputSchema,
   opSpecSchema,
-} from '../src/ports.js'
-import { CoreRuntime, type ModelCall } from '../src/runtime.js'
-import { wakeReasonSchema, type Slot, type WakeReason } from '../src/slots.js'
+} from '../src/core/ports.js'
+import { CoreRuntime, type ModelCall } from '../src/core/runtime.js'
+import { wakeReasonSchema, type Slot, type WakeReason } from '../src/core/slots.js'
 import { fixtureSlowSimManifest as fixtureSlowSim } from '../eval/sim.js'
 import {CODEX_PROJECT_MANIFEST} from '../src/executors/codex/contract.js'
-import {VirtualClock} from '../src/clock.js'
-import {ProjectConfirmationController} from '../src/project-confirmation.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {ProjectConfirmationController} from '../src/projects/project-confirmation.js'
 
 const manifest = executorManifestSchema.parse({
   name: 'slow_sim',

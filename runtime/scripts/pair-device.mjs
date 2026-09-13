@@ -7,8 +7,8 @@ import {setTimeout as delay} from 'node:timers/promises'
 const SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP']
 import QRCode from 'qrcode'
 import {WebSocket} from 'ws'
-import {loadServerConfig} from '../dist/src/server-config.js'
-import {pairingEndpoint} from '../dist/src/client-pairing.js'
+import {loadServerConfig} from '../dist/src/server/server-config.js'
+import {pairingEndpoint} from '../dist/src/server/client-pairing.js'
 
 function request(config, frame) {
   return new Promise((resolve, reject) => {

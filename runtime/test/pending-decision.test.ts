@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {VirtualClock} from '../src/clock.js'
-import {PendingDecision} from '../src/pending-decision.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {PendingDecision} from '../src/core/pending-decision.js'
 
 test('decision deadlines preserve replacement, held decisions and reentrant FIFO promotion', async () => {
   const clock = new VirtualClock()

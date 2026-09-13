@@ -1,4 +1,4 @@
-import {SensitiveContentPolicy, SensitivePathPolicy} from '../sensitivity.js'
+import {SensitiveContentPolicy, SensitivePathPolicy} from '../memory/sensitivity.js'
 
 const MAX_BATCH = 10
 const MAX_INPUTS = 1_000

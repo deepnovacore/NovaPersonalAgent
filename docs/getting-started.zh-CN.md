@@ -155,7 +155,7 @@ DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
 
 ## 公共环境变量参考
 
-下表由 `runtime/src/environment-contract.ts` 生成。主机私有握手变量不会进入表格。
+下表由 `runtime/src/config/environment-contract.ts` 生成。主机私有握手变量不会进入表格。
 
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | 变量 | 所属 | 必需条件 | 默认 | 说明 |

@@ -27,19 +27,19 @@ Suggestion Pool、Host 与 Floor 是 Nova 的具体设计。
 
 ## 1. 现有基础
 
-- `runtime/src/suggestions.ts`：`SuggestionPool`。每条 suggestion 有 `origin`
+- `runtime/src/core/suggestions.ts`：`SuggestionPool`。每条 suggestion 有 `origin`
   （`fast_brain | surrogate | executor`）、`kind`（`question | notify | followup`）、`content`、
   `evidence_refs`、`condition_key`、`delivery_policy`（`once | while_condition_true`）、
   `cooldown_until`、`expires_at`、`status`（`pending | fired | withdrawn | expired`）。
-- Surrogate 输出契约（`runtime/src/ports.ts`、`runtime/src/model-adapters.ts`）：
+- Surrogate 输出契约（`runtime/src/core/ports.ts`、`runtime/src/model/model-adapters.ts`）：
   `{speak, suggestion_id, progress_class, reason}`。主机只接受本次提供给它的 suggestion ID。
-- `runtime/src/prompting.ts` 的 `SURROGATE_SYSTEM`：Surrogate 不生成给用户听的话、不调用工具，
+- `runtime/src/model/prompting.ts` 的 `SURROGATE_SYSTEM`：Surrogate 不生成给用户听的话、不调用工具，
   只决定此刻是否值得开口、选桌上哪一条。coding progress 有专门的分类路径（`progress_class`）。
-- `runtime/src/floor.ts`：说话权仲裁 allow / preempt / defer，优先级 user 100、guard 90、
+- `runtime/src/realtime/floor.ts`：说话权仲裁 allow / preempt / defer，优先级 user 100、guard 90、
   active executors 50、ambient observation 40。
-- `runtime/src/context-view.ts`：同步编译当前上下文；不宜直接塞入异步远程检索。
+- `runtime/src/core/context-view.ts`：同步编译当前上下文；不宜直接塞入异步远程检索。
 - 触发方式：**仅**执行器的 progress / observation / handoff 事件。runtime 有黑板维护、超时等内部
-  定时器（`runtime/src/clock.ts` 等），但**没有用于需求发现的低频检查**，也没有提醒子系统。
+  定时器（`runtime/src/core/clock.ts` 等），但**没有用于需求发现的低频检查**，也没有提醒子系统。
 
 ## 2. 本卷新增
 

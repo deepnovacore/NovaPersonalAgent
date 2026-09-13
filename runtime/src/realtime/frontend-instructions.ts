@@ -1,5 +1,5 @@
-import {canonicalJson} from '../canonical-json.js'
-import type {ProjectConfirmationView} from '../project-confirmation.js'
+import {canonicalJson} from '../text/canonical-json.js'
+import type {ProjectConfirmationView} from '../projects/project-confirmation.js'
 import {activeExecutorContextData, type DelegateRecord} from './session-state.js'
 
 /**

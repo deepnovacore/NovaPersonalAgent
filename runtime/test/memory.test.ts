@@ -7,7 +7,7 @@ import {
   handoffPolicySchema,
   makeMemoryRef,
   parseMemoryRef,
-} from '../src/memory.js'
+} from '../src/core/memory.js'
 
 const slowPolicy = handoffPolicySchema.parse({
   channel: 'slow_sim',

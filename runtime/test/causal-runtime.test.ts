@@ -8,11 +8,11 @@ import {
   type ExecutorDispatchContext,
   type ExecutorHandoff,
   type ModelPort,
-} from '../src/causal-runtime.js'
-import { RealClock, VirtualClock } from '../src/clock.js'
-import type { EventRecord } from '../src/events.js'
-import { MonotonicIdFactory } from '../src/ids.js'
-import { delegateSchema, executorManifestSchema } from '../src/ports.js'
+} from '../src/core/causal-runtime.js'
+import { RealClock, VirtualClock } from '../src/core/clock.js'
+import type { EventRecord } from '../src/core/events.js'
+import { MonotonicIdFactory } from '../src/core/ids.js'
+import { delegateSchema, executorManifestSchema } from '../src/core/ports.js'
 import { fixtureSlowSimManifest } from '../eval/sim.js'
 
 interface Deferred<T> {

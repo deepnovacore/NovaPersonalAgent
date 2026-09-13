@@ -5,9 +5,9 @@ import {join} from 'node:path'
 import {once} from 'node:events'
 import {test} from 'node:test'
 import {WebSocket} from 'ws'
-import {ClientPairing, pairingEndpoint} from '../src/client-pairing.js'
-import {ClientServer} from '../src/client-server.js'
-import {AoqChatServer} from '../src/aoq-chat-server.js'
+import {ClientPairing, pairingEndpoint} from '../src/server/client-pairing.js'
+import {ClientServer} from '../src/server/client-server.js'
+import {AoqChatServer} from '../src/server/aoq-chat-server.js'
 
 const master = 'a'.repeat(32)
 const endpoint = 'wss://mac.example/client/v1'

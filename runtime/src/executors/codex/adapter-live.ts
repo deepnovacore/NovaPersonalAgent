@@ -14,8 +14,8 @@ import type {
   ExecutorAdapter,
   ExecutorDispatchContext,
   ExecutorHandoff,
-} from '../../causal-runtime.js'
-import type {JsonValue} from '../../events.js'
+} from '../../core/causal-runtime.js'
+import type {JsonValue} from '../../core/events.js'
 import {
   AdapterDeadlineError,
   CodexAdapterClosedError,

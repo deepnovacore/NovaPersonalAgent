@@ -7,22 +7,22 @@ import {tmpdir} from 'node:os'
 import {join, resolve} from 'node:path'
 import {test} from 'node:test'
 import {Worker} from 'node:worker_threads'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 import {prepareKnowledge} from '../src/knowledge/assembly.js'
 import {
   AssemblyError,
   buildAssembly as buildAssemblyRaw,
   type Assembly,
   buildAssembly,
-} from '../src/assembly.js'
+} from '../src/composition/assembly.js'
 import {
   REALTIME_ASSEMBLY_SHUTDOWN_GRACE_MS,
   buildRealtimeAssembly as buildRealtimeAssemblyRaw,
   type CodingAgentControllerFactory,
-} from '../src/realtime-assembly.js'
-import {VirtualClock} from '../src/clock.js'
-import {ScriptedIdFactory, type IdFactory} from '../src/ids.js'
-import {HostApprovalController} from '../src/approval.js'
+} from '../src/composition/realtime-assembly.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {ScriptedIdFactory, type IdFactory} from '../src/core/ids.js'
+import {HostApprovalController} from '../src/core/approval.js'
 import {codexAgentDescriptor, CodexAgentController} from '../src/executors/codex/controller.js'
 import {
   CODEX_LIVE_MANIFEST,
@@ -36,7 +36,7 @@ import {
   type PublicProjectContext,
   type PublicProjectView,
   type WorkspaceRecord,
-} from '../src/project-store.js'
+} from '../src/projects/project-store.js'
 import {
   settingsSchema,
   ConfigurationError,
@@ -44,36 +44,36 @@ import {
   type Settings,
   requireVolcengineRealtime,
   type VolcengineRealtimeConfig,
-} from '../src/config.js'
+} from '../src/config/config.js'
 import {
   type ExecutorAdapter,
   type ExecutorDispatchContext,
   type ExecutorHandoff,
-} from '../src/causal-runtime.js'
-import {executorManifestSchema, type Delegate, delegateSchema} from '../src/ports.js'
+} from '../src/core/causal-runtime.js'
+import {executorManifestSchema, type Delegate, delegateSchema} from '../src/core/ports.js'
 import {
   ProjectCodexAdapter,
   type ProjectTransportBinding,
   type ProjectTransportFactory,
 } from '../src/executors/codex/adapter-project.js'
 import {type Frame, type FrameSource, WatchAdapter} from '../src/executors/watcher.js'
-import {type EventRecord, type JsonValue} from '../src/events.js'
-import {consumeHostExecutorCapability} from '../src/host-executor-capability.js'
+import {type EventRecord, type JsonValue} from '../src/core/events.js'
+import {consumeHostExecutorCapability} from '../src/executors/host-executor-capability.js'
 import {
   type CompleteRequest,
   type GatewayCompletion,
   type GatewayDelta,
   type ModelGateway,
   type StreamRequest,
-} from '../src/model-gateway.js'
-import {PlaybackRegistry, type PlaybackCompletion, type PlaybackFrame} from '../src/playback.js'
+} from '../src/model/model-gateway.js'
+import {PlaybackRegistry, type PlaybackCompletion, type PlaybackFrame} from '../src/realtime/playback.js'
 import {type SearchTransport} from '../src/executors/search.js'
 import {RealtimeRuntimeBridge} from '../src/realtime/bridge.js'
 import {
   ProjectConfirmationController,
   type ConfirmedProjectOperation,
   type ProjectConfirmationView,
-} from '../src/project-confirmation.js'
+} from '../src/projects/project-confirmation.js'
 import {
   type HostContextItem,
   type HostResponseIntent,
@@ -88,7 +88,7 @@ import {RealtimeSession} from '../src/realtime/session.js'
 import {type CaptionFrame} from '../src/realtime/session-state.js'
 import {type RealtimeTelemetry} from '../src/realtime/telemetry.js'
 import {type PersonalMemoryRememberTurn} from '../src/memory/personal-memory.js'
-import {type CompiledTools} from '../src/tool-schema.js'
+import {type CompiledTools} from '../src/core/tool-schema.js'
 import {
   codexAgentDescriptor as provider1codexAgentDescriptor,
   CodexAgentController as provider1CodexAgentController,
@@ -99,7 +99,7 @@ import {
   type SteerTransportResult,
   type TransportOutcome,
 } from '../src/executors/codex/app-server-transport.js'
-import {buildDesktopRealtimeComposition} from '../src/desktop-session.js'
+import {buildDesktopRealtimeComposition} from '../src/desktop/desktop-session.js'
 import {type CapturedCameraFrame} from '../src/desktop.js'
 import {ChromiumFrameSource} from '../src/executors/chromium-frame-source.js'
 import {
@@ -108,7 +108,7 @@ import {
   buildCascadedRealtimeAssembly,
   type BuildCascadedRealtimeAssemblyOptions,
   type CascadedProviderRegistries,
-} from '../src/cascaded-realtime-assembly.js'
+} from '../src/composition/cascaded-realtime-assembly.js'
 import {
   QwenAudioRealtimeAdapter,
   QwenSocketClosedError,
@@ -117,8 +117,8 @@ import {
   type QwenSocket,
 } from '../src/realtime/qwen.js'
 import {CodexLiveAdapter} from '../src/executors/codex/adapter-live.js'
-import {MediaStore} from '../src/media-store.js'
-import {handoffPolicySchema} from '../src/memory.js'
+import {MediaStore} from '../src/core/media-store.js'
+import {handoffPolicySchema} from '../src/core/memory.js'
 import {createArkCascadedLlmSession} from '../src/realtime/cascaded/ark-llm.js'
 import {type CascadedLlmFactory} from '../src/realtime/cascaded/llm.js'
 import {CascadedRealtimeError} from '../src/realtime/cascaded/adapter.js'
@@ -3670,7 +3670,7 @@ test('Qwen realtime composition rejects a live Codex fallback', () => {
 })
 
 test('desktop entry leaves Codex prewarm to the realtime owner instead of blocking readiness', async () => {
-  const entry = await readFile(resolve(import.meta.dirname, '../../src/production-composition.ts'), 'utf8')
+  const entry = await readFile(resolve(import.meta.dirname, '../../src/composition/production-composition.ts'), 'utf8')
   assert.match(entry, /ownership\.own\(\(\) => codexResource\.close\(\)\)/u)
   assert.doesNotMatch(entry, /await codexResource\.start\(\)/u)
 })

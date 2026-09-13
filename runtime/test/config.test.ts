@@ -13,7 +13,7 @@ import {
   resolveModelApiKey,
   resolveProactivity,
   settingsSchema,
-} from '../src/config.js'
+} from '../src/config/config.js'
 
 test('DashScope key also configures support models only on the DashScope endpoint', () => {
   const env = {DASHSCOPE_API_KEY: 'dashscope-test-key'}

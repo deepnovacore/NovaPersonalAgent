@@ -130,7 +130,7 @@ Parsers:
 | DOCX | `mammoth` |
 
 Chunking: heading-aware, ~800 tokens, ~15% overlap. Reuse sensitivity gates from
-`runtime/src/sensitivity.ts` so credential-like spans are
+`runtime/src/memory/sensitivity.ts` so credential-like spans are
 refused before persistence.
 
 Limits (v1 starting points): max source size 10 MiB; 100 sources per profile

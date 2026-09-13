@@ -3,9 +3,9 @@ import {EventEmitter} from 'node:events'
 import {createServer, type Server, type Socket} from 'node:net'
 import {test} from 'node:test'
 import {WebSocket, type RawData} from 'ws'
-import {buildAssembly} from '../src/assembly.js'
-import {VirtualClock} from '../src/clock.js'
-import {loadSettings, settingsSchema} from '../src/config.js'
+import {buildAssembly} from '../src/composition/assembly.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {loadSettings, settingsSchema} from '../src/config/config.js'
 import {announceReadiness, type DesktopReadiness} from '../src/desktop.js'
 import type {
   CameraCaptureTransport,
@@ -21,25 +21,25 @@ import {
   type DesktopRealtimeOwner,
   type DesktopRealtimeTransportOwner,
   type DesktopOutputCallbacks,
-} from '../src/desktop-session.js'
-import {decodeAudioFrame} from '../src/desktop-wire.js'
-import type {EventRecord} from '../src/events.js'
+} from '../src/desktop/desktop-session.js'
+import {decodeAudioFrame} from '../src/desktop/desktop-wire.js'
+import type {EventRecord} from '../src/core/events.js'
 import type {
   CompleteRequest,
   GatewayCompletion,
   GatewayDelta,
   ModelGateway,
   StreamRequest,
-} from '../src/model-gateway.js'
-import {buildRealtimeAssembly} from '../src/realtime-assembly.js'
-import type {PlaybackCompletion} from '../src/playback.js'
+} from '../src/model/model-gateway.js'
+import {buildRealtimeAssembly} from '../src/composition/realtime-assembly.js'
+import type {PlaybackCompletion} from '../src/realtime/playback.js'
 import type {
   HostContextItem,
   HostResponseIntent,
   RealtimeProvider,
 } from '../src/realtime/protocol.js'
 import {memoryBoardMessage} from '../src/realtime/memory-board.js'
-import {buildProductionRealtimeAssembly} from '../src/cascaded-realtime-assembly.js'
+import {buildProductionRealtimeAssembly} from '../src/composition/cascaded-realtime-assembly.js'
 import {createArkCascadedLlmSession} from '../src/realtime/cascaded/ark-llm.js'
 import {
   QwenSocketClosedError,

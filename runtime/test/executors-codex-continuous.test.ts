@@ -13,12 +13,12 @@ import type {
 } from '../src/executors/codex/app-server-transport.js'
 import {CODEX_LIVE_MANIFEST} from '../src/executors/codex/contract.js'
 import {CODEX_AGENT_DESCRIPTOR} from '../src/executors/codex/controller.js'
-import type {ExecutorDispatchContext, ExecutorProgress} from '../src/causal-runtime.js'
-import {VirtualClock} from '../src/clock.js'
+import type {ExecutorDispatchContext, ExecutorProgress} from '../src/core/causal-runtime.js'
+import {VirtualClock} from '../src/core/clock.js'
 import {CodexLiveAdapter} from '../src/executors/codex/adapter-live.js'
-import type {JsonValue} from '../src/events.js'
-import {delegateSchema} from '../src/ports.js'
-import {compileToolSchema} from '../src/tool-schema.js'
+import type {JsonValue} from '../src/core/events.js'
+import {delegateSchema} from '../src/core/ports.js'
+import {compileToolSchema} from '../src/core/tool-schema.js'
 
 const PREFLIGHT: SafePreflightReport = Object.freeze({
   version: '0.145.0',

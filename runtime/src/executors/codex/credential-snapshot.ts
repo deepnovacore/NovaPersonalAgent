@@ -1,4 +1,4 @@
-import {isWellFormed} from '../../python-text.js'
+import {isWellFormed} from '../../text/python-text.js'
 import {managedMcpEnvironment, type ManagedCodexMcp} from './managed-mcp.js'
 import {realpathSync, type BigIntStats} from 'node:fs'
 import {chmod, lstat, rename, rm, stat} from 'node:fs/promises'

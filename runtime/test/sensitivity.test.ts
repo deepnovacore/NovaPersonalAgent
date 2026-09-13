@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import {
   SensitiveContentPolicy,
   SensitivePathPolicy,
-} from '../src/sensitivity.js'
+} from '../src/memory/sensitivity.js'
 
 test('denies sensitive paths without returning their labels', () => {
   const policy = new SensitivePathPolicy()

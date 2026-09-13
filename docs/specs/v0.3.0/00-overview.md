@@ -121,18 +121,18 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
 
 - **文字输入**：`runtime/src/desktop.ts` 定义 `input.text`（≤4000 UTF-16 单元）与
   `input.dictation`（start/finish/cancel，≤60 秒 16 kHz PCM16 草稿缓冲，30 秒 ASR 超时）；
-  `runtime/src/desktop-session.ts` 持有草稿状态机；`runtime/src/client-protocol.ts` 仅在 cascaded
+  `runtime/src/desktop/desktop-session.ts` 持有草稿状态机；`runtime/src/server/client-protocol.ts` 仅在 cascaded
   主机上声明 `text_input` / `dictation`。桌面 renderer 未接线；iOS 的
   `clients/ios/Nova/Nova/Connection/Client.swift` 已实现文字发送与 dictation 状态机（代码已实现），
   真机验收未完成。
-- **主动机制**：`runtime/src/suggestions.ts`（`SuggestionPool`；kind `question | notify | followup`；
+- **主动机制**：`runtime/src/core/suggestions.ts`（`SuggestionPool`；kind `question | notify | followup`；
   status `pending | fired | withdrawn | expired`；`evidence_refs`、`expires_at`、`cooldown_until`、
-  `delivery_policy`）→ Surrogate（`runtime/src/prompting.ts` 的 `SURROGATE_SYSTEM`，只选择不生成、
-  不调用工具；输出契约 `speak / suggestion_id / progress_class / reason` 在 `runtime/src/ports.ts`
-  与 `runtime/src/model-adapters.ts`）→ `runtime/src/floor.ts` 仲裁 allow / preempt / defer。
+  `delivery_policy`）→ Surrogate（`runtime/src/model/prompting.ts` 的 `SURROGATE_SYSTEM`，只选择不生成、
+  不调用工具；输出契约 `speak / suggestion_id / progress_class / reason` 在 `runtime/src/core/ports.ts`
+  与 `runtime/src/model/model-adapters.ts`）→ `runtime/src/realtime/floor.ts` 仲裁 allow / preempt / defer。
   runtime 有黑板维护等内部定时器，但**没有用于需求发现的低频检查**；主动行为全部由执行器进度与
   观察事件触发。
-- **记忆**：`runtime/src/memory.ts`、`runtime/src/context-view.ts`（唯一面向模型的有界投影）、
+- **记忆**：`runtime/src/core/memory.ts`、`runtime/src/core/context-view.ts`（唯一面向模型的有界投影）、
   `runtime/src/memory/personal-memory.ts`
   （`PersonalMemoryResource`：`recall`，可选 `remember` / `forget`；只接受可信轮次级写入）、
   `runtime/src/memory/factory.ts`（VoiceMem 后端）。`forget` 按来源粒度；recall 命中没有逐条稳定 ID、
@@ -140,8 +140,8 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
   是面向开发者的通道 / 诊断 / 图视图。
 - **知识库**：`runtime/src/knowledge/service.ts` 做有界的文件、URL、文件夹导入与混合检索，
   不是持续同步服务。
-- **能力与 MCP**：`runtime/src/capability-registry.ts`（`capabilities.json`，模块开关，按消费者暴露）、
-  `runtime/src/mcp-client.ts`（stdio 与 streamable-http，≤8 外部 server，≤32 工具/server）。
+- **能力与 MCP**：`runtime/src/config/capability-registry.ts`（`capabilities.json`，模块开关，按消费者暴露）、
+  `runtime/src/executors/mcp-client.ts`（stdio 与 streamable-http，≤8 外部 server，≤32 工具/server）。
   Home Assistant、AutoGLM 在源码中不存在；`thirdparty/Open-AutoGLM` 仅为参考副本，未被引用。
 - **客户端**：桌面为 Electron（`clients/desktop/src/main/*.mjs`、`clients/desktop/src/renderer/*.mjs`，
   含 `task-banner.mjs` 解析 `EXECUTOR_TASKS`）；iOS 为 SwiftUI；

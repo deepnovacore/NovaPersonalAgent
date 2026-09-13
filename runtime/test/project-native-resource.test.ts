@@ -11,7 +11,7 @@ import {
   loadProjectNativeHostFromResources,
   protectDefaultProjectDirectories,
   type ProjectNativeHost,
-} from '../src/project-native-resource.js'
+} from '../src/projects/project-native-resource.js'
 
 function fakeMachAddon(): Buffer {
   const body = Buffer.alloc(64)
@@ -137,7 +137,7 @@ test('project native host rejects wrong ABI and decorated addon exports without 
       moduleLoader: () => decorated,
     }), null)
 
-    const nativeResources = await import('../src/project-native-resource.js') as unknown as {
+    const nativeResources = await import('../src/projects/project-native-resource.js') as unknown as {
       inspectProjectNativeHostFromResources?: (options: {
         readonly resourcesPath: string
         readonly platform: string

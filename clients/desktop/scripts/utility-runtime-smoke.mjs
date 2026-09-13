@@ -147,7 +147,7 @@ async function run() {
   if (envIndex !== -1 && !process.argv[envIndex + 1]) throw new Error('env-file path is required')
   const file = envIndex === -1 ? {} : parseEnv(await readFile(process.argv[envIndex + 1], 'utf8'))
   const parentEnv = {...file, ...process.env}
-  const {environmentContract} = await import('../../../runtime/dist/src/environment-contract.js')
+  const {environmentContract} = await import('../../../runtime/dist/src/config/environment-contract.js')
   for (const entry of environmentContract) if (entry.owner.startsWith('retired_')) delete parentEnv[entry.name]
   const isolated = cascaded ? await mkdtemp(resolve(tmpdir(), 'nova-utility-cascaded-')) : null
   if (isolated) {

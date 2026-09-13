@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
-import { VirtualClock } from '../src/clock.js'
-import type { JsonValue } from '../src/events.js'
+import { canonicalJson } from '../src/text/canonical-json.js'
+import { VirtualClock } from '../src/core/clock.js'
+import type { JsonValue } from '../src/core/events.js'
 import {
   GatewayError,
   OpenAIModelGateway,
@@ -14,7 +14,7 @@ import {
   type GatewayDelta,
   type GatewayImage,
   type ModelMetrics,
-} from '../src/model-gateway.js'
+} from '../src/model/model-gateway.js'
 
 const fixtureRoot = resolve(import.meta.dirname, '../../../fixtures/gateway/v1')
 

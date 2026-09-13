@@ -2,14 +2,14 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import type { ContextView } from '../src/context-view.js'
+import type { ContextView } from '../src/core/context-view.js'
 import {
   COMPRESSOR_SYSTEM,
   SURROGATE_SYSTEM,
   pythonFixedOne,
   pythonFloat,
   renderContextSnapshot,
-} from '../src/prompting.js'
+} from '../src/model/prompting.js'
 
 const fixtureRoot = resolve(import.meta.dirname, '../../../fixtures/prompting/v1')
 

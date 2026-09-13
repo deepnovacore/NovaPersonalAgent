@@ -8,7 +8,7 @@ import {
   visionAssessSchema,
   type VisionAssessContext,
   type VisionIdentity,
-} from '../src/vision-assess.js'
+} from '../src/executors/vision/assess.js'
 
 const identity: VisionIdentity = {request_id: 'vision-1', revision: 4, session_epoch: 9}
 

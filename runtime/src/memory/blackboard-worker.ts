@@ -2,9 +2,9 @@ import {createHash} from 'node:crypto'
 import {DatabaseSync} from 'node:sqlite'
 import {isMainThread, parentPort, workerData} from 'node:worker_threads'
 import {z} from 'zod'
-import {canonicalJson} from '../canonical-json.js'
-import {memoryItemSchema} from '../memory.js'
-import {PrivateDatabaseError, preparePrivateDatabasePath, secureSidecar} from '../private-database.js'
+import {canonicalJson} from '../text/canonical-json.js'
+import {memoryItemSchema} from '../core/memory.js'
+import {PrivateDatabaseError, preparePrivateDatabasePath, secureSidecar} from '../storage/private-database.js'
 import {
   BLACKBOARD_BATCH_BYTES, BlackboardStoreError, blackboardBatchSchema, blackboardOptionsSchema,
   blackboardReceiptSchema, blackboardSnapshotSchema,

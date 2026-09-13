@@ -11,8 +11,8 @@
 
 - `runtime/src/knowledge/service.ts`：文件、URL、文件夹的**有界导入**，正文分块、embedding、
   混合检索，SQLite 存储（spec [04 知识库](../v0.2.0/04-knowledge-base.md)）。不是持续同步服务。
-- `runtime/src/capability-registry.ts`：`capabilities.json`、模块开关、按消费者（frontbrain / codex）
-  暴露工具；`runtime/src/mcp-client.ts`：外部 MCP（stdio、streamable-http），≤8 server、≤32 工具/server，
+- `runtime/src/config/capability-registry.ts`：`capabilities.json`、模块开关、按消费者（frontbrain / codex）
+  暴露工具；`runtime/src/executors/mcp-client.ts`：外部 MCP（stdio、streamable-http），≤8 server、≤32 工具/server，
   有界 I/O。spec [03 能力注册表与 MCP](../v0.2.0/03-capability-registry-and-mcp.md)。
 - 执行器边界：[07](../v0.2.0/07-executor-boundary.md)。核心只认角色（coding），Codex 是插件；
   执行器 manifest 有 `readonly`、`confirm`、`deadline_budget`、`sensitive_params`。

@@ -2,7 +2,7 @@ import {appendFileSync, chmodSync, constants, copyFileSync, mkdtempSync, realpat
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {prepareManagedCodexMcp, managedMcpEnvironment, type ManagedCodexMcp} from '../src/executors/codex/managed-mcp.js'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 /* eslint-disable @typescript-eslint/require-await -- deterministic fakes implement async host contracts */
 /* eslint-disable @typescript-eslint/no-empty-function -- inert fake callbacks model blocked/no-op resources */
 import assert from 'node:assert/strict'
@@ -18,8 +18,8 @@ import {
 } from '../src/executors/codex/app-server-transport.js'
 import {MAX_STDOUT} from '../src/executors/codex/protocol.js'
 import {resolveCodexLaunchProfile, type CodexLaunchProfile} from '../src/executors/codex/launch-profile.js'
-import {RealClock} from '../src/clock.js'
-import {HostApprovalController} from '../src/approval.js'
+import {RealClock} from '../src/core/clock.js'
+import {HostApprovalController} from '../src/core/approval.js'
 import {
   hostBinaryForTest,
   hostCodexHomeForTest,

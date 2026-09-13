@@ -8,7 +8,7 @@ import {fileURLToPath} from 'node:url'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {WebSocketServer} from 'ws'
-import {ClientPairing} from '../dist/src/client-pairing.js'
+import {ClientPairing} from '../dist/src/server/client-pairing.js'
 import {terminalPair, terminalQr} from './pair-device.mjs'
 
 const master = 'a'.repeat(32), server = 'wss://mac.example/client/v1'

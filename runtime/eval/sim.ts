@@ -7,8 +7,8 @@
  * simulators do not have. Keeping the two apart is why the names differ.
  */
 
-import { handoffPolicySchema } from '../src/memory.js'
-import { executorManifestSchema } from '../src/ports.js'
+import { handoffPolicySchema } from '../src/core/memory.js'
+import { executorManifestSchema } from '../src/core/ports.js'
 
 export const fixtureSlowSimManifest = executorManifestSchema.parse({
   name: 'slow_sim',

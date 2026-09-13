@@ -1,5 +1,5 @@
 import {prepareManagedCodexMcp} from '../src/executors/codex/managed-mcp.js'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import {resolve} from 'node:path'

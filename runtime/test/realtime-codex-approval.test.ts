@@ -2,9 +2,9 @@ import {validateAndSnapshotOffer} from '../src/executors/codex/approval-protocol
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import {VirtualClock} from '../src/clock.js'
-import {APPROVAL_TTL_SECONDS, type ApprovalView} from '../src/approval-port.js'
-import {HostApprovalController, type ApprovalResolution} from '../src/approval.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {APPROVAL_TTL_SECONDS, type ApprovalView} from '../src/core/approval-port.js'
+import {HostApprovalController, type ApprovalResolution} from '../src/core/approval.js'
 
 function controller(
   clock = new VirtualClock(10),

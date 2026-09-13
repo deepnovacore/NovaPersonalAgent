@@ -1,8 +1,8 @@
 import {randomUUID} from 'node:crypto'
-import {loadCapabilityRegistry, CapabilityConfigurationError} from '../../dist/src/capability-registry.js'
+import {loadCapabilityRegistry, CapabilityConfigurationError} from '../../dist/src/config/capability-registry.js'
 import {McpSearchTransport} from '../../dist/src/executors/search-mcp.js'
 import {SearchAdapter} from '../../dist/src/executors/search.js'
-import {RealClock} from '../../dist/src/clock.js'
+import {RealClock} from '../../dist/src/core/clock.js'
 
 let transport
 try {

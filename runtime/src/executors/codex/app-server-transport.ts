@@ -4,12 +4,12 @@ import { generateSessionTitle } from './session-title.js'
 import { sharedHomeOverrides } from './shared-home.js'
 import { assertApiKeyProvider,assertApiKeyThread,NOVA_API_PROVIDER } from './spawn-env.js'
 
-import type { ExecutorProgress } from '../../causal-runtime.js'
-import type { Clock } from '../../clock.js'
-import { RealClock, raceDeadline } from '../../clock.js'
-import { isWellFormed,stripLikePython } from '../../python-text.js'
-import { normalizeNfcPinned } from '../../unicode-normalize.js'
-import { isOtherCategory } from '../../unicode-tables.js'
+import type { ExecutorProgress } from '../../core/causal-runtime.js'
+import type { Clock } from '../../core/clock.js'
+import { RealClock, raceDeadline } from '../../core/clock.js'
+import { isWellFormed,stripLikePython } from '../../text/python-text.js'
+import { normalizeNfcPinned } from '../../text/unicode-normalize.js'
+import { isOtherCategory } from '../../text/unicode-tables.js'
 import {
 validateCodexSchemaBundle,
 validateEffectiveCodexConfig,
@@ -18,7 +18,7 @@ import {
 isCodexApprovalPort,
 routeCodexApprovalServerRequest,
 } from './approval-protocol.js'
-import type {ApprovalPort} from '../../approval.js'
+import type {ApprovalPort} from '../../core/approval.js'
 import { sanitizeCodexPreflightReport } from './contract.js'
 import type {
 CredentialSnapshot,

@@ -6,7 +6,7 @@ import {join} from 'node:path'
 import type {ReadableStream} from 'node:stream/web'
 import {test} from 'node:test'
 import {fileURLToPath} from 'node:url'
-import type {Clock} from '../src/clock.js'
+import type {Clock} from '../src/core/clock.js'
 import type {RealtimeTelemetry} from '../src/realtime/telemetry.js'
 import {
   createEndpointingCapabilityCache,

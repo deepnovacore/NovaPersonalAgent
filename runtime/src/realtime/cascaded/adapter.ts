@@ -1,8 +1,8 @@
 import {validateOriginalImage} from './llm.js'
 import type {Frame} from '../../executors/watcher.js'
 import { randomUUID } from 'node:crypto'
-import {jsonValueSchema} from '../../events.js'
-import {codePointLengthLikePython, stripLikePython} from '../../python-text.js'
+import {jsonValueSchema} from '../../core/events.js'
+import {codePointLengthLikePython, stripLikePython} from '../../text/python-text.js'
 import {
   MAX_REALTIME_PCM_BYTES,
   MAX_REALTIME_TEXT,

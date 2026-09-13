@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import type {AgentActionResult, AgentController} from '../src/agent-controller.js'
+import type {AgentActionResult, AgentController} from '../src/executors/agent-controller.js'
 import {
   CODEX_AGENT_SUMMARY
 } from '../src/executors/codex/contract.js'

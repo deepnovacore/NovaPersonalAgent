@@ -1,6 +1,6 @@
 import {originalImageUrl, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
-import { jsonValueSchema, type JsonValue } from '../../events.js'
-import { codePointLengthLikePython, stripLikePython } from '../../python-text.js'
+import { jsonValueSchema, type JsonValue } from '../../core/events.js'
+import { codePointLengthLikePython, stripLikePython } from '../../text/python-text.js'
 import { MAX_REALTIME_TEXT, type JsonObject } from '../protocol.js'
 import {
   ArkResponsesFailure,

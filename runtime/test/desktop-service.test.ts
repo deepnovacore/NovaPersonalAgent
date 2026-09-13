@@ -3,7 +3,7 @@ import {test} from 'node:test'
 import {
   RealtimeDesktopService,
   startDesktopActivityHeartbeat,
-} from '../src/desktop-session.js'
+} from '../src/desktop/desktop-session.js'
 
 test('client-owned provider listens before waiting for phone and stops while unattached', async () => {
   const order: string[] = []

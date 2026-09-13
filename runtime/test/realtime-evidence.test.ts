@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { memoryItemSchema, type HandoffPolicy, type MemoryItem } from '../src/memory.js'
+import { memoryItemSchema, type HandoffPolicy, type MemoryItem } from '../src/core/memory.js'
 import { GUARD_MANIFEST, WATCH_MANIFEST } from '../src/executors/watcher.js'
 import {
   finalSpeechView,

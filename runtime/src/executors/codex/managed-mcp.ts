@@ -1,5 +1,5 @@
-import {SensitiveContentPolicy} from '../../sensitivity.js'
-import type {CapabilityRegistry, McpServerConfig, McpServerStatus} from '../../capability-registry.js'
+import {SensitiveContentPolicy} from '../../memory/sensitivity.js'
+import type {CapabilityRegistry, McpServerConfig, McpServerStatus} from '../../config/capability-registry.js'
 import {snapshotJsonRecord} from './safe-json.js'
 
 export interface ManagedMcpEntry {

@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import {resolve} from 'node:path'
-import type {AgentController} from '../../src/agent-controller.js'
-import {VirtualClock} from '../../src/clock.js'
-import type {AgentExecutor} from '../../src/coding-executor.js'
-import type {EventRecord, JsonValue} from '../../src/events.js'
-import {HostApprovalController, type ApprovalResolution} from '../../src/approval.js'
+import type {AgentController} from '../../src/executors/agent-controller.js'
+import {VirtualClock} from '../../src/core/clock.js'
+import type {AgentExecutor} from '../../src/executors/coding-executor.js'
+import type {EventRecord, JsonValue} from '../../src/core/events.js'
+import {HostApprovalController, type ApprovalResolution} from '../../src/core/approval.js'
 import {
   CODEX_AGENT_SUMMARY,
   CODEX_PROJECT_APPROVAL_MANIFEST,
@@ -13,14 +13,14 @@ import {
 } from '../../src/executors/codex/contract.js'
 import {CodexAgentController} from '../../src/executors/codex/controller.js'
 import {type IntakeOptions} from '../../src/executors/coding/intake.js'
-import {Memory} from '../../src/memory.js'
-import {PlaybackRegistry} from '../../src/playback.js'
-import {executorManifestSchema} from '../../src/ports.js'
+import {Memory} from '../../src/core/memory.js'
+import {PlaybackRegistry} from '../../src/realtime/playback.js'
+import {executorManifestSchema} from '../../src/core/ports.js'
 import {
   ProjectConfirmationController,
   type ConfirmedProjectOperation,
   type ProjectConfirmationView,
-} from '../../src/project-confirmation.js'
+} from '../../src/projects/project-confirmation.js'
 import {
   RealtimeRuntimeBridge,
   type PersonalMemoryRecallPort,
@@ -33,7 +33,7 @@ import {
 } from '../../src/realtime/service-state.js'
 import {RealtimeService, type ServiceProvider} from '../../src/realtime/service.js'
 import {RealtimeSession, type SessionProvider} from '../../src/realtime/session.js'
-import {compileToolSchema} from '../../src/tool-schema.js'
+import {compileToolSchema} from '../../src/core/tool-schema.js'
 
 export const fixtureRoot = resolve(import.meta.dirname, '../../../../fixtures/realtime/service/v1')
 

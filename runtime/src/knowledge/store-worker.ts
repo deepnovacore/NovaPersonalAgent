@@ -3,8 +3,8 @@ import {chmodSync, lstatSync} from 'node:fs'
 import {isMainThread, parentPort, workerData} from 'node:worker_threads'
 import {DatabaseSync} from 'node:sqlite'
 
-import {SensitiveContentPolicy, SensitivePathPolicy} from '../sensitivity.js'
-import {preparePrivateDatabasePath, PrivateDatabaseError} from '../private-database.js'
+import {SensitiveContentPolicy, SensitivePathPolicy} from '../memory/sensitivity.js'
+import {preparePrivateDatabasePath, PrivateDatabaseError} from '../storage/private-database.js'
 import type {
   KnowledgeChunkInput,
   KnowledgeChunkResult,

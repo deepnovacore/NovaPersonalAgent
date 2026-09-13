@@ -1,10 +1,10 @@
-import type {ApprovalHost} from '../approval.js'
-import type {Clock} from '../clock.js'
-import type {JsonValue} from '../events.js'
+import type {ApprovalHost} from '../core/approval.js'
+import type {Clock} from '../core/clock.js'
+import type {JsonValue} from '../core/events.js'
 import {
   USER_PRIORITY
-} from '../memory.js'
-import type {PlaybackCompletion, PlaybackGeneration} from '../playback.js'
+} from '../core/memory.js'
+import type {PlaybackCompletion, PlaybackGeneration} from './playback.js'
 import type {
   HostResponseIntent
 } from './protocol.js'

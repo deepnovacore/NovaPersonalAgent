@@ -6,7 +6,7 @@ import {
   PlaybackRegistry,
   type PlaybackFrame,
   type PlaybackGeneration,
-} from '../src/playback.js'
+} from '../src/realtime/playback.js'
 
 function ids(...values: string[]): () => string {
   let offset = 0

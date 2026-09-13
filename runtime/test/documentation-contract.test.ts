@@ -6,7 +6,7 @@ import {test} from 'node:test'
 import {
   environmentContract,
   publicEnvironmentContract,
-} from '../src/environment-contract.js'
+} from '../src/config/environment-contract.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const currentDocs = [

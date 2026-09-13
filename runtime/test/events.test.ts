@@ -5,7 +5,7 @@ import {
   EventQueue,
   eventInputSchema,
   eventRecordSchema,
-} from '../src/events.js'
+} from '../src/core/events.js'
 
 test('event registry covers the Python spine table in the same order', () => {
   assert.deepEqual(EVENT_KINDS, [

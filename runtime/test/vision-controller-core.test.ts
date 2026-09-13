@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type {CompleteRequest, ModelGateway} from '../src/model-gateway.js'
+import type {CompleteRequest, ModelGateway} from '../src/model/model-gateway.js'
 import {
   VISION_ASSESS_JSON_SCHEMA,
   VisionAgentControllerCore,

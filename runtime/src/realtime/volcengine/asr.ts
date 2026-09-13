@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import {reportUsage, type UsageReporter} from '../usage.js'
 import { gzipSync, gunzipSync } from 'node:zlib'
-import { isWellFormed, stripLikePython } from '../../python-text.js'
+import { isWellFormed, stripLikePython } from '../../text/python-text.js'
 import type {AsrClient, AsrSession, AsrTranscript} from '../cascaded/ports.js'
 import { MAX_REALTIME_PCM_BYTES } from '../protocol.js'
 import {

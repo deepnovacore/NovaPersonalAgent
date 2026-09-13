@@ -8,20 +8,20 @@
  */
 
 import type { z } from 'zod'
-import { VirtualClock } from '../src/clock.js'
-import { resolveProactivityPreset } from '../src/config.js'
-import type { DesktopEffect } from '../src/effects.js'
+import { VirtualClock } from '../src/core/clock.js'
+import { resolveProactivityPreset } from '../src/config/config.js'
+import type { DesktopEffect } from '../src/core/effects.js'
 import {
   fixtureExpectedSchema,
   fixtureModelViewSchema,
   type FixtureExpected,
   type RuntimeFixture,
 } from './fixtures.js'
-import { ScriptedIdFactory } from '../src/ids.js'
-import { PlaybackRegistry } from '../src/playback.js'
-import type { ExecutorManifest } from '../src/ports.js'
-import { CoreRuntime } from '../src/runtime.js'
-import { SLOTS } from '../src/slots.js'
+import { ScriptedIdFactory } from '../src/core/ids.js'
+import { PlaybackRegistry } from '../src/realtime/playback.js'
+import type { ExecutorManifest } from '../src/core/ports.js'
+import { CoreRuntime } from '../src/core/runtime.js'
+import { SLOTS } from '../src/core/slots.js'
 
 type PlaybackEffect = NonNullable<FixtureExpected['playback_effects']>[number]
 

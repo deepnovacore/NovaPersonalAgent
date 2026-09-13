@@ -1,6 +1,6 @@
 import {homedir} from 'node:os'
 import {resolve} from 'node:path'
-import {requirePersonalMemory, type Settings} from '../config.js'
+import {requirePersonalMemory, type Settings} from '../config/config.js'
 import {PersonalMemoryStoreClient} from '../voicemem/store-client.js'
 import {RemotePersonalMemoryResource} from './remote-personal-memory.js'
 import type {PersonalMemoryResource} from './personal-memory.js'

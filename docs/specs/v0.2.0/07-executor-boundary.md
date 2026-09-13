@@ -8,7 +8,7 @@
 
 What is already clean:
 
-- `runtime/src/ports.ts`, `causal-runtime.ts`, `assembly.ts`,
+- `runtime/src/core/ports.ts`, `causal-runtime.ts`, `assembly.ts`,
   `cascaded-realtime-assembly.ts` contain **zero** `codex` references.
 - `assembly.ts` `resolveExecutors` (110–134) already looks adapters up by
   `manifest.name`; executor names are configuration keys, not a protocol enum.
@@ -109,7 +109,7 @@ validation (`codex-host-config`, `codex-launch-profile`, `codex-version`,
 Definitions:
 
 - **Core**: every file under `runtime/src/**` except `runtime/src/executors/**`.
-- **Host composition exception**: `runtime/src/production-composition.ts` may
+- **Host composition exception**: `runtime/src/composition/production-composition.ts` may
   load only `./executors/codex/host.js`; privileged host exports never flow into
   the public runtime barrel. Other core imports use `executors/index.ts`.
 - **Executor package**: `runtime/src/executors/<name>/**` with exactly one
@@ -261,7 +261,7 @@ summary lines. Runtime dispatch retains the exact executor/channel identity in
 ### Approval port
 
 Move the approval *types* out of `realtime/codex-approval.ts` into a new
-executor-agnostic `runtime/src/approval-port.ts`:
+executor-agnostic `runtime/src/core/approval-port.ts`:
 
 ```ts
 export interface ApprovalRequest {
@@ -324,7 +324,7 @@ runtime/src/executors/
     factory.ts                 # was codex-factory.ts
 ```
 
-`codex-project-store.ts` → `runtime/src/project-store.ts` (host). Field and
+`codex-project-store.ts` → `runtime/src/projects/project-store.ts` (host). Field and
 file renames inside the store are limited to `codex_home_key` →
 `executor_home_key` and the on-disk file name staying `codex-projects-v1.json`
 (no migration in this volume; 08 owns store schema changes if any).
@@ -396,7 +396,7 @@ other core modules must use the executor registry. ESLint checks static and dyna
 
 | Area | Files |
 |---|---|
-| Port | `runtime/src/ports.ts`, new `runtime/src/approval-port.ts` |
+| Port | `runtime/src/core/ports.ts`, new `runtime/src/core/approval-port.ts` |
 | Registry | new `runtime/src/executors/index.ts`, `runtime/src/executors/codex/index.ts`; evaluation fixtures use `runtime/eval/sim.ts` |
 | Moves | 16 `codex-*.ts`, `executors/codex*.ts`, `realtime/codex-approval.ts` → `executors/codex/**`; `codex-project-store.ts` → `project-store.ts` |
 | Role routing | `realtime-assembly.ts`, `confirmed-project-capability.ts`, `realtime/bridge.ts`, `model-adapters.ts`, `tool-schema.ts` |

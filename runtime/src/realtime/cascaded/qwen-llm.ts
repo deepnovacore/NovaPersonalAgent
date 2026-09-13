@@ -1,10 +1,10 @@
 import {originalImageUrl} from './llm.js'
 import {randomUUID} from 'node:crypto'
 import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
-import type { Clock } from '../../clock.js'
+import type { Clock } from '../../core/clock.js'
 import type { JsonObject } from '../protocol.js'
-import { codePointLengthLikePython } from '../../python-text.js'
-import type { JsonValue } from '../../events.js'
+import { codePointLengthLikePython } from '../../text/python-text.js'
+import type { JsonValue } from '../../core/events.js'
 import {
   MAX_CASCADED_LLM_HISTORY_CODEPOINTS,
   MAX_CASCADED_LLM_HISTORY_ITEMS,

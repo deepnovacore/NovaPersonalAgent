@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {VirtualClock} from '../src/clock.js'
-import type {JsonValue} from '../src/events.js'
-import {Memory} from '../src/memory.js'
-import {executorManifestSchema} from '../src/ports.js'
+import {VirtualClock} from '../src/core/clock.js'
+import type {JsonValue} from '../src/core/events.js'
+import {Memory} from '../src/core/memory.js'
+import {executorManifestSchema} from '../src/core/ports.js'
 import {
   ProjectConfirmationController
-} from '../src/project-confirmation.js'
+} from '../src/projects/project-confirmation.js'
 import {
   RealtimeRuntimeBridge
 } from '../src/realtime/bridge.js'
@@ -14,7 +14,7 @@ import type {ResponseOrigin} from '../src/realtime/protocol.js'
 import {ItemDeliveryUncertainError} from '../src/realtime/protocol.js'
 import {RealtimeService} from '../src/realtime/service.js'
 import type {RealtimeSession} from '../src/realtime/session.js'
-import {compileToolSchema} from '../src/tool-schema.js'
+import {compileToolSchema} from '../src/core/tool-schema.js'
 import {beginExecutorApprovalCarrier, confirmationTurn, emitExecutorApprovalFunction, emptyStream, endExecutorApprovalSpeech, finishExecutorApprovalQuestion, finishProviderResponse, guardFact, hostFact, offerCodexCommand, propose, realtimeServiceHarness, reserveConfirmationTurn, speak, toldAboutConfirmation, unsubscribeNothing} from './support/realtime-service-harness.js'
 
 

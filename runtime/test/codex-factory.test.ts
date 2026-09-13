@@ -1,5 +1,5 @@
 import {prepareManagedCodexMcp} from '../src/executors/codex/managed-mcp.js'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 import assert from 'node:assert/strict'
 import {
   chmodSync,
@@ -36,18 +36,18 @@ import {CredentialSnapshotter} from '../src/executors/codex/credential-snapshot.
 import {hostCodexHomeForTest} from '../src/executors/codex/process-owner.js'
 import {resolveCodexHostConfig, type CodexHostCatalog} from '../src/executors/codex/host-config.js'
 import {CodexHostConfigurationError} from '../src/executors/codex/host-config.js'
-import {VirtualClock} from '../src/clock.js'
-import {loadSettings} from '../src/config.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {loadSettings} from '../src/config/config.js'
 import type {ProjectCodexAdapter} from '../src/executors/codex/adapter-project.js'
-import type {NativeFileLockAuthority, NativeFileLockResult} from '../src/native-file-lock.js'
-import type {PublicProjectView} from '../src/project-store.js'
+import type {NativeFileLockAuthority, NativeFileLockResult} from '../src/storage/native-file-lock.js'
+import type {PublicProjectView} from '../src/projects/project-store.js'
 import type {
   ProjectFileIdentity,
   ProjectRootFileAuthority,
   ProjectRootFileCreateResult,
   ProjectRootFileLookupResult,
   ProjectRootFileResult,
-} from '../src/project-root-file.js'
+} from '../src/projects/project-root-file.js'
 const PREFLIGHT: SafePreflightReport = Object.freeze({
   version: '0.145.0',
   root_matches: true,

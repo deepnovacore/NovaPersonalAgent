@@ -1,8 +1,8 @@
 import {basename} from 'node:path'
 import {realpathSync} from 'node:fs'
 import {readLocalCodexSessions} from './local-sessions.js'
-import {hostPersistentHomeFromConfig, hostWorkspaceFromConfig} from '../../host-paths.js'
-import {hostWorkspacePath} from '../../host-paths.js'
+import {hostPersistentHomeFromConfig, hostWorkspaceFromConfig} from '../../projects/host-paths.js'
+import {hostWorkspacePath} from '../../projects/host-paths.js'
 import type {
   CodexAppServerTransport,
   RunInput,
@@ -29,17 +29,17 @@ import {
   type SessionResumeRollback,
   type SessionStartRollback,
   type WorkspaceRecord,
-} from '../../project-store.js'
+} from '../../projects/project-store.js'
 import type {HostCodexHome, HostWorkspace} from './process-owner.js'
 import type {
   ExecutorDispatchContext,
   ExecutorHandoff,
-} from '../../causal-runtime.js'
-import type {JsonValue} from '../../events.js'
-import {consumeHostExecutorCapability} from '../../host-executor-capability.js'
-import {USER_PRIORITY} from '../../memory.js'
-import type {ApprovalWork} from '../../approval-port.js'
-import type {HostApprovalController} from '../../approval.js'
+} from '../../core/causal-runtime.js'
+import type {JsonValue} from '../../core/events.js'
+import {consumeHostExecutorCapability} from '../host-executor-capability.js'
+import {USER_PRIORITY} from '../../core/memory.js'
+import type {ApprovalWork} from '../../core/approval-port.js'
+import type {HostApprovalController} from '../../core/approval.js'
 import {
   ProjectResolutionError,
   type CancelContext,
@@ -51,12 +51,12 @@ import {
   type ProjectRuntimeDispatch,
   type RosterEntry,
   type RunningWork,
-} from '../../coding-executor.js'
+} from '../coding-executor.js'
 import type {
   ConfirmedProjectOperation,
   ProjectConfirmationController,
-} from '../../project-confirmation.js'
-import {MAX_CONCURRENT_WORK, deriveSessionTitle} from '../../work-tools.js'
+} from '../../projects/project-confirmation.js'
+import {MAX_CONCURRENT_WORK, deriveSessionTitle} from '../../core/work-tools.js'
 import {CodexLiveAdapter} from './adapter-live.js'
 import {
   createCodexAdapterSharedState,

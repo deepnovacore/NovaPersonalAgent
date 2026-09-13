@@ -3,7 +3,7 @@ import {closeSync, fstatSync, mkdirSync, mkdtempSync, openSync, realpathSync, re
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {test} from 'node:test'
-import {createProjectNodeFiles} from '../src/project-node-files.js'
+import {createProjectNodeFiles} from '../src/projects/project-node-files.js'
 
 test('Node project files bind real descriptors, reject replaced roots and preserve exact children', () => {
   const parent = realpathSync(mkdtempSync(join(tmpdir(), 'nova-node-files-')))

@@ -1,0 +1,700 @@
+/**
+ * The desktop wire format: audio frames, control messages, and the delivery report.
+ *
+ * Ported from the codec half of `src/nova_audio_agent/realtime/desktop.py`. Everything here is
+ * byte-exact by requirement rather than by preference -- a renderer built against one runtime has to
+ * work against the other, and a header that differs by a separator or a field order is a renderer that
+ * silently drops audio.
+ *
+ * Two encodings, and the difference is deliberate. Audio headers and playback control use
+ * `ensure_ascii=True`, because they carry only identifiers and integers and an ASCII-only frame is one
+ * fewer thing to get wrong in a transport. Captions and the project view use `ensure_ascii=False`,
+ * because they carry text a person reads and escaping every CJK character would triple the frame for
+ * nothing.
+ */
+
+import type { PlaybackCompletion, PlaybackFrame } from '../realtime/playback.js'
+import {codePointLengthLikePython, stripLikePython} from '../text/python-text.js'
+import type { CaptionFrame } from '../realtime/session-state.js'
+import type { ExecutorState } from '../realtime/service-state.js'
+import {PROJECT_CONFIRMATION_TTL_SECONDS} from '../projects/project-confirmation.js'
+import {
+  APPROVAL_TTL_SECONDS,
+  type ApprovalLocalDetail as ExecutorApprovalLocalDetail,
+  type ApprovalView as ExecutorApprovalView,
+} from '../core/approval-port.js'
+
+/** Text frames produced on the orb socket (bootstrap, controls and camera requests). */
+export const WIRE_FRAME_TYPES = Object.freeze([
+  'playback.clear',
+  'playback.alert',
+  'playback.terminal',
+  'executor.state',
+  'project.state',
+  'executor.approval',
+  'caption',
+  'executor.progress',
+  'executor.results.reset',
+  'executor.result',
+  'desktop.activity',
+  'clock.ping',
+  'desktop.ready',
+  'camera.capture',
+  'camera.permission',
+  'executor.tasks',
+  'executor.task_action_result',
+] as const)
+
+export const [PLAYBACK_CLEAR, PLAYBACK_ALERT, PLAYBACK_TERMINAL, EXECUTOR_STATE, PROJECT_STATE, EXECUTOR_APPROVAL, CAPTION, EXECUTOR_PROGRESS, EXECUTOR_RESULTS_RESET, EXECUTOR_RESULT, DESKTOP_ACTIVITY, CLOCK_PING, DESKTOP_READY, CAMERA_CAPTURE, CAMERA_PERMISSION, EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT] = WIRE_FRAME_TYPES
+
+export const MAX_DESKTOP_JSON_BYTES = 16 * 1_024
+export const MAX_DESKTOP_PCM_BYTES = 64 * 1_024
+/** Bounded so a malformed length prefix cannot make a reader allocate arbitrarily. */
+export const MAX_AUDIO_HEADER_BYTES = 2_048
+/** `NOVA`, so a frame that is not one is rejected before its length is trusted. */
+const AUDIO_MAGIC = new Uint8Array([0x4e, 0x4f, 0x56, 0x41])
+
+export class DesktopProtocolError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DesktopProtocolError'
+  }
+}
+
+/** What the renderer shows for the current Codex project, with nothing internal in it. */
+export interface PublicProjectView {
+  readonly workspace_display_name: string | null
+  readonly session_title: string | null
+  /**
+   * Known projects with running works, most recently used first (spec 08); UI only. Optional on the
+   * input because a bare confirmation controller view has no store behind it; the wire always carries it.
+   */
+  readonly roster?: readonly {
+    readonly name: string
+    readonly last_used_at: number
+    readonly running: readonly {readonly work_id: string; readonly title: string}[]
+  }[]
+  readonly pending_confirmation: boolean
+  readonly pending_confirmation_busy: boolean
+  /** Opaque proposal binding exposed only while the confirmation banner is actionable. */
+  readonly pending_confirmation_id?: string
+  /** Every project proposal (create / reuse / select / resume) surfaces the pill (decision 2026-09-04). */
+  readonly pending_action?: 'create_workspace' | 'reuse_workspace' | 'select_workspace' | 'resume_session' | null
+  readonly pending_workspace_display_name?: string | null
+  readonly pending_session_title?: string | null
+  readonly pending_expires_in_seconds?: number | null
+}
+
+/**
+ * Frame one PCM chunk for the renderer.
+ *
+ * Magic, then a two-byte big-endian header length, then an ASCII JSON header, then the raw PCM. The
+ * length prefix is what lets a reader find the audio without scanning it -- and scanning would be
+ * wrong anyway, since PCM can contain any byte sequence including the magic.
+ */
+export function encodeAudioFrame(frame: PlaybackFrame): Uint8Array {
+  validatePlaybackFrame(frame)
+  if (frame.pcm.length > MAX_DESKTOP_PCM_BYTES) {
+    throw new DesktopProtocolError('desktop PCM frame is too large')
+  }
+  const header = asciiJson({
+    utterance_id: frame.utterance_id,
+    generation_epoch: frame.generation_epoch,
+    sequence: frame.sequence,
+  })
+  const headerBytes = new TextEncoder().encode(header)
+  if (headerBytes.length > MAX_AUDIO_HEADER_BYTES) {
+    throw new DesktopProtocolError('desktop audio header is too large')
+  }
+  const out = new Uint8Array(AUDIO_MAGIC.length + 2 + headerBytes.length + frame.pcm.length)
+  out.set(AUDIO_MAGIC, 0)
+  out[AUDIO_MAGIC.length] = (headerBytes.length >> 8) & 0xff
+  out[AUDIO_MAGIC.length + 1] = headerBytes.length & 0xff
+  out.set(headerBytes, AUDIO_MAGIC.length + 2)
+  out.set(frame.pcm, AUDIO_MAGIC.length + 2 + headerBytes.length)
+  return out
+}
+
+/**
+ * Read one framed PCM chunk.
+ *
+ * Every bound is checked before the byte range it guards is used: the magic before the length, the
+ * length before the split, the split before the slice. A reader that trusted the prefix first would
+ * hand an attacker the shape of its own memory.
+ */
+export function decodeAudioFrame(raw: Uint8Array): PlaybackFrame {
+  if (raw.length < AUDIO_MAGIC.length + 2) {
+    throw new DesktopProtocolError('desktop audio frame is invalid')
+  }
+  for (const [index, byte] of AUDIO_MAGIC.entries()) {
+    if (raw[index] !== byte) throw new DesktopProtocolError('desktop audio frame has invalid magic')
+  }
+  const headerSize = ((raw[4] ?? 0) << 8) | (raw[5] ?? 0)
+  // At least two, because the smallest possible JSON object is `{}`.
+  if (headerSize < 2 || headerSize > MAX_AUDIO_HEADER_BYTES) {
+    throw new DesktopProtocolError('desktop audio header is invalid')
+  }
+  const split = 6 + headerSize
+  if (split > raw.length) throw new DesktopProtocolError('desktop audio frame is truncated')
+  let header: unknown
+  let headerText: string
+  try {
+    headerText = new TextDecoder('utf-8', {fatal: true}).decode(raw.subarray(6, split))
+  } catch {
+    throw new DesktopProtocolError('desktop audio header is invalid')
+  }
+  try {
+    header = parseJsonWithIntegerFields(
+      headerText,
+      ['generation_epoch', 'sequence'],
+      field => new DesktopProtocolError(`desktop ${field} is invalid`),
+    )
+  } catch (cause) {
+    // A refusal from the integer check is specific and kept; a parse failure is not.
+    if (cause instanceof DesktopProtocolError) throw cause
+    throw new DesktopProtocolError('desktop audio header is invalid')
+  }
+  // Copied, not referenced: a subarray keeps the whole received buffer alive, and this frame outlives
+  // the read that produced it.
+  const pcm = new Uint8Array(raw.subarray(split))
+  const frame: PlaybackFrame = {
+    utterance_id: readIdentifier(header, 'utterance_id'),
+    generation_epoch: readPositiveInteger(header, 'generation_epoch'),
+    sequence: readNonNegativeInteger(header, 'sequence'),
+    pcm,
+  }
+  validatePlaybackFrame(frame)
+  if (pcm.length > MAX_DESKTOP_PCM_BYTES) {
+    throw new DesktopProtocolError('desktop PCM frame is too large')
+  }
+  return frame
+}
+
+/**
+ * Accept microphone PCM, or refuse it.
+ *
+ * Odd length means the renderer is not sending PCM16, and a half sample would shift every sample after
+ * it -- so this refuses rather than truncating, because truncating would produce audio that sounds
+ * plausible and is wrong.
+ */
+export function validateInputPcm(raw: Uint8Array): Uint8Array {
+  if (raw.length === 0 || raw.length % 2 !== 0) {
+    throw new DesktopProtocolError('desktop input must be aligned PCM16 bytes')
+  }
+  if (raw.length > MAX_DESKTOP_PCM_BYTES) {
+    throw new DesktopProtocolError('desktop input PCM frame is too large')
+  }
+  return raw
+}
+
+export function playbackClearMessage(utteranceId: string, generationEpoch: number): string {
+  return asciiJson({
+    type: PLAYBACK_CLEAR,
+    utterance_id: plainIdentifier(utteranceId),
+    generation_epoch: plainPositiveInteger(generationEpoch),
+  })
+}
+
+/**
+ * Tell the renderer playback stalled.
+ *
+ * The identity is all-or-nothing: a half-identified alert names a generation without an utterance or
+ * the reverse, and the renderer cannot act on either. An alert with no identity at all is the
+ * legitimate "something is wrong and I cannot say which turn" case.
+ */
+export function playbackAlertMessage(
+  utteranceId: string | null,
+  generationEpoch: number | null,
+): string {
+  if ((utteranceId === null) !== (generationEpoch === null)) {
+    throw new DesktopProtocolError('desktop alert identity must be complete')
+  }
+  if (utteranceId === null || generationEpoch === null) {
+    return asciiJson({type: PLAYBACK_ALERT})
+  }
+  return asciiJson({
+    type: PLAYBACK_ALERT,
+    utterance_id: plainIdentifier(utteranceId),
+    generation_epoch: plainPositiveInteger(generationEpoch),
+  })
+}
+
+export function playbackTerminalMessage(utteranceId: string, generationEpoch: number): string {
+  return asciiJson({
+    type: PLAYBACK_TERMINAL,
+    utterance_id: plainIdentifier(utteranceId),
+    generation_epoch: plainPositiveInteger(generationEpoch),
+  })
+}
+
+/** Which executor a state or approval frame is about; the renderer labels with `display_name`. */
+export interface ExecutorIdentity {
+  readonly executor: string
+  readonly display_name: string
+}
+
+function executorIdentity(identity: ExecutorIdentity): ExecutorIdentity {
+  const executor = plainIdentifier(identity.executor)
+  const displayName = identity.display_name
+  if (
+    typeof displayName !== 'string'
+    || stripLikePython(displayName) === ''
+    || codePointLengthLikePython(displayName) > 40
+  ) throw new DesktopProtocolError('desktop executor identity is invalid')
+  return {executor, display_name: displayName}
+}
+
+export function executorStateMessage(state: ExecutorState, identity: ExecutorIdentity): string {
+  if (state !== 'idle' && state !== 'running') {
+    throw new DesktopProtocolError('desktop executor state is invalid')
+  }
+  return unicodeJson({type: EXECUTOR_STATE, ...executorIdentity(identity), state})
+}
+
+/**
+ * The project view the renderer displays.
+ *
+ * Non-ASCII is left literal here: these are names a person reads, and escaping every CJK character
+ * would triple the frame to no benefit.
+ */
+export function projectStateMessage(view: PublicProjectView): string {
+  const pendingConfirmationId = view.pending_confirmation_id
+  const pendingAction = view.pending_action ?? null
+  const pendingWorkspace = view.pending_workspace_display_name ?? null
+  const pendingSession = view.pending_session_title ?? null
+  const pendingExpires = view.pending_expires_in_seconds ?? null
+  for (const value of [
+    view.workspace_display_name,
+    view.session_title,
+    pendingWorkspace,
+    pendingSession,
+  ]) {
+    if (value === null) continue
+    if (typeof value !== 'string' || value === '' || codePointLengthLikePython(value) > 120) {
+      throw new DesktopProtocolError('desktop project view is invalid')
+    }
+  }
+  if (
+    typeof view.pending_confirmation !== 'boolean'
+    || typeof view.pending_confirmation_busy !== 'boolean'
+    || (!view.pending_confirmation && view.pending_confirmation_busy)
+  ) {
+    throw new DesktopProtocolError('desktop project view is invalid')
+  }
+  if (
+    pendingConfirmationId !== undefined
+    && (
+      typeof pendingConfirmationId !== 'string'
+      || pendingConfirmationId === ''
+      || codePointLengthLikePython(pendingConfirmationId) > 128
+    )
+  ) throw new DesktopProtocolError('desktop project view is invalid')
+  if (
+    pendingAction !== null
+    && !['create_workspace', 'reuse_workspace', 'select_workspace', 'resume_session'].includes(pendingAction)
+  ) {
+    throw new DesktopProtocolError('desktop project view is invalid')
+  }
+  const roster: NonNullable<PublicProjectView['roster']> = view.roster ?? []
+  const validName = (value: unknown): boolean =>
+    typeof value === 'string' && value !== '' && codePointLengthLikePython(value) <= 120
+  const validWork = (work: {readonly work_id: string; readonly title: string}): boolean =>
+    typeof work.work_id === 'string' && work.work_id !== '' && validName(work.title)
+  // `Array.isArray` alone would narrow the typed arrays to `any[]`; this guard keeps the element types.
+  const isList = (value: unknown): value is readonly unknown[] => Array.isArray(value)
+  if (!isList(roster) || roster.length > 10 || !roster.every(entry =>
+    validName(entry.name)
+    && Number.isFinite(entry.last_used_at) && entry.last_used_at >= 0
+    && isList(entry.running) && entry.running.every(validWork),
+  )) {
+    throw new DesktopProtocolError('desktop project view is invalid')
+  }
+  if (
+    pendingExpires !== null
+    && (
+      typeof pendingExpires !== 'number'
+      || !Number.isFinite(pendingExpires)
+      || pendingExpires < 0
+      || pendingExpires > PROJECT_CONFIRMATION_TTL_SECONDS
+    )
+  ) {
+    throw new DesktopProtocolError('desktop project view is invalid')
+  }
+  const hasPendingMetadata = pendingAction !== null
+    || pendingWorkspace !== null
+    || pendingSession !== null
+    || pendingExpires !== null
+  if (!view.pending_confirmation && (hasPendingMetadata || pendingConfirmationId !== undefined)) {
+    throw new DesktopProtocolError('desktop project view is invalid')
+  }
+  if (
+    view.pending_confirmation
+    && hasPendingMetadata
+    && (pendingWorkspace === null || pendingExpires === null)
+  ) {
+    throw new DesktopProtocolError('desktop project view is invalid')
+  }
+  return unicodeJson({
+    type: PROJECT_STATE,
+    workspace_display_name: view.workspace_display_name,
+    session_title: view.session_title,
+    roster: roster.map(entry => ({
+      name: entry.name,
+      last_used_at: entry.last_used_at,
+      running: entry.running.map(work => ({work_id: work.work_id, title: work.title})),
+    })),
+    pending_confirmation: view.pending_confirmation,
+    pending_confirmation_busy: view.pending_confirmation_busy,
+    ...(pendingConfirmationId === undefined
+      ? {}
+      : {pending_confirmation_id: pendingConfirmationId}),
+    pending_action: pendingAction,
+    pending_workspace_display_name: pendingWorkspace,
+    pending_session_title: pendingSession,
+    pending_expires_in_seconds: pendingExpires,
+  })
+}
+
+/** Independent foreground permission view; raw protocol request fields never enter this frame. */
+export function executorApprovalMessage(view: ExecutorApprovalView, now: number, identity: ExecutorIdentity): string {
+  const executor = executorIdentity(identity)
+  if (!Number.isFinite(now)) throw new DesktopProtocolError('desktop executor approval view is invalid')
+  if (
+    typeof view.pending_approval !== 'boolean'
+    || typeof view.pending_approval_busy !== 'boolean'
+    || (!view.pending_approval && view.pending_approval_busy)
+  ) throw new DesktopProtocolError('desktop executor approval view is invalid')
+  const approvalId = view.pending_approval_id
+  if (!view.pending_approval) {
+    if (
+      approvalId !== undefined
+      || view.kind !== null
+      || view.local_detail !== null
+      || view.operation_summary !== null
+      || view.expires_at !== null
+    ) throw new DesktopProtocolError('desktop executor approval view is invalid')
+    return unicodeJson({
+      type: EXECUTOR_APPROVAL,
+      ...executor,
+      pending_approval: false,
+      pending_approval_busy: false,
+      kind: null,
+      local_detail: null,
+      operation_summary: null,
+      expires_in_seconds: null,
+    })
+  }
+  const detail = view.local_detail
+  if (
+    typeof approvalId !== 'string'
+    || approvalId === ''
+    || codePointLengthLikePython(approvalId) > 128
+    || !['file_change', 'command_execution', 'network', 'permissions'].includes(view.kind ?? '')
+    || detail?.kind !== view.kind
+    || typeof view.operation_summary !== 'string'
+    || stripLikePython(view.operation_summary) === ''
+    || codePointLengthLikePython(view.operation_summary) > 256
+    || typeof view.expires_at !== 'number'
+    || !Number.isFinite(view.expires_at)
+  ) throw new DesktopProtocolError('desktop executor approval view is invalid')
+  const localDetail = validateExecutorApprovalLocalDetail(detail)
+  const allowed = view.allowed_decisions
+  if (allowed !== undefined && (!Array.isArray(allowed) || allowed.length === 0 || allowed.length > 3
+    || allowed.some((value: unknown) => typeof value !== 'string' || !['accept', 'acceptForSession', 'decline'].includes(value))
+    || !allowed.includes('decline'))) throw new DesktopProtocolError('desktop executor approval view is invalid')
+  // A held head (parked behind a project confirmation) has no running countdown: the pill shows none
+  // rather than a number that never reaches zero.
+  const expiresInSeconds = view.held === true ? null : Math.min(
+    APPROVAL_TTL_SECONDS,
+    Math.max(0, view.expires_at - now),
+  )
+  // Spec 08: the pill names the asking work's project and session title, so two running works are told apart.
+  const work = view.work
+  if (work !== null && (
+    typeof work.work_id !== 'string' || work.work_id === '' || codePointLengthLikePython(work.work_id) > 128
+    || typeof work.project !== 'string' || stripLikePython(work.project) === ''
+    || typeof work.title !== 'string' || stripLikePython(work.title) === ''
+  )) throw new DesktopProtocolError('desktop executor approval view is invalid')
+  const clip = (value: string): string => [...value].slice(0, 120).join('')
+  const message = unicodeJson({
+    type: EXECUTOR_APPROVAL,
+    ...executor,
+    pending_approval: true,
+    pending_approval_busy: view.pending_approval_busy,
+    pending_approval_id: approvalId,
+    kind: view.kind,
+    local_detail: localDetail,
+    operation_summary: view.operation_summary,
+    expires_in_seconds: expiresInSeconds,
+    ...(allowed === undefined ? {} : {allowed_decisions: allowed}),
+    ...(work === null ? {} : {work: {work_id: work.work_id, project: clip(work.project), title: clip(work.title)}}),
+  })
+  if (new TextEncoder().encode(message).length > MAX_DESKTOP_JSON_BYTES) {
+    throw new DesktopProtocolError('desktop executor approval view is too large')
+  }
+  return message
+}
+
+function validateExecutorApprovalLocalDetail(
+  detail: ExecutorApprovalLocalDetail,
+): ExecutorApprovalLocalDetail {
+  if ('scope' in detail && (typeof detail.scope !== 'string' || stripLikePython(detail.scope) === '' || codePointLengthLikePython(detail.scope) > 1024)) {
+    throw new DesktopProtocolError('desktop executor approval view is invalid')
+  }
+  if (detail.kind === 'permissions') {
+    if (Object.keys(detail).sort().join(',') !== 'kind,scope') throw new DesktopProtocolError('desktop executor approval view is invalid')
+    return detail
+  }
+  if (detail.kind === 'command_execution' || detail.kind === 'network') {
+    if (
+      Object.keys(detail).sort().join(',') !== (detail.scope === undefined ? 'command,cwd,kind' : 'command,cwd,kind,scope')
+      || typeof detail.command !== 'string'
+      || stripLikePython(detail.command) === ''
+      || codePointLengthLikePython(detail.command) > 4096
+      || typeof detail.cwd !== 'string'
+      || stripLikePython(detail.cwd) === ''
+      || codePointLengthLikePython(detail.cwd) > 4096
+    ) throw new DesktopProtocolError('desktop executor approval view is invalid')
+    return detail
+  }
+  if (detail.kind !== 'file_change') throw new DesktopProtocolError('desktop executor approval view is invalid')
+  const rawChanges: unknown = detail.changes
+  if (
+    Object.keys(detail).sort().join(',') !== 'changes,kind'
+    || !Array.isArray(rawChanges)
+    || rawChanges.length === 0
+    || rawChanges.length > 64
+  ) throw new DesktopProtocolError('desktop executor approval view is invalid')
+  for (const candidate of rawChanges) {
+    if (!isPlainObject(candidate)) {
+      throw new DesktopProtocolError('desktop executor approval view is invalid')
+    }
+    const change = candidate
+    if (
+      Object.keys(change).sort().join(',') !== 'change,move_path,path'
+      || change.change !== 'add' && change.change !== 'delete' && change.change !== 'update'
+      || typeof change.path !== 'string'
+      || stripLikePython(change.path) === ''
+      || codePointLengthLikePython(change.path) > 4096
+      || change.move_path !== null && (
+        typeof change.move_path !== 'string'
+        || stripLikePython(change.move_path) === ''
+        || codePointLengthLikePython(change.move_path) > 4096
+      )
+    ) throw new DesktopProtocolError('desktop executor approval view is invalid')
+  }
+  return detail
+}
+
+/** Speculative or final transcript text. The sequence lets the renderer drop what arrives late. */
+export function captionMessage(frame: CaptionFrame, sequence: number): string {
+  return unicodeJson({
+    type: CAPTION,
+    role: frame.role,
+    text: frame.text,
+    final: frame.final,
+    sequence,
+  })
+}
+
+/**
+ * Map a delivery report to the Memory event; words nobody heard yield null.
+ *
+ * Suppressed means the audio never played, and empty text means there were no words -- either way
+ * recording it would put something in Memory the user did not hear, which later turns would then treat
+ * as shared context.
+ */
+export function deliveryToEvent(completion: PlaybackCompletion): {
+  readonly text: string
+  readonly utterance_id: string
+  readonly delivery: 'spoken' | 'interrupted'
+  readonly played_ms: number | null
+} | null {
+  if (completion.disposition === 'suppressed' || completion.text === '') return null
+  return {
+    text: completion.text,
+    utterance_id: completion.utterance_id,
+    delivery: completion.disposition,
+    played_ms: completion.played_ms,
+  }
+}
+
+/**
+ * Parse JSON, refusing any named field that is not written as an exactly-representable integer.
+ *
+ * Two problems the text cannot be trusted with, and one mechanism for both.
+ *
+ * **Spelling.** `json.loads` makes `1.0` a float and the oracle's `type(value) is not int` refuses it,
+ * while `JSON.parse` cannot tell `1.0` from `1`. The reviver's `context.source` carries the original
+ * literal, so the distinction survives the parse.
+ *
+ * **Range.** Python integers are unbounded; a JavaScript number is not. `9007199254740993` parses to
+ * `9007199254740992` here, and `Number.isInteger` is perfectly happy with the result -- so a renderer
+ * could have a generation fenced that is not the one it sent. Comparing the source against the parsed
+ * value catches exactly the cases where something was lost.
+ *
+ * This replaced a regex over the raw text, which was bypassable two ways: an escaped key spelling
+ * (`generation_\u0065poch`) decodes to the field name but does not match the pattern, and a duplicated
+ * key resolves to its *last* value in both parsers while a pattern finds the first. The reviver sees
+ * decoded keys and fires once per member with the surviving value, so neither applies.
+ *
+ * Refusing an out-of-range integer is a deliberate divergence: the oracle accepts it. Refusing is
+ * strictly safer than acting on a different number than the renderer sent.
+ */
+export function parseJsonWithIntegerFields(
+  text: string,
+  fields: readonly string[],
+  onInvalid: (field: string) => Error,
+): unknown {
+  const named = new Set(fields)
+  // Collected rather than judged in place: the reviver runs bottom-up, so the root object's identity is
+  // not known until the very end. A nested `{"meta":{"generation_epoch":1.5}}` is forward-compatible
+  // renderer metadata that the oracle parses and ignores -- it reads only `value.get(field)` on the
+  // root -- so rejecting it here would discard valid acknowledgements and strand playback state.
+  const candidates: {readonly holder: object; readonly field: string; readonly source: string}[] = []
+  const parsed: unknown = JSON.parse(text, function reviver(
+    this: unknown,
+    key: string,
+    value: unknown,
+    context?: {readonly source?: string},
+  ): unknown {
+    if (
+      named.has(key)
+      && context?.source !== undefined
+      && typeof this === 'object'
+      && this !== null
+    ) {
+      candidates.push({holder: this, field: key, source: context.source})
+    }
+    return value
+  })
+  if (typeof parsed !== 'object' || parsed === null) return parsed
+  for (const candidate of candidates) {
+    // Only the root's own members. Identity works because this reviver returns every value unchanged,
+    // so the object the top-level members were revived into is the object that comes back.
+    if (candidate.holder !== parsed) continue
+    // `null` is a legal value wherever a field is optional; it is not a number at all.
+    if (candidate.source === 'null') continue
+    if (!/^-?\d+$/u.test(candidate.source) || String((parsed as Record<string, unknown>)[candidate.field]) !== candidate.source) {
+      throw onInvalid(candidate.field)
+    }
+  }
+  return parsed
+}
+
+function validatePlaybackFrame(frame: PlaybackFrame): void {
+  plainIdentifier(frame.utterance_id)
+  plainPositiveInteger(frame.generation_epoch)
+  if (!Number.isInteger(frame.sequence) || frame.sequence < 0) {
+    throw new DesktopProtocolError('desktop audio sequence is invalid')
+  }
+  if (frame.pcm.length === 0 || frame.pcm.length % 2 !== 0) {
+    throw new DesktopProtocolError('desktop audio must be aligned PCM16 bytes')
+  }
+}
+
+function readIdentifier(payload: unknown, field: string): string {
+  if (!isPlainObject(payload)) throw new DesktopProtocolError('desktop frame payload is invalid')
+  try {
+    return plainIdentifier(payload[field])
+  } catch {
+    throw new DesktopProtocolError(`desktop ${field} is invalid`)
+  }
+}
+
+function readPositiveInteger(payload: unknown, field: string): number {
+  if (!isPlainObject(payload)) throw new DesktopProtocolError('desktop frame payload is invalid')
+  try {
+    return plainPositiveInteger(payload[field])
+  } catch {
+    throw new DesktopProtocolError(`desktop ${field} is invalid`)
+  }
+}
+
+function readNonNegativeInteger(payload: unknown, field: string): number {
+  if (!isPlainObject(payload)) throw new DesktopProtocolError('desktop frame payload is invalid')
+  const candidate = payload[field]
+  if (typeof candidate !== 'number' || !Number.isInteger(candidate) || candidate < 0) {
+    throw new DesktopProtocolError(`desktop ${field} is invalid`)
+  }
+  return candidate
+}
+
+/**
+ * An identifier the renderer can use.
+ *
+ * Whitespace-only is refused but whitespace-containing is not, and the value is returned untrimmed:
+ * the oracle checks `value.strip()` and returns `value`, so trimming here would produce an identifier
+ * that no longer matches the one the session holds.
+ */
+function plainIdentifier(value: unknown): string {
+  if (
+    typeof value !== 'string'
+    || stripLikePython(value) === ''
+    || codePointLengthLikePython(value) > 256
+  ) {
+    throw new DesktopProtocolError('desktop identity is invalid')
+  }
+  return value
+}
+
+function plainPositiveInteger(value: unknown): number {
+  // Integer *and* at least one: a generation epoch counts from one, and a float here would render as
+  // `1.5` in a field the renderer reads as an epoch.
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new DesktopProtocolError('desktop generation is invalid')
+  }
+  return value
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Compact JSON with every non-ASCII character escaped, matching `ensure_ascii=True`.
+ *
+ * Field order is insertion order, as the oracle's dict is -- *not* sorted. These frames are compared
+ * byte for byte against the Python ones, so the order is part of the format.
+ */
+function asciiJson(value: Record<string, unknown>): string {
+  return escapeNonAscii(compactJson(value))
+}
+
+/** Compact JSON leaving non-ASCII literal, matching `ensure_ascii=False`. */
+function unicodeJson(value: Record<string, unknown>): string {
+  return compactJson(value)
+}
+
+function compactJson(value: Record<string, unknown>): string {
+  // `JSON.stringify` already emits `{"a":1,"b":2}` with no spaces, which is Python's
+  // `separators=(",", ":")`.
+  return JSON.stringify(value)
+}
+
+/**
+ * Escape every non-ASCII code point as `\uXXXX`, the way Python's `ensure_ascii=True` does.
+ *
+ * Astral characters become a surrogate pair of escapes, which is also what Python emits -- it escapes
+ * the UTF-16 encoding rather than the code point.
+ */
+function escapeNonAscii(text: string): string {
+  let out = ''
+  for (const unit of text) {
+    const code = unit.codePointAt(0) ?? 0
+    if (code < 0x80) {
+      out += unit
+      continue
+    }
+    if (code > 0xff_ff) {
+      // Re-derive the surrogate pair, because that is what Python escapes.
+      const offset = code - 0x1_00_00
+      const high = 0xd8_00 + (offset >> 10)
+      const low = 0xdc_00 + (offset & 0x3ff)
+      out += `\\u${high.toString(16).padStart(4, '0')}\\u${low.toString(16).padStart(4, '0')}`
+      continue
+    }
+    out += `\\u${code.toString(16).padStart(4, '0')}`
+  }
+  return out
+}

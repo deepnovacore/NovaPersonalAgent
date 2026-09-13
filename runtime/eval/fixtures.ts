@@ -1,25 +1,25 @@
 import { readFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { z } from 'zod'
-import { proactivityPresetSchema } from '../src/config.js'
+import { proactivityPresetSchema } from '../src/config/config.js'
 import {
   eventRecordSchema,
   jsonValueSchema,
   outcomeSchema,
   trustSchema,
-} from '../src/events.js'
-import { memoryItemSchema, memoryRefSchema } from '../src/memory.js'
+} from '../src/core/events.js'
+import { memoryItemSchema, memoryRefSchema } from '../src/core/memory.js'
 import {
   delegateSchema,
-} from '../src/ports.js'
+} from '../src/core/ports.js'
 import {
   desktopEffectSchema,
   diagnosticSchema,
   executorEffectSchema,
   floorDecisionRecordSchema,
   playbackEffectSchema,
-} from '../src/effects.js'
-import { suggestionDeliveryPolicySchema } from '../src/suggestions.js'
+} from '../src/core/effects.js'
+import { suggestionDeliveryPolicySchema } from '../src/core/suggestions.js'
 
 export const fixtureManifestSchema = z.object({
   schema_version: z.literal(1),

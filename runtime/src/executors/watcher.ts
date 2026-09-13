@@ -16,15 +16,15 @@
  * repaired verdict is one this code decided the meaning of.
  */
 
-import {abortable} from '../camera-session.js'
-import { isOtherCategory } from '../unicode-tables.js'
-import { stripLikePython } from '../python-text.js'
-import type { ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff } from '../causal-runtime.js'
-import type { JsonValue } from '../events.js'
-import { handoffPolicySchema } from '../memory.js'
-import type { MediaRef, MediaStore } from '../media-store.js'
-import type { ModelGateway } from '../model-gateway.js'
-import { executorManifestSchema, opSpecSchema, type ExecutorManifest } from '../ports.js'
+import {abortable} from '../core/camera-session.js'
+import { isOtherCategory } from '../text/unicode-tables.js'
+import { stripLikePython } from '../text/python-text.js'
+import type { ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff } from '../core/causal-runtime.js'
+import type { JsonValue } from '../core/events.js'
+import { handoffPolicySchema } from '../core/memory.js'
+import type { MediaRef, MediaStore } from '../core/media-store.js'
+import type { ModelGateway } from '../model/model-gateway.js'
+import { executorManifestSchema, opSpecSchema, type ExecutorManifest } from '../core/ports.js'
 
 export const WATCH_PROGRESS_SUMMARY_TEMPLATE = '仍在监控：{condition}'
 /** Past this many consecutive failures the window gives up rather than burning the whole duration. */

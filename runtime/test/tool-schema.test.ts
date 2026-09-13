@@ -2,11 +2,11 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
-import type { JsonValue } from '../src/events.js'
-import { handoffPolicySchema } from '../src/memory.js'
-import { executorManifestSchema } from '../src/ports.js'
-import { ToolSchemaError, compileToolSchema } from '../src/tool-schema.js'
+import { canonicalJson } from '../src/text/canonical-json.js'
+import type { JsonValue } from '../src/core/events.js'
+import { handoffPolicySchema } from '../src/core/memory.js'
+import { executorManifestSchema } from '../src/core/ports.js'
+import { ToolSchemaError, compileToolSchema } from '../src/core/tool-schema.js'
 
 const fixtureRoot = resolve(import.meta.dirname, '../../../fixtures/tools/v1')
 

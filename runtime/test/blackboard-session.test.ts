@@ -7,15 +7,15 @@ import {join} from 'node:path'
 import {once} from 'node:events'
 import {Worker} from 'node:worker_threads'
 import {setTimeout as delay} from 'node:timers/promises'
-import {Memory} from '../src/memory.js'
-import {CausalRuntime, type ModelPort} from '../src/causal-runtime.js'
-import {RealClock} from '../src/clock.js'
-import {MonotonicIdFactory} from '../src/ids.js'
-import {executorManifestSchema} from '../src/ports.js'
+import {Memory} from '../src/core/memory.js'
+import {CausalRuntime, type ModelPort} from '../src/core/causal-runtime.js'
+import {RealClock} from '../src/core/clock.js'
+import {MonotonicIdFactory} from '../src/core/ids.js'
+import {executorManifestSchema} from '../src/core/ports.js'
 import {RealtimeRuntimeBridge} from '../src/realtime/bridge.js'
-import {compileToolSchema} from '../src/tool-schema.js'
+import {compileToolSchema} from '../src/core/tool-schema.js'
 import {compileMemoryRecall} from '../src/realtime/recall.js'
-import {wakeReasonSchema} from '../src/slots.js'
+import {wakeReasonSchema} from '../src/core/slots.js'
 import {BlackboardSession} from '../src/memory/blackboard-session.js'
 import {BlackboardStore} from '../src/memory/blackboard-store.js'
 
@@ -340,9 +340,9 @@ test('a killed serving runtime recovers its published admission without relaunch
   const blackboard = {path: join(directory, 'board.sqlite'), ownerId: 'local'}
   const writer = join(directory, 'writer.mjs')
   await writeFile(writer, `
-    import {CausalRuntime} from ${JSON.stringify(new URL('../src/causal-runtime.js', import.meta.url).href)};
-    import {RealClock} from ${JSON.stringify(new URL('../src/clock.js', import.meta.url).href)};
-    import {MonotonicIdFactory} from ${JSON.stringify(new URL('../src/ids.js', import.meta.url).href)};
+    import {CausalRuntime} from ${JSON.stringify(new URL('../src/core/causal-runtime.js', import.meta.url).href)};
+    import {RealClock} from ${JSON.stringify(new URL('../src/core/clock.js', import.meta.url).href)};
+    import {MonotonicIdFactory} from ${JSON.stringify(new URL('../src/core/ids.js', import.meta.url).href)};
     const runtime=new CausalRuntime({blackboard:${JSON.stringify(blackboard)},clock:new RealClock(),ids:new MonotonicIdFactory(),
       executors:[{manifest:${JSON.stringify(workerManifest)},dispatch:()=>{console.log('LAUNCHED');return new Promise(()=>{});}}]});
     void runtime.serve(new AbortController().signal);

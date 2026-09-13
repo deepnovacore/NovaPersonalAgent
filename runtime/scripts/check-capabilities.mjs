@@ -1,8 +1,8 @@
 import {readFile, writeFile} from 'node:fs/promises'
 import ts from 'typescript'
-const source = new URL('../src/capability-registry.ts', import.meta.url)
+const source = new URL('../src/config/capability-registry.ts', import.meta.url)
 const target = new URL('../../cli/src/capability-registry.mjs', import.meta.url)
-const output = '// Generated from runtime/src/capability-registry.ts; run node runtime/scripts/check-capabilities.mjs --write.\n'
+const output = '// Generated from runtime/src/config/capability-registry.ts; run node runtime/scripts/check-capabilities.mjs --write.\n'
   + ts.transpileModule(await readFile(source, 'utf8'), {
     compilerOptions: {target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.ESNext},
   }).outputText

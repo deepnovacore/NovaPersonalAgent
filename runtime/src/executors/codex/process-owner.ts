@@ -19,7 +19,7 @@ requireCanonicalPath,
 safeCanonicalPath,
 type HostStateHome,
 type HostWorkspace,
-} from '../../host-paths.js'
+} from '../../projects/host-paths.js'
 import {
 codexAppServerArgv,
 resolveCodexLaunchProfile,

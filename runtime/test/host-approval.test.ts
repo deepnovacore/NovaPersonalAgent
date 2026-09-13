@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {HostApprovalController, type ApprovalOffer} from '../src/approval.js'
-import {VirtualClock} from '../src/clock.js'
+import {HostApprovalController, type ApprovalOffer} from '../src/core/approval.js'
+import {VirtualClock} from '../src/core/clock.js'
 
 // The host accepts display facts already validated by an executor's protocol adapter.
 const offer: ApprovalOffer = Object.freeze({kind: 'permissions', local_detail: {kind: 'permissions', scope: 'read project'}, operation_summary: 'Read project'} as const)

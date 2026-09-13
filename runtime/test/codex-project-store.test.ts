@@ -30,7 +30,7 @@ import {tmpdir} from 'node:os'
 import {basename, join, relative} from 'node:path'
 import {test} from 'node:test'
 
-import {VirtualClock, type Clock} from '../src/clock.js'
+import {VirtualClock, type Clock} from '../src/core/clock.js'
 import {
   ProjectStore,
   PROJECT_MAINTENANCE_JOURNAL_FILE,
@@ -39,25 +39,25 @@ import {
   hostProjectRootForTest,
   normalizeProjectSessionTitle,
   normalizeProjectWorkspaceName,
-} from '../src/project-store.js'
+} from '../src/projects/project-store.js'
 import {
   hostCodexHomeValue,
   hostWorkspaceForTest,
   hostWorkspacePath,
 } from '../src/executors/codex/process-owner.js'
-import {ManagedWorkspaceMaintenanceService} from '../src/managed-workspace-maintenance.js'
+import {ManagedWorkspaceMaintenanceService} from '../src/projects/managed-workspace-maintenance.js'
 import {
   unsupportedNativeFileLocks,
   type NativeFileLockAuthority,
   type NativeFileLockResult,
-} from '../src/native-file-lock.js'
+} from '../src/storage/native-file-lock.js'
 import type {
   ProjectFileIdentity,
   ProjectRootFileAuthority,
   ProjectRootFileCreateResult,
   ProjectRootFileLookupResult,
   ProjectRootFileResult,
-} from '../src/project-root-file.js'
+} from '../src/projects/project-root-file.js'
 
 async function projectStoreFixture(prefix: string) {
   const root = await mkdtemp(join(tmpdir(), prefix))
@@ -838,7 +838,7 @@ test('project names use Python NFKC, whitespace collapse, and full casefold', ()
 
 test('managed workspace slug classification never consults ambient ICU Unicode categories', async () => {
   const source = await readFile(
-    join(import.meta.dirname, '../../src/project-store.ts'),
+    join(import.meta.dirname, '../../src/projects/project-store.ts'),
     'utf8',
   )
   assert.equal(source.includes('/[\\p{L}\\p{N}]/u'), false)
@@ -846,11 +846,11 @@ test('managed workspace slug classification never consults ambient ICU Unicode c
 
 test('durability and native locking source retain the audited no-fallback primitives', async () => {
   const storeSource = await readFile(
-    join(import.meta.dirname, '../../src/project-store.ts'),
+    join(import.meta.dirname, '../../src/projects/project-store.ts'),
     'utf8',
   )
   const nativeSource = await readFile(
-    join(import.meta.dirname, '../../src/native-file-lock.ts'),
+    join(import.meta.dirname, '../../src/storage/native-file-lock.ts'),
     'utf8',
   )
   const ordered = [

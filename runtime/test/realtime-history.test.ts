@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { JsonValue } from '../src/events.js'
-import { memoryItemSchema, type MemoryItem } from '../src/memory.js'
+import type { JsonValue } from '../src/core/events.js'
+import { memoryItemSchema, type MemoryItem } from '../src/core/memory.js'
 import {
   MAX_PACKED_RECOVERY_CONTENT,
   packRecoveryTurns,

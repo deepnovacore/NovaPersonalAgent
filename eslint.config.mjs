@@ -30,7 +30,7 @@ export default tseslint.config(
   {
     // Outside the executor registry, depend on the Codex package's public entry only.
     files: ['runtime/src/**/*.ts'],
-    ignores: ['runtime/src/executors/**', 'runtime/src/production-composition.ts'],
+    ignores: ['runtime/src/executors/**', 'runtime/src/composition/production-composition.ts'],
     rules: {
       'no-restricted-syntax': ['error', {
         selector: 'ImportExpression[source.value=/executors\\/codex\\//]',
@@ -45,14 +45,14 @@ export default tseslint.config(
     },
   },
   {
-    files: ['runtime/src/production-composition.ts'],
+    files: ['runtime/src/composition/production-composition.ts'],
     rules: {
       'no-restricted-imports': ['error', {patterns: [{
-        group: ['**/executors/codex/**', '!./executors/codex/host.js'],
+        group: ['**/executors/codex/**', '!../executors/codex/host.js'],
         message: 'the composition may load only the dedicated Codex host entry',
       }]}],
       'no-restricted-syntax': ['error', {
-        selector: 'ImportExpression[source.value=/executors\\/codex\\//][source.value!="./executors/codex/host.js"]',
+        selector: 'ImportExpression[source.value=/executors\\/codex\\//][source.value!="../executors/codex/host.js"]',
         message: 'the composition may load only the dedicated Codex host entry',
       }],
     },
@@ -63,7 +63,7 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['**/realtime/**', '**/desktop*', '**/*-assembly*'],
+          group: ['**/realtime/**', '**/desktop*', '**/desktop/**', '**/composition/**', '**/*-assembly*'],
           message: 'executor packages must not import realtime/, desktop*, or assemblies; depend on ports.ts',
         }],
       }],

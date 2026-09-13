@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import {loadSettings} from '../src/config.js'
+import {loadSettings} from '../src/config/config.js'
 import {
   buildIntegratedRealtimeAssembly,
   type IntegratedProviderRegistry,
-} from '../src/cascaded-realtime-assembly.js'
+} from '../src/composition/cascaded-realtime-assembly.js'
 import {QwenAudioRealtimeAdapter} from '../src/realtime/qwen.js'
 
 test('integrated registry resolves only Qwen and passes an immutable selected config', () => {

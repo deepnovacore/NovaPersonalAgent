@@ -1,6 +1,6 @@
 import {z} from 'zod'
-import type {ModelGateway} from '../../model-gateway.js'
-import type {RunningWork} from '../../coding-executor.js'
+import type {ModelGateway} from '../../model/model-gateway.js'
+import type {RunningWork} from '../coding-executor.js'
 import {workOrderSchema} from './work-order.js'
 
 export const intakeBindingSchema = z.object({

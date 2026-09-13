@@ -1,6 +1,6 @@
 export type { AgentControllerFactory,DelegateLike,DeliverySnapshot,ExecutorManifestLike,RealtimeServiceOptions,ServiceProvider,ServiceRuntime } from './service-ports.js'
 export { formatSeconds } from './service-state.js'
-import { CodingProgressNarrationState,type CodingProgressNarration } from '../coding-progress-narration.js'
+import { CodingProgressNarrationState,type CodingProgressNarration } from './coding-progress-narration.js'
 import { HostDelivery } from './host-delivery.js'
 import { ProjectConfirmationFlow } from './project-confirmation-flow.js'
 import { ProviderProjection } from './provider-projection.js'
@@ -20,22 +20,22 @@ import { randomUUID } from 'node:crypto'
 import {
 createAgentControllerRegistry,
 type AgentControllerRegistry
-} from '../agent-controller.js'
-import { ApprovalHost } from '../approval.js'
-import type { Clock } from '../clock.js'
-import { type EventRecord,type JsonValue } from '../events.js'
+} from '../executors/agent-controller.js'
+import { ApprovalHost } from '../core/approval.js'
+import type { Clock } from '../core/clock.js'
+import { type EventRecord,type JsonValue } from '../core/events.js'
 import {
 type IntakeEventPort,
 type IntakeOptions,
 } from '../executors/coding/intake.js'
 import {
 USER_PRIORITY
-} from '../memory.js'
-import type { PlaybackCompletion,PlaybackGeneration } from '../playback.js'
-import { codePointLengthLikePython } from '../python-text.js'
-import type { WakeReason } from '../slots.js'
-import type { Suggestion } from '../suggestions.js'
-import type { CompiledTools } from '../tool-schema.js'
+} from '../core/memory.js'
+import type { PlaybackCompletion,PlaybackGeneration } from './playback.js'
+import { codePointLengthLikePython } from '../text/python-text.js'
+import type { WakeReason } from '../core/slots.js'
+import type { Suggestion } from '../core/suggestions.js'
+import type { CompiledTools } from '../core/tool-schema.js'
 import type { RealtimeRuntimeBridge,ToolCallReady } from './bridge.js'
 import { type CodingChannel } from './evidence.js'
 import { packRecoveryTurns,projectRecoveryTurns,type RecoveryTurn } from './history.js'

@@ -16,7 +16,7 @@ import {
   validateCodexRequest,
 } from '../src/executors/codex/contract.js'
 import {CODEX_AGENT_DESCRIPTOR} from '../src/executors/codex/controller.js'
-import {compileToolSchema} from '../src/tool-schema.js'
+import {compileToolSchema} from '../src/core/tool-schema.js'
 import * as runtimeIndex from '../src/index.js'
 
 function digest(text: string): string {

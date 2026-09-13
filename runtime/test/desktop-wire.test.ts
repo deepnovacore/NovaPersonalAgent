@@ -13,7 +13,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
+import { canonicalJson } from '../src/text/canonical-json.js'
 import {
   DesktopProtocolError,
   captionMessage,
@@ -27,9 +27,9 @@ import {
   playbackClearMessage,
   playbackTerminalMessage,
   validateInputPcm,
-} from '../src/desktop-wire.js'
-import { parseClientMessage } from '../src/desktop-session.js'
-import type { PlaybackCompletion } from '../src/playback.js'
+} from '../src/desktop/desktop-wire.js'
+import { parseClientMessage } from '../src/desktop/desktop-session.js'
+import type { PlaybackCompletion } from '../src/realtime/playback.js'
 import type { ExecutorState } from '../src/realtime/service-state.js'
 
 const CODEX = {executor: 'codex', display_name: 'Codex'} as const

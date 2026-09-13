@@ -1,5 +1,5 @@
-import { jsonValueSchema } from '../events.js'
-import { canonicalJson } from '../canonical-json.js'
+import { jsonValueSchema } from '../core/events.js'
+import { canonicalJson } from '../text/canonical-json.js'
 import {
   MAX_REALTIME_PCM_BYTES,
   hostContextItemSchema,

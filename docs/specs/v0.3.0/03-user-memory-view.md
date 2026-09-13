@@ -15,7 +15,7 @@
   不保证派生条目立即完成纠正；`recall` 的命中没有逐条稳定 ID 与版本、没有 stated / inferred 标记，
   也没有列表接口。
 - `runtime/src/memory/factory.ts`：按 `Settings` 选择远程或本地 VoiceMem 后端。
-- `runtime/src/context-view.ts`：唯一面向模型的有界投影。
+- `runtime/src/core/context-view.ts`：唯一面向模型的有界投影。
 - 桌面 `clients/desktop/src/renderer/memory-board.mjs`：面向开发者的通道 / 诊断视图，
   没有用户视角、没有来源与 stated / inferred 区分。
 - 知识库（`runtime/src/knowledge/`）保存源内容与分块；它是**资料库**，不是记忆。

@@ -176,7 +176,7 @@ For opt-in live cascaded verification run `npm run smoke:cascaded --workspace @n
 
 ## Public environment reference
 
-The following block is generated from `runtime/src/environment-contract.ts`. Host-private handshake
+The following block is generated from `runtime/src/config/environment-contract.ts`. Host-private handshake
 inputs are intentionally excluded.
 
 <!-- BEGIN GENERATED ENV CONTRACT -->

@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
 import {test} from 'node:test'
 
-import {canonicalJson} from '../src/canonical-json.js'
+import {canonicalJson} from '../src/text/canonical-json.js'
 import {main} from '../src/cli.js'
 import {
   checkScorecardFixtures,

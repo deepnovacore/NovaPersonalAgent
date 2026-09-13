@@ -6,7 +6,7 @@ import {BlockList, isIP, type LookupFunction} from 'node:net'
 import {lstat, open, realpath} from 'node:fs/promises'
 import {Worker} from 'node:worker_threads'
 import {Agent, fetch as undiciFetch} from 'undici'
-import {SensitiveContentPolicy, SensitivePathPolicy} from '../sensitivity.js'
+import {SensitiveContentPolicy, SensitivePathPolicy} from '../memory/sensitivity.js'
 
 const MAX_FILE_BYTES = 10 * 1_024 * 1_024
 const MAX_TEXT_BYTES = 10 * 1_024 * 1_024

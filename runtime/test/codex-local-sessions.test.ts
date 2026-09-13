@@ -1,5 +1,5 @@
 import {fixture, context, run} from './fixtures/codex/project-adapter-fixture.js'
-import {hostHomeValue, hostWorkspacePath, hostWorkspaceForTest} from '../src/host-paths.js'
+import {hostHomeValue, hostWorkspacePath, hostWorkspaceForTest} from '../src/projects/host-paths.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {mkdtemp, realpath, rm, mkdir, access, rename, readFile, writeFile} from 'node:fs/promises'

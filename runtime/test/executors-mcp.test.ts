@@ -1,9 +1,9 @@
 import {tmpdir} from 'node:os'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
-import {executorManifestSchema} from '../src/ports.js'
-import {compileToolSchema} from '../src/tool-schema.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
+import {executorManifestSchema} from '../src/core/ports.js'
+import {compileToolSchema} from '../src/core/tool-schema.js'
 
 const manifest = (name = 'mcp__external') => executorManifestSchema.parse({
   name, display_name: 'External', roles: [], approvals: false, model_visibility: 'direct', probe_policy: 'none',
@@ -34,15 +34,15 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import {ListToolsRequestSchema, CallToolRequestSchema, type Tool, type CallToolResult} from '@modelcontextprotocol/sdk/types.js'
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js'
 import {McpExecutorAdapter, mcpToolAlias, prepareExternalMcp} from '../src/executors/mcp.js'
-import {McpConnection, probeMcpServer} from '../src/mcp-client.js'
-import {VirtualClock} from '../src/clock.js'
-import type {ExecutorDispatchContext} from '../src/causal-runtime.js'
-import {buildAssembly} from '../src/assembly.js'
-import {loadSettings} from '../src/config.js'
-import {buildRealtimeAssembly, filterDisabledCoding} from '../src/realtime-assembly.js'
+import {McpConnection, probeMcpServer} from '../src/executors/mcp-client.js'
+import {VirtualClock} from '../src/core/clock.js'
+import type {ExecutorDispatchContext} from '../src/core/causal-runtime.js'
+import {buildAssembly} from '../src/composition/assembly.js'
+import {loadSettings} from '../src/config/config.js'
+import {buildRealtimeAssembly, filterDisabledCoding} from '../src/composition/realtime-assembly.js'
 import type {RealtimeProvider} from '../src/realtime/protocol.js'
-import {Memory} from '../src/memory.js'
-import {compileContextView} from '../src/context-view.js'
+import {Memory} from '../src/core/memory.js'
+import {compileContextView} from '../src/core/context-view.js'
 
 const tool = (name = 'lookup', readonly = true): Tool => ({name, inputSchema: {type: 'object', properties: {value: {type: 'string'}}, required: ['value']}, annotations: {readOnlyHint: readonly}})
 const enabled = {enabled: true, timeoutMs: 1000, maxResultBytes: 4096, maxCallsPerTurn: 2}
@@ -365,25 +365,25 @@ test('stdio protocol buffer overflow is bounded, redacted and child is cleaned u
 
 test('actual desktop entry awaits discovery and owns cleanup when final exact frontend budget rejects construction', async () => {
   const local = await localMcp([tool()])
-  const configUrl = new URL('../src/config.js', import.meta.url).href
-  const registryUrl = new URL('../src/capability-registry.js', import.meta.url).href
-  const desktopUrl = new URL('../src/desktop-session.js', import.meta.url).href
+  const configUrl = new URL('../src/config/config.js', import.meta.url).href
+  const registryUrl = new URL('../src/config/capability-registry.js', import.meta.url).href
+  const desktopUrl = new URL('../src/desktop/desktop-session.js', import.meta.url).href
   const document = {version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}, coding: {enabled: false}, camera: {enabled: false}},
     mcpServers: {external: {transport: 'streamable-http', url: local.url, exposeTo: {frontbrain: true}, tools: {lookup: enabled}}}}
   const replacements = {
-    './config.js': `import {loadSettings as load} from ${JSON.stringify(configUrl)}; export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)}; export function loadSettings() {return {...load({NOVA_AUDIO_AGENT_MODEL_API_KEY:'fixture', DASHSCOPE_API_KEY:'fixture'}),executors:[]}}`,
-    './capability-registry.js': `import {parseCapabilityRegistry} from ${JSON.stringify(registryUrl)}; export function loadCapabilityRegistry() {return parseCapabilityRegistry(${JSON.stringify(document)})}`,
-    './desktop-session.js': `export {buildDesktopRealtimeComposition} from ${JSON.stringify(desktopUrl)};
+    [new URL('../src/config/config.js', import.meta.url).href]: `import {loadSettings as load} from ${JSON.stringify(configUrl)}; export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)}; export function loadSettings() {return {...load({NOVA_AUDIO_AGENT_MODEL_API_KEY:'fixture', DASHSCOPE_API_KEY:'fixture'}),executors:[]}}`,
+    [new URL('../src/config/capability-registry.js', import.meta.url).href]: `import {parseCapabilityRegistry} from ${JSON.stringify(registryUrl)}; export function loadCapabilityRegistry() {return parseCapabilityRegistry(${JSON.stringify(document)})}`,
+    [new URL('../src/desktop/desktop-session.js', import.meta.url).href]: `export {buildDesktopRealtimeComposition} from ${JSON.stringify(desktopUrl)};
       export async function runDesktopEntryWithStopSources({construct}) {
         const owned=[]; try {await construct({own:close=>owned.push(close)}); throw new Error('expected budget rejection');}
         catch(error) {if(error.code!=='frontbrain_tool_budget_exceeded'||error.toolCount!==2||error.toolBudget!==1) throw error; process.stdout.write('budget 2/1');}
         finally {for(const close of owned.reverse()) await close();} return 0;
       }`,
-    './realtime/telemetry.js': `export function createRealtimeTelemetry() {return {close(){},record(){}}}`,
+    [new URL('../src/realtime/telemetry.js', import.meta.url).href]: `export function createRealtimeTelemetry() {return {close(){},record(){}}}`,
   }
   const hook = `export async function resolve(specifier,context,next) {
     const replacements=${JSON.stringify(replacements)};
-    if(['/desktop-entry.js','/production-composition.js'].some(path=>context.parentURL?.endsWith(path))&&replacements[specifier]) return {url:'data:text/javascript,'+encodeURIComponent(replacements[specifier]),shortCircuit:true};
+    if(['/desktop-entry.js','/production-composition.js'].some(path=>context.parentURL?.endsWith(path))&&replacements[new URL(specifier, context.parentURL).href]) return {url:'data:text/javascript,'+encodeURIComponent(replacements[new URL(specifier, context.parentURL).href]),shortCircuit:true};
     return next(specifier,context);
   }`
   const script = `import {register} from 'node:module'; register('data:text/javascript,'+encodeURIComponent(${JSON.stringify(hook)}),import.meta.url); await import(${JSON.stringify(new URL('../src/desktop-entry.js', import.meta.url).href)});`

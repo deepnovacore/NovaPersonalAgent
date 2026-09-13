@@ -22,10 +22,10 @@ import type {
   ExecutorDispatchContext,
   ExecutorHandoff,
   ExecutorProgress,
-} from '../../causal-runtime.js'
-import type {Clock} from '../../clock.js'
-import {RealClock, raceDeadline} from '../../clock.js'
-import {jsonValueSchema, validProgressSummary, type JsonValue} from '../../events.js'
+} from '../../core/causal-runtime.js'
+import type {Clock} from '../../core/clock.js'
+import {RealClock, raceDeadline} from '../../core/clock.js'
+import {jsonValueSchema, validProgressSummary, type JsonValue} from '../../core/events.js'
 
 const TRANSPORT_CODES: ReadonlySet<string> = new Set<CodexTransportCode>([
   'completed',

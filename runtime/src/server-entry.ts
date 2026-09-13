@@ -1,8 +1,8 @@
-import {ClientPairing} from './client-pairing.js'
+import {ClientPairing} from './server/client-pairing.js'
 /** Headless production service. No Electron, parent-port, or stdin lifecycle dependency. */
 import {pathToFileURL} from 'node:url'
-import {initializeServerToken, loadServerConfig, type ServerConfig} from './server-config.js'
-import type {DesktopEntryOptions, DesktopStopEventSource} from './desktop-session.js'
+import {initializeServerToken, loadServerConfig, type ServerConfig} from './server/server-config.js'
+import type {DesktopEntryOptions, DesktopStopEventSource} from './desktop/desktop-session.js'
 
 export async function runServerEntry(options: {
   readonly environment?: NodeJS.ProcessEnv
@@ -29,7 +29,7 @@ export async function runServerEntry(options: {
   events.once('SIGTERM', requestStop)
   try {
     if (config.mediaMode === 'aoq_chat') {
-      const {AoqChatServer, issueAoqCredential, aoqCredentialURL} = await import('./aoq-chat-server.js')
+      const {AoqChatServer, issueAoqCredential, aoqCredentialURL} = await import('./server/aoq-chat-server.js')
       const environment = options.environment ?? process.env
       const apiHost = environment.NOVA_AUDIO_AGENT_AOQ_API_HOST ?? ''
       try { aoqCredentialURL(apiHost) } catch {
@@ -49,10 +49,10 @@ export async function runServerEntry(options: {
         return 2
       } finally { await server.close() }
     }
-    const {runDesktopEntry} = await import('./desktop-session.js')
+    const {runDesktopEntry} = await import('./desktop/desktop-session.js')
     const aoq = config.mediaMode === 'aoq_runtime'
     const environment = options.environment ?? process.env
-    const aoqModule = aoq ? await import('./aoq-chat-server.js') : undefined
+    const aoqModule = aoq ? await import('./server/aoq-chat-server.js') : undefined
     const aoqProvider = aoq ? await import('./realtime/aoq.js') : undefined
     const link = aoqProvider === undefined ? undefined : new aoqProvider.AoqRuntimeLink()
     const apiHost = environment.NOVA_AUDIO_AGENT_AOQ_API_HOST ?? ''
@@ -68,8 +68,8 @@ export async function runServerEntry(options: {
         return Promise.resolve()
       },
       construct: options.construct ?? (async ownership => {
-        const {buildProductionComposition} = await import('./production-composition.js')
-        const {ClientServer} = await import('./client-server.js')
+        const {buildProductionComposition} = await import('./composition/production-composition.js')
+        const {ClientServer} = await import('./server/client-server.js')
         return buildProductionComposition({
           token: config.token, stop, ownership, onDiagnostic, remote: true,
           environment: aoq ? {...environment, NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',

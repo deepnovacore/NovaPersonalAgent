@@ -3,25 +3,25 @@ import {mkdtemp, readFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {test} from 'node:test'
-import {VirtualClock} from '../src/clock.js'
+import {VirtualClock} from '../src/core/clock.js'
 import {
   DesktopSocketBridge,
   type BridgeService,
   type DesktopBridgeOptions,
   DesktopRealtime,
   type DesktopServerTransport,
-} from '../src/desktop-session.js'
+} from '../src/desktop/desktop-session.js'
 import {
   DesktopProtocolError,
   encodeAudioFrame,
   decodeAudioFrame,
   WIRE_FRAME_TYPES,
-} from '../src/desktop-wire.js'
+} from '../src/desktop/desktop-wire.js'
 import {type ExecutorState} from '../src/realtime/service-state.js'
-import {type JsonValue} from '../src/events.js'
+import {type JsonValue} from '../src/core/events.js'
 import {type RealtimeTelemetry, JsonlTelemetry} from '../src/realtime/telemetry.js'
 import {WebSocket, type RawData} from 'ws'
-import {encodeCameraFrame, serializeCameraPermissionResult} from '../src/desktop-camera.js'
+import {encodeCameraFrame, serializeCameraPermissionResult} from '../src/desktop/desktop-camera.js'
 import {
   DesktopOutboundValidationError,
   NodeDesktopServer,

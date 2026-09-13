@@ -1,6 +1,6 @@
 import {ReadableStream} from 'node:stream/web'
-import type {Clock} from '../../clock.js'
-import {ConfigurationError, type VolcengineRealtimeConfig} from '../../config.js'
+import type {Clock} from '../../core/clock.js'
+import {ConfigurationError, type VolcengineRealtimeConfig} from '../../config/config.js'
 import type {EndpointingEvent, EndpointingPort} from '../cascaded/ports.js'
 import {volcengineInputPcm} from './audio.js'
 import type {

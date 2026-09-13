@@ -493,7 +493,7 @@ const managedPhone = createManagedPhoneService({
   shutdown: child => shutdownBackend(child),
   launch: async () => {
     const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
-    const {initializeServerToken, loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server-config.js')).href)
+    const {initializeServerToken, loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
     await mkdir(phoneRoot(), {recursive: true, mode: 0o700})
     const tokenFile = resolve(phoneRoot(), 'host.token')
     try { initializeServerToken(tokenFile) } catch (error) { if (error.code !== 'EEXIST') throw error }
@@ -506,7 +506,7 @@ const managedPhone = createManagedPhoneService({
       decryptedSecrets: decryptSecretsForSpawn(currentSettings, secretCodec), resolvedConfig: desktopConfig,
       capabilitiesDocument: readCapabilityDocument(currentSettings, process.env)})
     if (app.isQuitting || !currentSettings.phoneConnectionEnabled) throw new Error('service_unavailable')
-    return utilityProcess.fork(resolve(dirname(entry), 'phone-desktop-entry.js'), [], {
+    return utilityProcess.fork(resolve(dirname(entry), 'desktop/phone-desktop-entry.js'), [], {
       cwd: desktopConfig?.workspace || process.cwd(), stdio: 'pipe', serviceName: 'Nova iPhone Service',
       env: {...spec.env, ...environment, NOVA_AUDIO_AGENT_SERVER_MEDIA_MODE: 'relay',
         NOVA_AUDIO_AGENT_BLACKBOARD_PATH: resolve(phoneRoot(), 'blackboard.sqlite'),
@@ -541,7 +541,7 @@ async function phoneAction(action, deviceId, epoch = phoneEpoch) {
     if (currentSettings.phoneServerPort && currentSettings.phoneServerTokenFile) {
       await managedPhone.stop()
       const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
-      const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server-config.js')).href)
+      const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
       const external = loadServerConfig({NOVA_AUDIO_AGENT_SERVER_PORT: String(currentSettings.phoneServerPort),
         NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile})
       if (phoneConfig?.port !== external.port || phoneConfig?.token !== external.token) await cancelPhonePairing(false)

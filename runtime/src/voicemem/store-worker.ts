@@ -12,8 +12,8 @@ import {
 
 import type {PersonalMemoryRecallScope} from '../memory/personal-memory.js'
 
-import {compareCodePoints} from '../canonical-json.js'
-import {PrivateDatabaseError, preparePrivateDatabasePath, secureSidecar} from '../private-database.js'
+import {compareCodePoints} from '../text/canonical-json.js'
+import {PrivateDatabaseError, preparePrivateDatabasePath, secureSidecar} from '../storage/private-database.js'
 import {parseVoiceMemRecallHit} from './store-client.js'
 import type {
   PersonalMemoryEmbeddingConfig,

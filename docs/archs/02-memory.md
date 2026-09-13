@@ -30,6 +30,6 @@ module allocates no Worker or MCP server and does not change `memory__recall`.
 There is no automatic corpus injection into ContextView. See
 [spec 04](../specs/v0.2.0/04-knowledge-base.md) and its separate live acceptance ledger.
 
-Sensitive path and content gates live in `runtime/src/sensitivity.ts` and are shared by knowledge
+Sensitive path and content gates live in `runtime/src/memory/sensitivity.ts` and are shared by knowledge
 and executor reference handling. The future memory substrate is specified separately in
 [06](../specs/v0.3.0/06-memory-substrate.md); it is not implemented.

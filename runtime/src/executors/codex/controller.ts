@@ -1,4 +1,4 @@
-import type {CodingAgentControllerFactory} from '../../coding-executor.js'
+import type {CodingAgentControllerFactory} from '../coding-executor.js'
 import type {
   AgentActionResult,
   AgentCancelRequest,
@@ -6,8 +6,8 @@ import type {
   AgentDispatchRequest,
   AgentDescriptor,
   AgentRuntimeDispatchPort,
-} from '../../agent-controller.js'
-import type {AgentExecutor, CancelContext} from '../../coding-executor.js'
+} from '../agent-controller.js'
+import type {AgentExecutor, CancelContext} from '../coding-executor.js'
 import {IntakeController, type IntakeOptions, type IntakeEventPort, type IntakeSession} from '../coding/intake.js'
 import {CODEX_AGENT_SUMMARY} from './contract.js'
 

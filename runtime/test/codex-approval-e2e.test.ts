@@ -4,30 +4,30 @@ import {test, type TestContext} from 'node:test'
 
 import {WebSocket, type RawData} from 'ws'
 
-import {VirtualClock, type Clock} from '../src/clock.js'
+import {VirtualClock, type Clock} from '../src/core/clock.js'
 import {CODEX_PROJECT_APPROVAL_MANIFEST} from '../src/executors/codex/contract.js'
 import {CODEX_AGENT_DESCRIPTOR, CodexAgentController} from '../src/executors/codex/controller.js'
 import {OwnedCodexAppServerTransport} from '../src/executors/codex/app-server-transport.js'
-import {DesktopRealtime} from '../src/desktop-session.js'
+import {DesktopRealtime} from '../src/desktop/desktop-session.js'
 import {
   NodeDesktopServer,
   type DesktopControl,
   type DesktopServerOptions,
 } from '../src/desktop.js'
-import {Memory} from '../src/memory.js'
+import {Memory} from '../src/core/memory.js'
 import {
   hostBinaryForTest,
   hostCodexHomeForTest,
   hostWorkspaceForTest,
 } from '../src/executors/codex/process-owner.js'
-import {PlaybackRegistry} from '../src/playback.js'
+import {PlaybackRegistry} from '../src/realtime/playback.js'
 import {RealtimeRuntimeBridge} from '../src/realtime/bridge.js'
-import {HostApprovalController} from '../src/approval.js'
+import {HostApprovalController} from '../src/core/approval.js'
 import type {HostContextItem, HostResponseIntent} from '../src/realtime/protocol.js'
 import {RealtimeService, type ServiceProvider} from '../src/realtime/service.js'
 import {RealtimeSession, type SessionProvider} from '../src/realtime/session.js'
-import {compileToolSchema} from '../src/tool-schema.js'
-import {CONFIRM_TOOL} from '../src/work-tools.js'
+import {compileToolSchema} from '../src/core/tool-schema.js'
+import {CONFIRM_TOOL} from '../src/core/work-tools.js'
 import {
   FakeAppServerOwnerFactory,
   type FakeAppServerScenario,

@@ -290,7 +290,7 @@ const mutations = Object.freeze([
   },
   {
     name: 'Watch never restarts a file source',
-    file: 'runtime/src/assembly.ts',
+    file: 'runtime/src/composition/assembly.ts',
     from: `    model: watchModel,
     captureEnabled,
   })
@@ -306,7 +306,7 @@ const mutations = Object.freeze([
   },
   {
     name: 'Guard restarts a file source before observation',
-    file: 'runtime/src/assembly.ts',
+    file: 'runtime/src/composition/assembly.ts',
     from: `    ...(isFileBackedFrameSource(frameSource)
       ? {prepareObservation: () => frameSource.restart()}
       : {}),`,

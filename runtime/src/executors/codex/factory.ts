@@ -1,5 +1,5 @@
 import type {ManagedCodexMcp} from './managed-mcp.js'
-import type {CodingExecutorResource} from '../../coding-executor.js'
+import type {CodingExecutorResource} from '../coding-executor.js'
 import {codexAgentDescriptor, codingAgentControllerFactory} from './controller.js'
 import {
   OwnedCodexAppServerTransport,
@@ -20,14 +20,14 @@ import type {
 } from './host-config.js'
 import {codexCredentialApiKey} from './host-config.js'
 import type {CredentialSnapshotter} from './credential-snapshot.js'
-import type {PublicProjectView} from '../../project-store.js'
+import type {PublicProjectView} from '../../projects/project-store.js'
 import {
   ProjectStore,
   MAX_PROJECT_WORKSPACE_NAME,
   ProjectStateError,
-} from '../../project-store.js'
-import type {NativeFileLockAuthority} from '../../native-file-lock.js'
-import type {ProjectRootFileAuthority} from '../../project-root-file.js'
+} from '../../projects/project-store.js'
+import type {NativeFileLockAuthority} from '../../storage/native-file-lock.js'
+import type {ProjectRootFileAuthority} from '../../projects/project-root-file.js'
 import {
   hostWorkspacePath,
   type CodexProcessOwnerFactory,
@@ -35,13 +35,13 @@ import {
   type HostCodexHome,
   type HostWorkspace,
 } from './process-owner.js'
-import type {ExecutorAdapter} from '../../causal-runtime.js'
-import type {Clock} from '../../clock.js'
+import type {ExecutorAdapter} from '../../core/causal-runtime.js'
+import type {Clock} from '../../core/clock.js'
 import {CodexHostConfigurationError} from './host-config.js'
 import {ProjectCodexAdapter} from './adapter-project.js'
-import {ProjectConfirmationController} from '../../project-confirmation.js'
-import {HostApprovalController, type ApprovalPort} from '../../approval.js'
-import {type ApprovalView} from '../../approval-port.js'
+import {ProjectConfirmationController} from '../../projects/project-confirmation.js'
+import {HostApprovalController, type ApprovalPort} from '../../core/approval.js'
+import {type ApprovalView} from '../../core/approval-port.js'
 import {basename} from 'node:path'
 import {
   resolveCodexLaunchProfile,

@@ -4,7 +4,7 @@ import {
   type AgentCancelRequest,
   type AgentController,
   type AgentDispatchRequest,
-} from '../../agent-controller.js'
+} from '../agent-controller.js'
 import {types as nodeTypes} from 'node:util'
 import {
   VISION_AGENT_DESCRIPTOR,

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { validProgressSummary } from '../src/events.js'
+import { validProgressSummary } from '../src/core/events.js'
 import {
   LETTER_CATEGORY_RANGE_COUNT,
   NUMBER_CATEGORY_RANGE_COUNT,
@@ -13,7 +13,7 @@ import {
   isNumberCategory,
   isOtherCategory,
   isPunctuationCategory,
-} from '../src/unicode-tables.js'
+} from '../src/text/unicode-tables.js'
 
 test('the pinned table decodes to the generated range set', () => {
   assert.equal(PINNED_UNICODE_VERSION, '15.0.0')

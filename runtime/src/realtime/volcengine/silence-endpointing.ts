@@ -1,4 +1,4 @@
-import {ConfigurationError, type VolcengineRealtimeConfig} from '../../config.js'
+import {ConfigurationError, type VolcengineRealtimeConfig} from '../../config/config.js'
 import {volcengineInputPcm} from './audio.js'
 import type {EndpointingEvent, EndpointingPort} from '../cascaded/ports.js'
 

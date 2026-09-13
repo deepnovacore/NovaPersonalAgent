@@ -7,9 +7,9 @@ import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/st
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js'
 import type {CallToolResult} from '@modelcontextprotocol/sdk/types.js'
 import {z} from 'zod'
-import type {ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff} from '../causal-runtime.js'
-import type {JsonValue} from '../events.js'
-import {executorManifestSchema, opSpecSchema, type ExecutorManifest} from '../ports.js'
+import type {ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff} from '../core/causal-runtime.js'
+import type {JsonValue} from '../core/events.js'
+import {executorManifestSchema, opSpecSchema, type ExecutorManifest} from '../core/ports.js'
 
 export const MCP_KNOWLEDGE_EXECUTOR = 'mcp__nova_knowledge'
 export const MCP_KNOWLEDGE_RECALL = 'recall'

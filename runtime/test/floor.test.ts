@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { Floor } from '../src/floor.js'
-import { USER_PRIORITY } from '../src/memory.js'
+import { Floor } from '../src/realtime/floor.js'
+import { USER_PRIORITY } from '../src/core/memory.js'
 
 test('idle allows, user speech defers, and agent speech requires higher priority', () => {
   assert.equal(new Floor().decide(1), 'allow')

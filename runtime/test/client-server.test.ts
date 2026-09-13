@@ -3,8 +3,8 @@ import {once} from 'node:events'
 import {test} from 'node:test'
 import {WebSocket} from 'ws'
 
-import {ClientServer} from '../src/client-server.js'
-import type {ClientMedia} from '../src/client-protocol.js'
+import {ClientServer} from '../src/server/client-server.js'
+import type {ClientMedia} from '../src/server/client-protocol.js'
 const token = '0123456789abcdef0123456789abcdef'
 
 async function peer(port: number, path = '/client/v1'): Promise<{socket: WebSocket; next: () => Promise<Record<string, unknown>>}> {

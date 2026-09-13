@@ -10,8 +10,8 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js'
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js'
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js'
-import type {ExecutorDispatchContext} from '../src/causal-runtime.js'
-import {VirtualClock} from '../src/clock.js'
+import type {ExecutorDispatchContext} from '../src/core/causal-runtime.js'
+import {VirtualClock} from '../src/core/clock.js'
 import {
   KnowledgeMcpAdapter,
   MCP_KNOWLEDGE_RECALL,

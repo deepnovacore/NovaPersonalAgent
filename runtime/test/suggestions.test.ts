@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { SuggestionPool, isSuggestionAvailable } from '../src/suggestions.js'
+import { SuggestionPool, isSuggestionAvailable } from '../src/core/suggestions.js'
 
 test('the pool owns stable insertion-order suggestion ids and content copies', () => {
   const content = {text: 'door is open'}

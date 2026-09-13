@@ -3,16 +3,16 @@ import {
   parseAgentActionResult,
   type AgentActionResult,
   type AgentController
-} from '../agent-controller.js'
-import type {ApprovalHost} from '../approval.js'
-import {canonicalJson} from '../canonical-json.js'
-import {type EventRecord, type JsonValue} from '../events.js'
+} from '../executors/agent-controller.js'
+import type {ApprovalHost} from '../core/approval.js'
+import {canonicalJson} from '../text/canonical-json.js'
+import {type EventRecord, type JsonValue} from '../core/events.js'
 import {
   type IntakeEventPort
 } from '../executors/coding/intake.js'
-import {codePointLengthLikePython, stripLikePython} from '../python-text.js'
-import type {CompiledTools} from '../tool-schema.js'
-import {CANCEL_TOOL, CONFIRM_TOOL, DISPATCH_TOOL} from '../work-tools.js'
+import {codePointLengthLikePython, stripLikePython} from '../text/python-text.js'
+import type {CompiledTools} from '../core/tool-schema.js'
+import {CANCEL_TOOL, CONFIRM_TOOL, DISPATCH_TOOL} from '../core/work-tools.js'
 import type {RealtimeRuntimeBridge, ToolAcceptance, ToolCallReady} from './bridge.js'
 import {requiresSynchronousResult} from './bridge.js'
 import {type CodingChannel} from './evidence.js'

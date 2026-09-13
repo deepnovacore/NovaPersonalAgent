@@ -4,9 +4,9 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, test } from 'node:test'
-import type { EventRecord } from '../src/events.js'
-import { compareCodePoints } from '../src/canonical-json.js'
-import { canonicalJson, replayTrace, TraceWriter } from '../src/trace.js'
+import type { EventRecord } from '../src/core/events.js'
+import { compareCodePoints } from '../src/text/canonical-json.js'
+import { canonicalJson, replayTrace, TraceWriter } from '../src/core/trace.js'
 
 const temporaryDirectories: string[] = []
 

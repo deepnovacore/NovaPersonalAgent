@@ -28,12 +28,12 @@ flowchart TB
 
 | Module | Responsibility |
 |---|---|
-| `runtime/src/causal-runtime.ts` | Event application, dispatch, single-flight slots, wake routing, delegate identity/deadline/terminal state, and the `ExecutorAdapter` port |
-| `runtime/src/memory.ts` | Append-only channel memory, accepted handoffs, and revision-bound intake snapshots; host authorization FSMs remain outside model state |
-| `runtime/src/context-view.ts` | The bounded model-facing view of current state |
-| `runtime/src/floor.ts` | Exclusive ownership of the user-facing speaking path |
-| `runtime/src/ports.ts` | Executor manifests, operation contracts, requests, and typed handoffs |
-| `runtime/src/assembly.ts`, `cascaded-realtime-assembly.ts` | Configuration-driven construction of runtime, executor, and realtime graphs; dispatches `integrated` vs `cascaded` |
+| `runtime/src/core/causal-runtime.ts` | Event application, dispatch, single-flight slots, wake routing, delegate identity/deadline/terminal state, and the `ExecutorAdapter` port |
+| `runtime/src/core/memory.ts` | Append-only channel memory, accepted handoffs, and revision-bound intake snapshots; host authorization FSMs remain outside model state |
+| `runtime/src/core/context-view.ts` | The bounded model-facing view of current state |
+| `runtime/src/realtime/floor.ts` | Exclusive ownership of the user-facing speaking path |
+| `runtime/src/core/ports.ts` | Executor manifests, operation contracts, requests, and typed handoffs |
+| `runtime/src/composition/assembly.ts`, `cascaded-realtime-assembly.ts` | Configuration-driven construction of runtime, executor, and realtime graphs; dispatches `integrated` vs `cascaded` |
 | `runtime/src/realtime/` | Host response admission/ownership, shared frontend-instructions, provider transports, playback fencing, recovery, and telemetry |
 | `runtime/src/codex-*.ts` | Codex app-server transport and contract, plus the Workspace/Session project store (`codex-project-store.ts`) |
 | `runtime/src/executors/` | Deterministic simulators and adapter implementations |

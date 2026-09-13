@@ -1,4 +1,4 @@
-import { isWellFormed } from '../../python-text.js'
+import { isWellFormed } from '../../text/python-text.js'
 import { snapshotJsonRecord } from './safe-json.js'
 
 export const NOVA_API_PROVIDER = 'nova_api_key'

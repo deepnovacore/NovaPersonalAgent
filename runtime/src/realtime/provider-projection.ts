@@ -1,12 +1,12 @@
-import { canonicalJson } from '../canonical-json.js';
-import type { Clock } from '../clock.js';
-import type { CodingProgressNarrationState } from '../coding-progress-narration.js';
-import { codingProgressSummary } from '../coding-progress-narration.js';
-import { validProgressSummary,type EventRecord,type JsonValue } from '../events.js';
-import { isMonitorPolicy,isPreemptiveMonitorAlert,monitorAlertDelivery,parseMemoryRef } from '../memory.js';
-import { stripLikePython } from '../python-text.js';
-import type { WakeReason } from '../slots.js';
-import type { Suggestion } from '../suggestions.js';
+import { canonicalJson } from '../text/canonical-json.js';
+import type { Clock } from '../core/clock.js';
+import type { CodingProgressNarrationState } from './coding-progress-narration.js';
+import { codingProgressSummary } from './coding-progress-narration.js';
+import { validProgressSummary,type EventRecord,type JsonValue } from '../core/events.js';
+import { isMonitorPolicy,isPreemptiveMonitorAlert,monitorAlertDelivery,parseMemoryRef } from '../core/memory.js';
+import { stripLikePython } from '../text/python-text.js';
+import type { WakeReason } from '../core/slots.js';
+import type { Suggestion } from '../core/suggestions.js';
 import { finalSpeechView,genericFinalSpeechView,type CodingChannel } from './evidence.js';
 import type {
 HostResponseIntent

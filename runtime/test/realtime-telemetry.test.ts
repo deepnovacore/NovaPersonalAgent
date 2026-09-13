@@ -3,8 +3,8 @@ import { mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { VirtualClock } from '../src/clock.js'
-import { jsonValueSchema } from '../src/events.js'
+import { VirtualClock } from '../src/core/clock.js'
+import { jsonValueSchema } from '../src/core/events.js'
 import {
   MAX_REALTIME_DIAGNOSTICS,
   JsonlTelemetry,

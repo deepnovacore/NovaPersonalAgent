@@ -2,12 +2,12 @@
 import {createHash} from 'node:crypto'
 import {AjvJsonSchemaValidator} from '@modelcontextprotocol/sdk/validation/ajv'
 import type {Tool} from '@modelcontextprotocol/sdk/types.js'
-import type {ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff} from '../causal-runtime.js'
-import {jsonValueSchema, type JsonValue} from '../events.js'
-import {executorManifestSchema, type ExecutorManifest} from '../ports.js'
-import {compileToolSchema} from '../tool-schema.js'
-import {McpConnection, McpFailure} from '../mcp-client.js'
-import type {CapabilityRegistry, McpServerConfig, McpServerStatus} from '../capability-registry.js'
+import type {ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff} from '../core/causal-runtime.js'
+import {jsonValueSchema, type JsonValue} from '../core/events.js'
+import {executorManifestSchema, type ExecutorManifest} from '../core/ports.js'
+import {compileToolSchema} from '../core/tool-schema.js'
+import {McpConnection, McpFailure} from './mcp-client.js'
+import type {CapabilityRegistry, McpServerConfig, McpServerStatus} from '../config/capability-registry.js'
 
 export function mcpToolAlias(server: string, original: string): string {
   const prefix = `mcp__${server}__`

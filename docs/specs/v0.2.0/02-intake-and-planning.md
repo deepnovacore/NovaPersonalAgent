@@ -27,7 +27,7 @@ contract.
   ([`runtime/src/codex-app-server-transport.ts`](../../../runtime/src/codex-app-server-transport.ts)).
 - Every delegate already passes admission via `dispatchExternal` /
   `dispatchConfirmedExternal` in
-  [`runtime/src/runtime.ts`](../../../runtime/src/runtime.ts): schema, known
+  [`runtime/src/core/runtime.ts`](../../../runtime/src/core/runtime.ts): schema, known
   manifest/op, duplicate-in-flight refusal, unknown-outcome fencing, and
   `origin_ref` visibility. Intake must reuse these public entry points, not
   bypass them or invent a parallel admit API.
@@ -443,8 +443,8 @@ Rules:
   FrontBrain’s intercepted `dispatch` opens or amends intake; the instruction
   text never reaches Codex as a work order.
 - Dispatch uses the existing public APIs on
-  [`CausalRuntime`](../../../runtime/src/causal-runtime.ts) /
-  [`Runtime`](../../../runtime/src/runtime.ts):
+  [`CausalRuntime`](../../../runtime/src/core/causal-runtime.ts) /
+  [`Runtime`](../../../runtime/src/core/runtime.ts):
   - `dispatchConfirmedExternal` when a project confirmation capability is
     required (create-with-work-order, and any path that already goes through
     the confirmation controller — including `planReadback=confirm`);

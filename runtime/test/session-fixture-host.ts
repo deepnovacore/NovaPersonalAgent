@@ -7,13 +7,13 @@
  * the fence interruption once per step, and the id sequence being a hard error in both directions.
  */
 
-import { VirtualClock } from '../src/clock.js'
+import { VirtualClock } from '../src/core/clock.js'
 import {
   PlaybackRegistry,
   type PlaybackCompletion,
   type PlaybackFrame,
   type PlaybackGeneration,
-} from '../src/playback.js'
+} from '../src/realtime/playback.js'
 import {
   RealtimeSession,
   type FenceInterruption,

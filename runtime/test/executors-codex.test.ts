@@ -15,13 +15,13 @@ import type {
   ExecutorAdapter,
   ExecutorDispatchContext,
   ExecutorHandoff,
-} from '../src/causal-runtime.js'
-import {VirtualClock} from '../src/clock.js'
-import type {JsonValue} from '../src/events.js'
+} from '../src/core/causal-runtime.js'
+import {VirtualClock} from '../src/core/clock.js'
+import type {JsonValue} from '../src/core/events.js'
 import {CodexTransportError} from '../src/executors/codex/app-server-transport.js'
 import {CodexLiveAdapter} from '../src/executors/codex/adapter-live.js'
-import {delegateSchema} from '../src/ports.js'
-import {compileToolSchema} from '../src/tool-schema.js'
+import {delegateSchema} from '../src/core/ports.js'
+import {compileToolSchema} from '../src/core/tool-schema.js'
 
 const PREFLIGHT: SafePreflightReport = Object.freeze({
   version: '0.145.0',

@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
 import {fixtureSlowSimManifest} from '../eval/sim.js'
-import {executorManifestSchema} from '../src/ports.js'
-import {handoffPolicySchema} from '../src/memory.js'
+import {executorManifestSchema} from '../src/core/ports.js'
+import {handoffPolicySchema} from '../src/core/memory.js'
 
 test('executor manifests require display_name', () => {
   assert.throws(() => executorManifestSchema.parse({

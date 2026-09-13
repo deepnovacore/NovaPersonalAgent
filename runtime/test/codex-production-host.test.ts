@@ -19,7 +19,7 @@ import {
 import {hostBinaryForTest, hostCodexHomeForTest, hostWorkspaceForTest} from '../src/executors/codex/process-owner.js'
 import {validateCodexSchemaBundle} from '../src/executors/codex/app-server-schema.js'
 import {supportedSchemaBundle} from './fixtures/codex/supported-schema-bundle.js'
-import {loadSettings} from '../src/config.js'
+import {loadSettings} from '../src/config/config.js'
 
 function fakeMachExecutable(): Buffer {
   const body = Buffer.alloc(64)

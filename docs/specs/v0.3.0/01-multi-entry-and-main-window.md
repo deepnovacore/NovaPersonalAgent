@@ -13,10 +13,10 @@
   （`id` + `start | finish | cancel`，草稿缓冲 16 kHz PCM16 ≤60 秒，finish 调用级联 ASR，30 秒超时）、
   `input.audio`（结束草稿模式，恢复连续语音）；识别结果 `input.transcription`。
   **草稿不是用户轮次，不触发 LLM 或工具；客户端必须显式发送编辑后的 `input.text`。**
-- **runtime**：`runtime/src/desktop.ts` 定义上述 payload 的 zod schema；`runtime/src/desktop-session.ts`
-  持有草稿状态机；`runtime/src/client-protocol.ts` 仅在 `pipeline_mode = cascaded` 时声明能力；
+- **runtime**：`runtime/src/desktop.ts` 定义上述 payload 的 zod schema；`runtime/src/desktop/desktop-session.ts`
+  持有草稿状态机；`runtime/src/server/client-protocol.ts` 仅在 `pipeline_mode = cascaded` 时声明能力；
   `runtime/src/realtime/service.ts` 要求 provider 具备 `transcribeDraft` 能力。
-- **管线**：`runtime/src/cascaded-realtime-assembly.ts` 按 `pipeline_mode` 选 `integrated`
+- **管线**：`runtime/src/composition/cascaded-realtime-assembly.ts` 按 `pipeline_mode` 选 `integrated`
   （单一实时语音模型，`runtime/src/realtime/qwen.ts`）或 `cascaded`（端点检测 → ASR → LLM → TTS，
   `runtime/src/realtime/cascaded/`）。
 - **客户端接线现状**：桌面 renderer（`clients/desktop/src/renderer/*.mjs`）未接
@@ -32,8 +32,8 @@
 
 问题：integrated 管线能否在同一会话里同时接文字与音频？
 
-- Nova 当前 integrated 默认模型是 `qwen-audio-3.0-realtime-plus`（`runtime/src/config.ts`、
-  `runtime/src/environment-contract.ts`）。`runtime/src/realtime/qwen.ts` 已经在同一会话中
+- Nova 当前 integrated 默认模型是 `qwen-audio-3.0-realtime-plus`（`runtime/src/config/config.ts`、
+  `runtime/src/config/environment-contract.ts`）。`runtime/src/realtime/qwen.ts` 已经在同一会话中
   交替发送 `input_audio_buffer.append` 与 `conversation.item.create`（`input_text` 内容），
   `turn_detection` 在连接时设一次且不再切换。但**现有所有 `input_text` 都是主机注入**
   （工具结果、工作区上下文、进度事实，并明确标注"不是用户说的话"），没有真实用户文字轮次路径。

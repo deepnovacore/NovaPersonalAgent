@@ -20,8 +20,8 @@ import {
   PINNED_UNICODE_VERSION,
   normalizeAndLowerPinned,
   normalizeNfkcPinned,
-} from '../src/unicode-normalize.js'
-import { isOtherCategory } from '../src/unicode-tables.js'
+} from '../src/text/unicode-normalize.js'
+import { isOtherCategory } from '../src/text/unicode-tables.js'
 
 interface NfkcVector {
   readonly name: string

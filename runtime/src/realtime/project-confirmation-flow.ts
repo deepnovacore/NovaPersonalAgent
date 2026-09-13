@@ -1,19 +1,19 @@
 import {createHash} from 'node:crypto'
-import type {ApprovalHost} from '../approval.js'
-import type {Clock} from '../clock.js'
+import type {ApprovalHost} from '../core/approval.js'
+import type {Clock} from '../core/clock.js'
 import {
   type IntakeEventPort,
   type IntakeOptions,
 } from '../executors/coding/intake.js'
 import {
   USER_PRIORITY
-} from '../memory.js'
+} from '../core/memory.js'
 import type {
   ConfirmedProjectOperation,
   ProjectConfirmationController,
   ProjectConfirmationView,
-} from '../project-confirmation.js'
-import {CONFIRM_TOOL, confirmArguments} from '../work-tools.js'
+} from '../projects/project-confirmation.js'
+import {CONFIRM_TOOL, confirmArguments} from '../core/work-tools.js'
 import type {ToolCallReady} from './bridge.js'
 import {ConfirmationTurnIsolation} from './confirmation-turn-isolation.js'
 import {type CodingChannel} from './evidence.js'

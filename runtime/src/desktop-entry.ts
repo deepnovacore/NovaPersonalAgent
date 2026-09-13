@@ -1,7 +1,7 @@
-import {installDesktopControl, desktopBudgetFailure, type DesktopCapabilityState} from './desktop-control.js'
-import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop-session.js'
+import {installDesktopControl, desktopBudgetFailure, type DesktopCapabilityState} from './desktop/desktop-control.js'
+import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop/desktop-session.js'
 import {announceReadiness} from './desktop.js'
-import {buildProductionComposition} from './production-composition.js'
+import {buildProductionComposition} from './composition/production-composition.js'
 
 type UtilityProcess = NodeJS.Process & {readonly parentPort?: DesktopStopParentSource & {postMessage(message: unknown): void}}
 

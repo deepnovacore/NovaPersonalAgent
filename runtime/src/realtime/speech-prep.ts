@@ -2,8 +2,8 @@ import {
   collapsePythonWhitespace,
   PYTHON_WHITESPACE_REGEX_CLASS,
   stripLikePython,
-} from '../python-text.js'
-import {isLetterCategory, isNumberCategory} from '../unicode-tables.js'
+} from '../text/python-text.js'
+import {isLetterCategory, isNumberCategory} from '../text/unicode-tables.js'
 
 export const SPEECH_FINAL_LIMIT = 600
 

@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import type { Channel, Memory, MemoryItem } from '../memory.js'
+import type { Channel, Memory, MemoryItem } from '../core/memory.js'
 import type {RealtimeDiagnosticsSnapshot} from './telemetry.js'
 
 export const MAX_BOARD_MESSAGE_BYTES = 256 * 1024

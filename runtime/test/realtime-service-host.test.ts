@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {canonicalJson} from '../src/canonical-json.js'
-import type {JsonValue} from '../src/events.js'
+import {canonicalJson} from '../src/text/canonical-json.js'
+import type {JsonValue} from '../src/core/events.js'
 import {ItemDeliveryUncertainError} from '../src/realtime/protocol.js'
 import {
   PREEMPT_MIN_PRIORITY

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {codePointLengthLikePython, collapsePythonWhitespace, stripLikePython} from '../src/python-text.js'
+import {codePointLengthLikePython, collapsePythonWhitespace, stripLikePython} from '../src/text/python-text.js'
 
 test('text helpers preserve Python whitespace disagreements and astral code-point length', () => {
   assert.equal(stripLikePython('\u001c\u001d\u001e\u001f\u0085value\u0085'), 'value')

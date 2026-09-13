@@ -8,10 +8,10 @@
 
 import {readFileSync} from 'node:fs'
 import {resolve} from 'node:path'
-import {VirtualClock} from '../../dist/src/clock.js'
-import {DASHSCOPE_COMPATIBLE_BASE_URL} from '../../dist/src/config.js'
-import {GatewaySurrogate} from '../../dist/src/model-adapters.js'
-import {OpenAIModelGateway} from '../../dist/src/model-gateway.js'
+import {VirtualClock} from '../../dist/src/core/clock.js'
+import {DASHSCOPE_COMPATIBLE_BASE_URL} from '../../dist/src/config/config.js'
+import {GatewaySurrogate} from '../../dist/src/model/model-adapters.js'
+import {OpenAIModelGateway} from '../../dist/src/model/model-gateway.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 

@@ -9,9 +9,9 @@ import {
   requireVolcengineRealtime,
   resolveProactivity,
   type Settings,
-} from '../src/config.js'
-import {canonicalJson} from '../src/canonical-json.js'
-import {stripLikePython} from '../src/python-text.js'
+} from '../src/config/config.js'
+import {canonicalJson} from '../src/text/canonical-json.js'
+import {stripLikePython} from '../src/text/python-text.js'
 
 interface ConfigCase {
   readonly id: string

@@ -1,12 +1,12 @@
-import type {JsonValue} from '../../events.js'
-import type {ModelGateway} from '../../model-gateway.js'
+import type {JsonValue} from '../../core/events.js'
+import type {ModelGateway} from '../../model/model-gateway.js'
 import {
   assessVision,
   VISION_ASSESS_SYSTEM,
   VisionMonitorMachine,
   type VisionAssessContext,
   type VisionIdentity,
-} from '../../vision-assess.js'
+} from './assess.js'
 
 export const VISION_AGENT_DESCRIPTOR = Object.freeze({
   name: 'vision',

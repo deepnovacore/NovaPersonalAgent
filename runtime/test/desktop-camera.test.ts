@@ -20,7 +20,7 @@ import {
   serializeCameraError,
   serializeCameraPermissionRequest,
   serializeCameraPermissionResult,
-} from '../src/desktop-camera.js'
+} from '../src/desktop/desktop-camera.js'
 
 const REQUEST_ID = 'camera-17'
 const JPEG = new Uint8Array([0xff, 0xd8, 0x01, 0x02, 0xff, 0xd9])

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { Buffer } from 'node:buffer'
 import { test } from 'node:test'
-import { handoffPolicySchema, Memory, USER_PRIORITY } from '../src/memory.js'
+import { handoffPolicySchema, Memory, USER_PRIORITY } from '../src/core/memory.js'
 import {
   MAX_BOARD_CONTENT_CHARS,
   MAX_BOARD_ITEMS_PER_CHANNEL,
@@ -12,7 +12,7 @@ import {
   memoryBoardMessage,
 } from '../src/realtime/memory-board.js'
 import {NullTelemetry} from '../src/realtime/telemetry.js'
-import {VirtualClock} from '../src/clock.js'
+import {VirtualClock} from '../src/core/clock.js'
 
 const slowPolicy = handoffPolicySchema.parse({
   channel: 'slow_sim',

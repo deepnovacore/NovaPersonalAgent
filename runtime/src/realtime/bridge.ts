@@ -17,19 +17,19 @@
 
 import { createHmac, randomBytes } from 'node:crypto'
 import {toUSVString} from 'node:util'
-import { canonicalJson } from '../canonical-json.js'
-import type {ExecutorAdmission, UserTurnAuthority} from '../causal-runtime.js'
-import type { JsonValue } from '../events.js'
-import { USER_PRIORITY } from '../memory.js'
+import { canonicalJson } from '../text/canonical-json.js'
+import type {ExecutorAdmission, UserTurnAuthority} from '../core/causal-runtime.js'
+import type { JsonValue } from '../core/events.js'
+import { USER_PRIORITY } from '../core/memory.js'
 import {PersonalMemoryError, type PersonalMemoryRecallHit, type PersonalMemoryRecallResult, type PersonalMemoryRecallPort} from '../memory/personal-memory.js'
-import type { DelegateRequest } from '../ports.js'
-import type { WakeReason } from '../slots.js'
-import type { CompiledTools } from '../tool-schema.js'
+import type { DelegateRequest } from '../core/ports.js'
+import type { WakeReason } from '../core/slots.js'
+import type { CompiledTools } from '../core/tool-schema.js'
 import type {CodingChannel} from './evidence.js'
 import type { HostContextItem, HostResponseIntent } from './protocol.js'
 import type { toolCallReadySchema } from './protocol.js'
 import type { z } from 'zod'
-import {stripLikePython} from '../python-text.js'
+import {stripLikePython} from '../text/python-text.js'
 
 /** The provider event this bridge admits. Derived from the schema so the two cannot drift. */
 export type ToolCallReady = z.infer<typeof toolCallReadySchema>

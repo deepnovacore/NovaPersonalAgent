@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {setImmediate as yieldImmediate} from 'node:timers/promises'
 import {test} from 'node:test'
 
-import {buildAssembly} from '../src/assembly.js'
+import {buildAssembly} from '../src/composition/assembly.js'
 import type {
   CodexAppServerTransport,
   SafePreflightReport,
@@ -10,12 +10,12 @@ import type {
   TransportObserver,
   TransportOutcome,
 } from '../src/executors/codex/app-server-transport.js'
-import {RealClock} from '../src/clock.js'
-import {settingsSchema} from '../src/config.js'
+import {RealClock} from '../src/core/clock.js'
+import {settingsSchema} from '../src/config/config.js'
 import {CodexLiveAdapter} from '../src/executors/codex/adapter-live.js'
 import {ProjectCodexAdapter} from '../src/executors/codex/adapter-project.js'
 import {CODEX_AGENT_DESCRIPTOR, CodexAgentController} from '../src/executors/codex/controller.js'
-import type {EventRecord} from '../src/events.js'
+import type {EventRecord} from '../src/core/events.js'
 import type {SearchTransport} from '../src/executors/search.js'
 import type {
   CompleteRequest,
@@ -23,9 +23,9 @@ import type {
   GatewayDelta,
   ModelGateway,
   StreamRequest,
-} from '../src/model-gateway.js'
-import {buildRealtimeAssembly, type CodingAgentControllerFactory} from '../src/realtime-assembly.js'
-import {CANCEL_TOOL, CONFIRM_TOOL, DISPATCH_TOOL} from '../src/work-tools.js'
+} from '../src/model/model-gateway.js'
+import {buildRealtimeAssembly, type CodingAgentControllerFactory} from '../src/composition/realtime-assembly.js'
+import {CANCEL_TOOL, CONFIRM_TOOL, DISPATCH_TOOL} from '../src/core/work-tools.js'
 import type {
   HostContextItem,
   JsonObject,

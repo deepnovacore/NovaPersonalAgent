@@ -7,10 +7,10 @@ import {rm} from 'node:fs/promises'
 import {test} from 'node:test'
 
 import type {TransportOutcome} from '../src/executors/codex/app-server-transport.js'
-import {ProjectResolutionError, type RunningWork} from '../src/coding-executor.js'
-import type {ExecutorHandoff} from '../src/causal-runtime.js'
-import {MAX_CONCURRENT_WORK} from '../src/work-tools.js'
-import {projectStateMessage} from '../src/desktop-wire.js'
+import {ProjectResolutionError, type RunningWork} from '../src/executors/coding-executor.js'
+import type {ExecutorHandoff} from '../src/core/causal-runtime.js'
+import {MAX_CONCURRENT_WORK} from '../src/core/work-tools.js'
+import {projectStateMessage} from '../src/desktop/desktop-wire.js'
 import {
   COMPLETE,
   context,

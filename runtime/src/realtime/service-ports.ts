@@ -1,26 +1,26 @@
 import {
 type AgentController
-} from '../agent-controller.js'
-import type { ApprovalController as ExecutorApprovalController } from '../approval-port.js'
-import type { ExecutorAdmission } from '../causal-runtime.js'
-import type { Clock } from '../clock.js'
-import type { CodingProgressNarrationState } from '../coding-progress-narration.js'
-import { type EventRecord,type JsonValue } from '../events.js'
+} from '../executors/agent-controller.js'
+import type { ApprovalController as ExecutorApprovalController } from '../core/approval-port.js'
+import type { ExecutorAdmission } from '../core/causal-runtime.js'
+import type { Clock } from '../core/clock.js'
+import type { CodingProgressNarrationState } from './coding-progress-narration.js'
+import { type EventRecord,type JsonValue } from '../core/events.js'
 import {
 type IntakeEventPort,
 type IntakeOptions,
 } from '../executors/coding/intake.js'
 import {
 type MemoryItem
-} from '../memory.js'
-import type { PlaybackGeneration } from '../playback.js'
-import type { ExecutorRole } from '../ports.js'
+} from '../core/memory.js'
+import type { PlaybackGeneration } from './playback.js'
+import type { ExecutorRole } from '../core/ports.js'
 import type {
 ConfirmedProjectOperation,
 ProjectConfirmationController,
 ProjectConfirmationView,
-} from '../project-confirmation.js'
-import type { CompiledTools } from '../tool-schema.js'
+} from '../projects/project-confirmation.js'
+import type { CompiledTools } from '../core/tool-schema.js'
 import type { RealtimeRuntimeBridge } from './bridge.js'
 import type {
 RealtimeProviderEvent

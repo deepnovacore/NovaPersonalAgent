@@ -4,10 +4,10 @@ import {join} from 'node:path'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import {canonicalJson} from '../src/canonical-json.js'
-import {buildCascadedRealtimeAssembly} from '../src/cascaded-realtime-assembly.js'
-import {ConfigurationError, loadSettings} from '../src/config.js'
-import {buildDiagnosticReport, diagnosticReportSchema} from '../src/diagnostics.js'
+import {canonicalJson} from '../src/text/canonical-json.js'
+import {buildCascadedRealtimeAssembly} from '../src/composition/cascaded-realtime-assembly.js'
+import {ConfigurationError, loadSettings} from '../src/config/config.js'
+import {buildDiagnosticReport, diagnosticReportSchema} from '../src/config/diagnostics.js'
 import {main} from '../src/cli.js'
 
 test('diagnostics require the credential for the unconditionally assembled Search adapter', async () => {

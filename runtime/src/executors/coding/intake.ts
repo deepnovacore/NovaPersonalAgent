@@ -1,6 +1,6 @@
-import type {JsonValue} from '../../events.js'
+import type {JsonValue} from '../../core/events.js'
 import {assessSchema, planSchema, type IntakeKind, type IntakeModels, type IntakeSlots} from './intake-model.js'
-import type {ConfirmedProjectOperation, ProjectProposal} from '../../project-confirmation.js'
+import type {ConfirmedProjectOperation, ProjectProposal} from '../../projects/project-confirmation.js'
 import {renderWorkOrder, type WorkOrder} from './work-order.js'
 import {
   ProjectResolutionError,
@@ -9,9 +9,9 @@ import {
   type IntakeTarget,
   type RosterEntry,
   type RunningWork,
-} from '../../coding-executor.js'
-import {collapsePythonWhitespace, stripLikePython} from '../../python-text.js'
-import {deriveSessionTitle} from '../../work-tools.js'
+} from '../coding-executor.js'
+import {collapsePythonWhitespace, stripLikePython} from '../../text/python-text.js'
+import {deriveSessionTitle} from '../../core/work-tools.js'
 
 export type {IntakeTarget}
 export interface IntakeSettings {

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {executorProgressSchema, executorResultSchema, projectExecutorEvent, safeProgressSummary} from '../src/desktop-progress.js'
-import type {EventRecord} from '../src/events.js'
-import type {HandoffPolicy} from '../src/memory.js'
-import type {Delegate} from '../src/ports.js'
+import {executorProgressSchema, executorResultSchema, projectExecutorEvent, safeProgressSummary} from '../src/desktop/desktop-progress.js'
+import type {EventRecord} from '../src/core/events.js'
+import type {HandoffPolicy} from '../src/core/memory.js'
+import type {Delegate} from '../src/core/ports.js'
 
 const delegate: Delegate = {delegate_id: 'd', executor: 'codex', op: 'project', request: {},
   origin_ref: 'conversation:1', deadline: 60, routing_class: 'user_awaited', dispatched_at: 1}

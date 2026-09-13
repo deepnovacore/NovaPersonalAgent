@@ -2,21 +2,21 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { VirtualClock } from '../src/clock.js'
-import type { ContextView } from '../src/context-view.js'
-import type { MemoryItem } from '../src/memory.js'
+import { VirtualClock } from '../src/core/clock.js'
+import type { ContextView } from '../src/core/context-view.js'
+import type { MemoryItem } from '../src/core/memory.js'
 import type {
   CompleteRequest,
   GatewayCompletion,
   GatewayDelta,
   ModelGateway,
   StreamRequest,
-} from '../src/model-gateway.js'
+} from '../src/model/model-gateway.js'
 import {
   GatewayCompressor,
   GatewaySurrogate,
   compressorPrompt,
-} from '../src/model-adapters.js'
+} from '../src/model/model-adapters.js'
 
 const fixtureRoot = resolve(import.meta.dirname, '../../../fixtures/adapters/v1')
 

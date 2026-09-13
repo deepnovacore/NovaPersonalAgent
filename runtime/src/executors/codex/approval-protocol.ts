@@ -1,9 +1,9 @@
 import {lstatSync, realpathSync} from 'node:fs'
 import {isAbsolute, relative, resolve, sep} from 'node:path'
 import {z} from 'zod'
-import type {ApprovalOffer, ApprovalPort} from '../../approval.js'
-import type {ApprovalDecision, FileChangeDisplay} from '../../approval-port.js'
-import {codePointLengthLikePython, isWellFormed, stripLikePython} from '../../python-text.js'
+import type {ApprovalOffer, ApprovalPort} from '../../core/approval.js'
+import type {ApprovalDecision, FileChangeDisplay} from '../../core/approval-port.js'
+import {codePointLengthLikePython, isWellFormed, stripLikePython} from '../../text/python-text.js'
 import {snapshotJsonRecord} from './safe-json.js'
 
 const CODEX_APPROVAL_COMMAND_LIMIT = 4096

@@ -92,4 +92,4 @@ A/B 轨继续并行、各自小步：A 做需求发现，B 做窗口与入口。
 - 架构不变量：[docs/archs/](../../archs/00-overview.md)、[docs/glossary.md](../../glossary.md)
 - v0.2.0 系列：[docs/specs/v0.2.0/00-overview.md](../v0.2.0/00-overview.md)
 
-- 2026-09-13：Workspace Graph 已退役：移除图谱存储 worker、上下文投影、桌面入口及配置；既有 SQLite 用户数据保留。敏感内容策略与原有测试迁至 `runtime/src/sensitivity.ts`、`runtime/test/sensitivity.test.ts`。个人记忆、知识库和 active project / executor 的 `workspace_context` 保留。[06 卷](06-memory-substrate.md) 仅记录下一步底座方向，尚未实现。
+- 2026-09-13：Workspace Graph 已退役：移除图谱存储 worker、上下文投影、桌面入口及配置；既有 SQLite 用户数据保留。敏感内容策略与原有测试迁至 `runtime/src/memory/sensitivity.ts`、`runtime/test/sensitivity.test.ts`。个人记忆、知识库和 active project / executor 的 `workspace_context` 保留。[06 卷](06-memory-substrate.md) 仅记录下一步底座方向，尚未实现。

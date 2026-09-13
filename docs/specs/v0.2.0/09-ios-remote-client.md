@@ -46,11 +46,11 @@ flowchart LR
 | 当前代码 | 观察 | 实施方向 |
 |---|---|---|
 | `runtime/src/desktop-entry.ts` | 组装 capabilities、MCP、Codex、telemetry、camera；依赖桌面 readiness 与父进程停止源 | 提取确实被两个入口使用的 production composition；增加独立服务入口 |
-| `runtime/src/desktop-session.ts` | 统一生命周期 owner 与 readiness 回报 | 复用清理次序；桌面回报和服务 ready 日志分别注入，不伪造 Electron 父进程 |
+| `runtime/src/desktop/desktop-session.ts` | 统一生命周期 owner 与 readiness 回报 | 复用清理次序；桌面回报和服务 ready 日志分别注入，不伪造 Electron 父进程 |
 | `runtime/src/desktop.ts` | localhost 随机端口、首帧认证、单客户端 | 旧入口保持默认；远程服务使用显式固定端口、独立远程握手路径 |
-| `runtime/src/desktop-wire.ts` | PCM16、NOVA 二进制头、播放身份 | 提取文档与跨语言向量，直接复用媒体格式 |
-| `runtime/src/desktop-session.ts` | disconnect fence、状态/结果重投、部分错误 abort | 明确连接级错误只关闭当前连接；保留真正的服务致命错误 |
-| `runtime/src/desktop-session.ts` | 连接 generation 与发送泵 | 防止旧连接异步回调影响新连接 |
+| `runtime/src/desktop/desktop-wire.ts` | PCM16、NOVA 二进制头、播放身份 | 提取文档与跨语言向量，直接复用媒体格式 |
+| `runtime/src/desktop/desktop-session.ts` | disconnect fence、状态/结果重投、部分错误 abort | 明确连接级错误只关闭当前连接；保留真正的服务致命错误 |
+| `runtime/src/desktop/desktop-session.ts` | 连接 generation 与发送泵 | 防止旧连接异步回调影响新连接 |
 | `runtime/src/realtime/service.ts`、`realtime-assembly.ts` | 对话与执行资源生命周期 | 核对断网、provider 故障、显式结束会话分别如何影响任务 |
 
 不批量重命名所有 `desktop-*` 文件，不复制一套 mobile Runtime，不把 Codex 专属逻辑移入通用客户端协议。现有状态文档是历史验收记录，能力装配以这次代码基线为准。

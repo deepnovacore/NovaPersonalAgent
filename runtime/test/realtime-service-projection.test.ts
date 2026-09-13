@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {canonicalJson} from '../src/canonical-json.js'
-import type {EventRecord} from '../src/events.js'
+import {canonicalJson} from '../src/text/canonical-json.js'
+import type {EventRecord} from '../src/core/events.js'
 import {
   MAX_HOST_FACT_CHARS,
   PREEMPT_MIN_PRIORITY
 } from '../src/realtime/service-state.js'
 import {SPEECH_FINAL_LIMIT} from '../src/realtime/speech-prep.js'
-import type {WakeReason} from '../src/slots.js'
-import type {Suggestion} from '../src/suggestions.js'
+import type {WakeReason} from '../src/core/slots.js'
+import type {Suggestion} from '../src/core/suggestions.js'
 import {progressEvent, projectionDocument, projectionGolden, realtimeServiceHarness, runProjection} from './support/realtime-service-harness.js'
 
 

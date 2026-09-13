@@ -1,5 +1,5 @@
-import {ClientServer} from '../dist/src/client-server.js'
-import {encodeAudioFrame} from '../dist/src/desktop-wire.js'
+import {ClientServer} from '../dist/src/server/client-server.js'
+import {encodeAudioFrame} from '../dist/src/desktop/desktop-wire.js'
 
 const port = Number(process.argv.find(arg => arg.startsWith('--port='))?.split('=')[1] ?? 8787)
 const disconnectAfter = Number(process.argv.find(arg => arg.startsWith('--disconnect-after-ms='))?.split('=')[1] ?? 0)

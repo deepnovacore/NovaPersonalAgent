@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
-import type { JsonValue } from '../src/events.js'
+import { canonicalJson } from '../src/text/canonical-json.js'
+import type { JsonValue } from '../src/core/events.js'
 import {
   CODEX_APPROVAL_FRONTEND_INSTRUCTIONS,
   FRONTEND_INSTRUCTIONS,

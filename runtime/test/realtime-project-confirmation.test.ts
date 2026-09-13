@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { VirtualClock } from '../src/clock.js'
+import { VirtualClock } from '../src/core/clock.js'
 import {
   ProjectConfirmationController,
   type ProjectConfirmationView,
-} from '../src/project-confirmation.js'
+} from '../src/projects/project-confirmation.js'
 
 function createController(
   clock: VirtualClock = new VirtualClock(10),

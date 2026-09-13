@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
-import {compileToolSchema} from '../../dist/src/tool-schema.js'
+import {compileToolSchema} from '../../dist/src/core/tool-schema.js'
 import {frontendInstructions} from '../../dist/src/realtime/frontend-instructions.js'
 import {SEARCH_MANIFEST} from '../../dist/src/executors/search.js'
 import {KNOWLEDGE_MCP_MANIFEST} from '../../dist/src/knowledge/mcp.js'
@@ -9,7 +9,7 @@ import {WATCH_MANIFEST, GUARD_MANIFEST} from '../../dist/src/executors/watcher.j
 import {VISION_AGENT_DESCRIPTOR} from '../../dist/src/executors/vision/controller-core.js'
 import {createQwenCascadedLlmFactory} from '../../dist/src/realtime/cascaded/qwen-llm.js'
 import {createArkCascadedLlmFactory} from '../../dist/src/realtime/cascaded/ark-llm.js'
-import {loadSettings, resolveCascadedSelection, DASHSCOPE_COMPATIBLE_BASE_URL} from '../../dist/src/config.js'
+import {loadSettings, resolveCascadedSelection, DASHSCOPE_COMPATIBLE_BASE_URL} from '../../dist/src/config/config.js'
 
 export function surface(disabled = []) {
   const modules = Object.fromEntries(['coding', 'camera', 'search', 'knowledge'].map(name => [name, !disabled.includes(name)]))

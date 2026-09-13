@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { CONVERSATION_CHANNEL, type MemoryItem } from '../memory.js'
-import {stripLikePython} from '../python-text.js'
+import { CONVERSATION_CHANNEL, type MemoryItem } from '../core/memory.js'
+import {stripLikePython} from '../text/python-text.js'
 
 export const MAX_PACKED_RECOVERY_CONTENT = 3900
 

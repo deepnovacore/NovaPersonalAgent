@@ -1,8 +1,8 @@
 import { closeSync, fchmodSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import {homedir} from 'node:os'
 import {dirname, join} from 'node:path'
-import type { Clock } from '../clock.js'
-import { jsonValueSchema, type JsonValue } from '../events.js'
+import type { Clock } from '../core/clock.js'
+import { jsonValueSchema, type JsonValue } from '../core/events.js'
 
 export interface RealtimeTelemetry {
   record(kind: string, payload: Readonly<Record<string, JsonValue>>): void

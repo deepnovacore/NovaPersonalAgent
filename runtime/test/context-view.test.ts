@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { compileContextView, FRESH_WINDOW } from '../src/context-view.js'
+import { compileContextView, FRESH_WINDOW } from '../src/core/context-view.js'
 import {
   CONVERSATION_CHANNEL,
   Memory,
   handoffPolicySchema,
-} from '../src/memory.js'
-import { delegateSchema, executorManifestSchema } from '../src/ports.js'
-import { SuggestionPool } from '../src/suggestions.js'
+} from '../src/core/memory.js'
+import { delegateSchema, executorManifestSchema } from '../src/core/ports.js'
+import { SuggestionPool } from '../src/core/suggestions.js'
 const slowPolicy = handoffPolicySchema.parse({
   channel: 'slow_sim',
   priority: 50,

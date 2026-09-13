@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { AssemblyError, buildAssembly } from '../src/assembly.js'
-import { VirtualClock } from '../src/clock.js'
-import { settingsSchema, type Settings } from '../src/config.js'
-import type { ExecutorAdapter, ExecutorDispatchContext } from '../src/causal-runtime.js'
-import type { EventRecord } from '../src/events.js'
+import { AssemblyError, buildAssembly } from '../src/composition/assembly.js'
+import { VirtualClock } from '../src/core/clock.js'
+import { settingsSchema, type Settings } from '../src/config/config.js'
+import type { ExecutorAdapter, ExecutorDispatchContext } from '../src/core/causal-runtime.js'
+import type { EventRecord } from '../src/core/events.js'
 const MCP_CAMERA_EXECUTOR = 'mcp__nova_camera'
 import { ChromiumFrameSource } from '../src/executors/chromium-frame-source.js'
 import { DisabledFrameSource } from '../src/executors/frame-source.js'
@@ -16,15 +16,15 @@ import {
   type Frame,
   type FrameSource,
 } from '../src/executors/watcher.js'
-import { MediaStore } from '../src/media-store.js'
+import { MediaStore } from '../src/core/media-store.js'
 import type {
   CompleteRequest,
   GatewayCompletion,
   GatewayDelta,
   ModelGateway,
   StreamRequest,
-} from '../src/model-gateway.js'
-import { delegateSchema, executorManifestSchema } from '../src/ports.js'
+} from '../src/model/model-gateway.js'
+import { delegateSchema, executorManifestSchema } from '../src/core/ports.js'
 
 function record(value: unknown): Record<string, unknown> {
   assert.equal(typeof value, 'object')

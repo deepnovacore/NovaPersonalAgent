@@ -2,21 +2,21 @@ import {codexAgentDescriptor, codingAgentControllerFactory} from '../src/executo
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import {ConfigurationError, loadSettings, type Settings} from '../src/config.js'
-import {VirtualClock} from '../src/clock.js'
+import {ConfigurationError, loadSettings, type Settings} from '../src/config/config.js'
+import {VirtualClock} from '../src/core/clock.js'
 import {CODEX_PROJECT_MANIFEST} from '../src/executors/codex/contract.js'
 import type {CodexAssemblyResource} from '../src/executors/codex/factory.js'
-import {ProjectConfirmationController} from '../src/project-confirmation.js'
+import {ProjectConfirmationController} from '../src/projects/project-confirmation.js'
 import {
   buildIntegratedRealtimeAssembly,
   type IntegratedProviderRegistry,
-} from '../src/cascaded-realtime-assembly.js'
+} from '../src/composition/cascaded-realtime-assembly.js'
 import {
   buildProductionRealtimeAssembly,
   type BuildProductionRealtimeAssemblyOptions,
-} from '../src/cascaded-realtime-assembly.js'
+} from '../src/composition/cascaded-realtime-assembly.js'
 import {QwenAudioRealtimeAdapter} from '../src/realtime/qwen.js'
-import type {RealtimeAssembly} from '../src/realtime-assembly.js'
+import type {RealtimeAssembly} from '../src/composition/realtime-assembly.js'
 
 type SelectedCodingComposition = Pick<
   BuildProductionRealtimeAssemblyOptions,
@@ -242,7 +242,7 @@ test('selected branch failures never fail over and invalid modes are credential-
 })
 
 test('registry Coding/Vision gates compose all four controller combinations', async () => {
-  const {parseCapabilityRegistry} = await import('../src/capability-registry.js')
+  const {parseCapabilityRegistry} = await import('../src/config/capability-registry.js')
   for (const coding of [false, true]) {
     for (const camera of [false, true]) {
       const resource = projectResource()
