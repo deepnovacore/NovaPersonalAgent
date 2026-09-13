@@ -292,7 +292,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
       integrated_provider: integratedProvider,
       qwen_realtime_url: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_URL),
       qwen_realtime_model: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL),
-      qwen_realtime_voice: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE),
+      qwen_realtime_voice: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE)
+        ?? (environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL?.startsWith('qwen3.5-omni-') ? 'Ethan' : undefined),
       dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY),
       qwen_controlled_guard_reconnect: optionalBoolean(
         environment.NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT,
