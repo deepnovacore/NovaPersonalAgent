@@ -19,16 +19,28 @@ const eslint = new ESLint({
 
 async function lintVirtual(relativePath: string, source: string) {
   const results = await eslint.lintText(source, {filePath: join(repositoryRoot, relativePath)})
-  return results[0]?.messages.filter(message => message.ruleId === 'no-restricted-imports') ?? []
+  return results[0]?.messages.filter(message => ['no-restricted-imports', 'no-restricted-syntax'].includes(message.ruleId ?? '')) ?? []
 }
 
 test('eslint blocks Codex internals while allowing the executor registry', async () => {
   const violations = await lintVirtual(CORE_PROBE, "import {CodexAdapter} from './executors/codex/adapter.js'\n")
   assert.ok(violations.length > 0, violations.map(item => item.message).join('; '))
   assert.deepEqual(await lintVirtual(CORE_PROBE, "import {CodexAdapter} from './executors/index.js'\n"), [])
+  assert.ok((await lintVirtual(CORE_PROBE, "await import('./executors/codex/host.js')\n")).length > 0)
+  assert.deepEqual(await lintVirtual(CORE_PROBE, "await import('./executors/index.js')\n"), [])
 })
 
 test('eslint blocks executor imports of the realtime layer', async () => {
   const violations = await lintVirtual(EXECUTOR_PROBE, "import {RealtimeService} from '../../realtime/service.js'\n")
   assert.ok(violations.length > 0, violations.map(item => item.message).join('; '))
+})
+
+test('composition host authority exception does not admit other Codex internals', async () => {
+  const path = 'runtime/src/production-composition.ts'
+  for (const source of ["import './executors/codex/host.js'", "await import('./executors/codex/host.js')"]) {
+    assert.deepEqual(await lintVirtual(path, source), [])
+  }
+  for (const source of ["import './executors/codex/adapter.js'", "await import('./executors/codex/adapter.js')"]) {
+    assert.ok((await lintVirtual(path, source)).length > 0)
+  }
 })

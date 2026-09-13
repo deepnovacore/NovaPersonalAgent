@@ -30,13 +30,30 @@ export default tseslint.config(
   {
     // Outside the executor registry, depend on the Codex package's public entry only.
     files: ['runtime/src/**/*.ts'],
-    ignores: ['runtime/src/executors/**'],
+    ignores: ['runtime/src/executors/**', 'runtime/src/production-composition.ts'],
     rules: {
+      'no-restricted-syntax': ['error', {
+        selector: 'ImportExpression[source.value=/executors\\/codex\\//]',
+        message: 'load Codex through the executor registry; host authority belongs to production-composition.ts',
+      }],
       'no-restricted-imports': ['error', {
         patterns: [{
           group: ['**/executors/codex/**'],
           message: 'import Codex through executors/index.js instead of package internals',
         }],
+      }],
+    },
+  },
+  {
+    files: ['runtime/src/production-composition.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {patterns: [{
+        group: ['**/executors/codex/**', '!./executors/codex/host.js'],
+        message: 'the composition may load only the dedicated Codex host entry',
+      }]}],
+      'no-restricted-syntax': ['error', {
+        selector: 'ImportExpression[source.value=/executors\\/codex\\//][source.value!="./executors/codex/host.js"]',
+        message: 'the composition may load only the dedicated Codex host entry',
       }],
     },
   },

@@ -1,6 +1,6 @@
 # 07. Executor Boundary
 
-> 摘要：把 Codex 从"散落在内核周边的 46 个文件"收成一个真正插在 `ports.ts` 后面的执行器插件。内核（`runtime/src/**` 除 `executors/**` 与组合根）不得 import Codex 模块、不得对 `'codex'` 字面量分支；执行器按**角色**（`roles: ['coding']`）而非名字被宿主派活；`service.ts` 里两套 Codex 命名的确认状态机（approval、project confirmation）改为执行器无关的宿主能力；桌面线框去掉 `codex.*` 类型名。本卷**不改任何用户可见行为**，也不改模型可见的工具名（工具面整体在 08 换）。边界用 lint + 脚本进 `npm run check`，并用一个 test-only fixture 执行器证明端口真的能插。里程碑 **M1.5a**，在 M1 之后、08 之前。
+> 摘要：把 Codex 从"散落在内核周边的 46 个文件"收成一个真正插在 `ports.ts` 后面的执行器插件。内核（`runtime/src/**` 除 `executors/**` 与组合根）不得 import Codex 模块、不得对 `'codex'` 字面量分支；执行器按**角色**（`roles: ['coding']`）而非名字被宿主派活；`service.ts` 里两套 Codex 命名的确认状态机（approval、project confirmation）改为执行器无关的宿主能力；桌面线框去掉 `codex.*` 类型名。本卷**不改任何用户可见行为**，也不改模型可见的工具名（工具面整体在 08 换）。边界通过 ESLint 进入 `npm run check`；历史 fixture 端口验证已归档。里程碑 **M1.5a**，在 M1 之后、08 之前。
 >
 > 依据：2026-09-03 对 `runtime/src` 的三份静态审计（耦合面、端口契约、project/session 流程），行号以当日 `v0.2.0dev` 工作树为准。
 
@@ -76,8 +76,8 @@ validation (`codex-host-config`, `codex-launch-profile`, `codex-version`,
    an approval surface; it does not own the tool or the FSM.
 4. **Executors do not import the conversation layer.** The dependency arrow
    is `realtime → ports ← executors/*`, never `executors/* → realtime`.
-5. **Enforced, not aspirational.** A lint rule plus a boundary script run in
-   `npm run check`; a test-only fixture executor exercises the full port.
+5. **Enforced, not aspirational.** ESLint static and dynamic import restrictions run in
+   `npm run check`; the historical fixture proof is archived below.
 6. **Behaviour-preserving.** No user-visible change: same tools, same wire
    semantics under new type names, same approval prompts, same live smokes.
 
@@ -87,8 +87,7 @@ validation (`codex-host-config`, `codex-launch-profile`, `codex-version`,
   `codex__confirm_project_action`, `codex__confirm_codex_approval`,
   `codex__steer`, `codex__status`. The whole model-facing surface changes
   once in [08](08-project-and-work.md) so prompt text and tests move once.
-- A second production executor (ACP or otherwise). The fixture executor is
-  test-only. ACP remains out of v0.2.0.
+- A second production executor (ACP or otherwise). The historical fixture executor is retired. ACP remains out of v0.2.0.
 - Changing Windows approval behaviour, launch profiles, or the broker shapes
   agreed in [01](01-codex-approvals.md).
 - Merging the two confirmation state machines. `ApprovalController` and
@@ -109,19 +108,18 @@ validation (`codex-host-config`, `codex-launch-profile`, `codex-version`,
 
 Definitions:
 
-- **Core**: every file under `runtime/src/**` except `runtime/src/executors/**`
-  and the composition roots below.
-- **Composition roots** (may import any executor package): `runtime/src/cli.ts`,
-  `runtime/src/desktop-entry.ts`, `runtime/src/production-realtime-assembly.ts`,
-  and `runtime/src/executors/index.ts` (the registry).
+- **Core**: every file under `runtime/src/**` except `runtime/src/executors/**`.
+- **Host composition exception**: `runtime/src/production-composition.ts` may
+  load only `./executors/codex/host.js`; privileged host exports never flow into
+  the public runtime barrel. Other core imports use `executors/index.ts`.
 - **Executor package**: `runtime/src/executors/<name>/**` with exactly one
   public entry point: `<name>/index.ts`, or a flat `<name>.ts` composition
   entry point. The latter is used by Vision so `assembly.ts` can load it
   independently; the aggregate `executors/index.ts` re-exports that same entry.
 
-Rules (each is machine-checked; see Enforcement):
+Rules (import boundaries are machine-checked; other ownership rules guide review):
 
-- R1. Core must not import from `runtime/src/executors/<name>/**`.
+- R1. Core must not import Codex internals except the dedicated host entry above.
 - R2. Core must not compare, switch, or branch on the literal `'codex'` (or any
   other executor name). Executor identity reaches core only as
   `manifest.name`, `manifest.roles`, `manifest.display_name`, `delegate.executor`.
@@ -135,8 +133,7 @@ Rules (each is machine-checked; see Enforcement):
   executor's package and merged into `environment-contract.ts` rows through the
   existing `owner` axis; core rows never carry `owner: 'codex'`.
 
-Allowed residue after this volume (must be listed in the boundary script's
-allowlist with a reason): the string `'codex'` inside `executors/codex/**`;
+Allowed vocabulary residue (the historical allowlist script is retired): the string `'codex'` inside `executors/codex/**`;
 the user-facing env var names; the `owner: 'codex'` tag on those rows;
 fixture / test files under `runtime/test/**`.
 
@@ -315,7 +312,6 @@ changes from `executor === 'codex' && op === 'project'` to
 ```
 runtime/src/executors/
   index.ts                     # registry: name → factory; used by composition roots
-  fixture/                     # test-only executor (see below); excluded from production build? no — shipped but never selected
   codex/
     index.ts                   # public: createCodexExecutor(config) → {adapter, envRows, diagnostics}
     contract.ts                # was codex-contract.ts
@@ -378,44 +374,19 @@ Golden-tested transcripts must be identical for the Codex case.
 
 ## Fixture executor (boundary proof)
 
-`runtime/eval/executors/fixture/` retains the deterministic executor used by the
-evaluation harness, with
-`roles: ['coding']`, `approvals: true`, `model_visibility: 'hidden'`, ops `run`,
-`steer`, `status`, `cancel` mirroring the Codex manifest shapes (08), and a
-registered `AgentDescriptor`, plus a scripted `ApprovalBroker`. It is
-selectable only when `NODE_ENV !== 'production'` or
-via `NOVA_AUDIO_AGENT_EXECUTORS=fixture` in tests. The production boundary is enforced by ESLint;
-the historical end-to-end fixture drove: assembly by role,
-intake dispatch through `dispatch`, progress, an approval round-trip through `confirm`,
-a project confirmation round-trip, and terminal handoff — **with no Codex
-module loaded** (asserted via `require.cache` / module registry inspection).
-If that test cannot be written without importing Codex, the boundary is not
-real and this volume is not done.
+The unused fixture executor and its historical boundary proof were retired in batch 1.
+The CLI evaluation path uses `runtime/eval/sim.ts`; no fixture executor is shipped.
+The original proof is preserved at [6b97ea96](https://github.com/deepnovacore/NovaAudioAgent/blob/6b97ea96/runtime/test/executor-boundary-fixture.test.ts).
 
-Phase 5.5 implementation note (2026-09-06): registration is the existing
-`buildAssembly({executors})` adapter map plus `settings.executors` selection,
-followed by the realtime host's coding-role resolution. Both production and
-the fixture supply their resource/controller through these ports. The
-`executors/index.ts` file is a public export barrel, not a factory registry;
-like the production compositions, the proof imports the selected package's
-dedicated entry point so the barrel does not eagerly import unrelated
-executors. The fixture factory rejects `NODE_ENV=production` and is never
-selected by production configuration. The test uses Node's ESM loader hooks
-to inspect actual loaded modules (CommonJS `require.cache` cannot prove this).
-The scripted boundaries are the provider, intake model answers and the
-in-memory executor; assembly, intake, runtime, confirmation capabilities,
-approval broker and service delivery are the actual host implementations.
-
-The broadened case-insensitive scan deliberately retains an exact-line,
-counted baseline for existing settings/storage names, composition field
-names, live prompt policy and historical comments. These are documented
-debt, not a claim that the stricter env-only acceptance checklist is done.
+`production-composition.ts` alone may load the dedicated `executors/codex/host.ts`
+authority entry. This entry remains excluded from the public runtime barrel;
+other core modules must use the executor registry. ESLint checks static and dynamic imports.
 
 
 ## Enforcement
 
 - ESLint (`eslint.config.mjs`): a block for
-  `runtime/src/**/*.ts` outside `executors/**` forbids direct imports from
+  `runtime/src/**/*.ts` outside `executors/**` (except the exact composition/host authority entry described above) forbids direct imports from
   `**/executors/codex/**`; the public `executors/index.ts` registry remains available. A block for
   `runtime/src/executors/**` restricting `**/realtime/**`, `**/desktop*`,
   `**/*-assembly*`.
@@ -427,7 +398,7 @@ debt, not a claim that the stricter env-only acceptance checklist is done.
 | Area | Files |
 |---|---|
 | Port | `runtime/src/ports.ts`, new `runtime/src/approval-port.ts` |
-| Registry | new `runtime/src/executors/index.ts`, `runtime/src/executors/codex/index.ts`; evaluation support lives in `runtime/eval/executors/fixture/**` |
+| Registry | new `runtime/src/executors/index.ts`, `runtime/src/executors/codex/index.ts`; evaluation fixtures use `runtime/eval/sim.ts` |
 | Moves | 16 `codex-*.ts`, `executors/codex*.ts`, `realtime/codex-approval.ts` → `executors/codex/**`; `codex-project-store.ts` → `project-store.ts` |
 | Role routing | `realtime-assembly.ts`, `confirmed-project-capability.ts`, `realtime/bridge.ts`, `model-adapters.ts`, `tool-schema.ts` |
 | Service | `realtime/service.ts` approval FSM → `ApprovalBroker`; rename only |
@@ -448,7 +419,7 @@ Deterministic:
       tests in `runtime/test/eslint-boundary.test.ts` using ESLint's API).
 - [x] The historical fixture executor proof ran through terminal delivery without loading
       `executors/codex/`; the harness remains under `runtime/eval/` and the deleted migration-era
-      test is available from the `v0.1.0` tag.
+      test is available from commit `6b97ea96`.
 - [ ] Assembly by role: disabled unique coding role → intake absent and no
       `dispatch` / `cancel` compilation without `AssemblyError`; two enabled
       coding roles → `AssemblyError`; one → dispatch reaches it.
