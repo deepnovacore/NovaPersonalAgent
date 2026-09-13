@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
-import type { JsonValue } from '../src/events.js'
-import { ItemDeliveryUncertainError } from '../src/realtime/protocol.js'
+import {test} from 'node:test'
+import {canonicalJson} from '../src/canonical-json.js'
+import type {JsonValue} from '../src/events.js'
+import {ItemDeliveryUncertainError} from '../src/realtime/protocol.js'
 import {
-PREEMPT_MIN_PRIORITY
+  PREEMPT_MIN_PRIORITY
 } from '../src/realtime/service-state.js'
-import { RealtimeService } from '../src/realtime/service.js'
-import { deliveryPassScenarios,document,finishProviderResponse,golden,guardFact,hostFact,openCompletedAcknowledgementPlayback,queueOnlyOptions,realtimeServiceHarness,runScenario,twoTurns } from './realtime-service-harness.js'
+import {RealtimeService} from '../src/realtime/service.js'
+import {deliveryPassScenarios, document, finishProviderResponse, golden, guardFact, hostFact, openCompletedAcknowledgementPlayback, queueOnlyOptions, realtimeServiceHarness, runScenario, twoTurns} from './support/realtime-service-harness.js'
+
 
 test('every service queue scenario matches the Python-exported golden', () => {
   const mismatched: string[] = []

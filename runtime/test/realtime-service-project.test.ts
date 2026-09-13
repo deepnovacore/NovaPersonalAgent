@@ -1,21 +1,22 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
-import { VirtualClock } from '../src/clock.js'
-import type { JsonValue } from '../src/events.js'
-import { Memory } from '../src/memory.js'
-import { executorManifestSchema } from '../src/ports.js'
+import {test} from 'node:test'
+import {VirtualClock} from '../src/clock.js'
+import type {JsonValue} from '../src/events.js'
+import {Memory} from '../src/memory.js'
+import {executorManifestSchema} from '../src/ports.js'
 import {
-ProjectConfirmationController
+  ProjectConfirmationController
 } from '../src/project-confirmation.js'
 import {
-RealtimeRuntimeBridge
+  RealtimeRuntimeBridge
 } from '../src/realtime/bridge.js'
-import type { ResponseOrigin } from '../src/realtime/protocol.js'
-import { ItemDeliveryUncertainError } from '../src/realtime/protocol.js'
-import { RealtimeService } from '../src/realtime/service.js'
-import type { RealtimeSession } from '../src/realtime/session.js'
-import { compileToolSchema } from '../src/tool-schema.js'
-import { beginExecutorApprovalCarrier,confirmationTurn,emitExecutorApprovalFunction,emptyStream,endExecutorApprovalSpeech,finishExecutorApprovalQuestion,finishProviderResponse,guardFact,hostFact,offerCodexCommand,propose,realtimeServiceHarness,reserveConfirmationTurn,speak,toldAboutConfirmation,unsubscribeNothing } from './realtime-service-harness.js'
+import type {ResponseOrigin} from '../src/realtime/protocol.js'
+import {ItemDeliveryUncertainError} from '../src/realtime/protocol.js'
+import {RealtimeService} from '../src/realtime/service.js'
+import type {RealtimeSession} from '../src/realtime/session.js'
+import {compileToolSchema} from '../src/tool-schema.js'
+import {beginExecutorApprovalCarrier, confirmationTurn, emitExecutorApprovalFunction, emptyStream, endExecutorApprovalSpeech, finishExecutorApprovalQuestion, finishProviderResponse, guardFact, hostFact, offerCodexCommand, propose, realtimeServiceHarness, reserveConfirmationTurn, speak, toldAboutConfirmation, unsubscribeNothing} from './support/realtime-service-harness.js'
+
 
 test('a Codex approval prompt is a neutral host fact with no local command detail', async () => {
   const {service, executorApproval} = realtimeServiceHarness('pipeline', {

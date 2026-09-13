@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
-import type { AgentActionResult,AgentController } from '../src/agent-controller.js'
+import {test} from 'node:test'
+import type {AgentActionResult, AgentController} from '../src/agent-controller.js'
 import {
-CODEX_AGENT_SUMMARY
+  CODEX_AGENT_SUMMARY
 } from '../src/executors/codex/contract.js'
-import { IntakeController } from '../src/executors/coding/intake.js'
-import type { ResponseOrigin } from '../src/realtime/protocol.js'
-import type { RealtimeService} from '../src/realtime/service.js';
-import {type ServiceProvider } from '../src/realtime/service.js'
-import { dispatchTurn,hostFact,intakePorts,parkedStream,realtimeServiceHarness,speak,twoTurns } from './realtime-service-harness.js'
+import {IntakeController} from '../src/executors/coding/intake.js'
+import type {ResponseOrigin} from '../src/realtime/protocol.js'
+import type {RealtimeService} from '../src/realtime/service.js'
+import {type ServiceProvider} from '../src/realtime/service.js'
+import {dispatchTurn, hostFact, intakePorts, parkedStream, realtimeServiceHarness, speak, twoTurns} from './support/realtime-service-harness.js'
+
 
 test('a tool call is admitted against the user turn that justifies it', async () => {
   const {service, actions, session} = realtimeServiceHarness('pipeline')

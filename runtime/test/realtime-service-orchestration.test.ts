@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
-import { getEventListeners } from 'node:events'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { test } from 'node:test'
-import { RealtimeService } from '../src/realtime/service.js'
-import type { RealtimeSession } from '../src/realtime/session.js'
-import { emptyStream,hostFact,parkedStream,queueOnlyOptions,realtimeServiceHarness,speak,twoTurns } from './realtime-service-harness.js'
+import {getEventListeners} from 'node:events'
+import {readFileSync} from 'node:fs'
+import {resolve} from 'node:path'
+import {test} from 'node:test'
+import {RealtimeService} from '../src/realtime/service.js'
+import type {RealtimeSession} from '../src/realtime/session.js'
+import {emptyStream, hostFact, parkedStream, queueOnlyOptions, realtimeServiceHarness, speak, twoTurns} from './support/realtime-service-harness.js'
+
 
 test('the stop flag is a real AbortSignal, because the runtime registers a listener on it', async () => {
   // The finding this test exists for: a look-alike carrying only `aborted` throws
