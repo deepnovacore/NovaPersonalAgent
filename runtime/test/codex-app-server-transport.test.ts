@@ -3126,3 +3126,18 @@ test('a binary identity change forbids certificate reuse before the shared-home 
     assert.equal(owner.received.some(item => item.method === 'thread/start'), false)
   } finally { await transport.close(); rmSync(root, {recursive: true, force: true}) }
 })
+
+test('shared HOME disabled MCP entries do not prevent a turn, but live or nonempty external entries do', async () => {
+  for (const [runtimeStatus, tools, expected] of [
+    ['disabled', {}, 'completed'],
+    ['connected', {}, 'mcp_tools_not_isolated'],
+    ['disabled', {rogue: {name: 'rogue'}}, 'mcp_tools_not_isolated'],
+  ] as const) {
+    const owner = new MemoryAppServerOwner([], {inventory: () => ({data: [{name: 'external-disabled', runtimeStatus, tools}], nextCursor: null})})
+    const transport = createTransport({spawn: async () => owner})
+    const result = await transport.run({workOrder: 'fixture'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.code, expected)
+    assert.equal(result.turnStartWritten, expected === 'completed')
+    await transport.close()
+  }
+})

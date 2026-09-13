@@ -337,3 +337,25 @@ test('all bubble mode shows only finalized assistant replies, preserving multili
   assert.equal(controller.items[0].kind, 'conversation')
   await controller.clear()
 })
+
+test('a new conversation replaces the old reply and each work retains only its latest progress', async () => {
+  const bubbles = createProgressBubbleController({reserveBubbleArea: async () => ({}), render: () => {}, schedule: () => 0, cancel: () => {}})
+  await bubbles.push({kind: 'conversation', delegateId: 'reply-1', summary: '正在启动', level: 'milestone'})
+  await bubbles.push({kind: 'conversation', delegateId: 'reply-2', summary: '启动失败', level: 'milestone'})
+  assert.deepEqual(bubbles.items.map(i => i.summary), ['启动失败'])
+  await bubbles.push({delegateId: 'work-1', summary: '工作中', level: 'detail'})
+  await bubbles.push({delegateId: 'work-1', summary: '已完成', level: 'milestone'})
+  assert.deepEqual(bubbles.items.map(i => i.summary), ['已完成', '启动失败'])
+})
+
+test('expanding a reply reserves three rows and collapsing releases them', async () => {
+  const rows = []
+  const bubbles = createProgressBubbleController({reserveBubbleArea: async n => {rows.push(n); return {}}, render: () => {}, schedule: () => 0, cancel: () => {}})
+  await bubbles.push({kind: 'conversation', summary: '长文本'.repeat(100), level: 'milestone'})
+  const key = bubbles.items[0].key
+  await bubbles.toggleExpanded(key)
+  assert.equal(bubbles.items[0].expanded, true)
+  assert.equal(rows.at(-1), 3)
+  await bubbles.toggleExpanded(key)
+  assert.equal(rows.at(-1), 1)
+})

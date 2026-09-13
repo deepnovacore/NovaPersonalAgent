@@ -80,7 +80,7 @@ test('Ark maps common inputs and tools, returns common events, and keeps chainin
   ])
   assert.deepEqual(requests[0]?.input, [
     {role: 'user', content: '天气'},
-    {role: 'user', content: '用户在上海'},
+    {role: 'system', content: '用户在上海'},
     {role: 'user', content: '上一轮问天气'},
     {type: 'function_call_output', call_id: 'weather-call', output: '{"temperature":20}'},
   ])

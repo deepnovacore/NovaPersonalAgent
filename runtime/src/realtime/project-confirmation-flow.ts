@@ -130,7 +130,9 @@ export class ProjectConfirmationFlow {
     const target = intake.target
     const proposal = this.#ports.projectConfirmation.prepare({
       action: target.action, workspace_display_name: target.workspace_display_name,
-      workspace_id: target.workspace_id, session_title: target.session_title, session_id: target.session_id,
+      workspace_id: target.workspace_id,
+      session_title: target.action === 'create' || target.action === 'reuse' ? intake.title : target.session_title,
+      session_id: target.session_id,
       work_order: intake.work_order, origin_ref: intake.origin_ref,
       intake_id: intake.intake_id, plan_revision: intake.plan_revision!,
     })

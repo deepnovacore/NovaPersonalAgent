@@ -919,9 +919,15 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         for (const value of response.data) {
           const server = snapshotJsonRecord(value)
           const name = server.name
-          if (typeof name !== 'string' || !Object.hasOwn(expected, name) || seen.has(name)) throw new TypeError('server')
+          if (typeof name !== 'string' || seen.has(name)) throw new TypeError('server')
           seen.add(name)
           const tools = snapshotJsonRecord(server.tools)
+          // Shared-home entries remain in Codex's inventory even when explicitly disabled.
+          if (server.runtimeStatus === 'disabled' && Object.keys(tools).length === 0) {
+            if (Object.hasOwn(expected, name)) recordManagedMcpVisibility(managed, name, false)
+            continue
+          }
+          if (!Object.hasOwn(expected, name)) throw new TypeError('server')
           for (const [nameOfTool, metadata] of Object.entries(tools)) {
             if (!expected[name]!.enabled_tools.includes(nameOfTool)
               || snapshotJsonRecord(metadata).name !== nameOfTool) throw new TypeError('tool')

@@ -29,6 +29,8 @@ import {jsonValueSchema, validProgressSummary, type JsonValue} from '../../core/
 
 const TRANSPORT_CODES: ReadonlySet<string> = new Set<CodexTransportCode>([
   'completed',
+  'config_not_isolated',
+  'mcp_tools_not_isolated',
   'adapter_timeout',
   'binary_missing',
   'credential_missing',
@@ -52,6 +54,8 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set<CodexTransportCode>([
 ])
 const PREFLIGHT_CODES: ReadonlySet<string> = new Set(PUBLIC_PREFLIGHT_CODES)
 const REFUSED_CODES: ReadonlySet<string> = new Set([
+  'config_not_isolated',
+  'mcp_tools_not_isolated',
   'adapter_timeout',
   'binary_missing',
   'busy',
@@ -345,7 +349,7 @@ export class CodexAdapterCore {
         return createRunHandoff(
           'failed',
           'trusted_system',
-          PREFLIGHT_CODES.has(admitted.code) ? admitted.code : 'worker_refused',
+          PREFLIGHT_CODES.has(admitted.code) || admitted.code === 'config_not_isolated' || admitted.code === 'mcp_tools_not_isolated' ? admitted.code : 'worker_refused',
           preflight,
           failureStage(admitted.code, 'thread_start'),
         )

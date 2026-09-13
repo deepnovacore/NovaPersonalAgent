@@ -630,3 +630,12 @@ test('DeepSeek official stream keeps tool history, disables thinking and meters 
   assert.equal(reports.at(-1)?.provider, 'deepseek')
   assert.equal(reports.at(-1)?.cachedTokens, 96)
 })
+
+test('host facts are system context, never a new user decision', async () => {
+  const capture: Capture = {}
+  const llm = session(capture)
+  await collect(llm.stream({inputs: [{kind: 'host_context', content: '请询问用户是否创建工作区'}], tools: [], signal: new AbortController().signal}))
+  const {messages} = JSON.parse(capture.init?.body as string) as {messages: unknown[]}
+  assert.deepEqual(messages.at(-1), {role: 'system', content: '请询问用户是否创建工作区'})
+  await llm.close()
+})

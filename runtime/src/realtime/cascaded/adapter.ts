@@ -952,7 +952,11 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         inputs: visualInputs.map(item => structuredClone(item)),
         tools: allowTools ? owner.tools.map(tool => structuredClone(tool)) : [],
         workspaceContext: owner.workspaceContext?.item.content ?? null,
-        responseAdaptation: owner.responseAdaptation?.content ?? null,
+        responseAdaptation: [owner.responseAdaptation?.content,
+          allowTools
+            ? '本轮只通过结构化 tool_calls 调用工具，不要把调用写成 JSON 文本。确认必须基于本轮用户决定；调用后等待宿主结果，不要声称已执行。'
+            : '本轮是宿主事实播报，没有用户授权，也没有可调用工具。只转述最新事实或给定问题，不模拟工具调用，不输出调用 JSON，不代用户确认；已接纳不等于已启动，失败原因未知时不猜测，不承诺自动重试。',
+        ].filter(Boolean).join('\n'),
         signal,
       })) {
         throwIfAborted(signal)

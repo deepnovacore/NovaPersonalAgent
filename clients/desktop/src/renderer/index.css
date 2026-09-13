@@ -52,6 +52,7 @@ html, body {
 #bubble-stack::before { width: 20px; height: 11px; bottom: -6px; background: #7a9e92; }
 #bubble-stack::after { width: 16px; height: 9px; bottom: -4px; background: #13161f; }
 .progress-bubble {
+  position: relative;
   width: calc(100% - 12px);
   max-width: 308px;
   height: 48px;
@@ -745,7 +746,31 @@ body:hover #orb-rail,
   #camera-toggle[data-camera-state="unavailable"] { color: #ff3b30; border-color: #ff3b30; }
 }
 
-.progress-bubble[data-kind='conversation'] { overflow-y: auto; white-space: pre-wrap; user-select: text; cursor: text; }
+.progress-bubble-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 16.5px;
+  max-height: 33px;
+  padding-right: 28px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.progress-bubble[data-expanded='true'] { height: 160px; flex-basis: 160px; }
+.progress-bubble[data-expanded='true'] .progress-bubble-text {
+  display: block;
+  -webkit-line-clamp: unset;
+  max-height: 146px;
+  overflow-y: auto;
+}
+.progress-bubble-toggle {
+  position: absolute; right: 7px; bottom: 6px;
+  padding: 0; border: 0; background: #13161f; color: #a6d6ff;
+  font: 10px/16.5px system-ui, sans-serif; cursor: pointer;
+}
+.progress-bubble-toggle[hidden] { display: none; }
 #last-result[hidden] { display: none; }
 
 /* Result access sits opposite the four existing controls, clear of the workspace pill. */

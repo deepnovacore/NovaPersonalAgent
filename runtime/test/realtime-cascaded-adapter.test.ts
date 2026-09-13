@@ -719,6 +719,7 @@ test('host facts preserve wording and cannot expose user-action tools', async ()
     kind: 'host_context', content: 'Nova Audio Agent 任务进度事实：第一项',
   }])
   assert.deepEqual(llm.calls[0]?.tools, [])
+  assert.ok(llm.calls[0]?.responseAdaptation?.includes('不代用户确认'))
 })
 
 test('cascaded adapter replaces workspace context without adding old context to LLM history', async () => {
@@ -830,9 +831,10 @@ test('cascaded response adaptation is an absolute per-turn slot and clears witho
   await run('adapt-2')
   await adapter.replaceResponseAdaptation({revision: 3, content: null}, new AbortController().signal)
   await run('adapt-3')
-  assert.equal(llm.calls[0]?.responseAdaptation, 'first preference')
-  assert.equal(llm.calls[1]?.responseAdaptation, 'second preference')
-  assert.equal(llm.calls[2]?.responseAdaptation, null)
+  assert.ok(llm.calls[0]?.responseAdaptation?.startsWith('first preference\n'))
+  assert.ok(llm.calls[1]?.responseAdaptation?.startsWith('second preference\n'))
+  assert.equal(llm.calls[2]?.responseAdaptation?.includes('preference'), false)
+  assert.ok(llm.calls[2]?.responseAdaptation?.includes('不代用户确认'))
   assert.equal(JSON.stringify(llm.calls[2]).includes('first preference'), false)
   await watching.stop()
   await adapter.close()

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import {ProjectConfirmationFlow} from '../src/realtime/project-confirmation-flow.js'
 import { VirtualClock } from '../src/core/clock.js'
 import {
   ProjectConfirmationController,
@@ -500,4 +501,19 @@ test('invalid proposal IDs are rejected before replacing pending state', () => {
     })
     assert.throws(() => prepareSelect(controller), /invalid confirmation proposal id/u)
   }
+})
+
+test('intake confirmation carries its objective title into the granted operation', () => {
+  const controller = createController()
+  const stop = new Error('stop after proposal persistence')
+  const flow = new ProjectConfirmationFlow({projectConfirmation: {
+    prepare: (input: Parameters<ProjectConfirmationController['prepare']>[0]) => {controller.prepare(input); throw stop},
+  }} as unknown as ConstructorParameters<typeof ProjectConfirmationFlow>[0])
+  const current = {target: {action: 'create', workspace_display_name: 'Game', workspace_id: null,
+    session_title: null, session_id: null}, title: 'Build a game', work_order: 'WorkOrder v2\n\nObjective:\n- Build a game',
+    origin_ref: 'conversation:1', intake_id: 'intake-1', plan_revision: 1}
+  assert.throws(() => flow.prepareIntake(current as Parameters<typeof flow.prepareIntake>[0]), error => error === stop)
+  const operation = controller.acceptDirectDecision({proposalId: controller.lifecycleId!, confirmed: true}).operation!
+  assert.equal(operation.session_title, 'Build a game')
+  assert.equal(operation.work_order, current.work_order)
 })

@@ -599,3 +599,13 @@ test('live pre-aborted dispatch never invokes a transport method', async () => {
   await assert.rejects(dispatch, {name: 'AbortError'})
   assert.deepEqual(transport.calls, [])
 })
+
+for (const code of ['config_not_isolated', 'mcp_tools_not_isolated']) {
+  test(`shared-home refusal preserves ${code} through the live adapter`, async () => {
+    const transport = new ScriptedTransport()
+    transport.outcome = {classification: 'refused', code, turnStartWritten: false, completion: null}
+    const result = await new CodexLiveAdapter(transport).dispatch('run', {work_order: 'Build a game'}, context())
+    assert.equal(result.outcome, 'failed')
+    assert.equal(result.content.code, code)
+  })
+}
