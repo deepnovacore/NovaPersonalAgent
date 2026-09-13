@@ -160,7 +160,7 @@ required to ship bubbles.
 
 | Area | Files |
 |---|---|
-| Projection | `runtime/src/desktop-bridge.ts`, possibly a small progress-projector module |
+| Projection | `runtime/src/desktop-session.ts`, possibly a small progress-projector module |
 | Wire | `runtime/src/desktop-wire.ts`, `runtime/src/desktop.ts` inbound/outbound schemas if needed |
 | Orb | new `bubbles.mjs` (or equivalent), `index.mjs`, `index.css` |
 | Settings | store v4 + 通知 tab |

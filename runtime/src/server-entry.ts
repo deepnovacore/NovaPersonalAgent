@@ -2,7 +2,7 @@ import {ClientPairing} from './client-pairing.js'
 /** Headless production service. No Electron, parent-port, or stdin lifecycle dependency. */
 import {pathToFileURL} from 'node:url'
 import {initializeServerToken, loadServerConfig, type ServerConfig} from './server-config.js'
-import type {DesktopEntryOptions, DesktopStopEventSource} from './desktop-service.js'
+import type {DesktopEntryOptions, DesktopStopEventSource} from './desktop-session.js'
 
 export async function runServerEntry(options: {
   readonly environment?: NodeJS.ProcessEnv
@@ -49,7 +49,7 @@ export async function runServerEntry(options: {
         return 2
       } finally { await server.close() }
     }
-    const {runDesktopEntry} = await import('./desktop-service.js')
+    const {runDesktopEntry} = await import('./desktop-session.js')
     const aoq = config.mediaMode === 'aoq_runtime'
     const environment = options.environment ?? process.env
     const aoqModule = aoq ? await import('./aoq-chat-server.js') : undefined

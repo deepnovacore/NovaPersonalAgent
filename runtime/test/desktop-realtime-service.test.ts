@@ -21,7 +21,7 @@ import {
   type DesktopRealtimeOwner,
   type DesktopRealtimeTransportOwner,
   type DesktopOutputCallbacks,
-} from '../src/desktop-service.js'
+} from '../src/desktop-session.js'
 import {decodeAudioFrame} from '../src/desktop-wire.js'
 import type {EventRecord} from '../src/events.js'
 import type {
@@ -39,7 +39,7 @@ import type {
   RealtimeProvider,
 } from '../src/realtime/protocol.js'
 import {memoryBoardMessage} from '../src/realtime/memory-board.js'
-import {buildProductionRealtimeAssembly} from '../src/production-realtime-assembly.js'
+import {buildProductionRealtimeAssembly} from '../src/cascaded-realtime-assembly.js'
 import {createArkCascadedLlmSession} from '../src/realtime/cascaded/ark-llm.js'
 import {
   QwenSocketClosedError,

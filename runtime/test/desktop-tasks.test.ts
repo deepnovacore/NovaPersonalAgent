@@ -37,7 +37,7 @@ test('retention preserves running tasks and stays below socket byte limit', () =
 })
 
 test('native opener accepts only canonical existing directories and passes no shell', async () => {
-  const {openTaskDirectory} = await import('../src/desktop-task-opener.js')
+  const {openTaskDirectory} = await import('../src/desktop-tasks.js')
   const {realpath} = await import('node:fs/promises')
   const path = await realpath(tmpdir())
   const launches: unknown[] = []
@@ -72,7 +72,7 @@ test('control-only project labels cannot invalidate outbound task snapshots', ()
 
 
 test('native opener drops an obsolete request after filesystem validation', async () => {
-  const {openTaskDirectory} = await import('../src/desktop-task-opener.js')
+  const {openTaskDirectory} = await import('../src/desktop-tasks.js')
   const {realpath} = await import('node:fs/promises')
   const path = await realpath(tmpdir())
   let wanted = true
@@ -104,7 +104,7 @@ test('a long-running native opener does not retain its caller process', {skip: p
 require('node:fs').writeFileSync(process.env.NOVA_OPENER_TEST_PID, String(process.pid));
 setInterval(() => {}, 1000);
 `, {mode: 0o700})
-    const module = new URL('../src/desktop-task-opener.js', import.meta.url).href
+    const module = new URL('../src/desktop-tasks.js', import.meta.url).href
     const script = `import {openTaskDirectory} from ${JSON.stringify(module)}; await openTaskDirectory(${JSON.stringify(directory)}, undefined, 'linux');`
     const caller = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
       env: {...process.env, PATH: `${directory}${delimiter}${process.env.PATH ?? ''}`, NOVA_OPENER_TEST_PID: pidFile},

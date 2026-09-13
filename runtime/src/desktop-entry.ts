@@ -1,5 +1,5 @@
 import {installDesktopControl, desktopBudgetFailure, type DesktopCapabilityState} from './desktop-control.js'
-import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop-service.js'
+import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop-session.js'
 import {announceReadiness} from './desktop.js'
 import {buildProductionComposition} from './production-composition.js'
 

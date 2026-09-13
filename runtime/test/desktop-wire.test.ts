@@ -28,7 +28,7 @@ import {
   playbackTerminalMessage,
   validateInputPcm,
 } from '../src/desktop-wire.js'
-import { parseClientMessage } from '../src/desktop-bridge.js'
+import { parseClientMessage } from '../src/desktop-session.js'
 import type { PlaybackCompletion } from '../src/playback.js'
 import type { ExecutorState } from '../src/realtime/service-state.js'
 

@@ -610,7 +610,7 @@ runtime port. Assembly wires the coding controller's run callback as
 | Cancel | adapter abort → `turn/interrupt`, `events.ts`/`ports.ts` `cancelled` outcome |
 | Titles | `executors/codex/transport/app-server-schema.ts`, `-transport.ts`, adapter mirror |
 | Prompt | `realtime/qwen.ts` FRONTEND_INSTRUCTIONS, `intake.ts` fact text |
-| Desktop | `desktop-wire.ts`, `desktop-bridge.ts`, renderer `index.mjs` / `confirmation-controls.mjs` / `bubbles.mjs` |
+| Desktop | `desktop-wire.ts`, `desktop-session.ts`, renderer `index.mjs` / `confirmation-controls.mjs` / `bubbles.mjs` |
 | Tests | `tool-schema`, `realtime-intake`, coordinator eval, `adapter-project`, `realtime-service`, `project-store`, `realtime-qwen`, assembly, desktop wire; the 07 fixture executor gains a registered `AgentDescriptor` and ops `run / steer / status / cancel` so `executor-boundary-fixture.test.ts` drives the `dispatch` path |
 
 ## Verification checklist

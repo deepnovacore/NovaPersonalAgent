@@ -276,7 +276,7 @@ flowchart LR
 | Thread params / binding | `runtime/src/codex-app-server-transport.ts`, `codex-app-server-projection.ts` |
 | Effective config | `runtime/src/codex-app-server-schema.ts` `validateEffectiveCodexConfig({mode, managedMcp})` |
 | Routing / results | `runtime/src/realtime/codex-approval.ts` |
-| Controller / wire | existing controller, `desktop-wire.ts`, `desktop-bridge.ts` (kind + allowed decisions on the frame) |
+| Controller / wire | existing controller, `desktop-wire.ts`, `desktop-session.ts` (kind + allowed decisions on the frame) |
 | Orb | `confirmation-controls.mjs`, `index.mjs`, CSS for third button |
 | Settings | `settings-store.mjs` v4, settings HTML/JS, `backend.mjs` env map |
 | Fixtures | `fixtures/codex/app-server-schema/0.152.0/`, fake app-server transcripts for each request kind |

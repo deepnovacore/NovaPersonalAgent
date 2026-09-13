@@ -3,7 +3,7 @@ import {spawnSync} from 'node:child_process'
 import {test} from 'node:test'
 
 /** Exercise Node's actual ESM closure; fail even if a concrete resource factory is never called. */
-for (const entry of ['index', 'desktop', 'production-realtime-assembly']) {
+for (const entry of ['index', 'desktop', 'cascaded-realtime-assembly']) {
   test(`generic ${entry} import does not load the concrete coding package`, () => {
     const target = new URL(`../src/${entry}.js`, import.meta.url).href
     const hook = `export async function resolve(specifier, context, next) {
@@ -23,7 +23,7 @@ test('desktop entry exits with its startup failure code after bounded cleanup', 
   const target = new URL('../src/desktop-entry.js', import.meta.url).href
   const replacements = {
     // Measure the exit boundary after module loading, not Windows cold-start I/O.
-    './desktop-service.js': `export async function runDesktopEntryWithStopSources() {
+    './desktop-session.js': `export async function runDesktopEntryWithStopSources() {
       setInterval(() => {}, 1000);
       setTimeout(() => process.exit(99), 2000);
       return 2;
@@ -58,7 +58,7 @@ test('desktop entry reaches coding-disabled composition without importing or con
     export function loadSettings() { return {...load({DASHSCOPE_API_KEY: 'fixture'}), executors: ['codex']}; }`
   const registry = `export function loadCapabilityRegistry() { return {modules: {coding: {enabled: false}, knowledge: {enabled: false}}, overrides: [], mcpServers: {}, serverStatuses: []}; }`
   const telemetry = `export function createRealtimeTelemetry() { return {close() {}}; }`
-  const replacements = {'./desktop-service.js': desktop, './config.js': config, './capability-registry.js': registry, './realtime/telemetry.js': telemetry}
+  const replacements = {'./desktop-session.js': desktop, './config.js': config, './capability-registry.js': registry, './realtime/telemetry.js': telemetry}
   const hook = `export async function resolve(specifier, context, next) {
     const replacements = ${JSON.stringify(replacements)};
     if (['/desktop-entry.js', '/production-composition.js'].some(path => context.parentURL?.endsWith(path)) && replacements[specifier]) {
@@ -102,7 +102,7 @@ test('actual desktop entry passes prepared external and knowledge MCP into the c
         transport: 'streamable-http', url: 'http://127.0.0.1:19888/mcp', headers: {},
         tools: {recall: {enabled: true, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2}}}}}; }`
   const configUrl = new URL('../src/config.js', import.meta.url).href
-  const replacements = {'./knowledge/assembly.js': knowledge, './desktop-service.js': desktop, './config.js': `import {loadSettings as load} from ${JSON.stringify(configUrl)}; export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)}; export function loadSettings() { return {...load({DASHSCOPE_API_KEY: 'fixture'}), executors: ['codex']}; }`, './capability-registry.js': registry, './realtime/telemetry.js': `export function createRealtimeTelemetry() { return {close() {}}; }`, './executors/codex/host.js': host}
+  const replacements = {'./knowledge/assembly.js': knowledge, './desktop-session.js': desktop, './config.js': `import {loadSettings as load} from ${JSON.stringify(configUrl)}; export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)}; export function loadSettings() { return {...load({DASHSCOPE_API_KEY: 'fixture'}), executors: ['codex']}; }`, './capability-registry.js': registry, './realtime/telemetry.js': `export function createRealtimeTelemetry() { return {close() {}}; }`, './executors/codex/host.js': host}
   const hook = `export async function resolve(specifier, context, next) {
     const replacements = ${JSON.stringify(replacements)};
     if (['/desktop-entry.js', '/production-composition.js'].some(path => context.parentURL?.endsWith(path)) && replacements[specifier]) return {url: 'data:text/javascript,' + encodeURIComponent(replacements[specifier]), shortCircuit: true};
@@ -121,7 +121,7 @@ test('actual desktop entry preserves production provider usage through private I
   const report = {id: 'usage-production', provider: 'qwen', service: 'realtime', model: 'qwen-audio-3.0-realtime-plus', status: 'complete', inputTokens: 12, outputTokens: 9,
     inputTextTokens: 5, inputAudioTokens: 7, outputTextTokens: 3, outputAudioTokens: 6}
   const replacements = {
-    './desktop-service.js': `export async function runDesktopEntryWithStopSources({construct}) {
+    './desktop-session.js': `export async function runDesktopEntryWithStopSources({construct}) {
       try { await construct({own() {}}); throw new Error('missing provider boundary'); }
       catch (error) { if (error.message !== 'usage-provider-reached') throw error; }
       return 0;
@@ -142,7 +142,7 @@ test('actual desktop entry preserves production provider usage through private I
     if (['/desktop-entry.js', '/production-composition.js'].some(path => context.parentURL?.endsWith(path)) && replacements[specifier]) {
       return {url: 'data:text/javascript,' + encodeURIComponent(replacements[specifier]), shortCircuit: true};
     }
-    if (context.parentURL?.endsWith('/qwen-realtime-assembly.js') && specifier === './realtime/qwen.js') {
+    if (context.parentURL?.endsWith('/cascaded-realtime-assembly.js') && specifier === './realtime/qwen.js') {
       return {url: 'data:text/javascript,' + encodeURIComponent(${JSON.stringify(provider)}), shortCircuit: true};
     }
     return next(specifier, context);

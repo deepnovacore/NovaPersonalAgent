@@ -33,7 +33,7 @@ flowchart TB
 | `runtime/src/context-view.ts` | The bounded model-facing view of current state |
 | `runtime/src/floor.ts` | Exclusive ownership of the user-facing speaking path |
 | `runtime/src/ports.ts` | Executor manifests, operation contracts, requests, and typed handoffs |
-| `runtime/src/assembly.ts`, `production-realtime-assembly.ts` | Configuration-driven construction of runtime, executor, and realtime graphs; dispatches `integrated` vs `cascaded` |
+| `runtime/src/assembly.ts`, `cascaded-realtime-assembly.ts` | Configuration-driven construction of runtime, executor, and realtime graphs; dispatches `integrated` vs `cascaded` |
 | `runtime/src/realtime/` | Host response admission/ownership, shared frontend-instructions, provider transports, playback fencing, recovery, and telemetry |
 | `runtime/src/codex-*.ts` | Codex app-server transport and contract, plus the Workspace/Session project store (`codex-project-store.ts`) |
 | `runtime/src/executors/` | Deterministic simulators and adapter implementations |
@@ -112,7 +112,7 @@ identity, playback generation, and delegate identity. Renderer acknowledgements 
 and completion. Recovery injects bounded host-owned facts rather than replaying arbitrary provider
 state.
 
-The top-level pipeline shape is selected by `production-realtime-assembly.ts` from
+The top-level pipeline shape is selected by `cascaded-realtime-assembly.ts` from
 `pipeline_mode`. `integrated` (the default) runs one realtime speech-to-speech model — today Qwen
 realtime only. `cascaded` composes injectable endpointing, ASR, LLM, and TTS ports; today's
 provider matrix is Volcengine ASR, a Qwen (`qwen-flash`) or Ark LLM, Volcengine TTS, and an `auto`

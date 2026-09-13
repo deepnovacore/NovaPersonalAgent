@@ -5,7 +5,7 @@ import {performance} from 'node:perf_hooks'
 import {WebSocket, WebSocketServer} from 'ws'
 import {z} from 'zod'
 import type {DesktopServerOptions, DesktopReadiness} from './desktop.js'
-import type {DesktopServerTransport} from './desktop-realtime.js'
+import type {DesktopServerTransport} from './desktop-session.js'
 import type {ClientCommands} from './client-protocol.js'
 
 const MAX_JSON_BYTES = 16 * 1024

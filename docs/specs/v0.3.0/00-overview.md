@@ -121,7 +121,7 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
 
 - **文字输入**：`runtime/src/desktop.ts` 定义 `input.text`（≤4000 UTF-16 单元）与
   `input.dictation`（start/finish/cancel，≤60 秒 16 kHz PCM16 草稿缓冲，30 秒 ASR 超时）；
-  `runtime/src/desktop-bridge.ts` 持有草稿状态机；`runtime/src/client-protocol.ts` 仅在 cascaded
+  `runtime/src/desktop-session.ts` 持有草稿状态机；`runtime/src/client-protocol.ts` 仅在 cascaded
   主机上声明 `text_input` / `dictation`。桌面 renderer 未接线；iOS 的
   `clients/ios/Nova/Nova/Connection/Client.swift` 已实现文字发送与 dictation 状态机（代码已实现），
   真机验收未完成。

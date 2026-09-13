@@ -9,7 +9,7 @@
 What is already clean:
 
 - `runtime/src/ports.ts`, `causal-runtime.ts`, `assembly.ts`,
-  `production-realtime-assembly.ts` contain **zero** `codex` references.
+  `cascaded-realtime-assembly.ts` contain **zero** `codex` references.
 - `assembly.ts` `resolveExecutors` (110–134) already looks adapters up by
   `manifest.name`; executor names are configuration keys, not a protocol enum.
   Host routing is by declared role (`roles: ['coding']`), never by a
@@ -37,7 +37,7 @@ Where Codex leaks (31 core files, three clusters):
    `model-adapters.ts:163` drops tools where `binding.executor !== 'codex'`.
 3. **Desktop wire.** `desktop-wire.ts:202–363` emits `codex.state`,
    `codex.project`, `codex.approval`; `desktop.ts:167–171` accepts
-   `codex.approval_decision`; `desktop-bridge.ts` holds `#codexOutbound` /
+   `codex.approval_decision`; `desktop-session.ts` holds `#codexOutbound` /
    `#projectOutbound` / `#approvalOutbound` latest-slots.
 
 Reverse dependency: `executors/codex-project-live.ts` imports
@@ -402,7 +402,7 @@ other core modules must use the executor registry. ESLint checks static and dyna
 | Role routing | `realtime-assembly.ts`, `confirmed-project-capability.ts`, `realtime/bridge.ts`, `model-adapters.ts`, `tool-schema.ts` |
 | Service | `realtime/service.ts` approval FSM → `ApprovalBroker`; rename only |
 | Config | `config.ts`, `environment-contract.ts`, `diagnostics.ts`, `codex-host-config.ts` (moved) |
-| Wire | `desktop-wire.ts`, `desktop.ts`, `desktop-bridge.ts`, `desktop-service.ts`, `desktop-progress.ts`; renderer label sites |
+| Wire | `desktop-wire.ts`, `desktop.ts`, `desktop-session.ts`, `desktop-session.ts`, `desktop-progress.ts`; renderer label sites |
 | Speech | `realtime/evidence.ts` |
 | Barrel | `runtime/src/index.ts` |
 | Checks | `eslint.config.mjs`, `package.json` |

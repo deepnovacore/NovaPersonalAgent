@@ -1,6 +1,6 @@
 /** Desktop-owned wrapper; the standalone server retains its headless lifecycle. */
 import {runServerEntry} from './server-entry.js'
-import {installDesktopStopSources, type DesktopStopParentSource} from './desktop-service.js'
+import {installDesktopStopSources, type DesktopStopParentSource} from './desktop-session.js'
 const parentPort = (process as NodeJS.Process & {parentPort?: DesktopStopParentSource & {postMessage(value: unknown): void}}).parentPort
 const stop = new AbortController()
 const binding = installDesktopStopSources({processEvents: process, stdin: process.stdin, stop,

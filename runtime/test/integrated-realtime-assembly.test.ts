@@ -5,7 +5,7 @@ import {loadSettings} from '../src/config.js'
 import {
   buildIntegratedRealtimeAssembly,
   type IntegratedProviderRegistry,
-} from '../src/integrated-realtime-assembly.js'
+} from '../src/cascaded-realtime-assembly.js'
 import {QwenAudioRealtimeAdapter} from '../src/realtime/qwen.js'
 
 test('integrated registry resolves only Qwen and passes an immutable selected config', () => {

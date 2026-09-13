@@ -1,5 +1,5 @@
 import type {CapabilityStatus} from './capability-registry.js'
-import type {DesktopStopParentSource} from './desktop-service.js'
+import type {DesktopStopParentSource} from './desktop-session.js'
 import {reportUsage, type UsageReport} from './realtime/usage.js'
 
 type ParentPort = DesktopStopParentSource & {postMessage(message: unknown): void}

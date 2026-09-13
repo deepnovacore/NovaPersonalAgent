@@ -13,10 +13,10 @@
   （`id` + `start | finish | cancel`，草稿缓冲 16 kHz PCM16 ≤60 秒，finish 调用级联 ASR，30 秒超时）、
   `input.audio`（结束草稿模式，恢复连续语音）；识别结果 `input.transcription`。
   **草稿不是用户轮次，不触发 LLM 或工具；客户端必须显式发送编辑后的 `input.text`。**
-- **runtime**：`runtime/src/desktop.ts` 定义上述 payload 的 zod schema；`runtime/src/desktop-bridge.ts`
+- **runtime**：`runtime/src/desktop.ts` 定义上述 payload 的 zod schema；`runtime/src/desktop-session.ts`
   持有草稿状态机；`runtime/src/client-protocol.ts` 仅在 `pipeline_mode = cascaded` 时声明能力；
   `runtime/src/realtime/service.ts` 要求 provider 具备 `transcribeDraft` 能力。
-- **管线**：`runtime/src/production-realtime-assembly.ts` 按 `pipeline_mode` 选 `integrated`
+- **管线**：`runtime/src/cascaded-realtime-assembly.ts` 按 `pipeline_mode` 选 `integrated`
   （单一实时语音模型，`runtime/src/realtime/qwen.ts`）或 `cascaded`（端点检测 → ASR → LLM → TTS，
   `runtime/src/realtime/cascaded/`）。
 - **客户端接线现状**：桌面 renderer（`clients/desktop/src/renderer/*.mjs`）未接

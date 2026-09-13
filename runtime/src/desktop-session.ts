@@ -1,26 +1,19 @@
-import {DesktopTasks, executorTasksSchema, taskActionResultSchema} from './desktop-tasks.js'
-import {EXECUTOR_RESULT, EXECUTOR_RESULTS_RESET, DESKTOP_ACTIVITY, CLOCK_PING, CAPTION, PLAYBACK_TERMINAL} from './desktop-wire.js'
-/**
- * One-client transport adapter around an already-built `RealtimeService`.
- *
- * Ported from `DesktopSocketBridge` in `src/nova_audio_agent/realtime/desktop.py`. The renderer is one
- * websocket and the runtime is a state machine, and everything here is about the mismatch between
- * them: a socket that can block, a queue that can fill, and audio that becomes wrong the instant the
- * agent is interrupted.
- *
- * Four outbound queues rather than one, because they have different urgency and different
- * overflow rules. Playback *clears* must overtake the audio they cancel -- a clear that queued behind
- * two seconds of stale PCM is two seconds of the user hearing something the agent has already
- * abandoned. Codex state and the project view are single-slot: only the latest matters, and a backlog
- * of stale states is worse than none.
- *
- * Overflow is not uniform either. A dropped caption is a cosmetic loss, so captions are droppable. A
- * dropped audio frame or control message means the renderer's picture of playback is now wrong in a
- * way it cannot detect, so the transport is stopped instead of quietly continuing.
- */
-
 import {
-  DesktopProtocolError,
+  DesktopTasks,
+  executorTasksSchema,
+  taskActionResultSchema,
+  taskActionSchema,
+  type TaskActionStatus,
+  openTaskDirectory,
+} from './desktop-tasks.js'
+import {
+  EXECUTOR_RESULT,
+  EXECUTOR_RESULTS_RESET,
+  DESKTOP_ACTIVITY,
+  CLOCK_PING,
+  CAPTION,
+  PLAYBACK_TERMINAL,
+  DesktopProtocolError as DesktopWireProtocolError,
   captionMessage,
   executorApprovalMessage,
   projectStateMessage,
@@ -34,20 +27,46 @@ import {
   parseJsonWithIntegerFields,
   validateInputPcm,
   type PublicProjectView,
+  DESKTOP_READY,
+  deliveryToEvent,
 } from './desktop-wire.js'
-import type { Clock } from './clock.js'
+import {type Clock} from './clock.js'
 import {
   connectionDiagnosticSchema,
   playbackTelemetrySchema,
   type DesktopControl,
+  DesktopOutboundValidationError,
+  DesktopProtocolError,
+  NodeDesktopServer,
+  type DesktopReadiness,
+  type DesktopServerOptions,
+  parseReadyEndpoint,
+  validateDesktopToken,
+  type CameraCaptureRequest,
+  type CameraCaptureTransport,
+  type CapturedCameraFrame,
 } from './desktop.js'
-import type { PlaybackFrame } from './playback.js'
-import type { CaptionFrame } from './realtime/session-state.js'
-import type { ExecutorState } from './realtime/service-state.js'
-import type {ApprovalView as ExecutorApprovalView} from './approval-port.js'
-import type { RealtimeTelemetry } from './realtime/telemetry.js'
+import {type PlaybackFrame, type PlaybackCompletion} from './playback.js'
+import {type CaptionFrame} from './realtime/session-state.js'
+import {type ExecutorState} from './realtime/service-state.js'
+import {type ApprovalView as ExecutorApprovalView} from './approval-port.js'
+import {type RealtimeTelemetry} from './realtime/telemetry.js'
 import {codePointLengthLikePython, stripLikePython} from './python-text.js'
-import {executorProgressSchema, executorResultSchema, type ExecutorProgress, type ExecutorResult, type ProgressMode} from './desktop-progress.js'
+import {
+  executorProgressSchema,
+  executorResultSchema,
+  type ExecutorProgress,
+  type ExecutorResult,
+  type ProgressMode,
+  projectExecutorEvent,
+  projectExecutorSuggestion,
+} from './desktop-progress.js'
+import {type CodingTaskPort, executorWithRole} from './coding-executor.js'
+import {type MemoryBoardDetail, memoryBoardMessage} from './realtime/memory-board.js'
+import {type CameraPermissionStatus} from './desktop-camera.js'
+import {type RealtimeAssembly} from './realtime-assembly.js'
+import {type ProjectConfirmationView} from './project-confirmation.js'
+import {type Suggestion} from './suggestions.js'
 
 export const DEFAULT_MAX_OUTBOUND_FRAMES = 128
 
@@ -349,7 +368,7 @@ export class DesktopSocketBridge {
       const enriched = parsed.result === null ? null : {...parsed.result, ...retained}
       // Validate metadata too before changing retained state; serialization stays one bounded work per frame.
       const wire = executorResultSchema.parse({type: EXECUTOR_RESULT, work_id: frame.delegate_id, result: enriched})
-      if (Buffer.byteLength(JSON.stringify(wire)) > MAX_DESKTOP_JSON_BYTES) throw new DesktopProtocolError('desktop result frame is too large')
+      if (Buffer.byteLength(JSON.stringify(wire)) > MAX_DESKTOP_JSON_BYTES) throw new DesktopWireProtocolError('desktop result frame is too large')
       const oldestFinished = [...this.#results].find(([, entry]) => entry.result !== null)?.[0]
       if (previous === undefined && this.#results.size >= 64 && oldestFinished === undefined) {
         this.#telemetry?.record('desktop.result_retention_full', {})
@@ -458,7 +477,7 @@ export class DesktopSocketBridge {
   async receive(raw: OutboundFrame, options: {readonly authenticated: boolean}): Promise<boolean> {
     if (!options.authenticated) {
       if (typeof raw !== 'string') {
-        throw new DesktopProtocolError('desktop authentication frame must be text')
+        throw new DesktopWireProtocolError('desktop authentication frame must be text')
       }
       parseClientMessage(raw, {expectedToken: this.#token, authenticated: false})
       return true
@@ -872,13 +891,13 @@ export function parseClientMessage(
   options: {readonly expectedToken: string; readonly authenticated: boolean},
 ): DesktopCommand {
   if (new TextEncoder().encode(raw).length > MAX_DESKTOP_JSON_BYTES) {
-    throw new DesktopProtocolError('desktop control frame is too large')
+    throw new DesktopWireProtocolError('desktop control frame is too large')
   }
   let preliminary: unknown
   try {
     preliminary = JSON.parse(raw) as unknown
   } catch {
-    throw new DesktopProtocolError('desktop control frame is invalid JSON')
+    throw new DesktopWireProtocolError('desktop control frame is invalid JSON')
   }
   if (
     options.authenticated
@@ -901,7 +920,7 @@ export function parseClientMessage(
         'rejected_frames',
         'stdin_buffered_bytes_max',
         'stdin_backpressure_count',
-      ], () => new DesktopProtocolError('desktop playback telemetry is invalid'))
+      ], () => new DesktopWireProtocolError('desktop playback telemetry is invalid'))
       const result = playbackTelemetrySchema.safeParse(telemetryValue)
       if (!result.success) return {kind: 'playback_telemetry_rejected', payload: {}}
       const {type, ...payload} = result.data
@@ -935,17 +954,17 @@ export function parseClientMessage(
       'attempt',
       'delay_ms',
     ], field =>
-      new DesktopProtocolError(
+      new DesktopWireProtocolError(
         field === 'generation_epoch'
           ? 'desktop playback generation is invalid'
           : 'desktop playback played_ms is invalid',
       ))
   } catch (cause) {
-    if (cause instanceof DesktopProtocolError) throw cause
-    throw new DesktopProtocolError('desktop control frame is invalid JSON')
+    if (cause instanceof DesktopWireProtocolError) throw cause
+    throw new DesktopWireProtocolError('desktop control frame is invalid JSON')
   }
   if (!isPlainObject(value) || typeof value.type !== 'string') {
-    throw new DesktopProtocolError('desktop control frame has no type')
+    throw new DesktopWireProtocolError('desktop control frame has no type')
   }
   if (!options.authenticated) {
     const token = value.token
@@ -954,7 +973,7 @@ export function parseClientMessage(
       || typeof token !== 'string'
       || !constantTimeEqual(token, options.expectedToken)
     ) {
-      throw new DesktopProtocolError('desktop authentication failed')
+      throw new DesktopWireProtocolError('desktop authentication failed')
     }
     return {kind: 'authenticated', payload: {}}
   }
@@ -979,7 +998,7 @@ export function parseClientMessage(
       || !Number.isInteger(generationEpoch)
       || generationEpoch < 1
     ) {
-      throw new DesktopProtocolError('desktop playback generation is invalid')
+      throw new DesktopWireProtocolError('desktop playback generation is invalid')
     }
     const payload: Record<string, string | number> = {
       utterance_id: utteranceId,
@@ -991,7 +1010,7 @@ export function parseClientMessage(
       const playedMs = value.played_ms
       if (playedMs !== null && playedMs !== undefined) {
         if (typeof playedMs !== 'number' || !Number.isInteger(playedMs) || playedMs < 0) {
-          throw new DesktopProtocolError('desktop playback played_ms is invalid')
+          throw new DesktopWireProtocolError('desktop playback played_ms is invalid')
         }
         payload.played_ms = playedMs
       }
@@ -1004,14 +1023,14 @@ export function parseClientMessage(
   }
   if (kind === 'project.confirmation_decision') {
     if (Object.keys(value).sort().join(',') !== 'confirmed,proposal_id,type') {
-      throw new DesktopProtocolError('desktop control frame type is unsupported')
+      throw new DesktopWireProtocolError('desktop control frame type is unsupported')
     }
     if (typeof value.confirmed !== 'boolean') {
-      throw new DesktopProtocolError('desktop project confirmation decision is invalid')
+      throw new DesktopWireProtocolError('desktop project confirmation decision is invalid')
     }
     const proposalId = readIdentifier(value, 'proposal_id')
     if (codePointLengthLikePython(proposalId) > 128) {
-      throw new DesktopProtocolError('desktop project confirmation decision is invalid')
+      throw new DesktopWireProtocolError('desktop project confirmation decision is invalid')
     }
     return {
       kind: 'project_confirmation_decision',
@@ -1020,15 +1039,15 @@ export function parseClientMessage(
   }
   if (kind === 'executor.approval_decision') {
     if (Object.keys(value).sort().join(',') !== (value.scope === undefined ? 'approval_id,approved,executor,type' : 'approval_id,approved,executor,scope,type')) {
-      throw new DesktopProtocolError('desktop control frame type is unsupported')
+      throw new DesktopWireProtocolError('desktop control frame type is unsupported')
     }
     if (typeof value.approved !== 'boolean' || value.scope !== undefined && (value.scope !== 'session' || !value.approved)) {
-      throw new DesktopProtocolError('desktop executor approval decision is invalid')
+      throw new DesktopWireProtocolError('desktop executor approval decision is invalid')
     }
     const executor = readIdentifier(value, 'executor')
     const approvalId = readIdentifier(value, 'approval_id')
     if (codePointLengthLikePython(approvalId) > 128) {
-      throw new DesktopProtocolError('desktop executor approval decision is invalid')
+      throw new DesktopWireProtocolError('desktop executor approval decision is invalid')
     }
     return {
       kind: 'executor_approval_decision',
@@ -1038,7 +1057,7 @@ export function parseClientMessage(
   if (kind === 'clock.pong') {
     const timestamp = value.t_render_ms
     if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp < 0) {
-      throw new DesktopProtocolError('desktop t_render_ms is invalid')
+      throw new DesktopWireProtocolError('desktop t_render_ms is invalid')
     }
     return {
       kind: 'clock_pong',
@@ -1048,20 +1067,20 @@ export function parseClientMessage(
   if (kind === 'connection.diagnostic') {
     const result = connectionDiagnosticSchema.safeParse(value)
     if (!result.success) {
-      throw new DesktopProtocolError('desktop connection diagnostic is invalid')
+      throw new DesktopWireProtocolError('desktop connection diagnostic is invalid')
     }
     const {type, ...payload} = result.data
     void type
     return {kind: 'connection_diagnostic', payload}
   }
-  throw new DesktopProtocolError('desktop control frame type is unsupported')
+  throw new DesktopWireProtocolError('desktop control frame type is unsupported')
 }
 
 function commandFromControl(control: DesktopControl): DesktopCommand {
   switch (control.type) {
     case 'executor.task_action':
     case 'coding.progress_narration':
-      throw new DesktopProtocolError('desktop host control requires authenticated transport')
+      throw new DesktopWireProtocolError('desktop host control requires authenticated transport')
     case 'input.audio': return {kind: 'input_audio', payload: {}}
     case 'input.text': return {kind: 'input_text', payload: {text: control.text}}
     case 'input.dictation': return {kind: 'input_dictation', payload: {id: control.id, action: control.action}}
@@ -1137,7 +1156,7 @@ function readRenderTimestamp(
   const timestamp = value.t_render_ms
   if (timestamp === undefined || timestamp === null) return
   if (typeof timestamp !== 'number' || !Number.isFinite(timestamp) || timestamp < 0) {
-    throw new DesktopProtocolError('desktop t_render_ms is invalid')
+    throw new DesktopWireProtocolError('desktop t_render_ms is invalid')
   }
   payload.t_render_ms = timestamp
 }
@@ -1149,7 +1168,7 @@ function readIdentifier(value: Record<string, unknown>, field: string): string {
     || stripLikePython(candidate) === ''
     || codePointLengthLikePython(candidate) > 256
   ) {
-    throw new DesktopProtocolError(`desktop ${field} is invalid`)
+    throw new DesktopWireProtocolError(`desktop ${field} is invalid`)
   }
   return candidate
 }
@@ -1214,4 +1233,964 @@ function constantTimeEqual(candidate: string, expected: string): boolean {
     difference |= candidate.charCodeAt(index) ^ expected.charCodeAt(index)
   }
   return difference === 0
+}
+
+const READY_FRAME = JSON.stringify({type: DESKTOP_READY})
+
+/** The authenticated writer surface used by the bridge pump. */
+export interface DesktopServerTransport {
+  sendText(raw: string): Promise<void>
+  sendBinary(raw: Uint8Array): Promise<void>
+  disconnectClient(): Promise<void>
+  start(): Promise<DesktopReadiness>
+  close(): Promise<void>
+}
+
+export interface DesktopRealtimeOptions extends DesktopBridgeOptions {
+  readonly taskPort?: CodingTaskPort
+  readonly openTaskDirectory?: (path: string) => Promise<void>
+  /** Remote transport errors release the connection; desktop retains its fatal policy. */
+  readonly transportFailure?: 'abort' | 'disconnect'
+  readonly memoryBoard?: (requestId: string, detail?: MemoryBoardDetail) => string | Promise<string>
+  readonly createServer?: (options: DesktopServerOptions) => DesktopServerTransport
+  /** Optional lifecycle observation after bridge connection state has been released. */
+  readonly onConnectionReleased?: () => void
+}
+
+/**
+ * Owns the narrow connection-generation boundary between desktop policy and the socket writer.
+ * Realtime service/provider construction intentionally lives elsewhere.
+ */
+export class DesktopRealtime {
+  readonly bridge: DesktopSocketBridge
+  readonly server: DesktopServerTransport
+  readonly serverOptions: DesktopServerOptions
+
+  readonly #stop: {abort(): void}
+  readonly #transportFailure: 'abort' | 'disconnect'
+  readonly #onConnectionReleased: (() => void) | undefined
+  readonly #telemetry: RealtimeTelemetry | undefined
+  readonly #discardInputAudio: (() => Promise<void>) | undefined
+  #generation = 0
+  #activeGeneration: number | null = null
+  #drainRequested = false
+  #draining = false
+
+  constructor(options: DesktopRealtimeOptions) {
+    const {
+      createServer,
+      transportFailure,
+      onConnectionReleased,
+      memoryBoard,
+      ...bridgeOptions
+    } = options
+    this.#discardInputAudio = transportFailure === 'disconnect'
+      ? options.service.discardInputAudio?.bind(options.service) : undefined
+    this.#stop = options.stop
+    this.#transportFailure = transportFailure ?? 'abort'
+    this.#onConnectionReleased = onConnectionReleased
+    this.#telemetry = options.telemetry
+    this.bridge = new DesktopSocketBridge({
+      ...bridgeOptions,
+      ...(transportFailure === 'disconnect' ? {stop: {abort: () => {
+        const generation = this.#activeGeneration
+        if (generation === null) this.bridge.release()
+        else void this.#disconnect(generation)
+      }}} : {}),
+      onOutboundAvailable: () => this.#requestDrain(),
+    })
+    this.serverOptions = {
+      token: options.token,
+      bootstrapTextFrames: [READY_FRAME],
+      onClientAuthenticated: () => this.#authenticated(),
+      onClientDisconnect: media => this.#disconnected(media?.hadProviderAttachment ?? true),
+      onDebugBoardRequest: request => {
+        if (memoryBoard === undefined) throw new DesktopProtocolError('desktop memory board is unavailable')
+        return memoryBoard(request.request_id, request.detail)
+      },
+      onAudio: pcm => this.bridge.receiveAudio(pcm),
+      onControl: async control => {
+        const generation = this.#activeGeneration
+        if (generation === null) throw new DesktopProtocolError('desktop control is unauthenticated')
+        if (control.type === 'coding.progress_narration') { options.service.setCodingProgressNarration?.(control.mode); return }
+        if (control.type !== 'executor.task_action') return this.bridge.receiveControl(control)
+        const request = taskActionSchema.parse(control)
+        // Folder resolution and native launch must not hold the serialized PCM input queue.
+        void (async () => {
+          let status: TaskActionStatus = 'unavailable'
+          try {
+            if (this.bridge.tasks.has(request.work_id, request.executor) && options.taskPort !== undefined) {
+              if (request.action === 'cancel') status = this.bridge.tasks.isRunning(request.work_id) ? options.taskPort.cancelTask(request.work_id) : 'not_running'
+              else {
+                const path = await options.taskPort.taskDirectory(request.work_id)
+                if (this.#activeGeneration !== generation) return
+                if (path !== null) { await (options.openTaskDirectory ?? (target => openTaskDirectory(target, undefined, process.platform, () => this.#activeGeneration === generation)))(path); status = 'opened' }
+              }
+            }
+          } catch { status = 'failed' }
+          if (this.#activeGeneration === generation) this.bridge.onTaskActionResult({type: 'executor.task_action_result', request_id: request.request_id, work_id: request.work_id, action: request.action, status})
+        })()
+      },
+    }
+    this.server = (createServer ?? (serverOptions => new NodeDesktopServer(serverOptions)))(
+      this.serverOptions,
+    )
+  }
+
+  #authenticated(): void {
+    if (!this.bridge.claim()) {
+      throw new DesktopProtocolError('desktop bridge connection is unavailable')
+    }
+    this.#activeGeneration = ++this.#generation
+    this.bridge.markAuthenticated()
+    this.#requestDrain()
+  }
+
+  #disconnected(hadProviderAttachment: boolean): void {
+    const generation = this.#activeGeneration
+    if (generation !== null) this.#release(generation, hadProviderAttachment)
+  }
+
+  #release(generation: number, hadProviderAttachment = true): void {
+    if (this.#activeGeneration !== generation) return
+    this.#activeGeneration = null
+    this.#generation += 1
+    if (hadProviderAttachment) void this.#discardInputAudio?.().catch(() => {
+      this.#telemetry?.record('remote.input_reset_failed', {})
+    })
+    this.bridge.release()
+    this.#onConnectionReleased?.()
+  }
+
+  #requestDrain(): void {
+    this.#drainRequested = true
+    if (this.#activeGeneration !== null && !this.#draining) void this.#drain()
+  }
+
+  async #drain(): Promise<void> {
+    if (this.#draining) return
+    this.#draining = true
+    try {
+      while (this.#activeGeneration !== null && this.#drainRequested) {
+        this.#drainRequested = false
+        for (;;) {
+          const generation: number | null = this.#activeGeneration
+          if (generation === null) break
+          const delivery = this.bridge.takeNextDelivery()
+          if (delivery === null) break
+          try {
+            await this.#send(delivery)
+          } catch (error) {
+            if (this.#activeGeneration !== generation) break
+            if (delivery.policy === 'required' && this.#transportFailure === 'abort') this.#stop.abort()
+            else if (delivery.policy !== 'required' && error instanceof DesktopOutboundValidationError) {
+              this.#telemetry?.record('desktop.outbound_validation_dropped', {
+                policy: delivery.policy,
+                frame_kind: typeof delivery.frame === 'string' ? 'text' : 'binary',
+              })
+              continue
+            } else {
+              await this.#disconnect(generation)
+            }
+            break
+          }
+          if (this.#activeGeneration !== generation) break
+        }
+      }
+    } finally {
+      this.#draining = false
+      if (this.#activeGeneration !== null && this.#drainRequested) void this.#drain()
+    }
+  }
+
+  async #disconnect(generation: number): Promise<void> {
+    if (this.#activeGeneration !== generation) return
+    try {
+      const disconnect = this.server.disconnectClient()
+      if (this.#transportFailure === 'disconnect') this.#release(generation)
+      await disconnect
+      this.#release(generation)
+    } catch {
+      this.#release(generation)
+      this.#telemetry?.record('desktop.transport_disconnect_failed', {})
+    }
+  }
+
+  #send(delivery: DesktopDelivery): Promise<void> {
+    return typeof delivery.frame === 'string'
+      ? this.server.sendText(delivery.frame)
+      : this.server.sendBinary(delivery.frame)
+  }
+}
+
+export const DESKTOP_OWNER_SHUTDOWN_GRACE_MS = 1_000
+
+export interface DesktopRealtimeOwner {
+  readonly service: {waitStopped(): Promise<void>}
+  start(): Promise<void>
+  stop(): Promise<void>
+}
+
+export interface DesktopRealtimeTransportOwner {
+  readonly server: Pick<DesktopServerTransport, 'start' | 'close'>
+}
+
+export interface DesktopOutputCallbacks {
+  readonly onExecutorSuggestion: (suggestion: Suggestion) => void
+  readonly onAudioFrame: (frame: PlaybackFrame) => void
+  readonly onAudioClear: (utteranceId: string, generationEpoch: number) => void
+  readonly onAudioAlert: (utteranceId: string | null, generationEpoch: number | null) => void
+  readonly onAudioTerminal: (utteranceId: string, generationEpoch: number) => void
+  readonly onDelivery: (completion: PlaybackCompletion) => void
+  readonly onCaption: (frame: CaptionFrame) => void
+  readonly onExecutorState: (state: ExecutorState) => void
+  readonly onProjectView: (view: ProjectConfirmationView) => void
+}
+
+export interface BuildDesktopRealtimeCompositionOptions {
+  readonly approvalExecutor?: ExecutorIdentity
+  readonly progressBubbles?: ProgressMode
+  readonly token: string
+  readonly stop: AbortController
+  readonly buildRealtime: (
+    callbacks: DesktopOutputCallbacks,
+    cameraTransport: CameraCaptureTransport,
+  ) => RealtimeAssembly
+  readonly telemetry?: RealtimeTelemetry
+  readonly projectView?: ProjectConfirmationView
+  readonly approvalView?: ExecutorApprovalView
+  readonly createServer?: DesktopRealtimeOptions['createServer']
+  readonly transportFailure?: DesktopRealtimeOptions['transportFailure']
+}
+
+export interface DesktopRealtimeComposition {
+  readonly realtime: RealtimeAssembly
+  readonly desktop: DesktopRealtime
+}
+
+/** Build the circular desktop callback graph without exposing a half-built bridge. */
+export function buildDesktopRealtimeComposition(
+  options: BuildDesktopRealtimeCompositionOptions,
+): DesktopRealtimeComposition {
+  validateDesktopToken(options.token)
+  const holder: {desktop?: DesktopRealtime; realtime?: RealtimeAssembly} = {}
+  const requireDesktop = (): DesktopRealtime => {
+    if (holder.desktop === undefined) {
+      throw new Error('desktop realtime bridge is unavailable during construction')
+    }
+    return holder.desktop
+  }
+  const requireRealtime = (): RealtimeAssembly => {
+    if (holder.realtime === undefined) {
+      throw new Error('desktop realtime runtime is unavailable during construction')
+    }
+    return holder.realtime
+  }
+  const cameraTransport: CameraCaptureTransport = {
+    captureCamera(request: CameraCaptureRequest): Promise<CapturedCameraFrame> {
+      let server: DesktopServerTransport
+      try {
+        server = requireDesktop().server
+      } catch (error) {
+        return Promise.reject(error instanceof Error
+          ? error
+          : new Error('desktop realtime bridge is unavailable during construction'))
+      }
+      if (!isCameraCaptureTransport(server)) {
+        return Promise.reject(new Error('desktop camera transport is unavailable'))
+      }
+      return server.captureCamera(request)
+    },
+    async releaseCamera(sessionId: string): Promise<void> {
+      const server = requireDesktop().server
+      if (isCameraCaptureTransport(server)) await server.releaseCamera?.(sessionId)
+    },
+    requestCameraPermission(): Promise<CameraPermissionStatus> {
+      let server: DesktopServerTransport
+      try {
+        server = requireDesktop().server
+      } catch (error) {
+        return Promise.reject(error instanceof Error
+          ? error
+          : new Error('desktop realtime bridge is unavailable during construction'))
+      }
+      if (!isCameraPermissionTransport(server)) {
+        return Promise.reject(new Error('desktop camera permission transport is unavailable'))
+      }
+      return server.requestCameraPermission()
+    },
+  }
+  const realtime = options.buildRealtime({
+    onExecutorSuggestion: suggestion => {
+      const progress = projectExecutorSuggestion(suggestion, requireRealtime().runtime.clock.now())
+      if (progress !== null) requireDesktop().bridge.onExecutorProgress(progress)
+    },
+    onAudioFrame: frame => requireDesktop().bridge.onAudioFrame(frame),
+    onAudioClear: (utteranceId, generationEpoch) => {
+      requireDesktop().bridge.onAudioClear(utteranceId, generationEpoch)
+    },
+    onAudioAlert: (utteranceId, generationEpoch) => {
+      requireDesktop().bridge.onAudioAlert(utteranceId, generationEpoch)
+    },
+    onAudioTerminal: (utteranceId, generationEpoch) => {
+      requireDesktop().bridge.onAudioTerminal(utteranceId, generationEpoch)
+    },
+    onDelivery: completion => {
+      const current = requireRealtime()
+      if (current.service.clearingConversation || completion.session_epoch !== current.session.sessionEpoch) return
+      const payload = deliveryToEvent(completion)
+      if (payload !== null) current.runtime.post({kind: 'assistant_spoken', payload})
+    },
+    onCaption: frame => requireDesktop().bridge.onCaption(frame),
+    onExecutorState: state => requireDesktop().bridge.onExecutorState(state),
+    onProjectView: view => requireDesktop().bridge.onProjectView(view),
+  }, cameraTransport)
+  holder.realtime = realtime
+  const desktop = new DesktopRealtime({
+    token: options.token,
+    ...(options.transportFailure === undefined ? {} : {transportFailure: options.transportFailure}),
+    service: realtime.service,
+    executor: codingExecutorIdentity(realtime) ?? options.approvalExecutor ?? null,
+    ...(() => {
+      const adapter = [...realtime.runtime.executors.values()].find(adapter => adapter.manifest.roles.includes('coding'))
+      const port = (adapter as {taskPort?: CodingTaskPort} | undefined)?.taskPort
+      return port === undefined ? {} : {taskPort: port}
+    })(),
+    stop: options.stop,
+    memoryBoard: async (requestId, detail) => {
+      await realtime.runtime.flushMemory(true)
+      return memoryBoardMessage(requestId, realtime.runtime.memory, options.telemetry?.diagnostics?.(),
+        detail === undefined ? {} : {detail})
+    },
+    clock: realtime.runtime.clock,
+    ...(options.progressBubbles === undefined ? {} : {progressBubbles: options.progressBubbles}),
+    ...(options.telemetry === undefined ? {} : {telemetry: options.telemetry}),
+    ...(options.projectView === undefined ? {} : {projectView: options.projectView}),
+    ...(options.approvalView === undefined ? {} : {approvalView: options.approvalView}),
+    ...(options.createServer === undefined ? {} : {createServer: options.createServer}),
+  })
+  holder.desktop = desktop
+  startDesktopActivityHeartbeat(realtime.service, idle => desktop.bridge.onActivity(idle), options.stop.signal)
+
+  const unsubscribeProgress = realtime.runtime.observe((event, currentConversation) => {
+    if (currentConversation === false) return
+    const projected = projectExecutorEvent(event, realtime.runtime, channel => realtime.service.agentNameForChannel(channel))
+    if (projected !== null) desktop.bridge.onExecutorProgress(projected.progress, projected.result)
+  })
+  if (options.stop.signal.aborted) unsubscribeProgress()
+  else options.stop.signal.addEventListener('abort', unsubscribeProgress, {once: true})
+  return {realtime, desktop}
+}
+
+/** Best-effort presence must never take down the owning realtime service. */
+export function startDesktopActivityHeartbeat(
+  service: RealtimeAssembly['service'],
+  publish: (idle: boolean) => void,
+  signal: AbortSignal,
+): ReturnType<typeof setInterval> {
+  const timer = setInterval(() => {
+    if (signal.aborted) return
+    let idle = false
+    try {
+      const session = service.session
+      idle = session.foregroundIdle && session.floor.state === 'idle'
+        && session.snapshot().active_delegates.length === 0
+        && service.executorState === 'idle'
+    } catch { /* Unavailable session state conservatively means busy. */ }
+    try { publish(idle) } catch { /* A dropped presence frame is retried next tick. */ }
+  }, 1000)
+  timer.unref()
+  if (signal.aborted) clearInterval(timer)
+  else signal.addEventListener('abort', () => clearInterval(timer), {once: true})
+  return timer
+}
+
+/** The frame identity of the configured coding executor, or `null` when there is none. */
+export function codingExecutorIdentity(realtime: Pick<RealtimeAssembly, 'runtime' | 'service'>): ExecutorIdentity | null {
+  const manifest = executorWithRole(
+    [...realtime.runtime.executors.values()].map(adapter => adapter.manifest),
+    'coding',
+  )
+  if (manifest === null) return null
+  const publicName = realtime.service.agentNameForChannel(manifest.name) ?? manifest.name
+  return {executor: publicName, display_name: publicName}
+}
+
+function isCameraCaptureTransport(
+  server: DesktopServerTransport,
+): server is DesktopServerTransport & CameraCaptureTransport {
+  return 'captureCamera' in server && typeof server.captureCamera === 'function'
+}
+
+function isCameraPermissionTransport(
+  server: DesktopServerTransport,
+): server is DesktopServerTransport & Required<Pick<CameraCaptureTransport, 'requestCameraPermission'>> {
+  return 'requestCameraPermission' in server
+    && typeof server.requestCameraPermission === 'function'
+}
+
+export interface RealtimeDesktopServiceOptions {
+  /** Phone-owned media must attach through the listener before the provider can start. */
+  readonly listenBeforeRealtime?: boolean
+  readonly realtime: DesktopRealtimeOwner
+  readonly desktop: DesktopRealtimeTransportOwner
+  readonly readyEndpoint: string
+  readonly stop: AbortController
+  readonly announce: (
+    endpoint: string,
+    readiness: DesktopReadiness,
+    signal: AbortSignal,
+  ) => Promise<void>
+  readonly closeAuxiliary?: () => void | Promise<void>
+  readonly cleanupGraceMs?: number
+  readonly onDiagnostic?: (line: string) => void
+}
+
+type CleanupResult =
+  | {readonly kind: 'resolved'}
+  | {readonly kind: 'rejected'; readonly error: unknown}
+  | {readonly kind: 'abandoned'}
+
+interface CleanupOutcome {readonly firstFailure: {readonly error: unknown} | null}
+
+type TerminalCause =
+  | {readonly kind: 'external'; readonly error: null}
+  | {readonly kind: 'service'; readonly error: {readonly value: unknown} | null}
+
+interface TerminalMonitor {
+  readonly promise: Promise<TerminalCause>
+  readonly current: () => TerminalCause | undefined
+}
+
+type PhaseResult<T> =
+  | {readonly kind: 'resolved'; readonly value: T}
+  | {readonly kind: 'rejected'; readonly error: unknown}
+  | {readonly kind: 'terminal'; readonly cause: TerminalCause}
+
+/** One idempotent lifecycle owner around the already-constructed realtime and socket graphs. */
+export class RealtimeDesktopService {
+  readonly #realtime: DesktopRealtimeOwner
+  readonly #desktop: DesktopRealtimeTransportOwner
+  readonly #readyEndpoint: string
+  readonly #stop: AbortController
+  readonly #announce: (
+    endpoint: string,
+    readiness: DesktopReadiness,
+    signal: AbortSignal,
+  ) => Promise<void>
+  readonly #closeAuxiliary: () => void | Promise<void>
+  readonly #cleanupGraceMs: number
+  readonly #listenBeforeRealtime: boolean
+  readonly #onDiagnostic: (line: string) => void
+  #runOperation: Promise<void> | null = null
+  #cleanupOperation: Promise<CleanupOutcome> | null = null
+
+  constructor(options: RealtimeDesktopServiceOptions) {
+    const grace = options.cleanupGraceMs ?? DESKTOP_OWNER_SHUTDOWN_GRACE_MS
+    if (!Number.isFinite(grace) || grace <= 0) {
+      throw new TypeError('desktop cleanup grace must be positive and finite')
+    }
+    this.#listenBeforeRealtime = options.listenBeforeRealtime ?? false
+    this.#realtime = options.realtime
+    this.#desktop = options.desktop
+    this.#readyEndpoint = options.readyEndpoint
+    this.#stop = options.stop
+    this.#announce = options.announce
+    this.#closeAuxiliary = options.closeAuxiliary ?? noop
+    this.#cleanupGraceMs = grace
+    this.#onDiagnostic = options.onDiagnostic ?? noopDiagnostic
+  }
+
+  run(): Promise<void> {
+    if (this.#runOperation !== null) return this.#runOperation
+    const operation = this.#runFresh()
+    this.#runOperation = operation
+    return operation
+  }
+
+  async stop(): Promise<void> {
+    this.#stop.abort()
+    const outcome = await this.#ensureCleanup()
+    if (outcome.firstFailure !== null) throw outcome.firstFailure.error
+  }
+
+  async #runFresh(): Promise<void> {
+    let primaryFailure: {readonly error: unknown} | null = null
+    try {
+      const external = this.#externalStopMonitor()
+      if (this.#listenBeforeRealtime && !this.#stop.signal.aborted) {
+        const listening = await this.#runPhase(this.#listen(), external, 'desktop_server_start_abandoned', isReadinessCancellation)
+        if (listening.kind === 'rejected') throw listening.error
+        if (listening.kind === 'terminal') return await this.#finish(listening.cause)
+      }
+      if (!this.#stop.signal.aborted) {
+        const start = await this.#runPhase(
+          this.#realtime.start(),
+          external,
+          'desktop_realtime_start_abandoned',
+        )
+        if (start.kind === 'rejected') primaryFailure = {error: start.error}
+        if (start.kind === 'terminal') return await this.#finish(start.cause)
+      }
+      if (primaryFailure === null && !this.#stop.signal.aborted) {
+        const terminal = this.#armTerminalMonitor(external)
+        // Promise callbacks for an already-settled waitStopped run before this continuation. This
+        // fence is what keeps a dead service from briefly advertising a live desktop listener.
+        await Promise.resolve()
+        const early = terminal.current()
+        if (early !== undefined) return await this.#finish(early)
+
+        if (!this.#listenBeforeRealtime) {
+          const listener = await this.#runPhase(
+            this.#desktop.server.start(), terminal, 'desktop_server_start_abandoned',
+          )
+          if (listener.kind === 'rejected') primaryFailure = {error: listener.error}
+          if (listener.kind === 'terminal') return await this.#finish(listener.cause)
+          if (listener.kind === 'resolved') {
+            const announcement = await this.#runPhase(
+              this.#announce(this.#readyEndpoint, listener.value, this.#stop.signal),
+              terminal, 'desktop_readiness_announcement_abandoned', isReadinessCancellation,
+            )
+            if (announcement.kind === 'rejected') primaryFailure = {error: announcement.error}
+            if (announcement.kind === 'terminal') return await this.#finish(announcement.cause)
+          }
+        }
+        if (primaryFailure === null) return await this.#finish(await terminal.promise)
+      }
+    } catch (error) {
+      primaryFailure = {error}
+    }
+    this.#stop.abort()
+    const cleanup = await this.#ensureCleanup()
+    if (primaryFailure !== null) throw primaryFailure.error
+    if (cleanup.firstFailure !== null) throw cleanup.firstFailure.error
+  }
+
+  async #listen(): Promise<void> {
+    const readiness = await this.#desktop.server.start()
+    if (!this.#stop.signal.aborted) await this.#announce(this.#readyEndpoint, readiness, this.#stop.signal)
+  }
+
+  #externalStopMonitor(): TerminalMonitor {
+    let current: TerminalCause | undefined
+    const promise = new Promise<TerminalCause>(resolve => {
+      if (this.#stop.signal.aborted) {
+        current = {kind: 'external', error: null}
+        resolve(current)
+        return
+      }
+      const onAbort = (): void => {
+        current = {kind: 'external', error: null}
+        resolve(current)
+      }
+      this.#stop.signal.addEventListener('abort', onAbort, {once: true})
+    })
+    return {promise, current: () => current}
+  }
+
+  #armTerminalMonitor(external: TerminalMonitor): TerminalMonitor {
+    let current = external.current()
+    const remember = (cause: TerminalCause): TerminalCause => {
+      current ??= external.current() ?? cause
+      return current
+    }
+    let service: Promise<TerminalCause>
+    try {
+      service = this.#realtime.service.waitStopped().then<TerminalCause, TerminalCause>(
+        () => remember({kind: 'service', error: null}),
+        (error: unknown) => remember({kind: 'service', error: {value: error}}),
+      )
+    } catch (error) {
+      service = Promise.resolve(remember({kind: 'service', error: {value: error}}))
+    }
+    const promise = Promise.race([external.promise, service]).then(cause => {
+      current = cause
+      this.#stop.abort()
+      void this.#ensureCleanup()
+      return cause
+    })
+    return {promise, current: () => current ?? external.current()}
+  }
+
+  async #runPhase<T>(
+    work: Promise<T>,
+    terminal: TerminalMonitor,
+    abandonedDiagnostic: string,
+    terminalWinsConcurrentRejection?: (error: unknown) => boolean,
+  ): Promise<PhaseResult<T>> {
+    const outcome: Promise<PhaseResult<T>> = work.then(
+      value => ({kind: 'resolved', value}),
+      (error: unknown) => ({kind: 'rejected', error}),
+    )
+    const raced = await Promise.race([
+      outcome,
+      terminal.promise.then(cause => ({kind: 'terminal' as const, cause})),
+    ])
+    if (
+      raced.kind === 'rejected'
+      && terminalWinsConcurrentRejection?.(raced.error) === true
+    ) {
+      const cause = terminal.current()
+      if (cause !== undefined) return {kind: 'terminal', cause}
+    }
+    if (raced.kind !== 'terminal') return raced
+    await this.#settlePhaseWithinGrace(outcome, abandonedDiagnostic)
+    return raced
+  }
+
+  async #settlePhaseWithinGrace<T>(
+    outcome: Promise<PhaseResult<T>>,
+    diagnostic: string,
+  ): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<'abandoned'>(resolve => {
+      timer = setTimeout(() => resolve('abandoned'), this.#cleanupGraceMs)
+    })
+    const result = await Promise.race([outcome.then(() => 'settled' as const), deadline])
+    if (timer !== undefined) clearTimeout(timer)
+    if (result === 'abandoned') this.#emitDiagnostic(diagnostic)
+  }
+
+  async #finish(cause: TerminalCause): Promise<void> {
+    const cleanup = await this.#ensureCleanup()
+    if (cause.kind === 'service' && cause.error !== null) throw cause.error.value
+    if (cleanup.firstFailure !== null) throw cleanup.firstFailure.error
+  }
+
+  #ensureCleanup(): Promise<CleanupOutcome> {
+    if (this.#cleanupOperation !== null) return this.#cleanupOperation
+    this.#cleanupOperation = this.#cleanup()
+    return this.#cleanupOperation
+  }
+
+  async #cleanup(): Promise<CleanupOutcome> {
+    let firstFailure: {readonly error: unknown} | null = null
+    const server = await this.#cleanupWithinGrace(
+      () => this.#desktop.server.close(),
+      'desktop_server_close_abandoned',
+    )
+    if (server.kind === 'rejected') firstFailure = {error: server.error}
+
+    const realtime = await settleCleanup(() => this.#realtime.stop())
+    if (firstFailure === null && realtime.kind === 'rejected') {
+      firstFailure = {error: realtime.error}
+    }
+
+    const auxiliary = await this.#cleanupWithinGrace(
+      () => this.#closeAuxiliary(),
+      'desktop_auxiliary_close_abandoned',
+    )
+    if (firstFailure === null && auxiliary.kind === 'rejected') {
+      firstFailure = {error: auxiliary.error}
+    }
+    return {firstFailure}
+  }
+
+  async #cleanupWithinGrace(
+    cleanup: () => void | Promise<void>,
+    diagnostic: string,
+  ): Promise<CleanupResult> {
+    const settled = settleCleanup(cleanup)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<CleanupResult>(resolve => {
+      timer = setTimeout(() => resolve({kind: 'abandoned'}), this.#cleanupGraceMs)
+    })
+    const result = await Promise.race([settled, deadline])
+    if (timer !== undefined) clearTimeout(timer)
+    if (result.kind === 'abandoned') {
+      this.#emitDiagnostic(diagnostic)
+    }
+    return result
+  }
+
+  #emitDiagnostic(diagnostic: string): void {
+    try {
+      this.#onDiagnostic(`[runtime-diagnostic] ${diagnostic}`)
+    } catch {
+      // Diagnostic observers do not own shutdown progress.
+    }
+  }
+}
+
+async function settleCleanup(cleanup: () => void | Promise<void>): Promise<CleanupResult> {
+  try {
+    await cleanup()
+    return {kind: 'resolved'}
+  } catch (error) {
+    return {kind: 'rejected', error}
+  }
+}
+
+export interface DesktopEntryConstruction {
+  readonly realtime: DesktopRealtimeOwner
+  readonly desktop: DesktopRealtimeTransportOwner
+  readonly closeAuxiliary?: () => void | Promise<void>
+}
+
+export interface DesktopConstructionOwnership {
+  /** Retain construction cleanup until the returned graph has acquired lifecycle ownership. */
+  own(cleanup: () => void | Promise<void>): () => void
+}
+
+export interface DesktopEntryOptions {
+  readonly listenBeforeRealtime?: boolean
+  readonly token: string
+  readonly readyEndpoint?: string
+  readonly stop: AbortController
+  readonly construct: (
+    ownership: DesktopConstructionOwnership,
+  ) => DesktopEntryConstruction | Promise<DesktopEntryConstruction>
+  readonly announce: (
+    endpoint: string,
+    readiness: DesktopReadiness,
+    signal: AbortSignal,
+  ) => Promise<void>
+  readonly onDiagnostic: (line: string) => void
+  readonly cleanupGraceMs?: number
+  readonly onStartupFailure?: (error: unknown) => void
+}
+
+/** Run the production entry without leaking configuration or dependency errors to stderr. */
+export async function runDesktopEntry(options: DesktopEntryOptions): Promise<0 | 2> {
+  let ownership: DesktopConstructionLedger | null = null
+  try {
+    ownership = new DesktopConstructionLedger(
+      options.cleanupGraceMs ?? DESKTOP_OWNER_SHUTDOWN_GRACE_MS,
+      options.onDiagnostic,
+    )
+    validateDesktopToken(options.token)
+    if (options.readyEndpoint !== undefined) parseReadyEndpoint(options.readyEndpoint)
+    const constructed = await options.construct(ownership)
+    const owner = new RealtimeDesktopService({
+      ...(options.listenBeforeRealtime === undefined ? {} : {listenBeforeRealtime: options.listenBeforeRealtime}),
+      realtime: constructed.realtime,
+      desktop: constructed.desktop,
+      readyEndpoint: options.readyEndpoint ?? '',
+      stop: options.stop,
+      announce: options.announce,
+      ...(constructed.closeAuxiliary === undefined
+        ? {}
+        : {closeAuxiliary: constructed.closeAuxiliary}),
+      ...(options.cleanupGraceMs === undefined ? {} : {cleanupGraceMs: options.cleanupGraceMs}),
+      onDiagnostic: options.onDiagnostic,
+    })
+    ownership.commit()
+    await owner.run()
+    return 0
+  } catch (error) {
+    await ownership?.rollback()
+    try {
+      options.onStartupFailure?.(error)
+      options.onDiagnostic(`[runtime-diagnostic] ${desktopEntryFailureCode(error)}`)
+    } catch {
+      // A diagnostic sink must not convert a bounded entry failure into an unhandled rejection.
+    }
+    return 2
+  }
+}
+
+function desktopEntryFailureCode(error: unknown): string {
+  if (error !== null && typeof error === 'object') {
+    const value = error as {readonly name?: unknown; readonly code?: unknown}
+    if (value.code === 'frontbrain_tool_budget_exceeded') return 'configuration_required'
+    if (value.code === 'credential_missing') return 'authentication_failed'
+    if (new Set([
+      'binary_missing', 'spawn_failed', 'codex_host_unavailable',
+      'codex_project_host_unsupported', 'backend_unavailable',
+    ]).has(String(value.code))) return 'backend_unavailable'
+    // Every configuration error class (core, camera, any executor's host config) ends in this suffix.
+    if (typeof value.name === 'string' && value.name.endsWith('ConfigurationError')) return 'configuration_required'
+  }
+  return 'assembly_failed'
+}
+
+interface ConstructionCleanup {
+  readonly cleanup: () => void | Promise<void>
+  active: boolean
+}
+
+class DesktopConstructionLedger implements DesktopConstructionOwnership {
+  readonly #cleanups: ConstructionCleanup[] = []
+  readonly #cleanupGraceMs: number
+  readonly #onDiagnostic: (line: string) => void
+  #sealed = false
+  #rollbackOperation: Promise<void> | null = null
+
+  constructor(cleanupGraceMs: number, onDiagnostic: (line: string) => void) {
+    if (!Number.isFinite(cleanupGraceMs) || cleanupGraceMs <= 0) {
+      throw new TypeError('desktop cleanup grace must be positive and finite')
+    }
+    this.#cleanupGraceMs = cleanupGraceMs
+    this.#onDiagnostic = onDiagnostic
+  }
+
+  own(cleanup: () => void | Promise<void>): () => void {
+    if (this.#sealed || typeof cleanup !== 'function') {
+      throw new TypeError('desktop construction ownership is closed')
+    }
+    const entry: ConstructionCleanup = {cleanup, active: true}
+    this.#cleanups.push(entry)
+    return (): void => { entry.active = false }
+  }
+
+  commit(): void {
+    this.#sealed = true
+    for (const entry of this.#cleanups) entry.active = false
+  }
+
+  rollback(): Promise<void> {
+    if (this.#rollbackOperation !== null) return this.#rollbackOperation
+    if (this.#sealed) return Promise.resolve()
+    this.#sealed = true
+    this.#rollbackOperation = this.#rollbackFresh()
+    return this.#rollbackOperation
+  }
+
+  async #rollbackFresh(): Promise<void> {
+    for (let index = this.#cleanups.length - 1; index >= 0; index -= 1) {
+      const entry = this.#cleanups[index]!
+      if (!entry.active) continue
+      entry.active = false
+      const result = await this.#cleanupWithinGrace(entry.cleanup)
+      if (result.kind === 'rejected') {
+        this.#emitDiagnostic('desktop_construction_cleanup_failed')
+      } else if (result.kind === 'abandoned') {
+        this.#emitDiagnostic('desktop_construction_cleanup_abandoned')
+      }
+    }
+  }
+
+  async #cleanupWithinGrace(cleanup: () => void | Promise<void>): Promise<CleanupResult> {
+    const settled = settleCleanup(cleanup)
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const deadline = new Promise<CleanupResult>(resolve => {
+      timer = setTimeout(() => resolve({kind: 'abandoned'}), this.#cleanupGraceMs)
+    })
+    const result = await Promise.race([settled, deadline])
+    if (timer !== undefined) clearTimeout(timer)
+    return result
+  }
+
+  #emitDiagnostic(diagnostic: string): void {
+    try {
+      this.#onDiagnostic(`[runtime-diagnostic] ${diagnostic}`)
+    } catch {
+      // Construction rollback remains all-attempted when diagnostics fail.
+    }
+  }
+}
+
+export interface DesktopStopEventSource {
+  once(event: string, listener: (...args: unknown[]) => void): unknown
+  on(event: string, listener: (...args: unknown[]) => void): unknown
+  off?(event: string, listener: (...args: unknown[]) => void): unknown
+  removeListener?(event: string, listener: (...args: unknown[]) => void): unknown
+}
+
+export interface DesktopStopInputSource extends DesktopStopEventSource {
+  resume(): unknown
+  pause?(): unknown
+}
+
+export interface DesktopStopParentSource extends DesktopStopEventSource {
+  start?(): void
+}
+
+export interface DesktopStopSources {
+  readonly processEvents: DesktopStopEventSource
+  readonly stdin: DesktopStopInputSource
+  readonly parentPort?: DesktopStopParentSource
+}
+
+export interface DesktopStopSourceBinding {
+  dispose(): void
+}
+
+/** Bind every host termination path to one abort owner and make the bindings explicitly releasable. */
+export function installDesktopStopSources(
+  options: DesktopStopSources & {readonly stop: AbortController},
+): DesktopStopSourceBinding {
+  const removers: (() => void)[] = []
+  let resumedStdin = false
+  let disposed = false
+  const requestStop = (): void => options.stop.abort()
+  const bind = (
+    source: DesktopStopEventSource,
+    method: 'on' | 'once',
+    event: string,
+    listener: (...args: unknown[]) => void,
+  ): void => {
+    source[method](event, listener)
+    removers.push(() => removeEventListener(source, event, listener))
+  }
+
+  bind(options.processEvents, 'once', 'SIGINT', requestStop)
+  bind(options.processEvents, 'once', 'SIGTERM', requestStop)
+  if (options.parentPort === undefined) {
+    bind(options.processEvents, 'once', 'disconnect', requestStop)
+    bind(options.stdin, 'once', 'end', requestStop)
+    options.stdin.resume()
+    resumedStdin = true
+  } else {
+    const onMessage = (event: unknown): void => {
+      if (isDesktopShutdownMessage(event)) requestStop()
+    }
+    bind(options.parentPort, 'on', 'message', onMessage)
+    bind(options.parentPort, 'once', 'close', requestStop)
+    options.parentPort.start?.()
+  }
+
+  return {
+    dispose: (): void => {
+      if (disposed) return
+      disposed = true
+      for (const remove of removers.splice(0).reverse()) remove()
+      if (resumedStdin) options.stdin.pause?.()
+    },
+  }
+}
+
+/** Entry wrapper that cannot leave a resumed stdin or process listener behind after any exit. */
+export async function runDesktopEntryWithStopSources(
+  options: DesktopEntryOptions,
+  sources: DesktopStopSources,
+): Promise<0 | 2> {
+  const binding = installDesktopStopSources({...sources, stop: options.stop})
+  try {
+    return await runDesktopEntry(options)
+  } finally {
+    binding.dispose()
+  }
+}
+
+/** Accept both Electron MessageEvent wrappers and utility-process direct payloads. */
+export function isDesktopShutdownMessage(event: unknown): boolean {
+  const message = isObject(event) && 'data' in event ? event.data : event
+  return isObject(message) && message.type === 'nova.shutdown'
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object'
+}
+
+function isReadinessCancellation(error: unknown): boolean {
+  return error instanceof DesktopProtocolError
+    && error.message === 'desktop readiness announcement cancelled'
+}
+
+function removeEventListener(
+  source: DesktopStopEventSource,
+  event: string,
+  listener: (...args: unknown[]) => void,
+): void {
+  if (source.off !== undefined) source.off(event, listener)
+  else source.removeListener?.(event, listener)
+}
+
+function noop(): void {
+  // Default auxiliary cleanup and settled-signal disposer.
+}
+
+function noopDiagnostic(_line: string): void {
+  void _line
 }

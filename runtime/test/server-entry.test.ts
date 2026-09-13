@@ -4,7 +4,7 @@ import {existsSync, mkdtempSync, readFileSync, statSync, chmodSync, rmSync, writ
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {EventEmitter, once} from 'node:events'
-import {runDesktopEntry} from '../src/desktop-service.js'
+import {runDesktopEntry} from '../src/desktop-session.js'
 
 // The same owner must run without an Electron readiness endpoint.
 test('headless lifecycle starts and cleans up without a parent readiness endpoint', async () => {

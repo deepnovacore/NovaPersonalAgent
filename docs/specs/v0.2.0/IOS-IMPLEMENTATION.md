@@ -46,7 +46,7 @@ P0 到 P5 为首版；P6 可独立延期。以下文件路径是规划实施落�
 
 ## P1：常驻服务入口与认证
 
-**修改：** `runtime/src/desktop-entry.ts`、`desktop-service.ts`、`desktop.ts`、`environment-contract.ts`、`runtime/package.json`。
+**修改：** `runtime/src/desktop-entry.ts`、`desktop-session.ts`、`desktop.ts`、`environment-contract.ts`、`runtime/package.json`。
 **新增：** `runtime/src/server-entry.ts`、`runtime/src/server-config.ts`、`runtime/src/production-composition.ts`、`runtime/test/server-entry.test.ts`、`docs/deployment/remote-server.md`。
 **输入：** P0 remote v1；现有 `buildProductionRealtimeAssembly` 与 Codex/MCP resource ownership。
 **输出：** localhost 固定端口的独立 Node 服务、凭据初始化/轮换入口、无密钥 ready 日志；桌面入口继续可用。
@@ -62,7 +62,7 @@ P0 到 P5 为首版；P6 可独立延期。以下文件路径是规划实施落�
 
 ## P2：网络故障与工作生命周期隔离
 
-**修改：** `runtime/src/desktop-bridge.ts`、`desktop-realtime.ts`，必要时 `desktop-service.ts`、`realtime/service.ts`、`realtime-assembly.ts`。
+**修改：** `runtime/src/desktop-session.ts`、`desktop-session.ts`，必要时 `desktop-session.ts`、`realtime/service.ts`、`realtime-assembly.ts`。
 **新增/扩展测试：** `runtime/test/remote-session.test.ts` 与现有 desktop bridge/service 测试。
 **输入：** P1 的 server instance/connection identity、P0 命令格式。
 **输出：** 有界请求去重、命令回执、重连快照；只作用于当前连接的传输失败。

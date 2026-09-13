@@ -10,11 +10,11 @@ import {ProjectConfirmationController} from '../src/project-confirmation.js'
 import {
   buildIntegratedRealtimeAssembly,
   type IntegratedProviderRegistry,
-} from '../src/integrated-realtime-assembly.js'
+} from '../src/cascaded-realtime-assembly.js'
 import {
   buildProductionRealtimeAssembly,
   type BuildProductionRealtimeAssemblyOptions,
-} from '../src/production-realtime-assembly.js'
+} from '../src/cascaded-realtime-assembly.js'
 import {QwenAudioRealtimeAdapter} from '../src/realtime/qwen.js'
 import type {RealtimeAssembly} from '../src/realtime-assembly.js'
 

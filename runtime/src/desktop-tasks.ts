@@ -1,6 +1,10 @@
 import {z} from 'zod'
-import type {ExecutorProgress} from './desktop-progress.js'
-import type {PublicProjectView} from './desktop-wire.js'
+import {type ExecutorProgress} from './desktop-progress.js'
+import {type PublicProjectView} from './desktop-wire.js'
+import {spawn} from 'node:child_process'
+import {isAbsolute} from 'node:path'
+import {realpath, stat} from 'node:fs/promises'
+
 const id = z.string().min(1).max(128).refine(s => s.trim().length > 0 && !/[\p{C}]/u.test(s))
 const label = z.string().min(1).refine(s => [...s].length <= 120 && !/[\p{C}]/u.test(s))
 export const taskActionSchema = z.object({type: z.literal('executor.task_action'), request_id: id, work_id: id, executor: id, action: z.enum(['open', 'cancel'])}).strict()
@@ -47,4 +51,17 @@ export class DesktopTasks {
   snapshot(): z.infer<typeof executorTasksSchema> {
     return {type: 'executor.tasks', revision: this.#revision, active_project: this.#project, tasks: [...this.#tasks.values()].sort((a, b) => Number(running(b)) - Number(running(a)) || b.ts - a.ts).map(task => ({...task}))}
   }
+}
+
+/** Only a host-resolved directory reaches the native file manager; never a renderer URL. */
+export async function openTaskDirectory(path: string, launch: (file: string, args: readonly string[]) => Promise<void> = (file, args) => new Promise((resolve, reject) => {
+  const child = spawn(file, [...args], {detached: true, stdio: 'ignore'})
+  child.once('error', error => reject(new Error('task directory opener failed', {cause: error})))
+  child.once('spawn', () => { child.unref(); resolve() })
+}), platform: string = process.platform, stillWanted: () => boolean = () => true): Promise<void> {
+  if (!isAbsolute(path) || await realpath(path) !== path || !(await stat(path)).isDirectory()) throw new Error('task workspace unavailable')
+  if (!stillWanted()) return
+  if (platform === 'darwin') await launch('/usr/bin/open', [path])
+  else if (platform === 'win32') await launch('explorer.exe', [path])
+  else await launch('xdg-open', [path])
 }

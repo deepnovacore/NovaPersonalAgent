@@ -8,7 +8,7 @@ import {VirtualClock, type Clock} from '../src/clock.js'
 import {CODEX_PROJECT_APPROVAL_MANIFEST} from '../src/executors/codex/contract.js'
 import {CODEX_AGENT_DESCRIPTOR, CodexAgentController} from '../src/executors/codex/controller.js'
 import {OwnedCodexAppServerTransport} from '../src/executors/codex/app-server-transport.js'
-import {DesktopRealtime} from '../src/desktop-realtime.js'
+import {DesktopRealtime} from '../src/desktop-session.js'
 import {
   NodeDesktopServer,
   type DesktopControl,

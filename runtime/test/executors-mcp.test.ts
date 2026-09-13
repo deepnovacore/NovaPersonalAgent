@@ -367,13 +367,13 @@ test('actual desktop entry awaits discovery and owns cleanup when final exact fr
   const local = await localMcp([tool()])
   const configUrl = new URL('../src/config.js', import.meta.url).href
   const registryUrl = new URL('../src/capability-registry.js', import.meta.url).href
-  const desktopUrl = new URL('../src/desktop-service.js', import.meta.url).href
+  const desktopUrl = new URL('../src/desktop-session.js', import.meta.url).href
   const document = {version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}, coding: {enabled: false}, camera: {enabled: false}},
     mcpServers: {external: {transport: 'streamable-http', url: local.url, exposeTo: {frontbrain: true}, tools: {lookup: enabled}}}}
   const replacements = {
     './config.js': `import {loadSettings as load} from ${JSON.stringify(configUrl)}; export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)}; export function loadSettings() {return {...load({NOVA_AUDIO_AGENT_MODEL_API_KEY:'fixture', DASHSCOPE_API_KEY:'fixture'}),executors:[]}}`,
     './capability-registry.js': `import {parseCapabilityRegistry} from ${JSON.stringify(registryUrl)}; export function loadCapabilityRegistry() {return parseCapabilityRegistry(${JSON.stringify(document)})}`,
-    './desktop-service.js': `export {buildDesktopRealtimeComposition} from ${JSON.stringify(desktopUrl)};
+    './desktop-session.js': `export {buildDesktopRealtimeComposition} from ${JSON.stringify(desktopUrl)};
       export async function runDesktopEntryWithStopSources({construct}) {
         const owned=[]; try {await construct({own:close=>owned.push(close)}); throw new Error('expected budget rejection');}
         catch(error) {if(error.code!=='frontbrain_tool_budget_exceeded'||error.toolCount!==2||error.toolBudget!==1) throw error; process.stdout.write('budget 2/1');}

@@ -24,7 +24,7 @@ Uplink binary frames: 1–65536 bytes, even length, raw PCM16. Downlink: existin
 
 Golden vectors: `fixtures/client-protocol/v1/vectors.json`, an array of `{name, hex, valid, expected?}`. Expected has `utterance_id`, `generation_epoch`, `sequence`, `pcm_hex`.
 
-Downlink text uses the existing `caption`, `playback.clear`, `playback.alert`, `playback.terminal`, `project.state`, `executor.state`, `executor.progress`, `executor.result`, `executor.results.reset`, `executor.approval`, and `clock.ping` payloads. Their authoritative encoders are `desktop-wire.ts`, `desktop-progress.ts`, and `desktop-bridge.ts`. Client must not treat terminal as proof that audio already played.
+Downlink text uses the existing `caption`, `playback.clear`, `playback.alert`, `playback.terminal`, `project.state`, `executor.state`, `executor.progress`, `executor.result`, `executor.results.reset`, `executor.approval`, and `clock.ping` payloads. Their authoritative encoders are `desktop-wire.ts`, `desktop-progress.ts`, and `desktop-session.ts`. Client must not treat terminal as proof that audio already played.
 
 ## Controls and receipts
 
