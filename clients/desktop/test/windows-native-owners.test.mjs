@@ -16,49 +16,23 @@ async function source(relativePath) {
   return await readFile(resolve(packageRoot, relativePath), 'utf8')
 }
 
-test('Windows project authority owns nonblocking locks and handle-relative project operations', async () => {
+test('Windows project addon owns only crash-safe nonblocking locks', async () => {
   const body = await source('native/project-native/project_native_windows.c')
   for (const required of [
-    /_get_osfhandle/u,
     /DuplicateHandle/u,
     /LockFileEx/u,
+    /UnlockFileEx/u,
     /LOCKFILE_FAIL_IMMEDIATELY/u,
-    /NtCreateFile/u,
-    /RootDirectory/u,
-    /FILE_OPEN_REPARSE_POINT/u,
-    /GetSecurityInfo/u,
-    /GetTokenInformation/u,
-    /SetFileInformationByHandle/u,
-    /NtSetInformationFile/u,
-    /NtFlushBuffersFileEx/u,
-    /NOVA_FILE_RENAME_INFORMATION/u,
     /uv_get_osfhandle/u,
-    /SetSecurityInfo/u,
-    /FileDispositionInfoEx/u,
-    /__pfnDliNotifyHook2/u,
     /GetModuleHandleW\(NULL\)/u,
   ]) assert.match(body, required)
   assert.match(body, /const PfnDliHook __pfnDliNotifyHook2 = nova_delay_load_hook;/u)
-  assert.doesNotMatch(body, /\nPfnDliHook __pfnDliNotifyHook2/u)
-  for (const exported of [
-    'acquire', 'openDirectory', 'probe', 'protectAt', 'prepareManagedAt',
-    'matchesAt', 'matchesWorkspaceAt',
-    'lookupAt', 'lookupWorkspaceAt', 'createFileAt', 'mkdirAt', 'mkdirPrivateAt',
-    'renameAt', 'renameNoReplaceAt', 'syncDirectory', 'unlinkAt', 'removeTreeAt',
-  ]) assert.match(body, new RegExp(`"${exported}"`, 'u'))
-  assert.doesNotMatch(body, /static napi_value nova_protect_directory|"protectDirectory"/u)
-  assert.match(body, /CreateFileW\s*\(/u)
-  assert.match(body, /FILE_FLAG_BACKUP_SEMANTICS\s*\|\s*FILE_FLAG_OPEN_REPARSE_POINT/u)
-  const openDirectory = body.split(
-    'static napi_value nova_open_directory',
-  )[1].split('static napi_value', 1)[0]
-  assert.match(openDirectory, /nova_current_user_owner\(opened\)/u)
-  assert.match(body, /nova_validate_project_root/u)
-  assert.match(body, /FILE_DELETE_CHILD[\s\S]{0,160}WRITE_DAC[\s\S]{0,160}GENERIC_ALL/u)
-  assert.match(body, /nova_private_acl\(handle, 0\)/u)
-  assert.match(body, /nova_private_acl\(handle, 1\)/u)
+  assert.match(body, /"acquire"/u)
+  assert.doesNotMatch(body, /NtCreateFile|GetSecurityInfo|"openDirectory"|"removeTreeAt"/u)
   const posixBody = await source('native/project-native/project_native_posix.c')
-  assert.doesNotMatch(posixBody, /static napi_value nova_protect_directory|"protectDirectory"/u)
+  assert.match(posixBody, /flock/u)
+  assert.match(posixBody, /"acquire"/u)
+  assert.doesNotMatch(posixBody, /"openDirectory"|"removeTreeAt"/u)
 })
 
 test('Windows sandbox probe measures child, filesystem, network, and limit isolation', async () => {

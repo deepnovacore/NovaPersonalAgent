@@ -21,33 +21,8 @@ function fakeMachAddon(): Buffer {
   return body
 }
 
-function fakeWindowsAddon(): Buffer {
-  const body = Buffer.alloc(128)
-  body.write('MZ', 0, 'ascii')
-  body.writeUInt32LE(64, 0x3c)
-  body.write('PE\0\0', 64, 'binary')
-  body.writeUInt16LE(0x8664, 68)
-  body.writeUInt16LE(0x2000, 86)
-  return body
-}
-
 function fakeAddon(): Record<string, (...args: readonly unknown[]) => unknown> {
-  return {
-    acquire: () => ({status: 'busy'}),
-    openDirectory: () => ({status: 'ok', descriptor: 41, close: () => undefined}),
-    probe: () => ({status: 'ok'}),
-    protectAt: () => ({status: 'ok'}),
-    matchesAt: () => ({status: 'ok'}),
-    lookupAt: () => ({status: 'missing'}),
-    createFileAt: () => ({status: 'exists'}),
-    mkdirAt: () => ({status: 'exists'}),
-    mkdirPrivateAt: () => ({status: 'ok', identity: {device: 1n, inode: 2n}}),
-    renameAt: () => ({status: 'ok'}),
-    renameNoReplaceAt: () => ({status: 'exists'}),
-    syncDirectory: () => ({status: 'ok'}),
-    unlinkAt: () => ({status: 'ok'}),
-    removeTreeAt: () => ({status: 'ok'}),
-  }
+  return {acquire: () => ({status: 'busy'})}
 }
 
 test('project native host loads only one fixed manifest-bound addon for the exact Electron tuple', async () => {
@@ -91,36 +66,14 @@ test('project native host loads only one fixed manifest-bound addon for the exac
     assert.notEqual(loaded, null)
     assert.equal(loads, 1)
     assert.deepEqual(loaded?.nativeLocks.acquire(7), {status: 'busy'})
-    assert.deepEqual(loaded?.rootFiles.probe(8), {status: 'ok'})
-    assert.equal(Object.hasOwn(loaded?.rootFiles ?? {}, 'matchesWorkspaceAt'), false)
-    assert.equal(Object.hasOwn(loaded?.rootFiles ?? {}, 'lookupWorkspaceAt'), false)
-    assert.deepEqual(loaded?.rootFiles.removeTreeAt(8, 'tombstone', {device: 1n, inode: 2n}), {
-      status: 'ok',
-    })
-    const maintenanceFiles = loaded?.rootFiles as unknown as {
-      renameNoReplaceAt(
-        root: number,
-        from: string,
-        to: string,
-        identity: {device: bigint; inode: bigint},
-      ): unknown
-      syncDirectory(root: number): unknown
-    }
-    assert.deepEqual(maintenanceFiles.renameNoReplaceAt(
-      8,
-      'source',
-      'destination',
-      {device: 1n, inode: 2n},
-    ), {status: 'exists'})
-    assert.deepEqual(maintenanceFiles.syncDirectory(8), {status: 'ok'})
-    const directory = loaded?.directoryHandles.open('/home/nova')
-    assert.equal(directory?.fd, 41)
-    assert.equal(directory?.close(), undefined)
-    assert.equal(Object.hasOwn(loaded ?? {}, 'protectDirectory'), false)
-    assert.equal(loaded?.protectDirectoryAt(8, 'state', 9), true)
-    assert.deepEqual(loaded?.mkdirPrivateAt(8, 'state'), {
-      status: 'ok', identity: {device: 1n, inode: 2n},
-    })
+    const directory = loaded.directoryHandles.open(root)
+    assert.equal(loaded.rootFiles.probe(directory.fd).status, 'ok')
+    assert.equal(loaded.rootFiles.mkdirAt(directory.fd, 'state').status, 'ok')
+    const child = loaded.directoryHandles.open(join(root, 'state'))
+    assert.equal(loaded.protectDirectoryAt(directory.fd, 'state', child.fd), true)
+    child.close()
+    directory.close()
+    assert.equal(loaded.rootFiles.probe(directory.fd).status, 'failed')
 
     const swappedDuringLoad = loadProjectNativeHostFromResources({
       resourcesPath: root,
@@ -203,54 +156,6 @@ test('project native host rejects wrong ABI and decorated addon exports without 
       resourcesPath: root, platform: 'freebsd', arch: 'x64', electronAbi: '148',
       moduleLoader: () => fakeAddon(),
     }), {status: 'absent', host: null})
-  } finally {
-    await rm(root, {recursive: true, force: true})
-  }
-})
-
-test('Windows project native host forwards managed-directory preparation to the native addon', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'nova-project-native-resource-')))
-  const addonPath = join(root, 'native', 'project-native', 'nova_project_native.node')
-  const body = fakeWindowsAddon()
-  const calls: Readonly<[number, string, number]>[] = []
-  try {
-    await mkdir(join(root, 'native', 'project-native'), {recursive: true})
-    await writeFile(addonPath, body)
-    await writeFile(join(root, 'native-resources-v1.json'), JSON.stringify({
-      schema_version: 1,
-      target: 'win32-x64',
-      resources: [{
-        logical_id: 'project_native_addon',
-        relative_path: 'native/project-native/nova_project_native.node',
-        byte_size: body.length,
-        sha256: createHash('sha256').update(body).digest('hex'),
-        kind: 'node_addon', platform: 'win32', architecture: 'x64',
-        electron_abi: 148, build_contract_version: 1,
-      }],
-    }))
-    const addon = {
-      ...fakeAddon(),
-      lookupWorkspaceAt: () => ({status: 'missing'}),
-      matchesWorkspaceAt: () => ({status: 'ok'}),
-      prepareManagedAt: (parent: number, name: string, child: number) => {
-        calls.push([parent, name, child])
-        return {status: child === 9 ? 'ok' : 'failed'}
-      },
-    }
-    const loaded = loadProjectNativeHostFromResources({
-      resourcesPath: root,
-      platform: 'win32',
-      arch: 'x64',
-      electronAbi: '148',
-      moduleLoader: () => addon,
-    })
-    assert.notEqual(loaded, null)
-    assert.equal(loaded?.prepareManagedDirectoryAt(7, 'workspaces', 9), true)
-    assert.equal(loaded?.prepareManagedDirectoryAt(7, 'workspaces', 10), false)
-    assert.deepEqual(calls, [
-      [7, 'workspaces', 9],
-      [7, 'workspaces', 10],
-    ])
   } finally {
     await rm(root, {recursive: true, force: true})
   }

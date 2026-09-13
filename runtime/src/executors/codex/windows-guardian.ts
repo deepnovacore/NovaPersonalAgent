@@ -1,7 +1,6 @@
+import {snapshotRegularFile, sameSnapshot} from '../../native-resource-snapshot.js'
 import {spawn} from 'node:child_process'
-import {createHash} from 'node:crypto'
-import {constants as fsConstants} from 'node:fs'
-import {closeSync, fstatSync, openSync, readSync, realpathSync, statSync} from 'node:fs'
+import {closeSync, openSync, readSync, realpathSync, statSync} from 'node:fs'
 import {isAbsolute, resolve} from 'node:path'
 import type {Readable, Writable} from 'node:stream'
 
@@ -73,13 +72,6 @@ type WindowsGuardianLauncher = (
     windowsHide: true
   }>,
 ) => WindowsGuardianChild
-
-interface FileSnapshot {
-  readonly device: bigint
-  readonly inode: bigint
-  readonly size: number
-  readonly sha256: string
-}
 
 export class CodexWindowsGuardianError extends Error {
   readonly code = 'spawn_failed' as const
@@ -226,10 +218,10 @@ export function loadWindowsGuardianFactoryFromResources(options: {
     ) return null
     const resourcesRoot = resolve(options.resourcesPath)
     if (realpathSync(resourcesRoot) !== resourcesRoot) return null
-    const manifest = JSON.parse(readBoundedRegularFile(
+    const manifest = JSON.parse(snapshotRegularFile(
       resolve(resourcesRoot, 'native-resources-v1.json'),
       MAX_MANIFEST_BYTES,
-    ).toString('utf8')) as unknown
+    ).bytes.toString('utf8')) as unknown
     const record = requireGuardianRecord(manifest)
     const helperPath = resolve(resourcesRoot, WINDOWS_GUARDIAN_PATH)
     if (realpathSync(helperPath) !== helperPath) return null
@@ -716,70 +708,6 @@ function requireExactRecord(
     || Object.getPrototypeOf(value) !== Object.prototype
     || Object.keys(value).sort().join('\0') !== [...keys].sort().join('\0')
   ) throw new CodexWindowsGuardianError()
-}
-
-function readBoundedRegularFile(path: string, maximumBytes: number): Buffer {
-  const descriptor = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
-  try {
-    const before = fstatSync(descriptor, {bigint: true})
-    if (!before.isFile() || before.size <= 0n || before.size > BigInt(maximumBytes)) {
-      throw new CodexWindowsGuardianError()
-    }
-    const size = Number(before.size)
-    const bytes = Buffer.allocUnsafe(size)
-    let offset = 0
-    while (offset < size) {
-      const count = readSync(descriptor, bytes, offset, size - offset, offset)
-      if (count === 0) throw new CodexWindowsGuardianError()
-      offset += count
-    }
-    const after = fstatSync(descriptor, {bigint: true})
-    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size) {
-      throw new CodexWindowsGuardianError()
-    }
-    return bytes
-  } finally {
-    closeSync(descriptor)
-  }
-}
-
-function snapshotRegularFile(path: string, maximumBytes: number): FileSnapshot {
-  const descriptor = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
-  try {
-    const before = fstatSync(descriptor, {bigint: true})
-    if (!before.isFile() || before.size <= 0n || before.size > BigInt(maximumBytes)) {
-      throw new CodexWindowsGuardianError()
-    }
-    const size = Number(before.size)
-    const hash = createHash('sha256')
-    const buffer = Buffer.allocUnsafe(Math.min(size, 64 * 1024))
-    let offset = 0
-    while (offset < size) {
-      const count = readSync(descriptor, buffer, 0, Math.min(buffer.byteLength, size - offset), offset)
-      if (count === 0) throw new CodexWindowsGuardianError()
-      hash.update(buffer.subarray(0, count))
-      offset += count
-    }
-    const after = fstatSync(descriptor, {bigint: true})
-    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size) {
-      throw new CodexWindowsGuardianError()
-    }
-    return Object.freeze({
-      device: before.dev,
-      inode: before.ino,
-      size,
-      sha256: hash.digest('hex'),
-    })
-  } finally {
-    closeSync(descriptor)
-  }
-}
-
-function sameSnapshot(left: FileSnapshot, right: FileSnapshot): boolean {
-  return left.device === right.device
-    && left.inode === right.inode
-    && left.size === right.size
-    && left.sha256 === right.sha256
 }
 
 function validatePortableExecutable(

@@ -1939,12 +1939,14 @@ export class ProjectStore {
     const retained = await openStateRoot(this.#stateRoot, this.#platform)
     this.#stateRootHandle = retained.file
     this.#stateRootIdentity = retained.identity
+    this.#rootFiles.bindDirectory?.(retained.file.fd, this.#stateRoot)
   }
 
   async #retainManagedRoot(): Promise<void> {
     const retained = await openManagedRoot(this.#managedRoot, this.#platform)
     this.#managedRootHandle = retained.file
     this.#managedRootIdentity = retained.identity
+    this.#rootFiles.bindDirectory?.(retained.file.fd, this.#managedRoot)
   }
 
   #probeRootFileAuthority(): void {

@@ -455,3 +455,25 @@ Live (behaviour must be identical to the M1 validation table in
 |---|---|---|
 | Executor identity in core | Core sees `manifest.name / roles / display_name` and `delegate.executor` only; routing by `roles: ['coding']`; lint + script enforce | Branching on `'codex'`; a `switch` per executor in assemblies; boundary by convention only |
 | Confirmation ownership | Approval and project confirmation are host capabilities; executors declare `approvals: true` and expose an `ApprovalBroker` port; the two FSMs stay separate and 08 unifies only the voice-facing `confirm(id, accepted)` tool by id ownership | Executor-owned confirmation tools; one merged confirmation state machine (still rejected) |
+
+### Project filesystem implementation after slimming
+
+Project paths and mutations use Node filesystem APIs. Open directory descriptors
+are bound to canonical paths and bigint device/inode identities; operations reject
+replaced roots, symlinks/junctions, unavailable (zero) inodes and invalid basenames.
+Canonical paths use the same `realpathSync` domain as ProjectStore. Every operation
+compares both the current descriptor and bound path identity; closing a host-owned
+directory removes its binding before releasing the descriptor. Exact-child deletion
+checks the recorded identity before mutation. This is a single-user desktop
+boundary: it does not promise resistance to an adversarial rename between the
+identity check and a path mutation, or inspect Windows ACLs.
+
+The project addon retains only crash-safe nonblocking advisory locks (`flock` /
+`LockFileEx`). Lock files are never unlinked: replacing an inode would split
+ownership between processes, while PID-based stale-file recovery races with reuse.
+Windows retains the no-breakaway Job launcher and its tree-empty completion
+protocol; `taskkill` after leader exit cannot reclaim a detached descendant.
+The native sandbox probe also remains: production preflight consumes its actual
+filesystem, child, network and resource-limit checks and fails closed when absent.
+Native resource loading continues to validate bounded snapshots and hashes through
+one shared implementation.

@@ -1,12 +1,11 @@
-import {createHash} from 'node:crypto'
+import {snapshotRegularFile, sameSnapshot, type FileSnapshot} from './native-resource-snapshot.js'
+import {createProjectNodeFiles} from './project-node-files.js'
 import {constants as fsConstants} from 'node:fs'
 import {
   chmodSync,
   closeSync,
-  fstatSync,
   mkdtempSync,
   openSync,
-  readSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -17,27 +16,14 @@ import {basename, dirname, isAbsolute, join, resolve, type PlatformPath} from 'n
 
 import type {NativeFileLockAuthority} from './native-file-lock.js'
 import type {
-  ProjectFileIdentity,
   ProjectRootFileAuthority,
-  ProjectRootFileCreateResult,
-  ProjectRootFileLookupResult,
-  ProjectRootFileResult,
 } from './project-root-file.js'
 
 const PROJECT_ADDON_PATH = 'native/project-native/nova_project_native.node'
 const PROJECT_ADDON_ID = 'project_native_addon'
 const MAX_MANIFEST_BYTES = 1024 * 1024
 const MAX_ADDON_BYTES = 16 * 1024 * 1024
-const MODULE_EXPORTS = Object.freeze([
-  'acquire', 'createFileAt', 'lookupAt', 'matchesAt', 'mkdirAt', 'mkdirPrivateAt', 'openDirectory',
-  'probe', 'protectAt', 'removeTreeAt', 'renameAt', 'renameNoReplaceAt', 'syncDirectory', 'unlinkAt',
-])
-const WINDOWS_MODULE_EXPORTS = Object.freeze([
-  ...MODULE_EXPORTS,
-  'lookupWorkspaceAt',
-  'matchesWorkspaceAt',
-  'prepareManagedAt',
-].sort())
+const MODULE_EXPORTS = Object.freeze(['acquire'] as const)
 
 export interface ProjectDirectoryHandle {
   readonly fd: number
@@ -50,7 +36,7 @@ export interface ProjectNativeHost {
   readonly directoryHandles: Readonly<{
     open(path: string): ProjectDirectoryHandle
   }>
-  /** Protects a retained child selected descriptor-relatively by the host. */
+  /** Protects a retained child selected by the host and verified against its parent. */
   protectDirectoryAt(root: number, name: string, child: number): boolean
   /** Prepares a retained managed container without blocking inherited traversal access. */
   prepareManagedDirectoryAt(root: number, name: string, child: number): boolean
@@ -141,14 +127,6 @@ export type ProjectNativeHostLoadResult =
   | Readonly<{readonly status: 'present_failure'; readonly host: null}>
   | Readonly<{readonly status: 'loaded'; readonly host: ProjectNativeHost}>
 
-interface FileSnapshot {
-  readonly bytes: Buffer
-  readonly device: bigint
-  readonly inode: bigint
-  readonly size: number
-  readonly sha256: string
-}
-
 export function loadPackagedProjectNativeHost(): ProjectNativeHost | null {
   const resourcesPath = (process as NodeJS.Process & {readonly resourcesPath?: unknown}).resourcesPath
   if (typeof resourcesPath !== 'string' || resourcesPath === '') return null
@@ -205,7 +183,6 @@ function loadSupportedProjectNativeHostFromResources(
     try {
       addon = requireAddon(
         (options.moduleLoader ?? defaultModuleLoader)(materialized.path),
-        options.platform,
       )
       if (addon === null || !sameSnapshot(materialized.snapshot, snapshotRegularFile(
         materialized.path,
@@ -216,71 +193,24 @@ function loadSupportedProjectNativeHostFromResources(
     }
     const after = snapshotRegularFile(addonPath, MAX_ADDON_BYTES)
     if (!sameSnapshot(before, after)) return null
-    const prepareManagedAt = (
-      root: number,
-      name: string,
-      child: number,
-    ): ProjectRootFileResult => addon.prepareManagedAt === undefined
-      ? addon.protectAt(root, name, child)
-      : addon.prepareManagedAt(root, name, child)
-    const nativeLocks: NativeFileLockAuthority = Object.freeze({
-      acquire: (descriptor: number) => addon.acquire(descriptor),
-    })
-    const directoryHandles = Object.freeze({
-      open: (path: string): ProjectDirectoryHandle => projectDirectoryHandle(addon.openDirectory(path)),
-    })
-    const rootFiles: ProjectRootFileAuthority = Object.freeze({
-      probe: (descriptor: number) => addon.probe(descriptor),
-      matchesAt: (root: number, name: string, child: number) => addon.matchesAt(root, name, child),
-      lookupAt: (root: number, name: string) => addon.lookupAt(root, name),
-      ...(addon.matchesWorkspaceAt === undefined ? {} : {
-        matchesWorkspaceAt: (root: number, name: string, child: number) => (
-          addon.matchesWorkspaceAt!(root, name, child)
-        ),
-      }),
-      ...(addon.lookupWorkspaceAt === undefined ? {} : {
-        lookupWorkspaceAt: (root: number, name: string) => addon.lookupWorkspaceAt!(root, name),
-      }),
-      createFileAt: (root: number, name: string, exclusive: boolean) => (
-        addon.createFileAt(root, name, exclusive)
-      ),
-      mkdirAt: (root: number, name: string) => addon.mkdirAt(root, name),
-      mkdirPrivateAt: (root: number, name: string) => addon.mkdirPrivateAt(root, name),
-      protectAt: (root: number, name: string, child: number) => addon.protectAt(root, name, child),
-      renameAt: (root: number, from: string, to: string) => addon.renameAt(root, from, to),
-      renameNoReplaceAt: (
-        root: number,
-        from: string,
-        to: string,
-        expected: ProjectFileIdentity,
-      ) => (
-        addon.renameNoReplaceAt(root, from, to, expected)
-      ),
-      syncDirectory: (root: number) => addon.syncDirectory(root),
-      unlinkAt: (
-        root: number,
-        name: string,
-        identity: ProjectFileIdentity,
-        kind: 'file' | 'directory',
-      ) => addon.unlinkAt(root, name, identity, kind),
-      removeTreeAt: (root: number, name: string, identity: ProjectFileIdentity) => (
-        addon.removeTreeAt(root, name, identity)
-      ),
-    })
-    return Object.freeze({
-      nativeLocks,
+    const rootFiles = createProjectNodeFiles()
+    const directoryHandles = {
+      open(path: string): ProjectDirectoryHandle {
+        const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
+        try { rootFiles.bindDirectory!(fd, path) }
+        catch (error) { closeSync(fd); throw error }
+        let closed = false
+        return {fd, close() { if (!closed) { closed = true; rootFiles.unbindDirectory!(fd); closeSync(fd) } }}
+      },
+    }
+    return {
+      nativeLocks: {acquire: descriptor => addon.acquire(descriptor)},
       rootFiles,
       directoryHandles,
-      protectDirectoryAt: (root: number, name: string, child: number) => {
-        const result: unknown = addon.protectAt(root, name, child)
-        return isStatus(result, 'ok')
-      },
-      prepareManagedDirectoryAt: (root: number, name: string, child: number) => {
-        const result: unknown = prepareManagedAt(root, name, child)
-        return isStatus(result, 'ok')
-      },
-      mkdirPrivateAt: (root: number, name: string) => addon.mkdirPrivateAt(root, name),
-    })
+      protectDirectoryAt: (root, name, child) => rootFiles.protectAt!(root, name, child).status === 'ok',
+      prepareManagedDirectoryAt: (root, name, child) => rootFiles.matchesAt(root, name, child).status === 'ok',
+      mkdirPrivateAt: (root, name) => rootFiles.mkdirAt(root, name),
+    }
   } catch {
     return null
   }
@@ -320,44 +250,6 @@ function supportedTarget(platform: string, arch: string): string | null {
   if (platform === 'linux' && arch === 'x64') return 'linux-x64-gnu'
   if (platform === 'win32' && arch === 'x64') return 'win32-x64'
   return null
-}
-
-function snapshotRegularFile(path: string, maximumBytes: number): FileSnapshot {
-  const descriptor = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
-  try {
-    const before = fstatSync(descriptor, {bigint: true})
-    if (!before.isFile() || before.size <= 0n || before.size > BigInt(maximumBytes)) {
-      throw new Error('native resource rejected')
-    }
-    const size = Number(before.size)
-    const bytes = Buffer.allocUnsafe(size)
-    let offset = 0
-    while (offset < size) {
-      const count = readSync(descriptor, bytes, offset, size - offset, offset)
-      if (count === 0) throw new Error('native resource rejected')
-      offset += count
-    }
-    const after = fstatSync(descriptor, {bigint: true})
-    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size) {
-      throw new Error('native resource rejected')
-    }
-    return Object.freeze({
-      bytes,
-      device: before.dev,
-      inode: before.ino,
-      size,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
-    })
-  } finally {
-    closeSync(descriptor)
-  }
-}
-
-function sameSnapshot(left: FileSnapshot, right: FileSnapshot): boolean {
-  return left.device === right.device
-    && left.inode === right.inode
-    && left.size === right.size
-    && left.sha256 === right.sha256
 }
 
 interface ProjectRecord {
@@ -451,62 +343,12 @@ function validBinary(bytes: Buffer, platform: string, arch: string): boolean {
     && (bytes.readUInt16LE(offset + 22) & 0x2000) !== 0
 }
 
-interface ProjectAddon extends NativeFileLockAuthority, ProjectRootFileAuthority {
-  openDirectory(path: string): unknown
-  protectAt(root: number, name: string, child: number): ProjectRootFileResult
-  prepareManagedAt?(root: number, name: string, child: number): ProjectRootFileResult
-  matchesWorkspaceAt?(root: number, name: string, child: number): ProjectRootFileResult
-  lookupWorkspaceAt?(root: number, name: string): ProjectRootFileLookupResult
-  mkdirPrivateAt(root: number, name: string): ProjectRootFileCreateResult
-  renameNoReplaceAt(
-    root: number,
-    from: string,
-    to: string,
-    expected: ProjectFileIdentity,
-  ): ProjectRootFileResult
-  syncDirectory(root: number): ProjectRootFileResult
-}
+type ProjectAddon = NativeFileLockAuthority
 
-function projectDirectoryHandle(value: unknown): ProjectDirectoryHandle {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('project_directory_open_failed')
-  }
-  const descriptors = Object.getOwnPropertyDescriptors(value)
-  if (Object.keys(descriptors).sort().join('\0') !== 'close\0descriptor\0status') {
-    throw new Error('project_directory_open_failed')
-  }
-  const status = descriptors.status
-  const descriptor = descriptors.descriptor
-  const close = descriptors.close
-  if (
-    !status?.enumerable || !Object.hasOwn(status, 'value') || status.value !== 'ok'
-    || !descriptor?.enumerable || !Object.hasOwn(descriptor, 'value')
-    || !Number.isSafeInteger(descriptor.value) || descriptor.value < 0
-    || !close?.enumerable || !Object.hasOwn(close, 'value') || typeof close.value !== 'function'
-  ) throw new Error('project_directory_open_failed')
-  let closed = false
-  return Object.freeze({
-    fd: descriptor.value as number,
-    close: (): void => {
-      if (closed) return
-      closed = true
-      Reflect.apply(close.value as (...args: never[]) => unknown, value, [])
-    },
-  })
-}
-
-function isStatus(value: unknown, status: string): boolean {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  const descriptors = Object.getOwnPropertyDescriptors(value)
-  const descriptor = descriptors.status
-  if (Object.keys(descriptors).length !== 1 || descriptor?.enumerable !== true) return false
-  return Object.hasOwn(descriptor, 'value') && descriptor.value === status
-}
-
-function requireAddon(value: unknown, platform: string): ProjectAddon | null {
+function requireAddon(value: unknown): ProjectAddon | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
   const descriptors = Object.getOwnPropertyDescriptors(value)
-  const expected = platform === 'win32' ? WINDOWS_MODULE_EXPORTS : MODULE_EXPORTS
+  const expected = MODULE_EXPORTS
   if (Object.keys(descriptors).sort().join('\0') !== expected.join('\0')) return null
   const methods: Partial<Record<(typeof MODULE_EXPORTS)[number], (...args: never[]) => unknown>> = {}
   for (const name of expected) {

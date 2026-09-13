@@ -15,11 +15,14 @@ export type ProjectRootFileCreateResult =
   | Readonly<{status: 'ok'; identity: ProjectFileIdentity}>
   | Readonly<{status: 'exists' | 'unsupported' | 'failed'}>
 
-/** Host-only descriptor-relative filesystem authority. No caller-controlled path enters this API. */
+/** Host-only filesystem authority bound to retained directory identities. */
 export interface ProjectRootFileAuthority {
+  /** Bind a real retained descriptor to its already validated host path. */
+  bindDirectory?(descriptor: number, path: string): void
+  unbindDirectory?(descriptor: number): void
   probe(rootDescriptor: number): ProjectRootFileResult
   matchesAt(rootDescriptor: number, name: string, childDescriptor: number): ProjectRootFileResult
-  /** Windows managed-workspace seam; admits sandbox write ACEs but not ACL administration. */
+  /** Validate a retained managed workspace against its parent. */
   matchesWorkspaceAt?(
     rootDescriptor: number,
     name: string,
@@ -32,7 +35,7 @@ export interface ProjectRootFileAuthority {
   mkdirAt(rootDescriptor: number, name: string): ProjectRootFileCreateResult
   /** Windows-only private create seam; callers fail closed when it is unavailable. */
   mkdirPrivateAt?(rootDescriptor: number, name: string): ProjectRootFileCreateResult
-  /** Windows-only ACL repair seam for an already-retained exact child. */
+  /** Protect an already-retained exact child with platform permissions. */
   protectAt?(
     rootDescriptor: number,
     name: string,
@@ -59,7 +62,7 @@ export interface ProjectRootFileAuthority {
   ): ProjectRootFileResult
 }
 
-/** Production stays fail-closed until Task 8 supplies the packaged descriptor-relative helper. */
+/** Fail closed when the host filesystem authority is unavailable. */
 export const unsupportedProjectRootFiles: ProjectRootFileAuthority = Object.freeze({
   probe: (): ProjectRootFileResult => ({status: 'unsupported'}),
   matchesAt: (): ProjectRootFileResult => ({status: 'unsupported'}),
