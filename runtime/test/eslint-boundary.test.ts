@@ -37,10 +37,10 @@ test('eslint blocks executor imports of the realtime layer', async () => {
 
 test('composition host authority exception does not admit other Codex internals', async () => {
   const path = 'runtime/src/composition/production-composition.ts'
-  for (const source of ["import './executors/codex/host.js'", "await import('./executors/codex/host.js')"]) {
+  for (const source of ["import '../executors/codex/host.js'", "await import('../executors/codex/host.js')"]) {
     assert.deepEqual(await lintVirtual(path, source), [])
   }
-  for (const source of ["import './executors/codex/adapter.js'", "await import('./executors/codex/adapter.js')"]) {
+  for (const source of ["import '../executors/codex/adapter-live.js'", "await import('../executors/codex/adapter-live.js')"]) {
     assert.ok((await lintVirtual(path, source)).length > 0)
   }
 })
