@@ -379,7 +379,7 @@ async function collectThroughTerminal(
   const seen: RealtimeProviderEvent[] = []
   for await (const raw of adapter.events(signal)) {
     const event = raw
-    assert.doesNotMatch(JSON.stringify(event), /(?:sentinel|asr|tts)-provider-secret/u)
+    assert.doesNotMatch(JSON.stringify(event), /provider-secret/u)
     seen.push(event)
     if (event.kind === 'user_transcript_final') await adapter.ensureResponse(signal, event.item_id)
     if (event.kind === 'response_terminal') return seen
@@ -397,7 +397,7 @@ function observe(adapter: CascadedRealtimeAdapter): {
   const task = (async () => {
     let active: string | null = null
     for await (const raw of adapter.events(controller.signal)) {
-      assert.doesNotMatch(JSON.stringify(raw), /(?:sentinel|asr|tts)-provider-secret/u)
+      assert.doesNotMatch(JSON.stringify(raw), /provider-secret/u)
       events.push(raw)
       if (raw.kind === 'response_started') active = raw.response_id
       if (raw.kind === 'response_terminal' && raw.response_id === active) active = null
@@ -1260,12 +1260,10 @@ test('an unresolved tool resets chaining and a late abandoned output never calls
     event.kind === 'response_terminal').length === 3)
   assert.equal(llm.calls.length, 2)
   await adapter.close()
-    assert.equal(llm.closed, true)
-    for (const session of sessions) assert.deepEqual(session.operations, ['open', 'cancel', 'close'])
-    await watching.stop()
-  await adapter.close()
-  assert.equal(endpointing.resets, 2, 'endpoint lifecycle including close')
   assert.equal(llm.closed, true)
+  for (const session of sessions) assert.deepEqual(session.operations, ['open', 'cancel', 'close'])
+  await watching.stop()
+  assert.equal(endpointing.resets, 2, 'endpoint lifecycle including close')
 })
 
 test('concurrent explicit responses share one held abandonment transition', async () => {
