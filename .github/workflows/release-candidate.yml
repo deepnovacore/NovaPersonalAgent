@@ -68,115 +68,41 @@ jobs:
       - name: Build unsigned candidate bytes
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         run: npm run ${{ matrix.package_script }} --workspace @nova-audio-agent/desktop
-      - name: Inspect exact unsigned application and installer bytes
+      - name: Verify installed application and backend
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
-        env:
-          NOVA_RELEASE_INSPECTION_DIAGNOSTICS: "1"
-        run: npm run inspect:release-package --workspace @nova-audio-agent/desktop
-      - name: Provision pinned target-native Codex
+        run: npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned
+      - name: Archive macOS application with native tools
+        if: matrix.platform == 'darwin' && inputs.candidate_scope == 'full'
+        shell: bash
+        run: |
+          mkdir -p candidate
+          ditto -c -k --keepParent "clients/desktop/dist/mac-arm64/Nova Audio Agent Desktop.app" candidate/nova-audio-agent-${{ inputs.release_version }}-macos-arm64-app.zip
+          cp clients/desktop/dist/*.dmg candidate/nova-audio-agent-${{ inputs.release_version }}-macos-arm64.dmg
+      - name: Archive Windows application with native tools
+        if: matrix.platform == 'win32'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force candidate
+          tar.exe -a -c -f candidate/nova-audio-agent-${{ inputs.release_version }}-windows-x64-portable.zip -C clients/desktop/dist/win-unpacked .
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item clients/desktop/dist/*.exe candidate/nova-audio-agent-${{ inputs.release_version }}-windows-x64.exe
+      - name: Verify macOS installer
+        if: matrix.platform == 'darwin' && inputs.candidate_scope == 'full'
+        run: npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-audio-agent-${{ inputs.release_version }}-macos-arm64.dmg"
+      - name: Verify Windows installer
+        if: matrix.platform == 'win32'
+        run: npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-audio-agent-${{ inputs.release_version }}-windows-x64.exe"
+      - name: Write CLI download checksums
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
-        run: npm install --prefix clients/desktop/build/release-codex --install-strategy=nested --package-lock=false --ignore-scripts --no-save --omit=dev @openai/codex@0.147.0
-      - name: Exercise packaged project authority, sandbox probe, and app-server lifecycle
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
-        env:
-          NOVA_AUDIO_AGENT_CODEX_API_KEY: offline-platform-contract-only
-        run: npm run smoke:packaged-codex:ci --workspace @nova-audio-agent/desktop
-      - name: Normalize closed release artifact names and final digests
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
-        run: npm run collect:release-artifacts --workspace @nova-audio-agent/desktop -- --target-id ${{ matrix.target_id }}
-      - name: Prepare checkout-free installed smoke kit
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
-        run: npm run prepare:release-smoke-kit --workspace @nova-audio-agent/desktop
+        shell: bash
+        run: |
+          cd candidate
+          for artifact in *; do
+            if command -v sha256sum >/dev/null; then sha256sum "$artifact" > "$artifact.sha256"; else shasum -a 256 "$artifact" > "$artifact.sha256"; fi
+          done
       - uses: actions/upload-artifact@v4
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         with:
           name: ${{ matrix.artifact_name }}
-          path: |
-            clients/desktop/build/release-artifacts/**
-            clients/desktop/build/release-digests/**
-            clients/desktop/build/release-smoke-kit/**
-          if-no-files-found: error
-
-  installed-candidate-smoke:
-    needs: platform-candidate
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: macos-14
-            target: darwin-arm64:app
-            artifact_name: candidate-darwin-arm64
-            filename: nova-audio-agent-0.1.1-macos-arm64-app.zip
-            command: node
-          - os: windows-latest
-            target: win32-x64:portable
-            artifact_name: candidate-win32-x64
-            filename: nova-audio-agent-0.1.1-windows-x64-portable.zip
-            command: node
-          - os: windows-latest
-            target: win32-x64:nsis
-            artifact_name: candidate-win32-x64
-            filename: nova-audio-agent-0.1.1-windows-x64.exe
-            command: node
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/setup-node@v4
-        if: inputs.candidate_scope == 'full' || startsWith(matrix.target, 'win32-x64:')
-        with:
-          node-version: "22"
-      - uses: actions/download-artifact@v4
-        if: inputs.candidate_scope == 'full' || startsWith(matrix.target, 'win32-x64:')
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: candidate
-      - name: Rehash, install, authenticate, exercise, quit, and remove candidate
-        if: inputs.candidate_scope == 'full' || startsWith(matrix.target, 'win32-x64:')
-        env:
-          NOVA_RELEASE_SMOKE_DIAGNOSTICS: "1"
-        run: >-
-          ${{ matrix.command }} candidate/release-smoke-kit/scripts/run-unsigned-installed-smoke.mjs
-          --target ${{ matrix.target }}
-          --artifact candidate/release-artifacts/${{ matrix.filename }}
-          --sha256-file candidate/release-digests/${{ matrix.filename }}.sha256
-          --camera-file candidate/release-smoke-kit/cat-sofa-guard.mp4
-
-  pending-candidate-ledger:
-    needs: installed-candidate-smoke
-    if: inputs.candidate_scope == 'full'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: candidate-*
-          path: downloaded
-      - name: Assemble only the complete digest-bound candidate matrix
-        run: node clients/desktop/scripts/assemble-release-artifact-root.mjs --input downloaded --output candidate-artifacts
-      - name: Generate the honest pending external-evidence ledger
-        env:
-          RELEASE_VERSION: ${{ inputs.release_version }}
-        run: >-
-          npm run generate:pending-release-ledger --workspace @nova-audio-agent/desktop --
-          --artifact-root "$GITHUB_WORKSPACE/candidate-artifacts"
-          --release-version "$RELEASE_VERSION"
-          --commit ${{ github.sha }}
-          --output "$GITHUB_WORKSPACE/candidate-ledger-v1.json"
-      - name: Render the unpublished pending candidate report
-        run: >-
-          npm run generate:release-candidate-report --workspace @nova-audio-agent/desktop --
-          --ledger "$GITHUB_WORKSPACE/candidate-ledger-v1.json"
-          --output "$GITHUB_WORKSPACE/candidate-report.md"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pending-candidate-ledger
-          path: |
-            candidate-ledger-v1.json
-            candidate-report.md
+          path: candidate/*
           if-no-files-found: error

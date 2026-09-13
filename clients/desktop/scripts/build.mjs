@@ -4,8 +4,6 @@ import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 import { checkJavaScriptFiles, generateWireFrameTypes } from './build-contract.mjs'
-import { buildDependencyReport, inspectConfiguredPackage } from './inspect-package.mjs'
-import { deriveLockedProductionClosure } from './release-dependency-closure.mjs'
 import { buildProjectNativeAddon } from './build-project-native.mjs'
 import { buildCodexSandboxProbe } from './build-codex-sandbox-probe.mjs'
 import { buildWindowsJobGuardian } from './build-windows-job-guardian.mjs'
@@ -36,26 +34,7 @@ const targetId = process.platform === 'darwin'
   : process.platform === 'win32'
     ? `win32-${process.arch}`
     : `linux-${process.arch}-gnu`
-await inspectConfiguredPackage({ packageRoot: root, targetId })
-const closure = await deriveLockedProductionClosure({
-  lockPath: resolve(root, '../../package-lock.json'),
-  targetId,
-  sourceBuild: true,
-})
-const releaseBuildDirectory = resolve(root, 'build/release')
-await mkdir(releaseBuildDirectory, { recursive: true })
-const dependencyReport = await buildDependencyReport(resolve(root, '../..'), closure)
-const dependencyReportPath = resolve(releaseBuildDirectory, 'production-dependencies-v1.json')
-await writeFile(
-  dependencyReportPath,
-  `${JSON.stringify(dependencyReport)}\n`,
-  { encoding: 'utf8', mode: 0o600 },
-)
-await stageReleaseApplication({
-  packageRoot: root,
-  repositoryRoot: resolve(root, '../..'),
-  dependencyReport,
-})
+await stageReleaseApplication({packageRoot: root})
 
 await buildProjectNativeAddon({
   packageRoot: root,

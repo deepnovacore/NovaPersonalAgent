@@ -137,18 +137,18 @@ The authoritative release declarations are in [RELEASE-GATE.md](RELEASE-GATE.md)
   projects only bounded side-VLM observation plus capture metadata and
   `evidence_ref` to Qwen. Disabling camera removes the Camera MCP, Vision
   controller, and hidden channels together.
-- [x] Desktop package/release inspection admits the pinned MCP SDK and its
-  lock-resolved transitive production closure as an explicit required set;
-  closure checks remain exact and the forbidden media/camera dependency
-  surfaces remain rejected.
+- [x] Desktop staging materializes installed production dependencies. Release
+  verification checks ASAR/native placement and launches the installed app
+  through an authenticated backend handshake; signed acceptance additionally
+  requires the platform signature tools. Dependency resolution belongs to npm.
+
 
 Deterministic M1.5c coverage is recorded in targeted tests: `assembly.test.ts`,
 `cascaded-realtime-assembly.test.ts`, `realtime-assembly.test.ts`,
 `structured-state-retirement.test.ts`, `vision-controller.test.ts`,
 `vision-controller-core.test.ts`, and the policy cases in
 `realtime-service.test.ts` cover the runtime boundaries; desktop
-`package-inspection.test.mjs` and `release-targets.test.mjs` cover the exact
-MCP SDK closure and release target contract. This is the covered deterministic
+`verify-release.test.mjs` covers staging and ASAR/native placement failures. This is the covered deterministic
 scope; the full validation ledger is recorded below.
 
 M1.5c product code is recorded at integration `65a6`; the migrated test set is

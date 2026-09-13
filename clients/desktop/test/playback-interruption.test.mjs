@@ -15,7 +15,7 @@ function frame(utteranceId, epoch, sequence) {
   return decodeAudioFrame(Buffer.concat([prefix, header, Buffer.from([0, 1])]))
 }
 
-test('fake backend response interruption and replacement session complete safely', () => {
+test('playback interruption and replacement session complete safely', () => {
   let localStops = 0
   const playback = new GenerationPlayback({ stopAll: () => { localStops += 1 } })
 

@@ -16,7 +16,7 @@ import {readCapabilityDocument} from '../src/main/capabilities-settings.mjs'
 import {requestDebugBoard} from '../src/main/debug-board-client.mjs'
 import {validateBootstrap} from '../src/main/security.mjs'
 import { WebSocket } from 'ws'
-import {generateReleaseSmokeCertificate} from './release-smoke-certificate.mjs'
+import {generateSmokeCertificate} from './smoke-tls.mjs'
 import {
   backendLaunchSpec,
   createReadinessListener,
@@ -218,7 +218,7 @@ async function runCapabilityStatus() {
   let listed = 0, called = 0, providerConnections = 0
   const providerPeers = []
   const certificate = resolve(root, 'cert.pem'), privateKey = resolve(root, 'key.pem')
-  await generateReleaseSmokeCertificate({certificate, privateKey})
+  await generateSmokeCertificate({certificate, privateKey})
   const cert = await readFile(certificate), key = await readFile(privateKey)
   const http = createServer({cert, key}, async (request, response) => {
     if (request.method !== 'POST') {response.writeHead(405); response.end(); return}

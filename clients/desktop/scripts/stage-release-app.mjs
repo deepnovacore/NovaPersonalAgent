@@ -1,56 +1,63 @@
 import assert from 'node:assert/strict'
-import {copyFile, cp, mkdir, rm, writeFile} from 'node:fs/promises'
-import {dirname, resolve} from 'node:path'
+import {cp, mkdir, readFile, realpath, rm} from 'node:fs/promises'
+import {createRequire} from 'node:module'
+import {relative, resolve, sep} from 'node:path'
 
-function safeRelativePath(value, prefix = '') {
-  assert.equal(typeof value, 'string', 'release_stage_path_invalid')
-  assert.ok(value !== '' && !value.startsWith('/') && !value.includes('\\'), 'release_stage_path_invalid')
-  assert.equal(value.split('/').includes('..'), false, 'release_stage_path_invalid')
-  if (prefix !== '') assert.ok(value.startsWith(prefix), 'release_stage_path_invalid')
-  return value
-}
-
-async function copyOwnedFile(source, destination) {
-  await mkdir(dirname(destination), {recursive: true})
-  await copyFile(source, destination)
-}
-
-export async function stageReleaseApplication({packageRoot, repositoryRoot, dependencyReport}) {
-  assert.equal(dependencyReport?.schema_version, 1, 'release_stage_report_invalid')
-  assert.ok(Array.isArray(dependencyReport.packages), 'release_stage_report_invalid')
+// Materialize the installed production graph. npm owns resolution and integrity;
+// staging only removes development files and the unused optional ffmpeg binaries.
+export async function stageReleaseApplication({packageRoot}) {
   const stageRoot = resolve(packageRoot, 'build/release-app')
   await rm(stageRoot, {recursive: true, force: true})
   await mkdir(stageRoot, {recursive: true, mode: 0o700})
-
-  await Promise.all([
-    cp(resolve(packageRoot, 'src'), resolve(stageRoot, 'src'), {recursive: true, errorOnExist: true}),
-    cp(resolve(packageRoot, 'LICENSES'), resolve(stageRoot, 'LICENSES'), {recursive: true, errorOnExist: true}),
-    copyOwnedFile(resolve(packageRoot, 'package.json'), resolve(stageRoot, 'package.json')),
-    copyOwnedFile(resolve(packageRoot, 'THIRD_PARTY_NOTICES.md'), resolve(stageRoot, 'THIRD_PARTY_NOTICES.md')),
-  ])
-
-  const installKeys = new Set()
-  for (const record of dependencyReport.packages) {
-    const installKey = safeRelativePath(record?.install_key, 'node_modules/')
-    assert.equal(installKeys.has(installKey), false, 'release_stage_report_invalid')
-    installKeys.add(installKey)
-    assert.ok(Array.isArray(record.files), 'release_stage_report_invalid')
-    const fileNames = new Set()
-    for (const file of record.files) {
-      const fileName = safeRelativePath(file?.path)
-      assert.equal(fileNames.has(fileName), false, 'release_stage_report_invalid')
-      fileNames.add(fileName)
-      await copyOwnedFile(
-        resolve(repositoryRoot, installKey, fileName),
-        resolve(stageRoot, installKey, fileName),
-      )
+  for (const name of ['src', 'LICENSES', 'package.json', 'THIRD_PARTY_NOTICES.md']) {
+    await cp(resolve(packageRoot, name), resolve(stageRoot, name), {recursive: true})
+  }
+  const selected = new Map()
+  const queue = [{source: packageRoot, destination: stageRoot}]
+  while (queue.length) {
+    const {source, destination} = queue.shift()
+    const manifest = JSON.parse(await readFile(resolve(source, 'package.json'), 'utf8'))
+    const optional = manifest.optionalDependencies ?? {}
+    for (const name of Object.keys({...manifest.dependencies, ...optional, ...manifest.peerDependencies})) {
+      if (manifest.name === '@livekit/av' && name.startsWith('@livekit/av-')) continue
+      const search = createRequire(resolve(source, 'package.json')).resolve.paths('nova-package-resolution') ?? []
+      let dependency
+      for (const directory of search) {
+        try { dependency = await realpath(resolve(directory, name)); break } catch (error) {
+          if (error.code !== 'ENOENT') throw error
+        }
+      }
+      if (!dependency) {
+        if (name in optional || manifest.peerDependenciesMeta?.[name]?.optional) continue
+        throw new Error(`production dependency missing: ${name}`)
+      }
+      const meta = JSON.parse(await readFile(resolve(dependency, 'package.json'), 'utf8'))
+      if ((meta.os && !meta.os.includes(process.platform)) || (meta.cpu && !meta.cpu.includes(process.arch))) {
+        assert.ok(name in optional, `production dependency wrong platform: ${name}`)
+        continue
+      }
+      // Keep one copy per installed identity; a conflicting version remains nested.
+      let target = resolve(stageRoot, 'node_modules', name)
+      if (selected.has(target) && selected.get(target) !== dependency) target = resolve(destination, 'node_modules', name)
+      if (selected.has(target)) {
+        assert.equal(selected.get(target), dependency, `production dependency conflict: ${name}`)
+        continue
+      }
+      selected.set(target, dependency)
+      await cp(dependency, target, {
+        recursive: true,
+        dereference: true,
+        filter(path) {
+          const local = relative(dependency, path).split(sep).join('/')
+          if (/(^|\/)(node_modules|test|tests|__tests__|fixtures|coverage)(\/|$)/u.test(local)) return false
+          if (/\.(map|ts|cts|mts|snap|png)$/u.test(local) || /\.test\.[cm]?js$/u.test(local)) return false
+          if (meta.name === '@nova-audio-agent/runtime') return local === '' || local === 'package.json' || local === 'dist' || local === 'dist/src' || local.startsWith('dist/src/')
+          if (meta.name === '@livekit/agents' && /^resources\/.*\.ogg$/u.test(local)) return false
+          return true
+        },
+      })
+      queue.push({source: dependency, destination: target})
     }
   }
-  await mkdir(resolve(stageRoot, 'build/release'), {recursive: true})
-  await writeFile(
-    resolve(stageRoot, 'build/release/production-dependencies-v1.json'),
-    `${JSON.stringify(dependencyReport)}\n`,
-    {encoding: 'utf8', mode: 0o600},
-  )
   return stageRoot
 }

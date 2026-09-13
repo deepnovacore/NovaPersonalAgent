@@ -82,11 +82,9 @@ jobs:
           set -euo pipefail
           gh run download "$CANDIDATE_RUN_ID" --name candidate-darwin-arm64 --dir downloaded/candidate-darwin-arm64
           gh run download "$CANDIDATE_RUN_ID" --name candidate-win32-x64 --dir downloaded/candidate-win32-x64
-          node clients/desktop/scripts/assemble-release-artifact-root.mjs --input downloaded --output release-artifacts
-          node clients/desktop/scripts/generate-release-manifest.mjs \
-            --artifact-root release-artifacts \
-            --commit "$EXPECTED_COMMIT" \
-            --output release-artifacts/release-manifest-v1.json
+          mkdir release-artifacts
+          cp downloaded/candidate-darwin-arm64/* downloaded/candidate-win32-x64/* release-artifacts/
+          test "$(find release-artifacts -maxdepth 1 -type f | wc -l)" -eq 8
       - name: Pack and audit the public npm package
         run: |
           set -euo pipefail
@@ -133,6 +131,4 @@ jobs:
           name: release-${{ inputs.release_version }}-publish-audit
           path: |
             candidate-run.json
-            release-artifacts/release-manifest-v1.json
-            release-artifacts/release-manifest-v1.json.sha256
           if-no-files-found: warn

@@ -18,7 +18,6 @@ files:
   - package.json
   - THIRD_PARTY_NOTICES.md
   - LICENSES/**/*
-  - build/release/production-dependencies-v1.json
   - node_modules
   - node_modules/**/*
   - '!node_modules/**/test/**/*'
