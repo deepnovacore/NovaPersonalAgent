@@ -54,7 +54,7 @@ try {
       bootstrap:async()=>({backend:{endpoint:'ws://127.0.0.1:9999/',token:'0'.repeat(32)},settings:{palette:'ember',progressBubbles:'all'},platform:'darwin',audioMode:'browser',cameraSource:'local',nativeAvailable:false,backendStatus:'connected'}),
       wakeWord:{onChanged:listen,activity:noop,report:noop,audio:noop},
       onBackendExit:listen,onBackendReady:listen,onBackendStatus:listen,
-      microphone:{requestPermission:async()=>({status:'denied'}),report:noop,onRetry:listen},
+      microphone:{requestPermission:async()=>({status:'denied'}),report:noop,onRetry:listen,onToggle:listen},
       camera:{requestPermission:async()=>({status:'denied'})},
       nativeAudio:{onEvent:listen,clear:async()=>{},setCaptureEnabled:async()=>false},
       orbMenu:{show:noop,openSettings:noop},windowDrag:{start:noop,move:noop,end:noop},
