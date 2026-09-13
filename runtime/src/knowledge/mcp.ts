@@ -2,8 +2,6 @@
 import {randomBytes, timingSafeEqual} from 'node:crypto'
 import {createServer, type IncomingMessage, type Server, type ServerResponse} from 'node:http'
 import type {Socket} from 'node:net'
-import {Client} from '@modelcontextprotocol/sdk/client/index.js'
-import {InMemoryTransport} from '@modelcontextprotocol/sdk/inMemory.js'
 import {McpServer} from '@modelcontextprotocol/sdk/server/mcp.js'
 import {StreamableHTTPServerTransport} from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js'
@@ -147,20 +145,24 @@ function safeChunk(value: unknown, locator: string): Record<string, JsonValue> |
     ...(source_id === undefined ? {} : {source_id}), ...(value.status === 'stale' ? {note: 'source_reindexed'} : {})}
 }
 
+async function recall(backend: KnowledgeRecallBackend, input: unknown, signal: AbortSignal): Promise<CallToolResult> {
+  const args = recallArgs(input)
+  if (args === null) return toolError('invalid_params')
+  if (signal.aborted) return toolError('cancelled')
+  try {
+    const hits = safeHits(await backend.recall(args.query, args.k, signal))
+    return signal.aborted ? toolError('cancelled') : hits === null ? toolError('unavailable')
+      : toolResult({trust: 'untrusted_external', hits: jsonHits(hits)})
+  } catch { return signal.aborted ? toolError('cancelled') : toolError('unavailable') }
+}
+
 export function createKnowledgeMcpServer(backend: KnowledgeRecallBackend): McpServer {
   const server = new McpServer({name: 'nova-knowledge', version: '0.2.0'})
   server.registerTool(MCP_KNOWLEDGE_RECALL, {
     description: '检索本地知识库。',
     inputSchema: z.object({query: z.string().min(1).max(MAX_QUERY_UNITS), k: z.number().int().min(1).max(5).optional()}).strict(), annotations: {readOnlyHint: true},
   }, async (input, extra) => {
-    const args = recallArgs(input)
-    if (args === null) return toolError('invalid_params')
-    if (extra.signal.aborted) return toolError('cancelled')
-    try {
-      const hits = safeHits(await backend.recall(args.query, args.k, extra.signal))
-      return extra.signal.aborted ? toolError('cancelled') : hits === null ? toolError('unavailable')
-        : toolResult({trust: 'untrusted_external', hits: jsonHits(hits)})
-    } catch { return extra.signal.aborted ? toolError('cancelled') : toolError('unavailable') }
+    return recall(backend, input, extra.signal)
   })
   server.registerTool(MCP_KNOWLEDGE_GET_CHUNK, {
     description: '读取已检索知识片段。', inputSchema: z.object({locator: z.string().min(1).max(MAX_LOCATOR_UNITS)}).strict(), annotations: {readOnlyHint: true},
@@ -187,76 +189,40 @@ function handoffResult(raw: unknown): ExecutorHandoff | null {
   return hits === null ? null : {outcome: 'ok', trust: 'untrusted_external', content: {trust: 'untrusted_external', hits: jsonHits(hits)}}
 }
 
-/** The model-facing adapter owns a linked client/server pair; backend ownership stays outside it. */
+/** Internal calls share the HTTP tool's validation; backend ownership stays outside the adapter. */
 export class KnowledgeMcpAdapter implements ExecutorAdapter {
   readonly manifest = KNOWLEDGE_MCP_MANIFEST
-  #server: McpServer
-  #client: Client
-  #serverTransport: InMemoryTransport
-  #clientTransport: InMemoryTransport
-  #connection: Promise<void> | undefined
-  #closed: Promise<void> | undefined
+  #lifecycle = new AbortController()
 
-  constructor(readonly backend: KnowledgeRecallBackend) {
-    ;({server: this.#server, client: this.#client, serverTransport: this.#serverTransport, clientTransport: this.#clientTransport} = this.#newConnection())
+  constructor(readonly backend: KnowledgeRecallBackend) {}
+
+  connect(): Promise<void> {
+    if (this.#lifecycle.signal.aborted) this.#lifecycle = new AbortController()
+    return Promise.resolve()
   }
 
-  #newConnection() {
-    const server = createKnowledgeMcpServer(this.backend)
-    const client = new Client({name: 'nova-knowledge-client', version: '0.2.0'})
-    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
-    return {server, client, serverTransport, clientTransport}
-  }
-
-  #replaceClosedConnection(): void {
-    ;({server: this.#server, client: this.#client, serverTransport: this.#serverTransport, clientTransport: this.#clientTransport} = this.#newConnection())
-  }
-
-  async connect(): Promise<void> {
-    if (this.#closed !== undefined) {
-      const closed = this.#closed
-      await closed
-      if (this.#closed === closed) { this.#closed = undefined; this.#replaceClosedConnection() }
-    }
-    if (this.#connection !== undefined) return await this.#connection
-    const server = this.#server
-    const client = this.#client
-    const pending: {attempt: Promise<void> | undefined} = {attempt: undefined}
-    pending.attempt = (async () => {
-      try { await server.connect(this.#serverTransport); await client.connect(this.#clientTransport) }
-      catch (error) {
-        await Promise.allSettled([client.close(), server.close()])
-        if (pending.attempt !== undefined && this.#connection === pending.attempt) {
-          this.#connection = undefined
-          if (this.#server === server && this.#client === client) this.#replaceClosedConnection()
-        }
-        throw error
-      }
-    })()
-    this.#connection = pending.attempt
-    return await pending.attempt
-  }
-
-  close(): Promise<void> {
-    this.#closed ??= Promise.allSettled([this.#client.close(), this.#server.close()]).then(() => undefined)
-    this.#connection = undefined
-    return this.#closed
-  }
-
-  /** Test-only inspection of the real, linked client. */
-  clientForTest(): unknown { return this.#client }
+  close(): Promise<void> { this.#lifecycle.abort(); return Promise.resolve() }
 
   async dispatch(op: string, request: Readonly<Record<string, JsonValue>>, context: ExecutorDispatchContext): Promise<ExecutorHandoff> {
     if (op !== MCP_KNOWLEDGE_RECALL) return handoffFailure('unknown_op', 'refused')
     const args = recallArgs(request)
     if (args === null) return handoffFailure('invalid_params', 'refused')
     if (context.signal.aborted) return handoffFailure('cancelled', 'cancelled')
+    const connected = this.connect()
+    const lifecycle = this.#lifecycle.signal
+    await connected
+    const signal = AbortSignal.any([context.signal, lifecycle])
+    let abort!: () => void
+    const cancelled = new Promise<never>((_resolve, reject) => { abort = () => reject(new Error('cancelled')) })
+    signal.addEventListener('abort', abort, {once: true})
     try {
-      await this.connect()
-      const result = await this.#client.callTool({name: MCP_KNOWLEDGE_RECALL, arguments: args}, undefined, {signal: context.signal})
+      signal.throwIfAborted()
+      const result = await Promise.race([recall(this.backend, args, signal), cancelled])
       if (context.signal.aborted) return handoffFailure('cancelled', 'cancelled')
+      if (signal.aborted) return handoffFailure('knowledge_mcp_unavailable')
       return handoffResult(result) ?? handoffFailure('knowledge_mcp_invalid_result')
     } catch { return context.signal.aborted ? handoffFailure('cancelled', 'cancelled') : handoffFailure('knowledge_mcp_unavailable') }
+    finally { signal.removeEventListener('abort', abort) }
   }
 }
 

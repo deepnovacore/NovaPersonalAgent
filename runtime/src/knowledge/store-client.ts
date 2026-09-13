@@ -132,10 +132,6 @@ export class KnowledgeStoreClient {
 
   #request<Result>(operation: string, payload: Record<string, unknown>): Promise<Result> {
     if (this.#closed || this.#failed) return Promise.reject(new KnowledgeStoreClientError('CLIENT_CLOSED'))
-    return this.#send(operation, payload)
-  }
-
-  #send<Result>(operation: string, payload: Record<string, unknown>): Promise<Result> {
     const requestId = this.#nextRequestId++
     return new Promise<Result>((resolve, reject) => {
       this.#pending.set(requestId, {resolve: resolve as (result: unknown) => void, reject})

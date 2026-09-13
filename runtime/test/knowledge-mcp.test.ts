@@ -189,32 +189,27 @@ test('loopback closes excess slow request bodies instead of leaving them outside
   }
 })
 
-test('a failed connect never replaces a successor opened after close', async () => {
-  const descriptor = Object.getOwnPropertyDescriptor(Client.prototype, 'connect')
-  assert.ok(descriptor !== undefined && typeof descriptor.value === 'function')
-  const original = descriptor.value as Client['connect']
-  let rejectFirst!: (error: Error) => void
+test('closing an internal recall cancels it without disturbing a reopened successor', async () => {
+  let start!: () => void, rejectOld!: (error: Error) => void
+  const started = new Promise<void>(resolve => { start = resolve })
+  const old = new Promise<readonly never[]>((_resolve, reject) => { rejectOld = reject })
   let first = true
-  Object.defineProperty(Client.prototype, 'connect', {configurable: true, value: function (this: Client, ...args: Parameters<Client['connect']>) {
-    if (first) { first = false; return new Promise<void>((_resolve, reject) => { rejectFirst = reject }) }
-    return original.apply(this, args)
+  const real = backend()
+  const adapter = new KnowledgeMcpAdapter({...real, recall: (query, k, signal) => {
+    if (first) { first = false; start(); return old }
+    return real.recall(query, k, signal)
   }})
-  const adapter = new KnowledgeMcpAdapter(backend())
   try {
-    const initial = adapter.connect()
-    await Promise.resolve()
+    const initial = adapter.dispatch('recall', {query: 'old'}, context())
+    await started
     await adapter.close()
-    const successor = adapter.connect()
-    await Promise.resolve()
-    const client = adapter.clientForTest()
-    rejectFirst(new Error('initial failure'))
-    await assert.rejects(initial)
-    await successor
-    assert.equal(adapter.clientForTest(), client)
-  } finally {
-    Object.defineProperty(Client.prototype, 'connect', {configurable: true, value: original})
-    await adapter.close()
-  }
+    await adapter.connect()
+    const successor = await adapter.dispatch('recall', {query: 'new'}, context())
+    assert.equal((await initial).outcome, 'failed')
+    assert.equal(successor.outcome, 'ok')
+    rejectOld(new Error('late backend failure'))
+    assert.equal((await adapter.dispatch('recall', {query: 'again'}, context())).outcome, 'ok')
+  } finally { await adapter.close() }
 })
 
 test('loopback uses an absolute deadline for a continuously dripping request body', async () => {

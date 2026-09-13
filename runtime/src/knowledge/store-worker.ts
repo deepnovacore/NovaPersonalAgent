@@ -1,11 +1,10 @@
 import {createHash, randomUUID} from 'node:crypto'
-import {chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, realpathSync} from 'node:fs'
-import {basename, dirname, isAbsolute, join, resolve} from 'node:path'
+import {chmodSync, lstatSync} from 'node:fs'
 import {isMainThread, parentPort, workerData} from 'node:worker_threads'
 import {DatabaseSync} from 'node:sqlite'
 
 import {SensitiveContentPolicy, SensitivePathPolicy} from '../sensitivity.js'
-import {hostProjectRootFromConfig} from '../project-store.js'
+import {preparePrivateDatabasePath, PrivateDatabaseError} from '../private-database.js'
 import type {
   KnowledgeChunkInput,
   KnowledgeChunkResult,
@@ -142,6 +141,7 @@ function open(): {readonly fts: boolean} {
     database = undefined
     ftsAvailable = false
     if (error instanceof StoreError) throw error
+    if (error instanceof PrivateDatabaseError) throw new StoreError(error.code)
     throw new StoreError('STORE_WRITE_FAILED')
   }
 }
@@ -300,7 +300,7 @@ function recall(queryValue: unknown, vectorValue: unknown, providerValue: unknow
   if (k > 5 || vector.length > 4096) throw new StoreError('STORE_INVALID_INPUT')
   const opened = db()
   const dims = vector.length
-  const candidates = new Map<string, {readonly vectorRank?: number; readonly lexicalRank?: number}>()
+  const candidates = new Map<string, {readonly row: Row; readonly vectorRank?: number; readonly lexicalRank?: number}>()
   const vectors = opened.prepare(`
     SELECT c.id, c.source_id, c.content_digest, s.title, c.heading_path, c.text, e.vector
     FROM chunks c JOIN sources s ON s.id = c.source_id JOIN embeddings e ON e.chunk_id = c.id
@@ -310,20 +310,17 @@ function recall(queryValue: unknown, vectorValue: unknown, providerValue: unknow
     .sort((left, right) => right.score - left.score || textValue(left.row, 'source_id').localeCompare(textValue(right.row, 'source_id')) || textValue(left.row, 'id').localeCompare(textValue(right.row, 'id')))
     .slice(0, 50)
   for (const [index, candidate] of scored.entries()) {
-    candidates.set(textValue(candidate.row, 'id'), {vectorRank: index + 1})
+    candidates.set(textValue(candidate.row, 'id'), {row: candidate.row, vectorRank: index + 1})
   }
-  const byId = new Map(vectors.map(row => [textValue(row, 'id'), row]))
 
   for (const [index, row] of lexicalCandidates(opened, query).entries()) {
     const id = textValue(row, 'id')
-    byId.set(id, row)
-    candidates.set(id, {...candidates.get(id), lexicalRank: index + 1})
+    candidates.set(id, {...candidates.get(id), row, lexicalRank: index + 1})
   }
   if (candidates.size === 0) return []
-  return [...candidates.entries()]
-    .map(([id, ranks]) => {
-      const row = byId.get(id)
-      if (row === undefined) throw new StoreError('STORE_READ_FAILED')
+  return [...candidates.values()]
+    .map(ranks => {
+      const {row} = ranks
       const score = (ranks.vectorRank === undefined ? 0 : 1 / (RRF_K + ranks.vectorRank))
         + (ranks.lexicalRank === undefined ? 0 : 1 / (RRF_K + ranks.lexicalRank))
       return hitFrom(row, score)
@@ -453,17 +450,6 @@ function hitFrom(row: Row, score: number): KnowledgeRecallHit {
     source_id: sourceId, title: redactOutput(textValue(row, 'title')), heading_path: redactOutput(textValue(row, 'heading_path')),
     text: redactOutput(truncateCodePoints(textValue(row, 'text'), 600)), score,
   }
-}
-
-function preparePrivateDatabasePath(path: string): string {
-  if (!isAbsolute(path) || path.includes('\0') || resolve(path) !== path) throw new StoreError('STORE_INVALID_INPUT')
-  const file = basename(path)
-  if (file === '' || file === '.' || file === '..') throw new StoreError('STORE_INVALID_INPUT')
-  const parent = ensurePrivateParent(dirname(path))
-  const databasePath = join(parent, file)
-  if (databasePath !== path) throw new StoreError('STORE_WRITE_FAILED')
-  ensurePrivateDatabaseFile(databasePath)
-  return databasePath
 }
 
 function db(): DatabaseSync {
@@ -623,57 +609,6 @@ function truncateCodePoints(value: string, max: number): string {
   return [...value].slice(0, max).join('')
 }
 
-function ensurePrivateParent(parent: string): string {
-  const missing: string[] = []
-  let ancestor = parent
-  while (true) {
-    try {
-      lstatSync(ancestor)
-      break
-    } catch {
-      const next = dirname(ancestor)
-      if (next === ancestor) throw new StoreError('STORE_WRITE_FAILED')
-      missing.unshift(basename(ancestor))
-      ancestor = next
-    }
-  }
-  try { hostProjectRootFromConfig(ancestor) } catch { throw new StoreError('STORE_WRITE_FAILED') }
-  let current = realpathSync(ancestor)
-  for (const child of missing) {
-    const next = join(current, child)
-    try { mkdirSync(next, {mode: 0o700}) } catch { /* an existing child is validated below */ }
-    try { hostProjectRootFromConfig(next) } catch { throw new StoreError('STORE_WRITE_FAILED') }
-    current = realpathSync(next)
-    if (current !== next) throw new StoreError('STORE_WRITE_FAILED')
-  }
-  return current
-}
-
-// O_NOFOLLOW is unavailable on Windows; retain lstat and descriptor identity checks there.
-function ensurePrivateDatabaseFile(path: string): void {
-  let descriptor: number | undefined
-  try {
-    try {
-      const info = lstatSync(path)
-      if (info.isSymbolicLink() || !info.isFile() || !privateFile(info)) throw new StoreError('STORE_WRITE_FAILED')
-      descriptor = openSync(path, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0))
-    } catch (error) {
-      if (error instanceof StoreError) throw error
-      descriptor = openSync(path, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600)
-    }
-    const fromDescriptor = fstatSync(descriptor)
-    const fromPath = lstatSync(path)
-    if (!fromDescriptor.isFile() || !privateFile(fromDescriptor) || fromDescriptor.dev !== fromPath.dev || fromDescriptor.ino !== fromPath.ino) {
-      throw new StoreError('STORE_WRITE_FAILED')
-    }
-  } catch (error) {
-    if (error instanceof StoreError) throw error
-    throw new StoreError('STORE_WRITE_FAILED')
-  } finally {
-    if (descriptor !== undefined) closeSync(descriptor)
-  }
-}
-
 function secureSidecar(databasePath: string, suffix: '-wal' | '-shm'): void {
   const path = `${databasePath}${suffix}`
   try {
@@ -685,12 +620,6 @@ function secureSidecar(databasePath: string, suffix: '-wal' | '-shm'): void {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
-}
-
-function privateFile(info: {readonly isFile: () => boolean; readonly mode: number; readonly uid: number}): boolean {
-  return info.isFile() && ownedByCurrentUser(info.uid) && (
-    process.platform === 'win32' || (info.mode & 0o7777) === 0o600
-  )
 }
 
 function ownedByCurrentUser(uid: number): boolean {
