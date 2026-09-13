@@ -1,4 +1,7 @@
-import {CodingProgressNarrationState, codingProgressSummary, type CodingProgressNarration} from '../coding-progress-narration.js'
+import { CodingProgressNarrationState,type CodingProgressNarration } from '../coding-progress-narration.js'
+import { ProviderProjection } from './provider-projection.js'
+import type { HostItemOptions,ServiceRuntime } from './service-ports.js'
+export type { DelegateLike,ExecutorManifestLike,ServiceRuntime } from './service-ports.js'
 /**
  * Production orchestration between a realtime FrontBrain and the existing Runtime.
  *
@@ -24,104 +27,95 @@ import {CodingProgressNarrationState, codingProgressSummary, type CodingProgress
  * than silently taking the inert branch, so a test that gets there fails loudly.
  */
 
-import {createHash, randomUUID} from 'node:crypto'
-import {canonicalJson} from '../canonical-json.js'
+import { createHash,randomUUID } from 'node:crypto'
 import {
-  type IntakeEventPort,
-  type IntakeOptions,
+createAgentControllerRegistry,
+parseAgentActionResult,
+type AgentActionResult,
+type AgentController,
+type AgentControllerRegistry,
+} from '../agent-controller.js'
+import type { ApprovalController as ExecutorApprovalController } from '../approval-port.js'
+import { ApprovalHost } from '../approval.js'
+import { canonicalJson } from '../canonical-json.js'
+import type { Clock } from '../clock.js'
+import { type EventRecord,type JsonValue } from '../events.js'
+import {
+type IntakeEventPort,
+type IntakeOptions,
 } from '../executors/coding/intake.js'
 import {
-  createAgentControllerRegistry,
-  parseAgentActionResult,
-  type AgentActionResult,
-  type AgentController,
-  type AgentControllerRegistry,
-} from '../agent-controller.js'
-import {CANCEL_TOOL, CONFIRM_TOOL, DISPATCH_TOOL, confirmArguments} from '../work-tools.js'
-import type {ExecutorAdmission} from '../causal-runtime.js'
-import type { Clock } from '../clock.js'
-import type {ExecutorRole} from '../ports.js'
-import { validProgressSummary, type EventRecord, type JsonValue } from '../events.js'
-import {
-  isMonitorPolicy,
-  isPreemptiveMonitorAlert,
-  monitorAlertDelivery,
-  parseMemoryRef,
-  USER_PRIORITY,
-  type MemoryItem,
+USER_PRIORITY,
+isMonitorPolicy,
+monitorAlertDelivery
 } from '../memory.js'
-import type {Suggestion} from '../suggestions.js'
-import type {WakeReason} from '../slots.js'
-import type { PlaybackCompletion, PlaybackGeneration } from '../playback.js'
-import type { CompiledTools } from '../tool-schema.js'
-import {requiresSynchronousResult} from './bridge.js'
-import type { RealtimeRuntimeBridge, ToolAcceptance, ToolCallReady } from './bridge.js'
+import type { PlaybackCompletion,PlaybackGeneration } from '../playback.js'
 import type {
-  ConfirmedProjectOperation,
-  ProjectConfirmationController,
-  ProjectConfirmationView,
+ConfirmedProjectOperation,
+ProjectConfirmationController,
+ProjectConfirmationView,
 } from '../project-confirmation.js'
-import type {ApprovalController as ExecutorApprovalController} from '../approval-port.js'
-import {ApprovalHost} from '../approval.js'
-import {ConfirmationTurnIsolation} from './confirmation-turn-isolation.js'
+import { codePointLengthLikePython,stripLikePython } from '../python-text.js'
+import type { WakeReason } from '../slots.js'
+import type { Suggestion } from '../suggestions.js'
+import type { CompiledTools } from '../tool-schema.js'
+import { CANCEL_TOOL,CONFIRM_TOOL,DISPATCH_TOOL,confirmArguments } from '../work-tools.js'
+import type { RealtimeRuntimeBridge,ToolAcceptance,ToolCallReady } from './bridge.js'
+import { requiresSynchronousResult } from './bridge.js'
+import { ConfirmationTurnIsolation } from './confirmation-turn-isolation.js'
+import { type CodingChannel } from './evidence.js'
+import { packRecoveryTurns,projectRecoveryTurns,type RecoveryTurn } from './history.js'
 import type {
-  HostContextItem,
-  HostResponseIntent,
-  RealtimeProviderEvent,
+HostContextItem,
+HostResponseIntent,
+RealtimeProviderEvent,
 } from './protocol.js'
 import { ItemDeliveryUncertainError } from './protocol.js'
-import { packRecoveryTurns, projectRecoveryTurns, type RecoveryTurn } from './history.js'
-import { RealtimeDeliveryError, type RealtimeSession } from './session.js'
 import {
-  MAX_CONTINUATION_TASK_SUMMARY,
-  MAX_PENDING_HOST_EVENTS,
-  activeExecutorContextData,
-  type CaptionFrame,
-} from './session-state.js'
-import {codePointLengthLikePython, stripLikePython} from '../python-text.js'
-import {
-  PREEMPTIVE_ALERT_DEADLINE_S,
-  PREEMPTIVE_ALERT_CLEAR_ACK_DEADLINE_S,
-  HIT_ALERT_MIN_PRIORITY,
-  MAX_HOST_FACT_CHARS,
-  MAX_LATE_SYNC_RESULTS,
-  MAX_PENDING_TOOL_REFUSALS,
-  MAX_TRACKED_ORIGIN_DELIVERY_PROOFS,
-  MAX_TRACKED_SEMANTIC_ACKNOWLEDGEMENTS,
-  MAX_TRACKED_TOOL_CALLS,
-  MAX_UNCERTAIN_DELIVERY_RETRIES,
-  PROJECT_EXPIRY_STEP_TIMEOUT_S,
-  PREEMPT_MIN_PRIORITY,
-  PROGRESS_HOST_ITEM_TTL_S,
-  SYNC_RESULT_SNIPPET_CHARS,
-  SYNC_RESULT_TITLE_CHARS,
-  USER_HOLD_MAX_S,
-  hostFactIntent,
-  callKey,
-  compareQueuedHostResponses,
-  parseCallKey,
-  continuationBatch,
-  projectCommitFailureText,
-  semanticAcknowledgement,
-  toolCallState,
-  type ExecutorState,
-  type ContinuationBatch,
-  type DeferredOriginToolCall,
-  type PreemptiveAlertActivationAuthority,
-  type PreemptiveAlertHistoryRecovery,
-  type PreemptiveAlert,
-  type HostItemOwner,
-  type ProjectExpiryBatch,
-  type QueuedHostResponse,
-  type SemanticAcknowledgement,
-  type ToolCallAcceptanceSnapshot,
-  type ToolCallState,
-  type UrgentHostResponseOwner,
+MAX_HOST_FACT_CHARS,
+MAX_LATE_SYNC_RESULTS,
+MAX_PENDING_TOOL_REFUSALS,
+MAX_TRACKED_ORIGIN_DELIVERY_PROOFS,
+MAX_TRACKED_SEMANTIC_ACKNOWLEDGEMENTS,
+MAX_TRACKED_TOOL_CALLS,
+MAX_UNCERTAIN_DELIVERY_RETRIES,
+PREEMPTIVE_ALERT_CLEAR_ACK_DEADLINE_S,
+PREEMPTIVE_ALERT_DEADLINE_S,
+PREEMPT_MIN_PRIORITY,
+PROJECT_EXPIRY_STEP_TIMEOUT_S,
+SYNC_RESULT_SNIPPET_CHARS,
+SYNC_RESULT_TITLE_CHARS,
+USER_HOLD_MAX_S,
+callKey,
+compareQueuedHostResponses,
+continuationBatch,
+hostFactIntent,
+parseCallKey,
+projectCommitFailureText,
+semanticAcknowledgement,
+toolCallState,
+type ContinuationBatch,
+type DeferredOriginToolCall,
+type ExecutorState,
+type PreemptiveAlert,
+type PreemptiveAlertActivationAuthority,
+type PreemptiveAlertHistoryRecovery,
+type ProjectExpiryBatch,
+type QueuedHostResponse,
+type SemanticAcknowledgement,
+type ToolCallAcceptanceSnapshot,
+type ToolCallState,
+type UrgentHostResponseOwner
 } from './service-state.js'
-import { finalSpeechView, genericFinalSpeechView, type CodingChannel } from './evidence.js'
-import { SPEECH_FINAL_LIMIT, prepareForSpeech } from './speech-prep.js'
+import {
+MAX_CONTINUATION_TASK_SUMMARY,
+MAX_PENDING_HOST_EVENTS,
+activeExecutorContextData,
+type CaptionFrame,
+} from './session-state.js'
+import { RealtimeDeliveryError,type RealtimeSession } from './session.js'
 import type { RealtimeTelemetry } from './telemetry.js'
-import {UserOriginBindingLedger} from './user-origin-binding.js'
+import { UserOriginBindingLedger } from './user-origin-binding.js'
 
 const PROJECT_CONFIRMATION_CARRIER_RELEASE_TIMEOUT_S = 3
 const UNKNOWN_CONFIRMATION_TOOL_RESULT = JSON.stringify({code: 'unknown_confirmation', state: 'refused'})
@@ -162,94 +156,6 @@ interface ProjectConfirmationDecisionRetry {
   readonly source_response_id: string
   requested: boolean
   retry_response_id: string | null
-}
-
-function suggestionSpeechView(content: Readonly<Record<string, JsonValue>>): string {
-  for (const key of ['observation', 'summary', 'message'] as const) {
-    const value = content[key]
-    if (typeof value === 'string' && stripLikePython(value) !== '') {
-      return prepareForSpeech(value, {limit: SPEECH_FINAL_LIMIT}).text
-    }
-  }
-  return '有一条新的提醒'
-}
-
-/** Monitor hits are user-facing reminders, not executor reports. */
-function monitorHitSpeechView(content: Readonly<Record<string, JsonValue>>): string {
-  for (const key of ['observation', 'summary', 'message'] as const) {
-    const value = content[key]
-    if (typeof value === 'string' && stripLikePython(value) !== '') {
-      return prepareForSpeech(`检测到了：${stripLikePython(value)}`, {
-        limit: SPEECH_FINAL_LIMIT,
-      }).text
-    }
-  }
-  return '检测到了，提醒条件已经满足。'
-}
-
-/** The runtime surface the service reads. Thirteen call sites in the oracle, mostly reads. */
-/** What the projection needs to know about one dispatched delegate. */
-export interface DelegateLike {
-  readonly delegate_id: string
-  readonly executor: string
-  readonly op: string
-  readonly origin_ref: string
-  readonly routing_class: string
-}
-
-/** What the projection needs from an executor's manifest. */
-export interface ExecutorManifestLike {
-  readonly name: string
-  readonly display_name?: string | undefined
-  readonly roles: readonly ExecutorRole[]
-  readonly ops: readonly {readonly name: string; readonly sync_result?: boolean}[]
-  readonly model_visibility?: 'direct' | 'hidden' | undefined
-  readonly policy: {
-    readonly priority: number
-    readonly operation_class?: 'task' | 'monitor'
-    readonly alert_delivery?: 'none' | 'deferred' | 'preemptive'
-    readonly suggest?: boolean
-    readonly progress_via_surrogate?: boolean
-  }
-}
-
-export interface ServiceRuntime {
-  readonly codingProgressNarration?: CodingProgressNarrationState
-  readonly clock: Clock
-  readonly executors: ReadonlyMap<string, {
-    readonly manifest: ExecutorManifestLike
-    admitRequest?(op: string, request: Readonly<Record<string, JsonValue>>): ExecutorAdmission | null
-  }>
-  observe(observer: (event: EventRecord, currentConversation?: boolean) => void): () => void
-  serve(stop: AbortSignal): Promise<void>
-  clearConversation?(): Promise<void>
-  flushMemory?(maintenance?: boolean): Promise<void>
-  /** The delegate a handoff claimed, if this exact event claimed one. */
-  claimedHandoff(seq: number): DelegateLike | undefined
-  /** Whether this exact deadline is the one that terminated its delegate. */
-  terminatedByDeadline(seq: number, delegateId: string): boolean
-  /** The delegate from either table, whether or not it is still in flight. */
-  delegateFor(delegateId: string): DelegateLike | undefined
-  /** The delegate only if it is still in flight. */
-  inFlightDelegate(delegateId: string): DelegateLike | undefined
-  /** A suggestion by id, for attributing a turn to what it was answering. Optional. */
-  suggestionFor?: (suggestionId: string) => {
-    readonly kind: string
-    readonly evidence_refs: readonly string[]
-  } | null
-  /** Mark a suggestion as actually offered. Optional. */
-  confirmSuggestionSpoken?: (suggestionId: string) => void
-  /**
-   * The blackboard, for the conversation history a replacement provider is seeded with.
-   *
-   * Optional because the history arms are off by default, and a runtime that never reconnects for a
-   * preemptive alert
-   * has no reason to expose it.
-   */
-  readonly memory?: {
-    readonly policies: ReadonlyMap<string, {readonly progress_via_surrogate?: boolean}>
-    readonly channels: ReadonlyMap<string, {readonly items: readonly MemoryItem[]}>
-  }
 }
 
 /** The provider surface the service uses directly: three calls, everything else via the session. */
@@ -363,6 +269,16 @@ export interface DeliverySnapshot {
 }
 
 export class RealtimeService {
+  readonly #projection: ProviderProjection
+
+  projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
+    this.#projection.projectRuntimeEvent(event, currentConversation)
+  }
+
+  onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
+    this.#projection.onSuggestionSelected(suggestion, reason)
+  }
+
   readonly session: RealtimeSession
   readonly #intake: IntakeEventPort | undefined
   #intakeUser: {text: string; origin_ref: string; epoch: number; inputRevision: number; localOnsetRevision: number} | null = null
@@ -520,14 +436,6 @@ export class RealtimeService {
   #unsubscribeProjectExpiry: (() => void) | null = null
   #unsubscribeExecutorApproval: (() => void) | null = null
   /**
-   * The last progress summary spoken for each delegate.
-   *
-   * The same-summary skip is what stops an executor that reports identical progress every few seconds
-   * from making the agent repeat itself. Cleared when the delegate settles, so a later run of the same
-   * id does not inherit a summary it never produced.
-   */
-  readonly #lastProgressSummary = new Map<string, string>()
-  /**
    * `(epoch, response)` keys whose playback the user demonstrably heard.
    *
    * Proof rather than assumption: an acknowledgement is only suppressed as already-said when there is
@@ -669,7 +577,29 @@ export class RealtimeService {
       this.#approvalHost.syncExecutorApproval(view)
     }) ?? null
     if (options.executorApproval !== undefined) this.#approvalHost.syncExecutorApproval(options.executorApproval.view)
-  }
+  
+    this.#projection = new ProviderProjection({
+      session: this.session, runtime: this.#runtime, clock: this.#clock, coding: this.#coding,
+      codingProgressNarration: this.#codingProgressNarration, telemetry: this.#telemetry,
+      idFactory: this.#idFactory,
+      queueHostItem: (intent, options) => this.queueHostItem(intent, options),
+      executorDisplayName: channel => this.#executorDisplayName(channel),
+      publishExecutorState: () => this.#publishExecutorState(),
+      resolveSyncResult: event => this.#resolveSyncResult(event),
+      expireSyncResult: event => this.#expireSyncResult(event),
+      hasSemanticAcknowledgement: id => this.#semanticAcknowledgements.has(id),
+      fenceSemanticAcknowledgement: delegate => this.#fenceSemanticAcknowledgement(delegate),
+      retireDelegateHostEvents: delegate => this.#retireDelegateHostEvents(delegate),
+      rememberDelegateHostEvent: (delegate, event) => this.#rememberDelegateHostEvent(delegate, event),
+      rememberCodingProgressHostEvent: event => this.#rememberCodingProgressHostEvent(event),
+      coalesceCodingProgress: () => {
+        const retained = this.#hostItems.filter(item => !this.#codingProgressQueued.has(item)
+          || this.#codingProgressHostEventIds.has(item.intent.item.event_id))
+        this.#hostItems.length = 0
+        this.#hostItems.push(...retained.sort(compareQueuedHostResponses))
+      },
+    })
+}
 
   get executorState(): ExecutorState {
     return this.#executorState
@@ -1086,16 +1016,7 @@ export class RealtimeService {
    */
   queueHostItem(
     intent: HostResponseIntent,
-    options: {
-      readonly semanticEventId?: string | null
-      readonly priority?: number
-      readonly preemptive?: boolean
-      /** A monitor policy has authorized this as a preemptive alert. */
-      readonly preemptiveAlert?: boolean
-      readonly preemptiveAlertDelegateId?: string | null
-      readonly owner?: HostItemOwner | null
-      readonly expiresAt?: number | null
-    } = {},
+    options: HostItemOptions = {},
   ): void {
     if (this.#clearingConversation) return
     const priority = options.priority ?? 50
@@ -1541,7 +1462,7 @@ export class RealtimeService {
     this.#projectConfirmationCommittingLifecycles.clear()
     this.#projectConfirmationExpiryFactOwners.clear()
     this.#projectExpiryBatches.length = 0
-    this.#lastProgressSummary.clear()
+    this.#projection.reset()
     this.#originDeliveryProofs.clear()
     this.#awaitingUserOrigin = false
     this.#userOriginPreexistingResponseId = null
@@ -2177,71 +2098,6 @@ export class RealtimeService {
     }
   }
 
-  // ---------------------------------------------------------------------------------------------
-  // Family O: projecting reducer events back to the provider.
-  //
-  // The runtime decides what happened; this decides what the model gets told about it, and the answer
-  // is usually "less than everything". A progress event that repeats the last summary, a suggestion
-  // handoff nobody selected, a monitor stop whose tool continuation already said it -- each is real in
-  // Memory and deliberately silent here, because the failure mode of a voice agent is not missing a
-  // fact, it is narrating its own bookkeeping.
-  //
-  // Two revalidations look redundant and are not. Observers receive events *unconditionally*,
-  // including ones the runtime's own validator dropped from Memory (CP1), and they receive a clone
-  // rather than the applied object -- so shape and delegate identity are both re-checked here.
-  // ---------------------------------------------------------------------------------------------
-
-  /**
-   * Project one reducer event to the provider, or decide it says nothing worth saying.
-   *
-   * Ordering matters at the top: the R105 sync resolution is a delegate-keyed lookup that has to run
-   * before the channel projections, because a synchronous result belongs to the tool call that is
-   * waiting on it rather than to the narration stream.
-   */
-  projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
-    if (!currentConversation) {
-      this.#settleHistoricalRuntimeEvent(event)
-      return
-    }
-    if (event.kind === 'handoff') this.#telemetry?.record('tool.finished', {
-      executor: event.payload.channel, delegate_id: event.payload.delegate_id, outcome: event.payload.outcome,
-    })
-    if (event.kind === 'handoff' && this.#resolveSyncResult(event)) return
-    if (event.kind === 'deadline') {
-      if (this.#expireSyncResult(event)) return
-      this.#projectDeadline(event)
-      return
-    }
-    if (event.kind !== 'progress' && event.kind !== 'observation' && event.kind !== 'handoff') {
-      return
-    }
-    const manifest = this.#runtime.executors.get(event.payload.channel)?.manifest
-    if (manifest === undefined) return
-
-    if (event.payload.channel === this.#coding?.channel && this.#telemetry !== undefined) {
-      if (event.kind === 'progress') {
-        this.#telemetry.record('executor.progress', {
-          delegate_id: event.payload.delegate_id,
-          phase: event.payload.phase,
-          internal_activity: event.payload.internal_activity,
-        })
-      } else if (event.kind === 'handoff') {
-        this.#telemetry.record('executor.handoff', {
-          delegate_id: event.payload.delegate_id,
-          outcome: event.payload.outcome,
-        })
-      }
-    }
-
-    if (event.kind === 'observation') {
-      this.#projectObservation(event, manifest)
-    } else if (event.kind === 'progress') {
-      this.#projectProgress(event, manifest)
-    } else {
-      this.#projectHandoff(event, manifest)
-    }
-  }
-
   #rememberCodingProgressHostEvent(eventId: string): void {
     this.#codingProgressHostEventIds.add(eventId)
     while (this.#codingProgressHostEventIds.size > MAX_PENDING_HOST_EVENTS) {
@@ -2251,86 +2107,6 @@ export class RealtimeService {
 
   /** Live host preference: switching never stops or restarts executor work. */
   setCodingProgressNarration(mode: CodingProgressNarration): void { this.#codingProgressNarration.setMode(mode) }
-
-  /** Old conversation terminals settle generic control state but never create provider content. */
-  #settleHistoricalRuntimeEvent(event: EventRecord): void {
-    if (event.kind !== 'handoff' && event.kind !== 'deadline') return
-    const delegateId = event.payload.delegate_id
-    let delegate: DelegateLike | undefined
-    if (event.kind === 'handoff') {
-      delegate = this.#runtime.claimedHandoff(event.seq)
-      if (delegate?.executor !== event.payload.channel) return
-    } else if (this.#runtime.terminatedByDeadline(event.seq, delegateId)) {
-      delegate = this.#runtime.delegateFor(delegateId)
-    }
-    if (delegate?.delegate_id !== delegateId) return
-    const channel = delegate.executor
-    this.session.registerDelegate(delegateId, {
-      summary: this.#delegateSummary(delegateId, this.#executorDisplayName(channel)),
-      state: event.kind === 'deadline'
-        ? 'unknown'
-        : event.payload.outcome === 'ok'
-          ? 'completed'
-          : event.payload.outcome === 'refused'
-            ? 'refused'
-            : event.payload.outcome === 'unknown' ? 'unknown' : 'failed',
-      channel,
-      progress_summary: null,
-      internal_activity: 0,
-      elapsed: 0,
-    })
-    this.#lastProgressSummary.delete(delegateId)
-    this.#publishExecutorState()
-  }
-
-  /** Project a suggestion chosen by Surrogate when no FastBrain owns the final speech turn. */
-  onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
-    const progress = this.#isSelectedProgress(suggestion)
-    const coding = progress && suggestion.evidence_refs[0]?.startsWith(`${this.#coding?.channel}:`) === true
-    if (coding && this.#codingProgressNarration.mode !== 'smart') return
-    const delegate = coding && reason.origin !== null ? this.#runtime.inFlightDelegate(reason.origin) : undefined
-    if (coding && delegate?.executor !== this.#coding?.channel) return
-    if (coding) {
-      this.#rememberCodingProgressHostEvent(`suggestion:${suggestion.id}`)
-      this.#rememberDelegateHostEvent(reason.origin!, `suggestion:${suggestion.id}`)
-    }
-    const hit = suggestion.content.hit === true
-    this.queueHostItem(hostFactIntent({
-      kind: this.#isSelectedProgress(suggestion) ? 'progress' : 'final',
-      host_item_id: this.#idFactory(),
-      event_id: `suggestion:${suggestion.id}`,
-      content: suggestionSpeechView(suggestion.content),
-    }), {
-      priority: hit ? Math.max(reason.priority, HIT_ALERT_MIN_PRIORITY) : reason.priority,
-      preemptive: false,
-      ...(coding ? {owner: {delegate_id: reason.origin!, channel: delegate!.executor}, expiresAt: this.#clock.now() + PROGRESS_HOST_ITEM_TTL_S} : {}),
-    })
-  }
-
-  /** Require the exact Memory item and policy that caused the selected working-progress suggestion. */
-  #isSelectedProgress(suggestion: Suggestion): boolean {
-    if (suggestion.evidence_refs.length !== 1) return false
-    const summary = suggestion.content.summary
-    if (typeof summary !== 'string') return false
-    const memory = this.#runtime.memory
-    if (memory === undefined) return false
-    const reference = suggestion.evidence_refs[0]
-    if (reference === undefined) return false
-    let channelName: string
-    let sequence: number
-    try {
-      [channelName, sequence] = parseMemoryRef(reference)
-    } catch {
-      return false
-    }
-    const policy = memory.policies.get(channelName)
-    const evidence = memory.channels.get(channelName)?.items.find(item => item.seq === sequence)
-    return policy?.progress_via_surrogate === true
-      && evidence?.channel === channelName
-      && evidence.seq === sequence
-      && evidence.content.phase === 'working'
-      && evidence.content.summary === summary
-  }
 
   /** Resolve a synchronous tool result before ordinary channel projection can consume it. */
   #resolveSyncResult(event: Extract<EventRecord, {kind: 'handoff'}>): boolean {
@@ -2443,301 +2219,6 @@ export class RealtimeService {
     return [...encoded].length <= MAX_HOST_FACT_CHARS
       ? encoded
       : JSON.stringify({state: event.payload.outcome, error: 'result_too_large'})
-  }
-
-  /**
-   * A delegate that ran out of time.
-   *
-   * The state goes to `unknown`, not `failed`: a deadline says nobody knows what happened, and telling
-   * the model it failed would be a claim the host cannot support. `sync_result` ops are skipped
-   * because their waiting tool call resolves the timeout itself.
-   */
-  #projectDeadline(event: Extract<EventRecord, {kind: 'deadline'}>): void {
-    const delegateId = event.payload.delegate_id
-    // This exact event, not "was terminated by a deadline at some point": a second deadline for the
-    // same delegate would otherwise announce the same timeout twice.
-    if (!this.#runtime.terminatedByDeadline(event.seq, delegateId)) return
-    const delegate = this.#runtime.delegateFor(delegateId)
-    if (delegate === undefined) return
-    const manifest = this.#runtime.executors.get(delegate.executor)?.manifest
-    const operation = manifest?.ops.find(candidate => candidate.name === delegate.op)
-    if (manifest === undefined || operation === undefined || operation.sync_result === true) return
-    const displayName = this.#executorDisplayName(delegate.executor)
-    this.session.registerDelegate(delegateId, {
-      summary: this.#delegateSummary(delegateId, displayName),
-      state: 'unknown',
-      channel: delegate.executor,
-      progress_summary: null,
-      internal_activity: 0,
-      elapsed: 0,
-    })
-    // A settled delegate leaves no dedup residue behind, or a later run of the same delegate id would
-    // inherit a summary it never produced.
-    this.#lastProgressSummary.delete(delegateId)
-    this.#publishExecutorState()
-    this.queueHostItem(hostFactIntent({
-      kind: 'final',
-      host_item_id: this.#idFactory(),
-      event_id: `deadline:${delegateId}`,
-      content: `${displayName} 的委派任务超时，未能确认结果。`,
-    }), {priority: manifest.policy.priority})
-  }
-
-  /**
-   * Something an executor noticed while running.
-   *
-   * Only a *hit* is worth interrupting for. A heartbeat or a miss registers delegate state and stops
-   * there, and an ambient hit is the Surrogate's to arbitrate rather than something to announce.
-   */
-  #projectObservation(
-    event: Extract<EventRecord, {kind: 'observation'}>,
-    manifest: ExecutorManifestLike,
-  ): void {
-    const delegate = this.#observationDelegate(event)
-    if (delegate === undefined) return
-    const displayName = this.#executorDisplayName(event.payload.channel)
-    this.session.registerDelegate(event.payload.delegate_id, {
-      summary: this.#delegateSummary(event.payload.delegate_id, displayName),
-      state: 'running',
-      channel: event.payload.channel,
-    })
-    this.#publishExecutorState()
-    if (event.payload.content.hit !== true) return
-    if (manifest.policy.suggest === true && delegate.routing_class === 'ambient') return
-    const monitor = isMonitorPolicy(manifest.policy)
-    const delivery = monitorAlertDelivery(manifest.policy)
-    // A none monitor still records the hit and updates delegate state above, but does not address it
-    // to the user or take their floor.
-    if (monitor && delivery === 'none') return
-    const speechView = monitor
-      ? monitorHitSpeechView(event.payload.content)
-      : genericFinalSpeechView(displayName, 'ok', event.payload.content)
-    const content = [...speechView]
-      .slice(0, MAX_HOST_FACT_CHARS)
-      .join('')
-    this.queueHostItem(hostFactIntent({
-      kind: 'final',
-      host_item_id: this.#idFactory(),
-      event_id: `observation:${event.payload.delegate_id}:${event.seq}`,
-      content,
-    }), {
-      // A monitoring hit outranks routine executor announcements; only its policy may authorize a floor preempt.
-      priority: Math.max(manifest.policy.priority, HIT_ALERT_MIN_PRIORITY),
-      preemptive: monitor
-        ? isPreemptiveMonitorAlert(manifest.policy)
-        : manifest.policy.priority >= PREEMPT_MIN_PRIORITY,
-      preemptiveAlert: isPreemptiveMonitorAlert(manifest.policy),
-      preemptiveAlertDelegateId: isPreemptiveMonitorAlert(manifest.policy) ? event.payload.delegate_id : null,
-    })
-  }
-
-  /**
-   * Resolve an observation to the exact live executor run it belongs to.
-   *
-   * All four fields have to match, not just the delegate id: an observation whose channel, op, or
-   * origin differs describes a different run, and projecting it would attribute one executor's finding
-   * to another's task.
-   */
-  #observationDelegate(
-    event: Extract<EventRecord, {kind: 'observation'}>,
-  ): DelegateLike | undefined {
-    const delegate = this.#runtime.inFlightDelegate(event.payload.delegate_id)
-    if (delegate === undefined) return undefined
-    if (
-      event.payload.channel !== delegate.executor
-      || event.payload.op !== delegate.op
-      || event.payload.origin_ref !== delegate.origin_ref
-    ) {
-      return undefined
-    }
-    return delegate
-  }
-
-  /**
-   * How far along a running executor is.
-   *
-   * The shape is revalidated here even though the runtime already did it, because observers receive
-   * events the runtime's validator dropped from Memory (CP1). And the delegate identity is rechecked
-   * against the in-flight table, because a progress event for a settled delegate describes a run that
-   * is over.
-   */
-  #projectProgress(
-    event: Extract<EventRecord, {kind: 'progress'}>,
-    manifest: ExecutorManifestLike,
-  ): void {
-    const payload = event.payload
-    if (
-      payload.op === ''
-      || !Number.isInteger(payload.internal_activity)
-      || !Number.isFinite(payload.elapsed)
-      || payload.elapsed < 0
-      || (payload.phase === 'started' && payload.internal_activity !== 0)
-      || (
-        payload.phase === 'working'
-        && !(payload.internal_activity >= 1 && payload.internal_activity <= 1_048_576)
-      )
-    ) {
-      return
-    }
-    const delegate = this.#runtime.inFlightDelegate(payload.delegate_id)
-    if (delegate?.executor !== payload.channel || delegate.op !== payload.op) return
-    const displayName = this.#executorDisplayName(payload.channel)
-    const coding = payload.channel === this.#coding?.channel
-    let summary: string | null = payload.summary
-    if (!validProgressSummary(summary, payload.phase)) summary = null
-    if (summary !== null) {
-      // CP2: prepared once at the storage boundary, so the recovery frame the session renders never
-      // carries raw markdown either.
-      summary = coding ? codingProgressSummary(summary) : prepareForSpeech(summary, {limit: SPEECH_FINAL_LIMIT}).text || null
-    }
-    const previousSummary = this.#lastProgressSummary.get(payload.delegate_id)
-    // Keep received facts current even when smart mode suppresses delivery.
-    if (coding && payload.phase === 'working' && summary !== null) {
-      this.#lastProgressSummary.set(payload.delegate_id, summary)
-    }
-    this.session.registerDelegate(payload.delegate_id, {
-      summary: this.#delegateSummary(payload.delegate_id, displayName),
-      state: 'running',
-      channel: payload.channel,
-      progress_summary: summary,
-      internal_activity: payload.internal_activity,
-      elapsed: payload.elapsed,
-    })
-    this.#publishExecutorState()
-    if (
-      payload.phase === 'started'
-      && this.#semanticAcknowledgements.has(`background:${payload.delegate_id}`)
-    ) return
-    // A monitor's periodic heartbeat is operational state, not a new user-facing event. Speaking it
-    // creates a fresh model turn that can accidentally replay an older acknowledgement.
-    if (isMonitorPolicy(manifest.policy) && payload.phase === 'working') return
-    if (payload.phase === 'working') {
-      if (this.#codingProgressNarration.viaSurrogate(coding, manifest.policy.progress_via_surrogate === true)) return
-      if (coding && this.#codingProgressNarration.mode === 'continuous' && summary === null) return
-    }
-
-    let content: string
-    if (payload.phase === 'started') {
-      content = `${displayName} 已开始处理这个任务。`
-    } else if (summary !== null) {
-      // Same-summary skip: state registration already happened, only the host injection is
-      // suppressed. A summary-less event keeps the field template and is never deduped this way.
-      if (previousSummary === summary) return
-      this.#lastProgressSummary.set(payload.delegate_id, summary)
-      content = `${displayName} 正在执行：${summary}`
-    } else {
-      content = `${displayName} 仍在处理这个任务，目前已推进 ${payload.internal_activity} 个步骤。`
-    }
-    const eventId = `progress:${payload.delegate_id}:${payload.phase}:${payload.internal_activity}`
-    if (coding) {
-      // Coalesce queued updates per task; the latest fact retains existing owner/floor/expiry fences.
-      if (this.#codingProgressNarration.mode === 'continuous') {
-        this.#retireDelegateHostEvents(payload.delegate_id)
-        const retained = this.#hostItems.filter(item => !this.#codingProgressQueued.has(item)
-          || this.#codingProgressHostEventIds.has(item.intent.item.event_id))
-        this.#hostItems.length = 0
-        this.#hostItems.push(...retained.sort(compareQueuedHostResponses))
-      }
-      this.#rememberCodingProgressHostEvent(eventId)
-    }
-    this.#rememberDelegateHostEvent(payload.delegate_id, eventId)
-    this.queueHostItem(hostFactIntent({
-      kind: 'progress',
-      host_item_id: this.#idFactory(),
-      event_id: eventId,
-      content,
-    }), {
-      priority: manifest.policy.priority,
-      owner: {delegate_id: payload.delegate_id, channel: payload.channel},
-      expiresAt: this.#clock.now() + PROGRESS_HOST_ITEM_TTL_S,
-    })
-  }
-
-  /**
-   * An executor finished.
-   *
-   * Two silences here are deliberate and were both learned from hearing the agent say too much. An
-   * unselected suggestion handoff is a proposal the Surrogate never chose, so announcing it would tell
-   * the user about something they were not offered. And a successful monitor stop already has its
-   * spoken confirmation in the stop tool's own continuation -- both terminal handoffs stay
-   * authoritative in Memory, but projecting either duplicates that acknowledgement, and projecting
-   * both produced three lines.
-   */
-  #projectHandoff(
-    event: Extract<EventRecord, {kind: 'handoff'}>,
-    manifest: ExecutorManifestLike,
-  ): void {
-    // Only the delegate *this* handoff claimed. A duplicate, or one for an already-settled delegate,
-    // claims nothing and must not be projected against whatever the previous one claimed.
-    const claimed = this.#runtime.claimedHandoff(event.seq)
-    if (claimed?.executor !== event.payload.channel) return
-    const payload = event.payload
-    const displayName = this.#executorDisplayName(payload.channel)
-    this.#fenceSemanticAcknowledgement(payload.delegate_id)
-    this.#retireDelegateHostEvents(payload.delegate_id)
-    const directSuggestionHandoff = manifest.policy.suggest === true
-      && payload.outcome === 'ok'
-      && claimed.routing_class === 'user_awaited'
-    const suppressUnselectedSuggestion = manifest.policy.suggest === true
-      && payload.outcome === 'ok'
-      && !directSuggestionHandoff
-    this.session.registerDelegate(payload.delegate_id, {
-      summary: this.#delegateSummary(payload.delegate_id, displayName),
-      state: payload.outcome === 'ok'
-        ? 'completed'
-        : payload.outcome === 'refused'
-          ? 'refused'
-          : payload.outcome === 'unknown' ? 'unknown' : 'failed',
-      channel: payload.channel,
-    })
-    // CP1: a settled delegate leaves no dedup residue behind.
-    this.#lastProgressSummary.delete(payload.delegate_id)
-    this.#publishExecutorState()
-    if (
-      isMonitorPolicy(manifest.policy)
-      && monitorAlertDelivery(manifest.policy) === 'none'
-      && payload.outcome === 'ok'
-      && payload.content.hit === true
-    ) return
-    if (suppressUnselectedSuggestion) return
-
-    const successfulMonitorStop = isMonitorPolicy(manifest.policy)
-      && payload.outcome === 'ok'
-      && (
-        (claimed.op === 'stop' && payload.content.stopped === true)
-        || (claimed.op === 'start' && payload.content.state === 'stopped')
-      )
-    if (successfulMonitorStop) return
-
-    const finalView = payload.channel === this.#coding?.channel
-      ? finalSpeechView(payload.outcome, payload.content, this.#coding.display_name)
-      : genericFinalSpeechView(displayName, payload.outcome, payload.content)
-    const content = [...finalView].slice(0, MAX_HOST_FACT_CHARS).join('')
-    const hit = payload.outcome === 'ok' && payload.content.hit === true
-    const preemptiveMonitorHit = hit && isPreemptiveMonitorAlert(manifest.policy)
-    this.queueHostItem(hostFactIntent({
-      kind: 'final',
-      host_item_id: this.#idFactory(),
-      event_id: `final:${payload.delegate_id}`,
-      content,
-    }), {
-      priority: hit
-        ? Math.max(manifest.policy.priority, HIT_ALERT_MIN_PRIORITY)
-        : manifest.policy.priority,
-      preemptive: hit && (isMonitorPolicy(manifest.policy)
-        ? isPreemptiveMonitorAlert(manifest.policy)
-        : manifest.policy.priority >= PREEMPT_MIN_PRIORITY),
-      preemptiveAlert: preemptiveMonitorHit,
-      preemptiveAlertDelegateId: preemptiveMonitorHit ? payload.delegate_id : null,
-    })
-  }
-
-  /** The summary the session already holds for a delegate, or a plain stand-in. */
-  #delegateSummary(delegateId: string, displayName: string): string {
-    for (const [currentId, record] of this.session.snapshot().active_delegates) {
-      if (currentId === delegateId) return record.summary
-    }
-    return `${displayName} background task`
   }
 
   /**
@@ -7109,4 +6590,4 @@ function projectConfirmationEventId(
   return `${namespace}:${digest}`
 }
 
-export type { HostContextItem, PlaybackCompletion }
+export type { HostContextItem,PlaybackCompletion }
