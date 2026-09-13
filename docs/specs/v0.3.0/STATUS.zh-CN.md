@@ -1,6 +1,6 @@
 # v0.3.0 进度说明（给同事 review 用）
 
-> 日期：2026-09-10 · 状态：**全部里程碑未开始**，本页只有规划。
+> 日期：2026-09-10，2026-09-12 补记忆底座与 IM · 状态：**全部里程碑未开始**，本页只有规划。
 > 这份文档用大白话讲"我们要做什么、分几步、每步做完算什么、想请你们拍板什么"。
 > 细节以各卷 spec 为准：[00 总览](00-overview.md)。
 
@@ -18,7 +18,8 @@ v0.2.0 让 Nova 做到"开口就能让 Codex 干活"。v0.3.0 换一个定位：
 - 加一个主窗口：左边聊天，右边看 **动态 / 任务 / 记忆**。收起来就是现在的悬浮窗，任务和会话不丢。
 - Nova 会主动提建议，但每条都要有依据，没依据就闭嘴。
 - 记忆对用户可见，能纠正、能忘记。
-- 用户自己选哪些目录、哪个邮箱和日历给 Nova 读；读了多少看得见。
+- 用户自己选哪些目录、哪个邮箱和日历、哪些飞书会话给 Nova 读；读了多少看得见。飞书 bot 也能把 Nova 的提醒推给你。
+- 记忆只有一套底座：读到的原文进账本，理解以修订形式派生，每条都能指出依据、能纠正、能忘记。
 
 参考了 [today.ai](https://today.ai) 的"记忆可见、首页汇总"形态，但走开源项目的路：
 本地运行、用户配置授权范围、来源可追溯、不宣称了解整台电脑。
@@ -31,11 +32,13 @@ A/B 轨继续并行、各自小步：A 做需求发现，B 做窗口与入口。
 |---|---|---|---|---|
 | **M5-B** 文字入桌面 | 桌面默认 cascaded；输入框三态接线；主窗口骨架只含对话列和复用 task-banner 的任务 tab | 无 | 验收场景 1、2、3 通过；全新安装不申请麦克风也能打字交办任务 | ⬜ 未开始 |
 | **M5-A** proposal 闭环 | Surrogate 输出可空 proposal；主机校验、入池、同日去重；低频检查事件；固定案例集 | 无（在现有悬浮窗和 iOS 输入框上验证） | 场景 4、5、6、7 通过；案例集 ≥10 应建议 + ≥10 应沉默全跑 | ⬜ 未开始 |
-| **契约钉住** | `feed_item`、`memory_entry` 的 zod schema 与 fixtures；personal-memory 端口扩展（`list` / `get` / `correct` / `forgetEntry` / `capabilities`）；持久化交付与忽略台账 | 02、03 卷评审通过 | fixtures 进 CI；至少一个后端实现端口扩展 | ⬜ 未开始 |
+| **契约钉住** | `feed_item`、`memory_entry` 的 zod schema 与 fixtures；持久化交付与忽略台账 | 02、03 卷评审通过 | fixtures 进 CI | ⬜ 未开始 |
+| **记忆底座** | 06 卷 `evidence_record` / `entry_revision` schema 与 fixtures；merge 纯函数；fold 与四种投影；Workspace Graph 作为第一写入方迁入；03 卷要的 `list` / `get` / `correct` / `forgetEntry` 由此提供 | 06 卷评审通过；契约钉住 | 06 卷场景 12、13、14、16、17 通过；VoiceMem 迁移路径拍板 | ⬜ 未开始 |
 | **M6-B** 动态页 | 主窗口消费 feed_item，用户动作回传；收起态角标与气泡；重开可恢复 | M5-B、契约 | 场景 11 通过；feed 空状态真实 | ⬜ 未开始 |
-| **M6-A** 记忆页 | memory_entry 投影；纠正与忘记回写并传播；概览段落带覆盖声明 | M5-A、契约 | 03 卷五个场景通过 | ⬜ 未开始 |
-| **M7** 本地目录来源 | 用户选目录；元数据概览后按预算读正文；增量与恢复核对；来源变化撤回 feed_item | M6-A（记忆传播） | 04 卷"目录覆盖诚实""排除生效"通过 | ⬜ 未开始 |
-| **M8** 一个邮件 / 日历 provider | 增量同步、cursor 失效恢复、删除传播、改期冲突完整场景 | M7 | 场景 8、9、10 通过 | ⬜ 未开始 |
+| **M6-A** 记忆页 | memory_entry 投影；纠正与忘记回写并传播；概览段落带覆盖声明 | M5-A、契约、记忆底座 | 03 卷五个场景通过 | ⬜ 未开始 |
+| **M7** 本地目录来源 | 用户选目录；元数据概览后按预算读正文；增量与恢复核对；来源删除物理清账本并撤回 feed_item | 记忆底座、M6-A（记忆传播） | 04 卷"目录覆盖诚实""排除生效"通过 | ⬜ 未开始 |
+| **M8-Mail** 一个邮件 / 日历 provider | 增量同步、cursor 失效恢复、删除传播、改期冲突完整场景 | M7 | 场景 8、9、10 通过 | ⬜ 未开始 |
+| **M8-IM** 飞书连接器 | 通用部署配置；读授权会话写账本、入库抽承诺；bot 推送 proposal 并回收用户动作；与 M8-Mail 并行 | M7 | 04 卷场景 18、19 与 06 卷场景 15 通过；公共边界测试允许"通用飞书连接器"且判定标准写清 | ⬜ 未开始 |
 | **M9-C** 多 coding 后端 | Kimi Code 与 pi agent 分别适配既有 coding 调度、审批、进度、取消 | v0.2 执行器/审批契约；不依赖 M7/M8 | 每个后端独立通过工作闭环及拒绝/取消/失败场景，支持矩阵明确 | ⬜ 未开始 |
 | **M9-G** GUI 执行器 | 以 AutoGLM 为首个 example，绑定设备与动作授权 | v0.2 执行器/审批契约；不依赖 M9-C、M7/M8 | 真机执行、拒绝、中途取消和状态不明场景通过 | ⬜ 未开始 |
 | **M9-Demo** agent2agent | Nova 委派 coding/GUI 专长 agent 的复现说明与真实演示 | M9-C、M9-G | 版本/平台/权限/产物/限制完整，不把协作演示称为未经验证的 A2A 协议兼容 | ⬜ 未开始 |
@@ -57,14 +60,20 @@ A/B 轨继续并行、各自小步：A 做需求发现，B 做窗口与入口。
 6. 两个契约对象 `feed_item`、`memory_entry`，主机拥有，UI 不存权威副本。
 7. 新开 v0.3.0 系列，里程碑从 M5 续编号。
 
+2026-09-12 补充确认（详见 [00 卷 D8](00-overview.md#已定决策2026-09-10-脑暴) 与 [06 卷](06-memory-substrate.md)）：
+
+8. 记忆收敛为一套三阶段底座：账本只追加且存原文，条目是修订日志，视图只读。VoiceMem 与 Workspace Graph
+   变成写入方，不再各自为真。用户纠正和模型合并是同一种修订记录。
+9. 飞书 IM 与邮件都在本版范围：飞书既是来源也是提醒投递渠道，必须是部署时配置的通用连接器。
+
 ## 四、现在的代码离目标有多远
 
 | 子系统 | 已有 | 缺 |
 |---|---|---|
 | 文字输入 | runtime 有 `input.text` / `input.dictation`，协议已写进 client-v1；iOS Swift 已实现文字与 dictation 接线 | 桌面和 WebUI 都没接线；iOS 真机验收未完成 |
 | 主动机制 | Suggestion Pool、Surrogate 选择、Floor 仲裁 | Surrogate 不会提新建议；没有用于需求发现的低频检查；没有 feed；没有持久化的交付 / 忽略台账 |
-| 记忆 | personal-memory 端口（recall / remember / 按来源 forget）、workspace graph、开发者 memory-board | 端口没有逐条 ID、版本、列表、按条目纠正 / 忘记；没有用户视角的记忆条目和纠正 UI |
-| 来源 | 知识库有界导入与检索 | 没有持续同步、没有邮件 / 日历、没有来源管理 UI |
+| 记忆 | personal-memory 端口（recall / remember / 按来源 forget）、workspace graph（已是账本 + 修订 + 快照雏形）、开发者 memory-board | 三套记忆不打通；没有统一的证据账本与修订日志；没有逐条 ID、版本、列表、按条目纠正 / 忘记；没有用户视角的记忆条目和纠正 UI |
+| 来源 | 知识库有界导入与检索；公共 iOS 有通用飞书登录 | 没有持续同步、没有邮件 / 日历、没有飞书消息读取与 bot 推送、没有来源管理 UI |
 | 执行生态 | Codex 执行器、能力注册表、外部 MCP | Kimi Code、pi agent 与 GUI/AutoGLM 接入待实现；Home Assistant 为后续候选 |
 | UI | Electron 悬浮窗、任务横幅、进度气泡、各设置面板 | 主窗口、动态页、记忆页 |
 
@@ -83,11 +92,15 @@ A/B 轨继续并行、各自小步：A 做需求发现，B 做窗口与入口。
 6. **要不要给 integrated 补文字入口**：协议可行，但要处理文字轮次与进行中语音轮次的冲突。
 7. **02 卷的去重策略**是否够用：同用户、同作用域、同稳定事项键、同日，基于持久化台账，不做语义去重。
 8. **执行器具体接入**：固定 Kimi Code / pi agent 的版本和接口；AutoGLM 首个设备平台与应用场景；用能力矩阵暴露审批、恢复、steer 等不支持项。
-9. **03 卷的 personal-memory 端口扩展**：VoiceMem 后端能否提供逐条稳定 ID 与版本；不能则 M6-A 的纠正只能降级。
+9. **VoiceMem 迁为底座写入方的路径**：sidecar 输出候选由主机 merge，还是原生 TS 双脑直接替代；未迁完前其条目在记忆页只读。
+10. **知识库与证据账本的关系**：独立保留只存 locator，还是并入账本、资料库退为索引。
+11. **IM 与邮件原文的默认保留期**：30 天 / 90 天 / 无默认。
+12. **飞书连接器首版范围**：只读单聊与指定群 / 加待办与日历 / 加 bot 推送；以及 M8-IM 与 M8-Mail 谁先上真实账号验收。
 
 ## 七、相关文件
 
 - 讨论稿：[docs/design-notes/2026-09-10-nova-personal-agent-product-architecture.zh-CN.md](../../design-notes/2026-09-10-nova-personal-agent-product-architecture.zh-CN.md)
+- 记忆参考对照与架构图改图意见：[docs/design-notes/2026-09-12-memory-references-comparison.zh-CN.md](../../design-notes/2026-09-12-memory-references-comparison.zh-CN.md)
 - 协议：[docs/protocols/client-v1.md](../../protocols/client-v1.md)
 - 架构不变量：[docs/archs/](../../archs/00-overview.md)、[docs/glossary.md](../../glossary.md)
 - v0.2.0 系列：[docs/specs/v0.2.0/00-overview.md](../v0.2.0/00-overview.md)

@@ -2,9 +2,10 @@
 
 > 目标：让用户看到 Nova 对自己形成了什么理解、依据是什么、什么时候形成的，并且能纠正和忘记。
 > 纠正不是改 UI 文案：后续检索、未交付的 proposal 和 feed 事项都必须看到新状态。
-> 本卷定义 `memory_entry` 契约。它是**投影**，不是新的存储层。
+> 本卷定义 `memory_entry` 契约。它是**投影**，不是新的存储层：底层是 [06 卷](06-memory-substrate.md)
+> 的 `entry_revision` 修订日志（B 阶段）经 fold 得到的当前态（C 阶段）。
 
-状态：待评审。对应里程碑 M6-A（见 [STATUS](STATUS.zh-CN.md)）。
+状态：待评审。对应里程碑 M6-A（见 [STATUS](STATUS.zh-CN.md)）；依赖“记忆底座”里程碑。
 
 ## 1. 现有基础
 
@@ -24,11 +25,12 @@
 
 ## 2. 本卷新增
 
-### 2.1 `memory_entry` 是投影，但需要先扩展端口
+### 2.1 `memory_entry` 是投影，能力由 06 卷底座提供
 
-`memory_entry` 由主机从 personal-memory 端口（及可选的 workspace graph）读出并整理，
-面向用户展示。它不新增存储。但现有端口只有查询、按轮次写入、按来源忘记三种能力，
-本卷需要**先扩展 `PersonalMemoryResource`**，再谈投影：
+`memory_entry` 由主机从 06 卷底座的当前态 fold 出来，面向用户展示。它不新增存储。
+现有 `PersonalMemoryResource` 端口只有查询、按轮次写入、按来源忘记三种能力，本卷需要的下列能力
+由**06 卷底座**统一提供；VoiceMem 与 Workspace Graph 改为底座的写入方（经 merge 写修订），
+不再各自实现这些接口：
 
 | 新增能力（可选实现） | 契约 | 用途 |
 |---|---|---|
@@ -38,12 +40,11 @@
 | `forgetEntry(entry_id, expected_version)` | 按条目忘记，并写入抑制标记 | 忘记（区别于现有按来源的 `forget(sourceId)`） |
 | `capabilities()` | 声明上述哪些已实现 | UI 如实显示不支持的操作 |
 
-后端未实现某能力时，主机按能力声明降级：记忆页不显示列表或禁用相应按钮并解释原因，
-不能假装成功。02 卷的记忆版本校验依赖 `get`；后端不提供版本时，02 卷必须把 `memory_refs`
+底座尚未接入某个写入方（例如 VoiceMem 仍在迁移）时，来自该写入方的条目在能力声明中标为
+只读，记忆页禁用相应按钮并解释原因，不能假装成功。02 卷的记忆版本校验依赖 `get`；后端不提供版本时，02 卷必须把 `memory_refs`
 视为不可校验并拒绝依赖它的 proposal，而不是跳过校验。
 
-端口扩展先于 M6-A 落地，列入 STATUS 的"契约钉住"里程碑。VoiceMem 后端能否提供逐条版本
-是实现问题，本卷只定契约。
+上述能力随“记忆底座”里程碑落地，先于 M6-A。`version` 即 06 卷的 `revision`。
 
 ### 2.2 契约对象：`memory_entry`
 
@@ -52,10 +53,12 @@
 | `id` | string | 底层稳定 `entry_id`，由 §2.1 的 `list` / `get` 提供 |
 | `version` | number \| string \| null | 底层单调版本；proposal 的 `memory_refs` 用它做一致性校验；后端不提供时为 null 且条目标记"不可校验" |
 | `content` | string ≤ 500 | 用户可读的一句理解 |
-| `kind` | `fact \| preference \| plan \| concern` | 事实 / 偏好 / 有日期或将来时的安排 / 进行中的关注点 |
+| `kind` | `fact \| preference \| plan \| concern \| commitment` | 事实 / 偏好 / 有日期或将来时的安排 / 进行中的关注点 / 承诺（我欠别人或别人欠我，06 卷 §6） |
 | `origin` | `stated \| inferred` | 用户明确表达 vs Nova 推断。只有 `stated` 可作为偏好覆盖等高信任用途 |
 | `source_refs` | array of `{type: conversation \| file \| mail \| calendar \| task, ref, observed_at}` | 至少 1 条；`inferred` 条目必须能展开看到推断依据 |
 | `observed_at` | ISO 8601 | 依据发生的时间，不是写入时间 |
+| `valid_until` | ISO 8601 \| null | 有时效的状态；过期后不进模型投影，记忆页“已过期”筛选可见 |
+| `entity_refs` | array of entry id | 指向 `kind = entity` 的条目（人 / 项目），human-centric 与 work-centric 共享 |
 | `recorded_at` | ISO 8601 | 写入时间 |
 | `topic` | string | 用户可理解的主题，用于分组（工作 / 生活 / 项目名等），由主机归类 |
 | `status` | `active \| corrected \| forgotten` | 见 §2.3 |
@@ -68,7 +71,7 @@
 
 | 操作 | 底层动作 | 传播 |
 |---|---|---|
-| 纠正 | 调用 `correct(entry_id, expected_version, …)`；原条目 `status: corrected`，新增一条 `stated` 条目，`source_refs` 指向本次用户操作 | 依赖原条目的 pending suggestion 撤回；相关 `feed_item` 置 `invalidated`；后续 recall 只返回新条目 |
+| 纠正 | 调用 `correct(entry_id, expected_version, …)`；底层写一条 `source_kind = user_correction` 的证据，再经 merge 写一条 `written_by = user_correction`、`origin = stated` 的修订；原修订被 supersede 且可查 | 依赖原条目的 pending suggestion 撤回；相关 `feed_item` 置 `invalidated`；后续 recall 只返回新条目 |
 | 忘记 | 调用 `forgetEntry(entry_id, expected_version)`；条目 `status: forgotten`，内容不再展示 | 同上；此外记录一条**抑制标记**（hash 依据），来源下次同步产生相同推断时不重新生成 |
 | 忘记整个来源 | 现有 `forget(sourceId)`；该来源派生的全部条目 `forgotten` | 走 04 卷"删除来源数据"路径 |
 | 查看来源 | 只读 | 无 |
@@ -97,7 +100,7 @@
 ## 3. 不做
 
 - 不生成叙事式"人物画像"作为主体；概览是可选附属。
-- 不新建第三套记忆存储。
+- 不在 06 卷底座之外新建记忆存储。
 - 不让 renderer 直接访问 VoiceMem 或 SQLite。
 - 不把知识库分块当作记忆展示。
 
@@ -108,7 +111,7 @@
 | 概览默认开关 | 默认开 / 默认关 | 关则首屏全是条目，更朴素 |
 | `topic` 归类方式 | 主机规则 / 模型归类后主机校验 | 模型归类更自然但需要校验与缓存 |
 | 后端不支持 `forgetEntry` / `list` 时的 UI | 隐藏 / 显示但禁用并解释 | 建议后者，如实告知 |
-| VoiceMem 能否提供逐条稳定 ID 与版本 | 后端原生支持 / 主机侧维护映射层 | 不能则 M6-A 的纠正只能降级为按来源忘记 |
+| VoiceMem 迁为底座写入方的路径 | sidecar 输出候选由主机 merge / 原生 TS 双脑直接替代 | 见 06 卷 §10；未迁完前其条目在记忆页只读 |
 
 ## 5. 验收场景
 
