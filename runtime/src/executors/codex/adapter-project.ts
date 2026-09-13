@@ -1,5 +1,5 @@
 import {basename} from 'node:path'
-import {realpath} from 'node:fs/promises'
+import {realpathSync} from 'node:fs'
 import {readLocalCodexSessions} from './local-sessions.js'
 import {hostPersistentHomeFromConfig, hostWorkspaceFromConfig} from '../../host-paths.js'
 import {hostWorkspacePath} from '../../host-paths.js'
@@ -200,7 +200,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     const refresh = (async () => {
       const ids = new Set<string>()
       try {
-        const home = await realpath(this.#localCodexHome!)
+        const home = realpathSync(this.#localCodexHome!)
         const catalog = await readLocalCodexSessions(home)
         // Keep the same ten-project intake budget. Older projects remain in Codex.
         const paths = new Set<string>()
@@ -264,7 +264,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     if (decision.kind === 'work' && decision.session === 'latest') {
       try { session = decision.session_title ? await this.#store.resolveSession(workspace.workspace_id, decision.session_title) : await this.#latestReadySession(workspace) }
       catch { throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: decision.session_title ?? ''}) }
-      if (session?.executor_home && !this.#localSessionIds.has(session.session_id)) throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: session.display_title})
+      if (session?.executor_home && session.origin !== 'nova' && !this.#localSessionIds.has(session.session_id)) throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: session.display_title})
     }
     return {
       workspace: workspace.canonical_path,
@@ -284,7 +284,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
         last_used_at: entry.last_used_at,
         last_session_title: session?.display_title ?? null,
         ...(this.#localCodexHome ? {sessions: (snapshot?.sessions ?? [])
-          .filter(item => item.workspace_id === workspace?.workspace_id && item.state === 'ready' && (!item.executor_home || this.#localSessionIds.has(item.session_id)))
+          .filter(item => item.workspace_id === workspace?.workspace_id && item.state === 'ready' && (!item.executor_home || item.origin === 'nova' || this.#localSessionIds.has(item.session_id)))
           .sort((a, b) => b.last_used_at - a.last_used_at).slice(0, 20).map(item => item.display_title)} : {}),
         running: this.#runningIn(entry.name),
       }
@@ -801,18 +801,28 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     let resumeRollback: SessionResumeRollback | null = null
     const disposition: {value: ValidatedCodexDisposition | null} = {value: null}
     await this.#store.revalidateWorkspace(workspace.workspace_id)
-    if (resumed?.executor_home) {
+    if (resumed?.executor_home && resumed.origin !== 'nova') {
       await this.#refreshLocalSessions()
       if (!this.#localCodexHome || !this.#catalogHealthy || !this.#localSessionIds.has(resumed.session_id)
-        || await realpath(this.#localCodexHome) !== resumed.executor_home) return failureHandoff('resume_unavailable', 'run')
+        || realpathSync(this.#localCodexHome) !== resumed.executor_home) return failureHandoff('resume_unavailable', 'run')
     }
-    const codexHome = resumed?.executor_home
-      ? hostPersistentHomeFromConfig(resumed.executor_home, [await realpath(this.#localCodexHome!)])
-      : await this.#store.persistentHome(workspace.workspace_id)
+    let codexHome: HostCodexHome
+    let canonicalHome: string | undefined
+    try {
+      const executorHome = resumed === null ? this.#localCodexHome : resumed.executor_home
+      canonicalHome = executorHome === undefined ? undefined : realpathSync(executorHome)
+      if (resumed?.executor_home && canonicalHome !== resumed.executor_home) return failureHandoff('resume_unavailable', 'run')
+      codexHome = canonicalHome === undefined
+        ? await this.#store.persistentHome(workspace.workspace_id, {create: resumed === null})
+        : hostPersistentHomeFromConfig(canonicalHome, [canonicalHome])
+    } catch (error) {
+      if (resumed !== null) return failureHandoff('resume_unavailable', 'run')
+      throw error
+    }
     let inner: CodexAppServerTransport
     try {
       if (session === null) {
-        const begun = await this.#store.beginSessionForRun(workspace.workspace_id, title)
+        const begun = await this.#store.beginSessionForRun(workspace.workspace_id, title, canonicalHome)
         session = begun.session
         startRollback = begun.rollback
       }
@@ -837,7 +847,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       inner = this.#transportFactory.create(Object.freeze({
         workspace: approvedWorkspace,
         codexHome,
-        preserveHome: resumed?.executor_home !== undefined,
+        preserveHome: true,
         resumeThreadId: resumed?.codex_thread_id ?? null,
         work: slot.work,
       }))

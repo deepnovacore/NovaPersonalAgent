@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {test} from 'node:test'
 import {
-  CODEX_BASE_MANIFEST,
   CODEX_LIVE_MANIFEST,
   CODEX_PROJECT_APPROVAL_MANIFEST,
   CODEX_PROJECT_MANIFEST,
@@ -66,14 +65,12 @@ function replaceFinalText(value: Record<string, unknown>, text: string): void {
   message.sha256 = digest(text)
 }
 
-test('base, live, and project manifests pin exact immutable public operations and policy', () => {
-  assert.deepEqual(CODEX_BASE_MANIFEST.ops.map(op => op.name), ['run', 'status'])
+test('live and project manifests pin exact immutable public operations and policy', () => {
   assert.deepEqual(CODEX_LIVE_MANIFEST.ops.map(op => op.name), ['run', 'steer', 'status'])
   assert.deepEqual(CODEX_PROJECT_MANIFEST.ops.map(op => op.name), ['run', 'steer', 'status', 'cancel'])
   assert.deepEqual(CODEX_PROJECT_APPROVAL_MANIFEST.ops.map(op => op.name), ['run', 'steer', 'status', 'cancel'])
   for (const manifest of [
-    CODEX_BASE_MANIFEST,
-    CODEX_LIVE_MANIFEST,
+      CODEX_LIVE_MANIFEST,
     CODEX_PROJECT_MANIFEST,
     CODEX_PROJECT_APPROVAL_MANIFEST,
   ]) {
@@ -99,8 +96,8 @@ test('base, live, and project manifests pin exact immutable public operations an
 test('the generic runtime package root does not load concrete Codex ownership', () => {
   const exports = runtimeIndex as Readonly<Record<string, unknown>>
   for (const forbidden of [
-    'CODEX_BASE_MANIFEST', 'CODEX_MANIFEST', 'JsonRpcConnection',
-    'CodexJsonlParser', 'AppServerTurnProjection', 'CodexAdapter',
+    'CODEX_LIVE_MANIFEST', 'CODEX_PROJECT_MANIFEST', 'JsonRpcConnection',
+    'CodexJsonlParser', 'AppServerTurnProjection', 'ProjectCodexAdapter',
     'CodexLiveAdapter', 'CodexProcess', 'CodexTransport', 'spawnCodex',
   ]) {
     assert.equal(Object.hasOwn(exports, forbidden), false)
@@ -137,23 +134,23 @@ test('project manifests carry approvals as a flag and pin run/steer/cancel param
 })
 
 test('base and live request validators use primitive strings, Python strip, and code points', () => {
-  assert.deepEqual(validateCodexRequest('base', 'run', {work_order: '  做事\u001c'}), {
+  assert.deepEqual(validateCodexRequest('live', 'run', {work_order: '  做事\u001c'}), {
     ok: true, value: {work_order: '做事'},
   })
   assert.deepEqual(validateCodexRequest('live', 'steer', {instruction: ' 约束 '}), {
     ok: true, value: {instruction: '约束'},
   })
-  assert.equal(validateCodexRequest('base', 'run', {work_order: '😀'.repeat(4000)}).ok, true)
-  assert.equal(validateCodexRequest('base', 'run', {work_order: '😀'.repeat(4001)}).ok, false)
-  assert.equal(validateCodexRequest('base', 'run', {work_order: '\u001c\u0085'}).ok, false)
-  assert.equal(validateCodexRequest('base', 'run', {work_order: '\ufeff'}).ok, true)
-  assert.equal(validateCodexRequest('base', 'run', {work_order: new String('boxed')}).ok, false)
-  assert.equal(validateCodexRequest('base', 'run', {work_order: 'ok', extra: true}).ok, false)
-  assert.deepEqual(validateCodexRequest('base', 'missing', {}), {
+  assert.equal(validateCodexRequest('live', 'run', {work_order: '😀'.repeat(4000)}).ok, true)
+  assert.equal(validateCodexRequest('live', 'run', {work_order: '😀'.repeat(4001)}).ok, false)
+  assert.equal(validateCodexRequest('live', 'run', {work_order: '\u001c\u0085'}).ok, false)
+  assert.equal(validateCodexRequest('live', 'run', {work_order: '\ufeff'}).ok, true)
+  assert.equal(validateCodexRequest('live', 'run', {work_order: new String('boxed')}).ok, false)
+  assert.equal(validateCodexRequest('live', 'run', {work_order: 'ok', extra: true}).ok, false)
+  assert.deepEqual(validateCodexRequest('live', 'missing', {}), {
     ok: false, error: 'unknown_op', op: 'missing',
   })
-  assert.deepEqual(validateCodexRequest('base', 'status', {}), {ok: true, value: {}})
-  assert.equal(validateCodexRequest('base', 'status', {extra: true}).ok, false)
+  assert.deepEqual(validateCodexRequest('live', 'status', {}), {ok: true, value: {}})
+  assert.equal(validateCodexRequest('live', 'status', {extra: true}).ok, false)
 })
 
 test('project request validator normalizes run/steer/cancel, defaults, and fails closed on extras', () => {
@@ -388,7 +385,7 @@ test('public contract helpers fail closed when hostile objects throw during insp
     getOwnPropertyDescriptor: () => { throw new Error('PRIVATE PROPERTY') },
   })
   assert.doesNotThrow(() => {
-    assert.deepEqual(validateCodexRequest('base', 'run', hostile), {
+    assert.deepEqual(validateCodexRequest('live', 'run', hostile), {
       ok: false, error: 'invalid_params', op: 'run',
     })
     assert.equal(sanitizeCodexEvidence(hostile), null)
@@ -406,7 +403,7 @@ test('request and sanitizer boundaries reject accessors without reading changing
       return requestReads === 1 ? 'legal' : 'PRIVATE'
     },
   })
-  assert.deepEqual(validateCodexRequest('base', 'run', request), {
+  assert.deepEqual(validateCodexRequest('live', 'run', request), {
     ok: false, error: 'invalid_params', op: 'run',
   })
   assert.equal(requestReads, 0)

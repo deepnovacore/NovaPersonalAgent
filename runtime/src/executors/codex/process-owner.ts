@@ -1,74 +1,50 @@
-import {managedMcpConfigToml, managedMcpEnvironment, type ManagedCodexMcp} from './managed-mcp.js'
-import {statSync} from 'node:fs'
-import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process'
-import {isAbsolute} from 'node:path'
-import type {Readable, Writable} from 'node:stream'
+import { spawn,type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { closeSync,fstatSync,openSync,readSync,statSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
+import type { Readable,Writable } from 'node:stream'
+import { managedMcpConfigToml,managedMcpEnvironment,type ManagedCodexMcp } from './managed-mcp.js'
+import { apiKeyProviderOverrides,NOVA_API_KEY_ENV,validateCodexEnvironment } from './spawn-env.js'
 
 import {
-  HostPathError,
-  hostEphemeralHomeFromConfig,
-  hostHomeForTest,
-  hostHomeValue,
-  hostPersistentHomeFromConfig,
-  hostWorkspaceForTest,
-  hostWorkspacePath,
-  hostWorkspaceFromConfig,
-  refreshEphemeralHomeIdentity,
-  requireCanonicalPath,
-  safeCanonicalPath,
-  type HostStateHome,
-  type HostWorkspace,
+hostEphemeralHomeFromConfig,
+hostHomeForTest,
+hostHomeValue,
+HostPathError,
+hostPersistentHomeFromConfig,
+hostWorkspaceForTest,
+hostWorkspaceFromConfig,
+hostWorkspacePath,
+refreshEphemeralHomeIdentity,
+requireCanonicalPath,
+safeCanonicalPath,
+type HostStateHome,
+type HostWorkspace,
 } from '../../host-paths.js'
-import {isWellFormed} from '../../python-text.js'
 import {
-  codexAppServerArgv,
-  resolveCodexLaunchProfile,
-  type CodexLaunchProfile,
+codexAppServerArgv,
+resolveCodexLaunchProfile,
+type CodexLaunchProfile,
 } from './launch-profile.js'
 
 const hostBinaryBrand: unique symbol = Symbol('HostBinary')
-const approvedSpawnBrand: unique symbol = Symbol('ApprovedSpawnSpec')
 
 export interface HostBinary { readonly [hostBinaryBrand]: true }
 export type HostCodexHome = HostStateHome
 export {
-  HostPathError as CodexProcessOwnerError,
-  hostWorkspaceFromConfig,
-  hostWorkspaceForTest,
-  hostWorkspacePath,
-  hostEphemeralHomeFromConfig as hostEphemeralCodexHomeFromConfig,
-  hostPersistentHomeFromConfig as hostPersistentCodexHomeFromConfig,
-  hostHomeForTest as hostCodexHomeForTest,
-  hostHomeValue as hostCodexHomeValue,
-  refreshEphemeralHomeIdentity as refreshEphemeralCodexHomeIdentity,
-  type HostWorkspace,
+HostPathError as CodexProcessOwnerError,hostHomeForTest as hostCodexHomeForTest,
+hostHomeValue as hostCodexHomeValue,hostEphemeralHomeFromConfig as hostEphemeralCodexHomeFromConfig,
+hostPersistentHomeFromConfig as hostPersistentCodexHomeFromConfig,hostWorkspaceForTest,hostWorkspaceFromConfig,hostWorkspacePath,refreshEphemeralHomeIdentity as refreshEphemeralCodexHomeIdentity,
+type HostWorkspace
 }
 const CodexProcessOwnerError = HostPathError
 type CodexProcessOwnerError = HostPathError
-export interface ApprovedSpawnSpec { readonly [approvedSpawnBrand]: true }
 
 const binaryValues = new WeakMap<HostBinary, string>()
-const spawnValues = new WeakMap<ApprovedSpawnSpec, ApprovedSpawnDetails>()
 const unconfirmedOwnerErrors = new WeakMap<CodexProcessOwnerError, OwnedCodexProcess>()
 
 export const CODEX_APP_SERVER_ARGV = codexAppServerArgv(resolveCodexLaunchProfile({
   approvalMode: 'ask', project: false, foregroundBroker: false,
 }))
-
-const CHILD_ENVIRONMENT_KEYS: ReadonlySet<string> = new Set([
-  'PATH',
-  'HOME',
-  'CODEX_HOME',
-  'LANG',
-  'LC_ALL',
-  'TERM',
-  'SSL_CERT_FILE',
-  'SSL_CERT_DIR',
-  'REQUESTS_CA_BUNDLE',
-  'CURL_CA_BUNDLE',
-  'CODEX_API_KEY',
-  'CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED',
-])
 
 export function unconfirmedCodexProcessOwnerError(owner: OwnedCodexProcess): CodexProcessOwnerError {
   const error = new CodexProcessOwnerError('spawn_failed')
@@ -104,7 +80,23 @@ export function hostBinaryPath(value: HostBinary): string {
   return path
 }
 
-interface ApprovedSpawnDetails {
+/** Native launch identity, scoped to one establish. Scripts cannot certify their downstream binary. */
+export function nativeCodexBinaryIdentity(binary: HostBinary, prefixArgs: readonly string[]): string | null {
+  if (prefixArgs.length !== 0) return null
+  const path = hostBinaryPath(binary)
+  const fd = openSync(path, 'r')
+  try {
+    const magic = Buffer.alloc(4)
+    if (readSync(fd, magic, 0, 4, 0) !== 4) return null
+    const signature = magic.toString('hex')
+    if (!['7f454c46', 'feedface', 'cefaedfe', 'feedfacf', 'cffaedfe', 'cafebabe', 'bebafeca'].includes(signature)
+      && magic.subarray(0, 2).toString() !== 'MZ') return null
+    const info = fstatSync(fd, {bigint: true})
+    return `${path}:${info.dev}:${info.ino}:${info.size}:${info.mtimeNs}:${info.ctimeNs}`
+  } finally { closeSync(fd) }
+}
+
+export interface CodexSpawnSpec {
   readonly binary: string
   readonly argv: readonly string[]
   readonly cwd: string
@@ -115,7 +107,7 @@ interface ApprovedSpawnDetails {
   readonly windowsHide: true
 }
 
-export function createApprovedCodexSpawnSpec(input: {
+export function createCodexSpawnSpec(input: {
   readonly binary: HostBinary
   readonly prefixArgs?: readonly string[]
   readonly workspace: HostWorkspace
@@ -125,18 +117,20 @@ export function createApprovedCodexSpawnSpec(input: {
   readonly managedMcp?: ManagedCodexMcp
   readonly preserveHome?: boolean | undefined
   readonly sharedHomeOverrides?: readonly string[]
-}): ApprovedSpawnSpec {
+}): CodexSpawnSpec {
   const binary = hostBinaryPath(input.binary)
   const cwd = hostWorkspacePath(input.workspace)
   const home = hostHomeValue(input.codexHome)
-  const environment = validateChildEnvironment(input.environment, home.path, managedMcpEnvironment(input.managedMcp))
-  const spec = Object.freeze({[approvedSpawnBrand]: true as const})
-  spawnValues.set(spec, Object.freeze({
+  let environment: Readonly<Record<string, string>>
+  try { environment = validateCodexEnvironment(input.environment, home.path, managedMcpEnvironment(input.managedMcp)) }
+  catch { throw new CodexProcessOwnerError('spawn_failed') }
+  return Object.freeze({
     binary,
     argv: Object.freeze([
       ...validateBinaryPrefixArgs(input.prefixArgs),
-      ...(input.preserveHome && input.managedMcp ? ['-c', managedMcpConfigToml(input.managedMcp).trim()] : []),
+      ...(input.managedMcp ? ['-c', managedMcpConfigToml(input.managedMcp).trim()] : []),
       ...(input.sharedHomeOverrides ?? []),
+      ...(environment[NOVA_API_KEY_ENV] === undefined ? [] : apiKeyProviderOverrides()),
       ...codexAppServerArgv(input.launchProfile ?? resolveCodexLaunchProfile({
         approvalMode: 'ask', project: false, foregroundBroker: false,
       }), input.managedMcp !== undefined || input.preserveHome === true),
@@ -147,8 +141,7 @@ export function createApprovedCodexSpawnSpec(input: {
     detached: true,
     stdio: Object.freeze(['pipe', 'pipe', 'pipe'] as const),
     windowsHide: true,
-  }))
-  return spec
+  })
 }
 
 function validateBinaryPrefixArgs(value: readonly string[] | undefined): readonly string[] {
@@ -166,28 +159,21 @@ function validateBinaryPrefixArgs(value: readonly string[] | undefined): readonl
   return Object.freeze(result)
 }
 
-/** Visible only to host-side factories and deterministic launch-boundary tests. */
-export function approvedCodexSpawnDetails(spec: ApprovedSpawnSpec): ApprovedSpawnDetails {
-  const details = spawnValues.get(spec)
-  if (details === undefined) throw new CodexProcessOwnerError('spawn_failed')
-  return details
-}
-
 /**
  * Behavioral test seam: caller `argv` is deliberately absent from the accepted shape.
  * This never accepts renderer input in production code.
  */
-export function createApprovedCodexSpawnSpecForTest(input: Readonly<Record<string, unknown>>): Record<string, unknown> {
+export function createCodexSpawnSpecForTest(input: Readonly<Record<string, unknown>>): Record<string, unknown> {
   const binary = hostBinaryForTest(requirePrimitiveString(input.binary))
   const workspace = hostWorkspaceForTest(requirePrimitiveString(input.workspace))
   const codexHome = hostHomeForTest(requirePrimitiveString(input.codexHome), {ephemeral: true})
   const environment = requireStringRecord(input.environment)
-  const details = approvedCodexSpawnDetails(createApprovedCodexSpawnSpec({
+  const details = createCodexSpawnSpec({
     binary,
     workspace,
     codexHome,
     environment,
-  }))
+  })
   return {
     argv: [...details.argv],
     environment: {...details.environment},
@@ -212,7 +198,7 @@ export interface OwnedCodexProcess {
 }
 
 export interface CodexProcessOwnerFactory {
-  spawn(spec: ApprovedSpawnSpec, control: CodexProcessSpawnControl): Promise<OwnedCodexProcess>
+  spawn(spec: CodexSpawnSpec, control: CodexProcessSpawnControl): Promise<OwnedCodexProcess>
 }
 
 export interface CodexProcessSpawnControl {
@@ -245,7 +231,7 @@ export class PosixCodexProcessOwnerFactory implements CodexProcessOwnerFactory {
     this.#groupOperations = options.groupOperations ?? DEFAULT_GROUP_OPERATIONS
   }
 
-  async spawn(spec: ApprovedSpawnSpec, control: CodexProcessSpawnControl): Promise<OwnedCodexProcess> {
+  async spawn(spec: CodexSpawnSpec, control: CodexProcessSpawnControl): Promise<OwnedCodexProcess> {
     if (process.platform === 'win32') throw new CodexProcessOwnerError('spawn_failed')
     if (control.signal.aborted || !Number.isFinite(control.expiresAtMs) || control.expiresAtMs <= Date.now()) {
       throw new CodexProcessOwnerError('spawn_failed')
@@ -259,7 +245,7 @@ export class PosixCodexProcessOwnerFactory implements CodexProcessOwnerFactory {
         throw unconfirmedCodexProcessOwnerError(failedOwner)
       }
     }
-    const details = approvedCodexSpawnDetails(spec)
+    const details = spec
     let child: ChildProcessWithoutNullStreams
     try {
       child = this.#spawn(details.binary, [...details.argv], {
@@ -419,45 +405,11 @@ export function createPlatformCodexProcessOwnerFactory(options: {
 }
 
 class FailingWindowsCodexProcessOwnerFactory implements CodexProcessOwnerFactory {
-  spawn(spec: ApprovedSpawnSpec, control: CodexProcessSpawnControl): Promise<OwnedCodexProcess> {
+  spawn(spec: CodexSpawnSpec, control: CodexProcessSpawnControl): Promise<OwnedCodexProcess> {
     void spec
     void control
     return Promise.reject(new CodexProcessOwnerError('spawn_failed'))
   }
-}
-
-function validateChildEnvironment(
-  value: Readonly<Record<string, string>>,
-  expectedCodexHome: string,
-  managedEnvironment: Readonly<Record<string, string>>,
-): Readonly<Record<string, string>> {
-  const prototype = Object.getPrototypeOf(value) as object | null
-  if (prototype !== Object.prototype && prototype !== null) throw new CodexProcessOwnerError('spawn_failed')
-  const descriptors = Object.getOwnPropertyDescriptors(value)
-  const result: Record<string, string> = {}
-  for (const key of Reflect.ownKeys(descriptors)) {
-    if (typeof key !== 'string' || (!CHILD_ENVIRONMENT_KEYS.has(key) && !Object.hasOwn(managedEnvironment, key))) {
-      throw new CodexProcessOwnerError('spawn_failed')
-    }
-    const descriptor = descriptors[key]
-    if (descriptor === undefined || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
-      throw new CodexProcessOwnerError('spawn_failed')
-    }
-    const field = descriptor.value as unknown
-    if (typeof field !== 'string' || !isWellFormed(field) || field.includes('\0')) {
-      throw new CodexProcessOwnerError('spawn_failed')
-    }
-    Object.defineProperty(result, key, {value: field, enumerable: true})
-  }
-  if (
-    Object.entries(managedEnvironment).some(([key, value]) => CHILD_ENVIRONMENT_KEYS.has(key) || result[key] !== value)
-    || result.PATH === undefined
-    || result.HOME === undefined
-    || result.CODEX_HOME !== expectedCodexHome
-    || result.CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED !== '1'
-    || result.CODEX_API_KEY === ''
-  ) throw new CodexProcessOwnerError('spawn_failed')
-  return Object.freeze(result)
 }
 
 function brandBinary(path: string): HostBinary {

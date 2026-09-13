@@ -422,6 +422,7 @@ export async function fixture(options: {
   await store.ensureImported('alpha', hostWorkspaceForTest(await realpath(workspace)))
   if (options.preexistingSession === true) {
     const existingWorkspace = await store.resolveWorkspace('alpha')
+    await store.persistentHome(existingWorkspace.workspace_id)
     const starting = await store.beginSession(existingWorkspace.workspace_id, 'Existing')
     await store.markSessionReady(starting.session_id, 'thread-existing')
   }
@@ -448,8 +449,8 @@ export function storeWithPersistentHomeHook(
   return new Proxy(store, {
     get(target, property) {
       if (property === 'persistentHome') {
-        return async (workspaceId: string) => {
-          const home = await target.persistentHome(workspaceId)
+        return async (workspaceId: string, options?: {readonly create?: boolean}) => {
+          const home = await target.persistentHome(workspaceId, options)
           await afterPersistentHome()
           return home
         }

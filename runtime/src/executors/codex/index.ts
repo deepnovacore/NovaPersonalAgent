@@ -33,17 +33,12 @@ export * from './contract.js'
 export * from './controller.js'
 export * from './version.js'
 export {
-  CODEX_CREDENTIAL_MARKER,
-  CODEX_SAVED_LOGIN_FILES,
   CodexCredentialError,
-  MAX_CREDENTIAL_BYTES,
-  MAX_CREDENTIAL_MARKER_BYTES,
   type CredentialSnapshot,
 } from './credential-snapshot.js'
 export * from './jsonl.js'
 export * from './protocol.js'
 export * from './turn-projection.js'
-export * from './adapter.js'
 export * from './adapter-live.js'
 export * from './adapter-project.js'
 export {

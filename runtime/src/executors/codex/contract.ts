@@ -142,12 +142,11 @@ function manifest(ops: readonly OpSpec[], approvals = false): ExecutorManifest {
   }))
 }
 
-export const CODEX_BASE_MANIFEST = manifest([RUN, STATUS])
 export const CODEX_LIVE_MANIFEST = manifest([RUN, STEER, STATUS])
 export const CODEX_PROJECT_MANIFEST = manifest([RUN_PROJECT, STEER_PROJECT, STATUS, CANCEL])
 export const CODEX_PROJECT_APPROVAL_MANIFEST = manifest([RUN_PROJECT, STEER_PROJECT, STATUS, CANCEL], true)
 
-export type CodexVariant = 'base' | 'live' | 'project'
+export type CodexVariant = 'live' | 'project'
 export type CodexRequestValidation =
   | {readonly ok: true; readonly value: Readonly<Record<string, unknown>>}
   | {readonly ok: false; readonly error: 'unknown_op' | 'invalid_params'; readonly op: string}
@@ -169,11 +168,7 @@ function validateCodexRequestChecked(
   op: string,
   request: unknown,
 ): CodexRequestValidation {
-  const operations = variant === 'base'
-    ? new Set(['run', 'status'])
-    : variant === 'live'
-      ? new Set(['run', 'steer', 'status'])
-      : new Set(['run', 'steer', 'status', 'cancel'])
+  const operations = new Set(variant === 'live' ? ['run', 'steer', 'status'] : ['run', 'steer', 'status', 'cancel'])
   if (!operations.has(op)) return failure('unknown_op', op)
   const requestSnapshot = snapshotJsonRecord(request)
   if (op === 'status') {

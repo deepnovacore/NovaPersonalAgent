@@ -1,36 +1,18 @@
-import {managedMcpEnvironment, managedMcpConfigToml, type ManagedCodexMcp} from './managed-mcp.js'
-import {constants as fsConstants, realpathSync, type BigIntStats} from 'node:fs'
-import {
-  chmod,
-  lstat,
-  open,
-  rename,
-  rm,
-  stat,
-  type FileHandle,
-} from 'node:fs/promises'
-import {createHash, randomUUID} from 'node:crypto'
-import {basename, dirname, join, posix, win32} from 'node:path'
-
-import {
-  hostCodexHomeValue,
-  refreshEphemeralCodexHomeIdentity,
-  type HostCodexHome,
-} from './process-owner.js'
 import {isWellFormed} from '../../python-text.js'
-
-export const MAX_CREDENTIAL_BYTES = 1024 * 1024
-export const MAX_CREDENTIAL_MARKER_BYTES = 4096
-export const CODEX_CREDENTIAL_MARKER = '.nova-credential-source-v1.json'
-export const CODEX_SAVED_LOGIN_FILES = Object.freeze(['auth.json', '.credentials.json'] as const)
+import {managedMcpEnvironment, type ManagedCodexMcp} from './managed-mcp.js'
+import {realpathSync, type BigIntStats} from 'node:fs'
+import {chmod, lstat, rename, rm, stat} from 'node:fs/promises'
+import {randomUUID} from 'node:crypto'
+import {basename, dirname, join} from 'node:path'
+import {hostCodexHomeValue, refreshEphemeralCodexHomeIdentity, type HostCodexHome} from './process-owner.js'
+import {CodexCredentialError, createCodexEnvironment, snapshotEnvironmentInput} from './spawn-env.js'
+export {CodexCredentialError, environmentValue} from './spawn-env.js'
 
 export type CodexCredentialDiagnosticCode =
   | 'codex_credential_snapshot_private_home_failed'
-  | 'codex_credential_snapshot_api_key_failed'
-  | 'codex_credential_snapshot_saved_login_failed'
   | 'codex_credential_snapshot_environment_failed'
 
-type CredentialPreparationPhase = 'private_home' | 'api_key' | 'saved_login' | 'environment'
+type CredentialPreparationPhase = 'private_home' | 'environment'
 
 const credentialSnapshotBrand: unique symbol = Symbol('CredentialSnapshot')
 export interface CredentialSnapshot { readonly [credentialSnapshotBrand]: true }
@@ -39,52 +21,20 @@ interface SnapshotValue {
   readonly environment: Readonly<Record<string, string>>
 }
 
-interface OwnedFile {
-  readonly content: Uint8Array
-  readonly digest: string
-  readonly mtimeNs: bigint
-}
-
 const snapshotValues = new WeakMap<CredentialSnapshot, SnapshotValue>()
-const ENVIRONMENT_ALLOWLIST: ReadonlySet<string> = new Set([
-  'PATH',
-  'HOME',
-  'LANG',
-  'LC_ALL',
-  'TERM',
-  'SSL_CERT_FILE',
-  'SSL_CERT_DIR',
-  'REQUESTS_CA_BUNDLE',
-  'CURL_CA_BUNDLE',
-])
-const fatalDecoder = new TextDecoder('utf-8', {fatal: true})
-
-export class CodexCredentialError extends Error {
-  readonly code = 'credential_missing' as const
-
-  constructor() {
-    super('credential_missing')
-    this.name = 'CodexCredentialError'
-  }
-}
 
 export class CredentialSnapshotter {
   readonly #environment: Readonly<Record<string, string>>
   readonly #platform: NodeJS.Platform
-  readonly #sourceHome: string
   readonly #onDiagnostic: (code: CodexCredentialDiagnosticCode) => void
 
   constructor(options: {
     readonly environment: Readonly<Record<string, string | undefined>>
     readonly platform?: NodeJS.Platform
-    readonly sourceHome?: string
     readonly onDiagnostic?: (code: CodexCredentialDiagnosticCode) => void
   }) {
     this.#environment = snapshotEnvironmentInput(options.environment)
     this.#platform = options.platform ?? process.platform
-    this.#sourceHome = options.sourceHome
-      ?? environmentValue(this.#environment, 'CODEX_HOME', this.#platform)
-      ?? join(environmentValue(this.#environment, 'HOME', this.#platform) ?? '', '.codex')
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
@@ -99,16 +49,9 @@ export class CredentialSnapshotter {
       const home = hostCodexHomeValue(input.codexHome)
       if (home.ephemeral) await ensureEphemeralDirectory(input.codexHome)
       else await requirePrivateDirectory(home.path, input.preserveHome === true)
-      phase = 'api_key'
-      const apiKey = validateApiKey(input.preserveHome ? null : input.apiKey)
-      phase = 'saved_login'
-      if (apiKey === null && !input.preserveHome) await this.#syncSavedLogin(home.path)
       phase = 'environment'
-      const environment = this.#childEnvironment(home.path, apiKey)
-      const managedEnvironment = managedMcpEnvironment(input.managedMcp)
-      if (Object.keys(managedEnvironment).some(key => Object.hasOwn(environment, key))) throw new CodexCredentialError()
-      const childEnvironment = Object.freeze({...environment, ...managedEnvironment})
-      if (!input.preserveHome) await atomicOwnerWrite(join(home.path, 'config.toml'), new TextEncoder().encode(managedMcpConfigToml(input.managedMcp)))
+      const childEnvironment = createCodexEnvironment(this.#environment, home.path, input.apiKey,
+        managedMcpEnvironment(input.managedMcp), this.#platform)
       const snapshot = Object.freeze({[credentialSnapshotBrand]: true as const})
       snapshotValues.set(snapshot, Object.freeze({environment: childEnvironment}))
       return snapshot
@@ -130,77 +73,6 @@ export class CredentialSnapshotter {
     return credentialSnapshotEnvironment(snapshot)
   }
 
-  #childEnvironment(destinationHome: string, apiKey: string | null): Readonly<Record<string, string>> {
-    const result: Record<string, string> = {}
-    for (const name of ENVIRONMENT_ALLOWLIST) {
-      const value = environmentValue(this.#environment, name, this.#platform)
-      if (value !== undefined) defineString(result, name, value)
-    }
-    if (result.PATH === undefined || result.HOME === undefined) throw new CodexCredentialError()
-    defineString(result, 'CODEX_HOME', destinationHome)
-    defineString(result, 'CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED', '1')
-    if (apiKey !== null) defineString(result, 'CODEX_API_KEY', apiKey)
-    return Object.freeze(result)
-  }
-
-  async #syncSavedLogin(destinationHome: string): Promise<void> {
-    if (this.#sourceHome === destinationHome) return
-    const markerPath = join(destinationHome, CODEX_CREDENTIAL_MARKER)
-    const marker = await readCredentialMarker(markerPath)
-    let markerChanged = false
-    for (const name of CODEX_SAVED_LOGIN_FILES) {
-      const source = await readOwnedFile(join(this.#sourceHome, name), {
-        maxBytes: MAX_CREDENTIAL_BYTES,
-        requiredMode: null,
-      })
-      const destinationPath = join(destinationHome, name)
-      const destination = await readOwnedFile(destinationPath, {
-        maxBytes: MAX_CREDENTIAL_BYTES,
-        requiredMode: 0o600,
-      })
-      if (source === null) continue
-      const previousDigest = marker[name]
-      let shouldReplace = destination === null
-      if (destination !== null && previousDigest === undefined) {
-        shouldReplace = !buffersEqual(destination.content, source.content)
-          && source.mtimeNs > destination.mtimeNs
-      } else if (destination !== null && previousDigest !== source.digest) {
-        shouldReplace = true
-      }
-      if (shouldReplace) await atomicOwnerWrite(destinationPath, source.content)
-      if (previousDigest !== source.digest) {
-        marker[name] = source.digest
-        markerChanged = true
-      }
-    }
-    if (markerChanged) {
-      const raw = encodeCredentialMarker(marker)
-      if (raw.byteLength > MAX_CREDENTIAL_MARKER_BYTES) throw new CodexCredentialError()
-      await atomicOwnerWrite(markerPath, raw)
-    }
-  }
-}
-
-export function environmentValue(
-  environment: Readonly<Record<string, string | undefined>>,
-  name: string,
-  platform: NodeJS.Platform,
-): string | undefined {
-  if (platform !== 'win32') return environment[name]
-  const normalizedName = name.toUpperCase()
-  let result: string | undefined
-  for (const [key, value] of Object.entries(environment)) {
-    if (key.toUpperCase() !== normalizedName || value === undefined) continue
-    if (result !== undefined && result !== value) throw new CodexCredentialError()
-    result = value
-  }
-  if (result !== undefined || normalizedName !== 'HOME') return result
-  for (const [key, value] of Object.entries(environment)) {
-    if (key.toUpperCase() !== 'USERPROFILE' || value === undefined) continue
-    if (result !== undefined && result !== value) throw new CodexCredentialError()
-    result = value
-  }
-  return result
 }
 
 function credentialDiagnosticForPhase(
@@ -208,8 +80,6 @@ function credentialDiagnosticForPhase(
 ): CodexCredentialDiagnosticCode {
   switch (phase) {
     case 'private_home': return 'codex_credential_snapshot_private_home_failed'
-    case 'api_key': return 'codex_credential_snapshot_api_key_failed'
-    case 'saved_login': return 'codex_credential_snapshot_saved_login_failed'
     case 'environment': return 'codex_credential_snapshot_environment_failed'
   }
 }
@@ -296,17 +166,16 @@ export function credentialSnapshotEnvironment(snapshot: CredentialSnapshot): Rea
   return value.environment
 }
 
-/** Test-only integration seam. It does not expose credential bodies or marker digests. */
+/** Test seam for the same HOME validation and environment preparation as production. */
 export async function prepareCodexCredentialSnapshotForTest(
   input: Readonly<Record<string, unknown>>,
 ): Promise<Record<string, unknown>> {
-  const sourceHome = requireString(input.sourceHome)
   const destinationHome = requireString(input.destinationHome)
   const environment = requireEnvironmentInput(input.environment)
   const apiKey = input.apiKey === null ? null : requireString(input.apiKey)
   const {hostCodexHomeForTest} = await import('./process-owner.js')
   const home = hostCodexHomeForTest(destinationHome, {ephemeral: true})
-  const snapshotter = new CredentialSnapshotter({sourceHome, environment})
+  const snapshotter = new CredentialSnapshotter({environment})
   const snapshot = await snapshotter.prepare({codexHome: home, apiKey})
   return {environment: {...credentialSnapshotEnvironment(snapshot)}}
 }
@@ -339,166 +208,9 @@ async function ensureEphemeralDirectory(homeValue: HostCodexHome): Promise<void>
   }
 }
 
-async function readOwnedFile(
-  path: string,
-  options: {readonly maxBytes: number; readonly requiredMode: number | null},
-): Promise<OwnedFile | null> {
-  const noFollow = typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0
-  let handle: FileHandle
-  try {
-    handle = await open(path, fsConstants.O_RDONLY | noFollow)
-  } catch (error) {
-    if (isErrno(error, 'ENOENT')) return null
-    throw error
-  }
-  try {
-    const info = await handle.stat({bigint: true})
-    const mode = Number(info.mode)
-    if (
-      !info.isFile()
-      || !ownerMatches(Number(info.uid))
-      || info.size > BigInt(options.maxBytes)
-      || (process.platform !== 'win32' && (mode & 0o022) !== 0)
-      || (
-        process.platform !== 'win32'
-        && options.requiredMode !== null
-        && (mode & 0o777) !== options.requiredMode
-      )
-    ) throw new CodexCredentialError()
-    const buffer = new Uint8Array(options.maxBytes + 1)
-    let offset = 0
-    while (offset < buffer.byteLength) {
-      const {bytesRead} = await handle.read(buffer, offset, buffer.byteLength - offset, null)
-      if (bytesRead === 0) break
-      offset += bytesRead
-    }
-    if (offset > options.maxBytes) throw new CodexCredentialError()
-    const content = buffer.slice(0, offset)
-    return Object.freeze({
-      content,
-      digest: createHash('sha256').update(content).digest('hex'),
-      mtimeNs: info.mtimeNs,
-    })
-  } finally {
-    await handle.close()
-  }
-}
-
-async function readCredentialMarker(path: string): Promise<Record<string, string>> {
-  const snapshot = await readOwnedFile(path, {
-    maxBytes: MAX_CREDENTIAL_MARKER_BYTES,
-    requiredMode: 0o600,
-  })
-  if (snapshot === null) return {}
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(fatalDecoder.decode(snapshot.content)) as unknown
-  } catch {
-    throw new CodexCredentialError()
-  }
-  if (!isPlainRecord(parsed)) throw new CodexCredentialError()
-  const result: Record<string, string> = {}
-  for (const [name, digest] of Object.entries(parsed)) {
-    if (!CODEX_SAVED_LOGIN_FILES.includes(name as typeof CODEX_SAVED_LOGIN_FILES[number])) {
-      throw new CodexCredentialError()
-    }
-    if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/u.test(digest)) {
-      throw new CodexCredentialError()
-    }
-    defineString(result, name, digest)
-  }
-  return result
-}
-
-function encodeCredentialMarker(marker: Readonly<Record<string, string>>): Uint8Array {
-  const fields: string[] = []
-  for (const name of ['.credentials.json', 'auth.json'] as const) {
-    const digest = marker[name]
-    if (digest !== undefined) fields.push(`"${name}":"${digest}"`)
-  }
-  return new TextEncoder().encode(`{${fields.join(',')}}`)
-}
-
-async function atomicOwnerWrite(path: string, content: Uint8Array): Promise<void> {
-  const {directory, filename} = splitAtomicTarget(path, process.platform)
-  const temporary = join(directory, `.${filename}.${randomUUID().replaceAll('-', '')}.tmp`)
-  const noFollow = typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0
-  let handle: FileHandle | undefined
-  try {
-    handle = await open(
-      temporary,
-      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | noFollow,
-      0o600,
-    )
-    await handle.chmod(0o600)
-    await handle.writeFile(content)
-    await handle.sync()
-    await handle.close()
-    handle = undefined
-    await rename(temporary, path)
-    await chmod(path, 0o600)
-    if (process.platform !== 'win32') {
-      const parent = await open(directory, fsConstants.O_RDONLY)
-      try {
-        await parent.sync()
-      } finally {
-        await parent.close()
-      }
-    }
-  } finally {
-    if (handle !== undefined) await handle.close().catch(() => undefined)
-    await rm(temporary, {force: true}).catch(() => undefined)
-  }
-}
-
-/** Test-only Windows path contract used before the native guardian ships. */
-export function splitCredentialAtomicTargetForTest(
-  path: string,
-  platform: 'win32' | 'posix',
-): Readonly<{directory: string; filename: string}> {
-  return splitAtomicTarget(path, platform)
-}
-
-function splitAtomicTarget(
-  path: string,
-  platform: NodeJS.Platform | 'posix',
-): Readonly<{directory: string; filename: string}> {
-  const pathApi = platform === 'win32' ? win32 : posix
-  return Object.freeze({directory: pathApi.dirname(path), filename: pathApi.basename(path)})
-}
-
-function snapshotEnvironmentInput(
-  value: Readonly<Record<string, string | undefined>>,
-): Readonly<Record<string, string>> {
-  const descriptors = Object.getOwnPropertyDescriptors(value)
-  const result: Record<string, string> = {}
-  for (const key of Reflect.ownKeys(descriptors)) {
-    if (typeof key !== 'string') throw new CodexCredentialError()
-    const descriptor = descriptors[key]
-    if (descriptor === undefined || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
-      throw new CodexCredentialError()
-    }
-    const field = descriptor.value as unknown
-    if (field === undefined) continue
-    if (typeof field !== 'string' || !isWellFormed(field) || field.includes('\0')) {
-      throw new CodexCredentialError()
-    }
-    defineString(result, key, field)
-  }
-  return Object.freeze(result)
-}
-
 function requireEnvironmentInput(value: unknown): Readonly<Record<string, string>> {
   if (!isPlainRecord(value)) throw new CodexCredentialError()
   return value as Record<string, string>
-}
-
-function validateApiKey(value: string | null): string | null {
-  if (value === null) return null
-  if (typeof value !== 'string' || value === '' || !isWellFormed(value) || value.includes('\0')) {
-    throw new CodexCredentialError()
-  }
-  return value
 }
 
 function requireString(value: unknown): string {
@@ -506,25 +218,8 @@ function requireString(value: unknown): string {
   return value
 }
 
-function buffersEqual(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.byteLength !== right.byteLength) return false
-  for (let index = 0; index < left.byteLength; index += 1) {
-    if (left[index] !== right[index]) return false
-  }
-  return true
-}
-
 function ownerMatches(uid: number): boolean {
   return typeof process.getuid !== 'function' || uid === process.getuid()
-}
-
-function defineString(target: Record<string, string>, key: string, value: string): void {
-  Object.defineProperty(target, key, {
-    value,
-    enumerable: true,
-    configurable: true,
-    writable: true,
-  })
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

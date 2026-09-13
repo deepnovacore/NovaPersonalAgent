@@ -4,7 +4,7 @@ import {fileURLToPath} from 'node:url'
 import type {Readable, Writable} from 'node:stream'
 
 import type {
-  ApprovedSpawnSpec,
+  CodexSpawnSpec,
   CodexProcessOwnerFactory,
   CodexProcessSpawnControl,
   OwnedCodexProcess,
@@ -45,7 +45,7 @@ export class FakeAppServerOwnerFactory implements CodexProcessOwnerFactory {
     this.#scenario = scenario
   }
 
-  async spawn(_spec: ApprovedSpawnSpec, control: CodexProcessSpawnControl): Promise<FakeAppServerOwner> {
+  async spawn(_spec: CodexSpawnSpec, control: CodexProcessSpawnControl): Promise<FakeAppServerOwner> {
     void _spec
     if (control.signal.aborted || control.expiresAtMs <= Date.now()) {
       throw new Error('fake owner spawn cancelled')

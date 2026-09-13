@@ -6,7 +6,7 @@ import {join} from 'node:path'
 import {parseCapabilityRegistry} from '../src/capability-registry.js'
 import {prepareManagedCodexMcp, managedMcpConfigToml} from '../src/executors/codex/managed-mcp.js'
 import {CredentialSnapshotter} from '../src/executors/codex/credential-snapshot.js'
-import {hostCodexHomeForTest, hostBinaryForTest, hostWorkspaceForTest, createApprovedCodexSpawnSpec, approvedCodexSpawnDetails} from '../src/executors/codex/process-owner.js'
+import {hostCodexHomeForTest, hostBinaryForTest, hostWorkspaceForTest, createCodexSpawnSpec} from '../src/executors/codex/process-owner.js'
 
 const tool = {enabled: true, timeoutMs: 8001}
 function registry(mcpServers: Record<string, unknown>, coding = true) {
@@ -25,19 +25,21 @@ test('private MCP config serializes only references and exact original tools; no
     const home = hostCodexHomeForTest(directory, {ephemeral: true})
     const snapshotter = new CredentialSnapshotter({environment: {PATH: '/safe', HOME: '/safe-home', AMBIENT_SECRET: 'not-inherited'}})
     const snapshot = await snapshotter.prepare({codexHome: home, apiKey: 'dummy-codex', managedMcp: managed})
-    const config = await readFile(join(directory, 'config.toml'), 'utf8')
+    await assert.rejects(readFile(join(directory, 'config.toml')), {code: 'ENOENT'})
+    const config = managedMcpConfigToml(managed)
     assert.match(config, /"enabled_tools" = \["look-up.raw"\]/u)
     assert.equal(config.includes('dummy-secret'), false)
     assert.equal(config.includes('hidden'), false)
     const env = snapshotter.environment(snapshot)
     assert.equal(env.AMBIENT_SECRET, undefined)
     assert.equal(Object.values(env).includes('dummy-secret'), true)
-    const spawnSpec = createApprovedCodexSpawnSpec({binary: hostBinaryForTest(process.execPath), workspace: hostWorkspaceForTest(process.cwd()), codexHome: home, environment: env, managedMcp: managed})
-    assert.equal(approvedCodexSpawnDetails(spawnSpec).argv.includes('mcp_servers={}'), false)
+    const spawnSpec = createCodexSpawnSpec({binary: hostBinaryForTest(process.execPath), workspace: hostWorkspaceForTest(process.cwd()), codexHome: home, environment: env, managedMcp: managed})
+    assert.ok(spawnSpec.argv.includes(config.trim()))
+    assert.equal(spawnSpec.argv.includes('mcp_servers={}'), false)
     for (const hostile of [Object.create(env) as Record<string, string>, Object.defineProperty({...env}, 'UNPREPARED_KEY', {get() { throw new Error('must not read') }, enumerable: true})]) {
-      assert.throws(() => createApprovedCodexSpawnSpec({binary: hostBinaryForTest(process.execPath), workspace: hostWorkspaceForTest(process.cwd()), codexHome: home, environment: hostile, managedMcp: managed}))
+      assert.throws(() => createCodexSpawnSpec({binary: hostBinaryForTest(process.execPath), workspace: hostWorkspaceForTest(process.cwd()), codexHome: home, environment: hostile, managedMcp: managed}))
     }
-    assert.throws(() => createApprovedCodexSpawnSpec({binary: hostBinaryForTest(process.execPath), workspace: hostWorkspaceForTest(process.cwd()), codexHome: home, environment: {...env, UNPREPARED_KEY: 'x'}, managedMcp: managed}))
+    assert.throws(() => createCodexSpawnSpec({binary: hostBinaryForTest(process.execPath), workspace: hostWorkspaceForTest(process.cwd()), codexHome: home, environment: {...env, UNPREPARED_KEY: 'x'}, managedMcp: managed}))
   } finally { await rm(directory, {recursive: true, force: true}) }
 })
 

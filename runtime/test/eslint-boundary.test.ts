@@ -23,9 +23,9 @@ async function lintVirtual(relativePath: string, source: string) {
 }
 
 test('eslint blocks Codex internals while allowing the executor registry', async () => {
-  const violations = await lintVirtual(CORE_PROBE, "import {CodexAdapter} from './executors/codex/adapter.js'\n")
+  const violations = await lintVirtual(CORE_PROBE, "import {CodexLiveAdapter} from './executors/codex/adapter-live.js'\n")
   assert.ok(violations.length > 0, violations.map(item => item.message).join('; '))
-  assert.deepEqual(await lintVirtual(CORE_PROBE, "import {CodexAdapter} from './executors/index.js'\n"), [])
+  assert.deepEqual(await lintVirtual(CORE_PROBE, "import {CodexLiveAdapter} from './executors/index.js'\n"), [])
   assert.ok((await lintVirtual(CORE_PROBE, "await import('./executors/codex/host.js')\n")).length > 0)
   assert.deepEqual(await lintVirtual(CORE_PROBE, "await import('./executors/index.js')\n"), [])
 })

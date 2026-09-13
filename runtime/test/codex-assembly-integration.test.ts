@@ -12,7 +12,7 @@ import type {
 } from '../src/executors/codex/app-server-transport.js'
 import {RealClock} from '../src/clock.js'
 import {settingsSchema} from '../src/config.js'
-import {CodexAdapter} from '../src/executors/codex/adapter.js'
+import {CodexLiveAdapter} from '../src/executors/codex/adapter-live.js'
 import {ProjectCodexAdapter} from '../src/executors/codex/adapter-project.js'
 import {CODEX_AGENT_DESCRIPTOR, CodexAgentController} from '../src/executors/codex/controller.js'
 import type {EventRecord} from '../src/events.js'
@@ -218,7 +218,7 @@ async function waitNamed(name: string, condition: () => boolean, timeoutMs = 1_5
   }
 }
 
-function createCore(transport: IntegrationTransport, adapter: CodexAdapter) {
+function createCore(transport: IntegrationTransport, adapter: CodexLiveAdapter) {
   void transport
   return buildAssembly({
     settings: settingsSchema.parse({executors: ['codex']}),
@@ -248,7 +248,7 @@ const reason = {
 test('buildAssembly preserves adapter identity and real CausalRuntime dispatches app-server transport', async () => {
   // This fails if assembly simulates Codex, copies a structural adapter, or bypasses the runtime handoff path.
   const transport = new IntegrationTransport()
-  const adapter = new CodexAdapter(transport)
+  const adapter = new CodexLiveAdapter(transport)
   const core = createCore(transport, adapter)
   assert.equal(core.runtime.executors.get('codex'), adapter)
   assert.equal(core.manifests.at(-1), adapter.manifest)
@@ -281,7 +281,7 @@ test('buildAssembly preserves adapter identity and real CausalRuntime dispatches
 test('RealtimeService alone publishes selected Codex idle-running-idle with no duplicate side channel', async () => {
   // This fails if the adapter publishes state itself or if runtime progress/handoff projection duplicates it.
   const transport = new IntegrationTransport()
-  const adapter = new CodexAdapter(transport)
+  const adapter = new CodexLiveAdapter(transport)
   const core = createCore(transport, adapter)
   const states = ['idle']
   const realtime = buildRealtimeAssembly({
@@ -323,7 +323,7 @@ test('RealtimeService suppresses duplicate running state for busy and unselected
   const entered = deferred<void>()
   transport.runBarrier = gate.promise
   transport.runEntered = () => { entered.resolve() }
-  const adapter = new CodexAdapter(transport)
+  const adapter = new CodexLiveAdapter(transport)
   const core = createCore(transport, adapter)
   const states = ['idle']
   const realtime = buildRealtimeAssembly({

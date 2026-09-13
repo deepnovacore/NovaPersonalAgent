@@ -5,15 +5,16 @@ import * as runtime from '../src/index.js'
 
 test('the runtime package root does not export Codex authority bypasses or test seams', () => {
   for (const name of [
-    'approvedCodexSpawnDetails',
-    'createApprovedCodexSpawnSpecForTest',
+    'createCodexEnvironment',
+    'validateCodexEnvironment',
+    'createCodexSpawnSpecForTest',
     'hostBinaryForTest',
     'hostCodexHomeForTest',
     'hostWorkspaceForTest',
     'hostBinaryFromConfig',
     'hostEphemeralCodexHomeFromConfig',
     'hostPersistentCodexHomeFromConfig',
-    'createApprovedCodexSpawnSpec',
+    'createCodexSpawnSpec',
     'createPlatformCodexProcessOwnerFactory',
     'PosixCodexProcessOwnerFactory',
     'hostCodexHomeValue',
@@ -21,7 +22,6 @@ test('the runtime package root does not export Codex authority bypasses or test 
     'unconfirmedCodexProcessOwnerError',
     'windowsGuardianHelperFromPackage',
     'prepareCodexCredentialSnapshotForTest',
-    'splitCredentialAtomicTargetForTest',
     'windowsGuardianHelperForTest',
     'windowsGuardianHelperPath',
     'resolveCodexHostConfig',

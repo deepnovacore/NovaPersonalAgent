@@ -7,15 +7,12 @@ import {test} from 'node:test'
 import {
   CredentialSnapshotter,
   credentialSnapshotEnvironment,
-  MAX_CREDENTIAL_BYTES,
-  MAX_CREDENTIAL_MARKER_BYTES,
   prepareCodexCredentialSnapshotForTest,
   removeEphemeralHomeWithRaceHookForTest,
-  splitCredentialAtomicTargetForTest,
 } from '../src/executors/codex/credential-snapshot.js'
 import {hostCodexHomeForTest} from '../src/executors/codex/process-owner.js'
 
-test('saved login is copied privately and the child environment is an exact allowlist', async () => {
+test('saved login stays in its original HOME and the child environment is an exact allowlist', async () => {
   const root = await mkdtemp(join(tmpdir(), 'nova-codex-credential-'))
   const source = join(root, 'source')
   const destination = join(root, 'destination')
@@ -38,15 +35,10 @@ test('saved login is copied privately and the child environment is an exact allo
       },
     })
 
-    assert.equal(await readFile(join(destination, 'auth.json'), 'utf8'), '{"token":"credential-sentinel"}')
-    if (process.platform !== 'win32') {
-      assert.equal((await lstat(join(destination, 'auth.json'))).mode & 0o777, 0o600)
-    }
-    const marker = JSON.parse(await readFile(
-      join(destination, '.nova-credential-source-v1.json'),
-      'utf8',
-    )) as Record<string, unknown>
-    assert.match(marker['auth.json'] as string, /^[0-9a-f]{64}$/u)
+    await assert.rejects(lstat(join(destination, 'auth.json')), {code: 'ENOENT'})
+    await assert.rejects(lstat(join(destination, '.nova-credential-source-v1.json')), {code: 'ENOENT'})
+    await assert.rejects(lstat(join(destination, 'config.toml')), {code: 'ENOENT'})
+    assert.equal(await readFile(join(source, 'auth.json'), 'utf8'), '{"token":"credential-sentinel"}')
     assert.deepEqual(Object.keys(result.environment as Record<string, string>).sort(), [
       'CODEX_HOME',
       'CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED',
@@ -76,7 +68,6 @@ test('an API key skips hostile saved-login files and remains process-only', asyn
   try {
     const home = hostCodexHomeForTest(await realpath(destination), {ephemeral: true})
     const snapshotter = new CredentialSnapshotter({
-      sourceHome: await realpath(source),
       environment: {PATH: '/safe-path', HOME: '/safe-home', SECRET_SENTINEL: 'drop-me'},
     })
     const snapshot = await snapshotter.prepare({codexHome: home, apiKey: 'api-key-process-only'})
@@ -85,7 +76,7 @@ test('an API key skips hostile saved-login files and remains process-only', asyn
       HOME: '/safe-home',
       CODEX_HOME: await realpath(destination),
       CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
-      CODEX_API_KEY: 'api-key-process-only',
+      NOVA_CODEX_API_KEY: 'api-key-process-only',
     })
     await assert.rejects(readFile(join(destination, 'auth.json')), {code: 'ENOENT'})
   } finally {
@@ -113,153 +104,8 @@ test('Windows environment aliases are canonicalized for the credential child', a
       HOME: 'C:\\Users\\nova',
       CODEX_HOME: await realpath(destination),
       CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
-      CODEX_API_KEY: 'api-key-process-only',
+      NOVA_CODEX_API_KEY: 'api-key-process-only',
     })
-  } finally {
-    await rm(root, {recursive: true, force: true})
-  }
-})
-
-test('credential no-follow, mode, and exact byte bounds fail with only credential_missing', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-bound-'))
-  try {
-    const scenarios = process.platform === 'win32'
-      ? (['over-limit'] as const)
-      : (['symlink', 'group-write', 'over-limit'] as const)
-    for (const scenario of scenarios) {
-      const diagnostics: string[] = []
-      const source = join(root, `${scenario}-source`)
-      const destination = join(root, `${scenario}-destination`)
-      await mkdir(source, {mode: 0o700})
-      await mkdir(destination, {mode: 0o700})
-      const auth = join(source, 'auth.json')
-      if (scenario === 'symlink') {
-        const outside = join(root, `${scenario}-outside`)
-        await writeFile(outside, 'credential-secret', {mode: 0o600})
-        await symlink(outside, auth)
-      } else {
-        await writeFile(
-          auth,
-          scenario === 'over-limit'
-            ? new Uint8Array(MAX_CREDENTIAL_BYTES + 1)
-            : 'credential-secret',
-          {mode: scenario === 'group-write' ? 0o620 : 0o600},
-        )
-        await chmod(auth, scenario === 'group-write' ? 0o620 : 0o600)
-      }
-      const snapshotter = new CredentialSnapshotter({
-        sourceHome: await realpath(source),
-        environment: {PATH: '/safe-path', HOME: '/safe-home'},
-        onDiagnostic: code => diagnostics.push(code),
-      })
-      const home = hostCodexHomeForTest(await realpath(destination), {ephemeral: true})
-      await assert.rejects(
-        snapshotter.prepare({codexHome: home, apiKey: null}),
-        (error: unknown) => {
-          assert.equal(String(error), 'CodexCredentialError: credential_missing')
-          assert.equal(String(error).includes(root), false)
-          assert.equal(String(error).includes('credential-secret'), false)
-          return true
-        },
-      )
-      assert.deepEqual(diagnostics, ['codex_credential_snapshot_saved_login_failed'])
-    }
-  } finally {
-    await rm(root, {recursive: true, force: true})
-  }
-})
-
-test('the exact 1 MiB credential is accepted and unchanged-source preserves destination edits', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-refresh-'))
-  const source = join(root, 'source')
-  const destination = join(root, 'destination')
-  await mkdir(source, {mode: 0o700})
-  await mkdir(destination, {mode: 0o700})
-  const exact = new Uint8Array(MAX_CREDENTIAL_BYTES)
-  exact.fill(0x61)
-  await writeFile(join(source, 'auth.json'), exact, {mode: 0o600})
-  try {
-    const snapshotter = new CredentialSnapshotter({
-      sourceHome: await realpath(source),
-      environment: {PATH: '/safe-path', HOME: '/safe-home'},
-    })
-    const home = hostCodexHomeForTest(await realpath(destination), {ephemeral: true})
-    await snapshotter.prepare({codexHome: home, apiKey: null})
-    assert.equal((await readFile(join(destination, 'auth.json'))).byteLength, MAX_CREDENTIAL_BYTES)
-
-    await writeFile(join(destination, 'auth.json'), 'destination-only-edit', {mode: 0o600})
-    await chmod(join(destination, 'auth.json'), 0o600)
-    await snapshotter.prepare({codexHome: home, apiKey: null})
-    assert.equal(await readFile(join(destination, 'auth.json'), 'utf8'), 'destination-only-edit')
-
-    await writeFile(join(source, 'auth.json'), 'new-source-value', {mode: 0o600})
-    await chmod(join(source, 'auth.json'), 0o600)
-    await snapshotter.prepare({codexHome: home, apiKey: null})
-    assert.equal(await readFile(join(destination, 'auth.json'), 'utf8'), 'new-source-value')
-  } finally {
-    await rm(root, {recursive: true, force: true})
-  }
-})
-
-test('credential marker exact byte bound is accepted and over-bound or hostile destination fails closed', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-marker-'))
-  const source = join(root, 'source')
-  const exactDestination = join(root, 'exact-destination')
-  const overDestination = join(root, 'over-destination')
-  const hostileDestination = join(root, 'hostile-destination')
-  await mkdir(source, {mode: 0o700})
-  await mkdir(exactDestination, {mode: 0o700})
-  await mkdir(overDestination, {mode: 0o700})
-  await mkdir(hostileDestination, {mode: 0o700})
-  const markerBody = `{"auth.json":"${'a'.repeat(64)}"}`
-  const exactMarker = `${markerBody}${' '.repeat(MAX_CREDENTIAL_MARKER_BYTES - Buffer.byteLength(markerBody))}`
-  await writeFile(
-    join(exactDestination, '.nova-credential-source-v1.json'),
-    exactMarker,
-    {mode: 0o600},
-  )
-  await writeFile(
-    join(overDestination, '.nova-credential-source-v1.json'),
-    `${exactMarker} `,
-    {mode: 0o600},
-  )
-  await writeFile(join(source, 'auth.json'), 'new-source', {mode: 0o600})
-  const outside = join(root, 'outside-destination')
-  if (process.platform !== 'win32') {
-    await writeFile(outside, 'destination-secret', {mode: 0o600})
-    await symlink(outside, join(hostileDestination, 'auth.json'))
-  }
-  try {
-    const snapshotter = new CredentialSnapshotter({
-      sourceHome: await realpath(source),
-      environment: {PATH: '/safe-path', HOME: '/safe-home'},
-    })
-    await snapshotter.prepare({
-      codexHome: hostCodexHomeForTest(await realpath(exactDestination), {ephemeral: true}),
-      apiKey: null,
-    })
-    if (process.platform !== 'win32') {
-      assert.equal((await lstat(join(exactDestination, 'auth.json'))).mode & 0o777, 0o600)
-      assert.equal(
-        (await lstat(join(exactDestination, '.nova-credential-source-v1.json'))).mode & 0o777,
-        0o600,
-      )
-    }
-    const rejectedDestinations = process.platform === 'win32'
-      ? [overDestination]
-      : [overDestination, hostileDestination]
-    for (const destination of rejectedDestinations) {
-      await assert.rejects(
-        snapshotter.prepare({
-          codexHome: hostCodexHomeForTest(await realpath(destination), {ephemeral: true}),
-          apiKey: null,
-        }),
-        (error: unknown) => String(error) === 'CodexCredentialError: credential_missing',
-      )
-    }
-    if (process.platform !== 'win32') {
-      assert.equal(await readFile(outside, 'utf8'), 'destination-secret')
-    }
   } finally {
     await rm(root, {recursive: true, force: true})
   }
@@ -338,27 +184,19 @@ test('ephemeral cleanup never deletes a replacement raced after its identity che
   }
 })
 
-test('credential atomic targets use Windows dirname and basename semantics', () => {
-  assert.deepEqual(
-    splitCredentialAtomicTargetForTest('C:\\Users\\nova\\.codex\\auth.json', 'win32'),
-    {directory: 'C:\\Users\\nova\\.codex', filename: 'auth.json'},
-  )
-})
-
-
 test('shared home preparation preserves configuration, saved login and directory permissions', async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), 'nova-shared-home-')))
   try {
     await chmod(home, 0o755)
     await writeFile(join(home, 'config.toml'), 'model = "user-model"\n')
     await writeFile(join(home, 'auth.json'), 'original-login', {mode: 0o600})
-    const credentials = new CredentialSnapshotter({sourceHome: '/not-the-shared-home', environment: {HOME: home, PATH: '/safe-path'}})
+    const credentials = new CredentialSnapshotter({environment: {HOME: home, PATH: '/safe-path'}})
     const capability = hostCodexHomeForTest(home, {ephemeral: false})
-    const snapshot = await credentials.prepare({codexHome: capability, apiKey: 'must-not-override-shared-login', preserveHome: true})
+    const snapshot = await credentials.prepare({codexHome: capability, apiKey: 'selected-key', preserveHome: true})
     await credentials.removeEphemeralHome(capability)
     assert.equal(await readFile(join(home, 'config.toml'), 'utf8'), 'model = "user-model"\n')
     assert.equal(await readFile(join(home, 'auth.json'), 'utf8'), 'original-login')
-    assert.equal(credentialSnapshotEnvironment(snapshot).CODEX_API_KEY, undefined)
+    assert.equal(credentialSnapshotEnvironment(snapshot).NOVA_CODEX_API_KEY, 'selected-key')
     if (process.platform !== 'win32') assert.equal((await lstat(home)).mode & 0o777, 0o755)
   } finally { await rm(home, {recursive: true, force: true}) }
 })

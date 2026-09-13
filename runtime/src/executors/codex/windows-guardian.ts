@@ -7,8 +7,7 @@ import type {Readable, Writable} from 'node:stream'
 import {snapshotJsonRecord} from './safe-json.js'
 import {
   CodexProcessOwnerError,
-  approvedCodexSpawnDetails,
-  type ApprovedSpawnSpec,
+  type CodexSpawnSpec,
   type CodexProcessOwnerFactory,
   type CodexProcessSpawnControl,
   type OwnedCodexProcess,
@@ -265,7 +264,7 @@ export class WindowsGuardianCodexProcessOwnerFactory implements CodexProcessOwne
   }
 
   async spawn(
-    spec: ApprovedSpawnSpec,
+    spec: CodexSpawnSpec,
     control: CodexProcessSpawnControl,
   ): Promise<OwnedCodexProcess> {
     if (
@@ -275,7 +274,7 @@ export class WindowsGuardianCodexProcessOwnerFactory implements CodexProcessOwne
       || control.expiresAtMs <= Date.now()
       || !this.#validateHelper()
     ) throw new CodexProcessOwnerError('spawn_failed')
-    const details = approvedCodexSpawnDetails(spec)
+    const details = (spec)
     const guardian = this.#spawnGuardian(
       details.binary,
       details.argv,

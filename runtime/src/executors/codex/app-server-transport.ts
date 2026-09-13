@@ -1,52 +1,54 @@
-import {sharedHomeOverrides} from './shared-home.js'
-import {generateSessionTitle} from './session-title.js'
-import {managedMcpEnvironment, recordManagedMcpVisibility, type ManagedCodexMcp} from './managed-mcp.js'
-import {Readable, Writable} from 'node:stream'
+import { Readable,Writable } from 'node:stream'
+import { managedMcpEnvironment,recordManagedMcpVisibility,type ManagedCodexMcp } from './managed-mcp.js'
+import { generateSessionTitle } from './session-title.js'
+import { sharedHomeOverrides } from './shared-home.js'
+import { assertApiKeyProvider,assertApiKeyThread,NOVA_API_PROVIDER } from './spawn-env.js'
 
+import type { ExecutorProgress } from '../../causal-runtime.js'
+import type { Clock } from '../../clock.js'
+import { RealClock } from '../../clock.js'
+import { isWellFormed,stripLikePython } from '../../python-text.js'
+import { normalizeNfcPinned } from '../../unicode-normalize.js'
+import { isOtherCategory } from '../../unicode-tables.js'
 import {
-  validateCodexSchemaBundle,
-  validateEffectiveCodexConfig,
+validateCodexSchemaBundle,
+validateEffectiveCodexConfig,
 } from './app-server-schema.js'
-import {sanitizeCodexPreflightReport} from './contract.js'
-import {admitCodexVersion} from './version.js'
+import {
+isCodexApprovalPort,
+routeCodexApprovalServerRequest,
+type CodexApprovalPort,
+} from './approval.js'
+import { sanitizeCodexPreflightReport } from './contract.js'
 import type {
-  CredentialSnapshot,
-  CredentialSnapshotter,
+CredentialSnapshot,
+CredentialSnapshotter,
 } from './credential-snapshot.js'
 import {
-  AppServerRequestRejected,
-  CodexProtocolError,
-  JsonRpcConnection,
-  MAX_STDOUT,
-} from './protocol.js'
+resolveCodexLaunchProfile,
+type CodexLaunchProfile,
+} from './launch-profile.js'
 import {
-  createApprovedCodexSpawnSpec,
-  hostCodexHomeValue,
-  hostWorkspacePath,
-  takeUnconfirmedCodexProcessOwner,
-  type CodexProcessOwnerFactory,
-  type HostBinary,
-  type HostCodexHome,
-  type HostWorkspace,
-  type OwnedCodexProcess,
+createCodexSpawnSpec,
+hostCodexHomeValue,
+hostWorkspacePath,
+nativeCodexBinaryIdentity,
+takeUnconfirmedCodexProcessOwner,
+type CodexProcessOwnerFactory,
+type HostBinary,
+type HostCodexHome,
+type HostWorkspace,
+type OwnedCodexProcess,
 } from './process-owner.js'
 import {
-  resolveCodexLaunchProfile,
-  type CodexLaunchProfile,
-} from './launch-profile.js'
-import {snapshotJsonRecord} from './safe-json.js'
-import {AppServerTurnProjection, type TurnCompletion} from './turn-projection.js'
-import type {ExecutorProgress} from '../../causal-runtime.js'
-import type {Clock} from '../../clock.js'
-import {RealClock} from '../../clock.js'
-import {stripLikePython, isWellFormed} from '../../python-text.js'
-import {normalizeNfcPinned} from '../../unicode-normalize.js'
-import {isOtherCategory} from '../../unicode-tables.js'
-import {
-  isCodexApprovalPort,
-  routeCodexApprovalServerRequest,
-  type CodexApprovalPort,
-} from './approval.js'
+AppServerRequestRejected,
+CodexProtocolError,
+JsonRpcConnection,
+MAX_STDOUT,
+} from './protocol.js'
+import { snapshotJsonRecord } from './safe-json.js'
+import { AppServerTurnProjection,type TurnCompletion } from './turn-projection.js'
+import { admitCodexVersion } from './version.js'
 
 export const CODEX_PREFLIGHT_LIMIT_MS = 20_000
 export const CODEX_INTERRUPT_GRACE_MS = 2_000
@@ -465,7 +467,15 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         titleWork = generateSessionTitle(workOrder, {
           mcpServers: Object.keys(this.#config.managedMcp?.servers ?? {}),
           signal: titleAbort.signal,
-          request: (method, params) => this.#requestWithin(target, method, params, titleDeadline),
+          request: async (method, params) => {
+            if (method !== 'thread/start' || this.#config.apiKey === null) return await this.#requestWithin(target, method, params, titleDeadline)
+            assertApiKeyProvider(await this.#requestWithin(target, 'config/read', {
+              includeLayers: true, cwd: hostWorkspacePath(this.#config.workspace),
+            }, titleDeadline))
+            const response = await this.#requestWithin(target, method, {...params, modelProvider: NOVA_API_PROVIDER}, titleDeadline)
+            assertApiKeyThread(response)
+            return response
+          },
           subscribe: listener => { target.metadataListeners.add(listener); return () => { target.metadataListeners.delete(listener) } },
         }).then(async name => {
           if (!name || target.closing || titleAbort.signal.aborted) return
@@ -689,11 +699,14 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     return admitted
   }
 
-  async #establish(deadline: TransportDeadline): Promise<{
+  async #establish(deadline: TransportDeadline, certification?: {readonly identity: string; readonly report: SafePreflightReport}): Promise<{
     readonly report: SafePreflightReport
     readonly session: Session
   }> {
-    const report = await this.#performPreflight(deadline)
+    const identity = nativeCodexBinaryIdentity(this.#config.binary, this.#config.prefixArgs ?? [])
+    if (certification !== undefined && certification.identity !== identity) throw new CodexTransportError('unsupported_protocol')
+    const report = certification?.report ?? await this.#performPreflight(deadline)
+    if (identity !== nativeCodexBinaryIdentity(this.#config.binary, this.#config.prefixArgs ?? [])) throw new CodexTransportError('unsupported_protocol')
     if (this.#closed) throw new CodexTransportError('transport_lost')
     if (this.#credentialRemovalRequired) {
       this.#closed = true
@@ -748,7 +761,8 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     let owner: OwnedCodexProcess
     try {
       const environment = this.#credentials.environment(credentialSnapshot)
-      const spec = createApprovedCodexSpawnSpec({
+      if (identity !== nativeCodexBinaryIdentity(this.#config.binary, this.#config.prefixArgs ?? [])) throw new CodexTransportError('unsupported_protocol')
+      const spec = createCodexSpawnSpec({
         binary: this.#config.binary,
         prefixArgs: this.#config.prefixArgs ?? [],
         workspace: this.#config.workspace,
@@ -855,7 +869,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         const cleanup = await this.#cleanup(session, false)
         if (!cleanup.complete || !cleanup.treeGone) throw new CodexTransportError('transport_lost')
         this.#session = null
-        return await this.#establish(deadline)
+        return await this.#establish(deadline, identity === null ? undefined : {identity, report})
       }
       validateEffectiveCodexConfig(configResponse, hostWorkspacePath(this.#config.workspace), {
         allowReplacementInstructions: false,
@@ -863,6 +877,10 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
         launchProfile: this.#config.launchProfile,
       })
+      if (this.#config.apiKey !== null) {
+        try { assertApiKeyProvider(configResponse) }
+        catch { throw new CodexTransportError('config_not_isolated') }
+      }
       const thread = this.#threadRequest()
       let threadResponse: unknown
       try {
@@ -872,6 +890,10 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
           throw new CodexTransportError('resume_unavailable')
         }
         throw error
+      }
+      if (this.#config.apiKey !== null) {
+        try { assertApiKeyThread(threadResponse) }
+        catch { throw new CodexTransportError('config_not_isolated') }
       }
       ;(session as {threadResponse: unknown}).threadResponse = threadResponse
       return {report, session}
@@ -1147,7 +1169,10 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     readonly params: Readonly<Record<string, unknown>>
   } {
     const workspace = hostWorkspacePath(this.#config.workspace)
-    const common: Record<string, unknown> = {...this.#config.launchProfile.thread}
+    const common: Record<string, unknown> = {
+      ...this.#config.launchProfile.thread,
+      ...(this.#config.apiKey === null ? {} : {modelProvider: NOVA_API_PROVIDER}),
+    }
     if (this.#config.developerInstructions !== null) {
       common.developerInstructions = this.#config.developerInstructions
     }

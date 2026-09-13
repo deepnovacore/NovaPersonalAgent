@@ -332,38 +332,9 @@ function projectHostConfig(t: TestContext, workspaceName = 'workspace'): {
   return {config, stateRoot, managedRoot}
 }
 
-test('ordinary composition keeps the non-realtime Codex adapter', async t => {
-  const config = hostConfig(t)
-  assert.ok(config !== null)
-
-  const managedMcp = prepareManagedCodexMcp(parseCapabilityRegistry({version: 1}))
-  const ordinaryFactory = new RecordingTransportFactory()
-  const ordinary = await createCodexAssemblyResource({
-    config,
-    composition: 'ordinary',
-    managedMcp,
-    transportFactory: ordinaryFactory,
-    clock: new VirtualClock(),
-    idFactory: () => 'ordinary-id',
-  })
-  assert.equal(ordinary.mode, 'ordinary')
-  assert.deepEqual(ordinary.adapter.manifest.ops.map(operation => operation.name), [
-    'run', 'status',
-  ])
-  assert.equal(ordinaryFactory.calls.length, 1)
-  assert.equal(ordinaryFactory.calls[0]?.mode, 'ordinary')
-  assert.equal(ordinaryFactory.calls[0]?.managedMcp, managedMcp)
-  await ordinary.start()
-  assert.equal(ordinaryFactory.transports[0]?.preflights, 1)
-  assert.equal(ordinaryFactory.transports[0]?.prewarms, 0)
-  await ordinary.close()
-  await ordinary.close()
-  assert.equal(ordinaryFactory.transports[0]?.closes, 1)
-
-})
-
 test('owned factory removes a preflight-only ephemeral home after transport close', async t => {
-  const config = hostConfig(t)
+  const {config, stateRoot, managedRoot} = projectHostConfig(t)
+  const projectHost = {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRootFileAuthority([stateRoot, managedRoot])}
   assert.ok(config !== null)
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'nova-codex-factory-home-')))
   const home = join(root, 'ephemeral')
@@ -381,7 +352,8 @@ test('owned factory removes a preflight-only ephemeral home after transport clos
   })
   const resource = await createCodexAssemblyResource({
     config,
-    composition: 'ordinary',
+    composition: 'realtime',
+    projectHost,
     transportFactory: factory,
     clock: new VirtualClock(),
     idFactory: () => 'ephemeral-cleanup-id',
@@ -406,7 +378,8 @@ test('realtime composition fails closed when the packaged project host is unavai
 })
 
 test('configured Codex rejects an unavailable or malformed host transport before adapter registration', async t => {
-  const config = hostConfig(t)
+  const {config, stateRoot, managedRoot} = projectHostConfig(t)
+  const projectHost = {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRootFileAuthority([stateRoot, managedRoot])}
   assert.ok(config !== null)
   let unavailableCreates = 0
   for (const transportFactory of [
@@ -415,7 +388,8 @@ test('configured Codex rejects an unavailable or malformed host transport before
   ]) {
     await assert.rejects(createCodexAssemblyResource({
       config,
-      composition: 'ordinary',
+      composition: 'realtime',
+      projectHost,
       transportFactory,
       clock: new VirtualClock(),
       idFactory: () => 'unavailable-id',
@@ -425,22 +399,6 @@ test('configured Codex rejects an unavailable or malformed host transport before
   assert.equal(unavailableCreates, 0)
 })
 
-test('ordinary composition never upgrades to project mode', async t => {
-  const {config} = projectHostConfig(t)
-  const transportFactory = new RecordingTransportFactory()
-  const resource = await createCodexAssemblyResource({
-    config,
-    composition: 'ordinary',
-    transportFactory,
-    clock: new VirtualClock(),
-    idFactory: () => 'ordinary-project-setting-id',
-  })
-
-  assert.equal(resource.mode, 'ordinary')
-  assert.deepEqual(resource.adapter.manifest.ops.map(operation => operation.name), ['run', 'status'])
-  assert.equal(transportFactory.calls[0]?.mode, 'ordinary')
-  await resource.close()
-})
 
 test('realtime mode always opens one project store and exposes only project tools and public view', async t => {
   const {config, stateRoot, managedRoot} = projectHostConfig(t)

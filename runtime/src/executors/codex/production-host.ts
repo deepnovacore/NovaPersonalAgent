@@ -1,4 +1,5 @@
 import {snapshotRegularFile, sameSnapshot, type FileSnapshot} from '../../native-resource-snapshot.js'
+import {hostCodexHomeValue} from './process-owner.js'
 import {spawn} from 'node:child_process'
 import {randomUUID} from 'node:crypto'
 import {
@@ -217,9 +218,6 @@ export function createProductionCodexHost(
     environment: hostEnvironment,
     platform,
     ...(options.onDiagnostic === undefined ? {} : {onDiagnostic: options.onDiagnostic}),
-    ...(typeof hostEnvironment.CODEX_HOME === 'string' && hostEnvironment.CODEX_HOME !== ''
-      ? {sourceHome: hostEnvironment.CODEX_HOME}
-      : {}),
   })
   const transportFactory = new OwnedCodexBackendTransportFactory({
     processFactory: createPlatformCodexProcessOwnerFactory({
@@ -373,6 +371,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
           workspace,
           deadline,
           4096,
+          config.preserveHome ? {...this.#environment, CODEX_HOME: hostCodexHomeValue(config.codexHome).path} : this.#environment,
         )
         let identity: 'chatgpt' | 'api_key'
         try {
@@ -498,6 +497,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
     cwd: string,
     deadline: number,
     stdoutLimit: number,
+    environment: Readonly<Record<string, string>> = this.#environment,
   ): Promise<BoundedCodexCommandResult> {
     const remaining = deadline - Date.now()
     if (remaining <= 0) throw new CodexTransportError('preflight_timeout')
@@ -505,7 +505,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
       binary,
       argv: Object.freeze([...argv]),
       cwd,
-      environment: this.#environment,
+      environment,
       timeoutMs: remaining,
       stdoutLimit,
       stderrLimit: MAX_COMMAND_STDERR,

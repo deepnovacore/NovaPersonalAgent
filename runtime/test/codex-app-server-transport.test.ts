@@ -1,3 +1,6 @@
+import {appendFileSync, chmodSync, constants, copyFileSync, mkdtempSync, realpathSync, rmSync} from 'node:fs'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
 import {prepareManagedCodexMcp, managedMcpEnvironment, type ManagedCodexMcp} from '../src/executors/codex/managed-mcp.js'
 import {parseCapabilityRegistry} from '../src/capability-registry.js'
 /* eslint-disable @typescript-eslint/require-await -- deterministic fakes implement async host contracts */
@@ -49,7 +52,7 @@ test('a cold run follows the app-server handshake and returns bounded internal c
       prepare: async () => ({} as never),
       environment: () => ({
         PATH: '/safe-path', HOME: '/safe-home', CODEX_HOME: workspace,
-        CODEX_API_KEY: 'api-key-sentinel',
+        NOVA_CODEX_API_KEY: 'api-key-sentinel',
         CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
       }),
       removeEphemeralHome: async () => {},
@@ -2201,7 +2204,7 @@ test('credential cancellation joins snapshot work and removes the ephemeral home
       },
       environment: () => ({
         PATH: '/safe', HOME: '/home', CODEX_HOME: workspace,
-        CODEX_API_KEY: 'api-key-sentinel',
+        NOVA_CODEX_API_KEY: 'api-key-sentinel',
         CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
       }),
       removeEphemeralHome: async () => { cleanupCount += 1 },
@@ -2251,7 +2254,7 @@ test('persistent resume uses exact host identity and rejection is pre-effect res
         prepare: async () => ({} as never),
         environment: () => ({
           PATH: '/safe', HOME: '/home', CODEX_HOME: workspace,
-          CODEX_API_KEY: 'api-key-sentinel',
+          NOVA_CODEX_API_KEY: 'api-key-sentinel',
           CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
         }),
         removeEphemeralHome: async () => {},
@@ -2270,6 +2273,7 @@ test('persistent resume uses exact host identity and rejection is pre-effect res
       approvalsReviewer: 'user',
       permissions: 'nova_audio_agent',
       developerInstructions: 'bounded instructions',
+      modelProvider: 'nova_api_key',
       cwd: workspace,
       threadId: 'durable-thread-1',
     })
@@ -2727,7 +2731,7 @@ class MemoryAppServerOwner {
     }
     if (message.method === 'thread/unsubscribe') { this.#send({id: message.id, result: {}}); return }
     if (message.method === 'thread/start' && message.params?.ephemeral === true && this.#options.persistent) {
-      this.#send({id: message.id, result: {thread: {id: 'title-only-thread'}}})
+      this.#send({id: message.id, result: {modelProvider: 'nova_api_key', thread: {id: 'title-only-thread', modelProvider: 'nova_api_key'}}})
       return
     }
     if (message.method === 'turn/start' && message.params?.threadId === 'title-only-thread') {
@@ -2818,6 +2822,8 @@ class MemoryAppServerOwner {
 function effectiveConfig(workspace: string, widened = false, managed?: ManagedCodexMcp): Record<string, unknown> {
   return {
     config: {
+      model_provider: 'nova_api_key',
+      model_providers: {nova_api_key: {base_url: 'https://api.openai.com/v1', env_key: 'NOVA_CODEX_API_KEY', wire_api: 'responses', requires_openai_auth: false}},
       approval_policy: 'never',
       approvals_reviewer: 'user',
       default_permissions: 'nova_audio_agent',
@@ -2848,6 +2854,7 @@ function threadResponse(
   persistent = false,
 ): Record<string, unknown> {
   return {
+    modelProvider: 'nova_api_key',
     approvalPolicy: 'never',
     cwd: workspace,
     sandbox: {},
@@ -2855,6 +2862,7 @@ function threadResponse(
     activePermissionProfile: {id: 'nova_audio_agent'},
     ...(persistent ? {runtimeWorkspaceRoots: [workspace]} : {}),
     thread: {
+      modelProvider: 'nova_api_key',
       id: threadId,
       cwd: workspace,
       ephemeral: !persistent,
@@ -2878,6 +2886,7 @@ function createTransport(
     readonly persistent?: boolean
     readonly generateTitles?: boolean
     readonly preserveHome?: boolean
+    readonly binary?: ReturnType<typeof hostBinaryForTest>
     readonly resumeThreadId?: string
     readonly developerInstructions?: string | null
     readonly prepare?: (input: {readonly apiKey: string | null}) => Promise<never>
@@ -2890,7 +2899,7 @@ function createTransport(
   const workspace = process.cwd()
   return new OwnedCodexAppServerTransport({
     config: {
-      binary: hostBinaryForTest(process.execPath),
+      binary: overrides.binary ?? hostBinaryForTest(process.execPath),
       workspace: hostWorkspaceForTest(workspace),
       codexHome: hostCodexHomeForTest(workspace, {ephemeral: !overrides.persistent}),
       apiKey: 'api-key-sentinel',
@@ -2916,7 +2925,7 @@ function createTransport(
       environment: () => ({
         ...managedMcpEnvironment(overrides.managedMcp),
         PATH: '/safe-path', HOME: '/safe-home', CODEX_HOME: workspace,
-        CODEX_API_KEY: 'api-key-sentinel',
+        NOVA_CODEX_API_KEY: 'api-key-sentinel',
         CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
       }),
       removeEphemeralHome: overrides.removeEphemeralHome ?? (async () => {}),
@@ -3067,16 +3076,24 @@ test('owned transport generates a title with an auxiliary thread while preservin
 
 
 test('shared home reads configuration before resuming the original thread with explicit roots', async () => {
+  let schemaCalls = 0
+  let preflightCalls = 0
   const owners: MemoryAppServerOwner[] = []
   const transport = createTransport({spawn: async () => {
     const owner = new MemoryAppServerOwner([], {persistent: true, threadId: 'original-thread'})
     owners.push(owner)
     return owner
-  }}, {persistent: true, preserveHome: true, resumeThreadId: 'original-thread'})
+  }}, {persistent: true, preserveHome: true, resumeThreadId: 'original-thread',
+    preflightRunner: {run: async () => { preflightCalls += 1; return safePreflightReport() }},
+    schemaProbe: {generate: async () => { schemaCalls += 1; return supportedSchemaBundle() }},
+  })
   try {
     const result = await transport.run({workOrder: 'Continue original task'}, {}, {expiresAtMs: Date.now() + 5000})
     assert.equal(result.classification, 'completed')
     assert.equal(owners.length, 2)
+    assert.equal(schemaCalls, 1)
+    assert.equal(preflightCalls, 1)
+    assert.ok(owners.every(owner => owner.received.some(item => item.method === 'config/read')))
     assert.equal(owners[0]!.received.some(item => item.method === 'thread/resume' || item.method === 'thread/start'), false)
     const resumed = owners[1]!.received.find(item => item.method === 'thread/resume')
     assert.equal(resumed?.params.threadId, 'original-thread')
@@ -3099,4 +3116,25 @@ test('a stalled title thread never delays an already completed turn', async () =
     // Without a bound the settled turn waits out the title's own 10s deadline.
     assert.ok(elapsed < 5_000, `settled turn waited ${elapsed}ms for advisory title metadata`)
   } finally { await transport.close() }
+})
+
+
+test('a binary identity change forbids certificate reuse before the shared-home restart', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'nova-certificate-')))
+  const binary = join(root, 'node-copy')
+  copyFileSync(process.execPath, binary, constants.COPYFILE_FICLONE)
+  chmodSync(binary, 0o700)
+  let spawns = 0
+  const owner = new MemoryAppServerOwner([], {persistent: true})
+  const transport = createTransport({spawn: async () => {
+    spawns += 1
+    appendFileSync(binary, 'identity changed')
+    return owner
+  }}, {binary: hostBinaryForTest(binary), persistent: true, preserveHome: true})
+  try {
+    const result = await transport.run({workOrder: 'must not reach thread start'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.code, 'unsupported_protocol')
+    assert.equal(spawns, 1)
+    assert.equal(owner.received.some(item => item.method === 'thread/start'), false)
+  } finally { await transport.close(); rmSync(root, {recursive: true, force: true}) }
 })

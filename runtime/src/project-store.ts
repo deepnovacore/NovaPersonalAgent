@@ -138,8 +138,9 @@ export interface WorkspaceRecord {
 }
 
 export interface ProjectSessionRecord {
-  /** Only host-discovered external sessions carry an explicit executor home. */
+  /** Persisted independently of workspace cwd; older explicit-home records are external. */
   readonly executor_home?: string
+  readonly origin?: 'nova' | 'external'
 
   readonly session_id: string
   readonly workspace_id: string
@@ -1441,6 +1442,7 @@ export class ProjectStore {
       if (!state.workspaces.has(workspaceId)) throw new ProjectStateError('workspace_not_found')
       const existing = [...state.sessions.values()].find(session => session.codex_thread_id === threadId && session.executor_home === home)
       if (existing && existing.workspace_id !== workspaceId) throw new ProjectStateError('session_state_conflict')
+      if (existing?.origin === 'nova') return [existing, false]
       // Evict like every other insert path: a full workspace must not freeze out newer discoveries.
       if (!existing) pruneForSessionInsert(state, workspaceId)
       const normalized = normalizeProjectSessionTitle(uniqueSessionTitle(
@@ -1448,7 +1450,7 @@ export class ProjectStore {
       ))
       const session: ProjectSessionRecord = Object.freeze({
         session_id: existing?.session_id ?? this.#newUniqueId(state), workspace_id: workspaceId,
-        executor_home: home, codex_thread_id: threadId, state: 'ready',
+        executor_home: home, origin: 'external', codex_thread_id: threadId, state: 'ready',
         display_title: normalized.display, normalized_title: normalized.normalized,
         created_at: existing?.created_at ?? input.updatedAt,
         last_used_at: Math.max(existing?.last_used_at ?? 0, input.updatedAt),
@@ -1465,7 +1467,8 @@ export class ProjectStore {
   }
 
   /** The host derives `displayTitle` from the work order (spec 08 Titles); there is no default title. */
-  async beginSessionForRun(workspaceId: string, displayTitle: string): Promise<BegunSession> {
+  async beginSessionForRun(workspaceId: string, displayTitle: string, executorHome?: string): Promise<BegunSession> {
+    const home = executorHome === undefined ? undefined : hostHomeValue(hostPersistentHomeFromConfig(executorHome, [executorHome])).path
     const supplied = normalizeProjectSessionTitle(displayTitle)
     return await this.#transaction(state => {
       const workspace = state.workspaces.get(workspaceId)
@@ -1480,6 +1483,8 @@ export class ProjectStore {
       const session: ProjectSessionRecord = Object.freeze({
         session_id: sessionId,
         workspace_id: workspaceId,
+        origin: 'nova',
+        ...(home === undefined ? {} : {executor_home: home}),
         display_title: normalized.display,
         normalized_title: normalized.normalized,
         codex_thread_id: null,
@@ -1610,6 +1615,21 @@ export class ProjectStore {
       if (session.state !== 'starting' || session.codex_thread_id !== null) {
         throw new ProjectStateError('session_state_conflict')
       }
+      if (session.origin === 'nova' && session.executor_home !== undefined) {
+        const duplicates = [...state.sessions.values()].filter(other => other.session_id !== sessionId
+          && other.executor_home === session.executor_home && other.codex_thread_id === cleanThreadId)
+        if (duplicates.some(other => other.workspace_id !== session.workspace_id || other.origin === 'nova')) {
+          throw new ProjectStateError('session_state_conflict')
+        }
+        for (const duplicate of duplicates) {
+          state.sessions.delete(duplicate.session_id)
+          const workspace = state.workspaces.get(duplicate.workspace_id)!
+          if (workspace.active_session_id === duplicate.session_id) {
+            state.workspaces.set(workspace.workspace_id, Object.freeze({...workspace, active_session_id: sessionId}))
+            bumpActiveBindingRevision(state)
+          }
+        }
+      }
       const ready: ProjectSessionRecord = Object.freeze({
         ...session,
         codex_thread_id: cleanThreadId,
@@ -1671,14 +1691,16 @@ export class ProjectStore {
     })
   }
 
-  async persistentHome(workspaceId: string): Promise<HostStateHome> {
+  async persistentHome(workspaceId: string, {create = true}: {readonly create?: boolean} = {}): Promise<HostStateHome> {
     return await this.#transaction(async state => {
       const workspace = state.workspaces.get(workspaceId)
       if (workspace === undefined) throw new ProjectStateError('workspace_not_found')
       await this.#revalidateStateRoot()
       const stateRoot = this.#requireStateRootHandle()
-      await this.#migrateLegacyHomes(stateRoot)
-      const homesRoot = join(this.#stateRoot, PROJECT_CODEX_HOMES_DIRECTORY)
+      if (create) await this.#migrateLegacyHomes(stateRoot)
+      const directory = !create && this.#lookupAt(stateRoot, PROJECT_CODEX_HOMES_DIRECTORY, 'state_permissions').status === 'missing'
+        ? LEGACY_PROJECT_CODEX_HOMES_DIRECTORY : PROJECT_CODEX_HOMES_DIRECTORY
+      const homesRoot = join(this.#stateRoot, directory)
       const home = join(homesRoot, workspace.codex_home_key)
       if (!isDirectChild(homesRoot, home)) throw new ProjectStateError('workspace_boundary_changed')
       let homes: {readonly file: FileHandle; readonly binding: DirectoryBinding} | null = null
@@ -1687,12 +1709,12 @@ export class ProjectStore {
         homes = await this.#ensurePrivateDirectoryAt(
           stateRoot,
           this.#stateRoot,
-          PROJECT_CODEX_HOMES_DIRECTORY,
+          directory, false, create,
         )
         workspaceHome = await this.#ensurePrivateDirectoryAt(
           homes.file,
           homes.binding.canonical,
-          workspace.codex_home_key,
+          workspace.codex_home_key, false, create,
         )
         const canonical = workspaceHome.binding.canonical
         if (canonical !== home || !isDirectChild(homesRoot, canonical)) {
@@ -1701,7 +1723,7 @@ export class ProjectStore {
         await this.#revalidateStateRoot()
         this.#requireMatchesAt(
           stateRoot,
-          PROJECT_CODEX_HOMES_DIRECTORY,
+          directory,
           homes.file,
           'state_permissions',
         )
@@ -2295,9 +2317,10 @@ export class ProjectStore {
     rootPath: string,
     name: string,
     exclusive = false,
+    create = true,
   ): Promise<{readonly file: FileHandle; readonly binding: DirectoryBinding}> {
     requireProjectBasename(name, 'state_permissions')
-    const created = this.#mkdirPrivateAt(root, name, 'state_permissions')
+    const created = create ? this.#mkdirPrivateAt(root, name, 'state_permissions') : {status: 'exists'} as const
     if (created.status !== 'ok' && (exclusive || created.status !== 'exists')) {
       throw new ProjectStateError('state_permissions')
     }
@@ -3543,8 +3566,11 @@ function decodeSession(value: unknown): ProjectSessionRecord {
     'session_id', 'workspace_id', 'display_title', 'normalized_title', 'codex_thread_id',
     'state', 'created_at', 'last_used_at',
     ...(Object.hasOwn(recordValue(value), 'executor_home') ? ['executor_home'] : []),
+    ...(Object.hasOwn(recordValue(value), 'origin') ? ['origin'] : []),
   ])
   if (raw.executor_home !== undefined && (typeof raw.executor_home !== 'string' || !isAbsolute(raw.executor_home))) throw new ProjectStateError('state_corrupt')
+  if (raw.origin !== undefined && raw.origin !== 'nova' && raw.origin !== 'external') throw new ProjectStateError('state_corrupt')
+  if (raw.origin === 'external' && raw.executor_home === undefined) throw new ProjectStateError('state_corrupt')
   const title = normalizeProjectSessionTitle(raw.display_title)
   if (raw.normalized_title !== title.normalized) throw new ProjectStateError('state_corrupt')
   if (raw.state !== 'starting' && raw.state !== 'ready' && raw.state !== 'unavailable') {
@@ -3556,6 +3582,8 @@ function decodeSession(value: unknown): ProjectSessionRecord {
   }
   return Object.freeze({
     ...(typeof raw.executor_home === 'string' ? {executor_home: raw.executor_home} : {}),
+    ...(raw.origin === 'nova' || raw.origin === 'external' ? {origin: raw.origin}
+      : typeof raw.executor_home === 'string' ? {origin: 'external' as const} : {}),
     session_id: storedId(raw.session_id),
     workspace_id: storedId(raw.workspace_id),
     display_title: title.display,

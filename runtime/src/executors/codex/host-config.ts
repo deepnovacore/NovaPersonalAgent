@@ -126,9 +126,15 @@ export function resolveCodexHostConfig(
   } catch {
     throw new CodexHostConfigurationError('codex_managed_root_invalid')
   }
+  const localCodexHome = join(safeCatalog.homeDirectory, '.codex')
+  try { lstatSync(localCodexHome) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    // The selected user home already exists; preserve its ACL inheritance on Windows.
+    mkdirSync(localCodexHome, {mode: 0o700})
+  }
   return Object.freeze({
     [resolvedCodexHostConfigBrand]: true as const,
-    localCodexHome: join(safeCatalog.homeDirectory, '.codex'),
+    localCodexHome: realpathSync(localCodexHome),
     binary,
     binaryPrefixArgs,
     workspace,

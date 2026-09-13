@@ -133,6 +133,7 @@ test('production preflight uses the fixed native probe and never passes credenti
       developerInstructions: null,
       resumeThreadId: null,
       persistent: false,
+      preserveHome: true,
       workingInterval: 30,
     }, 5_000)
     assert.deepEqual(result, {
@@ -145,6 +146,7 @@ test('production preflight uses the fixed native probe and never passes credenti
       limits: {cpu: 'finite', as: 'unbounded', nofile: 'finite'},
     })
     assert.equal(calls.length, 3)
+    assert.equal(calls.find(call => call.argv[0] === 'login')?.environment.CODEX_HOME, await realpath(home))
     for (const call of calls) {
       assert.equal(call.binary, await realpath(binary))
       assert.equal(call.cwd, await realpath(workspace))

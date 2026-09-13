@@ -135,7 +135,7 @@ export interface CodingExecutorResource {
   readonly agentDescriptor?: AgentDescriptor
   readonly agentControllerFactory?: CodingAgentControllerFactory
   readonly adapter: ExecutorAdapter
-  readonly mode: 'ordinary' | 'live' | 'project'
+  readonly mode: 'live' | 'project'
   readonly projectView: PublicProjectView | null
   readonly approvalController: ApprovalController | null
   start(): Promise<void>
