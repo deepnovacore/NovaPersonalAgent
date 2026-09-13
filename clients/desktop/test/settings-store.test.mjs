@@ -149,7 +149,7 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     planReadback: 'confirm',
     plannerModel: 'planner-model',
     progressBubbles: 'all',
-    embeddingProvider: 'local',
+    embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
     capabilitiesConfigPath: '/state/capabilities.json',
     knowledgePath: '/state/knowledge.sqlite',
@@ -171,7 +171,7 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     planReadback: 'confirm',
     plannerModel: 'planner-model',
     progressBubbles: 'all',
-    embeddingProvider: 'local',
+    embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
     capabilitiesConfigPath: '/state/capabilities.json',
     knowledgePath: '/state/knowledge.sqlite',
@@ -182,7 +182,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     clarificationDepth: 'deep',
     planReadback: 'always',
     progressBubbles: 'verbose',
-    embeddingProvider: 'remote',
   }})
   assert.equal(invalid.codexApprovalMode, 'ask')
   assert.equal(invalid.clarificationDepth, 'balanced')
@@ -1349,4 +1348,21 @@ test('phone pairing configuration persists but does not restart or leak into the
     const rejected = publicSettings(applySettingsUpdate(next, invalid))
     for (const key of Object.keys(invalid)) assert.equal(rejected[key], fields[key])
   }
+})
+
+test('unsupported embedding settings never become cloud defaults during normalize, save or load', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nova-embedding-settings-'))
+  const file = join(directory, 'settings.json')
+  try {
+    for (const embeddingProvider of ['local', 'remote']) {
+      const settings = {...DEFAULT_SETTINGS, embeddingProvider}
+      assert.throws(() => normalizeSettings(settings), {code: 'embedding_provider_invalid',
+        message: 'embeddingProvider: allowed value is dashscope'})
+      assert.throws(() => normalizeSettings({}, settings), /embeddingProvider.*dashscope/u)
+      await writeFile(file, JSON.stringify(settings))
+      await assert.rejects(loadSettings(file), /embeddingProvider.*dashscope/u)
+      await assert.rejects(saveSettings(file, settings), /embeddingProvider.*dashscope/u)
+      assert.equal(JSON.parse(await readFile(file, 'utf8')).embeddingProvider, embeddingProvider)
+    }
+  } finally {await rm(directory, {recursive: true, force: true})}
 })

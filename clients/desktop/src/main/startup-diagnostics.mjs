@@ -11,6 +11,7 @@ const MESSAGE_CODES = new Set([
 ])
 
 export function startupFailureCode(error) {
+  if (error?.code === 'embedding_provider_invalid') return error.code
   if (MESSAGE_CODES.has(error?.message)) return error.message
   if (error?.name === 'MainCameraConfigurationError') return 'camera_configuration_invalid'
   if (error?.message === 'NOVA_AUDIO_AGENT_BACKEND must be node') {
@@ -21,8 +22,12 @@ export function startupFailureCode(error) {
 
 export function reportStartupFailure(error, {
   write = chunk => process.stderr.write(chunk),
+  showError,
 } = {}) {
   const code = startupFailureCode(error)
   write(`[desktop-diagnostic] startup_failure code=${code}\n`)
+  if (code === 'embedding_provider_invalid') {
+    showError?.('embeddingProvider 仅支持 dashscope，后端未启动，原配置未修改。请在设置文件中明确选择云端服务后再重启。')
+  }
   return code
 }

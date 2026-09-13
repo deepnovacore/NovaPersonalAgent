@@ -265,7 +265,7 @@ test('resolved desktop settings override inherited Codex and model configuration
   assert.equal(spec.env.NOVA_AUDIO_AGENT_MODEL_BASE_URL, 'https://settings.example/v1')
 })
 
-test('launch spec maps v4 runtime settings and omits empty optional overrides', () => {
+test('launch spec forwards explicit v4 settings for runtime validation and omits empty overrides', () => {
   const spec = nodeLaunchSpec({
     workspace: '/workspace',
     token: TOKEN,

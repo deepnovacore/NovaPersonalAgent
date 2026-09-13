@@ -18,7 +18,7 @@ const executorApprovalModeSchema = z.enum(['ask', 'yolo'])
 const clarificationDepthSchema = z.enum(['minimal', 'balanced', 'thorough'])
 const planReadbackSchema = z.enum(['summary', 'confirm', 'silent'])
 const progressBubblesSchema = z.enum(['off', 'milestones', 'all'])
-const embeddingProviderSchema = z.enum(['dashscope', 'local'])
+const embeddingProviderSchema = z.enum(['dashscope'])
 const memoryConnectionSchema = z.enum(['disabled', 'local', 'remote'])
 const searchProviderSchema = z.enum(['mcp', 'tavily'])
 const volcFloatSchema = z.custom<number>(value => typeof value === 'number')
@@ -714,7 +714,8 @@ function parseProgressBubbles(value: string | undefined): z.infer<typeof progres
 }
 
 function parseEmbeddingProvider(value: string | undefined): z.infer<typeof embeddingProviderSchema> {
-  return parseSafeSelector(embeddingProviderSchema, value, 'dashscope')
+  return parseSelector(embeddingProviderSchema, value, 'dashscope',
+    'NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER (allowed: dashscope)')
 }
 
 function parseSearchProvider(value: string | undefined): z.infer<typeof searchProviderSchema> {

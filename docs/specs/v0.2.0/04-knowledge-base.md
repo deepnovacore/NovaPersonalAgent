@@ -1,6 +1,6 @@
 # 04. Knowledge Base (RAG)
 
-> 摘要：新增独立的知识层 K（用户策展文档），与 L0–L4 工作区图分离。本地 SQLite Worker 存 sources / chunks / embeddings；默认 DashScope `text-embedding-v4`，local EmbeddingProvider 只预留接口、界面上不可选。混合检索（向量 + FTS5，RRF）。检索面：内置 Knowledge MCP 的 `mcp__nova_knowledge__recall`、工作单引用（只附加当前执行端能解析的定位符）、可选 Codex 用的 loopback `nova-knowledge` MCP（开启即必须提供 `get_chunk`）。数据流向在设置页明示。默认不自动注入 ContextView。
+> 摘要：新增独立的知识层 K（用户策展文档），与 L0–L4 工作区图分离。本地 SQLite Worker 存 sources / chunks / embeddings；默认 DashScope `text-embedding-v4`，仅支持 DashScope，旧 local 配置明确拒绝。混合检索（向量 + FTS5，RRF）。检索面：内置 Knowledge MCP 的 `mcp__nova_knowledge__recall`、工作单引用（只附加当前执行端能解析的定位符）、可选 Codex 用的 loopback `nova-knowledge` MCP（开启即必须提供 `get_chunk`）。数据流向在设置页明示。默认不自动注入 ContextView。
 
 > 决定（2026-09-05，用户确认）：M4 纳入本轮实施。知识检索不新增原生语音工具，改为默认保留名称的内置 Knowledge MCP；模块默认关闭。`get_chunk` 仅投射给 Codex，导入/移除/重建仅走宿主入口。本卷描述验收目标，进度以 STATUS 台账为准。
 >
@@ -27,13 +27,12 @@
 3. Separate knowledge from the workspace graph (layer K ≠ L1).
 4. Provide three controlled retrieval surfaces: FrontBrain tool, planner
    references, optional Codex MCP.
-5. Default embedding via existing DashScope credentials; reserve a local
-   provider port.
+5. Embedding via existing DashScope credentials; unsupported providers fail
+   configuration validation without a cloud fallback.
 
 ## Non-goals
 
-- Shipping a full local embedding implementation in v0.2.0 (interface + settings
-  enum only).
+- Shipping a local embedding implementation or configuration entry in v0.2.0.
 - Auto-injecting knowledge into every ContextView (no automatic recall setting is implemented).
 - Merging knowledge cards into the workspace graph board.
 - Multi-user sync, cloud blob storage, or proprietary vector DB requirement.
@@ -96,7 +95,10 @@ interface EmbeddingProvider {
 | Provider id | Status in v0.2.0 |
 |---|---|
 | `dashscope` | Shipped — `text-embedding-v4` (or current DashScope embedding id verified at impl) via compatible `model_base_url` / DashScope key |
-| `local` | Interface reserved. **Not selectable** in the panel (shown disabled with “即将支持”); the runtime enum accepts it only behind `NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER=local` for development and then fails assembly with `embedding_provider_unavailable` |
+
+Only `dashscope` is supported. Explicit unsupported values (including old `local`
+settings) fail configuration validation; they never fall back to cloud embedding.
+The disabled local option has been removed.
 
 Settings: `embeddingProvider`, `embeddingModel` (see [06](06-settings-and-config.md)).
 Changing provider requires explicit reindexing to re-embed all chunks. Until then,
@@ -279,8 +281,8 @@ current rerun counts and platform skips belong in [IMPLEMENTATION](IMPLEMENTATIO
 - [x] Disabled module removes `mcp__nova_knowledge__recall` from schemas.
 - [x] Simulated embedding failure marks the ingest job failed without crashing
       runtime; DashScope HTTP errors are separately normalized by adapter tests.
-- [x] `local` provider not selectable in the panel; env-forced `local` fails
-      assembly with `embedding_provider_unavailable`, no half-written vectors.
+- [x] Unsupported embedding providers fail configuration validation before opening
+      a store; desktop load/save also reject old `local` settings without fallback.
 - [x] `nova-knowledge` listens on loopback only; token required; both `recall`
       and `get_chunk` present in `tools/list`; fixture for `ok` / `stale` /
       `gone`.
@@ -311,7 +313,7 @@ DashScope service call or a human voice session.
 | 6 | `knowledge-store.test.ts`: busy Worker, unresolved termination and same-database reopen; `knowledge-service.test.ts`: deferred reindex cannot overwrite reopened store; `realtime-assembly.test.ts`: full prepared Knowledge/core/realtime cleanup settles within the outer budget |
 | 7 | `knowledge-assembly.test.ts`: disabled module and exact read-only tool surface |
 | 8 | `knowledge-service.test.ts`: failed reindex preserves old source and records a safe failure; `knowledge-embeddings.test.ts`: simulated HTTP failures |
-| 9 | Static disabled `local` option in `desktop/nova-audio-agent-desktop/src/renderer/settings.html`; `knowledge-assembly.test.ts`: forced local fails before opening store |
+| 9 | `config.test.ts`, `settings-store.test.mjs`, `main-security.test.mjs`: unsupported providers fail before startup, including recovery; settings UI offers only DashScope |
 | 10 | `knowledge-mcp.test.ts`: actual SDK/loopback authentication and strict ok/stale/gone branches; `knowledge-assembly.test.ts`: loopback projection |
 | 11 | `knowledge-references.test.ts`: exposure, canonical workspace paths, stale/deleted pre-render references |
 | 12 | Static disclosure table in `desktop/nova-audio-agent-desktop/src/renderer/settings.html`; `desktop/nova-audio-agent-desktop/test/knowledge-panel.test.mjs` and `knowledge-actions.test.mjs`: consent precedes ingest |

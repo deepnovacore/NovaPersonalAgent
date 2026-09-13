@@ -20,7 +20,6 @@ export async function prepareKnowledge(
   settings: Settings, capabilities: CapabilityRegistry, signal?: AbortSignal,
 ): Promise<PreparedKnowledge | undefined> {
   if (!capabilities.modules.knowledge.enabled) return undefined
-  if (settings.embedding_provider !== 'dashscope') throw new Error('embedding_provider_unavailable')
   signal?.throwIfAborted()
   const embedding = new DashScopeEmbeddingProvider({baseUrl: settings.model_base_url,
     apiKey: resolveModelApiKey(settings) ?? '', model: settings.embedding_model})

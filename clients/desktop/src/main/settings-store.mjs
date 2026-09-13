@@ -93,7 +93,6 @@ const CODEX_APPROVAL_MODES = new Set(['ask', 'yolo'])
 const CLARIFICATION_DEPTHS = new Set(['minimal', 'balanced', 'thorough'])
 const PLAN_READBACK_MODES = new Set(['summary', 'confirm', 'silent'])
 const PROGRESS_BUBBLE_MODES = new Set(['off', 'milestones', 'all'])
-const EMBEDDING_PROVIDERS = new Set(['dashscope', 'local'])
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
 // Control characters would survive into an env value handed to a child process.
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
@@ -165,7 +164,11 @@ const validCodexApprovalMode = enumValidator(CODEX_APPROVAL_MODES)
 const validClarificationDepth = enumValidator(CLARIFICATION_DEPTHS)
 const validPlanReadback = enumValidator(PLAN_READBACK_MODES)
 const validProgressBubbles = enumValidator(PROGRESS_BUBBLE_MODES)
-const validEmbeddingProvider = enumValidator(EMBEDDING_PROVIDERS)
+function validEmbeddingProvider(value) {
+  if (typeof value !== 'string') return null
+  if (value !== 'dashscope') throw Object.assign(new Error('embeddingProvider: allowed value is dashscope'), {code: 'embedding_provider_invalid'})
+  return value
+}
 
 function validModelOrVoice(value) {
   if (typeof value !== 'string') return null
@@ -759,11 +762,13 @@ export function readSecret(settings, key, codec) {
 }
 
 export async function loadSettings(file) {
+  let raw
   try {
-    return normalizeSettings(JSON.parse(await readFile(file, 'utf8')))
+    raw = JSON.parse(await readFile(file, 'utf8'))
   } catch {
     return normalizeSettings(undefined)
   }
+  return normalizeSettings(raw)
 }
 
 export async function saveSettings(file, settings) {
@@ -799,6 +804,7 @@ export async function restoreSettingsRecovery(file) {
   try { recovery = JSON.parse(await readFile(`${file}.recovery`, 'utf8')) }
   catch (error) { if (error.code === 'ENOENT') return null; throw error }
   if (recovery?.version !== 1 || !isRecord(recovery.settings)) throw new Error('invalid settings recovery')
+  const settings = normalizeSettings(recovery.settings)
   const capability = recovery.capability
   if (capability !== null) {
     if (!isRecord(capability) || typeof capability.path !== 'string' || !isAbsolute(capability.path)
@@ -808,7 +814,7 @@ export async function restoreSettingsRecovery(file) {
         || (capability.previous !== '' && !BASE64.test(capability.previous))))) throw new Error('invalid capability recovery')
     await restoreCapabilitySnapshot(capability)
   }
-  const settings = await saveSettings(file, recovery.settings)
+  await saveSettings(file, settings)
   // Keep the record until restored settings have activated successfully.
   return settings
 }

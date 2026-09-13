@@ -12,6 +12,7 @@ import {
   resolveCascadedSelection,
   resolveModelApiKey,
   resolveProactivity,
+  settingsSchema,
 } from '../src/config.js'
 
 test('DashScope key also configures support models only on the DashScope endpoint', () => {
@@ -131,7 +132,7 @@ test('v4 settings env selectors and paths load with the documented names', () =>
     NOVA_AUDIO_AGENT_PROGRESS_BUBBLES: 'all',
     NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG: '/state/capabilities.json',
     NOVA_AUDIO_AGENT_KNOWLEDGE_PATH: '/state/knowledge.sqlite',
-    NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER: 'local',
+    NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER: 'dashscope',
     NOVA_AUDIO_AGENT_EMBEDDING_MODEL: 'custom-embedding',
   })
   assert.equal(settings.codex_approval_mode, 'yolo')
@@ -141,7 +142,7 @@ test('v4 settings env selectors and paths load with the documented names', () =>
   assert.equal(settings.progress_bubbles, 'all')
   assert.equal(settings.capabilities_config_path, '/state/capabilities.json')
   assert.equal(settings.knowledge_path, '/state/knowledge.sqlite')
-  assert.equal(settings.embedding_provider, 'local')
+  assert.equal(settings.embedding_provider, 'dashscope')
   assert.equal(settings.embedding_model, 'custom-embedding')
 })
 
@@ -152,7 +153,6 @@ test('invalid v4 enum env values fall back safely', () => {
     NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH: 'deep',
     NOVA_AUDIO_AGENT_PLAN_READBACK: 'always',
     NOVA_AUDIO_AGENT_PROGRESS_BUBBLES: 'verbose',
-    NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER: 'remote',
     NOVA_AUDIO_AGENT_SEARCH_PROVIDER: 'unknown',
   })
   assert.equal(settings.codex_approval_mode, 'ask')
@@ -874,4 +874,14 @@ test('removed memory backend configuration fails explicitly instead of silently 
 
 test('deferred native memory provider is rejected explicitly', () => {
   assert.throws(() => loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'local', NOVA_AUDIO_AGENT_MEMORY_PROVIDER: 'mem0'}), /MEMORY_PROVIDER/u)
+})
+
+test('unsupported embedding providers are rejected without a cloud fallback', () => {
+  for (const provider of ['local', 'remote']) {
+    assert.throws(() => loadSettings({NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER: provider}),
+      {name: 'ConfigurationError', code: 'invalid_configuration',
+        message: 'invalid configuration: NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER (allowed: dashscope)'})
+    assert.throws(() => settingsSchema.parse({embedding_provider: provider}),
+      /dashscope/u)
+  }
 })

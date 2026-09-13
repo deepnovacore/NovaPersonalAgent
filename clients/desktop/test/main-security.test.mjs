@@ -1092,3 +1092,34 @@ test('phone actions require the settings sender and restrict actions and device 
   assert.equal((await handler({sender}, 'enable')).state, 'ready')
   assert.equal(calls.length, 1)
 })
+
+
+test('unsupported embedding in recovery reaches startup diagnostics without mutating either file', async () => {
+  const {mkdtemp, writeFile, rm} = await import('node:fs/promises')
+  const {tmpdir} = await import('node:os')
+  const {join} = await import('node:path')
+  const {default: vm} = await import('node:vm')
+  const {saveSettings, loadSettings, restoreSettingsRecovery} = await import('../src/main/settings-store.mjs')
+  const root = await mkdtemp(join(tmpdir(), 'nova-local-embedding-recovery-'))
+  const file = join(root, 'settings.json')
+  try {
+    const current = await saveSettings(file, {})
+    const capabilityPath = join(root, 'capabilities.json')
+    const capabilityText = '{"version":1}'
+    await writeFile(capabilityPath, capabilityText)
+    const journal = JSON.stringify({version: 1, settings: {...current, embeddingProvider: 'local'}, capability: {
+      path: capabilityPath, written: Buffer.from(capabilityText).toString('base64'), previous: null,
+    }})
+    await writeFile(`${file}.recovery`, journal)
+    const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+    const helper = source.slice(source.indexOf('async function loadStartupSettings()'), source.indexOf('async function startSelectedCamera'))
+    const context = vm.createContext({settingsFile: () => file, loadSettings, restoreSettingsRecovery,
+      publishSettingsApplyStatus() {}, settingsRecoveryAvailable: false, openSettingsRequested: false})
+    vm.runInContext(helper, context)
+    await assert.rejects(context.loadStartupSettings(), {code: 'embedding_provider_invalid'})
+    assert.equal(context.currentSettings, undefined)
+    assert.equal(await readFile(capabilityPath, 'utf8'), capabilityText)
+    assert.deepEqual(await loadSettings(file), current)
+    assert.equal(await readFile(`${file}.recovery`, 'utf8'), journal)
+  } finally {await rm(root, {recursive: true, force: true})}
+})

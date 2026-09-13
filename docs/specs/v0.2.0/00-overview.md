@@ -185,7 +185,7 @@ merges — not as part of this documentation phase.
 
 ### Deferred items that return under a concrete use case
 
-- Local embedding provider implementation (interface reserved in 04).
+- Local embedding provider implementation and configuration entry (unsupported in 04).
 - `sqlite-vec` acceleration if chunk counts exceed brute-force comfort.
 - Widening the voice approval decision (`confirm(id, accepted)` after 08) to
   session-scoped grants.
@@ -240,7 +240,7 @@ schema bundle before revising. Disposition:
 | Product | Clarify to reduce errors, not add rounds | — | `02` question ownership (`user` vs `repo`), inferred vs stated, planner assumptions |
 | Product | Ship one complete coding loop first; milestones over weeks; verify search before flipping default | — | This file: milestones M1–M4, 03a-flip gate, 04 release-gate question |
 | Product | Bubbles are reminders, not audit; native window constraints | — | `05` last-result entry, main-process bounds reservation, banner coexistence |
-| Product | Make knowledge data flow explicit; unimplemented provider not selectable | — | `04` data-flow table in the panel; `local` disabled in UI |
+| Product | Make knowledge data flow explicit; unimplemented provider not selectable | — | `04` data-flow table in the panel; `local` removed from UI and rejected during configuration validation |
 
 ### 2026-09-03 — second pass (confirm loop, project actions, headless, alias)
 

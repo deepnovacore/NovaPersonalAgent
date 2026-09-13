@@ -983,7 +983,8 @@ async function loadStartupSettings() {
     currentSettings = recovered ?? await loadSettings(settingsFile())
     if (recovered) publishSettingsApplyStatus('recovery_pending')
     return true
-  } catch {
+  } catch (error) {
+    if (error?.code === 'embedding_provider_invalid') throw error
     currentSettings = await loadSettings(settingsFile())
     settingsRecoveryAvailable = true
     publishSettingsApplyStatus('recovery_failed')
@@ -1751,7 +1752,9 @@ if (packagedSourceRollbackUnavailable) {
     })
     return start()
   }).catch(error => {
-    reportStartupFailure(error)
+    reportStartupFailure(error, {
+      showError: message => dialog.showErrorBox('向量服务配置不受支持', `${message}\n设置文件：${settingsFile()}（如有 .recovery 文件也需检查）`),
+    })
     app.quit()
   })
 }
