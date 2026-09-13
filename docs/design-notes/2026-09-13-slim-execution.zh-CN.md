@@ -9,10 +9,10 @@
 | 3 | 完成并集成 | 图功能退役，sensitivity 保留，当前规范同步；真实 Chrome 进度界面在三个缩放等级通过。全量运行时仅发现固定提示词快照遗漏一条图说明，精确同步后协议 14 项通过；桌面 1020 通过/3 跳过。 |
 | 4 | 完成并集成 | 发布检查收敛到 250 行 verifier，保留实际依赖 staging、原生资源 manifest 和签名路径；真实 macOS 未签名安装副本的后端握手通过。集成桌面 878 通过/3 跳过。签名发布未执行。 |
 | 5 | 完成并集成 | Node 文件系统替代原生文件操作；Windows 实际 MSVC 编译、目录刷盘、锁竞争和进程退出后释放、Node 路径身份测试通过。Claude 最终复审 PASS；集成 check、运行时 2327 通过/8 跳过、桌面 878 通过/3 跳过。 |
-| 6 | 执行中 | provider-projection 与 host-delivery 已提取，均通过 Claude 关键审查；相关 361 项测试通过。tool/project owner 尚待完成。 |
-| 7 | 设计复审中 | 隔离 Codex 实测进程级 API key 不覆盖磁盘认证；确认 config/read 返回继承 provider 字段，整表 TOML 覆盖仍会合并旧字段，需校验实际配置。 |
-| 8 | 独立准备中 | 桌面设置及生命周期文件收敛；其余分组待执行。 |
-| 9 | 未完成 | 不删除现用行为断言。 |
+| 6 | 完成并集成 | 四个实际 owner 已迁出，service.ts 1800 行；各阶段 Claude PASS、361 项回归通过。构造期 intake dispatch 的 await 顺序按复审恢复，相关 329 项复验通过。 |
+| 7 | 实现完成，关键复审中 | 隔离分支 b45582a6：共享 HOME、Nova/external 归属、旧私有 HOME 原位兼容、无磁盘凭据覆盖；全量 runtime 2599 通过/8 跳过、desktop 1028 通过/3 跳过。真实 Codex 0.154.0 的隔离 HOME 与假 key 探针验证进程 provider 和配置继承。待集成。 |
+| 8 | 各组实现与审查中 | 桌面传输/assembly、设置/lifecycle、审批、存储 schema、知识库直调各组已通过审查；deadline race 已收敛并修复定时器监听清理。待整批集成。 |
+| 9 | 实现中 | service 按 owner 拆为五组，282 个静态测试调用与 1036 个断言 token 保持；项目存储临时目录 harness 收敛中。不删除现用行为断言。 |
 | 10 | 未开始 | 必须最后迁移目录并检查发布入口和 worker 路径。 |
 
 ## 实测修正的计划前提
@@ -24,5 +24,10 @@
 - Node 路径操作的单用户目录替换竞态上限已在代码说明；不伪造原生相对句柄保证。
 - 批 4 旧 build/sign hooks 直接依赖被删脚本，因此同步改接精简后的实际 staging/manifest。签名能力保留不代表完成真实签名发布验收。
 - 两处既有测试 fixture 已修复：认证 helper 必须消费 ready 后任务快照；renderer mock 必须提供 microphone.onToggle。生产语义未为测试改变。
+
+- 存储事务锁不验证磁盘 JSON：保留严格字段 schema 与跨记录不变量，改用已有 Zod；326 组新旧结果一致。目录替换原本只有一个 mutation owner，journal 的 prepared/committed 恢复不能合并成裸 rename。
+- confirmed capability 的 admitting/retry/revoke 是真实并发授权边界，保留。Codex 审批模块中的真实参数解析保留，删除的是别名与继承透传。
+- 当前 Codex 版本准入是 >=0.145.0，schema 证据是 0.152.0，桌面 bundle 另有版本；不存在可直接复用的精确认证 pin。保留实际协议准入校验与实时输入验证，不能用只走 initialize/thread 的一次 smoke 冒充所有审批/turn 方法的认证。
+- 公共 deadline race 只复用等待/取消监听；adapter 的晚到写入结果与清理宽限、RPC 的主动中止、transport 的被动等待仍由原 owner 处理。
 
 最终计量按生产、测试、脚本、文档和审计/历史备份分别统计；文件移动和 import 改写不算净删除收益。
