@@ -80,12 +80,10 @@ interface ToolContinuationPorts {
 }
 
 export class ToolContinuations {
-  async dispatchIntake(
-    dispatch: IntakeOptions['dispatch'],
+  recordIntakeDispatch(
     intake: Parameters<IntakeOptions['dispatch']>[0],
-    stillWanted: Parameters<IntakeOptions['dispatch']>[1],
-  ): Promise<Awaited<ReturnType<IntakeOptions['dispatch']>>> {
-    const result = await dispatch(intake, stillWanted)
+    result: Awaited<ReturnType<IntakeOptions['dispatch']>>,
+  ): Awaited<ReturnType<IntakeOptions['dispatch']>> {
     if (result.accepted && result.delegate_id !== null && result.delegate_id !== undefined) {
       const title = intake.title ?? intake.target?.session_title
       this.session.registerDelegate(result.delegate_id, {

@@ -259,9 +259,10 @@ export class RealtimeService {
     const intake: IntakeOptions | undefined = options.intake === undefined ? undefined : {
       ...options.intake,
       idFactory: this.#idFactory,
-      dispatch: (intake, stillWanted) => this.#continuations.dispatchIntake(
-        (intake, stillWanted) => options.intake!.dispatch(intake, stillWanted), intake, stillWanted,
-      ),
+      dispatch: async (intake, stillWanted) => {
+        const result = await options.intake!.dispatch(intake, stillWanted)
+        return this.#continuations.recordIntakeDispatch(intake, result)
+      },
       diagnostic: code => this.#onDiagnostic(`[realtime-diagnostic] ${code}`),
       invalidateProposal: () => this.#confirmation.invalidateProjectConfirmation('intake_amended'),
       fact: (intake, text) => {
