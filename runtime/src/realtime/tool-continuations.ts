@@ -1,3 +1,4 @@
+import type {IntakeOptions} from '../executors/coding/intake.js'
 import {
   parseAgentActionResult,
   type AgentActionResult,
@@ -79,6 +80,27 @@ interface ToolContinuationPorts {
 }
 
 export class ToolContinuations {
+  async dispatchIntake(
+    dispatch: IntakeOptions['dispatch'],
+    intake: Parameters<IntakeOptions['dispatch']>[0],
+    stillWanted: Parameters<IntakeOptions['dispatch']>[1],
+  ): Promise<Awaited<ReturnType<IntakeOptions['dispatch']>>> {
+    const result = await dispatch(intake, stillWanted)
+    if (result.accepted && result.delegate_id !== null && result.delegate_id !== undefined) {
+      const title = intake.title ?? intake.target?.session_title
+      this.session.registerDelegate(result.delegate_id, {
+        summary: intake.slots.goal.note.slice(0, 240),
+        state: 'running',
+        channel: this.#ports.coding?.channel ?? 'coding',
+        ...(intake.target === null ? {} : {project: intake.target.workspace_display_name}),
+        ...(title === undefined || title === null ? {} : {title}),
+      })
+      this.#ports.telemetry?.record('executor.dispatch', {delegate_id: result.delegate_id})
+      this.#ports.publishExecutorState()
+    }
+    return result
+
+  }
 
   resetCalls(): void {
     this.#toolCalls.clear()

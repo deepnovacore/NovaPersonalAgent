@@ -1,31 +1,27 @@
-import type { Clock } from '../clock.js'
-import type { CodingProgressNarrationState} from '../coding-progress-narration.js';
-import {codingProgressSummary } from '../coding-progress-narration.js'
-import { validProgressSummary,type EventRecord,type JsonValue } from '../events.js'
-import {
-isMonitorPolicy,
-isPreemptiveMonitorAlert,
-monitorAlertDelivery,
-parseMemoryRef
-} from '../memory.js'
-import { stripLikePython } from '../python-text.js'
-import type { WakeReason } from '../slots.js'
-import type { Suggestion } from '../suggestions.js'
-import { finalSpeechView,genericFinalSpeechView,type CodingChannel } from './evidence.js'
+import { canonicalJson } from '../canonical-json.js';
+import type { Clock } from '../clock.js';
+import type { CodingProgressNarrationState } from '../coding-progress-narration.js';
+import { codingProgressSummary } from '../coding-progress-narration.js';
+import { validProgressSummary,type EventRecord,type JsonValue } from '../events.js';
+import { isMonitorPolicy,isPreemptiveMonitorAlert,monitorAlertDelivery,parseMemoryRef } from '../memory.js';
+import { stripLikePython } from '../python-text.js';
+import type { WakeReason } from '../slots.js';
+import type { Suggestion } from '../suggestions.js';
+import { finalSpeechView,genericFinalSpeechView,type CodingChannel } from './evidence.js';
 import type {
 HostResponseIntent
-} from './protocol.js'
-import type { DelegateLike,ExecutorManifestLike,HostItemOptions,ServiceRuntime } from './service-ports.js'
+} from './protocol.js';
+import type { DelegateLike,ExecutorManifestLike,HostItemOptions,ServiceRuntime } from './service-ports.js';
 import {
 HIT_ALERT_MIN_PRIORITY,
 MAX_HOST_FACT_CHARS,
 PREEMPT_MIN_PRIORITY,
-PROGRESS_HOST_ITEM_TTL_S,
-hostFactIntent
-} from './service-state.js'
-import { type RealtimeSession } from './session.js'
-import { SPEECH_FINAL_LIMIT,prepareForSpeech } from './speech-prep.js'
-import type { RealtimeTelemetry } from './telemetry.js'
+PROGRESS_HOST_ITEM_TTL_S,diagnosticName,hostFactIntent,type ExecutorState
+} from './service-state.js';
+import { activeExecutorContextData } from './session-state.js';
+import { type RealtimeSession } from './session.js';
+import { SPEECH_FINAL_LIMIT,prepareForSpeech } from './speech-prep.js';
+import type { RealtimeTelemetry } from './telemetry.js';
 
 function suggestionSpeechView(content: Readonly<Record<string, JsonValue>>): string {
   for (const key of ['observation', 'summary', 'message'] as const) {
@@ -58,8 +54,11 @@ interface ProviderProjectionPorts {
  readonly telemetry: RealtimeTelemetry | undefined
  readonly idFactory: () => string
  queueHostItem(intent: HostResponseIntent, options?: HostItemOptions): void
- executorDisplayName(channel: string): string
- publishExecutorState(): void
+ readonly agentNameForChannel: (channel: string) => string | null
+ readonly clearingConversation: () => boolean
+ readonly onActiveWorkChanged: () => void
+ readonly onExecutorState: (state: ExecutorState) => void
+ readonly onDiagnostic: (line: string) => void
  resolveSyncResult(event: Extract<EventRecord, {kind: 'handoff'}>): boolean
  expireSyncResult(event: Extract<EventRecord, {kind: 'deadline'}>): boolean
  hasSemanticAcknowledgement(id: string): boolean
@@ -71,6 +70,69 @@ interface ProviderProjectionPorts {
 }
 
 export class ProviderProjection {
+
+  executorDisplayName(channel: string): string {
+    const agent = this.ports.agentNameForChannel(channel)
+    if (agent !== null) return agent
+    const manifest = this.ports.runtime.executors.get(channel)?.manifest
+    if (manifest !== undefined && isMonitorPolicy(manifest.policy)) {
+      return monitorAlertDelivery(manifest.policy) === 'deferred' ? '观察' : '监控'
+    }
+    return manifest?.display_name ?? channel
+  }
+
+  /** A channel's manifest priority, or the default when there is no manifest for it. */
+  executorPriority(channel: string | null): number {
+    if (channel === null) return 50
+    return this.ports.runtime.executors.get(channel)?.manifest.policy.priority ?? 50
+  }
+
+ get executorState(): ExecutorState {return this.#executorState}
+ setExecutorStateForTest(state: ExecutorState): void {this.#executorState = state; this.ports.onExecutorState(state)}
+
+  /**
+   * Tell the renderer whether Codex is working, when that changes.
+   *
+   * Derived from the session's live delegates rather than counted here: the session is what knows
+   * when one finishes, and a separate counter would drift the moment a delegate ended by any route
+   * this layer does not see.
+   */
+  publishExecutorState(): void {
+    const delegates = this.ports.session.snapshot().active_delegates
+    const fingerprint = canonicalJson(activeExecutorContextData(
+      delegates,
+      channel => this.ports.agentNameForChannel(channel),
+    ))
+    if (fingerprint !== this.#activeWorkFingerprint) {
+      this.#activeWorkFingerprint = fingerprint
+      if (!this.ports.clearingConversation()) {
+        try {
+          this.ports.onActiveWorkChanged()
+        } catch (cause) {
+          this.ports.onDiagnostic(
+            `[realtime-diagnostic] active_work_observer_failed type=${diagnosticName(cause)}`,
+          )
+        }
+      }
+    }
+    const next: ExecutorState = delegates.some(([, record]) => record.channel === this.ports.coding?.channel)
+      ? 'running'
+      : 'idle'
+    if (next === this.#executorState) return
+    this.#executorState = next
+    try {
+      this.ports.onExecutorState(next)
+    } catch (cause) {
+      // A renderer that cannot accept the state must not stop the service that produced it.
+      this.ports.onDiagnostic(`[realtime-diagnostic] codex_state_observer_failed type=${diagnosticName(cause)}`)
+    }
+  }
+
+  /** Compact fingerprint of delegate progress for context refresh. */
+  #activeWorkFingerprint = canonicalJson(activeExecutorContextData([]))
+
+  #executorState: ExecutorState = 'idle'
+
  readonly #lastProgressSummary = new Map<string, string>()
  constructor(private readonly ports: ProviderProjectionPorts) {}
  reset(): void { this.#lastProgressSummary.clear() }
@@ -132,7 +194,7 @@ projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
     if (delegate?.delegate_id !== delegateId) return
     const channel = delegate.executor
     this.ports.session.registerDelegate(delegateId, {
-      summary: this.#delegateSummary(delegateId, this.ports.executorDisplayName(channel)),
+      summary: this.#delegateSummary(delegateId, this.executorDisplayName(channel)),
       state: event.kind === 'deadline'
         ? 'unknown'
         : event.payload.outcome === 'ok'
@@ -146,7 +208,7 @@ projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
       elapsed: 0,
     })
     this.#lastProgressSummary.delete(delegateId)
-    this.ports.publishExecutorState()
+    this.publishExecutorState()
   }
 
 onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
@@ -206,7 +268,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     const manifest = this.ports.runtime.executors.get(delegate.executor)?.manifest
     const operation = manifest?.ops.find(candidate => candidate.name === delegate.op)
     if (manifest === undefined || operation === undefined || operation.sync_result === true) return
-    const displayName = this.ports.executorDisplayName(delegate.executor)
+    const displayName = this.executorDisplayName(delegate.executor)
     this.ports.session.registerDelegate(delegateId, {
       summary: this.#delegateSummary(delegateId, displayName),
       state: 'unknown',
@@ -218,7 +280,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     // A settled delegate leaves no dedup residue behind, or a later run of the same delegate id would
     // inherit a summary it never produced.
     this.#lastProgressSummary.delete(delegateId)
-    this.ports.publishExecutorState()
+    this.publishExecutorState()
     this.ports.queueHostItem(hostFactIntent({
       kind: 'final',
       host_item_id: this.ports.idFactory(),
@@ -233,13 +295,13 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
   ): void {
     const delegate = this.#observationDelegate(event)
     if (delegate === undefined) return
-    const displayName = this.ports.executorDisplayName(event.payload.channel)
+    const displayName = this.executorDisplayName(event.payload.channel)
     this.ports.session.registerDelegate(event.payload.delegate_id, {
       summary: this.#delegateSummary(event.payload.delegate_id, displayName),
       state: 'running',
       channel: event.payload.channel,
     })
-    this.ports.publishExecutorState()
+    this.publishExecutorState()
     if (event.payload.content.hit !== true) return
     if (manifest.policy.suggest === true && delegate.routing_class === 'ambient') return
     const monitor = isMonitorPolicy(manifest.policy)
@@ -304,7 +366,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     }
     const delegate = this.ports.runtime.inFlightDelegate(payload.delegate_id)
     if (delegate?.executor !== payload.channel || delegate.op !== payload.op) return
-    const displayName = this.ports.executorDisplayName(payload.channel)
+    const displayName = this.executorDisplayName(payload.channel)
     const coding = payload.channel === this.ports.coding?.channel
     let summary: string | null = payload.summary
     if (!validProgressSummary(summary, payload.phase)) summary = null
@@ -326,7 +388,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       internal_activity: payload.internal_activity,
       elapsed: payload.elapsed,
     })
-    this.ports.publishExecutorState()
+    this.publishExecutorState()
     if (
       payload.phase === 'started'
       && this.ports.hasSemanticAcknowledgement(`background:${payload.delegate_id}`)
@@ -382,7 +444,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     const claimed = this.ports.runtime.claimedHandoff(event.seq)
     if (claimed?.executor !== event.payload.channel) return
     const payload = event.payload
-    const displayName = this.ports.executorDisplayName(payload.channel)
+    const displayName = this.executorDisplayName(payload.channel)
     this.ports.fenceSemanticAcknowledgement(payload.delegate_id)
     this.ports.retireDelegateHostEvents(payload.delegate_id)
     const directSuggestionHandoff = manifest.policy.suggest === true
@@ -402,7 +464,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     })
     // CP1: a settled delegate leaves no dedup residue behind.
     this.#lastProgressSummary.delete(payload.delegate_id)
-    this.ports.publishExecutorState()
+    this.publishExecutorState()
     if (
       isMonitorPolicy(manifest.policy)
       && monitorAlertDelivery(manifest.policy) === 'none'

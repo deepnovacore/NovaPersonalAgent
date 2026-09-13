@@ -1,16 +1,42 @@
+import {
+type AgentController
+} from '../agent-controller.js'
+import type { ApprovalController as ExecutorApprovalController } from '../approval-port.js'
 import type { ExecutorAdmission } from '../causal-runtime.js'
 import type { Clock } from '../clock.js'
 import type { CodingProgressNarrationState } from '../coding-progress-narration.js'
 import { type EventRecord,type JsonValue } from '../events.js'
 import {
+type IntakeEventPort,
+type IntakeOptions,
+} from '../executors/coding/intake.js'
+import {
 type MemoryItem
 } from '../memory.js'
+import type { PlaybackGeneration } from '../playback.js'
 import type { ExecutorRole } from '../ports.js'
-import type { PreemptiveAlert,UrgentHostResponseOwner } from './service-state.js'
+import type {
+ConfirmedProjectOperation,
+ProjectConfirmationController,
+ProjectConfirmationView,
+} from '../project-confirmation.js'
+import type { CompiledTools } from '../tool-schema.js'
+import type { RealtimeRuntimeBridge } from './bridge.js'
+import type {
+RealtimeProviderEvent
+} from './protocol.js'
+import type { PreemptiveAlert } from './service-state.js'
 import {
-type HostItemOwner
+type ExecutorState,
+type HostItemOwner,
+type PreemptiveAlertHistoryRecovery,
+type UrgentHostResponseOwner
 } from './service-state.js'
-import type { RealtimeSession } from './session.js'
+import {
+type CaptionFrame
+} from './session-state.js'
+import { type RealtimeSession } from './session.js'
+import type { RealtimeTelemetry } from './telemetry.js'
 
 export interface DelegateLike {
   readonly delegate_id: string
@@ -119,3 +145,87 @@ export type ProviderReconnectReason =
   | 'project_confirmation_expiry_cleanup'
   | 'client_disconnect'
   | 'test'
+
+/** The provider surface the service uses directly: three calls, everything else via the session. */
+export interface ServiceProvider {
+  transcribeDraft?(pcm: Uint8Array, signal: AbortSignal): Promise<string>
+  submitText?(text: string, signal: AbortSignal): Promise<void>
+  sendAudio(pcm: Uint8Array, signal?: AbortSignal): Promise<void>
+  /**
+   * The event stream.
+   *
+   * Takes the stop signal because a parked stream is the normal case at shutdown: the provider has
+   * nothing to say and the iterator is suspended. Without the signal, `close()` would wait on an
+   * iteration that cannot be cancelled from outside.
+   */
+  events(signal: AbortSignal): AsyncIterable<RealtimeProviderEvent>
+  close(): Promise<void>
+}
+
+export interface RealtimeServiceOptions {
+  readonly intake?: Pick<
+    IntakeOptions,
+    'models' | 'settings' | 'roster' | 'running' | 'activeProject' | 'resolveTarget' | 'dispatch' | 'steer' | 'cancel' | 'record'
+  >
+  /** Supplies the coding controller with host callbacks; the controller owns intake construction. */
+  readonly agentControllerFactory?: AgentControllerFactory
+  /** Additional host-owned controllers. */
+  readonly agentControllers?: readonly AgentController[]
+  readonly provider: ServiceProvider
+  readonly runtime: ServiceRuntime
+  readonly tools: CompiledTools
+  readonly providerSchemas?: readonly Readonly<Record<string, JsonValue>>[]
+  readonly session: RealtimeSession
+  readonly bridge: RealtimeRuntimeBridge
+  readonly idFactory?: () => string
+  readonly onProviderTerminal?: (generation: PlaybackGeneration) => void
+  readonly onExecutorState?: (state: ExecutorState) => void
+  /** Fired when active delegate progress changes so provider context can refresh. */
+  readonly onActiveWorkChanged?: () => void
+  readonly onCaption?: (frame: CaptionFrame) => void
+  /** Receives a user transcript only after the core accepted its evidence; it must not block audio. */
+  readonly onUserTranscriptAccepted?: (turn: {
+    readonly text: string
+    readonly originRef: string
+    readonly sessionEpoch: number
+    readonly itemId: string
+    readonly userInputRevision: number
+  }) => void | Promise<void>
+  readonly telemetry?: RealtimeTelemetry
+  /** Generic composition seam; the legacy Guard-named options below remain accepted. */
+  readonly controlledPreemptiveAlertReconnect?: boolean
+  readonly preemptiveAlertHistoryRecovery?: PreemptiveAlertHistoryRecovery
+  readonly preemptiveAlertHistoryPairs?: number
+  /** @deprecated Compatibility options for existing environment/configuration keys. */
+  readonly controlledGuardReconnect?: boolean
+  readonly guardHistoryRecovery?: PreemptiveAlertHistoryRecovery
+  readonly guardHistoryPairs?: number
+  /** Absent means project confirmation is off, and every branch of it is inert. */
+  readonly projectConfirmation?: ProjectConfirmationController
+  /** Independent one-shot Codex permission authority; absent on non-brokered transports. */
+  readonly executorApproval?: ExecutorApprovalController
+  readonly commitProjectOperation?: (
+    operation: ConfirmedProjectOperation,
+  ) => Promise<{
+    readonly accepted: boolean
+    readonly code: string
+    readonly delegate_id?: string
+  }>
+  readonly onProjectView?: (view: ProjectConfirmationView) => void
+  readonly projectViewProvider?: (pendingConfirmation: boolean) => ProjectConfirmationView
+  /**
+   * How long one expiry cleanup step may take before it is abandoned.
+   *
+   * Injectable because the default is five seconds of wall clock, and the behaviour that matters -- what
+   * happens *after* a step is abandoned -- is otherwise only reachable by waiting that long.
+   */
+  readonly projectExpiryStepTimeoutMs?: number
+  /** Where a diagnostic goes. Defaults to stdout, which is what the oracle captures. */
+  readonly onDiagnostic?: (line: string) => void
+}
+
+export interface AgentControllerFactory {
+  create(context: {
+    readonly intake: IntakeOptions | undefined
+  }): AgentController & {readonly intake?: IntakeEventPort | undefined}
+}

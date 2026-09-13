@@ -6412,7 +6412,7 @@ test('provider reconnect telemetry has categorical outcomes and never leaks prov
 })
 
 test('every provider reconnect call site declares one reviewed categorical reason', () => {
-  const source = ['service.ts', 'tool-continuations.ts'].map(file => readFileSync(
+  const source = ['service.ts', 'tool-continuations.ts', 'project-confirmation-flow.ts'].map(file => readFileSync(
     resolve(import.meta.dirname, '../../src/realtime', file),
     'utf8',
   )).join('\n')

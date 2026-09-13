@@ -430,3 +430,17 @@ export function isAbort(cause: unknown): boolean {
 export function diagnosticName(cause: unknown): string {
   return cause instanceof Error ? cause.constructor.name : typeof cause
 }
+
+/**
+ * Seconds as the oracle's `f"{value:.0f}"` renders them.
+ *
+ * Python rounds half to even and JavaScript's `toFixed` rounds half away from zero, so 0.5 renders as
+ * "0" there and "1" here. Reproduced explicitly because this string is spoken to the user.
+ */
+export function formatSeconds(value: number): string {
+  const floor = Math.floor(value)
+  const remainder = value - floor
+  if (remainder > 0.5) return `${floor + 1}`
+  if (remainder < 0.5) return `${floor}`
+  return `${floor % 2 === 0 ? floor : floor + 1}`
+}

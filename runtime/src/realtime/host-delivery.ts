@@ -1,5 +1,6 @@
 import type {ApprovalHost} from '../approval.js'
 import type {Clock} from '../clock.js'
+import type {JsonValue} from '../events.js'
 import {
   USER_PRIORITY
 } from '../memory.js'
@@ -33,6 +34,7 @@ import type {RealtimeTelemetry} from './telemetry.js'
 import {Mutex, diagnosticName, isAbort} from './service-state.js'
 
 interface HostDeliveryPorts {
+  readonly responseCarriesPersonalRecall: (responseId: string) => boolean
   readonly session: RealtimeSession
   readonly runtime: ServiceRuntime
   readonly clock: Clock
@@ -54,6 +56,54 @@ interface HostDeliveryPorts {
 }
 
 export class HostDelivery {
+
+  /**
+   * What this turn was speaking *about*, when that is unambiguous.
+   *
+   * Only a single suggestion counts: a turn carrying two is answering neither one in particular, and
+   * attributing it to either would be a guess recorded as a fact.
+   */
+  #playbackAttribution(responseId: string): Readonly<Record<string, JsonValue>> | null {
+    const suggestionEvents = this.session.responseEventIds(responseId)
+      .filter(eventId => eventId.startsWith('suggestion:'))
+    if (suggestionEvents.length === 1) {
+      const suggestionId = suggestionEvents[0]!.slice('suggestion:'.length)
+      const suggestion = this.#ports.runtime.suggestionFor?.(suggestionId) ?? null
+      if (suggestion !== null && suggestion.kind === 'selected_progress') {
+        const memoryRef = suggestion.evidence_refs[0]
+        if (memoryRef !== undefined) {
+          return {target: 'selected_progress', memory_ref: memoryRef}
+        }
+      }
+    }
+    if (this.#ports.responseCarriesPersonalRecall(responseId)) return {target: 'memory_recall'}
+    return null
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Family E: playback acknowledgement.
+  //
+  // The renderer is the only thing that knows whether audio actually reached a person. Everything here
+  // turns its reports into facts the rest of the system can rely on -- and refuses to turn them into
+  // more than that. "The renderer said it played 0 ms" is not evidence the user heard anything.
+  // ---------------------------------------------------------------------------------------------
+
+  playbackStarted(utteranceId: string, generationEpoch: number): boolean {
+    // Read before the call, because starting playback is what makes it current.
+    const generation = this.session.currentGeneration
+    const started = this.session.playbackStarted(utteranceId, generationEpoch)
+    if (
+      started
+      && generation !== null
+      && generation.utterance_id === utteranceId
+      && generation.generation_epoch === generationEpoch
+      && this.#ports.telemetry !== undefined
+    ) {
+      const attribution = this.#playbackAttribution(generation.response_id)
+      if (attribution !== null) this.#ports.telemetry.record('playback.attribution', attribution)
+    }
+    return started
+  }
 
   semanticAcknowledgement(state: ToolCallState): Readonly<SemanticAcknowledgement> | null {
     return this.#ensureSemanticAcknowledgement(state)
