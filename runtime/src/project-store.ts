@@ -399,7 +399,9 @@ export class ProjectStore {
         await Promise.resolve(owner.release()).catch(() => undefined)
         await owner.file.close().catch(() => undefined)
       }
+      if (store.#stateRootHandle) store.#rootFiles.unbindDirectory?.(store.#stateRootHandle.fd)
       await store.#stateRootHandle?.close().catch(() => undefined)
+      if (store.#managedRootHandle) store.#rootFiles.unbindDirectory?.(store.#managedRootHandle.fd)
       await store.#managedRootHandle?.close().catch(() => undefined)
       store.#stateRootHandle = null
       store.#stateRootIdentity = null
@@ -437,7 +439,9 @@ export class ProjectStore {
     this.#stateRootIdentity = null
     this.#managedRootHandle = null
     this.#managedRootIdentity = null
+    if (root) this.#rootFiles.unbindDirectory?.(root.fd)
     await root?.close().catch(() => { failed = true })
+    if (managedRoot) this.#rootFiles.unbindDirectory?.(managedRoot.fd)
     await managedRoot?.close().catch(() => { failed = true })
     if (failed) throw new ProjectStateError('state_lock_failed')
   }

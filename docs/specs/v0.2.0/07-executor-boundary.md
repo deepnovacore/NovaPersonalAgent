@@ -468,9 +468,11 @@ checks the recorded identity before mutation. This is a single-user desktop
 boundary: it does not promise resistance to an adversarial rename between the
 identity check and a path mutation, or inspect Windows ACLs.
 
-The project addon retains only crash-safe nonblocking advisory locks (`flock` /
+The project addon retains crash-safe nonblocking advisory locks (`flock` /
 `LockFileEx`). Lock files are never unlinked: replacing an inode would split
 ownership between processes, while PID-based stale-file recovery races with reuse.
+Windows also retains the small native directory flush (`NtFlushBuffersFileEx`),
+because Node directory `fsync` returns EPERM; missing flush support fails closed.
 Windows retains the no-breakaway Job launcher and its tree-empty completion
 protocol; `taskkill` after leader exit cannot reclaim a detached descendant.
 The native sandbox probe also remains: production preflight consumes its actual

@@ -17,6 +17,16 @@ test('Node project files bind real descriptors, reject replaced roots and preser
     assert.equal(files.createFileAt(fd, 'state', true).status, 'ok')
     assert.equal(files.createFileAt(fd, 'state', true).status, 'exists')
     assert.equal(files.lookupAt(fd, '../escape').status, 'failed')
+    const stateFd = openSync(join(path, 'state'), 'r')
+    try { assert.equal(files.protectAt!(fd, 'state', stateFd).status, 'failed') }
+    finally { closeSync(stateFd) }
+    const flushed = createProjectNodeFiles(actual => {
+      assert.equal(actual, fd)
+      return {status: 'failed'}
+    })
+    flushed.bindDirectory!(fd, path)
+    assert.equal(flushed.syncDirectory!(fd).status, 'failed')
+    assert.equal(files.syncDirectory!(fd).status, process.platform === 'win32' ? 'failed' : 'ok')
     const stored = files.lookupAt(fd, 'state')
     assert.equal(stored.status, 'ok')
     if (stored.status !== 'ok') throw new Error('missing state')

@@ -20,6 +20,14 @@ if (process.argv[3] === 'hold') {
     const container = realpathSync(mkdtempSync(join(tmpdir(), 'nova-native-lock-')))
     const lockFile = join(container, 'owner.lock')
     writeFileSync(lockFile, '', {mode: 0o600})
+    if (process.platform === 'win32') {
+      const directory = openSync(container, 'r')
+      try { assert.deepEqual(addon.syncDirectory(directory), {status: 'ok'}) }
+      finally { closeSync(directory) }
+      const file = openSync(lockFile, 'r')
+      try { assert.deepEqual(addon.syncDirectory(file), {status: 'failed'}) }
+      finally { closeSync(file) }
+    }
     let lockChild = null
     try {
       const child = spawn(process.execPath, [__filename, addonPath, 'hold', lockFile], {

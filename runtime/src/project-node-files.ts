@@ -10,7 +10,7 @@ const same = (info: BigIntStats, expected: ProjectFileIdentity): boolean =>
   info.dev === expected.device && info.ino === expected.inode
 
 /** Node owns paths; descriptors only pin the identity of an already-open directory. */
-export function createProjectNodeFiles(): ProjectRootFileAuthority {
+export function createProjectNodeFiles(syncWindowsDirectory?: (fd: number) => ProjectRootFileResult): ProjectRootFileAuthority {
   const directories = new Map<number, {path: string; identity: ProjectFileIdentity}>()
   const inspect = (path: string): BigIntStats => {
     const info = lstatSync(path, {bigint: true})
@@ -75,7 +75,10 @@ export function createProjectNodeFiles(): ProjectRootFileAuthority {
   const protectAt: NonNullable<ProjectRootFileAuthority['protectAt']> = (root, name, fd) => {
     const result = matchesAt(root, name, fd)
     if (result.status !== 'ok') return result
-    return operation(() => { if (process.platform !== 'win32') fchmodSync(fd, 0o700) })
+    return operation(() => {
+      if (!fstatSync(fd).isDirectory()) throw new Error('project_directory_required')
+      if (process.platform !== 'win32') fchmodSync(fd, 0o700)
+    })
   }
   const remove = (root: number, name: string, expected: ProjectFileIdentity, kind: 'file' | 'directory' | 'tree'): ProjectRootFileResult => {
     try {
@@ -108,7 +111,14 @@ export function createProjectNodeFiles(): ProjectRootFileAuthority {
         return {status: 'ok'}
       } catch (error) { return failure(error) }
     },
-    syncDirectory: fd => operation(() => { directory(fd); if (process.platform !== 'win32') fsyncSync(fd) }),
+    syncDirectory: fd => {
+      const checked = operation(() => { directory(fd) })
+      if (checked.status !== 'ok') return checked
+      if (syncWindowsDirectory) {
+        try { return syncWindowsDirectory(fd) } catch (error) { return failure(error) }
+      }
+      return process.platform === 'win32' ? {status: 'failed'} : operation(() => fsyncSync(fd))
+    },
     unlinkAt: (root, name, expected, kind) => remove(root, name, expected, kind),
     removeTreeAt: (root, name, expected) => remove(root, name, expected, 'tree'),
   }

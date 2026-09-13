@@ -1,5 +1,6 @@
 #define _WIN32_WINNT 0x0A00
 #include <windows.h>
+#include <winternl.h>
 #include <delayimp.h>
 #include <node_api.h>
 #include <stdint.h>
@@ -142,6 +143,28 @@ static napi_value nova_acquire(napi_env env, napi_callback_info info) {
   return result;
 }
 
+/* Node cannot fsync directory handles on Windows. */
+static napi_value nova_sync_directory(napi_env env, napi_callback_info info) {
+  napi_value args[1];
+  HANDLE root;
+  BY_HANDLE_FILE_INFORMATION file;
+  if (!nova_args(env, info, 1, args) ||
+      !nova_handle_from_value(env, args[0], &root) ||
+      !GetFileInformationByHandle(root, &file) ||
+      (file.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
+    return nova_status(env, "failed");
+  typedef NTSTATUS(NTAPI *flush_fn)(HANDLE, ULONG, PVOID, ULONG, PIO_STATUS_BLOCK);
+  HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+  if (ntdll == NULL) return nova_status(env, "failed");
+#pragma warning(push)
+#pragma warning(disable : 4055)
+  flush_fn flush = (flush_fn)(void *)GetProcAddress(ntdll, "NtFlushBuffersFileEx");
+#pragma warning(pop)
+  IO_STATUS_BLOCK io;
+  return nova_status(env, flush != NULL && flush(root, 0, NULL, 0, &io) == 0
+                              ? "ok" : "failed");
+}
+
 static int nova_export(napi_env env, napi_value exports, const char *name,
                        napi_callback callback) {
   napi_value function;
@@ -152,5 +175,6 @@ static int nova_export(napi_env env, napi_value exports, const char *name,
 
 NAPI_MODULE_INIT() {
   if (!nova_export(env, exports, "acquire", nova_acquire)) return NULL;
+  if (!nova_export(env, exports, "syncDirectory", nova_sync_directory)) return NULL;
   return exports;
 }

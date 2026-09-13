@@ -23,7 +23,7 @@ const PROJECT_ADDON_PATH = 'native/project-native/nova_project_native.node'
 const PROJECT_ADDON_ID = 'project_native_addon'
 const MAX_MANIFEST_BYTES = 1024 * 1024
 const MAX_ADDON_BYTES = 16 * 1024 * 1024
-const MODULE_EXPORTS = Object.freeze(['acquire'] as const)
+const MODULE_EXPORTS = Object.freeze(['acquire', 'syncDirectory'] as const)
 
 export interface ProjectDirectoryHandle {
   readonly fd: number
@@ -182,7 +182,7 @@ function loadSupportedProjectNativeHostFromResources(
     let addon: ProjectAddon | null
     try {
       addon = requireAddon(
-        (options.moduleLoader ?? defaultModuleLoader)(materialized.path),
+        (options.moduleLoader ?? defaultModuleLoader)(materialized.path), options.platform,
       )
       if (addon === null || !sameSnapshot(materialized.snapshot, snapshotRegularFile(
         materialized.path,
@@ -193,7 +193,7 @@ function loadSupportedProjectNativeHostFromResources(
     }
     const after = snapshotRegularFile(addonPath, MAX_ADDON_BYTES)
     if (!sameSnapshot(before, after)) return null
-    const rootFiles = createProjectNodeFiles()
+    const rootFiles = createProjectNodeFiles(options.platform === 'win32' ? addon.syncDirectory : undefined)
     const directoryHandles = {
       open(path: string): ProjectDirectoryHandle {
         const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
@@ -343,12 +343,12 @@ function validBinary(bytes: Buffer, platform: string, arch: string): boolean {
     && (bytes.readUInt16LE(offset + 22) & 0x2000) !== 0
 }
 
-type ProjectAddon = NativeFileLockAuthority
+type ProjectAddon = NativeFileLockAuthority & {syncDirectory?: (fd: number) => {status: 'ok' | 'failed'}}
 
-function requireAddon(value: unknown): ProjectAddon | null {
+function requireAddon(value: unknown, platform: string): ProjectAddon | null {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
   const descriptors = Object.getOwnPropertyDescriptors(value)
-  const expected = MODULE_EXPORTS
+  const expected = platform === 'win32' ? MODULE_EXPORTS : ['acquire'] as const
   if (Object.keys(descriptors).sort().join('\0') !== expected.join('\0')) return null
   const methods: Partial<Record<(typeof MODULE_EXPORTS)[number], (...args: never[]) => unknown>> = {}
   for (const name of expected) {

@@ -16,11 +16,12 @@ async function source(relativePath) {
   return await readFile(resolve(packageRoot, relativePath), 'utf8')
 }
 
-test('Windows project addon owns only crash-safe nonblocking locks', async () => {
+test('Windows project addon owns crash-safe locks and directory flush', async () => {
   const body = await source('native/project-native/project_native_windows.c')
   for (const required of [
     /DuplicateHandle/u,
     /LockFileEx/u,
+    /NtFlushBuffersFileEx/u,
     /UnlockFileEx/u,
     /LOCKFILE_FAIL_IMMEDIATELY/u,
     /uv_get_osfhandle/u,
