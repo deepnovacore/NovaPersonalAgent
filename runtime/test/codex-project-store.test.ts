@@ -3165,6 +3165,20 @@ test('strict v1 decode rejects key, type, cap, reference, and normalized-identit
         await store.close()
       }
     }
+    const compatible = clone()
+    compatible.active_workspace_id = '__proto__'
+    compatible.workspaces = Object.fromEntries([['__proto__', {
+      ...workspaceTemplate, workspace_id: '__proto__', codex_home_key: 'home-__proto__',
+      created_at: -1.25,
+    }]])
+    for (const session of Object.values(compatible.sessions)) session.workspace_id = '__proto__'
+    await writeFile(statePath, JSON.stringify(compatible), {mode: 0o600})
+    const compatibleStore = await ProjectStore.open(options)
+    try {
+      const snapshot = await compatibleStore.snapshot()
+      assert.equal(snapshot.workspaces[0]?.workspace_id, '__proto__')
+      assert.equal(snapshot.workspaces[0]?.created_at, -1.25)
+    } finally { await compatibleStore.close() }
   } finally {
     await rm(root, {recursive: true, force: true})
   }

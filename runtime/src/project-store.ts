@@ -6,6 +6,7 @@ import {
 } from 'node:fs/promises'
 import {basename, dirname, isAbsolute, join, resolve} from 'node:path'
 import {TextDecoder} from 'node:util'
+import {z} from 'zod'
 
 import {
   canonicalJsonWithNumberFormatter,
@@ -3491,113 +3492,87 @@ function projectTimestampNumber(value: number, path: CanonicalJsonPath): string 
   return pythonFloat(value)
 }
 
-function decodeState(value: unknown): MutableProjectState {
-  const candidate = recordValue(value)
-  const rootKeys = ['version', 'active_workspace_id', 'workspaces', 'sessions']
-  if (Object.hasOwn(candidate, 'state_revision')) rootKeys.push('state_revision')
-  if (Object.hasOwn(candidate, 'active_binding_revision')) rootKeys.push('active_binding_revision')
-  const root = exactRecord(candidate, rootKeys)
-  if (root.version !== PROJECT_STATE_VERSION) throw new ProjectStateError('state_version_unsupported')
-  const rawWorkspaces = recordValue(root.workspaces)
-  const rawSessions = recordValue(root.sessions)
-  if (Object.keys(rawWorkspaces).length > MAX_PROJECT_WORKSPACES) throw new ProjectStateError('state_corrupt')
-  if (Object.keys(rawSessions).length > MAX_PROJECT_SESSIONS_TOTAL) throw new ProjectStateError('state_corrupt')
-  const state = emptyState()
-  state.stateRevision = Object.hasOwn(root, 'state_revision')
-    ? stateRevision(root.state_revision)
-    : 0
-  state.activeBindingRevision = Object.hasOwn(root, 'active_binding_revision')
-    ? activeBindingRevision(root.active_binding_revision)
-    : 0
-  for (const [key, raw] of Object.entries(rawWorkspaces)) {
-    const workspace = decodeWorkspace(raw)
-    if (key !== workspace.workspace_id || state.workspaces.has(key)) throw new ProjectStateError('state_corrupt')
-    state.workspaces.set(key, workspace)
-  }
-  for (const [key, raw] of Object.entries(rawSessions)) {
-    const session = decodeSession(raw)
-    if (
-      key !== session.session_id
-      || state.sessions.has(key)
-      || !state.workspaces.has(session.workspace_id)
-    ) throw new ProjectStateError('state_corrupt')
-    state.sessions.set(key, session)
-  }
-  const active = root.active_workspace_id
-  if (active !== null && (typeof active !== 'string' || !state.workspaces.has(active))) {
+const persistedId = z.string().regex(STORED_ID)
+// Keep JSON dictionary keys verbatim; z.record drops the valid stored ID '__proto__'.
+const persistedObject = z.custom<Record<string, unknown>>(
+  value => value !== null && typeof value === 'object' && !Array.isArray(value),
+)
+const persistedState = z.object({
+  version: z.unknown().nonoptional(),
+  active_workspace_id: z.unknown().nonoptional(),
+  workspaces: z.unknown().nonoptional(),
+  sessions: z.unknown().nonoptional(),
+  state_revision: z.unknown().optional(),
+  active_binding_revision: z.unknown().optional(),
+}).strict()
+const persistedWorkspace = z.object({
+  workspace_id: persistedId,
+  display_name: z.unknown().nonoptional(),
+  normalized_name: z.string(),
+  canonical_path: z.string().refine(path => isWellFormed(path) && isAbsolute(path)),
+  origin: z.enum(['managed', 'registered']),
+  codex_home_key: z.string(),
+  active_session_id: persistedId.nullable(),
+  created_at: z.number(),
+  last_used_at: z.number(),
+}).strict().transform(raw => {
+  const name = normalizeProjectWorkspaceName(raw.display_name)
+  if (raw.normalized_name !== name.normalized || raw.codex_home_key !== `home-${raw.workspace_id}`) {
     throw new ProjectStateError('state_corrupt')
   }
+  return Object.freeze({...raw, display_name: name.display})
+})
+const persistedSession = z.object({
+  session_id: persistedId,
+  workspace_id: persistedId,
+  display_title: z.unknown().nonoptional(),
+  normalized_title: z.string(),
+  codex_thread_id: z.unknown().nonoptional(),
+  state: z.enum(['starting', 'ready', 'unavailable']),
+  created_at: z.number(),
+  last_used_at: z.number(),
+  executor_home: z.string().refine(isAbsolute).optional(),
+  origin: z.enum(['nova', 'external']).optional(),
+}).strict().transform(raw => {
+  if (raw.origin === 'external' && raw.executor_home === undefined) throw new ProjectStateError('state_corrupt')
+  const title = normalizeProjectSessionTitle(raw.display_title)
+  if (raw.normalized_title !== title.normalized) throw new ProjectStateError('state_corrupt')
+  const threadId = raw.codex_thread_id === null ? null : validateThreadId(raw.codex_thread_id)
+  if ((raw.state === 'ready' && threadId === null) || (raw.state === 'starting' && threadId !== null)) {
+    throw new ProjectStateError('state_corrupt')
+  }
+  const {origin, executor_home: executorHome, ...record} = raw
+  return Object.freeze({
+    ...record,
+    ...(executorHome === undefined ? {} : {executor_home: executorHome}),
+    ...(origin === undefined && executorHome === undefined ? {} : {origin: origin ?? 'external'}),
+    display_title: title.display,
+    codex_thread_id: threadId,
+  })
+})
+
+function decodeState(value: unknown): MutableProjectState {
+  const root = persistedState.parse(value)
+  if (root.version !== PROJECT_STATE_VERSION) throw new ProjectStateError('state_version_unsupported')
+  const rawWorkspaces = persistedObject.parse(root.workspaces)
+  const rawSessions = persistedObject.parse(root.sessions)
+  if (Object.keys(rawWorkspaces).length > MAX_PROJECT_WORKSPACES
+    || Object.keys(rawSessions).length > MAX_PROJECT_SESSIONS_TOTAL) throw new ProjectStateError('state_corrupt')
+  const state = emptyState()
+  state.stateRevision = Object.hasOwn(root, 'state_revision') ? stateRevision(root.state_revision) : 0
+  state.activeBindingRevision = Object.hasOwn(root, 'active_binding_revision') ? stateRevision(root.active_binding_revision) : 0
+  for (const [key, raw] of Object.entries(rawWorkspaces)) state.workspaces.set(key, persistedWorkspace.parse(raw))
+  for (const [key, raw] of Object.entries(rawSessions)) state.sessions.set(key, persistedSession.parse(raw))
+  const active = root.active_workspace_id
+  if (active !== null && typeof active !== 'string') throw new ProjectStateError('state_corrupt')
   state.activeWorkspaceId = active
   validateState(state)
   return state
 }
 
-function decodeWorkspace(value: unknown): WorkspaceRecord {
-  const raw = exactRecord(value, [
-    'workspace_id', 'display_name', 'normalized_name', 'canonical_path', 'origin',
-    'codex_home_key', 'active_session_id', 'created_at', 'last_used_at',
-  ])
-  const workspaceId = storedId(raw.workspace_id)
-  const name = normalizeProjectWorkspaceName(raw.display_name)
-  if (raw.normalized_name !== name.normalized) throw new ProjectStateError('state_corrupt')
-  if (
-    typeof raw.canonical_path !== 'string'
-    || !isWellFormed(raw.canonical_path)
-    || !isAbsolute(raw.canonical_path)
-  ) throw new ProjectStateError('state_corrupt')
-  if (raw.origin !== 'managed' && raw.origin !== 'registered') throw new ProjectStateError('state_corrupt')
-  if (raw.codex_home_key !== `home-${workspaceId}`) throw new ProjectStateError('state_corrupt')
-  const activeSessionId = raw.active_session_id === null ? null : storedId(raw.active_session_id)
-  return Object.freeze({
-    workspace_id: workspaceId,
-    display_name: name.display,
-    normalized_name: name.normalized,
-    canonical_path: raw.canonical_path,
-    origin: raw.origin,
-    codex_home_key: raw.codex_home_key,
-    active_session_id: activeSessionId,
-    created_at: timestamp(raw.created_at),
-    last_used_at: timestamp(raw.last_used_at),
-  })
-}
-
-function decodeSession(value: unknown): ProjectSessionRecord {
-  const raw = exactRecord(value, [
-    'session_id', 'workspace_id', 'display_title', 'normalized_title', 'codex_thread_id',
-    'state', 'created_at', 'last_used_at',
-    ...(Object.hasOwn(recordValue(value), 'executor_home') ? ['executor_home'] : []),
-    ...(Object.hasOwn(recordValue(value), 'origin') ? ['origin'] : []),
-  ])
-  if (raw.executor_home !== undefined && (typeof raw.executor_home !== 'string' || !isAbsolute(raw.executor_home))) throw new ProjectStateError('state_corrupt')
-  if (raw.origin !== undefined && raw.origin !== 'nova' && raw.origin !== 'external') throw new ProjectStateError('state_corrupt')
-  if (raw.origin === 'external' && raw.executor_home === undefined) throw new ProjectStateError('state_corrupt')
-  const title = normalizeProjectSessionTitle(raw.display_title)
-  if (raw.normalized_title !== title.normalized) throw new ProjectStateError('state_corrupt')
-  if (raw.state !== 'starting' && raw.state !== 'ready' && raw.state !== 'unavailable') {
-    throw new ProjectStateError('state_corrupt')
-  }
-  const threadId = raw.codex_thread_id === null ? null : validateThreadId(raw.codex_thread_id)
-  if ((raw.state === 'ready' && threadId === null) || (raw.state === 'starting' && threadId !== null)) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  return Object.freeze({
-    ...(typeof raw.executor_home === 'string' ? {executor_home: raw.executor_home} : {}),
-    ...(raw.origin === 'nova' || raw.origin === 'external' ? {origin: raw.origin}
-      : typeof raw.executor_home === 'string' ? {origin: 'external' as const} : {}),
-    session_id: storedId(raw.session_id),
-    workspace_id: storedId(raw.workspace_id),
-    display_title: title.display,
-    normalized_title: title.normalized,
-    codex_thread_id: threadId,
-    state: raw.state,
-    created_at: timestamp(raw.created_at),
-    last_used_at: timestamp(raw.last_used_at),
-  })
-}
-
 function validateState(state: MutableProjectState): void {
   stateRevision(state.stateRevision)
-  activeBindingRevision(state.activeBindingRevision)
+  stateRevision(state.activeBindingRevision)
   if (state.workspaces.size > MAX_PROJECT_WORKSPACES || state.sessions.size > MAX_PROJECT_SESSIONS_TOTAL) {
     throw new ProjectStateError('state_corrupt')
   }
@@ -3606,19 +3581,23 @@ function validateState(state: MutableProjectState): void {
   }
   const workspaceNames = new Set<string>()
   const sessionTitles = new Set<string>()
-  for (const workspace of state.workspaces.values()) {
+  for (const [workspaceId, workspace] of state.workspaces) {
+    if (workspaceId !== workspace.workspace_id) throw new ProjectStateError('state_corrupt')
     if (workspaceNames.has(workspace.normalized_name)) throw new ProjectStateError('state_corrupt')
     workspaceNames.add(workspace.normalized_name)
     if (workspace.active_session_id !== null) {
       const session = state.sessions.get(workspace.active_session_id)
       if (session?.workspace_id !== workspace.workspace_id) throw new ProjectStateError('state_corrupt')
     }
-    if ([...state.sessions.values()].filter(
-      session => session.workspace_id === workspace.workspace_id,
-    ).length > MAX_PROJECT_SESSIONS_PER_WORKSPACE) throw new ProjectStateError('state_corrupt')
   }
-  for (const session of state.sessions.values()) {
-    if (!state.workspaces.has(session.workspace_id)) throw new ProjectStateError('state_corrupt')
+  const sessionCounts = new Map<string, number>()
+  for (const [sessionId, session] of state.sessions) {
+    if (sessionId !== session.session_id || !state.workspaces.has(session.workspace_id)) {
+      throw new ProjectStateError('state_corrupt')
+    }
+    const count = (sessionCounts.get(session.workspace_id) ?? 0) + 1
+    if (count > MAX_PROJECT_SESSIONS_PER_WORKSPACE) throw new ProjectStateError('state_corrupt')
+    sessionCounts.set(session.workspace_id, count)
     const key = `${session.workspace_id}\u0000${session.normalized_title}`
     if (sessionTitles.has(key)) throw new ProjectStateError('state_corrupt')
     sessionTitles.add(key)
@@ -3637,22 +3616,8 @@ function exactRecord(value: unknown, keys: readonly string[]): Readonly<Record<s
   return record
 }
 
-function recordValue(value: unknown): Readonly<Record<string, unknown>> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  return value as Readonly<Record<string, unknown>>
-}
-
 function storedId(value: unknown): string {
   if (typeof value !== 'string' || !STORED_ID.test(value)) throw new ProjectStateError('state_corrupt')
-  return value
-}
-
-function activeBindingRevision(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    throw new ProjectStateError('state_corrupt')
-  }
   return value
 }
 
@@ -3679,9 +3644,4 @@ function bumpActiveBindingRevision(state: MutableProjectState): number {
   }
   state.activeBindingRevision += 1
   return state.activeBindingRevision
-}
-
-function timestamp(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) throw new ProjectStateError('state_corrupt')
-  return value
 }
