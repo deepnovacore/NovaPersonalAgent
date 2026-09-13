@@ -2883,6 +2883,7 @@ export class RealtimeService {
       return
     }
     if (event.kind === 'provider_error') {
+      this.#telemetry?.record('provider.error', {session_epoch: event.session_epoch, code: event.code, recoverable: event.recoverable})
       await this.session.accept(event)
       this.#onDiagnostic(
         `[realtime-diagnostic] provider_error code=${event.code} recoverable=${event.recoverable}`,
@@ -2910,7 +2911,7 @@ export class RealtimeService {
         // it a throughput counter instead.
         if (!this.#audioStarted.has(event.response_id)) {
           this.#audioStarted.add(event.response_id)
-          this.#telemetry.record('provider.first_audio_delta', {response_id: event.response_id})
+          this.#telemetry.record('provider.first_audio_delta', {session_epoch: event.session_epoch, response_id: event.response_id})
         }
       } else if (event.kind === 'response_terminal') {
         this.#audioStarted.delete(event.response_id)
@@ -3065,6 +3066,17 @@ export class RealtimeService {
           event.response_id,
         ) ?? 'none',
       })
+    }
+
+    if (event.kind === 'user_speech_started' || event.kind === 'user_speech_ended') {
+      this.#telemetry?.record(`provider.${event.kind}`, {session_epoch: event.session_epoch,
+        speech_id: event.speech_id, item_id: event.provider_item_id, accepted})
+    } else if (event.kind === 'user_transcript_final' || event.kind === 'user_transcript_failed') {
+      this.#telemetry?.record(`provider.${event.kind}`, {session_epoch: event.session_epoch,
+        item_id: event.item_id, accepted})
+    } else if (event.kind === 'response_terminal') {
+      this.#telemetry?.record('provider.response_terminal', {session_epoch: event.session_epoch,
+        response_id: event.response_id, status: event.status, accepted})
     }
 
     if (this.#onCaption !== undefined) {
@@ -5678,6 +5690,8 @@ export class RealtimeService {
       && generation.generation_epoch === generationEpoch
       && this.#telemetry !== undefined
     ) {
+      this.#telemetry.record('playback.started', {session_epoch: generation.session_epoch,
+        response_id: generation.response_id, utterance_id: utteranceId, generation_epoch: generationEpoch})
       const attribution = this.#playbackAttribution(generation.response_id)
       if (attribution !== null) this.#telemetry.record('playback.attribution', attribution)
     }

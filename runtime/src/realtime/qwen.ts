@@ -279,9 +279,9 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
           instructions: this.#instructions(),
           input_audio_format: 'pcm',
           output_audio_format: 'pcm',
-          max_history_turns: 20,
+          ...(this.#model.startsWith('qwen3.5-omni-') ? {} : {max_history_turns: 20}),
           tools: [...options.tools],
-          turn_detection: {type: 'smart_turn'},
+          turn_detection: {type: this.#model.startsWith('qwen3.5-omni-') ? 'semantic_vad' : 'smart_turn'},
         },
       }), deadline)
       const updated = await this.#untilDeadline(this.#receiveJson(socket), deadline)
