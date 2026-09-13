@@ -96,34 +96,9 @@ const PROGRESS_BUBBLE_MODES = new Set(['off', 'milestones', 'all'])
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
 // Control characters would survive into an env value handed to a child process.
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
-const MISSING_PROPERTY = Symbol('missing property')
-const INVALID_PROPERTY = Symbol('invalid property')
-
+// Files are JSON and Electron IPC structured-clones settings patches.
 function isRecord(value) {
-  if (!value || typeof value !== 'object') return false
-  try {
-    return !Array.isArray(value)
-  } catch {
-    return false
-  }
-}
-
-// Values cross a storage/IPC trust boundary here. Reading with `object[key]`
-// would walk prototypes or execute accessors; descriptors let us accept only
-// the JSON-shaped properties the schema promises. A hostile Proxy may refuse
-// even descriptor inspection, in which case that field simply fails closed.
-function ownEnumerableDataValue(object, key) {
-  if (!isRecord(object)) return MISSING_PROPERTY
-  try {
-    const descriptor = Object.getOwnPropertyDescriptor(object, key)
-    if (!descriptor) return MISSING_PROPERTY
-    if (!descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) {
-      return INVALID_PROPERTY
-    }
-    return descriptor.value
-  } catch {
-    return INVALID_PROPERTY
-  }
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 // Each validator answers the value it accepts, or null. `pick` then walks
@@ -223,18 +198,8 @@ function normalizeCascadedLlmModels(raw, base) {
   const source = isRecord(raw) ? raw : {}
   const fallback = isRecord(base) ? base : DEFAULT_SETTINGS.cascadedLlmModels
   return {
-    qwen: pick(
-      ownEnumerableDataValue(source, 'qwen'),
-      ownEnumerableDataValue(fallback, 'qwen'),
-      DEFAULT_SETTINGS.cascadedLlmModels.qwen,
-      validModelOrVoice,
-    ),
-    ark: pick(
-      ownEnumerableDataValue(source, 'ark'),
-      ownEnumerableDataValue(fallback, 'ark'),
-      DEFAULT_SETTINGS.cascadedLlmModels.ark,
-      validModelOrVoice,
-    ),
+    qwen: pick(source.qwen, fallback.qwen, DEFAULT_SETTINGS.cascadedLlmModels.qwen, validModelOrVoice),
+    ark: pick(source.ark, fallback.ark, DEFAULT_SETTINGS.cascadedLlmModels.ark, validModelOrVoice),
   }
 }
 
@@ -243,8 +208,8 @@ function normalizeCascadedLlmModels(raw, base) {
 // dropped rather than round-tripped.
 function validSecretEntry(entry) {
   if (!isRecord(entry)) return null
-  const enc = ownEnumerableDataValue(entry, 'enc')
-  const data = ownEnumerableDataValue(entry, 'data')
+  const enc = entry.enc
+  const data = entry.data
   if (enc !== 'safeStorage' && enc !== 'none') return null
   if (typeof data !== 'string' || data === '' || data.length > MAX_CIPHERTEXT_BASE64) return null
   if (data.length % 4 !== 0 || !BASE64.test(data)) return null
@@ -255,7 +220,7 @@ function normalizeSecrets(raw) {
   const secrets = {}
   if (!isRecord(raw)) return secrets
   for (const key of SECRET_KEYS) {
-    const entry = validSecretEntry(ownEnumerableDataValue(raw, key))
+    const entry = validSecretEntry(raw[key])
     if (entry) secrets[key] = entry
   }
   return secrets
@@ -266,203 +231,63 @@ function normalizeSecrets(raw) {
 export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
   const source = isRecord(raw) ? raw : {}
   const fallback = isRecord(base) ? base : DEFAULT_SETTINGS
-  const rawVersion = ownEnumerableDataValue(source, 'version')
-  const baseVersion = ownEnumerableDataValue(fallback, 'version')
-  const acceptsV4Fields = rawVersion === MISSING_PROPERTY
-    ? baseVersion === MISSING_PROPERTY
+  const rawVersion = source.version
+  const baseVersion = fallback.version
+  const acceptsV4Fields = !Object.hasOwn(source, 'version')
+    ? !Object.hasOwn(fallback, 'version')
       || (typeof baseVersion === 'number' && baseVersion >= SETTINGS_VERSION)
     : typeof rawVersion === 'number' && rawVersion >= SETTINGS_VERSION
   return {
     version: SETTINGS_VERSION,
-    palette: pick(
-      ownEnumerableDataValue(source, 'palette'),
-      ownEnumerableDataValue(fallback, 'palette'),
-      DEFAULT_SETTINGS.palette,
-      validPalette,
-    ),
-    codingProgressNarration: pick(
-      ownEnumerableDataValue(source, 'codingProgressNarration'),
-      ownEnumerableDataValue(fallback, 'codingProgressNarration'),
-      DEFAULT_SETTINGS.codingProgressNarration,
-      value => value === 'smart' || value === 'continuous' ? value : null,
-    ),
-    proactivity: pick(
-      ownEnumerableDataValue(source, 'proactivity'),
-      ownEnumerableDataValue(fallback, 'proactivity'),
-      DEFAULT_SETTINGS.proactivity,
-      validProactivity,
-    ),
-    codexHeartbeatSeconds: pick(
-      ownEnumerableDataValue(source, 'codexHeartbeatSeconds'),
-      ownEnumerableDataValue(fallback, 'codexHeartbeatSeconds'),
-      DEFAULT_SETTINGS.codexHeartbeatSeconds,
-      validHeartbeat,
-    ),
-    codexBinaryMode: pick(
-      ownEnumerableDataValue(source, 'codexBinaryMode'),
-      ownEnumerableDataValue(fallback, 'codexBinaryMode'),
-      DEFAULT_SETTINGS.codexBinaryMode,
-      validCodexBinaryMode,
-    ),
-    codexBinaryPath: pick(
-      ownEnumerableDataValue(source, 'codexBinaryPath'),
-      ownEnumerableDataValue(fallback, 'codexBinaryPath'),
-      DEFAULT_SETTINGS.codexBinaryPath,
-      validDesktopString,
-    ),
-    codexWorkspace: pick(
-      ownEnumerableDataValue(source, 'codexWorkspace'),
-      ownEnumerableDataValue(fallback, 'codexWorkspace'),
-      DEFAULT_SETTINGS.codexWorkspace,
-      validDesktopString,
-    ),
-    codexManagedRoot: pick(
-      ownEnumerableDataValue(source, 'codexManagedRoot'),
-      ownEnumerableDataValue(fallback, 'codexManagedRoot'),
-      DEFAULT_SETTINGS.codexManagedRoot,
-      validDesktopString,
-    ),
-    modelBaseUrl: pick(
-      ownEnumerableDataValue(source, 'modelBaseUrl'),
-      ownEnumerableDataValue(fallback, 'modelBaseUrl'),
-      DEFAULT_SETTINGS.modelBaseUrl,
-      validModelBaseUrl,
-    ),
+    palette: pick(source.palette, fallback.palette, DEFAULT_SETTINGS.palette, validPalette),
+    codingProgressNarration: pick(source.codingProgressNarration, fallback.codingProgressNarration, DEFAULT_SETTINGS.codingProgressNarration, value => value === 'smart' || value === 'continuous' ? value : null),
+    proactivity: pick(source.proactivity, fallback.proactivity, DEFAULT_SETTINGS.proactivity, validProactivity),
+    codexHeartbeatSeconds: pick(source.codexHeartbeatSeconds, fallback.codexHeartbeatSeconds, DEFAULT_SETTINGS.codexHeartbeatSeconds, validHeartbeat),
+    codexBinaryMode: pick(source.codexBinaryMode, fallback.codexBinaryMode, DEFAULT_SETTINGS.codexBinaryMode, validCodexBinaryMode),
+    codexBinaryPath: pick(source.codexBinaryPath, fallback.codexBinaryPath, DEFAULT_SETTINGS.codexBinaryPath, validDesktopString),
+    codexWorkspace: pick(source.codexWorkspace, fallback.codexWorkspace, DEFAULT_SETTINGS.codexWorkspace, validDesktopString),
+    codexManagedRoot: pick(source.codexManagedRoot, fallback.codexManagedRoot, DEFAULT_SETTINGS.codexManagedRoot, validDesktopString),
+    modelBaseUrl: pick(source.modelBaseUrl, fallback.modelBaseUrl, DEFAULT_SETTINGS.modelBaseUrl, validModelBaseUrl),
     wakeWordEnabled: pick(
-      ownEnumerableDataValue(source, 'wakeWordEnabled'),
-      ownEnumerableDataValue(fallback, 'wakeWordEnabled'), false, validBoolean,
+      source.wakeWordEnabled,
+      fallback.wakeWordEnabled, false, validBoolean,
     ),
     autoHideSeconds: pick(
-      ownEnumerableDataValue(source, 'autoHideSeconds'),
-      ownEnumerableDataValue(fallback, 'autoHideSeconds'), 60,
+      source.autoHideSeconds,
+      fallback.autoHideSeconds, 60,
       value => Number.isInteger(value) && (value === 0 || value >= 30 && value <= 3600) ? value : null,
     ),
-    startListeningOnLaunch: pick(
-      ownEnumerableDataValue(source, 'startListeningOnLaunch'),
-      ownEnumerableDataValue(fallback, 'startListeningOnLaunch'),
-      DEFAULT_SETTINGS.startListeningOnLaunch,
-      validBoolean,
-    ),
-    pipelineMode: pick(
-      ownEnumerableDataValue(source, 'pipelineMode'),
-      ownEnumerableDataValue(fallback, 'pipelineMode'),
-      DEFAULT_SETTINGS.pipelineMode,
-      validPipelineMode,
-    ),
-    integratedProvider: pick(
-      ownEnumerableDataValue(source, 'integratedProvider'),
-      ownEnumerableDataValue(fallback, 'integratedProvider'),
-      DEFAULT_SETTINGS.integratedProvider,
-      validIntegratedProvider,
-    ),
-    integratedModel: pick(
-      ownEnumerableDataValue(source, 'integratedModel'),
-      ownEnumerableDataValue(fallback, 'integratedModel'),
-      DEFAULT_SETTINGS.integratedModel,
-      validModelOrVoice,
-    ),
-    integratedVoice: pick(
-      ownEnumerableDataValue(source, 'integratedVoice'),
-      ownEnumerableDataValue(fallback, 'integratedVoice'),
-      DEFAULT_SETTINGS.integratedVoice,
-      validModelOrVoice,
-    ),
-    cascadedEndpointingProvider: pick(
-      ownEnumerableDataValue(source, 'cascadedEndpointingProvider'),
-      ownEnumerableDataValue(fallback, 'cascadedEndpointingProvider'),
-      DEFAULT_SETTINGS.cascadedEndpointingProvider,
-      validCascadedEndpointingProvider,
-    ),
-    cascadedAsrProvider: pick(
-      ownEnumerableDataValue(source, 'cascadedAsrProvider'),
-      ownEnumerableDataValue(fallback, 'cascadedAsrProvider'),
-      DEFAULT_SETTINGS.cascadedAsrProvider,
-      validCascadedAsrProvider,
-    ),
-    cascadedLlmProvider: pick(
-      ownEnumerableDataValue(source, 'cascadedLlmProvider'),
-      ownEnumerableDataValue(fallback, 'cascadedLlmProvider'),
-      DEFAULT_SETTINGS.cascadedLlmProvider,
-      validCascadedLlmProvider,
-    ),
+    startListeningOnLaunch: pick(source.startListeningOnLaunch, fallback.startListeningOnLaunch, DEFAULT_SETTINGS.startListeningOnLaunch, validBoolean),
+    pipelineMode: pick(source.pipelineMode, fallback.pipelineMode, DEFAULT_SETTINGS.pipelineMode, validPipelineMode),
+    integratedProvider: pick(source.integratedProvider, fallback.integratedProvider, DEFAULT_SETTINGS.integratedProvider, validIntegratedProvider),
+    integratedModel: pick(source.integratedModel, fallback.integratedModel, DEFAULT_SETTINGS.integratedModel, validModelOrVoice),
+    integratedVoice: pick(source.integratedVoice, fallback.integratedVoice, DEFAULT_SETTINGS.integratedVoice, validModelOrVoice),
+    cascadedEndpointingProvider: pick(source.cascadedEndpointingProvider, fallback.cascadedEndpointingProvider, DEFAULT_SETTINGS.cascadedEndpointingProvider, validCascadedEndpointingProvider),
+    cascadedAsrProvider: pick(source.cascadedAsrProvider, fallback.cascadedAsrProvider, DEFAULT_SETTINGS.cascadedAsrProvider, validCascadedAsrProvider),
+    cascadedLlmProvider: pick(source.cascadedLlmProvider, fallback.cascadedLlmProvider, DEFAULT_SETTINGS.cascadedLlmProvider, validCascadedLlmProvider),
     cascadedLlmModels: normalizeCascadedLlmModels(
-      ownEnumerableDataValue(source, 'cascadedLlmModels'),
-      ownEnumerableDataValue(fallback, 'cascadedLlmModels'),
+      source.cascadedLlmModels,
+      fallback.cascadedLlmModels,
     ),
-    cascadedTtsProvider: pick(
-      ownEnumerableDataValue(source, 'cascadedTtsProvider'),
-      ownEnumerableDataValue(fallback, 'cascadedTtsProvider'),
-      DEFAULT_SETTINGS.cascadedTtsProvider,
-      validCascadedTtsProvider,
-    ),
-    cascadedTtsVoice: pick(
-      ownEnumerableDataValue(source, 'cascadedTtsVoice'),
-      ownEnumerableDataValue(fallback, 'cascadedTtsVoice'),
-      DEFAULT_SETTINGS.cascadedTtsVoice,
-      validModelOrVoice,
-    ),
-    codexApprovalMode: pick(
-      acceptsV4Fields ? ownEnumerableDataValue(source, 'codexApprovalMode') : MISSING_PROPERTY,
-      acceptsV4Fields ? ownEnumerableDataValue(fallback, 'codexApprovalMode') : MISSING_PROPERTY,
-      DEFAULT_SETTINGS.codexApprovalMode,
-      validCodexApprovalMode,
-    ),
-    clarificationDepth: pick(
-      acceptsV4Fields ? ownEnumerableDataValue(source, 'clarificationDepth') : MISSING_PROPERTY,
-      acceptsV4Fields ? ownEnumerableDataValue(fallback, 'clarificationDepth') : MISSING_PROPERTY,
-      DEFAULT_SETTINGS.clarificationDepth,
-      validClarificationDepth,
-    ),
-    planReadback: pick(
-      acceptsV4Fields ? ownEnumerableDataValue(source, 'planReadback') : MISSING_PROPERTY,
-      acceptsV4Fields ? ownEnumerableDataValue(fallback, 'planReadback') : MISSING_PROPERTY,
-      DEFAULT_SETTINGS.planReadback,
-      validPlanReadback,
-    ),
-    plannerModel: pick(
-      acceptsV4Fields ? ownEnumerableDataValue(source, 'plannerModel') : MISSING_PROPERTY,
-      acceptsV4Fields ? ownEnumerableDataValue(fallback, 'plannerModel') : MISSING_PROPERTY,
-      DEFAULT_SETTINGS.plannerModel,
-      validDesktopString,
-    ),
-    progressBubbles: pick(
-      acceptsV4Fields ? ownEnumerableDataValue(source, 'progressBubbles') : MISSING_PROPERTY,
-      acceptsV4Fields ? ownEnumerableDataValue(fallback, 'progressBubbles') : MISSING_PROPERTY,
-      DEFAULT_SETTINGS.progressBubbles,
-      validProgressBubbles,
-    ),
-    conversationVisionEnabled: pick(ownEnumerableDataValue(source, 'conversationVisionEnabled'), ownEnumerableDataValue(fallback, 'conversationVisionEnabled'), DEFAULT_SETTINGS.conversationVisionEnabled, validBoolean),
-    monitorCameraDeviceId: pick(ownEnumerableDataValue(source, 'monitorCameraDeviceId'), ownEnumerableDataValue(fallback, 'monitorCameraDeviceId'), DEFAULT_SETTINGS.monitorCameraDeviceId, value => typeof value === 'string' && value.length <= 256 && !/[\x00-\x1f]/u.test(value) ? value : null),
-    watchModel: pick(ownEnumerableDataValue(source, 'watchModel'), ownEnumerableDataValue(fallback, 'watchModel'), DEFAULT_SETTINGS.watchModel, validModelOrVoice),
-    phoneConnectionEnabled: pick(ownEnumerableDataValue(source, 'phoneConnectionEnabled'), ownEnumerableDataValue(fallback, 'phoneConnectionEnabled'), false, validBoolean),
-    phoneServerPort: pick(ownEnumerableDataValue(source, 'phoneServerPort'), ownEnumerableDataValue(fallback, 'phoneServerPort'), 0, value => Number.isInteger(value) && value >= 0 && value <= 65535 ? value : null),
-    phoneServerTokenFile: pick(ownEnumerableDataValue(source, 'phoneServerTokenFile'), ownEnumerableDataValue(fallback, 'phoneServerTokenFile'), '', value => { const path = validDesktopString(value); return path !== null && (path === '' || isAbsolute(path)) ? path : null }),
-    phoneServerUrl: pick(ownEnumerableDataValue(source, 'phoneServerUrl'), ownEnumerableDataValue(fallback, 'phoneServerUrl'), '', validPhoneServerUrl),
-    embeddingProvider: pick(
-      acceptsV4Fields ? ownEnumerableDataValue(source, 'embeddingProvider') : MISSING_PROPERTY,
-      acceptsV4Fields ? ownEnumerableDataValue(fallback, 'embeddingProvider') : MISSING_PROPERTY,
-      DEFAULT_SETTINGS.embeddingProvider,
-      validEmbeddingProvider,
-    ),
-    embeddingModel: pick(
-      acceptsV4Fields ? ownEnumerableDataValue(source, 'embeddingModel') : MISSING_PROPERTY,
-      acceptsV4Fields ? ownEnumerableDataValue(fallback, 'embeddingModel') : MISSING_PROPERTY,
-      DEFAULT_SETTINGS.embeddingModel,
-      validDesktopString,
-    ),
-    capabilitiesConfigPath: pick(
-      acceptsV4Fields ? ownEnumerableDataValue(source, 'capabilitiesConfigPath') : MISSING_PROPERTY,
-      acceptsV4Fields ? ownEnumerableDataValue(fallback, 'capabilitiesConfigPath') : MISSING_PROPERTY,
-      DEFAULT_SETTINGS.capabilitiesConfigPath,
-      validDesktopString,
-    ),
-    knowledgePath: pick(
-      acceptsV4Fields ? ownEnumerableDataValue(source, 'knowledgePath') : MISSING_PROPERTY,
-      acceptsV4Fields ? ownEnumerableDataValue(fallback, 'knowledgePath') : MISSING_PROPERTY,
-      DEFAULT_SETTINGS.knowledgePath,
-      validDesktopString,
-    ),
-    secrets: normalizeSecrets(ownEnumerableDataValue(source, 'secrets')),
+    cascadedTtsProvider: pick(source.cascadedTtsProvider, fallback.cascadedTtsProvider, DEFAULT_SETTINGS.cascadedTtsProvider, validCascadedTtsProvider),
+    cascadedTtsVoice: pick(source.cascadedTtsVoice, fallback.cascadedTtsVoice, DEFAULT_SETTINGS.cascadedTtsVoice, validModelOrVoice),
+    codexApprovalMode: pick(acceptsV4Fields ? source.codexApprovalMode : undefined, acceptsV4Fields ? fallback.codexApprovalMode : undefined, DEFAULT_SETTINGS.codexApprovalMode, validCodexApprovalMode),
+    clarificationDepth: pick(acceptsV4Fields ? source.clarificationDepth : undefined, acceptsV4Fields ? fallback.clarificationDepth : undefined, DEFAULT_SETTINGS.clarificationDepth, validClarificationDepth),
+    planReadback: pick(acceptsV4Fields ? source.planReadback : undefined, acceptsV4Fields ? fallback.planReadback : undefined, DEFAULT_SETTINGS.planReadback, validPlanReadback),
+    plannerModel: pick(acceptsV4Fields ? source.plannerModel : undefined, acceptsV4Fields ? fallback.plannerModel : undefined, DEFAULT_SETTINGS.plannerModel, validDesktopString),
+    progressBubbles: pick(acceptsV4Fields ? source.progressBubbles : undefined, acceptsV4Fields ? fallback.progressBubbles : undefined, DEFAULT_SETTINGS.progressBubbles, validProgressBubbles),
+    conversationVisionEnabled: pick(source.conversationVisionEnabled, fallback.conversationVisionEnabled, DEFAULT_SETTINGS.conversationVisionEnabled, validBoolean),
+    monitorCameraDeviceId: pick(source.monitorCameraDeviceId, fallback.monitorCameraDeviceId, DEFAULT_SETTINGS.monitorCameraDeviceId, value => typeof value === 'string' && value.length <= 256 && !/[\x00-\x1f]/u.test(value) ? value : null),
+    watchModel: pick(source.watchModel, fallback.watchModel, DEFAULT_SETTINGS.watchModel, validModelOrVoice),
+    phoneConnectionEnabled: pick(source.phoneConnectionEnabled, fallback.phoneConnectionEnabled, false, validBoolean),
+    phoneServerPort: pick(source.phoneServerPort, fallback.phoneServerPort, 0, value => Number.isInteger(value) && value >= 0 && value <= 65535 ? value : null),
+    phoneServerTokenFile: pick(source.phoneServerTokenFile, fallback.phoneServerTokenFile, '', value => { const path = validDesktopString(value); return path !== null && (path === '' || isAbsolute(path)) ? path : null }),
+    phoneServerUrl: pick(source.phoneServerUrl, fallback.phoneServerUrl, '', validPhoneServerUrl),
+    embeddingProvider: pick(acceptsV4Fields ? source.embeddingProvider : undefined, acceptsV4Fields ? fallback.embeddingProvider : undefined, DEFAULT_SETTINGS.embeddingProvider, validEmbeddingProvider),
+    embeddingModel: pick(acceptsV4Fields ? source.embeddingModel : undefined, acceptsV4Fields ? fallback.embeddingModel : undefined, DEFAULT_SETTINGS.embeddingModel, validDesktopString),
+    capabilitiesConfigPath: pick(acceptsV4Fields ? source.capabilitiesConfigPath : undefined, acceptsV4Fields ? fallback.capabilitiesConfigPath : undefined, DEFAULT_SETTINGS.capabilitiesConfigPath, validDesktopString),
+    knowledgePath: pick(acceptsV4Fields ? source.knowledgePath : undefined, acceptsV4Fields ? fallback.knowledgePath : undefined, DEFAULT_SETTINGS.knowledgePath, validDesktopString),
+    secrets: normalizeSecrets(source.secrets),
   }
 }
 
@@ -602,12 +427,8 @@ function updatedSecrets(stored, updates, codec) {
   const rejected = []
   if (!isRecord(updates)) return { secrets, rejected }
   for (const key of SECRET_KEYS) {
-    const value = ownEnumerableDataValue(updates, key)
-    if (value === MISSING_PROPERTY) continue
-    if (value === INVALID_PROPERTY) {
-      rejected.push(key)
-      continue
-    }
+    const value = updates[key]
+    if (!Object.hasOwn(updates, key)) continue
     if (typeof value !== 'string' || [...value].length > MAX_SECRET_LENGTH) {
       rejected.push(key)
       continue
@@ -664,52 +485,10 @@ function resealPlaintext(secrets, codec) {
 export function applySettingsUpdate(current, patch, codec) {
   const stored = normalizeSettings(current)
   const source = isRecord(patch) ? patch : {}
-  const next = normalizeSettings({
-    palette: ownEnumerableDataValue(source, 'palette'),
-    proactivity: ownEnumerableDataValue(source, 'proactivity'),
-    codingProgressNarration: ownEnumerableDataValue(source, 'codingProgressNarration'),
-    codexHeartbeatSeconds: ownEnumerableDataValue(source, 'codexHeartbeatSeconds'),
-    codexBinaryMode: ownEnumerableDataValue(source, 'codexBinaryMode'),
-    codexBinaryPath: ownEnumerableDataValue(source, 'codexBinaryPath'),
-    codexWorkspace: ownEnumerableDataValue(source, 'codexWorkspace'),
-    codexManagedRoot: ownEnumerableDataValue(source, 'codexManagedRoot'),
-    modelBaseUrl: ownEnumerableDataValue(source, 'modelBaseUrl'),
-    startListeningOnLaunch: ownEnumerableDataValue(source, 'startListeningOnLaunch'),
-    wakeWordEnabled: ownEnumerableDataValue(source, 'wakeWordEnabled'),
-    autoHideSeconds: ownEnumerableDataValue(source, 'autoHideSeconds'),
-    pipelineMode: ownEnumerableDataValue(source, 'pipelineMode'),
-    integratedProvider: ownEnumerableDataValue(source, 'integratedProvider'),
-    integratedModel: ownEnumerableDataValue(source, 'integratedModel'),
-    integratedVoice: ownEnumerableDataValue(source, 'integratedVoice'),
-    cascadedEndpointingProvider: ownEnumerableDataValue(
-      source,
-      'cascadedEndpointingProvider',
-    ),
-    cascadedAsrProvider: ownEnumerableDataValue(source, 'cascadedAsrProvider'),
-    cascadedLlmProvider: ownEnumerableDataValue(source, 'cascadedLlmProvider'),
-    cascadedLlmModels: ownEnumerableDataValue(source, 'cascadedLlmModels'),
-    cascadedTtsProvider: ownEnumerableDataValue(source, 'cascadedTtsProvider'),
-    cascadedTtsVoice: ownEnumerableDataValue(source, 'cascadedTtsVoice'),
-    codexApprovalMode: ownEnumerableDataValue(source, 'codexApprovalMode'),
-    clarificationDepth: ownEnumerableDataValue(source, 'clarificationDepth'),
-    planReadback: ownEnumerableDataValue(source, 'planReadback'),
-    plannerModel: ownEnumerableDataValue(source, 'plannerModel'),
-    progressBubbles: ownEnumerableDataValue(source, 'progressBubbles'),
-    conversationVisionEnabled: ownEnumerableDataValue(source, 'conversationVisionEnabled'),
-    monitorCameraDeviceId: ownEnumerableDataValue(source, 'monitorCameraDeviceId'),
-    watchModel: ownEnumerableDataValue(source, 'watchModel'),
-    phoneConnectionEnabled: ownEnumerableDataValue(source, 'phoneConnectionEnabled'),
-    phoneServerPort: ownEnumerableDataValue(source, 'phoneServerPort'),
-    phoneServerTokenFile: ownEnumerableDataValue(source, 'phoneServerTokenFile'),
-    phoneServerUrl: ownEnumerableDataValue(source, 'phoneServerUrl'),
-    embeddingProvider: ownEnumerableDataValue(source, 'embeddingProvider'),
-    embeddingModel: ownEnumerableDataValue(source, 'embeddingModel'),
-    capabilitiesConfigPath: ownEnumerableDataValue(source, 'capabilitiesConfigPath'),
-    knowledgePath: ownEnumerableDataValue(source, 'knowledgePath'),
-  }, stored)
+  const next = normalizeSettings({...source, version: stored.version}, stored)
   const { secrets, rejected } = updatedSecrets(
     stored.secrets,
-    ownEnumerableDataValue(source, 'secrets'),
+    source.secrets,
     codec,
   )
   next.secrets = resealPlaintext(secrets, codec)
