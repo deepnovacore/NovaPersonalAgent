@@ -1022,10 +1022,13 @@ function waitDesktopClose(socket: WebSocket, label: string): Promise<number> {
 }
 
 async function authenticateDesktop(socket: WebSocket, label: string): Promise<void> {
-  // No coding executor is configured here, so no executor.state frame follows the ready frame.
-  const initial = receiveFrames(socket, 1, `${label} bootstrap`)
+  // Even without a coding executor, authentication publishes an empty task snapshot.
+  const initial = receiveFrames(socket, 2, `${label} bootstrap`)
   await sendDesktop(socket, JSON.stringify({type: 'hello', token: TOKEN}), `${label} hello`)
-  assert.deepEqual((await initial).map(frame => text(frame)), ['{"type":"desktop.ready"}'])
+  assert.deepEqual((await initial).map(frame => JSON.parse(text(frame)) as unknown), [
+    {type: 'desktop.ready'},
+    {type: 'executor.tasks', revision: 0, active_project: null, tasks: []},
+  ])
 }
 
 async function assertDesktopControlOutputs(
@@ -1232,9 +1235,7 @@ test('authenticated fake-provider loopback uses one service for duplex audio and
   const first = await connectDesktop(announced.port)
   opened.add(first)
   try {
-    const initial = receiveFrames(first, 1, 'desktop ready and current state')
-    await sendDesktop(first, JSON.stringify({type: 'hello', token: TOKEN}), 'desktop hello')
-    assert.deepEqual((await initial).map(frame => text(frame)), ['{"type":"desktop.ready"}'])
+    await authenticateDesktop(first, 'desktop ready and current state')
 
     await sendDesktop(first, new Uint8Array([1, 2, 3, 4]), 'desktop PCM')
     await sendDesktop(first, JSON.stringify({
@@ -1277,9 +1278,7 @@ test('authenticated fake-provider loopback uses one service for duplex audio and
   const second = await connectDesktop(announced.port)
   opened.add(second)
   try {
-    const current = receiveFrames(second, 1, 'reconnected desktop current state')
-    await sendDesktop(second, JSON.stringify({type: 'hello', token: TOKEN}), 'reconnect hello')
-    assert.deepEqual((await current).map(frame => text(frame)), ['{"type":"desktop.ready"}'])
+    await authenticateDesktop(second, 'reconnected desktop current state')
     assert.equal(provider.connectCalls, 1)
   } finally {
     await closeDesktop(second)
