@@ -276,39 +276,27 @@ test('preflight is hard-capped and caller cancellation settles before spawn', as
   assert.equal(spawnCount, 0)
 })
 
-test('preflight rejects Codex versions older than the pinned app-server minimum', async () => {
-  const transport = createTransport({spawn: async () => new MemoryAppServerOwner([])}, {
-    preflightRunner: {run: async () => ({...safePreflightReport(), version: '0.144.9'})},
-  })
-  await assert.rejects(
-    transport.preflight({expiresAtMs: Date.now() + 5000}),
-    (error: unknown) => String(error) === 'CodexTransportError: unsupported_version',
-  )
-})
-
-test('preflight accepts newer prerelease and build-qualified Codex versions', async () => {
-  for (const version of ['0.151.0-alpha.7.2', '0.151.0-alpha.7+desktop.2', '0.145.0+build.1']) {
-    const transport = createTransport({spawn: async () => new MemoryAppServerOwner([])}, {
-      preflightRunner: {run: async () => ({...safePreflightReport(), version})},
-    })
-    assert.equal((await transport.preflight({expiresAtMs: Date.now() + 5000})).version, version)
-  }
-})
-
-test('preflight rejects a prerelease at the pinned app-server minimum and malformed labels', async () => {
-  for (const version of [
+for (const {name, versions, accepted} of [
+  {name: 'preflight rejects Codex versions older than the pinned app-server minimum', versions: ['0.144.9'], accepted: false},
+  {name: 'preflight accepts newer prerelease and build-qualified Codex versions', versions: ['0.151.0-alpha.7.2', '0.151.0-alpha.7+desktop.2', '0.145.0+build.1'], accepted: true},
+  {name: 'preflight rejects a prerelease at the pinned app-server minimum and malformed labels', versions: [
     '0.145.0-alpha', 'v0.145.0', 'codex-cli 0.145.0', 'codex 0.145.0',
     '0.151.0-alpha..7', '0.151.0 alpha.7',
-  ]) {
-    const transport = createTransport({spawn: async () => new MemoryAppServerOwner([])}, {
-      preflightRunner: {run: async () => ({...safePreflightReport(), version})},
-    })
-    await assert.rejects(
-      transport.preflight({expiresAtMs: Date.now() + 5000}),
-      (error: unknown) => String(error) === 'CodexTransportError: unsupported_version',
-    )
-  }
-})
+  ], accepted: false},
+]) {
+  test(name, async () => {
+    for (const version of versions) {
+      const transport = createTransport({spawn: async () => new MemoryAppServerOwner([])}, {
+        preflightRunner: {run: async () => ({...safePreflightReport(), version})},
+      })
+      if (accepted) assert.equal((await transport.preflight({expiresAtMs: Date.now() + 5000})).version, version)
+      else await assert.rejects(
+        transport.preflight({expiresAtMs: Date.now() + 5000}),
+        (error: unknown) => String(error) === 'CodexTransportError: unsupported_version',
+      )
+    }
+  })
+}
 
 test('a spawned process missing a required pipe is refused and disposed before protocol work', async () => {
   let disposed = false
