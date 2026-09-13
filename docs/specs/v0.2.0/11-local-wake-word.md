@@ -108,7 +108,7 @@ From the repository root:
 ```sh
 npm run check
 npm run test:desktop
-node --test runtime/dist/test/desktop-bridge.test.js runtime/dist/test/desktop-service.test.js runtime/dist/test/desktop-realtime.test.js
+node --test runtime/dist/test/desktop-session.test.js runtime/dist/test/desktop-service.test.js
 npm run package:mac
 ```
 

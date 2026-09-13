@@ -144,7 +144,7 @@ The authoritative release declarations are in [RELEASE-GATE.md](RELEASE-GATE.md)
 
 
 Deterministic M1.5c coverage is recorded in targeted tests: `assembly.test.ts`,
-`cascaded-realtime-assembly.test.ts`, `realtime-assembly.test.ts`,
+`realtime-assembly.test.ts`,
 `structured-state-retirement.test.ts`, `vision-controller.test.ts`,
 `vision-controller-core.test.ts`, and the policy cases in
 `realtime-service.test.ts` cover the runtime boundaries; desktop

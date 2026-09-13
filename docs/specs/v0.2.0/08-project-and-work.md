@@ -625,7 +625,7 @@ Deterministic:
       controllers; `dispatch.executor` enum generated from the controller
       registry with one `<name>: <summary>` line per controller in the tool description and
       no per-enum-value schema branch; no status tool anywhere in the table
-      (`tool-schema.test.ts`, `qwen-realtime-assembly.test.ts`).
+      (`tool-schema.test.ts`, `realtime-assembly.test.ts`).
 - [ ] Coordinator assess: six kinds route correctly; roster verbatim enforced;
       not-in-roster with explicit create intent → `create`, otherwise
       `unclear`; `new` refused when that project has a running work.
