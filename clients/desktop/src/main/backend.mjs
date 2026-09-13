@@ -25,6 +25,7 @@ const SETTINGS_DEFAULTS = Object.freeze({
   cascadedLlmModels: Object.freeze({
     qwen: 'qwen-flash',
     ark: 'doubao-seed-2-0-pro-260215',
+    deepseek: 'deepseek-flash',
   }),
   cascadedTtsProvider: 'volcengine',
   cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
@@ -56,6 +57,7 @@ export const SECRET_ENV_MAP = Object.freeze({
   modelApiKey: 'NOVA_AUDIO_AGENT_MODEL_API_KEY',
   codexApiKey: 'NOVA_AUDIO_AGENT_CODEX_API_KEY',
   arkApiKey: 'ARK_API_KEY',
+  deepseekApiKey: 'DEEPSEEK_API_KEY',
   doubaoBigmodelApiKey: 'DOUBAO_BIGMODEL_API_KEY',
   doubaoAsrApiKey: 'DOUBAO_ASR_API_KEY',
 })
@@ -623,7 +625,7 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
     if (pipelineMode === 'cascaded') {
       const llmProvider = settings?.cascadedLlmProvider
         ?? SETTINGS_DEFAULTS.cascadedLlmProvider
-      activeSecretKeys.add(llmProvider === 'ark' ? 'arkApiKey' : 'dashscopeApiKey')
+      activeSecretKeys.add(llmProvider === 'deepseek' ? 'deepseekApiKey' : llmProvider === 'ark' ? 'arkApiKey' : 'dashscopeApiKey')
       activeSecretKeys.add('doubaoBigmodelApiKey')
       // Optional override only. When absent, the runtime falls back to the
       // big-model key; Main does not synthesize a duplicate secret value.

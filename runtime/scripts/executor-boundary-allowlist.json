@@ -212,7 +212,7 @@
   },
   {
     "path": "runtime/src/environment-contract.ts",
-    "pattern": "| 'core' | 'qwen' | 'ark' | 'volcengine' | 'codex' | 'search' | 'camera'",
+    "pattern": "| 'core' | 'qwen' | 'ark' | 'deepseek' | 'volcengine' | 'codex' | 'search' | 'camera'",
     "reason": "Published executor environment names, descriptions and owner tags remain compatible."
   },
   {

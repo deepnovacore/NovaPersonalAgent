@@ -27,6 +27,7 @@ const ALL_SECRET_KEYS = Object.freeze([
   'modelApiKey',
   'codexApiKey',
   'arkApiKey',
+  'deepseekApiKey',
   'doubaoBigmodelApiKey',
   'doubaoAsrApiKey',
 ])
@@ -93,7 +94,7 @@ test('the default settings are the documented schema', () => {
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
     cascadedLlmProvider: 'qwen',
-    cascadedLlmModels: { qwen: 'qwen-flash', ark: 'doubao-seed-2-0-pro-260215' },
+    cascadedLlmModels: { qwen: 'qwen-flash', ark: 'doubao-seed-2-0-pro-260215', deepseek: 'deepseek-flash' },
     cascadedTtsProvider: 'volcengine',
     cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
     codexApprovalMode: 'ask',
@@ -267,7 +268,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
     cascadedLlmProvider: 'ark',
-    cascadedLlmModels: { qwen: 'qwen-plus', ark: 'doubao-custom' },
+    cascadedLlmModels: { qwen: 'qwen-plus', ark: 'doubao-custom', deepseek: 'deepseek-flash' },
     cascadedTtsProvider: 'volcengine',
     cascadedTtsVoice: 'zh_female_custom',
     codexApprovalMode: 'ask',
@@ -426,7 +427,7 @@ test('normalizeSettings reads remembered models only from own enumerable data pr
   const normalized = normalizeSettings({ cascadedLlmModels: models })
 
   assert.equal(getterCalls, 0)
-  assert.deepEqual(normalized.cascadedLlmModels, {
+  assert.deepEqual(normalized.cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: 'qwen-flash',
     ark: 'doubao-seed-2-0-pro-260215',
   })
@@ -438,7 +439,7 @@ test('normalizeSettings reads remembered models only from own enumerable data pr
   })
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: partiallyHidden,
-  }).cascadedLlmModels, {
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: 'qwen-own',
     ark: 'doubao-seed-2-0-pro-260215',
   })
@@ -528,7 +529,7 @@ test('normalizeSettings applies descriptor-only rules to caller-supplied base va
   assert.equal(normalized.pipelineMode, 'integrated')
   assert.equal(normalized.integratedModel, 'qwen-audio-3.0-realtime-plus')
   assert.equal(normalized.integratedVoice, 'longanqian')
-  assert.deepEqual(normalized.cascadedLlmModels, {
+  assert.deepEqual(normalized.cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: 'qwen-flash',
     ark: 'doubao-seed-2-0-pro-260215',
   })
@@ -589,37 +590,37 @@ test('normalizeSettings rejects leading and trailing controls before trimming mo
 
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: '\nqwen-custom', ark: 'ark-valid' },
-  }).cascadedLlmModels, {
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: 'qwen-flash',
     ark: 'ark-valid',
   })
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'qwen-valid', ark: 'ark-custom\r' },
-  }).cascadedLlmModels, {
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: 'qwen-valid',
     ark: 'doubao-seed-2-0-pro-260215',
   })
 })
 
-test('normalizeSettings treats cascadedLlmModels as a strict independent two-provider map', () => {
+test('normalizeSettings treats cascadedLlmModels as a strict independent three-provider map', () => {
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'qwen-max', ark: 'ark-custom', extra: 'drop-me' },
-  }).cascadedLlmModels, { qwen: 'qwen-max', ark: 'ark-custom' })
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash', qwen: 'qwen-max', ark: 'ark-custom' })
 
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'qwen-max' },
-  }).cascadedLlmModels, {
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: 'qwen-max',
     ark: DEFAULT_SETTINGS.cascadedLlmModels.ark,
   })
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'bad\nmodel', ark: 'ark-custom' },
-  }).cascadedLlmModels, {
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: DEFAULT_SETTINGS.cascadedLlmModels.qwen,
     ark: 'ark-custom',
   })
   for (const bad of [null, [], 'qwen-flash']) {
-    assert.deepEqual(normalizeSettings({ cascadedLlmModels: bad }).cascadedLlmModels, {
+    assert.deepEqual(normalizeSettings({ cascadedLlmModels: bad }).cascadedLlmModels, { deepseek: 'deepseek-flash', deepseek: 'deepseek-flash',
       ...DEFAULT_SETTINGS.cascadedLlmModels,
     })
   }
@@ -648,7 +649,7 @@ test('normalizeSettings falls back per field to a caller-supplied base', () => {
   assert.equal(merged.pipelineMode, 'cascaded')
   assert.equal(merged.integratedModel, 'integrated-kept')
   assert.equal(merged.cascadedLlmProvider, 'ark')
-  assert.deepEqual(merged.cascadedLlmModels, { qwen: 'qwen-next', ark: 'ark-kept' })
+  assert.deepEqual(merged.cascadedLlmModels, { deepseek: 'deepseek-flash', qwen: 'qwen-next', ark: 'ark-kept' })
 })
 
 test('normalizeSettings keeps only well-formed secret entries', () => {
@@ -761,6 +762,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     modelApiKey: false,
     codexApiKey: true,
     arkApiKey: false,
+    deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
     doubaoAsrApiKey: false,
   })
@@ -771,12 +773,13 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     modelApiKey: false,
     codexApiKey: false,
     arkApiKey: false,
+    deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
     doubaoAsrApiKey: false,
   })
 })
 
-test('all seven secret fields seal, report presence, round-trip, and clear independently', () => {
+test('all eight secret fields seal, report presence, round-trip, and clear independently', () => {
   const codec = fakeCodec()
   const values = Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, `${key}-value`]))
   const stored = applySettingsUpdate(DEFAULT_SETTINGS, { secrets: values }, codec)

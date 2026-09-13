@@ -596,6 +596,7 @@ test('every API key is a password field with a badge, hint, and clear button', (
     'dashscopeApiKey',
     'tavilyApiKey',
     'arkApiKey',
+    'deepseekApiKey',
     'doubaoBigmodelApiKey',
   ]) {
     assert.match(html, new RegExp(`<input type="password" id="${key}"[^>]*placeholder="输入新密钥；留空保持不变"`))
@@ -608,7 +609,7 @@ test('every API key is a password field with a badge, hint, and clear button', (
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
   assert.match(html, /火山语音/)
-  assert.equal((html.match(/type="password"/g) || []).length, 4)
+  assert.equal((html.match(/type="password"/g) || []).length, 5)
 })
 
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {

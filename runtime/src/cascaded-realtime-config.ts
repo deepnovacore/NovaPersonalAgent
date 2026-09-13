@@ -29,6 +29,7 @@ export interface VolcengineAsrConfig {
 }
 
 export interface QwenCascadedLlmConfig {
+  readonly provider?: 'qwen' | 'deepseek'
   readonly baseUrl: string
   readonly apiKey: string
   readonly model: string
@@ -49,7 +50,7 @@ export interface VolcengineTtsConfig {
 }
 
 export type SelectedCascadedLlmConfig =
-  | {readonly provider: 'qwen'; readonly config: QwenCascadedLlmConfig}
+  | {readonly provider: 'qwen' | 'deepseek'; readonly config: QwenCascadedLlmConfig}
   | {readonly provider: 'ark'; readonly config: ArkCascadedLlmConfig}
 
 export interface SelectedCascadedRealtimeConfig {
@@ -67,11 +68,12 @@ export function requireSelectedCascadedRealtimeConfig(
   const credentials = requireCascadedCredentials(settings, selection)
   const endpointing = resolveEndpointingConfig(settings)
   const asr = resolveAsrConfig(settings, credentials.asrApiKey)
-  const llm: SelectedCascadedLlmConfig = selection.llmProvider === 'qwen'
+  const llm: SelectedCascadedLlmConfig = selection.llmProvider !== 'ark'
     ? Object.freeze({
-      provider: 'qwen' as const,
+      provider: selection.llmProvider,
       config: Object.freeze({
-        baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
+        baseUrl: selection.llmProvider === 'deepseek' ? 'https://api.deepseek.com' : DASHSCOPE_COMPATIBLE_BASE_URL,
+        ...(selection.llmProvider === 'deepseek' ? {provider: 'deepseek' as const} : {}),
         apiKey: credentials.llmApiKey,
         model: selection.llmModel,
       }),

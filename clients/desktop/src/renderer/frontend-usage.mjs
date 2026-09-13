@@ -36,7 +36,7 @@ export function renderFrontendUsage(root, view, document = window.document) {
     const card = element('article', 'usage-card')
     const header = element('div', 'usage-card-header')
     const service = element('div', 'usage-service')
-    service.append(element('strong', '', services[row.service] ?? '模型服务'), element('span', 'usage-provider', {qwen: '通义千问', ark: '火山方舟', volcengine: '火山语音'}[row.provider] ?? row.provider))
+    service.append(element('strong', '', services[row.service] ?? '模型服务'), element('span', 'usage-provider', {qwen: '通义千问', ark: '火山方舟', deepseek: 'DeepSeek', volcengine: '火山语音'}[row.provider] ?? row.provider))
     const amount = element('div', 'usage-amount')
     amount.append(element('strong', '', row.pricedReports ? money(row.costCny) : '暂无数据'))
     if (row.missingReports || row.unpricedReports) amount.append(element('span', 'usage-incomplete', '部分用量'))

@@ -2,7 +2,7 @@ import {stripLikePython} from './python-text.js'
 import {casefoldLikePython} from './unicode-casefold.js'
 
 export type EnvironmentOwner =
-  | 'core' | 'qwen' | 'ark' | 'volcengine' | 'codex' | 'search' | 'camera'
+  | 'core' | 'qwen' | 'ark' | 'deepseek' | 'volcengine' | 'codex' | 'search' | 'camera'
   | 'telemetry' | 'host_private'
   | 'retired_realtime' | 'retired_ha' | 'retired_autoglm'
 
@@ -83,6 +83,7 @@ const rows: readonly Row[] = [
   ['NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT', 'qwen', false, true, 'never', 'false', 'Allow controlled Guard reconnect.', '允许受控 Guard 重连。'],
   ['NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY', 'qwen', false, true, 'never', 'none', 'Guard history recovery mode.', 'Guard 历史恢复模式。'],
   ['NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS', 'qwen', false, true, 'never', '4', 'Guard history pair count.', 'Guard 历史对话对数。'],
+  ['DEEPSEEK_API_KEY', 'deepseek', true, true, 'when_selected', null, 'Official DeepSeek cascaded LLM credential.', 'DeepSeek 官方级联 LLM 凭据。'],
   ['ARK_API_KEY', 'ark', true, true, 'when_selected', null, 'Ark cascaded LLM credential.', '方舟级联 LLM 凭据。'],
   ['DOUBAO_ASR_API_KEY', 'volcengine', true, true, 'never', 'Doubao big-model key', 'Volcengine ASR credential override.', '火山 ASR 凭据覆盖。'],
   ['DOUBAO_BIGMODEL_API_KEY', 'volcengine', true, true, 'when_selected', null, 'Volcengine TTS and ASR fallback credential.', '火山 TTS 及 ASR 回退凭据。'],

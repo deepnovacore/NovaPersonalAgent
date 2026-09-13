@@ -50,6 +50,7 @@ const SECRET_KEY_NAMES = [
   'modelApiKey',
   'codexApiKey',
   'arkApiKey',
+  'deepseekApiKey',
   'doubaoBigmodelApiKey',
   'doubaoAsrApiKey',
 ]

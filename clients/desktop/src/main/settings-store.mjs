@@ -12,6 +12,7 @@ export const SECRET_KEYS = Object.freeze([
   'modelApiKey',
   'codexApiKey',
   'arkApiKey',
+  'deepseekApiKey',
   'doubaoBigmodelApiKey',
   'doubaoAsrApiKey',
 ])
@@ -22,7 +23,7 @@ export const PIPELINE_MODES = Object.freeze(['integrated', 'cascaded'])
 export const INTEGRATED_PROVIDERS = Object.freeze(['qwen'])
 export const CASCADED_ENDPOINTING_PROVIDERS = Object.freeze(['auto'])
 export const CASCADED_ASR_PROVIDERS = Object.freeze(['volcengine'])
-export const CASCADED_LLM_PROVIDERS = Object.freeze(['qwen', 'ark'])
+export const CASCADED_LLM_PROVIDERS = Object.freeze(['qwen', 'ark', 'deepseek'])
 export const CASCADED_TTS_PROVIDERS = Object.freeze(['volcengine'])
 export const HEARTBEAT_MIN_SECONDS = 15
 export const HEARTBEAT_MAX_SECONDS = 120
@@ -57,6 +58,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   cascadedLlmModels: Object.freeze({
     qwen: 'qwen-flash',
     ark: 'doubao-seed-2-0-pro-260215',
+    deepseek: 'deepseek-flash',
   }),
   cascadedTtsProvider: 'volcengine',
   cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
@@ -224,6 +226,12 @@ function normalizeCascadedLlmModels(raw, base) {
       ownEnumerableDataValue(source, 'qwen'),
       ownEnumerableDataValue(fallback, 'qwen'),
       DEFAULT_SETTINGS.cascadedLlmModels.qwen,
+      validModelOrVoice,
+    ),
+    deepseek: pick(
+      ownEnumerableDataValue(source, 'deepseek'),
+      ownEnumerableDataValue(fallback, 'deepseek'),
+      DEFAULT_SETTINGS.cascadedLlmModels.deepseek,
       validModelOrVoice,
     ),
     ark: pick(

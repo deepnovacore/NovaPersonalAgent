@@ -259,7 +259,7 @@ export function buildCascadedRealtimeAssembly(
     ...(options.asrClient === undefined ? {} : {clientFactory: options.asrClient}),
   })
   let instructions = currentInstructions()
-  const createLlmFactory = () => selected.llm.provider === 'qwen'
+  const createLlmFactory = () => selected.llm.provider !== 'ark'
     ? registry.llm.qwen({
       ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, selected.llm.config.baseUrl)!}),
       config: selected.llm.config,

@@ -30,6 +30,7 @@ export class QwenCascadedLlmFailure extends Error {
 }
 
 export interface QwenCascadedLlmFactoryOptions {
+  readonly provider?: 'qwen' | 'deepseek'
   readonly baseUrl: string; readonly apiKey: string; readonly model: string; readonly instructions: string
   readonly fetchImpl?: typeof globalThis.fetch; readonly idFactory?: () => string; readonly clock?: Clock
   readonly onUsage?: UsageReporter
@@ -51,11 +52,13 @@ function schema(tool: CascadedLlmTool): JsonObject { return {type: 'function', f
 function size(units: readonly (readonly Message[])[]): {items: number; codepoints: number} { const all = units.flat(); return {items: all.length, codepoints: all.reduce((sum, item) => sum + codePointLengthLikePython(JSON.stringify(withoutImage(item))), 0)} }
 
 class Session implements CascadedLlmSession {
+  readonly #provider: 'qwen' | 'deepseek'
   readonly #onUsage: UsageReporter | undefined
   readonly #endpoint: string; readonly #apiKey: string; readonly #model: string; readonly #instructions: string; readonly #fetch: typeof fetch
   readonly #idleTimeoutMs: number; readonly #closeTimeoutMs: number; readonly #active = new Set<Active>()
   #history: Message[][] = []; #unresolved: Message[] | null = null; #closed = false; #closePromise: Promise<void> | null = null
   constructor(options: QwenCascadedLlmFactoryOptions) {
+    this.#provider = options.provider ?? 'qwen'
     this.#onUsage = options.onUsage
     if (!options.apiKey || !options.model || !options.instructions) throw fail('configuration')
     this.#endpoint = endpoint(options.baseUrl); this.#apiKey = options.apiKey; this.#model = options.model; this.#instructions = options.instructions; this.#fetch = options.fetchImpl ?? globalThis.fetch
@@ -73,6 +76,7 @@ class Session implements CascadedLlmSession {
       .join('\n\n')
     const messages = [{role: 'system' as const, content: systemContent}, ...this.#history.flat(), ...(unresolved ?? []), ...current]
     const body: Record<string, JsonValue> = {model: this.#model, messages: messages as unknown as JsonValue, stream: true, stream_options: {include_usage: true}}
+    if (this.#provider === 'deepseek') body.thinking = {type: 'disabled'}
     if (input.tools.length > 0) { body.tools = input.tools.map(schema); body.parallel_tool_calls = false }
     const active: Active = {completion: null, usageDeadline: null, controller: new AbortController(), reader: null, failureCode: null}
     const stop = (): void => { active.failureCode ??= 'aborted'; active.controller.abort(); void this.#cancel(active.reader) }
@@ -148,11 +152,11 @@ class Session implements CascadedLlmSession {
         const details = object(usage?.prompt_tokens_details) ? usage.prompt_tokens_details : {}
         const outputDetails = object(usage?.completion_tokens_details) ? usage.completion_tokens_details : {}
         reportUsage(this.#onUsage, {
-          id: usageId, service: 'llm', provider: 'qwen', model: this.#model,
+          id: usageId, service: 'llm', provider: this.#provider, model: this.#model,
           status: terminal && usage !== undefined ? 'complete' : 'missing',
           ...(terminal && usage !== undefined ? {
             inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens,
-            cachedTokens: details.cached_tokens, reasoningTokens: outputDetails.reasoning_tokens,
+            cachedTokens: this.#provider === 'deepseek' ? usage.prompt_cache_hit_tokens : details.cached_tokens, reasoningTokens: outputDetails.reasoning_tokens,
           } : {}),
         } as UsageReport)
         input.signal.removeEventListener('abort', stop); await this.#cancel(active.reader); this.#active.delete(active)

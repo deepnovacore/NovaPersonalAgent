@@ -888,3 +888,12 @@ test('removed memory backend configuration fails explicitly instead of silently 
 test('deferred native memory provider is rejected explicitly', () => {
   assert.throws(() => loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'local', NOVA_AUDIO_AGENT_MEMORY_PROVIDER: 'mem0'}), /MEMORY_PROVIDER/u)
 })
+
+
+test('DeepSeek cascade uses its official credential and Flash model', () => {
+  const settings = loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'deepseek-test', DOUBAO_BIGMODEL_API_KEY: 'speech-test'})
+  const selection = resolveCascadedSelection(settings)
+  assert.equal(selection.llmModel, 'deepseek-flash')
+  assert.equal(requireCascadedCredentials(settings, selection).llmApiKey, 'deepseek-test')
+  assert.throws(() => requireCascadedCredentials(loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'deepseek', DASHSCOPE_API_KEY: 'wrong-key'}), selection), /DEEPSEEK_API_KEY/)
+})
