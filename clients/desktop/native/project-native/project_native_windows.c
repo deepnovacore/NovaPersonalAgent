@@ -160,9 +160,35 @@ static napi_value nova_sync_directory(napi_env env, napi_callback_info info) {
 #pragma warning(disable : 4055)
   flush_fn flush = (flush_fn)(void *)GetProcAddress(ntdll, "NtFlushBuffersFileEx");
 #pragma warning(pop)
+  if (flush == NULL) return nova_status(env, "failed");
+  DWORD length = GetFinalPathNameByHandleW(root, NULL, 0, FILE_NAME_NORMALIZED);
+  if (length == 0 || length > 32768) return nova_status(env, "failed");
+  WCHAR *path = (WCHAR *)calloc(length + 1, sizeof(WCHAR));
+  if (path == NULL) return nova_status(env, "failed");
+  DWORD written = GetFinalPathNameByHandleW(root, path, length + 1,
+                                           FILE_NAME_NORMALIZED);
+  if (written == 0 || written > length) {
+    free(path);
+    return nova_status(env, "failed");
+  }
+  HANDLE writable = CreateFileW(path, FILE_ADD_FILE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  free(path);
+  if (writable == INVALID_HANDLE_VALUE) return nova_status(env, "failed");
+  BY_HANDLE_FILE_INFORMATION reopened;
+  if (!GetFileInformationByHandle(writable, &reopened) ||
+      (reopened.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0 ||
+      file.dwVolumeSerialNumber != reopened.dwVolumeSerialNumber ||
+      file.nFileIndexHigh != reopened.nFileIndexHigh ||
+      file.nFileIndexLow != reopened.nFileIndexLow) {
+    CloseHandle(writable);
+    return nova_status(env, "failed");
+  }
   IO_STATUS_BLOCK io;
-  return nova_status(env, flush != NULL && flush(root, 0, NULL, 0, &io) == 0
-                              ? "ok" : "failed");
+  NTSTATUS status = flush(writable, 0, NULL, 0, &io);
+  CloseHandle(writable);
+  return nova_status(env, status == 0 ? "ok" : "failed");
 }
 
 static int nova_export(napi_env env, napi_value exports, const char *name,

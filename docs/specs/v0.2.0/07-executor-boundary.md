@@ -472,7 +472,9 @@ The project addon retains crash-safe nonblocking advisory locks (`flock` /
 `LockFileEx`). Lock files are never unlinked: replacing an inode would split
 ownership between processes, while PID-based stale-file recovery races with reuse.
 Windows also retains the small native directory flush (`NtFlushBuffersFileEx`),
-because Node directory `fsync` returns EPERM; missing flush support fails closed.
+because Node directory `fsync` returns EPERM. It derives the retained handle’s
+final path, opens only the directory write permission needed by flush, and verifies
+volume/file identity before flushing; missing support or mismatch fails closed.
 Windows retains the no-breakaway Job launcher and its tree-empty completion
 protocol; `taskkill` after leader exit cannot reclaim a detached descendant.
 The native sandbox probe also remains: production preflight consumes its actual
