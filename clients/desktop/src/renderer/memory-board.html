@@ -25,7 +25,6 @@
     <nav class="board-tabs" role="tablist" aria-label="记忆面板 视图">
       <button id="memory-tab" type="button" role="tab" aria-selected="true" aria-controls="memory-panel">记忆</button>
       <button id="diagnostics-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostics-panel" tabindex="-1">诊断</button>
-      <button id="graph-tab" type="button" role="tab" aria-selected="false" aria-controls="graph-panel" tabindex="-1">工作区图谱</button>
     </nav>
     <main>
       <section id="memory-panel" role="tabpanel" aria-labelledby="memory-tab">
@@ -34,10 +33,6 @@
       </section>
       <section id="diagnostics-panel" role="tabpanel" aria-labelledby="diagnostics-tab" hidden>
         <div id="diagnostics"></div>
-      </section>
-      <section id="graph-panel" role="tabpanel" aria-labelledby="graph-tab" hidden>
-        <p id="graph-state" class="graph-state" aria-live="polite"></p>
-        <div id="workspace-graph"></div>
       </section>
     </main>
     <script type="module" src="./memory-board.mjs"></script>

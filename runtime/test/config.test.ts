@@ -309,29 +309,6 @@ test('runtime settings do not expose the retired backend selector', () => {
   assert.equal('backend' in loadSettings({NOVA_AUDIO_AGENT_BACKEND: 'python'}), false)
 })
 
-test('workspace graph settings default off and accept only loopback MyContext endpoints', () => {
-  const defaults = loadSettings({})
-  assert.equal(defaults.workspace_graph_enabled, false)
-  assert.equal(defaults.workspace_graph_path, '~/.nova-audio-agent/workspace-graph.sqlite')
-  assert.equal(defaults.mycontext_provider_url, null)
-  const enabled = loadSettings({
-    NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED: 'true',
-    NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH: '/private/state/graph.sqlite',
-    NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL: 'http://127.0.0.1:7412/v1',
-  })
-  assert.equal(enabled.workspace_graph_enabled, true)
-  assert.equal(enabled.workspace_graph_path, '/private/state/graph.sqlite')
-  assert.equal(enabled.mycontext_provider_url, 'http://127.0.0.1:7412/v1')
-  assert.throws(() => loadSettings({
-    NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL: 'https://example.com/context',
-  }), /NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL/u)
-  assert.throws(() => loadSettings({
-    NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL: 'http://127.0.0.1:7412/v1?token=secret',
-  }), /NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL/u)
-  assert.throws(() => loadSettings({
-    NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL: 'http://127.0.0.1:7412/v1#fragment',
-  }), /NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL/u)
-})
 
 test('proactivity presets and individual overrides preserve the Python table', () => {
   assert.deepEqual(

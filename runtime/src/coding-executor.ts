@@ -9,7 +9,7 @@
 import type {AgentDescriptor, AgentController, AgentRuntimeDispatchPort} from './agent-controller.js'
 import type {IntakeOptions, IntakeEventPort} from './executors/coding/intake.js'
 import type {ApprovalController} from './approval-port.js'
-import type {ExecutorAdapter, ExecutorHandoff} from './causal-runtime.js'
+import type {ExecutorAdapter} from './causal-runtime.js'
 import type {JsonValue} from './events.js'
 import type {DelegateRequest, ExecutorManifest} from './ports.js'
 import type {ConfirmedProjectOperation, ProjectAction, ProjectConfirmationController} from './project-confirmation.js'
@@ -96,16 +96,6 @@ export interface AgentExecutor {
   resolveIntakeTarget(decision: CoordinatorDecision): Promise<IntakeTarget>
 }
 
-export interface CommittedWorkspaceEvent {
-  readonly workspace: WorkspaceRecord
-}
-
-export interface TerminalWorkOrderEvent {
-  readonly workspace: WorkspaceRecord
-  readonly work_order: string
-  readonly handoff: ExecutorHandoff
-}
-
 export type ProjectRuntimeDispatch = (
   request: DelegateRequest,
   reason: WakeReason,
@@ -134,8 +124,6 @@ export interface ProjectExecutorAdapter extends ExecutorAdapter, AgentExecutor {
   activeCommittedWorkspace(): Promise<WorkspaceRecord | null>
   observeProjectView(observer: (view: PublicProjectView) => void | Promise<void>): () => void
   observeProjectContext(observer: (context: PublicProjectContext) => void | Promise<void>): () => void
-  observeCommittedWorkspace(observer: (event: CommittedWorkspaceEvent) => void | Promise<void>): () => void
-  observeTerminalWorkOrder(observer: (event: TerminalWorkOrderEvent) => void | Promise<void>): () => void
   commitConfirmed(operation: ConfirmedProjectOperation, dispatch: ProjectRuntimeDispatch): Promise<ProjectCommitResult>
   publicProjectView(pendingConfirmation: boolean): PublicProjectView
   publicProjectContext(pendingConfirmation: boolean): PublicProjectContext

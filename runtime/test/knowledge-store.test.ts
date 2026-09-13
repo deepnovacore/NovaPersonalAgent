@@ -54,7 +54,7 @@ async function storeWithPath(t: TestContext, forceLexical = false): Promise<{rea
 }
 
 async function holdWriteLock(path: string): Promise<{readonly release: () => Promise<void>}> {
-  const worker = new Worker(new URL('./fixtures/workspace-graph-sqlite-worker.js', import.meta.url), {
+  const worker = new Worker(new URL('./fixtures/sqlite-worker.js', import.meta.url), {
     workerData: {mode: 'lock', path},
   })
   await new Promise<void>((resolve, reject) => {
@@ -476,7 +476,7 @@ test('forced close during a native SQLite lock keeps reopening fail-closed until
 })
 
 async function fixtureSql(path: string, sql: string, mode = 'exec'): Promise<unknown> {
-  const worker = new Worker(new URL('./fixtures/workspace-graph-sqlite-worker.js', import.meta.url), {workerData: {path, sql, mode}})
+  const worker = new Worker(new URL('./fixtures/sqlite-worker.js', import.meta.url), {workerData: {path, sql, mode}})
   try {return await new Promise((resolve, reject) => {worker.once('message', resolve); worker.once('error', reject)})}
   finally {await worker.terminate()}
 }

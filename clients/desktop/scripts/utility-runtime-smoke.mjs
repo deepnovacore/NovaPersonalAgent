@@ -156,7 +156,6 @@ async function run() {
     await writeFile(resolve(isolated, 'capabilities.json'), JSON.stringify({version: 1, modules: {
       coding: {enabled: false}, camera: {enabled: false}, search: {enabled: false},
     }}))
-    parentEnv.NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED = 'false'
   }
   const spec = backendLaunchSpec({
     backend: 'node',
@@ -267,7 +266,7 @@ async function runCapabilityStatus() {
         NOVA_AUDIO_AGENT_MODEL_API_KEY: 'dummy-model-key', NOVA_AUDIO_AGENT_MODEL_BASE_URL: `https://127.0.0.1:${port}`,
         DASHSCOPE_API_KEY: 'dummy-dashscope-key', NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: `wss://127.0.0.1:${port}/qwen`,
         NOVA_AUDIO_AGENT_BLACKBOARD_PATH: resolve(root, 'blackboard.sqlite'), NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID: 'utility-smoke',
-        NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED: 'false', NODE_EXTRA_CA_CERTS: certificate}
+        NODE_EXTRA_CA_CERTS: certificate}
       const context = vm.createContext({readCapabilityDocument, classifyBackendFailure, createBackendDiagnosticCollector, createBackendControl,
         createReadinessListener: options => createReadinessListener({...options, onTimeout: () => {
           readinessTimeouts++; trace('readiness timeout requests child cleanup'); options.onTimeout?.()

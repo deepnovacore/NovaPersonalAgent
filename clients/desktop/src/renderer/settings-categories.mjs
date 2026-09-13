@@ -32,8 +32,8 @@ export function categorySectionIds() {
 
 /**
  * Roving-focus mapping for the vertical sidebar. Deliberately separate from
- * workspace-graph-board.mjs's boardTabForKey, which is horizontal and fixed at
- * three tabs; null means the key is not a navigation key and must pass through.
+ * channel-tabs.mjs's boardTabForKey, which is horizontal and fixed at
+ * two tabs; null means the key is not a navigation key and must pass through.
  */
 export function categoryTabForKey(activeCategory, key) {
   const ids = categoryIds()

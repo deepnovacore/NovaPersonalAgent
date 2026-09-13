@@ -21,23 +21,6 @@ const embeddingProviderSchema = z.enum(['dashscope'])
 const memoryConnectionSchema = z.enum(['disabled', 'local', 'remote'])
 const searchProviderSchema = z.enum(['mcp', 'tavily'])
 const volcFloatSchema = z.custom<number>(value => typeof value === 'number')
-const loopbackUrlSchema = z.string().url().refine(value => {
-  try {
-    const parsed = new URL(value)
-    return (parsed.protocol === 'http:' || parsed.protocol === 'https:')
-      && (parsed.hostname === '127.0.0.1'
-        || parsed.hostname === '::1'
-        || parsed.hostname === '[::1]'
-        || parsed.hostname === 'localhost')
-      && parsed.username === ''
-      && parsed.password === ''
-      && parsed.search === ''
-      && parsed.hash === ''
-  } catch {
-    return false
-  }
-}, 'provider endpoint must be loopback-only')
-
 export const DASHSCOPE_COMPATIBLE_BASE_URL =
   'https://dashscope.aliyuncs.com/compatible-mode/v1'
 
@@ -123,9 +106,6 @@ export const settingsSchema = z.object({
   memory_token: z.string().nullable().default(null),
   memory_path: z.string().min(1).default('~/.nova-audio-agent/memory.sqlite'),
   memory_user_id: z.string().min(1).default('local'),
-  workspace_graph_enabled: z.boolean().default(false),
-  workspace_graph_path: z.string().min(1).default('~/.nova-audio-agent/workspace-graph.sqlite'),
-  mycontext_provider_url: loopbackUrlSchema.nullable().default(null),
 }).strict()
 
 export type Settings = z.infer<typeof settingsSchema>
@@ -351,13 +331,6 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     memory_token: optionalSecret(environment.NOVA_AUDIO_AGENT_MEMORY_TOKEN),
     memory_path: optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_PATH),
     memory_user_id: optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_USER_ID),
-    workspace_graph_enabled: optionalBoolean(
-      environment.NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED,
-    ),
-    workspace_graph_path: optionalString(environment.NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH),
-    mycontext_provider_url: optionalSecret(
-      environment.NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL,
-    ),
   }
   const withoutUndefined = Object.fromEntries(
     Object.entries(candidate).filter(([, value]) => value !== undefined),

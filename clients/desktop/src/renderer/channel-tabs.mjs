@@ -65,3 +65,18 @@ export function channelAccent(name) {
   for (const character of text) sum += character.codePointAt(0)
   return CHANNEL_ACCENTS[sum % CHANNEL_ACCENTS.length]
 }
+
+export function boardTabForKey(activeTab, key) {
+  const tabs = ['memory', 'diagnostics']
+  if (key === 'Home') return 'memory'
+  if (key === 'End') return 'diagnostics'
+  const current = tabs.indexOf(activeTab)
+  if (current === -1) return null
+  if (key === 'ArrowLeft' || key === 'ArrowUp') {
+    return tabs[(current + tabs.length - 1) % tabs.length]
+  }
+  if (key === 'ArrowRight' || key === 'ArrowDown') {
+    return tabs[(current + 1) % tabs.length]
+  }
+  return null
+}

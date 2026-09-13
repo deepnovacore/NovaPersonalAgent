@@ -1170,22 +1170,6 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     })().finally(() => { clearingConversation = null })
     return clearingConversation
   })
-  ipcMain.handle('nova:workspace-graph-board:request', async event => {
-    if (!boardWindow || event.sender !== boardWindow.webContents) {
-      throw new Error('workspace graph board request rejected')
-    }
-    if (backendStatus.state !== 'connected' || !backendStatus.connection) {
-      return { error: 'unavailable' }
-    }
-    try {
-      return await requestBoardSnapshot(backendStatus.connection, {
-        board: 'workspace_graph',
-        detail: 'compact',
-      })
-    } catch (error) {
-      return {error: error?.code === 'timeout' ? 'timeout' : 'unavailable'}
-    }
-  })
   ipcMain.handle('nova:memory-board:copy-json', async event => {
     if (!boardWindow || event.sender !== boardWindow.webContents) {
       throw new Error('memory board copy rejected')

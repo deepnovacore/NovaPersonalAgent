@@ -77,8 +77,6 @@ test('different projects run in parallel; a busy project refuses; the cap refuse
   const value = await fixture()
   await withProjects(value, ['beta', 'gamma', 'delta'])
   const gates = gateProjects(value, ['alpha', 'beta', 'gamma'])
-  const terminals: ExecutorHandoff[] = []
-  value.adapter.observeTerminalWorkOrder(event => { terminals.push(event.handoff) })
   try {
     const alpha = run(value, 'alpha work', {project: 'alpha', title: 'Alpha', delegateId: 'work-alpha'})
     await settleWithin('alpha starts', gates.get('alpha')!.started)
@@ -127,7 +125,6 @@ test('different projects run in parallel; a busy project refuses; the cap refuse
     assert.deepEqual(value.adapter.running(), [])
     assert.deepEqual(value.adapter.roster().map(entry => entry.running), [[], [], [], []])
     assert.deepEqual(value.factory.transports.map(transport => transport.closeCalls), [1, 1, 1])
-    assert.equal(terminals.length, 3, 'refusals are not terminal work-order events')
     for (const name of ['alpha', 'beta', 'gamma']) {
       const workspace = await value.store.resolveWorkspace(name)
       assert.deepEqual(
@@ -145,8 +142,6 @@ test('different projects run in parallel; a busy project refuses; the cap refuse
 test('cancel aborts the run slot: one close, a cancelled handoff through the normal path, then not_running', async () => {
   const value = await fixture()
   const gates = gateProjects(value, ['alpha'])
-  const terminals: ExecutorHandoff[] = []
-  value.adapter.observeTerminalWorkOrder(event => { terminals.push(event.handoff) })
   try {
     const work = run(value, 'long task', {title: 'Long', delegateId: 'work-1'})
     await settleWithin('run starts', gates.get('alpha')!.started)
@@ -157,7 +152,6 @@ test('cancel aborts the run slot: one close, a cancelled handoff through the nor
       outcome: 'cancelled', trust: 'trusted_system', content: {reason: 'user_cancelled', work_id: 'work-1'},
     })
     assert.equal(value.factory.transports[0]?.closeCalls, 1, 'close (which interrupts) happens exactly once')
-    assert.deepEqual(terminals, [handoff])
     assert.deepEqual(value.adapter.running(), [])
     assert.deepEqual(await value.adapter.cancel(undefined, noResolver), {code: 'not_running'})
     const workspace = await value.store.resolveWorkspace('alpha')

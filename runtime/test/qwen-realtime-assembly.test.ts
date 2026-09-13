@@ -1,8 +1,7 @@
-import {assertBudgetRejectsBeforeGraphWorker} from './graph-budget-probe.js'
+import {parseCapabilityRegistry} from '../src/capability-registry.js'
 import assert from 'node:assert/strict'
-import {chmod, mkdtemp, readFile, realpath, rm} from 'node:fs/promises'
-import {tmpdir} from 'node:os'
-import {join, resolve} from 'node:path'
+import {readFile} from 'node:fs/promises'
+import {resolve} from 'node:path'
 import { test } from 'node:test'
 import {AssemblyError, buildAssembly} from '../src/assembly.js'
 import type {CodexAssemblyResource} from '../src/executors/codex/factory.js'
@@ -40,7 +39,6 @@ import type {CodingAgentControllerFactory} from '../src/realtime-assembly.js'
 import {
   QwenAudioRealtimeAdapter,
   QwenSocketClosedError,
-  workspaceGraphFrontendInstructions,
   type QwenConnector,
   type QwenConnectorOptions,
   type QwenSocket,
@@ -260,7 +258,6 @@ test('Qwen factory and plain assembly both leave the fast slot to the realtime o
   const qwenInput = realtime.runtime.core.post({kind: 'user_input', payload: {text: 'hello'}}, 0)
   realtime.runtime.core.apply(qwenInput)
   assert.equal(realtime.runtime.core.slots.inflight.fast, false)
-  assert.equal(realtime.workspaceGraph, undefined)
 
   // There is no second mode left: plain assembly wires no text front brain either, so a
   // user turn cannot take the fast slot out from under the realtime provider.
@@ -284,7 +281,6 @@ test('Qwen reports no validated original-image injection capability', () => {
     },
     idFactory: () => 'qwen-capability',
     now: () => 0,
-    workspaceGraphPolicy: false,
     executorApproval: false,
     connector: recordingConnector().connector,
   })
@@ -326,51 +322,7 @@ test('Qwen production composition forwards the personal memory owner', async () 
   assert.equal(closed, 1)
 })
 
-test('Qwen factory owns enabled graph storage while unsafe graph config stays voice-only', async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), 'nova-qwen-graph-')))
-  try {
-    await chmod(root, 0o700)
-    const connector = recordingConnector()
-    const enabled = buildQwenRealtimeAssembly(qwenOptions(settings({
-      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
-      NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED: 'true',
-      NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH: join(root, 'graph.sqlite'),
-    }), connector.connector))
-    assert.ok(enabled.workspaceGraph !== undefined)
-    await enabled.start()
-    const update = JSON.parse(connector.sockets[0]?.sent[0] ?? '{}') as {
-      readonly session?: {readonly instructions?: string}
-    }
-    assert.equal(update.session?.instructions, workspaceGraphFrontendInstructions)
-    assert.doesNotMatch(update.session?.instructions ?? '', /权限请求（含 id/u)
-    await enabled.stop()
 
-    const diagnostics: string[] = []
-    const unsafeConnector = recordingConnector()
-    const unsafe = buildQwenRealtimeAssembly(qwenOptions(settings({
-      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
-      NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED: 'true',
-      NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH: '/private/tmp/sensitive-graph.sqlite',
-    }), unsafeConnector.connector, {
-      onDiagnostic: line => { diagnostics.push(line) },
-    }))
-    assert.equal(unsafe.workspaceGraph, undefined)
-    assert.deepEqual(diagnostics, [
-      '[realtime-diagnostic] workspace_graph_configuration_invalid',
-    ])
-    await unsafe.start()
-    assert.equal(unsafeConnector.calls.length, 1)
-    await unsafe.stop()
-  } finally {
-    await rm(root, {recursive: true, force: true})
-  }
-})
-
-test('Qwen graph preamble keeps active project state authoritative and graph advice low authority', () => {
-  assert.match(workspaceGraphFrontendInstructions, /active_project_context.*authoritative host state/su)
-  assert.match(workspaceGraphFrontendInstructions, /workspace graph.*low authority/su)
-  assert.match(workspaceGraphFrontendInstructions, /cannot authorize.*switch/su)
-})
 
 test('Qwen factory construction does not invoke an unrelated LiveKit agents loader', () => {
   const connector = recordingConnector()
@@ -430,8 +382,6 @@ test('Qwen composition exposes approval only for the exact controller-bearing re
     activeCommittedWorkspace: () => Promise.resolve(null),
     observeProjectView: () => () => undefined,
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
   }
   let starts = 0
   let closes = 0
@@ -856,6 +806,15 @@ test('Qwen connector failure rolls core back safely and permits one later retry'
   assert.equal(frame.stops, 2)
 })
 
-test('qwen budget rejection creates no graph Worker and evaluates the final tool view once', () => {
-  assertBudgetRejectsBeforeGraphWorker('qwen')
+test('qwen rejects the final tool budget after evaluating the provider view once', () => {
+  const configured = loadSettings({
+    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
+    DASHSCOPE_API_KEY: 'fixture-only', DOUBAO_BIGMODEL_API_KEY: 'fixture-only',
+  })
+  const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
+  let views = 0
+  assert.throws(() => buildQwenRealtimeAssembly({
+    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+  }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 4, toolBudget: 1})
+  assert.equal(views, 1)
 })

@@ -221,16 +221,6 @@ export function renderContextSnapshot(view: ContextView, includeTrigger = false)
   lines.push(...(affordances.length > 0 ? affordances : ['- 无']))
   lines.push('')
 
-  const graphContext = view.graph_context
-  if (graphContext !== undefined && graphContext !== null) {
-    const blocks = [graphContext.header, graphContext.recall_pack]
-      .filter((block): block is string => block !== null)
-    if (blocks.length > 0) {
-      lines.push(...blocks)
-      lines.push('')
-    }
-  }
-
   return lines.join('\n')
 }
 

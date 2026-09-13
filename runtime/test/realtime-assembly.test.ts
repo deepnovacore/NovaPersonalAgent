@@ -42,11 +42,8 @@ import {
   type ProjectTransportFactory,
 } from '../src/executors/codex/adapter-project.js'
 import type {
-  CommittedWorkspaceEvent,
-  TerminalWorkOrderEvent,
 } from '../src/executors/codex/adapter-project.js'
 import type {
-  RealtimeWorkspaceGraph,
 } from '../src/realtime-assembly.js'
 import type { Frame, FrameSource } from '../src/executors/watcher.js'
 import type { EventRecord, JsonValue } from '../src/events.js'
@@ -85,10 +82,6 @@ import type { CaptionFrame } from '../src/realtime/session-state.js'
 import type { RealtimeTelemetry } from '../src/realtime/telemetry.js'
 import type {PersonalMemoryRememberTurn} from '../src/memory/personal-memory.js'
 import type { CompiledTools } from '../src/tool-schema.js'
-import {
-  WorkspaceGraphService,
-  type TaskCompletionInput,
-} from '../src/workspace-graph/service.js'
 
 const testCodingAgentControllerFactory: CodingAgentControllerFactory = {
   create: context => new CodexAgentController({
@@ -126,18 +119,6 @@ interface Deferred<T> {
   readonly promise: Promise<T>
   resolve(value: T): void
   reject(error: unknown): void
-}
-
-function emptyPublishedGraphSnapshot(publicationRevision: number) {
-  return Object.freeze({
-    schema_version: 3 as const,
-    publication_revision: publicationRevision,
-    degraded: false,
-    logical_workspaces: Object.freeze([]),
-    workspace_instances: Object.freeze([]),
-    relations: Object.freeze([]),
-    aliases: Object.freeze([]),
-  })
 }
 
 function deferred<T>(): Deferred<T> {
@@ -1558,8 +1539,6 @@ test('project adapter wiring carries one confirmed identity through the real rea
     activeCommittedWorkspace: ProjectCodexAdapter['activeCommittedWorkspace']
     observeProjectView: ProjectCodexAdapter['observeProjectView']
     observeProjectContext: ProjectCodexAdapter['observeProjectContext']
-    observeCommittedWorkspace: ProjectCodexAdapter['observeCommittedWorkspace']
-    observeTerminalWorkOrder: ProjectCodexAdapter['observeTerminalWorkOrder']
     close: ProjectCodexAdapter['close']
   } = {
     manifest: CODEX_PROJECT_MANIFEST,
@@ -1630,8 +1609,6 @@ test('project adapter wiring carries one confirmed identity through the real rea
       return () => { viewObservers.delete(observer) }
     },
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
     close: () => {
       closeCalls += 1
       return Promise.resolve()
@@ -1749,7 +1726,6 @@ test('active project views replace one provider context without publishing histo
   const contextObservers = new Set<(
     context: PublicProjectContext,
   ) => void | Promise<void>>()
-  const workspaceObservers = new Set<(event: CommittedWorkspaceEvent) => void | Promise<void>>()
   let view: PublicProjectView = Object.freeze({
     workspace_display_name: 'alpha',
     session_title: null,
@@ -1762,11 +1738,6 @@ test('active project views replace one provider context without publishing histo
     workspace_id: 'host-alpha', display_name: 'alpha', normalized_name: 'alpha',
     canonical_path: '/safe/alpha', origin: 'registered', codex_home_key: 'host-alpha',
     active_session_id: null, created_at: 1, last_used_at: 1,
-  })
-  const beta: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-beta', display_name: 'beta', normalized_name: 'beta',
-    canonical_path: '/safe/beta', origin: 'registered', codex_home_key: 'host-beta',
-    active_session_id: null, created_at: 2, last_used_at: 2,
   })
   const adapterShape: ExecutorAdapter & Record<string, unknown> = {
     manifest: CODEX_PROJECT_MANIFEST,
@@ -1792,13 +1763,6 @@ test('active project views replace one provider context without publishing histo
       contextObservers.add(observer)
       return () => { contextObservers.delete(observer) }
     },
-    observeCommittedWorkspace: (
-      observer: (event: CommittedWorkspaceEvent) => void | Promise<void>,
-    ) => {
-      workspaceObservers.add(observer)
-      return () => { workspaceObservers.delete(observer) }
-    },
-    observeTerminalWorkOrder: () => () => undefined,
     close: () => Promise.resolve(),
   }
   const core = buildAssembly({
@@ -1853,9 +1817,6 @@ test('active project views replace one provider context without publishing histo
     assert.equal(provider.workspaceItems[1]?.content.includes('workspaces='), false)
     assert.equal(provider.workspaceItems[1]?.content.includes('sessions='), false)
 
-    const committed = [...workspaceObservers][0]
-    assert.ok(committed !== undefined)
-    await committed({workspace: beta})
     await new Promise<void>(resolve => { setImmediate(resolve) })
     assert.equal(provider.workspaceItems.length, 2,
       'a new host id must not pair with the prior display view')
@@ -2018,867 +1979,8 @@ test('active executor context is published even when no project workspace is com
   }
 })
 
-test('delayed atomic view never pairs an immediate new graph with the prior workspace display',
-  async () => {
-    const clock = new VirtualClock(0)
-    const confirmation = new ProjectConfirmationController({
-      clock,
-      idFactory: () => 'atomic-graph-confirmation',
-    })
-    const provider = new WorkspaceContextProvider()
-    const contextObservers = new Set<(
-      context: PublicProjectContext,
-    ) => void | Promise<void>>()
-    const workspaceObservers = new Set<(
-      event: CommittedWorkspaceEvent,
-    ) => void | Promise<void>>()
-    const alpha: WorkspaceRecord = Object.freeze({
-      workspace_id: 'host-alpha', display_name: 'alpha', normalized_name: 'alpha',
-      canonical_path: '/safe/alpha', origin: 'registered', codex_home_key: 'host-alpha',
-      active_session_id: null, created_at: 1, last_used_at: 1,
-    })
-    const beta: WorkspaceRecord = Object.freeze({
-      workspace_id: 'host-beta', display_name: 'beta', normalized_name: 'beta',
-      canonical_path: '/safe/beta', origin: 'registered', codex_home_key: 'host-beta',
-      active_session_id: null, created_at: 2, last_used_at: 2,
-    })
-    let atomicContext: PublicProjectContext = Object.freeze({
-      workspace_id: alpha.workspace_id,
-      view: Object.freeze({
-        workspace_display_name: 'alpha', session_title: null, roster: [], pending_confirmation: false,
-        pending_confirmation_busy: false,
-      }),
-    })
-    const adapterShape: ExecutorAdapter & Record<string, unknown> = {
-      manifest: CODEX_PROJECT_MANIFEST,
-      confirmationController: confirmation,
-      dispatch: () => Promise.resolve({
-        outcome: 'ok', trust: 'trusted_system', content: {code: 'unused'}, refs: [],
-      }),
-      commitConfirmed: () => Promise.resolve({accepted: false, code: 'unused'}),
-      publicProjectView: () => atomicContext.view,
-      publicProjectContext: () => atomicContext,
-      initialize: () => Promise.resolve(),
-      activeCommittedWorkspace: () => Promise.resolve(alpha),
-      observeProjectView: () => () => undefined,
-      observeProjectContext: (
-        observer: (context: PublicProjectContext) => void | Promise<void>,
-      ) => {
-        contextObservers.add(observer)
-        return () => { contextObservers.delete(observer) }
-      },
-      observeCommittedWorkspace: (
-        observer: (event: CommittedWorkspaceEvent) => void | Promise<void>,
-      ) => {
-        workspaceObservers.add(observer)
-        return () => { workspaceObservers.delete(observer) }
-      },
-      observeTerminalWorkOrder: () => () => undefined,
-      close: () => Promise.resolve(),
-    }
-    const graphOpens: string[] = []
-    let graphScope = 0
-    const graph: RealtimeWorkspaceGraph = {
-      publishedSnapshot: emptyPublishedGraphSnapshot(1),
-      open: () => Promise.resolve(),
-      revokeCurrentWorkspaceScope: () => ++graphScope,
-      breakWorkspaceTransitionAdjacency: () => undefined,
-      openWorkspace: input => {
-        const suffix = input.repository_fingerprint === beta.workspace_id ? 'beta' : 'alpha'
-        graphOpens.push(input.repository_fingerprint ?? '')
-        return Promise.resolve({
-          kind: 'resolved',
-          resolution_basis: 'repository_fingerprint',
-          logical_workspace: Object.freeze({
-            logical_workspace_id: `logical-${suffix}`,
-            display_name: suffix,
-            aliases: [] as string[],
-            canonical_remote: null,
-            created_at: 1,
-            updated_at: 1,
-            revision: 1,
-          }),
-          instance: Object.freeze({
-            instance_id: `instance-${suffix}`,
-            logical_workspace_id: `logical-${suffix}`,
-            display_name: suffix,
-            path_label: suffix,
-            repository_fingerprint: input.repository_fingerprint,
-            branch: null,
-            status: 'active',
-            first_seen_at: 1,
-            last_seen_at: 1,
-            revision: 1,
-          }),
-          deltas: Object.freeze([]),
-        })
-      },
-      recordTaskCompletion: () => Promise.resolve(),
-      contextForTurn: input => Object.freeze({
-        header: `graph=${input.workspace_instance_id}`,
-        recall_pack: null,
-        omitted_preferences: 0,
-        omitted_hints: 0,
-        degraded: false,
-        diagnostic: null,
-      }),
-      close: () => Promise.resolve(),
-    }
-    const core = buildAssembly({
-      settings: settingsSchema.parse({executors: ['codex']}),
-      clock,
-      gateway: new NeverCalledGateway(),
-      searchTransport: new NeverCalledSearch(),
-      executors: [adapterShape],
-    })
-    const realtime = buildRealtimeAssembly({
-      core,
-      provider,
-      projectAdapter: adapterShape as unknown as ProjectCodexAdapter,
-      workspaceGraph: graph,
-    })
 
-    await realtime.start()
-    try {
-      const beforeSwitch = provider.workspaceItems.length
-      const committed = [...workspaceObservers][0]
-      assert.ok(committed !== undefined)
-      await committed({workspace: beta})
-      await waitNamed('immediate beta graph completion', () => graphOpens.includes(beta.workspace_id))
-      await yieldImmediate()
-      await yieldImmediate()
-      assert.equal(provider.workspaceItems.slice(beforeSwitch).some(item => (
-        item.workspace_instance_id === beta.workspace_id
-        && item.content.includes('workspace="alpha"')
-        && item.content.includes('graph=instance-beta')
-      )), false)
 
-      atomicContext = Object.freeze({
-        workspace_id: beta.workspace_id,
-        view: Object.freeze({
-          workspace_display_name: 'beta', session_title: null, roster: [], pending_confirmation: false,
-          pending_confirmation_busy: false,
-        }),
-      })
-      await Promise.all([...contextObservers].map(async observer => {
-        await observer(atomicContext)
-      }))
-      await waitNamed('atomic beta graph context', () => (
-        provider.workspaceItems.at(-1)?.workspace_instance_id === beta.workspace_id
-      ))
-      const current = provider.workspaceItems.at(-1)
-      assert.ok(current !== undefined)
-      assert.equal(current.content.includes('workspace="beta"'), true)
-      assert.equal(current.content.includes('graph=instance-beta'), true)
-    } finally {
-      await realtime.stop()
-    }
-  })
-
-test('project-mode startup fails closed before core/provider work without context capability',
-  async () => {
-    const clock = new VirtualClock(0)
-    const confirmation = new ProjectConfirmationController({
-      clock, idFactory: () => 'unsupported-context-confirmation',
-    })
-    const frameSource = new RecordingFrameSource()
-    const provider = new AbortAwareProvider()
-    const adapterShape: ExecutorAdapter & Record<string, unknown> = {
-      manifest: CODEX_PROJECT_MANIFEST,
-      confirmationController: confirmation,
-      dispatch: () => Promise.resolve({
-        outcome: 'ok', trust: 'trusted_system', content: {code: 'unused'}, refs: [],
-      }),
-      commitConfirmed: () => Promise.resolve({accepted: false, code: 'unused'}),
-      publicProjectView: () => Object.freeze({
-        workspace_display_name: null, session_title: null, pending_confirmation: false,
-        pending_confirmation_busy: false,
-      }),
-      publicProjectContext: () => Object.freeze({
-        workspace_id: null,
-        view: Object.freeze({
-          workspace_display_name: null, session_title: null, pending_confirmation: false,
-          pending_confirmation_busy: false,
-        }),
-      }),
-      initialize: () => Promise.resolve(),
-      activeCommittedWorkspace: () => Promise.resolve(null),
-      observeProjectView: () => () => undefined,
-      observeProjectContext: () => () => undefined,
-      observeCommittedWorkspace: () => () => undefined,
-      observeTerminalWorkOrder: () => () => undefined,
-      close: () => Promise.resolve(),
-    }
-    const core = buildAssembly({
-      settings: settingsSchema.parse({executors: ['codex']}),
-      clock,
-      gateway: new NeverCalledGateway(),
-      searchTransport: new NeverCalledSearch(),
-      frameSource,
-      executors: [adapterShape],
-    })
-    const realtime = buildRealtimeAssembly({
-      core,
-      provider,
-      projectAdapter: adapterShape as unknown as ProjectCodexAdapter,
-    })
-
-    await assert.rejects(realtime.start(), /cannot deliver active project context/u)
-    assert.equal(frameSource.starts, 0)
-    assert.equal(provider.connectCalls, 0)
-  })
-
-test('workspace graph opens before project initialization, injects only the current Header, and owns hooks', async () => {
-  const clock = new VirtualClock(50)
-  const actions: string[] = []
-  const provider = new WorkspaceContextProvider(actions)
-  const workspaceObservers = new Set<(event: CommittedWorkspaceEvent) => void | Promise<void>>()
-  const terminalObservers = new Set<(event: TerminalWorkOrderEvent) => void | Promise<void>>()
-  const confirmation = new ProjectConfirmationController({clock, idFactory: () => 'graph-confirmation'})
-  const workspace: WorkspaceRecord = Object.freeze({
-    workspace_id: 'workspace-authoritative',
-    display_name: 'alpha',
-    normalized_name: 'alpha',
-    canonical_path: '/safe/alpha',
-    origin: 'registered' as const,
-    codex_home_key: 'workspace-authoritative',
-    active_session_id: null,
-    created_at: 10,
-    last_used_at: 20,
-  })
-  let projectClosed = 0
-  const adapterShape: ExecutorAdapter & Record<string, unknown> = {
-    manifest: CODEX_PROJECT_MANIFEST,
-    confirmationController: confirmation,
-    dispatch: () => Promise.resolve({
-      outcome: 'ok', trust: 'trusted_system', content: {code: 'completed'}, refs: [],
-    }),
-    commitConfirmed: () => Promise.resolve({accepted: false, code: 'not_used'}),
-    publicProjectView: () => Object.freeze({
-      workspace_display_name: 'alpha', session_title: null, pending_confirmation: false,
-      pending_confirmation_busy: false,
-    }),
-    publicProjectContext: () => Object.freeze({
-      workspace_id: workspace.workspace_id,
-      view: Object.freeze({
-        workspace_display_name: 'alpha', session_title: null, pending_confirmation: false,
-        pending_confirmation_busy: false,
-      }),
-    }),
-    initialize: () => {
-      actions.push('project:initialize')
-      return Promise.resolve()
-    },
-    activeCommittedWorkspace: () => Promise.resolve(workspace),
-    observeProjectView: () => () => undefined,
-    observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: (observer: (event: CommittedWorkspaceEvent) => void) => {
-      workspaceObservers.add(observer)
-      return () => { workspaceObservers.delete(observer) }
-    },
-    observeTerminalWorkOrder: (observer: (event: TerminalWorkOrderEvent) => void) => {
-      terminalObservers.add(observer)
-      return () => { terminalObservers.delete(observer) }
-    },
-    close: () => { projectClosed += 1; return Promise.resolve() },
-  }
-  const projectAdapter = adapterShape as unknown as ProjectCodexAdapter
-  const graphCalls: unknown[] = []
-  let graphClosed = 0
-  let contextFailure = true
-  let holdLifecycle = false
-  const lifecycleGate = deferred<void>()
-  let holdTerminal = false
-  const terminalGate = deferred<void>()
-  let workspaceQueueFailures = 0
-  let graphScopeGeneration = 0
-  const diagnostics: string[] = []
-  const graph: RealtimeWorkspaceGraph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(7),
-    open: () => { actions.push('graph:open'); return Promise.resolve() },
-    revokeCurrentWorkspaceScope: () => ++graphScopeGeneration,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: async input => {
-      actions.push('graph:workspace')
-      graphCalls.push(input)
-      if (workspaceQueueFailures > 0) {
-        workspaceQueueFailures -= 1
-        throw Object.assign(new Error('bounded service admission overflow'), {
-          code: 'GRAPH_SERVICE_QUEUE_FULL',
-        })
-      }
-      if (holdLifecycle) await lifecycleGate.promise
-      return Promise.resolve({
-        kind: 'resolved',
-        resolution_basis: 'repository_fingerprint',
-        logical_workspace: Object.freeze({
-          logical_workspace_id: 'logical-alpha',
-          display_name: 'alpha',
-          aliases: [] as string[],
-          canonical_remote: null,
-          created_at: 20,
-          updated_at: 20,
-          revision: 1,
-        }),
-        instance: Object.freeze({
-          instance_id: 'instance-alpha',
-          logical_workspace_id: 'logical-alpha',
-          display_name: 'alpha',
-          path_label: 'alpha',
-          repository_fingerprint: 'workspace-authoritative',
-          branch: null,
-          status: 'active',
-          first_seen_at: 20,
-          last_seen_at: 20,
-          revision: 1,
-        }),
-        deltas: Object.freeze([]),
-      })
-    },
-    recordTaskCompletion: async input => {
-      graphCalls.push(input)
-      if (holdTerminal) await terminalGate.promise
-    },
-    contextForTurn: input => {
-      if (contextFailure) throw new Error('sensitive graph context failure')
-      graphCalls.push(input)
-      return Object.freeze({
-        header: '<workspace_context kind="data">current alpha</workspace_context>',
-        recall_pack: null,
-        omitted_preferences: 0,
-        omitted_hints: 0,
-        degraded: false,
-        diagnostic: null,
-      })
-    },
-    close: () => { graphClosed += 1; actions.push('graph:close'); return Promise.resolve() },
-  }
-  const core = buildAssembly({
-    settings: settingsSchema.parse({executors: ['codex']}),
-    clock,
-    gateway: new NeverCalledGateway(),
-    searchTransport: new NeverCalledSearch(),
-    frameSource: new RecordingFrameSource(actions),
-    executors: [adapterShape],
-  })
-  let id = 0
-  const realtime = buildRealtimeAssembly({
-    core,
-    provider,
-    projectAdapter,
-    workspaceGraph: graph,
-    idFactory: () => `graph-host-${++id}`,
-    wallClockNow: () => 1_800_000_000,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-  assert.throws(
-    () => core.runtime.bindGraphContextProvider(() => null),
-    /already bound/u,
-    'RealtimeAssembly must own the sole runtime graph-context binding',
-  )
-
-  await realtime.start()
-  assert.deepEqual(actions.slice(0, 6), [
-    'graph:open',
-    'project:initialize',
-    'graph:workspace',
-    'provider:connect',
-    'provider:events',
-  ])
-  assert.deepEqual(diagnostics, ['[realtime-diagnostic] workspace_graph_header_delivery_failed'])
-  assert.equal(diagnostics.join('\n').includes('sensitive'), false)
-  assert.equal(provider.workspaceItems.length, 1)
-  assert.deepEqual(provider.workspaceItems[0], {
-    kind: 'workspace_context',
-    host_item_id: 'graph-host-1',
-    event_id: 'graph-host-2',
-    content: '<active_project_context>\nworkspace="alpha"\nsession=""\n</active_project_context>',
-    call_id: null,
-    session_epoch: 1,
-    workspace_instance_id: 'workspace-authoritative',
-    revision: 1,
-  })
-  contextFailure = false
-  const workspaceObserver = [...workspaceObservers][0]
-  assert.ok(workspaceObserver !== undefined)
-  await workspaceObserver({workspace})
-  await waitNamed('workspace Header retry', () => provider.workspaceItems.length === 2)
-  assert.equal(provider.workspaceItems.length, 2)
-  assert.deepEqual(provider.workspaceItems[1], {
-    kind: 'workspace_context',
-    host_item_id: 'graph-host-3',
-    event_id: 'graph-host-4',
-    content: [
-      '<active_project_context>',
-      'workspace="alpha"',
-      'session=""',
-      '</active_project_context>',
-      '<workspace_graph_context>',
-      '<workspace_context kind="data">current alpha</workspace_context>',
-      '</workspace_graph_context>',
-    ].join('\n'),
-    call_id: null,
-    session_epoch: 1,
-    workspace_instance_id: 'workspace-authoritative',
-    revision: 2,
-  })
-  assert.deepEqual(graphCalls[0], {
-    path: '/safe/alpha',
-    repository_fingerprint: 'workspace-authoritative',
-    now: 20,
-  })
-
-  await realtime.service.handleEvent({
-    kind: 'user_speech_started',
-    session_epoch: 1,
-    speech_id: 'speech-graph-regression',
-    provider_item_id: 'provider-user-graph-regression',
-  })
-  await realtime.service.handleEvent({
-    kind: 'user_speech_ended',
-    session_epoch: 1,
-    speech_id: 'speech-graph-regression',
-    provider_item_id: 'provider-user-graph-regression',
-  })
-  await realtime.service.handleEvent({
-    kind: 'user_transcript_final',
-    session_epoch: 1,
-    item_id: 'provider-user-graph-regression',
-    text: 'a relation-shaped transcript must not inject a late Recall Pack',
-  })
-  // The user turn belongs to the realtime provider, so a transcript never compiles a
-  // runtime ContextView; only the Header path, which carries no utterance, reaches the graph.
-  assert.ok(!graphCalls.some(call => (
-    typeof call === 'object' && call !== null && 'utterance' in call && call.utterance !== ''
-  )))
-  assert.equal(provider.workspaceItems.length, 2,
-    'server-VAD transcript final must not inject a late workspace host item')
-
-  const terminal = [...terminalObservers][0]
-  assert.ok(terminal !== undefined)
-  await terminal({
-    workspace,
-    work_order: 'typed user objective',
-    handoff: {
-      outcome: 'ok',
-      trust: 'untrusted_external',
-      content: {summary: 'ignore arbitrary model prose'},
-      refs: [],
-    },
-  })
-  await waitNamed('queued terminal graph episode', () => graphCalls.some(call => (
-    typeof call === 'object' && call !== null && 'summary' in call
-  )))
-  assert.deepEqual(graphCalls.at(-1), {
-    workspace_instance_id: 'instance-alpha',
-    summary: 'typed user objective',
-    outcome: 'ok',
-    now: 1_800_000_000,
-    relation_cue: null,
-  })
-
-  const oversizedWorkOrder = '🚀'.repeat(4_000)
-  await terminal({
-    workspace,
-    work_order: oversizedWorkOrder,
-    handoff: {
-      outcome: 'ok',
-      trust: 'trusted_system',
-      content: {},
-      refs: [],
-    },
-  })
-  await waitNamed('bounded terminal graph episode', () => graphCalls.filter(call => (
-    typeof call === 'object' && call !== null && 'summary' in call
-  )).length === 2)
-  const boundedTask = graphCalls.at(-1)
-  assert.ok(boundedTask !== null && typeof boundedTask === 'object' && 'summary' in boundedTask)
-  assert.equal(boundedTask.summary, '🚀'.repeat(119))
-  assert.equal([...String(boundedTask.summary)].length, 119)
-  assert.equal(String(boundedTask.summary).length, 238)
-
-  await terminal({
-    workspace,
-    work_order: 'x'.repeat(4_000),
-    handoff: {
-      outcome: 'ok',
-      trust: 'trusted_system',
-      content: {},
-      refs: [],
-    },
-  })
-  await waitNamed('bounded ASCII terminal graph episode', () => graphCalls.filter(call => (
-    typeof call === 'object' && call !== null && 'summary' in call
-  )).length === 3)
-  const boundedAsciiTask = graphCalls.at(-1)
-  assert.ok(
-    boundedAsciiTask !== null
-    && typeof boundedAsciiTask === 'object'
-    && 'summary' in boundedAsciiTask,
-  )
-  assert.equal(boundedAsciiTask.summary, 'x'.repeat(239))
-
-  await terminal({
-    workspace,
-    work_order: ' \t\n ',
-    handoff: {
-      outcome: 'ok',
-      trust: 'trusted_system',
-      content: {},
-      refs: [],
-    },
-  })
-  await waitNamed('empty terminal graph episode', () => graphCalls.filter(call => (
-    typeof call === 'object' && call !== null && 'summary' in call
-  )).length === 4)
-  const emptyTask = graphCalls.at(-1)
-  assert.ok(emptyTask !== null && typeof emptyTask === 'object' && 'summary' in emptyTask)
-  assert.equal(emptyTask.summary, null)
-
-  holdLifecycle = true
-  const promptObserverResult = workspaceObserver({workspace})
-  try {
-    assert.equal(promptObserverResult, undefined,
-      'authoritative project observers must enqueue graph work without awaiting it')
-  } finally {
-    holdLifecycle = false
-    lifecycleGate.resolve(undefined)
-  }
-
-  holdTerminal = true
-  for (let index = 0; index < 64; index += 1) {
-    terminal({
-      workspace,
-      work_order: `queued terminal ${index}`,
-      handoff: {outcome: 'ok', trust: 'trusted_system', content: {}, refs: []},
-    })
-  }
-  await yieldImmediate()
-  const latestWorkspace = Object.freeze({
-    ...workspace,
-    workspace_id: 'workspace-authoritative-latest',
-    canonical_path: '/safe/latest',
-    last_used_at: 60,
-  })
-  for (let index = 0; index < 8; index += 1) {
-    workspaceObserver({
-      workspace: Object.freeze({
-        ...latestWorkspace,
-        workspace_id: index === 7
-          ? latestWorkspace.workspace_id
-          : `workspace-authoritative-intermediate-${index}`,
-        canonical_path: index === 7 ? latestWorkspace.canonical_path : `/safe/intermediate-${index}`,
-      }),
-    })
-  }
-  holdTerminal = false
-  terminalGate.resolve(undefined)
-  await waitNamed('coalesced latest workspace switch', () => graphCalls.some(call => (
-    typeof call === 'object'
-    && call !== null
-    && 'repository_fingerprint' in call
-    && call.repository_fingerprint === latestWorkspace.workspace_id
-  )))
-
-  workspaceQueueFailures = 2
-  const retryWorkspace = Object.freeze({
-    ...workspace,
-    workspace_id: 'workspace-authoritative-retry',
-    canonical_path: '/safe/retry',
-    last_used_at: 70,
-  })
-  workspaceObserver({workspace: retryWorkspace})
-  await waitNamed('service-admission workspace switch retry', () => graphCalls.filter(call => (
-    typeof call === 'object'
-    && call !== null
-    && 'repository_fingerprint' in call
-    && call.repository_fingerprint === retryWorkspace.workspace_id
-  )).length === 3)
-
-  await realtime.stop()
-  const releaseReboundProvider = core.runtime.bindGraphContextProvider(() => null)
-  releaseReboundProvider()
-  assert.equal(graphClosed, 1)
-  assert.equal(projectClosed, 1)
-  assert.equal(workspaceObservers.size, 0)
-  assert.equal(terminalObservers.size, 0)
-})
-
-test('real assembly and graph service infer only weak metadata from committed adjacent workspaces', async t => {
-  const graphEventuallyMs = 5_000
-  const directory = await mkdtemp(join(tmpdir(), 'nova-realtime-graph-transition-'))
-  const workspaceObservers = new Set<(event: CommittedWorkspaceEvent) => void | Promise<void>>()
-  const terminalObservers = new Set<(event: TerminalWorkOrderEvent) => void | Promise<void>>()
-  const clock = new VirtualClock(3)
-  const confirmation = new ProjectConfirmationController({clock, idFactory: () => 'transition-confirm'})
-  const alpha: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-alpha', display_name: 'alpha', normalized_name: 'alpha',
-    canonical_path: '/safe/assembly-alpha', origin: 'registered', codex_home_key: 'host-alpha',
-    active_session_id: null, created_at: 1, last_used_at: 1,
-  })
-  const beta: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-beta', display_name: 'beta', normalized_name: 'beta',
-    canonical_path: '/safe/assembly-beta', origin: 'registered', codex_home_key: 'host-beta',
-    active_session_id: null, created_at: 2, last_used_at: 2,
-  })
-  const gamma: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-gamma', display_name: 'gamma', normalized_name: 'gamma',
-    canonical_path: '/safe/assembly-gamma', origin: 'registered', codex_home_key: 'host-gamma',
-    active_session_id: null, created_at: 3, last_used_at: 3,
-  })
-  const delta: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-delta', display_name: 'delta', normalized_name: 'delta',
-    canonical_path: '/safe/assembly-delta', origin: 'registered', codex_home_key: 'host-delta',
-    active_session_id: null, created_at: 4, last_used_at: 4,
-  })
-  const epsilon: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-epsilon', display_name: 'epsilon', normalized_name: 'epsilon',
-    canonical_path: '/safe/assembly-epsilon', origin: 'registered', codex_home_key: 'host-epsilon',
-    active_session_id: null, created_at: 5, last_used_at: 5,
-  })
-  const adapterShape: ExecutorAdapter & Record<string, unknown> = {
-    manifest: CODEX_PROJECT_MANIFEST,
-    confirmationController: confirmation,
-    dispatch: () => Promise.resolve({
-      outcome: 'ok', trust: 'trusted_system', content: {code: 'completed'}, refs: [],
-    }),
-    commitConfirmed: () => Promise.resolve({accepted: false, code: 'not_used'}),
-    publicProjectView: () => Object.freeze({
-      workspace_display_name: 'alpha', session_title: null, pending_confirmation: false,
-      pending_confirmation_busy: false,
-    }),
-    publicProjectContext: () => Object.freeze({
-      workspace_id: alpha.workspace_id,
-      view: Object.freeze({
-        workspace_display_name: 'alpha', session_title: null, pending_confirmation: false,
-        pending_confirmation_busy: false,
-      }),
-    }),
-    initialize: () => Promise.resolve(),
-    activeCommittedWorkspace: () => Promise.resolve(alpha),
-    observeProjectView: () => () => undefined,
-    observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: (observer: (event: CommittedWorkspaceEvent) => void) => {
-      workspaceObservers.add(observer)
-      return () => { workspaceObservers.delete(observer) }
-    },
-    observeTerminalWorkOrder: (observer: (event: TerminalWorkOrderEvent) => void) => {
-      terminalObservers.add(observer)
-      return () => { terminalObservers.delete(observer) }
-    },
-    close: () => Promise.resolve(),
-  }
-  const projectAdapter = adapterShape as unknown as ProjectCodexAdapter
-  let observation = 0
-  let providerScopeLookups = 0
-  const graph = new WorkspaceGraphService({
-    path: join(directory, 'graph.sqlite'),
-    id_factory: () => `assembly-transition-${++observation}`,
-    personal_context_provider: {
-      lookupWorkspaceEvidence: () => {
-        providerScopeLookups += 1
-        return Promise.resolve(Object.freeze({
-          evidence: Object.freeze([]), omitted_evidence: 0,
-          degraded: false, diagnostic: null,
-        }))
-      },
-    },
-  })
-  const revokeGraphScope = graph.revokeCurrentWorkspaceScope.bind(graph)
-  let graphScopeRevocations = 0
-  graph.revokeCurrentWorkspaceScope = () => {
-    graphScopeRevocations += 1
-    return revokeGraphScope()
-  }
-  const recordGraphTaskCompletion = graph.recordTaskCompletion.bind(graph)
-  const graphTaskCompletions: TaskCompletionInput[] = []
-  graph.recordTaskCompletion = input => {
-    graphTaskCompletions.push(input)
-    return recordGraphTaskCompletion(input)
-  }
-  const diagnostics: string[] = []
-  const core = buildAssembly({
-    settings: settingsSchema.parse({executors: ['codex']}),
-    clock,
-    gateway: new NeverCalledGateway(),
-    searchTransport: new NeverCalledSearch(),
-    executors: [adapterShape],
-  })
-  const realtime = buildRealtimeAssembly({
-    core,
-    provider: new WorkspaceContextProvider(),
-    projectAdapter,
-    workspaceGraph: graph,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-  t.after(async () => {
-    await realtime.stop()
-    await rm(directory, {recursive: true, force: true})
-  })
-
-  // This test owns metadata transitions; cold Worker startup has a separate bounded-start test.
-  await settleNamed('graph fixture startup', graph.open(), 20_000)
-  await realtime.start()
-  await waitNamed('authoritative alpha graph open', () => (
-    graph.publishedSnapshot.logical_workspaces.length === 1
-  ), graphEventuallyMs)
-  assert.equal(graph.publishedSnapshot.relations.length, 0)
-  const alphaInstance = graph.publishedSnapshot.workspace_instances[0]
-  assert.ok(alphaInstance !== undefined)
-  const alphaProviderInput = {
-    workspace_instance_id: alphaInstance.instance_id,
-    query: 'explain current workspace evidence',
-    limit: 1,
-  } as const
-  await waitNamed('authoritative alpha provider scope', async () => (
-    !(await graph.enrichAfterExplicitRecall(alphaProviderInput)).degraded
-  ))
-  assert.equal(providerScopeLookups, 1)
-  const committed = [...workspaceObservers][0]
-  const terminal = [...terminalObservers][0]
-  assert.ok(committed !== undefined)
-  assert.ok(terminal !== undefined)
-  const revocationsBeforeSwitch = graphScopeRevocations
-  committed({workspace: beta})
-  terminal({
-    workspace: beta,
-    work_order: 'beta objective committed before gamma became current',
-    handoff: {outcome: 'ok', trust: 'trusted_system', content: {}, refs: []},
-  })
-  committed({workspace: gamma})
-  assert.equal(graphScopeRevocations, revocationsBeforeSwitch + 2)
-  assert.deepEqual(await graph.enrichAfterExplicitRecall(alphaProviderInput), {
-    evidence: [], omitted_evidence: 0, degraded: true, diagnostic: 'protocol',
-  }, 'committed-event admission must revoke old provider scope synchronously')
-  assert.equal(providerScopeLookups, 1)
-  await waitNamed('ordered authoritative alpha-to-beta-to-gamma transitions', () => (
-    graph.publishedSnapshot.relations.length === 2
-  ), graphEventuallyMs)
-  await waitNamed('terminal event for the resolved stale-generation beta mapping', () => (
-    graphTaskCompletions.length === 1
-  ), graphEventuallyMs)
-  assert.equal(graphTaskCompletions[0]?.workspace_instance_id, (
-    graph.publishedSnapshot.workspace_instances.find(instance => (
-      instance.repository_fingerprint === beta.workspace_id
-    ))?.instance_id
-  ))
-  const idsByHost = new Map(graph.publishedSnapshot.workspace_instances.map(instance => (
-    [instance.repository_fingerprint, instance.logical_workspace_id]
-  )))
-  assert.deepEqual(graph.publishedSnapshot.relations.map(relation => ({
-    source: relation.source_logical_id,
-    target: relation.target_logical_id,
-    type: relation.relation_type,
-    confidence: relation.confidence,
-    status: relation.status,
-  })), [
-    {
-      source: idsByHost.get('host-alpha'), target: idsByHost.get('host-beta'),
-      type: 'discussed_with', confidence: 0.4, status: 'weak',
-    },
-    {
-      source: idsByHost.get('host-beta'), target: idsByHost.get('host-gamma'),
-      type: 'discussed_with', confidence: 0.4, status: 'weak',
-    },
-  ])
-  assert.equal(JSON.stringify(graph.publishedSnapshot.relations).includes('/safe/'), false)
-
-  committed({workspace: Object.freeze({...gamma, canonical_path: 'speculative-relative-path'})})
-  await waitNamed('rejected speculative transition', () => (
-    diagnostics.some(line => line.endsWith('workspace_graph_lifecycle_failed'))
-  ), graphEventuallyMs)
-  assert.equal(graph.publishedSnapshot.relations.length, 2)
-  assert.ok(graph.publishedSnapshot.relations.every(relation => (
-    relation.revision === 0 && relation.evidence_refs.length === 1
-  )))
-
-  committed({workspace: delta})
-  await waitNamed('successful workspace after a rejected admitted transition', () => (
-    graph.publishedSnapshot.workspace_instances.some(instance => (
-      instance.repository_fingerprint === delta.workspace_id
-    ))
-  ), graphEventuallyMs)
-  assert.equal(
-    graph.publishedSnapshot.relations.length,
-    2,
-    'a processing failure must break adjacency instead of inferring gamma-to-delta',
-  )
-
-  committed({workspace: epsilon})
-  await waitNamed('new adjacency after the post-gap workspace becomes the anchor', () => (
-    graph.publishedSnapshot.relations.length === 3
-  ), graphEventuallyMs)
-  const postGapIds = new Map(graph.publishedSnapshot.workspace_instances.map(instance => (
-    [instance.repository_fingerprint, instance.logical_workspace_id]
-  )))
-  const postGapRelation = graph.publishedSnapshot.relations.find(relation => (
-    relation.source_logical_id === postGapIds.get('host-delta')
-    && relation.target_logical_id === postGapIds.get('host-epsilon')
-  ))
-  assert.ok(postGapRelation !== undefined)
-  assert.deepEqual({
-    type: postGapRelation.relation_type,
-    reason: postGapRelation.reason,
-    confidence: postGapRelation.confidence,
-    status: postGapRelation.status,
-    first_seen_at: postGapRelation.first_seen_at,
-    last_seen_at: postGapRelation.last_seen_at,
-    evidence: postGapRelation.evidence_refs.map(evidence => ({
-      source: evidence.source,
-      observed_at: evidence.observed_at,
-    })),
-    revision: postGapRelation.revision,
-  }, {
-    type: 'discussed_with',
-    reason: 'adjacent confirmed workspace transition',
-    confidence: 0.4,
-    status: 'weak',
-    first_seen_at: 5,
-    last_seen_at: 5,
-    evidence: [{source: 'runtime', observed_at: 5}],
-    revision: 0,
-  })
-})
-
-test('never-settling graph open is bounded and cannot block voice startup', async () => {
-  const openGate = deferred<void>()
-  const diagnostics: string[] = []
-  let closes = 0
-  const graph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(0),
-    open: () => openGate.promise,
-    revokeCurrentWorkspaceScope: () => 1,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: () => Promise.reject(new Error('not expected')),
-    recordTaskCompletion: () => Promise.reject(new Error('not expected')),
-    contextForTurn: () => null,
-    close: () => { closes += 1; return Promise.resolve() },
-  } as RealtimeWorkspaceGraph
-  const provider = new AbortAwareProvider()
-  const realtime = buildRealtimeAssembly({
-    core: realCore(), provider, workspaceGraph: graph,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-  const start = realtime.start()
-  try {
-    await settleNamed('bounded graph open', start, 1_750)
-    assert.equal(provider.connectCalls, 1)
-    assert.ok(diagnostics.includes('[realtime-diagnostic] workspace_graph_open_abandoned'))
-    await settleNamed('bounded stop with graph open pending', realtime.stop(), 2_750)
-    assert.equal(closes, 1)
-    assert.ok(diagnostics.filter(line => (
-      line === '[realtime-diagnostic] workspace_graph_open_abandoned'
-    )).length >= 2)
-    openGate.resolve(undefined)
-    await yieldImmediate()
-    await realtime.stop()
-    assert.equal(closes, 2)
-  } finally {
-    openGate.resolve(undefined)
-    await Promise.allSettled([start])
-    await realtime.stop()
-  }
-})
 
 test('a rejected initial project context publication is diagnosed and retried once', async () => {
   const diagnostics: string[] = []
@@ -2915,8 +2017,6 @@ test('a rejected initial project context publication is diagnosed and retried on
     activeCommittedWorkspace: () => Promise.resolve(workspace),
     observeProjectView: () => () => undefined,
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
     close: () => Promise.resolve(),
   }
   const core = buildAssembly({
@@ -2938,7 +2038,7 @@ test('a rejected initial project context publication is diagnosed and retried on
     await waitNamed('initial project context retry', () => attempts === 2)
     assert.equal(provider.workspaceItems.length, 2)
     assert.deepEqual(diagnostics, [
-      '[realtime-diagnostic] workspace_graph_header_delivery_failed',
+      '[realtime-diagnostic] workspace_context_delivery_failed',
     ])
     assert.equal(diagnostics.join('\n').includes('sensitive'), false)
   } finally {
@@ -2991,39 +2091,9 @@ test('never-settling initial Header delivery cannot block voice startup', async 
     activeCommittedWorkspace: () => Promise.resolve(workspace),
     observeProjectView: () => () => undefined,
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
     close: () => Promise.resolve(),
   }
   const projectAdapter = adapterShape as unknown as ProjectCodexAdapter
-  const graph: RealtimeWorkspaceGraph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(7),
-    open: () => Promise.resolve(),
-    revokeCurrentWorkspaceScope: () => 1,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: () => Promise.resolve({
-      kind: 'resolved',
-      resolution_basis: 'repository_fingerprint',
-      logical_workspace: Object.freeze({
-        logical_workspace_id: 'logical-header', display_name: 'header', aliases: [],
-        canonical_remote: null, created_at: 20, updated_at: 20, revision: 1,
-      }),
-      instance: Object.freeze({
-        instance_id: 'instance-header', logical_workspace_id: 'logical-header',
-        display_name: 'header', path_label: 'header',
-        repository_fingerprint: 'workspace-header', branch: null, status: 'active',
-        first_seen_at: 20, last_seen_at: 20, revision: 1,
-      }),
-      deltas: Object.freeze([]),
-    }),
-    recordTaskCompletion: () => Promise.resolve(),
-    contextForTurn: () => Object.freeze({
-      header: '<workspace_context kind="data">current header</workspace_context>',
-      recall_pack: null, omitted_preferences: 0, omitted_hints: 0, degraded: false,
-      diagnostic: null,
-    }),
-    close: () => Promise.resolve(),
-  }
   const core = buildAssembly({
     settings: settingsSchema.parse({executors: ['codex']}),
     clock,
@@ -3032,7 +2102,7 @@ test('never-settling initial Header delivery cannot block voice startup', async 
     executors: [adapterShape],
   })
   const realtime = buildRealtimeAssembly({
-    core, provider, projectAdapter, workspaceGraph: graph,
+    core, provider, projectAdapter,
     onDiagnostic: line => { diagnostics.push(line) },
   })
   const start = realtime.start()
@@ -3041,7 +2111,7 @@ test('never-settling initial Header delivery cannot block voice startup', async 
     assert.equal(provider.connectCalls, 1)
     assert.ok(provider.workspaceItems.length >= 1)
     assert.ok(diagnostics.includes(
-      '[realtime-diagnostic] workspace_graph_header_delivery_abandoned',
+      '[realtime-diagnostic] workspace_context_delivery_abandoned',
     ))
   } finally {
     headerGate.resolve(undefined)
@@ -3050,65 +2120,7 @@ test('never-settling initial Header delivery cannot block voice startup', async 
   }
 })
 
-test('abandoned graph close remains cleanup-incomplete and is retried by the assembly owner', async () => {
-  const closeGate = deferred<void>()
-  const diagnostics: string[] = []
-  let closes = 0
-  const graph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(0),
-    open: () => Promise.resolve(),
-    revokeCurrentWorkspaceScope: () => 1,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: () => Promise.reject(new Error('not expected')),
-    recordTaskCompletion: () => Promise.reject(new Error('not expected')),
-    contextForTurn: () => null,
-    close: () => {
-      closes += 1
-      return closes === 1 ? closeGate.promise : Promise.resolve()
-    },
-  } as RealtimeWorkspaceGraph
-  const realtime = buildRealtimeAssembly({
-    core: realCore(), provider: new AbortAwareProvider(), workspaceGraph: graph,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-  await realtime.start()
-  await settleNamed('first bounded graph close', realtime.stop(), 1_750)
-  assert.equal(closes, 1)
-  assert.ok(diagnostics.includes('[realtime-diagnostic] workspace_graph_close_abandoned'))
-  closeGate.resolve(undefined)
-  await yieldImmediate()
-  await realtime.stop()
-  assert.equal(closes, 2)
-})
 
-test('workspace graph open failure is diagnostic-only and never blocks voice startup', async () => {
-  const diagnostics: string[] = []
-  let closes = 0
-  const graph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(0),
-    open: () => Promise.reject(new Error('sensitive graph failure detail')),
-    revokeCurrentWorkspaceScope: () => 1,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: () => Promise.reject(new Error('not expected')),
-    recordTaskCompletion: () => Promise.reject(new Error('not expected')),
-    contextForTurn: () => null,
-    close: () => { closes += 1; return Promise.resolve() },
-  } as RealtimeWorkspaceGraph
-  const provider = new AbortAwareProvider()
-  const realtime = buildRealtimeAssembly({
-    core: realCore(),
-    provider,
-    workspaceGraph: graph,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-
-  await realtime.start()
-  assert.equal(provider.connectCalls, 1)
-  assert.deepEqual(diagnostics, ['[realtime-diagnostic] workspace_graph_open_failed'])
-  assert.equal(diagnostics.join('\n').includes('sensitive'), false)
-  await realtime.stop()
-  assert.equal(closes, 1)
-})
 
 test('concurrent starts acquire core, provider, and runtime serving exactly once', async () => {
   // Mutations caught: dropping start serialization or constructing a second service increments one

@@ -356,9 +356,7 @@ button:focus-visible {
   white-space: pre-wrap;
 }
 
-.empty,
-.graph-empty,
-.graph-omitted {
+.empty {
   margin: 0;
   color: var(--faint);
   font-size: 11px;
@@ -371,63 +369,6 @@ button:focus-visible {
   border: 1px dashed var(--line-strong);
   border-radius: 7px;
 }
-
-.graph-state {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 24px;
-  margin: 0 0 12px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.graph-nodes,
-.graph-relations { margin-bottom: 22px; }
-
-.graph-nodes > h2,
-.graph-relations > h2 {
-  margin: 0 0 10px;
-  padding-bottom: 7px;
-  border-bottom: 1px solid var(--line);
-  font-size: 13px;
-}
-
-.graph-node,
-.graph-relation {
-  margin-bottom: 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface-raised);
-  font-size: 12px;
-}
-
-.graph-node h3,
-.graph-relation h3 { margin: 0 0 6px; font-size: 13px; }
-
-.graph-instance,
-.graph-relation-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 4px 0;
-  color: var(--muted);
-}
-
-.graph-badge {
-  display: inline-block;
-  padding: 1px 7px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  font-size: 11px;
-}
-
-.badge-active { color: #4e9271; }
-.badge-inactive { color: var(--faint); }
-.badge-weak { color: #9a7b43; }
-.badge-degraded,
-.badge-stale { color: #b66d65; }
 
 @media (max-width: 760px) {
   body { padding-inline: 18px; }

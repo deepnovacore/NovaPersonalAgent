@@ -57,7 +57,6 @@ export function buildIntegratedRealtimeAssembly(
       coding: capabilities.modules.coding.enabled,
       knowledge: capabilities.modules.knowledge.enabled,
     },
-    workspaceGraphPolicy: options.settings.workspace_graph_enabled,
     executorApproval: (options.executorApproval ?? options.codexResource?.approvalController) != null,
   })
   return buildQwenRealtimeAssembly({

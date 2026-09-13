@@ -174,44 +174,6 @@ DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
 
 For opt-in live cascaded verification run `npm run smoke:cascaded --workspace @nova-audio-agent/runtime` with the provider credentials. The host controls response admission and request ownership; response origin is evidence, never authorization. Human acceptance remains pending.
 
-## Workspace memory graph and MyContext provider
-
-The Node runtime's opt-in workspace memory graph is configured with:
-
-```bash
-NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED=true
-NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH=~/.nova-audio-agent/workspace-graph.sqlite
-
-# Optional. This must be a separately supplied Nova-compatible read-only adapter base URL.
-NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL=http://127.0.0.1:PORT/base
-```
-
-The graph maintains workspace identity from Nova's confirmed lifecycle and records an adjacent
-committed A-to-B transition as weak `discussed_with` metadata — a bounded map cue, not a
-conclusion from model or work-order prose. Nova reads neither workspace, keeps the relation below
-the proactive threshold, and ages unrefreshed relations to stale after 90 days. Committed switches
-revoke the previous graph scope immediately and retain admitted A-to-B-to-C order; an
-uncommittable event breaks adjacency instead of bridging the gap. All durable graph times use
-Unix seconds. Nova does not copy repository-native engineering instructions or automatically
-inspect another workspace.
-
-The optional MyContext provider may be consulted only for explicit evidence recall about the same
-authoritative current workspace — for example, a user asking "why?" or asking for a source. It
-never participates in startup, workspace open/switch, default recall, the Context Header, Recall
-Pack, proactive confidence, tool routing, or actions. Returned text is local, read-only,
-source-labelled, untrusted, non-persistent, and non-proactive; it cannot mutate Nova's graph,
-workspace identity, task state, or another workspace. Provider failure is a visible degraded
-empty result and never blocks ordinary voice or project work.
-
-The URL must serve Nova's strict `nova_workspace_evidence` schema-version-1 capability and lookup
-contract; the raw upstream MyContext `/capabilities` v2 is not accepted, because it does not
-attest exact Nova workspace scope. Nova does not ship an adapter executable and does not guess
-compatibility from `/ask` results — installing MyContext alone does not enable enrichment. The
-integration is an HTTP client boundary and does not copy or bundle MyContext code or runtime;
-upstream MyContext is licensed under the Elastic License 2.0, and a separate legal and
-distribution review is required before reusing, bundling, or shipping any upstream MyContext code
-or runtime.
-
 ## Public environment reference
 
 The following block is generated from `runtime/src/environment-contract.ts`. Host-private handshake
@@ -293,9 +255,6 @@ inputs are intentionally excluded.
 | `NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT` | `codex` | No | ~/.nova-audio-agent/workspaces | Managed project root. |
 | `NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT` | `codex` | No | ~/.nova-audio-agent | Project state root. |
 | `NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL` | `codex` | No | 30 | Codex progress interval in seconds. |
-| `NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED` | `core` | No | false | Enable the local read-only workspace memory graph. |
-| `NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH` | `core` | No | ~/.nova-audio-agent/workspace-graph.sqlite | Workspace memory graph database path. |
-| `NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL` | `core` | No | None | Optional loopback-only Nova-compatible read-only MyContext adapter base URL. |
 | `TAVILY_API_KEY` | `search` | When selected | None | Tavily search credential. |
 | `NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE` | `camera` | No | None | Absolute deterministic desktop video input. |
 | `NOVA_AUDIO_AGENT_REALTIME_TELEMETRY` | `telemetry` | No | ~/.nova-audio-agent/realtime-telemetry.jsonl | Source-runtime telemetry output path; set an empty value to disable. |

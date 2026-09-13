@@ -16,7 +16,6 @@ import {
 } from './desktop.js'
 import type {RealtimeTelemetry} from './realtime/telemetry.js'
 import type {MemoryBoardDetail} from './realtime/memory-board.js'
-import {workspaceGraphBoardMessage} from './realtime/workspace-graph-board.js'
 
 const READY_FRAME = JSON.stringify({type: DESKTOP_READY})
 
@@ -35,7 +34,6 @@ export interface DesktopRealtimeOptions extends DesktopBridgeOptions {
   /** Remote transport errors release the connection; desktop retains its fatal policy. */
   readonly transportFailure?: 'abort' | 'disconnect'
   readonly memoryBoard?: (requestId: string, detail?: MemoryBoardDetail) => string | Promise<string>
-  readonly workspaceGraphBoard?: (requestId: string) => string
   readonly createServer?: (options: DesktopServerOptions) => DesktopServerTransport
   /** Optional lifecycle observation after bridge connection state has been released. */
   readonly onConnectionReleased?: () => void
@@ -66,7 +64,6 @@ export class DesktopRealtime {
       transportFailure,
       onConnectionReleased,
       memoryBoard,
-      workspaceGraphBoard,
       ...bridgeOptions
     } = options
     this.#discardInputAudio = transportFailure === 'disconnect'
@@ -90,14 +87,8 @@ export class DesktopRealtime {
       onClientAuthenticated: () => this.#authenticated(),
       onClientDisconnect: media => this.#disconnected(media?.hadProviderAttachment ?? true),
       onDebugBoardRequest: request => {
-        if (request.board === 'memory') {
-          if (memoryBoard === undefined) {
-            throw new DesktopProtocolError('desktop memory board is unavailable')
-          }
-          return memoryBoard(request.request_id, request.detail)
-        }
-        return workspaceGraphBoard?.(request.request_id)
-          ?? workspaceGraphBoardMessage(request.request_id, null, 'disabled')
+        if (memoryBoard === undefined) throw new DesktopProtocolError('desktop memory board is unavailable')
+        return memoryBoard(request.request_id, request.detail)
       },
       onAudio: pcm => this.bridge.receiveAudio(pcm),
       onControl: async control => {

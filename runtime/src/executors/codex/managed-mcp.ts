@@ -1,4 +1,4 @@
-import {SensitiveContentPolicy} from '../../workspace-graph/sensitivity.js'
+import {SensitiveContentPolicy} from '../../sensitivity.js'
 import type {CapabilityRegistry, McpServerConfig, McpServerStatus} from '../../capability-registry.js'
 import {snapshotJsonRecord} from './safe-json.js'
 

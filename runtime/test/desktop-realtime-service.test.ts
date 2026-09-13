@@ -1108,7 +1108,7 @@ test('production composition serves compact boards on debug sockets without dist
 
   const requestBoard = async (
     requestId: string,
-    board: 'memory' | 'workspace_graph',
+    board: 'memory',
   ): Promise<Record<string, unknown>> => {
     const debug = await connectDesktop(ready.port, '/debug-board')
     sockets.add(debug)
@@ -1133,24 +1133,6 @@ test('production composition serves compact boards on debug sockets without dist
     itemCount: 13,
     transferred: 12,
   })
-
-  const disabled = await requestBoard('composition-graph-disabled', 'workspace_graph')
-  assert.equal(disabled.availability, 'disabled')
-  Object.defineProperty(composition.realtime, 'workspaceGraph', {value: {
-    degraded: false,
-    publishedSnapshot: Object.freeze({
-      schema_version: 3,
-      publication_revision: 7,
-      degraded: false,
-      logical_workspaces: Object.freeze([]),
-      workspace_instances: Object.freeze([]),
-      relations: Object.freeze([]),
-      aliases: Object.freeze([]),
-    }),
-  }})
-  const readyGraph = await requestBoard('composition-graph-ready', 'workspace_graph')
-  assert.equal(readyGraph.availability, 'ready')
-  assert.equal(readyGraph.publication_revision, 7)
 
   const stillUsable = receiveFrames(voice, 1, 'voice after production debug requests')
   callbacks!.onCaption({role: 'user', text: 'still usable', final: true})

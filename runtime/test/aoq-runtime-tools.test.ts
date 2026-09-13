@@ -22,7 +22,7 @@ test('AOQ phone tools require a real speech origin, execute once, and emit host 
   const launches: {op: string; request: unknown; context: ExecutorDispatchContext}[] = []
   let finish!: () => void
   const completed = new Promise<void>(resolve => { finish = resolve })
-  const core = buildAssembly({settings: settingsSchema.parse({executors: ['slow_sim'], workspace_graph_enabled: false}),
+  const core = buildAssembly({settings: settingsSchema.parse({executors: ['slow_sim']}),
     clock: new VirtualClock(),
     capabilities: parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: false}}}),
     gateway: {

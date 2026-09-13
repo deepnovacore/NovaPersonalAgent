@@ -78,7 +78,7 @@ export async function runServerEntry(options: {
             NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE: 'longanqian'} : environment,
           ...(link === undefined ? {} : {integratedProviders: {qwen: input => new aoqProvider!.AoqRealtimeAdapter({
             ...input.config, link, onDiagnostic, idFactory: input.idFactory, now: input.now,
-            workspaceGraphPolicy: input.workspaceGraphPolicy, executorApproval: input.executorApproval,
+            executorApproval: input.executorApproval,
             ...(input.modules === undefined ? {} : {modules: input.modules}),
           })}}),
           createServer: (serverOptions, media) => link === undefined

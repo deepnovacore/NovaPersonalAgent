@@ -4,7 +4,7 @@ import {basename, dirname, isAbsolute, join, resolve} from 'node:path'
 import {isMainThread, parentPort, workerData} from 'node:worker_threads'
 import {DatabaseSync} from 'node:sqlite'
 
-import {SensitiveContentPolicy, SensitivePathPolicy} from '../workspace-graph/sensitivity.js'
+import {SensitiveContentPolicy, SensitivePathPolicy} from '../sensitivity.js'
 import {hostProjectRootFromConfig} from '../project-store.js'
 import type {
   KnowledgeChunkInput,

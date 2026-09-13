@@ -13,7 +13,6 @@ import type {
 } from './ports.js'
 import {
   CoreRuntime,
-  type GraphContextProvider,
   type ModelCall,
   type RuntimeDispatchResult,
 } from './runtime.js'
@@ -355,10 +354,6 @@ export class CausalRuntime {
     return () => this.#observers.delete(observer)
   }
 
-  /** Bind one host-owned, synchronous graph projection at the real model-call boundary. */
-  bindGraphContextProvider(provider: GraphContextProvider): () => void {
-    return this.core.bindGraphContextProvider(provider)
-  }
 
   bindSuggestionSelected(
     observer: (suggestion: Suggestion, reason: WakeReason) => void,

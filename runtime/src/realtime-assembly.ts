@@ -1,5 +1,4 @@
 import type {UsageReporter} from './realtime/usage.js'
-import {workspaceGraphServiceFromSettings} from './workspace-graph/factory.js'
 import type {ApprovalController} from './approval-port.js'
 import {capabilityStatus, type CapabilityStatus} from './capability-registry.js'
 import { randomUUID } from 'node:crypto'
@@ -12,9 +11,7 @@ import {
   executorWithRole,
   type CancelContext,
   type CodingExecutorResource,
-  type CommittedWorkspaceEvent,
   type ProjectExecutorAdapter,
-  type TerminalWorkOrderEvent,
 } from './coding-executor.js'
 import {
   PlaybackRegistry,
@@ -36,14 +33,6 @@ import { RealtimeSession } from './realtime/session.js'
 import type { CaptionFrame } from './realtime/session-state.js'
 import type { RealtimeTelemetry } from './realtime/telemetry.js'
 import {renderActiveExecutorContext, renderActiveProjectContext} from './realtime/frontend-instructions.js'
-import type {
-  OpenWorkspaceInput,
-  TaskCompletionInput,
-  TurnContextInput,
-} from './workspace-graph/service.js'
-import type {WorkspaceResolutionDecision} from './workspace-graph/identity.js'
-import type {PublishedGraphSnapshot} from './workspace-graph/store.js'
-import type {GraphContext} from './workspace-graph/context.js'
 import type {Suggestion} from './suggestions.js'
 import type {WakeReason} from './slots.js'
 import {USER_PRIORITY, parseMemoryRef} from './memory.js'
@@ -69,32 +58,7 @@ export function defaultIntake(
   return {models: intakeModels(gateway, settings.surrogate_model, settings.planner_model || settings.fast_model), settings}
 }
 
-export interface RealtimeWorkspaceGraph {
-  readonly publishedSnapshot: PublishedGraphSnapshot
-  readonly degraded?: boolean
-  open(): Promise<void>
-  revokeCurrentWorkspaceScope(): number
-  breakWorkspaceTransitionAdjacency(): void
-  openWorkspace(
-    input: OpenWorkspaceInput,
-    admittedScopeGeneration?: number,
-  ): Promise<WorkspaceResolutionDecision>
-  recordTaskCompletion(input: TaskCompletionInput): Promise<void>
-  contextForTurn(input: TurnContextInput): GraphContext | null
-  close(): Promise<void>
-}
-
 export const REALTIME_ASSEMBLY_SHUTDOWN_GRACE_MS = 1_000
-const MAX_GRAPH_LIFECYCLE_OPERATIONS = 64
-const MAX_GRAPH_TERMINAL_OPERATIONS = MAX_GRAPH_LIFECYCLE_OPERATIONS - 1
-const MAX_COMMITTED_WORKSPACE_EVENTS = 64
-const WORKSPACE_SWITCH_RETRY_MS = 10
-
-interface AdmittedCommittedWorkspace {
-  readonly event: CommittedWorkspaceEvent
-  readonly scopeGeneration: number
-}
-
 interface PriorAssistantReplyCandidate {
   readonly sessionEpoch: number
   readonly userInputRevision: number
@@ -230,9 +194,6 @@ export interface RealtimeAssemblyOptions {
   readonly codexResource?: CodingExecutorResource
   /** Required only when the resolved runtime has a coding role. */
   readonly codingAgentControllerFactory?: CodingAgentControllerFactory
-  readonly workspaceGraph?: RealtimeWorkspaceGraph
-  /** Production graph allocation is deferred until final tool validation and service construction succeed. */
-  readonly createWorkspaceGraph?: () => RealtimeWorkspaceGraph | undefined
   /** Personal-memory allocation occurs only after the final tool and executor validation. */
   readonly createPersonalMemory?: () => PersonalMemoryResource
 }
@@ -263,25 +224,18 @@ export class RealtimeAssembly {
   readonly service: RealtimeService
   readonly runtime: Assembly['runtime']
   readonly tools: CompiledTools
-  readonly workspaceGraph: RealtimeWorkspaceGraph | undefined
 
   readonly #onDiagnostic: (line: string) => void
   readonly #projectAdapter: ProjectExecutorAdapter | undefined
   readonly #codexResource: CodingExecutorResource | undefined
   readonly #unsubscribeProjectView: (() => void) | undefined
   readonly #unsubscribeProjectContext: (() => void) | undefined
-  readonly #unsubscribeCommittedWorkspace: (() => void) | undefined
-  readonly #unsubscribeTerminalWorkOrder: (() => void) | undefined
   readonly #unsubscribeProviderConnected: (() => void) | undefined
   readonly #personalMemoryTurnTracker: PersonalMemoryTurnTracker
   readonly #idFactory: () => string
-  readonly #wallClockNow: () => number
-  readonly #unbindGraphContext: (() => void) | undefined
   readonly #unbindSuggestionSelected: (() => void) | undefined
   readonly #createPersonalMemory: (() => PersonalMemoryResource) | undefined
   #personalMemory: PersonalMemoryResource | undefined
-  #workspaceGraphOpen = false
-  #currentWorkspaceInstanceId: string | null = null
   #currentHostWorkspaceId: string | null = null
   #latestProjectView: ProjectConfirmationView | null = null
   #projectContextRevision = 0
@@ -290,15 +244,6 @@ export class RealtimeAssembly {
   #projectContextOwnershipUncertain = false
   #providerConnectionObserved = false
   #projectContextTail: Promise<void> = Promise.resolve()
-  readonly #workspaceInstancesByHostId = new Map<string, string>()
-  #graphLifecycleTail: Promise<void> = Promise.resolve()
-  #graphLifecyclePending = 0
-  readonly #committedWorkspaceQueue: AdmittedCommittedWorkspace[] = []
-  #committedWorkspaceScheduled = false
-  #committedWorkspaceAdmissionFailed = false
-  #latestWorkspaceScopeGeneration = 0
-  #graphHooksClosed = false
-  #graphOpenOperation: Promise<void> | null = null
   #state: LifecycleState = 'new'
   #startOperation: Promise<void> | null = null
   #stopOperation: Promise<void> | null = null
@@ -317,7 +262,6 @@ export class RealtimeAssembly {
     readonly projectAdapter?: ProjectExecutorAdapter
     readonly onProjectView?: (view: ProjectConfirmationView) => void
     readonly codexResource?: CodingExecutorResource
-    readonly workspaceGraph?: RealtimeWorkspaceGraph
     readonly idFactory: () => string
     readonly wallClockNow: () => number
     readonly unbindSuggestionSelected?: () => void
@@ -335,29 +279,14 @@ export class RealtimeAssembly {
     this.service = input.service
     this.runtime = input.core.runtime
     this.tools = input.core.tools
-    this.workspaceGraph = input.workspaceGraph
     this.#onDiagnostic = input.onDiagnostic
     this.#projectAdapter = input.projectAdapter
     this.#codexResource = input.codexResource
     this.#idFactory = input.idFactory
-    this.#wallClockNow = input.wallClockNow
     this.#unbindSuggestionSelected = input.unbindSuggestionSelected
     this.#personalMemory = input.personalMemory
     this.#createPersonalMemory = input.createPersonalMemory
     this.#personalMemoryTurnTracker = input.personalMemoryTurnTracker
-    this.#unbindGraphContext = input.workspaceGraph === undefined
-      ? undefined
-      : input.core.runtime.bindGraphContextProvider(({latest_user_text: utterance}) => {
-        if (!this.#workspaceGraphOpen || this.#currentWorkspaceInstanceId === null) return null
-        const identity = this.providerSession.identity
-        if (identity === null) return null
-        return input.workspaceGraph!.contextForTurn({
-          session_epoch: identity.epoch,
-          workspace_instance_id: this.#currentWorkspaceInstanceId,
-          utterance,
-          preferences: [],
-        })
-      })
     this.#unsubscribeProjectView = input.projectAdapter === undefined
       ? undefined
       : input.projectAdapter.observeProjectView(view => {
@@ -368,17 +297,6 @@ export class RealtimeAssembly {
       : input.projectAdapter.observeProjectContext(async context => {
         this.#acceptProjectContext(context)
         await this.#enqueueProjectContextPublication(true)
-      })
-    this.#unsubscribeCommittedWorkspace = input.projectAdapter === undefined
-      ? undefined
-      : input.projectAdapter.observeCommittedWorkspace(event => {
-        if (input.workspaceGraph !== undefined) this.#enqueueCommittedWorkspace(event)
-      })
-    this.#unsubscribeTerminalWorkOrder = input.projectAdapter === undefined
-      || input.workspaceGraph === undefined
-      ? undefined
-      : input.projectAdapter.observeTerminalWorkOrder(event => {
-        this.#enqueueGraphLifecycle(() => this.#onTerminalWorkOrder(event))
       })
     this.#unsubscribeProviderConnected = input.providerSession.observeConnected(async () => {
       input.personalMemoryTurnTracker.reset()
@@ -485,24 +403,6 @@ export class RealtimeAssembly {
     if (this.#state !== 'starting') {
       throw new AssemblyError('realtime assembly start was abandoned by stop')
     }
-    if (this.workspaceGraph !== undefined) {
-      const openOperation = Promise.resolve().then(async () => { await this.workspaceGraph!.open() })
-      this.#graphOpenOperation = openOperation
-      void openOperation.then(
-        () => { if (this.#graphOpenOperation === openOperation) this.#graphOpenOperation = null },
-        () => { if (this.#graphOpenOperation === openOperation) this.#graphOpenOperation = null },
-      )
-      const graphOpen = await this.#cleanupWithinGrace(
-        () => openOperation,
-        'workspace_graph_open_abandoned',
-      )
-      if (graphOpen.kind === 'resolved') {
-        this.#workspaceGraphOpen = true
-      } else {
-        this.#workspaceGraphOpen = false
-        if (graphOpen.kind === 'rejected') this.#diagnose('workspace_graph_open_failed')
-      }
-    }
     try {
       if (this.#projectAdapter !== undefined) {
         await this.#projectAdapter.initialize()
@@ -510,12 +410,6 @@ export class RealtimeAssembly {
           this.#projectAdapter.confirmationController.pending,
         )
         this.#acceptProjectContext(context)
-        const activeWorkspace = await this.#projectAdapter.activeCommittedWorkspace()
-        if (activeWorkspace?.workspace_id === context.workspace_id) {
-          if (this.#workspaceGraphOpen) {
-            this.#enqueueCommittedWorkspace({workspace: activeWorkspace})
-          }
-        }
       }
       await this.core.start()
     } catch (error) {
@@ -546,12 +440,12 @@ export class RealtimeAssembly {
     }
     const initialPublication = await this.#cleanupWithinGrace(
       () => this.#enqueueProjectContextPublication(),
-      'workspace_graph_header_delivery_abandoned',
+      'workspace_context_delivery_abandoned',
     )
     if (initialPublication.kind === 'rejected') {
-      this.#diagnose('workspace_graph_header_delivery_failed')
+      this.#diagnose('workspace_context_delivery_failed')
       void this.#enqueueProjectContextPublication().catch(() => {
-        this.#diagnose('workspace_graph_header_delivery_failed')
+        this.#diagnose('workspace_context_delivery_failed')
       })
     }
     if (this.#state === 'starting') {
@@ -571,7 +465,6 @@ export class RealtimeAssembly {
       await this.#settleWithinGrace(starting, 'assembly_start_abandoned')
     }
 
-    this.#unbindGraphContext?.()
     this.#unbindSuggestionSelected?.()
 
     let firstFailure: {readonly error: unknown} | null = null
@@ -617,194 +510,25 @@ export class RealtimeAssembly {
     }
     this.#unsubscribeProjectView?.()
     this.#unsubscribeProjectContext?.()
-    this.#unsubscribeCommittedWorkspace?.()
-    this.#unsubscribeTerminalWorkOrder?.()
     this.#unsubscribeProviderConnected?.()
-    this.#graphHooksClosed = true
-
-    if (this.workspaceGraph !== undefined) {
-      const graphOpenOperation = this.#graphOpenOperation
-      if (graphOpenOperation !== null) {
-        const graphOpen = await this.#cleanupWithinGrace(
-          () => graphOpenOperation,
-          'workspace_graph_open_abandoned',
-        )
-        if (graphOpen.kind !== 'resolved') cleanupComplete = false
-      }
-      const lifecycle = await this.#cleanupWithinGrace(
-        () => this.#graphLifecycleTail,
-        'workspace_graph_lifecycle_abandoned',
-      )
-      if (lifecycle.kind !== 'resolved') cleanupComplete = false
-      const graph = await this.#cleanupWithinGrace(
-        () => this.workspaceGraph!.close(),
-        'workspace_graph_close_abandoned',
-      )
-      if (graph.kind !== 'resolved') cleanupComplete = false
-      if (graph.kind === 'rejected') this.#diagnose('workspace_graph_close_failed')
-    }
 
     if (cleanupComplete) this.#state = 'stopped'
     if (firstFailure !== null) throw firstFailure.error
-  }
-
-  async #onCommittedWorkspace(admitted: AdmittedCommittedWorkspace): Promise<void> {
-    if (!this.#workspaceGraphOpen || this.workspaceGraph === undefined) return
-    const {event, scopeGeneration} = admitted
-    try {
-      let decision: WorkspaceResolutionDecision
-      let queueFullDiagnosed = false
-      for (;;) {
-        try {
-          decision = await this.workspaceGraph.openWorkspace({
-            path: event.workspace.canonical_path,
-            repository_fingerprint: event.workspace.workspace_id,
-            now: event.workspace.last_used_at,
-          }, scopeGeneration)
-          break
-        } catch (error) {
-          if (!isWorkspaceGraphQueueFull(error) || this.#graphHooksClosed) throw error
-          if (!queueFullDiagnosed) {
-            queueFullDiagnosed = true
-            this.#diagnose('workspace_graph_lifecycle_queue_full')
-          }
-          await new Promise<void>(resolve => { setTimeout(resolve, WORKSPACE_SWITCH_RETRY_MS) })
-        }
-      }
-      if (decision.kind !== 'resolved') {
-        this.workspaceGraph.breakWorkspaceTransitionAdjacency()
-        return
-      }
-      // Every resolved host identity remains authoritative for terminal events, even if a newer
-      // committed workspace was admitted while this durable open was queued. Only model/provider
-      // current scope and Header delivery are latest-generation concerns.
-      this.#workspaceInstancesByHostId.set(
-        event.workspace.workspace_id,
-        decision.instance.instance_id,
-      )
-      if (
-        this.#committedWorkspaceAdmissionFailed
-        || scopeGeneration !== this.#latestWorkspaceScopeGeneration
-      ) return
-      if (event.workspace.workspace_id !== this.#currentHostWorkspaceId) return
-      this.#currentWorkspaceInstanceId = decision.instance.instance_id
-      await this.#enqueueProjectContextPublication()
-    } catch {
-      // This authoritative event was admitted but could not become graph state. The next successful
-      // event may become the new anchor, but it must not bridge relation inference across this gap.
-      this.workspaceGraph.breakWorkspaceTransitionAdjacency()
-      this.#diagnose('workspace_graph_lifecycle_failed')
-    }
-  }
-
-  async #onTerminalWorkOrder(event: TerminalWorkOrderEvent): Promise<void> {
-    if (
-      !this.#workspaceGraphOpen
-      || this.workspaceGraph === undefined
-    ) return
-    const workspaceInstanceId = this.#workspaceInstancesByHostId.get(event.workspace.workspace_id)
-    if (workspaceInstanceId === undefined) return
-    try {
-      await this.workspaceGraph.recordTaskCompletion({
-        workspace_instance_id: workspaceInstanceId,
-        summary: boundedTaskCompletionSummary(event.work_order),
-        outcome: event.handoff.outcome,
-        now: this.#wallClockNow(),
-        relation_cue: null,
-      })
-    } catch {
-      this.#diagnose('workspace_graph_lifecycle_failed')
-    }
-  }
-
-  #enqueueCommittedWorkspace(event: CommittedWorkspaceEvent): void {
-    if (
-      this.#graphHooksClosed
-      || !this.#workspaceGraphOpen
-      || this.workspaceGraph === undefined
-      || this.#committedWorkspaceAdmissionFailed
-    ) return
-    // Admission is synchronous: neither model-call context nor explicit provider enrichment may
-    // keep using A once the authoritative host has committed a switch away from A.
-    this.#currentWorkspaceInstanceId = null
-    let scopeGeneration: number
-    try {
-      scopeGeneration = this.workspaceGraph.revokeCurrentWorkspaceScope()
-    } catch {
-      this.#committedWorkspaceAdmissionFailed = true
-      this.#diagnose('workspace_graph_lifecycle_failed')
-      return
-    }
-    this.#latestWorkspaceScopeGeneration = scopeGeneration
-    if (this.#committedWorkspaceQueue.length >= MAX_COMMITTED_WORKSPACE_EVENTS) {
-      // A dropped transition would make the next edge ambiguous. Fail closed for the rest of this
-      // assembly instead of ever inferring across that gap; already-admitted events may still drain.
-      this.#committedWorkspaceAdmissionFailed = true
-      this.#diagnose('workspace_graph_lifecycle_queue_full')
-      return
-    }
-    this.#committedWorkspaceQueue.push({event, scopeGeneration})
-    if (this.#committedWorkspaceScheduled) return
-    this.#committedWorkspaceScheduled = true
-    const admitted = this.#enqueueGraphLifecycle(
-      () => this.#drainCommittedWorkspaces(),
-      true,
-    )
-    if (!admitted) {
-      this.#committedWorkspaceScheduled = false
-      this.#committedWorkspaceAdmissionFailed = true
-      this.#committedWorkspaceQueue.length = 0
-    }
-  }
-
-  async #drainCommittedWorkspaces(): Promise<void> {
-    try {
-      while (!this.#graphHooksClosed) {
-        const admitted = this.#committedWorkspaceQueue.shift()
-        if (admitted === undefined) return
-        await this.#onCommittedWorkspace(admitted)
-      }
-    } finally {
-      this.#committedWorkspaceScheduled = false
-    }
-  }
-
-  #enqueueGraphLifecycle(operation: () => Promise<void>, workspacePriority = false): boolean {
-    if (this.#graphHooksClosed || !this.#workspaceGraphOpen) return false
-    const capacity = workspacePriority
-      ? MAX_GRAPH_LIFECYCLE_OPERATIONS
-      : MAX_GRAPH_TERMINAL_OPERATIONS
-    if (this.#graphLifecyclePending >= capacity) {
-      this.#diagnose('workspace_graph_lifecycle_queue_full')
-      return false
-    }
-    this.#graphLifecyclePending += 1
-    const pending = this.#graphLifecycleTail.then(operation)
-    this.#graphLifecycleTail = pending.then(
-      () => { this.#graphLifecyclePending -= 1 },
-      () => { this.#graphLifecyclePending -= 1 },
-    )
-    return true
   }
 
   #acceptProjectContext(context: PublicProjectContext): void {
     this.service.onProjectWorkspaceChanged(context.workspace_id)
     this.#latestProjectView = Object.freeze({...context.view})
     this.#currentHostWorkspaceId = context.workspace_id
-    this.#currentWorkspaceInstanceId = context.workspace_id === null
-      ? null : this.#workspaceInstancesByHostId.get(context.workspace_id) ?? null
   }
 
   #enqueueProjectContextPublication(requireDelivery = false): Promise<void> {
     const view = this.#latestProjectView
     const hostWorkspaceId = this.#currentHostWorkspaceId
-    const workspaceInstanceId = hostWorkspaceId === null
-      ? null : this.#workspaceInstancesByHostId.get(hostWorkspaceId) ?? null
     const operation = this.#projectContextTail.then(async () => {
       await this.#injectCurrentProjectContext(
         view,
         hostWorkspaceId,
-        workspaceInstanceId,
         requireDelivery,
       )
     })
@@ -815,7 +539,6 @@ export class RealtimeAssembly {
   async #injectCurrentProjectContext(
     view: ProjectConfirmationView | null,
     hostWorkspaceId: string | null,
-    workspaceInstanceId: string | null,
     requireDelivery: boolean,
   ): Promise<void> {
     const activeExecutorContext = renderActiveExecutorContext(
@@ -837,29 +560,9 @@ export class RealtimeAssembly {
       return
     }
     const contextScopeId = hostWorkspaceId ?? 'active-executor-context'
-    let graphHeader: string | null = null
-    if (
-      this.#workspaceGraphOpen
-      && this.workspaceGraph !== undefined
-      && workspaceInstanceId !== null
-    ) {
-      try {
-        graphHeader = this.workspaceGraph.contextForTurn({
-          session_epoch: identity.epoch,
-          workspace_instance_id: workspaceInstanceId,
-          utterance: '',
-          preferences: [],
-        })?.header ?? null
-      } catch {
-        this.#diagnose('workspace_graph_header_delivery_failed')
-      }
-    }
     const content = [
       view === null ? null : renderActiveProjectContext(view),
       activeExecutorContext,
-      graphHeader === null
-        ? null
-        : `<workspace_graph_context>\n${graphHeader}\n</workspace_graph_context>`,
     ].filter((part): part is string => part !== null).join('\n') || [
       '<runtime_context>',
       'active_project=false',
@@ -898,7 +601,7 @@ export class RealtimeAssembly {
     try {
       this.#onDiagnostic(`[realtime-diagnostic] ${code}`)
     } catch {
-      // Graph diagnostics are best-effort and never change voice/project outcomes.
+      // Context diagnostics are best-effort and never change voice/project outcomes.
     }
   }
 
@@ -969,23 +672,6 @@ export class RealtimeAssembly {
     }
     return result
   }
-}
-
-function boundedTaskCompletionSummary(value: string): string | null {
-  let bounded = ''
-  for (const character of value) {
-    if (bounded.length + character.length > 239) break
-    bounded += character
-  }
-  return /\S/u.test(bounded) ? bounded : null
-}
-
-function isWorkspaceGraphQueueFull(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false
-  const descriptor = Object.getOwnPropertyDescriptor(error, 'code')
-  return descriptor !== undefined
-    && 'value' in descriptor
-    && descriptor.value === 'GRAPH_SERVICE_QUEUE_FULL'
 }
 
 /** Build the provider-neutral realtime resources in their ownership order. */
@@ -1242,7 +928,6 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       service.onSuggestionSelected(suggestion, reason)
     },
   )
-  const workspaceGraph = options.workspaceGraph ?? options.createWorkspaceGraph?.()
   const personalMemory = options.createPersonalMemory?.()
   personalMemoryHolder.current = personalMemory
   return assignAssembly(new RealtimeAssembly({
@@ -1270,7 +955,6 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     ...(projectAdapter === undefined ? {} : {projectAdapter}),
     ...(options.onProjectView === undefined ? {} : {onProjectView: options.onProjectView}),
     ...(options.codexResource === undefined ? {} : {codexResource: options.codexResource}),
-    ...(workspaceGraph === undefined ? {} : {workspaceGraph}),
   }), assemblyHolder)
 }
 
@@ -1293,8 +977,6 @@ function asProjectAdapter(adapter: unknown): ProjectExecutorAdapter {
     || !('activeCommittedWorkspace' in adapter)
     || !('observeProjectView' in adapter)
     || !('observeProjectContext' in adapter)
-    || !('observeCommittedWorkspace' in adapter)
-    || !('observeTerminalWorkOrder' in adapter)
   ) throw new AssemblyError('project coding resource has an invalid adapter')
   return adapter as ProjectExecutorAdapter
 }
@@ -1484,13 +1166,6 @@ export function composeRealtime(
   options: Omit<RealtimeAssemblyOptions, 'core' | 'provider' | 'idFactory'> & {readonly settings: AssemblyOptions['settings']; readonly idFactory: () => string},
   providerTuning: Required<Pick<RealtimeAssemblyOptions, 'controlledPreemptiveAlertReconnect' | 'preemptiveAlertHistoryRecovery' | 'preemptiveAlertHistoryPairs'>>,
 ): RealtimeAssembly {
-  const createWorkspaceGraph = () => workspaceGraphServiceFromSettings(
-    options.settings,
-    code => {
-      if (code === 'workspace_graph_open_failed') return
-      try { options.onDiagnostic?.(`[realtime-diagnostic] ${code}`) } catch { /* advisory */ }
-    },
-  )
   return buildRealtimeAssembly({
     core,
     provider,
@@ -1498,7 +1173,6 @@ export function composeRealtime(
     ...(options.onExecutorSuggestion === undefined ? {} : {onExecutorSuggestion: options.onExecutorSuggestion}),
     idFactory: options.idFactory,
     ...providerTuning,
-    createWorkspaceGraph,
     ...(options.createPersonalMemory === undefined ? {} : {createPersonalMemory: options.createPersonalMemory}),
     ...(options.providerToolView === undefined
       ? {}

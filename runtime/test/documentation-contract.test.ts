@@ -65,6 +65,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
   assert.match(chinese, /可选.*在线 smoke/u)
 
   for (const [file, text] of documents) {
+    assert.doesNotMatch(text, /workspace-graph surfaces|工作区图谱|NOVA_AUDIO_AGENT_WORKSPACE_GRAPH/u, file)
     assert.doesNotMatch(text, /NOVA_AUDIO_AGENT_(?:REALTIME_PROVIDER|VOLCENGINE_ARK_MODEL|VOLCENGINE_ARK_SUPPORT_MODEL)/u, file)
   }
 })

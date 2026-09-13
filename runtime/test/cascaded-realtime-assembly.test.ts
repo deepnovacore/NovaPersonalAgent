@@ -1,8 +1,5 @@
-import {assertBudgetRejectsBeforeGraphWorker} from './graph-budget-probe.js'
+import {parseCapabilityRegistry} from '../src/capability-registry.js'
 import assert from 'node:assert/strict'
-import {chmod, mkdtemp, realpath, rm} from 'node:fs/promises'
-import {tmpdir} from 'node:os'
-import {join} from 'node:path'
 import {test} from 'node:test'
 import {AssemblyError} from '../src/assembly.js'
 import type {ExecutorAdapter, ExecutorDispatchContext} from '../src/causal-runtime.js'
@@ -10,7 +7,6 @@ import {VirtualClock} from '../src/clock.js'
 import type {CodexAssemblyResource} from '../src/executors/codex/factory.js'
 import {codexAgentDescriptor, CodexAgentController} from '../src/executors/codex/controller.js'
 import {
-  ConfigurationError,
   loadSettings,
   requireVolcengineRealtime,
   type Settings,
@@ -687,43 +683,6 @@ test('cascaded production composition forwards the personal memory owner', async
   assert.equal(closed, 1)
 })
 
-test('cascaded assembly owns enabled graph storage and exposes replaceable Header delivery',
-  async () => {
-    const root = await realpath(await mkdtemp(join(tmpdir(), 'nova-cascaded-graph-')))
-    await chmod(root, 0o700)
-    try {
-      const enabled = buildCascadedRealtimeAssembly(assemblyOptions(settings({
-        NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED: 'true',
-        NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH: join(root, 'graph.sqlite'),
-      })))
-      try {
-        assert.ok(enabled.workspaceGraph !== undefined)
-        assert.equal('injectWorkspaceContext' in enabled.provider, true)
-      } finally {
-        await enabled.stop()
-      }
-
-      const disabled = buildCascadedRealtimeAssembly(assemblyOptions(settings()))
-      try {
-        assert.equal(disabled.workspaceGraph, undefined)
-      } finally {
-        await disabled.stop()
-      }
-    } finally {
-      await rm(root, {recursive: true, force: true})
-    }
-  })
-
-test('cascaded credentials validate before composition-only resource mismatches', () => {
-  const configured = settings({
-    ARK_API_KEY: '',
-    NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
-  })
-  assert.throws(
-    () => buildCascadedRealtimeAssembly(assemblyOptions(configured)),
-    error => error instanceof ConfigurationError && error.message === '缺少 ARK_API_KEY',
-  )
-})
 
 test('cascaded realtime composition rejects a matching live coding resource by project mode', () => {
   const configured = settings({NOVA_AUDIO_AGENT_EXECUTORS: 'fast_sim'})
@@ -785,8 +744,6 @@ test('cascaded composition forwards an explicit generic controller for a renamed
     activeCommittedWorkspace: () => Promise.resolve(null),
     observeProjectView: () => () => undefined,
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
   }
   const resource: CodexAssemblyResource = {
     adapter,
@@ -906,6 +863,15 @@ test('core gateway preserves generic models or applies all Ark support overrides
     }
   })
 
-test('cascaded budget rejection creates no graph Worker and evaluates the final tool view once', () => {
-  assertBudgetRejectsBeforeGraphWorker('cascaded')
+test('cascaded rejects the final tool budget after evaluating the provider view once', () => {
+  const configured = loadSettings({
+    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+    DASHSCOPE_API_KEY: 'fixture-only', DOUBAO_BIGMODEL_API_KEY: 'fixture-only',
+  })
+  const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
+  let views = 0
+  assert.throws(() => buildCascadedRealtimeAssembly({
+    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+  }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 4, toolBudget: 1})
+  assert.equal(views, 1)
 })

@@ -76,7 +76,7 @@ const helloSchema = z.object({
 const debugBoardRequestSchema = z.object({
   type: z.literal('debug.board.request'),
   request_id: identifierSchema,
-  board: z.enum(['memory', 'workspace_graph']),
+  board: z.literal('memory'),
   detail: z.enum(['compact', 'full']),
 }).strict()
 
@@ -260,7 +260,7 @@ export interface DesktopServerOptions {
 
 export interface DesktopDebugBoardRequest {
   readonly request_id: string
-  readonly board: 'memory' | 'workspace_graph'
+  readonly board: 'memory'
   readonly detail: MemoryBoardDetail
 }
 
@@ -920,7 +920,7 @@ function validateDebugBoardResponse(raw: string, request: DesktopDebugBoardReque
     throw new DesktopOutboundValidationError('desktop debug response is invalid')
   }
   const response = value as {readonly type?: unknown; readonly request_id?: unknown}
-  const expectedType = request.board === 'memory' ? 'memory.board' : 'workspace_graph.board'
+  const expectedType = 'memory.board'
   if (response.type !== expectedType || response.request_id !== request.request_id) {
     throw new DesktopOutboundValidationError('desktop debug response is invalid')
   }
@@ -1167,4 +1167,4 @@ async function closeWebSocket(socket: WebSocket, graceMs: number): Promise<void>
 export * from './capability-registry.js'
 export {probeMcpServer} from './mcp-client.js'
 
-export {SensitiveContentPolicy} from './workspace-graph/sensitivity.js'
+export {SensitiveContentPolicy} from './sensitivity.js'

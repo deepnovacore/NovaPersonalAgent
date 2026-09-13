@@ -45,8 +45,6 @@ function projectResource(): CodexAssemblyResource {
     activeCommittedWorkspace: () => Promise.resolve(null),
     observeProjectView: () => () => undefined,
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
   } as never
   return {
     adapter, agentDescriptor: codexAgentDescriptor('codex'), agentControllerFactory: codingAgentControllerFactory,

@@ -170,31 +170,27 @@ test('preload exposes board reads and explicit memory clear', async () => {
   const { exposed, invokes, sends } = await loadPreload()
 
   assert.deepEqual(Object.keys(exposed.memoryBoard).sort(), ['clear', 'copyJson', 'export', 'request'])
-  assert.deepEqual(Object.keys(exposed.graphBoard).sort(), ['request'])
+  assert.equal(exposed.graphBoard, undefined)
   assert.ok(Object.isFrozen(exposed.memoryBoard))
-  assert.ok(Object.isFrozen(exposed.graphBoard))
   await exposed.memoryBoard.request()
   await exposed.memoryBoard.request('full')
   await exposed.memoryBoard.copyJson()
   await exposed.memoryBoard.export()
   await exposed.memoryBoard.clear()
-  await exposed.graphBoard.request()
   assert.deepEqual(invokes, [
     {channel: 'nova:memory-board:request', payload: undefined},
     {channel: 'nova:memory-board:request', payload: 'full'},
     {channel: 'nova:memory-board:copy-json', payload: undefined},
     {channel: 'nova:memory-board:export', payload: undefined},
     {channel: 'nova:memory-board:clear', payload: undefined},
-    {channel: 'nova:workspace-graph-board:request', payload: undefined},
   ])
-  assert.equal(exposed.graphBoard.export, undefined)
   assert.deepEqual(sends, [])
 })
 
 test('preload declares each bridge namespace exactly once', async () => {
   const { source } = await loadPreload()
 
-  for (const namespace of ['orbMenu', 'releaseCamera', 'microphone', 'memoryBoard', 'graphBoard', 'nativeAudio', 'windowDrag', 'windowLayout', 'settings']) {
+  for (const namespace of ['orbMenu', 'releaseCamera', 'microphone', 'memoryBoard', 'nativeAudio', 'windowDrag', 'windowLayout', 'settings']) {
     const declarations = source.match(new RegExp(`^  ${namespace}: `, 'gm')) || []
     assert.equal(declarations.length, 1, `${namespace} is declared once`)
   }

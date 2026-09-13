@@ -78,9 +78,7 @@ export function requestDebugBoard(connection, request, {
       } catch {
         return fail('invalid_response')
       }
-      const expectedType = normalized.board === 'memory'
-        ? 'memory.board'
-        : 'workspace_graph.board'
+      const expectedType = 'memory.board'
       if (!payload || typeof payload !== 'object' || Array.isArray(payload)
         || payload.type !== expectedType
         || payload.request_id !== requestId) return fail('invalid_response')
@@ -194,7 +192,7 @@ function debugBoardEndpoint(connection) {
 
 function normalizeRequest(request) {
   if (!request || typeof request !== 'object'
-    || !['memory', 'workspace_graph'].includes(request.board)
+    || request.board !== 'memory'
     || !['compact', 'full'].includes(request.detail)) {
     throw new TypeError('invalid debug board request')
   }

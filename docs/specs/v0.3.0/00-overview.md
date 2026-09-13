@@ -106,7 +106,7 @@ v0.2 执行器/审批边界 ── M9-C Kimi Code + pi agent ──┐
 | 对象 | 回答的问题 | 拥有者 | 完整字段 |
 |---|---|---|---|
 | `feed_item` | 用户现在需要看见和处理什么 | 主机；由 Suggestion Pool 的准入结果生成和更新 | [02 卷](02-need-discovery-and-feed.md) |
-| `memory_entry` | Nova 对用户形成了什么理解，依据是什么 | 主机；是 personal-memory 端口与 workspace graph 之上的投影 | [03 卷](03-user-memory-view.md) |
+| `memory_entry` | Nova 对用户形成了什么理解，依据是什么 | 主机；是 personal-memory 端口之上的投影 | [03 卷](03-user-memory-view.md) |
 
 两者都是**接口内容，不是已发布的 wire schema**。落地时以 zod schema 与 `fixtures/` 下的
 golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `client.command` /
@@ -133,7 +133,7 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
   runtime 有黑板维护等内部定时器，但**没有用于需求发现的低频检查**；主动行为全部由执行器进度与
   观察事件触发。
 - **记忆**：`runtime/src/memory.ts`、`runtime/src/context-view.ts`（唯一面向模型的有界投影）、
-  `runtime/src/workspace-graph/`、`runtime/src/memory/personal-memory.ts`
+  `runtime/src/memory/personal-memory.ts`
   （`PersonalMemoryResource`：`recall`，可选 `remember` / `forget`；只接受可信轮次级写入）、
   `runtime/src/memory/factory.ts`（VoiceMem 后端）。`forget` 按来源粒度；recall 命中没有逐条稳定 ID、
   版本或 stated / inferred 标记；没有列表接口。**没有用户画像层**。桌面 `memory-board.mjs`

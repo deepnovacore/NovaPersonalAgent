@@ -153,38 +153,6 @@ DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
 
 级联管线的可选真实验证：`npm run smoke:cascaded --workspace @nova-audio-agent/runtime`。需要相应 provider 凭据；宿主控制 response admission 和请求归属，模型 response origin 不是授权。真人验收仍待完成。
 
-## Workspace 记忆图谱与 MyContext provider
-
-Node runtime 的 opt-in workspace 记忆图谱通过以下变量配置：
-
-```bash
-NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED=true
-NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH=~/.nova-audio-agent/workspace-graph.sqlite
-
-# 可选；必须指向另行提供的 Nova 兼容的只读 adapter base URL。
-NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL=http://127.0.0.1:PORT/base
-```
-
-图谱根据 Nova 已确认的生命周期维护 workspace 身份，并把相邻、已提交的 A→B 转换记录成弱
-`discussed_with` 元数据——这只是有界的地图线索，不是从模型或 work-order 自由文本推导的结论。
-Nova 不读取任一 workspace，关系低于主动建议阈值，90 天未刷新后转为 stale。已提交的切换会立即
-撤销旧图谱 scope，并保留已接收的 A→B→C 顺序；无法提交的事件会打断相邻关系，不能跨缺口连边。
-所有持久图谱时间统一使用 Unix 秒。Nova 不会复制仓库内的工程指令，也不会自动检查另一个
-workspace。
-
-可选的 MyContext provider 只能在同一个权威当前 workspace 中、为显式证据召回而被请求，例如用户
-追问“为什么”或要求查看来源。它不参与启动、workspace 打开/切换、默认召回、Context Header、
-Recall Pack、主动建议置信度、工具路由或任何 action。返回文本留在本地，只读且带来源标签，同时
-被视为不受信任、不持久化且不主动；它不能修改 Nova 图谱、workspace 身份、任务状态或另一个
-workspace。provider 故障只返回可见的降级空结果，不阻塞普通语音或项目工作。
-
-该 URL 必须提供 Nova `nova_workspace_evidence` schema version 1 的严格能力握手和查询契约；
-上游 MyContext 原始 `/capabilities` v2 不被接受，因为它不能证明 Nova 所要求的精确 workspace
-scope。Nova 不提供 adapter 可执行文件，也不会根据 `/ask` 结果猜测兼容——只安装 MyContext 不会
-启用 enrichment。这项集成只是 HTTP client 边界，不复制或捆绑 MyContext 代码及运行时；上游
-MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何上游 MyContext 代码或运行时之前，
-必须另行完成法律与分发审查。
-
 ## 公共环境变量参考
 
 下表由 `runtime/src/environment-contract.ts` 生成。主机私有握手变量不会进入表格。
@@ -265,9 +233,6 @@ MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何�
 | `NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT` | `codex` | 否 | ~/.nova-audio-agent/workspaces | 托管项目根目录。 |
 | `NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT` | `codex` | 否 | ~/.nova-audio-agent | 项目状态根目录。 |
 | `NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL` | `codex` | 否 | 30 | Codex 进度间隔秒数。 |
-| `NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED` | `core` | 否 | false | 启用本地只读工作区记忆图谱。 |
-| `NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH` | `core` | 否 | ~/.nova-audio-agent/workspace-graph.sqlite | 工作区记忆图谱数据库路径。 |
-| `NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL` | `core` | 否 | 无 | 可选的仅限本机回环、Nova 兼容的只读 MyContext adapter base URL。 |
 | `TAVILY_API_KEY` | `search` | 选择该能力时 | 无 | Tavily 搜索凭据。 |
 | `NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE` | `camera` | 否 | 无 | 桌面确定性视频输入的绝对路径。 |
 | `NOVA_AUDIO_AGENT_REALTIME_TELEMETRY` | `telemetry` | 否 | ~/.nova-audio-agent/realtime-telemetry.jsonl | 源码运行时遥测输出路径；设置为空值可禁用。 |

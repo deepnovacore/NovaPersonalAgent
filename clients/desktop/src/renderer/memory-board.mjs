@@ -1,8 +1,4 @@
-import {
-  boardTabForKey,
-  createGraphTabController,
-  renderWorkspaceGraphBoard,
-} from './workspace-graph-board.mjs'
+import {boardTabForKey} from './channel-tabs.mjs'
 import {
   captureBoardScrollPositions,
   diagnosticScrollKey,
@@ -25,13 +21,9 @@ const exportButton = document.querySelector('#export')
 const clearButton = document.querySelector('#clear-conversation')
 const memoryTab = document.querySelector('#memory-tab')
 const diagnosticsTab = document.querySelector('#diagnostics-tab')
-const graphTab = document.querySelector('#graph-tab')
 const memoryPanel = document.querySelector('#memory-panel')
 const diagnosticsPanel = document.querySelector('#diagnostics-panel')
-const graphPanel = document.querySelector('#graph-panel')
 const diagnosticsRoot = document.querySelector('#diagnostics')
-const graphRoot = document.querySelector('#workspace-graph')
-const graphState = document.querySelector('#graph-state')
 
 let latestPayload = null
 let inFlight = false
@@ -249,7 +241,6 @@ function renderChannelTabs() {
 async function load() {
   if (document.hidden) return
   if (clearInFlight) return
-  if (activeTab === 'graph') return
   if (inFlight) return
   const owner = loadOwnership
   inFlight = true
@@ -257,15 +248,15 @@ async function load() {
   refreshButton.disabled = true
   try {
     const payload = await window.novaAudioAgentDesktop.memoryBoard.request()
-    if (owner !== loadOwnership || document.hidden || activeTab === 'graph') return
+    if (owner !== loadOwnership || document.hidden) return
     if (!payload || payload.error || !Array.isArray(payload.channels) || !validDiagnostics(payload)) {
       statusLabel.textContent = payload?.error === 'timeout' ? '后端无响应' : '加载失败'
       return
     }
     latestPayload = payload
     const scrollPositions = captureBoardScrollPositions(document)
-    copyJsonButton.disabled = copyInFlight || activeTab === 'graph'
-    exportButton.disabled = exportInFlight || activeTab === 'graph'
+    copyJsonButton.disabled = copyInFlight
+    exportButton.disabled = exportInFlight
     renderChannelTabs()
     renderActiveChannelCard()
     diagnosticsRoot.replaceChildren(...payload.diagnostics.records.map(record => (
@@ -280,12 +271,12 @@ async function load() {
     restoreBoardScrollPositions(document, scrollPositions)
     statusLabel.textContent = `更新于 ${new Date().toLocaleTimeString()}`
   } catch {
-    if (owner !== loadOwnership || document.hidden || activeTab === 'graph') return
+    if (owner !== loadOwnership || document.hidden) return
     statusLabel.textContent = '加载失败'
   } finally {
     refreshButton.disabled = false
     inFlight = false
-    if (owner !== loadOwnership && !document.hidden && activeTab !== 'graph') {
+    if (owner !== loadOwnership && !document.hidden) {
       queueMicrotask(() => { void load() })
     }
   }
@@ -302,7 +293,7 @@ async function copyBoardJson() {
     statusLabel.textContent = '复制失败'
   } finally {
     copyInFlight = false
-    copyJsonButton.disabled = activeTab === 'graph' || latestPayload === null
+    copyJsonButton.disabled = latestPayload === null
   }
 }
 
@@ -318,7 +309,7 @@ async function exportBoard() {
     statusLabel.textContent = '导出失败'
   } finally {
     exportInFlight = false
-    exportButton.disabled = activeTab === 'graph'
+    exportButton.disabled = latestPayload === null
   }
 }
 
@@ -344,72 +335,42 @@ async function clearConversation() {
   } finally {
     clearInFlight = false
     clearButton.disabled = false
-    copyJsonButton.disabled = activeTab === 'graph' || latestPayload === null
-    exportButton.disabled = activeTab === 'graph' || latestPayload === null
+    copyJsonButton.disabled = latestPayload === null
+    exportButton.disabled = latestPayload === null
   }
 }
 
-const graphController = createGraphTabController({
-  request: () => window.novaAudioAgentDesktop.graphBoard.request(),
-  visible: () => !document.hidden,
-  render: payload => {
-    renderWorkspaceGraphBoard(payload, {
-      document,
-      root: graphRoot,
-      status: graphState,
-    })
-    statusLabel.textContent = `更新于 ${new Date().toLocaleTimeString()}`
-  },
-  failure: reason => {
-    graphRoot.replaceChildren()
-    graphState.textContent = reason === 'unavailable' ? '后端无响应' : '图谱数据无效'
-    statusLabel.textContent = '加载失败'
-  },
-})
-
 function selectTab(tab) {
-  if (tab === 'graph' && activeTab !== 'graph') loadOwnership += 1
   activeTab = tab
-  const graphActive = activeTab === 'graph'
   const diagnosticsActive = activeTab === 'diagnostics'
-  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab, graph: graphTab}
+  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab}
   for (const [name, element] of Object.entries(tabElements)) {
     element.setAttribute('aria-selected', String(name === activeTab))
     element.tabIndex = name === activeTab ? 0 : -1
   }
   memoryPanel.hidden = activeTab !== 'memory'
   diagnosticsPanel.hidden = !diagnosticsActive
-  graphPanel.hidden = !graphActive
-  copyJsonButton.hidden = activeTab === 'graph'
-  copyJsonButton.disabled = graphActive || copyInFlight || latestPayload === null
-  exportButton.hidden = activeTab === 'graph'
+  copyJsonButton.disabled = copyInFlight || latestPayload === null
   clearButton.hidden = activeTab !== 'memory'
-  exportButton.disabled = graphActive || exportInFlight || latestPayload === null
-  if (graphActive) void graphController.activate()
-  else {
-    graphController.deactivate()
-    void load()
-  }
+  exportButton.disabled = exportInFlight || latestPayload === null
+  void load()
 }
 
 memoryTab.addEventListener('click', () => { selectTab('memory') })
 diagnosticsTab.addEventListener('click', () => { selectTab('diagnostics') })
-graphTab.addEventListener('click', () => { selectTab('graph') })
 function handleTabKey(event) {
   const nextTab = boardTabForKey(activeTab, event.key)
   if (nextTab === null) return
   event.preventDefault()
   selectTab(nextTab)
-  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab, graph: graphTab}
+  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab}
   const nextElement = tabElements[nextTab]
   nextElement.focus()
 }
 memoryTab.addEventListener('keydown', handleTabKey)
 diagnosticsTab.addEventListener('keydown', handleTabKey)
-graphTab.addEventListener('keydown', handleTabKey)
 refreshButton.addEventListener('click', () => {
-  if (activeTab === 'graph') void graphController.refresh()
-  else void load()
+  void load()
 })
 copyJsonButton.addEventListener('click', () => { void copyBoardJson() })
 exportButton.addEventListener('click', () => { void exportBoard() })
@@ -417,15 +378,12 @@ clearButton.addEventListener('click', () => { void clearConversation() })
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     loadOwnership += 1
-    if (activeTab === 'graph') graphController.deactivate()
     return
   }
-  if (activeTab === 'graph') void graphController.activate()
-  else void load()
+  void load()
 })
 setInterval(() => {
   if (document.hidden) return
-  if (activeTab === 'graph') void graphController.tick()
-  else void load()
+  void load()
 }, 2000)
 selectTab('memory')

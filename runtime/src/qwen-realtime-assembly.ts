@@ -57,7 +57,6 @@ export interface BuildQwenRealtimeProviderOptions {
   readonly connector?: QwenConnector
   readonly idFactory: () => string
   readonly now: () => number
-  readonly workspaceGraphPolicy: boolean
   readonly executorApproval: boolean
   readonly modules?: {readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean}
 }
@@ -87,7 +86,6 @@ export function buildQwenRealtimeAssembly(
       connector: options.connector ?? webSocketQwenConnector,
       idFactory: options.idFactory,
       now: options.now,
-      workspaceGraphPolicy: options.workspaceGraphPolicy,
       executorApproval: options.executorApproval,
       ...(options.modules === undefined ? {} : {modules: options.modules}),
     })
@@ -131,7 +129,6 @@ export function buildQwenRealtimeAssembly(
       coding: core.capabilities.modules.coding.enabled,
       knowledge: core.capabilities.modules.knowledge.enabled,
     },
-    workspaceGraphPolicy: options.settings.workspace_graph_enabled,
     executorApproval: (options.executorApproval ?? options.codexResource?.approvalController) != null,
   })
   const intake = options.intake ?? defaultIntake(core, gateway, options.settings)

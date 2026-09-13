@@ -9,10 +9,6 @@ import {
 } from './memory.js'
 import type { Delegate, ExecutorManifest } from './ports.js'
 import { isSuggestionAvailable, type Suggestion } from './suggestions.js'
-import {
-  cloneGraphContext,
-  type GraphContext,
-} from './workspace-graph/context.js'
 
 export const RECENT_LIMIT = 5
 export const FRESH_WINDOW = 30
@@ -49,7 +45,6 @@ export interface ContextView {
   readonly floor: FloorState
   readonly now: number
   readonly trigger_kind: string | null
-  readonly graph_context?: GraphContext | null
 }
 
 export function compileContextView(
@@ -63,7 +58,6 @@ export function compileContextView(
     readonly selectedSuggestion?: string | null
     readonly triggerKind?: string | null
     readonly freshWindow?: number
-    readonly graphContext?: GraphContext | null
   } = {},
 ): ContextView {
   const channels = [...memory.channels.values()].map(channel => ({
@@ -86,7 +80,6 @@ export function compileContextView(
     ...compileUpdates(channels, now, options.freshWindow ?? FRESH_WINDOW),
   ]
 
-  const graphContext = options.graphContext
   return {
     channels: structuredClone(channels),
     in_flight: structuredClone(inFlight),
@@ -94,9 +87,6 @@ export function compileContextView(
     floor,
     now,
     trigger_kind: options.triggerKind ?? null,
-    ...(graphContext === undefined || graphContext === null
-      ? {}
-      : {graph_context: cloneGraphContext(graphContext)}),
   }
 }
 

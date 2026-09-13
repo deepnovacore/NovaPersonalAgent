@@ -33,7 +33,7 @@ const absolutePathStart = /[A-Za-z]:[\\/]|[\\/]/gu
 const absolutePathStartBoundary = /[\s<>"'`()\[\]{},;!?=:]/u
 const pathCandidateBoundary = /[\s<>"'`()\[\]{},;!?\\/]/gu
 
-/** Denies locations that must never be discovered or represented in graph state. */
+/** Denies locations that must never be discovered or persisted. */
 export class SensitivePathPolicy {
   private readonly deniedRoots: readonly string[]
   private readonly deniedTextRoots: readonly string[]
@@ -243,7 +243,7 @@ function hasMeaningfulContent(value: string): boolean {
   return /[\p{L}\p{N}]/u.test(withoutRedactions)
 }
 
-/** Keeps a scrubbed graph label schema-valid without splitting a redaction marker or code point. */
+/** Keeps a scrubbed label schema-valid without splitting a redaction marker or code point. */
 export function boundRedactedLabel(value: string, maxUtf16Units = 239): string | null {
   const redaction = '[redacted]'
   const redactionUtf16Units = 10

@@ -71,7 +71,6 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:window-drag:end',
     'nova:window-drag:move',
     'nova:window-drag:start',
-    'nova:workspace-graph-board:request',
     'nova:workspaces:clear-all',
     'nova:workspaces:clear-current',
     'nova:workspaces:open-current',
@@ -93,7 +92,7 @@ test('记忆面板 clear is zero-argument, sender-bound, single-flight, and rech
   const preload = await readFile(new URL('../src/preload/preload.cjs', import.meta.url), 'utf8')
   const renderer = await readFile(new URL('../src/renderer/memory-board.mjs', import.meta.url), 'utf8')
   const start = main.indexOf("ipcMain.handle('nova:memory-board:clear'")
-  const handler = main.slice(start, main.indexOf("ipcMain.handle('nova:workspace-graph-board:request'", start))
+  const handler = main.slice(start, main.indexOf("ipcMain.handle('nova:memory-board:copy-json'", start))
 
   assert.notEqual(start, -1)
   assert.match(handler, /async \(event, \.\.\.args\) =>/)
@@ -111,7 +110,7 @@ test('记忆面板 clear is zero-argument, sender-bound, single-flight, and rech
 async function extractedMemoryBoardClear(dialog, owner) {
   const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const start = main.indexOf("ipcMain.handle('nova:memory-board:clear'")
-  const source = main.slice(start, main.indexOf("ipcMain.handle('nova:workspace-graph-board:request'", start))
+  const source = main.slice(start, main.indexOf("ipcMain.handle('nova:memory-board:copy-json'", start))
   let handler
   const sender = {}
   const context = createContext({
@@ -188,19 +187,6 @@ test('main owns the fixed orb menu and validates every menu and board sender', a
   assert.match(renderer, /orbMenu\.show\(\)/)
 })
 
-test('workspace graph board is sender-bound on the independent debug channel', async () => {
-  const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
-  const preload = await readFile(new URL('../src/preload/preload.cjs', import.meta.url), 'utf8')
-  const renderer = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
-
-  assert.match(main, /ipcMain\.handle\('nova:workspace-graph-board:request', async event => \{\n\s*if \(!boardWindow \|\| event\.sender !== boardWindow\.webContents\)/)
-  assert.match(main, /board: 'workspace_graph',\s*detail: 'compact'/u)
-  assert.doesNotMatch(preload, /workspace-graph-board:(?:fetch|data)/u)
-  assert.doesNotMatch(renderer, /workspace_graph\.board/u)
-  for (const source of [main, preload, renderer]) {
-    assert.doesNotMatch(source, /workspace-graph-board:(?:export|delete|edit|suppress|merge|switch|inspect)/u)
-  }
-})
 
 test('a hidden orb window is never shrunk, and comes back at natural size', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')

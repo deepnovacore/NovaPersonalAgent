@@ -21,7 +21,6 @@ import {executorWithRole} from './coding-executor.js'
 import type {PlaybackCompletion, PlaybackFrame} from './playback.js'
 import type {RealtimeAssembly} from './realtime-assembly.js'
 import {memoryBoardMessage} from './realtime/memory-board.js'
-import {workspaceGraphBoardMessage} from './realtime/workspace-graph-board.js'
 import type {ProjectConfirmationView} from './project-confirmation.js'
 import type {ApprovalView as ExecutorApprovalView} from './approval-port.js'
 import type {CaptionFrame} from './realtime/session-state.js'
@@ -169,7 +168,6 @@ export function buildDesktopRealtimeComposition(
       return memoryBoardMessage(requestId, realtime.runtime.memory, options.telemetry?.diagnostics?.(),
         detail === undefined ? {} : {detail})
     },
-    workspaceGraphBoard: requestId => workspaceGraphBoardForRealtime(requestId, realtime),
     clock: realtime.runtime.clock,
     ...(options.progressBubbles === undefined ? {} : {progressBubbles: options.progressBubbles}),
     ...(options.telemetry === undefined ? {} : {telemetry: options.telemetry}),
@@ -222,21 +220,6 @@ export function codingExecutorIdentity(realtime: Pick<RealtimeAssembly, 'runtime
   if (manifest === null) return null
   const publicName = realtime.service.agentNameForChannel(manifest.name) ?? manifest.name
   return {executor: publicName, display_name: publicName}
-}
-
-/** Project one already-published graph snapshot without opening any graph capability. */
-export function workspaceGraphBoardForRealtime(
-  requestId: string,
-  realtime: Pick<RealtimeAssembly, 'workspaceGraph'>,
-): string {
-  const graph = realtime.workspaceGraph
-  if (graph === undefined) return workspaceGraphBoardMessage(requestId, null, 'disabled')
-  const snapshot = graph.publishedSnapshot
-  return workspaceGraphBoardMessage(
-    requestId,
-    snapshot,
-    graph.degraded === true || snapshot.degraded ? 'degraded' : 'ready',
-  )
 }
 
 function isCameraCaptureTransport(

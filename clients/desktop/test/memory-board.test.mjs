@@ -36,8 +36,8 @@ class BoardDocument extends EventTarget {
     this.scrollingElement = new BoardElement('page')
     this.elements = new Map([
       'channels', 'status', 'refresh', 'export', 'copy-json', 'memory-tab',
-      'diagnostics-tab', 'graph-tab', 'memory-panel', 'diagnostics-panel',
-      'graph-panel', 'diagnostics', 'workspace-graph', 'graph-state',
+      'diagnostics-tab', 'memory-panel', 'diagnostics-panel',
+      'diagnostics',
       'clear-conversation', 'channel-tabs',
     ].map(id => [`#${id}`, new BoardElement(id)]))
   }
@@ -153,7 +153,6 @@ test('copy JSON uses the sender-validated desktop bridge when web clipboard perm
           clipboardWrites.push('desktop bridge')
           return {copied: true}
         }, export: async () => ({canceled: true})},
-        graphBoard: {request: async () => ({error: 'unavailable'})},
       },
     }},
     navigator: {configurable: true, value: {
@@ -203,7 +202,6 @@ test('clearing fences a stale read, is single-flight, and blocks export', async 
         copyJson: async () => ({copied: true}),
         export: async () => { exports.push(true); return {saved: 'never.json'} },
       },
-      graphBoard: {request: async () => ({error: 'unavailable'})},
     }}},
     navigator: {configurable: true, value: {}},
     setInterval: {configurable: true, value: () => 1},
@@ -235,19 +233,16 @@ test('clearing fences a stale read, is single-flight, and blocks export', async 
   assert.equal(exports.length, 0)
 })
 
-test('board presents accessible Memory, Diagnostics and Graph tabs and never exports graph data', async () => {
+test('board presents accessible Memory and Diagnostics tabs with keyboard navigation', async () => {
   const source = await readFile(new URL('../src/renderer/memory-board.mjs', import.meta.url), 'utf8')
   const html = await readFile(new URL('../src/renderer/memory-board.html', import.meta.url), 'utf8')
 
+  assert.doesNotMatch(html, /graph-tab|graph-panel/u)
   assert.match(html, /role="tablist"/)
   assert.match(html, /id="memory-tab"[^>]+role="tab"/)
   assert.match(html, /id="diagnostics-tab"[^>]+role="tab"/)
-  assert.match(html, /id="graph-tab"[^>]+role="tab"/)
   assert.match(html, /id="memory-panel"[^>]+role="tabpanel"/)
   assert.match(html, /id="diagnostics-panel"[^>]+role="tabpanel"/)
-  assert.match(html, /id="graph-panel"[^>]+role="tabpanel"/)
-  assert.match(source, /graphBoard\.request\(\)/)
-  assert.match(source, /exportButton\.hidden = activeTab === 'graph'/)
   assert.match(source, /boardTabForKey\(activeTab, event\.key\)/)
   assert.match(source, /tabElements\[nextTab\]/u)
   assert.match(source, /\.focus\(\)/)
@@ -315,7 +310,6 @@ test('main requests compact board snapshots directly without relaying through th
   assert.match(source, /board: 'memory',\s*detail: detail === 'full' \? 'full' : 'compact'/u)
   assert.match(source, /backendGeneration \+= 1/u)
   assert.match(source, /backend_generation: generation/u)
-  assert.match(source, /board: 'workspace_graph',\s*detail: 'compact'/u)
   assert.doesNotMatch(source, /nova:memory-board:(?:fetch|data)/u)
   assert.doesNotMatch(source, /nova:workspace-graph-board:(?:fetch|data)/u)
   const exportBody = source.slice(source.indexOf("ipcMain.handle('nova:memory-board:export'"))
@@ -424,7 +418,6 @@ test('the rail renders one tab per channel and mounts only the selected card', a
         copyJson: async () => ({copied: true}),
         export: async () => ({canceled: true}),
       },
-      graphBoard: {request: async () => ({error: 'unavailable'})},
     }}},
     setInterval: {configurable: true, value: () => 1},
   })
@@ -500,7 +493,6 @@ test('a refresh reuses the channel buttons so keyboard focus survives it', async
         copyJson: async () => ({copied: true}),
         export: async () => ({canceled: true}),
       },
-      graphBoard: {request: async () => ({error: 'unavailable'})},
     }}},
     setInterval: {configurable: true, value: () => 1},
   })
@@ -536,4 +528,17 @@ test('a refresh reuses the channel buttons so keyboard focus survives it', async
   await settle()
   assert.equal(rail.children.length, 3)
   assert.notDeepEqual([...rail.children], firstPass, 'a new channel set rebuilds the rail')
+})
+
+
+test('memory board keyboard navigation stays within the two retained tabs', async () => {
+  const {boardTabForKey} = await import('../src/renderer/channel-tabs.mjs')
+  for (const key of ['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown']) {
+    assert.equal(boardTabForKey('memory', key), 'diagnostics')
+    assert.equal(boardTabForKey('diagnostics', key), 'memory')
+  }
+  assert.equal(boardTabForKey('diagnostics', 'Home'), 'memory')
+  assert.equal(boardTabForKey('memory', 'End'), 'diagnostics')
+  assert.equal(boardTabForKey('unknown', 'ArrowRight'), null)
+  assert.equal(boardTabForKey('memory', 'Enter'), null)
 })

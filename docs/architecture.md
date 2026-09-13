@@ -36,7 +36,6 @@ flowchart TB
 | `runtime/src/assembly.ts`, `production-realtime-assembly.ts` | Configuration-driven construction of runtime, executor, and realtime graphs; dispatches `integrated` vs `cascaded` |
 | `runtime/src/realtime/` | Host response admission/ownership, shared frontend-instructions, provider transports, playback fencing, recovery, and telemetry |
 | `runtime/src/codex-*.ts` | Codex app-server transport and contract, plus the Workspace/Session project store (`codex-project-store.ts`) |
-| `runtime/src/workspace-graph/` | Opt-in durable workspace memory graph: store worker, identity, projector, recall, context budgeter, provider seam |
 | `runtime/src/executors/` | Deterministic simulators and adapter implementations |
 
 ## Executor boundary
@@ -81,17 +80,6 @@ Maintenance of managed workspaces is a host surface rather than a voice capabili
 can open the active managed workspace, or clear the active one or every managed workspace behind
 two confirmation dialogs; clearing empties directories while the project record, display name,
 Codex history, and Session metadata survive, so the store stays authoritative over the filesystem.
-
-## Workspace memory graph (opt-in)
-
-The Node runtime carries an opt-in durable workspace memory graph
-(`runtime/src/workspace-graph/`): a SQLite store on a worker thread, identity resolution for
-spoken workspace names, deterministic projection of confirmed lifecycle events into weak relation
-cards, and bounded recall. Graph context reaches model calls only through fixed budgets — a
-bounded header and a recall pack of at most two hints — and is marked low-authority: it can never
-authorize a workspace switch. The memory layering rationale is in the
-[memory volume](archs/02-memory.md) and the context rules in the
-[context-view volume](archs/03-context-view.md).
 
 ## Platform notes
 

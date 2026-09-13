@@ -77,7 +77,7 @@ npm ci && cp .env.example .env
 ```bash
 npm run start:client
 ```
-客户端包含麦克风、摄像头、声音开关等按钮，以及设置面板、外部 MCP 设置和工作区图谱。你也可以试试把鼠标悬在桌面 orb 上，会有惊喜）
+客户端包含麦克风、摄像头、声音开关等按钮，以及设置面板和外部 MCP 设置。你也可以试试把鼠标悬在桌面 orb 上，会有惊喜）
 
 从 [DashScope](https://platform.qianwenai.com) 和 [Tavily](https://docs.tavily.com) 获取 API Key 并配置 `DASHSCOPE_API_KEY` 和 `TAVILY_API_KEY`。
 
@@ -104,7 +104,7 @@ Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia`
 
 ## 5. 路线图
 
-- [ ] **v0.2.0（`v0.2.0dev`）：** 完善跨平台审批；减少快脑原生工具并将 workspace/session 调度下沉到 coding 执行器；支持可替换 ASR/LLM/TTS 及供应商解耦；自定义 MCP、搜索/RAG 与中文唤醒词“你好星核”；VoiceMem 服务个人、Workspace Graph 服务工作区；通过 Tailscale 连接 PC runtime 的原生 iOS 客户端。已有实现与待验收项分别见 [规格](docs/specs/v0.2.0/00-overview.md) 和 [发布门槛](docs/specs/v0.2.0/RELEASE-GATE.md)。
+- [ ] **v0.2.0（`v0.2.0dev`）：** 完善跨平台审批；减少快脑原生工具并将 workspace/session 调度下沉到 coding 执行器；支持可替换 ASR/LLM/TTS 及供应商解耦；自定义 MCP、搜索/RAG 与中文唤醒词“你好星核”；VoiceMem 服务个人记忆；通过 Tailscale 连接 PC runtime 的原生 iOS 客户端。已有实现与待验收项分别见 [规格](docs/specs/v0.2.0/00-overview.md) 和 [发布门槛](docs/specs/v0.2.0/RELEASE-GATE.md)。
 - [ ] **v0.3.0：** coding 执行器接入 **Kimi Code + pi agent**；接入 **GUI 执行器，以 AutoGLM 为首个 example**，用真实闭环展示 agent2agent；扩展 **Surrogate + Proactive + Memory**，基于记忆发现需求并主动关心。同步保留文字/语音主窗口、动态/任务/记忆页、可纠正/忘记的个人记忆与用户授权来源规划；执行器不等待邮件/日历 connector。见 [规格](docs/specs/v0.3.0/00-overview.md)、[里程碑](docs/specs/v0.3.0/STATUS.zh-CN.md) 和 [完整 roadmap](docs/archs/09-roadmap.md)。
 
 `v0.2.0dev` 通过自动化门禁即可集成；合入 `main` 前须完成

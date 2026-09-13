@@ -44,7 +44,6 @@ import {
   ProjectResolutionError,
   type CancelContext,
   type CancelResult,
-  type CommittedWorkspaceEvent,
   type CoordinatorDecision,
   type IntakeTarget,
   type ProjectCommitResult,
@@ -52,7 +51,6 @@ import {
   type ProjectRuntimeDispatch,
   type RosterEntry,
   type RunningWork,
-  type TerminalWorkOrderEvent,
 } from '../../coding-executor.js'
 import type {
   ConfirmedProjectOperation,
@@ -103,7 +101,7 @@ export interface ProjectTransportFactory {
   create(binding: ProjectTransportBinding): CodexAppServerTransport
 }
 
-export type {CommittedWorkspaceEvent, ProjectCommitResult, ProjectRuntimeDispatch, TerminalWorkOrderEvent}
+export type {ProjectCommitResult, ProjectRuntimeDispatch}
 
 export interface ProjectCodexAdapterOptions {
   readonly localCodexHome?: string
@@ -115,8 +113,6 @@ export interface ProjectCodexAdapterOptions {
   readonly onProjectView?: ProjectViewObserver
 }
 
-type CommittedWorkspaceObserver = (event: CommittedWorkspaceEvent) => void | Promise<void>
-type TerminalWorkOrderObserver = (event: TerminalWorkOrderEvent) => void | Promise<void>
 type ProjectViewObserver = (view: PublicProjectView) => void | Promise<void>
 type ProjectContextObserver = (context: PublicProjectContext) => void | Promise<void>
 
@@ -139,8 +135,6 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   readonly #transportFactory: ProjectTransportFactory
   readonly #projectViewObservers = new Set<ProjectViewObserver>()
   readonly #projectContextObservers = new Set<ProjectContextObserver>()
-  readonly #committedWorkspaceObservers = new Set<CommittedWorkspaceObserver>()
-  readonly #terminalWorkOrderObservers = new Set<TerminalWorkOrderObserver>()
   // ponytail: one status snapshot shared by every run's live adapter, so `status` reports the last
   // run that touched it; per-slot status is the upgrade path once the host asks for it.
   readonly #liveState: CodexAdapterSharedState = createCodexAdapterSharedState()
@@ -376,16 +370,6 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     return () => { this.#projectContextObservers.delete(observer) }
   }
 
-  observeCommittedWorkspace(observer: CommittedWorkspaceObserver): () => void {
-    this.#committedWorkspaceObservers.add(observer)
-    return () => { this.#committedWorkspaceObservers.delete(observer) }
-  }
-
-  observeTerminalWorkOrder(observer: TerminalWorkOrderObserver): () => void {
-    this.#terminalWorkOrderObservers.add(observer)
-    return () => { this.#terminalWorkOrderObservers.delete(observer) }
-  }
-
   async dispatch(
     op: string,
     request: Readonly<Record<string, JsonValue>>,
@@ -456,7 +440,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     }
     const title = resumed?.display_title ?? input.title ?? deriveSessionTitle(input.work_order)
     return await this.#runInSlot(workspace, title, context, (slot, runContext) =>
-      this.#runBound(slot, workspace, resumed, title, input.work_order, runContext, false))
+      this.#runBound(slot, workspace, resumed, title, input.work_order, runContext))
   }
 
   /**
@@ -563,7 +547,6 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
           }
           return commitResult(false, projectErrorCode(error))
         }
-        await this.#notifyCommittedWorkspace(committedWorkspace)
         return commitResult(true, 'committed')
       }
       const normalized = validateCodexRequest('project', 'run', {work_order: workOrder})
@@ -750,7 +733,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       let result: ExecutorHandoff
       try {
         result = await this.#runInSlot(workspace, title, context, (slot, runContext) =>
-          this.#runBound(slot, workspace, null, title, workOrder, runContext, true))
+          this.#runBound(slot, workspace, null, title, workOrder, runContext))
       } catch (error) {
         const rolledBack = await this.#store.rollbackManagedCreate(
           workspace.workspace_id, {wait: true, previousWorkspaceId: previousWorkspace?.workspace_id ?? null},
@@ -775,7 +758,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
         return failureHandoff('workspace_boundary_changed', 'run')
       }
       return await this.#runInSlot(workspace, title, context, (slot, runContext) =>
-        this.#runBound(slot, workspace, null, title, workOrder, runContext, false))
+        this.#runBound(slot, workspace, null, title, workOrder, runContext))
     }
     if (operation.action !== 'resume' || operation.workspace_id === null || operation.session_id === null) {
       return failureHandoff('confirmation_binding_mismatch', 'run')
@@ -789,7 +772,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       return projectProblemHandoff('session_unavailable')
     }
     return await this.#runInSlot(workspace, session.display_title, context, (slot, runContext) =>
-      this.#runBound(slot, workspace, session, session.display_title, workOrder, runContext, false))
+      this.#runBound(slot, workspace, session, session.display_title, workOrder, runContext))
   }
 
   /**
@@ -803,7 +786,6 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     title: string,
     workOrder: string,
     context: ExecutorDispatchContext,
-    deferWorkspaceObservation: boolean,
   ): Promise<ExecutorHandoff> {
     try {
       await this.#drainRetainedTransportCleanups()
@@ -852,7 +834,6 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       // transport can run against it. This also keeps a resumed session from inheriting the
       // prior display title during the process-construction window.
       await this.#refreshProjectContextBarrier()
-      if (!deferWorkspaceObservation) await this.#notifyCommittedWorkspace(workspace)
       inner = this.#transportFactory.create(Object.freeze({
         workspace: approvedWorkspace,
         codexHome,
@@ -878,7 +859,6 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
         const terminal = failureHandoff(
           error.code, 'run', failureStage(error.code, 'thread_start'),
         )
-        await this.#notifyTerminalWorkOrder(workspace, workOrder, terminal)
         return terminal
       }
       throw error
@@ -970,37 +950,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       : resumed === null && reportedThreadId === null && transportResult.outcome === 'ok'
         ? failureHandoff('thread_id_invalid', 'run', 'thread_start')
         : transportResult
-    if (deferWorkspaceObservation && terminal.outcome === 'ok') {
-      await this.#notifyCommittedWorkspace(workspace)
-    }
-    await this.#notifyTerminalWorkOrder(workspace, workOrder, terminal)
     return terminal
-  }
-
-  async #notifyCommittedWorkspace(workspace: WorkspaceRecord): Promise<void> {
-    const event = Object.freeze({workspace})
-    for (const observer of [...this.#committedWorkspaceObservers]) {
-      try {
-        await observer(event)
-      } catch {
-        // Graph/telemetry observers cannot change an authoritative project outcome.
-      }
-    }
-  }
-
-  async #notifyTerminalWorkOrder(
-    workspace: WorkspaceRecord,
-    workOrder: string,
-    handoff: ExecutorHandoff,
-  ): Promise<void> {
-    const event = Object.freeze({workspace, work_order: workOrder, handoff})
-    for (const observer of [...this.#terminalWorkOrderObservers]) {
-      try {
-        await observer(event)
-      } catch {
-        // Episode projection is best-effort and cannot change executor delivery.
-      }
-    }
   }
 
   async #loadProjectContext(): Promise<PublicProjectContext | null> {

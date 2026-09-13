@@ -82,7 +82,7 @@ Get API key from [DashScope](https://platform.qianwenai.com) and [Tavily](https:
 ```bash
 npm run start:client
 ```
-The client includes microphone, camera, sound, settings, external MCP controls, and workspace-graph surfaces. Try hovering over the desktop orb to get surprised :) Also you
+The client includes microphone, camera, sound, settings, and external MCP controls. Try hovering over the desktop orb to get surprised :) Also you
 may try build or run demo locally:
 
 ```bash
@@ -110,7 +110,7 @@ wake-word Worker; explicit mute stops wake detection. See
 
 ## 5. Roadmap
 
-- [ ] **v0.2.0 (`v0.2.0dev`):** cross-platform approval forwarding; fewer native FrontBrain tools with workspace/session coordination inside the coding executor; replaceable ASR/LLM/TTS and provider-neutral contracts; custom MCP, search/RAG and the Chinese wake phrase “你好星核”; VoiceMem for personal memory and Workspace Graph for workspace continuity; native iOS connected to a PC runtime through Tailscale. Existing implementation and outstanding acceptance are tracked separately in the [specs](docs/specs/v0.2.0/00-overview.md) and [release gate](docs/specs/v0.2.0/RELEASE-GATE.md).
+- [ ] **v0.2.0 (`v0.2.0dev`):** cross-platform approval forwarding; fewer native FrontBrain tools with workspace/session coordination inside the coding executor; replaceable ASR/LLM/TTS and provider-neutral contracts; custom MCP, search/RAG and the Chinese wake phrase “你好星核”; VoiceMem for personal memory; native iOS connected to a PC runtime through Tailscale. Existing implementation and outstanding acceptance are tracked separately in the [specs](docs/specs/v0.2.0/00-overview.md) and [release gate](docs/specs/v0.2.0/RELEASE-GATE.md).
 - [ ] **v0.3.0:** **Kimi Code + pi agent** coding backends; a **GUI executor with AutoGLM as the first example**, demonstrated through real agent2agent workflows; **Surrogate + Proactive + Memory** for memory-grounded need discovery and considerate follow-up. Retain the planned text/voice main window, feed/tasks/memory views, correctable personal memory and authorized sources; executor integration does not wait for mail/calendar connectors. See [specs](docs/specs/v0.3.0/00-overview.md), [milestones](docs/specs/v0.3.0/STATUS.zh-CN.md) and the [full roadmap](docs/archs/09-roadmap.md).
 
 `v0.2.0dev` integrates after automated gates; `main` requires all feature and supported-platform

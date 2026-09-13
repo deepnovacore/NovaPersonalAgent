@@ -12,7 +12,6 @@ import {
   QwenAudioRealtimeAdapter,
   QwenRealtimeError,
   QwenSocketClosedError,
-  workspaceGraphFrontendInstructions,
   type QwenSocket,
 } from '../src/realtime/qwen.js'
 import { ItemDeliveryUncertainError, type RealtimeProviderEvent } from '../src/realtime/protocol.js'
@@ -719,17 +718,6 @@ test('Qwen reconnect resets Header ownership and the new epoch starts without de
   assert.equal(proof.delivery.session_epoch, 2)
 })
 
-test('graph-enabled Qwen policy is conditional and default instructions stay byte-identical', async () => {
-  const scripted = scriptedSocket([...handshake])
-  const adapter = adapterFor(scripted, {workspaceGraphPolicy: true})
-  await adapter.connect({tools: [], signal: new AbortController().signal})
-  const update = scripted.sent.find(frame => frame.type === 'session.update')
-  const session = update?.session as Record<string, unknown>
-  assert.equal(session.instructions, workspaceGraphFrontendInstructions)
-  assert.match(String(session.instructions), /不得建议用户切换工作区/u)
-  assert.match(String(session.instructions), /不得仅因图谱提示调用动作工具/u)
-  assert.notEqual(workspaceGraphFrontendInstructions, FRONTEND_INSTRUCTIONS)
-})
 
 test('a tool output injects a function_call_output item', async () => {
   const scripted = scriptedSocket([...handshake])

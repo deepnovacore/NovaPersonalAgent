@@ -63,7 +63,7 @@ A/B 轨继续并行、各自小步：A 做需求发现，B 做窗口与入口。
 |---|---|---|
 | 文字输入 | runtime 有 `input.text` / `input.dictation`，协议已写进 client-v1；iOS Swift 已实现文字与 dictation 接线 | 桌面没接线；iOS 真机验收未完成 |
 | 主动机制 | Suggestion Pool、Surrogate 选择、Floor 仲裁 | Surrogate 不会提新建议；没有用于需求发现的低频检查；没有 feed；没有持久化的交付 / 忽略台账 |
-| 记忆 | personal-memory 端口（recall / remember / 按来源 forget）、workspace graph、开发者 memory-board | 端口没有逐条 ID、版本、列表、按条目纠正 / 忘记；没有用户视角的记忆条目和纠正 UI |
+| 记忆 | personal-memory 端口（recall / remember / 按来源 forget）、开发者 memory-board | 端口没有逐条 ID、版本、列表、按条目纠正 / 忘记；没有用户视角的记忆条目和纠正 UI |
 | 来源 | 知识库有界导入与检索 | 没有持续同步、没有邮件 / 日历、没有来源管理 UI |
 | 执行生态 | Codex 执行器、能力注册表、外部 MCP | Kimi Code、pi agent 与 GUI/AutoGLM 接入待实现；Home Assistant 为后续候选 |
 | UI | Electron 悬浮窗、任务横幅、进度气泡、各设置面板 | 主窗口、动态页、记忆页 |
@@ -91,3 +91,5 @@ A/B 轨继续并行、各自小步：A 做需求发现，B 做窗口与入口。
 - 协议：[docs/protocols/client-v1.md](../../protocols/client-v1.md)
 - 架构不变量：[docs/archs/](../../archs/00-overview.md)、[docs/glossary.md](../../glossary.md)
 - v0.2.0 系列：[docs/specs/v0.2.0/00-overview.md](../v0.2.0/00-overview.md)
+
+- 2026-09-13：Workspace Graph 已退役：移除图谱存储 worker、上下文投影、桌面入口及配置；既有 SQLite 用户数据保留。敏感内容策略与原有测试迁至 `runtime/src/sensitivity.ts`、`runtime/test/sensitivity.test.ts`。个人记忆、知识库和 active project / executor 的 `workspace_context` 保留。[06 卷](06-memory-substrate.md) 仅记录下一步底座方向，尚未实现。

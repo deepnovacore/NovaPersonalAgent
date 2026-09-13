@@ -157,29 +157,6 @@ test('run with a project name activates that workspace without confirmation; unk
   }
 })
 
-test('committed workspace and typed terminal observers run after authoritative boundaries', async () => {
-  const value = await fixture()
-  try {
-    const workspaces: string[] = []
-    const completions: string[] = []
-    const unsubscribeWorkspace = value.adapter.observeCommittedWorkspace(event => {
-      workspaces.push(`${event.workspace.workspace_id}:${event.workspace.canonical_path}`)
-    })
-    const unsubscribeCompletion = value.adapter.observeTerminalWorkOrder(event => {
-      completions.push(`${event.workspace.workspace_id}:${event.work_order}:${event.handoff.outcome}`)
-    })
-    const result = await run(value, 'typed completion', {title: 'Observed'})
-    assert.equal(result.outcome, 'ok')
-    assert.equal(workspaces.length, 1)
-    assert.match(workspaces[0] ?? '', /^workspace-/u)
-    assert.deepEqual(completions.map(item => item.split(':').slice(1)), [['typed completion', 'ok']])
-    unsubscribeWorkspace()
-    unsubscribeCompletion()
-  } finally {
-    await value.adapter.close()
-    await rm(value.root, {recursive: true, force: true})
-  }
-})
 
 test('confirmed create builds the workspace, runs once with the proposal title, and rejects replay', async () => {
   const value = await fixture()
@@ -419,10 +396,6 @@ test('wrong delegate, origin, copied capability, rejection, and replay have zero
 test('new-run missing thread rolls back provisional session and failed confirmed create rolls back empty workspace', async () => {
   const value = await fixture()
   try {
-    const committedWorkspaces: string[] = []
-    value.adapter.observeCommittedWorkspace(event => {
-      committedWorkspaces.push(event.workspace.display_name)
-    })
     value.factory.reportThread = false
     const failed = await run(value, 'cannot bind')
     assert.deepEqual(failed.content, {error: 'thread_id_invalid', op: 'run', stage: 'thread_start'})
@@ -436,8 +409,6 @@ test('new-run missing thread rolls back provisional session and failed confirmed
     await value.adapter.commitConfirmed(operation, () => ({accepted: true, delegate_id: 'delegate-create'}))
     const result = await executeConfirmed(value, operation, 'delegate-create')
     assert.equal(result.outcome, 'failed')
-    assert.deepEqual(committedWorkspaces, ['alpha'],
-      'a confirmed create that rolls back must never become graph evidence')
     assert.deepEqual((await value.store.listWorkspaces()).map(item => item.display_name), ['alpha'])
     const publicView = value.adapter.publicProjectView(false)
     assert.deepEqual(publicView, {
@@ -527,8 +498,6 @@ test('threadless preflight failures preserve their safe category, stage, rollbac
   ] as const) {
     const value = await fixture()
     try {
-      const terminals: ExecutorHandoff[] = []
-      value.adapter.observeTerminalWorkOrder(event => { terminals.push(event.handoff) })
       value.factory.preflightError = new CodexTransportError(code)
       const failed = await run(value, `fail at ${stage}`)
       assert.equal(failed.outcome, 'failed')
@@ -537,7 +506,6 @@ test('threadless preflight failures preserve their safe category, stage, rollbac
       assert.equal(failed.content.error, undefined)
       const alpha = await value.store.resolveWorkspace('alpha')
       assert.deepEqual(await value.store.listSessions(alpha), [])
-      assert.deepEqual(terminals, [failed])
     } finally {
       await value.adapter.close()
       await rm(value.root, {recursive: true, force: true})
@@ -548,8 +516,6 @@ test('threadless preflight failures preserve their safe category, stage, rollbac
 test('threadless transport refusal stays the real failure instead of becoming thread_id_invalid', async () => {
   const value = await fixture()
   try {
-    const terminals: ExecutorHandoff[] = []
-    value.adapter.observeTerminalWorkOrder(event => { terminals.push(event.handoff) })
     value.factory.reportThread = false
     value.factory.nextOutcome = {
       classification: 'refused', code: 'server_rejected', turnStartWritten: false, completion: null,
@@ -560,7 +526,6 @@ test('threadless transport refusal stays the real failure instead of becoming th
     assert.equal(failed.content.stage, 'thread_start')
     const alpha = await value.store.resolveWorkspace('alpha')
     assert.deepEqual(await value.store.listSessions(alpha), [])
-    assert.deepEqual(terminals, [failed])
   } finally {
     await value.adapter.close()
     await rm(value.root, {recursive: true, force: true})
@@ -570,14 +535,11 @@ test('threadless transport refusal stays the real failure instead of becoming th
 test('spawn failure returns a safe staged terminal and rolls back the provisional Session', async () => {
   const value = await fixture()
   try {
-    const terminals: ExecutorHandoff[] = []
-    value.adapter.observeTerminalWorkOrder(event => { terminals.push(event.handoff) })
     value.factory.createFailure = new CodexTransportError('spawn_failed')
     const failed = await run(value, 'fail while spawning')
     assert.deepEqual(failed.content, {error: 'spawn_failed', op: 'run', stage: 'spawn'})
     const alpha = await value.store.resolveWorkspace('alpha')
     assert.deepEqual(await value.store.listSessions(alpha), [])
-    assert.deepEqual(terminals, [failed])
     assert.deepEqual(value.adapter.running(), [], 'a failed run releases its slot')
   } finally {
     await value.adapter.close()
@@ -773,15 +735,12 @@ test('critical confirmed-create publication failure removes the workspace and re
   }
 })
 
-test('confirmed select publishes one atomic context before committed graph notification', async () => {
+test('confirmed select publishes one atomic project context', async () => {
   const value = await fixture()
   await value.store.createManaged('beta')
   const order: string[] = []
   const unsubscribeContext = observeCriticalProjectContext(value.adapter, contextValue => {
     order.push(`context:${contextValue.workspace_id}:${contextValue.view.workspace_display_name}`)
-  })
-  const unsubscribeCommitted = value.adapter.observeCommittedWorkspace(event => {
-    order.push(`committed:${event.workspace.workspace_id}:${event.workspace.display_name}`)
   })
   try {
     const alpha = await value.store.resolveWorkspace('alpha')
@@ -793,11 +752,9 @@ test('confirmed select publishes one atomic context before committed graph notif
     assert.deepEqual(committed, {accepted: true, code: 'committed'})
     assert.deepEqual(order, [
       `context:${alpha.workspace_id}:alpha`,
-      `committed:${alpha.workspace_id}:alpha`,
     ])
   } finally {
     unsubscribeContext()
-    unsubscribeCommitted()
     await value.adapter.close()
     await rm(value.root, {recursive: true, force: true})
   }

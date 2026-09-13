@@ -107,7 +107,7 @@ for (const failure of ['disconnect', 'send'] as const) test(`real realtime playb
   let launches = 0
   let endEvents!: () => void
   const core = buildAssembly({
-    settings: settingsSchema.parse({executors: ['slow_sim'], model_api_key: 'test-only', workspace_graph_enabled: false}),
+    settings: settingsSchema.parse({executors: ['slow_sim'], model_api_key: 'test-only'}),
     capabilities: parseCapabilityRegistry({version: 1, modules: {
       search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: false},
     }}),
