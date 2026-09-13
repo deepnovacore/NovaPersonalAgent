@@ -8,5 +8,5 @@
     "sourceMap": true,
     "tsBuildInfoFile": "dist/.tsbuildinfo"
   },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "eval/**/*.ts", "test/**/*.ts"]
 }

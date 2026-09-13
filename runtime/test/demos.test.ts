@@ -5,7 +5,7 @@ import {resolve} from 'node:path'
 import {test} from 'node:test'
 
 import {main} from '../src/cli.js'
-import {DEMO_NAMES, runDemo, runDemos} from '../src/demos.js'
+import {DEMO_NAMES, runDemo, runDemos} from '../eval/demos.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const fixtureRoot = resolve(repositoryRoot, 'fixtures/product/v1')

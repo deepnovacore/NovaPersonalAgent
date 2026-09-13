@@ -358,4 +358,4 @@ function assertPlainJson(value: unknown): void {
 import {readFile, realpath} from 'node:fs/promises'
 import {isAbsolute, relative, resolve} from 'node:path'
 
-import {canonicalJson, compareCodePoints} from './canonical-json.js'
+import {canonicalJson, compareCodePoints} from '../src/canonical-json.js'

@@ -1,10 +1,6 @@
-import {stripLikePython} from './python-text.js'
-import {casefoldLikePython} from './unicode-casefold.js'
-
 export type EnvironmentOwner =
   | 'core' | 'qwen' | 'ark' | 'volcengine' | 'codex' | 'search' | 'camera'
   | 'telemetry' | 'host_private'
-  | 'retired_realtime' | 'retired_ha' | 'retired_autoglm'
 
 export interface EnvironmentVariableContract {
   readonly name: string
@@ -48,7 +44,6 @@ const rows: readonly Row[] = [
   ['NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER', 'core', false, true, 'never', 'qwen', 'Cascaded LLM provider.', '级联 LLM 提供方。'],
   ['NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL', 'core', false, true, 'never', 'provider default', 'Cascaded LLM model override.', '级联 LLM 模型覆盖。'],
   ['NOVA_AUDIO_AGENT_CASCADE_TTS_PROVIDER', 'core', false, true, 'never', 'volcengine', 'Cascaded TTS provider.', '级联 TTS 提供方。'],
-  ['NOVA_AUDIO_AGENT_REALTIME_PROVIDER', 'retired_realtime', false, false, 'never', null, 'Retired vendor-shaped realtime selector.', '已退役的厂商形态实时选择器。'],
   ['NOVA_AUDIO_AGENT_EXECUTOR', 'core', false, true, 'never', null, 'Optional single executor selector; unset selects none.', '可选的单执行器选择器；未设置时不选择执行器。'],
   ['NOVA_AUDIO_AGENT_EXECUTORS', 'core', false, true, 'never', null, 'Optional ordered executor list; unset selects none.', '可选的有序执行器列表；未设置时不选择执行器。'],
   ['NOVA_AUDIO_AGENT_CODING_PROGRESS_NARRATION', 'core', false, true, 'never', 'smart', 'Coding progress narration.', '编程进度播报模式。'],
@@ -87,8 +82,6 @@ const rows: readonly Row[] = [
   ['DOUBAO_ASR_API_KEY', 'volcengine', true, true, 'never', 'Doubao big-model key', 'Volcengine ASR credential override.', '火山 ASR 凭据覆盖。'],
   ['DOUBAO_BIGMODEL_API_KEY', 'volcengine', true, true, 'when_selected', null, 'Volcengine TTS and ASR fallback credential.', '火山 TTS 及 ASR 回退凭据。'],
   ['NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL', 'ark', false, true, 'never', 'Volcengine Ark endpoint', 'Ark secure endpoint.', '方舟安全地址。'],
-  ['NOVA_AUDIO_AGENT_VOLCENGINE_ARK_MODEL', 'retired_realtime', false, false, 'never', null, 'Retired Ark model selector.', '已退役的方舟模型选择器。'],
-  ['NOVA_AUDIO_AGENT_VOLCENGINE_ARK_SUPPORT_MODEL', 'retired_realtime', false, false, 'never', null, 'Retired Ark support-model selector.', '已退役的方舟辅助模型选择器。'],
   ['NOVA_AUDIO_AGENT_DOUBAO_ASR_ENDPOINT', 'volcengine', false, true, 'never', 'Doubao ASR endpoint', 'Doubao ASR secure endpoint.', '豆包 ASR 安全地址。'],
   ['NOVA_AUDIO_AGENT_DOUBAO_ASR_RESOURCE_ID', 'volcengine', false, true, 'never', 'volc.seedasr.sauc.duration', 'Doubao ASR resource ID.', '豆包 ASR 资源 ID。'],
   ['NOVA_AUDIO_AGENT_DOUBAO_ASR_CHUNK_MS', 'volcengine', false, true, 'never', '200', 'ASR input chunk duration.', 'ASR 输入分块时长。'],
@@ -128,16 +121,6 @@ const rows: readonly Row[] = [
   ['NOVA_AUDIO_AGENT_RELEASE_SMOKE', 'host_private', false, false, 'never', null, 'Authenticated packaged lifecycle smoke mode.', '安装包认证生命周期冒烟模式。'],
   ['CODEX_HOME', 'host_private', false, false, 'never', null, 'Host Codex credential home.', '主机 Codex 凭据目录。'],
   ['HOME', 'host_private', false, false, 'never', null, 'Host home directory.', '主机用户目录。'],
-  ['NOVA_AUDIO_AGENT_HA_URL', 'retired_ha', false, false, 'never', null, 'Retired Home Assistant endpoint.', '已退役 Home Assistant 地址。'],
-  ['NOVA_AUDIO_AGENT_HA_TOKEN', 'retired_ha', true, false, 'never', null, 'Retired Home Assistant credential.', '已退役 Home Assistant 凭据。'],
-  ['NOVA_AUDIO_AGENT_HA_ENTITY_ID', 'retired_ha', false, false, 'never', null, 'Retired Home Assistant entity.', '已退役 Home Assistant 实体。'],
-  ['NOVA_AUDIO_AGENT_AUTOGLM_REPO', 'retired_autoglm', false, false, 'never', null, 'Retired AutoGLM repository.', '已退役 AutoGLM 仓库。'],
-  ['NOVA_AUDIO_AGENT_AUTOGLM_PYTHON', 'retired_autoglm', false, false, 'never', null, 'Retired AutoGLM Python.', '已退役 AutoGLM Python。'],
-  ['NOVA_AUDIO_AGENT_AUTOGLM_BASE_URL', 'retired_autoglm', false, false, 'never', null, 'Retired AutoGLM endpoint.', '已退役 AutoGLM 地址。'],
-  ['NOVA_AUDIO_AGENT_AUTOGLM_MODEL', 'retired_autoglm', false, false, 'never', null, 'Retired AutoGLM model.', '已退役 AutoGLM 模型。'],
-  ['NOVA_AUDIO_AGENT_AUTOGLM_API_KEY', 'retired_autoglm', true, false, 'never', null, 'Retired AutoGLM credential.', '已退役 AutoGLM 凭据。'],
-  ['NOVA_AUDIO_AGENT_AUTOGLM_WDA_URL', 'retired_autoglm', false, false, 'never', null, 'Retired AutoGLM WDA endpoint.', '已退役 AutoGLM WDA 地址。'],
-  ['NOVA_AUDIO_AGENT_AUTOGLM_DEVICE_ID', 'retired_autoglm', false, false, 'never', null, 'Retired AutoGLM device selector.', '已退役 AutoGLM 设备选择器。'],
 ] as const
 
 export const environmentContract: readonly EnvironmentVariableContract[] = Object.freeze(rows.map(
@@ -156,45 +139,4 @@ export const environmentContract: readonly EnvironmentVariableContract[] = Objec
 
 export function publicEnvironmentContract(): readonly EnvironmentVariableContract[] {
   return Object.freeze(environmentContract.filter(entry => entry.public))
-}
-
-export function findRetiredConfiguration(environment: NodeJS.ProcessEnv):
-  | {readonly capability: 'realtime' | 'ha' | 'autoglm'; readonly fields: readonly string[]}
-  | null {
-  const retiredRealtimeFields = environmentContract
-    .filter(entry => entry.owner === 'retired_realtime')
-    .filter(entry => stripLikePython(environment[entry.name] ?? '') !== '')
-    .map(entry => entry.name)
-    .sort(compareStrings)
-  if (retiredRealtimeFields.length > 0) {
-    return Object.freeze({
-      capability: 'realtime' as const,
-      fields: Object.freeze(retiredRealtimeFields),
-    })
-  }
-  const configured = environment.NOVA_AUDIO_AGENT_EXECUTORS
-  const selectorValues = configured === undefined || configured === ''
-    ? [environment.NOVA_AUDIO_AGENT_EXECUTOR ?? '']
-    : configured.split(',')
-  for (const value of selectorValues) {
-    const normalized = casefoldLikePython(stripLikePython(value))
-    if (normalized === 'ha' || normalized === 'autoglm') {
-      return Object.freeze({capability: normalized, fields: Object.freeze([])})
-    }
-  }
-
-  const retiredEntries = environmentContract
-    .filter(entry => entry.owner === 'retired_ha' || entry.owner === 'retired_autoglm')
-    .filter(entry => stripLikePython(environment[entry.name] ?? '') !== '')
-    .sort((left, right) => compareStrings(left.name, right.name))
-  if (retiredEntries.length === 0) return null
-  const capability = retiredEntries[0]!.owner === 'retired_ha' ? 'ha' : 'autoglm'
-  const fields = retiredEntries
-    .filter(entry => entry.owner === `retired_${capability}`)
-    .map(entry => entry.name)
-  return Object.freeze({capability, fields: Object.freeze(fields)})
-}
-
-function compareStrings(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0
 }

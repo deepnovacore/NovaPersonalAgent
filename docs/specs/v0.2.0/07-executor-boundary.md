@@ -378,14 +378,14 @@ Golden-tested transcripts must be identical for the Codex case.
 
 ## Fixture executor (boundary proof)
 
-`runtime/src/executors/fixture/` ships a deterministic executor registered
-through the same `executors/index.ts` path as Codex, with
+`runtime/eval/executors/fixture/` retains the deterministic executor used by the
+evaluation harness, with
 `roles: ['coding']`, `approvals: true`, `model_visibility: 'hidden'`, ops `run`,
 `steer`, `status`, `cancel` mirroring the Codex manifest shapes (08), and a
 registered `AgentDescriptor`, plus a scripted `ApprovalBroker`. It is
 selectable only when `NODE_ENV !== 'production'` or
-via `NOVA_AUDIO_AGENT_EXECUTORS=fixture` in tests. A single test
-(`runtime/test/executor-boundary-fixture.test.ts`) drives: assembly by role,
+via `NOVA_AUDIO_AGENT_EXECUTORS=fixture` in tests. The production boundary is enforced by ESLint;
+the historical end-to-end fixture drove: assembly by role,
 intake dispatch through `dispatch`, progress, an approval round-trip through `confirm`,
 a project confirmation round-trip, and terminal handoff — **with no Codex
 module loaded** (asserted via `require.cache` / module registry inspection).
@@ -414,25 +414,20 @@ debt, not a claim that the stricter env-only acceptance checklist is done.
 
 ## Enforcement
 
-- ESLint (`eslint.config.mjs`): add a block for
-  `runtime/src/**/*.ts` (excluding `executors/**` and composition roots) with
-  `no-restricted-imports` patterns `**/executors/*/**`; and a block for
+- ESLint (`eslint.config.mjs`): a block for
+  `runtime/src/**/*.ts` outside `executors/**` forbids direct imports from
+  `**/executors/codex/**`; the public `executors/index.ts` registry remains available. A block for
   `runtime/src/executors/**` restricting `**/realtime/**`, `**/desktop*`,
   `**/*-assembly*`.
-- Script `runtime/scripts/check-executor-boundary.mjs --check`: scans core for the regex
-  `/codex/giu` and fails on any hit not in the allowlist
-  file `runtime/scripts/executor-boundary-allowlist.json` (each entry: path,
-  pattern, reason). Wired as `check:executor-boundary` in
-  `package.json` `check`.
-- Acceptance: `rg -i codex runtime/src --glob '!executors/codex/**' --glob '!executors/index.ts'`
-  returns only allowlisted lines.
+- `runtime/test/eslint-boundary.test.ts` proves the forbidden internal import, the allowed registry
+  import, and the executor-to-realtime restriction without maintaining a vocabulary allowlist.
 
 ## Implementation touchpoints
 
 | Area | Files |
 |---|---|
 | Port | `runtime/src/ports.ts`, new `runtime/src/approval-port.ts` |
-| Registry | new `runtime/src/executors/index.ts`, `runtime/src/executors/codex/index.ts`, `runtime/src/executors/fixture/**` |
+| Registry | new `runtime/src/executors/index.ts`, `runtime/src/executors/codex/index.ts`; evaluation support lives in `runtime/eval/executors/fixture/**` |
 | Moves | 16 `codex-*.ts`, `executors/codex*.ts`, `realtime/codex-approval.ts` → `executors/codex/**`; `codex-project-store.ts` → `project-store.ts` |
 | Role routing | `realtime-assembly.ts`, `confirmed-project-capability.ts`, `realtime/bridge.ts`, `model-adapters.ts`, `tool-schema.ts` |
 | Service | `realtime/service.ts` approval FSM → `ApprovalBroker`; rename only |
@@ -440,21 +435,20 @@ debt, not a claim that the stricter env-only acceptance checklist is done.
 | Wire | `desktop-wire.ts`, `desktop.ts`, `desktop-bridge.ts`, `desktop-service.ts`, `desktop-progress.ts`; renderer label sites |
 | Speech | `realtime/evidence.ts` |
 | Barrel | `runtime/src/index.ts` |
-| Checks | `eslint.config.mjs`, `runtime/scripts/check-executor-boundary.mjs`, `package.json` |
-| Tests | relocate `runtime/test/codex-*.test.ts` alongside; new fixture test; wire schema tests |
+| Checks | `eslint.config.mjs`, `package.json` |
+| Tests | relocate `runtime/test/codex-*.test.ts` alongside; lint boundary and wire schema tests |
 
 ## Verification checklist
 
 Deterministic:
 
-- [ ] `npm run check` includes `check:executor-boundary` and passes with an
-      allowlist containing only env var names / owner tags.
+- [ ] `npm run check` includes the ESLint executor boundary and passes.
 - [ ] ESLint restricted-import blocks fail on a deliberately planted core →
       `executors/codex` import and executor → `realtime` import (negative
       tests in `runtime/test/eslint-boundary.test.ts` using ESLint's API).
-- [x] Fixture executor test passes with no Codex module in the module registry
-      (`executor-boundary-fixture.test.ts`: real assembly through terminal delivery;
-      module-loader assertion excludes `executors/codex/`).
+- [x] The historical fixture executor proof ran through terminal delivery without loading
+      `executors/codex/`; the harness remains under `runtime/eval/` and the deleted migration-era
+      test is available from the `v0.1.0` tag.
 - [ ] Assembly by role: disabled unique coding role → intake absent and no
       `dispatch` / `cancel` compilation without `AssemblyError`; two enabled
       coding roles → `AssemblyError`; one → dispatch reaches it.

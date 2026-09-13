@@ -4,13 +4,13 @@ import {tmpdir} from 'node:os'
 import {parseArgs, parseEnv} from 'node:util'
 import {spawn, execFileSync} from 'node:child_process'
 import {createHash, randomUUID} from 'node:crypto'
-import {configuration, runTextCase} from './text-tools.mjs'
-import {validateFixtures, summary} from './validation.mjs'
+import {configuration, runTextCase} from './live/text-tools.mjs'
+import {validateFixtures, summary} from './live/validation.mjs'
 
-const root = resolve(import.meta.dirname, '../../..')
-const catalog = JSON.parse(await readFile(join(import.meta.dirname, 'catalog.json'), 'utf8'))
+const root = resolve(import.meta.dirname, '../..')
+const catalog = JSON.parse(await readFile(join(import.meta.dirname, 'live/catalog.json'), 'utf8'))
 const {values} = parseArgs({options: {
-  list: {type:'boolean'}, suite: {type:'string', default:'text-tools'}, case: {type:'string'},
+  list: {type:'boolean'}, target: {type:'string', default:'text-tools'}, case: {type:'string'},
   provider: {type:'string'}, model: {type:'string'}, repeat: {type:'string', default:'1'},
   'env-file': {type:'string'}, output: {type:'string'},
 }})
@@ -19,7 +19,7 @@ if (values.list) {
 } else {
   const repeats = Number(values.repeat)
   if (!Number.isInteger(repeats) || repeats < 1 || repeats > 10) throw new Error('repeat must be 1..10')
-  const selected = values.suite.split(',').map(id => {
+  const selected = values.target.split(',').map(id => {
     const suite = catalog.suites.find(suite => suite.id === id)
     if (!suite) throw new Error(`unknown suite: ${id}`)
     return suite
@@ -35,7 +35,7 @@ if (values.list) {
   const output = resolve(values.output ?? join(tmpdir(), `nova-live-${randomUUID()}.json`))
   const git = (...args) => execFileSync('git', args, {cwd:root, encoding:'utf8'}).trim()
   const harnessHash = createHash('sha256')
-  for (const file of ['run.mjs','text-tools.mjs','validation.mjs','catalog.json']) harnessHash.update(await readFile(join(import.meta.dirname,file)))
+  for (const file of ['../live-smoke.mjs','text-tools.mjs','validation.mjs','catalog.json']) harnessHash.update(await readFile(join(import.meta.dirname,'live',file)))
   const report = {version:1, harnessHash:harnessHash.digest('hex'), startedAt:new Date().toISOString(), revision:git('rev-parse','HEAD'),
     dirty:git('status','--porcelain').length > 0, node:process.version, platform:process.platform,
     selection:selected.map(suite => suite.id), repeats, fixtures:selected.some(suite => suite.id === 'text-tools') ? cases : [], fixtureHash:createHash('sha256').update(fixtureText).digest('hex'),

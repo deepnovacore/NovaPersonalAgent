@@ -6,7 +6,7 @@ import {ESLint} from 'eslint'
 const repositoryRoot = join(import.meta.dirname, '../../..')
 const CORE_PROBE = 'runtime/src/boundary-negative-probe.ts'
 const EXECUTOR_PROBE = 'runtime/src/executors/codex/eslint-boundary-negative.ts'
-/** Probes are linted in memory (never written under `runtime/src`, which the parity audit scans concurrently). */
+/** Probes are linted in memory and never written under `runtime/src`. */
 const eslint = new ESLint({
   overrideConfigFile: join(repositoryRoot, 'eslint.config.mjs'),
   cwd: repositoryRoot,
@@ -22,9 +22,10 @@ async function lintVirtual(relativePath: string, source: string) {
   return results[0]?.messages.filter(message => message.ruleId === 'no-restricted-imports') ?? []
 }
 
-test('eslint blocks core imports of a concrete executor package', async () => {
+test('eslint blocks Codex internals while allowing the executor registry', async () => {
   const violations = await lintVirtual(CORE_PROBE, "import {CodexAdapter} from './executors/codex/adapter.js'\n")
   assert.ok(violations.length > 0, violations.map(item => item.message).join('; '))
+  assert.deepEqual(await lintVirtual(CORE_PROBE, "import {CodexAdapter} from './executors/index.js'\n"), [])
 })
 
 test('eslint blocks executor imports of the realtime layer', async () => {

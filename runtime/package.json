@@ -24,7 +24,8 @@
     "nova-audio-agent-node": "./dist/src/cli.js"
   },
   "files": [
-    "dist/src"
+    "dist/src",
+    "dist/eval"
   ],
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json",
@@ -35,18 +36,18 @@
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
     "demo": "npm run build && node dist/src/cli.js demo",
     "fixtures:check": "npm run build && node dist/src/cli.js fixture check",
-    "lint": "eslint src test",
-    "smoke:qwen": "npm run build && node scripts/qwen-live-smoke.mjs",
-    "smoke:cascaded": "npm run build && node scripts/cascaded-live-smoke.mjs",
-    "smoke:qwen:clarification": "npm run build && node scripts/qwen-codex-clarification-live-smoke.mjs",
-    "smoke:qwen:routing": "npm run build && node scripts/qwen-progress-routing-live-smoke.mjs",
-    "smoke:qwen:surrogate": "npm run build && node scripts/qwen-surrogate-progress-live-smoke.mjs",
+    "lint": "eslint src eval test",
+    "smoke:qwen": "npm run build && node scripts/live-smoke.mjs --target=qwen",
+    "smoke:cascaded": "npm run build && node scripts/live-smoke.mjs --target=cascaded",
+    "smoke:qwen:clarification": "npm run build && node scripts/live-smoke.mjs --target=qwen-clarification-legacy",
+    "smoke:qwen:routing": "npm run build && node scripts/live-smoke.mjs --target=qwen-routing-legacy",
+    "smoke:qwen:surrogate": "npm run build && node scripts/live-smoke.mjs --target=qwen-surrogate",
     "test": "npm run build && node --test dist/test/*.test.js",
     "test:win": "npm run build && node scripts/test-windows.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "smoke:search:mcp": "npm run build && node scripts/search-mcp-live-smoke.mjs",
-    "smoke:knowledge": "npm run build && node scripts/knowledge-live-smoke.mjs",
-    "test:live": "npm run build && node scripts/live/run.mjs",
+    "smoke:search:mcp": "npm run build && node scripts/live-smoke.mjs --target=search-mcp",
+    "smoke:knowledge": "npm run build && node scripts/live-smoke.mjs --target=knowledge",
+    "test:live": "npm run build && node scripts/live-smoke.mjs",
     "test:live:contract": "npm run build && node --test scripts/live/contract.test.mjs"
   },
   "dependencies": {

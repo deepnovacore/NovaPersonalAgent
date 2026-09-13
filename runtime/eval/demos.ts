@@ -2,7 +2,7 @@ import {readFile, realpath} from 'node:fs/promises'
 import {isAbsolute, relative, resolve} from 'node:path'
 import {z} from 'zod'
 
-import {canonicalJson} from './canonical-json.js'
+import {canonicalJson} from '../src/canonical-json.js'
 import {loadRuntimeFixture} from './fixtures.js'
 import {runRuntimeFixture} from './fixture-host.js'
 import {fixtureManifestRegistry} from './sim.js'

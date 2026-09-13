@@ -28,21 +28,14 @@ export default tseslint.config(
     },
   },
   {
-    // Spec 07 R1: core never imports a concrete executor package. Composition roots and the
-    // registry are the only exceptions; `executors/coding/` is the role-level intake coordinator
-    // (spec 08), shared by every coding executor and not a concrete package.
+    // Outside the executor registry, depend on the Codex package's public entry only.
     files: ['runtime/src/**/*.ts'],
-    ignores: [
-      'runtime/src/executors/**',
-      'runtime/src/cli.ts',
-      'runtime/src/desktop-entry.ts',
-      'runtime/src/production-realtime-assembly.ts',
-    ],
+    ignores: ['runtime/src/executors/**'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['**/executors/*/**', '**/executors/*/index.js', '!**/executors/coding/**'],
-          message: 'core must not import an executor package; route through ports or the executors/index.js registry',
+          group: ['**/executors/codex/**'],
+          message: 'import Codex through executors/index.js instead of package internals',
         }],
       }],
     },
@@ -60,7 +53,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['runtime/test/**/*.ts'],
+    files: ['runtime/{eval,test}/**/*.ts'],
     rules: {
       // node:test owns the returned registration promise.
       '@typescript-eslint/no-floating-promises': 'off',

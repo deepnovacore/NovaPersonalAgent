@@ -1,5 +1,5 @@
 /** Digital audio live acceptance. Uses production factories; never records the microphone.
- * node runtime/scripts/cascaded-live-smoke.mjs --env-file /path/to/.env --output /tmp/report.json
+ * node runtime/scripts/live-smoke.mjs --target=cascaded --env-file /path/to/.env --output /tmp/report.json
  * Requires ARK_API_KEY and DOUBAO_BIGMODEL_API_KEY (optional DOUBAO_ASR_API_KEY).
  */
 import assert from 'node:assert/strict'
@@ -7,14 +7,13 @@ import {readFile, writeFile} from 'node:fs/promises'
 import {parseArgs, parseEnv} from 'node:util'
 import {randomUUID} from 'node:crypto'
 import {setTimeout as delay} from 'node:timers/promises'
-import {loadSettings} from '../dist/src/config.js'
-import {environmentContract} from '../dist/src/environment-contract.js'
-import {requireSelectedCascadedRealtimeConfig} from '../dist/src/cascaded-realtime-config.js'
-import {buildCascadedRealtimeAssembly, cascadedProviderRegistries as registry} from '../dist/src/cascaded-realtime-assembly.js'
-import {parseCapabilityRegistry} from '../dist/src/capability-registry.js'
-import {CascadedRealtimeProvider} from '../dist/src/realtime/cascaded/provider.js'
-import {RealClock} from '../dist/src/clock.js'
-import {NullTelemetry} from '../dist/src/realtime/telemetry.js'
+import {loadSettings} from '../../dist/src/config.js'
+import {requireSelectedCascadedRealtimeConfig} from '../../dist/src/cascaded-realtime-config.js'
+import {buildCascadedRealtimeAssembly, cascadedProviderRegistries as registry} from '../../dist/src/cascaded-realtime-assembly.js'
+import {parseCapabilityRegistry} from '../../dist/src/capability-registry.js'
+import {CascadedRealtimeProvider} from '../../dist/src/realtime/cascaded/provider.js'
+import {RealClock} from '../../dist/src/clock.js'
+import {NullTelemetry} from '../../dist/src/realtime/telemetry.js'
 
 const {values} = parseArgs({options: {'env-file': {type: 'string'}, output: {type: 'string'}}})
 const report = {startedAt: new Date().toISOString(), cases: [], scope: 'digital audio; no microphone or speaker playback'}
@@ -97,12 +96,10 @@ async function synthesizeInput(factory, text) {
 try {
   const file = values['env-file'] ? parseEnv(await readFile(values['env-file'], 'utf8')) : {}
   const environment = {...file, ...process.env}
-  const ignored = environmentContract.filter(entry => entry.owner.startsWith('retired_') && entry.name in environment)
-  for (const entry of ignored) delete environment[entry.name]
   const settings = loadSettings({...environment,
     NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark'})
   const config = requireSelectedCascadedRealtimeConfig(settings)
-  passed(phase, {ignoredRetiredKeys: ignored.map(entry => entry.name)})
+  passed(phase)
   const clock = new RealClock()
   const ids = {next: () => randomUUID()}
   const ttsFactory = registry.tts.volcengine({config: config.tts, ids})

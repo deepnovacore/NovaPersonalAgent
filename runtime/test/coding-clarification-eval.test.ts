@@ -18,7 +18,7 @@ interface Observation {
 
 const scoreModule = await import(pathToFileURL(resolve(
   import.meta.dirname,
-  '../../scripts/qwen-codex-clarification-score.mjs',
+  '../../eval/qwen-codex-clarification-score.mjs',
 )).href) as {
   readonly scoreCodexClarificationTurn: (
     criterion: Criterion,

@@ -8,12 +8,10 @@ import {
   type Settings,
 } from './config.js'
 import {requireSelectedCascadedRealtimeConfig} from './cascaded-realtime-config.js'
-import {findRetiredConfiguration} from './environment-contract.js'
 import {stripLikePython} from './python-text.js'
 
 const diagnosticIdSchema = z.enum([
   'node.version',
-  'configuration.retirement',
   'configuration.parse',
   'provider.qwen',
   'provider.volcengine',
@@ -24,9 +22,6 @@ const diagnosticIdSchema = z.enum([
 const diagnosticCodeSchema = z.enum([
   'node_version_supported',
   'node_version_unsupported',
-  'active_configuration',
-  'retired_capability',
-  'retired_configuration',
   'configuration_valid',
   'configuration_invalid',
   'qwen_configuration_valid',
@@ -53,7 +48,7 @@ export const diagnosticReportSchema = z.object({
   schema_version: z.literal(1),
   runtime: z.literal('node'),
   ok: z.boolean(),
-  checks: z.array(diagnosticCheckSchema).max(8),
+  checks: z.array(diagnosticCheckSchema).max(7),
 }).strict()
 
 export interface DiagnosticCheck {
@@ -79,23 +74,6 @@ export function buildDiagnosticReport(options: {
   readonly executorChecks?: readonly ExecutorDiagnostic[]
 }): Promise<DiagnosticReport> {
   const checks: DiagnosticCheck[] = [nodeVersionCheck(options.nodeVersion)]
-  try {
-    const retired = findRetiredConfiguration(options.environment)
-    if (retired !== null) {
-      checks.push(check(
-        'configuration.retirement',
-        'fail',
-        retired.fields.length === 0 ? 'retired_capability' : 'retired_configuration',
-      ))
-      checks.push(check('configuration.parse', 'fail', 'configuration_invalid'))
-      return Promise.resolve(report(checks))
-    }
-    checks.push(check('configuration.retirement', 'pass', 'active_configuration'))
-  } catch {
-    checks.push(check('configuration.retirement', 'fail', 'diagnostic_internal_failure'))
-    return Promise.resolve(report(checks))
-  }
-
   let settings: Settings
   let capabilities: CapabilityRegistry
   try {

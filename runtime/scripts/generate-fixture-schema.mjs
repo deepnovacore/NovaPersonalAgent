@@ -1,6 +1,6 @@
 import { writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { runtimeFixtureJsonSchema } from '../dist/src/fixtures.js'
+import { runtimeFixtureJsonSchema } from '../dist/eval/fixtures.js'
 import { workspaceGraphFixtureJsonSchema } from '../dist/src/workspace-graph/models.js'
 
 const targets = [

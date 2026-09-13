@@ -47,7 +47,7 @@ test('runner missing credentials writes blocked report and exits nonzero without
   const directory = mkdtempSync(join(tmpdir(),'nova-live-contract-'))
   try {
     const output = join(directory,'report.json')
-    const result = spawnSync(process.execPath,[fileURLToPath(new URL('./run.mjs',import.meta.url)),
+    const result = spawnSync(process.execPath,[fileURLToPath(new URL('../live-smoke.mjs',import.meta.url)),
       '--provider','qwen','--case','greeting','--output',output], {env:{PATH:process.env.PATH},encoding:'utf8'})
     assert.equal(result.status,2,result.stderr)
     const report = JSON.parse(readFileSync(output,'utf8'))
@@ -82,18 +82,27 @@ test('continuation reuses call id, validates the answer, and preserves partial p
 })
 
 
-test('catalogue paths exist and retired commands fail closed', () => {
+test('catalogue paths exist and retired targets have no executable', () => {
   const catalog = JSON.parse(readFileSync(new URL('./catalog.json',import.meta.url)))
   assert.equal(new Set(catalog.suites.map(suite => suite.id)).size,catalog.suites.length)
   for (const suite of catalog.suites) {
+    if (suite.retired) {
+      assert.equal(suite.entry,undefined,suite.id)
+      const directory = mkdtempSync(join(tmpdir(),'nova-retired-live-'))
+      try {
+        const output = join(directory,'report.json')
+        const result = spawnSync(process.execPath,[fileURLToPath(new URL('../live-smoke.mjs',import.meta.url)),
+          `--target=${suite.id}`,'--output',output], {env:{PATH:process.env.PATH},encoding:'utf8'})
+        assert.equal(result.status,2,result.stderr)
+        const report = JSON.parse(readFileSync(output,'utf8'))
+        assert.equal(report.results[0].reason,'retired_suite')
+        assert.equal(report.summary.accepted,false)
+      } finally { rmSync(directory,{recursive:true,force:true}) }
+      continue
+    }
     if (suite.entry === 'text-tools') continue
     const entry = new URL('../../'+suite.entry,import.meta.url)
     assert.ok(existsSync(entry),suite.id)
-    if (suite.retired) {
-      const result = spawnSync(process.execPath,[fileURLToPath(entry)],{encoding:'utf8'})
-      assert.equal(result.status,2)
-      assert.match(result.stderr,/retired/u)
-    }
   }
 })
 

@@ -1,7 +1,6 @@
 import {parseCapabilityRegistry, type CapabilityRegistry} from './capability-registry.js'
 import { z } from 'zod'
 import { stripLikePython } from './python-text.js'
-import {findRetiredConfiguration} from './environment-contract.js'
 
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
@@ -214,40 +213,14 @@ const proactivityPresets: Readonly<Record<Settings['proactivity_preset'], Proact
   eager: {cooldown: 30, fresh_window: 45},
 }
 
-export type ConfigurationErrorCode =
-  | 'invalid_configuration'
-  | 'retired_capability'
-  | 'retired_configuration'
-
 export class ConfigurationError extends Error {
-  readonly fields: readonly string[] | undefined
-
-  constructor(
-    message: string,
-    readonly code: ConfigurationErrorCode = 'invalid_configuration',
-    fields?: readonly string[],
-  ) {
+  constructor(message: string, readonly code: 'invalid_configuration' = 'invalid_configuration') {
     super(message)
     this.name = 'ConfigurationError'
-    this.fields = fields === undefined ? undefined : Object.freeze([...fields])
   }
 }
 
 export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Settings {
-  const retired = findRetiredConfiguration(environment)
-  if (retired !== null) {
-    if (retired.fields.length === 0) {
-      throw new ConfigurationError(
-        `executor '${retired.capability}' was removed from the Node runtime`,
-        'retired_capability',
-      )
-    }
-    throw new ConfigurationError(
-      `retired capability '${retired.capability}' configuration is not supported: ${retired.fields.join(', ')}`,
-      'retired_configuration',
-      retired.fields,
-    )
-  }
   const pipelineMode = parsePipelineMode(environment.NOVA_AUDIO_AGENT_PIPELINE_MODE)
   const integratedProvider = pipelineMode === 'integrated'
     ? parseIntegratedProvider(environment.NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER)

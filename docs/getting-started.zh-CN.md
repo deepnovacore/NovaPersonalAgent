@@ -187,8 +187,7 @@ MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何�
 
 ## 公共环境变量参考
 
-下表由 `runtime/src/environment-contract.ts` 生成。主机私有握手变量和已退役集成变量不会进入
-表格。兼容提示：`HA_*` 与 `AUTOGLM_*` 已退役，不要在 Node 配置中继续填写其凭据或地址。
+下表由 `runtime/src/environment-contract.ts` 生成。主机私有握手变量不会进入表格。
 
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | 变量 | 所属 | 必需条件 | 默认 | 说明 |

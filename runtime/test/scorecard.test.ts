@@ -11,7 +11,7 @@ import {
   evaluateSurrogate,
   type FastBrainSample,
   type SurrogateSample,
-} from '../src/scorecard.js'
+} from '../eval/scorecard.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const fixtureRoot = resolve(repositoryRoot, 'fixtures/product/v1')
@@ -84,6 +84,6 @@ test('scorecard fixture CLI is read-only and compact', async () => {
 })
 
 test('runtime scorecard source never consumes rollback test snapshots', async () => {
-  const source = await readFile(resolve(repositoryRoot, 'runtime/src/scorecard.ts'), 'utf8')
+  const source = await readFile(resolve(repositoryRoot, 'runtime/eval/scorecard.ts'), 'utf8')
   assert.equal(source.includes('tests/snapshots'), false)
 })

@@ -8,7 +8,7 @@ import {
   sessionFixtureJsonSchema,
   sessionFixtureStepSchema,
   type SessionFixture,
-} from '../src/realtime/session-fixtures.js'
+} from '../eval/realtime/session-fixtures.js'
 import { runSessionFixture } from './session-fixture-host.js'
 
 // The test runs as runtime/dist/test/*.js, so three levels up is the repository root.

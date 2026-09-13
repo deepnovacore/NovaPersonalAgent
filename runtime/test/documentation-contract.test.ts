@@ -139,16 +139,12 @@ function generatedBlock(document: string): string {
   return document.slice(start, end)
 }
 
-test('current Node Codex and release claims remain exact', async () => {
+test('current Node Codex transport claim remains exact', async () => {
   const gettingStarted = await readFile(
     resolve(repositoryRoot, 'docs/getting-started.md'),
     'utf8',
   )
   assert.match(gettingStarted, /Codex is app-server-only; JSONL is\s+fixture-parser-only/iu)
-  assert.match(
-    gettingStarted,
-    /Legacy HA and AutoGLM settings produce\s+a stable, credential-safe migration error/iu,
-  )
 })
 
 test('every production environment name is classified and private names stay private', async () => {
@@ -166,7 +162,7 @@ test('every production environment name is classified and private names stay pri
     }
   }
   for (const entry of environmentContract) {
-    if (entry.owner === 'host_private' || entry.owner.startsWith('retired_')) {
+    if (entry.owner === 'host_private') {
       assert.equal(entry.public, false, entry.name)
     }
   }

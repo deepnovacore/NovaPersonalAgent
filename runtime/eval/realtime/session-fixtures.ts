@@ -19,7 +19,7 @@
 import { readFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { z } from 'zod'
-import { delegateStateSchema, providerTurnPhaseSchema } from './session-state.js'
+import { delegateStateSchema, providerTurnPhaseSchema } from '../../src/realtime/session-state.js'
 
 /**
  * Note on optionality: nothing here has a Zod default.

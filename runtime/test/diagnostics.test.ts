@@ -24,7 +24,6 @@ test('diagnostics require the credential for the unconditionally assembled Searc
     ok: false,
     checks: [
       {id: 'node.version', status: 'pass', code: 'node_version_supported'},
-      {id: 'configuration.retirement', status: 'pass', code: 'active_configuration'},
       {id: 'configuration.parse', status: 'pass', code: 'configuration_valid'},
       {id: 'provider.qwen', status: 'pass', code: 'qwen_configuration_valid'},
       {id: 'executors.contract', status: 'pass', code: 'executor_configuration_valid'},
@@ -45,7 +44,7 @@ test('diagnostics pass the required Search check without probing Tavily', async 
     nodeVersion: 'v22.12.0',
   })
   assert.equal(report.ok, true)
-  assert.deepEqual(report.checks[5], {
+  assert.deepEqual(report.checks[4], {
     id: 'search.credential', status: 'pass', code: 'search_credential_present',
   })
   assert.equal(canonicalJson(report).includes('secret'), false)
@@ -54,20 +53,9 @@ test('diagnostics pass the required Search check without probing Tavily', async 
 test('diagnostics fail only selected required provider configuration', async () => {
   const qwen = await buildDiagnosticReport({environment: {}, nodeVersion: '22.12.0'})
   assert.equal(qwen.ok, false)
-  assert.deepEqual(qwen.checks[3], {
+  assert.deepEqual(qwen.checks[2], {
     id: 'provider.qwen', status: 'fail', code: 'qwen_configuration_invalid',
   })
-
-  const retired = await buildDiagnosticReport({
-    environment: {NOVA_AUDIO_AGENT_REALTIME_PROVIDER: 'secret-old-value'},
-    nodeVersion: 'v22.12.0',
-  })
-  assert.equal(retired.ok, false)
-  assert.deepEqual(retired.checks.slice(1), [
-    {id: 'configuration.retirement', status: 'fail', code: 'retired_configuration'},
-    {id: 'configuration.parse', status: 'fail', code: 'configuration_invalid'},
-  ])
-  assert.equal(canonicalJson(retired).includes('secret-old-value'), false)
 })
 
 test('diagnostics retain the integrated Qwen check for the default product shape', async () => {
@@ -75,7 +63,7 @@ test('diagnostics retain the integrated Qwen check for the default product shape
     environment: {DASHSCOPE_API_KEY: 'dashscope-secret'},
     nodeVersion: 'v22.12.0',
   })
-  assert.deepEqual(integrated.checks[3], {
+  assert.deepEqual(integrated.checks[2], {
     id: 'provider.qwen', status: 'pass', code: 'qwen_configuration_valid',
   })
 })
@@ -108,7 +96,7 @@ test('cascaded diagnostics reject every representative configuration production 
       ...case_.override,
     }
     const diagnostic = await buildDiagnosticReport({environment, nodeVersion: 'v22.12.0'})
-    assert.deepEqual(diagnostic.checks[3], {
+    assert.deepEqual(diagnostic.checks[2], {
       id: 'provider.volcengine',
       status: 'fail',
       code: 'volcengine_configuration_invalid',
@@ -142,7 +130,7 @@ test('cascaded diagnostics never read the unselected LLM platform', async () => 
       },
     })
     const report = await buildDiagnosticReport({environment, nodeVersion: 'v22.12.0'})
-    assert.deepEqual(report.checks[3], {
+    assert.deepEqual(report.checks[2], {
       id: 'provider.volcengine',
       status: 'pass',
       code: 'volcengine_configuration_valid',
@@ -150,21 +138,7 @@ test('cascaded diagnostics never read the unselected LLM platform', async () => 
   }
 })
 
-test('diagnostics classify retirement and unexpected access without retaining private data', async () => {
-  const retired = await buildDiagnosticReport({
-    environment: {
-      NOVA_AUDIO_AGENT_EXECUTOR: 'HA',
-      NOVA_AUDIO_AGENT_HA_TOKEN: 'sentinel-retired-secret',
-    },
-    nodeVersion: 'v22.12.0',
-  })
-  assert.equal(retired.ok, false)
-  assert.deepEqual(retired.checks.slice(1, 3), [
-    {id: 'configuration.retirement', status: 'fail', code: 'retired_capability'},
-    {id: 'configuration.parse', status: 'fail', code: 'configuration_invalid'},
-  ])
-  assert.equal(canonicalJson(retired).includes('sentinel'), false)
-
+test('diagnostics classify unexpected access without retaining private data', async () => {
   const throwing = new Proxy<NodeJS.ProcessEnv>({}, {
     get() { throw new Error('sentinel-private-path-and-secret') },
   })
@@ -172,7 +146,7 @@ test('diagnostics classify retirement and unexpected access without retaining pr
   assert.equal(internal.ok, false)
   assert.deepEqual(internal.checks, [
     {id: 'node.version', status: 'pass', code: 'node_version_supported'},
-    {id: 'configuration.retirement', status: 'fail', code: 'diagnostic_internal_failure'},
+    {id: 'configuration.parse', status: 'fail', code: 'configuration_invalid'},
   ])
   assert.equal(canonicalJson(internal).includes('sentinel'), false)
 })

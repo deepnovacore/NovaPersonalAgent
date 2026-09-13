@@ -4,7 +4,7 @@
  * Deliberately not a unit test: it needs a credential and the network, so it is a
  * separate command and it fails loudly rather than skipping when unconfigured.
  *
- *   NOVA_AUDIO_AGENT_MODEL_API_KEY=... node runtime/scripts/qwen-live-smoke.mjs
+ *   NOVA_AUDIO_AGENT_MODEL_API_KEY=... node runtime/scripts/live-smoke.mjs --target=qwen
  *
  * Reads the same variables the Python runtime reads, so a working Python setup
  * needs no new configuration.
@@ -12,10 +12,10 @@
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { QwenAudioRealtimeAdapter } from '../dist/src/realtime/qwen.js'
-import { webSocketQwenConnector } from '../dist/src/realtime/qwen-transport.js'
+import { QwenAudioRealtimeAdapter } from '../../dist/src/realtime/qwen.js'
+import { webSocketQwenConnector } from '../../dist/src/realtime/qwen-transport.js'
 
-const REPOSITORY_ROOT = resolve(import.meta.dirname, '../..')
+const REPOSITORY_ROOT = resolve(import.meta.dirname, '../../..')
 
 /** Minimal .env reader so the smoke matches the Python runtime's configuration. */
 function dotenv() {

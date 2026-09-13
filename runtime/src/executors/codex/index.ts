@@ -3,7 +3,7 @@
  *
  * Core (`runtime/src/**` outside `executors/**` and the composition roots) never imports anything
  * under `executors/codex/`; composition roots and the barrel reach Codex only through this module
- * or the registry in `../index.ts`. `scripts/check-executor-boundary.mjs` enforces that.
+ * or the registry in `../index.ts`. ESLint enforces that.
  */
 export * from './app-server-schema.js'
 export {

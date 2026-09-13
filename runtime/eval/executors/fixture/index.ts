@@ -1,13 +1,13 @@
 /** Deterministic, in-memory boundary probe; supplied to assembly's normal name/role registry. */
-import {HostApprovalController} from '../../approval.js'
-import type {Clock} from '../../clock.js'
-import type {ExecutorDispatchContext, ExecutorHandoff} from '../../causal-runtime.js'
-import type {CodingAgentControllerFactory, CodingExecutorResource, ProjectExecutorAdapter, ProjectRuntimeDispatch} from '../../coding-executor.js'
-import {executorManifestSchema} from '../../ports.js'
-import {ProjectConfirmationController, type ConfirmedProjectOperation} from '../../project-confirmation.js'
-import {consumeHostExecutorCapability} from '../../host-executor-capability.js'
-import {IntakeController} from '../coding/intake.js'
-import type {JsonValue} from '../../events.js'
+import {HostApprovalController} from '../../../src/approval.js'
+import type {Clock} from '../../../src/clock.js'
+import type {ExecutorDispatchContext, ExecutorHandoff} from '../../../src/causal-runtime.js'
+import type {CodingAgentControllerFactory, CodingExecutorResource, ProjectExecutorAdapter, ProjectRuntimeDispatch} from '../../../src/coding-executor.js'
+import {executorManifestSchema} from '../../../src/ports.js'
+import {ProjectConfirmationController, type ConfirmedProjectOperation} from '../../../src/project-confirmation.js'
+import {consumeHostExecutorCapability} from '../../../src/host-executor-capability.js'
+import {IntakeController} from '../../../src/executors/coding/intake.js'
+import type {JsonValue} from '../../../src/events.js'
 
 export const FIXTURE_DESCRIPTOR = {name: 'fixture', summary: 'Deterministic boundary probe', ownedChannels: ['fixture']}
 const nothing = (): void => undefined

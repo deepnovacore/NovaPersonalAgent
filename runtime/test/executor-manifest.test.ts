@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import {fixtureSlowSimManifest} from '../src/sim.js'
+import {fixtureSlowSimManifest} from '../eval/sim.js'
 import {executorManifestSchema} from '../src/ports.js'
 import {handoffPolicySchema} from '../src/memory.js'
 

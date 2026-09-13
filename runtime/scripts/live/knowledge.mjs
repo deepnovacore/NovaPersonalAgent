@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import {mkdtemp, realpath, writeFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {loadSettings} from '../dist/src/config.js'
-import {parseCapabilityRegistry} from '../dist/src/capability-registry.js'
-import {prepareKnowledge} from '../dist/src/knowledge/assembly.js'
-import {RealClock} from '../dist/src/clock.js'
+import {loadSettings} from '../../dist/src/config.js'
+import {parseCapabilityRegistry} from '../../dist/src/capability-registry.js'
+import {prepareKnowledge} from '../../dist/src/knowledge/assembly.js'
+import {RealClock} from '../../dist/src/clock.js'
 
 // Live validation sends only this synthetic document and query, never a user's corpus.
 const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-knowledge-smoke-'))

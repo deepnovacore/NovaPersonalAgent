@@ -2,7 +2,7 @@
 // Usage: node runtime/scripts/diff-session-fixture.mjs <scenario-id>
 import { resolve } from 'node:path'
 import { canonicalJson } from '../dist/src/canonical-json.js'
-import { loadSessionFixture } from '../dist/src/realtime/session-fixtures.js'
+import { loadSessionFixture } from '../dist/eval/realtime/session-fixtures.js'
 import { runSessionFixture } from '../dist/test/session-fixture-host.js'
 
 const scenario = process.argv[2]

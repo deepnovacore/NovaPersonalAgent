@@ -2,17 +2,17 @@
 
 Live acceptance measures real provider behavior separately from deterministic tests. A green unit
 suite, a working executor, and a model selecting the right tool are different claims. The canonical
-inventory is `runtime/scripts/live/catalog.json`; the runner is `runtime/scripts/live/run.mjs`.
+inventory is `runtime/scripts/live/catalog.json`; the runner is `runtime/scripts/live-smoke.mjs`.
 
 ## Layers and ownership
 
 | Layer | Suites | Evidence | Does not prove |
 | --- | --- | --- | --- |
-| Provider | `qwen-audio` | Real provider session/audio contract | Business tool selection |
+| Provider | `qwen` | Real provider session/audio contract | Business tool selection |
 | Model routing | `text-tools` | Real Qwen/Ark cascaded adapter, production frontend prompt, compiled built-in schemas, synthetic user text and tool results | Host admission, executor execution, ASR/TTS |
 | Model planning | `coordinator`, `qwen-surrogate` | Real downstream assess/cancel or progress decisions | Frontend choosing dispatch |
 | Executor | `search-mcp`, `knowledge` | Real search/embedding/retrieval through existing smoke scripts | Model selecting these tools |
-| Pipeline | `cascaded-audio` | Digital ASR/LLM/TTS, synthetic echo tool continuation, host playback seams | Physical microphone/speaker, all business tools |
+| Pipeline | `cascaded` | Digital ASR/LLM/TTS, synthetic echo tool continuation, host playback seams | Physical microphone/speaker, all business tools |
 | Device/product | Existing desktop installed/package smokes | Packaging, startup, configured device seams | Real model routing unless explicitly exercised |
 
 Runtime owns the suite catalogue, fixtures, scorer and reports. A change to a tool, descriptor or
@@ -28,19 +28,19 @@ From the repository root (Node 22.13+ and dependencies installed):
 npm run test:live:contract --workspace @nova-audio-agent/runtime
 npm run test:live --workspace @nova-audio-agent/runtime -- --list
 npm run test:live --workspace @nova-audio-agent/runtime -- \
-  --suite text-tools --provider qwen --repeat 3 --env-file /path/to/.env \
+  --target text-tools --provider qwen --repeat 3 --env-file /path/to/.env \
   --output /tmp/nova-live-qwen.json
 npm run test:live --workspace @nova-audio-agent/runtime -- \
-  --suite text-tools --provider ark --model doubao-seed-2-0-pro-260215 \
+  --target text-tools --provider ark --model doubao-seed-2-0-pro-260215 \
   --output /tmp/nova-live-ark.json
 npm run test:live --workspace @nova-audio-agent/runtime -- \
-  --suite text-tools --case confirm-no --provider qwen --output /tmp/confirm-no.json
+  --target text-tools --case confirm-no --provider qwen --output /tmp/confirm-no.json
 npm run test:live --workspace @nova-audio-agent/runtime -- \
-  --suite coordinator,search-mcp,knowledge --env-file /path/to/.env --output /tmp/executors.json
+  --target coordinator,search-mcp,knowledge --env-file /path/to/.env --output /tmp/executors.json
 ```
 
-After a build, invoke `node runtime/scripts/live/run.mjs` directly to avoid rebuilding for every run.
-`--suite` defaults to `text-tools`; there is deliberately no implicit run-all. External executor
+After a build, invoke `node runtime/scripts/live-smoke.mjs --target=<target>` directly to avoid rebuilding for every run.
+`--target` defaults to `text-tools`; there is deliberately no implicit run-all. External executor
 suites need their own deployment configuration. Process environment overrides `--env-file`; the
 runner never automatically reads an arbitrary checkout's `.env`. Text routing only needs the
 selected LLM key (`DASHSCOPE_API_KEY` or `ARK_API_KEY`), not ASR/TTS credentials. It uses production

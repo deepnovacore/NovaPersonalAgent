@@ -900,6 +900,65 @@ test('Python-strip blank ASR final fails the item and never starts LLM', async (
   await watching.stop()
 })
 
+test('ASR open and finish failures recover on the next utterance', async () => {
+  class FinishFailSession extends FakeAsrSession {
+    override finish(): Promise<void> {
+      return Promise.reject(new Error('asr-provider-secret'))
+    }
+  }
+  for (const failure of ['start', 'finish'] as const) {
+    const recovered = new FakeAsrSession({text: '恢复成功', final: true})
+    let opens = 0
+    const failed = new FinishFailSession()
+    const asr: AsrClient = {
+      open: () => {
+        opens += 1
+        if (failure === 'start' && opens === 1) {
+          return Promise.reject(new Error('asr-provider-secret'))
+        }
+        return Promise.resolve(failure === 'finish' && opens === 1 ? failed : recovered)
+      },
+    }
+    const endpointing = new ScriptedEndpointing(
+      [{kind: 'speech_start', pcm: new Uint8Array([0, 0])}],
+      [{kind: 'speech_end', commit: true}],
+      [{kind: 'speech_start', pcm: new Uint8Array([1, 0])}],
+      [{kind: 'speech_end', commit: true}],
+    )
+    const adapter = new CascadedRealtimeAdapter({
+      endpointing, asr,
+      llm: new FakeLlm([
+        {kind: 'response_started', response_id: `response-${failure}`},
+        {kind: 'response_completed', response_id: `response-${failure}`},
+      ]),
+      tts: new FakeTtsClient(new FakeTtsSession()),
+      idFactory: ids(
+        `session-${failure}`, `speech-${failure}`, `item-${failure}`,
+        `speech-${failure}-recovered`, `item-${failure}-recovered`,
+      ),
+    })
+    await adapter.connect({tools: [], signal: new AbortController().signal})
+    const watching = observe(adapter)
+    try {
+      for (let index = 0; index < 4; index += 1) {
+        await adapter.sendAudio(new Uint8Array([0, 0]), new AbortController().signal)
+      }
+      await waitFor(`${failure} recovery`, () => watching.events.some(event =>
+        event.kind === 'response_terminal' && event.status === 'completed'))
+      assert.deepEqual(watching.events.find(event => event.kind === 'provider_error'), {
+        kind: 'provider_error', session_epoch: 1,
+        code: `volcengine_asr_${failure}`, recoverable: true,
+      })
+      assert.equal(watching.events.some(event => event.kind === 'user_transcript_failed'), true)
+      assert.doesNotMatch(JSON.stringify(watching.events), /asr-provider-secret/u)
+    } finally {
+      await adapter.close()
+      await watching.stop()
+    }
+    assert.equal(endpointing.resets, failure === 'start' ? 5 : 4)
+  }
+})
+
 test('an ASR append failure is recoverable and a later utterance still completes', async () => {
   class AppendFailSession implements AsrSession {
     #release: (() => void) | null = null

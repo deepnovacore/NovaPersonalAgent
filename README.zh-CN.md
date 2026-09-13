@@ -100,6 +100,7 @@ Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia`
 | [上手指南](docs/getting-started.zh-CN.md) | 安装与集成 |
 | [v0.2.0 规格](docs/specs/v0.2.0/00-overview.md) | `v0.2.0dev` 上进行中的功能契约 |
 | [历史设计探索：A Tradeoff Ruler for Proactive Voice Agents](docs/blog/2026-08-proactive-voice-agent-design-space.md) | 历史设计博客 |
+| [Node runtime 迁移归档](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | `v0.1.0` tag 历史中的迁移期计划 |
 
 ## 5. 路线图
 

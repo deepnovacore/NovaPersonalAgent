@@ -14,7 +14,7 @@ import { RealClock, VirtualClock } from '../src/clock.js'
 import type { EventRecord } from '../src/events.js'
 import { MonotonicIdFactory } from '../src/ids.js'
 import { delegateSchema, executorManifestSchema } from '../src/ports.js'
-import { fixtureSlowSimManifest } from '../src/sim.js'
+import { fixtureSlowSimManifest } from '../eval/sim.js'
 import type {GraphContext} from '../src/workspace-graph/context.js'
 
 const graphHeader = '<workspace_context kind="data">' + canonicalJson({

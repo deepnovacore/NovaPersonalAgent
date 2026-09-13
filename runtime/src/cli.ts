@@ -5,11 +5,11 @@ import { basename, isAbsolute, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { canonicalJson } from './canonical-json.js'
 import {buildDiagnosticReport} from './diagnostics.js'
-import {runDemos, type DemoName} from './demos.js'
-import {checkScorecardFixtures} from './scorecard.js'
-import { loadRuntimeFixture, type RuntimeFixture } from './fixtures.js'
-import { runRuntimeFixture } from './fixture-host.js'
-import { fixtureManifestRegistry } from './sim.js'
+import {runDemos, type DemoName} from '../eval/demos.js'
+import {checkScorecardFixtures} from '../eval/scorecard.js'
+import { loadRuntimeFixture, type RuntimeFixture } from '../eval/fixtures.js'
+import { runRuntimeFixture } from '../eval/fixture-host.js'
+import { fixtureManifestRegistry } from '../eval/sim.js'
 
 export interface CliIo {
   readonly write: (text: string) => void

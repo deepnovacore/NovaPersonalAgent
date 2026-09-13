@@ -7,9 +7,7 @@
 Node.js and TypeScript are the only product runtime. Codex is app-server-only; JSONL is
 fixture-parser-only and has no production process execution path. The v0.2dev thin-frontend target
 projects direct camera evidence through the Vision controller's hidden Watch/Guard channels;
-M1.5c/live/Windows acceptance remains pending. Legacy HA and AutoGLM settings produce
-a stable, credential-safe migration error before provider, process, device, or desktop
-construction.
+M1.5c/live/Windows acceptance remains pending.
 
 ## Install for source development
 
@@ -217,8 +215,7 @@ or runtime.
 ## Public environment reference
 
 The following block is generated from `runtime/src/environment-contract.ts`. Host-private handshake
-inputs and retired integration variables are intentionally excluded. The retired compatibility
-families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for them to a Node setup.
+inputs are intentionally excluded.
 
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | Variable | Owner | Required | Default | Description |
