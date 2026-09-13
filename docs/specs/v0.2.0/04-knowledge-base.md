@@ -6,17 +6,11 @@
 >
 > 修订（2026-09-03）：回应评审 P2-7（`knowledge://` 引用 Codex 打不开、`get_chunk` 可选、删除/重索引后失效）及产品建议「本地知识库要把数据流说清楚」「未实现的 provider 不可选」。发布门槛：本卷是否进入 v0.2.0 见 [00](00-overview.md#release-gate-for-04)。
 
-## Baseline (before M4)
+## Current boundary
 
-- Memory layers L0–L4 are documented in
-  [`docs/archs/02-memory.md`](../../archs/02-memory.md). L1 is the workspace
-  graph SQLite sidecar; there is no document corpus.
-- Retrieval today is lexical only: `memory__recall` and ≤2 graph hints.
-- MyContext is an optional read-only evidence adapter, off by default, not a
-  document store.
-- `node:sqlite` `DatabaseSync` already runs in a Worker
-  (`runtime/src/workspace-graph/store-worker.ts`).
-- Deferred: unrestricted long-term memory search
+- Live conversation and optional VoiceMem personal memory remain separate from the document corpus.
+- `node:sqlite` `DatabaseSync` runs in `runtime/src/knowledge/store-worker.ts`.
+- Unrestricted long-term memory search remains deferred
   ([`docs/archs/08-deferred.md`](../../archs/08-deferred.md)).
 
 ## Goals
@@ -24,7 +18,7 @@
 1. Let users ingest private documents into a local store Nova can retrieve.
 2. Keep knowledge as **evidence**, never instructions (invariant 10 / trust
    table).
-3. Separate knowledge from the workspace graph (layer K ≠ L1).
+3. Keep document knowledge separate from conversation and personal memory.
 4. Provide three controlled retrieval surfaces: FrontBrain tool, planner
    references, optional Codex MCP.
 5. Embedding via existing DashScope credentials; unsupported providers fail
@@ -34,7 +28,6 @@
 
 - Shipping a local embedding implementation or configuration entry in v0.2.0.
 - Auto-injecting knowledge into every ContextView (no automatic recall setting is implemented).
-- Merging knowledge cards into the workspace graph board.
 - Multi-user sync, cloud blob storage, or proprietary vector DB requirement.
 - Copying qwen’s substring-only domain library as the primary retriever
   (take the provider/untrusted rules; use real embeddings).
@@ -137,7 +130,7 @@ Parsers:
 | DOCX | `mammoth` |
 
 Chunking: heading-aware, ~800 tokens, ~15% overlap. Reuse sensitivity gates from
-`runtime/src/workspace-graph/sensitivity.ts` so credential-like spans are
+`runtime/src/sensitivity.ts` so credential-like spans are
 refused before persistence.
 
 Limits (v1 starting points): max source size 10 MiB; 100 sources per profile
@@ -246,7 +239,7 @@ item. Explicit tool / planner / Codex recall only.
 
 | Area | Likely paths |
 |---|---|
-| Worker / store | `runtime/src/knowledge/` (new), mirror workspace-graph client/worker split |
+| Worker / store | `runtime/src/knowledge/` client/worker split |
 | Tool | `tool-schema` + realtime recall wiring |
 | Desktop | knowledge panel in settings or a sibling window; main-process dialogs |
 | Deps | bounded compatible embedding HTTP client; `pdfjs-dist`; `mammoth` with `jszip` expansion preflight; MCP SDK (from 03) |

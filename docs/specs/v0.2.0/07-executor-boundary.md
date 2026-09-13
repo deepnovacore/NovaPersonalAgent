@@ -328,8 +328,7 @@ runtime/src/executors/
 file renames inside the store are limited to `codex_home_key` →
 `executor_home_key` and the on-disk file name staying `codex-projects-v1.json`
 (no migration in this volume; 08 owns store schema changes if any).
-`managed-workspace-maintenance.ts` and `workspace-graph/factory.ts` import the
-host store, which removes their two Codex imports.
+`managed-workspace-maintenance.ts` imports the host store without a Codex dependency.
 
 `index.ts` barrel: replace lines 5–32 with `export * from './executors/index.js'`
 plus the host store export.

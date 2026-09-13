@@ -192,7 +192,7 @@ try {
   const deliveries = []
   let acknowledgeCompletion = false
   assembly = buildCascadedRealtimeAssembly({
-    settings: {...settings, executors: [], workspace_graph_enabled: false, camera_module_enabled: false},
+    settings: {...settings, executors: [], camera_module_enabled: false},
     capabilities: parseCapabilityRegistry({version: 1, modules: {
       coding: {enabled: false}, camera: {enabled: false}, search: {enabled: false},
     }}, {}),

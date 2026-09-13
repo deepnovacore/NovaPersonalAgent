@@ -178,3 +178,16 @@ async function sourceFiles(root: string): Promise<string[]> {
   }
   return files
 }
+
+
+test('current architecture and numbered specs do not depend on the retired graph', async () => {
+  const roots = ['docs/archs', 'docs/specs/v0.2.0', 'docs/specs/v0.3.0']
+  for (const root of roots) {
+    for (const file of await readdir(resolve(repositoryRoot, root))) {
+      if (!/^\d.*\.md$/u.test(file)) continue
+      const text = await readFile(resolve(repositoryRoot, root, file), 'utf8')
+      assert.doesNotMatch(text, /workspace-graph\/|workspace_graph|NOVA_AUDIO_AGENT_WORKSPACE_GRAPH|GraphContext|PublishedGraphSnapshot/u, `${root}/${file}`)
+      assert.doesNotMatch(text, /Workspace Graph|workspace graph/u, `${root}/${file}`)
+    }
+  }
+})

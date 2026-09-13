@@ -43,12 +43,10 @@ below.
   (`app-server-transport.ts:1176`); `causal-runtime.ts:447` aborts on
   shutdown/deadline. **No model-facing cancel tool**, no per-delegate abort API.
 - `workspace_context` item: produced by
-  `RealtimeAssembly.#injectCurrentProjectContext` (`realtime-assembly.ts`
-  ~608–678), content `<active_project_context>` + optional
-  `<workspace_graph_context>`; revision bumps on content change; Qwen adapter
+  `RealtimeAssembly.#injectCurrentProjectContext` (`realtime-assembly.ts`), content `<active_project_context>` + `<active_executor_context>`;
+  revision bumps on content change; Qwen adapter
   delivers via `replace_provider_item` (`qwen.ts:393`); item cannot create a
-  response (`protocol.ts:206`). Graph header is low-authority
-  (`qwen.ts:253–260`).
+  response (`protocol.ts:206`).
 - Frontend instructions naming `codex__project` etc.: `qwen.ts:134–250`;
   intake fact text `codex__confirm_project_action`: `intake.ts:293`.
 
@@ -428,9 +426,9 @@ all confirmation goes through `confirm(id, accepted)`.
 ## ContextView (no roster)
 
 `#injectCurrentProjectContext` keeps `<active_project_context>` (active
-workspace path, active session title) and optional low-authority
-`<workspace_graph_context>`. **No `<projects>` block.** The voice model does
-not see project names in context; it sends natural language and the
+workspace display name, active session title) and `<active_executor_context>`
+(current work). **No `<projects>` roster block.** The voice model sees only the
+current project display name; it sends natural language and the
 coordinator picks from roster input.
 
 Revision bumps when: store `active_binding_revision` changes, active session
