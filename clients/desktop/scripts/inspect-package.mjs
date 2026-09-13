@@ -40,6 +40,7 @@ const EXPECTED_RUNTIME_DEPENDENCIES = Object.freeze([
   'jszip',
   'mammoth',
   'pdfjs-dist',
+  'qrcode',
   'undici',
   VOICEMEM_PACKAGE,
   'ws',
