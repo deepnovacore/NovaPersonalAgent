@@ -38,7 +38,6 @@ export function browserWindowOptions(preload, launchId, { opaque = false } = {})
     // window open when window-position.mjs shrinks it to rest.
     minWidth: DORMANT_ORB_WINDOW_SIZE.width,
     minHeight: DORMANT_ORB_WINDOW_SIZE.height,
-    maxWidth: 160,
     frame: false,
     // Compositors without a working transparent-visuals path (opted into via
     // NOVA_ORB_OPAQUE) get a solid plate instead of a broken/black surface.

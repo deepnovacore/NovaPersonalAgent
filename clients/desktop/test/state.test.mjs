@@ -344,9 +344,9 @@ test('an inactive working executor stays visible until explicitly asleep', () =>
   assert.equal(orbDormant({...working, wakeState: 'sleeping'}), true)
 })
 
-test('sleep ignores hover but leaves room for confirmation surfaces', () => {
+test('sleep expands on hover and leaves room for confirmation surfaces', () => {
   const sleeping = { ...dormantBase, wakeState: 'sleeping' }
-  assert.equal(orbDormant({ ...sleeping, hovered: true }), true)
+  assert.equal(orbDormant({ ...sleeping, hovered: true }), false)
   // Both of these reclaim the window bounds on the main side, so the renderer
   // must agree rather than fight over them.
   assert.equal(orbDormant({ ...sleeping, confirmationVisible: true }), false)
@@ -373,13 +373,13 @@ test('explicit sleep shrinks muted and working states without hiding confirmatio
     const value = {...dormantBase, stateName, wakeState: 'sleeping', executorWorking: true}
     assert.equal(orbDormant(value), true)
     assert.equal(orbDormant({...value, confirmationVisible: true}), false)
-    assert.equal(orbDormant({...value, hovered: true}), true)
+    assert.equal(orbDormant({...value, hovered: true}), false)
   }
 })
 
-test('all sleeping orbs stay compact on hover and during background work', () => {
+test('all sleeping orbs reveal controls on hover even during background work', () => {
   for (const stateName of ['idle', 'muted', 'working', 'reconnecting']) {
-    assert.equal(orbDormant({stateName, wakeState: 'sleeping', hovered: true, executorWorking: true}), true)
+    assert.equal(orbDormant({stateName, wakeState: 'sleeping', hovered: true, executorWorking: true}), false)
     assert.equal(orbDormant({stateName, wakeState: 'sleeping', confirmationVisible: true}), false)
   }
 })

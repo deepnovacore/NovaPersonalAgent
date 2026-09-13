@@ -930,23 +930,12 @@
       "file": "clients/desktop/src/renderer/task-banner.mjs",
       "kind": "numeric_template",
       "occurrence_index": 2,
-      "line": 142,
-      "snippet": "(value?.bannerOffsetRows ?? 0) * 56",
-      "snippet_sha256": "ff6527ada3d61db9f3200984cb801a898c4669bc4fba7cd5f0b5e35e475da12f",
+      "line": 174,
+      "snippet": "Math.max(0, view.tasks.length - 3)",
+      "snippet_sha256": "67dcece1bf2f21c7267203221f81d3a104649583e58b63489e5270a8ca172578",
       "disposition": "wire_json",
-      "behavior": "a suppressed combined reservation does not discard an alert before fallback",
-      "test": "clients/desktop/test/task-banner-layout.test.mjs"
-    },
-    {
-      "file": "clients/desktop/src/renderer/task-banner.mjs",
-      "kind": "numeric_template",
-      "occurrence_index": 3,
-      "line": 169,
-      "snippet": "Math.max(0, view.tasks.findIndex(t => t.work_id === task?.work_id)) + 1",
-      "snippet_sha256": "f6341fc13179f4b7a4e8c7ed14545cdcd0daeebbcd7a9710ee75a0760af6bef1",
-      "disposition": "wire_json",
-      "behavior": "cancel carries exact identity and stays cancelling until terminal, not merely the reply",
-      "test": "clients/desktop/test/task-banner.test.mjs"
+      "behavior": "展开其余 3 个任务",
+      "test": "clients/desktop/scripts/renderer-task-banner-smoke.mjs"
     },
     {
       "file": "clients/desktop/src/renderer/workspace-graph-board.mjs",
