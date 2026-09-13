@@ -10,8 +10,7 @@
   "workspaces": [
     "runtime",
     "clients/desktop",
-    "cli",
-    "clients/webui"
+    "cli"
   ],
   "scripts": {
     "start:client": "node scripts/start-client.mjs",
@@ -29,15 +28,13 @@
     "runtime:fixtures": "npm run fixtures:check --workspace @nova-audio-agent/runtime",
     "runtime:smoke:qwen": "npm run smoke:qwen --workspace @nova-audio-agent/runtime",
     "runtime:smoke:qwen:clarification": "npm run smoke:qwen:clarification --workspace @nova-audio-agent/runtime",
-    "test": "npm run test:runtime && npm run test:desktop && npm run test:cli && npm run test:webui",
+    "test": "npm run test:runtime && npm run test:desktop && npm run test:cli",
     "test:cli": "npm test --workspace nova-audio-agent",
     "test:desktop": "npm test --workspace @nova-audio-agent/desktop",
     "test:runtime": "npm test --workspace @nova-audio-agent/runtime",
     "test:runtime:win": "npm run test:win --workspace @nova-audio-agent/runtime",
     "runtime:smoke:search:mcp": "npm run smoke:search:mcp --workspace @nova-audio-agent/runtime",
-    "check:release-gate": "node runtime/scripts/check-release-gate.mjs",
-    "start:web": "npm run start --workspace @nova-audio-agent/webui",
-    "test:webui": "npm test --workspace @nova-audio-agent/webui"
+    "check:release-gate": "node runtime/scripts/check-release-gate.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

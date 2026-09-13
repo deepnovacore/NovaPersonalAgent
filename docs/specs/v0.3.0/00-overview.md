@@ -55,7 +55,7 @@ Home Assistant 是后续扩展候选，不是本版必交付项。以下编号�
 | D1 | **两条轨道并行、各自小步。** A 轨：需求发现闭环；B 轨：主窗口与多入口。开工前先钉住两个契约对象（D6）。 | 需求发现能在现有悬浮窗和 iOS 输入框上先验证价值；主窗口若先做而动态页为空，只是一个壳。并行但先定接口，避免互相等待。 |
 | D2 | **桌面默认 cascaded 管线。** 文字与语音共用同一个 LLM 会话；integrated（Qwen 实时语音对语音）保留为可选的纯语音低延迟模式。选中 integrated 时文字输入置灰并说明原因。 | runtime 中 `text_input` / `dictation` 只在 cascaded 主机上声明；单一会话让切换入口时上下文天然连续，文字不依赖麦克风初始化。调研表明 Nova 实际使用的 Qwen-Audio-Realtime 系官方文档支持带 `input_text` 的 user message，所以 integrated 置灰**不是 provider 协议层限制**；但完整用户文字轮次、与进行中语音轮次的取消关系、交付语义都未验证，不能概括为只补能力声明。是否为 integrated 补文字入口列为 01 卷待评审项，不影响本决策。 |
 | D3 | **记忆页以结构化条目为主，概览可选。** 每条含来源、时间、"你说过"还是"我推断"，可纠正可忘记。页首概览段落必须声明依据条数与来源范围。 | 结构化条目便于审计，纠正有明确落点；叙事画像容易出现"目录名变身份"的过度推断，且改一句要重生成整段。 |
-| D4 | **主窗口从现有 Electron 桌面长出，悬浮窗为收起态。** 不新起客户端，不以 WebUI 为主窗口。信息架构：左侧常驻对话列，右侧 动态 / 任务 / 记忆 三个 tab；具体视觉布局待评审。 | 桌面 renderer 已有 memory-board、task-banner、knowledge-panel、capabilities-editor 可搬入；同进程同状态最容易满足"收起不丢会话与任务"。WebUI 保留为远程薄客户端。 |
+| D4 | **主窗口从现有 Electron 桌面长出，悬浮窗为收起态。** 不新起客户端。信息架构：左侧常驻对话列，右侧 动态 / 任务 / 记忆 三个 tab；具体视觉布局待评审。 | 桌面 renderer 已有 memory-board、task-banner、knowledge-panel、capabilities-editor 可搬入；同进程同状态最容易满足"收起不丢会话与任务"。 |
 | D5 | **同一个输入框三态**：打字；长按录音，松手得到可编辑草稿，发送才算一轮；切到全双工，麦克风常开，输入框位置显示实时转写。 | 三种入口在协议上已分别对应 `input.text`、`input.dictation`、`input.audio`；UI 上收敛为一个控件，用户不用理解管线。 |
 | D6 | **两个主机拥有的契约对象**：`feed_item`（首页事项）与 `memory_entry`（用户视角的记忆投影，不是新存储）。UI 不持有任何权威副本。 | 它们是 A 轨与 B 轨的接口。A 轨产出并维护，B 轨渲染并回传用户动作。任务列表沿用已有的 `EXECUTOR_TASKS`。 |
 | D7 | **新开 v0.3.0 系列，里程碑从 M5 续编号。** | 定位转型在版本号上可见；v0.2.0 的"一句话目标"不被稀释。 |
@@ -122,7 +122,7 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
 - **文字输入**：`runtime/src/desktop.ts` 定义 `input.text`（≤4000 UTF-16 单元）与
   `input.dictation`（start/finish/cancel，≤60 秒 16 kHz PCM16 草稿缓冲，30 秒 ASR 超时）；
   `runtime/src/desktop-bridge.ts` 持有草稿状态机；`runtime/src/client-protocol.ts` 仅在 cascaded
-  主机上声明 `text_input` / `dictation`。桌面与 WebUI renderer 均未接线；iOS 的
+  主机上声明 `text_input` / `dictation`。桌面 renderer 未接线；iOS 的
   `clients/ios/Nova/Nova/Connection/Client.swift` 已实现文字发送与 dictation 状态机（代码已实现），
   真机验收未完成。
 - **主动机制**：`runtime/src/suggestions.ts`（`SuggestionPool`；kind `question | notify | followup`；
@@ -144,7 +144,7 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
   `runtime/src/mcp-client.ts`（stdio 与 streamable-http，≤8 外部 server，≤32 工具/server）。
   Home Assistant、AutoGLM 在源码中不存在；`thirdparty/Open-AutoGLM` 仅为参考副本，未被引用。
 - **客户端**：桌面为 Electron（`clients/desktop/src/main/*.mjs`、`clients/desktop/src/renderer/*.mjs`，
-  含 `task-banner.mjs` 解析 `EXECUTOR_TASKS`）；WebUI 为无框架 ES modules；iOS 为 SwiftUI；
+  含 `task-banner.mjs` 解析 `EXECUTOR_TASKS`）；iOS 为 SwiftUI；
   没有统一客户端 SDK，靠 `docs/protocols/client-v1.md` 与 `fixtures/client-protocol/v1/` 保持一致。
 
 ## 部署边界

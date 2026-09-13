@@ -19,7 +19,7 @@
 - **管线**：`runtime/src/production-realtime-assembly.ts` 按 `pipeline_mode` 选 `integrated`
   （单一实时语音模型，`runtime/src/realtime/qwen.ts`）或 `cascaded`（端点检测 → ASR → LLM → TTS，
   `runtime/src/realtime/cascaded/`）。
-- **客户端接线现状**：桌面 renderer（`clients/desktop/src/renderer/*.mjs`）与 WebUI 均未接
+- **客户端接线现状**：桌面 renderer（`clients/desktop/src/renderer/*.mjs`）未接
   `input.text` / `input.dictation`；iOS 的 `Client.swift` 已实现文字发送、长按 dictation 状态机
   与麦克风权限处理（**代码已实现**），但**真机验收未完成**，spec 09 仍标 planning。
 - **桌面已有面板**：`task-banner.mjs`（解析 `EXECUTOR_TASKS`：`{revision, active_project,
@@ -113,12 +113,12 @@
 - renderer 不维护第二份权威任务列表、feed 列表或记忆列表；全部从主机订阅并按 `revision` 更新。
 - 主窗口与 orb 是同一 renderer 进程的两个视图（或同一主进程的两个窗口，落地时定），
   订阅同一份状态；不存在两份连接。
-- iOS 与 WebUI 通过 `/client/v1` 消费同样的 `feed_item` / `memory_entry` / `EXECUTOR_TASKS`，
+- iOS 通过 `/client/v1` 消费同样的 `feed_item` / `memory_entry` / `EXECUTOR_TASKS`，
   但本系列不承诺它们在 M6 前实现新视图。
 
 ## 3. 不做
 
-- 不新起客户端；不以 WebUI 为主窗口。
+- 不新起客户端。
 - 不给 integrated 管线加文字入口（列为待评审，见 §5）。
 - 不改草稿缓冲、超时等协议参数。
 - 不在 renderer 跑 ASR 或任何模型。

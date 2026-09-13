@@ -61,7 +61,7 @@ A/B 轨继续并行、各自小步：A 做需求发现，B 做窗口与入口。
 
 | 子系统 | 已有 | 缺 |
 |---|---|---|
-| 文字输入 | runtime 有 `input.text` / `input.dictation`，协议已写进 client-v1；iOS Swift 已实现文字与 dictation 接线 | 桌面和 WebUI 都没接线；iOS 真机验收未完成 |
+| 文字输入 | runtime 有 `input.text` / `input.dictation`，协议已写进 client-v1；iOS Swift 已实现文字与 dictation 接线 | 桌面没接线；iOS 真机验收未完成 |
 | 主动机制 | Suggestion Pool、Surrogate 选择、Floor 仲裁 | Surrogate 不会提新建议；没有用于需求发现的低频检查；没有 feed；没有持久化的交付 / 忽略台账 |
 | 记忆 | personal-memory 端口（recall / remember / 按来源 forget）、workspace graph、开发者 memory-board | 端口没有逐条 ID、版本、列表、按条目纠正 / 忘记；没有用户视角的记忆条目和纠正 UI |
 | 来源 | 知识库有界导入与检索 | 没有持续同步、没有邮件 / 日历、没有来源管理 UI |
