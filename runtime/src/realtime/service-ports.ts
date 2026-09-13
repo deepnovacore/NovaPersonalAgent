@@ -6,9 +6,11 @@ import {
 type MemoryItem
 } from '../memory.js'
 import type { ExecutorRole } from '../ports.js'
+import type { PreemptiveAlert,UrgentHostResponseOwner } from './service-state.js'
 import {
 type HostItemOwner
 } from './service-state.js'
+import type { RealtimeSession } from './session.js'
 
 export interface DelegateLike {
   readonly delegate_id: string
@@ -81,3 +83,21 @@ export interface HostItemOptions {
       readonly owner?: HostItemOwner | null
       readonly expiresAt?: number | null
     }
+
+/** Detached observability at an awaited delivery/event boundary; reading never drives work. */
+export interface DeliverySnapshot {
+  readonly sessionEpoch: number
+  readonly floor: RealtimeSession['floor']['state']
+  readonly providerIdle: boolean
+  readonly foregroundIdle: boolean
+  readonly rendererPaused: boolean
+  readonly activeResponseId: string | null
+  readonly userResponseMode: RealtimeSession['userResponseMode']
+  readonly urgentOwner: Pick<UrgentHostResponseOwner, 'session_epoch' | 'event_id' | 'response_id' | 'delivery_token'> | null
+  readonly queuedEventIds: readonly string[]
+  readonly armedPreemptPriority: number | null
+  readonly preemptiveAlert: PreemptiveAlert | null
+  readonly epochNeedingActivation: number | null
+  readonly acknowledgementPhases: Readonly<Record<string, string>>
+  readonly continuationOrder: readonly string[]
+}

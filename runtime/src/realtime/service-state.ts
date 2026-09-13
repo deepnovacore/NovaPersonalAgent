@@ -12,9 +12,9 @@
  * which is why each is spelled out with what it protects rather than left to a comment saying "cap".
  */
 
-import type { HostResponseIntent } from './protocol.js'
 import type { PlaybackGeneration } from '../playback.js'
-import type { ToolAcceptance, ToolCallReady } from './bridge.js'
+import type { ToolAcceptance,ToolCallReady } from './bridge.js'
+import type { HostResponseIntent } from './protocol.js'
 
 /** Longest host fact the provider will be given. Beyond this the model stops attending to it. */
 export const MAX_HOST_FACT_CHARS = 3_000
@@ -333,4 +333,100 @@ export function hostFactIntent(item: {
     task_summary: null,
     origin_spoken: false,
   }
+}
+
+/**
+ * A mutual exclusion lock with FIFO ordering.
+ *
+ * FIFO rather than whoever-wins, because the delivery lock decides the order host facts reach the
+ * provider: a waiter that jumped the queue would reorder what the user hears.
+ */
+export class Mutex {
+  #locked = false
+  readonly #waiting: (() => void)[] = []
+
+  async run<T>(body: () => Promise<T>): Promise<T> {
+    await this.#acquire()
+    try {
+      return await body()
+    } finally {
+      this.#release()
+    }
+  }
+
+  get locked(): boolean {
+    return this.#locked
+  }
+
+  async #acquire(): Promise<void> {
+    if (!this.#locked) {
+      this.#locked = true
+      return
+    }
+    await new Promise<void>(resolve => {
+      this.#waiting.push(resolve)
+    })
+  }
+
+  #release(): void {
+    const next = this.#waiting.shift()
+    if (next === undefined) {
+      this.#locked = false
+      return
+    }
+    // Handed straight to the next waiter rather than unlocked and re-acquired, so nothing that
+    // arrives in between can take the lock ahead of someone already waiting.
+    next()
+  }
+}
+
+/** A latch that stays set until cleared, matching `asyncio.Event`. */
+export class Signal {
+  #set = false
+  readonly #waiting: (() => void)[] = []
+
+  set(): void {
+    this.#set = true
+    const waiting = this.#waiting.splice(0, this.#waiting.length)
+    for (const resolve of waiting) resolve()
+  }
+
+  clear(): void {
+    this.#set = false
+  }
+
+  async wait(signal?: AbortSignal): Promise<void> {
+    if (this.#set) return
+    if (signal?.aborted === true) return
+    await new Promise<void>(resolve => {
+      let settled = false
+      const finish = (): void => {
+        if (settled) return
+        settled = true
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }
+      const onAbort = (): void => {
+        const index = this.#waiting.indexOf(finish)
+        if (index >= 0) this.#waiting.splice(index, 1)
+        finish()
+      }
+      this.#waiting.push(finish)
+      // Resolves rather than rejects: an interrupted wait is a normal shutdown, and the caller
+      // re-reads the signal immediately afterwards.
+      signal?.addEventListener('abort', onAbort, {once: true})
+      // Abort may win between the early check and listener registration. EventTarget does not replay
+      // an already-fired abort event, so close that race explicitly.
+      if (signal?.aborted === true) onAbort()
+    })
+  }
+}
+
+/** Whether this rejection is an abort, which is an ordinary cancellation rather than a failure. */
+export function isAbort(cause: unknown): boolean {
+  return cause instanceof Error && (cause.name === 'AbortError' || cause.name === 'TimeoutError')
+}
+
+export function diagnosticName(cause: unknown): string {
+  return cause instanceof Error ? cause.constructor.name : typeof cause
 }
