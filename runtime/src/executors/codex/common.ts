@@ -24,7 +24,7 @@ import type {
   ExecutorProgress,
 } from '../../causal-runtime.js'
 import type {Clock} from '../../clock.js'
-import {RealClock} from '../../clock.js'
+import {RealClock, raceDeadline} from '../../clock.js'
 import {jsonValueSchema, validProgressSummary, type JsonValue} from '../../events.js'
 
 const TRANSPORT_CODES: ReadonlySet<string> = new Set<CodexTransportCode>([
@@ -133,7 +133,6 @@ export function createCodexAdapterSharedState(): CodexAdapterSharedState {
 
 export class CodexAdapterCore {
   readonly #transport: CodexAppServerTransport
-  readonly #live: boolean
   readonly #scheduler: CodexAdapterScheduler
   readonly #sharedState: CodexAdapterSharedState
   #runActive = false
@@ -143,13 +142,11 @@ export class CodexAdapterCore {
   constructor(
     transport: CodexAppServerTransport,
     options: {
-      readonly live: boolean
       readonly scheduler?: CodexAdapterScheduler
       readonly sharedState?: CodexAdapterSharedState
     },
   ) {
     this.#transport = transport
-    this.#live = options.live
     this.#scheduler = options.scheduler ?? DEFAULT_SCHEDULER
     this.#sharedState = options.sharedState ?? createCodexAdapterSharedState()
   }
@@ -169,8 +166,8 @@ export class CodexAdapterCore {
       outcome: 'ok',
       trust: 'trusted_system',
       content: requireJsonRecord(projectCodexStatus(this.#status, now, {
-        live: this.#live,
-        ...(this.#live ? {progress: this.#latestProgress} : {}),
+        live: true,
+        progress: this.#latestProgress,
       })),
     }
   }
@@ -229,7 +226,7 @@ export class CodexAdapterCore {
         if (!observerOpen || this.#runToken !== runToken) return
         const progress = sanitizeProgress(value)
         if (progress === null) return
-        if (this.#live) this.#latestProgress = progress
+        this.#latestProgress = progress
         try { context.progress(progress) } catch { /* advisory progress never owns the worker */ }
       },
       onTurnStartWritten: (): void => {
@@ -269,7 +266,7 @@ export class CodexAdapterCore {
         if (error instanceof CodexAdapterClosedError) return failureHandoff('closed', 'run')
         const code = error instanceof InvalidPreflightError
           ? 'invalid_preflight_report'
-          : safePreflightExceptionCode(error, this.#live ? 'transport_failure' : 'worker_exception_before_start')
+          : safePreflightExceptionCode(error, 'transport_failure')
         return createRunHandoff(
           'failed', 'trusted_system', code, preflight, failureStage(code, 'preflight'),
         )
@@ -298,9 +295,7 @@ export class CodexAdapterCore {
         const afterStart = sideEffectSeen
         const code = safePreflightExceptionCode(
           error,
-          this.#live
-            ? 'transport_failure'
-            : (afterStart ? 'worker_exception_after_start' : 'worker_exception_before_start'),
+          'transport_failure',
         )
         return createRunHandoff(
           afterStart ? 'unknown' : 'failed',
@@ -350,7 +345,7 @@ export class CodexAdapterCore {
         return createRunHandoff(
           'failed',
           'trusted_system',
-          this.#live && PREFLIGHT_CODES.has(admitted.code) ? admitted.code : 'worker_refused',
+          PREFLIGHT_CODES.has(admitted.code) ? admitted.code : 'worker_refused',
           preflight,
           failureStage(admitted.code, 'thread_start'),
         )
@@ -537,13 +532,9 @@ async function awaitCodexPhase<T>(start: () => Promise<T>, deadline: RunDeadline
     throw new AdapterDeadlineError()
   }
   const work = Promise.resolve().then(start)
-  const timerController = new AbortController()
-  const timeout = deadline.clock.sleep(remaining, timerController.signal).then(() => {
-    throw new AdapterDeadlineError()
-  })
-  const aborted = abortPromise(deadline.controller.signal)
   try {
-    const result = await Promise.race([work, timeout, aborted])
+    const result = await raceDeadline(work, deadline.clock, remaining, deadline.controller.signal,
+      () => new AdapterDeadlineError(), abortError)
     if (deadline.clock.now() >= deadline.expiresAt) throw new AdapterDeadlineError()
     return result
   } catch (error) {
@@ -556,10 +547,6 @@ async function awaitCodexPhase<T>(start: () => Promise<T>, deadline: RunDeadline
       throw new AdapterAbortError(late.state === 'fulfilled' ? late.value : undefined)
     }
     throw error
-  } finally {
-    timerController.abort()
-    void timeout.catch(() => undefined)
-    void aborted.catch(() => undefined)
   }
 }
 
@@ -599,13 +586,6 @@ export function readWrittenBoundary(
   } catch {
     return null
   }
-}
-
-function abortPromise(signal: AbortSignal): Promise<never> {
-  if (signal.aborted) return Promise.reject(abortError())
-  return new Promise<never>((_resolve, reject) => {
-    signal.addEventListener('abort', () => { reject(abortError()) }, {once: true})
-  })
 }
 
 function requirePreflight(value: unknown): Readonly<Record<string, unknown>> {

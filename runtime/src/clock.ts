@@ -102,6 +102,7 @@ export class RealClock implements Clock {
     await new Promise<void>((resolve, reject) => {
       const onAbort = (): void => {
         clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
         reject(abortError())
       }
       const timer = setTimeout(() => {
@@ -135,4 +136,21 @@ function abortError(): Error {
   const error = new Error('sleep aborted')
   error.name = 'AbortError'
   return error
+}
+
+/** Passive race; the caller retains operation cancellation and late-result ownership. */
+export async function raceDeadline<T>(
+  work: Promise<T>, clock: Clock, remaining: number, signal: AbortSignal | undefined,
+  timeoutError: () => Error, abortFailure: () => Error = timeoutError,
+): Promise<T> {
+  const timer = new AbortController()
+  const timeout = clock.sleep(remaining, timer.signal).then(() => { throw timeoutError() })
+  let onAbort!: () => void
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(abortFailure())
+    if (signal?.aborted === true) onAbort()
+    else signal?.addEventListener('abort', onAbort, {once: true})
+  })
+  try { return await Promise.race([work, timeout, aborted]) }
+  finally { timer.abort(); signal?.removeEventListener('abort', onAbort) }
 }

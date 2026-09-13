@@ -60,7 +60,6 @@ export class CodexLiveAdapter implements ExecutorAdapter {
     this.#scheduler = scheduler
     this.#onValidatedOutcome = host?.onValidatedOutcome
     this.#core = new CodexAdapterCore(transport, {
-      live: true,
       ...(scheduler === undefined ? {} : {scheduler}),
       ...(host?.sharedState === undefined ? {} : {sharedState: host.sharedState}),
     })

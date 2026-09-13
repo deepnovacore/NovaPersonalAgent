@@ -6,7 +6,7 @@ import { assertApiKeyProvider,assertApiKeyThread,NOVA_API_PROVIDER } from './spa
 
 import type { ExecutorProgress } from '../../causal-runtime.js'
 import type { Clock } from '../../clock.js'
-import { RealClock } from '../../clock.js'
+import { RealClock, raceDeadline } from '../../clock.js'
 import { isWellFormed,stripLikePython } from '../../python-text.js'
 import { normalizeNfcPinned } from '../../unicode-normalize.js'
 import { isOtherCategory } from '../../unicode-tables.js'
@@ -1734,34 +1734,23 @@ async function requestWithDeadline(
   validateDeadline(deadline)
   const controller = new AbortController()
   let timedOut = false
-  const remaining = Math.max(0, deadline.expiresAtMs - Date.now())
-  let rejectDeadline!: (error: Error) => void
-  const deadlineFailure = new Promise<never>((_resolve, reject) => { rejectDeadline = reject })
-  void deadlineFailure.catch(() => undefined)
-  const timer = setTimeout(() => {
+  const failDeadline = (): Error => {
     timedOut = true
     controller.abort()
-    rejectDeadline(new CodexTransportError('adapter_timeout'))
-  }, remaining)
-  const onAbort = (): void => {
-    controller.abort()
-    rejectDeadline(new CodexTransportError('adapter_timeout'))
+    return new CodexTransportError('adapter_timeout')
   }
-  deadline.signal?.addEventListener('abort', onAbort, {once: true})
   try {
     const request = operation(controller.signal)
-    const candidates: Promise<unknown>[] = [request, deadlineFailure]
+    const candidates: Promise<unknown>[] = [request]
     if (sessionFailure !== undefined) candidates.push(sessionFailure.then(error => {
       controller.abort()
       throw error
     }))
-    return await Promise.race(candidates)
+    return await raceDeadline(Promise.race(candidates), REAL_SCHEDULER.clock,
+      Math.max(0, deadline.expiresAtMs - Date.now()) / 1000, deadline.signal, failDeadline)
   } catch (error) {
     if (timedOut || deadline.signal?.aborted === true) throw new CodexTransportError('adapter_timeout')
     throw error
-  } finally {
-    clearTimeout(timer)
-    deadline.signal?.removeEventListener('abort', onAbort)
   }
 }
 
@@ -1771,21 +1760,8 @@ async function runWithin<T>(
   timeoutCode: CodexTransportCode,
 ): Promise<T> {
   validateDeadline(deadline)
-  let timer: NodeJS.Timeout | undefined
-  let onAbort: (() => void) | undefined
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => { reject(new CodexTransportError(timeoutCode)) }, deadline.expiresAtMs - Date.now())
-    if (deadline.signal !== undefined) {
-      onAbort = () => { reject(new CodexTransportError(timeoutCode)) }
-      deadline.signal.addEventListener('abort', onAbort, {once: true})
-    }
-  })
-  try {
-    return await Promise.race([operation, timeout])
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-    if (onAbort !== undefined) deadline.signal?.removeEventListener('abort', onAbort)
-  }
+  return await raceDeadline(operation, REAL_SCHEDULER.clock,
+    Math.max(0, deadline.expiresAtMs - Date.now()) / 1000, deadline.signal, () => new CodexTransportError(timeoutCode))
 }
 
 async function writeDrain(stream: Writable, bytes: Uint8Array): Promise<void> {
