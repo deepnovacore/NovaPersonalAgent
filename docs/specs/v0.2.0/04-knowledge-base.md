@@ -1,6 +1,6 @@
 # 04. Knowledge Base (RAG)
 
-> 摘要：新增独立的知识层 K（用户策展文档），与 L0–L4 工作区图分离。本地 SQLite Worker 存 sources / chunks / embeddings；默认 DashScope `text-embedding-v4`，仅支持 DashScope，旧 local 配置明确拒绝。混合检索（向量 + FTS5，RRF）。检索面：内置 Knowledge MCP 的 `mcp__nova_knowledge__recall`、工作单引用（只附加当前执行端能解析的定位符）、可选 Codex 用的 loopback `nova-knowledge` MCP（开启即必须提供 `get_chunk`）。数据流向在设置页明示。默认不自动注入 ContextView。
+> 摘要：新增独立的知识层 K（用户策展文档），与当前对话和个人记忆分离。本地 SQLite Worker 存 sources / chunks / embeddings；默认 DashScope `text-embedding-v4`，仅支持 DashScope，旧 local 配置明确拒绝。混合检索（向量 + FTS5，RRF）。检索面：内置 Knowledge MCP 的 `mcp__nova_knowledge__recall`、工作单引用（只附加当前执行端能解析的定位符）、可选 Codex 用的 loopback `nova-knowledge` MCP（开启即必须提供 `get_chunk`）。数据流向在设置页明示。默认不自动注入 ContextView。
 
 > 决定（2026-09-05，用户确认）：M4 纳入本轮实施。知识检索不新增原生语音工具，改为默认保留名称的内置 Knowledge MCP；模块默认关闭。`get_chunk` 仅投射给 Codex，导入/移除/重建仅走宿主入口。本卷描述验收目标，进度以 STATUS 台账为准。
 >

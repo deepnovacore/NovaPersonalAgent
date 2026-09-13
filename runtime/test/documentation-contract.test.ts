@@ -187,7 +187,7 @@ test('current architecture and numbered specs do not depend on the retired graph
       if (!/^\d.*\.md$/u.test(file)) continue
       const text = await readFile(resolve(repositoryRoot, root, file), 'utf8')
       assert.doesNotMatch(text, /workspace-graph\/|workspace_graph|NOVA_AUDIO_AGENT_WORKSPACE_GRAPH|GraphContext|PublishedGraphSnapshot/u, `${root}/${file}`)
-      assert.doesNotMatch(text, /Workspace Graph|workspace graph/u, `${root}/${file}`)
+      assert.doesNotMatch(text, /Workspace Graph|workspace graph|工作区图/u, `${root}/${file}`)
     }
   }
 })
