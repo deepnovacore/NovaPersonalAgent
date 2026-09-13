@@ -47,6 +47,11 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: package-lock.json
+      - name: Validate candidate version before building and naming artifacts
+        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: node clients/desktop/scripts/check-release-version.mjs
       - run: npm install --global npm@11.6.0
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
       - run: npm ci

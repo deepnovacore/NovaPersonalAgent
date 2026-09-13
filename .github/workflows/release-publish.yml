@@ -49,11 +49,9 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          node -e 'if (!/^\d+\.\d+\.\d+$/.test(process.argv[1])) process.exit(1)' "$RELEASE_VERSION"
+          node clients/desktop/scripts/check-release-version.mjs
           test "$EXPECTED_COMMIT" = "$(git rev-parse HEAD)"
           git merge-base --is-ancestor "$EXPECTED_COMMIT" origin/main
-          test "$(node -p "require('./cli/package.json').version")" = "$RELEASE_VERSION"
-          test "$(node -p "require('./clients/desktop/package.json').version")" = "$RELEASE_VERSION"
           gh run view "$CANDIDATE_RUN_ID" --json headSha,jobs,name > candidate-run.json
           test "$(jq -r .name candidate-run.json)" = "Release candidate evidence"
           test "$(jq -r .headSha candidate-run.json)" = "$EXPECTED_COMMIT"

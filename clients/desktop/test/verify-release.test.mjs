@@ -4,6 +4,8 @@ import {tmpdir} from 'node:os'
 import {dirname, join} from 'node:path'
 import {PassThrough} from 'node:stream'
 import test from 'node:test'
+import {spawnSync} from 'node:child_process'
+import {fileURLToPath} from 'node:url'
 import {createPackageWithOptions, uncache} from '@electron/asar'
 import {inspectApplication, readReadiness} from '../scripts/verify-release.mjs'
 import {expectedNativeResources} from '../scripts/native-resource-contract.mjs'
@@ -13,6 +15,25 @@ async function file(root, name, body = 'fixture') {
   await mkdir(dirname(join(root, name)), {recursive: true})
   await writeFile(join(root, name), body)
 }
+
+test('release version gate rejects stale candidate inputs and divergent package versions', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'nova-release-version-'))
+  const script = fileURLToPath(new URL('../scripts/check-release-version.mjs', import.meta.url))
+  try {
+    for (const [candidate, cli, desktop, accepted] of [
+      ['1.2.3', '1.2.3', '1.2.3', true],
+      ['0.1.1', '1.2.3', '1.2.3', false],
+      ['1.2.3', '1.2.4', '1.2.3', false],
+      ['1.2.3', '1.2.3', '1.2.4', false],
+      ['invalid', 'invalid', 'invalid', false],
+    ]) {
+      await file(root, 'cli/package.json', JSON.stringify({version: cli}))
+      await file(root, 'clients/desktop/package.json', JSON.stringify({version: desktop}))
+      const result = spawnSync(process.execPath, [script], {cwd: root, env: {...process.env, RELEASE_VERSION: candidate}, encoding: 'utf8'})
+      assert.equal(result.status === 0, accepted, `${candidate}/${cli}/${desktop}: ${result.stderr}`)
+    }
+  } finally { await rm(root, {recursive: true, force: true}) }
+})
 
 test('release verifier rejects packed native modules and missing unpacked resources', async () => {
   const root = await mkdtemp(join(tmpdir(), 'nova-release-test-'))

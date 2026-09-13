@@ -72,11 +72,21 @@ test('shared config overrides disable inherited tools without replacing the home
     shell_environment_policy: {set: {EXTERNAL_VALUE: 'private'}},
   }}, ['managed'])
   assert.ok(args.includes('features.js_repl=false'))
-  assert.ok(args.includes('mcp_servers.external.enabled=false'))
+  assert.ok(args.includes('mcp_servers={ "external" = { "enabled" = false } }'))
   assert.ok(args.includes('shell_environment_policy.set.EXTERNAL_VALUE=""'))
   assert.equal(args.includes('mcp_servers={}'), false)
   assert.equal(args.some(arg => arg.includes('managed')), false)
-  assert.throws(() => sharedHomeOverrides({config: {mcp_servers: {'ambiguous.key': {}}}}, []))
+})
+
+test('shared config disables quoted MCP names without admitting inherited tools or copying their secrets', () => {
+  const args = sharedHomeOverrides({config: {mcp_servers: {
+    'corp.tools': {enabled: false, command: 'private-command'},
+    'quoted"name': {enabled: true}, managed: {enabled: true},
+  }}}, ['managed'])
+  assert.deepEqual(args.filter(value => value.startsWith('mcp_servers=')), [
+    'mcp_servers={ "corp.tools" = { "enabled" = false }, "quoted\\"name" = { "enabled" = false } }',
+  ])
+  assert.equal(args.some(value => value.includes('private-command') || value.includes('managed')), false)
 })
 
 
