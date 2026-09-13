@@ -22,6 +22,7 @@ here propose deltas and never silently rewrite those volumes.
 | [03 用户视角记忆](03-user-memory-view.md) | `memory_entry` 投影；来源、stated/inferred；纠正与忘记的回写与传播；概览段落的覆盖声明 | A 与 B 交界 |
 | [04 来源与 connector](04-sources-and-connectors.md) | 用户配置的本地目录优先；一个邮件/日历 provider；授权、暂停、断开、删除；MCP 作为暴露方式 | C |
 | [05 Coding 与 GUI 执行器](05-coding-and-gui-executors.md) | Kimi Code / pi agent；GUI 与 AutoGLM example；agent2agent 真实闭环与发布证据 | D |
+| [06 记忆底座](06-memory-substrate.md) | 账本 / 条目 / 视图三阶段；`evidence_record` 与 `entry_revision` 契约；merge 唯一写入口；Discovery 拆为抽取与筛选 | A 与 C 交界 |
 | [STATUS](STATUS.zh-CN.md) | 白话进度页：里程碑、依赖、退出条件、待拍板事项 | 共同 |
 
 ## 本版三项明确主线（2026-09-10 规划补充）
@@ -59,6 +60,7 @@ Home Assistant 是后续扩展候选，不是本版必交付项。以下编号�
 | D5 | **同一个输入框三态**：打字；长按录音，松手得到可编辑草稿，发送才算一轮；切到全双工，麦克风常开，输入框位置显示实时转写。 | 三种入口在协议上已分别对应 `input.text`、`input.dictation`、`input.audio`；UI 上收敛为一个控件，用户不用理解管线。 |
 | D6 | **两个主机拥有的契约对象**：`feed_item`（首页事项）与 `memory_entry`（用户视角的记忆投影，不是新存储）。UI 不持有任何权威副本。 | 它们是 A 轨与 B 轨的接口。A 轨产出并维护，B 轨渲染并回传用户动作。任务列表沿用已有的 `EXECUTOR_TASKS`。 |
 | D7 | **新开 v0.3.0 系列，里程碑从 M5 续编号。** | 定位转型在版本号上可见；v0.2.0 的"一句话目标"不被稀释。 |
+| D8 | **记忆收敛为一套三阶段底座（2026-09-12）。** A 账本只追加并**存原文**，来源断开物理删除；B 条目是只追加的修订日志，merge 是唯一写入口，用户纠正与模型合并是同一种修订记录；C 视图只读重算。VoiceMem 可迁为写入方；底座按新契约直接实现。Discovery 拆为入库抽取与 tick 筛选。飞书 IM 与邮件都在本版范围（M8-IM、M8-Mail）。 | 现有记忆能力无法满足 D3 / D6 要求的逐条 ID、版本、纠正传播；按参考项目分层会加剧分散。可追溯是属性不是层。存原文换来重抽取能力，代价是字段级敏感策略、物理删除与保留期成为硬要求。详见 [06 卷](06-memory-substrate.md) 与 [对照记录](../../design-notes/2026-09-12-memory-references-comparison.zh-CN.md)。 |
 
 ## Goals
 
@@ -66,7 +68,7 @@ Home Assistant 是后续扩展候选，不是本版必交付项。以下编号�
 2. **入口切换不换助手、不丢事情。** 文字提交任务后收起窗口，用语音继续问同一任务，不重复创建工作。
 3. **有依据的主动发现。** 需求来自对话、任务变化、获准访问的资料和个人记忆；每条建议能追溯依据；没有依据时保持沉默。无任务时也能基于记忆主动关心。
 4. **记忆可见、可纠正、可忘记。** 用户看到的是带来源和时间的理解，纠正后检索和未交付建议都看到新状态。
-5. **来源由用户授权、范围可见。** 用户自己选目录、账户和范围；覆盖范围、解析失败与同步状态对用户可见。
+5. **来源由用户授权、范围可见。** 用户自己选目录、账户和范围；覆盖范围、解析失败与同步状态对用户可见。本版来源包括本地目录、一个邮件 / 日历 provider 和飞书 IM；飞书同时是主动提议的投递渠道。
 6. **专长执行器可替换。** Kimi Code、pi agent 与 GUI/AutoGLM 共用主机授权和结果事实；用真实 agent2agent 闭环验证边界。
 
 ## Non-goals (v0.3.0)
@@ -84,20 +86,20 @@ Home Assistant 是后续扩展候选，不是本版必交付项。以下编号�
 ## 两条轨道与里程碑顺序
 
 ```text
-M5-B 文字入桌面 ──┐                          ┌── M6-B 动态页
-                  ├── 契约 feed_item /       │
-M5-A proposal 闭环 ┘   memory_entry 钉住 ────┼── M6-A 记忆页
-                                              │
-                                              └── M7 本地目录来源 ── M8 邮件/日历
+M5-B 文字入桌面 ──┐                                        ┌── M6-B 动态页
+                  ├── 契约 feed_item /  ── 记忆底座 ────────┤
+M5-A proposal 闭环 ┘   memory_entry 钉住   (06 卷 A/B/C)    ├── M6-A 记忆页
+                                                            │
+                                                            └── M7 本地目录来源 ─┬─ M8-Mail 邮件/日历
+                                                                                 └─ M8-IM 飞书
 
 v0.2 执行器/审批边界 ── M9-C Kimi Code + pi agent ──┐
                      └─ M9-G GUI / AutoGLM ─────────┴─ M9-Demo agent2agent
 ```
 
 - **M5-A 与 M5-B 互不依赖，可同时开工。** M5-A 在现有悬浮窗和 iOS 输入框上验证；M5-B 只做输入框三态接线和主窗口骨架（对话列 + 复用 task-banner 的任务 tab）。
-- **M6 两项都依赖契约对象先在 02、03 卷钉住并有 fixtures**，以及 03 卷 §2.1 的 personal-memory
-  端口扩展（`list` / `get` / `correct` / `forgetEntry`）与 02 卷的持久化交付 / 忽略台账先落地。契约字段在 02（`feed_item`）和 03（`memory_entry`）给出完整表；本卷只给概念定义。
-- **M7 起属于 C 轨（来源）**，依赖 M6-A 的记忆回写路径（来源删除要传播到记忆与 feed）。
+- **M6 两项都依赖契约对象先在 02、03 卷钉住并有 fixtures**，以及"记忆底座"里程碑（06 卷 `evidence_record` / `entry_revision` schema 与 fixtures）与 02 卷的持久化交付 / 忽略台账先落地。03 卷 §2.1 的 `list` / `get` / `correct` / `forgetEntry` 由底座提供。契约字段在 02（`feed_item`）、03（`memory_entry`）、06（底座）给出完整表；本卷只给概念定义。
+- **M7 起属于 C 轨（来源）**，依赖记忆底座与 M6-A 的记忆回写路径（来源删除要物理删除账本行并传播到记忆与 feed）。M8-Mail 与 M8-IM 并行，都依赖 M7 的来源管理路径；先上哪个真实账号验收待评审。
 - **M9 属于 D 轨（执行生态）**，M9-C 与 M9-G 可和 M5/M6 并行，不依赖 M7/M8；依赖 v0.2 执行器与审批契约，各后端验收后进入 M9-Demo。详见 [05](05-coding-and-gui-executors.md)。
 - 不写日期。每个里程碑只写依赖与退出条件，见 [STATUS](STATUS.zh-CN.md)。
 
@@ -106,7 +108,9 @@ v0.2 执行器/审批边界 ── M9-C Kimi Code + pi agent ──┐
 | 对象 | 回答的问题 | 拥有者 | 完整字段 |
 |---|---|---|---|
 | `feed_item` | 用户现在需要看见和处理什么 | 主机；由 Suggestion Pool 的准入结果生成和更新 | [02 卷](02-need-discovery-and-feed.md) |
-| `memory_entry` | Nova 对用户形成了什么理解，依据是什么 | 主机；是 personal-memory 端口之上的投影 | [03 卷](03-user-memory-view.md) |
+| `memory_entry` | Nova 对用户形成了什么理解，依据是什么 | 主机；是 06 卷底座当前态的投影 | [03 卷](03-user-memory-view.md) |
+| `evidence_record` | 实际读到了什么、从哪来、什么时候 | 主机；账本行，只追加，存原文 | [06 卷](06-memory-substrate.md) |
+| `entry_revision` | 一条理解的某次修订：谁写的、依据什么、替代了哪次 | 主机；只经 merge 写入 | [06 卷](06-memory-substrate.md) |
 
 两者都是**接口内容，不是已发布的 wire schema**。落地时以 zod schema 与 `fixtures/` 下的
 golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `client.command` /

@@ -152,10 +152,10 @@ export function deriveOrbState(input) {
   })
 }
 
-// Sleep owns the compact presentation, regardless of hover or background work.
-// Inactive standby still expands on hover; confirmation surfaces retain room.
+// Hover reveals controls without changing audio wake state.
+// Background work alone must not expand a sleeping orb.
 export function orbDormant(input) {
-  if (input?.wakeState === 'sleeping') return !input.confirmationVisible && !input.bubblesVisible
+  if (input?.wakeState === 'sleeping') return !input.hovered && !input.confirmationVisible && !input.bubblesVisible
   return input?.stateName === 'inactive'
     && input.hovered !== true
     && input.executorWorking !== true

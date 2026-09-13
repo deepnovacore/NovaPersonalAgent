@@ -80,7 +80,7 @@ function updateResultButton() {
   lastResultButton.setAttribute('aria-label', lastResultButton.title)
 }
 const applyBubbleLayout = layout => {
-  const active = layout?.rows > 0 && !layout.suppressed
+  const active = (layout?.rows > 0 || layout?.taskHeightCss > 0) && !layout.suppressed
   const changed = shell.dataset.bubbles !== String(active)
   shell.dataset.bubbles = String(active)
   if (active) {
@@ -95,7 +95,7 @@ const applyBubbleLayout = layout => {
   if (changed) render()
 }
 const taskArea = createTaskAreaReservation({
-  reserve: rows => window.novaAudioAgentDesktop.windowLayout.reserveBubbleArea(rows),
+  reserve: (rows, taskRows) => window.novaAudioAgentDesktop.windowLayout.reserveBubbleArea(rows, taskRows),
   onLayout: layout => {
     applyBubbleLayout(layout)
     taskBanner?.applyLayout(layout)
@@ -325,6 +325,7 @@ function render() {
   setAttribute(orb, 'role', sleeping ? 'button' : 'img')
   setAttribute(orb, 'tabindex', sleeping ? '0' : '-1')
   setText(codexSummary, state.projectLabel)
+  setAttribute(codexSummary, 'title', state.projectLabel)
   setText(codexOperation, state.confirmationOperation)
   setAttribute(codexOperation, 'title', state.confirmationOperation)
   setText(codexExpiry, state.confirmationCompactStatus)
@@ -616,8 +617,9 @@ function applyWakeState(value) {
   // Sleeping used to be invisible — main hid the whole window — so the state
   // was read only for audio routing. It now drives the dormant bubble, so the
   // renderer has to keep it.
+  const wasSleeping = axes.wakeState === 'sleeping'
   axes.wakeState = typeof value?.state === 'string' ? value.state : 'active'
-  if (axes.wakeState === 'sleeping') axes.hovered = false
+  if (!wasSleeping && axes.wakeState === 'sleeping') axes.hovered = false
   taskBanner.setSuspended(axes.wakeState === 'sleeping')
   if (axes.wakeState === 'sleeping') void progressBubbles.clear()
   sleepButton.title = value?.status === 'ready' && !axes.muted ? '休眠（Ctrl+L）；点击或说“你好星核”唤醒' : '休眠；唤醒词不可用时请点击恢复'
@@ -1321,12 +1323,12 @@ orb.addEventListener('contextmenu', event => {
   event.preventDefault()
   window.novaAudioAgentDesktop.orbMenu.show()
 })
-// Hover expands inactive standby, but explicit sleep waits for a wake action. `mouseenter`/`mouseleave` rather than `mouseover`:
+// Hover reveals controls in both sleep and inactive standby without waking audio. `mouseenter`/`mouseleave` rather than `mouseover`:
 // they do not bubble from the rail buttons, so crossing between the orb and a
 // control cannot flap the window bounds. The window shrinks around its own
 // centre, so the pointer stays inside the bubble it just shrank onto.
 document.body.addEventListener('mouseenter', () => {
-  if (axes.hovered || axes.wakeState === 'sleeping') return
+  if (axes.hovered) return
   axes.hovered = true
   render()
 })

@@ -604,3 +604,29 @@ test('Qwen sends original pixels through tool continuations and strips them from
   assert.match(requests[2]!, /call-1/u)
   await llm.close()
 })
+
+test('DeepSeek official stream keeps tool history, disables thinking and meters KV cache', async () => {
+  const requests: Record<string, unknown>[] = [], reports: UsageReport[] = []
+  const responses = [
+    sse([{id: 'ds-1', choices: [{delta: {tool_calls: [{index: 0, id: 'call-ds', type: 'function', function: {name: 'lookup', arguments: '{}'}}]}, finish_reason: 'tool_calls'}]}]),
+    sse([{id: 'ds-2', choices: [{delta: {content: 'done'}, finish_reason: 'stop'}]}, {choices: [], usage: {prompt_tokens: 120, completion_tokens: 2, prompt_cache_hit_tokens: 96}}]),
+  ]
+  const session = createQwenCascadedLlmFactory({provider: 'deepseek', baseUrl: 'https://api.deepseek.com', apiKey: 'deepseek-test', model: 'deepseek-flash', instructions: 'instructions', onUsage: report => reports.push(report),
+    fetchImpl: (url, init) => {
+      assert.equal(url, 'https://api.deepseek.com/chat/completions')
+      assert.equal((init!.headers as Record<string, string>).authorization, 'Bearer deepseek-test')
+      assert.equal(typeof init!.body, 'string')
+      requests.push(JSON.parse(init!.body as string) as Record<string, unknown>)
+      return Promise.resolve(responses.shift()!)
+    },
+  }).open()
+  const tools = [{name: 'lookup', parameters: {type: 'object', properties: {}}}]
+  const first = await collect(session.stream({inputs: [{kind: 'user_text', text: 'lookup'}], tools, signal: new AbortController().signal}))
+  assert.ok(first.some(event => event.kind === 'tool_call' && event.call_id === 'call-ds'))
+  await collect(session.stream({inputs: [{kind: 'tool_result', call_id: 'call-ds', output: {ok: true}}], tools, signal: new AbortController().signal}))
+  await session.close()
+  assert.deepEqual(requests[0]!.thinking, {type: 'disabled'})
+  assert.equal((requests[1]!.messages as {role: string}[]).filter(message => message.role === 'tool').length, 1)
+  assert.equal(reports.at(-1)?.provider, 'deepseek')
+  assert.equal(reports.at(-1)?.cachedTokens, 96)
+})

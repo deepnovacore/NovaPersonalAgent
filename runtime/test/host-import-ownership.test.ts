@@ -57,7 +57,7 @@ test('desktop entry reaches coding-disabled composition without importing or con
     export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)};
     export function loadSettings() { return {...load({DASHSCOPE_API_KEY: 'fixture'}), executors: ['codex']}; }`
   const registry = `export function loadCapabilityRegistry() { return {modules: {coding: {enabled: false}, knowledge: {enabled: false}}, overrides: [], mcpServers: {}, serverStatuses: []}; }`
-  const telemetry = `export function createRealtimeTelemetry() { return {close() {}}; }`
+  const telemetry = `export function createRealtimeTelemetry() { return {record() {}, close() {}}; }`
   const replacements = {[new URL('../src/desktop/desktop-session.js', import.meta.url).href]: desktop, [new URL('../src/config/config.js', import.meta.url).href]: config, [new URL('../src/config/capability-registry.js', import.meta.url).href]: registry, [new URL('../src/realtime/telemetry.js', import.meta.url).href]: telemetry}
   const hook = `export async function resolve(specifier, context, next) {
     const replacements = ${JSON.stringify(replacements)};
@@ -102,7 +102,7 @@ test('actual desktop entry passes prepared external and knowledge MCP into the c
         transport: 'streamable-http', url: 'http://127.0.0.1:19888/mcp', headers: {},
         tools: {recall: {enabled: true, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2}}}}}; }`
   const configUrl = new URL('../src/config/config.js', import.meta.url).href
-  const replacements = {[new URL('../src/knowledge/assembly.js', import.meta.url).href]: knowledge, [new URL('../src/desktop/desktop-session.js', import.meta.url).href]: desktop, [new URL('../src/config/config.js', import.meta.url).href]: `import {loadSettings as load} from ${JSON.stringify(configUrl)}; export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)}; export function loadSettings() { return {...load({DASHSCOPE_API_KEY: 'fixture'}), executors: ['codex']}; }`, [new URL('../src/config/capability-registry.js', import.meta.url).href]: registry, [new URL('../src/realtime/telemetry.js', import.meta.url).href]: `export function createRealtimeTelemetry() { return {close() {}}; }`, [new URL('../src/executors/codex/host.js', import.meta.url).href]: host}
+  const replacements = {[new URL('../src/knowledge/assembly.js', import.meta.url).href]: knowledge, [new URL('../src/desktop/desktop-session.js', import.meta.url).href]: desktop, [new URL('../src/config/config.js', import.meta.url).href]: `import {loadSettings as load} from ${JSON.stringify(configUrl)}; export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)}; export function loadSettings() { return {...load({DASHSCOPE_API_KEY: 'fixture'}), executors: ['codex']}; }`, [new URL('../src/config/capability-registry.js', import.meta.url).href]: registry, [new URL('../src/realtime/telemetry.js', import.meta.url).href]: `export function createRealtimeTelemetry() { return {record() {}, close() {}}; }`, [new URL('../src/executors/codex/host.js', import.meta.url).href]: host}
   const hook = `export async function resolve(specifier, context, next) {
     const replacements = ${JSON.stringify(replacements)};
     if (['/desktop-entry.js', '/production-composition.js'].some(path => context.parentURL?.endsWith(path)) && replacements[new URL(specifier, context.parentURL).href]) return {url: 'data:text/javascript,' + encodeURIComponent(replacements[new URL(specifier, context.parentURL).href]), shortCircuit: true};
@@ -132,7 +132,7 @@ test('actual desktop entry preserves production provider usage through private I
       export function loadSettings() { return load({DASHSCOPE_API_KEY: 'fixture', NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated'}); }`,
     [new URL('../src/config/capability-registry.js', import.meta.url).href]: `import {parseCapabilityRegistry} from ${JSON.stringify(registryUrl)};
       export function loadCapabilityRegistry() { return parseCapabilityRegistry({version: 1, modules: {coding: {enabled: false}, knowledge: {enabled: false}, search: {enabled: false}, camera: {enabled: false}}}); }`,
-    [new URL('../src/realtime/telemetry.js', import.meta.url).href]: `export function createRealtimeTelemetry() { return {close() {}}; }`,
+    [new URL('../src/realtime/telemetry.js', import.meta.url).href]: `export function createRealtimeTelemetry() { return {record() {}, close() {}}; }`,
   }
   const provider = `export class QwenAudioRealtimeAdapter {
     constructor(options) { options.onUsage(${JSON.stringify(report)}); throw new Error('usage-provider-reached'); }

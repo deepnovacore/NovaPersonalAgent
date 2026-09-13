@@ -675,6 +675,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     try {
       this.#record('volcengine.asr.connect', {epoch: owner.epoch})
       session = await this.#asrClient.open(signal)
+      this.#record('volcengine.asr.connected', {epoch: owner.epoch, item_id: itemId})
     } catch {
       if (!this.#isCurrent(owner)) return
       await this.#emit(owner, {
@@ -934,7 +935,9 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       let visualInputs = inputs
       if (this.#captureFrame && inputs.some(item => item.kind === 'user_text')) {
         try {
+          this.#record('cascaded.vision.requested', {epoch: owner.epoch, response_id: active.id})
           const image = await this.#captureFrame(signal)
+          this.#record('cascaded.vision.completed', {epoch: owner.epoch, response_id: active.id})
           validateOriginalImage(image)
           throwIfAborted(signal)
           if (!this.#isCurrent(owner) || owner.response !== active) return
@@ -944,6 +947,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           visualInputs = inputs.map(item => item.kind === 'user_text' ? {...item, text: item.text + '\n[主机状态：本轮摄像头取帧失败。请明确告诉用户本轮未取得画面，不要假装看到了。]'} : item)
         }
       }
+      this.#record('cascaded.llm.requested', {epoch: owner.epoch, response_id: active.id})
       for await (const event of owner.llm.stream({
         inputs: visualInputs.map(item => structuredClone(item)),
         tools: allowTools ? owner.tools.map(tool => structuredClone(tool)) : [],
@@ -956,7 +960,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         if (event.kind === 'response_started') {
           if (llmResponseId !== null) throw new Error('duplicate LLM response identity')
           llmResponseId = event.response_id
-          this.#record('cascaded.llm.started', {epoch: owner.epoch})
+          this.#record('cascaded.llm.started', {epoch: owner.epoch, response_id: active.id})
           active.tts = this.#newTtsState(active.id, signal)
           this.#prewarmTts(owner, active.tts)
         } else if (event.kind === 'text_delta') {
@@ -967,7 +971,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           if (transcriptLength > MAX_REALTIME_TEXT) throw new Error('LLM response text overflow')
           transcript.push(event.text)
           if (transcriptLength === [...event.text].length) {
-            this.#record('cascaded.llm.first_text', {epoch: owner.epoch})
+            this.#record('cascaded.llm.first_text', {epoch: owner.epoch, response_id: active.id})
           }
           await this.#emit(owner, {
             kind: 'response_transcript_delta', session_epoch: owner.epoch,
@@ -983,7 +987,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           pendingTool = event
           owner.pendingToolCallId = event.call_id
           await this.#cancelTts(owner, active)
-          this.#record('cascaded.llm.tool_call', {epoch: owner.epoch})
+          this.#record('cascaded.llm.tool_call', {epoch: owner.epoch, response_id: active.id})
         } else if (event.kind === 'response_failed') {
           if (llmResponseId !== null && event.response_id !== llmResponseId) throw new Error('LLM failure identity mismatch')
           throw new Error('LLM stable provider failure')
@@ -1113,7 +1117,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       const session = await this.#ensureTts(owner, state)
       if (!state.firstTextRecorded) {
         state.firstTextRecorded = true
-        this.#record('volcengine.tts.first_text', {epoch: owner.epoch})
+        this.#record('volcengine.tts.first_text', {epoch: owner.epoch, response_id: state.responseId})
       }
       await session.sendText(text, combineSignals(state.responseSignal, state.controller.signal))
     } catch {
@@ -1139,7 +1143,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       if (pcm.byteLength === 0 || pcm.byteLength % 2 !== 0) throw new TtsResponseFailure()
       if (!state.audioEmitted) {
         state.audioEmitted = true
-        this.#record('volcengine.tts.first_audio', {epoch: owner.epoch})
+        this.#record('volcengine.tts.first_audio', {epoch: owner.epoch, response_id: state.responseId})
       }
       await this.#emit(owner, {
         kind: 'response_audio_delta', session_epoch: owner.epoch,

@@ -99,6 +99,8 @@ export class HostDelivery {
       && generation.generation_epoch === generationEpoch
       && this.#ports.telemetry !== undefined
     ) {
+      this.#ports.telemetry.record('playback.started', {session_epoch: generation.session_epoch,
+        response_id: generation.response_id, utterance_id: utteranceId, generation_epoch: generationEpoch})
       const attribution = this.#playbackAttribution(generation.response_id)
       if (attribution !== null) this.#ports.telemetry.record('playback.attribution', attribution)
     }

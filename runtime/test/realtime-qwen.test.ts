@@ -1368,3 +1368,16 @@ test('Qwen realtime close without request has no usage; dispatched response miss
   }
   assert.equal(reports[0]?.status, 'missing')
 })
+
+for (const model of ['qwen3.5-omni-flash-realtime', 'qwen3.5-omni-plus-realtime']) {
+  test(`${model} uses Omni session settings`, async () => {
+    const scripted = scriptedSocket([...handshake])
+    const adapter = adapterFor(scripted, {model, voice: 'Ethan'})
+    await adapter.connect({tools: [], signal: new AbortController().signal})
+    const session = scripted.sent.find(frame => frame.type === 'session.update')!.session as Record<string, unknown>
+    assert.deepEqual(session.turn_detection, {type: 'semantic_vad'})
+    assert.equal(session.voice, 'Ethan')
+    assert.equal('max_history_turns' in session, false)
+    await adapter.close()
+  })
+}

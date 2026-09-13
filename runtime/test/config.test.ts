@@ -11,6 +11,7 @@ import {
   requireVolcengineRealtime,
   resolveCascadedSelection,
   resolveModelApiKey,
+  resolveWatchModelConnection,
   resolveProactivity,
   settingsSchema,
 } from '../src/config/config.js'
@@ -21,6 +22,18 @@ test('DashScope key also configures support models only on the DashScope endpoin
   assert.equal(resolveModelApiKey(loadSettings({...env, NOVA_AUDIO_AGENT_MODEL_BASE_URL: DASHSCOPE_COMPATIBLE_BASE_URL})), env.DASHSCOPE_API_KEY)
   assert.equal(resolveModelApiKey(loadSettings({...env, NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://example.com/v1'})), null)
   assert.equal(resolveModelApiKey(loadSettings({...env, NOVA_AUDIO_AGENT_MODEL_API_KEY: 'custom-test-key'})), 'custom-test-key')
+})
+
+test('a monitor preset loads its own provider credential independently of the conversation provider', () => {
+  const integrated = loadSettings({NOVA_AUDIO_AGENT_WATCH_MODEL: 'doubao-seed-2-0-pro-260215', ARK_API_KEY: 'ark-test'})
+  assert.equal(integrated.ark_api_key, 'ark-test')
+  assert.deepEqual(resolveWatchModelConnection(integrated), {baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', apiKey: 'ark-test'})
+  const cascaded = loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
+    NOVA_AUDIO_AGENT_WATCH_MODEL: 'qwen3-vl-plus', DASHSCOPE_API_KEY: 'qwen-test'})
+  assert.equal(cascaded.dashscope_api_key, 'qwen-test')
+  assert.deepEqual(resolveWatchModelConnection(cascaded), {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: 'qwen-test'})
+  assert.throws(() => resolveWatchModelConnection(loadSettings({NOVA_AUDIO_AGENT_WATCH_MODEL: 'doubao-seed-2-0-pro-260215', DASHSCOPE_API_KEY: 'qwen-test'})), /ARK_API_KEY/)
+  assert.equal(resolveWatchModelConnection(loadSettings({NOVA_AUDIO_AGENT_WATCH_MODEL: 'custom-model'})), null)
 })
 
 test('pipeline defaults are product-shaped and cascaded defaults use Qwen Flash', () => {
@@ -731,4 +744,12 @@ test('unsupported embedding providers are rejected without a cloud fallback', ()
     assert.throws(() => settingsSchema.parse({embedding_provider: provider}),
       /dashscope/u)
   }
+})
+
+test('DeepSeek cascade uses its official credential and Flash model', () => {
+  const settings = loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'deepseek-test', DOUBAO_BIGMODEL_API_KEY: 'speech-test'})
+  const selection = resolveCascadedSelection(settings)
+  assert.equal(selection.llmModel, 'deepseek-flash')
+  assert.equal(requireCascadedCredentials(settings, selection).llmApiKey, 'deepseek-test')
+  assert.throws(() => requireCascadedCredentials(loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'deepseek', DASHSCOPE_API_KEY: 'wrong-key'}), selection), /DEEPSEEK_API_KEY/)
 })

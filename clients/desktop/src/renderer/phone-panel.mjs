@@ -1,7 +1,7 @@
 export const PHONE_STATES = {
   idle: ['建立设备连接', '在 iPhone 上继续与这台电脑的 Nova 对话。首次连接只需扫码。', '启用手机连接', 'enable'],
   not_installed: ['还差一个安全连接', '在电脑和 iPhone 安装 Tailscale，登录同一账号，然后回来继续。', '下载 Tailscale', 'install'],
-  needs_login: ['连接你的设备', '请先在电脑和 iPhone 登录 Tailscale，并确认两台设备都已连接。', '打开 Tailscale', 'login'],
+  needs_login: ['连接同一 Tailscale 网络', '在电脑和 iPhone 上打开 Tailscale，登录同一账号并连接。完成后回来重新检测。', '打开 Tailscale', 'login'],
   needs_serve: ['设备已在线', '允许同一 Tailscale 网络中的设备连接这台 Nova。连接仍需扫码授权。', '开启安全连接', 'network'],
   conflict: ['已有其他服务使用此地址', 'Nova 不会覆盖现有转发。可在高级设置填写另一个已配置的安全地址。', '查看配置帮助', 'help'],
   public_endpoint: ['此地址已公开到互联网', '请为 Nova 使用私有 Tailscale Serve 地址，再重新检测。', '查看配置帮助', 'help'],
@@ -20,6 +20,8 @@ export function createPhonePanel({document, api, save}) {
   const render = view => {
     const [title, detail, label, next] = PHONE_STATES[view.state] ?? PHONE_STATES.unavailable
     action = next
+    const step = view.state === 'paired' ? 'done' : view.image ? 'scan' : 'network'
+    for (const name of ['network', 'scan', 'done']) node(`phone-step-${name}`).setAttribute('aria-current', name === step ? 'step' : 'false')
     node('phone-title').textContent = title
     node('phone-description').textContent = detail
     node('phone-primary').textContent = label
@@ -27,7 +29,7 @@ export function createPhonePanel({document, api, save}) {
     node('phone-primary').disabled = busy
     node('phone-state').textContent = view.state === 'ready' ? '等待扫码' : view.state === 'paired' ? '已配对' : view.service ? '本机服务已就绪' : '私人设备连接'
     node('phone-qr').hidden = !view.image
-    node('phone-qr').src = view.image ?? ''
+    if (node('phone-qr').getAttribute('src') !== (view.image ?? '')) node('phone-qr').src = view.image ?? ''
     node('phone-illustration').hidden = Boolean(view.image)
     node('phone-host').textContent = view.host ?? ''
     node('phone-disable').hidden = view.state === 'idle' || view.state === 'unsupported'
@@ -43,12 +45,14 @@ export function createPhonePanel({document, api, save}) {
     }
     devices.hidden = !(view.devices?.length)
   }
-  async function run(next = 'status', deviceId) {
+  async function run(next = 'status', deviceId, quiet = false) {
     if (busy || !active) return
     busy = true
     const epoch = generation
-    node('phone-primary').disabled = true
-    node('phone-primary').textContent = next === 'network' ? '正在配置…' : '正在准备…'
+    if (!quiet) {
+      node('phone-primary').disabled = true
+      node('phone-primary').textContent = next === 'network' ? '正在配置…' : '正在准备…'
+    }
     try {
       const view = await api.phoneAction(next, deviceId)
       if (epoch === generation) { busy = false; render(view) }
@@ -65,7 +69,7 @@ export function createPhonePanel({document, api, save}) {
       if (active === value) return
       active = value; generation++
       clearInterval(timer)
-      if (active) { void run(); timer = setInterval(() => { if (action === 'refresh') void run('status') }, 3000); timer.unref?.() }
+      if (active) { void run(); timer = setInterval(() => { if (action === 'refresh') void run('status', undefined, true) }, 3000); timer.unref?.() }
       else { node('phone-qr').hidden = true; node('phone-qr').src = ''; void api.phoneAction('cancel').catch(() => {}) }
     },
   }

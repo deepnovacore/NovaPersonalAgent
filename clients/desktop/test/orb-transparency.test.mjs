@@ -10,6 +10,37 @@ const require = createRequire(import.meta.url)
 const electron = require('electron')
 const probe = fileURLToPath(new URL('../scripts/orb-transparency-probe.cjs', import.meta.url))
 
+test('message reservations keep the full orb inside the native window at screen edges', {
+  skip: process.platform !== 'darwin',
+}, async () => {
+  const { stdout } = await execFileAsync(electron, [probe], { timeout: 15_000 })
+  const natural = JSON.parse(stdout.trim().split('\n').at(-1)).naturalProject
+  assert.ok(natural['codex-label'].top >= natural['state-label'].bottom)
+  assert.ok(natural['codex-label'].top >= natural['orb-rail'].bottom, 'restored workspace must clear controls')
+  assert.ok(natural['codex-label'].bottom <= 160)
+  for (const layout of JSON.parse(stdout.trim().split('\n').at(-1)).bubbleLayouts) {
+    assert.equal(layout.actual.width, layout.expected.width)
+    assert.equal(layout.actual.height, layout.expected.height)
+    assert.ok(layout.orb.left >= -0.75 && layout.orb.right <= layout.width + 0.75)
+    assert.ok(layout.orb.top >= -0.75 && layout.orb.bottom <= layout.height + 0.75)
+    const project = layout.surfaces.find(surface => surface.selector === '#codex-label')
+    const status = layout.surfaces.find(surface => surface.selector === '#state-label')
+    assert.ok(project.top >= status.bottom, 'workspace banner must stay below status')
+    assert.equal(layout.placement, 'above')
+    assert.equal(layout.tail.content, '""')
+    assert.ok(Math.abs(layout.tail.x - (layout.orb.left + layout.orb.width / 2)) <= 0.75, 'tail must point at orb center')
+    assert.ok(Math.abs(layout.tail.bottom - layout.orb.top) <= 0.75, 'tail must touch orb')
+    for (const [index, a] of layout.surfaces.entries()) {
+      assert.ok(a.left >= -0.75 && a.right <= layout.width + 0.75, `${a.selector} clipped horizontally`)
+      assert.ok(a.top >= -0.75 && a.bottom <= layout.height + 0.75, `${a.selector} clipped vertically`)
+      for (const b of layout.surfaces.slice(index + 1)) {
+        assert.ok(a.right <= b.left || b.right <= a.left || a.bottom <= b.top || b.bottom <= a.top,
+          `${a.selector} overlaps ${b.selector}`)
+      }
+    }
+  }
+})
+
 test('transparent orb renders without an outer shadow', {
   skip: process.platform !== 'darwin',
 }, async () => {

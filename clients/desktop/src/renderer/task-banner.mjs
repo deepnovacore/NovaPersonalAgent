@@ -53,7 +53,7 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
   }
   function state() {
     const item = selected()
-    return {tasks: tasks.map(task => ({...task})), selected: item ? {...item} : null,
+    return {tasks: tasks.filter(task => !expired.has(task.work_id)).map(task => ({...task, cancelling: cancelling.has(task.work_id), opening: [...pending.values()].some(p => p.work_id === task.work_id && p.action === 'open'), error: errors.get(task.work_id) ?? ''})), selected: item ? {...item} : null,
       visible: !suspended && !hidden && item !== null, connected, runningCount: tasks.filter(task => RUNNING.has(task.phase)).length,
       cancelling: cancelling.has(selectedId), opening: [...pending.values()].some(p => p.work_id === selectedId && p.action === 'open'),
       error: errors.get(selectedId) ?? ''}
@@ -133,63 +133,57 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
   })
 }
 
-/** Stable DOM nodes preserve focus while progress text streams. */
+/** Keep each card and its action buttons stable while progress updates. */
 export function mountTaskBanner({container, send, reserveArea, onChange = () => {}}) {
-  const query = selector => container.querySelector(selector)
-  const title = query('[data-task-title]'), summary = query('[data-task-summary]')
-  const project = query('[data-task-project]'), status = query('[data-task-status]')
-  const picker = query('[data-task-picker]'), error = query('[data-task-error]')
-  const open = query('[data-task-open]'), stop = query('[data-task-stop]')
-  let layout = null, reserved = false, hovered = false, focused = false
+  const list = container.querySelector('[data-task-list]'), expand = container.querySelector('[data-task-expand]')
+  const cards = new Map()
+  let layout = null, reserved = 0, expanded = false, hovered = false, focused = false, platform = ''
   function applyLayout(value) {
     layout = value
-    container.dataset.placement = value?.bubblePlacement ?? 'above'
-    container.style.setProperty('--task-banner-offset', `${(value?.bannerOffsetRows ?? 0) * 56}px`)
-    container.hidden = !controller.state().visible || (value?.suppressed === true || value?.bannerSuppressed === true)
+    container.style.setProperty('--task-height', `${value?.taskHeightCss ?? 0}px`)
+    container.hidden = !controller.state().visible || !(value?.taskHeightCss > 0) || value?.suppressed === true
   }
-  const controller = createTaskBannerController({send, onChange: view => {
-    container.hidden = !view.visible || (layout?.suppressed === true || layout?.bannerSuppressed === true)
-    const task = view.selected
-    if (task) {
-      container.dataset.phase = task.phase
-      project.textContent = task.project
-      title.textContent = task.title; title.title = task.title
-      summary.textContent = task.summary; summary.title = task.summary
-      status.textContent = !view.connected ? '连接已断开 · 状态待同步' : view.cancelling ? '正在停止' : STATUS[task.phase]
-      open.disabled = !view.connected || view.opening
-      stop.disabled = !view.connected || view.cancelling || !RUNNING.has(task.phase)
-      error.textContent = view.error; error.hidden = !view.error
+  function render(view) {
+    container.hidden = !view.visible || !(layout?.taskHeightCss > 0) || layout?.suppressed === true
+    const shown = expanded ? view.tasks : view.tasks.slice(0, 3)
+    for (const [id, card] of cards) if (!view.tasks.some(task => task.work_id === id)) {card.remove(); cards.delete(id)}
+    for (const task of view.tasks) {
+      let card = cards.get(task.work_id)
+      if (!card) {
+        card = container.ownerDocument.createElement('article')
+        card.className = 'task-card'
+        card.innerHTML = '<div class="task-card-heading"><strong data-title></strong><span data-status></span></div><p data-summary></p><div class="task-card-footer"><span data-project></span><button data-open type="button">打开</button><button data-stop type="button">停止</button></div><p data-error role="alert" hidden></p>'
+        for (const [selector, action] of [['[data-open]', 'open'], ['[data-stop]', 'cancel']]) card.querySelector(selector).addEventListener('click', () => {controller.select(task.work_id); controller.action(action)})
+        cards.set(task.work_id, card); list.append(card)
+      }
+      card.hidden = !shown.includes(task)
+      card.dataset.phase = task.phase
+      const set = (selector, text) => { const node = card.querySelector(selector); node.textContent = text; node.title = text }
+      set('[data-title]', task.title)
+      set('[data-project]', task.project)
+      set('[data-summary]', task.summary)
+      set('[data-status]', !view.connected ? '连接已断开' : task.cancelling ? '正在停止' : STATUS[task.phase])
+      set('[data-error]', task.error)
+      card.querySelector('[data-error]').hidden = !task.error
+      card.querySelector('[data-open]').disabled = !view.connected || task.opening
+      card.querySelector('[data-open]').title = platform === 'darwin' ? '在 Finder 中打开项目' : '在文件管理器中打开项目'
+      card.querySelector('[data-stop]').disabled = !view.connected || task.cancelling || !RUNNING.has(task.phase)
     }
-    const optionsKey = JSON.stringify(view.tasks.map(t => [t.work_id, t.project, t.title, t.phase]))
-    if (picker.dataset.options !== optionsKey) {
-      picker.replaceChildren(...view.tasks.map((task, index) => {
-        const option = container.ownerDocument.createElement('option')
-        option.value = task.work_id; option.textContent = `${index + 1} / ${view.tasks.length} · ${task.project} · ${task.title} · ${STATUS[task.phase]}`
-        return option
-      }))
-      picker.dataset.options = optionsKey
-    }
-    picker.value = task?.work_id ?? ''
-    picker.closest('.task-banner-switch').hidden = view.tasks.length < 2
-    query('[data-task-count]').textContent = `${Math.max(0, view.tasks.findIndex(t => t.work_id === task?.work_id)) + 1} / ${view.tasks.length}`
-    picker.setAttribute('aria-label', `切换任务，共 ${view.tasks.length} 个`)
-    if (reserved !== view.visible) {
-      reserved = view.visible
-      void reserveArea(reserved).then(applyLayout).catch(() => { container.hidden = true })
-    }
+    container.querySelector('[data-task-count]').textContent = `任务 · ${view.tasks.length}`
+    expand.hidden = view.tasks.length <= 3
+    expand.textContent = expanded ? '收起' : `展开其余 ${Math.max(0, view.tasks.length - 3)} 个任务`
+    expand.setAttribute('aria-expanded', String(expanded))
+    const rows = view.visible ? Math.min(shown.length, 5) : 0
+    if (reserved !== rows) {reserved = rows; void reserveArea(rows).then(applyLayout).catch(() => {container.hidden = true})}
     onChange(view)
-  }})
-  picker.addEventListener('change', () => controller.select(picker.value))
-  open.addEventListener('click', () => controller.action('open'))
-  stop.addEventListener('click', () => controller.action('cancel'))
-  query('[data-task-hide]').addEventListener('click', () => controller.dismiss())
+  }
+  const controller = createTaskBannerController({send, onChange: render})
+  expand.addEventListener('click', () => {expanded = !expanded; render(controller.state())})
+  container.querySelector('[data-task-hide]').addEventListener('click', () => controller.dismiss())
   const syncPause = () => hovered || focused ? controller.pause() : controller.resume()
-  container.addEventListener('pointerenter', () => { hovered = true; syncPause() })
-  container.addEventListener('pointerleave', () => { hovered = false; syncPause() })
-  container.addEventListener('focusin', () => { focused = true; syncPause() })
-  container.addEventListener('focusout', event => { focused = container.contains(event.relatedTarget); syncPause() })
-  return Object.freeze({...controller, applyLayout, setPlatform(platform) {
-    const label = platform === 'darwin' ? '在 Finder 中打开项目' : '在文件管理器中打开项目'
-    open.title = label; open.setAttribute('aria-label', label)
-  }})
+  container.addEventListener('pointerenter', () => {hovered = true; syncPause()})
+  container.addEventListener('pointerleave', () => {hovered = false; syncPause()})
+  container.addEventListener('focusin', () => {focused = true; syncPause()})
+  container.addEventListener('focusout', event => {focused = container.contains(event.relatedTarget); syncPause()})
+  return Object.freeze({...controller, applyLayout, setPlatform(value) {platform = value; render(controller.state())}})
 }

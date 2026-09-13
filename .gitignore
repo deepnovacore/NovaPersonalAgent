@@ -72,3 +72,9 @@ video/
 
 # AutoGLM local environment
 .autoglm-venv/
+
+# Playwright MCP browser debugging artifacts.
+.playwright-mcp/
+
+# Test pollution: a literal "~" directory appears when an unexpanded ~ path is passed as HOME.
+clients/desktop/~/

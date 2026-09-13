@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { VirtualClock } from '../src/core/clock.js'
-import { jsonValueSchema } from '../src/core/events.js'
 import {
   MAX_REALTIME_DIAGNOSTICS,
   JsonlTelemetry,
@@ -27,7 +26,7 @@ test('JSONL telemetry uses the injected clock and is readable before close', asy
   telemetry.close()
 
   const records = (await readFile(path, 'utf8')).trim().split('\n')
-    .map(line => jsonValueSchema.parse(JSON.parse(line) as unknown))
+    .map(line => withoutEnvelope(JSON.parse(line) as Record<string, unknown>))
   assert.deepEqual(records, [
     {ts: 5, kind: 'provider.response_started', payload: {response_id: 'response-1'}},
     {ts: 6.5, kind: 'renderer.ack', payload: {kind: 'playback_started', t_render_ms: 120.5}},
@@ -108,7 +107,7 @@ test('desktop telemetry defaults to a private app-state JSONL path', async t => 
   assert.equal((await stat(telemetryPath)).mode & 0o777, 0o600)
   assert.deepEqual(
     (await readFile(telemetryPath, 'utf8')).trim().split('\n')
-      .map(line => JSON.parse(line) as unknown),
+      .map(line => withoutEnvelope(JSON.parse(line) as Record<string, unknown>)),
     [{ts: 0, kind: 'always.available', payload: {revision: 1}}],
   )
 })
@@ -150,10 +149,33 @@ test('desktop telemetry accepts an explicit empty opt-out and expands custom hom
   const records = (await readFile(telemetryPath, 'utf8'))
     .trim()
     .split('\n')
-    .map(line => JSON.parse(line) as unknown)
+    .map(line => withoutEnvelope(JSON.parse(line) as Record<string, unknown>))
   assert.deepEqual(records, [{
     ts: 0,
     kind: 'camera.admission',
     payload: {executor: 'guard', status: 'denied', phase: 'pre_arm', admitted: false},
   }])
+})
+
+function withoutEnvelope(record: Record<string, unknown>): Record<string, unknown> {
+  assert.equal(typeof record.run_id, 'string')
+  assert.equal(typeof record.seq, 'number')
+  assert.equal(typeof record.wall_time, 'string')
+  return {ts: record.ts, kind: record.kind, payload: record.payload}
+}
+
+test('concurrent writers and restart preserve distinct run identities', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'nova-telemetry-runs-'))
+  t.after(() => rm(directory, {recursive: true, force: true}))
+  const path = join(directory, 'trace.jsonl')
+  const a = new JsonlTelemetry(path, {clock: new VirtualClock(2)})
+  const b = new JsonlTelemetry(path, {clock: new VirtualClock(1)})
+  a.record('a', {}); b.record('b', {}); a.record('a2', {})
+  a.close(); b.close()
+  const c = new JsonlTelemetry(path, {clock: new VirtualClock(0)})
+  c.record('c', {}); c.close()
+  const rows = (await readFile(path, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as {run_id: string; seq: number; kind: string})
+  assert.deepEqual(rows.map(row => row.kind), ['a', 'b', 'a2', 'c'])
+  assert.deepEqual(rows.map(row => row.seq), [1, 1, 2, 1])
+  assert.equal(new Set(rows.map(row => row.run_id)).size, 3)
 })

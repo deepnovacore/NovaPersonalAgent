@@ -71,3 +71,5 @@
 文档截至代码终验提交净增 15 行；本文最终验收记录另计，不纳入源码收益。WebUI 恢复分支仍保留且未推送。原预算约 29k 生产减量没有实现为同等收益：原生锁/Job/sandbox、实际磁盘与协议验证、确认授权阶段均有真实消费者或正确性职责；结构拆分也不是删行。所有相关条目已按上述证据处理，不以删断言或删平台来凑预算。
 
 详细原始日志与逐批审查保存在本机 `/tmp/nova-slim-execution/`：`runtime-final2.log`、`desktop-final.log`、`cli-final.log`、`package-verify-final2.log`、`windows-native-check6.log`、`windows-layout-run.log`、`codex-process-cancel.log`、`probe-shared-chatgpt-responses.log`、`renderer-final.log`、`batch10-equivalence.json` 及各批 review/report。最终 macOS 产物位于 worktree 的 `clients/desktop/dist/mac-arm64/Nova Audio Agent Desktop.app`。
+
+后续多模型复审、两项修复、主线集成验证及最终代码规模见 [复审与集成记录](2026-09-13-slim-review-and-merge.zh-CN.md)。本文的未合并状态与验收数据保留为原执行时点记录。

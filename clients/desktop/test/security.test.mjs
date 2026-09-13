@@ -19,9 +19,9 @@ test('settings links open only fixed API key pages in the external browser', asy
   assert.deepEqual(opened, [allowed])
   const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
   const links = [...html.matchAll(/<a class="key-link" href="([^"]+)" target="_blank" rel="noopener noreferrer"/g)]
-  assert.equal(links.length, 4)
+  assert.equal(links.length, 5)
   for (const [, href] of links) handler({url: href.replaceAll('&amp;', '&')})
-  assert.equal(opened.length, 5)
+  assert.equal(opened.length, 6)
 })
 
 test('accepts only loopback websocket bootstrap with a 128-bit token', () => {
@@ -46,12 +46,12 @@ test('pins BrowserWindow isolation sandbox and ephemeral partition', () => {
   assert.equal(options.height, 160)
   // The floor is the dormant bubble, not the natural orb: Electron clamps
   // programmatic setBounds to these too, so pinning them at 160 would stop the
-  // window ever shrinking to rest. Width is still capped at the natural size —
-  // only height grows, for the confirmation and bubble surfaces.
+  // window ever shrinking to rest. Message reservations grow both dimensions.
   assert.equal(options.minWidth, DORMANT_ORB_WINDOW_SIZE.width)
   assert.equal(options.minHeight, DORMANT_ORB_WINDOW_SIZE.height)
   assert.ok(options.minWidth < 160 && options.minHeight < 160)
-  assert.equal(options.maxWidth, 160)
+  assert.equal(options.maxWidth, undefined)
+  assert.equal(options.resizable, false)
   assert.equal(options.maxHeight, undefined)
   assert.equal(options.transparent, true)
   assert.equal(options.frame, false)
@@ -87,8 +87,8 @@ test('memory board window shares the orb session with the same isolation walls',
 test('settings window shares the orb session with the same isolation walls', () => {
   const options = securityModule.settingsWindowOptions('/app/preload.cjs', 'launch-1')
 
-  assert.equal(options.width, 760)
-  assert.equal(options.height, 620)
+  assert.equal(options.width, 1140)
+  assert.equal(options.height, 930)
   assert.equal(options.minWidth, 620)
   assert.equal(options.minHeight, 520)
   assert.equal(options.title, '设置')

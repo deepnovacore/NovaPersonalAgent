@@ -592,7 +592,7 @@ function sleepOrb() {
 
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
-    { label: wakeWord?.state === 'sleeping' ? '唤醒' : '休眠', click: () => wakeWord?.state === 'sleeping' ? wakeWord.wake() : sleepOrb() },
+    ...(wakeWord?.state === 'sleeping' ? [{ label: '唤醒', click: () => wakeWord.wake() }] : []),
     { label: '连接 iPhone…', click: () => { void openPairingWindow() } },
     { label: '记忆面板', click: () => openMemoryBoard(launchId) },
     { label: '设置…', click: () => openSettingsWindow(launchId) },
@@ -1487,14 +1487,14 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!mainWindow.isVisible()) return
     orbWindow.setDormant(active)
   })
-  ipcMain.handle('nova:bubbles:reserve', async (event, rows) => {
+  ipcMain.handle('nova:bubbles:reserve', async (event, rows, taskRows = 0) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
       throw new Error('bubble bounds request rejected')
     }
-    if (!Number.isInteger(rows) || rows < 0 || rows > 6) {
+    if (!Number.isInteger(rows) || rows < 0 || rows > 6 || !Number.isInteger(taskRows) || taskRows < 0 || taskRows > 5) {
       throw new Error('bubble rows rejected')
     }
-    return orbWindow.reserveBubbleArea(rows)
+    return orbWindow.reserveBubbleArea(rows, taskRows)
   })
   ipcMain.handle('nova:executor-result:open', async (event, value) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) {

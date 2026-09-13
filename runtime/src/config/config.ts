@@ -1,13 +1,14 @@
 import {parseCapabilityRegistry, type CapabilityRegistry} from './capability-registry.js'
 import { z } from 'zod'
 import { stripLikePython } from '../text/python-text.js'
+import {supportsVision} from '../model/vision-capability.js'
 
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
 const integratedProviderNameSchema = z.enum(['qwen'])
 const cascadedEndpointingProviderNameSchema = z.enum(['auto'])
 const cascadedAsrProviderNameSchema = z.enum(['volcengine'])
-const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark'])
+const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark', 'deepseek'])
 const cascadedTtsProviderNameSchema = z.enum(['volcengine'])
 const qwenGuardHistoryRecoverySchema = z.enum(['none', 'packed'])
 const qwenGuardHistoryPairsSchema = z.union([z.literal(1), z.literal(2), z.literal(4)])
@@ -47,6 +48,7 @@ export const settingsSchema = z.object({
   qwen_realtime_voice: z.string().default('longanqian'),
   dashscope_api_key: z.string().nullable().default(null),
   ark_api_key: z.string().nullable().default(null),
+  deepseek_api_key: z.string().nullable().default(null),
   doubao_asr_api_key: z.string().nullable().default(null),
   doubao_bigmodel_api_key: z.string().nullable().default(null),
   volcengine_ark_base_url: z.string().default('https://ark.cn-beijing.volces.com/api/v3'),
@@ -148,7 +150,7 @@ export interface VolcengineRealtimeConfig {
 export interface CascadedSelection {
   readonly endpointingProvider: 'auto'
   readonly asrProvider: 'volcengine'
-  readonly llmProvider: 'qwen' | 'ark'
+  readonly llmProvider: 'qwen' | 'ark' | 'deepseek'
   readonly llmModel: string
   readonly ttsProvider: 'volcengine'
 }
@@ -226,6 +228,11 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     tavily_api_key: optionalSecret(environment.TAVILY_API_KEY),
     fast_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_FAST_MODEL),
     watch_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_WATCH_MODEL),
+    ...(supportsVision('qwen', environment.NOVA_AUDIO_AGENT_WATCH_MODEL ?? '')
+      ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
+    ...(supportsVision('ark', environment.NOVA_AUDIO_AGENT_WATCH_MODEL ?? '')
+      ? {ark_api_key: optionalSecret(environment.ARK_API_KEY),
+          volcengine_ark_base_url: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL)} : {}),
     conversation_vision_enabled: optionalBoolean(environment.NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED),
     monitor_camera_device_id: optionalString(environment.NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID),
     surrogate_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_SURROGATE_MODEL),
@@ -238,7 +245,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
       integrated_provider: integratedProvider,
       qwen_realtime_url: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_URL),
       qwen_realtime_model: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL),
-      qwen_realtime_voice: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE),
+      qwen_realtime_voice: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE)
+        ?? (environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL?.startsWith('qwen3.5-omni-') ? 'Ethan' : undefined),
       dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY),
       qwen_controlled_guard_reconnect: optionalBoolean(
         environment.NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT,
@@ -255,7 +263,9 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
       cascade_tts_provider: cascadedProviders!.tts,
       ...(cascadedProviders!.llm === 'qwen'
         ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)}
-        : {ark_api_key: optionalSecret(environment.ARK_API_KEY)}),
+        : cascadedProviders!.llm === 'deepseek'
+          ? {deepseek_api_key: optionalSecret(environment.DEEPSEEK_API_KEY)}
+          : {ark_api_key: optionalSecret(environment.ARK_API_KEY)}),
       ...(cascadedProviders!.llm === 'ark' ? {
         volcengine_ark_base_url: rawEnvironmentValue(
           environment.NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL,
@@ -443,6 +453,21 @@ export function resolveModelApiKey(settings: Settings): string | null {
     || (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.dashscope_api_key : null)
 }
 
+/** Preset monitor models keep their credential on their own provider endpoint. */
+export function resolveWatchModelConnection(settings: Settings): {readonly baseUrl: string; readonly apiKey: string} | null {
+  const model = stripLikePython(settings.watch_model ?? '')
+  if (supportsVision('qwen', model)) return {
+    baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
+    apiKey: requiredCredential(settings.dashscope_api_key
+      ?? (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null), 'DASHSCOPE_API_KEY'),
+  }
+  if (supportsVision('ark', model)) return {
+    baseUrl: secureEndpoint(settings.volcengine_ark_base_url, 'https', 'NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL'),
+    apiKey: requiredCredential(settings.ark_api_key, 'ARK_API_KEY'),
+  }
+  return null
+}
+
 /** Keeps a selected provider credential on its fixed compatible endpoint. */
 export function resolveSupportModelConnection(
   settings: Settings,
@@ -470,7 +495,7 @@ export function resolveCascadedSelection(settings: Settings): CascadedSelection 
   const llmModel = settings.cascade_llm_model === null
     ? (settings.cascade_llm_provider === 'qwen'
       ? 'qwen-flash'
-      : 'doubao-seed-2-0-pro-260215')
+      : settings.cascade_llm_provider === 'deepseek' ? 'deepseek-flash' : 'doubao-seed-2-0-pro-260215')
     : requiredSetting(settings.cascade_llm_model, 'NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL')
   return Object.freeze({
     endpointingProvider: settings.cascade_endpointing_provider,
@@ -487,7 +512,9 @@ export function requireCascadedCredentials(
 ): CascadedCredentials {
   const llmApiKey = selection.llmProvider === 'qwen'
     ? requiredCredential(settings.dashscope_api_key, 'DASHSCOPE_API_KEY')
-    : requiredCredential(settings.ark_api_key, 'ARK_API_KEY')
+    : selection.llmProvider === 'deepseek'
+      ? requiredCredential(settings.deepseek_api_key, 'DEEPSEEK_API_KEY')
+      : requiredCredential(settings.ark_api_key, 'ARK_API_KEY')
   const ttsApiKey = requiredCredential(settings.doubao_bigmodel_api_key, 'DOUBAO_BIGMODEL_API_KEY')
   const asrApiKey = stripLikePython(settings.doubao_asr_api_key ?? '') || ttsApiKey
   return Object.freeze({llmApiKey, asrApiKey, ttsApiKey})
@@ -794,6 +821,7 @@ function compareStrings(left: string, right: string): number {
 function configurationFieldName(field: string): string {
   const aliases: Readonly<Record<string, string>> = {
     ark_api_key: 'ARK_API_KEY',
+    deepseek_api_key: 'DEEPSEEK_API_KEY',
     dashscope_api_key: 'DASHSCOPE_API_KEY',
     doubao_asr_api_key: 'DOUBAO_ASR_API_KEY',
     doubao_bigmodel_api_key: 'DOUBAO_BIGMODEL_API_KEY',

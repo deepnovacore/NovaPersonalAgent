@@ -52,6 +52,15 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   const clock = new RealClock()
   const telemetry = createRealtimeTelemetry(environment, {clock})
   ownership.own(() => telemetry.close())
+  telemetry.record('pipeline.configuration', {
+    pipeline: settings.pipeline_mode,
+    provider: settings.pipeline_mode === 'cascaded' ? settings.cascade_llm_provider : settings.integrated_provider,
+    model: settings.pipeline_mode === 'cascaded'
+      ? requireSelectedCascadedRealtimeConfig(settings).selection.llmModel
+      : settings.qwen_realtime_model,
+    asr: settings.cascade_asr_provider, tts: settings.cascade_tts_provider,
+    vision: settings.conversation_vision_enabled,
+  })
   let publishExecutorApproval: (view: ExecutorApprovalView) => void = () => undefined
   const codexResource = !capabilities.modules.coding.enabled || !settings.executors.includes('codex')
     ? null

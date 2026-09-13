@@ -1350,3 +1350,12 @@ test('dev dotenv keys override saved keys in both public metadata and runtime co
   assert.equal(resolved.secretsPresent.codexApiKey, false)
   assert.doesNotMatch(JSON.stringify({secretsPresent: resolved.secretsPresent, secretSources: resolved.secretSources}), /repo-key|speech-key|stored-key/)
 })
+
+test('DeepSeek cascade injects only its selected official model credential', () => {
+  const env = capabilityEnvironment({pipelineMode: 'cascaded', cascadedLlmProvider: 'deepseek'}, {deepseekApiKey: 'deepseek-test', arkApiKey: 'unused-ark'}, {}, {modules: {search: {enabled: false}, camera: {enabled: false}}})
+  assert.equal(env.DEEPSEEK_API_KEY, 'deepseek-test')
+  assert.equal(env.ARK_API_KEY, undefined)
+  const view = resolveSecretConfiguration({}, {}, {DEEPSEEK_API_KEY: 'deepseek-dotenv-test'})
+  assert.equal(view.secretsPresent.deepseekApiKey, true)
+  assert.equal(view.secretSources.deepseekApiKey, 'dotenv')
+})

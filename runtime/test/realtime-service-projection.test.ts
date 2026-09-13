@@ -1087,3 +1087,19 @@ test('received coding summaries deduplicate across smart continuous and repeated
   service.projectRuntimeEvent(progressEvent({seq: 6, summary: 'B', activity: 6}))
   assert.equal(queued().length, 0, 'withdrawn queued facts are received, not claimed delivered or replayed')
 })
+test('latency telemetry binds accepted speech, audio and playback without conversation bodies', async () => {
+  const {service, session, telemetry} = realtimeServiceHarness('pipeline')
+  await service.connect()
+  await service.handleEvent({kind: 'user_speech_started', session_epoch: 1, speech_id: 's', provider_item_id: 'i'})
+  await service.handleEvent({kind: 'user_speech_ended', session_epoch: 1, speech_id: 's', provider_item_id: 'i'})
+  await service.handleEvent({kind: 'user_transcript_final', session_epoch: 1, item_id: 'i', text: 'private profiling test'})
+  await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'r'})
+  for (let i = 0; i < 2; i++) await service.handleEvent({kind: 'response_audio_delta', session_epoch: 1, response_id: 'r', pcm: new Uint8Array([0, 1])})
+  const generation = session.currentGeneration!
+  assert.equal(service.playbackStarted(generation.utterance_id, generation.generation_epoch), true)
+  await service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: 'r', status: 'completed', reason: ''})
+  const kinds = ['provider.user_speech_ended', 'provider.user_transcript_final', 'provider.first_audio_delta', 'playback.started', 'provider.response_terminal']
+  for (const kind of kinds) assert.equal(telemetry.filter(row => row.kind === kind).length, 1, kind)
+  assert.deepEqual(telemetry.find(row => row.kind === 'provider.first_audio_delta')?.payload, {session_epoch: 1, response_id: 'r'})
+  assert.equal(JSON.stringify(telemetry.filter(row => kinds.includes(row.kind))).includes('private profiling test'), false)
+})

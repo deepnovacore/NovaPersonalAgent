@@ -847,7 +847,13 @@ test('authenticated playback telemetry reaches the configured JSONL sink', async
   telemetry.close()
 
   const records: unknown[] = (await readFile(path, 'utf8')).trim().split('\n')
-    .map(line => JSON.parse(line) as unknown)
+    .map(line => {
+      const {run_id, seq, wall_time, ...record} = JSON.parse(line) as Record<string, unknown>
+      assert.equal(typeof run_id, 'string')
+      assert.equal(seq, 1)
+      assert.equal(typeof wall_time, 'string')
+      return record
+    })
   assert.deepEqual(records, [{
     ts: 4.5,
     kind: 'playback.native',
