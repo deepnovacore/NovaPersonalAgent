@@ -86,3 +86,20 @@ test('staging preserves nested dependency versions and omits development files',
     await assert.rejects(access(join(staged, 'node_modules/c/test/unused.js')), /ENOENT/u)
   } finally { await rm(root, {recursive: true, force: true}) }
 })
+
+
+test('staging keeps the runtime CLI evaluation imports executable', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'nova-stage-runtime-'))
+  const runtime = 'node_modules/@nova-audio-agent/runtime'
+  try {
+    await file(root, 'package.json', JSON.stringify({dependencies: {'@nova-audio-agent/runtime': '1'}}))
+    for (const name of ['src/main.mjs', 'LICENSES/MIT', 'THIRD_PARTY_NOTICES.md']) await file(root, name)
+    await file(root, `${runtime}/package.json`, JSON.stringify({name: '@nova-audio-agent/runtime', type: 'module', files: ['dist/src', 'dist/eval']}))
+    await file(root, `${runtime}/dist/src/cli.js`, "import {marker} from '../eval/probe.js'; console.log(marker)")
+    await file(root, `${runtime}/dist/eval/probe.js`, "export const marker = 'evaluation-ready'")
+    const staged = await stageReleaseApplication({packageRoot: root})
+    const result = spawnSync(process.execPath, [join(staged, runtime, 'dist/src/cli.js')], {encoding: 'utf8'})
+    assert.equal(result.status, 0, result.stderr)
+    assert.equal(result.stdout.trim(), 'evaluation-ready')
+  } finally { await rm(root, {recursive: true, force: true}) }
+})

@@ -73,9 +73,6 @@ export const DEFAULT_MAX_OUTBOUND_FRAMES = 128
 /** What a parsed renderer control frame carries. */
 export interface DesktopCommand {
   readonly kind:
-    | 'input_audio'
-    | 'input_text'
-    | 'input_dictation'
     | 'authenticated'
     | 'speech_onset'
     | 'playback_started'
@@ -543,9 +540,6 @@ export class DesktopSocketBridge {
   }
 
   async #receiveCommand(command: DesktopCommand): Promise<void> {
-    if (command.kind === 'input_audio') return this.receiveControl({type: 'input.audio'})
-    if (command.kind === 'input_text') return this.receiveControl({type: 'input.text', text: String(command.payload.text)})
-    if (command.kind === 'input_dictation') return this.receiveControl({type: 'input.dictation', id: String(command.payload.id), action: command.payload.action as 'start' | 'finish' | 'cancel'})
     if (
       this.#telemetry !== undefined
       && command.kind !== 'playback_telemetry'
@@ -1076,14 +1070,11 @@ export function parseClientMessage(
   throw new DesktopWireProtocolError('desktop control frame type is unsupported')
 }
 
-function commandFromControl(control: DesktopControl): DesktopCommand {
+function commandFromControl(control: Exclude<DesktopControl, {type: 'input.audio' | 'input.text' | 'input.dictation'}>): DesktopCommand {
   switch (control.type) {
     case 'executor.task_action':
     case 'coding.progress_narration':
       throw new DesktopWireProtocolError('desktop host control requires authenticated transport')
-    case 'input.audio': return {kind: 'input_audio', payload: {}}
-    case 'input.text': return {kind: 'input_text', payload: {text: control.text}}
-    case 'input.dictation': return {kind: 'input_dictation', payload: {id: control.id, action: control.action}}
     case 'speech.onset':
       return {
         kind: 'speech_onset',
