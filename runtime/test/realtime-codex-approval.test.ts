@@ -1,20 +1,17 @@
+import {validateAndSnapshotOffer} from '../src/executors/codex/approval-protocol.js'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
 import {VirtualClock} from '../src/clock.js'
-import {
-  CODEX_APPROVAL_TTL_SECONDS,
-  CodexApprovalController,
-  type CodexApprovalResolution,
-  type CodexApprovalView,
-} from '../src/executors/codex/approval.js'
+import {APPROVAL_TTL_SECONDS, type ApprovalView} from '../src/approval-port.js'
+import {HostApprovalController, type ApprovalResolution} from '../src/approval.js'
 
 function controller(
   clock = new VirtualClock(10),
-  views: CodexApprovalView[] = [],
-): CodexApprovalController {
+  views: ApprovalView[] = [],
+): HostApprovalController {
   let nextId = 0
-  const approval = new CodexApprovalController({
+  const approval = new HostApprovalController({
     clock,
     idFactory: () => `nova-approval-${++nextId}`,
   })
@@ -23,9 +20,9 @@ function controller(
 }
 
 function offerCommand(
-  approval: CodexApprovalController,
+  approval: HostApprovalController,
   signal: AbortSignal = new AbortController().signal,
-): Promise<CodexApprovalResolution | null> {
+): Promise<ApprovalResolution | null> {
   return approval.offer({
     kind: 'command_execution',
     local_detail: {
@@ -38,7 +35,7 @@ function offerCommand(
 }
 
 test('one exact opaque decision is consumed once while observers see the busy edge', async () => {
-  const views: CodexApprovalView[] = []
+  const views: ApprovalView[] = []
   const approval = controller(new VirtualClock(10), views)
   const waiting = offerCommand(approval)
 
@@ -53,7 +50,7 @@ test('one exact opaque decision is consumed once while observers see the busy ed
       cwd: 'C:\\workspace',
     },
     operation_summary: 'Codex 请求执行一条工作区命令。',
-    expires_at: 10 + CODEX_APPROVAL_TTL_SECONDS,
+    expires_at: 10 + APPROVAL_TTL_SECONDS,
     work: null,
     queued: 0,
   })
@@ -105,7 +102,7 @@ test('concurrency, invalidation, signal loss, and expiry all settle fail-closed'
   assert.equal(approval.consume(lostResolution!), 'decline')
 
   const expired = offerCommand(approval)
-  clock.advanceTo(clock.now() + CODEX_APPROVAL_TTL_SECONDS)
+  clock.advanceTo(clock.now() + APPROVAL_TTL_SECONDS)
   await Promise.resolve()
   const expiredResolution = await expired
   assert.notEqual(expiredResolution, null)
@@ -115,27 +112,27 @@ test('concurrency, invalidation, signal loss, and expiry all settle fail-closed'
 
 test('a held head outlives its TTL, still takes a click, and release re-arms a full TTL', async () => {
   const clock = new VirtualClock(5)
-  const views: CodexApprovalView[] = []
+  const views: ApprovalView[] = []
   const approval = controller(clock, views)
   const first = offerCommand(approval)
   assert.equal(approval.hold(), true)
   assert.equal(approval.hold(), false, 'idempotent')
   assert.equal(approval.view.held, true)
-  clock.advanceTo(clock.now() + CODEX_APPROVAL_TTL_SECONDS + 30)
+  clock.advanceTo(clock.now() + APPROVAL_TTL_SECONDS + 30)
   await Promise.resolve()
   assert.equal(approval.pending, true, 'no expiry while held')
   assert.equal(approval.release(), true)
   assert.equal(approval.release(), false)
   assert.equal(approval.view.held, undefined)
-  assert.equal(approval.view.expires_at, clock.now() + CODEX_APPROVAL_TTL_SECONDS)
-  clock.advanceTo(clock.now() + CODEX_APPROVAL_TTL_SECONDS)
+  assert.equal(approval.view.expires_at, clock.now() + APPROVAL_TTL_SECONDS)
+  clock.advanceTo(clock.now() + APPROVAL_TTL_SECONDS)
   await Promise.resolve()
   assert.equal(approval.consume((await first)!), 'decline', 'expires normally once released')
 
   // A renderer click is an explicit decision and works while held, even past the stale deadline.
   const second = offerCommand(approval)
   approval.hold()
-  clock.advanceTo(clock.now() + CODEX_APPROVAL_TTL_SECONDS + 1)
+  clock.advanceTo(clock.now() + APPROVAL_TTL_SECONDS + 1)
   assert.equal(approval.acceptDecision({approvalId: 'nova-approval-2', decision: 'accept'}), true)
   assert.equal(approval.consume((await second)!), 'accept')
   assert.equal(approval.hold(), false, 'nothing to hold')
@@ -146,14 +143,14 @@ test('hold cannot revive an approval whose deadline has already arrived', async 
   const clock = new VirtualClock(5)
   const approval = controller(clock)
   const waiting = offerCommand(approval)
-  clock.advanceTo(clock.now() + CODEX_APPROVAL_TTL_SECONDS)
+  clock.advanceTo(clock.now() + APPROVAL_TTL_SECONDS)
   assert.equal(approval.hold(), false)
   assert.equal(approval.consume((await waiting)!), 'decline')
   assert.equal(approval.pending, false)
 })
 
 test('file display data is snapshotted and observer failures cannot strand authority', async () => {
-  const approval = new CodexApprovalController({
+  const approval = new HostApprovalController({
     clock: new VirtualClock(),
     idFactory: () => 'file-public-id',
   })
@@ -161,11 +158,11 @@ test('file display data is snapshotted and observer failures cannot strand autho
   approval.observe(() => { throw new Error('renderer gone') })
   approval.observe(() => { healthyObserverCalls += 1 })
   const changes = [{change: 'update' as const, path: 'src/a.ts', move_path: 'src/b.ts'}]
-  const waiting = approval.offer({
+  const waiting = approval.offer(validateAndSnapshotOffer({
     kind: 'file_change',
     local_detail: {kind: 'file_change', changes},
     operation_summary: 'Codex 请求修改工作区文件。',
-  }, new AbortController().signal)
+  }), new AbortController().signal)
   changes[0]!.path = 'PRIVATE-MUTATION'
 
   assert.deepEqual(approval.view.local_detail, {
@@ -181,7 +178,7 @@ test('file display data is snapshotted and observer failures cannot strand autho
 
 test('invalid generated IDs and malformed public decisions never replace pending state', async () => {
   for (const idFactory of [() => '', () => 'x'.repeat(129)]) {
-    const approval = new CodexApprovalController({clock: new VirtualClock(), idFactory})
+    const approval = new HostApprovalController({clock: new VirtualClock(), idFactory})
     await assert.rejects(offerCommand(approval), /invalid approval id/u)
     assert.equal(approval.pending, false)
   }

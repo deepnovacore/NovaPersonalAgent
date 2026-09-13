@@ -19,7 +19,7 @@ import {
 import {MAX_STDOUT} from '../src/executors/codex/protocol.js'
 import {resolveCodexLaunchProfile, type CodexLaunchProfile} from '../src/executors/codex/launch-profile.js'
 import {RealClock} from '../src/clock.js'
-import {CodexApprovalController} from '../src/executors/codex/approval.js'
+import {HostApprovalController} from '../src/approval.js'
 import {
   hostBinaryForTest,
   hostCodexHomeForTest,
@@ -82,7 +82,7 @@ test('a cold run follows the app-server handshake and returns bounded internal c
 })
 
 test('an explicit ask profile supplies the approval policy without a legacy launch field', async () => {
-  const controller = new CodexApprovalController({
+  const controller = new HostApprovalController({
     clock: new RealClock(),
     idFactory: () => 'profile-approval',
   })
@@ -2332,7 +2332,7 @@ test('the real fake app-server handles arbitrary stdout chunks and barriered ste
 test('the real fake app-server carries correlated file and bounded command approvals end to end', async () => {
   for (const scenario of ['file-approval', 'command-approval'] as const) {
     const factory = new FakeAppServerOwnerFactory(scenario)
-    const controller = new CodexApprovalController({
+    const controller = new HostApprovalController({
       clock: new RealClock(),
       idFactory: () => `nova-${scenario}`,
     })
@@ -2389,7 +2389,7 @@ test('the real fake app-server carries correlated file and bounded command appro
 
 test('the real fake app-server declines a file approval with invalid startedAtMs', async () => {
   const factory = new FakeAppServerOwnerFactory('file-approval-invalid-start')
-  const controller = new CodexApprovalController({
+  const controller = new HostApprovalController({
     clock: new RealClock(),
     idFactory: () => 'must-not-be-offered',
   })
@@ -2892,7 +2892,7 @@ function createTransport(
     readonly prepare?: (input: {readonly apiKey: string | null}) => Promise<never>
     readonly removeEphemeralHome?: () => Promise<void>
     readonly approvalPolicy?: 'never' | 'on-request'
-    readonly approvalController?: CodexApprovalController
+    readonly approvalController?: HostApprovalController
     readonly launchProfile?: CodexLaunchProfile
   } = {},
 ): OwnedCodexAppServerTransport {

@@ -49,7 +49,7 @@ import {
   type ConfirmedProjectOperation,
   type ProjectConfirmationView,
 } from '../src/project-confirmation.js'
-import {CodexApprovalController, type CodexApprovalResolution} from '../src/executors/codex/approval.js'
+import {HostApprovalController, type ApprovalResolution} from '../src/approval.js'
 import {CodexAgentController} from '../src/executors/codex/controller.js'
 import type {AgentExecutor} from '../src/coding-executor.js'
 import {IntakeController, type IntakeOptions} from '../src/executors/coding/intake.js'
@@ -681,7 +681,7 @@ function pipelineService(options: {
   readonly session: RealtimeSession
   readonly clock: VirtualClock
   readonly diagnostics: string[]
-  readonly executorApproval: CodexApprovalController | null
+  readonly executorApproval: HostApprovalController | null
   readonly telemetry: {readonly kind: string; readonly payload: Readonly<Record<string, JsonValue>>}[]
   readonly runtimeDispatches: () => number
 } {
@@ -740,7 +740,7 @@ function pipelineService(options: {
     return `id-${idSeq}`
   }
   const executorApproval = options.withExecutorApproval === true
-    ? new CodexApprovalController({clock, idFactory: nextId})
+    ? new HostApprovalController({clock, idFactory: nextId})
     : null
   const playback = new PlaybackRegistry({
     idFactory: nextId,
@@ -5462,9 +5462,9 @@ test('a cancel rejection for a turn that already spoke is ignored', async () => 
 })
 
 function offerCodexCommand(
-  controller: CodexApprovalController,
+  controller: HostApprovalController,
   signal = new AbortController().signal,
-): Promise<CodexApprovalResolution | null> {
+): Promise<ApprovalResolution | null> {
   return controller.offer({
     kind: 'command_execution',
     local_detail: {
@@ -7673,7 +7673,7 @@ function confirmationService(options: {
   readonly diagnostics: string[]
   readonly telemetry: {readonly kind: string; readonly payload: Readonly<Record<string, JsonValue>>}[]
   readonly clock: VirtualClock
-  readonly executorApproval: CodexApprovalController | null
+  readonly executorApproval: HostApprovalController | null
 } {
   const manifest = executorManifestSchema.parse({
     name: 'codex',
@@ -7769,7 +7769,7 @@ function confirmationService(options: {
   })
   const controller = new ProjectConfirmationController({clock, idFactory: nextId})
   const executorApproval = options.withExecutorApproval === true
-    ? new CodexApprovalController({clock, idFactory: nextId})
+    ? new HostApprovalController({clock, idFactory: nextId})
     : null
   let ingested = 0
   const externalCommit = options.commit ?? ((): Promise<{

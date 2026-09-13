@@ -605,7 +605,7 @@ runtime port. Assembly wires the coding controller's run callback as
 | Port | `agent-controller.ts` `AgentController`; `realtime/service.ts` `dispatch`/`cancel` routing by controller name, unified `confirm` routing |
 | Store | `project-store.ts` (title derivation, per-workspace running state, roster query) |
 | Context | `realtime-assembly.ts` `#injectCurrentProjectContext` (no roster), `realtime/session-state.ts` `host_state.project` / `.title`, `realtime/qwen.ts` render + policy text |
-| Approvals | `approval-port.ts` + `executors/codex/approval.ts` FIFO queue keyed `{work_id, approval_id}`; `realtime/service.ts` approval fact naming project + title |
+| Approvals | `approval-port.ts` + `approval.ts` FIFO queue keyed `{work_id, approval_id}`; `realtime/service.ts` approval fact naming project + title |
 | Concurrency | `executors/codex/adapter-project.ts` per-workspace lock, transport factory, `MAX_CONCURRENT_WORK` |
 | Cancel | adapter abort → `turn/interrupt`, `events.ts`/`ports.ts` `cancelled` outcome |
 | Titles | `executors/codex/transport/app-server-schema.ts`, `-transport.ts`, adapter mirror |

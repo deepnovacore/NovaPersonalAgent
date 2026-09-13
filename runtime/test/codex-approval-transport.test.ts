@@ -12,17 +12,15 @@ import {join, resolve} from 'node:path'
 import {test, type TestContext} from 'node:test'
 
 import {VirtualClock} from '../src/clock.js'
-import {
-  CodexApprovalController,
-  routeCodexApprovalServerRequest,
-} from '../src/executors/codex/approval.js'
+import {HostApprovalController} from '../src/approval.js'
+import {routeCodexApprovalServerRequest} from '../src/executors/codex/approval-protocol.js'
 import {MAX_CONCURRENT_WORK} from '../src/work-tools.js'
 
 function fixture(t: TestContext) {
   const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'nova-codex-approval-route-')))
   t.after(() => { rmSync(workspace, {recursive: true, force: true}) })
   let nextId = 0
-  const controller = new CodexApprovalController({
+  const controller = new HostApprovalController({
     clock: new VirtualClock(100),
     idFactory: () => `public-${++nextId}`,
   })
@@ -396,7 +394,7 @@ test('available decisions constrain session approval and permission expiry grant
   await waiting
   for (const end of ['ttl', 'lost']) {
     const clock = new VirtualClock()
-    const approval = new CodexApprovalController({clock, idFactory: () => 'permissions'})
+    const approval = new HostApprovalController({clock, idFactory: () => 'permissions'})
     const signal = new AbortController()
     const result = routeCodexApprovalServerRequest({
       ...base, controller: approval, method: 'item/permissions/requestApproval',
@@ -456,7 +454,7 @@ test('concurrent, terminal-turn, transport-loss, and unknown requests preserve f
 test('approval FIFO: the head is the only voice-visible entry, queued TTLs start at promotion, work scoping', async () => {
   const clock = new VirtualClock(100)
   let nextId = 0
-  const controller = new CodexApprovalController({clock, idFactory: () => `public-${++nextId}`})
+  const controller = new HostApprovalController({clock, idFactory: () => `public-${++nextId}`})
   const offer = (command: string) => ({
     kind: 'command_execution' as const,
     local_detail: {kind: 'command_execution' as const, command, cwd: '/w'},

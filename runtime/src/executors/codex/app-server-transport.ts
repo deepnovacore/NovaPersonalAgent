@@ -17,8 +17,8 @@ validateEffectiveCodexConfig,
 import {
 isCodexApprovalPort,
 routeCodexApprovalServerRequest,
-type CodexApprovalPort,
-} from './approval.js'
+} from './approval-protocol.js'
+import type {ApprovalPort} from '../../approval.js'
 import { sanitizeCodexPreflightReport } from './contract.js'
 import type {
 CredentialSnapshot,
@@ -102,7 +102,7 @@ export interface CodexAppServerLaunchConfig {
   readonly persistent: boolean
   readonly workingInterval?: number
   readonly approvalPolicy?: 'never' | 'on-request'
-  readonly approvalController?: CodexApprovalPort
+  readonly approvalController?: ApprovalPort
   readonly launchProfile?: CodexLaunchProfile
 }
 

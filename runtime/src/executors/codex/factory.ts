@@ -40,11 +40,8 @@ import type {Clock} from '../../clock.js'
 import {CodexHostConfigurationError} from './host-config.js'
 import {ProjectCodexAdapter} from './adapter-project.js'
 import {ProjectConfirmationController} from '../../project-confirmation.js'
-import {
-  CodexApprovalController,
-  type CodexApprovalPort,
-  type CodexApprovalView,
-} from './approval.js'
+import {HostApprovalController, type ApprovalPort} from '../../approval.js'
+import {type ApprovalView} from '../../approval-port.js'
 import {basename} from 'node:path'
 import {
   resolveCodexLaunchProfile,
@@ -68,7 +65,7 @@ export interface CodexTransportBinding {
   readonly workingInterval: number
   readonly launchProfile: CodexLaunchProfile
   /** Project mode: the shared controller scoped to the run's work (`forWork`), so one work's turn end never drops another's approval. */
-  readonly approvalController: CodexApprovalPort | null
+  readonly approvalController: ApprovalPort | null
 }
 
 export interface CodexBackendTransportFactory {
@@ -187,7 +184,7 @@ export interface CodexAssemblyResource extends CodingExecutorResource {
   readonly mode: CodexAssemblyMode
   readonly projectView: PublicProjectView | null
   readonly approvalPolicy: CodexApprovalPolicy
-  readonly approvalController: CodexApprovalController | null
+  readonly approvalController: HostApprovalController | null
   start(): Promise<void>
   close(): Promise<void>
 }
@@ -207,7 +204,7 @@ export interface CreateCodexAssemblyResourceOptions {
   readonly onProjectView?: (view: PublicProjectView) => void
   readonly platform?: NodeJS.Platform
   readonly codexApprovalBroker?: {
-    readonly publish: (view: CodexApprovalView) => void
+    readonly publish: (view: ApprovalView) => void
   }
   readonly onDiagnostic?: (code: string) => void
 }
@@ -249,7 +246,7 @@ async function createProjectResource(
     foregroundBroker: options.codexApprovalBroker !== undefined,
   })
   const approvalController = launchProfile.controller === 'present'
-    ? new CodexApprovalController({clock: options.clock, idFactory: options.idFactory})
+    ? new HostApprovalController({clock: options.clock, idFactory: options.idFactory})
     : null
   if (launchProfile.id === 'ask_headless') {
     try { options.onDiagnostic?.('ask_headless_no_broker') } catch { /* diagnostics are advisory */ }
@@ -359,7 +356,7 @@ class ProjectCodexAssemblyResource implements CodexAssemblyResource {
     readonly adapter: ProjectCodexAdapter,
     startupTransport: CodexAppServerTransport,
     readonly approvalPolicy: CodexApprovalPolicy,
-    readonly approvalController: CodexApprovalController | null,
+    readonly approvalController: HostApprovalController | null,
     unsubscribeApproval: (() => void) | null,
   ) {
     this.#startupTransport = startupTransport

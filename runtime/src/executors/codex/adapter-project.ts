@@ -39,7 +39,7 @@ import type {JsonValue} from '../../events.js'
 import {consumeHostExecutorCapability} from '../../host-executor-capability.js'
 import {USER_PRIORITY} from '../../memory.js'
 import type {ApprovalWork} from '../../approval-port.js'
-import type {CodexApprovalController} from './approval.js'
+import type {HostApprovalController} from '../../approval.js'
 import {
   ProjectResolutionError,
   type CancelContext,
@@ -109,7 +109,7 @@ export interface ProjectCodexAdapterOptions {
   readonly store: ProjectStore
   readonly confirmation: ProjectConfirmationController
   readonly transportFactory: ProjectTransportFactory
-  readonly codexApproval?: CodexApprovalController
+  readonly codexApproval?: HostApprovalController
   readonly onProjectView?: ProjectViewObserver
 }
 

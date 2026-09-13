@@ -22,7 +22,7 @@ import {
 } from '../src/realtime-assembly.js'
 import {VirtualClock} from '../src/clock.js'
 import {ScriptedIdFactory, type IdFactory} from '../src/ids.js'
-import {CodexApprovalController} from '../src/executors/codex/approval.js'
+import {HostApprovalController} from '../src/approval.js'
 import {codexAgentDescriptor, CodexAgentController} from '../src/executors/codex/controller.js'
 import {
   CODEX_LIVE_MANIFEST,
@@ -2759,7 +2759,7 @@ test('Codex resource approval authority is wired into the realtime service', asy
       outcome: 'failed', trust: 'trusted_system', content: {code: 'not_run'},
     }),
   }
-  const controller = new CodexApprovalController({clock, idFactory: () => 'approval-1'})
+  const controller = new HostApprovalController({clock, idFactory: () => 'approval-1'})
   const resource: CodexAssemblyResource = {
     adapter,
     mode: 'live',
@@ -3546,7 +3546,7 @@ test('Qwen composition exposes approval only for the exact controller-bearing re
     clock,
     idFactory: () => 'unused-project-confirmation-id',
   })
-  const approvalController = new CodexApprovalController({
+  const approvalController = new HostApprovalController({
     clock,
     idFactory: () => 'unused-codex-approval-id',
   })

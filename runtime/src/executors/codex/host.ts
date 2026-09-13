@@ -4,7 +4,7 @@
  * `*-assembly.ts`) import this; it is deliberately absent from the package-root barrel so the
  * runtime package never exports authority bypasses (`test/codex-root-exports.test.ts`).
  */
-export * from './approval.js'
+export * from './approval-protocol.js'
 export {OwnedCodexAppServerTransport} from './app-server-transport.js'
 export {
   CredentialSnapshotter,

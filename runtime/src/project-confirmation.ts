@@ -1,3 +1,4 @@
+import {PendingDecision} from './pending-decision.js'
 /**
  * Host confirmation for a Codex project boundary change.
  *
@@ -94,10 +95,11 @@ export class ProjectConfirmationController {
   #reserved: string | null = null
   #commitAuthority: ConfirmedProjectOperation | null = null
   #state: 'pending' | 'committing' | 'settled' = 'settled'
-  #expiryAbort: AbortController | null = null
+  readonly #decision: PendingDecision<'project', ProjectProposal>
 
   constructor(options: ProjectConfirmationOptions) {
     this.#clock = options.clock
+    this.#decision = new PendingDecision(options.clock)
     this.#idFactory = options.idFactory
     this.#onChange = options.onChange
   }
@@ -354,6 +356,7 @@ export class ProjectConfirmationController {
     this.#commitAuthority = null
     this.#reserved = null
     this.#state = 'pending'
+    this.#decision.release(this.#proposal, this.#proposal.expires_at)
     this.#publish()
     return true
   }
@@ -436,55 +439,22 @@ export class ProjectConfirmationController {
     // shared click/voice lock; only runtime rejection may move it back to pending.
     this.#commitAuthority = operation
     this.#state = 'committing'
+    this.#decision.hold(proposal)
     this.#publish()
     return outcome('confirmed', {operation})
   }
 
   #clearAll(): void {
+    if (this.#proposal !== null) this.#decision.consume(this.#proposal)
     if (this.#commitAuthority !== null) revokeConfirmedProjectCapability(this.#commitAuthority)
     this.#proposal = null
     this.#reserved = null
     this.#commitAuthority = null
     this.#state = 'settled'
-    const abort = this.#expiryAbort
-    this.#expiryAbort = null
-    abort?.abort()
   }
 
-  /**
-   * Start the deadline timer.
-   *
-   * A deliberate divergence from the oracle, which schedules nothing when `prepare` is called
-   * outside a running asyncio loop -- a proposal made there is never collected, and its `_proposal`
-   * is retained after the deadline even though `pending` reports false. That is an artefact of how
-   * Python discovers its loop rather than a decision, and it leaves stale authority reachable by
-   * anything that inspects state directly. Here the timer is always armed.
-   */
   #scheduleExpiry(proposal: ProjectProposal): void {
-    this.#expiryAbort?.abort()
-    const abort = new AbortController()
-    this.#expiryAbort = abort
-    void this.#expireGeneration(proposal, abort.signal)
-  }
-
-  async #expireGeneration(proposal: ProjectProposal, signal: AbortSignal): Promise<void> {
-    try {
-      await this.#clock.sleep(Math.max(0, proposal.expires_at - this.#clock.now()), signal)
-    } catch {
-      // Aborted, which means something already replaced or cleared this proposal.
-      return
-    }
-    // Re-checked rather than trusted: the timer may have been overtaken by a replacement proposal
-    // that happens to share a deadline, and identity is what distinguishes them. A decision already
-    // in committing spent the TTL in time; claim, rollback, rejection or invalidation must settle it.
-    if (
-      this.#proposal !== proposal
-      || this.#state !== 'pending'
-      || !this.#isExpired(proposal)
-    ) return
-    this.#clearAll()
-    this.#publish()
-    this.#publishExpiry()
+    this.#decision.offer('project', proposal, proposal.expires_at, () => { this.expire() })
   }
 
   #publishExpiry(): void {

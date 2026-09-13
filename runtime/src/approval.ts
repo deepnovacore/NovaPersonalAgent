@@ -1,3 +1,4 @@
+import {PendingDecision} from './pending-decision.js'
 import type {Clock} from './clock.js'
 import {APPROVAL_TTL_SECONDS, type ApprovalDecision, type ApprovalKind, type ApprovalLocalDetail, type ApprovalView, type ApprovalWork, type ApprovalController} from './approval-port.js'
 import {MAX_CONCURRENT_WORK, confirmArguments} from './work-tools.js'
@@ -28,9 +29,6 @@ interface PendingApproval {
   expiresAt: number
   readonly signal: AbortSignal
   readonly resolve: (resolution: ApprovalResolution) => void
-  /** Replaced by `release`, which re-arms the head with a fresh deadline. */
-  expiryAbort: AbortController
-  /** Parked by `hold` behind a project confirmation: the deadline is stale and must not drop the entry. */
   held: boolean
   onSignalAbort: (() => void) | null
   state: 'pending' | 'responding'
@@ -51,6 +49,7 @@ export type ApprovalPort = Pick<HostApprovalController, 'offer' | 'consume' | 'i
  */
 export class HostApprovalController {
   readonly #clock: Clock
+  readonly #decision: PendingDecision<'approval', PendingApproval>
   readonly #idFactory: () => string
   readonly #observers: ((view: ApprovalView) => void)[] = []
   #current: PendingApproval | null = null
@@ -58,6 +57,7 @@ export class HostApprovalController {
 
   constructor(options: HostApprovalControllerOptions) {
     this.#clock = options.clock
+    this.#decision = new PendingDecision(options.clock)
     this.#idFactory = options.idFactory
   }
 
@@ -101,7 +101,7 @@ export class HostApprovalController {
       return false
     }
     current.held = true
-    current.expiryAbort.abort()
+    this.#decision.hold(current)
     this.#publish()
     return true
   }
@@ -111,8 +111,8 @@ export class HostApprovalController {
     const current = this.#current
     if (current?.state !== 'pending' || !current.held) return false
     current.held = false
-    current.expiryAbort = new AbortController()
-    this.#arm(current)
+    current.expiresAt = this.#clock.now() + APPROVAL_TTL_SECONDS
+    this.#decision.release(current, current.expiresAt)
     this.#publish()
     return true
   }
@@ -153,7 +153,6 @@ export class HostApprovalController {
       expiresAt: 0,
       signal,
       resolve,
-      expiryAbort: new AbortController(),
       held: false,
       onSignalAbort: null,
       state: 'pending',
@@ -186,7 +185,7 @@ export class HostApprovalController {
     const resolution = Object.freeze({decision: input.decision})
     current.state = 'responding'
     current.resolution = resolution
-    current.expiryAbort.abort()
+    this.#decision.consume(current)
     current.resolve(resolution)
     this.#publish()
     return true
@@ -227,19 +226,6 @@ export class HostApprovalController {
     return owned.length > 0
   }
 
-  async #expireAtDeadline(current: PendingApproval): Promise<void> {
-    try {
-      await this.#clock.sleep(
-        Math.max(0, current.expiresAt - this.#clock.now()),
-        current.expiryAbort.signal,
-      )
-    } catch {
-      return
-    }
-    if (this.#current !== current || current.held || this.#clock.now() < current.expiresAt) return
-    this.#drop(current)
-  }
-
   #promote(entry: PendingApproval): void {
     this.#current = entry
     this.#arm(entry)
@@ -247,7 +233,7 @@ export class HostApprovalController {
 
   #arm(entry: PendingApproval): void {
     entry.expiresAt = this.#clock.now() + APPROVAL_TTL_SECONDS
-    void this.#expireAtDeadline(entry)
+    this.#decision.offer('approval', entry, entry.expiresAt, (_kind, expired) => this.#drop(expired))
   }
 
   #promoteNext(): void {
@@ -271,7 +257,7 @@ export class HostApprovalController {
   }
 
   #detach(entry: PendingApproval): void {
-    entry.expiryAbort.abort()
+    this.#decision.consume(entry)
     if (entry.onSignalAbort !== null) {
       entry.signal.removeEventListener('abort', entry.onSignalAbort)
       entry.onSignalAbort = null

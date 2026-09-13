@@ -1,22 +1,11 @@
 import {lstatSync, realpathSync} from 'node:fs'
 import {isAbsolute, relative, resolve, sep} from 'node:path'
 import {z} from 'zod'
-
-import {HostApprovalController, type HostApprovalControllerOptions as CodexApprovalControllerOptions, type ApprovalPort as CodexApprovalPort} from '../../approval.js'
-export type {CodexApprovalControllerOptions, CodexApprovalPort}
-import {
-  APPROVAL_TTL_SECONDS,
-  type ApprovalDecision,
-  type ApprovalKind,
-  type ApprovalLocalDetail,
-  type ApprovalView,
-  type ApprovalWork,
-  type FileChangeDisplay,
-} from '../../approval-port.js'
-import {snapshotJsonRecord} from './safe-json.js'
+import type {ApprovalOffer, ApprovalPort} from '../../approval.js'
+import type {ApprovalDecision, FileChangeDisplay} from '../../approval-port.js'
 import {codePointLengthLikePython, isWellFormed, stripLikePython} from '../../python-text.js'
+import {snapshotJsonRecord} from './safe-json.js'
 
-export const CODEX_APPROVAL_TTL_SECONDS = APPROVAL_TTL_SECONDS
 const CODEX_APPROVAL_COMMAND_LIMIT = 4096
 const CODEX_APPROVAL_PATH_LIMIT = 4096
 const CODEX_APPROVAL_CHANGE_LIMIT = 64
@@ -25,9 +14,6 @@ const CODEX_APPROVAL_PROTOCOL_ID_LIMIT = 256
 const CODEX_APPROVAL_REASON_LIMIT = 1024
 const CODEX_APPROVAL_DIFF_LIMIT = 65_536
 const CODEX_APPROVAL_ACTIONS_LIMIT = 16_384
-
-export type CodexApprovalDecision = ApprovalDecision
-export type CodexApprovalKind = ApprovalKind
 
 const permissionPath = z.string().min(1).max(CODEX_APPROVAL_PATH_LIMIT).refine(isWellFormed)
 const specialPath = z.union([
@@ -54,32 +40,15 @@ type PermissionFileSystemPath = NonNullable<NonNullable<PermissionProfile['fileS
 type PermissionSpecialPath = Extract<PermissionFileSystemPath, {type: 'special'}>['value']
 const SESSION_DECISIONS = Object.freeze(['accept', 'acceptForSession', 'decline'] as const)
 
-export type CodexFileChangeDisplay = FileChangeDisplay
-
-export type CodexApprovalLocalDetail = ApprovalLocalDetail
-
-export interface CodexApprovalOffer {
-  readonly kind: CodexApprovalKind
-  readonly local_detail: CodexApprovalLocalDetail
-  readonly operation_summary: string
-  readonly allowed_decisions?: readonly CodexApprovalDecision[]
-}
-
-export type CodexApprovalView = ApprovalView
-
-export interface CodexApprovalResolution {
-  readonly decision: CodexApprovalDecision
-}
-
-export function isCodexApprovalPort(value: unknown): value is CodexApprovalPort {
+export function isCodexApprovalPort(value: unknown): value is ApprovalPort {
   return typeof value === 'object' && value !== null
-    && typeof (value as CodexApprovalPort).offer === 'function'
-    && typeof (value as CodexApprovalPort).consume === 'function'
-    && typeof (value as CodexApprovalPort).invalidate === 'function'
+    && typeof (value as ApprovalPort).offer === 'function'
+    && typeof (value as ApprovalPort).consume === 'function'
+    && typeof (value as ApprovalPort).invalidate === 'function'
 }
 
 export interface CodexApprovalServerRequestRouteOptions {
-  readonly controller: CodexApprovalPort
+  readonly controller: ApprovalPort
   readonly workspace: string
   readonly activePair: readonly [string, string] | null
   readonly fileChangeItem: (
@@ -92,16 +61,8 @@ export interface CodexApprovalServerRequestRouteOptions {
 }
 
 export interface CodexApprovalServerResponse {
-  readonly result: {readonly decision: CodexApprovalDecision}
+  readonly result: {readonly decision: ApprovalDecision}
     | {readonly permissions: PermissionProfile; readonly scope: 'turn' | 'session'}
-}
-
-/** Codex display validation and redaction adapt offers into the host-owned FIFO. */
-export class CodexApprovalController extends HostApprovalController {
-  override async offer(input: CodexApprovalOffer, signal: AbortSignal, work: ApprovalWork | null = null): Promise<CodexApprovalResolution | null> {
-    if (!(signal instanceof AbortSignal) || signal.aborted) return Promise.resolve(null)
-    return await super.offer(validateAndSnapshotOffer(input), signal, work)
-  }
 }
 
 /** Route only the foreground approval methods currently supported by this transport; unknown methods remain transport-owned. */
@@ -121,7 +82,7 @@ async function routeSupportedCodexApproval(
 ): Promise<CodexApprovalServerResponse> {
   const isPermissions = options.method === 'item/permissions/requestApproval'
   let requested: PermissionProfile = {}
-  const respond = (decision: CodexApprovalDecision): CodexApprovalServerResponse => isPermissions
+  const respond = (decision: ApprovalDecision): CodexApprovalServerResponse => isPermissions
     ? {result: {permissions: decision === 'decline' ? {} : requested, scope: decision === 'acceptForSession' ? 'session' : 'turn'}}
     : approvalResponse(decision)
   try {
@@ -130,7 +91,7 @@ async function routeSupportedCodexApproval(
       ? fileChangeOffer(options)
       : isPermissions ? permissionsOffer(options, requested) : commandExecutionOffer(options)
     if (offer === null || options.signal.aborted) return respond('decline')
-    const resolution = await options.controller.offer(offer, options.signal)
+    const resolution = await options.controller.offer(validateAndSnapshotOffer(offer), options.signal)
     if (resolution === null) return respond('decline')
     return respond(options.controller.consume(resolution))
   } catch {
@@ -138,7 +99,7 @@ async function routeSupportedCodexApproval(
   }
 }
 
-function fileChangeOffer(options: CodexApprovalServerRequestRouteOptions): CodexApprovalOffer | null {
+function fileChangeOffer(options: CodexApprovalServerRequestRouteOptions): ApprovalOffer | null {
   const workspace = canonicalWorkspace(options.workspace)
   const params = snapshotJsonRecord(options.params)
   if (!exactKeys(params, [
@@ -165,7 +126,7 @@ function fileChangeOffer(options: CodexApprovalServerRequestRouteOptions): Codex
     || item.changes.length > CODEX_APPROVAL_CHANGE_LIMIT
   ) return null
   let totalDiff = 0
-  const changes: CodexFileChangeDisplay[] = []
+  const changes: FileChangeDisplay[] = []
   for (const candidate of item.changes) {
     const change = snapshotJsonRecord(candidate)
     if (!exactKeys(change, ['diff', 'kind', 'path']) || typeof change.diff !== 'string') return null
@@ -195,7 +156,7 @@ function fileChangeOffer(options: CodexApprovalServerRequestRouteOptions): Codex
 
 function commandExecutionOffer(
   options: CodexApprovalServerRequestRouteOptions,
-): CodexApprovalOffer | null {
+): ApprovalOffer | null {
   const workspace = canonicalWorkspace(options.workspace)
   const params = snapshotJsonRecord(options.params)
   if (!exactKeys(params, [
@@ -254,7 +215,7 @@ function commandExecutionOffer(
   })
 }
 
-function permissionsOffer(options: CodexApprovalServerRequestRouteOptions, requested: PermissionProfile): CodexApprovalOffer | null {
+function permissionsOffer(options: CodexApprovalServerRequestRouteOptions, requested: PermissionProfile): ApprovalOffer | null {
   const workspace = canonicalWorkspace(options.workspace)
   const params = snapshotJsonRecord(options.params)
   if (!exactKeys(params, ['cwd', 'environmentId', 'itemId', 'permissions', 'reason', 'startedAtMs', 'threadId', 'turnId'])
@@ -414,11 +375,11 @@ function exactKeys(value: Readonly<Record<string, unknown>>, allowed: readonly s
   return Object.keys(value).every(key => accepted.has(key))
 }
 
-function approvalResponse(decision: CodexApprovalDecision): CodexApprovalServerResponse {
+function approvalResponse(decision: ApprovalDecision): CodexApprovalServerResponse {
   return Object.freeze({result: Object.freeze({decision})})
 }
 
-function validateAndSnapshotOffer(input: CodexApprovalOffer): CodexApprovalOffer {
+export function validateAndSnapshotOffer(input: ApprovalOffer): ApprovalOffer {
   const summary = boundedText(input.operation_summary, CODEX_APPROVAL_SUMMARY_LIMIT)
   const allowed = input.allowed_decisions
   if (allowed !== undefined && (allowed.length > 3 || allowed.length === 0
