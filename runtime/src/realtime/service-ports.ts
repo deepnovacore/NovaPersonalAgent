@@ -101,3 +101,21 @@ export interface DeliverySnapshot {
   readonly acknowledgementPhases: Readonly<Record<string, string>>
   readonly continuationOrder: readonly string[]
 }
+
+export interface BoundToolOrigin {
+  readonly observedProviderResponseId: string | null
+  readonly originItemId: string | null
+  readonly originRef: string | null
+}
+
+export type ProviderReconnectReason =
+  | 'project_confirmation_ui_retry'
+  | 'uncertain_delivery'
+  | 'recoverable_provider_error'
+  | 'origin_resolution_overflow'
+  | 'origin_binding_overflow'
+  | 'refusal_ledger_overflow'
+  | 'project_confirmation_carrier_recovery'
+  | 'project_confirmation_expiry_cleanup'
+  | 'client_disconnect'
+  | 'test'

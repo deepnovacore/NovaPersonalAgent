@@ -6412,10 +6412,10 @@ test('provider reconnect telemetry has categorical outcomes and never leaks prov
 })
 
 test('every provider reconnect call site declares one reviewed categorical reason', () => {
-  const source = readFileSync(
-    resolve(import.meta.dirname, '../../src/realtime/service.ts'),
+  const source = ['service.ts', 'tool-continuations.ts'].map(file => readFileSync(
+    resolve(import.meta.dirname, '../../src/realtime', file),
     'utf8',
-  )
+  )).join('\n')
   for (const reason of [
     'project_confirmation_ui_retry',
     'uncertain_delivery',
@@ -6429,7 +6429,7 @@ test('every provider reconnect call site declares one reviewed categorical reaso
   ]) {
     assert.match(source, new RegExp(`reason: '${reason}'`, 'u'))
   }
-  const calls = [...source.matchAll(/#reconnectProviderSession\(\{(?<options>[\s\S]*?)\}\)/gu)]
+  const calls = [...source.matchAll(/(?:#|\.)reconnectProviderSession\(\{(?<options>[\s\S]*?)\}\)/gu)]
   assert.ok(calls.length >= 9)
   for (const call of calls) {
     assert.match(call.groups?.options ?? '', /reason: '/u)
