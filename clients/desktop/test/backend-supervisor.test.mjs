@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict'
 import {EventEmitter} from 'node:events'
 import test from 'node:test'
-
 import {shutdownBackend, waitForBackendReadiness} from '../src/main/backend.mjs'
-import {createBackendDiagnosticCollector} from '../src/main/backend-diagnostics.mjs'
-import {createBackendSupervisor} from '../src/main/backend-supervisor.mjs'
-
+import {createBackendDiagnosticCollector, createBackendSupervisor, createBackendControl, classifyBackendFailure} from '../src/main/backend-supervisor.mjs'
 function deferred() {
   let resolve
   const promise = new Promise(next => { resolve = next })
@@ -210,4 +207,83 @@ test('assembly cleanup failure on explicit stop or restart never schedules an ex
       await supervisor.stop()
     }
   }
+})
+
+test('private requests correlate, reject on close, and ignore late status', async () => {
+  const child = new EventEmitter(), sent = [], statuses = []
+  child.postMessage = value => sent.push(value)
+  const control = createBackendControl(child, {onStatus: status => statuses.push(status)})
+  const request = control.request('capabilities.status', {})
+  child.emit('message', {type: 'nova.control.reply', id: sent[0].id, result: {ok: true}})
+  assert.deepEqual(await request, {ok: true})
+  const pending = control.request('knowledge.reindex', {})
+  control.close()
+  await assert.rejects(pending, /unavailable/)
+  child.emit('message', {type: 'nova.capabilities', status: {toolCount: 8, toolBudget: 24}})
+  assert.equal(statuses.length, 0)
+  assert.equal(child.listenerCount('message'), 0)
+})
+
+test('private status projects only safe public fields and bounded exact counts', async () => {
+  const {publicRuntimeCapabilityStatus} = await import('../src/main/backend-supervisor.mjs')
+  const projected = publicRuntimeCapabilityStatus({state: 'startup_failed', toolCount: 27, toolBudget: 24,
+    modules: {search: {enabled: true, provider: 'mcp', mcp: {headers: {authorization: 'private-secret'}}}}, registry: 'private-secret',
+    servers: [{name: 'docs', status: 'failed', reason: 'discovery_failed', config: 'private-secret', codex: {status: 'failed', reason: 'codex_timeout_unrepresentable'}}]})
+  assert.equal(projected.toolCount, 27)
+  assert.equal(projected.toolBudget, 24)
+  assert.equal(projected.state, 'startup_failed')
+  assert.ok(!JSON.stringify(projected).includes('private-secret'))
+  assert.equal(publicRuntimeCapabilityStatus({toolCount: -1, toolBudget: 24}), null)
+})
+
+test('usage stays private, validates numbers and ignores closed children', () => {
+  const child = new EventEmitter(), received = []
+  const control = createBackendControl(child, {onUsage: report => received.push(report)})
+  const report = {id:'request-1',provider:'qwen',service:'llm',model:'qwen-flash',status:'complete',inputTokens:10,secret:'private'}
+  child.emit('message',{type:'nova.usage',report:{...report,inputTokens:Infinity}})
+  child.emit('message',{type:'nova.usage',report})
+  assert.equal(received.length,1)
+  assert.equal(received[0].secret,undefined)
+  control.close()
+  child.emit('message',{type:'nova.usage',report})
+  assert.equal(received.length,1)
+})
+
+test('backend classifier maps only stable public failure classes', () => {
+  assert.deepEqual(classifyBackendFailure('manual_path_required'), {
+    kind: 'configuration_required', code: 'manual_path_required',
+  })
+  assert.deepEqual(classifyBackendFailure('authentication_failed'), {
+    kind: 'authentication_failed', code: 'authentication_failed',
+  })
+  assert.deepEqual(classifyBackendFailure('codex_unavailable'), {
+    kind: 'unavailable', code: 'codex_unavailable',
+  })
+  assert.deepEqual(classifyBackendFailure('private exception text'), {
+    kind: 'recoverable', code: 'backend_disconnected',
+  })
+})
+
+test('collector accepts split stable diagnostics and never returns raw stderr', () => {
+  const collector = createBackendDiagnosticCollector()
+  collector.push('secret=https://user:pass@example.invalid\n[runtime-dia')
+  collector.push('gnostic] authentication_failed\nprivate stack')
+  assert.equal(collector.code(), 'authentication_failed')
+  assert.deepEqual(collector.failure(), {
+    kind: 'authentication_failed', code: 'authentication_failed',
+  })
+  assert.equal(JSON.stringify(collector.failure()).includes('secret'), false)
+})
+
+test('collector surfaces safe Codex detail but does not promote it to a startup failure class', () => {
+  const collector = createBackendDiagnosticCollector()
+  assert.equal(
+    collector.push('[runtime-diagnostic] codex_login_status_nonzero\nprivate command output'),
+    'codex_login_status_nonzero',
+  )
+  assert.equal(collector.code(), 'codex_login_status_nonzero')
+  assert.deepEqual(collector.failure(), {
+    kind: 'recoverable', code: 'backend_disconnected',
+  })
+  assert.equal(JSON.stringify(collector.failure()).includes('private'), false)
 })

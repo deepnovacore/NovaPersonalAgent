@@ -17,7 +17,7 @@ const BUILD_JAVASCRIPT_FILES = Object.freeze([
   'src/main/security.mjs',
   'src/main/native-audio.mjs',
   'src/main/release-smoke-channel.mjs',
-  'src/main/startup-diagnostics.mjs',
+  'src/main/desktop-startup.mjs',
   'src/main/drag-controller.mjs',
   'src/main/settings-store.mjs',
   'src/renderer/index.mjs',

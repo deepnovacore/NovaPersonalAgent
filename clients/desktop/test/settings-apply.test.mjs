@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import {createLifecycleCoordinator} from '../src/main/lifecycle-coordinator.mjs'
+import {createLifecycleCoordinator} from '../src/main/desktop-startup.mjs'
 import {
   applySettingsTransaction,
   coordinateCodexRescan,

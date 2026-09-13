@@ -10,7 +10,7 @@ import {
   toolCountLabel,
 } from '../src/main/orb-menu.mjs'
 
-// The shape backend-control.mjs sanitizes into, with main's own state overlay.
+// The shape backend-supervisor.mjs sanitizes into, with main's own state overlay.
 function runtime(overrides = {}) {
   return {
     toolCount: 12,

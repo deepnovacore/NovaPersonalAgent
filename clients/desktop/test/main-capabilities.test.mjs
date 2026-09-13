@@ -7,7 +7,7 @@ import {statSync} from 'node:fs'
 import {join} from 'node:path'
 import {resolveSecretConfiguration} from '../src/main/backend.mjs'
 import {createBackendSupervisor} from '../src/main/backend-supervisor.mjs'
-import {classifyBackendFailure} from '../src/main/backend-diagnostics.mjs'
+import {classifyBackendFailure} from '../src/main/backend-supervisor.mjs'
 import {capabilityPath, capabilityDocumentRevision, readCapabilityDocument} from '../src/main/capabilities-settings.mjs'
 
 const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')

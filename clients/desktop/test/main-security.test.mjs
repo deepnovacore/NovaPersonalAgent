@@ -946,7 +946,7 @@ test('recovery cleanup failure stops the activated child before rollback and pre
   const {join} = await import('node:path')
   const {default: vm} = await import('node:vm')
   const {applySettingsTransaction} = await import('../src/main/settings-apply.mjs')
-  const {createLifecycleCoordinator} = await import('../src/main/lifecycle-coordinator.mjs')
+  const {createLifecycleCoordinator} = await import('../src/main/desktop-startup.mjs')
   const {saveSettings, loadSettings, saveSettingsRecovery, restoreSettingsRecovery} = await import('../src/main/settings-store.mjs')
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const helper = name => {

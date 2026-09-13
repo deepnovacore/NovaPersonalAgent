@@ -1,7 +1,8 @@
+import {createBackendControl, classifyBackendFailure, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
+import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure} from './desktop-startup.mjs'
 import {VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
-import {createBackendControl} from './backend-control.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
 import {createManagedPhoneService, phoneNetwork, requestPhonePairing, renderPhoneQr} from './phone-connection.mjs'
 import {activeMcpMenuRows} from './orb-menu.mjs'
@@ -52,12 +53,6 @@ import {
   watchBackendExit,
   waitForBackendReadiness,
 } from './backend.mjs'
-import {
-  classifyBackendFailure,
-  createBackendDiagnosticCollector,
-} from './backend-diagnostics.mjs'
-import { createBackendSupervisor } from './backend-supervisor.mjs'
-import { createLifecycleCoordinator } from './lifecycle-coordinator.mjs'
 import { configureDevelopmentDockIcon } from './app-icon.mjs'
 import {
   createDebugBoardRequester,
@@ -68,12 +63,6 @@ import { startWithSelectedCamera } from './camera-source.mjs'
 import { createDragController } from './drag-controller.mjs'
 import { executorResultDialogOptions, executorResultMenuTemplate } from './executor-result.mjs'
 import { shouldOpenSettings } from './launch-command.mjs'
-import {
-  canonicalInstalledExecutable,
-  canonicalInstalledInvocation,
-  inspectCodexVersion,
-  prepareDesktopStartup,
-} from './desktop-startup.mjs'
 import { createNativeAudioManager } from './native-audio.mjs'
 import {
   ensurePrivateProjectDirectories,
@@ -83,7 +72,6 @@ import {
   createReleaseSmokeChannel,
   releaseSmokeSourceRollbackExitCode,
 } from './release-smoke-channel.mjs'
-import { reportStartupFailure } from './startup-diagnostics.mjs'
 import {
   createSafeStorageCodec,
   backendSettings,

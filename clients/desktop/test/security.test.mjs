@@ -32,18 +32,11 @@ test('accepts only loopback websocket bootstrap with a 128-bit token', () => {
     endpoint: 'ws://127.0.0.1:49152/',
     token: 'a'.repeat(32),
   })
-  assert.throws(() => validateBootstrap({
-    endpoint: 'wss://voice.example.com',
-    token: 'a'.repeat(32),
-  }), /loopback/)
-  assert.throws(() => validateBootstrap({
-    endpoint: 'ws://127.0.0.1:49152/?token=secret',
-    token: 'a'.repeat(32),
-  }), /query/)
-  assert.throws(() => validateBootstrap({
-    endpoint: 'ws://127.0.0.1:49152',
-    token: 'short',
-  }), /128-bit/)
+  for (const [endpoint, token, reason] of [
+    ['wss://voice.example.com', 'a'.repeat(32), /loopback/],
+    ['ws://127.0.0.1:49152/?token=secret', 'a'.repeat(32), /query/],
+    ['ws://127.0.0.1:49152', 'short', /128-bit/],
+  ]) assert.throws(() => validateBootstrap({endpoint, token}), reason)
 })
 
 test('pins BrowserWindow isolation sandbox and ephemeral partition', () => {
