@@ -89,11 +89,6 @@ const emptySlots = (): IntakeSlots => ({
 const limit = (value: string, count: number): string => [...value].slice(0, count).join('')
 const MAX_ROSTER = 10
 
-/** This recognizes non-content turns only. It never grants execution authority. */
-export function isPurePlanDecision(text: string): boolean {
-  return /^(确认|可以|做吧|好|好的|同意|不同意|不行|取消|不用了|算了|yes|ok|okay|confirm|no|cancel)[。！!,.，\s]*$/iu.test(text.trim())
-}
-
 /**
  * The quoted span must occur in an utterance *and* overlap (one contains the other) exactly one roster
  * name, which must be the selected one: a filler like "改" vouches for nothing, and a shared prefix like
@@ -173,7 +168,7 @@ export class IntakeController {
       const current = this.#session!
       if (current.state === 'committing') return 'intake_in_progress'
       // A provider repeats the draft for an already-ingested answer: one content revision per turn.
-      if (current.origin_ref !== originRef) this.userTurn(text, originRef, sessionId)
+      if (current.origin_ref !== originRef) this.#revise(text, originRef, sessionId)
       return 'intake_in_progress'
     }
     this.#session = {
@@ -191,13 +186,17 @@ export class IntakeController {
 
   userTurn(text: string, originRef: string, sessionId: string): void {
     this.#userInputPending = false
+    // Pending proposals belong to structured confirm/dispatch/cancel, regardless of wording.
+    if (this.#session?.session_id === sessionId && this.#session.proposal_id !== null) return
+    this.#revise(text, originRef, sessionId)
+  }
+
+  #revise(text: string, originRef: string, sessionId: string): void {
     const current = this.#session
     if (current === null || !this.active) return
     if (current.session_id !== sessionId) { this.cancel(); return }
     if (current.state === 'committing' || current.origin_ref === originRef) return
     if (stripLikePython(text) === '') { this.cancel(); return }
-    if (current.proposal_id !== null && isPurePlanDecision(text)) return
-    if (/^(取消|不用了|算了|cancel)[。！!.，\s]*$/iu.test(text.trim())) { this.cancel(); return }
     current.turns.push({question: current.pending_question, answer: limit(text, 2000)})
     if (current.turns.length > 8) { this.#close('abandoned'); return }
     current.revision += 1
@@ -303,13 +302,11 @@ export class IntakeController {
       let question = result.candidate_question?.owner === 'user' ? result.candidate_question.text : null
       const active = this.#options.activeProject()
       const project = result.project ?? (kind === 'create' ? null : active)
-      // Wrong-project protection: a non-active selection must be quoted from the utterance, never inferred.
-      // The one host-authored exception is our own `是在 X 里做吗？` once the user has just affirmed it (an alias
-      // like 博客→blog never contains the roster name, a bare 对 cannot, and `blog` next to `blog-v2` would
-      // never pass the exactly-one check; without this the question loops).
+      // A selected project needs quoted user evidence. For a host question, the assessor
+      // selects the project and quotes the affirmative answer; the host checks that provenance.
       const latest = current.turns.at(-1)
       const affirmed = latest?.question === `是在 ${project} 里做吗？`
-        && /^(是|对|嗯|好|可以|是的|对的|没错|yes|ok|okay)[。！!,.，\s]*$/iu.test(latest.answer.trim())
+        && result.project_evidence != null && latest.answer.includes(result.project_evidence)
       if (kind !== 'create' && kind !== 'unclear' && project !== null && project !== active && !affirmed
         && !evidenceOccurs(result.project_evidence ?? '', project,
           [current.opening, ...current.turns.map(turn => turn.answer)], this.#options.roster().map(entry => entry.name))

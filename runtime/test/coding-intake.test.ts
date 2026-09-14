@@ -168,7 +168,7 @@ test('intake confirms the exact compiled proposal without revision bump or recom
   await h.intake.settled()
   assert.equal(h.intake.view?.state, 'readback')
   const proposalId = h.intake.view.proposal_id!
-  h.intake.userTurn('确认', 'u2', 'e')
+  h.intake.userTurn('确认创建工作区并执行这个计数器任务。', 'u2', 'e')
   assert.equal(h.intake.view?.revision, 1)
   assert.equal(h.intake.view?.origin_ref, 'u1')
   const operation = h.confirmation.acceptDirectDecision({proposalId, confirmed: true}).operation!
@@ -227,6 +227,7 @@ test('intake stale plan is dropped; amendments coalesce into one new plan and re
   h.intake.open(request, 'Fix it', 'u1', 'e')
   await entered
   h.intake.userTurn('Wait, only analyze', 'u2', 'e')
+  h.intake.open(request, 'Wait, only analyze', 'u2', 'e')
   h.intake.userTurn('Do not modify any files', 'u3', 'e')
   release(plan({intake_id: h.intake.view!.intake_id, revision: 1}))
   await h.intake.settled()
@@ -269,6 +270,7 @@ test('intake amendment invalidates proposal; session mismatch and cancellation p
   await h.intake.settled()
   const old = h.intake.view!.proposal_id!
   h.intake.userTurn('Wait, only analyze', 'u2', 'e')
+  h.intake.open(request, 'Wait, only analyze', 'u2', 'e')
   assert.equal(h.confirmation.acceptDirectDecision({proposalId: old, confirmed: true}).operation, null)
   await h.intake.settled()
   assert.equal(h.intake.view?.revision, 2)
@@ -366,8 +368,8 @@ test('coordinator: an affirmed host question is the only host-authored project e
   ]
   // An alias (博客 → blog) can never be quoted; the host's own `是在 blog 里做吗？` becomes the evidence once
   // the user affirms it -- and only then: a negative or a new instruction leaves the question unanswered.
-  for (const [answer, dispatched] of [['对', true], ['不是', false], ['先修登录', false]] as const) {
-    const alias = harness({roster, models: {assess: input => Promise.resolve(assessment(input, {project: 'blog', project_evidence: 'blog'}))}})
+  for (const [answer, dispatched] of [['对，就在你刚才问的那个项目里做', true], ['不是', false], ['先修登录', false]] as const) {
+    const alias = harness({roster, models: {assess: input => Promise.resolve(assessment(input, {project: 'blog', project_evidence: input.revision === 1 || !dispatched ? 'blog' : answer}))}})
     alias.intake.open(request, '改一下博客的暗色模式', 'u1', 'e')
     await alias.intake.settled()
     assert.equal(alias.intake.view?.kind, 'unclear', answer)
@@ -386,7 +388,7 @@ test('coordinator: unclear asks the model question; a resolution error routes wi
   assert.ok(unclear.facts.some(text => text.includes('是哪个项目？')))
 
   const unknown = harness({
-    models: {assess: input => Promise.resolve(assessment(input, {project: 'blgo', project_evidence: 'blgo'}))},
+    models: {assess: input => Promise.resolve(assessment(input, {project: 'blgo', project_evidence: input.revision === 1 ? 'blgo' : '对'}))},
     resolveTarget: () => Promise.reject(new ProjectResolutionError('unknown_project', {project: 'blgo', suggestions: ['blog'], hint: 'create'})),
   })
   unknown.intake.open(request, '在 blgo 里修测试', 'u1', 'e')
@@ -403,7 +405,7 @@ test('coordinator: unclear asks the model question; a resolution error routes wi
 
 test('coordinator: steer preserves the request and amendments after project clarification', async () => {
   const h = harness({models: {
-    assess: input => Promise.resolve(assessment(input, {kind: 'steer', project: 'blog'})),
+    assess: input => Promise.resolve(assessment(input, {kind: 'steer', project: 'blog', project_evidence: input.revision === 3 ? '是的' : null})),
   }})
   h.intake.open(request, '把博客那个正在做的页面字体再调大', 'u1', 'e')
   await h.intake.settled()
@@ -709,3 +711,20 @@ test('an explicitly named session selects its project, but an invented session s
     h.intake.cancel()
   }
 })
+
+for (const text of ['取消', '不用了', 'cancel', '确认前先把需求改成新的']) {
+  test(`pending proposal waits for a structured decision: ${text}`, async () => {
+    const h = harness({settings: {clarification_depth: 'balanced', plan_readback: 'confirm'}})
+    h.intake.open(request, 'Fix it', 'u1', 'e')
+    await h.intake.settled()
+    const proposalId = h.intake.view!.proposal_id!
+    h.intake.userTurn(text, 'u2', 'e')
+    assert.equal(h.intake.view?.proposal_id, proposalId)
+    assert.equal(h.intake.view?.revision, 1)
+    h.intake.open(request, text, 'u2', 'e')
+    assert.equal(h.intake.view?.revision, 2)
+    assert.equal(h.intake.view?.proposal_id, null)
+    assert.equal(h.confirmation.acceptDirectDecision({proposalId, confirmed: true}).operation, null)
+    await h.intake.settled()
+  })
+}

@@ -696,8 +696,22 @@ export class ProjectConfirmationFlow {
   blocksProjectConfirmationTool(event: {
     readonly session_epoch: number
     readonly response_id: string | null
+    readonly name?: string
+    readonly arguments?: unknown
   }): boolean {
     const effectiveResponseId = event.response_id ?? this.session.activeProviderResponseId
+    const reserved = this.#projectConfirmationIsolation.reservation
+    // A correlated coding dispatch revises the proposal through normal tool admission and intake.
+    // Keep host narration, shadow turns and unbound calls behind the confirmation fence.
+    if (event.name === 'dispatch' && this.#ports.intake() !== undefined
+      && event.arguments !== null && typeof event.arguments === 'object'
+      && Object.getOwnPropertyDescriptor(event.arguments, 'executor')?.value === this.#ports.coding?.channel
+      && reserved?.sessionEpoch === event.session_epoch && effectiveResponseId !== null
+      && this.#ports.userOrigins.itemForResponse(event.session_epoch, effectiveResponseId) === reserved.itemId
+      && this.#ports.userOrigins.hasOriginRef(event.session_epoch, reserved.itemId)
+      && reserved.userRevision === this.session.userInputRevision
+      && this.#projectConfirmationIsolation.responseState({sessionEpoch: event.session_epoch, responseId: effectiveResponseId})?.quarantined !== true
+    ) return false
     if (
       effectiveResponseId !== null
       && this.#projectConfirmationIsolation.responseState({

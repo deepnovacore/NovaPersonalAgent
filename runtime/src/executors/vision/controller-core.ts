@@ -229,7 +229,6 @@ export class VisionAgentControllerCore {
   get identity(): VisionIdentity | null { return this.#machine.identity }
 
   async dispatch(request: VisionControllerDispatchRequest): Promise<VisionControllerResult> {
-    if (this.#isStopInstruction(request.instruction)) return Promise.resolve(this.#stop(request, 'requested_stop'))
     if (this.#machine.state !== 'idle') return emptyResult('busy')
     if (!safeWanted(request.stillWanted)) return emptyResult('superseded')
 
@@ -456,8 +455,4 @@ export class VisionAgentControllerCore {
       && this.#active !== null && sameIdentity(this.#active.identity, identity)) this.#active = null
   }
 
-  #isStopInstruction(instruction: string): boolean {
-    const normalized = instruction.trim().toLocaleLowerCase()
-    return normalized === 'stop' || normalized === 'cancel' || normalized === '停止' || normalized === '取消监控'
-  }
 }

@@ -9,6 +9,7 @@
     {"id":"qwen","layer":"provider","entry":"scripts/live/qwen.mjs","requires":[["DASHSCOPE_API_KEY","NOVA_AUDIO_AGENT_MODEL_API_KEY"]],"timeoutMs":120000,"scope":"Qwen realtime connection and audio provider contract; no business tools."},
     {"id":"qwen-surrogate","layer":"model-planning","entry":"scripts/live/qwen-surrogate.mjs","requires":[["DASHSCOPE_API_KEY","NOVA_AUDIO_AGENT_MODEL_API_KEY"]],"timeoutMs":180000,"scope":"Real surrogate progress decisions; not frontend tool selection."},
     {"id":"qwen-clarification-legacy","layer":"model-routing","requires":[],"timeoutMs":60000,"retired":"Stale import and missing agent descriptors; use text-tools for current frontend routing, coordinator for intake. Voice replacement remains uncovered.","scope":"Historical voice clarification smoke; not an acceptance gate."},
-    {"id":"qwen-routing-legacy","layer":"model-routing","requires":[],"timeoutMs":60000,"retired":"Handwritten legacy codex__status schema differs from current hidden operations; not current-product acceptance.","scope":"Historical memory/status voice routing."}
+    {"id":"qwen-routing-legacy","layer":"model-routing","requires":[],"timeoutMs":60000,"retired":"Handwritten legacy codex__status schema differs from current hidden operations; not current-product acceptance.","scope":"Historical memory/status voice routing."},
+    {"id":"project","layer":"end-to-end","entry":"scripts/live/project.mjs","requires":[["NOVA_LIVE_PROJECT_EXECUTE"],["DASHSCOPE_API_KEY"],["DOUBAO_BIGMODEL_API_KEY"]],"timeoutMs":480000,"scope":"Explicit opt-in real workspace and Codex execution; shared Codex login, isolated temporary Nova state. Text or synthetic audio input; no physical device/GUI acceptance."}
   ]
 }

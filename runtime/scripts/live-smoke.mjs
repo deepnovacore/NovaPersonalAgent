@@ -2,6 +2,7 @@ import {readFile, writeFile, mkdir} from 'node:fs/promises'
 import {resolve, dirname, join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {parseArgs, parseEnv} from 'node:util'
+import {createRequire} from 'node:module'
 import {spawn, execFileSync} from 'node:child_process'
 import {createHash, randomUUID} from 'node:crypto'
 import {configuration, runTextCase} from './live/text-tools.mjs'
@@ -36,6 +37,7 @@ if (values.list) {
   const git = (...args) => execFileSync('git', args, {cwd:root, encoding:'utf8'}).trim()
   const harnessHash = createHash('sha256')
   for (const file of ['../live-smoke.mjs','text-tools.mjs','validation.mjs','catalog.json']) harnessHash.update(await readFile(join(import.meta.dirname,'live',file)))
+  if (selected.some(suite => suite.id === 'project')) for (const file of ['runtime/scripts/live/project.mjs','runtime/scripts/live/project-result.mjs','clients/desktop/scripts/live-project-host.cjs']) harnessHash.update(await readFile(join(root,file)))
   const report = {version:1, harnessHash:harnessHash.digest('hex'), startedAt:new Date().toISOString(), revision:git('rev-parse','HEAD'),
     dirty:git('status','--porcelain').length > 0, node:process.version, platform:process.platform,
     selection:selected.map(suite => suite.id), repeats, fixtures:selected.some(suite => suite.id === 'text-tools') ? cases : [], fixtureHash:createHash('sha256').update(fixtureText).digest('hex'),
@@ -68,14 +70,14 @@ if (values.list) {
           try {
             result = suite.id === 'text-tools'
               ? await runTextCase(entry, config, suite.timeoutMs)
-              : await runProcess(suite, environment)
+              : await runProcess(suite, suite.id === 'project' ? {...environment, NOVA_LIVE_PROJECT_REPORT: `${output}.project-${repeat}.json`} : environment)
           } catch (error) {
             // Never persist transport messages, URLs, headers, env values, or child stdout.
             const code = ['network','http','timeout','aborted','configuration','protocol','overflow','closed'].includes(error.code) ? error.code : 'runner_error'
             result = {status: ['protocol','overflow'].includes(code) ? 'failed' : 'error', reason:code}
           }
         }
-        report.results.push({suite:suite.id, layer:suite.layer, case:entry.id, repeat,
+        report.results.push({...(suite.id === 'project' && !blocked ? {artifact: `${output}.project-${repeat}.json`} : {}),suite:suite.id, layer:suite.layer, case:entry.id, repeat,
           ...(config ? {provider:config.provider, model:config.model} : {}), ...result, elapsedMs:Date.now()-start})
         console.log(`${suite.id}/${entry.id} #${repeat}: ${result.status}${result.failures?.length ? ` (${result.failures.join(', ')})` : ''}`)
         await persist()
@@ -90,14 +92,23 @@ if (values.list) {
 
 function runProcess(suite, environment) {
   return new Promise(resolveResult => {
-    const child = spawn(process.execPath, [...(suite.id === 'coordinator' ? ['--test'] : []), suite.entry],
+    const project = suite.id === 'project'
+    const executable = project ? createRequire(join(root,'clients/desktop/package.json'))('electron') : process.execPath
+    const argv = project ? [join(root,'clients/desktop/scripts/live-project-host.cjs')] : [...(suite.id === 'coordinator' ? ['--test'] : []), suite.entry]
+    const child = spawn(executable, argv,
       {cwd:join(root,'runtime'), env:{...environment, NOVA_LIVE_TESTS:'1'}, stdio:['ignore','pipe','pipe']})
-    let bytes = 0, timedOut = false, overflow = false
-    const count = data => { bytes += data.length; if (bytes > 2_000_000) { overflow = true; child.kill('SIGKILL') } }
+    let bytes = 0, timedOut = false, overflow = false, killTimer
+    const terminate = () => {
+      if (!project) { child.kill('SIGKILL'); return }
+      if (killTimer) return
+      child.kill('SIGTERM')
+      killTimer = setTimeout(() => child.kill('SIGKILL'), 10000)
+    }
+    const count = data => { bytes += data.length; if (bytes > 2_000_000) { overflow = true; terminate() } }
     child.stdout.on('data',count); child.stderr.on('data',count)
-    const timer = setTimeout(() => { timedOut = true; child.kill('SIGKILL') }, suite.timeoutMs)
-    child.on('error', () => { clearTimeout(timer); resolveResult({status:'error', reason:'spawn_failed'}) })
-    child.on('close', code => { clearTimeout(timer); resolveResult({status:timedOut || overflow ? 'error' : code === 0 ? 'passed' : 'failed',
+    const timer = setTimeout(() => { timedOut = true; terminate() }, suite.timeoutMs)
+    child.on('error', () => { clearTimeout(timer); clearTimeout(killTimer); resolveResult({status:'error', reason:'spawn_failed'}) })
+    child.on('close', code => { clearTimeout(timer); clearTimeout(killTimer); resolveResult({status:timedOut || overflow ? 'error' : code === 0 ? 'passed' : 'failed',
       exitCode:code, ...(timedOut ? {reason:'timeout'} : overflow ? {reason:'output_limit'} : {})}) })
   })
 }

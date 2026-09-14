@@ -57,7 +57,7 @@ const CODEX_APPROVAL_INSTRUCTIONS = [
 const CODING_INSTRUCTIONS_AFTER = [
   'Coding intake 的宿主事实携带问题时，只问给定的那一个问题，不再次 dispatch；仓库技术栈、入口、测试命令交给执行器探索。',
   '宿主说 ready / planning / readback / committing 时，不自行追问；纯确认用给定 id 调用 confirm。',
-  '用户修改需求时保留新约束，旧待确认事项不再有效。用户回答 Coding intake 的宿主问题后等待宿主规划，不重复 dispatch。',
+  '用户修改待确认的需求时必须调用 dispatch，保留新约束，由宿主替换旧提议；不能确认旧提议。用户回答 Coding intake 的宿主问题后等待宿主规划，不重复 dispatch。',
   '一轮只做一个动作。用户要求先讨论、解释原理或比较方案时直接回答，不为一般知识讨论查询记忆；不得把探索性提问当成执行许可。',
   'dispatch 的 instruction 必须保留用户的最终交付目标、所有显式约束和验收步骤，',
   '描述完整任务，不得缩成第一步（例如只写“读取合同”或“查看文件”）。',

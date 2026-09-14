@@ -1570,6 +1570,29 @@ test('project proposal reaches provider and desktop before confirmation', async 
     assert.deepEqual(validations, ['tetris-game'])
     assert.equal(transportCreations, 0)
     assert.equal(confirmation.pending, true)
+
+    for (let i = 0; i < 5 && !realtime.service.session.providerIdle; i++) {
+      await realtime.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: `readback-${i}`})
+      await realtime.service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: `readback-${i}`, status: 'completed', reason: 'done'})
+    }
+    await realtime.service.handleEvent({kind: 'user_speech_started', session_epoch: 1,
+      speech_id: 'speech-amend', provider_item_id: 'user-amend'})
+    await realtime.service.handleEvent({kind: 'user_speech_ended', session_epoch: 1,
+      speech_id: 'speech-amend', provider_item_id: 'user-amend'})
+    await realtime.service.handleEvent({kind: 'user_transcript_final', session_epoch: 1,
+      item_id: 'user-amend', text: '确认前先修改 tetris-game 的需求：只实现键盘操作'})
+    assert.equal(confirmation.pending, true, 'raw input preserves the proposal for a structured decision')
+    await realtime.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'response-amend'})
+    await realtime.service.handleEvent({kind: 'tool_call_ready', session_epoch: 1,
+      call_id: 'call-amend', item_id: 'function-amend', response_id: 'response-amend', name: 'dispatch',
+      arguments: {executor: 'codex', instruction: '确认前先修改 tetris-game 的需求：只实现键盘操作', origin_ref: 'conversation:2'}})
+    await realtime.service.handleEvent({kind: 'response_terminal', session_epoch: 1,
+      response_id: 'response-amend', status: 'completed', reason: 'done'})
+    await waitNamed('amendment admitted through service', () => provider.hostItems.some(item =>
+      item.call_id === 'call-amend' && (JSON.parse(item.content) as {code?: string}).code === 'intake_in_progress'))
+    await waitNamed('amended plan resolved', () => validations.length === 2)
+    assert.equal(transportCreations, 0, 'amendment must not execute the old proposal')
+
   } finally {
     await realtime.stop()
   }
