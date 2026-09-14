@@ -838,7 +838,7 @@ test('project names use Python NFKC, whitespace collapse, and full casefold', ()
 
 test('managed workspace slug classification never consults ambient ICU Unicode categories', async () => {
   const source = await readFile(
-    join(import.meta.dirname, '../../src/projects/project-store.ts'),
+    join(import.meta.dirname, '../../src/projects/project-state.ts'),
     'utf8',
   )
   assert.equal(source.includes('/[\\p{L}\\p{N}]/u'), false)
@@ -846,7 +846,7 @@ test('managed workspace slug classification never consults ambient ICU Unicode c
 
 test('durability and native locking source retain the audited no-fallback primitives', async () => {
   const storeSource = await readFile(
-    join(import.meta.dirname, '../../src/projects/project-store.ts'),
+    join(import.meta.dirname, '../../src/projects/project-store-files.ts'),
     'utf8',
   )
   const nativeSource = await readFile(

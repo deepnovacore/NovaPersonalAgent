@@ -1,6 +1,6 @@
 import {closeSync, constants, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, realpathSync} from 'node:fs'
 import {basename, dirname, isAbsolute, join, resolve} from 'node:path'
-import {hostProjectRootFromConfig} from '../projects/project-store.js'
+import {hostProjectRootFromConfig} from '../projects/project-store-files.js'
 
 export class PrivateDatabaseError extends Error {
   constructor(readonly code: 'STORE_INVALID_INPUT' | 'STORE_WRITE_FAILED') { super(code) }
