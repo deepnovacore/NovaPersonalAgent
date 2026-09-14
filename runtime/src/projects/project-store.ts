@@ -1,19 +1,8 @@
 import {randomUUID} from 'node:crypto'
-import {constants, lstatSync, realpathSync, type Stats} from 'node:fs'
-import {
-  open,
-  type FileHandle,
-} from 'node:fs/promises'
-import {basename, dirname, isAbsolute, join, resolve} from 'node:path'
-import {TextDecoder} from 'node:util'
-import {z} from 'zod'
-
-import {
-  canonicalJsonWithNumberFormatter,
-  compareCodePoints,
-  type CanonicalJsonPath,
-} from '../text/canonical-json.js'
-import {RealClock, type Clock} from '../core/clock.js'
+import {constants, realpathSync} from 'node:fs'
+import {open, type FileHandle} from 'node:fs/promises'
+import {basename, join} from 'node:path'
+import {stripLikePython} from '../text/python-text.js'
 import {
   hostHomeValue,
   hostPersistentHomeFromConfig,
@@ -22,90 +11,114 @@ import {
   type HostStateHome,
   type HostWorkspace,
 } from './host-paths.js'
-import type {NativeFileLockAuthority, NativeFileLockResult} from '../storage/native-file-lock.js'
-import {isPythonSpace, isWellFormed, stripLikePython} from '../text/python-text.js'
-import {casefoldLikePython} from '../text/unicode-casefold.js'
-import {isLetterCategory, isNumberCategory, isOtherCategory} from '../text/unicode-tables.js'
-import {normalizeNfkcPinned} from '../text/unicode-normalize.js'
-import {pythonFloat} from '../text/python-number.js'
+import {type ProjectFileIdentity} from './project-root-file.js'
 import {
-  unsupportedProjectRootFiles,
-  type ProjectFileIdentity,
-  type ProjectRootFileAuthority,
-  type ProjectRootFileCreateResult,
-  type ProjectRootFileLookupResult,
-  type ProjectRootFileResult,
-} from './project-root-file.js'
+  bumpActiveBindingRevision,
+  compareCreated,
+  MAINTENANCE_TOMBSTONE,
+  MAX_PROJECT_SESSION_TITLE,
+  mostRecentlyUsed,
+  newestReadySession,
+  normalizeProjectSessionTitle,
+  normalizeProjectWorkspaceName,
+  ProjectStateError,
+  pruneForSessionInsert,
+  recentWorkspaces,
+  requireUniqueWorkspaceName,
+  requireWorkspaceCapacity,
+  slugPrefix,
+  snapshotState,
+  STORED_ID,
+  uniqueSessionTitle,
+  uniqueWorkspaceName,
+  validateThreadId,
+  type BegunSession,
+  type ExternalManagedWorkspaceReconciliation,
+  type ManagedMaintenanceJournal,
+  type ManagedMaintenanceJournalEntry,
+  type ManagedReplacementInput,
+  type MutableProjectState,
+  type NormalizedProjectText,
+  type PreparedSessionResume,
+  type ProjectMaintenanceSnapshot,
+  type ProjectMaintenanceTargetSnapshot,
+  type ProjectSessionRecord,
+  type ProjectSnapshot,
+  type PublicProjectContext,
+  type PublicProjectView,
+  type SessionResumeRollback,
+  type SessionStartRollback,
+  type WorkspaceRecord,
+} from './project-state.js'
+import {
+  directoryFlag,
+  fileIdentity,
+  isCommittedTransactionFailure,
+  isDirectChild,
+  isNodeError,
+  LEGACY_PROJECT_CODEX_HOMES_DIRECTORY,
+  noFollowFlag,
+  privateDirectoryMetadata,
+  PROJECT_CODEX_HOMES_DIRECTORY,
+  PROJECT_OWNER_LOCK_FILE,
+  ProjectStoreFiles,
+  sameFileIdentity,
+  validateRegisteredWorkspace,
+  type DirectoryBinding,
+  type FileIdentity,
+  type HeldLock,
+  type MaintenanceFaultStep,
+  type ProjectStoreOptions,
+  type ProjectTransactionWaitOptions,
+} from './project-store-files.js'
 
-export const PROJECT_STATE_VERSION = 1
-export const PROJECT_STATE_FILE = 'codex-projects-v1.json'
-export const PROJECT_TRANSACTION_LOCK_FILE = 'codex-projects-v1.lock'
-export const PROJECT_OWNER_LOCK_FILE = 'codex-projects-v1.owner.lock'
-export const PROJECT_MAINTENANCE_JOURNAL_FILE = 'managed-workspace-maintenance-v1.json'
-const PROJECT_CODEX_HOMES_DIRECTORY = 'codex-homes'
-const LEGACY_PROJECT_CODEX_HOMES_DIRECTORY = 'codex-workspaces'
-export const MAX_PROJECT_STATE_BYTES = 1024 * 1024
-export const MAX_PROJECT_WORKSPACES = 100
-export const MAX_PROJECT_SESSIONS_PER_WORKSPACE = 200
-export const MAX_PROJECT_SESSIONS_TOTAL = 1000
-export const MAX_PROJECT_WORKSPACE_NAME = 80
-export const MAX_PROJECT_SESSION_TITLE = 120
-const MAX_PUBLIC_ROSTER = 20
-const MAX_PROJECT_THREAD_ID = 256
-const PROJECT_LOCK_WAIT_SECONDS = 2
-const PROJECT_LOCK_RETRY_SECONDS = 0.025
-const STORED_ID = /^[A-Za-z0-9_-]{8,80}$/u
+export {
+  MAX_PROJECT_SESSION_TITLE,
+  MAX_PROJECT_SESSIONS_PER_WORKSPACE,
+  MAX_PROJECT_SESSIONS_TOTAL,
+  MAX_PROJECT_WORKSPACE_NAME,
+  MAX_PROJECT_WORKSPACES,
+  normalizeProjectSessionTitle,
+  normalizeProjectWorkspaceName,
+  PROJECT_STATE_VERSION,
+  ProjectStateError,
+  type BegunSession,
+  type ExternalManagedWorkspaceReconciliation,
+  type ManagedMaintenanceJournal,
+  type ManagedMaintenanceJournalEntry,
+  type ManagedReplacementInput,
+  type NormalizedProjectText,
+  type PreparedSessionResume,
+  type ProjectMaintenanceSnapshot,
+  type ProjectMaintenanceTargetSnapshot,
+  type ProjectSessionRecord,
+  type ProjectSnapshot,
+  type ProjectStateCode,
+  type PublicProjectContext,
+  type PublicProjectView,
+  type PublicRosterEntry,
+  type SessionResumeRollback,
+  type SessionStartRollback,
+  type WorkspaceRecord,
+} from './project-state.js'
+
+export {
+  hostManagedProjectRootForTest,
+  hostManagedProjectRootFromConfig,
+  hostProjectRootForTest,
+  hostProjectRootFromConfig,
+  MAX_PROJECT_STATE_BYTES,
+  PROJECT_MAINTENANCE_JOURNAL_FILE,
+  PROJECT_OWNER_LOCK_FILE,
+  PROJECT_STATE_FILE,
+  PROJECT_TRANSACTION_LOCK_FILE,
+  type HostManagedProjectRoot,
+  type HostProjectRoot,
+  type ProjectStoreOptions,
+  type ProjectTransactionWaitOptions,
+} from './project-store-files.js'
+
 const MAX_ID_FACTORY_ATTEMPTS = 32
-const MAX_MAINTENANCE_JOURNAL_BYTES = 64 * 1024
-const MAINTENANCE_TOMBSTONE = /^\.nova-maintenance-([A-Za-z0-9_-]{8,80})-([0-9]{1,3})$/u
-const MAINTENANCE_REPLACEMENT = /^\.nova-replacement-([A-Za-z0-9_-]{8,80})-([0-9]{1,3})$/u
-
-export type ProjectStateCode =
-  | 'workspace_name_invalid'
-  | 'session_title_invalid'
-  | 'state_lock_failed'
-  | 'state_busy'
-  | 'state_permissions'
-  | 'state_corrupt'
-  | 'state_too_large'
-  | 'state_version_unsupported'
-  | 'state_write_failed'
-  | 'context_delivery_failed'
-  | 'managed_root_unsafe'
-  | 'workspace_invalid'
-  | 'workspace_not_found'
-  | 'workspace_name_conflict'
-  | 'workspace_path_conflict'
-  | 'workspace_limit'
-  | 'workspace_create_failed'
-  | 'workspace_boundary_changed'
-  | 'session_not_found'
-  | 'session_unavailable'
-  | 'session_workspace_mismatch'
-  | 'session_state_conflict'
-  | 'session_limit'
-  | 'thread_id_invalid'
-  | 'id_factory_invalid'
-  | 'clock_invalid'
-
-export class ProjectStateError extends Error {
-  constructor(readonly code: ProjectStateCode) {
-    super(code)
-    this.name = 'ProjectStateError'
-  }
-}
-
-class TransactionProjectStateError extends ProjectStateError {
-  constructor(code: ProjectStateCode, readonly committed: boolean) {
-    super(code)
-  }
-}
-
-type MaintenanceFaultStep =
-  | 'replacement_created'
-  | 'replacement_identity_persisted'
-  | 'replacement_placed'
-  | 'cleanup_entry_deleted'
 
 class MaintenanceFaultError extends Error {
   constructor(step: MaintenanceFaultStep) {
@@ -114,342 +127,41 @@ class MaintenanceFaultError extends Error {
   }
 }
 
-export interface NormalizedProjectText {
-  readonly display: string
-  readonly normalized: string
-}
-
-const hostProjectRootBrand: unique symbol = Symbol('HostProjectRoot')
-export interface HostProjectRoot { readonly [hostProjectRootBrand]: true }
-const rootValues = new WeakMap<HostProjectRoot, string>()
-const hostManagedProjectRootBrand: unique symbol = Symbol('HostManagedProjectRoot')
-export interface HostManagedProjectRoot { readonly [hostManagedProjectRootBrand]: true }
-const managedRootValues = new WeakMap<HostManagedProjectRoot, string>()
-
-export interface WorkspaceRecord {
-  readonly workspace_id: string
-  readonly display_name: string
-  readonly normalized_name: string
-  readonly canonical_path: string
-  readonly origin: 'managed' | 'registered'
-  readonly codex_home_key: string
-  readonly active_session_id: string | null
-  readonly created_at: number
-  readonly last_used_at: number
-}
-
-export interface ProjectSessionRecord {
-  /** Persisted independently of workspace cwd; older explicit-home records are external. */
-  readonly executor_home?: string
-  readonly origin?: 'nova' | 'external'
-
-  readonly session_id: string
-  readonly workspace_id: string
-  readonly display_title: string
-  readonly normalized_title: string
-  readonly codex_thread_id: string | null
-  readonly state: 'starting' | 'ready' | 'unavailable'
-  readonly created_at: number
-  readonly last_used_at: number
-}
-
-export interface SessionStartRollback {
-  readonly activationRevision: number
-  readonly previousActiveWorkspaceId: string | null
-  readonly workspaceId: string
-  readonly previousActiveSessionId: string | null
-  readonly startedSessionId: string
-}
-
-export interface BegunSession {
-  readonly session: ProjectSessionRecord
-  readonly rollback: SessionStartRollback
-}
-
-export interface ProjectSnapshot {
-  readonly version: 1
-  readonly state_revision: number
-  readonly active_binding_revision: number
-  readonly active_workspace_id: string | null
-  readonly workspaces: readonly WorkspaceRecord[]
-  readonly sessions: readonly ProjectSessionRecord[]
-}
-
-export interface ProjectMaintenanceTargetSnapshot {
-  readonly workspace: WorkspaceRecord
-  readonly identity: ProjectFileIdentity
-}
-
-export interface ProjectMaintenanceSnapshot {
-  readonly state_revision: number
-  readonly active_workspace_id: string | null
-  readonly managed_targets: readonly ProjectMaintenanceTargetSnapshot[]
-}
-
-export interface ExternalManagedWorkspaceReconciliation {
-  readonly status: 'unchanged' | 'reconciled'
-  readonly recreated_count: number
-  readonly active_workspace_reset: boolean
-}
-
-export interface ManagedMaintenanceJournalEntry {
-  readonly workspace_id: string
-  readonly original_name: string
-  readonly tombstone_name: string
-  readonly replacement_name: string
-  readonly identity: ProjectFileIdentity
-  readonly replacement_identity: ProjectFileIdentity | null
-}
-
-export interface ManagedMaintenanceJournal {
-  readonly version: 1 | 2
-  readonly operation_id: string
-  readonly phase: 'prepared' | 'committed'
-  readonly entries: readonly ManagedMaintenanceJournalEntry[]
-}
-
-export interface ManagedReplacementInput {
-  readonly expected_state_revision: number
-  readonly targets: readonly {
-    readonly workspace_id: string
-    readonly canonical_path: string
-    readonly identity: ProjectFileIdentity
-    readonly tombstone_name: string
-  }[]
-}
-
-/** Desktop-only roster row (spec 08): the voice model never reads this. */
-export interface PublicRosterEntry {
-  readonly name: string
-  readonly last_used_at: number
-  readonly running: readonly {readonly work_id: string; readonly title: string}[]
-}
-
-export interface PublicProjectView {
-  readonly available_sessions?: readonly {readonly project: string; readonly titles: readonly string[]}[]
-  readonly workspace_display_name: string | null
-  readonly session_title: string | null
-  /** Known projects, most recently used first, with their running works; UI only. */
-  readonly roster: readonly PublicRosterEntry[]
-  readonly pending_confirmation: boolean
-  readonly pending_confirmation_busy: boolean
-  readonly pending_confirmation_id?: string
-  /** Optional at the internal boundary so legacy store-only callers remain source compatible. */
-  readonly pending_action?: 'create_workspace' | 'reuse_workspace' | 'select_workspace' | 'resume_session' | null
-  readonly pending_workspace_display_name?: string | null
-  readonly pending_session_title?: string | null
-  readonly pending_expires_in_seconds?: number | null
-}
-
-export interface PublicProjectContext {
-  readonly workspace_id: string | null
-  readonly view: PublicProjectView
-}
-
-export interface SessionResumeRollback {
-  readonly activationRevision: number
-  readonly previousActiveWorkspaceId: string | null
-  readonly workspaceId: string
-  readonly previousActiveSessionId: string | null
-  readonly resumedSessionId: string
-}
-
-export interface PreparedSessionResume {
-  readonly workspace: HostWorkspace
-  readonly rollback: SessionResumeRollback
-}
-
-interface MutableProjectState {
-  stateRevision: number
-  activeBindingRevision: number
-  activeWorkspaceId: string | null
-  workspaces: Map<string, WorkspaceRecord>
-  sessions: Map<string, ProjectSessionRecord>
-}
-
-type DurabilityStep =
-  | 'temp_open'
-  | 'file_fsync'
-  | 'atomic_replace'
-  | 'dir_fsync'
-  | 'windows_metadata_commit'
-
-export interface ProjectStoreOptions {
-  readonly stateRoot: HostProjectRoot
-  readonly managedRoot: HostManagedProjectRoot
-  readonly nativeLocks: NativeFileLockAuthority
-  readonly rootFiles?: ProjectRootFileAuthority
-  readonly now?: () => number
-  readonly idFactory?: () => string
-  readonly live?: boolean
-  readonly lockClock?: Clock
-  readonly onDurabilityStep?: (step: DurabilityStep) => void
-  /** Deterministic crash-transition seam used only by transaction tests. */
-  readonly maintenanceFault?: (step: MaintenanceFaultStep) => boolean
-  /** Host-only seam: Windows security is enforced by the native handle authority. */
-  readonly platform?: NodeJS.Platform
-}
-
-export interface ProjectTransactionWaitOptions {
-  readonly wait: true
-  readonly signal?: AbortSignal
-}
-
-interface HeldLock {
-  readonly file: FileHandle
-  readonly release: () => void | Promise<void>
-}
-
-type FileIdentity = ProjectFileIdentity
-
-interface DirectoryBinding {
-  readonly canonical: string
-  readonly identity: FileIdentity
-}
-
-interface StateRootIdentity extends FileIdentity {
-  readonly canonical: string
-  readonly owner: bigint
-  readonly mode: bigint
-}
-
-type TransactionResult<T> = readonly [value: T, changed: boolean]
-
-export function hostProjectRootFromConfig(configured: string): HostProjectRoot {
-  return brandProjectRoot(requireProjectRoot(configured, 'state_permissions', process.platform))
-}
-
-/** Test-only constructor; it enforces the same canonical owner-only directory contract. */
-export function hostProjectRootForTest(
-  configured: string,
-  platform: NodeJS.Platform = process.platform,
-): HostProjectRoot {
-  return brandProjectRoot(requireProjectRoot(configured, 'state_permissions', platform))
-}
-
-export function hostManagedProjectRootFromConfig(configured: string): HostManagedProjectRoot {
-  return brandManagedProjectRoot(requireManagedProjectRoot(configured, process.platform))
-}
-
-/** Test-only constructor; it enforces the same canonical owner-controlled directory contract. */
-export function hostManagedProjectRootForTest(
-  configured: string,
-  platform: NodeJS.Platform = process.platform,
-): HostManagedProjectRoot {
-  return brandManagedProjectRoot(requireManagedProjectRoot(configured, platform))
-}
-
+/** Project/session operations and managed-workspace recovery, under one filesystem transaction owner. */
 export class ProjectStore {
-  readonly #stateRoot: string
-  readonly #managedRoot: string
-  readonly #nativeLocks: NativeFileLockAuthority
-  readonly #rootFiles: ProjectRootFileAuthority
   readonly #now: () => number
   readonly #idFactory: () => string
-  readonly #recoverStarting: boolean
-  readonly #lockClock: Clock
-  readonly #onDurabilityStep: ((step: DurabilityStep) => void) | undefined
   readonly #maintenanceFault: ((step: MaintenanceFaultStep) => boolean) | undefined
-  readonly #platform: NodeJS.Platform
-  readonly #activeTransactions = new Set<Promise<void>>()
   readonly #workspaceIdentities = new Map<string, FileIdentity>()
-  readonly #closeAbort = new AbortController()
-  #stateRootHandle: FileHandle | null = null
-  #stateRootIdentity: StateRootIdentity | null = null
-  #managedRootHandle: FileHandle | null = null
-  #managedRootIdentity: FileIdentity | null = null
-  #managedRootPoisoned = false
-  #stateRootPoisoned = false
-  #startupLoaded = false
-  #closed = false
-  #ownerLock: HeldLock | null = null
-  #closePromise: Promise<void> | null = null
+  readonly #files: ProjectStoreFiles
 
   private constructor(options: ProjectStoreOptions) {
-    this.#stateRoot = projectRootPath(options.stateRoot)
-    this.#managedRoot = managedProjectRootPath(options.managedRoot)
-    this.#nativeLocks = options.nativeLocks
-    this.#rootFiles = options.rootFiles ?? unsupportedProjectRootFiles
+    this.#files = new ProjectStoreFiles(options)
     this.#now = options.now ?? (() => Date.now() / 1000)
     this.#idFactory = options.idFactory ?? (() => randomUUID().replaceAll('-', ''))
-    this.#recoverStarting = options.live === true
-    this.#lockClock = options.lockClock ?? new RealClock()
-    this.#onDurabilityStep = options.onDurabilityStep
     this.#maintenanceFault = options.maintenanceFault
-    this.#platform = options.platform ?? process.platform
   }
 
   static async open(options: ProjectStoreOptions): Promise<ProjectStore> {
     const store = new ProjectStore(options)
     try {
-      await store.#retainStateRoot()
-      await store.#retainManagedRoot()
-      store.#probeRootFileAuthority()
-      if (store.#recoverStarting) {
-        store.#ownerLock = await store.#openAndAcquireLock(PROJECT_OWNER_LOCK_FILE)
-        await store.#revalidateStateRoot()
-        await store.#migrateLegacyHomes(store.#requireStateRootHandle())
-        if (await store.#loadMaintenanceJournal() !== null) {
-          await store.cleanupManagedMaintenanceJournal()
-        }
+      await store.#files.open()
+      if (store.#files.hasOwnerLock && await store.#files.loadMaintenanceJournal() !== null) {
+        await store.cleanupManagedMaintenanceJournal()
       }
       return store
     } catch (error) {
-      const owner = store.#ownerLock
-      store.#ownerLock = null
-      if (owner !== null) {
-        await Promise.resolve(owner.release()).catch(() => undefined)
-        await owner.file.close().catch(() => undefined)
-      }
-      if (store.#stateRootHandle) store.#rootFiles.unbindDirectory?.(store.#stateRootHandle.fd)
-      await store.#stateRootHandle?.close().catch(() => undefined)
-      if (store.#managedRootHandle) store.#rootFiles.unbindDirectory?.(store.#managedRootHandle.fd)
-      await store.#managedRootHandle?.close().catch(() => undefined)
-      store.#stateRootHandle = null
-      store.#stateRootIdentity = null
-      store.#managedRootHandle = null
-      store.#managedRootIdentity = null
+      await store.#files.disposeFailedOpen()
       throw error
     }
   }
 
   close(): Promise<void> {
-    if (this.#closePromise !== null) return this.#closePromise
-    this.#closed = true
-    this.#closeAbort.abort()
-    const active = [...this.#activeTransactions]
-    this.#closePromise = this.#finishClose(active)
-    return this.#closePromise
-  }
-
-  async #finishClose(active: readonly Promise<void>[]): Promise<void> {
-    await Promise.all(active)
-    const owner = this.#ownerLock
-    this.#ownerLock = null
-    let failed = false
-    if (owner !== null) {
-      try {
-        await owner.release()
-      } catch {
-        failed = true
-      }
-      await owner.file.close().catch(() => { failed = true })
-    }
-    const root = this.#stateRootHandle
-    const managedRoot = this.#managedRootHandle
-    this.#stateRootHandle = null
-    this.#stateRootIdentity = null
-    this.#managedRootHandle = null
-    this.#managedRootIdentity = null
-    if (root) this.#rootFiles.unbindDirectory?.(root.fd)
-    await root?.close().catch(() => { failed = true })
-    if (managedRoot) this.#rootFiles.unbindDirectory?.(managedRoot.fd)
-    await managedRoot?.close().catch(() => { failed = true })
-    if (failed) throw new ProjectStateError('state_lock_failed')
+    return this.#files.close()
   }
 
   async snapshot(): Promise<ProjectSnapshot> {
-    return await this.#transaction(state => [snapshotState(state), false], {wait: true})
+    return await this.#files.transaction(state => [snapshotState(state), false], {wait: true})
   }
 
   async reconcileExternallyRemovedManagedWorkspaces(): Promise<
@@ -462,12 +174,12 @@ export class ProjectStore {
       readonly previousIdentity: FileIdentity | undefined
     }[] = []
     try {
-      return await this.#transaction<ExternalManagedWorkspaceReconciliation>(async state => {
-        if (await this.#loadMaintenanceJournal() !== null) {
+      return await this.#files.transaction<ExternalManagedWorkspaceReconciliation>(async state => {
+        if (await this.#files.loadMaintenanceJournal() !== null) {
           throw new ProjectStateError('state_busy')
         }
-        const managed = await this.#validateManagedRoot()
-        const root = this.#requireManagedRootHandle()
+        const managed = await this.#files.validateManagedRoot()
+        const root = this.#files.requireManagedRootHandle()
         const missing: WorkspaceRecord[] = []
         let managedWorkspaceCount = 0
         for (const workspace of [...state.workspaces.values()].sort(compareCreated)) {
@@ -476,7 +188,7 @@ export class ProjectStore {
           if (!isDirectChild(managed, workspace.canonical_path)) {
             throw new ProjectStateError('workspace_boundary_changed')
           }
-          const present = this.#lookupWorkspaceAt(
+          const present = this.#files.lookupWorkspaceAt(
             root,
             basename(workspace.canonical_path),
             'workspace_boundary_changed',
@@ -485,7 +197,7 @@ export class ProjectStore {
             missing.push(workspace)
             continue
           }
-          const binding = await this.#validateManagedWorkspaceBinding(workspace.canonical_path)
+          const binding = await this.#files.validateManagedWorkspaceBinding(workspace.canonical_path)
           this.#pinWorkspaceIdentity(workspace.workspace_id, binding.identity)
         }
         if (missing.length === 0) {
@@ -497,7 +209,7 @@ export class ProjectStore {
         }
 
         for (const workspace of missing) {
-          const recreated = await this.#ensurePrivateDirectoryAt(
+          const recreated = await this.#files.ensurePrivateDirectoryAt(
             root,
             managed,
             basename(workspace.canonical_path),
@@ -516,7 +228,7 @@ export class ProjectStore {
             await recreated.file.close().catch(() => undefined)
           }
         }
-        await this.#syncManagedRoot()
+        await this.#files.syncManagedRoot()
         const activeWorkspaceReset = state.activeWorkspaceId !== null
           && (
             missing.length === managedWorkspaceCount
@@ -535,7 +247,7 @@ export class ProjectStore {
     } catch (error) {
       if (!isCommittedTransactionFailure(error)) {
         for (const candidate of [...created].reverse()) {
-          const removed = await this.#rollbackCreatedDirectory(candidate)
+          const removed = await this.#files.rollbackCreatedDirectory(candidate)
           if (!removed) continue
           const current = this.#workspaceIdentities.get(candidate.workspaceId)
           if (current === undefined || !sameFileIdentity(current, candidate.identity)) continue
@@ -551,12 +263,12 @@ export class ProjectStore {
   }
 
   async maintenanceSnapshot(): Promise<ProjectMaintenanceSnapshot> {
-    return await this.#transaction<ProjectMaintenanceSnapshot>(async state => {
-      await this.#validateManagedRoot()
+    return await this.#files.transaction<ProjectMaintenanceSnapshot>(async state => {
+      await this.#files.validateManagedRoot()
       const targets: ProjectMaintenanceTargetSnapshot[] = []
       for (const workspace of [...state.workspaces.values()].sort(compareCreated)) {
         if (workspace.origin !== 'managed') continue
-        const binding = await this.#validateManagedWorkspaceBinding(workspace.canonical_path)
+        const binding = await this.#files.validateManagedWorkspaceBinding(workspace.canonical_path)
         this.#pinWorkspaceIdentity(workspace.workspace_id, binding.identity)
         targets.push(Object.freeze({
           workspace: Object.freeze({...workspace}),
@@ -572,14 +284,14 @@ export class ProjectStore {
   }
 
   async currentMaintenanceSnapshot(): Promise<ProjectMaintenanceSnapshot> {
-    return await this.#transaction<ProjectMaintenanceSnapshot>(async state => {
-      await this.#validateManagedRoot()
+    return await this.#files.transaction<ProjectMaintenanceSnapshot>(async state => {
+      await this.#files.validateManagedRoot()
       const workspace = state.activeWorkspaceId === null
         ? undefined
         : state.workspaces.get(state.activeWorkspaceId)
       const targets: ProjectMaintenanceTargetSnapshot[] = []
       if (workspace?.origin === 'managed') {
-        const binding = await this.#validateManagedWorkspaceBinding(workspace.canonical_path)
+        const binding = await this.#files.validateManagedWorkspaceBinding(workspace.canonical_path)
         this.#pinWorkspaceIdentity(workspace.workspace_id, binding.identity)
         targets.push(Object.freeze({
           workspace: Object.freeze({...workspace}),
@@ -597,17 +309,17 @@ export class ProjectStore {
   async withCurrentManagedWorkspacePath(
     callback: (path: string) => void,
   ): Promise<boolean> {
-    return await this.#transaction<boolean>(async state => {
-      await this.#validateManagedRoot()
+    return await this.#files.transaction<boolean>(async state => {
+      await this.#files.validateManagedRoot()
       const workspace = state.activeWorkspaceId === null
         ? undefined
         : state.workspaces.get(state.activeWorkspaceId)
       if (workspace?.origin !== 'managed') return [false, false]
-      const before = await this.#validateManagedWorkspaceBinding(workspace.canonical_path)
+      const before = await this.#files.validateManagedWorkspaceBinding(workspace.canonical_path)
       this.#pinWorkspaceIdentity(workspace.workspace_id, before.identity)
       callback(workspace.canonical_path)
-      await this.#validateManagedRoot()
-      const after = await this.#validateManagedWorkspaceBinding(workspace.canonical_path)
+      await this.#files.validateManagedRoot()
+      const after = await this.#files.validateManagedWorkspaceBinding(workspace.canonical_path)
       if (!sameFileIdentity(before.identity, after.identity)) {
         throw new ProjectStateError('workspace_boundary_changed')
       }
@@ -620,7 +332,7 @@ export class ProjectStore {
     readonly committed: boolean
     readonly tombstones: readonly {readonly name: string; readonly identity: ProjectFileIdentity}[]
   }> {
-    return await this.#transaction<{
+    return await this.#files.transaction<{
       readonly status: 'stale' | 'rolled_back' | 'committed'
       readonly committed: boolean
       readonly tombstones: readonly {readonly name: string; readonly identity: ProjectFileIdentity}[]
@@ -628,8 +340,8 @@ export class ProjectStore {
       if (state.stateRevision !== input.expected_state_revision || input.targets.length === 0) {
         return [{status: 'stale', committed: false, tombstones: []}, false]
       }
-      const managed = await this.#validateManagedRoot()
-      const root = this.#requireManagedRootHandle()
+      const managed = await this.#files.validateManagedRoot()
+      const root = this.#files.requireManagedRootHandle()
       const prepared: {
         readonly workspace: WorkspaceRecord
         readonly originalName: string
@@ -651,7 +363,7 @@ export class ProjectStore {
           || seenWorkspaces.has(target.workspace_id)
           || seenTombstones.has(target.tombstone_name)
         ) return [{status: 'stale', committed: false, tombstones: []}, false]
-        const binding = await this.#validateManagedWorkspaceBinding(target.canonical_path)
+        const binding = await this.#files.validateManagedWorkspaceBinding(target.canonical_path)
         if (!sameFileIdentity(binding.identity, target.identity)) {
           return [{status: 'stale', committed: false, tombstones: []}, false]
         }
@@ -690,10 +402,10 @@ export class ProjectStore {
           replacement_identity: null,
         }))),
       })
-      if (await this.#loadMaintenanceJournal() !== null) {
+      if (await this.#files.loadMaintenanceJournal() !== null) {
         throw new ProjectStateError('state_busy')
       }
-      await this.#writeMaintenanceJournal(journal)
+      await this.#files.writeMaintenanceJournal(journal)
       const replaced: {
         readonly target: typeof prepared[number]
         replacementIdentity: FileIdentity | null
@@ -702,26 +414,26 @@ export class ProjectStore {
       try {
         for (const item of replaced) {
           const target = item.target
-          const tombstoneBefore = this.#lookupAt(root, target.tombstoneName, 'workspace_boundary_changed')
-          const replacementBefore = this.#lookupAt(
+          const tombstoneBefore = this.#files.lookupAt(root, target.tombstoneName, 'workspace_boundary_changed')
+          const replacementBefore = this.#files.lookupAt(
             root, target.replacementName, 'workspace_boundary_changed',
           )
           if (tombstoneBefore.status !== 'missing' || replacementBefore.status !== 'missing') {
             throw new ProjectStateError('workspace_boundary_changed')
           }
-          const renamed = this.#renameManagedNoReplace(
+          const renamed = this.#files.renameManagedNoReplace(
             root, target.originalName, target.tombstoneName, target.identity,
           )
           if (renamed.status !== 'ok') throw new ProjectStateError('workspace_boundary_changed')
           item.renamed = true
-          const tombstone = this.#lookupAt(root, target.tombstoneName, 'workspace_boundary_changed')
+          const tombstone = this.#files.lookupAt(root, target.tombstoneName, 'workspace_boundary_changed')
           if (tombstone.status !== 'ok' || !sameFileIdentity(tombstone.identity, target.identity)) {
             throw new ProjectStateError('workspace_boundary_changed')
           }
         }
         for (const [index, item] of replaced.entries()) {
           const target = item.target
-          const replacement = await this.#ensurePrivateDirectoryAt(
+          const replacement = await this.#files.ensurePrivateDirectoryAt(
             root, managed, target.replacementName, true,
           )
           item.replacementIdentity = replacement.binding.identity
@@ -736,16 +448,16 @@ export class ProjectStore {
               })
               : entry)),
           })
-          await this.#writeMaintenanceJournal(journal)
+          await this.#files.writeMaintenanceJournal(journal)
           this.#maintenanceCheckpoint('replacement_identity_persisted')
-          const placed = this.#renameManagedNoReplace(
+          const placed = this.#files.renameManagedNoReplace(
             root,
             target.replacementName,
             target.originalName,
             replacement.binding.identity,
           )
           if (placed.status !== 'ok') throw new ProjectStateError('workspace_boundary_changed')
-          const placedIdentity = this.#lookupAt(
+          const placedIdentity = this.#files.lookupAt(
             root, target.originalName, 'workspace_boundary_changed',
           )
           if (
@@ -759,8 +471,8 @@ export class ProjectStore {
             replacement.binding.identity,
           )
         }
-        await this.#syncManagedRoot()
-        await this.#writeMaintenanceJournal(Object.freeze({...journal, phase: 'committed'}))
+        await this.#files.syncManagedRoot()
+        await this.#files.writeMaintenanceJournal(Object.freeze({...journal, phase: 'committed'}))
       } catch (error) {
         if (error instanceof MaintenanceFaultError) throw error
         let rollbackComplete = true
@@ -770,7 +482,7 @@ export class ProjectStore {
             : [item.target.originalName, item.target.replacementName]
           for (const name of replacementNames) {
             try {
-              const present = this.#lookupAt(root, name, 'workspace_boundary_changed')
+              const present = this.#files.lookupAt(root, name, 'workspace_boundary_changed')
               if (present.status === 'missing') continue
               if (present.status !== 'ok') {
                 rollbackComplete = false
@@ -783,14 +495,14 @@ export class ProjectStore {
                 rollbackComplete = false
                 continue
               }
-              const removed = this.#unlinkAt(
+              const removed = this.#files.unlinkAt(
                 root, name, present.identity, 'directory', 'workspace_boundary_changed',
               )
               if (removed.status !== 'ok' && removed.status !== 'missing') rollbackComplete = false
             } catch { rollbackComplete = false }
           }
           if (item.renamed) {
-            const restored = this.#renameManagedNoReplace(
+            const restored = this.#files.renameManagedNoReplace(
               root,
               item.target.tombstoneName,
               item.target.originalName,
@@ -809,8 +521,8 @@ export class ProjectStore {
         }
         if (rollbackComplete) {
           try {
-            await this.#syncManagedRoot()
-            await this.#clearMaintenanceJournal(operationId)
+            await this.#files.syncManagedRoot()
+            await this.#files.clearMaintenanceJournal(operationId)
           } catch { rollbackComplete = false }
         }
         if (!rollbackComplete) throw new ProjectStateError('workspace_boundary_changed')
@@ -828,12 +540,12 @@ export class ProjectStore {
   }
 
   async loadManagedMaintenanceJournal(): Promise<ManagedMaintenanceJournal | null> {
-    return await this.#transaction(async () => [await this.#loadMaintenanceJournal(), false], {wait: true})
+    return await this.#files.transaction(async () => [await this.#files.loadMaintenanceJournal(), false], {wait: true})
   }
 
   async clearManagedMaintenanceJournal(expectedOperationId: string): Promise<void> {
-    await this.#transaction(async () => {
-      await this.#clearMaintenanceJournal(expectedOperationId)
+    await this.#files.transaction(async () => {
+      await this.#files.clearMaintenanceJournal(expectedOperationId)
       return [undefined, false]
     }, {wait: true})
   }
@@ -841,33 +553,33 @@ export class ProjectStore {
   async cleanupManagedMaintenanceJournal(): Promise<{
     readonly status: 'clean' | 'cleanup_pending' | 'rollback_pending'
   }> {
-    return await this.#transaction<{
+    return await this.#files.transaction<{
       readonly status: 'clean' | 'cleanup_pending' | 'rollback_pending'
     }>(async () => {
-      const journal = await this.#loadMaintenanceJournal()
+      const journal = await this.#files.loadMaintenanceJournal()
       if (journal === null) return [{status: 'clean'}, false]
       // Inspection needs only the transaction lock. Replay also needs the live-owner lock;
       // a non-live desktop observer must not mutate a running backend's workspaces.
       let owner: HeldLock | null = null
-      if (this.#ownerLock === null) {
+      if (!this.#files.hasOwnerLock) {
         try {
-          owner = await this.#openAndAcquireLock(PROJECT_OWNER_LOCK_FILE)
+          owner = await this.#files.openAndAcquireLock(PROJECT_OWNER_LOCK_FILE)
         } catch (error) {
           if (!(error instanceof ProjectStateError) || error.code !== 'state_busy') throw error
           return [{status: journal.phase === 'prepared' ? 'rollback_pending' : 'cleanup_pending'}, false]
         }
       }
       try {
-        await this.#validateManagedRoot()
-        const root = this.#requireManagedRootHandle()
+        await this.#files.validateManagedRoot()
+        const root = this.#files.requireManagedRootHandle()
         if (journal.phase === 'prepared') {
           const remaining: ManagedMaintenanceJournalEntry[] = []
           for (const entry of [...journal.entries].reverse()) {
-            const tombstone = this.#lookupAt(root, entry.tombstone_name, 'workspace_boundary_changed')
-            const original = this.#lookupAt(root, entry.original_name, 'workspace_boundary_changed')
+            const tombstone = this.#files.lookupAt(root, entry.tombstone_name, 'workspace_boundary_changed')
+            const original = this.#files.lookupAt(root, entry.original_name, 'workspace_boundary_changed')
             const temporary = entry.replacement_name === entry.original_name
               ? {status: 'missing'} as const
-              : this.#lookupAt(root, entry.replacement_name, 'workspace_boundary_changed')
+              : this.#files.lookupAt(root, entry.replacement_name, 'workspace_boundary_changed')
             if (tombstone.status === 'missing') {
               if (
                 original.status !== 'ok'
@@ -907,7 +619,7 @@ export class ProjectStore {
                 continue
               }
               try {
-                const removed = this.#unlinkAt(
+                const removed = this.#files.unlinkAt(
                   root,
                   candidate.name,
                   candidate.result.identity,
@@ -921,17 +633,17 @@ export class ProjectStore {
               remaining.push(entry)
               continue
             }
-            const originalAfter = this.#lookupAt(
+            const originalAfter = this.#files.lookupAt(
               root, entry.original_name, 'workspace_boundary_changed',
             )
             if (originalAfter.status !== 'missing') {
               remaining.push(entry)
               continue
             }
-            const restored = this.#renameManagedNoReplace(
+            const restored = this.#files.renameManagedNoReplace(
               root, entry.tombstone_name, entry.original_name, entry.identity,
             )
-            const restoredIdentity = this.#lookupAt(
+            const restoredIdentity = this.#files.lookupAt(
               root, entry.original_name, 'workspace_boundary_changed',
             )
             if (
@@ -949,13 +661,13 @@ export class ProjectStore {
             )
           }
           if (remaining.length === 0) {
-            await this.#syncManagedRoot()
-            await this.#clearMaintenanceJournal(journal.operation_id)
+            await this.#files.syncManagedRoot()
+            await this.#files.clearMaintenanceJournal(journal.operation_id)
             return [{status: 'clean'}, false]
           }
           if (remaining.length !== journal.entries.length) {
-            await this.#syncManagedRoot()
-            await this.#writeMaintenanceJournal(Object.freeze({
+            await this.#files.syncManagedRoot()
+            await this.#files.writeMaintenanceJournal(Object.freeze({
               version: journal.version,
               operation_id: journal.operation_id,
               phase: 'prepared',
@@ -966,20 +678,18 @@ export class ProjectStore {
         }
         const remaining: ManagedMaintenanceJournalEntry[] = []
         for (const entry of journal.entries) {
-          const result = this.#callRootFile(() => this.#rootFiles.removeTreeAt(
-            root.fd, entry.tombstone_name, entry.identity,
-          ))
+          const result = this.#files.removeManagedTree(root, entry.tombstone_name, entry.identity)
           if (result.status !== 'ok' && result.status !== 'missing') remaining.push(entry)
           else if (result.status === 'ok') this.#maintenanceCheckpoint('cleanup_entry_deleted')
         }
         if (remaining.length === 0) {
-          await this.#syncManagedRoot()
-          await this.#clearMaintenanceJournal(journal.operation_id)
+          await this.#files.syncManagedRoot()
+          await this.#files.clearMaintenanceJournal(journal.operation_id)
           return [{status: 'clean'}, false]
         }
         if (remaining.length !== journal.entries.length) {
-          await this.#syncManagedRoot()
-          await this.#writeMaintenanceJournal(Object.freeze({
+          await this.#files.syncManagedRoot()
+          await this.#files.writeMaintenanceJournal(Object.freeze({
             version: journal.version,
             operation_id: journal.operation_id,
             phase: 'committed',
@@ -1008,14 +718,14 @@ export class ProjectStore {
     const requested = normalizeProjectWorkspaceName(displayName)
     const createdPin: {workspaceId: string; identity: FileIdentity}[] = []
     try {
-      return await this.#transaction(async state => {
+      return await this.#files.transaction(async state => {
         const binding = await validateRegisteredWorkspace(hostWorkspacePath(workspace))
         const existing = [...state.workspaces.values()].find(
           record => record.canonical_path === binding.canonical,
         )
         if (existing !== undefined) {
           const approved = existing.origin === 'managed'
-            ? await this.#validateManagedWorkspaceBinding(existing.canonical_path)
+            ? await this.#files.validateManagedWorkspaceBinding(existing.canonical_path)
             : binding
           this.#pinWorkspaceIdentity(existing.workspace_id, approved.identity)
           return [existing, false]
@@ -1047,7 +757,7 @@ export class ProjectStore {
     const name = normalizeProjectWorkspaceName(displayName)
     const createdPin: {workspaceId: string; identity: FileIdentity}[] = []
     try {
-      return await this.#transaction(async state => {
+      return await this.#files.transaction(async state => {
         const binding = await validateRegisteredWorkspace(hostWorkspacePath(workspace))
         requireWorkspaceCapacity(state)
         requireUniqueWorkspaceName(state, name.normalized)
@@ -1077,7 +787,7 @@ export class ProjectStore {
 
   async validateManagedCreate(displayName: string): Promise<string> {
     const name = normalizeProjectWorkspaceName(displayName)
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       requireWorkspaceCapacity(state)
       requireUniqueWorkspaceName(state, name.normalized)
       return [name.display, false]
@@ -1092,9 +802,9 @@ export class ProjectStore {
       readonly workspaceId: string
     } | null} = {created: null}
     try {
-      return await this.#transaction(async state => {
-        const managed = await this.#validateManagedRoot()
-        const managedHandle = this.#requireManagedRootHandle()
+      return await this.#files.transaction(async state => {
+        const managed = await this.#files.validateManagedRoot()
+        const managedHandle = this.#files.requireManagedRootHandle()
         requireWorkspaceCapacity(state)
         requireUniqueWorkspaceName(state, name.normalized)
         const workspaceId = this.#newUniqueId(state)
@@ -1103,7 +813,7 @@ export class ProjectStore {
         const candidateName = basename(candidate)
         let candidateFile: FileHandle | null = null
         try {
-          const created = this.#mkdirPrivateAt(
+          const created = this.#files.mkdirPrivateAt(
             managedHandle,
             candidateName,
             'workspace_create_failed',
@@ -1116,7 +826,7 @@ export class ProjectStore {
             candidate,
             constants.O_RDONLY | directoryFlag() | noFollowFlag(),
           )
-          this.#requireMatchesAt(
+          this.#files.requireMatchesAt(
             managedHandle,
             candidateName,
             candidateFile,
@@ -1127,25 +837,25 @@ export class ProjectStore {
             !initialInfo.isDirectory()
             || !sameFileIdentity(initialIdentity, fileIdentity(initialInfo))
           ) throw new ProjectStateError('workspace_boundary_changed')
-          this.#protectAt(
+          this.#files.protectAt(
             managedHandle,
             candidateName,
             candidateFile,
             'workspace_boundary_changed',
           )
-          if (this.#platform !== 'win32') await candidateFile.chmod(0o700)
+          if (this.#files.platform !== 'win32') await candidateFile.chmod(0o700)
           const verified = await candidateFile.stat({bigint: true})
           const canonical = realpathSync(candidate)
-          this.#requireMatchesAt(
+          this.#files.requireMatchesAt(
             managedHandle,
             candidateName,
             candidateFile,
             'workspace_boundary_changed',
           )
-          await this.#validateManagedRoot()
+          await this.#files.validateManagedRoot()
           if (
             !verified.isDirectory()
-            || !privateDirectoryMetadata(verified, this.#platform)
+            || !privateDirectoryMetadata(verified, this.#files.platform)
             || canonical !== candidate
             || !isDirectChild(managed, canonical)
             || !sameFileIdentity(initialIdentity, fileIdentity(verified))
@@ -1185,7 +895,7 @@ export class ProjectStore {
     } catch (error) {
       const created = rollback.created
       if (created !== null && !isCommittedTransactionFailure(error)) {
-        if (await this.#rollbackCreatedDirectory(created)) {
+        if (await this.#files.rollbackCreatedDirectory(created)) {
           const identity = created.identity
           if (identity !== null) {
             this.#deleteWorkspaceIdentityIfExact(created.workspaceId, identity)
@@ -1206,24 +916,24 @@ export class ProjectStore {
       readonly identity: FileIdentity
     } | null} = {removed: null}
     try {
-      const result = await this.#transaction(async state => {
+      const result = await this.#files.transaction(async state => {
         const workspace = state.workspaces.get(workspaceId)
         if (workspace?.origin !== 'managed') return [false, false]
         if ([...state.sessions.values()].some(session => session.workspace_id === workspaceId)) {
           return [false, false]
         }
-        const managed = await this.#validateManagedRoot()
+        const managed = await this.#files.validateManagedRoot()
         if (!isDirectChild(managed, workspace.canonical_path)) return [false, false]
         try {
-          const binding = await this.#validateManagedWorkspaceBinding(workspace.canonical_path)
+          const binding = await this.#files.validateManagedWorkspaceBinding(workspace.canonical_path)
           const pinned = this.#workspaceIdentities.get(workspaceId)
           if (pinned !== undefined && !sameFileIdentity(pinned, binding.identity)) {
             return [false, false]
           }
           this.#pinWorkspaceIdentity(workspaceId, binding.identity)
           const name = basename(binding.canonical)
-          const unlinked = this.#unlinkAt(
-            this.#requireManagedRootHandle(),
+          const unlinked = this.#files.unlinkAt(
+            this.#files.requireManagedRootHandle(),
             name,
             binding.identity,
             'directory',
@@ -1266,7 +976,7 @@ export class ProjectStore {
 
   async resolveWorkspace(displayName: string | null): Promise<WorkspaceRecord> {
     const normalized = displayName === null ? null : normalizeProjectWorkspaceName(displayName)
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const record = normalized === null
         ? (state.activeWorkspaceId === null ? undefined : state.workspaces.get(state.activeWorkspaceId))
         : [...state.workspaces.values()].find(item => item.normalized_name === normalized.normalized)
@@ -1277,7 +987,7 @@ export class ProjectStore {
 
   async selectWorkspace(displayName: string): Promise<WorkspaceRecord> {
     const name = normalizeProjectWorkspaceName(displayName)
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const found = [...state.workspaces.values()].find(
         record => record.normalized_name === name.normalized,
       )
@@ -1296,13 +1006,13 @@ export class ProjectStore {
     workspaceId: string,
   ): Promise<WorkspaceRecord> {
     const name = normalizeProjectWorkspaceName(displayName)
-    return await this.#transaction(async state => {
+    return await this.#files.transaction(async state => {
       const found = state.workspaces.get(workspaceId)
       if (found?.normalized_name !== name.normalized) {
         throw new ProjectStateError('workspace_boundary_changed')
       }
       const binding = found.origin === 'managed'
-        ? await this.#validateManagedWorkspaceBinding(found.canonical_path)
+        ? await this.#files.validateManagedWorkspaceBinding(found.canonical_path)
         : await validateRegisteredWorkspace(found.canonical_path, 'workspace_boundary_changed')
       this.#pinWorkspaceIdentity(found.workspace_id, binding.identity)
       const record = Object.freeze({...found, last_used_at: this.#stamp()})
@@ -1314,12 +1024,12 @@ export class ProjectStore {
   }
 
   async revalidateWorkspace(workspaceId: string): Promise<HostWorkspace> {
-    return await this.#transaction(async state => {
+    return await this.#files.transaction(async state => {
       const workspace = state.workspaces.get(workspaceId)
       if (workspace === undefined) throw new ProjectStateError('workspace_not_found')
       let binding: DirectoryBinding
       if (workspace.origin === 'managed') {
-        binding = await this.#validateManagedWorkspaceBinding(workspace.canonical_path, true)
+        binding = await this.#files.validateManagedWorkspaceBinding(workspace.canonical_path, true)
       } else {
         binding = await validateRegisteredWorkspace(
           workspace.canonical_path,
@@ -1347,7 +1057,7 @@ export class ProjectStore {
     threadId: string,
   ): Promise<PreparedSessionResume> {
     const expectedThread = validateThreadId(threadId)
-    return await this.#transaction(async state => {
+    return await this.#files.transaction(async state => {
       const workspace = state.workspaces.get(workspaceId)
       const session = state.sessions.get(sessionId)
       if (workspace === undefined || session?.workspace_id !== workspaceId) {
@@ -1360,7 +1070,7 @@ export class ProjectStore {
       const previousActiveWorkspaceId = state.activeWorkspaceId
       const previousActiveSessionId = workspace.active_session_id
       const binding = workspace.origin === 'managed'
-        ? await this.#validateManagedWorkspaceBinding(workspace.canonical_path, true)
+        ? await this.#files.validateManagedWorkspaceBinding(workspace.canonical_path, true)
         : await validateRegisteredWorkspace(workspace.canonical_path, 'workspace_boundary_changed')
       this.#pinWorkspaceIdentity(workspaceId, binding.identity)
       const stamp = this.#stamp()
@@ -1391,7 +1101,7 @@ export class ProjectStore {
     rollback: SessionResumeRollback,
     options?: ProjectTransactionWaitOptions,
   ): Promise<boolean> {
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const workspace = state.workspaces.get(rollback.workspaceId)
       if (
         workspace === undefined
@@ -1419,7 +1129,7 @@ export class ProjectStore {
 
   async resolveSession(workspaceId: string, displayTitle: string | null): Promise<ProjectSessionRecord> {
     const title = displayTitle === null ? null : normalizeProjectSessionTitle(displayTitle)
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const workspace = state.workspaces.get(workspaceId)
       if (workspace === undefined) throw new ProjectStateError('workspace_not_found')
       const record = title === null
@@ -1439,7 +1149,7 @@ export class ProjectStore {
     const threadId = validateThreadId(input.threadId)
     const home = realpathSync(input.home)
     const title = normalizeProjectSessionTitle([...input.title].slice(0, MAX_PROJECT_SESSION_TITLE).join(''))
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       if (!state.workspaces.has(workspaceId)) throw new ProjectStateError('workspace_not_found')
       const existing = [...state.sessions.values()].find(session => session.codex_thread_id === threadId && session.executor_home === home)
       if (existing && existing.workspace_id !== workspaceId) throw new ProjectStateError('session_state_conflict')
@@ -1471,7 +1181,7 @@ export class ProjectStore {
   async beginSessionForRun(workspaceId: string, displayTitle: string, executorHome?: string): Promise<BegunSession> {
     const home = executorHome === undefined ? undefined : hostHomeValue(hostPersistentHomeFromConfig(executorHome, [executorHome])).path
     const supplied = normalizeProjectSessionTitle(displayTitle)
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const workspace = state.workspaces.get(workspaceId)
       if (workspace === undefined) throw new ProjectStateError('workspace_not_found')
       const previousActiveWorkspaceId = state.activeWorkspaceId
@@ -1516,7 +1226,7 @@ export class ProjectStore {
   async setSessionTitle(sessionId: string, title: string): Promise<boolean> {
     const clipped = stripLikePython([...title].slice(0, MAX_PROJECT_SESSION_TITLE).join(''))
     if (clipped === '') return false
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const session = state.sessions.get(sessionId)
       if (session === undefined) return [false, false]
       const normalized = normalizeProjectSessionTitle(uniqueSessionTitle(
@@ -1536,7 +1246,7 @@ export class ProjectStore {
     sessionId: string,
     options?: ProjectTransactionWaitOptions,
   ): Promise<boolean> {
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const session = state.sessions.get(sessionId)
       if (session?.state !== 'starting' || session.codex_thread_id !== null) {
         return [false, false]
@@ -1559,7 +1269,7 @@ export class ProjectStore {
     rollback: SessionStartRollback,
     options?: ProjectTransactionWaitOptions,
   ): Promise<boolean> {
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const session = state.sessions.get(rollback.startedSessionId)
       if (
         session?.workspace_id !== rollback.workspaceId
@@ -1610,7 +1320,7 @@ export class ProjectStore {
     options?: ProjectTransactionWaitOptions,
   ): Promise<ProjectSessionRecord> {
     const cleanThreadId = validateThreadId(threadId)
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const session = state.sessions.get(sessionId)
       if (session === undefined) throw new ProjectStateError('session_not_found')
       if (session.state !== 'starting' || session.codex_thread_id !== null) {
@@ -1646,7 +1356,7 @@ export class ProjectStore {
     sessionId: string,
     options?: ProjectTransactionWaitOptions,
   ): Promise<ProjectSessionRecord> {
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const session = state.sessions.get(sessionId)
       if (session === undefined) throw new ProjectStateError('session_not_found')
       const unavailable: ProjectSessionRecord = Object.freeze({
@@ -1668,7 +1378,7 @@ export class ProjectStore {
   }
 
   async activateSession(workspaceId: string, sessionId: string): Promise<ProjectSessionRecord> {
-    return await this.#transaction(state => {
+    return await this.#files.transaction(state => {
       const workspace = state.workspaces.get(workspaceId)
       const session = state.sessions.get(sessionId)
       if (workspace === undefined) throw new ProjectStateError('workspace_not_found')
@@ -1693,26 +1403,26 @@ export class ProjectStore {
   }
 
   async persistentHome(workspaceId: string, {create = true}: {readonly create?: boolean} = {}): Promise<HostStateHome> {
-    return await this.#transaction(async state => {
+    return await this.#files.transaction(async state => {
       const workspace = state.workspaces.get(workspaceId)
       if (workspace === undefined) throw new ProjectStateError('workspace_not_found')
-      await this.#revalidateStateRoot()
-      const stateRoot = this.#requireStateRootHandle()
-      if (create) await this.#migrateLegacyHomes(stateRoot)
-      const directory = !create && this.#lookupAt(stateRoot, PROJECT_CODEX_HOMES_DIRECTORY, 'state_permissions').status === 'missing'
+      await this.#files.revalidateStateRoot()
+      const stateRoot = this.#files.requireStateRootHandle()
+      if (create) await this.#files.migrateLegacyHomes(stateRoot)
+      const directory = !create && this.#files.lookupAt(stateRoot, PROJECT_CODEX_HOMES_DIRECTORY, 'state_permissions').status === 'missing'
         ? LEGACY_PROJECT_CODEX_HOMES_DIRECTORY : PROJECT_CODEX_HOMES_DIRECTORY
-      const homesRoot = join(this.#stateRoot, directory)
+      const homesRoot = join(this.#files.stateRoot, directory)
       const home = join(homesRoot, workspace.codex_home_key)
       if (!isDirectChild(homesRoot, home)) throw new ProjectStateError('workspace_boundary_changed')
       let homes: {readonly file: FileHandle; readonly binding: DirectoryBinding} | null = null
       let workspaceHome: {readonly file: FileHandle; readonly binding: DirectoryBinding} | null = null
       try {
-        homes = await this.#ensurePrivateDirectoryAt(
+        homes = await this.#files.ensurePrivateDirectoryAt(
           stateRoot,
-          this.#stateRoot,
+          this.#files.stateRoot,
           directory, false, create,
         )
-        workspaceHome = await this.#ensurePrivateDirectoryAt(
+        workspaceHome = await this.#files.ensurePrivateDirectoryAt(
           homes.file,
           homes.binding.canonical,
           workspace.codex_home_key, false, create,
@@ -1721,14 +1431,14 @@ export class ProjectStore {
         if (canonical !== home || !isDirectChild(homesRoot, canonical)) {
           throw new ProjectStateError('state_permissions')
         }
-        await this.#revalidateStateRoot()
-        this.#requireMatchesAt(
+        await this.#files.revalidateStateRoot()
+        this.#files.requireMatchesAt(
           stateRoot,
           directory,
           homes.file,
           'state_permissions',
         )
-        this.#requireMatchesAt(
+        this.#files.requireMatchesAt(
           homes.file,
           workspace.codex_home_key,
           workspaceHome.file,
@@ -1738,7 +1448,7 @@ export class ProjectStore {
         if (hostHomeValue(branded).path !== canonical) {
           throw new ProjectStateError('state_permissions')
         }
-        this.#requireMatchesAt(
+        this.#files.requireMatchesAt(
           homes.file,
           workspace.codex_home_key,
           workspaceHome.file,
@@ -1864,41 +1574,6 @@ export class ProjectStore {
     }
   }
 
-  async #validateManagedWorkspaceBinding(
-    path: string,
-    refreshAcl = false,
-  ): Promise<DirectoryBinding> {
-    const managed = await this.#validateManagedRoot()
-    if (!isDirectChild(managed, path)) {
-      throw new ProjectStateError('workspace_boundary_changed')
-    }
-    const root = this.#requireManagedRootHandle()
-    let file: FileHandle | null = null
-    try {
-      file = await open(path, constants.O_RDONLY | directoryFlag() | noFollowFlag())
-      this.#requireWorkspaceMatchesAt(root, basename(path), file, 'workspace_boundary_changed')
-      if (refreshAcl) {
-        this.#protectAt(root, basename(path), file, 'workspace_boundary_changed')
-        this.#requireWorkspaceMatchesAt(root, basename(path), file, 'workspace_boundary_changed')
-      }
-      const info = await file.stat({bigint: true})
-      const canonical = realpathSync(path)
-      if (
-        !info.isDirectory()
-        || canonical !== path
-        || !privateDirectoryMetadata(info, this.#platform)
-        || !isDirectChild(managed, canonical)
-      ) throw new Error('unsafe')
-      await this.#validateManagedRoot()
-      this.#requireWorkspaceMatchesAt(root, basename(path), file, 'workspace_boundary_changed')
-      return {canonical, identity: fileIdentity(info)}
-    } catch {
-      throw new ProjectStateError('workspace_boundary_changed')
-    } finally {
-      await file?.close().catch(() => undefined)
-    }
-  }
-
   #stamp(): number {
     const value = this.#now()
     if (typeof value !== 'number' || !Number.isFinite(value)) {
@@ -1907,831 +1582,8 @@ export class ProjectStore {
     return value
   }
 
-  async #transaction<T>(
-    operation: (
-      state: MutableProjectState,
-    ) => TransactionResult<T> | Promise<TransactionResult<T>>,
-    options?: ProjectTransactionWaitOptions,
-  ): Promise<T> {
-    if (this.#closed) throw new ProjectStateError('state_lock_failed')
-    let complete!: () => void
-    const ownership = new Promise<void>(resolveOwnership => { complete = resolveOwnership })
-    this.#activeTransactions.add(ownership)
-    try {
-      await this.#revalidateStateRoot()
-      const mayRecover = this.#recoverStarting && !this.#startupLoaded
-      const held = await this.#openAndAcquireLock(
-        PROJECT_TRANSACTION_LOCK_FILE,
-        options?.wait === true || mayRecover,
-        options?.signal,
-      )
-      let releaseFailure = false
-      let committed = false
-      try {
-        await this.#revalidateStateRoot()
-        const shouldRecover = this.#recoverStarting && !this.#startupLoaded
-        const [state, recovered] = await this.#loadState(shouldRecover)
-        const [value, changed] = await operation(state)
-        if (recovered || changed) bumpStateRevision(state)
-        validateState(state)
-        if (recovered || changed) {
-          await this.#saveState(state, () => { committed = true })
-        }
-        await this.#revalidateStateRoot()
-        this.#startupLoaded = true
-        return value
-      } catch (error) {
-        if (committed && error instanceof ProjectStateError) {
-          throw new TransactionProjectStateError(error.code, true)
-        }
-        throw error
-      } finally {
-        try {
-          await held.release()
-        } catch {
-          releaseFailure = true
-        }
-        await held.file.close().catch(() => { releaseFailure = true })
-        if (releaseFailure) {
-          throw new TransactionProjectStateError('state_lock_failed', committed)
-        }
-      }
-    } finally {
-      this.#activeTransactions.delete(ownership)
-      complete()
-    }
-  }
-
-  async #retainStateRoot(): Promise<void> {
-    const retained = await openStateRoot(this.#stateRoot, this.#platform)
-    this.#stateRootHandle = retained.file
-    this.#stateRootIdentity = retained.identity
-    this.#rootFiles.bindDirectory?.(retained.file.fd, this.#stateRoot)
-  }
-
-  async #retainManagedRoot(): Promise<void> {
-    const retained = await openManagedRoot(this.#managedRoot, this.#platform)
-    this.#managedRootHandle = retained.file
-    this.#managedRootIdentity = retained.identity
-    this.#rootFiles.bindDirectory?.(retained.file.fd, this.#managedRoot)
-  }
-
-  #probeRootFileAuthority(): void {
-    const stateRoot = this.#requireStateRootHandle()
-    const managedRoot = this.#requireManagedRootHandle()
-    if (
-      this.#callRootFile(() => this.#rootFiles.probe(stateRoot.fd)).status !== 'ok'
-      || this.#callRootFile(() => this.#rootFiles.probe(managedRoot.fd)).status !== 'ok'
-    ) throw new ProjectStateError('state_permissions')
-  }
-
-  async #revalidateStateRoot(): Promise<void> {
-    if (this.#stateRootPoisoned) throw new ProjectStateError('state_permissions')
-    const retained = this.#stateRootHandle
-    const expected = this.#stateRootIdentity
-    if (retained === null || expected === null) {
-      this.#stateRootPoisoned = true
-      throw new ProjectStateError('state_permissions')
-    }
-    let current: FileHandle | null = null
-    try {
-      const retainedInfo = await retained.stat({bigint: true})
-      if (!stateRootMatches(retainedInfo, expected, this.#platform)) throw new Error('retained root changed')
-      current = await open(
-        this.#stateRoot,
-        constants.O_RDONLY | directoryFlag() | noFollowFlag(),
-      )
-      const currentInfo = await current.stat({bigint: true})
-      const canonical = realpathSync(this.#stateRoot)
-      if (!stateRootMatches(currentInfo, expected, this.#platform) || canonical !== expected.canonical) {
-        throw new Error('state root identity changed')
-      }
-    } catch {
-      this.#stateRootPoisoned = true
-      throw new ProjectStateError('state_permissions')
-    } finally {
-      await current?.close().catch(() => undefined)
-    }
-  }
-
-  async #validateManagedRoot(): Promise<string> {
-    if (this.#managedRootPoisoned) throw new ProjectStateError('managed_root_unsafe')
-    const retained = this.#managedRootHandle
-    const expected = this.#managedRootIdentity
-    if (retained === null || expected === null) {
-      this.#managedRootPoisoned = true
-      throw new ProjectStateError('managed_root_unsafe')
-    }
-    let current: FileHandle | null = null
-    try {
-      const retainedInfo = await retained.stat({bigint: true})
-      if (
-        !retainedInfo.isDirectory()
-        || !managedDirectoryMetadata(retainedInfo, this.#platform)
-        || !sameFileIdentity(expected, fileIdentity(retainedInfo))
-      ) throw new Error('retained managed root changed')
-      current = await open(
-        this.#managedRoot,
-        constants.O_RDONLY | directoryFlag() | noFollowFlag(),
-      )
-      const currentInfo = await current.stat({bigint: true})
-      const canonical = realpathSync(this.#managedRoot)
-      if (
-        canonical !== this.#managedRoot
-        || !currentInfo.isDirectory()
-        || !managedDirectoryMetadata(currentInfo, this.#platform)
-        || !sameFileIdentity(expected, fileIdentity(currentInfo))
-      ) throw new Error('managed root identity changed')
-      return canonical
-    } catch {
-      this.#managedRootPoisoned = true
-      throw new ProjectStateError('managed_root_unsafe')
-    } finally {
-      await current?.close().catch(() => undefined)
-    }
-  }
-
-  #requireStateRootHandle(): FileHandle {
-    if (this.#stateRootHandle === null) throw new ProjectStateError('state_permissions')
-    return this.#stateRootHandle
-  }
-
-  #requireManagedRootHandle(): FileHandle {
-    if (this.#managedRootHandle === null) throw new ProjectStateError('managed_root_unsafe')
-    return this.#managedRootHandle
-  }
-
-  #callRootFile(operation: () => unknown): ProjectRootFileResult {
-    try {
-      const result = operation()
-      return validProjectRootFileResult(result) ? result : {status: 'failed'}
-    } catch {
-      return {status: 'failed'}
-    }
-  }
-
-  #callRootFileLookup(operation: () => unknown): ProjectRootFileLookupResult {
-    try {
-      const result = operation()
-      return validProjectRootFileLookupResult(result) ? result : {status: 'failed'}
-    } catch {
-      return {status: 'failed'}
-    }
-  }
-
-  #callRootFileCreate(operation: () => unknown): ProjectRootFileCreateResult {
-    try {
-      const result = operation()
-      return validProjectRootFileCreateResult(result) ? result : {status: 'failed'}
-    } catch {
-      return {status: 'failed'}
-    }
-  }
-
-  #requireMatchesAt(
-    root: FileHandle,
-    name: string,
-    child: FileHandle,
-    code: ProjectStateCode,
-  ): void {
-    requireProjectBasename(name, code)
-    const result = this.#callRootFile(() => this.#rootFiles.matchesAt(root.fd, name, child.fd))
-    if (result.status !== 'ok') throw new ProjectStateError(code)
-  }
-
-  #requireWorkspaceMatchesAt(
-    root: FileHandle,
-    name: string,
-    child: FileHandle,
-    code: ProjectStateCode,
-  ): void {
-    requireProjectBasename(name, code)
-    const result = this.#callRootFile(() => (
-      this.#rootFiles.matchesWorkspaceAt?.(root.fd, name, child.fd)
-      ?? this.#rootFiles.matchesAt(root.fd, name, child.fd)
-    ))
-    if (result.status !== 'ok') throw new ProjectStateError(code)
-  }
-
-  #lookupAt(
-    root: FileHandle,
-    name: string,
-    code: ProjectStateCode,
-  ): ProjectRootFileLookupResult {
-    requireProjectBasename(name, code)
-    const result = this.#callRootFileLookup(() => this.#rootFiles.lookupAt(root.fd, name))
-    if (result.status === 'unsupported' || result.status === 'failed') {
-      throw new ProjectStateError(code)
-    }
-    return result
-  }
-
-  #lookupWorkspaceAt(
-    root: FileHandle,
-    name: string,
-    code: ProjectStateCode,
-  ): ProjectRootFileLookupResult {
-    requireProjectBasename(name, code)
-    const result = this.#callRootFileLookup(() => (
-      this.#rootFiles.lookupWorkspaceAt?.(root.fd, name)
-      ?? this.#rootFiles.lookupAt(root.fd, name)
-    ))
-    if (result.status === 'unsupported' || result.status === 'failed') {
-      throw new ProjectStateError(code)
-    }
-    return result
-  }
-
-  #mkdirAt(root: FileHandle, name: string, code: ProjectStateCode): ProjectRootFileCreateResult {
-    requireProjectBasename(name, code)
-    const result = this.#callRootFileCreate(() => this.#rootFiles.mkdirAt(root.fd, name))
-    if (result.status === 'unsupported' || result.status === 'failed') {
-      throw new ProjectStateError(code)
-    }
-    return result
-  }
-
-  #mkdirPrivateAt(
-    root: FileHandle,
-    name: string,
-    code: ProjectStateCode,
-  ): ProjectRootFileCreateResult {
-    if (this.#platform !== 'win32') return this.#mkdirAt(root, name, code)
-    requireProjectBasename(name, code)
-    const result = this.#callRootFileCreate(
-      () => this.#rootFiles.mkdirPrivateAt?.(root.fd, name) ?? {status: 'unsupported'},
-    )
-    if (result.status === 'unsupported' || result.status === 'failed') {
-      throw new ProjectStateError(code)
-    }
-    return result
-  }
-
-  #protectAt(root: FileHandle, name: string, child: FileHandle, code: ProjectStateCode): void {
-    if (this.#platform !== 'win32') return
-    requireProjectBasename(name, code)
-    const result = this.#callRootFile(
-      () => this.#rootFiles.protectAt?.(root.fd, name, child.fd) ?? {status: 'unsupported'},
-    )
-    if (result.status !== 'ok') throw new ProjectStateError(code)
-  }
-
-  #createFileAt(
-    root: FileHandle,
-    name: string,
-    exclusive: boolean,
-    code: ProjectStateCode,
-  ): ProjectRootFileCreateResult {
-    requireProjectBasename(name, code)
-    const result = this.#callRootFileCreate(
-      () => this.#rootFiles.createFileAt(root.fd, name, exclusive),
-    )
-    if (
-      result.status === 'unsupported'
-      || result.status === 'failed'
-    ) throw new ProjectStateError(code)
-    if (exclusive && result.status !== 'ok') throw new ProjectStateError(code)
-    if (!exclusive && result.status !== 'ok' && result.status !== 'exists') {
-      throw new ProjectStateError(code)
-    }
-    return result
-  }
-
-  #renameAt(root: FileHandle, from: string, to: string): void {
-    requireProjectBasename(from, 'state_write_failed')
-    requireProjectBasename(to, 'state_write_failed')
-    const result = this.#callRootFile(() => this.#rootFiles.renameAt(root.fd, from, to))
-    if (result.status !== 'ok') throw new ProjectStateError('state_write_failed')
-  }
-
-  #renameManagedNoReplace(
-    root: FileHandle,
-    from: string,
-    to: string,
-    expected: FileIdentity,
-  ): ProjectRootFileResult {
-    requireProjectBasename(from, 'workspace_boundary_changed')
-    requireProjectBasename(to, 'workspace_boundary_changed')
-    const result = this.#callRootFile(
-      () => this.#rootFiles.renameNoReplaceAt?.(root.fd, from, to, expected)
-        ?? {status: 'unsupported'},
-    )
-    if (result.status === 'unsupported' || result.status === 'failed') {
-      throw new ProjectStateError('workspace_boundary_changed')
-    }
-    return result
-  }
-
-  async #syncManagedRoot(): Promise<void> {
-    await this.#validateManagedRoot()
-    const root = this.#requireManagedRootHandle()
-    const result = this.#callRootFile(
-      () => this.#rootFiles.syncDirectory?.(root.fd) ?? {status: 'unsupported'},
-    )
-    if (result.status !== 'ok') throw new ProjectStateError('workspace_boundary_changed')
-    await this.#validateManagedRoot()
-  }
-
   #maintenanceCheckpoint(step: MaintenanceFaultStep): void {
     if (this.#maintenanceFault?.(step) === true) throw new MaintenanceFaultError(step)
-  }
-
-  async #migrateLegacyHomes(root: FileHandle): Promise<void> {
-    const current = this.#lookupAt(root, PROJECT_CODEX_HOMES_DIRECTORY, 'state_permissions')
-    if (current.status === 'ok') return
-    if (current.status !== 'missing') throw new ProjectStateError('state_permissions')
-    const legacy = this.#lookupAt(
-      root,
-      LEGACY_PROJECT_CODEX_HOMES_DIRECTORY,
-      'state_permissions',
-    )
-    if (legacy.status === 'missing') return
-    if (legacy.status !== 'ok') throw new ProjectStateError('state_permissions')
-
-    let legacyDirectory: {readonly file: FileHandle; readonly binding: DirectoryBinding} | null = null
-    try {
-      legacyDirectory = await this.#ensurePrivateDirectoryAt(
-        root,
-        this.#stateRoot,
-        LEGACY_PROJECT_CODEX_HOMES_DIRECTORY,
-      )
-      if (!sameFileIdentity(legacy.identity, legacyDirectory.binding.identity)) {
-        throw new ProjectStateError('state_permissions')
-      }
-      const currentAgain = this.#lookupAt(
-        root,
-        PROJECT_CODEX_HOMES_DIRECTORY,
-        'state_permissions',
-      )
-      if (currentAgain.status === 'ok') return
-      if (currentAgain.status !== 'missing') throw new ProjectStateError('state_permissions')
-      await this.#revalidateStateRoot()
-      this.#requireMatchesAt(
-        root,
-        LEGACY_PROJECT_CODEX_HOMES_DIRECTORY,
-        legacyDirectory.file,
-        'state_permissions',
-      )
-      const renamed = this.#callRootFile(() => this.#rootFiles.renameAt(
-        root.fd,
-        LEGACY_PROJECT_CODEX_HOMES_DIRECTORY,
-        PROJECT_CODEX_HOMES_DIRECTORY,
-      ))
-      if (renamed.status !== 'ok') throw new ProjectStateError('state_permissions')
-      this.#requireMatchesAt(
-        root,
-        PROJECT_CODEX_HOMES_DIRECTORY,
-        legacyDirectory.file,
-        'state_permissions',
-      )
-      const legacyAfter = this.#lookupAt(
-        root,
-        LEGACY_PROJECT_CODEX_HOMES_DIRECTORY,
-        'state_permissions',
-      )
-      if (legacyAfter.status !== 'missing') throw new ProjectStateError('state_permissions')
-      await this.#revalidateStateRoot()
-    } finally {
-      await legacyDirectory?.file.close().catch(() => undefined)
-    }
-  }
-
-  #unlinkAt(
-    root: FileHandle,
-    name: string,
-    expected: FileIdentity,
-    kind: 'file' | 'directory',
-    code: ProjectStateCode,
-  ): ProjectRootFileResult {
-    requireProjectBasename(name, code)
-    const result = this.#callRootFile(
-      () => this.#rootFiles.unlinkAt(root.fd, name, expected, kind),
-    )
-    if (result.status === 'unsupported' || result.status === 'failed') {
-      throw new ProjectStateError(code)
-    }
-    return result
-  }
-
-  async #ensurePrivateDirectoryAt(
-    root: FileHandle,
-    rootPath: string,
-    name: string,
-    exclusive = false,
-    create = true,
-  ): Promise<{readonly file: FileHandle; readonly binding: DirectoryBinding}> {
-    requireProjectBasename(name, 'state_permissions')
-    const created = create ? this.#mkdirPrivateAt(root, name, 'state_permissions') : {status: 'exists'} as const
-    if (created.status !== 'ok' && (exclusive || created.status !== 'exists')) {
-      throw new ProjectStateError('state_permissions')
-    }
-    const createdIdentity = created.status === 'ok' ? created.identity : null
-    const path = join(rootPath, name)
-    let file: FileHandle | null = null
-    try {
-      file = await open(path, constants.O_RDONLY | directoryFlag() | noFollowFlag())
-      this.#requireMatchesAt(root, name, file, 'state_permissions')
-      const initialInfo = await file.stat({bigint: true})
-      const initialIdentity = fileIdentity(initialInfo)
-      if (createdIdentity !== null && !sameFileIdentity(createdIdentity, initialIdentity)) {
-        throw new ProjectStateError('state_permissions')
-      }
-      this.#protectAt(root, name, file, 'state_permissions')
-      if (created.status === 'ok' && this.#platform !== 'win32') await file.chmod(0o700)
-      const info = await file.stat({bigint: true})
-      const identity = fileIdentity(info)
-      const canonical = realpathSync(path)
-      if (
-        !info.isDirectory()
-        || !privateDirectoryMetadata(info, this.#platform)
-        || canonical !== path
-        || !isDirectChild(rootPath, canonical)
-      ) throw new ProjectStateError('state_permissions')
-      this.#requireMatchesAt(root, name, file, 'state_permissions')
-      return {file, binding: {canonical, identity}}
-    } catch (error) {
-      await file?.close().catch(() => undefined)
-      if (createdIdentity !== null) {
-        try {
-          this.#unlinkAt(root, name, createdIdentity, 'directory', 'state_permissions')
-        } catch {
-          // A newly-created directory is removed only through an exact descriptor-relative match.
-        }
-      }
-      if (error instanceof ProjectStateError) throw error
-      throw new ProjectStateError('state_permissions')
-    }
-  }
-
-  async #openAndAcquireLock(
-    fileName: string,
-    wait = false,
-    signal?: AbortSignal,
-  ): Promise<HeldLock> {
-    const root = this.#requireStateRootHandle()
-    requireProjectBasename(fileName, 'state_permissions')
-    const created = this.#createFileAt(root, fileName, false, 'state_permissions')
-    const createdIdentity = created.status === 'ok' ? created.identity : null
-    const file = await openValidatedRegularFile(
-      join(this.#stateRoot, fileName),
-      constants.O_RDWR | noFollowFlag(),
-      null,
-      this.#platform,
-    )
-    const waitSignal = signal === undefined
-      ? this.#closeAbort.signal
-      : AbortSignal.any([signal, this.#closeAbort.signal])
-    let deadline = 0
-    try {
-      this.#requireMatchesAt(root, fileName, file, 'state_permissions')
-      if (createdIdentity !== null) {
-        const opened = await file.stat({bigint: true})
-        if (!sameFileIdentity(createdIdentity, fileIdentity(opened))) {
-          throw new ProjectStateError('state_permissions')
-        }
-      }
-      deadline = readClock(this.#lockClock) + PROJECT_LOCK_WAIT_SECONDS
-      while (true) {
-        if (waitSignal.aborted) throw projectAbortError()
-        const result: unknown = this.#nativeLocks.acquire(file.fd)
-        if (!validNativeLockResult(result)) throw new ProjectStateError('state_lock_failed')
-        if (result.status === 'acquired') {
-          if (!waitSignal.aborted) {
-            try {
-              await this.#revalidateStateRoot()
-              this.#requireMatchesAt(root, fileName, file, 'state_permissions')
-              return {file, release: result.release}
-            } catch (error) {
-              try { await result.release() } catch { /* preserve the root failure */ }
-              throw error
-            }
-          }
-          try {
-            await result.release()
-          } catch {
-            throw new ProjectStateError('state_lock_failed')
-          }
-          throw projectAbortError()
-        }
-        if (result.status !== 'busy') throw new ProjectStateError('state_lock_failed')
-        if (!wait) throw new ProjectStateError('state_busy')
-        const remaining = deadline - readClock(this.#lockClock)
-        if (remaining <= 0) throw new ProjectStateError('state_busy')
-        await this.#lockClock.sleep(Math.min(PROJECT_LOCK_RETRY_SECONDS, remaining), waitSignal)
-      }
-    } catch (error) {
-      await file.close().catch(() => undefined)
-      if (error instanceof ProjectStateError || isAbortError(error)) throw error
-      throw new ProjectStateError('state_lock_failed')
-    }
-  }
-
-  async #loadState(recoverStarting: boolean): Promise<readonly [MutableProjectState, boolean]> {
-    await this.#revalidateStateRoot()
-    const root = this.#requireStateRootHandle()
-    const path = join(this.#stateRoot, PROJECT_STATE_FILE)
-    let file: FileHandle
-    try {
-      file = await openValidatedRegularFile(
-        path,
-        constants.O_RDONLY | nonblockFlag() | noFollowFlag(),
-        null,
-        this.#platform,
-      )
-    } catch (error) {
-      if (isNodeError(error, 'ENOENT')) {
-        await this.#revalidateStateRoot()
-        if (this.#lookupAt(root, PROJECT_STATE_FILE, 'state_permissions').status !== 'missing') {
-          throw new ProjectStateError('state_permissions')
-        }
-        return [emptyState(), false]
-      }
-      throw error
-    }
-    try {
-      await this.#revalidateStateRoot()
-      this.#requireMatchesAt(root, PROJECT_STATE_FILE, file, 'state_permissions')
-      const info = await file.stat()
-      if (info.size > MAX_PROJECT_STATE_BYTES) throw new ProjectStateError('state_too_large')
-      const buffer = Buffer.alloc(MAX_PROJECT_STATE_BYTES + 1)
-      let bytesRead = 0
-      while (bytesRead < buffer.length) {
-        const read = await file.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead)
-        if (read.bytesRead === 0) break
-        bytesRead += read.bytesRead
-      }
-      if (bytesRead > MAX_PROJECT_STATE_BYTES) throw new ProjectStateError('state_too_large')
-      let parsed: unknown
-      try {
-        const text = new TextDecoder('utf-8', {fatal: true}).decode(buffer.subarray(0, bytesRead))
-        parsed = JSON.parse(text) as unknown
-      } catch {
-        throw new ProjectStateError('state_corrupt')
-      }
-      const state = decodeState(parsed)
-      let recovered = false
-      if (recoverStarting) {
-        for (const [sessionId, session] of state.sessions) {
-          if (session.state === 'starting' && session.codex_thread_id === null) {
-            state.sessions.set(sessionId, Object.freeze({...session, state: 'unavailable'}))
-            recovered = true
-          }
-        }
-      }
-      return [state, recovered]
-    } catch (error) {
-      if (error instanceof ProjectStateError) throw error
-      throw new ProjectStateError('state_corrupt')
-    } finally {
-      let closeFailed = false
-      await file.close().catch(() => { closeFailed = true })
-      if (closeFailed) throw new ProjectStateError('state_corrupt')
-    }
-  }
-
-  async #readMaintenanceJournal(): Promise<{
-    readonly journal: ManagedMaintenanceJournal
-    readonly identity: FileIdentity
-  } | null> {
-    const root = this.#requireStateRootHandle()
-    const path = join(this.#stateRoot, PROJECT_MAINTENANCE_JOURNAL_FILE)
-    let file: FileHandle
-    try {
-      file = await openValidatedRegularFile(
-        path,
-        constants.O_RDONLY | nonblockFlag() | noFollowFlag(),
-        null,
-        this.#platform,
-      )
-    } catch (error) {
-      if (isNodeError(error, 'ENOENT')) {
-        if (this.#lookupAt(
-          root, PROJECT_MAINTENANCE_JOURNAL_FILE, 'state_permissions',
-        ).status === 'missing') return null
-      }
-      throw new ProjectStateError('state_permissions')
-    }
-    try {
-      await this.#revalidateStateRoot()
-      this.#requireMatchesAt(root, PROJECT_MAINTENANCE_JOURNAL_FILE, file, 'state_permissions')
-      const info = await file.stat({bigint: true})
-      if (Number(info.size) > MAX_MAINTENANCE_JOURNAL_BYTES) {
-        throw new ProjectStateError('state_corrupt')
-      }
-      const raw = await file.readFile()
-      if (raw.byteLength > MAX_MAINTENANCE_JOURNAL_BYTES) {
-        throw new ProjectStateError('state_corrupt')
-      }
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(raw)) as unknown
-      } catch {
-        throw new ProjectStateError('state_corrupt')
-      }
-      return {journal: decodeMaintenanceJournal(parsed), identity: fileIdentity(info)}
-    } finally {
-      await file.close().catch(() => undefined)
-    }
-  }
-
-  async #loadMaintenanceJournal(): Promise<ManagedMaintenanceJournal | null> {
-    return (await this.#readMaintenanceJournal())?.journal ?? null
-  }
-
-  async #writeMaintenanceJournal(journal: ManagedMaintenanceJournal): Promise<void> {
-    const raw = Buffer.from(canonicalJsonWithNumberFormatter(
-      encodeMaintenanceJournal(journal),
-      () => undefined,
-    ), 'utf8')
-    if (raw.byteLength > MAX_MAINTENANCE_JOURNAL_BYTES) {
-      throw new ProjectStateError('state_too_large')
-    }
-    const root = this.#requireStateRootHandle()
-    const tempName = `.${PROJECT_MAINTENANCE_JOURNAL_FILE}.${randomUUID()}.tmp`
-    const tempPath = join(this.#stateRoot, tempName)
-    let file: FileHandle | null = null
-    let tempIdentity: FileIdentity | null = null
-    try {
-      const created = this.#createFileAt(root, tempName, true, 'state_write_failed')
-      if (created.status !== 'ok') throw new ProjectStateError('state_write_failed')
-      tempIdentity = created.identity
-      file = await open(tempPath, constants.O_WRONLY | noFollowFlag())
-      const info = await file.stat({bigint: true})
-      if (!info.isFile() || !privateRegularFileMetadata(info, this.#platform)
-        || !sameFileIdentity(created.identity, fileIdentity(info))) {
-        throw new ProjectStateError('state_permissions')
-      }
-      this.#requireMatchesAt(root, tempName, file, 'state_permissions')
-      await file.writeFile(raw)
-      await file.sync()
-      await file.close()
-      file = null
-      const before = this.#lookupAt(root, tempName, 'state_permissions')
-      if (before.status !== 'ok' || !sameFileIdentity(before.identity, created.identity)) {
-        throw new ProjectStateError('state_permissions')
-      }
-      this.#renameAt(root, tempName, PROJECT_MAINTENANCE_JOURNAL_FILE)
-      const after = this.#lookupAt(root, PROJECT_MAINTENANCE_JOURNAL_FILE, 'state_permissions')
-      if (after.status !== 'ok' || !sameFileIdentity(after.identity, created.identity)) {
-        throw new ProjectStateError('state_permissions')
-      }
-      if (this.#platform !== 'win32') await root.sync()
-    } catch (error) {
-      if (error instanceof ProjectStateError) throw error
-      throw new ProjectStateError('state_write_failed')
-    } finally {
-      await file?.close().catch(() => undefined)
-      this.#removeOwnedTemp(tempName, tempIdentity)
-    }
-  }
-
-  async #clearMaintenanceJournal(expectedOperationId: string): Promise<void> {
-    const loaded = await this.#readMaintenanceJournal()
-    if (loaded === null) return
-    if (loaded.journal.operation_id !== expectedOperationId) {
-      throw new ProjectStateError('state_busy')
-    }
-    const result = this.#unlinkAt(
-      this.#requireStateRootHandle(),
-      PROJECT_MAINTENANCE_JOURNAL_FILE,
-      loaded.identity,
-      'file',
-      'state_write_failed',
-    )
-    if (result.status !== 'ok') throw new ProjectStateError('state_write_failed')
-    if (this.#platform !== 'win32') await this.#requireStateRootHandle().sync()
-  }
-
-  async #saveState(state: MutableProjectState, markCommitted: () => void): Promise<void> {
-    let raw: Buffer
-    try {
-      raw = Buffer.from(canonicalJsonWithNumberFormatter(
-        encodeState(state),
-        projectTimestampNumber,
-      ), 'utf8')
-    } catch {
-      throw new ProjectStateError('state_corrupt')
-    }
-    if (raw.byteLength > MAX_PROJECT_STATE_BYTES) throw new ProjectStateError('state_too_large')
-    const root = this.#requireStateRootHandle()
-    const tempName = `.${PROJECT_STATE_FILE}.${randomUUID()}.tmp`
-    requireProjectBasename(tempName, 'state_write_failed')
-    const temp = join(this.#stateRoot, tempName)
-    let file: FileHandle | null = null
-    let tempIdentity: FileIdentity | null = null
-    try {
-      await this.#revalidateStateRoot()
-      const created = this.#createFileAt(root, tempName, true, 'state_write_failed')
-      if (created.status !== 'ok') throw new ProjectStateError('state_write_failed')
-      tempIdentity = created.identity
-      file = await open(
-        temp,
-        constants.O_WRONLY | noFollowFlag(),
-      )
-      const info = await file.stat({bigint: true})
-      if (
-        !info.isFile()
-        || !privateRegularFileMetadata(info, this.#platform)
-        || !sameFileIdentity(tempIdentity, fileIdentity(info))
-      ) throw new ProjectStateError('state_permissions')
-      await this.#revalidateStateRoot()
-      this.#requireMatchesAt(root, tempName, file, 'state_permissions')
-      this.#publishDurability('temp_open')
-      await file.writeFile(raw)
-      await file.sync()
-      this.#publishDurability('file_fsync')
-      await file.close()
-      file = null
-      await this.#revalidateStateRoot()
-      const beforeRename = this.#lookupAt(root, tempName, 'state_permissions')
-      if (
-        beforeRename.status !== 'ok'
-        || tempIdentity === null
-        || !sameFileIdentity(beforeRename.identity, tempIdentity)
-      ) throw new ProjectStateError('state_permissions')
-      this.#renameAt(root, tempName, PROJECT_STATE_FILE)
-      markCommitted()
-      this.#publishDurability('atomic_replace')
-      await this.#revalidateStateRoot()
-      const replaced = this.#lookupAt(root, PROJECT_STATE_FILE, 'state_permissions')
-      if (
-        replaced.status !== 'ok'
-        || tempIdentity === null
-        || !sameFileIdentity(replaced.identity, tempIdentity)
-      ) throw new ProjectStateError('state_permissions')
-      const directory = this.#stateRootHandle
-      if (directory === null) throw new ProjectStateError('state_permissions')
-      if (this.#platform === 'win32') {
-        // Node maps FileHandle.sync() to FlushFileBuffers(), which rejects
-        // directory handles with EPERM on Windows. The replace is already
-        // committed by the native descriptor-relative rename above; the
-        // retained-root and replacement identity checks are the Windows
-        // metadata commit boundary.
-        this.#publishDurability('windows_metadata_commit')
-      } else {
-        await directory.sync()
-        this.#publishDurability('dir_fsync')
-      }
-      await this.#revalidateStateRoot()
-    } catch (error) {
-      if (error instanceof ProjectStateError) throw error
-      throw new ProjectStateError('state_write_failed')
-    } finally {
-      await file?.close().catch(() => undefined)
-      this.#removeOwnedTemp(tempName, tempIdentity)
-    }
-  }
-
-  #removeOwnedTemp(name: string, expected: FileIdentity | null): void {
-    if (expected === null) return
-    try {
-      const root = this.#requireStateRootHandle()
-      const result = this.#unlinkAt(root, name, expected, 'file', 'state_write_failed')
-      if (result.status === 'ok' || result.status === 'missing' || result.status === 'mismatch') return
-    } catch {
-      // Exact descriptor-relative cleanup is best effort and never falls back to a path delete.
-    }
-  }
-
-  async #rollbackCreatedDirectory(candidate: {
-    readonly path: string
-    readonly identity: FileIdentity | null
-    readonly workspaceId: string
-  }): Promise<boolean> {
-    if (candidate.identity === null) return false
-    let file: FileHandle | null = null
-    try {
-      const managed = await this.#validateManagedRoot()
-      if (!isDirectChild(managed, candidate.path)) return false
-      const root = this.#requireManagedRootHandle()
-      const name = basename(candidate.path)
-      file = await open(candidate.path, constants.O_RDONLY | directoryFlag() | noFollowFlag())
-      this.#requireMatchesAt(root, name, file, 'workspace_boundary_changed')
-      const info = await file.stat({bigint: true})
-      const canonical = realpathSync(candidate.path)
-      if (
-        !info.isDirectory()
-        || !privateDirectoryMetadata(info, this.#platform)
-        || !sameFileIdentity(candidate.identity, fileIdentity(info))
-        || canonical !== candidate.path
-      ) return false
-      this.#requireMatchesAt(root, name, file, 'workspace_boundary_changed')
-      const removed = this.#unlinkAt(
-        root,
-        name,
-        candidate.identity,
-        'directory',
-        'workspace_boundary_changed',
-      )
-      if (removed.status !== 'ok') return false
-      await this.#validateManagedRoot()
-      return true
-    } catch {
-      // Rollback is best effort and never removes an unproven replacement or non-empty directory.
-      return false
-    } finally {
-      await file?.close().catch(() => undefined)
-    }
   }
 
   async #restoreManagedDirectory(
@@ -2743,27 +1595,27 @@ export class ProjectStore {
     let createdIdentity: FileIdentity | null = null
     let adopted = false
     try {
-      const managed = await this.#validateManagedRoot()
+      const managed = await this.#files.validateManagedRoot()
       if (!isDirectChild(managed, removed.path)) return
-      const root = this.#requireManagedRootHandle()
-      const created = this.#mkdirPrivateAt(root, removed.name, 'workspace_boundary_changed')
+      const root = this.#files.requireManagedRootHandle()
+      const created = this.#files.mkdirPrivateAt(root, removed.name, 'workspace_boundary_changed')
       if (created.status !== 'ok') return
       createdRoot = root
       createdIdentity = created.identity
       file = await open(removed.path, constants.O_RDONLY | directoryFlag() | noFollowFlag())
-      this.#requireMatchesAt(root, removed.name, file, 'workspace_boundary_changed')
+      this.#files.requireMatchesAt(root, removed.name, file, 'workspace_boundary_changed')
       const initialInfo = await file.stat({bigint: true})
       if (!sameFileIdentity(created.identity, fileIdentity(initialInfo))) return
-      this.#protectAt(root, removed.name, file, 'workspace_boundary_changed')
-      if (this.#platform !== 'win32') await file.chmod(0o700)
+      this.#files.protectAt(root, removed.name, file, 'workspace_boundary_changed')
+      if (this.#files.platform !== 'win32') await file.chmod(0o700)
       const info = await file.stat({bigint: true})
       const canonical = realpathSync(removed.path)
       if (
         !info.isDirectory()
-        || !privateDirectoryMetadata(info, this.#platform)
+        || !privateDirectoryMetadata(info, this.#files.platform)
         || canonical !== removed.path
       ) return
-      this.#requireMatchesAt(root, removed.name, file, 'workspace_boundary_changed')
+      this.#files.requireMatchesAt(root, removed.name, file, 'workspace_boundary_changed')
       const current = this.#workspaceIdentities.get(workspaceId)
       if (current !== undefined && sameFileIdentity(current, removed.identity)) {
         this.#workspaceIdentities.set(workspaceId, fileIdentity(info))
@@ -2775,7 +1627,7 @@ export class ProjectStore {
       await file?.close().catch(() => undefined)
       if (!adopted && createdRoot !== null && createdIdentity !== null) {
         try {
-          this.#unlinkAt(
+          this.#files.unlinkAt(
             createdRoot,
             removed.name,
             createdIdentity,
@@ -2788,860 +1640,4 @@ export class ProjectStore {
       }
     }
   }
-
-  #publishDurability(step: DurabilityStep): void {
-    try { this.#onDurabilityStep?.(step) } catch { /* an audit sink never owns state */ }
-  }
-}
-
-function validNativeLockResult(value: unknown): value is NativeFileLockResult {
-  const record = ownDataRecord(value)
-  if (record === null) return false
-  const status = record.status
-  if (status === 'acquired') {
-    return exactKeys(record, ['status', 'release']) && typeof record.release === 'function'
-  }
-  return exactKeys(record, ['status'])
-    && (status === 'busy' || status === 'unsupported' || status === 'failed')
-}
-
-function validProjectRootFileResult(value: unknown): value is ProjectRootFileResult {
-  const record = ownDataRecord(value)
-  if (record === null || !exactKeys(record, ['status'])) return false
-  const status = record.status
-  return status === 'ok'
-    || status === 'mismatch'
-    || status === 'exists'
-    || status === 'missing'
-    || status === 'unsupported'
-    || status === 'failed'
-}
-
-function validProjectRootFileLookupResult(value: unknown): value is ProjectRootFileLookupResult {
-  const record = ownDataRecord(value)
-  if (record === null) return false
-  if (record.status === 'ok') {
-    if (!exactKeys(record, ['status', 'identity'])) return false
-    const identity = ownDataRecord(record.identity)
-    return identity !== null
-      && exactKeys(identity, ['device', 'inode'])
-      && typeof identity.device === 'bigint'
-      && typeof identity.inode === 'bigint'
-      && identity.device >= 0n
-      && identity.inode >= 0n
-  }
-  return exactKeys(record, ['status'])
-    && (record.status === 'missing'
-      || record.status === 'unsupported'
-      || record.status === 'failed')
-}
-
-function validProjectRootFileCreateResult(value: unknown): value is ProjectRootFileCreateResult {
-  const record = ownDataRecord(value)
-  if (record === null) return false
-  if (record.status === 'ok') {
-    if (!exactKeys(record, ['status', 'identity'])) return false
-    return validFileIdentity(record.identity)
-  }
-  return exactKeys(record, ['status'])
-    && (record.status === 'exists'
-      || record.status === 'unsupported'
-      || record.status === 'failed')
-}
-
-function validFileIdentity(value: unknown): value is FileIdentity {
-  const identity = ownDataRecord(value)
-  return identity !== null
-    && exactKeys(identity, ['device', 'inode'])
-    && typeof identity.device === 'bigint'
-    && typeof identity.inode === 'bigint'
-    && identity.device >= 0n
-    && identity.inode >= 0n
-}
-
-function ownDataRecord(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null) return null
-  const prototype = Reflect.getPrototypeOf(value)
-  if (prototype !== Object.prototype && prototype !== null) return null
-  const descriptors = Object.getOwnPropertyDescriptors(value)
-  for (const descriptor of Object.values(descriptors)) {
-    if (!Object.hasOwn(descriptor, 'value')) return null
-  }
-  return value as Record<string, unknown>
-}
-
-function exactKeys(record: Record<string, unknown>, expected: readonly string[]): boolean {
-  const keys = Reflect.ownKeys(record)
-  return keys.length === expected.length
-    && expected.every(key => Object.hasOwn(record, key))
-}
-
-function requireProjectBasename(name: string, code: ProjectStateCode): void {
-  if (
-    typeof name !== 'string'
-    || name === ''
-    || !isWellFormed(name)
-    || name === '.'
-    || name === '..'
-    || name.includes('/')
-    || name.includes('\\')
-    || name.includes('\0')
-    || name.includes('://')
-    || /^[A-Za-z]:/u.test(name)
-    || basename(name) !== name
-  ) throw new ProjectStateError(code)
-}
-
-function isCommittedTransactionFailure(error: unknown): boolean {
-  return error instanceof TransactionProjectStateError && error.committed
-}
-
-export function normalizeProjectWorkspaceName(value: unknown): NormalizedProjectText {
-  const result = normalizePublicText(value, MAX_PROJECT_WORKSPACE_NAME, 'workspace_name_invalid')
-  if (
-    result.display.includes('/')
-    || result.display.includes('\\')
-    || result.display.includes('://')
-    || /^[A-Za-z]:/u.test(result.display)
-    || result.display === '.'
-    || result.display === '..'
-  ) throw new ProjectStateError('workspace_name_invalid')
-  return result
-}
-
-export function normalizeProjectSessionTitle(value: unknown): NormalizedProjectText {
-  return normalizePublicText(value, MAX_PROJECT_SESSION_TITLE, 'session_title_invalid')
-}
-
-function normalizePublicText(
-  value: unknown,
-  limit: number,
-  code: 'workspace_name_invalid' | 'session_title_invalid',
-): NormalizedProjectText {
-  if (typeof value !== 'string' || !isWellFormed(value)) throw new ProjectStateError(code)
-  const stripped = stripLikePython(normalizeNfkcPinned(value))
-  const pieces: string[] = []
-  let current = ''
-  for (const character of stripped) {
-    if (isPythonSpace(character)) {
-      if (current !== '') {
-        pieces.push(current)
-        current = ''
-      }
-      continue
-    }
-    current += character
-  }
-  if (current !== '') pieces.push(current)
-  const display = pieces.join(' ')
-  if (
-    display === ''
-    || [...display].length > limit
-    || [...display].some(character => {
-      const codePoint = character.codePointAt(0)
-      return codePoint === undefined || isOtherCategory(codePoint)
-    })
-  ) throw new ProjectStateError(code)
-  return Object.freeze({display, normalized: casefoldLikePython(display)})
-}
-
-function brandProjectRoot(path: string): HostProjectRoot {
-  const value = Object.freeze({[hostProjectRootBrand]: true as const})
-  rootValues.set(value, path)
-  return value
-}
-
-function brandManagedProjectRoot(path: string): HostManagedProjectRoot {
-  const value = Object.freeze({[hostManagedProjectRootBrand]: true as const})
-  managedRootValues.set(value, path)
-  return value
-}
-
-function projectRootPath(value: HostProjectRoot): string {
-  const path = rootValues.get(value)
-  if (path === undefined) throw new ProjectStateError('state_permissions')
-  return path
-}
-
-function managedProjectRootPath(value: HostManagedProjectRoot): string {
-  const path = managedRootValues.get(value)
-  if (path === undefined) throw new ProjectStateError('managed_root_unsafe')
-  return path
-}
-
-function requireProjectRoot(
-  configured: string,
-  code: ProjectStateCode,
-  platform: NodeJS.Platform,
-): string {
-  try {
-    if (typeof configured !== 'string' || !isAbsolute(configured) || !isWellFormed(configured)) {
-      throw new Error('invalid')
-    }
-    const info = lstatSync(configured)
-    const canonical = realpathSync(configured)
-    if (
-      info.isSymbolicLink()
-      || !info.isDirectory()
-      || canonical !== resolve(configured)
-      || !privateDirectoryMetadata(info, platform)
-    ) throw new Error('unsafe')
-    return canonical
-  } catch {
-    throw new ProjectStateError(code)
-  }
-}
-
-function requireManagedProjectRoot(configured: string, platform: NodeJS.Platform): string {
-  try {
-    if (typeof configured !== 'string' || !isAbsolute(configured) || !isWellFormed(configured)) {
-      throw new Error('invalid')
-    }
-    const info = lstatSync(configured)
-    const canonical = realpathSync(configured)
-    if (
-      info.isSymbolicLink()
-      || !info.isDirectory()
-      || canonical !== resolve(configured)
-      || !managedDirectoryMetadata(info, platform)
-    ) throw new Error('unsafe')
-    return canonical
-  } catch {
-    throw new ProjectStateError('managed_root_unsafe')
-  }
-}
-
-async function validateRegisteredWorkspace(
-  path: string,
-  failure: 'workspace_invalid' | 'workspace_boundary_changed' = 'workspace_invalid',
-): Promise<DirectoryBinding> {
-  try {
-    const file = await open(path, constants.O_RDONLY | directoryFlag() | noFollowFlag())
-    try {
-      const info = await file.stat({bigint: true})
-      const canonical = realpathSync(path)
-      if (!info.isDirectory() || canonical !== path) throw new Error('unsafe')
-      return {canonical, identity: fileIdentity(info)}
-    } finally {
-      await file.close()
-    }
-  } catch {
-    throw new ProjectStateError(failure)
-  }
-}
-
-async function openValidatedRegularFile(
-  path: string,
-  flags: number,
-  createMode: number | null,
-  platform: NodeJS.Platform,
-): Promise<FileHandle> {
-  let file: FileHandle | null = null
-  try {
-    file = createMode === null ? await open(path, flags) : await open(path, flags, createMode)
-    const info = await file.stat()
-    if (
-      !info.isFile()
-      || !privateRegularFileMetadata(info, platform)
-    ) throw new ProjectStateError('state_permissions')
-    return file
-  } catch (error) {
-    await file?.close().catch(() => undefined)
-    if (isNodeError(error, 'ENOENT')) throw error
-    if (error instanceof ProjectStateError) throw error
-    throw new ProjectStateError('state_permissions')
-  }
-}
-
-function privateDirectoryMetadata(
-  info: Pick<Stats, 'uid' | 'mode'> | {readonly uid: bigint; readonly mode: bigint},
-  platform: NodeJS.Platform,
-): boolean {
-  if (platform === 'win32') return true
-  return ownedByCurrentUserValue(info.uid) && (BigInt(info.mode) & 0o7777n) === 0o700n
-}
-
-function privateRegularFileMetadata(
-  info: Pick<Stats, 'uid' | 'mode'> | {readonly uid: bigint; readonly mode: bigint},
-  platform: NodeJS.Platform,
-): boolean {
-  if (platform === 'win32') return true
-  return ownedByCurrentUserValue(info.uid) && (BigInt(info.mode) & 0o7777n) === 0o600n
-}
-
-function managedDirectoryMetadata(
-  info: Pick<Stats, 'uid' | 'mode'> | {readonly uid: bigint; readonly mode: bigint},
-  platform: NodeJS.Platform,
-): boolean {
-  if (platform === 'win32') return true
-  return ownedByCurrentUserValue(info.uid) && !unsafeManagedMode(Number(info.mode))
-}
-
-function ownedByCurrentUserValue(uid: number | bigint): boolean {
-  return typeof process.getuid === 'function' && BigInt(uid) === BigInt(process.getuid())
-}
-
-function fileIdentity(info: {readonly dev: bigint; readonly ino: bigint}): FileIdentity {
-  return Object.freeze({device: info.dev, inode: info.ino})
-}
-
-function sameFileIdentity(left: FileIdentity, right: FileIdentity): boolean {
-  return left.device === right.device && left.inode === right.inode
-}
-
-async function openStateRoot(
-  path: string,
-  platform: NodeJS.Platform,
-): Promise<{readonly file: FileHandle; readonly identity: StateRootIdentity}> {
-  let file: FileHandle | null = null
-  try {
-    file = await open(path, constants.O_RDONLY | directoryFlag() | noFollowFlag())
-    const info = await file.stat({bigint: true})
-    const canonical = realpathSync(path)
-    if (
-      !info.isDirectory()
-      || canonical !== path
-      || !privateDirectoryMetadata(info, platform)
-    ) throw new Error('unsafe')
-    return {
-      file,
-      identity: Object.freeze({
-        ...fileIdentity(info),
-        canonical,
-        owner: info.uid,
-        mode: info.mode & 0o7777n,
-      }),
-    }
-  } catch {
-    await file?.close().catch(() => undefined)
-    throw new ProjectStateError('state_permissions')
-  }
-}
-
-async function openManagedRoot(
-  path: string,
-  platform: NodeJS.Platform,
-): Promise<{readonly file: FileHandle; readonly identity: FileIdentity}> {
-  let file: FileHandle | null = null
-  try {
-    file = await open(path, constants.O_RDONLY | directoryFlag() | noFollowFlag())
-    const info = await file.stat({bigint: true})
-    const canonical = realpathSync(path)
-    if (
-      !info.isDirectory()
-      || canonical !== path
-      || !managedDirectoryMetadata(info, platform)
-    ) throw new Error('unsafe')
-    return {file, identity: fileIdentity(info)}
-  } catch {
-    await file?.close().catch(() => undefined)
-    throw new ProjectStateError('managed_root_unsafe')
-  }
-}
-
-function stateRootMatches(
-  info: {readonly dev: bigint; readonly ino: bigint; readonly uid: bigint; readonly mode: bigint; isDirectory(): boolean},
-  expected: StateRootIdentity,
-  platform: NodeJS.Platform,
-): boolean {
-  return info.isDirectory()
-    && info.dev === expected.device
-    && info.ino === expected.inode
-    && (platform === 'win32' || (
-      info.uid === expected.owner
-      && (info.mode & 0o7777n) === expected.mode
-      && privateDirectoryMetadata(info, platform)
-    ))
-}
-
-function unsafeManagedMode(mode: number): boolean {
-  return (mode & 0o7022) !== 0
-}
-
-function readClock(clock: Clock): number {
-  const value = clock.now()
-  if (!Number.isFinite(value)) throw new ProjectStateError('state_lock_failed')
-  return value
-}
-
-function isAbortError(error: unknown): error is Error {
-  return error instanceof Error && error.name === 'AbortError'
-}
-
-function projectAbortError(): Error {
-  const error = new Error('project state operation aborted')
-  error.name = 'AbortError'
-  return error
-}
-
-function noFollowFlag(): number {
-  return constants.O_NOFOLLOW ?? 0
-}
-
-function directoryFlag(): number {
-  return constants.O_DIRECTORY ?? 0
-}
-
-function nonblockFlag(): number {
-  return constants.O_NONBLOCK ?? 0
-}
-
-function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
-  return error instanceof Error && (error as NodeJS.ErrnoException).code === code
-}
-
-function isDirectChild(parent: string, child: string): boolean {
-  return child !== parent && dirname(child) === parent
-}
-
-function emptyState(): MutableProjectState {
-  return {
-    stateRevision: 0,
-    activeBindingRevision: 0,
-    activeWorkspaceId: null,
-    workspaces: new Map(),
-    sessions: new Map(),
-  }
-}
-
-function snapshotState(state: MutableProjectState): ProjectSnapshot {
-  return Object.freeze({
-    version: PROJECT_STATE_VERSION,
-    state_revision: state.stateRevision,
-    active_binding_revision: state.activeBindingRevision,
-    active_workspace_id: state.activeWorkspaceId,
-    workspaces: Object.freeze([...state.workspaces.values()].sort(compareCreated)),
-    sessions: Object.freeze([...state.sessions.values()].sort(compareCreated)),
-  })
-}
-
-function compareCreated(
-  left: {readonly created_at: number; readonly workspace_id?: string; readonly session_id?: string},
-  right: {readonly created_at: number; readonly workspace_id?: string; readonly session_id?: string},
-): number {
-  return left.created_at - right.created_at
-    || compareCodePoints(left.workspace_id ?? left.session_id ?? '', right.workspace_id ?? right.session_id ?? '')
-}
-
-/** Desktop roster order: most recently used first, capped like the other public listings. */
-function recentWorkspaces(workspaces: readonly WorkspaceRecord[]): readonly WorkspaceRecord[] {
-  return [...workspaces].sort((left, right) =>
-    right.last_used_at - left.last_used_at
-    || right.created_at - left.created_at
-    || compareCodePoints(right.workspace_id, left.workspace_id),
-  ).slice(0, MAX_PUBLIC_ROSTER)
-}
-
-function mostRecentlyUsed<T extends {
-  readonly last_used_at: number
-  readonly created_at: number
-  readonly workspace_id: string
-}>(
-  values: Iterable<T>,
-): T | undefined {
-  return [...values].sort((left, right) =>
-    right.last_used_at - left.last_used_at
-    || right.created_at - left.created_at
-    || compareCodePoints(right.workspace_id, left.workspace_id),
-  )[0]
-}
-
-function requireWorkspaceCapacity(state: MutableProjectState): void {
-  if (state.workspaces.size >= MAX_PROJECT_WORKSPACES) throw new ProjectStateError('workspace_limit')
-}
-
-function requireUniqueWorkspaceName(state: MutableProjectState, normalized: string): void {
-  if ([...state.workspaces.values()].some(record => record.normalized_name === normalized)) {
-    throw new ProjectStateError('workspace_name_conflict')
-  }
-}
-
-function uniqueWorkspaceName(state: MutableProjectState, base: string): string {
-  if (![...state.workspaces.values()].some(
-    record => record.normalized_name === normalizeProjectWorkspaceName(base).normalized,
-  )) return base
-  for (let suffix = 2; suffix < Number.MAX_SAFE_INTEGER; suffix += 1) {
-    const ending = ` (${suffix})`
-    const clipped = stripLikePython([...base].slice(0, Math.max(1, MAX_PROJECT_WORKSPACE_NAME - [...ending].length)).join(''))
-    const candidate = `${clipped}${ending}`
-    if (![...state.workspaces.values()].some(
-      record => record.normalized_name === normalizeProjectWorkspaceName(candidate).normalized,
-    )) return candidate
-  }
-  throw new ProjectStateError('workspace_limit')
-}
-
-function uniqueSessionTitle(state: MutableProjectState, workspaceId: string, base: string): string {
-  const exists = (candidate: string): boolean => {
-    const normalized = normalizeProjectSessionTitle(candidate).normalized
-    return [...state.sessions.values()].some(
-      session => session.workspace_id === workspaceId && session.normalized_title === normalized,
-    )
-  }
-  if (!exists(base)) return base
-  for (let suffix = 2; suffix < Number.MAX_SAFE_INTEGER; suffix += 1) {
-    const ending = ` (${suffix})`
-    const clipped = stripLikePython([...base].slice(0, Math.max(1, MAX_PROJECT_SESSION_TITLE - [...ending].length)).join(''))
-    const candidate = `${clipped}${ending}`
-    if (!exists(candidate)) return candidate
-  }
-  throw new ProjectStateError('session_limit')
-}
-
-function pruneForSessionInsert(state: MutableProjectState, workspaceId: string): void {
-  const workspaceCount = (): number => [...state.sessions.values()].filter(
-    session => session.workspace_id === workspaceId,
-  ).length
-  while (
-    workspaceCount() >= MAX_PROJECT_SESSIONS_PER_WORKSPACE
-    || state.sessions.size >= MAX_PROJECT_SESSIONS_TOTAL
-  ) {
-    const activeIds = new Set([...state.workspaces.values()].flatMap(
-      workspace => workspace.active_session_id === null ? [] : [workspace.active_session_id],
-    ))
-    const targetOnly = workspaceCount() >= MAX_PROJECT_SESSIONS_PER_WORKSPACE
-    const candidates = [...state.sessions.values()].filter(session =>
-      session.state !== 'starting'
-      && !activeIds.has(session.session_id)
-      && (!targetOnly || session.workspace_id === workspaceId),
-    ).sort((left, right) =>
-      (left.state === 'unavailable' ? 0 : 1) - (right.state === 'unavailable' ? 0 : 1)
-      || left.last_used_at - right.last_used_at
-      || left.created_at - right.created_at
-      || compareCodePoints(left.session_id, right.session_id),
-    )
-    const candidate = candidates[0]
-    if (candidate === undefined) throw new ProjectStateError('session_limit')
-    state.sessions.delete(candidate.session_id)
-  }
-}
-
-function newestReadySession(
-  state: MutableProjectState,
-  workspaceId: string,
-): ProjectSessionRecord | undefined {
-  return [...state.sessions.values()].filter(
-    session => session.workspace_id === workspaceId && session.state === 'ready',
-  ).sort((left, right) =>
-    right.last_used_at - left.last_used_at
-    || right.created_at - left.created_at
-    || compareCodePoints(right.session_id, left.session_id),
-  )[0]
-}
-
-function slugPrefix(display: string): string {
-  const pieces: string[] = []
-  for (const character of casefoldLikePython(display)) {
-    const codePoint = character.codePointAt(0)
-    const alphanumeric = codePoint !== undefined
-      && (isLetterCategory(codePoint) || isNumberCategory(codePoint))
-    if (alphanumeric) pieces.push(character)
-    else if ((isPythonSpace(character) || character === '-' || character === '_') && pieces.at(-1) !== '-') {
-      if (pieces.length > 0) pieces.push('-')
-    }
-  }
-  const prefix = [...stripLikePython(pieces.join('').replace(/^-+|-+$/gu, ''))].slice(0, 32).join('').replace(/-+$/gu, '')
-  return prefix === '' ? 'workspace' : prefix
-}
-
-function validateThreadId(value: unknown): string {
-  if (
-    typeof value !== 'string'
-    || !isWellFormed(value)
-    || [...value].length < 1
-    || [...value].length > MAX_PROJECT_THREAD_ID
-    || [...value].some(character => {
-      const codePoint = character.codePointAt(0)
-      return codePoint === undefined || isOtherCategory(codePoint)
-    })
-  ) throw new ProjectStateError('thread_id_invalid')
-  return value
-}
-
-function encodeState(state: MutableProjectState): Readonly<Record<string, unknown>> {
-  return {
-    version: PROJECT_STATE_VERSION,
-    state_revision: state.stateRevision,
-    active_binding_revision: state.activeBindingRevision,
-    active_workspace_id: state.activeWorkspaceId,
-    workspaces: Object.fromEntries([...state.workspaces].map(([key, value]) => [key, {...value}])),
-    sessions: Object.fromEntries([...state.sessions].map(([key, value]) => [key, {...value}])),
-  }
-}
-
-function encodeMaintenanceJournal(journal: ManagedMaintenanceJournal): Readonly<Record<string, unknown>> {
-  return {
-    entries: journal.entries.map(entry => {
-      const encoded = {
-        identity: {
-          device: entry.identity.device.toString(10),
-          inode: entry.identity.inode.toString(10),
-        },
-        original_name: entry.original_name,
-        replacement_identity: entry.replacement_identity === null ? null : {
-          device: entry.replacement_identity.device.toString(10),
-          inode: entry.replacement_identity.inode.toString(10),
-        },
-        tombstone_name: entry.tombstone_name,
-        workspace_id: entry.workspace_id,
-      }
-      return journal.version === 1
-        ? encoded
-        : {...encoded, replacement_name: entry.replacement_name}
-    }),
-    operation_id: journal.operation_id,
-    phase: journal.phase,
-    version: journal.version,
-  }
-}
-
-function decodeMaintenanceJournal(value: unknown): ManagedMaintenanceJournal {
-  const root = exactRecord(value, ['entries', 'operation_id', 'phase', 'version'])
-  if (
-    (root.version !== 1 && root.version !== 2)
-    || !Array.isArray(root.entries)
-    || root.entries.length > MAX_PROJECT_WORKSPACES
-  ) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  const operationId = storedId(root.operation_id)
-  if (root.phase !== 'prepared' && root.phase !== 'committed') {
-    throw new ProjectStateError('state_corrupt')
-  }
-  const entries = root.entries.map(raw => {
-    const entry = exactRecord(raw, root.version === 1
-      ? ['identity', 'original_name', 'replacement_identity', 'tombstone_name', 'workspace_id']
-      : [
-          'identity', 'original_name', 'replacement_identity', 'replacement_name',
-          'tombstone_name', 'workspace_id',
-        ])
-    const identity = exactRecord(entry.identity, ['device', 'inode'])
-    const replacementIdentity = entry.replacement_identity === null
-      ? null
-      : exactRecord(entry.replacement_identity, ['device', 'inode'])
-    if (typeof entry.original_name !== 'string') throw new ProjectStateError('state_corrupt')
-    requireProjectBasename(entry.original_name, 'state_corrupt')
-    if (
-      typeof entry.tombstone_name !== 'string'
-      || MAINTENANCE_TOMBSTONE.exec(entry.tombstone_name)?.[1] !== operationId
-    ) throw new ProjectStateError('state_corrupt')
-    const replacementName = root.version === 1 ? entry.original_name : entry.replacement_name
-    if (
-      typeof replacementName !== 'string'
-      || (root.version === 2
-        && (
-          MAINTENANCE_REPLACEMENT.exec(replacementName)?.[1] !== operationId
-          || replacementName !== entry.tombstone_name.replace(
-            '.nova-maintenance-',
-            '.nova-replacement-',
-          )
-        ))
-    ) throw new ProjectStateError('state_corrupt')
-    return Object.freeze({
-      workspace_id: storedId(entry.workspace_id),
-      original_name: entry.original_name,
-      tombstone_name: entry.tombstone_name,
-      replacement_name: replacementName,
-      identity: Object.freeze({
-        device: decimalIdentity(identity.device),
-        inode: decimalIdentity(identity.inode),
-      }),
-      replacement_identity: replacementIdentity === null ? null : Object.freeze({
-        device: decimalIdentity(replacementIdentity.device),
-        inode: decimalIdentity(replacementIdentity.inode),
-      }),
-    })
-  })
-  if (
-    entries.length === 0
-    || new Set(entries.map(entry => entry.workspace_id)).size !== entries.length
-    || new Set(entries.map(entry => entry.original_name)).size !== entries.length
-    || new Set(entries.map(entry => entry.tombstone_name)).size !== entries.length
-    || new Set(entries.map(entry => entry.replacement_name)).size !== entries.length
-  ) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  if (root.phase === 'committed' && entries.some(entry => entry.replacement_identity === null)) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  return Object.freeze({
-    version: root.version,
-    operation_id: operationId,
-    phase: root.phase,
-    entries: Object.freeze(entries),
-  })
-}
-
-function decimalIdentity(value: unknown): bigint {
-  if (typeof value !== 'string' || !/^(0|[1-9][0-9]{0,39})$/u.test(value)) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  const parsed = BigInt(value)
-  if (parsed > 18_446_744_073_709_551_615n) throw new ProjectStateError('state_corrupt')
-  return parsed
-}
-
-function projectTimestampNumber(value: number, path: CanonicalJsonPath): string | undefined {
-  if (path.length !== 3) return undefined
-  const [collection, recordId, field] = path
-  if (
-    (collection !== 'workspaces' && collection !== 'sessions')
-    || typeof recordId !== 'string'
-    || (field !== 'created_at' && field !== 'last_used_at')
-  ) return undefined
-  return pythonFloat(value)
-}
-
-const persistedId = z.string().regex(STORED_ID)
-// Keep JSON dictionary keys verbatim; z.record drops the valid stored ID '__proto__'.
-const persistedObject = z.custom<Record<string, unknown>>(
-  value => value !== null && typeof value === 'object' && !Array.isArray(value),
-)
-const persistedState = z.object({
-  version: z.unknown().nonoptional(),
-  active_workspace_id: z.unknown().nonoptional(),
-  workspaces: z.unknown().nonoptional(),
-  sessions: z.unknown().nonoptional(),
-  state_revision: z.unknown().optional(),
-  active_binding_revision: z.unknown().optional(),
-}).strict()
-const persistedWorkspace = z.object({
-  workspace_id: persistedId,
-  display_name: z.unknown().nonoptional(),
-  normalized_name: z.string(),
-  canonical_path: z.string().refine(path => isWellFormed(path) && isAbsolute(path)),
-  origin: z.enum(['managed', 'registered']),
-  codex_home_key: z.string(),
-  active_session_id: persistedId.nullable(),
-  created_at: z.number(),
-  last_used_at: z.number(),
-}).strict().transform(raw => {
-  const name = normalizeProjectWorkspaceName(raw.display_name)
-  if (raw.normalized_name !== name.normalized || raw.codex_home_key !== `home-${raw.workspace_id}`) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  return Object.freeze({...raw, display_name: name.display})
-})
-const persistedSession = z.object({
-  session_id: persistedId,
-  workspace_id: persistedId,
-  display_title: z.unknown().nonoptional(),
-  normalized_title: z.string(),
-  codex_thread_id: z.unknown().nonoptional(),
-  state: z.enum(['starting', 'ready', 'unavailable']),
-  created_at: z.number(),
-  last_used_at: z.number(),
-  executor_home: z.string().refine(isAbsolute).optional(),
-  origin: z.enum(['nova', 'external']).optional(),
-}).strict().transform(raw => {
-  if (raw.origin === 'external' && raw.executor_home === undefined) throw new ProjectStateError('state_corrupt')
-  const title = normalizeProjectSessionTitle(raw.display_title)
-  if (raw.normalized_title !== title.normalized) throw new ProjectStateError('state_corrupt')
-  const threadId = raw.codex_thread_id === null ? null : validateThreadId(raw.codex_thread_id)
-  if ((raw.state === 'ready' && threadId === null) || (raw.state === 'starting' && threadId !== null)) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  const {origin, executor_home: executorHome, ...record} = raw
-  return Object.freeze({
-    ...record,
-    ...(executorHome === undefined ? {} : {executor_home: executorHome}),
-    ...(origin === undefined && executorHome === undefined ? {} : {origin: origin ?? 'external'}),
-    display_title: title.display,
-    codex_thread_id: threadId,
-  })
-})
-
-function decodeState(value: unknown): MutableProjectState {
-  const root = persistedState.parse(value)
-  if (root.version !== PROJECT_STATE_VERSION) throw new ProjectStateError('state_version_unsupported')
-  const rawWorkspaces = persistedObject.parse(root.workspaces)
-  const rawSessions = persistedObject.parse(root.sessions)
-  if (Object.keys(rawWorkspaces).length > MAX_PROJECT_WORKSPACES
-    || Object.keys(rawSessions).length > MAX_PROJECT_SESSIONS_TOTAL) throw new ProjectStateError('state_corrupt')
-  const state = emptyState()
-  state.stateRevision = Object.hasOwn(root, 'state_revision') ? stateRevision(root.state_revision) : 0
-  state.activeBindingRevision = Object.hasOwn(root, 'active_binding_revision') ? stateRevision(root.active_binding_revision) : 0
-  for (const [key, raw] of Object.entries(rawWorkspaces)) state.workspaces.set(key, persistedWorkspace.parse(raw))
-  for (const [key, raw] of Object.entries(rawSessions)) state.sessions.set(key, persistedSession.parse(raw))
-  const active = root.active_workspace_id
-  if (active !== null && typeof active !== 'string') throw new ProjectStateError('state_corrupt')
-  state.activeWorkspaceId = active
-  validateState(state)
-  return state
-}
-
-function validateState(state: MutableProjectState): void {
-  stateRevision(state.stateRevision)
-  stateRevision(state.activeBindingRevision)
-  if (state.workspaces.size > MAX_PROJECT_WORKSPACES || state.sessions.size > MAX_PROJECT_SESSIONS_TOTAL) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  if (state.activeWorkspaceId !== null && !state.workspaces.has(state.activeWorkspaceId)) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  const workspaceNames = new Set<string>()
-  const sessionTitles = new Set<string>()
-  for (const [workspaceId, workspace] of state.workspaces) {
-    if (workspaceId !== workspace.workspace_id) throw new ProjectStateError('state_corrupt')
-    if (workspaceNames.has(workspace.normalized_name)) throw new ProjectStateError('state_corrupt')
-    workspaceNames.add(workspace.normalized_name)
-    if (workspace.active_session_id !== null) {
-      const session = state.sessions.get(workspace.active_session_id)
-      if (session?.workspace_id !== workspace.workspace_id) throw new ProjectStateError('state_corrupt')
-    }
-  }
-  const sessionCounts = new Map<string, number>()
-  for (const [sessionId, session] of state.sessions) {
-    if (sessionId !== session.session_id || !state.workspaces.has(session.workspace_id)) {
-      throw new ProjectStateError('state_corrupt')
-    }
-    const count = (sessionCounts.get(session.workspace_id) ?? 0) + 1
-    if (count > MAX_PROJECT_SESSIONS_PER_WORKSPACE) throw new ProjectStateError('state_corrupt')
-    sessionCounts.set(session.workspace_id, count)
-    const key = `${session.workspace_id}\u0000${session.normalized_title}`
-    if (sessionTitles.has(key)) throw new ProjectStateError('state_corrupt')
-    sessionTitles.add(key)
-  }
-}
-
-function exactRecord(value: unknown, keys: readonly string[]): Readonly<Record<string, unknown>> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  const record = value as Readonly<Record<string, unknown>>
-  const actual = Object.keys(record)
-  if (actual.length !== keys.length || keys.some(key => !Object.hasOwn(record, key))) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  return record
-}
-
-function storedId(value: unknown): string {
-  if (typeof value !== 'string' || !STORED_ID.test(value)) throw new ProjectStateError('state_corrupt')
-  return value
-}
-
-function stateRevision(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  return value
-}
-
-function bumpStateRevision(state: MutableProjectState): number {
-  if (!Number.isSafeInteger(state.stateRevision) || state.stateRevision < 0
-    || state.stateRevision >= Number.MAX_SAFE_INTEGER) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  state.stateRevision += 1
-  return state.stateRevision
-}
-
-function bumpActiveBindingRevision(state: MutableProjectState): number {
-  if (!Number.isSafeInteger(state.activeBindingRevision) || state.activeBindingRevision < 0
-    || state.activeBindingRevision >= Number.MAX_SAFE_INTEGER) {
-    throw new ProjectStateError('state_corrupt')
-  }
-  state.activeBindingRevision += 1
-  return state.activeBindingRevision
 }
