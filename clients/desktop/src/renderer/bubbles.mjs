@@ -250,9 +250,11 @@ export function mountProgressBubbles({container, reserveBubbleArea, document = w
   const bubbles = createProgressBubbleController({
     reserveBubbleArea,
     render: items => {
+      const focusedKey = document.activeElement?.closest('.progress-bubble')?.dataset.key
       container.replaceChildren(...items.map(item => {
         const bubble = document.createElement('div')
         bubble.className = 'progress-bubble'
+        bubble.dataset.key = item.key
         bubble.dataset.level = item.level
         bubble.dataset.kind = item.kind
         bubble.dataset.expanded = String(item.expanded)
@@ -268,8 +270,10 @@ export function mountProgressBubbles({container, reserveBubbleArea, document = w
         bubble.append(text, toggle)
         bubble.addEventListener('pointerenter', () => bubbles.pause(item.key))
         bubble.addEventListener('pointerleave', () => bubbles.resume(item.key))
-        bubble.addEventListener('focus', () => bubbles.pause(item.key))
-        bubble.addEventListener('blur', () => bubbles.resume(item.key))
+        bubble.addEventListener('focusin', () => bubbles.pause(item.key))
+        bubble.addEventListener('focusout', event => {
+          if (!bubble.contains(event.relatedTarget)) bubbles.resume(item.key)
+        })
         return bubble
       }))
       // Native bounds have already been reserved, so overflow is measured at the final width.
@@ -277,6 +281,7 @@ export function mountProgressBubbles({container, reserveBubbleArea, document = w
         const text = bubble.querySelector('.progress-bubble-text')
         const toggle = bubble.querySelector('.progress-bubble-toggle')
         toggle.hidden = bubble.dataset.expanded !== 'true' && text.scrollHeight <= text.clientHeight + 1
+        if (bubble.dataset.key === focusedKey) toggle.focus()
       }
     },
     onLayout: layout => {
