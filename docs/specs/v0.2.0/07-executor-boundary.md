@@ -119,7 +119,8 @@ Definitions:
 
 Rules (import boundaries are machine-checked; other ownership rules guide review):
 
-- R1. Core must not import Codex internals except the dedicated host entry above.
+- R1. Core must not import concrete executor packages except the dedicated host entry above.
+  `executors/coding/` is the shared role-level coordinator, not a concrete package.
 - R2. Core must not compare, switch, or branch on the literal `'codex'` (or any
   other executor name). Executor identity reaches core only as
   `manifest.name`, `manifest.roles`, `manifest.display_name`, `delegate.executor`.
@@ -386,7 +387,8 @@ other core modules must use the executor registry. ESLint checks static and dyna
 
 - ESLint (`eslint.config.mjs`): a block for
   `runtime/src/**/*.ts` outside `executors/**` (except the exact composition/host authority entry described above) forbids direct imports from
-  `**/executors/codex/**`; the public `executors/index.ts` registry remains available. A block for
+  `**/executors/*/**` with a role-level `executors/coding/**` exception; the public
+  `executors/index.ts` registry remains available. A block for
   `runtime/src/executors/**` restricting `**/realtime/**`, `**/desktop*`,
   `**/*-assembly*`.
 - `runtime/test/eslint-boundary.test.ts` proves the forbidden internal import, the allowed registry

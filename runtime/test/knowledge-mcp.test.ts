@@ -90,7 +90,7 @@ function structured(result: unknown): Record<string, unknown> {
   return value.structuredContent as Record<string, unknown>
 }
 
-test('knowledge adapter calls recall through its actual local MCP SDK client', async () => {
+test('knowledge adapter calls recall directly through the injected backend', async () => {
   const adapter = new KnowledgeMcpAdapter(backend())
   try {
     assert.equal(adapter.manifest.name, 'mcp__nova_knowledge')

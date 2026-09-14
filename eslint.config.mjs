@@ -28,18 +28,18 @@ export default tseslint.config(
     },
   },
   {
-    // Outside the executor registry, depend on the Codex package's public entry only.
+    // Spec 07 R1: concrete packages belong behind the registry; coding/ is a shared role coordinator.
     files: ['runtime/src/**/*.ts'],
     ignores: ['runtime/src/executors/**', 'runtime/src/composition/production-composition.ts'],
     rules: {
       'no-restricted-syntax': ['error', {
-        selector: 'ImportExpression[source.value=/executors\\/codex\\//]',
-        message: 'load Codex through the executor registry; host authority belongs to production-composition.ts',
+        selector: 'ImportExpression[source.value=/executors\\/.+\\//]:not([source.value=/executors\\/coding\\//])',
+        message: 'load concrete executor packages through the registry; host authority belongs to production-composition.ts',
       }],
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['**/executors/codex/**'],
-          message: 'import Codex through executors/index.js instead of package internals',
+          group: ['**/executors/*/**', '!**/executors/coding/**'],
+          message: 'import concrete executors through executors/index.js instead of package internals',
         }],
       }],
     },
@@ -48,11 +48,11 @@ export default tseslint.config(
     files: ['runtime/src/composition/production-composition.ts'],
     rules: {
       'no-restricted-imports': ['error', {patterns: [{
-        group: ['**/executors/codex/**', '!../executors/codex/host.js'],
+        group: ['**/executors/*/**', '!**/executors/coding/**', '!../executors/codex/host.js'],
         message: 'the composition may load only the dedicated Codex host entry',
       }]}],
       'no-restricted-syntax': ['error', {
-        selector: 'ImportExpression[source.value=/executors\\/codex\\//][source.value!="../executors/codex/host.js"]',
+        selector: 'ImportExpression[source.value=/executors\\/.+\\//]:not([source.value=/executors\\/coding\\//])[source.value!="../executors/codex/host.js"]',
         message: 'the composition may load only the dedicated Codex host entry',
       }],
     },

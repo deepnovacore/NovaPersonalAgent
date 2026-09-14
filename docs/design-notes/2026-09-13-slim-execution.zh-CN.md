@@ -73,3 +73,5 @@
 详细原始日志与逐批审查保存在本机 `/tmp/nova-slim-execution/`：`runtime-final2.log`、`desktop-final.log`、`cli-final.log`、`package-verify-final2.log`、`windows-native-check6.log`、`windows-layout-run.log`、`codex-process-cancel.log`、`probe-shared-chatgpt-responses.log`、`renderer-final.log`、`batch10-equivalence.json` 及各批 review/report。最终 macOS 产物位于 worktree 的 `clients/desktop/dist/mac-arm64/Nova Audio Agent Desktop.app`。
 
 后续多模型复审、两项修复、主线集成验证及最终代码规模见 [复审与集成记录](2026-09-13-slim-review-and-merge.zh-CN.md)。本文的未合并状态与验收数据保留为原执行时点记录。
+
+2026-09-14 补充说明：批 1 删除 `retired_realtime/retired_ha/retired_autoglm` 行和检查后，对应旧环境变量作为未知配置被忽略；独立的 `NOVA_AUDIO_AGENT_MEMORY_BACKEND` 迁移报错仍保留。后续 R1 通用边界恢复、打包 eval 补齐及外部意见核验见 [意见处理记录](2026-09-14-slim-review-feedback.zh-CN.md)。

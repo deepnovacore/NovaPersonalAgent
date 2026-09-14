@@ -209,7 +209,6 @@ try {
         {seq: 2, ts: 2, trust: 'trusted_system', content: {text: '今天有两件重要的事：\n上午完成方案评审，下午继续开发语音管线。', delivery: 'spoken'}},
         {seq: 3, ts: 3, trust: 'trusted_user', content: {text: '好的，先从方案评审开始。'}},
       ]}], diagnostics: {version: 1, records: []}})},
-      graphBoard: {request: async () => ({error: 'unavailable'})},
     }
   })
   await board.setViewportSize({width: 980, height: 760})

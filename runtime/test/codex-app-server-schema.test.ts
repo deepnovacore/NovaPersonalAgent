@@ -847,3 +847,23 @@ test('effective config closure admits pinned local normalization and rejects eve
   nested(nested(response, 'config'), 'mcp_servers').host_leak = {}
   assert.throws(() => validateEffectiveCodexConfig(response, '/workspace', {allowReplacementInstructions: false, managedMcp}), /config_not_isolated/u)
 })
+
+test('shared HOME accepts disabled external entries only while every managed server remains intact', () => {
+  const managedMcp = prepareManagedCodexMcp(parseCapabilityRegistry({version: 1, mcpServers: {docs: {
+    transport: 'stdio', command: '/usr/bin/false', tools: {lookup: {enabled: true}},
+  }}}))
+  const options = {allowReplacementInstructions: false, managedMcp, sharedHome: true}
+  const response = effectiveConfig()
+  nested(response, 'config').mcp_servers = {...managedMcp.servers, 'corp.tools': {enabled: false}}
+  assert.equal(validateEffectiveCodexConfig(response, '/workspace', options).mcp, 'managed')
+  for (const change of [
+    (servers: Record<string, unknown>) => { delete servers.docs },
+    (servers: Record<string, unknown>) => { nested(servers, 'docs').enabled = false },
+    (servers: Record<string, unknown>) => { nested(servers, 'docs').enabled_tools = [] },
+    (servers: Record<string, unknown>) => { nested(servers, 'corp.tools').enabled = true },
+  ]) {
+    const bad = structuredClone(response)
+    change(nested(nested(bad, 'config'), 'mcp_servers'))
+    assert.throws(() => validateEffectiveCodexConfig(bad, '/workspace', options), /config_not_isolated/u)
+  }
+})

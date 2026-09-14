@@ -30,6 +30,15 @@ test('eslint blocks Codex internals while allowing the executor registry', async
   assert.deepEqual(await lintVirtual(CORE_PROBE, "await import('./executors/index.js')\n"), [])
 })
 
+test('core cannot bypass the registry for another executor package; coding remains a role-level port', async () => {
+  for (const source of ["import './executors/example/adapter.js'", "await import('./executors/example/adapter.js')"]) {
+    assert.ok((await lintVirtual(CORE_PROBE, source)).length > 0)
+  }
+  for (const source of ["import './executors/coding/intake.js'", "await import('./executors/coding/intake.js')"]) {
+    assert.deepEqual(await lintVirtual(CORE_PROBE, source), [])
+  }
+})
+
 test('eslint blocks executor imports of the realtime layer', async () => {
   const violations = await lintVirtual(EXECUTOR_PROBE, "import {RealtimeService} from '../../realtime/service.js'\n")
   assert.ok(violations.length > 0, violations.map(item => item.message).join('; '))
@@ -40,7 +49,7 @@ test('composition host authority exception does not admit other Codex internals'
   for (const source of ["import '../executors/codex/host.js'", "await import('../executors/codex/host.js')"]) {
     assert.deepEqual(await lintVirtual(path, source), [])
   }
-  for (const source of ["import '../executors/codex/adapter-live.js'", "await import('../executors/codex/adapter-live.js')"]) {
+  for (const source of ["import '../executors/codex/adapter-live.js'", "await import('../executors/codex/adapter-live.js')", "import '../executors/example/adapter.js'", "await import('../executors/example/adapter.js')"]) {
     assert.ok((await lintVirtual(path, source)).length > 0)
   }
 })
