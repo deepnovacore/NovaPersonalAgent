@@ -1549,7 +1549,7 @@ test('project proposal reaches provider and desktop before confirmation', async 
       pending_confirmation_id: 'assembly-proposal',
       pending_action: 'create_workspace',
       pending_workspace_display_name: 'tetris-game',
-      pending_session_title: null,
+      pending_session_title: '实现并验证俄罗斯方块小游戏',
       pending_expires_in_seconds: 360,
     })
 
