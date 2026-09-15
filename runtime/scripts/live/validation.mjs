@@ -10,14 +10,15 @@ const expectation = z.object({
 const fixtureSchema = z.object({version:z.literal(1), cases:z.array(z.object({
   id:z.string().regex(/^[a-z0-9-]+$/u), text:z.string().min(1), context:z.string().min(1),
   disabled:z.array(z.enum(['search','camera','coding','knowledge'])).optional(),
-  steps:z.array(z.object({expect:expectation, otherwise:expectation.optional(), result:z.json().optional()}).strict()).min(1).max(3),
+  steps:z.array(z.object({expect:expectation, otherwise:expectation.optional(), result:z.json().optional(), user:z.string().min(1).optional()}).strict()).min(1).max(3),
 }).strict()).min(1)}).strict()
 export function validateFixtures(value) {
   const parsed = fixtureSchema.parse(value)
   if (new Set(parsed.cases.map(entry => entry.id)).size !== parsed.cases.length) throw new Error('duplicate case id')
   for (const entry of parsed.cases) for (const [index, step] of entry.steps.entries()) {
     for (const call of step.expect.calls) for (const pattern of Object.values(call.notMatch ?? {})) new RegExp(pattern, 'u')
-    if ((index < entry.steps.length - 1) !== (step.result !== undefined)) throw new Error('continuation result/step mismatch')
+    if ((index < entry.steps.length - 1) !== (step.result !== undefined || step.user !== undefined)) throw new Error('continuation result/step mismatch')
+    if (step.user !== undefined && (step.result !== undefined || step.expect.calls.length !== 0)) throw new Error('user continuation requires no call or tool result')
     if (step.otherwise && (step.result === undefined || step.otherwise.calls.length !== 0)) throw new Error('otherwise requires a continuation and no calls')
     if (step.result !== undefined && step.expect.calls.length !== 1) throw new Error('continuation requires one expected call')
   }

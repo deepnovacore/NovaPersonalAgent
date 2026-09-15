@@ -48,7 +48,8 @@ export function score(expect, observed, tools) {
       if (JSON.stringify(args[key]) !== JSON.stringify(value)) failures.push(`argument:${key}`)
     }
     for (const [key, terms] of Object.entries(wanted.contains ?? {})) {
-      if (typeof args[key] !== 'string' || terms.some(term => !args[key].includes(term))) failures.push(`missing_terms:${key}`)
+      const content = Array.isArray(args[key]) && args[key].every(value => typeof value === 'string') ? args[key].join('\n') : args[key]
+      if (typeof content !== 'string' || terms.some(term => !content.includes(term))) failures.push(`missing_terms:${key}`)
     }
     for (const [key, groups] of Object.entries(wanted.containsAny ?? {})) {
       if (typeof args[key] !== 'string' || groups.some(terms => !terms.some(term => args[key].includes(term)))) failures.push(`missing_meaning:${key}`)
@@ -101,7 +102,9 @@ export async function runTextCase(testCase, config, timeoutMs, factoryOverride) 
       }
       failures.push(...score(step.expect, observed, compiled.tools).map(reason => `${index}:${reason}`))
       // Never execute a tool: only synthetic fixture outputs may continue a model response.
-      if (failures.length || step.result === undefined) break
+      if (failures.length) break
+      if (step.user !== undefined) { inputs = [{kind: 'user_text', text: step.user}]; continue }
+      if (step.result === undefined) break
       if (observed.calls.length !== 1) { failures.push(`${index}:continuation_requires_one_call`); break }
       inputs = [{kind: 'tool_result', call_id: observed.calls[0].call_id, output: step.result}]
     }

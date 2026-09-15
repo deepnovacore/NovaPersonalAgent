@@ -22,3 +22,5 @@ The default uses text input and a natural confirmation sentence. A replacement p
 Run these variants separately. A text pass does not certify audio, and an executor `started` event does not certify completion. Spoken output is preserved for review; the harness does not pretend to judge every paraphrased false claim with a keyword list.
 
 Regression covered: a natural confirmation must preserve the proposal until structured `confirm` admission. Requirement changes must instead reach intake through structured `dispatch`. Audio endpointing and physical desktop acceptance remain separate checks.
+
+Before project execution, check frontend clarification with `--target text-tools --case coding-clarify-before-dispatch` and `--case coding-clarification-still-unresolved`. These use real multi-turn model conversations: no dispatch before the user answers, one dispatch with the original task and selected user source quotes after clarification, and no dispatch while the user is still deciding. They do not execute tools. The host separately validates quoted user text before coordinator admission; general conversation history is context, not project-selection authority.

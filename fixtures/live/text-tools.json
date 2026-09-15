@@ -757,6 +757,75 @@
           }
         }
       ]
+    },
+    {
+      "id": "coding-clarify-before-dispatch",
+      "text": "帮我写一个贪吃蛇游戏。",
+      "context": "<active_project_context> workspace=\"demo\" session=\"已有游戏\" </active_project_context> 当前用户内容 ref=conversation:1",
+      "steps": [
+        {
+          "expect": {
+            "calls": [],
+            "text": "required"
+          },
+          "user": "做成浏览器网页，方向键控制，显示分数，不要安装依赖。"
+        },
+        {
+          "expect": {
+            "calls": [
+              {
+                "name": "dispatch",
+                "args": {
+                  "executor": "codex"
+                },
+                "contains": {
+                  "instruction": [
+                    "贪吃蛇",
+                    "方向键",
+                    "依赖"
+                  ],
+                  "source_quotes": [
+                    "贪吃蛇"
+                  ]
+                },
+                "containsAny": {
+                  "instruction": [
+                    [
+                      "网页",
+                      "浏览器"
+                    ],
+                    [
+                      "分数",
+                      "得分"
+                    ]
+                  ]
+                }
+              }
+            ],
+            "text": "forbidden"
+          }
+        }
+      ]
+    },
+    {
+      "id": "coding-clarification-still-unresolved",
+      "text": "帮我写一个贪吃蛇游戏，运行形式还没想好，先别开始。",
+      "context": "<active_project_context> workspace=\"demo\" session=\"已有游戏\" </active_project_context> 当前用户内容 ref=conversation:1",
+      "steps": [
+        {
+          "expect": {
+            "calls": [],
+            "text": "required"
+          },
+          "user": "网页版和桌面版有什么区别？我还没选。"
+        },
+        {
+          "expect": {
+            "calls": [],
+            "text": "required"
+          }
+        }
+      ]
     }
   ]
 }

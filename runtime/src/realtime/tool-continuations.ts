@@ -1,3 +1,4 @@
+import {projectRecoveryTurns} from './history.js'
 import type {IntakeOptions} from '../executors/coding/intake.js'
 import {
   parseAgentActionResult,
@@ -1197,6 +1198,14 @@ export class ToolContinuations {
     if (event.session_epoch <= this.#ports.discardedInputEpoch() || originRef === null || user?.epoch !== event.session_epoch || originRef !== user.origin_ref) {
       return this.#refusalAcceptance(event, 'missing_origin_ref', '{"code":"missing_origin_ref"}')
     }
+    const conversationContext = projectRecoveryTurns(this.#ports.runtime.memory?.channels.get('conversation')?.items ?? [],
+      {maxPairs: 8, maxChars: 8000}).map(({role, text, sequence}) => ({role, text, sequence}))
+    const sourceQuotes = event.arguments.source_quotes ?? []
+    if (event.name === DISPATCH_TOOL && (!Array.isArray(sourceQuotes) || sourceQuotes.length > 8
+      || sourceQuotes.some(quote => typeof quote !== 'string' || quote.trim() === '' || codePointLengthLikePython(quote) > 2000
+        || ![user.text, ...conversationContext.filter(turn => turn.role === 'user').map(turn => turn.text)].some(text => text.includes(quote))))) {
+      return this.#refusalAcceptance(event, 'invalid_source_quotes', '{"code":"invalid_source_quotes"}')
+    }
     const controller = this.#ports.agentController(executor)
     if (controller === undefined) return this.#refusalAcceptance(event, 'unsupported_tool', '{"code":"unsupported_tool"}')
     // A user turn that supersedes an async controller operation makes its result informational only;
@@ -1208,6 +1217,7 @@ export class ToolContinuations {
     const rawResult = event.name === DISPATCH_TOOL
       ? await controller.dispatch({
         instruction: instruction!, originalUserText: user.text, origin_ref: user.origin_ref,
+        conversationContext, sourceQuotes: sourceQuotes as readonly string[],
         sessionEpoch: event.session_epoch, acceptedUserInputRevision: revision, stillWanted: fence,
       })
       : await controller.cancel({
@@ -1238,7 +1248,7 @@ export class ToolContinuations {
       case 'intake_in_progress':
         return canonicalJson({
           code: result.code,
-          message: '宿主正在整理需求，尚未派单。等待宿主问题或计划，不自行追问。',
+          message: '内部接收回执，尚未派单。不要向用户播报此回执；等待具体问题、确认事项或执行结果。',
         })
       case 'cancelled':
         return canonicalJson({

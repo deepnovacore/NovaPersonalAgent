@@ -297,11 +297,11 @@ test('Qwen clarification fixture covers adaptive first-turn and merged multi-tur
 
 test('Qwen instructions route every coding request through the three host tools (spec 08)', () => {
   assert.match(FRONTEND_INSTRUCTIONS, /编程、项目和会话相关的请求一律只用三个宿主工具：dispatch、cancel、confirm/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /任何编程请求（新任务、追加要求、切换项目、新建项目）都调用 dispatch/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /instruction 原样传用户这一轮的完整要求，不预先拆分、不改写成问句，也不猜测项目名或 Session/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /由宿主决定项目、Session 和是否需要追问。工具不返回项目清单；仅当用户询问会话时，可列举宿主 available_sessions 中的项目和标题/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /需求没有澄清之前不要调用 dispatch/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /instruction 汇总本次任务多轮已经明确的目标、约束、验收及修改/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /由下游 coordinator 决定工作区和 Session 的选择、新建、切换/u)
   assert.match(FRONTEND_INSTRUCTIONS, /用户明确要求停止或取消正在执行的任务时调用 cancel；instruction 只在用户点名了要停哪个任务时传/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /code=intake_opened \/ intake_in_progress 表示正在整理需求，尚未派单/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /code=intake_opened \/ intake_in_progress 是内部接收回执，尚未派单/u)
   assert.match(FRONTEND_INSTRUCTIONS, /unknown_project \/ ambiguous_project \/ busy_project \/ capacity 表示任务尚未执行，按事实转述可选项/u)
   assert.match(FRONTEND_INSTRUCTIONS, /同意、拒绝或取消都必须调用 confirm.*不得只做口头回应/su)
   assert.match(FRONTEND_INSTRUCTIONS, /id 从该宿主事实原样复制，accepted 用 JSON boolean 表示决定/u)
@@ -372,8 +372,8 @@ test('Qwen provider emits approval instructions only for an approval-enabled ses
   }
 })
 
-test('Qwen hands coding intake to the host and does not invent additional questions', () => {
-  assert.match(FRONTEND_INSTRUCTIONS, /任何编程请求.*都调用 dispatch.*由宿主决定项目、Session 和是否需要追问/su)
+test('Qwen clarifies before dispatch and leaves project coordination downstream', () => {
+  assert.match(FRONTEND_INSTRUCTIONS, /需求没有澄清之前不要调用 dispatch.*由下游 coordinator 决定工作区和 Session/su)
   assert.match(FRONTEND_INSTRUCTIONS, /intake_opened.*intake_in_progress.*尚未派单/su)
   assert.match(FRONTEND_INSTRUCTIONS, /只问给定的那一个问题，不再次 dispatch/u)
   assert.match(FRONTEND_INSTRUCTIONS, /仓库技术栈、入口、测试命令交给执行器探索/u)

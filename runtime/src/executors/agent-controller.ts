@@ -16,6 +16,8 @@ export interface AgentDescriptor {
 }
 
 export interface AgentDispatchRequest {
+  readonly sourceQuotes?: readonly string[]
+  readonly conversationContext?: readonly {readonly role: 'user' | 'assistant'; readonly text: string; readonly sequence: number}[]
   readonly instruction: string
   readonly originalUserText: string
   readonly origin_ref: string

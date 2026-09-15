@@ -79,7 +79,9 @@ export class CodexAgentController implements AgentController {
       }
     }
     const code = intake.open(
-      {work_order: request.instruction, project: null, session: 'latest'},
+      {work_order: request.instruction, project: null, session: 'latest',
+        source_quotes: [...(request.sourceQuotes ?? [])],
+        conversation_context: (request.conversationContext ?? []).map(turn => ({...turn}))},
       request.originalUserText,
       request.origin_ref,
       String(request.sessionEpoch),

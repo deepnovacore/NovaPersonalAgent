@@ -236,11 +236,12 @@ test('the Codex controller preserves intake dispatch and forwards the revision f
 
   const dispatch = await codex.dispatch({
     instruction: '修复布局', originalUserText: '修复布局', origin_ref: 'conversation:4',
+    conversationContext: [{role: 'user', text: '按钮在手机上被截断', sequence: 1}, {role: 'assistant', text: '只修手机版吗？', sequence: 2}],
     sessionEpoch: 9, acceptedUserInputRevision: 12, stillWanted: () => true,
   })
   assert.deepEqual(dispatch, {code: 'intake_opened', accepted: true, detail: {state: 'open'}})
   const current = codex.inspectIntakeForTest()
-  assert.deepEqual(current?.request, {work_order: '修复布局', project: null, session: 'latest'})
+  assert.deepEqual(current?.request, {work_order: '修复布局', project: null, session: 'latest', source_quotes: [], conversation_context: [{role: 'user', text: '按钮在手机上被截断', sequence: 1}, {role: 'assistant', text: '只修手机版吗？', sequence: 2}]})
   assert.equal(current?.origin_ref, 'conversation:4')
   assert.equal(current?.session_id, '9')
 

@@ -728,3 +728,28 @@ for (const text of ['取消', '不用了', 'cancel', '确认前先把需求改�
     await h.intake.settled()
   })
 }
+
+ test('frontend context reaches assessment without granting historical project authority', async () => {
+   const context = [
+     {role: 'user', text: '在 blog 项目里写贪吃蛇', sequence: 1},
+     {role: 'assistant', text: '要网页还是桌面版？', sequence: 2},
+   ]
+   let captured: Readonly<Record<string, unknown>> | undefined
+   const h = harness({models: {assess: input => {
+     captured = input
+     return Promise.resolve(assessment(input, {project: 'blog', project_evidence: 'blog'}))
+   }}})
+   h.intake.open({...request, conversation_context: context}, '网页，方向键控制', 'u3', 'e')
+   await h.intake.settled()
+   assert.deepEqual(captured?.conversation_context, context)
+   assert.equal(captured?.opening, '网页，方向键控制')
+   assert.deepEqual(h.decisions, [])
+   assert.equal(h.intake.view?.kind, 'unclear')
+ })
+
+test('dispatch-selected user quotes preserve the current clarification chain project', async () => {
+  const h = harness({models: {assess: input => Promise.resolve(assessment(input, {project: 'blog', project_evidence: 'blog'}))}})
+  h.intake.open({...request, source_quotes: ['在 blog 项目里写贪吃蛇']}, '网页，方向键控制', 'u3', 'e')
+  await h.intake.settled()
+  assert.deepEqual(h.decisions, [{kind: 'work', project: 'blog', session: 'latest'}])
+})

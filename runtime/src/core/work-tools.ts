@@ -45,12 +45,13 @@ function executorLines(agents: readonly AgentDescriptor[]): string {
 export function dispatchToolSpec(agents: readonly AgentDescriptor[]): HostToolSpec {
   return {
     name: DISPATCH_TOOL,
-    description: `把用户明确的执行要求交给一个 agent 执行器，包括新任务、继续已有任务、追加要求和修改约束。追加要求也必须调用，口头接收不会把要求传给执行器；由宿主判断项目、会话、是否追问。executor 可选：${executorLines(agents)}`,
+    description: `需求澄清后，把用户明确的执行要求交给 agent，包括新任务、继续、追加和修改。影响交付的歧义未解决时先直接问用户，不调用此工具；明确后交付完整多轮要求。下游 coordinator 决定项目和会话。executor 可选：${executorLines(agents)}`,
     params: {
       type: 'object',
       properties: {
         executor: {type: 'string', enum: agents.map(agent => agent.name)},
-        instruction: {...INSTRUCTION, description: '用户这次想要完成的事，保留目标、约束和验收，不缩成第一步'},
+        instruction: {...INSTRUCTION, description: '本次任务经多轮澄清的完整目标、约束和验收，合并最新纠正，不只传最后一句、不添加未要求的约束'},
+        source_quotes: {type: 'array', maxItems: 8, items: {type: 'string', minLength: 1, maxLength: 2000}, description: '多轮澄清时，逐字引用本次任务相关的先前用户原句片段，必须包含最初请求中的目标和指定项目，不能只引用最新澄清答案；不得引用助手建议或无关旧任务。只有当前一句足够时省略。'},
       },
       required: ['executor', 'instruction'],
       additionalProperties: false,

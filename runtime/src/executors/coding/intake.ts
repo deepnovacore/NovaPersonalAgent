@@ -251,10 +251,18 @@ export class IntakeController {
     return current
   }
 
+  #userEvidence(current: IntakeSession): string[] {
+    const quotes = current.request.source_quotes
+    return [...(Array.isArray(quotes) ? quotes.filter((quote): quote is string => typeof quote === 'string') : []),
+      current.opening, ...current.turns.map(turn => turn.answer)]
+  }
+
   #input(current: IntakeSession): Readonly<Record<string, unknown>> {
     return {
       intake_id: current.intake_id, revision: current.revision, opening: current.opening,
       instruction: current.request.work_order ?? current.request.instruction ?? null,
+      conversation_context: current.request.conversation_context ?? [],
+      source_quotes: current.request.source_quotes ?? [],
       turns: structuredClone(current.turns), slots: structuredClone(current.slots),
       discovery: [...current.discovery], intent_to_proceed: current.intent_to_proceed,
       questions_asked: current.questions_asked, question_budget: this.#budget(),
@@ -309,7 +317,7 @@ export class IntakeController {
         && result.project_evidence != null && latest.answer.includes(result.project_evidence)
       if (kind !== 'create' && kind !== 'unclear' && project !== null && project !== active && !affirmed
         && !evidenceOccurs(result.project_evidence ?? '', project,
-          [current.opening, ...current.turns.map(turn => turn.answer)], this.#options.roster().map(entry => entry.name))
+          this.#userEvidence(current), this.#options.roster().map(entry => entry.name))
           && !this.#namedSessionEvidence(project, result.session_title, current)) {
         this.#options.diagnostic('intake_project_evidence_missing')
         kind = 'unclear'
@@ -331,7 +339,7 @@ export class IntakeController {
       }
       // Keep the user's request and later corrections together. A project affirmation is target
       // evidence, not a replacement instruction. The executor still enforces its input bound.
-      const userText = [current.opening, ...current.turns.map(turn => turn.question === null
+      const userText = [...(Array.isArray(current.request.source_quotes) ? current.request.source_quotes.filter((quote): quote is string => typeof quote === 'string') : []), current.opening, ...current.turns.map(turn => turn.question === null
         ? `用户补充：${turn.answer}`
         : `宿主追问：${turn.question}\n用户补充：${turn.answer}`)].join('\n')
       // Local onset precedes final ASR and does not advance the intake revision yet.
@@ -410,10 +418,10 @@ export class IntakeController {
   #namedSessionEvidence(project: string, title: string | null | undefined, current: IntakeSession): boolean {
     if (!title) return false
     const roster = this.#options.roster()
-    const namedProject = [current.opening, ...current.turns.map(turn => turn.answer)].some(text => text.includes(project))
+    const namedProject = this.#userEvidence(current).some(text => text.includes(project))
     if (!namedProject && roster.filter(entry => entry.sessions?.includes(title)).length !== 1) return false
     return roster.some(entry => entry.name === project && entry.sessions?.includes(title))
-      && [current.opening, ...current.turns.map(turn => turn.answer)].some(text => text.includes(title))
+      && this.#userEvidence(current).some(text => text.includes(title))
   }
 
   async #plan(snapshot: IntakeSession): Promise<void> {
