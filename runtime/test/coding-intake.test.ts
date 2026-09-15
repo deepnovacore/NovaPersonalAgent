@@ -753,3 +753,23 @@ test('dispatch-selected user quotes preserve the current clarification chain pro
   await h.intake.settled()
   assert.deepEqual(h.decisions, [{kind: 'work', project: 'blog', session: 'latest'}])
 })
+
+test('preparation state spans assessment and stops at a concrete question or cancellation', async () => {
+  const states: boolean[] = []
+  const h = harness({
+    onStateChanged: () => states.push(h.intake.preparing),
+    models: {assess: input => Promise.resolve(assessment(input, {
+      kind: 'unclear', readiness: .25, slots: {...slots, scope: missing},
+      candidate_question: {owner: 'user', text: 'Which screen?'},
+    }))},
+  })
+  h.intake.open(request, 'Fix login', 'u1', '1')
+  assert.equal(h.intake.preparing, true)
+  await h.intake.settled()
+  assert.equal(h.intake.preparing, false)
+  assert.ok(h.facts.some(text => text.includes('Which screen?')))
+  assert.equal(states[0], true)
+  assert.equal(states.at(-1), false)
+  h.intake.cancel()
+  assert.equal(h.intake.preparing, false)
+})

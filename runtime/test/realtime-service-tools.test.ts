@@ -496,7 +496,7 @@ test('valid controller result details never reach provider-facing tool output', 
       dispatch: () => Promise.resolve(result),
       cancel: () => Promise.resolve({code: 'not_running', accepted: true, detail: {}}),
     }
-    const {service} = realtimeServiceHarness('pipeline', {agent: true, agentControllers: [controller]})
+    const {service, actions} = realtimeServiceHarness('pipeline', {agent: true, agentControllers: [controller]})
     await service.connect()
     const acceptance = await dispatchTurn(service, 'dispatch', {
       executor: 'codex', instruction: 'perform safe work', origin_ref: 'conversation:1',
@@ -504,7 +504,9 @@ test('valid controller result details never reach provider-facing tool output', 
     const providerFacing = JSON.stringify({content: acceptance.host_item.content, response: acceptance.response_intent})
     assert.equal(providerFacing.includes(hostile), false, result.code)
     if (result.code === 'intake_opened' || result.code === 'intake_in_progress') {
-      assert.equal(acceptance.host_item.content.includes('"state"'), false, result.code)
+      assert.equal(acceptance.continuation, 'deferred')
+      assert.equal(actions.some(action => action.startsWith('create_response:')), false)
+      assert.deepEqual(JSON.parse(acceptance.host_item.content), {code: result.code, execution_started: false})
     }
     await service.close()
   }
@@ -1166,7 +1168,7 @@ test('dispatch on the coordinated coding executor opens the intake; a committed 
   assert.equal(acceptance.accepted, true)
   assert.equal(acceptance.code, 'intake_opened')
   assert.equal(acceptance.inline_fulfilled, true)
-  assert.match(acceptance.host_item.content, /"code":"intake_opened".*尚未派单/u)
+  assert.deepEqual(JSON.parse(acceptance.host_item.content), {code: 'intake_opened', execution_started: false})
   await service.settleIntakeForTest()
   assert.equal(service.intakeSession?.questions_asked, 1)
   service.onProjectWorkspaceChanged('w2')

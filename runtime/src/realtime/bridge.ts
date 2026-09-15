@@ -82,6 +82,8 @@ export interface ToolAcceptance {
   readonly code: string
   readonly host_item: HostContextItem
   readonly response_intent: HostResponseIntent
+  /** Internal receipt: retain the tool result for the next user-visible fact or user turn. */
+  readonly continuation?: 'deferred'
   readonly delegate_id: string | null
   /**
    * R105: the accepted op declared `sync_result`, so the host item is a pending tool result the

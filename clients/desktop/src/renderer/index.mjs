@@ -339,7 +339,7 @@ function render() {
     stateName: state.name,
     wakeState: axes.wakeState,
     hovered: axes.hovered,
-    executorWorking: axes.codex === 'working',
+    executorWorking: axes.codex === 'working' || axes.codex === 'preparing',
     confirmationVisible: state.confirmationVisible,
     bubblesVisible: shell.dataset.bubbles === 'true',
   })
@@ -890,7 +890,7 @@ async function handleControl(message) {
     captionLabel.dataset.role = message.role
     captionLabel.hidden = !message.text
   } else if (message.type === EXECUTOR_STATE) {
-    axes.codex = message.state === 'running' ? 'working' : 'idle'
+    axes.codex = message.state === 'running' ? 'working' : message.state === 'preparing' ? 'preparing' : 'idle'
     if (typeof message.display_name === 'string') axes.executorName = message.display_name
     if (typeof message.executor === 'string') axes.executorId = message.executor
   } else if (message.type === PROJECT_STATE) {

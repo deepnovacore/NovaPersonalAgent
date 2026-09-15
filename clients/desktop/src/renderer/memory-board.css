@@ -397,3 +397,7 @@ button:focus-visible {
 .chat-debug pre { max-height: 180px; overflow: auto; font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-message:focus-visible { outline: 2px solid #6d87b1; outline-offset: 4px; border-radius: 16px; }
 @media (max-width: 600px) { .chat-messages { padding: 16px; } .chat-message { max-width: 92%; } }
+
+.conversation-history { border-bottom: 1px solid #d8dde5; padding-bottom: 12px; }
+.conversation-history > summary { color: #687586; cursor: pointer; }
+.conversation-boundary { color: #687586; font-size: 12px; margin: 0; }

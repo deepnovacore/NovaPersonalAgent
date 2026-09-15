@@ -67,7 +67,7 @@ function inputItem(input: CascadedLlmInput): JsonObject {
   if (input.kind === 'tool_result') {
     return {type: 'function_call_output', call_id: input.call_id, output: JSON.stringify(input.output)}
   }
-  return {role: input.kind === 'host_context' ? 'system' : 'user', content: input.kind === 'user_text' ? (input.image ? [{type: 'input_text', text: input.text}, {type: 'input_image', image_url: originalImageUrl(input.image)}] : input.text) : input.content}
+  return {role: input.kind === 'user_text' || input.kind === 'host_activation' ? 'user' : 'system', content: input.kind === 'user_text' ? (input.image ? [{type: 'input_text', text: input.text}, {type: 'input_image', image_url: originalImageUrl(input.image)}] : input.text) : input.content}
 }
 
 function toolSchema(tool: CascadedLlmTool): JsonObject {

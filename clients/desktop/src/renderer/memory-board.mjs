@@ -33,6 +33,7 @@ let clearInFlight = false
 let activeTab = 'memory'
 let activeChannel = null
 let loadOwnership = 0
+let historyExpanded = false
 
 function itemContent(raw) {
   try {
@@ -43,7 +44,9 @@ function itemContent(raw) {
 }
 
 function boardTime(item) {
-  return `t=${Number(item.ts).toFixed(1)}s`
+  return item.historical && Number.isFinite(item.recorded_at_ms)
+    ? `历史 · ${new Date(item.recorded_at_ms).toLocaleString()}`
+    : `t=${Number(item.ts).toFixed(1)}s`
 }
 
 function renderItem(item, conversation = false) {
@@ -122,13 +125,34 @@ function renderChannel(channel, index) {
   const itemsRoot = document.createElement('div')
   itemsRoot.className = channel.name === 'conversation' ? 'channel-items chat-messages' : 'channel-items'
   itemsRoot.dataset.scrollKey = `channel:${channel.name}`
-  if (!channel.items.length) {
+  const historical = channel.name === 'conversation' ? channel.items.filter(item => item.historical) : []
+  const current = channel.name === 'conversation' ? channel.items.filter(item => !item.historical) : channel.items
+  if (historical.length) {
+    const history = document.createElement('details')
+    history.className = 'conversation-history'
+    history.open = historyExpanded
+    history.addEventListener('toggle', () => { historyExpanded = history.open })
+    const label = document.createElement('summary')
+    label.textContent = `重启前的历史记录（最近 ${historical.length} 条）`
+    const historyItems = document.createElement('div')
+    historyItems.className = 'chat-messages'
+    for (const item of historical) historyItems.append(renderItem(item, true))
+    history.append(label, historyItems)
+    itemsRoot.append(history)
+  }
+  if (channel.name === 'conversation' && channel.historical_through_seq) {
+    const label = document.createElement('p')
+    label.className = 'conversation-boundary'
+    label.textContent = '本次连接'
+    itemsRoot.append(label)
+  }
+  if (!current.length) {
     const empty = document.createElement('p')
     empty.className = 'empty'
-    empty.textContent = '暂无记录'
+    empty.textContent = channel.name === 'conversation' ? '本次连接暂无对话' : '暂无记录'
     itemsRoot.append(empty)
   }
-  for (const item of channel.items) itemsRoot.append(renderItem(item, channel.name === 'conversation'))
+  for (const item of current) itemsRoot.append(renderItem(item, channel.name === 'conversation'))
   if (channel.name === 'conversation') section.append(header, itemsRoot)
   else section.append(header, summary, itemsRoot)
   return section

@@ -56,6 +56,7 @@ export interface IntakeSession {
 }
 
 export interface IntakeOptions {
+  readonly onStateChanged?: () => void
   readonly models: IntakeModels
   readonly settings: IntakeSettings
   readonly idFactory: () => string
@@ -80,7 +81,7 @@ export interface IntakeOptions {
 /** Events and confirmed-host results only; lifecycle decisions stay with the coding controller. */
 export type IntakeEventPort = Pick<IntakeController,
   'userInputStarted' | 'userTurn' | 'cancel' | 'decline' | 'beginConfirmed' | 'settleConfirmed' |
-  'workspaceChanged' | 'factEligible'>
+  'workspaceChanged' | 'factEligible' | 'preparing'>
 
 const emptySlots = (): IntakeSlots => ({
   goal: {state: 'missing', note: ''}, scope: {state: 'missing', note: ''},
@@ -148,6 +149,10 @@ export class IntakeController {
   constructor(options: IntakeOptions) { this.#options = options }
   get view(): Readonly<IntakeSession> | null { return this.#session === null ? null : structuredClone(this.#session) }
   get active(): boolean { return this.#session !== null && this.#session.state !== 'closed' }
+  get preparing(): boolean {
+    return this.active && (this.#assessPending || this.#planPending || this.#assessing !== null
+      || this.#planning !== null || this.#session?.state === 'committing')
+  }
   userInputStarted(): void { if (this.active) this.#userInputPending = true }
 
   workspaceChanged(workspaceId: string | null): void {
@@ -222,6 +227,7 @@ export class IntakeController {
       || current.plan_revision !== current.revision || operation.intake_id !== current.intake_id
       || operation.plan_revision !== current.plan_revision || operation.work_order !== current.work_order) return false
     current.state = 'committing'
+    this.#options.onStateChanged?.()
     return true
   }
 
@@ -272,6 +278,7 @@ export class IntakeController {
   }
 
   #pump(): void {
+    this.#options.onStateChanged?.()
     if (!this.active) return
     if (this.#assessPending && this.#assessing === null) {
       this.#assessPending = false
@@ -522,6 +529,7 @@ export class IntakeController {
     this.#planPending = false
     for (const abort of this.#abort) abort.abort()
     if (current.proposal_id !== null && outcome !== 'dispatched') this.#options.invalidateProposal()
+    this.#options.onStateChanged?.()
     if (outcome === 'abandoned') this.#options.fact(current, '抱歉，仍未能形成明确工作单，本次需求已结束，尚未执行。请重新说明具体目标。')
   }
 }

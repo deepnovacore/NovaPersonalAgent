@@ -129,7 +129,8 @@ test('Qwen joins fragmented tool calls and retains a matched tool result with it
     name: 'search__query', arguments: {q: 'weather'},
   })
   const answer = await collect(session.stream({
-    inputs: [{kind: 'tool_result', call_id: 'call-1', output: {temperature: 20}}],
+    inputs: [{kind: 'tool_result', call_id: 'call-1', output: {temperature: 20}},
+      {kind: 'host_activation', content: 'Nova Audio Agent 宿主激活事实：最新问题'}, {kind: 'packed_history', content: '只读历史'}],
     tools, signal: new AbortController().signal,
   }))
   assert.equal(answer.at(-1)?.kind, 'response_completed')
@@ -141,6 +142,9 @@ test('Qwen joins fragmented tool calls and retains a matched tool result with it
       && (calls[0] as Record<string, unknown>).id === 'call-1'
   }))
   assert.ok(messages.some(message => message.role === 'tool' && message.tool_call_id === 'call-1'))
+  assert.ok(messages.some(message => message.role === 'system' && message.content === '只读历史'))
+  assert.equal(messages.at(-2)?.role, 'user')
+  assert.equal(messages.at(-2)?.content, 'Nova Audio Agent 宿主激活事实：最新问题')
 })
 
 test('Qwen completes two sequential tool hops as one bounded semantic interaction', async () => {

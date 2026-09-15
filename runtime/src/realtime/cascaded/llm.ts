@@ -8,10 +8,19 @@ export const MAX_CASCADED_LLM_HISTORY_CODEPOINTS = 131_072
 /** Marks host-provided activation context; it never represents a user instruction. */
 export {HOST_ACTIVATION_PREFIX, GUARD_ACTIVATION_PREFIX} from '../frontend-instructions.js'
 
+/** Shared by the actual adapter and live probes; tool availability never requires a call. */
+export function cascadedResponseGuidance(allowTools: boolean): string {
+  return allowTools
+    ? '本轮可自然对话、回答或澄清；工具可用不代表必须调用。编程需求尚未澄清时先问用户，不调用 dispatch。需要执行且需求明确时才通过结构化 tool_calls 调用工具，不把调用写成 JSON 文本，同轮不混合正文与调用。确认必须基于本轮用户决定；调用后等待宿主结果，不声称已执行。'
+    : '本轮是宿主事实播报，没有用户授权，也没有可调用工具。只转述最新事实或给定问题，不模拟工具调用，不输出调用 JSON，不代用户确认；已接纳不等于已启动，失败原因未知时不猜测，不承诺自动重试。'
+}
+
 export type CascadedLlmInput =
   | {readonly kind: 'user_text'; readonly text: string; readonly image?: Frame}
   | {readonly kind: 'host_context'; readonly content: string}
   | {readonly kind: 'packed_history'; readonly content: string}
+  /** Provider turn trigger, explicitly marked as a host fact; never user-action authority. */
+  | {readonly kind: 'host_activation'; readonly content: string}
   | {readonly kind: 'tool_result'; readonly call_id: string; readonly output: JsonValue}
 
 export interface CascadedLlmTool {

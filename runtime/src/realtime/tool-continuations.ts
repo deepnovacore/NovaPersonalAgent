@@ -265,7 +265,10 @@ export class ToolContinuations {
           await this.session.injectToolOutput(state.acceptance.host_item)
           state.output = 'confirmed'
         }
-        intents.push(state.acceptance.response_intent)
+        if (state.acceptance.continuation === 'deferred') {
+          state.continuation = 'terminal'
+          state.final_disposition = 'completed'
+        } else intents.push(state.acceptance.response_intent)
       }
 
       if (abandoning) {
@@ -274,8 +277,8 @@ export class ToolContinuations {
         continue
       }
       if (intents.length === 0) {
-        // Every member has been pruned out from under the batch, so there is nothing to speak about.
-        batch.phase = 'abandoned'
+        // Internal receipts settle without generating speech; their results remain provider context.
+        batch.phase = 'terminal'
         this.#continuationFifo.shift()
         continue
       }
@@ -1239,7 +1242,10 @@ export class ToolContinuations {
       return this.#refusalAcceptance(event, 'controller_result_invalid', canonicalJson({code: 'controller_result_invalid'}))
     }
     const acceptance = this.#refusalAcceptance(event, result.code, this.#agentActionContent(result))
-    return result.accepted ? {...acceptance, accepted: true, inline_fulfilled: true} : acceptance
+    return result.accepted ? {...acceptance, accepted: true, inline_fulfilled: true,
+      ...(result.code === 'intake_opened' || result.code === 'intake_in_progress'
+        ? {continuation: 'deferred' as const} : {}),
+    } : acceptance
   }
 
   #agentActionContent(result: AgentActionResult): string {
@@ -1248,7 +1254,7 @@ export class ToolContinuations {
       case 'intake_in_progress':
         return canonicalJson({
           code: result.code,
-          message: '内部接收回执，尚未派单。不要向用户播报此回执；等待具体问题、确认事项或执行结果。',
+          execution_started: false,
         })
       case 'cancelled':
         return canonicalJson({

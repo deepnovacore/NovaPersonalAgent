@@ -379,7 +379,7 @@ test('formal RealtimeSession Guard recovery keeps Volc history disabled but acce
     assert.equal(withoutHistory.inputs.length, 2)
     assert.equal(withoutHistory.inputs[0]?.kind, 'host_context')
     assert.match(String(withoutHistory.inputs[0]?.content), /恢复摘要/u)
-    assert.equal(withoutHistory.inputs[1]?.kind, 'host_context')
+    assert.equal(withoutHistory.inputs[1]?.kind, 'host_activation')
     assert.match(String(withoutHistory.inputs[1]?.content), /请提醒用户/u)
     assert.doesNotMatch(JSON.stringify(withoutHistory.inputs), /上一问|上一答/u)
 

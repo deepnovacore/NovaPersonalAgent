@@ -258,6 +258,7 @@ export class RealtimeService {
     const projectConfirmation = options.projectConfirmation
     const intake: IntakeOptions | undefined = options.intake === undefined ? undefined : {
       ...options.intake,
+      onStateChanged: () => this.#projection.publishExecutorState(),
       idFactory: this.#idFactory,
       dispatch: async (intake, stillWanted) => {
         const result = await options.intake!.dispatch(intake, stillWanted)
@@ -415,6 +416,7 @@ export class RealtimeService {
       clearingConversation: () => this.#clearingConversation,
       onActiveWorkChanged,
       onExecutorState: this.#onExecutorState,
+      preparing: () => this.#intake?.preparing === true,
       onDiagnostic: this.#onDiagnostic,
       resolveSyncResult: event => this.#continuations.resolveSyncResult(event),
       expireSyncResult: event => this.#continuations.expireSyncResult(event),

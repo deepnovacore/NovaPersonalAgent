@@ -1,3 +1,4 @@
+import {cascadedResponseGuidance} from '../../dist/src/realtime/cascaded/llm.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
 import {compileToolSchema} from '../../dist/src/core/tool-schema.js'
@@ -89,7 +90,7 @@ export async function runTextCase(testCase, config, timeoutMs, factoryOverride) 
       const observed = {calls: [], text: '', completed: false}
       observations.push(observed)
       for await (const event of session.stream({inputs, tools: compiled.tools,
-        workspaceContext: testCase.context, signal})) {
+        workspaceContext: testCase.context, responseAdaptation: cascadedResponseGuidance(true), signal})) {
         if (event.kind === 'tool_call') observed.calls.push({name: event.name, arguments: event.arguments, call_id: event.call_id})
         if (event.kind === 'text_delta') observed.text += event.text
         if (event.kind === 'response_completed') observed.completed = true

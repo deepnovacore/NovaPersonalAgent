@@ -245,7 +245,7 @@ function executorIdentity(identity: ExecutorIdentity): ExecutorIdentity {
 }
 
 export function executorStateMessage(state: ExecutorState, identity: ExecutorIdentity): string {
-  if (state !== 'idle' && state !== 'running') {
+  if (state !== 'idle' && state !== 'preparing' && state !== 'running') {
     throw new DesktopProtocolError('desktop executor state is invalid')
   }
   return unicodeJson({type: EXECUTOR_STATE, ...executorIdentity(identity), state})

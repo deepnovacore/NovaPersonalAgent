@@ -24,3 +24,17 @@ Run these variants separately. A text pass does not certify audio, and an execut
 Regression covered: a natural confirmation must preserve the proposal until structured `confirm` admission. Requirement changes must instead reach intake through structured `dispatch`. Audio endpointing and physical desktop acceptance remain separate checks.
 
 Before project execution, check frontend clarification with `--target text-tools --case coding-clarify-before-dispatch` and `--case coding-clarification-still-unresolved`. These use real multi-turn model conversations: no dispatch before the user answers, one dispatch with the original task and selected user source quotes after clarification, and no dispatch while the user is still deciding. They do not execute tools. The host separately validates quoted user text before coordinator admission; general conversation history is context, not project-selection authority.
+
+### Cascaded clarification and receipt delivery
+
+After building runtime, run `node runtime/scripts/live/cascaded-clarification.mjs` with
+`DASHSCOPE_API_KEY` configured. This exercises the real CascadedRealtimeAdapter and Qwen:
+ambiguous request → clarification → dispatch → silent receipt → one concrete host question.
+The script uses synthetic TTS and host facts; it does not prove microphone, workspace creation,
+or executor acceptance. Unlike text-tools routing probes, it checks the actual adapter's
+response guidance and host-message encoding.
+
+Memory board preserves durable history, folding restored conversation records separately from
+this connection. The orb displays “正在安排任务” during coordinator assessment/planning,
+then yields to a concrete question, confirmation, or running task. These are state projections,
+not additional model-generated acknowledgements.

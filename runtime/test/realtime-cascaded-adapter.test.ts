@@ -716,7 +716,7 @@ test('host facts preserve wording and cannot expose user-action tools', async ()
     {kind: 'host_request', host_item_id: item.host_item_id})
 
   assert.deepEqual(llm.calls[0]?.inputs, [{
-    kind: 'host_context', content: 'Nova Audio Agent 任务进度事实：第一项',
+    kind: 'host_activation', content: 'Nova Audio Agent 宿主激活事实：以下内容不是用户说的话，也不是新的用户目标。只把该事实作为宿主提供的上下文：第一项',
   }])
   assert.deepEqual(llm.calls[0]?.tools, [])
   assert.ok(llm.calls[0]?.responseAdaptation?.includes('不代用户确认'))
@@ -886,10 +886,76 @@ test('adapter supplies semantic user text and matching structured tool results t
     }, new AbortController().signal)
     await waitFor('semantic tool continuation', () => llm.calls.length === 2)
 
+    assert.ok(llm.calls[0]?.responseAdaptation?.includes('工具可用不代表必须调用'))
     assert.deepEqual(llm.calls[0]?.inputs.at(-1), {kind: 'user_text', text: '你好', image})
     assert.deepEqual(llm.calls[1]?.inputs.at(-1), {
       kind: 'tool_result', call_id: 'call-1', output: {temperature: 20},
     })
+    assert.equal(captures, 1)
+    assert.equal(llm.abandons, 0)
+    await adapter.close()
+    assert.equal(llm.closed, true)
+    for (const session of sessions) assert.deepEqual(session.operations, ['open', 'cancel', 'close'])
+    await watching.stop()
+    assert.equal(endpointing.resets, 3, 'endpoint lifecycle including close')
+  })
+
+test('deferred receipt waits for the concrete host fact and retains the matching tool result',
+  async () => {
+    const endpointing = new ScriptedEndpointing(
+      [{kind: 'speech_start', pcm: new Uint8Array([0, 0])}],
+      [{kind: 'speech_end', commit: true}],
+    )
+    const llm = new FakeLlm(
+      [
+        {kind: 'response_started', response_id: 'response-tool'},
+        {kind: 'tool_call', item_id: 'item-1', call_id: 'call-1',
+          name: 'weather__get', arguments: {}},
+        {kind: 'response_completed', response_id: 'response-tool'},
+      ],
+      [
+        {kind: 'response_started', response_id: 'response-result'},
+        {kind: 'response_completed', response_id: 'response-result'},
+      ],
+    )
+    const image = {payload: new Uint8Array([255,216,255,217]), media_type: 'image/jpeg', width:1280,height:720,captured_at:1}
+    let captures = 0
+    const sessions = [new FakeTtsSession(), new FakeTtsSession()]
+    const adapter = new CascadedRealtimeAdapter({
+      captureFrame: () => { captures++; return Promise.resolve(image) },
+      endpointing,
+      asr: new FakeAsrClient(new FakeAsrSession({text: '你好', final: true})),
+      llm,
+      tts: new FakeTtsClient(...sessions),
+      idFactory: ids('session-semantic', 'speech-semantic', 'item-semantic', 'provider-result', 'provider-fact'),
+    })
+    await adapter.connect({tools: [], signal: new AbortController().signal})
+    const watching = observe(adapter)
+    await adapter.sendAudio(new Uint8Array([0, 0]), new AbortController().signal)
+    await adapter.sendAudio(new Uint8Array([0, 0]), new AbortController().signal)
+    await waitFor('semantic tool call', () => watching.events.some(event =>
+      event.kind === 'tool_call_ready'))
+    const result = {
+      kind: 'tool_output' as const,
+      host_item_id: 'tool-result', event_id: 'tool-result-event',
+      content: '{"temperature":20}', call_id: 'call-1',
+    }
+    await adapter.injectHostItem(result, directOptions())
+    assert.equal(llm.calls.length, 1, 'injecting an internal receipt does not call the model')
+    const fact = hostItem('intake-question', '做成网页还是桌面应用？')
+    await adapter.injectHostItem(fact, directOptions())
+    await adapter.createResponse({
+      kind: 'host_fact', item: fact, task_summary: null, origin_spoken: false,
+    }, new AbortController().signal)
+    await waitFor('semantic tool continuation', () => llm.calls.length === 2)
+
+    assert.ok(llm.calls[0]?.responseAdaptation?.includes('工具可用不代表必须调用'))
+    assert.deepEqual(llm.calls[0]?.inputs.at(-1), {kind: 'user_text', text: '你好', image})
+    assert.deepEqual(llm.calls[1]?.inputs[0], {
+      kind: 'tool_result', call_id: 'call-1', output: {temperature: 20},
+    })
+    assert.equal(llm.calls[1]?.inputs.at(-1)?.kind, 'host_activation')
+    assert.deepEqual(llm.calls[1]?.tools, [])
     assert.equal(captures, 1)
     assert.equal(llm.abandons, 0)
     await adapter.close()
@@ -1247,7 +1313,7 @@ test('an unresolved tool resets chaining and a late abandoned output never calls
     event.kind === 'response_terminal').length === 2)
   assert.equal(llm.abandons, 1)
   assert.deepEqual(llm.calls[1]?.inputs.at(-1), {
-    kind: 'host_context', content: 'Nova Audio Agent 任务进度事实：任务仍在运行',
+    kind: 'host_activation', content: 'Nova Audio Agent 宿主激活事实：以下内容不是用户说的话，也不是新的用户目标。只把该事实作为宿主提供的上下文：任务仍在运行',
   })
 
   const late = {
@@ -1933,8 +1999,8 @@ test('pending recovery and tool items are ordered once and consumed targets stay
   await adapter.sendAudio(new Uint8Array([0, 0]), new AbortController().signal)
   await waitFor('pending user response', () => watching.events.some(event => event.kind === 'response_terminal'))
   assert.deepEqual(llm.calls[0]?.inputs, [
-    {kind: 'host_context', content: 'Nova Audio Agent 恢复摘要：恢复事实'},
     {kind: 'tool_result', call_id: 'call-1', output: {ok: true}},
+    {kind: 'host_context', content: 'Nova Audio Agent 恢复摘要：恢复事实'},
     {kind: 'user_text', text: '继续'},
   ])
   await adapter.createResponse({kind: 'host_fact', item: recovery, task_summary: null, origin_spoken: false}, new AbortController().signal)

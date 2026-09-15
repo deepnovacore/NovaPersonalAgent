@@ -383,3 +383,10 @@ test('all sleeping orbs reveal controls on hover even during background work', (
     assert.equal(orbDormant({stateName, wakeState: 'sleeping', confirmationVisible: true}), false)
   }
 })
+
+test('preparing work is visible while idle and yields to speech and confirmation', () => {
+  assert.equal(deriveOrbState({...base, codex: 'preparing'}).statusLine, '正在安排任务')
+  assert.equal(deriveOrbState({...base, codex: 'preparing', playback: 'speaking'}).statusLine, '回复中')
+  assert.equal(deriveOrbState({...base, codex: 'preparing', pendingConfirmation: true}).statusLine, '需要你的确认')
+  assert.equal(deriveOrbState(base).statusLine, '待命')
+})

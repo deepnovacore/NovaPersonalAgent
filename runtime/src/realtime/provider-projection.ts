@@ -57,6 +57,7 @@ interface ProviderProjectionPorts {
  readonly agentNameForChannel: (channel: string) => string | null
  readonly clearingConversation: () => boolean
  readonly onActiveWorkChanged: () => void
+ readonly preparing: () => boolean
  readonly onExecutorState: (state: ExecutorState) => void
  readonly onDiagnostic: (line: string) => void
  resolveSyncResult(event: Extract<EventRecord, {kind: 'handoff'}>): boolean
@@ -117,7 +118,7 @@ export class ProviderProjection {
     }
     const next: ExecutorState = delegates.some(([, record]) => record.channel === this.ports.coding?.channel)
       ? 'running'
-      : 'idle'
+      : this.ports.preparing() ? 'preparing' : 'idle'
     if (next === this.#executorState) return
     this.#executorState = next
     try {

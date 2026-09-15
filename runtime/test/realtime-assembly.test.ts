@@ -1533,7 +1533,6 @@ test('project proposal reaches provider and desktop before confirmation', async 
 
     await waitNamed('correlated dispatch tool result', () => (
       provider.hostItems.some(item => item.call_id === 'call-project')
-      && provider.responseIntents.some(intent => intent.kind === 'tool_result')
     ))
     await waitNamed('immediate pending project view', () => (
       views.some(view => view.pending_action === 'create_workspace')
@@ -1556,8 +1555,9 @@ test('project proposal reaches provider and desktop before confirmation', async 
     const item = provider.hostItems.find(candidate => candidate.call_id === 'call-project')
     assert.ok(item !== undefined)
     assert.equal((JSON.parse(item.content) as {readonly code?: string}).code, 'intake_opened')
-    // The proposal reaches the model as a host fact naming the id; only `confirm` can answer it. Queued
-    // counts: the fake provider never answers the tool-result response, so the floor stays busy.
+    assert.equal(provider.responseIntents.some(intent => intent.kind === 'tool_result'), false,
+      'internal receipt must not request a reply')
+    // Only the concrete proposal requests a user-facing response.
     const factText = 'id=assembly-proposal；仅通过 confirm(id, accepted) 回答'
     await waitNamed('confirmation fact', () => [
       ...provider.hostItems.filter(candidate => candidate.call_id === null).map(candidate => candidate.content),

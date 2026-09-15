@@ -54,7 +54,7 @@ export const GUARD_CLEAR_ACK_DEADLINE_S = PREEMPTIVE_ALERT_CLEAR_ACK_DEADLINE_S
  */
 export const HIT_ALERT_MIN_PRIORITY = 55
 
-export type ExecutorState = 'idle' | 'running'
+export type ExecutorState = 'idle' | 'preparing' | 'running'
 export type PreemptiveAlertHistoryRecovery = 'none' | 'packed'
 /** @deprecated Compatibility type for the legacy environment keys. */
 export type GuardHistoryRecovery = PreemptiveAlertHistoryRecovery

@@ -402,7 +402,8 @@ test('the rail renders one tab per channel and mounts only the selected card', a
       {name: 'codex', summary: 'built a thing', item_count: 2, items: [
         {seq: 1, trust: 'inferred', ts: 1, content: 'codex-one'},
       ]},
-      {name: 'conversation', summary: null, item_count: 1, items: [
+      {name: 'conversation', summary: null, item_count: 2, historical_through_seq: 1, items: [
+        {seq: 1, historical: true, recorded_at_ms: 1789440000000, trust: 'trusted_user', ts: 100, content: 'old-user'},
         {seq: 2, trust: 'trusted_system', ts: 2, content: 'said-hello'},
       ]},
       {name: 'mcp__acme_tools', summary: null, item_count: 0, items: []},
@@ -439,7 +440,7 @@ test('the rail renders one tab per channel and mounts only the selected card', a
   )
   assert.deepEqual(
     rail.children.map(tab => tab.textContent),
-    ['对话 1', 'Codex 2', 'acme_tools 0'],
+    ['对话 2', 'Codex 2', 'acme_tools 0'],
     'each tab names its channel and its depth',
   )
   for (const tab of rail.children) assert.equal(tab.attributes.get('role'), 'tab')
@@ -451,12 +452,27 @@ test('the rail renders one tab per channel and mounts only the selected card', a
   const cards = document.querySelector('#channels')
   assert.equal(cards.children.length, 1, 'only the selected channel is mounted')
 
+  const messages = cards.children[0].children[1]
+  const [history, boundary, current] = messages.children
+  assert.equal(history.id, 'details')
+  assert.equal(history.open, false, 'restored history is collapsed by default')
+  assert.match(history.children[0].textContent, /重启前/)
+  assert.equal(history.children[1].children.length, 1)
+  const historicalMeta = history.children[1].children[0].children[1].children[0]
+  assert.match(historicalMeta.children[2].textContent, /^历史 · /)
+  assert.equal(boundary.textContent, '本次连接')
+  assert.equal(current.children[0].textContent, 'said-hello')
+  history.open = true
+  history.dispatchEvent(new Event('toggle'))
+
   // Selecting a channel repaints from the cached payload; it must not read again.
   rail.children[1].click()
   await settle()
   assert.equal(rail.children[1].attributes.get('aria-selected'), 'true')
   assert.equal(rail.children[0].attributes.get('aria-selected'), 'false')
   assert.equal(document.querySelector('#channels').children.length, 1)
+  rail.children[0].click()
+  assert.equal(document.querySelector('#channels').children[0].children[1].children[0].open, true)
 })
 
 test('channel selection never issues a backend read', async () => {

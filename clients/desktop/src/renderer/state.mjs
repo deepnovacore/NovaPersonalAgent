@@ -132,7 +132,7 @@ export function deriveOrbState(input) {
     label,
     statusLine: pendingConfirmation
       ? '需要你的确认'
-      : compactOrbLabel(name),
+      : name === 'idle' && input.codex === 'preparing' ? '正在安排任务' : compactOrbLabel(name),
     codexLabel,
     projectLabel,
     codexMode,
