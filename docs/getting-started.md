@@ -126,7 +126,7 @@ fixtures are read-only during ordinary checks.
 `integrated` and `cascaded` are the top-level pipeline shapes. Integrated Qwen is the default: it
 uses `qwen-audio-3.0-realtime-plus`, the `longanqian` voice, and `DASHSCOPE_API_KEY`, with no ASR,
 LLM, or TTS subnode controls. Cascaded mode exposes endpointing, ASR, LLM, and TTS; its default is
-Volcengine ASR -> Qwen `qwen-flash` -> Volcengine TTS. Ark is an explicit cascaded LLM selection,
+Volcengine ASR -> Qwen `qwen-plus` -> Volcengine TTS. Ark is an explicit cascaded LLM selection,
 not an alternate integrated provider:
 
 ```bash

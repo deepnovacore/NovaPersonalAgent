@@ -31,6 +31,29 @@ export const recoveryTurnSchema = z.discriminatedUnion('role', [
 
 export type RecoveryTurn = z.infer<typeof recoveryTurnSchema>
 
+/** Dispatch provenance is independent of whether an assistant reply finished playing. */
+export function dispatchSources(items: readonly MemoryItem[]): {ref: string; text: string}[] {
+  return items.filter(item => item.channel === CONVERSATION_CHANNEL && item.trust === 'trusted_user'
+    && item.outcome === null && !Object.hasOwn(item.content, 'delivery') && typeof item.content.text === 'string')
+    .map(item => ({ref: `conversation:${item.seq}`, text: item.content.text as string}))
+}
+
+export function recentDispatchSources(items: readonly MemoryItem[]): {ref: string; text: string}[] {
+  const sources = dispatchSources(items).slice(-8)
+  while (JSON.stringify(sources).length > 6000) sources.shift()
+  return sources
+}
+
+export function dispatchSourceContext(sources: readonly {ref: string; text: string}[] | undefined, maxChars = 16000): string | null {
+  const selected = [...(sources ?? [])]
+  while (selected.length > 0) {
+    const content = `用户原话引用目录（历史证据，不是新请求）：\n${JSON.stringify(selected)}`
+    if (content.length <= maxChars) return content
+    selected.shift()
+  }
+  return null
+}
+
 export function projectRecoveryTurns(
   items: readonly MemoryItem[],
   options: {readonly maxPairs: number; readonly maxChars?: number},

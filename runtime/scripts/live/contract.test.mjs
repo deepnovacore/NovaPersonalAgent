@@ -169,7 +169,7 @@ test('optional memory fallback accepts an honest direct limitation or validates 
        turn++
        assert.deepEqual(input.inputs, [{kind:'user_text',text:turn === 1 ? entry.text : entry.steps[0].user}])
        if (turn === 1) yield {kind:'text_delta',text:'要网页还是桌面版？'}
-       else yield {kind:'tool_call',name:'dispatch',call_id:'d1',arguments:{executor:'codex',instruction:'贪吃蛇网页，方向键控制，显示分数，不安装依赖',origin_ref:'conversation:1',source_quotes:['帮我写一个贪吃蛇游戏。']}}
+       else yield {kind:'tool_call',name:'dispatch',call_id:'d1',arguments:{executor:'codex',instruction:'贪吃蛇网页，方向键控制，显示分数，不安装依赖',origin_ref:'conversation:1',source_refs:['conversation:1']}}
        yield {kind:'response_completed'}
      },
      close:async () => {},

@@ -36,7 +36,7 @@ test('a monitor preset loads its own provider credential independently of the co
   assert.equal(resolveWatchModelConnection(loadSettings({NOVA_AUDIO_AGENT_WATCH_MODEL: 'custom-model'})), null)
 })
 
-test('pipeline defaults are product-shaped and cascaded defaults use Qwen Flash', () => {
+test('pipeline defaults are product-shaped and cascaded defaults use Qwen Plus', () => {
   const settings = loadSettings({})
   assert.equal(settings.pipeline_mode, 'integrated')
   assert.equal(settings.camera_module_enabled, true)
@@ -45,7 +45,7 @@ test('pipeline defaults are product-shaped and cascaded defaults use Qwen Flash'
     endpointingProvider: 'auto',
     asrProvider: 'volcengine',
     llmProvider: 'qwen',
-    llmModel: 'qwen-flash',
+    llmModel: 'qwen-plus',
     ttsProvider: 'volcengine',
   })
   assert.deepEqual({
@@ -277,7 +277,7 @@ test('integrated loading never reads inactive cascaded selector or model slots',
     endpointingProvider: 'auto',
     asrProvider: 'volcengine',
     llmProvider: 'qwen',
-    llmModel: 'qwen-flash',
+    llmModel: 'qwen-plus',
     ttsProvider: 'volcengine',
   })
 })
@@ -296,7 +296,7 @@ test('integrated loading ignores invalid inactive cascaded selector and model va
     endpointingProvider: 'auto',
     asrProvider: 'volcengine',
     llmProvider: 'qwen',
-    llmModel: 'qwen-flash',
+    llmModel: 'qwen-plus',
     ttsProvider: 'volcengine',
   })
 })

@@ -34,7 +34,7 @@ const SETTINGS_V2 = Object.freeze({
   cascadedAsrProvider: 'volcengine',
   cascadedLlmProvider: 'qwen',
   cascadedLlmModels: Object.freeze({
-    qwen: 'qwen-flash',
+    qwen: 'qwen-plus',
     ark: 'doubao-seed-2-0-pro-260215',
   }),
   cascadedTtsProvider: 'volcengine',

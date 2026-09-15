@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
+import type {Memory} from '../src/core/memory.js'
 import type {AgentActionResult, AgentController} from '../src/executors/agent-controller.js'
 import {
   CODEX_AGENT_SUMMARY
@@ -1344,19 +1345,43 @@ test('bound tool-result continuations retain the original user evidence across m
     assert.equal(runtimeDispatches(), 3, 'an old continuation cannot borrow the replacement user')
   } finally { await service.close() }
 })
-test('dispatch source quotes must match host-recorded user words before controller admission', async () => {
-  for (const [quote, expected] of [['build timer', true], ['assistant suggested blog', false]] as const) {
+test('dispatch source refs must resolve to host-recorded user words before controller admission', async () => {
+  for (const [ref, expected] of [['conversation:1', true], ['conversation:999', false]] as const) {
     let calls = 0
     const controller: AgentController = {
       descriptor: {name: 'codex', summary: CODEX_AGENT_SUMMARY, ownedChannels: ['codex']},
-      dispatch: request => { calls++; assert.deepEqual(request.sourceQuotes, [quote]); return Promise.resolve({code: 'accepted', accepted: true, detail: {}}) },
+      dispatch: request => { calls++; assert.deepEqual(request.sourceQuotes, ['build timer']); return Promise.resolve({code: 'accepted', accepted: true, detail: {}}) },
       cancel: () => Promise.resolve({code: 'not_running', accepted: true, detail: {}}),
     }
-    const {service} = realtimeServiceHarness('pipeline', {agent: true, agentControllers: [controller]})
+    const {service, telemetry} = realtimeServiceHarness('pipeline', {agent: true, agentControllers: [controller]})
     await service.connect()
-    const acceptance = await dispatchTurn(service, 'dispatch', {executor: 'codex', instruction: 'build timer', source_quotes: [quote]})
+    const acceptance = await dispatchTurn(service, 'dispatch', {executor: 'codex', instruction: 'build timer', source_refs: [ref]})
     assert.equal(calls, expected ? 1 : 0)
-    assert.equal(acceptance.code, expected ? 'accepted' : 'invalid_source_quotes')
+    assert.equal(acceptance.code, expected ? 'accepted' : 'invalid_source_refs')
+    assert.equal(telemetry.find(event => event.kind === 'tool.admission')?.payload.code, acceptance.code)
+    if (!expected) {
+      const result = JSON.parse(acceptance.host_item.content) as {sources: unknown}
+      assert.deepEqual(result.sources, [{ref: 'conversation:1', text: 'build timer'}])
+    }
     await service.close()
+  }
+})
+
+test('dispatch refs retain interrupted users but cannot select assistant text', async () => {
+  for (const [ref, expected] of [['conversation:1', true], ['conversation:2', false]] as const) {
+    const {service, runtimeDispatches} = realtimeServiceHarness('pipeline', {agent: true})
+    await service.connect()
+    try {
+      await speak(service, 'original', '写一个俄罗斯方。')
+      const memory = service.internals.runtime.memory as Memory
+      memory.append('conversation', {
+        ts: 0, priority: 100, trust: 'trusted_system', content: {text: '网页还是桌面？', delivery: 'interrupted', played_ms: 100},
+      })
+      const acceptance = await dispatchTurn(service, 'dispatch', {
+        executor: 'codex', instruction: '创建网页游戏', source_refs: [ref],
+      })
+      assert.equal(acceptance.accepted, expected)
+      assert.equal(runtimeDispatches(), expected ? 1 : 0)
+    } finally { await service.close() }
   }
 })

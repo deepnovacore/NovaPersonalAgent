@@ -74,7 +74,7 @@ export class RealtimeProviderSession {
   #responseAdaptationAttempt: {
     readonly epoch: number
     readonly revision: number
-    readonly content: string | null
+    readonly signature: string
     readonly confirmed: boolean
   } | null = null
   readonly #connectedObservers = new Set<(
@@ -327,7 +327,7 @@ export class RealtimeProviderSession {
     const parsed = hostResponseIntentSchema.parse(intent)
     const owner = this.#requiredConnectionOwner()
     try {
-      await this.#refreshResponseAdaptation(owner, signal)
+      await this.#refreshResponseAdaptation(owner, signal, parsed.kind !== 'host_fact')
       this.#assertCurrentConnection(owner)
       await this.#provider.createResponse(
         structuredClone(parsed),
@@ -442,7 +442,7 @@ export class RealtimeProviderSession {
     return this.#state === 'closed'
   }
 
-  async #refreshResponseAdaptation(owner: ConnectionOwner, signal?: AbortSignal): Promise<void> {
+  async #refreshResponseAdaptation(owner: ConnectionOwner, signal?: AbortSignal, includeUserSources = true): Promise<void> {
     if (this.#provider.replaceResponseAdaptation === undefined || this.#responseAdaptation === undefined) return
     const operation = this.#responseAdaptationTail.then(async () => {
       if (!this.#isCurrentConnection(owner)) return
@@ -462,20 +462,21 @@ export class RealtimeProviderSession {
         this.#reportAdaptationDiagnostic('invalid', owner.identity.epoch, null)
         return
       }
-      const context = parsed.data
+      const context = includeUserSources ? parsed.data : {revision: parsed.data.revision, content: parsed.data.content}
+      const signature = JSON.stringify({content: context.content, user_sources: context.user_sources})
       const previous = this.#responseAdaptationAttempt
       if (previous !== null && previous.epoch === owner.identity.epoch
-        && previous.confirmed && previous.content === context.content
+        && previous.confirmed && previous.signature === signature
         && context.revision >= previous.revision) {
         this.#responseAdaptationAttempt = {
-          epoch: owner.identity.epoch, revision: context.revision, content: context.content, confirmed: true,
+          epoch: owner.identity.epoch, revision: context.revision, signature, confirmed: true,
         }
         return
       }
       if (previous !== null && previous.epoch === owner.identity.epoch
-        && previous.revision === context.revision && previous.content === context.content) return
+        && previous.revision === context.revision && previous.signature === signature) return
       this.#responseAdaptationAttempt = {
-        epoch: owner.identity.epoch, revision: context.revision, content: context.content, confirmed: false,
+        epoch: owner.identity.epoch, revision: context.revision, signature, confirmed: false,
       }
       try {
         await this.#provider.replaceResponseAdaptation!(
@@ -484,10 +485,10 @@ export class RealtimeProviderSession {
         )
         this.#assertCurrentConnection(owner)
         this.#responseAdaptationAttempt = {
-          epoch: owner.identity.epoch, revision: context.revision, content: context.content, confirmed: true,
+          epoch: owner.identity.epoch, revision: context.revision, signature, confirmed: true,
         }
       } catch {
-        // This affects wording only. The captured owner is checked again before audio/response send.
+        // Guidance cannot grant execution authority. The owner is checked again before sending.
         this.#reportAdaptationDiagnostic('replace_failed', owner.identity.epoch, context.revision)
       }
     })

@@ -784,8 +784,8 @@
                     "方向键",
                     "依赖"
                   ],
-                  "source_quotes": [
-                    "贪吃蛇"
+                  "source_refs": [
+                    "conversation:1"
                   ]
                 },
                 "containsAny": {

@@ -1,3 +1,4 @@
+import {dispatchSourceContext} from '../../dist/src/realtime/history.js'
 import {cascadedResponseGuidance} from '../../dist/src/realtime/cascaded/llm.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
@@ -82,15 +83,17 @@ export async function runTextCase(testCase, config, timeoutMs, factoryOverride) 
   const factory = factoryOverride ?? (config.provider === 'qwen' ? createQwenCascadedLlmFactory : createArkCascadedLlmFactory)
   const session = factory({...config, instructions: compiled.instructions}).open()
   const observations = []
+  const userSources = []
   const failures = []
   const signal = AbortSignal.timeout(timeoutMs)
   try {
     let inputs = [{kind: 'user_text', text: testCase.text}]
     for (const [index, step] of testCase.steps.entries()) {
+      for (const item of inputs) if (item.kind === 'user_text') userSources.push({ref: `conversation:${userSources.length + 1}`, text: item.text})
       const observed = {calls: [], text: '', completed: false}
       observations.push(observed)
       for await (const event of session.stream({inputs, tools: compiled.tools,
-        workspaceContext: testCase.context, responseAdaptation: cascadedResponseGuidance(true), signal})) {
+        workspaceContext: testCase.context, responseAdaptation: [cascadedResponseGuidance(true), dispatchSourceContext(userSources.slice(-8))].filter(Boolean).join('\n'), signal})) {
         if (event.kind === 'tool_call') observed.calls.push({name: event.name, arguments: event.arguments, call_id: event.call_id})
         if (event.kind === 'text_delta') observed.text += event.text
         if (event.kind === 'response_completed') observed.completed = true

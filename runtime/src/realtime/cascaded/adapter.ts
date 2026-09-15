@@ -1,3 +1,4 @@
+import {dispatchSourceContext} from '../history.js'
 import {cascadedResponseGuidance, validateOriginalImage} from './llm.js'
 import type {Frame} from '../../executors/watcher.js'
 import { randomUUID } from 'node:crypto'
@@ -141,7 +142,7 @@ interface EpochOwner {
     readonly providerItemId: string
     readonly record: WorkspaceContextDeliveryRecord
   } | null
-  responseAdaptation: {readonly revision: number; readonly content: string | null} | null
+  responseAdaptation: ResponseAdaptationContext | null
   consumptionGeneration: number
   responseSequence: number
   pendingToolCallId: string | null
@@ -446,8 +447,8 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       context = responseAdaptationContextSchema.parse(context)
       const prior = owner.responseAdaptation
       if (prior !== null && context.revision < prior.revision) return Promise.resolve()
-      if (prior !== null && context.revision === prior.revision && context.content === prior.content) return Promise.resolve()
-      owner.responseAdaptation = {revision: context.revision, content: context.content}
+      if (prior !== null && JSON.stringify(context) === JSON.stringify(prior)) return Promise.resolve()
+      owner.responseAdaptation = context
       return Promise.resolve()
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new CascadedRealtimeError('configuration'))
@@ -953,6 +954,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         tools: allowTools ? owner.tools.map(tool => structuredClone(tool)) : [],
         workspaceContext: owner.workspaceContext?.item.content ?? null,
         responseAdaptation: [owner.responseAdaptation?.content,
+          allowTools ? dispatchSourceContext(owner.responseAdaptation?.user_sources) : null,
           cascadedResponseGuidance(allowTools),
         ].filter(Boolean).join('\n'),
         signal,

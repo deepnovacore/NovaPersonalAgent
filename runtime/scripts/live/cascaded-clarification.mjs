@@ -39,7 +39,10 @@ const reader = (async () => {
     if (event.kind === 'response_terminal') waiting.shift()?.(event)
   }
 })()
+const userSources = []
 async function user(text) {
+  userSources.push({ref: `conversation:${userSources.length + 1}`, text})
+  await adapter.replaceResponseAdaptation({revision: userSources.length, content: null, user_sources: userSources}, signal)
   const start = events.length
   const ended = nextTerminal()
   await adapter.submitText(text, signal)
@@ -61,6 +64,7 @@ try {
   const call = second.find(event => event.kind === 'tool_call_ready')
   assert.ok(call, 'Clarified request must dispatch')
   assert.equal(call.name, 'dispatch')
+  assert.ok(call.arguments.source_refs?.includes('conversation:1'), 'Dispatch must select the original user goal')
   const receipt = {
     kind: 'tool_output', host_item_id: 'probe-receipt', event_id: 'probe-receipt', call_id: call.call_id,
     content: JSON.stringify({code: 'intake_opened', execution_started: false}),
@@ -94,7 +98,7 @@ try {
   assert.equal((await failureEnded).status, 'completed')
   const failure = response(events.slice(failureStart))
   assert.equal(failure.calls.length, 0)
-  assert.match(failure.text, /未.*启动|没有.*启动/)
+  assert.match(failure.text, /未.*启动|没(?:有|能).*启动/)
   assert.doesNotMatch(failure.text, /确认|修正请求|请问|请选择|需要您|需要你|[？?]|将.*重试|会.*重试/)
   console.log(JSON.stringify({passed: true, model: config.model, requests: requests.length,
     responses: [response(first), response(second), final, failure],

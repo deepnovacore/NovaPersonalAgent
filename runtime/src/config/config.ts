@@ -494,7 +494,7 @@ export function resolveSupportModelConnection(
 export function resolveCascadedSelection(settings: Settings): CascadedSelection {
   const llmModel = settings.cascade_llm_model === null
     ? (settings.cascade_llm_provider === 'qwen'
-      ? 'qwen-flash'
+      ? 'qwen-plus'
       : settings.cascade_llm_provider === 'deepseek' ? 'deepseek-flash' : 'doubao-seed-2-0-pro-260215')
     : requiredSetting(settings.cascade_llm_model, 'NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL')
   return Object.freeze({

@@ -51,7 +51,7 @@ export function dispatchToolSpec(agents: readonly AgentDescriptor[]): HostToolSp
       properties: {
         executor: {type: 'string', enum: agents.map(agent => agent.name)},
         instruction: {...INSTRUCTION, description: '本次任务已明确的完整目标、约束和验收，合并最新纠正，不只传最后一句、不添加未要求的约束'},
-        source_quotes: {type: 'array', maxItems: 8, items: {type: 'string', minLength: 1, maxLength: 2000}, description: '多轮澄清时，逐字引用本次任务相关的先前用户原句片段，必须包含最初请求中的目标和指定项目，不能只引用最新澄清答案；不得引用助手建议或无关旧任务。只有当前一句足够时省略。'},
+        source_refs: {type: 'array', maxItems: 8, items: {type: 'string'}, description: '从用户原话引用目录选择本次任务相关的 ref，包含多轮澄清中的最初目标和指定项目；不引用助手建议或无关旧任务。只有当前一句足够时省略。'},
       },
       required: ['executor', 'instruction'],
       additionalProperties: false,

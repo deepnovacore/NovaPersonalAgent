@@ -113,7 +113,7 @@ node runtime/dist/src/cli.js scorecard fixture check
 `integrated` 和 `cascaded` 是顶层管线形态。默认是集成 Qwen：使用
 `qwen-audio-3.0-realtime-plus`、`longanqian` 音色和 `DASHSCOPE_API_KEY`，没有 ASR、LLM 或 TTS
 子节点控件。级联模式显示端点检测、ASR、LLM 和 TTS；默认链路是
-火山 ASR -> Qwen `qwen-flash` -> 火山 TTS。Ark 是显式的级联 LLM 选择，不是另一种集成 provider：
+火山 ASR -> Qwen `qwen-plus` -> 火山 TTS。Ark 是显式的级联 LLM 选择，不是另一种集成 provider：
 
 ```bash
 NOVA_AUDIO_AGENT_PIPELINE_MODE=cascaded

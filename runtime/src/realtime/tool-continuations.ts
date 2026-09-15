@@ -1,4 +1,4 @@
-import {projectRecoveryTurns} from './history.js'
+import {dispatchSources, projectRecoveryTurns, recentDispatchSources} from './history.js'
 import type {IntakeOptions} from '../executors/coding/intake.js'
 import {
   parseAgentActionResult,
@@ -1201,14 +1201,19 @@ export class ToolContinuations {
     if (event.session_epoch <= this.#ports.discardedInputEpoch() || originRef === null || user?.epoch !== event.session_epoch || originRef !== user.origin_ref) {
       return this.#refusalAcceptance(event, 'missing_origin_ref', '{"code":"missing_origin_ref"}')
     }
-    const conversationContext = projectRecoveryTurns(this.#ports.runtime.memory?.channels.get('conversation')?.items ?? [],
+    const conversationItems = this.#ports.runtime.memory?.channels.get('conversation')?.items ?? []
+    const conversationContext = projectRecoveryTurns(conversationItems,
       {maxPairs: 8, maxChars: 8000}).map(({role, text, sequence}) => ({role, text, sequence}))
-    const sourceQuotes = event.arguments.source_quotes ?? []
-    if (event.name === DISPATCH_TOOL && (!Array.isArray(sourceQuotes) || sourceQuotes.length > 8
-      || sourceQuotes.some(quote => typeof quote !== 'string' || quote.trim() === '' || codePointLengthLikePython(quote) > 2000
-        || ![user.text, ...conversationContext.filter(turn => turn.role === 'user').map(turn => turn.text)].some(text => text.includes(quote))))) {
-      return this.#refusalAcceptance(event, 'invalid_source_quotes', '{"code":"invalid_source_quotes"}')
+    const sources = dispatchSources(conversationItems)
+    const sourceRefs = event.arguments.source_refs ?? []
+    if (event.name === DISPATCH_TOOL && ('source_quotes' in event.arguments || !Array.isArray(sourceRefs)
+      || sourceRefs.length > 8 || sourceRefs.some(ref => typeof ref !== 'string' || !sources.some(source => source.ref === ref)))) {
+      return this.#refusalAcceptance(event, 'invalid_source_refs', canonicalJson({
+        code: 'invalid_source_refs', parameter: 'source_refs',
+        message: '任务尚未提交。source_refs 必须选择用户原话引用目录中的 ref。', sources: recentDispatchSources(conversationItems),
+      }))
     }
+    const sourceQuotes = sources.filter(source => (sourceRefs as readonly string[]).includes(source.ref)).map(source => source.text)
     const controller = this.#ports.agentController(executor)
     if (controller === undefined) return this.#refusalAcceptance(event, 'unsupported_tool', '{"code":"unsupported_tool"}')
     // A user turn that supersedes an async controller operation makes its result informational only;
@@ -1220,7 +1225,7 @@ export class ToolContinuations {
     const rawResult = event.name === DISPATCH_TOOL
       ? await controller.dispatch({
         instruction: instruction!, originalUserText: user.text, origin_ref: user.origin_ref,
-        conversationContext, sourceQuotes: sourceQuotes as readonly string[],
+        conversationContext, sourceQuotes,
         sessionEpoch: event.session_epoch, acceptedUserInputRevision: revision, stillWanted: fence,
       })
       : await controller.cancel({
@@ -1333,7 +1338,7 @@ export class ToolContinuations {
             : 'delegated'
     this.#ports.telemetry.record('tool.admission', {
       logical_name: input.logicalName, call_id: input.callId,
-      delegate_id: input.acceptance.delegate_id, outcome
+      delegate_id: input.acceptance.delegate_id, outcome, code: input.acceptance.code,
     })
   }
 

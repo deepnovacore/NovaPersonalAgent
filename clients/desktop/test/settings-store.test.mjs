@@ -94,7 +94,7 @@ test('the default settings are the documented schema', () => {
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
     cascadedLlmProvider: 'qwen',
-    cascadedLlmModels: { qwen: 'qwen-flash', ark: 'doubao-seed-2-0-pro-260215', deepseek: 'deepseek-flash' },
+    cascadedLlmModels: { qwen: 'qwen-plus', ark: 'doubao-seed-2-0-pro-260215', deepseek: 'deepseek-flash' },
     cascadedTtsProvider: 'volcengine',
     cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
     codexApprovalMode: 'ask',
@@ -371,7 +371,7 @@ test('JSON settings rebuild only declared fields and keep invalid nested values 
   assert.equal(normalized.codexHeartbeatSeconds, 45)
   assert.equal(Object.hasOwn(normalized, '__proto__'), false)
   assert.equal(Object.hasOwn(normalized, 'unknown'), false)
-  assert.deepEqual(normalized.cascadedLlmModels, {qwen: 'qwen-flash', deepseek: 'deepseek-flash', ark: 'custom-ark'})
+  assert.deepEqual(normalized.cascadedLlmModels, {qwen: 'qwen-plus', deepseek: 'deepseek-flash', ark: 'custom-ark'})
   assert.deepEqual(normalized.secrets, {tavilyApiKey: {enc: 'none', data: 'dGF2aWx5'}})
 })
 
@@ -412,7 +412,7 @@ test('normalizeSettings rejects leading and trailing controls before trimming mo
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: '\nqwen-custom', ark: 'ark-valid' },
   }).cascadedLlmModels, { deepseek: 'deepseek-flash',
-    qwen: 'qwen-flash',
+    qwen: 'qwen-plus',
     ark: 'ark-valid',
   })
   assert.deepEqual(normalizeSettings({

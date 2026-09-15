@@ -190,6 +190,22 @@ test('provider session applies adaptation without blocking PCM ingress', async (
   await session.close()
 })
 
+test('new user sources refresh before response even when preferences are unchanged', async () => {
+  const provider = new FakeProvider()
+  let context = {revision: 1, content: null, user_sources: [{ref: 'conversation:1', text: 'first'}]}
+  const session = new RealtimeProviderSession(provider, {responseAdaptation: () => context})
+  await session.connect()
+  context = {revision: 2, content: null, user_sources: [{ref: 'conversation:3', text: 'second'}]}
+  await session.ensureResponse()
+  assert.equal(provider.responseAdaptations.length, 2)
+  assert.deepEqual(provider.responseAdaptations.at(-1), context)
+  await session.createResponse(hostFact({kind: 'final', host_item_id: 'fact', event_id: 'fact', call_id: null, content: 'done'}))
+  assert.deepEqual(provider.responseAdaptations.at(-1), {revision: 2, content: null})
+  await session.ensureResponse()
+  assert.deepEqual(provider.responseAdaptations.at(-1), context)
+  await session.close()
+})
+
 test('response adaptation failures are diagnostic-only across audio, host response, and ensure paths', async () => {
   const provider = new FakeProvider()
   provider.adaptationFailure = new Error('replace failed')

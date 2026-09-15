@@ -1054,6 +1054,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
         provider,
         runtime: {
           clock,
+          memory,
           executors,
           // Keep a live delegate so projection reaches the pipeline decisions under test.
           ...runtimePorts({

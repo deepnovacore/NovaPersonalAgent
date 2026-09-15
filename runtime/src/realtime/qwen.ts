@@ -1,3 +1,4 @@
+import {dispatchSourceContext} from './history.js'
 /**
  * DashScope Qwen Audio Realtime adapter for the provider-neutral contracts.
  *
@@ -376,6 +377,9 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
       throw new QwenRealtimeError('response adaptation completed for stale session')
     }
     context = responseAdaptationContextSchema.parse(context)
+    context = responseAdaptationContextSchema.parse({...context,
+      content: [context.content, dispatchSourceContext(context.user_sources, 16000 - (context.content?.length ?? 0) - 1)]
+        .filter(Boolean).join('\n') || null})
     signal.throwIfAborted()
     if (this.#responseAdaptationUncertain) {
       throw new QwenRealtimeError('response adaptation ownership is uncertain until reconnect')

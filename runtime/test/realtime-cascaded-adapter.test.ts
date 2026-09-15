@@ -703,6 +703,8 @@ test('host facts preserve wording and cannot expose user-action tools', async ()
     idFactory: ids('session-host', 'provider-host'),
   })
   await adapter.connect({tools: [tool], signal: new AbortController().signal})
+  await adapter.replaceResponseAdaptation({revision: 1, content: null,
+    user_sources: [{ref: 'conversation:1', text: 'OLD_USER_REQUEST'}]}, new AbortController().signal)
   tool.function.name = 'caller-mutated'
   tool.function.parameters.properties.city.type = 'number'
   const item = hostItem('progress-host', '第一项')
@@ -720,6 +722,7 @@ test('host facts preserve wording and cannot expose user-action tools', async ()
   }])
   assert.deepEqual(llm.calls[0]?.tools, [])
   assert.ok(llm.calls[0]?.responseAdaptation?.includes('不代用户确认'))
+  assert.equal(JSON.stringify(llm.calls[0]).includes('OLD_USER_REQUEST'), false)
 })
 
 test('cascaded adapter replaces workspace context without adding old context to LLM history', async () => {

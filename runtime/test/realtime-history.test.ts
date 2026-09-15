@@ -7,6 +7,9 @@ import {
   packRecoveryTurns,
   projectRecoveryTurns,
   recoveryTurnSchema,
+  dispatchSources,
+  recentDispatchSources,
+  dispatchSourceContext,
 } from '../src/realtime/history.js'
 
 function item(
@@ -51,6 +54,16 @@ function assistant(
     playedMs: options.playedMs === undefined ? 100 : options.playedMs,
   })
 }
+
+test('bounded dispatch directory does not invalidate retained user refs', () => {
+  const items = [user(1, 'original goal'), assistant(2, 'question', {delivery: 'interrupted'}),
+    ...Array.from({length: 10}, (_, index) => user(index + 3, `answer ${index}`))]
+  assert.equal(recentDispatchSources(items).some(source => source.ref === 'conversation:1'), false)
+  assert.equal(dispatchSources(items).find(source => source.ref === 'conversation:1')?.text, 'original goal')
+  assert.equal(dispatchSources(items).some(source => source.ref === 'conversation:2'), false)
+  assert.ok(JSON.stringify(recentDispatchSources([user(1, 'x'.repeat(7000)), user(2, 'latest')])).length <= 6000)
+  assert.equal(dispatchSourceContext(dispatchSources(items), 0), null)
+})
 
 test('recovery projection keeps only complete chronological trusted pairs', () => {
   const projected = projectRecoveryTurns([

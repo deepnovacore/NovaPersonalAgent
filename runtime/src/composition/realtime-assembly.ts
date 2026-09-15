@@ -1,4 +1,5 @@
 import type {UsageReporter} from '../realtime/usage.js'
+import {recentDispatchSources} from '../realtime/history.js'
 import type {ApprovalController} from '../core/approval-port.js'
 import {capabilityStatus, type CapabilityStatus} from '../config/capability-registry.js'
 import { randomUUID } from 'node:crypto'
@@ -713,8 +714,24 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const onDiagnostic = options.onDiagnostic ?? (line => { console.log(line) })
   const personalMemoryHolder: {current: PersonalMemoryResource | undefined} = {current: undefined}
   const personalMemoryTurnTracker = new PersonalMemoryTurnTracker()
+  let responseAdaptationRevision = 0
+  let responseAdaptationSignature: string | undefined
   const providerSession = new RealtimeProviderSession(provider, {
-    responseAdaptation: () => responseAdaptationFor(personalMemoryHolder.current),
+    responseAdaptation: () => {
+      const preferences = responseAdaptationFor(personalMemoryHolder.current)
+      const conversation = core.runtime.memory.channels.get('conversation')
+      const sources = recentDispatchSources(conversation?.items ?? [])
+      const context = {
+        content: preferences?.content ?? null,
+        ...(sources.length === 0 ? {} : {user_sources: sources}),
+      }
+      const signature = JSON.stringify({context, preferenceRevision: preferences?.revision})
+      if (signature !== responseAdaptationSignature) {
+        responseAdaptationRevision++
+        responseAdaptationSignature = signature
+      }
+      return {revision: responseAdaptationRevision, ...context}
+    },
     onDiagnostic: diagnostic => {
       onDiagnostic(
         `[realtime-diagnostic] response_adaptation_${diagnostic.reason} epoch=${diagnostic.epoch} revision=${diagnostic.revision ?? 'none'}`,
@@ -1211,4 +1228,3 @@ export function validateCodingResource(options: Pick<AssemblyOptions, 'settings'
     throw new AssemblyError('realtime coding resource project mode mismatch')
   }
 }
-
