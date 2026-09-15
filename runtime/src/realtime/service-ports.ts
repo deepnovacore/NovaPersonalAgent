@@ -165,7 +165,7 @@ export interface ServiceProvider {
 export interface RealtimeServiceOptions {
   readonly intake?: Pick<
     IntakeOptions,
-    'models' | 'settings' | 'roster' | 'running' | 'activeProject' | 'resolveTarget' | 'dispatch' | 'steer' | 'cancel' | 'record'
+    'models' | 'settings' | 'roster' | 'running' | 'activeProject' | 'resolveTarget' | 'dispatch' | 'steer' | 'record'
   >
   /** Supplies the coding controller with host callbacks; the controller owns intake construction. */
   readonly agentControllerFactory?: AgentControllerFactory

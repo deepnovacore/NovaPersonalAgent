@@ -142,12 +142,12 @@ test('Qwen joins fragmented tool calls and retains a matched tool result with it
       && (calls[0] as Record<string, unknown>).id === 'call-1'
   }))
   assert.ok(messages.some(message => message.role === 'tool' && message.tool_call_id === 'call-1'))
-  assert.ok(messages.some(message => message.role === 'system' && message.content === '只读历史'))
-  assert.equal(messages.at(-2)?.role, 'user')
-  assert.equal(messages.at(-2)?.content, 'Nova Audio Agent 宿主激活事实：最新问题')
+  assert.equal(messages.some(message => message.content === '只读历史'), false)
+  assert.equal(messages.at(-1)?.role, 'user')
+  assert.equal(messages.at(-1)?.content, 'Nova Audio Agent 宿主激活事实：最新问题')
 })
 
-test('Qwen completes two sequential tool hops as one bounded semantic interaction', async () => {
+for (const factOnly of [false, true]) test(`Qwen completes two sequential tool hops (factOnly=${factOnly})`, async () => {
   const requests: Record<string, unknown>[] = []
   const responses = [
     sse([{id: 'response-a', choices: [{delta: {tool_calls: [{index: 0, id: 'call-a',
@@ -184,7 +184,8 @@ test('Qwen completes two sequential tool hops as one bounded semantic interactio
     arguments: {from: 'a'},
   })
   const final = await collect(session.stream({
-    inputs: [{kind: 'tool_result', call_id: 'call-b', output: {value: 'b'}}], tools,
+    inputs: [{kind: 'tool_result', call_id: 'call-b', output: {value: 'b'}},
+      ...(factOnly ? [{kind: 'host_activation' as const, content: '最新事实'}] : [])], tools,
     signal: new AbortController().signal,
   }))
 
@@ -195,9 +196,9 @@ test('Qwen completes two sequential tool hops as one bounded semantic interactio
   ])
   const finalMessages = requests[2]?.messages as Record<string, unknown>[]
   assert.deepEqual(finalMessages.filter(message => message.role === 'tool').map(message =>
-    message.tool_call_id), ['call-a', 'call-b'])
+    message.tool_call_id), factOnly ? ['call-b'] : ['call-a', 'call-b'])
   assert.deepEqual(finalMessages.filter(message => Array.isArray(message.tool_calls)).map(message =>
-    ((message.tool_calls as readonly {id: string}[])[0]?.id)), ['call-a', 'call-b'])
+    ((message.tool_calls as readonly {id: string}[])[0]?.id)), factOnly ? ['call-b'] : ['call-a', 'call-b'])
 })
 
 test('Qwen abandons unresolved tool state without discarding completed bounded history', async () => {
@@ -230,6 +231,21 @@ test('Qwen abandons unresolved tool state without discarding completed bounded h
   assert.ok(messages.some(item => item.role === 'user' && item.content === 'unrelated user turn'))
   assert.equal(messages.some(item => item.content === 'abandoned tool turn'), false)
   assert.equal(messages.some(item => Array.isArray(item.tool_calls)), false)
+  await session.close()
+})
+
+test('Qwen tool preamble stays internal while structured call is delivered', async () => {
+  const session = createQwenCascadedLlmFactory({
+    baseUrl: 'https://dashscope.example/v1', apiKey: 'dash-secret', model: 'qwen-flash',
+    instructions: 'instructions', fetchImpl: () => Promise.resolve(sse([
+      {id: 'resp', choices: [{delta: {content: '正在安排任务。'}, finish_reason: null}]},
+      {id: 'resp', choices: [{delta: {tool_calls: [{index: 0, id: 'call', function: {name: 'dispatch', arguments: '{}'}}]}, finish_reason: 'tool_calls'}]},
+    ])),
+  }).open()
+  const events = await collect(session.stream({inputs: [{kind: 'user_text', text: '创建文件'}],
+    tools: [{name: 'dispatch', parameters: {type: 'object', properties: {}}}], signal: new AbortController().signal}))
+  assert.deepEqual(events.map(event => event.kind), ['response_started', 'tool_call', 'response_completed'])
+  assert.equal(events[1]?.kind === 'tool_call' && events[1].name, 'dispatch')
   await session.close()
 })
 
@@ -641,5 +657,32 @@ test('host facts are system context, never a new user decision', async () => {
   await collect(llm.stream({inputs: [{kind: 'host_context', content: '请询问用户是否创建工作区'}], tools: [], signal: new AbortController().signal}))
   const {messages} = JSON.parse(capture.init?.body as string) as {messages: unknown[]}
   assert.deepEqual(messages.at(-1), {role: 'system', content: '请询问用户是否创建工作区'})
+  await llm.close()
+})
+
+test('host narration reads only its fact while the next user turn retains conversation history', async () => {
+  const requests: {messages: {role: string; content: unknown}[]}[] = []
+  const replies = ['旧问题：请选择项目。', '任务未能启动。', '已理解后续请求。']
+  const llm = createQwenCascadedLlmFactory({
+    baseUrl: 'https://dashscope.example/v1', apiKey: 'test', model: 'qwen-flash', instructions: 'instructions',
+    fetchImpl: (_url, init) => {
+      requests.push(JSON.parse(init!.body as string) as typeof requests[number])
+      return Promise.resolve(sse([{id: `response-${requests.length}`, choices: [{
+        delta: {content: replies.shift()}, finish_reason: 'stop',
+      }]}]))
+    },
+  }).open()
+  const signal = new AbortController().signal
+  await collect(llm.stream({inputs: [{kind: 'user_text', text: '用户原始任务'}], tools: [], signal}))
+  await collect(llm.stream({inputs: [{kind: 'packed_history', content: '恢复的旧问题'},
+    {kind: 'host_activation', content: '本次执行请求已失效，任务未能启动。'}],
+    workspaceContext: '旧工作区上下文', tools: [], signal}))
+  const narration = JSON.stringify(requests[1])
+  assert.doesNotMatch(narration, /旧问题|原始任务|旧工作区/)
+  assert.match(narration, /请求已失效/)
+  await collect(llm.stream({inputs: [{kind: 'user_text', text: '继续讨论'}], tools: [], signal}))
+  const conversation = JSON.stringify(requests[2])
+  assert.match(conversation, /用户原始任务/)
+  assert.match(conversation, /任务未能启动/)
   await llm.close()
 })

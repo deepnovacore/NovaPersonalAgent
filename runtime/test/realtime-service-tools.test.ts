@@ -1150,7 +1150,7 @@ test('dispatch on the coordinated coding executor opens the intake; a committed 
     resolveTarget: () => Promise.resolve(({workspace: '/canonical', action: 'reuse', workspace_display_name: 'alpha', workspace_id: 'w1', session_title: null, session_id: null})),
     models: {
       assess: input => Promise.resolve(({intake_id: input.intake_id, revision: input.revision,
-        kind: 'work', project: null, project_evidence: null, session: 'latest',
+        kind: 'work', project: null, project_evidence: null, session: {mode: 'latest'},
         slots: {goal: {state: 'stated', note: 'Improve login'}, scope: {state: 'missing', note: ''}, acceptance: {state: 'missing', note: ''}, constraints: {state: 'missing', note: ''}},
         readiness: .25, intent_to_proceed: true, candidate_question: {owner: 'user', text: 'Which observable behavior?'}, discovery: [], early_exit: false, abandon: false})),
       plan: () => { return Promise.reject(new Error('not ready')) },
@@ -1177,7 +1177,7 @@ test('dispatch on the coordinated coding executor opens the intake; a committed 
   await service.close()
 })
 
-for (const race of ['assess-steer', 'assess-cancel', 'cancel-resolver'] as const) {
+for (const race of ['assess-steer'] as const) {
   test(`intake pending speech fences ${race} through RealtimeService and reassesses the final correction`, async () => {
     let release!: () => void
     const held = new Promise<void>(resolve => { release = resolve })
@@ -1188,21 +1188,15 @@ for (const race of ['assess-steer', 'assess-cancel', 'cancel-resolver'] as const
     const intake = intakePorts({
       models: {
         assess: async input => {
-          if (first && race !== 'cancel-resolver') { entered(); await held }
+          if (first) { entered(); await held }
           return {intake_id: input.intake_id, revision: input.revision,
-            kind: race === 'assess-steer' ? 'steer' : 'cancel', project: null, project_evidence: null, session: 'latest',
+            kind: race === 'assess-steer' ? 'steer' : 'cancel', project: null, project_evidence: null, session: {mode: 'latest'},
             slots: {goal: {state: 'stated', note: 'adjust task'}, scope: {state: 'missing', note: ''}, acceptance: {state: 'missing', note: ''}, constraints: {state: 'missing', note: ''}},
             readiness: .25, intent_to_proceed: true, candidate_question: null, discovery: [], early_exit: false, abandon: false}
         },
         plan: () => { throw new Error('unexpected plan') }, resolveCancelTarget: () => Promise.resolve(null),
       },
       steer: (_current, _project, text) => { effects.push(text); return {accepted: true, delegate_id: 'running'} },
-      cancel: async (text, stillWanted) => {
-        if (first && race === 'cancel-resolver') { entered(); await held }
-        if (!stillWanted()) return {code: 'not_running'}
-        effects.push(text)
-        return {code: 'not_running'}
-      },
     })
     const {service} = realtimeServiceHarness('pipeline', {projectTool: true, intake})
     await service.connect()
@@ -1218,6 +1212,11 @@ for (const race of ['assess-steer', 'assess-cancel', 'cancel-resolver'] as const
     first = false
     await speak(service, 'u2', 'Apply my corrected request')
     await service.settleIntakeForTest()
+    assert.equal(effects.length, 0, 'raw transcripts carry no execution authority')
+    await service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: 'r1', status: 'completed', reason: ''})
+    await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'r2'})
+    await service.handleEvent({kind: 'tool_call_ready', session_epoch: 1, response_id: 'r2', item_id: 't2', call_id: 'c2', name: 'dispatch', arguments: {executor: 'codex', instruction: 'Apply my corrected request'}})
+    await service.settleIntakeForTest()
     assert.equal(effects.length, 1)
     assert.match(effects[0]!, /Apply my corrected request/u)
     await service.close()
@@ -1230,7 +1229,7 @@ for (const terminal of ['failed', 'empty'] as const) {
     const {service} = realtimeServiceHarness('pipeline', {projectTool: true, intake: intakePorts({
       models: {
         assess: input => Promise.resolve({intake_id: input.intake_id, revision: input.revision,
-          kind: 'steer', project: null, project_evidence: null, session: 'latest',
+          kind: 'unclear', project: null, project_evidence: null, session: {mode: 'latest'},
           slots: {goal: {state: 'stated', note: 'task'}, scope: {state: 'missing', note: ''}, acceptance: {state: 'missing', note: ''}, constraints: {state: 'missing', note: ''}},
           readiness: .25, intent_to_proceed: false, candidate_question: null, discovery: [], early_exit: false, abandon: false}),
         plan: () => { throw new Error('unexpected plan') }, resolveCancelTarget: () => Promise.resolve(null),
@@ -1249,8 +1248,9 @@ for (const terminal of ['failed', 'empty'] as const) {
       ? {kind: 'user_transcript_failed', session_epoch: 1, item_id: 'u2'}
       : {kind: 'user_transcript_final', session_epoch: 1, item_id: 'u2', text: '   '})
     await service.settleIntakeForTest()
-    assert.equal(service.intakeSession?.state, 'closed')
+    assert.equal(service.intakeSession?.state, terminal === 'failed' ? 'closed' : 'clarifying')
     assert.deepEqual(effects, [])
+    if (terminal === 'empty') { await service.close(); return }
     await service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: 'r1', status: 'completed', reason: ''})
     await speak(service, 'u3', 'Discuss a new task')
     await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'r3'})

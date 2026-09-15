@@ -8,6 +8,7 @@ export function validateProjectResult(result) {
     ...(!result.proposalId || result.confirmedId !== result.proposalId ? ['confirmation_identity'] : []),
     ...(result.replacedProposal ? ['proposal_replaced_by_confirmation'] : []),
     ...(result.outcome !== 'ok' || result.code !== 'completed' ? ['executor_not_completed'] : []),
+    ...(!Array.isArray(result.followups)||result.followups.length!==2||result.followups.some((item,index)=>item.session!==['latest','new'][index]||item.outcome!=='ok'||item.sessionMatches!==true||item.file!==['CONTINUE_OK','NEW_SESSION_OK'][index]) ? ['followup_not_completed'] : []),
     ...(result.file?.trim() !== 'NOVA_E2E_OK' ? ['artifact_mismatch'] : []),
   ]
 }

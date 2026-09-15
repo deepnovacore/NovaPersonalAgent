@@ -1275,6 +1275,53 @@ test('a common LLM failure uses a provider-neutral stable owner code', async () 
   await adapter.close()
 })
 
+test('a host fact can start immediately after an observed terminal', async () => {
+  const llm = new FakeLlm(
+    [
+      {kind: 'response_started', response_id: 'response-first'},
+      {kind: 'response_completed', response_id: 'response-first'},
+    ],
+    [
+      {kind: 'response_started', response_id: 'response-second'},
+      {kind: 'response_completed', response_id: 'response-second'},
+    ],
+  )
+  const adapter = new CascadedRealtimeAdapter({
+    endpointing: new ScriptedEndpointing(), asr: new FakeAsrClient(), llm,
+    tts: new FakeTtsClient(new FakeTtsSession(), new FakeTtsSession()),
+    idFactory: ids('session-terminal-window', 'provider-first', 'provider-second'),
+  })
+  const controller = new AbortController()
+  await adapter.connect({tools: [], signal: controller.signal})
+  const reader = adapter.events(controller.signal)[Symbol.asyncIterator]()
+  const nextTerminal = async (): Promise<Extract<RealtimeProviderEvent, {kind: 'response_terminal'}>> => {
+    while (true) {
+      const event = await reader.next()
+      if (event.done === true) throw new Error('adapter event stream ended before terminal')
+      if (event.value.kind === 'response_terminal') return event.value
+    }
+  }
+
+  try {
+    const first = hostItem('terminal-window-first')
+    await adapter.injectHostItem(first, directOptions())
+    await adapter.createResponse({kind: 'host_fact', item: first, task_summary: null,
+      origin_spoken: false}, controller.signal)
+    assert.equal((await settleWithin('first immediate terminal', nextTerminal())).status, 'completed')
+
+    const second = hostItem('terminal-window-second')
+    await adapter.injectHostItem(second, directOptions())
+    await adapter.createResponse({kind: 'host_fact', item: second, task_summary: null,
+      origin_spoken: false}, controller.signal)
+    assert.equal((await settleWithin('second immediate terminal', nextTerminal())).status, 'completed')
+    assert.equal(llm.calls.length, 2)
+  } finally {
+    controller.abort()
+    await reader.return?.()
+    await adapter.close()
+  }
+})
+
 test('an unresolved tool resets chaining and a late abandoned output never calls LLM', async () => {
   const llm = new FakeLlm(
     [

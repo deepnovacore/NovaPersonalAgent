@@ -4,9 +4,9 @@ import {readFileSync} from 'node:fs'
 import {validateProjectResult} from './project-result.mjs'
 
 test('project acceptance requires matching proposal, terminal success and actual artifact', () => {
-  const good = {expectedName:'test',proposalName:'test',workspaceName:'test',managedRoot:'/tmp/live/workspaces',workspacePath:'/tmp/live/workspaces/test-123',proposalId:'p1',confirmedId:'p1',replacedProposal:false,outcome:'ok',code:'completed',file:'NOVA_E2E_OK\n'}
+  const good = {followups:[{session:'latest',sessionMatches:true,outcome:'ok',file:'CONTINUE_OK'},{session:'new',sessionMatches:true,outcome:'ok',file:'NEW_SESSION_OK'}],expectedName:'test',proposalName:'test',workspaceName:'test',managedRoot:'/tmp/live/workspaces',workspacePath:'/tmp/live/workspaces/test-123',proposalId:'p1',confirmedId:'p1',replacedProposal:false,outcome:'ok',code:'completed',file:'NOVA_E2E_OK\n'}
   assert.deepEqual(validateProjectResult(good),[])
-  for(const patch of [{approvalRequired:true},{proposalName:'other'},{workspaceName:'other'},{workspacePath:'/tmp/live/workspaces-sibling/x'},{workspacePath:'/tmp/elsewhere'},{confirmedId:'p2'},{replacedProposal:true},{outcome:'failed'},{code:'transport_lost'},{file:null},{file:'wrong'}]) {
+  for(const patch of [{followups:[]},{followups:[{session:'latest',outcome:'refused',file:null}]},{approvalRequired:true},{proposalName:'other'},{workspaceName:'other'},{workspacePath:'/tmp/live/workspaces-sibling/x'},{workspacePath:'/tmp/elsewhere'},{confirmedId:'p2'},{replacedProposal:true},{outcome:'failed'},{code:'transport_lost'},{file:null},{file:'wrong'}]) {
     assert.ok(validateProjectResult({...good,...patch}).length>0)
   }
 })

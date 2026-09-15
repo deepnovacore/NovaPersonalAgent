@@ -4,7 +4,6 @@ import type {ConfirmedProjectOperation, ProjectProposal} from '../../projects/pr
 import {renderWorkOrder, type WorkOrder} from './work-order.js'
 import {
   ProjectResolutionError,
-  type CancelResult,
   type CoordinatorDecision,
   type IntakeTarget,
   type RosterEntry,
@@ -68,8 +67,6 @@ export interface IntakeOptions {
   readonly prepare: (session: Readonly<IntakeSession>) => ProjectProposal
   readonly dispatch: (session: Readonly<IntakeSession>, stillWanted?: () => boolean) => IntakeAdmission | Promise<IntakeAdmission>
   readonly steer: (session: Readonly<IntakeSession>, project: string | null, instruction: string, stillWanted?: () => boolean) => IntakeAdmission | Promise<IntakeAdmission>
-  /** `stillWanted` is re-checked by the adapter after its model call, before any work is aborted. */
-  readonly cancel: (instruction: string, stillWanted: () => boolean) => Promise<CancelResult>
   readonly invalidateProposal: () => void
   readonly fact: (session: Readonly<IntakeSession>, text: string) => void
   readonly record: (session: Readonly<IntakeSession>, kind: string, data: Readonly<Record<string, JsonValue>>) => void
@@ -80,7 +77,7 @@ export interface IntakeOptions {
 
 /** Events and confirmed-host results only; lifecycle decisions stay with the coding controller. */
 export type IntakeEventPort = Pick<IntakeController,
-  'userInputStarted' | 'userTurn' | 'cancel' | 'decline' | 'beginConfirmed' | 'settleConfirmed' |
+  'userInputStarted' | 'userInputEnded' | 'userResponseCompleted' | 'cancel' | 'decline' | 'beginConfirmed' | 'settleConfirmed' |
   'workspaceChanged' | 'factEligible' | 'preparing'>
 
 const emptySlots = (): IntakeSlots => ({
@@ -128,12 +125,6 @@ export function renderResolutionError(error: ProjectResolutionError): string {
   return `code=capacity：同时运行的任务已达上限，正在跑：${list(detail.running)}。可以先取消一个。新任务尚未执行。`
 }
 
-export function renderCancelResult(result: CancelResult): string {
-  if (result.code === 'cancelled') return `code=cancelled：已请求停止“${result.work.project}/${result.work.title}”，稍后有终态事实。`
-  if (result.code === 'not_running') return 'code=not_running：当前没有正在执行的任务。'
-  return `code=ambiguous_work：有多个任务在跑：${result.running.map(work => `${work.project}/${work.title}`).join('、')}。请用户说明要停哪一个。`
-}
-
 /** Two controller-owned single-flight slots; latest revision replaces pending work, never active work. */
 export class IntakeController {
   readonly #options: IntakeOptions
@@ -154,6 +145,17 @@ export class IntakeController {
       || this.#planning !== null || this.#session?.state === 'committing')
   }
   userInputStarted(): void { if (this.active) this.#userInputPending = true }
+  userInputEnded(): void {
+    // A transcript is context, not an amendment decision. Hold old async work until dispatch.
+    if (!this.active || this.#session?.proposal_id !== null) this.#userInputPending = false
+  }
+
+  userResponseCompleted(): void {
+    if (!this.#userInputPending || !this.active || this.#session?.proposal_id !== null) return
+    this.#userInputPending = false
+    this.#assessPending = true
+    this.#pump()
+  }
 
   workspaceChanged(workspaceId: string | null): void {
     if (this.#workspaceId !== undefined && this.#workspaceId !== workspaceId
@@ -168,10 +170,11 @@ export class IntakeController {
   }
 
   open(request: Readonly<Record<string, JsonValue>>, text: string, originRef: string, sessionId: string): 'intake_opened' | 'intake_in_progress' {
+    this.#userInputPending = false
     if (this.active && this.#session!.session_id !== sessionId) this.cancel()
     if (this.active) {
       const current = this.#session!
-      if (current.state === 'committing') return 'intake_in_progress'
+      if (current.state === 'committing' && current.proposal_id !== null) return 'intake_in_progress'
       // A provider repeats the draft for an already-ingested answer: one content revision per turn.
       if (current.origin_ref !== originRef) this.#revise(text, originRef, sessionId)
       return 'intake_in_progress'
@@ -189,18 +192,11 @@ export class IntakeController {
     return 'intake_opened'
   }
 
-  userTurn(text: string, originRef: string, sessionId: string): void {
-    this.#userInputPending = false
-    // Pending proposals belong to structured confirm/dispatch/cancel, regardless of wording.
-    if (this.#session?.session_id === sessionId && this.#session.proposal_id !== null) return
-    this.#revise(text, originRef, sessionId)
-  }
-
   #revise(text: string, originRef: string, sessionId: string): void {
     const current = this.#session
     if (current === null || !this.active) return
     if (current.session_id !== sessionId) { this.cancel(); return }
-    if (current.state === 'committing' || current.origin_ref === originRef) return
+    if (current.origin_ref === originRef) return
     if (stripLikePython(text) === '') { this.cancel(); return }
     current.turns.push({question: current.pending_question, answer: limit(text, 2000)})
     if (current.turns.length > 8) { this.#close('abandoned'); return }
@@ -303,6 +299,7 @@ export class IntakeController {
       const parsed = assessSchema.safeParse(raw)
       if (!parsed.success) { this.#malformed(current); return }
       const result = parsed.data
+      const sessionTitle = result.session.mode === 'named' ? result.session.title : null
       if (result.intake_id !== snapshot.intake_id || result.revision !== snapshot.revision) {
         this.#options.diagnostic('intake_stale_result'); return
       }
@@ -325,23 +322,18 @@ export class IntakeController {
       if (kind !== 'create' && kind !== 'unclear' && project !== null && project !== active && !affirmed
         && !evidenceOccurs(result.project_evidence ?? '', project,
           this.#userEvidence(current), this.#options.roster().map(entry => entry.name))
-          && !this.#namedSessionEvidence(project, result.session_title, current)) {
+          && !this.#namedSessionEvidence(project, sessionTitle, current)) {
         this.#options.diagnostic('intake_project_evidence_missing')
         kind = 'unclear'
         question = `是在 ${project} 里做吗？`
       }
-      if (result.session_title && project !== null && !this.#namedSessionEvidence(project, result.session_title, current)) {
+      if (sessionTitle && project !== null && !this.#namedSessionEvidence(project, sessionTitle, current)) {
         kind = 'unclear'
         question = '请明确要继续的项目和会话名称。'
       }
       current.kind = kind
       if (kind === 'unclear' || (kind === 'create' && project === null)) {
         this.#ask(current, kind === 'create' ? '新项目叫什么名字？' : question ?? '请说明要在哪个项目里做什么。')
-        return
-      }
-      if (!current.intent_to_proceed) {
-        current.state = 'clarifying'
-        this.#options.fact(current, '需求已记录，等待用户明确要求开始；不要继续追问或声称已执行。')
         return
       }
       // Keep the user's request and later corrections together. A project affirmation is target
@@ -351,16 +343,8 @@ export class IntakeController {
         : `宿主追问：${turn.question}\n用户补充：${turn.answer}`)].join('\n')
       // Local onset precedes final ASR and does not advance the intake revision yet.
       if (this.#userInputPending) return
-      if (kind === 'cancel') {
-        const outcome = await this.#options.cancel(userText, () => !this.#userInputPending && this.#live(snapshot.intake_id, snapshot.revision) !== null)
-        current = this.#current(snapshot.intake_id, snapshot.revision)
-        if (current === null || this.#userInputPending) return
-        this.#options.record(current, 'intake.cancel', {code: outcome.code})
-        this.#route(current, renderCancelResult(outcome))
-        return
-      }
       if (kind === 'steer') {
-        const wanted = () => !this.#userInputPending && this.#current(snapshot.intake_id, snapshot.revision) === current
+        const wanted = this.#launchWanted(current)
         const admission = await this.#options.steer(current, project, userText, wanted)
         if (!wanted()) return
         this.#options.record(current, 'intake.steer', {accepted: admission.accepted, delegate_id: admission.delegate_id ?? null})
@@ -369,7 +353,7 @@ export class IntakeController {
           : `code=steer_failed：追加要求未送达：${admission.problem ?? admission.code ?? 'runtime_rejected'}。`)
         return
       }
-      const decision: CoordinatorDecision = {kind: kind === 'switch' ? 'switch' : kind === 'create' ? 'create' : 'work', project, session: result.session, ...(result.session_title ? {session_title: result.session_title} : {})}
+      const decision: CoordinatorDecision = {kind: kind === 'switch' ? 'switch' : kind === 'create' ? 'create' : 'work', project, session: result.session.mode === 'new' ? 'new' : 'latest', ...(sessionTitle ? {session_title: sessionTitle} : {})}
       let target: IntakeTarget
       try {
         target = await this.#options.resolveTarget(decision)
@@ -470,11 +454,10 @@ export class IntakeController {
         this.#propose(current, `计划（项目 ${project}）：${limit(order.objective, 200)}`)
         return
       }
-      if (this.#options.settings.plan_readback === 'summary') this.#options.fact(current, `计划（项目 ${project}）：${limit(order.objective, 240)}。只读回这一句，不再追问；等待宿主派单结果。`)
       current.state = 'committing'
-      const wanted = () => !this.#userInputPending && this.#current(snapshot.intake_id, snapshot.revision) === current
+      const wanted = this.#launchWanted(current)
       const admission = await this.#options.dispatch(current, wanted)
-      if (wanted()) this.#settle(admission)
+      if (this.#current(snapshot.intake_id, snapshot.revision) === current) this.#settle(admission)
     } catch {
       const current = this.#current(snapshot.intake_id, snapshot.revision)
       if (current !== null) this.#malformed(current)
@@ -500,6 +483,15 @@ export class IntakeController {
   #route(current: IntakeSession, text: string): void {
     this.#close('routed')
     this.#options.fact(current, text)
+  }
+
+  #launchWanted(current: IntakeSession): () => boolean {
+    const revision = current.revision
+    // Admission transfers ownership to the delegate. Completing intake does not cancel it.
+    return () => current.revision === revision && (
+      current.outcome === 'dispatched' || current.outcome === 'routed'
+      || (this.#session === current && current.state !== 'closed' && !this.#userInputPending)
+    )
   }
 
   #settle(result: IntakeAdmission): void {

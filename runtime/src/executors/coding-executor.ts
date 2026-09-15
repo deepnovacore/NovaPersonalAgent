@@ -68,9 +68,13 @@ export type CancelResult =
   | {readonly code: 'not_running'}
   | {readonly code: 'ambiguous_work'; readonly running: readonly RunningWork[]}
 
+export type CancelTargetResolver = (instruction: string, running: readonly RunningWork[]) => Promise<string | null>
+
 export interface CancelContext {
+  /** Host-resolved exact work id. When set, the adapter may cancel only that running work. */
+  readonly targetWorkId?: string
   /** Same `surrogate_model` as `intake.assess`; `null` when the model could not pick one of `running`. */
-  readonly resolveCancelTarget: (instruction: string, running: readonly RunningWork[]) => Promise<string | null>
+  readonly resolveCancelTarget?: CancelTargetResolver
   /** Re-checked after the model call, before any slot is aborted; `false` means the request was superseded. */
   readonly stillWanted?: () => boolean
 }
@@ -165,6 +169,6 @@ export interface CodingAgentControllerFactory {
     readonly intake: IntakeOptions | undefined
     readonly dispatchPort: AgentRuntimeDispatchPort
     readonly executor: Pick<AgentExecutor, 'cancel'> | undefined
-    readonly resolveCancelTarget: CancelContext['resolveCancelTarget']
+    readonly resolveCancelTarget: CancelTargetResolver
   }): AgentController & {readonly intake?: IntakeEventPort | undefined}
 }

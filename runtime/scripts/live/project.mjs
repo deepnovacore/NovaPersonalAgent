@@ -73,6 +73,8 @@ try {
   const name='语音验收'+randomUUID().slice(0,6)
   report.request=`新建一个叫“${name}”的工作区，只创建 acceptance.txt，内容为 NOVA_E2E_OK。不安装依赖，不联网，不启动服务器。完成后读取文件验证内容。`
   await send(report.request)
+  await wait('initial_frontend_terminal',()=>telemetry.diagnostics().records.some(item=>item.kind==='provider.response_terminal'),60000)
+  if(!telemetry.diagnostics().records.some(item=>item.kind==='tool.call'&&item.payload.name==='host.dispatch'))throw Error('clear_request_not_dispatched')
   await wait('proposal',()=>view?.pending_confirmation===true,90000)
   Object.assign(report.result,{proposalId:view.pending_confirmation_id,expectedName:name,proposalName:view.pending_workspace_display_name,managedRoot:path.join(runRoot,'workspaces')})
   if(view.pending_workspace_display_name!==name)throw Error('project_name_mismatch')
@@ -87,10 +89,33 @@ try {
   const state=JSON.parse(await readFile(path.join(runRoot,'codex-projects-v1.json'),'utf8'))
   const workspace=Object.values(state.workspaces).find(item=>item.origin==='managed')
   if(workspace){Object.assign(report.result,{workspaceName:workspace.display_name,workspacePath:realpathSync(workspace.canonical_path)});report.workspace=workspace.canonical_path;report.sessions=Object.values(state.sessions).filter(item=>item.workspace_id===workspace.workspace_id).map(({codex_thread_id,state,origin})=>({codex_thread_id,state,origin}));try{report.result.file=await readFile(path.join(workspace.canonical_path,'acceptance.txt'),'utf8')}catch{report.result.file=null}}
+  report.result.followups=[]
+  if(report.result.outcome==='ok' && workspace) {
+    let previousThread=state.sessions[workspace.active_session_id]?.codex_thread_id
+    for(const [session,file,expected] of [['latest','continued.txt','CONTINUE_OK'],['new','new-session.txt','NEW_SESSION_OK']]) {
+      await wait('delivery_idle',()=>assembly.service.session.providerIdle)
+      const before=assembly.runtime.memory.channels.get('codex').items.filter(item=>item.outcome!=null).length
+      const action=session==='new'?'里新建一个会话执行':'继续执行'
+      await send(`在刚创建的工作区“${name}”${action}：只创建 ${file}，内容为 ${expected}，然后读取验证。不安装依赖，不联网，不启动服务器。现在开始。`)
+      await wait(`${session}_completed`,()=>assembly.runtime.memory.channels.get('codex').items.filter(item=>item.outcome!=null).length>before,120000)
+      const terminal=assembly.runtime.memory.channels.get('codex').items.findLast(item=>item.outcome!=null)
+      let actual=null
+      try{actual=await readFile(path.join(workspace.canonical_path,file),'utf8')}catch{}
+      const after=JSON.parse(await readFile(path.join(runRoot,'codex-projects-v1.json'),'utf8'))
+      const currentWorkspace=after.workspaces[workspace.workspace_id]
+      const thread=after.sessions[currentWorkspace?.active_session_id]?.codex_thread_id
+      const sessionMatches=!!thread&&!!previousThread&&(session==='new'?thread!==previousThread:thread===previousThread)
+      report.result.followups.push({session,outcome:terminal.outcome,content:terminal.content,file:actual,expected,thread,sessionMatches})
+      previousThread=thread
+      if(terminal.outcome!=='ok'||actual!==expected)break
+    }
+    await wait('final_delivery_idle',()=>assembly.service.session.providerIdle)
+  }
   report.failures=validateProjectResult(report.result)
   report.status=report.failures.length?'failed':'passed'
-}catch(error){report.status='failed';report.failure=['codex_not_found','project_name_mismatch','proposal_replaced_by_confirmation','proposal_timeout','readback_terminal_timeout','executor_terminal_timeout'].includes(error.message)?error.message:'runtime_failure';report.errorType=error.name}
+}catch(error){report.status='failed';report.failure=['clear_request_not_dispatched','codex_not_found','project_name_mismatch','proposal_replaced_by_confirmation','proposal_timeout','readback_terminal_timeout','executor_terminal_timeout','latest_completed_timeout','new_completed_timeout'].includes(error.message)?error.message:'runtime_failure';report.errorType=error.name}
 finally {
+  if(assembly)report.codingRecords=assembly.runtime.memory.channels.get('codex')?.items??[]
   if(assembly)report.transcripts=assembly.runtime.memory.channels.get('conversation')?.items.filter(i=>i.trust==='trusted_user').map(i=>i.content.text)??[]
   report.telemetry=telemetry.diagnostics()
   try{await assembly?.stop();await resource?.close()}catch{report.status='failed';report.cleanupFailure=true}

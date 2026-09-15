@@ -97,10 +97,19 @@ export function projectExecutorEvent(
   } else {
     const outcome = event.kind === 'deadline' ? 'unknown' : event.payload.outcome
     phase = outcome === 'ok' ? 'completed' : outcome
+    const content = event.kind === 'handoff' ? event.payload.content : {}
+    const superseded = outcome === 'refused' && content !== null && typeof content === 'object' && !Array.isArray(content)
+      && (content.code === 'superseded' || content.error === 'superseded')
+    const usageLimited = content !== null && typeof content === 'object' && !Array.isArray(content)
+      && (content.code === 'usage_limit_exceeded' || content.error === 'usage_limit_exceeded')
     const fallback = outcome === 'ok'
       ? `${label} ${monitor ? '监控已停止' : '已完成任务'}。`
-      : `${label} ${outcome === 'unknown' ? '结果尚未确认' : outcome === 'refused' ? '请求被拒绝' : outcome === 'cancelled' ? (monitor ? '监控已停止' : '任务已停止') : (monitor ? '监控失败' : '执行失败')}。`
-    text = event.kind === 'handoff' ? safeProgressSummary(event.payload.content.summary, fallback) : fallback
+      : usageLimited
+        ? `${label} 额度不足，任务未完成。`
+      : superseded
+        ? `${label} 任务未启动。`
+        : `${label} ${outcome === 'unknown' ? '结果尚未确认' : outcome === 'refused' ? '请求被拒绝' : outcome === 'cancelled' ? (monitor ? '监控已停止' : '任务已取消') : (monitor ? '监控失败' : '执行失败')}。`
+    text = event.kind === 'handoff' && !superseded && !usageLimited ? safeProgressSummary(event.payload.content.summary, fallback) : fallback
     const changed = event.kind === 'handoff' ? event.payload.content.changed_files : null
     result = {delegate_id: id, executor: publicExecutor, outcome, summary: text,
       started_at: delegate.dispatched_at, ended_at: event.ts,

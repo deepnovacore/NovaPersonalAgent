@@ -1347,6 +1347,10 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     owner.responseStartBarrier = barrier
     if (previous !== null) await previous
     try {
+      // Terminal is observable before the response task finishes releasing its ownership.
+      if (owner.response?.terminal && !await settleWithin(owner.response.task, this.#settleTimeoutMs)) {
+        throw new CascadedRealtimeError('response_active')
+      }
       if (!this.#isCurrent(owner)) throw new CascadedRealtimeError('state')
       return await operation()
     } finally {

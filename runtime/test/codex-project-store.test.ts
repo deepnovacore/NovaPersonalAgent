@@ -758,16 +758,32 @@ class CountingProtectRootFileAuthority extends DescriptorRelativeRootFileAuthori
   }
 }
 
-class DeferredReleaseLockAuthority implements NativeFileLockAuthority {
-  releaseStarted: (() => void) | null = null
+class DeferredReleaseLockAuthority extends DescriptorLockAuthority {
+  acquireCalls = 0
   releaseNow: (() => void) | null = null
+  #deferNextRelease = false
+  #releaseStarted: (() => void) | null = null
 
-  acquire(): NativeFileLockResult {
+  deferNextRelease(): Promise<void> {
+    this.#deferNextRelease = true
+    return new Promise<void>(resolveStarted => { this.#releaseStarted = resolveStarted })
+  }
+
+  override acquire(descriptor: number): NativeFileLockResult {
+    this.acquireCalls += 1
+    const acquired = super.acquire(descriptor)
+    if (acquired.status !== 'acquired') return acquired
     return {
       status: 'acquired',
       release: async () => {
-        this.releaseStarted?.()
-        await new Promise<void>(resolveRelease => { this.releaseNow = resolveRelease })
+        if (this.#deferNextRelease) {
+          this.#deferNextRelease = false
+          this.#releaseStarted?.()
+          this.#releaseStarted = null
+          await new Promise<void>(resolveRelease => { this.releaseNow = resolveRelease })
+          this.releaseNow = null
+        }
+        await acquired.release()
       },
     }
   }
@@ -1375,9 +1391,7 @@ test('a transaction joins asynchronous native unlock before its promise settles'
   const storeFixture = await projectStoreFixture('nova-codex-project-lock-join-')
 
   const nativeLocks = new DeferredReleaseLockAuthority()
-  let releaseStartedResolve: (() => void) | null = null
-  const releaseStarted = new Promise<void>(resolveStarted => { releaseStartedResolve = resolveStarted })
-  nativeLocks.releaseStarted = () => { releaseStartedResolve?.() }
+  const releaseStarted = nativeLocks.deferNextRelease()
   const store = await storeFixture.open({
     nativeLocks,
   })
@@ -1394,6 +1408,125 @@ test('a transaction joins asynchronous native unlock before its promise settles'
     await within('snapshot after native release', snapshot)
     await within('store close after transaction', closing)
     assert.equal(settled, true)
+  } finally {
+    nativeLocks.releaseNow?.()
+    await storeFixture.close(store)
+  }
+})
+
+test('same-instance default transactions wait behind an active transaction before native lock acquisition', async () => {
+  const storeFixture = await projectStoreFixture('nova-codex-project-instance-queue-')
+  const {root} = storeFixture
+  const firstPath = join(root, 'background')
+  const secondPath = join(root, 'foreground')
+  await mkdir(firstPath, {mode: 0o700})
+  await mkdir(secondPath, {mode: 0o700})
+  const nativeLocks = new DeferredReleaseLockAuthority()
+  const ids = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
+  const store = await storeFixture.open({
+    nativeLocks,
+    idFactory: () => ids.next().value ?? 'unused-id',
+  })
+  try {
+    const releaseStarted = nativeLocks.deferNextRelease()
+    const first = store.ensureImported('background', hostWorkspaceForTest(await realpath(firstPath)))
+    await within('background transaction release start', releaseStarted)
+    const callsBeforeSecond = nativeLocks.acquireCalls
+    let secondSettled = false
+    const second = store
+      .ensureImported('foreground', hostWorkspaceForTest(await realpath(secondPath)))
+      .finally(() => { secondSettled = true })
+    void second.catch(() => undefined)
+    await new Promise<void>(resolveTurn => { setImmediate(resolveTurn) })
+    assert.equal(secondSettled, false, 'foreground transaction must wait for predecessor ownership')
+    assert.equal(
+      nativeLocks.acquireCalls,
+      callsBeforeSecond,
+      'queued same-instance transaction must not collide with the held native lock',
+    )
+    nativeLocks.releaseNow?.()
+    assert.equal((await within('background transaction', first)).workspace_id, 'workspace-0001')
+    assert.equal((await within('foreground transaction', second)).workspace_id, 'workspace-0002')
+  } finally {
+    nativeLocks.releaseNow?.()
+    await storeFixture.close(store)
+  }
+})
+
+test('a caller signal aborts a queued same-instance transaction before native lock acquisition', async () => {
+  const storeFixture = await projectStoreFixture('nova-codex-project-instance-queue-abort-')
+  const {root} = storeFixture
+  const workspacePath = join(root, 'workspace')
+  const holderPath = join(root, 'holder')
+  await mkdir(workspacePath, {mode: 0o700})
+  await mkdir(holderPath, {mode: 0o700})
+  const nativeLocks = new DeferredReleaseLockAuthority()
+  const ids = ['workspace-0001', 'session-0001', 'workspace-0002'][Symbol.iterator]()
+  const store = await storeFixture.open({
+    nativeLocks,
+    idFactory: () => ids.next().value ?? 'unused-id',
+  })
+  try {
+    const workspace = await store.ensureImported(
+      'alpha',
+      hostWorkspaceForTest(await realpath(workspacePath)),
+    )
+    const starting = await store.beginSession(workspace.workspace_id, '任务')
+    const releaseStarted = nativeLocks.deferNextRelease()
+    const holder = store.ensureImported('holder', hostWorkspaceForTest(await realpath(holderPath)))
+    await within('holder transaction release start', releaseStarted)
+    const callsBeforeQueued = nativeLocks.acquireCalls
+    const abort = new AbortController()
+    const rollback = (store.rollbackSessionStart as unknown as (
+      sessionId: string,
+      options: {readonly wait: boolean; readonly signal: AbortSignal},
+    ) => Promise<boolean>).call(store, starting.session_id, {wait: true, signal: abort.signal})
+    void rollback.catch(() => undefined)
+    await new Promise<void>(resolveTurn => { setImmediate(resolveTurn) })
+    assert.equal(nativeLocks.acquireCalls, callsBeforeQueued)
+    abort.abort()
+    await assert.rejects(
+      within('caller-aborted same-instance predecessor wait', rollback, 100),
+      (error: unknown) => error instanceof Error && error.name === 'AbortError',
+    )
+    nativeLocks.releaseNow?.()
+    await within('holder transaction', holder)
+    assert.equal((await store.resolveSession(workspace.workspace_id, null)).state, 'starting')
+  } finally {
+    nativeLocks.releaseNow?.()
+    await storeFixture.close(store)
+  }
+})
+
+test('store close aborts a queued same-instance transaction before native lock acquisition', async () => {
+  const storeFixture = await projectStoreFixture('nova-codex-project-instance-queue-close-')
+  const {root} = storeFixture
+  const firstPath = join(root, 'background')
+  const secondPath = join(root, 'foreground')
+  await mkdir(firstPath, {mode: 0o700})
+  await mkdir(secondPath, {mode: 0o700})
+  const nativeLocks = new DeferredReleaseLockAuthority()
+  const ids = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
+  const store = await storeFixture.open({
+    nativeLocks,
+    idFactory: () => ids.next().value ?? 'unused-id',
+  })
+  try {
+    const releaseStarted = nativeLocks.deferNextRelease()
+    const first = store.ensureImported('background', hostWorkspaceForTest(await realpath(firstPath)))
+    await within('background transaction release start', releaseStarted)
+    const second = store.ensureImported('foreground', hostWorkspaceForTest(await realpath(secondPath)))
+    void second.catch(() => undefined)
+    let closeSettled = false
+    const closing = store.close().finally(() => { closeSettled = true })
+    await assert.rejects(
+      within('close-aborted same-instance predecessor wait', second, 100),
+      (error: unknown) => error instanceof ProjectStateError && error.code === 'state_lock_failed',
+    )
+    assert.equal(closeSettled, false, 'close must still join the active predecessor transaction')
+    nativeLocks.releaseNow?.()
+    await within('background transaction', first)
+    await within('store close after queued transaction abort', closing)
   } finally {
     nativeLocks.releaseNow?.()
     await storeFixture.close(store)

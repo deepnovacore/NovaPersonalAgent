@@ -470,6 +470,61 @@ for (const ending of ['cancel', 'abort'] as const) {
   })
 }
 
+test('exact cancel target never falls back to another running work', async () => {
+  const value = await fixture()
+  let release!: (outcome: TransportOutcome) => void
+  value.factory.runGate = new Promise<TransportOutcome>(resolve => { release = resolve })
+  let starts = 0
+  let firstStarted!: () => void
+  let secondStarted!: () => void
+  const firstRunning = new Promise<void>(resolve => { firstStarted = resolve })
+  const secondRunning = new Promise<void>(resolve => { secondStarted = resolve })
+  value.factory.onRun = () => {
+    starts += 1
+    if (starts === 1) firstStarted()
+    else if (starts === 2) secondStarted()
+  }
+  try {
+    await value.store.createManaged('beta')
+    await value.store.selectWorkspace('alpha')
+    const first = run(value, 'first long task', {project: 'alpha', title: 'First', delegateId: 'work-first'})
+    const firstOutcome = first.then(
+      value => ({kind: 'result' as const, value}),
+      error => ({kind: 'error' as const, error: error instanceof Error ? error : new Error('non-error project rejection')}),
+    )
+    await settleWithin('first run starts', firstRunning)
+    const second = run(value, 'second long task', {project: 'beta', session: 'new', title: 'Second', delegateId: 'work-second'})
+    const secondOutcome = second.then(
+      value => ({kind: 'result' as const, value}),
+      error => ({kind: 'error' as const, error: error instanceof Error ? error : new Error('non-error project rejection')}),
+    )
+    await settleWithin('second run starts', secondRunning)
+    const running = value.adapter.running()
+    assert.deepEqual(running.map(work => work.work_id).sort(), ['work-first', 'work-second'])
+
+    assert.deepEqual(await value.adapter.cancel('ignored', {targetWorkId: 'missing-work'}), {code: 'ambiguous_work', running})
+    assert.deepEqual(value.adapter.running().map(work => work.work_id).sort(), ['work-first', 'work-second'])
+
+    assert.deepEqual(await value.adapter.cancel('ignored', {targetWorkId: 'work-second'}), {
+      code: 'cancelled', work: {work_id: 'work-second', project: 'beta', title: 'Second'},
+    })
+    const secondCancelled = await settleWithin('second cancelled', secondOutcome)
+    assert.equal(secondCancelled.kind, 'result')
+    assert.deepEqual(secondCancelled.value, {
+      outcome: 'cancelled', trust: 'trusted_system',
+      content: {reason: 'user_cancelled', work_id: 'work-second'},
+    })
+    release(COMPLETE)
+    const firstCompleted = await settleWithin('first completes', firstOutcome)
+    assert.equal(firstCompleted.kind, 'result')
+    assert.equal(firstCompleted.value.outcome, 'ok')
+  } finally {
+    release?.(COMPLETE)
+    await value.adapter.close()
+    await rm(value.root, {recursive: true, force: true})
+  }
+})
+
 test('a residual create race is recoverably refused before effects', async () => {
   const value = await fixture()
   try {

@@ -37,6 +37,19 @@ test('progress projects only correlated accepted evidence and never private comm
   assert.deepEqual(projectExecutorEvent(terminal, evidence, channel => channel === 'codex' ? 'coding_agent' : null)?.result, {
     delegate_id: 'd', executor: 'coding_agent', outcome: 'ok', summary: 'coding_agent 已完成任务。', started_at: 1, ended_at: 3, changed_files: null,
   })
+  const superseded: EventRecord = {seq: 3, ts: 4, kind: 'handoff', payload: {
+    channel: 'codex', delegate_id: 'd', origin_ref: 'conversation:1', outcome: 'refused', trust: 'trusted_system', content: {error: 'superseded'}, refs: [],
+  }}
+  assert.deepEqual(projectExecutorEvent(superseded, evidence)?.result, {
+    delegate_id: 'd', executor: 'codex', outcome: 'refused', summary: 'Codex 任务未启动。', started_at: 1, ended_at: 4, changed_files: null,
+  })
+  const usageLimited: EventRecord = {seq: 4, ts: 5, kind: 'handoff', payload: {
+    channel: 'codex', delegate_id: 'd', origin_ref: 'conversation:1', outcome: 'unknown', trust: 'untrusted_external',
+    content: {code: 'usage_limit_exceeded', summary: 'raw provider quota text must stay private'}, refs: [],
+  }}
+  assert.deepEqual(projectExecutorEvent(usageLimited, evidence)?.result, {
+    delegate_id: 'd', executor: 'codex', outcome: 'unknown', summary: 'Codex 额度不足，任务未完成。', started_at: 1, ended_at: 5, changed_files: null,
+  })
   assert.equal(projectExecutorEvent(terminal, {...evidence, claimedHandoff: () => undefined}), null)
   assert.equal(projectExecutorEvent({...terminal, ts: 0}, evidence), null)
   const frame = projectExecutorEvent(started, evidence)!.progress

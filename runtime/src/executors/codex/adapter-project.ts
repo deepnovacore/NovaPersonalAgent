@@ -295,12 +295,16 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     return [...this.#slots.values()].map(slot => slot.work)
   }
 
-  /** 0 → not_running; 1 → cancel it (no model call); >1 → one `resolveCancelTarget` call, else ambiguous. */
+  /** Exact target id cancels only that work; otherwise 0 → not_running, 1 → cancel, >1 → model target. */
   async cancel(instruction: string | undefined, context: CancelContext): Promise<CancelResult> {
     const running = this.running()
     if (running.length === 0) return {code: 'not_running'}
-    let target = running.length === 1 ? running[0] : undefined
-    if (target === undefined && instruction !== undefined && instruction !== '') {
+    let target = context.targetWorkId === undefined
+      ? running.length === 1 ? running[0] : undefined
+      : running.find(work => work.work_id === context.targetWorkId)
+    if (context.targetWorkId !== undefined && context.stillWanted?.() === false) return {code: 'ambiguous_work', running}
+    if (target === undefined && context.targetWorkId === undefined && instruction !== undefined && instruction !== ''
+      && context.resolveCancelTarget !== undefined) {
       const id = await context.resolveCancelTarget(instruction, running)
       // The user may have corrected themselves during the model call: a stale cancel stops nothing.
       if (context.stillWanted?.() === false) return {code: 'ambiguous_work', running}

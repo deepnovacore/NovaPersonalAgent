@@ -4,7 +4,7 @@ import {parseProgressFrame, validProjectLabel} from './bubbles.mjs'
 const RUNNING = new Set(['started', 'working'])
 const AUTO_HIDE = new Set(['completed', 'cancelled'])
 const PHASES = new Set([...RUNNING, ...AUTO_HIDE, 'failed', 'refused', 'unknown'])
-const STATUS = {started: '已开始', working: '进行中', completed: '已完成', cancelled: '已停止', failed: '执行失败', refused: '请求被拒绝', unknown: '结果待确认'}
+const STATUS = {started: '已开始', working: '进行中', completed: '已完成', cancelled: '已停止', failed: '执行失败', refused: '未执行', unknown: '结果待确认'}
 
 export function parseTaskSnapshot(frame) {
   if (!frame || frame.type !== EXECUTOR_TASKS || !Number.isSafeInteger(frame.revision) || frame.revision < 0

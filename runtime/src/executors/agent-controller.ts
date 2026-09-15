@@ -37,6 +37,7 @@ export interface AgentCancelRequest {
 
 /** The smallest runtime capability a controller may use to start owned executor work. */
 export interface AgentRuntimeDispatchPort {
+  cancelPendingDispatch?(delegateId: string): boolean
   dispatch(request: {
     readonly channel: string
     readonly op: string
@@ -82,6 +83,7 @@ export const agentActionResultSchema = z.discriminatedUnion('code', [
     code: z.literal('cancelled'), accepted: z.literal(true),
     detail: z.object({work: agentWorkSchema}).strict(),
   }).strict(),
+  z.object({code: z.literal('intake_cancelled'), accepted: z.literal(true), detail: noDetailSchema}).strict(),
   z.object({code: z.literal('not_running'), accepted: z.literal(true), detail: noDetailSchema}).strict(),
   z.object({code: z.literal('busy'), accepted: z.literal(true), detail: noDetailSchema}).strict(),
   z.object({code: z.literal('clarification_required'), accepted: z.literal(true), detail: noDetailSchema}).strict(),

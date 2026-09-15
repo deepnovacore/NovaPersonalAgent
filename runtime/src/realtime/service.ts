@@ -1197,6 +1197,9 @@ export class RealtimeService {
       this.#continuations.finishContinuation(event)
       this.#continuations.finishOrigin(event.response_id)
       const itemId = this.#userOrigins.itemForResponse(event.session_epoch, event.response_id)
+      if (event.status === 'completed' && itemId !== undefined
+        && this.#userOrigins.revisionForItem(event.session_epoch, itemId) === this.session.userInputRevision
+        && this.#intakeUser?.localOnsetRevision === this.#localSpeechOnsetRevision) this.#intake?.userResponseCompleted()
       await this.#confirmation.settleTerminal(event, itemId)
       await this.#approvalHost.settleTerminal(event)
       this.#confirmation.clearTerminalShadow(event.session_epoch, itemId)
@@ -1245,7 +1248,7 @@ export class RealtimeService {
         })
         this.#rememberUserOriginRef(event.session_epoch, event.item_id, originRef)
         this.#intakeUser = {text: event.text, origin_ref: originRef, epoch: event.session_epoch, inputRevision, localOnsetRevision}
-        this.#intake?.userTurn(event.text, originRef, String(event.session_epoch))
+        this.#intake?.userInputEnded()
         this.#awaitingUserOrigin = this.#userOrigins.hasUnboundRevision(
           event.session_epoch,
           this.session.userInputRevision,

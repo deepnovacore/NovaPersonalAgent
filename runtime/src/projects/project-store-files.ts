@@ -1,4 +1,5 @@
 import {randomUUID} from 'node:crypto'
+import {addAbortListener} from 'node:events'
 import {constants, lstatSync, realpathSync, type Stats} from 'node:fs'
 import {open, type FileHandle} from 'node:fs/promises'
 import {
@@ -292,10 +293,13 @@ export class ProjectStoreFiles {
     options?: ProjectTransactionWaitOptions,
   ): Promise<T> {
     if (this.#closed) throw new ProjectStateError('state_lock_failed')
+    const predecessors = [...this.#activeTransactions]
     let complete!: () => void
     const ownership = new Promise<void>(resolveOwnership => { complete = resolveOwnership })
     this.#activeTransactions.add(ownership)
     try {
+      await waitForTransactions(predecessors, options?.signal, this.#closeAbort.signal)
+      if (this.#closed) throw new ProjectStateError('state_lock_failed')
       await this.revalidateStateRoot()
       const mayRecover = this.#recoverStarting && !this.#startupLoaded
       const held = await this.openAndAcquireLock(
@@ -1416,6 +1420,28 @@ function readClock(clock: Clock): number {
   const value = clock.now()
   if (!Number.isFinite(value)) throw new ProjectStateError('state_lock_failed')
   return value
+}
+
+async function waitForTransactions(
+  transactions: readonly Promise<void>[],
+  signal: AbortSignal | undefined,
+  closeSignal: AbortSignal,
+): Promise<void> {
+  if (transactions.length === 0) return
+  if (signal?.aborted === true) throw projectAbortError()
+  if (closeSignal.aborted) throw new ProjectStateError('state_lock_failed')
+  const combined = signal === undefined ? closeSignal : AbortSignal.any([signal, closeSignal])
+  let subscription: ReturnType<typeof addAbortListener> | undefined
+  try {
+    await new Promise<void>((resolve, reject) => {
+      subscription = addAbortListener(combined, () => {
+        reject(closeSignal.aborted ? new ProjectStateError('state_lock_failed') : projectAbortError())
+      })
+      void Promise.all(transactions).then(() => { resolve() }, reject)
+    })
+  } finally {
+    subscription?.[Symbol.dispose]()
+  }
 }
 
 function isAbortError(error: unknown): error is Error {

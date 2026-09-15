@@ -17,6 +17,7 @@ export interface TurnCompletion {
   readonly status: 'completed' | 'failed'
   readonly final_text: string | null
   readonly internal_activity: number
+  readonly error_code?: 'usage_limit_exceeded' | null
 }
 
 export class AppServerTurnProjection {
@@ -320,6 +321,7 @@ export class AppServerTurnProjection {
       status: turn.status === 'completed' ? 'completed' : 'failed',
       final_text: finalText,
       internal_activity: this.#internalActivity,
+      error_code: safeTurnErrorCode(turn.error),
     })
   }
 
@@ -376,6 +378,11 @@ function requireNonemptyString(value: unknown): string {
 function requireObject(value: unknown): Record<string, unknown> {
   if (!isPlainObject(value)) throw new TypeError('object')
   return value
+}
+
+function safeTurnErrorCode(value: unknown): 'usage_limit_exceeded' | null {
+  if (!isPlainObject(value)) return null
+  return value.codexErrorInfo === 'usageLimitExceeded' ? 'usage_limit_exceeded' : null
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

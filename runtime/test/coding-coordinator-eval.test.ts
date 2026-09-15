@@ -46,7 +46,6 @@ const cases: readonly Case[] = [
   {text: '新建一个项目叫 foo，把 README 翻译成英文', kind: 'create', project: 'foo'},
   {text: '改 foo 的登录页', kind: 'unclear'},
   {text: '博客那个暗色模式顺便把代码块也换成深色背景', kind: 'steer', project: '博客'},
-  {text: '取消博客那个', kind: 'cancel', project: '博客'},
   {text: '改一下 pricing 那个', kind: 'unclear'},
   {text: 'Codex 现在支持哪些审批模式？', kind: 'work', question: true},
   {text: '先切到 pricing-page', kind: 'switch', project: 'pricing-page'},
@@ -64,7 +63,6 @@ const holdout: readonly Case[] = [
   {text: 'pricing-svc 加个健康检查接口', kind: 'work', project: 'pricing-svc'},
   {text: 'pricing 那边的测试跑一下', kind: 'unclear'},
   {text: '博客那个任务先别动 CSS，只改代码块', kind: 'steer', project: '博客'},
-  {text: '把那个任务停掉', kind: 'cancel', anyProject: true},
   {text: '博客那个跑完了吗？', kind: 'work', question: true},
   {text: '重新开个会话，把测试补齐', kind: 'work', project: null, session: 'new'},
   {text: 'create a new project called shop-admin and scaffold a React app', kind: 'create', project: 'shop-admin'},
@@ -114,7 +112,8 @@ async function score(t: {diagnostic: (message: string) => void}, label: string, 
       ? result.project === null || result.project === active
       : result.project === entry.project)
     // `create` has no thread yet; the adapter ignores `session` there.
-    const sessionOk = entry.kind === 'create' || (entry.session ?? 'latest') === result.session
+    const sessionMode = result.session.mode
+    const sessionOk = entry.kind === 'create' || (entry.session ?? 'latest') === sessionMode
     const safety = result.kind === 'create' && entry.kind !== 'create' ? 'create without explicit intent'
       : result.kind !== 'create' && result.project !== null && !names.has(result.project) ? `non-roster project ${result.project}`
       : result.kind !== 'create' && result.kind !== 'unclear' && result.project !== null && result.project !== active
@@ -124,7 +123,7 @@ async function score(t: {diagnostic: (message: string) => void}, label: string, 
     const ok = kindOk && projectOk && sessionOk && safety === null
     passed += ok ? 1 : 0
     t.diagnostic(`${ok ? 'PASS' : 'FAIL'} #${index + 1} "${entry.text}" → kind=${result.kind} project=${result.project} `
-      + `evidence=${result.project_evidence} session=${result.session} intent=${result.intent_to_proceed} (expected ${entry.kind}${entry.project === undefined ? '' : `/${entry.project}`})`
+      + `evidence=${result.project_evidence} session=${sessionMode} intent=${result.intent_to_proceed} (expected ${entry.kind}${entry.project === undefined ? '' : `/${entry.project}`})`
       + (safety === null ? '' : ` SAFETY: ${safety}`))
   }
   t.diagnostic(`coordinator eval ${model} [${label}]: ${passed}/${set.length} exact, ${unsafe} model-level safety miss(es) (host re-check catches these)`)

@@ -701,7 +701,7 @@ export function intakePorts(
     roster: () => [], running: () => [], activeProject: () => 'alpha',
     resolveTarget: unexpected,
     models: {assess: unexpected, plan: unexpected, resolveCancelTarget: unexpected},
-    dispatch: unexpected, steer: unexpected, cancel: unexpected,
+    dispatch: unexpected, steer: unexpected,
     record: () => undefined,
     ...overrides,
   }

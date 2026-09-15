@@ -71,10 +71,17 @@ class Session implements CascadedLlmSession {
     if (unresolved === null && input.inputs.some(item => item.kind === 'tool_result')) throw fail('protocol')
     if (unresolved !== null) this.#checkResults(input.inputs, unresolved)
     this.#trim(unresolved ?? [])
-    const systemContent = [this.#instructions, input.workspaceContext, input.responseAdaptation]
+    const factOnly = input.inputs.some(item => item.kind === 'host_activation')
+    const systemContent = [this.#instructions, factOnly ? null : input.workspaceContext, input.responseAdaptation]
       .filter((item): item is string => item !== null && item !== undefined)
       .join('\n\n')
-    const messages = [{role: 'system' as const, content: systemContent}, ...this.#history.flat(), ...(unresolved ?? []), ...current]
+    // Narration reads its own fact, not an unfinished question from a prior conversation turn.
+    // Tool-call/result pairs stay intact; the full turn is still recorded for the next user turn.
+    const context = factOnly
+      ? [...(unresolved?.slice(-1) ?? []),
+        ...input.inputs.filter(item => item.kind === 'host_activation' || item.kind === 'tool_result').map(message)]
+      : [...this.#history.flat(), ...(unresolved ?? []), ...current]
+    const messages = [{role: 'system' as const, content: systemContent}, ...context]
     const body: Record<string, JsonValue> = {model: this.#model, messages: messages as unknown as JsonValue, stream: true, stream_options: {include_usage: true}}
     if (this.#provider === 'deepseek') body.thinking = {type: 'disabled'}
     if (input.tools.length > 0) { body.tools = input.tools.map(schema); body.parallel_tool_calls = false }
@@ -114,17 +121,19 @@ class Session implements CascadedLlmSession {
           if (content !== undefined && content !== null && typeof content !== 'string') throw fail('protocol'); if (calls !== undefined && !Array.isArray(calls)) throw fail('protocol')
           if (!started && (content !== undefined || calls !== undefined || choice.finish_reason !== undefined)) { if (responseId === null) throw fail('protocol'); started = true; yield {kind: 'response_started', response_id: responseId} }
           if (typeof content === 'string' && content !== '') sawText = true
-          if (typeof content === 'string' && content !== '') { text += content; yield {kind: 'text_delta', text: content} }
+          if (typeof content === 'string' && content !== '') { text += content; if (input.tools.length === 0) yield {kind: 'text_delta', text: content} }
           for (const call of calls ?? []) this.#fragment(fragments, call)
           if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
             if (typeof choice.finish_reason !== 'string' || responseId === null) throw fail('protocol')
             if (choice.finish_reason === 'stop') {
               if (fragments.size > 0) throw fail('protocol')
+              // With tools enabled, wait for the response kind before publishing speech.
+              if (input.tools.length > 0 && text !== '') yield {kind: 'text_delta', text}
               this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant' as const, content: text}].map(withoutImage))
               this.#unresolved = null; terminal = true
               yield {kind: 'response_completed', response_id: responseId}; return
             } else if (choice.finish_reason === 'tool_calls') {
-              if (sawText || fragments.size === 0) throw fail('protocol'); const callsOut = this.#calls(fragments)
+              if ((sawText && input.tools.length === 0) || fragments.size === 0) throw fail('protocol'); const callsOut = this.#calls(fragments)
               for (const call of callsOut) yield {kind: 'tool_call', item_id: call.id, call_id: call.id, name: call.function.name, arguments: JSON.parse(call.function.arguments) as JsonObject}
               this.#unresolved = [...(unresolved ?? []), ...current, {role: 'assistant', content: null, tool_calls: callsOut}]
               terminal = true; yield {kind: 'response_completed', response_id: responseId}; return

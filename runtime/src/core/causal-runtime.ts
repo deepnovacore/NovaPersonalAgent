@@ -128,7 +128,7 @@ export class CausalRuntime {
   readonly #pendingUserInputs = new Map<number, PendingUserInput>()
   readonly #hostExecutorCapabilities = new Map<string, object>()
   readonly #userTurns = new Map<string, UserTurnAuthority>()
-  readonly #launchChecks = new Map<string, () => boolean>()
+  readonly #launchChecks = new Map<string, (() => boolean) | null>()
   readonly #shutdownGrace: number
   #state: 'new' | 'serving' | 'closed' = 'new'
   #acceptCompletions = true
@@ -298,6 +298,12 @@ export class CausalRuntime {
     await this.flushMemory()
     if (epoch !== this.core.conversationEpoch) return {accepted: false, delegate_id: null, problem: 'conversation_cleared'}
     return admission
+  }
+
+  cancelPendingDispatch(delegateId: string): boolean {
+    if (!this.#launchChecks.has(delegateId)) return false
+    this.#launchChecks.set(delegateId, null)
+    return true
   }
 
   /** Admit and privately carry the exact one-shot confirmed project capability. */
@@ -503,8 +509,13 @@ export class CausalRuntime {
       signal => {
         const userTurn = this.#userTurns.get(delegate.delegate_id)
         this.#userTurns.delete(delegate.delegate_id)
-        const wanted = this.#launchChecks.get(delegate.delegate_id) ?? userTurn?.stillWanted
+        const launchCheck = this.#launchChecks.get(delegate.delegate_id)
+        const wanted = launchCheck ?? userTurn?.stillWanted
         this.#launchChecks.delete(delegate.delegate_id)
+        if (launchCheck === null) {
+          this.#hostExecutorCapabilities.delete(delegate.delegate_id)
+          return Promise.resolve({outcome: 'cancelled', trust: 'trusted_system', content: {}, refs: []})
+        }
         let live = true
         try { live = wanted?.() ?? true } catch { live = false }
         live &&= epoch === this.core.conversationEpoch && this.#clearing === undefined && this.#acceptCompletions

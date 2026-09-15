@@ -1256,6 +1256,8 @@ export class ToolContinuations {
           code: result.code,
           execution_started: false,
         })
+      case 'intake_cancelled':
+        return canonicalJson({code: result.code, message: '待执行任务已取消，尚未启动。'})
       case 'cancelled':
         return canonicalJson({
           code: result.code,

@@ -36,7 +36,7 @@ export interface CodingChannel {
  * never a handoff.
  */
 export function finalSpeechView(outcome: string, content: unknown, displayName: string): string {
-  if (outcome === 'cancelled') return `${displayName} 那个任务已经停了`
+  if (outcome === 'cancelled') return `${displayName} 任务已取消`
   let finalMessage: unknown
   let code: unknown
   let error: unknown
@@ -50,8 +50,13 @@ export function finalSpeechView(outcome: string, content: unknown, displayName: 
   const category = typeof code === 'string' && code !== ''
     ? code
     : typeof error === 'string' && error !== '' ? error : 'no_final_message'
+  if (category === 'usage_limit_exceeded') {
+    return `${displayName} 额度不足，这次任务没有成功完成。`
+  }
   if (outcome === 'refused') {
-    return `${displayName} 未执行，需要选择或修正请求（${category}）`
+    return category === 'superseded'
+      ? `${displayName} 本次执行请求已失效，任务未能启动。`
+      : `${displayName} 任务未执行（${category}）`
   }
   let text: string | undefined
   let upstreamTruncated = false

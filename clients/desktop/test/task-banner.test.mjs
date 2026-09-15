@@ -116,3 +116,69 @@ test('sleep suspension preserves task visibility, user dismissal and completion 
   assert.equal(banner.state().visible, false)
   assert.equal(sent.length, 0)
 })
+
+
+class NodeStub {
+  constructor(ownerDocument = null) {
+    this.ownerDocument = ownerDocument ?? this
+    this.children = []
+    this.hidden = false
+    this.textContent = ''
+    this.title = ''
+    this.disabled = false
+    this.dataset = {}
+    this.style = {setProperty() {}}
+    this.listeners = new Map()
+    this.parent = null
+    this.className = ''
+  }
+  append(...nodes) { for (const node of nodes) { node.parent = this; this.children.push(node) } }
+  remove() { if (this.parent) this.parent.children = this.parent.children.filter(node => node !== this) }
+  addEventListener(type, listener) { this.listeners.set(type, listener) }
+  click() { this.listeners.get('click')?.({currentTarget: this}) }
+  setAttribute(name, value) { this[name] = String(value) }
+  getAttribute(name) { return this[name] }
+  set innerHTML(value) {
+    this._innerHTML = value
+    for (const selector of ['[data-title]', '[data-status]', '[data-summary]', '[data-project]', '[data-open]', '[data-stop]', '[data-error]']) {
+      const node = new NodeStub(this.ownerDocument)
+      node.selector = selector
+      if (selector === '[data-open]' || selector === '[data-stop]') node.type = 'button'
+      this.append(node)
+    }
+  }
+  querySelector(selector) {
+    return this.children.find(node => node.selector === selector) ?? null
+  }
+}
+
+class DocumentStub extends NodeStub {
+  createElement() { return new NodeStub(this) }
+}
+
+function taskContainer() {
+  const document = new DocumentStub()
+  const container = new NodeStub(document)
+  const list = new NodeStub(document); list.selector = '[data-task-list]'
+  const expand = new NodeStub(document); expand.selector = '[data-task-expand]'
+  const hide = new NodeStub(document); hide.selector = '[data-task-hide]'
+  const count = new NodeStub(document); count.selector = '[data-task-count]'
+  container.append(list, expand, hide, count)
+  return {container, list}
+}
+
+test('refused task cards say not executed instead of rejected', async () => {
+  assert.equal(typeof module.mountTaskBanner, 'function', 'task banner renderer must be implemented')
+  const {container, list} = taskContainer()
+  const banner = module.mountTaskBanner({
+    container,
+    send: () => true,
+    reserveArea: async () => ({taskHeightCss: 80, suppressed: false}),
+  })
+  banner.applyLayout({taskHeightCss: 80, suppressed: false})
+  banner.receive(frame([task('a', 'refused')]))
+  await Promise.resolve()
+  const card = list.children[0]
+  assert.equal(card.dataset.phase, 'refused')
+  assert.equal(card.querySelector('[data-status]').textContent, '未执行')
+})

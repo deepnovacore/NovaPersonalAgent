@@ -330,3 +330,22 @@ test('ports and observers cannot mutate runtime-owned causal records', async () 
     await serving
   }
 })
+
+test('cancelling an admitted delegate before launch produces cancelled without invoking the executor', async () => {
+  let starts = 0
+  const runtime = new CausalRuntime({clock: new RealClock(), ids: new MonotonicIdFactory(),
+    models: {fast: {complete: () => Promise.resolve({speak: {act: 'none'}, action: {act: 'none'}})}},
+    executors: [{manifest: fixtureSlowSimManifest, dispatch: () => {starts++; return Promise.resolve({outcome: 'ok', trust: 'trusted_system', content: {}, refs: []})}}]})
+  const origin = runtime.memory.append('conversation', {ts: 0, trust: 'trusted_user', priority: 100, content: {text: 'dim light'}})
+  const admission = await runtime.dispatchExternal({executor: 'slow_sim', op: 'set_light', request: {brightness: 30}, origin_ref: `conversation:${origin.seq}`},
+    {kind: 'realtime_tool', priority: 100, routing_class: 'ambient', origin: null, selected_suggestion: null}, undefined, () => true)
+  assert.equal(admission.accepted, true)
+  assert.equal(runtime.cancelPendingDispatch(admission.delegate_id!), true)
+  const stop = new AbortController()
+  const serving = runtime.serve(stop.signal)
+  try {
+    await eventually(() => runtime.memory.channels.get('slow_sim')?.items.some(item => item.outcome === 'cancelled') === true)
+    assert.equal(starts, 0)
+    assert.equal(runtime.cancelPendingDispatch(admission.delegate_id!), false)
+  } finally { stop.abort(); await serving }
+})

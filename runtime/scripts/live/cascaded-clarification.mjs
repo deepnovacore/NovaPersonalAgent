@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import {CascadedRealtimeAdapter} from '../../dist/src/realtime/cascaded/adapter.js'
 import {createQwenCascadedLlmFactory} from '../../dist/src/realtime/cascaded/qwen-llm.js'
+import {finalSpeechView} from '../../dist/src/realtime/evidence.js'
 import {configuration, surface} from './text-tools.mjs'
 
 const compiled = surface()
@@ -84,8 +85,19 @@ try {
   assert.equal(requests.at(-1).messages.at(-2).role, 'tool')
   assert.match(requests.at(-1).messages.at(-1).content, /宿主激活事实/)
   assert.match(final.text, /项目.*[？?]/, 'Must ask the actual project question')
+  const failureFact = {...fact, host_item_id: 'probe-failure', event_id: 'probe-failure',
+    content: finalSpeechView('refused', {error: 'superseded'}, 'Codex')}
+  await adapter.injectHostItem(failureFact, {signal, confirmationTimeout: null, asUserActivation: false})
+  const failureStart = events.length
+  const failureEnded = nextTerminal()
+  await adapter.createResponse({kind: 'host_fact', item: failureFact, task_summary: null, origin_spoken: false}, signal)
+  assert.equal((await failureEnded).status, 'completed')
+  const failure = response(events.slice(failureStart))
+  assert.equal(failure.calls.length, 0)
+  assert.match(failure.text, /未.*启动|没有.*启动/)
+  assert.doesNotMatch(failure.text, /确认|修正请求|请问|请选择|需要您|需要你|[？?]|将.*重试|会.*重试/)
   console.log(JSON.stringify({passed: true, model: config.model, requests: requests.length,
-    responses: [response(first), response(second), final],
+    responses: [response(first), response(second), final, failure],
     scope: 'Real adapter and Qwen; synthetic TTS and host fact; no audio device or executor',
   }, null, 2))
 } finally {

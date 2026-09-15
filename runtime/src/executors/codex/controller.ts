@@ -7,7 +7,7 @@ import type {
   AgentDescriptor,
   AgentRuntimeDispatchPort,
 } from '../agent-controller.js'
-import type {AgentExecutor, CancelContext} from '../coding-executor.js'
+import type {AgentExecutor, CancelTargetResolver} from '../coding-executor.js'
 import {IntakeController, type IntakeOptions, type IntakeEventPort, type IntakeSession} from '../coding/intake.js'
 import {CODEX_AGENT_SUMMARY} from './contract.js'
 
@@ -34,7 +34,7 @@ export class CodexAgentController implements AgentController {
   readonly #intake: IntakeController | undefined
   readonly #executor: Pick<AgentExecutor, 'cancel'> | undefined
   readonly #dispatchPort: AgentRuntimeDispatchPort | undefined
-  readonly #resolveCancelTarget: CancelContext['resolveCancelTarget']
+  readonly #resolveCancelTarget: CancelTargetResolver
 
   constructor(options: {
     /** Runtime channel selected by the composition root's `coding` role. */
@@ -42,7 +42,7 @@ export class CodexAgentController implements AgentController {
     readonly intake?: IntakeOptions
     readonly executor?: Pick<AgentExecutor, 'cancel'>
     readonly dispatchPort?: AgentRuntimeDispatchPort
-    readonly resolveCancelTarget: CancelContext['resolveCancelTarget']
+    readonly resolveCancelTarget: CancelTargetResolver
   }) {
     this.#channel = options.channel ?? 'codex'
     this.descriptor = codexAgentDescriptor(this.#channel)
@@ -95,10 +95,35 @@ export class CodexAgentController implements AgentController {
     if (!request.stillWanted()) return {code: 'superseded', accepted: false, detail: {}}
     const executor = this.#executor
     if (executor === undefined) return {code: 'unsupported_tool', accepted: false, detail: {}}
-    const result = await executor.cancel(request.instruction, {
+    let result = await executor.cancel(request.instruction, {
       resolveCancelTarget: this.#resolveCancelTarget,
       stillWanted: request.stillWanted,
     })
+    if (result.code === 'not_running') {
+      const pending = this.#intake?.view
+      if (pending && (this.#intake?.active || pending.delegate_id !== null)) {
+        const target = {work_id: pending.intake_id, project: pending.target?.workspace_display_name ?? '当前工作区',
+          title: pending.title ?? pending.opening}
+        const selected = request.instruction === undefined
+          || await this.#resolveCancelTarget(request.instruction, [target]) === target.work_id
+        const current = this.#intake?.view
+        if (selected && request.stillWanted() && current?.intake_id === pending.intake_id && current.revision === pending.revision) {
+          if (current.delegate_id !== null) {
+            if (this.#dispatchPort?.cancelPendingDispatch?.(current.delegate_id) === true) {
+              this.#intake?.cancel()
+              return {code: 'intake_cancelled', accepted: true, detail: {}}
+            }
+            result = await executor.cancel(request.instruction, {
+              targetWorkId: current.delegate_id,
+              stillWanted: request.stillWanted,
+            })
+          } else if (this.#intake?.active) {
+            this.#intake.cancel()
+            return {code: 'intake_cancelled', accepted: true, detail: {}}
+          }
+        }
+      }
+    }
     if (result.code === 'cancelled') {
       return {code: result.code, accepted: true, detail: {work: workDetail(result.work)}}
     }

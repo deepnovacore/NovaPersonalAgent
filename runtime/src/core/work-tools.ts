@@ -45,12 +45,12 @@ function executorLines(agents: readonly AgentDescriptor[]): string {
 export function dispatchToolSpec(agents: readonly AgentDescriptor[]): HostToolSpec {
   return {
     name: DISPATCH_TOOL,
-    description: `需求澄清后，把用户明确的执行要求交给 agent，包括新任务、继续、追加和修改。影响交付的歧义未解决时先直接问用户，不调用此工具；明确后交付完整多轮要求。下游 coordinator 决定项目和会话。executor 可选：${executorLines(agents)}`,
+    description: `把已经明确的任务交给 agent，包括新建工作区、新任务、继续、追加和修改。单轮请求已完整时直接调用；只有影响交付的缺项才先澄清。不要在调用前再问是否执行或复核已给出的名称。下游 coordinator 决定项目和会话，宿主会为确需授权的操作生成带 id 的确认提议。executor 可选：${executorLines(agents)}`,
     params: {
       type: 'object',
       properties: {
         executor: {type: 'string', enum: agents.map(agent => agent.name)},
-        instruction: {...INSTRUCTION, description: '本次任务经多轮澄清的完整目标、约束和验收，合并最新纠正，不只传最后一句、不添加未要求的约束'},
+        instruction: {...INSTRUCTION, description: '本次任务已明确的完整目标、约束和验收，合并最新纠正，不只传最后一句、不添加未要求的约束'},
         source_quotes: {type: 'array', maxItems: 8, items: {type: 'string', minLength: 1, maxLength: 2000}, description: '多轮澄清时，逐字引用本次任务相关的先前用户原句片段，必须包含最初请求中的目标和指定项目，不能只引用最新澄清答案；不得引用助手建议或无关旧任务。只有当前一句足够时省略。'},
       },
       required: ['executor', 'instruction'],
@@ -63,7 +63,7 @@ export function dispatchToolSpec(agents: readonly AgentDescriptor[]): HostToolSp
 export function cancelToolSpec(agents: readonly AgentDescriptor[]): HostToolSpec {
   return {
     name: CANCEL_TOOL,
-    description: `停止一个正在执行的任务；用户明确要求停止或取消时必须调用，不要只口头答应。用户说先别停止或只讨论是否停止时不要调用。executor 可选：${executorLines(agents)}`,
+    description: `停止一个正在准备或执行的任务；用户明确要求停止或取消时必须调用，不要只口头答应。用户说先别停止或只讨论是否停止时不要调用。executor 可选：${executorLines(agents)}`,
     params: {
       type: 'object',
       properties: {

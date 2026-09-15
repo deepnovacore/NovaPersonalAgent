@@ -51,11 +51,23 @@ test('Codex startup failures use the real safe category in natural Chinese', () 
   }
 })
 
+test('Codex usage-limit code has fixed wording and never exposes raw provider text', () => {
+  const spoken = safeMemoryEvidence(item('codex', {
+    code: 'usage_limit_exceeded',
+    message: 'raw provider quota text must stay private',
+  }, {outcome: 'unknown'}), CODING)
+  assert.equal(spoken, 'Codex 额度不足，这次任务没有成功完成。')
+  assert.doesNotMatch(spoken, /raw provider/u)
+})
+
 test('Codex refusal is neither failure nor uncertainty', () => {
   assert.equal(finalSpeechView('refused', {
     op: 'project', code: 'workspace_name_conflict', recoverable: true,
     result: {final_message: {text: 'provider supplied refusal detail'}},
-  }, 'Codex'), 'Codex 未执行，需要选择或修正请求（workspace_name_conflict）')
+  }, 'Codex'), 'Codex 任务未执行（workspace_name_conflict）')
+  assert.equal(finalSpeechView('refused', {
+    error: 'superseded',
+  }, 'Codex'), 'Codex 本次执行请求已失效，任务未能启动。')
 })
 
 test('a camera permission refusal speaks the host-provided recovery instruction', () => {

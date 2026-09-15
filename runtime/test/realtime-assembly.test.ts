@@ -1454,7 +1454,7 @@ test('project proposal reaches provider and desktop before confirmation', async 
     models: {
       assess: (input: Readonly<Record<string, unknown>>) => Promise.resolve({
         intake_id: input.intake_id, revision: input.revision, slots, readiness: 0.75,
-        kind: 'create', project: 'tetris-game', project_evidence: 'tetris-game', session: 'latest',
+        kind: 'create', project: 'tetris-game', project_evidence: 'tetris-game', session: {mode: 'latest'},
         intent_to_proceed: true, candidate_question: null, discovery: [], early_exit: false, abandon: false,
       }),
       plan: (input: Readonly<Record<string, unknown>>) => Promise.resolve({

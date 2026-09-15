@@ -83,6 +83,7 @@ export type CodexTransportCode =
   | 'resume_unavailable'
   | 'server_rejected'
   | 'turn_failed'
+  | 'usage_limit_exceeded'
   | 'missing_terminal'
   | 'nonzero_exit'
   | 'unexpected_server_request'
@@ -506,19 +507,22 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         return outcome(written ? 'uncertain' : 'refused', failureCode, written, completion)
       }
       if (completion === null) return outcome(written ? 'uncertain' : 'refused', 'transport_lost', written, null)
-      const safeCompletion = Object.freeze({
+      const safeCompletion: TurnCompletion = Object.freeze({
         status: completion.status,
         final_text: completion.final_text === null
           ? null
           : this.#sanitizeText(completion.final_text, CODEX_FINAL_TEXT_LIMIT).text,
         internal_activity: completion.internal_activity,
+        ...(completion.error_code === undefined ? {} : {error_code: completion.error_code}),
       })
       if (cleanup.cleanupFailed) return outcome('uncertain', 'credential_missing', written, safeCompletion)
       if (!cleanup.complete) return outcome('uncertain', 'transport_lost', written, safeCompletion)
       if (session?.unexpectedServerRequest === true) {
         return outcome('uncertain', 'unexpected_server_request', written, safeCompletion)
       }
-      if (completion.status !== 'completed') return outcome('uncertain', 'turn_failed', written, safeCompletion)
+      if (completion.status !== 'completed') {
+        return outcome('uncertain', safeCompletion.error_code ?? 'turn_failed', written, safeCompletion)
+      }
       if (safeCompletion.final_text === null) return outcome('uncertain', 'missing_terminal', written, safeCompletion)
       if (cleanup.exitCode !== 0) return outcome('uncertain', 'nonzero_exit', written, safeCompletion)
       if (cleanup.stop !== 'none') return outcome('uncertain', 'transport_lost', written, safeCompletion)
@@ -1867,7 +1871,7 @@ const TRANSPORT_CODES: ReadonlySet<CodexTransportCode> = new Set([
   'completed', 'adapter_timeout', 'binary_missing', 'credential_missing', 'preflight_failed',
   'preflight_timeout', 'sandbox_failed', 'spawn_failed', 'stderr_too_large', 'transport_lost',
   'unsupported_protocol', 'unsupported_version', 'workspace_invalid', 'workspace_root_mismatch',
-  'resume_unavailable', 'server_rejected', 'turn_failed', 'missing_terminal', 'nonzero_exit',
+  'resume_unavailable', 'server_rejected', 'turn_failed', 'usage_limit_exceeded', 'missing_terminal', 'nonzero_exit',
   'unexpected_server_request', 'busy', 'config_not_isolated', 'mcp_tools_not_isolated',
 ])
 

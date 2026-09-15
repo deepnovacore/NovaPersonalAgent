@@ -310,7 +310,7 @@ test('matching terminal projects only final agent text and clears the active pai
       ],
     },
   })
-  assert.deepEqual(completion, {status: 'failed', final_text: 'safe final', internal_activity: 1})
+  assert.deepEqual(completion, {status: 'failed', final_text: 'safe final', internal_activity: 1, error_code: null})
   assert.equal(projection.activePair, null)
   assert.equal(JSON.stringify(completion).includes('PRIVATE'), false)
   item(projection, {type: 'agentMessage', text: 'PRIVATE-LATE'})

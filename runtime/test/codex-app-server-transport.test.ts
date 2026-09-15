@@ -78,7 +78,27 @@ test('a cold run follows the app-server handshake and returns bounded internal c
     status: 'completed',
     final_text: 'bounded result',
     internal_activity: 1,
+    error_code: null,
   })
+})
+
+test('turn usage-limit failure is projected as a safe transport code', async () => {
+  const owner = new MemoryAppServerOwner([], {turnFailure: 'usageLimitExceeded'})
+  const transport = createTransport({spawn: async () => owner})
+
+  const result = await transport.run(
+    {workOrder: 'private usage limited work'},
+    {},
+    {expiresAtMs: Date.now() + 5000},
+  )
+
+  assert.equal(result.classification, 'uncertain')
+  assert.equal(result.code, 'usage_limit_exceeded')
+  assert.equal(result.turnStartWritten, true)
+  assert.equal(result.completion?.status, 'failed')
+  assert.equal(result.completion?.error_code, 'usage_limit_exceeded')
+  assert.equal(JSON.stringify(result).includes('private usage'), false)
+  assert.equal(JSON.stringify(result).includes('raw quota detail'), false)
 })
 
 test('an explicit ask profile supplies the approval policy without a legacy launch field', async () => {
@@ -2515,6 +2535,7 @@ class MemoryAppServerOwner {
     readonly echoSteerInFinal: boolean
     readonly holdServerReplyWrite: boolean
     readonly stallTitleTurn: boolean
+    readonly turnFailure: 'usageLimitExceeded' | null
   }
   #delayedTurnRequestId: number | undefined
   #heldInitializeRequestId: number | undefined
@@ -2540,6 +2561,7 @@ class MemoryAppServerOwner {
     readonly echoSteerInFinal?: boolean
     readonly holdServerReplyWrite?: boolean
     readonly stallTitleTurn?: boolean
+    readonly turnFailure?: 'usageLimitExceeded'
   } = {}) {
     const pause = this.stdout.pause.bind(this.stdout)
     const resume = this.stdout.resume.bind(this.stdout)
@@ -2564,6 +2586,7 @@ class MemoryAppServerOwner {
       echoSteerInFinal: options.echoSteerInFinal ?? false,
       holdServerReplyWrite: options.holdServerReplyWrite ?? false,
       stallTitleTurn: options.stallTitleTurn ?? false,
+      turnFailure: options.turnFailure ?? null,
     }
     this.exit = new Promise(resolve => { this.#resolveExit = resolve })
     this.stdin = new Writable({
@@ -2780,6 +2803,22 @@ class MemoryAppServerOwner {
 
   #sendTurnCompletion(requestId: number | undefined): void {
     this.#send({id: requestId, result: {turn: {id: 'turn-1', items: [], status: 'inProgress'}}})
+    if (this.#options.turnFailure !== null) {
+      this.#send({method: 'turn/completed', params: {
+        threadId: this.#options.threadId,
+        turn: {
+          id: 'turn-1',
+          status: 'failed',
+          items: [],
+          error: {
+            message: 'raw quota detail must stay private',
+            codexErrorInfo: this.#options.turnFailure,
+            additionalDetails: 'raw quota detail',
+          },
+        },
+      }})
+      return
+    }
     this.#send({method: 'item/completed', params: {
       threadId: this.#options.threadId, turnId: 'turn-1',
       item: {type: 'agentMessage', text: this.#options.echoSteerInFinal && this.#lastSteer !== null

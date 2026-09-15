@@ -47,6 +47,7 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set<CodexTransportCode>([
   'resume_unavailable',
   'server_rejected',
   'turn_failed',
+  'usage_limit_exceeded',
   'missing_terminal',
   'nonzero_exit',
   'unexpected_server_request',
@@ -83,6 +84,7 @@ const UNCERTAIN_CODES: ReadonlySet<string> = new Set([
   'stderr_too_large',
   'transport_lost',
   'turn_failed',
+  'usage_limit_exceeded',
   'unsupported_protocol',
   'unexpected_server_request',
 ])
@@ -619,9 +621,20 @@ function validateOutcome(value: unknown): ValidatedOutcome | null {
     let completion: ValidatedOutcome['completion'] = null
     if (snapshot.completion !== null) {
       const candidate = snapshotJsonRecord(snapshot.completion)
-      if (!sameKeys(candidate, ['status', 'final_text', 'internal_activity'])) return null
+      if (
+        !sameKeys(candidate, ['status', 'final_text', 'internal_activity'])
+        && !sameKeys(candidate, ['status', 'final_text', 'internal_activity', 'error_code'])
+      ) return null
       if (candidate.status !== 'completed' && candidate.status !== 'failed') return null
       if (candidate.final_text !== null && typeof candidate.final_text !== 'string') return null
+      if (
+        Object.hasOwn(candidate, 'error_code')
+        && candidate.error_code !== null
+        && candidate.error_code !== 'usage_limit_exceeded'
+      ) return null
+      if (candidate.status === 'completed' && candidate.error_code !== undefined && candidate.error_code !== null) {
+        return null
+      }
       if (
         typeof candidate.internal_activity !== 'number'
         || !Number.isSafeInteger(candidate.internal_activity)
@@ -632,6 +645,7 @@ function validateOutcome(value: unknown): ValidatedOutcome | null {
         status: candidate.status,
         final_text: candidate.final_text,
         internal_activity: candidate.internal_activity,
+        ...(Object.hasOwn(candidate, 'error_code') ? {error_code: candidate.error_code as 'usage_limit_exceeded' | null} : {}),
       })
     }
     if (snapshot.classification === 'completed') {

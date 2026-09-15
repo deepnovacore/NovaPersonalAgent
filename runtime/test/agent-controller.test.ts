@@ -217,15 +217,16 @@ test('the Codex controller preserves intake dispatch and forwards the revision f
     resolveTarget: () => Promise.reject(new Error('not expected')),
     prepare: () => { throw new Error('not expected') },
     dispatch: () => ({accepted: false}), steer: () => ({accepted: false}),
-    cancel: () => Promise.resolve({code: 'not_running'}),
     invalidateProposal: () => undefined, fact: () => undefined, record: () => undefined, diagnostic: () => undefined,
   }
+  let runningTask = true
   let cancelInstruction: string | undefined
   let cancelStillWanted: (() => boolean) | undefined
   const codex = new CodexAgentController({
     intake,
     executor: {
       cancel: (instruction, context) => {
+        if (!runningTask) return Promise.resolve({code: 'not_running' as const})
         cancelInstruction = instruction
         cancelStillWanted = context.stillWanted
         return Promise.resolve({code: 'cancelled' as const, work: {work_id: 'w-1', project: 'site', title: '布局'}})
@@ -266,6 +267,162 @@ test('the Codex controller preserves intake dispatch and forwards the revision f
     detail: {work: {work_id: 'w-1', project: 'site', title: '布局'}},
   })
   assert.equal(Object.hasOwn(cancellation, 'message'), false, 'controllers return structured facts, not user prose')
+  runningTask = false
+  const pendingCancel = await codex.cancel({originalUserText: '取消', origin_ref: 'conversation:6',
+    sessionEpoch: 9, acceptedUserInputRevision: 14, stillWanted: () => true})
+  assert.deepEqual(pendingCancel, {code: 'intake_cancelled', accepted: true, detail: {}})
+  assert.equal(codex.inspectIntakeForTest()?.outcome, 'cancelled')
+})
+
+test('Codex controller cancels the fresh queued delegate after cancel target resolution races intake dispatch', async () => {
+  let releaseAssess!: () => void
+  const assessGate = new Promise<void>(resolve => { releaseAssess = resolve })
+  let releaseResolver!: () => void
+  let resolverEntered!: () => void
+  const resolverGate = new Promise<void>(resolve => { resolverEntered = resolve })
+  const slots = {
+    goal: {state: 'stated' as const, note: 'Fix login'},
+    scope: {state: 'stated' as const, note: 'Login only'},
+    acceptance: {state: 'stated' as const, note: 'Shows validation'},
+    constraints: {state: 'missing' as const, note: ''},
+  }
+  const intake: IntakeOptions = {
+    idFactory: () => 'intake-race',
+    settings: {clarification_depth: 'balanced', plan_readback: 'silent'},
+    models: {
+      assess: async input => {
+        await assessGate
+        return {intake_id: input.intake_id, revision: input.revision, slots, readiness: 1,
+          kind: 'work', project: null, project_evidence: null, session: {mode: 'latest'}, intent_to_proceed: true,
+          candidate_question: null, discovery: [], early_exit: false, abandon: false}
+      },
+      plan: input => Promise.resolve({intake_id: input.intake_id, revision: input.revision,
+        work_order: {objective: 'Fix login', scope_in: ['Login only'], acceptance: ['Shows validation']}}),
+      resolveCancelTarget: () => Promise.resolve(null),
+    },
+    roster: () => [], running: () => [], activeProject: () => 'Project',
+    resolveTarget: () => Promise.resolve({workspace: '/project', action: 'reuse', workspace_display_name: 'Project',
+      workspace_id: 'project', session_title: null, session_id: null}),
+    prepare: () => { throw new Error('not expected') },
+    dispatch: () => ({accepted: true, delegate_id: 'fresh-delegate'}),
+    steer: () => ({accepted: false}),
+    invalidateProposal: () => undefined, fact: () => undefined, record: () => undefined, diagnostic: () => undefined,
+  }
+  const cancelledDelegates: string[] = []
+  const codex = new CodexAgentController({
+    intake,
+    executor: {cancel: () => Promise.resolve({code: 'not_running' as const})},
+    dispatchPort: {
+      dispatch: () => ({accepted: false, delegate_id: null}),
+      cancelPendingDispatch: id => { cancelledDelegates.push(id); return true },
+    },
+    resolveCancelTarget: async (_instruction, candidates) => {
+      resolverEntered()
+      await new Promise<void>(resolve => { releaseResolver = resolve })
+      return candidates[0]?.work_id ?? null
+    },
+  })
+
+  assert.deepEqual(await codex.dispatch({
+    instruction: '修复登录', originalUserText: '修复登录', origin_ref: 'conversation:7',
+    sessionEpoch: 9, acceptedUserInputRevision: 15, stillWanted: () => true,
+  }), {code: 'intake_opened', accepted: true, detail: {state: 'open'}})
+  const cancel = codex.cancel({
+    instruction: '停掉刚才的登录任务', originalUserText: '停掉刚才的登录任务', origin_ref: 'conversation:8',
+    sessionEpoch: 9, acceptedUserInputRevision: 16, stillWanted: () => true,
+  })
+  await resolverGate
+  releaseAssess()
+  await codex.settleIntakeForTest()
+  assert.equal(codex.inspectIntakeForTest()?.delegate_id, 'fresh-delegate')
+  releaseResolver()
+
+  assert.deepEqual(await cancel, {code: 'intake_cancelled', accepted: true, detail: {}})
+  assert.deepEqual(cancelledDelegates, ['fresh-delegate'])
+})
+
+test('Codex controller cancels the fresh running delegate when queued cancellation loses the launch race', async () => {
+  let releaseAssess!: () => void
+  const assessGate = new Promise<void>(resolve => { releaseAssess = resolve })
+  let releaseResolver!: () => void
+  let resolverEntered!: () => void
+  const resolverGate = new Promise<void>(resolve => { resolverEntered = resolve })
+  const slots = {
+    goal: {state: 'stated' as const, note: 'Fix login'},
+    scope: {state: 'stated' as const, note: 'Login only'},
+    acceptance: {state: 'stated' as const, note: 'Shows validation'},
+    constraints: {state: 'missing' as const, note: ''},
+  }
+  const intake: IntakeOptions = {
+    idFactory: () => 'intake-running-race',
+    settings: {clarification_depth: 'balanced', plan_readback: 'silent'},
+    models: {
+      assess: async input => {
+        await assessGate
+        return {intake_id: input.intake_id, revision: input.revision, slots, readiness: 1,
+          kind: 'work', project: null, project_evidence: null, session: {mode: 'latest'}, intent_to_proceed: true,
+          candidate_question: null, discovery: [], early_exit: false, abandon: false}
+      },
+      plan: input => Promise.resolve({intake_id: input.intake_id, revision: input.revision,
+        work_order: {objective: 'Fix login', scope_in: ['Login only'], acceptance: ['Shows validation']}}),
+      resolveCancelTarget: () => Promise.resolve(null),
+    },
+    roster: () => [], running: () => [], activeProject: () => 'Project',
+    resolveTarget: () => Promise.resolve({workspace: '/project', action: 'reuse', workspace_display_name: 'Project',
+      workspace_id: 'project', session_title: null, session_id: null}),
+    prepare: () => { throw new Error('not expected') },
+    dispatch: () => ({accepted: true, delegate_id: 'fresh-delegate'}),
+    steer: () => ({accepted: false}),
+    invalidateProposal: () => undefined, fact: () => undefined, record: () => undefined, diagnostic: () => undefined,
+  }
+  let cancelCalls = 0
+  const targetWorkIds: (string | undefined)[] = []
+  const codex = new CodexAgentController({
+    intake,
+    executor: {
+      cancel: (_instruction, context) => {
+        cancelCalls += 1
+        targetWorkIds.push(context.targetWorkId)
+        if (cancelCalls === 1) return Promise.resolve({code: 'not_running' as const})
+        assert.equal(context.resolveCancelTarget, undefined)
+        const running = [
+          {work_id: 'other-delegate', project: 'Project', title: 'Other'},
+          {work_id: 'fresh-delegate', project: 'Project', title: 'Fix login'},
+        ]
+        return Promise.resolve(context.targetWorkId === 'fresh-delegate'
+          ? {code: 'cancelled' as const, work: running[1]!}
+          : {code: 'ambiguous_work' as const, running})
+      },
+    },
+    dispatchPort: {
+      dispatch: () => ({accepted: false, delegate_id: null}),
+      cancelPendingDispatch: () => false,
+    },
+    resolveCancelTarget: async (_instruction, candidates) => {
+      resolverEntered()
+      await new Promise<void>(resolve => { releaseResolver = resolve })
+      return candidates[0]?.work_id ?? null
+    },
+  })
+
+  assert.deepEqual(await codex.dispatch({
+    instruction: '修复登录', originalUserText: '修复登录', origin_ref: 'conversation:9',
+    sessionEpoch: 9, acceptedUserInputRevision: 17, stillWanted: () => true,
+  }), {code: 'intake_opened', accepted: true, detail: {state: 'open'}})
+  const cancel = codex.cancel({
+    instruction: '停掉刚才的登录任务', originalUserText: '停掉刚才的登录任务', origin_ref: 'conversation:10',
+    sessionEpoch: 9, acceptedUserInputRevision: 18, stillWanted: () => true,
+  })
+  await resolverGate
+  releaseAssess()
+  await codex.settleIntakeForTest()
+  assert.equal(codex.inspectIntakeForTest()?.delegate_id, 'fresh-delegate')
+  releaseResolver()
+
+  assert.deepEqual(await cancel, {code: 'cancelled', accepted: true,
+    detail: {work: {work_id: 'fresh-delegate', project: 'Project', title: 'Fix login'}}})
+  assert.equal(cancelCalls, 2)
+  assert.deepEqual(targetWorkIds, [undefined, 'fresh-delegate'])
 })
 
 test('no-intake Codex dispatch fences a superseded request before the runtime delegate starts', async () => {

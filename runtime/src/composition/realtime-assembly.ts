@@ -9,7 +9,7 @@ import type {PublicProjectContext} from '../projects/project-store.js'
 import type { JsonValue } from '../core/events.js'
 import {
   executorWithRole,
-  type CancelContext,
+  type CancelTargetResolver,
   type CodingExecutorResource,
   type ProjectExecutorAdapter,
 } from '../executors/coding-executor.js'
@@ -784,10 +784,11 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   // exact resolver for the composed controller; a direct no-intake test seam remains safely
   // unable to guess an ambiguous running-work target.
   const resolvedIntakeModels = options.intake?.models
-  const resolveCancelTarget: CancelContext['resolveCancelTarget'] = resolvedIntakeModels === undefined
+  const resolveCancelTarget: CancelTargetResolver = resolvedIntakeModels === undefined
     ? () => Promise.resolve(null)
     : (instruction, running) => resolvedIntakeModels.resolveCancelTarget(instruction, running)
   const agentDispatchPort = {
+    cancelPendingDispatch: (id: string) => core.runtime.cancelPendingDispatch(id),
     dispatch: (request: {
       readonly channel: string
       readonly op: string
@@ -852,10 +853,6 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       running: () => projectAdapter.running(),
       activeProject: () => projectAdapter.publicProjectView(false).workspace_display_name,
       resolveTarget: (decision: CoordinatorDecision) => projectAdapter.resolveIntakeTarget(decision),
-      cancel: (instruction: string, stillWanted: () => boolean) => projectAdapter.cancel(instruction, {
-        resolveCancelTarget: (text, running) => options.intake!.models.resolveCancelTarget(text, running),
-        stillWanted,
-      }),
       // Spec 08: the coordinator's decision rides with the work order; the adapter re-resolves at run time.
       dispatch: (intake: IntakeSession, stillWanted?: () => boolean) => core.runtime.dispatchExternal({
         executor: projectAdapter.manifest.name, op: 'run', origin_ref: intake.origin_ref,

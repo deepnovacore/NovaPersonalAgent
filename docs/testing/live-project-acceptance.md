@@ -10,9 +10,9 @@ NOVA_LIVE_PROJECT_EXECUTE=1 node runtime/scripts/live-smoke.mjs \
   --target project --env-file /path/to/live.env --output /tmp/project-live.json
 ```
 
-This is opt-in because it consumes model usage, creates files, and leaves a real Codex thread in the shared Codex home. Nova's project state and managed workspaces are isolated under a new OS temporary directory, retained for inspection. The sidecar `/tmp/project-live.json.project-1.json` records stage results, ASR transcripts, spoken output, confirmation identity, final executor status and artifact contents. It intentionally omits the discovered session roster and credentials. Do not publish reports without reviewing their generated text.
+This is opt-in because it consumes model usage, creates files, and leaves real Codex threads in the shared Codex home. Nova's project state and managed workspaces are isolated under a new OS temporary directory, retained for inspection. The sidecar `/tmp/project-live.json.project-1.json` records stage results, ASR transcripts, spoken output, confirmation identity, final executor status and artifact contents. It intentionally omits the discovered session roster and credentials. Do not publish reports without reviewing their generated text.
 
-The default uses text input and a natural confirmation sentence. A replacement proposal, missing completion, or incorrect/missing `acceptance.txt` fails acceptance. It never silently substitutes a short confirmation or presses the host's confirmation control after a failure.
+The default uses text input and a natural confirmation sentence, then continues in the same session and explicitly creates a new session in the same workspace. It checks all three files and verifies that continuation preserves the Codex thread id while new-session execution changes it. An unnecessary first-turn clarification, replacement proposal, missing completion, wrong session identity, or incorrect/missing artifact fails acceptance. It never silently substitutes a short confirmation or presses the host's confirmation control after a failure.
 
 - `NOVA_LIVE_PROJECT_CONFIRMATION=short`: explicitly test the short-confirmation baseline.
 - `NOVA_LIVE_PROJECT_INPUT=audio`: synthesize the same request and send PCM through production endpointing and ASR. Transcripts reveal fragmentation or lost constraints. Playback acknowledgements are digital; this is not physical microphone/speaker or GUI acceptance.
@@ -29,7 +29,7 @@ Before project execution, check frontend clarification with `--target text-tools
 
 After building runtime, run `node runtime/scripts/live/cascaded-clarification.mjs` with
 `DASHSCOPE_API_KEY` configured. This exercises the real CascadedRealtimeAdapter and Qwen:
-ambiguous request → clarification → dispatch → silent receipt → one concrete host question.
+ambiguous request → clarification → dispatch → silent receipt → one concrete host question → a failure report without requesting another confirmation or promising a retry.
 The script uses synthetic TTS and host facts; it does not prove microphone, workspace creation,
 or executor acceptance. Unlike text-tools routing probes, it checks the actual adapter's
 response guidance and host-message encoding.
