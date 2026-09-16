@@ -271,7 +271,7 @@ function describeGlobPattern(pattern: string, workspace: string): string {
   return redactApprovalDetail(displayed)
 }
 
-function redactApprovalDetail(value: string): string {
+export function redactApprovalDetail(value: string): string {
   return value
     .replace(/((?:[a-z][a-z\d+.-]*):\/\/[^/\s:@]+:)[^/\s@]+(@)/giu, '$1[REDACTED]$2')
     .replace(/((?:proxy-)?authorization\s*:\s*basic\s+)[^\s"';&]+/giu, '$1[REDACTED]')

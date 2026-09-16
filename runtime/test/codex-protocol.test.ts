@@ -750,15 +750,16 @@ test('server request concurrency is bounded and overflow aborts every tracked au
   assert.equal(signals.every(signal => signal.aborted), true)
 })
 
-test('response rejection exposes only stable code and numeric server code', async () => {
+test('response rejection preserves bounded diagnostics separately from the safe error message', async () => {
   const connection = new JsonRpcConnection({write: () => Promise.resolve()})
   const request = connection.request('m', {})
   await Promise.resolve()
-  await connection.feed(jsonLine({id: 1, error: {code: 42, message: 'PRIVATE', data: {token: 'DROP'}}}))
+  await connection.feed(jsonLine({id: 1, error: {code: 42, message: 'no rollout found; token=SECRET', data: {token: 'DROP'}}}))
   await assert.rejects(request, error => {
     assert.ok(error instanceof AppServerRequestRejected)
     assert.equal(error.code, 'server_rejected')
     assert.equal(error.server_code, 42)
+    assert.deepEqual(error.diagnostic, {method: 'm', server_code: 42, message: 'no rollout found; token=SECRET'})
     assert.equal(String(error).includes('PRIVATE'), false)
     return true
   })

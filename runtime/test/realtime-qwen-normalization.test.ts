@@ -297,7 +297,7 @@ test('Qwen clarification fixture covers adaptive first-turn and merged multi-tur
 
 test('Qwen instructions route every coding request through the three host tools (spec 08)', () => {
   assert.match(FRONTEND_INSTRUCTIONS, /编程、项目和会话相关的请求一律只用三个宿主工具：dispatch、cancel、confirm/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /明确则直接 dispatch；有会改变交付的必要歧义才提问/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /能确定用户要的产物和必须遵守的边界，就直接 dispatch/u)
   assert.match(FRONTEND_INSTRUCTIONS, /instruction 汇总本次任务多轮已经明确的目标、约束、验收及修改/u)
   assert.match(FRONTEND_INSTRUCTIONS, /由下游 coordinator 决定工作区和 Session 的选择、新建、切换/u)
   assert.match(FRONTEND_INSTRUCTIONS, /用户明确要求停止、取消或暂不执行已经派发的任务（包括正在准备的任务）时调用 cancel；instruction 只在用户点名了要停哪个任务时传/u)
@@ -373,7 +373,7 @@ test('Qwen provider emits approval instructions only for an approval-enabled ses
 })
 
 test('Qwen clarifies before dispatch and leaves project coordination downstream', () => {
-  assert.match(FRONTEND_INSTRUCTIONS, /有会改变交付的必要歧义才提问.*由下游 coordinator 决定工作区和 Session/su)
+  assert.match(FRONTEND_INSTRUCTIONS, /只有缺失的信息使你无法确定要做什么.*由下游 coordinator 决定工作区和 Session/su)
   assert.match(FRONTEND_INSTRUCTIONS, /intake_opened.*intake_in_progress.*尚未派单/su)
   assert.match(FRONTEND_INSTRUCTIONS, /只问给定的那一个问题，不再次 dispatch/u)
   assert.match(FRONTEND_INSTRUCTIONS, /仓库技术栈、入口、测试命令交给执行器探索/u)

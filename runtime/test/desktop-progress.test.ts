@@ -93,3 +93,13 @@ test('monitor progress follows policy when its channel is renamed', () => {
   const urgent: HandoffPolicy = {...monitor, alert_delivery: 'preemptive'}
   assert.equal(projectExecutorEvent(hit, monitorEvidence, () => 'vision', () => urgent)?.progress.level, 'milestone')
 })
+
+test('terminal task detail keeps correlated server diagnostics outside spoken progress', () => {
+  const diagnostic = {method: 'thread/resume', server_code: -32600, message: 'no rollout found'}
+  const event: EventRecord = {seq: 9, ts: 3, kind: 'handoff', payload: {
+    channel: 'codex', delegate_id: 'd', origin_ref: 'conversation:1', outcome: 'failed', trust: 'trusted_system', content: {diagnostic}, refs: [],
+  }}
+  const frame = projectExecutorEvent(event, evidence)
+  assert.deepEqual(frame?.result?.diagnostic, diagnostic)
+  assert.equal(frame?.progress.summary.includes('no rollout'), false)
+})

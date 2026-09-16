@@ -266,10 +266,10 @@ export class RealtimeService {
       },
       diagnostic: code => this.#onDiagnostic(`[realtime-diagnostic] ${code}`),
       invalidateProposal: () => this.#confirmation.invalidateProjectConfirmation('intake_amended'),
-      fact: (intake, text) => {
+      fact: (intake, text, kind) => {
         this.queueHostItem(hostFactIntent({
           kind: 'final', host_item_id: this.#idFactory(),
-          event_id: `intake:${intake.intake_id}:${intake.revision}:${this.#idFactory()}`,
+          event_id: `intake:${intake.intake_id}:${intake.revision}:${kind ?? this.#idFactory()}`,
           content: [...text].slice(0, MAX_HOST_FACT_CHARS).join(''),
         }), {priority: USER_PRIORITY - 1, preemptive: false})
         this.#deliveryReady.set()

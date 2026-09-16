@@ -111,6 +111,20 @@ try {
     }
     await wait('final_delivery_idle',()=>assembly.service.session.providerIdle)
   }
+  if(process.env.NOVA_LIVE_PROJECT_SNAKE==='1' && report.result.outcome==='ok' && workspace) {
+    await wait('snake_delivery_idle',()=>assembly.service.session.providerIdle)
+    const before=assembly.runtime.memory.channels.get('codex').items.filter(item=>item.outcome!=null).length
+    await send('帮我写一个最简单的网页版贪吃蛇游戏，保存为 snake.html，一个HTML文件，无外部依赖，方向键控制，有开始和重新开始按钮及得分，撞墙或自己结束。只在当前工作区里创建该文件，不修改已有文件。完成后读取验证。')
+    await wait('snake_completed',()=>assembly.runtime.memory.channels.get('codex').items.filter(item=>item.outcome!=null).length>before,180000)
+    const terminal=assembly.runtime.memory.channels.get('codex').items.findLast(item=>item.outcome!=null)
+    const after=JSON.parse(await readFile(path.join(runRoot,'codex-projects-v1.json'),'utf8'))
+    const thread=after.sessions[after.workspaces[workspace.workspace_id].active_session_id]?.codex_thread_id
+    const previous=report.result.followups.at(-1)?.thread
+    const html=await readFile(path.join(workspace.canonical_path,'snake.html'),'utf8')
+    report.snake={outcome:terminal.outcome,thread,newSession:thread!==previous,file:path.join(workspace.canonical_path,'snake.html'),bytes:html.length}
+    if(terminal.outcome!=='ok'||thread===previous||html.length<100)throw Error('snake_failed')
+    await wait('snake_final_delivery_idle',()=>assembly.service.session.providerIdle)
+  }
   report.failures=validateProjectResult(report.result)
   report.status=report.failures.length?'failed':'passed'
 }catch(error){report.status='failed';report.failure=['clear_request_not_dispatched','codex_not_found','project_name_mismatch','proposal_replaced_by_confirmation','proposal_timeout','readback_terminal_timeout','executor_terminal_timeout','latest_completed_timeout','new_completed_timeout'].includes(error.message)?error.message:'runtime_failure';report.errorType=error.name}

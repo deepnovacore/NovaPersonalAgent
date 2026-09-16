@@ -1,3 +1,4 @@
+import type {ExecutorDiagnostic} from '../../core/executor-diagnostic.js'
 import {snapshotJsonValue} from './safe-json.js'
 
 export const MAX_JSONL_LINE = 256 * 1024
@@ -25,11 +26,13 @@ export class CodexProtocolError extends Error {
 
 export class AppServerRequestRejected extends CodexProtocolError {
   readonly server_code: number
+  readonly diagnostic: ExecutorDiagnostic | undefined
 
-  constructor(serverCode: number) {
+  constructor(serverCode: number, method?: string, message?: string) {
     super('server_rejected')
     this.name = 'AppServerRequestRejected'
     this.server_code = serverCode
+    this.diagnostic = method === undefined ? undefined : {method, server_code: serverCode, message: (message ?? "").slice(0, 65536)}
   }
 }
 
@@ -62,6 +65,7 @@ export interface JsonRpcRequestOptions {
 }
 
 interface PendingRequest {
+  readonly method: string
   readonly resolve: (value: unknown) => void
   readonly reject: (error: Error) => void
   readonly signal: AbortSignal | undefined
@@ -165,6 +169,7 @@ export class JsonRpcConnection {
       this.#nextId = requestId
       let onAbort: (() => void) | undefined
       const pending: PendingRequest = {
+        method,
         resolve: resolveResponse,
         reject: rejectResponse,
         signal: options.signal,
@@ -348,7 +353,7 @@ export class JsonRpcConnection {
         const serverCode = typeof remoteCode === 'number' && Number.isSafeInteger(remoteCode)
           ? remoteCode
           : -32000
-        pending.reject(new AppServerRequestRejected(serverCode))
+        pending.reject(new AppServerRequestRejected(serverCode, pending.method, typeof message.error.message === "string" ? message.error.message : ""))
         return
       }
       const failure = this.#poison(new CodexProtocolError('malformed_jsonl'))

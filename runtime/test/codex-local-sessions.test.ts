@@ -203,3 +203,26 @@ test('catalog deduplication preserves Nova bindings in both import orderings and
     await rm(value.root, {recursive: true, force: true})
   }
 })
+
+test('an indexed thread with a missing rollout is not imported or selected for latest', async () => {
+  const home = await realpath(await mkdtemp(join(tmpdir(), 'nova-missing-rollout-')))
+  const value = await fixture({localCodexHome: home})
+  try {
+    await run(value, 'first task', {session: 'new', title: 'Old'})
+    const workspace = await value.store.resolveWorkspace('alpha')
+    const session = await value.store.resolveSession(workspace.workspace_id, 'Old')
+    const db = new DatabaseSync(join(home, 'state_5.sqlite'))
+    db.exec('CREATE TABLE threads (id TEXT, title TEXT, cwd TEXT, source TEXT, archived INTEGER, updated_at INTEGER, rollout_path TEXT)')
+    db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)').run(session.codex_thread_id, 'Old', workspace.canonical_path, 'app-server', 0, 100, join(home, 'missing.jsonl'))
+    db.close()
+    assert.deepEqual(await readLocalCodexSessions(home), [])
+    const target = await value.adapter.resolveIntakeTarget({kind: 'work', project: 'alpha', session: 'latest'})
+    assert.equal(target.action, 'reuse')
+    assert.equal(target.session_id, null)
+    assert.equal((await value.store.resolveSession(workspace.workspace_id, 'Old')).state, 'unavailable')
+  } finally {
+    await value.adapter.close()
+    await rm(value.root, {recursive: true, force: true})
+    await rm(home, {recursive: true, force: true})
+  }
+})

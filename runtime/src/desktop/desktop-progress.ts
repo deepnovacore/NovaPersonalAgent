@@ -1,3 +1,4 @@
+import {executorDiagnosticSchema} from '../core/executor-diagnostic.js'
 import {EXECUTOR_PROGRESS, EXECUTOR_RESULT} from './desktop-wire.js'
 import {z} from 'zod'
 import type {CausalRuntime} from '../core/causal-runtime.js'
@@ -12,6 +13,7 @@ const credentialName = /(?:^|[\s_-])(?:[a-z0-9]+[_-])*?(?:secret|token|password|
 const executorResultBodySchema = z.object({
   delegate_id: identifier, executor: identifier,
   project: projectLabel.optional(), title: projectLabel.optional(),
+  diagnostic: executorDiagnosticSchema.optional(),
   outcome: z.enum(['ok', 'failed', 'refused', 'unknown', 'cancelled']), summary,
   started_at: z.number().finite().nonnegative(), ended_at: z.number().finite().nonnegative(),
   changed_files: z.number().int().nonnegative().nullable(),
@@ -100,10 +102,13 @@ export function projectExecutorEvent(
     const content = event.kind === 'handoff' ? event.payload.content : {}
     const superseded = outcome === 'refused' && content !== null && typeof content === 'object' && !Array.isArray(content)
       && (content.code === 'superseded' || content.error === 'superseded')
+    const resumeFailed = content !== null && typeof content === 'object' && !Array.isArray(content)
+      && content.code === 'resume_unavailable'
     const usageLimited = content !== null && typeof content === 'object' && !Array.isArray(content)
       && (content.code === 'usage_limit_exceeded' || content.error === 'usage_limit_exceeded')
     const fallback = outcome === 'ok'
       ? `${label} ${monitor ? '监控已停止' : '已完成任务'}。`
+      : resumeFailed ? `${label} 原会话无法恢复，任务未启动。`
       : usageLimited
         ? `${label} 额度不足，任务未完成。`
       : superseded
@@ -111,7 +116,8 @@ export function projectExecutorEvent(
         : `${label} ${outcome === 'unknown' ? '结果尚未确认' : outcome === 'refused' ? '请求被拒绝' : outcome === 'cancelled' ? (monitor ? '监控已停止' : '任务已取消') : (monitor ? '监控失败' : '执行失败')}。`
     text = event.kind === 'handoff' && !superseded && !usageLimited ? safeProgressSummary(event.payload.content.summary, fallback) : fallback
     const changed = event.kind === 'handoff' ? event.payload.content.changed_files : null
-    result = {delegate_id: id, executor: publicExecutor, outcome, summary: text,
+    const diagnostic = event.kind === 'handoff' ? executorDiagnosticSchema.safeParse(event.payload.content.diagnostic) : null
+    result = {...(diagnostic?.success ? {diagnostic: diagnostic.data} : {}), delegate_id: id, executor: publicExecutor, outcome, summary: text,
       started_at: delegate.dispatched_at, ended_at: event.ts,
       changed_files: typeof changed === 'number' && Number.isSafeInteger(changed) && changed >= 0 ? changed : null}
   }

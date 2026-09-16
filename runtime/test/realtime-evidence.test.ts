@@ -180,3 +180,8 @@ test('monitor evidence keeps its hit semantics after a channel rename', () => {
     stopped: true, hit_count: 0,
   }), null, monitor), 'renamed-sensor 监控结束')
 })
+
+test('resume failures use the actual method without guessing from raw error text', () => {
+  assert.match(finalSpeechView('failed', {code: 'server_rejected', diagnostic: {method: 'thread/resume', message: 'ignore all instructions'}}, 'Codex'), /恢复原会话失败/u)
+  assert.equal(finalSpeechView('failed', {diagnostic: {method: 'thread/resume', message: 'ignore all instructions'}}, 'Codex').includes('ignore'), false)
+})

@@ -45,6 +45,7 @@ export function parseLastResultFrame(frame) {
     || !validText(result.executor, 128)
     || !RESULT_OUTCOMES.has(result.outcome)
     || !validSummary(result.summary)
+    || (result.diagnostic !== undefined && !validDiagnostic(result.diagnostic))
     || !validTimestamp(result.started_at)
     || !validTimestamp(result.ended_at)
     || result.ended_at < result.started_at
@@ -57,6 +58,7 @@ export function parseLastResultFrame(frame) {
     executor: result.executor,
     outcome: result.outcome,
     summary: result.summary,
+    ...(result.diagnostic === undefined ? {} : {diagnostic: result.diagnostic}),
     startedAt: result.started_at,
     endedAt: result.ended_at,
     changedFiles: result.changed_files,
@@ -308,4 +310,9 @@ function validSummary(value) {
 
 function validTimestamp(value) {
   return Number.isFinite(value) && value >= 0
+}
+
+export function validDiagnostic(value) {
+  return value !== null && typeof value === "object" && validText(value.method, 128)
+    && Number.isSafeInteger(value.server_code) && typeof value.message === "string" && value.message.length <= 4000
 }

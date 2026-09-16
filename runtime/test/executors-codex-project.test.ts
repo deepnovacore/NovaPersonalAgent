@@ -575,9 +575,11 @@ test('threadless transport refusal stays the real failure instead of becoming th
     value.factory.nextOutcome = {
       classification: 'refused', code: 'server_rejected', turnStartWritten: false, completion: null,
     }
+    value.factory.nextOutcome = {...value.factory.nextOutcome, diagnostic: {method: 'thread/resume', server_code: -32600, message: 'no rollout found'}}
     const failed = await run(value, 'fail during thread start')
+    assert.deepEqual(failed.content.diagnostic, {method: 'thread/resume', server_code: -32600, message: 'no rollout found'})
     assert.equal(failed.outcome, 'failed')
-    assert.equal(failed.content.code, 'worker_refused')
+    assert.equal(failed.content.code, 'server_rejected')
     assert.equal(failed.content.stage, 'thread_start')
     const alpha = await value.store.resolveWorkspace('alpha')
     assert.deepEqual(await value.store.listSessions(alpha), [])
@@ -983,7 +985,7 @@ test('private resume-unavailable disposition marks the exact stored session unav
       classification: 'refused', code: 'resume_unavailable', turnStartWritten: false, completion: null,
     }
     const unavailable = await run(value, 'continue', {session: 'latest'})
-    assert.equal(unavailable.content.code, 'worker_refused')
+    assert.equal(unavailable.content.code, 'resume_unavailable')
     assert.equal((await value.store.resolveSession(workspace.workspace_id, 'Task')).state, 'unavailable')
   } finally {
     await value.adapter.close()

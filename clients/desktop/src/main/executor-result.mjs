@@ -1,4 +1,4 @@
-import {parseProjectRoster, validProjectLabel} from '../renderer/bubbles.mjs'
+import {parseProjectRoster, validProjectLabel, validDiagnostic} from '../renderer/bubbles.mjs'
 
 const OUTCOMES = new Set(['ok', 'failed', 'refused', 'unknown', 'cancelled'])
 
@@ -13,6 +13,7 @@ export function parseExecutorResult(value) {
         executor: value.executor,
         outcome: value.outcome,
         summary: value.summary,
+        diagnostic: value.diagnostic,
         startedAt: value.started_at,
         endedAt: value.ended_at,
         changedFiles: value.changed_files,
@@ -23,6 +24,7 @@ export function parseExecutorResult(value) {
     || (canonical.title !== undefined && !validProjectLabel(canonical.title))
     || !OUTCOMES.has(canonical.outcome)
     || !validSummary(canonical.summary)
+    || (canonical.diagnostic !== undefined && !validDiagnostic(canonical.diagnostic))
     || !validTime(canonical.startedAt)
     || !validTime(canonical.endedAt)
     || canonical.endedAt < canonical.startedAt
@@ -35,6 +37,7 @@ export function parseExecutorResult(value) {
     executor: canonical.executor,
     outcome: canonical.outcome,
     summary: canonical.summary,
+    ...(canonical.diagnostic === undefined ? {} : {diagnostic: canonical.diagnostic}),
     startedAt: canonical.startedAt,
     endedAt: canonical.endedAt,
     changedFiles: canonical.changedFiles,
@@ -49,7 +52,7 @@ export function executorResultDialogOptions(result) {
     type: result.outcome === 'ok' ? 'info' : 'warning',
     title: '任务结果',
     message: outcome,
-    detail: `${result.project ?? result.executor} · ${result.title ?? result.delegateId}\n${result.summary}\n\n变更文件：${result.changedFiles === null ? '未知' : result.changedFiles}\n开始：${formatSeconds(result.startedAt)}\n结束：${formatSeconds(result.endedAt)}\n耗时：${formatSeconds(result.endedAt - result.startedAt, false)}`,
+    detail: `${result.project ?? result.executor} · ${result.title ?? result.delegateId}\n${result.summary}${result.diagnostic === undefined ? "" : `\n\n${result.executor} ${result.diagnostic.method} (${result.diagnostic.server_code})\n${result.diagnostic.message}`}\n\n变更文件：${result.changedFiles === null ? '未知' : result.changedFiles}\n开始：${formatSeconds(result.startedAt)}\n结束：${formatSeconds(result.endedAt)}\n耗时：${formatSeconds(result.endedAt - result.startedAt, false)}`,
     buttons: ['打开 记忆面板', '关闭'],
     defaultId: 0,
     cancelId: 1,

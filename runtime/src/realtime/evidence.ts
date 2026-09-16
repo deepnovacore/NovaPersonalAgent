@@ -42,6 +42,9 @@ export function finalSpeechView(outcome: string, content: unknown, displayName: 
   let error: unknown
   let stage: unknown
   if (isObject(content)) {
+    if (outcome === 'failed' && isObject(content.diagnostic) && content.diagnostic.method === 'thread/resume') {
+      return `${displayName} 恢复原会话失败，任务未启动。具体错误可在任务详情查看；这不代表需要修改任务需求。`
+    }
     code = content.code
     error = content.error
     stage = content.stage
@@ -90,6 +93,7 @@ function codingStartupFailureSpeech(category: string, stage: unknown, displayNam
   if (category === 'spawn_failed' || stage === 'spawn') {
     return `${displayName} 进程未能启动，这次任务没有成功启动。`
   }
+  if (category === 'resume_unavailable') return `${displayName} 原会话记录不可用，无法恢复，任务未启动。需要在新会话中继续。`
   if (category === 'thread_id_invalid' || category === 'session_thread_mismatch') {
     return `${displayName} 会话未能建立，这次任务没有成功启动。`
   }

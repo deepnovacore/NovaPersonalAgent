@@ -1,3 +1,4 @@
+import type {ExecutorDiagnostic} from '../../core/executor-diagnostic.js'
 import { Readable,Writable } from 'node:stream'
 import { managedMcpEnvironment,recordManagedMcpVisibility,type ManagedCodexMcp } from './managed-mcp.js'
 import { generateSessionTitle } from './session-title.js'
@@ -16,6 +17,7 @@ validateEffectiveCodexConfig,
 } from './app-server-schema.js'
 import {
 isCodexApprovalPort,
+redactApprovalDetail,
 routeCodexApprovalServerRequest,
 } from './approval-protocol.js'
 import type {ApprovalPort} from '../../core/approval.js'
@@ -141,6 +143,7 @@ export interface TransportObserver {
 }
 
 export interface TransportOutcome {
+  readonly diagnostic?: ExecutorDiagnostic
   readonly classification: 'completed' | 'refused' | 'uncertain'
   readonly code: CodexTransportCode
   readonly turnStartWritten: boolean
@@ -266,7 +269,7 @@ interface CredentialRemovalAttempt {
 export class CodexTransportError extends Error {
   readonly code: CodexTransportCode
 
-  constructor(code: CodexTransportCode) {
+  constructor(code: CodexTransportCode, readonly diagnostic?: ExecutorDiagnostic) {
     super(code)
     this.name = 'CodexTransportError'
     this.code = code
@@ -391,6 +394,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     let titleWork: Promise<void> | null = null
     const titleAbort = new AbortController()
     let failureCode: CodexTransportCode | null = null
+    let diagnostic: ExecutorDiagnostic | undefined
     try {
       if (this.#prewarmPromise !== null) {
         await runWithin(this.#prewarmPromise, deadline, 'adapter_timeout')
@@ -488,7 +492,10 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
       }
       completion = await this.#waitForCompletion(session, deadline)
     } catch (error) {
-      failureCode = safeTransportError(error, 'transport_lost').code
+      const failure = safeTransportError(error, 'transport_lost')
+      failureCode = failure.code
+      diagnostic = failure.diagnostic === undefined ? undefined : {...failure.diagnostic,
+        message: this.#sanitizeText(redactApprovalDetail(failure.diagnostic.message), 4000).text.slice(0, 4000)}
     }
     if (titleWork !== null) {
       const titleGrace = setTimeout(() => { titleAbort.abort() }, CODEX_TITLE_GRACE_MS)
@@ -504,7 +511,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     this.#runActive = false
     try {
       if (failureCode !== null) {
-        return outcome(written ? 'uncertain' : 'refused', failureCode, written, completion)
+        return {...outcome(written ? 'uncertain' : 'refused', failureCode, written, completion), ...(diagnostic === undefined ? {} : {diagnostic})}
       }
       if (completion === null) return outcome(written ? 'uncertain' : 'refused', 'transport_lost', written, null)
       const safeCompletion: TurnCompletion = Object.freeze({
@@ -891,7 +898,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         threadResponse = await this.#requestWithin(session, thread.method, thread.params, deadline)
       } catch (error) {
         if (thread.method === 'thread/resume' && error instanceof AppServerRequestRejected) {
-          throw new CodexTransportError('resume_unavailable')
+          throw new CodexTransportError('resume_unavailable', error.diagnostic)
         }
         throw error
       }
@@ -1832,7 +1839,7 @@ function outcome(
 }
 
 function mapProtocolFailure(error: unknown): CodexTransportError {
-  if (error instanceof AppServerRequestRejected) return new CodexTransportError('server_rejected')
+  if (error instanceof AppServerRequestRejected) return new CodexTransportError('server_rejected', error.diagnostic)
   if (!(error instanceof CodexProtocolError)) return new CodexTransportError('transport_lost')
   if (error.code === 'stdout_too_large' || error.code === 'stdout_line_too_large') {
     return new CodexTransportError('transport_lost')
@@ -1849,7 +1856,7 @@ function mapProtocolFailure(error: unknown): CodexTransportError {
 }
 
 function safeTransportError(error: unknown, fallback: CodexTransportCode): CodexTransportError {
-  if (error instanceof CodexTransportError) return new CodexTransportError(error.code)
+  if (error instanceof CodexTransportError) return new CodexTransportError(error.code, error.diagnostic)
   if (error instanceof CodexProtocolError) return mapProtocolFailure(error)
   if (isPlainRecord(error)) {
     const code = error.code

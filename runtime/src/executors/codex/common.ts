@@ -1,3 +1,4 @@
+import {executorDiagnosticSchema, type ExecutorDiagnostic} from '../../core/executor-diagnostic.js'
 import {createHash} from 'node:crypto'
 
 import type {
@@ -112,6 +113,7 @@ interface RunDeadline {
 }
 
 interface ValidatedOutcome {
+  readonly diagnostic?: ExecutorDiagnostic
   readonly classification: 'completed' | 'refused' | 'uncertain'
   readonly code: CodexTransportCode
   readonly turnStartWritten: boolean
@@ -350,15 +352,16 @@ export class CodexAdapterCore {
       if (admitted.classification === 'refused') {
         return createRunHandoff(
           'failed',
-          'trusted_system',
-          PREFLIGHT_CODES.has(admitted.code) || admitted.code === 'config_not_isolated' || admitted.code === 'mcp_tools_not_isolated' ? admitted.code : 'worker_refused',
+          admitted.diagnostic === undefined ? 'trusted_system' : 'untrusted_external',
+          admitted.code,
           preflight,
           failureStage(admitted.code, 'thread_start'),
+          undefined, admitted.diagnostic,
         )
       }
       if (admitted.classification === 'uncertain') {
         return createRunHandoff(
-          'unknown', 'untrusted_external', admitted.code, preflight, 'thread_start',
+          'unknown', 'untrusted_external', admitted.code, preflight, 'thread_start', undefined, admitted.diagnostic,
         )
       }
       if (evidence === null || !admitted.turnStartWritten) {
@@ -610,7 +613,10 @@ function requirePreflight(value: unknown): Readonly<Record<string, unknown>> {
 function validateOutcome(value: unknown): ValidatedOutcome | null {
   try {
     const snapshot = snapshotJsonRecord(value)
-    if (!sameKeys(snapshot, ['classification', 'code', 'turnStartWritten', 'completion'])) return null
+    if (!sameKeys(snapshot, ['classification', 'code', 'turnStartWritten', 'completion'])
+      && !sameKeys(snapshot, ['classification', 'code', 'turnStartWritten', 'completion', 'diagnostic'])) return null
+    const parsedDiagnostic = executorDiagnosticSchema.safeParse(snapshot.diagnostic)
+    const diagnostic = parsedDiagnostic.success ? parsedDiagnostic.data : undefined
     if (
       snapshot.classification !== 'completed'
       && snapshot.classification !== 'refused'
@@ -666,6 +672,7 @@ function validateOutcome(value: unknown): ValidatedOutcome | null {
       || !UNCERTAIN_CODES.has(snapshot.code)
     ) return null
     return Object.freeze({
+      ...(diagnostic === undefined ? {} : {diagnostic}),
       classification: snapshot.classification,
       code: snapshot.code as CodexTransportCode,
       turnStartWritten: snapshot.turnStartWritten,
@@ -719,11 +726,13 @@ function createRunHandoff(
   preflight: Readonly<Record<string, unknown>>,
   stage?: CodexFailureStage,
   evidence?: Readonly<Record<string, unknown>>,
+  diagnostic?: ExecutorDiagnostic,
 ): ExecutorHandoff {
   return {
     outcome,
     trust,
-    content: requireJsonRecord(createCodexRunEnvelope(code, preflight, evidence, stage)),
+    content: requireJsonRecord({...createCodexRunEnvelope(code, preflight, evidence, stage),
+      ...(diagnostic === undefined ? {} : {diagnostic})}),
   }
 }
 

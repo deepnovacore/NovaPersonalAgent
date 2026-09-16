@@ -73,6 +73,18 @@ try {
   const count = requests.length
   await new Promise(resolve => setTimeout(resolve, 150))
   assert.equal(requests.length, count, 'Receipt alone must not request the model')
+  const waitingFact = {kind: 'final', host_item_id: 'probe-waiting', event_id: 'probe-waiting', call_id: null,
+    content: '任务还在准备中，尚未开始执行。'}
+  await adapter.injectHostItem(waitingFact, {signal, confirmationTimeout: null, asUserActivation: false})
+  const waitingStart = events.length
+  const waitingEnded = nextTerminal()
+  await adapter.createResponse({kind: 'host_fact', item: waitingFact, task_summary: null, origin_spoken: false}, signal)
+  assert.equal((await waitingEnded).status, 'completed')
+  const waitingResponse = response(events.slice(waitingStart))
+  assert.ok(requests.at(-1).messages.some(message => message.role === 'tool' && message.tool_call_id === call.call_id))
+  assert.equal(waitingResponse.calls.length, 0)
+  assert.ok(waitingResponse.text.length <= 80, 'Waiting feedback must stay brief')
+  assert.doesNotMatch(waitingResponse.text, /[？?]/)
   const fact = {
     kind: 'final', host_item_id: 'probe-question', event_id: 'probe-question', call_id: null,
     content: '请只问用户这一项：是在现有的游戏项目里做，还是创建新项目？',
@@ -84,24 +96,30 @@ try {
   assert.equal((await ended).status, 'completed')
   const final = response(events.slice(start))
   assert.equal(final.calls.length, 0)
-  assert.equal(requests.length, count + 1)
+  assert.equal(requests.length, count + 2)
   assert.equal(requests.at(-1).tools, undefined)
-  assert.equal(requests.at(-1).messages.at(-2).role, 'tool')
   assert.match(requests.at(-1).messages.at(-1).content, /宿主激活事实/)
   assert.match(final.text, /项目.*[？?]/, 'Must ask the actual project question')
-  const failureFact = {...fact, host_item_id: 'probe-failure', event_id: 'probe-failure',
-    content: finalSpeechView('refused', {error: 'superseded'}, 'Codex')}
-  await adapter.injectHostItem(failureFact, {signal, confirmationTimeout: null, asUserActivation: false})
-  const failureStart = events.length
-  const failureEnded = nextTerminal()
-  await adapter.createResponse({kind: 'host_fact', item: failureFact, task_summary: null, origin_spoken: false}, signal)
-  assert.equal((await failureEnded).status, 'completed')
-  const failure = response(events.slice(failureStart))
-  assert.equal(failure.calls.length, 0)
-  assert.match(failure.text, /未.*启动|没(?:有|能).*启动/)
-  assert.doesNotMatch(failure.text, /确认|修正请求|请问|请选择|需要您|需要你|[？?]|将.*重试|会.*重试/)
+  const failures = []
+  for (const [outcome, content] of [
+    ['refused', {error: 'superseded'}],
+    ['failed', {code: 'resume_unavailable', diagnostic: {method: 'thread/resume', server_code: -32600, message: 'no rollout found for thread'}}],
+  ]) {
+    const failureFact = {...fact, host_item_id: `probe-failure-${failures.length}`, event_id: `probe-failure-${failures.length}`,
+      content: finalSpeechView(outcome, content, 'Codex')}
+    await adapter.injectHostItem(failureFact, {signal, confirmationTimeout: null, asUserActivation: false})
+    const failureStart = events.length
+    const failureEnded = nextTerminal()
+    await adapter.createResponse({kind: 'host_fact', item: failureFact, task_summary: null, origin_spoken: false}, signal)
+    assert.equal((await failureEnded).status, 'completed')
+    const failure = response(events.slice(failureStart))
+    assert.equal(failure.calls.length, 0)
+    assert.match(failure.text, /(?:未|没).*启动/)
+    assert.doesNotMatch(failure.text, /确认|修正请求|请问|请选择|需要您|需要你|[？?]|将.*重试|会.*重试/)
+    failures.push(failure)
+  }
   console.log(JSON.stringify({passed: true, model: config.model, requests: requests.length,
-    responses: [response(first), response(second), final, failure],
+    responses: [response(first), response(second), waitingResponse, final, ...failures],
     scope: 'Real adapter and Qwen; synthetic TTS and host fact; no audio device or executor',
   }, null, 2))
 } finally {

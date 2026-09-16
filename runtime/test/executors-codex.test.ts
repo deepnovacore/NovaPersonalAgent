@@ -433,7 +433,7 @@ test('live maps pre/post-side-effect failures without leaking internal text', as
       configure: transport => {
         transport.outcome = {classification: 'refused', code: 'server_rejected', turnStartWritten: false, completion: null}
       },
-      expected: ['failed', 'trusted_system', 'worker_refused'],
+      expected: ['failed', 'trusted_system', 'server_rejected'],
     },
     {
       configure: transport => {
@@ -540,9 +540,9 @@ test('live rejects contradictory classification and code combinations', async ()
 
 test('live refusal matrix follows only real 6B pre-write paths', async () => {
   for (const [code, expectedCode] of [
-    ['server_rejected', 'worker_refused'],
-    ['unexpected_server_request', 'worker_refused'],
-    ['resume_unavailable', 'worker_refused'],
+    ['server_rejected', 'server_rejected'],
+    ['unexpected_server_request', 'unexpected_server_request'],
+    ['resume_unavailable', 'resume_unavailable'],
     ['turn_failed', 'invalid_worker_result'],
     ['missing_terminal', 'invalid_worker_result'],
     ['nonzero_exit', 'invalid_worker_result'],
@@ -609,3 +609,12 @@ for (const code of ['config_not_isolated', 'mcp_tools_not_isolated']) {
     assert.equal(result.content.code, code)
   })
 }
+
+test('invalid optional diagnostic does not replace the actual refusal code', async () => {
+  const transport = new ScriptedTransport()
+  transport.outcome = {classification: 'refused', code: 'resume_unavailable', turnStartWritten: false, completion: null,
+    diagnostic: {method: 'thread/resume', server_code: -32600, message: '😀'.repeat(4000)}}
+  const handoff = await new CodexLiveAdapter(transport).dispatch('run', {work_order: 'resume'}, contextFor('run', {}))
+  assert.equal(handoff.content.code, 'resume_unavailable')
+  assert.equal(handoff.content.diagnostic, undefined)
+})

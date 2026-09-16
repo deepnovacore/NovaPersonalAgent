@@ -778,3 +778,20 @@ test('an unrelated completed frontend turn releases paused work without rewritin
   assert.equal(h.intake.view?.opening, 'Fix empty password')
   assert.equal(h.intake.view?.revision, 1)
 })
+
+test('long preparation emits one waiting fact and invalidates it after cancellation', t => {
+  t.mock.timers.enable({apis: ['setTimeout']})
+  const h = harness({models: {assess: () => new Promise(() => { /* deliberately pending */ })}})
+  h.intake.open(request, 'Build a page', 'conversation:1', '1')
+  t.mock.timers.tick(5999)
+  assert.equal(h.facts.length, 0)
+  t.mock.timers.tick(1)
+  assert.equal(h.facts.length, 1)
+  const s = h.intake.view!
+  const event = `intake:${s.intake_id}:${s.revision}:waiting`
+  assert.equal(h.intake.factEligible(event, 1), true)
+  t.mock.timers.tick(6000)
+  assert.equal(h.facts.length, 1)
+  h.intake.cancel()
+  assert.equal(h.intake.factEligible(event, 1), false)
+})

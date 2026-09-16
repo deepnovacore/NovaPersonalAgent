@@ -68,7 +68,7 @@ export interface IntakeOptions {
   readonly dispatch: (session: Readonly<IntakeSession>, stillWanted?: () => boolean) => IntakeAdmission | Promise<IntakeAdmission>
   readonly steer: (session: Readonly<IntakeSession>, project: string | null, instruction: string, stillWanted?: () => boolean) => IntakeAdmission | Promise<IntakeAdmission>
   readonly invalidateProposal: () => void
-  readonly fact: (session: Readonly<IntakeSession>, text: string) => void
+  readonly fact: (session: Readonly<IntakeSession>, text: string, kind?: 'waiting') => void
   readonly record: (session: Readonly<IntakeSession>, kind: string, data: Readonly<Record<string, JsonValue>>) => void
   readonly diagnostic: (code: string) => void
   /** Host-only retrieval; model output never supplies evidence or resolvable locators. */
@@ -136,6 +136,8 @@ export class IntakeController {
   #userInputPending = false
   #workspaceId: string | null | undefined = undefined
   readonly #abort = new Set<AbortController>()
+  #waitTimer: ReturnType<typeof setTimeout> | undefined
+  #waitRevision: string | null = null
 
   constructor(options: IntakeOptions) { this.#options = options }
   get view(): Readonly<IntakeSession> | null { return this.#session === null ? null : structuredClone(this.#session) }
@@ -167,6 +169,7 @@ export class IntakeController {
     return intake?.session_id === String(sessionEpoch)
       && eventId.startsWith(`intake:${intake.intake_id}:${intake.revision}:`)
       && intake.outcome !== 'cancelled'
+      && (!eventId.endsWith(':waiting') || (this.preparing && !this.#userInputPending))
   }
 
   open(request: Readonly<Record<string, JsonValue>>, text: string, originRef: string, sessionId: string): 'intake_opened' | 'intake_in_progress' {
@@ -273,7 +276,25 @@ export class IntakeController {
     }
   }
 
+  #updateWaitNotice(): void {
+    const current = this.#session
+    const key = this.preparing && current !== null ? `${current.intake_id}:${current.revision}` : null
+    if (key === this.#waitRevision) return
+    clearTimeout(this.#waitTimer)
+    this.#waitRevision = key
+    if (key === null || current === null) return
+    const {intake_id, revision} = current
+    this.#waitTimer = setTimeout(() => {
+      const live = this.#live(intake_id, revision)
+      if (live !== null && this.preparing && !this.#userInputPending) {
+        this.#options.fact(live, '任务还在准备中，尚未开始执行。', 'waiting')
+      }
+    }, 6000)
+    this.#waitTimer.unref?.()
+  }
+
   #pump(): void {
+    this.#updateWaitNotice()
     this.#options.onStateChanged?.()
     if (!this.active) return
     if (this.#assessPending && this.#assessing === null) {
@@ -517,6 +538,7 @@ export class IntakeController {
     const current = this.#session!
     current.state = 'closed'
     current.outcome = outcome
+    this.#updateWaitNotice()
     this.#assessPending = false
     this.#planPending = false
     for (const abort of this.#abort) abort.abort()

@@ -1012,6 +1012,8 @@ test('turn rejection happens after the writer drain and stays server_rejected', 
   )
   assert.equal(result.classification, 'uncertain')
   assert.equal(result.code, 'server_rejected')
+  assert.equal(result.diagnostic?.method, 'turn/start')
+  assert.equal(result.diagnostic?.server_code, -32001)
   assert.equal(result.turnStartWritten, true)
 })
 
@@ -2288,6 +2290,7 @@ test('persistent resume uses exact host identity and rejection is pre-effect res
     if (rejected) {
       assert.equal(result.classification, 'refused')
       assert.equal(result.code, 'resume_unavailable')
+      assert.deepEqual(result.diagnostic, {method: 'thread/resume', server_code: -32001, message: 'resume-private'})
       assert.equal(result.turnStartWritten, false)
       assert.equal(owner.received.some(message => message.method === 'turn/start'), false)
     } else {

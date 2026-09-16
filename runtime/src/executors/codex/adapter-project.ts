@@ -1,6 +1,6 @@
 import {basename} from 'node:path'
 import {realpathSync} from 'node:fs'
-import {readLocalCodexSessions} from './local-sessions.js'
+import {readLocalCodexSessions, localRolloutAvailable} from './local-sessions.js'
 import {hostPersistentHomeFromConfig, hostWorkspaceFromConfig} from '../../projects/host-paths.js'
 import {hostWorkspacePath} from '../../projects/host-paths.js'
 import type {
@@ -264,6 +264,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     if (decision.kind === 'work' && decision.session === 'latest') {
       try { session = decision.session_title ? await this.#store.resolveSession(workspace.workspace_id, decision.session_title) : await this.#latestReadySession(workspace) }
       catch { throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: decision.session_title ?? ''}) }
+      if (session !== null && !(await this.#rolloutAvailable(session))) throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: session.display_title})
       if (session?.executor_home && session.origin !== 'nova' && !this.#localSessionIds.has(session.session_id)) throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: session.display_title})
     }
     return {
@@ -361,7 +362,16 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       if (error instanceof ProjectStateError && error.code === 'session_not_found') return null
       throw error
     }
-    return session.state === 'ready' && session.codex_thread_id !== null ? session : null
+    return session.state === 'ready' && session.codex_thread_id !== null && await this.#rolloutAvailable(session) ? session : null
+  }
+
+  async #rolloutAvailable(session: ProjectSessionRecord): Promise<boolean> {
+    if (session.executor_home && session.codex_thread_id
+      && await localRolloutAvailable(session.executor_home, session.codex_thread_id) === false) {
+      await this.#store.markSessionUnavailable(session.session_id, {wait: true})
+      return false
+    }
+    return true
   }
 
   observeProjectView(observer: ProjectViewObserver): () => void {
@@ -805,6 +815,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     let resumeRollback: SessionResumeRollback | null = null
     const disposition: {value: ValidatedCodexDisposition | null} = {value: null}
     await this.#store.revalidateWorkspace(workspace.workspace_id)
+    if (resumed !== null && !(await this.#rolloutAvailable(resumed))) return failureHandoff('resume_unavailable', 'run', 'thread_start')
     if (resumed?.executor_home && resumed.origin !== 'nova') {
       await this.#refreshLocalSessions()
       if (!this.#localCodexHome || !this.#catalogHealthy || !this.#localSessionIds.has(resumed.session_id)

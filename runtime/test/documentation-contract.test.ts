@@ -44,7 +44,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
 
   assert.match(english, /integrated.*cascaded/isu)
   assert.match(english, /qwen-audio-3\.0-realtime-plus.*longanqian/isu)
-  assert.match(english, /Volcengine ASR\s*->\s*Qwen `qwen-flash`\s*->\s*Volcengine TTS/u)
+  assert.match(english, /Volcengine ASR\s*->\s*Qwen `qwen-plus`\s*->\s*Volcengine TTS/u)
   assert.match(english, /Ark.*explicit.*cascaded LLM/isu)
   assert.match(english, /one key per platform.*reused/isu)
   assert.match(english, /ASR.*fallback.*DOUBAO_BIGMODEL_API_KEY/isu)
@@ -55,7 +55,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
 
   assert.match(chinese, /集成.*级联/su)
   assert.match(chinese, /qwen-audio-3\.0-realtime-plus.*longanqian/su)
-  assert.match(chinese, /火山 ASR\s*->\s*Qwen `qwen-flash`\s*->\s*火山 TTS/u)
+  assert.match(chinese, /火山 ASR\s*->\s*Qwen `qwen-plus`\s*->\s*火山 TTS/u)
   assert.match(chinese, /Ark.*显式.*级联 LLM/su)
   assert.match(chinese, /每个平台.*一把密钥.*复用/su)
   assert.match(chinese, /ASR.*回退.*DOUBAO_BIGMODEL_API_KEY/su)

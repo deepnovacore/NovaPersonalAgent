@@ -722,7 +722,7 @@ test('live refusal exposes only reviewed safe codes and rejects contradictory ou
     [{classification: 'refused', code: 'credential_missing', turnStartWritten: false, completion: null},
       'credential_missing'],
     [{classification: 'refused', code: 'busy', turnStartWritten: false, completion: null},
-      'worker_refused'],
+      'busy'],
     [{classification: 'uncertain', code: 'completed', turnStartWritten: true, completion: null},
       'invalid_worker_result'],
   ] as const) {
