@@ -835,6 +835,7 @@ interface ProjectionOptions {
   readonly terminates?: boolean
   readonly inFlight?: boolean
   readonly delegateOverride?: Partial<{
+    readonly request: Readonly<Record<string, JsonValue>>
     readonly executor: string
     readonly op: string
     readonly origin_ref: string

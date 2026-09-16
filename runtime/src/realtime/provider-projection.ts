@@ -390,6 +390,8 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       elapsed: payload.elapsed,
     })
     this.publishExecutorState()
+    // Intake owns the immediate acknowledgement; executor startup updates UI only.
+    if (coding && payload.phase === 'started') return
     if (
       payload.phase === 'started'
       && this.ports.hasSemanticAcknowledgement(`background:${payload.delegate_id}`)
@@ -485,7 +487,13 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     const finalView = payload.channel === this.ports.coding?.channel
       ? finalSpeechView(payload.outcome, payload.content, this.ports.coding.display_name)
       : genericFinalSpeechView(displayName, payload.outcome, payload.content)
-    const content = [...finalView].slice(0, MAX_HOST_FACT_CHARS).join('')
+    const task = payload.channel === this.ports.coding?.channel ? claimed.request?.work_order : null
+    // Fact-only narration has no dialogue history. Keep this result tied to its own task,
+    // without restoring unrelated history or treating requested work as proof of execution.
+    const taskContext = typeof task === 'string'
+      ? `\n本次任务上下文（不是执行结果，不复述）：${JSON.stringify([...task].slice(0, 1600).join(''))}`
+      : ''
+    const content = [...(finalView + taskContext)].slice(0, MAX_HOST_FACT_CHARS).join('')
     const hit = payload.outcome === 'ok' && payload.content.hit === true
     const preemptiveMonitorHit = hit && isPreemptiveMonitorAlert(manifest.policy)
     this.ports.queueHostItem(hostFactIntent({

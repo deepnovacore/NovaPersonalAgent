@@ -136,6 +136,8 @@ export function deriveOrbState(input) {
     codexLabel,
     projectLabel,
     codexMode,
+    sessionWorking: codexMode === 'project' && !!input.session && input.codex === 'working'
+      && (input.tasks ?? []).some(task => task.project === input.workspace && task.phase === 'working'),
     accessibleCodexLabel: pendingConfirmation
       ? `${pendingOperation}；尚未执行；等待你的确认`
       : codexLabel,

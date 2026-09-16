@@ -73,7 +73,7 @@ export function surrogateSystemPrompt(preset: ProactivityPreset): string {
   const selectedPolicy = [
     `<proactivity_policy preset="${preset}">`,
     '静默偏好必须有当前 trusted_user 原话作为依据；系统策略中的例子不是用户要求。没有这类用户原话时，不得臆造用户要求静默。明确的用户静默要求优先于下方档位策略。',
-    '只分类 suggestion.summary 相对 suggestion.previous_summary 新增的事实，不能因为累计摘要仍含旧里程碑而重复播报。',
+    '只分类 suggestion.summary 相对 suggestion.previous_summary 和用户已知目标/约束新增的事实；首次执行器摘要如果只是重述已确认需求或承诺开始工作，同样保持沉默，不能因为累计摘要仍含旧里程碑而重复播报。',
     '只有 Codex working progress 才填写 progress_class；其他 suggestion 必须填 null，且 null 是合法值。',
     'Codex working progress 的 progress_class 必须是 routine_delta、milestone、blocker、action_required 之一；',
     '文件或命令计数、正在编辑、开始检查、普通实现细节属于 routine_delta；',

@@ -37,6 +37,7 @@ html, body {
   align-items: center;
   pointer-events: none;
 }
+#bubble-stack[data-placement='above'] { inset: auto 0 calc(100% - var(--bubble-orb-y) + 55px); }
 #bubble-stack[data-placement='below'] { inset: auto 0 0; flex-direction: column; }
 #bubble-stack[data-alignment='left'] { align-items: flex-start; }
 #bubble-stack[data-alignment='right'] { align-items: flex-end; }
@@ -758,7 +759,7 @@ body:hover #orb-rail,
   overflow-wrap: anywhere;
   user-select: text;
 }
-.progress-bubble[data-expanded='true'] { height: 160px; flex-basis: 160px; }
+.progress-bubble[data-expanded='true'] { height: auto; flex-basis: auto; max-height: 160px; }
 .progress-bubble[data-expanded='true'] .progress-bubble-text {
   display: block;
   -webkit-line-clamp: unset;
@@ -781,7 +782,7 @@ body:hover #last-result, #last-result:focus-visible { opacity: 1; pointer-events
 /* Keep the result entry out of the orb until its interaction is redesigned. */
 #last-result { display: none; }
 
-#codex-label[data-mode='project'] #codex-summary {
+#codex-label[data-mode='project'][data-working='true'] #codex-summary {
   background: linear-gradient(110deg, #bfb9c7 30%, #fff 48%, #bfb9c7 66%);
   background-size: 240% 100%;
   background-clip: text;

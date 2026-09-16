@@ -193,3 +193,18 @@ test('invalid generated IDs and malformed public decisions never replace pending
   approval.invalidate('test_cleanup')
   await waiting
 })
+
+test('approval timeout and observer failure remain distinguishable in diagnostics', async () => {
+  const clock = new VirtualClock()
+  const diagnostics: string[] = []
+  const approval = new HostApprovalController({clock, idFactory: () => 'diagnostic-test',
+    onDiagnostic: code => { diagnostics.push(code) }})
+  approval.observe(() => { throw new Error('broken presentation') })
+  const pending = offerCommand(approval)
+  assert.deepEqual(diagnostics, ['executor_approval_observer_failed'])
+  clock.advanceTo(APPROVAL_TTL_SECONDS)
+  const resolution = await pending
+  assert.equal(approval.consume(resolution!), 'decline')
+  assert.ok(diagnostics.includes('executor_approval_expired'))
+  assert.equal(approval.pending, false)
+})

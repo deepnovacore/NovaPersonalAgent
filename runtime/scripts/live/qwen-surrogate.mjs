@@ -49,6 +49,12 @@ const surrogate = new GatewaySurrogate({
 })
 
 const cases = [{
+  id: 'repeated-known-pomodoro-requirements',
+  goal: '创建单文件番茄计时器，25分钟工作5分钟休息，支持开始暂停重置，完成后打开浏览器',
+  previous: '正在安排任务',
+  summary: '我会创建单文件番茄计时器，验证25/5分钟循环和开始暂停重置功能，完成后打开浏览器。',
+  expectedClass: 'routine_delta', expectedSpeak: false,
+}, {
   id: 'concrete-working-plan',
   goal: '实现一个网页版贪吃蛇游戏',
   previous: '任务已开始',

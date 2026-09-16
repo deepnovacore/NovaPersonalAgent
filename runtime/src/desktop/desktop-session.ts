@@ -331,6 +331,12 @@ export class DesktopSocketBridge {
   onExecutorApproval(view: ExecutorApprovalView): void {
     if (this.#executor !== null) executorApprovalMessage(view, this.#clock?.now() ?? 0, this.#executor)
     if (sameApprovalView(view, this.#approvalView)) return
+    this.#telemetry?.record('approval.desktop_view', {
+      pending: view.pending_approval,
+      approval_id: view.pending_approval_id ?? null,
+      connected: this.#authenticated,
+      executor_available: this.#executor !== null,
+    })
     this.#approvalView = view
     this.#syncApprovalDelivery()
   }

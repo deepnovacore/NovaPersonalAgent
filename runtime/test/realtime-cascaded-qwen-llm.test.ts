@@ -201,6 +201,39 @@ for (const factOnly of [false, true]) test(`Qwen completes two sequential tool h
     ((message.tool_calls as readonly {id: string}[])[0]?.id)), factOnly ? ['call-b'] : ['call-a', 'call-b'])
 })
 
+test('interrupting a consumed tool result keeps the resolved pair and admits the next user turn', async () => {
+  const requests: Record<string, unknown>[] = []
+  const responses = [
+    sse([{id: 'tool-turn', choices: [{delta: {tool_calls: [{index: 0, id: 'call-accepted',
+      function: {name: 'dispatch', arguments: '{}'}}]}, finish_reason: 'tool_calls'}]}]),
+    sse([{id: 'ack-turn', choices: [{delta: {content: '正在安排'}, finish_reason: 'stop'}]}]),
+    sse([{id: 'next-turn', choices: [{delta: {content: '已收到补充'}, finish_reason: 'stop'}]}]),
+  ]
+  const session = createQwenCascadedLlmFactory({
+    baseUrl: 'https://dashscope.example/v1', apiKey: 'test-key', model: 'qwen-plus',
+    instructions: 'instructions', fetchImpl: (_url, init) => {
+      requests.push(JSON.parse(init?.body as string) as Record<string, unknown>)
+      return Promise.resolve(responses.shift()!)
+    },
+  }).open()
+  const signal = new AbortController().signal
+  await collect(session.stream({inputs: [{kind: 'user_text', text: '原始需求'}], tools: [], signal}))
+  const continuation = session.stream({
+    inputs: [{kind: 'tool_result', call_id: 'call-accepted', output: {accepted: true}}], tools: [], signal,
+  })[Symbol.asyncIterator]()
+  const started = await continuation.next()
+  assert.equal(started.done, false)
+  if (!started.done) assert.equal(started.value.kind, 'response_started')
+  await continuation.return?.()
+  const next = await collect(session.stream({inputs: [{kind: 'user_text', text: '补充要求'}], tools: [], signal}))
+  assert.equal(next.at(-1)?.kind, 'response_completed')
+  const messages = requests.at(-1)?.messages as Record<string, unknown>[]
+  assert.equal(messages.filter(item => item.tool_call_id === 'call-accepted').length, 1)
+  assert.ok(messages.some(item => item.content === '原始需求'))
+  assert.equal(messages.some(item => item.content === '正在安排'), false)
+  await session.close()
+})
+
 test('Qwen abandons unresolved tool state without discarding completed bounded history', async () => {
   const requests: Record<string, unknown>[] = []
   const responses = [
@@ -678,6 +711,8 @@ test('host narration reads only its fact while the next user turn retains conver
     {kind: 'host_activation', content: '本次执行请求已失效，任务未能启动。'}],
     workspaceContext: '旧工作区上下文', tools: [], signal}))
   const narration = JSON.stringify(requests[1])
+  assert.doesNotMatch(String(requests[1]?.messages[0]?.content), /instructions/)
+  assert.match(String(requests[1]?.messages[0]?.content), /语音播报者/)
   assert.doesNotMatch(narration, /旧问题|原始任务|旧工作区/)
   assert.match(narration, /请求已失效/)
   await collect(llm.stream({inputs: [{kind: 'user_text', text: '继续讨论'}], tools: [], signal}))

@@ -24,17 +24,17 @@ try {
   const page = await context.newPage()
   const errors=[]
   page.on('pageerror', error=>errors.push(error.message))
-  let zoom=1, rows=0, confirmation=false, inSettings=false
+  let zoom=1, rows=0, taskRows=0, confirmation=false, inSettings=false
   let position={x:400,y:400,width:160,height:160}
   async function layout() {
     const area={x:0,y:0,width:1920,height:1080}
-    const result=rows?bubbleWindowLayout({normalBounds:position,rows,zoomFactor:zoom,scaleFactor:2,workArea:area,confirmationActive:confirmation})
+    const result=rows || taskRows?bubbleWindowLayout({normalBounds:position,rows,taskRows,zoomFactor:zoom,scaleFactor:2,workArea:area,confirmationActive:confirmation})
       :confirmation?confirmationWindowLayout({normalBounds:position,zoomFactor:zoom,workArea:area}):{bounds:position}
     const shape={...result,rows,suppressed:result.suppressed??false}
     if (!inSettings) await page.setViewportSize({width:result.bounds.width,height:result.bounds.height})
     return shape
   }
-  await page.exposeFunction('__reserve',async next=>{rows=next;return layout()})
+  await page.exposeFunction('__reserve',async (next,tasks)=>{rows=next;taskRows=tasks;return layout()})
   await page.exposeFunction('__confirm',async active=>{confirmation=active;return layout()})
   await page.addInitScript(view=>{
     const noop=()=>{}, listen=()=>noop
@@ -61,7 +61,7 @@ try {
       executorResult:{open:async result=>{window.__openedResult=result}},
       windowLayout:{onConfirmationPlacement:cb=>(window.__placement=cb,noop),
         onBubbleLayout:cb=>(window.__bubbleLayout=cb,noop),
-        reserveBubbleArea:async next=>emitLayout(await window.__reserve(next)),
+        reserveBubbleArea:async (next,tasks)=>emitLayout(await window.__reserve(next,tasks)),
         setConfirmationMode:active=>{void window.__confirm(active).then(emitLayout)}},
       settings:{get:async()=>view,onChanged:listen,set:async patch=>({...view,...patch,saved:true,operationStatus:'applied',rejectedSecrets:[]})},
     }
@@ -75,11 +75,28 @@ try {
   await page.locator('[data-kind=conversation]').waitFor()
   await page.screenshot({path: `${output}/conversation-bubble.png`})
   await page.locator('[data-kind=conversation]').click()
+  await page.evaluate(() => window.__frame({type:'caption',role:'assistant',final:true,sequence:3,text:'番茄计时器已经完成，可以开始计时。打开浏览器预览还需要你批准，请在下方选择允许或拒绝。页面包含工作和休息计时、暂停与重置功能，已经通过基础验证。'}))
+  await page.locator('.progress-bubble-toggle').click()
+  await page.locator('.progress-bubble[data-expanded="true"]').waitFor()
+  const expanded = await page.locator('.progress-bubble[data-expanded="true"]').boundingBox()
+  assert.ok(expanded.height < 150, 'expanded short text fits content instead of a fixed 160px panel')
+  const expandedOrb = await page.locator('#orb').boundingBox()
+  assert.ok(Math.abs(expandedOrb.y - expanded.y - expanded.height) <= 12,
+    'content-sized bubble remains attached to the orb')
+  await page.screenshot({path:`${output}/expanded-content.png`})
+  await page.locator('.progress-bubble').click()
+  await page.evaluate(()=>window.__frame({type:'executor.tasks',revision:1,active_project:'番茄计时器',tasks:[{work_id:'timer',executor:'codex',project:'番茄计时器',title:'创建番茄计时器',phase:'working',summary:'等待打开预览的审批',ts:1}]}))
   for (const factor of [1,1.25,1.5]) {
+    rows=0; taskRows=0; confirmation=false
+    await page.reload()
+    await page.waitForFunction(()=>window.__socket?.readyState===1)
+    await page.evaluate(()=>window.__frame({type:'executor.tasks',revision:1,active_project:'番茄计时器',tasks:[{work_id:'timer',executor:'codex',project:'番茄计时器',title:'创建番茄计时器',phase:'working',summary:'等待审批',ts:1}]}))
     zoom=factor
     await page.evaluate(z=>document.documentElement.style.zoom=z,zoom)
-    await page.evaluate(()=>window.__frame({type:'executor.approval',executor:'codex',display_name:'Codex',pending_approval:true,pending_approval_busy:false,pending_approval_id:'approval',kind:'network',local_detail:{kind:'network',command:'npm install',cwd:'/workspace',scope:'网络：registry.npmjs.org'},operation_summary:'Codex 请求访问网络。',expires_in_seconds:60,allowed_decisions:['accept','acceptForSession','decline']}))
+    await page.evaluate(()=>window.__frame({type:'executor.approval',executor:'codex',display_name:'Codex',pending_approval:true,pending_approval_busy:false,pending_approval_id:'approval',work:{work_id:'timer',project:'番茄计时器',title:'创建番茄计时器'},kind:'network',local_detail:{kind:'network',command:'npm install',cwd:'/workspace',scope:'网络：registry.npmjs.org'},operation_summary:'Codex 请求访问网络。',expires_in_seconds:60,allowed_decisions:['accept','acceptForSession','decline']}))
     await page.waitForFunction(()=>!document.querySelector('#codex-allow-session').hidden)
+    await page.locator('#codex-confirm').click()
+    assert.equal(JSON.parse(await page.evaluate(()=>window.__sent.at(-1))).type,'executor.approval_decision')
     await page.waitForTimeout(150)
     for(let i=0;i<3;i++) await page.evaluate(i=>window.__frame({type:'executor.progress',delegate_id:`d-${i}`,executor:'codex',phase:'alert',summary:['已开始处理任务','正在检查测试结果','已完成代码修改'][i],level:'milestone',ts:i+1}),i)
     await page.waitForFunction(()=>document.querySelectorAll('.progress-bubble').length===3)
@@ -88,13 +105,10 @@ try {
     for(const b of boxes) assert.ok(b.rect.x>=-1&&b.rect.y>=-1&&b.rect.right<=viewport.width+1&&b.rect.bottom<=viewport.height+1,`${factor} clipped ${JSON.stringify(b)} within ${JSON.stringify(viewport)}`)
     await page.screenshot({path:`${output}/approval-bubbles-${factor}.png`,omitBackground:false})
     console.log(`approval and bubbles: zoom=${factor}, viewport=${viewport.width}x${viewport.height}`)
-    await page.locator('.progress-bubble').first().click()
-    await page.waitForFunction(()=>document.querySelectorAll('.progress-bubble').length===2)
-    await page.evaluate(()=>window.__frame({type:'executor.approval',executor:'codex',display_name:'Codex',pending_approval:false,pending_approval_busy:false,kind:null,local_detail:null,operation_summary:null,expires_in_seconds:null}))
-    await page.locator('.progress-bubble').first().click()
-    await page.locator('.progress-bubble').first().click()
-    await page.waitForFunction(()=>document.querySelectorAll('.progress-bubble').length===0)
   }
+  rows=0; taskRows=0; confirmation=false
+  await page.reload()
+  await page.waitForFunction(()=>window.__socket?.readyState===1)
   await page.evaluate(()=>window.__frame({type:'executor.approval',executor:'codex',display_name:'Codex',pending_approval:true,pending_approval_busy:false,pending_approval_id:'expiring',kind:'permissions',local_detail:{kind:'permissions',scope:'网络：请求访问'},operation_summary:'Codex 请求提升权限。',expires_in_seconds:.1,allowed_decisions:['accept','acceptForSession','decline']}))
   await page.waitForFunction(()=>document.querySelector('#codex-confirm').disabled && document.querySelector('#codex-allow-session').disabled && document.querySelector('#codex-cancel').disabled)
   const count = await page.evaluate(()=>window.__sent.length)

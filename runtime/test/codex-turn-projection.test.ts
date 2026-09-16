@@ -240,12 +240,12 @@ test('count-only work waits for the 30 second keepalive while first prose emits 
     phase: 'working',
     internal_activity: 3,
     elapsed: 30,
-    summary: '已执行 1 条命令、已修改 1 处文件。正在实现 核心',
+    summary: '正在实现 核心',
   })
   assert.equal(JSON.stringify(progress).includes('PRIVATE'), false)
 })
 
-test('typed summaries use exact Chinese counts and the latest allowed prose only', () => {
+test('new prose emits once while later activity never repackages old prose or counters', () => {
   const clock = new VirtualClock()
   const progress: ExecutorProgress[] = []
   const projection = startedProjection(clock, value => { progress.push(value) })
@@ -258,10 +258,10 @@ test('typed summaries use exact Chinese counts and the latest allowed prose only
   item(projection, {type: 'agentMessage', text: '最新说明'})
   clock.advanceTo(30)
   item(projection, {type: 'unknownFuture', text: 'PRIVATE-UNKNOWN'})
-  assert.equal(
-    progress.at(-1)?.summary,
-    '已执行 2 条命令（1 条失败）、已修改 2 处文件、已调用 2 次工具。最新说明',
-  )
+  assert.deepEqual(progress.map(value => value.summary).filter(value => value !== null), ['旧计划', '最新说明'])
+  assert.equal(progress.at(-1)?.summary, null)
+  item(projection, {type: 'agentMessage', text: '最新说明'})
+  assert.equal(progress.filter(value => value.summary === '最新说明').length, 1)
   assert.equal(JSON.stringify(progress).includes('PRIVATE'), false)
 })
 

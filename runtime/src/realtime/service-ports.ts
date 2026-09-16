@@ -39,6 +39,7 @@ import { type RealtimeSession } from './session.js'
 import type { RealtimeTelemetry } from './telemetry.js'
 
 export interface DelegateLike {
+  readonly request?: Readonly<Record<string, JsonValue>>
   readonly delegate_id: string
   readonly executor: string
   readonly op: string

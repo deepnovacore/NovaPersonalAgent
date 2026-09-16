@@ -81,7 +81,10 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
             transportFactory: codexHost.transportFactory,
             clock,
             idFactory: () => randomUUID().replaceAll('-', ''),
-            onDiagnostic,
+            onDiagnostic: code => {
+              telemetry.record('executor.diagnostic', {code})
+              onDiagnostic(code)
+            },
             codexApprovalBroker: {
               publish: view => { publishExecutorApproval(view) },
             },

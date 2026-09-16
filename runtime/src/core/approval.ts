@@ -38,6 +38,7 @@ interface PendingApproval {
 export interface HostApprovalControllerOptions {
   readonly clock: Clock
   readonly idFactory: () => string
+  readonly onDiagnostic?: (code: string) => void
 }
 
 /** What a transport needs from the approval FIFO; `forWork` binds it to one running work. */
@@ -51,6 +52,7 @@ export class HostApprovalController {
   readonly #clock: Clock
   readonly #decision: PendingDecision<'approval', PendingApproval>
   readonly #idFactory: () => string
+  readonly #onDiagnostic: ((code: string) => void) | undefined
   readonly #observers: ((view: ApprovalView) => void)[] = []
   #current: PendingApproval | null = null
   readonly #queue: PendingApproval[] = []
@@ -59,6 +61,7 @@ export class HostApprovalController {
     this.#clock = options.clock
     this.#decision = new PendingDecision(options.clock)
     this.#idFactory = options.idFactory
+    this.#onDiagnostic = options.onDiagnostic
   }
 
   get view(): ApprovalView {
@@ -233,7 +236,10 @@ export class HostApprovalController {
 
   #arm(entry: PendingApproval): void {
     entry.expiresAt = this.#clock.now() + APPROVAL_TTL_SECONDS
-    this.#decision.offer('approval', entry, entry.expiresAt, (_kind, expired) => this.#drop(expired))
+    this.#decision.offer('approval', entry, entry.expiresAt, (_kind, expired) => {
+      this.#diagnose('executor_approval_expired')
+      this.#drop(expired)
+    })
   }
 
   #promoteNext(): void {
@@ -267,8 +273,12 @@ export class HostApprovalController {
   #publish(): void {
     const view = this.view
     for (const observer of [...this.#observers]) {
-      try { observer(view) } catch { /* observers never own approval state */ }
+      try { observer(view) } catch { this.#diagnose('executor_approval_observer_failed') }
     }
+  }
+
+  #diagnose(code: string): void {
+    try { this.#onDiagnostic?.(code) } catch { /* diagnostics cannot change approval authority */ }
   }
 }
 

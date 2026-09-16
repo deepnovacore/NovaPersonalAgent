@@ -1651,3 +1651,17 @@ test('delivery-pass fixture: requested user response reserves the provider befor
   assert.equal(actions.filter(action => action === 'ensure_response').length, 1)
   assert.equal(actions.includes('inject:fixture'), false)
 })
+
+test('coding final narration carries only its correlated work order as task context', () => {
+  const {service} = realtimeServiceHarness('projection', {
+    delegateOverride: {request: {work_order: '列出已有文件，不修改它们。'}},
+  })
+  service.projectRuntimeEvent({kind: 'handoff', seq: 1, ts: 1, payload: {
+    channel: 'codex', delegate_id: 'd-1', origin_ref: 'conversation:1', outcome: 'ok',
+    trust: 'untrusted_external', content: {result: {final_message: {text: 'a.txt b.txt'}}}, refs: [],
+  }})
+  const content = service.queuedHostItems()[0]?.intent.item.content ?? ''
+  assert.ok(content.includes('a.txt b.txt'))
+  assert.ok(content.includes('列出已有文件，不修改它们。'))
+  assert.ok(content.includes('不是执行结果'))
+})

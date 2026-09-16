@@ -782,7 +782,7 @@ test('an unrelated completed frontend turn releases paused work without rewritin
 test('accepted dispatch emits immediate feedback once and cancellation invalidates it', () => {
   const h = harness({models: {assess: () => new Promise(() => { /* deliberately pending */ })}})
   h.intake.open(request, 'Build a page', 'conversation:1', '1')
-  assert.deepEqual(h.facts, ['正在安排任务，尚未开始执行。'])
+  assert.deepEqual(h.facts, ['正在安排任务。'])
   const s = h.intake.view!
   const event = `intake:${s.intake_id}:${s.revision}:accepted`
   assert.equal(h.intake.factEligible(event, 1), true)

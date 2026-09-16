@@ -8,6 +8,7 @@ import type { JsonValue } from '../../core/events.js'
 import {
   MAX_CASCADED_LLM_HISTORY_CODEPOINTS,
   MAX_CASCADED_LLM_HISTORY_ITEMS,
+  CASCADED_NARRATION_INSTRUCTIONS,
   type CascadedLlmEvent,
   type CascadedLlmFactory,
   type CascadedLlmInput,
@@ -72,7 +73,8 @@ class Session implements CascadedLlmSession {
     if (unresolved !== null) this.#checkResults(input.inputs, unresolved)
     this.#trim(unresolved ?? [])
     const factOnly = input.inputs.some(item => item.kind === 'host_activation')
-    const systemContent = [this.#instructions, factOnly ? null : input.workspaceContext, input.responseAdaptation]
+    const systemContent = [factOnly ? CASCADED_NARRATION_INSTRUCTIONS : this.#instructions,
+      factOnly ? null : input.workspaceContext, input.responseAdaptation]
       .filter((item): item is string => item !== null && item !== undefined)
       .join('\n\n')
     // Narration reads its own fact, not an unfinished question from a prior conversation turn.
@@ -152,6 +154,12 @@ class Session implements CascadedLlmSession {
       }
       throw stable
     } finally {
+      // Receipt of a matching tool result survives interruption of its narration.
+      // Preserve the resolved pair; the next user turn must not owe that result again.
+      if (!terminal && unresolved !== null) {
+        this.#history.push([...unresolved, ...current].map(withoutImage))
+        this.#unresolved = null
+      }
       const finish = async (): Promise<void> => {
         // Metering outlives semantic ownership; the next voice turn must not wait for this tail.
         if (terminal && this.#onUsage !== undefined && events !== undefined && !active.controller.signal.aborted) {

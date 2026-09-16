@@ -1006,6 +1006,7 @@ export class CoreRuntime {
         content: {
           summary: event.payload.summary,
           previous_summary: previousSummary ?? null,
+          ...(coding ? {work_order: delegate.request.work_order ?? null} : {}),
         },
         evidence_refs: [memoryItemRef(appended)],
         salience: policy.priority,

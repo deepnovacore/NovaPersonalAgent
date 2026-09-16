@@ -246,7 +246,8 @@ async function createProjectResource(
     foregroundBroker: options.codexApprovalBroker !== undefined,
   })
   const approvalController = launchProfile.controller === 'present'
-    ? new HostApprovalController({clock: options.clock, idFactory: options.idFactory})
+    ? new HostApprovalController({clock: options.clock, idFactory: options.idFactory,
+        ...(options.onDiagnostic === undefined ? {} : {onDiagnostic: options.onDiagnostic})})
     : null
   if (launchProfile.id === 'ask_headless') {
     try { options.onDiagnostic?.('ask_headless_no_broker') } catch { /* diagnostics are advisory */ }

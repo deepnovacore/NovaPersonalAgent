@@ -318,7 +318,7 @@ const backendRecovery = new BackendReconnectController({
 })
 
 function render() {
-  const state = deriveOrbState(axes)
+  const state = deriveOrbState({...axes, tasks: taskBanner?.state().tasks ?? []})
   shell.dataset.state = state.name
   const sleeping = axes.wakeState === 'sleeping'
   setText(stateLabel, sleeping ? '已休眠 · 点击唤醒' : state.statusLine)
@@ -330,6 +330,7 @@ function render() {
   setAttribute(codexOperation, 'title', state.confirmationOperation)
   setText(codexExpiry, state.confirmationCompactStatus)
   codexLabel.dataset.mode = state.codexMode
+  codexLabel.dataset.working = String(state.sessionWorking)
   setAttribute(codexLabel, 'aria-label', state.codexLabel)
   if (lastReportedConfirmationMode !== state.confirmationVisible) {
     window.novaAudioAgentDesktop.windowLayout.setConfirmationMode(state.confirmationVisible)

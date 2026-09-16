@@ -190,7 +190,7 @@ export class IntakeController {
     }
     this.#assessPending = true
     this.#pump()
-    this.#options.fact(this.#session, '正在安排任务，尚未开始执行。', 'accepted')
+    this.#options.fact(this.#session, '正在安排任务。', 'accepted')
     return 'intake_opened'
   }
 
@@ -295,7 +295,8 @@ export class IntakeController {
     const abort = new AbortController()
     this.#abort.add(abort)
     try {
-      const raw = await this.#options.models.assess(this.#input(snapshot), AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]))
+      const input = this.#input(snapshot)
+      const raw = await this.#options.models.assess(input, AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]))
       let current = this.#current(snapshot.intake_id, snapshot.revision)
       if (current === null) return
       const parsed = assessSchema.safeParse(raw)
@@ -307,7 +308,7 @@ export class IntakeController {
       }
       current.malformed = 0
       if (result.abandon) { this.cancel(); return }
-      this.#options.record(current, 'intake.assess', result)
+      this.#options.record(current, 'intake.assess', {...result, input_active_project: input.active_project as string | null})
       current.slots = result.slots
       current.intent_to_proceed = result.intent_to_proceed || result.early_exit
       current.discovery = [...new Set([...current.discovery, ...result.discovery,

@@ -390,3 +390,13 @@ test('preparing work is visible while idle and yields to speech and confirmation
   assert.equal(deriveOrbState({...base, codex: 'preparing', pendingConfirmation: true}).statusLine, '需要你的确认')
   assert.equal(deriveOrbState(base).statusLine, '待命')
 })
+
+test('session shimmer needs actual working activity in the displayed workspace', () => {
+  const input = {...base, workspace: '游戏', session: '贪吃蛇', codex: 'working'}
+  for (const phase of ['started', 'completed', 'failed', 'cancelled']) {
+    assert.equal(deriveOrbState({...input, tasks: [{project: '游戏', phase}]}).sessionWorking, false)
+  }
+  assert.equal(deriveOrbState({...input, tasks: [{project: '计时器', phase: 'working'}]}).sessionWorking, false)
+  assert.equal(deriveOrbState({...input, tasks: [{project: '游戏', phase: 'working'}]}).sessionWorking, true)
+  assert.equal(deriveOrbState({...input, codex: 'preparing', tasks: [{project: '游戏', phase: 'working'}]}).sessionWorking, false)
+})

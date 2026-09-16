@@ -40,7 +40,8 @@ test('every projection matches the Python-exported golden outside Node display l
     const localizedName = spec.display_name === 'watch'
       ? '观察'
       : spec.display_name === 'guard' ? '监控' : null
-    const expected = localizedName === null || typeof pythonExpected.content !== 'string'
+    // Coding intake owns startup acknowledgement in the desktop product.
+    const expected = spec.name === 'progress-started' ? {...pythonExpected, content: null} : localizedName === null || typeof pythonExpected.content !== 'string'
       ? pythonExpected
       : {...pythonExpected, content: pythonExpected.content.replace(spec.display_name, localizedName)}
     if (canonicalJson(actual) !== canonicalJson(expected)) {
@@ -553,7 +554,7 @@ test('a surrogate-reported channel does not also speak its own working progress'
   service.projectRuntimeEvent(progressEvent({seq: 1, summary: 'running tests', activity: 1}))
   assert.deepEqual(queued(), [], 'working is silent')
 
-  // `started` still speaks, because that is a transition rather than progress.
+  // Intake already acknowledged this task; startup is state-only.
   service.projectRuntimeEvent({
     kind: 'progress',
     seq: 2,
@@ -568,7 +569,7 @@ test('a surrogate-reported channel does not also speak its own working progress'
       summary: null,
     },
   })
-  assert.equal(queued().length, 1)
+  assert.equal(queued().length, 0)
 })
 
 test('Guard working heartbeats update state without creating another spoken turn', () => {
@@ -975,7 +976,7 @@ test('a thread-ready started fact is silent when the delegate already owns an ac
   assert.equal(service.session.delegateState('d-1'), 'running')
 })
 
-test('a thread-ready started fact remains the fallback when no acknowledgement owner exists', () => {
+test('coding startup updates state without duplicating the intake acknowledgement', () => {
   const {service, queued} = realtimeServiceHarness('projection')
 
   service.projectRuntimeEvent({
@@ -993,7 +994,7 @@ test('a thread-ready started fact remains the fallback when no acknowledgement o
     },
   })
 
-  assert.deepEqual(queued(), ['Codex 已开始处理这个任务。'])
+  assert.deepEqual(queued(), [])
   assert.equal(service.session.delegateState('d-1'), 'running')
 })
 
