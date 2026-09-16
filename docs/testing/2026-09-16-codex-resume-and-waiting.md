@@ -15,7 +15,7 @@ The original timing was about 23 seconds between the user's clarification and ex
 - Keep bounded, redacted RPC method, numeric code and error text through transport, handoff and the existing desktop task-details dialog. Preserve specific failure codes. Server prose is untrusted evidence; spoken failure wording does not follow instructions in that prose.
 - Exclude known missing rollout files from the local session catalog, and verify a selected session's indexed rollout before resuming. Mark a known missing session unavailable. Catalog I/O uncertainty is not treated as proof of loss; the app-server remains authoritative. Do not reconstruct history, search alternate identities, or automatically retry a failed execution.
 - Let the coordinator choose `new` for an independent objective and `latest` for actual continuation, using structured output and context rather than keywords. Explicitly requested unavailable sessions are refused rather than silently substituted.
-- Publish one preparation fact after six seconds of continued preparation. Suppress it when the matching intake/revision is no longer preparing or user input is pending. Internal acceptance receipts remain silent.
+- Publish one immediate preparation fact when a new dispatch is accepted. The initial six-second heuristic was removed following user review. Suppress it when the matching intake/revision is no longer preparing or user input is pending. Internal acceptance receipts remain silent.
 - Replace the frontend's overbroad “any choice that changes the result requires clarification” criterion with “missing information prevents determining the requested artifact or required boundaries.” Legitimate implementation choices remain executor-owned; no mandatory four-slot questionnaire or per-feature exceptions were added.
 
 ## Acceptance evidence
@@ -24,9 +24,9 @@ The first real run completed workspace creation, same-session continuation and e
 
 After the clarification instruction change, the same complete game request directly dispatched. The coordinator selected a different Codex thread, which created and read back a 4,459-character `snake.html` in the isolated test workspace. The run completed successfully. No user project files were modified by these probes.
 
-The real missing thread was separately verified as unavailable and absent from the corrected local catalog. Regression tests exercise a stale index and verify it is not selected for automatic resume, plus the actual transport's `thread/resume` rejection path, diagnostic propagation, and cancellation of delayed feedback. Local Claude CLI `claude-fable-5-1` reviewed the error chain and lifecycle twice and discussed the clarification failure separately; its concrete findings were addressed.
+The real missing thread was separately verified as unavailable and absent from the corrected local catalog. Regression tests exercise a stale index and verify it is not selected for automatic resume, plus the actual transport's `thread/resume` rejection path, diagnostic propagation, and cancellation of obsolete acceptance feedback. Local Claude CLI `claude-fable-5-1` reviewed the error chain and lifecycle twice and discussed the clarification failure separately; its concrete findings were addressed.
 
-The opt-in production runner supports `NOVA_LIVE_PROJECT_SNAKE=1` for the independent game scenario. The clarification live runner now covers delayed feedback, superseded requests and resume failures. Its final Qwen Plus run passed: waiting feedback was “好的，任务已收到，正在准备中，还没开始执行。”; resume failure correctly said the task had not started and pointed to details without asking for reconfirmation or requirement changes. This runner uses synthetic TTS and host facts; it does not prove physical audio playback.
+The opt-in production runner supports `NOVA_LIVE_PROJECT_SNAKE=1` for the independent game scenario. The clarification live runner now covers acceptance feedback, superseded requests and resume failures. Its final Qwen Plus run passed: waiting feedback was “好的，任务已收到，正在准备中，还没开始执行。”; resume failure correctly said the task had not started and pointed to details without asking for reconfirmation or requirement changes. This runner uses synthetic TTS and host facts; it does not prove physical audio playback.
 
 Browser gameplay is **not accepted**: the browser tool refused the local `file://` URL under its security policy and prohibited alternate-entry workarounds. The earlier Playwright CLI attempt separately failed to download because its configured registry DNS was unavailable. No browser-policy bypass was attempted. Physical microphone/speaker acceptance and the separately reported speech segmentation defect are also outside this result.
 
@@ -39,3 +39,11 @@ Raw reproduction, failed and successful live reports, model reviews, and test lo
 - Runtime lint, runtime build, desktop build and diff whitespace checks passed.
 - Final Claude Fable review found no blocker or keyword-based semantic fallback. Its remaining catalog exception question was checked: the sole caller already catches catalog failures and marks the catalog unhealthy, preserving the existing execution boundary. No additional fallback was added.
 - The running desktop client was not restarted; the new build must be loaded before testing these changes in that process.
+
+## Follow-up: immediate acceptance feedback
+
+User review rejected the unmeasured six-second threshold. The timer and its two state fields were deleted. A newly accepted dispatch now queues “正在安排任务，尚未开始执行。” synchronously; duplicate dispatch does not enqueue a second acknowledgement. Existing revision/cancellation checks remain, and a queued preparation message is dropped if actual progress has already superseded it. There is no periodic waiting narration.
+
+The immediate-feedback unit check passed, including duplicate dispatch and cancellation. Qwen Plus live adapter verification passed with synthetic TTS/host facts; the generated acceptance sentence remained more verbose than the canonical status, so this does not establish exact spoken wording or physical playback latency. The running client was not restarted.
+
+Claude Fable reviewed this follow-up and found no concrete blocker after the queue lifecycle was supplied. Its two verification points were checked: eligibility is re-evaluated at the provider boundary, and the acceptance kind is a typed stable token.

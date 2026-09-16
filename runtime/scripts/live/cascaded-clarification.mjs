@@ -74,7 +74,7 @@ try {
   await new Promise(resolve => setTimeout(resolve, 150))
   assert.equal(requests.length, count, 'Receipt alone must not request the model')
   const waitingFact = {kind: 'final', host_item_id: 'probe-waiting', event_id: 'probe-waiting', call_id: null,
-    content: '任务还在准备中，尚未开始执行。'}
+    content: '正在安排任务，尚未开始执行。'}
   await adapter.injectHostItem(waitingFact, {signal, confirmationTimeout: null, asUserActivation: false})
   const waitingStart = events.length
   const waitingEnded = nextTerminal()

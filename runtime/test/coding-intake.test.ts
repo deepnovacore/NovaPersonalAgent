@@ -779,18 +779,14 @@ test('an unrelated completed frontend turn releases paused work without rewritin
   assert.equal(h.intake.view?.revision, 1)
 })
 
-test('long preparation emits one waiting fact and invalidates it after cancellation', t => {
-  t.mock.timers.enable({apis: ['setTimeout']})
+test('accepted dispatch emits immediate feedback once and cancellation invalidates it', () => {
   const h = harness({models: {assess: () => new Promise(() => { /* deliberately pending */ })}})
   h.intake.open(request, 'Build a page', 'conversation:1', '1')
-  t.mock.timers.tick(5999)
-  assert.equal(h.facts.length, 0)
-  t.mock.timers.tick(1)
-  assert.equal(h.facts.length, 1)
+  assert.deepEqual(h.facts, ['正在安排任务，尚未开始执行。'])
   const s = h.intake.view!
-  const event = `intake:${s.intake_id}:${s.revision}:waiting`
+  const event = `intake:${s.intake_id}:${s.revision}:accepted`
   assert.equal(h.intake.factEligible(event, 1), true)
-  t.mock.timers.tick(6000)
+  h.intake.open(request, 'Build a page', 'conversation:1', '1')
   assert.equal(h.facts.length, 1)
   h.intake.cancel()
   assert.equal(h.intake.factEligible(event, 1), false)
