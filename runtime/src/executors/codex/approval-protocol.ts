@@ -168,7 +168,7 @@ function commandExecutionOffer(
   if (
     !nullableBoundedText(params.approvalId, CODEX_APPROVAL_PROTOCOL_ID_LIMIT)
     || params.kind !== undefined && params.kind !== 'command'
-    || params.environmentId !== undefined && params.environmentId !== null
+    || params.environmentId != null && params.environmentId !== 'local'
     || !nullableBoundedText(params.reason, CODEX_APPROVAL_REASON_LIMIT)
     || typeof params.command !== 'string'
     || !isWellFormed(params.command)
@@ -188,11 +188,12 @@ function commandExecutionOffer(
   z.array(z.string().max(4096)).max(64).nullish().parse(params.proposedExecpolicyAmendment)
   const extra = permissionProfileSchema.nullish().parse(params.additionalPermissions)
   const rawDecisions = params.availableDecisions
-  if (rawDecisions != null && (!Array.isArray(rawDecisions) || rawDecisions.length > 16)) return null
+  if (rawDecisions != null && (!Array.isArray(rawDecisions) || rawDecisions.length > 16
+    || JSON.stringify(rawDecisions).length > CODEX_APPROVAL_ACTIONS_LIMIT)) return null
   // Persistent rule amendments are intentionally never emitted, even when advertised by Codex.
   const allowed = rawDecisions == null ? ['accept', 'decline'] as const
-    : SESSION_DECISIONS.filter(value => (rawDecisions as unknown[]).includes(value))
-  if (!allowed.includes('decline')) return null
+    // Declining this operation must not cancel the turn, even when Codex advertises only cancel.
+    : SESSION_DECISIONS.filter(value => value === 'decline' || (rawDecisions as unknown[]).includes(value))
   const isNetwork = network != null || amendments != null
   const hosts = [...new Set([...(network ? [network.host] : []), ...(amendments ?? []).map(item => item.host)])]
   if (hosts.some(host => !/^[a-z\d.:\[\]-]+$/iu.test(host))) return null
@@ -220,7 +221,7 @@ function permissionsOffer(options: CodexApprovalServerRequestRouteOptions, reque
   const params = snapshotJsonRecord(options.params)
   if (!exactKeys(params, ['cwd', 'environmentId', 'itemId', 'permissions', 'reason', 'startedAtMs', 'threadId', 'turnId'])
     || approvalCore(params, options.activePair) === null
-    || params.environmentId != null
+    || params.environmentId != null && params.environmentId !== 'local'
     || !nullableBoundedText(params.reason, CODEX_APPROVAL_REASON_LIMIT)
     || typeof params.cwd !== 'string' || !isCanonicalWorkspace(params.cwd, workspace)) return null
   return {

@@ -222,11 +222,11 @@ if (scenario === 'descendant-leader-first' || scenario === 'descendant-ignore-te
             params: {
               additionalPermissions: null,
               approvalId: null,
-              availableDecisions: ['accept', 'acceptForSession', 'decline'],
+              availableDecisions: ['accept', 'acceptForSession', 'cancel'],
               command: 'node --version',
               commandActions: null,
               cwd: process.cwd(),
-              environmentId: null,
+              environmentId: 'local',
               itemId: 'fixture-command-item',
               networkApprovalContext: null,
               proposedExecpolicyAmendment: null,

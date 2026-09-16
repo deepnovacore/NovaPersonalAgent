@@ -356,7 +356,7 @@ test('network and permission approvals return exact turn/session grants with no 
   for (const kind of ['file_change', 'command_execution', 'network', 'permissions']) {
     for (const decision of ['accept', 'acceptForSession', 'decline'] as const) {
       const params = kind === 'file_change' ? fileParams : kind === 'permissions'
-        ? {...fileParams, grantRoot: undefined, cwd: workspace, permissions}
+        ? {...fileParams, grantRoot: undefined, environmentId: 'local', cwd: workspace, permissions}
         : {...commandParams(workspace), availableDecisions: ['accept', 'acceptForSession', 'decline'],
             proposedExecpolicyAmendment: ['npm'], ...(kind === 'network' ? {
               networkApprovalContext: {host: 'registry.npmjs.org', protocol: 'https'},
@@ -379,6 +379,32 @@ test('network and permission approvals return exact turn/session grants with no 
         ? {permissions: decision === 'decline' ? {} : permissions, scope: decision === 'acceptForSession' ? 'session' : 'turn'}
         : {decision}})
     }
+  }
+})
+
+test('live local command approval accepts cancel-only denial without granting persistent policy', async t => {
+  const {base, controller, workspace} = fixture(t)
+  // Shape captured from a real Codex network escalation; browser open uses the same protocol.
+  const params = {...commandParams(workspace), environmentId: 'local',
+    command: "/bin/zsh -lc 'curl --max-time 20 --output network-example.html https://example.com'",
+    availableDecisions: ['accept', {acceptWithExecpolicyAmendment: {execpolicy_amendment: ['curl']}}, 'cancel']}
+  for (const command of [params.command, "/bin/zsh -lc \"open 'https://example.com/?nova-preview-approval=20260916'\""]) {
+    for (const decision of ['accept', 'decline'] as const) {
+      const result = routeCodexApprovalServerRequest({...base,
+        method: 'item/commandExecution/requestApproval', params: {...params, command}, signal: new AbortController().signal})
+      assert.equal(controller.pending, true)
+      assert.deepEqual(controller.view.allowed_decisions, ['accept', 'decline'])
+      assert.equal(controller.acceptDecision({approvalId: controller.view.pending_approval_id!, decision: 'acceptForSession'}), false)
+      assert.equal(controller.acceptDecision({approvalId: controller.view.pending_approval_id!, decision}), true)
+      assert.deepEqual(await result, {result: {decision}})
+    }
+  }
+  for (const change of [{environmentId: 'remote'}, {turnId: 'another-turn'}, {cwd: resolve(workspace, '..')},
+    {availableDecisions: ['accept', {acceptWithExecpolicyAmendment: {execpolicy_amendment: ['x'.repeat(16_385)]}}, 'cancel']}]) {
+    const result = routeCodexApprovalServerRequest({...base,
+      method: 'item/commandExecution/requestApproval', params: {...params, ...change}, signal: new AbortController().signal})
+    assert.equal(controller.pending, false)
+    assert.deepEqual(await result, {result: {decision: 'decline'}})
   }
 })
 
