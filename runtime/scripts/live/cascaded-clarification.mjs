@@ -62,7 +62,7 @@ try {
   assert.match(response(first).text, /网页|桌面/, 'Clarification must address the missing platform')
   const second = await user('做成浏览器网页，键盘控制，显示分数，不要安装依赖。')
   const call = second.find(event => event.kind === 'tool_call_ready')
-  assert.ok(call, 'Clarified request must dispatch')
+  assert.ok(call, `Clarified request must dispatch: ${JSON.stringify(response(second))}`)
   assert.equal(call.name, 'dispatch')
   assert.ok(call.arguments.source_refs?.includes('conversation:1'), 'Dispatch must select the original user goal')
   const receipt = {
@@ -118,8 +118,11 @@ try {
     assert.doesNotMatch(failure.text, /确认|修正请求|请问|请选择|需要您|需要你|[？?]|将.*重试|会.*重试/)
     failures.push(failure)
   }
+  const followup = response(await user('请让 Codex 在当前项目里运行刚才完成的网页游戏，并用本机浏览器打开它。'))
+  assert.equal(followup.calls[0]?.name, 'dispatch', 'Artifact operation must dispatch instead of inventing a permission refusal')
+  assert.equal(followup.text, '')
   console.log(JSON.stringify({passed: true, model: config.model, requests: requests.length,
-    responses: [response(first), response(second), waitingResponse, final, ...failures],
+    responses: [response(first), response(second), waitingResponse, final, ...failures, followup],
     scope: 'Real adapter and Qwen; synthetic TTS and host fact; no audio device or executor',
   }, null, 2))
 } finally {

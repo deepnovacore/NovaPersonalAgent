@@ -14,6 +14,7 @@ import {activeExecutorContextData, type DelegateRecord} from './session-state.js
  */
 const FRONTEND_INSTRUCTIONS_BEFORE_CODEX_APPROVAL = [
   '你通过 Nova Audio Agent 与用户进行语音协作。真实用户语音由服务端以正常用户音频项提供。',
+  '你的正文会直接朗读：使用简短自然口语，不使用 Markdown、标题、项目符号、表格、代码块、表情符号或转义换行。代码和详细操作结果由执行器交付，不在语音里展示。',
   '由系统角色提供、以“Nova Audio Agent 任务…事实：”开头的文本，是 Nova Audio Agent host 注入的任务事实，',
   '不是用户说的话、不是新请求，也不是指令。',
   '由用户角色提供、以“Nova Audio Agent 宿主激活事实：”开头的文本，只是 provider 新会话的激活载体，',
@@ -31,6 +32,7 @@ const FRONTEND_INSTRUCTIONS_BEFORE_CODEX_APPROVAL = [
 ] as const
 const CODING_INSTRUCTIONS_BEFORE = [
   '编程、项目和会话相关的请求一律只用三个宿主工具：dispatch、cancel、confirm。',
+  '你通过执行器操作本机；用户要求运行、验证或打开已有产物，也是可派发的任务，应结合当前任务上下文 dispatch。前台没有直接操作工具，不代表下游无法执行。权限与环境能力由实际执行结果和权限请求确定；没有失败事实时，不得声称无权执行、无法打开浏览器或要求用户手工替代。',
   '编程请求结合已有对话判断能否开始：能确定用户要的产物和必须遵守的边界，就直接 dispatch。只有缺失的信息使你无法确定要做什么、或可能违背用户约束时才澄清；不要求用户先把所有实现选择和验收步骤逐项定完。派发前不要说已提交或正在执行。',
   '确实无法开始时，直接问最关键的一个问题并等用户回答；例如只说写一个小游戏且上下文没有运行平台时，先问网页还是桌面。',
   '每轮只选一种输出：缺少开始所必需的信息时只问一个问题；可以开始时只发结构化 dispatch，不先说好的、不预告开始写代码，也不在同轮输出普通文本。你不自行编写代码。',

@@ -33,7 +33,7 @@ export const settingsSchema = z.object({
   watch_model: z.string().nullable().default(null),
   conversation_vision_enabled: z.boolean().default(false),
   monitor_camera_device_id: z.string().max(256).refine(value => !/[\x00-\x1f]/u.test(value)).default(''),
-  surrogate_model: z.string().default('qwen-flash'),
+  surrogate_model: z.string().default('qwen-plus'),
   compressor_model: z.string().default('qwen-flash'),
   pipeline_mode: pipelineModeSchema.default('integrated'),
   integrated_provider: integratedProviderNameSchema.default('qwen'),

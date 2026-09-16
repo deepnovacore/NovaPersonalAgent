@@ -218,8 +218,45 @@ try {
   assert.equal(await board.locator('.chat-debug:visible').count(), 0)
   await board.screenshot({path: `${output}/conversation.png`, fullPage: true})
   await board.locator('.chat-assistant').hover()
+  assert.equal(await board.locator('.chat-debug:visible').count(), 0)
+  await board.locator('.chat-assistant').click({button: 'right'})
   assert.equal(await board.locator('.chat-debug:visible').count(), 1)
-  await board.screenshot({path: `${output}/conversation-hover.png`, fullPage: true})
+  await board.screenshot({path: `${output}/conversation-details.png`, fullPage: true})
+  await board.locator('.chat-assistant').press('Escape')
+  assert.equal(await board.locator('.chat-debug:visible').count(), 0)
+  const tasks = await context.newPage()
+  await tasks.route('http://nova.test/index.html', async route => {
+    const html = await readFile(resolve(root, 'src/renderer/index.html'), 'utf8')
+    await route.fulfill({contentType: 'text/html', body: html.replace(/<script[^>]*>[\s\S]*?<\/script>/g, '')})
+  })
+  await tasks.setViewportSize({width: 420, height: 520})
+  await tasks.goto('http://nova.test/index.html')
+  await tasks.evaluate(async () => {
+    const {mountTaskBanner} = await import('./task-banner.mjs')
+    window.actions = []
+    const banner = mountTaskBanner({container: document.querySelector('#task-banner'),
+      send: action => {window.actions.push(action); return true},
+      reserveArea: async () => ({taskHeightCss: 140, suppressed: false}),
+    })
+    banner.receive({type: 'executor.tasks', revision: 1, active_project: '演示项目', tasks: [{
+      work_id: 'demo-task', executor: 'codex', project: '演示项目', title: '网页游戏',
+      phase: 'working', summary: '正在检查游戏交互', ts: 1,
+    }]})
+    const label = document.querySelector('#codex-label')
+    label.dataset.mode = 'project'
+    label.hidden = false
+    document.querySelector('#codex-summary').textContent = '工作区 演示项目 · Session 网页游戏'
+  })
+  await tasks.locator('[data-open]').waitFor()
+  assert.equal(await tasks.locator('[data-open]').innerText(), '')
+  assert.equal(await tasks.locator('[data-stop]').getAttribute('aria-label'), '停止任务')
+  await tasks.locator('[data-open]').click()
+  await tasks.locator('[data-stop]').click()
+  assert.deepEqual(await tasks.evaluate(() => window.actions.map(action => action.action)), ['open', 'cancel'])
+  assert.equal(await tasks.locator('#codex-summary').evaluate(el => getComputedStyle(el).animationName), 'none')
+  await tasks.emulateMedia({reducedMotion: 'no-preference'})
+  assert.equal(await tasks.locator('#codex-summary').evaluate(el => getComputedStyle(el).animationName), 'session-shimmer')
+  await tasks.screenshot({path: `${output}/task-icons-shimmer.png`})
   assert.deepEqual(errors, [])
   console.log(JSON.stringify({moduleToggles: true, preset: true, serverCrud: true, toolAllowlist: true, transportFields: true, saveLattice: true, executorConfiguration: true, credentialFilteredModels: true, horizontalOverflow: false, pageErrors: errors, screenshots: output}))
 } finally {await browser.close()}

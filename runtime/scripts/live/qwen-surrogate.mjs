@@ -3,7 +3,7 @@
  *
  * This is deliberately separate from deterministic tests: it calls the configured
  * OpenAI-compatible endpoint and fails loudly when credentials are absent. It records
- * no prompt, model reason, credential, or progress content.
+ * no credentials; failed assertions include the synthetic-case verdict for diagnosis.
  */
 
 import {readFileSync} from 'node:fs'
@@ -44,11 +44,18 @@ const gateway = new OpenAIModelGateway({
 })
 const surrogate = new GatewaySurrogate({
   gateway,
-  model: setting('NOVA_AUDIO_AGENT_SURROGATE_MODEL') ?? 'qwen-flash',
+  model: setting('NOVA_AUDIO_AGENT_SURROGATE_MODEL') ?? 'qwen-plus',
   proactivityPreset: 'eager',
 })
 
 const cases = [{
+  id: 'concrete-working-plan',
+  goal: '实现一个网页版贪吃蛇游戏',
+  previous: '任务已开始',
+  summary: '我会用单个 HTML 文件实现，采用网格和方向键控制，并检查碰撞、计分及加速逻辑。',
+  expectedClass: 'routine_delta',
+  expectedSpeak: true,
+}, {
   // The completed milestone stays verbatim in the cumulative summary; only the file count moves.
   id: 'cumulative-old-milestone-file-count-only',
   previous: '根因定位已完成；已修改 2 个文件',
@@ -65,6 +72,7 @@ const cases = [{
 
 function view(testCase) {
   const progress = {
+    op: 'run',
     phase: 'working',
     internal_activity: 3,
     elapsed: 20,
@@ -73,14 +81,14 @@ function view(testCase) {
   return {
     structured: {
       intent: {objective_hypothesis: '', constraints: [], unresolved_questions: [], uncertainty: 0, revision: 0},
-      goal: {objective: '修复进度播报', acceptance_criteria: [], status: 'accepted', revision: 0},
+      goal: {objective: testCase.goal ?? '修复进度播报', acceptance_criteria: [], status: 'accepted', revision: 0},
       authorization: {allow: [], deny: [], evidence_refs: [], revision: 0},
     },
     channels: [{
       name: 'conversation', summary: null, omitted: 0,
       recent: [{
         channel: 'conversation', seq: 1, ts: 0, trust: 'trusted_user', priority: 100,
-        content: {text: '请修复进度播报'}, outcome: null, refs: [],
+        content: {text: testCase.goal ?? '请修复进度播报'}, outcome: null, refs: [],
       }],
     }, {
       name: 'codex', summary: null, omitted: 0,
@@ -112,7 +120,7 @@ function view(testCase) {
 for (const testCase of cases) {
   const verdict = await surrogate.watch(view(testCase))
   if (verdict.progress_class !== testCase.expectedClass || verdict.speak !== testCase.expectedSpeak) {
-    throw new Error(`${testCase.id}: unexpected classification or speech decision`)
+    throw new Error(`${testCase.id}: unexpected classification or speech decision: ${JSON.stringify(verdict)}`)
   }
   if (verdict.speak && verdict.suggestion_id !== 's-1') {
     throw new Error(`${testCase.id}: spoken verdict did not select the offered suggestion`)

@@ -108,7 +108,7 @@ test('the Surrogate rejects output that is not contract-shaped', async () => {
   }
 })
 
-test('the Surrogate preserves a routine speech request for host policy arbitration', async () => {
+test('the Surrogate preserves its structured progress decision', async () => {
   const surrogate = new GatewaySurrogate({
     gateway: new ScriptedGateway(
       [],
@@ -146,7 +146,7 @@ test('the Surrogate receives the selected proactivity policy at its model bounda
   assert.equal(new Set(systems.values()).size, 3)
   assert.match(systems.get('conservative') ?? '', /action_required.*blocker.*验证证据.*milestone/u)
   assert.match(systems.get('balanced') ?? '', /改变用户对任务状态理解的 milestone/u)
-  assert.match(systems.get('eager') ?? '', /milestone/u)
+  assert.match(systems.get('eager') ?? '', /首次出现的具体工作方向/u)
   assert.doesNotMatch(systems.get('eager') ?? '', /开始或完成验证/u)
 
   for (const system of systems.values()) {
@@ -174,4 +174,12 @@ test('the compressor strips exactly the whitespace Python strips', async () => {
     model: 'qwen-flash',
   })
   assert.equal(await compressor.compress([]), '\ufeffsummary\ufeff')
+})
+
+
+test('Surrogate receives the actual progress trigger, not an unlabelled snapshot', async () => {
+  const gateway = new ScriptedGateway([], '{"speak":false,"suggestion_id":null,"progress_class":"routine_delta","reason":"counter only"}')
+  const surrogate = new GatewaySurrogate({gateway, model: 'm', proactivityPreset: 'eager'})
+  await surrogate.watch({...emptyView, trigger_kind: 'progress'})
+  assert.match(gateway.completions[0]!.prompt, /当前触发事件：progress/u)
 })

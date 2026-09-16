@@ -164,7 +164,7 @@ DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
 | `NOVA_AUDIO_AGENT_MODEL_API_KEY` | `core` | 否 | 无 | 可选的通用辅助模型 API 凭据覆盖。 |
 | `NOVA_AUDIO_AGENT_FAST_MODEL` | `core` | 否 | qwen3-vl-plus | FastBrain 模型。 |
 | `NOVA_AUDIO_AGENT_WATCH_MODEL` | `core` | 否 | fast model | Watch 模型覆盖。 |
-| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | 否 | qwen-flash | Surrogate 模型。 |
+| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | 否 | qwen-plus | Surrogate 模型。 |
 | `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | 否 | qwen-flash | 记忆压缩模型。 |
 | `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | 否 | integrated | 产品管线形态：集成或级联。 |
 | `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | 否 | false | 为已确认支持图片的级联模型附加默认摄像头画面。 |

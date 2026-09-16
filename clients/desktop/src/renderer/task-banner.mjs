@@ -152,7 +152,7 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
       if (!card) {
         card = container.ownerDocument.createElement('article')
         card.className = 'task-card'
-        card.innerHTML = '<div class="task-card-heading"><strong data-title></strong><span data-status></span></div><p data-summary></p><div class="task-card-footer"><span data-project></span><button data-open type="button">打开</button><button data-stop type="button">停止</button></div><p data-error role="alert" hidden></p>'
+        card.innerHTML = '<div class="task-card-heading"><strong data-title></strong><span data-status></span></div><p data-summary></p><div class="task-card-footer"><span data-project></span><button data-open type="button" aria-label="打开项目"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M21 3l-11 11M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></svg></button><button data-stop type="button" aria-label="停止任务" title="停止任务"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div><p data-error role="alert" hidden></p>'
         for (const [selector, action] of [['[data-open]', 'open'], ['[data-stop]', 'cancel']]) card.querySelector(selector).addEventListener('click', () => {controller.select(task.work_id); controller.action(action)})
         cards.set(task.work_id, card); list.append(card)
       }

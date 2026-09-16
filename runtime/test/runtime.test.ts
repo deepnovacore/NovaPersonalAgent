@@ -1001,7 +1001,7 @@ test('an unchanged progress summary does not replace or re-run its Surrogate can
   assert.equal(calls[1]?.reason.selected_suggestion, 's-1')
 })
 
-test('the host refuses a routine progress delta even when the model asks to speak', () => {
+test('the host delivers model-selected progress without a second semantic veto', () => {
   const selected: string[] = []
   const {runtime, calls} = runtimeWithCalls({
     manifest: testManifest({wake: 'none', progressViaSurrogate: true}),
@@ -1033,9 +1033,8 @@ test('the host refuses a routine progress delta even when the model asks to spea
   }, 2)
   runtime.apply(runtime.queue.popReady(2)!)
 
-  assert.deepEqual(selected, [])
-  assert.equal(runtime.suggestions.get('s-1')?.status, 'withdrawn')
-  assert.deepEqual(runtime.diagnostics.at(-1), {code: 'invalid_surrogate_progress_decision'})
+  assert.deepEqual(selected, ['s-1'])
+  assert.equal(runtime.diagnostics.some(item => item.code === 'invalid_surrogate_progress_decision'), false)
 })
 
 test('a non-progress ambient verdict ignores an accidental progress class', () => {

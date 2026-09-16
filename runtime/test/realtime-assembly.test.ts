@@ -992,7 +992,7 @@ test('routine cumulative progress is suppressed end to end while a later milesto
     const gateway = new SequencedSurrogateGateway([
       '{"speak":false,"suggestion_id":null,"progress_class":"milestone","reason":"baseline"}',
       '{"speak":false,"suggestion_id":null,"progress_class":"routine_delta","reason":"only file count changed"}',
-      '{"speak":true,"suggestion_id":"s-3","progress_class":"routine_delta","reason":"eager file count update"}',
+      '{"speak":false,"suggestion_id":null,"progress_class":"routine_delta","reason":"only another file count update"}',
       '{"speak":true,"suggestion_id":"s-4","progress_class":"milestone","reason":"targeted tests passed"}',
     ])
     const telemetry: {readonly kind: string; readonly payload: unknown}[] = []
@@ -1081,7 +1081,7 @@ test('routine cumulative progress is suppressed end to end while a later milesto
       assert.equal(provider.injected.length, 0)
       assert.deepEqual(core.runtime.core.diagnostics.filter(item => (
         item.code === 'invalid_surrogate_progress_decision'
-      )), [{code: 'invalid_surrogate_progress_decision'}])
+      )), [])
       assert.equal(core.runtime.core.diagnostics.some(item => (
         item.code === 'invalid_surrogate_output'
       )), false)
@@ -1116,8 +1116,8 @@ test('routine cumulative progress is suppressed end to end while a later milesto
           progress_class: 'routine_delta', suppressed: false, trigger_kind: 'progress',
         },
         {
-          disposition: 'selected', offered_count: 1, preset: 'eager',
-          progress_class: 'routine_delta', suppressed: true, trigger_kind: 'progress',
+          disposition: 'silent', offered_count: 1, preset: 'eager',
+          progress_class: 'routine_delta', suppressed: false, trigger_kind: 'progress',
         },
         {
           disposition: 'selected', offered_count: 1, preset: 'eager',

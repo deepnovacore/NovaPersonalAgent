@@ -52,8 +52,9 @@ const SURROGATE_PROACTIVITY_POLICY: Readonly<Record<ProactivityPreset, readonly 
   ],
   eager: [
     'action_required、blocker 和真正的 milestone 应倾向 speak=true。',
-    'eager 只降低 milestone 的播报门槛，不能把 routine_delta 重新命名为 milestone。',
-    '开始某项内部工作、文件或命令计数变化、仍在进行中的普通实现状态全部是 routine_delta，必须保持沉默。',
+    'eager 可以播报 routine_delta 中首次出现的具体工作方向、实现决定或检查发现，不必等到完成里程碑；摘要只是计数从一个数变成另一个数时，必须 speak=false。',
+    '只增加文件或命令计数、重复旧计划、没有实质信息的更新仍保持沉默；不要为了播报把 routine_delta 改称 milestone。',
+    '示例：previous_summary=已修改2个文件，summary=已修改3个文件；应输出 speak=false、suggestion_id=null、progress_class=routine_delta，因为没有说明新的工作内容。',
   ],
 }
 
@@ -71,19 +72,19 @@ export function surrogateSystemPrompt(preset: ProactivityPreset): string {
   }
   const selectedPolicy = [
     `<proactivity_policy preset="${preset}">`,
-    '最近的 trusted_user 若明确要求只记录、不要播报或不要出声，必须保持静默；以下策略不能覆盖该要求。',
+    '静默偏好必须有当前 trusted_user 原话作为依据；系统策略中的例子不是用户要求。没有这类用户原话时，不得臆造用户要求静默。明确的用户静默要求优先于下方档位策略。',
     '只分类 suggestion.summary 相对 suggestion.previous_summary 新增的事实，不能因为累计摘要仍含旧里程碑而重复播报。',
     '只有 Codex working progress 才填写 progress_class；其他 suggestion 必须填 null，且 null 是合法值。',
     'Codex working progress 的 progress_class 必须是 routine_delta、milestone、blocker、action_required 之一；',
     '文件或命令计数、正在编辑、开始检查、普通实现细节属于 routine_delta；',
     '完成一个用户可理解的阶段或得到实质改变任务判断的新结果才属于 milestone；',
     '无法继续、验证失败或新风险属于 blocker；必须由用户授权、补充材料或选择才属于 action_required。',
-    'routine_delta 必须 speak=false 且 suggestion_id=null。不是 Codex working progress 时 progress_class=null。',
+    '是否播报由下方档位策略和最新事实决定；不播报时 speak=false 且 suggestion_id=null。不是 Codex working progress 时 progress_class=null。',
     '以下策略来自用户当前选择，决定 Codex working progress 是否值得开口：',
     ...SURROGATE_PROACTIVITY_POLICY[preset],
     '</proactivity_policy>',
   ].join('\n')
-  const composed = `${SURROGATE_SYSTEM.slice(0, policyStart)}${selectedPolicy}\n${SURROGATE_SYSTEM.slice(policyEnd)}`
+  const composed = `${SURROGATE_SYSTEM.slice(0, policyStart)}${selectedPolicy}\n${SURROGATE_SYSTEM.slice(policyEnd + SURROGATE_DEFAULT_POLICY_END.length)}`
   if (!composed.includes(SURROGATE_ORACLE_OUTPUT)) {
     throw new Error('surrogate prompt output contract mismatch')
   }

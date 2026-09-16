@@ -306,7 +306,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
             progress_class: record.output.progress_class,
             suppressed: call.reason.kind === 'progress'
               && record.output.speak
-              && record.output.progress_class === 'routine_delta',
+              && record.output.progress_class === null,
             trigger_kind: call.reason.kind,
           })
         } catch { /* telemetry cannot change arbitration */ }

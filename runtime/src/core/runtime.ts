@@ -1265,7 +1265,6 @@ export class CoreRuntime {
     }
     if (job.progressTrigger !== null && (
       parsed.data.progress_class === null
-      || (parsed.data.speak && parsed.data.progress_class === 'routine_delta')
     )) {
       this.diagnostics.push({code: 'invalid_surrogate_progress_decision'})
       this.#settleProgressTrigger(job.progressTrigger, null)

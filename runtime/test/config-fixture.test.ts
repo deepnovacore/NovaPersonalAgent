@@ -69,6 +69,8 @@ function evaluateConfigFixture(fixture: ConfigCase): unknown {
 }
 
 function loadPythonOwnedFixtureSettings(environment: NodeJS.ProcessEnv): Settings {
+  // Pin the retired Python default; Nova now uses Plus for progress/coordinator reliability.
+  environment = {NOVA_AUDIO_AGENT_SURROGATE_MODEL: 'qwen-flash', ...environment}
   const legacyProvider = stripLikePython(environment.NOVA_AUDIO_AGENT_REALTIME_PROVIDER ?? '')
   if (legacyProvider !== 'volcengine') return loadSettings(environment)
 
@@ -234,3 +236,7 @@ function projectProvider(settings: Settings): Readonly<Record<string, unknown>> 
 function secretPresent(value: string | null): boolean {
   return value !== null && stripLikePython(value) !== ''
 }
+
+ test('Node defaults to Plus for progress and coordinator assessment', () => {
+  assert.equal(loadSettings({}).surrogate_model, 'qwen-plus')
+})

@@ -14,3 +14,7 @@
 .task-banner button:focus-visible { outline: 2px solid #ffc77e; outline-offset: 1px; }
 .task-banner [data-task-expand] { flex: 0 0 26px; }
 .task-card [data-error] { color: #ffb5b5; white-space: normal; }
+
+.task-card-footer button { width: 30px; height: 30px; padding: 6px; display: grid; place-items: center; }
+.task-card-footer svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.task-card-footer [data-stop] svg { fill: currentColor; stroke: none; }

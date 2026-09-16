@@ -106,7 +106,7 @@ flowchart LR
   Voice -->|"cancel(executor, instruction?)"| Host
   Voice -->|"confirm(id, accepted)"| Host
   Host -->|"AgentController port"| Intake[executors/coding/intake coordinator]
-  Intake -->|"assess: kind/project/session + slots"| LLM[DashScope surrogate_model, default qwen-flash]
+  Intake -->|"assess: kind/project/session + slots"| LLM[DashScope surrogate_model, default qwen-plus]
   Intake -->|"fact / proposal back"| Host
   Intake -->|"run{work_order, project, session}"| Adapter[executors/codex/adapter-project]
   Adapter -->|"per-workspace slot, global cap 3"| Codex[codex app-server]
@@ -723,7 +723,7 @@ first, Windows second). Each row records transcript, tool calls, and Codex
       median must be 1 (today ≥3).
       *2026-09-04: not run — needs a live voice session.*
 
-- [x] Coordinator eval (DashScope `surrogate_model`, default `qwen-flash` — the
+- [x] Coordinator eval (DashScope `surrogate_model`, default `qwen-plus` — the
   same model 02 pins for `intake.assess`; fixed roster, ~10 Chinese utterances
   covering switch / create / steer / cancel / ambiguity) with threshold in test;
   evidence in IMPLEMENTATION.md.

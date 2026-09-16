@@ -186,7 +186,7 @@ inputs are intentionally excluded.
 | `NOVA_AUDIO_AGENT_MODEL_API_KEY` | `core` | No | None | Optional generic support-model API credential override. |
 | `NOVA_AUDIO_AGENT_FAST_MODEL` | `core` | No | qwen3-vl-plus | FastBrain model. |
 | `NOVA_AUDIO_AGENT_WATCH_MODEL` | `core` | No | fast model | Watch model override. |
-| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | No | qwen-flash | Surrogate model. |
+| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | No | qwen-plus | Surrogate model. |
 | `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | No | qwen-flash | Memory compressor model. |
 | `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | No | integrated | Product pipeline shape: integrated or cascaded. |
 | `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | No | false | Attach a default-camera frame to user turns on verified cascaded VLMs. |

@@ -70,7 +70,7 @@ export class GatewaySurrogate {
     const response = await this.#gateway.complete({
       model: this.#model,
       system: surrogateSystemPrompt(this.#proactivityPreset),
-      prompt: renderContextView(view),
+      prompt: `当前触发事件：${view.trigger_kind ?? 'unspecified'}\n${renderContextView(view)}`,
       jsonSchema: SURROGATE_SCHEMA,
       ...(signal === undefined ? {} : {signal}),
     })

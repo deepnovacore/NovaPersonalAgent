@@ -84,13 +84,25 @@ function renderItem(item, conversation = false) {
     const role = payload?.role === 'user' || item.trust === 'trusted_user' ? 'user' : 'assistant'
     article.className = `item chat-message chat-${role}`
     article.tabIndex = 0
-    article.setAttribute('aria-label', role === 'user' ? '你的消息，聚焦查看详情' : 'Nova 的消息，聚焦查看详情')
+    article.setAttribute('aria-label', role === 'user' ? '你的消息，右键或 Shift+F10 查看详情' : 'Nova 的消息，右键或 Shift+F10 查看详情')
     const text = document.createElement('div')
     text.className = 'chat-text'
     text.textContent = typeof payload?.text === 'string' ? payload.text
       : typeof payload === 'string' ? payload : '非文本消息'
     const debug = document.createElement('div')
     debug.className = 'chat-debug'
+    debug.hidden = true
+    article.setAttribute('aria-expanded', 'false')
+    const toggleDetails = event => {
+      event.preventDefault()
+      debug.hidden = !debug.hidden
+      article.setAttribute('aria-expanded', String(!debug.hidden))
+    }
+    article.addEventListener('contextmenu', toggleDetails)
+    article.addEventListener('keydown', event => {
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) toggleDetails(event)
+      if (event.key === 'Escape') { debug.hidden = true; article.setAttribute('aria-expanded', 'false') }
+    })
     debug.append(meta, content)
     article.append(text, debug)
   } else article.append(meta, content)

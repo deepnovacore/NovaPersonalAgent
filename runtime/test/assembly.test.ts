@@ -494,7 +494,7 @@ test('assembly gates local Guard before armed and emits bounded camera admission
 test('assembly telemetry does not call a non-progress class a host suppression', async () => {
   const telemetry: {readonly kind: string; readonly payload: unknown}[] = []
   const gateway = new ScriptedGateway([], {
-    'qwen-flash': '{"speak":true,"suggestion_id":null,"progress_class":"routine_delta","reason":"private summary echo"}',
+    'qwen-plus': '{"speak":true,"suggestion_id":null,"progress_class":"routine_delta","reason":"private summary echo"}',
   })
   const assembly = buildAssembly({
     settings: settings({proactivity_preset: 'eager'}),
