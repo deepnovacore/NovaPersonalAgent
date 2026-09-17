@@ -6,6 +6,7 @@ import {
   type CodexAppServerTransport,
   type CodexHostPreflightRunner,
   type CodexLiveSchemaProbe,
+  type ProjectConnectionBinding,
   type RunInput,
   type SafePreflightReport,
   type SteerInput,
@@ -43,6 +44,8 @@ import {ProjectConfirmationController} from '../../projects/project-confirmation
 import {HostApprovalController, type ApprovalPort} from '../../core/approval.js'
 import {type ApprovalView} from '../../core/approval-port.js'
 import {basename} from 'node:path'
+import {hostPersistentHomeFromConfig} from '../../projects/host-paths.js'
+import {hostCodexHomeValue} from './process-owner.js'
 import {
   resolveCodexLaunchProfile,
   type CodexLaunchProfile,
@@ -139,6 +142,16 @@ class CredentialHomeOwningTransport implements CodexAppServerTransport {
     return this.inner.preflight(deadline)
   }
 
+  prewarmConnection(deadline: TransportDeadline): Promise<SafePreflightReport | null> {
+    if (!this.inner.prewarmConnection) throw new CodexHostConfigurationError('codex_host_unavailable')
+    return this.inner.prewarmConnection(deadline)
+  }
+
+  bindProject(binding: ProjectConnectionBinding): void {
+    if (!this.inner.bindProject) throw new CodexHostConfigurationError('codex_host_unavailable')
+    this.inner.bindProject(binding)
+  }
+
   prewarm(deadline: TransportDeadline): Promise<SafePreflightReport | null> {
     return this.inner.prewarm(deadline)
   }
@@ -147,8 +160,9 @@ class CredentialHomeOwningTransport implements CodexAppServerTransport {
     input: RunInput,
     observer: TransportObserver,
     deadline: TransportDeadline,
+    completionDeadline?: TransportDeadline | null,
   ): Promise<TransportOutcome> {
-    return this.inner.run(input, observer, deadline)
+    return this.inner.run(input, observer, deadline, completionDeadline)
   }
 
   steer(input: SteerInput, deadline: TransportDeadline): Promise<SteerTransportResult> {
@@ -258,23 +272,27 @@ async function createProjectResource(
   if (host === undefined) {
     throw new CodexHostConfigurationError('codex_project_host_unsupported')
   }
+  const warmHome = options.config.prewarm && options.config.localCodexHome
+    ? hostPersistentHomeFromConfig(options.config.localCodexHome, [options.config.localCodexHome]) : null
+  let warmClaimed = false
   let store: ProjectStore | null = null
   let startupTransport: CodexAppServerTransport | null = null
   try {
     startupTransport = options.transportFactory.create(Object.freeze({
       ...(options.managedMcp === undefined ? {} : {managedMcp: options.managedMcp}),
-      mode: 'live',
+      mode: warmHome === null ? 'live' : 'project',
+      preserveHome: warmHome !== null,
       binary: options.config.binary,
       binaryPrefixArgs: options.config.binaryPrefixArgs,
       workspace: options.config.workspace,
-      codexHome: null,
+      codexHome: warmHome,
       credential: options.config.credential,
       resumeThreadId: null,
       workingInterval: options.config.workingInterval,
-      launchProfile: resolveCodexLaunchProfile({
+      launchProfile: warmHome !== null ? launchProfile : resolveCodexLaunchProfile({
         approvalMode: options.config.codexApprovalMode, project: false, foregroundBroker: false,
       }),
-      approvalController: null,
+      approvalController: warmHome === null ? null : approvalController,
     }))
     if (!isCodexTransport(startupTransport)) {
       throw new CodexHostConfigurationError('codex_host_unavailable')
@@ -301,6 +319,14 @@ async function createProjectResource(
       ...(approvalController === null ? {} : {codexApproval: approvalController}),
       transportFactory: {
         create: binding => {
+          if (!warmClaimed && warmHome !== null && startupTransport?.bindProject
+            && hostCodexHomeValue(binding.codexHome).path === hostCodexHomeValue(warmHome).path) {
+            warmClaimed = true
+            startupTransport.bindProject({workspace: binding.workspace, resumeThreadId: binding.resumeThreadId,
+              approvalController: approvalController?.forWork(binding.work) ?? null})
+            try { options.onDiagnostic?.('project_prewarm_reused') } catch { /* advisory */ }
+            return startupTransport
+          }
           const transport = options.transportFactory.create(Object.freeze({
             ...(options.managedMcp === undefined ? {} : {managedMcp: options.managedMcp}),
             preserveHome: binding.preserveHome ?? false,
@@ -330,6 +356,8 @@ async function createProjectResource(
       launchProfile.thread.approvalPolicy,
       approvalController,
       unsubscribeApproval,
+      warmHome !== null,
+      () => { warmClaimed = true;try { options.onDiagnostic?.('project_prewarm_failed') } catch { /* advisory */ } },
     )
   } catch (error) {
     approvalController?.invalidate('resource_creation_failed')
@@ -359,6 +387,8 @@ class ProjectCodexAssemblyResource implements CodexAssemblyResource {
     readonly approvalPolicy: CodexApprovalPolicy,
     readonly approvalController: HostApprovalController | null,
     unsubscribeApproval: (() => void) | null,
+    readonly prewarmConnection = false,
+    readonly onPrewarmFailure: () => void = () => undefined,
   ) {
     this.#startupTransport = startupTransport
     this.#unsubscribeApproval = unsubscribeApproval
@@ -375,6 +405,16 @@ class ProjectCodexAssemblyResource implements CodexAssemblyResource {
   }
 
   async #startFresh(): Promise<void> {
+    if (this.prewarmConnection && this.#startupTransport.prewarmConnection) {
+      // Certification remains mandatory; warming a certified connection is only an optimization.
+      await this.#startupTransport.preflight({expiresAtMs: Date.now() + 20_000})
+      try { await this.#startupTransport.prewarmConnection({expiresAtMs: Date.now() + 20_000}) }
+      catch {
+        this.onPrewarmFailure()
+        await this.#startupTransport.close('failure')
+      }
+      return
+    }
     let failure: unknown = null
     try {
       await this.#startupTransport.preflight({expiresAtMs: Date.now() + 20_000})

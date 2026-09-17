@@ -2191,7 +2191,7 @@ test('a committed confirmation has one host-owned reply and suppresses the tool 
     ...service.queuedHostItems().map(item => item.intent.item),
   ].filter(item => item.event_id.startsWith('project-confirmation:'))
   assert.equal(confirmationFacts.length, 1)
-  assert.equal(confirmationFacts[0]?.content, '已确认，已提交并正在启动。')
+  assert.equal(confirmationFacts[0]?.content, '正在启动任务。')
 })
 
 test('a voice confirmation quarantines the carrier and delivers the host fact after terminal', async () => {
@@ -2205,7 +2205,7 @@ test('a voice confirmation quarantines the carrier and delivers the host fact af
   assert.equal(actions.includes('cancel:response-1'), true)
   assert.ok(
     service.queuedHostItems().some(item => (
-      item.intent.item.content === '已确认，已提交并正在启动。'
+      item.intent.item.content === '正在启动任务。'
     )),
     'the confirmation fact is queued immediately',
   )
@@ -2219,7 +2219,7 @@ test('a voice confirmation quarantines the carrier and delivers the host fact af
   })
 
   assert.ok(
-    injected.some(item => item.content === '已确认，已提交并正在启动。'),
+    injected.some(item => item.content === '正在启动任务。'),
     'the confirmation fact is delivered once the carrier turn ends',
   )
   assert.equal(controller.pending, false)
@@ -3149,13 +3149,13 @@ test('a tool-first terminal confirmation delivers its host acknowledgement witho
   assert.equal(actions.filter(action => action === 'commit').length, 1)
   assert.equal(actions.filter(action => action === 'ensure-response').length, 0)
   assert.equal(
-    injected.filter(item => item.content === '已确认，已提交并正在启动。').length,
+    injected.filter(item => item.content === '正在启动任务。').length,
     1,
     'the idle floor receives exactly one acknowledgement in the same event pass',
   )
   assert.equal(
     service.queuedHostItems().some(item => (
-      item.intent.item.content === '已确认，已提交并正在启动。'
+      item.intent.item.content === '正在启动任务。'
     )),
     false,
     'the acknowledgement does not wait for another user turn or progress event',
@@ -3195,14 +3195,14 @@ test('a settled tool-first confirmation cannot consume the next proposal retry',
   assert.equal(actions.filter(action => action === 'commit').length, 1)
   assert.equal(actions.filter(action => action === 'ensure-response').length, 0)
   assert.equal(
-    injected.filter(item => item.content === '已确认，已提交并正在启动。').length,
+    injected.filter(item => item.content === '正在启动任务。').length,
     1,
     'the first acknowledgement was injected before its provider response starts',
   )
   assert.equal(actions.filter(action => action === 'create:host_fact').length, 1)
   assert.equal(
     service.queuedHostItems().some(item => (
-      item.intent.item.content === '已确认，已提交并正在启动。'
+      item.intent.item.content === '正在启动任务。'
     )),
     false,
     'the first acknowledgement is not merely waiting in the host queue',
@@ -3306,13 +3306,13 @@ test('a deduplicated confirmation output does not settle the user response debt'
     'only the seed output reached the provider',
   )
   assert.equal(
-    injected.filter(item => item.content === '已确认，已提交并正在启动。').length,
+    injected.filter(item => item.content === '正在启动任务。').length,
     0,
     'the acknowledgement cannot run ahead of a tool output the provider did not receive',
   )
   assert.ok(
     service.queuedHostItems().some(item => (
-      item.intent.item.content === '已确认，已提交并正在启动。'
+      item.intent.item.content === '正在启动任务。'
     )),
     'the unresolved user-response debt keeps the acknowledgement queued',
   )

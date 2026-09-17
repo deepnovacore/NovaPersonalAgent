@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {VirtualClock} from '../src/core/clock.js'
 import {IntakeController, type IntakeOptions} from '../src/executors/coding/intake.js'
-import {assessSchema, intakeModels, type IntakeModels, type IntakeSlots} from '../src/executors/coding/intake-model.js'
+import {assessSchema, assessSchemaFor, intakeModels, type IntakeModels, type IntakeSlots} from '../src/executors/coding/intake-model.js'
 import {ProjectConfirmationController} from '../src/projects/project-confirmation.js'
 import {renderWorkOrder, workOrderSchema} from '../src/executors/coding/work-order.js'
 import {ProjectResolutionError, type CoordinatorDecision, type IntakeTarget} from '../src/executors/coding-executor.js'
@@ -431,6 +431,7 @@ test('coordinator: steer preserves the request and amendments after project clar
 test('coordinator: the complete bounded intake fits the real project steer contract', async () => {
   let delivered = ''
   const h = harness({
+    running: () => [{work_id: 'w-project', project: 'Project', title: 'Current task'}],
     models: {assess: input => Promise.resolve(assessment(input, input.revision === 9
       ? {kind: 'steer'}
       : {kind: 'unclear', candidate_question: {owner: 'user', text: 'Which scope?'.padEnd(300, '?')}}))},
@@ -501,7 +502,7 @@ test('coordinator: switch proposes without a plan cycle and activates only throu
   assert.equal(switched.intake.view?.state, 'readback')
   assert.equal(switched.intake.view?.work_order, null)
   assert.equal(switched.confirmation.view.pending_action, 'select_workspace')
-  assert.match(switched.facts.at(-1)!, /^准备切换到工作区blog，请确认或取消。 切换到项目“blog”，不派任务。id=proposal-\d+；仅通过 confirm\(id, accepted\) 回答/)
+  assert.match(switched.facts.at(-1)!, /^是否切换到“blog”工作区？ 切换到项目“blog”，不派任务。id=proposal-\d+；仅通过 confirm\(id, accepted\) 回答/)
   assert.ok(!switched.facts.some(text => text.startsWith('code=switched')))
 
   // A user turn while the commit runs in `committing` is ignored: no revision bump, no re-assess (P1 race).
@@ -748,7 +749,8 @@ test('accepted dispatch and steer remain launchable after intake closes normally
       assert.equal(check?.(), true)
       return {accepted: true, delegate_id: 'delayed'}
     }
-    const h = harness({models: {assess: input => Promise.resolve(assessment(input, {kind}))},
+    const h = harness({running: () => [{work_id: 'w-project', project: 'Project', title: 'Current task'}],
+      models: {assess: input => Promise.resolve(assessment(input, {kind}))},
       dispatch: admit, steer: (session, _project, _instruction, check) => admit(session, check)})
     h.intake.open(request, 'Fix empty password', 'u1', 'e')
     await h.intake.settled()
@@ -782,7 +784,7 @@ test('an unrelated completed frontend turn releases paused work without rewritin
 test('accepted dispatch emits immediate feedback once and cancellation invalidates it', () => {
   const h = harness({models: {assess: () => new Promise(() => { /* deliberately pending */ })}})
   h.intake.open(request, 'Build a page', 'conversation:1', '1')
-  assert.deepEqual(h.facts, ['正在安排任务。'])
+  assert.deepEqual(h.facts, ['马上安排。'])
   const s = h.intake.view!
   const event = `intake:${s.intake_id}:${s.revision}:accepted`
   assert.equal(h.intake.factEligible(event, 1), true)
@@ -790,4 +792,17 @@ test('accepted dispatch emits immediate feedback once and cancellation invalidat
   assert.equal(h.facts.length, 1)
   h.intake.cancel()
   assert.equal(h.intake.factEligible(event, 1), false)
+})
+
+
+test('idle workspaces do not advertise or admit steer, even if a model invents it', async () => {
+  const raw = assessment({intake_id: 'idle', revision: 1}, {kind: 'steer'})
+  assert.equal(assessSchemaFor({running: []}).safeParse(raw).success, false)
+  assert.equal(assessSchemaFor({running}).safeParse(raw).success, true)
+  const h = harness({running: () => [], models: {assess: input => Promise.resolve(assessment(input, {kind: 'steer'}))}})
+  h.intake.open(request, '继续当前工作区的会话，创建下一个文件', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.steered.length, 0)
+  assert.equal(h.dispatched.length, 0, 'the host must not invent a replacement operation')
+  assert.match(h.facts.at(-1)!, /code=no_active_turn/)
 })

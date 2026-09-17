@@ -9,7 +9,7 @@ import type {
 } from './app-server-transport.js'
 import {CodexTransportError} from './app-server-transport.js'
 import {
-  INTERNAL_CODEX_RUN_DEADLINE,
+  CODEX_STARTUP_DEADLINE,
   MAX_CODEX_EVIDENCE_COUNTER,
   PUBLIC_PREFLIGHT_CODES,
   createCodexRunEnvelope,
@@ -96,7 +96,7 @@ export interface CodexAdapterScheduler {
   readonly lifecycleClock?: Clock
 }
 
-export type CodexFailureStage = 'preflight' | 'credential' | 'spawn' | 'thread_start'
+export type CodexFailureStage = 'preflight' | 'credential' | 'spawn' | 'thread_start' | 'execution'
 
 const DEFAULT_LIFECYCLE_CLOCK = new RealClock()
 const DEFAULT_SCHEDULER: CodexAdapterScheduler = {
@@ -199,7 +199,7 @@ export class CodexAdapterCore {
     const startedAt = context.clock.now()
     const deadline = createRunDeadline(
       context.clock,
-      INTERNAL_CODEX_RUN_DEADLINE,
+      CODEX_STARTUP_DEADLINE,
       context.signal,
       this.#scheduler,
     )
@@ -208,6 +208,7 @@ export class CodexAdapterCore {
     let preflightPassed = false
     let processStarted = false
     let sideEffectSeen = false
+    let turnBound = false
     let observerOpen = true
     this.#latestProgress = null
     this.#status = freezeStatus({
@@ -244,6 +245,7 @@ export class CodexAdapterCore {
       onTurnBound: (): void => {
         if (!observerOpen || this.#runToken !== runToken) return
         sideEffectSeen = true
+        turnBound = true
         try { options.onTurnBound?.() } catch { /* advisory state never owns the worker */ }
       },
     }
@@ -283,8 +285,8 @@ export class CodexAdapterCore {
       let rawOutcome: TransportOutcome
       try {
         rawOutcome = await awaitCodexPhase(
-          () => this.#transport.run({workOrder}, observer, deadline.transport),
-          deadline,
+          () => this.#transport.run({workOrder}, observer, deadline.transport, null),
+          deadline, false,
         )
       } catch (error) {
         if (
@@ -310,7 +312,7 @@ export class CodexAdapterCore {
           afterStart ? 'untrusted_external' : 'trusted_system',
           code,
           preflight,
-          failureStage(code, 'thread_start'),
+          failureStage(code, turnBound ? 'execution' : 'thread_start'),
         )
       }
 
@@ -361,7 +363,7 @@ export class CodexAdapterCore {
       }
       if (admitted.classification === 'uncertain') {
         return createRunHandoff(
-          'unknown', 'untrusted_external', admitted.code, preflight, 'thread_start', undefined, admitted.diagnostic,
+          'unknown', 'untrusted_external', admitted.code, preflight, turnBound ? 'execution' : 'thread_start', undefined, admitted.diagnostic,
         )
       }
       if (evidence === null || !admitted.turnStartWritten) {
@@ -531,12 +533,12 @@ function createRunDeadline(
   }
 }
 
-async function awaitCodexPhase<T>(start: () => Promise<T>, deadline: RunDeadline): Promise<T> {
-  const remaining = deadline.expiresAt - deadline.clock.now()
+async function awaitCodexPhase<T>(start: () => Promise<T>, deadline: RunDeadline, bounded = true): Promise<T> {
+  const remaining = bounded ? deadline.expiresAt - deadline.clock.now() : null
   if (deadline.controller.signal.aborted) {
     throw abortError()
   }
-  if (!(remaining > 0)) {
+  if (remaining !== null && !(remaining > 0)) {
     deadline.controller.abort()
     throw new AdapterDeadlineError()
   }
@@ -544,7 +546,7 @@ async function awaitCodexPhase<T>(start: () => Promise<T>, deadline: RunDeadline
   try {
     const result = await raceDeadline(work, deadline.clock, remaining, deadline.controller.signal,
       () => new AdapterDeadlineError(), abortError)
-    if (deadline.clock.now() >= deadline.expiresAt) throw new AdapterDeadlineError()
+    if (bounded && deadline.clock.now() >= deadline.expiresAt) throw new AdapterDeadlineError()
     return result
   } catch (error) {
     if (error instanceof AdapterDeadlineError || deadline.controller.signal.aborted) {

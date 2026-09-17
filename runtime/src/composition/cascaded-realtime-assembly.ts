@@ -1,3 +1,4 @@
+import type {RealtimeTelemetry} from '../realtime/telemetry.js'
 import {supportsVision} from '../model/vision-capability.js'
 import {captureConversationFrame} from '../core/camera-session.js'
 import {usageReporterForEndpoint, type UsageReporter} from '../realtime/usage.js'
@@ -188,12 +189,14 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
       const capability = input.capability
         ?? createEndpointingCapabilityFactory({
           clock: input.clock,
+          ...(process.env.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH === undefined ? {}
+            : {resourcesPath: process.env.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH}),
           ...(input.liveKitExecutor === undefined
             ? {}
             : {executor: input.liveKitExecutor}),
         })
       return async (request: Parameters<EndpointingFactory>[0]) => (
-        buildEndpointing(await capability(request), input.config)
+        buildEndpointing(await capability(request), input.config, request.telemetry)
       )
     },
   }),
@@ -378,12 +381,14 @@ function supportComposition(
 function buildEndpointing(
   prepared: PreparedEndpointingCapability,
   config: AutoEndpointingConfig,
+  telemetry?: RealtimeTelemetry,
 ): LiveKitVolcEndpointing | SilenceVolcEndpointing {
   if (prepared.result.mode !== 'livekit_v1_mini') return new SilenceVolcEndpointing(config)
   if (prepared.surface === undefined || prepared.executor === undefined) {
     throw new CascadedRealtimeError('configuration')
   }
   return new LiveKitVolcEndpointing({
+    ...(telemetry === undefined ? {} : {telemetry}),
     surface: prepared.surface,
     executor: prepared.executor,
     config,

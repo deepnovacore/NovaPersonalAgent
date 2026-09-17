@@ -32,6 +32,11 @@ export const assessSchema = intakeBindingSchema.extend({
   discovery: z.array(z.string().trim().min(1).max(300)).max(12),
   early_exit: z.boolean(), abandon: z.boolean(),
 }).strict()
+/** Action availability comes from host state, not words in the user's request. */
+export function assessSchemaFor(input: Readonly<Record<string, unknown>>) {
+  return Array.isArray(input.running) && input.running.length === 0
+    ? assessSchema.extend({kind: intakeKindSchema.exclude(['steer'])}) : assessSchema
+}
 export const planSchema = intakeBindingSchema.extend({work_order: workOrderSchema}).strict()
 export const cancelTargetSchema = z.object({target_work_id: z.string().min(1).max(128).nullable()}).strict()
 
@@ -67,7 +72,7 @@ export function intakeModels(gateway: ModelGateway, assessModel: string, planner
     return JSON.parse(result.text) as unknown
   }
   return {
-    assess: (input, signal) => complete(assessModel, ASSESS_INSTRUCTIONS, assessSchema, input, signal),
+    assess: (input, signal) => complete(assessModel, ASSESS_INSTRUCTIONS, assessSchemaFor(input), input, signal),
     plan: (input, signal) => complete(plannerModel, PLAN_INSTRUCTIONS, planSchema, input, signal),
     resolveCancelTarget: async (instruction, running) => {
       const raw = await complete(assessModel, CANCEL_TARGET_INSTRUCTIONS, cancelTargetSchema, {instruction, running}, AbortSignal.timeout(15_000))

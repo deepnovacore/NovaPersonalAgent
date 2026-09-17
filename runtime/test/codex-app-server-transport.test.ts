@@ -3183,3 +3183,84 @@ test('shared HOME disabled MCP entries do not prevent a turn, but live or nonemp
     await transport.close()
   }
 })
+
+
+test('project connection prewarm does not open a thread and resumes only the later binding', async () => {
+  const owners: MemoryAppServerOwner[] = []
+  const transport = createTransport({spawn: async () => {
+    const owner = new MemoryAppServerOwner([], {persistent: true, threadId: 'approved-thread'})
+    owners.push(owner)
+    return owner
+  }}, {persistent: true, preserveHome: true})
+  try {
+    await transport.prewarmConnection({expiresAtMs: Date.now() + 5000})
+    const spawned = owners.length
+    assert.ok(spawned > 0)
+    assert.ok(owners.every(owner => !owner.received.some(item => item.method.startsWith('thread/') || item.method === 'turn/start')))
+    transport.bindProject({workspace: hostWorkspaceForTest(process.cwd()), resumeThreadId: 'approved-thread', approvalController: null})
+    const result = await transport.run({workOrder: 'Continue only the approved task'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.classification, 'completed')
+    assert.equal(owners.length, spawned, 'the warm app-server must be reused')
+    const resumed = owners.at(-1)!.received.find(item => item.method === 'thread/resume')
+    assert.equal(resumed?.params.threadId, 'approved-thread')
+    assert.deepEqual(resumed?.params.runtimeWorkspaceRoots, [process.cwd()])
+    assert.throws(() => transport.bindProject({workspace: hostWorkspaceForTest(process.cwd()), resumeThreadId: null, approvalController: null}))
+  } finally { await transport.close() }
+})
+
+test('an unbound project connection cannot execute and closing it creates no thread', async () => {
+  const owners: MemoryAppServerOwner[] = []
+  const transport = createTransport({spawn: async () => {
+    const owner = new MemoryAppServerOwner([], {persistent: true});owners.push(owner);return owner
+  }}, {persistent: true, preserveHome: true})
+  await transport.prewarmConnection({expiresAtMs: Date.now() + 5000})
+  const result = await transport.run({workOrder: 'must not execute'}, {}, {expiresAtMs: Date.now() + 5000})
+  assert.equal(result.turnStartWritten, false)
+  assert.equal(result.code, 'config_not_isolated')
+  await transport.close()
+  assert.ok(owners.every(owner => !owner.received.some(item => item.method.startsWith('thread/') || item.method === 'turn/start')))
+})
+
+
+test('a dead project prewarm is discarded before the approved thread is opened', async () => {
+  const owners: MemoryAppServerOwner[] = []
+  const transport = createTransport({spawn: async () => {
+    const owner = new MemoryAppServerOwner([], {persistent: true, threadId: 'approved-thread'});owners.push(owner);return owner
+  }}, {persistent: true, preserveHome: true})
+  try {
+    await transport.prewarmConnection({expiresAtMs: Date.now() + 5000})
+    const count = owners.length
+    owners.at(-1)!.abruptExit(0)
+    await new Promise<void>(resolve => { setImmediate(resolve) })
+    transport.bindProject({workspace: hostWorkspaceForTest(process.cwd()), resumeThreadId: 'approved-thread', approvalController: null})
+    const result = await transport.run({workOrder: 'Only approved task'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.classification, 'completed')
+    assert.equal(owners.length, count + 1)
+    assert.ok(owners.slice(0, count).every(owner => !owner.received.some(item => item.method.startsWith('thread/'))))
+  } finally { await transport.close() }
+})
+
+test('a warmed project routes approval to the later work-scoped controller', async () => {
+  const factory = new FakeAppServerOwnerFactory('command-approval')
+  const controller = new HostApprovalController({clock: new RealClock(), idFactory: () => 'warm-approval'})
+  const transport = createTransport(factory, {persistent: true, preserveHome: true,
+    approvalController: controller,
+    launchProfile: resolveCodexLaunchProfile({approvalMode: 'ask', project: true, foregroundBroker: true})})
+  const work = {work_id: 'confirmed-work', project: 'Notes', title: 'Approved task'}
+  try {
+    await transport.prewarmConnection({expiresAtMs: Date.now() + 5000})
+    assert.equal(controller.pending, false)
+    transport.bindProject({workspace: hostWorkspaceForTest(process.cwd()), resumeThreadId: null,
+      approvalController: controller.forWork(work)})
+    const running = transport.run({workOrder: 'Approval fixture'}, {}, {expiresAtMs: Date.now() + 10000})
+    await within(factory.owner!.waitForBarrier('approval_request'), 5000, 'warm approval request')
+    await settleUntil(() => controller.pending, 'warm approval pending')
+    assert.deepEqual(controller.view.work, work)
+    assert.equal(controller.acceptDecision({approvalId: 'warm-approval', decision: 'accept'}), true)
+    assert.equal((await running).classification, 'completed')
+  } finally {
+    await transport.close().catch(() => undefined)
+    await factory.owner?.killTree().catch(() => undefined)
+    await factory.owner?.dispose().catch(() => undefined)
+  }
+})

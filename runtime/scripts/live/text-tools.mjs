@@ -26,7 +26,7 @@ export function surface(disabled = []) {
     ...(modules.camera ? [VISION_AGENT_DESCRIPTOR] : []),
   ]
   const tools = compileToolSchema(manifests, {includeMemoryRecall: true, agentDescriptors}).schemas.map(schema => schema.function)
-  const instructions = frontendInstructions(modules)
+  const instructions = frontendInstructions(modules, modules.coding)
   return {tools, instructions, hash: createHash('sha256').update(JSON.stringify({tools, instructions})).digest('hex')}
 }
 
@@ -93,7 +93,7 @@ export async function runTextCase(testCase, config, timeoutMs, factoryOverride) 
       const observed = {calls: [], text: '', completed: false}
       observations.push(observed)
       for await (const event of session.stream({inputs, tools: compiled.tools,
-        workspaceContext: testCase.context, responseAdaptation: [cascadedResponseGuidance(true), dispatchSourceContext(userSources.slice(-8))].filter(Boolean).join('\n'), signal})) {
+        workspaceContext: testCase.context, responseAdaptation: [dispatchSourceContext(userSources.slice(-8)), cascadedResponseGuidance(true)].filter(Boolean).join('\n'), signal})) {
         if (event.kind === 'tool_call') observed.calls.push({name: event.name, arguments: event.arguments, call_id: event.call_id})
         if (event.kind === 'text_delta') observed.text += event.text
         if (event.kind === 'response_completed') observed.completed = true

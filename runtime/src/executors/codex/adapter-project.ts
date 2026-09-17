@@ -1067,6 +1067,7 @@ class ThreadObservingTransport implements CodexAppServerTransport {
     input: RunInput,
     observer: TransportObserver,
     deadline: TransportDeadline,
+    completionDeadline?: TransportDeadline | null,
   ): Promise<TransportOutcome> {
     const {threadName, onThreadReady, onThreadNamed} = this.observation
     return this.inner.run(threadName === null ? input : {...input, threadName}, {
@@ -1079,7 +1080,7 @@ class ThreadObservingTransport implements CodexAppServerTransport {
         if (name !== null) onThreadNamed(threadId, name)
         observer.onThreadNamed?.(threadId, name)
       },
-    }, deadline)
+    }, deadline, completionDeadline)
   }
 
   steer(input: SteerInput, deadline: TransportDeadline): Promise<SteerTransportResult> {

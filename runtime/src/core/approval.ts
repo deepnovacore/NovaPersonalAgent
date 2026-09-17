@@ -212,19 +212,19 @@ export class HostApprovalController {
 
   /** Drop the head (expiry, epoch change, carrier loss); the next queued entry becomes visible. */
   invalidate(reason: string): boolean {
-    void reason
     const current = this.#current
     if (current === null) return false
+    this.#onDiagnostic?.(`executor_approval_invalidated:${reason}`)
     this.#drop(current)
     return true
   }
 
   /** Drop every entry of one work (its turn ended or its transport closed) without touching other works. */
   invalidateWork(workId: string, reason: string): boolean {
-    void reason
     const owned = [this.#current, ...this.#queue].filter(
       (entry): entry is PendingApproval => entry?.work?.work_id === workId,
     )
+    if (owned.length) this.#onDiagnostic?.(`executor_approval_invalidated:${reason}`)
     for (const entry of owned) this.#drop(entry)
     return owned.length > 0
   }

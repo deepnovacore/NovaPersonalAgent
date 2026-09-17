@@ -195,7 +195,7 @@ inputs are intentionally excluded.
 | `NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER` | `core` | No | qwen | Integrated realtime provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_ENDPOINTING_PROVIDER` | `core` | No | auto | Cascaded endpointing provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_ASR_PROVIDER` | `core` | No | volcengine | Cascaded ASR provider. |
-| `NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER` | `core` | No | qwen | Cascaded LLM provider. |
+| `NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER` | `core` | No | deepseek | Cascaded LLM provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL` | `core` | No | provider default | Cascaded LLM model override. |
 | `NOVA_AUDIO_AGENT_CASCADE_TTS_PROVIDER` | `core` | No | volcengine | Cascaded TTS provider. |
 | `NOVA_AUDIO_AGENT_EXECUTOR` | `core` | No | None | Optional single executor selector; unset selects none. |

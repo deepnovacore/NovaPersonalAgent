@@ -76,6 +76,19 @@ const cases = [{
   expectedSpeak: true,
 }]
 
+for (const scope of ['current-reply', 'task-progress']) cases.push({
+  id: `silence-scope-${scope}`,
+  goal: '创建一个网页工具',
+  previous: '先检查工作区',
+  summary: '工作区没有现有页面，将以内部 ID 区分同名条目，避免记录混淆。',
+  conversation: [
+    {trust: 'trusted_system', content: {text: '需要介绍导出和统计这几个可选功能吗？'}},
+    {trust: 'trusted_user', content: {text: scope === 'current-reply' ? '不用，不用讲。' : '这个任务的中间进度都不要播报，只告诉我最终结果。'}},
+    {trust: 'trusted_system', content: {text: '好，等它跑完我再说结果。'}},
+  ],
+  expectedClass: 'routine_delta', expectedSpeak: scope === 'current-reply',
+})
+
 function view(testCase) {
   const progress = {
     op: 'run',
@@ -92,7 +105,7 @@ function view(testCase) {
     },
     channels: [{
       name: 'conversation', summary: null, omitted: 0,
-      recent: [{
+      recent: testCase.conversation?.map((item, index) => ({channel: 'conversation', seq: index + 1, ts: index, priority: 100, outcome: null, refs: [], ...item})) ?? [{
         channel: 'conversation', seq: 1, ts: 0, trust: 'trusted_user', priority: 100,
         content: {text: testCase.goal ?? '请修复进度播报'}, outcome: null, refs: [],
       }],
@@ -123,18 +136,20 @@ function view(testCase) {
   }
 }
 
+const failures = []
 for (const testCase of cases) {
   const verdict = await surrogate.watch(view(testCase))
   if (verdict.progress_class !== testCase.expectedClass || verdict.speak !== testCase.expectedSpeak) {
-    throw new Error(`${testCase.id}: unexpected classification or speech decision: ${JSON.stringify(verdict)}`)
+    failures.push(`${testCase.id}: unexpected classification or speech decision: ${JSON.stringify(verdict)}`)
   }
   if (verdict.speak && verdict.suggestion_id !== 's-1') {
-    throw new Error(`${testCase.id}: spoken verdict did not select the offered suggestion`)
+    failures.push(`${testCase.id}: spoken verdict did not select the offered suggestion`)
   }
   if (!verdict.speak && verdict.suggestion_id !== null) {
-    throw new Error(`${testCase.id}: silent verdict selected a suggestion`)
+    failures.push(`${testCase.id}: silent verdict selected a suggestion`)
   }
   console.log(`${testCase.id}: class=${verdict.progress_class}, speak=${verdict.speak}`)
 }
 
+if (failures.length) throw new Error(failures.join('\n'))
 console.log('Qwen Surrogate progress smoke passed')

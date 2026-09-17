@@ -208,3 +208,21 @@ test('approval timeout and observer failure remain distinguishable in diagnostic
   assert.ok(diagnostics.includes('executor_approval_expired'))
   assert.equal(approval.pending, false)
 })
+
+test('a late long-task approval retains its own full window and reports revocation reason', async () => {
+  const clock = new VirtualClock(0)
+  const diagnostics: string[] = []
+  const approval = new HostApprovalController({clock, idFactory: () => 'late-approval',
+    onDiagnostic: code => { diagnostics.push(code) }})
+  clock.advanceTo(599)
+  const waiting = offerCommand(approval)
+  assert.equal(approval.view.expires_at, 659)
+  clock.advanceTo(620)
+  assert.equal(approval.pending, true)
+  assert.equal(approval.acceptDecision({approvalId: 'late-approval', decision: 'accept'}), true)
+  assert.equal(approval.consume((await waiting)!), 'accept')
+  const revoked = offerCommand(approval)
+  approval.invalidate('connection_lost')
+  assert.equal(approval.consume((await revoked)!), 'decline')
+  assert.deepEqual(diagnostics, ['executor_approval_invalidated:connection_lost'])
+})

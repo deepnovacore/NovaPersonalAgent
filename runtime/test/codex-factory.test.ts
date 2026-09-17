@@ -322,6 +322,7 @@ function projectHostConfig(t: TestContext, workspaceName = 'workspace'): {
     NOVA_AUDIO_AGENT_CODEX_WORKSPACE: workspace,
     NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT: managedRoot,
     NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT: stateRoot,
+    NOVA_AUDIO_AGENT_CODEX_PREWARM: 'false',
   }), {
     canonicalBinaries: [binary],
     canonicalWorkspaces: [workspace],
@@ -524,4 +525,50 @@ test('factory exposes a brokered controller for every foreground project transpo
       await resource.close()
     }
   }
+})
+
+
+test('project startup retains a connection-only prewarm without creating a session', async t => {
+  const {config, stateRoot, managedRoot} = projectHostConfig(t)
+  const transport = new RecordingTransport()
+  let warmed = 0
+  const resource = await createCodexAssemblyResource({
+    config: {...config, prewarm: true}, composition: 'realtime', clock: new VirtualClock(), idFactory: () => 'warm-id',
+    transportFactory: {available: true, create: binding => {
+      assert.equal(binding.mode, 'project')
+      assert.equal(binding.preserveHome, true)
+      assert.equal(binding.resumeThreadId, null)
+      return Object.assign(transport, {prewarmConnection: () => { warmed += 1;return Promise.resolve(PREFLIGHT) }})
+    }},
+    projectHost: {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRootFileAuthority([stateRoot, managedRoot])},
+  })
+  try {
+    await resource.start()
+    assert.equal(warmed, 1)
+    assert.equal(transport.prewarms, 0, 'legacy thread-opening prewarm must not be called')
+    assert.equal(transport.closes, 0)
+    const state = JSON.parse(readFileSync(join(stateRoot, 'codex-projects-v1.json'), 'utf8')) as {sessions: object}
+    assert.deepEqual(state.sessions, {})
+  } finally { await resource.close() }
+  assert.equal(transport.closes, 1)
+})
+
+
+test('failed optional project prewarm is closed without failing certified startup', async t => {
+  const {config, stateRoot, managedRoot} = projectHostConfig(t)
+  const transport = new RecordingTransport(),diagnostics: string[] = []
+  const resource = await createCodexAssemblyResource({
+    config: {...config, prewarm: true}, composition: 'realtime', clock: new VirtualClock(), idFactory: () => 'warm-failure',
+    onDiagnostic: code => { diagnostics.push(code) },
+    transportFactory: {available: true, create: () => Object.assign(transport, {
+      prewarmConnection: () => Promise.reject(new Error('test connection failure')),
+    })},
+    projectHost: {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRootFileAuthority([stateRoot, managedRoot])},
+  })
+  try {
+    await resource.start()
+    assert.equal(transport.preflights, 1)
+    assert.equal(transport.closes, 1)
+    assert.ok(diagnostics.includes('project_prewarm_failed'))
+  } finally { await resource.close() }
 })

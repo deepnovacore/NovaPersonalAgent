@@ -721,7 +721,7 @@ test('host facts preserve wording and cannot expose user-action tools', async ()
     kind: 'host_activation', content: 'Nova Audio Agent 宿主激活事实：以下内容不是用户说的话，也不是新的用户目标。只把该事实作为宿主提供的上下文：第一项',
   }])
   assert.deepEqual(llm.calls[0]?.tools, [])
-  assert.ok(llm.calls[0]?.responseAdaptation?.includes('不代用户确认'))
+  assert.ok(llm.calls[0]?.responseAdaptation?.includes('不代用户决定'))
   assert.equal(JSON.stringify(llm.calls[0]).includes('OLD_USER_REQUEST'), false)
 })
 
@@ -837,7 +837,7 @@ test('cascaded response adaptation is an absolute per-turn slot and clears witho
   assert.ok(llm.calls[0]?.responseAdaptation?.startsWith('first preference\n'))
   assert.ok(llm.calls[1]?.responseAdaptation?.startsWith('second preference\n'))
   assert.equal(llm.calls[2]?.responseAdaptation?.includes('preference'), false)
-  assert.ok(llm.calls[2]?.responseAdaptation?.includes('不代用户确认'))
+  assert.ok(llm.calls[2]?.responseAdaptation?.includes('不代用户决定'))
   assert.equal(JSON.stringify(llm.calls[2]).includes('first preference'), false)
   await watching.stop()
   await adapter.close()
@@ -1651,6 +1651,33 @@ test('TTS never opens a third session after the one permitted retry also fails',
   assert.equal(events.some(event => event.kind === 'provider_error'
     && event.code === 'volcengine_tts_receive'), true)
   assert.equal(terminalStatus(events), 'failed')
+})
+
+test('empty TTS completion retries once and cannot be reported as spoken', async () => {
+  for (const recovers of [true, false]) {
+    const second = new FakeTtsSession(...(recovers ? [new Uint8Array([1, 2])] : []))
+    const client = new FakeTtsClient(new FakeTtsSession(), second)
+    const adapter = new CascadedRealtimeAdapter({
+      endpointing: new ScriptedEndpointing(), asr: new FakeAsrClient(),
+      llm: new FakeLlm([
+        {kind: 'response_started', response_id: 'empty-audio'},
+        {kind: 'text_delta', text: '要创建这个工作区吗？'},
+        {kind: 'response_completed', response_id: 'empty-audio'},
+      ]), tts: client,
+    })
+    await adapter.connect({tools: [], signal: new AbortController().signal})
+    const item = hostItem('empty-audio')
+    await adapter.injectHostItem(item, directOptions())
+    const collecting = collectThroughTerminal(adapter)
+    await adapter.createResponse({kind: 'host_fact', item, task_summary: null, origin_spoken: false},
+      new AbortController().signal)
+    const events = await settleWithin('empty TTS completion', collecting)
+    assert.equal(client.opens, 2)
+    assert.deepEqual(second.texts, ['要创建这个工作区吗？'])
+    assert.equal(terminalStatus(events), recovers ? 'completed' : 'failed')
+    assert.equal(events.some(event => event.kind === 'response_audio_delta'), recovers)
+    await adapter.close()
+  }
 })
 
 test('a pre-audio finish failure replays every accumulated text chunk in order', async () => {

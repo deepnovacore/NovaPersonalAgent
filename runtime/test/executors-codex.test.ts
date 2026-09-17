@@ -311,37 +311,23 @@ test('live aggregate deadline stops before run and keeps the preflight report pr
   assert.deepEqual(transport.calls, ['preflight'])
 })
 
-test('live deadline retains a late writer-drain outcome as external uncertainty', async () => {
-  // This fails if bounded cleanup discards Task-6B's authoritative late turnStartWritten bit.
+test('live completion is not cancelled at the former total deadline', async () => {
   const clock = new VirtualClock(7)
   const entered = deferred<void>()
+  const release = deferred<void>()
   const transport = new ScriptedTransport()
   transport.runAction = async (_observer, deadline) => {
     entered.resolve()
-    await new Promise<void>(resolve => {
-      deadline.signal?.addEventListener('abort', () => { resolve() }, {once: true})
-    })
-    return {
-      classification: 'uncertain', code: 'transport_lost',
-      turnStartWritten: true, completion: null,
-    }
+    await release.promise
+    assert.equal(deadline.signal?.aborted, false)
+    return COMPLETE_OUTCOME
   }
   const adapter = new CodexLiveAdapter(transport)
-  const running = adapter.dispatch(
-    'run', {work_order: 'written near deadline'}, contextFor('run', {}, {clock}),
-  )
+  const running = adapter.dispatch('run', {work_order: 'long task'}, contextFor('run', {}, {clock}))
   await entered.promise
-  clock.advanceTo(547)
-  const handoff = await running
-
-  assert.deepEqual([handoff.outcome, handoff.trust, handoff.content.code], [
-    'unknown', 'untrusted_external', 'adapter_timeout',
-  ])
-  assert.deepEqual(adapter.status, {
-    state: 'running', run_sequence: 1, started_at: 7, finished_at: null, elapsed: 540,
-    process_running: true, process_exited: false, terminal: null, exit_code: null,
-    preflight: 'passed', prewarm: 'cold',
-  })
+  clock.advanceTo(1207)
+  release.resolve()
+  assert.equal((await running).outcome, 'ok')
 })
 
 test('live accepts the real 6B post-write unsupported-protocol uncertainty pair', async () => {
@@ -383,8 +369,9 @@ test('live side effects use writer drain rather than started progress guesses', 
 })
 
 test('live cleanup grace follows VirtualClock and leaves no ambient waiter', async () => {
-  // This fails if bounded cleanup sleeps six real seconds after a virtual deadline.
+  // This fails if bounded cleanup sleeps six real seconds after cancellation.
   const clock = new VirtualClock(7)
+  const controller = new AbortController()
   const entered = deferred<void>()
   const release = deferred<TransportOutcome>()
   const transport = new ScriptedTransport()
@@ -393,22 +380,23 @@ test('live cleanup grace follows VirtualClock and leaves no ambient waiter', asy
     return await release.promise
   }
   const running = new CodexLiveAdapter(transport).dispatch(
-    'run', {work_order: 'non-cooperative'}, contextFor('run', {}, {clock}),
+    'run', {work_order: 'non-cooperative'}, contextFor('run', {}, {clock, signal: controller.signal}),
   )
   await entered.promise
+  controller.abort()
   clock.advanceTo(547)
   await yieldImmediate()
   const cleanupWaiters = clock.waiterCount()
   clock.advanceTo(553)
   const winner = await Promise.race([
-    running.then(() => 'settled' as const),
+    running.then(() => 'unexpected' as const, (error: unknown) => { assert.ok(error instanceof Error); assert.equal(error.name, 'AbortError'); return 'settled' as const }),
     yieldImmediate().then(() => 'ambient' as const),
   ])
   release.resolve({
     classification: 'refused', code: 'transport_lost',
     turnStartWritten: false, completion: null,
   })
-  await running
+  await assert.rejects(running, {name: 'AbortError'})
 
   assert.equal(cleanupWaiters, 1)
   assert.equal(winner, 'settled')
@@ -617,4 +605,15 @@ test('invalid optional diagnostic does not replace the actual refusal code', asy
   const handoff = await new CodexLiveAdapter(transport).dispatch('run', {work_order: 'resume'}, contextFor('run', {}))
   assert.equal(handoff.content.code, 'resume_unavailable')
   assert.equal(handoff.content.diagnostic, undefined)
+})
+
+test('connection loss after the turn is bound is diagnosed as execution rather than startup', async () => {
+  const transport = new ScriptedTransport()
+  transport.runAction = observer => {
+    observer.onTurnBound?.()
+    return Promise.resolve({classification: 'uncertain', code: 'transport_lost', turnStartWritten: true, completion: null})
+  }
+  const result = await new CodexLiveAdapter(transport).dispatch('run', {work_order: 'work'}, contextFor('run', {}))
+  assert.equal(result.outcome, 'unknown')
+  assert.equal(result.content.stage, 'execution')
 })

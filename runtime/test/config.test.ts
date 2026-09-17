@@ -36,7 +36,7 @@ test('a monitor preset loads its own provider credential independently of the co
   assert.equal(resolveWatchModelConnection(loadSettings({NOVA_AUDIO_AGENT_WATCH_MODEL: 'custom-model'})), null)
 })
 
-test('pipeline defaults are product-shaped and cascaded defaults use Qwen Plus', () => {
+test('pipeline defaults are product-shaped and cascaded defaults use DeepSeek Flash', () => {
   const settings = loadSettings({})
   assert.equal(settings.pipeline_mode, 'integrated')
   assert.equal(settings.camera_module_enabled, true)
@@ -44,8 +44,8 @@ test('pipeline defaults are product-shaped and cascaded defaults use Qwen Plus',
   assert.deepEqual(resolveCascadedSelection(settings), {
     endpointingProvider: 'auto',
     asrProvider: 'volcengine',
-    llmProvider: 'qwen',
-    llmModel: 'qwen-plus',
+    llmProvider: 'deepseek',
+    llmModel: 'deepseek-flash',
     ttsProvider: 'volcengine',
   })
   assert.deepEqual({
@@ -276,8 +276,8 @@ test('integrated loading never reads inactive cascaded selector or model slots',
   assert.deepEqual(resolveCascadedSelection(loadSettings(environment)), {
     endpointingProvider: 'auto',
     asrProvider: 'volcengine',
-    llmProvider: 'qwen',
-    llmModel: 'qwen-plus',
+    llmProvider: 'deepseek',
+    llmModel: 'deepseek-flash',
     ttsProvider: 'volcengine',
   })
 })
@@ -295,8 +295,8 @@ test('integrated loading ignores invalid inactive cascaded selector and model va
   assert.deepEqual(resolveCascadedSelection(settings), {
     endpointingProvider: 'auto',
     asrProvider: 'volcengine',
-    llmProvider: 'qwen',
-    llmModel: 'qwen-plus',
+    llmProvider: 'deepseek',
+    llmModel: 'deepseek-flash',
     ttsProvider: 'volcengine',
   })
 })

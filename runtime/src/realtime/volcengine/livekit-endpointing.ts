@@ -1,3 +1,4 @@
+import type {RealtimeTelemetry} from '../telemetry.js'
 import {ReadableStream} from 'node:stream/web'
 import type {Clock} from '../../core/clock.js'
 import {ConfigurationError, type VolcengineRealtimeConfig} from '../../config/config.js'
@@ -27,6 +28,7 @@ export type LiveKitVolcEndpointingConfig = Pick<VolcengineRealtimeConfig,
   | 'vadSpeechPadMs' | 'vadMaxUtteranceMs'>
 
 export interface LiveKitVolcEndpointingOptions {
+  readonly telemetry?: RealtimeTelemetry
   readonly surface: LiveKitAgentsPublicSurface
   readonly executor: LiveKitExecutor
   readonly config: LiveKitVolcEndpointingConfig
@@ -71,6 +73,7 @@ interface LiveEpoch {
 interface ProgressWaiter {readonly position: number; readonly resolve: () => void; readonly reject: (error: Error) => void}
 
 export class LiveKitVolcEndpointing implements EndpointingPort {
+  readonly #telemetry: RealtimeTelemetry | undefined
   readonly #surface: LiveKitAgentsPublicSurface
   readonly #executor: LiveKitExecutor
   readonly #config: LiveKitVolcEndpointingConfig
@@ -93,6 +96,7 @@ export class LiveKitVolcEndpointing implements EndpointingPort {
 
   constructor(options: LiveKitVolcEndpointingOptions) {
     validateConfig(options.config)
+    this.#telemetry = options.telemetry
     this.#surface = options.surface
     this.#executor = options.executor
     this.#config = Object.freeze({...options.config})
@@ -339,6 +343,10 @@ export class LiveKitVolcEndpointing implements EndpointingPort {
     current.lastSpeech = Math.min(current.lastSpeech, position - samplesForMilliseconds(silence))
     const threshold = await this.#predictionThreshold(epoch)
     if (!this.#isCurrent(epoch) || this.#utterance !== current) return
+    this.#telemetry?.record('volcengine.endpointing.decision', {
+      probability: threshold.probability, threshold: threshold.unlikely, silence_ms: silence,
+      decision: threshold.probability >= threshold.unlikely ? 'commit' : 'extend',
+    })
     if (threshold.probability >= threshold.unlikely) this.#commitEnd(position)
     else {
       current.phase = 'extension'

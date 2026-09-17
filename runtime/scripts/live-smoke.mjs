@@ -37,7 +37,7 @@ if (values.list) {
   const git = (...args) => execFileSync('git', args, {cwd:root, encoding:'utf8'}).trim()
   const harnessHash = createHash('sha256')
   for (const file of ['../live-smoke.mjs','text-tools.mjs','validation.mjs','catalog.json']) harnessHash.update(await readFile(join(import.meta.dirname,'live',file)))
-  if (selected.some(suite => suite.id === 'project')) for (const file of ['runtime/scripts/live/project.mjs','runtime/scripts/live/project-result.mjs','clients/desktop/scripts/live-project-host.cjs']) harnessHash.update(await readFile(join(root,file)))
+  if (selected.some(suite => suite.id === 'project')) for (const file of ['runtime/scripts/live/project.mjs','runtime/scripts/live/project-result.mjs','runtime/scripts/live/workspace-scenarios.mjs','clients/desktop/scripts/live-project-host.cjs']) harnessHash.update(await readFile(join(root,file)))
   const report = {version:1, harnessHash:harnessHash.digest('hex'), startedAt:new Date().toISOString(), revision:git('rev-parse','HEAD'),
     dirty:git('status','--porcelain').length > 0, node:process.version, platform:process.platform,
     selection:selected.map(suite => suite.id), repeats, fixtures:selected.some(suite => suite.id === 'text-tools') ? cases : [], fixtureHash:createHash('sha256').update(fixtureText).digest('hex'),

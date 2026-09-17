@@ -45,7 +45,7 @@ function executorLines(agents: readonly AgentDescriptor[]): string {
 export function dispatchToolSpec(agents: readonly AgentDescriptor[]): HostToolSpec {
   return {
     name: DISPATCH_TOOL,
-    description: `把已经明确的任务交给 agent，包括新建工作区、新任务、继续、追加和修改。单轮请求已完整时直接调用；只有影响交付的缺项才先澄清。不要在调用前再问是否执行或复核已给出的名称。下游 coordinator 决定项目和会话，宿主会为确需授权的操作生成带 id 的确认提议。executor 可选：${executorLines(agents)}`,
+    description: `把已经明确的任务交给 agent，包括只新建或切换工作区（不执行编码）、新任务、继续、追加和修改。派发的是已经明确的用户任务，不是让下游替前台澄清需求。产物类别、当前目录或“可以做出来”本身不算依据；当不同用法会让用户得到明显不同的结果而又没有其他依据时，先问最关键的一点。依据可以来自用户当前描述、相关历史或明确委托，不要求固定字段，不重复询问已知内容。关键歧义消除后调用。不要在调用前再问是否执行或复核已给出的名称。下游 coordinator 决定项目和会话，宿主会为确需授权的操作生成带 id 的确认提议。executor 可选：${executorLines(agents)}`,
     params: {
       type: 'object',
       properties: {

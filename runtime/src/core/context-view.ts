@@ -19,7 +19,7 @@ export interface InFlightView {
   readonly origin_ref: MemoryRef
   readonly dispatched_at: number
   readonly eta: number
-  readonly deadline: number
+  readonly deadline: number | null
   readonly routing_class: string
 }
 

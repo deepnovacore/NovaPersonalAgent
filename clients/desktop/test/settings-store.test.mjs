@@ -93,7 +93,7 @@ test('the default settings are the documented schema', () => {
     integratedVoice: 'longanqian',
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
-    cascadedLlmProvider: 'qwen',
+    cascadedLlmProvider: 'deepseek',
     cascadedLlmModels: { qwen: 'qwen-plus', ark: 'doubao-seed-2-0-pro-260215', deepseek: 'deepseek-flash' },
     cascadedTtsProvider: 'volcengine',
     cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',

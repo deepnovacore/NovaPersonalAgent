@@ -86,6 +86,7 @@ class Session implements CascadedLlmSession {
     const messages = [{role: 'system' as const, content: systemContent}, ...context]
     const body: Record<string, JsonValue> = {model: this.#model, messages: messages as unknown as JsonValue, stream: true, stream_options: {include_usage: true}}
     if (this.#provider === 'deepseek') body.thinking = {type: 'disabled'}
+    else body.enable_thinking = false
     if (input.tools.length > 0) { body.tools = input.tools.map(schema); body.parallel_tool_calls = false }
     const active: Active = {completion: null, usageDeadline: null, controller: new AbortController(), reader: null, failureCode: null}
     const stop = (): void => { active.failureCode ??= 'aborted'; active.controller.abort(); void this.#cancel(active.reader) }
@@ -121,7 +122,7 @@ class Session implements CascadedLlmSession {
           if (!object(choice) || !object(choice.delta)) throw fail('protocol')
           const content = choice.delta.content, calls = choice.delta.tool_calls
           if (content !== undefined && content !== null && typeof content !== 'string') throw fail('protocol'); if (calls !== undefined && !Array.isArray(calls)) throw fail('protocol')
-          if (!started && (content !== undefined || calls !== undefined || choice.finish_reason !== undefined)) { if (responseId === null) throw fail('protocol'); started = true; yield {kind: 'response_started', response_id: responseId} }
+          if (!started && ((input.tools.length === 0 && typeof content === 'string' && content !== '') || (choice.finish_reason !== undefined && choice.finish_reason !== null))) { if (responseId === null) throw fail('protocol'); started = true; yield {kind: 'response_started', response_id: responseId} }
           if (typeof content === 'string' && content !== '') sawText = true
           if (typeof content === 'string' && content !== '') { text += content; if (input.tools.length === 0) yield {kind: 'text_delta', text: content} }
           for (const call of calls ?? []) this.#fragment(fragments, call)
@@ -210,7 +211,7 @@ class Session implements CascadedLlmSession {
     while (true) {
       let read: Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']>>; try { read = await this.#timed(reader.read(), active) } catch (error) { if (error instanceof QwenCascadedLlmFailure) throw error; throw fail(active.controller.signal.aborted ? this.#closed ? 'closed' : 'aborted' : 'network') }
       if (read.done) { if (buffered.length > 0) { const event = line(buffered); if (event !== null && event !== 'done') yield event }; const event = line(new Uint8Array()); if (event !== null && event !== 'done') yield event; return }
-      if (!(read.value instanceof Uint8Array)) throw fail('protocol'); total += read.value.length; if (total > MAX_RESPONSE_BYTES) throw fail('overflow'); const next = new Uint8Array(buffered.length + read.value.length); next.set(buffered); next.set(read.value); buffered = next
+      if (!(read.value instanceof Uint8Array)) throw fail('protocol'); total += read.value.length; if (total > MAX_RESPONSE_BYTES) throw fail('overflow'); const next = new Uint8Array(buffered.length + read.value.length); next.set(buffered); next.set(read.value, buffered.length); buffered = next
       let newline = buffered.indexOf(10); while (newline >= 0) { const event = line(buffered.subarray(0, newline)); buffered = buffered.slice(newline + 1); if (event === 'done') return; if (event !== null) yield event; newline = buffered.indexOf(10) }; if (buffered.length > MAX_LINE_BYTES) throw fail('overflow')
     }
   }

@@ -103,6 +103,7 @@ const integratedVoicePreset = document.querySelector('#integratedVoicePreset')
 const integratedVoiceCustom = document.querySelector('#integratedVoiceCustom')
 const cascadedAsrProvider = document.querySelector('#cascadedAsrProvider')
 const cascadedLlmProvider = document.querySelector('#cascadedLlmProvider')
+const cascadedLlmModelPreset = document.querySelector('#cascadedLlmModelPreset')
 const cascadedLlmModel = document.querySelector('#cascadedLlmModel')
 const cascadedTtsProvider = document.querySelector('#cascadedTtsProvider')
 const cascadedTtsVoicePreset = document.querySelector('#cascadedTtsVoicePreset')
@@ -157,7 +158,7 @@ document.getElementById('coding-executor-configure').addEventListener('click', (
 const capabilitySettings = ['embeddingProvider', 'embeddingModel', 'knowledgePath', 'capabilitiesConfigPath'].map(key => document.getElementById(key))
 const knowledgePanel = createKnowledgePanel({document, action: payload => api.knowledgeAction(payload)})
 
-function populateVoiceOptions(select, presets) {
+function populatePresetOptions(select, presets, customLabel = '自定义音色 ID…') {
   select.replaceChildren()
   for (const preset of presets) {
     const option = document.createElement('option')
@@ -167,12 +168,12 @@ function populateVoiceOptions(select, presets) {
   }
   const custom = document.createElement('option')
   custom.value = CUSTOM_VOICE_VALUE
-  custom.textContent = '自定义音色 ID…'
+  custom.textContent = customLabel
   select.append(custom)
 }
 
-populateVoiceOptions(integratedVoicePreset, QWEN_VOICES)
-populateVoiceOptions(cascadedTtsVoicePreset, VOLCENGINE_TTS_VOICES)
+populatePresetOptions(integratedVoicePreset, QWEN_VOICES)
+populatePresetOptions(cascadedTtsVoicePreset, VOLCENGINE_TTS_VOICES)
 
 function secretInput(key) { return document.querySelector(`#${key}`) }
 function secretClearButton(key) { return document.querySelector(`button.clear[data-key="${key}"]`) }
@@ -211,7 +212,7 @@ function renderKeyUsage(view) {
   }
 }
 
-function renderVoice(select, customInput, value, presets) {
+function renderPreset(select, customInput, value, presets) {
   const choice = resolveVoiceChoice(value, presets)
   select.value = choice.selected
   customInput.hidden = choice.selected !== CUSTOM_VOICE_VALUE
@@ -384,18 +385,24 @@ function render(view, _drafts, state) {
   }
   integratedModel.value = view.integratedModel ?? ''
   const voices = view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: 'Ethan（默认）'}] : QWEN_VOICES
-  populateVoiceOptions(integratedVoicePreset, voices)
-  renderVoice(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, voices)
+  populatePresetOptions(integratedVoicePreset, voices)
+  renderPreset(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, voices)
   cascadedAsrProvider.value = view.cascadedAsrProvider
   cascadedLlmProvider.value = view.cascadedLlmProvider
-  const modelPresets = document.querySelector('#cascaded-model-presets')
-  modelPresets.replaceChildren()
-  if (view.cascadedLlmProvider === 'deepseek') {
-    const option = document.createElement('option'); option.value = 'deepseek-flash'; option.label = 'DeepSeek V4.1 Flash'; modelPresets.append(option)
-  }
-  cascadedLlmModel.value = view.cascadedLlmModels?.[view.cascadedLlmProvider] ?? ''
+  const modelPresets = ({
+    qwen: [
+      {value: 'qwen3.8-flash', label: 'qwen3.8-flash · 第一档 · ★★★★★'},
+      {value: 'qwen-flash', label: 'qwen-flash · 第二档 · ★★★★☆'},
+      {value: 'qwen3.8-max', label: 'qwen3.8-max · 第二档 · ★★★★☆'},
+      {value: 'qwen-plus', label: 'qwen-plus · 第三档 · ★★★☆☆'},
+    ],
+    deepseek: [{value: 'deepseek-flash', label: 'deepseek-flash · 第一档 · ★★★★★'}],
+    ark: [{value: 'doubao-seed-2-0-pro-260215', label: 'doubao-seed-2-0-pro-260215'}],
+  }[view.cascadedLlmProvider] ?? [])
+  populatePresetOptions(cascadedLlmModelPreset, modelPresets, '自定义模型 ID…')
+  renderPreset(cascadedLlmModelPreset, cascadedLlmModel, view.cascadedLlmModels?.[view.cascadedLlmProvider], modelPresets)
   cascadedTtsProvider.value = view.cascadedTtsProvider
-  renderVoice(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
+  renderPreset(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
   renderBadges(view.secretsPresent, view.secretSources)
   renderKeyUsage(view)
   warning.hidden = view.keyringAvailable !== false
@@ -502,6 +509,12 @@ bindStage(integratedModel, 'change', () => ({
 }))
 bindStage(cascadedAsrProvider, 'change', () => ({cascadedAsrProvider: cascadedAsrProvider.value}))
 bindStage(cascadedLlmProvider, 'change', () => ({cascadedLlmProvider: cascadedLlmProvider.value}))
+cascadedLlmModelPreset.addEventListener('change', () => {
+  const custom = cascadedLlmModelPreset.value === CUSTOM_VOICE_VALUE
+  cascadedLlmModel.hidden = !custom
+  if (custom) { cascadedLlmModel.focus(); return }
+  controller.stage({cascadedLlmModels: { [cascadedLlmProvider.value]: cascadedLlmModelPreset.value }})
+})
 cascadedLlmModel.addEventListener('input', () => {
   const provider = cascadedLlmProvider.value
   const value = cascadedLlmModel.value

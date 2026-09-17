@@ -34,7 +34,7 @@ test('Codex recall exposes only the prepared terminal message', () => {
     provider_secret: 'NEVER-EXPOSE',
     result: {final_message: {text: '已实现主体。 https://secret.example/path', truncated: false}},
   }), CODING)
-  assert.equal(evidence, 'Codex 报告任务完成：已实现主体。 （链接略）')
+  assert.equal(evidence, '任务已完成：已实现主体。 （链接略）')
   assert.doesNotMatch(evidence, /NEVER-EXPOSE|secret\.example/u)
 })
 
@@ -64,7 +64,7 @@ test('Codex refusal is neither failure nor uncertainty', () => {
   assert.equal(finalSpeechView('refused', {
     op: 'project', code: 'workspace_name_conflict', recoverable: true,
     result: {final_message: {text: 'provider supplied refusal detail'}},
-  }, 'Codex'), 'Codex 任务未执行（workspace_name_conflict）')
+  }, 'Codex'), '这次任务没有启动。')
   assert.equal(finalSpeechView('refused', {
     error: 'superseded',
   }, 'Codex'), 'Codex 本次执行请求已失效，任务未能启动。')
@@ -109,7 +109,7 @@ test('Codex progress requires the exact trusted stored envelope', () => {
   assert.equal(safeMemoryEvidence(item('codex', {...content, request: {secret: 'NEVER-EXPOSE'}}, {
     outcome: null,
     trust: 'trusted_system',
-  }), CODING), 'Codex 任务未能确认完成（no_final_message）')
+  }), CODING), '目前无法确认任务是否完成。')
 })
 
 test('search, watch, and structured evidence use closed field allowlists', () => {

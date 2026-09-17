@@ -59,7 +59,7 @@ export function finalSpeechView(outcome: string, content: unknown, displayName: 
   if (outcome === 'refused') {
     return category === 'superseded'
       ? `${displayName} 本次执行请求已失效，任务未能启动。`
-      : `${displayName} 任务未执行（${category}）`
+      : '这次任务没有启动。'
   }
   let text: string | undefined
   let upstreamTruncated = false
@@ -74,14 +74,15 @@ export function finalSpeechView(outcome: string, content: unknown, displayName: 
       const failure = codingStartupFailureSpeech(category, stage, displayName)
       if (failure !== null) return failure
     }
-    return `${displayName} 任务未能确认完成（${category}）`
+    return category === 'adapter_timeout'
+      ? '等待任务结果超时了，目前无法确认是否完成。'
+      : '目前无法确认任务是否完成。'
   }
   const prepared = prepareForSpeech(text, {limit: SPEECH_FINAL_LIMIT})
   const note = upstreamTruncated || prepared.truncated ? '（结果较长，已截取要点）' : ''
-  if (outcome === 'ok') return `${displayName} 报告任务完成：${prepared.text}${note}`
+  if (outcome === 'ok') return `任务已完成：${prepared.text}${note}`
   if (outcome === 'failed') {
-    const category = typeof code === 'string' && code !== '' ? `（${code}）` : ''
-    return `${displayName} 任务失败${category}：${prepared.text}${note}`
+    return `任务未成功完成：${prepared.text}${note}`
   }
   return `${displayName} 任务结果不确定：${prepared.text}${note}`
 }

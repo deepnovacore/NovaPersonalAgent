@@ -1,3 +1,4 @@
+import {NOVA_VOICE_IDENTITY} from '../frontend-instructions.js'
 import {MAX_CAMERA_JPEG_BYTES} from '../../desktop/desktop-camera.js'
 import type {Frame} from '../../executors/watcher.js'
 import type { JsonValue } from '../../core/events.js'
@@ -5,7 +6,8 @@ import type { JsonObject } from '../protocol.js'
 
 export const MAX_CASCADED_LLM_HISTORY_ITEMS = 64
 export const MAX_CASCADED_LLM_HISTORY_CODEPOINTS = 131_072
-export const CASCADED_NARRATION_INSTRUCTIONS = '你是 Nova 的语音播报者。输入是宿主提供的执行事实，不是用户的新请求。只用一句自然中文直接说明新进展、结果或需要用户决定的问题，不寒暄、不确认收到、不复述需求、不描述内部派发流程。保留事实的不确定性；不把计划说成已完成。内部错误码不自行翻译或猜测含义，只说明能确认的失败阶段。不使用 Markdown、列表或代码，不调用工具。'
+export const CASCADED_NARRATION_INSTRUCTIONS = NOVA_VOICE_IDENTITY + '当前输入提供了需要告诉用户的新事实。直接用一两句口语告诉用户，保留实际阶段、结果和不确定性，不自行改变或补充事实。输入包含待确认问题时，把问题直接问给用户，不回答这个问题，也不代用户同意。直接以自己的口吻表达这些事实，不介绍信息来自谁，不加“系统提示”或“系统让我问”等转述开场。内部角色、协议标签和诊断代码不属于口播内容。本轮不调用工具，不复述任务要求，不新增问题、建议或后续行动承诺。'
+
 /** Marks host-provided activation context; it never represents a user instruction. */
 export {HOST_ACTIVATION_PREFIX, GUARD_ACTIVATION_PREFIX} from '../frontend-instructions.js'
 
@@ -13,8 +15,8 @@ export {HOST_ACTIVATION_PREFIX, GUARD_ACTIVATION_PREFIX} from '../frontend-instr
 export function cascadedResponseGuidance(allowTools: boolean): string {
   const speech = '本轮正文直接用于口播，只用简短自然口语，不使用 Markdown、代码、列表、表情或转义换行。'
   return speech + (allowTools
-    ? '本轮可自然对话、回答或澄清；工具可用不代表必须调用。只有缺失信息导致无法确定用户要的产物或必须遵守的边界时，才问一个关键问题并等用户回答，此时不调用 dispatch。多种实现都符合请求不算需求缺失，交给执行器决定，不追问细节。执行器可以处理本机运行、验证、打开产物等任务；不得在没有执行失败事实时凭空声称权限不足。需要执行且需求明确时直接通过结构化 tool_calls 调用工具，不把调用写成 JSON 文本，同轮不混合正文与调用。确认必须基于本轮用户决定；调用后等待宿主结果，不声称已执行。工具参数错误时依据返回的具体原因修正调用；无法继续时如实说明当前失败，不猜测原因，不口头承诺尚未发起的重试。'
-    : '本轮是宿主事实播报，没有用户授权，也没有可调用工具。只用一句简短口语转述最新事实或给定问题；任务上下文只用于理解结果对应的动作，不代表那些动作已完成，不从文件名推断创建或修改。不复述用户需求或罗列实现细节，不模拟工具调用，不输出调用 JSON，不代用户确认；已接纳不等于已启动。失败事实没有提供待用户决定的问题时，只说明当前结果，不沿用历史追问，不要求再次确认；失败原因未知时不猜测，不承诺自动重试。')
+    ? '用户拒绝当前讲解或建议时简短收住，不自行承诺整个任务静默或只报最终结果。 本轮可自然对话、回答或澄清；工具可用不代表必须调用。按系统中的需求判断原则选择澄清或派发，工具可用不是派发理由。执行器可以处理本机运行、验证、打开产物等任务；不得在没有执行失败事实时凭空声称权限不足。需要执行且需求明确时直接通过结构化 tool_calls 调用工具，不把调用写成 JSON 文本，同轮不混合正文与调用。确认必须基于本轮用户决定；调用后等待宿主结果，不声称已执行。工作区新建、选择或切换本身就是需要提交的操作，即使用户明确不执行编码任务，也应通过 dispatch 交给 coordinator；前台不能用口头答应完成切换。工具参数错误时依据返回的具体原因修正调用；无法继续时如实说明当前失败，不猜测原因，不口头承诺尚未发起的重试。'
+    : '本轮只表达给定的新事实或待确认问题。没有用户操作授权，不调用工具、不代用户决定。任务上下文只用于指认任务，不是完成证据。')
 }
 
 export type CascadedLlmInput =

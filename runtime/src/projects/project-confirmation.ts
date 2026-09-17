@@ -599,14 +599,14 @@ function confirmationPrompt(
 ): string {
   if (action === 'resume') {
     if (session === null) throw new TypeError('resume requires a Session title')
-    return `准备切换到${workspace}，并继续 Session“${session}”，请确认或取消。`
+    return `是否切换到“${workspace}”，继续“${session}”会话？`
   }
   if (action === 'reuse') {
-    return `是否使用现有工作区“${workspace}”并开始任务？请确认或取消。`
+    return `是否使用现有工作区“${workspace}”并开始任务？`
   }
   if (action === 'create' && hasWorkOrder) {
-    return `是否创建工作区“${workspace}”并开始任务？请确认或取消。`
+    return `请问是否创建工作区“${workspace}”并开始任务？`
   }
-  if (action === 'create') return `准备创建并切换到工作区${workspace}，请确认或取消。`
-  return `准备切换到工作区${workspace}，请确认或取消。`
+  if (action === 'create') return `请问是否创建并切换到“${workspace}”工作区？`
+  return `是否切换到“${workspace}”工作区？`
 }

@@ -919,6 +919,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     allowTools: boolean,
   ): Promise<void> {
     let llmResponseId: string | null = null
+    let llmFailureCode: string | null = null
     let textSeen = false
     let toolSeen = false
     let pendingTool: Extract<CascadedLlmEvent, {kind: 'tool_call'}> | null = null
@@ -994,6 +995,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           this.#record('cascaded.llm.tool_call', {epoch: owner.epoch, response_id: active.id})
         } else if (event.kind === 'response_failed') {
           if (llmResponseId !== null && event.response_id !== llmResponseId) throw new Error('LLM failure identity mismatch')
+          llmFailureCode = event.code
           throw new Error('LLM stable provider failure')
         } else {
           if (llmResponseId === null || event.response_id !== llmResponseId) {
@@ -1047,6 +1049,11 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       } else {
         await this.#cancelTts(owner, active)
         const ttsFailure = error instanceof TtsResponseFailure
+        const rawCode = llmFailureCode ?? (error instanceof Error && 'code' in error ? error.code : null)
+        const code = typeof rawCode === 'string'
+          && ['configuration', 'aborted', 'timeout', 'protocol', 'overflow', 'closed', 'network', 'http'].includes(rawCode)
+          ? rawCode : 'unknown'
+        this.#record('cascaded.response.failed', {component: ttsFailure ? 'tts' : 'llm', code})
         await this.#emit(owner, {
           kind: 'provider_error', session_epoch: owner.epoch,
           code: ttsFailure ? 'volcengine_tts_receive' : 'cascaded_response_failed',
@@ -1154,6 +1161,8 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         response_id: state.responseId, pcm,
       })
     }
+    // A closed prewarmed session is not proof that submitted speech was synthesized.
+    if (!state.audioEmitted && !state.controller.signal.aborted) throw new TtsResponseFailure()
   }
 
   async #retryTts(owner: EpochOwner, state: ActiveTts): Promise<boolean> {

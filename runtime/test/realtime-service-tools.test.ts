@@ -1187,6 +1187,7 @@ for (const race of ['assess-steer'] as const) {
     const effects: string[] = []
     let first = true
     const intake = intakePorts({
+      running: () => [{work_id: 'running', project: 'alpha', title: 'Existing task'}],
       models: {
         assess: async input => {
           if (first) { entered(); await held }

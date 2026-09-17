@@ -73,11 +73,15 @@ class LiveTransport implements CodexAppServerTransport {
     return this.prewarmValue as SafePreflightReport | null
   }
 
+  completionDeadline: TransportDeadline | null | undefined
+
   async run(
     input: {readonly workOrder: string},
     observer: TransportObserver,
     deadline: TransportDeadline,
+    completionDeadline?: TransportDeadline | null,
   ): Promise<TransportOutcome> {
+    this.completionDeadline = completionDeadline
     this.calls.push('run')
     this.workOrders.push(input.workOrder)
     if (this.runAction !== null) return await this.runAction(observer, deadline) as TransportOutcome
@@ -869,4 +873,28 @@ test('live close aborts, joins, and fences every in-flight steer result', async 
   assert.equal(steerWasAborted, true)
   assert.deepEqual(steer.content, {error: 'closed', op: 'steer'})
   assert.equal(transport.instructions.length, 1)
+})
+
+
+test('Codex execution crosses both former total deadlines and still settles normally', async () => {
+  const clock = new VirtualClock(0)
+  const entered = deferred<void>(), release = deferred<TransportOutcome>()
+  const transport = new LiveTransport()
+  transport.runAction = async observer => {
+    observer.onThreadReady?.('long-thread')
+    markTurnStartWritten(observer)
+    entered.resolve()
+    return await release.promise
+  }
+  const adapter = new CodexLiveAdapter(transport, {wallNowMilliseconds: () => 1000, lifecycleClock: clock})
+  let settled = false
+  const running = adapter.dispatch('run', {work_order: 'long task'}, context('run', {}, {clock})).then(value => { settled = true; return value })
+  await entered.promise
+  assert.equal(transport.completionDeadline, null)
+  clock.advanceTo(1200)
+  await yieldImmediate()
+  assert.equal(settled, false)
+  release.resolve(COMPLETE_OUTCOME)
+  assert.equal((await running).outcome, 'ok')
+  await adapter.close()
 })

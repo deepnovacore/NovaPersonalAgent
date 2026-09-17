@@ -1,5 +1,5 @@
-/** Opt-in real project execution. Never load credentials or alter the user's Nova state. */
-import {mkdir,mkdtemp,readFile,writeFile} from 'node:fs/promises'
+/** Opt-in real project execution. Never log credentials or alter the user's Nova state. */
+import {mkdir,mkdtemp,readFile,writeFile,copyFile,chmod,rm} from 'node:fs/promises'
 import {realpathSync,statSync,readFileSync,accessSync,constants} from 'node:fs'
 import {tmpdir} from 'node:os'
 import * as path from 'node:path'
@@ -25,10 +25,16 @@ const runRoot=realpathSync(await mkdtemp(path.join(tmpdir(),'nova-live-project-'
 await mkdir(path.join(runRoot,'initial'));await mkdir(path.join(runRoot,'workspaces'))
 const output=process.env.NOVA_LIVE_PROJECT_REPORT??path.join(runRoot,'report.json')
 const mode=process.env.NOVA_LIVE_PROJECT_INPUT??'text'
+const workspaceScenario=['workspaces','clarification'].includes(process.env.NOVA_LIVE_PROJECT_SCENARIO)
 const decision=process.env.NOVA_LIVE_PROJECT_CONFIRMATION??'natural'
 if(!['text','audio'].includes(mode)||!['natural','short'].includes(decision))throw Error('invalid project test mode')
 const report={version:1,status:'running',input:mode,confirmation:decision,runRoot,steps:[],spoken:[],transcripts:[],result:{},scope:'Production cascaded runtime and real Codex; digital playback acknowledgement; no microphone, speaker or GUI acceptance.'}
 const clock=new RealClock(),telemetry=new NullTelemetry({clock})
+if(workspaceScenario){
+  const record=telemetry.record.bind(telemetry),snapshot=telemetry.diagnostics.bind(telemetry),history=[]
+  telemetry.record=(kind,payload)=>{record(kind,payload);history.push(snapshot().records.at(-1))}
+  telemetry.diagnostics=()=>({version:1,records:history.slice()})
+}
 let assembly,resource,view,confirmed=false
 const stop=new AbortController()
 process.parentPort.on('message',event=>{if((event.data??event)?.type==='nova.live.stop'){stop.abort();void assembly?.stop().catch(()=>undefined)}})
@@ -41,16 +47,38 @@ const wait=async(name,predicate,ms=60000)=>{const end=Date.now()+ms;while(!predi
   await delay(100)
 };step(name)}
 try {
+  if(workspaceScenario){
+    const originalFetch=globalThis.fetch
+    globalThis.fetch=async(url,options)=>{
+      if(typeof options?.body==='string'){
+        try{const body=JSON.parse(options.body);if(body.messages&&body.model){(report.modelRequests??=[]).push(body);await save()}}catch{}
+      }
+      return originalFetch(url,options)
+    }
+  }
   const invocation=canonicalInstalledInvocation({kind:'native',command:process.env.NOVA_AUDIO_AGENT_CODEX_BIN??'/opt/homebrew/bin/codex',prefixArgs:[]},
     {platform:process.platform,arch:process.arch,pathApi:path,realpath:realpathSync,stat:statSync,readFile:readFileSync,access:p=>accessSync(p,constants.X_OK)})
   if(!invocation)throw Error('codex_not_found')
   const settings=loadSettings({...process.env,NOVA_AUDIO_AGENT_PIPELINE_MODE:'cascaded',NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'qwen',
-    NOVA_AUDIO_AGENT_EXECUTOR:'codex',NOVA_AUDIO_AGENT_CODEX_BIN:invocation.command,NOVA_AUDIO_AGENT_CODEX_PREWARM:'false',
+    NOVA_AUDIO_AGENT_EXECUTOR:'codex',NOVA_AUDIO_AGENT_CODEX_BIN:invocation.command,NOVA_AUDIO_AGENT_CODEX_PREWARM:process.env.NOVA_AUDIO_AGENT_CODEX_PREWARM??'false',
     NOVA_AUDIO_AGENT_CODEX_WORKSPACE:path.join(runRoot,'initial'),NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT:path.join(runRoot,'workspaces'),
     NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT:runRoot,NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED:'false'})
   const capabilities=parseCapabilityRegistry({version:1,modules:{coding:{enabled:true},camera:{enabled:false},search:{enabled:false},knowledge:{enabled:false}}},{})
   const host=createProductionCodexHost(settings,{resourcesPath:process.env.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH??path.join(root,'clients/desktop/build')})
-  resource=await createCodexAssemblyResource({config:resolveCodexHostConfig(settings,host.catalog),composition:'realtime',transportFactory:host.transportFactory,
+  const config=resolveCodexHostConfig(settings,workspaceScenario?{...host.catalog,homeDirectory:runRoot}:host.catalog)
+  if(workspaceScenario){
+    // Share login/provider configuration only; never import the user's session catalog.
+    for(const file of ['auth.json','config.toml']){
+      try{await copyFile(path.join(host.catalog.homeDirectory,'.codex',file),path.join(runRoot,'.codex',file));await chmod(path.join(runRoot,'.codex',file),0o600)}
+      catch(error){if(error.code!=='ENOENT')throw error}
+    }
+    const {ProjectStore}=await import('../../dist/src/projects/project-store.js')
+    const store=await ProjectStore.open({stateRoot:config.stateRoot,managedRoot:config.managedRoot,...host.projectHost,live:true})
+    try{for(const name of ['贪吃蛇','笔记工具'])await store.createManaged(name);await store.selectWorkspace('贪吃蛇')}
+    finally{await store.close()}
+  }
+  resource=await createCodexAssemblyResource({config,composition:'realtime',transportFactory:host.transportFactory,
+    onDiagnostic:code=>{(report.executorDiagnostics??=[]).push({code,at:clock.now()})},
     projectHost:host.projectHost,clock,idFactory:()=>randomUUID().replaceAll('-',''),managedMcp:prepareManagedCodexMcp(capabilities),
     codexApprovalBroker:{publish:()=>{report.result.approvalRequired=true}}})
   assembly=buildProductionRealtimeAssembly({settings,capabilities,codexResource:resource,telemetry,
@@ -70,6 +98,11 @@ try {
     for(let i=0;i<pcm.length/2;i++){const p=i*1.5,l=Math.floor(p),r=Math.min(l+1,original.length/2-1);pcm.writeInt16LE(Math.round(original.readInt16LE(l*2)*(1-p+l)+original.readInt16LE(r*2)*(p-l)),i*2)}
     for(const part of [Buffer.alloc(16000),pcm,Buffer.alloc(64000)])for(let i=0;i<part.length;i+=1024){await assembly.service.sendAudio(part.subarray(i,i+1024));await delay(32)}
   }
+  if(workspaceScenario){
+    const {runWorkspaceScenarios}=await import('./workspace-scenarios.mjs')
+    await runWorkspaceScenarios({assembly,telemetry,send,wait,report,save,getView:()=>view})
+    report.status='passed'
+  }else{
   const name='语音验收'+randomUUID().slice(0,6)
   report.request=`新建一个叫“${name}”的工作区，只创建 acceptance.txt，内容为 NOVA_E2E_OK。不安装依赖，不联网，不启动服务器。完成后读取文件验证内容。`
   await send(report.request)
@@ -127,12 +160,14 @@ try {
   }
   report.failures=validateProjectResult(report.result)
   report.status=report.failures.length?'failed':'passed'
-}catch(error){report.status='failed';report.failure=['clear_request_not_dispatched','codex_not_found','project_name_mismatch','proposal_replaced_by_confirmation','proposal_timeout','readback_terminal_timeout','executor_terminal_timeout','latest_completed_timeout','new_completed_timeout'].includes(error.message)?error.message:'runtime_failure';report.errorType=error.name}
+  }
+}catch(error){report.status='failed';report.failure=['clear_request_not_dispatched','codex_not_found','project_name_mismatch','proposal_replaced_by_confirmation','proposal_timeout','readback_terminal_timeout','executor_terminal_timeout','latest_completed_timeout','new_completed_timeout'].includes(error.message)?error.message:'runtime_failure';report.errorType=error.name;if(workspaceScenario)report.scenarioFailure=error.message}
 finally {
   if(assembly)report.codingRecords=assembly.runtime.memory.channels.get('codex')?.items??[]
   if(assembly)report.transcripts=assembly.runtime.memory.channels.get('conversation')?.items.filter(i=>i.trust==='trusted_user').map(i=>i.content.text)??[]
   report.telemetry=telemetry.diagnostics()
   try{await assembly?.stop();await resource?.close()}catch{report.status='failed';report.cleanupFailure=true}
+  if(workspaceScenario)for(const file of ['auth.json','config.toml'])await rm(path.join(runRoot,'.codex',file),{force:true})
   await save();console.log(`project: ${report.status}; report ${output}`)
 }
 process.exit(report.status==='passed'?0:1)

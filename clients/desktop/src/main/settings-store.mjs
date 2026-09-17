@@ -54,7 +54,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   integratedVoice: 'longanqian',
   cascadedEndpointingProvider: 'auto',
   cascadedAsrProvider: 'volcengine',
-  cascadedLlmProvider: 'qwen',
+  cascadedLlmProvider: 'deepseek',
   cascadedLlmModels: Object.freeze({
     qwen: 'qwen-plus',
     ark: 'doubao-seed-2-0-pro-260215',

@@ -817,7 +817,7 @@ export class CoreRuntime {
       ...parsed,
       request: structuredClone(parsed.request),
       delegate_id: this.#ids.next('delegate'),
-      deadline: dispatchedAt + operation.deadline_budget,
+      deadline: operation.deadline_budget === null ? null : dispatchedAt + operation.deadline_budget,
       routing_class: reason.routing_class,
       dispatched_at: dispatchedAt,
     })
@@ -825,7 +825,7 @@ export class CoreRuntime {
     this.#inFlight.set(delegate.delegate_id, delegate)
     this.#dispatches.push(delegate)
     this.#routableDelegates.set(delegate.delegate_id, delegate)
-    this.post({kind: 'deadline', payload: {delegate_id: delegate.delegate_id}}, delegate.deadline)
+    if (delegate.deadline !== null) this.post({kind: 'deadline', payload: {delegate_id: delegate.delegate_id}}, delegate.deadline)
     // Python's runtime uses one job sequence for model and executor tasks. The
     // executor job id stays private, but reserving it keeps later public
     // model_done ids cross-language exact.

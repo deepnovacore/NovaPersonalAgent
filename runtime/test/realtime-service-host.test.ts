@@ -308,7 +308,7 @@ test('a terminal Codex handoff cancels its playing standalone acknowledgement be
   )
   assert.equal(
     service.queuedHostItems()[0]?.intent.item.content,
-    'Codex 报告任务完成：test.py created',
+    '任务已完成：test.py created',
   )
   assert.equal(
     service.playbackCleared(generation!.utterance_id, generation!.generation_epoch, 0),

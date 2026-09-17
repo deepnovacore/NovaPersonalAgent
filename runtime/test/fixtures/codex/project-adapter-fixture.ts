@@ -317,7 +317,9 @@ export class ProjectTransport implements CodexAppServerTransport {
     input: RunInput,
     observer: TransportObserver,
     deadline: TransportDeadline,
+    completionDeadline?: TransportDeadline | null,
   ): Promise<TransportOutcome> {
+    assert.equal(completionDeadline, null, 'project transport must forward the explicit unbounded completion policy')
     this.workOrders.push(input.workOrder)
     this.runInputs.push(input)
     this.observers.push(observer)

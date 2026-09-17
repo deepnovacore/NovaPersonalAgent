@@ -39,7 +39,7 @@ export const settingsSchema = z.object({
   integrated_provider: integratedProviderNameSchema.default('qwen'),
   cascade_endpointing_provider: cascadedEndpointingProviderNameSchema.default('auto'),
   cascade_asr_provider: cascadedAsrProviderNameSchema.default('volcengine'),
-  cascade_llm_provider: cascadedLlmProviderNameSchema.default('qwen'),
+  cascade_llm_provider: cascadedLlmProviderNameSchema.default('deepseek'),
   cascade_llm_model: z.string().nullable().default(null),
   cascade_tts_provider: cascadedTtsProviderNameSchema.default('volcengine'),
   camera_module_enabled: z.boolean().default(true),

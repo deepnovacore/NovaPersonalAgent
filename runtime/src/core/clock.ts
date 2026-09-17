@@ -140,17 +140,18 @@ function abortError(): Error {
 
 /** Passive race; the caller retains operation cancellation and late-result ownership. */
 export async function raceDeadline<T>(
-  work: Promise<T>, clock: Clock, remaining: number, signal: AbortSignal | undefined,
+  work: Promise<T>, clock: Clock, remaining: number | null, signal: AbortSignal | undefined,
   timeoutError: () => Error, abortFailure: () => Error = timeoutError,
 ): Promise<T> {
   const timer = new AbortController()
-  const timeout = clock.sleep(remaining, timer.signal).then(() => { throw timeoutError() })
+  const candidates: Promise<T>[] = [work]
+  if (remaining !== null) candidates.push(clock.sleep(remaining, timer.signal).then(() => { throw timeoutError() }))
   let onAbort!: () => void
   const aborted = new Promise<never>((_resolve, reject) => {
     onAbort = () => reject(abortFailure())
     if (signal?.aborted === true) onAbort()
     else signal?.addEventListener('abort', onAbort, {once: true})
   })
-  try { return await Promise.race([work, timeout, aborted]) }
+  try { return await Promise.race([...candidates, aborted]) }
   finally { timer.abort(); signal?.removeEventListener('abort', onAbort) }
 }

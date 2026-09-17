@@ -47,7 +47,7 @@ function projectCommitSuccessText(
   operation: ConfirmedProjectOperation,
   code: string,
 ): string {
-  if (code !== 'committed') return '已确认，已提交并正在启动。'
+  if (code !== 'committed') return '正在启动任务。'
   if (operation.action === 'create') {
     return `已确认，已创建并切换到工作区 ${operation.workspace_display_name}。`
   }

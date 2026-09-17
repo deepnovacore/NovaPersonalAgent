@@ -279,7 +279,8 @@
                       "不改动业务逻辑",
                       "不涉及业务逻辑",
                       "不要修改业务逻辑",
-                      "不得改动任何业务逻辑"
+                      "不得改动任何业务逻辑",
+                  "不得改动业务逻辑"
                     ]
                   ]
                 }
@@ -823,6 +824,47 @@
           "expect": {
             "calls": [],
             "text": "required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "weekly-report-after-clarification",
+      "text": "我要记录我们公司所有人的周报。",
+      "context": "<active_project_context>\nworkspace=\"贪吃蛇\"\nsession=\"已有小游戏\"\n</active_project_context>\n当前用户内容 ref=conversation:1",
+      "disabled": [
+        "camera",
+        "search",
+        "knowledge"
+      ],
+      "steps": [
+        {
+          "expect": {
+            "calls": [],
+            "text": "required"
+          },
+          "user": "网页版就行。"
+        },
+        {
+          "expect": {
+            "calls": [
+              {
+                "name": "dispatch",
+                "args": {
+                  "executor": "codex"
+                },
+                "contains": {
+                  "instruction": [
+                    "周报"
+                  ],
+                  "source_refs": [
+                    "conversation:1",
+                    "conversation:2"
+                  ]
+                }
+              }
+            ],
+            "text": "forbidden"
           }
         }
       ]

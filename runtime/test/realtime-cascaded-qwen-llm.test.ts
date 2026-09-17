@@ -18,6 +18,32 @@ interface Capture {
   init?: RequestInit
 }
 
+test('tool SSE preserves incomplete lines across network chunks, including UTF-8 splits', async () => {
+  const call = {index: 0, id: 'call-1', function: {name: 'dispatch', arguments: JSON.stringify({instruction: '创建网页'})}}
+  const wire = new TextEncoder().encode([
+    `data: ${JSON.stringify({id: 'response-1', choices: [{delta: {tool_calls: [call]}}]})}\n\n`,
+    'data: {"id":"response-1","choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\n',
+    'data: [DONE]\n\n',
+  ].join(''))
+  for (const width of [1, 7, 31, wire.length]) {
+    const session = createQwenCascadedLlmFactory({
+      baseUrl: 'https://example.test', apiKey: 'synthetic', model: 'test', instructions: 'test',
+      fetchImpl: () => Promise.resolve(new Response(new ReadableStream<Uint8Array>({start(controller) {
+        for (let offset = 0; offset < wire.length; offset += width) controller.enqueue(wire.slice(offset, offset + width))
+        controller.close()
+      }}), {headers: {'content-type': 'text/event-stream'}})),
+    }).open()
+    const events = await collect(session.stream({inputs: [{kind: 'user_text', text: 'test'}],
+      tools: [{name: 'dispatch', parameters: {type: 'object'}}], signal: new AbortController().signal}))
+    assert.deepEqual(events, [
+      {kind: 'response_started', response_id: 'response-1'},
+      {kind: 'tool_call', item_id: 'call-1', call_id: 'call-1', name: 'dispatch', arguments: {instruction: '创建网页'}},
+      {kind: 'response_completed', response_id: 'response-1'},
+    ], `chunk width ${width}`)
+    await session.close()
+  }
+})
+
 async function collect(stream: AsyncIterable<CascadedLlmEvent>): Promise<CascadedLlmEvent[]> {
   const events: CascadedLlmEvent[] = []
   for await (const event of stream) events.push(event)
@@ -87,6 +113,7 @@ test('Qwen Chat Completions request and text SSE stream use the semantic contrac
       {role: 'user', content: '你好'},
     ],
     stream: true,
+    enable_thinking: false,
     stream_options: {include_usage: true},
   })
   assert.doesNotMatch(body, /dash-secret/u)
@@ -712,7 +739,7 @@ test('host narration reads only its fact while the next user turn retains conver
     workspaceContext: '旧工作区上下文', tools: [], signal}))
   const narration = JSON.stringify(requests[1])
   assert.doesNotMatch(String(requests[1]?.messages[0]?.content), /instructions/)
-  assert.match(String(requests[1]?.messages[0]?.content), /语音播报者/)
+  assert.match(String(requests[1]?.messages[0]?.content), /用第一人称/)
   assert.doesNotMatch(narration, /旧问题|原始任务|旧工作区/)
   assert.match(narration, /请求已失效/)
   await collect(llm.stream({inputs: [{kind: 'user_text', text: '继续讨论'}], tools: [], signal}))
@@ -720,4 +747,35 @@ test('host narration reads only its fact while the next user turn retains conver
   assert.match(conversation, /用户原始任务/)
   assert.match(conversation, /任务未能启动/)
   await llm.close()
+})
+
+
+test('thinking and buffered text do not start an idle TTS session', async () => {
+  for (const toolEnabled of [false, true]) {
+    let source!: ReadableStreamDefaultController<Uint8Array>
+    const body = new ReadableStream<Uint8Array>({start(controller) { source = controller }})
+    const session = createQwenCascadedLlmFactory({
+      baseUrl: 'https://dashscope.example/v1', apiKey: 'test-key', model: 'qwen3.8-max',
+      instructions: 'instructions', fetchImpl: () => Promise.resolve(new Response(body, {headers: {'content-type': 'text/event-stream'}})),
+    }).open()
+    const received: CascadedLlmEvent[] = []
+    const collecting = (async () => {
+      for await (const event of session.stream({inputs: [],
+        tools: toolEnabled ? [{name: 'dispatch', parameters: {type: 'object'}}] : [],
+        signal: new AbortController().signal})) received.push(event)
+    })()
+    const send = (delta: object, finish_reason?: string): void => source.enqueue(new TextEncoder().encode(
+      `data: ${JSON.stringify({id: 'response', choices: [{delta, ...(finish_reason ? {finish_reason} : {})}]})}\n\n`))
+    send({content: '', reasoning_content: 'thinking'})
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(received.length, 0)
+    send({content: '需要新建工作区吗？'})
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(received.length, toolEnabled ? 0 : 2)
+    send({}, 'stop')
+    source.close()
+    await collecting
+    assert.deepEqual(received.map(event => event.kind), ['response_started', 'text_delta', 'response_completed'])
+    await session.close()
+  }
 })

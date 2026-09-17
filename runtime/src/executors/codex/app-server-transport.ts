@@ -155,13 +155,23 @@ export interface SteerTransportResult {
   readonly written: boolean
 }
 
+export interface ProjectConnectionBinding {
+  readonly workspace: HostWorkspace
+  readonly resumeThreadId: string | null
+  readonly approvalController: ApprovalPort | null
+}
+
 export interface CodexAppServerTransport {
+  /** Warm the connection only; project authority is supplied after confirmation. */
+  prewarmConnection?(deadline: TransportDeadline): Promise<SafePreflightReport | null>
+  bindProject?(binding: ProjectConnectionBinding): void
   preflight(deadline: TransportDeadline): Promise<SafePreflightReport>
   prewarm(deadline: TransportDeadline): Promise<SafePreflightReport | null>
   run(
     input: RunInput,
     observer: TransportObserver,
     deadline: TransportDeadline,
+    completionDeadline?: TransportDeadline | null,
   ): Promise<TransportOutcome>
   steer(input: SteerInput, deadline: TransportDeadline): Promise<SteerTransportResult>
   close(reason?: 'shutdown' | 'cancel' | 'failure'): Promise<void>
@@ -277,12 +287,14 @@ export class CodexTransportError extends Error {
 }
 
 export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
-  readonly #config: ValidatedCodexAppServerLaunchConfig
+  #config: ValidatedCodexAppServerLaunchConfig
   readonly #processFactory: CodexProcessOwnerFactory
   readonly #credentials: CredentialProvider
   readonly #preflightRunner: CodexHostPreflightRunner
   readonly #schemaProbe: CodexLiveSchemaProbe
   readonly #scheduler: TransportScheduler
+  #connectionOnly = false
+  #projectBinding: ProjectConnectionBinding | null = null
   #session: Session | null = null
   #prewarmPromise: Promise<SafePreflightReport | null> | null = null
   #establishPromise: Promise<{
@@ -330,6 +342,32 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     return await this.#performPreflight(deadline)
   }
 
+  prewarmConnection(deadline: TransportDeadline): Promise<SafePreflightReport | null> {
+    if (!this.#config.persistent || !this.#config.preserveHome || this.#hadTurn || this.#runActive
+      || (!this.#connectionOnly && (this.#session !== null || this.#establishPromise !== null))) {
+      return Promise.reject(new CodexTransportError('config_not_isolated'))
+    }
+    this.#connectionOnly = true
+    return this.prewarm(deadline)
+  }
+
+  bindProject(binding: ProjectConnectionBinding): void {
+    if (!this.#connectionOnly || this.#closed || this.#runActive || this.#hadTurn || this.#projectBinding !== null) {
+      throw new CodexTransportError('busy')
+    }
+    // Validate the host's new binding now, but do not mutate an in-flight handshake.
+    this.#boundConfig(binding)
+    this.#projectBinding = Object.freeze({...binding})
+  }
+
+  #boundConfig(binding: ProjectConnectionBinding): ValidatedCodexAppServerLaunchConfig {
+    const config = {...this.#config}
+    delete config.approvalController
+    return validateLaunchConfig({...config, workspace: binding.workspace, resumeThreadId: binding.resumeThreadId,
+      generateTitles: binding.resumeThreadId === null,
+      ...(binding.approvalController === null ? {} : {approvalController: binding.approvalController})})
+  }
+
   prewarm(deadline: TransportDeadline): Promise<SafePreflightReport | null> {
     try {
       validateDeadline(deadline)
@@ -358,7 +396,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         clock: this.#scheduler.clock,
         workingInterval: this.#config.workingInterval,
       })
-      this.#bindThread(projection, session.threadResponse)
+      if (!this.#connectionOnly) this.#bindThread(projection, session.threadResponse)
       await this.#scheduler.yieldIo()
       if (session.failureCause !== null) throw session.failureCause
       if (session.unexpectedServerRequest) {
@@ -378,6 +416,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     input: RunInput,
     observer: TransportObserver,
     deadline: TransportDeadline,
+    completionDeadline: TransportDeadline | null = deadline,
   ): Promise<TransportOutcome> {
     let workOrder: string
     try {
@@ -399,11 +438,30 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
       if (this.#prewarmPromise !== null) {
         await runWithin(this.#prewarmPromise, deadline, 'adapter_timeout')
       }
+      if (this.#connectionOnly) {
+        if (this.#projectBinding === null) throw new CodexTransportError('config_not_isolated')
+        this.#config = this.#boundConfig(this.#projectBinding)
+        // The warm process was certified in its startup directory, not this approved target.
+        await this.#performPreflight(deadline)
+      }
       session = this.#usableWarmSession()
       if (session === null) {
         if (this.#session !== null) await this.#cleanup(this.#session, true)
         session = (await this.#startEstablish(deadline)).session
         this.#session = session
+      }
+      if (this.#connectionOnly) {
+        const configResponse = await this.#requestWithin(session, 'config/read', {
+          includeLayers: true, cwd: hostWorkspacePath(this.#config.workspace),
+        }, deadline)
+        validateEffectiveCodexConfig(configResponse, hostWorkspacePath(this.#config.workspace), {
+          allowReplacementInstructions: false, sharedHome: true,
+          ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
+          launchProfile: this.#config.launchProfile,
+        })
+        if (this.#config.apiKey !== null) assertApiKeyProvider(configResponse)
+        await this.#openThread(session, deadline)
+        this.#connectionOnly = false
       }
       session.used = true
       session.warm = false
@@ -490,7 +548,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
           observer.onThreadNamed?.(threadId, name)
         }).catch(() => undefined)
       }
-      completion = await this.#waitForCompletion(session, deadline)
+      completion = await this.#waitForCompletion(session, completionDeadline, deadline.signal)
     } catch (error) {
       const failure = safeTransportError(error, 'transport_lost')
       failureCode = failure.code
@@ -892,27 +950,31 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         try { assertApiKeyProvider(configResponse) }
         catch { throw new CodexTransportError('config_not_isolated') }
       }
-      const thread = this.#threadRequest()
-      let threadResponse: unknown
-      try {
-        threadResponse = await this.#requestWithin(session, thread.method, thread.params, deadline)
-      } catch (error) {
-        if (thread.method === 'thread/resume' && error instanceof AppServerRequestRejected) {
-          throw new CodexTransportError('resume_unavailable', error.diagnostic)
-        }
-        throw error
-      }
-      if (this.#config.apiKey !== null) {
-        try { assertApiKeyThread(threadResponse) }
-        catch { throw new CodexTransportError('config_not_isolated') }
-      }
-      ;(session as {threadResponse: unknown}).threadResponse = threadResponse
+      if (!this.#connectionOnly) await this.#openThread(session, deadline)
       return {report, session}
     } catch (error) {
       const cleanup = await this.#cleanup(session, true)
       if (cleanup.complete && this.#session === session) this.#session = null
       throw safeTransportError(error, 'transport_lost')
     }
+  }
+
+  async #openThread(session: Session, deadline: TransportDeadline): Promise<void> {
+    const thread = this.#threadRequest()
+    let threadResponse: unknown
+    try {
+      threadResponse = await this.#requestWithin(session, thread.method, thread.params, deadline)
+    } catch (error) {
+      if (thread.method === 'thread/resume' && error instanceof AppServerRequestRejected) {
+        throw new CodexTransportError('resume_unavailable', error.diagnostic)
+      }
+      throw error
+    }
+    if (this.#config.apiKey !== null) {
+      try { assertApiKeyThread(threadResponse) }
+      catch { throw new CodexTransportError('config_not_isolated') }
+    }
+    ;(session as {threadResponse: unknown}).threadResponse = threadResponse
   }
 
   async #validateMcpVisibility(session: Session, threadId: string, deadline: TransportDeadline): Promise<void> {
@@ -1234,14 +1296,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     onWritten?: () => void,
     observeSessionFailure = true,
   ): Promise<unknown> {
-    return await requestWithDeadline(
-      signal => session.rpc.request(method, params, {
-        signal,
-        ...(onWritten === undefined ? {} : {onWritten: () => { onWritten() }}),
-      }),
-      deadline,
-      observeSessionFailure ? session.failure.promise : undefined,
-    )
+    return this.#requestPreparedWithin(session, method, () => params, deadline, onWritten, observeSessionFailure)
   }
 
   async #requestPreparedWithin(
@@ -1250,15 +1305,25 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     prepare: () => Readonly<Record<string, unknown>>,
     deadline: TransportDeadline,
     onWritten?: () => void,
+    observeSessionFailure = true,
   ): Promise<unknown> {
-    return await requestWithDeadline(
-      signal => session.rpc.requestPrepared(method, prepare, {
-        signal,
-        ...(onWritten === undefined ? {} : {onWritten: () => { onWritten() }}),
-      }),
-      deadline,
-      session.failure.promise,
-    )
+    const started = Date.now()
+    try {
+      return await requestWithDeadline(
+        signal => session.rpc.requestPrepared(method, prepare, {
+          signal,
+          ...(onWritten === undefined ? {} : {onWritten: () => { onWritten() }}),
+        }),
+        deadline,
+        observeSessionFailure ? session.failure.promise : undefined,
+      )
+    } catch (error) {
+      if (error instanceof CodexTransportError && error.code === 'adapter_timeout') {
+        throw new CodexTransportError('adapter_timeout', {method, server_code: null,
+          elapsed_ms: Date.now() - started, message: 'The control request exceeded its deadline.'})
+      }
+      throw error
+    }
   }
 
   async #notifyWithin(
@@ -1270,17 +1335,16 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     await runWithin(session.rpc.notify(method, params), deadline, 'adapter_timeout')
   }
 
-  async #waitForCompletion(session: Session, deadline: TransportDeadline): Promise<TurnCompletion> {
+  async #waitForCompletion(session: Session, deadline: TransportDeadline | null, signal?: AbortSignal): Promise<TurnCompletion> {
     const completion = session.completion
     if (completion === null) throw new CodexTransportError('transport_lost')
-    return await runWithin(
-      Promise.race([
-        completion.promise,
-        session.failure.promise.then(error => Promise.reject(error)),
-      ]),
-      deadline,
-      'adapter_timeout',
-    )
+    const work = Promise.race([
+      completion.promise,
+      session.failure.promise.then(error => Promise.reject(error)),
+    ])
+    return deadline === null
+      ? await raceDeadline(work, REAL_SCHEDULER.clock, null, signal, () => new CodexTransportError('transport_lost'))
+      : await runWithin(work, deadline, 'adapter_timeout')
   }
 
   #usableWarmSession(): Session | null {

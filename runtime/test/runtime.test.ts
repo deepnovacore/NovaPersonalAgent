@@ -1955,3 +1955,19 @@ test('external dispatch resolves retained origin sequences without using array p
   )
   assert.equal(admitted.accepted, true)
 })
+
+
+test('an explicitly unbounded delegate does not schedule a total deadline', () => {
+  const unbounded = executorManifestSchema.parse({...manifest, ops: [{...manifest.ops[0], deadline_budget: null}]})
+  const runtime = new CoreRuntime({manifests: [unbounded], ids: new MonotonicIdFactory()})
+  const origin = appendTurn(runtime, 1, 'long operation')
+  const admitted = runtime.dispatchExternal({executor: 'slow_sim', op: 'set_light', request: {}, origin_ref: origin}, externalReason)
+  assert.equal(admitted.accepted, true)
+  assert.equal(runtime.inFlightDelegate(admitted.delegate_id!)?.deadline, null)
+  let event
+  while ((event = runtime.queue.popReady(1200)) !== undefined) {
+    assert.notEqual(event.kind, 'deadline')
+    runtime.apply(event)
+  }
+  assert.equal(runtime.inFlightDelegate(admitted.delegate_id!) !== undefined, true)
+})

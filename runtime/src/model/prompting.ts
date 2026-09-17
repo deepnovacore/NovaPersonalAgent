@@ -61,7 +61,7 @@ const SURROGATE_PROACTIVITY_POLICY: Readonly<Record<ProactivityPreset, readonly 
 const SURROGATE_DEFAULT_POLICY_START = '遇到 Codex 的 working progress，要区分“值得保留”和“值得现在打扰用户”。'
 const SURROGATE_DEFAULT_POLICY_END = 'floor=idle、信息新颖、相关或以后可能有用，都不能单独成为开口理由。'
 const SURROGATE_ORACLE_OUTPUT = '只输出 JSON：{"speak": true|false, "suggestion_id": "s-N"|null, "reason": "一句内部理由"}。'
-const SURROGATE_NODE_OUTPUT = '只输出 JSON：{"speak": true|false, "suggestion_id": "s-N"|null, "progress_class": "routine_delta"|"milestone"|"blocker"|"action_required"|null, "reason": "一句内部理由"}。'
+const SURROGATE_NODE_OUTPUT = '先在 reason 中概括用户已要求的功能，再指出 summary 中超出这些要求和 previous_summary 的新增信息；若没有新增，必须说明没有新增并保持沉默。若用户明确要求静默则说明其适用范围。最后按档位分类并决定是否播报。只输出 JSON：{"reason": "一句内部理由", "progress_class": "routine_delta"|"milestone"|"blocker"|"action_required"|null, "speak": true|false, "suggestion_id": "s-N"|null}。'
 
 /** Apply the user's proactivity choice at the model decision boundary. */
 export function surrogateSystemPrompt(preset: ProactivityPreset): string {
@@ -73,6 +73,7 @@ export function surrogateSystemPrompt(preset: ProactivityPreset): string {
   const selectedPolicy = [
     `<proactivity_policy preset="${preset}">`,
     '静默偏好必须有当前 trusted_user 原话作为依据；系统策略中的例子不是用户要求。没有这类用户原话时，不得臆造用户要求静默。明确的用户静默要求优先于下方档位策略。',
+    '判断静默要求的范围时，结合用户原话所回应的那轮对话：拒绝当前讲解、补充建议或让当前话语停止，不等于禁止后续任务进度。只有用户明确将静默范围指向任务进度或后续播报时才据此压掉进度；助手自行承诺只在完成后说结果不能扩大用户授权的范围。',
     '只分类 suggestion.summary 相对 suggestion.previous_summary 和用户已知目标/约束新增的事实；首次执行器摘要如果只是重述已确认需求或承诺开始工作，同样保持沉默，不能因为累计摘要仍含旧里程碑而重复播报。',
     '只有 Codex working progress 才填写 progress_class；其他 suggestion 必须填 null，且 null 是合法值。',
     'Codex working progress 的 progress_class 必须是 routine_delta、milestone、blocker、action_required 之一；',
@@ -190,7 +191,8 @@ export function renderContextSnapshot(view: ContextView, includeTrigger = false)
         `- ${entry.delegate_id}：${entry.what}`
         + `（起于 t=${pythonFloat(entry.dispatched_at)}，`
         + `预计 t=${pythonFloat(entry.eta)} 回来，`
-        + `最迟 t=${pythonFloat(entry.deadline)}；因 ${entry.origin_ref} 而派）`,
+        + (entry.deadline === null ? '无整单期限' : `最迟 t=${pythonFloat(entry.deadline)}`)
+        + `；因 ${entry.origin_ref} 而派）`,
       )
     }
   } else {

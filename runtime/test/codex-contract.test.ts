@@ -5,7 +5,7 @@ import {
   CODEX_LIVE_MANIFEST,
   CODEX_PROJECT_APPROVAL_MANIFEST,
   CODEX_PROJECT_MANIFEST,
-  INTERNAL_CODEX_RUN_DEADLINE,
+  CODEX_STARTUP_DEADLINE,
   classifyCodexResult,
   createCodexRunEnvelope,
   createInitialCodexStatus,
@@ -90,7 +90,7 @@ test('live and project manifests pin exact immutable public operations and polic
     assert.equal(Object.isFrozen(manifest.ops), true)
     assert.equal(manifest.model_visibility, 'hidden', 'every Codex variant is host-controlled')
   }
-  assert.equal(INTERNAL_CODEX_RUN_DEADLINE, 540)
+  assert.equal(CODEX_STARTUP_DEADLINE, 540)
 })
 
 test('the generic runtime package root does not load concrete Codex ownership', () => {
@@ -123,7 +123,7 @@ test('project manifests carry approvals as a flag and pin run/steer/cancel param
     required: ['work_id'],
     additionalProperties: false,
   })
-  assert.deepEqual([run, steer, status, cancel].map(op => op?.deadline_budget), [600, 30, 5, 30])
+  assert.deepEqual([run, steer, status, cancel].map(op => op?.deadline_budget), [null, 30, 5, 30])
   assert.deepEqual([run, steer, status, cancel].map(op => op?.sync_result), [false, false, true, true])
   assert.deepEqual(run?.sensitive_params, ['work_order'])
   assert.deepEqual(steer?.sensitive_params, ['instruction'])

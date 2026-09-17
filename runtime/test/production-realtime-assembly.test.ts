@@ -101,7 +101,7 @@ test('production selector supplies the paired coding factory and descriptor only
     assert.equal(actual, expected)
     assert.equal(typeof (selected?.codingAgentControllerFactory as {readonly create?: unknown} | undefined)?.create, 'function')
     assert.deepEqual(selected?.agentDescriptors, [{
-      name: 'codex', summary: '在已配置的项目工作区里执行编码任务（改代码、修 bug、写测试、重构）',
+      name: 'codex', summary: '管理项目工作区和会话（新建、选择、切换），以及执行编码、运行、验证任务；只切换而不编码也是可提交的操作',
       ownedChannels: ['workspace_coder'],
     }])
   }
@@ -125,7 +125,7 @@ test('production integrated composition registers the default coding controller 
   try {
     assert.deepEqual(realtime.tools.agent_descriptors.find(descriptor => descriptor.name === 'codex'), {
       name: 'codex',
-      summary: '在已配置的项目工作区里执行编码任务（改代码、修 bug、写测试、重构）',
+      summary: '管理项目工作区和会话（新建、选择、切换），以及执行编码、运行、验证任务；只切换而不编码也是可提交的操作',
       ownedChannels: ['codex'],
     })
     assert.equal(realtime.service.agentNameForChannel('codex'), 'codex')

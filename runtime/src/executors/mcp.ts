@@ -107,7 +107,7 @@ export class McpExecutorAdapter implements ExecutorAdapter {
     const count = counts.get(op) ?? 0
     if (count >= policy.maxCallsPerTurn) return failure('max_calls_per_turn')
     counts.set(op, count + 1)
-    const timeoutMs = Math.min(policy.timeoutMs, Math.max(0, (context.delegate.deadline - context.clock.now()) * 1000))
+    const timeoutMs = Math.min(policy.timeoutMs, Math.max(0, ((context.delegate.deadline ?? (context.clock.now() + policy.timeoutMs / 1000)) - context.clock.now()) * 1000))
     if (timeoutMs <= 0 || context.signal.aborted) return failure('timeout', 'unknown')
     try {
       context.progress({phase: 'started', internal_activity: 0, elapsed: 0, summary: null})

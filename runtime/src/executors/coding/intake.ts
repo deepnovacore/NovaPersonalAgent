@@ -190,7 +190,7 @@ export class IntakeController {
     }
     this.#assessPending = true
     this.#pump()
-    this.#options.fact(this.#session, '正在安排任务。', 'accepted')
+    this.#options.fact(this.#session, '马上安排。', 'accepted')
     return 'intake_opened'
   }
 
@@ -347,6 +347,10 @@ export class IntakeController {
       // Local onset precedes final ASR and does not advance the intake revision yet.
       if (this.#userInputPending) return
       if (kind === 'steer') {
+        if (!this.#options.running().some(work => work.project === project)) {
+          this.#route(current, 'code=no_active_turn：目标工作区没有正在执行的任务，本次追加要求未执行。')
+          return
+        }
         const wanted = this.#launchWanted(current)
         const admission = await this.#options.steer(current, project, userText, wanted)
         if (!wanted()) return

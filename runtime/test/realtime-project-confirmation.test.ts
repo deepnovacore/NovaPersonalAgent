@@ -364,7 +364,7 @@ test('a workspace creation with work starts with the approved concise confirmati
 
   assert.equal(
     proposal.confirmation_prompt,
-    '是否创建工作区“timer-app”并开始任务？请确认或取消。',
+    '请问是否创建工作区“timer-app”并开始任务？',
   )
 })
 
@@ -382,7 +382,7 @@ test('workspace reuse has its own exact confirmation and a public pill action', 
 
   assert.equal(
     proposal.confirmation_prompt,
-    '是否使用现有工作区“timer-app”并开始任务？请确认或取消。',
+    '是否使用现有工作区“timer-app”并开始任务？',
   )
   // Spec 08 (2026-09-04 decision): every change of the active project confirms, so each action names its pill.
   assert.equal(controller.view.pending_action, 'reuse_workspace')
@@ -469,7 +469,7 @@ test('public view and prompt expose labels but no private bindings', () => {
     origin_ref: 'user:1',
   })
 
-  assert.equal(proposal.confirmation_prompt, '准备切换到天气看板，并继续 Session“登录修复”，请确认或取消。')
+  assert.equal(proposal.confirmation_prompt, '是否切换到“天气看板”，继续“登录修复”会话？')
   assert.deepEqual(controller.view, {
     pending_confirmation: true,
     pending_confirmation_busy: false,

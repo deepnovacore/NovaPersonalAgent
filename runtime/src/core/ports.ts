@@ -16,7 +16,7 @@ export const delegateRequestSchema = z.object({
 export const delegateSchema = delegateRequestSchema.extend({
   origin_ref: memoryRefSchema,
   delegate_id: z.string().min(1),
-  deadline: z.number().finite(),
+  deadline: z.number().finite().nullable(),
   routing_class: routingClassSchema,
   dispatched_at: z.number().finite(),
 }).strict()
@@ -96,7 +96,7 @@ export const opSpecSchema = z.object({
   params: z.record(z.string(), jsonValueSchema),
   readonly: z.boolean().default(false),
   confirm: z.boolean().default(false),
-  deadline_budget: z.number().finite().positive().default(30),
+  deadline_budget: z.number().finite().positive().nullable().default(30),
   verifies: z.array(z.string()).default([]),
   sensitive_params: z.array(z.string()).default([]),
   sync_result: z.boolean().default(false),

@@ -126,6 +126,7 @@ export type EndpointingCapabilityFactory = (input: {
 }) => Promise<PreparedEndpointingCapability>
 
 export function createEndpointingCapabilityFactory(options: {
+  readonly resourcesPath?: string
   readonly executor?: LiveKitExecutor
   readonly clock?: Clock
 } = {}): EndpointingCapabilityFactory {
@@ -146,6 +147,7 @@ export function createEndpointingCapabilityFactory(options: {
       signal: input.signal,
       agentsLoader: loader,
       executor,
+      ...(options.resourcesPath === undefined ? {} : {resourcesPath: options.resourcesPath}),
       ...(options.clock === undefined ? {} : {clock: options.clock}),
       ...(input.telemetry === undefined ? {} : {telemetry: input.telemetry}),
     })
@@ -175,6 +177,7 @@ export interface EndpointingCapabilityCache {
 }
 
 export interface EndpointingCapabilityOptions {
+  readonly resourcesPath?: string
   readonly executor?: LiveKitExecutor
   readonly signal: AbortSignal
   readonly telemetry?: RealtimeTelemetry
@@ -353,6 +356,7 @@ export async function probeEndpointingCapability(
   const supported = isSupportedRuntime(runtime, libc)
   const key = [
     AGENTS_VERSION,
+    options.resourcesPath ?? 'default-resources',
     runtime.platform,
     runtime.arch,
     libc,
@@ -469,7 +473,7 @@ async function probeUnderDeadline(
   }
 
   const fixtureSet = options.fixtures === undefined
-    ? await loadCapabilityFixtures(signal)
+    ? await loadCapabilityFixtures(signal, options.resourcesPath)
     : copyAndValidateFixtures(options.fixtures)
   if (fixtureSet === null) {
     return unavailableCapability(runtime.platform, runtime.arch, 'inconclusive')
@@ -1036,10 +1040,11 @@ function copyAndValidateFixtures(
 
 async function loadCapabilityFixtures(
   signal: AbortSignal,
+  configuredResourcesPath?: string,
 ): Promise<EndpointingCapabilityFixtures | null> {
   if (signal.aborted) throw ABORTED
   const relative = join('fixtures', 'realtime', 'volcengine', 'v1', 'endpointing')
-  const resourcesPath = (process as NodeJS.Process & {readonly resourcesPath?: unknown}).resourcesPath
+  const resourcesPath = configuredResourcesPath ?? (process as NodeJS.Process & {readonly resourcesPath?: unknown}).resourcesPath
   const candidates = typeof resourcesPath === 'string' && resourcesPath !== ''
     ? [join(resourcesPath, 'endpointing', 'volcengine-v1')]
     : [

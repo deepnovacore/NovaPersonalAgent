@@ -684,6 +684,29 @@ test('a packaged runtime loads only its fixed resourcesPath endpointing assets',
   }
 })
 
+test('desktop configured resources override the development Electron resources directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'nova-configured-endpointing-'))
+  const directory = join(root, 'endpointing', 'volcengine-v1')
+  const original = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
+  try {
+    await mkdir(directory, {recursive: true})
+    const loaded = await fixtures()
+    await writeFile(join(directory, 'speech-16k-s16le.pcm'), loaded.speech)
+    await writeFile(join(directory, 'silence-16k-s16le.pcm'), loaded.silence)
+    Object.defineProperty(process, 'resourcesPath', {configurable: true, value: join(root, 'electron')})
+    const created = createSurface({vad: 'differentiated'})
+    const options = {executor: new RecordingExecutor(), signal: new AbortController().signal,
+      agentsLoader: loaderFor(created.surface, created.state), clock: new ProbeClock(),
+      runtime: SUPPORTED_RUNTIME, cache: createEndpointingCapabilityCache()}
+    assert.equal((await probeEndpointingCapability(options)).vad.available, false)
+    assert.equal((await probeEndpointingCapability({...options, resourcesPath: root})).vad.available, true)
+  } finally {
+    if (original === undefined) delete (process as NodeJS.Process & {resourcesPath?: string}).resourcesPath
+    else Object.defineProperty(process, 'resourcesPath', original)
+    await rm(root, {recursive: true, force: true})
+  }
+})
+
 test('unsupported platform and musl Linux fail before package loading', async () => {
   for (const runtime of [
     {platform: 'darwin', arch: 'ppc64'},

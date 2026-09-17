@@ -296,9 +296,9 @@
               </select>
             </div>
             <div class="field">
-              <label for="cascadedLlmModel">当前模型</label>
-              <datalist id="cascaded-model-presets"></datalist>
-              <input type="text" id="cascadedLlmModel" list="cascaded-model-presets" maxlength="64" autocomplete="off" spellcheck="false">
+              <label for="cascadedLlmModelPreset">当前模型</label>
+              <select id="cascadedLlmModelPreset"></select>
+              <input type="text" id="cascadedLlmModel" aria-label="自定义对话模型 ID" placeholder="输入模型 ID" maxlength="64" autocomplete="off" spellcheck="false" hidden>
             </div>
           </div>
           <div class="pipeline-card">
