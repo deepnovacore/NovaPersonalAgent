@@ -1052,12 +1052,13 @@ export class ProjectConfirmationFlow {
       })
     } catch (failure) {
       if (intakeOperation) this.#ports.intake()?.settleConfirmed({accepted: false, code: 'callback_failed'})
+      if (intakeOperation) this.#ports.projectConfirmation?.rejectConfirmed(operation)
       if (isAbort(failure)) {
         this.#projectConfirmationCommittingLifecycles.delete(lifecycleId)
         this.#projectConfirmationExpiryFactOwners.delete(lifecycleId)
         throw failure
       }
-      this.#ports.projectConfirmation?.rollbackConfirmed(operation)
+      if (!intakeOperation) this.#ports.projectConfirmation?.rollbackConfirmed(operation)
       this.#ports.telemetry?.record(this.#ports.projectConfirmation?.pending === true
         ? 'project_confirmation.commit_rollback'
         : 'project_confirmation.commit_settled', {
@@ -1069,7 +1070,7 @@ export class ProjectConfirmationFlow {
       })
       return this.#finishConfirmedProjectCommit(lifecycleId, {
         state: 'failed',
-        text: '已确认，但操作未执行。',
+        text: intakeOperation ? '' : '已确认，但操作未执行。',
       })
     }
   }

@@ -9,6 +9,7 @@ import {ProjectConfirmationController} from '../src/projects/project-confirmatio
 import {renderWorkOrder, workOrderSchema} from '../src/executors/coding/work-order.js'
 import {ProjectResolutionError, type CoordinatorDecision, type IntakeTarget} from '../src/executors/coding-executor.js'
 import {validateCodexRequest} from '../src/executors/codex/contract.js'
+import {GatewayError} from '../src/model/model-gateway.js'
 
 const stated = (note: string) => ({state: 'stated' as const, note})
 const missing = {state: 'missing' as const, note: ''}
@@ -265,7 +266,8 @@ test('intake assess is single-flight; stale and malformed output cannot speak or
   await broken.intake.settled()
   broken.intake.open(request, 'Try again', 'u2', 'e')
   await broken.intake.settled()
-  assert.equal(broken.intake.view?.outcome, 'abandoned')
+  assert.equal(broken.intake.view?.state, 'failed')
+  assert.equal(broken.intake.view?.outcome, null)
   assert.equal(broken.dispatched.length, 0)
 })
 
@@ -784,7 +786,7 @@ test('an unrelated completed frontend turn releases paused work without rewritin
 test('accepted dispatch emits immediate feedback once and cancellation invalidates it', () => {
   const h = harness({models: {assess: () => new Promise(() => { /* deliberately pending */ })}})
   h.intake.open(request, 'Build a page', 'conversation:1', '1')
-  assert.deepEqual(h.facts, ['马上安排。'])
+  assert.deepEqual(h.facts, ['让我先梳理一下计划。'])
   const s = h.intake.view!
   const event = `intake:${s.intake_id}:${s.revision}:accepted`
   assert.equal(h.intake.factEligible(event, 1), true)
@@ -805,4 +807,205 @@ test('idle workspaces do not advertise or admit steer, even if a model invents i
   assert.equal(h.steered.length, 0)
   assert.equal(h.dispatched.length, 0, 'the host must not invent a replacement operation')
   assert.match(h.facts.at(-1)!, /code=no_active_turn/)
+})
+
+test('transient assessment failure retries the same requirement and dispatches once', async () => {
+  let calls = 0
+  const h = harness({models: {assess: input => {
+    if (++calls === 1) return Promise.reject(new GatewayError('HTTPStatus503'))
+    return Promise.resolve(assessment(input))
+  }}})
+  h.intake.open(request, 'Fix empty password', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.outcome, 'dispatched')
+  assert.equal(h.dispatched.length, 1)
+  assert.equal(calls, 2)
+  assert.ok(!h.facts.some(text => text.includes('请补充') || text.includes('需求已结束')))
+})
+
+test('exhausted service failures retain requirements and only structured dispatch resumes them', async () => {
+  let unavailable = true, calls = 0
+  let resumed: Readonly<Record<string, unknown>> | undefined
+  const failures: unknown[] = []
+  const h = harness({record: (_s, kind, data) => { if (kind === 'intake.failure') failures.push(data) }, models: {
+    assess: input => {
+      calls++
+      if (unavailable) return Promise.reject(new GatewayError('HTTPStatus503'))
+      resumed = input
+      return Promise.resolve(assessment(input))
+    },
+  }})
+  h.intake.open({...request, source_quotes: ['original user goal']}, 'Fix empty password', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(h.intake.view?.outcome, null)
+  assert.equal(h.intake.preparing, false)
+  assert.equal(calls, 2)
+  assert.equal(failures.length, 2)
+  assert.match(h.facts.at(-1)!, /原需求已保留/)
+  h.intake.userInputStarted()
+  h.intake.userInputEnded()
+  h.intake.userResponseCompleted()
+  await h.intake.settled()
+  assert.equal(calls, 2, 'unrelated conversation must not restart an unavailable service')
+  unavailable = false
+  h.intake.open(request, 'Continue', 'u2', 'e')
+  await h.intake.settled()
+  assert.equal(h.dispatched.length, 1)
+  assert.equal(resumed?.opening, 'Fix empty password')
+  assert.deepEqual(resumed?.source_quotes, ['original user goal'])
+  assert.deepEqual(resumed?.turns, [{question: null, answer: 'Continue'}])
+})
+
+test('authentication failures pause without retry or blaming the user', async () => {
+  let calls = 0
+  const failures: unknown[] = []
+  const h = harness({record: (_s, kind, data) => { if (kind === 'intake.failure') failures.push(data) }, models: {
+    assess: () => { calls++; return Promise.reject(new GatewayError('HTTPStatus401')) },
+  }})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(calls, 1)
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.deepEqual(failures, [{stage: 'assess', reason: 'authentication', attempt: 1, retrying: false}])
+  assert.match(h.facts.at(-1)!, /配置/)
+})
+
+test('plan generation retries independently but admission exceptions never retry', async () => {
+  let assessments = 0, plans = 0, admissions = 0
+  const h = harness({models: {
+    assess: input => { assessments++; return Promise.resolve(assessment(input)) },
+    plan: input => ++plans === 1 ? Promise.reject(new GatewayError('HTTPStatus429')) : Promise.resolve(plan(input)),
+  }, dispatch: () => { admissions++; throw new Error('receipt lost after admission') }})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(assessments, 1)
+  assert.equal(plans, 2)
+  assert.equal(admissions, 1)
+  assert.equal(h.intake.view?.state, 'dispatch_unknown')
+  assert.match(h.facts.at(-1)!, /可能已开始/)
+  assert.doesNotMatch(h.facts.at(-1)!, /尚未执行/)
+  h.intake.open(request, 'Try again', 'u2', 'e')
+  h.intake.userInputStarted()
+  h.intake.userResponseCompleted()
+  await h.intake.settled()
+  assert.equal(admissions, 1)
+})
+
+for (const action of ['cancel', 'revise', 'interrupt'] as const) {
+  test(`a ${action} during retry backoff cannot launch the old requirement`, async () => {
+    let failed!: () => void
+    const failure = new Promise<void>(resolve => { failed = resolve })
+    const revisions: unknown[] = []
+    const h = harness({record: (_s, kind) => { if (kind === 'intake.failure') failed() }, models: {
+      assess: input => {
+        revisions.push(input.revision)
+        if (revisions.length === 1) return Promise.reject(new GatewayError('HTTPStatus503'))
+        return Promise.resolve(assessment(input))
+      },
+    }})
+    h.intake.open(request, 'Fix it', 'u1', 'e')
+    // The old implementation has only the diagnostic, no durable failure record.
+    await Promise.race([failure, h.intake.settled()])
+    if (action === 'cancel') h.intake.cancel()
+    else if (action === 'revise') h.intake.open(request, 'Fix the new requirement', 'u2', 'e')
+    else h.intake.userInputStarted()
+    await h.intake.settled()
+    assert.deepEqual(revisions, action === 'revise' ? [1, 2] : [1])
+    assert.equal(h.dispatched.length, action === 'revise' ? 1 : 0)
+    if (action === 'interrupt') {
+      h.intake.userInputEnded()
+      h.intake.userResponseCompleted()
+      await h.intake.settled()
+      assert.equal(h.dispatched.length, 1)
+    }
+  })
+}
+
+test('a lost confirmed admission receipt remains unknown and cannot be re-confirmed', async () => {
+  const h = harness({settings: {clarification_depth: 'balanced', plan_readback: 'confirm'}})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await h.intake.settled()
+  const operation = h.confirmation.acceptDirectDecision({proposalId: h.intake.view!.proposal_id!, confirmed: true}).operation!
+  assert.equal(h.intake.beginConfirmed(operation), true)
+  h.intake.settleConfirmed({accepted: false, code: 'callback_failed'})
+  assert.equal(h.intake.view?.state, 'dispatch_unknown')
+  assert.match(h.facts.at(-1)!, /可能已开始/)
+  assert.equal(h.intake.beginConfirmed(operation), false)
+})
+
+test('a noncooperative model hits the deadline without dispatch and ignores its late result', async () => {
+  const clock = new VirtualClock()
+  let release!: (value: unknown) => void
+  const h = harness({clock, models: {assess: () => new Promise(resolve => { release = resolve })}})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  clock.advanceTo(30)
+  await h.intake.settled()
+  assert.equal(h.intake.view?.state, 'failed')
+  release(assessment({intake_id: h.intake.view.intake_id, revision: 1}))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.dispatched.length, 0)
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(clock.waiterCount(), 0)
+})
+
+test('a spoken interruption during steering does not discard an accepted receipt', async () => {
+  let release!: (value: {accepted: boolean; delegate_id: string}) => void
+  let entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const h = harness({running: () => [{work_id: 'running', project: 'Project', title: 'Task'}],
+    models: {assess: input => Promise.resolve(assessment(input, {kind: 'steer'}))},
+    steer: () => { entered(); return new Promise(resolve => { release = resolve }) },
+  })
+  h.intake.open(request, 'Update the task', 'u1', 'e')
+  await started
+  h.intake.userInputStarted()
+  release({accepted: true, delegate_id: 'running'})
+  await h.intake.settled()
+  assert.equal(h.intake.view?.outcome, 'routed')
+  assert.equal(h.intake.preparing, false)
+})
+
+test('speech pauses preserve the failed assessment retry budget', async () => {
+  let calls = 0
+  let failed!: () => void
+  const firstFailure = new Promise<void>(resolve => { failed = resolve })
+  const h = harness({record: (_s, kind) => { if (kind === 'intake.failure') failed() }, models: {
+    assess: () => { calls++; return Promise.reject(new GatewayError('HTTPStatus503')) },
+  }})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await firstFailure
+  h.intake.userInputStarted()
+  await h.intake.settled()
+  h.intake.userResponseCompleted()
+  await h.intake.settled()
+  assert.equal(calls, 2)
+  assert.equal(h.intake.view?.state, 'failed')
+})
+
+test('stuck evidence retrieval times out and aborts without launching', async () => {
+  const clock = new VirtualClock()
+  let entered!: () => void
+  let signal!: AbortSignal
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const h = harness({clock, attachEvidence: (_order, _workspace, abortSignal) => {
+    signal = abortSignal; entered(); return new Promise(() => { /* deliberately noncooperative */ })
+  }})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await started
+  clock.advanceTo(30)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(signal.aborted, true)
+  assert.equal(h.dispatched.length, 0)
+})
+
+test('failed proposal delivery invalidates its pending confirmation', async () => {
+  const h = harness({settings: {clarification_depth: 'balanced', plan_readback: 'confirm'},
+    fact: (session) => { if (session.proposal_id !== null) throw new Error('delivery unavailable') },
+  })
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(h.intake.view?.proposal_id, null)
 })

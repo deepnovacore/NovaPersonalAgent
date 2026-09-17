@@ -57,7 +57,7 @@ const agentWorkSchema = z.object({
   title: z.string().min(1).max(120),
 }).strict()
 const intakeStateSchema = z.enum([
-  'open', 'clarifying', 'ready_to_plan', 'planning', 'readback', 'committing', 'closed',
+  'open', 'clarifying', 'ready_to_plan', 'planning', 'readback', 'committing', 'failed', 'dispatch_unknown', 'closed',
 ])
 const visionChannelSchema = z.enum(['watch', 'guard'])
 

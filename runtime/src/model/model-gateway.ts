@@ -77,11 +77,11 @@ export interface ModelGateway {
 
 /** A provider failure whose message carries only a stable classification. */
 export class GatewayError extends Error {
-  constructor(classification: string) {
+  constructor(readonly classification: string) {
     // Python interpolates the CPython exception type name here. That name cannot
     // exist in Node, so this uses a stable classification instead, the same choice
-    // made for ExecutorContractError. The text is diagnostic only and never becomes
-    // durable evidence: a model port failure reaches the reducer as `port_failure`.
+    // made for ExecutorContractError. Intake records only fixed failure categories;
+    // a model port failure reaches the reducer as `port_failure`.
     super(`模型请求失败（${classification}）`)
     this.name = 'GatewayError'
   }
@@ -390,9 +390,9 @@ export class OpenAIModelGateway implements ModelGateway {
 
 function classify(error: unknown): string {
   if (error instanceof GatewayError) {
-    const match = /（(.+)）/u.exec(error.message)
-    return match?.[1] ?? 'GatewayError'
+    return error.classification
   }
+  if (error instanceof SyntaxError || error instanceof z.ZodError) return 'InvalidResponse'
   if (error instanceof Error) {
     return error.name === 'TimeoutError' || error.name === 'AbortError'
       ? error.name

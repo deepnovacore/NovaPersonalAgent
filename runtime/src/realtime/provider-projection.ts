@@ -135,8 +135,9 @@ export class ProviderProjection {
   #executorState: ExecutorState = 'idle'
 
  readonly #lastProgressSummary = new Map<string, string>()
+ readonly #startedDelegates = new Set<string>()
  constructor(private readonly ports: ProviderProjectionPorts) {}
- reset(): void { this.#lastProgressSummary.clear() }
+ reset(): void { this.#lastProgressSummary.clear(); this.#startedDelegates.clear() }
 /** Resolve synchronous results before ordinary channel projection can consume them. */
 projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
     if (!currentConversation) {
@@ -209,6 +210,7 @@ projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
       elapsed: 0,
     })
     this.#lastProgressSummary.delete(delegateId)
+    this.#startedDelegates.delete(delegateId)
     this.publishExecutorState()
   }
 
@@ -281,6 +283,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     // A settled delegate leaves no dedup residue behind, or a later run of the same delegate id would
     // inherit a summary it never produced.
     this.#lastProgressSummary.delete(delegateId)
+    this.#startedDelegates.delete(delegateId)
     this.publishExecutorState()
     this.ports.queueHostItem(hostFactIntent({
       kind: 'final',
@@ -390,10 +393,14 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       elapsed: payload.elapsed,
     })
     this.publishExecutorState()
-    // Intake owns the immediate acknowledgement; executor startup updates UI only.
-    if (coding && payload.phase === 'started') return
+    // Preparation and actual execution are different lifecycle facts. Deduplicate by delegate,
+    // never by spoken text, and let normal owner/expiry fences suppress obsolete startup facts.
+    if (coding && payload.phase === 'started') {
+      if (this.#startedDelegates.has(payload.delegate_id)) return
+      this.#startedDelegates.add(payload.delegate_id)
+    }
     if (
-      payload.phase === 'started'
+      !coding && payload.phase === 'started'
       && this.ports.hasSemanticAcknowledgement(`background:${payload.delegate_id}`)
     ) return
     // A monitor's periodic heartbeat is operational state, not a new user-facing event. Speaking it
@@ -406,7 +413,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
 
     let content: string
     if (payload.phase === 'started') {
-      content = `${displayName} 已开始处理这个任务。`
+      content = coding ? `需求梳理完毕，交给 ${manifest.display_name} 执行。` : `${displayName} 已开始处理这个任务。`
     } else if (summary !== null) {
       // Same-summary skip: state registration already happened, only the host injection is
       // suppressed. A summary-less event keeps the field template and is never deduped this way.
@@ -417,7 +424,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       content = `${displayName} 仍在处理这个任务，目前已推进 ${payload.internal_activity} 个步骤。`
     }
     const eventId = `progress:${payload.delegate_id}:${payload.phase}:${payload.internal_activity}`
-    if (coding) {
+    if (coding && payload.phase === 'working') {
       // Coalesce queued updates per task; the latest fact retains existing owner/floor/expiry fences.
       if (this.ports.codingProgressNarration.mode === 'continuous') {
         this.ports.retireDelegateHostEvents(payload.delegate_id)
@@ -467,6 +474,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     })
     // CP1: a settled delegate leaves no dedup residue behind.
     this.#lastProgressSummary.delete(payload.delegate_id)
+    this.#startedDelegates.delete(payload.delegate_id)
     this.publishExecutorState()
     if (
       isMonitorPolicy(manifest.policy)

@@ -6,10 +6,26 @@ import {
   CODEX_AGENT_SUMMARY
 } from '../src/executors/codex/contract.js'
 import {IntakeController} from '../src/executors/coding/intake.js'
+import {GatewayError} from '../src/model/model-gateway.js'
 import type {ResponseOrigin} from '../src/realtime/protocol.js'
 import type {RealtimeService} from '../src/realtime/service.js'
 import {type ServiceProvider} from '../src/realtime/service.js'
 import {dispatchTurn, hostFact, intakePorts, parkedStream, realtimeServiceHarness, speak, twoTurns} from './support/realtime-service-harness.js'
+
+test('intake failures reach exported telemetry without raw provider errors', async () => {
+  const {service, telemetry} = realtimeServiceHarness('pipeline', {agent: true, intake: intakePorts({
+    models: {assess: () => Promise.reject(new GatewayError('HTTPStatus401')),
+      plan: () => Promise.resolve({}), resolveCancelTarget: () => Promise.resolve(null)},
+  })})
+  await service.connect()
+  await dispatchTurn(service, 'dispatch', {executor: 'codex', instruction: 'Build a page', origin_ref: 'conversation:1'})
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(service.intakeSession?.state, 'failed')
+  const failure = telemetry.find(event => event.kind === 'intake.failure')
+  assert.deepEqual(failure?.payload, {intake_id: service.intakeSession.intake_id, revision: 1,
+    stage: 'assess', reason: 'authentication', attempt: 1, retrying: false})
+  await service.close()
+})
 
 
 test('a tool call is admitted against the user turn that justifies it', async () => {

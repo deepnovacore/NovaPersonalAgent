@@ -258,6 +258,13 @@ export class RealtimeService {
     const projectConfirmation = options.projectConfirmation
     const intake: IntakeOptions | undefined = options.intake === undefined ? undefined : {
       ...options.intake,
+      clock: this.#clock,
+      record: (intake, kind, data) => {
+        if (kind === 'intake.failure') this.#telemetry?.record(kind, {
+          intake_id: intake.intake_id, revision: intake.revision, ...data,
+        })
+        options.intake!.record(intake, kind, data)
+      },
       onStateChanged: () => this.#projection.publishExecutorState(),
       idFactory: this.#idFactory,
       dispatch: async (intake, stillWanted) => {
