@@ -224,6 +224,7 @@ MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何�
 | `NOVA_AUDIO_AGENT_SEARCH_PROVIDER` | `search` | 否 | tavily | CLI 或 CI 搜索提供方覆盖。 |
 | `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` | `search` | 否 | 无 | 网页搜索 MCP 地址覆盖；选择 MCP 且未设置时使用已核对的百炼预设。 |
 | `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` | `search` | 否 | web_search | 网页搜索 MCP 工具覆盖（通用默认 web_search；百炼预设 bailian_web_search）。 |
+| `NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED` | `core` | 否 | true | 逐段语音回答前检索少量相关记忆，可设为 false 关闭。 |
 | `NOVA_AUDIO_AGENT_KNOWLEDGE_PATH` | `core` | 否 | ~/.nova-audio-agent/knowledge.sqlite | 知识库 SQLite 数据库路径。 |
 | `NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER` | `core` | 否 | dashscope | 知识库 embedding 提供方。 |
 | `NOVA_AUDIO_AGENT_EMBEDDING_MODEL` | `core` | 否 | text-embedding-v4 | 知识库 embedding 模型。 |

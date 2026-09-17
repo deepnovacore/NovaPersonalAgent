@@ -4,7 +4,8 @@
 > 转为**拥有持续记忆、能发现潜在需求并跟进事情的通用个人 Agent**：用户可以打字、说话，
 > 也可以让它在后台工作。本系列锚定三件事——交互（含 push-and-pull 主动交互与需求发现）、
 > 记忆、前后脑协作——并把语音降为入口之一。系列只定边界与验收；实现按里程碑推进，
-> 里程碑从 M5 续编号，双轨并行、各自小步。**2026-09-11 已授权按 M5–M7 实施；M8 及之后移至 v0.4.0。**
+> 里程碑从 M5 续编号，双轨并行、各自小步。**2026-09-11 已授权按 M5–M7 实施。2026-09-12 决定：M8 邮件 / 日历与飞书 IM
+> 留在 v0.3.0（M8-Mail、M8-IM），推翻 09-11 移至 v0.4.0 的划分；M9 执行器仍在 v0.4.0。**
 >
 > 起点：[产品定位与架构设计讨论稿（2026-09-10）](../../design-notes/2026-09-10-nova-personal-agent-product-architecture.zh-CN.md)。
 > 本系列吸收其结论并把脑暴敲定的决策写成契约；讨论稿保留为背景和参考来源。
@@ -20,16 +21,19 @@ here propose deltas and never silently rewrite those volumes.
 | [01 多入口与主窗口](01-multi-entry-and-main-window.md) | 文字 / 全双工语音 / 长按草稿共用一个输入框；主窗口从现有桌面长出，悬浮窗为收起态；共享主机状态 | B |
 | [02 需求发现与动态页](02-need-discovery-and-feed.md) | 扩展 Surrogate 输出 proposal；低频检查；主机校验、入池、去重、交付记账；`feed_item` 契约 | A |
 | [03 用户视角记忆](03-user-memory-view.md) | `memory_entry` 投影；来源、stated/inferred；纠正与忘记的回写与传播；概览段落的覆盖声明 | A 与 B 交界 |
-| [04 来源与 connector](04-sources-and-connectors.md) | 用户配置的本地目录；授权、暂停、断开、删除；MCP 作为暴露方式 | C |
+| [04 来源与 connector](04-sources-and-connectors.md) | 用户配置的本地目录；一个邮件/日历 provider；飞书 IM 作为来源与投递渠道；授权、暂停、断开、删除；MCP 作为暴露方式 | C |
+| [06 记忆底座](06-memory-substrate.md) | 账本 / 条目 / 视图三阶段；`evidence_record` 与 `entry_revision` 契约；merge 唯一写入口；Discovery 拆为抽取与筛选 | A 与 C 交界 |
 | [STATUS](STATUS.zh-CN.md) | 白话进度页：里程碑、依赖、退出条件、待拍板事项 | 共同 |
 
-## 本版范围（2026-09-11）
+## 本版范围（2026-09-11，2026-09-12 调整）
 
-1. M5：桌面文字/语音入口和有依据的 proposal 闭环。
-2. M6：持久动态、用户可纠正/忘记的记忆。
-3. M7：用户授权的本地目录增量来源。
+1. M5：桌面文字/语音入口和有依据的 proposal 闭环。（已实现）
+2. M6：持久动态、用户可纠正/忘记的记忆。（已实现）
+3. M7：用户授权的本地目录增量来源。（已实现）
+4. 记忆底座：06 卷三阶段底座，收敛现有三套记忆。（规划）
+5. M8-Mail：一个邮件/日历 provider；M8-IM：飞书连接器，既是来源也是提醒投递渠道。（规划，2026-09-12 从 v0.4.0 拉回）
 
-M8 邮件/日历、M9-C Kimi Code / pi agent、M9-G GUI/AutoGLM、M9-Demo 移至 [v0.4.0](../v0.4.0/00-overview.md)。编号和验收边界不变。
+M9-C Kimi Code / pi agent、M9-G GUI/AutoGLM、M9-Demo 仍在 [v0.4.0](../v0.4.0/00-overview.md)。编号和验收边界不变。
 
 ## 与 v0.2.0 的关系
 
@@ -53,6 +57,7 @@ M8 邮件/日历、M9-C Kimi Code / pi agent、M9-G GUI/AutoGLM、M9-Demo 移至
 | D5 | **同一个输入框三态**：打字；长按录音，松手得到可编辑草稿，发送才算一轮；切到全双工，麦克风常开，输入框位置显示实时转写。 | 三种入口在协议上已分别对应 `input.text`、`input.dictation`、`input.audio`；UI 上收敛为一个控件，用户不用理解管线。 |
 | D6 | **两个主机拥有的契约对象**：`feed_item`（首页事项）与 `memory_entry`（用户视角的记忆投影，不是新存储）。UI 不持有任何权威副本。 | 它们是 A 轨与 B 轨的接口。A 轨产出并维护，B 轨渲染并回传用户动作。任务列表沿用已有的 `EXECUTOR_TASKS`。 |
 | D7 | **新开 v0.3.0 系列，里程碑从 M5 续编号。** | 定位转型在版本号上可见；v0.2.0 的"一句话目标"不被稀释。 |
+| D8 | **记忆收敛为一套三阶段底座（2026-09-12）。** A 账本只追加并**存原文**，用户删除来源数据时物理删除；B 条目是只追加的修订日志，merge 是唯一写入口，用户纠正与模型合并是同一种修订记录；C 视图只读重算，统一回忆融合 B 当前态与 A 原文索引；Knowledge 退为索引并继承外发同意。VoiceMem 与 Workspace Graph 改为写入方。Discovery 拆为入库抽取与 tick 筛选。飞书 IM 与邮件都在本版范围（M8-IM、M8-Mail）。 | 三套互不打通的记忆无法满足 D3 / D6 要求的逐条 ID、版本、纠正传播；按参考项目分层会加剧分散。可追溯是属性不是层。存原文换来重抽取能力，代价是字段级敏感策略、物理删除与保留期成为硬要求。详见 [06 卷](06-memory-substrate.md) 与 [对照记录](../../design-notes/2026-09-12-memory-references-comparison.zh-CN.md)。 |
 
 ## Goals
 
@@ -60,7 +65,7 @@ M8 邮件/日历、M9-C Kimi Code / pi agent、M9-G GUI/AutoGLM、M9-Demo 移至
 2. **入口切换不换助手、不丢事情。** 文字提交任务后收起窗口，用语音继续问同一任务，不重复创建工作。
 3. **有依据的主动发现。** 需求来自对话、任务变化、获准访问的资料和个人记忆；每条建议能追溯依据；没有依据时保持沉默。无任务时也能基于记忆主动关心。
 4. **记忆可见、可纠正、可忘记。** 用户看到的是带来源和时间的理解，纠正后检索和未交付建议都看到新状态。
-5. **来源由用户授权、范围可见。** 用户自己选目录、账户和范围；覆盖范围、解析失败与同步状态对用户可见。
+5. **来源由用户授权、范围可见。** 用户自己选目录、账户和范围；覆盖范围、解析失败与同步状态对用户可见。本版来源包括本地目录、一个邮件 / 日历 provider 和飞书 IM；飞书同时是主动提议的投递渠道。
 6. **保留执行器基础。** 本版继续使用 Codex；新 coding/GUI 后端在 v0.4.0 验收。
 
 ## Non-goals (v0.3.0)
@@ -80,15 +85,18 @@ M8 邮件/日历、M9-C Kimi Code / pi agent、M9-G GUI/AutoGLM、M9-Demo 移至
 ```text
 M5-B 文字入桌面 ──┐                          ┌── M6-B 动态页
                   ├── 契约 feed_item /       │
-M5-A proposal 闭环 ┘   memory_entry 钉住 ────┼── M6-A 记忆页
-                                              │
-                                              └── M7 本地目录来源
+M5-A proposal 闭环 ┘   memory_entry 钉住 ────┼── M6-A 记忆页 ──── 记忆底座（06 卷 A/B/C）
+                                              │                        │
+                                              └── M7 本地目录来源 ──────┼─ M8-Mail 邮件/日历
+                                                                       └─ M8-IM 飞书
 ```
 
 - **M5-A 与 M5-B 互不依赖，可同时开工。** M5-A 在现有悬浮窗和 iOS 输入框上验证；M5-B 只做输入框三态接线和主窗口骨架（对话列 + 复用 task-banner 的任务 tab）。
 - **M6 两项都依赖契约对象先在 02、03 卷钉住并有 fixtures**，以及 03 卷 §2.1 的 personal-memory
   端口扩展（`list` / `get` / `correct` / `forgetEntry`）与 02 卷的持久化交付 / 忽略台账先落地。契约字段在 02（`feed_item`）和 03（`memory_entry`）给出完整表；本卷只给概念定义。
 - **M7 起属于 C 轨（来源）**，依赖 M6-A 的记忆回写路径（来源删除要传播到记忆与 feed）。
+- **记忆底座**在 M6-A 已实现的 VoiceMem 路径之上收敛：06 卷 schema 与 fixtures，Workspace Graph 作为第一写入方迁入，VoiceMem 迁移路径待评审。
+- **M8-Mail 与 M8-IM 并行**，都依赖 M7 的来源管理路径与记忆底座（来源删除要物理删除账本行）；先上哪个真实账号验收待评审。
 - 不写日期。每个里程碑只写依赖与退出条件，见 [STATUS](STATUS.zh-CN.md)。
 
 ## 契约对象（概念定义）
@@ -96,7 +104,9 @@ M5-A proposal 闭环 ┘   memory_entry 钉住 ────┼── M6-A 记忆
 | 对象 | 回答的问题 | 拥有者 | 完整字段 |
 |---|---|---|---|
 | `feed_item` | 用户现在需要看见和处理什么 | 主机；由 Suggestion Pool 的准入结果生成和更新 | [02 卷](02-need-discovery-and-feed.md) |
-| `memory_entry` | Nova 对用户形成了什么理解，依据是什么 | 主机；是 personal-memory 端口与 workspace graph 之上的投影 | [03 卷](03-user-memory-view.md) |
+| `memory_entry` | Nova 对用户形成了什么理解，依据是什么 | 主机；是 personal-memory 端口之上的投影，目标为 06 卷底座当前态 | [03 卷](03-user-memory-view.md) |
+| `evidence_record` | 实际读到了什么、从哪来、什么时候 | 主机；账本行，只追加，存原文 | [06 卷](06-memory-substrate.md) |
+| `entry_revision` | 一条理解的某次修订：谁写的、依据什么、替代了哪次 | 主机；只经 merge 写入 | [06 卷](06-memory-substrate.md) |
 
 两者都是**接口内容，不是已发布的 wire schema**。落地时以 zod schema 与 `fixtures/` 下的
 golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `client.command` /
@@ -160,7 +170,7 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
 
 - 每卷末尾列出验收场景，编号沿用讨论稿 §9 的 1–11，便于交叉引用。
 - 需求发现同时观察命中与遗漏：固定案例集包含"应提出建议"和"应保持沉默"两类，任何改动都要跑全集。
-- 交付记账分展示、通知、语音三类分别记录；卡片渲染不等于用户已读。
+- 交付记账分展示、通知、语音、IM 四类分别记录；卡片渲染不等于用户已读，bot 发送成功也不等于。
 - 默认保留本地诊断；不以收集私人原文作为遥测前提。
 - 真人语音、真实目录、真实邮箱的验收另立台账，代码与确定性测试通过不等于验收完成。
 

@@ -1108,3 +1108,27 @@ test('text reconnect while provider submission is pending shares one host operat
   assert.equal(receipts.length,2)
   assert.deepEqual(receipts[0],receipts[1]);bridge.release()
 })
+
+test('unscoped PCM and dictation cannot bypass an owned conversation voice',async()=>{
+ const checked:(string|undefined)[]=[]
+ const {bridge,calls}=harness({validateConversationInput:(_kind,id)=>{checked.push(id);if(id!=='voice')throw Error('voice_not_owned')},sendConversationAudio:()=>Promise.resolve()})
+ await assert.rejects(bridge.receiveAudio(new Uint8Array(4)),/voice_not_owned/)
+ await assert.rejects(bridge.receiveControl({type:'input.audio'}),/voice_not_owned/)
+ await assert.rejects(bridge.receiveControl({type:'input.dictation',id:'draft',action:'start'}),/voice_not_owned/)
+ await bridge.receiveControl({type:'input.audio',conversation_id:'voice'});await bridge.receiveAudio(new Uint8Array(4))
+ assert.deepEqual(checked,[undefined,undefined,undefined,'voice','voice']);assert.equal(calls.length,0)
+})
+test('text receipt identity includes conversation and scoped decisions do not fall back',async()=>{
+ const routed:string[]=[]
+ const target=harness().service
+ target.projectConfirmationDecision=(id)=>{routed.push(id);return Promise.resolve()}
+ const {bridge,calls}=harness({submitConversationText:(id,text)=>{routed.push(id+':'+text);return Promise.resolve()},conversationService:id=>id==='a'?target:undefined})
+ bridge.markAuthenticated();drainJsonFrames(bridge)
+ await bridge.receiveControl({type:'input.text',conversation_id:'a',request_id:'same',text:'hello'})
+ await bridge.receiveControl({type:'input.text',conversation_id:'b',request_id:'same',text:'hello'})
+ const receipts=drainJsonFrames(bridge) as {type:string;ok:boolean;error?:string;conversation_id?:string}[]
+ assert.equal(receipts[0]?.conversation_id,'a');assert.equal(receipts[1]?.error,'request_id_conflict')
+ await bridge.receiveControl({type:'project.confirmation_decision',conversation_id:'a',proposal_id:'owned',confirmed:true})
+ await bridge.receiveControl({type:'project.confirmation_decision',conversation_id:'missing',proposal_id:'stale',confirmed:true})
+ assert.deepEqual(routed,['a:hello','owned']);assert.equal(calls.length,0)
+})

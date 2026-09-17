@@ -1,3 +1,4 @@
+import {conversationsStateSchema,initialConversations,type ConversationsState} from './conversations.js';
 import {Worker} from 'node:worker_threads';
 import { z } from 'zod';
 import { constants } from 'node:fs';
@@ -7,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { preparePrivateDatabasePath } from '../private-database.js';
 import { feedItemSchema, personalSettingsSchema, type FeedItem, type PersonalSettings } from './contracts.js';
 export interface PersonalState {
+    conversations:ConversationsState;
     user_scope: string | null;
     revision: number;
     feed: FeedItem[];
@@ -17,10 +19,10 @@ export interface PersonalState {
         result: unknown;
     }>;
 }
-export const initialState = (): PersonalState => ({ user_scope: null, revision: 0, feed: [], dedupe: [], settings: { discovery_enabled: true, discovery_interval_minutes: 30 }, receipts: {} });
+export const initialState = (): PersonalState => ({ conversations:initialConversations(), user_scope: null, revision: 0, feed: [], dedupe: [], settings: { discovery_enabled: true, discovery_interval_minutes: 30 }, receipts: {} });
 // ponytail: bounded JSON ledger; move to the existing Worker if 10000 retained matters are needed.
 const MAX_STORE_BYTES = 16 * 1024 * 1024;
-const stateSchema = z.object({ user_scope: z.string().max(512).nullable(), revision: z.number().int().nonnegative(), feed: z.array(feedItemSchema).max(10000), dedupe: z.array(z.string().max(128)).max(20000), settings: personalSettingsSchema, receipts: z.record(z.string().max(128), z.object({ payload: z.string().max(16384), result: z.unknown() })).refine(r => Object.keys(r).length <= 256) }).strict();
+const stateSchema = z.object({ conversations:conversationsStateSchema.default(initialConversations), user_scope: z.string().max(512).nullable(), revision: z.number().int().nonnegative(), feed: z.array(feedItemSchema).max(10000), dedupe: z.array(z.string().max(128)).max(20000), settings: personalSettingsSchema, receipts: z.record(z.string().max(128), z.object({ payload: z.string().max(16384), result: z.unknown() })).refine(r => Object.keys(r).length <= 256) }).strict();
 export class PersonalStore {
     constructor(readonly path: string) { }
     async read(): Promise<PersonalState> {

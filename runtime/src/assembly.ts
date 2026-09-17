@@ -64,6 +64,8 @@ export class AssemblyError extends Error {
 }
 
 export interface AssemblyOptions {
+  /** Borrow deployment resources; this scoped core closes only its own state. */
+  readonly sharedResources?: boolean
   readonly blackboard?: BlackboardSessionOptions
   readonly conversationId?: string
   readonly settings: Settings
@@ -280,7 +282,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       || !descriptor.ownedChannels.some(channel => (options.executors ?? []).some(adapter => adapter.manifest.name === channel && adapter.manifest.roles.includes('coding')))),
     ...(cameraModuleEnabled ? [VISION_AGENT_DESCRIPTOR] : []),
   ]
-  const tools = compileToolSchema(manifests, {includeMemoryRecall: true, agentDescriptors})
+  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, agentDescriptors})
 
   const surrogate = new GatewaySurrogate({
     gateway,
@@ -391,11 +393,11 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
         guard?.close()
         for (const close of [
           () => runtime.closeMemory(),
-          () => options.knowledge?.close(),
-          () => options.externalMcp?.close(),
+          () => options.sharedResources ? undefined : options.knowledge?.close(),
+          () => options.sharedResources ? undefined : options.externalMcp?.close(),
           () => searchTransport?.close?.(),
           async () => {
-            if (started && (cameraModuleEnabled || settings.conversation_vision_enabled)) {
+            if (!options.sharedResources && started && (cameraModuleEnabled || settings.conversation_vision_enabled)) {
               await frameSource.stop()
             }
             started = false

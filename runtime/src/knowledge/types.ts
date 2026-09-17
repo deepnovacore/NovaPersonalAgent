@@ -15,6 +15,7 @@ export interface KnowledgeSource {
 }
 
 export interface KnowledgeChunkInput {
+  readonly evidence_id?: string
   readonly heading_path: string
   readonly text: string
   readonly token_estimate: number
@@ -29,6 +30,7 @@ export interface ReplaceKnowledgeSourceInput {
 }
 
 export interface KnowledgeRecallHit {
+  readonly evidence_id?: string
   readonly locator: string
   readonly source_id: string
   readonly title: string
@@ -38,11 +40,23 @@ export interface KnowledgeRecallHit {
 }
 
 export interface KnowledgeChunkResult {
+  readonly evidence_id?: string
   readonly status: 'ok' | 'stale' | 'gone'
   readonly text?: string
   readonly title?: string
   readonly heading_path?: string
   readonly source_id?: string
+}
+
+export interface KnowledgeIndexChunk {
+  readonly chunk_id: string
+  readonly source_id: string
+  readonly locator: string
+  readonly text: string
+  readonly ordinal: number
+  readonly observed_at: string
+  readonly content_digest: string
+  readonly evidence_id?: string
 }
 
 export interface KnowledgeJob {

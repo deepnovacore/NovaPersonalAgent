@@ -2,8 +2,10 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
   personal: Object.freeze({
+    setUnread: value => ipcRenderer.invoke('nova:personal:unread', value),
     wake: () => ipcRenderer.invoke('nova:personal:wake'),
     setCollapsed: value => ipcRenderer.invoke('nova:personal:collapse', value),
+    openFeishuVerification: url => ipcRenderer.invoke('nova:personal:feishu-verification', url),
     chooseDirectory: () => ipcRenderer.invoke('nova:personal:directory'),
     onCollapsed: callback => {
       const listener = (_event, value) => { if (typeof value === 'boolean') callback(value) }
@@ -164,6 +166,8 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     set: commit => ipcRenderer.invoke('nova:settings:set', commit),
     restart: () => ipcRenderer.invoke('nova:settings:set', {settingsPatch: {}}, true),
     probeCapabilities: payload => ipcRenderer.invoke('nova:capabilities:probe', payload),
+    feishuCommand: (method, params = {}) => ipcRenderer.invoke('nova:settings:feishu', {method, params}),
+    openFeishuVerification: url => ipcRenderer.invoke('nova:personal:feishu-verification', url),
     knowledgeAction: payload => ipcRenderer.invoke('nova:knowledge:action', payload),
     onChanged: callback => {
       if (typeof callback !== 'function') return () => {}

@@ -1,4 +1,4 @@
-import {installDesktopControl, desktopBudgetFailure, type DesktopCapabilityState} from './desktop-control.js'
+import {installDesktopControl, handleFeishuSettings, desktopBudgetFailure, type DesktopCapabilityState} from './desktop-control.js'
 import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop-service.js'
 import {announceReadiness} from './desktop.js'
 import {buildProductionComposition} from './production-composition.js'
@@ -12,9 +12,11 @@ const parentPort = (process as UtilityProcess).parentPort
 
 let capabilityView: (() => DesktopCapabilityState | undefined) = () => undefined
 let knowledgeHandle: ((method: string, params: unknown) => Promise<unknown>) | undefined
+let feishuHandle: ((method: string, params: unknown) => Promise<unknown>) | undefined
 let clearConversation: (() => Promise<void>) | undefined
 const control = installDesktopControl({...(parentPort === undefined ? {} : {parentPort}), signal: stop.signal,
   status: () => capabilityView(), handle: async (method, params) => {
+    if (method.startsWith('feishu.')) return feishuHandle?.(method, params)
     if (method !== 'conversation.clear') return knowledgeHandle?.(method, params)
     if (clearConversation === undefined || params === null || typeof params !== 'object'
       || Array.isArray(params) || Object.keys(params).length !== 0) return {error: 'unavailable'}
@@ -47,6 +49,7 @@ const exitCode = await runDesktopEntryWithStopSources({
     })
     capabilityView = () => ({...composition.realtime.capabilityStatus, state: 'running'})
     clearConversation = () => composition.realtime.clearConversation()
+    feishuHandle = (method, params) => handleFeishuSettings(input => composition.realtime.personalAgent.command(input), method, params)
     control.publish()
     return composition
   },

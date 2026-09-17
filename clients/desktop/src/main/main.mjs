@@ -1,4 +1,6 @@
-import {VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
+import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
+import {createFeishuSetupOwner} from './feishu-setup.mjs'
+import {FeishuConnector, VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createBackendControl} from './backend-control.mjs'
@@ -118,6 +120,7 @@ import {
 import {
   allowRendererNavigation,
   apiKeyWindowOpenHandler,
+  feishuVerificationUrl,
   boardWindowOptions,
   browserWindowOptions,
   configureWindowSecurity,
@@ -175,6 +178,7 @@ let settingsGeneration = 0
 let launchGeneration = 0
 let runtimeCapabilities = null
 let capabilityEditorCache = null
+const feishuSetupOwner = createFeishuSetupOwner({Connector: FeishuConnector})
 let backendControl = null
 let settingsApplyStatus = 'idle'
 let settingsRestartPending = false
@@ -797,6 +801,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
       resolvedConfig: desktopConfig,
       searchProxyUrl,
     })
+    await feishuSetupOwner.release()
     spawnedBackend = utilityProcess.fork(spec.entry, spec.argv, {
       cwd: workspace,
       env: spec.env,
@@ -946,9 +951,17 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (event.sender !== mainWindow.webContents || typeof value !== 'boolean') throw new Error('window request rejected')
     setPersonalCollapsed(value)
   })
+  ipcMain.handle('nova:personal:unread', (event, value) => {
+    if (event.sender !== mainWindow.webContents || !Number.isSafeInteger(value) || value < 0 || value > 1000000) throw new Error('unread request rejected')
+    updateTrayUnread(tray, backendStatus.state === 'connected' ? value : 0)
+  })
   ipcMain.handle('nova:personal:wake', event => {
     if (event.sender !== mainWindow.webContents) throw new Error('wake request rejected')
     wakeWord?.wake()
+  })
+  ipcMain.handle('nova:personal:feishu-verification', async (event, value) => {
+    if (event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) throw new Error('authorization request rejected')
+    await shell.openExternal(feishuVerificationUrl(value))
   })
   ipcMain.handle('nova:personal:directory', async event => {
     if (event.sender !== mainWindow.webContents) throw new Error('directory request rejected')
@@ -1253,6 +1266,23 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     }
     return workspaceActionReply(() => workspaceActions.clearAll())
   })
+  ipcMain.handle('nova:settings:feishu', async (event, payload) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('IM request rejected')
+    const allowed = ['feishu.status', 'feishu.app.start', 'feishu.app.status', 'feishu.app.cancel', 'feishu.app.bind', 'feishu.login', 'feishu.complete', 'feishu.chats', 'feishu.configure', 'feishu.sync', 'feishu.pause', 'feishu.resume', 'feishu.disconnect', 'feishu.delete', 'feishu.bot.configure']
+    if (!payload || Object.getPrototypeOf(payload) !== Object.prototype || Object.keys(payload).sort().join(',') !== 'method,params'
+      || !allowed.includes(payload.method) || !payload.params || Object.getPrototypeOf(payload.params) !== Object.prototype
+      || JSON.stringify(payload.params).length > 16384) throw new Error('IM request rejected')
+    const owner = backendControl, generation = settingsGeneration
+    if (backendStatus.state === 'configuration_required' && !backend) {
+      const result = await feishuSetupOwner.request(payload.method, payload.params)
+      if (generation !== settingsGeneration || backendStatus.state !== 'configuration_required') throw new Error('IM connection changed')
+      return result
+    }
+    if (!owner) throw new Error('IM connection unavailable')
+    const result = await owner.request(payload.method, payload.params, {timeoutMs: 180000})
+    if (owner !== backendControl || generation !== settingsGeneration) throw new Error('IM connection changed')
+    return result
+  })
   ipcMain.handle('nova:knowledge:action', async (event, payload) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('knowledge action rejected')
     const owner = backendControl, generation = settingsGeneration
@@ -1517,6 +1547,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     },
     onStatus: status => {
       const previousConnection = backendStatus.connection
+      resetTrayUnreadForBackend(tray, backendStatus, status)
       backendStatus = status
       if (status.state === 'connected' && status.connection !== previousConnection) {
         backendGeneration += 1
@@ -1681,7 +1712,7 @@ app.on('before-quit', event => {
   wakeWord?.stop()
   void nativeAudio?.deactivate()
   if (quitDrain) { event.preventDefault(); return }
-  if (!backendSupervisor && !backend && !managedWorkspaceMaintenance) return
+  // Setup-only Feishu also owns subprocesses and must drain on quit.
   // Hold the quit while the backend drains on the stdin-EOF sentinel: a bare
   // kill would cut the session off mid-teardown, and on Windows there is no
   // graceful signal at all. Resume normal window shutdown after the drain;
@@ -1697,7 +1728,7 @@ app.on('before-quit', event => {
     await maintenance?.close()
     sourceSmokeStage('maintenance_closed')
   }), wait(3000).then(() => sourceSmokeStage('maintenance_deadline'))])
-  const drain = Promise.all([backendDrain, maintenanceDrain])
+  const drain = Promise.all([backendDrain, maintenanceDrain, feishuSetupOwner.release()])
   const resumeQuit = () => { quitDrained = true; sourceSmokeStage('quit_resumed'); app.quit() }
   quitDrain = drain.then(resumeQuit, resumeQuit)
 })

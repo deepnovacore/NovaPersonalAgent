@@ -1,3 +1,4 @@
+import type {CommittedConversationPair} from '../history.js'
 import {MAX_CAMERA_JPEG_BYTES} from '../../desktop-camera.js'
 import type {Frame} from '../../executors/watcher.js'
 import type { JsonValue } from '../../events.js'
@@ -28,6 +29,8 @@ export type CascadedLlmEvent =
   | {readonly kind: 'response_failed'; readonly response_id: string; readonly code: string}
 
 export interface CascadedLlmSession {
+  /** Fresh-session seed only, before any request; never merges unresolved tool calls. */
+  restoreHistory?(history:readonly CommittedConversationPair[],signal:AbortSignal):Promise<void>
   stream(input: {
     readonly inputs: readonly CascadedLlmInput[]
     readonly tools: readonly CascadedLlmTool[]
@@ -43,7 +46,7 @@ export interface CascadedLlmSession {
 }
 
 export interface CascadedLlmFactory {
-  open(): CascadedLlmSession
+  open(options?:{readonly history?:readonly CommittedConversationPair[]}): CascadedLlmSession
 }
 
 

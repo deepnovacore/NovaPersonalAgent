@@ -227,7 +227,7 @@ test('camera assembly hides Watch and Guard behind the owned Vision controller',
   })
   const names = assembly.tools.schemas.map(schema => String(record(record(schema).function).name))
   assert.deepEqual(names, [
-    'memory__recall', 'search__search', 'dispatch', 'cancel', 'confirm',
+    'memory__recall', 'memory__evidence', 'search__search', 'dispatch', 'cancel', 'confirm',
   ])
   assert.deepEqual(assembly.tools.agent_descriptors.map(descriptor => descriptor.name), ['vision'])
   assert.deepEqual(assembly.visionController?.descriptor.ownedChannels, ['watch', 'guard'])
@@ -237,7 +237,7 @@ test('camera assembly hides Watch and Guard behind the owned Vision controller',
     settings: settings({executors: []}), gateway: new ScriptedGateway([]), cameraModuleEnabled: false,
   })
   assert.deepEqual(disabled.tools.schemas.map(schema => String(record(record(schema).function).name)), [
-    'memory__recall', 'search__search',
+    'memory__recall', 'memory__evidence', 'search__search',
   ])
   assert.equal(disabled.visionController, undefined)
 })

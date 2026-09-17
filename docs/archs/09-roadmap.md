@@ -27,19 +27,22 @@ The candidate realtime MCP budget `B=24` still requires provider validation; it 
 universal limit. External MCP implementation is not equivalent to release acceptance.
 `FASTBRAIN_SYSTEM` remains deferred legacy code, not an additional active model.
 
-## v0.3.0 — personal-agent loop (M5–M7)
+## v0.3.0 — personal-agent loop (M5–M8)
 
 Text/voice entry and an Electron main window; evidence-grounded Surrogate proposals;
 persistent feed; correctable/forgettable personal memory; user-authorized local folder
-synchronization. Reuse the existing runtime, Suggestion Pool, Floor and knowledge import.
-See [specs](../specs/v0.3.0/00-overview.md) and [milestones](../specs/v0.3.0/STATUS.zh-CN.md).
+synchronization (M5–M7, implemented on `v0.3.0dev`). Then a unified memory substrate
+(append-only evidence ledger storing raw text, revision-log entries, read-only views;
+spec 06), one mail/calendar provider (M8-Mail) and a Feishu connector that is both a
+source and a delivery channel (M8-IM). Mail and IM were moved to v0.4.0 on 2026-09-11
+and pulled back on 2026-09-12. Reuse the existing runtime, Suggestion Pool, Floor and
+knowledge import. See [specs](../specs/v0.3.0/00-overview.md) and
+[milestones](../specs/v0.3.0/STATUS.zh-CN.md).
 
-## v0.4.0 — account sources and specialist executors (M8 onward)
+## v0.4.0 — specialist executors (M9)
 
-Moved from v0.3.0 on 2026-09-11 at the user's request, preserving milestone numbers:
-M8 mail/calendar provider; M9-C Kimi Code and pi agent; M9-G GUI/AutoGLM;
-M9-Demo real agent2agent workflows. Executors need not wait for mail/calendar.
-Home Assistant and MyContext remain later candidates.
+M9-C Kimi Code and pi agent; M9-G GUI/AutoGLM; M9-Demo real agent2agent workflows.
+Executors do not wait for mail/calendar or IM. Home Assistant and MyContext remain later candidates.
 See [specs](../specs/v0.4.0/00-overview.md) and [milestones](../specs/v0.4.0/STATUS.zh-CN.md).
 
 ## Integration and evidence

@@ -141,9 +141,9 @@ const DEFAULT_BOOTSTRAP_TEXT_FRAMES = [
 
 const ordinaryDesktopControlSchema = z.discriminatedUnion('type', [
   personalCommandSchema,
-  z.object({type: z.literal('input.audio')}).strict(),
-  z.object({type: z.literal('input.dictation'), id: identifierSchema, action: z.enum(['start', 'finish', 'cancel'])}).strict(),
-  z.object({type: z.literal('input.text'), request_id: z.string().min(1).max(128).optional(), input_instance_id: z.string().min(1).max(128).optional(), text: z.string().min(1).max(4000).refine(value => value.trim().length > 0)}).strict(),
+  z.object({type: z.literal('input.audio'), conversation_id: identifierSchema.optional()}).strict(),
+  z.object({type: z.literal('input.dictation'), conversation_id: identifierSchema.optional(), id: identifierSchema, action: z.enum(['start', 'finish', 'cancel'])}).strict(),
+  z.object({type: z.literal('input.text'), conversation_id: identifierSchema.optional(), request_id: z.string().min(1).max(128).optional(), input_instance_id: z.string().min(1).max(128).optional(), text: z.string().min(1).max(4000).refine(value => value.trim().length > 0)}).strict(),
   z.object({
     type: z.literal('speech.onset'),
     speech_id: identifierSchema,
@@ -164,12 +164,12 @@ const ordinaryDesktopControlSchema = z.discriminatedUnion('type', [
       t_render_ms: renderTimestampSchema,
     })),
   z.object({
-    type: z.literal('project.confirmation_decision'),
+    type: z.literal('project.confirmation_decision'), conversation_id:identifierSchema.optional(),
     proposal_id: identifierSchema.refine(value => codePointLengthLikePython(value) <= 128),
     confirmed: z.boolean(),
   }).strict(),
   z.object({
-    type: z.literal('executor.approval_decision'),
+    type: z.literal('executor.approval_decision'), conversation_id:identifierSchema.optional(),
     executor: identifierSchema,
     approval_id: identifierSchema.refine(value => codePointLengthLikePython(value) <= 128),
     approved: z.boolean(),
@@ -1170,3 +1170,5 @@ export * from './capability-registry.js'
 export {probeMcpServer} from './mcp-client.js'
 
 export {SensitiveContentPolicy} from './workspace-graph/sensitivity.js'
+
+export {FeishuConnector} from './connectors/feishu/index.js'

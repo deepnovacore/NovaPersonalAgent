@@ -67,12 +67,22 @@ export function requireSelectedCascadedRealtimeConfig(
   const credentials = requireCascadedCredentials(settings, selection)
   const endpointing = resolveEndpointingConfig(settings)
   const asr = resolveAsrConfig(settings, credentials.asrApiKey)
-  const llm: SelectedCascadedLlmConfig = selection.llmProvider === 'qwen'
+  const llm = requireSelectedCascadedLlmConfig(settings)
+  const tts = resolveTtsConfig(settings, credentials.ttsApiKey)
+  return Object.freeze({selection, endpointing, asr, llm, tts})
+}
+
+/** Text sessions require only their selected LLM, independent of speech configuration. */
+export function requireSelectedCascadedLlmConfig(settings:Settings):SelectedCascadedLlmConfig {
+  const selection=resolveCascadedSelection(settings)
+  const apiKey=stripLikePython((selection.llmProvider==='qwen'?settings.dashscope_api_key:settings.ark_api_key)??'')
+  if(!apiKey)throw new ConfigurationError(`缺少 ${selection.llmProvider==='qwen'?'DASHSCOPE_API_KEY':'ARK_API_KEY'}`)
+  return selection.llmProvider === 'qwen'
     ? Object.freeze({
       provider: 'qwen' as const,
       config: Object.freeze({
         baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
-        apiKey: credentials.llmApiKey,
+        apiKey: apiKey,
         model: selection.llmModel,
       }),
     })
@@ -84,12 +94,10 @@ export function requireSelectedCascadedRealtimeConfig(
           'https',
           'NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL',
         ),
-        apiKey: credentials.llmApiKey,
+        apiKey: apiKey,
         model: selection.llmModel,
       }),
     })
-  const tts = resolveTtsConfig(settings, credentials.ttsApiKey)
-  return Object.freeze({selection, endpointing, asr, llm, tts})
 }
 
 function resolveEndpointingConfig(settings: Settings): AutoEndpointingConfig {
@@ -113,6 +121,12 @@ function resolveEndpointingConfig(settings: Settings): AutoEndpointingConfig {
     vadSpeechPadMs: settings.volcengine_vad_speech_pad_ms,
     vadMaxUtteranceMs: settings.volcengine_vad_max_utterance_ms,
   })
+}
+
+export function requireSelectedCascadedAsrConfig(settings:Settings):VolcengineAsrConfig {
+  const key=stripLikePython(settings.doubao_asr_api_key??'')||stripLikePython(settings.doubao_bigmodel_api_key??'')
+  if(!key)throw new ConfigurationError('缺少 DOUBAO_ASR_API_KEY')
+  return resolveAsrConfig(settings,key)
 }
 
 function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConfig {

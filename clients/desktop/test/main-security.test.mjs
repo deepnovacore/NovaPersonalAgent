@@ -55,10 +55,13 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:personal:collapse',
     'nova:personal:collapsed',
     'nova:personal:directory',
+    'nova:personal:feishu-verification',
+    'nova:personal:unread',
     'nova:personal:wake',
     'nova:projects:repair',
     'nova:release-camera:result',
     'nova:settings:changed',
+    'nova:settings:feishu',
     'nova:settings:get',
     'nova:settings:open',
     'nova:settings:set',
@@ -795,8 +798,9 @@ test('renderer text startup avoids microphone and explicit voice entry requires 
   assert.match(voiceEntry, /await refreshMicrophonePermission\(\) !== 'granted'/)
   assert.ok(voiceEntry.indexOf('refreshMicrophonePermission') < voiceEntry.indexOf('activateCapture'))
   assert.match(renderer, /async function retryMicrophonePermission\(\)/)
-  assert.match(renderer, /const microphone = await refreshMicrophonePermission\(\)/)
-  assert.match(renderer, /if \(microphone === 'granted' && !axes\.activated\) await activateCapture\(\)/)
+  const retry=renderer.slice(renderer.indexOf('async function retryMicrophonePermission()'),renderer.indexOf('async function boot()'))
+  assert.match(retry,/await refreshMicrophonePermission\(\)/)
+  assert.doesNotMatch(retry,/activateCapture\(/)
   assert.match(renderer, /microphone\.onRetry\(\(\) => \{\s*void retryMicrophonePermission\(\)\s*\}\)/)
   assert.doesNotMatch(renderer, /startListeningOnLaunch/)
   assert.doesNotMatch(renderer, /orb\.addEventListener\('click'/)
@@ -837,7 +841,7 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   let prevented = 0, quits = 0, backendStops = 0
   const event = {preventDefault() { prevented++ }}
   const context = vm.createContext({
-    sourceSmokeStage() {},
+    sourceSmokeStage() {}, feishuSetupOwner: {release: async () => {}},
     app: {
       on: (name, handler) => { if (name === 'before-quit') beforeQuit = handler },
       quit() { quits++; beforeQuit(event) },
@@ -1061,4 +1065,15 @@ test('workspace cleanup cannot restart a backend while settings recovery is pend
   context.settingsRecoveryAvailable = false
   assert.equal(await callbacks.restartBackendBounded(), true)
   assert.equal(restarts, 1)
+})
+
+test('personal directory and window controls are bound to main renderer',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ for(const channel of ['directory','collapse','wake']){
+  const begin=source.indexOf(`ipcMain.handle('nova:personal:${channel}'`)
+  assert.ok(begin>=0)
+  const body=source.slice(begin,source.indexOf("\n  })",begin))
+  assert.match(body,/event.sender !== mainWindow.webContents/)
+ }
+ assert.match(source,/setBounds: bounds => \{ if \(personalCollapsed\) mainWindow.setBounds\(bounds\) \}/)
 })

@@ -22,7 +22,7 @@ const snapshotSchema = z.object({
 }).strict()
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
-  size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
+  evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
 const recordSchema = z.object({view: snapshotSchema, files: z.array(trackedSchema).max(20000),
   deleting: z.boolean().default(false), observation: z.string().max(500).default(''),
   pending: z.object({path: pathSchema, size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), previous_updated_at: z.number().nullable()}).strict().nullable().default(null)}).strict()
@@ -39,7 +39,7 @@ export interface LocalDirectorySourceOptions {
   readonly pollMs?: number
   readonly onChange?: (changed: boolean) => void | Promise<void>
   readonly onInvalidate?: (ref: string) => void | Promise<void>
-  readonly onObserve?: (source: {source_ref: {type: 'file'; ref: string; observed_at: string}; content: string; topic?: string}) => void | Promise<void>
+  readonly onObserve?: (source: {source_ref: {type: 'file'; ref: string; observed_at: string}; content: string; topic?: string; evidence_ids?: string[]}) => void | Promise<void>
 }
 
 /** Opt-in local grants. Existing knowledge ingestion owns parsing, screening and embeddings. */
@@ -219,10 +219,7 @@ export class LocalDirectorySources {
           const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id)
           const indexed = (await this.#options.knowledge.listSources()).find(item => item.id === result.id)
           if (!indexed) throw new Error('ingest_failed')
-          const tracked = {...file, id: result.id, fingerprint: indexed.fingerprint, owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: randomUUID()}
-          if (previous && previous.fingerprint !== tracked.fingerprint) {
-            await this.#invalidateFile(previous)
-          }
+          const tracked = {...file, id: result.id, fingerprint: indexed.fingerprint, owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
           record.files = record.files.filter(old => old.path !== file.path); record.files.push(tracked); record.pending = null
           bytes += file.size; view.read++
           await this.#save()
@@ -245,7 +242,7 @@ export class LocalDirectorySources {
         const document = relative(view.path, file.path), project = dirname(document) === '.' ? basename(view.path) : dirname(document)
         const context = `文档 ${basename(view.path)}/${document}`.slice(0, 100) + '：'
         await this.#options.onObserve({source_ref: {type: 'file', ref: file.observation_ref, observed_at: view.last_sync},
-          content: context + file.excerpt.slice(0, 500 - context.length), topic: project.slice(0, 80)})
+          content: context + file.excerpt.slice(0, 500 - context.length), topic: project.slice(0, 80), ...(file.evidence_ids ? {evidence_ids: file.evidence_ids} : {})})
         file.observed = true
         await this.#save()
       }

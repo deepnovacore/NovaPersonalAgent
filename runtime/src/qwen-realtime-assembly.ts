@@ -1,3 +1,4 @@
+import type {CommittedConversationPair} from './realtime/history.js'
 import {usageReporterForEndpoint, type UsageReporter} from './realtime/usage.js'
 /** Production Qwen composition above the provider-neutral realtime owner. */
 
@@ -50,6 +51,7 @@ export interface BuildQwenRealtimeAssemblyOptions
 
 /** Narrow provider-only form used by the integrated provider registry. */
 export interface BuildQwenRealtimeProviderOptions {
+  readonly history?:readonly CommittedConversationPair[]
   readonly onUsage?: UsageReporter
 
 
@@ -79,6 +81,7 @@ export function buildQwenRealtimeAssembly(
 ): RealtimeAssembly | QwenAudioRealtimeAdapter {
   if ('config' in options) {
     return new QwenAudioRealtimeAdapter({
+      ...(options.history===undefined?{}:{history:options.history}),
       ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, options.config.url)!}),
       url: options.config.url,
       apiKey: options.config.apiKey,

@@ -1,3 +1,6 @@
+import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
+export type PreparedMemoryContext = (signal: AbortSignal) => Promise<string | null>
+import {abortable} from '../../camera-session.js'
 import {validateOriginalImage} from './llm.js'
 import type {Frame} from '../../executors/watcher.js'
 import { randomUUID } from 'node:crypto'
@@ -55,12 +58,15 @@ export const CASCADED_PREEMPTIVE_ALERT_POLICY = Object.freeze({
 })
 
 export interface CascadedRealtimeAdapterOptions {
-  readonly endpointing: EndpointingPort
-  readonly asr: AsrClient
+  readonly textOnly?: boolean
+  readonly history?: readonly CommittedConversationPair[]
+  readonly endpointing?: EndpointingPort
+  readonly asr?: AsrClient
   readonly llm: CascadedLlmSession
   /** Opens a fresh LLM session for every adapter connection epoch. */
   readonly llmFactory?: CascadedLlmFactory
-  readonly tts: TtsClient
+  readonly tts?: TtsClient
+  readonly prerecall?: (query: string, signal: AbortSignal) => Promise<PreparedMemoryContext | null>
   readonly captureFrame?: (signal: AbortSignal) => Promise<Frame>
   readonly telemetry?: RealtimeTelemetry
   readonly idFactory?: () => string
@@ -127,6 +133,7 @@ interface ActiveResponse {
 
 interface EpochOwner {
   readonly epoch: number
+  historyRestoring:boolean
   readonly sessionId: string
   readonly controller: AbortController
   readonly queue: BoundedEventQueue
@@ -141,6 +148,7 @@ interface EpochOwner {
     readonly providerItemId: string
     readonly record: WorkspaceContextDeliveryRecord
   } | null
+  prerecall: {query: string; itemId: string; controller: AbortController; result: Promise<PreparedMemoryContext | null>} | null
   responseAdaptation: {readonly revision: number; readonly content: string | null} | null
   consumptionGeneration: number
   responseSequence: number
@@ -277,11 +285,14 @@ class BoundedEventQueue {
 
 export class CascadedRealtimeAdapter implements RealtimeProvider {
   readonly userResponseMode = 'requested' as const
-  readonly #endpointing: EndpointingPort
-  readonly #asrClient: AsrClient
-  readonly #ttsClient: TtsClient
+  readonly #textOnly:boolean
+  readonly #initialHistory:readonly CommittedConversationPair[]|undefined
+  readonly #endpointing: EndpointingPort|undefined
+  readonly #asrClient: AsrClient|undefined
+  readonly #ttsClient: TtsClient|undefined
   readonly #llm: CascadedLlmSession
   readonly #llmFactory: CascadedLlmFactory | undefined
+  readonly #prerecall: ((query: string, signal: AbortSignal) => Promise<PreparedMemoryContext | null>) | undefined
   readonly #captureFrame: ((signal: AbortSignal) => Promise<Frame>) | undefined
   readonly #telemetry: RealtimeTelemetry
   readonly #idFactory: () => string
@@ -295,11 +306,15 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
   #legacyLlmClosePromise: Promise<void> | null = null
 
   constructor(options: CascadedRealtimeAdapterOptions) {
-    this.#endpointing = options.endpointing
-    this.#asrClient = options.asr
-    this.#ttsClient = options.tts
+    this.#textOnly=options.textOnly===true
+    this.#initialHistory=options.history===undefined?undefined:committedConversationPairsSchema.parse(options.history)
+    if(!this.#textOnly&&(!options.endpointing||!options.asr||!options.tts))throw new CascadedRealtimeError('configuration')
+    this.#endpointing = this.#textOnly?undefined:options.endpointing
+    this.#asrClient = this.#textOnly?undefined:options.asr
+    this.#ttsClient = this.#textOnly?undefined:options.tts
     this.#llm = options.llm
     this.#llmFactory = options.llmFactory
+    this.#prerecall = options.prerecall
     this.#captureFrame = options.captureFrame
     this.#telemetry = options.telemetry ?? new NullTelemetry()
     this.#idFactory = options.idFactory ?? randomUUID
@@ -332,6 +347,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       const llm = this.#openLlm()
       owner = {
         epoch,
+        historyRestoring:false,
         sessionId,
         controller: new AbortController(),
         queue: new BoundedEventQueue(),
@@ -342,6 +358,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         consumed: new Map(),
         abandonedCalls: new Map(),
         workspaceContext: null,
+        prerecall: null,
         responseAdaptation: null,
         consumptionGeneration: 0,
         responseSequence: 0,
@@ -353,7 +370,11 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         revoked: false,
       }
       this.#owner = owner
-      await this.#endpointing.reset()
+      if(this.#initialHistory!==undefined){
+        if(!llm.restoreHistory)throw new CascadedRealtimeError('configuration')
+        await llm.restoreHistory(this.#initialHistory,options.signal)
+      }
+      await this.#endpointing?.reset()
       throwIfAborted(options.signal)
       if (this.#owner !== owner || owner.revoked) throw new CascadedRealtimeError('state')
       this.#epoch = epoch
@@ -373,6 +394,15 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     }
   }
 
+  async restoreHistory(history:readonly CommittedConversationPair[],signal:AbortSignal):Promise<void> {
+    const owner=this.#requiredOwner()
+    if(owner.userInput!==null||owner.response!==null||owner.asr!==null||owner.pending.size||owner.consumed.size||owner.responseSequence)throw new CascadedRealtimeError('state')
+    if(!owner.llm.restoreHistory)throw new CascadedRealtimeError('configuration')
+    owner.historyRestoring=true
+    try {await owner.llm.restoreHistory(committedConversationPairsSchema.parse(history),combineSignals(signal,owner.controller.signal))}
+    finally {owner.historyRestoring=false}
+  }
+
   submitText(text: string, signal: AbortSignal): Promise<void> {
     if (typeof text !== 'string' || !text.trim() || text.length > 4000) return Promise.reject(new CascadedRealtimeError('configuration'))
     const owner = this.#requiredOwner()
@@ -383,13 +413,14 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       await this.#emit(owner, {kind: 'user_speech_started', session_epoch: owner.epoch, speech_id: speechId, provider_item_id: itemId})
       await this.#emit(owner, {kind: 'user_speech_ended', session_epoch: owner.epoch, speech_id: speechId, provider_item_id: itemId})
       owner.userInput = {itemId, text, submitted: false}
-      await this.#emit(owner, {kind: 'user_transcript_final', session_epoch: owner.epoch, item_id: itemId, text})
+      await this.#emit(owner, {kind: 'user_transcript_final', session_epoch: owner.epoch, item_id: itemId, text, input_kind:'text'})
     })
     this.#audioTail = operation.catch(() => undefined)
     return operation
   }
 
   sendAudio(pcm: Uint8Array, signal: AbortSignal): Promise<void> {
+    if(this.#textOnly)return Promise.reject(new CascadedRealtimeError('configuration'))
     let owned: Uint8Array
     try {
       owned = inputPcm(pcm)
@@ -407,14 +438,14 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       throwIfAborted(combined)
       let decisions: readonly EndpointingEvent[]
       try {
-        decisions = await this.#endpointing.feed(owned.slice(), combined)
+        decisions = await this.#endpointing!.feed(owned.slice(), combined)
       } catch {
         throwIfAborted(combined)
         await this.#emit(owner, {
           kind: 'provider_error', session_epoch: owner.epoch,
           code: 'volcengine_vad_failed', recoverable: true,
         })
-        await Promise.resolve(this.#endpointing.reset()).catch(() => undefined)
+        await Promise.resolve(this.#endpointing?.reset()).catch(() => undefined)
         return
       }
       for (const decision of decisions) {
@@ -674,7 +705,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     let session: AsrSession
     try {
       this.#record('volcengine.asr.connect', {epoch: owner.epoch})
-      session = await this.#asrClient.open(signal)
+      session = await this.#asrClient!.open(signal)
     } catch {
       if (!this.#isCurrent(owner)) return
       await this.#emit(owner, {
@@ -688,7 +719,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       await this.#emit(owner, {
         kind: 'user_transcript_failed', session_epoch: owner.epoch, item_id: itemId,
       })
-      await Promise.resolve(this.#endpointing.reset()).catch(() => undefined)
+      await Promise.resolve(this.#endpointing?.reset()).catch(() => undefined)
       return
     }
     if (!this.#isCurrent(owner)) {
@@ -725,7 +756,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
   async #stopAsr(owner: EpochOwner, commit: boolean, signal: AbortSignal): Promise<void> {
     const active = owner.asr
     if (active === null) {
-      await Promise.resolve(this.#endpointing.reset()).catch(() => undefined)
+      await Promise.resolve(this.#endpointing?.reset()).catch(() => undefined)
       return
     }
     if (!active.speechEnded) {
@@ -738,12 +769,12 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     this.#record('volcengine.vad.end', {epoch: owner.epoch, commit})
     if (active.failed) {
       if (owner.asr === active) owner.asr = null
-      await Promise.resolve(this.#endpointing.reset()).catch(() => undefined)
+      await Promise.resolve(this.#endpointing?.reset()).catch(() => undefined)
       return
     }
     if (!commit) {
       await this.#discardAsr(owner)
-      await Promise.resolve(this.#endpointing.reset()).catch(() => undefined)
+      await Promise.resolve(this.#endpointing?.reset()).catch(() => undefined)
       return
     }
     try {
@@ -758,7 +789,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       })
       await this.#discardAsr(owner)
     } finally {
-      await Promise.resolve(this.#endpointing.reset()).catch(() => undefined)
+      await Promise.resolve(this.#endpointing?.reset()).catch(() => undefined)
     }
   }
 
@@ -792,6 +823,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           return
         } else {
           this.#record('volcengine.asr.partial', {epoch: owner.epoch})
+          if (transcript.text.length >= 6) void this.#prepareRecall(owner, active.itemId, transcript.text)
           await this.#emit(owner, {
             kind: 'user_transcript_delta', session_epoch: owner.epoch,
             item_id: active.itemId, text: transcript.text,
@@ -838,7 +870,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       kind: 'user_transcript_failed', session_epoch: owner.epoch, item_id: active.itemId,
     })
     await this.#discardAsr(owner)
-    await Promise.resolve(this.#endpointing.reset()).catch(() => undefined)
+    await Promise.resolve(this.#endpointing?.reset()).catch(() => undefined)
   }
 
   async #discardAsr(owner: EpochOwner): Promise<void> {
@@ -910,6 +942,21 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     void active.task.catch(() => undefined)
   }
 
+  #prepareRecall(owner: EpochOwner, itemId: string, query: string): Promise<PreparedMemoryContext | null> {
+    if (!this.#prerecall) return Promise.resolve(null)
+    if (owner.prerecall?.query === query && owner.prerecall.itemId === itemId) return owner.prerecall.result
+    owner.prerecall?.controller.abort()
+    const controller = new AbortController()
+    const signal = AbortSignal.any([owner.controller.signal, controller.signal, AbortSignal.timeout(250)])
+    const started = performance.now()
+    const result = abortable(this.#prerecall(query, signal), signal).catch(() => null).then(content => {
+      this.#record('memory.prerecall.completed', {duration_ms: performance.now() - started, injected: false})
+      return signal.aborted ? null : content
+    })
+    owner.prerecall = {query, itemId, controller, result}
+    return result
+  }
+
   async #runResponse(
     owner: EpochOwner,
     active: ActiveResponse,
@@ -944,11 +991,23 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           visualInputs = inputs.map(item => item.kind === 'user_text' ? {...item, text: item.text + '\n[主机状态：本轮摄像头取帧失败。请明确告诉用户本轮未取得画面，不要假装看到了。]'} : item)
         }
       }
+      const userText = inputs.find(item => item.kind === 'user_text')
+      let memoryContext: string | null = null
+      if (userText?.kind === 'user_text' && this.#prerecall) {
+        const consumeSignal = AbortSignal.any([signal, AbortSignal.timeout(250)])
+        const prepared = await abortable(this.#prepareRecall(owner, owner.userInput?.itemId ?? active.id, userText.text), consumeSignal).catch(() => null)
+        if (prepared) {
+          memoryContext = await abortable(prepared(consumeSignal), consumeSignal).catch(() => null)
+        }
+        throwIfAborted(signal)
+        if (!this.#isCurrent(owner) || owner.response !== active) return
+        this.#record('memory.prerecall.injected', {injected: memoryContext !== null})
+      }
       for await (const event of owner.llm.stream({
         inputs: visualInputs.map(item => structuredClone(item)),
         tools: allowTools ? owner.tools.map(tool => structuredClone(tool)) : [],
         workspaceContext: owner.workspaceContext?.item.content ?? null,
-        responseAdaptation: owner.responseAdaptation?.content ?? null,
+        responseAdaptation: [owner.responseAdaptation?.content, memoryContext].filter(Boolean).join("\n\n") || null,
         signal,
       })) {
         throwIfAborted(signal)
@@ -957,11 +1016,13 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           if (llmResponseId !== null) throw new Error('duplicate LLM response identity')
           llmResponseId = event.response_id
           this.#record('cascaded.llm.started', {epoch: owner.epoch})
-          active.tts = this.#newTtsState(active.id, signal)
-          this.#prewarmTts(owner, active.tts)
+          if(!this.#textOnly){
+            active.tts = this.#newTtsState(active.id, signal)
+            this.#prewarmTts(owner, active.tts)
+          }
         } else if (event.kind === 'text_delta') {
           if (toolSeen) throw new MixedResponseFailure()
-          if (llmResponseId === null || active.tts === null) throw new Error('LLM text before identity')
+          if (llmResponseId === null || (!this.#textOnly&&active.tts === null)) throw new Error('LLM text before identity')
           textSeen = true
           transcriptLength += [...event.text].length
           if (transcriptLength > MAX_REALTIME_TEXT) throw new Error('LLM response text overflow')
@@ -973,7 +1034,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
             kind: 'response_transcript_delta', session_epoch: owner.epoch,
             response_id: active.id, text: event.text,
           })
-          for (const chunk of chunker.push(event.text)) {
+          if(active.tts!==null)for (const chunk of chunker.push(event.text)) {
             await this.#sendTtsText(owner, active.tts, chunk)
           }
         } else if (event.kind === 'tool_call') {
@@ -992,11 +1053,13 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
             throw new Error('LLM terminal identity mismatch')
           }
           if (textSeen) {
+            if(!this.#textOnly){
             if (active.tts === null) throw new Error('missing TTS state')
             for (const chunk of chunker.finish()) {
               await this.#sendTtsText(owner, active.tts, chunk)
             }
             await this.#finishTts(owner, active)
+            }
             await this.#emit(owner, {
               kind: 'response_transcript_final', session_epoch: owner.epoch,
               response_id: active.id, text: transcript.join(''),
@@ -1074,7 +1137,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
 
   #prewarmTts(owner: EpochOwner, state: ActiveTts): void {
     if (state.openPromise !== null || state.session !== null) return
-    state.openPromise = this.#ttsClient.open(
+    state.openPromise = this.#ttsClient!.open(
       combineSignals(state.responseSignal, state.controller.signal),
     )
     void state.openPromise.catch(() => undefined)
@@ -1092,12 +1155,12 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         this.#record('volcengine.tts.prewarm.ready', {epoch: owner.epoch})
       } catch {
         this.#record('volcengine.tts.prewarm.failed', {epoch: owner.epoch})
-        session = await this.#ttsClient.open(
+        session = await this.#ttsClient!.open(
           combineSignals(state.responseSignal, state.controller.signal),
         )
       }
     } else {
-      session = await this.#ttsClient.open(
+      session = await this.#ttsClient!.open(
         combineSignals(state.responseSignal, state.controller.signal),
       )
     }
@@ -1390,7 +1453,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     successful = await this.#abandonPendingToolCall(owner) && successful
     successful = await safeCallWithin(() => this.#closeLlm(owner), this.#settleTimeoutMs) && successful
     successful = await safeCallWithin(
-      async () => { await this.#endpointing.reset() }, this.#settleTimeoutMs,
+      async () => { await this.#endpointing?.reset() }, this.#settleTimeoutMs,
     ) && successful
     return successful
   }
@@ -1417,7 +1480,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
 
   #requiredOwner(): EpochOwner {
     const owner = this.#owner
-    if (this.#state !== 'connected' || owner === null || owner.revoked) {
+    if (this.#state !== 'connected' || owner === null || owner.revoked || owner.historyRestoring) {
       throw new CascadedRealtimeError('state')
     }
     return owner

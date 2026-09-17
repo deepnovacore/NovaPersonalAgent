@@ -65,6 +65,8 @@ export type CancelResult =
   | {readonly code: 'ambiguous_work'; readonly running: readonly RunningWork[]}
 
 export interface CancelContext {
+  /** Host-owned conversation boundary; an empty set authorizes no cancellation. */
+  readonly workIds?: ReadonlySet<string>
   /** Same `surrogate_model` as `intake.assess`; `null` when the model could not pick one of `running`. */
   readonly resolveCancelTarget: (instruction: string, running: readonly RunningWork[]) => Promise<string | null>
   /** Re-checked after the model call, before any slot is aborted; `false` means the request was superseded. */
@@ -132,7 +134,7 @@ export interface ProjectExecutorAdapter extends ExecutorAdapter, AgentExecutor {
   observeProjectContext(observer: (context: PublicProjectContext) => void | Promise<void>): () => void
   observeCommittedWorkspace(observer: (event: CommittedWorkspaceEvent) => void | Promise<void>): () => void
   observeTerminalWorkOrder(observer: (event: TerminalWorkOrderEvent) => void | Promise<void>): () => void
-  commitConfirmed(operation: ConfirmedProjectOperation, dispatch: ProjectRuntimeDispatch): Promise<ProjectCommitResult>
+  commitConfirmed(operation: ConfirmedProjectOperation, dispatch: ProjectRuntimeDispatch, confirmation?: ProjectConfirmationController): Promise<ProjectCommitResult>
   publicProjectView(pendingConfirmation: boolean): PublicProjectView
   publicProjectContext(pendingConfirmation: boolean): PublicProjectContext
   close(): Promise<void>

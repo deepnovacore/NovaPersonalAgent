@@ -1,3 +1,5 @@
+import {randomUUID} from 'node:crypto'
+import {personalCommandSchema} from './personal-agent/contracts.js'
 import type {CapabilityStatus} from './capability-registry.js'
 import type {DesktopStopParentSource} from './desktop-service.js'
 import {reportUsage, type UsageReport} from './realtime/usage.js'
@@ -68,4 +70,14 @@ export function desktopBudgetFailure(error: unknown): DesktopCapabilityState | u
     || !Number.isSafeInteger(value.toolCount) || value.toolCount < 0 || value.toolCount > 100000
     || !Number.isSafeInteger(value.toolBudget) || value.toolBudget < 1 || value.toolBudget > 256) return undefined
   return {state: 'startup_failed', toolCount: value.toolCount, toolBudget: value.toolBudget}
+}
+
+
+/** Settings may configure IM; they cannot read memory or authorize tasks through this port. */
+export async function handleFeishuSettings(command: (input: unknown) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
+  if (!method.startsWith('feishu.')) return {error: 'unsupported'}
+  const parsed = personalCommandSchema.safeParse({type: 'personal.command', request_id: randomUUID(), method, params})
+  if (!parsed.success) return {error: 'invalid_request'}
+  const result = await command(parsed.data) as {ok?: boolean; data?: unknown; error?: string}
+  return result.ok === true ? result.data : {error: result.error ?? 'unavailable'}
 }

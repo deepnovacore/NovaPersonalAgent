@@ -184,3 +184,34 @@ test('discovery uses bounded existing Surrogate gateway without speech or execut
   const conflicted=new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({speak:true,suggestion_id:'s-1',progress_class:null,reason:'bad',proposal:{kind:'question',summary:'Q',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}})),model:'same-model',proactivityPreset:'balanced'})
   await assert.rejects(conflicted.watch(emptyView),/契约/)
 })
+
+test('read-only preparation makes one completion and rejects invented or stale snapshot references',async()=>{
+ const snapshot={user_scope:'local',local_date:'2026-09-14',weekday:'Monday',timezone:'Asia/Shanghai',memory:[],evidence_refs:['file:allowed'],recent_delivery:[]}
+ const proposal={kind:'question' as const,summary:'Review project',why_now:'meeting today',evidence_refs:['file:allowed'],memory_refs:[]}
+ const gateway=new ScriptedGateway([],JSON.stringify({text:'A source-grounded outline',evidence_refs:['file:allowed'],memory_refs:[]}))
+ const surrogate=new GatewaySurrogate({gateway,model:'same',proactivityPreset:'balanced'})
+ const prepared=await surrogate.prepareProposal(snapshot,proposal,new AbortController().signal)
+ assert.equal(prepared?.prepared.trust,'untrusted_external')
+ assert.equal(prepared?.prepared.text,'A source-grounded outline')
+ assert.equal(gateway.completions.length,1)
+ assert.equal(Object.hasOwn(gateway.completions[0]!,'tools'),false)
+ for(const refs of [{evidence_refs:['file:invented'],memory_refs:[]},{evidence_refs:[],memory_refs:[{entry_id:'missing',version:1}]}]){
+  const invalid=new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({text:'Do this',...refs})),model:'same',proactivityPreset:'balanced'})
+  assert.equal(await invalid.prepareProposal(snapshot,proposal,new AbortController().signal),null)
+ }
+ const brief=await surrogate.prepareBrief(snapshot,{kind:'outlook',local_date:'2026-09-14',timezone:'Asia/Shanghai',scheduled_at:'2026-09-14T00:30:00Z',dedupe_key:'brief:test'},new AbortController().signal)
+ assert.equal(brief?.action_label,'查看简报')
+ assert.equal(gateway.completions.length,2)
+})
+
+
+test('preparation rejects a stale active-memory version and skips an empty snapshot',async()=>{
+ const memory={id:'m',version:2,content:'Meeting plan',kind:'plan' as const,origin:'stated' as const,source_refs:[{type:'conversation' as const,ref:'conversation:1',observed_at:'2026-09-14T00:00:00Z'}],observed_at:'2026-09-14T00:00:00Z',recorded_at:'2026-09-14T00:00:00Z',topic:'work',status:'active' as const,corrected_to:null,confidence_note:null}
+ const snapshot={user_scope:'local',local_date:'2026-09-14',weekday:'Monday',timezone:'Asia/Shanghai',memory:[memory],evidence_refs:[],recent_delivery:[]}
+ const proposal={kind:'question' as const,summary:'Meeting',why_now:'today',evidence_refs:[],memory_refs:[{entry_id:'m',version:2}]}
+ const gateway=new ScriptedGateway([],JSON.stringify({text:'Prepared',evidence_refs:[],memory_refs:[{entry_id:'m',version:1}]}))
+ const surrogate=new GatewaySurrogate({gateway,model:'same',proactivityPreset:'balanced'})
+ assert.equal(await surrogate.prepareProposal(snapshot,proposal,new AbortController().signal),null)
+ assert.equal(await surrogate.prepareProposal({...snapshot,memory:[]},proposal,new AbortController().signal),null)
+ assert.equal(gateway.completions.length,1)
+})

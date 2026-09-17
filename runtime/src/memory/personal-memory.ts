@@ -5,6 +5,7 @@ export * from './entry.js'
 export type PersonalMemoryRecallScope = 'recent' | 'any'
 
 export interface PersonalMemoryRecallHit {
+  readonly revision?: MemoryVersion
   readonly memoryId: string
   readonly text: string
   /** Empty when a backend cannot provide provenance; never invent evidence references. */
@@ -32,6 +33,8 @@ export interface PersonalMemoryRecallResult {
 }
 
 export interface PersonalMemoryRememberTurn {
+  /** Host-confirmed text input; raw ASR and imported messages omit this. */
+  readonly confirmed?: boolean
   /** Host-issued idempotency key; repeated admission must not duplicate the source. */
   readonly sourceId: string
   readonly sessionId: string
@@ -78,6 +81,10 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  readonly readEvidence?: (id:string) => Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}|null>
+  readonly recordEvidence?: (input:{sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean}) => Promise<{evidence_id:string}>
+  readonly evidenceFor?: (id:string,revision:MemoryVersion) => Promise<readonly {id:string;source_kind:string;locator:string;text:string;observed_at:string}[]>
+  readonly reextract?: (id:string) => Promise<void>
   readonly observeSource?: (input:MemoryObservation) => Promise<MemoryEntry|null>
   readonly capabilities?: () => MemoryCapabilities
   readonly list?: (options?: MemoryListOptions) => Promise<MemoryPage>

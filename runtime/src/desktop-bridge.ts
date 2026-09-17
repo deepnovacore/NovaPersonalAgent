@@ -97,6 +97,11 @@ export interface BridgeService {
 }
 
 export interface DesktopBridgeOptions {
+  readonly conversationService?:(id:string)=>BridgeService|undefined
+  readonly voiceService?:()=>BridgeService|undefined
+  readonly sendConversationAudio?: (id:string,pcm:Uint8Array)=>Promise<void>
+  readonly submitConversationText?: (id:string,text:string,requestId?:string)=>Promise<void>
+  readonly validateConversationInput?: (kind:'audio'|'dictation',id:string|undefined)=>void
   readonly token: string
   readonly service: BridgeService
   /** Set to tear the transport down. Overflow of a non-droppable frame trips it. */
@@ -164,7 +169,7 @@ export class DesktopSocketBridge {
   readonly #inputInstanceId = randomUUID()
   readonly #textReceipts = new Map<string,{hash:string;result:Promise<{type:'input.text_result';request_id:string;ok:boolean;error?:string}>}>()
   #draftInput = false
-  #dictation: {id: string; chunks: Uint8Array[]; size: number; finishing: boolean; controller: AbortController; timer: ReturnType<typeof setTimeout>} | undefined
+  #dictation: {id: string; conversationId?:string; chunks: Uint8Array[]; size: number; finishing: boolean; controller: AbortController; timer: ReturnType<typeof setTimeout>} | undefined
   #claimed = false
   #authenticated = false
   #everAuthenticated = false
@@ -181,7 +186,18 @@ export class DesktopSocketBridge {
   #firstFrameSeen: string | null = null
   #playbackTelemetryRejected = 0
 
+  readonly #conversationService:DesktopBridgeOptions['conversationService']
+  readonly #voiceService: DesktopBridgeOptions['voiceService']
+  #voiceConversation:string|undefined
+  readonly #sendConversationAudio: DesktopBridgeOptions['sendConversationAudio']
+  readonly #submitConversationText: DesktopBridgeOptions['submitConversationText']
+  readonly #validateConversationInput: DesktopBridgeOptions['validateConversationInput']
   constructor(options: DesktopBridgeOptions) {
+    this.#conversationService=options.conversationService
+    this.#voiceService=options.voiceService
+    this.#sendConversationAudio=options.sendConversationAudio
+    this.#submitConversationText=options.submitConversationText
+    this.#validateConversationInput=options.validateConversationInput
     // 128 bits of hex, exactly. A shorter token is a weaker one, and a longer one means the caller is
     // passing something other than what this expects.
     if (options.token.length !== 32 || !/^[0-9a-fA-F]+$/u.test(options.token)) {
@@ -447,7 +463,7 @@ export class DesktopSocketBridge {
   #fencePlaybackForConnectionBoundary(
     options: {readonly resumeDelivery?: boolean} = {},
   ): void {
-    void this.#service.playbackDisconnected(options).catch(() => {
+    void (this.#voiceService?.()??this.#service).playbackDisconnected(options).catch(() => {
       this.#telemetry?.record('desktop.playback_disconnect_failed', {})
     })
   }
@@ -489,23 +505,24 @@ export class DesktopSocketBridge {
       draft.chunks.push(pcm.slice()); draft.size += pcm.length
       return
     }
-    if (!this.#draftInput) await this.#service.sendAudio(pcm)
+    if (!this.#draftInput) {this.#validateConversationInput?.('audio',this.#voiceConversation);if(this.#voiceConversation){if(!this.#sendConversationAudio)throw Error('voice_unavailable');await this.#sendConversationAudio(this.#voiceConversation,pcm)}else await this.#service.sendAudio(pcm)}
   }
 
   async receiveControl(control: DesktopControl): Promise<void> {
-    if (control.type === 'input.audio') { if (this.#dictation) throw new Error('dictation active'); this.#draftInput = false; return }
-    if (control.type === 'input.dictation') { this.#dictationControl(control.id, control.action); return }
+    if (control.type === 'input.audio') { this.#validateConversationInput?.('audio',control.conversation_id);this.#voiceConversation=control.conversation_id; if (this.#dictation) throw new Error('dictation active'); this.#draftInput = false; return }
+    if (control.type === 'input.dictation') { if(control.action==='start')this.#validateConversationInput?.('dictation',control.conversation_id); this.#dictationControl(control.id, control.action,control.conversation_id); return }
     if (control.type === 'input.text') {
       const submit=async()=>{
         if (this.#dictation) throw new Error('dictation active')
+        if(control.conversation_id){if(!this.#submitConversationText)throw Error('conversation_runtime_unavailable');await this.#submitConversationText(control.conversation_id,control.text,control.request_id);return}
         if (!this.#service.submitText) throw new Error('text input unavailable')
         await this.#service.submitText(control.text)
       }
       if(control.request_id===undefined){await submit();return}
       const id=control.request_id
-      const result=(ok:boolean,error?:string)=>({type:'input.text_result' as const,request_id:id,ok,...(error===undefined?{}:{error})})
+      const result=(ok:boolean,error?:string)=>({type:'input.text_result' as const,request_id:id,ok,...(control.conversation_id?{conversation_id:control.conversation_id}:{}),...(error===undefined?{}:{error})})
       let receipt:ReturnType<typeof result>
-      const hash=createHash('sha256').update(control.text).digest('hex')
+      const hash=createHash('sha256').update(JSON.stringify([control.conversation_id??null,control.text])).digest('hex')
       const prior=this.#textReceipts.get(id)
       if(control.input_instance_id!==undefined&&control.input_instance_id!==this.#inputInstanceId)receipt=result(false,'outcome_unknown')
       else if(prior)receipt=prior.hash===hash?await prior.result:result(false,'request_id_conflict')
@@ -527,7 +544,7 @@ export class DesktopSocketBridge {
     clearTimeout(this.#dictation.timer); this.#dictation.controller.abort(); this.#dictation = undefined
   }
 
-  #dictationControl(id: string, action: 'start' | 'finish' | 'cancel'): void {
+  #dictationControl(id: string, action: 'start' | 'finish' | 'cancel',conversationId?:string): void {
     if (action === 'cancel') { if (this.#dictation?.id === id) this.#cancelDictation(); return }
     if (!this.#service.transcribeDraft) throw new Error('dictation unavailable')
     if (action === 'start') {
@@ -535,7 +552,7 @@ export class DesktopSocketBridge {
       if (this.#dictation) throw new Error('dictation active')
       const controller = new AbortController()
       const timer = setTimeout(() => { if (this.#dictation?.controller === controller) this.#cancelDictation() }, 90000)
-      this.#dictation = {id, chunks: [], size: 0, finishing: false, controller, timer}
+      this.#dictation = {id,...(conversationId?{conversationId}:{}), chunks: [], size: 0, finishing: false, controller, timer}
       return
     }
     const draft = this.#dictation
@@ -543,15 +560,15 @@ export class DesktopSocketBridge {
     draft.finishing = true
     const pcm = Buffer.concat(draft.chunks); draft.chunks = []
     void this.#service.transcribeDraft(pcm, AbortSignal.any([draft.controller.signal, AbortSignal.timeout(30000)]))
-      .then(text => { if (this.#dictation === draft) this.#enqueue(JSON.stringify({type: 'input.transcription', id, text})) })
-      .catch(() => { if (this.#dictation === draft) this.#enqueue(JSON.stringify({type: 'input.transcription', id, error: 'recognition_failed'})) })
+      .then(text => { if (this.#dictation === draft) this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), text})) })
+      .catch(() => { if (this.#dictation === draft) this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), error: 'recognition_failed'})) })
       .finally(() => { if (this.#dictation === draft) this.#cancelDictation() })
   }
 
   async #receiveCommand(command: DesktopCommand): Promise<void> {
-    if (command.kind === 'input_audio') return this.receiveControl({type: 'input.audio'})
-    if (command.kind === 'input_text') return this.receiveControl({type: 'input.text', text: String(command.payload.text),...(typeof command.payload.request_id==='string'?{request_id:command.payload.request_id}:{}),...(typeof command.payload.input_instance_id==='string'?{input_instance_id:command.payload.input_instance_id}:{})})
-    if (command.kind === 'input_dictation') return this.receiveControl({type: 'input.dictation', id: String(command.payload.id), action: command.payload.action as 'start' | 'finish' | 'cancel'})
+    if (command.kind === 'input_audio') return this.receiveControl({type: 'input.audio',...(typeof command.payload.conversation_id==='string'?{conversation_id:command.payload.conversation_id}:{})})
+    if (command.kind === 'input_text') return this.receiveControl({type: 'input.text', text: String(command.payload.text),...(typeof command.payload.conversation_id==='string'?{conversation_id:command.payload.conversation_id}:{}),...(typeof command.payload.request_id==='string'?{request_id:command.payload.request_id}:{}),...(typeof command.payload.input_instance_id==='string'?{input_instance_id:command.payload.input_instance_id}:{})})
+    if (command.kind === 'input_dictation') return this.receiveControl({type: 'input.dictation', id: String(command.payload.id), action: command.payload.action as 'start' | 'finish' | 'cancel',...(typeof command.payload.conversation_id==='string'?{conversation_id:command.payload.conversation_id}:{})})
     if (
       this.#telemetry !== undefined
       && command.kind !== 'playback_telemetry'
@@ -587,30 +604,30 @@ export class DesktopSocketBridge {
         )
         return
       case 'speech_onset':
-        await this.#service.localSpeechOnset(String(command.payload.speech_id))
+        await (this.#voiceService?.()??this.#service).localSpeechOnset(String(command.payload.speech_id))
         return
       case 'playback_started':
-        this.#service.playbackStarted(
+        (this.#voiceService?.()??this.#service).playbackStarted(
           String(command.payload.utterance_id),
           Number(command.payload.generation_epoch),
         )
         return
       case 'playback_done':
-        this.#service.playbackDone(
+        (this.#voiceService?.()??this.#service).playbackDone(
           String(command.payload.utterance_id),
           Number(command.payload.generation_epoch),
           optionalPlayedMs(command.payload),
         )
         return
       case 'playback_stopped':
-        await this.#service.playbackStopped(
+        await (this.#voiceService?.()??this.#service).playbackStopped(
           String(command.payload.utterance_id),
           Number(command.payload.generation_epoch),
           optionalPlayedMs(command.payload),
         )
         return
       case 'playback_cleared':
-        this.#service.playbackCleared(
+        (this.#voiceService?.()??this.#service).playbackCleared(
           String(command.payload.utterance_id),
           Number(command.payload.generation_epoch),
           optionalPlayedMs(command.payload),
@@ -619,7 +636,9 @@ export class DesktopSocketBridge {
       case 'project_confirmation_decision': {
         const proposalId = command.payload.proposal_id
         if (typeof proposalId !== 'string') return
-        await this.#service.projectConfirmationDecision(
+        const target=typeof command.payload.conversation_id==='string'?this.#conversationService?.(command.payload.conversation_id):this.#service
+        if(!target)return
+        await target.projectConfirmationDecision(
           proposalId,
           command.payload.confirmed === true,
         )
@@ -629,7 +648,9 @@ export class DesktopSocketBridge {
         const approvalId = command.payload.approval_id
         // A decision names its executor; one that names another executor is not ours to relay.
         if (typeof approvalId !== 'string' || command.payload.executor !== this.#executor?.executor) return
-        this.#service.executorApprovalDecision(approvalId, command.payload.approved === true, command.payload.scope === 'session' ? 'session' : undefined)
+        const target=typeof command.payload.conversation_id==='string'?this.#conversationService?.(command.payload.conversation_id):this.#service
+        if(!target)return
+        target.executorApprovalDecision(approvalId, command.payload.approved === true, command.payload.scope === 'session' ? 'session' : undefined)
         return
       }
       default:
@@ -1088,9 +1109,9 @@ function commandFromControl(control: DesktopControl): DesktopCommand {
     case 'executor.task_action':
     case 'coding.progress_narration':
       throw new DesktopProtocolError('desktop host control requires authenticated transport')
-    case 'input.audio': return {kind: 'input_audio', payload: {}}
-    case 'input.text': return {kind: 'input_text', payload: {text: control.text,...(control.request_id===undefined?{}:{request_id:control.request_id}),...(control.input_instance_id===undefined?{}:{input_instance_id:control.input_instance_id})}}
-    case 'input.dictation': return {kind: 'input_dictation', payload: {id: control.id, action: control.action}}
+    case 'input.audio': return {kind: 'input_audio', payload: {...(control.conversation_id?{conversation_id:control.conversation_id}:{})}}
+    case 'input.text': return {kind: 'input_text', payload: {...(control.conversation_id?{conversation_id:control.conversation_id}:{}),text: control.text,...(control.request_id===undefined?{}:{request_id:control.request_id}),...(control.input_instance_id===undefined?{}:{input_instance_id:control.input_instance_id})}}
+    case 'input.dictation': return {kind: 'input_dictation', payload: {id: control.id, action: control.action,...(control.conversation_id?{conversation_id:control.conversation_id}:{})}}
     case 'speech.onset':
       return {
         kind: 'speech_onset',
@@ -1117,12 +1138,12 @@ function commandFromControl(control: DesktopControl): DesktopCommand {
     case 'project.confirmation_decision':
       return {
         kind: 'project_confirmation_decision',
-        payload: {proposal_id: control.proposal_id, confirmed: control.confirmed},
+        payload: {proposal_id: control.proposal_id, confirmed: control.confirmed,...(control.conversation_id?{conversation_id:control.conversation_id}:{})},
       }
     case 'executor.approval_decision':
       return {
         kind: 'executor_approval_decision',
-        payload: {executor: control.executor, approval_id: control.approval_id, approved: control.approved, ...(control.scope === undefined ? {} : {scope: control.scope})},
+        payload: {...(control.conversation_id?{conversation_id:control.conversation_id}:{}),executor: control.executor, approval_id: control.approval_id, approved: control.approved, ...(control.scope === undefined ? {} : {scope: control.scope})},
       }
     case 'clock.pong':
       return {

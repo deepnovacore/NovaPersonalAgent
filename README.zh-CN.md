@@ -104,8 +104,8 @@ Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia`
 ## 5. 路线图
 
 - [ ] **v0.2.0（`v0.2.0dev`）：** 完善跨平台审批；减少快脑原生工具并将 workspace/session 调度下沉到 coding 执行器；支持可替换 ASR/LLM/TTS 及供应商解耦；自定义 MCP、搜索/RAG 与中文唤醒词“你好星核”；VoiceMem 服务个人、Workspace Graph 服务工作区；通过 Tailscale 连接 PC runtime 的原生 iOS 客户端。已有实现与待验收项分别见 [规格](docs/specs/v0.2.0/00-overview.md) 和 [发布门槛](docs/specs/v0.2.0/RELEASE-GATE.md)。
-- [ ] **v0.3.0：** M5–M7：文字/语音主窗口、基于记忆的主动发现、持久动态、可纠正/忘记的个人记忆与授权本地目录。见 [规格](docs/specs/v0.3.0/00-overview.md)。
-- [ ] **v0.4.0：** M8 邮件/日历；M9 Kimi Code + pi agent、GUI/AutoGLM 与真实 agent2agent 演示。见 [规格](docs/specs/v0.4.0/00-overview.md)。
+- [ ] **v0.3.0：** M5–M7：文字/语音主窗口、基于记忆的主动发现、持久动态、可纠正/忘记的个人记忆与授权本地目录；随后是统一记忆底座、一个邮件/日历 provider 与飞书连接器（M8-Mail、M8-IM）。见 [规格](docs/specs/v0.3.0/00-overview.md)。
+- [ ] **v0.4.0：** M9 Kimi Code + pi agent、GUI/AutoGLM 与真实 agent2agent 演示。见 [规格](docs/specs/v0.4.0/00-overview.md)。
 
 `v0.2.0dev` 通过自动化门禁即可集成；合入 `main` 前须完成
 [发布台账](docs/specs/v0.2.0/RELEASE-GATE.md)中的全部功能与支持平台验收。Linux 暂不发布，保留 Ubuntu 源码测试。

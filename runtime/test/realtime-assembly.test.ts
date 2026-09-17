@@ -17,6 +17,7 @@ import {
   type Assembly,
 } from '../src/assembly.js'
 import {
+  composeRealtime,
   REALTIME_ASSEMBLY_SHUTDOWN_GRACE_MS,
   buildRealtimeAssembly as buildRealtimeAssemblyRaw,
   type CodingAgentControllerFactory,
@@ -4187,4 +4188,25 @@ test('personal host shares opened memory, persists configuration and closes with
     assert.equal(realtime.personalAgent.snapshot().settings.discovery_enabled,false)
   } finally {await realtime.stop();await rm(dir,{recursive:true,force:true})}
   assert.equal(closes,1)
+})
+
+test('knowledge-only composition opens canonical originals without enabling personal capture', async () => {
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-knowledge-only-'))
+  const capabilities=parseCapabilityRegistry({version:1,modules:{search:{enabled:false},coding:{enabled:false},knowledge:{enabled:true}}},{})
+  const settings=settingsSchema.parse({executors:[],model_api_key:'test-key',knowledge_path:join(directory,'knowledge.sqlite'),workspace_graph_path:join(directory,'memory.sqlite'),memory_connection:'disabled'})
+  const knowledge=await prepareKnowledge(settings,capabilities)
+  assert.ok(knowledge)
+  const core=buildAssembly({settings,capabilities,knowledge,frameSource:new RecordingFrameSource(),gateway:new NeverCalledGateway()})
+  const realtime=composeRealtime(core,new AbortAwareProvider(),{settings,idFactory:()=> 'knowledge-only-id'},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:2})
+  try {
+    await realtime.start()
+    const memory=realtime.personalMemory
+    assert.ok(memory?.recordEvidence)
+    assert.equal(memory.remember,undefined)
+    assert.equal(memory.list,undefined)
+    assert.equal(memory.responseAdaptation,undefined)
+    const saved=await memory.recordEvidence({sourceId:'knowledge:document',locator:'notes/demo',text:'Demo notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
+    assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence?.text,'Demo notes')
+    assert.deepEqual((await memory.recall('demo')).hits,[])
+  } finally {await realtime.stop();await knowledge.close();await rm(directory,{recursive:true,force:true})}
 })

@@ -916,6 +916,8 @@ async function handleControl(message) {
       'type',
       'workspace_display_name',
     ]
+    if (message.conversation_id !== undefined && (typeof message.conversation_id !== 'string' || !message.conversation_id || message.conversation_id.length > 128)) return
+    if (message.conversation_id !== undefined) {baseKeys.push('conversation_id');baseKeys.sort()}
     const validKeys = keys === baseKeys.join(',')
       || keys === [...baseKeys, 'pending_confirmation_id'].sort().join(',')
     const validConfirmationId = pendingConfirmationId === undefined
@@ -962,6 +964,7 @@ async function handleControl(message) {
           }
         : null
       confirmationDecision.sync({
+        conversationId: message.conversation_id,
         pending: pillPending,
         proposalId: pillPending ? pendingConfirmationId ?? null : null,
         busy: pendingBusy,
@@ -984,6 +987,7 @@ async function handleControl(message) {
           }
         : null
       codexApprovalDecision.sync({
+        conversationId: approval.conversation_id,
         pending: approval.pending_approval,
         approvalId: approval.pending_approval ? approval.pending_approval_id : null,
         executor: approval.executor,
@@ -1174,8 +1178,7 @@ async function refreshMicrophonePermission() {
 }
 
 async function retryMicrophonePermission() {
-  const microphone = await refreshMicrophonePermission()
-  if (microphone === 'granted' && !axes.activated) await activateCapture()
+  await refreshMicrophonePermission()
 }
 
 async function boot() {

@@ -269,6 +269,7 @@ export interface ServiceProvider {
 }
 
 export interface RealtimeServiceOptions {
+  readonly onProviderEvent?: (event: RealtimeProviderEvent)=>void
   readonly intake?: Pick<
     IntakeOptions,
     'models' | 'settings' | 'roster' | 'running' | 'activeProject' | 'resolveTarget' | 'dispatch' | 'steer' | 'cancel' | 'record'
@@ -291,6 +292,7 @@ export interface RealtimeServiceOptions {
   readonly onCaption?: (frame: CaptionFrame) => void
   /** Receives a user transcript only after the core accepted its evidence; it must not block audio. */
   readonly onUserTranscriptAccepted?: (turn: {
+    readonly confirmed?: boolean
     readonly text: string
     readonly originRef: string
     readonly sessionEpoch: number
@@ -538,7 +540,9 @@ export class RealtimeService {
   #awaitingUserOrigin = false
   #userOriginPreexistingResponseId: string | null = null
 
+  readonly #onProviderEvent: ((event:RealtimeProviderEvent)=>void)|undefined
   constructor(options: RealtimeServiceOptions) {
+    this.#onProviderEvent=options.onProviderEvent
     const recovery = options.preemptiveAlertHistoryRecovery ?? options.guardHistoryRecovery ?? 'none'
     if (recovery !== 'none' && recovery !== 'packed') {
       throw new TypeError('unknown preemptive-alert history recovery arm')
@@ -2767,6 +2771,7 @@ export class RealtimeService {
         received = true
         try {
           await this.handleEvent(event)
+          this.#onProviderEvent?.(event)
         } catch (cause) {
           if (cause instanceof ItemDeliveryUncertainError) {
             await this.#recoverUncertainDelivery(cause)
@@ -3247,7 +3252,7 @@ export class RealtimeService {
         const originRef = await this.#bridge.acceptUserTranscript(event.text)
         if (event.session_epoch <= this.#discardedInputEpoch) return
         this.#notifyAcceptedUserTranscript({
-          text: event.text, originRef, sessionEpoch: event.session_epoch, itemId: event.item_id, userInputRevision: inputRevision,
+          text: event.text, originRef, sessionEpoch: event.session_epoch, itemId: event.item_id, userInputRevision: inputRevision, ...(event.input_kind==='text'?{confirmed:true}:{}),
         })
         this.#rememberUserOriginRef(event.session_epoch, event.item_id, originRef)
         this.#intakeUser = {text: event.text, origin_ref: originRef, epoch: event.session_epoch, inputRevision, localOnsetRevision}
@@ -3343,6 +3348,7 @@ export class RealtimeService {
   }
 
   #notifyAcceptedUserTranscript(turn: {
+    readonly confirmed?: boolean
     readonly text: string
     readonly originRef: string
     readonly sessionEpoch: number
@@ -3805,8 +3811,7 @@ export class RealtimeService {
     const callOverCapacity = this.#toolCalls.size >= MAX_TRACKED_TOOL_CALLS
     const binding = hidden ? undefined : this.#tools.bindings.get(event.name)
     const personalRecall = binding?.kind === 'query'
-      && event.name === 'memory__recall'
-      && event.arguments.source === 'personal'
+      && (event.name === 'memory__evidence' || (event.name === 'memory__recall' && event.arguments.source !== 'session'))
     const noIntakeAgentDispatch = !hidden
       && event.name === DISPATCH_TOOL
       && this.#intake === undefined

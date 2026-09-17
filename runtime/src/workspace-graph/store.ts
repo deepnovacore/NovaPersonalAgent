@@ -1,3 +1,6 @@
+import {recordWorkspaceRevision} from '../memory-substrate/workspace.js'
+import {migrateLegacyMemory} from '../memory-substrate/migration.js'
+import {initializeMemory, memoryOperation, type MemoryOperation} from '../memory-substrate/store.js'
 import { createHash } from 'node:crypto'
 
 import { z } from 'zod'
@@ -482,6 +485,16 @@ export class WorkspaceGraphStore {
       database.exec('PRAGMA busy_timeout=1000')
       database.exec('PRAGMA foreign_keys=ON')
       this.#migrate(database)
+      initializeMemory(database)
+      database.exec('BEGIN IMMEDIATE')
+      try {
+        for (const [table, kind] of [['logical_workspaces','LogicalWorkspace'],['workspace_instances','WorkspaceInstance'],['relation_cards','RelationCard']] as const) {
+          for (const row of database.prepare(`SELECT payload_json FROM ${table}`).all()) {
+            recordWorkspaceRevision(database, kind, JSON.parse(String(row.payload_json)) as WorkspaceCard | RelationCard)
+          }
+        }
+        database.exec('COMMIT')
+      } catch (error) { database.exec('ROLLBACK'); throw error }
       // A fresh database must finish its serialized schema transaction before
       // concurrent clients negotiate WAL. On Windows, racing journal_mode with
       // another connection's first migration fails immediately despite the busy
@@ -500,6 +513,15 @@ export class WorkspaceGraphStore {
       }
       if (error instanceof WorkspaceGraphStoreError) throw error
       throw new WorkspaceGraphStoreError('STORE_MIGRATION_FAILED')
+    }
+  }
+
+  memory(operation: MemoryOperation, input: unknown, openLegacy?: GraphDatabaseFactory): unknown {
+    try { return operation === 'migrate_legacy' ? migrateLegacyMemory(this.#requireDatabase(), input, openLegacy ?? (() => {throw new Error('STORE_INVALID_OPERATION')})) : memoryOperation(this.#requireDatabase(), operation, input) }
+    catch (error) {
+      const code = error instanceof Error ? error.message : ''
+      if (['STORE_STALE_REVISION','STORE_NOT_FOUND','STORE_INVALID_OPERATION','STORE_IDEMPOTENCY_CONFLICT'].includes(code)) throw new WorkspaceGraphStoreError(code as WorkspaceGraphStoreErrorCode)
+      throw new WorkspaceGraphStoreError('STORE_WRITE_FAILED')
     }
   }
 
@@ -1559,6 +1581,7 @@ export class WorkspaceGraphStore {
   }
 
   #replaceLogicalWorkspace(database: GraphDatabase, workspace: LogicalWorkspace): void {
+    workspace = recordWorkspaceRevision(database, 'LogicalWorkspace', workspace)
       database.prepare(`
         INSERT INTO logical_workspaces(
           logical_workspace_id, display_name, canonical_remote,
@@ -1583,6 +1606,7 @@ export class WorkspaceGraphStore {
   }
 
   #replaceWorkspaceInstance(database: GraphDatabase, instance: WorkspaceInstance): void {
+    instance = recordWorkspaceRevision(database, 'WorkspaceInstance', instance)
       database.prepare(`
         INSERT INTO workspace_instances(
           instance_id, logical_workspace_id, display_name, path_label, branch,
@@ -1622,6 +1646,7 @@ export class WorkspaceGraphStore {
   }
 
   #writeRelation(database: GraphDatabase, relation: RelationCard): void {
+    relation = recordWorkspaceRevision(database, 'RelationCard', relation)
     database.prepare(`
       INSERT INTO relation_cards(
         source_logical_id, target_logical_id, relation_type, confidence, reason,

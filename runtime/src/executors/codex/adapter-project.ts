@@ -243,7 +243,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
 
   /** 0 → not_running; 1 → cancel it (no model call); >1 → one `resolveCancelTarget` call, else ambiguous. */
   async cancel(instruction: string | undefined, context: CancelContext): Promise<CancelResult> {
-    const running = this.running()
+    const running = this.running().filter(work => context.workIds === undefined || context.workIds.has(work.work_id))
     if (running.length === 0) return {code: 'not_running'}
     let target = running.length === 1 ? running[0] : undefined
     if (target === undefined && instruction !== undefined && instruction !== '') {
@@ -447,8 +447,9 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   async commitConfirmed(
     operation: ConfirmedProjectOperation,
     runtimeDispatch: ProjectRuntimeDispatch,
+    confirmation: ProjectConfirmationController = this.#confirmation,
   ): Promise<ProjectCommitResult> {
-    if (!this.#confirmation.ownsConfirmed(operation)) {
+    if (!confirmation.ownsConfirmed(operation)) {
       return commitResult(false, 'confirmation_invalid')
     }
     if (this.#projectCommitActive) return commitResult(false, 'confirmation_in_progress')
@@ -458,7 +459,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       if (workOrder === null) {
         // Workspace-only changes have no runtime delegate admission. Claim immediately; every
         // validation or store failure after this boundary is terminal rather than retryable.
-        if (!this.#confirmation.claimConfirmed(operation)) {
+        if (!confirmation.claimConfirmed(operation)) {
           return commitResult(false, 'confirmation_invalid')
         }
         let committedWorkspace: WorkspaceRecord
@@ -505,14 +506,14 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       const busy = this.#slots.size >= MAX_CONCURRENT_WORK
         || (operation.workspace_id !== null && this.#slots.has(operation.workspace_id))
       if (!normalized.ok || normalized.value.work_order !== workOrder || busy) {
-        if (busy) this.#confirmation.rollbackConfirmed(operation)
-        else this.#confirmation.rejectConfirmed(operation)
+        if (busy) confirmation.rollbackConfirmed(operation)
+        else confirmation.rejectConfirmed(operation)
         return commitResult(false, busy ? 'busy' : 'invalid_operation')
       }
       try {
         await this.#revalidateProposal(operation)
       } catch (error) {
-        this.#confirmation.rejectConfirmed(operation)
+        confirmation.rejectConfirmed(operation)
         return commitResult(false, projectErrorCode(error))
       }
       let launchAuthorized = false
@@ -534,13 +535,13 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
         () => launchAuthorized,
       )
       if (!admission.accepted || admission.delegate_id === null) {
-        this.#confirmation.rollbackConfirmed(operation)
+        confirmation.rollbackConfirmed(operation)
         return commitResult(false, 'runtime_rejected')
       }
-      if (!this.#confirmation.recordRuntimeAdmission(operation)) {
+      if (!confirmation.recordRuntimeAdmission(operation)) {
         return commitResult(false, 'confirmation_invalid')
       }
-      if (!this.#confirmation.claimConfirmed(operation)) {
+      if (!confirmation.claimConfirmed(operation)) {
         return commitResult(false, 'confirmation_invalid')
       }
       this.#confirmedBindings.set(operation, Object.freeze({

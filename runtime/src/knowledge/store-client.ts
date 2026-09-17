@@ -5,6 +5,7 @@ import type {
   KnowledgeJob,
   KnowledgeRecallHit,
   KnowledgeSource,
+  KnowledgeIndexChunk,
   ReplaceKnowledgeSourceInput,
 } from './types.js'
 
@@ -108,6 +109,12 @@ export class KnowledgeStoreClient {
   }
 
   listSources(): Promise<readonly KnowledgeSource[]> { return this.#request('list_sources', {}) }
+
+  listChunks(sourceId: string, offset = 0): Promise<readonly KnowledgeIndexChunk[]> { return this.#request('list_chunks', {source_id: sourceId, offset}) }
+
+  async linkEvidence(links: readonly {chunk_id: string; content_digest: string; evidence_id: string}[]): Promise<void> {
+    await this.#request('link_evidence', {links})
+  }
 
   async replaceSource(input: ReplaceKnowledgeSourceInput): Promise<void> {
     await this.#request('replace_source', {input})

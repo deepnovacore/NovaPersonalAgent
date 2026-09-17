@@ -141,6 +141,12 @@ export class SensitiveContentPolicy {
     let matches = 0
     let scrubbed = value
 
+    // A pasted or truncated private key is sensitive regardless of its file name.
+    scrubbed = scrubbed.replace(/-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/gu, () => {
+      matches += 1
+      return '[redacted]'
+    })
+
     scrubbed = scrubbed.replace(/https?:\/\/[^\s<>"']+/giu, match => {
       if (!urlCarriesCredentials(match)) return match
       matches += 1

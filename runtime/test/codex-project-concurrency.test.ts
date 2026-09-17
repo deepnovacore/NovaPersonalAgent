@@ -9,6 +9,7 @@ import {test} from 'node:test'
 import type {TransportOutcome} from '../src/executors/codex/app-server-transport.js'
 import {ProjectResolutionError, type RunningWork} from '../src/coding-executor.js'
 import type {ExecutorHandoff} from '../src/causal-runtime.js'
+import {ProjectConfirmationController} from '../src/project-confirmation.js'
 import {MAX_CONCURRENT_WORK} from '../src/work-tools.js'
 import {projectStateMessage} from '../src/desktop-wire.js'
 import {
@@ -150,7 +151,9 @@ test('cancel aborts the run slot: one close, a cancelled handoff through the nor
   try {
     const work = run(value, 'long task', {title: 'Long', delegateId: 'work-1'})
     await settleWithin('run starts', gates.get('alpha')!.started)
-    const cancelled = await value.adapter.cancel(undefined, noResolver)
+    assert.deepEqual(await value.adapter.cancel(undefined, {...noResolver, workIds: new Set()}), {code: 'not_running'})
+    assert.equal(value.adapter.running().length, 1, 'another conversation cannot implicitly cancel the only global work')
+    const cancelled = await value.adapter.cancel(undefined, {...noResolver, workIds: new Set(['work-1'])})
     assert.deepEqual(cancelled, {code: 'cancelled', work: {work_id: 'work-1', project: 'alpha', title: 'Long'}})
     const handoff = await settleWithin('cancelled handoff', work)
     assert.deepEqual(handoff, {
@@ -417,6 +420,26 @@ test('desktop task port cancels the exact slot and retains terminal workspace wi
     await b
   } finally {
     for (const gate of gates.values()) gate.release()
+    await value.adapter.close()
+    await rm(value.root, {recursive: true, force: true})
+  }
+})
+
+// A shared executor retains one workspace lock table, but approval authority belongs to a chat.
+test('shared project executor accepts only the supplied conversation confirmation', async () => {
+  const value = await fixture()
+  try {
+    const scoped = new ProjectConfirmationController({clock: value.clock, idFactory: () => 'chat-b'})
+    const {workspace, ...proposal} = await value.adapter.resolveIntakeTarget({kind: 'switch', project: 'alpha', session: 'latest'})
+    void workspace
+    const pending = scoped.prepare({...proposal, work_order: null, origin_ref: 'chat:b'})
+    const outcome = scoped.acceptDirectDecision({proposalId: pending.proposal_id, confirmed: true})
+    assert.ok(outcome.operation)
+    const dispatch = () => { throw new Error('workspace selection must not dispatch') }
+    assert.equal((await value.adapter.commitConfirmed(outcome.operation, dispatch)).code, 'confirmation_invalid')
+    assert.equal((await value.adapter.commitConfirmed(outcome.operation, dispatch, scoped)).code, 'committed')
+    assert.equal((await value.adapter.commitConfirmed(outcome.operation, dispatch, scoped)).code, 'confirmation_invalid')
+  } finally {
     await value.adapter.close()
     await rm(value.root, {recursive: true, force: true})
   }

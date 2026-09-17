@@ -95,7 +95,7 @@ test('real HTTP discovers exact frontend allowlist, calls original alias, classi
     assert.equal(result.outcome, 'ok'); assert.equal(result.trust, 'untrusted_external')
     assert.deepEqual(local.stats(), {listed: 1, called: 1, deleted: 0})
     const core = buildAssembly({settings: loadSettings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'fixture'}), externalMcp: prepared})
-    assert.deepEqual(core.tools.schemas.map(schema => (schema.function as {name: string}).name).sort(), ['memory__recall', 'mcp__external__write', `mcp__external__${alias}`].sort())
+    assert.deepEqual(core.tools.schemas.map(schema => (schema.function as {name: string}).name).sort(), ['memory__recall', 'memory__evidence', 'mcp__external__write', `mcp__external__${alias}`].sort())
     await core.stop()
     assert.equal(local.stats().deleted, 1)
   } finally {await prepared.close(); await local.close()}
@@ -376,7 +376,7 @@ test('actual desktop entry awaits discovery and owns cleanup when final exact fr
     './desktop-service.js': `export {buildDesktopRealtimeComposition} from ${JSON.stringify(desktopUrl)};
       export async function runDesktopEntryWithStopSources({construct}) {
         const owned=[]; try {await construct({own:close=>owned.push(close)}); throw new Error('expected budget rejection');}
-        catch(error) {if(error.code!=='frontbrain_tool_budget_exceeded'||error.toolCount!==2||error.toolBudget!==1) throw error; process.stdout.write('budget 2/1');}
+        catch(error) {if(error.code!=='frontbrain_tool_budget_exceeded'||error.toolCount!==3||error.toolBudget!==1) throw error; process.stdout.write('budget 3/1');}
         finally {for(const close of owned.reverse()) await close();} return 0;
       }`,
     './realtime/telemetry.js': `export function createRealtimeTelemetry() {return {close(){},record(){}}}`,
@@ -392,7 +392,7 @@ test('actual desktop entry awaits discovery and owns cleanup when final exact fr
     let stdout = ''; let stderr = ''
     child.stdout.on('data', chunk => {stdout += String(chunk)}); child.stderr.on('data', chunk => {stderr += String(chunk)})
     const result = await new Promise<number | null>((resolve, reject) => {child.on('error', reject); child.on('exit', resolve)})
-    assert.equal(result, 0, stderr); assert.equal(stdout, 'budget 2/1')
+    assert.equal(result, 0, stderr); assert.equal(stdout, 'budget 3/1')
     assert.deepEqual(local.stats(), {listed: 1, called: 0, deleted: 1})
   } finally {await local.close()}
 })

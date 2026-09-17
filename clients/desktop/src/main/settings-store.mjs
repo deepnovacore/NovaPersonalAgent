@@ -72,6 +72,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   embeddingModel: 'text-embedding-v4',
   capabilitiesConfigPath: '',
   knowledgePath: '',
+  memoryPrerecallEnabled: true,
   secrets: Object.freeze({}),
 })
 
@@ -434,6 +435,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
       DEFAULT_SETTINGS.capabilitiesConfigPath,
       validDesktopString,
     ),
+    memoryPrerecallEnabled: pick(ownEnumerableDataValue(source, 'memoryPrerecallEnabled'), ownEnumerableDataValue(fallback, 'memoryPrerecallEnabled'), DEFAULT_SETTINGS.memoryPrerecallEnabled, validBoolean),
     knowledgePath: pick(
       acceptsV4Fields ? ownEnumerableDataValue(source, 'knowledgePath') : MISSING_PROPERTY,
       acceptsV4Fields ? ownEnumerableDataValue(fallback, 'knowledgePath') : MISSING_PROPERTY,
@@ -489,6 +491,7 @@ export function publicSettings(settings) {
     embeddingModel: normalized.embeddingModel,
     capabilitiesConfigPath: normalized.capabilitiesConfigPath,
     knowledgePath: normalized.knowledgePath,
+    memoryPrerecallEnabled: normalized.memoryPrerecallEnabled,
   }
 }
 
@@ -676,6 +679,7 @@ export function applySettingsUpdate(current, patch, codec) {
     embeddingModel: ownEnumerableDataValue(source, 'embeddingModel'),
     capabilitiesConfigPath: ownEnumerableDataValue(source, 'capabilitiesConfigPath'),
     knowledgePath: ownEnumerableDataValue(source, 'knowledgePath'),
+    memoryPrerecallEnabled: ownEnumerableDataValue(source, 'memoryPrerecallEnabled'),
   }, stored)
   const { secrets, rejected } = updatedSecrets(
     stored.secrets,

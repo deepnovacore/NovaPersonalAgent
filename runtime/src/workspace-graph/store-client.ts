@@ -1,3 +1,4 @@
+import type {MemoryOperation} from '../memory-substrate/store.js'
 import { randomUUID } from 'node:crypto'
 import { Worker, type WorkerOptions } from 'node:worker_threads'
 
@@ -192,6 +193,7 @@ export class WorkspaceGraphStoreClient {
   #expectedExit = false
   #recovering = false
   #closing: Promise<void> | null = null
+  #opening: Promise<void> | null = null
 
   constructor(path: string, options: WorkspaceGraphStoreClientOptions = {}) {
     this.#workerData = {
@@ -207,8 +209,14 @@ export class WorkspaceGraphStoreClient {
     return this.#publishedSnapshot
   }
 
+  memory(operation: MemoryOperation, input: unknown): Promise<unknown> {
+    return this.#request('memory', {memoryOperation: operation, input}, value => value)
+  }
+
   async open(): Promise<void> {
-    await this.#request('open', {}, nullResult)
+    if (this.#closed || this.#failed) throw new WorkspaceGraphStoreClientError('CLIENT_CLOSED')
+    this.#opening ??= this.#request('open', {}, nullResult)
+    await this.#opening
   }
 
   close(): Promise<void> {

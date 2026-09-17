@@ -5,6 +5,19 @@ import {
   SensitivePathPolicy,
 } from '../src/workspace-graph/sensitivity.js'
 
+test('screens pasted private keys, including truncated blocks, without hiding public keys', () => {
+  const policy = new SensitiveContentPolicy()
+  for (const kind of ['PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY', 'OPENSSH PRIVATE KEY', 'ENCRYPTED PRIVATE KEY']) {
+    const block = `-----BEGIN ${kind}-----\nfixture-private-material\n-----END ${kind}-----`
+    assert.deepEqual(policy.scrub('detail', block), {kind: 'rejected'})
+    assert.deepEqual(policy.scrub('detail', `-----BEGIN ${kind}-----\nfixture-private-material`), {kind: 'rejected'})
+    const mixed = policy.scrub('detail', `Deployment note\n${block}\nFollow up tomorrow`)
+    assert.equal(mixed.kind, 'redacted')
+    if (mixed.kind === 'redacted') assert.equal(mixed.value, 'Deployment note\n[redacted]\nFollow up tomorrow')
+  }
+  assert.deepEqual(policy.scrub('detail', '-----BEGIN PUBLIC KEY-----\nfixture-public-material\n-----END PUBLIC KEY-----'), {kind: 'clean'})
+})
+
 test('denies sensitive paths without returning their labels', () => {
   const policy = new SensitivePathPolicy()
   const path = '/repo/.env.production'

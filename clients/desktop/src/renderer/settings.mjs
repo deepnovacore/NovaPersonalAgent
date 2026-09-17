@@ -1,3 +1,4 @@
+import {createImPanel} from './im-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
 import {createCapabilitiesEditor} from './capabilities-editor.mjs'
 import {createKnowledgePanel} from './knowledge-panel.mjs'
@@ -22,6 +23,7 @@ import {
 } from './voice-choice.mjs'
 
 const api = window.novaAudioAgentDesktop.settings
+const imPanel = createImPanel({document, api})
 const SECRET_KEYS = [
   'dashscopeApiKey', 'tavilyApiKey',
   'arkApiKey', 'doubaoBigmodelApiKey',
@@ -115,6 +117,7 @@ let activeCategory = SETTINGS_CATEGORIES[0].id
 function applyCategory(id) {
   if (!isValidCategory(id)) return
   activeCategory = id
+  if (id === 'im') void imPanel.load()
   for (const category of SETTINGS_CATEGORIES) {
     const visible = category.id === id
     for (const sectionId of category.sections) {
@@ -144,6 +147,7 @@ for (const [index, button] of categoryButtons.entries()) {
 const capabilityEditor = createCapabilitiesEditor({root: document.querySelector('#capabilities-editor'),
   stateLabel: document.querySelector('#capabilities-state'), problemsLabel: document.querySelector('#capabilities-problems'),
   stage: patch => controller.stage(patch), probe: payload => api.probeCapabilities(payload)})
+const memoryPrerecall = document.getElementById('memory-prerecall-enabled')
 const capabilitySettings = ['embeddingProvider', 'embeddingModel', 'knowledgePath', 'capabilitiesConfigPath'].map(key => document.getElementById(key))
 const knowledgePanel = createKnowledgePanel({document, action: payload => api.knowledgeAction(payload)})
 
@@ -312,6 +316,7 @@ function render(view, _drafts, state) {
   renderVision(view)
   capabilityEditor.render(view)
   knowledgePanel.render(view)
+  memoryPrerecall.checked = view.memoryPrerecallEnabled !== false
   for (const input of capabilitySettings) input.value = view[input.id] ?? ''
   controllerState = state
   wakeEnabled.checked = view.wakeWordEnabled === true
@@ -443,6 +448,7 @@ for (const input of progressBubblesInputs) {
   bindStage(input, 'change', () => ({progressBubbles: input.value}))
 }
 bindStage(clarificationDepth, 'change', () => ({clarificationDepth: clarificationDepth.value}))
+bindStage(memoryPrerecall, 'change', () => ({memoryPrerecallEnabled: memoryPrerecall.checked}))
 for (const input of capabilitySettings) bindStage(input, 'change', () => ({[input.id]: input.value}))
 heartbeat.addEventListener('input', () => {
   heartbeatValue.textContent = `${heartbeat.value} 秒`

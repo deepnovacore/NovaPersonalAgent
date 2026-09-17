@@ -110,8 +110,8 @@ wake-word Worker; explicit mute stops wake detection. See
 ## 5. Roadmap
 
 - [ ] **v0.2.0 (`v0.2.0dev`):** cross-platform approval forwarding; fewer native FrontBrain tools with workspace/session coordination inside the coding executor; replaceable ASR/LLM/TTS and provider-neutral contracts; custom MCP, search/RAG and the Chinese wake phrase “你好星核”; VoiceMem for personal memory and Workspace Graph for workspace continuity; native iOS connected to a PC runtime through Tailscale. Existing implementation and outstanding acceptance are tracked separately in the [specs](docs/specs/v0.2.0/00-overview.md) and [release gate](docs/specs/v0.2.0/RELEASE-GATE.md).
-- [ ] **v0.3.0:** M5–M7: text/voice main window, memory-grounded initiative, persistent feed, correctable personal memory and authorized local folders. See [specs](docs/specs/v0.3.0/00-overview.md).
-- [ ] **v0.4.0:** M8 mail/calendar; M9 Kimi Code + pi agent, GUI/AutoGLM and real agent2agent demonstrations. See [specs](docs/specs/v0.4.0/00-overview.md).
+- [ ] **v0.3.0:** M5–M7: text/voice main window, memory-grounded initiative, persistent feed, correctable personal memory and authorized local folders; then a unified memory substrate, one mail/calendar provider and a Feishu connector (M8-Mail, M8-IM). See [specs](docs/specs/v0.3.0/00-overview.md).
+- [ ] **v0.4.0:** M9 Kimi Code + pi agent, GUI/AutoGLM and real agent2agent demonstrations. See [specs](docs/specs/v0.4.0/00-overview.md).
 
 `v0.2.0dev` integrates after automated gates; `main` requires all feature and supported-platform
 acceptance in the [release ledger](docs/specs/v0.2.0/RELEASE-GATE.md). Linux releases are deferred;

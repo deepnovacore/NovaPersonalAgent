@@ -2,6 +2,7 @@
 
 import {
   buildCascadedRealtimeAssembly,
+  buildTextRealtimeAssembly,
   type BuildCascadedRealtimeAssemblyOptions,
 } from './cascaded-realtime-assembly.js'
 import {ConfigurationError} from './config.js'
@@ -12,9 +13,10 @@ import {
 import {filterDisabledCoding, type RealtimeAssembly} from './realtime-assembly.js'
 
 export type BuildProductionRealtimeAssemblyOptions =
-  BuildIntegratedRealtimeAssemblyOptions & BuildCascadedRealtimeAssemblyOptions
+  BuildIntegratedRealtimeAssemblyOptions & BuildCascadedRealtimeAssemblyOptions & {readonly textOnly?:boolean}
 
 export interface ProductionRealtimeAssemblyBuilders {
+  readonly text?: (options:BuildCascadedRealtimeAssemblyOptions)=>RealtimeAssembly
   readonly integrated?: (
     options: BuildIntegratedRealtimeAssemblyOptions,
   ) => RealtimeAssembly
@@ -28,6 +30,7 @@ export function buildProductionRealtimeAssembly(
   builders: ProductionRealtimeAssemblyBuilders = {},
 ): RealtimeAssembly {
   const composition = productionCodingComposition(filterDisabledCoding(options))
+  if(options.textOnly)return (builders.text??buildTextRealtimeAssembly)(composition)
   if (options.settings.pipeline_mode === 'integrated') {
     return (builders.integrated ?? buildIntegratedRealtimeAssembly)(composition)
   }

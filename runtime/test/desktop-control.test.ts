@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {EventEmitter} from 'node:events'
 import {test} from 'node:test'
-import {installDesktopControl, desktopBudgetFailure, type DesktopCapabilityState} from '../src/desktop-control.js'
+import {installDesktopControl, handleFeishuSettings, desktopBudgetFailure, type DesktopCapabilityState} from '../src/desktop-control.js'
 import {runDesktopEntry} from '../src/desktop-service.js'
 import {buildProductionRealtimeAssembly} from '../src/production-realtime-assembly.js'
 import {loadSettings} from '../src/config.js'
@@ -26,7 +26,7 @@ test('real final compilation failure preserves exact N/B over private startup st
       },
     })
     assert.equal(result, 2)
-    assert.deepEqual(parentPort.sent, [{type: 'nova.capabilities', status: {state: 'startup_failed', toolCount: 2, toolBudget: 1}}])
+    assert.deepEqual(parentPort.sent, [{type: 'nova.capabilities', status: {state: 'startup_failed', toolCount: 3, toolBudget: 1}}])
     assert.equal(desktopBudgetFailure({code: 'frontbrain_tool_budget_exceeded', toolCount: Infinity, toolBudget: 24}), undefined)
   } finally {control.dispose(); stop.abort()}
   assert.equal(parentPort.listenerCount('message'), 0)
@@ -61,4 +61,16 @@ test('private usage frames validate meters and preserve metering tails during sh
   stop.abort()
   control.publishUsage(report)
   assert.equal(parentPort.sent.length, 3)
+})
+
+
+test('settings IM port admits only bounded Feishu methods and unwraps no memory snapshot', async () => {
+  const calls: unknown[] = []
+  const command = (input: unknown) => {calls.push(input); return Promise.resolve({ok:true,data:{state:'unauthorized'}})}
+  assert.deepEqual(await handleFeishuSettings(command,'memory.list',{}),{error:'unsupported'})
+  assert.deepEqual(await handleFeishuSettings(command,'feishu.arbitrary',{}),{error:'invalid_request'})
+  assert.equal(calls.length,0)
+  assert.deepEqual(await handleFeishuSettings(command,'feishu.status',{}),{state:'unauthorized'})
+  assert.equal(calls.length,1)
+  assert.deepEqual(await handleFeishuSettings(()=>Promise.resolve({ok:false,error:'unavailable'}),'feishu.login',{}),{error:'unavailable'})
 })

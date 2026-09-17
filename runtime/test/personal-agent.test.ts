@@ -1,3 +1,4 @@
+import {UnifiedRetrieval} from '../src/memory/retrieval.js';
 import {once} from 'node:events';
 import {readFileSync} from 'node:fs';
 import { test } from 'node:test';
@@ -201,3 +202,58 @@ test('a supporting memory and a concrete task do not suppress each other in eith
   }finally{await f.close()}
  }
 })
+
+test('Feishu controls and delivery ledger stay separate from execution authorization', async () => {
+    const f = await fixture();
+    let calls=0;
+    try {
+        f.host.setFeishu({snapshot:()=>({available:true,state:'ready'}),open:()=>Promise.resolve(),close:()=>Promise.resolve(),command:(method)=>{calls++;return Promise.resolve({method})}});
+        const command={type:'personal.command',request_id:'feishu-configure-test',method:'feishu.bot.configure',params:{enabled:true}};
+        assert.equal((await f.host.command(command) as {ok:boolean}).ok,true);
+        await f.host.command(command);assert.equal(calls,1);
+        assert.deepEqual(f.host.snapshot().feishu,{available:true,state:'ready'});
+        await f.host.admit(proposal(),await f.host.discoverySnapshot());
+        const item=f.host.snapshot().feed[0]!;
+        await f.host.imDelivered(item.id);
+        const delivered=f.host.snapshot().feed[0]!;
+        assert(delivered.delivery.im_sent_at);
+        assert.equal(delivered.delivery.presented_at,null);
+        assert.equal(delivered.delivery.notified_at,null);
+        assert.equal(delivered.delivery.spoken_at,null);
+        await f.host.action({id:item.id,action:'open'});
+        await assert.rejects(f.host.action({id:item.id,action:'act'}),/unsupported/);
+    } finally { await f.close(); }
+});
+
+test('shared C retrieval reuses exact prefetch and rereads originals before admission and delivery', async () => {
+    const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-host-c-'));
+    let live=true, recalls=0;
+    const original={evidence_id:'canonical:one',source_kind:'file',locator:'notes/demo',text:'The demo is today',observed_at:now.toISOString(),trust:'untrusted_external' as const};
+    const memory:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>Promise.resolve({source:'personal',state:'empty',scope:'recent',hits:[],degraded:false}),readEvidence:()=>Promise.resolve(live?original:null)};
+    const retrieval=new UnifiedRetrieval({memory:()=>memory,rawRecall:()=>{recalls++;return Promise.resolve([{evidence_id:original.evidence_id}])}});
+    const host=new PersonalAgentHost({path:join(dir,'feed.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),now:()=>now,evidence:()=>null});
+    host.setRetrieval(retrieval);
+    try {
+        await host.open();
+        const query=now.toLocaleDateString('en-CA');
+        host.setPrefetchedRetrieval(query,await retrieval.recall(query));
+        const snapshot=await host.discoverySnapshot();
+        assert.equal(recalls,1);
+        assert.deepEqual(snapshot.evidence_refs,[original.evidence_id]);
+        assert.equal(snapshot.retrieval?.snippets[0]?.trust,'untrusted_external');
+        const read={type:'personal.command',request_id:'raw-debug',method:'memory.evidence',params:{evidence_id:original.evidence_id}};
+        const shown=await host.command(read) as {ok:boolean;data:{state:string;evidence:{text:string}}};
+        assert.equal(shown.ok,true);assert.equal(shown.data.state,'ok');assert.equal(shown.data.evidence.text,original.text);
+        const replay=await host.command(read) as {reload_required:boolean;data?:unknown};
+        assert.equal(replay.reload_required,true);assert.equal(replay.data,undefined);
+        const p={...proposal(),memory_refs:[],evidence_refs:[original.evidence_id]};
+        assert.equal(await host.admit(p,snapshot),'admitted');
+        live=false;
+        const gone=await host.command({...read,request_id:'raw-debug-after-delete'}) as {data:{state:string;evidence:unknown}};
+        assert.equal(gone.data.state,'gone');assert.equal(gone.data.evidence,null);
+        assert.equal(await host.canDeliver(host.snapshot().feed[0]!.id),false);
+        assert.equal(await host.admit(p,snapshot),'rejected');
+        assert.deepEqual((await host.discoverySnapshot()).retrieval?.snippets,[]);
+        assert.equal(recalls,1);
+    } finally {await host.close();await rm(dir,{recursive:true,force:true});}
+});

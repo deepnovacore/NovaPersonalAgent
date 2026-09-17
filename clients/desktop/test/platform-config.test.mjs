@@ -151,3 +151,10 @@ test('startup creates every application-owned default directory before spawn', a
     { path: '/home/nova/.nova-audio-agent/workspaces/default', options: { recursive: true, mode: 0o700 } },
   ])
 })
+
+test('desktop startup model preflight accepts both modes without voice credentials',()=>{
+ for(const pipelineMode of ['integrated','cascaded']){
+  const config=resolveDesktopConfig({settings:{pipelineMode,modelBaseUrl:'https://api.example.com/v1'},environment:{},home:'/home/nova',platform:'darwin',pathApi:posix})
+  assert.equal(config.modelConfigurationError,null)
+ }
+})

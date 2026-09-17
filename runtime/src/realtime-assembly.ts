@@ -1,3 +1,13 @@
+import type {RealtimeProviderEvent} from './realtime/protocol.js'
+import type {KnowledgeEvidenceLedger} from './knowledge/service.js'
+import {UnifiedRetrieval} from './memory/retrieval.js'
+import {DashScopeEmbeddingProvider} from './knowledge/embeddings.js'
+import {createHash as embeddingHash} from 'node:crypto'
+import {SubstrateMemoryResource} from './memory-substrate/resource.js'
+import {WorkspaceGraphStoreClient} from './workspace-graph/store-client.js'
+import {WorkspaceGraphService} from './workspace-graph/service.js'
+import {homedir as memoryHome} from 'node:os'
+import {resolve as memoryPath} from 'node:path'
 import {compileContextView} from './context-view.js'
 import {PersonalAgentHost} from './personal-agent/host.js'
 import {tmpdir} from 'node:os'
@@ -15,6 +25,7 @@ import type {PublicProjectContext} from './project-store.js'
 import type { JsonValue } from './events.js'
 import {
   executorWithRole,
+  ProjectResolutionError,
   type CancelContext,
   type CodingExecutorResource,
   type CommittedWorkspaceEvent,
@@ -198,6 +209,10 @@ function responseAdaptationFor(
 }
 
 export interface RealtimeAssemblyOptions {
+  readonly nextPlaybackGeneration?:()=>number
+  readonly onProviderEvent?: (event:RealtimeProviderEvent)=>void
+  readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
+
   readonly onUsage?: UsageReporter
 
   readonly executorApproval?: ApprovalController
@@ -259,6 +274,7 @@ type CleanupResult =
  */
 export class RealtimeAssembly {
   readonly personalAgent: PersonalAgentHost
+  readonly retrieval:UnifiedRetrieval
   get personalMemory(): PersonalMemoryResource|undefined { return this.#personalMemory }
 
   readonly capabilityStatus: CapabilityStatus
@@ -273,6 +289,7 @@ export class RealtimeAssembly {
   readonly tools: CompiledTools
   readonly workspaceGraph: RealtimeWorkspaceGraph | undefined
 
+  readonly #sharedPersonal: boolean
   readonly #unsubscribePersonalEvents: () => void
   readonly #onDiagnostic: (line: string) => void
   readonly #projectAdapter: ProjectExecutorAdapter | undefined
@@ -289,6 +306,11 @@ export class RealtimeAssembly {
   readonly #unbindSuggestionSelected: (() => void) | undefined
   readonly #createPersonalMemory: (() => PersonalMemoryResource) | undefined
   #personalMemory: PersonalMemoryResource | undefined
+  readonly #knowledgeLedger:KnowledgeEvidenceLedger={
+    record:input=>this.#personalMemory?.recordEvidence?.(input)??Promise.reject(Error('memory_unavailable')),
+    read:id=>this.#personalMemory?.readEvidence?.(id)??Promise.resolve(null),
+    remove:id=>this.#personalMemory?.forgetSource?.(id)??Promise.reject(Error('memory_unavailable')),
+  }
   #workspaceGraphOpen = false
   #currentWorkspaceInstanceId: string | null = null
   #currentHostWorkspaceId: string | null = null
@@ -321,6 +343,7 @@ export class RealtimeAssembly {
     readonly playback: PlaybackRegistry
     readonly session: RealtimeSession
     readonly bridge: RealtimeRuntimeBridge
+    readonly retrieval:UnifiedRetrieval
     readonly service: RealtimeService
     readonly onDiagnostic: (line: string) => void
     readonly projectAdapter?: ProjectExecutorAdapter
@@ -330,10 +353,12 @@ export class RealtimeAssembly {
     readonly idFactory: () => string
     readonly wallClockNow: () => number
     readonly unbindSuggestionSelected?: () => void
+    readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
     readonly personalMemory?: PersonalMemoryResource
     readonly createPersonalMemory?: () => PersonalMemoryResource
     readonly personalMemoryTurnTracker: PersonalMemoryTurnTracker
   }) {
+    const lifecycleProjectAdapter = input.sharedPersonal ? undefined : input.projectAdapter
     this.core = input.core
     this.capabilityStatus = capabilityStatus(input.core.capabilities, input.toolCount ?? input.core.tools.schemas.length)
     this.provider = input.provider
@@ -341,17 +366,19 @@ export class RealtimeAssembly {
     this.playback = input.playback
     this.session = input.session
     this.bridge = input.bridge
+    this.retrieval = input.retrieval
     this.service = input.service
     this.runtime = input.core.runtime
     this.tools = input.core.tools
     this.workspaceGraph = input.workspaceGraph
     this.#onDiagnostic = input.onDiagnostic
-    this.#projectAdapter = input.projectAdapter
+    this.#projectAdapter = lifecycleProjectAdapter
     this.#codexResource = input.codexResource
     this.#idFactory = input.idFactory
     this.#wallClockNow = input.wallClockNow
     this.#unbindSuggestionSelected = input.unbindSuggestionSelected
-    this.personalAgent = new PersonalAgentHost({
+    this.#sharedPersonal = input.sharedPersonal !== undefined
+    this.personalAgent = input.sharedPersonal?.host ?? new PersonalAgentHost({
       path: input.core.personalAgentConfig?.path ?? join(realpathSync(tmpdir()), `nova-personal-${randomUUID()}.json`),
       userScope: input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
       pool: input.core.runtime.core.suggestions,
@@ -359,18 +386,26 @@ export class RealtimeAssembly {
       context:()=>{const view=compileContextView(input.core.runtime.memory,input.core.runtime.core.floor.state,input.core.runtime.clock.now(),{suggestions:input.core.runtime.core.suggestions.all(),triggerKind:'discovery_tick'});return {...view,channels:view.channels.slice(-8),affordances:view.affordances.slice(-8),in_flight:view.in_flight.slice(-8)}},
       onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}})},
       evidenceRefs:()=>[...input.core.runtime.memory.channels.values()].flatMap(channel=>channel.items.slice(-4).map(item=>`${item.channel}:${item.seq}`)).slice(-16),
-      ...(input.core.personalAgentConfig?{summarizeMemory:(entries,signal)=>input.core.personalAgentConfig!.surrogate.summarizeMemory(entries,signal),discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
+      ...(input.core.personalAgentConfig?{prepareBrief:(snapshot,slot,signal)=>input.core.personalAgentConfig!.surrogate.prepareBrief(snapshot,slot,signal),prepareProposal:(snapshot,proposal,signal)=>input.core.personalAgentConfig!.surrogate.prepareProposal(snapshot,proposal,signal),summarizeMemory:(entries,signal)=>input.core.personalAgentConfig!.surrogate.summarizeMemory(entries,signal),discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
     })
+    if (!this.#sharedPersonal) this.personalAgent.setRetrieval(input.retrieval)
     this.#unsubscribePersonalEvents=input.core.runtime.observe((event,current)=>{
       if(current===false)return
       if(event.kind==='handoff'&&input.core.runtime.claimedHandoff(event.seq)){
         const title=event.payload.outcome==='ok'?'任务已完成':`任务结束：${event.payload.outcome}`
         void this.personalAgent.taskResult(event.payload.delegate_id,title).catch(()=>{ /* optional host projection failure */ })
+        if (event.payload.outcome === 'ok' && this.#personalMemory instanceof SubstrateMemoryResource) {
+          void this.#personalMemory.ingestEvidence({sourceId:'task:'+event.payload.delegate_id,locator:'task:'+event.payload.delegate_id,
+            kind:'task_result',observedAt:new Date(this.#wallClockNow()*1000).toISOString(),
+            text:JSON.stringify({work_id:event.payload.delegate_id,outcome:'ok',host_confirmed:true}),
+          }).catch(()=>{ this.#diagnose('personal_memory_admission_failed') })
+        }
       }
       if(event.kind==='observation'||event.kind==='handoff')void this.personalAgent.discover().catch(()=>{ /* optional host projection failure */ })
     })
     this.#personalMemory = input.personalMemory
+    if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) })
     this.#createPersonalMemory = input.createPersonalMemory
     this.#personalMemoryTurnTracker = input.personalMemoryTurnTracker
     this.#unbindGraphContext = input.workspaceGraph === undefined
@@ -386,31 +421,31 @@ export class RealtimeAssembly {
           preferences: [],
         })
       })
-    this.#unsubscribeProjectView = input.projectAdapter === undefined
+    this.#unsubscribeProjectView = lifecycleProjectAdapter === undefined
       ? undefined
-      : input.projectAdapter.observeProjectView(view => {
+      : lifecycleProjectAdapter.observeProjectView(view => {
         input.onProjectView?.(view)
       })
-    this.#unsubscribeProjectContext = input.projectAdapter === undefined
+    this.#unsubscribeProjectContext = lifecycleProjectAdapter === undefined
       ? undefined
-      : input.projectAdapter.observeProjectContext(async context => {
+      : lifecycleProjectAdapter.observeProjectContext(async context => {
         this.#acceptProjectContext(context)
         await this.#enqueueProjectContextPublication(true)
       })
-    this.#unsubscribeCommittedWorkspace = input.projectAdapter === undefined
+    this.#unsubscribeCommittedWorkspace = lifecycleProjectAdapter === undefined
       ? undefined
-      : input.projectAdapter.observeCommittedWorkspace(event => {
+      : lifecycleProjectAdapter.observeCommittedWorkspace(event => {
         if (input.workspaceGraph !== undefined) this.#enqueueCommittedWorkspace(event)
       })
-    this.#unsubscribeTerminalWorkOrder = input.projectAdapter === undefined
+    this.#unsubscribeTerminalWorkOrder = lifecycleProjectAdapter === undefined
       || input.workspaceGraph === undefined
       ? undefined
-      : input.projectAdapter.observeTerminalWorkOrder(event => {
+      : lifecycleProjectAdapter.observeTerminalWorkOrder(event => {
         this.#enqueueGraphLifecycle(() => this.#onTerminalWorkOrder(event))
       })
     this.#unsubscribeProviderConnected = input.providerSession.observeConnected(async () => {
       input.personalMemoryTurnTracker.reset()
-      if (input.projectAdapter === undefined) return
+      if (lifecycleProjectAdapter === undefined) return
       // Initial delivery is owned by #startFresh's bounded publication step.
       // Lifecycle observation owns only fresh reconnect epochs.
       if (!this.#providerConnectionObserved) {
@@ -546,7 +581,7 @@ export class RealtimeAssembly {
         }
       }
       await this.core.start()
-      await this.personalAgent.open()
+      if (!this.#sharedPersonal) await this.personalAgent.open()
     } catch (error) {
       if (this.#state === 'starting') {
         await this.#closePersonalMemory()
@@ -585,7 +620,7 @@ export class RealtimeAssembly {
     }
     if (this.#state === 'starting') {
       this.#state = 'started'
-      if (this.#codexResource !== undefined) {
+      if (!this.#sharedPersonal && this.#codexResource !== undefined) {
         try {
           void this.#codexResource.start().catch(() => undefined)
         } catch {
@@ -601,7 +636,7 @@ export class RealtimeAssembly {
     }
 
     this.#unsubscribePersonalEvents()
-    await this.personalAgent.close()
+    if (!this.#sharedPersonal) await this.personalAgent.close()
     this.#unbindGraphContext?.()
     this.#unbindSuggestionSelected?.()
 
@@ -631,14 +666,14 @@ export class RealtimeAssembly {
     if (core.kind !== 'resolved') cleanupComplete = false
     if (firstFailure === null && core.kind === 'rejected') firstFailure = {error: core.error}
 
-    if (this.#codexResource !== undefined) {
+    if (!this.#sharedPersonal && this.#codexResource !== undefined) {
       const codex = await this.#cleanupWithinGrace(
         () => this.#codexResource!.close(),
         'codex_close_abandoned',
       )
       if (codex.kind !== 'resolved') cleanupComplete = false
       if (firstFailure === null && codex.kind === 'rejected') firstFailure = {error: codex.error}
-    } else if (this.#projectAdapter !== undefined) {
+    } else if (!this.#sharedPersonal && this.#projectAdapter !== undefined) {
       const project = await this.#cleanupWithinGrace(
         () => this.#projectAdapter!.close(),
         'assembly_project_adapter_close_abandoned',
@@ -947,7 +982,8 @@ export class RealtimeAssembly {
   }
 
   async #closePersonalMemory(): Promise<CleanupResult> {
-    await this.personalAgent.close()
+    if (this.#sharedPersonal) return {kind: 'resolved'}
+    if (!this.#sharedPersonal) await this.personalAgent.close()
     const personalMemory = this.#personalMemory
     if (personalMemory === undefined) return {kind: 'resolved'}
     this.#personalMemory = undefined
@@ -958,9 +994,11 @@ export class RealtimeAssembly {
   }
 
   async #openPersonalMemory(): Promise<void> {
+    if (this.#sharedPersonal) return
     try {
       if (this.#personalMemory === undefined && this.#createPersonalMemory !== undefined) {
         this.#personalMemory = this.#createPersonalMemory()
+        if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) })
       }
       if (this.#personalMemory === undefined) return
       const opened = await this.#cleanupWithinGrace(
@@ -969,6 +1007,12 @@ export class RealtimeAssembly {
       )
       if (opened.kind === 'rejected') throw opened.error
       if (opened.kind === 'abandoned') throw new AssemblyError('personal memory open was abandoned')
+      if(this.core.knowledge){
+        const memory=this.#personalMemory
+        if(memory?.recordEvidence&&memory.readEvidence&&memory.forgetSource){
+          await this.core.knowledge.service.bindEvidenceLedger(this.#knowledgeLedger)
+        }else{this.#diagnose('knowledge_memory_ledger_unavailable')}
+      }
     } catch (error) {
       await this.#closePersonalMemory()
       throw error
@@ -1036,14 +1080,14 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     ? asProjectAdapter(resourceAdapter)
     : options.projectAdapter
   if (projectAdapter !== undefined) {
-    if (options.projectConfirmation !== undefined || options.commitProjectOperation !== undefined) {
+    if ((options.projectConfirmation !== undefined && options.sharedPersonal === undefined) || options.commitProjectOperation !== undefined) {
       throw new AssemblyError('project adapter cannot be combined with manual project wiring')
     }
     if (codingManifest === null || core.runtime.executors.get(codingManifest.name) !== projectAdapter) {
       throw new AssemblyError('project adapter must be the registered coding executor')
     }
   }
-  const projectConfirmation = projectAdapter?.confirmationController ?? options.projectConfirmation
+  const projectConfirmation = options.sharedPersonal ? options.projectConfirmation : projectAdapter?.confirmationController ?? options.projectConfirmation
   const commitProjectOperation = projectAdapter === undefined
     ? options.commitProjectOperation
     : ((operation: ConfirmedProjectOperation) => projectAdapter.commitConfirmed(
@@ -1054,6 +1098,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
           capability,
           launchAuthorized,
         ),
+        projectConfirmation,
       ))
   const provider = options.provider
   const onDiagnostic = options.onDiagnostic ?? (line => { console.log(line) })
@@ -1076,6 +1121,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const wallClockNow = options.wallClockNow ?? (() => Date.now() / 1_000)
   const playback = new PlaybackRegistry({
     idFactory,
+    ...(options.nextPlaybackGeneration?{nextGenerationEpoch:options.nextPlaybackGeneration}:{}),
     onFrame: options.onAudioFrame ?? noop,
     onClear: options.onAudioClear ?? noop,
     ...(options.onAudioAlert === undefined ? {} : {onAlert: options.onAudioAlert}),
@@ -1117,9 +1163,15 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     throw new AssemblyError('coding agent controller factory requires a coding executor')
   }
   const personalMemorySessionId = randomUUID()
+  const retrieval=new UnifiedRetrieval({memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
+    if(!personalMemoryHolder.current?.readEvidence)return []
+    const result=await core.knowledge!.service.recall(query,Math.min(5,limit),signal)
+    return result.flatMap(hit=>'evidence_id' in hit&&typeof hit.evidence_id==='string'?[{evidence_id:hit.evidence_id,score:hit.score}]:[])
+  }}:{})})
   const bridge = new RealtimeRuntimeBridge({
     runtime: core.runtime,
-    ...(options.createPersonalMemory === undefined ? {} : {personalMemory: {
+    retrieval,
+    ...((options.createPersonalMemory === undefined && options.sharedPersonal?.memory === undefined) ? {} : {personalMemory: {
       recall: (...input) => {
         const current = personalMemoryHolder.current
         return current === undefined
@@ -1165,8 +1217,8 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   }
   const agentControllers = core.visionController === undefined ? [] : [core.visionController]
   const service = new RealtimeService({
-    ...(options.createPersonalMemory === undefined ? {} : {onUserTranscriptAccepted: (turn: {
-      readonly text: string; readonly originRef: string; readonly sessionEpoch: number
+    ...((options.createPersonalMemory === undefined && options.sharedPersonal?.memory === undefined) ? {} : {onUserTranscriptAccepted: (turn: {
+      readonly confirmed?: boolean; readonly text: string; readonly originRef: string; readonly sessionEpoch: number
       readonly userInputRevision: number
     }) => {
       const previousAssistantReply = personalMemoryTurnTracker.takeCaptured(
@@ -1181,6 +1233,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
         sessionId: personalMemorySessionId,
         sequence,
         text: turn.text,
+        ...(resource instanceof SubstrateMemoryResource?{confirmed:turn.confirmed===true}:{}),
         occurredAt: new Date(wallClockNow() * 1_000).toISOString(),
         ...(previousAssistantReply === undefined ? {} : {previousAssistantReply}),
       }).then(() => undefined)
@@ -1199,12 +1252,13 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
         core.knowledge!.service, order.objective, workspace, Object.hasOwn(core.knowledge!.codexEntries, 'nova_knowledge'), signal,
       )) satisfies NonNullable<IntakeOptions['attachEvidence']>}),
       roster: () => projectAdapter.roster(),
-      running: () => projectAdapter.running(),
-      activeProject: () => projectAdapter.publicProjectView(false).workspace_display_name,
-      resolveTarget: (decision: CoordinatorDecision) => projectAdapter.resolveIntakeTarget(decision),
+      running: () => projectAdapter.running().filter(work=>options.sharedPersonal===undefined||core.runtime.inFlightDelegate(work.work_id)!==undefined),
+      activeProject: () => options.sharedPersonal ? null : projectAdapter.publicProjectView(false).workspace_display_name,
+      resolveTarget: (decision: CoordinatorDecision) => {if(options.sharedPersonal&&decision.project===null)throw new ProjectResolutionError('unknown_project',{reason:'explicit_project_required'});return projectAdapter.resolveIntakeTarget(decision)},
       cancel: (instruction: string, stillWanted: () => boolean) => projectAdapter.cancel(instruction, {
         resolveCancelTarget: (text, running) => options.intake!.models.resolveCancelTarget(text, running),
         stillWanted,
+        ...(options.sharedPersonal?{workIds:new Set(projectAdapter.running().filter(work=>core.runtime.inFlightDelegate(work.work_id)!==undefined).map(work=>work.work_id))}:{}),
       }),
       // Spec 08: the coordinator's decision rides with the work order; the adapter re-resolves at run time.
       dispatch: (intake: IntakeSession, stillWanted?: () => boolean) => core.runtime.dispatchExternal({
@@ -1214,9 +1268,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
           session: intake.decision?.session ?? 'latest', ...(intake.title === null ? {} : {title: intake.title}),
         },
       }, USER_AWAITED_TOOL, undefined, stillWanted),
-      steer: (intake: IntakeSession, project: string | null, instruction: string, stillWanted?: () => boolean) => core.runtime.dispatchExternal({
+      steer: (intake: IntakeSession, project: string | null, instruction: string, stillWanted?: () => boolean) => {if(options.sharedPersonal&&!projectAdapter.running().some(work=>work.project===project&&core.runtime.inFlightDelegate(work.work_id)!==undefined))throw new ProjectResolutionError('unknown_project',{reason:'work_not_owned'});return core.runtime.dispatchExternal({
         executor: projectAdapter.manifest.name, op: 'steer', origin_ref: intake.origin_ref, request: {instruction, project},
-      }, USER_AWAITED_TOOL, undefined, stillWanted),
+      }, USER_AWAITED_TOOL, undefined, stillWanted)},
       record: (intake: IntakeSession, kind: string, data: Readonly<Record<string, JsonValue>>) => {
         core.runtime.memory.append(projectAdapter.manifest.name, {
           ts: core.runtime.clock.now(), trust: 'trusted_system', priority: USER_PRIORITY - 1,
@@ -1226,6 +1280,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       },
     }}),
     idFactory,
+    ...(options.onProviderEvent ? {onProviderEvent: options.onProviderEvent}: {}),
     onProviderTerminal: generation => {
       options.onAudioTerminal?.(generation.utterance_id, generation.generation_epoch)
     },
@@ -1275,12 +1330,12 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     (suggestion: Suggestion, reason: WakeReason) => {
       try { options.onExecutorSuggestion?.(suggestion) } catch { /* observability cannot own speech */ }
       if (typeof suggestion.content.personal_feed_id === 'string') {
-        void assemblyHolder.current?.personalAgent.canDeliver(suggestion.content.personal_feed_id).then(valid=>{if(valid)service.onSuggestionSelected(suggestion,reason)}).catch(()=>{ /* optional host projection failure */ })
+        void assemblyHolder.current?.personalAgent.canDeliver(suggestion.content.personal_feed_id).then(valid=>{if(valid&&!assemblyHolder.current?.personalAgent.routePersonalSuggestion(suggestion,reason))service.onSuggestionSelected(suggestion,reason)}).catch(()=>{ /* optional host projection failure */ })
       } else service.onSuggestionSelected(suggestion, reason)
     },
   )
   const workspaceGraph = options.workspaceGraph ?? options.createWorkspaceGraph?.()
-  const personalMemory = options.createPersonalMemory?.()
+  const personalMemory = options.sharedPersonal?.memory ?? options.createPersonalMemory?.()
   personalMemoryHolder.current = personalMemory
   return assignAssembly(new RealtimeAssembly({
     toolCount: count,
@@ -1290,6 +1345,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     playback,
     session,
     bridge,
+    retrieval,
     service,
     onDiagnostic,
     idFactory,
@@ -1304,6 +1360,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       },
     }),
     personalMemoryTurnTracker,
+    ...(options.sharedPersonal === undefined ? {} : {sharedPersonal:options.sharedPersonal}),
     ...(projectAdapter === undefined ? {} : {projectAdapter}),
     ...(options.onProjectView === undefined ? {} : {onProjectView: options.onProjectView}),
     ...(options.codexResource === undefined ? {} : {codexResource: options.codexResource}),
@@ -1521,7 +1578,29 @@ export function composeRealtime(
   options: Omit<RealtimeAssemblyOptions, 'core' | 'provider' | 'idFactory'> & {readonly settings: AssemblyOptions['settings']; readonly idFactory: () => string},
   providerTuning: Required<Pick<RealtimeAssemblyOptions, 'controlledPreemptiveAlertReconnect' | 'preemptiveAlertHistoryRecovery' | 'preemptiveAlertHistoryPairs'>>,
 ): RealtimeAssembly {
-  const createWorkspaceGraph = () => workspaceGraphServiceFromSettings(
+  const local = (options.createPersonalMemory as {localMemoryConfig?:{path:string;userId:string;extractionModel:string;embedding:{baseUrl:string;apiKey:string;model:string}}} | undefined)?.localMemoryConfig
+  let sharedClient: WorkspaceGraphStoreClient | undefined
+  const getClient = () => sharedClient ??= new WorkspaceGraphStoreClient(memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
+  const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
+  const useLocalLedger=local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
+  const createPersonalMemory = useLocalLedger ? () => {
+    const memory = new SubstrateMemoryResource({client:getClient(),userId:local?.userId??options.settings.memory_user_id,
+      ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?options.settings.model_base_url:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
+      personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:options.settings.workspace_graph_enabled,
+      gateway:core.gateway,model:local?.extractionModel??options.settings.fast_model,closeClient:!options.settings.workspace_graph_enabled,onClose:()=>{sharedClient=undefined},
+      ...(local?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
+    })
+    if(local)return memory
+    // Knowledge-only mode owns A originals, without enabling personal capture or B projections.
+    let opened=false
+    return {open:async()=>{await memory.open();opened=true},close:async()=>{opened=false;await memory.close()},
+      recall:(_query,queryOptions)=>opened?Promise.resolve({source:'personal',state:'empty',scope:queryOptions?.scope??'any',hits:[],degraded:false}):Promise.reject(Error('memory_unavailable')),
+      recordEvidence:input=>memory.recordEvidence(input),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),
+    } satisfies PersonalMemoryResource
+  } : options.createPersonalMemory
+  const createWorkspaceGraph = () => useLocalLedger && options.settings.workspace_graph_enabled
+    ? new WorkspaceGraphService({path:options.settings.workspace_graph_path,store_client:getClient()})
+    : workspaceGraphServiceFromSettings(
     options.settings,
     code => {
       if (code === 'workspace_graph_open_failed') return
@@ -1531,12 +1610,13 @@ export function composeRealtime(
   return buildRealtimeAssembly({
     core,
     provider,
+    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
     ...(options.intake === undefined ? {} : {intake: options.intake}),
     ...(options.onExecutorSuggestion === undefined ? {} : {onExecutorSuggestion: options.onExecutorSuggestion}),
     idFactory: options.idFactory,
     ...providerTuning,
     createWorkspaceGraph,
-    ...(options.createPersonalMemory === undefined ? {} : {createPersonalMemory: options.createPersonalMemory}),
+    ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
     ...(options.providerToolView === undefined
       ? {}
       : {providerToolView: options.providerToolView}),

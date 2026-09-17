@@ -1,3 +1,4 @@
+import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
 import {originalImageUrl} from './llm.js'
 import {randomUUID} from 'node:crypto'
 import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
@@ -54,16 +55,19 @@ class Session implements CascadedLlmSession {
   readonly #onUsage: UsageReporter | undefined
   readonly #endpoint: string; readonly #apiKey: string; readonly #model: string; readonly #instructions: string; readonly #fetch: typeof fetch
   readonly #idleTimeoutMs: number; readonly #closeTimeoutMs: number; readonly #active = new Set<Active>()
+  #started = false; #seeded = false
   #history: Message[][] = []; #unresolved: Message[] | null = null; #closed = false; #closePromise: Promise<void> | null = null
-  constructor(options: QwenCascadedLlmFactoryOptions) {
+  constructor(options: QwenCascadedLlmFactoryOptions,history?:readonly CommittedConversationPair[]) {
     this.#onUsage = options.onUsage
     if (!options.apiKey || !options.model || !options.instructions) throw fail('configuration')
     this.#endpoint = endpoint(options.baseUrl); this.#apiKey = options.apiKey; this.#model = options.model; this.#instructions = options.instructions; this.#fetch = options.fetchImpl ?? globalThis.fetch
     this.#idleTimeoutMs = options.idleTimeoutMs ?? 30_000; this.#closeTimeoutMs = options.closeTimeoutMs ?? 1_000
+    if(history!==undefined)this.#seed(history)
     if (!Number.isFinite(this.#idleTimeoutMs) || this.#idleTimeoutMs <= 0 || !Number.isFinite(this.#closeTimeoutMs) || this.#closeTimeoutMs <= 0) throw fail('configuration')
   }
   async *stream(input: {readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
     if (this.#closed) throw fail('closed'); if (input.signal.aborted) throw fail('aborted')
+    this.#started = true
     const current = input.inputs.map(message), unresolved = this.#unresolved
     if (unresolved === null && input.inputs.some(item => item.kind === 'tool_result')) throw fail('protocol')
     if (unresolved !== null) this.#checkResults(input.inputs, unresolved)
@@ -161,6 +165,16 @@ class Session implements CascadedLlmSession {
       else await finish()
     }
   }
+  restoreHistory(history:readonly CommittedConversationPair[],signal:AbortSignal):Promise<void> {
+    try {signal.throwIfAborted();if(this.#closed||this.#started||this.#seeded)throw fail('protocol');this.#seed(history);return Promise.resolve()}
+    catch(error){return Promise.reject(error instanceof Error?error:fail('protocol'))}
+  }
+  #seed(history:readonly CommittedConversationPair[]):void {
+    const pairs=committedConversationPairsSchema.parse(history)
+    this.#history=pairs.map(pair=>[{role:'user',content:pair.user},{role:'assistant',content:pair.assistant}])
+    this.#seeded=true
+    this.#trim([])
+  }
   #fragment(fragments: Map<number, Fragment>, value: unknown): void {
     if (!object(value) || typeof value.index !== 'number' || !Number.isSafeInteger(value.index) || value.index !== 0 || (value.function !== undefined && !object(value.function))) throw fail('protocol')
     const index = value.index
@@ -229,7 +243,7 @@ class Session implements CascadedLlmSession {
     return this.#closePromise
   }
 }
-export function createQwenCascadedLlmFactory(options: QwenCascadedLlmFactoryOptions): CascadedLlmFactory { return {open: () => new Session(options)} }
+export function createQwenCascadedLlmFactory(options: QwenCascadedLlmFactoryOptions): CascadedLlmFactory { return {open: input => new Session(options,input?.history)} }
 
 function withoutImage(message: Message): Message {
   return Array.isArray(message.content) ? {...message, content: (message.content as readonly JsonObject[]).filter(part => part.type === 'text').map(part => typeof part.text === 'string' ? part.text : '').join('\n')} : message

@@ -604,3 +604,22 @@ test('Qwen sends original pixels through tool continuations and strips them from
   assert.match(requests[2]!, /call-1/u)
   await llm.close()
 })
+
+test('fresh sessions seed only committed pairs and reject reseeding after a pending tool', async () => {
+  const bodies:Record<string,unknown>[]=[]
+  const factory=createQwenCascadedLlmFactory({baseUrl:'https://example.invalid',apiKey:'test',model:'test',instructions:'system',fetchImpl:(_url,init)=>{
+    bodies.push(JSON.parse(init?.body as string) as Record<string,unknown>)
+    return Promise.resolve(sse([{id:'r',choices:[{delta:{tool_calls:[{index:0,id:'call',function:{name:'lookup',arguments:'{}'}}]},finish_reason:'tool_calls'}]}]))
+  }})
+  const first=factory.open(),second=factory.open(),signal=new AbortController().signal
+  try {
+    assert(typeof first.restoreHistory==='function');assert(typeof second.restoreHistory==='function')
+    await first.restoreHistory([{user:'first question',assistant:'first answer'}],signal)
+    await second.restoreHistory([{user:'other question',assistant:'other answer'}],signal)
+    await collect(first.stream({inputs:[{kind:'user_text',text:'next'}],tools:[],signal}))
+    await collect(second.stream({inputs:[{kind:'user_text',text:'other next'}],tools:[],signal}))
+    assert.match(JSON.stringify(bodies[0]),/first answer/u);assert.doesNotMatch(JSON.stringify(bodies[0]),/other answer/u)
+    assert.match(JSON.stringify(bodies[1]),/other answer/u);assert.doesNotMatch(JSON.stringify(bodies[1]),/first answer/u)
+    await assert.rejects(first.restoreHistory([{user:'bad',assistant:'overwrite'}],signal))
+  } finally {await first.close();await second.close()}
+})

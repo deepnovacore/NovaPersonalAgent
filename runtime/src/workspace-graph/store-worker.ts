@@ -1,3 +1,8 @@
+import {dirname} from 'node:path'
+import {hostProjectRootFromConfig} from '../project-store.js'
+import {closeSync,constants,fchmodSync,fstatSync,lstatSync,openSync,realpathSync} from 'node:fs'
+import {preparePrivateDatabasePath,secureSidecar} from '../private-database.js'
+import type {MemoryOperation} from '../memory-substrate/store.js'
 import { isMainThread, parentPort, workerData } from 'node:worker_threads'
 import { DatabaseSync } from 'node:sqlite'
 
@@ -37,10 +42,12 @@ const data = parseWorkerData(workerData)
 let relationHookUsed = false
 const store = new WorkspaceGraphStore(
   data.path,
-  path => new DatabaseSync(path, {
-    allowExtension: false,
-    enableForeignKeyConstraints: true,
-  }),
+  path => {
+    const prepared=privateGraphPath(path)
+    secureSidecar(prepared,'-wal');secureSidecar(prepared,'-shm')
+    const database=new DatabaseSync(prepared,{allowExtension:false,enableForeignKeyConstraints:true})
+    return database
+  },
   {
     deniedRoots: data.deniedRoots,
     ...(data.publicationRevisionFloor === undefined
@@ -105,8 +112,11 @@ port.on('message', message => {
 
 function execute(request: StoreRequest): {readonly result: unknown; readonly publish: boolean} {
   switch (request.operation) {
+    case 'memory':
+      return {result: store.memory(stringField(request, 'memoryOperation') as MemoryOperation, request.input, path => new DatabaseSync(path, {readOnly:true,allowExtension:false})), publish: false}
     case 'open':
       store.open()
+      const path=privateGraphPath(data.path);secureSidecar(path,'-wal');secureSidecar(path,'-shm')
       return {result: null, publish: true}
     case 'close':
       store.close()
@@ -293,4 +303,24 @@ function safeErrorCode(error: unknown): WorkspaceGraphStoreErrorCode {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Upgrade owner-held graph files before they can receive raw personal evidence. */
+function privateGraphPath(input:string):string {
+  // macOS exposes system temp directories through fixed OS-owned aliases.
+  let path=input
+  if(process.platform==='darwin')for(const root of ['/var','/tmp'])if(path.startsWith(root+'/'))path=realpathSync(root)+path.slice(root.length)
+  let descriptor:number|undefined
+  try {
+    const before=lstatSync(path)
+    hostProjectRootFromConfig(dirname(path))
+    if(before.isSymbolicLink()||!before.isFile()||(process.getuid!==undefined&&before.uid!==process.getuid()))throw Error('invalid private graph file')
+    descriptor=openSync(path,constants.O_RDWR|constants.O_NOFOLLOW)
+    const opened=fstatSync(descriptor)
+    if(opened.dev!==before.dev||opened.ino!==before.ino||!opened.isFile())throw Error('graph file changed')
+    if(process.platform!=='win32')fchmodSync(descriptor,0o600)
+  } catch(error) {
+    if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error
+  } finally {if(descriptor!==undefined)closeSync(descriptor)}
+  return preparePrivateDatabasePath(path)
 }

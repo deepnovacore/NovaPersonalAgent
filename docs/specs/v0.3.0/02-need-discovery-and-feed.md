@@ -48,7 +48,7 @@ Suggestion Pool、Host 与 Floor 是 Nova 的具体设计。
 | 机会 | 触发条件 | 说明 |
 |---|---|---|
 | 上下文变化 | 现有路径：执行器事件进入 ContextView | 保持原语义；coding progress 的分类路径不混入 proposal 生成 |
-| 来源变化 | 04 卷的来源记录产生新增、修订、删除 | 04 卷落地前该机会不存在，不用占位 |
+| 来源变化 | 04 卷的来源记录（06 卷 `evidence_record`）产生新增、删除，或入库抽取写入了新修订 | 04 卷落地前该机会不存在，不用占位。**入库时的抽取（发现即抽取）不属于本卷**，见 06 卷 §7；本卷的“发现”只指从当前态里筛选此刻值得提的 |
 | 低频检查 | 主机按配置间隔发出一个 `tick` 事件（默认间隔待评审，见 §5） | 只代表"获得一次判断机会"，不代表用户空闲、不代表必须开口 |
 
 `tick` 进入事件记录（`EVENT_KINDS` 新增一种，命名待落地时定），携带本地日期、星期、时区，
@@ -59,14 +59,16 @@ Suggestion Pool、Host 与 Floor 是 Nova 的具体设计。
 每次判断为 Surrogate 准备一个**快照**，包含：
 
 - 当前 ContextView（现有）；
-- 少量相关个人记忆：通过 `PersonalMemoryResource.recall` 在适配层**异步**取回，形成有界列表，
-  每条带 03 卷定义的稳定 `entry_id` 与 `version`（后端不提供版本时标记为不可校验）；
+- 少量相关个人记忆：通过 06 卷 §5.1 统一回忆在适配层**异步**取回 B 当前条目与 A 原文节选，形成有界列表，
+  每条带 03 卷定义的稳定 `entry_id` 与 `version`（即 06 卷 `revision`；后端不提供版本时标记为不可校验）；
+  `kind = commitment` 的条目按 `due` 与 `direction` 优先进入快照；
 - 近期实际交付记录：最近 N 条已展示 / 已通知 / 已语音交付的事项摘要（N 待评审，建议 ≤ 8），
   防止重复提议；
 - 时钟：本地日期、星期、时区。
 
 快照携带 `user_scope`（用户与作用域）和实际使用的记忆版本集合。ContextView 保持同步编译；
 异步检索在适配层完成后再组装快照，不改 `context-view.ts` 的同步契约。
+统一结果保留 `entries` 与低信任 `snippets` 两层，依据使用 A 的 canonical `evidence_id` 与 locator；会话 MemoryRef 仍独立。tick 不抽取、不让模型选择资料库。proposal 只能引用本次快照中的依据和修订，准入与交付前重新校验，失效则撤回。
 
 ### 2.3 输出：追加可空 proposal
 
@@ -78,7 +80,7 @@ proposal (nullable):
   summary:       建议或问题的一句话内容（给用户看，≤ 200 字符）
   why_now:       为什么此刻相关（≤ 200 字符）
   evidence_refs: 当前快照中的运行时依据（事件 MemoryRef 或来源记录 ID），可为空数组
-  memory_refs:   使用的个人记忆 {entry_id, version}，可为空数组
+  memory_refs:   使用的个人记忆 {entry_id, version}，可为空数组；等价写法 entry_id@revision
 ```
 
 `evidence_refs` 与 `memory_refs` **至少一类非空**。无任务场景下可能只有个人记忆，此时
@@ -116,13 +118,14 @@ proposal (nullable):
 5. **分配**：主机分配 suggestion ID、`expires_at`（默认有效期待评审，建议 24 小时）、优先级
    （沿用 Floor 的 ambient observation 档，即 40；不允许模型指定）、`cooldown_until`。
 6. **入池**：以 `origin: 'surrogate'`、`kind` 同 proposal.kind、`content: {summary, why_now}`、
-   `evidence_refs` 写入 `SuggestionPool`。
+   `evidence_refs` 写入 `SuggestionPool`。依据为 `commitment` 条目时，主机按其 `direction` 校正 kind：
+   `owed_by_me` → `notify`，`owed_to_me` → `followup`；模型给出的 kind 与之不符则以主机为准并记录。
 
 模型不能扩大权限、不能提高打扰等级、不能指定交付方式。
 
-### 2.5 呈现：三类交付分别记账
+### 2.5 呈现：四类交付分别记账
 
-每条入池的 suggestion 生成或更新一条 `feed_item`（§3）。交付分三类，各自独立记录，任何一类
+每条入池的 suggestion 生成或更新一条 `feed_item`（§3）。交付分四类，各自独立记录，任何一类
 成功都不推断另一类：
 
 | 交付 | 触发条件 | 记录字段 |
@@ -130,6 +133,7 @@ proposal (nullable):
 | 首页展示 | `feed_item` 进入用户可见列表 | `presented_at`；**不等于用户已读** |
 | 通知 | 主窗口收起且事项优先级达到通知阈值（阈值待评审） | `notified_at`、通知渠道 |
 | 语音 | Floor 允许且用户未静音且当前 suggestion 被 Surrogate 后续选中 | `spoken_at`；沿用现有 `fired` 路径 |
+| IM | 用户开启了 04 卷 §2.5 的 bot 推送且事项优先级达到通知阈值 | `im_sent_at`、渠道标识；bot 发送成功不等于用户已读 |
 
 "入池""选择""实际交付"是三个状态，不合并。语音交付失败（被 preempt、静音、连接断开）不能记为成功。
 
@@ -157,7 +161,7 @@ proposal (nullable):
 | `title` | string ≤ 120 | 发生了什么 |
 | `why_now` | string ≤ 200 | 为何此刻相关 |
 | `evidence_refs` | array | 依据引用；UI 可展开查看 |
-| `source` | `{type: conversation \| task \| memory \| file \| mail \| calendar, ref}` | 信息来源 |
+| `source` | `{type: conversation \| task \| memory \| file \| mail \| calendar \| im, ref}` | 信息来源 |
 | `suggestion_id` | string \| null | 关联的 suggestion |
 | `task_ref` | `{work_id}` \| null | 关联任务；任务详情以 `EXECUTOR_TASKS` 为准 |
 | `subject_key` | string | 主机计算的稳定事项键（§2.4） |
@@ -167,7 +171,7 @@ proposal (nullable):
 | `expires_at` | ISO 8601 \| null | |
 | `user_state` | `new \| seen \| snoozed \| dismissed` | 用户动作；`snoozed` 带 `snooze_until` |
 | `lifecycle` | `active \| resolved \| invalidated` | 主机维护 |
-| `delivery` | `{presented_at, notified_at, spoken_at}` 各可空 | §2.5 三类记账 |
+| `delivery` | `{presented_at, notified_at, spoken_at, im_sent_at}` 各可空 | §2.5 四类记账 |
 
 用户可执行的动作：`open`（进入对话或任务）、`act`（开始处理，走既有 `dispatch` 授权路径，
 **不绕过**）、`snooze`、`dismiss`、`expand_evidence`。忽略反馈用于减少同类重复呈现（计入去重记账，
@@ -221,3 +225,13 @@ Suggestion Pool 只负责候选与交付调度，不当首页数据库。
 检索/决策延迟、用户纠正后的失效传播；比较关闭需求发现的 v0.2 基线与 v0.3 proposal。
 另测无活动任务、用户忙碌/静默、过时记忆、冲突记忆及重启后的场景。
 未经授权的执行必须为零；其余发布阈值在基线测量后、验收前固定，不以建议数量增加代替效果。
+
+## 2026-09-12 修订：准备、简报与会话交付
+
+所有主动内容集中进入固定「主动提醒」会话，不插入其他主题的对话。仅该会话自身占用实时语音、客户端在前台、未静音且 Floor 允许时可以播报；其他会话正在语音时静默到达。消息呈现、未读、通知与实际播报分别记账。
+
+先准备再提醒：只允许读取已授权资料、检索、生成摘要和提纲。准备模型没有执行工具；材料保持低信任，发布及点击时复验来源与记忆修订。准备本身不授权发送消息、修改文件或启动 coding。具体行动按钮在用户点击后开启专题对话，外部执行仍走原审批机制。
+
+每日前瞻和回顾分别默认关闭，不改变用户原有 discovery 设置。开启时默认工作日 08:30 前瞻、18:30 回顾，22:00–08:00 免打扰；全部使用设置时区。简报按本地日期、类型、时区去重，事项另行去重。当前实现只考虑当天两小时内的时刻，不补发旧队列；夏令时不存在的时刻跳过、重复时刻只发一次。准备前持久化占用键，因此进程崩溃或准备失败不会在同一日重复准备；不承诺失败自动补发。
+
+验收包括跨重启去重、撤回失效材料、重复点击幂等、静音期间不播报、后台会话不抢焦点、菜单栏未读和并发已读确认。真实飞书投递与回调必须另行验收，不能用页面预览或模拟状态替代。

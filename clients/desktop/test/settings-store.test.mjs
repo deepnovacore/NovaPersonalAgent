@@ -105,6 +105,7 @@ test('the default settings are the documented schema', () => {
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
+    memoryPrerecallEnabled: true,
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
     secrets: {},
   })
@@ -278,6 +279,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
+    memoryPrerecallEnabled: true,
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
     secrets: {},
   })
@@ -345,6 +347,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'integratedProvider',
     'integratedVoice',
     'knowledgePath',
+    'memoryPrerecallEnabled',
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
@@ -719,6 +722,7 @@ test('publicSettings never carries the secrets object', () => {
     'integratedProvider',
     'integratedVoice',
     'knowledgePath',
+    'memoryPrerecallEnabled',
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
@@ -1332,4 +1336,12 @@ test('native vision settings persist independently and device IDs have a bounded
 
 test('explicit integrated preference is preserved for existing users', () => {
   assert.equal(normalizeSettings({version:4,pipelineMode:'integrated'}).pipelineMode, 'integrated')
+})
+
+test('memory prerecall defaults on and preserves an explicit off setting', () => {
+  assert.equal(normalizeSettings({}).memoryPrerecallEnabled,true)
+  const settings=normalizeSettings({memoryPrerecallEnabled:false})
+  assert.equal(publicSettings(settings).memoryPrerecallEnabled,false)
+  assert.equal(backendSettings(settings).memoryPrerecallEnabled,false)
+  assert.equal(normalizeSettings({memoryPrerecallEnabled:'false'}).memoryPrerecallEnabled,true)
 })

@@ -217,3 +217,11 @@ export function apiKeyWindowOpenHandler(openExternal) {
     return {action: 'deny'}
   }
 }
+
+export function feishuVerificationUrl(value) {
+  if (typeof value !== 'string' || value.length > 4096) throw new Error('授权链接无效')
+  const url = new URL(value)
+  if (url.protocol !== 'https:' || url.username || url.password || url.port ||
+      !['feishu.cn', 'larksuite.com'].some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))) throw new Error('授权链接无效')
+  return url.href
+}

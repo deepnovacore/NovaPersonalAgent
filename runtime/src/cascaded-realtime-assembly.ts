@@ -1,3 +1,5 @@
+import {transcribeDraft} from './realtime/cascaded/transcribe.js'
+import {prerecallContext} from './memory/prerecall.js'
 import {supportsVision} from './vision-capability.js'
 import {captureConversationFrame} from './camera-session.js'
 import {usageReporterForEndpoint, type UsageReporter} from './realtime/usage.js'
@@ -7,6 +9,8 @@ import {capabilitiesFromSettings} from './config.js'
 import {buildAssembly, type AssemblyOptions} from './assembly.js'
 import {
   requireSelectedCascadedRealtimeConfig,
+  requireSelectedCascadedLlmConfig,
+  requireSelectedCascadedAsrConfig,
   type ArkCascadedLlmConfig,
   type AutoEndpointingConfig,
   type QwenCascadedLlmConfig,
@@ -38,7 +42,7 @@ import {
 import {createArkCascadedLlmFactory} from './realtime/cascaded/ark-llm.js'
 import type {CascadedLlmFactory} from './realtime/cascaded/llm.js'
 import type {AsrClient, AsrFactory, EndpointingFactory, TtsClient, TtsFactory} from './realtime/cascaded/ports.js'
-import {CascadedRealtimeError} from './realtime/cascaded/adapter.js'
+import {CascadedRealtimeAdapter,CascadedRealtimeError} from './realtime/cascaded/adapter.js'
 import {CascadedRealtimeProvider} from './realtime/cascaded/provider.js'
 import {createQwenCascadedLlmFactory} from './realtime/cascaded/qwen-llm.js'
 import {
@@ -224,6 +228,40 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
   }),
 })
 
+/** Shared desktop host graph: text only; scoped voice graphs are constructed on explicit voice start. */
+export function buildTextRealtimeAssembly(
+  options:BuildCascadedRealtimeAssemblyOptions,
+  registry:CascadedProviderRegistries=options.registries??cascadedProviderRegistries,
+):RealtimeAssembly {
+  options=filterDisabledCoding(options)
+  validateCodingResource(options)
+  const selected=requireSelectedCascadedLlmConfig(options.settings)
+  const clock=options.clock??new RealClock(),ids=options.ids??new MonotonicIdFactory()
+  const capabilities=options.capabilities??capabilitiesFromSettings(options.settings)
+  const instructions=frontendInstructions({search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,knowledge:capabilities.modules.knowledge.enabled},(options.executorApproval??options.codexResource?.approvalController)!=null)
+  const common={clock,ids,instructions,...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!})}
+  const llmFactory=selected.provider==='qwen'
+    ?registry.llm.qwen({...common,config:selected.config,...(options.qwenLlmFactory===undefined?{}:{factory:options.qwenLlmFactory})})
+    :registry.llm.ark({...common,config:selected.config,...(options.arkLlmFactory===undefined?{}:{factory:options.arkLlmFactory})})
+  const support=supportComposition(options,selected.provider,selected.config.model,selected.config.apiKey,selected.config.baseUrl,clock)
+  const core=buildAssembly({...options,settings:support.settings,clock,ids,gateway:support.gateway,...((options.executors===undefined&&options.codexResource===undefined)?{}:{executors:[...(options.executors??[]),...(options.codexResource===undefined?[]:[options.codexResource.adapter])]})})
+  const provider=Object.assign(new CascadedRealtimeAdapter({textOnly:true,llm:llmFactory.open(),llmFactory,idFactory:()=>ids.next('text'),
+    ...(options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await composition.retrieval.recall(query,{scope:'any',limit:3,signal});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await composition.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();composition.personalAgent.setPrefetchedRetrieval(query,current);return prerecallContext(query,current)}}}:{}),
+    ...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),
+  }),{
+    transcribeDraft:(pcm:Uint8Array,signal:AbortSignal)=>{
+      signal.throwIfAborted()
+      const config=requireSelectedCascadedAsrConfig(options.settings)
+      const factory=registry.asr.volcengine({config,ids,...(options.asrClient===undefined?{}:{clientFactory:options.asrClient}),...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,config.endpoint)!})})
+      return transcribeDraft(factory.openClient(),pcm,signal)
+    },
+  })
+  const intake=options.intake??defaultIntake(core,support.gateway,options.settings)
+  const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
+  const composition=composeRealtime(core,provider,{...options,...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4,...(createPersonalMemory===undefined?{}:{createPersonalMemory})})
+  return composition
+}
+
 export function buildCascadedRealtimeAssembly(
   options: BuildCascadedRealtimeAssemblyOptions,
   registry: CascadedProviderRegistries = options.registries ?? cascadedProviderRegistries,
@@ -308,6 +346,16 @@ export function buildCascadedRealtimeAssembly(
       : {executors: [...(options.executors ?? []), ...(options.codexResource === undefined ? [] : [options.codexResource.adapter])]}),
   })
   const provider = new CascadedRealtimeProvider({
+    ...(options.settings.memory_prerecall_enabled ? {prerecall: async (query: string, signal: AbortSignal) => {
+      const result = await composition.retrieval.recall(query, {scope: 'any', limit: 3, signal})
+      signal.throwIfAborted()
+      return async (consumeSignal: AbortSignal) => {
+        const current = await composition.retrieval.revalidate(result, consumeSignal)
+        consumeSignal.throwIfAborted()
+        composition.personalAgent.setPrefetchedRetrieval(query, current)
+        return prerecallContext(query, current)
+      }
+    }} : {}),
     ...(options.settings.conversation_vision_enabled && supportsVision(selection.llmProvider, selection.llmModel)
       ? {captureFrame: (signal: AbortSignal) => captureConversationFrame(core.frameSource, signal, core.mediaStore)} : {}),
     endpointingFactory,
@@ -318,7 +366,7 @@ export function buildCascadedRealtimeAssembly(
     idFactory: () => ids.next('cascaded'),
   })
   const intake = options.intake ?? defaultIntake(core, support.gateway, options.settings)
-  return composeRealtime(core, provider, {
+  const composition = composeRealtime(core, provider, {
     ...options,
     ...(intake === undefined ? {} : {intake}),
     idFactory: () => ids.next('realtime'),
@@ -328,6 +376,7 @@ export function buildCascadedRealtimeAssembly(
     preemptiveAlertHistoryPairs: 4,
     ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
   })
+  return composition
 }
 
 function supportComposition(

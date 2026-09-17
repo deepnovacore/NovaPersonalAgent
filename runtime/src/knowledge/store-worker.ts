@@ -12,6 +12,7 @@ import type {
   KnowledgeJob,
   KnowledgeRecallHit,
   KnowledgeSource,
+  KnowledgeIndexChunk,
   ReplaceKnowledgeSourceInput,
 } from './types.js'
 
@@ -87,6 +88,8 @@ function execute(request: Request): unknown {
     case 'open': return open()
     case 'close': return close()
     case 'list_sources': return listSources()
+    case 'list_chunks': return listChunks(request.source_id, request.offset)
+    case 'link_evidence': return linkEvidence(request.links)
     case 'replace_source': return replaceSource(request.input)
     case 'remove_source': return removeSource(request.id)
     case 'recall': return recall(request.query, request.vector, request.provider_id, request.k)
@@ -123,6 +126,10 @@ function open(): {readonly fts: boolean} {
       CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY, source_id TEXT NOT NULL, state TEXT NOT NULL,
         error_code TEXT, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS evidence_links (
+        chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+        evidence_id TEXT NOT NULL
       );
       CREATE TABLE IF NOT EXISTS knowledge_metadata (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
       INSERT OR IGNORE INTO knowledge_metadata(key, value) VALUES ('fts_dirty', 1);
@@ -224,6 +231,40 @@ function listSources(): readonly KnowledgeSource[] {
   `).all().map(row => sourceFrom(row as Row))
 }
 
+function listChunks(sourceValue: unknown, offsetValue: unknown): readonly KnowledgeIndexChunk[] {
+  const sourceId = boundedString(sourceValue, 200), offset = nonnegativeInteger(offsetValue, MAX_CHUNKS)
+  return db().prepare(`SELECT c.id, c.source_id, c.text, c.ordinal, c.content_digest, s.locator, s.updated_at, l.evidence_id
+    FROM chunks c JOIN sources s ON s.id = c.source_id LEFT JOIN evidence_links l ON l.chunk_id = c.id
+    WHERE c.source_id = ? ORDER BY c.ordinal, c.id LIMIT 100 OFFSET ?`).all(sourceId, offset).map(value => {
+    const row = value as Row
+    return {chunk_id: textValue(row, 'id'), source_id: sourceId, text: textValue(row, 'text'), ordinal: numberValue(row, 'ordinal'),
+      locator: textValue(row, 'locator'), observed_at: new Date(numberValue(row, 'updated_at')).toISOString(), content_digest: textValue(row, 'content_digest'),
+      ...(typeof row.evidence_id === 'string' ? {evidence_id: row.evidence_id} : {})}
+  })
+}
+
+function linkEvidence(value: unknown): null {
+  if (!Array.isArray(value) || value.length > 100) throw new StoreError('STORE_INVALID_INPUT')
+  const links = value.map(item => {
+    if (!isRecord(item)) throw new StoreError('STORE_INVALID_INPUT')
+    return {chunk_id: boundedString(item.chunk_id, 200), content_digest: boundedString(item.content_digest, 200), evidence_id: boundedString(item.evidence_id, 600)}
+  })
+  const opened = db()
+  try {
+    opened.exec('BEGIN IMMEDIATE')
+    for (const link of links) {
+      if (!opened.prepare('SELECT 1 FROM chunks WHERE id = ? AND content_digest = ?').get(link.chunk_id, link.content_digest)) throw new StoreError('STORE_WRITE_FAILED')
+      opened.prepare('INSERT INTO evidence_links(chunk_id,evidence_id) VALUES (?,?) ON CONFLICT(chunk_id) DO UPDATE SET evidence_id=excluded.evidence_id').run(link.chunk_id, link.evidence_id)
+    }
+    opened.exec('COMMIT'); return null
+  } catch (error) { try {opened.exec('ROLLBACK')} catch { /* no active transaction */ } throw error }
+}
+
+function evidenceLink(chunkId: string): {evidence_id?: string} {
+  const row = db().prepare('SELECT evidence_id FROM evidence_links WHERE chunk_id = ?').get(chunkId)
+  return typeof row?.evidence_id === 'string' ? {evidence_id: row.evidence_id} : {}
+}
+
 function replaceSource(value: unknown): null {
   const input = parseReplaceInput(value)
   const opened = db()
@@ -264,6 +305,7 @@ function replaceSource(value: unknown): null {
       const digest = contentDigest(input.source.title, chunk.heading_path, chunk.text)
       const legacy = old?.content_digest === digest ? old.legacy_digest ?? null : null
       chunkStatement.run(id, input.source.id, chunk.heading_path, chunk.text, chunk.token_estimate, ordinal, digest, legacy)
+      if (chunk.evidence_id) opened.prepare('INSERT INTO evidence_links(chunk_id,evidence_id) VALUES (?,?)').run(id, chunk.evidence_id)
       embeddingStatement.run(id, input.provider_id, input.dims, vectorBlob(chunk.vector))
       ftsStatement?.run(id, input.source.id, chunk.text, chunk.heading_path)
     }
@@ -341,6 +383,7 @@ function getChunk(value: unknown): KnowledgeChunkResult {
   `).get(parsed.chunkId, parsed.sourceId) as Row | undefined
   if (row === undefined) return {status: 'gone'}
   return {
+    ...evidenceLink(textValue(row, 'id')),
     status: textValue(row, 'content_digest').slice(0, 12) === parsed.digest || row.legacy_digest === parsed.digest ? 'ok' : 'stale', text: redactOutput(textValue(row, 'text')), title: redactOutput(textValue(row, 'title')),
     heading_path: redactOutput(textValue(row, 'heading_path')), source_id: textValue(row, 'source_id'),
   }
@@ -407,6 +450,7 @@ function parseChunk(value: unknown): KnowledgeChunkInput {
   if (!isRecord(value)) throw new StoreError('STORE_INVALID_INPUT')
   return {
     heading_path: screenContent(boundedString(value.heading_path, 1024)),
+    ...(value.evidence_id === undefined ? {} : {evidence_id: boundedString(value.evidence_id, 600)}),
     text: screenContent(boundedCodePoints(value.text, 3200)),
     token_estimate: nonnegativeInteger(value.token_estimate, 1_000_000),
     vector: numericVector(value.vector),
@@ -449,6 +493,7 @@ function hitFrom(row: Row, score: number): KnowledgeRecallHit {
   const sourceId = textValue(row, 'source_id')
   const id = textValue(row, 'id')
   return {
+    ...evidenceLink(id),
     locator: `knowledge://${sourceId}/${id}?d=${textValue(row, 'content_digest').slice(0, 12)}`,
     source_id: sourceId, title: redactOutput(textValue(row, 'title')), heading_path: redactOutput(textValue(row, 'heading_path')),
     text: redactOutput(truncateCodePoints(textValue(row, 'text'), 600)), score,

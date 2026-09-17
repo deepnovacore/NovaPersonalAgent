@@ -1,71 +1,115 @@
-/** One input owner; snapshots remain host-owned and commands never optimistically mutate them. */
+/** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 export class PersonalController {
   constructor({send,start,stop,changed=()=>{}}) {
-    Object.assign(this,{send,start,stop,changed,connected:false,capabilities:[],draft:'',mode:'text',collapsed:false,error:'',snapshot:null,dictationId:null,pending:new Map(),generation:0,submittedDraft:null,submittedRequestId:null,restoredSubmitted:false,inputInstance:null,submittedInstance:null})
+    Object.assign(this,{send,start,stop,changed,connected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
   }
-  connect() { this.connected=true; this.error=''; this.capabilities=[]; this.snapshot=null; if(this.submittedRequestId)this.send({type:'input.text',text:this.submittedDraft,request_id:this.submittedRequestId,input_instance_id:this.submittedInstance}); this.changed() }
-  disconnect() {
-    if(this.submittedDraft && !this.restoredSubmitted){this.draft=[this.submittedDraft,this.draft].filter(Boolean).join('\n');this.restoredSubmitted=true}
-    this.connected=false; this.capabilities=[]; this.generation++; this.dictationId=null; this.mode='text'
-    for(const {reject,timer} of this.pending.values()) {clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
-    this.pending.clear(); void this.stop(); this.error='连接已断开，草稿已保留'; this.changed()
+  get selectedId(){return this.snapshot?.conversations?.selected_id??null}
+  get voiceId(){return this.snapshot?.conversations?.voice_id??null}
+  state(id=this.selectedId){if(!this.drafts.has(id))this.drafts.set(id,{draft:'',error:'',submission:null});return this.drafts.get(id)}
+  get draft(){return this.state().draft} set draft(value){this.state().draft=value}
+  get error(){return this.state().error} set error(value){this.state().error=value}
+  get submittedRequestId(){return this.state().submission?.request_id??null}
+  get submittedDraft(){return this.state().submission?.text??null}
+  get isVoiceConversation(){return Boolean(this.selectedId&&(this.voiceId===this.selectedId||(!this.dictationId&&['starting','voice'].includes(this.mode)&&this.captureConversationId===this.selectedId)))}
+  connect(){
+    this.connected=true;this.error='';this.capabilities=[];this.snapshot=null
+    for(const [id,state]of this.drafts)if(state.submission)this.sendSubmission(id,state.submission)
+    this.changed()
   }
-  collapse(value) {this.collapsed=value; if(value && this.mode!=='voice') void this.text(); this.changed()}
-  receive(frame) {
-    if(frame.type==='input.text_result' && frame.request_id===this.submittedRequestId) {
-      if(!frame.ok){if(!this.restoredSubmitted)this.draft=[this.submittedDraft,this.draft].filter(Boolean).join('\n');this.error=frame.error==='outcome_unknown'?'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。':frame.error||'文字发送失败，草稿已保留'}
-      else if(this.restoredSubmitted && this.draft===this.submittedDraft)this.draft=''
-      this.submittedDraft=null;this.submittedRequestId=null;this.restoredSubmitted=false
+  sendSubmission(id,value){return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id})}
+  disconnect(){
+    for(const state of this.drafts.values())if(state.submission&&!state.submission.restored){state.draft=[state.submission.text,state.draft].filter(Boolean).join('\n');state.submission.restored=true}
+    this.connected=false;this.capabilities=[];this.generation++;this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
+    for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
+    this.pending.clear();void this.stop();this.error='连接已断开，草稿已保留';this.changed()
+  }
+  collapse(value){this.collapsed=value;if(value&&this.dictationId)void this.text();this.changed()}
+  receive(frame){
+    if(frame.type==='conversation.error'&&typeof frame.conversation_id==='string')this.state(frame.conversation_id).error='回复失败，请重试。'
+    if(frame.type==='input.text_result')for(const [id,state]of this.drafts){
+      const request=state.submission
+      if(!request||request.request_id!==frame.request_id||(frame.conversation_id&&frame.conversation_id!==id))continue
+      if(!frame.ok){if(!request.restored)state.draft=[request.text,state.draft].filter(Boolean).join('\n');state.error=frame.error==='outcome_unknown'?'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。':frame.error||'文字发送失败，草稿已保留'}
+      else if(request.restored&&state.draft===request.text)state.draft=''
+      state.submission=null
     }
     if(['client.ready','desktop.capabilities'].includes(frame.type)){this.capabilities=frame.capabilities??[];this.inputInstance=frame.input_instance_id??null}
-    if(frame.type==='personal.state' && Number.isSafeInteger(frame.revision) && (!this.snapshot || frame.revision>this.snapshot.revision)) this.snapshot=frame
-    if(frame.type==='personal.result') {
-      const entry=this.pending.get(frame.request_id)
-      if(entry) {clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok ? entry.resolve(frame.data) : entry.reject(new Error(frame.error||'操作失败'));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
+    if(frame.type==='personal.state'&&Number.isSafeInteger(frame.revision)&&(!this.snapshot||frame.revision>this.snapshot.revision)){
+      const previous=this.selectedId;this.snapshot=frame
+      if(this.mode==='voice'&&this.voiceId!==this.captureConversationId){this.generation++;this.mode='text';this.captureConversationId=null;void this.stop()}
+      if(this.voiceId&&this.dictationId)void this.text()
+      if(!previous&&this.selectedId&&this.drafts.has(null)){const scratch=this.drafts.get(null);if(scratch.draft&&!this.state().draft)this.state().draft=scratch.draft;this.drafts.delete(null)}
     }
-    if(frame.type==='input.transcription' && frame.id===this.dictationId) {
-      if(typeof frame.text==='string') this.draft=frame.text
-      else this.error='recognition_failed · 原有草稿已保留'
-      this.dictationId=null;this.mode='text'
+    if(frame.type==='personal.result'){
+      const entry=this.pending.get(frame.request_id)
+      if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(new Error(frame.error||'操作失败'));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
+    }
+    if(frame.type==='input.transcription'&&frame.id===this.dictationId&&(!frame.conversation_id||frame.conversation_id===this.dictationConversationId)){
+      const state=this.state(this.dictationConversationId)
+      if(typeof frame.text==='string'&&frame.text.trim()&&[state.draft,frame.text].filter(Boolean).join('\n').length<=4000)state.draft=[state.draft,frame.text].filter(Boolean).join('\n');else state.error='recognition_failed · 原有草稿已保留'
+      this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
     }
     this.changed()
   }
-  async command(method,params={}) {
-    if(!this.connected) throw new Error('尚未连接')
-    if(this.pending.size>=32) throw new Error('请等待当前操作完成')
+  async command(method,params={}){
+    if(!this.connected)throw new Error('尚未连接')
+    if(this.pending.size>=32)throw new Error('请等待当前操作完成')
     const request_id=crypto.randomUUID()
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{this.pending.delete(request_id);reject(new Error('操作超时，请刷新状态后重试'))},30000)
       this.pending.set(request_id,{resolve,reject,timer})
-      if(!this.send({type:'personal.command',request_id,method,params})) {clearTimeout(timer);this.pending.delete(request_id);reject(new Error('发送失败'))}
+      if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(new Error('发送失败'))}
     })
   }
-  async text() {
-    this.generation++; if(this.dictationId) this.send({type:'input.dictation',id:this.dictationId,action:'cancel'})
-    this.dictationId=null;this.mode='text'; await this.stop();this.changed()
+  select(id){return this.command('conversations.select',{id})}
+  create(){return this.command('conversations.create',{})}
+  openFeed(id,label){return this.command('conversations.open_feed',{feed_id:id,label})}
+  async text(){
+    if(this.mode==='voice')return
+    this.generation++;if(this.dictationId)this.send({type:'input.dictation',id:this.dictationId,action:'cancel',conversation_id:this.dictationConversationId})
+    this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text';await this.stop();this.changed()
   }
-  async voice() {
-    await this.text(); if(!this.connected) throw new Error('尚未连接')
-    const generation=this.generation;this.mode='starting';this.changed()
-    try {await this.start();if(generation!==this.generation){await this.stop();return} if(!this.send({type:'input.audio'})) throw new Error('连接已断开');this.mode='voice'}
-    catch(error){this.mode='text';await this.stop();throw error} finally {this.changed()}
+  async stopVoice(){
+    const id=this.voiceId??this.captureConversationId
+    this.generation++;await this.stop();this.captureConversationId=null;this.mode='text'
+    if(id&&this.connected)await this.command('conversations.voice',{id,enabled:false})
+    this.changed()
   }
-  async dictate() {
-    if(!this.connected || !this.capabilities.includes('dictation')) return
-    await this.text();const generation=this.generation;this.mode='starting';this.changed()
-    this.dictationId=crypto.randomUUID()
-    if(!this.send({type:'input.dictation',id:this.dictationId,action:'start'})) throw new Error('发送失败')
-    try {await this.start();if(generation!==this.generation){await this.stop();return}this.mode='dictation'}
-    catch(error){await this.text();throw error} finally{this.changed()}
+  async startCapture(){this.capturePending=true;try{await this.start()}finally{this.capturePending=false}}
+  async voice(){
+    const id=this.selectedId
+    if(!id||!this.connected)throw new Error('尚未选择会话')
+    if(this.capturePending||this.voiceId||this.mode!=='text')throw new Error('请先结束当前语音或录音')
+    const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.changed()
+    try{
+      await this.command('conversations.voice',{id,enabled:true})
+      if(generation!==this.generation)return
+      await this.startCapture()
+      if(generation!==this.generation){await this.stop();return}
+      if(!this.send({type:'input.audio',conversation_id:id}))throw new Error('连接已断开')
+      this.mode='voice'
+    }catch(error){this.mode='text';this.captureConversationId=null;await this.stop();if(this.connected)await this.command('conversations.voice',{id,enabled:false}).catch(()=>{});throw error}
+    finally{this.changed()}
   }
-  async finish() {
-    if(this.mode==='starting') return this.text()
-    if(this.mode!=='dictation') return
-    this.mode='transcribing';await this.stop();this.send({type:'input.dictation',id:this.dictationId,action:'finish'});this.changed()
+  async dictate(){
+    const id=this.selectedId
+    if(!id||!this.connected||!this.capabilities.includes('dictation'))return
+    if(this.capturePending||this.voiceId||this.mode!=='text')throw new Error('请先结束持续对话，再使用录音')
+    const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.dictationConversationId=id;this.dictationId=crypto.randomUUID();this.changed()
+    if(!this.send({type:'input.dictation',id:this.dictationId,action:'start',conversation_id:id})){await this.text();throw new Error('发送失败')}
+    try{await this.startCapture();if(generation!==this.generation){await this.stop();return}this.mode='dictation'}
+    catch(error){await this.text();throw error}finally{this.changed()}
   }
-  async submit() {
-    if(this.submittedRequestId || !this.inputInstance || !this.connected || !this.capabilities.includes('text_input') || !this.draft.trim() || this.draft.length>4000) return false
-    await this.text(); const request_id=crypto.randomUUID(); if(!this.send({type:'input.text',text:this.draft,request_id,input_instance_id:this.inputInstance})) {this.error='发送失败，草稿已保留';this.changed();return false}
-    this.submittedInstance=this.inputInstance;this.submittedRequestId=request_id;this.submittedDraft=this.draft;this.draft='';this.error='';this.changed();return true
+  async finish(){
+    if(this.mode==='starting'&&this.dictationId)return this.text()
+    if(this.mode!=='dictation')return
+    const id=this.dictationId,conversationId=this.dictationConversationId;this.mode='transcribing';await this.stop();if(this.dictationId!==id)return;if(!this.send({type:'input.dictation',id,action:'finish',conversation_id:conversationId})){await this.text();this.state(conversationId).error='发送失败，草稿已保留'}this.changed()
+  }
+  async submit(){
+    const id=this.selectedId,state=this.state(id)
+    if(!id||state.submission||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
+    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false}
+    if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';this.changed();return false}
+    state.submission=request;state.draft='';state.error='';this.changed();return true
   }
 }

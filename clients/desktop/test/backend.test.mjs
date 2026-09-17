@@ -1351,3 +1351,10 @@ test('dev dotenv keys override saved keys in both public metadata and runtime co
   assert.equal(resolved.secretsPresent.codexApiKey, false)
   assert.doesNotMatch(JSON.stringify({secretsPresent: resolved.secretsPresent, secretSources: resolved.secretSources}), /repo-key|speech-key|stored-key/)
 })
+
+test('memory prerecall switch overrides inherited env and defaults on', () => {
+  for (const enabled of [undefined, false, true]) {
+    const spec=nodeLaunchSpec({workspace:'/workspace',token:TOKEN,readyEndpoint:'127.0.0.1:49152',parentEnv:{NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED:'stale'},settings:{...SETTINGS_V2,...(enabled===undefined?{}:{memoryPrerecallEnabled:enabled})}})
+    assert.equal(spec.env.NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED,String(enabled??true))
+  }
+})

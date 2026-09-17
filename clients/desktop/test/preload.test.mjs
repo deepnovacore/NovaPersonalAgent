@@ -63,8 +63,8 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   const { exposed, ipcRenderer, invokes } = await loadPreload()
 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
-    'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'get', 'knowledgeAction', 'onChanged',
-    'openCurrentManagedWorkspace',
+    'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'onChanged',
+    'openCurrentManagedWorkspace', 'openFeishuVerification',
     'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend',
     'retryMicrophone', 'set',
   ])

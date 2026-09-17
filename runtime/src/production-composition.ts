@@ -1,3 +1,10 @@
+import {scopeApprovalController} from './personal-agent/approval-scope.js'
+import type {PersonalAgentHost} from './personal-agent/host.js'
+import {conversationRuntimeFactory} from './personal-agent/conversation-runtime.js'
+import {join} from 'node:path'
+import {FeishuConnector} from './connectors/feishu/index.js'
+import {SubstrateMemoryResource} from './memory-substrate/resource.js'
+import {z} from 'zod'
 import {blackboardOptionsFromSettings} from './memory/blackboard-session.js'
 import type {UsageReporter} from './realtime/usage.js'
 import {prepareKnowledge} from './knowledge/assembly.js'
@@ -6,8 +13,8 @@ import {LocalDirectorySources} from './personal-agent/sources.js'
 import {randomUUID} from 'node:crypto'
 import {loadCapabilityRegistry} from './capability-registry.js'
 import {prepareExternalMcp} from './executors/mcp.js'
-import {loadSettings, requireIntegratedRealtime} from './config.js'
-import {requireSelectedCascadedRealtimeConfig} from './cascaded-realtime-config.js'
+import {loadSettings} from './config.js'
+import {requireSelectedCascadedLlmConfig} from './cascaded-realtime-config.js'
 import {remoteClientMedia} from './server-config.js'
 import type {ClientMedia} from './client-protocol.js'
 import {buildDesktopRealtimeComposition, type DesktopConstructionOwnership} from './desktop-service.js'
@@ -34,8 +41,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
 }) {
   const loadedSettings = loadSettings(environment)
   const media = remote ? remoteClientMedia(loadedSettings) : undefined
-  if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
-  else requireSelectedCascadedRealtimeConfig(loadedSettings)
+  requireSelectedCascadedLlmConfig(loadedSettings)
   const externalMcp = await prepareExternalMcp(loadCapabilityRegistry({environment: remote
       ? {...environment, NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false'} : environment}), stop.signal)
   const releaseExternal = ownership.own(() => externalMcp.close())
@@ -81,7 +87,10 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
           })
     })()
   const releaseCodex = codexResource === null ? undefined : ownership.own(() => codexResource.close())
+  const conversationOwner:{host?:PersonalAgentHost}={}
   const camera = remote ? null : selectDesktopCameraSource(environment)
+  let playbackEpoch=0
+  const nextPlaybackGeneration=()=>++playbackEpoch
   const composition = buildDesktopRealtimeComposition({
     token,
     stop,
@@ -102,6 +111,8 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         clock,
       })
       const realtimeOptions: BuildProductionRealtimeAssemblyOptions = {
+        textOnly:true,
+        nextPlaybackGeneration,
         blackboard: blackboardOptionsFromSettings(settings),
         settings,
         ...(onUsage === undefined ? {} : {onUsage}),
@@ -114,6 +125,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         ...(frameSource === undefined ? {} : {frameSource}),
         ...(codexResource === null ? {} : {codexResource}),
         ...callbacks,
+        ...(codexResource?.approvalController?{executorApproval:scopeApprovalController(codexResource.approvalController,view=>!view.work||!conversationOwner.host?.workConversation(view.work.work_id))}:{}),
       }
       const realtime = buildProductionRealtimeAssembly(realtimeOptions, integratedProviders === undefined ? {} : {
         integrated: options => buildIntegratedRealtimeAssembly(options, integratedProviders),
@@ -137,13 +149,67 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       },
       onObserve: async observation => {
         const memory = composition.realtime.personalMemory
-        if (!memory?.observeSource) throw new Error('memory_unavailable')
-        await memory.observeSource(observation)
+        if (!memory?.observeSource) return // Knowledge-only mode indexes A without enabling personal extraction.
+        await memory.observeSource({...observation, embedding_consent: true})
       },
     }))
   }
+  const host = composition.realtime.personalAgent
+  conversationOwner.host=host
+  host.setConversationRuntime(conversationRuntimeFactory({settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
+    ...(onUsage===undefined?{}:{onUsage}),
+    ...(composition.realtime.core.frameSource?{frameSource:composition.realtime.core.frameSource}:{}),
+    blackboard:blackboardOptionsFromSettings(settings),clock,gateway:composition.realtime.core.gateway,
+    ...(knowledge?{knowledge}:{}),...(codexResource?{codexResource}:{}),onDiagnostic,
+    host,memory:()=>composition.realtime.personalMemory,nextPlaybackGeneration,
+    onExecutorProgress:(progress,result)=>composition.desktop.bridge.onExecutorProgress(progress,result),
+    onAudioFrame:frame=>composition.desktop.bridge.onAudioFrame(frame),onAudioClear:(id,epoch)=>composition.desktop.bridge.onAudioClear(id,epoch),onAudioAlert:(id,epoch)=>composition.desktop.bridge.onAudioAlert(id,epoch),onAudioTerminal:(id,epoch)=>composition.desktop.bridge.onAudioTerminal(id,epoch),
+  }),frame=>composition.desktop.bridge.onPersonalFrame(frame))
+  const feishu = new FeishuConnector({
+    executable: environment.NOVA_AUDIO_AGENT_FEISHU_CLI_PATH ?? 'lark-cli',
+    credentialRoot: join(host.path + '.feishu', 'credentials'),
+    statePath: join(host.path + '.feishu', 'state.json'),
+    onChange:()=>host.connectionChanged(),
+    ingest: async message => {
+      const memory = composition.realtime.personalMemory
+      if (!(memory instanceof SubstrateMemoryResource)) throw Error('请先启用本地记忆')
+      await memory.ingestEvidence({sourceId:message.source_id,locator:message.locator,text:message.raw_text,observedAt:message.observed_at,kind:'im',embeddingConsent:true,retentionUntil:message.retention_until,senderId:message.sender_id,accountId:message.account_id})
+      await host.sourceChanged()
+    },
+    deleteSource: async ref => {
+      const memory = composition.realtime.personalMemory
+      if (!memory?.forgetSource) throw Error('memory_unavailable')
+      await memory.forgetSource(ref)
+      await host.revalidate()
+      await host.refreshMemory()
+    },
+    onAction: async action => {
+      // Card feedback is never an execution capability. 'open' only marks the item seen.
+      const result = await host.command({type:'personal.command',request_id:'feishu:'+action.event_id,
+        method:'feed.action',params:{id:action.proposal_id,action:action.action==='ignore'?'dismiss':action.action,
+          ...(action.action==='snooze'?{snooze_until:new Date(Date.now()+60*60000).toISOString()}:{})}})
+      if (!(result as {ok?:boolean}).ok) throw Error('feishu_action_rejected')
+    },
+  })
+  host.setFeishu({snapshot:()=>feishu.snapshot(),command:(method,params)=>feishu.command(method,z.record(z.string(),z.unknown()).parse(params)),open:()=>feishu.open(),close:async()=>{await feishu.close()}})
+  let delivering = false
+  const deliver = async () => {
+    if (delivering || stop.signal.aborted) return
+    delivering = true
+    try {
+      for (const item of host.snapshot().feed) {
+        if (stop.signal.aborted || item.delivery.im_sent_at || !await host.canDeliver(item.id)) continue
+        if (await feishu.sendReminder({id:item.id,title:item.title,body:item.why_now})) await host.imDelivered(item.id)
+      }
+    } catch { onDiagnostic('[runtime-diagnostic] feishu_delivery_unavailable') }
+    finally { delivering = false }
+  }
+  const unsubscribeFeishu = host.subscribe(() => { void deliver() })
+  const deliveryTimer=setInterval(()=>{void deliver()},30000)
+  deliveryTimer.unref()
+  ownership.own(() => {clearInterval(deliveryTimer);unsubscribeFeishu()})
   ownership.own(() => composition.desktop.server.close())
-  publishExecutorApproval = view => { composition.desktop.bridge.onExecutorApproval(view) }
+  publishExecutorApproval = view => { if(view.work&&host.workConversation(view.work.work_id))return;composition.desktop.bridge.onExecutorApproval(view) }
   return {
     ...composition,
     closeAuxiliary: () => telemetry.close(),

@@ -72,6 +72,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
     ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
+    createImPanel: () => ({load: () => Promise.resolve()}),
     createKnowledgePanel: () => ({render() {}}),
     document: {
       querySelector: node, querySelectorAll: () => [], getElementById: id => node(`#${id}`),
@@ -1035,8 +1036,8 @@ test('the sidebar renders one button per category with the first current', () =>
     assert.match(html, new RegExp(`${category.label}</button>`))
   }
   assert.match(html, /id="category-general" data-category="general" aria-current="true">/)
-  assert.equal((html.match(/class="nav-item"/g) || []).length, 6)
-  assert.equal((html.match(/tabindex="-1"/g) || []).length, 5)
+  assert.equal((html.match(/class="nav-item"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length)
+  assert.equal((html.match(/tabindex="-1"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length - 1)
 })
 
 test('sidebar navigation cycles vertically and passes other keys through', () => {
@@ -1285,4 +1286,18 @@ test('empty usage has quiet card values, one hint, and no empty details disclosu
   assert.equal(panel.node('#usage-breakdown').hidden,false)
   assert.equal(panel.node('#frontend-usage').hidden,true)
   assert.equal(panel.node('#usage-session-cost').textContent,'¥0.0100')
+})
+
+test('memory prerecall switch stages and saves explicit off without hiding on integrated mode', async () => {
+  let saved
+  const panel=await mountSettingsPanel(publicView({memoryPrerecallEnabled:true}),{set:async patch=>{saved=patch.settingsPatch;return publicView({...patch.settingsPatch})}})
+  const toggle=panel.node('#memory-prerecall-enabled')
+  assert.equal(toggle.checked,true)
+  toggle.checked=false
+  toggle.listeners.change()
+  await panel.click('#settings-save')
+  assert.equal(saved.memoryPrerecallEnabled,false)
+  assert.equal(toggle.checked,false)
+  assert.match(html,/回答前查找相关记忆/u)
+  assert.match(html,/仅逐段语音模式；关闭后仍可按需回忆/u)
 })

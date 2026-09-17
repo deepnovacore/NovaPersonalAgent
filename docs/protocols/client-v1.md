@@ -128,3 +128,39 @@ The bridge retains at most 256 text request receipts for its runtime lifetime, w
 Actual provider transcript captions now optionally carry an opaque `turn_id` derived from host service identity, provider epoch, role, and item/response identity. Caption deltas/finals for the same turn use the same ID; a new ID starts a new message even if a previous final was dropped. Existing role/text/final/sequence fields are unchanged. Empty final captions are reset signals and must close the displayed accumulation even when there is no text to append. Caption bodies remain speculative and droppable.
 
 `memory.overview` is optional/null while unavailable or refreshing. A valid value has `summary` and one to four `sections`, each containing `title`, `summary`, `keywords` (up to five), and `refs` (`entry_id`, exact `version`). References must resolve to active entries in the current page. Summaries are derived display data, not new authoritative memories. Source changes, correction and forgetting invalidate them; clients show source excerpts when unavailable and must reject stale references. Snapshot revision also advances for asynchronous summary projection changes.
+
+### Conversation-scoped desktop inputs
+
+`personal.state.conversations` contains `selected_id`, nullable `voice_id`,
+`unread_count`, `items` and the selected conversation's `messages`. Items expose
+`id`, `kind` (`chat`, `topic`, `proactive`), `title`, `subject_key`, timestamps,
+`generation` and `unread_count`. Messages expose `id`, `conversation_id`, `role`,
+`text`, `created_at`, and optional `turn_id` / `reply_to`. Selection does not
+transfer voice ownership. The fixed `chat:proactive` conversation receives proactive
+reminders; only that conversation may speak them while it owns voice.
+
+Authenticated `personal.command` methods:
+
+- `conversations.create {title?}` and `conversations.select {id}`.
+- `conversations.clear {id,expected_generation?}` clears only that conversation.
+- `conversations.open_feed {feed_id,label?}` opens the stable topic idempotently;
+  prepared source background remains untrusted and grants no execution authority.
+- `conversations.voice {id,enabled}` explicitly starts or ends the single voice
+  owner. Text is rejected in that conversation until voice ends; other conversations
+  may run text concurrently. Dictation requires voice to be ended first.
+- `conversations.read {id,through_message_id}` acknowledges only the displayed
+  prefix. Repeating an old acknowledgement does not read later arrivals.
+
+`input.text`, `input.audio`, and `input.dictation` accept `conversation_id`.
+Correlated `input.text_result` acknowledges durable host admission; model completion
+arrives through captions and updated state. A failed admitted response emits
+`conversation.error {conversation_id,error}`. Same-conversation text turns execute
+in order, with separate model history and causal state per conversation. Older
+clients may omit the ID and retain the original single-service input behavior.
+
+`caption`, `project.state`, and `executor.approval` may carry `conversation_id`.
+The existing `project.confirmation_decision` and `executor.approval_decision` controls
+accept that same ID. Clients must echo the ID from the approval frame, never infer
+it from the currently selected conversation. An unknown scoped target is rejected
+without falling back to the global service. Backend-instance and request-ID text
+replay rules above still apply.

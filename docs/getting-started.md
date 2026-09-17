@@ -254,6 +254,7 @@ families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for the
 | `NOVA_AUDIO_AGENT_SEARCH_PROVIDER` | `search` | No | tavily | CLI or CI search provider override. |
 | `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` | `search` | No | None | Web search MCP endpoint override; unset uses the verified Bailian preset when MCP is selected. |
 | `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` | `search` | No | web_search | Web search MCP tool override (generic default web_search; Bailian preset bailian_web_search). |
+| `NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED` | `core` | No | true | Retrieve bounded context before cascaded replies. |
 | `NOVA_AUDIO_AGENT_KNOWLEDGE_PATH` | `core` | No | ~/.nova-audio-agent/knowledge.sqlite | Knowledge SQLite database path. |
 | `NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER` | `core` | No | dashscope | Knowledge embedding provider. |
 | `NOVA_AUDIO_AGENT_EMBEDDING_MODEL` | `core` | No | text-embedding-v4 | Knowledge embedding model. |
