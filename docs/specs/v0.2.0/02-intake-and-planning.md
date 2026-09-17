@@ -302,6 +302,11 @@ idle
   preparation failure invalidates any pending proposal.
   The `intake.failure` memory and telemetry record includes stage, reason,
   attempt and retrying, bound to intake ID and revision, without provider bodies.
+- In cascaded mode, intake uses the resolved support connection's model settings.
+  When reusing the selected provider, assessment and the default planner use that
+  provider's selected model; an explicit planner override is retained. A generic
+  support connection retains its own model configuration. Never send default Qwen
+  model names to a selected DeepSeek or Ark endpoint.
 - Preparation feedback is “让我先梳理一下计划。” Actual coding `started` progress
   emits “需求梳理完毕，交给 {executor display_name} 执行。” once per delegate.
   Admission alone never triggers that startup announcement.
