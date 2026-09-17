@@ -16,6 +16,9 @@ export type MemoryBoardDetail = 'compact' | 'full'
 
 export interface MemoryBoardMessageOptions {
   readonly detail?: MemoryBoardDetail
+  readonly channel?: string
+  readonly before_seq?: number
+  readonly conversationEpoch?: number
 }
 
 interface BoardItem {
@@ -37,7 +40,10 @@ interface BoardChannel {
   summary: string | null
   readonly uncompressed: number
   readonly item_count: number
+  readonly retention_revision: number
   items: BoardItem[]
+  next_before_seq: number | null
+  has_more: boolean
 }
 
 export function memoryBoardMessage(
@@ -46,7 +52,7 @@ export function memoryBoardMessage(
   diagnosticSnapshot: RealtimeDiagnosticsSnapshot = {version: 1, records: []},
   options: MemoryBoardMessageOptions = {},
 ): string {
-  const detail = options.detail ?? 'full'
+  const detail = options.channel === undefined ? options.detail ?? 'full' : 'full'
   const profile = detail === 'compact'
     ? {
         messageBytes: MAX_BOARD_REFRESH_MESSAGE_BYTES,
@@ -62,15 +68,21 @@ export function memoryBoardMessage(
         summaryChars: MAX_BOARD_SUMMARY_CHARS,
         diagnostics: diagnosticSnapshot.records.length,
       }
-  const channels = [...memory.channels.values()].map(channel => channelView(channel, profile))
+  const selected = [...memory.channels.values()].filter(channel => options.channel === undefined || channel.name === options.channel)
+  const channels = selected.map(channel => channelView(channel, profile, options.before_seq))
   const diagnostics = {
     version: 1 as const,
     records: diagnosticSnapshot.records.slice(-profile.diagnostics),
   }
   let summariesDropped = false
   while (true) {
+    for (const channel of channels) {
+      const first = channel.items[0]?.seq
+      channel.has_more = first !== undefined && memory.channels.get(channel.name)!.items.some(item => item.seq < first)
+      channel.next_before_seq = channel.has_more ? first! : null
+    }
     const message = JSON.stringify({
-      type: 'memory.board', request_id: requestId, diagnostics, channels,
+      type: 'memory.board', request_id: requestId, conversation_epoch: options.conversationEpoch ?? 0, diagnostics, channels,
     })
     if (Buffer.byteLength(message, 'utf8') <= profile.messageBytes) return message
     if (diagnostics.records.length > 0) {
@@ -100,16 +112,20 @@ interface BoardProfile {
   readonly summaryChars: number
 }
 
-function channelView(channel: Channel, profile: BoardProfile): BoardChannel {
+function channelView(channel: Channel, profile: BoardProfile, before?: number): BoardChannel {
   return {
     name: channel.name,
+    next_before_seq: null,
+    has_more: false,
     ...(channel.restoredThroughSequence === 0 ? {} : {historical_through_seq: channel.restoredThroughSequence}),
     summary: channel.summary === null
       ? null
       : sliceCodePoints(channel.summary, profile.summaryChars),
     uncompressed: channel.uncompressed,
     item_count: channel.items.length,
+    retention_revision: channel.retentionRevision,
     items: channel.items
+      .filter(item => before === undefined || item.seq < before)
       .slice(-profile.itemsPerChannel)
       .map(item => ({...itemView(item, profile.contentChars),
         ...(item.seq <= channel.restoredThroughSequence ? {

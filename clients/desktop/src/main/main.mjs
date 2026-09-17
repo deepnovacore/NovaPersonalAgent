@@ -592,7 +592,6 @@ function sleepOrb() {
 
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
-    ...(wakeWord?.state === 'sleeping' ? [{ label: '唤醒', click: () => wakeWord.wake() }] : []),
     { label: '连接 iPhone…', click: () => { void openPairingWindow() } },
     { label: '记忆面板', click: () => openMemoryBoard(launchId) },
     { label: '设置…', click: () => openSettingsWindow(launchId) },
@@ -1125,6 +1124,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       const snapshot = await requestBoardSnapshot(connection, {
         board: 'memory',
         detail: detail === 'full' ? 'full' : 'compact',
+        ...(detail && typeof detail === 'object' ? {channel: detail.channel, before_seq: detail.before_seq} : {}),
       })
       if (backendStatus.connection !== connection || backendGeneration !== generation) {
         return { error: 'unavailable' }

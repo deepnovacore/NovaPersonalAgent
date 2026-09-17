@@ -36,7 +36,7 @@ try {
         window.__commits.push(commit)
         const outcome = window.__outcome
         if (['busy', 'invalid'].includes(outcome)) return {...view, saved: false, operationStatus: outcome}
-        view = {...view, ...commit.settingsPatch, ...(commit.capabilitiesDocument ? {capabilitiesDocument: commit.capabilitiesDocument} : {}), settingsApplyStatus: outcome,
+        view = {...view, ...commit.settingsPatch, cascadedLlmModels: {...view.cascadedLlmModels, ...commit.settingsPatch.cascadedLlmModels}, ...(commit.capabilitiesDocument ? {capabilitiesDocument: commit.capabilitiesDocument} : {}), settingsApplyStatus: outcome,
           capabilities: {...view.capabilities, diskGeneration: view.capabilities.diskGeneration + 1}, saved: true, operationStatus: outcome, rejectedSecrets: []}
         return view
       },
@@ -57,8 +57,25 @@ try {
   }
   await page.screenshot({path: `${output}/qwen-omni.png`})
   await page.locator('label').filter({has: page.locator('input[name="pipelineMode"][value="cascaded"]')}).click()
+  await page.locator('#cascadedLlmProvider').selectOption('qwen')
+  for (const model of ['qwen3.8-max', 'qwen3.8-flash', 'qwen-flash', 'qwen-plus']) {
+    await page.locator('#cascadedLlmModelPreset').selectOption(model)
+    assert.equal(await page.locator('#cascadedLlmModel').isVisible(), false)
+    await page.locator('#settings-save').click()
+    assert.equal((await page.evaluate(() => window.__commits.at(-1))).settingsPatch.cascadedLlmModels.qwen, model)
+  }
+  await page.locator('#cascadedLlmModelPreset').selectOption('__custom__')
+  await page.locator('#cascadedLlmModel').fill('qwen-custom-snapshot')
+  await page.locator('#settings-save').click()
+  assert.equal((await page.evaluate(() => window.__commits.at(-1))).settingsPatch.cascadedLlmModels.qwen, 'qwen-custom-snapshot')
+  await page.locator('#cascadedLlmProvider').selectOption('ark')
+  await page.locator('#cascadedLlmProvider').selectOption('qwen')
+  assert.equal(await page.locator('#cascadedLlmModel').inputValue(), 'qwen-custom-snapshot')
+  await page.locator('#cascadedLlmModelPreset').selectOption('qwen3.8-max')
+  await page.locator('#settings-save').click()
+  await page.screenshot({path: `${output}/qwen-model-picker.png`})
   await page.locator('#cascadedLlmProvider').selectOption('deepseek')
-  assert.equal(await page.locator('#cascadedLlmModel').inputValue(), 'deepseek-flash')
+  assert.equal(await page.locator('#cascadedLlmModelPreset').inputValue(), 'deepseek-flash')
   assert.equal(await page.locator('#usage-deepseekApiKey').textContent(), '必需')
   await page.locator('#settings-save').click()
   assert.equal((await page.evaluate(() => window.__commits.at(-1))).settingsPatch.cascadedLlmProvider, 'deepseek')
@@ -234,7 +251,7 @@ try {
   await tasks.evaluate(async () => {
     const {mountTaskBanner} = await import('./task-banner.mjs')
     window.actions = []
-    const banner = mountTaskBanner({container: document.querySelector('#task-banner'),
+    const banner = window.taskBanner = mountTaskBanner({container: document.querySelector('#task-banner'),
       send: action => {window.actions.push(action); return true},
       reserveArea: async () => ({taskHeightCss: 140, suppressed: false}),
     })
@@ -255,8 +272,20 @@ try {
   assert.deepEqual(await tasks.evaluate(() => window.actions.map(action => action.action)), ['open', 'cancel'])
   assert.equal(await tasks.locator('#codex-summary').evaluate(el => getComputedStyle(el).animationName), 'none')
   await tasks.emulateMedia({reducedMotion: 'no-preference'})
-  assert.equal(await tasks.locator('#codex-summary').evaluate(el => getComputedStyle(el).animationName), 'session-shimmer')
+  assert.equal(await tasks.locator('#codex-summary').evaluate(el => getComputedStyle(el).animationName), 'none')
+  await tasks.locator('#codex-label').evaluate(el => {el.dataset.working = 'true'})
+  assert.equal(await tasks.locator('#codex-summary').evaluate(el => getComputedStyle(el).animationName), 'none')
+  assert.equal(await tasks.locator('.task-list-heading').evaluate(el => getComputedStyle(el).animationName), 'task-shimmer')
   await tasks.screenshot({path: `${output}/task-icons-shimmer.png`})
+  await tasks.emulateMedia({reducedMotion: 'reduce'})
+  assert.equal(await tasks.locator('.task-list-heading').evaluate(el => getComputedStyle(el).animationName), 'none')
+  await tasks.emulateMedia({reducedMotion: 'no-preference'})
+  for (const [index, phase] of ['started', 'completed'].entries()) {
+    await tasks.evaluate(({index, phase}) => window.taskBanner.receive({type: 'executor.tasks', revision: index + 2,
+      active_project: '演示项目', tasks: [{work_id: 'demo-task', executor: 'codex', project: '演示项目',
+        title: '网页游戏', phase, summary: '任务状态', ts: index + 2}]}), {index, phase})
+    assert.equal(await tasks.locator('.task-list-heading').evaluate(el => getComputedStyle(el).animationName), 'none')
+  }
   assert.deepEqual(errors, [])
   console.log(JSON.stringify({moduleToggles: true, preset: true, serverCrud: true, toolAllowlist: true, transportFields: true, saveLattice: true, executorConfiguration: true, credentialFilteredModels: true, horizontalOverflow: false, pageErrors: errors, screenshots: output}))
 } finally {await browser.close()}

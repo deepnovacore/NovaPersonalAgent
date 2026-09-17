@@ -96,7 +96,7 @@ test('board auto-refresh is renderer-owned, guarded, and visibility-aware', asyn
   assert.match(source, /setInterval\(/)
   assert.match(source, /2000/)
   assert.match(source, /let inFlight = false/)
-  assert.match(source, /if \(inFlight\) return/)
+  assert.match(source, /if \(inFlight \|\| pageInFlight\) return/)
   assert.match(source, /async function load\(\) \{\n\s*if \(document\.hidden\) return/)
   assert.match(source, /const owner = loadOwnership[\s\S]*await window\.novaAudioAgentDesktop\.memoryBoard\.request\(\)[\s\S]*owner !== loadOwnership/u)
   assert.match(source, /document\.hidden\) \{\s*loadOwnership \+= 1/u)
@@ -453,7 +453,7 @@ test('the rail renders one tab per channel and mounts only the selected card', a
   assert.equal(cards.children.length, 1, 'only the selected channel is mounted')
 
   const messages = cards.children[0].children[1]
-  const [history, boundary, current] = messages.children
+  const [, history, boundary, current] = messages.children
   assert.equal(history.id, 'details')
   assert.equal(history.open, false, 'restored history is collapsed by default')
   assert.match(history.children[0].textContent, /重启前/)
@@ -472,7 +472,7 @@ test('the rail renders one tab per channel and mounts only the selected card', a
   assert.equal(rail.children[0].attributes.get('aria-selected'), 'false')
   assert.equal(document.querySelector('#channels').children.length, 1)
   rail.children[0].click()
-  assert.equal(document.querySelector('#channels').children[0].children[1].children[0].open, true)
+  assert.equal(document.querySelector('#channels').children[0].children[1].children[1].open, true)
 })
 
 test('channel selection never issues a backend read', async () => {

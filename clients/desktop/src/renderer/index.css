@@ -781,15 +781,3 @@ body:hover #last-result, #last-result:focus-visible { opacity: 1; pointer-events
 
 /* Keep the result entry out of the orb until its interaction is redesigned. */
 #last-result { display: none; }
-
-#codex-label[data-mode='project'][data-working='true'] #codex-summary {
-  background: linear-gradient(110deg, #bfb9c7 30%, #fff 48%, #bfb9c7 66%);
-  background-size: 240% 100%;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: session-shimmer 3s linear infinite;
-}
-@keyframes session-shimmer { from { background-position: 180% 0; } to { background-position: -60% 0; } }
-@media (prefers-reduced-motion: reduce) {
-  #codex-label[data-mode='project'] #codex-summary { animation: none; background: none; -webkit-text-fill-color: currentColor; }
-}

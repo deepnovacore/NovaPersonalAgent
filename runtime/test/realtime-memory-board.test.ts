@@ -137,3 +137,29 @@ test('compact refresh is smaller while full export retains the complete bounded 
   assert.equal(full.diagnostics.records.length, 128)
   assert.ok(Buffer.byteLength(compactMessage, 'utf8') < Buffer.byteLength(fullMessage, 'utf8'))
 })
+
+
+test('conversation pagination visits all 237 records across concurrent refreshes', () => {
+  const memory = new Memory()
+  fill(memory, 'conversation', 237)
+  interface Page {name: string; items: {seq: number}[]; has_more: boolean; next_before_seq: number | null}
+  const read = (before?: number): Page => {
+    const board = JSON.parse(memoryBoardMessage('page', memory, undefined,
+      before === undefined ? {detail: 'compact'} : {channel: 'conversation', before_seq: before})) as {channels: Page[]}
+    const channel = board.channels.find(channel => channel.name === 'conversation')
+    assert.ok(channel)
+    return channel
+  }
+  let page = read()
+  assert.equal(page.items.length, 12)
+  const seen = new Set<number>(page.items.map((item: {seq: number}) => item.seq))
+  fill(memory, 'conversation', 3)
+  while (page.has_more) {
+    assert.notEqual(page.next_before_seq, null)
+    page = read(page.next_before_seq!)
+    assert.ok(page.items.length <= 50)
+    for (const item of page.items) { assert.ok(!seen.has(item.seq)); seen.add(item.seq) }
+  }
+  assert.equal(page.next_before_seq, null)
+  assert.deepEqual([...seen].sort((a, b) => a - b), Array.from({length: 237}, (_, i) => i + 1))
+})

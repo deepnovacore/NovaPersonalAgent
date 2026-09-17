@@ -78,7 +78,9 @@ const debugBoardRequestSchema = z.object({
   request_id: identifierSchema,
   board: z.literal('memory'),
   detail: z.enum(['compact', 'full']),
-}).strict()
+  channel: z.string().min(1).max(128).optional(),
+  before_seq: z.number().int().positive().optional(),
+}).strict().refine(value => value.before_seq === undefined || value.channel !== undefined)
 
 export const playbackTelemetrySchema = z.object({
   type: z.literal('playback.telemetry'),

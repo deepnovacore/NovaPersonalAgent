@@ -62,7 +62,7 @@ import {
   projectExecutorSuggestion,
 } from './desktop-progress.js'
 import {type CodingTaskPort, executorWithRole} from '../executors/coding-executor.js'
-import {type MemoryBoardDetail, memoryBoardMessage} from '../realtime/memory-board.js'
+import {type MemoryBoardDetail, type MemoryBoardMessageOptions, memoryBoardMessage} from '../realtime/memory-board.js'
 import {type CameraPermissionStatus} from './desktop-camera.js'
 import {type RealtimeAssembly} from '../composition/realtime-assembly.js'
 import {type ProjectConfirmationView} from '../projects/project-confirmation.js'
@@ -1248,7 +1248,7 @@ export interface DesktopRealtimeOptions extends DesktopBridgeOptions {
   readonly openTaskDirectory?: (path: string) => Promise<void>
   /** Remote transport errors release the connection; desktop retains its fatal policy. */
   readonly transportFailure?: 'abort' | 'disconnect'
-  readonly memoryBoard?: (requestId: string, detail?: MemoryBoardDetail) => string | Promise<string>
+  readonly memoryBoard?: (requestId: string, detail?: MemoryBoardDetail, page?: MemoryBoardMessageOptions) => string | Promise<string>
   readonly createServer?: (options: DesktopServerOptions) => DesktopServerTransport
   /** Optional lifecycle observation after bridge connection state has been released. */
   readonly onConnectionReleased?: () => void
@@ -1303,7 +1303,7 @@ export class DesktopRealtime {
       onClientDisconnect: media => this.#disconnected(media?.hadProviderAttachment ?? true),
       onDebugBoardRequest: request => {
         if (memoryBoard === undefined) throw new DesktopProtocolError('desktop memory board is unavailable')
-        return memoryBoard(request.request_id, request.detail)
+        return memoryBoard(request.request_id, request.detail, request)
       },
       onAudio: pcm => this.bridge.receiveAudio(pcm),
       onControl: async control => {
@@ -1554,10 +1554,10 @@ export function buildDesktopRealtimeComposition(
       return port === undefined ? {} : {taskPort: port}
     })(),
     stop: options.stop,
-    memoryBoard: async (requestId, detail) => {
+    memoryBoard: async (requestId, detail, page) => {
       await realtime.runtime.flushMemory(true)
       return memoryBoardMessage(requestId, realtime.runtime.memory, options.telemetry?.diagnostics?.(),
-        detail === undefined ? {} : {detail})
+        {...page, conversationEpoch: realtime.runtime.core.conversationEpoch, ...(detail === undefined ? {} : {detail})})
     },
     clock: realtime.runtime.clock,
     ...(options.progressBubbles === undefined ? {} : {progressBubbles: options.progressBubbles}),

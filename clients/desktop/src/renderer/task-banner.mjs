@@ -144,6 +144,7 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
     container.hidden = !controller.state().visible || !(value?.taskHeightCss > 0) || value?.suppressed === true
   }
   function render(view) {
+    container.dataset.working = String(view.connected && view.tasks.some(task => task.phase === 'working'))
     container.hidden = !view.visible || !(layout?.taskHeightCss > 0) || layout?.suppressed === true
     const shown = expanded ? view.tasks : view.tasks.slice(0, 3)
     for (const [id, card] of cards) if (!view.tasks.some(task => task.work_id === id)) {card.remove(); cards.delete(id)}

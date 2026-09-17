@@ -403,3 +403,6 @@ button:focus-visible {
 .conversation-history { border-bottom: 1px solid #d8dde5; padding-bottom: 12px; }
 .conversation-history > summary { color: #687586; cursor: pointer; }
 .conversation-boundary { color: #687586; font-size: 12px; margin: 0; }
+.history-load { align-self: center; padding: 6px 12px; border: 0; border-radius: 8px; background: transparent; color: #687586; font-size: 12px; cursor: pointer; }
+.history-load:hover:not(:disabled) { background: #e9effa; color: #4a658b; }
+.history-load:disabled { cursor: default; }

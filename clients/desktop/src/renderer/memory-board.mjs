@@ -34,6 +34,7 @@ let activeTab = 'memory'
 let activeChannel = null
 let loadOwnership = 0
 let historyExpanded = false
+let pageInFlight = false
 
 function itemContent(raw) {
   try {
@@ -52,6 +53,7 @@ function boardTime(item) {
 function renderItem(item, conversation = false) {
   const article = document.createElement('article')
   article.className = 'item'
+  article.dataset.seq = String(item.seq)
   const meta = document.createElement('div')
   meta.className = 'meta'
   const trust = document.createElement('span')
@@ -137,6 +139,16 @@ function renderChannel(channel, index) {
   const itemsRoot = document.createElement('div')
   itemsRoot.className = channel.name === 'conversation' ? 'channel-items chat-messages' : 'channel-items'
   itemsRoot.dataset.scrollKey = `channel:${channel.name}`
+  if (channel.name === 'conversation') {
+    const older = document.createElement('button')
+    older.className = 'history-load'
+    older.textContent = channel.has_more ? '向上滚动加载更早记录' : '已到可用记录的开头'
+    older.disabled = !channel.has_more
+    older.addEventListener('click', () => { void loadEarlier() })
+    itemsRoot.append(older)
+    itemsRoot.addEventListener('scroll', () => { if (itemsRoot.scrollTop === 0) void loadEarlier() })
+    itemsRoot.addEventListener('wheel', event => { if (event.deltaY < 0 && itemsRoot.scrollTop === 0) void loadEarlier() }, {passive: true})
+  }
   const historical = channel.name === 'conversation' ? channel.items.filter(item => item.historical) : []
   const current = channel.name === 'conversation' ? channel.items.filter(item => !item.historical) : channel.items
   if (historical.length) {
@@ -277,7 +289,7 @@ function renderChannelTabs() {
 async function load() {
   if (document.hidden) return
   if (clearInFlight) return
-  if (inFlight) return
+  if (inFlight || pageInFlight) return
   const owner = loadOwnership
   inFlight = true
   statusLabel.textContent = '加载中…'
@@ -288,6 +300,30 @@ async function load() {
     if (!payload || payload.error || !Array.isArray(payload.channels) || !validDiagnostics(payload)) {
       statusLabel.textContent = payload?.error === 'timeout' ? '后端无响应' : '加载失败'
       return
+    }
+    const sameGeneration = latestPayload?.backend_generation === payload.backend_generation && latestPayload?.conversation_epoch === payload.conversation_epoch
+    const previous = sameGeneration ? latestPayload?.channels.find(c => c.name === 'conversation') : null
+    const recent = payload.channels.find(c => c.name === 'conversation')
+    if (previous && recent && recent.retention_revision === previous.retention_revision && recent.item_count >= previous.item_count) {
+      // Fill any interval missed while the board was hidden before merging the recent tail.
+      let cursor = recent.items[0]?.seq
+      const last = previous.items.at(-1)?.seq
+      const collected = [...recent.items]
+      while (last !== undefined && cursor > last + 1) {
+        const page = await window.novaAudioAgentDesktop.memoryBoard.request({channel: 'conversation', before_seq: cursor})
+        if (!page || page.error || !Array.isArray(page.channels)) throw new Error('history_page_failed')
+        if (owner !== loadOwnership || (page?.backend_generation !== payload.backend_generation || page?.conversation_epoch !== payload.conversation_epoch)) return
+        const channel = page.channels?.find(c => c.name === 'conversation')
+        if (!channel || channel.retention_revision !== recent.retention_revision) throw new Error('history_changed')
+        if (!channel.items.length) break
+        collected.push(...channel.items)
+        const next = channel.items[0].seq
+        if (next >= cursor) break
+        cursor = next
+      }
+      recent.items = mergeItems(previous.items, collected)
+      recent.has_more = previous.has_more
+      recent.next_before_seq = previous.next_before_seq
     }
     latestPayload = payload
     const scrollPositions = captureBoardScrollPositions(document)
@@ -316,6 +352,38 @@ async function load() {
       queueMicrotask(() => { void load() })
     }
   }
+}
+
+function mergeItems(older, newer) {
+  const items = new Map(older.map(item => [item.seq, item]))
+  for (const item of newer) {
+    const previous = items.get(item.seq)
+    if (!previous || !item.truncated || (previous.truncated && item.content.length > previous.content.length)) items.set(item.seq, item)
+  }
+  return [...items.values()].sort((a, b) => a.seq - b.seq)
+}
+
+async function loadEarlier() {
+  const channel = latestPayload?.channels.find(c => c.name === 'conversation')
+  if (activeChannel !== 'conversation' || !channel?.has_more || pageInFlight || inFlight || clearInFlight) return
+  const owner = loadOwnership, generation = latestPayload.backend_generation, epoch = latestPayload.conversation_epoch
+  const cursor = channel.next_before_seq
+  pageInFlight = true
+  try {
+    const payload = await window.novaAudioAgentDesktop.memoryBoard.request({channel: 'conversation', before_seq: cursor})
+    if (owner !== loadOwnership || payload?.backend_generation !== generation || latestPayload?.backend_generation !== generation || payload?.conversation_epoch !== epoch || latestPayload?.conversation_epoch !== epoch) return
+    const page = payload.channels?.find(c => c.name === 'conversation')
+    if (!page) { statusLabel.textContent = '历史记录加载失败，向上滚动重试'; return }
+    const current = latestPayload.channels.find(c => c.name === 'conversation')
+    if (!current || current.next_before_seq !== cursor || page.retention_revision !== current.retention_revision) return
+    const positions = captureBoardScrollPositions(document)
+    current.items = mergeItems(page.items, current.items)
+    current.has_more = page.has_more
+    current.next_before_seq = page.next_before_seq
+    renderActiveChannelCard()
+    restoreBoardScrollPositions(document, positions)
+  } catch { statusLabel.textContent = '历史记录加载失败，向上滚动重试' }
+  finally { pageInFlight = false }
 }
 
 async function copyBoardJson() {

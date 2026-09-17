@@ -63,6 +63,8 @@ export function requestDebugBoard(connection, request, {
           request_id: requestId,
           board: normalized.board,
           detail: normalized.detail,
+          ...(normalized.channel === undefined ? {} : {channel: normalized.channel}),
+          ...(normalized.before_seq === undefined ? {} : {before_seq: normalized.before_seq}),
         }))
       } catch {
         fail('unavailable')
@@ -122,7 +124,7 @@ export function createDebugBoardRequester({request = requestDebugBoard} = {}) {
       pending = new Map()
       byConnection.set(connection, pending)
     }
-    const key = `${normalized.board}:${normalized.detail}`
+    const key = `${normalized.board}:${normalized.detail}:${normalized.channel ?? ""}:${normalized.before_seq ?? ""}`
     const active = pending.get(key)
     if (active) return active
     let operation
@@ -196,5 +198,9 @@ function normalizeRequest(request) {
     || !['compact', 'full'].includes(request.detail)) {
     throw new TypeError('invalid debug board request')
   }
-  return Object.freeze({board: request.board, detail: request.detail})
+  if (request.channel !== undefined && (typeof request.channel !== 'string' || !request.channel || request.channel.length > 128)) throw new TypeError('invalid channel')
+  if (request.before_seq !== undefined && (!Number.isSafeInteger(request.before_seq) || request.before_seq <= 0 || request.channel === undefined)) throw new TypeError('invalid cursor')
+  return Object.freeze({board: request.board, detail: request.detail,
+    ...(request.channel === undefined ? {} : {channel: request.channel}),
+    ...(request.before_seq === undefined ? {} : {before_seq: request.before_seq})})
 }
