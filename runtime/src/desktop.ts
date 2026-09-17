@@ -1,6 +1,6 @@
 import {personalCommandSchema} from './personal-agent/contracts.js'
-export {VISION_MODELS, supportsVision} from './vision-capability.js'
-import {taskActionSchema} from './desktop-tasks.js'
+export {VISION_MODELS, supportsVision} from './model/vision-capability.js'
+import {taskActionSchema} from './desktop/desktop-tasks.js'
 import { timingSafeEqual } from 'node:crypto'
 import { createConnection } from 'node:net'
 import { z } from 'zod'
@@ -22,8 +22,8 @@ import {
   serializeCameraCapture,
   serializeCameraPermissionRequest,
   type CameraPermissionStatus,
-} from './desktop-camera.js'
-import {codePointLengthLikePython, stripLikePython} from './python-text.js'
+} from './desktop/desktop-camera.js'
+import {codePointLengthLikePython, stripLikePython} from './text/python-text.js'
 import {
   MAX_BOARD_MESSAGE_BYTES,
   type MemoryBoardDetail,
@@ -34,7 +34,7 @@ export {
   loadProjectNativeHostFromResources,
   type ProjectNativeHostLoadResult,
   type ProjectNativeHost,
-} from './project-native-resource.js'
+} from './projects/project-native-resource.js'
 
 export {
   ManagedWorkspaceMaintenanceService,
@@ -46,11 +46,11 @@ export {
   type ManagedWorkspacePreparation,
   type ManagedWorkspacePrepareResult,
   type ManagedWorkspaceScope,
-} from './managed-workspace-maintenance.js'
+} from './projects/managed-workspace-maintenance.js'
 
 
-import {DESKTOP_READY, MAX_DESKTOP_JSON_BYTES, MAX_DESKTOP_PCM_BYTES} from './desktop-wire.js'
-export {MAX_DESKTOP_JSON_BYTES, MAX_DESKTOP_PCM_BYTES, WIRE_FRAME_TYPES} from './desktop-wire.js'
+import {DESKTOP_READY, MAX_DESKTOP_JSON_BYTES, MAX_DESKTOP_PCM_BYTES} from './desktop/desktop-wire.js'
+export {MAX_DESKTOP_JSON_BYTES, MAX_DESKTOP_PCM_BYTES, WIRE_FRAME_TYPES} from './desktop/desktop-wire.js'
 export const MAX_DESKTOP_OUTBOUND_BINARY_BYTES = 8 * 1024 * 1024
 export const MAX_DESKTOP_PENDING_SENDS = 128
 export const MAX_DESKTOP_DEBUG_CONNECTIONS = 4
@@ -77,9 +77,11 @@ const helloSchema = z.object({
 const debugBoardRequestSchema = z.object({
   type: z.literal('debug.board.request'),
   request_id: identifierSchema,
-  board: z.enum(['memory', 'workspace_graph']),
+  board: z.literal('memory'),
   detail: z.enum(['compact', 'full']),
-}).strict()
+  channel: z.string().min(1).max(128).optional(),
+  before_seq: z.number().int().positive().optional(),
+}).strict().refine(value => value.before_seq === undefined || value.channel !== undefined)
 
 export const playbackTelemetrySchema = z.object({
   type: z.literal('playback.telemetry'),
@@ -262,7 +264,7 @@ export interface DesktopServerOptions {
 
 export interface DesktopDebugBoardRequest {
   readonly request_id: string
-  readonly board: 'memory' | 'workspace_graph'
+  readonly board: 'memory'
   readonly detail: MemoryBoardDetail
 }
 
@@ -922,7 +924,7 @@ function validateDebugBoardResponse(raw: string, request: DesktopDebugBoardReque
     throw new DesktopOutboundValidationError('desktop debug response is invalid')
   }
   const response = value as {readonly type?: unknown; readonly request_id?: unknown}
-  const expectedType = request.board === 'memory' ? 'memory.board' : 'workspace_graph.board'
+  const expectedType = 'memory.board'
   if (response.type !== expectedType || response.request_id !== request.request_id) {
     throw new DesktopOutboundValidationError('desktop debug response is invalid')
   }
@@ -1166,9 +1168,8 @@ async function closeWebSocket(socket: WebSocket, graceMs: number): Promise<void>
   })
 }
 
-export * from './capability-registry.js'
-export {probeMcpServer} from './mcp-client.js'
+export * from './config/capability-registry.js'
+export {probeMcpServer} from './executors/mcp-client.js'
 
-export {SensitiveContentPolicy} from './workspace-graph/sensitivity.js'
-
+export {SensitiveContentPolicy} from './memory/sensitivity.js'
 export {FeishuConnector} from './connectors/feishu/index.js'

@@ -1,10 +1,12 @@
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
+import {createBackendControl, classifyBackendFailure, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
+import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure} from './desktop-startup.mjs'
 import {FeishuConnector, VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
-import {createBackendControl} from './backend-control.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
+import {createManagedPhoneService, phoneNetwork, requestPhonePairing, renderPhoneQr} from './phone-connection.mjs'
 import {activeMcpMenuRows} from './orb-menu.mjs'
 import {parseSettingsCommit, validatePreparedSettings, prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, assertEditorSafe, referencedCapabilitySecrets, capabilityPath, capabilityDocumentRevision, invalidCommit} from './capabilities-settings.mjs'
 import {parseCapabilityRegistry} from '@nova-audio-agent/runtime/desktop'
@@ -53,12 +55,6 @@ import {
   watchBackendExit,
   waitForBackendReadiness,
 } from './backend.mjs'
-import {
-  classifyBackendFailure,
-  createBackendDiagnosticCollector,
-} from './backend-diagnostics.mjs'
-import { createBackendSupervisor } from './backend-supervisor.mjs'
-import { createLifecycleCoordinator } from './lifecycle-coordinator.mjs'
 import { configureDevelopmentDockIcon } from './app-icon.mjs'
 import {
   createDebugBoardRequester,
@@ -69,12 +65,6 @@ import { startWithSelectedCamera } from './camera-source.mjs'
 import { createDragController } from './drag-controller.mjs'
 import { executorResultDialogOptions, executorResultMenuTemplate } from './executor-result.mjs'
 import { shouldOpenSettings } from './launch-command.mjs'
-import {
-  canonicalInstalledExecutable,
-  canonicalInstalledInvocation,
-  inspectCodexVersion,
-  prepareDesktopStartup,
-} from './desktop-startup.mjs'
 import { createNativeAudioManager } from './native-audio.mjs'
 import {
   ensurePrivateProjectDirectories,
@@ -84,7 +74,6 @@ import {
   createReleaseSmokeChannel,
   releaseSmokeSourceRollbackExitCode,
 } from './release-smoke-channel.mjs'
-import { reportStartupFailure } from './startup-diagnostics.mjs'
 import {
   createSafeStorageCodec,
   backendSettings,
@@ -359,6 +348,7 @@ const settingsWriter = createSettingsWriter({
 })
 
 function publishCommittedSettings() {
+  if (!currentSettings.phoneConnectionEnabled) void managedPhone.stop()
   capabilityEditorCache = null
   wakeWord?.configure(currentSettings)
   settingsGeneration += 1
@@ -471,6 +461,7 @@ function openSettingsWindow(launchId, { category } = {}) {
   })
   window.once('ready-to-show', () => window.show())
   window.on('closed', () => {
+    void cancelPhonePairing()
     settingsWindow = null
     pendingSettingsCategory = null
   })
@@ -498,11 +489,185 @@ function activeMcpSubmenu(launchId) {
     : { label: row.label, enabled: false }))
 }
 
+const phoneRoot = () => resolve(app.getPath('userData'), 'phone')
+let phoneConfig, phonePayload, phoneImage, phoneEpoch = 0
+let phoneIssuedDevices = new Set()
+let phoneQueue = Promise.resolve()
+const managedPhone = createManagedPhoneService({
+  shutdown: child => shutdownBackend(child),
+  launch: async () => {
+    const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
+    const {initializeServerToken, loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
+    await mkdir(phoneRoot(), {recursive: true, mode: 0o700})
+    const tokenFile = resolve(phoneRoot(), 'host.token')
+    try { initializeServerToken(tokenFile) } catch (error) { if (error.code !== 'EEXIST') throw error }
+    const environment = {NOVA_AUDIO_AGENT_SERVER_PORT: '19876', NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: tokenFile}
+    phoneConfig = loadServerConfig(environment)
+    const spec = backendLaunchSpec({backend: 'node', nodeEntry: entry,
+      nodeResourcesPath: app.isPackaged ? process.resourcesPath : resolve(packageRoot, 'build'),
+      workspace: desktopConfig?.workspace || process.cwd(), token: phoneConfig.token,
+      readyEndpoint: '127.0.0.1:1', parentEnv: process.env, settings: currentSettings,
+      decryptedSecrets: decryptSecretsForSpawn(currentSettings, secretCodec), resolvedConfig: desktopConfig,
+      capabilitiesDocument: readCapabilityDocument(currentSettings, process.env)})
+    if (app.isQuitting || !currentSettings.phoneConnectionEnabled) throw new Error('service_unavailable')
+    return utilityProcess.fork(resolve(dirname(entry), 'desktop/phone-desktop-entry.js'), [], {
+      cwd: desktopConfig?.workspace || process.cwd(), stdio: 'pipe', serviceName: 'Nova iPhone Service',
+      env: {...spec.env, ...environment, NOVA_AUDIO_AGENT_SERVER_MEDIA_MODE: 'relay',
+        NOVA_AUDIO_AGENT_BLACKBOARD_PATH: resolve(phoneRoot(), 'blackboard.sqlite'),
+        NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID: 'phone',
+        NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT: resolve(phoneRoot(), 'projects')},
+    })
+  },
+})
+
+async function cancelPhonePairing(invalidate = true) {
+  if (invalidate) phoneEpoch++
+  const config = phoneConfig, code = phonePayload?.code
+  phonePayload = undefined; phoneImage = undefined
+  if (config && code) await requestPhonePairing(config, {type: 'pair.cancel', code}).catch(() => {})
+}
+
+async function phoneAction(action, deviceId, epoch = phoneEpoch) {
+  if (action === 'cancel') { await cancelPhonePairing(); return {state: 'idle'} }
+  if (app.isQuitting) return {state: 'idle'}
+  if (action === 'install') { await shell.openExternal('https://tailscale.com/download'); return {state: 'not_installed'} }
+  if (action === 'login') { await shell.openPath('/Applications/Tailscale.app'); return {state: 'needs_login', service: true} }
+  if (action === 'help') { await shell.openExternal('https://tailscale.com/docs/features/tailscale-serve'); return {state: 'needs_serve'} }
+  if (action === 'disable') {
+    await settingsWriter({phoneConnectionEnabled: false})
+    await cancelPhonePairing(); await managedPhone.stop()
+    return {state: 'idle'}
+  }
+  if (action === 'enable') await settingsWriter({phoneConnectionEnabled: true})
+  if (!currentSettings.phoneConnectionEnabled) return {state: 'idle'}
+  try {
+    if (process.platform !== 'darwin') return {state: 'unsupported'}
+    if (currentSettings.phoneServerPort && currentSettings.phoneServerTokenFile) {
+      await managedPhone.stop()
+      const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
+      const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
+      const external = loadServerConfig({NOVA_AUDIO_AGENT_SERVER_PORT: String(currentSettings.phoneServerPort),
+        NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile})
+      if (phoneConfig?.port !== external.port || phoneConfig?.token !== external.token) await cancelPhonePairing(false)
+      phoneConfig = external
+    } else {
+      if (!managedPhone.running && phonePayload) await cancelPhonePairing(false)
+      await managedPhone.start()
+    }
+    const config = phoneConfig
+    const network = currentSettings.phoneServerUrl ? {state: 'ready', url: currentSettings.phoneServerUrl}
+      : await phoneNetwork(config.port, action === 'network')
+    if (epoch !== phoneEpoch) return {state: 'idle'}
+    if (network.state !== 'ready') return {...network, service: true}
+    if (action === 'revoke') await requestPhonePairing(config, {type: 'pair.revoke', device_id: deviceId})
+    if (phonePayload && phonePayload.server !== new URL('/client/v1', network.url).href) await cancelPhonePairing(false)
+    if (epoch !== phoneEpoch) return {state: 'idle'}
+    const activeEpoch = epoch
+    if (action === 'refresh' || !phonePayload) {
+      const before = await requestPhonePairing(config, {type: 'pair.list'})
+      if (epoch !== phoneEpoch) return {state: 'idle'}
+      phoneIssuedDevices = new Set(before.devices.map(device => device.id))
+      const payload = await requestPhonePairing(config, {type: 'pair.create', server: network.url})
+      if (activeEpoch !== phoneEpoch) {
+        await requestPhonePairing(config, {type: 'pair.cancel', code: payload.code}).catch(() => {})
+        return {state: 'idle'}
+      }
+      phonePayload = payload; phoneImage = undefined
+      const script = app.isPackaged ? resolve(process.resourcesPath, 'pair-device.swift') : resolve(packageRoot, '../../runtime/scripts/pair-device.swift')
+      phoneImage = await renderPhoneQr(script, payload)
+      if (activeEpoch !== phoneEpoch) { phoneImage = undefined; return {state: 'idle'} }
+    }
+    const result = await requestPhonePairing(config, {type: 'pair.list', code: phonePayload.code})
+    return {state: result.pairing_active ? 'ready' : result.devices.some(device => !phoneIssuedDevices.has(device.id)) ? 'paired' : 'invalidated', image: result.pairing_active ? phoneImage : undefined,
+      host: new URL(network.url).hostname, devices: result.devices, service: true}
+  } catch (error) {
+    await cancelPhonePairing()
+    return {state: error.message === 'qr_unavailable' ? 'qr_unavailable' : 'service_unavailable'}
+  }
+}
+
+function openPairingWindow(launchId = activeLaunchId) {
+  openSettingsWindow(launchId, {category: 'phone'})
+}
+
+function sleepOrb() {
+  wakeWord?.sleep('bubble')
+}
+
+async function applyDesktopSettings(payload, restart = false) {
+  // Plaintext keys travel from the panel into the writer, and are decrypted
+  // only in main for validation or backend spawn. Public settings replies
+  // contain presence flags and rejected key names, never secret values.
+  if (typeof restart !== 'boolean') throw new Error('invalid restart mode')
+  const pendingRestart = settingsRestartPending
+  const previousSettings = currentSettings
+  const recoveryPending = settingsRecoveryAvailable
+  let capabilitiesChanged = false
+  const applied = await applySettingsTransaction({
+    deferRestart: !restart,
+    needsBackendRestart: () => restart || pendingRestart || recoveryPending || capabilitiesChanged || JSON.stringify(backendSettings(previousSettings))
+      !== JSON.stringify(backendSettings(currentSettings)),
+    coordinator: lifecycleCoordinator,
+    patch: payload,
+    write: async value => {
+      try {
+        if (settingsRecoveryAvailable) await rollbackSettings(false)
+        const commit = parseSettingsCommit(value)
+        capabilitiesChanged = commit.capabilitiesDocument !== undefined
+        return await settingsWriter(commit.settingsPatch ?? {}, next => {
+          validatePreparedSettings(commit.settingsPatch, publicSettings(next))
+          if ([resolve(settingsFile()), resolve(`${settingsFile()}.recovery`)].includes(capabilityPath(next, process.env))) throw invalidCommit('capability_settings_path_conflict')
+          const document = commit.capabilitiesDocument ?? readCapabilityDocument(next, process.env)
+          const secrets = decryptSecretsForSpawn(next, secretCodec)
+          return prepareCapabilityCommit({settings: next, sourceSettings: currentSettings, document: commit.capabilitiesDocument, expectedRevision: commit.capabilitiesBaseRevision,
+            environment: capabilityEnvironment(next, secrets, process.env, document), knownSecrets: Object.values(secrets),
+            beforeWrite: async capability => {
+              await saveSettingsRecovery(settingsFile(), currentSettings, capability)
+              settingsRecoveryAvailable = true
+            }})
+        })
+      } catch (error) {
+        console.error(`[desktop-diagnostic] settings_save_failure type=${error.name}`)
+        throw error
+      }
+    },
+    publishCommitted: publishCommittedSettings,
+    rollback: rollbackSettings,
+    complete: completeSettings,
+    prepareConfiguration: async () => {
+      try {
+        return await prepareDesktopConfiguration()
+      } catch (error) {
+        console.error(`[desktop-diagnostic] settings_apply_failure type=${error.name}`)
+        throw error
+      }
+    },
+    commitConfiguration: commitDesktopConfiguration,
+    discardConfiguration: discardDesktopConfiguration,
+    restartBackend: restartSettingsBackend,
+    publishStatus: publishSettingsApplyStatus,
+  })
+  if (applied.operationStatus === 'pending_restart') settingsRestartPending = true
+  else if (applied.operationStatus === 'applied') settingsRestartPending = false
+  return {...settingsView(), ...applied}
+}
+
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
+    { label: '连接 iPhone…', click: () => { void openPairingWindow() } },
     { label: '记忆面板', click: () => openMemoryBoard(launchId) },
     { label: '设置…', click: () => openSettingsWindow(launchId) },
     { label: 'MCP 服务', submenu: activeMcpSubmenu(launchId) },
+    { label: '重启后台', enabled: settingsReady && !lifecycleCoordinator.busy, click: async () => {
+      try {
+        const result = await applyDesktopSettings({settingsPatch: {}}, true)
+        if (result.operationStatus === 'applied') return
+        dialog.showErrorBox('后台未重启', result.operationStatus === 'busy'
+          ? '另一项操作正在进行，请稍后重试。' : '重启失败，请打开设置检查配置。')
+      } catch {
+        dialog.showErrorBox('后台未重启', '重启失败，请打开设置检查配置。')
+      }
+    } },
     { type: 'separator' },
     { label: '退出 Nova Audio Agent', click: () => app.quit() },
   ]).popup({ window: mainWindow })
@@ -878,7 +1043,8 @@ async function loadStartupSettings() {
     currentSettings = recovered ?? await loadSettings(settingsFile())
     if (recovered) publishSettingsApplyStatus('recovery_pending')
     return true
-  } catch {
+  } catch (error) {
+    if (error?.code === 'embedding_provider_invalid') throw error
     currentSettings = await loadSettings(settingsFile())
     settingsRecoveryAvailable = true
     publishSettingsApplyStatus('recovery_failed')
@@ -1055,6 +1221,19 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   ipcMain.on('nova:orb-menu:show', event => {
     if (mainWindow && event.sender === mainWindow.webContents) showOrbMenu(launchId)
   })
+  ipcMain.handle('nova:phone:action', (event, action, deviceId) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents
+      || !['status', 'enable', 'disable', 'network', 'refresh', 'cancel', 'install', 'help', 'login', 'revoke'].includes(action)
+      || (action === 'revoke' ? typeof deviceId !== 'string' || !/^[a-f0-9-]{36}$/.test(deviceId) : deviceId !== undefined)) return {state: 'unavailable'}
+    if (action === 'cancel') return phoneAction(action)
+    const epoch = phoneEpoch
+    const result = phoneQueue.then(() => phoneAction(action, deviceId, epoch))
+    phoneQueue = result.catch(() => {})
+    return result
+  })
+  ipcMain.on('nova:pairing:open', (event, ...args) => {
+    if (settingsWindow && event.sender === settingsWindow.webContents && args.length === 0) void openPairingWindow(launchId)
+  })
   ipcMain.on('nova:settings:open', event => {
     if (mainWindow && event.sender === mainWindow.webContents) openSettingsWindow(launchId)
   })
@@ -1071,6 +1250,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       const snapshot = await requestBoardSnapshot(connection, {
         board: 'memory',
         detail: detail === 'full' ? 'full' : 'compact',
+        ...(detail && typeof detail === 'object' ? {channel: detail.channel, before_seq: detail.before_seq} : {}),
       })
       if (backendStatus.connection !== connection || backendGeneration !== generation) {
         return { error: 'unavailable' }
@@ -1103,22 +1283,6 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       } catch { return {error: 'unavailable'} }
     })().finally(() => { clearingConversation = null })
     return clearingConversation
-  })
-  ipcMain.handle('nova:workspace-graph-board:request', async event => {
-    if (!boardWindow || event.sender !== boardWindow.webContents) {
-      throw new Error('workspace graph board request rejected')
-    }
-    if (backendStatus.state !== 'connected' || !backendStatus.connection) {
-      return { error: 'unavailable' }
-    }
-    try {
-      return await requestBoardSnapshot(backendStatus.connection, {
-        board: 'workspace_graph',
-        detail: 'compact',
-      })
-    } catch (error) {
-      return {error: error?.code === 'timeout' ? 'timeout' : 'unavailable'}
-    }
   })
   ipcMain.handle('nova:memory-board:copy-json', async event => {
     if (!boardWindow || event.sender !== boardWindow.webContents) {
@@ -1317,6 +1481,12 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   ipcMain.on('nova:wake-word:audio', (event, value) => {
     if (event.sender === mainWindow?.webContents) wakeWord?.accept(value)
   })
+  ipcMain.on('nova:wake-word:sleep', (event, ...args) => {
+    if (mainWindow && event.sender === mainWindow.webContents && args.length === 0) sleepOrb()
+  })
+  ipcMain.on('nova:wake-word:wake', (event, ...args) => {
+    if (mainWindow && event.sender === mainWindow.webContents && args.length === 0) wakeWord?.wake()
+  })
   ipcMain.on('nova:wake-word:activity', event => {
     if (event.sender === mainWindow?.webContents || event.sender === settingsWindow?.webContents) wakeWord?.activity()
   })
@@ -1329,61 +1499,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
       throw new Error('settings update rejected')
     }
-    // Plaintext keys travel from the panel into the writer, and are decrypted
-    // only in main for validation or backend spawn. Public settings replies
-    // contain presence flags and rejected key names, never secret values.
-    if (typeof restart !== 'boolean') throw new Error('invalid restart mode')
-    const pendingRestart = settingsRestartPending
-    const previousSettings = currentSettings
-    const recoveryPending = settingsRecoveryAvailable
-    let capabilitiesChanged = false
-    const applied = await applySettingsTransaction({
-      deferRestart: !restart,
-      needsBackendRestart: () => restart || pendingRestart || recoveryPending || capabilitiesChanged || JSON.stringify(backendSettings(previousSettings))
-        !== JSON.stringify(backendSettings(currentSettings)),
-      coordinator: lifecycleCoordinator,
-      patch: payload,
-      write: async value => {
-        try {
-          if (settingsRecoveryAvailable) await rollbackSettings(false)
-          const commit = parseSettingsCommit(value)
-          capabilitiesChanged = commit.capabilitiesDocument !== undefined
-          return await settingsWriter(commit.settingsPatch ?? {}, next => {
-            validatePreparedSettings(commit.settingsPatch, publicSettings(next))
-            if ([resolve(settingsFile()), resolve(`${settingsFile()}.recovery`)].includes(capabilityPath(next, process.env))) throw invalidCommit('capability_settings_path_conflict')
-            const document = commit.capabilitiesDocument ?? readCapabilityDocument(next, process.env)
-            const secrets = decryptSecretsForSpawn(next, secretCodec)
-            return prepareCapabilityCommit({settings: next, sourceSettings: currentSettings, document: commit.capabilitiesDocument, expectedRevision: commit.capabilitiesBaseRevision,
-              environment: capabilityEnvironment(next, secrets, process.env, document), knownSecrets: Object.values(secrets),
-              beforeWrite: async capability => {
-                await saveSettingsRecovery(settingsFile(), currentSettings, capability)
-                settingsRecoveryAvailable = true
-              }})
-          })
-        } catch (error) {
-          console.error(`[desktop-diagnostic] settings_save_failure type=${error.name}`)
-          throw error
-        }
-      },
-      publishCommitted: publishCommittedSettings,
-      rollback: rollbackSettings,
-      complete: completeSettings,
-      prepareConfiguration: async () => {
-        try {
-          return await prepareDesktopConfiguration()
-        } catch (error) {
-          console.error(`[desktop-diagnostic] settings_apply_failure type=${error.name}`)
-          throw error
-        }
-      },
-      commitConfiguration: commitDesktopConfiguration,
-      discardConfiguration: discardDesktopConfiguration,
-      restartBackend: restartSettingsBackend,
-      publishStatus: publishSettingsApplyStatus,
-    })
-    if (applied.operationStatus === 'pending_restart') settingsRestartPending = true
-    else if (applied.operationStatus === 'applied') settingsRestartPending = false
-    return {...settingsView(), ...applied}
+    return applyDesktopSettings(payload, restart)
   })
   ipcMain.handle('nova:bootstrap', event => {
     // The renderer binds its backend-exit listener only after this reply lands, so a push
@@ -1460,14 +1576,14 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!mainWindow.isVisible()) return
     orbWindow.setDormant(active)
   })
-  ipcMain.handle('nova:bubbles:reserve', async (event, rows) => {
+  ipcMain.handle('nova:bubbles:reserve', async (event, rows, taskRows = 0) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
       throw new Error('bubble bounds request rejected')
     }
-    if (!Number.isInteger(rows) || rows < 0 || rows > 6) {
+    if (!Number.isInteger(rows) || rows < 0 || rows > 6 || !Number.isInteger(taskRows) || taskRows < 0 || taskRows > 5) {
       throw new Error('bubble rows rejected')
     }
-    return orbWindow.reserveBubbleArea(rows)
+    return orbWindow.reserveBubbleArea(rows, taskRows)
   })
   ipcMain.handle('nova:executor-result:open', async (event, value) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
@@ -1537,6 +1653,13 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   // that instead of leaving the user to wonder why the hotkey never fires.
   if (!shortcutRegistered) {
     console.warn('[nova-audio-agent-desktop] global shortcut unavailable on this session')
+  }
+  if (currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
+  for (const [key, action] of [
+    ['Control+M', () => sendToOrb('nova:microphone:toggle')],
+    ['Control+L', sleepOrb],
+  ]) {
+    if (!globalShortcut.register(key, action)) console.warn(`[nova-audio-agent-desktop] shortcut unavailable: ${key}`)
   }
   backendSupervisor = createBackendSupervisor({
     start: onExit => launchBackend(backendKind, smokeChannel, onExit),
@@ -1691,7 +1814,9 @@ if (packagedSourceRollbackUnavailable) {
     })
     return start()
   }).catch(error => {
-    reportStartupFailure(error)
+    reportStartupFailure(error, {
+      showError: message => dialog.showErrorBox('向量服务配置不受支持', `${message}\n设置文件：${settingsFile()}（如有 .recovery 文件也需检查）`),
+    })
     app.quit()
   })
 }
@@ -1728,7 +1853,7 @@ app.on('before-quit', event => {
     await maintenance?.close()
     sourceSmokeStage('maintenance_closed')
   }), wait(3000).then(() => sourceSmokeStage('maintenance_deadline'))])
-  const drain = Promise.all([backendDrain, maintenanceDrain, feishuSetupOwner.release()])
+  const drain = Promise.all([backendDrain, maintenanceDrain, feishuSetupOwner.release(), cancelPhonePairing().then(() => managedPhone.stop())])
   const resumeQuit = () => { quitDrained = true; sourceSmokeStage('quit_resumed'); app.quit() }
   quitDrain = drain.then(resumeQuit, resumeQuit)
 })

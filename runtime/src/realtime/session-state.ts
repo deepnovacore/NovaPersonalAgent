@@ -15,7 +15,7 @@
  */
 
 import { z } from 'zod'
-import { PROGRESS_SUMMARY_LIMIT } from '../events.js'
+import { PROGRESS_SUMMARY_LIMIT } from '../core/events.js'
 import type { HostResponseIntent, RealtimeProviderEvent } from './protocol.js'
 
 export const MAX_TRACKED_USER_TRANSCRIPTS = 4_096

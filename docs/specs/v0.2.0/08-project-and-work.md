@@ -43,12 +43,10 @@ below.
   (`app-server-transport.ts:1176`); `causal-runtime.ts:447` aborts on
   shutdown/deadline. **No model-facing cancel tool**, no per-delegate abort API.
 - `workspace_context` item: produced by
-  `RealtimeAssembly.#injectCurrentProjectContext` (`realtime-assembly.ts`
-  ~608–678), content `<active_project_context>` + optional
-  `<workspace_graph_context>`; revision bumps on content change; Qwen adapter
+  `RealtimeAssembly.#injectCurrentProjectContext` (`realtime-assembly.ts`), content `<active_project_context>` + `<active_executor_context>`;
+  revision bumps on content change; Qwen adapter
   delivers via `replace_provider_item` (`qwen.ts:393`); item cannot create a
-  response (`protocol.ts:206`). Graph header is low-authority
-  (`qwen.ts:253–260`).
+  response (`protocol.ts:206`).
 - Frontend instructions naming `codex__project` etc.: `qwen.ts:134–250`;
   intake fact text `codex__confirm_project_action`: `intake.ts:293`.
 
@@ -108,7 +106,7 @@ flowchart LR
   Voice -->|"cancel(executor, instruction?)"| Host
   Voice -->|"confirm(id, accepted)"| Host
   Host -->|"AgentController port"| Intake[executors/coding/intake coordinator]
-  Intake -->|"assess: kind/project/session + slots"| LLM[DashScope surrogate_model, default qwen-flash]
+  Intake -->|"assess: kind/project/session + slots"| LLM[DashScope surrogate_model, default qwen-plus]
   Intake -->|"fact / proposal back"| Host
   Intake -->|"run{work_order, project, session}"| Adapter[executors/codex/adapter-project]
   Adapter -->|"per-workspace slot, global cap 3"| Codex[codex app-server]
@@ -428,9 +426,9 @@ all confirmation goes through `confirm(id, accepted)`.
 ## ContextView (no roster)
 
 `#injectCurrentProjectContext` keeps `<active_project_context>` (active
-workspace path, active session title) and optional low-authority
-`<workspace_graph_context>`. **No `<projects>` block.** The voice model does
-not see project names in context; it sends natural language and the
+workspace display name, active session title) and `<active_executor_context>`
+(current work). **No `<projects>` roster block.** The voice model sees only the
+current project display name; it sends natural language and the
 coordinator picks from roster input.
 
 Revision bumps when: store `active_binding_revision` changes, active session
@@ -607,12 +605,12 @@ runtime port. Assembly wires the coding controller's run callback as
 | Port | `agent-controller.ts` `AgentController`; `realtime/service.ts` `dispatch`/`cancel` routing by controller name, unified `confirm` routing |
 | Store | `project-store.ts` (title derivation, per-workspace running state, roster query) |
 | Context | `realtime-assembly.ts` `#injectCurrentProjectContext` (no roster), `realtime/session-state.ts` `host_state.project` / `.title`, `realtime/qwen.ts` render + policy text |
-| Approvals | `approval-port.ts` + `executors/codex/approval.ts` FIFO queue keyed `{work_id, approval_id}`; `realtime/service.ts` approval fact naming project + title |
+| Approvals | `approval-port.ts` + `approval.ts` FIFO queue keyed `{work_id, approval_id}`; `realtime/service.ts` approval fact naming project + title |
 | Concurrency | `executors/codex/adapter-project.ts` per-workspace lock, transport factory, `MAX_CONCURRENT_WORK` |
 | Cancel | adapter abort → `turn/interrupt`, `events.ts`/`ports.ts` `cancelled` outcome |
 | Titles | `executors/codex/transport/app-server-schema.ts`, `-transport.ts`, adapter mirror |
 | Prompt | `realtime/qwen.ts` FRONTEND_INSTRUCTIONS, `intake.ts` fact text |
-| Desktop | `desktop-wire.ts`, `desktop-bridge.ts`, renderer `index.mjs` / `confirmation-controls.mjs` / `bubbles.mjs` |
+| Desktop | `desktop-wire.ts`, `desktop-session.ts`, renderer `index.mjs` / `confirmation-controls.mjs` / `bubbles.mjs` |
 | Tests | `tool-schema`, `realtime-intake`, coordinator eval, `adapter-project`, `realtime-service`, `project-store`, `realtime-qwen`, assembly, desktop wire; the 07 fixture executor gains a registered `AgentDescriptor` and ops `run / steer / status / cancel` so `executor-boundary-fixture.test.ts` drives the `dispatch` path |
 
 ## Verification checklist
@@ -627,7 +625,7 @@ Deterministic:
       controllers; `dispatch.executor` enum generated from the controller
       registry with one `<name>: <summary>` line per controller in the tool description and
       no per-enum-value schema branch; no status tool anywhere in the table
-      (`tool-schema.test.ts`, `qwen-realtime-assembly.test.ts`).
+      (`tool-schema.test.ts`, `realtime-assembly.test.ts`).
 - [ ] Coordinator assess: six kinds route correctly; roster verbatim enforced;
       not-in-roster with explicit create intent → `create`, otherwise
       `unclear`; `new` refused when that project has a running work.
@@ -725,7 +723,7 @@ first, Windows second). Each row records transcript, tool calls, and Codex
       median must be 1 (today ≥3).
       *2026-09-04: not run — needs a live voice session.*
 
-- [x] Coordinator eval (DashScope `surrogate_model`, default `qwen-flash` — the
+- [x] Coordinator eval (DashScope `surrogate_model`, default `qwen-plus` — the
   same model 02 pins for `intake.assess`; fixed roster, ~10 Chinese utterances
   covering switch / create / steer / cancel / ambiguity) with threshold in test;
   evidence in IMPLEMENTATION.md.

@@ -132,10 +132,12 @@ export function deriveOrbState(input) {
     label,
     statusLine: pendingConfirmation
       ? '需要你的确认'
-      : compactOrbLabel(name),
+      : name === 'idle' && input.codex === 'preparing' ? '正在安排任务' : compactOrbLabel(name),
     codexLabel,
     projectLabel,
     codexMode,
+    sessionWorking: codexMode === 'project' && !!input.session && input.codex === 'working'
+      && (input.tasks ?? []).some(task => task.project === input.workspace && task.phase === 'working'),
     accessibleCodexLabel: pendingConfirmation
       ? `${pendingOperation}；尚未执行；等待你的确认`
       : codexLabel,
@@ -152,42 +154,11 @@ export function deriveOrbState(input) {
   })
 }
 
-/**
- * The only two states a bubble may stand in for. A whitelist rather than a list
- * of exclusions: the wake word's idle timer watches the microphone and knows
- * nothing about the backend, so it dozes off just as happily while the session
- * is broken. Shrinking there would collapse the orb to 40px and hide the pill
- * naming the fault — the user would lose the only sign anything is wrong. An
- * exclusion list would have to be extended by whoever adds the next failure
- * state; this way a new name stays full size until someone says otherwise.
- */
-const RESTABLE_STATES = new Set(['idle', 'inactive'])
-
-/**
- * Whether the orb should rest as a small bubble instead of a full disc.
- *
- * A second axis rather than another `deriveOrbState` name: resting changes only
- * the size, never what the orb is telling the user, and the state vocabulary is
- * already pinned field-for-field by the visual layer.
- *
- * Resting covers both ways of not being in use — the wake word dozed off, or
- * capture was never switched on. Hover lifts it so the rail and the status pill
- * are reachable at their normal size. A confirmation card or a stack of
- * progress bubbles outrank it: neither fits a 64px window, both mean something
- * wants attention, and the main-side controller refuses to shrink under them
- * anyway — so disagreeing here would just start a fight over the bounds.
- *
- * A working executor outranks it too, and is checked separately from
- * `bubblesVisible` on purpose. A running task does not change the orb state —
- * it stays `idle` — and the bubble area it reserves only lands after an async
- * IPC round trip, so `bubblesVisible` is still false while that is in flight.
- * Reading the executor axis directly closes both the race and the wider hole,
- * where an idle-but-working session would rest and hide its own task banner.
- */
+// Hover reveals controls without changing audio wake state.
+// Background work alone must not expand a sleeping orb.
 export function orbDormant(input) {
-  if (!RESTABLE_STATES.has(input?.stateName)) return false
-  const resting = input.wakeState === 'sleeping' || input.stateName === 'inactive'
-  return resting
+  if (input?.wakeState === 'sleeping') return !input.hovered && !input.confirmationVisible && !input.bubblesVisible
+  return input?.stateName === 'inactive'
     && input.hovered !== true
     && input.executorWorking !== true
     && input.confirmationVisible !== true

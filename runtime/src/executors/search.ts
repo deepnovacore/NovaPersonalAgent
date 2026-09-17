@@ -14,19 +14,19 @@
 
 import { createHash } from 'node:crypto'
 import { EnvHttpProxyAgent, fetch as undiciFetch } from 'undici'
-import { compareCodePoints } from '../canonical-json.js'
-import type { ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff } from '../causal-runtime.js'
-import type { JsonValue } from '../events.js'
-import { handoffPolicySchema } from '../memory.js'
-import { executorManifestSchema, opSpecSchema, type ExecutorManifest } from '../ports.js'
-import { pythonFloat } from '../prompting.js'
+import { compareCodePoints } from '../text/canonical-json.js'
+import type { ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff } from '../core/causal-runtime.js'
+import type { JsonValue } from '../core/events.js'
+import { handoffPolicySchema } from '../core/memory.js'
+import { executorManifestSchema, opSpecSchema, type ExecutorManifest } from '../core/ports.js'
+import { pythonFloat } from '../model/prompting.js'
 import {
   codePointLengthLikePython,
   isPythonSpace,
   isWellFormed,
   stripLikePython,
-} from '../python-text.js'
-import { isOtherCategory } from '../unicode-tables.js'
+} from '../text/python-text.js'
+import { isOtherCategory } from '../text/unicode-tables.js'
 
 const PROVIDER = 'tavily'
 const ENDPOINT = 'https://api.tavily.com/search'

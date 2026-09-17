@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import {EventEmitter} from 'node:events'
 import {test} from 'node:test'
-import {installDesktopControl, handleFeishuSettings, desktopBudgetFailure, type DesktopCapabilityState} from '../src/desktop-control.js'
-import {runDesktopEntry} from '../src/desktop-service.js'
-import {buildProductionRealtimeAssembly} from '../src/production-realtime-assembly.js'
-import {loadSettings} from '../src/config.js'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
+import {installDesktopControl, handleFeishuSettings, desktopBudgetFailure, type DesktopCapabilityState} from '../src/desktop/desktop-control.js'
+import {runDesktopEntry} from '../src/desktop/desktop-session.js'
+import {buildProductionRealtimeAssembly} from '../src/composition/cascaded-realtime-assembly.js'
+import {loadSettings} from '../src/config/config.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 
 class Parent extends EventEmitter {
   readonly sent: unknown[] = []

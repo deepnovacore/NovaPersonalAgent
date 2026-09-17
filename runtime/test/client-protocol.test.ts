@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {readFileSync} from 'node:fs'
-import {ClientCommands, decodeClientAudioFrame} from '../src/client-protocol.js'
+import {ClientCommands, decodeClientAudioFrame} from '../src/server/client-protocol.js'
 
 test('remote command ledger delivers once, rejects mutation, and fences reconnects', async () => {
   const commands = new ClientCommands('connection-1')

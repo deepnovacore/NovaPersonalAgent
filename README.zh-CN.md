@@ -77,7 +77,7 @@ npm ci && cp .env.example .env
 ```bash
 npm run start:client
 ```
-客户端包含麦克风、摄像头、声音开关等按钮，以及设置面板、外部 MCP 设置和工作区图谱。你也可以试试把鼠标悬在桌面 orb 上，会有惊喜）
+客户端包含麦克风、摄像头、声音开关等按钮，以及设置面板和外部 MCP 设置。你也可以试试把鼠标悬在桌面 orb 上，会有惊喜）
 
 从 [DashScope](https://platform.qianwenai.com) 和 [Tavily](https://docs.tavily.com) 获取 API Key 并配置 `DASHSCOPE_API_KEY` 和 `TAVILY_API_KEY`。
 
@@ -100,6 +100,7 @@ Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia`
 | [上手指南](docs/getting-started.zh-CN.md) | 安装与集成 |
 | [v0.2.0 规格](docs/specs/v0.2.0/00-overview.md) | `v0.2.0dev` 上进行中的功能契约 |
 | [历史设计探索：A Tradeoff Ruler for Proactive Voice Agents](docs/blog/2026-08-proactive-voice-agent-design-space.md) | 历史设计博客 |
+| [Node runtime 迁移归档](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | `v0.1.0` tag 历史中的迁移期计划 |
 
 ## 5. 路线图
 
@@ -121,7 +122,3 @@ npm ci && npm run check && npm run build && npm test
 ## 7. 许可证
 
 版权所有 2026 DeepNovaCore，[Apache License 2.0](LICENSE)。
-
-## 浏览器客户端
-
-浏览器客户端位于 `clients/webui`，与 `clients/desktop`、`clients/ios` 统一管理。启动 headless runtime 后运行 `npm run start:web`。连接凭据、浏览器音频和 HTTPS 部署见 [WebUI 使用说明](clients/webui/README.md)。

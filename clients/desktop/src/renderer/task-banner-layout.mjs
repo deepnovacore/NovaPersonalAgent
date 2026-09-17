@@ -1,35 +1,18 @@
-/** One native reservation for the card and independent alerts; never publish interim suppression. */
+/** Messages reserve space above the orb; task cards reserve their own space below. */
 export function createTaskAreaReservation({reserve, onLayout}) {
-  let banner = false, progressRows = 0, reserving = false, bannerSuppressed = false, queue = Promise.resolve()
+  let taskRows = 0, progressRows = 0, queue = Promise.resolve()
   function request() {
-    const result = queue.then(async () => {
-      reserving = true
-      try {
-        const rows = (banner ? 3 : 0) + progressRows
-        let layout = await reserve(rows)
-        bannerSuppressed = false
-        if (layout?.suppressed && banner && progressRows > 0) {
-          layout = await reserve(progressRows)
-          bannerSuppressed = true
-        }
-        const value = {...layout, rows: layout?.rows ?? rows, bannerOffsetRows: progressRows, bannerSuppressed}
-        onLayout(value)
-        return value
-      } finally { reserving = false }
+    const next = queue.then(async () => {
+      const layout = await reserve(progressRows, taskRows)
+      onLayout(layout)
+      return layout
     })
-    queue = result.catch(() => {})
-    return result
+    queue = next.catch(() => {})
+    return next
   }
   return Object.freeze({
-    reserveBanner(active) { banner = active; return request() },
+    reserveBanner(rows) { taskRows = rows; return request() },
     reserveProgress(rows) { progressRows = rows; return request() },
-    onNativeLayout(layout) {
-      if (reserving) return
-      if (layout?.suppressed && banner && progressRows > 0) {
-        void request().catch(() => {})
-        return
-      }
-      onLayout({...layout, bannerOffsetRows: progressRows, bannerSuppressed})
-    },
+    onNativeLayout: onLayout,
   })
 }

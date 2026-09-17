@@ -1690,7 +1690,14 @@
                 "minLength": 1
               },
               "deadline": {
-                "type": "number"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
               },
               "routing_class": {
                 "type": "string",
@@ -1917,7 +1924,14 @@
                         "minLength": 1
                       },
                       "deadline": {
-                        "type": "number"
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
                       },
                       "routing_class": {
                         "type": "string",

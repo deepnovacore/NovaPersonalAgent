@@ -8,7 +8,7 @@ import {PassThrough} from 'node:stream'
 import {test} from 'node:test'
 
 import {
-  createApprovedCodexSpawnSpec,
+  createCodexSpawnSpec,
   createPlatformCodexProcessOwnerFactory,
   hostBinaryForTest,
   hostCodexHomeForTest,
@@ -62,7 +62,7 @@ test('guardian frames enforce exact UTF-8 byte limit, order, shape, and EOF', ()
 test('the force command is fixed and Windows fails closed without a packaged helper', async () => {
   assert.equal(new TextDecoder().decode(windowsGuardianForceFrame()), '{"type":"force","version":1}\n')
   const workspace = process.cwd()
-  const spec = createApprovedCodexSpawnSpec({
+  const spec = createCodexSpawnSpec({
     binary: hostBinaryForTest(process.execPath),
     workspace: hostWorkspaceForTest(workspace),
     codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
@@ -205,7 +205,7 @@ test('packaged Windows guardian owns the fixed app-server command and rejects a 
     })
     assert.notEqual(factory, null)
     const workspace = await realpath(process.cwd())
-    const spec = createApprovedCodexSpawnSpec({
+    const spec = createCodexSpawnSpec({
       binary: hostBinaryForTest(process.execPath),
       workspace: hostWorkspaceForTest(workspace),
       codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),

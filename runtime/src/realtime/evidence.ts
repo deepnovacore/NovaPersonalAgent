@@ -1,7 +1,7 @@
-import { validProgressSummary, type JsonValue } from '../events.js'
-import { CONVERSATION_CHANNEL, isMonitorPolicy, type HandoffPolicy, type MemoryItem } from '../memory.js'
-import {pythonFloat} from '../python-number.js'
-import {stripLikePython} from '../python-text.js'
+import { validProgressSummary, type JsonValue } from '../core/events.js'
+import { CONVERSATION_CHANNEL, isMonitorPolicy, type HandoffPolicy, type MemoryItem } from '../core/memory.js'
+import {pythonFloat} from '../text/python-number.js'
+import {stripLikePython} from '../text/python-text.js'
 import { prepareForSpeech, SPEECH_FINAL_LIMIT } from './speech-prep.js'
 
 const GENERIC_SCALAR_KEYS = [
@@ -36,12 +36,15 @@ export interface CodingChannel {
  * never a handoff.
  */
 export function finalSpeechView(outcome: string, content: unknown, displayName: string): string {
-  if (outcome === 'cancelled') return `${displayName} 那个任务已经停了`
+  if (outcome === 'cancelled') return `${displayName} 任务已取消`
   let finalMessage: unknown
   let code: unknown
   let error: unknown
   let stage: unknown
   if (isObject(content)) {
+    if (outcome === 'failed' && isObject(content.diagnostic) && content.diagnostic.method === 'thread/resume') {
+      return `${displayName} 恢复原会话失败，任务未启动。具体错误可在任务详情查看；这不代表需要修改任务需求。`
+    }
     code = content.code
     error = content.error
     stage = content.stage
@@ -50,8 +53,13 @@ export function finalSpeechView(outcome: string, content: unknown, displayName: 
   const category = typeof code === 'string' && code !== ''
     ? code
     : typeof error === 'string' && error !== '' ? error : 'no_final_message'
+  if (category === 'usage_limit_exceeded') {
+    return `${displayName} 额度不足，这次任务没有成功完成。`
+  }
   if (outcome === 'refused') {
-    return `${displayName} 未执行，需要选择或修正请求（${category}）`
+    return category === 'superseded'
+      ? `${displayName} 本次执行请求已失效，任务未能启动。`
+      : '这次任务没有启动。'
   }
   let text: string | undefined
   let upstreamTruncated = false
@@ -66,14 +74,15 @@ export function finalSpeechView(outcome: string, content: unknown, displayName: 
       const failure = codingStartupFailureSpeech(category, stage, displayName)
       if (failure !== null) return failure
     }
-    return `${displayName} 任务未能确认完成（${category}）`
+    return category === 'adapter_timeout'
+      ? '等待任务结果超时了，目前无法确认是否完成。'
+      : '目前无法确认任务是否完成。'
   }
   const prepared = prepareForSpeech(text, {limit: SPEECH_FINAL_LIMIT})
   const note = upstreamTruncated || prepared.truncated ? '（结果较长，已截取要点）' : ''
-  if (outcome === 'ok') return `${displayName} 报告任务完成：${prepared.text}${note}`
+  if (outcome === 'ok') return `任务已完成：${prepared.text}${note}`
   if (outcome === 'failed') {
-    const category = typeof code === 'string' && code !== '' ? `（${code}）` : ''
-    return `${displayName} 任务失败${category}：${prepared.text}${note}`
+    return `任务未成功完成：${prepared.text}${note}`
   }
   return `${displayName} 任务结果不确定：${prepared.text}${note}`
 }
@@ -85,6 +94,7 @@ function codingStartupFailureSpeech(category: string, stage: unknown, displayNam
   if (category === 'spawn_failed' || stage === 'spawn') {
     return `${displayName} 进程未能启动，这次任务没有成功启动。`
   }
+  if (category === 'resume_unavailable') return `${displayName} 原会话记录不可用，无法恢复，任务未启动。需要在新会话中继续。`
   if (category === 'thread_id_invalid' || category === 'session_thread_mismatch') {
     return `${displayName} 会话未能建立，这次任务没有成功启动。`
   }

@@ -34,27 +34,27 @@ import {
   hostProjectRootForTest,
   ProjectStateError,
   type PublicProjectView,
-} from '../../../src/project-store.js'
+} from '../../../src/projects/project-store.js'
 import {hostWorkspaceForTest} from '../../../src/executors/codex/process-owner.js'
-import type {ExecutorDispatchContext} from '../../../src/causal-runtime.js'
-import {VirtualClock} from '../../../src/clock.js'
+import type {ExecutorDispatchContext} from '../../../src/core/causal-runtime.js'
+import {VirtualClock} from '../../../src/core/clock.js'
 import {
   ProjectCodexAdapter,
   type ProjectTransportBinding,
   type ProjectTransportFactory,
 } from '../../../src/executors/codex/adapter-project.js'
-import type {JsonValue} from '../../../src/events.js'
-import {bindHostExecutorCapability} from '../../../src/host-executor-capability.js'
-import type {NativeFileLockAuthority, NativeFileLockResult} from '../../../src/native-file-lock.js'
+import type {JsonValue} from '../../../src/core/events.js'
+import {bindHostExecutorCapability} from '../../../src/executors/host-executor-capability.js'
+import type {NativeFileLockAuthority, NativeFileLockResult} from '../../../src/storage/native-file-lock.js'
 import type {
   ProjectFileIdentity,
   ProjectRootFileAuthority,
   ProjectRootFileCreateResult,
   ProjectRootFileLookupResult,
   ProjectRootFileResult,
-} from '../../../src/project-root-file.js'
-import {delegateSchema} from '../../../src/ports.js'
-import {ProjectConfirmationController} from '../../../src/project-confirmation.js'
+} from '../../../src/projects/project-root-file.js'
+import {delegateSchema} from '../../../src/core/ports.js'
+import {ProjectConfirmationController} from '../../../src/projects/project-confirmation.js'
 
 export const PREFLIGHT: SafePreflightReport = Object.freeze({
   version: '0.145.0',
@@ -317,7 +317,9 @@ export class ProjectTransport implements CodexAppServerTransport {
     input: RunInput,
     observer: TransportObserver,
     deadline: TransportDeadline,
+    completionDeadline?: TransportDeadline | null,
   ): Promise<TransportOutcome> {
+    assert.equal(completionDeadline, null, 'project transport must forward the explicit unbounded completion policy')
     this.workOrders.push(input.workOrder)
     this.runInputs.push(input)
     this.observers.push(observer)
@@ -395,6 +397,7 @@ export interface Fixture {
 }
 
 export async function fixture(options: {
+  readonly localCodexHome?: string
   readonly preexistingSession?: boolean
   readonly decorateStore?: (store: ProjectStore) => ProjectStore
 } = {}): Promise<Fixture> {
@@ -421,6 +424,7 @@ export async function fixture(options: {
   await store.ensureImported('alpha', hostWorkspaceForTest(await realpath(workspace)))
   if (options.preexistingSession === true) {
     const existingWorkspace = await store.resolveWorkspace('alpha')
+    await store.persistentHome(existingWorkspace.workspace_id)
     const starting = await store.beginSession(existingWorkspace.workspace_id, 'Existing')
     await store.markSessionReady(starting.session_id, 'thread-existing')
   }
@@ -432,6 +436,7 @@ export async function fixture(options: {
   })
   const factory = new RecordingProjectTransportFactory()
   const adapter = new ProjectCodexAdapter({
+    ...(options.localCodexHome ? {localCodexHome: options.localCodexHome} : {}),
     store: options.decorateStore?.(store) ?? store,
     confirmation,
     transportFactory: factory,
@@ -446,8 +451,8 @@ export function storeWithPersistentHomeHook(
   return new Proxy(store, {
     get(target, property) {
       if (property === 'persistentHome') {
-        return async (workspaceId: string) => {
-          const home = await target.persistentHome(workspaceId)
+        return async (workspaceId: string, options?: {readonly create?: boolean}) => {
+          const home = await target.persistentHome(workspaceId, options)
           await afterPersistentHome()
           return home
         }

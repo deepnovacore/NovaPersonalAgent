@@ -8,7 +8,7 @@ import {
   confirmArguments,
   deriveSessionTitle,
   dispatchToolSpec,
-} from '../src/work-tools.js'
+} from '../src/core/work-tools.js'
 
 test('deriveSessionTitle keeps the first sentence, stripped, at most 20 code points', () => {
   assert.equal(deriveSessionTitle('  给博客加暗色模式。然后再写测试  '), '给博客加暗色模式')

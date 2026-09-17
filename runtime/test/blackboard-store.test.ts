@@ -8,9 +8,9 @@ import {spawn} from 'node:child_process'
 import {once} from 'node:events'
 import {Worker} from 'node:worker_threads'
 import {BlackboardStore} from '../src/memory/blackboard-store.js'
-import {memoryItemSchema} from '../src/memory.js'
-import {canonicalJson} from '../src/canonical-json.js'
-import {secureSidecar} from '../src/private-database.js'
+import {memoryItemSchema} from '../src/core/memory.js'
+import {canonicalJson} from '../src/text/canonical-json.js'
+import {secureSidecar} from '../src/storage/private-database.js'
 
 const item = (seq: number, text: string) => memoryItemSchema.parse({
   channel: 'conversation', seq, ts: 1, trust: 'trusted_user', priority: 100, content: {text},

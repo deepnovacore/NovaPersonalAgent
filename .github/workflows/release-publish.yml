@@ -49,11 +49,9 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
-          node -e 'if (!/^\d+\.\d+\.\d+$/.test(process.argv[1])) process.exit(1)' "$RELEASE_VERSION"
+          node clients/desktop/scripts/check-release-version.mjs
           test "$EXPECTED_COMMIT" = "$(git rev-parse HEAD)"
           git merge-base --is-ancestor "$EXPECTED_COMMIT" origin/main
-          test "$(node -p "require('./cli/package.json').version")" = "$RELEASE_VERSION"
-          test "$(node -p "require('./clients/desktop/package.json').version")" = "$RELEASE_VERSION"
           gh run view "$CANDIDATE_RUN_ID" --json headSha,jobs,name > candidate-run.json
           test "$(jq -r .name candidate-run.json)" = "Release candidate evidence"
           test "$(jq -r .headSha candidate-run.json)" = "$EXPECTED_COMMIT"
@@ -82,11 +80,9 @@ jobs:
           set -euo pipefail
           gh run download "$CANDIDATE_RUN_ID" --name candidate-darwin-arm64 --dir downloaded/candidate-darwin-arm64
           gh run download "$CANDIDATE_RUN_ID" --name candidate-win32-x64 --dir downloaded/candidate-win32-x64
-          node clients/desktop/scripts/assemble-release-artifact-root.mjs --input downloaded --output release-artifacts
-          node clients/desktop/scripts/generate-release-manifest.mjs \
-            --artifact-root release-artifacts \
-            --commit "$EXPECTED_COMMIT" \
-            --output release-artifacts/release-manifest-v1.json
+          mkdir release-artifacts
+          cp downloaded/candidate-darwin-arm64/* downloaded/candidate-win32-x64/* release-artifacts/
+          test "$(find release-artifacts -maxdepth 1 -type f | wc -l)" -eq 8
       - name: Pack and audit the public npm package
         run: |
           set -euo pipefail
@@ -133,6 +129,4 @@ jobs:
           name: release-${{ inputs.release_version }}-publish-audit
           path: |
             candidate-run.json
-            release-artifacts/release-manifest-v1.json
-            release-artifacts/release-manifest-v1.json.sha256
           if-no-files-found: warn

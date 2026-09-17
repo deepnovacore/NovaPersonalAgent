@@ -174,7 +174,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
     }
     func pair(_ invitation: PairingCode) {
         end()
-        guard invitation.expiresAt > Date() else { status = "二维码已过期，请在 Mac 上重新生成。"; return }
+        guard invitation.expiresAt.map({ $0 > Date() }) ?? true else { status = "二维码已过期，请在 Mac 上重新生成。"; return }
         let id = generation
         pairing = true; connecting = true; status = "正在配对主机"
         let config = URLSessionConfiguration.ephemeral

@@ -1,4 +1,4 @@
-import {abortable} from '../src/camera-session.js'
+import {abortable} from '../src/core/camera-session.js'
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {mkdtemp, writeFile, rm, realpath} from 'node:fs/promises'

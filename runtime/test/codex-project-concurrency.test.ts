@@ -7,11 +7,11 @@ import {rm} from 'node:fs/promises'
 import {test} from 'node:test'
 
 import type {TransportOutcome} from '../src/executors/codex/app-server-transport.js'
-import {ProjectResolutionError, type RunningWork} from '../src/coding-executor.js'
-import type {ExecutorHandoff} from '../src/causal-runtime.js'
-import {ProjectConfirmationController} from '../src/project-confirmation.js'
-import {MAX_CONCURRENT_WORK} from '../src/work-tools.js'
-import {projectStateMessage} from '../src/desktop-wire.js'
+import {ProjectResolutionError, type RunningWork} from '../src/executors/coding-executor.js'
+import type {ExecutorHandoff} from '../src/core/causal-runtime.js'
+import {MAX_CONCURRENT_WORK} from '../src/core/work-tools.js'
+import {projectStateMessage} from '../src/desktop/desktop-wire.js'
+import {ProjectConfirmationController} from '../src/projects/project-confirmation.js'
 import {
   COMPLETE,
   context,
@@ -78,8 +78,6 @@ test('different projects run in parallel; a busy project refuses; the cap refuse
   const value = await fixture()
   await withProjects(value, ['beta', 'gamma', 'delta'])
   const gates = gateProjects(value, ['alpha', 'beta', 'gamma'])
-  const terminals: ExecutorHandoff[] = []
-  value.adapter.observeTerminalWorkOrder(event => { terminals.push(event.handoff) })
   try {
     const alpha = run(value, 'alpha work', {project: 'alpha', title: 'Alpha', delegateId: 'work-alpha'})
     await settleWithin('alpha starts', gates.get('alpha')!.started)
@@ -128,7 +126,6 @@ test('different projects run in parallel; a busy project refuses; the cap refuse
     assert.deepEqual(value.adapter.running(), [])
     assert.deepEqual(value.adapter.roster().map(entry => entry.running), [[], [], [], []])
     assert.deepEqual(value.factory.transports.map(transport => transport.closeCalls), [1, 1, 1])
-    assert.equal(terminals.length, 3, 'refusals are not terminal work-order events')
     for (const name of ['alpha', 'beta', 'gamma']) {
       const workspace = await value.store.resolveWorkspace(name)
       assert.deepEqual(
@@ -146,8 +143,6 @@ test('different projects run in parallel; a busy project refuses; the cap refuse
 test('cancel aborts the run slot: one close, a cancelled handoff through the normal path, then not_running', async () => {
   const value = await fixture()
   const gates = gateProjects(value, ['alpha'])
-  const terminals: ExecutorHandoff[] = []
-  value.adapter.observeTerminalWorkOrder(event => { terminals.push(event.handoff) })
   try {
     const work = run(value, 'long task', {title: 'Long', delegateId: 'work-1'})
     await settleWithin('run starts', gates.get('alpha')!.started)
@@ -160,7 +155,6 @@ test('cancel aborts the run slot: one close, a cancelled handoff through the nor
       outcome: 'cancelled', trust: 'trusted_system', content: {reason: 'user_cancelled', work_id: 'work-1'},
     })
     assert.equal(value.factory.transports[0]?.closeCalls, 1, 'close (which interrupts) happens exactly once')
-    assert.deepEqual(terminals, [handoff])
     assert.deepEqual(value.adapter.running(), [])
     assert.deepEqual(await value.adapter.cancel(undefined, noResolver), {code: 'not_running'})
     const workspace = await value.store.resolveWorkspace('alpha')
@@ -314,9 +308,16 @@ test('a new thread is named by the host title and a Codex rename is mirrored int
     const transport = value.factory.transports[0]!
     assert.equal(transport.runInputs[0]?.threadName, 'Blog')
     assert.equal(value.adapter.running()[0]?.title, 'Blog')
+    const renamed = new Promise<void>(resolve => {
+      const unsubscribe = value.adapter.observeProjectView(view => {
+        if (view.session_title === 'Blog: draft outline') { unsubscribe(); resolve() }
+      })
+    })
+    transport.observers[0]!.onThreadNamed?.('unrelated-thread', 'Must not replace the title')
     transport.observers[0]!.onThreadNamed?.('thread-1', 'Blog: draft outline')
     transport.observers[0]!.onThreadNamed?.('thread-1', null)
-    assert.equal(titleWrites.length, 1, 'a cleared name is not mirrored')
+    await settleWithin('renamed title reaches the project view', renamed)
+    assert.equal(titleWrites.length, 1, 'cleared and unrelated thread names are not mirrored')
     assert.equal(await titleWrites[0], true)
     assert.equal(value.adapter.running()[0]?.title, 'Blog: draft outline')
     const workspace = await value.store.resolveWorkspace('alpha')

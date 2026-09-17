@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff } from '../src/causal-runtime.js'
-import { VirtualClock } from '../src/clock.js'
+import type { ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff } from '../src/core/causal-runtime.js'
+import { VirtualClock } from '../src/core/clock.js'
 import { CamAdapter, CameraError, CAMERA_MANIFEST } from '../src/executors/camera.js'
-import { MediaStore } from '../src/media-store.js'
-import { delegateSchema } from '../src/ports.js'
+import { MediaStore } from '../src/core/media-store.js'
+import { delegateSchema } from '../src/core/ports.js'
 import type { Frame, FrameSource } from '../src/executors/watcher.js'
 
 function context(): ExecutorDispatchContext {

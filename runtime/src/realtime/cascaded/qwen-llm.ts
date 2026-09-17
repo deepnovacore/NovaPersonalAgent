@@ -2,13 +2,14 @@ import {committedConversationPairsSchema,type CommittedConversationPair} from '.
 import {originalImageUrl} from './llm.js'
 import {randomUUID} from 'node:crypto'
 import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
-import type { Clock } from '../../clock.js'
+import type { Clock } from '../../core/clock.js'
 import type { JsonObject } from '../protocol.js'
-import { codePointLengthLikePython } from '../../python-text.js'
-import type { JsonValue } from '../../events.js'
+import { codePointLengthLikePython } from '../../text/python-text.js'
+import type { JsonValue } from '../../core/events.js'
 import {
   MAX_CASCADED_LLM_HISTORY_CODEPOINTS,
   MAX_CASCADED_LLM_HISTORY_ITEMS,
+  CASCADED_NARRATION_INSTRUCTIONS,
   type CascadedLlmEvent,
   type CascadedLlmFactory,
   type CascadedLlmInput,
@@ -31,6 +32,7 @@ export class QwenCascadedLlmFailure extends Error {
 }
 
 export interface QwenCascadedLlmFactoryOptions {
+  readonly provider?: 'qwen' | 'deepseek'
   readonly baseUrl: string; readonly apiKey: string; readonly model: string; readonly instructions: string
   readonly fetchImpl?: typeof globalThis.fetch; readonly idFactory?: () => string; readonly clock?: Clock
   readonly onUsage?: UsageReporter
@@ -47,17 +49,19 @@ function jsonObject(value: unknown): value is JsonObject { return object(value) 
 function id(value: unknown): value is string { return typeof value === 'string' && value.length > 0 }
 function copy(value: JsonValue): JsonValue { return structuredClone(value) }
 function endpoint(baseUrl: string): string { try { const url = new URL(baseUrl); url.pathname = `${url.pathname.replace(/\/+$/u, '')}/chat/completions`; return url.toString() } catch { throw fail('configuration') } }
-function message(input: CascadedLlmInput): Message { return input.kind === 'tool_result' ? {role: 'tool', content: JSON.stringify(copy(input.output)), tool_call_id: input.call_id} : {role: 'user', content: input.kind === 'user_text' ? (input.image ? [{type: 'text', text: input.text}, {type: 'image_url', image_url: {url: originalImageUrl(input.image)}}] : input.text) : input.content} }
+function message(input: CascadedLlmInput): Message { return input.kind === 'tool_result' ? {role: 'tool', content: JSON.stringify(copy(input.output)), tool_call_id: input.call_id} : {role: input.kind === 'user_text' || input.kind === 'host_activation' ? 'user' : 'system', content: input.kind === 'user_text' ? (input.image ? [{type: 'text', text: input.text}, {type: 'image_url', image_url: {url: originalImageUrl(input.image)}}] : input.text) : input.content} }
 function schema(tool: CascadedLlmTool): JsonObject { return {type: 'function', function: {name: tool.name, ...(tool.description === undefined ? {} : {description: tool.description}), parameters: copy(tool.parameters)}} }
 function size(units: readonly (readonly Message[])[]): {items: number; codepoints: number} { const all = units.flat(); return {items: all.length, codepoints: all.reduce((sum, item) => sum + codePointLengthLikePython(JSON.stringify(withoutImage(item))), 0)} }
 
 class Session implements CascadedLlmSession {
+  readonly #provider: 'qwen' | 'deepseek'
   readonly #onUsage: UsageReporter | undefined
   readonly #endpoint: string; readonly #apiKey: string; readonly #model: string; readonly #instructions: string; readonly #fetch: typeof fetch
   readonly #idleTimeoutMs: number; readonly #closeTimeoutMs: number; readonly #active = new Set<Active>()
   #started = false; #seeded = false
   #history: Message[][] = []; #unresolved: Message[] | null = null; #closed = false; #closePromise: Promise<void> | null = null
   constructor(options: QwenCascadedLlmFactoryOptions,history?:readonly CommittedConversationPair[]) {
+    this.#provider = options.provider ?? 'qwen'
     this.#onUsage = options.onUsage
     if (!options.apiKey || !options.model || !options.instructions) throw fail('configuration')
     this.#endpoint = endpoint(options.baseUrl); this.#apiKey = options.apiKey; this.#model = options.model; this.#instructions = options.instructions; this.#fetch = options.fetchImpl ?? globalThis.fetch
@@ -72,11 +76,21 @@ class Session implements CascadedLlmSession {
     if (unresolved === null && input.inputs.some(item => item.kind === 'tool_result')) throw fail('protocol')
     if (unresolved !== null) this.#checkResults(input.inputs, unresolved)
     this.#trim(unresolved ?? [])
-    const systemContent = [this.#instructions, input.workspaceContext, input.responseAdaptation]
+    const factOnly = input.inputs.some(item => item.kind === 'host_activation')
+    const systemContent = [factOnly ? CASCADED_NARRATION_INSTRUCTIONS : this.#instructions,
+      factOnly ? null : input.workspaceContext, input.responseAdaptation]
       .filter((item): item is string => item !== null && item !== undefined)
       .join('\n\n')
-    const messages = [{role: 'system' as const, content: systemContent}, ...this.#history.flat(), ...(unresolved ?? []), ...current]
+    // Narration reads its own fact, not an unfinished question from a prior conversation turn.
+    // Tool-call/result pairs stay intact; the full turn is still recorded for the next user turn.
+    const context = factOnly
+      ? [...(unresolved?.slice(-1) ?? []),
+        ...input.inputs.filter(item => item.kind === 'host_activation' || item.kind === 'tool_result').map(message)]
+      : [...this.#history.flat(), ...(unresolved ?? []), ...current]
+    const messages = [{role: 'system' as const, content: systemContent}, ...context]
     const body: Record<string, JsonValue> = {model: this.#model, messages: messages as unknown as JsonValue, stream: true, stream_options: {include_usage: true}}
+    if (this.#provider === 'deepseek') body.thinking = {type: 'disabled'}
+    else body.enable_thinking = false
     if (input.tools.length > 0) { body.tools = input.tools.map(schema); body.parallel_tool_calls = false }
     const active: Active = {completion: null, usageDeadline: null, controller: new AbortController(), reader: null, failureCode: null}
     const stop = (): void => { active.failureCode ??= 'aborted'; active.controller.abort(); void this.#cancel(active.reader) }
@@ -112,19 +126,21 @@ class Session implements CascadedLlmSession {
           if (!object(choice) || !object(choice.delta)) throw fail('protocol')
           const content = choice.delta.content, calls = choice.delta.tool_calls
           if (content !== undefined && content !== null && typeof content !== 'string') throw fail('protocol'); if (calls !== undefined && !Array.isArray(calls)) throw fail('protocol')
-          if (!started && (content !== undefined || calls !== undefined || choice.finish_reason !== undefined)) { if (responseId === null) throw fail('protocol'); started = true; yield {kind: 'response_started', response_id: responseId} }
+          if (!started && ((input.tools.length === 0 && typeof content === 'string' && content !== '') || (choice.finish_reason !== undefined && choice.finish_reason !== null))) { if (responseId === null) throw fail('protocol'); started = true; yield {kind: 'response_started', response_id: responseId} }
           if (typeof content === 'string' && content !== '') sawText = true
-          if (typeof content === 'string' && content !== '') { text += content; yield {kind: 'text_delta', text: content} }
+          if (typeof content === 'string' && content !== '') { text += content; if (input.tools.length === 0) yield {kind: 'text_delta', text: content} }
           for (const call of calls ?? []) this.#fragment(fragments, call)
           if (choice.finish_reason !== undefined && choice.finish_reason !== null) {
             if (typeof choice.finish_reason !== 'string' || responseId === null) throw fail('protocol')
             if (choice.finish_reason === 'stop') {
               if (fragments.size > 0) throw fail('protocol')
+              // With tools enabled, wait for the response kind before publishing speech.
+              if (input.tools.length > 0 && text !== '') yield {kind: 'text_delta', text}
               this.#history.push([...(unresolved ?? []), ...current, {role: 'assistant' as const, content: text}].map(withoutImage))
               this.#unresolved = null; terminal = true
               yield {kind: 'response_completed', response_id: responseId}; return
             } else if (choice.finish_reason === 'tool_calls') {
-              if (sawText || fragments.size === 0) throw fail('protocol'); const callsOut = this.#calls(fragments)
+              if ((sawText && input.tools.length === 0) || fragments.size === 0) throw fail('protocol'); const callsOut = this.#calls(fragments)
               for (const call of callsOut) yield {kind: 'tool_call', item_id: call.id, call_id: call.id, name: call.function.name, arguments: JSON.parse(call.function.arguments) as JsonObject}
               this.#unresolved = [...(unresolved ?? []), ...current, {role: 'assistant', content: null, tool_calls: callsOut}]
               terminal = true; yield {kind: 'response_completed', response_id: responseId}; return
@@ -143,6 +159,12 @@ class Session implements CascadedLlmSession {
       }
       throw stable
     } finally {
+      // Receipt of a matching tool result survives interruption of its narration.
+      // Preserve the resolved pair; the next user turn must not owe that result again.
+      if (!terminal && unresolved !== null) {
+        this.#history.push([...unresolved, ...current].map(withoutImage))
+        this.#unresolved = null
+      }
       const finish = async (): Promise<void> => {
         // Metering outlives semantic ownership; the next voice turn must not wait for this tail.
         if (terminal && this.#onUsage !== undefined && events !== undefined && !active.controller.signal.aborted) {
@@ -152,11 +174,11 @@ class Session implements CascadedLlmSession {
         const details = object(usage?.prompt_tokens_details) ? usage.prompt_tokens_details : {}
         const outputDetails = object(usage?.completion_tokens_details) ? usage.completion_tokens_details : {}
         reportUsage(this.#onUsage, {
-          id: usageId, service: 'llm', provider: 'qwen', model: this.#model,
+          id: usageId, service: 'llm', provider: this.#provider, model: this.#model,
           status: terminal && usage !== undefined ? 'complete' : 'missing',
           ...(terminal && usage !== undefined ? {
             inputTokens: usage.prompt_tokens, outputTokens: usage.completion_tokens,
-            cachedTokens: details.cached_tokens, reasoningTokens: outputDetails.reasoning_tokens,
+            cachedTokens: this.#provider === 'deepseek' ? usage.prompt_cache_hit_tokens : details.cached_tokens, reasoningTokens: outputDetails.reasoning_tokens,
           } : {}),
         } as UsageReport)
         input.signal.removeEventListener('abort', stop); await this.#cancel(active.reader); this.#active.delete(active)
@@ -189,7 +211,7 @@ class Session implements CascadedLlmSession {
   #calls(fragments: ReadonlyMap<number, Fragment>): Call[] { if (fragments.size !== 1 || !fragments.has(0)) throw fail('protocol'); return [...fragments.entries()].map(([, part]) => { if (!id(part.id) || !id(part.name)) throw fail('protocol'); let args: unknown; try { args = JSON.parse(part.arguments) } catch { throw fail('protocol') }; if (!jsonObject(args)) throw fail('protocol'); return {id: part.id, type: 'function', function: {name: part.name, arguments: JSON.stringify(copy(args))}} }) }
   #checkResults(inputs: readonly CascadedLlmInput[], unresolved: readonly Message[]): void {
     const calls = (unresolved.at(-1)?.tool_calls ?? []).map(item => item.id).sort(), results = inputs.filter((item): item is Extract<CascadedLlmInput, {kind: 'tool_result'}> => item.kind === 'tool_result').map(item => item.call_id).sort()
-    if (calls.length === 0 || calls.length !== results.length || calls.some((call, index) => call !== results[index]) || results.length !== inputs.length) throw fail('protocol')
+    if (calls.length === 0 || calls.length !== results.length || calls.some((call, index) => call !== results[index]) || inputs.slice(0, results.length).some(item => item.kind !== 'tool_result')) throw fail('protocol')
   }
   abandonPendingResponse(): Promise<void> {
     if (this.#closed) return Promise.reject(fail('closed'))
@@ -203,7 +225,7 @@ class Session implements CascadedLlmSession {
     while (true) {
       let read: Awaited<ReturnType<ReadableStreamDefaultReader<Uint8Array>['read']>>; try { read = await this.#timed(reader.read(), active) } catch (error) { if (error instanceof QwenCascadedLlmFailure) throw error; throw fail(active.controller.signal.aborted ? this.#closed ? 'closed' : 'aborted' : 'network') }
       if (read.done) { if (buffered.length > 0) { const event = line(buffered); if (event !== null && event !== 'done') yield event }; const event = line(new Uint8Array()); if (event !== null && event !== 'done') yield event; return }
-      if (!(read.value instanceof Uint8Array)) throw fail('protocol'); total += read.value.length; if (total > MAX_RESPONSE_BYTES) throw fail('overflow'); const next = new Uint8Array(buffered.length + read.value.length); next.set(buffered); next.set(read.value); buffered = next
+      if (!(read.value instanceof Uint8Array)) throw fail('protocol'); total += read.value.length; if (total > MAX_RESPONSE_BYTES) throw fail('overflow'); const next = new Uint8Array(buffered.length + read.value.length); next.set(buffered); next.set(read.value, buffered.length); buffered = next
       let newline = buffered.indexOf(10); while (newline >= 0) { const event = line(buffered.subarray(0, newline)); buffered = buffered.slice(newline + 1); if (event === 'done') return; if (event !== null) yield event; newline = buffered.indexOf(10) }; if (buffered.length > MAX_LINE_BYTES) throw fail('overflow')
     }
   }

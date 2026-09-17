@@ -10,18 +10,18 @@ import type {
   TransportObserver,
   TransportOutcome,
 } from '../src/executors/codex/app-server-transport.js'
-import {CODEX_AGENT_SUMMARY, CODEX_BASE_MANIFEST} from '../src/executors/codex/contract.js'
+import {CODEX_AGENT_SUMMARY, CODEX_LIVE_MANIFEST} from '../src/executors/codex/contract.js'
 import type {
   ExecutorAdapter,
   ExecutorDispatchContext,
   ExecutorHandoff,
-} from '../src/causal-runtime.js'
-import {VirtualClock} from '../src/clock.js'
-import type {JsonValue} from '../src/events.js'
+} from '../src/core/causal-runtime.js'
+import {VirtualClock} from '../src/core/clock.js'
+import type {JsonValue} from '../src/core/events.js'
 import {CodexTransportError} from '../src/executors/codex/app-server-transport.js'
-import {CodexAdapter, CODEX_MANIFEST} from '../src/executors/codex/adapter.js'
-import {delegateSchema} from '../src/ports.js'
-import {compileToolSchema} from '../src/tool-schema.js'
+import {CodexLiveAdapter} from '../src/executors/codex/adapter-live.js'
+import {delegateSchema} from '../src/core/ports.js'
+import {compileToolSchema} from '../src/core/tool-schema.js'
 
 const PREFLIGHT: SafePreflightReport = Object.freeze({
   version: '0.145.0',
@@ -144,9 +144,9 @@ function markTurnStartWritten(observer: TransportObserver): void {
   extended.onTurnStartWritten?.()
 }
 
-test('ordinary adapter projects a valid app-server run into bounded public evidence', async () => {
+test('live adapter projects a valid app-server run into bounded public evidence', async () => {
   // This fails if 6A/6B remain disconnected or if the adapter copies transport-private state.
-  const adapter: ExecutorAdapter = new CodexAdapter(new ScriptedTransport())
+  const adapter: ExecutorAdapter = new CodexLiveAdapter(new ScriptedTransport())
 
   const handoff = await adapter.dispatch('run', {work_order: '  do work  '}, context())
 
@@ -182,17 +182,16 @@ test('ordinary adapter projects a valid app-server run into bounded public evide
 test('hidden Codex bindings stay while the model sees only descriptor-driven host tools', () => {
   // This fails if the adapter advertises a project/live op, or the compiler still emits
   // `codex__*` schemas for a hidden controller-owned executor (spec 08 folds those into `dispatch`).
-  const adapter: ExecutorAdapter = new CodexAdapter(new ScriptedTransport())
-  assert.equal(adapter.manifest, CODEX_MANIFEST)
-  assert.equal(CODEX_MANIFEST, CODEX_BASE_MANIFEST)
-  assert.deepEqual(CODEX_MANIFEST.ops.map(op => op.name), ['run', 'status'])
-  assert.equal(CODEX_MANIFEST.model_visibility, 'hidden')
+  const adapter: ExecutorAdapter = new CodexLiveAdapter(new ScriptedTransport())
+  assert.equal(adapter.manifest, CODEX_LIVE_MANIFEST)
+  assert.deepEqual(CODEX_LIVE_MANIFEST.ops.map(op => op.name), ['run', 'steer', 'status'])
+  assert.equal(CODEX_LIVE_MANIFEST.model_visibility, 'hidden')
   const compiled = compileToolSchema([adapter.manifest], {agentDescriptors: [{
     name: 'codex', summary: CODEX_AGENT_SUMMARY, ownedChannels: ['codex'],
   }]})
   assert.deepEqual(
-    [...compiled.bindings.keys()].slice(-5),
-    ['codex__run', 'codex__status', 'dispatch', 'cancel', 'confirm'],
+    [...compiled.bindings.keys()].slice(-6),
+    ['codex__run', 'codex__steer', 'codex__status', 'dispatch', 'cancel', 'confirm'],
   )
   assert.equal(compiled.bindings.get('codex__run')?.kind, 'delegate')
   assert.equal(compiled.bindings.get('dispatch')?.kind, 'host')
@@ -208,7 +207,7 @@ test('hidden Codex bindings stay while the model sees only descriptor-driven hos
   assert.ok(dispatch.description.includes(`codex: ${CODEX_AGENT_SUMMARY}`))
 })
 
-test('ordinary validation is exact, Python-compatible, and transport-free on rejection', async () => {
+test('live validation is exact, Python-compatible, and transport-free on rejection', async () => {
   // This fails if validation uses trim/UTF-16 length, accepts decorated objects, or calls the transport first.
   const invalid: readonly [string, unknown][] = [
     ['missing', {}],
@@ -222,7 +221,7 @@ test('ordinary validation is exact, Python-compatible, and transport-free on rej
   ]
   for (const [op, request] of invalid) {
     const transport = new ScriptedTransport()
-    const handoff = await new CodexAdapter(transport).dispatch(
+    const handoff = await new CodexLiveAdapter(transport).dispatch(
       op,
       request as Readonly<Record<string, JsonValue>>,
       contextFor(op, {}),
@@ -239,7 +238,7 @@ test('ordinary validation is exact, Python-compatible, and transport-free on rej
     get: () => { getterReads += 1; return 'private getter' },
   })
   const hostileTransport = new ScriptedTransport()
-  const hostileResult = await new CodexAdapter(hostileTransport).dispatch(
+  const hostileResult = await new CodexLiveAdapter(hostileTransport).dispatch(
     'run', hostile as Readonly<Record<string, JsonValue>>, contextFor('run', {}),
   )
   assert.deepEqual(hostileResult.content, {error: 'invalid_params', op: 'run'})
@@ -247,14 +246,14 @@ test('ordinary validation is exact, Python-compatible, and transport-free on rej
   assert.deepEqual(hostileTransport.calls, [])
 
   const transport = new ScriptedTransport()
-  const accepted = await new CodexAdapter(transport).dispatch(
+  const accepted = await new CodexLiveAdapter(transport).dispatch(
     'run', {work_order: `\u001c${'😀'.repeat(4000)}\u0085`}, contextFor('run', {}),
   )
   assert.equal(accepted.outcome, 'ok')
   assert.deepEqual(transport.workOrders, ['😀'.repeat(4000)])
 })
 
-test('ordinary status, busy rejection, and one absolute deadline follow the active run', async () => {
+test('live status, busy rejection, and one absolute deadline follow the active run', async () => {
   // This fails if runs queue, status uses stale time, or preflight/run receive different budgets.
   const clock = new VirtualClock(7)
   const release = deferred<TransportOutcome>()
@@ -266,7 +265,7 @@ test('ordinary status, busy rejection, and one absolute deadline follow the acti
     started.resolve()
     return await release.promise
   }
-  const adapter = new CodexAdapter(transport, {wallNowMilliseconds: () => 1_000})
+  const adapter = new CodexLiveAdapter(transport, {wallNowMilliseconds: () => 1_000})
   const running = adapter.dispatch('run', {work_order: 'one'}, contextFor('run', {}, {clock}))
   await started.promise
   clock.advanceTo(12)
@@ -283,6 +282,7 @@ test('ordinary status, busy rejection, and one absolute deadline follow the acti
     started_at: 7, finished_at: null, elapsed: 5,
     process: {running: true, exited: false, exit_code: null},
     protocol: {terminal: null}, preflight: {verdict: 'passed'},
+    prewarm: {state: 'cold'}, progress: {internal_activity: 0},
   })
   assert.deepEqual(busy.content, {error: 'busy', op: 'run'})
   assert.deepEqual(transport.workOrders, ['one'])
@@ -297,12 +297,12 @@ test('ordinary status, busy rejection, and one absolute deadline follow the acti
   assert.equal(adapter.status.elapsed, 5)
 })
 
-test('ordinary aggregate deadline stops before run and keeps the preflight report private-safe', async () => {
+test('live aggregate deadline stops before run and keeps the preflight report private-safe', async () => {
   // This fails if each phase receives a fresh 540-second budget or expiry is checked only before await.
   const clock = new VirtualClock(7)
   const transport = new ScriptedTransport()
   transport.preflightAction = () => { clock.advanceTo(547) }
-  const handoff = await new CodexAdapter(transport).dispatch(
+  const handoff = await new CodexLiveAdapter(transport).dispatch(
     'run', {work_order: 'bounded'}, contextFor('run', {}, {clock}),
   )
   assert.equal(handoff.outcome, 'failed')
@@ -311,40 +311,26 @@ test('ordinary aggregate deadline stops before run and keeps the preflight repor
   assert.deepEqual(transport.calls, ['preflight'])
 })
 
-test('ordinary deadline retains a late writer-drain outcome as external uncertainty', async () => {
-  // This fails if bounded cleanup discards Task-6B's authoritative late turnStartWritten bit.
+test('live completion is not cancelled at the former total deadline', async () => {
   const clock = new VirtualClock(7)
   const entered = deferred<void>()
+  const release = deferred<void>()
   const transport = new ScriptedTransport()
   transport.runAction = async (_observer, deadline) => {
     entered.resolve()
-    await new Promise<void>(resolve => {
-      deadline.signal?.addEventListener('abort', () => { resolve() }, {once: true})
-    })
-    return {
-      classification: 'uncertain', code: 'transport_lost',
-      turnStartWritten: true, completion: null,
-    }
+    await release.promise
+    assert.equal(deadline.signal?.aborted, false)
+    return COMPLETE_OUTCOME
   }
-  const adapter = new CodexAdapter(transport)
-  const running = adapter.dispatch(
-    'run', {work_order: 'written near deadline'}, contextFor('run', {}, {clock}),
-  )
+  const adapter = new CodexLiveAdapter(transport)
+  const running = adapter.dispatch('run', {work_order: 'long task'}, contextFor('run', {}, {clock}))
   await entered.promise
-  clock.advanceTo(547)
-  const handoff = await running
-
-  assert.deepEqual([handoff.outcome, handoff.trust, handoff.content.code], [
-    'unknown', 'untrusted_external', 'adapter_timeout',
-  ])
-  assert.deepEqual(adapter.status, {
-    state: 'running', run_sequence: 1, started_at: 7, finished_at: null, elapsed: 540,
-    process_running: true, process_exited: false, terminal: null, exit_code: null,
-    preflight: 'passed', prewarm: 'cold',
-  })
+  clock.advanceTo(1207)
+  release.resolve()
+  assert.equal((await running).outcome, 'ok')
 })
 
-test('ordinary accepts the real 6B post-write unsupported-protocol uncertainty pair', async () => {
+test('live accepts the real 6B post-write unsupported-protocol uncertainty pair', async () => {
   // Task-6B's malformed-after-turn real-child path returns this exact typed outcome.
   const transport = new ScriptedTransport()
   transport.outcome = {
@@ -352,7 +338,7 @@ test('ordinary accepts the real 6B post-write unsupported-protocol uncertainty p
     turnStartWritten: true, completion: null,
   }
 
-  const adapter = new CodexAdapter(transport)
+  const adapter = new CodexLiveAdapter(transport)
   const handoff = await adapter.dispatch(
     'run', {work_order: 'typed 6B outcome'}, contextFor('run', {}),
   )
@@ -363,11 +349,11 @@ test('ordinary accepts the real 6B post-write unsupported-protocol uncertainty p
   assert.equal(adapter.status.process_exited, false)
 })
 
-test('ordinary side effects use writer drain rather than started progress guesses', async () => {
+test('live side effects use writer drain rather than started progress guesses', async () => {
   // This fails if progress is mistaken for authority or the formal written latch is ignored.
   for (const [written, expected] of [
-    [false, ['failed', 'trusted_system', 'worker_exception_before_start']],
-    [true, ['unknown', 'untrusted_external', 'worker_exception_after_start']],
+    [false, ['failed', 'trusted_system', 'transport_failure']],
+    [true, ['unknown', 'untrusted_external', 'transport_failure']],
   ] as const) {
     const transport = new ScriptedTransport()
     transport.runAction = observer => {
@@ -375,16 +361,17 @@ test('ordinary side effects use writer drain rather than started progress guesse
       if (written) markTurnStartWritten(observer)
       return Promise.reject(new Error('PRIVATE-WRITER-DRAIN-SENTINEL'))
     }
-    const handoff = await new CodexAdapter(transport).dispatch(
+    const handoff = await new CodexLiveAdapter(transport).dispatch(
       'run', {work_order: 'work'}, contextFor('run', {}),
     )
     assert.deepEqual([handoff.outcome, handoff.trust, handoff.content.code], expected)
   }
 })
 
-test('ordinary cleanup grace follows VirtualClock and leaves no ambient waiter', async () => {
-  // This fails if bounded cleanup sleeps six real seconds after a virtual deadline.
+test('live cleanup grace follows VirtualClock and leaves no ambient waiter', async () => {
+  // This fails if bounded cleanup sleeps six real seconds after cancellation.
   const clock = new VirtualClock(7)
+  const controller = new AbortController()
   const entered = deferred<void>()
   const release = deferred<TransportOutcome>()
   const transport = new ScriptedTransport()
@@ -392,30 +379,31 @@ test('ordinary cleanup grace follows VirtualClock and leaves no ambient waiter',
     entered.resolve()
     return await release.promise
   }
-  const running = new CodexAdapter(transport).dispatch(
-    'run', {work_order: 'non-cooperative'}, contextFor('run', {}, {clock}),
+  const running = new CodexLiveAdapter(transport).dispatch(
+    'run', {work_order: 'non-cooperative'}, contextFor('run', {}, {clock, signal: controller.signal}),
   )
   await entered.promise
+  controller.abort()
   clock.advanceTo(547)
   await yieldImmediate()
   const cleanupWaiters = clock.waiterCount()
   clock.advanceTo(553)
   const winner = await Promise.race([
-    running.then(() => 'settled' as const),
+    running.then(() => 'unexpected' as const, (error: unknown) => { assert.ok(error instanceof Error); assert.equal(error.name, 'AbortError'); return 'settled' as const }),
     yieldImmediate().then(() => 'ambient' as const),
   ])
   release.resolve({
     classification: 'refused', code: 'transport_lost',
     turnStartWritten: false, completion: null,
   })
-  await running
+  await assert.rejects(running, {name: 'AbortError'})
 
   assert.equal(cleanupWaiters, 1)
   assert.equal(winner, 'settled')
   assert.equal(clock.waiterCount(), 0)
 })
 
-test('ordinary maps pre/post-side-effect failures without leaking internal text', async () => {
+test('live maps pre/post-side-effect failures without leaking internal text', async () => {
   // This fails if preflight success is treated as a turn side effect or arbitrary exception text is copied.
   const cases: readonly Readonly<{
     configure: (transport: ScriptedTransport) => void
@@ -427,13 +415,13 @@ test('ordinary maps pre/post-side-effect failures without leaking internal text'
     },
     {
       configure: transport => { transport.preflightError = new Error('PRIVATE-PREFLIGHT-SENTINEL') },
-      expected: ['failed', 'trusted_system', 'worker_exception_before_start'],
+      expected: ['failed', 'trusted_system', 'transport_failure'],
     },
     {
       configure: transport => {
         transport.outcome = {classification: 'refused', code: 'server_rejected', turnStartWritten: false, completion: null}
       },
-      expected: ['failed', 'trusted_system', 'worker_refused'],
+      expected: ['failed', 'trusted_system', 'server_rejected'],
     },
     {
       configure: transport => {
@@ -454,7 +442,7 @@ test('ordinary maps pre/post-side-effect failures without leaking internal text'
       configure: transport => {
         transport.runAction = () => Promise.reject(new Error('PRIVATE-BEFORE-WRITE-SENTINEL'))
       },
-      expected: ['failed', 'trusted_system', 'worker_exception_before_start'],
+      expected: ['failed', 'trusted_system', 'transport_failure'],
     },
     {
       configure: transport => {
@@ -464,24 +452,24 @@ test('ordinary maps pre/post-side-effect failures without leaking internal text'
           return Promise.reject(new Error('PRIVATE-RUN-SENTINEL'))
         }
       },
-      expected: ['unknown', 'untrusted_external', 'worker_exception_after_start'],
+      expected: ['unknown', 'untrusted_external', 'transport_failure'],
     },
   ]
   for (const entry of cases) {
     const transport = new ScriptedTransport()
     entry.configure(transport)
-    const handoff = await new CodexAdapter(transport).dispatch(
+    const handoff = await new CodexLiveAdapter(transport).dispatch(
       'run', {work_order: 'PRIVATE-WORK-ORDER'}, contextFor('run', {}),
     )
     assert.deepEqual([handoff.outcome, handoff.trust, handoff.content.code], entry.expected)
-    const publicText = JSON.stringify({handoff, status: new CodexAdapter(new ScriptedTransport()).status})
+    const publicText = JSON.stringify({handoff, status: new CodexLiveAdapter(new ScriptedTransport()).status})
     assert.equal(publicText.includes('PRIVATE-PREFLIGHT-SENTINEL'), false)
     assert.equal(publicText.includes('PRIVATE-RUN-SENTINEL'), false)
     assert.equal(JSON.stringify(handoff).includes('PRIVATE-WORK-ORDER'), false)
   }
 })
 
-test('ordinary rejects hostile or contradictory completion before public evidence', async () => {
+test('live rejects hostile or contradictory completion before public evidence', async () => {
   // This fails if typed transport objects can smuggle accessors, extra fields, or invalid final text.
   let getterReads = 0
   const hostile = Object.create(null) as Record<string, unknown>
@@ -494,7 +482,7 @@ test('ordinary rejects hostile or contradictory completion before public evidenc
   })
   const hostileTransport = new ScriptedTransport()
   hostileTransport.outcome = hostile
-  const rejected = await new CodexAdapter(hostileTransport).dispatch(
+  const rejected = await new CodexLiveAdapter(hostileTransport).dispatch(
     'run', {work_order: 'work'}, contextFor('run', {}),
   )
   assert.equal(rejected.content.code, 'invalid_worker_result')
@@ -509,7 +497,7 @@ test('ordinary rejects hostile or contradictory completion before public evidenc
     transport.outcome = {
       classification: 'completed', code: 'completed', turnStartWritten: true, completion,
     }
-    const adapter = new CodexAdapter(transport)
+    const adapter = new CodexLiveAdapter(transport)
     const handoff = await adapter.dispatch(
       'run', {work_order: 'work'}, contextFor('run', {}),
     )
@@ -520,7 +508,7 @@ test('ordinary rejects hostile or contradictory completion before public evidenc
   }
 })
 
-test('ordinary rejects contradictory classification and code combinations', async () => {
+test('live rejects contradictory classification and code combinations', async () => {
   // This fails if internal Task-6B codes cross a public classification they cannot represent.
   for (const outcome of [
     {classification: 'uncertain', code: 'completed', turnStartWritten: true, completion: null},
@@ -530,7 +518,7 @@ test('ordinary rejects contradictory classification and code combinations', asyn
   ]) {
     const transport = new ScriptedTransport()
     transport.outcome = outcome
-    const handoff = await new CodexAdapter(transport).dispatch(
+    const handoff = await new CodexLiveAdapter(transport).dispatch(
       'run', {work_order: 'work'}, contextFor('run', {}),
     )
     assert.equal(handoff.content.code, 'invalid_worker_result')
@@ -538,18 +526,18 @@ test('ordinary rejects contradictory classification and code combinations', asyn
   }
 })
 
-test('ordinary refusal matrix follows only real 6B pre-write paths', async () => {
+test('live refusal matrix follows only real 6B pre-write paths', async () => {
   for (const [code, expectedCode] of [
-    ['server_rejected', 'worker_refused'],
-    ['unexpected_server_request', 'worker_refused'],
-    ['resume_unavailable', 'worker_refused'],
+    ['server_rejected', 'server_rejected'],
+    ['unexpected_server_request', 'unexpected_server_request'],
+    ['resume_unavailable', 'resume_unavailable'],
     ['turn_failed', 'invalid_worker_result'],
     ['missing_terminal', 'invalid_worker_result'],
     ['nonzero_exit', 'invalid_worker_result'],
   ] as const) {
     const transport = new ScriptedTransport()
     transport.outcome = {classification: 'refused', code, turnStartWritten: false, completion: null}
-    const handoff = await new CodexAdapter(transport).dispatch(
+    const handoff = await new CodexLiveAdapter(transport).dispatch(
       'run', {work_order: 'typed refusal'}, contextFor('run', {}),
     )
 
@@ -559,7 +547,7 @@ test('ordinary refusal matrix follows only real 6B pre-write paths', async () =>
   }
 })
 
-test('ordinary cancellation waits for transport settlement, rethrows, and releases busy state', async () => {
+test('live cancellation waits for transport settlement, rethrows, and releases busy state', async () => {
   // This fails if cancellation fabricates a handoff or leaves the adapter permanently busy.
   const controller = new AbortController()
   const entered = deferred<void>()
@@ -573,7 +561,7 @@ test('ordinary cancellation waits for transport settlement, rethrows, and releas
     })
     return {classification: 'uncertain', code: 'transport_lost', turnStartWritten: true, completion: null}
   }
-  const adapter = new CodexAdapter(transport)
+  const adapter = new CodexLiveAdapter(transport)
   const running = adapter.dispatch(
     'run', {work_order: 'first'}, contextFor('run', {}, {signal: controller.signal}),
   )
@@ -588,14 +576,44 @@ test('ordinary cancellation waits for transport settlement, rethrows, and releas
   assert.equal(adapter.status.run_sequence, 2)
 })
 
-test('ordinary pre-aborted dispatch never invokes a transport method', async () => {
+test('live pre-aborted dispatch never invokes a transport method', async () => {
   // This fails if the promise is created before the aggregate deadline/abort pre-check.
   const controller = new AbortController()
   controller.abort()
   const transport = new ScriptedTransport()
-  const dispatch = new CodexAdapter(transport).dispatch(
+  const dispatch = new CodexLiveAdapter(transport).dispatch(
     'run', {work_order: 'must not run'}, contextFor('run', {}, {signal: controller.signal}),
   )
   await assert.rejects(dispatch, {name: 'AbortError'})
   assert.deepEqual(transport.calls, [])
+})
+
+for (const code of ['config_not_isolated', 'mcp_tools_not_isolated']) {
+  test(`shared-home refusal preserves ${code} through the live adapter`, async () => {
+    const transport = new ScriptedTransport()
+    transport.outcome = {classification: 'refused', code, turnStartWritten: false, completion: null}
+    const result = await new CodexLiveAdapter(transport).dispatch('run', {work_order: 'Build a game'}, context())
+    assert.equal(result.outcome, 'failed')
+    assert.equal(result.content.code, code)
+  })
+}
+
+test('invalid optional diagnostic does not replace the actual refusal code', async () => {
+  const transport = new ScriptedTransport()
+  transport.outcome = {classification: 'refused', code: 'resume_unavailable', turnStartWritten: false, completion: null,
+    diagnostic: {method: 'thread/resume', server_code: -32600, message: '😀'.repeat(4000)}}
+  const handoff = await new CodexLiveAdapter(transport).dispatch('run', {work_order: 'resume'}, contextFor('run', {}))
+  assert.equal(handoff.content.code, 'resume_unavailable')
+  assert.equal(handoff.content.diagnostic, undefined)
+})
+
+test('connection loss after the turn is bound is diagnosed as execution rather than startup', async () => {
+  const transport = new ScriptedTransport()
+  transport.runAction = observer => {
+    observer.onTurnBound?.()
+    return Promise.resolve({classification: 'uncertain', code: 'transport_lost', turnStartWritten: true, completion: null})
+  }
+  const result = await new CodexLiveAdapter(transport).dispatch('run', {work_order: 'work'}, contextFor('run', {}))
+  assert.equal(result.outcome, 'unknown')
+  assert.equal(result.content.stage, 'execution')
 })

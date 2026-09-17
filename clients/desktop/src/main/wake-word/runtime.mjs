@@ -93,6 +93,7 @@ export class WakeWordRuntime {
   stop() {
     const worker = this.worker
     this.worker = null
+    this.status = 'off'
     this.pending = false
     this.queue = []
     this.queuedBytes = 0
@@ -132,13 +133,14 @@ export class WakeWordRuntime {
     return true
   }
   /**
-   * `reason` separates the two callers, which want opposite things on screen.
+   * `reason` separates idle/bubble sleep from explicit window hiding.
    * An idle timeout should leave a resting bubble behind; an explicit hide
    * (tray, global shortcut) is a "get out of my way" gesture and must still
-   * clear the screen. Both still park the runtime in the same sleeping state.
+   * clear the screen. Bubble sleep also works without the optional detector.
    */
   sleep(reason = 'idle') {
-    if (!this.enabled || this.status !== 'ready' || !this.activated || this.state !== 'active') return false
+    if (this.state !== 'active') return false
+    if (reason !== 'bubble' && (!this.enabled || this.status !== 'ready' || !this.activated)) return false
     this.state = 'sleeping'
     this.reset()
     this.hide(reason)
@@ -146,7 +148,7 @@ export class WakeWordRuntime {
   }
   activity() { this.idleSince = null }
   accept(value) {
-    if (!this.enabled || this.status !== 'ready' || this.state !== 'sleeping'
+    if (!this.worker || !this.enabled || this.status !== 'ready' || this.state !== 'sleeping'
       || this.muted || !this.activated || this.now() - this.lastReport > 2500
       || value?.epoch !== this.epoch || !(value.pcm instanceof Uint8Array)
       || value.pcm.length === 0 || value.pcm.length > 6400 || value.pcm.length % 2) return false

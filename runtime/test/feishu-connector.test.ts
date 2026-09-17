@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { assertFeishuCommand, createFeishuRunner, FeishuAppNotConfigured, parseFeishuJson } from '../src/connectors/feishu/cli.js';
-import {abortable} from '../src/camera-session.js';
+import {abortable} from '../src/core/camera-session.js';
 import { FEISHU_SCOPES, FeishuConnector, type FeishuMessage } from '../src/connectors/feishu/index.js';
 
 test('Feishu runner rejects identity/flag/path expansion and malformed output', () => {
@@ -139,7 +139,7 @@ test('selected chat ingestion, pagination, delete generations, private bot and d
     assert.equal(connector.snapshot().scope_configured, false);
     await connector.configure(['oc_selected'], true);
     assert.equal(connector.snapshot().scope_configured, true);
-    assert.equal(JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')).scopeConfigured, true);
+    assert.equal((JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')) as {scopeConfigured: boolean}).scopeConfigured, true);
     await connector.sync();
     assert.equal(pageCalls, 2); assert.equal(messages.length, 2);
     assert(changes.length > 0);

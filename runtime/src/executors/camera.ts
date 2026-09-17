@@ -1,8 +1,8 @@
-import type { ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff } from '../causal-runtime.js'
-import type { JsonValue } from '../events.js'
-import type { MediaStore } from '../media-store.js'
-import { handoffPolicySchema } from '../memory.js'
-import { executorManifestSchema, opSpecSchema, type ExecutorManifest } from '../ports.js'
+import type { ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff } from '../core/causal-runtime.js'
+import type { JsonValue } from '../core/events.js'
+import type { MediaStore } from '../core/media-store.js'
+import { handoffPolicySchema } from '../core/memory.js'
+import { executorManifestSchema, opSpecSchema, type ExecutorManifest } from '../core/ports.js'
 import type { FrameSource } from './watcher.js'
 
 export const SNAPSHOT = opSpecSchema.parse({

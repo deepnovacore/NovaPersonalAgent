@@ -82,7 +82,7 @@ Get API key from [DashScope](https://platform.qianwenai.com) and [Tavily](https:
 ```bash
 npm run start:client
 ```
-The client includes microphone, camera, sound, settings, external MCP controls, and workspace-graph surfaces. Try hovering over the desktop orb to get surprised :) Also you
+The client includes microphone, camera, sound, settings, and external MCP controls. Try hovering over the desktop orb to get surprised :) Also you
 may try build or run demo locally:
 
 ```bash
@@ -106,6 +106,7 @@ wake-word Worker; explicit mute stops wake detection. See
 | [Getting started](docs/getting-started.md) | Setup and integrations |
 | [v0.2.0 specs](docs/specs/v0.2.0/00-overview.md) | In-progress feature contracts on `v0.2.0dev` |
 | [Historical design exploration: A Tradeoff Ruler for Proactive Voice Agents](docs/blog/2026-08-proactive-voice-agent-design-space.md) | Historical design-space essay |
+| [Node runtime migration archive](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
 
 ## 5. Roadmap
 
@@ -130,7 +131,3 @@ invariants: [CONTRIBUTING.md](CONTRIBUTING.md).
 ## 7. License
 
 Copyright 2026 DeepNovaCore, [Apache License 2.0](LICENSE).
-
-## Browser client
-
-The browser client lives in `clients/webui`, alongside `clients/desktop` and `clients/ios`. Run `npm run start:web` after starting the headless runtime. See [WebUI setup](clients/webui/README.md) for credentials, audio and HTTPS configuration.

@@ -37,58 +37,15 @@ jobs:
       - run: npm run build
       - name: Build unsigned native package bytes
         run: npm run ${{ matrix.package_script }} --workspace @nova-audio-agent/desktop
-      - name: Inspect exact unsigned application and installer bytes
-        env:
-          NOVA_RELEASE_INSPECTION_DIAGNOSTICS: "1"
-        run: npm run inspect:release-package --workspace @nova-audio-agent/desktop
-      - name: Normalize closed release artifact names and final digests
-        run: npm run collect:release-artifacts --workspace @nova-audio-agent/desktop -- --target-id ${{ matrix.target_id }}
-      - name: Prepare checkout-free installed smoke kit
-        run: npm run prepare:release-smoke-kit --workspace @nova-audio-agent/desktop
-      - name: Add portable unsigned result classifier to checkout-free kit
-        run: node -e "require('node:fs').copyFileSync('clients/desktop/scripts/run-unsigned-installed-smoke.mjs','clients/desktop/build/release-smoke-kit/scripts/run-unsigned-installed-smoke.mjs')"
-      # This is a same-workflow debugging artifact, not a release candidate.
-      # The private repository's current plan does not provide attestations;
-      # the downstream job still rehashes the closed bytes before execution.
+      - run: npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned
+      - name: Verify installed NSIS candidate
+        shell: pwsh
+        run: |
+          $installer = (Get-ChildItem clients/desktop/dist/*.exe).FullName
+          npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned --artifact "$installer"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: |
-            clients/desktop/build/release-artifacts/**
-            clients/desktop/build/release-digests/**
-            clients/desktop/build/release-smoke-kit/**
+          path: clients/desktop/dist/*.exe
           if-no-files-found: error
-
-  installed-smoke:
-    needs: package
-    timeout-minutes: 30
-    permissions:
-      contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-2022
-            target: win32-x64:nsis
-            artifact_name: unsigned-win32-x64
-            filename: nova-audio-agent-0.1.1-windows-x64.exe
-            command: node
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.artifact_name }}
-          path: candidate
-      - name: Rehash, install, authenticate, exercise, quit, and remove candidate
-        timeout-minutes: 10
-        env:
-          NOVA_RELEASE_SMOKE_DIAGNOSTICS: "1"
-        run: >-
-          ${{ matrix.command }} candidate/release-smoke-kit/scripts/run-unsigned-installed-smoke.mjs
-          --target ${{ matrix.target }}
-          --artifact candidate/release-artifacts/${{ matrix.filename }}
-          --sha256-file candidate/release-digests/${{ matrix.filename }}.sha256
-          --camera-file candidate/release-smoke-kit/cat-sofa-guard.mp4

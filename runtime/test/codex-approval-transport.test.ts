@@ -11,18 +11,16 @@ import {tmpdir} from 'node:os'
 import {join, resolve} from 'node:path'
 import {test, type TestContext} from 'node:test'
 
-import {VirtualClock} from '../src/clock.js'
-import {
-  CodexApprovalController,
-  routeCodexApprovalServerRequest,
-} from '../src/executors/codex/approval.js'
-import {MAX_CONCURRENT_WORK} from '../src/work-tools.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {HostApprovalController} from '../src/core/approval.js'
+import {routeCodexApprovalServerRequest} from '../src/executors/codex/approval-protocol.js'
+import {MAX_CONCURRENT_WORK} from '../src/core/work-tools.js'
 
 function fixture(t: TestContext) {
   const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'nova-codex-approval-route-')))
   t.after(() => { rmSync(workspace, {recursive: true, force: true}) })
   let nextId = 0
-  const controller = new CodexApprovalController({
+  const controller = new HostApprovalController({
     clock: new VirtualClock(100),
     idFactory: () => `public-${++nextId}`,
   })
@@ -358,7 +356,7 @@ test('network and permission approvals return exact turn/session grants with no 
   for (const kind of ['file_change', 'command_execution', 'network', 'permissions']) {
     for (const decision of ['accept', 'acceptForSession', 'decline'] as const) {
       const params = kind === 'file_change' ? fileParams : kind === 'permissions'
-        ? {...fileParams, grantRoot: undefined, cwd: workspace, permissions}
+        ? {...fileParams, grantRoot: undefined, environmentId: 'local', cwd: workspace, permissions}
         : {...commandParams(workspace), availableDecisions: ['accept', 'acceptForSession', 'decline'],
             proposedExecpolicyAmendment: ['npm'], ...(kind === 'network' ? {
               networkApprovalContext: {host: 'registry.npmjs.org', protocol: 'https'},
@@ -384,6 +382,32 @@ test('network and permission approvals return exact turn/session grants with no 
   }
 })
 
+test('live local command approval accepts cancel-only denial without granting persistent policy', async t => {
+  const {base, controller, workspace} = fixture(t)
+  // Shape captured from a real Codex network escalation; browser open uses the same protocol.
+  const params = {...commandParams(workspace), environmentId: 'local',
+    command: "/bin/zsh -lc 'curl --max-time 20 --output network-example.html https://example.com'",
+    availableDecisions: ['accept', {acceptWithExecpolicyAmendment: {execpolicy_amendment: ['curl']}}, 'cancel']}
+  for (const command of [params.command, "/bin/zsh -lc \"open 'https://example.com/?nova-preview-approval=20260916'\""]) {
+    for (const decision of ['accept', 'decline'] as const) {
+      const result = routeCodexApprovalServerRequest({...base,
+        method: 'item/commandExecution/requestApproval', params: {...params, command}, signal: new AbortController().signal})
+      assert.equal(controller.pending, true)
+      assert.deepEqual(controller.view.allowed_decisions, ['accept', 'decline'])
+      assert.equal(controller.acceptDecision({approvalId: controller.view.pending_approval_id!, decision: 'acceptForSession'}), false)
+      assert.equal(controller.acceptDecision({approvalId: controller.view.pending_approval_id!, decision}), true)
+      assert.deepEqual(await result, {result: {decision}})
+    }
+  }
+  for (const change of [{environmentId: 'remote'}, {turnId: 'another-turn'}, {cwd: resolve(workspace, '..')},
+    {availableDecisions: ['accept', {acceptWithExecpolicyAmendment: {execpolicy_amendment: ['x'.repeat(16_385)]}}, 'cancel']}]) {
+    const result = routeCodexApprovalServerRequest({...base,
+      method: 'item/commandExecution/requestApproval', params: {...params, ...change}, signal: new AbortController().signal})
+    assert.equal(controller.pending, false)
+    assert.deepEqual(await result, {result: {decision: 'decline'}})
+  }
+})
+
 test('available decisions constrain session approval and permission expiry grants nothing', async t => {
   const {base, controller, workspace} = fixture(t)
   const waiting = routeCodexApprovalServerRequest({
@@ -396,7 +420,7 @@ test('available decisions constrain session approval and permission expiry grant
   await waiting
   for (const end of ['ttl', 'lost']) {
     const clock = new VirtualClock()
-    const approval = new CodexApprovalController({clock, idFactory: () => 'permissions'})
+    const approval = new HostApprovalController({clock, idFactory: () => 'permissions'})
     const signal = new AbortController()
     const result = routeCodexApprovalServerRequest({
       ...base, controller: approval, method: 'item/permissions/requestApproval',
@@ -456,7 +480,7 @@ test('concurrent, terminal-turn, transport-loss, and unknown requests preserve f
 test('approval FIFO: the head is the only voice-visible entry, queued TTLs start at promotion, work scoping', async () => {
   const clock = new VirtualClock(100)
   let nextId = 0
-  const controller = new CodexApprovalController({clock, idFactory: () => `public-${++nextId}`})
+  const controller = new HostApprovalController({clock, idFactory: () => `public-${++nextId}`})
   const offer = (command: string) => ({
     kind: 'command_execution' as const,
     local_detail: {kind: 'command_execution' as const, command, cwd: '/w'},

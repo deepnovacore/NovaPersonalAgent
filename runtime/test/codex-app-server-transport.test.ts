@@ -1,5 +1,8 @@
+import {appendFileSync, chmodSync, constants, copyFileSync, mkdtempSync, realpathSync, rmSync} from 'node:fs'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
 import {prepareManagedCodexMcp, managedMcpEnvironment, type ManagedCodexMcp} from '../src/executors/codex/managed-mcp.js'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 /* eslint-disable @typescript-eslint/require-await -- deterministic fakes implement async host contracts */
 /* eslint-disable @typescript-eslint/no-empty-function -- inert fake callbacks model blocked/no-op resources */
 import assert from 'node:assert/strict'
@@ -15,8 +18,8 @@ import {
 } from '../src/executors/codex/app-server-transport.js'
 import {MAX_STDOUT} from '../src/executors/codex/protocol.js'
 import {resolveCodexLaunchProfile, type CodexLaunchProfile} from '../src/executors/codex/launch-profile.js'
-import {RealClock} from '../src/clock.js'
-import {CodexApprovalController} from '../src/executors/codex/approval.js'
+import {RealClock} from '../src/core/clock.js'
+import {HostApprovalController} from '../src/core/approval.js'
 import {
   hostBinaryForTest,
   hostCodexHomeForTest,
@@ -49,7 +52,7 @@ test('a cold run follows the app-server handshake and returns bounded internal c
       prepare: async () => ({} as never),
       environment: () => ({
         PATH: '/safe-path', HOME: '/safe-home', CODEX_HOME: workspace,
-        CODEX_API_KEY: 'api-key-sentinel',
+        NOVA_CODEX_API_KEY: 'api-key-sentinel',
         CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
       }),
       removeEphemeralHome: async () => {},
@@ -75,11 +78,31 @@ test('a cold run follows the app-server handshake and returns bounded internal c
     status: 'completed',
     final_text: 'bounded result',
     internal_activity: 1,
+    error_code: null,
   })
 })
 
+test('turn usage-limit failure is projected as a safe transport code', async () => {
+  const owner = new MemoryAppServerOwner([], {turnFailure: 'usageLimitExceeded'})
+  const transport = createTransport({spawn: async () => owner})
+
+  const result = await transport.run(
+    {workOrder: 'private usage limited work'},
+    {},
+    {expiresAtMs: Date.now() + 5000},
+  )
+
+  assert.equal(result.classification, 'uncertain')
+  assert.equal(result.code, 'usage_limit_exceeded')
+  assert.equal(result.turnStartWritten, true)
+  assert.equal(result.completion?.status, 'failed')
+  assert.equal(result.completion?.error_code, 'usage_limit_exceeded')
+  assert.equal(JSON.stringify(result).includes('private usage'), false)
+  assert.equal(JSON.stringify(result).includes('raw quota detail'), false)
+})
+
 test('an explicit ask profile supplies the approval policy without a legacy launch field', async () => {
-  const controller = new CodexApprovalController({
+  const controller = new HostApprovalController({
     clock: new RealClock(),
     idFactory: () => 'profile-approval',
   })
@@ -273,39 +296,27 @@ test('preflight is hard-capped and caller cancellation settles before spawn', as
   assert.equal(spawnCount, 0)
 })
 
-test('preflight rejects Codex versions older than the pinned app-server minimum', async () => {
-  const transport = createTransport({spawn: async () => new MemoryAppServerOwner([])}, {
-    preflightRunner: {run: async () => ({...safePreflightReport(), version: '0.144.9'})},
-  })
-  await assert.rejects(
-    transport.preflight({expiresAtMs: Date.now() + 5000}),
-    (error: unknown) => String(error) === 'CodexTransportError: unsupported_version',
-  )
-})
-
-test('preflight accepts newer prerelease and build-qualified Codex versions', async () => {
-  for (const version of ['0.151.0-alpha.7.2', '0.151.0-alpha.7+desktop.2', '0.145.0+build.1']) {
-    const transport = createTransport({spawn: async () => new MemoryAppServerOwner([])}, {
-      preflightRunner: {run: async () => ({...safePreflightReport(), version})},
-    })
-    assert.equal((await transport.preflight({expiresAtMs: Date.now() + 5000})).version, version)
-  }
-})
-
-test('preflight rejects a prerelease at the pinned app-server minimum and malformed labels', async () => {
-  for (const version of [
+for (const {name, versions, accepted} of [
+  {name: 'preflight rejects Codex versions older than the pinned app-server minimum', versions: ['0.144.9'], accepted: false},
+  {name: 'preflight accepts newer prerelease and build-qualified Codex versions', versions: ['0.151.0-alpha.7.2', '0.151.0-alpha.7+desktop.2', '0.145.0+build.1'], accepted: true},
+  {name: 'preflight rejects a prerelease at the pinned app-server minimum and malformed labels', versions: [
     '0.145.0-alpha', 'v0.145.0', 'codex-cli 0.145.0', 'codex 0.145.0',
     '0.151.0-alpha..7', '0.151.0 alpha.7',
-  ]) {
-    const transport = createTransport({spawn: async () => new MemoryAppServerOwner([])}, {
-      preflightRunner: {run: async () => ({...safePreflightReport(), version})},
-    })
-    await assert.rejects(
-      transport.preflight({expiresAtMs: Date.now() + 5000}),
-      (error: unknown) => String(error) === 'CodexTransportError: unsupported_version',
-    )
-  }
-})
+  ], accepted: false},
+]) {
+  test(name, async () => {
+    for (const version of versions) {
+      const transport = createTransport({spawn: async () => new MemoryAppServerOwner([])}, {
+        preflightRunner: {run: async () => ({...safePreflightReport(), version})},
+      })
+      if (accepted) assert.equal((await transport.preflight({expiresAtMs: Date.now() + 5000})).version, version)
+      else await assert.rejects(
+        transport.preflight({expiresAtMs: Date.now() + 5000}),
+        (error: unknown) => String(error) === 'CodexTransportError: unsupported_version',
+      )
+    }
+  })
+}
 
 test('a spawned process missing a required pipe is refused and disposed before protocol work', async () => {
   let disposed = false
@@ -1001,6 +1012,8 @@ test('turn rejection happens after the writer drain and stays server_rejected', 
   )
   assert.equal(result.classification, 'uncertain')
   assert.equal(result.code, 'server_rejected')
+  assert.equal(result.diagnostic?.method, 'turn/start')
+  assert.equal(result.diagnostic?.server_code, -32001)
   assert.equal(result.turnStartWritten, true)
 })
 
@@ -2201,7 +2214,7 @@ test('credential cancellation joins snapshot work and removes the ephemeral home
       },
       environment: () => ({
         PATH: '/safe', HOME: '/home', CODEX_HOME: workspace,
-        CODEX_API_KEY: 'api-key-sentinel',
+        NOVA_CODEX_API_KEY: 'api-key-sentinel',
         CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
       }),
       removeEphemeralHome: async () => { cleanupCount += 1 },
@@ -2251,7 +2264,7 @@ test('persistent resume uses exact host identity and rejection is pre-effect res
         prepare: async () => ({} as never),
         environment: () => ({
           PATH: '/safe', HOME: '/home', CODEX_HOME: workspace,
-          CODEX_API_KEY: 'api-key-sentinel',
+          NOVA_CODEX_API_KEY: 'api-key-sentinel',
           CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
         }),
         removeEphemeralHome: async () => {},
@@ -2270,12 +2283,14 @@ test('persistent resume uses exact host identity and rejection is pre-effect res
       approvalsReviewer: 'user',
       permissions: 'nova_audio_agent',
       developerInstructions: 'bounded instructions',
+      modelProvider: 'nova_api_key',
       cwd: workspace,
       threadId: 'durable-thread-1',
     })
     if (rejected) {
       assert.equal(result.classification, 'refused')
       assert.equal(result.code, 'resume_unavailable')
+      assert.deepEqual(result.diagnostic, {method: 'thread/resume', server_code: -32001, message: 'resume-private'})
       assert.equal(result.turnStartWritten, false)
       assert.equal(owner.received.some(message => message.method === 'turn/start'), false)
     } else {
@@ -2328,7 +2343,7 @@ test('the real fake app-server handles arbitrary stdout chunks and barriered ste
 test('the real fake app-server carries correlated file and bounded command approvals end to end', async () => {
   for (const scenario of ['file-approval', 'command-approval'] as const) {
     const factory = new FakeAppServerOwnerFactory(scenario)
-    const controller = new CodexApprovalController({
+    const controller = new HostApprovalController({
       clock: new RealClock(),
       idFactory: () => `nova-${scenario}`,
     })
@@ -2385,7 +2400,7 @@ test('the real fake app-server carries correlated file and bounded command appro
 
 test('the real fake app-server declines a file approval with invalid startedAtMs', async () => {
   const factory = new FakeAppServerOwnerFactory('file-approval-invalid-start')
-  const controller = new CodexApprovalController({
+  const controller = new HostApprovalController({
     clock: new RealClock(),
     idFactory: () => 'must-not-be-offered',
   })
@@ -2522,10 +2537,13 @@ class MemoryAppServerOwner {
     readonly bindWorkspace: string | null
     readonly echoSteerInFinal: boolean
     readonly holdServerReplyWrite: boolean
+    readonly stallTitleTurn: boolean
+    readonly turnFailure: 'usageLimitExceeded' | null
   }
   #delayedTurnRequestId: number | undefined
   #heldInitializeRequestId: number | undefined
   #lastSteer: string | null = null
+  #threadName: string | null = null
   #heldServerReplyWrite: ((error?: Error | null) => void) | null = null
 
   constructor(methods: string[], options: {
@@ -2545,6 +2563,8 @@ class MemoryAppServerOwner {
     readonly bindWorkspace?: string | null
     readonly echoSteerInFinal?: boolean
     readonly holdServerReplyWrite?: boolean
+    readonly stallTitleTurn?: boolean
+    readonly turnFailure?: 'usageLimitExceeded'
   } = {}) {
     const pause = this.stdout.pause.bind(this.stdout)
     const resume = this.stdout.resume.bind(this.stdout)
@@ -2568,6 +2588,8 @@ class MemoryAppServerOwner {
       bindWorkspace: options.bindWorkspace ?? null,
       echoSteerInFinal: options.echoSteerInFinal ?? false,
       holdServerReplyWrite: options.holdServerReplyWrite ?? false,
+      stallTitleTurn: options.stallTitleTurn ?? false,
+      turnFailure: options.turnFailure ?? null,
     }
     this.exit = new Promise(resolve => { this.#resolveExit = resolve })
     this.stdin = new Writable({
@@ -2712,6 +2734,27 @@ class MemoryAppServerOwner {
       this.#send({id: message.id, result: this.#options.inventory?.() ?? {data: [], nextCursor: null}})
       return
     }
+    if (message.method === 'thread/name/set') {
+      this.#threadName = String(message.params?.name)
+      this.#send({id: message.id, result: {}})
+      return
+    }
+    if (message.method === 'thread/read') {
+      this.#send({id: message.id, result: {thread: {id: this.#options.threadId, name: this.#threadName}}})
+      return
+    }
+    if (message.method === 'thread/unsubscribe') { this.#send({id: message.id, result: {}}); return }
+    if (message.method === 'thread/start' && message.params?.ephemeral === true && this.#options.persistent) {
+      this.#send({id: message.id, result: {modelProvider: 'nova_api_key', thread: {id: 'title-only-thread', modelProvider: 'nova_api_key'}}})
+      return
+    }
+    if (message.method === 'turn/start' && message.params?.threadId === 'title-only-thread') {
+      this.#send({id: message.id, result: {turn: {id: 'title-turn'}}})
+      if (this.#options.stallTitleTurn) return
+      this.#send({method: 'item/completed', params: {threadId: 'title-only-thread', turnId: 'title-turn', item: {type: 'agentMessage', text: '{"title":"修复登录校验"}'}}})
+      this.#send({method: 'turn/completed', params: {threadId: 'title-only-thread', turn: {id: 'title-turn', status: 'completed', items: []}}})
+      return
+    }
     if (message.method === 'thread/start' || message.method === 'thread/resume') {
       if (message.method === 'thread/resume' && this.#options.rejectResume) {
         this.#send({id: message.id, error: {code: -32001, message: 'resume-private'}})
@@ -2763,6 +2806,22 @@ class MemoryAppServerOwner {
 
   #sendTurnCompletion(requestId: number | undefined): void {
     this.#send({id: requestId, result: {turn: {id: 'turn-1', items: [], status: 'inProgress'}}})
+    if (this.#options.turnFailure !== null) {
+      this.#send({method: 'turn/completed', params: {
+        threadId: this.#options.threadId,
+        turn: {
+          id: 'turn-1',
+          status: 'failed',
+          items: [],
+          error: {
+            message: 'raw quota detail must stay private',
+            codexErrorInfo: this.#options.turnFailure,
+            additionalDetails: 'raw quota detail',
+          },
+        },
+      }})
+      return
+    }
     this.#send({method: 'item/completed', params: {
       threadId: this.#options.threadId, turnId: 'turn-1',
       item: {type: 'agentMessage', text: this.#options.echoSteerInFinal && this.#lastSteer !== null
@@ -2793,6 +2852,8 @@ class MemoryAppServerOwner {
 function effectiveConfig(workspace: string, widened = false, managed?: ManagedCodexMcp): Record<string, unknown> {
   return {
     config: {
+      model_provider: 'nova_api_key',
+      model_providers: {nova_api_key: {base_url: 'https://api.openai.com/v1', env_key: 'NOVA_CODEX_API_KEY', wire_api: 'responses', requires_openai_auth: false}},
       approval_policy: 'never',
       approvals_reviewer: 'user',
       default_permissions: 'nova_audio_agent',
@@ -2823,6 +2884,7 @@ function threadResponse(
   persistent = false,
 ): Record<string, unknown> {
   return {
+    modelProvider: 'nova_api_key',
     approvalPolicy: 'never',
     cwd: workspace,
     sandbox: {},
@@ -2830,6 +2892,7 @@ function threadResponse(
     activePermissionProfile: {id: 'nova_audio_agent'},
     ...(persistent ? {runtimeWorkspaceRoots: [workspace]} : {}),
     thread: {
+      modelProvider: 'nova_api_key',
       id: threadId,
       cwd: workspace,
       ephemeral: !persistent,
@@ -2851,19 +2914,22 @@ function createTransport(
     }
     readonly managedMcp?: ManagedCodexMcp
     readonly persistent?: boolean
+    readonly generateTitles?: boolean
+    readonly preserveHome?: boolean
+    readonly binary?: ReturnType<typeof hostBinaryForTest>
     readonly resumeThreadId?: string
     readonly developerInstructions?: string | null
     readonly prepare?: (input: {readonly apiKey: string | null}) => Promise<never>
     readonly removeEphemeralHome?: () => Promise<void>
     readonly approvalPolicy?: 'never' | 'on-request'
-    readonly approvalController?: CodexApprovalController
+    readonly approvalController?: HostApprovalController
     readonly launchProfile?: CodexLaunchProfile
   } = {},
 ): OwnedCodexAppServerTransport {
   const workspace = process.cwd()
   return new OwnedCodexAppServerTransport({
     config: {
-      binary: hostBinaryForTest(process.execPath),
+      binary: overrides.binary ?? hostBinaryForTest(process.execPath),
       workspace: hostWorkspaceForTest(workspace),
       codexHome: hostCodexHomeForTest(workspace, {ephemeral: !overrides.persistent}),
       apiKey: 'api-key-sentinel',
@@ -2871,6 +2937,8 @@ function createTransport(
       developerInstructions: overrides.developerInstructions ?? null,
       resumeThreadId: overrides.resumeThreadId ?? null,
       persistent: overrides.persistent ?? false,
+      generateTitles: overrides.generateTitles ?? false,
+      preserveHome: overrides.preserveHome ?? false,
       ...(overrides.approvalPolicy === undefined
         ? {}
         : {approvalPolicy: overrides.approvalPolicy}),
@@ -2887,7 +2955,7 @@ function createTransport(
       environment: () => ({
         ...managedMcpEnvironment(overrides.managedMcp),
         PATH: '/safe-path', HOME: '/safe-home', CODEX_HOME: workspace,
-        CODEX_API_KEY: 'api-key-sentinel',
+        NOVA_CODEX_API_KEY: 'api-key-sentinel',
         CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
       }),
       removeEphemeralHome: overrides.removeEphemeralHome ?? (async () => {}),
@@ -3015,4 +3083,184 @@ test('managed credentials never reach preflight probes or bounded final output',
   assert.equal(outcome.code, 'completed')
   assert.equal(JSON.stringify(outcome).includes('dummy-mcp-secret'), false)
   assert.ok(probes.every(config => !Object.hasOwn(config as object, 'managedMcp')))
+})
+
+
+test('owned transport generates a title with an auxiliary thread while preserving the main result and binding', async () => {
+  const owner = new MemoryAppServerOwner([], {persistent: true})
+  const ready: string[] = []
+  const names: string[] = []
+  const transport = createTransport({spawn: async () => owner}, {persistent: true, generateTitles: true})
+  try {
+    const result = await transport.run({workOrder: 'Fix login validation', threadName: 'Temporary title'}, {
+      onThreadReady: id => { ready.push(id) },
+      onThreadNamed: (id, name) => { names.push(`${id}:${name}`) },
+    }, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.classification, 'completed')
+    assert.equal(result.completion?.final_text, 'bounded result')
+    assert.deepEqual(ready, ['thread-1'])
+    assert.deepEqual(names, ['thread-1:修复登录校验'])
+    assert.equal(owner.received.filter(item => item.method === 'thread/name/set').at(-1)?.params.threadId, 'thread-1')
+  } finally { await transport.close() }
+})
+
+
+test('shared home reads configuration before resuming the original thread with explicit roots', async () => {
+  let schemaCalls = 0
+  let preflightCalls = 0
+  const owners: MemoryAppServerOwner[] = []
+  const transport = createTransport({spawn: async () => {
+    const owner = new MemoryAppServerOwner([], {persistent: true, threadId: 'original-thread'})
+    owners.push(owner)
+    return owner
+  }}, {persistent: true, preserveHome: true, resumeThreadId: 'original-thread',
+    preflightRunner: {run: async () => { preflightCalls += 1; return safePreflightReport() }},
+    schemaProbe: {generate: async () => { schemaCalls += 1; return supportedSchemaBundle() }},
+  })
+  try {
+    const result = await transport.run({workOrder: 'Continue original task'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.classification, 'completed')
+    assert.equal(owners.length, 2)
+    assert.equal(schemaCalls, 1)
+    assert.equal(preflightCalls, 1)
+    assert.ok(owners.every(owner => owner.received.some(item => item.method === 'config/read')))
+    assert.equal(owners[0]!.received.some(item => item.method === 'thread/resume' || item.method === 'thread/start'), false)
+    const resumed = owners[1]!.received.find(item => item.method === 'thread/resume')
+    assert.equal(resumed?.params.threadId, 'original-thread')
+    assert.deepEqual(resumed?.params.runtimeWorkspaceRoots, [process.cwd()])
+  } finally { await transport.close() }
+})
+
+
+test('a stalled title thread never delays an already completed turn', async () => {
+  const owner = new MemoryAppServerOwner([], {persistent: true, stallTitleTurn: true})
+  const transport = createTransport({spawn: async () => owner}, {persistent: true, generateTitles: true})
+  try {
+    const started = Date.now()
+    const result = await transport.run({workOrder: 'Fix login validation', threadName: 'Temporary title'}, {}, {
+      expiresAtMs: Date.now() + 30_000,
+    })
+    const elapsed = Date.now() - started
+    assert.equal(result.classification, 'completed')
+    assert.equal(result.completion?.final_text, 'bounded result')
+    // Without a bound the settled turn waits out the title's own 10s deadline.
+    assert.ok(elapsed < 5_000, `settled turn waited ${elapsed}ms for advisory title metadata`)
+  } finally { await transport.close() }
+})
+
+
+test('a binary identity change forbids certificate reuse before the shared-home restart', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'nova-certificate-')))
+  const binary = join(root, 'node-copy')
+  copyFileSync(process.execPath, binary, constants.COPYFILE_FICLONE)
+  chmodSync(binary, 0o700)
+  let spawns = 0
+  const owner = new MemoryAppServerOwner([], {persistent: true})
+  const transport = createTransport({spawn: async () => {
+    spawns += 1
+    appendFileSync(binary, 'identity changed')
+    return owner
+  }}, {binary: hostBinaryForTest(binary), persistent: true, preserveHome: true})
+  try {
+    const result = await transport.run({workOrder: 'must not reach thread start'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.code, 'unsupported_protocol')
+    assert.equal(spawns, 1)
+    assert.equal(owner.received.some(item => item.method === 'thread/start'), false)
+  } finally { await transport.close(); rmSync(root, {recursive: true, force: true}) }
+})
+
+test('shared HOME disabled MCP entries do not prevent a turn, but live or nonempty external entries do', async () => {
+  for (const [runtimeStatus, tools, expected] of [
+    ['disabled', {}, 'completed'],
+    ['connected', {}, 'mcp_tools_not_isolated'],
+    ['disabled', {rogue: {name: 'rogue'}}, 'mcp_tools_not_isolated'],
+  ] as const) {
+    const owner = new MemoryAppServerOwner([], {inventory: () => ({data: [{name: 'external-disabled', runtimeStatus, tools}], nextCursor: null})})
+    const transport = createTransport({spawn: async () => owner})
+    const result = await transport.run({workOrder: 'fixture'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.code, expected)
+    assert.equal(result.turnStartWritten, expected === 'completed')
+    await transport.close()
+  }
+})
+
+
+test('project connection prewarm does not open a thread and resumes only the later binding', async () => {
+  const owners: MemoryAppServerOwner[] = []
+  const transport = createTransport({spawn: async () => {
+    const owner = new MemoryAppServerOwner([], {persistent: true, threadId: 'approved-thread'})
+    owners.push(owner)
+    return owner
+  }}, {persistent: true, preserveHome: true})
+  try {
+    await transport.prewarmConnection({expiresAtMs: Date.now() + 5000})
+    const spawned = owners.length
+    assert.ok(spawned > 0)
+    assert.ok(owners.every(owner => !owner.received.some(item => item.method.startsWith('thread/') || item.method === 'turn/start')))
+    transport.bindProject({workspace: hostWorkspaceForTest(process.cwd()), resumeThreadId: 'approved-thread', approvalController: null})
+    const result = await transport.run({workOrder: 'Continue only the approved task'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.classification, 'completed')
+    assert.equal(owners.length, spawned, 'the warm app-server must be reused')
+    const resumed = owners.at(-1)!.received.find(item => item.method === 'thread/resume')
+    assert.equal(resumed?.params.threadId, 'approved-thread')
+    assert.deepEqual(resumed?.params.runtimeWorkspaceRoots, [process.cwd()])
+    assert.throws(() => transport.bindProject({workspace: hostWorkspaceForTest(process.cwd()), resumeThreadId: null, approvalController: null}))
+  } finally { await transport.close() }
+})
+
+test('an unbound project connection cannot execute and closing it creates no thread', async () => {
+  const owners: MemoryAppServerOwner[] = []
+  const transport = createTransport({spawn: async () => {
+    const owner = new MemoryAppServerOwner([], {persistent: true});owners.push(owner);return owner
+  }}, {persistent: true, preserveHome: true})
+  await transport.prewarmConnection({expiresAtMs: Date.now() + 5000})
+  const result = await transport.run({workOrder: 'must not execute'}, {}, {expiresAtMs: Date.now() + 5000})
+  assert.equal(result.turnStartWritten, false)
+  assert.equal(result.code, 'config_not_isolated')
+  await transport.close()
+  assert.ok(owners.every(owner => !owner.received.some(item => item.method.startsWith('thread/') || item.method === 'turn/start')))
+})
+
+
+test('a dead project prewarm is discarded before the approved thread is opened', async () => {
+  const owners: MemoryAppServerOwner[] = []
+  const transport = createTransport({spawn: async () => {
+    const owner = new MemoryAppServerOwner([], {persistent: true, threadId: 'approved-thread'});owners.push(owner);return owner
+  }}, {persistent: true, preserveHome: true})
+  try {
+    await transport.prewarmConnection({expiresAtMs: Date.now() + 5000})
+    const count = owners.length
+    owners.at(-1)!.abruptExit(0)
+    await new Promise<void>(resolve => { setImmediate(resolve) })
+    transport.bindProject({workspace: hostWorkspaceForTest(process.cwd()), resumeThreadId: 'approved-thread', approvalController: null})
+    const result = await transport.run({workOrder: 'Only approved task'}, {}, {expiresAtMs: Date.now() + 5000})
+    assert.equal(result.classification, 'completed')
+    assert.equal(owners.length, count + 1)
+    assert.ok(owners.slice(0, count).every(owner => !owner.received.some(item => item.method.startsWith('thread/'))))
+  } finally { await transport.close() }
+})
+
+test('a warmed project routes approval to the later work-scoped controller', async () => {
+  const factory = new FakeAppServerOwnerFactory('command-approval')
+  const controller = new HostApprovalController({clock: new RealClock(), idFactory: () => 'warm-approval'})
+  const transport = createTransport(factory, {persistent: true, preserveHome: true,
+    approvalController: controller,
+    launchProfile: resolveCodexLaunchProfile({approvalMode: 'ask', project: true, foregroundBroker: true})})
+  const work = {work_id: 'confirmed-work', project: 'Notes', title: 'Approved task'}
+  try {
+    await transport.prewarmConnection({expiresAtMs: Date.now() + 5000})
+    assert.equal(controller.pending, false)
+    transport.bindProject({workspace: hostWorkspaceForTest(process.cwd()), resumeThreadId: null,
+      approvalController: controller.forWork(work)})
+    const running = transport.run({workOrder: 'Approval fixture'}, {}, {expiresAtMs: Date.now() + 10000})
+    await within(factory.owner!.waitForBarrier('approval_request'), 5000, 'warm approval request')
+    await settleUntil(() => controller.pending, 'warm approval pending')
+    assert.deepEqual(controller.view.work, work)
+    assert.equal(controller.acceptDecision({approvalId: 'warm-approval', decision: 'accept'}), true)
+    assert.equal((await running).classification, 'completed')
+  } finally {
+    await transport.close().catch(() => undefined)
+    await factory.owner?.killTree().catch(() => undefined)
+    await factory.owner?.dispose().catch(() => undefined)
+  }
 })

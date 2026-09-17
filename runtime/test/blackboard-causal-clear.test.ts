@@ -6,11 +6,11 @@ import {join} from 'node:path'
 import {setTimeout as delay} from 'node:timers/promises'
 import {once} from 'node:events'
 import {Worker} from 'node:worker_threads'
-import {CausalRuntime, type ExecutorDispatchContext, type ExecutorHandoff} from '../src/causal-runtime.js'
-import {RealClock} from '../src/clock.js'
-import {MonotonicIdFactory} from '../src/ids.js'
-import {executorManifestSchema} from '../src/ports.js'
-import {wakeReasonSchema} from '../src/slots.js'
+import {CausalRuntime, type ExecutorDispatchContext, type ExecutorHandoff} from '../src/core/causal-runtime.js'
+import {RealClock} from '../src/core/clock.js'
+import {MonotonicIdFactory} from '../src/core/ids.js'
+import {executorManifestSchema} from '../src/core/ports.js'
+import {wakeReasonSchema} from '../src/core/slots.js'
 
 const manifest = executorManifestSchema.parse({
   name: 'worker', display_name: 'worker', policy: {channel: 'worker', priority: 50, wake: 'none', typical_latency: 1, compress_watermark: 40},

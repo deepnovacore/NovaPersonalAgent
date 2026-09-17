@@ -206,7 +206,7 @@
             "trust": "trusted_system",
             "outcome": "ok",
             "match": "lexical",
-            "evidence": "Codex 报告任务完成：status two from codex"
+            "evidence": "任务已完成：status two from codex"
           },
           {
             "ref": "conversation:1",
@@ -222,7 +222,7 @@
       "encodings": [
         {
           "max_chars": 3000,
-          "encoded": "{\"hits\":[{\"channel\":\"search\",\"evidence\":\"搜索结果：status three（example.com）：a search snippet about status\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"search:1\",\"trust\":\"untrusted_external\",\"ts\":1.7},{\"channel\":\"codex\",\"evidence\":\"Codex 报告任务完成：status two from codex\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"codex:1\",\"trust\":\"trusted_system\",\"ts\":1.5},{\"channel\":\"conversation\",\"evidence\":\"status one\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:1\",\"trust\":\"trusted_system\",\"ts\":1.0}],\"omitted\":0,\"raw_scanned\":3,\"scan_truncated\":false,\"scope\":\"any\",\"searched_count\":3,\"state\":\"ok\"}"
+          "encoded": "{\"hits\":[{\"channel\":\"search\",\"evidence\":\"搜索结果：status three（example.com）：a search snippet about status\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"search:1\",\"trust\":\"untrusted_external\",\"ts\":1.7},{\"channel\":\"codex\",\"evidence\":\"任务已完成：status two from codex\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"codex:1\",\"trust\":\"trusted_system\",\"ts\":1.5},{\"channel\":\"conversation\",\"evidence\":\"status one\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:1\",\"trust\":\"trusted_system\",\"ts\":1.0}],\"omitted\":0,\"raw_scanned\":3,\"scan_truncated\":false,\"scope\":\"any\",\"searched_count\":3,\"state\":\"ok\"}"
         }
       ]
     },
@@ -252,7 +252,7 @@
             "trust": "trusted_system",
             "outcome": "ok",
             "match": "lexical",
-            "evidence": "Codex 报告任务完成：codex item 7"
+            "evidence": "任务已完成：codex item 7"
           },
           {
             "ref": "conversation:7",
@@ -270,7 +270,7 @@
             "trust": "trusted_system",
             "outcome": "ok",
             "match": "lexical",
-            "evidence": "Codex 报告任务完成：codex item 6"
+            "evidence": "任务已完成：codex item 6"
           },
           {
             "ref": "conversation:6",
@@ -286,7 +286,7 @@
       "encodings": [
         {
           "max_chars": 3000,
-          "encoded": "{\"hits\":[{\"channel\":\"conversation\",\"evidence\":\"item 8\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:8\",\"trust\":\"trusted_system\",\"ts\":8.0},{\"channel\":\"codex\",\"evidence\":\"Codex 报告任务完成：codex item 7\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"codex:7\",\"trust\":\"trusted_system\",\"ts\":7.5},{\"channel\":\"conversation\",\"evidence\":\"item 7\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:7\",\"trust\":\"trusted_system\",\"ts\":7.0},{\"channel\":\"codex\",\"evidence\":\"Codex 报告任务完成：codex item 6\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"codex:6\",\"trust\":\"trusted_system\",\"ts\":6.5},{\"channel\":\"conversation\",\"evidence\":\"item 6\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:6\",\"trust\":\"trusted_system\",\"ts\":6.0}],\"omitted\":5,\"raw_scanned\":10,\"scan_truncated\":false,\"scope\":\"recent\",\"searched_count\":10,\"state\":\"ok\"}"
+          "encoded": "{\"hits\":[{\"channel\":\"conversation\",\"evidence\":\"item 8\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:8\",\"trust\":\"trusted_system\",\"ts\":8.0},{\"channel\":\"codex\",\"evidence\":\"任务已完成：codex item 7\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"codex:7\",\"trust\":\"trusted_system\",\"ts\":7.5},{\"channel\":\"conversation\",\"evidence\":\"item 7\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:7\",\"trust\":\"trusted_system\",\"ts\":7.0},{\"channel\":\"codex\",\"evidence\":\"任务已完成：codex item 6\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"codex:6\",\"trust\":\"trusted_system\",\"ts\":6.5},{\"channel\":\"conversation\",\"evidence\":\"item 6\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:6\",\"trust\":\"trusted_system\",\"ts\":6.0}],\"omitted\":5,\"raw_scanned\":10,\"scan_truncated\":false,\"scope\":\"recent\",\"searched_count\":10,\"state\":\"ok\"}"
         }
       ]
     },
@@ -307,7 +307,7 @@
             "trust": "trusted_system",
             "outcome": "ok",
             "match": "lexical",
-            "evidence": "Codex 报告任务完成：same score here"
+            "evidence": "任务已完成：same score here"
           },
           {
             "ref": "conversation:1",
@@ -332,7 +332,7 @@
       "encodings": [
         {
           "max_chars": 3000,
-          "encoded": "{\"hits\":[{\"channel\":\"codex\",\"evidence\":\"Codex 报告任务完成：same score here\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"codex:1\",\"trust\":\"trusted_system\",\"ts\":1.0},{\"channel\":\"conversation\",\"evidence\":\"same score here\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:1\",\"trust\":\"trusted_system\",\"ts\":1.0},{\"channel\":\"search\",\"evidence\":\"搜索结果：same score here（example.com）：same score here too\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"search:1\",\"trust\":\"trusted_system\",\"ts\":1.0}],\"omitted\":0,\"raw_scanned\":3,\"scan_truncated\":false,\"scope\":\"any\",\"searched_count\":3,\"state\":\"ok\"}"
+          "encoded": "{\"hits\":[{\"channel\":\"codex\",\"evidence\":\"任务已完成：same score here\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"codex:1\",\"trust\":\"trusted_system\",\"ts\":1.0},{\"channel\":\"conversation\",\"evidence\":\"same score here\",\"match\":\"lexical\",\"outcome\":null,\"ref\":\"conversation:1\",\"trust\":\"trusted_system\",\"ts\":1.0},{\"channel\":\"search\",\"evidence\":\"搜索结果：same score here（example.com）：same score here too\",\"match\":\"lexical\",\"outcome\":\"ok\",\"ref\":\"search:1\",\"trust\":\"trusted_system\",\"ts\":1.0}],\"omitted\":0,\"raw_scanned\":3,\"scan_truncated\":false,\"scope\":\"any\",\"searched_count\":3,\"state\":\"ok\"}"
         }
       ]
     },

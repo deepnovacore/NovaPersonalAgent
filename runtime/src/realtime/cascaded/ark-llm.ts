@@ -1,7 +1,7 @@
 import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
 import {originalImageUrl, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
-import { jsonValueSchema, type JsonValue } from '../../events.js'
-import { codePointLengthLikePython, stripLikePython } from '../../python-text.js'
+import { jsonValueSchema, type JsonValue } from '../../core/events.js'
+import { codePointLengthLikePython, stripLikePython } from '../../text/python-text.js'
 import { MAX_REALTIME_TEXT, type JsonObject } from '../protocol.js'
 import {
   ArkResponsesFailure,
@@ -68,7 +68,7 @@ function inputItem(input: CascadedLlmInput): JsonObject {
   if (input.kind === 'tool_result') {
     return {type: 'function_call_output', call_id: input.call_id, output: JSON.stringify(input.output)}
   }
-  return {role: 'user', content: input.kind === 'user_text' ? (input.image ? [{type: 'input_text', text: input.text}, {type: 'input_image', image_url: originalImageUrl(input.image)}] : input.text) : input.content}
+  return {role: input.kind === 'user_text' || input.kind === 'host_activation' ? 'user' : 'system', content: input.kind === 'user_text' ? (input.image ? [{type: 'input_text', text: input.text}, {type: 'input_image', image_url: originalImageUrl(input.image)}] : input.text) : input.content}
 }
 
 function toolSchema(tool: CascadedLlmTool): JsonObject {

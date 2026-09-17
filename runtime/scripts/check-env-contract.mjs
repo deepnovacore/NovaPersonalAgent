@@ -2,7 +2,7 @@ import {readFile, writeFile} from 'node:fs/promises'
 import {resolve} from 'node:path'
 import {fileURLToPath} from 'node:url'
 
-import {publicEnvironmentContract} from '../dist/src/environment-contract.js'
+import {publicEnvironmentContract} from '../dist/src/config/environment-contract.js'
 
 const mode = process.argv[2]
 if (mode !== '--check' && mode !== '--write') {

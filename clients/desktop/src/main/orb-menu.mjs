@@ -1,6 +1,6 @@
 // The orb menu's MCP rows, kept out of main.mjs because a popped-up native
 // Menu cannot be driven from a test. The input is the runtime capability
-// snapshot main holds (backend-control.mjs's publicRuntimeCapabilityStatus,
+// snapshot main holds (backend-supervisor.mjs's publicRuntimeCapabilityStatus,
 // with main's own state overlay), never anything read from disk here.
 const MCP_PREFIX = /^mcp__/
 const SERVER_STATUS_LABELS = Object.freeze({

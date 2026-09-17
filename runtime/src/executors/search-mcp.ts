@@ -3,8 +3,8 @@ import {Client} from '@modelcontextprotocol/sdk/client/index.js'
 import {StreamableHTTPClientTransport} from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type {Transport} from '@modelcontextprotocol/sdk/shared/transport.js'
 import {ListToolsResultSchema, type CallToolResult, type Tool} from '@modelcontextprotocol/sdk/types.js'
-import {boundedMcpFetch} from '../mcp-client.js'
-import {validateMcpEndpoint, type SearchMcpConfig} from '../capability-registry.js'
+import {boundedMcpFetch} from './mcp-client.js'
+import {validateMcpEndpoint, type SearchMcpConfig} from '../config/capability-registry.js'
 import {TavilyTransportFailure, type SearchTransport} from './search.js'
 
 export class McpSearchTransport implements SearchTransport {

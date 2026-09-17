@@ -3,9 +3,9 @@ import {EventEmitter} from 'node:events'
 import {createServer, type Server, type Socket} from 'node:net'
 import {test} from 'node:test'
 import {WebSocket, type RawData} from 'ws'
-import {buildAssembly} from '../src/assembly.js'
-import {VirtualClock} from '../src/clock.js'
-import {loadSettings, settingsSchema} from '../src/config.js'
+import {buildAssembly} from '../src/composition/assembly.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {loadSettings, settingsSchema} from '../src/config/config.js'
 import {announceReadiness, type DesktopReadiness} from '../src/desktop.js'
 import type {
   CameraCaptureTransport,
@@ -21,25 +21,25 @@ import {
   type DesktopRealtimeOwner,
   type DesktopRealtimeTransportOwner,
   type DesktopOutputCallbacks,
-} from '../src/desktop-service.js'
-import {decodeAudioFrame} from '../src/desktop-wire.js'
-import type {EventRecord} from '../src/events.js'
+} from '../src/desktop/desktop-session.js'
+import {decodeAudioFrame} from '../src/desktop/desktop-wire.js'
+import type {EventRecord} from '../src/core/events.js'
 import type {
   CompleteRequest,
   GatewayCompletion,
   GatewayDelta,
   ModelGateway,
   StreamRequest,
-} from '../src/model-gateway.js'
-import {buildRealtimeAssembly} from '../src/realtime-assembly.js'
-import type {PlaybackCompletion} from '../src/playback.js'
+} from '../src/model/model-gateway.js'
+import {buildRealtimeAssembly} from '../src/composition/realtime-assembly.js'
+import type {PlaybackCompletion} from '../src/realtime/playback.js'
 import type {
   HostContextItem,
   HostResponseIntent,
   RealtimeProvider,
 } from '../src/realtime/protocol.js'
 import {memoryBoardMessage} from '../src/realtime/memory-board.js'
-import {buildProductionRealtimeAssembly} from '../src/production-realtime-assembly.js'
+import {buildProductionRealtimeAssembly} from '../src/composition/cascaded-realtime-assembly.js'
 import {createArkCascadedLlmSession} from '../src/realtime/cascaded/ark-llm.js'
 import {
   QwenSocketClosedError,
@@ -1022,10 +1022,16 @@ function waitDesktopClose(socket: WebSocket, label: string): Promise<number> {
 }
 
 async function authenticateDesktop(socket: WebSocket, label: string): Promise<void> {
-  // No coding executor is configured here, so no executor.state frame follows the ready frame.
-  const initial = receiveFrames(socket, 1, `${label} bootstrap`)
+  // Even without a coding executor, authentication publishes an empty task snapshot.
+  const initial = receiveFrames(socket, 3, `${label} bootstrap`)
   await sendDesktop(socket, JSON.stringify({type: 'hello', token: TOKEN}), `${label} hello`)
-  assert.deepEqual((await initial).map(frame => text(frame)), ['{"type":"desktop.ready"}'])
+  const bootstrap = (await initial).map(frame => JSON.parse(text(frame)) as Record<string, unknown>)
+  assert.equal(bootstrap[1]?.type, 'desktop.capabilities')
+  assert.equal(typeof bootstrap[1]?.input_instance_id, 'string')
+  assert.deepEqual(bootstrap.filter(frame => frame.type !== 'desktop.capabilities'), [
+    {type: 'desktop.ready'},
+    {type: 'executor.tasks', revision: 0, active_project: null, tasks: []},
+  ])
 }
 
 async function assertDesktopControlOutputs(
@@ -1105,7 +1111,7 @@ test('production composition serves compact boards on debug sockets without dist
 
   const requestBoard = async (
     requestId: string,
-    board: 'memory' | 'workspace_graph',
+    board: 'memory',
   ): Promise<Record<string, unknown>> => {
     const debug = await connectDesktop(ready.port, '/debug-board')
     sockets.add(debug)
@@ -1130,24 +1136,6 @@ test('production composition serves compact boards on debug sockets without dist
     itemCount: 13,
     transferred: 12,
   })
-
-  const disabled = await requestBoard('composition-graph-disabled', 'workspace_graph')
-  assert.equal(disabled.availability, 'disabled')
-  Object.defineProperty(composition.realtime, 'workspaceGraph', {value: {
-    degraded: false,
-    publishedSnapshot: Object.freeze({
-      schema_version: 3,
-      publication_revision: 7,
-      degraded: false,
-      logical_workspaces: Object.freeze([]),
-      workspace_instances: Object.freeze([]),
-      relations: Object.freeze([]),
-      aliases: Object.freeze([]),
-    }),
-  }})
-  const readyGraph = await requestBoard('composition-graph-ready', 'workspace_graph')
-  assert.equal(readyGraph.availability, 'ready')
-  assert.equal(readyGraph.publication_revision, 7)
 
   const stillUsable = receiveFrames(voice, 1, 'voice after production debug requests')
   callbacks!.onCaption({role: 'user', text: 'still usable', final: true})
@@ -1232,9 +1220,7 @@ test('authenticated fake-provider loopback uses one service for duplex audio and
   const first = await connectDesktop(announced.port)
   opened.add(first)
   try {
-    const initial = receiveFrames(first, 1, 'desktop ready and current state')
-    await sendDesktop(first, JSON.stringify({type: 'hello', token: TOKEN}), 'desktop hello')
-    assert.deepEqual((await initial).map(frame => text(frame)), ['{"type":"desktop.ready"}'])
+    await authenticateDesktop(first, 'desktop ready and current state')
 
     await sendDesktop(first, new Uint8Array([1, 2, 3, 4]), 'desktop PCM')
     await sendDesktop(first, JSON.stringify({
@@ -1277,9 +1263,7 @@ test('authenticated fake-provider loopback uses one service for duplex audio and
   const second = await connectDesktop(announced.port)
   opened.add(second)
   try {
-    const current = receiveFrames(second, 1, 'reconnected desktop current state')
-    await sendDesktop(second, JSON.stringify({type: 'hello', token: TOKEN}), 'reconnect hello')
-    assert.deepEqual((await current).map(frame => text(frame)), ['{"type":"desktop.ready"}'])
+    await authenticateDesktop(second, 'reconnected desktop current state')
     assert.equal(provider.connectCalls, 1)
   } finally {
     await closeDesktop(second)

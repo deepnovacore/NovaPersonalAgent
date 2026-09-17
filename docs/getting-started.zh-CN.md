@@ -113,7 +113,7 @@ node runtime/dist/src/cli.js scorecard fixture check
 `integrated` 和 `cascaded` 是顶层管线形态。默认是集成 Qwen：使用
 `qwen-audio-3.0-realtime-plus`、`longanqian` 音色和 `DASHSCOPE_API_KEY`，没有 ASR、LLM 或 TTS
 子节点控件。级联模式显示端点检测、ASR、LLM 和 TTS；默认链路是
-火山 ASR -> Qwen `qwen-flash` -> 火山 TTS。Ark 是显式的级联 LLM 选择，不是另一种集成 provider：
+火山 ASR -> Qwen `qwen-plus` -> 火山 TTS。Ark 是显式的级联 LLM 选择，不是另一种集成 provider：
 
 ```bash
 NOVA_AUDIO_AGENT_PIPELINE_MODE=cascaded
@@ -153,51 +153,19 @@ DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
 
 级联管线的可选真实验证：`npm run smoke:cascaded --workspace @nova-audio-agent/runtime`。需要相应 provider 凭据；宿主控制 response admission 和请求归属，模型 response origin 不是授权。真人验收仍待完成。
 
-## Workspace 记忆图谱与 MyContext provider
-
-Node runtime 的 opt-in workspace 记忆图谱通过以下变量配置：
-
-```bash
-NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED=true
-NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH=~/.nova-audio-agent/workspace-graph.sqlite
-
-# 可选；必须指向另行提供的 Nova 兼容的只读 adapter base URL。
-NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL=http://127.0.0.1:PORT/base
-```
-
-图谱根据 Nova 已确认的生命周期维护 workspace 身份，并把相邻、已提交的 A→B 转换记录成弱
-`discussed_with` 元数据——这只是有界的地图线索，不是从模型或 work-order 自由文本推导的结论。
-Nova 不读取任一 workspace，关系低于主动建议阈值，90 天未刷新后转为 stale。已提交的切换会立即
-撤销旧图谱 scope，并保留已接收的 A→B→C 顺序；无法提交的事件会打断相邻关系，不能跨缺口连边。
-所有持久图谱时间统一使用 Unix 秒。Nova 不会复制仓库内的工程指令，也不会自动检查另一个
-workspace。
-
-可选的 MyContext provider 只能在同一个权威当前 workspace 中、为显式证据召回而被请求，例如用户
-追问“为什么”或要求查看来源。它不参与启动、workspace 打开/切换、默认召回、Context Header、
-Recall Pack、主动建议置信度、工具路由或任何 action。返回文本留在本地，只读且带来源标签，同时
-被视为不受信任、不持久化且不主动；它不能修改 Nova 图谱、workspace 身份、任务状态或另一个
-workspace。provider 故障只返回可见的降级空结果，不阻塞普通语音或项目工作。
-
-该 URL 必须提供 Nova `nova_workspace_evidence` schema version 1 的严格能力握手和查询契约；
-上游 MyContext 原始 `/capabilities` v2 不被接受，因为它不能证明 Nova 所要求的精确 workspace
-scope。Nova 不提供 adapter 可执行文件，也不会根据 `/ask` 结果猜测兼容——只安装 MyContext 不会
-启用 enrichment。这项集成只是 HTTP client 边界，不复制或捆绑 MyContext 代码及运行时；上游
-MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何上游 MyContext 代码或运行时之前，
-必须另行完成法律与分发审查。
-
 ## 公共环境变量参考
 
-下表由 `runtime/src/environment-contract.ts` 生成。主机私有握手变量和已退役集成变量不会进入
-表格。兼容提示：`HA_*` 与 `AUTOGLM_*` 已退役，不要在 Node 配置中继续填写其凭据或地址。
+下表由 `runtime/src/config/environment-contract.ts` 生成。主机私有握手变量不会进入表格。
 
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | 变量 | 所属 | 必需条件 | 默认 | 说明 |
 |---|---|---|---|---|
+| `NOVA_AUDIO_AGENT_MEMORY_LEDGER_PATH` | `core` | 否 | ~/.nova-audio-agent/workspace-graph.sqlite | 统一记忆账本 SQLite 路径，兼容 v0.3 已有存储位置。 |
 | `NOVA_AUDIO_AGENT_MODEL_BASE_URL` | `core` | 否 | DashScope compatible endpoint | FastBrain 兼容 API 地址。 |
 | `NOVA_AUDIO_AGENT_MODEL_API_KEY` | `core` | 否 | 无 | 可选的通用辅助模型 API 凭据覆盖。 |
 | `NOVA_AUDIO_AGENT_FAST_MODEL` | `core` | 否 | qwen3-vl-plus | FastBrain 模型。 |
 | `NOVA_AUDIO_AGENT_WATCH_MODEL` | `core` | 否 | fast model | Watch 模型覆盖。 |
-| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | 否 | qwen-flash | Surrogate 模型。 |
+| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | 否 | qwen-plus | Surrogate 模型。 |
 | `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | 否 | qwen-flash | 记忆压缩模型。 |
 | `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | 否 | integrated | 产品管线形态：集成或级联。 |
 | `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | 否 | false | 为已确认支持图片的级联模型附加默认摄像头画面。 |
@@ -206,7 +174,7 @@ MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何�
 | `NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER` | `core` | 否 | qwen | 集成实时提供方。 |
 | `NOVA_AUDIO_AGENT_CASCADE_ENDPOINTING_PROVIDER` | `core` | 否 | auto | 级联端点检测提供方。 |
 | `NOVA_AUDIO_AGENT_CASCADE_ASR_PROVIDER` | `core` | 否 | volcengine | 级联 ASR 提供方。 |
-| `NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER` | `core` | 否 | qwen | 级联 LLM 提供方。 |
+| `NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER` | `core` | 否 | deepseek | 级联 LLM 提供方。 |
 | `NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL` | `core` | 否 | provider default | 级联 LLM 模型覆盖。 |
 | `NOVA_AUDIO_AGENT_CASCADE_TTS_PROVIDER` | `core` | 否 | volcengine | 级联 TTS 提供方。 |
 | `NOVA_AUDIO_AGENT_EXECUTOR` | `core` | 否 | 无 | 可选的单执行器选择器；未设置时不选择执行器。 |
@@ -243,6 +211,7 @@ MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何�
 | `NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT` | `qwen` | 否 | false | 允许受控 Guard 重连。 |
 | `NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY` | `qwen` | 否 | none | Guard 历史恢复模式。 |
 | `NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS` | `qwen` | 否 | 4 | Guard 历史对话对数。 |
+| `DEEPSEEK_API_KEY` | `deepseek` | 选择该能力时 | 无 | DeepSeek 官方级联 LLM 凭据。 |
 | `ARK_API_KEY` | `ark` | 选择该能力时 | 无 | 方舟级联 LLM 凭据。 |
 | `DOUBAO_ASR_API_KEY` | `volcengine` | 否 | Doubao big-model key | 火山 ASR 凭据覆盖。 |
 | `DOUBAO_BIGMODEL_API_KEY` | `volcengine` | 选择该能力时 | 无 | 火山 TTS 及 ASR 回退凭据。 |
@@ -267,9 +236,6 @@ MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何�
 | `NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT` | `codex` | 否 | ~/.nova-audio-agent/workspaces | 托管项目根目录。 |
 | `NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT` | `codex` | 否 | ~/.nova-audio-agent | 项目状态根目录。 |
 | `NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL` | `codex` | 否 | 30 | Codex 进度间隔秒数。 |
-| `NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED` | `core` | 否 | false | 启用本地只读工作区记忆图谱。 |
-| `NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH` | `core` | 否 | ~/.nova-audio-agent/workspace-graph.sqlite | 工作区记忆图谱数据库路径。 |
-| `NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL` | `core` | 否 | 无 | 可选的仅限本机回环、Nova 兼容的只读 MyContext adapter base URL。 |
 | `TAVILY_API_KEY` | `search` | 选择该能力时 | 无 | Tavily 搜索凭据。 |
 | `NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE` | `camera` | 否 | 无 | 桌面确定性视频输入的绝对路径。 |
 | `NOVA_AUDIO_AGENT_REALTIME_TELEMETRY` | `telemetry` | 否 | ~/.nova-audio-agent/realtime-telemetry.jsonl | 源码运行时遥测输出路径；设置为空值可禁用。 |
@@ -278,8 +244,6 @@ MyContext 采用 Elastic License 2.0，复用、捆绑或随产品交付任何�
 <!-- END GENERATED ENV CONTRACT -->
 
 接入宿主管理的共享记忆服务时，设置 `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`，并显式提供 `NOVA_AUDIO_AGENT_MEMORY_URL` 与宿主签发的 `NOVA_AUDIO_AGENT_MEMORY_TOKEN`。地址仅支持 HTTPS 或数字回环 HTTP，不接受路径、查询参数、内嵌凭据和重定向。身份由令牌绑定；`MEMORY_PATH` 和 `MEMORY_USER_ID` 仅用于本地 VoiceMem。偏好缓存在打开及成功记住、召回、删除后刷新。此客户端不负责部署服务，也不向模型开放身份选择。
-
-查询当前工作状态及生成周报时，必须使用工作区账本工具读取最新有效记录。个人召回保留历史证据，也可能包含用户此前的原话；它不能替代账本，更不能在账本数据不可用时充当权威回退。
 
 ### 能力注册表与可选 MCP 搜索
 
@@ -309,13 +273,13 @@ Windows 和真人语音验收仍需独立完成。
 
 ### 记忆引擎与连接方式
 
-本地模式设置 `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local`，使用现有 Node Worker 和 SDK；此时 `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` 可省略。共享服务设置 `MEMORY_CONNECTION=remote`，并提供地址与身份绑定令牌。远程模式不能设置 `MEMORY_PROVIDER`，引擎由服务端决定。远程不可用时明确返回不可用，不创建另一份本地公司记忆。
+本地模式设置 `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local`，使用现有 Node Worker 和 SDK；此时 `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` 可省略。共享服务设置 `MEMORY_CONNECTION=remote`，并提供地址与身份绑定令牌。远程模式不能设置 `MEMORY_PROVIDER`，引擎由服务端决定。远程不可用时明确返回不可用，不创建本地回退数据库。
 
 仅支持 `MEMORY_CONNECTION` 和本地 `MEMORY_PROVIDER`。旧 `MEMORY_BACKEND` 已移除，填写时会明确报错。单独填写 provider 不会自动启用记忆。
 
 运行时继续依赖 `PersonalMemoryResource`，通过可选的 `remember`、`forget`、缓存式 `responseAdaptation` 表达能力。适配器只有在满足接口保证时才能提供对应方法：`stored` 表示已经可靠保存原始记录，不代表仅接受请求，也不代表已完成抽取。证据 ID 必须有真实来源，不比较不同引擎的相关性分数。当前 HTTP 连接器要求服务满足 v1 的 preferences、remember、recall、forget 契约，不能直接指向任意 mem0 地址。原生 mem0 适配器保留在源集成分支，等待独立打包契约。只读实现可通过现有 assembly factory 注入，不暴露写入能力。
 
-公司渠道共用一份远程记忆，客户端偏好缓存只是可重建的投影。已存在的工作记录仍是周报修订状态的权威来源；历史记忆不能保证另一段旧话语中的同义陈述也被撤回。
+客户端偏好缓存只是可重建的投影，不是另一份可写的记忆存储。
 
 升级 SDK 前，对已构建或解包的候选 SDK 执行：
 

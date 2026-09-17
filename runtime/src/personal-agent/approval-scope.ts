@@ -1,4 +1,4 @@
-import type {ApprovalController,ApprovalView} from '../approval-port.js'
+import type {ApprovalController,ApprovalView} from '../core/approval-port.js'
 const empty:ApprovalView={pending_approval:false,pending_approval_busy:false,kind:null,local_detail:null,operation_summary:null,expires_at:null,work:null,queued:0}
 /** Scope every read and mutation, including implicit hold/invalidate operations. */
 export function scopeApprovalController(broker:ApprovalController,owns:(view:ApprovalView)=>boolean):ApprovalController {

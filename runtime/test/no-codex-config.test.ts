@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import {loadSettings} from '../src/config.js'
+import {loadSettings} from '../src/config/config.js'
 
 test('sim-only settings ignore codex env vars instead of failing parse', () => {
   assert.doesNotThrow(() => loadSettings({

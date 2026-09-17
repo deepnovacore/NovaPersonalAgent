@@ -1,3 +1,4 @@
+import {createPhonePanel} from '../src/renderer/phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from '../src/renderer/frontend-usage.mjs'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
@@ -70,7 +71,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createKnowledgePanel: () => ({render() {}}),
@@ -79,7 +80,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
       createElement: () => ({children: [], append(...items) {this.children.push(...items)}}), addEventListener() {},
     },
     window: {novaAudioAgentDesktop: {settings: {
-      get: async () => initialView, onChanged: listener => { push = listener }, ...apiOverrides,
+      phoneAction: async () => ({state: 'idle'}), get: async () => initialView, onChanged: listener => { push = listener }, ...apiOverrides,
     }}},
   })
   await new Promise(resolve => setImmediate(resolve))
@@ -122,7 +123,7 @@ test('ordinary applied views and local edits do not introduce a recovery complet
   assert.equal(panel.node('#restart-notice').hidden, true)
   panel.push(applied)
   panel.node('#integratedModel').value = 'draft-model'
-  panel.node('#integratedModel').listeners.input()
+  panel.node('#integratedModel').listeners.change()
   assert.equal(panel.node('#restart-notice').hidden, true)
 })
 
@@ -132,14 +133,14 @@ test('rendering a confirmed applied view preserves an unrelated pending restart 
       settingsApplyStatus: 'applied', settingsRecoveryAvailable: false}),
   })
   panel.node('#integratedModel').value = 'saved-model'
-  panel.node('#integratedModel').listeners.input()
+  panel.node('#integratedModel').listeners.change()
   panel.click('#settings-save')
   await new Promise(resolve => setImmediate(resolve))
   // No disconnected transition was observed, so the controller still owns a
   // pending restart notice even though its last confirmed reply says applied.
   assert.equal(panel.node('#restart-notice').dataset.state, 'restarting')
   panel.node('#integratedModel').value = 'new-draft-model'
-  panel.node('#integratedModel').listeners.input()
+  panel.node('#integratedModel').listeners.change()
   assert.equal(panel.node('#restart-notice').dataset.state, 'restarting')
 })
 
@@ -514,13 +515,13 @@ test('presence booleans stay public while hostile presence accessors are never i
   })
 })
 
-test('the settings page ships the same locked-down CSP as the memory board', () => {
+test('settings allows only inline QR images while keeping network and scripts locked down', () => {
   const board = /* the panel must not loosen anything the board already forbids */ [
     "default-src 'self'",
     "script-src 'self'",
     "style-src 'self'",
     "connect-src 'none'",
-    "img-src 'none'",
+    "img-src data:",
     "media-src 'none'",
     "object-src 'none'",
     "base-uri 'none'",
@@ -533,19 +534,11 @@ test('the settings page ships the same locked-down CSP as the memory board', () 
   assert.match(html, /<html lang="zh-CN">/)
 })
 
-test('the palette control offers both orb palettes with a live swatch', () => {
-  assert.match(html, /<input type="radio" name="palette" value="ember"/)
-  assert.match(html, /<input type="radio" name="palette" value="graphite"/)
-  assert.match(html, /暖焰/)
-  assert.match(html, /月光/)
-  assert.match(html, /class="swatch swatch-ember"/)
-  assert.match(html, /class="swatch swatch-graphite"/)
-  // The swatches preview the real orb colours rather than inventing new ones.
-  assert.match(css, /#FFB454/i)
-  assert.match(css, /#C7CED8/i)
+test('appearance controls are absent from settings', () => {
+  assert.doesNotMatch(html, /id="appearance-section"|name="palette"/)
 })
 
-test('the proactivity control offers three tiers explained in push-and-pull terms', () => {
+test('the proactivity control offers three tiers with concise descriptions', () => {
   for (const value of ['conservative', 'balanced', 'eager']) {
     assert.match(html, new RegExp(`<input type="radio" name="proactivity" value="${value}"`))
   }
@@ -553,12 +546,12 @@ test('the proactivity control offers three tiers explained in push-and-pull term
   assert.match(html, /均衡/)
   assert.match(html, /积极/)
   const notes = [...html.matchAll(/<span class="option-note">([^<]+)<\/span>/g)].map(m => m[1])
-  const proactivityNotes = notes.filter(note => /推|拉/.test(note))
-  assert.equal(proactivityNotes.length, 3, 'each tier is explained with push-and-pull wording')
+  const proactivityNotes = notes.filter(note => ['优先等待你询问', '仅播报重要进展', '主动播报进展与提醒'].includes(note))
+  assert.equal(proactivityNotes.length, 3, 'each tier has a concise description')
 })
 
 test('common choices use compact segmented groups without losing radio semantics', () => {
-  for (const id of ['palette', 'proactivity', 'pipeline-mode']) {
+  for (const id of ['proactivity', 'pipeline-mode']) {
     assert.match(html, new RegExp(`<fieldset id="${id}" class="[^"]*segmented[^"]*"`))
   }
   assert.match(css, /\.segmented\s*\{/)
@@ -566,11 +559,11 @@ test('common choices use compact segmented groups without losing radio semantics
 })
 
 test('the heartbeat slider and model fields carry Main-compatible bounds', () => {
-  assert.match(html, /Coding 执行器播报间隔/)
+  assert.match(html, /编程执行器播报间隔/)
   assert.match(html, /<input type="range" id="heartbeat" min="15" max="120" step="1"/)
   assert.match(html, /Qwen 实时模型/)
-  assert.match(html, /<input type="text" id="integratedModel" maxlength="64"/)
-  assert.match(html, /<input type="text" id="cascadedLlmModel" maxlength="64"/)
+  assert.match(html, /<select id="integratedModel"/)
+  assert.match(html, /<input type="text" id="cascadedLlmModel"[^>]*maxlength="64"/)
 })
 
 test('both voice fields offer presets while keeping a bounded custom id path', () => {
@@ -596,6 +589,7 @@ test('every API key is a password field with a badge, hint, and clear button', (
     'dashscopeApiKey',
     'tavilyApiKey',
     'arkApiKey',
+    'deepseekApiKey',
     'doubaoBigmodelApiKey',
   ]) {
     assert.match(html, new RegExp(`<input type="password" id="${key}"[^>]*placeholder="输入新密钥；留空保持不变"`))
@@ -608,7 +602,7 @@ test('every API key is a password field with a badge, hint, and clear button', (
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
   assert.match(html, /火山语音/)
-  assert.equal((html.match(/type="password"/g) || []).length, 4)
+  assert.equal((html.match(/type="password"/g) || []).length, 5)
 })
 
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {
@@ -625,13 +619,14 @@ test('the compact theme preserves motion contrast and forced-color accessibility
   assert.match(css, /@media \(forced-colors: active\)/)
 })
 
-test('pipeline selection shows the integrated path or the cascaded nodes', () => {
+test('pipeline selection shows selectable stages and relative cost guidance', () => {
+  assert.doesNotMatch(html, /id="cascadedEndpointingProvider"/)
+  assert.match(html, /相对集成式管线[\s\S]*<strong class="cost-saving">70%<\/strong>/)
   assert.match(html, /<input type="radio" name="pipelineMode" value="integrated">/)
   assert.match(html, /<input type="radio" name="pipelineMode" value="cascaded">/)
   assert.match(html, /<section id="integrated-pipeline">/)
   assert.match(html, /<section id="cascaded-pipeline" hidden>/)
   for (const id of [
-    'cascadedEndpointingProvider',
     'cascadedAsrProvider',
     'cascadedLlmProvider',
     'cascadedLlmModel',
@@ -715,7 +710,7 @@ test('Codex and Projects is the final collapsed settings disclosure', () => {
   assert.ok(disclosure, 'Codex and Projects closes the settings content')
   assert.doesNotMatch(disclosure, /<details id="codex-projects"[^>]*\sopen(?:\s|>)/)
   assert.match(disclosure, /<div id="codex-manual-settings"[^>]*hidden>/)
-  assert.match(disclosure, /Coding 执行器与工作区/)
+  assert.match(disclosure, /编程/)
 })
 
 test('the panel exposes packaged Codex, Projects, and model endpoint configuration', () => {
@@ -741,7 +736,7 @@ test('the panel exposes packaged Codex, Projects, and model endpoint configurati
 })
 
 test('workspace actions use refresh wording and omit managed terminology from UI copy', () => {
-  assert.match(html, /id="codex-rescan">重新检测<\/button>/u)
+  assert.match(html, /id="codex-rescan"[^>]*aria-label="重新检测 Codex"/u)
   assert.match(html, />打开当前工作区<\/button>/u)
   assert.match(html, />清空当前工作区<\/button>/u)
   assert.match(html, />清空全部工作区<\/button>/u)
@@ -792,8 +787,6 @@ test('the keyring warning is driven by the flag main reports', () => {
 
 test('all editable settings stage until the single save action', () => {
   assert.match(script, /addEventListener\('change'/)
-  assert.match(script, /input\[name="palette"\]/)
-  assert.match(script, /\(\{palette: input\.value\}\)/)
   assert.match(html, /id="settings-save"[^>]*>保存<\/button>/)
   assert.doesNotMatch(script, /saveText\(|controller\.push\(|save-secrets/)
   assert.match(script, /button\.clear/)
@@ -900,7 +893,7 @@ test('one save names any rejected secret by its panel label', () => {
   // Each exact queued request retains its own rejection list. The renderer
   // names only keys this save submitted, so a coalesced neighbour cannot make
   // a different field's error appear in its status line.
-  assert.match(script, /if \(result\.rejectedSecrets\.length\) \{/)
+  assert.match(script, /if \(result\.rejectedSecrets && result\.rejectedSecrets\.length\) \{/)
   assert.match(
     script,
     /statusLabel\.textContent = `部分密钥未保存\(含非法字符\): \$\{labels\.join\('、'\)\}`/,
@@ -938,8 +931,8 @@ test('the Orb receives one committed palette notification only inside the save t
     /'nova:settings:changed', orbSettings\(currentSettings\)/g,
   ) ?? []
   assert.equal(notifications.length, 1)
-  const handler = mainScript.slice(mainScript.indexOf("ipcMain.handle('nova:settings:set'"))
-  const body = handler.slice(0, handler.indexOf('\n  })'))
+  const handler = mainScript.slice(mainScript.indexOf('async function applyDesktopSettings'))
+  const body = handler.slice(0, handler.indexOf('\n}'))
   assert.match(body, /publishCommitted: publishCommittedSettings/)
   assert.ok(body.indexOf('write: async value') < body.indexOf('publishCommitted:'))
 })
@@ -1023,7 +1016,7 @@ test('every settings block belongs to exactly one sidebar category', () => {
   // table would be hidden permanently by applyCategory.
   const blocks = [...html.matchAll(/<(?:section|details) (?:class="[^"]*" )?id="([^"]+)"/g)]
     .map(match => match[1])
-    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown'].includes(id))
+    .filter(id => !['integrated-pipeline', 'cascaded-pipeline', 'usage-breakdown', 'phone-advanced'].includes(id))
   for (const id of blocks) assert.ok(sections.includes(id), `${id} is missing from a category`)
 })
 
@@ -1042,7 +1035,7 @@ test('the sidebar renders one button per category with the first current', () =>
 
 test('sidebar navigation cycles vertically and passes other keys through', () => {
   const {categoryTabForKey} = settingsCategories
-  assert.equal(categoryTabForKey('general', 'ArrowDown'), 'pipeline')
+  assert.equal(categoryTabForKey('general', 'ArrowDown'), 'usage')
   assert.equal(categoryTabForKey('general', 'ArrowUp'), 'codex', 'wraps backwards')
   assert.equal(categoryTabForKey('codex', 'ArrowDown'), 'general', 'wraps forwards')
   assert.equal(categoryTabForKey('secrets', 'Home'), 'general')
@@ -1267,6 +1260,7 @@ test('conversation vision is unavailable for audio or unknown models and never o
   const panel = await mountSettingsPanel(publicView(base))
   assert.equal(panel.node('#conversation-vision-enabled').disabled,true)
   assert.equal(panel.node('#conversation-vision-enabled').checked,false)
+  assert.equal(panel.node('#conversation-vision-status').textContent, '')
   panel.push(publicView({...base,pipelineMode:'cascaded',cascadedLlmModels:{qwen:'qwen3-vl-plus'}}))
   assert.equal(panel.node('#conversation-vision-enabled').disabled,false)
   assert.equal(panel.node('#conversation-vision-enabled').checked,true)
@@ -1274,6 +1268,20 @@ test('conversation vision is unavailable for audio or unknown models and never o
   assert.equal(panel.node('#conversation-vision-enabled').disabled,true)
   assert.doesNotMatch(html,/id="conversation-camera"/u)
   assert.doesNotMatch(await readFile(new URL('../src/renderer/capabilities-editor.mjs',import.meta.url),'utf8'),/mcp__nova_camera/u)
+})
+
+test('monitor model presets require the matching saved API key and preserve unavailable selections', async () => {
+  const base = {visionModels: {qwen: ['qwen3-vl-plus', 'qwen3-vl-flash'], ark: ['doubao-seed-2-0-pro-260215']}}
+  const panel = await mountSettingsPanel(publicView(base))
+  const select = panel.node('#watch-model')
+  assert.equal(select.disabled, true)
+  panel.push(publicView({...base, secretsPresent: {dashscopeApiKey: true}}))
+  assert.equal(select.disabled, false)
+  assert.deepEqual(select.children.filter(row => row.value).map(row => row.value), ['qwen3-vl-plus', 'qwen3-vl-flash'])
+  panel.push(publicView({...base, watchModel: 'qwen3-vl-plus', secretsPresent: {arkApiKey: true}}))
+  assert.equal(select.value, 'qwen3-vl-plus')
+  assert.equal(select.children.find(row => row.value === 'qwen3-vl-plus').disabled, true)
+  assert.ok(select.children.some(row => row.value === 'doubao-seed-2-0-pro-260215' && !row.disabled))
 })
 
 test('empty usage has quiet card values, one hint, and no empty details disclosure', async () => {
@@ -1284,6 +1292,7 @@ test('empty usage has quiet card values, one hint, and no empty details disclosu
   assert.equal(panel.node('#usage-breakdown').hidden,true)
   panel.push(publicView({frontendUsage:{requests:1,pricedReports:1,costCny:0.01,rows:[],history:{requests:1,pricedReports:1,costCny:0.01,rows:[]}}}))
   assert.equal(panel.node('#usage-breakdown').hidden,false)
+  assert.equal(panel.node('#usage-breakdown').open,true)
   assert.equal(panel.node('#frontend-usage').hidden,true)
   assert.equal(panel.node('#usage-session-cost').textContent,'¥0.0100')
 })
@@ -1300,4 +1309,74 @@ test('memory prerecall switch stages and saves explicit off without hiding on in
   assert.equal(toggle.checked,false)
   assert.match(html,/回答前查找相关记忆/u)
   assert.match(html,/仅逐段语音模式；关闭后仍可按需回忆/u)
+})
+
+test('pairing polling keeps the QR and regenerate button stable while manual refresh shows progress', async t => {
+  t.mock.timers.enable({apis: ['setInterval']})
+  const ready = {state: 'ready', image: 'data:image/png;base64,qr', devices: []}
+  let pending
+  const panel = await mountSettingsPanel(publicView(), {
+    phoneAction: async () => pending ? pending.promise : ready,
+  })
+  await panel.click('#category-phone')
+  await new Promise(resolve => setImmediate(resolve))
+  const button = panel.node('#phone-primary'), qr = panel.node('#phone-qr')
+  let imageWrites = 0, source = qr.src
+  qr.attributes.src = source
+  Object.defineProperty(qr, 'src', {get: () => source, set: value => {imageWrites++; source = value; qr.attributes.src = value}})
+  pending = deferred()
+  t.mock.timers.tick(3000)
+  assert.equal(button.textContent, '重新生成二维码')
+  assert.equal(button.disabled, false)
+  pending.resolve(ready)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(imageWrites, 0)
+  pending = deferred()
+  await panel.click('#phone-primary')
+  assert.equal(button.disabled, true)
+  assert.equal(button.textContent, '正在准备…')
+  pending.resolve({...ready, image: 'data:image/png;base64,new'})
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(qr.src, 'data:image/png;base64,new')
+  assert.equal(button.disabled, false)
+  pending = deferred()
+  t.mock.timers.tick(3000)
+  pending.resolve({state: 'paired', devices: []})
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(panel.node('#phone-title').textContent, 'iPhone 已配对')
+  assert.equal(qr.hidden, true)
+  await panel.click('#category-general')
+})
+
+test('phone settings stage together and open pairing only after persistence succeeds', async () => {
+  let opened = 0
+  let savedPatch
+  const panel = await mountSettingsPanel(publicView({phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: ''}), {
+    set: async ({settingsPatch}) => {
+      savedPatch = settingsPatch
+      return publicView({...settingsPatch})
+    },
+    phoneAction: async action => { if (action === 'enable') opened += 1; return {state: 'idle'} },
+  })
+  for (const [id, value] of [['phone-server-port', '18080'], ['phone-server-token-file', '/tmp/nova/token'], ['phone-server-url', 'wss://host.ts.net']]) {
+    panel.node(`#${id}`).value = value
+    panel.node(`#${id}`).listeners.input()
+  }
+  await panel.click('#category-phone')
+  await new Promise(resolve => setImmediate(resolve))
+  await panel.click('#phone-pairing-open')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(savedPatch.phoneServerPort, 18080)
+  assert.equal(savedPatch.phoneServerTokenFile, '/tmp/nova/token')
+  assert.equal(savedPatch.phoneServerUrl, 'wss://host.ts.net')
+  assert.equal(opened, 1)
+
+  const failed = await mountSettingsPanel(publicView(), {
+    set: async () => { throw new Error('disk unavailable') },
+    phoneAction: async action => { if (action === 'enable') opened += 1; return {state: 'idle'} },
+  })
+  failed.node('#phone-server-port').value = '18080'
+  failed.node('#phone-server-port').listeners.input()
+  await failed.click('#phone-pairing-open')
+  assert.equal(opened, 1)
 })

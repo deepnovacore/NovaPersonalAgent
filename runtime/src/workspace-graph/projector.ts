@@ -2,9 +2,9 @@ import {createHash} from 'node:crypto'
 
 import {z} from 'zod'
 
-import {canonicalJson, compareCodePoints} from '../canonical-json.js'
-import {collapsePythonWhitespace, isWellFormed, stripLikePython} from '../python-text.js'
-import {normalizeNfkcPinned} from '../unicode-normalize.js'
+import {canonicalJson, compareCodePoints} from '../text/canonical-json.js'
+import {collapsePythonWhitespace, isWellFormed, stripLikePython} from '../text/python-text.js'
+import {normalizeNfkcPinned} from '../text/unicode-normalize.js'
 import {
   EvidenceRefSchema,
   LogicalWorkspaceSchema,
@@ -18,7 +18,7 @@ import {
   type RelationCard,
   type WorkspaceInstance,
 } from './models.js'
-import {SensitiveContentPolicy, SensitivePathPolicy} from './sensitivity.js'
+import {SensitiveContentPolicy, SensitivePathPolicy} from '../memory/sensitivity.js'
 
 export type ProjectionOrigin =
   | 'trusted_runtime'

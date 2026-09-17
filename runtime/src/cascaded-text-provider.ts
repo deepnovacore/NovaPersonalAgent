@@ -1,7 +1,7 @@
-import {cascadedProviderRegistries,type CascadedProviderRegistries} from './cascaded-realtime-assembly.js'
-import {requireSelectedCascadedLlmConfig} from './cascaded-realtime-config.js'
-import {capabilitiesFromSettings,type Settings} from './config.js'
-import type {Clock} from './clock.js'
+import {cascadedProviderRegistries,type CascadedProviderRegistries} from './composition/cascaded-realtime-assembly.js'
+import {requireSelectedCascadedLlmConfig} from './config/cascaded-realtime-config.js'
+import {capabilitiesFromSettings,type Settings} from './config/config.js'
+import type {Clock} from './core/clock.js'
 import {CascadedRealtimeAdapter,type CascadedRealtimeAdapterOptions} from './realtime/cascaded/adapter.js'
 import {frontendInstructions} from './realtime/frontend-instructions.js'
 import type {CommittedConversationPair} from './realtime/history.js'
@@ -22,6 +22,6 @@ export function buildCascadedTextProvider(options:{
   const input={config:selected.config,clock:options.clock,ids:{next:options.idFactory},instructions:frontendInstructions({
     search:capabilities.modules.search.enabled,camera:options.captureFrame!==undefined,coding:capabilities.modules.coding.enabled,knowledge:capabilities.modules.knowledge.enabled,
   },options.executorApproval===true),...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!})}
-  const factory=registry.llm[selected.provider](input)
+  const factory=registry.llm[selected.provider === 'deepseek' ? 'qwen' : selected.provider](input)
   return new CascadedRealtimeAdapter({textOnly:true,llm:factory.open(),llmFactory:factory,idFactory:options.idFactory,...(options.prerecall===undefined?{}:{prerecall:options.prerecall}),...(options.captureFrame===undefined?{}:{captureFrame:options.captureFrame}),...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),...(options.history===undefined?{}:{history:options.history})})
 }

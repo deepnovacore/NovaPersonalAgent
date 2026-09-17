@@ -1,5 +1,5 @@
 import {prepareManagedCodexMcp} from '../src/executors/codex/managed-mcp.js'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 import assert from 'node:assert/strict'
 import {
   chmodSync,
@@ -36,18 +36,18 @@ import {CredentialSnapshotter} from '../src/executors/codex/credential-snapshot.
 import {hostCodexHomeForTest} from '../src/executors/codex/process-owner.js'
 import {resolveCodexHostConfig, type CodexHostCatalog} from '../src/executors/codex/host-config.js'
 import {CodexHostConfigurationError} from '../src/executors/codex/host-config.js'
-import {VirtualClock} from '../src/clock.js'
-import {loadSettings} from '../src/config.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {loadSettings} from '../src/config/config.js'
 import type {ProjectCodexAdapter} from '../src/executors/codex/adapter-project.js'
-import type {NativeFileLockAuthority, NativeFileLockResult} from '../src/native-file-lock.js'
-import type {PublicProjectView} from '../src/project-store.js'
+import type {NativeFileLockAuthority, NativeFileLockResult} from '../src/storage/native-file-lock.js'
+import type {PublicProjectView} from '../src/projects/project-store.js'
 import type {
   ProjectFileIdentity,
   ProjectRootFileAuthority,
   ProjectRootFileCreateResult,
   ProjectRootFileLookupResult,
   ProjectRootFileResult,
-} from '../src/project-root-file.js'
+} from '../src/projects/project-root-file.js'
 const PREFLIGHT: SafePreflightReport = Object.freeze({
   version: '0.145.0',
   root_matches: true,
@@ -322,6 +322,7 @@ function projectHostConfig(t: TestContext, workspaceName = 'workspace'): {
     NOVA_AUDIO_AGENT_CODEX_WORKSPACE: workspace,
     NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT: managedRoot,
     NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT: stateRoot,
+    NOVA_AUDIO_AGENT_CODEX_PREWARM: 'false',
   }), {
     canonicalBinaries: [binary],
     canonicalWorkspaces: [workspace],
@@ -332,38 +333,9 @@ function projectHostConfig(t: TestContext, workspaceName = 'workspace'): {
   return {config, stateRoot, managedRoot}
 }
 
-test('ordinary composition keeps the non-realtime Codex adapter', async t => {
-  const config = hostConfig(t)
-  assert.ok(config !== null)
-
-  const managedMcp = prepareManagedCodexMcp(parseCapabilityRegistry({version: 1}))
-  const ordinaryFactory = new RecordingTransportFactory()
-  const ordinary = await createCodexAssemblyResource({
-    config,
-    composition: 'ordinary',
-    managedMcp,
-    transportFactory: ordinaryFactory,
-    clock: new VirtualClock(),
-    idFactory: () => 'ordinary-id',
-  })
-  assert.equal(ordinary.mode, 'ordinary')
-  assert.deepEqual(ordinary.adapter.manifest.ops.map(operation => operation.name), [
-    'run', 'status',
-  ])
-  assert.equal(ordinaryFactory.calls.length, 1)
-  assert.equal(ordinaryFactory.calls[0]?.mode, 'ordinary')
-  assert.equal(ordinaryFactory.calls[0]?.managedMcp, managedMcp)
-  await ordinary.start()
-  assert.equal(ordinaryFactory.transports[0]?.preflights, 1)
-  assert.equal(ordinaryFactory.transports[0]?.prewarms, 0)
-  await ordinary.close()
-  await ordinary.close()
-  assert.equal(ordinaryFactory.transports[0]?.closes, 1)
-
-})
-
 test('owned factory removes a preflight-only ephemeral home after transport close', async t => {
-  const config = hostConfig(t)
+  const {config, stateRoot, managedRoot} = projectHostConfig(t)
+  const projectHost = {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRootFileAuthority([stateRoot, managedRoot])}
   assert.ok(config !== null)
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'nova-codex-factory-home-')))
   const home = join(root, 'ephemeral')
@@ -381,7 +353,8 @@ test('owned factory removes a preflight-only ephemeral home after transport clos
   })
   const resource = await createCodexAssemblyResource({
     config,
-    composition: 'ordinary',
+    composition: 'realtime',
+    projectHost,
     transportFactory: factory,
     clock: new VirtualClock(),
     idFactory: () => 'ephemeral-cleanup-id',
@@ -406,7 +379,8 @@ test('realtime composition fails closed when the packaged project host is unavai
 })
 
 test('configured Codex rejects an unavailable or malformed host transport before adapter registration', async t => {
-  const config = hostConfig(t)
+  const {config, stateRoot, managedRoot} = projectHostConfig(t)
+  const projectHost = {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRootFileAuthority([stateRoot, managedRoot])}
   assert.ok(config !== null)
   let unavailableCreates = 0
   for (const transportFactory of [
@@ -415,7 +389,8 @@ test('configured Codex rejects an unavailable or malformed host transport before
   ]) {
     await assert.rejects(createCodexAssemblyResource({
       config,
-      composition: 'ordinary',
+      composition: 'realtime',
+      projectHost,
       transportFactory,
       clock: new VirtualClock(),
       idFactory: () => 'unavailable-id',
@@ -425,22 +400,6 @@ test('configured Codex rejects an unavailable or malformed host transport before
   assert.equal(unavailableCreates, 0)
 })
 
-test('ordinary composition never upgrades to project mode', async t => {
-  const {config} = projectHostConfig(t)
-  const transportFactory = new RecordingTransportFactory()
-  const resource = await createCodexAssemblyResource({
-    config,
-    composition: 'ordinary',
-    transportFactory,
-    clock: new VirtualClock(),
-    idFactory: () => 'ordinary-project-setting-id',
-  })
-
-  assert.equal(resource.mode, 'ordinary')
-  assert.deepEqual(resource.adapter.manifest.ops.map(operation => operation.name), ['run', 'status'])
-  assert.equal(transportFactory.calls[0]?.mode, 'ordinary')
-  await resource.close()
-})
 
 test('realtime mode always opens one project store and exposes only project tools and public view', async t => {
   const {config, stateRoot, managedRoot} = projectHostConfig(t)
@@ -566,4 +525,50 @@ test('factory exposes a brokered controller for every foreground project transpo
       await resource.close()
     }
   }
+})
+
+
+test('project startup retains a connection-only prewarm without creating a session', async t => {
+  const {config, stateRoot, managedRoot} = projectHostConfig(t)
+  const transport = new RecordingTransport()
+  let warmed = 0
+  const resource = await createCodexAssemblyResource({
+    config: {...config, prewarm: true}, composition: 'realtime', clock: new VirtualClock(), idFactory: () => 'warm-id',
+    transportFactory: {available: true, create: binding => {
+      assert.equal(binding.mode, 'project')
+      assert.equal(binding.preserveHome, true)
+      assert.equal(binding.resumeThreadId, null)
+      return Object.assign(transport, {prewarmConnection: () => { warmed += 1;return Promise.resolve(PREFLIGHT) }})
+    }},
+    projectHost: {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRootFileAuthority([stateRoot, managedRoot])},
+  })
+  try {
+    await resource.start()
+    assert.equal(warmed, 1)
+    assert.equal(transport.prewarms, 0, 'legacy thread-opening prewarm must not be called')
+    assert.equal(transport.closes, 0)
+    const state = JSON.parse(readFileSync(join(stateRoot, 'codex-projects-v1.json'), 'utf8')) as {sessions: object}
+    assert.deepEqual(state.sessions, {})
+  } finally { await resource.close() }
+  assert.equal(transport.closes, 1)
+})
+
+
+test('failed optional project prewarm is closed without failing certified startup', async t => {
+  const {config, stateRoot, managedRoot} = projectHostConfig(t)
+  const transport = new RecordingTransport(),diagnostics: string[] = []
+  const resource = await createCodexAssemblyResource({
+    config: {...config, prewarm: true}, composition: 'realtime', clock: new VirtualClock(), idFactory: () => 'warm-failure',
+    onDiagnostic: code => { diagnostics.push(code) },
+    transportFactory: {available: true, create: () => Object.assign(transport, {
+      prewarmConnection: () => Promise.reject(new Error('test connection failure')),
+    })},
+    projectHost: {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRootFileAuthority([stateRoot, managedRoot])},
+  })
+  try {
+    await resource.start()
+    assert.equal(transport.preflights, 1)
+    assert.equal(transport.closes, 1)
+    assert.ok(diagnostics.includes('project_prewarm_failed'))
+  } finally { await resource.close() }
 })

@@ -2,21 +2,21 @@ import {codexAgentDescriptor, codingAgentControllerFactory} from '../src/executo
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import {ConfigurationError, loadSettings, type Settings} from '../src/config.js'
-import {VirtualClock} from '../src/clock.js'
+import {ConfigurationError, loadSettings, type Settings} from '../src/config/config.js'
+import {VirtualClock} from '../src/core/clock.js'
 import {CODEX_PROJECT_MANIFEST} from '../src/executors/codex/contract.js'
 import type {CodexAssemblyResource} from '../src/executors/codex/factory.js'
-import {ProjectConfirmationController} from '../src/project-confirmation.js'
+import {ProjectConfirmationController} from '../src/projects/project-confirmation.js'
 import {
   buildIntegratedRealtimeAssembly,
   type IntegratedProviderRegistry,
-} from '../src/integrated-realtime-assembly.js'
+} from '../src/composition/cascaded-realtime-assembly.js'
 import {
   buildProductionRealtimeAssembly,
   type BuildProductionRealtimeAssemblyOptions,
-} from '../src/production-realtime-assembly.js'
+} from '../src/composition/cascaded-realtime-assembly.js'
 import {QwenAudioRealtimeAdapter} from '../src/realtime/qwen.js'
-import type {RealtimeAssembly} from '../src/realtime-assembly.js'
+import type {RealtimeAssembly} from '../src/composition/realtime-assembly.js'
 
 type SelectedCodingComposition = Pick<
   BuildProductionRealtimeAssemblyOptions,
@@ -45,8 +45,6 @@ function projectResource(): CodexAssemblyResource {
     activeCommittedWorkspace: () => Promise.resolve(null),
     observeProjectView: () => () => undefined,
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
   } as never
   return {
     adapter, agentDescriptor: codexAgentDescriptor('codex'), agentControllerFactory: codingAgentControllerFactory,
@@ -103,7 +101,7 @@ test('production selector supplies the paired coding factory and descriptor only
     assert.equal(actual, expected)
     assert.equal(typeof (selected?.codingAgentControllerFactory as {readonly create?: unknown} | undefined)?.create, 'function')
     assert.deepEqual(selected?.agentDescriptors, [{
-      name: 'codex', summary: '在已配置的项目工作区里执行编码任务（改代码、修 bug、写测试、重构）',
+      name: 'codex', summary: '管理项目工作区和会话（新建、选择、切换），以及执行编码、运行、验证任务；只切换而不编码也是可提交的操作',
       ownedChannels: ['workspace_coder'],
     }])
   }
@@ -127,7 +125,7 @@ test('production integrated composition registers the default coding controller 
   try {
     assert.deepEqual(realtime.tools.agent_descriptors.find(descriptor => descriptor.name === 'codex'), {
       name: 'codex',
-      summary: '在已配置的项目工作区里执行编码任务（改代码、修 bug、写测试、重构）',
+      summary: '管理项目工作区和会话（新建、选择、切换），以及执行编码、运行、验证任务；只切换而不编码也是可提交的操作',
       ownedChannels: ['codex'],
     })
     assert.equal(realtime.service.agentNameForChannel('codex'), 'codex')
@@ -244,7 +242,7 @@ test('selected branch failures never fail over and invalid modes are credential-
 })
 
 test('registry Coding/Vision gates compose all four controller combinations', async () => {
-  const {parseCapabilityRegistry} = await import('../src/capability-registry.js')
+  const {parseCapabilityRegistry} = await import('../src/config/capability-registry.js')
   for (const coding of [false, true]) {
     for (const camera of [false, true]) {
       const resource = projectResource()

@@ -64,8 +64,8 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
     'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'onChanged',
-    'openCurrentManagedWorkspace', 'openFeishuVerification',
-    'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend',
+    'openCurrentManagedWorkspace', 'openFeishuVerification', 'openPairing',
+    'phoneAction', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend',
     'retryMicrophone', 'set',
   ])
   assert.ok(Object.isFrozen(exposed.settings))
@@ -105,7 +105,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
 test('preload exposes a bounded microphone permission lifecycle', async () => {
   const { exposed, ipcRenderer, invokes, sends } = await loadPreload()
 
-  assert.deepEqual(Object.keys(exposed.microphone).sort(), ['onRetry', 'report', 'requestPermission'])
+  assert.deepEqual(Object.keys(exposed.microphone).sort(), ['onRetry', 'onToggle', 'report', 'requestPermission'])
   await exposed.microphone.requestPermission()
   exposed.microphone.report('device_busy')
   const retries = []
@@ -117,6 +117,12 @@ test('preload exposes a bounded microphone permission lifecycle', async () => {
   assert.deepEqual(invokes, [{ channel: 'nova:microphone:permission', payload: undefined }])
   assert.deepEqual(sends, [{ channel: 'nova:microphone:status', payload: 'device_busy' }])
   assert.deepEqual(retries, ['retry'])
+  const toggles = []
+  const stopToggle = exposed.microphone.onToggle(() => toggles.push(true))
+  ipcRenderer.emit('nova:microphone:toggle', {})
+  stopToggle()
+  ipcRenderer.emit('nova:microphone:toggle', {})
+  assert.deepEqual(toggles, [true])
 })
 
 test('preload exposes one bounded native playback mute command', async () => {
@@ -164,31 +170,27 @@ test('preload exposes board reads and explicit memory clear', async () => {
   const { exposed, invokes, sends } = await loadPreload()
 
   assert.deepEqual(Object.keys(exposed.memoryBoard).sort(), ['clear', 'copyJson', 'export', 'request'])
-  assert.deepEqual(Object.keys(exposed.graphBoard).sort(), ['request'])
+  assert.equal(exposed.graphBoard, undefined)
   assert.ok(Object.isFrozen(exposed.memoryBoard))
-  assert.ok(Object.isFrozen(exposed.graphBoard))
   await exposed.memoryBoard.request()
   await exposed.memoryBoard.request('full')
   await exposed.memoryBoard.copyJson()
   await exposed.memoryBoard.export()
   await exposed.memoryBoard.clear()
-  await exposed.graphBoard.request()
   assert.deepEqual(invokes, [
     {channel: 'nova:memory-board:request', payload: undefined},
     {channel: 'nova:memory-board:request', payload: 'full'},
     {channel: 'nova:memory-board:copy-json', payload: undefined},
     {channel: 'nova:memory-board:export', payload: undefined},
     {channel: 'nova:memory-board:clear', payload: undefined},
-    {channel: 'nova:workspace-graph-board:request', payload: undefined},
   ])
-  assert.equal(exposed.graphBoard.export, undefined)
   assert.deepEqual(sends, [])
 })
 
 test('preload declares each bridge namespace exactly once', async () => {
   const { source } = await loadPreload()
 
-  for (const namespace of ['orbMenu', 'releaseCamera', 'microphone', 'memoryBoard', 'graphBoard', 'nativeAudio', 'windowDrag', 'windowLayout', 'settings']) {
+  for (const namespace of ['orbMenu', 'releaseCamera', 'microphone', 'memoryBoard', 'nativeAudio', 'windowDrag', 'windowLayout', 'settings']) {
     const declarations = source.match(new RegExp(`^  ${namespace}: `, 'gm')) || []
     assert.equal(declarations.length, 1, `${namespace} is declared once`)
   }

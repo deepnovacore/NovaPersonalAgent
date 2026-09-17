@@ -2,12 +2,12 @@
 import {createHash} from 'node:crypto'
 import {AjvJsonSchemaValidator} from '@modelcontextprotocol/sdk/validation/ajv'
 import type {Tool} from '@modelcontextprotocol/sdk/types.js'
-import type {ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff} from '../causal-runtime.js'
-import {jsonValueSchema, type JsonValue} from '../events.js'
-import {executorManifestSchema, type ExecutorManifest} from '../ports.js'
-import {compileToolSchema} from '../tool-schema.js'
-import {McpConnection, McpFailure} from '../mcp-client.js'
-import type {CapabilityRegistry, McpServerConfig, McpServerStatus} from '../capability-registry.js'
+import type {ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff} from '../core/causal-runtime.js'
+import {jsonValueSchema, type JsonValue} from '../core/events.js'
+import {executorManifestSchema, type ExecutorManifest} from '../core/ports.js'
+import {compileToolSchema} from '../core/tool-schema.js'
+import {McpConnection, McpFailure} from './mcp-client.js'
+import type {CapabilityRegistry, McpServerConfig, McpServerStatus} from '../config/capability-registry.js'
 
 export function mcpToolAlias(server: string, original: string): string {
   const prefix = `mcp__${server}__`
@@ -107,7 +107,7 @@ export class McpExecutorAdapter implements ExecutorAdapter {
     const count = counts.get(op) ?? 0
     if (count >= policy.maxCallsPerTurn) return failure('max_calls_per_turn')
     counts.set(op, count + 1)
-    const timeoutMs = Math.min(policy.timeoutMs, Math.max(0, (context.delegate.deadline - context.clock.now()) * 1000))
+    const timeoutMs = Math.min(policy.timeoutMs, Math.max(0, ((context.delegate.deadline ?? (context.clock.now() + policy.timeoutMs / 1000)) - context.clock.now()) * 1000))
     if (timeoutMs <= 0 || context.signal.aborted) return failure('timeout', 'unknown')
     try {
       context.progress({phase: 'started', internal_activity: 0, elapsed: 0, summary: null})

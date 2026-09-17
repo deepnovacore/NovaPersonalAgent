@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {ConfigurationError} from '../src/config.js'
+import {ConfigurationError} from '../src/config/config.js'
 import {CascadedRealtimeAdapter} from '../src/realtime/cascaded/adapter.js'
 import type {
   AsrClient, AsrSession, EndpointingEvent, TtsAudio, TtsClient, TtsSession,

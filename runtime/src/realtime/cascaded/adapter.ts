@@ -1,11 +1,12 @@
 import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
 export type PreparedMemoryContext = (signal: AbortSignal) => Promise<string | null>
-import {abortable} from '../../camera-session.js'
-import {validateOriginalImage} from './llm.js'
+import {abortable} from '../../core/camera-session.js'
+import {dispatchSourceContext} from '../history.js'
+import {cascadedResponseGuidance, validateOriginalImage} from './llm.js'
 import type {Frame} from '../../executors/watcher.js'
 import { randomUUID } from 'node:crypto'
-import {jsonValueSchema} from '../../events.js'
-import {codePointLengthLikePython, stripLikePython} from '../../python-text.js'
+import {jsonValueSchema} from '../../core/events.js'
+import {codePointLengthLikePython, stripLikePython} from '../../text/python-text.js'
 import {
   MAX_REALTIME_PCM_BYTES,
   MAX_REALTIME_TEXT,
@@ -149,7 +150,7 @@ interface EpochOwner {
     readonly record: WorkspaceContextDeliveryRecord
   } | null
   prerecall: {query: string; itemId: string; controller: AbortController; result: Promise<PreparedMemoryContext | null>} | null
-  responseAdaptation: {readonly revision: number; readonly content: string | null} | null
+  responseAdaptation: ResponseAdaptationContext | null
   consumptionGeneration: number
   responseSequence: number
   pendingToolCallId: string | null
@@ -477,8 +478,8 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       context = responseAdaptationContextSchema.parse(context)
       const prior = owner.responseAdaptation
       if (prior !== null && context.revision < prior.revision) return Promise.resolve()
-      if (prior !== null && context.revision === prior.revision && context.content === prior.content) return Promise.resolve()
-      owner.responseAdaptation = {revision: context.revision, content: context.content}
+      if (prior !== null && JSON.stringify(context) === JSON.stringify(prior)) return Promise.resolve()
+      owner.responseAdaptation = context
       return Promise.resolve()
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new CascadedRealtimeError('configuration'))
@@ -706,6 +707,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     try {
       this.#record('volcengine.asr.connect', {epoch: owner.epoch})
       session = await this.#asrClient!.open(signal)
+      this.#record('volcengine.asr.connected', {epoch: owner.epoch, item_id: itemId})
     } catch {
       if (!this.#isCurrent(owner)) return
       await this.#emit(owner, {
@@ -964,6 +966,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     allowTools: boolean,
   ): Promise<void> {
     let llmResponseId: string | null = null
+    let llmFailureCode: string | null = null
     let textSeen = false
     let toolSeen = false
     let pendingTool: Extract<CascadedLlmEvent, {kind: 'tool_call'}> | null = null
@@ -981,7 +984,9 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       let visualInputs = inputs
       if (this.#captureFrame && inputs.some(item => item.kind === 'user_text')) {
         try {
+          this.#record('cascaded.vision.requested', {epoch: owner.epoch, response_id: active.id})
           const image = await this.#captureFrame(signal)
+          this.#record('cascaded.vision.completed', {epoch: owner.epoch, response_id: active.id})
           validateOriginalImage(image)
           throwIfAborted(signal)
           if (!this.#isCurrent(owner) || owner.response !== active) return
@@ -1003,11 +1008,15 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         if (!this.#isCurrent(owner) || owner.response !== active) return
         this.#record('memory.prerecall.injected', {injected: memoryContext !== null})
       }
+      this.#record('cascaded.llm.requested', {epoch: owner.epoch, response_id: active.id})
       for await (const event of owner.llm.stream({
         inputs: visualInputs.map(item => structuredClone(item)),
         tools: allowTools ? owner.tools.map(tool => structuredClone(tool)) : [],
         workspaceContext: owner.workspaceContext?.item.content ?? null,
-        responseAdaptation: [owner.responseAdaptation?.content, memoryContext].filter(Boolean).join("\n\n") || null,
+        responseAdaptation: [owner.responseAdaptation?.content, memoryContext,
+          allowTools ? dispatchSourceContext(owner.responseAdaptation?.user_sources) : null,
+          cascadedResponseGuidance(allowTools),
+        ].filter(Boolean).join('\n'),
         signal,
       })) {
         throwIfAborted(signal)
@@ -1015,7 +1024,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
         if (event.kind === 'response_started') {
           if (llmResponseId !== null) throw new Error('duplicate LLM response identity')
           llmResponseId = event.response_id
-          this.#record('cascaded.llm.started', {epoch: owner.epoch})
+          this.#record('cascaded.llm.started', {epoch: owner.epoch, response_id: active.id})
           if(!this.#textOnly){
             active.tts = this.#newTtsState(active.id, signal)
             this.#prewarmTts(owner, active.tts)
@@ -1028,7 +1037,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           if (transcriptLength > MAX_REALTIME_TEXT) throw new Error('LLM response text overflow')
           transcript.push(event.text)
           if (transcriptLength === [...event.text].length) {
-            this.#record('cascaded.llm.first_text', {epoch: owner.epoch})
+            this.#record('cascaded.llm.first_text', {epoch: owner.epoch, response_id: active.id})
           }
           await this.#emit(owner, {
             kind: 'response_transcript_delta', session_epoch: owner.epoch,
@@ -1044,9 +1053,10 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           pendingTool = event
           owner.pendingToolCallId = event.call_id
           await this.#cancelTts(owner, active)
-          this.#record('cascaded.llm.tool_call', {epoch: owner.epoch})
+          this.#record('cascaded.llm.tool_call', {epoch: owner.epoch, response_id: active.id})
         } else if (event.kind === 'response_failed') {
           if (llmResponseId !== null && event.response_id !== llmResponseId) throw new Error('LLM failure identity mismatch')
+          llmFailureCode = event.code
           throw new Error('LLM stable provider failure')
         } else {
           if (llmResponseId === null || event.response_id !== llmResponseId) {
@@ -1102,6 +1112,11 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       } else {
         await this.#cancelTts(owner, active)
         const ttsFailure = error instanceof TtsResponseFailure
+        const rawCode = llmFailureCode ?? (error instanceof Error && 'code' in error ? error.code : null)
+        const code = typeof rawCode === 'string'
+          && ['configuration', 'aborted', 'timeout', 'protocol', 'overflow', 'closed', 'network', 'http'].includes(rawCode)
+          ? rawCode : 'unknown'
+        this.#record('cascaded.response.failed', {component: ttsFailure ? 'tts' : 'llm', code})
         await this.#emit(owner, {
           kind: 'provider_error', session_epoch: owner.epoch,
           code: ttsFailure ? 'volcengine_tts_receive' : 'cascaded_response_failed',
@@ -1176,7 +1191,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       const session = await this.#ensureTts(owner, state)
       if (!state.firstTextRecorded) {
         state.firstTextRecorded = true
-        this.#record('volcengine.tts.first_text', {epoch: owner.epoch})
+        this.#record('volcengine.tts.first_text', {epoch: owner.epoch, response_id: state.responseId})
       }
       await session.sendText(text, combineSignals(state.responseSignal, state.controller.signal))
     } catch {
@@ -1202,13 +1217,15 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       if (pcm.byteLength === 0 || pcm.byteLength % 2 !== 0) throw new TtsResponseFailure()
       if (!state.audioEmitted) {
         state.audioEmitted = true
-        this.#record('volcengine.tts.first_audio', {epoch: owner.epoch})
+        this.#record('volcengine.tts.first_audio', {epoch: owner.epoch, response_id: state.responseId})
       }
       await this.#emit(owner, {
         kind: 'response_audio_delta', session_epoch: owner.epoch,
         response_id: state.responseId, pcm,
       })
     }
+    // A closed prewarmed session is not proof that submitted speech was synthesized.
+    if (!state.audioEmitted && !state.controller.signal.aborted) throw new TtsResponseFailure()
   }
 
   async #retryTts(owner: EpochOwner, state: ActiveTts): Promise<boolean> {
@@ -1326,11 +1343,13 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     if (intent !== null && !owner.pending.has(intent.item.host_item_id)) return {inputs, hostIds}
     for (const [hostId, pending] of owner.pending) {
       const include = pending.item.kind === 'recovery' || pending.item.kind === 'dialogue_context'
-        || (intent === null ? pending.item.kind === 'tool_output'
-          : hostId === intent.item.host_item_id
-            || (intent.item.kind === 'tool_output' && pending.item.kind === 'tool_output'))
+        || pending.item.kind === 'tool_output' || hostId === intent?.item.host_item_id
       if (!include) continue
-      inputs.push(structuredClone(pending.input))
+      const input = intent?.kind === 'host_fact' && hostId === intent.item.host_item_id
+        && (pending.item.kind === 'progress' || pending.item.kind === 'final')
+        ? hostInput(pending.item, true) : structuredClone(pending.input)
+      if (input.kind === 'tool_result') inputs.unshift(input)
+      else inputs.push(input)
       hostIds.push(hostId)
     }
     return {inputs, hostIds}
@@ -1402,6 +1421,10 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     owner.responseStartBarrier = barrier
     if (previous !== null) await previous
     try {
+      // Terminal is observable before the response task finishes releasing its ownership.
+      if (owner.response?.terminal && !await settleWithin(owner.response.task, this.#settleTimeoutMs)) {
+        throw new CascadedRealtimeError('response_active')
+      }
       if (!this.#isCurrent(owner)) throw new CascadedRealtimeError('state')
       return await operation()
     } finally {
@@ -1535,7 +1558,7 @@ function hostInput(item: HostContextItem, asUserActivation: boolean): CascadedLl
     : `Nova Audio Agent ${labels[item.kind]}：${item.content}`
   return item.kind === 'dialogue_context'
     ? {kind: 'packed_history', content}
-    : {kind: 'host_context', content}
+    : {kind: asUserActivation ? 'host_activation' : 'host_context', content}
 }
 
 function cascadedToolSchema(schema: JsonObject): CascadedLlmTool {

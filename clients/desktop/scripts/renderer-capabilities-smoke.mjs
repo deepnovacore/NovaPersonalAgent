@@ -36,19 +36,98 @@ try {
         window.__commits.push(commit)
         const outcome = window.__outcome
         if (['busy', 'invalid'].includes(outcome)) return {...view, saved: false, operationStatus: outcome}
-        view = {...view, ...commit.settingsPatch, ...(commit.capabilitiesDocument ? {capabilitiesDocument: commit.capabilitiesDocument} : {}), settingsApplyStatus: outcome,
+        view = {...view, ...commit.settingsPatch, cascadedLlmModels: {...view.cascadedLlmModels, ...commit.settingsPatch.cascadedLlmModels}, ...(commit.capabilitiesDocument ? {capabilitiesDocument: commit.capabilitiesDocument} : {}), settingsApplyStatus: outcome,
           capabilities: {...view.capabilities, diskGeneration: view.capabilities.diskGeneration + 1}, saved: true, operationStatus: outcome, rejectedSecrets: []}
         return view
       },
     }}
-  }, {...publicSettings(DEFAULT_SETTINGS), frontendUsage: {requests: 4, missingReports: 1, unpricedReports: 0, pricedReports: 3, costCny: .0961, rows: [{service: 'realtime', provider: 'qwen', model: 'qwen-audio-3.0-realtime-plus', missingReports: 1, pricedReports: 3, costCny: .0961, inputTokens: 10677, outputTokens: 316, inputTextTokens: 10520, inputAudioTokens: 157, outputTextTokens: 68, outputAudioTokens: 248}]}, backendStatus: 'connected', settingsApplyStatus: 'idle', secretsPresent: {}, keyringAvailable: true, codexStatus: {status: 'ready'}, managedWorkspaces: {health: 'ready'},
+  }, {...publicSettings(DEFAULT_SETTINGS), frontendUsage: {requests: 4, missingReports: 1, unpricedReports: 0, pricedReports: 3, costCny: .0961, rows: [{service: 'realtime', provider: 'qwen', model: 'qwen-audio-3.0-realtime-plus', missingReports: 1, pricedReports: 3, costCny: .0961, inputTokens: 10677, outputTokens: 316, inputTextTokens: 10520, inputAudioTokens: 157, outputTextTokens: 68, outputAudioTokens: 248}]}, backendStatus: 'connected', settingsApplyStatus: 'idle', secretsPresent: {}, keyringAvailable: true, codexStatus: {status: 'ready', version: 'codex-cli 0.154.0', path: '/test/codex'}, managedWorkspaces: {health: 'ready'},
     capabilitiesDocument: {version: 1, modules: {search: {enabled: true, provider: 'tavily'}}, mcpServers: {demo: {enabled: false, transport: 'streamable-http', url: 'https://example.com/mcp', tools: {}, exposeTo: {frontbrain: false, codex: true}}}},
     capabilities: {path: '/fake/capabilities.json', diskGeneration: 2, problems: [], status: {modules: {search: {provider: 'tavily'}}, overrides: []}, runtime: {state: 'running', diskGeneration: 2, generation: 1, toolCount: 9, toolBudget: 24, servers: []}}})
   const bounds = settingsWindowOptions(resolve(root, 'src/preload/preload.cjs'), 'smoke')
   await page.setViewportSize({width: bounds.width, height: bounds.height})
   await page.goto('http://nova.test/settings.html')
+  await page.locator('#category-pipeline').click()
+  for (const model of ['qwen3.5-omni-flash-realtime', 'qwen3.5-omni-plus-realtime']) {
+    await page.locator('#integratedModel').selectOption(model)
+    assert.equal(await page.locator('#integratedVoicePreset').inputValue(), 'Ethan')
+    assert.equal(await page.locator('#integratedVoicePreset option').count(), 2)
+    await page.locator('#settings-save').click()
+    assert.equal((await page.evaluate(() => window.__commits.at(-1))).settingsPatch.integratedModel, model)
+  }
+  await page.screenshot({path: `${output}/qwen-omni.png`})
+  await page.locator('label').filter({has: page.locator('input[name="pipelineMode"][value="cascaded"]')}).click()
+  await page.locator('#cascadedLlmProvider').selectOption('qwen')
+  for (const model of ['qwen3.8-max', 'qwen3.8-flash', 'qwen-flash', 'qwen-plus']) {
+    await page.locator('#cascadedLlmModelPreset').selectOption(model)
+    assert.equal(await page.locator('#cascadedLlmModel').isVisible(), false)
+    await page.locator('#settings-save').click()
+    assert.equal((await page.evaluate(() => window.__commits.at(-1))).settingsPatch.cascadedLlmModels.qwen, model)
+  }
+  await page.locator('#cascadedLlmModelPreset').selectOption('__custom__')
+  await page.locator('#cascadedLlmModel').fill('qwen-custom-snapshot')
+  await page.locator('#settings-save').click()
+  assert.equal((await page.evaluate(() => window.__commits.at(-1))).settingsPatch.cascadedLlmModels.qwen, 'qwen-custom-snapshot')
+  await page.locator('#cascadedLlmProvider').selectOption('ark')
+  await page.locator('#cascadedLlmProvider').selectOption('qwen')
+  assert.equal(await page.locator('#cascadedLlmModel').inputValue(), 'qwen-custom-snapshot')
+  await page.locator('#cascadedLlmModelPreset').selectOption('qwen3.8-max')
+  await page.locator('#settings-save').click()
+  await page.screenshot({path: `${output}/qwen-model-picker.png`})
+  await page.locator('#cascadedLlmProvider').selectOption('deepseek')
+  assert.equal(await page.locator('#cascadedLlmModelPreset').inputValue(), 'deepseek-flash')
+  assert.equal(await page.locator('#usage-deepseekApiKey').textContent(), '必需')
+  await page.locator('#settings-save').click()
+  assert.equal((await page.evaluate(() => window.__commits.at(-1))).settingsPatch.cascadedLlmProvider, 'deepseek')
+  await page.screenshot({path: `${output}/deepseek-cascade.png`})
+  await page.locator('#category-secrets').click()
+  await page.locator('#deepseekApiKey').fill('deepseek-browser-test')
+  await page.locator('#settings-save').click()
+  assert.equal((await page.evaluate(() => window.__commits.at(-1))).settingsPatch.secrets.deepseekApiKey, 'deepseek-browser-test')
+  await page.locator('#category-pipeline').click()
+  await page.locator('label').filter({has: page.locator('input[name="pipelineMode"][value="integrated"]')}).click()
+  await page.locator('#settings-save').click()
   await page.locator('#category-capabilities').click()
-  await page.getByText('前台可用 9 个工具', {exact: false}).waitFor()
+  await page.getByRole('heading', {name: '主 Agent 视觉能力', exact: true}).waitFor()
+  assert.equal(await page.locator('#capabilities-state').count(), 0)
+  assert.equal(await page.locator('#conversation-vision-enabled').isDisabled(), true)
+  assert.equal(await page.locator('#conversation-vision-status').textContent(), '')
+  assert.equal(await page.locator('#watch-model').isDisabled(), true)
+  assert.equal(await page.locator('#executors-section').getByRole('switch').count(), 2)
+  assert.equal(await page.locator('#mcp-section').getByRole('switch', {name: '视觉监控', exact: true}).count(), 0)
+  await page.screenshot({path: `${output}/capabilities-no-keys.png`, fullPage: true})
+  await page.evaluate(() => window.__push({
+    visionModels: {qwen: ['qwen3-vl-plus', 'qwen3-vl-flash', 'qwen-vl-max', 'qwen-vl-plus'], ark: ['doubao-seed-2-0-pro-260215']},
+    secretsPresent: {dashscopeApiKey: true},
+  }))
+  assert.equal(await page.locator('#watch-model option[value^="doubao"]').count(), 0)
+  await page.locator('#watch-model').selectOption('qwen3-vl-flash')
+  await page.getByRole('switch', {name: '视觉监控', exact: true}).uncheck()
+  assert.equal(await page.locator('#watch-model').isDisabled(), true)
+  await page.getByRole('switch', {name: '编程', exact: true}).uncheck()
+  await page.locator('#settings-save').click()
+  const executorCommit = await page.evaluate(() => window.__commits.at(-1))
+  assert.equal(executorCommit.capabilitiesDocument.modules.camera.enabled, false)
+  assert.equal(executorCommit.capabilitiesDocument.modules.coding.enabled, false)
+  assert.equal(executorCommit.settingsPatch.watchModel, 'qwen3-vl-flash')
+  await page.getByRole('switch', {name: '视觉监控', exact: true}).check()
+  await page.getByRole('switch', {name: '编程', exact: true}).check()
+  await page.locator('#coding-executor-configure').click()
+  assert.equal(await page.locator('#codexBinaryPath').count(), 1)
+  assert.equal(await page.locator('#codex-projects').evaluate(el => el.open && !el.hidden), true)
+  await page.locator('#category-capabilities').click()
+  await page.evaluate(() => window.__push({secretsPresent: {dashscopeApiKey: true, arkApiKey: true}}))
+  await page.locator('#watch-model').selectOption('doubao-seed-2-0-pro-260215')
+  await page.locator('#settings-save').click()
+  assert.equal((await page.evaluate(() => window.__commits.at(-1))).settingsPatch.watchModel, 'doubao-seed-2-0-pro-260215')
+  await page.evaluate(() => scrollTo(0, 0))
+  for (const row of await page.locator('.executor-card .checkbox-field').all()) {
+    const box = await row.boundingBox()
+    const toggle = await row.getByRole('switch').boundingBox()
+    assert.ok(box.x + box.width - toggle.x - toggle.width < 25, 'executor switches align right')
+  }
+  await page.screenshot({path: `${output}/capabilities-executors-mcp.png`, fullPage: true})
+  await page.screenshot({path: `${output}/capabilities-preview.png`})
   assert.equal(await page.locator('#embeddingProvider').inputValue(), 'dashscope')
   assert.equal(await page.locator('#embeddingModel').inputValue(), 'text-embedding-v4')
   await page.getByLabel('搜索服务', {exact: true}).selectOption('mcp')
@@ -86,12 +165,12 @@ try {
   assert.deepEqual(commit.capabilitiesDocument.mcpServers, {})
   for (const [outcome, expected] of [['busy', '另一项操作进行中，草稿未保存'], ['invalid', '配置校验失败，草稿未保存'], ['failed', '设置已保存'], ['restart_failed', '设置已保存']]) {
     await page.evaluate(outcome => {window.__outcome = outcome}, outcome)
-    await page.getByLabel('相机与视觉', {exact: true}).click()
+    await page.getByLabel('视觉监控', {exact: true}).click()
     await page.locator('#settings-save').click()
     assert.equal(await page.locator('#status').textContent(), expected)
   }
   await page.evaluate(() => window.__push({capabilities: {diskGeneration: 7, status: {modules: {search: {provider: 'mcp'}}, overrides: ['NOVA_AUDIO_AGENT_SEARCH_PROVIDER']}, problems: [], runtime: {state: 'startup_failed', diskGeneration: 7, generation: 4, toolCount: 27, toolBudget: 24}}}))
-  assert.match(await page.locator('#capabilities-state').textContent(), /启动失败.*27 个工具（上限 24 个）/u)
+  assert.equal(await page.locator('#capabilities-state').count(), 0)
   await page.evaluate(() => scrollTo(0, 0))
   await page.screenshot({path: `${output}/capability-budget-failure.png`, fullPage: true})
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
@@ -99,13 +178,19 @@ try {
   await page.evaluate(() => window.__push({secretsPresent: {arkApiKey: true, doubaoBigmodelApiKey: true}, secretSources: {arkApiKey: 'dotenv', doubaoBigmodelApiKey: 'dotenv'}}))
   for (const width of [760, 620]) {
     await page.setViewportSize({width, height: 720})
-    for (const category of ['knowledge', 'secrets', 'general', 'codex']) {
+    for (const category of ['capabilities', 'knowledge', 'secrets', 'general', 'usage', 'codex']) {
       await page.locator(`#category-${category}`).click()
-      if (category === 'general') {
+      if (category === 'usage') {
         await page.locator('#frontend-usage-section details').evaluate(el => {el.open = true})
         assert.equal(await page.locator('#wake-word-status').isVisible(), false)
         assert.equal(await page.locator('.usage-stats .usage-metric').count(), 3)
         assert.equal(await page.locator('.usage-card .usage-metric').count(), 6)
+      }
+      if (category === 'general') assert.equal(await page.locator('#frontend-usage-section').isVisible(), false)
+      if (category === 'usage') assert.equal(await page.locator('#frontend-usage-section').isVisible(), true)
+      if (category === 'codex') {
+        assert.equal(await page.locator('#codex-rescan svg').count(), 1)
+        assert.equal(await page.locator('#codex-rescan').getAttribute('aria-label'), '重新检测 Codex')
       }
       if (category === 'knowledge') {
         await page.locator('#knowledge-refresh').click()
@@ -116,7 +201,7 @@ try {
       assert.equal(await page.locator('#settings-save').textContent(), '保存')
       assert.equal(await page.locator('#settings-restart').textContent(), '重启')
       if (category === 'secrets') {
-        assert.equal(await page.locator('input[type=password]:visible').count(), 2)
+        assert.equal(await page.locator('input[type=password]:visible').count(), 3)
         assert.equal(await page.locator('#badge-arkApiKey').textContent(), '来自 .env')
         assert.equal(await page.locator('#arkApiKey').inputValue(), '')
         assert.equal(await page.locator('#arkApiKey').isDisabled(), true)
@@ -127,8 +212,10 @@ try {
   }
   await page.locator('#category-capabilities').click()
   await page.evaluate(() => window.__push({capabilities: {runtime: {state: 'running', toolCount: 9, toolBudget: 24, modules: {search: {enabled: true, provider: 'mcp'}}, servers: [{name: 'workspace', status: 'ok'}]}}}))
-  assert.match(await page.locator('.mcp-runtime-list').textContent(), /workspace/)
-  assert.match(await page.locator('.mcp-runtime-list').textContent(), /搜索/)
+  assert.equal(await page.locator('.mcp-runtime-list').count(), 0)
+  assert.equal(await page.getByLabel('前台工具预算上限', {exact: true}).count(), 0)
+  assert.equal(await page.locator('[data-module=search]').getByLabel('搜索服务', {exact: true}).count(), 1)
+  assert.equal(await page.locator('[data-module=knowledge]').getByRole('switch').count(), 2)
   await page.screenshot({path: `${output}/mcp-runtime.png`, fullPage: true})
   const board = await context.newPage()
   board.on('pageerror', error => errors.push(error.message))
@@ -139,7 +226,6 @@ try {
         {seq: 2, ts: 2, trust: 'trusted_system', content: {text: '今天有两件重要的事：\n上午完成方案评审，下午继续开发语音管线。', delivery: 'spoken'}},
         {seq: 3, ts: 3, trust: 'trusted_user', content: {text: '好的，先从方案评审开始。'}},
       ]}], diagnostics: {version: 1, records: []}})},
-      graphBoard: {request: async () => ({error: 'unavailable'})},
     }
   })
   await board.setViewportSize({width: 980, height: 760})
@@ -149,8 +235,57 @@ try {
   assert.equal(await board.locator('.chat-debug:visible').count(), 0)
   await board.screenshot({path: `${output}/conversation.png`, fullPage: true})
   await board.locator('.chat-assistant').hover()
+  assert.equal(await board.locator('.chat-debug:visible').count(), 0)
+  await board.locator('.chat-assistant').click({button: 'right'})
   assert.equal(await board.locator('.chat-debug:visible').count(), 1)
-  await board.screenshot({path: `${output}/conversation-hover.png`, fullPage: true})
+  await board.screenshot({path: `${output}/conversation-details.png`, fullPage: true})
+  await board.locator('.chat-assistant').press('Escape')
+  assert.equal(await board.locator('.chat-debug:visible').count(), 0)
+  const tasks = await context.newPage()
+  await tasks.route('http://nova.test/index.html', async route => {
+    const html = await readFile(resolve(root, 'src/renderer/index.html'), 'utf8')
+    await route.fulfill({contentType: 'text/html', body: html.replace(/<script[^>]*>[\s\S]*?<\/script>/g, '')})
+  })
+  await tasks.setViewportSize({width: 420, height: 520})
+  await tasks.goto('http://nova.test/index.html')
+  await tasks.evaluate(async () => {
+    const {mountTaskBanner} = await import('./task-banner.mjs')
+    window.actions = []
+    const banner = window.taskBanner = mountTaskBanner({container: document.querySelector('#task-banner'),
+      send: action => {window.actions.push(action); return true},
+      reserveArea: async () => ({taskHeightCss: 140, suppressed: false}),
+    })
+    banner.receive({type: 'executor.tasks', revision: 1, active_project: '演示项目', tasks: [{
+      work_id: 'demo-task', executor: 'codex', project: '演示项目', title: '网页游戏',
+      phase: 'working', summary: '正在检查游戏交互', ts: 1,
+    }]})
+    const label = document.querySelector('#codex-label')
+    label.dataset.mode = 'project'
+    label.hidden = false
+    document.querySelector('#codex-summary').textContent = '工作区 演示项目 · Session 网页游戏'
+  })
+  await tasks.locator('[data-open]').waitFor()
+  assert.equal(await tasks.locator('[data-open]').innerText(), '')
+  assert.equal(await tasks.locator('[data-stop]').getAttribute('aria-label'), '停止任务')
+  await tasks.locator('[data-open]').click()
+  await tasks.locator('[data-stop]').click()
+  assert.deepEqual(await tasks.evaluate(() => window.actions.map(action => action.action)), ['open', 'cancel'])
+  assert.equal(await tasks.locator('#codex-summary').evaluate(el => getComputedStyle(el).animationName), 'none')
+  await tasks.emulateMedia({reducedMotion: 'no-preference'})
+  assert.equal(await tasks.locator('#codex-summary').evaluate(el => getComputedStyle(el).animationName), 'none')
+  await tasks.locator('#codex-label').evaluate(el => {el.dataset.working = 'true'})
+  assert.equal(await tasks.locator('#codex-summary').evaluate(el => getComputedStyle(el).animationName), 'none')
+  assert.equal(await tasks.locator('.task-list-heading').evaluate(el => getComputedStyle(el).animationName), 'task-shimmer')
+  await tasks.screenshot({path: `${output}/task-icons-shimmer.png`})
+  await tasks.emulateMedia({reducedMotion: 'reduce'})
+  assert.equal(await tasks.locator('.task-list-heading').evaluate(el => getComputedStyle(el).animationName), 'none')
+  await tasks.emulateMedia({reducedMotion: 'no-preference'})
+  for (const [index, phase] of ['started', 'completed'].entries()) {
+    await tasks.evaluate(({index, phase}) => window.taskBanner.receive({type: 'executor.tasks', revision: index + 2,
+      active_project: '演示项目', tasks: [{work_id: 'demo-task', executor: 'codex', project: '演示项目',
+        title: '网页游戏', phase, summary: '任务状态', ts: index + 2}]}), {index, phase})
+    assert.equal(await tasks.locator('.task-list-heading').evaluate(el => getComputedStyle(el).animationName), 'none')
+  }
   assert.deepEqual(errors, [])
-  console.log(JSON.stringify({moduleToggles: true, preset: true, serverCrud: true, toolAllowlist: true, transportFields: true, saveLattice: true, exactBudget: '27/24', horizontalOverflow: false, pageErrors: errors, screenshots: output}))
+  console.log(JSON.stringify({moduleToggles: true, preset: true, serverCrud: true, toolAllowlist: true, transportFields: true, saveLattice: true, executorConfiguration: true, credentialFilteredModels: true, horizontalOverflow: false, pageErrors: errors, screenshots: output}))
 } finally {await browser.close()}

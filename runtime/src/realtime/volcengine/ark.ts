@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto'
 import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
-import { jsonValueSchema, type JsonValue } from '../../events.js'
-import { codePointLengthLikePython, stripLikePython } from '../../python-text.js'
+import { jsonValueSchema, type JsonValue } from '../../core/events.js'
+import { codePointLengthLikePython, stripLikePython } from '../../text/python-text.js'
 import { MAX_REALTIME_TEXT, type JsonObject } from '../protocol.js'
 
 export const MAX_ARK_REQUEST_BYTES = 4 * 1_024 * 1_024

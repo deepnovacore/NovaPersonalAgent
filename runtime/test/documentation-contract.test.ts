@@ -6,7 +6,7 @@ import {test} from 'node:test'
 import {
   environmentContract,
   publicEnvironmentContract,
-} from '../src/environment-contract.js'
+} from '../src/config/environment-contract.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const currentDocs = [
@@ -44,7 +44,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
 
   assert.match(english, /integrated.*cascaded/isu)
   assert.match(english, /qwen-audio-3\.0-realtime-plus.*longanqian/isu)
-  assert.match(english, /Volcengine ASR\s*->\s*Qwen `qwen-flash`\s*->\s*Volcengine TTS/u)
+  assert.match(english, /Volcengine ASR\s*->\s*Qwen `qwen-plus`\s*->\s*Volcengine TTS/u)
   assert.match(english, /Ark.*explicit.*cascaded LLM/isu)
   assert.match(english, /one key per platform.*reused/isu)
   assert.match(english, /ASR.*fallback.*DOUBAO_BIGMODEL_API_KEY/isu)
@@ -55,7 +55,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
 
   assert.match(chinese, /集成.*级联/su)
   assert.match(chinese, /qwen-audio-3\.0-realtime-plus.*longanqian/su)
-  assert.match(chinese, /火山 ASR\s*->\s*Qwen `qwen-flash`\s*->\s*火山 TTS/u)
+  assert.match(chinese, /火山 ASR\s*->\s*Qwen `qwen-plus`\s*->\s*火山 TTS/u)
   assert.match(chinese, /Ark.*显式.*级联 LLM/su)
   assert.match(chinese, /每个平台.*一把密钥.*复用/su)
   assert.match(chinese, /ASR.*回退.*DOUBAO_BIGMODEL_API_KEY/su)
@@ -65,6 +65,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
   assert.match(chinese, /可选.*在线 smoke/u)
 
   for (const [file, text] of documents) {
+    assert.doesNotMatch(text, /workspace-graph surfaces|工作区图谱|NOVA_AUDIO_AGENT_WORKSPACE_GRAPH/u, file)
     assert.doesNotMatch(text, /NOVA_AUDIO_AGENT_(?:REALTIME_PROVIDER|VOLCENGINE_ARK_MODEL|VOLCENGINE_ARK_SUPPORT_MODEL)/u, file)
   }
 })
@@ -139,16 +140,12 @@ function generatedBlock(document: string): string {
   return document.slice(start, end)
 }
 
-test('current Node Codex and release claims remain exact', async () => {
+test('current Node Codex transport claim remains exact', async () => {
   const gettingStarted = await readFile(
     resolve(repositoryRoot, 'docs/getting-started.md'),
     'utf8',
   )
   assert.match(gettingStarted, /Codex is app-server-only; JSONL is\s+fixture-parser-only/iu)
-  assert.match(
-    gettingStarted,
-    /Legacy HA and AutoGLM settings produce\s+a stable, credential-safe migration error/iu,
-  )
 })
 
 test('every production environment name is classified and private names stay private', async () => {
@@ -166,7 +163,7 @@ test('every production environment name is classified and private names stay pri
     }
   }
   for (const entry of environmentContract) {
-    if (entry.owner === 'host_private' || entry.owner.startsWith('retired_')) {
+    if (entry.owner === 'host_private') {
       assert.equal(entry.public, false, entry.name)
     }
   }
@@ -181,3 +178,16 @@ async function sourceFiles(root: string): Promise<string[]> {
   }
   return files
 }
+
+
+test('current architecture and numbered specs do not depend on the retired graph', async () => {
+  const roots = ['docs/archs', 'docs/specs/v0.2.0', 'docs/specs/v0.3.0']
+  for (const root of roots) {
+    for (const file of await readdir(resolve(repositoryRoot, root))) {
+      if (!/^\d.*\.md$/u.test(file)) continue
+      const text = await readFile(resolve(repositoryRoot, root, file), 'utf8')
+      assert.doesNotMatch(text, /workspace-graph\/|workspace_graph|NOVA_AUDIO_AGENT_WORKSPACE_GRAPH|GraphContext|PublishedGraphSnapshot/u, `${root}/${file}`)
+      assert.doesNotMatch(text, /Workspace Graph|workspace graph|工作区图/u, `${root}/${file}`)
+    }
+  }
+})

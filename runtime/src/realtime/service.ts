@@ -1,130 +1,71 @@
-import {CodingProgressNarrationState, codingProgressSummary, type CodingProgressNarration} from '../coding-progress-narration.js'
+export type { AgentControllerFactory,DelegateLike,DeliverySnapshot,ExecutorManifestLike,RealtimeServiceOptions,ServiceProvider,ServiceRuntime } from './service-ports.js'
+export { formatSeconds } from './service-state.js'
+import { CodingProgressNarrationState,type CodingProgressNarration } from './coding-progress-narration.js'
+import { HostDelivery } from './host-delivery.js'
+import { ProjectConfirmationFlow } from './project-confirmation-flow.js'
+import { ProviderProjection } from './provider-projection.js'
+import type { DeliverySnapshot,HostItemOptions,ProviderReconnectReason,RealtimeServiceOptions,ServiceProvider,ServiceRuntime } from './service-ports.js'
+import { Mutex,Signal,diagnosticName } from './service-state.js'
+import { ToolContinuations } from './tool-continuations.js'
 /**
- * Production orchestration between a realtime FrontBrain and the existing Runtime.
- *
- * Ported from `src/nova_audio_agent/realtime/service.py`. The session below it owns *provider*
- * state -- turns, fences, playback generations -- and this layer owns everything that has to be
- * decided across turns: which host fact gets the floor next, which tool calls belong to the same
- * continuation, and what happens to all of it when the provider session is replaced underneath.
- *
- * Two structural facts shape the whole file.
- *
- * **Almost every ledger is keyed on `(session_epoch, id)`.** That is the reconnect contract, not
- * defensive prefixing: after a reconnect the provider may reuse an item or response id, and a ledger
- * keyed on the id alone would let the new session's item answer the old session's question.
- *
- * **The two locks have a fixed order and one of them must never be held across a public call.**
- * `_reconnect_lock` is taken before `_delivery_lock`, never the reverse. And the reconnect path calls
- * the private `#deliveryPass` rather than the public `flushHostItems`, because the public wrapper
- * would re-enter reconnect and deadlock against the lock already held.
- *
- * Preemptive-alert behavior (controlled reconnect, arbitration, clear deadlines) and project
- * confirmation are gated behind composition settings and a supplied controller. They are not
- * ported yet; where the core path touches them it reaches an explicit boundary that throws rather
- * than silently taking the inert branch, so a test that gets there fails loudly.
+ * Coordinates provider event ordering, lifecycle and user-origin evidence.
+ * HostDelivery owns speech/acknowledgements; ToolContinuations owns admitted work;
+ * ProjectConfirmationFlow owns confirmation lifecycle; ProviderProjection owns presentation.
+ * Reconnect lock precedes delivery lock. Reconnect uses private deliveryPass, never
+ * the public recovery wrapper. Continuations run only after delivery lock release.
+ * Epoch checks remain at the original await boundaries because providers may reuse IDs.
  */
 
-import {createHash, randomUUID} from 'node:crypto'
-import {canonicalJson} from '../canonical-json.js'
+import { randomUUID } from 'node:crypto'
 import {
-  type IntakeEventPort,
-  type IntakeOptions,
+createAgentControllerRegistry,
+type AgentControllerRegistry
+} from '../executors/agent-controller.js'
+import { ApprovalHost } from '../core/approval.js'
+import type { Clock } from '../core/clock.js'
+import { type EventRecord,type JsonValue } from '../core/events.js'
+import {
+type IntakeEventPort,
+type IntakeOptions,
 } from '../executors/coding/intake.js'
 import {
-  createAgentControllerRegistry,
-  parseAgentActionResult,
-  type AgentActionResult,
-  type AgentController,
-  type AgentControllerRegistry,
-} from '../agent-controller.js'
-import {CANCEL_TOOL, CONFIRM_TOOL, DISPATCH_TOOL, confirmArguments} from '../work-tools.js'
-import type {ExecutorAdmission} from '../causal-runtime.js'
-import type { Clock } from '../clock.js'
-import type {ExecutorRole} from '../ports.js'
-import { validProgressSummary, type EventRecord, type JsonValue } from '../events.js'
-import {
-  isMonitorPolicy,
-  isPreemptiveMonitorAlert,
-  monitorAlertDelivery,
-  parseMemoryRef,
-  USER_PRIORITY,
-  type MemoryItem,
-} from '../memory.js'
-import type {Suggestion} from '../suggestions.js'
-import type {WakeReason} from '../slots.js'
-import type { PlaybackCompletion, PlaybackGeneration } from '../playback.js'
-import type { CompiledTools } from '../tool-schema.js'
-import {requiresSynchronousResult} from './bridge.js'
-import type { RealtimeRuntimeBridge, ToolAcceptance, ToolCallReady } from './bridge.js'
+USER_PRIORITY
+} from '../core/memory.js'
+import type { PlaybackCompletion,PlaybackGeneration } from './playback.js'
+import { codePointLengthLikePython } from '../text/python-text.js'
+import type { WakeReason } from '../core/slots.js'
+import type { Suggestion } from '../core/suggestions.js'
+import type { CompiledTools } from '../core/tool-schema.js'
+import type { RealtimeRuntimeBridge,ToolCallReady } from './bridge.js'
+import { type CodingChannel } from './evidence.js'
+import { packRecoveryTurns,projectRecoveryTurns,type RecoveryTurn } from './history.js'
 import type {
-  ConfirmedProjectOperation,
-  ProjectConfirmationController,
-  ProjectConfirmationView,
-} from '../project-confirmation.js'
-import type {ApprovalController as ExecutorApprovalController} from '../approval-port.js'
-import {ApprovalHost} from '../approval.js'
-import {ConfirmationTurnIsolation} from './confirmation-turn-isolation.js'
-import type {
-  HostContextItem,
-  HostResponseIntent,
-  RealtimeProviderEvent,
+HostContextItem,
+HostResponseIntent,
+RealtimeProviderEvent,
 } from './protocol.js'
 import { ItemDeliveryUncertainError } from './protocol.js'
-import { packRecoveryTurns, projectRecoveryTurns, type RecoveryTurn } from './history.js'
-import { RealtimeDeliveryError, type RealtimeSession } from './session.js'
 import {
-  MAX_CONTINUATION_TASK_SUMMARY,
-  MAX_PENDING_HOST_EVENTS,
-  activeExecutorContextData,
-  type CaptionFrame,
-} from './session-state.js'
-import {codePointLengthLikePython, stripLikePython} from '../python-text.js'
-import {
-  PREEMPTIVE_ALERT_DEADLINE_S,
-  PREEMPTIVE_ALERT_CLEAR_ACK_DEADLINE_S,
-  HIT_ALERT_MIN_PRIORITY,
-  MAX_HOST_FACT_CHARS,
-  MAX_LATE_SYNC_RESULTS,
-  MAX_PENDING_TOOL_REFUSALS,
-  MAX_TRACKED_ORIGIN_DELIVERY_PROOFS,
-  MAX_TRACKED_SEMANTIC_ACKNOWLEDGEMENTS,
-  MAX_TRACKED_TOOL_CALLS,
-  MAX_UNCERTAIN_DELIVERY_RETRIES,
-  PROJECT_EXPIRY_STEP_TIMEOUT_S,
-  PREEMPT_MIN_PRIORITY,
-  PROGRESS_HOST_ITEM_TTL_S,
-  SYNC_RESULT_SNIPPET_CHARS,
-  SYNC_RESULT_TITLE_CHARS,
-  USER_HOLD_MAX_S,
-  hostFactIntent,
-  callKey,
-  compareQueuedHostResponses,
-  parseCallKey,
-  continuationBatch,
-  projectCommitFailureText,
-  semanticAcknowledgement,
-  toolCallState,
-  type ExecutorState,
-  type ContinuationBatch,
-  type DeferredOriginToolCall,
-  type PreemptiveAlertActivationAuthority,
-  type PreemptiveAlertHistoryRecovery,
-  type PreemptiveAlert,
-  type HostItemOwner,
-  type ProjectExpiryBatch,
-  type QueuedHostResponse,
-  type SemanticAcknowledgement,
-  type ToolCallAcceptanceSnapshot,
-  type ToolCallState,
-  type UrgentHostResponseOwner,
+MAX_HOST_FACT_CHARS,
+MAX_TRACKED_TOOL_CALLS,
+PROJECT_EXPIRY_STEP_TIMEOUT_S,
+callKey,
+hostFactIntent,
+type ContinuationBatch,
+type ExecutorState,
+type PreemptiveAlertHistoryRecovery,
+type QueuedHostResponse,
+type SemanticAcknowledgement,
+type ToolCallAcceptanceSnapshot,
+type ToolCallState,
+type UrgentHostResponseOwner
 } from './service-state.js'
-import { finalSpeechView, genericFinalSpeechView, type CodingChannel } from './evidence.js'
-import { SPEECH_FINAL_LIMIT, prepareForSpeech } from './speech-prep.js'
+import {
+type CaptionFrame
+} from './session-state.js'
+import { RealtimeDeliveryError,type RealtimeSession } from './session.js'
 import type { RealtimeTelemetry } from './telemetry.js'
-import {UserOriginBindingLedger} from './user-origin-binding.js'
-
-const PROJECT_CONFIRMATION_CARRIER_RELEASE_TIMEOUT_S = 3
-const UNKNOWN_CONFIRMATION_TOOL_RESULT = JSON.stringify({code: 'unknown_confirmation', state: 'refused'})
+import { UserOriginBindingLedger } from './user-origin-binding.js'
 
 function sameAgentDescriptors(
   left: readonly {readonly name: string; readonly summary: string; readonly ownedChannels: readonly string[]}[],
@@ -139,205 +80,6 @@ function sameAgentDescriptors(
   })
 }
 
-type ProviderReconnectReason =
-  | 'project_confirmation_ui_retry'
-  | 'uncertain_delivery'
-  | 'recoverable_provider_error'
-  | 'origin_resolution_overflow'
-  | 'origin_binding_overflow'
-  | 'refusal_ledger_overflow'
-  | 'project_confirmation_carrier_recovery'
-  | 'project_confirmation_expiry_cleanup'
-  | 'client_disconnect'
-  | 'test'
-
-interface BoundToolOrigin {
-  readonly observedProviderResponseId: string | null
-  readonly originItemId: string | null
-  readonly originRef: string | null
-}
-
-interface ProjectConfirmationDecisionRetry {
-  readonly item_key: string
-  readonly source_response_id: string
-  requested: boolean
-  retry_response_id: string | null
-}
-
-function suggestionSpeechView(content: Readonly<Record<string, JsonValue>>): string {
-  for (const key of ['observation', 'summary', 'message'] as const) {
-    const value = content[key]
-    if (typeof value === 'string' && stripLikePython(value) !== '') {
-      return prepareForSpeech(value, {limit: SPEECH_FINAL_LIMIT}).text
-    }
-  }
-  return '有一条新的提醒'
-}
-
-/** Monitor hits are user-facing reminders, not executor reports. */
-function monitorHitSpeechView(content: Readonly<Record<string, JsonValue>>): string {
-  for (const key of ['observation', 'summary', 'message'] as const) {
-    const value = content[key]
-    if (typeof value === 'string' && stripLikePython(value) !== '') {
-      return prepareForSpeech(`检测到了：${stripLikePython(value)}`, {
-        limit: SPEECH_FINAL_LIMIT,
-      }).text
-    }
-  }
-  return '检测到了，提醒条件已经满足。'
-}
-
-/** The runtime surface the service reads. Thirteen call sites in the oracle, mostly reads. */
-/** What the projection needs to know about one dispatched delegate. */
-export interface DelegateLike {
-  readonly delegate_id: string
-  readonly executor: string
-  readonly op: string
-  readonly origin_ref: string
-  readonly routing_class: string
-}
-
-/** What the projection needs from an executor's manifest. */
-export interface ExecutorManifestLike {
-  readonly name: string
-  readonly display_name?: string | undefined
-  readonly roles: readonly ExecutorRole[]
-  readonly ops: readonly {readonly name: string; readonly sync_result?: boolean}[]
-  readonly model_visibility?: 'direct' | 'hidden' | undefined
-  readonly policy: {
-    readonly priority: number
-    readonly operation_class?: 'task' | 'monitor'
-    readonly alert_delivery?: 'none' | 'deferred' | 'preemptive'
-    readonly suggest?: boolean
-    readonly progress_via_surrogate?: boolean
-  }
-}
-
-export interface ServiceRuntime {
-  readonly codingProgressNarration?: CodingProgressNarrationState
-  readonly clock: Clock
-  readonly executors: ReadonlyMap<string, {
-    readonly manifest: ExecutorManifestLike
-    admitRequest?(op: string, request: Readonly<Record<string, JsonValue>>): ExecutorAdmission | null
-  }>
-  observe(observer: (event: EventRecord, currentConversation?: boolean) => void): () => void
-  serve(stop: AbortSignal): Promise<void>
-  clearConversation?(): Promise<void>
-  flushMemory?(maintenance?: boolean): Promise<void>
-  /** The delegate a handoff claimed, if this exact event claimed one. */
-  claimedHandoff(seq: number): DelegateLike | undefined
-  /** Whether this exact deadline is the one that terminated its delegate. */
-  terminatedByDeadline(seq: number, delegateId: string): boolean
-  /** The delegate from either table, whether or not it is still in flight. */
-  delegateFor(delegateId: string): DelegateLike | undefined
-  /** The delegate only if it is still in flight. */
-  inFlightDelegate(delegateId: string): DelegateLike | undefined
-  /** A suggestion by id, for attributing a turn to what it was answering. Optional. */
-  suggestionFor?: (suggestionId: string) => {
-    readonly kind: string
-    readonly evidence_refs: readonly string[]
-  } | null
-  /** Mark a suggestion as actually offered. Optional. */
-  confirmSuggestionSpoken?: (suggestionId: string) => void
-  /**
-   * The blackboard, for the conversation history a replacement provider is seeded with.
-   *
-   * Optional because the history arms are off by default, and a runtime that never reconnects for a
-   * preemptive alert
-   * has no reason to expose it.
-   */
-  readonly memory?: {
-    readonly policies: ReadonlyMap<string, {readonly progress_via_surrogate?: boolean}>
-    readonly channels: ReadonlyMap<string, {readonly items: readonly MemoryItem[]}>
-  }
-}
-
-/** The provider surface the service uses directly: three calls, everything else via the session. */
-export interface ServiceProvider {
-  transcribeDraft?(pcm: Uint8Array, signal: AbortSignal): Promise<string>
-  submitText?(text: string, signal: AbortSignal): Promise<void>
-  sendAudio(pcm: Uint8Array, signal?: AbortSignal): Promise<void>
-  /**
-   * The event stream.
-   *
-   * Takes the stop signal because a parked stream is the normal case at shutdown: the provider has
-   * nothing to say and the iterator is suspended. Without the signal, `close()` would wait on an
-   * iteration that cannot be cancelled from outside.
-   */
-  events(signal: AbortSignal): AsyncIterable<RealtimeProviderEvent>
-  close(): Promise<void>
-}
-
-export interface RealtimeServiceOptions {
-  readonly onProviderEvent?: (event: RealtimeProviderEvent)=>void
-  readonly intake?: Pick<
-    IntakeOptions,
-    'models' | 'settings' | 'roster' | 'running' | 'activeProject' | 'resolveTarget' | 'dispatch' | 'steer' | 'cancel' | 'record'
-  >
-  /** Supplies the coding controller with host callbacks; the controller owns intake construction. */
-  readonly agentControllerFactory?: AgentControllerFactory
-  /** Additional host-owned controllers. */
-  readonly agentControllers?: readonly AgentController[]
-  readonly provider: ServiceProvider
-  readonly runtime: ServiceRuntime
-  readonly tools: CompiledTools
-  readonly providerSchemas?: readonly Readonly<Record<string, JsonValue>>[]
-  readonly session: RealtimeSession
-  readonly bridge: RealtimeRuntimeBridge
-  readonly idFactory?: () => string
-  readonly onProviderTerminal?: (generation: PlaybackGeneration) => void
-  readonly onExecutorState?: (state: ExecutorState) => void
-  /** Fired when active delegate progress changes so provider context can refresh. */
-  readonly onActiveWorkChanged?: () => void
-  readonly onCaption?: (frame: CaptionFrame) => void
-  /** Receives a user transcript only after the core accepted its evidence; it must not block audio. */
-  readonly onUserTranscriptAccepted?: (turn: {
-    readonly confirmed?: boolean
-    readonly text: string
-    readonly originRef: string
-    readonly sessionEpoch: number
-    readonly itemId: string
-    readonly userInputRevision: number
-  }) => void | Promise<void>
-  readonly telemetry?: RealtimeTelemetry
-  /** Generic composition seam; the legacy Guard-named options below remain accepted. */
-  readonly controlledPreemptiveAlertReconnect?: boolean
-  readonly preemptiveAlertHistoryRecovery?: PreemptiveAlertHistoryRecovery
-  readonly preemptiveAlertHistoryPairs?: number
-  /** @deprecated Compatibility options for existing environment/configuration keys. */
-  readonly controlledGuardReconnect?: boolean
-  readonly guardHistoryRecovery?: PreemptiveAlertHistoryRecovery
-  readonly guardHistoryPairs?: number
-  /** Absent means project confirmation is off, and every branch of it is inert. */
-  readonly projectConfirmation?: ProjectConfirmationController
-  /** Independent one-shot Codex permission authority; absent on non-brokered transports. */
-  readonly executorApproval?: ExecutorApprovalController
-  readonly commitProjectOperation?: (
-    operation: ConfirmedProjectOperation,
-  ) => Promise<{
-    readonly accepted: boolean
-    readonly code: string
-    readonly delegate_id?: string
-  }>
-  readonly onProjectView?: (view: ProjectConfirmationView) => void
-  readonly projectViewProvider?: (pendingConfirmation: boolean) => ProjectConfirmationView
-  /**
-   * How long one expiry cleanup step may take before it is abandoned.
-   *
-   * Injectable because the default is five seconds of wall clock, and the behaviour that matters -- what
-   * happens *after* a step is abandoned -- is otherwise only reachable by waiting that long.
-   */
-  readonly projectExpiryStepTimeoutMs?: number
-  /** Where a diagnostic goes. Defaults to stdout, which is what the oracle captures. */
-  readonly onDiagnostic?: (line: string) => void
-}
-
-export interface AgentControllerFactory {
-  create(context: {
-    readonly intake: IntakeOptions | undefined
-  }): AgentController & {readonly intake?: IntakeEventPort | undefined}
-}
-
 /**
  * How long `close` waits for a task that is not responding to its abort signal.
  *
@@ -346,25 +88,76 @@ export interface AgentControllerFactory {
  */
 const SHUTDOWN_GRACE_MS = 250
 
-/** Detached observability at an awaited delivery/event boundary; reading never drives work. */
-export interface DeliverySnapshot {
-  readonly sessionEpoch: number
-  readonly floor: RealtimeSession['floor']['state']
-  readonly providerIdle: boolean
-  readonly foregroundIdle: boolean
-  readonly rendererPaused: boolean
-  readonly activeResponseId: string | null
-  readonly userResponseMode: RealtimeSession['userResponseMode']
-  readonly urgentOwner: Pick<UrgentHostResponseOwner, 'session_epoch' | 'event_id' | 'response_id' | 'delivery_token'> | null
-  readonly queuedEventIds: readonly string[]
-  readonly armedPreemptPriority: number | null
-  readonly preemptiveAlert: PreemptiveAlert | null
-  readonly epochNeedingActivation: number | null
-  readonly acknowledgementPhases: Readonly<Record<string, string>>
-  readonly continuationOrder: readonly string[]
-}
-
 export class RealtimeService {
+  playbackStarted(utteranceId: string, generationEpoch: number): boolean {return this.#host.playbackStarted(utteranceId, generationEpoch)}
+
+  readonly #confirmation: ProjectConfirmationFlow
+
+  get projectConfirmationBlockingForTest(): boolean {return this.#confirmation.projectConfirmationBlockingForTest}
+
+  get confirmationClosingItemsForTest(): readonly string[] {return this.#confirmation.confirmationClosingItemsForTest}
+
+  get confirmationItemsForTest(): readonly string[] {return this.#confirmation.confirmationItemsForTest}
+
+  get confirmationResponsesForTest(): readonly string[] {return this.#confirmation.confirmationResponsesForTest}
+
+  readonly #continuations: ToolContinuations
+
+  get toolCallDispositionsForTest(): readonly (string | null)[] { return this.#continuations.toolCallDispositionsForTest }
+
+  driveContinuations(): Promise<void> { return this.#continuations.driveContinuations() }
+
+  toolCallAcceptances(): readonly ToolCallAcceptanceSnapshot[] { return this.#continuations.toolCallAcceptances() }
+
+  readonly #host: HostDelivery
+
+  get urgentOwnerForTest(): UrgentHostResponseOwner | null { return this.#host.urgentOwnerForTest }
+
+  seedUrgentOwnerForTest(input: {
+    readonly sessionEpoch: number
+    readonly eventId: string
+    readonly responseId: string | null
+  }): void { return this.#host.seedUrgentOwnerForTest(input) }
+
+  takeNextQueuedHostItem(): QueuedHostResponse | undefined { return this.#host.takeNextQueuedHostItem() }
+
+  queuedHostItems(): readonly QueuedHostResponse[] { return this.#host.queuedHostItems() }
+
+  get armedPreemptPriority(): number | null { return this.#host.armedPreemptPriority }
+
+  get pendingHostItemCount(): number { return this.#host.pendingHostItemCount }
+
+  playbackDisconnected(
+    options: {readonly resumeDelivery?: boolean} = {},
+  ): Promise<boolean> { return this.#host.playbackDisconnected(options) }
+
+  playbackStopped(
+    utteranceId: string,
+    generationEpoch: number,
+    playedMs: number | null,
+  ): Promise<boolean> { return this.#host.playbackStopped(utteranceId, generationEpoch, playedMs) }
+
+  playbackCleared(utteranceId: string, generationEpoch: number, playedMs: number | null): boolean { return this.#host.playbackCleared(utteranceId, generationEpoch, playedMs) }
+
+  playbackDone(utteranceId: string, generationEpoch: number, playedMs: number | null): boolean { return this.#host.playbackDone(utteranceId, generationEpoch, playedMs) }
+
+  queueHostItem(
+    intent: HostResponseIntent,
+    options: HostItemOptions = {},
+  ): void { return this.#host.queueHostItem(intent, options) }
+
+  semanticAcknowledgementFor(responseId: string): string | null { return this.#host.semanticAcknowledgementFor(responseId) }
+
+  readonly #projection: ProviderProjection
+
+  projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
+    this.#projection.projectRuntimeEvent(event, currentConversation)
+  }
+
+  onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
+    this.#projection.onSuggestionSelected(suggestion, reason)
+  }
+
   readonly session: RealtimeSession
   readonly #intake: IntakeEventPort | undefined
   #intakeUser: {text: string; origin_ref: string; epoch: number; inputRevision: number; localOnsetRevision: number} | null = null
@@ -376,15 +169,12 @@ export class RealtimeService {
   readonly #clock: Clock
   #unsubscribeCodingProgress: (() => void) | null = null
   readonly #codingProgressNarration: CodingProgressNarrationState
-  readonly #codingProgressQueued = new WeakSet<QueuedHostResponse>()
-  readonly #codingProgressHostEventIds = new Set<string>()
   readonly #tools: CompiledTools
   readonly #providerSchemas: readonly Readonly<Record<string, JsonValue>>[]
   readonly #bridge: RealtimeRuntimeBridge
   readonly #idFactory: () => string
   readonly #onProviderTerminal: (generation: PlaybackGeneration) => void
   readonly #onExecutorState: (state: ExecutorState) => void
-  readonly #onActiveWorkChanged: () => void
   readonly #captionScope = randomUUID()
   readonly #onCaption: ((frame: CaptionFrame) => void) | undefined
   readonly #onUserTranscriptAccepted: RealtimeServiceOptions['onUserTranscriptAccepted']
@@ -393,52 +183,13 @@ export class RealtimeService {
   readonly #controlledPreemptiveAlertReconnect: boolean
   readonly #preemptiveAlertHistoryRecovery: PreemptiveAlertHistoryRecovery
   readonly #preemptiveAlertHistoryPairs: number
-  readonly #projectConfirmation: ProjectConfirmationController | undefined
   readonly #approvalHost: ApprovalHost
   /** The coding-role executor's channel and label, resolved once from the registered manifests. */
   readonly #coding: CodingChannel | null
   readonly #agentRegistry: AgentControllerRegistry
-  /** Public agent name -> host controller; never inferred from runtime manifest metadata. */
-  readonly #agentControllers: ReadonlyMap<string, AgentController>
-  readonly #commitProjectOperation:
-    | ((operation: ConfirmedProjectOperation) => Promise<{
-      readonly accepted: boolean
-      readonly code: string
-      readonly delegate_id?: string
-    }>)
-    | undefined
-  readonly #onProjectView: ((view: ProjectConfirmationView) => void) | undefined
-  readonly #projectViewProvider:
-    | ((pendingConfirmation: boolean) => ProjectConfirmationView)
-    | undefined
-  readonly #projectExpiryStepTimeoutMs: number
-
-  /** A binary min-heap ordered by `compareQueuedHostResponses`, matching the oracle's `heapq`. */
-  #hostItems: QueuedHostResponse[] = []
-  #hostItemSeq = 0
-  #pendingPreemptPriority: number | null = null
-  #urgentDeliveryToken = 0
-  #urgentHostResponseOwner: UrgentHostResponseOwner | null = null
-  #providerEpochNeedingActivation: number | null = null
-  #providerReconnectSourceEpoch: number | null = null
-  #preemptiveAlertToken = 0
-  #preemptiveAlert: PreemptiveAlert | null = null
-  /** The in-flight cancel deadline for the current preemption, if one is armed. */
-  #preemptiveAlertAbort: AbortController | null = null
-  /** Per-generation waits for the renderer to confirm a clear, keyed `utterance:epoch`. */
-  readonly #preemptiveAlertClearDeadlines = new Map<string, AbortController>()
-
-  readonly #deliveryLock = new Mutex()
   readonly #reconnectLock = new Mutex()
   readonly #pendingIngress = new Set<Promise<void>>()
-  /**
-   * CP3: serializes the continuation pass across its two entry points -- provider events and the
-   * delivery loop. Never held together with the delivery lock.
-   */
-  readonly #continuationDriveLock = new Mutex()
   readonly #deliveryReady = new Signal()
-  #rendererHostDeliveryPaused = false
-  #rendererHostDeliveryBoundary: object | null = null
   /**
    * The stop flag, as a real `AbortController`.
    *
@@ -455,94 +206,21 @@ export class RealtimeService {
   #clearingConversation = false
   #clearConversationOperation: Promise<void> | null = null
   #conversationClearRevision = 0
-  #executorState: ExecutorState = 'idle'
-  /** Compact fingerprint of delegate progress for context refresh. */
-  #activeWorkFingerprint = canonicalJson(activeExecutorContextData([]))
-
-  /** Insertion-ordered, oldest evicted: a retry already attempted must not be attempted again. */
-  readonly #uncertainDeliveryRetries = new Map<string, null>()
-  readonly #toolCalls = new Map<string, ToolCallState>()
-  readonly #overflowToolCalls = new Map<string, ToolCallState>()
-  readonly #continuationBatches = new Map<string, ContinuationBatch>()
-  readonly #continuationFifo: string[] = []
-  readonly #semanticAcknowledgements = new Map<string, SemanticAcknowledgement>()
-  /** Responses whose renderer generation was fenced because the user locally took the floor. */
-  readonly #localSpeechInterruptedResponses = new Map<string, null>()
-  /** Provider-visible progress events and their owners, bounded in provider-ledger order. */
-  readonly #delegateHostEvents = new Map<string, string>()
-  /** Best-effort provider cleanup is observed so it cannot reject outside service ownership. */
-  readonly #providerRetirementTasks = new Set<Promise<void>>()
-  readonly #providerRetirementEventIds = new Set<string>()
-  /** Exact standalone delegation acknowledgements superseded by their own terminal handoff. */
-  readonly #semanticAcknowledgementReleaseTasks = new Set<Promise<void>>()
   readonly #audioStarted = new Set<string>()
-  /**
-   * Slots promised to calls admitted but not yet acknowledged.
-   *
-   * Counted against the same bound as the acknowledgements themselves, so two calls admitted back to
-   * back cannot both be promised a slot only one of them can have.
-   */
-  #semanticAcknowledgementReservations = 0
   /** Exact revision-scoped join from provider user items to responses and Memory origins. */
   readonly #userOrigins = new UserOriginBindingLedger(MAX_TRACKED_TOOL_CALLS)
-  /** Tool calls waiting for the transcript that would justify them. */
-  readonly #originDeferredToolCalls: DeferredOriginToolCall[] = []
-  /** R105: delegate id -> the call key waiting on its synchronous result. */
-  readonly #pendingSync = new Map<string, string>()
-  /** A timed-out sync call whose first real late handoff should become one host fact. */
-  readonly #lateSync = new Map<string, string>()
-  /** Policy-free project turn identity state; never shared with Codex approval occupancy. */
-  readonly #projectConfirmationIsolation = new ConfirmationTurnIsolation<ToolCallReady>(
-    MAX_TRACKED_TOOL_CALLS,
-  )
-  /** Later utterances captured while another item owns the same confirmation. */
-  readonly #projectConfirmationShadowItems = new Set<string>()
-  /** Items mid-close: no longer answerable, still blocking tool calls. */
-  readonly #projectConfirmationClosingItems = new Set<string>()
-  /** Bounded carrier cancel/watchdog work, observed so it cannot outlive service shutdown silently. */
-  readonly #projectConfirmationCarrierReleaseTasks = new Set<Promise<void>>()
-  /** Carrier recovery waits here while a newer user turn is still being transcribed. */
-  readonly #projectConfirmationCarrierReconnectAfterUser = new Map<
-    string,
-    {readonly sessionEpoch: number; readonly responseId: string; readonly reason: string}
-  >()
-  /** Epoch whose requested confirmation retry has not revealed its response id yet. */
-  #projectConfirmationPendingQuarantineEpoch: number | null = null
-  readonly #projectConfirmationClosingCalls = new Set<string>()
-  /** Voice decision handlers whose exact tool output must precede expiry cleanup when possible. */
-  readonly #projectConfirmationDecisionGates = new Map<string, Promise<void>>()
-  /** Insertion-ordered so the oldest closed call is the one evicted. */
-  readonly #projectConfirmationClosedCalls = new Map<string, null>()
-  #projectConfirmationDecisionRetry: ProjectConfirmationDecisionRetry | null = null
-  /** Confirmation commits whose terminal user-facing fact has not been selected yet. */
-  readonly #projectConfirmationCommittingLifecycles = new Set<string>()
-  /** Active commits for which the expiry observer owns the terminal fact. */
-  readonly #projectConfirmationExpiryFactOwners = new Set<string>()
-  readonly #projectExpiryBatches: ProjectExpiryBatch[] = []
-  #projectExpiryDraining: Promise<void> | null = null
-  #unsubscribeProjectExpiry: (() => void) | null = null
   #unsubscribeExecutorApproval: (() => void) | null = null
-  /**
-   * The last progress summary spoken for each delegate.
-   *
-   * The same-summary skip is what stops an executor that reports identical progress every few seconds
-   * from making the agent repeat itself. Cleared when the delegate settles, so a later run of the same
-   * id does not inherit a summary it never produced.
-   */
-  readonly #lastProgressSummary = new Map<string, string>()
-  /**
-   * `(epoch, response)` keys whose playback the user demonstrably heard.
-   *
-   * Proof rather than assumption: an acknowledgement is only suppressed as already-said when there is
-   * a record of the turn carrying it having actually been played.
-   */
-  readonly #originDeliveryProofs = new Map<string, null>()
   #awaitingUserOrigin = false
   #userOriginPreexistingResponseId: string | null = null
 
   readonly #onProviderEvent: ((event:RealtimeProviderEvent)=>void)|undefined
   constructor(options: RealtimeServiceOptions) {
     this.#onProviderEvent=options.onProviderEvent
+    // Preserve config capture order when custom controller factories invoke intake callbacks.
+    let commitProjectOperation: RealtimeServiceOptions['commitProjectOperation'] = undefined
+    let onProjectView: RealtimeServiceOptions['onProjectView'] = undefined
+    let projectViewProvider: RealtimeServiceOptions['projectViewProvider'] = undefined
+    let projectExpiryStepTimeoutMs: number | undefined = undefined
     const recovery = options.preemptiveAlertHistoryRecovery ?? options.guardHistoryRecovery ?? 'none'
     if (recovery !== 'none' && recovery !== 'packed') {
       throw new TypeError('unknown preemptive-alert history recovery arm')
@@ -568,7 +246,7 @@ export class RealtimeService {
     this.#idFactory = options.idFactory ?? (() => `host_${randomHex()}`)
     this.#onProviderTerminal = options.onProviderTerminal ?? noop
     this.#onExecutorState = options.onExecutorState ?? noop
-    this.#onActiveWorkChanged = options.onActiveWorkChanged ?? noop
+    const onActiveWorkChanged = options.onActiveWorkChanged ?? noop
     this.#onCaption = options.onCaption
     this.#onUserTranscriptAccepted = options.onUserTranscriptAccepted
     this.#telemetry = options.telemetry
@@ -580,62 +258,48 @@ export class RealtimeService {
       ?? false
     this.#preemptiveAlertHistoryRecovery = recovery
     this.#preemptiveAlertHistoryPairs = pairs
-    this.#projectConfirmation = options.projectConfirmation
+    const projectConfirmation = options.projectConfirmation
     const intake: IntakeOptions | undefined = options.intake === undefined ? undefined : {
       ...options.intake,
+      clock: this.#clock,
+      record: (intake, kind, data) => {
+        if (kind === 'intake.failure') this.#telemetry?.record(kind, {
+          intake_id: intake.intake_id, revision: intake.revision, ...data,
+        })
+        options.intake!.record(intake, kind, data)
+      },
+      onStateChanged: () => this.#projection.publishExecutorState(),
       idFactory: this.#idFactory,
       dispatch: async (intake, stillWanted) => {
         const result = await options.intake!.dispatch(intake, stillWanted)
-        if (result.accepted && result.delegate_id !== null && result.delegate_id !== undefined) {
-          const title = intake.title ?? intake.target?.session_title
-          this.session.registerDelegate(result.delegate_id, {
-            summary: intake.slots.goal.note.slice(0, 240),
-            state: 'running',
-            channel: this.#coding?.channel ?? 'coding',
-            ...(intake.target === null ? {} : {project: intake.target.workspace_display_name}),
-            ...(title === undefined || title === null ? {} : {title}),
-          })
-          this.#telemetry?.record('executor.dispatch', {delegate_id: result.delegate_id})
-          this.#publishExecutorState()
-        }
-        return result
+        return this.#continuations.recordIntakeDispatch(intake, result)
       },
       diagnostic: code => this.#onDiagnostic(`[realtime-diagnostic] ${code}`),
-      invalidateProposal: () => this.#invalidateProjectConfirmation('intake_amended'),
-      fact: (intake, text) => {
+      invalidateProposal: () => this.#confirmation.invalidateProjectConfirmation('intake_amended'),
+      fact: (intake, text, kind) => {
         this.queueHostItem(hostFactIntent({
           kind: 'final', host_item_id: this.#idFactory(),
-          event_id: `intake:${intake.intake_id}:${intake.revision}:${this.#idFactory()}`,
+          event_id: `intake:${intake.intake_id}:${intake.revision}:${kind ?? this.#idFactory()}`,
           content: [...text].slice(0, MAX_HOST_FACT_CHARS).join(''),
         }), {priority: USER_PRIORITY - 1, preemptive: false})
         this.#deliveryReady.set()
       },
       prepare: intake => {
-        if (intake.target === null || this.#projectConfirmation === undefined) throw new TypeError('intake_confirmation_unavailable')
-        const target = intake.target
-        const proposal = this.#projectConfirmation.prepare({
-          action: target.action, workspace_display_name: target.workspace_display_name,
-          workspace_id: target.workspace_id, session_title: target.session_title, session_id: target.session_id,
-          work_order: intake.work_order, origin_ref: intake.origin_ref,
-          intake_id: intake.intake_id, plan_revision: intake.plan_revision!,
-        })
-        this.#syncProjectConfirmationIsolation()
-        this.#publishProjectView()
-        return proposal
+        return this.#confirmation.prepareIntake(intake)
       },
     }
     this.#approvalHost = new ApprovalHost({
       session: this.session, clock: this.#clock, idFactory: this.#idFactory,
       controller: options.executorApproval, telemetry: this.#telemetry,
-      projectBlocking: () => this.#projectConfirmation?.pending === true || this.#projectConfirmation?.committing === true,
+      projectBlocking: () => projectConfirmation?.pending === true || projectConfirmation?.committing === true,
       displayName: () => this.#coding?.display_name ?? '执行器',
       queueHostItem: (intent, options) => this.queueHostItem(intent, options),
       deliveryReady: () => this.#deliveryReady.set(),
       reportDeliveryFailure: failure => this.#reportDeliveryFailure(failure),
-      retireProviderHostEventNow: eventId => this.#retireProviderHostEventNow(eventId),
-      retireProviderHostEvent: eventId => this.#retireProviderHostEvent(eventId),
-      removeQueuedPrompt: id => this.#removeQueuedExecutorApprovalPrompt(id),
-      releaseQuestion: id => this.#releaseExecutorApprovalQuestion(id),
+      retireProviderHostEventNow: eventId => this.#host.retireProviderHostEventNow(eventId),
+      retireProviderHostEvent: eventId => this.#host.retireProviderHostEvent(eventId),
+      removeQueuedPrompt: id => this.#host.removeQueuedExecutorApprovalPrompt(id),
+      releaseQuestion: id => this.#host.releaseExecutorApprovalQuestion(id),
     })
     this.#coding = null
     for (const adapter of options.runtime.executors.values()) {
@@ -644,6 +308,59 @@ export class RealtimeService {
         break
       }
     }
+    this.#host = new HostDelivery({
+      session: this.session, runtime: this.#runtime, clock: this.#clock,
+      telemetry: this.#telemetry, approvalHost: this.#approvalHost,
+      controlledPreemptiveAlertReconnect: this.#controlledPreemptiveAlertReconnect,
+      clearingConversation: () => this.#clearingConversation,
+      stopped: () => this.#stop.signal.aborted,
+      providerFailed: () => this.#providerFailed,
+      wake: () => this.#deliveryReady.set(),
+      intakeFactEligible: (id, epoch) => this.#intake?.factEligible(id, epoch),
+      executorPriority: channel => this.#projection.executorPriority(channel),
+      executorDisplayName: channel => this.#projection.executorDisplayName(channel),
+      idFactory: this.#idFactory, onDiagnostic: this.#onDiagnostic,
+      reportDeliveryFailure: failure => this.#reportDeliveryFailure(failure),
+      responseCarriesPersonalRecall: responseId => this.#continuations.responseCarriesPersonalRecall(responseId),
+      originCanReferenceProof: key => this.#continuations.originCanReferenceProof(key),
+      originHasNonterminalReference: key => this.#continuations.originHasNonterminalReference(key),
+    })
+    this.#confirmation = new ProjectConfirmationFlow({
+      session: this.session, clock: this.#clock, projectConfirmation,
+      approvalHost: this.#approvalHost, coding: this.#coding, telemetry: this.#telemetry,
+      idFactory: this.#idFactory, onDiagnostic: this.#onDiagnostic,
+      intake: () => this.#intake,
+      get commitProjectOperation() {return commitProjectOperation},
+      get onProjectView() {return onProjectView},
+      get projectViewProvider() {return projectViewProvider},
+      get projectExpiryStepTimeoutMs() {return projectExpiryStepTimeoutMs!},
+      userOrigins: {
+        itemForResponse: (epoch, response) => this.#userOrigins.itemForResponse(epoch, response),
+        revisionForItem: (epoch, item) => this.#userOrigins.revisionForItem(epoch, item),
+        hasOriginRef: (epoch, item) => this.#userOrigins.hasOriginRef(epoch, item),
+        bindRetryResponse: input => this.#userOrigins.bindRetryResponse(input),
+      },
+      bindResponseUserOrigin: (epoch, response) => this.#bindResponseUserOrigin(epoch, response),
+      failOriginTranscriptAndRefresh: (epoch, item) => {
+        this.#failUserOriginTranscript(epoch, item)
+        this.#awaitingUserOrigin = this.#userOrigins.hasUnboundRevision(epoch, this.session.userInputRevision)
+        if (!this.#awaitingUserOrigin) this.#userOriginPreexistingResponseId = null
+      },
+      continuations: {
+        takeDeferredForItem: item => this.#continuations.takeDeferredForItem(item),
+        takeConfirmationDeferredCalls: epoch => this.#continuations.takeConfirmationDeferredCalls(epoch),
+        abandonProjectConfirmationContinuation: (epoch, response) => this.#continuations.abandonProjectConfirmationContinuation(epoch, response),
+        releaseDeferredOriginCalls: (item, origin) => this.#continuations.releaseDeferredOriginCalls(item, origin),
+      },
+      reconnectProviderSession: options => this.#reconnectProviderSession(options),
+      deliveryPass: () => this.#deliveryPass(),
+      queueHostItem: (intent, options) => this.queueHostItem(intent, options),
+      wakeDelivery: () => this.#deliveryReady.set(),
+      reportDeliveryFailure: failure => this.#reportDeliveryFailure(failure),
+      stopSignal: () => this.#stop.signal,
+      conversationClearRevision: () => this.#conversationClearRevision,
+      clearingConversation: () => this.#clearingConversation,
+    })
     const controllers = [...(options.agentControllers ?? [])]
     if (options.agentControllerFactory !== undefined) {
       const controller = options.agentControllerFactory.create({intake})
@@ -657,27 +374,75 @@ export class RealtimeService {
     if (!sameAgentDescriptors(this.#agentRegistry.descriptors, options.tools.agent_descriptors)) {
       throw new TypeError('agent controller registry does not match compiled tool descriptors')
     }
-    this.#agentControllers = this.#agentRegistry.controllers
-    this.#commitProjectOperation = options.commitProjectOperation
-    this.#onProjectView = options.onProjectView
-    this.#projectViewProvider = options.projectViewProvider
-    this.#projectExpiryStepTimeoutMs = options.projectExpiryStepTimeoutMs
-      ?? PROJECT_EXPIRY_STEP_TIMEOUT_S * 1_000
+    this.#continuations = new ToolContinuations({
+      session: this.session, host: this.#host, runtime: this.#runtime,
+      bridge: this.#bridge, tools: this.#tools, intake: this.#intake, approvalHost: this.#approvalHost,
+      coding: this.#coding, telemetry: this.#telemetry, idFactory: this.#idFactory,
+      executorPriority: channel => this.#projection.executorPriority(channel),
+      executorDisplayName: channel => this.#projection.executorDisplayName(channel),
+      publishExecutorState: () => this.#projection.publishExecutorState(),
+      queueHostItem: (intent, options) => this.queueHostItem(intent, options),
+      wakeDelivery: () => this.#deliveryReady.set(),
+      userOrigins: {
+        itemForResponse: (epoch, response) => this.#userOrigins.itemForResponse(epoch, response),
+        revisionForItem: (epoch, item) => this.#userOrigins.revisionForItem(epoch, item),
+        originRefForItem: (epoch, item) => this.#userOrigins.originRefForItem(epoch, item),
+        bindRetryResponse: input => this.#userOrigins.bindRetryResponse(input),
+      },
+      confirmTarget: event => this.#confirmation.confirmTarget(event),
+      isProjectConfirmationShadowItem: (epoch, item) => this.#confirmation.isProjectConfirmationShadowItem(epoch, item),
+      closeProjectConfirmationTool: event => this.#confirmation.closeProjectConfirmationTool(event),
+      handleProjectConfirmationDecision: (event, origin) => this.#confirmation.handleProjectConfirmationDecision(event, origin),
+      reconnectProviderSession: options => this.#reconnectProviderSession(options),
+      deliveryPass: () => this.#deliveryPass(),
+      recoverUncertainDelivery: failure => this.#recoverUncertainDelivery(failure),
+      reportDeliveryFailure: failure => this.#reportDeliveryFailure(failure),
+      awaitingUserOrigin: () => this.#awaitingUserOrigin,
+      userOriginPreexistingResponseId: () => this.#userOriginPreexistingResponseId,
+      discardedInputEpoch: () => this.#discardedInputEpoch,
+      stopSignal: () => this.#stop.signal,
+      intakeUser: () => this.#intakeUser,
+      currentUserTurn: (event, origin) => this.#currentUserTurn(event, origin),
+      agentController: name => this.#agentRegistry.controllers.get(name),
+    })
+    commitProjectOperation = options.commitProjectOperation
+    onProjectView = options.onProjectView
+    projectViewProvider = options.projectViewProvider
+    projectExpiryStepTimeoutMs = options.projectExpiryStepTimeoutMs ?? PROJECT_EXPIRY_STEP_TIMEOUT_S * 1_000
     // Subscribed at construction: a proposal can expire before anything else happens, and the observer
     // is the only notice of it.
-    this.#unsubscribeProjectExpiry = options.projectConfirmation?.observeExpiry(() => {
-      const proposalId = this.#projectConfirmation?.lifecycleId
-      this.#projectConfirmationExpired()
-      if (proposalId !== undefined && proposalId !== null) this.#intake?.decline(proposalId)
-    }) ?? null
+    this.#confirmation.subscribeExpiry()
     this.#unsubscribeExecutorApproval = options.executorApproval?.observe(view => {
       this.#approvalHost.syncExecutorApproval(view)
     }) ?? null
     if (options.executorApproval !== undefined) this.#approvalHost.syncExecutorApproval(options.executorApproval.view)
-  }
+
+    this.#projection = new ProviderProjection({
+      session: this.session, runtime: this.#runtime, clock: this.#clock, coding: this.#coding,
+      codingProgressNarration: this.#codingProgressNarration, telemetry: this.#telemetry,
+      idFactory: this.#idFactory,
+      queueHostItem: (intent, options) => this.queueHostItem(intent, options),
+      agentNameForChannel: channel => this.#agentRegistry.agentNameForChannel(channel),
+      clearingConversation: () => this.#clearingConversation,
+      onActiveWorkChanged,
+      onExecutorState: this.#onExecutorState,
+      preparing: () => this.#intake?.preparing === true,
+      onDiagnostic: this.#onDiagnostic,
+      resolveSyncResult: event => this.#continuations.resolveSyncResult(event),
+      expireSyncResult: event => this.#continuations.expireSyncResult(event),
+      hasSemanticAcknowledgement: id => this.#host.hasSemanticAcknowledgement(id),
+      fenceSemanticAcknowledgement: delegate => this.#host.fenceSemanticAcknowledgement(delegate),
+      retireDelegateHostEvents: delegate => this.#host.retireDelegateHostEvents(delegate),
+      rememberDelegateHostEvent: (delegate, event) => this.#host.rememberDelegateHostEvent(delegate, event),
+      rememberCodingProgressHostEvent: event => this.#host.rememberCodingProgressHostEvent(event),
+      coalesceCodingProgress: () => {
+        this.#host.coalesceCodingProgress()
+      },
+    })
+}
 
   get executorState(): ExecutorState {
-    return this.#executorState
+    return this.#projection.executorState
   }
 
   agentNameForChannel(channel: string): string | null { return this.#agentRegistry.agentNameForChannel(channel) }
@@ -710,18 +475,13 @@ export class RealtimeService {
     // user authority must become unusable in the same synchronous turn as the clear request.
     this.#conversationClearRevision += 1
     this.#clearingConversation = true
-    this.#rendererHostDeliveryPaused = true
-    this.#rendererHostDeliveryBoundary = {}
-    this.#preemptiveAlertToken += 1
-    this.#clearPreemptiveAlert()
-    for (const deadline of this.#preemptiveAlertClearDeadlines.values()) deadline.abort()
-    this.#preemptiveAlertClearDeadlines.clear()
+    this.#host.pauseForConversationClear()
     const clearingGeneration = this.session.beginConversationClear()
-    if (clearingGeneration !== null) this.#startPreemptiveAlertClearDeadline(clearingGeneration)
+    if (clearingGeneration !== null) this.#host.startPreemptiveAlertClearDeadline(clearingGeneration)
     this.#intake?.cancel()
     this.#intakeUser = null
-    this.#urgentHostResponseOwner = null
-    this.#invalidateProjectConfirmation('conversation_cleared')
+    this.#host.releaseUrgentOwner()
+    this.#confirmation.invalidateProjectConfirmation('conversation_cleared')
     do {
       this.#approvalHost.invalidateExecutorApproval('conversation_cleared')
     } while (this.#approvalHost.pending)
@@ -731,8 +491,7 @@ export class RealtimeService {
         if (this.#clearConversationOperation !== operation) return
         this.#clearConversationOperation = null
         this.#clearingConversation = false
-        this.#rendererHostDeliveryPaused = false
-        this.#rendererHostDeliveryBoundary = null
+        this.#host.resumeAfterConversationClear()
         this.#deliveryReady.set()
       },
       failure => {
@@ -754,7 +513,7 @@ export class RealtimeService {
     // The synchronous clear fence prevents new admissions while existing handlers settle.
     await Promise.allSettled([...this.#pendingIngress])
     await this.#reconnectLock.run(async () => {
-        await this.#deliveryLock.run(async () => {
+        await this.#host.withDeliveryLock(async () => {
           if (this.#runtime.clearConversation === undefined) {
             throw new Error('runtime conversation clear is unavailable')
           }
@@ -763,40 +522,15 @@ export class RealtimeService {
           await this.session.resetConversation({tools: structuredClone(this.#providerSchemas)})
           this.#userOrigins.beginEpoch(this.session.sessionEpoch)
           this.#clearCaptions()
-          this.#publishExecutorState()
+          this.#projection.publishExecutorState()
         })
       })
-  }
-
-  /** What the host told the provider about each live tool call, in admission order. */
-  toolCallAcceptances(): readonly ToolCallAcceptanceSnapshot[] {
-    return [...this.#toolCalls.entries()].map(([key, state]) => {
-      const separator = key.indexOf(':')
-      return {
-        session_epoch: Number(key.slice(0, separator)),
-        call_id: key.slice(separator + 1),
-        provider_response_id: state.provider_response_id,
-        acceptance: state.acceptance,
-      }
-    })
-  }
-
-  /** The acknowledgement bound to one provider response, if it is the one being spoken. */
-  semanticAcknowledgementFor(responseId: string): string | null {
-    for (const current of this.#semanticAcknowledgements.values()) {
-      if (current.phase === 'bound' && current.response_id === responseId) return current.event_id
-    }
-    return null
   }
 
   #subscribeCodingProgress(): void {
     if (this.#unsubscribeCodingProgress !== null) return
     this.#unsubscribeCodingProgress = this.#codingProgressNarration.observe(() => {
-      for (const eventId of this.#codingProgressHostEventIds) this.#retireProviderHostEvent(eventId)
-      const retained = this.#hostItems.filter(item => !this.#codingProgressQueued.has(item))
-      this.#hostItems.length = 0
-      this.#hostItems.push(...retained.sort(compareQueuedHostResponses))
-      this.#codingProgressHostEventIds.clear()
+      this.#host.retireCodingProgress()
     })
   }
 
@@ -807,7 +541,7 @@ export class RealtimeService {
     if (Number.isInteger(this.session.sessionEpoch) && this.session.sessionEpoch >= 0) {
       this.#userOrigins.beginEpoch(this.session.sessionEpoch)
     }
-    this.#syncProjectConfirmationIsolation()
+    this.#confirmation.syncProjectConfirmationIsolation()
     this.#approvalHost.sync()
     this.#unsubscribe = this.#runtime.observe((event, currentConversation = true) => {
       this.projectRuntimeEvent(event, currentConversation)
@@ -849,24 +583,18 @@ export class RealtimeService {
     this.#unsubscribeCodingProgress?.()
     this.#unsubscribeCodingProgress = null
     this.#stop.abort()
-    this.#invalidateProjectConfirmation('service_closed')
+    this.#confirmation.invalidateProjectConfirmation('service_closed')
     this.#approvalHost.invalidateExecutorApproval('service_closed')
-    if (this.#unsubscribeProjectExpiry !== null) {
-      this.#unsubscribeProjectExpiry()
-      this.#unsubscribeProjectExpiry = null
-    }
+    this.#confirmation.unsubscribeExpiry()
     if (this.#unsubscribeExecutorApproval !== null) {
       this.#unsubscribeExecutorApproval()
       this.#unsubscribeExecutorApproval = null
     }
-    this.#projectExpiryBatches.length = 0
+    this.#confirmation.discardPendingExpiries()
     // The drain is shutdown-owned work. A promise cannot be cancelled, so its continuations check the
     // signal instead -- and this waits, bounded, so a reconnect cannot land after `close` returned.
-    const draining = this.#projectExpiryDraining
-    this.#providerEpochNeedingActivation = null
-    this.#providerReconnectSourceEpoch = null
-    this.#urgentHostResponseOwner = null
-    this.#preemptiveAlert = null
+    const draining = this.#confirmation.expiryDrain()
+    this.#host.close()
     this.#deliveryReady.set()
     if (this.#unsubscribe !== null) {
       this.#unsubscribe()
@@ -888,10 +616,10 @@ export class RealtimeService {
     }
     const backgroundTasks = [
       ...this.#tasks,
-      ...this.#providerRetirementTasks,
+      ...this.#host.retirementTasks(),
       ...this.#approvalHost.pendingTasks,
-      ...this.#semanticAcknowledgementReleaseTasks,
-      ...this.#projectConfirmationCarrierReleaseTasks,
+      ...this.#host.acknowledgementReleaseTasks(),
+      ...this.#confirmation.carrierReleaseTasks(),
     ]
     const tasks = draining === null ? backgroundTasks : [...backgroundTasks, draining]
     this.#tasks = []
@@ -968,16 +696,7 @@ export class RealtimeService {
     const generation = this.session.currentGeneration
     if (generation !== null) {
       const key = callKey(generation.session_epoch, generation.response_id)
-      this.#localSpeechInterruptedResponses.delete(key)
-      this.#localSpeechInterruptedResponses.set(key, null)
-      while (
-        this.#localSpeechInterruptedResponses.size
-        > MAX_TRACKED_SEMANTIC_ACKNOWLEDGEMENTS
-      ) {
-        const oldest = this.#localSpeechInterruptedResponses.keys().next()
-        if (oldest.done) break
-        this.#localSpeechInterruptedResponses.delete(oldest.value)
-      }
+      this.#host.rememberLocalSpeechInterruption(key)
     }
     this.#approvalHost.releaseQuestionOnOnset()
     await this.session.localSpeechOnset(speechId)
@@ -985,93 +704,7 @@ export class RealtimeService {
 
   /** Settle the exact proposal shown by the renderer; the controller remains the sole authority. */
   projectConfirmationDecision(proposalId: string, confirmed: boolean): Promise<void> {
-    return this.#trackIngress(() => this.#projectConfirmationDecision(proposalId, confirmed))
-  }
-
-  async #projectConfirmationDecision(proposalId: string, confirmed: boolean): Promise<void> {
-    const controller = this.#projectConfirmation
-    const lifecycleId = controller?.lifecycleId ?? 'none'
-    this.#telemetry?.record('project_confirmation.ui_decision_requested', {
-      proposal_id: proposalId,
-      confirmed,
-      lifecycle_id: lifecycleId,
-    })
-    if (controller === undefined) return
-    const outcome = controller.acceptDirectDecision({proposalId, confirmed})
-    if (outcome.kind === 'cancelled') this.#intake?.decline(proposalId)
-    if (outcome.kind === 'ignored') {
-      this.#telemetry?.record('project_confirmation.ui_decision_refused', {
-        proposal_id: proposalId,
-        reason: 'stale_or_not_pending',
-      })
-      return
-    }
-    this.#publishProjectView()
-
-    // A click wins the same one-shot authority race as a function call. Close every voice carrier
-    // before awaiting commit I/O so a late provider call cannot act on the settled proposal.
-    const reserved = this.#projectConfirmationIsolation.reservation
-    const items = reserved === null
-      ? []
-      : [{sessionEpoch: reserved.sessionEpoch, id: reserved.itemId}]
-    const retry = this.#projectConfirmationDecisionRetry
-    const reconnectOutstandingRetry = retry?.requested === true
-      && retry.retry_response_id === null
-      && parseCallKey(retry.item_key).sessionEpoch === this.session.sessionEpoch
-    if (reconnectOutstandingRetry) {
-      this.#projectConfirmationPendingQuarantineEpoch = this.session.sessionEpoch
-    }
-    for (const item of items) this.#beginProjectConfirmationClose(item.sessionEpoch, item.id)
-    if (reconnectOutstandingRetry) {
-      this.#projectConfirmationPendingQuarantineEpoch = this.session.sessionEpoch
-    }
-    await this.#quarantineProjectConfirmationResponses(this.session.sessionEpoch)
-
-    let state = outcome.kind === 'confirmed' ? 'accepted' : 'refused'
-    let text = outcome.response_text
-    let expiryOwnsFact = false
-    try {
-      for (const item of items) await this.#closeConfirmationDeferredCalls(item.id)
-      if (outcome.kind === 'confirmed' && outcome.operation !== null) {
-        const committed = await this.#commitConfirmedProjectOperation(outcome.operation)
-        state = committed.state
-        text = committed.text
-        expiryOwnsFact = committed.expiryOwnsFact
-      }
-      if (reconnectOutstandingRetry) {
-        try {
-          await this.#reconnectProviderSession({
-            reason: 'project_confirmation_ui_retry',
-            expectedEpoch: this.session.sessionEpoch,
-          })
-        } catch (failure) {
-          this.#reportDeliveryFailure(failure instanceof RealtimeDeliveryError
-            ? failure
-            : new RealtimeDeliveryError(String(failure)))
-        }
-      }
-    } finally {
-      for (const item of items) this.#endProjectConfirmationClose(item.sessionEpoch, item.id)
-      this.#projectConfirmationShadowItems.clear()
-      this.#projectConfirmationClosingItems.clear()
-      this.#projectConfirmationDecisionRetry = null
-      this.#projectConfirmationIsolation.setResponseFencePending(false)
-    }
-    // Expiry publishes through its observer-owned cleanup batch. Queuing here as well would create
-    // two differently keyed host facts for the same deadline transition.
-    if (outcome.kind !== 'expired' && !expiryOwnsFact && text !== null && text !== '') {
-      this.#queueProjectConfirmationFact(
-        text,
-        lifecycleId,
-        `ui-decision:${outcome.kind}:${state}`,
-      )
-    }
-    this.#publishProjectView()
-    this.#telemetry?.record('project_confirmation.ui_decision_completed', {
-      proposal_id: proposalId,
-      outcome: outcome.kind,
-      state,
-    })
+    return this.#trackIngress(() => this.#confirmation.projectConfirmationDecision(proposalId, confirmed))
   }
 
   /** Renderer clicks are direct local-user authority on the same one-shot controller as voice. */
@@ -1082,89 +715,6 @@ export class RealtimeService {
 
   async waitStopped(): Promise<void> {
     await Promise.allSettled(this.#tasks)
-  }
-
-  /**
-   * Queue one host fact for delivery when the floor allows it.
-   *
-   * The priority is clamped below `USER_PRIORITY`: nothing the host says may outrank the user, and a
-   * caller that passes a higher number is expressing urgency rather than claiming precedence over the
-   * person in the room.
-   */
-  queueHostItem(
-    intent: HostResponseIntent,
-    options: {
-      readonly semanticEventId?: string | null
-      readonly priority?: number
-      readonly preemptive?: boolean
-      /** A monitor policy has authorized this as a preemptive alert. */
-      readonly preemptiveAlert?: boolean
-      readonly preemptiveAlertDelegateId?: string | null
-      readonly owner?: HostItemOwner | null
-      readonly expiresAt?: number | null
-    } = {},
-  ): void {
-    if (this.#clearingConversation) return
-    const priority = options.priority ?? 50
-    const preemptive = options.preemptive ?? false
-    const preemptiveAlert = options.preemptiveAlert ?? false
-    const effectivePriority = Math.min(priority, USER_PRIORITY - 1)
-    const preemptiveAlertDelegateId = options.preemptiveAlertDelegateId ?? null
-    const preemptiveAlertActivation: PreemptiveAlertActivationAuthority | null = preemptiveAlertDelegateId === null
-      ? null
-      : {
-        delegate_id: preemptiveAlertDelegateId,
-        event_id: intent.item.event_id,
-        source_epoch: this.session.sessionEpoch,
-      }
-    this.#telemetry?.record('hostitem.queued', {event_id: intent.item.event_id})
-    this.#hostItemSeq += 1
-    const queued: QueuedHostResponse = {
-      sortKey: [-effectivePriority, preemptive ? -1 : 0, this.#hostItemSeq],
-      intent,
-      priority: effectivePriority,
-      preemptive,
-      preemptive_alert: preemptiveAlert,
-      seq: this.#hostItemSeq,
-      queued_at: this.#clock.now(),
-      semantic_event_id: options.semanticEventId ?? null,
-      preemptive_alert_activation: preemptiveAlertActivation,
-      owner: options.owner ?? null,
-      expires_at: options.expiresAt ?? null,
-    }
-    if (this.#codingProgressHostEventIds.has(intent.item.event_id)) this.#codingProgressQueued.add(queued)
-    heapPush(this.#hostItems, queued)
-    if (preemptive) this.#armPreempt(effectivePriority)
-    this.#deliveryReady.set()
-  }
-
-  #requeueHostItem(queued: QueuedHostResponse): void {
-    this.#telemetry?.record('hostitem.queued', {event_id: queued.intent.item.event_id})
-    heapPush(this.#hostItems, queued)
-    if (queued.preemptive) this.#armPreempt(queued.priority)
-    this.#deliveryReady.set()
-  }
-
-  #armPreempt(priority: number): void {
-    const pending = this.#pendingPreemptPriority
-    this.#pendingPreemptPriority = pending === null ? priority : Math.max(priority, pending)
-  }
-
-  /** Recompute the armed preempt priority from what is actually still queued. */
-  #recomputePreemptPriority(): void {
-    const priorities = this.#hostItems
-      .filter(candidate => candidate.preemptive)
-      .map(candidate => candidate.priority)
-    this.#pendingPreemptPriority = priorities.length === 0 ? null : Math.max(...priorities)
-  }
-
-  /** Generic urgent items need the legacy priority band; monitor alerts carry explicit policy authority. */
-  #preemptEligible(queued: QueuedHostResponse): boolean {
-    return queued.preemptive && (queued.preemptive_alert || queued.priority >= PREEMPT_MIN_PRIORITY)
-  }
-
-  #hasEligiblePreempt(): boolean {
-    return this.#hostItems.some(queued => this.#preemptEligible(queued))
   }
 
   /**
@@ -1199,16 +749,9 @@ export class RealtimeService {
       this.#failUncertainDelivery()
       return
     }
-    if (this.#uncertainDeliveryRetries.has(failure.host_item_id)) {
+    if (!this.#host.admitUncertainDeliveryRetry(failure.host_item_id)) {
       this.#failUncertainDelivery()
       return
-    }
-    this.#uncertainDeliveryRetries.delete(failure.host_item_id)
-    this.#uncertainDeliveryRetries.set(failure.host_item_id, null)
-    while (this.#uncertainDeliveryRetries.size > MAX_UNCERTAIN_DELIVERY_RETRIES) {
-      const oldest = this.#uncertainDeliveryRetries.keys().next()
-      if (oldest.done === true) break
-      this.#uncertainDeliveryRetries.delete(oldest.value)
     }
     try {
       const reconnected = await this.#reconnectProviderSession({
@@ -1228,8 +771,7 @@ export class RealtimeService {
   #failUncertainDelivery(): void {
     this.#onDiagnostic('[realtime-diagnostic] uncertain_delivery_exhausted')
     this.#providerFailed = true
-    this.#urgentHostResponseOwner = null
-    this.#preemptiveAlert = null
+    this.#host.releaseFailedDelivery()
     this.#stop.abort()
     this.#deliveryReady.set()
   }
@@ -1247,257 +789,7 @@ export class RealtimeService {
    * its own, and CP3 says the two are never held together.
    */
   async #deliveryPass(): Promise<void> {
-    let shouldRedriveContinuations = false
-    await this.#deliveryLock.run(async () => {
-      if (this.session.releaseStaleUserHold(USER_HOLD_MAX_S)) {
-        this.#onDiagnostic('[realtime-diagnostic] floor_stale_hold_released')
-      }
-      if (this.#rendererHostDeliveryPaused) return
-      const eligiblePreemptWasArmed = this.#hasEligiblePreempt()
-      await this.#maybePreemptLocked()
-      if (this.session.userResponseMode === 'requested') {
-        await this.session.requestPendingUserResponse()
-      }
-      await this.#flushHostItemsLocked()
-      shouldRedriveContinuations = eligiblePreemptWasArmed
-        && (
-          !this.#hasEligiblePreempt()
-        )
-        && this.session.foregroundIdle
-        && this.session.floor.state !== 'user_speaking'
-    })
-    if (shouldRedriveContinuations) await this.driveContinuations()
-  }
-
-  /**
-   * Arbitrate a preemptive host item against whatever the agent is saying.
-   *
-   * Every early return here is a reason *not* to interrupt, and they are checked before any preemptive alert
-   * state is touched so the ordinary path never reaches the unported arbitration.
-   */
-  async #maybePreemptLocked(): Promise<void> {
-    if (!this.#hasEligiblePreempt()) return
-    if (this.session.floor.state === 'user_speaking') return
-    if (this.session.foregroundIdle) return
-    if (this.#urgentHostResponseOwner !== null) return
-    if (this.#preemptiveAlert !== null) return
-    const queued = this.#hostItems
-      .filter(candidate => this.#preemptEligible(candidate))
-      .sort(compareQueuedHostResponses)
-      .at(0)
-    if (queued === undefined) return
-
-    this.#preemptiveAlertToken += 1
-    const preemption: PreemptiveAlert = {
-      token: this.#preemptiveAlertToken,
-      session_epoch: this.session.sessionEpoch,
-      event_id: queued.intent.item.event_id,
-      old_response_id: this.session.activeProviderResponseId,
-      old_generation: this.session.currentGeneration,
-      queued_at: queued.queued_at,
-      cancel_sent: false,
-      deadline_fired: false,
-      replacement_terminal: false,
-      reconnect_permit_consumed: false,
-      reconnect_disallowed: false,
-      reconnect_aborted: false,
-    }
-    this.#preemptiveAlert = preemption
-    // Armed before the await: the provider may never confirm the cancel, and the deadline is what
-    // stops the alert waiting behind a turn that will not stop.
-    const abort = new AbortController()
-    this.#preemptiveAlertAbort = abort
-    void this.#firePreemptiveAlertDeadline(preemption)
-    this.#telemetry?.record('guard.preempt_started', {})
-    let preempted: boolean
-    try {
-      preempted = await this.session.hostPreempt()
-    } catch (cause) {
-      // The preemption never happened, so its deadline must not fire against a session that is still
-      // speaking normally.
-      this.#clearPreemptiveAlert(preemption.token)
-      throw cause
-    }
-    if (!preempted) {
-      this.#clearPreemptiveAlert(preemption.token)
-      return
-    }
-    // The session may have learned the response id only while preempting -- a turn that was still
-    // starting when the alert arrived.
-    const responseId = this.session.activeProviderResponseId
-    const current = this.#preemptiveAlert
-    if (
-      responseId !== null
-      && current !== null
-      && current.token === preemption.token
-      && this.session.providerTurnPhase(responseId) === 'cancel_requested'
-    ) {
-      if (current.old_response_id === null) {
-        this.#preemptiveAlert = {...current, old_response_id: responseId}
-      }
-      this.#recordPreemptiveAlertCancelSent(responseId)
-    }
-  }
-
-  /**
-   * Deliver from the head of the queue while the floor allows it.
-   *
-   * Stops at the first item that cannot go now rather than scanning past it: the heap order *is* the
-   * delivery order, and skipping a blocked head to deliver a lower-priority item behind it would
-   * reorder what the user hears.
-   */
-  async #flushHostItemsLocked(): Promise<void> {
-    while (this.#hostItems.length > 0) {
-      const queued = this.#hostItems[0]!
-      if (this.#executorApprovalBlocksSemanticAcknowledgement(queued)) break
-      if (!this.#queuedHostItemEligible(queued)) {
-        heapPop(this.#hostItems)
-        if (queued.preemptive) this.#recomputePreemptPriority()
-        continue
-      }
-      const preemptiveOverlap = this.#preemptiveAlertOverlapAllowed(queued)
-      const ordinaryDelivery = this.session.foregroundIdle && this.session.floor.state === 'idle'
-      if (!preemptiveOverlap && !ordinaryDelivery) break
-      heapPop(this.#hostItems)
-      const userActivation = this.#preemptiveAlertActivationRequired(queued)
-      let eligibilityRevoked = false
-      const responseAllowed = (): boolean => {
-        const eligible = this.#queuedHostItemEligible(queued)
-        if (!eligible) eligibilityRevoked = true
-        return eligible
-      }
-      let delivery
-      try {
-        if (userActivation) {
-          // A reconnected session will not speak until something user-shaped arrives, so a preemptive-alert fact
-          // crossing a reconnect has to carry that activation or it lands in a session that never
-          // responds.
-          delivery = await this.session.deliverHostResponse(queued.intent, {
-            responseAllowed,
-            asUserActivation: true,
-          })
-        } else if (preemptiveOverlap) {
-          const preemption = this.#preemptiveAlert
-          // Only a permit-consuming preemption gets a confirmation timeout: it is speaking into a
-          // session created for it, where waiting indefinitely would strand the alert.
-          const confirmationTimeout = preemption !== null
-            && preemption.reconnect_permit_consumed
-            && preemption.event_id === queued.intent.item.event_id
-            ? 0.5
-            : null
-          delivery = confirmationTimeout === null
-            ? await this.session.deliverPreemptiveHostResponse(queued.intent, {responseAllowed})
-            : await this.session.deliverPreemptiveHostResponse(queued.intent, {
-              confirmationTimeout,
-              responseAllowed,
-            })
-        } else {
-          delivery = await this.session.deliverHostResponse(queued.intent, {responseAllowed})
-        }
-      } catch (cause) {
-        // Put it back before propagating: a delivery that threw has not been delivered, and dropping
-        // it here would lose a fact the model was supposed to receive.
-        heapPush(this.#hostItems, queued)
-        throw cause
-      }
-      const delivered = delivery.accepted
-      if (
-        !delivered
-        && eligibilityRevoked
-        && delivery.injectionEpoch === this.session.sessionEpoch
-      ) {
-        await this.#retireProviderHostEventNow(queued.intent.item.event_id)
-      }
-      if (delivered && userActivation) {
-        this.#providerEpochNeedingActivation = null
-        this.#providerReconnectSourceEpoch = null
-      }
-      if (queued.preemptive) this.#recomputePreemptPriority()
-      if (
-        delivered
-        && queued.preemptive
-        && !this.#stop.signal.aborted
-        && !this.#providerFailed
-        && delivery.injectionEpoch === this.session.sessionEpoch
-      ) {
-        // The owner is what makes the alert's audio attributable until it is played or cleared.
-        this.#urgentDeliveryToken += 1
-        this.#urgentHostResponseOwner = {
-          delivery_token: this.#urgentDeliveryToken,
-          session_epoch: delivery.injectionEpoch,
-          event_id: queued.intent.item.event_id,
-          queued,
-          response_id: null,
-          generation: null,
-        }
-      }
-      if (delivered && queued.semantic_event_id !== null) {
-        const acknowledgement = this.#semanticAcknowledgements.get(queued.semantic_event_id)
-        if (acknowledgement?.phase === 'queued') acknowledgement.phase = 'requested'
-      }
-      if (delivered) {
-        this.#telemetry?.record('hostitem.injected', {event_id: queued.intent.item.event_id})
-        // One delivery per pass: the floor state this loop tested is now stale, and the next pass
-        // re-reads it rather than assuming the item just injected left the floor unchanged.
-        break
-      }
-    }
-  }
-
-  /** Revalidate lifecycle eligibility at the final provider boundary. */
-  #queuedHostItemEligible(queued: QueuedHostResponse): boolean {
-    const eventId = queued.intent.item.event_id
-    if (this.#codingProgressQueued.has(queued) && !this.#codingProgressHostEventIds.has(eventId)) return false
-    if (eventId.startsWith('intake:') && this.#intake?.factEligible(eventId, this.session.sessionEpoch) !== true) return false
-    if (eventId.startsWith('approval:') && !this.#approvalHost.factEligible(eventId)) return false
-    if (queued.semantic_event_id !== null) {
-      const acknowledgement = this.#semanticAcknowledgements.get(queued.semantic_event_id)
-      if (
-        acknowledgement?.phase === 'cancelled'
-        || acknowledgement?.phase === 'delivered'
-      ) return false
-    }
-    if (queued.owner !== null) {
-      const state = this.session.delegateState(queued.owner.delegate_id)
-      if (state !== undefined && state !== 'running') return false
-    }
-    return queued.expires_at === null || this.#clock.now() < queued.expires_at
-  }
-
-  /** A pending permission question owns the foreground ahead of any generic startup receipt. */
-  #executorApprovalBlocksSemanticAcknowledgement(queued: QueuedHostResponse): boolean {
-    return this.#approvalHost.blocksSemanticAcknowledgement(queued.semantic_event_id)
-  }
-
-  /** Whether this queued item is the captured preemptive alert the current handoff is waiting to deliver. */
-  #preemptiveAlertOverlapAllowed(queued: QueuedHostResponse): boolean {
-    const preemption = this.#preemptiveAlert
-    return preemption !== null
-      && queued.preemptive
-      && queued.intent.item.event_id === preemption.event_id
-      && preemption.session_epoch === this.session.sessionEpoch
-      && this.session.providerIdle
-      && this.session.floor.state !== 'user_speaking'
-  }
-
-  /**
-   * Whether this item has to be injected as a user activation.
-   *
-   * A reconnected provider session will not speak until something user-shaped arrives, so a preemptive alert
-   * fact that crosses a reconnect has to carry that activation or it is delivered into a session
-   * that never responds.
-   */
-  #preemptiveAlertActivationRequired(queued: QueuedHostResponse): boolean {
-    const authority = queued.preemptive_alert_activation
-    if (authority?.event_id !== queued.intent.item.event_id) return false
-    const authorized = queued.intent.item.event_id === `final:${authority.delegate_id}`
-      || queued.intent.item.event_id.startsWith(`observation:${authority.delegate_id}:`)
-    if (!authorized) return false
-    return this.#providerEpochNeedingActivation === this.session.sessionEpoch
-      || (
-        this.#providerReconnectSourceEpoch !== null
-        && this.#providerReconnectSourceEpoch !== this.session.sessionEpoch
-      )
+    if (await this.#host.deliveryPass()) await this.driveContinuations()
   }
 
   /** Blank dead-epoch speculative text on both roles after a reconnect. */
@@ -1511,496 +803,21 @@ export class RealtimeService {
 
   /** Drop every service projection that could make the fresh provider epoch describe old dialogue. */
   #resetConversationLedgers(): void {
-    this.#hostItems.length = 0
-    this.#hostItemSeq = 0
-    this.#pendingPreemptPriority = null
-    this.#urgentDeliveryToken += 1
-    this.#urgentHostResponseOwner = null
-    this.#providerEpochNeedingActivation = null
-    this.#providerReconnectSourceEpoch = null
-    this.#preemptiveAlertToken += 1
-    this.#preemptiveAlertAbort?.abort()
-    this.#preemptiveAlertAbort = null
-    this.#preemptiveAlert = null
-    this.#uncertainDeliveryRetries.clear()
-    this.#toolCalls.clear()
-    this.#overflowToolCalls.clear()
-    this.#continuationBatches.clear()
-    this.#continuationFifo.length = 0
-    this.#semanticAcknowledgements.clear()
-    this.#semanticAcknowledgementReservations = 0
-    this.#localSpeechInterruptedResponses.clear()
-    this.#delegateHostEvents.clear()
-    this.#providerRetirementEventIds.clear()
+    this.#host.resetDelivery()
+    this.#host.resetUncertainDeliveryRetries()
+    this.#continuations.resetCalls()
+    this.#host.resetAcknowledgements()
     this.#audioStarted.clear()
-    this.#originDeferredToolCalls.length = 0
-    this.#pendingSync.clear()
-    this.#lateSync.clear()
-    this.#projectConfirmationIsolation.invalidate()
-    this.#projectConfirmationShadowItems.clear()
-    this.#projectConfirmationClosingItems.clear()
-    this.#projectConfirmationCarrierReconnectAfterUser.clear()
-    this.#projectConfirmationPendingQuarantineEpoch = null
-    this.#projectConfirmationClosingCalls.clear()
-    this.#projectConfirmationDecisionGates.clear()
-    this.#projectConfirmationClosedCalls.clear()
-    this.#projectConfirmationDecisionRetry = null
-    this.#projectConfirmationCommittingLifecycles.clear()
-    this.#projectConfirmationExpiryFactOwners.clear()
-    this.#projectExpiryBatches.length = 0
-    this.#lastProgressSummary.clear()
-    this.#originDeliveryProofs.clear()
+    this.#continuations.resetDeferredAndSync()
+    this.#confirmation.reset()
+    this.#projection.reset()
+    this.#host.resetOriginProofs()
     this.#awaitingUserOrigin = false
     this.#userOriginPreexistingResponseId = null
     this.#intakeUser = null
     this.#localSpeechOnsetRevision = 0
     this.#lastLocalSpeechOnsetId = null
     this.#deliveryReady.clear()
-  }
-
-  /**
-   * CP3: both the provider stream and the delivery loop drive continuations.
-   *
-   * The phase check inside cannot stop a second entrant on its own, because the pass awaits the
-   * provider partway through -- so the whole pass is serialized instead.
-   */
-  async driveContinuations(): Promise<void> {
-    await this.#continuationDriveLock.run(async () => {
-      await this.#driveContinuationsLocked()
-    })
-  }
-
-  /**
-   * Whether a continuation may be requested right now.
-   *
-   * Two reasons not to. The user speaking outranks anything the agent wants to say. And an armed
-   * preemption means something urgent is about to interrupt, so starting a turn now would produce one
-   * that is immediately cut off.
-   */
-  #continuationRequestIsBlocked(): boolean {
-    return this.#rendererHostDeliveryPaused
-      || this.session.floor.state === 'user_speaking'
-      || (
-        this.#hasEligiblePreempt()
-      )
-  }
-
-  /**
-   * Give the model a turn to speak about finished tool work, one batch at a time.
-   *
-   * Strictly FIFO and strictly one in flight. The FIFO is why the agent narrates work in the order it
-   * was asked for rather than the order it finished; the single-flight check is why it does not talk
-   * over itself. Both are enforced by looking only at the head of the queue -- a batch that is not
-   * ready blocks the ones behind it deliberately, because speaking about later work first would
-   * describe a sequence the user did not ask for.
-   *
-   * Every `return` here leaves the batch where it is, to be retried when something changes. Every
-   * `continue` has popped a batch that will never speak.
-   */
-  async #driveContinuationsLocked(): Promise<void> {
-    if (
-      this.#hasEligiblePreempt()
-    ) {
-      return
-    }
-    // One turn in flight at a time. Checked across all batches rather than just the head, because a
-    // batch can still be speaking after its own key left the front of the queue.
-    for (const batch of this.#continuationBatches.values()) {
-      if (batch.phase === 'requested' || batch.phase === 'bound') return
-    }
-
-    while (this.#continuationFifo.length > 0) {
-      const head = this.#continuationFifo[0]!
-      const batch = this.#continuationBatches.get(head)
-      if (batch === undefined) {
-        this.#continuationFifo.shift()
-        continue
-      }
-      if (batch.phase === 'terminal' || batch.phase === 'abandoned') {
-        this.#continuationFifo.shift()
-        continue
-      }
-      if (batch.phase !== 'ready') return
-
-      const abandoning = batch.origin_status === 'cancelled' || batch.origin_status === 'failed'
-      if (!abandoning) {
-        // R105: a sync member is still awaiting its Handoff or Deadline. The batch stays unready
-        // without popping or requesting -- speaking now would describe a result that does not exist.
-        for (const key of batch.call_keys) {
-          if (this.#toolCallState(key)?.sync === 'pending') return
-        }
-      }
-
-      // The provider is holding a slot for every tool result in this batch. They are injected before
-      // the turn is requested, and before the abandon path too: an abandoned batch still owes the
-      // provider its results, or the protocol stalls waiting for them.
-      const intents: HostResponseIntent[] = []
-      for (const key of batch.call_keys) {
-        const state = this.#toolCallState(key)
-        if (state === undefined) continue
-        if (state.output === 'pending') {
-          await this.session.injectToolOutput(state.acceptance.host_item)
-          state.output = 'confirmed'
-        }
-        intents.push(state.acceptance.response_intent)
-      }
-
-      if (abandoning) {
-        this.#abandonBatch(batch)
-        this.#continuationFifo.shift()
-        continue
-      }
-      if (intents.length === 0) {
-        // Every member has been pruned out from under the batch, so there is nothing to speak about.
-        batch.phase = 'abandoned'
-        this.#continuationFifo.shift()
-        continue
-      }
-      if (this.#continuationRequestIsBlocked()) return
-
-      const requestResult = await this.session.requestToolContinuation(intents, {
-        originSpoken: this.#batchOriginWasDelivered(batch),
-      })
-      // Retryable means the provider could not take it *now*: the batch keeps its place and the next
-      // pass tries again. Rejected means it never will.
-      if (requestResult === 'retryable') return
-      if (requestResult === 'rejected') {
-        this.#abandonBatch(batch)
-        this.#continuationFifo.shift()
-        continue
-      }
-      batch.phase = 'requested'
-      for (const key of batch.call_keys) {
-        const state = this.#toolCallState(key)
-        if (state !== undefined) state.continuation = 'requested'
-      }
-      return
-    }
-  }
-
-  /**
-   * Give up on a batch, and settle what each member is owed.
-   *
-   * The final disposition distinguishes three things a caller cares about: work that was never
-   * dispatched is `superseded`, work the bridge refused is `refused`, and work that ran but will not
-   * be spoken about is `abandoned` -- and only that last kind gets a background acknowledgement,
-   * because it is the only one where something actually happened that the user has not heard about.
-   */
-  #abandonBatch(batch: ContinuationBatch): void {
-    for (const key of batch.call_keys) {
-      const state = this.#toolCallState(key)
-      if (state === undefined) continue
-      state.continuation = 'abandoned'
-      if (state.sync === 'pending') {
-        // R105: an abandoned batch converts the pending sync wait to the announce path; the result
-        // becomes a host fact instead of part of a turn that is no longer happening.
-        state.sync = 'announce'
-      } else if (state.sync === 'resolved') {
-        // CP3: resolved while collecting. The output injection above landed in a dead turn and no
-        // continuation will speak it, so it is downgraded to one announce host fact.
-        this.#announceResolvedSyncState(state)
-      }
-      if (state.dispatch === 'not_dispatched') {
-        state.final_disposition = 'superseded'
-      } else if (!state.acceptance.accepted) {
-        state.final_disposition = 'refused'
-      } else {
-        state.final_disposition = 'abandoned'
-        this.#queueBackgroundAcknowledgement(state)
-      }
-    }
-    batch.phase = 'abandoned'
-  }
-
-  /**
-   * Whether the user has already heard the acknowledgement this batch would repeat.
-   *
-   * Only meaningful for a single-call batch: with more than one there is no single origin to have been
-   * delivered. The revision check is what makes it safe -- a proof from before the user spoke again
-   * says nothing about whether they have heard about *this* turn.
-   */
-  #batchOriginWasDelivered(batch: ContinuationBatch): boolean {
-    if (batch.call_keys.length !== 1) return false
-    const state = this.#toolCallState(batch.call_keys[0]!)
-    if (state === undefined || !this.#refreshOriginDelivery(state, batch)) return false
-    const acknowledgement = this.#semanticAcknowledgement(state)
-    return acknowledgement !== null
-      && acknowledgement.origin_delivered
-      && acknowledgement.origin_user_input_revision === this.session.userInputRevision
-  }
-
-  /**
-   * Mark an acknowledgement as already spoken, if there is proof its turn was played.
-   *
-   * A proof only counts for a lone asynchronous call: with several in a batch, or with a synchronous
-   * result, the turn that played was not the acknowledgement.
-   */
-  #refreshOriginDelivery(state: ToolCallState, batch?: ContinuationBatch): boolean {
-    const key = callKey(state.provider_session_epoch, state.provider_response_id)
-    const resolved = batch ?? this.#continuationBatches.get(key)
-    const singleAsync = resolved?.call_keys.length === 1
-      && this.#toolCallState(resolved.call_keys[0]!) === state
-      && state.acceptance.response_intent.kind === 'delegation_acknowledgement'
-    if (!singleAsync || !this.#originDeliveryProofs.has(key)) return false
-    const acknowledgement = this.#semanticAcknowledgement(state)
-    if (acknowledgement === null) return false
-    acknowledgement.origin_delivered = true
-    return true
-  }
-
-  /**
-   * Queue the acknowledgement for work that ran but will not be spoken about in its own turn.
-   *
-   * If the user already heard it, it is marked delivered instead of queued: saying it twice is worse
-   * than not saying it again.
-   */
-  #queueBackgroundAcknowledgement(state: ToolCallState): void {
-    const acknowledgement = this.#semanticAcknowledgement(state)
-    if (acknowledgement === null) return
-    this.#refreshOriginDelivery(state)
-    if (acknowledgement.origin_delivered || acknowledgement.heard) {
-      acknowledgement.phase = 'delivered'
-      acknowledgement.response_id = null
-      acknowledgement.response_session_epoch = null
-      acknowledgement.binding = null
-      return
-    }
-    this.#queueSemanticAcknowledgement(acknowledgement)
-  }
-
-  /** Queue one acknowledgement as a host fact, unless it is already queued or already said. */
-  #queueSemanticAcknowledgement(acknowledgement: SemanticAcknowledgement): void {
-    if (
-      acknowledgement.phase === 'requested'
-      || acknowledgement.phase === 'bound'
-      || acknowledgement.phase === 'delivered'
-      || acknowledgement.phase === 'cancelled'
-    ) {
-      return
-    }
-    if (this.#hostItems.some(queued => queued.semantic_event_id === acknowledgement.event_id)) {
-      // Already waiting its turn. Marked queued rather than queued again, so the user hears it once.
-      acknowledgement.phase = 'queued'
-      return
-    }
-    const priority = this.#executorPriority(acknowledgement.channel)
-    acknowledgement.provider_event_id = acknowledgement.event_id
-    this.queueHostItem({
-      kind: 'host_fact',
-      item: {
-        kind: 'progress',
-        host_item_id: this.#idFactory(),
-        event_id: acknowledgement.event_id,
-        content: `${this.#executorDisplayName(acknowledgement.channel)} 已提交，正在启动：${acknowledgement.summary}`,
-        call_id: null,
-      },
-      task_summary: null,
-      origin_spoken: false,
-    }, {semanticEventId: acknowledgement.event_id, priority})
-    acknowledgement.phase = 'queued'
-  }
-
-  /**
-   * CP3: a resolved-but-undelivered sync result of an abandoned batch keeps its compact view.
-   *
-   * Requeued as the one announce host fact, rather than discarded: the work ran and produced a result
-   * the model was going to ground itself on, and losing it silently is worse than saying it plainly.
-   */
-  #announceResolvedSyncState(state: ToolCallState): void {
-    const delegateId = state.acceptance.delegate_id
-    if (delegateId === null) return
-    state.sync = 'announce'
-    this.queueHostItem({
-      kind: 'host_fact',
-      item: {
-        kind: 'final',
-        host_item_id: this.#idFactory(),
-        event_id: `sync:${delegateId}`,
-        content: state.acceptance.host_item.content,
-        call_id: null,
-      },
-      task_summary: null,
-      origin_spoken: false,
-    }, {priority: this.#executorPriority(state.acceptance.executor)})
-  }
-
-  /** A channel's manifest priority, or the default when there is no manifest for it. */
-  #executorPriority(channel: string | null): number {
-    if (channel === null) return 50
-    return this.#runtime.executors.get(channel)?.manifest.policy.priority ?? 50
-  }
-
-  /**
-   * Settle the acknowledgements the response that just ended was carrying.
-   *
-   * Provider completion is not audible delivery. A completed turn with a live renderer generation
-   * stays bound until playback reports what happened; one with no playable audio becomes a fallback.
-   * A failed fallback gets one bounded retry, while a failed continuation returns to its batch.
-   *
-   * An origin already proven delivered is delivered regardless of the status: the user heard it, and a
-   * retry would be the second telling.
-   */
-  #finishSemanticAcknowledgement(event: {
-    readonly session_epoch: number
-    readonly response_id: string
-    readonly status: string
-  }): void {
-    const bound = [...this.#semanticAcknowledgements.values()]
-      .filter(current => (
-        current.phase === 'bound'
-        && current.response_session_epoch === event.session_epoch
-        && current.response_id === event.response_id
-      ))
-    for (const acknowledgement of bound) {
-      if (acknowledgement.origin_delivered || acknowledgement.heard) {
-        this.#markAcknowledgementDelivered(acknowledgement)
-        continue
-      }
-      if (event.status === 'completed') {
-        const generation = this.session.currentGeneration
-        if (
-          generation?.session_epoch === event.session_epoch
-          && generation.response_id === event.response_id
-        ) continue
-        // Only a standalone fallback owns its semantic event as a provider fact. Continuations leave
-        // `provider_event_id` null in `#bindContinuation`, so this equality is the explicit ownership
-        // boundary: preserve the injected fact, but return its response authority for another turn.
-        if (
-          acknowledgement.provider_event_id === acknowledgement.event_id
-          && !this.session.reopenHostResponse(acknowledgement.event_id)
-        ) {
-          this.#onDiagnostic('[realtime-diagnostic] semantic_ack_reopen_failed')
-          continue
-        }
-        acknowledgement.phase = 'pending'
-        acknowledgement.response_id = null
-        acknowledgement.response_session_epoch = null
-        acknowledgement.binding = null
-        this.#queueSemanticAcknowledgement(acknowledgement)
-      } else if (acknowledgement.binding === 'fallback') {
-        acknowledgement.phase = 'pending'
-        acknowledgement.response_id = null
-        acknowledgement.response_session_epoch = null
-        acknowledgement.binding = null
-        if (event.status === 'failed') {
-          // One retry after a failure, and only one: a provider failing the same fact repeatedly would
-          // otherwise have the host queue it forever.
-          if (acknowledgement.failed_retry_consumed) continue
-          acknowledgement.failed_retry_consumed = true
-        }
-        this.#queueSemanticAcknowledgement(acknowledgement)
-      } else if (acknowledgement.binding === 'continuation') {
-        acknowledgement.phase = 'pending'
-        acknowledgement.response_id = null
-        acknowledgement.response_session_epoch = null
-        acknowledgement.binding = null
-      }
-    }
-  }
-
-  #markAcknowledgementDelivered(acknowledgement: SemanticAcknowledgement): void {
-    acknowledgement.phase = 'delivered'
-    acknowledgement.response_id = null
-    acknowledgement.response_session_epoch = null
-    acknowledgement.binding = null
-  }
-
-  /** Bind the one acknowledgement that asked for a turn to the response that will speak it. */
-  #bindRequestedSemanticAcknowledgement(responseId: string): void {
-    for (const acknowledgement of this.#semanticAcknowledgements.values()) {
-      if (acknowledgement.phase !== 'requested') continue
-      acknowledgement.phase = 'bound'
-      acknowledgement.response_id = responseId
-      acknowledgement.response_session_epoch = this.session.sessionEpoch
-      acknowledgement.provider_event_id = acknowledgement.event_id
-      acknowledgement.binding = 'fallback'
-      return
-    }
-  }
-
-  #suppressCancelledSemanticAcknowledgement(responseId: string): boolean {
-    const eventIds = this.session.responseEventIds(responseId)
-    const acknowledgement = [...this.#semanticAcknowledgements.values()].find(current => (
-      current.phase === 'cancelled' && eventIds.includes(current.event_id)
-    ))
-    return acknowledgement !== undefined && this.session.suppressResponse(responseId)
-  }
-
-  #fenceSemanticAcknowledgement(delegateId: string): boolean {
-    const acknowledgement = this.#semanticAcknowledgements.get(`background:${delegateId}`)
-    if (
-      acknowledgement === undefined
-      || acknowledgement.phase === 'delivered'
-      || acknowledgement.phase === 'cancelled'
-    ) return false
-    if (
-      acknowledgement.origin_delivered
-      || acknowledgement.heard
-      || this.session.eventWasSpoken(acknowledgement.event_id)
-    ) {
-      if (
-        acknowledgement.phase === 'bound'
-        && acknowledgement.binding === 'fallback'
-        && acknowledgement.response_id !== null
-        && acknowledgement.response_session_epoch === this.session.sessionEpoch
-      ) {
-        this.#cancelSemanticAcknowledgementResponse(
-          acknowledgement.response_session_epoch,
-          acknowledgement.response_id,
-        )
-      }
-      this.#markAcknowledgementDelivered(acknowledgement)
-      this.#retireSemanticAcknowledgementHostEvent(acknowledgement)
-      return false
-    }
-    if (acknowledgement.phase === 'bound') {
-      const responseId = acknowledgement.response_id
-      if (responseId === null) return false
-      if (!this.session.suppressResponse(responseId)) {
-        if (
-          acknowledgement.binding !== 'fallback'
-          || acknowledgement.response_session_epoch !== this.session.sessionEpoch
-        ) return false
-        this.#cancelSemanticAcknowledgementResponse(
-          acknowledgement.response_session_epoch,
-          responseId,
-        )
-      }
-    }
-    const retained = this.#hostItems.filter(queued => (
-      queued.semantic_event_id !== acknowledgement.event_id
-    ))
-    if (retained.length !== this.#hostItems.length) {
-      retained.sort(compareQueuedHostResponses)
-      this.#hostItems.length = 0
-      this.#hostItems.push(...retained)
-    }
-    acknowledgement.phase = 'cancelled'
-    acknowledgement.response_id = null
-    acknowledgement.response_session_epoch = null
-    acknowledgement.binding = null
-    this.#retireSemanticAcknowledgementHostEvent(acknowledgement)
-    return true
-  }
-
-  /** Cancel only the standalone acknowledgement that its own terminal handoff made obsolete. */
-  #cancelSemanticAcknowledgementResponse(sessionEpoch: number, responseId: string): void {
-    const cancellation = (async (): Promise<void> => {
-      if (sessionEpoch !== this.session.sessionEpoch) return
-      try {
-        await this.session.quarantineResponse(responseId)
-      } catch (failure) {
-        this.#reportDeliveryFailure(failure instanceof RealtimeDeliveryError
-          ? failure
-          : new RealtimeDeliveryError(String(failure)))
-      } finally {
-        this.#deliveryReady.set()
-      }
-    })()
-    const task = cancellation.finally(() => {
-      this.#semanticAcknowledgementReleaseTasks.delete(task)
-    })
-    this.#semanticAcknowledgementReleaseTasks.add(task)
   }
 
   /**
@@ -2035,38 +852,34 @@ export class RealtimeService {
           return false
         }
         const oldEpoch = this.session.sessionEpoch
-        this.#invalidateProjectConfirmation('provider_replaced')
+        this.#confirmation.invalidateProjectConfirmation('provider_replaced')
         this.#approvalHost.invalidateExecutorApproval('provider_replaced')
-        this.#preemptiveAlert = null
-        this.#providerReconnectSourceEpoch = oldEpoch
+        this.#host.beginReconnect(oldEpoch)
         await this.session.reconnect({tools: structuredClone(this.#providerSchemas)})
         // Only if nothing cleared it while we were awaiting. A user who started speaking during the
         // reconnect has already activated the new session, so demanding an activation would be wrong.
-        if (this.#providerReconnectSourceEpoch === oldEpoch) {
-          this.#providerEpochNeedingActivation = this.session.sessionEpoch
-          this.#providerReconnectSourceEpoch = null
-        }
-        const retryOwner = this.#urgentHostResponseOwner
+        this.#host.finishReconnect(oldEpoch)
+        const retryOwner = this.#host.currentUrgentOwner
 
         // Every origin binding named items in a session that is gone. Keeping any of it would let a
         // tool call cite evidence the new provider has never seen.
         this.#awaitingUserOrigin = false
         this.#userOriginPreexistingResponseId = null
         this.#userOrigins.beginEpoch(this.session.sessionEpoch)
-        this.#originDeferredToolCalls.length = 0
+        this.#continuations.clearDeferred()
 
-        this.#releaseUrgentHostResponseForEpoch(oldEpoch)
+        this.#host.releaseUrgentHostResponseForEpoch(oldEpoch)
         // An urgent item that was injected but never got a response is the one case worth retrying: it
         // was delivered into a session that died before speaking it, so the user heard nothing. One that
         // *did* get a response was taken up by the provider, and re-queueing would say it twice.
         if (retryOwner?.session_epoch === oldEpoch && retryOwner.response_id === null) {
-          this.#requeueHostItem(retryOwner.queued)
+          this.#host.requeueHostItem(retryOwner.queued)
         }
         this.#clearCaptions()
         this.#audioStarted.clear()
-        this.#reconcileToolStateAfterReconnect(oldEpoch)
-        this.#reopenFailedSemanticAcknowledgements()
-        this.#reconcileSemanticAcknowledgementsAfterReconnect()
+        this.#continuations.reconcileToolStateAfterReconnect(oldEpoch)
+        this.#host.reopenFailedSemanticAcknowledgements()
+        this.#host.reconcileSemanticAcknowledgementsAfterReconnect()
         await this.driveContinuations()
         await this.#deliveryPass()
         this.#telemetry?.record('provider.reconnect', {
@@ -2081,671 +894,8 @@ export class RealtimeService {
     }
   }
 
-  /**
-   * Settle every tool call that belonged to the dead epoch.
-   *
-   * The dead epoch cannot receive a continuation, so nothing in it will ever be spoken about in its own
-   * turn. Each call therefore gets a final disposition here rather than waiting for a terminal that
-   * cannot arrive -- and the ones that actually ran get a background acknowledgement, because the work
-   * happened and the user has not heard about it.
-   */
-  #reconcileToolStateAfterReconnect(oldEpoch: number): void {
-    for (const callKeyValue of this.#pendingSync.values()) {
-      if (parseCallKey(callKeyValue).sessionEpoch !== oldEpoch) continue
-      const state = this.#toolCallState(callKeyValue)
-      // R105: the dead epoch cannot receive a continuation; the result, when it arrives, becomes a
-      // host fact in the new epoch.
-      if (state?.sync === 'pending') state.sync = 'announce'
-    }
-    for (const [batchKey, batch] of this.#continuationBatches.entries()) {
-      if (parseCallKey(batchKey).sessionEpoch !== oldEpoch) continue
-      for (const key of batch.call_keys) {
-        const state = this.#toolCallState(key)
-        if (state === undefined) continue
-        // Captured before the disposition is written, because that is what decides whether anything
-        // actually ran -- and only work that ran is worth telling the user about.
-        const needsSemanticAcknowledgement = state.dispatch === 'dispatched'
-          && state.acceptance.accepted
-        if (state.continuation !== 'terminal') {
-          state.continuation = 'abandoned'
-          state.continuation_response_id = null
-          if (state.sync === 'resolved') {
-            // CP3: resolved but its continuation never became terminal. Re-delivered as one announce
-            // host fact in the new epoch, matching the at-least-once posture of the acknowledgements.
-            this.#announceResolvedSyncState(state)
-          }
-        }
-        if (state.final_disposition === null) {
-          if (state.dispatch === 'not_dispatched') {
-            state.final_disposition = 'superseded'
-          } else if (!state.acceptance.accepted) {
-            state.final_disposition = 'refused'
-          } else {
-            state.final_disposition = 'abandoned'
-          }
-        }
-        if (needsSemanticAcknowledgement) this.#queueBackgroundAcknowledgement(state)
-      }
-      // A batch already terminal was spoken before the session died, so it keeps that.
-      if (batch.phase !== 'terminal') {
-        batch.phase = 'abandoned'
-        batch.continuation_response_id = null
-      }
-    }
-    const surviving = this.#continuationFifo
-      .filter(key => parseCallKey(key).sessionEpoch !== oldEpoch)
-    this.#continuationFifo.length = 0
-    this.#continuationFifo.push(...surviving)
-  }
-
-  /**
-   * Re-queue acknowledgements whose turn died with the old session.
-   *
-   * One that was requested or bound to any response was never proven audible -- the turn carrying it
-   * belonged to a provider session that is gone -- so it goes back to pending and is queued again.
-   * Only an acknowledgement carrying renderer-backed `heard` proof stays delivered.
-   */
-  #reconcileSemanticAcknowledgementsAfterReconnect(): void {
-    for (const acknowledgement of this.#semanticAcknowledgements.values()) {
-      if (acknowledgement.heard) {
-        this.#markAcknowledgementDelivered(acknowledgement)
-        continue
-      }
-      if (
-        acknowledgement.phase === 'requested'
-        || acknowledgement.phase === 'bound'
-      ) {
-        if (acknowledgement.provider_event_id !== null) {
-          this.session.reopenHostEvent(acknowledgement.provider_event_id)
-        }
-        acknowledgement.phase = 'pending'
-        acknowledgement.response_id = null
-        acknowledgement.response_session_epoch = null
-        acknowledgement.binding = null
-      }
-      if (acknowledgement.phase === 'pending' || acknowledgement.phase === 'queued') {
-        this.#queueSemanticAcknowledgement(acknowledgement)
-      }
-    }
-  }
-
-  /**
-   * Give a once-failed acknowledgement another chance after a reconnect.
-   *
-   * Its single retry was spent on a session that then died, which is not the same as having been tried
-   * and refused -- so the new session gets to attempt it once.
-   */
-  #reopenFailedSemanticAcknowledgements(): void {
-    for (const acknowledgement of this.#semanticAcknowledgements.values()) {
-      if (!acknowledgement.failed_retry_consumed) continue
-      if (acknowledgement.phase === 'pending') {
-        this.#queueSemanticAcknowledgement(acknowledgement)
-      }
-    }
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // Family O: projecting reducer events back to the provider.
-  //
-  // The runtime decides what happened; this decides what the model gets told about it, and the answer
-  // is usually "less than everything". A progress event that repeats the last summary, a suggestion
-  // handoff nobody selected, a monitor stop whose tool continuation already said it -- each is real in
-  // Memory and deliberately silent here, because the failure mode of a voice agent is not missing a
-  // fact, it is narrating its own bookkeeping.
-  //
-  // Two revalidations look redundant and are not. Observers receive events *unconditionally*,
-  // including ones the runtime's own validator dropped from Memory (CP1), and they receive a clone
-  // rather than the applied object -- so shape and delegate identity are both re-checked here.
-  // ---------------------------------------------------------------------------------------------
-
-  /**
-   * Project one reducer event to the provider, or decide it says nothing worth saying.
-   *
-   * Ordering matters at the top: the R105 sync resolution is a delegate-keyed lookup that has to run
-   * before the channel projections, because a synchronous result belongs to the tool call that is
-   * waiting on it rather than to the narration stream.
-   */
-  projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
-    if (!currentConversation) {
-      this.#settleHistoricalRuntimeEvent(event)
-      return
-    }
-    if (event.kind === 'handoff') this.#telemetry?.record('tool.finished', {
-      executor: event.payload.channel, delegate_id: event.payload.delegate_id, outcome: event.payload.outcome,
-    })
-    if (event.kind === 'handoff' && this.#resolveSyncResult(event)) return
-    if (event.kind === 'deadline') {
-      if (this.#expireSyncResult(event)) return
-      this.#projectDeadline(event)
-      return
-    }
-    if (event.kind !== 'progress' && event.kind !== 'observation' && event.kind !== 'handoff') {
-      return
-    }
-    const manifest = this.#runtime.executors.get(event.payload.channel)?.manifest
-    if (manifest === undefined) return
-
-    if (event.payload.channel === this.#coding?.channel && this.#telemetry !== undefined) {
-      if (event.kind === 'progress') {
-        this.#telemetry.record('executor.progress', {
-          delegate_id: event.payload.delegate_id,
-          phase: event.payload.phase,
-          internal_activity: event.payload.internal_activity,
-        })
-      } else if (event.kind === 'handoff') {
-        this.#telemetry.record('executor.handoff', {
-          delegate_id: event.payload.delegate_id,
-          outcome: event.payload.outcome,
-        })
-      }
-    }
-
-    if (event.kind === 'observation') {
-      this.#projectObservation(event, manifest)
-    } else if (event.kind === 'progress') {
-      this.#projectProgress(event, manifest)
-    } else {
-      this.#projectHandoff(event, manifest)
-    }
-  }
-
-  #rememberCodingProgressHostEvent(eventId: string): void {
-    this.#codingProgressHostEventIds.add(eventId)
-    while (this.#codingProgressHostEventIds.size > MAX_PENDING_HOST_EVENTS) {
-      this.#codingProgressHostEventIds.delete(this.#codingProgressHostEventIds.values().next().value!)
-    }
-  }
-
   /** Live host preference: switching never stops or restarts executor work. */
   setCodingProgressNarration(mode: CodingProgressNarration): void { this.#codingProgressNarration.setMode(mode) }
-
-  /** Old conversation terminals settle generic control state but never create provider content. */
-  #settleHistoricalRuntimeEvent(event: EventRecord): void {
-    if (event.kind !== 'handoff' && event.kind !== 'deadline') return
-    const delegateId = event.payload.delegate_id
-    let delegate: DelegateLike | undefined
-    if (event.kind === 'handoff') {
-      delegate = this.#runtime.claimedHandoff(event.seq)
-      if (delegate?.executor !== event.payload.channel) return
-    } else if (this.#runtime.terminatedByDeadline(event.seq, delegateId)) {
-      delegate = this.#runtime.delegateFor(delegateId)
-    }
-    if (delegate?.delegate_id !== delegateId) return
-    const channel = delegate.executor
-    this.session.registerDelegate(delegateId, {
-      summary: this.#delegateSummary(delegateId, this.#executorDisplayName(channel)),
-      state: event.kind === 'deadline'
-        ? 'unknown'
-        : event.payload.outcome === 'ok'
-          ? 'completed'
-          : event.payload.outcome === 'refused'
-            ? 'refused'
-            : event.payload.outcome === 'unknown' ? 'unknown' : 'failed',
-      channel,
-      progress_summary: null,
-      internal_activity: 0,
-      elapsed: 0,
-    })
-    this.#lastProgressSummary.delete(delegateId)
-    this.#publishExecutorState()
-  }
-
-  /** Project a suggestion chosen by Surrogate when no FastBrain owns the final speech turn. */
-  onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
-    const progress = this.#isSelectedProgress(suggestion)
-    const coding = progress && suggestion.evidence_refs[0]?.startsWith(`${this.#coding?.channel}:`) === true
-    if (coding && this.#codingProgressNarration.mode !== 'smart') return
-    const delegate = coding && reason.origin !== null ? this.#runtime.inFlightDelegate(reason.origin) : undefined
-    if (coding && delegate?.executor !== this.#coding?.channel) return
-    if (coding) {
-      this.#rememberCodingProgressHostEvent(`suggestion:${suggestion.id}`)
-      this.#rememberDelegateHostEvent(reason.origin!, `suggestion:${suggestion.id}`)
-    }
-    const hit = suggestion.content.hit === true
-    this.queueHostItem(hostFactIntent({
-      kind: this.#isSelectedProgress(suggestion) ? 'progress' : 'final',
-      host_item_id: this.#idFactory(),
-      event_id: `suggestion:${suggestion.id}`,
-      content: suggestionSpeechView(suggestion.content),
-    }), {
-      priority: hit ? Math.max(reason.priority, HIT_ALERT_MIN_PRIORITY) : reason.priority,
-      preemptive: false,
-      ...(coding ? {owner: {delegate_id: reason.origin!, channel: delegate!.executor}, expiresAt: this.#clock.now() + PROGRESS_HOST_ITEM_TTL_S} : {}),
-    })
-  }
-
-  /** Require the exact Memory item and policy that caused the selected working-progress suggestion. */
-  #isSelectedProgress(suggestion: Suggestion): boolean {
-    if (suggestion.evidence_refs.length !== 1) return false
-    const summary = suggestion.content.summary
-    if (typeof summary !== 'string') return false
-    const memory = this.#runtime.memory
-    if (memory === undefined) return false
-    const reference = suggestion.evidence_refs[0]
-    if (reference === undefined) return false
-    let channelName: string
-    let sequence: number
-    try {
-      [channelName, sequence] = parseMemoryRef(reference)
-    } catch {
-      return false
-    }
-    const policy = memory.policies.get(channelName)
-    const evidence = memory.channels.get(channelName)?.items.find(item => item.seq === sequence)
-    return policy?.progress_via_surrogate === true
-      && evidence?.channel === channelName
-      && evidence.seq === sequence
-      && evidence.content.phase === 'working'
-      && evidence.content.summary === summary
-  }
-
-  /** Resolve a synchronous tool result before ordinary channel projection can consume it. */
-  #resolveSyncResult(event: Extract<EventRecord, {kind: 'handoff'}>): boolean {
-    const callKeyValue = this.#pendingSync.get(event.payload.delegate_id)
-    if (callKeyValue === undefined) {
-      if (!this.#lateSync.has(event.payload.delegate_id)) return false
-      this.#lateSync.delete(event.payload.delegate_id)
-      this.#queueSyncAnnouncement(event)
-      return true
-    }
-    this.#pendingSync.delete(event.payload.delegate_id)
-    const state = this.#toolCallState(callKeyValue)
-    if (state === undefined) {
-      this.#queueSyncAnnouncement(event)
-      return true
-    }
-    if (state.sync === 'pending') {
-      this.#confirmSyncOutput(state, this.#syncResultContent(event))
-      state.sync = 'resolved'
-      this.#deliveryReady.set()
-    } else if (state.sync === 'announce') {
-      this.#queueSyncAnnouncement(event)
-    }
-    return true
-  }
-
-  /** Resolve a synchronous timeout without narrating it; one real late handoff may still be announced. */
-  #expireSyncResult(event: Extract<EventRecord, {kind: 'deadline'}>): boolean {
-    const callKeyValue = this.#pendingSync.get(event.payload.delegate_id)
-    if (callKeyValue === undefined) return false
-    this.#pendingSync.delete(event.payload.delegate_id)
-    const state = this.#toolCallState(callKeyValue)
-    if (state !== undefined) {
-      if (state.sync === 'pending') {
-        this.#confirmSyncOutput(state, '{"state":"timeout"}')
-        this.#deliveryReady.set()
-      } else if (state.sync !== 'announce') {
-        return true
-      }
-      state.sync = 'announce'
-    }
-    this.#lateSync.delete(event.payload.delegate_id)
-    this.#lateSync.set(event.payload.delegate_id, callKeyValue)
-    while (this.#lateSync.size > MAX_LATE_SYNC_RESULTS) {
-      const oldest = this.#lateSync.keys().next()
-      if (oldest.done) break
-      this.#lateSync.delete(oldest.value)
-    }
-    return true
-  }
-
-  #confirmSyncOutput(state: ToolCallState, content: string): void {
-    const previous = state.acceptance.host_item
-    if (previous.call_id === null) return
-    const hostItem: HostContextItem = {...previous, content}
-    state.acceptance = {
-      ...state.acceptance,
-      host_item: hostItem,
-      response_intent: {
-        kind: 'tool_result', item: hostItem, task_summary: null, origin_spoken: false,
-      },
-    }
-  }
-
-  #queueSyncAnnouncement(event: Extract<EventRecord, {kind: 'handoff'}>): void {
-    this.queueHostItem(hostFactIntent({
-      kind: 'final',
-      host_item_id: this.#idFactory(),
-      event_id: `sync:${event.payload.delegate_id}`,
-      content: this.#syncResultContent(event),
-    }), {priority: this.#executorPriority(event.payload.channel)})
-  }
-
-  /** Compact, closed sync result for the model; status remains intact and private refs stay excluded. */
-  #syncResultContent(event: Extract<EventRecord, {kind: 'handoff'}>): string {
-    const content = event.payload.content
-    if (event.payload.channel === 'search' && event.payload.outcome === 'ok') {
-      const results = Array.isArray(content.results)
-        ? content.results.flatMap(raw => {
-          if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return []
-          const title = typeof raw.title === 'string'
-            ? [...raw.title].slice(0, SYNC_RESULT_TITLE_CHARS).join('')
-            : ''
-          const snippet = typeof raw.snippet === 'string'
-            ? [...raw.snippet].slice(0, SYNC_RESULT_SNIPPET_CHARS).join('')
-            : ''
-          let source = ''
-          if (typeof raw.canonical_url === 'string') {
-            try { source = new URL(raw.canonical_url).hostname } catch { /* invalid source stays empty */ }
-          }
-          return [{title, snippet, source}]
-        })
-        : []
-      const query = typeof content.query === 'string'
-        ? [...content.query].slice(0, 512).join('')
-        : null
-      let encoded = JSON.stringify({state: 'ok', query, results})
-      while ([...encoded].length > MAX_HOST_FACT_CHARS && results.length > 0) {
-        const longest = Math.max(...results.map(result => [...result.snippet].length))
-        if (longest > 50) {
-          for (const result of results) {
-            result.snippet = [...result.snippet].slice(0, Math.max(50, Math.floor(longest / 2))).join('')
-          }
-        } else results.pop()
-        encoded = JSON.stringify({state: 'ok', query, results})
-      }
-      return encoded
-    }
-    const encoded = JSON.stringify({state: event.payload.outcome, content})
-    return [...encoded].length <= MAX_HOST_FACT_CHARS
-      ? encoded
-      : JSON.stringify({state: event.payload.outcome, error: 'result_too_large'})
-  }
-
-  /**
-   * A delegate that ran out of time.
-   *
-   * The state goes to `unknown`, not `failed`: a deadline says nobody knows what happened, and telling
-   * the model it failed would be a claim the host cannot support. `sync_result` ops are skipped
-   * because their waiting tool call resolves the timeout itself.
-   */
-  #projectDeadline(event: Extract<EventRecord, {kind: 'deadline'}>): void {
-    const delegateId = event.payload.delegate_id
-    // This exact event, not "was terminated by a deadline at some point": a second deadline for the
-    // same delegate would otherwise announce the same timeout twice.
-    if (!this.#runtime.terminatedByDeadline(event.seq, delegateId)) return
-    const delegate = this.#runtime.delegateFor(delegateId)
-    if (delegate === undefined) return
-    const manifest = this.#runtime.executors.get(delegate.executor)?.manifest
-    const operation = manifest?.ops.find(candidate => candidate.name === delegate.op)
-    if (manifest === undefined || operation === undefined || operation.sync_result === true) return
-    const displayName = this.#executorDisplayName(delegate.executor)
-    this.session.registerDelegate(delegateId, {
-      summary: this.#delegateSummary(delegateId, displayName),
-      state: 'unknown',
-      channel: delegate.executor,
-      progress_summary: null,
-      internal_activity: 0,
-      elapsed: 0,
-    })
-    // A settled delegate leaves no dedup residue behind, or a later run of the same delegate id would
-    // inherit a summary it never produced.
-    this.#lastProgressSummary.delete(delegateId)
-    this.#publishExecutorState()
-    this.queueHostItem(hostFactIntent({
-      kind: 'final',
-      host_item_id: this.#idFactory(),
-      event_id: `deadline:${delegateId}`,
-      content: `${displayName} 的委派任务超时，未能确认结果。`,
-    }), {priority: manifest.policy.priority})
-  }
-
-  /**
-   * Something an executor noticed while running.
-   *
-   * Only a *hit* is worth interrupting for. A heartbeat or a miss registers delegate state and stops
-   * there, and an ambient hit is the Surrogate's to arbitrate rather than something to announce.
-   */
-  #projectObservation(
-    event: Extract<EventRecord, {kind: 'observation'}>,
-    manifest: ExecutorManifestLike,
-  ): void {
-    const delegate = this.#observationDelegate(event)
-    if (delegate === undefined) return
-    const displayName = this.#executorDisplayName(event.payload.channel)
-    this.session.registerDelegate(event.payload.delegate_id, {
-      summary: this.#delegateSummary(event.payload.delegate_id, displayName),
-      state: 'running',
-      channel: event.payload.channel,
-    })
-    this.#publishExecutorState()
-    if (event.payload.content.hit !== true) return
-    if (manifest.policy.suggest === true && delegate.routing_class === 'ambient') return
-    const monitor = isMonitorPolicy(manifest.policy)
-    const delivery = monitorAlertDelivery(manifest.policy)
-    // A none monitor still records the hit and updates delegate state above, but does not address it
-    // to the user or take their floor.
-    if (monitor && delivery === 'none') return
-    const speechView = monitor
-      ? monitorHitSpeechView(event.payload.content)
-      : genericFinalSpeechView(displayName, 'ok', event.payload.content)
-    const content = [...speechView]
-      .slice(0, MAX_HOST_FACT_CHARS)
-      .join('')
-    this.queueHostItem(hostFactIntent({
-      kind: 'final',
-      host_item_id: this.#idFactory(),
-      event_id: `observation:${event.payload.delegate_id}:${event.seq}`,
-      content,
-    }), {
-      // A monitoring hit outranks routine executor announcements; only its policy may authorize a floor preempt.
-      priority: Math.max(manifest.policy.priority, HIT_ALERT_MIN_PRIORITY),
-      preemptive: monitor
-        ? isPreemptiveMonitorAlert(manifest.policy)
-        : manifest.policy.priority >= PREEMPT_MIN_PRIORITY,
-      preemptiveAlert: isPreemptiveMonitorAlert(manifest.policy),
-      preemptiveAlertDelegateId: isPreemptiveMonitorAlert(manifest.policy) ? event.payload.delegate_id : null,
-    })
-  }
-
-  /**
-   * Resolve an observation to the exact live executor run it belongs to.
-   *
-   * All four fields have to match, not just the delegate id: an observation whose channel, op, or
-   * origin differs describes a different run, and projecting it would attribute one executor's finding
-   * to another's task.
-   */
-  #observationDelegate(
-    event: Extract<EventRecord, {kind: 'observation'}>,
-  ): DelegateLike | undefined {
-    const delegate = this.#runtime.inFlightDelegate(event.payload.delegate_id)
-    if (delegate === undefined) return undefined
-    if (
-      event.payload.channel !== delegate.executor
-      || event.payload.op !== delegate.op
-      || event.payload.origin_ref !== delegate.origin_ref
-    ) {
-      return undefined
-    }
-    return delegate
-  }
-
-  /**
-   * How far along a running executor is.
-   *
-   * The shape is revalidated here even though the runtime already did it, because observers receive
-   * events the runtime's validator dropped from Memory (CP1). And the delegate identity is rechecked
-   * against the in-flight table, because a progress event for a settled delegate describes a run that
-   * is over.
-   */
-  #projectProgress(
-    event: Extract<EventRecord, {kind: 'progress'}>,
-    manifest: ExecutorManifestLike,
-  ): void {
-    const payload = event.payload
-    if (
-      payload.op === ''
-      || !Number.isInteger(payload.internal_activity)
-      || !Number.isFinite(payload.elapsed)
-      || payload.elapsed < 0
-      || (payload.phase === 'started' && payload.internal_activity !== 0)
-      || (
-        payload.phase === 'working'
-        && !(payload.internal_activity >= 1 && payload.internal_activity <= 1_048_576)
-      )
-    ) {
-      return
-    }
-    const delegate = this.#runtime.inFlightDelegate(payload.delegate_id)
-    if (delegate?.executor !== payload.channel || delegate.op !== payload.op) return
-    const displayName = this.#executorDisplayName(payload.channel)
-    const coding = payload.channel === this.#coding?.channel
-    let summary: string | null = payload.summary
-    if (!validProgressSummary(summary, payload.phase)) summary = null
-    if (summary !== null) {
-      // CP2: prepared once at the storage boundary, so the recovery frame the session renders never
-      // carries raw markdown either.
-      summary = coding ? codingProgressSummary(summary) : prepareForSpeech(summary, {limit: SPEECH_FINAL_LIMIT}).text || null
-    }
-    const previousSummary = this.#lastProgressSummary.get(payload.delegate_id)
-    // Keep received facts current even when smart mode suppresses delivery.
-    if (coding && payload.phase === 'working' && summary !== null) {
-      this.#lastProgressSummary.set(payload.delegate_id, summary)
-    }
-    this.session.registerDelegate(payload.delegate_id, {
-      summary: this.#delegateSummary(payload.delegate_id, displayName),
-      state: 'running',
-      channel: payload.channel,
-      progress_summary: summary,
-      internal_activity: payload.internal_activity,
-      elapsed: payload.elapsed,
-    })
-    this.#publishExecutorState()
-    if (
-      payload.phase === 'started'
-      && this.#semanticAcknowledgements.has(`background:${payload.delegate_id}`)
-    ) return
-    // A monitor's periodic heartbeat is operational state, not a new user-facing event. Speaking it
-    // creates a fresh model turn that can accidentally replay an older acknowledgement.
-    if (isMonitorPolicy(manifest.policy) && payload.phase === 'working') return
-    if (payload.phase === 'working') {
-      if (this.#codingProgressNarration.viaSurrogate(coding, manifest.policy.progress_via_surrogate === true)) return
-      if (coding && this.#codingProgressNarration.mode === 'continuous' && summary === null) return
-    }
-
-    let content: string
-    if (payload.phase === 'started') {
-      content = `${displayName} 已开始处理这个任务。`
-    } else if (summary !== null) {
-      // Same-summary skip: state registration already happened, only the host injection is
-      // suppressed. A summary-less event keeps the field template and is never deduped this way.
-      if (previousSummary === summary) return
-      this.#lastProgressSummary.set(payload.delegate_id, summary)
-      content = `${displayName} 正在执行：${summary}`
-    } else {
-      content = `${displayName} 仍在处理这个任务，目前已推进 ${payload.internal_activity} 个步骤。`
-    }
-    const eventId = `progress:${payload.delegate_id}:${payload.phase}:${payload.internal_activity}`
-    if (coding) {
-      // Coalesce queued updates per task; the latest fact retains existing owner/floor/expiry fences.
-      if (this.#codingProgressNarration.mode === 'continuous') {
-        this.#retireDelegateHostEvents(payload.delegate_id)
-        const retained = this.#hostItems.filter(item => !this.#codingProgressQueued.has(item)
-          || this.#codingProgressHostEventIds.has(item.intent.item.event_id))
-        this.#hostItems.length = 0
-        this.#hostItems.push(...retained.sort(compareQueuedHostResponses))
-      }
-      this.#rememberCodingProgressHostEvent(eventId)
-    }
-    this.#rememberDelegateHostEvent(payload.delegate_id, eventId)
-    this.queueHostItem(hostFactIntent({
-      kind: 'progress',
-      host_item_id: this.#idFactory(),
-      event_id: eventId,
-      content,
-    }), {
-      priority: manifest.policy.priority,
-      owner: {delegate_id: payload.delegate_id, channel: payload.channel},
-      expiresAt: this.#clock.now() + PROGRESS_HOST_ITEM_TTL_S,
-    })
-  }
-
-  /**
-   * An executor finished.
-   *
-   * Two silences here are deliberate and were both learned from hearing the agent say too much. An
-   * unselected suggestion handoff is a proposal the Surrogate never chose, so announcing it would tell
-   * the user about something they were not offered. And a successful monitor stop already has its
-   * spoken confirmation in the stop tool's own continuation -- both terminal handoffs stay
-   * authoritative in Memory, but projecting either duplicates that acknowledgement, and projecting
-   * both produced three lines.
-   */
-  #projectHandoff(
-    event: Extract<EventRecord, {kind: 'handoff'}>,
-    manifest: ExecutorManifestLike,
-  ): void {
-    // Only the delegate *this* handoff claimed. A duplicate, or one for an already-settled delegate,
-    // claims nothing and must not be projected against whatever the previous one claimed.
-    const claimed = this.#runtime.claimedHandoff(event.seq)
-    if (claimed?.executor !== event.payload.channel) return
-    const payload = event.payload
-    const displayName = this.#executorDisplayName(payload.channel)
-    this.#fenceSemanticAcknowledgement(payload.delegate_id)
-    this.#retireDelegateHostEvents(payload.delegate_id)
-    const directSuggestionHandoff = manifest.policy.suggest === true
-      && payload.outcome === 'ok'
-      && claimed.routing_class === 'user_awaited'
-    const suppressUnselectedSuggestion = manifest.policy.suggest === true
-      && payload.outcome === 'ok'
-      && !directSuggestionHandoff
-    this.session.registerDelegate(payload.delegate_id, {
-      summary: this.#delegateSummary(payload.delegate_id, displayName),
-      state: payload.outcome === 'ok'
-        ? 'completed'
-        : payload.outcome === 'refused'
-          ? 'refused'
-          : payload.outcome === 'unknown' ? 'unknown' : 'failed',
-      channel: payload.channel,
-    })
-    // CP1: a settled delegate leaves no dedup residue behind.
-    this.#lastProgressSummary.delete(payload.delegate_id)
-    this.#publishExecutorState()
-    if (
-      isMonitorPolicy(manifest.policy)
-      && monitorAlertDelivery(manifest.policy) === 'none'
-      && payload.outcome === 'ok'
-      && payload.content.hit === true
-    ) return
-    if (suppressUnselectedSuggestion) return
-
-    const successfulMonitorStop = isMonitorPolicy(manifest.policy)
-      && payload.outcome === 'ok'
-      && (
-        (claimed.op === 'stop' && payload.content.stopped === true)
-        || (claimed.op === 'start' && payload.content.state === 'stopped')
-      )
-    if (successfulMonitorStop) return
-
-    const finalView = payload.channel === this.#coding?.channel
-      ? finalSpeechView(payload.outcome, payload.content, this.#coding.display_name)
-      : genericFinalSpeechView(displayName, payload.outcome, payload.content)
-    const content = [...finalView].slice(0, MAX_HOST_FACT_CHARS).join('')
-    const hit = payload.outcome === 'ok' && payload.content.hit === true
-    const preemptiveMonitorHit = hit && isPreemptiveMonitorAlert(manifest.policy)
-    this.queueHostItem(hostFactIntent({
-      kind: 'final',
-      host_item_id: this.#idFactory(),
-      event_id: `final:${payload.delegate_id}`,
-      content,
-    }), {
-      priority: hit
-        ? Math.max(manifest.policy.priority, HIT_ALERT_MIN_PRIORITY)
-        : manifest.policy.priority,
-      preemptive: hit && (isMonitorPolicy(manifest.policy)
-        ? isPreemptiveMonitorAlert(manifest.policy)
-        : manifest.policy.priority >= PREEMPT_MIN_PRIORITY),
-      preemptiveAlert: preemptiveMonitorHit,
-      preemptiveAlertDelegateId: preemptiveMonitorHit ? payload.delegate_id : null,
-    })
-  }
-
-  /** The summary the session already holds for a delegate, or a plain stand-in. */
-  #delegateSummary(delegateId: string, displayName: string): string {
-    for (const [currentId, record] of this.session.snapshot().active_delegates) {
-      if (currentId === delegateId) return record.summary
-    }
-    return `${displayName} background task`
-  }
 
   /**
    * Consume the provider stream until it ends or the service stops.
@@ -2872,13 +1022,10 @@ export class RealtimeService {
 
   async #handleEvent(event: RealtimeProviderEvent): Promise<void> {
     if (event.session_epoch <= this.#discardedInputEpoch) return
-    this.#syncProjectConfirmationIsolation()
+    this.#confirmation.syncProjectConfirmationIsolation()
     if (event.kind === 'response_cancel_rejected') {
-      if (this.#projectConfirmationIsolation.responseState({
-        sessionEpoch: event.session_epoch,
-        responseId: event.response_id,
-      })?.quarantined === true) {
-        await this.#recoverProjectConfirmationCarrier(
+      if (this.#confirmation.responseIsQuarantined(event.session_epoch, event.response_id)) {
+        await this.#confirmation.recoverProjectConfirmationCarrier(
           event.session_epoch,
           event.response_id,
           'cancel_rejected',
@@ -2891,6 +1038,7 @@ export class RealtimeService {
       return
     }
     if (event.kind === 'provider_error') {
+      this.#telemetry?.record('provider.error', {session_epoch: event.session_epoch, code: event.code, recoverable: event.recoverable})
       await this.session.accept(event)
       this.#onDiagnostic(
         `[realtime-diagnostic] provider_error code=${event.code} recoverable=${event.recoverable}`,
@@ -2904,8 +1052,8 @@ export class RealtimeService {
       } else {
         this.#providerFailed = true
         this.#approvalHost.invalidateExecutorApproval('provider_failed')
-        this.#urgentHostResponseOwner = null
-        this.#preemptiveAlert = null
+        this.#host.releaseUrgentOwner()
+        this.#host.releasePreemptionAfterFailure()
         this.#stop.abort()
       }
       return
@@ -2918,7 +1066,7 @@ export class RealtimeService {
         // it a throughput counter instead.
         if (!this.#audioStarted.has(event.response_id)) {
           this.#audioStarted.add(event.response_id)
-          this.#telemetry.record('provider.first_audio_delta', {response_id: event.response_id})
+          this.#telemetry.record('provider.first_audio_delta', {session_epoch: event.session_epoch, response_id: event.response_id})
         }
       } else if (event.kind === 'response_terminal') {
         this.#audioStarted.delete(event.response_id)
@@ -2928,16 +1076,16 @@ export class RealtimeService {
     // Captured before `accept`, because a terminal is what *removes* the owner's response and the
     // release below needs to know which owner this terminal belonged to.
     const terminalOwner = event.kind === 'response_terminal'
-      ? this.#urgentOwnerForResponse(event.session_epoch, event.response_id)
+      ? this.#host.urgentOwnerForResponse(event.session_epoch, event.response_id)
       : null
 
     // A tool call in a turn that is meant to be waiting for a confirmation is refused before the
     // session sees it: letting it through would have the model acting inside the very turn whose answer
     // it is supposed to be waiting for.
-    const confirmTarget = event.kind === 'tool_call_ready' ? this.#confirmTarget(event) : null
+    const confirmTarget = event.kind === 'tool_call_ready' ? this.#confirmation.confirmTarget(event) : null
     const isConfirmationDecision = confirmTarget === 'project'
     const blockedConfirmationTool = event.kind === 'tool_call_ready'
-      && this.#blocksProjectConfirmationTool(event)
+      && this.#confirmation.blocksProjectConfirmationTool(event)
       && !isConfirmationDecision
     const isExecutorApprovalDecision = confirmTarget === 'approval'
     const blockedExecutorApprovalTool = event.kind === 'tool_call_ready'
@@ -2947,12 +1095,7 @@ export class RealtimeService {
     // speech end. That response is an authorization carrier, not an audible assistant turn. Let it
     // acquire an origin while the user still owns the floor, but never bypass the one-shot fence for
     // a stale host-requested confirmation question.
-    const confirmationFencePendingAtStart = this.#projectConfirmationIsolation.responseFencePending
-    const confirmationResponseStartsDuringSpeech = event.kind === 'response_started'
-      && event.session_epoch === this.session.sessionEpoch
-      && this.session.floor.state === 'user_speaking'
-      && !this.#projectConfirmationIsolation.responseFencePending
-      && this.#projectConfirmationIsolation.reservation?.sessionEpoch === event.session_epoch
+    const {confirmationFencePendingAtStart, confirmationResponseStartsDuringSpeech} = this.#confirmation.beforeEvent(event)
     const accepted = blockedConfirmationTool || blockedExecutorApprovalTool
       ? false
       : await this.session.accept(event, {
@@ -2961,93 +1104,17 @@ export class RealtimeService {
             || approvalEvent.orphanedExecutorRetryCandidate,
         })
     const executorQuarantinedResponse = await this.#approvalHost.afterEventAccepted(event, accepted, approvalEvent)
-    if (
-      event.kind === 'response_started'
-      && this.#projectConfirmationPendingQuarantineEpoch === event.session_epoch
-    ) {
-      this.#projectConfirmationPendingQuarantineEpoch = null
-      this.#projectConfirmationIsolation.markBlockedResponse({
-        sessionEpoch: event.session_epoch,
-        responseId: event.response_id,
-      })
-      this.#projectConfirmationIsolation.markQuarantined({
-        sessionEpoch: event.session_epoch,
-        responseId: event.response_id,
-      })
-      this.session.suppressResponse(event.response_id)
-    }
-    if (
-      event.kind === 'response_started'
-      && event.session_epoch === this.session.sessionEpoch
-      && this.#projectConfirmationIsBlocking()
-    ) {
-      // A fenced pre-start response is the stale question the user interrupted, not the response to
-      // their answer. It spends the one-shot fence but must not bind or release the reserved item.
-      if (accepted) {
-        this.#projectConfirmationIsolation.markBlockedResponse({
-          sessionEpoch: event.session_epoch,
-          responseId: event.response_id,
-        })
-        if (this.#userOrigins.itemForResponse(event.session_epoch, event.response_id) === undefined) {
-          if (!this.#bindProjectConfirmationRetryResponse(event.session_epoch, event.response_id)) {
-            this.#bindResponseUserOrigin(event.session_epoch, event.response_id)
-          }
-        }
-        this.#bindProjectConfirmationResponse(event.session_epoch, event.response_id)
-        if (confirmationResponseStartsDuringSpeech) {
-          // The provider may now finish its structured function call, but it must not start talking
-          // after the user's floor opens. The deterministic confirmation fact remains the reply owner.
-          this.session.suppressResponse(event.response_id)
-        }
-      }
-      // The armed fence has been spent by this response, so it no longer holds the block open.
-      this.#projectConfirmationIsolation.setResponseFencePending(false)
-    }
-    if (
-      event.kind === 'response_started'
-      && this.#projectConfirmationIsolation.reservation?.sessionEpoch === event.session_epoch
-    ) {
-      this.#telemetry?.record('project_confirmation.response_started', {
-        session_epoch: event.session_epoch,
-        response_id: event.response_id,
-        accepted,
-        started_during_user_speech: confirmationResponseStartsDuringSpeech,
-        fence_pending: confirmationFencePendingAtStart,
-        origin_bound: accepted
-          && this.#userOrigins.itemForResponse(event.session_epoch, event.response_id) !== undefined,
-        confirmation_item_count: this.#projectConfirmationIsolation.reservation === null ? 0 : 1,
-        proposal_id: this.#projectConfirmation?.lifecycleId ?? 'none',
-        proposal_origin_ref: this.#projectConfirmation?.proposalOriginRef ?? 'none',
-        delegate_origin_ref: this.#projectConfirmation?.proposalOriginRef ?? 'none',
-        user_input_revision: this.session.providerTurnUserInputRevision(event.response_id) ?? -1,
-        item_id: this.#userOrigins.itemForResponse(
-          event.session_epoch,
-          event.response_id,
-        ) ?? 'none',
-      })
-    }
+    this.#confirmation.afterEventAccepted(event, accepted, confirmationFencePendingAtStart, confirmationResponseStartsDuringSpeech)
     if (event.kind === 'response_started' || event.kind === 'response_audio_delta') {
-      const preemption = this.#preemptiveAlert
-      // A turn that was still starting when the alert arrived has only now revealed its id, so the
-      // preemption learns which response it is cancelling here rather than at arbitration time.
-      if (
-        preemption !== null
-        && preemption.session_epoch === event.session_epoch
-        && preemption.old_response_id === null
-        && this.session.activeProviderResponseId === event.response_id
-        && this.session.providerTurnPhase(event.response_id) === 'cancel_requested'
-        && this.session.providerTurnWasFenced(event.response_id)
-      ) {
-        this.#preemptiveAlert = {...preemption, old_response_id: event.response_id}
-      }
-      this.#recordPreemptiveAlertCancelSent(event.response_id)
+      this.#host.learnPreemptedResponse(event)
+      this.#host.recordPreemptiveAlertCancelSent(event.response_id)
     }
     // Unconditional, and before the accepted-only work: a fence receipt is destructive to read, so it
     // has to be consumed on every event or a later one would see a stale interruption.
-    this.#retireFencedPrestartUrgent()
+    this.#host.retireFencedPrestartUrgent()
     if (accepted && (event.kind === 'response_started' || event.kind === 'response_audio_delta')) {
-      this.#bindUrgentHostResponse(event)
-      this.#finishPreemptiveAlertFirstAudio(event)
+      this.#host.bindUrgentHostResponse(event)
+      this.#host.finishPreemptiveAlertFirstAudio(event)
     }
 
     if (event.kind === 'response_started' && accepted) {
@@ -3056,11 +1123,11 @@ export class RealtimeService {
       if (this.session.responseEventIds(event.response_id).length === 0) {
         this.#bindResponseUserOrigin(event.session_epoch, event.response_id)
       }
-      this.#suppressCancelledSemanticAcknowledgement(event.response_id)
-      this.#bindRequestedSemanticAcknowledgement(event.response_id)
-      this.#bindContinuation(event.response_id)
-      this.#bindToolContinuationOrigin(event.session_epoch, event.response_id)
-      this.#suppressShadowConfirmationResponse(event.session_epoch, event.response_id)
+      this.#host.suppressCancelledSemanticAcknowledgement(event.response_id)
+      this.#host.bindRequestedSemanticAcknowledgement(event.response_id)
+      this.#continuations.bindContinuation(event.response_id)
+      this.#continuations.bindToolContinuationOrigin(event.session_epoch, event.response_id)
+      this.#confirmation.suppressShadowConfirmationResponse(event.session_epoch, event.response_id)
     }
     if (event.kind === 'response_started') {
       this.#telemetry?.record('provider.response_started', {
@@ -3073,6 +1140,17 @@ export class RealtimeService {
           event.response_id,
         ) ?? 'none',
       })
+    }
+
+    if (event.kind === 'user_speech_started' || event.kind === 'user_speech_ended') {
+      this.#telemetry?.record(`provider.${event.kind}`, {session_epoch: event.session_epoch,
+        speech_id: event.speech_id, item_id: event.provider_item_id, accepted})
+    } else if (event.kind === 'user_transcript_final' || event.kind === 'user_transcript_failed') {
+      this.#telemetry?.record(`provider.${event.kind}`, {session_epoch: event.session_epoch,
+        item_id: event.item_id, accepted})
+    } else if (event.kind === 'response_terminal') {
+      this.#telemetry?.record('provider.response_terminal', {session_epoch: event.session_epoch,
+        response_id: event.response_id, status: event.status, accepted})
     }
 
     if (this.#onCaption !== undefined) {
@@ -3088,20 +1166,8 @@ export class RealtimeService {
 
     if (event.kind === 'user_speech_started' && accepted) {
       this.#intake?.userInputStarted()
-      if (this.#providerEpochNeedingActivation === event.session_epoch) {
-        this.#providerEpochNeedingActivation = null
-      }
-      this.#providerReconnectSourceEpoch = null
-      const preemption = this.#preemptiveAlert
-      if (preemption !== null) {
-        // The user speaking is the authority the preemption was borrowing. A permit not yet spent is
-        // now disallowed; one already spent means a reconnect is in flight and has to be abandoned.
-        this.#preemptiveAlert = {
-          ...preemption,
-          reconnect_disallowed: !preemption.reconnect_permit_consumed,
-          reconnect_aborted: preemption.reconnect_permit_consumed,
-        }
-      }
+      this.#host.acceptUserActivation(event.session_epoch)
+      this.#host.revokePreemptiveReconnect()
       // An automatic provider may finish its function call before emitting this turn's transcript final. Do not let
       // that call bind to provider-authored placeholder text or the previous user turn.
       this.#awaitingUserOrigin = true
@@ -3116,7 +1182,7 @@ export class RealtimeService {
       this.#approvalHost.noteExecutorApprovalOnsetBeforeContext()
       this.#approvalHost.releaseQuestionOnOnset()
       await this.#approvalHost.reserveExecutorApprovalItem(event.session_epoch, event.provider_item_id)
-      this.#reserveProjectConfirmation(event)
+      this.#confirmation.reserveProjectConfirmation(event)
     }
     if (
       event.kind === 'user_speech_ended'
@@ -3134,7 +1200,7 @@ export class RealtimeService {
 
     if (event.kind === 'response_terminal' && accepted) {
       this.#approvalHost.noteTerminal(event)
-      this.#recordPreemptiveAlertCancelTerminal(event)
+      this.#host.recordPreemptiveAlertCancelTerminal(event)
       const generation = this.session.currentGeneration
       if (
         generation !== null
@@ -3143,80 +1209,25 @@ export class RealtimeService {
       ) {
         this.#onProviderTerminal(generation)
       }
-      this.#finishSemanticAcknowledgement(event)
-      this.#finishContinuation(event)
-      this.#finishOrigin(event.response_id)
+      this.#host.finishSemanticAcknowledgement(event)
+      this.#continuations.finishContinuation(event)
+      this.#continuations.finishOrigin(event.response_id)
       const itemId = this.#userOrigins.itemForResponse(event.session_epoch, event.response_id)
-      if (
-        itemId !== undefined
-        && this.#isProjectConfirmationItem(event.session_epoch, itemId)
-      ) {
-        const controller = this.#projectConfirmation
-        const itemKey = callKey(event.session_epoch, itemId)
-        const retry = this.#projectConfirmationDecisionRetry
-        const isRetryTerminal = retry?.item_key === itemKey
-          && retry.retry_response_id === event.response_id
-        // A transport-level cancelled/failed terminal can be just as empty as completed. What
-        // matters at this boundary is whether the response supplied any audible decision, not the
-        // provider's terminal label.
-        const silentTerminal = !this.session.responseHasSpoken(event.response_id)
-        this.#telemetry?.record('project_confirmation.response_terminal', {
-          session_epoch: event.session_epoch,
-          response_id: event.response_id,
-          item_id: itemId,
-          status: event.status,
-          transcript_ready: this.#userOrigins.hasOriginRef(event.session_epoch, itemId),
-          decision_seen: false,
-          retry_attempt: isRetryTerminal ? 1 : 0,
-          user_input_revision: this.#userOrigins.revisionForItem(
-            event.session_epoch,
-            itemId,
-          ) ?? -1,
-          proposal_id: controller?.lifecycleId ?? 'none',
-          proposal_origin_ref: controller?.proposalOriginRef ?? 'none',
-          delegate_origin_ref: controller?.proposalOriginRef ?? 'none',
-        })
-        if (silentTerminal && controller?.pending === true && !isRetryTerminal) {
-          this.#projectConfirmationDecisionRetry ??= {
-            item_key: itemKey,
-            source_response_id: event.response_id,
-            requested: false,
-            retry_response_id: null,
-          }
-          await this.#maybeRequestProjectConfirmationDecisionRetry(event.session_epoch, itemId)
-        } else {
-          controller?.releaseUndecided({epoch: event.session_epoch, itemId})
-          this.#endProjectConfirmationItem(event.session_epoch, itemId)
-          if (isRetryTerminal) {
-            this.#telemetry?.record('project_confirmation.decision_retry_exhausted', {
-              session_epoch: event.session_epoch,
-              item_id: itemId,
-              response_id: event.response_id,
-              proposal_id: controller?.lifecycleId ?? 'none',
-              proposal_origin_ref: controller?.proposalOriginRef ?? 'none',
-              delegate_origin_ref: controller?.proposalOriginRef ?? 'none',
-              user_input_revision: this.#userOrigins.revisionForItem(
-                event.session_epoch,
-                itemId,
-              ) ?? -1,
-              reason: 'no_confirmation_function',
-            })
-          }
-        }
-      }
+      if (event.status === 'completed' && itemId !== undefined
+        && this.#userOrigins.revisionForItem(event.session_epoch, itemId) === this.session.userInputRevision
+        && this.#intakeUser?.localOnsetRevision === this.#localSpeechOnsetRevision) this.#intake?.userResponseCompleted()
+      await this.#confirmation.settleTerminal(event, itemId)
       await this.#approvalHost.settleTerminal(event)
-      if (itemId !== undefined) {
-        this.#projectConfirmationShadowItems.delete(callKey(event.session_epoch, itemId))
-      }
+      this.#confirmation.clearTerminalShadow(event.session_epoch, itemId)
       // Released only when the terminal is *not* the current generation: if it is, playback is still
       // running and the owner is what keeps the alert's audio attributable.
       if (
         generation?.session_epoch !== event.session_epoch
         || generation.response_id !== event.response_id
       ) {
-        this.#releaseUrgentHostResponse(terminalOwner)
+        this.#host.releaseUrgentHostResponse(terminalOwner)
       }
-      this.#markPreemptiveAlertReplacementTerminal(terminalOwner)
+      this.#host.markPreemptiveAlertReplacementTerminal(terminalOwner)
     }
     if (event.kind === 'response_terminal' && executorQuarantinedResponse) {
       await this.#approvalHost.finishPendingExecutorApprovalResponseQuarantine(
@@ -3231,10 +1242,7 @@ export class RealtimeService {
         // A delayed final still belongs to its original VAD item, not a newer speech onset.
         const inputRevision = this.#userOrigins.revisionForItem(event.session_epoch, event.item_id)
           ?? this.session.userInputRevision
-        if (this.#providerEpochNeedingActivation === event.session_epoch) {
-          this.#providerEpochNeedingActivation = null
-        }
-        this.#providerReconnectSourceEpoch = null
+        this.#host.acceptUserActivation(event.session_epoch)
         if (this.#userOrigins.revisionForItem(event.session_epoch, event.item_id) === undefined) {
           // Some realtime transports can deliver a final transcript without a preceding VAD item id.
           // `RealtimeSession.accept()` has already advanced the exact item as the current user turn;
@@ -3256,25 +1264,13 @@ export class RealtimeService {
         })
         this.#rememberUserOriginRef(event.session_epoch, event.item_id, originRef)
         this.#intakeUser = {text: event.text, origin_ref: originRef, epoch: event.session_epoch, inputRevision, localOnsetRevision}
-        this.#intake?.userTurn(event.text, originRef, String(event.session_epoch))
+        this.#intake?.userInputEnded()
         this.#awaitingUserOrigin = this.#userOrigins.hasUnboundRevision(
           event.session_epoch,
           this.session.userInputRevision,
         )
         if (!this.#awaitingUserOrigin) this.#userOriginPreexistingResponseId = null
-        if (
-          this.#isProjectConfirmationItem(event.session_epoch, event.item_id)
-          && this.#projectConfirmation?.pending !== true
-        ) {
-          await this.#closeConfirmationDeferredCalls(event.item_id)
-        } else if (this.#isProjectConfirmationShadowItem(event.session_epoch, event.item_id)) {
-          await this.#closeConfirmationDeferredCalls(event.item_id)
-        } else {
-          await this.#releaseDeferredOriginCalls(event.item_id, originRef)
-        }
-        if (this.#isProjectConfirmationItem(event.session_epoch, event.item_id)) {
-          await this.#maybeRequestProjectConfirmationDecisionRetry(event.session_epoch, event.item_id)
-        }
+        await this.#confirmation.afterTranscriptFinal(event, originRef)
       }
     } else if (event.kind === 'user_transcript_failed') {
       if (accepted) {
@@ -3297,13 +1293,7 @@ export class RealtimeService {
           this.session.userInputRevision,
         )
         if (!this.#awaitingUserOrigin) this.#userOriginPreexistingResponseId = null
-        if (this.#isProjectConfirmationItem(event.session_epoch, event.item_id)) {
-          await this.#failProjectConfirmation(event.session_epoch, event.item_id)
-        } else if (this.#isProjectConfirmationShadowItem(event.session_epoch, event.item_id)) {
-          await this.#closeConfirmationDeferredCalls(event.item_id)
-        } else {
-          await this.#releaseDeferredOriginCalls(event.item_id, null)
-        }
+        await this.#confirmation.afterTranscriptFailed(event)
       }
     } else if (event.kind === 'tool_call_ready') {
       this.#telemetry?.record('tool.call', {
@@ -3313,7 +1303,7 @@ export class RealtimeService {
       if (!accepted) {
         // A refused confirmation tool still owes the provider a terminal result, or the protocol stalls
         // waiting for one that will never come.
-        if (blockedConfirmationTool) await this.#closeProjectConfirmationTool(event)
+        if (blockedConfirmationTool) await this.#confirmation.closeProjectConfirmationTool(event)
         else if (blockedExecutorApprovalTool) await this.#approvalHost.closeExecutorApprovalCarrierTool(event)
         else if (
           isExecutorApprovalDecision
@@ -3327,19 +1317,13 @@ export class RealtimeService {
         }
         return
       }
-      await this.#routeToolCall(event)
+      await this.#continuations.routeToolCall(event)
     }
     if (event.kind === 'user_transcript_final' || event.kind === 'user_transcript_failed') {
-      await this.#resumeProjectConfirmationCarrierRecoveryAfterUser()
+      await this.#confirmation.resumeProjectConfirmationCarrierRecoveryAfterUser()
     }
     if (event.kind === 'response_terminal') {
-      this.#projectConfirmationIsolation.clearResponse({
-        sessionEpoch: event.session_epoch,
-        responseId: event.response_id,
-      })
-      if (this.#projectConfirmationPendingQuarantineEpoch === event.session_epoch) {
-        this.#projectConfirmationPendingQuarantineEpoch = null
-      }
+      this.#confirmation.clearTerminal(event)
       this.#approvalHost.clearTerminal(event)
     }
 
@@ -3364,148 +1348,6 @@ export class RealtimeService {
     } catch {
       this.#onDiagnostic('[realtime-diagnostic] personal_memory_admission_failed')
     }
-  }
-
-  /**
-   * Decide whether a tool call can be handled now, or has to wait for its evidence.
-   *
-   * Three cases, in the order the oracle checks them. If the response already has a bound user item,
-   * the call has its evidence -- unless the transcript for that item has not landed, in which case it
-   * waits. If no item is bound but a user turn is in flight, the call may belong to *that* turn, and
-   * the question becomes whether the response it names is the one that turn will answer. If nothing is
-   * pending at all, the call has whatever evidence it is going to get.
-   *
-   * The deferral queue is bounded. Full means the provider is producing calls faster than transcripts
-   * arrive, and no amount of waiting will fix it -- reconnecting is the way back to a session whose
-   * state can be reasoned about.
-   */
-  /**
-   * Which confirmation FSM a `confirm(id, accepted)` call answers (spec 08: one tool for both).
-   *
-   * An id the approval FSM knows -- live, still holding voice authority, or its expiry tombstone --
-   * wins, so a late answer keeps that FSM's own classification; then the project proposal's id. Any
-   * other well-formed id names nothing and is `'none'` (`unknown_confirmation`, refused in
-   * `#interceptHost`); only a null / malformed id falls through to whichever FSM is pending, so each
-   * keeps its own malformed-call accounting. `null` is any other tool. The id is read through
-   * `confirmArguments` so a provider-supplied accessor is never evaluated here.
-   */
-  #confirmTarget(event: ToolCallReady): 'approval' | 'project' | 'none' | null {
-    if (event.name !== CONFIRM_TOOL) return null
-    const id = confirmArguments(event.arguments)?.id ?? null
-    const project = this.#projectConfirmation
-    if (id !== null && this.#approvalHost.ownsId(id)) return 'approval'
-    if (id !== null && project?.lifecycleId === id) return 'project'
-    if (id !== null) return 'none'
-    if (project?.pending === true) return 'project'
-    if (this.#approvalHost.pending) return 'approval'
-    if (
-      event.response_id !== null
-      && this.#approvalHost.isExecutorApprovalResponseQuarantined(event.session_epoch, event.response_id)
-    ) return 'approval'
-    return 'none'
-  }
-
-  async #routeToolCall(event: ToolCallReady): Promise<void> {
-    const activeResponseId = this.session.activeProviderResponseId
-    const observedResponseId = event.response_id ?? activeResponseId
-
-    const evidence = observedResponseId === null ? undefined : this.session.providerResponseOrigin(observedResponseId)
-    const boundItem = observedResponseId === null ? undefined
-      : this.#userOrigins.itemForResponse(event.session_epoch, observedResponseId)
-    const toolContinuation = observedResponseId !== null && evidence?.kind === 'host_request'
-      && this.session.responseIsToolContinuation(observedResponseId)
-      && boundItem !== undefined
-      && this.#userOrigins.revisionForItem(event.session_epoch, boundItem) === this.session.userInputRevision
-      && this.session.providerTurnUserInputRevision(observedResponseId) === this.session.userInputRevision
-    if (evidence !== undefined && !toolContinuation && (
-      evidence.kind !== 'user_item' || boundItem !== evidence.item_id
-    )) {
-      // Explicit evidence may be rejected, but cannot fall back to the next arriving transcript.
-      await this.#handleBoundToolCall(event, {
-        observedProviderResponseId: observedResponseId, originItemId: null, originRef: null,
-      })
-      return
-    }
-    const confirmTarget = this.#confirmTarget(event)
-    if (confirmTarget === 'approval') {
-      await this.#approvalHost.routeExecutorApprovalCall(event, observedResponseId)
-      return
-    }
-    const originItemId = observedResponseId === null
-      ? undefined
-      : this.#userOrigins.itemForResponse(event.session_epoch, observedResponseId)
-
-    if (
-      originItemId !== undefined
-      && this.#isProjectConfirmationShadowItem(event.session_epoch, originItemId)
-    ) {
-      await this.#closeProjectConfirmationTool(event)
-      return
-    }
-
-    if (originItemId !== undefined) {
-      const originRef = this.#userOrigins.originRefForItem(event.session_epoch, originItemId)
-      if (originRef !== undefined) {
-        await this.#handleBoundToolCall(event, {
-          observedProviderResponseId: observedResponseId,
-          originItemId,
-          originRef,
-        })
-      } else if (this.#originDeferredToolCalls.length >= MAX_PENDING_TOOL_REFUSALS) {
-        await this.#reconnectProviderSession({
-          reason: 'origin_resolution_overflow',
-          expectedEpoch: this.session.sessionEpoch,
-        })
-      } else {
-        this.#originDeferredToolCalls.push({
-          event,
-          response_id: observedResponseId!,
-          user_item_id: originItemId,
-        })
-      }
-      return
-    }
-
-    if (confirmTarget === 'project') {
-      await this.#handleProjectConfirmationDecision(event, {
-        observedProviderResponseId: observedResponseId,
-        originItemId: null,
-        originRef: null,
-      })
-      return
-    }
-
-    if (this.#awaitingUserOrigin) {
-      // Whether the response this call names is the one the in-flight user turn will answer. If it is
-      // not -- a different response, a finished one, or one already fenced -- the call is not waiting
-      // on that turn and holding it back would delay it for evidence it was never going to get.
-      const originIsActive = observedResponseId !== null
-        && activeResponseId === observedResponseId
-        && this.session.providerTurnPhase(observedResponseId) === 'active'
-        && !this.session.providerTurnWasFenced(observedResponseId)
-      if (observedResponseId === this.#userOriginPreexistingResponseId) {
-        // The response was already running when the user started speaking, so it cannot be answering
-        // them: handle it now with whatever evidence it has.
-        await this.#handleToolCall(event)
-      } else if (!originIsActive) {
-        await this.#handleToolCall(event)
-      } else if (this.#originDeferredToolCalls.length >= MAX_PENDING_TOOL_REFUSALS) {
-        await this.#reconnectProviderSession({
-          reason: 'origin_binding_overflow',
-          expectedEpoch: this.session.sessionEpoch,
-        })
-      } else {
-        // Non-null by construction: `originIsActive` above required it.
-        this.#originDeferredToolCalls.push({
-          event,
-          response_id: observedResponseId,
-          user_item_id: null,
-        })
-      }
-      return
-    }
-
-    await this.#handleToolCall(event)
   }
 
   /**
@@ -3540,8 +1382,7 @@ export class RealtimeService {
     }
     this.#providerFailed = true
     this.#approvalHost.invalidateExecutorApproval('task_failed')
-    this.#urgentHostResponseOwner = null
-    this.#preemptiveAlert = null
+    this.#host.releaseFailedDelivery()
     this.#stop.abort()
     this.#deliveryReady.set()
   }
@@ -3622,8 +1463,8 @@ export class RealtimeService {
       response_id: responseId,
       item_id: itemId,
       status,
-      proposal_id: this.#projectConfirmation?.lifecycleId ?? 'none',
-      proposal_origin_ref: this.#projectConfirmation?.proposalOriginRef ?? 'none',
+      proposal_id: this.#confirmation.proposalId ?? 'none',
+      proposal_origin_ref: this.#confirmation.proposalOriginRef ?? 'none',
     })
   }
 
@@ -3652,501 +1493,6 @@ export class RealtimeService {
     return failed
   }
 
-  /**
-   * Run the tool calls that were waiting for this transcript.
-   *
-   * Two kinds of waiter. One names the user item it needs, and is released when that item arrives.
-   * The other could not be keyed at all -- it arrived before any item was known -- and those are
-   * released as a batch, all from the same response, but only if no keyed waiter matched: a keyed
-   * match means the transcript belongs to a specific call, and releasing the unkeyed batch alongside
-   * it would hand them evidence that is not theirs.
-   *
-   * The epoch is re-read each iteration. Handling one call can reconnect, and every remaining call
-   * belongs to a session that no longer exists.
-   */
-  async #releaseDeferredOriginCalls(itemId: string, originRef: string | null): Promise<void> {
-    const releaseEpoch = this.session.sessionEpoch
-    const deferred = [...this.#originDeferredToolCalls]
-    this.#originDeferredToolCalls.length = 0
-    const hasKeyedMatch = deferred.some(entry => entry.user_item_id === itemId)
-    const unkeyedResponseId = hasKeyedMatch
-      ? null
-      : deferred.find(entry => entry.user_item_id === null)?.response_id ?? null
-    for (const entry of deferred) {
-      if (this.session.sessionEpoch !== releaseEpoch) return
-      const matchesKeyed = entry.user_item_id === itemId
-      const matchesUnkeyedBatch = entry.user_item_id === null
-        && entry.response_id === unkeyedResponseId
-      if (!matchesKeyed && !matchesUnkeyedBatch) {
-        this.#originDeferredToolCalls.push(entry)
-        continue
-      }
-      await this.#handleBoundToolCall(entry.event, {
-        observedProviderResponseId: entry.response_id,
-        originItemId: entry.user_item_id,
-        originRef,
-      })
-    }
-  }
-
-  async #handleBoundToolCall(event: ToolCallReady, origin: BoundToolOrigin): Promise<void> {
-    const confirmTarget = this.#confirmTarget(event)
-    if (confirmTarget === 'project') {
-      await this.#handleProjectConfirmationDecision(event, origin)
-      return
-    }
-    if (confirmTarget === 'approval') {
-      await this.#approvalHost.handleExecutorApprovalDecision(event, origin)
-      return
-    }
-    await this.#handleToolCall(event, {
-      observedProviderResponseId: origin.observedProviderResponseId,
-      originRef: origin.originRef,
-    })
-  }
-
-  /** Where a batch's originating response ended up, collapsed to the four states a batch tracks. */
-  #originStatus(responseId: string): ContinuationBatch['origin_status'] {
-    const phase = this.session.providerTurnPhase(responseId)
-    // `cancel_requested` is still active: the cancel has been asked for, not observed, and treating
-    // it as cancelled would abandon a batch whose response may yet complete normally.
-    if (phase === 'active' || phase === 'cancel_requested') return 'active'
-    if (phase === 'failed') return 'failed'
-    if (phase === 'cancelled' || this.session.providerTurnWasFenced(responseId)) return 'cancelled'
-    return 'completed'
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // Family J: admitting one tool call.
-  // ---------------------------------------------------------------------------------------------
-
-  #toolCallState(key: string): ToolCallState | undefined {
-    return this.#toolCalls.get(key) ?? this.#overflowToolCalls.get(key)
-  }
-
-  /**
-   * Admit one tool call, or record why it could not be.
-   *
-   * The long branch is first-sighting; the short one at the end handles a repeat of a call already
-   * known. Three things can stop an admission and they are genuinely different: *superseded* means
-   * the turn that proposed it is gone, so running it would act on an intention the user has moved
-   * past; *over capacity* means the ledgers are full and admitting more would grow without bound;
-   * and a bridge refusal means the proposal itself was not admissible.
-   */
-  async #handleToolCall(
-    call: ToolCallReady,
-    options: {
-      readonly observedProviderResponseId?: string | null
-      readonly originRef?: string | null
-    } = {},
-  ): Promise<void> {
-    const event = call
-    // A hidden agent op named by the provider was never offered to it and cannot be reached through
-    // a host rewrite. Controllers are the only path from a public agent name to a hidden channel.
-    const hidden = this.#tools.hidden.has(call.name)
-    const key = callKey(event.session_epoch, event.call_id)
-    const existing = this.#toolCallState(key)
-    if (existing !== undefined) {
-      // A repeat. Touch it so the LRU keeps it, and finish the one piece of work a repeat can carry:
-      // a superseded call whose output was never confirmed still owes the provider a result.
-      const ledger = this.#toolCalls.has(key) ? this.#toolCalls : this.#overflowToolCalls
-      ledger.delete(key)
-      ledger.set(key, existing)
-      if (
-        existing.observation === 'superseded'
-        && existing.continuation === 'abandoned'
-        && existing.output === 'pending'
-      ) {
-        await this.#confirmSupersededOutput(existing)
-      }
-      return
-    }
-
-    const observedProviderResponseId = options.observedProviderResponseId ?? null
-    const originRef = options.originRef ?? null
-    const activeResponseId = this.session.activeProviderResponseId
-    // The item id is the last resort: a call with no response at all still needs a batch key, and its
-    // own item is the only identifier that is certainly unique.
-    const providerResponseId = observedProviderResponseId
-      ?? event.response_id
-      ?? activeResponseId
-      ?? event.item_id
-    const originUserInputRevision = this.session.providerTurnUserInputRevision(providerResponseId)
-      ?? this.session.userInputRevision
-    const originPhase = this.session.providerTurnPhase(providerResponseId)
-    const hasProviderOrigin = event.response_id !== null || activeResponseId !== null
-
-    // Two different questions. When the caller already resolved which response this belongs to, the
-    // only thing left to ask is whether that response survived. When it did not, the call has to be
-    // matched against the provider's current turn first -- and a call naming a response that is not
-    // the active one is describing a turn that has already been replaced.
-    const superseded = observedProviderResponseId !== null
-      ? (
-        originPhase === 'cancelled'
-        || originPhase === 'failed'
-        || this.session.providerTurnWasFenced(providerResponseId)
-      )
-      : (
-        (event.response_id === null && activeResponseId === null)
-        || (
-          event.response_id !== null
-          && activeResponseId !== null
-          && activeResponseId !== event.response_id
-        )
-        || (
-          hasProviderOrigin
-          && (
-            (originPhase !== null && originPhase !== 'active')
-            || this.session.providerTurnWasFenced(providerResponseId)
-          )
-        )
-      )
-
-    if (
-      this.#toolCalls.size >= MAX_TRACKED_TOOL_CALLS
-      || this.#overflowToolCalls.size >= MAX_PENDING_TOOL_REFUSALS
-    ) {
-      this.#pruneTerminalToolState()
-    }
-    const callOverCapacity = this.#toolCalls.size >= MAX_TRACKED_TOOL_CALLS
-    const binding = hidden ? undefined : this.#tools.bindings.get(event.name)
-    const personalRecall = binding?.kind === 'query'
-      && (event.name === 'memory__evidence' || (event.name === 'memory__recall' && event.arguments.source !== 'session'))
-    const noIntakeAgentDispatch = !hidden
-      && event.name === DISPATCH_TOOL
-      && this.#intake === undefined
-      && this.#agentExecutorName(event.arguments.executor) !== null
-    // A delegated call will eventually need to be spoken about, so its acknowledgement slot is
-    // reserved *before* admission -- admitting work the agent could never mention is worse than
-    // refusing it.
-    const synchronousDelegateCall = binding?.kind === 'delegate'
-      && typeof binding.executor === 'string'
-      && typeof binding.op === 'string'
-      && requiresSynchronousResult(
-        this.#runtime.executors.get(binding.executor),
-        binding.op,
-        event.arguments,
-        binding.sync_result === true,
-      )
-    const requiresSemanticAcknowledgement = !superseded
-      && (binding?.kind === 'delegate' || noIntakeAgentDispatch)
-      && !synchronousDelegateCall
-    let semanticReserved = false
-    if (!callOverCapacity && requiresSemanticAcknowledgement) {
-      semanticReserved = this.#reserveSemanticAcknowledgement()
-    }
-    const overCapacity = callOverCapacity
-      || (requiresSemanticAcknowledgement && !semanticReserved)
-    if (overCapacity && this.#overflowToolCalls.size >= MAX_PENDING_TOOL_REFUSALS) {
-      // Both ledgers full of refusals the provider has not acknowledged. The session is no longer
-      // tracking reality, and reconnecting is the only way back to a state that can be reasoned about.
-      await this.#reconnectProviderSession({
-        reason: 'refusal_ledger_overflow',
-        expectedEpoch: this.session.sessionEpoch,
-      })
-      return
-    }
-
-    let acceptance: ToolAcceptance
-    if (superseded) {
-      acceptance = this.#supersededAcceptance(event)
-    } else if (overCapacity) {
-      acceptance = this.#overCapacityAcceptance(event)
-    } else if (hidden) {
-      acceptance = this.#refusalAcceptance(event, 'unknown_tool', '{"code":"unknown_tool","state":"refused"}')
-    } else if (personalRecall) {
-      // Classification does not start the read. The serialized receive loop installs its ledger first.
-      acceptance = await this.#bridge.acceptToolCall(event, {originRef})
-      if (acceptance.code === 'async_tool') {
-        const state = toolCallState({
-          acceptance,
-          logical_name: binding?.logical_name ?? null,
-          provider_response_id: providerResponseId,
-          provider_session_epoch: event.session_epoch,
-          origin_user_input_revision: originUserInputRevision,
-          observation: 'observed',
-          dispatch: 'fulfilled',
-          sync: 'pending',
-        })
-        this.#toolCalls.set(key, state)
-        const batchKey = callKey(event.session_epoch, providerResponseId)
-        let batch = this.#continuationBatches.get(batchKey)
-        if (batch === undefined) {
-          batch = continuationBatch(providerResponseId)
-          this.#continuationBatches.set(batchKey, batch)
-          this.#continuationFifo.push(batchKey)
-        }
-        batch.call_keys.push(key)
-        const originStatus = this.#originStatus(providerResponseId)
-        if (originStatus !== 'active') {
-          batch.origin_status = originStatus
-          batch.phase = 'ready'
-        }
-        void this.#resolvePersonalRecall({
-          event,
-          key,
-          state,
-          originRef,
-          originUserInputRevision,
-          providerResponseId,
-        }).catch(failure => {
-          if (!isAbort(failure)) {
-            this.#reportDeliveryFailure(failure instanceof RealtimeDeliveryError
-              ? failure
-              : new RealtimeDeliveryError(String(failure)))
-          }
-        })
-        return
-      }
-    } else {
-      try {
-        const userTurn = this.#currentUserTurn(event, originRef)
-        const intercepted = await this.#interceptHost(event, originRef)
-        if (event.session_epoch <= this.#discardedInputEpoch) {
-          if (semanticReserved) this.#semanticAcknowledgementReservations -= 1
-          return
-        }
-        acceptance = intercepted
-          ?? await this.#bridge.acceptToolCall(event, {originRef, ...(userTurn === null ? {} : {userTurn})})
-        if (event.session_epoch <= this.#discardedInputEpoch) {
-          if (semanticReserved) this.#semanticAcknowledgementReservations -= 1
-          return
-        }
-      } catch (cause) {
-        // The reservation was taken on the assumption the admission would happen. It did not, and a
-        // reservation nobody releases is a slot permanently unavailable to every later call.
-        if (semanticReserved) this.#semanticAcknowledgementReservations -= 1
-        throw cause
-      }
-    }
-
-    this.#recordToolAdmission({
-      callId: event.call_id,
-      logicalName: binding?.logical_name ?? null,
-      acceptance,
-      superseded,
-    })
-    const state: ToolCallState = toolCallState({
-      acceptance,
-      logical_name: binding?.logical_name ?? null,
-      provider_response_id: providerResponseId,
-      provider_session_epoch: event.session_epoch,
-      origin_user_input_revision: originUserInputRevision,
-      observation: superseded ? 'superseded' : 'observed',
-      dispatch: superseded
-        ? 'not_dispatched'
-        : overCapacity
-          ? 'rejected'
-          : acceptance.inline_fulfilled
-            ? 'fulfilled'
-            : acceptance.accepted
-              ? 'dispatched'
-              : 'rejected',
-    })
-    if (acceptance.inline_fulfilled && acceptance.telemetry !== null) {
-      this.#telemetry?.record('memory.recall', acceptance.telemetry)
-    }
-    if (acceptance.sync_result && acceptance.accepted && acceptance.delegate_id !== null) {
-      state.sync = 'pending'
-      this.#pendingSync.set(acceptance.delegate_id, key)
-    }
-    if (semanticReserved) {
-      try {
-        if (
-          acceptance.accepted
-          && acceptance.delegate_id !== null
-          && !acceptance.sync_result
-        ) {
-          if (this.#semanticAcknowledgement(state) === null) {
-            throw new Error('reserved semantic acknowledgement is unavailable')
-          }
-        }
-      } finally {
-        this.#semanticAcknowledgementReservations -= 1
-      }
-    }
-    if (overCapacity) {
-      this.#overflowToolCalls.set(key, state)
-    } else {
-      this.#toolCalls.set(key, state)
-    }
-
-    const batchKey = callKey(event.session_epoch, providerResponseId)
-    let batch = this.#continuationBatches.get(batchKey)
-    if (
-      superseded
-      && batch !== undefined
-      && (
-        batch.phase === 'requested'
-        || batch.phase === 'bound'
-        || batch.phase === 'terminal'
-        || batch.phase === 'abandoned'
-      )
-    ) {
-      // The batch has already spoken or given up. A superseded latecomer cannot join it, and the only
-      // thing left owed is the tool result the provider is still holding a slot for.
-      state.continuation = 'abandoned'
-      await this.#confirmSupersededOutput(state)
-      return
-    }
-    if (batch === undefined) {
-      batch = continuationBatch(providerResponseId)
-      this.#continuationBatches.set(batchKey, batch)
-      this.#continuationFifo.push(batchKey)
-    }
-    batch.call_keys.push(key)
-    const originStatus = this.#originStatus(providerResponseId)
-    if (superseded) {
-      batch.origin_status = 'cancelled'
-      // A cancel that has been requested but not observed leaves the batch collecting: the response
-      // may still deliver more calls, and closing the batch now would strand them.
-      if (originPhase !== 'cancel_requested') batch.phase = 'ready'
-    } else if (originStatus !== 'active') {
-      batch.origin_status = originStatus
-      batch.phase = 'ready'
-    }
-
-    if (
-      acceptance.accepted
-      && acceptance.delegate_id !== null
-      && acceptance.executor !== null
-      && !acceptance.sync_result
-    ) {
-      const summary = acceptance.response_intent.task_summary
-      const display = typeof summary === 'string' && stripLikePython(summary) !== ''
-        ? summary
-        : `${this.#executorDisplayName(acceptance.executor)} background task`
-      this.session.registerDelegate(acceptance.delegate_id, {
-        summary: [...stripLikePython(display)].slice(0, MAX_CONTINUATION_TASK_SUMMARY).join(''),
-        state: 'running',
-        channel: acceptance.executor,
-      })
-      if (acceptance.executor === this.#coding?.channel) {
-        this.#telemetry?.record('executor.dispatch', {delegate_id: acceptance.delegate_id})
-      }
-      this.#publishExecutorState()
-    }
-  }
-
-  async #resolvePersonalRecall(input: {
-    readonly event: ToolCallReady
-    readonly key: string
-    readonly state: ToolCallState
-    readonly originRef: string | null
-    readonly originUserInputRevision: number
-    readonly providerResponseId: string
-  }): Promise<void> {
-    const acceptance = await this.#bridge.acceptPersonalMemoryRecall(input.event, {originRef: input.originRef, signal: this.#stop.signal})
-    // A replacement session or shutdown cannot receive this old provider call. Its ledger was already
-    // reconciled, so the late read has no provider-facing work left to do.
-    if (
-      this.#stop.signal.aborted
-      || this.session.sessionEpoch !== input.event.session_epoch
-      || this.#toolCallState(input.key) !== input.state
-      || input.state.final_disposition !== null
-    ) return
-    const superseded = this.session.userInputRevision !== input.originUserInputRevision
-      || this.session.providerTurnWasFenced(input.providerResponseId)
-    input.state.acceptance = superseded ? this.#supersededAcceptance(input.event) : acceptance
-    input.state.observation = superseded ? 'superseded' : 'observed'
-    input.state.dispatch = superseded
-      ? 'not_dispatched'
-      : acceptance.inline_fulfilled
-        ? 'fulfilled'
-        : 'rejected'
-    input.state.sync = 'none'
-    this.#recordToolAdmission({
-      callId: input.event.call_id,
-      logicalName: input.state.logical_name,
-      acceptance: input.state.acceptance,
-      superseded,
-    })
-    if (input.state.acceptance.inline_fulfilled && input.state.acceptance.telemetry !== null) {
-      this.#telemetry?.record('memory.recall', input.state.acceptance.telemetry)
-    }
-    const batch = this.#continuationBatches.get(callKey(input.event.session_epoch, input.providerResponseId))
-    if (superseded && batch !== undefined) {
-      batch.origin_status = 'cancelled'
-      batch.phase = 'ready'
-    }
-    try {
-      await this.driveContinuations()
-      await this.#deliveryPass()
-    } catch (cause) {
-      if (cause instanceof ItemDeliveryUncertainError) {
-        await this.#recoverUncertainDelivery(cause)
-        return
-      }
-      if (cause instanceof RealtimeDeliveryError) {
-        this.#reportDeliveryFailure(cause)
-        return
-      }
-      throw cause
-    }
-  }
-
-  /**
-   * Drop everything that has reached a terminal state.
-   *
-   * Called when a ledger is about to overflow rather than on a timer: what makes an entry droppable
-   * is that nothing can still refer to it, and that is a property of its state, not its age.
-   */
-  #pruneTerminalToolState(): void {
-    for (const ledger of [this.#toolCalls, this.#overflowToolCalls]) {
-      for (const [key, state] of [...ledger.entries()]) {
-        if (state.final_disposition !== null) ledger.delete(key)
-      }
-    }
-    for (const [key, batch] of [...this.#continuationBatches.entries()]) {
-      if (batch.phase === 'terminal' || batch.phase === 'abandoned') {
-        this.#continuationBatches.delete(key)
-      }
-    }
-    const surviving = this.#continuationFifo.filter(key => this.#continuationBatches.has(key))
-    this.#continuationFifo.length = 0
-    this.#continuationFifo.push(...surviving)
-  }
-
-  #supersededAcceptance(event: ToolCallReady): ToolAcceptance {
-    return this.#refusalAcceptance(event, 'superseded', '{"state":"superseded"}')
-  }
-
-  #overCapacityAcceptance(event: ToolCallReady): ToolAcceptance {
-    return this.#refusalAcceptance(
-      event,
-      'over_capacity',
-      '{"code":"over_capacity","state":"refused"}',
-    )
-  }
-
-  /** A refusal the service authors itself, rather than one the bridge produced. */
-  #refusalAcceptance(event: ToolCallReady, code: string, content: string): ToolAcceptance {
-    const hostItem: HostContextItem = {
-      kind: 'tool_output',
-      host_item_id: this.#idFactory(),
-      event_id: this.#idFactory(),
-      call_id: event.call_id,
-      content,
-    }
-    return {
-      accepted: false,
-      code,
-      host_item: hostItem,
-      response_intent: {kind: 'tool_result', item: hostItem, task_summary: null, origin_spoken: false},
-      delegate_id: null,
-      sync_result: false,
-      executor: null,
-      op: null,
-      inline_fulfilled: false,
-      telemetry: null,
-    }
-  }
-
-  /** The `executor` argument names a registered host controller, or nothing. */
-  #agentExecutorName(value: JsonValue | undefined): string | null {
-    return typeof value === 'string' && this.#agentControllers.has(value) ? value : null
-  }
-
   /** Same current-user fence for controller actions and direct external MCP effects. */
   #currentUserTurn(event: ToolCallReady, originRef: string | null) {
     const user = this.#intakeUser
@@ -4162,1934 +1508,7 @@ export class RealtimeService {
         && this.#intakeUser?.origin_ref === originRef}
   }
 
-  /**
-   * The host tools. A controller receives the fenced public request and returns structured facts;
-   * RealtimeService alone maps those facts to provider-facing result language.
-   */
-  async #interceptHost(event: ToolCallReady, originRef: string | null): Promise<ToolAcceptance | null> {
-    if (event.name === CONFIRM_TOOL) {
-      return this.#refusalAcceptance(event, 'unknown_confirmation', UNKNOWN_CONFIRMATION_TOOL_RESULT)
-    }
-    if (event.name !== DISPATCH_TOOL && event.name !== CANCEL_TOOL) return null
-    const executor = this.#agentExecutorName(event.arguments.executor)
-    const raw = event.arguments.instruction
-    const instruction = typeof raw === 'string' ? stripLikePython(raw) : null
-    const instructionValid = event.name === CANCEL_TOOL && raw === undefined
-      ? true
-      : instruction !== null && instruction !== '' && codePointLengthLikePython(instruction) <= 4000
-    if (executor === null || !instructionValid) {
-      return this.#refusalAcceptance(event, 'invalid_params', '{"code":"invalid_params"}')
-    }
-    // Both act on the user's behalf, so both need the current user turn as origin: a spontaneous
-    // `cancel` would stop work nobody asked to stop.
-    const user = this.#intakeUser
-    if (event.session_epoch <= this.#discardedInputEpoch || originRef === null || user?.epoch !== event.session_epoch || originRef !== user.origin_ref) {
-      return this.#refusalAcceptance(event, 'missing_origin_ref', '{"code":"missing_origin_ref"}')
-    }
-    const controller = this.#agentControllers.get(executor)
-    if (controller === undefined) return this.#refusalAcceptance(event, 'unsupported_tool', '{"code":"unsupported_tool"}')
-    // A user turn that supersedes an async controller operation makes its result informational only;
-    // the controller must re-check this fence before it changes executor state.
-    const authority = this.#currentUserTurn(event, originRef)
-    if (authority === null) return this.#refusalAcceptance(event, 'superseded', '{"code":"superseded"}')
-    const revision = authority.acceptedUserInputRevision
-    const fence = authority.stillWanted
-    const rawResult = event.name === DISPATCH_TOOL
-      ? await controller.dispatch({
-        instruction: instruction!, originalUserText: user.text, origin_ref: user.origin_ref,
-        sessionEpoch: event.session_epoch, acceptedUserInputRevision: revision, stillWanted: fence,
-      })
-      : await controller.cancel({
-        ...(instruction === null ? {} : {instruction}), originalUserText: user.text, origin_ref: user.origin_ref,
-        sessionEpoch: event.session_epoch, acceptedUserInputRevision: revision, stillWanted: fence,
-      })
-    const result = parseAgentActionResult(rawResult)
-    if (result === null) {
-      return this.#refusalAcceptance(event, 'controller_result_invalid', canonicalJson({code: 'controller_result_invalid'}))
-    }
-    if (result.code === 'delegated') {
-      if (!controller.descriptor.ownedChannels.includes(result.detail.channel)) {
-        return this.#refusalAcceptance(event, 'controller_result_invalid', canonicalJson({code: 'controller_result_invalid'}))
-      }
-      return this.#controllerDelegationAcceptance(event, result, instruction!)
-    }
-    if (result.code === 'monitor_stop_requested'
-      && !controller.descriptor.ownedChannels.includes(result.detail.channel)) {
-      return this.#refusalAcceptance(event, 'controller_result_invalid', canonicalJson({code: 'controller_result_invalid'}))
-    }
-    const acceptance = this.#refusalAcceptance(event, result.code, this.#agentActionContent(result))
-    return result.accepted ? {...acceptance, accepted: true, inline_fulfilled: true} : acceptance
-  }
-
-  #agentActionContent(result: AgentActionResult): string {
-    switch (result.code) {
-      case 'intake_opened':
-      case 'intake_in_progress':
-        return canonicalJson({
-          code: result.code,
-          message: '宿主正在整理需求，尚未派单。等待宿主问题或计划，不自行追问。',
-        })
-      case 'cancelled':
-        return canonicalJson({
-          code: result.code,
-          message: 'code=cancelled：已请求停止任务，稍后有终态事实。',
-        })
-      case 'ambiguous_work':
-        return canonicalJson({
-          code: result.code,
-          running_count: result.detail.running.length,
-          message: 'code=ambiguous_work：有多个任务正在执行，请说明要停止哪一个。',
-        })
-      case 'not_running':
-        return canonicalJson({code: result.code, message: 'code=not_running：当前没有正在执行的任务。'})
-      case 'busy':
-        return canonicalJson({code: result.code, message: '当前已有一个监控任务在运行。'})
-      case 'clarification_required':
-        return canonicalJson({code: result.code, message: '请完整重述需要监控的画面条件、提醒要求和时长。'})
-      case 'assessment_unavailable':
-        return canonicalJson({code: result.code, message: '暂时无法判断监控请求。'})
-      case 'monitor_stop_requested':
-        return canonicalJson({code: result.code, message: '已请求停止监控。'})
-      case 'accepted':
-      case 'delegated':
-      case 'unsupported_tool':
-      case 'superseded':
-      case 'runtime_rejected':
-        return canonicalJson({code: result.code})
-    }
-  }
-
-  #controllerDelegationAcceptance(
-    event: ToolCallReady,
-    result: Extract<AgentActionResult, {readonly code: 'delegated'}>,
-    instruction: string,
-  ): ToolAcceptance {
-    const hostItem: HostContextItem = {
-      kind: 'tool_output', host_item_id: this.#idFactory(), event_id: this.#idFactory(),
-      call_id: event.call_id, content: canonicalJson({state: 'accepted'}),
-    }
-    return {
-      accepted: true,
-      code: 'accepted',
-      host_item: hostItem,
-      response_intent: {
-        kind: 'delegation_acknowledgement', item: hostItem,
-        task_summary: [...stripLikePython(instruction)].slice(0, MAX_CONTINUATION_TASK_SUMMARY).join(''),
-        origin_spoken: false,
-      },
-      delegate_id: result.delegate_id,
-      sync_result: false,
-      executor: result.detail.channel,
-      op: result.detail.op,
-      inline_fulfilled: false,
-      telemetry: null,
-    }
-  }
-
-  #recordToolAdmission(input: {
-    readonly callId: string
-    readonly logicalName: string | null
-    readonly acceptance: ToolAcceptance
-    readonly superseded: boolean
-  }): void {
-    if (this.#telemetry === undefined || input.logicalName === null) return
-    const outcome = input.superseded
-      ? 'superseded'
-      : !input.acceptance.accepted
-        ? 'rejected'
-        : input.acceptance.inline_fulfilled
-          ? 'inline'
-          : input.acceptance.sync_result
-            ? 'sync'
-            : 'delegated'
-    this.#telemetry.record('tool.admission', {logical_name: input.logicalName, call_id: input.callId,
-      delegate_id: input.acceptance.delegate_id, outcome})
-  }
-
-  /** Give the provider the result it is holding a slot for, once. */
-  async #confirmSupersededOutput(state: ToolCallState): Promise<void> {
-    if (state.output === 'confirmed') return
-    await this.session.injectToolOutput(state.acceptance.host_item)
-    state.output = 'confirmed'
-    state.final_disposition = 'superseded'
-  }
-
-  #executorDisplayName(channel: string): string {
-    const agent = this.#agentRegistry.agentNameForChannel(channel)
-    if (agent !== null) return agent
-    const manifest = this.#runtime.executors.get(channel)?.manifest
-    if (manifest !== undefined && isMonitorPolicy(manifest.policy)) {
-      return monitorAlertDelivery(manifest.policy) === 'deferred' ? '观察' : '监控'
-    }
-    return manifest?.display_name ?? channel
-  }
-
-  /**
-   * Tell the renderer whether Codex is working, when that changes.
-   *
-   * Derived from the session's live delegates rather than counted here: the session is what knows
-   * when one finishes, and a separate counter would drift the moment a delegate ended by any route
-   * this layer does not see.
-   */
-  #publishExecutorState(): void {
-    const delegates = this.session.snapshot().active_delegates
-    const fingerprint = canonicalJson(activeExecutorContextData(
-      delegates,
-      channel => this.#agentRegistry.agentNameForChannel(channel),
-    ))
-    if (fingerprint !== this.#activeWorkFingerprint) {
-      this.#activeWorkFingerprint = fingerprint
-      if (!this.#clearingConversation) {
-        try {
-          this.#onActiveWorkChanged()
-        } catch (cause) {
-          this.#onDiagnostic(
-            `[realtime-diagnostic] active_work_observer_failed type=${diagnosticName(cause)}`,
-          )
-        }
-      }
-    }
-    const next: ExecutorState = delegates.some(([, record]) => record.channel === this.#coding?.channel)
-      ? 'running'
-      : 'idle'
-    if (next === this.#executorState) return
-    this.#executorState = next
-    try {
-      this.#onExecutorState(next)
-    } catch (cause) {
-      // A renderer that cannot accept the state must not stop the service that produced it.
-      this.#onDiagnostic(`[realtime-diagnostic] codex_state_observer_failed type=${diagnosticName(cause)}`)
-    }
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // Family N: the acknowledgement a delegated call owes the user.
-  // ---------------------------------------------------------------------------------------------
-
-  /** Mirror a newly visible controller lifecycle without importing its expiry policy. */
-  #syncProjectConfirmationIsolation(): void {
-    const controller = this.#projectConfirmation
-    const lifecycleId = controller?.lifecycleId
-    const sessionEpoch = this.session.sessionEpoch
-    if (
-      controller?.pending !== true
-      || lifecycleId === null
-      || lifecycleId === undefined
-      || sessionEpoch < 1
-    ) return
-    // Spec 08: a colliding executor approval waits behind the project confirmation. Its voice authority
-    // is withdrawn and its TTL paused (`hold`, never declined); `#publishProjectView` re-arms both once
-    // this one settles.
-    this.#approvalHost.hold()
-    const current = this.#projectConfirmationIsolation.authority
-    if (current?.authorityId === lifecycleId && current.sessionEpoch === sessionEpoch) return
-    const remaining = controller.view.pending_expires_in_seconds
-    if (remaining === undefined || remaining === null || !Number.isFinite(remaining)) return
-    this.#projectConfirmationIsolation.beginAuthority({
-      authorityId: lifecycleId,
-      sessionEpoch,
-      createdUserRevision: this.session.userInputRevision,
-      expiresAt: this.#clock.now() + Math.max(0, remaining),
-    })
-  }
-
-  /**
-   * The acknowledgement for one delegated call, creating it if the ledger has room.
-   *
-   * Returns null rather than evicting something live: an acknowledgement still waiting to be spoken
-   * is a promise to the user, and dropping one to make room for another would silently break it. Only
-   * terminal entries (delivered, or cancelled before speech) are reclaimed.
-   */
-  #semanticAcknowledgement(state: ToolCallState): SemanticAcknowledgement | null {
-    const summary = state.acceptance.response_intent.task_summary
-    const delegateId = state.acceptance.delegate_id
-    if (delegateId === null || summary === null) return null
-    const eventId = `background:${delegateId}`
-    const existing = this.#semanticAcknowledgements.get(eventId)
-    if (existing !== undefined) {
-      this.#semanticAcknowledgements.delete(eventId)
-      this.#semanticAcknowledgements.set(eventId, existing)
-      return existing
-    }
-    while (this.#semanticAcknowledgements.size >= MAX_TRACKED_SEMANTIC_ACKNOWLEDGEMENTS) {
-      const deliveredId = [...this.#semanticAcknowledgements.entries()]
-        .find(([, current]) => (
-          current.phase === 'delivered' || current.phase === 'cancelled'
-        ))?.[0]
-      if (deliveredId === undefined) return null
-      this.#semanticAcknowledgements.delete(deliveredId)
-    }
-    const channel = state.acceptance.executor
-    if (channel === null) return null
-    const created = semanticAcknowledgement({
-      event_id: eventId,
-      delegate_id: delegateId,
-      summary: [...summary].slice(0, MAX_CONTINUATION_TASK_SUMMARY).join(''),
-      channel,
-    })
-    created.origin_session_epoch = state.provider_session_epoch
-    created.origin_response_id = state.provider_response_id
-    created.origin_user_input_revision = state.origin_user_input_revision
-    this.#semanticAcknowledgements.set(eventId, created)
-    return created
-  }
-
-  /**
-   * Hold a slot before admitting a call that will need one.
-   *
-   * The reservation counts against the same bound as the acknowledgements themselves, so two calls
-   * admitted back to back cannot both be promised a slot only one of them can have.
-   */
-  #reserveSemanticAcknowledgement(): boolean {
-    while (
-      this.#semanticAcknowledgements.size + this.#semanticAcknowledgementReservations
-      >= MAX_TRACKED_SEMANTIC_ACKNOWLEDGEMENTS
-    ) {
-      const deliveredId = [...this.#semanticAcknowledgements.entries()]
-        .find(([, current]) => (
-          current.phase === 'delivered' || current.phase === 'cancelled'
-        ))?.[0]
-      if (deliveredId === undefined) return false
-      this.#semanticAcknowledgements.delete(deliveredId)
-    }
-    this.#semanticAcknowledgementReservations += 1
-    return true
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // Family M: batching tool results into one turn.
-  // ---------------------------------------------------------------------------------------------
-
-  /** A tool continuation inherits evidence only from its confirmed outputs in the current turn. */
-  #bindToolContinuationOrigin(epoch: number, responseId: string): void {
-    if (epoch !== this.session.sessionEpoch || !this.session.responseIsToolContinuation(responseId)) return
-    const revision = this.session.providerTurnUserInputRevision(responseId)
-    if (revision !== this.session.userInputRevision) return
-    let itemId: string | undefined
-    // ponytail: bounded ledger scan; index event ids if large continuation batches become common.
-    for (const eventId of this.session.responseEventIds(responseId)) {
-      const state = [...this.#toolCalls.values(), ...this.#overflowToolCalls.values()].find(current => (
-        current.acceptance.host_item.event_id === eventId
-        && current.provider_session_epoch === epoch
-        && current.output === 'confirmed'
-        && current.continuation !== 'abandoned'
-        && current.observation !== 'superseded'
-      ))
-      if (state?.origin_user_input_revision !== revision) return
-      const sourceItem = this.#userOrigins.itemForResponse(epoch, state.provider_response_id)
-      if (sourceItem === undefined || this.#userOrigins.revisionForItem(epoch, sourceItem) !== revision
-        || (itemId !== undefined && itemId !== sourceItem)) return
-      itemId = sourceItem
-    }
-    if (itemId !== undefined) this.#userOrigins.bindRetryResponse({epoch, responseId, itemId})
-  }
-
-  /** Bind the head batch to the response that will speak it. */
-  #bindContinuation(responseId: string): void {
-    const head = this.#continuationFifo[0]
-    if (head === undefined) return
-    const batch = this.#continuationBatches.get(head)
-    if (batch?.phase !== 'requested') return
-    batch.phase = 'bound'
-    batch.continuation_response_id = responseId
-    for (const key of batch.call_keys) {
-      const state = this.#toolCallState(key)
-      if (state === undefined) continue
-      state.continuation = 'bound'
-      state.continuation_response_id = responseId
-      const acknowledgement = this.#semanticAcknowledgement(state)
-      if (acknowledgement?.phase === 'pending') {
-        acknowledgement.phase = 'bound'
-        acknowledgement.response_id = responseId
-        acknowledgement.response_session_epoch = this.session.sessionEpoch
-        // The continuation is carried by the tool output itself. That item is protocol state for the
-        // function call, not a provider-visible semantic acknowledgement fact, so the acknowledgement
-        // must never acquire authority to retire or reopen it.
-        acknowledgement.provider_event_id = null
-        acknowledgement.binding = 'continuation'
-      }
-    }
-  }
-
-  /**
-   * Close the head batch when the response that was speaking it ends.
-   *
-   * Only the head, and only if this is the response it was bound to: a terminal for some other
-   * response says nothing about whether this batch was spoken.
-   */
-  #finishContinuation(event: {readonly response_id: string; readonly status: string}): void {
-    const head = this.#continuationFifo[0]
-    if (head === undefined) return
-    const batch = this.#continuationBatches.get(head)
-    if (batch === undefined) return
-    if (batch.phase !== 'bound' || batch.continuation_response_id !== event.response_id) return
-    batch.phase = 'terminal'
-    for (const key of batch.call_keys) {
-      const state = this.#toolCallState(key)
-      if (state === undefined) continue
-      state.continuation = 'terminal'
-      state.final_disposition = !state.acceptance.accepted
-        ? 'refused'
-        : event.status === 'completed'
-          ? 'completed'
-          : 'abandoned'
-    }
-    this.#continuationFifo.shift()
-  }
-
-  /** A collecting batch whose originating response has ended is ready to speak. */
-  #finishOrigin(responseId: string): void {
-    const batch = this.#continuationBatches.get(callKey(this.session.sessionEpoch, responseId))
-    if (batch?.phase !== 'collecting') return
-    batch.origin_status = this.#originStatus(responseId)
-    batch.phase = 'ready'
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // Approval transport: queue delivery and exact audible-response fencing.
-  /** Remove only the undelivered local queue entry; provider context has its own lifecycle. */
-  #removeQueuedExecutorApprovalPrompt(approvalId: string): void {
-    const prefix = `approval:${approvalId}:`
-    const retained = this.#hostItems.filter(queued => (
-      !queued.intent.item.event_id.startsWith(prefix)
-    ))
-    if (retained.length !== this.#hostItems.length) {
-      retained.sort(compareQueuedHostResponses)
-      this.#hostItems.length = 0
-      this.#hostItems.push(...retained)
-      this.#recomputePreemptPriority()
-    }
-  }
-
-  /** Stop/fence only the exact spoken question response while preserving its provider host fact. */
-  #releaseExecutorApprovalQuestion(approvalId: string): void {
-    const prefix = `approval:${approvalId}:`
-    const owner = this.#urgentHostResponseOwner
-    if (owner?.event_id.startsWith(prefix) === true) {
-      if (owner.response_id === null) {
-        this.#approvalHost.setResponseFencePending(
-          this.session.armPendingResponseFence(),
-        )
-      } else {
-        this.session.suppressResponse(owner.response_id)
-        this.#approvalHost.cancelExecutorApprovalPromptResponse(owner.session_epoch, owner.response_id)
-      }
-      this.#releaseUrgentHostResponse(owner)
-    }
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // Family I: project confirmation.
-  //
-  // Changing which workspace the agent operates in needs the user to say yes out loud, and this is the
-  // machinery that makes that answer trustworthy in a conversation that keeps moving. The controller
-  // owns the decision; this owns the *isolation* around it.
-  //
-  // Three overlapping guards, because the failure modes are different. The reserved item makes one
-  // transcript the answer and nothing else. The response block permits only the dedicated decision
-  // function. And the pending-only fence cancels an old host-requested question without cancelling the
-  // model response that must produce that function. Each closes a hole the other two leave open.
-  // ---------------------------------------------------------------------------------------------
-
-  /**
-   * Claim the user's next utterance as the answer to a pending proposal.
-   *
-   * An utterance with no provider item id cannot be reserved, and an unreservable one cannot be
-   * answered -- so the proposal is cancelled outright rather than left waiting for a reply that can
-   * never be attributed to it.
-   */
-  #reserveProjectConfirmation(event: {
-    readonly session_epoch: number
-    readonly provider_item_id: string | null
-  }): void {
-    if (this.#projectConfirmation?.pending !== true) return
-    const itemId = event.provider_item_id
-    if (itemId === null) {
-      const lifecycleId = this.#projectConfirmationLifecycleId()
-      this.#invalidateProjectConfirmation('missing_item_correlation')
-      this.#queueProjectConfirmationFact(
-        '缺少语音确认关联，本次操作已取消。',
-        lifecycleId,
-        'missing-item-correlation',
-      )
-      return
-    }
-    if (!this.#projectConfirmation.reserveUserItem({epoch: event.session_epoch, itemId})) {
-      if (!this.#isProjectConfirmationItem(event.session_epoch, itemId)) {
-        this.#projectConfirmationShadowItems.add(callKey(event.session_epoch, itemId))
-      }
-      return
-    }
-    const mirrored = this.#projectConfirmationIsolation.reserveUserItem({
-      sessionEpoch: event.session_epoch,
-      itemId,
-      userRevision: this.session.userInputRevision,
-    })
-    if (mirrored !== 'reserved' && mirrored !== 'idempotent') {
-      const lifecycleId = this.#projectConfirmationLifecycleId()
-      this.#invalidateProjectConfirmation('missing_item_correlation')
-      this.#queueProjectConfirmationFact(
-        '缺少语音确认关联，本次操作已取消。',
-        lifecycleId,
-        'missing-item-correlation',
-      )
-      return
-    }
-    // Cancel only a confirmation question whose host-requested response has not started yet. The
-    // response created from this user answer must remain alive so the provider can emit the structured
-    // confirmation function after its response start.
-    this.#projectConfirmationIsolation.setResponseFencePending(
-      this.session.armPendingResponseFence(),
-    )
-    this.#publishProjectView()
-  }
-
-  /** Bind an initial carrier only after the shared origin ledger proves the exact item/revision. */
-  #bindProjectConfirmationResponse(epoch: number, responseId: string): boolean {
-    const itemId = this.#userOrigins.itemForResponse(epoch, responseId)
-    const revision = itemId === undefined
-      ? undefined
-      : this.#userOrigins.revisionForItem(epoch, itemId)
-    if (itemId === undefined || revision === undefined) return false
-    const result = this.#projectConfirmationIsolation.bindResponse({
-      sessionEpoch: epoch,
-      itemId,
-      userRevision: revision,
-      responseId,
-    })
-    return result === 'bound' || result === 'idempotent'
-  }
-
-  /** Bind the provider response created by the one bounded retry to its original user evidence. */
-  #bindProjectConfirmationRetryResponse(epoch: number, responseId: string): boolean {
-    const retry = this.#projectConfirmationDecisionRetry
-    if (retry === null || !retry.requested || retry.retry_response_id !== null) return false
-    const item = parseCallKey(retry.item_key)
-    if (item.sessionEpoch !== epoch) return false
-    const revision = this.#userOrigins.revisionForItem(epoch, item.id)
-    if (revision === undefined || !this.session.responseMatchesUserItem(responseId, item.id, revision)) return false
-    if (!this.#userOrigins.bindRetryResponse({epoch, responseId, itemId: item.id})) return false
-    const isolated = this.#projectConfirmationIsolation.bindRetryResponse({
-      sessionEpoch: epoch,
-      itemId: item.id,
-      userRevision: revision,
-      responseId,
-    })
-    if (isolated !== 'bound' && isolated !== 'idempotent') return false
-    retry.retry_response_id = responseId
-    this.#telemetry?.record('project_confirmation.decision_retry_started', {
-      session_epoch: epoch,
-      item_id: item.id,
-      response_id: responseId,
-      source_response_id: retry.source_response_id,
-      proposal_id: this.#projectConfirmation?.lifecycleId ?? 'none',
-      proposal_origin_ref: this.#projectConfirmation?.proposalOriginRef ?? 'none',
-      delegate_origin_ref: this.#projectConfirmation?.proposalOriginRef ?? 'none',
-      user_input_revision: this.#userOrigins.revisionForItem(epoch, item.id) ?? -1,
-    })
-    return true
-  }
-
-  /** Once the same turn's transcript exists, ask the provider once more for the structured decision. */
-  async #maybeRequestProjectConfirmationDecisionRetry(epoch: number, itemId: string): Promise<void> {
-    const retry = this.#projectConfirmationDecisionRetry
-    const controller = this.#projectConfirmation
-    if (
-      retry?.item_key !== callKey(epoch, itemId)
-      || retry.requested
-      || !this.#userOrigins.hasOriginRef(epoch, itemId)
-      || controller?.pending !== true
-    ) return
-    retry.requested = true
-    this.#telemetry?.record('project_confirmation.decision_retry_requested', {
-      session_epoch: epoch,
-      item_id: itemId,
-      source_response_id: retry.source_response_id,
-      proposal_id: controller.lifecycleId ?? 'none',
-      transcript_ready: true,
-      retry_attempt: 1,
-      proposal_origin_ref: controller.proposalOriginRef ?? 'none',
-      delegate_origin_ref: controller.proposalOriginRef ?? 'none',
-      user_input_revision: this.#userOrigins.revisionForItem(epoch, itemId) ?? -1,
-    })
-    let requested = false
-    try {
-      requested = await this.session.requestUserResponse()
-    } catch (failure) {
-      this.#reportDeliveryFailure(failure instanceof RealtimeDeliveryError
-        ? failure
-        : new RealtimeDeliveryError(String(failure)))
-    }
-    if (requested) return
-
-    controller.releaseUndecided({epoch, itemId})
-    this.#endProjectConfirmationItem(epoch, itemId)
-    this.#telemetry?.record('project_confirmation.decision_retry_exhausted', {
-      session_epoch: epoch,
-      item_id: itemId,
-      response_id: retry.source_response_id,
-      proposal_id: controller.lifecycleId ?? 'none',
-      reason: 'provider_retry_unavailable',
-      proposal_origin_ref: controller.proposalOriginRef ?? 'none',
-      delegate_origin_ref: controller.proposalOriginRef ?? 'none',
-      user_input_revision: this.#userOrigins.revisionForItem(epoch, itemId) ?? -1,
-    })
-  }
-
-  /**
-   * Whether this tool call arrives in a turn that is supposed to be waiting for a confirmation.
-   *
-   * Blocked by *epoch* as well as by response, because a reconnect renumbers responses and a
-   * confirmation spanning one would otherwise stop blocking. Recording the response id on the way
-   * through is what makes the block stick for the rest of that turn.
-   */
-  #blocksProjectConfirmationTool(event: {
-    readonly session_epoch: number
-    readonly response_id: string | null
-  }): boolean {
-    const effectiveResponseId = event.response_id ?? this.session.activeProviderResponseId
-    if (
-      effectiveResponseId !== null
-      && this.#projectConfirmationIsolation.responseState({
-        sessionEpoch: event.session_epoch,
-        responseId: effectiveResponseId,
-      })?.quarantined === true
-    ) return true
-    if (this.#projectConfirmationIsolation.hasBlockedResponseInEpoch(event.session_epoch)) return true
-    if (this.#projectConfirmationIsBlocking()) {
-      if (event.response_id !== null) {
-        this.#projectConfirmationIsolation.markBlockedResponse({
-          sessionEpoch: event.session_epoch,
-          responseId: event.response_id,
-        })
-      }
-      return true
-    }
-    return false
-  }
-
-  #isProjectConfirmationItem(epoch: number, itemId: string): boolean {
-    const key = callKey(epoch, itemId)
-    const reserved = this.#projectConfirmationIsolation.reservation
-    return reserved?.sessionEpoch === epoch && reserved.itemId === itemId
-      || this.#projectConfirmationClosingItems.has(key)
-  }
-
-  #projectConfirmationIsBlocking(): boolean {
-    return this.#projectConfirmationIsolation.reservation !== null
-      || this.#projectConfirmationClosingItems.size > 0
-      || this.#projectConfirmationIsolation.responseFencePending
-  }
-
-  #isProjectConfirmationShadowItem(epoch: number, itemId: string): boolean {
-    return this.#projectConfirmationShadowItems.has(callKey(epoch, itemId))
-  }
-
-  /** A shadow turn is still transcribed into Memory, but it cannot speak or execute tools. */
-  #suppressShadowConfirmationResponse(epoch: number, responseId: string): void {
-    const itemId = this.#userOrigins.itemForResponse(epoch, responseId)
-    if (itemId === undefined || !this.#isProjectConfirmationShadowItem(epoch, itemId)) return
-    this.session.suppressResponse(responseId)
-  }
-
-  /**
-   * Move an item from reserved to closing.
-   *
-   * A separate set rather than a flag, because closing involves provider I/O: during it the item is no
-   * longer accepting an answer but still has to block tool calls, and a single set could not say both.
-   */
-  #beginProjectConfirmationClose(epoch: number, itemId: string): void {
-    const key = callKey(epoch, itemId)
-    const reserved = this.#projectConfirmationIsolation.reservation
-    if (reserved?.sessionEpoch === epoch && reserved.itemId === itemId) {
-      this.#projectConfirmationIsolation.releaseReservation({
-        sessionEpoch: epoch,
-        itemId,
-        userRevision: reserved.userRevision,
-      })
-    }
-    this.#projectConfirmationClosingItems.add(key)
-  }
-
-  #endProjectConfirmationClose(epoch: number, itemId: string): void {
-    const key = callKey(epoch, itemId)
-    this.#projectConfirmationClosingItems.delete(key)
-    if (this.#projectConfirmationDecisionRetry?.item_key === key) {
-      this.#projectConfirmationDecisionRetry = null
-    }
-  }
-
-  #endProjectConfirmationItem(epoch: number, itemId: string): void {
-    const key = callKey(epoch, itemId)
-    const reserved = this.#projectConfirmationIsolation.reservation
-    if (reserved?.sessionEpoch === epoch && reserved.itemId === itemId) {
-      this.#projectConfirmationIsolation.releaseReservation({
-        sessionEpoch: epoch,
-        itemId,
-        userRevision: reserved.userRevision,
-      })
-    }
-    if (this.#projectConfirmationDecisionRetry?.item_key === key) {
-      this.#projectConfirmationDecisionRetry = null
-    }
-  }
-
-  async #handleProjectConfirmationDecision(
-    event: ToolCallReady,
-    origin: BoundToolOrigin,
-  ): Promise<void> {
-    const call = callKey(event.session_epoch, event.call_id)
-    if (
-      this.#projectConfirmationClosingCalls.has(call)
-      || this.#projectConfirmationClosedCalls.has(call)
-    ) return
-    this.#projectConfirmationClosingCalls.add(call)
-    let releaseDecisionGate: (() => void) | undefined
-    const decisionGate = new Promise<void>(resolve => { releaseDecisionGate = resolve })
-    this.#projectConfirmationDecisionGates.set(call, decisionGate)
-
-    let code = 'confirmation_not_pending'
-    let state = 'refused'
-    let confirmationText: string | null = null
-    let confirmationResponseId: string | null = null
-    try {
-      const itemId = origin.originItemId
-      const controller = this.#projectConfirmation
-      if (itemId === null) {
-        const recovered = await this.#recoverUnboundProjectConfirmation(event)
-        const proposalId = controller?.lifecycleId ?? 'none'
-        const responseId = event.response_id ?? 'none'
-        const activeResponseId = this.session.activeProviderResponseId ?? 'none'
-        const responsePhase = event.response_id === null
-          ? 'unknown'
-          : this.session.providerTurnPhase(event.response_id) ?? 'unknown'
-        const responseFenced = event.response_id !== null
-          && this.session.providerTurnWasFenced(event.response_id)
-        this.#onDiagnostic(
-          '[realtime-diagnostic] project_confirmation_binding_missing'
-          + ` session_epoch=${event.session_epoch}`
-          + ` call_id=${event.call_id}`
-          + ` response_id=${responseId}`
-          + ` active_response_id=${activeResponseId}`
-          + ` response_phase=${responsePhase}`
-          + ` response_fenced=${responseFenced}`
-          + ' origin_item_bound=false'
-          + ` pending=${controller?.pending === true}`
-          + ` recovered=${recovered}`
-          + ` proposal_id=${proposalId}`,
-        )
-        this.#telemetry?.record('project_confirmation.binding_missing', {
-          session_epoch: event.session_epoch,
-          call_id: event.call_id,
-          response_id: responseId,
-          active_response_id: activeResponseId,
-          response_phase: responsePhase,
-          response_fenced: responseFenced,
-          origin_item_bound: false,
-          pending: controller?.pending === true,
-          recovered,
-          proposal_id: proposalId,
-          proposal_origin_ref: controller?.proposalOriginRef ?? 'none',
-          delegate_origin_ref: controller?.proposalOriginRef ?? 'none',
-          user_input_revision: event.response_id === null
-            ? -1
-            : this.session.providerTurnUserInputRevision(event.response_id) ?? -1,
-          item_id: 'none',
-        })
-      }
-      if (
-        controller !== undefined
-        && itemId !== null
-        && origin.originRef !== null
-        && origin.observedProviderResponseId !== null
-        && event.response_id === origin.observedProviderResponseId
-        && this.#projectConfirmationIsolation.isAuthorizationCarrier({
-          sessionEpoch: event.session_epoch,
-          userRevision: this.#userOrigins.revisionForItem(event.session_epoch, itemId) ?? -1,
-          responseId: origin.observedProviderResponseId,
-        })
-        && this.#isProjectConfirmationItem(event.session_epoch, itemId)
-      ) {
-        let text: string | null = null
-        let expiryOwnsFact = false
-        const decision = confirmArguments(event.arguments)
-        if (decision === null) {
-          code = 'confirmation_invalid'
-          text = '确认请求无效，操作尚未执行。'
-        } else {
-          const outcome = controller.acceptDecision({
-            epoch: event.session_epoch,
-            itemId,
-            proposalId: decision.id,
-            confirmed: decision.accepted,
-          })
-          if (outcome.kind === 'cancelled') this.#intake?.decline(decision.id)
-          code = outcome.kind === 'ignored' ? 'confirmation_not_pending' : outcome.kind
-          state = outcome.kind === 'confirmed' ? 'accepted' : 'refused'
-          text = outcome.response_text
-          this.#publishProjectView()
-          if (outcome.kind !== 'invalid' && outcome.kind !== 'ignored') {
-            this.#beginProjectConfirmationClose(event.session_epoch, itemId)
-            try {
-              await this.#closeConfirmationDeferredCalls(itemId)
-              if (outcome.kind === 'confirmed' && outcome.operation !== null) {
-                const committed = await this.#commitConfirmedProjectOperation(outcome.operation)
-                state = committed.state
-                text = committed.text
-                expiryOwnsFact = committed.expiryOwnsFact
-              }
-            } finally {
-              this.#endProjectConfirmationClose(event.session_epoch, itemId)
-            }
-          }
-        }
-        if (
-          text !== null
-          && text !== ''
-          && !expiryOwnsFact
-          && code !== 'confirmation_invalid'
-          && code !== 'confirmation_not_pending'
-        ) {
-          confirmationText = text
-          confirmationResponseId = origin.observedProviderResponseId
-        }
-        this.#publishProjectView()
-      }
-      const item: HostContextItem = {
-        kind: 'tool_output',
-        host_item_id: this.#idFactory(),
-        event_id: this.#idFactory(),
-        call_id: event.call_id,
-        content: JSON.stringify({code, state}),
-      }
-      const toolOutputInjected = await this.session.injectToolOutput(item)
-      if (confirmationText !== null) {
-        if (toolOutputInjected && confirmationResponseId !== null) {
-          this.session.settleUserResponse(confirmationResponseId)
-        }
-        const carrierNeedsCancellation = confirmationResponseId === null
-          ? false
-          : this.#prepareProjectConfirmationCarrier(event.session_epoch, confirmationResponseId)
-        this.#queueProjectConfirmationFact(
-          confirmationText,
-          this.#projectConfirmationLifecycleId(),
-          `decision:${code}:${state}`,
-        )
-        if (carrierNeedsCancellation && confirmationResponseId !== null) {
-          this.#cancelProjectConfirmationCarrier(event.session_epoch, confirmationResponseId)
-        }
-      }
-    } catch (cause) {
-      releaseDecisionGate?.()
-      this.#projectConfirmationDecisionGates.delete(call)
-      this.#projectConfirmationClosingCalls.delete(call)
-      throw cause
-    }
-    releaseDecisionGate?.()
-    this.#projectConfirmationDecisionGates.delete(call)
-    this.#projectConfirmationClosingCalls.delete(call)
-    this.#rememberClosedProjectConfirmationCall(call)
-  }
-
-  async #commitConfirmedProjectOperation(
-    operation: ConfirmedProjectOperation,
-  ): Promise<{
-    readonly state: 'accepted' | 'failed'
-    readonly text: string
-    readonly expiryOwnsFact: boolean
-  }> {
-    const intakeOperation = operation.intake_id !== undefined
-    if (intakeOperation && this.#intake?.beginConfirmed(operation) !== true) {
-      this.#projectConfirmation?.rejectConfirmed(operation)
-      return {state: 'failed', text: '计划已失效，尚未执行。请重新提出任务。', expiryOwnsFact: false}
-    }
-    const callback = this.#commitProjectOperation
-    const lifecycleId = operation.proposal_id
-    this.#projectConfirmationCommittingLifecycles.add(lifecycleId)
-    this.#telemetry?.record('project_confirmation.commit_started', {
-      session_epoch: this.session.sessionEpoch,
-      proposal_id: operation.proposal_id,
-      proposal_origin_ref: operation.origin_ref,
-      delegate_origin_ref: operation.origin_ref,
-      expires_at: operation.expires_at,
-    })
-    if (callback === undefined) {
-      if (intakeOperation) this.#intake?.settleConfirmed({accepted: false, code: 'callback_missing'})
-      this.#projectConfirmation?.rollbackConfirmed(operation)
-      this.#telemetry?.record(this.#projectConfirmation?.pending === true
-        ? 'project_confirmation.commit_rollback'
-        : 'project_confirmation.commit_settled', {
-        session_epoch: this.session.sessionEpoch,
-        proposal_id: operation.proposal_id,
-        proposal_origin_ref: operation.origin_ref,
-        delegate_origin_ref: operation.origin_ref,
-        code: 'callback_missing',
-      })
-      return this.#finishConfirmedProjectCommit(lifecycleId, {
-        state: 'failed',
-        text: '确认处理不可用，本次操作未执行。',
-      })
-    }
-    try {
-      const result = await callback(operation)
-      const controller = this.#projectConfirmation
-      this.#telemetry?.record('project_confirmation.commit_admission', {
-        session_epoch: this.session.sessionEpoch,
-        proposal_id: operation.proposal_id,
-        proposal_origin_ref: operation.origin_ref,
-        delegate_origin_ref: operation.origin_ref,
-        accepted: result.accepted,
-        code: result.code,
-        delegate_id: result.delegate_id ?? 'none',
-      })
-      if (result.accepted && controller?.committing === true) {
-        if (intakeOperation) this.#intake?.settleConfirmed({accepted: false, code: 'confirmation_invalid'})
-        controller.rejectConfirmed(operation)
-        this.#telemetry?.record('project_confirmation.commit_settled', {
-          session_epoch: this.session.sessionEpoch,
-          proposal_id: operation.proposal_id,
-          proposal_origin_ref: operation.origin_ref,
-          delegate_origin_ref: operation.origin_ref,
-          accepted: false,
-          code: 'confirmation_invalid',
-          delegate_id: result.delegate_id ?? 'none',
-        })
-        return this.#finishConfirmedProjectCommit(lifecycleId, {
-          state: 'failed',
-          text: '确认处理无效，本次操作未执行。',
-        })
-      }
-      if (!result.accepted && controller?.committing === true) {
-        if (result.code === 'runtime_rejected') controller.rollbackConfirmed(operation)
-        else if (result.code !== 'confirmation_in_progress') controller.rejectConfirmed(operation)
-      }
-      if (intakeOperation) this.#intake?.settleConfirmed(result)
-      const transitionKind = result.code === 'confirmation_in_progress'
-        ? 'project_confirmation.commit_duplicate_suppressed'
-        : controller?.pending === true
-          ? 'project_confirmation.commit_rollback'
-          : 'project_confirmation.commit_settled'
-      this.#telemetry?.record(transitionKind, {
-        session_epoch: this.session.sessionEpoch,
-        proposal_id: operation.proposal_id,
-        proposal_origin_ref: operation.origin_ref,
-        delegate_origin_ref: operation.origin_ref,
-        accepted: result.accepted,
-        code: result.code,
-        delegate_id: result.delegate_id ?? 'none',
-      })
-      return this.#finishConfirmedProjectCommit(lifecycleId, {
-        state: result.accepted ? 'accepted' : 'failed',
-        text: result.accepted
-          ? projectCommitSuccessText(operation, result.code)
-          : result.code === 'confirmation_in_progress'
-            ? ''
-            : projectCommitFailureText(result.code, this.#coding?.display_name),
-      })
-    } catch (failure) {
-      if (intakeOperation) this.#intake?.settleConfirmed({accepted: false, code: 'callback_failed'})
-      if (isAbort(failure)) {
-        this.#projectConfirmationCommittingLifecycles.delete(lifecycleId)
-        this.#projectConfirmationExpiryFactOwners.delete(lifecycleId)
-        throw failure
-      }
-      this.#projectConfirmation?.rollbackConfirmed(operation)
-      this.#telemetry?.record(this.#projectConfirmation?.pending === true
-        ? 'project_confirmation.commit_rollback'
-        : 'project_confirmation.commit_settled', {
-        session_epoch: this.session.sessionEpoch,
-        proposal_id: operation.proposal_id,
-        proposal_origin_ref: operation.origin_ref,
-        delegate_origin_ref: operation.origin_ref,
-        code: 'callback_failed',
-      })
-      return this.#finishConfirmedProjectCommit(lifecycleId, {
-        state: 'failed',
-        text: '已确认，但操作未执行。',
-      })
-    }
-  }
-
-  #finishConfirmedProjectCommit(
-    lifecycleId: string,
-    result: {readonly state: 'accepted' | 'failed'; readonly text: string},
-  ): {readonly state: 'accepted' | 'failed'; readonly text: string; readonly expiryOwnsFact: boolean} {
-    this.#projectConfirmationCommittingLifecycles.delete(lifecycleId)
-    return {
-      ...result,
-      expiryOwnsFact: this.#projectConfirmationExpiryFactOwners.delete(lifecycleId),
-    }
-  }
-
-  /**
-   * End one answer whose confirmation function cannot be tied back to a provider response.
-   *
-   * Refusing the function is necessary but insufficient: leaving the controller reservation alive
-   * turns every later utterance into a shadow and makes a still-valid proposal impossible to answer.
-   * Recovery is deliberately narrow -- current epoch, one exact reserved item, and a live proposal --
-   * and grants no authority. It only lets the user make a fresh, bindable attempt.
-   */
-  async #recoverUnboundProjectConfirmation(event: ToolCallReady): Promise<boolean> {
-    const controller = this.#projectConfirmation
-    if (
-      controller?.pending !== true
-      || event.session_epoch !== this.session.sessionEpoch
-      || this.#projectConfirmationIsolation.responseFencePending
-    ) return false
-    const reserved = this.#projectConfirmationIsolation.reservation
-    const itemId = reserved?.sessionEpoch === event.session_epoch ? reserved.itemId : undefined
-    if (itemId === undefined || !controller.releaseUndecided({
-      epoch: event.session_epoch,
-      itemId,
-    })) return false
-
-    this.#beginProjectConfirmationClose(event.session_epoch, itemId)
-    try {
-      await this.#closeConfirmationDeferredCalls(itemId)
-    } finally {
-      this.#endProjectConfirmationClose(event.session_epoch, itemId)
-    }
-    this.#failUserOriginTranscript(event.session_epoch, itemId)
-    this.#awaitingUserOrigin = this.#userOrigins.hasUnboundRevision(
-      event.session_epoch,
-      this.session.userInputRevision,
-    )
-    if (!this.#awaitingUserOrigin) this.#userOriginPreexistingResponseId = null
-    this.#queueProjectConfirmationFact(
-      '我没能把这次语音和确认请求关联起来；请再说一次“确认”或“取消”。',
-      this.#projectConfirmationLifecycleId(),
-      `binding-missing:${callKey(event.session_epoch, itemId)}`,
-    )
-    this.#publishProjectView()
-    return true
-  }
-
-  /** Transcription failed, so the answer is unknowable and the proposal is cancelled. */
-  async #failProjectConfirmation(epoch: number, itemId: string): Promise<void> {
-    if (this.#projectConfirmationClosingItems.has(callKey(epoch, itemId))) {
-      await this.#closeConfirmationDeferredCalls(itemId)
-      return
-    }
-    this.#beginProjectConfirmationClose(epoch, itemId)
-    try {
-      await this.#closeConfirmationDeferredCalls(itemId)
-    } finally {
-      this.#endProjectConfirmationClose(epoch, itemId)
-    }
-    const controller = this.#projectConfirmation
-    if (controller === undefined) return
-    const outcome = controller.failTranscript({epoch, itemId})
-    if (outcome.response_text !== null && outcome.response_text !== '') {
-      this.#queueProjectConfirmationFact(
-        outcome.response_text,
-        this.#projectConfirmationLifecycleId(),
-        `transcript-failed:${callKey(epoch, itemId)}`,
-      )
-    }
-    this.#publishProjectView()
-  }
-
-  /**
-   * Give the provider a terminal result for a tool call the confirmation refused.
-   *
-   * Reserved *before* the first await: expiry cleanup and a provider event can both reach the same
-   * call, and two terminal outputs for one function call is a protocol violation. Cleared on failure so
-   * a retry is possible; recorded on success so a later attempt is a no-op.
-   */
-  async #closeProjectConfirmationTool(event: ToolCallReady): Promise<void> {
-    const key = callKey(event.session_epoch, event.call_id)
-    if (
-      this.#projectConfirmationClosingCalls.has(key)
-      || this.#projectConfirmationClosedCalls.has(key)
-    ) {
-      return
-    }
-    this.#projectConfirmationClosingCalls.add(key)
-    const item: HostContextItem = {
-      kind: 'tool_output',
-      host_item_id: this.#idFactory(),
-      event_id: this.#idFactory(),
-      call_id: event.call_id,
-      content: '{"code":"confirmation_reserved","state":"superseded"}',
-    }
-    try {
-      await this.session.injectToolOutput(item)
-    } catch (cause) {
-      this.#projectConfirmationClosingCalls.delete(key)
-      throw cause
-    }
-    this.#projectConfirmationClosingCalls.delete(key)
-    this.#rememberClosedProjectConfirmationCall(key)
-  }
-
-  #rememberClosedProjectConfirmationCall(key: string): void {
-    this.#projectConfirmationClosedCalls.delete(key)
-    this.#projectConfirmationClosedCalls.set(key, null)
-    while (this.#projectConfirmationClosedCalls.size > MAX_TRACKED_TOOL_CALLS) {
-      const oldest = this.#projectConfirmationClosedCalls.keys().next()
-      if (oldest.done === true) break
-      this.#projectConfirmationClosedCalls.delete(oldest.value)
-    }
-  }
-
-  /**
-   * Refuse the tool calls that were waiting on this transcript.
-   *
-   * Detached before awaiting: rebuilding the queue from a snapshot after provider I/O would overwrite
-   * calls a concurrent event appended in the meantime.
-   */
-  async #closeConfirmationDeferredCalls(itemId: string): Promise<void> {
-    const matching: DeferredOriginToolCall[] = []
-    const retained: DeferredOriginToolCall[] = []
-    for (const call of this.#originDeferredToolCalls) {
-      (call.user_item_id === itemId ? matching : retained).push(call)
-    }
-    this.#originDeferredToolCalls.length = 0
-    this.#originDeferredToolCalls.push(...retained)
-    for (const call of matching) {
-      await this.#closeProjectConfirmationTool(call.event)
-    }
-  }
-
-  /** Say something to the user about the confirmation. Just below user priority: urgent, not louder. */
-  #queueProjectConfirmationFact(text: string, lifecycleId: string, transition: string): void {
-    this.queueHostItem(hostFactIntent({
-      kind: 'final',
-      host_item_id: this.#idFactory(),
-      event_id: projectConfirmationEventId('project-confirmation', lifecycleId, transition),
-      content: [...text].slice(0, MAX_HOST_FACT_CHARS).join(''),
-    }), {priority: USER_PRIORITY - 1, preemptive: false})
-    this.#deliveryReady.set()
-  }
-
-  #abandonProjectConfirmationContinuation(sessionEpoch: number, responseId: string): void {
-    const batch = this.#continuationBatches.get(callKey(sessionEpoch, responseId))
-    if (batch === undefined) return
-    batch.origin_status = 'cancelled'
-    batch.phase = 'ready'
-  }
-
-  /** Transfer reply ownership locally before any provider I/O can delay the deterministic fact. */
-  #prepareProjectConfirmationCarrier(sessionEpoch: number, responseId: string): boolean {
-    const phase = this.session.providerTurnPhase(responseId)
-    const generation = this.session.currentGeneration
-    const live = sessionEpoch === this.session.sessionEpoch && (
-      this.session.activeProviderResponseId === responseId
-      || phase === 'active'
-      || phase === 'cancel_requested'
-      || (
-        generation !== null
-        && generation.session_epoch === sessionEpoch
-        && generation.response_id === responseId
-      )
-    )
-    if (live) {
-      this.#projectConfirmationIsolation.markQuarantined({sessionEpoch, responseId})
-    }
-    this.session.suppressResponse(responseId)
-    this.#abandonProjectConfirmationContinuation(sessionEpoch, responseId)
-    return live
-  }
-
-  /** Cancel the carrier without holding up the event that queued its host-owned reply. */
-  #cancelProjectConfirmationCarrier(sessionEpoch: number, responseId: string): void {
-    const cancellation = (async (): Promise<void> => {
-      try {
-        const targeted = await this.session.quarantineResponse(responseId)
-        if (!targeted) {
-          this.#projectConfirmationIsolation.clearQuarantined({sessionEpoch, responseId})
-          return
-        }
-        if (this.session.providerTurnPhase(responseId) !== 'cancel_requested') {
-          // The carrier may have reached terminal while tool output was being confirmed even though
-          // its audio was still queued. The exact fence was still required, but no provider terminal
-          // remains to release a quarantine entry or justify a reconnect watchdog.
-          this.#projectConfirmationIsolation.clearQuarantined({sessionEpoch, responseId})
-          return
-        }
-      } catch (failure) {
-        this.#reportDeliveryFailure(failure instanceof RealtimeDeliveryError
-          ? failure
-          : new RealtimeDeliveryError(String(failure)))
-        await this.#recoverProjectConfirmationCarrier(
-          sessionEpoch,
-          responseId,
-          'cancel_failed',
-        )
-        return
-      }
-      await this.#projectConfirmationCarrierReleaseWatchdog(sessionEpoch, responseId)
-    })()
-    this.#trackProjectConfirmationCarrierRelease(cancellation)
-  }
-
-  #trackProjectConfirmationCarrierRelease(work: Promise<void>): void {
-    const task = work.catch((failure: unknown) => {
-      if (!isAbort(failure)) {
-        this.#reportDeliveryFailure(failure instanceof RealtimeDeliveryError
-          ? failure
-          : new RealtimeDeliveryError(String(failure)))
-      }
-    }).finally(() => {
-      this.#projectConfirmationCarrierReleaseTasks.delete(task)
-    })
-    this.#projectConfirmationCarrierReleaseTasks.add(task)
-  }
-
-  async #projectConfirmationCarrierReleaseWatchdog(
-    sessionEpoch: number,
-    responseId: string,
-  ): Promise<void> {
-    await this.#clock.sleep(PROJECT_CONFIRMATION_CARRIER_RELEASE_TIMEOUT_S, this.#stop.signal)
-    await this.#recoverProjectConfirmationCarrier(sessionEpoch, responseId, 'terminal_timeout')
-  }
-
-  async #recoverProjectConfirmationCarrier(
-    sessionEpoch: number,
-    responseId: string,
-    reason: string,
-  ): Promise<void> {
-    const key = callKey(sessionEpoch, responseId)
-    if (
-      sessionEpoch !== this.session.sessionEpoch
-      || this.#projectConfirmationIsolation.responseState({sessionEpoch, responseId})
-        ?.quarantined !== true
-      || this.session.providerTurnPhase(responseId) !== 'cancel_requested'
-    ) return
-    if (this.session.floor.state === 'user_speaking') {
-      const alreadyDeferred = this.#projectConfirmationCarrierReconnectAfterUser.has(key)
-      this.#projectConfirmationCarrierReconnectAfterUser.set(key, {
-        sessionEpoch,
-        responseId,
-        reason,
-      })
-      if (!alreadyDeferred) {
-        this.#trackProjectConfirmationCarrierRelease(
-          this.#recoverProjectConfirmationCarrierAfterStaleUserHold(key),
-        )
-      }
-      return
-    }
-    this.#projectConfirmationCarrierReconnectAfterUser.delete(key)
-    this.#telemetry?.record('project_confirmation.carrier_recovery', {
-      session_epoch: sessionEpoch,
-      response_id: responseId,
-      reason,
-    })
-    await this.#reconnectProviderSession({
-      reason: 'project_confirmation_carrier_recovery',
-      expectedEpoch: sessionEpoch,
-    })
-  }
-
-  async #recoverProjectConfirmationCarrierAfterStaleUserHold(key: string): Promise<void> {
-    if (!await this.session.waitForStaleHold(USER_HOLD_MAX_S)) return
-    const pending = this.#projectConfirmationCarrierReconnectAfterUser.get(key)
-    if (pending === undefined) return
-    if (this.session.releaseStaleUserHold(USER_HOLD_MAX_S)) {
-      this.#onDiagnostic('[realtime-diagnostic] project_confirmation_stale_user_hold_released')
-    }
-    await this.#recoverProjectConfirmationCarrier(
-      pending.sessionEpoch,
-      pending.responseId,
-      pending.reason,
-    )
-  }
-
-  async #resumeProjectConfirmationCarrierRecoveryAfterUser(): Promise<void> {
-    if (this.session.floor.state === 'user_speaking') return
-    const pending = [...this.#projectConfirmationCarrierReconnectAfterUser.values()]
-    this.#projectConfirmationCarrierReconnectAfterUser.clear()
-    for (const carrier of pending) {
-      await this.#recoverProjectConfirmationCarrier(
-        carrier.sessionEpoch,
-        carrier.responseId,
-        carrier.reason,
-      )
-    }
-  }
-
-  async #quarantineProjectConfirmationResponses(sessionEpoch: number): Promise<void> {
-    const carriers: string[] = []
-    for (const response of this.#projectConfirmationIsolation.blockedResponses) {
-      if (response.sessionEpoch !== sessionEpoch) continue
-      if (this.#prepareProjectConfirmationCarrier(sessionEpoch, response.responseId)) {
-        carriers.push(response.responseId)
-      }
-    }
-    this.session.armPendingResponseFence()
-    if (
-      this.#projectConfirmationPendingQuarantineEpoch !== null
-      && this.#projectConfirmationPendingQuarantineEpoch === sessionEpoch
-    ) {
-      try {
-        await this.session.quarantineActiveOrAwaitingResponse()
-      } catch (failure) {
-        this.#reportDeliveryFailure(failure instanceof RealtimeDeliveryError
-          ? failure
-          : new RealtimeDeliveryError(String(failure)))
-      }
-    }
-    for (const responseId of carriers) {
-      this.#cancelProjectConfirmationCarrier(sessionEpoch, responseId)
-    }
-  }
-
-  /** The proposal id is the lifecycle key; settlement deliberately does not erase it. */
-  #projectConfirmationLifecycleId(): string {
-    const lifecycleId = this.#projectConfirmation?.lifecycleId
-    if (lifecycleId !== null && lifecycleId !== undefined) return lifecycleId
-    this.#onDiagnostic('[realtime-diagnostic] project_confirmation_lifecycle_missing')
-    return `session:${this.session.sessionEpoch}`
-  }
-
-  /**
-   * The proposal timed out on its own.
-   *
-   * Batched and drained by one task rather than handled inline, because cleanup involves provider I/O
-   * and possibly a reconnect -- and the expiry observer is called from a timer that must not be left
-   * awaiting either. A second expiry while one is draining joins the queue instead of racing it.
-   */
-  #projectConfirmationExpired(): void {
-    const reserved = this.#projectConfirmationIsolation.reservation
-    const itemKeys = reserved === null
-      ? []
-      : [callKey(reserved.sessionEpoch, reserved.itemId)]
-    const sourceEpoch = this.session.sessionEpoch
-    const lifecycleId = this.#projectConfirmationLifecycleId()
-    if (this.#projectConfirmationCommittingLifecycles.has(lifecycleId)) {
-      this.#projectConfirmationExpiryFactOwners.add(lifecycleId)
-    }
-    // A reconnect is needed when the confirmation armed a fence or blocked a response in this epoch:
-    // either leaves provider state the next turn would otherwise inherit.
-    const reconnect = this.#projectConfirmationIsolation.responseFencePending
-      || (this.#projectConfirmationDecisionRetry?.requested === true
-        && this.#projectConfirmationDecisionRetry.retry_response_id === null)
-      || this.#projectConfirmationIsolation.hasBlockedResponseInEpoch(sourceEpoch)
-    for (const key of itemKeys) {
-      const {sessionEpoch, id} = parseCallKey(key)
-      this.#beginProjectConfirmationClose(sessionEpoch, id)
-    }
-    this.#projectExpiryBatches.push({
-      item_keys: itemKeys,
-      source_epoch: sourceEpoch,
-      reconnect,
-      lifecycle_id: lifecycleId,
-    })
-    this.#startProjectConfirmationExpiryDrain()
-    this.#publishProjectView()
-  }
-
-  /** Do not reconnect or inject expiry facts beside an in-flight confirmation tool output. */
-  #startProjectConfirmationExpiryDrain(): void {
-    if (
-      this.#projectExpiryDraining !== null
-      || this.#projectExpiryBatches.length === 0
-    ) return
-    const signal = this.#stop.signal
-    this.#projectExpiryDraining = this.#drainProjectConfirmationExpiries(signal)
-      .catch((failure: unknown) => {
-        this.#onDiagnostic(
-          `[realtime-diagnostic] project_expiry_failure type=${diagnosticName(failure)}`,
-        )
-      })
-      .finally(() => {
-        this.#projectExpiryDraining = null
-        this.#startProjectConfirmationExpiryDrain()
-      })
-  }
-
-  async #drainProjectConfirmationExpiries(signal: AbortSignal): Promise<void> {
-    for (;;) {
-      if (signal.aborted) return
-      const batch = this.#projectExpiryBatches.shift()
-      if (batch === undefined) return
-      await this.#finishProjectConfirmationExpiry(batch, signal)
-    }
-  }
-
-  /**
-   * Clean up after one expired proposal.
-   *
-   * Every step is deadlined, because each one talks to a provider that may not answer and an expiry
-   * that hangs leaves the confirmation state blocking every later turn. A step that times out is
-   * treated as a failure of that step, not of the expiry: the loop carries on and the user is still
-   * told the proposal lapsed.
-   *
-   * The re-drain loop matters: closing a call awaits, and a provider event during that await can defer
-   * another call for the same epoch. Taking the queue once would leave it behind.
-   */
-  async #finishProjectConfirmationExpiry(
-    batch: ProjectExpiryBatch,
-    signal: AbortSignal,
-  ): Promise<void> {
-    const clearRevision = this.#conversationClearRevision
-    if (this.#clearingConversation) return
-    let closeFailed = false
-    const decisionGates = [...this.#projectConfirmationDecisionGates]
-      .filter(([key]) => parseCallKey(key).sessionEpoch === batch.source_epoch)
-      .map(([, gate]) => gate)
-    if (decisionGates.length > 0) {
-      const completed = await this.#runProjectExpiryStep(Promise.all(decisionGates))
-      closeFailed = closeFailed || !completed
-    }
-    for (;;) {
-      // Checked at every resumption point, not just on entry: each close awaits the provider, and the
-      // service can be closed during any of them. Reconnecting or injecting after that would be a
-      // stopped service talking to a provider it has already released.
-      if (
-        signal.aborted
-        || this.#clearingConversation
-        || clearRevision !== this.#conversationClearRevision
-      ) return
-      const deferred = this.#takeConfirmationDeferredCalls(batch.source_epoch)
-      if (deferred.length === 0) break
-      for (const call of deferred) {
-        try {
-          const completed = await this.#runProjectExpiryStep(
-            this.#closeProjectConfirmationTool(call.event),
-          )
-          closeFailed = closeFailed || !completed
-          if (
-            this.#clearingConversation
-            || clearRevision !== this.#conversationClearRevision
-          ) return
-        } catch {
-          closeFailed = true
-        }
-      }
-    }
-    if (
-      signal.aborted
-      || this.#clearingConversation
-      || clearRevision !== this.#conversationClearRevision
-    ) return
-    if (batch.reconnect || closeFailed) {
-      try {
-        await this.#runProjectExpiryStep(
-          this.#reconnectProviderSession({
-            reason: 'project_confirmation_expiry_cleanup',
-            expectedEpoch: batch.source_epoch,
-          }),
-        )
-      } catch (failure) {
-        this.#onDiagnostic(
-          `[realtime-diagnostic] project_expiry_reconnect_failure type=${diagnosticName(failure)}`,
-        )
-      }
-    }
-    // The items are released even at shutdown: leaving one closing would block a service that is
-    // restarted. Only the provider-facing half below is skipped.
-    for (const key of batch.item_keys) {
-      const {sessionEpoch, id} = parseCallKey(key)
-      this.#endProjectConfirmationClose(sessionEpoch, id)
-    }
-    if (
-      signal.aborted
-      || this.#clearingConversation
-      || clearRevision !== this.#conversationClearRevision
-    ) return
-    this.#queueProjectConfirmationFact(
-      '确认已过期，本次操作已取消。',
-      batch.lifecycle_id,
-      'expired',
-    )
-    try {
-      await this.#runProjectExpiryStep(this.#deliveryPass())
-    } catch (failure) {
-      this.#onDiagnostic(
-        `[realtime-diagnostic] project_expiry_delivery_failure type=${diagnosticName(failure)}`,
-      )
-    }
-    this.#publishProjectView()
-  }
-
-  /** Take the deferred calls belonging to one epoch, leaving the rest queued in order. */
-  #takeConfirmationDeferredCalls(sourceEpoch: number): readonly DeferredOriginToolCall[] {
-    const matching: DeferredOriginToolCall[] = []
-    const retained: DeferredOriginToolCall[] = []
-    for (const deferred of this.#originDeferredToolCalls) {
-      (deferred.event.session_epoch === sourceEpoch ? matching : retained).push(deferred)
-    }
-    this.#originDeferredToolCalls.length = 0
-    this.#originDeferredToolCalls.push(...retained)
-    return matching
-  }
-
-  /**
-   * Run one cleanup step, or give up on it.
-   *
-   * Returns whether it finished. A step that did not is abandoned rather than awaited: the work may
-   * still complete in the background, and the alternative is an expiry that never ends.
-   */
-  async #runProjectExpiryStep(work: Promise<unknown>): Promise<boolean> {
-    // Attached now so a rejection after the deadline is not an unhandled one.
-    const settled = work.then(() => true, () => false)
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const deadline = new Promise<false>(resolve => {
-      timer = setTimeout(() => resolve(false), this.#projectExpiryStepTimeoutMs)
-    })
-    try {
-      return await Promise.race([settled, deadline])
-    } finally {
-      if (timer !== undefined) clearTimeout(timer)
-    }
-  }
-
-  #publishProjectView(): void {
-    const controller = this.#projectConfirmation
-    if (controller === undefined) return
-    try {
-      this.#onProjectView?.(
-        this.#projectViewProvider?.(controller.pending || controller.committing) ?? controller.view,
-      )
-    } catch {
-      // A renderer that cannot accept the view must not prevent the state change that produced it.
-    }
-    // Spec 08: an executor approval that waited behind this confirmation gets a fresh TTL and is
-    // voice-armed once it is over. `release` publishes, and the observer runs the host sync
-    // with the re-armed view; a head that was never held is synced directly.
-    if (!controller.pending && !controller.committing) this.#approvalHost.release()
-  }
-
-  /**
-   * Drop the proposal and every trace of its isolation.
-   *
-   * Called when the world the proposal described has changed underneath it -- a reconnect, a new
-   * provider session -- so confirming it would commit against a context the user never saw.
-   */
-  #invalidateProjectConfirmation(reason: string): void {
-    if (reason !== 'intake_amended') this.#intake?.cancel()
-    this.#projectConfirmation?.invalidate(reason)
-    this.#projectConfirmationIsolation.invalidate()
-    this.#projectConfirmationShadowItems.clear()
-    this.#projectConfirmationClosingItems.clear()
-    this.#projectConfirmationCarrierReconnectAfterUser.clear()
-    this.#projectConfirmationPendingQuarantineEpoch = null
-    this.#projectConfirmationDecisionRetry = null
-    this.#publishProjectView()
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // Family E: playback acknowledgement.
-  //
-  // The renderer is the only thing that knows whether audio actually reached a person. Everything here
-  // turns its reports into facts the rest of the system can rely on -- and refuses to turn them into
-  // more than that. "The renderer said it played 0 ms" is not evidence the user heard anything.
-  // ---------------------------------------------------------------------------------------------
-
-  playbackStarted(utteranceId: string, generationEpoch: number): boolean {
-    // Read before the call, because starting playback is what makes it current.
-    const generation = this.session.currentGeneration
-    const started = this.session.playbackStarted(utteranceId, generationEpoch)
-    if (
-      started
-      && generation !== null
-      && generation.utterance_id === utteranceId
-      && generation.generation_epoch === generationEpoch
-      && this.#telemetry !== undefined
-    ) {
-      const attribution = this.#playbackAttribution(generation.response_id)
-      if (attribution !== null) this.#telemetry.record('playback.attribution', attribution)
-    }
-    return started
-  }
-
-  /**
-   * What this turn was speaking *about*, when that is unambiguous.
-   *
-   * Only a single suggestion counts: a turn carrying two is answering neither one in particular, and
-   * attributing it to either would be a guess recorded as a fact.
-   */
-  #playbackAttribution(responseId: string): Readonly<Record<string, JsonValue>> | null {
-    const suggestionEvents = this.session.responseEventIds(responseId)
-      .filter(eventId => eventId.startsWith('suggestion:'))
-    if (suggestionEvents.length === 1) {
-      const suggestionId = suggestionEvents[0]!.slice('suggestion:'.length)
-      const suggestion = this.#runtime.suggestionFor?.(suggestionId) ?? null
-      if (suggestion !== null && suggestion.kind === 'selected_progress') {
-        const memoryRef = suggestion.evidence_refs[0]
-        if (memoryRef !== undefined) {
-          return {target: 'selected_progress', memory_ref: memoryRef}
-        }
-      }
-    }
-    for (const state of this.#toolCalls.values()) {
-      if (
-        state.logical_name === 'memory.recall'
-        && state.acceptance.inline_fulfilled
-        && state.continuation_response_id === responseId
-      ) {
-        return {target: 'memory_recall'}
-      }
-    }
-    return null
-  }
-
-  /**
-   * The renderer finished playing a generation.
-   *
-   * The event ids are captured *before* completing, because completion is what clears the generation --
-   * and the suggestion confirmations below need to know what it was carrying.
-   */
-  playbackDone(utteranceId: string, generationEpoch: number, playedMs: number | null): boolean {
-    const generation = this.session.currentGeneration
-    const urgentOwner = this.#urgentOwnerForGeneration(utteranceId, generationEpoch)
-    const eventIds = generation === null
-      ? []
-      : this.session.responseEventIds(generation.response_id)
-    const completion = this.session.completePlayback(utteranceId, generationEpoch, playedMs)
-    if (completion === null) return false
-    this.#localSpeechInterruptedResponses.delete(
-      callKey(completion.session_epoch, completion.response_id),
-    )
-    this.#recordOriginDeliveryProof(completion)
-    this.#recordSemanticAcknowledgementHeard(completion)
-    this.#cancelPreemptiveAlertClearDeadline(utteranceId, generationEpoch)
-    for (const eventId of eventIds) {
-      // Confirmed only if it was actually spoken: a suggestion in a turn that was cut off has not been
-      // offered, and marking it fired would stop it ever being offered again.
-      if (eventId.startsWith('suggestion:') && this.session.eventWasSpoken(eventId)) {
-        this.#runtime.confirmSuggestionSpoken?.(eventId.slice('suggestion:'.length))
-      }
-    }
-    this.#releaseUrgentHostResponse(urgentOwner)
-    this.#deliveryReady.set()
-    return true
-  }
-
-  /** The renderer dropped a generation on request. */
-  playbackCleared(utteranceId: string, generationEpoch: number, playedMs: number | null): boolean {
-    const urgentOwner = this.#urgentOwnerForGeneration(utteranceId, generationEpoch)
-    const completion = this.session.completePlaybackClear(utteranceId, generationEpoch, playedMs)
-    if (completion === null) return false
-    const responseKey = callKey(completion.session_epoch, completion.response_id)
-    const interruptedByLocalSpeech = this.#localSpeechInterruptedResponses.delete(responseKey)
-    const audible = completion.played_ms === null
-      ? completion.started
-      : completion.played_ms > 0
-    this.#reconcileAcknowledgementAfterPlaybackInterruption(
-      completion.session_epoch,
-      completion.response_id,
-      interruptedByLocalSpeech && audible,
-    )
-    // The acknowledgement arrived, so the deadline waiting for it has nothing left to retire.
-    this.#cancelPreemptiveAlertClearDeadline(utteranceId, generationEpoch)
-    this.#releaseUrgentHostResponse(urgentOwner)
-    this.#deliveryReady.set()
-    return true
-  }
-
-  /** The renderer stopped playback without being asked -- a device change, or a closed window. */
-  async playbackStopped(
-    utteranceId: string,
-    generationEpoch: number,
-    playedMs: number | null,
-  ): Promise<boolean> {
-    const generation = this.session.currentGeneration
-    const urgentOwner = this.#urgentOwnerForGeneration(utteranceId, generationEpoch)
-    const namesCurrentGeneration = generation !== null
-      && generation.utterance_id === utteranceId
-      && generation.generation_epoch === generationEpoch
-    const stopping = this.session.playbackStopped(utteranceId, generationEpoch, playedMs)
-    // `RealtimeSession.playbackStopped` fences and clears the renderer generation synchronously,
-    // then may wait for provider cancellation. Recover acknowledgement ownership before that wait:
-    // a cascaded provider can emit `response_terminal(cancelled)` while the cancel promise is still
-    // pending, and that terminal deliberately removes the old continuation binding.
-    if (namesCurrentGeneration) {
-      this.#localSpeechInterruptedResponses.delete(
-        callKey(generation.session_epoch, generation.response_id),
-      )
-      this.#reconcileAcknowledgementAfterPlaybackInterruption(
-        generation.session_epoch,
-        generation.response_id,
-      )
-    }
-    const stopped = await stopping
-    if (!stopped) return false
-    this.#cancelPreemptiveAlertClearDeadline(utteranceId, generationEpoch)
-    this.#releaseUrgentHostResponse(urgentOwner)
-    this.#deliveryReady.set()
-    return true
-  }
-
-  /** The renderer transport vanished, so no current or imminent response may keep speaking. */
-  async playbackDisconnected(
-    options: {readonly resumeDelivery?: boolean} = {},
-  ): Promise<boolean> {
-    // Set before the first await so a concurrent host event cannot use the renderer boundary as a
-    // chance to start speech that no authenticated renderer can play.
-    const boundary = {}
-    this.#rendererHostDeliveryBoundary = boundary
-    this.#rendererHostDeliveryPaused = true
-    try {
-      const releasedUserHold = this.session.releaseRendererUserHold()
-      const generation = this.session.currentGeneration
-      let fenced: boolean
-      if (generation !== null) {
-        fenced = await this.playbackStopped(
-          generation.utterance_id,
-          generation.generation_epoch,
-          null,
-        )
-      } else {
-        fenced = await this.session.rendererDisconnected()
-      }
-      return fenced || releasedUserHold
-    } finally {
-      if (
-        options.resumeDelivery === true
-        && this.#rendererHostDeliveryBoundary === boundary
-      ) {
-        this.#rendererHostDeliveryPaused = false
-        this.#deliveryReady.set()
-      }
-    }
-  }
-
-  /** Return an interrupted, unheard acknowledgement to the live delegate that still owns it. */
-  #reconcileAcknowledgementAfterPlaybackInterruption(
-    sessionEpoch: number,
-    responseId: string,
-    suppressReplay = false,
-  ): void {
-    for (const acknowledgement of this.#semanticAcknowledgements.values()) {
-      if (
-        acknowledgement.phase !== 'bound'
-        || acknowledgement.response_session_epoch !== sessionEpoch
-        || acknowledgement.response_id !== responseId
-        || acknowledgement.heard
-      ) continue
-      if (suppressReplay) {
-        // The renderer supplied audible evidence and local VAD says the user took the floor. The
-        // acknowledgement was interrupted rather than fully heard, but replaying the same sentence
-        // over the user's next turn is worse than retiring it. Device/window stops never enter here.
-        acknowledgement.phase = 'cancelled'
-        acknowledgement.response_id = null
-        acknowledgement.response_session_epoch = null
-        acknowledgement.binding = null
-        this.#retireSemanticAcknowledgementHostEvent(acknowledgement)
-        continue
-      }
-      if (this.session.delegateState(acknowledgement.delegate_id) !== 'running') {
-        acknowledgement.phase = 'cancelled'
-        acknowledgement.response_id = null
-        acknowledgement.response_session_epoch = null
-        acknowledgement.binding = null
-        this.#retireSemanticAcknowledgementHostEvent(acknowledgement)
-        continue
-      }
-      if (
-        acknowledgement.provider_event_id === acknowledgement.event_id
-        && !this.session.reopenHostResponse(acknowledgement.event_id)
-      ) {
-        this.#onDiagnostic('[realtime-diagnostic] semantic_ack_reopen_failed')
-        continue
-      }
-      acknowledgement.phase = 'pending'
-      acknowledgement.response_id = null
-      acknowledgement.response_session_epoch = null
-      acknowledgement.binding = null
-      this.#queueSemanticAcknowledgement(acknowledgement)
-    }
-  }
-
-  /**
-   * Record that a turn was audibly delivered, if it was.
-   *
-   * `played_ms > 0` when the renderer reported a duration, and otherwise whether it started at all.
-   * Zero milliseconds is not audible: the renderer began and produced no sound, which is exactly the
-   * case where assuming delivery would suppress an acknowledgement the user never heard.
-   *
-   * Only kept when something can still refer to it, and evicted oldest-first among the entries nothing
-   * live points at -- so a bounded ledger never drops the proof a pending acknowledgement is waiting on.
-   */
-  #recordOriginDeliveryProof(completion: PlaybackCompletion): void {
-    const audible = completion.played_ms === null
-      ? completion.started
-      : completion.played_ms > 0
-    if (completion.disposition !== 'spoken' || !audible) return
-    const key = callKey(completion.session_epoch, completion.response_id)
-    if (!this.#originCanReferenceProof(key)) return
-    this.#originDeliveryProofs.delete(key)
-    this.#originDeliveryProofs.set(key, null)
-    this.#pruneOriginDeliveryProofs()
-  }
-
-  /** Persist renderer-backed audibility for the acknowledgement bound to this exact provider turn. */
-  #recordSemanticAcknowledgementHeard(completion: PlaybackCompletion): void {
-    const audible = completion.played_ms === null
-      ? completion.started
-      : completion.played_ms > 0
-    if (completion.disposition !== 'spoken' || !audible) return
-    for (const acknowledgement of this.#semanticAcknowledgements.values()) {
-      if (
-        acknowledgement.phase !== 'bound'
-        || acknowledgement.response_session_epoch !== completion.session_epoch
-        || acknowledgement.response_id !== completion.response_id
-      ) continue
-      acknowledgement.heard = true
-      this.#markAcknowledgementDelivered(acknowledgement)
-      this.#retireSemanticAcknowledgementHostEvent(acknowledgement)
-    }
-  }
-
-  #rememberDelegateHostEvent(delegateId: string, eventId: string): void {
-    this.#delegateHostEvents.delete(eventId)
-    this.#delegateHostEvents.set(eventId, delegateId)
-    while (this.#delegateHostEvents.size > MAX_PENDING_HOST_EVENTS) {
-      const oldest = this.#delegateHostEvents.keys().next()
-      if (oldest.done) break
-      this.#delegateHostEvents.delete(oldest.value)
-    }
-  }
-
-  #retireDelegateHostEvents(delegateId: string): void {
-    for (const [eventId, owner] of [...this.#delegateHostEvents]) {
-      if (owner !== delegateId) continue
-      this.#delegateHostEvents.delete(eventId)
-      this.#codingProgressHostEventIds.delete(eventId)
-      this.#retireProviderHostEvent(eventId)
-    }
-  }
-
-  #retireSemanticAcknowledgementHostEvent(
-    acknowledgement: SemanticAcknowledgement,
-  ): void {
-    const eventId = acknowledgement.provider_event_id
-    if (eventId !== null) this.#retireProviderHostEvent(eventId)
-  }
-
-  /** Provider deletion is defense in depth; queue eligibility remains the correctness boundary. */
-  #retireProviderHostEvent(eventId: string): void {
-    if (this.#providerRetirementEventIds.has(eventId)) return
-    this.#providerRetirementEventIds.add(eventId)
-    const task = this.session.retireHostEvent(eventId)
-      .then(() => undefined)
-      .catch((failure: unknown) => {
-        this.#onDiagnostic(
-          `[realtime-diagnostic] host_item_retire_failure type=${diagnosticName(failure)}`,
-        )
-      })
-      .finally(() => {
-        this.#providerRetirementEventIds.delete(eventId)
-        this.#providerRetirementTasks.delete(task)
-      })
-    this.#providerRetirementTasks.add(task)
-  }
-
-  /** Injection just completed, so perform a fresh lookup even if an earlier best-effort miss exists. */
-  async #retireProviderHostEventNow(eventId: string): Promise<void> {
-    try {
-      await this.session.retireHostEvent(eventId)
-    } catch (failure) {
-      this.#onDiagnostic(
-        `[realtime-diagnostic] host_item_retire_failure type=${diagnosticName(failure)}`,
-      )
-    }
-  }
-
-  /** Whether anything at all refers to this turn. A proof nothing can cite is not worth keeping. */
-  #originCanReferenceProof(key: string): boolean {
-    const {sessionEpoch, id: responseId} = parseCallKey(key)
-    if (this.#originDeferredToolCalls.some(deferred => (
-      deferred.event.session_epoch === sessionEpoch && deferred.response_id === responseId
-    ))) {
-      return true
-    }
-    for (const ledger of [this.#toolCalls, this.#overflowToolCalls]) {
-      for (const state of ledger.values()) {
-        if (
-          state.provider_session_epoch === sessionEpoch
-          && state.provider_response_id === responseId
-        ) {
-          return true
-        }
-      }
-    }
-    if (this.#continuationBatches.has(key)) return true
-    for (const acknowledgement of this.#semanticAcknowledgements.values()) {
-      if (
-        acknowledgement.origin_session_epoch === sessionEpoch
-        && acknowledgement.origin_response_id === responseId
-      ) {
-        return true
-      }
-    }
-    return false
-  }
-
-  /** Whether anything *unfinished* refers to it, which is what makes it unsafe to evict. */
-  #originHasNonterminalReference(key: string): boolean {
-    const {sessionEpoch, id: responseId} = parseCallKey(key)
-    if (this.#originDeferredToolCalls.some(deferred => (
-      deferred.event.session_epoch === sessionEpoch && deferred.response_id === responseId
-    ))) {
-      return true
-    }
-    for (const ledger of [this.#toolCalls, this.#overflowToolCalls]) {
-      for (const state of ledger.values()) {
-        if (
-          state.provider_session_epoch === sessionEpoch
-          && state.provider_response_id === responseId
-          && state.final_disposition === null
-        ) {
-          return true
-        }
-      }
-    }
-    const batch = this.#continuationBatches.get(key)
-    if (batch !== undefined && batch.phase !== 'terminal' && batch.phase !== 'abandoned') return true
-    for (const acknowledgement of this.#semanticAcknowledgements.values()) {
-      if (
-        acknowledgement.origin_session_epoch === sessionEpoch
-        && acknowledgement.origin_response_id === responseId
-        && acknowledgement.phase !== 'delivered'
-      ) {
-        return true
-      }
-    }
-    return false
-  }
-
-  /**
-   * Keep the ledger bounded, evicting what nothing unfinished depends on.
-   *
-   * When *everything* is still referenced there is no safe choice, so the newest goes: the older
-   * proofs have waited longer and are likelier to be the one something is about to ask for.
-   */
-  #pruneOriginDeliveryProofs(): void {
-    while (this.#originDeliveryProofs.size > MAX_TRACKED_ORIGIN_DELIVERY_PROOFS) {
-      let evictable: string | undefined
-      for (const key of this.#originDeliveryProofs.keys()) {
-        if (!this.#originHasNonterminalReference(key)) {
-          evictable = key
-          break
-        }
-      }
-      if (evictable === undefined) {
-        const newest = [...this.#originDeliveryProofs.keys()].at(-1)
-        if (newest !== undefined) this.#originDeliveryProofs.delete(newest)
-        return
-      }
-      this.#originDeliveryProofs.delete(evictable)
-    }
-  }
-
-  // ---------------------------------------------------------------------------------------------
-  // Family L: preemptive-alert delivery.
-  //
-  // A preemptive alert is the one thing allowed to interrupt the agent mid-sentence, and interrupting is
-  // the hard part. The provider has to be told to stop, the renderer has to be told to drop the audio
-  // already in flight, and the replacement has to start speaking -- with no guarantee any of the three
-  // acknowledges. So every step is deadlined: if the provider does not confirm the cancel, the host
-  // stops waiting and speaks anyway; if the renderer does not confirm the clear, the generation is
-  // retired as unknown rather than left pending forever.
-  //
-  // The token is what makes that safe. Each preemption carries one, and every deferred callback checks
-  // it before acting -- so a deadline belonging to a preemption that has already resolved does
-  // nothing, instead of tearing down the one that replaced it.
-  // ---------------------------------------------------------------------------------------------
+  // Controlled provider replacement stays here; HostDelivery owns preemption state and deadlines.
 
   /**
    * The provider refused to cancel, so take the session away from it.
@@ -6113,9 +1532,9 @@ export class RealtimeService {
   }): Promise<void> {
     if (!this.#controlledPreemptiveAlertReconnect) return
     await this.#reconnectLock.run(async () => {
-      await this.#deliveryLock.run(async () => {
+      await this.#host.withDeliveryLock(async () => {
         if (this.#preemptiveAlertHistoryRecovery !== 'none') await this.#runtime.flushMemory?.(true)
-        const preemption = this.#preemptiveAlert
+        const preemption = this.#host.currentPreemption
         if (
           preemption?.session_epoch !== event.session_epoch
           || preemption.session_epoch !== this.session.sessionEpoch
@@ -6129,21 +1548,15 @@ export class RealtimeService {
         ) {
           return
         }
-        const queued = this.#hostItems
-          .find(candidate => candidate.intent.item.event_id === preemption.event_id)
+        const queued = this.#host.findQueuedEvent(preemption.event_id)
         const oldGeneration = preemption.old_generation
         if (queued === undefined || oldGeneration === null) return
 
-        const spent: PreemptiveAlert = {
-          ...preemption,
-          cancel_sent: true,
-          reconnect_permit_consumed: true,
-        }
-        this.#preemptiveAlert = spent
+        const spent = this.#host.spendReconnectPermit(preemption)
         if (spent.deadline_fired) {
           // The alert already fenced the retained renderer generation. Anchor its uncertainty bound
           // now, before a slow reconnect; ordinary deferred alerts never consume this permit.
-          this.#startPreemptiveAlertClearDeadline(oldGeneration)
+          this.#host.startPreemptiveAlertClearDeadline(oldGeneration)
         }
         const oldEpoch = this.session.sessionEpoch
         const history = this.#preemptiveAlertRecoveryHistory()
@@ -6155,7 +1568,7 @@ export class RealtimeService {
             history,
             historyMode: this.#preemptiveAlertHistoryRecovery,
           })
-          this.#providerEpochNeedingActivation = this.session.sessionEpoch
+          this.#host.requireActivation()
           if (this.#preemptiveAlertHistoryRecovery !== 'none') {
             this.#telemetry?.record('guard.history_recovery', {
               arm: this.#preemptiveAlertHistoryRecovery,
@@ -6171,27 +1584,23 @@ export class RealtimeService {
           this.#awaitingUserOrigin = false
           this.#userOriginPreexistingResponseId = null
           this.#userOrigins.beginEpoch(this.session.sessionEpoch)
-          this.#originDeferredToolCalls.length = 0
-          this.#releaseUrgentHostResponseForEpoch(oldEpoch)
+          this.#continuations.clearDeferred()
+          this.#host.releaseUrgentHostResponseForEpoch(oldEpoch)
           this.#clearCaptions()
           this.#audioStarted.clear()
-          this.#reconcileToolStateAfterReconnect(oldEpoch)
-          this.#reopenFailedSemanticAcknowledgements()
-          this.#reconcileSemanticAcknowledgementsAfterReconnect()
-          const current = this.#preemptiveAlert
+          this.#continuations.reconcileToolStateAfterReconnect(oldEpoch)
+          this.#host.reopenFailedSemanticAcknowledgements()
+          this.#host.reconcileSemanticAcknowledgementsAfterReconnect()
+          const current = this.#host.currentPreemption
           // The world may have moved while reconnecting: a replacement preemption, or a user who
           // started speaking and revoked the authority this was borrowing.
           if (current?.token !== spent.token) return
           if (current.reconnect_aborted) {
-            this.#clearPreemptiveAlert(current.token)
+            this.#host.clearPreemptiveAlert(current.token)
             return
           }
-          this.#preemptiveAlert = {
-            ...current,
-            session_epoch: this.session.sessionEpoch,
-            old_response_id: null,
-          }
-          await this.#deliverCapturedPreemptiveAlertLocked(queued)
+          this.#host.adoptReconnectedPreemption(current)
+          await this.#host.deliverCapturedPreemptiveAlertLocked(queued)
         } catch (failure) {
           this.#telemetry?.record('guard.history_recovery_failure', {
             arm: this.#preemptiveAlertHistoryRecovery,
@@ -6220,458 +1629,14 @@ export class RealtimeService {
     return history
   }
 
-  /**
-   * Deliver the exact preemptive alert captured before the reconnect, independent of heap order.
-   *
-   * Not through the ordinary flush: the item was chosen before the session was replaced, and re-running
-   * the priority comparison now could deliver something else into a session that exists solely to
-   * carry this one. Removed from the heap by identity and re-heapified, rather than popped.
-   */
-  async #deliverCapturedPreemptiveAlertLocked(queued: QueuedHostResponse): Promise<void> {
-    const index = this.#hostItems.indexOf(queued)
-    if (index === -1) return
-    this.#hostItems.splice(index, 1)
-    this.#hostItems.sort(compareQueuedHostResponses)
-    const userActivation = this.#preemptiveAlertActivationRequired(queued)
-    let lifecycleRevoked = false
-    let delivery
-    try {
-      delivery = await this.session.deliverPreemptiveHostResponse(queued.intent, {
-        confirmationTimeout: 0.5,
-        responseAllowed: () => {
-          const eligible = this.#queuedHostItemEligible(queued)
-          if (!eligible) lifecycleRevoked = true
-          return eligible && this.#preemptiveAlertResponseIsAllowed(queued.intent.item.event_id)
-        },
-        asUserActivation: userActivation,
-      })
-    } catch (cause) {
-      this.#requeueHostItem(queued)
-      throw cause
-    }
-    if (!delivery.accepted) {
-      if (lifecycleRevoked) {
-        if (delivery.injectionEpoch === this.session.sessionEpoch) {
-          await this.#retireProviderHostEventNow(queued.intent.item.event_id)
-        }
-      } else {
-        this.#requeueHostItem(queued)
-      }
-      this.#recomputePreemptPriority()
-      return
-    }
-    if (userActivation) {
-      this.#providerEpochNeedingActivation = null
-      this.#providerReconnectSourceEpoch = null
-    }
-    this.#recomputePreemptPriority()
-    if (queued.semantic_event_id !== null) {
-      const acknowledgement = this.#semanticAcknowledgements.get(queued.semantic_event_id)
-      if (acknowledgement?.phase === 'queued') acknowledgement.phase = 'requested'
-    }
-    if (
-      !this.#stop.signal.aborted
-      && !this.#providerFailed
-      && delivery.injectionEpoch === this.session.sessionEpoch
-    ) {
-      this.#urgentDeliveryToken += 1
-      this.#urgentHostResponseOwner = {
-        delivery_token: this.#urgentDeliveryToken,
-        session_epoch: delivery.injectionEpoch,
-        event_id: queued.intent.item.event_id,
-        queued,
-        response_id: null,
-        generation: null,
-      }
-    }
-    this.#telemetry?.record('hostitem.injected', {event_id: queued.intent.item.event_id})
-  }
-
-  /**
-   * Whether the replacement turn may still speak.
-   *
-   * Checked at the moment the provider is about to create it, not when it was requested: a user who
-   * started talking in between has revoked the authority, and an aborted reconnect means the session
-   * this was for is gone.
-   */
-  #preemptiveAlertResponseIsAllowed(eventId: string): boolean {
-    const preemption = this.#preemptiveAlert
-    return preemption !== null
-      && preemption.event_id === eventId
-      && !preemption.reconnect_aborted
-      && this.session.floor.state !== 'user_speaking'
-  }
-
-  /**
-   * Bind the urgent item to the response now speaking it.
-   *
-   * The owner is created at delivery, before any response exists, so this is where it learns which one
-   * it became. Matched by *event id within the response*, not by timing: another response could start
-   * in the same instant, and binding to the wrong one would mean the alert is later considered spoken
-   * when something else was.
-   */
-  #bindUrgentHostResponse(event: {
-    readonly kind: string
-    readonly session_epoch: number
-    readonly response_id: string
-  }): void {
-    const owner = this.#urgentHostResponseOwner
-    if (owner?.session_epoch !== event.session_epoch) return
-    let bound = owner
-    if (owner.response_id === null) {
-      if (event.kind !== 'response_started') return
-      if (!this.session.responseEventIds(event.response_id).includes(owner.event_id)) return
-      bound = {...owner, response_id: event.response_id}
-    } else if (owner.response_id !== event.response_id) {
-      return
-    }
-    const generation = this.session.currentGeneration
-    if (
-      generation !== null
-      && generation.session_epoch === event.session_epoch
-      && generation.response_id === event.response_id
-    ) {
-      bound = {...bound, generation}
-    }
-    // The token guards against a replacement owner having appeared while this was being computed.
-    if (this.#urgentHostResponseOwner?.delivery_token === bound.delivery_token) {
-      this.#urgentHostResponseOwner = bound
-    }
-  }
-
-  /**
-   * The replacement is audibly speaking, so the preemption is over.
-   *
-   * This is the success path, and it is deliberately the *only* one that reports the switch latency:
-   * the deadline path fires when the provider did not cooperate, and timing that would measure the
-   * timeout rather than the handover.
-   */
-  #finishPreemptiveAlertFirstAudio(event: {
-    readonly session_epoch: number
-    readonly response_id: string
-  }): void {
-    const preemption = this.#preemptiveAlert
-    const owner = this.#urgentHostResponseOwner
-    const generation = this.session.currentGeneration
-    if (
-      preemption === null
-      || owner === null
-      || generation === null
-      || preemption.event_id !== owner.event_id
-      || preemption.session_epoch !== event.session_epoch
-      || owner.response_id !== event.response_id
-      || generation.session_epoch !== event.session_epoch
-      || generation.response_id !== event.response_id
-    ) {
-      return
-    }
-    const token = preemption.token
-    this.#clearPreemptiveAlert(token)
-    if (
-      this.#controlledPreemptiveAlertReconnect
-      && preemption.reconnect_permit_consumed
-      && preemption.old_generation !== null
-    ) {
-      this.#startPreemptiveAlertClearDeadline(preemption.old_generation)
-    }
-    this.#telemetry?.record('guard.first_audio_switch', {
-      elapsed_ms: Math.max(0, Math.round((this.#clock.now() - preemption.queued_at) * 1_000)),
-    })
-  }
-
-  /**
-   * Stop waiting for the provider to confirm the cancel.
-   *
-   * The provider was asked to stop and has not said it did. Past the deadline the host acts as though
-   * it had -- the alternative is the user hearing the old turn continue while an urgent alert waits
-   * behind it, which is the failure preemption exists to prevent.
-   */
-  async #firePreemptiveAlertDeadline(preemption: PreemptiveAlert): Promise<void> {
-    try {
-      const delay = Math.max(
-        0,
-        preemption.queued_at + PREEMPTIVE_ALERT_DEADLINE_S - this.#clock.now(),
-      )
-      await this.#clock.sleep(delay, this.#preemptiveAlertAbort?.signal)
-      const current = this.#preemptiveAlert
-      // Re-read, never trusted: the preemption this timer belongs to may have resolved, been replaced,
-      // or already fired while this was sleeping.
-      if (current?.token !== preemption.token || current.deadline_fired) return
-      if (current.reconnect_aborted) {
-        this.#clearPreemptiveAlert(current.token)
-        return
-      }
-      const controlledHandoff = current.reconnect_permit_consumed
-      const expired = controlledHandoff && current.old_generation !== null
-        ? this.session.alertPreemptiveAlertHandoff(current.old_generation)
-        : this.session.expireHostPreempt(current.old_generation)
-      if (!expired) return
-      this.#preemptiveAlert = {...current, deadline_fired: true}
-      if (
-        this.#controlledPreemptiveAlertReconnect
-        && current.reconnect_permit_consumed
-        && current.old_generation !== null
-      ) {
-        this.#startPreemptiveAlertClearDeadline(current.old_generation)
-      }
-      this.#telemetry?.record('guard.alert_deadline_fired', {})
-      // Both halves are done, so nothing is left to wait for.
-      if (current.replacement_terminal) this.#clearPreemptiveAlert(current.token)
-      this.#deliveryReady.set()
-    } catch (failure) {
-      if (isAbort(failure)) return
-      this.#onDiagnostic(`[realtime-diagnostic] preemptive_alert_failure type=${diagnosticName(failure)}`)
-    }
-  }
-
-  /**
-   * End a preemption, cancelling its deadline.
-   *
-   * The token argument is how a caller says "only if this is still the one I mean" -- without it, a
-   * late callback would clear a preemption that started after the one it belonged to.
-   */
-  #clearPreemptiveAlert(token?: number): void {
-    const current = this.#preemptiveAlert
-    if (current === null || (token !== undefined && current.token !== token)) return
-    this.#preemptiveAlert = null
-    const abort = this.#preemptiveAlertAbort
-    this.#preemptiveAlertAbort = null
-    abort?.abort()
-  }
-
-  /**
-   * Wait for the renderer to confirm it dropped the cleared audio.
-   *
-   * Keyed by generation and idempotent: the clear can be re-sent, and a second deadline for the same
-   * generation would retire it twice.
-   */
-  #startPreemptiveAlertClearDeadline(generation: PlaybackGeneration): void {
-    const key = `${generation.utterance_id}:${generation.generation_epoch}`
-    if (this.#preemptiveAlertClearDeadlines.has(key)) return
-    const abort = new AbortController()
-    this.#preemptiveAlertClearDeadlines.set(key, abort)
-    void this.#retirePreemptiveAlertClearUnknown(generation, key, abort.signal)
-  }
-
-  /**
-   * Give up on the renderer's clear acknowledgement.
-   *
-   * Retiring the generation as *unknown* rather than cleared is the honest answer: the host does not
-   * know how much of it the user heard, and recording either extreme would be a claim it cannot
-   * support.
-   */
-  async #retirePreemptiveAlertClearUnknown(
-    generation: PlaybackGeneration,
-    key: string,
-    signal: AbortSignal,
-  ): Promise<void> {
-    try {
-      await this.#clock.sleep(PREEMPTIVE_ALERT_CLEAR_ACK_DEADLINE_S, signal)
-      if (!this.session.retirePlaybackClearUnknown(generation)) return
-      this.#telemetry?.record('renderer_clear_unknown', {
-        session_epoch: generation.session_epoch,
-        generation_epoch: generation.generation_epoch,
-      })
-      this.#deliveryReady.set()
-    } catch (failure) {
-      if (!isAbort(failure)) throw failure
-    } finally {
-      if (this.#preemptiveAlertClearDeadlines.get(key)?.signal === signal) {
-        this.#preemptiveAlertClearDeadlines.delete(key)
-      }
-    }
-  }
-
-  #cancelPreemptiveAlertClearDeadline(utteranceId: string, generationEpoch: number): void {
-    const key = `${utteranceId}:${generationEpoch}`
-    const abort = this.#preemptiveAlertClearDeadlines.get(key)
-    if (abort === undefined) return
-    this.#preemptiveAlertClearDeadlines.delete(key)
-    abort.abort()
-  }
-
-  /** Record how the cancelled turn actually ended, which is the only measure of whether it worked. */
-  #recordPreemptiveAlertCancelTerminal(event: {
-    readonly session_epoch: number
-    readonly response_id: string
-    readonly status: string
-    readonly reason: string
-  }): void {
-    const preemption = this.#preemptiveAlert
-    if (
-      preemption?.session_epoch !== event.session_epoch
-      || preemption.old_response_id !== event.response_id
-    ) {
-      return
-    }
-    // Only a client-requested cancellation means the preemption did it. A turn that ended by itself in
-    // the same moment looks identical from outside and is not the same event.
-    const success = event.status === 'cancelled' && event.reason === 'client_cancelled'
-    const reasonCategory = event.status === 'cancelled'
-      ? (success ? 'client_cancelled' : 'other_cancelled')
-      : event.status
-    this.#telemetry?.record('provider.cancel_terminal', {
-      status: event.status,
-      reason_category: reasonCategory,
-      success,
-      elapsed_ms: Math.max(0, Math.round((this.#clock.now() - preemption.queued_at) * 1_000)),
-    })
-  }
-
-  /** Note that the cancel actually reached the provider. Once per preemption. */
-  #recordPreemptiveAlertCancelSent(responseId: string): void {
-    const preemption = this.#preemptiveAlert
-    if (
-      preemption?.session_epoch !== this.session.sessionEpoch
-      || preemption.old_response_id !== responseId
-      || preemption.cancel_sent
-    ) {
-      return
-    }
-    this.#preemptiveAlert = {...preemption, cancel_sent: true}
-    this.#telemetry?.record('provider.cancel_sent', {
-      elapsed_ms: Math.max(0, Math.round((this.#clock.now() - preemption.queued_at) * 1_000)),
-    })
-  }
-
-  /**
-   * The replacement turn has ended.
-   *
-   * Half of the two-sided finish: the preemption is over when the replacement has finished *and* the
-   * old turn has been dealt with. Whichever arrives second does the clearing.
-   */
-  #markPreemptiveAlertReplacementTerminal(owner: UrgentHostResponseOwner | null): void {
-    const preemption = this.#preemptiveAlert
-    if (
-      owner === null
-      || preemption?.event_id !== owner.event_id
-      || preemption.session_epoch !== owner.session_epoch
-    ) {
-      return
-    }
-    const marked = {...preemption, replacement_terminal: true}
-    this.#preemptiveAlert = marked
-    if (marked.deadline_fired) this.#clearPreemptiveAlert(marked.token)
-  }
-
-  /**
-   * Release an urgent item that was fenced before it ever started.
-   *
-   * A fence receipt naming it means the provider never began the response carrying it. Holding the
-   * owner would block every later preemption behind one that is never going to speak.
-   */
-  #retireFencedPrestartUrgent(): void {
-    const receipt = this.session.takeFenceInterruption()
-    const owner = this.#urgentHostResponseOwner
-    if (
-      receipt === null
-      || owner?.response_id !== null
-      || owner.session_epoch !== receipt.session_epoch
-      || !receipt.event_ids.includes(owner.event_id)
-    ) {
-      return
-    }
-    this.#releaseUrgentHostResponse(owner)
-  }
-
-  #urgentOwnerForResponse(sessionEpoch: number, responseId: string): UrgentHostResponseOwner | null {
-    const owner = this.#urgentHostResponseOwner
-    if (owner?.session_epoch !== sessionEpoch || owner.response_id !== responseId) return null
-    return owner
-  }
-
-  #urgentOwnerForGeneration(
-    utteranceId: string,
-    generationEpoch: number,
-  ): UrgentHostResponseOwner | null {
-    const generation = this.#urgentHostResponseOwner?.generation
-    if (
-      generation?.utterance_id !== utteranceId
-      || generation.generation_epoch !== generationEpoch
-    ) {
-      return null
-    }
-    return this.#urgentHostResponseOwner
-  }
-
-  /** Release this exact owner. The token is what stops a stale caller releasing its replacement. */
-  #releaseUrgentHostResponse(owner: UrgentHostResponseOwner | null): void {
-    const current = this.#urgentHostResponseOwner
-    if (
-      owner !== null
-      && current !== null
-      && current.delivery_token === owner.delivery_token
-    ) {
-      this.#urgentHostResponseOwner = null
-    }
-  }
-
-  #releaseUrgentHostResponseForEpoch(sessionEpoch: number): void {
-    if (this.#urgentHostResponseOwner?.session_epoch === sessionEpoch) {
-      this.#urgentHostResponseOwner = null
-    }
-  }
-
   deliveryState(): DeliverySnapshot {
-    const alert = this.#preemptiveAlert
-    return {
-      sessionEpoch: this.session.sessionEpoch,
-      floor: this.session.floor.state,
-      providerIdle: this.session.providerIdle,
-      foregroundIdle: this.session.foregroundIdle,
-      rendererPaused: this.#rendererHostDeliveryPaused,
-      activeResponseId: this.session.activeProviderResponseId,
-      userResponseMode: this.session.userResponseMode,
-      urgentOwner: this.#urgentHostResponseOwner === null ? null : {
-        session_epoch: this.#urgentHostResponseOwner.session_epoch,
-        event_id: this.#urgentHostResponseOwner.event_id,
-        response_id: this.#urgentHostResponseOwner.response_id,
-        delivery_token: this.#urgentHostResponseOwner.delivery_token,
-      },
-      queuedEventIds: this.queuedHostItems().map(queued => queued.intent.item.event_id),
-      armedPreemptPriority: this.#pendingPreemptPriority,
-      preemptiveAlert: alert === null ? null : {...alert,
-        old_generation: alert.old_generation === null ? null : {...alert.old_generation}},
-      epochNeedingActivation: this.#providerEpochNeedingActivation,
-      acknowledgementPhases: Object.fromEntries([...this.#semanticAcknowledgements.entries()]
-        .map(([eventId, acknowledgement]) => [eventId, acknowledgement.phase])),
-      continuationOrder: [...this.#continuationFifo],
-    }
-  }
-
-  /** Read-only views the tests and the desktop layer use. */
-  get pendingHostItemCount(): number {
-    return this.#hostItems.length
-  }
-
-  get armedPreemptPriority(): number | null {
-    return this.#pendingPreemptPriority
-  }
-
-  /** The queued items in delivery order, for assertions. A copy: the heap is not the caller's. */
-  queuedHostItems(): readonly QueuedHostResponse[] {
-    return [...this.#hostItems].sort(compareQueuedHostResponses)
-  }
-
-  /**
-   * Take the next item the queue would deliver, without delivering it.
-   *
-   * The ordering is a contract the oracle pins, and the delivery path around it is not ported yet, so
-   * the two have to be separable: this is how the ordering is exercised on its own. It keeps the
-   * armed-preempt bookkeeping in step, which is the part a caller would otherwise get wrong.
-   */
-  takeNextQueuedHostItem(): QueuedHostResponse | undefined {
-    const queued = heapPop(this.#hostItems)
-    if (queued?.preemptive === true) this.#recomputePreemptPriority()
-    return queued
+    return {...this.#host.snapshot(), continuationOrder: this.#continuations.continuationOrder()}
   }
 
   /**
    * Drive the uncertain-delivery recovery directly.
    *
-   * The path that normally reaches it runs inside the provider loop, which needs the unported event
-   * pipeline. Exposed so the recovery policy -- one retry per item, never for a recovery item -- can be
-   * tested on its own rather than waiting for the pipeline that would reach it.
+   * Exposed to test the bounded recovery policy independently of provider receive timing.
    */
   reportUncertainDeliveryForTest(failure: ItemDeliveryUncertainError): Promise<void> {
     return this.#recoverUncertainDelivery(failure)
@@ -6701,74 +1666,9 @@ export class RealtimeService {
     })
   }
 
-  /** Stand in for preemptive-alert delivery that would normally create an urgent owner. */
-  seedUrgentOwnerForTest(input: {
-    readonly sessionEpoch: number
-    readonly eventId: string
-    readonly responseId: string | null
-  }): void {
-    this.#urgentDeliveryToken += 1
-    this.#urgentHostResponseOwner = {
-      delivery_token: this.#urgentDeliveryToken,
-      session_epoch: input.sessionEpoch,
-      event_id: input.eventId,
-      queued: {
-        sortKey: [-90, -1, 0],
-        intent: hostFactIntent({
-          kind: 'final',
-          host_item_id: 'urgent-host-1',
-          event_id: input.eventId,
-          content: 'urgent',
-        }),
-        priority: 90,
-        preemptive: true,
-        preemptive_alert: false,
-        seq: 0,
-        queued_at: 0,
-        semantic_event_id: null,
-        preemptive_alert_activation: null,
-        owner: null,
-        expires_at: null,
-      },
-      response_id: input.responseId,
-      generation: null,
-    }
-  }
-
-  get urgentOwnerForTest(): UrgentHostResponseOwner | null {
-    return this.#urgentHostResponseOwner
-  }
-
-  /** Each tracked tool call's final disposition, in admission order. */
-  get toolCallDispositionsForTest(): readonly (string | null)[] {
-    return [...this.#toolCalls.values()].map(state => state.final_disposition)
-  }
-
-  /** Which responses a confirmation has blocked. The block outliving its turn is the failure mode. */
-  get confirmationResponsesForTest(): readonly string[] {
-    return this.#projectConfirmationIsolation.blockedResponses
-      .map(response => callKey(response.sessionEpoch, response.responseId))
-  }
-
-  /** Items reserved as the answer to a proposal. One left here blocks every later turn. */
-  get confirmationItemsForTest(): readonly string[] {
-    const reserved = this.#projectConfirmationIsolation.reservation
-    return reserved === null ? [] : [callKey(reserved.sessionEpoch, reserved.itemId)]
-  }
-
-  /** Items mid-close. One left here after an expiry would block every later turn. */
-  get confirmationClosingItemsForTest(): readonly string[] {
-    return [...this.#projectConfirmationClosingItems]
-  }
-
   /** Drive invalidation directly, for the observer-failure case. */
   invalidateProjectConfirmationForTest(reason: string): void {
-    this.#invalidateProjectConfirmation(reason)
-  }
-
-  /** Whether a confirmation is currently refusing tool calls. Invisible from outside otherwise. */
-  get projectConfirmationBlockingForTest(): boolean {
-    return this.#projectConfirmationIsBlocking()
+    this.#confirmation.invalidateProjectConfirmation(reason)
   }
 
   /** Which response holds which user turn, in binding order. */
@@ -6791,7 +1691,7 @@ export class RealtimeService {
     return this.#providerSchemas
   }
 
-  /** Wiring the unported families will need; exposed now so their absence is visible, not implied. */
+  /** Read-only compatibility configuration view. */
   get preemptiveAlertConfiguration(): {
     readonly controlledReconnect: boolean
     readonly historyRecovery: PreemptiveAlertHistoryRecovery
@@ -6813,13 +1713,7 @@ export class RealtimeService {
     return this.preemptiveAlertConfiguration
   }
 
-  /**
-   * State the unported families own, reachable without re-threading the constructor.
-   *
-   * Exposed deliberately rather than left private-and-unused: these are the seams families L, I, and
-   * the event pipeline attach to, and naming them here is what makes the shape of what is missing
-   * legible instead of implied.
-   */
+  /** Existing test compatibility views; production owners communicate through semantic methods. */
   get internals(): {
     readonly reconnectLock: Mutex
     readonly requeueHostItem: (queued: QueuedHostResponse) => void
@@ -6843,25 +1737,23 @@ export class RealtimeService {
     return {
       reconnectLock: this.#reconnectLock,
       requeueHostItem: (queued: QueuedHostResponse) => {
-        this.#requeueHostItem(queued)
+        this.#host.requeueHostItem(queued)
       },
       nextUrgentDeliveryToken: () => {
-        this.#urgentDeliveryToken += 1
-        return this.#urgentDeliveryToken
+        return this.#host.nextUrgentDeliveryToken()
       },
       nextPreemptiveAlertToken: () => {
-        this.#preemptiveAlertToken += 1
-        return this.#preemptiveAlertToken
+        return this.#host.nextPreemptiveAlertToken()
       },
       bridge: this.#bridge,
       tools: this.#tools,
       runtime: this.#runtime,
       idFactory: this.#idFactory,
-      toolCalls: this.#toolCalls,
-      overflowToolCalls: this.#overflowToolCalls,
-      continuationBatches: this.#continuationBatches,
-      continuationFifo: this.#continuationFifo,
-      semanticAcknowledgements: this.#semanticAcknowledgements,
+      toolCalls: this.#continuations.callsForTest(),
+      overflowToolCalls: this.#continuations.overflowCallsForTest(),
+      continuationBatches: this.#continuations.batchesForTest(),
+      continuationFifo: this.#continuations.continuationOrderForTest(),
+      semanticAcknowledgements: this.#host.acknowledgementsForTest(),
       audioStarted: this.#audioStarted,
       onProviderTerminal: this.#onProviderTerminal,
       onExecutorState: this.#onExecutorState,
@@ -6869,139 +1761,9 @@ export class RealtimeService {
         this.#clearCaptions()
       },
       setExecutorState: (state: ExecutorState) => {
-        this.#executorState = state
-        this.#onExecutorState(state)
+        this.#projection.setExecutorStateForTest(state)
       },
     }
-  }
-}
-
-/**
- * A binary min-heap, matching the oracle's `heapq` sift order exactly.
- *
- * Not a sorted array: `heapq` is not a stable sort, and two items comparing equal can come out in an
- * order a sort would not produce. The comparison keys here are unique by construction (the sequence
- * number is the last field), so the orders coincide -- but implementing the same structure means that
- * remains true if a future key stops being unique.
- */
-function heapPush<T>(heap: T[], item: T): void {
-  heap.push(item)
-  let index = heap.length - 1
-  while (index > 0) {
-    const parent = (index - 1) >> 1
-    if (compareHeap(heap[index]!, heap[parent]!) >= 0) break
-    ;[heap[index], heap[parent]] = [heap[parent]!, heap[index]!]
-    index = parent
-  }
-}
-
-function heapPop<T>(heap: T[]): T | undefined {
-  const top = heap[0]
-  const last = heap.pop()
-  if (heap.length === 0 || last === undefined) return top
-  heap[0] = last
-  let index = 0
-  for (;;) {
-    const left = index * 2 + 1
-    const right = left + 1
-    let smallest = index
-    if (left < heap.length && compareHeap(heap[left]!, heap[smallest]!) < 0) smallest = left
-    if (right < heap.length && compareHeap(heap[right]!, heap[smallest]!) < 0) smallest = right
-    if (smallest === index) break
-    ;[heap[index], heap[smallest]] = [heap[smallest]!, heap[index]!]
-    index = smallest
-  }
-  return top
-}
-
-function compareHeap(left: unknown, right: unknown): number {
-  return compareQueuedHostResponses(left as QueuedHostResponse, right as QueuedHostResponse)
-}
-
-/**
- * A mutual exclusion lock with FIFO ordering.
- *
- * FIFO rather than whoever-wins, because the delivery lock decides the order host facts reach the
- * provider: a waiter that jumped the queue would reorder what the user hears.
- */
-class Mutex {
-  #locked = false
-  readonly #waiting: (() => void)[] = []
-
-  async run<T>(body: () => Promise<T>): Promise<T> {
-    await this.#acquire()
-    try {
-      return await body()
-    } finally {
-      this.#release()
-    }
-  }
-
-  get locked(): boolean {
-    return this.#locked
-  }
-
-  async #acquire(): Promise<void> {
-    if (!this.#locked) {
-      this.#locked = true
-      return
-    }
-    await new Promise<void>(resolve => {
-      this.#waiting.push(resolve)
-    })
-  }
-
-  #release(): void {
-    const next = this.#waiting.shift()
-    if (next === undefined) {
-      this.#locked = false
-      return
-    }
-    // Handed straight to the next waiter rather than unlocked and re-acquired, so nothing that
-    // arrives in between can take the lock ahead of someone already waiting.
-    next()
-  }
-}
-
-/** A latch that stays set until cleared, matching `asyncio.Event`. */
-class Signal {
-  #set = false
-  readonly #waiting: (() => void)[] = []
-
-  set(): void {
-    this.#set = true
-    const waiting = this.#waiting.splice(0, this.#waiting.length)
-    for (const resolve of waiting) resolve()
-  }
-
-  clear(): void {
-    this.#set = false
-  }
-
-  async wait(signal?: AbortSignal): Promise<void> {
-    if (this.#set) return
-    if (signal?.aborted === true) return
-    await new Promise<void>(resolve => {
-      let settled = false
-      const finish = (): void => {
-        if (settled) return
-        settled = true
-        signal?.removeEventListener('abort', onAbort)
-        resolve()
-      }
-      const onAbort = (): void => {
-        const index = this.#waiting.indexOf(finish)
-        if (index >= 0) this.#waiting.splice(index, 1)
-        finish()
-      }
-      this.#waiting.push(finish)
-      // Resolves rather than rejects: an interrupted wait is a normal shutdown, and the caller
-      // re-reads the signal immediately afterwards.
-      signal?.addEventListener('abort', onAbort, {once: true})
-      // Abort may win between the early check and listener registration. EventTarget does not replay
-      // an already-fired abort event, so close that race explicitly.
-      if (signal?.aborted === true) onAbort()
-    })
   }
 }
 
@@ -7056,20 +1818,6 @@ function noop(): void {
   // Intentionally empty: an absent observer is not an error.
 }
 
-function projectCommitSuccessText(
-  operation: ConfirmedProjectOperation,
-  code: string,
-): string {
-  if (code !== 'committed') return '已确认，已提交并正在启动。'
-  if (operation.action === 'create') {
-    return `已确认，已创建并切换到工作区 ${operation.workspace_display_name}。`
-  }
-  if (operation.action === 'select') {
-    return `已确认，已切换到工作区 ${operation.workspace_display_name}。`
-  }
-  return '已确认，项目操作已完成。'
-}
-
 /** Wrap whatever was thrown so it can be re-thrown as an Error without losing the original. */
 function asError(cause: unknown): Error {
   if (cause instanceof Error) return cause
@@ -7078,46 +1826,9 @@ function asError(cause: unknown): Error {
   return wrapped
 }
 
-/**
- * Seconds as the oracle's `f"{value:.0f}"` renders them.
- *
- * Python rounds half to even and JavaScript's `toFixed` rounds half away from zero, so 0.5 renders as
- * "0" there and "1" here. Reproduced explicitly because this string is spoken to the user.
- */
-export function formatSeconds(value: number): string {
-  const floor = Math.floor(value)
-  const remainder = value - floor
-  if (remainder > 0.5) return `${floor + 1}`
-  if (remainder < 0.5) return `${floor}`
-  return `${floor % 2 === 0 ? floor : floor + 1}`
-}
-
-/** Whether this rejection is an abort, which is an ordinary cancellation rather than a failure. */
-function isAbort(cause: unknown): boolean {
-  return cause instanceof Error && (cause.name === 'AbortError' || cause.name === 'TimeoutError')
-}
-
-function diagnosticName(cause: unknown): string {
-  return cause instanceof Error ? cause.constructor.name : typeof cause
-}
-
 function randomHex(): string {
   // 32 hex characters, matching the oracle's `uuid4().hex`.
   return randomUUID().replaceAll('-', '')
 }
 
-/** Stable within one proposal transition, distinct across proposal lifecycles. */
-function projectConfirmationEventId(
-  namespace: 'project-confirmation' | 'project-confirmation-retry',
-  lifecycleId: string,
-  transition: string,
-): string {
-  const digest = createHash('sha256')
-    .update(lifecycleId)
-    .update('\0')
-    .update(transition)
-    .digest('hex')
-  return `${namespace}:${digest}`
-}
-
-export type { HostContextItem, PlaybackCompletion }
+export type { HostContextItem,PlaybackCompletion }

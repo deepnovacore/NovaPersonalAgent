@@ -1,17 +1,19 @@
-import type {JsonValue} from '../../events.js'
+import type {JsonValue} from '../../core/events.js'
+import {z} from 'zod'
+import {RealClock, raceDeadline, type Clock} from '../../core/clock.js'
+import {GatewayError} from '../../model/model-gateway.js'
 import {assessSchema, planSchema, type IntakeKind, type IntakeModels, type IntakeSlots} from './intake-model.js'
-import type {ConfirmedProjectOperation, ProjectProposal} from '../../project-confirmation.js'
+import type {ConfirmedProjectOperation, ProjectProposal} from '../../projects/project-confirmation.js'
 import {renderWorkOrder, type WorkOrder} from './work-order.js'
 import {
   ProjectResolutionError,
-  type CancelResult,
   type CoordinatorDecision,
   type IntakeTarget,
   type RosterEntry,
   type RunningWork,
-} from '../../coding-executor.js'
-import {collapsePythonWhitespace, stripLikePython} from '../../python-text.js'
-import {deriveSessionTitle} from '../../work-tools.js'
+} from '../coding-executor.js'
+import {collapsePythonWhitespace, stripLikePython} from '../../text/python-text.js'
+import {deriveSessionTitle} from '../../core/work-tools.js'
 
 export type {IntakeTarget}
 export interface IntakeSettings {
@@ -32,7 +34,7 @@ export interface IntakeSession {
   workspace: string | null
   session_id: string
   origin_ref: string
-  state: 'open' | 'clarifying' | 'ready_to_plan' | 'planning' | 'readback' | 'committing' | 'closed'
+  state: 'open' | 'clarifying' | 'ready_to_plan' | 'planning' | 'readback' | 'committing' | 'failed' | 'dispatch_unknown' | 'closed'
   /** `routed`: steer / cancel / resolution error went straight to the adapter, no plan cycle. */
   outcome: 'dispatched' | 'admission_refused' | 'cancelled' | 'abandoned' | 'routed' | null
   delegate_id: string | null
@@ -46,7 +48,6 @@ export interface IntakeSession {
   stop_asking: boolean
   pending_question: string | null
   missing_goal_grace: number | null
-  malformed: number
   kind: IntakeKind | null
   decision: CoordinatorDecision | null
   target: IntakeTarget | null
@@ -56,6 +57,8 @@ export interface IntakeSession {
 }
 
 export interface IntakeOptions {
+  readonly clock?: Clock
+  readonly onStateChanged?: () => void
   readonly models: IntakeModels
   readonly settings: IntakeSettings
   readonly idFactory: () => string
@@ -67,10 +70,8 @@ export interface IntakeOptions {
   readonly prepare: (session: Readonly<IntakeSession>) => ProjectProposal
   readonly dispatch: (session: Readonly<IntakeSession>, stillWanted?: () => boolean) => IntakeAdmission | Promise<IntakeAdmission>
   readonly steer: (session: Readonly<IntakeSession>, project: string | null, instruction: string, stillWanted?: () => boolean) => IntakeAdmission | Promise<IntakeAdmission>
-  /** `stillWanted` is re-checked by the adapter after its model call, before any work is aborted. */
-  readonly cancel: (instruction: string, stillWanted: () => boolean) => Promise<CancelResult>
   readonly invalidateProposal: () => void
-  readonly fact: (session: Readonly<IntakeSession>, text: string) => void
+  readonly fact: (session: Readonly<IntakeSession>, text: string, kind?: 'accepted') => void
   readonly record: (session: Readonly<IntakeSession>, kind: string, data: Readonly<Record<string, JsonValue>>) => void
   readonly diagnostic: (code: string) => void
   /** Host-only retrieval; model output never supplies evidence or resolvable locators. */
@@ -79,8 +80,8 @@ export interface IntakeOptions {
 
 /** Events and confirmed-host results only; lifecycle decisions stay with the coding controller. */
 export type IntakeEventPort = Pick<IntakeController,
-  'userInputStarted' | 'userTurn' | 'cancel' | 'decline' | 'beginConfirmed' | 'settleConfirmed' |
-  'workspaceChanged' | 'factEligible'>
+  'userInputStarted' | 'userInputEnded' | 'userResponseCompleted' | 'cancel' | 'decline' | 'beginConfirmed' | 'settleConfirmed' |
+  'workspaceChanged' | 'factEligible' | 'preparing'>
 
 const emptySlots = (): IntakeSlots => ({
   goal: {state: 'missing', note: ''}, scope: {state: 'missing', note: ''},
@@ -88,10 +89,23 @@ const emptySlots = (): IntakeSlots => ({
 })
 const limit = (value: string, count: number): string => [...value].slice(0, count).join('')
 const MAX_ROSTER = 10
+type IntakeStage = 'assess' | 'plan' | 'resolve' | 'prepare' | 'evidence' | 'dispatch' | 'steer'
 
-/** This recognizes non-content turns only. It never grants execution authority. */
-export function isPurePlanDecision(text: string): boolean {
-  return /^(确认|可以|做吧|好|好的|同意|不同意|不行|取消|不用了|算了|yes|ok|okay|confirm|no|cancel)[。！!,.，\s]*$/iu.test(text.trim())
+/** Only fixed classifications enter memory or speech; never provider bodies or error messages. */
+function failureReason(error: unknown): string {
+  if (error instanceof GatewayError) {
+    if (['HTTPStatus401', 'HTTPStatus403'].includes(error.classification)) return 'authentication'
+    if (error.classification === 'HTTPStatus429') return 'rate_limit'
+    if (/^HTTPStatus5\d\d$/u.test(error.classification)) return 'server_error'
+    if (error.classification === 'TimeoutError') return 'timeout'
+    if (error.classification === 'TransportError') return 'transport'
+    if (error.classification === 'InvalidResponse') return 'invalid_output'
+    return 'provider_rejected'
+  }
+  if (error instanceof SyntaxError || error instanceof z.ZodError
+    || (error instanceof TypeError && error.message === 'intake_output_too_large')) return 'invalid_output'
+  if (error instanceof Error && error.name === 'TimeoutError') return 'timeout'
+  return 'internal_error'
 }
 
 /**
@@ -118,6 +132,7 @@ export function renderResolutionError(error: ProjectResolutionError): string {
       ? `${text(item.project)}/${text(item.title)}`
       : text(item)).join('、')
     : ''
+  if (error.code === 'unknown_session') return `code=unknown_session：没有找到“${text(detail.title)}”这个可继续的会话，请明确项目和会话名称。任务尚未执行。`
   if (error.code === 'unknown_project') {
     const suggestions = list(detail.suggestions)
     return `code=unknown_project：没有叫“${text(detail.project)}”的项目${suggestions === '' ? '' : `，相近的有：${suggestions}`}。可以请用户确认项目名，或明确要求新建。任务尚未执行。`
@@ -131,15 +146,10 @@ export function renderResolutionError(error: ProjectResolutionError): string {
   return `code=capacity：同时运行的任务已达上限，正在跑：${list(detail.running)}。可以先取消一个。新任务尚未执行。`
 }
 
-export function renderCancelResult(result: CancelResult): string {
-  if (result.code === 'cancelled') return `code=cancelled：已请求停止“${result.work.project}/${result.work.title}”，稍后有终态事实。`
-  if (result.code === 'not_running') return 'code=not_running：当前没有正在执行的任务。'
-  return `code=ambiguous_work：有多个任务在跑：${result.running.map(work => `${work.project}/${work.title}`).join('、')}。请用户说明要停哪一个。`
-}
-
 /** Two controller-owned single-flight slots; latest revision replaces pending work, never active work. */
 export class IntakeController {
   readonly #options: IntakeOptions
+  readonly #clock: Clock
   #session: IntakeSession | null = null
   #assessing: Promise<void> | null = null
   #planning: Promise<void> | null = null
@@ -148,11 +158,29 @@ export class IntakeController {
   #userInputPending = false
   #workspaceId: string | null | undefined = undefined
   readonly #abort = new Set<AbortController>()
+  readonly #modelBudgets = new Map<string, {attempts: number; deadline: number}>()
 
-  constructor(options: IntakeOptions) { this.#options = options }
+  constructor(options: IntakeOptions) { this.#options = options; this.#clock = options.clock ?? new RealClock() }
   get view(): Readonly<IntakeSession> | null { return this.#session === null ? null : structuredClone(this.#session) }
   get active(): boolean { return this.#session !== null && this.#session.state !== 'closed' }
+  get preparing(): boolean {
+    return this.active && !['failed', 'dispatch_unknown'].includes(this.#session!.state)
+      && (this.#assessPending || this.#planPending || this.#assessing !== null
+      || this.#planning !== null || this.#session?.state === 'committing')
+  }
   userInputStarted(): void { if (this.active) this.#userInputPending = true }
+  userInputEnded(): void {
+    // A transcript is context, not an amendment decision. Hold old async work until dispatch.
+    if (!this.active || this.#session?.proposal_id !== null) this.#userInputPending = false
+  }
+
+  userResponseCompleted(): void {
+    if (!this.#userInputPending || !this.active || this.#session?.proposal_id !== null) return
+    this.#userInputPending = false
+    if (['failed', 'dispatch_unknown', 'committing'].includes(this.#session.state)) return
+    this.#assessPending = true
+    this.#pump()
+  }
 
   workspaceChanged(workspaceId: string | null): void {
     if (this.#workspaceId !== undefined && this.#workspaceId !== workspaceId
@@ -164,15 +192,17 @@ export class IntakeController {
     return intake?.session_id === String(sessionEpoch)
       && eventId.startsWith(`intake:${intake.intake_id}:${intake.revision}:`)
       && intake.outcome !== 'cancelled'
+      && (!eventId.endsWith(':accepted') || (this.preparing && !this.#userInputPending))
   }
 
   open(request: Readonly<Record<string, JsonValue>>, text: string, originRef: string, sessionId: string): 'intake_opened' | 'intake_in_progress' {
+    this.#userInputPending = false
     if (this.active && this.#session!.session_id !== sessionId) this.cancel()
     if (this.active) {
       const current = this.#session!
-      if (current.state === 'committing') return 'intake_in_progress'
+      if (current.state === 'committing' || current.state === 'dispatch_unknown') return 'intake_in_progress'
       // A provider repeats the draft for an already-ingested answer: one content revision per turn.
-      if (current.origin_ref !== originRef) this.userTurn(text, originRef, sessionId)
+      if (current.origin_ref !== originRef) this.#revise(text, originRef, sessionId)
       return 'intake_in_progress'
     }
     this.#session = {
@@ -181,25 +211,25 @@ export class IntakeController {
       origin_ref: originRef, state: 'open', outcome: null, delegate_id: null,
       request: structuredClone(request), opening: limit(text, 4000), turns: [], slots: emptySlots(), discovery: [],
       questions_asked: 0, intent_to_proceed: false, stop_asking: false, pending_question: null,
-      missing_goal_grace: null, malformed: 0, kind: null, decision: null, target: null, work_order: null, title: null,
+      missing_goal_grace: null, kind: null, decision: null, target: null, work_order: null, title: null,
     }
     this.#assessPending = true
     this.#pump()
+    this.#options.fact(this.#session, '让我先梳理一下计划。', 'accepted')
     return 'intake_opened'
   }
 
-  userTurn(text: string, originRef: string, sessionId: string): void {
-    this.#userInputPending = false
+  #revise(text: string, originRef: string, sessionId: string): void {
     const current = this.#session
     if (current === null || !this.active) return
     if (current.session_id !== sessionId) { this.cancel(); return }
-    if (current.state === 'committing' || current.origin_ref === originRef) return
+    if (current.origin_ref === originRef) return
     if (stripLikePython(text) === '') { this.cancel(); return }
-    if (current.proposal_id !== null && isPurePlanDecision(text)) return
-    if (/^(取消|不用了|算了|cancel)[。！!.，\s]*$/iu.test(text.trim())) { this.cancel(); return }
     current.turns.push({question: current.pending_question, answer: limit(text, 2000)})
     if (current.turns.length > 8) { this.#close('abandoned'); return }
+    this.#modelBudgets.clear()
     current.revision += 1
+    for (const abort of this.#abort) abort.abort()
     current.origin_ref = originRef
     current.plan_revision = null
     current.work_order = null
@@ -222,11 +252,14 @@ export class IntakeController {
       || current.plan_revision !== current.revision || operation.intake_id !== current.intake_id
       || operation.plan_revision !== current.plan_revision || operation.work_order !== current.work_order) return false
     current.state = 'committing'
+    this.#options.onStateChanged?.()
     return true
   }
 
   settleConfirmed(result: IntakeAdmission): void {
-    if (this.#session?.state === 'committing') this.#settle(result)
+    if (this.#session?.state !== 'committing') return
+    if (result.code === 'callback_failed') this.#failure(this.#session, 'dispatch', new Error('commit receipt unavailable'))
+    else this.#settle(result)
   }
 
   decline(proposalId: string): void {
@@ -251,10 +284,18 @@ export class IntakeController {
     return current
   }
 
+  #userEvidence(current: IntakeSession): string[] {
+    const quotes = current.request.source_quotes
+    return [...(Array.isArray(quotes) ? quotes.filter((quote): quote is string => typeof quote === 'string') : []),
+      current.opening, ...current.turns.map(turn => turn.answer)]
+  }
+
   #input(current: IntakeSession): Readonly<Record<string, unknown>> {
     return {
       intake_id: current.intake_id, revision: current.revision, opening: current.opening,
       instruction: current.request.work_order ?? current.request.instruction ?? null,
+      conversation_context: current.request.conversation_context ?? [],
+      source_quotes: current.request.source_quotes ?? [],
       turns: structuredClone(current.turns), slots: structuredClone(current.slots),
       discovery: [...current.discovery], intent_to_proceed: current.intent_to_proceed,
       questions_asked: current.questions_asked, question_budget: this.#budget(),
@@ -264,7 +305,8 @@ export class IntakeController {
   }
 
   #pump(): void {
-    if (!this.active) return
+    this.#options.onStateChanged?.()
+    if (!this.active || this.#userInputPending || ['failed', 'dispatch_unknown'].includes(this.#session!.state)) return
     if (this.#assessPending && this.#assessing === null) {
       this.#assessPending = false
       const snapshot = structuredClone(this.#session!)
@@ -281,19 +323,19 @@ export class IntakeController {
   async #assess(snapshot: IntakeSession): Promise<void> {
     const abort = new AbortController()
     this.#abort.add(abort)
+    let stage: IntakeStage = 'assess'
     try {
-      const raw = await this.#options.models.assess(this.#input(snapshot), AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]))
+      const input = this.#input(snapshot)
+      const result = await this.#model(snapshot, 'assess', assessSchema, input, abort)
+      if (result === null) return
       let current = this.#current(snapshot.intake_id, snapshot.revision)
       if (current === null) return
-      const parsed = assessSchema.safeParse(raw)
-      if (!parsed.success) { this.#malformed(current); return }
-      const result = parsed.data
+      const sessionTitle = result.session.mode === 'named' ? result.session.title : null
       if (result.intake_id !== snapshot.intake_id || result.revision !== snapshot.revision) {
         this.#options.diagnostic('intake_stale_result'); return
       }
-      current.malformed = 0
       if (result.abandon) { this.cancel(); return }
-      this.#options.record(current, 'intake.assess', result)
+      this.#options.record(current, 'intake.assess', {...result, input_active_project: input.active_project as string | null})
       current.slots = result.slots
       current.intent_to_proceed = result.intent_to_proceed || result.early_exit
       current.discovery = [...new Set([...current.discovery, ...result.discovery,
@@ -302,59 +344,57 @@ export class IntakeController {
       let question = result.candidate_question?.owner === 'user' ? result.candidate_question.text : null
       const active = this.#options.activeProject()
       const project = result.project ?? (kind === 'create' ? null : active)
-      // Wrong-project protection: a non-active selection must be quoted from the utterance, never inferred.
-      // The one host-authored exception is our own `是在 X 里做吗？` once the user has just affirmed it (an alias
-      // like 博客→blog never contains the roster name, a bare 对 cannot, and `blog` next to `blog-v2` would
-      // never pass the exactly-one check; without this the question loops).
+      // A selected project needs quoted user evidence. For a host question, the assessor
+      // selects the project and quotes the affirmative answer; the host checks that provenance.
       const latest = current.turns.at(-1)
       const affirmed = latest?.question === `是在 ${project} 里做吗？`
-        && /^(是|对|嗯|好|可以|是的|对的|没错|yes|ok|okay)[。！!,.，\s]*$/iu.test(latest.answer.trim())
+        && result.project_evidence != null && latest.answer.includes(result.project_evidence)
       if (kind !== 'create' && kind !== 'unclear' && project !== null && project !== active && !affirmed
         && !evidenceOccurs(result.project_evidence ?? '', project,
-          [current.opening, ...current.turns.map(turn => turn.answer)], this.#options.roster().map(entry => entry.name))) {
+          this.#userEvidence(current), this.#options.roster().map(entry => entry.name))
+          && !this.#namedSessionEvidence(project, sessionTitle, current)) {
         this.#options.diagnostic('intake_project_evidence_missing')
         kind = 'unclear'
         question = `是在 ${project} 里做吗？`
+      }
+      if (sessionTitle && project !== null && !this.#namedSessionEvidence(project, sessionTitle, current)) {
+        kind = 'unclear'
+        question = '请明确要继续的项目和会话名称。'
       }
       current.kind = kind
       if (kind === 'unclear' || (kind === 'create' && project === null)) {
         this.#ask(current, kind === 'create' ? '新项目叫什么名字？' : question ?? '请说明要在哪个项目里做什么。')
         return
       }
-      if (!current.intent_to_proceed) {
-        current.state = 'clarifying'
-        this.#options.fact(current, '需求已记录，等待用户明确要求开始；不要继续追问或声称已执行。')
-        return
-      }
       // Keep the user's request and later corrections together. A project affirmation is target
       // evidence, not a replacement instruction. The executor still enforces its input bound.
-      const userText = [current.opening, ...current.turns.map(turn => turn.question === null
+      const userText = [...(Array.isArray(current.request.source_quotes) ? current.request.source_quotes.filter((quote): quote is string => typeof quote === 'string') : []), current.opening, ...current.turns.map(turn => turn.question === null
         ? `用户补充：${turn.answer}`
         : `宿主追问：${turn.question}\n用户补充：${turn.answer}`)].join('\n')
       // Local onset precedes final ASR and does not advance the intake revision yet.
       if (this.#userInputPending) return
-      if (kind === 'cancel') {
-        const outcome = await this.#options.cancel(userText, () => !this.#userInputPending && this.#live(snapshot.intake_id, snapshot.revision) !== null)
-        current = this.#current(snapshot.intake_id, snapshot.revision)
-        if (current === null || this.#userInputPending) return
-        this.#options.record(current, 'intake.cancel', {code: outcome.code})
-        this.#route(current, renderCancelResult(outcome))
-        return
-      }
       if (kind === 'steer') {
-        const wanted = () => !this.#userInputPending && this.#current(snapshot.intake_id, snapshot.revision) === current
+        if (!this.#options.running().some(work => work.project === project)) {
+          this.#route(current, 'code=no_active_turn：目标工作区没有正在执行的任务，本次追加要求未执行。')
+          return
+        }
+        const wanted = this.#launchWanted(current)
+        stage = 'steer'
+        current.state = 'committing'
         const admission = await this.#options.steer(current, project, userText, wanted)
-        if (!wanted()) return
+        if (this.#current(snapshot.intake_id, snapshot.revision) !== current) return
         this.#options.record(current, 'intake.steer', {accepted: admission.accepted, delegate_id: admission.delegate_id ?? null})
         this.#route(current, admission.accepted
           ? 'code=steered：已把追加要求交给正在执行的任务，等待宿主进度。'
           : `code=steer_failed：追加要求未送达：${admission.problem ?? admission.code ?? 'runtime_rejected'}。`)
         return
       }
-      const decision: CoordinatorDecision = {kind: kind === 'switch' ? 'switch' : kind === 'create' ? 'create' : 'work', project, session: result.session}
+      const decision: CoordinatorDecision = {kind: kind === 'switch' ? 'switch' : kind === 'create' ? 'create' : 'work', project, session: result.session.mode === 'new' ? 'new' : 'latest', ...(sessionTitle ? {session_title: sessionTitle} : {})}
       let target: IntakeTarget
+      stage = 'resolve'
       try {
-        target = await this.#options.resolveTarget(decision)
+        target = await raceDeadline(this.#options.resolveTarget(decision), this.#clock, 30, abort.signal,
+          () => new DOMException('resolution deadline', 'TimeoutError'))
       } catch (error) {
         current = this.#current(snapshot.intake_id, snapshot.revision)
         if (current === null) return
@@ -373,6 +413,7 @@ export class IntakeController {
       current.stop_asking ||= result.early_exit || current.questions_asked >= this.#budget()
         || readiness >= (this.#options.settings.clarification_depth === 'thorough' ? 1 : .75)
       if (kind === 'switch' || (kind === 'create' && current.slots.goal.state === 'missing' && question === null)) {
+        stage = 'prepare'
         // No plan cycle, still confirmed: every change of the active project is confirmed by the user
         // before any side effect (decision 2026-09-04), and creating a workspace is irreversible.
         current.plan_revision = current.revision
@@ -398,20 +439,29 @@ export class IntakeController {
       }
       current.state = 'ready_to_plan'
       this.#planPending = true
-    } catch {
-      const current = this.#current(snapshot.intake_id, snapshot.revision)
-      if (current !== null) this.#malformed(current)
-    } finally { this.#abort.delete(abort) }
+    } catch (error) {
+      if (!abort.signal.aborted) this.#failure(snapshot, stage, error)
+    } finally { abort.abort(); this.#abort.delete(abort) }
+  }
+
+  #namedSessionEvidence(project: string, title: string | null | undefined, current: IntakeSession): boolean {
+    if (!title) return false
+    const roster = this.#options.roster()
+    const namedProject = this.#userEvidence(current).some(text => text.includes(project))
+    if (!namedProject && roster.filter(entry => entry.sessions?.includes(title)).length !== 1) return false
+    return roster.some(entry => entry.name === project && entry.sessions?.includes(title))
+      && this.#userEvidence(current).some(text => text.includes(title))
   }
 
   async #plan(snapshot: IntakeSession): Promise<void> {
     const abort = new AbortController()
     this.#abort.add(abort)
+    let stage: IntakeStage = 'plan'
     try {
-      const raw = await this.#options.models.plan(this.#input(snapshot), AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]))
+      const result = await this.#model(snapshot, 'plan', planSchema, this.#input(snapshot), abort)
+      if (result === null) return
       const current = this.#current(snapshot.intake_id, snapshot.revision)
       if (current === null) return
-      const result = planSchema.parse(raw)
       if (result.intake_id !== current.intake_id || result.revision !== current.revision) {
         this.#options.diagnostic('intake_stale_result'); return
       }
@@ -426,8 +476,10 @@ export class IntakeController {
         discovery: [...new Set([...current.discovery, ...result.work_order.discovery])].slice(0, 12),
         assumptions: [...new Set([...Object.values(slots).filter(slot => slot.state === 'inferred').map(slot => slot.note), ...result.work_order.assumptions])].slice(0, 12),
       }
+      stage = 'evidence'
       const evidence = this.#options.attachEvidence === undefined ? undefined
-        : await this.#options.attachEvidence(order, current.workspace, abort.signal)
+        : await raceDeadline(this.#options.attachEvidence(order, current.workspace, abort.signal), this.#clock, 30, abort.signal,
+          () => new DOMException('evidence deadline', 'TimeoutError'))
       if (this.#current(snapshot.intake_id, snapshot.revision) !== current || abort.signal.aborted) return
       current.work_order = renderWorkOrder({...order, ...evidence})
       current.title = deriveSessionTitle(order.objective)
@@ -440,18 +492,18 @@ export class IntakeController {
       // The readback line always names the project. A plan that changes the active project (create, or
       // work quoted into another project) is confirmed under every `plan_readback` (decision 2026-09-04).
       if (this.#options.settings.plan_readback === 'confirm' || project !== this.#options.activeProject()) {
+        stage = 'prepare'
         this.#propose(current, `计划（项目 ${project}）：${limit(order.objective, 200)}`)
         return
       }
-      if (this.#options.settings.plan_readback === 'summary') this.#options.fact(current, `计划（项目 ${project}）：${limit(order.objective, 240)}。只读回这一句，不再追问；等待宿主派单结果。`)
       current.state = 'committing'
-      const wanted = () => !this.#userInputPending && this.#current(snapshot.intake_id, snapshot.revision) === current
+      const wanted = this.#launchWanted(current)
+      stage = 'dispatch'
       const admission = await this.#options.dispatch(current, wanted)
-      if (wanted()) this.#settle(admission)
-    } catch {
-      const current = this.#current(snapshot.intake_id, snapshot.revision)
-      if (current !== null) this.#malformed(current)
-    } finally { this.#abort.delete(abort) }
+      if (this.#current(snapshot.intake_id, snapshot.revision) === current) this.#settle(admission)
+    } catch (error) {
+      if (!abort.signal.aborted) this.#failure(snapshot, stage, error)
+    } finally { abort.abort(); this.#abort.delete(abort) }
   }
 
   #ask(current: IntakeSession, question: string): void {
@@ -475,6 +527,15 @@ export class IntakeController {
     this.#options.fact(current, text)
   }
 
+  #launchWanted(current: IntakeSession): () => boolean {
+    const revision = current.revision
+    // Admission transfers ownership to the delegate. Completing intake does not cancel it.
+    return () => current.revision === revision && (
+      current.outcome === 'dispatched' || current.outcome === 'routed'
+      || (this.#session === current && current.state !== 'closed' && !this.#userInputPending)
+    )
+  }
+
   #settle(result: IntakeAdmission): void {
     const current = this.#session!
     current.delegate_id = result.delegate_id ?? null
@@ -487,21 +548,76 @@ export class IntakeController {
   }
 
   #budget(): number { return {minimal: 1, balanced: 3, thorough: 5}[this.#options.settings.clarification_depth] }
-  #malformed(current: IntakeSession): void {
-    current.malformed += 1
-    current.state = 'clarifying'
-    this.#options.diagnostic('intake_malformed_result')
-    if (current.malformed >= 2) this.#close('abandoned')
-    else this.#options.fact(current, '暂时未能整理这次需求，任务尚未执行，请补充或重试。')
+  /** Retry only pure model calls, never resolution, confirmation, steering or admission. */
+  async #model<T>(snapshot: IntakeSession, stage: 'assess' | 'plan', schema: z.ZodType<T>,
+    input: Readonly<Record<string, unknown>>, abort: AbortController): Promise<T | null> {
+    const key = `${snapshot.intake_id}:${snapshot.revision}:${stage}`
+    const budget = this.#modelBudgets.get(key) ?? {attempts: 0, deadline: this.#clock.now() + 30}
+    this.#modelBudgets.set(key, budget)
+    const deadline = budget.deadline
+    while (budget.attempts < 2) {
+      if (abort.signal.aborted || this.#live(snapshot.intake_id, snapshot.revision) === null || this.#userInputPending) return null
+      if (this.#clock.now() >= deadline) {
+        this.#failure(snapshot, stage, new DOMException('model deadline', 'TimeoutError'), budget.attempts)
+        return null
+      }
+      const attempt = ++budget.attempts
+      const timeout = new AbortController()
+      const signal = AbortSignal.any([abort.signal, timeout.signal])
+      try {
+        const raw = await raceDeadline(this.#options.models[stage](input, signal), this.#clock,
+          Math.max(0, deadline - this.#clock.now()), abort.signal,
+          () => { timeout.abort(); return new DOMException('model deadline', 'TimeoutError') })
+        if (this.#current(snapshot.intake_id, snapshot.revision) === null) return null
+        const result = schema.parse(raw)
+        this.#modelBudgets.delete(key)
+        return result
+      } catch (error) {
+        if (abort.signal.aborted || this.#live(snapshot.intake_id, snapshot.revision) === null) return null
+        const retrying = attempt < 2 && this.#clock.now() + 1 < deadline
+          && ['rate_limit', 'server_error', 'transport', 'timeout', 'invalid_output'].includes(failureReason(error))
+        this.#failure(snapshot, stage, error, attempt, retrying)
+        if (!retrying) return null
+        try { await this.#clock.sleep(1, abort.signal) } catch { return null }
+      } finally { timeout.abort() }
+    }
+    return null
+  }
+
+  #failure(snapshot: IntakeSession, stage: IntakeStage, error: unknown, attempt = 1, retrying = false): void {
+    const current = this.#live(snapshot.intake_id, snapshot.revision)
+    if (current === null) return
+    const reason = failureReason(error)
+    const unknown = stage === 'dispatch' || stage === 'steer'
+    if (!retrying) {
+      if (!unknown && current.proposal_id !== null) {
+        this.#options.invalidateProposal()
+        current.proposal_id = null
+      }
+      current.state = unknown ? 'dispatch_unknown' : 'failed'
+      this.#assessPending = false
+      this.#planPending = false
+    }
+    this.#options.record(current, 'intake.failure', {stage, reason, attempt, retrying})
+    this.#options.diagnostic(`intake_${stage}_${reason}`)
+    if (retrying) return
+    this.#options.onStateChanged?.()
+    this.#options.fact(current, unknown
+      ? '派单结果暂时无法确认，任务可能已开始。需要先核实执行状态，不要重复派单。'
+      : reason === 'authentication' || reason === 'provider_rejected'
+        ? '计划服务的连接或配置需要检查。原需求已保留，任务尚未执行，修复后可以继续。'
+        : '这次计划暂时未能生成，原需求已保留，任务尚未执行，可以稍后继续，无需重述需求。')
   }
   #close(outcome: NonNullable<IntakeSession['outcome']>): void {
     const current = this.#session!
+    this.#modelBudgets.clear()
     current.state = 'closed'
     current.outcome = outcome
     this.#assessPending = false
     this.#planPending = false
     for (const abort of this.#abort) abort.abort()
     if (current.proposal_id !== null && outcome !== 'dispatched') this.#options.invalidateProposal()
+    this.#options.onStateChanged?.()
     if (outcome === 'abandoned') this.#options.fact(current, '抱歉，仍未能形成明确工作单，本次需求已结束，尚未执行。请重新说明具体目标。')
   }
 }

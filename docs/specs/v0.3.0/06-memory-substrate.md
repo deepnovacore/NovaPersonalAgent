@@ -14,7 +14,7 @@
 [design-notes/2026-09-12-memory-references-comparison](../../design-notes/2026-09-12-memory-references-comparison.zh-CN.md)），
 得出三条结论：
 
-1. 现有三套记忆（会话黑板、VoiceMem 个人记忆、Workspace Graph）各自为真，03 卷要求的
+1. 现有三套记忆（会话黑板、VoiceMem 个人记忆、历史工作区存储）各自为真，03 卷要求的
    逐条 ID / 版本 / origin / 纠正传播在任何一套里都不完整。再按参考项目各加一层只会更散。
 2. 记忆层内部应按**数据变更方式**分阶段，而不是按参考项目或按"人 / 工作"分库。变更方式只有三种：
    只追加、受控修订、只读重算。
@@ -25,9 +25,9 @@
 
 - `runtime/src/memory.ts`：会话内运行时黑板（`Memory` / `Channel`，按 handoff 通道编号的 `MemoryItem`），
   `docs/archs/02-memory.md` 的 L0。**不进本卷底座**；它是当前会话事实，不是持续理解。
-- `runtime/src/workspace-graph/`：`models.ts` 已有 `EvidenceRefSchema`、`ObservationSchema`（只追加观测）、
+- 已有 SQLite 存储模块：`models.ts` 已有 `EvidenceRefSchema`、`ObservationSchema`（只追加观测）、
   `LogicalWorkspace` / `WorkspaceInstance` / `RelationCard`（带 revision 的派生卡片）、`RecallPack`；
-  `store.ts` + `store-worker.ts` 由 Worker 独占 SQLite；`projector.ts` 产出 `PublishedGraphSnapshot`；
+  `store.ts` + `store-worker.ts` 由 Worker 独占 SQLite；`projector.ts` 产出 不可变存储快照；
   `identity.ts` 做工作区别名归一（`candidate | confirmed | suppressed`，ASR 别名置信上限 0.25）；
   `sensitivity.ts` 有 `SensitivePathPolicy` 与字段级 `SensitiveContentPolicy`。这套已经是
   "账本 + 条目 + 视图"的雏形，对应 `docs/archs/02-memory.md` 的 L1–L4，本卷以它为底座的**第一个实现**。
@@ -96,7 +96,7 @@ A / B / C 是记忆层**内部的三个阶段**，不是三个部署单元：同
 - 保留期是连接器配置：IM 原文默认 30 天，邮件默认保留期随 M8-Mail 确定，本地目录与对话默认长期。
   到期只清 `raw_text`，`extracted`、`hash`、`locator` 保留，追溯降级为"能回到原处看"。
 - 敏感策略落在字段级：`raw_text`、`extracted` 内每个字符串字段、`locator` 各自过策略，
-  复用 `runtime/src/workspace-graph/sensitivity.ts` 的 `SensitiveContentPolicy`，不新写一套。
+  复用 `runtime/src/memory/sensitivity.ts` 的 `SensitiveContentPolicy`，不新写一套。
 - 模型对自己行为的叙述不能成为 `evidence_record`（§8）。
 
 ## 4. B 阶段契约：`entry_revision`
@@ -123,7 +123,7 @@ merge(current: FoldedEntry | null, candidate: Candidate, policy) -> NOOP | add |
 ```
 
 - `candidate` 来自入库抽取（§7）或用户纠正；带 `evidence_refs`、`origin`、`written_by`。
-- 不变量（吸收自 mycontext，已在 workspace-graph spec 的 Design rules 中）：
+- 不变量（吸收自 mycontext，已在 历史存储规格 的 Design rules 中）：
   数据库为真；`written_by = user_correction` 优先于任何 `merge`，且后者不能覆盖前者，
   除非新的用户纠正；agent 自身输出不作候选；同一 `hash` 已被用户忘记（03 卷抑制标记）则 NOOP；
   来源撤回级联：其 `evidence_refs` 全部悬空的条目自动写一条 `tombstone`，`written_by = merge`，
@@ -147,7 +147,7 @@ fold 规则：按 `entry_id` 取最大 `revision`；`op = tombstone` 则条目�
 | 记忆页 | 列表 / 分页 | 全部 active 条目 | 03 卷 `memory_entry` | 03 卷 |
 
 - 每次 fold 结果作为不可变快照发布；消费者只读最新快照，发布失败时继续用上一份并可见地标记降级
-  （沿用 `PublishedGraphSnapshot` 的做法）。
+  （沿用 不可变存储快照 的做法）。
 - **悬空 `evidence_refs`**：条目仍在当前态时，投影里该依据显示为"证据已删除（来源 X，时间 T）"，
   `locator` 不再展示；全部悬空的条目已由 §4 级联墓碑处理。
 - 视图层不写任何东西。记忆页的纠正 / 忘记走 `client.command`，主机把它写成
@@ -185,7 +185,7 @@ embedding 外发仍须显式同意，并绑定授权范围与 provider。没有�
 | `commitment` | 两视角交界 | `direction: owed_by_me \| owed_to_me`、`due`（可空）、`counterparty` → `entity_refs`、`status: open \| done \| dropped` | 对话、IM、邮件；抽取规则 §7 |
 | `entity` | 共享 | `entity_kind: person \| project \| workspace`、别名列表 | `identity.ts` 已做 workspace；person 归一待评审 |
 | `topic` | Work-centric | 标签 + 出现范围 | 授权目录（today.ai 式关键词，证据指向文件） |
-| Workspace Graph 的 `LogicalWorkspace` / `WorkspaceInstance` / `RelationCard` | Work-centric | 保持现有 schema | 现有 projector 改为经 merge 写修订 |
+| 历史工作区存储 的 `LogicalWorkspace` / `WorkspaceInstance` / `RelationCard` | Work-centric | 保持现有 schema | 现有 projector 改为经 merge 写修订 |
 
 Human-centric 与 Work-centric 是同一张修订表上的 kind，不是两个库。一条 `commitment` 的
 `counterparty` 与一条"重要关系"的 `fact` 指向同一个 `entity` 条目，这是"两个视角关联同一份事实"的物理含义。
@@ -202,7 +202,7 @@ Human-centric 与 Work-centric 是同一张修订表上的 kind，不是两个�
 
 - 抽取是有界的一次模型调用，输出经 zod 校验后才进 `extracted`；校验失败记录并跳过，不阻塞入账。
 - 抽取结果全部是 `origin = inferred`，除非来源本身是用户在对话中的明确表达（`user_confirmed`，
-  非 ASR 原始转写，沿用 workspace-graph spec 的 `user_transcript` vs `user_confirmed` 区分）。
+  非 ASR 原始转写，沿用 历史存储规格 的 `user_transcript` vs `user_confirmed` 区分）。
 - 筛选不调用工具、不新增条目，只是 02 卷 §2.2 快照的供给方；02 卷 Surrogate 的职责不变。
 - 同事架构图上的 "Discovery" 框只是后一半；前一半画进 Memory 框内（改图意见见对照记录）。
 
@@ -217,7 +217,7 @@ PR / commit 已创建（URL 或 SHA）、命令返回码与截断输出、`EXECU
 
 - 不生成叙事式人物画像作为主体（D3 不变）。
 - 不引入向量数据库或 mem0 作为依赖；mem0 的贡献只是 §4 的 merge 动作集合。
-- 不在 06 卷底座之外新建记忆存储；VoiceMem 与 Workspace Graph 改为写入方，不再各自为真。
+- 不在 06 卷底座之外新建记忆存储；VoiceMem 与 历史工作区存储 改为写入方，不再各自为真。
 - 不让 renderer、模型或语音热路径直接读写底座 SQLite。
 - 不另起 RAG 真相源或规格卷；复用现有知识索引，归入 §5.1。
 - 不做精确到点的提醒（02 卷不变）；`commitment.due` 只供筛选，不承诺时效。
@@ -230,7 +230,7 @@ PR / commit 已创建（URL 或 SHA）、命令返回码与截断输出、`EXECU
 | VoiceMem 改造成 B 写入方的路径 | sidecar 输出候选由主机 merge / 原生 TS 双脑直接替代 sidecar | 前者保住现有后端；后者依赖 09-05 设计落地 |
 | IM 与邮件原文默认保留期 | 30 天 / 90 天 / 用户配置无默认 | 越短越轻，重抽取窗口越小 |
 | person 实体归一 | 复用 `identity.ts` 的 candidate / confirmed / suppressed 机制 / 只按连接器给的稳定 ID，不做跨来源归一 | 前者能把飞书里的人和邮件里的人对上，误合并风险需 ASR 式置信上限 |
-| Workspace Graph 迁移时机 | 底座里程碑内一次迁 / 先并行写、后切换 | 前者干净，后者可分步验收 |
+| 历史工作区存储 迁移时机 | 底座里程碑内一次迁 / 先并行写、后切换 | 前者干净，后者可分步验收 |
 
 ## 11. 验收场景
 
@@ -259,4 +259,4 @@ PR / commit 已创建（URL 或 SHA）、命令返回码与截断输出、`EXECU
 
 ## 2026-09-12 实施约定
 
-Knowledge 作为 A 的派生索引，统一回忆属于 C 阶段。个人记忆和 Workspace Graph 共用现有 Worker/SQLite；旧 VoiceMem 数据只读迁入并保留原数据库。候选抽取复用现有模型 gateway，merge 是唯一修订入口。工作区旧表作为修订结果的物化视图保留。人按连接器稳定身份记录，不自动跨账号归一。当前范围与验收状态见 [本轮实现记录](MEMORY-AND-FEISHU-IMPLEMENTATION.md)。
+Knowledge 作为 A 的派生索引，统一回忆属于 C 阶段。个人记忆和 历史工作区存储 共用现有 Worker/SQLite；旧 VoiceMem 数据只读迁入并保留原数据库。候选抽取复用现有模型 gateway，merge 是唯一修订入口。工作区旧表作为修订结果的物化视图保留。人按连接器稳定身份记录，不自动跨账号归一。当前范围与验收状态见 [本轮实现记录](MEMORY-AND-FEISHU-IMPLEMENTATION.md)。

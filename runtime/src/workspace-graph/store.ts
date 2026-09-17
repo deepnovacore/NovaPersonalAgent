@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 
 import { z } from 'zod'
 
-import { canonicalJson, compareCodePoints } from '../canonical-json.js'
+import { canonicalJson, compareCodePoints } from '../text/canonical-json.js'
 import {
   EvidenceRefSchema,
   LogicalWorkspaceSchema,
@@ -23,7 +23,7 @@ import {
   SensitiveContentPolicy,
   SensitivePathPolicy,
   boundRedactedLabel,
-} from './sensitivity.js'
+} from '../memory/sensitivity.js'
 import {
   applyWorkspaceIdentityDeltas,
   type WorkspaceAliasObservation,

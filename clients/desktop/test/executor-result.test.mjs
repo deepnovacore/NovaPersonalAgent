@@ -83,3 +83,11 @@ test('project/title limits use the existing roster code-point bound', () => {
   assert.ok(parseExecutorResult(result))
   assert.equal(parseExecutorResult({...result, title: '🌟'.repeat(121)}), null)
 })
+
+test('task details retain the server failure without turning it into the summary', () => {
+  const diagnostic = {method: 'thread/resume', server_code: -32600, message: 'no rollout found'}
+  const result = parseExecutorResult({delegate_id: 'd', executor: 'codex', outcome: 'failed', summary: '恢复失败', started_at: 1, ended_at: 2, changed_files: null, diagnostic})
+  assert.deepEqual(result.diagnostic, diagnostic)
+  assert.match(executorResultDialogOptions(result).detail, /thread\/resume.*-32600/u)
+  assert.match(executorResultDialogOptions(result).detail, /no rollout found/u)
+})

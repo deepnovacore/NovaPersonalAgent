@@ -3,13 +3,12 @@
 const assert = require('node:assert/strict')
 const {spawnSync} = require('node:child_process')
 const {chmodSync, lstatSync, realpathSync} = require('node:fs')
-const {readFile, rename, writeFile} = require('node:fs/promises')
+const {rename, writeFile} = require('node:fs/promises')
 const {resolve} = require('node:path')
 
 const {signAsync} = require('@electron/osx-sign')
 
 const packageRoot = resolve(__dirname, '..')
-const reportPath = resolve(packageRoot, 'build/release/production-dependencies-v1.json')
 const inheritEntitlements = resolve(packageRoot, 'resources/entitlements.mac.inherit.plist')
 
 /**
@@ -25,13 +24,9 @@ module.exports = async function signMacWithNativeManifest(options) {
   assert.equal(app, resolve(options.app), 'mac_native_signing_rejected')
   const resourcesRoot = resolve(app, 'Contents/Resources')
   assert.equal(realpathSync(resourcesRoot), resourcesRoot, 'mac_native_signing_rejected')
-  const [{generateNativeResourceManifest}, {parseStrictJson}] = await Promise.all([
-    import('./native-resource-contract.mjs'),
-    import('./strict-json.mjs'),
-  ])
-  const dependencyReport = parseStrictJson(await readFile(reportPath, 'utf8'))
+  const {generateNativeResourceManifest} = await import('./native-resource-contract.mjs')
   const targetId = process.arch === 'arm64' ? 'darwin-arm64' : 'darwin-x64'
-  const before = await generateNativeResourceManifest({resourcesRoot, targetId, dependencyReport})
+  const before = await generateNativeResourceManifest({resourcesRoot, targetId})
   const sealedPaths = new Set()
   for (const resource of before.resources) {
     if (
@@ -47,7 +42,7 @@ module.exports = async function signMacWithNativeManifest(options) {
     sealedPaths.add(path)
   }
   assert.ok(sealedPaths.size > 0, 'mac_native_signing_rejected')
-  const manifest = await generateNativeResourceManifest({resourcesRoot, targetId, dependencyReport})
+  const manifest = await generateNativeResourceManifest({resourcesRoot, targetId})
   const manifestPath = resolve(resourcesRoot, 'native-resources-v1.json')
   const temporary = resolve(resourcesRoot, '.native-resources-v1.json.signing')
   await writeFile(temporary, `${JSON.stringify(manifest)}\n`, {encoding: 'utf8', mode: 0o600})
@@ -60,7 +55,7 @@ module.exports = async function signMacWithNativeManifest(options) {
     ignore: path => sealedPaths.has(resolve(path)) || ignoredBy(priorIgnore, path),
   })
   runCodesign(['--verify', '--deep', '--strict', '--verbose=2', app])
-  const finalManifest = await generateNativeResourceManifest({resourcesRoot, targetId, dependencyReport})
+  const finalManifest = await generateNativeResourceManifest({resourcesRoot, targetId})
   assert.deepEqual(finalManifest, manifest, 'mac_native_signing_rejected')
 }
 

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { compileContextView } from '../src/context-view.js'
-import { Memory } from '../src/memory.js'
+import { compileContextView } from '../src/core/context-view.js'
+import { Memory } from '../src/core/memory.js'
 import { RealtimeRuntimeBridge } from '../src/realtime/bridge.js'
-import { compileToolSchema } from '../src/tool-schema.js'
+import { compileToolSchema } from '../src/core/tool-schema.js'
 
 test('compiled tools omit retired structured update tools while preserving recall', () => {
   const tools = compileToolSchema([], {includeMemoryRecall: true})

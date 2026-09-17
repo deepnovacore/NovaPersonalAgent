@@ -28,22 +28,32 @@ export default tseslint.config(
     },
   },
   {
-    // Spec 07 R1: core never imports a concrete executor package. Composition roots and the
-    // registry are the only exceptions; `executors/coding/` is the role-level intake coordinator
-    // (spec 08), shared by every coding executor and not a concrete package.
+    // Spec 07 R1: concrete packages belong behind the registry; coding/ is a shared role coordinator.
     files: ['runtime/src/**/*.ts'],
-    ignores: [
-      'runtime/src/executors/**',
-      'runtime/src/cli.ts',
-      'runtime/src/desktop-entry.ts',
-      'runtime/src/production-realtime-assembly.ts',
-    ],
+    ignores: ['runtime/src/executors/**', 'runtime/src/composition/production-composition.ts'],
     rules: {
+      'no-restricted-syntax': ['error', {
+        selector: 'ImportExpression[source.value=/executors\\/.+\\//]:not([source.value=/executors\\/coding\\//])',
+        message: 'load concrete executor packages through the registry; host authority belongs to production-composition.ts',
+      }],
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['**/executors/*/**', '**/executors/*/index.js', '!**/executors/coding/**'],
-          message: 'core must not import an executor package; route through ports or the executors/index.js registry',
+          group: ['**/executors/*/**', '!**/executors/coding/**'],
+          message: 'import concrete executors through executors/index.js instead of package internals',
         }],
+      }],
+    },
+  },
+  {
+    files: ['runtime/src/composition/production-composition.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {patterns: [{
+        group: ['**/executors/*/**', '!**/executors/coding/**', '!../executors/codex/host.js'],
+        message: 'the composition may load only the dedicated Codex host entry',
+      }]}],
+      'no-restricted-syntax': ['error', {
+        selector: 'ImportExpression[source.value=/executors\\/.+\\//]:not([source.value=/executors\\/coding\\//])[source.value!="../executors/codex/host.js"]',
+        message: 'the composition may load only the dedicated Codex host entry',
       }],
     },
   },
@@ -53,14 +63,14 @@ export default tseslint.config(
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [{
-          group: ['**/realtime/**', '**/desktop*', '**/*-assembly*'],
+          group: ['**/realtime/**', '**/desktop*', '**/desktop/**', '**/composition/**', '**/*-assembly*'],
           message: 'executor packages must not import realtime/, desktop*, or assemblies; depend on ports.ts',
         }],
       }],
     },
   },
   {
-    files: ['runtime/test/**/*.ts'],
+    files: ['runtime/{eval,test}/**/*.ts'],
     rules: {
       // node:test owns the returned registration promise.
       '@typescript-eslint/no-floating-promises': 'off',

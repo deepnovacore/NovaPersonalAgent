@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import type {AgentActionResult, AgentCancelRequest, AgentDispatchRequest} from '../src/agent-controller.js'
+import type {AgentActionResult, AgentCancelRequest, AgentDispatchRequest} from '../src/executors/agent-controller.js'
 import {VisionAgentController} from '../src/executors/vision/controller.js'
 import type {VisionAgentControllerCore, VisionControllerResult} from '../src/executors/vision/controller-core.js'
 

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {setImmediate as tick} from 'node:timers/promises'
-import {DesktopRealtime} from '../src/desktop-realtime.js'
-import type {BridgeService} from '../src/desktop-bridge.js'
+import {DesktopRealtime} from '../src/desktop/desktop-session.js'
+import type {BridgeService} from '../src/desktop/desktop-session.js'
 import type {DesktopServerOptions} from '../src/desktop.js'
 
 function harness() {
@@ -87,13 +87,13 @@ test('a rejected send from an old connection cannot disconnect its replacement',
 })
 
 for (const failure of ['disconnect', 'send'] as const) test(`real realtime playback ${failure} preserves the worker and reconnects to the same work ID`, async t => {
-  const {buildAssembly} = await import('../src/assembly.js')
-  const {buildRealtimeAssembly} = await import('../src/realtime-assembly.js')
-  const {buildDesktopRealtimeComposition, runDesktopEntry} = await import('../src/desktop-service.js')
-  const {settingsSchema} = await import('../src/config.js')
-  const {parseCapabilityRegistry} = await import('../src/capability-registry.js')
-  const {VirtualClock} = await import('../src/clock.js')
-  const {slowSimManifest} = await import('../src/sims.js')
+  const {buildAssembly} = await import('../src/composition/assembly.js')
+  const {buildRealtimeAssembly} = await import('../src/composition/realtime-assembly.js')
+  const {buildDesktopRealtimeComposition, runDesktopEntry} = await import('../src/desktop/desktop-session.js')
+  const {settingsSchema} = await import('../src/config/config.js')
+  const {parseCapabilityRegistry} = await import('../src/config/capability-registry.js')
+  const {VirtualClock} = await import('../src/core/clock.js')
+  const {slowSimManifest} = await import('../src/core/sims.js')
   const stop = new AbortController()
   const sent: (string | Uint8Array)[] = []
   let options!: DesktopServerOptions
@@ -107,7 +107,7 @@ for (const failure of ['disconnect', 'send'] as const) test(`real realtime playb
   let launches = 0
   let endEvents!: () => void
   const core = buildAssembly({
-    settings: settingsSchema.parse({executors: ['slow_sim'], model_api_key: 'test-only', workspace_graph_enabled: false}),
+    settings: settingsSchema.parse({executors: ['slow_sim'], model_api_key: 'test-only'}),
     capabilities: parseCapabilityRegistry({version: 1, modules: {
       search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: false},
     }}),

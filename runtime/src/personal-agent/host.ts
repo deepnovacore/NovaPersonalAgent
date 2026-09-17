@@ -1,15 +1,15 @@
-import type {WakeReason} from '../slots.js';
+import type {WakeReason} from '../core/slots.js';
 import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
 import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool, type ConversationRuntimeFactory} from './conversations.js';
 import type {UnifiedRetrieval,UnifiedRetrievalResult} from '../memory/retrieval.js';
 import {validateMemoryOverview, type MemoryOverview} from './memory-overview.js';
-import type { ContextView } from '../context-view.js';
+import type { ContextView } from '../core/context-view.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
-import { memoryRefSchema } from '../memory.js';
-import type { Suggestion, SuggestionPool } from '../suggestions.js';
+import { memoryRefSchema } from '../core/memory.js';
+import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
 import { personalCommandSchema, personalSettingsSchema, preparedContentSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 export interface Evidence {

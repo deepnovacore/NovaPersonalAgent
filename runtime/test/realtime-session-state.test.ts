@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { PROGRESS_SUMMARY_LIMIT } from '../src/events.js'
+import { PROGRESS_SUMMARY_LIMIT } from '../src/core/events.js'
 import { hostFact, type HostResponseIntent } from '../src/realtime/protocol.js'
 import {
   EpochLedger,

@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
+import { canonicalJson } from '../src/text/canonical-json.js'
 import { checkRuntimeFixtures, main, runDeterministicDemo } from '../src/cli.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')

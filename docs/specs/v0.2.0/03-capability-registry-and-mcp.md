@@ -18,7 +18,7 @@
 - Codex spawn forces `mcp_servers={}` and `validateEffectiveCodexConfig`
   requires an empty `mcp_servers` map
   ([`runtime/src/executors/codex/app-server-schema.ts`](../../../runtime/src/executors/codex/app-server-schema.ts)).
-- `compileToolSchema` ([`runtime/src/tool-schema.ts`](../../../runtime/src/tool-schema.ts)):
+- `compileToolSchema` ([`runtime/src/core/tool-schema.ts`](../../../runtime/src/core/tool-schema.ts)):
   every manifest needs ≥1 `readonly` op (the probe entry for `unknown`
   outcomes, see `sims.ts` contract 2 and `context-view.ts` `compileProbes`);
   wire names are `<manifest>__<op>` ≤ 64 code points with a restricted charset;

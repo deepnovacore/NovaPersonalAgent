@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import type {ExecutorProgress} from '../src/causal-runtime.js'
-import {VirtualClock, type Clock} from '../src/clock.js'
+import type {ExecutorProgress} from '../src/core/causal-runtime.js'
+import {VirtualClock, type Clock} from '../src/core/clock.js'
 import {CodexProtocolError, MAX_FINAL_TEXT_INPUT, MAX_INTERNAL_ACTIVITY} from '../src/executors/codex/protocol.js'
 import {AppServerTurnProjection} from '../src/executors/codex/turn-projection.js'
 import {resolveCodexLaunchProfile} from '../src/executors/codex/launch-profile.js'
@@ -240,12 +240,12 @@ test('count-only work waits for the 30 second keepalive while first prose emits 
     phase: 'working',
     internal_activity: 3,
     elapsed: 30,
-    summary: '已执行 1 条命令、已修改 1 处文件。正在实现 核心',
+    summary: '正在实现 核心',
   })
   assert.equal(JSON.stringify(progress).includes('PRIVATE'), false)
 })
 
-test('typed summaries use exact Chinese counts and the latest allowed prose only', () => {
+test('new prose emits once while later activity never repackages old prose or counters', () => {
   const clock = new VirtualClock()
   const progress: ExecutorProgress[] = []
   const projection = startedProjection(clock, value => { progress.push(value) })
@@ -258,10 +258,10 @@ test('typed summaries use exact Chinese counts and the latest allowed prose only
   item(projection, {type: 'agentMessage', text: '最新说明'})
   clock.advanceTo(30)
   item(projection, {type: 'unknownFuture', text: 'PRIVATE-UNKNOWN'})
-  assert.equal(
-    progress.at(-1)?.summary,
-    '已执行 2 条命令（1 条失败）、已修改 2 处文件、已调用 2 次工具。最新说明',
-  )
+  assert.deepEqual(progress.map(value => value.summary).filter(value => value !== null), ['旧计划', '最新说明'])
+  assert.equal(progress.at(-1)?.summary, null)
+  item(projection, {type: 'agentMessage', text: '最新说明'})
+  assert.equal(progress.filter(value => value.summary === '最新说明').length, 1)
   assert.equal(JSON.stringify(progress).includes('PRIVATE'), false)
 })
 
@@ -310,7 +310,7 @@ test('matching terminal projects only final agent text and clears the active pai
       ],
     },
   })
-  assert.deepEqual(completion, {status: 'failed', final_text: 'safe final', internal_activity: 1})
+  assert.deepEqual(completion, {status: 'failed', final_text: 'safe final', internal_activity: 1, error_code: null})
   assert.equal(projection.activePair, null)
   assert.equal(JSON.stringify(completion).includes('PRIVATE'), false)
   item(projection, {type: 'agentMessage', text: 'PRIVATE-LATE'})

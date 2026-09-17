@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {PersonalStore,initialState} from '../src/personal-agent/store.js'
-import {SuggestionPool} from '../src/suggestions.js'
+import {SuggestionPool} from '../src/core/suggestions.js'
 import type {PreparedMaterial} from '../src/personal-agent/contracts.js'
 const material:PreparedMaterial={prepared:{trust:'untrusted_external',text:'Prepared grounded detail',evidence_refs:['file:1']},memory_refs:[],action_label:'继续讨论'}
 test('brief host persists claim before preparation, survives restart, and opens grounded unread topic',async()=>{

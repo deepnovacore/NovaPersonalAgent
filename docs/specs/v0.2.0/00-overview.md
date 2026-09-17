@@ -2,7 +2,7 @@
 
 > Vision update: camera MCP and side-VLM foreground projection below are superseded by [native vision and independent monitoring](../../archs/11-vision.md). The current default foreground has five host/native tools; camera capture is not a tool.
 
-> 摘要：v0.2.0 交付可靠、模块化、可跨设备使用的 Agent 基础：跨平台审批、薄快脑与 coding 侧调度、可替换级联管线及供应商解耦、自定义 MCP / 搜索 / RAG 与中文唤醒、VoiceMem 个人记忆与 Workspace Graph 工作区记忆、Tailscale 连接 PC runtime 的 iOS 客户端。意图澄清、工作单、设置与进度展示服务于这些闭环。本系列定义边界与验收，不把已有实现等同于已发布。
+> 摘要：v0.2.0 交付可靠、模块化、可跨设备使用的 Agent 基础：跨平台审批、薄快脑与 coding 侧调度、可替换级联管线及供应商解耦、自定义 MCP / 搜索 / RAG 与中文唤醒、VoiceMem 个人记忆与主机拥有的项目/任务上下文、Tailscale 连接 PC runtime 的 iOS 客户端。意图澄清、工作单、设置与进度展示服务于这些闭环。本系列定义边界与验收，不把已有实现等同于已发布。
 >
 > 修订（2026-09-03）：吸收一轮静态评审（7 条 P1/P2 + 4 条产品建议），处置见文末「Review log」。
 
@@ -48,7 +48,7 @@ They complement the historical volume/milestone numbering below; they do not res
 - Provider-neutral realtime contracts and independently configurable ASR / LLM / TTS are part of
   this release scope, alongside integrated voice. Configuration support needs actual provider
   entitlement and end-to-end interruption/turn tests; successful TTS does not establish ASR access.
-- VoiceMem is the personal-memory backend; Workspace Graph preserves workspace-specific context.
+- VoiceMem is the personal-memory backend; the host publishes current project and executor context.
   RAG is source-grounded knowledge retrieval, not a substitute for either memory responsibility.
 - iOS + Tailscale + PC runtime is the baseline remote experience. Pairing should minimize manual
   endpoint/credential entry while retaining revocation and application authentication. Provider-direct
@@ -185,7 +185,7 @@ merges — not as part of this documentation phase.
 
 ### Deferred items that return under a concrete use case
 
-- Local embedding provider implementation (interface reserved in 04).
+- Local embedding provider implementation and configuration entry (unsupported in 04).
 - `sqlite-vec` acceleration if chunk counts exceed brute-force comfort.
 - Widening the voice approval decision (`confirm(id, accepted)` after 08) to
   session-scoped grants.
@@ -240,7 +240,7 @@ schema bundle before revising. Disposition:
 | Product | Clarify to reduce errors, not add rounds | — | `02` question ownership (`user` vs `repo`), inferred vs stated, planner assumptions |
 | Product | Ship one complete coding loop first; milestones over weeks; verify search before flipping default | — | This file: milestones M1–M4, 03a-flip gate, 04 release-gate question |
 | Product | Bubbles are reminders, not audit; native window constraints | — | `05` last-result entry, main-process bounds reservation, banner coexistence |
-| Product | Make knowledge data flow explicit; unimplemented provider not selectable | — | `04` data-flow table in the panel; `local` disabled in UI |
+| Product | Make knowledge data flow explicit; unimplemented provider not selectable | — | `04` data-flow table in the panel; `local` removed from UI and rejected during configuration validation |
 
 ### 2026-09-03 — second pass (confirm loop, project actions, headless, alias)
 

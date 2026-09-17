@@ -1,4 +1,4 @@
-import {canonicalJson} from '../canonical-json.js'
+import {canonicalJson} from '../text/canonical-json.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
 import type {LogicalWorkspace,WorkspaceInstance,RelationCard} from '../workspace-graph/models.js'
 import {contentHash,memoryOperation,EntryRevisionSchema} from './store.js'

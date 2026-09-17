@@ -14,8 +14,8 @@ import type {
   ExecutorAdapter,
   ExecutorDispatchContext,
   ExecutorHandoff,
-} from '../../causal-runtime.js'
-import type {JsonValue} from '../../events.js'
+} from '../../core/causal-runtime.js'
+import type {JsonValue} from '../../core/events.js'
 import {
   AdapterDeadlineError,
   CodexAdapterClosedError,
@@ -60,7 +60,6 @@ export class CodexLiveAdapter implements ExecutorAdapter {
     this.#scheduler = scheduler
     this.#onValidatedOutcome = host?.onValidatedOutcome
     this.#core = new CodexAdapterCore(transport, {
-      live: true,
       ...(scheduler === undefined ? {} : {scheduler}),
       ...(host?.sharedState === undefined ? {} : {sharedState: host.sharedState}),
     })

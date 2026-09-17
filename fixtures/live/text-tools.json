@@ -146,21 +146,24 @@
       ]
     },
     {
-      "id": "snapshot",
-      "text": "看一下现在摄像头前有什么。",
+      "id": "vision-without-image",
+      "text": "这条消息没有附带图片，也没有开启对话视觉。你能看到摄像头前有什么吗？",
       "context": "<active_project_context>\nworkspace=\"demo\"\nsession=\"验收\"\n</active_project_context>\n当前用户内容 ref=conversation:1",
       "steps": [
         {
           "expect": {
-            "calls": [
-              {
-                "name": "mcp__nova_camera__snapshot",
-                "args": {
-                  "origin_ref": "conversation:1"
-                }
-              }
+            "calls": [],
+            "text": "required",
+            "textAny": [
+              "看不到",
+              "无法",
+              "不能",
+              "没有"
             ],
-            "text": "forbidden"
+            "textNot": [
+              "正在查看",
+              "已经看到"
+            ]
           }
         }
       ]
@@ -276,7 +279,8 @@
                       "不改动业务逻辑",
                       "不涉及业务逻辑",
                       "不要修改业务逻辑",
-                      "不得改动任何业务逻辑"
+                      "不得改动任何业务逻辑",
+                  "不得改动业务逻辑"
                     ]
                   ]
                 }
@@ -751,6 +755,116 @@
           "expect": {
             "calls": [],
             "text": "required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "coding-clarify-before-dispatch",
+      "text": "帮我写一个贪吃蛇游戏。",
+      "context": "<active_project_context> workspace=\"demo\" session=\"已有游戏\" </active_project_context> 当前用户内容 ref=conversation:1",
+      "steps": [
+        {
+          "expect": {
+            "calls": [],
+            "text": "required"
+          },
+          "user": "做成浏览器网页，方向键控制，显示分数，不要安装依赖。"
+        },
+        {
+          "expect": {
+            "calls": [
+              {
+                "name": "dispatch",
+                "args": {
+                  "executor": "codex"
+                },
+                "contains": {
+                  "instruction": [
+                    "贪吃蛇",
+                    "方向键",
+                    "依赖"
+                  ],
+                  "source_refs": [
+                    "conversation:1"
+                  ]
+                },
+                "containsAny": {
+                  "instruction": [
+                    [
+                      "网页",
+                      "浏览器"
+                    ],
+                    [
+                      "分数",
+                      "得分"
+                    ]
+                  ]
+                }
+              }
+            ],
+            "text": "forbidden"
+          }
+        }
+      ]
+    },
+    {
+      "id": "coding-clarification-still-unresolved",
+      "text": "帮我写一个贪吃蛇游戏，运行形式还没想好，先别开始。",
+      "context": "<active_project_context> workspace=\"demo\" session=\"已有游戏\" </active_project_context> 当前用户内容 ref=conversation:1",
+      "steps": [
+        {
+          "expect": {
+            "calls": [],
+            "text": "required"
+          },
+          "user": "网页版和桌面版有什么区别？我还没选。"
+        },
+        {
+          "expect": {
+            "calls": [],
+            "text": "required"
+          }
+        }
+      ]
+    },
+    {
+      "id": "weekly-report-after-clarification",
+      "text": "我要记录我们公司所有人的周报。",
+      "context": "<active_project_context>\nworkspace=\"贪吃蛇\"\nsession=\"已有小游戏\"\n</active_project_context>\n当前用户内容 ref=conversation:1",
+      "disabled": [
+        "camera",
+        "search",
+        "knowledge"
+      ],
+      "steps": [
+        {
+          "expect": {
+            "calls": [],
+            "text": "required"
+          },
+          "user": "网页版就行。"
+        },
+        {
+          "expect": {
+            "calls": [
+              {
+                "name": "dispatch",
+                "args": {
+                  "executor": "codex"
+                },
+                "contains": {
+                  "instruction": [
+                    "周报"
+                  ],
+                  "source_refs": [
+                    "conversation:1",
+                    "conversation:2"
+                  ]
+                }
+              }
+            ],
+            "text": "forbidden"
           }
         }
       ]

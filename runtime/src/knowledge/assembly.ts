@@ -1,7 +1,7 @@
 import {homedir} from 'node:os'
 import {resolve} from 'node:path'
-import {resolveModelApiKey, type Settings} from '../config.js'
-import type {CapabilityRegistry, McpServerConfig} from '../capability-registry.js'
+import {resolveModelApiKey, type Settings} from '../config/config.js'
+import type {CapabilityRegistry, McpServerConfig} from '../config/capability-registry.js'
 import {DashScopeEmbeddingProvider} from './embeddings.js'
 import {KnowledgeStoreClient} from './store-client.js'
 import {KnowledgeService} from './service.js'
@@ -21,7 +21,6 @@ export async function prepareKnowledge(
   settings: Settings, capabilities: CapabilityRegistry, signal?: AbortSignal,
 ): Promise<PreparedKnowledge | undefined> {
   if (!capabilities.modules.knowledge.enabled) return undefined
-  if (settings.embedding_provider !== 'dashscope') throw new Error('embedding_provider_unavailable')
   signal?.throwIfAborted()
   const embedding = new DashScopeEmbeddingProvider({baseUrl: settings.model_base_url,
     apiKey: resolveModelApiKey(settings) ?? '', model: settings.embedding_model})

@@ -1,10 +1,10 @@
 import {initializeRetrieval,memoryRetrieval} from './retrieval.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
-import {canonicalJson} from '../canonical-json.js'
-import {trustSchema} from '../events.js'
+import {canonicalJson} from '../text/canonical-json.js'
+import {trustSchema} from '../core/events.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
-import {SensitiveContentPolicy} from '../workspace-graph/sensitivity.js'
+import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 
 const id = z.string().min(1).max(512)
 const date = z.iso.datetime({offset:true})

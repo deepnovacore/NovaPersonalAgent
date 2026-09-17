@@ -12,9 +12,8 @@ import {test} from 'node:test'
 import {
   CodexProcessOwnerError,
   PosixCodexProcessOwnerFactory,
-  approvedCodexSpawnDetails,
-  createApprovedCodexSpawnSpec,
-  createApprovedCodexSpawnSpecForTest,
+  createCodexSpawnSpec,
+  createCodexSpawnSpecForTest,
   hostBinaryForTest,
   hostBinaryFromConfig,
   hostEphemeralCodexHomeFromConfig,
@@ -50,7 +49,7 @@ const EXACT_APP_SERVER_ARGV = [
 test('the host launch boundary ignores caller argv and parent secrets', () => {
   process.env.NOVA_CODEX_PARENT_SECRET_SENTINEL = 'must-not-cross'
   try {
-    const spec = createApprovedCodexSpawnSpecForTest({
+    const spec = createCodexSpawnSpecForTest({
       binary: process.execPath,
       workspace: process.cwd(),
       codexHome: process.cwd(),
@@ -123,7 +122,7 @@ test('approved specs reject leaked keys, missing remote disable, and mismatched 
       CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1'},
   ]) {
     assert.throws(
-      () => createApprovedCodexSpawnSpec({...input, environment}),
+      () => createCodexSpawnSpec({...input, environment}),
       (error: unknown) => error instanceof CodexProcessOwnerError && error.code === 'spawn_failed',
     )
   }
@@ -135,7 +134,7 @@ test('approved specs prepend one canonical JavaScript launcher without a shell',
   await writeFile(launcher, '#!/usr/bin/env node\n')
   try {
     const workspace = process.cwd()
-    const spec = createApprovedCodexSpawnSpec({
+    const spec = createCodexSpawnSpec({
       binary: hostBinaryForTest(process.execPath),
       prefixArgs: [realpathSync(launcher)],
       workspace: hostWorkspaceForTest(workspace),
@@ -145,7 +144,7 @@ test('approved specs prepend one canonical JavaScript launcher without a shell',
         CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
       },
     })
-    const details = approvedCodexSpawnDetails(spec)
+    const details = (spec)
     assert.deepEqual(details.argv, [realpathSync(launcher), ...EXACT_APP_SERVER_ARGV])
     assert.equal(details.shell, false)
   } finally {
@@ -163,7 +162,7 @@ test('the POSIX factory performs the exact direct detached spawn', {
     return child
   }) as unknown as typeof spawn
   const workspace = process.cwd()
-  const spec = createApprovedCodexSpawnSpec({
+  const spec = createCodexSpawnSpec({
     binary: hostBinaryForTest(process.execPath),
     workspace: hostWorkspaceForTest(workspace),
     codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
@@ -196,7 +195,7 @@ test('the POSIX factory performs the exact direct detached spawn', {
       windowsHide: true,
     },
   })
-  assert.deepEqual(approvedCodexSpawnDetails(spec).argv, EXACT_APP_SERVER_ARGV)
+  assert.deepEqual((spec).argv, EXACT_APP_SERVER_ARGV)
   child.emit('exit', 0)
   assert.equal(await owner.exit, 0)
 })
@@ -222,7 +221,7 @@ test('POSIX group supervision treats EPERM as alive and never substitutes the le
     },
   })
   const workspace = process.cwd()
-  const owner = await factory.spawn(createApprovedCodexSpawnSpec({
+  const owner = await factory.spawn(createCodexSpawnSpec({
     binary: hostBinaryForTest(process.execPath),
     workspace: hostWorkspaceForTest(workspace),
     codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
@@ -258,7 +257,7 @@ test('POSIX group liveness propagates non-ESRCH and non-EPERM probe failures', {
     },
   })
   const workspace = process.cwd()
-  const owner = await factory.spawn(createApprovedCodexSpawnSpec({
+  const owner = await factory.spawn(createCodexSpawnSpec({
     binary: hostBinaryForTest(process.execPath),
     workspace: hostWorkspaceForTest(workspace),
     codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
@@ -291,7 +290,7 @@ test('POSIX spawn fails closed when negative-PGID supervision cannot be establis
     },
   })
   const workspace = process.cwd()
-  await assert.rejects(factory.spawn(createApprovedCodexSpawnSpec({
+  await assert.rejects(factory.spawn(createCodexSpawnSpec({
     binary: hostBinaryForTest(process.execPath),
     workspace: hostWorkspaceForTest(workspace),
     codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
@@ -335,7 +334,7 @@ test('failed POSIX supervision confirms the whole group is gone before spawn rej
     },
   })
   const workspace = process.cwd()
-  await assert.rejects(factory.spawn(createApprovedCodexSpawnSpec({
+  await assert.rejects(factory.spawn(createCodexSpawnSpec({
     binary: hostBinaryForTest(process.execPath),
     workspace: hostWorkspaceForTest(workspace),
     codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
@@ -381,7 +380,7 @@ test('persistent POSIX supervision failure retains the first owner and blocks a 
     },
   })
   const workspace = process.cwd()
-  const spec = createApprovedCodexSpawnSpec({
+  const spec = createCodexSpawnSpec({
     binary: hostBinaryForTest(process.execPath),
     workspace: hostWorkspaceForTest(workspace),
     codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
@@ -443,7 +442,7 @@ test('failed POSIX supervision kills an acknowledged real descendant group', {
           wait: async milliseconds => { await new Promise(resolve => setTimeout(resolve, milliseconds)) },
           now: () => Date.now(),
         },
-      }).spawn(createApprovedCodexSpawnSpec({
+      }).spawn(createCodexSpawnSpec({
         binary: hostBinaryForTest(process.execPath),
         workspace: hostWorkspaceForTest(workspace),
         codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
@@ -487,7 +486,7 @@ test('a real POSIX leader exit does not hide its SIGTERM-ignoring descendant', {
   skip: process.platform === 'win32',
 }, async () => {
   const workspace = process.cwd()
-  const spec = createApprovedCodexSpawnSpec({
+  const spec = createCodexSpawnSpec({
     binary: hostBinaryForTest(process.execPath),
     workspace: hostWorkspaceForTest(workspace),
     codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
@@ -540,7 +539,7 @@ test('the production POSIX owner reaps a real leader-first process group through
   }) as unknown as typeof spawn
   const workspace = process.cwd()
   const owner = await new PosixCodexProcessOwnerFactory({spawn: injectedSpawn}).spawn(
-    createApprovedCodexSpawnSpec({
+    createCodexSpawnSpec({
       binary: hostBinaryForTest(process.execPath),
       workspace: hostWorkspaceForTest(workspace),
       codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),

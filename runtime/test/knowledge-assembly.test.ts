@@ -4,20 +4,18 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import test from 'node:test'
 import {prepareKnowledge} from '../src/knowledge/assembly.js'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
-import {settingsSchema} from '../src/config.js'
-import {buildAssembly} from '../src/assembly.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
+import {settingsSchema} from '../src/config/config.js'
+import {buildAssembly} from '../src/composition/assembly.js'
 import {frontendInstructions} from '../src/realtime/qwen.js'
 import {prepareManagedCodexMcp, managedMcpConfigToml, managedMcpEnvironment} from '../src/executors/codex/managed-mcp.js'
 
-test('knowledge disabled allocates nothing; forced local provider fails before opening a store', async () => {
+test('knowledge disabled allocates nothing', async () => {
   assert.ok(!frontendInstructions().includes('mcp__nova_knowledge__recall'))
   assert.ok(frontendInstructions({knowledge: true}).includes('memory__evidence'))
   const capabilities = parseCapabilityRegistry({version: 1, modules: {knowledge: {enabled: false}}}, {})
-  const settings = settingsSchema.parse({executors: [], embedding_provider: 'local'})
+  const settings = settingsSchema.parse({executors: []})
   assert.equal(await prepareKnowledge(settings, capabilities), undefined)
-  const enabled = parseCapabilityRegistry({version: 1, modules: {knowledge: {enabled: true}}}, {})
-  await assert.rejects(prepareKnowledge(settings, enabled), /embedding_provider_unavailable/)
 })
 
 test('prepared knowledge contributes unified recall instead of a separate frontend storage tool and closes with assembly', async () => {

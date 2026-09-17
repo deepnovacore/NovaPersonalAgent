@@ -33,10 +33,10 @@ test('reserves bubble bounds above the orb in Electron DIPs without Retina doubl
   assert.deepEqual(retina.bounds, oneX.bounds)
   assert.deepEqual(retina.renderedOrbScreenCenter, {x: 680, y: 380})
   assert.equal(retina.bounds.width, 360)
-  assert.equal(retina.bounds.height, 328)
+  assert.equal(retina.bounds.height, 348)
 })
 
-test('flips bubbles below near the top and keeps their wide surface on the selected display', () => {
+test('keeps chat above the orb near the top by moving the surface inside the selected display', () => {
   const layout = bubbleWindowLayout({
     normalBounds: {x: -1900, y: 24, width: 160, height: 160},
     rows: 1,
@@ -45,13 +45,15 @@ test('flips bubbles below near the top and keeps their wide surface on the selec
     workArea: {x: -1920, y: 24, width: 1920, height: 1056},
   })
 
-  assert.equal(layout.bubblePlacement, 'below')
+  assert.equal(layout.bubblePlacement, 'above')
   assert.equal(layout.bubbleAlignment, 'left')
   assert.ok(layout.bounds.x >= -1920)
   assert.ok(layout.bounds.x + layout.bounds.width <= 0)
   assert.ok(layout.bounds.y >= 24)
   assert.ok(layout.bounds.y + layout.bounds.height <= 1080)
-  assert.deepEqual(layout.renderedOrbScreenCenter, {x: -1820, y: 144})
+  // At 150% zoom the anchor moves inward so the entire orb/controls surface fits.
+  assert.deepEqual(layout.renderedOrbScreenCenter, {x: -1800, y: 190.5})
+  assert.equal(layout.orbOffsetCssX, 80)
 })
 
 test('suppresses bubbles when a confirmation banner leaves no opposite-side room', () => {
@@ -85,10 +87,10 @@ test('one controller uses confirmation bounds first, reserves bubbles, and resto
 
   const combined = controller.reserveBubbleArea(6)
   assert.equal(combined.suppressed, false)
-  assert.equal(bounds.height, 496)
+  assert.equal(bounds.height, 516)
   const bubble = controller.reserveBubbleArea(2)
   assert.equal(bubble.suppressed, false)
-  assert.equal(bounds.height, 272)
+  assert.equal(bounds.height, 292)
   controller.setConfirmationMode(true)
   assert.equal(controller.bubblesSuppressed, false)
   controller.reserveBubbleArea(0)
@@ -334,4 +336,26 @@ test('all bubble mode shows only finalized assistant replies, preserving multili
   assert.equal(await controller.push(reply), true)
   assert.equal(controller.items[0].kind, 'conversation')
   await controller.clear()
+})
+
+test('a new conversation replaces the old reply and each work retains only its latest progress', async () => {
+  const bubbles = createProgressBubbleController({reserveBubbleArea: async () => ({}), render: () => {}, schedule: () => 0, cancel: () => {}})
+  await bubbles.push({kind: 'conversation', delegateId: 'reply-1', summary: '正在启动', level: 'milestone'})
+  await bubbles.push({kind: 'conversation', delegateId: 'reply-2', summary: '启动失败', level: 'milestone'})
+  assert.deepEqual(bubbles.items.map(i => i.summary), ['启动失败'])
+  await bubbles.push({delegateId: 'work-1', summary: '工作中', level: 'detail'})
+  await bubbles.push({delegateId: 'work-1', summary: '已完成', level: 'milestone'})
+  assert.deepEqual(bubbles.items.map(i => i.summary), ['已完成', '启动失败'])
+})
+
+test('expanding a reply reserves three rows and collapsing releases them', async () => {
+  const rows = []
+  const bubbles = createProgressBubbleController({reserveBubbleArea: async n => {rows.push(n); return {}}, render: () => {}, schedule: () => 0, cancel: () => {}})
+  await bubbles.push({kind: 'conversation', summary: '长文本'.repeat(100), level: 'milestone'})
+  const key = bubbles.items[0].key
+  await bubbles.toggleExpanded(key)
+  assert.equal(bubbles.items[0].expanded, true)
+  assert.equal(rows.at(-1), 3)
+  await bubbles.toggleExpanded(key)
+  assert.equal(rows.at(-1), 1)
 })

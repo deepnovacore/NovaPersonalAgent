@@ -1,8 +1,8 @@
 import {homedir} from 'node:os'
 import {resolve} from 'node:path'
-import type {Settings} from '../config.js'
-import {canonicalJson} from '../canonical-json.js'
-import type {Channel, Memory} from '../memory.js'
+import type {Settings} from '../config/config.js'
+import {canonicalJson} from '../text/canonical-json.js'
+import type {Channel, Memory} from '../core/memory.js'
 import {BLACKBOARD_BATCH_BYTES, BLACKBOARD_BATCH_ITEMS, BlackboardStore, BlackboardStoreError, type BlackboardBatch, type BlackboardOptions} from './blackboard-store.js'
 
 export type BlackboardSessionOptions = Omit<BlackboardOptions, 'channels' | 'conversationId'>

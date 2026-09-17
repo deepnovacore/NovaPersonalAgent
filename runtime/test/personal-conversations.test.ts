@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {ConversationRuntimePool,createConversation} from '../src/personal-agent/conversations.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
-import {SuggestionPool} from '../src/suggestions.js'
+import {SuggestionPool} from '../src/core/suggestions.js'
 
 test('conversation pool permits parallel conversations and orders one conversation',async()=>{
  const calls:string[]=[],releases:(()=>void)[]=[]
@@ -44,13 +44,13 @@ test('host persists selection and messages and clears selected conversation only
 
 test('production scoped graph completes a real text adapter turn without closing global host',async()=>{
  const {conversationRuntimeFactory}=await import('../src/personal-agent/conversation-runtime.js')
- const {settingsSchema}=await import('../src/config.js')
+ const {settingsSchema}=await import('../src/config/config.js')
  const {buildCascadedTextProvider}=await import('../src/cascaded-text-provider.js')
- const {cascadedProviderRegistries}=await import('../src/cascaded-realtime-assembly.js')
+ const {cascadedProviderRegistries}=await import('../src/composition/cascaded-realtime-assembly.js')
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-conversation-graph-'))
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  try{await host.open();const factory=conversationRuntimeFactory({host,memory:()=>undefined,
-  settings:settingsSchema.parse({executors:[],camera_module_enabled:false,dashscope_api_key:'test'}),
+  settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),
   searchTransport:{search:()=>Promise.reject(Error('unexpected search'))},
   gateway:{complete:()=>Promise.reject(Error('unexpected model')),async *stream(){await Promise.resolve();throw Error('unexpected stream')}},
   onDiagnostic:()=>{ /* test diagnostics not user output */ },
@@ -105,7 +105,7 @@ test('cleared runtime emissions are fenced before replacement and busy voice par
 })
 
 test('playback epoch allocation spans independent conversation registries',async()=>{
- const {PlaybackRegistry}=await import('../src/playback.js')
+ const {PlaybackRegistry}=await import('../src/realtime/playback.js')
  let epoch=0
  const options={idFactory:()=>crypto.randomUUID(),nextGenerationEpoch:()=>++epoch,onFrame:()=>{ /* no audio device */ },onClear:()=>{ /* no audio device */ }}
  const first=new PlaybackRegistry(options),second=new PlaybackRegistry(options)

@@ -27,6 +27,7 @@ const ALL_SECRET_KEYS = Object.freeze([
   'modelApiKey',
   'codexApiKey',
   'arkApiKey',
+  'deepseekApiKey',
   'doubaoBigmodelApiKey',
   'doubaoAsrApiKey',
 ])
@@ -92,8 +93,8 @@ test('the default settings are the documented schema', () => {
     integratedVoice: 'longanqian',
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
-    cascadedLlmProvider: 'qwen',
-    cascadedLlmModels: { qwen: 'qwen-flash', ark: 'doubao-seed-2-0-pro-260215' },
+    cascadedLlmProvider: 'deepseek',
+    cascadedLlmModels: { qwen: 'qwen-plus', ark: 'doubao-seed-2-0-pro-260215', deepseek: 'deepseek-flash' },
     cascadedTtsProvider: 'volcengine',
     cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
     codexApprovalMode: 'ask',
@@ -107,6 +108,7 @@ test('the default settings are the documented schema', () => {
     knowledgePath: '',
     memoryPrerecallEnabled: true,
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
+    phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
   assert.deepEqual([...SECRET_KEYS], ALL_SECRET_KEYS)
@@ -149,7 +151,7 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     planReadback: 'confirm',
     plannerModel: 'planner-model',
     progressBubbles: 'all',
-    embeddingProvider: 'local',
+    embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
     capabilitiesConfigPath: '/state/capabilities.json',
     knowledgePath: '/state/knowledge.sqlite',
@@ -171,7 +173,7 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     planReadback: 'confirm',
     plannerModel: 'planner-model',
     progressBubbles: 'all',
-    embeddingProvider: 'local',
+    embeddingProvider: 'dashscope',
     embeddingModel: 'custom-embedding',
     capabilitiesConfigPath: '/state/capabilities.json',
     knowledgePath: '/state/knowledge.sqlite',
@@ -182,7 +184,6 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
     clarificationDepth: 'deep',
     planReadback: 'always',
     progressBubbles: 'verbose',
-    embeddingProvider: 'remote',
   }})
   assert.equal(invalid.codexApprovalMode, 'ask')
   assert.equal(invalid.clarificationDepth, 'balanced')
@@ -267,7 +268,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
     cascadedLlmProvider: 'ark',
-    cascadedLlmModels: { qwen: 'qwen-plus', ark: 'doubao-custom' },
+    cascadedLlmModels: { qwen: 'qwen-plus', ark: 'doubao-custom', deepseek: 'deepseek-flash' },
     cascadedTtsProvider: 'volcengine',
     cascadedTtsVoice: 'zh_female_custom',
     codexApprovalMode: 'ask',
@@ -281,6 +282,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     knowledgePath: '',
     memoryPrerecallEnabled: true,
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
+    phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
   })
 })
@@ -351,6 +353,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
+    'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'plannerModel',
@@ -364,193 +367,15 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
   ])
 })
 
-test('normalizeSettings reads only own enumerable top-level data properties', () => {
-  let getterCalls = 0
-  const inherited = {
-    palette: 'graphite',
-    proactivity: 'eager',
-    integratedModel: 'inherited-model',
-  }
-  const raw = Object.create(inherited)
-  Object.defineProperties(raw, {
-    codexHeartbeatSeconds: { value: 45, enumerable: true },
-    pipelineMode: {
-      enumerable: true,
-      get() {
-        getterCalls += 1
-        return 'cascaded'
-      },
-    },
-    integratedVoice: { value: 'hidden-voice', enumerable: false },
-  })
-  Object.defineProperty(raw, Symbol('hostile'), {
-    enumerable: true,
-    get() {
-      getterCalls += 1
-      return 'symbol-value'
-    },
-  })
-
+test('JSON settings rebuild only declared fields and keep invalid nested values at defaults', () => {
+  const raw = JSON.parse('{"__proto__":{"palette":"graphite"},"unknown":true,"codexHeartbeatSeconds":45,"cascadedLlmModels":{"qwen":null,"ark":"custom-ark"},"secrets":{"tavilyApiKey":{"enc":"none","data":"dGF2aWx5"},"codexApiKey":{"enc":"none","data":false}}}')
   const normalized = normalizeSettings(raw)
-
-  assert.equal(getterCalls, 0)
-  assert.equal(normalized.codexHeartbeatSeconds, 45)
   assert.equal(normalized.palette, 'ember')
-  assert.equal(normalized.proactivity, 'balanced')
-  assert.equal(normalized.pipelineMode, 'cascaded')
-  assert.equal(normalized.integratedModel, 'qwen-audio-3.0-realtime-plus')
-  assert.equal(normalized.integratedVoice, 'longanqian')
-})
-
-test('normalizeSettings reads remembered models only from own enumerable data properties', () => {
-  let getterCalls = 0
-  const models = Object.create({ qwen: 'inherited-qwen' })
-  Object.defineProperties(models, {
-    ark: {
-      enumerable: true,
-      get() {
-        getterCalls += 1
-        return 'getter-ark'
-      },
-    },
-    qwenHidden: { value: 'hidden', enumerable: false },
-  })
-  Object.defineProperty(models, Symbol('hostile'), {
-    enumerable: true,
-    get() {
-      getterCalls += 1
-      return 'symbol-model'
-    },
-  })
-
-  const normalized = normalizeSettings({ cascadedLlmModels: models })
-
-  assert.equal(getterCalls, 0)
-  assert.deepEqual(normalized.cascadedLlmModels, {
-    qwen: 'qwen-flash',
-    ark: 'doubao-seed-2-0-pro-260215',
-  })
-
-  const partiallyHidden = {}
-  Object.defineProperties(partiallyHidden, {
-    qwen: { value: 'qwen-own', enumerable: true },
-    ark: { value: 'ark-hidden', enumerable: false },
-  })
-  assert.deepEqual(normalizeSettings({
-    cascadedLlmModels: partiallyHidden,
-  }).cascadedLlmModels, {
-    qwen: 'qwen-own',
-    ark: 'doubao-seed-2-0-pro-260215',
-  })
-})
-
-test('normalizeSettings drops hostile secret maps and entries without invoking getters', () => {
-  let getterCalls = 0
-  const secrets = Object.create({
-    dashscopeApiKey: { enc: 'none', data: 'aW5oZXJpdGVk' },
-  })
-  Object.defineProperties(secrets, {
-    tavilyApiKey: {
-      value: { enc: 'none', data: 'dGF2aWx5' },
-      enumerable: true,
-    },
-    arkApiKey: {
-      enumerable: true,
-      get() {
-        getterCalls += 1
-        return { enc: 'none', data: 'YXJr' }
-      },
-    },
-    codexApiKey: {
-      value: { enc: 'none', data: 'Y29kZXg=' },
-      enumerable: false,
-    },
-  })
-  const hostileEntry = {}
-  Object.defineProperties(hostileEntry, {
-    enc: {
-      enumerable: true,
-      get() {
-        getterCalls += 1
-        return 'none'
-      },
-    },
-    data: { value: 'ZG91YmFv', enumerable: true },
-  })
-  Object.defineProperty(secrets, 'doubaoBigmodelApiKey', {
-    value: hostileEntry,
-    enumerable: true,
-  })
-  Object.defineProperty(secrets, Symbol('hostile'), {
-    enumerable: true,
-    get() {
-      getterCalls += 1
-      return 'symbol-secret'
-    },
-  })
-
-  const normalized = normalizeSettings({ secrets })
-
-  assert.equal(getterCalls, 0)
-  assert.deepEqual(normalized.secrets, {
-    tavilyApiKey: { enc: 'none', data: 'dGF2aWx5' },
-  })
-})
-
-test('normalizeSettings applies descriptor-only rules to caller-supplied base values', () => {
-  let getterCalls = 0
-  const base = Object.create({ pipelineMode: 'cascaded' })
-  Object.defineProperties(base, {
-    palette: { value: 'graphite', enumerable: true },
-    integratedModel: {
-      enumerable: true,
-      get() {
-        getterCalls += 1
-        return 'getter-model'
-      },
-    },
-    integratedVoice: { value: 'hidden-voice', enumerable: false },
-    cascadedLlmModels: {
-      enumerable: true,
-      value: Object.create({ qwen: 'inherited-qwen', ark: 'inherited-ark' }),
-    },
-  })
-
-  const normalized = normalizeSettings({
-    palette: 'invalid',
-    integratedModel: '',
-    integratedVoice: '',
-    cascadedLlmModels: { qwen: '', ark: '' },
-  }, base)
-
-  assert.equal(getterCalls, 0)
-  assert.equal(normalized.palette, 'graphite')
-  assert.equal(normalized.pipelineMode, 'cascaded')
-  assert.equal(normalized.integratedModel, 'qwen-audio-3.0-realtime-plus')
-  assert.equal(normalized.integratedVoice, 'longanqian')
-  assert.deepEqual(normalized.cascadedLlmModels, {
-    qwen: 'qwen-flash',
-    ark: 'doubao-seed-2-0-pro-260215',
-  })
-})
-
-test('normalizeSettings fails closed for descriptor-hostile and revoked proxy shapes', () => {
-  const hostile = new Proxy({}, {
-    get() {
-      throw new Error('ordinary property read must never happen')
-    },
-    getOwnPropertyDescriptor() {
-      throw new Error('descriptor unavailable')
-    },
-  })
-  const { proxy: revoked, revoke } = Proxy.revocable({}, {})
-  revoke()
-
-  assert.deepEqual(normalizeSettings(hostile), DEFAULT_SETTINGS)
-  assert.deepEqual(normalizeSettings(revoked), DEFAULT_SETTINGS)
-  assert.deepEqual(normalizeSettings({ cascadedLlmModels: hostile }), DEFAULT_SETTINGS)
-  assert.deepEqual(normalizeSettings({ secrets: hostile }), DEFAULT_SETTINGS)
-  assert.deepEqual(normalizeSettings({}, hostile), DEFAULT_SETTINGS)
+  assert.equal(normalized.codexHeartbeatSeconds, 45)
+  assert.equal(Object.hasOwn(normalized, '__proto__'), false)
+  assert.equal(Object.hasOwn(normalized, 'unknown'), false)
+  assert.deepEqual(normalized.cascadedLlmModels, {qwen: 'qwen-plus', deepseek: 'deepseek-flash', ark: 'custom-ark'})
+  assert.deepEqual(normalized.secrets, {tavilyApiKey: {enc: 'none', data: 'dGF2aWx5'}})
 })
 
 test('normalizeSettings rejects rather than clamps an out-of-range heartbeat', () => {
@@ -589,32 +414,32 @@ test('normalizeSettings rejects leading and trailing controls before trimming mo
 
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: '\nqwen-custom', ark: 'ark-valid' },
-  }).cascadedLlmModels, {
-    qwen: 'qwen-flash',
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash',
+    qwen: 'qwen-plus',
     ark: 'ark-valid',
   })
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'qwen-valid', ark: 'ark-custom\r' },
-  }).cascadedLlmModels, {
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: 'qwen-valid',
     ark: 'doubao-seed-2-0-pro-260215',
   })
 })
 
-test('normalizeSettings treats cascadedLlmModels as a strict independent two-provider map', () => {
+test('normalizeSettings treats cascadedLlmModels as a strict independent three-provider map', () => {
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'qwen-max', ark: 'ark-custom', extra: 'drop-me' },
-  }).cascadedLlmModels, { qwen: 'qwen-max', ark: 'ark-custom' })
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash', qwen: 'qwen-max', ark: 'ark-custom' })
 
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'qwen-max' },
-  }).cascadedLlmModels, {
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: 'qwen-max',
     ark: DEFAULT_SETTINGS.cascadedLlmModels.ark,
   })
   assert.deepEqual(normalizeSettings({
     cascadedLlmModels: { qwen: 'bad\nmodel', ark: 'ark-custom' },
-  }).cascadedLlmModels, {
+  }).cascadedLlmModels, { deepseek: 'deepseek-flash',
     qwen: DEFAULT_SETTINGS.cascadedLlmModels.qwen,
     ark: 'ark-custom',
   })
@@ -648,7 +473,7 @@ test('normalizeSettings falls back per field to a caller-supplied base', () => {
   assert.equal(merged.pipelineMode, 'cascaded')
   assert.equal(merged.integratedModel, 'integrated-kept')
   assert.equal(merged.cascadedLlmProvider, 'ark')
-  assert.deepEqual(merged.cascadedLlmModels, { qwen: 'qwen-next', ark: 'ark-kept' })
+  assert.deepEqual(merged.cascadedLlmModels, { deepseek: 'deepseek-flash', qwen: 'qwen-next', ark: 'ark-kept' })
 })
 
 test('normalizeSettings keeps only well-formed secret entries', () => {
@@ -726,6 +551,7 @@ test('publicSettings never carries the secrets object', () => {
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
+    'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'plannerModel',
@@ -761,6 +587,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     modelApiKey: false,
     codexApiKey: true,
     arkApiKey: false,
+    deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
     doubaoAsrApiKey: false,
   })
@@ -771,12 +598,13 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     modelApiKey: false,
     codexApiKey: false,
     arkApiKey: false,
+    deepseekApiKey: false,
     doubaoBigmodelApiKey: false,
     doubaoAsrApiKey: false,
   })
 })
 
-test('all seven secret fields seal, report presence, round-trip, and clear independently', () => {
+test('all eight secret fields seal, report presence, round-trip, and clear independently', () => {
   const codec = fakeCodec()
   const values = Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, `${key}-value`]))
   const stored = applySettingsUpdate(DEFAULT_SETTINGS, { secrets: values }, codec)
@@ -1344,4 +1172,38 @@ test('memory prerecall defaults on and preserves an explicit off setting', () =>
   assert.equal(publicSettings(settings).memoryPrerecallEnabled,false)
   assert.equal(backendSettings(settings).memoryPrerecallEnabled,false)
   assert.equal(normalizeSettings({memoryPrerecallEnabled:'false'}).memoryPrerecallEnabled,true)
+})
+
+test('phone pairing configuration persists but does not restart or leak into the voice backend', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'nova-phone-settings-'))
+  t.after(() => rm(dir, {recursive: true, force: true}))
+  const fields = {phoneServerPort: 9020, phoneServerTokenFile: '/private/host.token', phoneServerUrl: 'wss://host.example'}
+  const next = applySettingsUpdate(DEFAULT_SETTINGS, fields)
+  const file = join(dir, 'settings.json')
+  await saveSettings(file, next)
+  const loaded = publicSettings(await loadSettings(file))
+  for (const [key, value] of Object.entries(fields)) assert.equal(loaded[key], value)
+  assert.deepEqual(backendSettings(next), backendSettings(DEFAULT_SETTINGS))
+  for (const invalid of [{phoneServerPort: 65536}, {phoneServerTokenFile: '../token'},
+    {phoneServerUrl: 'wss://' + 'x'.repeat(2049)}, {phoneServerUrl: 'ws://host.example'}, {phoneServerUrl: 'wss://u:p@host.example'}, {phoneServerUrl: 'wss://host.example/?token=x'}]) {
+    const rejected = publicSettings(applySettingsUpdate(next, invalid))
+    for (const key of Object.keys(invalid)) assert.equal(rejected[key], fields[key])
+  }
+})
+
+test('unsupported embedding settings never become cloud defaults during normalize, save or load', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nova-embedding-settings-'))
+  const file = join(directory, 'settings.json')
+  try {
+    for (const embeddingProvider of ['local', 'remote']) {
+      const settings = {...DEFAULT_SETTINGS, embeddingProvider}
+      assert.throws(() => normalizeSettings(settings), {code: 'embedding_provider_invalid',
+        message: 'embeddingProvider: allowed value is dashscope'})
+      assert.throws(() => normalizeSettings({}, settings), /embeddingProvider.*dashscope/u)
+      await writeFile(file, JSON.stringify(settings))
+      await assert.rejects(loadSettings(file), /embeddingProvider.*dashscope/u)
+      await assert.rejects(saveSettings(file, settings), /embeddingProvider.*dashscope/u)
+      assert.equal(JSON.parse(await readFile(file, 'utf8')).embeddingProvider, embeddingProvider)
+    }
+  } finally {await rm(directory, {recursive: true, force: true})}
 })

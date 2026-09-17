@@ -1,23 +1,23 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type {JsonValue} from '../src/events.js'
-import { MonotonicIdFactory, ScriptedIdFactory } from '../src/ids.js'
+import type {JsonValue} from '../src/core/events.js'
+import { MonotonicIdFactory, ScriptedIdFactory } from '../src/core/ids.js'
 import {
   CONVERSATION_CHANNEL,
   USER_PRIORITY,
   handoffPolicySchema,
-} from '../src/memory.js'
+} from '../src/core/memory.js'
 import {
   executorManifestSchema,
   fastBrainOutputSchema,
   opSpecSchema,
-} from '../src/ports.js'
-import { CoreRuntime, type ModelCall } from '../src/runtime.js'
-import { wakeReasonSchema, type Slot, type WakeReason } from '../src/slots.js'
-import { fixtureSlowSimManifest as fixtureSlowSim } from '../src/sim.js'
+} from '../src/core/ports.js'
+import { CoreRuntime, type ModelCall } from '../src/core/runtime.js'
+import { wakeReasonSchema, type Slot, type WakeReason } from '../src/core/slots.js'
+import { fixtureSlowSimManifest as fixtureSlowSim } from '../eval/sim.js'
 import {CODEX_PROJECT_MANIFEST} from '../src/executors/codex/contract.js'
-import {VirtualClock} from '../src/clock.js'
-import {ProjectConfirmationController} from '../src/project-confirmation.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {ProjectConfirmationController} from '../src/projects/project-confirmation.js'
 
 const manifest = executorManifestSchema.parse({
   name: 'slow_sim',
@@ -1001,7 +1001,7 @@ test('an unchanged progress summary does not replace or re-run its Surrogate can
   assert.equal(calls[1]?.reason.selected_suggestion, 's-1')
 })
 
-test('the host refuses a routine progress delta even when the model asks to speak', () => {
+test('the host delivers model-selected progress without a second semantic veto', () => {
   const selected: string[] = []
   const {runtime, calls} = runtimeWithCalls({
     manifest: testManifest({wake: 'none', progressViaSurrogate: true}),
@@ -1033,9 +1033,8 @@ test('the host refuses a routine progress delta even when the model asks to spea
   }, 2)
   runtime.apply(runtime.queue.popReady(2)!)
 
-  assert.deepEqual(selected, [])
-  assert.equal(runtime.suggestions.get('s-1')?.status, 'withdrawn')
-  assert.deepEqual(runtime.diagnostics.at(-1), {code: 'invalid_surrogate_progress_decision'})
+  assert.deepEqual(selected, ['s-1'])
+  assert.equal(runtime.diagnostics.some(item => item.code === 'invalid_surrogate_progress_decision'), false)
 })
 
 test('a non-progress ambient verdict ignores an accidental progress class', () => {
@@ -1955,4 +1954,20 @@ test('external dispatch resolves retained origin sequences without using array p
     {executor: 'ext_sim', op: 'act', request: {}, origin_ref: originRef}, externalReason,
   )
   assert.equal(admitted.accepted, true)
+})
+
+
+test('an explicitly unbounded delegate does not schedule a total deadline', () => {
+  const unbounded = executorManifestSchema.parse({...manifest, ops: [{...manifest.ops[0], deadline_budget: null}]})
+  const runtime = new CoreRuntime({manifests: [unbounded], ids: new MonotonicIdFactory()})
+  const origin = appendTurn(runtime, 1, 'long operation')
+  const admitted = runtime.dispatchExternal({executor: 'slow_sim', op: 'set_light', request: {}, origin_ref: origin}, externalReason)
+  assert.equal(admitted.accepted, true)
+  assert.equal(runtime.inFlightDelegate(admitted.delegate_id!)?.deadline, null)
+  let event
+  while ((event = runtime.queue.popReady(1200)) !== undefined) {
+    assert.notEqual(event.kind, 'deadline')
+    runtime.apply(event)
+  }
+  assert.equal(runtime.inFlightDelegate(admitted.delegate_id!) !== undefined, true)
 })

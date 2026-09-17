@@ -1,10 +1,10 @@
 import {resolve} from 'node:path'
-import type {ExecutorProgress} from '../../causal-runtime.js'
-import type {Clock} from '../../clock.js'
+import type {ExecutorProgress} from '../../core/causal-runtime.js'
+import type {Clock} from '../../core/clock.js'
 import {snapshotJsonRecord} from './safe-json.js'
 import type {CodexLaunchProfile} from './launch-profile.js'
-import {PROGRESS_SUMMARY_LIMIT, validProgressSummary} from '../../events.js'
-import {isPythonSpace} from '../../python-text.js'
+import {validProgressSummary} from '../../core/events.js'
+import {isPythonSpace} from '../../text/python-text.js'
 import {
   CodexProtocolError,
   MAX_FINAL_TEXT_INPUT,
@@ -17,6 +17,7 @@ export interface TurnCompletion {
   readonly status: 'completed' | 'failed'
   readonly final_text: string | null
   readonly internal_activity: number
+  readonly error_code?: 'usage_limit_exceeded' | null
 }
 
 export class AppServerTurnProjection {
@@ -30,13 +31,9 @@ export class AppServerTurnProjection {
   #startedAt: number | null = null
   #internalActivity = 0
   #lastWorkingAt: number | null = null
-  #hasEmittedProse = false
+  #lastEmittedProse: string | null = null
   #completedAgentText: string | null = null
   #summaryProse: string | null = null
-  #commands = 0
-  #commandsFailed = 0
-  #filesChanged = 0
-  #toolCalls = 0
   readonly #fileChangeItems = new Map<string, {
     readonly item: Readonly<Record<string, unknown>>
     readonly startedAtMs: number
@@ -192,12 +189,8 @@ export class AppServerTurnProjection {
     this.#activeTurnId = turnId
     this.#completedAgentText = null
     this.#summaryProse = null
-    this.#commands = 0
-    this.#commandsFailed = 0
-    this.#filesChanged = 0
-    this.#toolCalls = 0
     this.#fileChangeItems.clear()
-    this.#hasEmittedProse = false
+    this.#lastEmittedProse = null
     this.#startedAt = this.#clock.now()
     this.#lastWorkingAt = this.#startedAt
     this.#emit({phase: 'started', internal_activity: 0, elapsed: 0, summary: null})
@@ -235,15 +228,15 @@ export class AppServerTurnProjection {
     const elapsed = Math.max(0, now - this.#startedAt)
     const intervalElapsed = this.#lastWorkingAt !== null
       && now - this.#lastWorkingAt >= this.#workingInterval
-    const firstProse = this.#summaryProse !== null && !this.#hasEmittedProse
-    if (!intervalElapsed && !firstProse) return
+    const summary = this.#summaryProse !== this.#lastEmittedProse ? this.#summaryProse : null
+    if (!intervalElapsed && summary === null) return
     this.#lastWorkingAt = now
-    this.#hasEmittedProse ||= this.#summaryProse !== null
+    this.#lastEmittedProse = this.#summaryProse
     this.#emit({
       phase: 'working',
       internal_activity: this.#internalActivity,
       elapsed,
-      summary: this.#composeSummary(),
+      summary,
     })
   }
 
@@ -253,33 +246,6 @@ export class AppServerTurnProjection {
       if (typeof item.text === 'string') this.#summaryProse = boundedProse(item.text, SUMMARY_PROSE_LIMIT)
       return
     }
-    if (type === 'commandExecution') {
-      this.#commands += 1
-      if (item.exitCode !== 0 && item.exitCode !== null && item.exitCode !== undefined) {
-        this.#commandsFailed += 1
-      }
-      return
-    }
-    if (type === 'fileChange') {
-      this.#filesChanged += Array.isArray(item.changes) ? item.changes.length : 1
-      return
-    }
-    if (type === 'mcpToolCall' || type === 'webSearch') this.#toolCalls += 1
-  }
-
-  #composeSummary(): string | null {
-    const segments: string[] = []
-    if (this.#commands > 0) {
-      const failed = this.#commandsFailed > 0 ? `（${this.#commandsFailed} 条失败）` : ''
-      segments.push(`已执行 ${this.#commands} 条命令${failed}`)
-    }
-    if (this.#filesChanged > 0) segments.push(`已修改 ${this.#filesChanged} 处文件`)
-    if (this.#toolCalls > 0) segments.push(`已调用 ${this.#toolCalls} 次工具`)
-    const digest = segments.join('、')
-    let combined = digest
-    if (digest !== '' && this.#summaryProse !== null) combined += `。${this.#summaryProse}`
-    else if (digest === '' && this.#summaryProse !== null) combined = this.#summaryProse
-    return combined === '' ? null : boundedProse(combined, PROGRESS_SUMMARY_LIMIT)
   }
 
   #matchesItem(params: Readonly<Record<string, unknown>>): params is Readonly<{
@@ -320,6 +286,7 @@ export class AppServerTurnProjection {
       status: turn.status === 'completed' ? 'completed' : 'failed',
       final_text: finalText,
       internal_activity: this.#internalActivity,
+      error_code: safeTurnErrorCode(turn.error),
     })
   }
 
@@ -376,6 +343,11 @@ function requireNonemptyString(value: unknown): string {
 function requireObject(value: unknown): Record<string, unknown> {
   if (!isPlainObject(value)) throw new TypeError('object')
   return value
+}
+
+function safeTurnErrorCode(value: unknown): 'usage_limit_exceeded' | null {
+  if (!isPlainObject(value)) return null
+  return value.codexErrorInfo === 'usageLimitExceeded' ? 'usage_limit_exceeded' : null
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

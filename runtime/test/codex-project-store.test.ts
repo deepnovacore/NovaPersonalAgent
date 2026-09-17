@@ -30,7 +30,7 @@ import {tmpdir} from 'node:os'
 import {basename, join, relative} from 'node:path'
 import {test} from 'node:test'
 
-import {VirtualClock, type Clock} from '../src/clock.js'
+import {VirtualClock, type Clock} from '../src/core/clock.js'
 import {
   ProjectStore,
   PROJECT_MAINTENANCE_JOURNAL_FILE,
@@ -39,25 +39,49 @@ import {
   hostProjectRootForTest,
   normalizeProjectSessionTitle,
   normalizeProjectWorkspaceName,
-} from '../src/project-store.js'
+} from '../src/projects/project-store.js'
 import {
   hostCodexHomeValue,
   hostWorkspaceForTest,
   hostWorkspacePath,
 } from '../src/executors/codex/process-owner.js'
-import {ManagedWorkspaceMaintenanceService} from '../src/managed-workspace-maintenance.js'
+import {ManagedWorkspaceMaintenanceService} from '../src/projects/managed-workspace-maintenance.js'
 import {
   unsupportedNativeFileLocks,
   type NativeFileLockAuthority,
   type NativeFileLockResult,
-} from '../src/native-file-lock.js'
+} from '../src/storage/native-file-lock.js'
 import type {
   ProjectFileIdentity,
   ProjectRootFileAuthority,
   ProjectRootFileCreateResult,
   ProjectRootFileLookupResult,
   ProjectRootFileResult,
-} from '../src/project-root-file.js'
+} from '../src/projects/project-root-file.js'
+
+async function projectStoreFixture(prefix: string) {
+  const root = await mkdtemp(join(tmpdir(), prefix))
+  const stateRoot = join(root, 'state')
+  const managedRoot = join(root, 'managed')
+  await mkdir(stateRoot, {mode: 0o700})
+  await mkdir(managedRoot, {mode: 0o700})
+  const options = async (overrides: Partial<Parameters<typeof ProjectStore.open>[0]> = {}) => ({
+    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
+    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+    nativeLocks: new DescriptorLockAuthority(),
+    ...(Object.hasOwn(overrides, 'rootFiles') ? {} : {rootFiles: rootFilesForTest(stateRoot, managedRoot)}),
+    ...overrides,
+  })
+  return {
+    root, stateRoot, managedRoot, options,
+    open: async (overrides?: Partial<Parameters<typeof ProjectStore.open>[0]>) =>
+      await ProjectStore.open(await options(overrides)),
+    async close(...stores: readonly ({close(): Promise<void>} | null | undefined)[]): Promise<void> {
+      for (const store of stores) await store?.close()
+      await rm(root, {recursive: true, force: true})
+    },
+  }
+}
 
 async function within<T>(name: string, work: Promise<T>, milliseconds = 2_000): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -734,16 +758,32 @@ class CountingProtectRootFileAuthority extends DescriptorRelativeRootFileAuthori
   }
 }
 
-class DeferredReleaseLockAuthority implements NativeFileLockAuthority {
-  releaseStarted: (() => void) | null = null
+class DeferredReleaseLockAuthority extends DescriptorLockAuthority {
+  acquireCalls = 0
   releaseNow: (() => void) | null = null
+  #deferNextRelease = false
+  #releaseStarted: (() => void) | null = null
 
-  acquire(): NativeFileLockResult {
+  deferNextRelease(): Promise<void> {
+    this.#deferNextRelease = true
+    return new Promise<void>(resolveStarted => { this.#releaseStarted = resolveStarted })
+  }
+
+  override acquire(descriptor: number): NativeFileLockResult {
+    this.acquireCalls += 1
+    const acquired = super.acquire(descriptor)
+    if (acquired.status !== 'acquired') return acquired
     return {
       status: 'acquired',
       release: async () => {
-        this.releaseStarted?.()
-        await new Promise<void>(resolveRelease => { this.releaseNow = resolveRelease })
+        if (this.#deferNextRelease) {
+          this.#deferNextRelease = false
+          this.#releaseStarted?.()
+          this.#releaseStarted = null
+          await new Promise<void>(resolveRelease => { this.releaseNow = resolveRelease })
+          this.releaseNow = null
+        }
+        await acquired.release()
       },
     }
   }
@@ -814,7 +854,7 @@ test('project names use Python NFKC, whitespace collapse, and full casefold', ()
 
 test('managed workspace slug classification never consults ambient ICU Unicode categories', async () => {
   const source = await readFile(
-    join(import.meta.dirname, '../../src/project-store.ts'),
+    join(import.meta.dirname, '../../src/projects/project-state.ts'),
     'utf8',
   )
   assert.equal(source.includes('/[\\p{L}\\p{N}]/u'), false)
@@ -822,11 +862,11 @@ test('managed workspace slug classification never consults ambient ICU Unicode c
 
 test('durability and native locking source retain the audited no-fallback primitives', async () => {
   const storeSource = await readFile(
-    join(import.meta.dirname, '../../src/project-store.ts'),
+    join(import.meta.dirname, '../../src/projects/project-store-files.ts'),
     'utf8',
   )
   const nativeSource = await readFile(
-    join(import.meta.dirname, '../../src/native-file-lock.ts'),
+    join(import.meta.dirname, '../../src/storage/native-file-lock.ts'),
     'utf8',
   )
   const ordered = [
@@ -853,16 +893,9 @@ test('durability and native locking source retain the audited no-fallback primit
 })
 
 test('native lock unsupported and busy results fail closed without a PID or path lock fallback', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-lock-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const roots = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
-  }
+  const storeFixture = await projectStoreFixture('nova-codex-project-lock-')
+
+  const roots = await storeFixture.options()
   let store: ProjectStore | null = null
   try {
     store = await ProjectStore.open({...roots, nativeLocks: unsupportedNativeFileLocks})
@@ -908,8 +941,7 @@ test('native lock unsupported and busy results fail closed without a PID or path
       await failed.close()
     }
   } finally {
-    await store?.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
@@ -944,16 +976,10 @@ test('native lock results require exact plain data without invoking getters', as
     }),
   ]
   for (const [index, factory] of factories.entries()) {
-    const root = await mkdtemp(join(tmpdir(), `nova-codex-project-lock-result-${index}-`))
-    const stateRoot = join(root, 'state')
-    const managedRoot = join(root, 'managed')
-    await mkdir(stateRoot, {mode: 0o700})
-    await mkdir(managedRoot, {mode: 0o700})
-    const store = await ProjectStore.open({
-      stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-      managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+    const storeFixture = await projectStoreFixture(`nova-codex-project-lock-result-${index}-`)
+
+    const store = await storeFixture.open({
       nativeLocks: {acquire: () => factory() as NativeFileLockResult},
-      rootFiles: rootFilesForTest(stateRoot, managedRoot),
     })
     try {
       await assert.rejects(
@@ -963,19 +989,16 @@ test('native lock results require exact plain data without invoking getters', as
           && !String(error).includes('sentinel'),
       )
     } finally {
-      await store.close()
-      await rm(root, {recursive: true, force: true})
+      await storeFixture.close(store)
     }
   }
   assert.equal(getterReads, 0)
 })
 
 test('missing, unsupported, asynchronous, and malformed root-file authority fails at open', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-root-files-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-root-files-')
+  const {stateRoot, managedRoot} = storeFixture
+  // This fixture deliberately omits rootFiles to exercise the missing-authority boundary.
   const roots = {
     stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
     managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
@@ -1030,23 +1053,17 @@ test('missing, unsupported, asynchronous, and malformed root-file authority fail
       }
     }
   } finally {
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('state lock and temp creation use only descriptor-relative fixed basenames', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-root-create-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-root-create-')
+  const {root, stateRoot, managedRoot} = storeFixture
   const workspace = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspace, {mode: 0o700})
   const rootFiles = new RecordingRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => 'workspace-0001',
   })
@@ -1072,17 +1089,13 @@ test('state lock and temp creation use only descriptor-relative fixed basenames'
       assert.equal(/^[A-Za-z]:/u.test(item.name), false)
     }
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('malformed descriptor creation fails before native acquire without awaiting host values', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-root-create-malformed-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-root-create-malformed-')
+  const {stateRoot, managedRoot} = storeFixture
   const delegate = new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot])
   const never = new Promise<ProjectRootFileCreateResult>(() => undefined)
   const rootFiles = {
@@ -1098,9 +1111,7 @@ test('malformed descriptor creation fails before native acquire without awaiting
       delegate.removeTreeAt(descriptor, name, expected),
   } satisfies ProjectRootFileAuthority
   let acquireCalls = 0
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks: {acquire: () => {
       acquireCalls += 1
       return {status: 'acquired', release: () => undefined}
@@ -1114,22 +1125,16 @@ test('malformed descriptor creation fails before native acquire without awaiting
     )
     assert.equal(acquireCalls, 0)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a descriptor child mismatch fails before native lock acquisition', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-root-match-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-root-match-')
+  const {stateRoot, managedRoot} = storeFixture
   let acquireCalls = 0
   const rootFiles = new RejectLockMatchRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks: {acquire: () => {
       acquireCalls += 1
       return {status: 'acquired', release: () => undefined}
@@ -1148,22 +1153,16 @@ test('a descriptor child mismatch fails before native lock acquisition', async (
       (error: unknown) => isErrno(error, 'EBADF'),
     )
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a newly-created lock must retain its exact descriptor identity before native acquire', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-lock-create-race-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-lock-create-race-')
+  const {stateRoot, managedRoot} = storeFixture
   let acquireCalls = 0
   const rootFiles = new ReplaceCreatedLockRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks: {acquire: () => {
       acquireCalls += 1
       return {status: 'acquired', release: () => undefined}
@@ -1178,8 +1177,7 @@ test('a newly-created lock must retain its exact descriptor identity before nati
     assert.equal(rootFiles.replaced, true)
     assert.equal(acquireCalls, 0)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
@@ -1230,15 +1228,12 @@ test('swap-away-and-back descriptor operations never write or delete replacement
 test('state-root replacement during descriptor acquire cannot redirect state writes', {
   skip: process.platform === 'win32' && 'requires POSIX open-directory rename and symlink semantics',
 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-root-acquire-swap-'))
-  const stateRoot = join(root, 'state')
+  const storeFixture = await projectStoreFixture('nova-codex-project-root-acquire-swap-')
+  const {root, stateRoot} = storeFixture
   const retainedRoot = join(root, 'state-retained')
   const replacementRoot = join(root, 'replacement')
-  const managedRoot = join(root, 'managed')
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
   await mkdir(replacementRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   let swapped = false
   const nativeLocks: NativeFileLockAuthority = {
@@ -1251,11 +1246,8 @@ test('state-root replacement during descriptor acquire cannot redirect state wri
       return {status: 'acquired', release: () => undefined}
     },
   }
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     idFactory: () => 'workspace-0001',
   })
   try {
@@ -1275,22 +1267,18 @@ test('state-root replacement during descriptor acquire cannot redirect state wri
       (error: unknown) => error instanceof ProjectStateError && error.code === 'state_permissions',
     )
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('live owner acquisition validates the retained state-root identity before open returns', {
   skip: process.platform === 'win32' && 'requires POSIX open-directory rename and symlink semantics',
 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-owner-root-swap-'))
-  const stateRoot = join(root, 'state')
+  const storeFixture = await projectStoreFixture('nova-codex-project-owner-root-swap-')
+  const {root, stateRoot} = storeFixture
   const retainedRoot = join(root, 'state-retained')
   const replacementRoot = join(root, 'replacement')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
   await mkdir(replacementRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   let swapped = false
   const nativeLocks: NativeFileLockAuthority = {
     acquire: () => {
@@ -1304,41 +1292,31 @@ test('live owner acquisition validates the retained state-root identity before o
   }
   try {
     await assert.rejects(
-      ProjectStore.open({
-        stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-        managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+      storeFixture.open({
         nativeLocks,
-        rootFiles: rootFilesForTest(stateRoot, managedRoot),
         live: true,
       }),
       (error: unknown) => error instanceof ProjectStateError && error.code === 'state_permissions',
     )
     await assert.rejects(lstat(join(replacementRoot, 'codex-projects-v1.json')), {code: 'ENOENT'})
   } finally {
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('state-root replacement after atomic replace is detected and permanently poisons the store', {
   skip: process.platform === 'win32' && 'requires POSIX open-directory rename and symlink semantics',
 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-root-commit-swap-'))
-  const stateRoot = join(root, 'state')
+  const storeFixture = await projectStoreFixture('nova-codex-project-root-commit-swap-')
+  const {root, stateRoot} = storeFixture
   const retainedRoot = join(root, 'state-retained')
   const replacementRoot = join(root, 'replacement')
-  const managedRoot = join(root, 'managed')
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
   await mkdir(replacementRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   let swapped = false
   const durability: string[] = []
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => 'workspace-0001',
     onDurabilityStep: step => {
       durability.push(step)
@@ -1361,26 +1339,19 @@ test('state-root replacement after atomic replace is detected and permanently po
     )
     assert.deepEqual(await readdir(replacementRoot), [])
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('an asynchronous or never-settling native acquire is malformed and fails immediately', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-async-lock-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-async-lock-')
+
   const never = new Promise<NativeFileLockResult>(() => undefined)
   const nativeLocks = {
     acquire: () => never,
   } as unknown as NativeFileLockAuthority
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
   })
   let closeSettled = false
   try {
@@ -1396,11 +1367,8 @@ test('an asynchronous or never-settling native acquire is malformed and fails im
     const thenableLocks = {
       acquire: () => ({status: 'busy', then: () => undefined}),
     } as unknown as NativeFileLockAuthority
-    const thenableStore = await ProjectStore.open({
-      stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-      managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+    const thenableStore = await storeFixture.open({
       nativeLocks: thenableLocks,
-      rootFiles: rootFilesForTest(stateRoot, managedRoot),
     })
     let thenableClosed = false
     try {
@@ -1415,25 +1383,17 @@ test('an asynchronous or never-settling native acquire is malformed and fails im
       if (thenableClosed) await thenableStore.close()
       else void thenableStore.close()
     }
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('a transaction joins asynchronous native unlock before its promise settles', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-lock-join-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-lock-join-')
+
   const nativeLocks = new DeferredReleaseLockAuthority()
-  let releaseStartedResolve: (() => void) | null = null
-  const releaseStarted = new Promise<void>(resolveStarted => { releaseStartedResolve = resolveStarted })
-  nativeLocks.releaseStarted = () => { releaseStartedResolve?.() }
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const releaseStarted = nativeLocks.deferNextRelease()
+  const store = await storeFixture.open({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
   })
   try {
     let settled = false
@@ -1450,30 +1410,142 @@ test('a transaction joins asynchronous native unlock before its promise settles'
     assert.equal(settled, true)
   } finally {
     nativeLocks.releaseNow?.()
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
+  }
+})
+
+test('same-instance default transactions wait behind an active transaction before native lock acquisition', async () => {
+  const storeFixture = await projectStoreFixture('nova-codex-project-instance-queue-')
+  const {root} = storeFixture
+  const firstPath = join(root, 'background')
+  const secondPath = join(root, 'foreground')
+  await mkdir(firstPath, {mode: 0o700})
+  await mkdir(secondPath, {mode: 0o700})
+  const nativeLocks = new DeferredReleaseLockAuthority()
+  const ids = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
+  const store = await storeFixture.open({
+    nativeLocks,
+    idFactory: () => ids.next().value ?? 'unused-id',
+  })
+  try {
+    const releaseStarted = nativeLocks.deferNextRelease()
+    const first = store.ensureImported('background', hostWorkspaceForTest(await realpath(firstPath)))
+    await within('background transaction release start', releaseStarted)
+    const callsBeforeSecond = nativeLocks.acquireCalls
+    let secondSettled = false
+    const second = store
+      .ensureImported('foreground', hostWorkspaceForTest(await realpath(secondPath)))
+      .finally(() => { secondSettled = true })
+    void second.catch(() => undefined)
+    await new Promise<void>(resolveTurn => { setImmediate(resolveTurn) })
+    assert.equal(secondSettled, false, 'foreground transaction must wait for predecessor ownership')
+    assert.equal(
+      nativeLocks.acquireCalls,
+      callsBeforeSecond,
+      'queued same-instance transaction must not collide with the held native lock',
+    )
+    nativeLocks.releaseNow?.()
+    assert.equal((await within('background transaction', first)).workspace_id, 'workspace-0001')
+    assert.equal((await within('foreground transaction', second)).workspace_id, 'workspace-0002')
+  } finally {
+    nativeLocks.releaseNow?.()
+    await storeFixture.close(store)
+  }
+})
+
+test('a caller signal aborts a queued same-instance transaction before native lock acquisition', async () => {
+  const storeFixture = await projectStoreFixture('nova-codex-project-instance-queue-abort-')
+  const {root} = storeFixture
+  const workspacePath = join(root, 'workspace')
+  const holderPath = join(root, 'holder')
+  await mkdir(workspacePath, {mode: 0o700})
+  await mkdir(holderPath, {mode: 0o700})
+  const nativeLocks = new DeferredReleaseLockAuthority()
+  const ids = ['workspace-0001', 'session-0001', 'workspace-0002'][Symbol.iterator]()
+  const store = await storeFixture.open({
+    nativeLocks,
+    idFactory: () => ids.next().value ?? 'unused-id',
+  })
+  try {
+    const workspace = await store.ensureImported(
+      'alpha',
+      hostWorkspaceForTest(await realpath(workspacePath)),
+    )
+    const starting = await store.beginSession(workspace.workspace_id, '任务')
+    const releaseStarted = nativeLocks.deferNextRelease()
+    const holder = store.ensureImported('holder', hostWorkspaceForTest(await realpath(holderPath)))
+    await within('holder transaction release start', releaseStarted)
+    const callsBeforeQueued = nativeLocks.acquireCalls
+    const abort = new AbortController()
+    const rollback = (store.rollbackSessionStart as unknown as (
+      sessionId: string,
+      options: {readonly wait: boolean; readonly signal: AbortSignal},
+    ) => Promise<boolean>).call(store, starting.session_id, {wait: true, signal: abort.signal})
+    void rollback.catch(() => undefined)
+    await new Promise<void>(resolveTurn => { setImmediate(resolveTurn) })
+    assert.equal(nativeLocks.acquireCalls, callsBeforeQueued)
+    abort.abort()
+    await assert.rejects(
+      within('caller-aborted same-instance predecessor wait', rollback, 100),
+      (error: unknown) => error instanceof Error && error.name === 'AbortError',
+    )
+    nativeLocks.releaseNow?.()
+    await within('holder transaction', holder)
+    assert.equal((await store.resolveSession(workspace.workspace_id, null)).state, 'starting')
+  } finally {
+    nativeLocks.releaseNow?.()
+    await storeFixture.close(store)
+  }
+})
+
+test('store close aborts a queued same-instance transaction before native lock acquisition', async () => {
+  const storeFixture = await projectStoreFixture('nova-codex-project-instance-queue-close-')
+  const {root} = storeFixture
+  const firstPath = join(root, 'background')
+  const secondPath = join(root, 'foreground')
+  await mkdir(firstPath, {mode: 0o700})
+  await mkdir(secondPath, {mode: 0o700})
+  const nativeLocks = new DeferredReleaseLockAuthority()
+  const ids = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
+  const store = await storeFixture.open({
+    nativeLocks,
+    idFactory: () => ids.next().value ?? 'unused-id',
+  })
+  try {
+    const releaseStarted = nativeLocks.deferNextRelease()
+    const first = store.ensureImported('background', hostWorkspaceForTest(await realpath(firstPath)))
+    await within('background transaction release start', releaseStarted)
+    const second = store.ensureImported('foreground', hostWorkspaceForTest(await realpath(secondPath)))
+    void second.catch(() => undefined)
+    let closeSettled = false
+    const closing = store.close().finally(() => { closeSettled = true })
+    await assert.rejects(
+      within('close-aborted same-instance predecessor wait', second, 100),
+      (error: unknown) => error instanceof ProjectStateError && error.code === 'state_lock_failed',
+    )
+    assert.equal(closeSettled, false, 'close must still join the active predecessor transaction')
+    nativeLocks.releaseNow?.()
+    await within('background transaction', first)
+    await within('store close after queued transaction abort', closing)
+  } finally {
+    nativeLocks.releaseNow?.()
+    await storeFixture.close(store)
   }
 })
 
 test('rollback and first-live recovery use one bounded abort-aware descriptor-lock wait', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-lock-wait-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-lock-wait-')
+  const {root} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const nativeLocks = new BusyThenDescriptorLockAuthority()
   const clock = new AdvancingClock()
   const ids = ['workspace-0001', 'session-0001', 'session-0002'][Symbol.iterator]()
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const options = await storeFixture.options({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     idFactory: () => ids.next().value ?? 'unused-id',
     lockClock: clock,
-  } as Parameters<typeof ProjectStore.open>[0]
+  })
   let ordinary: ProjectStore | null = null
   let live: ProjectStore | null = null
   try {
@@ -1501,25 +1573,17 @@ test('rollback and first-live recovery use one bounded abort-aware descriptor-lo
     assert.equal((await live.resolveSession(workspace.workspace_id, crashed.display_title)).state, 'unavailable')
     assert.deepEqual(clock.sleeps, [0.025, 0.025, 0.025, 0.025])
   } finally {
-    await ordinary?.close()
-    await live?.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(ordinary, live)
   }
 })
 
 test('managed-create rollback opts into the same bounded descriptor-lock wait', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-managed-lock-wait-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-managed-lock-wait-')
+
   const nativeLocks = new BusyThenDescriptorLockAuthority()
   const clock = new AdvancingClock()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     idFactory: () => 'workspace-0001',
     lockClock: clock,
   })
@@ -1533,27 +1597,20 @@ test('managed-create rollback opts into the same bounded descriptor-lock wait', 
     assert.deepEqual(clock.sleeps, [0.025, 0.025])
     await assert.rejects(lstat(created.canonical_path), {code: 'ENOENT'})
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('ready and unavailable finalization opt into the same bounded descriptor-lock wait', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-finalize-lock-wait-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-finalize-lock-wait-')
+  const {root} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const nativeLocks = new BusyThenDescriptorLockAuthority()
   const clock = new AdvancingClock()
   const ids = ['workspace-0001', 'session-0001'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     idFactory: () => ids.next().value ?? 'unused-id',
     lockClock: clock,
   })
@@ -1575,30 +1632,23 @@ test('ready and unavailable finalization opt into the same bounded descriptor-lo
     assert.equal(unavailable.state, 'unavailable')
     assert.deepEqual(clock.sleeps, [0.025, 0.025, 0.025, 0.025])
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('an aborted bounded lock wait settles and is joined before store close returns', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-lock-abort-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-lock-abort-')
+  const {root} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const nativeLocks = new BusyThenDescriptorLockAuthority()
   const clock = new VirtualClock()
   const ids = ['workspace-0001', 'session-0001'][Symbol.iterator]()
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const options = await storeFixture.options({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     idFactory: () => ids.next().value ?? 'unused-id',
     lockClock: clock,
-  } as Parameters<typeof ProjectStore.open>[0]
+  })
   const store = await ProjectStore.open(options)
   try {
     const workspace = await store.ensureImported(
@@ -1625,27 +1675,20 @@ test('an aborted bounded lock wait settles and is joined before store close retu
     await within('store close after aborted lock wait', store.close())
     assert.equal(clock.waiterCount(), 0)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a bounded lock wait exhausts one fixed deadline and returns stable state_busy', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-lock-deadline-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-lock-deadline-')
+  const {root} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const nativeLocks = new BusyThenDescriptorLockAuthority()
   const clock = new AdvancingClock()
   const ids = ['workspace-0001', 'session-0001'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     idFactory: () => ids.next().value ?? 'unused-id',
     lockClock: clock,
   })
@@ -1672,28 +1715,21 @@ test('a bounded lock wait exhausts one fixed deadline and returns stable state_b
     assert.equal((await store.resolveSession(workspace.workspace_id, null)).state, 'starting')
   } finally {
     nativeLocks.busyAttempts = 0
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('live owner exclusion and first-transaction recovery are crash-safe and ordinary readers do not recover', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-owner-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-owner-')
+  const {root} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const nativeLocks = new DescriptorLockAuthority()
   const ids = ['workspace-0001', 'session-0001'][Symbol.iterator]()
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const options = await storeFixture.options({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     idFactory: () => ids.next().value ?? 'unused-id',
-  }
+  })
   let first: ProjectStore | null = null
   let ordinary: ProjectStore | null = null
   let restarted: ProjectStore | null = null
@@ -1718,26 +1754,15 @@ test('live owner exclusion and first-transaction recovery are crash-safe and ord
     const recovered = await restarted.resolveSession(workspace.workspace_id, starting.display_title)
     assert.equal(recovered.state, 'unavailable')
   } finally {
-    await first?.close()
-    await ordinary?.close()
-    await restarted?.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(first, ordinary, restarted)
   }
 })
 
 test('registry no-follow, owner mode, byte cap, strict decode, and corrupt-byte preservation fail closed', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-state-security-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-state-security-')
+  const {root, stateRoot} = storeFixture
   const statePath = join(stateRoot, 'codex-projects-v1.json')
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
-  }
+  const options = await storeFixture.options()
   const expectCode = async (code: string): Promise<void> => {
     const store = await ProjectStore.open(options)
     try {
@@ -1814,26 +1839,20 @@ test('registry no-follow, owner mode, byte cap, strict decode, and corrupt-byte 
       await expectCode('state_permissions')
     }
   } finally {
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('state revision increments once per mutation and maintenance snapshots pin managed identities', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-revision-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-revision-')
+  const {stateRoot, managedRoot} = storeFixture
   const identifiers = ['workspace-0001', 'session-0001'][Symbol.iterator]()
   const rootFiles = new ToggleRemoveTreeRootFileAuthority([stateRoot, managedRoot])
-  const storeOptions = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeOptions = await storeFixture.options({
     rootFiles,
     now: () => 100,
     idFactory: () => identifiers.next().value ?? 'unused-id',
-  }
+  })
   let store = await ProjectStore.open(storeOptions)
   try {
     assert.equal((await store.snapshot()).state_revision, 0)
@@ -1896,23 +1915,16 @@ test('state revision increments once per mutation and maintenance snapshots pin 
     assert.deepEqual(await store.cleanupManagedMaintenanceJournal(), {status: 'clean'})
     assert.equal(await store.loadManagedMaintenanceJournal(), null)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('all managed originals are detached before any replacement is created', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-maintenance-order-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-maintenance-order-')
+  const {stateRoot, managedRoot} = storeFixture
   const identifiers = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
   const rootFiles = new MaintenanceOrderRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => identifiers.next().value ?? 'unused-id',
   })
@@ -1941,22 +1953,15 @@ test('all managed originals are detached before any replacement is created', asy
     assert.equal(firstMkdir, 2)
     assert.deepEqual(await store.cleanupManagedMaintenanceJournal(), {status: 'clean'})
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('maintenance rename never overwrites a destination raced into the managed root', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-maintenance-collision-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-maintenance-collision-')
+  const {stateRoot, managedRoot} = storeFixture
   const rootFiles = new MaintenanceCollisionRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => 'workspace-0001',
   })
@@ -1985,23 +1990,16 @@ test('maintenance rename never overwrites a destination raced into the managed r
     assert.equal(collision.ino, rootFiles.collisionIdentity?.inode)
     assert.equal(await readFile(join(workspace.canonical_path, 'original.txt'), 'utf8'), 'preserve me')
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('managed-root metadata is durable before commit and cleanup journal advancement', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-maintenance-durability-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-maintenance-durability-')
+  const {stateRoot, managedRoot} = storeFixture
   const identifiers = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
   const rootFiles = new MaintenanceDurabilityRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => identifiers.next().value ?? 'unused-id',
   })
@@ -2044,23 +2042,16 @@ test('managed-root metadata is durable before commit and cleanup journal advance
     assert.notEqual(clearBarrier, -1, JSON.stringify(rootFiles.events))
     assert.equal(clearBarrier < clearJournal, true, JSON.stringify(rootFiles.events))
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('managed-root rollback is durable before its journal is cleared', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-maintenance-rollback-durability-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-maintenance-rollback-durability-')
+  const {stateRoot, managedRoot} = storeFixture
   const identifiers = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
   const rootFiles = new MaintenanceDurabilityRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => identifiers.next().value ?? 'unused-id',
   })
@@ -2090,23 +2081,16 @@ test('managed-root rollback is durable before its journal is cleared', async () 
     assert.equal(await readFile(join(alpha.canonical_path, 'alpha.txt'), 'utf8'), 'alpha')
     assert.equal(await readFile(join(beta.canonical_path, 'beta.txt'), 'utf8'), 'beta')
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a later replacement failure restores every original in the prepared set', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-maintenance-rollback-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-maintenance-rollback-')
+  const {stateRoot, managedRoot} = storeFixture
   const identifiers = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
   const rootFiles = new FailNthMaintenanceMkdirAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => identifiers.next().value ?? 'unused-id',
   })
@@ -2132,8 +2116,7 @@ test('a later replacement failure restores every original in the prepared set', 
     assert.equal(await readFile(join(beta.canonical_path, 'beta.txt'), 'utf8'), 'beta')
     assert.equal(await store.loadManagedMaintenanceJournal(), null)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
@@ -2192,18 +2175,12 @@ test('desktop journal recovery waits for the live owner before changing managed 
 })
 
 test('a prepared journal rolls back after restart without deleting a populated replacement', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-maintenance-recovery-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-maintenance-recovery-')
+  const {stateRoot, managedRoot} = storeFixture
+  const options = await storeFixture.options({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => 'workspace-0001',
-  }
+  })
   let store = await ProjectStore.open(options)
   try {
     const workspace = await store.createManaged('Alpha')
@@ -2245,23 +2222,17 @@ test('a prepared journal rolls back after restart without deleting a populated r
     await assert.rejects(readFile(join(stateRoot, PROJECT_MAINTENANCE_JOURNAL_FILE)), /ENOENT/u)
   } finally {
     await store.close().catch(() => undefined)
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('prepared recovery never deletes an empty replacement with an unbound identity', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-maintenance-substitution-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-maintenance-substitution-')
+  const {stateRoot, managedRoot} = storeFixture
+  const options = await storeFixture.options({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => 'workspace-0001',
-  }
+  })
   let store = await ProjectStore.open(options)
   try {
     const workspace = await store.createManaged('Alpha')
@@ -2295,24 +2266,18 @@ test('prepared recovery never deletes an empty replacement with an unbound ident
     assert.equal(await readFile(join(managedRoot, tombstoneName, 'original.txt'), 'utf8'), 'preserve me')
   } finally {
     await store.close().catch(() => undefined)
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('a partially recovered prepared v1 maintenance journal remains decodable', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-v1-prepared-shrink-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-v1-prepared-shrink-')
+  const {stateRoot, managedRoot} = storeFixture
   const identifiers = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const options = await storeFixture.options({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => identifiers.next().value ?? 'unused-id',
-  }
+  })
   let store = await ProjectStore.open(options)
   try {
     const alpha = await store.createManaged('Alpha')
@@ -2376,25 +2341,19 @@ test('a partially recovered prepared v1 maintenance journal remains decodable', 
     assert.deepEqual(await store.cleanupManagedMaintenanceJournal(), {status: 'clean'})
   } finally {
     await store.close().catch(() => undefined)
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('a partially cleaned committed v1 maintenance journal remains decodable', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-v1-committed-shrink-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-v1-committed-shrink-')
+  const {stateRoot, managedRoot} = storeFixture
   const identifiers = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
   const rootFiles = new MaintenanceDurabilityRootFileAuthority([stateRoot, managedRoot])
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const options = await storeFixture.options({
     rootFiles,
     idFactory: () => identifiers.next().value ?? 'unused-id',
-  }
+  })
   let store = await ProjectStore.open(options)
   try {
     await store.createManaged('Alpha')
@@ -2449,7 +2408,7 @@ test('a partially cleaned committed v1 maintenance journal remains decodable', a
     assert.deepEqual(await store.cleanupManagedMaintenanceJournal(), {status: 'clean'})
   } finally {
     await store.close().catch(() => undefined)
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
@@ -2460,19 +2419,13 @@ test('replacement crash boundaries recover the operation-owned temporary in eith
     'replacement_placed',
   ] as const) {
     await t.test(crashPoint, async () => {
-      const root = await mkdtemp(join(tmpdir(), `nova-codex-project-maintenance-${crashPoint}-`))
-      const stateRoot = join(root, 'state')
-      const managedRoot = join(root, 'managed')
-      await mkdir(stateRoot, {mode: 0o700})
-      await mkdir(managedRoot, {mode: 0o700})
+      const storeFixture = await projectStoreFixture(`nova-codex-project-maintenance-${crashPoint}-`)
+      const {stateRoot, managedRoot} = storeFixture
       const rootFiles = new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot])
-      const baseOptions = {
-        stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-        managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-        nativeLocks: new DescriptorLockAuthority(),
+      const baseOptions = await storeFixture.options({
         rootFiles,
         idFactory: () => 'workspace-0001',
-      }
+      })
       const crashOptions = {
         ...baseOptions,
         maintenanceFault: (step: string) => step === crashPoint,
@@ -2506,26 +2459,20 @@ test('replacement crash boundaries recover the operation-owned temporary in eith
         assert.equal(await store.loadManagedMaintenanceJournal(), null)
       } finally {
         await store.close().catch(() => undefined)
-        await rm(root, {recursive: true, force: true})
+        await storeFixture.close()
       }
     })
   }
 })
 
 test('crash after tombstone deletion is idempotently completed from the committed journal', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-maintenance-delete-crash-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-maintenance-delete-crash-')
+  const {stateRoot, managedRoot} = storeFixture
   const rootFiles = new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot])
-  const baseOptions = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const baseOptions = await storeFixture.options({
     rootFiles,
     idFactory: () => 'workspace-0001',
-  }
+  })
   const crashOptions = {
     ...baseOptions,
     maintenanceFault: (step: string) => step === 'cleanup_entry_deleted',
@@ -2590,20 +2537,14 @@ test('crash after tombstone deletion is idempotently completed from the committe
     assert.deepEqual(await readdir(workspace.canonical_path), [])
   } finally {
     await store.close().catch(() => undefined)
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('committed cleanup treats an already missing tombstone as completed', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-maintenance-missing-cleanup-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-maintenance-missing-cleanup-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => 'workspace-0001',
   })
@@ -2627,21 +2568,14 @@ test('committed cleanup treats an already missing tombstone as completed', async
     assert.deepEqual(await store.cleanupManagedMaintenanceJournal(), {status: 'clean'})
     assert.equal(await store.loadManagedMaintenanceJournal(), null)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('current managed open detects a same-path substitution around the host callback', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-open-substitution-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-open-substitution-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => 'workspace-0001',
   })
@@ -2655,22 +2589,15 @@ test('current managed open detects a same-path substitution around the host call
       error instanceof ProjectStateError && error.code === 'workspace_boundary_changed'
     ))
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('current maintenance snapshot ignores invalid detached managed records', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-current-maintenance-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-current-maintenance-')
+  const {stateRoot, managedRoot} = storeFixture
   const identifiers = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => identifiers.next().value ?? 'unused-id',
   })
@@ -2688,25 +2615,18 @@ test('current maintenance snapshot ignores invalid detached managed records', as
       error instanceof ProjectStateError && error.code === 'workspace_boundary_changed'
     ))
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('external managed cleanup recreates empty roots and clears the active selection', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-external-cleanup-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-external-cleanup-')
+  const {stateRoot, managedRoot} = storeFixture
   const identifiers = [
     'workspace-0001', 'session-000001',
     'workspace-0002', 'session-000002',
   ][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => identifiers.next().value ?? 'unused-id',
   })
@@ -2739,24 +2659,17 @@ test('external managed cleanup recreates empty roots and clears the active selec
     })
     assert.equal((await store.maintenanceSnapshot()).managed_targets.length, 2)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('complete external managed cleanup keeps an existing imported workspace unselected', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-external-empty-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-external-empty-')
+  const {root, stateRoot, managedRoot} = storeFixture
   const importedRoot = join(root, 'imported')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(importedRoot, {mode: 0o700})
   const identifiers = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => identifiers.next().value ?? 'unused-id',
   })
@@ -2784,21 +2697,14 @@ test('complete external managed cleanup keeps an existing imported workspace uns
     )
     assert.equal((await store.snapshot()).active_workspace_id, null)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('external cleanup reconciliation refuses a same-name replacement', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-external-replacement-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-external-replacement-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => 'workspace-0001',
   })
@@ -2815,22 +2721,15 @@ test('external cleanup reconciliation refuses a same-name replacement', async ()
     )
     assert.equal((await store.snapshot()).active_workspace_id, workspace.workspace_id)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('external cleanup reconciliation refuses a replacement racing directory recreation', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-external-race-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-external-race-')
+  const {stateRoot, managedRoot} = storeFixture
   const rootFiles = new ExternalCleanupMkdirCollisionAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => 'workspace-0001',
   })
@@ -2850,21 +2749,14 @@ test('external cleanup reconciliation refuses a replacement racing directory rec
     assert.equal(info.ino, collision?.inode)
     assert.equal((await store.snapshot()).active_workspace_id, workspace.workspace_id)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('current managed open releases the store transaction before awaiting host completion', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-open-lock-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-open-lock-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => 'workspace-0001',
   })
@@ -2887,22 +2779,14 @@ test('current managed open releases the store transaction before awaiting host c
     assert.deepEqual(await opened, {status: 'opened'})
   } finally {
     finishHost?.()
-    await service?.close()
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(service, store)
   }
 })
 
 test('a committed journal cannot omit its replacement identity', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-journal-phase-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-journal-phase-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
   })
   try {
@@ -2922,21 +2806,14 @@ test('a committed journal cannot omit its replacement identity', async () => {
       error instanceof ProjectStateError && error.code === 'state_corrupt'
     ))
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a v2 journal binds each replacement temporary to its exact tombstone entry', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-journal-replacement-name-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-journal-replacement-name-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot]),
   })
   try {
@@ -2957,19 +2834,15 @@ test('a v2 journal binds each replacement temporary to its exact tombstone entry
       error instanceof ProjectStateError && error.code === 'state_corrupt'
     ))
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('state roots and files reject special permission bits rather than masking them away', {
   skip: process.platform === 'win32' && 'Windows security is represented by ACLs, not POSIX mode bits',
 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-special-mode-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-special-mode-')
+  const {stateRoot, managedRoot} = storeFixture
   try {
     await chmod(stateRoot, 0o1700)
     assert.throws(
@@ -2996,7 +2869,7 @@ test('state roots and files reject special permission bits rather than masking t
     }
   } finally {
     await chmod(stateRoot, 0o700).catch(() => undefined)
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
@@ -3137,18 +3010,10 @@ test('strict v1 decode rejects key, type, cap, reference, and normalized-identit
   duplicateSessionTitle.sessions['session-0001']!.normalized_title = 'session 0'
   mutations.push({name: 'duplicate normalized session', value: duplicateSessionTitle})
 
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-strict-state-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-strict-state-')
+  const {stateRoot} = storeFixture
   const statePath = join(stateRoot, 'codex-projects-v1.json')
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
-  }
+  const options = await storeFixture.options()
   try {
     for (const mutation of mutations) {
       await writeFile(statePath, JSON.stringify(mutation.value), {mode: 0o600})
@@ -3165,27 +3030,34 @@ test('strict v1 decode rejects key, type, cap, reference, and normalized-identit
         await store.close()
       }
     }
+    const compatible = clone()
+    compatible.active_workspace_id = '__proto__'
+    compatible.workspaces = Object.fromEntries([['__proto__', {
+      ...workspaceTemplate, workspace_id: '__proto__', codex_home_key: 'home-__proto__',
+      created_at: -1.25,
+    }]])
+    for (const session of Object.values(compatible.sessions)) session.workspace_id = '__proto__'
+    await writeFile(statePath, JSON.stringify(compatible), {mode: 0o600})
+    const compatibleStore = await ProjectStore.open(options)
+    try {
+      const snapshot = await compatibleStore.snapshot()
+      assert.equal(snapshot.workspaces[0]?.workspace_id, '__proto__')
+      assert.equal(snapshot.workspaces[0]?.created_at, -1.25)
+    } finally { await compatibleStore.close() }
   } finally {
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('managed and registered workspace bindings reject symlink replacement at transport time', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-boundary-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-boundary-')
+  const {root, managedRoot} = storeFixture
   const registered = join(root, 'registered')
   const replacement = join(root, 'replacement')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(registered, {mode: 0o700})
   await mkdir(replacement, {mode: 0o700})
   const ids = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => ids.next().value ?? 'unused-id',
   })
   try {
@@ -3205,25 +3077,17 @@ test('managed and registered workspace bindings reject symlink replacement at tr
     assert.equal(relative(await realpath(managedRoot), managed.canonical_path).includes('/'), false)
     await store.revalidateWorkspace(managed.workspace_id)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('workspace bindings pin inode identity and managed workspaces retain owner-only mode', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-inode-binding-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-inode-binding-')
+  const {root} = storeFixture
   const registered = join(root, 'registered')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(registered, {mode: 0o700})
   const ids = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => ids.next().value ?? 'unused-id',
   })
   try {
@@ -3257,22 +3121,15 @@ test('workspace bindings pin inode identity and managed workspaces retain owner-
         && error.code === 'workspace_boundary_changed',
     )
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('Windows run revalidation reapplies the managed workspace ACL before admission', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-acl-refresh-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-acl-refresh-')
+  const {stateRoot, managedRoot} = storeFixture
   const rootFiles = new CountingProtectRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => 'workspace-0001',
     platform: 'win32',
@@ -3285,23 +3142,16 @@ test('Windows run revalidation reapplies the managed workspace ACL before admiss
 
     assert.equal(rootFiles.protectCalls, beforeAdmission + 1)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('Windows session resume reapplies the managed workspace ACL before admission', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-resume-acl-refresh-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-resume-acl-refresh-')
+  const {stateRoot, managedRoot} = storeFixture
   const rootFiles = new CountingProtectRootFileAuthority([stateRoot, managedRoot])
   const ids = ['workspace-0001', 'session-0001'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => ids.next().value ?? 'unused-id',
     platform: 'win32',
@@ -3320,26 +3170,18 @@ test('Windows session resume reapplies the managed workspace ACL before admissio
 
     assert.equal(rootFiles.protectCalls, beforeAdmission + 1)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('workspace inode pins are process-local and a restart establishes a fresh portable baseline', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-inode-restart-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-inode-restart-')
+  const {root} = storeFixture
   const registered = join(root, 'registered')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(registered, {mode: 0o700})
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const options = await storeFixture.options({
     idFactory: () => 'workspace-0001',
-  }
+  })
   let first: ProjectStore | null = null
   let restarted: ProjectStore | null = null
   try {
@@ -3366,25 +3208,16 @@ test('workspace inode pins are process-local and a restart establishes a fresh p
         && error.code === 'workspace_boundary_changed',
     )
   } finally {
-    await first?.close()
-    await restarted?.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(first, restarted)
   }
 })
 
 test('ensureImported preserves the stronger managed workspace binding for an existing record', {
   skip: process.platform === 'win32' && 'this test mutates POSIX mode bits; Windows ACLs are native-tested',
 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-managed-import-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const storeFixture = await projectStoreFixture('nova-codex-project-managed-import-')
+
+  const store = await storeFixture.open({
     idFactory: () => 'workspace-0001',
   })
   try {
@@ -3399,26 +3232,18 @@ test('ensureImported preserves the stronger managed workspace binding for an exi
         && error.code === 'workspace_boundary_changed',
     )
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a managed record must remain a direct child even when its replacement path is canonical', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-direct-parent-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-direct-parent-')
+  const {root, stateRoot} = storeFixture
   const outside = join(root, 'outside')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(outside, {mode: 0o700})
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const options = await storeFixture.options({
     idFactory: () => 'workspace-0001',
-  }
+  })
   let store: ProjectStore | null = null
   try {
     store = await ProjectStore.open(options)
@@ -3438,23 +3263,15 @@ test('a managed record must remain a direct child even when its replacement path
         && error.code === 'workspace_boundary_changed',
     )
   } finally {
-    await store?.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('managed creation uses only a pinned safe slug and rollback never deletes user data', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-managed-safety-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-managed-safety-')
+
   const ids = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => ids.next().value ?? 'unused-id',
   })
   try {
@@ -3475,21 +3292,14 @@ test('managed creation uses only a pinned safe slug and rollback never deletes u
       (error: unknown) => error instanceof ProjectStateError && error.code === 'workspace_name_conflict',
     )
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('managed mkdir returns the rollback identity without a second path lookup', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-managed-create-identity-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-managed-create-identity-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     rootFiles: new FailManagedLookupRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => 'workspace-0001',
   })
@@ -3498,22 +3308,14 @@ test('managed mkdir returns the rollback identity without a second path lookup',
     assert.equal((await lstat(created.canonical_path)).isDirectory(), true)
     assert.equal(await store.rollbackManagedCreate(created.workspace_id), true)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('managed rollback refuses an empty same-path inode replacement and retains state', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-rollback-inode-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const storeFixture = await projectStoreFixture('nova-codex-project-rollback-inode-')
+
+  const store = await storeFixture.open({
     idFactory: () => 'workspace-0001',
   })
   try {
@@ -3524,23 +3326,16 @@ test('managed rollback refuses an empty same-path inode replacement and retains 
     assert.equal((await lstat(managed.canonical_path)).isDirectory(), true)
     assert.equal((await store.resolveWorkspace('managed')).workspace_id, managed.workspace_id)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a committed create keeps its inode pin when only native release fails', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-commit-release-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-commit-release-')
+
   const nativeLocks = new FailNextReleaseLockAuthority()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     idFactory: () => 'workspace-0001',
   })
   try {
@@ -3559,22 +3354,14 @@ test('a committed create keeps its inode pin when only native release fails', as
         && error.code === 'workspace_boundary_changed',
     )
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('successful managed rollback clears the exact pin so an absent ID can be reused', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-rollback-pin-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const storeFixture = await projectStoreFixture('nova-codex-project-rollback-pin-')
+
+  const store = await storeFixture.open({
     idFactory: () => 'workspace-0001',
   })
   try {
@@ -3583,22 +3370,15 @@ test('successful managed rollback clears the exact pin so an absent ID can be re
     const second = await store.createManaged('second')
     assert.equal(second.workspace_id, first.workspace_id)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a pre-commit rollback failure restores a safe managed child and advances its pin', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-rollback-restore-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-rollback-restore-')
+  const {stateRoot, managedRoot} = storeFixture
   const rootFiles = new ToggleTempCreateRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => 'workspace-0001',
   })
@@ -3642,25 +3422,18 @@ test('a pre-commit rollback failure restores a safe managed child and advances i
     rootFiles.failTempCreate = false
     assert.equal(await store.rollbackManagedCreate(managed.workspace_id), true)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('rollback restore rejects an immediate mkdir replacement before chmod or pin advance', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-rollback-restore-race-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-rollback-restore-race-')
+  const {stateRoot, managedRoot} = storeFixture
   const rootFiles = new ReplaceManagedRestoreAfterMkdirRootFileAuthority([
     stateRoot,
     managedRoot,
   ])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => 'workspace-0001',
   })
@@ -3681,23 +3454,15 @@ test('rollback restore rejects an immediate mkdir replacement before chmod or pi
         && error.code === 'workspace_boundary_changed',
     )
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a managed slug and ID collision is a stable path conflict without overwriting', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-path-conflict-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-path-conflict-')
+
   const ids = ['prefix-one-123456789012', 'prefix-two-123456789012'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => ids.next().value ?? 'unused-id',
   })
   try {
@@ -3710,23 +3475,15 @@ test('a managed slug and ID collision is a stable path conflict without overwrit
     assert.equal((await store.listWorkspaces()).length, 1)
     assert.equal((await realpath(first.canonical_path)), first.canonical_path)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('ID allocation never overwrites either namespace and has a fixed collision bound', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-id-collision-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-id-collision-')
+  const {managedRoot} = storeFixture
   let calls = 0
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => {
       calls += 1
       return 'workspace-0001'
@@ -3749,25 +3506,18 @@ test('ID allocation never overwrites either namespace and has a fixed collision 
     assert.equal(calls - callsAfterFirst, 64)
     assert.deepEqual(await store.listSessions(first.workspace_id), [])
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('failed registered creation clears only its new pin so the exact ID can be reused', async () => {
   for (const method of ['ensureImported', 'registerWorkspace'] as const) {
-    const root = await mkdtemp(join(tmpdir(), `nova-codex-project-${method}-pin-`))
-    const stateRoot = join(root, 'state')
-    const managedRoot = join(root, 'managed')
+    const storeFixture = await projectStoreFixture(`nova-codex-project-${method}-pin-`)
+    const {root, stateRoot, managedRoot} = storeFixture
     const workspace = join(root, 'workspace')
-    await mkdir(stateRoot, {mode: 0o700})
-    await mkdir(managedRoot, {mode: 0o700})
     await mkdir(workspace, {mode: 0o700})
     const rootFiles = new ToggleTempCreateRootFileAuthority([stateRoot, managedRoot])
-    const store = await ProjectStore.open({
-      stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-      managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-      nativeLocks: new DescriptorLockAuthority(),
+    const store = await storeFixture.open({
       rootFiles,
       idFactory: () => 'workspace-0001',
     })
@@ -3781,27 +3531,20 @@ test('failed registered creation clears only its new pin so the exact ID can be 
       const created = await store[method]('second', hostWorkspaceForTest(await realpath(workspace)))
       assert.equal(created.workspace_id, 'workspace-0001')
     } finally {
-      await store.close()
-      await rm(root, {recursive: true, force: true})
+      await storeFixture.close(store)
     }
   }
 })
 
 test('a committed registered workspace keeps its exact pin when release fails', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-register-commit-pin-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-register-commit-pin-')
+  const {root} = storeFixture
   const workspace = join(root, 'workspace')
   const original = join(root, 'workspace-original')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspace, {mode: 0o700})
   const nativeLocks = new FailNextReleaseLockAuthority()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const store = await storeFixture.open({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     idFactory: () => 'workspace-0001',
   })
   try {
@@ -3820,8 +3563,7 @@ test('a committed registered workspace keeps its exact pin when release fails', 
         && error.code === 'workspace_boundary_changed',
     )
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
@@ -3829,16 +3571,9 @@ test('managed creation repairs a restrictive umask and leaves no rollback residu
   concurrency: false,
   skip: process.platform === 'win32' && 'Windows directory privacy is ACL-based, not umask-based',
 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-umask-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const storeFixture = await projectStoreFixture('nova-codex-project-umask-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     idFactory: () => 'workspace-0001',
   })
   await store.snapshot()
@@ -3851,23 +3586,16 @@ test('managed creation repairs a restrictive umask and leaves no rollback residu
     assert.equal((await readdir(stateRoot)).some(name => name.endsWith('.tmp')), false)
   } finally {
     process.umask(previousUmask)
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('managed creation repairs a permissive native mkdir before it can become public', {
   skip: process.platform === 'win32' && 'Windows directory privacy is ACL-based, not mode-based',
 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-mkdir-mode-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-mkdir-mode-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     rootFiles: new PermissiveManagedMkdirRootFileAuthority(stateRoot, managedRoot),
     idFactory: () => 'workspace-0001',
   })
@@ -3875,21 +3603,14 @@ test('managed creation repairs a permissive native mkdir before it can become pu
     const created = await store.createManaged('managed')
     assert.equal((await lstat(created.canonical_path)).mode & 0o7777, 0o700)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('managed creation rolls back an empty child when the subsequent state save fails', {concurrency: false}, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-save-rollback-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const storeFixture = await projectStoreFixture('nova-codex-project-save-rollback-')
+  const {stateRoot, managedRoot} = storeFixture
+  const store = await storeFixture.open({
     rootFiles: new FailTempCreateRootFileAuthority([stateRoot, managedRoot]),
     idFactory: () => 'workspace-0001',
   })
@@ -3905,28 +3626,20 @@ test('managed creation rolls back an empty child when the subsequent state save 
     assert.equal((await readdir(stateRoot)).some(name => name.endsWith('.tmp')), false)
   } finally {
     process.umask(previousUmask)
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('an uncommitted poisoned state root cannot strand an empty managed child', {
   skip: process.platform === 'win32' && 'requires POSIX open-directory rename and symlink semantics',
 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-poison-rollback-'))
-  const stateRoot = join(root, 'state')
+  const storeFixture = await projectStoreFixture('nova-codex-project-poison-rollback-')
+  const {root, stateRoot, managedRoot} = storeFixture
   const retainedState = join(root, 'state-retained')
   const replacementState = join(root, 'state-replacement')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
   await mkdir(replacementState, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   let swapped = false
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => 'workspace-0001',
     onDurabilityStep: step => {
       if (step === 'temp_open' && !swapped) {
@@ -3945,8 +3658,7 @@ test('an uncommitted poisoned state root cannot strand an empty managed child', 
     assert.deepEqual(await readdir(replacementState), [])
     assert.equal((await readdir(retainedState)).some(name => name.endsWith('.tmp')), false)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
@@ -3965,19 +3677,12 @@ test('project public text enforces Python code points, category C, and path-name
 })
 
 test('Windows first save completes without POSIX directory fsync', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-windows-save-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-windows-save-')
+  const {root} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const durability: string[] = []
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     platform: 'win32',
     idFactory: () => 'workspace-0001',
     onDurabilityStep: step => { durability.push(step) },
@@ -3993,34 +3698,26 @@ test('Windows first save completes without POSIX directory fsync', async () => {
     ])
     assert.equal(durability.includes('dir_fsync'), false)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('project state reloads under a descriptor lock and persists ready sessions atomically', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-store-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-store-')
+  const {root, stateRoot, managedRoot} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   await chmod(stateRoot, 0o700)
   await chmod(managedRoot, 0o700)
   const durability: string[] = []
   const identifiers = ['workspace-0001', 'session-0001'][Symbol.iterator]()
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const options = await storeFixture.options({
     now: () => 100,
     idFactory: () => identifiers.next().value ?? 'unused-id',
     onDurabilityStep: (step: 'temp_open' | 'file_fsync' | 'atomic_replace' | 'dir_fsync' | 'windows_metadata_commit') => {
       durability.push(step)
     },
-  }
+  })
   let first: ProjectStore | null = null
   let second: ProjectStore | null = null
   try {
@@ -4068,24 +3765,15 @@ test('project state reloads under a descriptor lock and persists ready sessions 
       (snapshot as unknown as {active_binding_revision: number}).active_binding_revision,
     )
   } finally {
-    await first?.close()
-    await second?.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(first, second)
   }
 })
 
 test('persistent homes are private, stable per workspace, and distinct across workspaces', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-homes-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-homes-')
+
   const ids = ['workspace-0001', 'workspace-0002'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => ids.next().value ?? 'unused-id',
   })
   try {
@@ -4097,17 +3785,13 @@ test('persistent homes are private, stable per workspace, and distinct across wo
     assert.equal(hostCodexHomeValue(firstHome).path, hostCodexHomeValue(firstAgain).path)
     assert.notEqual(hostCodexHomeValue(firstHome).path, hostCodexHomeValue(secondHome).path)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('opening the live project store migrates legacy codex-workspaces to codex-homes', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-home-migration-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-home-migration-')
+  const {stateRoot, managedRoot} = storeFixture
   const canonicalStateRoot = await realpath(stateRoot)
   const legacyRoot = join(canonicalStateRoot, 'codex-workspaces')
   const legacyHome = join(legacyRoot, 'home-workspace-0001')
@@ -4127,28 +3811,21 @@ test('opening the live project store migrates legacy codex-workspaces to codex-h
     assert.equal(await readFile(join(migratedRoot, 'home-workspace-0001', 'migration-marker'), 'utf8'), 'preserved')
     await assert.rejects(lstat(legacyRoot), (error: unknown) => isErrno(error, 'ENOENT'))
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('a rejected legacy home migration releases the live owner lock for retry', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-home-migration-retry-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-home-migration-retry-')
+  const {stateRoot} = storeFixture
   const legacyRoot = join(stateRoot, 'codex-workspaces')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(legacyRoot, {mode: 0o755})
   await chmod(legacyRoot, 0o755)
   const nativeLocks = new DescriptorLockAuthority()
-  const options = {
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
+  const options = await storeFixture.options({
     nativeLocks,
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
     live: true,
-  }
+  })
   try {
     await assert.rejects(
       ProjectStore.open(options),
@@ -4159,21 +3836,15 @@ test('a rejected legacy home migration releases the live owner lock for retry', 
     await retried.close()
     assert.equal((await lstat(join(stateRoot, 'codex-homes'))).isDirectory(), true)
   } finally {
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close()
   }
 })
 
 test('persistent home rejects an immediate mkdir replacement before chmod or adoption', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-home-race-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-home-race-')
+  const {stateRoot, managedRoot} = storeFixture
   const rootFiles = new ReplaceHomeAfterMkdirRootFileAuthority([stateRoot, managedRoot])
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
+  const store = await storeFixture.open({
     rootFiles,
     idFactory: () => 'workspace-0001',
   })
@@ -4188,23 +3859,15 @@ test('persistent home rejects an immediate mkdir replacement before chmod or ado
       assert.equal(lstatSync(rootFiles.replacedPath!).mode & 0o7777, 0o755)
     }
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('managed rollback restores the deterministic most-recent survivor on timestamp ties', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-rollback-order-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-rollback-order-')
+
   const ids = ['workspace-0001', 'workspace-0002', 'workspace-0003'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => ids.next().value ?? 'unused-id',
     now: () => 100,
   })
@@ -4215,18 +3878,14 @@ test('managed rollback restores the deterministic most-recent survivor on timest
     assert.equal(await store.rollbackManagedCreate(provisional.workspace_id), true)
     assert.equal((await store.resolveWorkspace(null)).workspace_id, second.workspace_id)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('session retention prunes unavailable before inactive ready and never prunes active', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-session-retention-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-session-retention-')
+  const {root, stateRoot} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const workspaceId = 'workspace-0001'
   const activeSessionId = 'session-0199'
@@ -4261,11 +3920,7 @@ test('session retention prunes unavailable before inactive ready and never prune
     },
     sessions,
   }), {mode: 0o600})
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => 'session-new1',
     now: () => 1000,
   })
@@ -4278,25 +3933,79 @@ test('session retention prunes unavailable before inactive ready and never prune
     assert.equal(retained.some(session => session.session_id === activeSessionId), true)
     assert.equal(retained.some(session => session.session_id === provisional.session_id), true)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
+  }
+})
+
+test('a discovered session imported into a full workspace evicts like every other insert', async () => {
+  const storeFixture = await projectStoreFixture('nova-codex-project-import-retention-')
+  const {root, stateRoot} = storeFixture
+  const workspacePath = join(root, 'workspace')
+  const sharedHome = join(root, 'codex-home')
+  await mkdir(workspacePath, {mode: 0o700})
+  await mkdir(sharedHome, {mode: 0o700})
+  const workspaceId = 'workspace-0001'
+  const activeSessionId = 'session-0199'
+  const sessions = Object.fromEntries(Array.from({length: 200}, (_unused, index) => {
+    const sessionId = `session-${String(index).padStart(4, '0')}`
+    return [sessionId, {
+      session_id: sessionId,
+      workspace_id: workspaceId,
+      display_title: `Task ${index}`,
+      normalized_title: `task ${index}`,
+      codex_thread_id: `thread-${index}`,
+      state: index === 0 ? 'unavailable' : 'ready',
+      created_at: index,
+      last_used_at: index,
+    }]
+  }))
+  await writeFile(join(stateRoot, 'codex-projects-v1.json'), JSON.stringify({
+    version: 1,
+    active_workspace_id: workspaceId,
+    workspaces: {
+      [workspaceId]: {
+        workspace_id: workspaceId,
+        display_name: 'alpha',
+        normalized_name: 'alpha',
+        canonical_path: await realpath(workspacePath),
+        origin: 'registered',
+        codex_home_key: `home-${workspaceId}`,
+        active_session_id: activeSessionId,
+        created_at: 0,
+        last_used_at: 199,
+      },
+    },
+    sessions,
+  }), {mode: 0o600})
+  const store = await storeFixture.open({
+    idFactory: () => 'session-new1',
+    now: () => 1000,
+  })
+  try {
+    // A full workspace must not permanently freeze out newly discovered CLI sessions.
+    const imported = await store.importSession(workspaceId, {
+      threadId: 'thread-newly-discovered',
+      title: '最新会话',
+      home: await realpath(sharedHome),
+      updatedAt: 5000,
+    })
+    const retained = await store.listSessions(workspaceId)
+    assert.equal(retained.length, 200)
+    assert.equal(retained.some(session => session.session_id === imported.session_id), true)
+    assert.equal(retained.some(session => session.session_id === 'session-0000'), false)
+    assert.equal(retained.some(session => session.session_id === activeSessionId), true)
+  } finally {
+    await storeFixture.close(store)
   }
 })
 
 test('setSessionTitle clips to 120 code points, keeps per-workspace uniqueness, and rejects unknown or empty', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-session-title-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-session-title-')
+  const {root} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const ids = ['workspace-0001', 'session-0001', 'session-0002'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => ids.next().value ?? 'unused-id',
   })
   try {
@@ -4317,26 +4026,18 @@ test('setSessionTitle clips to 120 code points, keeps per-workspace uniqueness, 
     assert.equal(await store.setSessionTitle(first.session_id, '   '), false)
     assert.equal(await store.setSessionTitle('session-missing', '博客'), false)
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('rollback and unavailable transitions repair the active Session deterministically', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-session-repair-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-session-repair-')
+  const {root} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const ids = ['workspace-0001', 'session-0001', 'session-0002', 'session-0003'][Symbol.iterator]()
   let now = 0
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => ids.next().value ?? 'unused-id',
     now: () => { now += 1; return now },
   })
@@ -4369,25 +4070,17 @@ test('rollback and unavailable transitions repair the active Session determinist
       (error: unknown) => error instanceof ProjectStateError && error.code === 'session_not_found',
     )
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
 test('thread identity uses Python code-point bounds and exact returned text', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-thread-id-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
+  const storeFixture = await projectStoreFixture('nova-codex-project-thread-id-')
+  const {root} = storeFixture
   const workspacePath = join(root, 'workspace')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspacePath, {mode: 0o700})
   const ids = ['workspace-0001', 'session-0001', 'session-0002'][Symbol.iterator]()
-  const store = await ProjectStore.open({
-    stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-    managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-    nativeLocks: new DescriptorLockAuthority(),
-    rootFiles: rootFilesForTest(stateRoot, managedRoot),
+  const store = await storeFixture.open({
     idFactory: () => ids.next().value ?? 'unused-id',
   })
   try {
@@ -4407,8 +4100,7 @@ test('thread identity uses Python code-point bounds and exact returned text', as
     }
     assert.equal((await store.resolveSession(workspace.workspace_id, 'second')).state, 'starting')
   } finally {
-    await store.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })
 
@@ -4417,20 +4109,13 @@ test('live recovery reads Python v1 bytes and writes byte-identical Python canon
     join(import.meta.dirname, '../../../fixtures/runtime/codex-project-state-v1.json'),
     'utf8',
   )) as {readonly input_utf8_base64: string; readonly recovered_utf8_base64: string}
-  const root = await mkdtemp(join(tmpdir(), 'nova-codex-project-python-bytes-'))
-  const stateRoot = join(root, 'state')
-  const managedRoot = join(root, 'managed')
-  await mkdir(stateRoot, {mode: 0o700})
-  await mkdir(managedRoot, {mode: 0o700})
+  const storeFixture = await projectStoreFixture('nova-codex-project-python-bytes-')
+  const {stateRoot} = storeFixture
   const statePath = join(stateRoot, 'codex-projects-v1.json')
   await writeFile(statePath, Buffer.from(fixture.input_utf8_base64, 'base64'), {mode: 0o600})
   let store: ProjectStore | null = null
   try {
-    store = await ProjectStore.open({
-      stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
-      managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),
-      nativeLocks: new DescriptorLockAuthority(),
-      rootFiles: rootFilesForTest(stateRoot, managedRoot),
+    store = await storeFixture.open({
       live: true,
     })
     const snapshot = await store.snapshot()
@@ -4440,7 +4125,6 @@ test('live recovery reads Python v1 bytes and writes byte-identical Python canon
       Buffer.from(fixture.recovered_utf8_base64, 'base64'),
     )
   } finally {
-    await store?.close()
-    await rm(root, {recursive: true, force: true})
+    await storeFixture.close(store)
   }
 })

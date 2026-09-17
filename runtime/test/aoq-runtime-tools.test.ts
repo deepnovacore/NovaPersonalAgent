@@ -4,15 +4,15 @@ import {once} from 'node:events'
 import {setTimeout as delay} from 'node:timers/promises'
 import {test} from 'node:test'
 import {WebSocket} from 'ws'
-import {AoqChatServer} from '../src/aoq-chat-server.js'
+import {AoqChatServer} from '../src/server/aoq-chat-server.js'
 import {AoqRealtimeAdapter, AoqRuntimeLink} from '../src/realtime/aoq.js'
-import {buildAssembly} from '../src/assembly.js'
-import {buildRealtimeAssembly} from '../src/realtime-assembly.js'
-import {settingsSchema} from '../src/config.js'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
-import {VirtualClock} from '../src/clock.js'
-import {slowSimManifest} from '../src/sims.js'
-import type {ExecutorDispatchContext} from '../src/causal-runtime.js'
+import {buildAssembly} from '../src/composition/assembly.js'
+import {buildRealtimeAssembly} from '../src/composition/realtime-assembly.js'
+import {settingsSchema} from '../src/config/config.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {slowSimManifest} from '../src/core/sims.js'
+import type {ExecutorDispatchContext} from '../src/core/causal-runtime.js'
 
 /** Real WS -> broker -> AOQ/Qwen -> RealtimeService -> CausalRuntime -> simulator dispatch. */
 test('AOQ phone tools require a real speech origin, execute once, and emit host output plus response.create', {timeout: 10_000}, async t => {
@@ -22,7 +22,7 @@ test('AOQ phone tools require a real speech origin, execute once, and emit host 
   const launches: {op: string; request: unknown; context: ExecutorDispatchContext}[] = []
   let finish!: () => void
   const completed = new Promise<void>(resolve => { finish = resolve })
-  const core = buildAssembly({settings: settingsSchema.parse({executors: ['slow_sim'], workspace_graph_enabled: false}),
+  const core = buildAssembly({settings: settingsSchema.parse({executors: ['slow_sim']}),
     clock: new VirtualClock(),
     capabilities: parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: false}}}),
     gateway: {

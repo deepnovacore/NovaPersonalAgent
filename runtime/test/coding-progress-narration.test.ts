@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {CodingProgressNarrationState} from '../src/coding-progress-narration.js'
-import {settingsSchema} from '../src/config.js'
+import {CodingProgressNarrationState} from '../src/realtime/coding-progress-narration.js'
+import {settingsSchema} from '../src/config/config.js'
 
 test('coding narration defaults to smart and switches only coding progress routing', () => {
   assert.equal(settingsSchema.parse({executors: []}).coding_progress_narration, 'smart')

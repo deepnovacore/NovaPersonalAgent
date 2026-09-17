@@ -1,4 +1,4 @@
-import type {CompleteRequest, ModelGateway} from '../src/model-gateway.js'
+import type {CompleteRequest, ModelGateway} from '../src/model/model-gateway.js'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {mkdtemp, rm, realpath} from 'node:fs/promises'
@@ -8,7 +8,7 @@ import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {validateMemoryOverview, type MemoryOverview} from '../src/personal-agent/memory-overview.js'
 import type {MemoryEntry} from '../src/memory/entry.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
-import {SuggestionPool} from '../src/suggestions.js'
+import {SuggestionPool} from '../src/core/suggestions.js'
 const entry: MemoryEntry = {id:'one',version:1,content:'Nova supports voice conversations.',kind:'fact',origin:'inferred',topic:'Nova',status:'active',corrected_to:null,confidence_note:null,source_refs:[{type:'file',ref:'README.md',observed_at:'2026-09-11T00:00:00Z'}],observed_at:'2026-09-11T00:00:00Z',recorded_at:'2026-09-11T00:00:00Z'}
 const overview = (version=1): MemoryOverview => ({summary:'Nova supports voice conversations.',sections:[{title:'Nova',summary:'Voice conversations.',keywords:['voice'],refs:[{entry_id:'one',version}]}]})
 const tick = () => new Promise(resolve => setImmediate(resolve))
@@ -47,7 +47,7 @@ test('empty memory and absent model stay available without model calls',async()=
   try {await host.open();await tick();assert.equal(calls,0);assert.equal(host.snapshot().memory.overview,null)} finally {await host.close();await rm(dir,{recursive:true,force:true})}
 })
 test('two-stage synthesis uses the existing model and preserves facts before grouping',async()=>{
-  const {GatewaySurrogate}=await import('../src/model-adapters.js')
+  const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
   const requests:CompleteRequest[]=[]
   const facts={facts:[{entry_id:entry.id,version:entry.version,fact:'Nova supports voice conversations.'}]}
   const grouping={summary:overview().summary,sections:[{title:'Nova',keywords:['voice'],refs:[{entry_id:'one',version:1}]}]}
@@ -88,7 +88,7 @@ test('source observation refreshes memory while discovery is disabled and eviden
 })
 
 test('missing, duplicate or wrong-version extracted facts fail before grouping',async()=>{
- const {GatewaySurrogate}=await import('../src/model-adapters.js')
+ const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
  const second={...entry,id:'two',topic:'EEG',content:'An EEG demonstration proposal.'}
  const one={entry_id:'one',version:1,fact:'Nova supports voice conversations.'}
  const two={entry_id:'two',version:1,fact:'EEG is a demonstration proposal.'}
@@ -101,7 +101,7 @@ test('missing, duplicate or wrong-version extracted facts fail before grouping',
  }
 })
 test('grouping with missing or wrong references falls back after exactly two calls',async()=>{
- const {GatewaySurrogate}=await import('../src/model-adapters.js')
+ const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
  const second={...entry,id:'two',topic:'EEG',content:'An EEG demonstration proposal.'}
  const facts={facts:[{entry_id:'one',version:1,fact:'Nova supports voice conversations.'},{entry_id:'two',version:1,fact:'EEG is a demonstration proposal.'}]}
  for(const result of [overview(),overview(9)].map(value=>({...value,sections:value.sections.map(section=>({title:section.title,keywords:section.keywords,refs:section.refs}))}))){
@@ -113,14 +113,14 @@ test('grouping with missing or wrong references falls back after exactly two cal
  }
 })
 test('cancellation between extraction and grouping does not start another request',async()=>{
- const {GatewaySurrogate}=await import('../src/model-adapters.js')
+ const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
  const controller=new AbortController();let calls=0
  const gateway={complete:()=>{calls++;controller.abort();return Promise.resolve({text:JSON.stringify({facts:[{entry_id:'one',version:1,fact:'Nova supports voice conversations.'}]})})}} as unknown as ModelGateway
  const surrogate=new GatewaySurrogate({gateway,model:'existing-model',proactivityPreset:'balanced'})
  assert.equal(await surrogate.summarizeMemory([entry],controller.signal),null);assert.equal(calls,1)
 })
 test('grouping assembles every fact verbatim and rejects oversized cards instead of truncating',async()=>{
- const {GatewaySurrogate}=await import('../src/model-adapters.js')
+ const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
  const second={...entry,id:'two',topic:'EEG',content:'An EEG demonstration proposal.'}
  for(const long of [false,true]){
   const facts={facts:[{entry_id:'one',version:1,fact:long?'A'.repeat(300):'Nova supports voice conversations.'},{entry_id:'two',version:1,fact:long?'B'.repeat(300):'EEG is a demonstration proposal.'}]}

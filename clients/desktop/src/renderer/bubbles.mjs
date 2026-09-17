@@ -45,6 +45,7 @@ export function parseLastResultFrame(frame) {
     || !validText(result.executor, 128)
     || !RESULT_OUTCOMES.has(result.outcome)
     || !validSummary(result.summary)
+    || (result.diagnostic !== undefined && !validDiagnostic(result.diagnostic))
     || !validTimestamp(result.started_at)
     || !validTimestamp(result.ended_at)
     || result.ended_at < result.started_at
@@ -57,6 +58,7 @@ export function parseLastResultFrame(frame) {
     executor: result.executor,
     outcome: result.outcome,
     summary: result.summary,
+    ...(result.diagnostic === undefined ? {} : {diagnostic: result.diagnostic}),
     startedAt: result.started_at,
     endedAt: result.ended_at,
     changedFiles: result.changed_files,
@@ -123,7 +125,7 @@ export function createProgressBubbleController({
   }
 
   async function update(next, version) {
-    const layout = await reserve(next.length)
+    const layout = await reserve(next.reduce((rows, item) => rows + (item.expanded ? 3 : 1), 0))
     if (layout === null || version !== generation) return false
     if (layout?.suppressed) {
       clearVisible()
@@ -159,10 +161,14 @@ export function createProgressBubbleController({
         level: value.level,
         ts: Number.isFinite(value.ts) ? value.ts : 0,
         paused: false,
+        expanded: false,
         expiresAt: now() + lifetime,
       }
       if (items.some(current => current.key === item.key)) return false
-      const next = [item, ...items].slice(0, MAX_BUBBLES)
+      const previous = items.filter(current => item.kind === 'conversation'
+        ? current.kind !== 'conversation'
+        : !item.delegateId || current.kind !== 'progress' || current.delegateId !== item.delegateId)
+      const next = [item, ...previous].slice(0, MAX_BUBBLES)
       if (!await update(next, version)) return false
       arm(item)
       return true
@@ -197,6 +203,16 @@ export function createProgressBubbleController({
     arm(item)
   }
 
+  async function toggleExpanded(key) {
+    const version = generation
+    return enqueue(async () => {
+      const item = items.find(item => item.key === key)
+      if (!item) return false
+      const next = items.map(current => ({...current, expanded: current.key === key ? !item.expanded : false}))
+      return update(next, version)
+    })
+  }
+
   function clear() {
     generation += 1
     clearVisible()
@@ -219,6 +235,7 @@ export function createProgressBubbleController({
   return Object.freeze({
     push,
     dismiss,
+    toggleExpanded,
     pause,
     resume,
     clear,
@@ -235,20 +252,39 @@ export function mountProgressBubbles({container, reserveBubbleArea, document = w
   const bubbles = createProgressBubbleController({
     reserveBubbleArea,
     render: items => {
+      const focusedKey = document.activeElement?.closest('.progress-bubble')?.dataset.key
       container.replaceChildren(...items.map(item => {
-        const bubble = document.createElement('button')
-        bubble.type = 'button'
+        const bubble = document.createElement('div')
         bubble.className = 'progress-bubble'
+        bubble.dataset.key = item.key
         bubble.dataset.level = item.level
         bubble.dataset.kind = item.kind
-        bubble.textContent = item.summary
-        bubble.addEventListener('click', () => { void bubbles.dismiss(item.key) })
+        bubble.dataset.expanded = String(item.expanded)
+        const text = document.createElement('span')
+        text.className = 'progress-bubble-text'
+        text.textContent = item.summary
+        const toggle = document.createElement('button')
+        toggle.type = 'button'
+        toggle.className = 'progress-bubble-toggle'
+        toggle.textContent = item.expanded ? '收起' : '展开'
+        toggle.setAttribute('aria-expanded', String(item.expanded))
+        toggle.addEventListener('click', () => { void bubbles.toggleExpanded(item.key) })
+        bubble.append(text, toggle)
         bubble.addEventListener('pointerenter', () => bubbles.pause(item.key))
         bubble.addEventListener('pointerleave', () => bubbles.resume(item.key))
-        bubble.addEventListener('focus', () => bubbles.pause(item.key))
-        bubble.addEventListener('blur', () => bubbles.resume(item.key))
+        bubble.addEventListener('focusin', () => bubbles.pause(item.key))
+        bubble.addEventListener('focusout', event => {
+          if (!bubble.contains(event.relatedTarget)) bubbles.resume(item.key)
+        })
         return bubble
       }))
+      // Native bounds have already been reserved, so overflow is measured at the final width.
+      for (const bubble of container.children) {
+        const text = bubble.querySelector('.progress-bubble-text')
+        const toggle = bubble.querySelector('.progress-bubble-toggle')
+        toggle.hidden = bubble.dataset.expanded !== 'true' && text.scrollHeight <= text.clientHeight + 1
+        if (bubble.dataset.key === focusedKey) toggle.focus()
+      }
     },
     onLayout: layout => {
       if (!layout) return
@@ -274,4 +310,9 @@ function validSummary(value) {
 
 function validTimestamp(value) {
   return Number.isFinite(value) && value >= 0
+}
+
+export function validDiagnostic(value) {
+  return value !== null && typeof value === "object" && validText(value.method, 128)
+    && Number.isSafeInteger(value.server_code) && typeof value.message === "string" && value.message.length <= 4000
 }

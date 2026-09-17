@@ -8,37 +8,12 @@ import {
   type ExecutorDispatchContext,
   type ExecutorHandoff,
   type ModelPort,
-} from '../src/causal-runtime.js'
-import {canonicalJson} from '../src/canonical-json.js'
-import { RealClock, VirtualClock } from '../src/clock.js'
-import type { EventRecord } from '../src/events.js'
-import { MonotonicIdFactory } from '../src/ids.js'
-import { delegateSchema, executorManifestSchema } from '../src/ports.js'
-import { fixtureSlowSimManifest } from '../src/sim.js'
-import type {GraphContext} from '../src/workspace-graph/context.js'
-
-const graphHeader = '<workspace_context kind="data">' + canonicalJson({
-  content: canonicalJson({
-    current_instance_name: 'Nova checkout',
-    current_logical_name: 'Nova workspace',
-    degraded: false,
-    preferences: [],
-  }),
-  logical_workspace_id: 'logical-nova',
-  revision: 4,
-  session_epoch: 2,
-  token_estimate: 150,
-  workspace_instance_id: 'instance-nova',
-}) + '</workspace_context>'
-
-const graphContext: GraphContext = Object.freeze({
-  header: graphHeader,
-  recall_pack: null,
-  omitted_preferences: 0,
-  omitted_hints: 0,
-  degraded: false,
-  diagnostic: null,
-})
+} from '../src/core/causal-runtime.js'
+import { RealClock, VirtualClock } from '../src/core/clock.js'
+import type { EventRecord } from '../src/core/events.js'
+import { MonotonicIdFactory } from '../src/core/ids.js'
+import { delegateSchema, executorManifestSchema } from '../src/core/ports.js'
+import { fixtureSlowSimManifest } from '../eval/sim.js'
 
 interface Deferred<T> {
   readonly promise: Promise<T>
@@ -59,72 +34,7 @@ async function eventually(predicate: () => boolean): Promise<void> {
   assert.fail('condition did not become true')
 }
 
-test('the real model-call boundary compiles graph context from the latest accepted user text', async () => {
-  const calls: Parameters<ModelPort['complete']>[0][] = []
-  const providerInputs: unknown[] = []
-  const runtime = new CausalRuntime({
-    clock: new RealClock(),
-    ids: new MonotonicIdFactory(),
-    models: {
-      fast: {
-        complete: call => {
-          calls.push(call)
-          return Promise.resolve({speak: {act: 'none'}, action: {act: 'none'}})
-        },
-      },
-    },
-  })
-  const unbind = runtime.bindGraphContextProvider(input => {
-    providerInputs.push(input)
-    return graphContext
-  })
-  assert.throws(() => runtime.bindGraphContextProvider(() => null), /already bound/u)
-  const stop = new AbortController()
-  const serving = runtime.serve(stop.signal)
 
-  try {
-    await runtime.ingestUserInput({text: 'explain the shared runtime'})
-    await eventually(() => calls.length === 1)
-    assert.deepEqual(providerInputs, [{
-      latest_user_text: 'explain the shared runtime',
-      slot: 'fast',
-      started_at: calls[0]?.started_at,
-    }])
-    assert.deepEqual(calls[0]?.context_view?.graph_context, graphContext)
-    assert.notEqual(calls[0]?.context_view?.graph_context, graphContext)
-    unbind()
-  } finally {
-    stop.abort()
-    await serving
-  }
-})
-
-test('a throwing graph context provider fails closed without blocking a model call', async () => {
-  const calls: Parameters<ModelPort['complete']>[0][] = []
-  const runtime = new CausalRuntime({
-    clock: new RealClock(),
-    ids: new MonotonicIdFactory(),
-    models: {
-      fast: {
-        complete: call => {
-          calls.push(call)
-          return Promise.resolve({speak: {act: 'none'}, action: {act: 'none'}})
-        },
-      },
-    },
-  })
-  runtime.bindGraphContextProvider(() => { throw new Error('private graph failure') })
-  const stop = new AbortController()
-  const serving = runtime.serve(stop.signal)
-  try {
-    await runtime.ingestUserInput({text: 'keep the voice turn running'})
-    await eventually(() => calls.length === 1)
-    assert.equal('graph_context' in (calls[0]?.context_view ?? {}), false)
-  } finally {
-    stop.abort()
-    await serving
-  }
-})
 
 test('executor contexts permit direct dispatch without an observation sink', () => {
   // Watch returns `observation_unavailable` in this deliberate direct-use case; the serving runtime
@@ -419,4 +329,23 @@ test('ports and observers cannot mutate runtime-owned causal records', async () 
     stop.abort()
     await serving
   }
+})
+
+test('cancelling an admitted delegate before launch produces cancelled without invoking the executor', async () => {
+  let starts = 0
+  const runtime = new CausalRuntime({clock: new RealClock(), ids: new MonotonicIdFactory(),
+    models: {fast: {complete: () => Promise.resolve({speak: {act: 'none'}, action: {act: 'none'}})}},
+    executors: [{manifest: fixtureSlowSimManifest, dispatch: () => {starts++; return Promise.resolve({outcome: 'ok', trust: 'trusted_system', content: {}, refs: []})}}]})
+  const origin = runtime.memory.append('conversation', {ts: 0, trust: 'trusted_user', priority: 100, content: {text: 'dim light'}})
+  const admission = await runtime.dispatchExternal({executor: 'slow_sim', op: 'set_light', request: {brightness: 30}, origin_ref: `conversation:${origin.seq}`},
+    {kind: 'realtime_tool', priority: 100, routing_class: 'ambient', origin: null, selected_suggestion: null}, undefined, () => true)
+  assert.equal(admission.accepted, true)
+  assert.equal(runtime.cancelPendingDispatch(admission.delegate_id!), true)
+  const stop = new AbortController()
+  const serving = runtime.serve(stop.signal)
+  try {
+    await eventually(() => runtime.memory.channels.get('slow_sim')?.items.some(item => item.outcome === 'cancelled') === true)
+    assert.equal(starts, 0)
+    assert.equal(runtime.cancelPendingDispatch(admission.delegate_id!), false)
+  } finally { stop.abort(); await serving }
 })

@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {loadSettings} from '../src/config.js'
-import {VirtualClock} from '../src/clock.js'
-import {cascadedProviderRegistries} from '../src/cascaded-realtime-assembly.js'
+import {loadSettings} from '../src/config/config.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {cascadedProviderRegistries} from '../src/composition/cascaded-realtime-assembly.js'
 import {buildCascadedTextProvider} from '../src/cascaded-text-provider.js'
 import type {CascadedLlmInput} from '../src/realtime/cascaded/llm.js'
 
 test('production text factory only validates and constructs selected LLM with no speech credentials',async()=>{
- const settings={...loadSettings({DASHSCOPE_API_KEY:'test',NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'qwen'}),doubao_tts_endpoint:'invalid',doubao_asr_endpoint:'invalid',volcengine_vad_threshold:-1}
+ const settings={...loadSettings({DASHSCOPE_API_KEY:'test',NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'qwen'},true),doubao_tts_endpoint:'invalid',doubao_asr_endpoint:'invalid',volcengine_vad_threshold:-1}
  let sequence=0,opened=0,recalled=0,consumed=0,metered=0
  let adaptation:string|null|undefined
  const received:CascadedLlmInput[][]=[]
@@ -25,7 +25,7 @@ test('production text factory only validates and constructs selected LLM with no
   await provider.connect({tools:[],signal})
   const done=(async()=>{for await(const raw of provider.events(signal)){const event=raw as {kind:string;item_id?:string};if(event.kind==='user_transcript_final')await provider.ensureResponse?.(signal,event.item_id);if(event.kind==='response_terminal')return}})()
   assert(typeof provider.submitText==='function');await provider.submitText('question',signal);await done
-  assert.equal(opened,1);assert.equal(recalled,1);assert.equal(consumed,1);assert.equal(metered,1);assert.equal(adaptation,'verified memory context');assert.deepEqual(received,[[{kind:'user_text',text:'question'}]])
+  assert.equal(opened,1);assert.equal(recalled,1);assert.equal(consumed,1);assert.equal(metered,1);assert.match(adaptation??'',/^verified memory context\n/u);assert.deepEqual(received,[[{kind:'user_text',text:'question'}]])
  }finally{await provider.close()}
 })
 
@@ -43,4 +43,16 @@ test('voice provider factory constructs only lazy provider resources and restore
   llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:input=>{seeded=input?.history;return {async *stream(){await Promise.resolve()},abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()}}})},
  })
  try {assert.equal(audioOpens,0);await provider.connect({tools:[],signal:new AbortController().signal});assert.equal(audioOpens,3);assert.deepEqual(seeded,history)}finally{await provider.close()}
+})
+
+test('integrated voice keeps the explicitly selected text LLM and ledger path', async () => {
+ const {requireSelectedCascadedLlmConfig}=await import('../src/config/cascaded-realtime-config.js')
+ const settings=loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE:'integrated',DASHSCOPE_API_KEY:'voice-key',
+  NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'deepseek',DEEPSEEK_API_KEY:'text-key',
+  NOVA_AUDIO_AGENT_MEMORY_LEDGER_PATH:'/tmp/new-ledger.sqlite',NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH:'/tmp/legacy-ledger.sqlite'},true)
+ assert.equal(settings.pipeline_mode,'integrated')
+ assert.equal(settings.workspace_graph_path,'/tmp/new-ledger.sqlite')
+ const selected=requireSelectedCascadedLlmConfig(settings)
+ assert.equal(selected.provider,'deepseek');assert.equal(selected.config.apiKey,'text-key')
+ assert.equal(loadSettings({NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH:'/tmp/legacy-ledger.sqlite'}).workspace_graph_path,'/tmp/legacy-ledger.sqlite')
 })

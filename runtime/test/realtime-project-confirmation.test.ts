@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { VirtualClock } from '../src/clock.js'
+import {ProjectConfirmationFlow} from '../src/realtime/project-confirmation-flow.js'
+import { VirtualClock } from '../src/core/clock.js'
 import {
   ProjectConfirmationController,
   type ProjectConfirmationView,
-} from '../src/project-confirmation.js'
+} from '../src/projects/project-confirmation.js'
 
 function createController(
   clock: VirtualClock = new VirtualClock(10),
@@ -363,7 +364,7 @@ test('a workspace creation with work starts with the approved concise confirmati
 
   assert.equal(
     proposal.confirmation_prompt,
-    '是否创建工作区“timer-app”并开始任务？请确认或取消。',
+    '请问是否创建工作区“timer-app”并开始任务？',
   )
 })
 
@@ -381,7 +382,7 @@ test('workspace reuse has its own exact confirmation and a public pill action', 
 
   assert.equal(
     proposal.confirmation_prompt,
-    '是否使用现有工作区“timer-app”并开始任务？请确认或取消。',
+    '是否使用现有工作区“timer-app”并开始任务？',
   )
   // Spec 08 (2026-09-04 decision): every change of the active project confirms, so each action names its pill.
   assert.equal(controller.view.pending_action, 'reuse_workspace')
@@ -468,7 +469,7 @@ test('public view and prompt expose labels but no private bindings', () => {
     origin_ref: 'user:1',
   })
 
-  assert.equal(proposal.confirmation_prompt, '准备切换到天气看板，并继续 Session“登录修复”，请确认或取消。')
+  assert.equal(proposal.confirmation_prompt, '是否切换到“天气看板”，继续“登录修复”会话？')
   assert.deepEqual(controller.view, {
     pending_confirmation: true,
     pending_confirmation_busy: false,
@@ -500,4 +501,19 @@ test('invalid proposal IDs are rejected before replacing pending state', () => {
     })
     assert.throws(() => prepareSelect(controller), /invalid confirmation proposal id/u)
   }
+})
+
+test('intake confirmation carries its objective title into the granted operation', () => {
+  const controller = createController()
+  const stop = new Error('stop after proposal persistence')
+  const flow = new ProjectConfirmationFlow({projectConfirmation: {
+    prepare: (input: Parameters<ProjectConfirmationController['prepare']>[0]) => {controller.prepare(input); throw stop},
+  }} as unknown as ConstructorParameters<typeof ProjectConfirmationFlow>[0])
+  const current = {target: {action: 'create', workspace_display_name: 'Game', workspace_id: null,
+    session_title: null, session_id: null}, title: 'Build a game', work_order: 'WorkOrder v2\n\nObjective:\n- Build a game',
+    origin_ref: 'conversation:1', intake_id: 'intake-1', plan_revision: 1}
+  assert.throws(() => flow.prepareIntake(current as Parameters<typeof flow.prepareIntake>[0]), error => error === stop)
+  const operation = controller.acceptDirectDecision({proposalId: controller.lifecycleId!, confirmed: true}).operation!
+  assert.equal(operation.session_title, 'Build a game')
+  assert.equal(operation.work_order, current.work_order)
 })

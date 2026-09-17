@@ -4,15 +4,17 @@
 // text that additive attributes would disturb.
 export const SETTINGS_CATEGORIES = Object.freeze([
   Object.freeze({id: 'general', label: '通用', sections: Object.freeze([
-    'wake-word-section', 'appearance-section', 'notifications-section',
-    'intent-section', 'proactivity-section', 'frontend-usage-section',
+    'wake-word-section', 'notifications-section',
+    'intent-section', 'proactivity-section',
   ])}),
+  Object.freeze({id: 'usage', label: '用量', sections: Object.freeze(['frontend-usage-section'])}),
   Object.freeze({id: 'pipeline', label: '语音管线', sections: Object.freeze(['pipeline'])}),
-  Object.freeze({id: 'capabilities', label: '能力与 MCP', sections: Object.freeze(['capabilities-section'])}),
+  Object.freeze({id: 'capabilities', label: '执行器与 MCP', sections: Object.freeze(['capabilities-section'])}),
   Object.freeze({id: 'im', label: 'IM 渠道', sections: Object.freeze(['im-section'])}),
   Object.freeze({id: 'knowledge', label: '知识库', sections: Object.freeze(['knowledge-section'])}),
   Object.freeze({id: 'secrets', label: 'API 密钥', sections: Object.freeze(['secrets'])}),
-  Object.freeze({id: 'codex', label: 'Coding 执行器与工作区', sections: Object.freeze([
+  Object.freeze({id: 'phone', label: '连接 iPhone', sections: Object.freeze(['phone-connection-section'])}),
+  Object.freeze({id: 'codex', label: '编程', sections: Object.freeze([
     'codex-approval-section', 'codex-projects',
   ])}),
 ])
@@ -32,8 +34,8 @@ export function categorySectionIds() {
 
 /**
  * Roving-focus mapping for the vertical sidebar. Deliberately separate from
- * workspace-graph-board.mjs's boardTabForKey, which is horizontal and fixed at
- * three tabs; null means the key is not a navigation key and must pass through.
+ * channel-tabs.mjs's boardTabForKey, which is horizontal and fixed at
+ * two tabs; null means the key is not a navigation key and must pass through.
  */
 export function categoryTabForKey(activeCategory, key) {
   const ids = categoryIds()

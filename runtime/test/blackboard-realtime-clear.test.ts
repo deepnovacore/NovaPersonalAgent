@@ -3,9 +3,9 @@ import {mkdtemp, realpath, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {test} from 'node:test'
-import {buildAssembly, type Assembly} from '../src/assembly.js'
-import {VirtualClock} from '../src/clock.js'
-import {settingsSchema} from '../src/config.js'
+import {buildAssembly, type Assembly} from '../src/composition/assembly.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {settingsSchema} from '../src/config/config.js'
 import type {Frame, FrameSource} from '../src/executors/watcher.js'
 import type {BlackboardSessionOptions} from '../src/memory/blackboard-session.js'
 import type {
@@ -20,8 +20,8 @@ import type {
   GatewayDelta,
   ModelGateway,
   StreamRequest,
-} from '../src/model-gateway.js'
-import {buildRealtimeAssembly, type RealtimeAssembly} from '../src/realtime-assembly.js'
+} from '../src/model/model-gateway.js'
+import {buildRealtimeAssembly, type RealtimeAssembly} from '../src/composition/realtime-assembly.js'
 import type {SearchTransport} from '../src/executors/search.js'
 import type {HostContextItem, HostResponseIntent, JsonObject, RealtimeProvider} from '../src/realtime/protocol.js'
 

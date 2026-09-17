@@ -1,5 +1,5 @@
 import type {ObservationAdmission} from '../watcher.js'
-import type {VisionIdentity} from '../../vision-assess.js'
+import type {VisionIdentity} from './assess.js'
 import type {VisionLifecycleSink} from './controller-core.js'
 
 interface VisionLifecycleTarget {

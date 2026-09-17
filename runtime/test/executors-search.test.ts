@@ -18,12 +18,12 @@ import { readFileSync } from 'node:fs'
 import net from 'node:net'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
-import type { ExecutorAdapter, ExecutorDispatchContext } from '../src/causal-runtime.js'
-import { VirtualClock } from '../src/clock.js'
-import type { JsonValue } from '../src/events.js'
-import { delegateSchema } from '../src/ports.js'
-import { stripLikePython } from '../src/python-text.js'
+import { canonicalJson } from '../src/text/canonical-json.js'
+import type { ExecutorAdapter, ExecutorDispatchContext } from '../src/core/causal-runtime.js'
+import { VirtualClock } from '../src/core/clock.js'
+import type { JsonValue } from '../src/core/events.js'
+import { delegateSchema } from '../src/core/ports.js'
+import { stripLikePython } from '../src/text/python-text.js'
 import {
   SearchAdapter,
   TavilyTransport,

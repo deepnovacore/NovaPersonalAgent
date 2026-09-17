@@ -16,15 +16,15 @@
  * scenario distinguishes is either dead or a hole in the fixture set.
  */
 
-import type { Clock } from '../clock.js'
-import { Floor } from '../floor.js'
-import { USER_PRIORITY } from '../memory.js'
-import {codePointLengthLikePython} from '../python-text.js'
+import type { Clock } from '../core/clock.js'
+import { Floor } from './floor.js'
+import { USER_PRIORITY } from '../core/memory.js'
+import {codePointLengthLikePython} from '../text/python-text.js'
 import type {
   PlaybackCompletion,
   PlaybackGeneration,
   PlaybackRegistry,
-} from '../playback.js'
+} from './playback.js'
 import { packRecoveryTurns, type RecoveryTurn } from './history.js'
 import {
   ItemDeliveryUncertainError,

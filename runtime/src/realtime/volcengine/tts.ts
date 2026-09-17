@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import {reportUsage, type UsageReporter} from '../usage.js'
-import { isWellFormed, stripLikePython } from '../../python-text.js'
+import { isWellFormed, stripLikePython } from '../../text/python-text.js'
 import type {TtsAudio, TtsClient, TtsSession} from '../cascaded/ports.js'
 import { MAX_REALTIME_TEXT } from '../protocol.js'
 import { MAX_VOLCENGINE_WIRE_FRAME_BYTES, volcengineOutputPcm } from './audio.js'

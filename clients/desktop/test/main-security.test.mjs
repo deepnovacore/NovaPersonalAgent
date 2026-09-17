@@ -44,6 +44,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:microphone:permission',
     'nova:microphone:retry',
     'nova:microphone:status',
+    'nova:microphone:toggle',
     'nova:native-audio:capture',
     'nova:native-audio:clear',
     'nova:native-audio:event',
@@ -52,12 +53,14 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:native-audio:terminal',
     'nova:orb-menu:show',
     'nova:orb:dormant',
+    'nova:pairing:open',
     'nova:personal:collapse',
     'nova:personal:collapsed',
     'nova:personal:directory',
     'nova:personal:feishu-verification',
     'nova:personal:unread',
     'nova:personal:wake',
+    'nova:phone:action',
     'nova:projects:repair',
     'nova:release-camera:result',
     'nova:settings:changed',
@@ -70,10 +73,11 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:wake-word:changed',
     'nova:wake-word:report',
     'nova:wake-word:retry',
+    'nova:wake-word:sleep',
+    'nova:wake-word:wake',
     'nova:window-drag:end',
     'nova:window-drag:move',
     'nova:window-drag:start',
-    'nova:workspace-graph-board:request',
     'nova:workspaces:clear-all',
     'nova:workspaces:clear-current',
     'nova:workspaces:open-current',
@@ -95,7 +99,7 @@ test('记忆面板 clear is zero-argument, sender-bound, single-flight, and rech
   const preload = await readFile(new URL('../src/preload/preload.cjs', import.meta.url), 'utf8')
   const renderer = await readFile(new URL('../src/renderer/memory-board.mjs', import.meta.url), 'utf8')
   const start = main.indexOf("ipcMain.handle('nova:memory-board:clear'")
-  const handler = main.slice(start, main.indexOf("ipcMain.handle('nova:workspace-graph-board:request'", start))
+  const handler = main.slice(start, main.indexOf("ipcMain.handle('nova:memory-board:copy-json'", start))
 
   assert.notEqual(start, -1)
   assert.match(handler, /async \(event, \.\.\.args\) =>/)
@@ -113,7 +117,7 @@ test('记忆面板 clear is zero-argument, sender-bound, single-flight, and rech
 async function extractedMemoryBoardClear(dialog, owner) {
   const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const start = main.indexOf("ipcMain.handle('nova:memory-board:clear'")
-  const source = main.slice(start, main.indexOf("ipcMain.handle('nova:workspace-graph-board:request'", start))
+  const source = main.slice(start, main.indexOf("ipcMain.handle('nova:memory-board:copy-json'", start))
   let handler
   const sender = {}
   const context = createContext({
@@ -190,19 +194,6 @@ test('main owns the fixed orb menu and validates every menu and board sender', a
   assert.match(renderer, /orbMenu\.show\(\)/)
 })
 
-test('workspace graph board is sender-bound on the independent debug channel', async () => {
-  const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
-  const preload = await readFile(new URL('../src/preload/preload.cjs', import.meta.url), 'utf8')
-  const renderer = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
-
-  assert.match(main, /ipcMain\.handle\('nova:workspace-graph-board:request', async event => \{\n\s*if \(!boardWindow \|\| event\.sender !== boardWindow\.webContents\)/)
-  assert.match(main, /board: 'workspace_graph',\s*detail: 'compact'/u)
-  assert.doesNotMatch(preload, /workspace-graph-board:(?:fetch|data)/u)
-  assert.doesNotMatch(renderer, /workspace_graph\.board/u)
-  for (const source of [main, preload, renderer]) {
-    assert.doesNotMatch(source, /workspace-graph-board:(?:export|delete|edit|suppress|merge|switch|inspect)/u)
-  }
-})
 
 test('a hidden orb window is never shrunk, and comes back at natural size', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
@@ -298,8 +289,8 @@ test('settings IPC is sender-validated and answers from main without an orb rela
   assert.match(source, /function publishCommittedSettings\(\) \{[\s\S]*sendToOrb\('nova:settings:changed', orbSettings\(currentSettings\)\)/)
   // No requestId machinery: settings live in main, so nothing round-trips
   // through the orb renderer the way the memory board has to.
-  const set = source.slice(source.indexOf("ipcMain.handle('nova:settings:set'"))
-  assert.doesNotMatch(set.slice(0, set.indexOf('\n  })')), /requestId|pendingBoardRequests/)
+  const set = source.slice(source.indexOf("async function applyDesktopSettings"))
+  assert.doesNotMatch(set.slice(0, set.indexOf('\n}')), /requestId|pendingBoardRequests/)
 })
 
 test('Codex rescan is restricted to the settings window sender', async () => {
@@ -374,8 +365,8 @@ test('rollback recovery gates startup, save restart, rescan, and explicit backen
   assert.match(recoveryBody, /stopBackend:/)
   assert.match(recoveryBody, /backendSupervisor\.stop\(\)/)
   assert.match(recoveryBody, /retryBackend:[\s\S]*backendSupervisor\.status\(\)\.state === 'connected'/)
-  const settings = source.slice(source.indexOf("ipcMain.handle('nova:settings:set'"))
-  const settingsHandler = settings.slice(0, settings.indexOf('\n  })'))
+  const settings = source.slice(source.indexOf("async function applyDesktopSettings"))
+  const settingsHandler = settings.slice(0, settings.indexOf('\n}'))
   assert.match(settingsHandler, /restartBackend: restartSettingsBackend/)
   const activation = source.slice(source.indexOf('async function restartSettingsBackend'))
   assert.match(activation.slice(0, activation.indexOf('\n}')), /managedWorkspaceBackendRecovery\.restart\(\)/)
@@ -430,8 +421,8 @@ test('every settings write goes through one queue so overlapping patches merge',
   assert.match(body, /save: next => saveSettings\(settingsFile\(\), next\)/)
   assert.match(body, /codec: secretCodec/)
 
-  const set = source.slice(source.indexOf("ipcMain.handle('nova:settings:set'"))
-  const handler = set.slice(0, set.indexOf('\n  })'))
+  const set = source.slice(source.indexOf("async function applyDesktopSettings"))
+  const handler = set.slice(0, set.indexOf('\n}'))
   assert.match(handler, /applySettingsTransaction\(\{/)
   assert.match(handler, /write: async value => \{[\s\S]*await settingsWriter\(commit\.settingsPatch \?\? \{\}, next =>/)
   assert.match(handler, /coordinator: lifecycleCoordinator/)
@@ -566,8 +557,8 @@ test('supervisor publishes live connection state to an open settings panel', asy
 test('a saved configuration reports bounded transaction phases without falsifying backend status', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const apply = await readFile(new URL('../src/main/settings-apply.mjs', import.meta.url), 'utf8')
-  const set = source.slice(source.indexOf("ipcMain.handle('nova:settings:set'"))
-  const handler = set.slice(0, set.indexOf('\n  })'))
+  const set = source.slice(source.indexOf("async function applyDesktopSettings"))
+  const handler = set.slice(0, set.indexOf('\n}'))
 
   assert.match(source, /settingsApplyStatus/)
   assert.match(handler, /publishStatus: publishSettingsApplyStatus/)
@@ -841,7 +832,7 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   let prevented = 0, quits = 0, backendStops = 0
   const event = {preventDefault() { prevented++ }}
   const context = vm.createContext({
-    sourceSmokeStage() {}, feishuSetupOwner: {release: async () => {}},
+    sourceSmokeStage() {}, feishuSetupOwner: {release: async () => {}}, cancelPhonePairing: async () => {}, managedPhone: {stop: async () => {}},
     app: {
       on: (name, handler) => { if (name === 'before-quit') beforeQuit = handler },
       quit() { quits++; beforeQuit(event) },
@@ -875,7 +866,9 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
   const {default: vm} = await import('node:vm')
   const {backendSettings, DEFAULT_SETTINGS} = await import('../src/main/settings-store.mjs')
   const start = source.indexOf("  ipcMain.handle('nova:settings:set'")
-  const handlerSource = source.slice(start, source.indexOf('\n  })', start) + 5)
+  const sharedStart = source.indexOf('async function applyDesktopSettings')
+  const sharedSource = source.slice(sharedStart, source.indexOf('\n}', sharedStart) + 2)
+  const handlerSource = sharedSource + '\n' + source.slice(start, source.indexOf('\n  })', start) + 5)
   for (const [payload, expectedRestart, pendingRecovery = false] of [
     [{settingsPatch: {wakeWordEnabled: true}}, false],
     [{settingsPatch: {autoHideSeconds: 120}}, false],
@@ -969,7 +962,7 @@ test('recovery cleanup failure stops the activated child before rollback and pre
   const {join} = await import('node:path')
   const {default: vm} = await import('node:vm')
   const {applySettingsTransaction} = await import('../src/main/settings-apply.mjs')
-  const {createLifecycleCoordinator} = await import('../src/main/lifecycle-coordinator.mjs')
+  const {createLifecycleCoordinator} = await import('../src/main/desktop-startup.mjs')
   const {saveSettings, loadSettings, saveSettingsRecovery, restoreSettingsRecovery} = await import('../src/main/settings-store.mjs')
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const helper = name => {
@@ -1076,4 +1069,69 @@ test('personal directory and window controls are bound to main renderer',async()
   assert.match(body,/event.sender !== mainWindow.webContents/)
  }
  assert.match(source,/setBounds: bounds => \{ if \(personalCollapsed\) mainWindow.setBounds\(bounds\) \}/)
+})
+
+test('sleep and wake IPC reject other windows and unexpected arguments', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const sender = {}
+  for (const action of ['sleep', 'wake']) {
+    const start = source.indexOf(`ipcMain.on('nova:wake-word:${action}',`)
+    const body = source.slice(start, source.indexOf('\n  })', start) + 5)
+    let handler, calls = 0
+    new Function('ipcMain', 'mainWindow', 'sleepOrb', 'wakeWord', body)(
+      {on: (_name, callback) => { handler = callback }}, {webContents: sender},
+      () => calls++, {wake: () => calls++})
+    handler({sender: {}})
+    handler({sender}, 'unexpected')
+    assert.equal(calls, 0)
+    handler({sender})
+    assert.equal(calls, 1)
+  }
+})
+
+test('phone actions require the settings sender and restrict actions and device identifiers', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const {default: vm} = await import('node:vm')
+  const body = source.slice(source.indexOf("  ipcMain.handle('nova:phone:action'"), source.indexOf("  ipcMain.on('nova:pairing:open'"))
+  let handler
+  const sender = {}, calls = []
+  vm.runInNewContext(body, {ipcMain: {handle: (_channel, fn) => {handler = fn}}, settingsWindow: {webContents: sender},
+    phoneEpoch: 0, phoneQueue: Promise.resolve(), phoneAction: async (...args) => {calls.push(args); return {state: 'ready'}}})
+  assert.equal((await handler({sender: {}}, 'enable')).state, 'unavailable')
+  assert.equal((await handler({sender}, 'exec')).state, 'unavailable')
+  assert.equal((await handler({sender}, 'status', 'extra')).state, 'unavailable')
+  assert.equal((await handler({sender}, 'revoke', '../token')).state, 'unavailable')
+  assert.equal((await handler({sender}, 'enable')).state, 'ready')
+  assert.equal(calls.length, 1)
+})
+
+
+test('unsupported embedding in recovery reaches startup diagnostics without mutating either file', async () => {
+  const {mkdtemp, writeFile, rm} = await import('node:fs/promises')
+  const {tmpdir} = await import('node:os')
+  const {join} = await import('node:path')
+  const {default: vm} = await import('node:vm')
+  const {saveSettings, loadSettings, restoreSettingsRecovery} = await import('../src/main/settings-store.mjs')
+  const root = await mkdtemp(join(tmpdir(), 'nova-local-embedding-recovery-'))
+  const file = join(root, 'settings.json')
+  try {
+    const current = await saveSettings(file, {})
+    const capabilityPath = join(root, 'capabilities.json')
+    const capabilityText = '{"version":1}'
+    await writeFile(capabilityPath, capabilityText)
+    const journal = JSON.stringify({version: 1, settings: {...current, embeddingProvider: 'local'}, capability: {
+      path: capabilityPath, written: Buffer.from(capabilityText).toString('base64'), previous: null,
+    }})
+    await writeFile(`${file}.recovery`, journal)
+    const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+    const helper = source.slice(source.indexOf('async function loadStartupSettings()'), source.indexOf('async function startSelectedCamera'))
+    const context = vm.createContext({settingsFile: () => file, loadSettings, restoreSettingsRecovery,
+      publishSettingsApplyStatus() {}, settingsRecoveryAvailable: false, openSettingsRequested: false})
+    vm.runInContext(helper, context)
+    await assert.rejects(context.loadStartupSettings(), {code: 'embedding_provider_invalid'})
+    assert.equal(context.currentSettings, undefined)
+    assert.equal(await readFile(capabilityPath, 'utf8'), capabilityText)
+    assert.deepEqual(await loadSettings(file), current)
+    assert.equal(await readFile(`${file}.recovery`, 'utf8'), journal)
+  } finally {await rm(root, {recursive: true, force: true})}
 })

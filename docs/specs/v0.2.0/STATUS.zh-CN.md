@@ -248,6 +248,6 @@ M2 能力注册表、M3 外部 MCP 和 M4 知识库均已有实现；接下来�
 - 项目 / 会话 / 任务：[`08-project-and-work.md`](08-project-and-work.md)（文末有 live 验收清单，未勾的就是第五节的缺口）
 - 实现台账与全部验证证据：[`IMPLEMENTATION.md`](IMPLEMENTATION.md)
 - 级联数字音频历史证据：[`provider-contract acceptance`](../../handoffs/2026-09-05-provider-contract-acceptance.md)、[`cascaded acceptance`](../../handoffs/2026-09-05-cascaded-live-acceptance.md)
-- 关键代码：`runtime/src/work-tools.ts`（三个工具）、`runtime/src/executors/coding/intake.ts`（coordinator）、`runtime/src/executors/codex/adapter-project.ts`（并发槽 / 取消 / 标题）、`runtime/src/realtime/service.ts`（拦截与 `confirm` 分流）
+- 关键代码：`runtime/src/core/work-tools.ts`（三个工具）、`runtime/src/executors/coding/intake.ts`（coordinator）、`runtime/src/executors/codex/adapter-project.ts`（并发槽 / 取消 / 标题）、`runtime/src/realtime/service.ts`（拦截与 `confirm` 分流）
 
 调度归属关键代码补充：`runtime/src/realtime/session.ts`、`runtime/src/realtime/frontend-instructions.ts`。

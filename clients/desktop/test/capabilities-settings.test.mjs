@@ -132,7 +132,7 @@ test('Ark plus enabled MCP or knowledge independently exports DashScope only whe
 
 test('combined operation validates settings, returns invalid/busy unchanged and distinguishes saved failures', async t => {
   const {applySettingsTransaction} = await import('../src/main/settings-apply.mjs')
-  const {createLifecycleCoordinator} = await import('../src/main/lifecycle-coordinator.mjs')
+  const {createLifecycleCoordinator} = await import('../src/main/desktop-startup.mjs')
   const {parseSettingsCommit, validatePreparedSettings} = await import('../src/main/capabilities-settings.mjs')
   const root = await fixture(t), path = join(root, 'cap.json')
   await writeFile(path, JSON.stringify(document))
@@ -259,7 +259,7 @@ test('failed backend activation and interrupted saves restore settings, sealed s
   const {applySettingsTransaction} = await import('../src/main/settings-apply.mjs')
   const {saveSettings, loadSettings, saveSettingsRecovery, restoreSettingsRecovery, clearSettingsRecovery,
     applySettingsUpdate} = await import('../src/main/settings-store.mjs')
-  const {createLifecycleCoordinator} = await import('../src/main/lifecycle-coordinator.mjs')
+  const {createLifecycleCoordinator} = await import('../src/main/desktop-startup.mjs')
   for (const capabilitiesOnly of [false, true]) {
     const root = await fixture(t), file = join(root, 'settings.json'), cap = join(root, 'cap.json')
     const originalBytes = ' {"version":1,"modules":{"search":{"enabled":false}}} \n'

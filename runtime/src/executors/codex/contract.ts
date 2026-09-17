@@ -1,14 +1,14 @@
 import {createHash} from 'node:crypto'
-import type {ExecutorProgress} from '../../causal-runtime.js'
-import type {JsonValue} from '../../events.js'
+import type {ExecutorProgress} from '../../core/causal-runtime.js'
+import type {JsonValue} from '../../core/events.js'
 import {snapshotJsonRecord} from './safe-json.js'
-import {validProgressSummary} from '../../events.js'
-import {hasOtherCategory as hasPinnedOtherCategory} from '../../unicode-tables.js'
-import {normalizeNfcPinned} from '../../unicode-normalize.js'
-import {isPythonSpace, isWellFormed, stripLikePython} from '../../python-text.js'
-import {executorManifestSchema, type ExecutorManifest, type OpSpec} from '../../ports.js'
+import {validProgressSummary} from '../../core/events.js'
+import {hasOtherCategory as hasPinnedOtherCategory} from '../../text/unicode-tables.js'
+import {normalizeNfcPinned} from '../../text/unicode-normalize.js'
+import {isPythonSpace, isWellFormed, stripLikePython} from '../../text/python-text.js'
+import {executorManifestSchema, type ExecutorManifest, type OpSpec} from '../../core/ports.js'
 
-export const INTERNAL_CODEX_RUN_DEADLINE = 540
+export const CODEX_STARTUP_DEADLINE = 540
 export const MAX_CODEX_EVENTS = 16_384
 export const MAX_CODEX_EVIDENCE_COUNTER = 1_048_576
 // Intake retains a 4000-code-point opening and at most 8 answers (2000 each), plus questions (300).
@@ -26,7 +26,7 @@ const CODEX_POLICY = {
 
 const RUN: OpSpec = {
   name: 'run',
-  description: '在配置好的工作区中执行一个有界、非交互的 Codex 工作单',
+  description: '在配置好的工作区中执行 Codex 工作单，按需等待用户审批',
   params: {
     type: 'object',
     properties: {work_order: {type: 'string', minLength: 1, maxLength: 4000}},
@@ -35,7 +35,7 @@ const RUN: OpSpec = {
   },
   readonly: false,
   confirm: false,
-  deadline_budget: 600,
+  deadline_budget: null,
   verifies: [],
   sensitive_params: ['work_order'],
   sync_result: false,
@@ -81,12 +81,13 @@ const PROJECT: Readonly<Record<string, JsonValue>> = {
 /** Project-mode `run`: the coordinator's decision rides with the work order (spec 08). */
 const RUN_PROJECT: OpSpec = {
   ...RUN,
-  description: '在 coordinator 选定的项目/会话中执行一个有界、非交互的 Codex 工作单',
+  description: '在 coordinator 选定的项目/会话中执行 Codex 工作单，按需等待用户审批',
   params: {
     type: 'object',
     properties: {
       work_order: {type: 'string', minLength: 1, maxLength: 4000},
       project: PROJECT,
+      session_id: {type: 'string', minLength: 1, maxLength: 80, description: '宿主已解析的精确会话 ID'},
       session: {type: 'string', enum: ['latest', 'new'], description: 'latest 续用活动会话；new 开新线程'},
       title: {type: 'string', minLength: 1, maxLength: 120, description: '宿主为新会话派生的标题'},
     },
@@ -127,7 +128,7 @@ const CANCEL: OpSpec = {
 }
 
 /** One description line in the host `dispatch` tool; the voice model never sees the ops above. */
-export const CODEX_AGENT_SUMMARY = '在已配置的项目工作区里执行编码任务（改代码、修 bug、写测试、重构）'
+export const CODEX_AGENT_SUMMARY = '管理项目工作区和会话（新建、选择、切换），以及执行编码、运行、验证任务；只切换而不编码也是可提交的操作'
 
 function manifest(ops: readonly OpSpec[], approvals = false): ExecutorManifest {
   return deepFreeze(executorManifestSchema.parse({
@@ -141,12 +142,11 @@ function manifest(ops: readonly OpSpec[], approvals = false): ExecutorManifest {
   }))
 }
 
-export const CODEX_BASE_MANIFEST = manifest([RUN, STATUS])
 export const CODEX_LIVE_MANIFEST = manifest([RUN, STEER, STATUS])
 export const CODEX_PROJECT_MANIFEST = manifest([RUN_PROJECT, STEER_PROJECT, STATUS, CANCEL])
 export const CODEX_PROJECT_APPROVAL_MANIFEST = manifest([RUN_PROJECT, STEER_PROJECT, STATUS, CANCEL], true)
 
-export type CodexVariant = 'base' | 'live' | 'project'
+export type CodexVariant = 'live' | 'project'
 export type CodexRequestValidation =
   | {readonly ok: true; readonly value: Readonly<Record<string, unknown>>}
   | {readonly ok: false; readonly error: 'unknown_op' | 'invalid_params'; readonly op: string}
@@ -168,11 +168,7 @@ function validateCodexRequestChecked(
   op: string,
   request: unknown,
 ): CodexRequestValidation {
-  const operations = variant === 'base'
-    ? new Set(['run', 'status'])
-    : variant === 'live'
-      ? new Set(['run', 'steer', 'status'])
-      : new Set(['run', 'steer', 'status', 'cancel'])
+  const operations = new Set(variant === 'live' ? ['run', 'steer', 'status'] : ['run', 'steer', 'status', 'cancel'])
   if (!operations.has(op)) return failure('unknown_op', op)
   const requestSnapshot = snapshotJsonRecord(request)
   if (op === 'status') {
@@ -202,7 +198,7 @@ function projectField(request: Record<string, unknown>, result: Record<string, u
 }
 
 function validateProjectRun(request: Record<string, unknown>): CodexRequestValidation {
-  const allowed = new Set(['work_order', 'project', 'session', 'title'])
+  const allowed = new Set(['work_order', 'project', 'session', 'title', 'session_id'])
   if (Object.keys(request).some(key => !allowed.has(key))) return failure('invalid_params', 'run')
   const workOrder = normalizedString(request.work_order, 4000)
   if (workOrder === null) return failure('invalid_params', 'run')
@@ -211,6 +207,11 @@ function validateProjectRun(request: Record<string, unknown>): CodexRequestValid
   const session = Object.hasOwn(request, 'session') ? request.session : 'latest'
   if (session !== 'latest' && session !== 'new') return failure('invalid_params', 'run')
   result.session = session
+  if (Object.hasOwn(request, 'session_id')) {
+    const id = normalizedString(request.session_id, 80)
+    if (id === null || session !== 'latest') return failure('invalid_params', 'run')
+    result.session_id = id
+  }
   if (Object.hasOwn(request, 'title')) {
     const title = normalizedString(request.title, 120)
     if (title === null) return failure('invalid_params', 'run')
@@ -332,7 +333,7 @@ export function createCodexRunEnvelope(
   code: unknown,
   preflight: Readonly<Record<string, unknown>>,
   evidence?: unknown,
-  stage?: 'preflight' | 'credential' | 'spawn' | 'thread_start',
+  stage?: 'preflight' | 'credential' | 'spawn' | 'thread_start' | 'execution',
 ): Readonly<Record<string, unknown>> {
   const admitted = evidence === undefined ? null : sanitizeCodexEvidence(evidence)
   return deepFreeze({

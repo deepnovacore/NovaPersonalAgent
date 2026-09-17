@@ -7,9 +7,7 @@
 Node.js and TypeScript are the only product runtime. Codex is app-server-only; JSONL is
 fixture-parser-only and has no production process execution path. The v0.2dev thin-frontend target
 projects direct camera evidence through the Vision controller's hidden Watch/Guard channels;
-M1.5c/live/Windows acceptance remains pending. Legacy HA and AutoGLM settings produce
-a stable, credential-safe migration error before provider, process, device, or desktop
-construction.
+M1.5c/live/Windows acceptance remains pending.
 
 ## Install for source development
 
@@ -128,7 +126,7 @@ fixtures are read-only during ordinary checks.
 `integrated` and `cascaded` are the top-level pipeline shapes. Integrated Qwen is the default: it
 uses `qwen-audio-3.0-realtime-plus`, the `longanqian` voice, and `DASHSCOPE_API_KEY`, with no ASR,
 LLM, or TTS subnode controls. Cascaded mode exposes endpointing, ASR, LLM, and TTS; its default is
-Volcengine ASR -> Qwen `qwen-flash` -> Volcengine TTS. Ark is an explicit cascaded LLM selection,
+Volcengine ASR -> Qwen `qwen-plus` -> Volcengine TTS. Ark is an explicit cascaded LLM selection,
 not an alternate integrated provider:
 
 ```bash
@@ -176,58 +174,20 @@ DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
 
 For opt-in live cascaded verification run `npm run smoke:cascaded --workspace @nova-audio-agent/runtime` with the provider credentials. The host controls response admission and request ownership; response origin is evidence, never authorization. Human acceptance remains pending.
 
-## Workspace memory graph and MyContext provider
-
-The Node runtime's opt-in workspace memory graph is configured with:
-
-```bash
-NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED=true
-NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH=~/.nova-audio-agent/workspace-graph.sqlite
-
-# Optional. This must be a separately supplied Nova-compatible read-only adapter base URL.
-NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL=http://127.0.0.1:PORT/base
-```
-
-The graph maintains workspace identity from Nova's confirmed lifecycle and records an adjacent
-committed A-to-B transition as weak `discussed_with` metadata — a bounded map cue, not a
-conclusion from model or work-order prose. Nova reads neither workspace, keeps the relation below
-the proactive threshold, and ages unrefreshed relations to stale after 90 days. Committed switches
-revoke the previous graph scope immediately and retain admitted A-to-B-to-C order; an
-uncommittable event breaks adjacency instead of bridging the gap. All durable graph times use
-Unix seconds. Nova does not copy repository-native engineering instructions or automatically
-inspect another workspace.
-
-The optional MyContext provider may be consulted only for explicit evidence recall about the same
-authoritative current workspace — for example, a user asking "why?" or asking for a source. It
-never participates in startup, workspace open/switch, default recall, the Context Header, Recall
-Pack, proactive confidence, tool routing, or actions. Returned text is local, read-only,
-source-labelled, untrusted, non-persistent, and non-proactive; it cannot mutate Nova's graph,
-workspace identity, task state, or another workspace. Provider failure is a visible degraded
-empty result and never blocks ordinary voice or project work.
-
-The URL must serve Nova's strict `nova_workspace_evidence` schema-version-1 capability and lookup
-contract; the raw upstream MyContext `/capabilities` v2 is not accepted, because it does not
-attest exact Nova workspace scope. Nova does not ship an adapter executable and does not guess
-compatibility from `/ask` results — installing MyContext alone does not enable enrichment. The
-integration is an HTTP client boundary and does not copy or bundle MyContext code or runtime;
-upstream MyContext is licensed under the Elastic License 2.0, and a separate legal and
-distribution review is required before reusing, bundling, or shipping any upstream MyContext code
-or runtime.
-
 ## Public environment reference
 
-The following block is generated from `runtime/src/environment-contract.ts`. Host-private handshake
-inputs and retired integration variables are intentionally excluded. The retired compatibility
-families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for them to a Node setup.
+The following block is generated from `runtime/src/config/environment-contract.ts`. Host-private handshake
+inputs are intentionally excluded.
 
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | Variable | Owner | Required | Default | Description |
 |---|---|---|---|---|
+| `NOVA_AUDIO_AGENT_MEMORY_LEDGER_PATH` | `core` | No | ~/.nova-audio-agent/workspace-graph.sqlite | Canonical memory ledger SQLite path; retains the v0.3 storage location. |
 | `NOVA_AUDIO_AGENT_MODEL_BASE_URL` | `core` | No | DashScope compatible endpoint | FastBrain compatible API endpoint. |
 | `NOVA_AUDIO_AGENT_MODEL_API_KEY` | `core` | No | None | Optional generic support-model API credential override. |
 | `NOVA_AUDIO_AGENT_FAST_MODEL` | `core` | No | qwen3-vl-plus | FastBrain model. |
 | `NOVA_AUDIO_AGENT_WATCH_MODEL` | `core` | No | fast model | Watch model override. |
-| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | No | qwen-flash | Surrogate model. |
+| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | No | qwen-plus | Surrogate model. |
 | `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | No | qwen-flash | Memory compressor model. |
 | `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | No | integrated | Product pipeline shape: integrated or cascaded. |
 | `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | No | false | Attach a default-camera frame to user turns on verified cascaded VLMs. |
@@ -236,7 +196,7 @@ families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for the
 | `NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER` | `core` | No | qwen | Integrated realtime provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_ENDPOINTING_PROVIDER` | `core` | No | auto | Cascaded endpointing provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_ASR_PROVIDER` | `core` | No | volcengine | Cascaded ASR provider. |
-| `NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER` | `core` | No | qwen | Cascaded LLM provider. |
+| `NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER` | `core` | No | deepseek | Cascaded LLM provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL` | `core` | No | provider default | Cascaded LLM model override. |
 | `NOVA_AUDIO_AGENT_CASCADE_TTS_PROVIDER` | `core` | No | volcengine | Cascaded TTS provider. |
 | `NOVA_AUDIO_AGENT_EXECUTOR` | `core` | No | None | Optional single executor selector; unset selects none. |
@@ -273,6 +233,7 @@ families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for the
 | `NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT` | `qwen` | No | false | Allow controlled Guard reconnect. |
 | `NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY` | `qwen` | No | none | Guard history recovery mode. |
 | `NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS` | `qwen` | No | 4 | Guard history pair count. |
+| `DEEPSEEK_API_KEY` | `deepseek` | When selected | None | Official DeepSeek cascaded LLM credential. |
 | `ARK_API_KEY` | `ark` | When selected | None | Ark cascaded LLM credential. |
 | `DOUBAO_ASR_API_KEY` | `volcengine` | No | Doubao big-model key | Volcengine ASR credential override. |
 | `DOUBAO_BIGMODEL_API_KEY` | `volcengine` | When selected | None | Volcengine TTS and ASR fallback credential. |
@@ -297,9 +258,6 @@ families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for the
 | `NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT` | `codex` | No | ~/.nova-audio-agent/workspaces | Managed project root. |
 | `NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT` | `codex` | No | ~/.nova-audio-agent | Project state root. |
 | `NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL` | `codex` | No | 30 | Codex progress interval in seconds. |
-| `NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED` | `core` | No | false | Enable the local read-only workspace memory graph. |
-| `NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH` | `core` | No | ~/.nova-audio-agent/workspace-graph.sqlite | Workspace memory graph database path. |
-| `NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL` | `core` | No | None | Optional loopback-only Nova-compatible read-only MyContext adapter base URL. |
 | `TAVILY_API_KEY` | `search` | When selected | None | Tavily search credential. |
 | `NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE` | `camera` | No | None | Absolute deterministic desktop video input. |
 | `NOVA_AUDIO_AGENT_REALTIME_TELEMETRY` | `telemetry` | No | ~/.nova-audio-agent/realtime-telemetry.jsonl | Source-runtime telemetry output path; set an empty value to disable. |
@@ -308,8 +266,6 @@ families are `HA_*` and `AUTOGLM_*`; do not add credentials or endpoints for the
 <!-- END GENERATED ENV CONTRACT -->
 
 For a host-managed shared memory service, set `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`, an explicit origin in `NOVA_AUDIO_AGENT_MEMORY_URL`, and its host-issued `NOVA_AUDIO_AGENT_MEMORY_TOKEN`. Only HTTPS or numeric loopback HTTP is accepted; URL paths, query strings, embedded credentials, and redirects are rejected. The token fixes the identity; `MEMORY_PATH` and `MEMORY_USER_ID` apply only to local VoiceMem. Preferences refresh on open and successful remember, recall, or forget calls. This client does not provision the service or expose identity selection to the model.
-
-Current work status and weekly reports must query the workspace ledger tool for the latest active record versions. Personal recall contains historical evidence, including earlier user utterances, and must not replace the ledger or serve as an authoritative fallback when ledger data is unavailable.
 
 ### Optional capability registry and MCP search
 
@@ -366,13 +322,13 @@ and MCP retrieval passed on 2026-09-05; Windows and human-voice acceptance remai
 
 ### Memory providers and connections
 
-Use `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local` for the local Node Worker and SDK; `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` is optional in this mode. Use `remote` for the shared HTTP service, with its URL and identity-bound token. Do not set `MEMORY_PROVIDER` for a remote connection: its engine is selected by the service. An unavailable remote service reports unavailable; it never creates a local company-memory database.
+Use `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local` for the local Node Worker and SDK; `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` is optional in this mode. Use `remote` for the shared HTTP service, with its URL and identity-bound token. Do not set `MEMORY_PROVIDER` for a remote connection: its engine is selected by the service. An unavailable remote service reports unavailable; it never creates a local fallback database.
 
 Only `MEMORY_CONNECTION` and the local `MEMORY_PROVIDER` selector are supported. `MEMORY_BACKEND` has been removed and is rejected with a migration error. A provider without an enabled local connection is rejected rather than silently enabling memory.
 
 The runtime consumes `PersonalMemoryResource`, including optional `remember`, `forget`, and cached `responseAdaptation`. Adapter methods must only exist when their guarantees can be met. In particular, `stored` means durable admission, not merely acceptance or completed extraction. Evidence IDs must refer to real sources; provider relevance scores are not comparable across engines. The HTTP connector currently requires the documented v1 preferences, remember, recall and forget service contract. An arbitrary mem0 endpoint is not that contract. The native mem0 adapter remains in the integration source branch pending an isolated packaging contract. A read-only provider can be injected through the existing assembly factory without advertising writes.
 
-Company channels use one remote memory authority. The small preference cache is a disposable projection, not another writable memory store. The existing work-record ledger remains authoritative for corrected weekly-report states; historical recall alone cannot guarantee that a withdrawn claim disappears from every earlier utterance.
+The small preference cache is a disposable projection, not another writable memory store.
 
 SDK upgrades must pass the real Worker contract tests before changing the dependency lock. After unpacking/building an SDK candidate, run:
 

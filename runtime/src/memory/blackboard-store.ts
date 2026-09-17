@@ -1,6 +1,6 @@
 import {Worker} from 'node:worker_threads'
 import {z} from 'zod'
-import {memoryChannelSnapshotSchema, memoryItemSchema} from '../memory.js'
+import {memoryChannelSnapshotSchema, memoryItemSchema} from '../core/memory.js'
 
 export const BLACKBOARD_BATCH_ITEMS = 256
 export const BLACKBOARD_BATCH_BYTES = 4 * 1024 * 1024

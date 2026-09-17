@@ -29,7 +29,7 @@ const transport = new OwnedCodexAppServerTransport({
     prepare: async () => ({} as never),
     environment: () => ({
       PATH: '/safe-path', HOME: '/safe-home', CODEX_HOME: workspace,
-      CODEX_API_KEY: 'fixture-key',
+      NOVA_CODEX_API_KEY: 'fixture-key',
       CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1',
     }),
     removeEphemeralHome: async () => {},

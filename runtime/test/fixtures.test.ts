@@ -9,11 +9,11 @@ import {
   loadRuntimeFixture,
   runtimeFixtureJsonSchema,
   runtimeFixtureSchema,
-} from '../src/fixtures.js'
-import { handoffPolicySchema } from '../src/memory.js'
-import { executorManifestSchema } from '../src/ports.js'
-import { runRuntimeFixture } from '../src/fixture-host.js'
-import { canonicalJson } from '../src/trace.js'
+} from '../eval/fixtures.js'
+import { handoffPolicySchema } from '../src/core/memory.js'
+import { executorManifestSchema } from '../src/core/ports.js'
+import { runRuntimeFixture } from '../eval/fixture-host.js'
+import { canonicalJson } from '../src/core/trace.js'
 
 const fixtureParent = resolve(
   import.meta.dirname,

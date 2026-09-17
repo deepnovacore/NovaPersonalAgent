@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import {canonicalJsonWithNumberFormatter} from '../src/canonical-json.js'
-import {pythonFloat} from '../src/python-number.js'
+import {canonicalJsonWithNumberFormatter} from '../src/text/canonical-json.js'
+import {pythonFloat} from '../src/text/python-number.js'
 
 test('path-aware canonical number formatting preserves ordinary numbers and Python float bytes', () => {
   const visited: (readonly (string | number)[])[] = []

@@ -17,8 +17,8 @@ import {
   verifyCameraFileFixture,
 } from './camera-file-integration-contract.mjs'
 
-import { VirtualClock } from '../../../runtime/dist/src/clock.js'
-import { MAX_CAMERA_POSITION_MS } from '../../../runtime/dist/src/desktop-camera.js'
+import { VirtualClock } from '../../../runtime/dist/src/core/clock.js'
+import { MAX_CAMERA_POSITION_MS } from '../../../runtime/dist/src/desktop/desktop-camera.js'
 import { NodeDesktopServer } from '../../../runtime/dist/src/desktop.js'
 import { CamAdapter, CameraError } from '../../../runtime/dist/src/executors/camera.js'
 import { ChromiumFrameSource } from '../../../runtime/dist/src/executors/chromium-frame-source.js'
@@ -27,7 +27,7 @@ import {
   WATCH_MANIFEST,
   WatchAdapter,
 } from '../../../runtime/dist/src/executors/watcher.js'
-import { MediaStore } from '../../../runtime/dist/src/media-store.js'
+import { MediaStore } from '../../../runtime/dist/src/core/media-store.js'
 
 registerAppScheme(protocol)
 

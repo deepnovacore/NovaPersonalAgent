@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import type {CompleteRequest, ModelGateway} from '../src/model-gateway.js'
+import type {CompleteRequest, ModelGateway} from '../src/model/model-gateway.js'
 import {
   VISION_ASSESS_JSON_SCHEMA,
   VisionAgentControllerCore,
@@ -388,6 +388,10 @@ test('dispatch stop and public cancel target the sole channel, fence late callba
   const calls: Record<string, unknown>[] = []
   const value = core(new ScriptedGateway(assessment()), calls)
   assert.equal((await value.dispatch(request())).code, 'delegated')
+  for (const instruction of ['stop', 'cancel', '停止', '取消监控']) {
+    assert.equal((await value.dispatch(request({instruction}))).code, 'busy')
+    assert.equal(calls.length, 1)
+  }
   assert.deepEqual(await value.cancel({origin_ref: 'user-item-2', stillWanted: () => true}), {
     code: 'cancelled', accepted: true, detail: {channel: 'watch', op: 'stop'},
   })

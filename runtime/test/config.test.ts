@@ -11,8 +11,10 @@ import {
   requireVolcengineRealtime,
   resolveCascadedSelection,
   resolveModelApiKey,
+  resolveWatchModelConnection,
   resolveProactivity,
-} from '../src/config.js'
+  settingsSchema,
+} from '../src/config/config.js'
 
 test('DashScope key also configures support models only on the DashScope endpoint', () => {
   const env = {DASHSCOPE_API_KEY: 'dashscope-test-key'}
@@ -22,7 +24,19 @@ test('DashScope key also configures support models only on the DashScope endpoin
   assert.equal(resolveModelApiKey(loadSettings({...env, NOVA_AUDIO_AGENT_MODEL_API_KEY: 'custom-test-key'})), 'custom-test-key')
 })
 
-test('pipeline defaults are product-shaped and cascaded defaults use Qwen Flash', () => {
+test('a monitor preset loads its own provider credential independently of the conversation provider', () => {
+  const integrated = loadSettings({NOVA_AUDIO_AGENT_WATCH_MODEL: 'doubao-seed-2-0-pro-260215', ARK_API_KEY: 'ark-test'})
+  assert.equal(integrated.ark_api_key, 'ark-test')
+  assert.deepEqual(resolveWatchModelConnection(integrated), {baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', apiKey: 'ark-test'})
+  const cascaded = loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
+    NOVA_AUDIO_AGENT_WATCH_MODEL: 'qwen3-vl-plus', DASHSCOPE_API_KEY: 'qwen-test'})
+  assert.equal(cascaded.dashscope_api_key, 'qwen-test')
+  assert.deepEqual(resolveWatchModelConnection(cascaded), {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: 'qwen-test'})
+  assert.throws(() => resolveWatchModelConnection(loadSettings({NOVA_AUDIO_AGENT_WATCH_MODEL: 'doubao-seed-2-0-pro-260215', DASHSCOPE_API_KEY: 'qwen-test'})), /ARK_API_KEY/)
+  assert.equal(resolveWatchModelConnection(loadSettings({NOVA_AUDIO_AGENT_WATCH_MODEL: 'custom-model'})), null)
+})
+
+test('pipeline defaults are product-shaped and cascaded defaults use DeepSeek Flash', () => {
   const settings = loadSettings({})
   assert.equal(settings.pipeline_mode, 'integrated')
   assert.equal(settings.camera_module_enabled, true)
@@ -30,8 +44,8 @@ test('pipeline defaults are product-shaped and cascaded defaults use Qwen Flash'
   assert.deepEqual(resolveCascadedSelection(settings), {
     endpointingProvider: 'auto',
     asrProvider: 'volcengine',
-    llmProvider: 'qwen',
-    llmModel: 'qwen-flash',
+    llmProvider: 'deepseek',
+    llmModel: 'deepseek-flash',
     ttsProvider: 'volcengine',
   })
   assert.deepEqual({
@@ -131,7 +145,7 @@ test('v4 settings env selectors and paths load with the documented names', () =>
     NOVA_AUDIO_AGENT_PROGRESS_BUBBLES: 'all',
     NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG: '/state/capabilities.json',
     NOVA_AUDIO_AGENT_KNOWLEDGE_PATH: '/state/knowledge.sqlite',
-    NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER: 'local',
+    NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER: 'dashscope',
     NOVA_AUDIO_AGENT_EMBEDDING_MODEL: 'custom-embedding',
   })
   assert.equal(settings.codex_approval_mode, 'yolo')
@@ -141,7 +155,7 @@ test('v4 settings env selectors and paths load with the documented names', () =>
   assert.equal(settings.progress_bubbles, 'all')
   assert.equal(settings.capabilities_config_path, '/state/capabilities.json')
   assert.equal(settings.knowledge_path, '/state/knowledge.sqlite')
-  assert.equal(settings.embedding_provider, 'local')
+  assert.equal(settings.embedding_provider, 'dashscope')
   assert.equal(settings.embedding_model, 'custom-embedding')
 })
 
@@ -152,7 +166,6 @@ test('invalid v4 enum env values fall back safely', () => {
     NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH: 'deep',
     NOVA_AUDIO_AGENT_PLAN_READBACK: 'always',
     NOVA_AUDIO_AGENT_PROGRESS_BUBBLES: 'verbose',
-    NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER: 'remote',
     NOVA_AUDIO_AGENT_SEARCH_PROVIDER: 'unknown',
   })
   assert.equal(settings.codex_approval_mode, 'ask')
@@ -183,32 +196,6 @@ test('Ark receives its provider default only when no model override exists', () 
     })),
     /NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL 不能为空/u,
   )
-})
-
-test('retired realtime provider configuration fails by field name only', () => {
-  assert.throws(
-    () => loadSettings({NOVA_AUDIO_AGENT_REALTIME_PROVIDER: 'secret-old-value'}),
-    error => error instanceof ConfigurationError
-      && error.code === 'retired_configuration'
-      && error.fields?.join(',') === 'NOVA_AUDIO_AGENT_REALTIME_PROVIDER'
-      && !error.message.includes('secret-old-value'),
-  )
-})
-
-test('retired Ark selector configuration fails by field name only', () => {
-  const sentinel = 'secret-old-ark-value'
-  for (const field of [
-    'NOVA_AUDIO_AGENT_VOLCENGINE_ARK_MODEL',
-    'NOVA_AUDIO_AGENT_VOLCENGINE_ARK_SUPPORT_MODEL',
-  ] as const) {
-    assert.throws(
-      () => loadSettings({[field]: sentinel}),
-      error => error instanceof ConfigurationError
-        && error.code === 'retired_configuration'
-        && error.fields?.join(',') === field
-        && !error.message.includes(sentinel),
-    )
-  }
 })
 
 test('integrated loading never reads Ark or Doubao credential slots', () => {
@@ -289,8 +276,8 @@ test('integrated loading never reads inactive cascaded selector or model slots',
   assert.deepEqual(resolveCascadedSelection(loadSettings(environment)), {
     endpointingProvider: 'auto',
     asrProvider: 'volcengine',
-    llmProvider: 'qwen',
-    llmModel: 'qwen-flash',
+    llmProvider: 'deepseek',
+    llmModel: 'deepseek-flash',
     ttsProvider: 'volcengine',
   })
 })
@@ -308,8 +295,8 @@ test('integrated loading ignores invalid inactive cascaded selector and model va
   assert.deepEqual(resolveCascadedSelection(settings), {
     endpointingProvider: 'auto',
     asrProvider: 'volcengine',
-    llmProvider: 'qwen',
-    llmModel: 'qwen-flash',
+    llmProvider: 'deepseek',
+    llmModel: 'deepseek-flash',
     ttsProvider: 'volcengine',
   })
 })
@@ -335,29 +322,6 @@ test('runtime settings do not expose the retired backend selector', () => {
   assert.equal('backend' in loadSettings({NOVA_AUDIO_AGENT_BACKEND: 'python'}), false)
 })
 
-test('workspace graph settings default off and accept only loopback MyContext endpoints', () => {
-  const defaults = loadSettings({})
-  assert.equal(defaults.workspace_graph_enabled, false)
-  assert.equal(defaults.workspace_graph_path, '~/.nova-audio-agent/workspace-graph.sqlite')
-  assert.equal(defaults.mycontext_provider_url, null)
-  const enabled = loadSettings({
-    NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED: 'true',
-    NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_PATH: '/private/state/graph.sqlite',
-    NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL: 'http://127.0.0.1:7412/v1',
-  })
-  assert.equal(enabled.workspace_graph_enabled, true)
-  assert.equal(enabled.workspace_graph_path, '/private/state/graph.sqlite')
-  assert.equal(enabled.mycontext_provider_url, 'http://127.0.0.1:7412/v1')
-  assert.throws(() => loadSettings({
-    NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL: 'https://example.com/context',
-  }), /NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL/u)
-  assert.throws(() => loadSettings({
-    NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL: 'http://127.0.0.1:7412/v1?token=secret',
-  }), /NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL/u)
-  assert.throws(() => loadSettings({
-    NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL: 'http://127.0.0.1:7412/v1#fragment',
-  }), /NOVA_AUDIO_AGENT_MYCONTEXT_PROVIDER_URL/u)
-})
 
 test('proactivity presets and individual overrides preserve the Python table', () => {
   assert.deepEqual(
@@ -464,110 +428,6 @@ test('executor list is trimmed, ordered, unique, and non-empty', () => {
   assert.throws(
     () => loadSettings({NOVA_AUDIO_AGENT_EXECUTORS: 'codex,codex'}),
     /duplicate/u,
-  )
-})
-
-test('retired executors return explicit removal errors', () => {
-  assert.throws(
-    () => loadSettings({NOVA_AUDIO_AGENT_EXECUTOR: 'ha'}),
-    /was removed/u,
-  )
-  assert.throws(
-    () => loadSettings({NOVA_AUDIO_AGENT_EXECUTORS: 'codex,autoglm'}),
-    /was removed/u,
-  )
-})
-
-test('retired executor selection wins, is case-insensitive, and preserves configured order', () => {
-  for (const [environment, capability] of [
-    [{NOVA_AUDIO_AGENT_EXECUTOR: ' HA '}, 'ha'],
-    [{NOVA_AUDIO_AGENT_EXECUTOR: 'AutoGLM'}, 'autoglm'],
-    [{NOVA_AUDIO_AGENT_EXECUTORS: 'codex, AutoGLM , HA'}, 'autoglm'],
-    [{NOVA_AUDIO_AGENT_EXECUTORS: 'fast_sim,HA,autoglm'}, 'ha'],
-  ] as const) {
-    assert.throws(
-      () => loadSettings(environment),
-      error => {
-        const projected = error as ConfigurationError & {
-          readonly code?: string
-          readonly fields?: readonly string[]
-        }
-        return projected instanceof ConfigurationError
-          && projected.code === 'retired_capability'
-          && projected.message === `executor '${capability}' was removed from the Node runtime`
-          && projected.fields === undefined
-      },
-    )
-  }
-})
-
-test('nonempty retired configuration fails safely while Python whitespace stays inert', () => {
-  const retired = [
-    ['NOVA_AUDIO_AGENT_HA_URL', 'ha'],
-    ['NOVA_AUDIO_AGENT_HA_TOKEN', 'ha'],
-    ['NOVA_AUDIO_AGENT_HA_ENTITY_ID', 'ha'],
-    ['NOVA_AUDIO_AGENT_AUTOGLM_REPO', 'autoglm'],
-    ['NOVA_AUDIO_AGENT_AUTOGLM_PYTHON', 'autoglm'],
-    ['NOVA_AUDIO_AGENT_AUTOGLM_BASE_URL', 'autoglm'],
-    ['NOVA_AUDIO_AGENT_AUTOGLM_MODEL', 'autoglm'],
-    ['NOVA_AUDIO_AGENT_AUTOGLM_API_KEY', 'autoglm'],
-    ['NOVA_AUDIO_AGENT_AUTOGLM_WDA_URL', 'autoglm'],
-    ['NOVA_AUDIO_AGENT_AUTOGLM_DEVICE_ID', 'autoglm'],
-  ] as const
-  for (const [field, capability] of retired) {
-    assert.doesNotThrow(() => loadSettings({[field]: '\u001c\u0085'}))
-    assert.throws(
-      () => loadSettings({[field]: '\ufeffsentinel-secret-path-url-device'}),
-      error => {
-        const projected = error as ConfigurationError & {
-          readonly code?: string
-          readonly fields?: readonly string[]
-        }
-        return projected instanceof ConfigurationError
-          && projected.code === 'retired_configuration'
-          && projected.message
-            === `retired capability '${capability}' configuration is not supported: ${field}`
-          && Object.isFrozen(projected.fields)
-          && projected.fields?.length === 1
-          && projected.fields[0] === field
-          && !projected.message.includes('sentinel')
-      },
-    )
-  }
-})
-
-test('retired configuration fields use canonical code-point order and selector precedence', () => {
-  assert.throws(
-    () => loadSettings({
-      NOVA_AUDIO_AGENT_AUTOGLM_WDA_URL: 'sentinel-url',
-      NOVA_AUDIO_AGENT_AUTOGLM_API_KEY: 'sentinel-secret',
-    }),
-    error => {
-      const projected = error as ConfigurationError & {
-        readonly code?: string
-        readonly fields?: readonly string[]
-      }
-      return projected instanceof ConfigurationError
-        && projected.code === 'retired_configuration'
-        && projected.fields?.join(',')
-          === 'NOVA_AUDIO_AGENT_AUTOGLM_API_KEY,NOVA_AUDIO_AGENT_AUTOGLM_WDA_URL'
-    },
-  )
-  assert.throws(
-    () => loadSettings({
-      NOVA_AUDIO_AGENT_EXECUTOR: 'HA',
-      NOVA_AUDIO_AGENT_HA_TOKEN: 'sentinel-secret',
-    }),
-    error => {
-      const projected = error as ConfigurationError & {
-        readonly code?: string
-        readonly fields?: readonly string[]
-      }
-      return projected instanceof ConfigurationError
-        && projected.code === 'retired_capability'
-        && projected.fields === undefined
-        && !projected.message.includes('sentinel')
-    },
   )
 })
 
@@ -874,4 +734,22 @@ test('removed memory backend configuration fails explicitly instead of silently 
 
 test('deferred native memory provider is rejected explicitly', () => {
   assert.throws(() => loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'local', NOVA_AUDIO_AGENT_MEMORY_PROVIDER: 'mem0'}), /MEMORY_PROVIDER/u)
+})
+
+test('unsupported embedding providers are rejected without a cloud fallback', () => {
+  for (const provider of ['local', 'remote']) {
+    assert.throws(() => loadSettings({NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER: provider}),
+      {name: 'ConfigurationError', code: 'invalid_configuration',
+        message: 'invalid configuration: NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER (allowed: dashscope)'})
+    assert.throws(() => settingsSchema.parse({embedding_provider: provider}),
+      /dashscope/u)
+  }
+})
+
+test('DeepSeek cascade uses its official credential and Flash model', () => {
+  const settings = loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'deepseek-test', DOUBAO_BIGMODEL_API_KEY: 'speech-test'})
+  const selection = resolveCascadedSelection(settings)
+  assert.equal(selection.llmModel, 'deepseek-flash')
+  assert.equal(requireCascadedCredentials(settings, selection).llmApiKey, 'deepseek-test')
+  assert.throws(() => requireCascadedCredentials(loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'deepseek', DASHSCOPE_API_KEY: 'wrong-key'}), selection), /DEEPSEEK_API_KEY/)
 })

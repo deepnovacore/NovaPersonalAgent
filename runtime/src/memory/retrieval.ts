@@ -1,6 +1,6 @@
-import {abortable} from '../camera-session.js'
-import type {JsonValue} from '../events.js'
-import {SensitiveContentPolicy} from '../workspace-graph/sensitivity.js'
+import {abortable} from '../core/camera-session.js'
+import type {JsonValue} from '../core/events.js'
+import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 import type {PersonalMemoryResource, MemoryVersion} from './personal-memory.js'
 
 export interface RetrievedEntry extends Record<string, JsonValue> {

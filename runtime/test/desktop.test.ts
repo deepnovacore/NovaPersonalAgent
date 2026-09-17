@@ -27,7 +27,7 @@ import {
   encodeCameraFrame,
   serializeCameraError,
   serializeCameraPermissionResult,
-} from '../src/desktop-camera.js'
+} from '../src/desktop/desktop-camera.js'
 
 const TOKEN = '0123456789abcdef0123456789abcdef'
 

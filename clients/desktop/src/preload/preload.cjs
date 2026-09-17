@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     },
   }),
   wakeWord: Object.freeze({
+    sleep: () => ipcRenderer.send('nova:wake-word:sleep'),
+    wake: () => ipcRenderer.send('nova:wake-word:wake'),
     report: value => ipcRenderer.send('nova:wake-word:report', value),
     audio: value => ipcRenderer.send('nova:wake-word:audio', value),
     activity: () => ipcRenderer.send('nova:wake-word:activity'),
@@ -64,6 +66,12 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     requestPermission: () => ipcRenderer.invoke('nova:camera:permission'),
   }),
   microphone: Object.freeze({
+    onToggle: callback => {
+      if (typeof callback !== 'function') return () => {}
+      const listener = () => callback()
+      ipcRenderer.on('nova:microphone:toggle', listener)
+      return () => ipcRenderer.removeListener('nova:microphone:toggle', listener)
+    },
     requestPermission: () => ipcRenderer.invoke('nova:microphone:permission'),
     report: status => ipcRenderer.send('nova:microphone:status', status),
     onRetry: callback => {
@@ -77,13 +85,10 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     clear: () => ipcRenderer.invoke('nova:memory-board:clear'),
     request: detail => ipcRenderer.invoke(
       'nova:memory-board:request',
-      detail === 'full' ? 'full' : undefined,
+      detail === 'full' || (detail && typeof detail === 'object') ? detail : undefined,
     ),
     copyJson: () => ipcRenderer.invoke('nova:memory-board:copy-json'),
     export: () => ipcRenderer.invoke('nova:memory-board:export'),
-  }),
-  graphBoard: Object.freeze({
-    request: () => ipcRenderer.invoke('nova:workspace-graph-board:request'),
   }),
   executorResult: Object.freeze({
     open: result => ipcRenderer.invoke('nova:executor-result:open', result),
@@ -142,8 +147,9 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
       ipcRenderer.on('nova:confirmation-placement', listener)
       return () => ipcRenderer.removeListener('nova:confirmation-placement', listener)
     },
-    reserveBubbleArea: rows => ipcRenderer.invoke(
+    reserveBubbleArea: (rows, taskRows = 0) => ipcRenderer.invoke(
       'nova:bubbles:reserve', Number.isInteger(rows) && rows >= 0 && rows <= 6 ? rows : -1,
+      Number.isInteger(taskRows) && taskRows >= 0 && taskRows <= 5 ? taskRows : -1,
     ),
     onBubbleLayout: callback => {
       if (typeof callback !== 'function') return () => {}
@@ -153,6 +159,8 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     },
   }),
   settings: Object.freeze({
+    phoneAction: (action, deviceId) => ipcRenderer.invoke('nova:phone:action', action, deviceId),
+    openPairing: () => ipcRenderer.send('nova:pairing:open'),
     get: () => ipcRenderer.invoke('nova:settings:get'),
     rescanCodex: () => ipcRenderer.invoke('nova:codex:rescan'),
     retryBackend: () => ipcRenderer.invoke('nova:backend:retry'),

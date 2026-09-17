@@ -1,4 +1,4 @@
-// Generated from runtime/src/capability-registry.ts; run node runtime/scripts/check-capabilities.mjs --write.
+// Generated from runtime/src/config/capability-registry.ts; run node runtime/scripts/check-capabilities.mjs --write.
 /** One dependency-free registry parser, also emitted into the standalone CLI by check-capabilities.mjs. */
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';

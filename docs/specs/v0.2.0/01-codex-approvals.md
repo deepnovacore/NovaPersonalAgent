@@ -41,7 +41,7 @@ target contract.
 - `codexApprovalPolicyForTransport` in
   [`runtime/src/codex-factory.ts`](../../../runtime/src/codex-factory.ts)
   returns `on-request` only for `win32 + project + foregroundBroker`. Darwin and
-  Linux always get `never` and a null `CodexApprovalController`.
+  Linux always get `never` and a null `HostApprovalController`.
 - `#threadRequest` in
   [`runtime/src/codex-app-server-transport.ts`](../../../runtime/src/codex-app-server-transport.ts)
   sends only `approvalPolicy`, `cwd`, `ephemeral`, `developerInstructions`. It
@@ -146,7 +146,7 @@ output. `ask_headless` never silently becomes `yolo`.
 | `turn/start` | No policy / sandbox overrides | same | same |
 | Effective-config validator | `{profile: 'ask', managedMcp}` expects ask sandbox + `approval_policy === 'on-request'` | `{profile: 'ask_headless', managedMcp}` expects ask sandbox + `approval_policy === 'never'` | `{profile: 'yolo', managedMcp}` expects `approval_policy === 'never'`, `sandbox_mode === 'danger-full-access'`, no permission profile; still requires `web_search === 'disabled'`, shell policy, feature disables, managed MCP |
 | Thread binding (`bindThread`) | Echoes `on-request` + profile `nova_audio_agent` | Echoes `never` + profile `nova_audio_agent` | Echoes `never` + `danger-full-access` |
-| `CodexApprovalController` | Constructed | `null`; approval tool / instructions omitted; startup logs `ask_headless_no_broker` | `null`; approval tool / instructions omitted |
+| `HostApprovalController` | Constructed | `null`; approval tool / instructions omitted; startup logs `ask_headless_no_broker` | `null`; approval tool / instructions omitted |
 
 `CodexLaunchProfile` therefore carries the effective `approvalPolicy`,
 sandbox/permissions choice, and `controller: present | absent` so argv,
@@ -257,7 +257,7 @@ flowchart LR
   Profile --> Validate[validateEffectiveCodexConfig mode]
   Profile --> CtlGate{controller?}
   Codex[codex app-server] -->|requestApproval| Router[routeCodexApprovalServerRequest]
-  Router --> Ctl[CodexApprovalController]
+  Router --> Ctl[HostApprovalController]
   Ctl --> Wire[codex.approval frame]
   Wire --> Banner[Orb accept / session / decline]
   Ctl --> Voice[confirm(id, accepted)]
@@ -276,7 +276,7 @@ flowchart LR
 | Thread params / binding | `runtime/src/codex-app-server-transport.ts`, `codex-app-server-projection.ts` |
 | Effective config | `runtime/src/codex-app-server-schema.ts` `validateEffectiveCodexConfig({mode, managedMcp})` |
 | Routing / results | `runtime/src/realtime/codex-approval.ts` |
-| Controller / wire | existing controller, `desktop-wire.ts`, `desktop-bridge.ts` (kind + allowed decisions on the frame) |
+| Controller / wire | existing controller, `desktop-wire.ts`, `desktop-session.ts` (kind + allowed decisions on the frame) |
 | Orb | `confirmation-controls.mjs`, `index.mjs`, CSS for third button |
 | Settings | `settings-store.mjs` v4, settings HTML/JS, `backend.mjs` env map |
 | Fixtures | `fixtures/codex/app-server-schema/0.152.0/`, fake app-server transcripts for each request kind |

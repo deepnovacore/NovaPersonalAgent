@@ -1,22 +1,23 @@
+import {dispatchSourceContext} from '../../dist/src/realtime/history.js'
+import {cascadedResponseGuidance} from '../../dist/src/realtime/cascaded/llm.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
-import {compileToolSchema} from '../../dist/src/tool-schema.js'
+import {compileToolSchema} from '../../dist/src/core/tool-schema.js'
 import {frontendInstructions} from '../../dist/src/realtime/frontend-instructions.js'
 import {SEARCH_MANIFEST} from '../../dist/src/executors/search.js'
-import {CAMERA_MCP_MANIFEST} from '../../dist/src/executors/mcp-camera.js'
 import {KNOWLEDGE_MCP_MANIFEST} from '../../dist/src/knowledge/mcp.js'
 import {CODEX_PROJECT_MANIFEST, CODEX_AGENT_SUMMARY} from '../../dist/src/executors/codex/contract.js'
 import {WATCH_MANIFEST, GUARD_MANIFEST} from '../../dist/src/executors/watcher.js'
 import {VISION_AGENT_DESCRIPTOR} from '../../dist/src/executors/vision/controller-core.js'
 import {createQwenCascadedLlmFactory} from '../../dist/src/realtime/cascaded/qwen-llm.js'
 import {createArkCascadedLlmFactory} from '../../dist/src/realtime/cascaded/ark-llm.js'
-import {loadSettings, resolveCascadedSelection, DASHSCOPE_COMPATIBLE_BASE_URL} from '../../dist/src/config.js'
+import {loadSettings, resolveCascadedSelection, DASHSCOPE_COMPATIBLE_BASE_URL} from '../../dist/src/config/config.js'
 
 export function surface(disabled = []) {
   const modules = Object.fromEntries(['coding', 'camera', 'search', 'knowledge'].map(name => [name, !disabled.includes(name)]))
   const manifests = [
     ...(modules.search ? [SEARCH_MANIFEST] : []),
-    ...(modules.camera ? [CAMERA_MCP_MANIFEST, WATCH_MANIFEST, GUARD_MANIFEST] : []),
+    ...(modules.camera ? [WATCH_MANIFEST, GUARD_MANIFEST] : []),
     ...(modules.knowledge ? [KNOWLEDGE_MCP_MANIFEST] : []),
     ...(modules.coding ? [CODEX_PROJECT_MANIFEST] : []),
   ]
@@ -25,7 +26,7 @@ export function surface(disabled = []) {
     ...(modules.camera ? [VISION_AGENT_DESCRIPTOR] : []),
   ]
   const tools = compileToolSchema(manifests, {includeMemoryRecall: true, agentDescriptors}).schemas.map(schema => schema.function)
-  const instructions = frontendInstructions(modules)
+  const instructions = frontendInstructions(modules, modules.coding)
   return {tools, instructions, hash: createHash('sha256').update(JSON.stringify({tools, instructions})).digest('hex')}
 }
 
@@ -49,7 +50,8 @@ export function score(expect, observed, tools) {
       if (JSON.stringify(args[key]) !== JSON.stringify(value)) failures.push(`argument:${key}`)
     }
     for (const [key, terms] of Object.entries(wanted.contains ?? {})) {
-      if (typeof args[key] !== 'string' || terms.some(term => !args[key].includes(term))) failures.push(`missing_terms:${key}`)
+      const content = Array.isArray(args[key]) && args[key].every(value => typeof value === 'string') ? args[key].join('\n') : args[key]
+      if (typeof content !== 'string' || terms.some(term => !content.includes(term))) failures.push(`missing_terms:${key}`)
     }
     for (const [key, groups] of Object.entries(wanted.containsAny ?? {})) {
       if (typeof args[key] !== 'string' || groups.some(terms => !terms.some(term => args[key].includes(term)))) failures.push(`missing_meaning:${key}`)
@@ -81,15 +83,17 @@ export async function runTextCase(testCase, config, timeoutMs, factoryOverride) 
   const factory = factoryOverride ?? (config.provider === 'qwen' ? createQwenCascadedLlmFactory : createArkCascadedLlmFactory)
   const session = factory({...config, instructions: compiled.instructions}).open()
   const observations = []
+  const userSources = []
   const failures = []
   const signal = AbortSignal.timeout(timeoutMs)
   try {
     let inputs = [{kind: 'user_text', text: testCase.text}]
     for (const [index, step] of testCase.steps.entries()) {
+      for (const item of inputs) if (item.kind === 'user_text') userSources.push({ref: `conversation:${userSources.length + 1}`, text: item.text})
       const observed = {calls: [], text: '', completed: false}
       observations.push(observed)
       for await (const event of session.stream({inputs, tools: compiled.tools,
-        workspaceContext: testCase.context, signal})) {
+        workspaceContext: testCase.context, responseAdaptation: [dispatchSourceContext(userSources.slice(-8)), cascadedResponseGuidance(true)].filter(Boolean).join('\n'), signal})) {
         if (event.kind === 'tool_call') observed.calls.push({name: event.name, arguments: event.arguments, call_id: event.call_id})
         if (event.kind === 'text_delta') observed.text += event.text
         if (event.kind === 'response_completed') observed.completed = true
@@ -102,7 +106,9 @@ export async function runTextCase(testCase, config, timeoutMs, factoryOverride) 
       }
       failures.push(...score(step.expect, observed, compiled.tools).map(reason => `${index}:${reason}`))
       // Never execute a tool: only synthetic fixture outputs may continue a model response.
-      if (failures.length || step.result === undefined) break
+      if (failures.length) break
+      if (step.user !== undefined) { inputs = [{kind: 'user_text', text: step.user}]; continue }
+      if (step.result === undefined) break
       if (observed.calls.length !== 1) { failures.push(`${index}:continuation_requires_one_call`); break }
       inputs = [{kind: 'tool_result', call_id: observed.calls[0].call_id, output: step.result}]
     }

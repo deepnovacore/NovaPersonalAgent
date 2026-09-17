@@ -8,14 +8,16 @@ const DORMANT_WINDOW_SIZE = 64
 const visualSmoke = process.env.NOVA_ORB_VISUAL_SMOKE === '1'
 
 app.whenReady().then(async () => {
+  const { browserWindowOptions } = await import('../src/main/security.mjs')
+  const { bubbleWindowLayout } = await import('../src/main/window-position.mjs')
   const window = new BrowserWindow({
+    ...browserWindowOptions(join(__dirname, '../src/preload/preload.cjs'), 'layout-probe'),
     width: WINDOW_SIZE,
     height: WINDOW_SIZE,
     // Same floor as the real orb window: Electron clamps setBounds to these,
     // so a 160 minimum here would silently defeat the dormant measurement.
     minWidth: DORMANT_WINDOW_SIZE,
     minHeight: DORMANT_WINDOW_SIZE,
-    maxWidth: WINDOW_SIZE,
     resizable: false,
     frame: false,
     show: visualSmoke,
@@ -27,6 +29,70 @@ app.whenReady().then(async () => {
   })
 
   try {
+    window.webContents.session.webRequest.onBeforeRequest((details, callback) => {
+      callback({ cancel: details.url.endsWith('/renderer/index.mjs') })
+    })
+    await window.loadFile(join(__dirname, '../src/renderer/index.html'))
+    await window.webContents.insertCSS('#orb-rail { opacity: 1 !important; transition: none !important; }')
+    const bubbleLayouts = []
+    for (const zoomFactor of [1, 1.5]) {
+      for (const [x, y, rows = 1] of [[0, 500], [600, 500], [1280, 500], [1280, 0], [1280, 500, 3]]) {
+        const layout = bubbleWindowLayout({
+          normalBounds: { x, y, width: 160, height: 160 },
+          rows, zoomFactor, scaleFactor: 2,
+          workArea: { x: 0, y: 0, width: 1440, height: 900 },
+        })
+        window.webContents.setZoomFactor(zoomFactor)
+        window.setBounds(layout.bounds)
+        const rendered = await window.webContents.executeJavaScript(`new Promise(resolve => {
+          const shell = document.getElementById('shell')
+          document.getElementById('codex-label').dataset.mode = 'project'
+          document.getElementById('codex-summary').textContent = '工作区 kart-racing-game · Session 任务 2'
+          document.getElementById('state-label').textContent = '待命'
+          const stack = document.getElementById('bubble-stack')
+          stack.dataset.placement = '${layout.bubblePlacement}'
+          stack.dataset.alignment = '${layout.bubbleAlignment}'
+          stack.innerHTML = '<button class="progress-bubble" data-level="milestone">你好，有什么我可以帮你的吗？</button>'.repeat(${rows})
+          shell.dataset.bubbles = 'true'
+          shell.style.setProperty('--bubble-orb-x', '${layout.orbOffsetCssX}px')
+          shell.style.setProperty('--bubble-orb-y', '${layout.orbOffsetCssY}px')
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve({
+            width: innerWidth, height: innerHeight,
+            orb: document.getElementById('orb').getBoundingClientRect().toJSON(),
+            placement: stack.dataset.placement,
+            tail: (() => {
+              const style = getComputedStyle(stack, '::before')
+              const box = stack.getBoundingClientRect()
+              return { content: style.content, x: box.left + parseFloat(style.left),
+                bottom: box.bottom - parseFloat(style.bottom) }
+            })(),
+            surfaces: ['#orb', '#codex-label', '#state-label', '#orb-rail', '.progress-bubble'].map(selector => ({
+              selector, ...document.querySelector(selector).getBoundingClientRect().toJSON(),
+            })),
+          })))
+        })`)
+        bubbleLayouts.push({ expected: layout.bounds, actual: window.getBounds(), ...rendered })
+        if (process.env.NOVA_BUBBLE_SCREENSHOT && zoomFactor === 1 && x === 1280 && y === 500 && rows === 1) {
+          const { pathToFileURL } = require('node:url')
+          const visualUrl = pathToFileURL(join(__dirname, '../src/renderer/orb-visual.mjs')).href
+          await window.webContents.executeJavaScript(`import('${visualUrl}').then(({createOrbVisualSafe}) => createOrbVisualSafe(document.querySelector('.orb-canvas')).setState('idle'))`)
+          const background = await window.webContents.insertCSS('body { background: #f8f8f8 !important; }')
+          await window.webContents.executeJavaScript('new Promise(resolve => setTimeout(resolve, 250))')
+          require('node:fs').writeFileSync(process.env.NOVA_BUBBLE_SCREENSHOT, (await window.webContents.capturePage()).toPNG())
+          await window.webContents.removeInsertedCSS(background)
+        }
+      }
+    }
+    window.webContents.setZoomFactor(1)
+    window.setSize(WINDOW_SIZE, WINDOW_SIZE)
+    const naturalProject = await window.webContents.executeJavaScript(`new Promise(resolve => {
+      document.getElementById('shell').removeAttribute('data-bubbles')
+      document.getElementById('bubble-stack').replaceChildren()
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(
+        Object.fromEntries(['orb', 'orb-rail', 'state-label', 'codex-label'].map(id =>
+          [id, document.getElementById(id).getBoundingClientRect().toJSON()]))
+      )))
+    })`)
     await window.loadFile(join(__dirname, '../test/fixtures/orb-transparency.html'))
     const boxShadow = await window.webContents.executeJavaScript(
       "getComputedStyle(document.querySelector('#orb')).boxShadow",
@@ -248,7 +314,7 @@ app.whenReady().then(async () => {
       })`)
       confirmationLayouts.push({zoomFactor, ...layout})
     }
-    process.stdout.write(`${JSON.stringify({ boxShadow, secondaryDisplays, standbyStyles, contrastDiscSizes, dormantLayout, dormantWithBubbles, confirmationLayouts })}\n`)
+    process.stdout.write(`${JSON.stringify({ naturalProject, bubbleLayouts, boxShadow, secondaryDisplays, standbyStyles, contrastDiscSizes, dormantLayout, dormantWithBubbles, confirmationLayouts })}\n`)
     if (visualSmoke) {
       window.center()
       window.setAlwaysOnTop(true, 'floating')

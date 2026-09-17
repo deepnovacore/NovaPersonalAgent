@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
-import type { JsonValue } from '../src/events.js'
+import { canonicalJson } from '../src/text/canonical-json.js'
+import type { JsonValue } from '../src/core/events.js'
 import {
   CODEX_APPROVAL_FRONTEND_INSTRUCTIONS,
   FRONTEND_INSTRUCTIONS,
@@ -295,19 +295,19 @@ test('Qwen clarification fixture covers adaptive first-turn and merged multi-tur
     .every(turn => (turn.required_work_order_terms?.length ?? 0) >= 2))
 })
 
-test('Qwen instructions route every coding request through the three host tools (spec 08)', () => {
-  assert.match(FRONTEND_INSTRUCTIONS, /编程、项目和会话相关的请求一律只用三个宿主工具：dispatch、cancel、confirm/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /任何编程请求（新任务、追加要求、切换项目、新建项目）都调用 dispatch/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /instruction 原样传用户这一轮的完整要求，不预先拆分、不改写成问句，也不猜测项目名或 Session/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /由宿主决定项目、Session 和是否需要追问。工具不返回项目清单，也不要向用户列举项目/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /用户明确要求停止或取消正在执行的任务时调用 cancel；instruction 只在用户点名了要停哪个任务时传/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /code=intake_opened \/ intake_in_progress 表示正在整理需求，尚未派单/u)
+test('Qwen instructions clarify before submitting coding actions through host tools (spec 08)', () => {
+  assert.match(FRONTEND_INSTRUCTIONS, /只有决定执行用户操作时，才通过 dispatch、cancel、confirm 三个宿主工具提交/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /关键歧义已消除就立即派发，不重复提问/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /instruction 汇总本次任务多轮已经明确的目标、约束、验收及修改/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /由下游 coordinator 决定工作区和 Session 的选择、新建、切换/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /用户明确要求停止、取消或暂不执行已经派发的任务（包括正在准备的任务）时调用 cancel；instruction 只在用户点名了要停哪个任务时传/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /code=intake_opened \/ intake_in_progress 是内部接收回执，尚未派单/u)
   assert.match(FRONTEND_INSTRUCTIONS, /unknown_project \/ ambiguous_project \/ busy_project \/ capacity 表示任务尚未执行，按事实转述可选项/u)
   assert.match(FRONTEND_INSTRUCTIONS, /同意、拒绝或取消都必须调用 confirm.*不得只做口头回应/su)
   assert.match(FRONTEND_INSTRUCTIONS, /id 从该宿主事实原样复制，accepted 用 JSON boolean 表示决定/u)
   assert.match(FRONTEND_INSTRUCTIONS, /同意 accepted=true，明确拒绝或取消 accepted=false；尚未决定、需要考虑或追问原因不代表拒绝/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /<active_project_context> 是 authoritative host state，只描述当前工作区和 Session/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /用户回答 Coding intake 的宿主问题后等待宿主规划，不重复 dispatch/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /<active_project_context> 是 authoritative host state，描述当前工作区、Session 和可继续的会话目录/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /用户回答 Coding intake 的宿主问题后，将答案与原始目标合并，通过 dispatch/u)
   assert.match(FRONTEND_INSTRUCTIONS, /已提交、正在启动.*host 生命周期事实.*已开始处理/su)
   assert.match(FRONTEND_INSTRUCTIONS, /没有工具事件或 host 事实.*不得声称已经提交/su)
   assert.match(FRONTEND_INSTRUCTIONS, /只转述.*最后一条.*尚未转述.*不得.*重复更早的任务事实/su)
@@ -372,8 +372,8 @@ test('Qwen provider emits approval instructions only for an approval-enabled ses
   }
 })
 
-test('Qwen hands coding intake to the host and does not invent additional questions', () => {
-  assert.match(FRONTEND_INSTRUCTIONS, /任何编程请求.*都调用 dispatch.*由宿主决定项目、Session 和是否需要追问/su)
+test('Qwen clarifies before dispatch and leaves project coordination downstream', () => {
+  assert.match(FRONTEND_INSTRUCTIONS, /问一个最能消除这个歧义的具体问题并等待回答，不调用 dispatch.*由下游 coordinator 决定工作区和 Session/su)
   assert.match(FRONTEND_INSTRUCTIONS, /intake_opened.*intake_in_progress.*尚未派单/su)
   assert.match(FRONTEND_INSTRUCTIONS, /只问给定的那一个问题，不再次 dispatch/u)
   assert.match(FRONTEND_INSTRUCTIONS, /仓库技术栈、入口、测试命令交给执行器探索/u)

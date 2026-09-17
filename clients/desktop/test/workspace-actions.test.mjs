@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {createBackendSupervisor} from '../src/main/backend-supervisor.mjs'
-import {createLifecycleCoordinator} from '../src/main/lifecycle-coordinator.mjs'
+import {createLifecycleCoordinator} from '../src/main/desktop-startup.mjs'
 import * as workspaceActionModule from '../src/main/workspace-actions.mjs'
 
 const {createWorkspaceActions} = workspaceActionModule

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {UnifiedRetrieval} from '../src/memory/retrieval.js'
 import type {MemoryEntry, PersonalMemoryResource, PersonalMemoryRecallHit} from '../src/memory/personal-memory.js'
-import type {JsonValue} from '../src/events.js'
+import type {JsonValue} from '../src/core/events.js'
 
 const entry = (id: string, version = 1): MemoryEntry => ({id, version, content: `记忆 ${id}`, kind: 'fact', origin: 'stated', source_refs: [{type: 'conversation', ref: 'source', observed_at: '2026-09-12T00:00:00Z'}], observed_at: '2026-09-12T00:00:00Z', recorded_at: '2026-09-12T00:00:00Z', topic: '', status: 'active', corrected_to: null, confidence_note: null})
 const memoryHit = (id: string): PersonalMemoryRecallHit => ({memoryId: id, revision: 1, text: `记忆 ${id}`, evidenceIds: [`e:${id}`, `e:${id}`], score: 1e9})

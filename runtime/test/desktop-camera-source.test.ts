@@ -5,7 +5,7 @@ import {
   DesktopCameraConfigurationError,
   selectDesktopCameraSource,
   type CameraFileSystem,
-} from '../src/desktop-camera-source.js'
+} from '../src/desktop/desktop-camera-source.js'
 
 class RecordingFileSystem implements CameraFileSystem {
   readonly calls: string[] = []

@@ -3,8 +3,8 @@ import {acquirePersonalLock} from './store.js'
 import {lstat, opendir, open, readFile, realpath, rename, rm, writeFile} from 'node:fs/promises'
 import {basename, dirname, extname, isAbsolute, join, relative} from 'node:path'
 import {z} from 'zod'
-import {preparePrivateDatabasePath} from '../private-database.js'
-import {SensitivePathPolicy} from '../workspace-graph/sensitivity.js'
+import {preparePrivateDatabasePath} from '../storage/private-database.js'
+import {SensitivePathPolicy} from '../memory/sensitivity.js'
 import type {KnowledgeService} from '../knowledge/service.js'
 
 export const SOURCE_EXCLUDES = ['.git', '.worktrees', '.codex', '.claude', 'node_modules', 'dist', 'build', 'target', '.cache', '__pycache__', '.venv', 'venv', 'Library', 'Browser', 'Chrome', 'Chromium', 'Firefox', 'Safari'] as const

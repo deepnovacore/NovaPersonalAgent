@@ -1,97 +1,154 @@
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import assert from 'node:assert/strict'
-import {mkdtemp, realpath, rm, writeFile} from 'node:fs/promises'
+import {mkdtemp, realpath, rm, writeFile, readFile} from 'node:fs/promises'
 import {once} from 'node:events'
-import {setTimeout as delay} from 'node:timers/promises'
-import type {BlackboardSessionOptions} from '../src/memory/blackboard-session.js'
+import {setTimeout as delay, setImmediate as yieldImmediate} from 'node:timers/promises'
+import {type BlackboardSessionOptions} from '../src/memory/blackboard-session.js'
 import {tmpdir} from 'node:os'
-import {join} from 'node:path'
-import { setImmediate as yieldImmediate } from 'node:timers/promises'
-import { test } from 'node:test'
+import {join, resolve} from 'node:path'
+import {test} from 'node:test'
 import {Worker} from 'node:worker_threads'
-import {parseCapabilityRegistry} from '../src/capability-registry.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 import {prepareKnowledge} from '../src/knowledge/assembly.js'
 import {
   AssemblyError,
   buildAssembly as buildAssemblyRaw,
   type Assembly,
-} from '../src/assembly.js'
+  buildAssembly,
+} from '../src/composition/assembly.js'
 import {
   composeRealtime,
   REALTIME_ASSEMBLY_SHUTDOWN_GRACE_MS,
   buildRealtimeAssembly as buildRealtimeAssemblyRaw,
   type CodingAgentControllerFactory,
-} from '../src/realtime-assembly.js'
-import { VirtualClock } from '../src/clock.js'
-import { ScriptedIdFactory } from '../src/ids.js'
-import {CodexApprovalController} from '../src/executors/codex/approval.js'
+} from '../src/composition/realtime-assembly.js'
+import {VirtualClock} from '../src/core/clock.js'
+import {ScriptedIdFactory, type IdFactory} from '../src/core/ids.js'
+import {HostApprovalController} from '../src/core/approval.js'
 import {codexAgentDescriptor, CodexAgentController} from '../src/executors/codex/controller.js'
-import {CODEX_LIVE_MANIFEST, CODEX_PROJECT_MANIFEST} from '../src/executors/codex/contract.js'
-import type {CodexAssemblyResource} from '../src/executors/codex/factory.js'
+import {
+  CODEX_LIVE_MANIFEST,
+  CODEX_PROJECT_MANIFEST,
+  CODEX_PROJECT_APPROVAL_MANIFEST,
+} from '../src/executors/codex/contract.js'
+import {type CodexAssemblyResource} from '../src/executors/codex/factory.js'
 import {
   ProjectStateError,
   type ProjectStore,
   type PublicProjectContext,
   type PublicProjectView,
   type WorkspaceRecord,
-} from '../src/project-store.js'
-import { settingsSchema } from '../src/config.js'
-import type {ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff} from '../src/causal-runtime.js'
-import { executorManifestSchema, type Delegate } from '../src/ports.js'
+} from '../src/projects/project-store.js'
+import {
+  settingsSchema,
+  ConfigurationError,
+  loadSettings,
+  type Settings,
+  requireVolcengineRealtime,
+  type VolcengineRealtimeConfig,
+} from '../src/config/config.js'
+import {
+  type ExecutorAdapter,
+  type ExecutorDispatchContext,
+  type ExecutorHandoff,
+} from '../src/core/causal-runtime.js'
+import {executorManifestSchema, type Delegate, delegateSchema} from '../src/core/ports.js'
 import {
   ProjectCodexAdapter,
   type ProjectTransportBinding,
   type ProjectTransportFactory,
 } from '../src/executors/codex/adapter-project.js'
-import type {
-  CommittedWorkspaceEvent,
-  TerminalWorkOrderEvent,
-} from '../src/executors/codex/adapter-project.js'
-import type {
-  RealtimeWorkspaceGraph,
-} from '../src/realtime-assembly.js'
-import type { Frame, FrameSource } from '../src/executors/watcher.js'
-import type { EventRecord, JsonValue } from '../src/events.js'
-import {consumeHostExecutorCapability} from '../src/host-executor-capability.js'
-import type {
-  CompleteRequest,
-  GatewayCompletion,
-  GatewayDelta,
-  ModelGateway,
-  StreamRequest,
-} from '../src/model-gateway.js'
+import {type Frame, type FrameSource, WatchAdapter} from '../src/executors/watcher.js'
+import {type EventRecord, type JsonValue} from '../src/core/events.js'
+import {consumeHostExecutorCapability} from '../src/executors/host-executor-capability.js'
 import {
-  PlaybackRegistry,
-  type PlaybackCompletion,
-  type PlaybackFrame,
-} from '../src/playback.js'
-import type { SearchTransport } from '../src/executors/search.js'
-import { RealtimeRuntimeBridge } from '../src/realtime/bridge.js'
+  type CompleteRequest,
+  type GatewayCompletion,
+  type GatewayDelta,
+  type ModelGateway,
+  type StreamRequest,
+} from '../src/model/model-gateway.js'
+import {PlaybackRegistry, type PlaybackCompletion, type PlaybackFrame} from '../src/realtime/playback.js'
+import {type SearchTransport} from '../src/executors/search.js'
+import {RealtimeRuntimeBridge} from '../src/realtime/bridge.js'
 import {
   ProjectConfirmationController,
   type ConfirmedProjectOperation,
   type ProjectConfirmationView,
-} from '../src/project-confirmation.js'
-import type {
-  HostContextItem,
-  HostResponseIntent,
-  JsonObject,
-  RealtimeProvider,
-  ResponseAdaptationContext,
-} from '../src/realtime/protocol.js'
-import { RealtimeProviderSession } from '../src/realtime/provider-session.js'
-import { RealtimeService } from '../src/realtime/service.js'
-import type { ExecutorState } from '../src/realtime/service-state.js'
-import { RealtimeSession } from '../src/realtime/session.js'
-import type { CaptionFrame } from '../src/realtime/session-state.js'
-import type { RealtimeTelemetry } from '../src/realtime/telemetry.js'
-import type {PersonalMemoryRememberTurn} from '../src/memory/personal-memory.js'
-import type { CompiledTools } from '../src/tool-schema.js'
+} from '../src/projects/project-confirmation.js'
 import {
-  WorkspaceGraphService,
-  type TaskCompletionInput,
-} from '../src/workspace-graph/service.js'
+  type HostContextItem,
+  type HostResponseIntent,
+  type JsonObject,
+  type RealtimeProvider,
+  type ResponseAdaptationContext,
+} from '../src/realtime/protocol.js'
+import {RealtimeProviderSession} from '../src/realtime/provider-session.js'
+import {RealtimeService} from '../src/realtime/service.js'
+import {type ExecutorState} from '../src/realtime/service-state.js'
+import {RealtimeSession} from '../src/realtime/session.js'
+import {type CaptionFrame} from '../src/realtime/session-state.js'
+import {type RealtimeTelemetry} from '../src/realtime/telemetry.js'
+import {type PersonalMemoryRememberTurn} from '../src/memory/personal-memory.js'
+import {type CompiledTools} from '../src/core/tool-schema.js'
+import {
+  codexAgentDescriptor as provider1codexAgentDescriptor,
+  CodexAgentController as provider1CodexAgentController,
+} from '../src/executors/index.js'
+import {
+  type CodexAppServerTransport,
+  type SafePreflightReport,
+  type SteerTransportResult,
+  type TransportOutcome,
+} from '../src/executors/codex/app-server-transport.js'
+import {buildDesktopRealtimeComposition} from '../src/desktop/desktop-session.js'
+import {type CapturedCameraFrame} from '../src/desktop.js'
+import {ChromiumFrameSource} from '../src/executors/chromium-frame-source.js'
+import {
+  buildQwenRealtimeAssembly,
+  type BuildQwenRealtimeAssemblyOptions,
+  buildCascadedRealtimeAssembly,
+  type BuildCascadedRealtimeAssemblyOptions,
+  type CascadedProviderRegistries,
+} from '../src/composition/cascaded-realtime-assembly.js'
+import {
+  QwenAudioRealtimeAdapter,
+  QwenSocketClosedError,
+  type QwenConnector,
+  type QwenConnectorOptions,
+  type QwenSocket,
+} from '../src/realtime/qwen.js'
+import {CodexLiveAdapter} from '../src/executors/codex/adapter-live.js'
+import {MediaStore} from '../src/core/media-store.js'
+import {handoffPolicySchema} from '../src/core/memory.js'
+import {createArkCascadedLlmSession} from '../src/realtime/cascaded/ark-llm.js'
+import {type CascadedLlmFactory} from '../src/realtime/cascaded/llm.js'
+import {CascadedRealtimeError} from '../src/realtime/cascaded/adapter.js'
+import {CascadedRealtimeProvider} from '../src/realtime/cascaded/provider.js'
+import {
+  type AsrClient,
+  type AsrFactory,
+  type EndpointingFactory,
+  type TtsClient,
+  type TtsFactory,
+} from '../src/realtime/cascaded/ports.js'
+import {
+  type ArkEvent,
+  type ArkResponsesGateway,
+  type ArkStreamInput,
+} from '../src/realtime/volcengine/ark.js'
+import {
+  type EndpointingCapabilityReason,
+  type EndpointingCapabilityResult,
+  type LiveKitAgentsPublicSurface,
+  type LiveKitExecutor,
+  type LiveKitVadEvent,
+  type PreparedEndpointingCapability,
+} from '../src/realtime/volcengine/endpointing-capability.js'
+import {LiveKitVolcEndpointing} from '../src/realtime/volcengine/livekit-endpointing.js'
+import {SilenceVolcEndpointing} from '../src/realtime/volcengine/silence-endpointing.js'
 
+{
 const testCodingAgentControllerFactory: CodingAgentControllerFactory = {
   create: context => new CodexAgentController({
     channel: context.channel,
@@ -128,18 +185,6 @@ interface Deferred<T> {
   readonly promise: Promise<T>
   resolve(value: T): void
   reject(error: unknown): void
-}
-
-function emptyPublishedGraphSnapshot(publicationRevision: number) {
-  return Object.freeze({
-    schema_version: 3 as const,
-    publication_revision: publicationRevision,
-    degraded: false,
-    logical_workspaces: Object.freeze([]),
-    workspace_instances: Object.freeze([]),
-    relations: Object.freeze([]),
-    aliases: Object.freeze([]),
-  })
 }
 
 function deferred<T>(): Deferred<T> {
@@ -949,7 +994,7 @@ test('routine cumulative progress is suppressed end to end while a later milesto
     const gateway = new SequencedSurrogateGateway([
       '{"speak":false,"suggestion_id":null,"progress_class":"milestone","reason":"baseline"}',
       '{"speak":false,"suggestion_id":null,"progress_class":"routine_delta","reason":"only file count changed"}',
-      '{"speak":true,"suggestion_id":"s-3","progress_class":"routine_delta","reason":"eager file count update"}',
+      '{"speak":false,"suggestion_id":null,"progress_class":"routine_delta","reason":"only another file count update"}',
       '{"speak":true,"suggestion_id":"s-4","progress_class":"milestone","reason":"targeted tests passed"}',
     ])
     const telemetry: {readonly kind: string; readonly payload: unknown}[] = []
@@ -1038,7 +1083,7 @@ test('routine cumulative progress is suppressed end to end while a later milesto
       assert.equal(provider.injected.length, 0)
       assert.deepEqual(core.runtime.core.diagnostics.filter(item => (
         item.code === 'invalid_surrogate_progress_decision'
-      )), [{code: 'invalid_surrogate_progress_decision'}])
+      )), [])
       assert.equal(core.runtime.core.diagnostics.some(item => (
         item.code === 'invalid_surrogate_output'
       )), false)
@@ -1073,8 +1118,8 @@ test('routine cumulative progress is suppressed end to end while a later milesto
           progress_class: 'routine_delta', suppressed: false, trigger_kind: 'progress',
         },
         {
-          disposition: 'selected', offered_count: 1, preset: 'eager',
-          progress_class: 'routine_delta', suppressed: true, trigger_kind: 'progress',
+          disposition: 'silent', offered_count: 1, preset: 'eager',
+          progress_class: 'routine_delta', suppressed: false, trigger_kind: 'progress',
         },
         {
           disposition: 'selected', offered_count: 1, preset: 'eager',
@@ -1413,7 +1458,7 @@ test('project proposal reaches provider and desktop before confirmation', async 
     models: {
       assess: (input: Readonly<Record<string, unknown>>) => Promise.resolve({
         intake_id: input.intake_id, revision: input.revision, slots, readiness: 0.75,
-        kind: 'create', project: 'tetris-game', project_evidence: 'tetris-game', session: 'latest',
+        kind: 'create', project: 'tetris-game', project_evidence: 'tetris-game', session: {mode: 'latest'},
         intent_to_proceed: true, candidate_question: null, discovery: [], early_exit: false, abandon: false,
       }),
       plan: (input: Readonly<Record<string, unknown>>) => Promise.resolve({
@@ -1492,7 +1537,6 @@ test('project proposal reaches provider and desktop before confirmation', async 
 
     await waitNamed('correlated dispatch tool result', () => (
       provider.hostItems.some(item => item.call_id === 'call-project')
-      && provider.responseIntents.some(intent => intent.kind === 'tool_result')
     ))
     await waitNamed('immediate pending project view', () => (
       views.some(view => view.pending_action === 'create_workspace')
@@ -1508,15 +1552,16 @@ test('project proposal reaches provider and desktop before confirmation', async 
       pending_confirmation_id: 'assembly-proposal',
       pending_action: 'create_workspace',
       pending_workspace_display_name: 'tetris-game',
-      pending_session_title: null,
+      pending_session_title: '实现并验证俄罗斯方块小游戏',
       pending_expires_in_seconds: 360,
     })
 
     const item = provider.hostItems.find(candidate => candidate.call_id === 'call-project')
     assert.ok(item !== undefined)
     assert.equal((JSON.parse(item.content) as {readonly code?: string}).code, 'intake_opened')
-    // The proposal reaches the model as a host fact naming the id; only `confirm` can answer it. Queued
-    // counts: the fake provider never answers the tool-result response, so the floor stays busy.
+    assert.equal(provider.responseIntents.some(intent => intent.kind === 'tool_result'), false,
+      'internal receipt must not request a reply')
+    // Only the concrete proposal requests a user-facing response.
     const factText = 'id=assembly-proposal；仅通过 confirm(id, accepted) 回答'
     await waitNamed('confirmation fact', () => [
       ...provider.hostItems.filter(candidate => candidate.call_id === null).map(candidate => candidate.content),
@@ -1529,6 +1574,29 @@ test('project proposal reaches provider and desktop before confirmation', async 
     assert.deepEqual(validations, ['tetris-game'])
     assert.equal(transportCreations, 0)
     assert.equal(confirmation.pending, true)
+
+    for (let i = 0; i < 5 && !realtime.service.session.providerIdle; i++) {
+      await realtime.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: `readback-${i}`})
+      await realtime.service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: `readback-${i}`, status: 'completed', reason: 'done'})
+    }
+    await realtime.service.handleEvent({kind: 'user_speech_started', session_epoch: 1,
+      speech_id: 'speech-amend', provider_item_id: 'user-amend'})
+    await realtime.service.handleEvent({kind: 'user_speech_ended', session_epoch: 1,
+      speech_id: 'speech-amend', provider_item_id: 'user-amend'})
+    await realtime.service.handleEvent({kind: 'user_transcript_final', session_epoch: 1,
+      item_id: 'user-amend', text: '确认前先修改 tetris-game 的需求：只实现键盘操作'})
+    assert.equal(confirmation.pending, true, 'raw input preserves the proposal for a structured decision')
+    await realtime.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'response-amend'})
+    await realtime.service.handleEvent({kind: 'tool_call_ready', session_epoch: 1,
+      call_id: 'call-amend', item_id: 'function-amend', response_id: 'response-amend', name: 'dispatch',
+      arguments: {executor: 'codex', instruction: '确认前先修改 tetris-game 的需求：只实现键盘操作', origin_ref: 'conversation:2'}})
+    await realtime.service.handleEvent({kind: 'response_terminal', session_epoch: 1,
+      response_id: 'response-amend', status: 'completed', reason: 'done'})
+    await waitNamed('amendment admitted through service', () => provider.hostItems.some(item =>
+      item.call_id === 'call-amend' && (JSON.parse(item.content) as {code?: string}).code === 'intake_in_progress'))
+    await waitNamed('amended plan resolved', () => validations.length === 2)
+    assert.equal(transportCreations, 0, 'amendment must not execute the old proposal')
+
   } finally {
     await realtime.stop()
   }
@@ -1562,8 +1630,6 @@ test('project adapter wiring carries one confirmed identity through the real rea
     activeCommittedWorkspace: ProjectCodexAdapter['activeCommittedWorkspace']
     observeProjectView: ProjectCodexAdapter['observeProjectView']
     observeProjectContext: ProjectCodexAdapter['observeProjectContext']
-    observeCommittedWorkspace: ProjectCodexAdapter['observeCommittedWorkspace']
-    observeTerminalWorkOrder: ProjectCodexAdapter['observeTerminalWorkOrder']
     close: ProjectCodexAdapter['close']
   } = {
     manifest: CODEX_PROJECT_MANIFEST,
@@ -1634,8 +1700,6 @@ test('project adapter wiring carries one confirmed identity through the real rea
       return () => { viewObservers.delete(observer) }
     },
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
     close: () => {
       closeCalls += 1
       return Promise.resolve()
@@ -1753,7 +1817,6 @@ test('active project views replace one provider context without publishing histo
   const contextObservers = new Set<(
     context: PublicProjectContext,
   ) => void | Promise<void>>()
-  const workspaceObservers = new Set<(event: CommittedWorkspaceEvent) => void | Promise<void>>()
   let view: PublicProjectView = Object.freeze({
     workspace_display_name: 'alpha',
     session_title: null,
@@ -1766,11 +1829,6 @@ test('active project views replace one provider context without publishing histo
     workspace_id: 'host-alpha', display_name: 'alpha', normalized_name: 'alpha',
     canonical_path: '/safe/alpha', origin: 'registered', codex_home_key: 'host-alpha',
     active_session_id: null, created_at: 1, last_used_at: 1,
-  })
-  const beta: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-beta', display_name: 'beta', normalized_name: 'beta',
-    canonical_path: '/safe/beta', origin: 'registered', codex_home_key: 'host-beta',
-    active_session_id: null, created_at: 2, last_used_at: 2,
   })
   const adapterShape: ExecutorAdapter & Record<string, unknown> = {
     manifest: CODEX_PROJECT_MANIFEST,
@@ -1796,13 +1854,6 @@ test('active project views replace one provider context without publishing histo
       contextObservers.add(observer)
       return () => { contextObservers.delete(observer) }
     },
-    observeCommittedWorkspace: (
-      observer: (event: CommittedWorkspaceEvent) => void | Promise<void>,
-    ) => {
-      workspaceObservers.add(observer)
-      return () => { workspaceObservers.delete(observer) }
-    },
-    observeTerminalWorkOrder: () => () => undefined,
     close: () => Promise.resolve(),
   }
   const core = buildAssembly({
@@ -1857,9 +1908,6 @@ test('active project views replace one provider context without publishing histo
     assert.equal(provider.workspaceItems[1]?.content.includes('workspaces='), false)
     assert.equal(provider.workspaceItems[1]?.content.includes('sessions='), false)
 
-    const committed = [...workspaceObservers][0]
-    assert.ok(committed !== undefined)
-    await committed({workspace: beta})
     await new Promise<void>(resolve => { setImmediate(resolve) })
     assert.equal(provider.workspaceItems.length, 2,
       'a new host id must not pair with the prior display view')
@@ -2022,867 +2070,8 @@ test('active executor context is published even when no project workspace is com
   }
 })
 
-test('delayed atomic view never pairs an immediate new graph with the prior workspace display',
-  async () => {
-    const clock = new VirtualClock(0)
-    const confirmation = new ProjectConfirmationController({
-      clock,
-      idFactory: () => 'atomic-graph-confirmation',
-    })
-    const provider = new WorkspaceContextProvider()
-    const contextObservers = new Set<(
-      context: PublicProjectContext,
-    ) => void | Promise<void>>()
-    const workspaceObservers = new Set<(
-      event: CommittedWorkspaceEvent,
-    ) => void | Promise<void>>()
-    const alpha: WorkspaceRecord = Object.freeze({
-      workspace_id: 'host-alpha', display_name: 'alpha', normalized_name: 'alpha',
-      canonical_path: '/safe/alpha', origin: 'registered', codex_home_key: 'host-alpha',
-      active_session_id: null, created_at: 1, last_used_at: 1,
-    })
-    const beta: WorkspaceRecord = Object.freeze({
-      workspace_id: 'host-beta', display_name: 'beta', normalized_name: 'beta',
-      canonical_path: '/safe/beta', origin: 'registered', codex_home_key: 'host-beta',
-      active_session_id: null, created_at: 2, last_used_at: 2,
-    })
-    let atomicContext: PublicProjectContext = Object.freeze({
-      workspace_id: alpha.workspace_id,
-      view: Object.freeze({
-        workspace_display_name: 'alpha', session_title: null, roster: [], pending_confirmation: false,
-        pending_confirmation_busy: false,
-      }),
-    })
-    const adapterShape: ExecutorAdapter & Record<string, unknown> = {
-      manifest: CODEX_PROJECT_MANIFEST,
-      confirmationController: confirmation,
-      dispatch: () => Promise.resolve({
-        outcome: 'ok', trust: 'trusted_system', content: {code: 'unused'}, refs: [],
-      }),
-      commitConfirmed: () => Promise.resolve({accepted: false, code: 'unused'}),
-      publicProjectView: () => atomicContext.view,
-      publicProjectContext: () => atomicContext,
-      initialize: () => Promise.resolve(),
-      activeCommittedWorkspace: () => Promise.resolve(alpha),
-      observeProjectView: () => () => undefined,
-      observeProjectContext: (
-        observer: (context: PublicProjectContext) => void | Promise<void>,
-      ) => {
-        contextObservers.add(observer)
-        return () => { contextObservers.delete(observer) }
-      },
-      observeCommittedWorkspace: (
-        observer: (event: CommittedWorkspaceEvent) => void | Promise<void>,
-      ) => {
-        workspaceObservers.add(observer)
-        return () => { workspaceObservers.delete(observer) }
-      },
-      observeTerminalWorkOrder: () => () => undefined,
-      close: () => Promise.resolve(),
-    }
-    const graphOpens: string[] = []
-    let graphScope = 0
-    const graph: RealtimeWorkspaceGraph = {
-      publishedSnapshot: emptyPublishedGraphSnapshot(1),
-      open: () => Promise.resolve(),
-      revokeCurrentWorkspaceScope: () => ++graphScope,
-      breakWorkspaceTransitionAdjacency: () => undefined,
-      openWorkspace: input => {
-        const suffix = input.repository_fingerprint === beta.workspace_id ? 'beta' : 'alpha'
-        graphOpens.push(input.repository_fingerprint ?? '')
-        return Promise.resolve({
-          kind: 'resolved',
-          resolution_basis: 'repository_fingerprint',
-          logical_workspace: Object.freeze({
-            logical_workspace_id: `logical-${suffix}`,
-            display_name: suffix,
-            aliases: [] as string[],
-            canonical_remote: null,
-            created_at: 1,
-            updated_at: 1,
-            revision: 1,
-          }),
-          instance: Object.freeze({
-            instance_id: `instance-${suffix}`,
-            logical_workspace_id: `logical-${suffix}`,
-            display_name: suffix,
-            path_label: suffix,
-            repository_fingerprint: input.repository_fingerprint,
-            branch: null,
-            status: 'active',
-            first_seen_at: 1,
-            last_seen_at: 1,
-            revision: 1,
-          }),
-          deltas: Object.freeze([]),
-        })
-      },
-      recordTaskCompletion: () => Promise.resolve(),
-      contextForTurn: input => Object.freeze({
-        header: `graph=${input.workspace_instance_id}`,
-        recall_pack: null,
-        omitted_preferences: 0,
-        omitted_hints: 0,
-        degraded: false,
-        diagnostic: null,
-      }),
-      close: () => Promise.resolve(),
-    }
-    const core = buildAssembly({
-      settings: settingsSchema.parse({executors: ['codex']}),
-      clock,
-      gateway: new NeverCalledGateway(),
-      searchTransport: new NeverCalledSearch(),
-      executors: [adapterShape],
-    })
-    const realtime = buildRealtimeAssembly({
-      core,
-      provider,
-      projectAdapter: adapterShape as unknown as ProjectCodexAdapter,
-      workspaceGraph: graph,
-    })
 
-    await realtime.start()
-    try {
-      const beforeSwitch = provider.workspaceItems.length
-      const committed = [...workspaceObservers][0]
-      assert.ok(committed !== undefined)
-      await committed({workspace: beta})
-      await waitNamed('immediate beta graph completion', () => graphOpens.includes(beta.workspace_id))
-      await yieldImmediate()
-      await yieldImmediate()
-      assert.equal(provider.workspaceItems.slice(beforeSwitch).some(item => (
-        item.workspace_instance_id === beta.workspace_id
-        && item.content.includes('workspace="alpha"')
-        && item.content.includes('graph=instance-beta')
-      )), false)
 
-      atomicContext = Object.freeze({
-        workspace_id: beta.workspace_id,
-        view: Object.freeze({
-          workspace_display_name: 'beta', session_title: null, roster: [], pending_confirmation: false,
-          pending_confirmation_busy: false,
-        }),
-      })
-      await Promise.all([...contextObservers].map(async observer => {
-        await observer(atomicContext)
-      }))
-      await waitNamed('atomic beta graph context', () => (
-        provider.workspaceItems.at(-1)?.workspace_instance_id === beta.workspace_id
-      ))
-      const current = provider.workspaceItems.at(-1)
-      assert.ok(current !== undefined)
-      assert.equal(current.content.includes('workspace="beta"'), true)
-      assert.equal(current.content.includes('graph=instance-beta'), true)
-    } finally {
-      await realtime.stop()
-    }
-  })
-
-test('project-mode startup fails closed before core/provider work without context capability',
-  async () => {
-    const clock = new VirtualClock(0)
-    const confirmation = new ProjectConfirmationController({
-      clock, idFactory: () => 'unsupported-context-confirmation',
-    })
-    const frameSource = new RecordingFrameSource()
-    const provider = new AbortAwareProvider()
-    const adapterShape: ExecutorAdapter & Record<string, unknown> = {
-      manifest: CODEX_PROJECT_MANIFEST,
-      confirmationController: confirmation,
-      dispatch: () => Promise.resolve({
-        outcome: 'ok', trust: 'trusted_system', content: {code: 'unused'}, refs: [],
-      }),
-      commitConfirmed: () => Promise.resolve({accepted: false, code: 'unused'}),
-      publicProjectView: () => Object.freeze({
-        workspace_display_name: null, session_title: null, pending_confirmation: false,
-        pending_confirmation_busy: false,
-      }),
-      publicProjectContext: () => Object.freeze({
-        workspace_id: null,
-        view: Object.freeze({
-          workspace_display_name: null, session_title: null, pending_confirmation: false,
-          pending_confirmation_busy: false,
-        }),
-      }),
-      initialize: () => Promise.resolve(),
-      activeCommittedWorkspace: () => Promise.resolve(null),
-      observeProjectView: () => () => undefined,
-      observeProjectContext: () => () => undefined,
-      observeCommittedWorkspace: () => () => undefined,
-      observeTerminalWorkOrder: () => () => undefined,
-      close: () => Promise.resolve(),
-    }
-    const core = buildAssembly({
-      settings: settingsSchema.parse({executors: ['codex']}),
-      clock,
-      gateway: new NeverCalledGateway(),
-      searchTransport: new NeverCalledSearch(),
-      frameSource,
-      executors: [adapterShape],
-    })
-    const realtime = buildRealtimeAssembly({
-      core,
-      provider,
-      projectAdapter: adapterShape as unknown as ProjectCodexAdapter,
-    })
-
-    await assert.rejects(realtime.start(), /cannot deliver active project context/u)
-    assert.equal(frameSource.starts, 0)
-    assert.equal(provider.connectCalls, 0)
-  })
-
-test('workspace graph opens before project initialization, injects only the current Header, and owns hooks', async () => {
-  const clock = new VirtualClock(50)
-  const actions: string[] = []
-  const provider = new WorkspaceContextProvider(actions)
-  const workspaceObservers = new Set<(event: CommittedWorkspaceEvent) => void | Promise<void>>()
-  const terminalObservers = new Set<(event: TerminalWorkOrderEvent) => void | Promise<void>>()
-  const confirmation = new ProjectConfirmationController({clock, idFactory: () => 'graph-confirmation'})
-  const workspace: WorkspaceRecord = Object.freeze({
-    workspace_id: 'workspace-authoritative',
-    display_name: 'alpha',
-    normalized_name: 'alpha',
-    canonical_path: '/safe/alpha',
-    origin: 'registered' as const,
-    codex_home_key: 'workspace-authoritative',
-    active_session_id: null,
-    created_at: 10,
-    last_used_at: 20,
-  })
-  let projectClosed = 0
-  const adapterShape: ExecutorAdapter & Record<string, unknown> = {
-    manifest: CODEX_PROJECT_MANIFEST,
-    confirmationController: confirmation,
-    dispatch: () => Promise.resolve({
-      outcome: 'ok', trust: 'trusted_system', content: {code: 'completed'}, refs: [],
-    }),
-    commitConfirmed: () => Promise.resolve({accepted: false, code: 'not_used'}),
-    publicProjectView: () => Object.freeze({
-      workspace_display_name: 'alpha', session_title: null, pending_confirmation: false,
-      pending_confirmation_busy: false,
-    }),
-    publicProjectContext: () => Object.freeze({
-      workspace_id: workspace.workspace_id,
-      view: Object.freeze({
-        workspace_display_name: 'alpha', session_title: null, pending_confirmation: false,
-        pending_confirmation_busy: false,
-      }),
-    }),
-    initialize: () => {
-      actions.push('project:initialize')
-      return Promise.resolve()
-    },
-    activeCommittedWorkspace: () => Promise.resolve(workspace),
-    observeProjectView: () => () => undefined,
-    observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: (observer: (event: CommittedWorkspaceEvent) => void) => {
-      workspaceObservers.add(observer)
-      return () => { workspaceObservers.delete(observer) }
-    },
-    observeTerminalWorkOrder: (observer: (event: TerminalWorkOrderEvent) => void) => {
-      terminalObservers.add(observer)
-      return () => { terminalObservers.delete(observer) }
-    },
-    close: () => { projectClosed += 1; return Promise.resolve() },
-  }
-  const projectAdapter = adapterShape as unknown as ProjectCodexAdapter
-  const graphCalls: unknown[] = []
-  let graphClosed = 0
-  let contextFailure = true
-  let holdLifecycle = false
-  const lifecycleGate = deferred<void>()
-  let holdTerminal = false
-  const terminalGate = deferred<void>()
-  let workspaceQueueFailures = 0
-  let graphScopeGeneration = 0
-  const diagnostics: string[] = []
-  const graph: RealtimeWorkspaceGraph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(7),
-    open: () => { actions.push('graph:open'); return Promise.resolve() },
-    revokeCurrentWorkspaceScope: () => ++graphScopeGeneration,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: async input => {
-      actions.push('graph:workspace')
-      graphCalls.push(input)
-      if (workspaceQueueFailures > 0) {
-        workspaceQueueFailures -= 1
-        throw Object.assign(new Error('bounded service admission overflow'), {
-          code: 'GRAPH_SERVICE_QUEUE_FULL',
-        })
-      }
-      if (holdLifecycle) await lifecycleGate.promise
-      return Promise.resolve({
-        kind: 'resolved',
-        resolution_basis: 'repository_fingerprint',
-        logical_workspace: Object.freeze({
-          logical_workspace_id: 'logical-alpha',
-          display_name: 'alpha',
-          aliases: [] as string[],
-          canonical_remote: null,
-          created_at: 20,
-          updated_at: 20,
-          revision: 1,
-        }),
-        instance: Object.freeze({
-          instance_id: 'instance-alpha',
-          logical_workspace_id: 'logical-alpha',
-          display_name: 'alpha',
-          path_label: 'alpha',
-          repository_fingerprint: 'workspace-authoritative',
-          branch: null,
-          status: 'active',
-          first_seen_at: 20,
-          last_seen_at: 20,
-          revision: 1,
-        }),
-        deltas: Object.freeze([]),
-      })
-    },
-    recordTaskCompletion: async input => {
-      graphCalls.push(input)
-      if (holdTerminal) await terminalGate.promise
-    },
-    contextForTurn: input => {
-      if (contextFailure) throw new Error('sensitive graph context failure')
-      graphCalls.push(input)
-      return Object.freeze({
-        header: '<workspace_context kind="data">current alpha</workspace_context>',
-        recall_pack: null,
-        omitted_preferences: 0,
-        omitted_hints: 0,
-        degraded: false,
-        diagnostic: null,
-      })
-    },
-    close: () => { graphClosed += 1; actions.push('graph:close'); return Promise.resolve() },
-  }
-  const core = buildAssembly({
-    settings: settingsSchema.parse({executors: ['codex']}),
-    clock,
-    gateway: new NeverCalledGateway(),
-    searchTransport: new NeverCalledSearch(),
-    frameSource: new RecordingFrameSource(actions),
-    executors: [adapterShape],
-  })
-  let id = 0
-  const realtime = buildRealtimeAssembly({
-    core,
-    provider,
-    projectAdapter,
-    workspaceGraph: graph,
-    idFactory: () => `graph-host-${++id}`,
-    wallClockNow: () => 1_800_000_000,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-  assert.throws(
-    () => core.runtime.bindGraphContextProvider(() => null),
-    /already bound/u,
-    'RealtimeAssembly must own the sole runtime graph-context binding',
-  )
-
-  await realtime.start()
-  assert.deepEqual(actions.slice(0, 6), [
-    'graph:open',
-    'project:initialize',
-    'graph:workspace',
-    'provider:connect',
-    'provider:events',
-  ])
-  assert.deepEqual(diagnostics, ['[realtime-diagnostic] workspace_graph_header_delivery_failed'])
-  assert.equal(diagnostics.join('\n').includes('sensitive'), false)
-  assert.equal(provider.workspaceItems.length, 1)
-  assert.deepEqual(provider.workspaceItems[0], {
-    kind: 'workspace_context',
-    host_item_id: 'graph-host-1',
-    event_id: 'graph-host-2',
-    content: '<active_project_context>\nworkspace="alpha"\nsession=""\n</active_project_context>',
-    call_id: null,
-    session_epoch: 1,
-    workspace_instance_id: 'workspace-authoritative',
-    revision: 1,
-  })
-  contextFailure = false
-  const workspaceObserver = [...workspaceObservers][0]
-  assert.ok(workspaceObserver !== undefined)
-  await workspaceObserver({workspace})
-  await waitNamed('workspace Header retry', () => provider.workspaceItems.length === 2)
-  assert.equal(provider.workspaceItems.length, 2)
-  assert.deepEqual(provider.workspaceItems[1], {
-    kind: 'workspace_context',
-    host_item_id: 'graph-host-3',
-    event_id: 'graph-host-4',
-    content: [
-      '<active_project_context>',
-      'workspace="alpha"',
-      'session=""',
-      '</active_project_context>',
-      '<workspace_graph_context>',
-      '<workspace_context kind="data">current alpha</workspace_context>',
-      '</workspace_graph_context>',
-    ].join('\n'),
-    call_id: null,
-    session_epoch: 1,
-    workspace_instance_id: 'workspace-authoritative',
-    revision: 2,
-  })
-  assert.deepEqual(graphCalls[0], {
-    path: '/safe/alpha',
-    repository_fingerprint: 'workspace-authoritative',
-    now: 20,
-  })
-
-  await realtime.service.handleEvent({
-    kind: 'user_speech_started',
-    session_epoch: 1,
-    speech_id: 'speech-graph-regression',
-    provider_item_id: 'provider-user-graph-regression',
-  })
-  await realtime.service.handleEvent({
-    kind: 'user_speech_ended',
-    session_epoch: 1,
-    speech_id: 'speech-graph-regression',
-    provider_item_id: 'provider-user-graph-regression',
-  })
-  await realtime.service.handleEvent({
-    kind: 'user_transcript_final',
-    session_epoch: 1,
-    item_id: 'provider-user-graph-regression',
-    text: 'a relation-shaped transcript must not inject a late Recall Pack',
-  })
-  // The user turn belongs to the realtime provider, so a transcript never compiles a
-  // runtime ContextView; only the Header path, which carries no utterance, reaches the graph.
-  assert.ok(!graphCalls.some(call => (
-    typeof call === 'object' && call !== null && 'utterance' in call && call.utterance !== ''
-  )))
-  assert.equal(provider.workspaceItems.length, 2,
-    'server-VAD transcript final must not inject a late workspace host item')
-
-  const terminal = [...terminalObservers][0]
-  assert.ok(terminal !== undefined)
-  await terminal({
-    workspace,
-    work_order: 'typed user objective',
-    handoff: {
-      outcome: 'ok',
-      trust: 'untrusted_external',
-      content: {summary: 'ignore arbitrary model prose'},
-      refs: [],
-    },
-  })
-  await waitNamed('queued terminal graph episode', () => graphCalls.some(call => (
-    typeof call === 'object' && call !== null && 'summary' in call
-  )))
-  assert.deepEqual(graphCalls.at(-1), {
-    workspace_instance_id: 'instance-alpha',
-    summary: 'typed user objective',
-    outcome: 'ok',
-    now: 1_800_000_000,
-    relation_cue: null,
-  })
-
-  const oversizedWorkOrder = '🚀'.repeat(4_000)
-  await terminal({
-    workspace,
-    work_order: oversizedWorkOrder,
-    handoff: {
-      outcome: 'ok',
-      trust: 'trusted_system',
-      content: {},
-      refs: [],
-    },
-  })
-  await waitNamed('bounded terminal graph episode', () => graphCalls.filter(call => (
-    typeof call === 'object' && call !== null && 'summary' in call
-  )).length === 2)
-  const boundedTask = graphCalls.at(-1)
-  assert.ok(boundedTask !== null && typeof boundedTask === 'object' && 'summary' in boundedTask)
-  assert.equal(boundedTask.summary, '🚀'.repeat(119))
-  assert.equal([...String(boundedTask.summary)].length, 119)
-  assert.equal(String(boundedTask.summary).length, 238)
-
-  await terminal({
-    workspace,
-    work_order: 'x'.repeat(4_000),
-    handoff: {
-      outcome: 'ok',
-      trust: 'trusted_system',
-      content: {},
-      refs: [],
-    },
-  })
-  await waitNamed('bounded ASCII terminal graph episode', () => graphCalls.filter(call => (
-    typeof call === 'object' && call !== null && 'summary' in call
-  )).length === 3)
-  const boundedAsciiTask = graphCalls.at(-1)
-  assert.ok(
-    boundedAsciiTask !== null
-    && typeof boundedAsciiTask === 'object'
-    && 'summary' in boundedAsciiTask,
-  )
-  assert.equal(boundedAsciiTask.summary, 'x'.repeat(239))
-
-  await terminal({
-    workspace,
-    work_order: ' \t\n ',
-    handoff: {
-      outcome: 'ok',
-      trust: 'trusted_system',
-      content: {},
-      refs: [],
-    },
-  })
-  await waitNamed('empty terminal graph episode', () => graphCalls.filter(call => (
-    typeof call === 'object' && call !== null && 'summary' in call
-  )).length === 4)
-  const emptyTask = graphCalls.at(-1)
-  assert.ok(emptyTask !== null && typeof emptyTask === 'object' && 'summary' in emptyTask)
-  assert.equal(emptyTask.summary, null)
-
-  holdLifecycle = true
-  const promptObserverResult = workspaceObserver({workspace})
-  try {
-    assert.equal(promptObserverResult, undefined,
-      'authoritative project observers must enqueue graph work without awaiting it')
-  } finally {
-    holdLifecycle = false
-    lifecycleGate.resolve(undefined)
-  }
-
-  holdTerminal = true
-  for (let index = 0; index < 64; index += 1) {
-    terminal({
-      workspace,
-      work_order: `queued terminal ${index}`,
-      handoff: {outcome: 'ok', trust: 'trusted_system', content: {}, refs: []},
-    })
-  }
-  await yieldImmediate()
-  const latestWorkspace = Object.freeze({
-    ...workspace,
-    workspace_id: 'workspace-authoritative-latest',
-    canonical_path: '/safe/latest',
-    last_used_at: 60,
-  })
-  for (let index = 0; index < 8; index += 1) {
-    workspaceObserver({
-      workspace: Object.freeze({
-        ...latestWorkspace,
-        workspace_id: index === 7
-          ? latestWorkspace.workspace_id
-          : `workspace-authoritative-intermediate-${index}`,
-        canonical_path: index === 7 ? latestWorkspace.canonical_path : `/safe/intermediate-${index}`,
-      }),
-    })
-  }
-  holdTerminal = false
-  terminalGate.resolve(undefined)
-  await waitNamed('coalesced latest workspace switch', () => graphCalls.some(call => (
-    typeof call === 'object'
-    && call !== null
-    && 'repository_fingerprint' in call
-    && call.repository_fingerprint === latestWorkspace.workspace_id
-  )))
-
-  workspaceQueueFailures = 2
-  const retryWorkspace = Object.freeze({
-    ...workspace,
-    workspace_id: 'workspace-authoritative-retry',
-    canonical_path: '/safe/retry',
-    last_used_at: 70,
-  })
-  workspaceObserver({workspace: retryWorkspace})
-  await waitNamed('service-admission workspace switch retry', () => graphCalls.filter(call => (
-    typeof call === 'object'
-    && call !== null
-    && 'repository_fingerprint' in call
-    && call.repository_fingerprint === retryWorkspace.workspace_id
-  )).length === 3)
-
-  await realtime.stop()
-  const releaseReboundProvider = core.runtime.bindGraphContextProvider(() => null)
-  releaseReboundProvider()
-  assert.equal(graphClosed, 1)
-  assert.equal(projectClosed, 1)
-  assert.equal(workspaceObservers.size, 0)
-  assert.equal(terminalObservers.size, 0)
-})
-
-test('real assembly and graph service infer only weak metadata from committed adjacent workspaces', async t => {
-  const graphEventuallyMs = 5_000
-  const directory = await mkdtemp(join(tmpdir(), 'nova-realtime-graph-transition-'))
-  const workspaceObservers = new Set<(event: CommittedWorkspaceEvent) => void | Promise<void>>()
-  const terminalObservers = new Set<(event: TerminalWorkOrderEvent) => void | Promise<void>>()
-  const clock = new VirtualClock(3)
-  const confirmation = new ProjectConfirmationController({clock, idFactory: () => 'transition-confirm'})
-  const alpha: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-alpha', display_name: 'alpha', normalized_name: 'alpha',
-    canonical_path: '/safe/assembly-alpha', origin: 'registered', codex_home_key: 'host-alpha',
-    active_session_id: null, created_at: 1, last_used_at: 1,
-  })
-  const beta: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-beta', display_name: 'beta', normalized_name: 'beta',
-    canonical_path: '/safe/assembly-beta', origin: 'registered', codex_home_key: 'host-beta',
-    active_session_id: null, created_at: 2, last_used_at: 2,
-  })
-  const gamma: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-gamma', display_name: 'gamma', normalized_name: 'gamma',
-    canonical_path: '/safe/assembly-gamma', origin: 'registered', codex_home_key: 'host-gamma',
-    active_session_id: null, created_at: 3, last_used_at: 3,
-  })
-  const delta: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-delta', display_name: 'delta', normalized_name: 'delta',
-    canonical_path: '/safe/assembly-delta', origin: 'registered', codex_home_key: 'host-delta',
-    active_session_id: null, created_at: 4, last_used_at: 4,
-  })
-  const epsilon: WorkspaceRecord = Object.freeze({
-    workspace_id: 'host-epsilon', display_name: 'epsilon', normalized_name: 'epsilon',
-    canonical_path: '/safe/assembly-epsilon', origin: 'registered', codex_home_key: 'host-epsilon',
-    active_session_id: null, created_at: 5, last_used_at: 5,
-  })
-  const adapterShape: ExecutorAdapter & Record<string, unknown> = {
-    manifest: CODEX_PROJECT_MANIFEST,
-    confirmationController: confirmation,
-    dispatch: () => Promise.resolve({
-      outcome: 'ok', trust: 'trusted_system', content: {code: 'completed'}, refs: [],
-    }),
-    commitConfirmed: () => Promise.resolve({accepted: false, code: 'not_used'}),
-    publicProjectView: () => Object.freeze({
-      workspace_display_name: 'alpha', session_title: null, pending_confirmation: false,
-      pending_confirmation_busy: false,
-    }),
-    publicProjectContext: () => Object.freeze({
-      workspace_id: alpha.workspace_id,
-      view: Object.freeze({
-        workspace_display_name: 'alpha', session_title: null, pending_confirmation: false,
-        pending_confirmation_busy: false,
-      }),
-    }),
-    initialize: () => Promise.resolve(),
-    activeCommittedWorkspace: () => Promise.resolve(alpha),
-    observeProjectView: () => () => undefined,
-    observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: (observer: (event: CommittedWorkspaceEvent) => void) => {
-      workspaceObservers.add(observer)
-      return () => { workspaceObservers.delete(observer) }
-    },
-    observeTerminalWorkOrder: (observer: (event: TerminalWorkOrderEvent) => void) => {
-      terminalObservers.add(observer)
-      return () => { terminalObservers.delete(observer) }
-    },
-    close: () => Promise.resolve(),
-  }
-  const projectAdapter = adapterShape as unknown as ProjectCodexAdapter
-  let observation = 0
-  let providerScopeLookups = 0
-  const graph = new WorkspaceGraphService({
-    path: join(directory, 'graph.sqlite'),
-    id_factory: () => `assembly-transition-${++observation}`,
-    personal_context_provider: {
-      lookupWorkspaceEvidence: () => {
-        providerScopeLookups += 1
-        return Promise.resolve(Object.freeze({
-          evidence: Object.freeze([]), omitted_evidence: 0,
-          degraded: false, diagnostic: null,
-        }))
-      },
-    },
-  })
-  const revokeGraphScope = graph.revokeCurrentWorkspaceScope.bind(graph)
-  let graphScopeRevocations = 0
-  graph.revokeCurrentWorkspaceScope = () => {
-    graphScopeRevocations += 1
-    return revokeGraphScope()
-  }
-  const recordGraphTaskCompletion = graph.recordTaskCompletion.bind(graph)
-  const graphTaskCompletions: TaskCompletionInput[] = []
-  graph.recordTaskCompletion = input => {
-    graphTaskCompletions.push(input)
-    return recordGraphTaskCompletion(input)
-  }
-  const diagnostics: string[] = []
-  const core = buildAssembly({
-    settings: settingsSchema.parse({executors: ['codex']}),
-    clock,
-    gateway: new NeverCalledGateway(),
-    searchTransport: new NeverCalledSearch(),
-    executors: [adapterShape],
-  })
-  const realtime = buildRealtimeAssembly({
-    core,
-    provider: new WorkspaceContextProvider(),
-    projectAdapter,
-    workspaceGraph: graph,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-  t.after(async () => {
-    await realtime.stop()
-    await rm(directory, {recursive: true, force: true})
-  })
-
-  // This test owns metadata transitions; cold Worker startup has a separate bounded-start test.
-  await settleNamed('graph fixture startup', graph.open(), 20_000)
-  await realtime.start()
-  await waitNamed('authoritative alpha graph open', () => (
-    graph.publishedSnapshot.logical_workspaces.length === 1
-  ), graphEventuallyMs)
-  assert.equal(graph.publishedSnapshot.relations.length, 0)
-  const alphaInstance = graph.publishedSnapshot.workspace_instances[0]
-  assert.ok(alphaInstance !== undefined)
-  const alphaProviderInput = {
-    workspace_instance_id: alphaInstance.instance_id,
-    query: 'explain current workspace evidence',
-    limit: 1,
-  } as const
-  await waitNamed('authoritative alpha provider scope', async () => (
-    !(await graph.enrichAfterExplicitRecall(alphaProviderInput)).degraded
-  ))
-  assert.equal(providerScopeLookups, 1)
-  const committed = [...workspaceObservers][0]
-  const terminal = [...terminalObservers][0]
-  assert.ok(committed !== undefined)
-  assert.ok(terminal !== undefined)
-  const revocationsBeforeSwitch = graphScopeRevocations
-  committed({workspace: beta})
-  terminal({
-    workspace: beta,
-    work_order: 'beta objective committed before gamma became current',
-    handoff: {outcome: 'ok', trust: 'trusted_system', content: {}, refs: []},
-  })
-  committed({workspace: gamma})
-  assert.equal(graphScopeRevocations, revocationsBeforeSwitch + 2)
-  assert.deepEqual(await graph.enrichAfterExplicitRecall(alphaProviderInput), {
-    evidence: [], omitted_evidence: 0, degraded: true, diagnostic: 'protocol',
-  }, 'committed-event admission must revoke old provider scope synchronously')
-  assert.equal(providerScopeLookups, 1)
-  await waitNamed('ordered authoritative alpha-to-beta-to-gamma transitions', () => (
-    graph.publishedSnapshot.relations.length === 2
-  ), graphEventuallyMs)
-  await waitNamed('terminal event for the resolved stale-generation beta mapping', () => (
-    graphTaskCompletions.length === 1
-  ), graphEventuallyMs)
-  assert.equal(graphTaskCompletions[0]?.workspace_instance_id, (
-    graph.publishedSnapshot.workspace_instances.find(instance => (
-      instance.repository_fingerprint === beta.workspace_id
-    ))?.instance_id
-  ))
-  const idsByHost = new Map(graph.publishedSnapshot.workspace_instances.map(instance => (
-    [instance.repository_fingerprint, instance.logical_workspace_id]
-  )))
-  assert.deepEqual(graph.publishedSnapshot.relations.map(relation => ({
-    source: relation.source_logical_id,
-    target: relation.target_logical_id,
-    type: relation.relation_type,
-    confidence: relation.confidence,
-    status: relation.status,
-  })), [
-    {
-      source: idsByHost.get('host-alpha'), target: idsByHost.get('host-beta'),
-      type: 'discussed_with', confidence: 0.4, status: 'weak',
-    },
-    {
-      source: idsByHost.get('host-beta'), target: idsByHost.get('host-gamma'),
-      type: 'discussed_with', confidence: 0.4, status: 'weak',
-    },
-  ])
-  assert.equal(JSON.stringify(graph.publishedSnapshot.relations).includes('/safe/'), false)
-
-  committed({workspace: Object.freeze({...gamma, canonical_path: 'speculative-relative-path'})})
-  await waitNamed('rejected speculative transition', () => (
-    diagnostics.some(line => line.endsWith('workspace_graph_lifecycle_failed'))
-  ), graphEventuallyMs)
-  assert.equal(graph.publishedSnapshot.relations.length, 2)
-  assert.ok(graph.publishedSnapshot.relations.every(relation => (
-    relation.revision === 0 && relation.evidence_refs.length === 1
-  )))
-
-  committed({workspace: delta})
-  await waitNamed('successful workspace after a rejected admitted transition', () => (
-    graph.publishedSnapshot.workspace_instances.some(instance => (
-      instance.repository_fingerprint === delta.workspace_id
-    ))
-  ), graphEventuallyMs)
-  assert.equal(
-    graph.publishedSnapshot.relations.length,
-    2,
-    'a processing failure must break adjacency instead of inferring gamma-to-delta',
-  )
-
-  committed({workspace: epsilon})
-  await waitNamed('new adjacency after the post-gap workspace becomes the anchor', () => (
-    graph.publishedSnapshot.relations.length === 3
-  ), graphEventuallyMs)
-  const postGapIds = new Map(graph.publishedSnapshot.workspace_instances.map(instance => (
-    [instance.repository_fingerprint, instance.logical_workspace_id]
-  )))
-  const postGapRelation = graph.publishedSnapshot.relations.find(relation => (
-    relation.source_logical_id === postGapIds.get('host-delta')
-    && relation.target_logical_id === postGapIds.get('host-epsilon')
-  ))
-  assert.ok(postGapRelation !== undefined)
-  assert.deepEqual({
-    type: postGapRelation.relation_type,
-    reason: postGapRelation.reason,
-    confidence: postGapRelation.confidence,
-    status: postGapRelation.status,
-    first_seen_at: postGapRelation.first_seen_at,
-    last_seen_at: postGapRelation.last_seen_at,
-    evidence: postGapRelation.evidence_refs.map(evidence => ({
-      source: evidence.source,
-      observed_at: evidence.observed_at,
-    })),
-    revision: postGapRelation.revision,
-  }, {
-    type: 'discussed_with',
-    reason: 'adjacent confirmed workspace transition',
-    confidence: 0.4,
-    status: 'weak',
-    first_seen_at: 5,
-    last_seen_at: 5,
-    evidence: [{source: 'runtime', observed_at: 5}],
-    revision: 0,
-  })
-})
-
-test('never-settling graph open is bounded and cannot block voice startup', async () => {
-  const openGate = deferred<void>()
-  const diagnostics: string[] = []
-  let closes = 0
-  const graph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(0),
-    open: () => openGate.promise,
-    revokeCurrentWorkspaceScope: () => 1,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: () => Promise.reject(new Error('not expected')),
-    recordTaskCompletion: () => Promise.reject(new Error('not expected')),
-    contextForTurn: () => null,
-    close: () => { closes += 1; return Promise.resolve() },
-  } as RealtimeWorkspaceGraph
-  const provider = new AbortAwareProvider()
-  const realtime = buildRealtimeAssembly({
-    core: realCore(), provider, workspaceGraph: graph,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-  const start = realtime.start()
-  try {
-    await settleNamed('bounded graph open', start, 1_750)
-    assert.equal(provider.connectCalls, 1)
-    assert.ok(diagnostics.includes('[realtime-diagnostic] workspace_graph_open_abandoned'))
-    await settleNamed('bounded stop with graph open pending', realtime.stop(), 2_750)
-    assert.equal(closes, 1)
-    assert.ok(diagnostics.filter(line => (
-      line === '[realtime-diagnostic] workspace_graph_open_abandoned'
-    )).length >= 2)
-    openGate.resolve(undefined)
-    await yieldImmediate()
-    await realtime.stop()
-    assert.equal(closes, 2)
-  } finally {
-    openGate.resolve(undefined)
-    await Promise.allSettled([start])
-    await realtime.stop()
-  }
-})
 
 test('a rejected initial project context publication is diagnosed and retried once', async () => {
   const diagnostics: string[] = []
@@ -2919,8 +2108,6 @@ test('a rejected initial project context publication is diagnosed and retried on
     activeCommittedWorkspace: () => Promise.resolve(workspace),
     observeProjectView: () => () => undefined,
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
     close: () => Promise.resolve(),
   }
   const core = buildAssembly({
@@ -2942,7 +2129,7 @@ test('a rejected initial project context publication is diagnosed and retried on
     await waitNamed('initial project context retry', () => attempts === 2)
     assert.equal(provider.workspaceItems.length, 2)
     assert.deepEqual(diagnostics, [
-      '[realtime-diagnostic] workspace_graph_header_delivery_failed',
+      '[realtime-diagnostic] workspace_context_delivery_failed',
     ])
     assert.equal(diagnostics.join('\n').includes('sensitive'), false)
   } finally {
@@ -2995,39 +2182,9 @@ test('never-settling initial Header delivery cannot block voice startup', async 
     activeCommittedWorkspace: () => Promise.resolve(workspace),
     observeProjectView: () => () => undefined,
     observeProjectContext: () => () => undefined,
-    observeCommittedWorkspace: () => () => undefined,
-    observeTerminalWorkOrder: () => () => undefined,
     close: () => Promise.resolve(),
   }
   const projectAdapter = adapterShape as unknown as ProjectCodexAdapter
-  const graph: RealtimeWorkspaceGraph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(7),
-    open: () => Promise.resolve(),
-    revokeCurrentWorkspaceScope: () => 1,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: () => Promise.resolve({
-      kind: 'resolved',
-      resolution_basis: 'repository_fingerprint',
-      logical_workspace: Object.freeze({
-        logical_workspace_id: 'logical-header', display_name: 'header', aliases: [],
-        canonical_remote: null, created_at: 20, updated_at: 20, revision: 1,
-      }),
-      instance: Object.freeze({
-        instance_id: 'instance-header', logical_workspace_id: 'logical-header',
-        display_name: 'header', path_label: 'header',
-        repository_fingerprint: 'workspace-header', branch: null, status: 'active',
-        first_seen_at: 20, last_seen_at: 20, revision: 1,
-      }),
-      deltas: Object.freeze([]),
-    }),
-    recordTaskCompletion: () => Promise.resolve(),
-    contextForTurn: () => Object.freeze({
-      header: '<workspace_context kind="data">current header</workspace_context>',
-      recall_pack: null, omitted_preferences: 0, omitted_hints: 0, degraded: false,
-      diagnostic: null,
-    }),
-    close: () => Promise.resolve(),
-  }
   const core = buildAssembly({
     settings: settingsSchema.parse({executors: ['codex']}),
     clock,
@@ -3036,7 +2193,7 @@ test('never-settling initial Header delivery cannot block voice startup', async 
     executors: [adapterShape],
   })
   const realtime = buildRealtimeAssembly({
-    core, provider, projectAdapter, workspaceGraph: graph,
+    core, provider, projectAdapter,
     onDiagnostic: line => { diagnostics.push(line) },
   })
   const start = realtime.start()
@@ -3045,7 +2202,7 @@ test('never-settling initial Header delivery cannot block voice startup', async 
     assert.equal(provider.connectCalls, 1)
     assert.ok(provider.workspaceItems.length >= 1)
     assert.ok(diagnostics.includes(
-      '[realtime-diagnostic] workspace_graph_header_delivery_abandoned',
+      '[realtime-diagnostic] workspace_context_delivery_abandoned',
     ))
   } finally {
     headerGate.resolve(undefined)
@@ -3054,65 +2211,7 @@ test('never-settling initial Header delivery cannot block voice startup', async 
   }
 })
 
-test('abandoned graph close remains cleanup-incomplete and is retried by the assembly owner', async () => {
-  const closeGate = deferred<void>()
-  const diagnostics: string[] = []
-  let closes = 0
-  const graph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(0),
-    open: () => Promise.resolve(),
-    revokeCurrentWorkspaceScope: () => 1,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: () => Promise.reject(new Error('not expected')),
-    recordTaskCompletion: () => Promise.reject(new Error('not expected')),
-    contextForTurn: () => null,
-    close: () => {
-      closes += 1
-      return closes === 1 ? closeGate.promise : Promise.resolve()
-    },
-  } as RealtimeWorkspaceGraph
-  const realtime = buildRealtimeAssembly({
-    core: realCore(), provider: new AbortAwareProvider(), workspaceGraph: graph,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-  await realtime.start()
-  await settleNamed('first bounded graph close', realtime.stop(), 1_750)
-  assert.equal(closes, 1)
-  assert.ok(diagnostics.includes('[realtime-diagnostic] workspace_graph_close_abandoned'))
-  closeGate.resolve(undefined)
-  await yieldImmediate()
-  await realtime.stop()
-  assert.equal(closes, 2)
-})
 
-test('workspace graph open failure is diagnostic-only and never blocks voice startup', async () => {
-  const diagnostics: string[] = []
-  let closes = 0
-  const graph = {
-    publishedSnapshot: emptyPublishedGraphSnapshot(0),
-    open: () => Promise.reject(new Error('sensitive graph failure detail')),
-    revokeCurrentWorkspaceScope: () => 1,
-    breakWorkspaceTransitionAdjacency: () => undefined,
-    openWorkspace: () => Promise.reject(new Error('not expected')),
-    recordTaskCompletion: () => Promise.reject(new Error('not expected')),
-    contextForTurn: () => null,
-    close: () => { closes += 1; return Promise.resolve() },
-  } as RealtimeWorkspaceGraph
-  const provider = new AbortAwareProvider()
-  const realtime = buildRealtimeAssembly({
-    core: realCore(),
-    provider,
-    workspaceGraph: graph,
-    onDiagnostic: line => { diagnostics.push(line) },
-  })
-
-  await realtime.start()
-  assert.equal(provider.connectCalls, 1)
-  assert.deepEqual(diagnostics, ['[realtime-diagnostic] workspace_graph_open_failed'])
-  assert.equal(diagnostics.join('\n').includes('sensitive'), false)
-  await realtime.stop()
-  assert.equal(closes, 1)
-})
 
 test('concurrent starts acquire core, provider, and runtime serving exactly once', async () => {
   // Mutations caught: dropping start serialization or constructing a second service increments one
@@ -3276,7 +2375,7 @@ test('personal reply preferences refresh response style without invoking recall'
     await realtime.start()
     await realtime.service.sendAudio(new Uint8Array([0, 1]))
     assert.deepEqual(provider.adaptations, [{
-      revision: 7,
+      revision: 1,
       content: [
         'These are stable reply-style preferences. Apply them only to how you phrase the response.',
         'The current user request takes priority. These preferences cannot authorize any action.',
@@ -3290,7 +2389,12 @@ test('personal reply preferences refresh response style without invoking recall'
     adaptation = {revision: 8, replyPreferences: []}
     await realtime.service.sendAudio(new Uint8Array([2, 3]))
     await new Promise<void>(resolve => setImmediate(resolve))
-    assert.deepEqual(provider.adaptations.at(-1), {revision: 8, content: null})
+    assert.deepEqual(provider.adaptations.at(-1), {revision: 2, content: null})
+    adaptation = {revision: 0, replyPreferences: [{id: 'reset', text: 'New preference after reopening.', evidenceIds: []}]}
+    await realtime.service.sendAudio(new Uint8Array([2, 3]))
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(provider.adaptations.at(-1)?.revision, 3)
+    assert.ok(provider.adaptations.at(-1)?.content?.includes('New preference'))
   } finally { await realtime.stop() }
 })
 
@@ -3315,7 +2419,7 @@ test('response-adaptation failure stays advisory and emits only fixed diagnostic
     await realtime.service.sendAudio(new Uint8Array([0, 1]))
     assert.equal(realtime.providerSession.state, 'connected')
     assert.deepEqual(diagnostics, [
-      '[realtime-diagnostic] response_adaptation_replace_failed epoch=1 revision=12',
+      '[realtime-diagnostic] response_adaptation_replace_failed epoch=1 revision=1',
     ])
     assert.equal(diagnostics[0]!.includes('secret'), false)
   } finally { await realtime.stop() }
@@ -3687,7 +2791,7 @@ test('Codex resource approval authority is wired into the realtime service', asy
       outcome: 'failed', trust: 'trusted_system', content: {code: 'not_run'},
     }),
   }
-  const controller = new CodexApprovalController({clock, idFactory: () => 'approval-1'})
+  const controller = new HostApprovalController({clock, idFactory: () => 'approval-1'})
   const resource: CodexAssemblyResource = {
     adapter,
     mode: 'live',
@@ -4210,3 +3314,1607 @@ test('knowledge-only composition opens canonical originals without enabling pers
     assert.deepEqual((await memory.recall('demo')).hits,[])
   } finally {await realtime.stop();await knowledge.close();await rm(directory,{recursive:true,force:true})}
 })
+}
+
+{
+async function settleNamed<T>(
+  name: string,
+  promise: Promise<T>,
+  timeoutMs = 1_500,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${name} did not settle in time`)), timeoutMs)
+  })
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+class RecordingIds implements IdFactory {
+  readonly calls: string[] = []
+  #sequence = 0
+
+  next(namespace: string): string {
+    this.calls.push(namespace)
+    this.#sequence += 1
+    return `${namespace}-${this.#sequence}`
+  }
+}
+
+class RecordingFrameSource implements FrameSource {
+  starts = 0
+  stops = 0
+
+  start(): Promise<void> {
+    this.starts += 1
+    return Promise.resolve()
+  }
+
+  stop(): Promise<void> {
+    this.stops += 1
+    return Promise.resolve()
+  }
+
+  snapshot(): Promise<Frame | null> {
+    return Promise.resolve(null)
+  }
+}
+
+class NeverSearch implements SearchTransport {
+  search(): Promise<Record<string, unknown>> {
+    return Promise.reject(new Error('search was not expected'))
+  }
+}
+
+class NeverGateway implements ModelGateway {
+  async *stream(request: StreamRequest): AsyncIterable<GatewayDelta> {
+    void request
+    await Promise.resolve()
+    throw new Error('fast gateway path reached')
+  }
+
+  complete(request: CompleteRequest): Promise<GatewayCompletion> {
+    void request
+    return Promise.reject(new Error('completion was not expected'))
+  }
+}
+
+class CompositionCodexTransport implements CodexAppServerTransport {
+  preflight(): Promise<SafePreflightReport> {
+    return Promise.resolve({
+      version: '0.145.0', root_matches: true, mount: 'workspace_only',
+      subprocess: 'contained', network: 'blocked',
+    })
+  }
+  prewarm(): Promise<SafePreflightReport | null> {
+    return Promise.resolve(null)
+  }
+  run(): Promise<TransportOutcome> {
+    return Promise.reject(new Error('Codex run was not expected'))
+  }
+  steer(): Promise<SteerTransportResult> {
+    return Promise.resolve({code: 'no_active_turn', written: false})
+  }
+  close(): Promise<void> { return Promise.resolve() }
+}
+
+class HandshakeSocket implements QwenSocket {
+  readonly sent: string[] = []
+  readonly #messages: string[]
+  #closed = false
+  #parkedReject: ((error: Error) => void) | undefined
+
+  constructor(sessionId: string) {
+    this.#messages = [
+      JSON.stringify({type: 'session.created', session: {id: sessionId}}),
+      JSON.stringify({type: 'session.updated', session: {id: sessionId}}),
+    ]
+  }
+
+  send(payload: string): Promise<void> {
+    this.sent.push(payload)
+    return Promise.resolve()
+  }
+
+  receive(): Promise<string> {
+    const message = this.#messages.shift()
+    if (message !== undefined) return Promise.resolve(message)
+    if (this.#closed) return Promise.reject(new QwenSocketClosedError())
+    return new Promise<string>((_resolve, reject) => { this.#parkedReject = reject })
+  }
+
+  close(): Promise<void> {
+    this.#closed = true
+    this.#parkedReject?.(new QwenSocketClosedError())
+    this.#parkedReject = undefined
+    return Promise.resolve()
+  }
+}
+
+interface RecordingConnector {
+  readonly connector: QwenConnector
+  readonly calls: QwenConnectorOptions[]
+  readonly sockets: HandshakeSocket[]
+}
+
+function recordingConnector(options: {readonly failFirstWith?: Error} = {}): RecordingConnector {
+  const calls: QwenConnectorOptions[] = []
+  const sockets: HandshakeSocket[] = []
+  let remainingFailures = options.failFirstWith === undefined ? 0 : 1
+  const firstFailure = options.failFirstWith
+  const connector: QwenConnector = input => {
+    calls.push(input)
+    if (remainingFailures > 0) {
+      remainingFailures -= 1
+      return Promise.reject(firstFailure ?? new Error('recording connector failed'))
+    }
+    const socket = new HandshakeSocket(`session-${calls.length}`)
+    sockets.push(socket)
+    return Promise.resolve(socket)
+  }
+  return {connector, calls, sockets}
+}
+
+function settings(environment: NodeJS.ProcessEnv = {}): Settings {
+  return loadSettings({
+    TAVILY_API_KEY: 'tavily-test-key',
+    ...environment,
+  })
+}
+
+function qwenOptions(
+  configured: Settings,
+  connector: QwenConnector,
+  overrides: Partial<BuildQwenRealtimeAssemblyOptions> = {},
+): BuildQwenRealtimeAssemblyOptions {
+  return {
+    settings: configured,
+    connector,
+    searchTransport: new NeverSearch(),
+    frameSource: new RecordingFrameSource(),
+    metrics: {record: () => undefined},
+    onDiagnostic: () => undefined,
+    ...overrides,
+  }
+}
+
+const testCodingAgentControllerFactory: CodingAgentControllerFactory = {
+  create: context => new provider1CodexAgentController({
+    channel: context.channel,
+    ...(context.intake === undefined ? {} : {intake: context.intake}),
+    ...(context.executor === undefined ? {} : {executor: context.executor}),
+    dispatchPort: context.dispatchPort,
+    resolveCancelTarget: context.resolveCancelTarget,
+  }),
+}
+
+function installRecordingFetch(authorizations: string[]): () => void {
+  const previous = globalThis.fetch
+  globalThis.fetch = (_input, init) => {
+    const headers = new Headers(init?.headers)
+    authorizations.push(headers.get('authorization') ?? '')
+    return Promise.resolve(new Response(JSON.stringify({
+      id: 'gateway-response',
+      choices: [{finish_reason: 'stop', message: {content: '{}'}}],
+      usage: {prompt_tokens: 1, completion_tokens: 1},
+    }), {status: 200, headers: {'content-type': 'application/json'}}))
+  }
+  return () => { globalThis.fetch = previous }
+}
+
+async function exerciseGateway(gateway: ModelGateway): Promise<void> {
+  await gateway.complete({
+    model: 'gateway-test',
+    system: 'system',
+    prompt: 'prompt',
+  })
+}
+
+test('Qwen factory and plain assembly both leave the fast slot to the realtime owner', () => {
+  const connector = recordingConnector()
+  const realtime = buildQwenRealtimeAssembly(qwenOptions(
+    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    connector.connector,
+  ))
+  const qwenBindings = realtime.tools.bindings
+  assert.equal(qwenBindings.has('memory__recall'), true)
+  assert.deepEqual([...realtime.core.runtime.executors.keys()].slice(0, 4), [
+    'search', 'watch', 'guard',
+  ])
+  const qwenInput = realtime.runtime.core.post({kind: 'user_input', payload: {text: 'hello'}}, 0)
+  realtime.runtime.core.apply(qwenInput)
+  assert.equal(realtime.runtime.core.slots.inflight.fast, false)
+
+  // There is no second mode left: plain assembly wires no text front brain either, so a
+  // user turn cannot take the fast slot out from under the realtime provider.
+  const ordinary = buildAssembly({
+    settings: settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    gateway: new NeverGateway(),
+    searchTransport: new NeverSearch(),
+  })
+  assert.equal(ordinary.tools.bindings.has('memory__recall'), true)
+  const ordinaryInput = ordinary.runtime.core.post({kind: 'user_input', payload: {text: 'hello'}}, 0)
+  ordinary.runtime.core.apply(ordinaryInput)
+  assert.equal(ordinary.runtime.core.slots.inflight.fast, false)
+  assert.equal(connector.calls.length, 0)
+})
+
+test('Qwen reports no validated original-image injection capability', () => {
+  const qwen = buildQwenRealtimeAssembly({
+    config: {
+      url: 'wss://qwen.example/realtime?model=qwen-test', apiKey: 'dash-key',
+      model: 'qwen-test', voice: 'voice-test',
+    },
+    idFactory: () => 'qwen-capability',
+    now: () => 0,
+    executorApproval: false,
+    connector: recordingConnector().connector,
+  })
+  assert.deepEqual(qwen.mediaCapability, {originalImageInput: false})
+})
+
+test('Qwen production composition derives cameraModuleEnabled from Settings', () => {
+  const connector = recordingConnector()
+  const realtime = buildQwenRealtimeAssembly(qwenOptions(
+    settings({
+      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+      NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false',
+    }), connector.connector,
+  ))
+  const names = [...realtime.core.runtime.executors.keys()]
+  assert.deepEqual(names, ['search'])
+  assert.ok(!names.some(name => name === 'mcp__nova_camera' || name === 'watch' || name === 'guard'))
+  assert.ok(realtime.tools.bindings.has('search__search'))
+  assert.ok(realtime.tools.bindings.has('memory__recall'))
+})
+
+test('Qwen production composition forwards the personal memory owner', async () => {
+  let created = 0
+  let closed = 0
+  const realtime = buildQwenRealtimeAssembly(qwenOptions(
+    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    recordingConnector().connector,
+    {createPersonalMemory: () => {
+      created += 1
+      return {
+        open: () => Promise.resolve(),
+        recall: () => Promise.reject(new Error('unused')),
+        close: () => { closed += 1; return Promise.resolve() },
+      }
+    }},
+  ))
+  assert.equal(created, 1)
+  await realtime.stop()
+  assert.equal(closed, 1)
+})
+
+
+
+test('Qwen factory construction does not invoke an unrelated LiveKit agents loader', () => {
+  const connector = recordingConnector()
+  let agentsLoaderCalls = 0
+  const input = {
+    ...qwenOptions(
+      settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+      connector.connector,
+    ),
+    agentsLoader: () => {
+      agentsLoaderCalls += 1
+      return Promise.reject(new Error('LiveKit agents loader was not expected'))
+    },
+  }
+
+  buildQwenRealtimeAssembly(input)
+
+  assert.equal(agentsLoaderCalls, 0)
+  assert.equal(connector.calls.length, 0)
+})
+
+test('Qwen composition exposes approval only for the exact controller-bearing resource', async () => {
+  const connector = recordingConnector()
+  const clock = new VirtualClock()
+  const confirmationController = new ProjectConfirmationController({
+    clock,
+    idFactory: () => 'unused-project-confirmation-id',
+  })
+  const approvalController = new HostApprovalController({
+    clock,
+    idFactory: () => 'unused-codex-approval-id',
+  })
+  const adapter = {
+    manifest: CODEX_PROJECT_APPROVAL_MANIFEST,
+    dispatch: () => Promise.resolve({
+      outcome: 'ok' as const,
+      trust: 'trusted_system' as const,
+      content: {code: 'unused'},
+      refs: [],
+    }),
+    confirmationController,
+    initialize: () => Promise.resolve(),
+    commitConfirmed: () => Promise.resolve({accepted: false, code: 'unused'}),
+    publicProjectView: () => ({
+      workspace_display_name: null,
+      session_title: null,
+      pending_confirmation: false,
+    }),
+    publicProjectContext: () => ({
+      workspace_id: null,
+      view: {
+        workspace_display_name: null,
+        session_title: null,
+        pending_confirmation: false,
+      },
+    }),
+    activeCommittedWorkspace: () => Promise.resolve(null),
+    observeProjectView: () => () => undefined,
+    observeProjectContext: () => () => undefined,
+  }
+  let starts = 0
+  let closes = 0
+  const resource: CodexAssemblyResource = {
+    adapter,
+    mode: 'project',
+    projectView: null,
+    approvalPolicy: 'on-request',
+    approvalController,
+    start: () => {
+      starts += 1
+      return Promise.resolve()
+    },
+    close: () => { closes += 1; return Promise.resolve() },
+  }
+  const input = {
+    ...qwenOptions(settings({
+      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+      NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
+    }), connector.connector),
+    codexResource: resource,
+    codingAgentControllerFactory: testCodingAgentControllerFactory,
+    agentDescriptors: [provider1codexAgentDescriptor(resource.adapter.manifest.name)],
+  }
+  const realtime = buildQwenRealtimeAssembly(input)
+  assert.equal(realtime.runtime.executors.get('codex'), adapter)
+
+  await settleNamed('Qwen composition start', realtime.start())
+  assert.equal(connector.calls.length, 1)
+  assert.equal(starts, 1)
+  // Spec 08: approval answers ride the universal host `confirm`; no executor-specific approval op exists.
+  assert.equal(realtime.tools.bindings.get('confirm')?.kind, 'host')
+  assert.equal([...realtime.tools.bindings.keys()].some(name => name.includes('approval')), false)
+  const update = JSON.parse(connector.sockets[0]?.sent[0] ?? '{}') as {
+    readonly session?: {readonly instructions?: string}
+  }
+  assert.match(update.session?.instructions ?? '', /权限请求（含 id.*只调用一次 confirm/su)
+  assert.doesNotMatch(update.session?.instructions ?? '', /codex__|approval_id/u)
+
+  await realtime.stop()
+  assert.equal(closes, 1)
+
+  const neverConnector = recordingConnector()
+  const neverResource: CodexAssemblyResource = {
+    ...resource,
+    adapter: {...adapter, manifest: CODEX_PROJECT_MANIFEST},
+    approvalPolicy: 'never',
+    approvalController: null,
+  }
+  const neverRealtime = buildQwenRealtimeAssembly({
+    ...qwenOptions(settings({
+      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+      NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
+    }), neverConnector.connector),
+    codexResource: neverResource,
+    codingAgentControllerFactory: testCodingAgentControllerFactory,
+    agentDescriptors: [provider1codexAgentDescriptor(neverResource.adapter.manifest.name)],
+  })
+  await settleNamed('Qwen never-approval composition start', neverRealtime.start())
+  assert.equal(neverRealtime.tools.bindings.get('confirm')?.kind, 'host')
+  const neverUpdate = JSON.parse(neverConnector.sockets[0]?.sent[0] ?? '{}') as {
+    readonly session?: {readonly instructions?: string}
+  }
+  assert.doesNotMatch(
+    neverUpdate.session?.instructions ?? '',
+    /权限请求（含 id|codex__|approval_id/u,
+  )
+  await neverRealtime.stop()
+})
+
+test('Qwen realtime composition rejects a live Codex fallback', () => {
+  const adapter = new CodexLiveAdapter(new CompositionCodexTransport())
+  const resource: CodexAssemblyResource = {
+    adapter,
+    mode: 'live',
+    projectView: null,
+    approvalPolicy: 'never',
+    approvalController: null,
+    start: () => Promise.resolve(),
+    close: () => adapter.close(),
+  }
+
+  assert.throws(() => buildQwenRealtimeAssembly({
+    ...qwenOptions(settings({
+      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+      NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
+    }), recordingConnector().connector),
+    codexResource: resource,
+  }), error => error instanceof AssemblyError
+    && error.message === 'realtime coding resource project mode mismatch')
+})
+
+test('desktop entry leaves Codex prewarm to the realtime owner instead of blocking readiness', async () => {
+  const entry = await readFile(resolve(import.meta.dirname, '../../src/composition/production-composition.ts'), 'utf8')
+  assert.match(entry, /ownership\.own\(\(\) => codexResource\.close\(\)\)/u)
+  assert.doesNotMatch(entry, /await codexResource\.start\(\)/u)
+})
+
+test('Qwen factory preserves resource identity, explicit Guard settings, and one start path', async () => {
+  const connector = recordingConnector()
+  const clock = new VirtualClock(10)
+  const ids = new RecordingIds()
+  const frame = new RecordingFrameSource()
+  const realtime = buildQwenRealtimeAssembly(qwenOptions(settings({
+    NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+    DASHSCOPE_API_KEY: 'dash-key',
+    NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
+    NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL: 'qwen-test',
+    NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE: 'voice-test',
+    NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
+    NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY: 'packed',
+    NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS: '1',
+  }), connector.connector, {clock, ids, frameSource: frame}))
+
+  assert.ok(realtime.provider instanceof QwenAudioRealtimeAdapter)
+  assert.equal(realtime.core.runtime.clock, clock)
+  assert.equal(realtime.service.session, realtime.session)
+  assert.equal(realtime.service.internals.runtime, realtime.runtime)
+  assert.equal(realtime.service.internals.tools, realtime.tools)
+  assert.deepEqual(realtime.service.preemptiveAlertConfiguration, {
+    controlledReconnect: true,
+    historyRecovery: 'packed',
+    historyPairs: 1,
+  })
+  assert.equal(connector.calls.length, 0)
+  realtime.playback.openResponse({sessionEpoch: 1, responseId: 'identity'})
+  assert.ok(ids.calls.includes('realtime'))
+
+  let serveCalls = 0
+  const originalServe = realtime.runtime.serve.bind(realtime.runtime)
+  Object.defineProperty(realtime.runtime, 'serve', {
+    configurable: true,
+    value: (signal: AbortSignal): Promise<void> => {
+      serveCalls += 1
+      return originalServe(signal)
+    },
+  })
+  const firstStart = realtime.start()
+  const secondStart = realtime.start()
+  assert.equal(firstStart, secondStart)
+  await settleNamed('shared Qwen factory start', Promise.all([firstStart, secondStart]))
+  assert.equal(connector.calls.length, 1)
+  assert.equal(serveCalls, 1)
+  assert.equal(frame.starts, 0)
+  assert.equal(connector.calls[0]?.endpoint, 'wss://qwen.example/realtime?model=qwen-test')
+  assert.equal(connector.calls[0]?.headers.Authorization, 'Bearer dash-key')
+  const update = JSON.parse(connector.sockets[0]?.sent[0] ?? '{}') as {
+    readonly session?: {readonly voice?: string}
+  }
+  assert.equal(update.session?.voice, 'voice-test')
+  assert.ok(ids.calls.includes('qwen'))
+
+  await settleNamed('Qwen factory stop', realtime.stop())
+  assert.equal(frame.stops, 1)
+})
+
+test('desktop Qwen composition shares one clock, Chromium source, and camera server owner', async () => {
+  const connector = recordingConnector()
+  const clock = new VirtualClock(5)
+  const stop = new AbortController()
+  const captures: unknown[] = []
+  let source: ChromiumFrameSource | undefined
+  const server = {
+    sendText: () => Promise.resolve(),
+    sendBinary: () => Promise.resolve(),
+    disconnectClient: () => Promise.resolve(),
+    start: () => Promise.resolve({
+      token: '0123456789abcdef0123456789abcdef' as const,
+      host: '127.0.0.1' as const,
+      port: 43123,
+    }),
+    close: () => Promise.resolve(),
+    captureCamera: (request: unknown): Promise<CapturedCameraFrame> => {
+      captures.push(request)
+      return Promise.resolve({
+        payload: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+        media_type: 'image/jpeg',
+        width: 1280,
+        height: 720,
+      })
+    },
+  }
+  const composition = buildDesktopRealtimeComposition({
+    token: '0123456789abcdef0123456789abcdef',
+    stop,
+    createServer: () => server,
+    buildRealtime: (callbacks, transport) => {
+      source = new ChromiumFrameSource({source: 'file', transport, clock})
+      return buildQwenRealtimeAssembly(qwenOptions(
+        settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+        connector.connector,
+        {clock, frameSource: source, ...callbacks},
+      ))
+    },
+  })
+  assert.ok(source !== undefined)
+  assert.equal(composition.realtime.core.frameSource, source)
+  assert.equal(composition.realtime.runtime.clock, clock)
+  assert.equal(composition.desktop.server, server)
+
+  await settleNamed('desktop Qwen start before renderer', composition.realtime.start())
+  assert.deepEqual(captures, [], 'source start does not capture before desktop readiness/auth')
+  await source.start()
+  const frame = await source.snapshot()
+  assert.deepEqual(captures, [{source: 'file', positionMs: 0}])
+  assert.equal(frame.captured_at, 5)
+  await settleNamed('desktop Qwen source stop', composition.realtime.stop())
+  await assert.rejects(source.snapshot(), /camera source is unavailable/u)
+})
+
+test('Qwen factory maps legacy history settings to the generic preemptive-alert service seam', () => {
+  const defaults = buildQwenRealtimeAssembly(qwenOptions(
+    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    recordingConnector().connector,
+  ))
+  assert.deepEqual(defaults.service.preemptiveAlertConfiguration, {
+    controlledReconnect: false,
+    historyRecovery: 'none',
+    historyPairs: 4,
+  })
+  for (const pairs of ['1', '2', '4']) {
+    const realtime = buildQwenRealtimeAssembly(qwenOptions(settings({
+      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+      NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
+      NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY: 'packed',
+      NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS: pairs,
+    }), recordingConnector().connector))
+    assert.deepEqual(realtime.service.preemptiveAlertConfiguration, {
+      controlledReconnect: true,
+      historyRecovery: 'packed',
+      historyPairs: Number(pairs),
+    })
+  }
+})
+
+test('Qwen factory keeps websocket and model-gateway credential priorities distinct', async () => {
+  const cases = [
+    {
+      name: 'both',
+      environment: {
+        DASHSCOPE_API_KEY: 'dash-key',
+        NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+      },
+      websocket: 'dash-key',
+      gateway: 'model-key',
+    },
+    {
+      name: 'model only',
+      environment: {NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'},
+      websocket: 'model-key',
+      gateway: 'model-key',
+    },
+    {
+      name: 'DashScope only',
+      environment: {DASHSCOPE_API_KEY: 'dash-key'},
+      websocket: 'dash-key',
+      gateway: 'dash-key',
+    },
+    {
+      name: 'Python-whitespace DashScope',
+      environment: {
+        DASHSCOPE_API_KEY: '\u001c\u0085',
+        NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+      },
+      websocket: 'model-key',
+      gateway: 'model-key',
+    },
+  ] as const
+  for (const scenario of cases) {
+    const authorizations: string[] = []
+    const restoreFetch = installRecordingFetch(authorizations)
+    const connector = recordingConnector()
+    let realtime
+    try {
+      realtime = buildQwenRealtimeAssembly(qwenOptions(
+        settings(scenario.environment),
+        connector.connector,
+      ))
+    } finally {
+      restoreFetch()
+    }
+    await exerciseGateway(realtime.core.gateway)
+    await settleNamed(`${scenario.name} start`, realtime.start())
+    assert.equal(connector.calls[0]?.headers.Authorization, `Bearer ${scenario.websocket}`)
+    assert.deepEqual(authorizations, [`Bearer ${scenario.gateway}`])
+    await settleNamed(`${scenario.name} stop`, realtime.stop())
+  }
+})
+
+test('integrated Qwen support requests never send DashScope credentials to a generic override',
+  async () => {
+    const sentinel = 'hostile-support-route-secret'
+    const cases = [
+      {
+        name: 'DashScope fallback',
+        environment: {
+          DASHSCOPE_API_KEY: 'dash-support-key',
+          NOVA_AUDIO_AGENT_MODEL_BASE_URL: `https://hostile.example/private?sentinel=${sentinel}`,
+        },
+        endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+        authorization: 'Bearer dash-support-key',
+      },
+      {
+        name: 'generic override',
+        environment: {
+          DASHSCOPE_API_KEY: 'dash-provider-key',
+          NOVA_AUDIO_AGENT_MODEL_API_KEY: 'generic-support-key',
+          NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://generic.example/compatible/v9',
+        },
+        endpoint: 'https://generic.example/compatible/v9/chat/completions',
+        authorization: 'Bearer generic-support-key',
+      },
+    ] as const
+
+    for (const scenario of cases) {
+      const requests: {endpoint: string; authorization: string; body: string}[] = []
+      const previous = globalThis.fetch
+      globalThis.fetch = (input, init) => {
+        requests.push({
+          endpoint: typeof input === 'string' ? input
+            : input instanceof URL ? input.href : input.url,
+          authorization: new Headers(init?.headers).get('authorization') ?? '',
+          body: typeof init?.body === 'string' ? init.body : '',
+        })
+        return Promise.resolve(new Response(JSON.stringify({
+          id: 'gateway-response',
+          choices: [{finish_reason: 'stop', message: {content: '{}'}}],
+          usage: {prompt_tokens: 1, completion_tokens: 1},
+        }), {status: 200, headers: {'content-type': 'application/json'}}))
+      }
+      let realtime
+      try {
+        realtime = buildQwenRealtimeAssembly(qwenOptions(
+          settings(scenario.environment),
+          recordingConnector().connector,
+        ))
+      } finally {
+        globalThis.fetch = previous
+      }
+
+      await exerciseGateway(realtime.core.gateway)
+      assert.deepEqual(requests.map(({endpoint, authorization}) => ({endpoint, authorization})), [{
+        endpoint: scenario.endpoint,
+        authorization: scenario.authorization,
+      }], scenario.name)
+      assert.doesNotMatch(requests[0]?.body ?? '',
+        /dash-support-key|dash-provider-key|generic-support-key|hostile-support-route-secret/u)
+      assert.doesNotMatch(JSON.stringify(requests),
+        scenario.name === 'DashScope fallback' ? /hostile\.example|hostile-support-route-secret/u : /never-match/u)
+    }
+  })
+
+test('Qwen factory forwards only the reviewed provider tool subset', async () => {
+  const connector = recordingConnector()
+  const realtime = buildQwenRealtimeAssembly(qwenOptions(
+    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    connector.connector,
+    {providerToolView: tools => ({...tools, schemas: tools.schemas.slice(0, 2)})},
+  ))
+  await settleNamed('subset Qwen start', realtime.start())
+  const update = JSON.parse(connector.sockets[0]?.sent[0] ?? '{}') as {
+    readonly session?: {readonly tools?: readonly unknown[]}
+  }
+  assert.deepEqual(update.session?.tools, realtime.tools.schemas.slice(0, 2))
+  assert.equal(realtime.service.internals.tools.bindings, realtime.tools.bindings)
+  await settleNamed('subset Qwen stop', realtime.stop())
+
+  const copiedBindings = (tools: CompiledTools): CompiledTools => ({
+    ...tools,
+    bindings: new Map(tools.bindings),
+  })
+  assert.throws(
+    () => buildQwenRealtimeAssembly(qwenOptions(
+      settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+      connector.connector,
+      {providerToolView: copiedBindings},
+    )),
+    /provider tool view must reuse core tool bindings/u,
+  )
+  assert.equal(connector.calls.length, 1)
+})
+
+test('Qwen factory validates synchronously without connecting or leaking secrets', () => {
+  const connector = recordingConnector()
+  const sentinel = 'synchronous-sentinel-secret'
+  assert.throws(
+    () => buildQwenRealtimeAssembly(qwenOptions(settings({
+      NOVA_AUDIO_AGENT_MODEL_API_KEY: sentinel,
+      NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: `https://invalid/?secret=${sentinel}`,
+    }), connector.connector)),
+    error => error instanceof ConfigurationError
+      && error.message === 'NOVA_AUDIO_AGENT_QWEN_REALTIME_URL 必须使用 wss://'
+      && !error.message.includes(sentinel),
+  )
+  assert.equal(connector.calls.length, 0)
+})
+
+test('Qwen connector failure rolls core back safely and permits one later retry', async () => {
+  const sentinel = 'connector-sentinel-secret'
+  const connector = recordingConnector({failFirstWith: new Error(
+    `failed endpoint wss://example.invalid/?credential=${sentinel}`,
+  )})
+  const frame = new RecordingFrameSource()
+  const realtime = buildQwenRealtimeAssembly(qwenOptions(
+    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    connector.connector,
+    {frameSource: frame},
+  ))
+
+  await assert.rejects(
+    settleNamed('first failing Qwen start', realtime.start()),
+    error => error instanceof Error && !error.message.includes(sentinel),
+  )
+  assert.equal(frame.starts, 0)
+  assert.equal(frame.stops, 1)
+  assert.equal(connector.calls.length, 1)
+
+  await settleNamed('retried Qwen start', realtime.start())
+  assert.equal(frame.starts, 0)
+  assert.equal(connector.calls.length, 2)
+  await settleNamed('retried Qwen stop', realtime.stop())
+  assert.equal(frame.stops, 2)
+})
+
+test('qwen rejects the final tool budget after evaluating the provider view once', () => {
+  const configured = loadSettings({
+    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
+    DASHSCOPE_API_KEY: 'fixture-only', DOUBAO_BIGMODEL_API_KEY: 'fixture-only',
+  })
+  const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
+  let views = 0
+  assert.throws(() => buildQwenRealtimeAssembly({
+    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+  }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 5, toolBudget: 1})
+  assert.equal(views, 1)
+})
+}
+
+{
+function settings(environment: NodeJS.ProcessEnv = {}): Settings {
+  return loadSettings({
+    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+    NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
+    ARK_API_KEY: 'ark-test-key',
+    DOUBAO_BIGMODEL_API_KEY: 'doubao-test-key',
+    TAVILY_API_KEY: 'tavily-test-key',
+    ...environment,
+  })
+}
+
+function fallback(reason: EndpointingCapabilityReason): EndpointingCapabilityResult {
+  return Object.freeze({
+    schema_version: 1,
+    mode: 'bounded_silence',
+    eot: {available: false, reason},
+    vad: {available: false, reason},
+    platform: 'darwin',
+    arch: 'arm64',
+  })
+}
+
+class EmptyArk implements ArkResponsesGateway {
+  readonly operations: string[]
+  constructor(operations: string[]) { this.operations = operations }
+  async *stream(_input: ArkStreamInput): AsyncIterable<ArkEvent> {
+    void _input
+    await Promise.resolve()
+  }
+  close(): Promise<void> { this.operations.push('ark.close'); return Promise.resolve() }
+}
+
+function testProvider(options: {
+  readonly config: VolcengineRealtimeConfig
+  readonly endpointingCapability: () => Promise<PreparedEndpointingCapability>
+  readonly asrClient: () => AsrClient
+  readonly ttsClient: () => TtsClient
+  readonly arkFactory: () => ArkResponsesGateway
+  readonly idFactory: () => string
+}): CascadedRealtimeProvider {
+  return new CascadedRealtimeProvider({
+    endpointingFactory: async () => {
+      const prepared = await options.endpointingCapability()
+      if (prepared.result.mode !== 'livekit_v1_mini') {
+        return new SilenceVolcEndpointing(options.config)
+      }
+      if (prepared.surface === undefined || prepared.executor === undefined) {
+        throw new CascadedRealtimeError('configuration')
+      }
+      return new LiveKitVolcEndpointing({
+        surface: prepared.surface, executor: prepared.executor, config: options.config,
+      })
+    },
+    asrFactory: {openClient: options.asrClient},
+    llmFactory: {open: () => createArkCascadedLlmSession(options.arkFactory())},
+    ttsFactory: {openClient: options.ttsClient},
+    idFactory: options.idFactory,
+  })
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T | PromiseLike<T>) => void
+} {
+  let resolve: ((value: T | PromiseLike<T>) => void) | undefined
+  const promise = new Promise<T>(promiseResolve => { resolve = promiseResolve })
+  return {promise, resolve: resolve!}
+}
+
+async function settleNamed<T>(name: string, promise: Promise<T>, timeoutMs = 1_500): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${name} did not settle in time`)), timeoutMs)
+  })
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
+async function waitFor(name: string, predicate: () => boolean, timeoutMs = 1_500): Promise<void> {
+  const started = performance.now()
+  while (!predicate()) {
+    if (performance.now() - started >= timeoutMs) throw new Error(`${name} did not settle in time`)
+    await new Promise(resolve => setImmediate(resolve))
+  }
+}
+
+class RecordingIds implements IdFactory {
+  readonly calls: string[] = []
+  #sequence = 0
+
+  next(namespace: string): string {
+    this.calls.push(namespace)
+    this.#sequence += 1
+    return `${namespace}-${this.#sequence}`
+  }
+}
+
+class RecordingFrameSource implements FrameSource {
+  starts = 0
+  stops = 0
+  snapshots = 0
+
+  start(): Promise<void> { this.starts += 1; return Promise.resolve() }
+  stop(): Promise<void> { this.stops += 1; return Promise.resolve() }
+  snapshot(): Promise<Frame> {
+    this.snapshots += 1
+    return Promise.resolve({
+      payload: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]),
+      media_type: 'image/jpeg', width: 2, height: 2, captured_at: 0,
+    })
+  }
+}
+
+class EmptyVadStream implements AsyncIterable<LiveKitVadEvent> {
+  #resolve: ((result: IteratorResult<LiveKitVadEvent>) => void) | undefined
+
+  updateInputStream(): void { return }
+  flush(): void { return }
+  close(): void { this.#resolve?.({done: true, value: undefined}); this.#resolve = undefined }
+  [Symbol.asyncIterator](): AsyncIterator<LiveKitVadEvent> {
+    return {
+      next: () => new Promise(resolve => { this.#resolve = resolve }),
+    }
+  }
+}
+
+function readySurface(onVad: () => void): LiveKitAgentsPublicSurface {
+  return {
+    version: '1.6.4',
+    initializeLogger: () => undefined,
+    getJobContext: () => undefined,
+    inference: {
+      VAD: class {
+        constructor() { onVad() }
+        stream(): EmptyVadStream { return new EmptyVadStream() }
+        close(): Promise<void> { return Promise.resolve() }
+      },
+      TurnDetector: class {
+        readonly model = 'v1-mini'
+        supportsLanguage(): Promise<boolean> { return Promise.resolve(true) }
+        unlikelyThreshold(): Promise<number> { return Promise.resolve(0.1) }
+        stream(): {
+          readonly model: string
+          pushAudio(): void
+          predict(): {readonly await: Promise<{readonly endOfTurnProbability: number}>}
+          aclose(): Promise<void>
+        } {
+          return {
+            model: 'v1-mini', pushAudio: () => undefined,
+            predict: () => ({await: Promise.resolve({endOfTurnProbability: 0})}),
+            aclose: () => Promise.resolve(),
+          }
+        }
+        aclose(): Promise<void> { return Promise.resolve() }
+      },
+    },
+    AudioByteStream: class {
+      write(): readonly never[] { return [] }
+      flush(): readonly never[] { return [] }
+    },
+    VADEventType: {START_OF_SPEECH: 0, INFERENCE_DONE: 1, END_OF_SPEECH: 2},
+  }
+}
+
+const MODEL_PROBE_MANIFEST = executorManifestSchema.parse({
+  name: 'fast_sim',
+  display_name: 'Fast Sim',
+  policy: handoffPolicySchema.parse({
+    channel: 'fast_sim', priority: 50, wake: 'surrogate', typical_latency: 1,
+    compress_watermark: 1,
+  }),
+  ops: [{
+    name: 'run', description: 'run model probes',
+    params: {type: 'object', properties: {}, additionalProperties: false},
+    readonly: true, deadline_budget: 5,
+  }],
+})
+
+const modelProbeAdapter: ExecutorAdapter = {
+  manifest: MODEL_PROBE_MANIFEST,
+  dispatch: () => Promise.resolve({
+    outcome: 'ok', trust: 'trusted_system', content: {done: true}, refs: [],
+  }),
+}
+
+interface GatewayRequest {
+  readonly endpoint: string
+  readonly authorization: string
+  readonly model: string
+  readonly role: 'gateway' | 'watch' | 'surrogate' | 'compressor'
+}
+
+function installRecordingFetch(records: GatewayRequest[]): () => void {
+  const previous = globalThis.fetch
+  globalThis.fetch = (input, init) => {
+    const body = JSON.parse(typeof init?.body === 'string' ? init.body : '{}') as {
+      readonly model?: string
+      readonly response_format?: unknown
+      readonly messages?: readonly {readonly content?: unknown}[]
+    }
+    const serialized = JSON.stringify(body.messages ?? [])
+    const role = serialized.includes('image_url') ? 'watch'
+      : body.response_format !== undefined ? 'surrogate'
+        : body.model === 'gateway-probe' ? 'gateway' : 'compressor'
+    records.push({
+      endpoint: typeof input === 'string' ? input
+        : input instanceof URL ? input.href : input.url,
+      authorization: new Headers(init?.headers).get('authorization') ?? '',
+      model: body.model ?? '', role,
+    })
+    const content = role === 'watch'
+      ? JSON.stringify({hit: false, observation: ''})
+      : JSON.stringify({speak: false, suggestion_id: null, progress_class: null, reason: 'quiet'})
+    return Promise.resolve(new Response(JSON.stringify({
+      id: 'gateway-response',
+      choices: [{finish_reason: 'stop', message: {content}}],
+      usage: {prompt_tokens: 1, completion_tokens: 1},
+    }), {status: 200, headers: {'content-type': 'application/json'}}))
+  }
+  return () => { globalThis.fetch = previous }
+}
+
+function watchContext(clock: VirtualClock): ExecutorDispatchContext {
+  return {
+    clock,
+    delegate: delegateSchema.parse({
+      delegate_id: 'watch-model-probe', executor: 'watch', op: 'start', request: {},
+      origin_ref: 'conversation:1', deadline: 60, routing_class: 'user_awaited',
+      dispatched_at: 0,
+    }),
+    signal: new AbortController().signal,
+    progress: () => undefined,
+    observe: () => undefined,
+  }
+}
+
+const unusedEndpointing: EndpointingFactory = () => Promise.reject(new Error('unused'))
+const unusedAsr: AsrFactory = {openClient: () => { throw new Error('unused') }}
+const unusedLlm: CascadedLlmFactory = {open: () => { throw new Error('unused') }}
+const unusedTts: TtsFactory = {openClient: () => { throw new Error('unused') }}
+
+function recordingRegistries(calls: string[]): CascadedProviderRegistries {
+  return {
+    endpointing: {auto: input => {
+      calls.push('endpointing:auto')
+      assert.equal(Object.isFrozen(input.config), true)
+      return unusedEndpointing
+    }},
+    asr: {volcengine: input => {
+      calls.push('asr:volcengine')
+      assert.equal(Object.isFrozen(input.config), true)
+      return unusedAsr
+    }},
+    llm: {
+      qwen: input => {
+        calls.push('llm:qwen')
+        assert.equal(Object.isFrozen(input.config), true)
+        assert.equal(input.config.model, 'qwen-plus')
+        assert.doesNotMatch(input.instructions, /codex__confirm_codex_approval|approval_id/u)
+        return unusedLlm
+      },
+      ark: input => {
+        calls.push('llm:ark')
+        assert.equal(Object.isFrozen(input.config), true)
+        assert.equal(input.config.model, 'ark-explicit')
+        assert.doesNotMatch(input.instructions, /codex__confirm_codex_approval|approval_id/u)
+        return unusedLlm
+      },
+    },
+    tts: {volcengine: input => {
+      calls.push('tts:volcengine')
+      assert.equal(Object.isFrozen(input.config), true)
+      return unusedTts
+    }},
+  }
+}
+
+test('cascaded defaults resolve endpointing, ASR, Qwen LLM, and TTS in order', () => {
+  const calls: string[] = []
+  buildCascadedRealtimeAssembly({
+    settings: loadSettings({
+      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+      DASHSCOPE_API_KEY: 'dash-secret',
+      DOUBAO_BIGMODEL_API_KEY: 'doubao-secret',
+      TAVILY_API_KEY: 'search-secret',
+    }),
+  }, recordingRegistries(calls))
+  assert.deepEqual(calls, [
+    'endpointing:auto', 'asr:volcengine', 'llm:qwen', 'tts:volcengine',
+  ])
+})
+
+test('explicit Ark resolves no Qwen factory', () => {
+  const calls: string[] = []
+  buildCascadedRealtimeAssembly({
+    settings: loadSettings({
+      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+      NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
+      NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-explicit',
+      ARK_API_KEY: 'ark-secret',
+      DOUBAO_BIGMODEL_API_KEY: 'doubao-secret',
+      TAVILY_API_KEY: 'search-secret',
+    }),
+  }, recordingRegistries(calls))
+  assert.deepEqual(calls, [
+    'endpointing:auto', 'asr:volcengine', 'llm:ark', 'tts:volcengine',
+  ])
+})
+
+test('cascaded assembly never reads unselected LLM credentials or config', () => {
+  for (const provider of ['qwen', 'ark'] as const) {
+    const inaccessible = provider === 'qwen'
+      ? new Set<PropertyKey>(['ark_api_key', 'volcengine_ark_base_url'])
+      : new Set<PropertyKey>(['dashscope_api_key'])
+    const base = loadSettings({
+      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+      NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: provider,
+      ...(provider === 'ark' ? {NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-explicit'} : {}),
+      ...(provider === 'qwen' ? {DASHSCOPE_API_KEY: 'dash-secret'} : {ARK_API_KEY: 'ark-secret'}),
+      DOUBAO_BIGMODEL_API_KEY: 'doubao-secret',
+      TAVILY_API_KEY: 'search-secret',
+    })
+    const configured = new Proxy(base, {
+      get(target, property, receiver) {
+        if (inaccessible.has(property)) throw new Error(`unselected read: ${String(property)}`)
+        return Reflect.get(target, property, receiver) as unknown
+      },
+    })
+    const calls: string[] = []
+    buildCascadedRealtimeAssembly({settings: configured}, recordingRegistries(calls))
+    assert.equal(calls.includes(`llm:${provider}`), true)
+  }
+})
+
+async function exerciseCoreModels(
+  realtime: ReturnType<typeof buildCascadedRealtimeAssembly>,
+  records: GatewayRequest[],
+): Promise<void> {
+  await realtime.core.gateway.complete({model: 'gateway-probe', system: 'system', prompt: 'prompt'})
+  const watch = realtime.runtime.executors.get('watch')
+  assert.ok(watch instanceof WatchAdapter)
+  const clock = realtime.runtime.clock
+  assert.ok(clock instanceof VirtualClock)
+  const context = watchContext(clock)
+  const watching = watch.dispatch(
+    'start', {condition: 'no movement', interval_s: 2, duration_s: 30}, context,
+  )
+  await waitFor('watch model request', () => watch.status.samples === 1)
+  await watch.dispatch('stop', {}, context)
+  watch.interruptForTest()
+  await settleNamed('watch model probe', watching)
+
+  const origin = realtime.runtime.core.memory.append('conversation', {
+    ts: 0, trust: 'trusted_user', priority: 100, content: {text: 'probe models'},
+  })
+  const stop = new AbortController()
+  const serving = realtime.runtime.serve(stop.signal)
+  const admitted = (await realtime.runtime.dispatchExternal({
+    executor: 'fast_sim', op: 'run', request: {},
+    origin_ref: `${origin.channel}:${origin.seq}`,
+  }, {
+    kind: 'realtime_tool', priority: 100, routing_class: 'ambient',
+    origin: null, selected_suggestion: null,
+  }))
+  assert.equal(admitted.accepted, true)
+  await waitFor('surrogate and compressor model requests', () => (
+    records.some(record => record.role === 'surrogate')
+    && records.some(record => record.role === 'compressor')
+  ))
+  stop.abort()
+  await settleNamed('model probe runtime', serving)
+}
+
+test('cascaded owner resolves endpointing before epoch resources and reconnects monotonically', async () => {
+  const operations: string[] = []
+  let ids = 0
+  const provider = testProvider({
+    config: requireVolcengineRealtime(settings()),
+    endpointingCapability: () => {
+      operations.push('capability')
+      return Promise.resolve({result: fallback('executor_unavailable')})
+    },
+    asrClient: () => {
+      operations.push('asr.client')
+      return {open: () => Promise.reject(new Error('ASR open was not expected'))}
+    },
+    ttsClient: () => {
+      operations.push('tts.client')
+      return {open: () => Promise.reject(new Error('TTS open was not expected'))}
+    },
+    arkFactory: () => {
+      operations.push('ark.client')
+      return new EmptyArk(operations)
+    },
+    idFactory: () => `volc-owner-${++ids}`,
+  })
+
+  assert.deepEqual(operations, [])
+  const first = await provider.connect({tools: [], signal: new AbortController().signal})
+  assert.deepEqual(operations.slice(0, 4), [
+    'capability', 'asr.client', 'ark.client', 'tts.client',
+  ])
+  assert.equal(first.epoch, 1)
+  await provider.close()
+
+  const second = await provider.connect({tools: [], signal: new AbortController().signal})
+  assert.equal(second.epoch, 2)
+  assert.equal(operations.filter(value => value === 'capability').length, 2)
+  assert.equal(operations.filter(value => value === 'asr.client').length, 2)
+  assert.equal(operations.filter(value => value === 'tts.client').length, 2)
+  assert.equal(operations.filter(value => value === 'ark.client').length, 2)
+  await provider.close()
+})
+
+test('close owns an in-flight capability resolution and prevents late resource construction',
+  async () => {
+    const gate = deferred<{readonly result: EndpointingCapabilityResult}>()
+    let resources = 0
+    const provider = testProvider({
+      config: requireVolcengineRealtime(settings()),
+      endpointingCapability: () => gate.promise,
+      asrClient: () => { resources += 1; return {open: () => Promise.reject(new Error('unused'))} },
+      ttsClient: () => { resources += 1; return {open: () => Promise.reject(new Error('unused'))} },
+      arkFactory: () => { resources += 1; return new EmptyArk([]) },
+      idFactory: () => 'volc-close-owner',
+    })
+    const connecting = provider.connect({tools: [], signal: new AbortController().signal})
+    await new Promise(resolve => setImmediate(resolve))
+    let closeSettled = false
+    const closing = provider.close().then(() => { closeSettled = true })
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(closeSettled, false)
+    await assert.rejects(
+      provider.connect({tools: [], signal: new AbortController().signal}),
+      error => error instanceof CascadedRealtimeError && error.code === 'state',
+    )
+
+    gate.resolve({result: fallback('executor_unavailable')})
+    await assert.rejects(connecting, {name: 'AbortError'})
+    await closing
+    assert.equal(resources, 0)
+  })
+
+test('ready selects LiveKit while every unavailable result stays on bounded silence', async () => {
+  let liveVad = 0
+  const liveProvider = testProvider({
+    config: requireVolcengineRealtime(settings()),
+    endpointingCapability: () => Promise.resolve({
+      result: {
+        schema_version: 1, mode: 'livekit_v1_mini',
+        eot: {available: true, reason: 'ready'}, vad: {available: true, reason: 'ready'},
+        platform: 'darwin', arch: 'arm64',
+      },
+      surface: readySurface(() => { liveVad += 1 }),
+      executor: {} as LiveKitExecutor,
+    }),
+    asrClient: () => ({open: () => Promise.reject(new Error('unused'))}),
+    ttsClient: () => ({open: () => Promise.reject(new Error('unused'))}),
+    arkFactory: () => new EmptyArk([]),
+    idFactory: () => 'volc-ready',
+  })
+  await liveProvider.connect({tools: [], signal: new AbortController().signal})
+  assert.equal(liveVad, 1)
+  await liveProvider.close()
+
+  const reasons: readonly EndpointingCapabilityReason[] = [
+    'unsupported_platform', 'package_unavailable', 'native_unavailable',
+    'executor_unavailable', 'model_unavailable', 'timeout', 'inconclusive', 'aborted',
+  ]
+  for (const reason of reasons) {
+    let asrOpens = 0
+    const provider = testProvider({
+      config: requireVolcengineRealtime(settings()),
+      endpointingCapability: () => Promise.resolve({result: fallback(reason)}),
+      asrClient: () => ({open: () => { asrOpens += 1; return Promise.reject(new Error('unused')) }}),
+      ttsClient: () => ({open: () => Promise.reject(new Error('unused'))}),
+      arkFactory: () => new EmptyArk([]),
+      idFactory: () => `volc-${reason}`,
+    })
+    await provider.connect({tools: [], signal: new AbortController().signal})
+    await provider.sendAudio(new Uint8Array(1_024), new AbortController().signal)
+    assert.equal(asrOpens, 0, reason)
+    await provider.close()
+  }
+})
+
+test('failed epoch construction rolls back and a later connect builds fresh resources', async () => {
+  let capabilities = 0
+  let asrClients = 0
+  let ttsClients = 0
+  let arkAttempts = 0
+  const provider = testProvider({
+    config: requireVolcengineRealtime(settings()),
+    endpointingCapability: () => {
+      capabilities += 1
+      return Promise.resolve({result: fallback('executor_unavailable')})
+    },
+    asrClient: () => { asrClients += 1; return {open: () => Promise.reject(new Error('unused'))} },
+    ttsClient: () => { ttsClients += 1; return {open: () => Promise.reject(new Error('unused'))} },
+    arkFactory: () => {
+      arkAttempts += 1
+      if (arkAttempts === 1) throw new Error('private provider failure')
+      return new EmptyArk([])
+    },
+    idFactory: () => `volc-rollback-${arkAttempts}`,
+  })
+
+  await assert.rejects(
+    provider.connect({tools: [], signal: new AbortController().signal}),
+    error => error instanceof CascadedRealtimeError && error.code === 'configuration',
+  )
+  const identity = await provider.connect({tools: [], signal: new AbortController().signal})
+  assert.equal(identity.epoch, 1)
+  assert.deepEqual({capabilities, asrClients, ttsClients, arkAttempts}, {
+    capabilities: 2, asrClients: 2, ttsClients: 1, arkAttempts: 2,
+  })
+  await provider.close()
+})
+
+function assemblyOptions(
+  configured: Settings,
+  overrides: Partial<BuildCascadedRealtimeAssemblyOptions> = {},
+): BuildCascadedRealtimeAssemblyOptions {
+  return {
+    settings: configured,
+    searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
+    endpointingCapability: () => Promise.resolve({result: fallback('executor_unavailable')}),
+    asrClient: () => ({open: () => Promise.reject(new Error('ASR open was not expected'))}),
+    ttsClient: () => ({open: () => Promise.reject(new Error('TTS open was not expected'))}),
+    arkLlmFactory: () => ({open: () => createArkCascadedLlmSession(new EmptyArk([]))}),
+    metrics: {record: () => undefined},
+    onDiagnostic: () => undefined,
+    ...overrides,
+  }
+}
+
+test('cascaded assembly preserves one graph, shared resources, and frozen Guard policy', async () => {
+  const operations: string[] = []
+  const clock = new VirtualClock(10)
+  const ids = new RecordingIds()
+  const frameSource = new RecordingFrameSource()
+  const mediaStore = new MediaStore()
+  let telemetryCloses = 0
+  const configured = settings({
+    NOVA_AUDIO_AGENT_MODEL_API_KEY: 'generic-model-key',
+    NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-realtime-distinct',
+    NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
+    NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY: 'packed',
+    NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS: '1',
+  })
+  const realtime = buildCascadedRealtimeAssembly(assemblyOptions(configured, {
+    clock, ids, frameSource, mediaStore,
+    telemetry: {record: () => undefined, close: () => { telemetryCloses += 1 }},
+    endpointingCapability: () => {
+      operations.push('capability')
+      return Promise.resolve({result: fallback('executor_unavailable')})
+    },
+    asrClient: () => { operations.push('asr'); return {open: () => Promise.reject(new Error('unused'))} },
+    ttsClient: () => { operations.push('tts'); return {open: () => Promise.reject(new Error('unused'))} },
+    arkLlmFactory: ({config}) => ({open: () => {
+      operations.push(`ark:${config.model}`)
+      return createArkCascadedLlmSession(new EmptyArk(operations))
+    }}),
+  }))
+
+  assert.deepEqual(operations, [])
+  assert.ok(realtime.provider instanceof CascadedRealtimeProvider)
+  assert.equal(realtime.core.runtime.clock, clock)
+  assert.equal(realtime.core.frameSource, frameSource)
+  assert.equal(realtime.core.mediaStore, mediaStore)
+  assert.equal(realtime.service.session, realtime.session)
+  assert.equal(realtime.service.internals.runtime, realtime.runtime)
+  assert.equal(realtime.service.internals.tools, realtime.tools)
+  assert.equal(realtime.tools.bindings.has('memory__recall'), true)
+  assert.deepEqual([...realtime.runtime.executors.keys()].slice(0, 4), [
+    'search', 'watch', 'guard',
+  ])
+  assert.deepEqual(realtime.service.preemptiveAlertConfiguration, {
+    controlledReconnect: false, historyRecovery: 'none', historyPairs: 4,
+  })
+
+  let serveCalls = 0
+  const originalServe = realtime.runtime.serve.bind(realtime.runtime)
+  Object.defineProperty(realtime.runtime, 'serve', {
+    configurable: true,
+    value: (signal: AbortSignal): Promise<void> => { serveCalls += 1; return originalServe(signal) },
+  })
+  const first = realtime.start()
+  const second = realtime.start()
+  assert.equal(first, second)
+  await settleNamed('cascaded assembly start', Promise.all([first, second]))
+  assert.deepEqual(operations.slice(0, 4), [
+    'capability', 'asr', 'ark:ark-realtime-distinct', 'tts',
+  ])
+  assert.equal(serveCalls, 1)
+  assert.equal(frameSource.starts, 0)
+  assert.ok(ids.calls.includes('cascaded'))
+  await settleNamed('cascaded assembly stop', realtime.stop())
+  await settleNamed('cascaded assembly repeated stop', realtime.stop())
+  assert.equal(frameSource.stops, 1)
+  assert.equal(telemetryCloses, 0)
+})
+
+test('cascaded production composition derives cameraModuleEnabled from Settings', () => {
+  const realtime = buildCascadedRealtimeAssembly(assemblyOptions(settings({
+    NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false',
+  })))
+  const names = [...realtime.core.runtime.executors.keys()]
+  assert.deepEqual(names, ['search'])
+  assert.ok(!names.some(name => name === 'cam' || name === 'mcp__nova_camera' || name === 'watch' || name === 'guard'))
+  assert.ok(realtime.tools.bindings.has('search__search'))
+  assert.ok(realtime.tools.bindings.has('memory__recall'))
+})
+
+test('cascaded production composition forwards the personal memory owner', async () => {
+  let created = 0
+  let closed = 0
+  const realtime = buildCascadedRealtimeAssembly(assemblyOptions(settings(), {
+    createPersonalMemory: () => {
+      created += 1
+      return {
+        open: () => Promise.resolve(),
+        recall: () => Promise.reject(new Error('unused')),
+        close: () => { closed += 1; return Promise.resolve() },
+      }
+    },
+  }))
+  assert.equal(created, 1)
+  await realtime.stop()
+  assert.equal(closed, 1)
+})
+
+
+test('cascaded realtime composition rejects a matching live coding resource by project mode', () => {
+  const configured = settings({NOVA_AUDIO_AGENT_EXECUTORS: 'fast_sim'})
+  const resource: CodexAssemblyResource = {
+    adapter: modelProbeAdapter,
+    mode: 'live',
+    projectView: null,
+    approvalPolicy: 'never',
+    approvalController: null,
+    start: () => Promise.resolve(),
+    close: () => Promise.resolve(),
+  }
+
+  assert.throws(
+    () => buildCascadedRealtimeAssembly(assemblyOptions(configured, {codexResource: resource})),
+    error => error instanceof AssemblyError
+      && error.message === 'realtime coding resource project mode mismatch',
+  )
+})
+
+test('cascaded composition forwards an explicit generic controller for a renamed hidden coding executor', async () => {
+  const coding = {
+    ...modelProbeAdapter,
+    manifest: executorManifestSchema.parse({
+      name: 'workspace_coder', display_name: 'Workspace coder', model_visibility: 'hidden', roles: ['coding'],
+      policy: {channel: 'workspace_coder', priority: 50, wake: 'fast', typical_latency: 5, compress_watermark: 8},
+      ops: [
+        {name: 'run', description: 'run', params: {type: 'object', properties: {work_order: {type: 'string'}}, required: ['work_order'], additionalProperties: false}},
+        {name: 'status', description: 'status', readonly: true, params: {type: 'object', properties: {}, additionalProperties: false}},
+      ],
+    }),
+  }
+  const contexts: Parameters<CodingAgentControllerFactory['create']>[0][] = []
+  const factory: CodingAgentControllerFactory = {
+    create: context => {
+      contexts.push(context)
+      return new CodexAgentController({
+        channel: context.channel,
+        ...(context.intake === undefined ? {} : {intake: context.intake}),
+        ...(context.executor === undefined ? {} : {executor: context.executor}),
+        dispatchPort: context.dispatchPort,
+        resolveCancelTarget: context.resolveCancelTarget,
+      })
+    },
+  }
+  const confirmationController = new ProjectConfirmationController({
+    clock: new VirtualClock(), idFactory: () => 'cascaded-coding-confirmation',
+  })
+  const adapter = {
+    ...coding,
+    confirmationController,
+    initialize: () => Promise.resolve(),
+    commitConfirmed: () => Promise.resolve({accepted: false, code: 'unused'}),
+    publicProjectView: () => ({workspace_display_name: null, session_title: null, pending_confirmation: false}),
+    publicProjectContext: () => ({
+      workspace_id: null,
+      view: {workspace_display_name: null, session_title: null, pending_confirmation: false},
+    }),
+    activeCommittedWorkspace: () => Promise.resolve(null),
+    observeProjectView: () => () => undefined,
+    observeProjectContext: () => () => undefined,
+  }
+  const resource: CodexAssemblyResource = {
+    adapter,
+    mode: 'project', projectView: null, approvalPolicy: 'never', approvalController: null,
+    start: () => Promise.resolve(), close: () => Promise.resolve(),
+  }
+  const gatewayRequests: Readonly<Record<string, unknown>>[] = []
+  const realtime = buildCascadedRealtimeAssembly(assemblyOptions(settings({
+    NOVA_AUDIO_AGENT_EXECUTORS: 'workspace_coder',
+  }), {
+    codexResource: resource,
+    agentDescriptors: [codexAgentDescriptor('workspace_coder')],
+    codingAgentControllerFactory: factory,
+    supportGateway: {
+      complete: (input: Readonly<Record<string, unknown>>) => {
+        gatewayRequests.push(input)
+        return Promise.resolve({text: '{"target_work_id":"work-two"}'})
+      },
+    } as never,
+  }))
+  try {
+    assert.equal(contexts.length, 1)
+    assert.equal(contexts[0]?.channel, 'workspace_coder')
+    assert.notEqual(contexts[0]?.intake, undefined)
+    assert.equal(await contexts[0]?.resolveCancelTarget('stop the second task', [
+      {work_id: 'work-one', project: 'alpha', title: 'first task'},
+      {work_id: 'work-two', project: 'beta', title: 'second task'},
+    ]), 'work-two')
+    assert.equal(gatewayRequests.length, 1)
+    assert.match(String(gatewayRequests[0]?.prompt), /work-two/u)
+  } finally {
+    await realtime.stop()
+  }
+})
+
+test('core gateway preserves generic models or applies all Ark support overrides immutably',
+  async () => {
+    const cases = [
+      {
+        name: 'generic',
+        environment: {
+          NOVA_AUDIO_AGENT_MODEL_API_KEY: 'generic-safe-key',
+          NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://generic.example/v9',
+        },
+        endpoint: 'https://generic.example/v9/chat/completions',
+        authorization: 'Bearer generic-safe-key',
+        models: {watch: 'watch-original', surrogate: 'surrogate-original', compressor: 'compressor-original'},
+      },
+      {
+        name: 'Python-whitespace Ark fallback',
+        environment: {
+          NOVA_AUDIO_AGENT_MODEL_API_KEY: '\u001c\u0085',
+          NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://generic.example/v9',
+        },
+        endpoint: 'https://ark-support.example/api/v3/chat/completions',
+        authorization: 'Bearer ark-test-key',
+        models: {watch: 'watch-original', surrogate: 'ark-selected', compressor: 'ark-selected'},
+      },
+      {
+        name: 'Qwen fallback',
+        environment: {
+          NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'qwen',
+          NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'qwen-flash',
+          DASHSCOPE_API_KEY: 'dash-support-key',
+          NOVA_AUDIO_AGENT_MODEL_API_KEY: '\u001c\u0085',
+        },
+        endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+        authorization: 'Bearer dash-support-key',
+        models: {watch: 'watch-original', surrogate: 'qwen-flash', compressor: 'qwen-flash'},
+      },
+    ] as const
+    for (const scenario of cases) {
+      const records: GatewayRequest[] = []
+      const restoreFetch = installRecordingFetch(records)
+      const configured = settings({
+        NOVA_AUDIO_AGENT_EXECUTOR: 'fast_sim',
+        NOVA_AUDIO_AGENT_FAST_MODEL: 'fast-original',
+        NOVA_AUDIO_AGENT_WATCH_MODEL: 'watch-original',
+        NOVA_AUDIO_AGENT_SURROGATE_MODEL: 'surrogate-original',
+        NOVA_AUDIO_AGENT_COMPRESSOR_MODEL: 'compressor-original',
+        NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL: 'https://ark-support.example/api/v3',
+        NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-selected',
+        ...scenario.environment,
+      })
+      const beforeModels = {
+        fast: configured.fast_model,
+        watch: configured.watch_model,
+        surrogate: configured.surrogate_model,
+        compressor: configured.compressor_model,
+      }
+      let realtime: ReturnType<typeof buildCascadedRealtimeAssembly>
+      try {
+        realtime = buildCascadedRealtimeAssembly(assemblyOptions(configured, {
+          clock: new VirtualClock(),
+          frameSource: new RecordingFrameSource(),
+          executors: [modelProbeAdapter],
+        }))
+      } finally {
+        restoreFetch()
+      }
+      await exerciseCoreModels(realtime, records)
+      assert.deepEqual({
+        fast: configured.fast_model,
+        watch: configured.watch_model,
+        surrogate: configured.surrogate_model,
+        compressor: configured.compressor_model,
+      }, beforeModels, scenario.name)
+      assert.deepEqual(records.map(record => record.role).sort(), [
+        'compressor', 'gateway', 'surrogate', 'watch',
+      ])
+      for (const record of records) {
+        assert.equal(record.endpoint, scenario.endpoint, `${scenario.name}:${record.role}`)
+        assert.equal(record.authorization, scenario.authorization, `${scenario.name}:${record.role}`)
+        if (record.role !== 'gateway') assert.equal(record.model, scenario.models[record.role])
+      }
+      assert.equal(configured.fast_model, 'fast-original')
+    }
+  })
+
+test('cascaded rejects the final tool budget after evaluating the provider view once', () => {
+  const configured = loadSettings({
+    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+    DASHSCOPE_API_KEY: 'fixture-only', DOUBAO_BIGMODEL_API_KEY: 'fixture-only',
+  })
+  const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
+  let views = 0
+  assert.throws(() => buildCascadedRealtimeAssembly({
+    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+  }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 5, toolBudget: 1})
+  assert.equal(views, 1)
+})
+}

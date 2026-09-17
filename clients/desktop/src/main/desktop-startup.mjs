@@ -160,3 +160,61 @@ export async function prepareDesktopStartup({
   })
   return Object.freeze({ config: resolved, codexStatus: status })
 }
+
+export function createLifecycleCoordinator({ onChange = () => {} } = {}) {
+  let owner = null
+
+  return Object.freeze({
+    get busy() {
+      return owner !== null
+    },
+    get owner() {
+      return owner
+    },
+    async run(kind, operation) {
+      if (owner !== null) return Object.freeze({ status: 'busy' })
+      owner = kind
+      onChange(Object.freeze({ busy: true, owner }))
+      try {
+        return Object.freeze({ status: 'completed', value: await operation() })
+      } finally {
+        owner = null
+        onChange(Object.freeze({ busy: false, owner: null }))
+      }
+    },
+  })
+}
+
+const MESSAGE_CODES = new Set([
+  'project_directory_authority_unavailable',
+  'project_directory_open_failed',
+  'project_directory_open_failed_home',
+  'project_directory_open_failed_root',
+  'project_directory_open_failed_state',
+  'project_directory_open_failed_managed',
+  'project_directory_open_failed_workspace',
+  'project_directory_create_failed',
+  'project_directory_protection_failed',
+])
+
+export function startupFailureCode(error) {
+  if (error?.code === 'embedding_provider_invalid') return error.code
+  if (MESSAGE_CODES.has(error?.message)) return error.message
+  if (error?.name === 'MainCameraConfigurationError') return 'camera_configuration_invalid'
+  if (error?.message === 'NOVA_AUDIO_AGENT_BACKEND must be node') {
+    return 'backend_selection_invalid'
+  }
+  return 'startup_failed'
+}
+
+export function reportStartupFailure(error, {
+  write = chunk => process.stderr.write(chunk),
+  showError,
+} = {}) {
+  const code = startupFailureCode(error)
+  write(`[desktop-diagnostic] startup_failure code=${code}\n`)
+  if (code === 'embedding_provider_invalid') {
+    showError?.('embeddingProvider 仅支持 dashscope，后端未启动，原配置未修改。请在设置文件中明确选择云端服务后再重启。')
+  }
+  return code
+}

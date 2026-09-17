@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { jsonValueSchema, type JsonValue } from '../events.js'
+import { jsonValueSchema, type JsonValue } from '../core/events.js'
 import { MAX_PACKED_RECOVERY_CONTENT, type CommittedConversationPair } from './history.js'
 
 export const MAX_REALTIME_TEXT = 4_000
@@ -407,10 +407,13 @@ export type JsonObject = Readonly<Record<string, JsonValue>>
 export interface ResponseAdaptationContext {
   readonly revision: number
   readonly content: string | null
+  readonly user_sources?: readonly {readonly ref: string; readonly text: string}[] | undefined
 }
 export const responseAdaptationContextSchema = z.object({
   revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   content: z.string().max(16_000).nullable(),
+  user_sources: z.array(z.object({ref: z.string(), text: z.string()}).strict()).max(8)
+    .refine(sources => JSON.stringify(sources).length <= 6000).optional(),
 }).strict()
 
 export interface RealtimeProvider {

@@ -1,7 +1,7 @@
-import {installDesktopControl, handleFeishuSettings, desktopBudgetFailure, type DesktopCapabilityState} from './desktop-control.js'
-import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop-service.js'
+import {installDesktopControl, handleFeishuSettings, desktopBudgetFailure, type DesktopCapabilityState} from './desktop/desktop-control.js'
+import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop/desktop-session.js'
 import {announceReadiness} from './desktop.js'
-import {buildProductionComposition} from './production-composition.js'
+import {buildProductionComposition} from './composition/production-composition.js'
 
 type UtilityProcess = NodeJS.Process & {readonly parentPort?: DesktopStopParentSource & {postMessage(message: unknown): void}}
 
@@ -61,7 +61,9 @@ const exitCode = await runDesktopEntryWithStopSources({
 
 control.dispose()
 process.exitCode = exitCode
-if (exitCode !== 0) {
+// Electron utility processes can retain native/IPC handles after all owned
+// services have drained. Finish only here, after stop-source and control disposal.
+if (exitCode !== 0 || parentPort !== undefined) {
   await new Promise<void>(resolve => process.stderr.write('', () => resolve()))
   process.exit(exitCode)
 }

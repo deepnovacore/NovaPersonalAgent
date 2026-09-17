@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {loadSettings} from '../src/config.js'
-import {buildProductionRealtimeAssembly} from '../src/production-realtime-assembly.js'
-import {cascadedProviderRegistries} from '../src/cascaded-realtime-assembly.js'
+import {loadSettings} from '../src/config/config.js'
+import {buildProductionRealtimeAssembly} from '../src/composition/cascaded-realtime-assembly.js'
+import {cascadedProviderRegistries} from '../src/composition/cascaded-realtime-assembly.js'
 
 test('desktop text graph connects without speech credentials or initializing audio or model requests',async()=>{
  let opens=0,audio=0,requests=0
  const unavailable=()=>{audio++;throw Error('audio factory must remain lazy')}
- const settings=loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE:'integrated',NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'qwen',DASHSCOPE_API_KEY:'test-only',TAVILY_API_KEY:'test-only'})
+ const settings=loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE:'integrated',NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'qwen',DASHSCOPE_API_KEY:'test-only',TAVILY_API_KEY:'test-only'},true)
  const assembly=buildProductionRealtimeAssembly({settings,textOnly:true,registries:{...cascadedProviderRegistries,asr:{volcengine:unavailable},tts:{volcengine:unavailable},endpointing:{auto:unavailable},llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>{opens++;return {stream:()=>{requests++;throw Error('unexpected model request')},abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()}}})}}})
  assert.equal(audio,0);assert.equal(requests,0)
  const signal=new AbortController().signal
@@ -23,7 +23,7 @@ test('actual desktop production composition starts with text credentials only an
  const {mkdtemp,realpath,writeFile,rm}=await import('node:fs/promises')
  const os=await import('node:os')
  const path=await import('node:path')
- const {buildProductionComposition}=await import('../src/production-composition.js')
+ const {buildProductionComposition}=await import('../src/composition/production-composition.js')
  const dir=await mkdtemp(path.join(await realpath(os.tmpdir()),'nova-text-composition-'))
  const stop=new AbortController(),cleanups=new Set<()=>void|Promise<void>>()
  let composition:Awaited<ReturnType<typeof buildProductionComposition>>|undefined

@@ -1,11 +1,11 @@
 import {randomUUID} from 'node:crypto'
-import {abortable} from '../camera-session.js'
-import type {Clock} from '../clock.js'
+import {abortable} from '../core/camera-session.js'
+import type {Clock} from '../core/clock.js'
 import {
   CAMERA_HEIGHT,
   CAMERA_WIDTH,
   MAX_CAMERA_POSITION_MS,
-} from '../desktop-camera.js'
+} from '../desktop/desktop-camera.js'
 import {
   DesktopCameraError,
   type CameraCaptureRequest,

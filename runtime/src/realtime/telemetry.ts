@@ -1,8 +1,9 @@
+import {randomUUID} from 'node:crypto'
 import { closeSync, fchmodSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import {homedir} from 'node:os'
 import {dirname, join} from 'node:path'
-import type { Clock } from '../clock.js'
-import { jsonValueSchema, type JsonValue } from '../events.js'
+import type { Clock } from '../core/clock.js'
+import { jsonValueSchema, type JsonValue } from '../core/events.js'
 
 export interface RealtimeTelemetry {
   record(kind: string, payload: Readonly<Record<string, JsonValue>>): void
@@ -88,11 +89,14 @@ export class JsonlTelemetry implements RealtimeTelemetry, Disposable {
   readonly #diagnostics: RealtimeDiagnosticRing
   readonly #fileDescriptor: number
   #closed = false
+  readonly #runId = randomUUID()
+  #sequence = 0
 
   constructor(path: string, options: {readonly clock: Clock}) {
     this.#clock = options.clock
     this.#diagnostics = new RealtimeDiagnosticRing(options.clock)
-    const fileDescriptor = openSync(path, 'w', 0o600)
+    // ponytail: append-only diagnostic log; rotate externally for unattended long-running deployments.
+    const fileDescriptor = openSync(path, 'a', 0o600)
     try {
       // `mode` applies only when a file is created. Reused debug paths must not retain a looser
       // permission from an older client; Windows does not expose POSIX owner bits.
@@ -109,7 +113,8 @@ export class JsonlTelemetry implements RealtimeTelemetry, Disposable {
     const safePayload = Object.fromEntries(
       Object.entries(payload).map(([key, value]) => [key, jsonValueSchema.parse(value)]),
     )
-    const record = jsonValueSchema.parse({ts: this.#clock.now(), kind, payload: safePayload})
+    const record = jsonValueSchema.parse({run_id: this.#runId, seq: ++this.#sequence,
+      wall_time: new Date().toISOString(), ts: this.#clock.now(), kind, payload: safePayload})
     writeSync(this.#fileDescriptor, `${JSON.stringify(record)}\n`, undefined, 'utf8')
     this.#diagnostics.record(kind, safePayload)
   }

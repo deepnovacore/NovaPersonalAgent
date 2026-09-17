@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { test } from 'node:test'
-import { canonicalJson } from '../src/canonical-json.js'
-import { VirtualClock } from '../src/clock.js'
-import type { JsonValue } from '../src/events.js'
+import { canonicalJson } from '../src/text/canonical-json.js'
+import { VirtualClock } from '../src/core/clock.js'
+import type { JsonValue } from '../src/core/events.js'
 import {
   GatewayError,
   OpenAIModelGateway,
@@ -14,7 +14,7 @@ import {
   type GatewayDelta,
   type GatewayImage,
   type ModelMetrics,
-} from '../src/model-gateway.js'
+} from '../src/model/model-gateway.js'
 
 const fixtureRoot = resolve(import.meta.dirname, '../../../fixtures/gateway/v1')
 
@@ -282,4 +282,35 @@ test('complete parses one choice and reports usage', async () => {
   assert.equal(headers.authorization, 'Bearer k')
   const body = JSON.parse(captured?.init.body as string) as Record<string, unknown>
   assert.deepEqual(body.response_format, {type: 'json_object'})
+})
+
+
+test('support transport leaves thinking to downstream configuration in complete and stream', async () => {
+  for (const baseUrl of [
+    'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    'https://api.deepseek.com',
+    'https://ark.cn-beijing.volces.com/api/v3',
+    'https://example.invalid/v1',
+  ]) {
+    const bodies: Record<string, unknown>[] = []
+    const gateway = new OpenAIModelGateway({
+      baseUrl,
+      apiKey: 'test', clock: new VirtualClock(), metrics: {record: () => undefined},
+      fetch: (_url, init) => {
+        const body = JSON.parse(init!.body as string) as Record<string, unknown>
+        bodies.push(body)
+        return Promise.resolve(body.stream ? sseResponse(['[DONE]'])
+          : Response.json({choices: [{message: {content: '{}'}}]}))
+      },
+    })
+    // Model names do not decide the transport policy.
+    const request = {model: 'configured-model', system: 's', prompt: 'p'}
+    await gateway.complete(request)
+    for await (const delta of gateway.stream(request)) { void delta }
+    assert.equal(bodies.length, 2)
+    for (const body of bodies) {
+      assert.equal(Object.hasOwn(body, 'thinking'), false)
+      assert.equal(Object.hasOwn(body, 'enable_thinking'), false)
+    }
+  }
 })

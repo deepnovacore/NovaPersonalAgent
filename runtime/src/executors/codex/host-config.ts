@@ -19,9 +19,9 @@ import {
   hostProjectRootFromConfig,
   type HostManagedProjectRoot,
   type HostProjectRoot,
-} from '../../project-store.js'
-import type {Settings} from '../../config.js'
-import {isWellFormed, stripLikePython} from '../../python-text.js'
+} from '../../projects/project-store.js'
+import type {Settings} from '../../config/config.js'
+import {isWellFormed, stripLikePython} from '../../text/python-text.js'
 
 const resolvedCodexHostConfigBrand: unique symbol = Symbol('ResolvedCodexHostConfig')
 const codexCredentialProfileBrand: unique symbol = Symbol('CodexCredentialProfile')
@@ -56,6 +56,7 @@ export interface CodexCredentialProfile {
 
 export interface ResolvedCodexHostConfig {
   readonly [resolvedCodexHostConfigBrand]: true
+  readonly localCodexHome?: string
   readonly binary: HostBinary
   readonly binaryPrefixArgs: readonly string[]
   readonly workspace: HostWorkspace
@@ -125,8 +126,15 @@ export function resolveCodexHostConfig(
   } catch {
     throw new CodexHostConfigurationError('codex_managed_root_invalid')
   }
+  const localCodexHome = join(safeCatalog.homeDirectory, '.codex')
+  try { lstatSync(localCodexHome) } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    // The selected user home already exists; preserve its ACL inheritance on Windows.
+    mkdirSync(localCodexHome, {mode: 0o700})
+  }
   return Object.freeze({
     [resolvedCodexHostConfigBrand]: true as const,
+    localCodexHome: realpathSync(localCodexHome),
     binary,
     binaryPrefixArgs,
     workspace,

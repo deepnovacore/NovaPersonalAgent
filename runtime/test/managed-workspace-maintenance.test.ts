@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 
-import {ManagedWorkspaceMaintenanceService} from '../src/managed-workspace-maintenance.js'
-import {ProjectStateError} from '../src/project-store.js'
+import {ManagedWorkspaceMaintenanceService} from '../src/projects/managed-workspace-maintenance.js'
+import {ProjectStateError} from '../src/projects/project-store.js'
 
 function record(id: string, origin: 'managed' | 'registered' = 'managed') {
   return Object.freeze({

@@ -26,8 +26,8 @@ test('endpoint pricing identity is host resolved and never forwards URL credenti
 })
 
 test('production cascade forwards usage independently from semantic events with selected endpoint region', async () => {
-  const {buildCascadedRealtimeAssembly, cascadedProviderRegistries} = await import('../src/cascaded-realtime-assembly.js')
-  const {loadSettings} = await import('../src/config.js')
+  const {buildCascadedRealtimeAssembly, cascadedProviderRegistries} = await import('../src/composition/cascaded-realtime-assembly.js')
+  const {loadSettings} = await import('../src/config/config.js')
   const reports: UsageReport[] = []
   const settings = loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', DASHSCOPE_API_KEY: 'test', DOUBAO_ASR_API_KEY: 'test', DOUBAO_BIGMODEL_API_KEY: 'test', TAVILY_API_KEY: 'test'})
   buildCascadedRealtimeAssembly({settings, onUsage: value => reports.push(value)}, {

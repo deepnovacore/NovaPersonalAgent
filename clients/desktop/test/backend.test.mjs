@@ -34,7 +34,7 @@ const SETTINGS_V2 = Object.freeze({
   cascadedAsrProvider: 'volcengine',
   cascadedLlmProvider: 'qwen',
   cascadedLlmModels: Object.freeze({
-    qwen: 'qwen-flash',
+    qwen: 'qwen-plus',
     ark: 'doubao-seed-2-0-pro-260215',
   }),
   cascadedTtsProvider: 'volcengine',
@@ -265,7 +265,7 @@ test('resolved desktop settings override inherited Codex and model configuration
   assert.equal(spec.env.NOVA_AUDIO_AGENT_MODEL_BASE_URL, 'https://settings.example/v1')
 })
 
-test('launch spec maps v4 runtime settings and omits empty optional overrides', () => {
+test('launch spec forwards explicit v4 settings for runtime validation and omits empty overrides', () => {
   const spec = nodeLaunchSpec({
     workspace: '/workspace',
     token: TOKEN,
@@ -546,7 +546,7 @@ test('launch spec falls back to the settings-store defaults when settings is mis
   assert.equal(spec.env.NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL, '30')
   assert.equal(spec.env.NOVA_AUDIO_AGENT_PIPELINE_MODE, 'cascaded')
   assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER, 'qwen')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL, 'qwen-flash')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL, 'qwen-plus')
   assert.equal(spec.env.NOVA_AUDIO_AGENT_DOUBAO_TTS_VOICE, 'zh_female_vv_uranus_bigtts')
 })
 
@@ -563,7 +563,7 @@ test('launch spec falls back per-field for a partially-populated settings object
   assert.equal(spec.env.NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL, '30')
   assert.equal(spec.env.NOVA_AUDIO_AGENT_PIPELINE_MODE, 'cascaded')
   assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER, 'qwen')
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL, 'qwen-flash')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL, 'qwen-plus')
   assert.equal(spec.env.NOVA_AUDIO_AGENT_DOUBAO_TTS_VOICE, 'zh_female_vv_uranus_bigtts')
 })
 
@@ -1357,4 +1357,13 @@ test('memory prerecall switch overrides inherited env and defaults on', () => {
     const spec=nodeLaunchSpec({workspace:'/workspace',token:TOKEN,readyEndpoint:'127.0.0.1:49152',parentEnv:{NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED:'stale'},settings:{...SETTINGS_V2,...(enabled===undefined?{}:{memoryPrerecallEnabled:enabled})}})
     assert.equal(spec.env.NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED,String(enabled??true))
   }
+})
+
+test('DeepSeek cascade injects only its selected official model credential', () => {
+  const env = capabilityEnvironment({pipelineMode: 'cascaded', cascadedLlmProvider: 'deepseek'}, {deepseekApiKey: 'deepseek-test', arkApiKey: 'unused-ark'}, {}, {modules: {search: {enabled: false}, camera: {enabled: false}}})
+  assert.equal(env.DEEPSEEK_API_KEY, 'deepseek-test')
+  assert.equal(env.ARK_API_KEY, undefined)
+  const view = resolveSecretConfiguration({}, {}, {DEEPSEEK_API_KEY: 'deepseek-dotenv-test'})
+  assert.equal(view.secretsPresent.deepseekApiKey, true)
+  assert.equal(view.secretSources.deepseekApiKey, 'dotenv')
 })

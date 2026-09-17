@@ -1,56 +1,64 @@
-import {managedMcpEnvironment, recordManagedMcpVisibility, type ManagedCodexMcp} from './managed-mcp.js'
-import {Readable, Writable} from 'node:stream'
+import type {ExecutorDiagnostic} from '../../core/executor-diagnostic.js'
+import { Readable,Writable } from 'node:stream'
+import { managedMcpEnvironment,recordManagedMcpVisibility,type ManagedCodexMcp } from './managed-mcp.js'
+import { generateSessionTitle } from './session-title.js'
+import { sharedHomeOverrides } from './shared-home.js'
+import { assertApiKeyProvider,assertApiKeyThread,NOVA_API_PROVIDER } from './spawn-env.js'
 
+import type { ExecutorProgress } from '../../core/causal-runtime.js'
+import type { Clock } from '../../core/clock.js'
+import { RealClock, raceDeadline } from '../../core/clock.js'
+import { isWellFormed,stripLikePython } from '../../text/python-text.js'
+import { normalizeNfcPinned } from '../../text/unicode-normalize.js'
+import { isOtherCategory } from '../../text/unicode-tables.js'
 import {
-  validateCodexSchemaBundle,
-  validateEffectiveCodexConfig,
+validateCodexSchemaBundle,
+validateEffectiveCodexConfig,
 } from './app-server-schema.js'
-import {sanitizeCodexPreflightReport} from './contract.js'
-import {admitCodexVersion} from './version.js'
+import {
+isCodexApprovalPort,
+redactApprovalDetail,
+routeCodexApprovalServerRequest,
+} from './approval-protocol.js'
+import type {ApprovalPort} from '../../core/approval.js'
+import { sanitizeCodexPreflightReport } from './contract.js'
 import type {
-  CredentialSnapshot,
-  CredentialSnapshotter,
+CredentialSnapshot,
+CredentialSnapshotter,
 } from './credential-snapshot.js'
 import {
-  AppServerRequestRejected,
-  CodexProtocolError,
-  JsonRpcConnection,
-  MAX_STDOUT,
-} from './protocol.js'
+resolveCodexLaunchProfile,
+type CodexLaunchProfile,
+} from './launch-profile.js'
 import {
-  createApprovedCodexSpawnSpec,
-  hostCodexHomeValue,
-  hostWorkspacePath,
-  takeUnconfirmedCodexProcessOwner,
-  type CodexProcessOwnerFactory,
-  type HostBinary,
-  type HostCodexHome,
-  type HostWorkspace,
-  type OwnedCodexProcess,
+createCodexSpawnSpec,
+hostCodexHomeValue,
+hostWorkspacePath,
+nativeCodexBinaryIdentity,
+takeUnconfirmedCodexProcessOwner,
+type CodexProcessOwnerFactory,
+type HostBinary,
+type HostCodexHome,
+type HostWorkspace,
+type OwnedCodexProcess,
 } from './process-owner.js'
 import {
-  resolveCodexLaunchProfile,
-  type CodexLaunchProfile,
-} from './launch-profile.js'
-import {snapshotJsonRecord} from './safe-json.js'
-import {AppServerTurnProjection, type TurnCompletion} from './turn-projection.js'
-import type {ExecutorProgress} from '../../causal-runtime.js'
-import type {Clock} from '../../clock.js'
-import {RealClock} from '../../clock.js'
-import {stripLikePython, isWellFormed} from '../../python-text.js'
-import {normalizeNfcPinned} from '../../unicode-normalize.js'
-import {isOtherCategory} from '../../unicode-tables.js'
-import {
-  isCodexApprovalPort,
-  routeCodexApprovalServerRequest,
-  type CodexApprovalPort,
-} from './approval.js'
+AppServerRequestRejected,
+CodexProtocolError,
+JsonRpcConnection,
+MAX_STDOUT,
+} from './protocol.js'
+import { snapshotJsonRecord } from './safe-json.js'
+import { AppServerTurnProjection,type TurnCompletion } from './turn-projection.js'
+import { admitCodexVersion } from './version.js'
 
 export const CODEX_PREFLIGHT_LIMIT_MS = 20_000
 export const CODEX_INTERRUPT_GRACE_MS = 2_000
 export const CODEX_TREE_GRACE_MS = 5_000
 const CODEX_CONTROL_GRACE_MS = 250
 const CODEX_TREE_PHASE_GRACE_MS = 1_000
+/** A settled turn waits only this long for advisory title metadata before abandoning it. */
+const CODEX_TITLE_GRACE_MS = 1_000
 export const CODEX_STDERR_LIMIT = 64 * 1024
 export const CODEX_WORK_ORDER_LIMIT = 65_536
 export const CODEX_DEVELOPER_INSTRUCTIONS_LIMIT = 4000
@@ -77,6 +85,7 @@ export type CodexTransportCode =
   | 'resume_unavailable'
   | 'server_rejected'
   | 'turn_failed'
+  | 'usage_limit_exceeded'
   | 'missing_terminal'
   | 'nonzero_exit'
   | 'unexpected_server_request'
@@ -84,6 +93,8 @@ export type CodexTransportCode =
 
 export interface CodexAppServerLaunchConfig {
   readonly managedMcp?: ManagedCodexMcp
+  readonly generateTitles?: boolean
+  readonly preserveHome?: boolean
   readonly binary: HostBinary
   readonly prefixArgs?: readonly string[]
   readonly workspace: HostWorkspace
@@ -94,7 +105,7 @@ export interface CodexAppServerLaunchConfig {
   readonly persistent: boolean
   readonly workingInterval?: number
   readonly approvalPolicy?: 'never' | 'on-request'
-  readonly approvalController?: CodexApprovalPort
+  readonly approvalController?: ApprovalPort
   readonly launchProfile?: CodexLaunchProfile
 }
 
@@ -132,6 +143,7 @@ export interface TransportObserver {
 }
 
 export interface TransportOutcome {
+  readonly diagnostic?: ExecutorDiagnostic
   readonly classification: 'completed' | 'refused' | 'uncertain'
   readonly code: CodexTransportCode
   readonly turnStartWritten: boolean
@@ -143,13 +155,23 @@ export interface SteerTransportResult {
   readonly written: boolean
 }
 
+export interface ProjectConnectionBinding {
+  readonly workspace: HostWorkspace
+  readonly resumeThreadId: string | null
+  readonly approvalController: ApprovalPort | null
+}
+
 export interface CodexAppServerTransport {
+  /** Warm the connection only; project authority is supplied after confirmation. */
+  prewarmConnection?(deadline: TransportDeadline): Promise<SafePreflightReport | null>
+  bindProject?(binding: ProjectConnectionBinding): void
   preflight(deadline: TransportDeadline): Promise<SafePreflightReport>
   prewarm(deadline: TransportDeadline): Promise<SafePreflightReport | null>
   run(
     input: RunInput,
     observer: TransportObserver,
     deadline: TransportDeadline,
+    completionDeadline?: TransportDeadline | null,
   ): Promise<TransportOutcome>
   steer(input: SteerInput, deadline: TransportDeadline): Promise<SteerTransportResult>
   close(reason?: 'shutdown' | 'cancel' | 'failure'): Promise<void>
@@ -164,7 +186,7 @@ export interface CodexLiveSchemaProbe {
 }
 
 interface CredentialProvider {
-  prepare(input: {readonly codexHome: HostCodexHome; readonly apiKey: string | null; readonly managedMcp?: ManagedCodexMcp}): Promise<CredentialSnapshot>
+  prepare(input: {readonly codexHome: HostCodexHome; readonly apiKey: string | null; readonly managedMcp?: ManagedCodexMcp; readonly preserveHome?: boolean | undefined}): Promise<CredentialSnapshot>
   environment(snapshot: CredentialSnapshot): Readonly<Record<string, string>>
   removeEphemeralHome(home: HostCodexHome): Promise<void>
 }
@@ -196,6 +218,7 @@ interface Session {
   readonly stderrDone: Promise<void>
   readonly settlePumps: () => Promise<void>
   readonly removeListeners: () => void
+  readonly metadataListeners: Set<(method: string, params: Record<string, unknown>) => void>
   readonly threadResponse: unknown
   projection: AppServerTurnProjection | null
   completion: Deferred<TurnCompletion> | null
@@ -256,7 +279,7 @@ interface CredentialRemovalAttempt {
 export class CodexTransportError extends Error {
   readonly code: CodexTransportCode
 
-  constructor(code: CodexTransportCode) {
+  constructor(code: CodexTransportCode, readonly diagnostic?: ExecutorDiagnostic) {
     super(code)
     this.name = 'CodexTransportError'
     this.code = code
@@ -264,12 +287,14 @@ export class CodexTransportError extends Error {
 }
 
 export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
-  readonly #config: ValidatedCodexAppServerLaunchConfig
+  #config: ValidatedCodexAppServerLaunchConfig
   readonly #processFactory: CodexProcessOwnerFactory
   readonly #credentials: CredentialProvider
   readonly #preflightRunner: CodexHostPreflightRunner
   readonly #schemaProbe: CodexLiveSchemaProbe
   readonly #scheduler: TransportScheduler
+  #connectionOnly = false
+  #projectBinding: ProjectConnectionBinding | null = null
   #session: Session | null = null
   #prewarmPromise: Promise<SafePreflightReport | null> | null = null
   #establishPromise: Promise<{
@@ -290,6 +315,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
   readonly #establishControllers = new Set<AbortController>()
   #lateCleanupFailure: CodexTransportError | null = null
   #credentialCleanupFailure: CodexTransportError | null = null
+  #sharedHomeOverrides: readonly string[] | null = null
   #credentialRemovalRequired = false
   #credentialRemovalAttempt: CredentialRemovalAttempt | null = null
   #credentialPreparations = 0
@@ -314,6 +340,32 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
   async preflight(deadline: TransportDeadline): Promise<SafePreflightReport> {
     validateDeadline(deadline)
     return await this.#performPreflight(deadline)
+  }
+
+  prewarmConnection(deadline: TransportDeadline): Promise<SafePreflightReport | null> {
+    if (!this.#config.persistent || !this.#config.preserveHome || this.#hadTurn || this.#runActive
+      || (!this.#connectionOnly && (this.#session !== null || this.#establishPromise !== null))) {
+      return Promise.reject(new CodexTransportError('config_not_isolated'))
+    }
+    this.#connectionOnly = true
+    return this.prewarm(deadline)
+  }
+
+  bindProject(binding: ProjectConnectionBinding): void {
+    if (!this.#connectionOnly || this.#closed || this.#runActive || this.#hadTurn || this.#projectBinding !== null) {
+      throw new CodexTransportError('busy')
+    }
+    // Validate the host's new binding now, but do not mutate an in-flight handshake.
+    this.#boundConfig(binding)
+    this.#projectBinding = Object.freeze({...binding})
+  }
+
+  #boundConfig(binding: ProjectConnectionBinding): ValidatedCodexAppServerLaunchConfig {
+    const config = {...this.#config}
+    delete config.approvalController
+    return validateLaunchConfig({...config, workspace: binding.workspace, resumeThreadId: binding.resumeThreadId,
+      generateTitles: binding.resumeThreadId === null,
+      ...(binding.approvalController === null ? {} : {approvalController: binding.approvalController})})
   }
 
   prewarm(deadline: TransportDeadline): Promise<SafePreflightReport | null> {
@@ -344,7 +396,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         clock: this.#scheduler.clock,
         workingInterval: this.#config.workingInterval,
       })
-      this.#bindThread(projection, session.threadResponse)
+      if (!this.#connectionOnly) this.#bindThread(projection, session.threadResponse)
       await this.#scheduler.yieldIo()
       if (session.failureCause !== null) throw session.failureCause
       if (session.unexpectedServerRequest) {
@@ -364,6 +416,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     input: RunInput,
     observer: TransportObserver,
     deadline: TransportDeadline,
+    completionDeadline: TransportDeadline | null = deadline,
   ): Promise<TransportOutcome> {
     let workOrder: string
     try {
@@ -377,16 +430,38 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     this.#sensitiveInputs.splice(0, this.#sensitiveInputs.length, workOrder)
     let session: Session | null = null
     let completion: TurnCompletion | null = null
+    let titleWork: Promise<void> | null = null
+    const titleAbort = new AbortController()
     let failureCode: CodexTransportCode | null = null
+    let diagnostic: ExecutorDiagnostic | undefined
     try {
       if (this.#prewarmPromise !== null) {
         await runWithin(this.#prewarmPromise, deadline, 'adapter_timeout')
+      }
+      if (this.#connectionOnly) {
+        if (this.#projectBinding === null) throw new CodexTransportError('config_not_isolated')
+        this.#config = this.#boundConfig(this.#projectBinding)
+        // The warm process was certified in its startup directory, not this approved target.
+        await this.#performPreflight(deadline)
       }
       session = this.#usableWarmSession()
       if (session === null) {
         if (this.#session !== null) await this.#cleanup(this.#session, true)
         session = (await this.#startEstablish(deadline)).session
         this.#session = session
+      }
+      if (this.#connectionOnly) {
+        const configResponse = await this.#requestWithin(session, 'config/read', {
+          includeLayers: true, cwd: hostWorkspacePath(this.#config.workspace),
+        }, deadline)
+        validateEffectiveCodexConfig(configResponse, hostWorkspacePath(this.#config.workspace), {
+          allowReplacementInstructions: false, sharedHome: true,
+          ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
+          launchProfile: this.#config.launchProfile,
+        })
+        if (this.#config.apiKey !== null) assertApiKeyProvider(configResponse)
+        await this.#openThread(session, deadline)
+        this.#connectionOnly = false
       }
       session.used = true
       session.warm = false
@@ -416,6 +491,10 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
       const threadId = projection.threadId
       if (threadId === null) throw new CodexTransportError('unsupported_protocol')
       try { observer.onThreadReady?.(threadId) } catch { /* advisory */ }
+      const existingName = snapshotJsonRecord(snapshotJsonRecord(session.threadResponse).thread).name
+      if (typeof existingName === 'string' && existingName.trim()) {
+        try { observer.onThreadNamed?.(threadId, existingName) } catch { /* advisory */ }
+      }
       if (input.threadName !== undefined) {
         // The host-derived title is advisory: Codex owns the name once set (08), so a rejection
         // never fails the turn.
@@ -445,9 +524,40 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         },
       )
       projection.bindTurnResponse(turnResponse)
-      completion = await this.#waitForCompletion(session, deadline)
+      if (this.#config.generateTitles && input.threadName !== undefined) {
+        const target = session
+        const titleDeadline = {...deadline, expiresAtMs: Math.min(deadline.expiresAtMs, Date.now() + 12_000)}
+        titleWork = generateSessionTitle(workOrder, {
+          mcpServers: Object.keys(this.#config.managedMcp?.servers ?? {}),
+          signal: titleAbort.signal,
+          request: async (method, params) => {
+            if (method !== 'thread/start' || this.#config.apiKey === null) return await this.#requestWithin(target, method, params, titleDeadline)
+            assertApiKeyProvider(await this.#requestWithin(target, 'config/read', {
+              includeLayers: true, cwd: hostWorkspacePath(this.#config.workspace),
+            }, titleDeadline))
+            const response = await this.#requestWithin(target, method, {...params, modelProvider: NOVA_API_PROVIDER}, titleDeadline)
+            assertApiKeyThread(response)
+            return response
+          },
+          subscribe: listener => { target.metadataListeners.add(listener); return () => { target.metadataListeners.delete(listener) } },
+        }).then(async name => {
+          if (!name || target.closing || titleAbort.signal.aborted) return
+          const current = snapshotJsonRecord(await this.#requestWithin(target, 'thread/read', {threadId}, titleDeadline))
+          if (snapshotJsonRecord(current.thread).name !== input.threadName) return
+          await this.#requestWithin(target, 'thread/name/set', {threadId, name}, titleDeadline)
+          observer.onThreadNamed?.(threadId, name)
+        }).catch(() => undefined)
+      }
+      completion = await this.#waitForCompletion(session, completionDeadline, deadline.signal)
     } catch (error) {
-      failureCode = safeTransportError(error, 'transport_lost').code
+      const failure = safeTransportError(error, 'transport_lost')
+      failureCode = failure.code
+      diagnostic = failure.diagnostic === undefined ? undefined : {...failure.diagnostic,
+        message: this.#sanitizeText(redactApprovalDetail(failure.diagnostic.message), 4000).text.slice(0, 4000)}
+    }
+    if (titleWork !== null) {
+      const titleGrace = setTimeout(() => { titleAbort.abort() }, CODEX_TITLE_GRACE_MS)
+      try { await titleWork } finally { clearTimeout(titleGrace) }
     }
     this.#hadTurn ||= session?.projection?.turnWasStarted ?? false
     const written = session?.turnStartWritten ?? false
@@ -459,22 +569,25 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     this.#runActive = false
     try {
       if (failureCode !== null) {
-        return outcome(written ? 'uncertain' : 'refused', failureCode, written, completion)
+        return {...outcome(written ? 'uncertain' : 'refused', failureCode, written, completion), ...(diagnostic === undefined ? {} : {diagnostic})}
       }
       if (completion === null) return outcome(written ? 'uncertain' : 'refused', 'transport_lost', written, null)
-      const safeCompletion = Object.freeze({
+      const safeCompletion: TurnCompletion = Object.freeze({
         status: completion.status,
         final_text: completion.final_text === null
           ? null
           : this.#sanitizeText(completion.final_text, CODEX_FINAL_TEXT_LIMIT).text,
         internal_activity: completion.internal_activity,
+        ...(completion.error_code === undefined ? {} : {error_code: completion.error_code}),
       })
       if (cleanup.cleanupFailed) return outcome('uncertain', 'credential_missing', written, safeCompletion)
       if (!cleanup.complete) return outcome('uncertain', 'transport_lost', written, safeCompletion)
       if (session?.unexpectedServerRequest === true) {
         return outcome('uncertain', 'unexpected_server_request', written, safeCompletion)
       }
-      if (completion.status !== 'completed') return outcome('uncertain', 'turn_failed', written, safeCompletion)
+      if (completion.status !== 'completed') {
+        return outcome('uncertain', safeCompletion.error_code ?? 'turn_failed', written, safeCompletion)
+      }
       if (safeCompletion.final_text === null) return outcome('uncertain', 'missing_terminal', written, safeCompletion)
       if (cleanup.exitCode !== 0) return outcome('uncertain', 'nonzero_exit', written, safeCompletion)
       if (cleanup.stop !== 'none') return outcome('uncertain', 'transport_lost', written, safeCompletion)
@@ -655,11 +768,14 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     return admitted
   }
 
-  async #establish(deadline: TransportDeadline): Promise<{
+  async #establish(deadline: TransportDeadline, certification?: {readonly identity: string; readonly report: SafePreflightReport}): Promise<{
     readonly report: SafePreflightReport
     readonly session: Session
   }> {
-    const report = await this.#performPreflight(deadline)
+    const identity = nativeCodexBinaryIdentity(this.#config.binary, this.#config.prefixArgs ?? [])
+    if (certification !== undefined && certification.identity !== identity) throw new CodexTransportError('unsupported_protocol')
+    const report = certification?.report ?? await this.#performPreflight(deadline)
+    if (identity !== nativeCodexBinaryIdentity(this.#config.binary, this.#config.prefixArgs ?? [])) throw new CodexTransportError('unsupported_protocol')
     if (this.#closed) throw new CodexTransportError('transport_lost')
     if (this.#credentialRemovalRequired) {
       this.#closed = true
@@ -672,6 +788,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const credentialWork = Promise.resolve()
       .then(() => this.#credentials.prepare({
         codexHome: this.#config.codexHome,
+        preserveHome: this.#config.preserveHome,
         apiKey: this.#config.apiKey,
         ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
       }))
@@ -713,12 +830,15 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     let owner: OwnedCodexProcess
     try {
       const environment = this.#credentials.environment(credentialSnapshot)
-      const spec = createApprovedCodexSpawnSpec({
+      if (identity !== nativeCodexBinaryIdentity(this.#config.binary, this.#config.prefixArgs ?? [])) throw new CodexTransportError('unsupported_protocol')
+      const spec = createCodexSpawnSpec({
         binary: this.#config.binary,
         prefixArgs: this.#config.prefixArgs ?? [],
         workspace: this.#config.workspace,
         codexHome: this.#config.codexHome,
         environment,
+        preserveHome: this.#config.preserveHome,
+        sharedHomeOverrides: this.#sharedHomeOverrides ?? [],
         ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
         launchProfile: this.#config.launchProfile,
       })
@@ -813,28 +933,48 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         includeLayers: true,
         cwd: hostWorkspacePath(this.#config.workspace),
       }, deadline)
+      if (this.#config.preserveHome && this.#sharedHomeOverrides === null) {
+        this.#sharedHomeOverrides = sharedHomeOverrides(configResponse, Object.keys(this.#config.managedMcp?.servers ?? {}))
+        const cleanup = await this.#cleanup(session, false)
+        if (!cleanup.complete || !cleanup.treeGone) throw new CodexTransportError('transport_lost')
+        this.#session = null
+        return await this.#establish(deadline, identity === null ? undefined : {identity, report})
+      }
       validateEffectiveCodexConfig(configResponse, hostWorkspacePath(this.#config.workspace), {
         allowReplacementInstructions: false,
+        sharedHome: this.#config.preserveHome === true,
         ...(this.#config.managedMcp === undefined ? {} : {managedMcp: this.#config.managedMcp}),
         launchProfile: this.#config.launchProfile,
       })
-      const thread = this.#threadRequest()
-      let threadResponse: unknown
-      try {
-        threadResponse = await this.#requestWithin(session, thread.method, thread.params, deadline)
-      } catch (error) {
-        if (thread.method === 'thread/resume' && error instanceof AppServerRequestRejected) {
-          throw new CodexTransportError('resume_unavailable')
-        }
-        throw error
+      if (this.#config.apiKey !== null) {
+        try { assertApiKeyProvider(configResponse) }
+        catch { throw new CodexTransportError('config_not_isolated') }
       }
-      ;(session as {threadResponse: unknown}).threadResponse = threadResponse
+      if (!this.#connectionOnly) await this.#openThread(session, deadline)
       return {report, session}
     } catch (error) {
       const cleanup = await this.#cleanup(session, true)
       if (cleanup.complete && this.#session === session) this.#session = null
       throw safeTransportError(error, 'transport_lost')
     }
+  }
+
+  async #openThread(session: Session, deadline: TransportDeadline): Promise<void> {
+    const thread = this.#threadRequest()
+    let threadResponse: unknown
+    try {
+      threadResponse = await this.#requestWithin(session, thread.method, thread.params, deadline)
+    } catch (error) {
+      if (thread.method === 'thread/resume' && error instanceof AppServerRequestRejected) {
+        throw new CodexTransportError('resume_unavailable', error.diagnostic)
+      }
+      throw error
+    }
+    if (this.#config.apiKey !== null) {
+      try { assertApiKeyThread(threadResponse) }
+      catch { throw new CodexTransportError('config_not_isolated') }
+    }
+    ;(session as {threadResponse: unknown}).threadResponse = threadResponse
   }
 
   async #validateMcpVisibility(session: Session, threadId: string, deadline: TransportDeadline): Promise<void> {
@@ -852,9 +992,15 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         for (const value of response.data) {
           const server = snapshotJsonRecord(value)
           const name = server.name
-          if (typeof name !== 'string' || !Object.hasOwn(expected, name) || seen.has(name)) throw new TypeError('server')
+          if (typeof name !== 'string' || seen.has(name)) throw new TypeError('server')
           seen.add(name)
           const tools = snapshotJsonRecord(server.tools)
+          // Shared-home entries remain in Codex's inventory even when explicitly disabled.
+          if (server.runtimeStatus === 'disabled' && Object.keys(tools).length === 0) {
+            if (Object.hasOwn(expected, name)) recordManagedMcpVisibility(managed, name, false)
+            continue
+          }
+          if (!Object.hasOwn(expected, name)) throw new TypeError('server')
           for (const [nameOfTool, metadata] of Object.entries(tools)) {
             if (!expected[name]!.enabled_tools.includes(nameOfTool)
               || snapshotJsonRecord(metadata).name !== nameOfTool) throw new TypeError('tool')
@@ -906,6 +1052,8 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const rpc = new JsonRpcConnection({
       write: async bytes => { await writeDrain(owner.stdin, bytes) },
       onNotification: notification => {
+        for (const listener of session.metadataListeners) listener(notification.method, notification.params)
+
         if (isTurnLifecycleNotification(notification.method) && !session.turnStartAdmitted) {
           this.#failSession(session, new CodexTransportError('unsupported_protocol'))
           return
@@ -1030,6 +1178,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const session: Session = {
       owner,
       rpc,
+      metadataListeners: new Set(),
       credentialSnapshot,
       failure,
       failureCause: null,
@@ -1099,7 +1248,10 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     readonly params: Readonly<Record<string, unknown>>
   } {
     const workspace = hostWorkspacePath(this.#config.workspace)
-    const common: Record<string, unknown> = {...this.#config.launchProfile.thread}
+    const common: Record<string, unknown> = {
+      ...this.#config.launchProfile.thread,
+      ...(this.#config.apiKey === null ? {} : {modelProvider: NOVA_API_PROVIDER}),
+    }
     if (this.#config.developerInstructions !== null) {
       common.developerInstructions = this.#config.developerInstructions
     }
@@ -1109,6 +1261,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const persistent = {
       ...common,
       cwd: workspace,
+      ...(this.#config.preserveHome ? {runtimeWorkspaceRoots: [workspace]} : {}),
     }
     if (this.#config.resumeThreadId !== null) {
       return {method: 'thread/resume', params: {
@@ -1143,14 +1296,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     onWritten?: () => void,
     observeSessionFailure = true,
   ): Promise<unknown> {
-    return await requestWithDeadline(
-      signal => session.rpc.request(method, params, {
-        signal,
-        ...(onWritten === undefined ? {} : {onWritten: () => { onWritten() }}),
-      }),
-      deadline,
-      observeSessionFailure ? session.failure.promise : undefined,
-    )
+    return this.#requestPreparedWithin(session, method, () => params, deadline, onWritten, observeSessionFailure)
   }
 
   async #requestPreparedWithin(
@@ -1159,15 +1305,25 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     prepare: () => Readonly<Record<string, unknown>>,
     deadline: TransportDeadline,
     onWritten?: () => void,
+    observeSessionFailure = true,
   ): Promise<unknown> {
-    return await requestWithDeadline(
-      signal => session.rpc.requestPrepared(method, prepare, {
-        signal,
-        ...(onWritten === undefined ? {} : {onWritten: () => { onWritten() }}),
-      }),
-      deadline,
-      session.failure.promise,
-    )
+    const started = Date.now()
+    try {
+      return await requestWithDeadline(
+        signal => session.rpc.requestPrepared(method, prepare, {
+          signal,
+          ...(onWritten === undefined ? {} : {onWritten: () => { onWritten() }}),
+        }),
+        deadline,
+        observeSessionFailure ? session.failure.promise : undefined,
+      )
+    } catch (error) {
+      if (error instanceof CodexTransportError && error.code === 'adapter_timeout') {
+        throw new CodexTransportError('adapter_timeout', {method, server_code: null,
+          elapsed_ms: Date.now() - started, message: 'The control request exceeded its deadline.'})
+      }
+      throw error
+    }
   }
 
   async #notifyWithin(
@@ -1179,17 +1335,16 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     await runWithin(session.rpc.notify(method, params), deadline, 'adapter_timeout')
   }
 
-  async #waitForCompletion(session: Session, deadline: TransportDeadline): Promise<TurnCompletion> {
+  async #waitForCompletion(session: Session, deadline: TransportDeadline | null, signal?: AbortSignal): Promise<TurnCompletion> {
     const completion = session.completion
     if (completion === null) throw new CodexTransportError('transport_lost')
-    return await runWithin(
-      Promise.race([
-        completion.promise,
-        session.failure.promise.then(error => Promise.reject(error)),
-      ]),
-      deadline,
-      'adapter_timeout',
-    )
+    const work = Promise.race([
+      completion.promise,
+      session.failure.promise.then(error => Promise.reject(error)),
+    ])
+    return deadline === null
+      ? await raceDeadline(work, REAL_SCHEDULER.clock, null, signal, () => new CodexTransportError('transport_lost'))
+      : await runWithin(work, deadline, 'adapter_timeout')
   }
 
   #usableWarmSession(): Session | null {
@@ -1562,6 +1717,8 @@ function validateLaunchConfig(config: CodexAppServerLaunchConfig): ValidatedCode
   }
   return Object.freeze({
     ...(config.managedMcp === undefined ? {} : {managedMcp: config.managedMcp}),
+    generateTitles: config.generateTitles === true,
+    preserveHome: config.preserveHome === true,
     binary: config.binary,
     prefixArgs: Object.freeze([...(config.prefixArgs ?? [])]),
     workspace: config.workspace,
@@ -1658,34 +1815,23 @@ async function requestWithDeadline(
   validateDeadline(deadline)
   const controller = new AbortController()
   let timedOut = false
-  const remaining = Math.max(0, deadline.expiresAtMs - Date.now())
-  let rejectDeadline!: (error: Error) => void
-  const deadlineFailure = new Promise<never>((_resolve, reject) => { rejectDeadline = reject })
-  void deadlineFailure.catch(() => undefined)
-  const timer = setTimeout(() => {
+  const failDeadline = (): Error => {
     timedOut = true
     controller.abort()
-    rejectDeadline(new CodexTransportError('adapter_timeout'))
-  }, remaining)
-  const onAbort = (): void => {
-    controller.abort()
-    rejectDeadline(new CodexTransportError('adapter_timeout'))
+    return new CodexTransportError('adapter_timeout')
   }
-  deadline.signal?.addEventListener('abort', onAbort, {once: true})
   try {
     const request = operation(controller.signal)
-    const candidates: Promise<unknown>[] = [request, deadlineFailure]
+    const candidates: Promise<unknown>[] = [request]
     if (sessionFailure !== undefined) candidates.push(sessionFailure.then(error => {
       controller.abort()
       throw error
     }))
-    return await Promise.race(candidates)
+    return await raceDeadline(Promise.race(candidates), REAL_SCHEDULER.clock,
+      Math.max(0, deadline.expiresAtMs - Date.now()) / 1000, deadline.signal, failDeadline)
   } catch (error) {
     if (timedOut || deadline.signal?.aborted === true) throw new CodexTransportError('adapter_timeout')
     throw error
-  } finally {
-    clearTimeout(timer)
-    deadline.signal?.removeEventListener('abort', onAbort)
   }
 }
 
@@ -1695,21 +1841,8 @@ async function runWithin<T>(
   timeoutCode: CodexTransportCode,
 ): Promise<T> {
   validateDeadline(deadline)
-  let timer: NodeJS.Timeout | undefined
-  let onAbort: (() => void) | undefined
-  const timeout = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => { reject(new CodexTransportError(timeoutCode)) }, deadline.expiresAtMs - Date.now())
-    if (deadline.signal !== undefined) {
-      onAbort = () => { reject(new CodexTransportError(timeoutCode)) }
-      deadline.signal.addEventListener('abort', onAbort, {once: true})
-    }
-  })
-  try {
-    return await Promise.race([operation, timeout])
-  } finally {
-    if (timer !== undefined) clearTimeout(timer)
-    if (onAbort !== undefined) deadline.signal?.removeEventListener('abort', onAbort)
-  }
+  return await raceDeadline(operation, REAL_SCHEDULER.clock,
+    Math.max(0, deadline.expiresAtMs - Date.now()) / 1000, deadline.signal, () => new CodexTransportError(timeoutCode))
 }
 
 async function writeDrain(stream: Writable, bytes: Uint8Array): Promise<void> {
@@ -1770,7 +1903,7 @@ function outcome(
 }
 
 function mapProtocolFailure(error: unknown): CodexTransportError {
-  if (error instanceof AppServerRequestRejected) return new CodexTransportError('server_rejected')
+  if (error instanceof AppServerRequestRejected) return new CodexTransportError('server_rejected', error.diagnostic)
   if (!(error instanceof CodexProtocolError)) return new CodexTransportError('transport_lost')
   if (error.code === 'stdout_too_large' || error.code === 'stdout_line_too_large') {
     return new CodexTransportError('transport_lost')
@@ -1787,7 +1920,7 @@ function mapProtocolFailure(error: unknown): CodexTransportError {
 }
 
 function safeTransportError(error: unknown, fallback: CodexTransportCode): CodexTransportError {
-  if (error instanceof CodexTransportError) return new CodexTransportError(error.code)
+  if (error instanceof CodexTransportError) return new CodexTransportError(error.code, error.diagnostic)
   if (error instanceof CodexProtocolError) return mapProtocolFailure(error)
   if (isPlainRecord(error)) {
     const code = error.code
@@ -1809,7 +1942,7 @@ const TRANSPORT_CODES: ReadonlySet<CodexTransportCode> = new Set([
   'completed', 'adapter_timeout', 'binary_missing', 'credential_missing', 'preflight_failed',
   'preflight_timeout', 'sandbox_failed', 'spawn_failed', 'stderr_too_large', 'transport_lost',
   'unsupported_protocol', 'unsupported_version', 'workspace_invalid', 'workspace_root_mismatch',
-  'resume_unavailable', 'server_rejected', 'turn_failed', 'missing_terminal', 'nonzero_exit',
+  'resume_unavailable', 'server_rejected', 'turn_failed', 'usage_limit_exceeded', 'missing_terminal', 'nonzero_exit',
   'unexpected_server_request', 'busy', 'config_not_isolated', 'mcp_tools_not_isolated',
 ])
 

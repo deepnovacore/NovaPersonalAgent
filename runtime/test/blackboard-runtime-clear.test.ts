@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {MonotonicIdFactory, ScriptedIdFactory} from '../src/ids.js'
-import {handoffPolicySchema} from '../src/memory.js'
-import {executorManifestSchema, fastBrainOutputSchema} from '../src/ports.js'
-import {CoreRuntime, type ModelCall} from '../src/runtime.js'
+import {MonotonicIdFactory, ScriptedIdFactory} from '../src/core/ids.js'
+import {handoffPolicySchema} from '../src/core/memory.js'
+import {executorManifestSchema, fastBrainOutputSchema} from '../src/core/ports.js'
+import {CoreRuntime, type ModelCall} from '../src/core/runtime.js'
 
 const manifest = executorManifestSchema.parse({
   name: 'worker', display_name: 'worker', probe_policy: 'readonly_ops',

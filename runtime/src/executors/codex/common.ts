@@ -1,3 +1,4 @@
+import {executorDiagnosticSchema, type ExecutorDiagnostic} from '../../core/executor-diagnostic.js'
 import {createHash} from 'node:crypto'
 
 import type {
@@ -8,7 +9,7 @@ import type {
 } from './app-server-transport.js'
 import {CodexTransportError} from './app-server-transport.js'
 import {
-  INTERNAL_CODEX_RUN_DEADLINE,
+  CODEX_STARTUP_DEADLINE,
   MAX_CODEX_EVIDENCE_COUNTER,
   PUBLIC_PREFLIGHT_CODES,
   createCodexRunEnvelope,
@@ -22,13 +23,15 @@ import type {
   ExecutorDispatchContext,
   ExecutorHandoff,
   ExecutorProgress,
-} from '../../causal-runtime.js'
-import type {Clock} from '../../clock.js'
-import {RealClock} from '../../clock.js'
-import {jsonValueSchema, validProgressSummary, type JsonValue} from '../../events.js'
+} from '../../core/causal-runtime.js'
+import type {Clock} from '../../core/clock.js'
+import {RealClock, raceDeadline} from '../../core/clock.js'
+import {jsonValueSchema, validProgressSummary, type JsonValue} from '../../core/events.js'
 
 const TRANSPORT_CODES: ReadonlySet<string> = new Set<CodexTransportCode>([
   'completed',
+  'config_not_isolated',
+  'mcp_tools_not_isolated',
   'adapter_timeout',
   'binary_missing',
   'credential_missing',
@@ -45,6 +48,7 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set<CodexTransportCode>([
   'resume_unavailable',
   'server_rejected',
   'turn_failed',
+  'usage_limit_exceeded',
   'missing_terminal',
   'nonzero_exit',
   'unexpected_server_request',
@@ -52,6 +56,8 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set<CodexTransportCode>([
 ])
 const PREFLIGHT_CODES: ReadonlySet<string> = new Set(PUBLIC_PREFLIGHT_CODES)
 const REFUSED_CODES: ReadonlySet<string> = new Set([
+  'config_not_isolated',
+  'mcp_tools_not_isolated',
   'adapter_timeout',
   'binary_missing',
   'busy',
@@ -79,6 +85,7 @@ const UNCERTAIN_CODES: ReadonlySet<string> = new Set([
   'stderr_too_large',
   'transport_lost',
   'turn_failed',
+  'usage_limit_exceeded',
   'unsupported_protocol',
   'unexpected_server_request',
 ])
@@ -89,7 +96,7 @@ export interface CodexAdapterScheduler {
   readonly lifecycleClock?: Clock
 }
 
-export type CodexFailureStage = 'preflight' | 'credential' | 'spawn' | 'thread_start'
+export type CodexFailureStage = 'preflight' | 'credential' | 'spawn' | 'thread_start' | 'execution'
 
 const DEFAULT_LIFECYCLE_CLOCK = new RealClock()
 const DEFAULT_SCHEDULER: CodexAdapterScheduler = {
@@ -106,6 +113,7 @@ interface RunDeadline {
 }
 
 interface ValidatedOutcome {
+  readonly diagnostic?: ExecutorDiagnostic
   readonly classification: 'completed' | 'refused' | 'uncertain'
   readonly code: CodexTransportCode
   readonly turnStartWritten: boolean
@@ -133,7 +141,6 @@ export function createCodexAdapterSharedState(): CodexAdapterSharedState {
 
 export class CodexAdapterCore {
   readonly #transport: CodexAppServerTransport
-  readonly #live: boolean
   readonly #scheduler: CodexAdapterScheduler
   readonly #sharedState: CodexAdapterSharedState
   #runActive = false
@@ -143,13 +150,11 @@ export class CodexAdapterCore {
   constructor(
     transport: CodexAppServerTransport,
     options: {
-      readonly live: boolean
       readonly scheduler?: CodexAdapterScheduler
       readonly sharedState?: CodexAdapterSharedState
     },
   ) {
     this.#transport = transport
-    this.#live = options.live
     this.#scheduler = options.scheduler ?? DEFAULT_SCHEDULER
     this.#sharedState = options.sharedState ?? createCodexAdapterSharedState()
   }
@@ -169,8 +174,8 @@ export class CodexAdapterCore {
       outcome: 'ok',
       trust: 'trusted_system',
       content: requireJsonRecord(projectCodexStatus(this.#status, now, {
-        live: this.#live,
-        ...(this.#live ? {progress: this.#latestProgress} : {}),
+        live: true,
+        progress: this.#latestProgress,
       })),
     }
   }
@@ -194,7 +199,7 @@ export class CodexAdapterCore {
     const startedAt = context.clock.now()
     const deadline = createRunDeadline(
       context.clock,
-      INTERNAL_CODEX_RUN_DEADLINE,
+      CODEX_STARTUP_DEADLINE,
       context.signal,
       this.#scheduler,
     )
@@ -203,6 +208,7 @@ export class CodexAdapterCore {
     let preflightPassed = false
     let processStarted = false
     let sideEffectSeen = false
+    let turnBound = false
     let observerOpen = true
     this.#latestProgress = null
     this.#status = freezeStatus({
@@ -229,7 +235,7 @@ export class CodexAdapterCore {
         if (!observerOpen || this.#runToken !== runToken) return
         const progress = sanitizeProgress(value)
         if (progress === null) return
-        if (this.#live) this.#latestProgress = progress
+        this.#latestProgress = progress
         try { context.progress(progress) } catch { /* advisory progress never owns the worker */ }
       },
       onTurnStartWritten: (): void => {
@@ -239,6 +245,7 @@ export class CodexAdapterCore {
       onTurnBound: (): void => {
         if (!observerOpen || this.#runToken !== runToken) return
         sideEffectSeen = true
+        turnBound = true
         try { options.onTurnBound?.() } catch { /* advisory state never owns the worker */ }
       },
     }
@@ -269,7 +276,7 @@ export class CodexAdapterCore {
         if (error instanceof CodexAdapterClosedError) return failureHandoff('closed', 'run')
         const code = error instanceof InvalidPreflightError
           ? 'invalid_preflight_report'
-          : safePreflightExceptionCode(error, this.#live ? 'transport_failure' : 'worker_exception_before_start')
+          : safePreflightExceptionCode(error, 'transport_failure')
         return createRunHandoff(
           'failed', 'trusted_system', code, preflight, failureStage(code, 'preflight'),
         )
@@ -278,8 +285,8 @@ export class CodexAdapterCore {
       let rawOutcome: TransportOutcome
       try {
         rawOutcome = await awaitCodexPhase(
-          () => this.#transport.run({workOrder}, observer, deadline.transport),
-          deadline,
+          () => this.#transport.run({workOrder}, observer, deadline.transport, null),
+          deadline, false,
         )
       } catch (error) {
         if (
@@ -298,16 +305,14 @@ export class CodexAdapterCore {
         const afterStart = sideEffectSeen
         const code = safePreflightExceptionCode(
           error,
-          this.#live
-            ? 'transport_failure'
-            : (afterStart ? 'worker_exception_after_start' : 'worker_exception_before_start'),
+          'transport_failure',
         )
         return createRunHandoff(
           afterStart ? 'unknown' : 'failed',
           afterStart ? 'untrusted_external' : 'trusted_system',
           code,
           preflight,
-          failureStage(code, 'thread_start'),
+          failureStage(code, turnBound ? 'execution' : 'thread_start'),
         )
       }
 
@@ -349,15 +354,16 @@ export class CodexAdapterCore {
       if (admitted.classification === 'refused') {
         return createRunHandoff(
           'failed',
-          'trusted_system',
-          this.#live && PREFLIGHT_CODES.has(admitted.code) ? admitted.code : 'worker_refused',
+          admitted.diagnostic === undefined ? 'trusted_system' : 'untrusted_external',
+          admitted.code,
           preflight,
           failureStage(admitted.code, 'thread_start'),
+          undefined, admitted.diagnostic,
         )
       }
       if (admitted.classification === 'uncertain') {
         return createRunHandoff(
-          'unknown', 'untrusted_external', admitted.code, preflight, 'thread_start',
+          'unknown', 'untrusted_external', admitted.code, preflight, turnBound ? 'execution' : 'thread_start', undefined, admitted.diagnostic,
         )
       }
       if (evidence === null || !admitted.turnStartWritten) {
@@ -527,24 +533,20 @@ function createRunDeadline(
   }
 }
 
-async function awaitCodexPhase<T>(start: () => Promise<T>, deadline: RunDeadline): Promise<T> {
-  const remaining = deadline.expiresAt - deadline.clock.now()
+async function awaitCodexPhase<T>(start: () => Promise<T>, deadline: RunDeadline, bounded = true): Promise<T> {
+  const remaining = bounded ? deadline.expiresAt - deadline.clock.now() : null
   if (deadline.controller.signal.aborted) {
     throw abortError()
   }
-  if (!(remaining > 0)) {
+  if (remaining !== null && !(remaining > 0)) {
     deadline.controller.abort()
     throw new AdapterDeadlineError()
   }
   const work = Promise.resolve().then(start)
-  const timerController = new AbortController()
-  const timeout = deadline.clock.sleep(remaining, timerController.signal).then(() => {
-    throw new AdapterDeadlineError()
-  })
-  const aborted = abortPromise(deadline.controller.signal)
   try {
-    const result = await Promise.race([work, timeout, aborted])
-    if (deadline.clock.now() >= deadline.expiresAt) throw new AdapterDeadlineError()
+    const result = await raceDeadline(work, deadline.clock, remaining, deadline.controller.signal,
+      () => new AdapterDeadlineError(), abortError)
+    if (bounded && deadline.clock.now() >= deadline.expiresAt) throw new AdapterDeadlineError()
     return result
   } catch (error) {
     if (error instanceof AdapterDeadlineError || deadline.controller.signal.aborted) {
@@ -556,10 +558,6 @@ async function awaitCodexPhase<T>(start: () => Promise<T>, deadline: RunDeadline
       throw new AdapterAbortError(late.state === 'fulfilled' ? late.value : undefined)
     }
     throw error
-  } finally {
-    timerController.abort()
-    void timeout.catch(() => undefined)
-    void aborted.catch(() => undefined)
   }
 }
 
@@ -601,13 +599,6 @@ export function readWrittenBoundary(
   }
 }
 
-function abortPromise(signal: AbortSignal): Promise<never> {
-  if (signal.aborted) return Promise.reject(abortError())
-  return new Promise<never>((_resolve, reject) => {
-    signal.addEventListener('abort', () => { reject(abortError()) }, {once: true})
-  })
-}
-
 function requirePreflight(value: unknown): Readonly<Record<string, unknown>> {
   const admitted = sanitizeCodexPreflightReport(value)
   if (
@@ -624,7 +615,10 @@ function requirePreflight(value: unknown): Readonly<Record<string, unknown>> {
 function validateOutcome(value: unknown): ValidatedOutcome | null {
   try {
     const snapshot = snapshotJsonRecord(value)
-    if (!sameKeys(snapshot, ['classification', 'code', 'turnStartWritten', 'completion'])) return null
+    if (!sameKeys(snapshot, ['classification', 'code', 'turnStartWritten', 'completion'])
+      && !sameKeys(snapshot, ['classification', 'code', 'turnStartWritten', 'completion', 'diagnostic'])) return null
+    const parsedDiagnostic = executorDiagnosticSchema.safeParse(snapshot.diagnostic)
+    const diagnostic = parsedDiagnostic.success ? parsedDiagnostic.data : undefined
     if (
       snapshot.classification !== 'completed'
       && snapshot.classification !== 'refused'
@@ -635,9 +629,20 @@ function validateOutcome(value: unknown): ValidatedOutcome | null {
     let completion: ValidatedOutcome['completion'] = null
     if (snapshot.completion !== null) {
       const candidate = snapshotJsonRecord(snapshot.completion)
-      if (!sameKeys(candidate, ['status', 'final_text', 'internal_activity'])) return null
+      if (
+        !sameKeys(candidate, ['status', 'final_text', 'internal_activity'])
+        && !sameKeys(candidate, ['status', 'final_text', 'internal_activity', 'error_code'])
+      ) return null
       if (candidate.status !== 'completed' && candidate.status !== 'failed') return null
       if (candidate.final_text !== null && typeof candidate.final_text !== 'string') return null
+      if (
+        Object.hasOwn(candidate, 'error_code')
+        && candidate.error_code !== null
+        && candidate.error_code !== 'usage_limit_exceeded'
+      ) return null
+      if (candidate.status === 'completed' && candidate.error_code !== undefined && candidate.error_code !== null) {
+        return null
+      }
       if (
         typeof candidate.internal_activity !== 'number'
         || !Number.isSafeInteger(candidate.internal_activity)
@@ -648,6 +653,7 @@ function validateOutcome(value: unknown): ValidatedOutcome | null {
         status: candidate.status,
         final_text: candidate.final_text,
         internal_activity: candidate.internal_activity,
+        ...(Object.hasOwn(candidate, 'error_code') ? {error_code: candidate.error_code as 'usage_limit_exceeded' | null} : {}),
       })
     }
     if (snapshot.classification === 'completed') {
@@ -668,6 +674,7 @@ function validateOutcome(value: unknown): ValidatedOutcome | null {
       || !UNCERTAIN_CODES.has(snapshot.code)
     ) return null
     return Object.freeze({
+      ...(diagnostic === undefined ? {} : {diagnostic}),
       classification: snapshot.classification,
       code: snapshot.code as CodexTransportCode,
       turnStartWritten: snapshot.turnStartWritten,
@@ -721,11 +728,13 @@ function createRunHandoff(
   preflight: Readonly<Record<string, unknown>>,
   stage?: CodexFailureStage,
   evidence?: Readonly<Record<string, unknown>>,
+  diagnostic?: ExecutorDiagnostic,
 ): ExecutorHandoff {
   return {
     outcome,
     trust,
-    content: requireJsonRecord(createCodexRunEnvelope(code, preflight, evidence, stage)),
+    content: requireJsonRecord({...createCodexRunEnvelope(code, preflight, evidence, stage),
+      ...(diagnostic === undefined ? {} : {diagnostic})}),
   }
 }
 

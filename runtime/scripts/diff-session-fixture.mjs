@@ -1,8 +1,8 @@
 // Show where the Node replay of one session scenario diverges from its Python golden.
 // Usage: node runtime/scripts/diff-session-fixture.mjs <scenario-id>
 import { resolve } from 'node:path'
-import { canonicalJson } from '../dist/src/canonical-json.js'
-import { loadSessionFixture } from '../dist/src/realtime/session-fixtures.js'
+import { canonicalJson } from '../dist/src/text/canonical-json.js'
+import { loadSessionFixture } from '../dist/eval/realtime/session-fixtures.js'
 import { runSessionFixture } from '../dist/test/session-fixture-host.js'
 
 const scenario = process.argv[2]

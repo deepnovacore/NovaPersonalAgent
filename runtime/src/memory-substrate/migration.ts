@@ -1,6 +1,6 @@
 import {existsSync} from 'node:fs'
 import {z} from 'zod'
-import {canonicalJson} from '../canonical-json.js'
+import {canonicalJson} from '../text/canonical-json.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
 import {contentHash,memoryOperation} from './store.js'
 

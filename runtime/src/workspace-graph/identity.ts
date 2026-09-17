@@ -1,14 +1,14 @@
 import {createHash} from 'node:crypto'
 import {posix, win32} from 'node:path'
 
-import {canonicalJson, compareCodePoints} from '../canonical-json.js'
+import {canonicalJson, compareCodePoints} from '../text/canonical-json.js'
 import {
   collapsePythonWhitespace,
   isWellFormed,
   stripLikePython,
-} from '../python-text.js'
-import {casefoldLikePython} from '../unicode-casefold.js'
-import {normalizeNfkcPinned} from '../unicode-normalize.js'
+} from '../text/python-text.js'
+import {casefoldLikePython} from '../text/unicode-casefold.js'
+import {normalizeNfkcPinned} from '../text/unicode-normalize.js'
 import type {
   LogicalWorkspace,
   WorkspaceInstance,
@@ -16,7 +16,7 @@ import type {
 import {
   SensitiveContentPolicy,
   SensitivePathPolicy,
-} from './sensitivity.js'
+} from '../memory/sensitivity.js'
 
 export const ASR_ALIAS_CONFIDENCE_CAP = 0.25
 

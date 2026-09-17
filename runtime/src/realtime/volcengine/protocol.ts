@@ -264,5 +264,5 @@ function decodeIdentifier(bytes: Uint8Array, message: string): string {
     throw new VolcProtocolError(message)
   }
 }
-import { isWellFormed } from '../../python-text.js'
+import { isWellFormed } from '../../text/python-text.js'
 import { MAX_VOLCENGINE_WIRE_FRAME_BYTES } from './audio.js'

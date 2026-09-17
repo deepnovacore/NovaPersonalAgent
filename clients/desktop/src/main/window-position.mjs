@@ -133,6 +133,7 @@ export function confirmationWindowLayout({normalBounds, zoomFactor, workArea}) {
 export function bubbleWindowLayout({
   normalBounds,
   rows,
+  taskRows = 0,
   zoomFactor,
   scaleFactor,
   workArea,
@@ -141,7 +142,7 @@ export function bubbleWindowLayout({
   if (!validRectangle(normalBounds) || !validRectangle(workArea)) {
     throw new TypeError('bubble window geometry is invalid')
   }
-  if (!Number.isInteger(rows) || rows < 1 || rows > 6) {
+  if (!Number.isInteger(rows) || rows < 0 || rows > 6 || !Number.isInteger(taskRows) || taskRows < 0 || taskRows > 5 || (rows === 0 && taskRows === 0)) {
     throw new RangeError('bubble rows are invalid')
   }
   if (!Number.isFinite(zoomFactor) || zoomFactor <= 0 || zoomFactor > 5
@@ -158,7 +159,9 @@ export function bubbleWindowLayout({
     x: orbScreenCenter.x - Math.round(bubbleWidth / 2),
     y: workArea.y,
   }, {width: bubbleWidth, height: 1}, workArea).x
-  const orbOffsetX = orbScreenCenter.x - x
+  // Keep the full 160 CSS-pixel orb/controls surface inside the window at zoomed edges.
+  const orbMargin = 80 * zoomFactor
+  const orbOffsetX = Math.max(orbMargin, Math.min(bubbleWidth - orbMargin, orbScreenCenter.x - x))
   const bubbleAlignment = orbOffsetX < Math.round(bubbleWidth / 2)
     ? 'left'
     : orbOffsetX > Math.round(bubbleWidth / 2) ? 'right' : 'center'
@@ -176,6 +179,7 @@ export function bubbleWindowLayout({
         zoomFactor,
         bubbleHeight,
         bubbleWidth,
+        taskRows,
         x,
         workArea,
       })
@@ -217,31 +221,23 @@ export function bubbleWindowLayout({
   })
 }
 
-function bubbleOnlyLayout({normalBounds, zoomFactor, bubbleHeight, bubbleWidth, x, workArea}) {
-  const naturalHeight = Math.max(NATURAL_ORB_WINDOW_SIZE.height, Math.ceil(160 * zoomFactor))
+function bubbleOnlyLayout({normalBounds, zoomFactor, bubbleHeight, bubbleWidth, taskRows = 0, x, workArea}) {
+  // 55px above the center joins the chat tail; 125px below holds status and workspace.
+  const naturalHeight = Math.ceil(180 * zoomFactor)
   if (naturalHeight + bubbleHeight > workArea.height || bubbleWidth > workArea.width) {
     return {suppressed: true, bubblePlacement: 'above', position: normalBounds,
       height: normalBounds.height, orbOffsetX: normalBounds.width / 2, orbOffsetY: normalBounds.height / 2}
   }
-  const orbOffset = Math.round(naturalHeight / 2)
-  const above = {
+  const orbOffset = 55 * zoomFactor
+  const available = Math.floor((workArea.height - naturalHeight - bubbleHeight) / zoomFactor)
+  const taskHeightCss = taskRows && available >= 128 ? Math.min(taskRows * 96 + 64, available) : 0
+  return {
+    taskHeightCss,
     bubblePlacement: 'above',
     position: {x, y: rectangleCenter(normalBounds).y - bubbleHeight - orbOffset},
-    height: naturalHeight + bubbleHeight,
+    height: naturalHeight + bubbleHeight + Math.ceil(taskHeightCss * zoomFactor),
     orbOffsetY: bubbleHeight + orbOffset,
   }
-  const below = {
-    bubblePlacement: 'below',
-    position: {x, y: rectangleCenter(normalBounds).y - orbOffset},
-    height: naturalHeight + bubbleHeight,
-    orbOffsetY: orbOffset,
-  }
-  return fitsWorkArea(above.position, {width: bubbleWidth, height: above.height}, workArea)
-    ? above
-    : fitsWorkArea(below.position, {width: bubbleWidth, height: below.height}, workArea)
-      ? below
-      : overflow(above.position, {width: bubbleWidth, height: above.height}, workArea)
-        <= overflow(below.position, {width: bubbleWidth, height: below.height}, workArea) ? above : below
 }
 
 function bubbleConfirmationLayout({normalBounds, zoomFactor, bubbleHeight, bubbleWidth, x, workArea}) {
@@ -331,7 +327,7 @@ export function createOrbWindowController({
 }) {
   let normalBounds = null
   let confirmationActive = false
-  let rows = 0
+  let rows = 0, taskRows = 0
   let activeLayout = null
   let dormant = false
 
@@ -348,7 +344,7 @@ export function createOrbWindowController({
   }
 
   function restoreIfNatural() {
-    if (confirmationActive || rows > 0 || dormant || normalBounds === null) return false
+    if (confirmationActive || rows > 0 || taskRows > 0 || dormant || normalBounds === null) return false
     setBounds(normalBounds)
     normalBounds = null
     activeLayout = null
@@ -361,10 +357,11 @@ export function createOrbWindowController({
     if (normalBounds === null) return null
     const center = rectangleCenter(normalBounds)
     const workArea = getWorkAreaForPoint(center)
-    if (rows > 0) {
+    if (rows > 0 || taskRows > 0) {
       const layout = bubbleWindowLayout({
         normalBounds,
         rows,
+        taskRows,
         zoomFactor: getZoomFactor(),
         scaleFactor: getScaleFactor(),
         workArea,
@@ -429,12 +426,13 @@ export function createOrbWindowController({
     return sync()
   }
 
-  function reserveBubbleArea(nextRows) {
-    if (!Number.isInteger(nextRows) || nextRows < 0 || nextRows > 6) {
+  function reserveBubbleArea(nextRows, nextTaskRows = 0) {
+    if (!Number.isInteger(nextRows) || nextRows < 0 || nextRows > 6 || !Number.isInteger(nextTaskRows) || nextTaskRows < 0 || nextTaskRows > 5) {
       throw new RangeError('bubble rows are invalid')
     }
-    if (nextRows > 0) ensureNormalBounds()
+    if (nextRows > 0 || nextTaskRows > 0) ensureNormalBounds()
     rows = nextRows
+    taskRows = nextTaskRows
     return sync() || Object.freeze({rows: 0, suppressed: false, bubblePlacement: 'above'})
   }
 

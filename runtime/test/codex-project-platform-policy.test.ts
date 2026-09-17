@@ -9,7 +9,7 @@ import {
   ProjectStateError,
   hostManagedProjectRootForTest,
   hostProjectRootForTest,
-} from '../src/project-store.js'
+} from '../src/projects/project-store.js'
 
 test('every foreground project broker selects ask and every missing broker selects headless ask', () => {
   assert.equal(resolveCodexLaunchProfile({

@@ -1049,7 +1049,7 @@ test('the orb markup hosts the particle canvas instead of gradient spans', async
 test('the orb rail carries the mute toggle and settings buttons', async () => {
   const html = await readFile(new URL('../src/renderer/index.html', import.meta.url), 'utf8')
   assert.match(html, /<nav id="orb-rail" aria-label="快捷操作">/)
-  assert.match(html, /<button id="mute-toggle" type="button" aria-label="闭麦" aria-pressed="false" disabled>/)
+  assert.match(html, /<button id="mute-toggle" title="切换闭麦（Ctrl\+M）" type="button" aria-label="闭麦" aria-pressed="false" disabled>/)
   assert.match(html, /<button id="speaker-toggle" type="button" aria-label="关闭 Nova 声音" aria-pressed="true"/)
   assert.match(html, /<button id="camera-toggle" type="button" aria-label="打开摄像头" aria-pressed="false" disabled>/)
   assert.match(html, /<button id="open-settings" type="button" aria-label="设置">/)

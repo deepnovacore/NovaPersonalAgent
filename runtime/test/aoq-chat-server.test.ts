@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto'
 import {once} from 'node:events'
 import {test} from 'node:test'
 import {WebSocket} from 'ws'
-import {AoqChatServer, issueAoqCredential, aoqCredentialURL} from '../src/aoq-chat-server.js'
+import {AoqChatServer, issueAoqCredential, aoqCredentialURL} from '../src/server/aoq-chat-server.js'
 
 const token = 'a'.repeat(32)
 const allocation = {

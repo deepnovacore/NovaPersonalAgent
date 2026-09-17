@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
-import type {ModelGateway} from '../src/model-gateway.js'
+import type {ModelGateway} from '../src/model/model-gateway.js'
 
 test('substrate resource keeps identity, correction, restart and source deletion on worker',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-substrate-'));const path=join(root,'memory.sqlite')

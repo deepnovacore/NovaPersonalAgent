@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {executorProgressSchema, executorResultSchema, projectExecutorEvent, safeProgressSummary} from '../src/desktop-progress.js'
-import type {EventRecord} from '../src/events.js'
-import type {HandoffPolicy} from '../src/memory.js'
-import type {Delegate} from '../src/ports.js'
+import {executorProgressSchema, executorResultSchema, projectExecutorEvent, safeProgressSummary} from '../src/desktop/desktop-progress.js'
+import type {EventRecord} from '../src/core/events.js'
+import type {HandoffPolicy} from '../src/core/memory.js'
+import type {Delegate} from '../src/core/ports.js'
 
 const delegate: Delegate = {delegate_id: 'd', executor: 'codex', op: 'project', request: {},
   origin_ref: 'conversation:1', deadline: 60, routing_class: 'user_awaited', dispatched_at: 1}
@@ -36,6 +36,19 @@ test('progress projects only correlated accepted evidence and never private comm
   })
   assert.deepEqual(projectExecutorEvent(terminal, evidence, channel => channel === 'codex' ? 'coding_agent' : null)?.result, {
     delegate_id: 'd', executor: 'coding_agent', outcome: 'ok', summary: 'coding_agent 已完成任务。', started_at: 1, ended_at: 3, changed_files: null,
+  })
+  const superseded: EventRecord = {seq: 3, ts: 4, kind: 'handoff', payload: {
+    channel: 'codex', delegate_id: 'd', origin_ref: 'conversation:1', outcome: 'refused', trust: 'trusted_system', content: {error: 'superseded'}, refs: [],
+  }}
+  assert.deepEqual(projectExecutorEvent(superseded, evidence)?.result, {
+    delegate_id: 'd', executor: 'codex', outcome: 'refused', summary: 'Codex 任务未启动。', started_at: 1, ended_at: 4, changed_files: null,
+  })
+  const usageLimited: EventRecord = {seq: 4, ts: 5, kind: 'handoff', payload: {
+    channel: 'codex', delegate_id: 'd', origin_ref: 'conversation:1', outcome: 'unknown', trust: 'untrusted_external',
+    content: {code: 'usage_limit_exceeded', summary: 'raw provider quota text must stay private'}, refs: [],
+  }}
+  assert.deepEqual(projectExecutorEvent(usageLimited, evidence)?.result, {
+    delegate_id: 'd', executor: 'codex', outcome: 'unknown', summary: 'Codex 额度不足，任务未完成。', started_at: 1, ended_at: 5, changed_files: null,
   })
   assert.equal(projectExecutorEvent(terminal, {...evidence, claimedHandoff: () => undefined}), null)
   assert.equal(projectExecutorEvent({...terminal, ts: 0}, evidence), null)
@@ -79,4 +92,14 @@ test('monitor progress follows policy when its channel is renamed', () => {
 
   const urgent: HandoffPolicy = {...monitor, alert_delivery: 'preemptive'}
   assert.equal(projectExecutorEvent(hit, monitorEvidence, () => 'vision', () => urgent)?.progress.level, 'milestone')
+})
+
+test('terminal task detail keeps correlated server diagnostics outside spoken progress', () => {
+  const diagnostic = {method: 'thread/resume', server_code: -32600, message: 'no rollout found'}
+  const event: EventRecord = {seq: 9, ts: 3, kind: 'handoff', payload: {
+    channel: 'codex', delegate_id: 'd', origin_ref: 'conversation:1', outcome: 'failed', trust: 'trusted_system', content: {diagnostic}, refs: [],
+  }}
+  const frame = projectExecutorEvent(event, evidence)
+  assert.deepEqual(frame?.result?.diagnostic, diagnostic)
+  assert.equal(frame?.progress.summary.includes('no rollout'), false)
 })

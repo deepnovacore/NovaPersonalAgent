@@ -17,9 +17,8 @@
   不保证派生条目立即完成纠正；`recall` 的命中没有逐条稳定 ID 与版本、没有 stated / inferred 标记，
   也没有列表接口。
 - `runtime/src/memory/factory.ts`：按 `Settings` 选择远程或本地 VoiceMem 后端。
-- `runtime/src/workspace-graph/`：可选的持久工作区记忆图，有压缩上限。
-- `runtime/src/context-view.ts`：唯一面向模型的有界投影。
-- 桌面 `clients/desktop/src/renderer/memory-board.mjs`：面向开发者的通道 / 诊断 / 图视图，
+- `runtime/src/core/context-view.ts`：唯一面向模型的有界投影。
+- 桌面 `clients/desktop/src/renderer/memory-board.mjs`：面向开发者的通道 / 诊断视图，
   没有用户视角、没有来源与 stated / inferred 区分。
 - 知识库（`runtime/src/knowledge/`）保存源内容与分块；它是**资料库**，不是记忆。
 - **没有用户画像层**，也没有任何"关于你"的生成摘要。
@@ -30,7 +29,7 @@
 
 `memory_entry` 由主机从 personal-memory 端口读出并整理，面向用户展示。它不新增存储。
 下列能力在 `v0.3.0dev` 已由扩展后的 VoiceMem Worker 提供；"记忆底座"里程碑落地后由 06 卷底座统一提供，
-VoiceMem 与 Workspace Graph 改为底座的写入方（经 merge 写修订），不再各自实现这些接口：
+VoiceMem 与 历史工作区存储 改为底座的写入方（经 merge 写修订），不再各自实现这些接口：
 
 | 新增能力（可选实现） | 契约 | 用途 |
 |---|---|---|
@@ -40,8 +39,8 @@ VoiceMem 与 Workspace Graph 改为底座的写入方（经 merge 写修订）�
 | `forgetEntry(entry_id, expected_version)` | 按条目忘记，并写入抑制标记 | 忘记（区别于现有按来源的 `forget(sourceId)`） |
 | `capabilities()` | 声明上述哪些已实现 | UI 如实显示不支持的操作 |
 
-后端未实现某能力时，主机按能力声明降级：记忆页不显示列表或禁用相应按钮并解释原因，
-不能假装成功。02 卷的记忆版本校验依赖 `get`；后端不提供版本时，02 卷必须把 `memory_refs`
+底座尚未接入某个写入方（例如 VoiceMem 仍在迁移）时，来自该写入方的条目在能力声明中标为
+只读，记忆页禁用相应按钮并解释原因，不能假装成功。02 卷的记忆版本校验依赖 `get`；后端不提供版本时，02 卷必须把 `memory_refs`
 视为不可校验并拒绝依赖它的 proposal，而不是跳过校验。
 
 `version` 即 06 卷的 `revision`。

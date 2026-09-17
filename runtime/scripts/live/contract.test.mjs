@@ -13,7 +13,7 @@ test('fixture contract, current built-in surface and expectations cannot silentl
   const parsed = validateFixtures(fixture)
   const full = surface()
   assert.deepEqual(full.tools.map(tool => tool.name).sort(), ['memory__recall','search__search',
-    'mcp__nova_camera__snapshot','mcp__nova_knowledge__recall','dispatch','cancel','confirm'].sort())
+    'mcp__nova_knowledge__recall','dispatch','cancel','confirm'].sort())
   assert.deepEqual(surface(['coding','camera','search','knowledge']).tools.map(tool => tool.name), ['memory__recall'])
   const covered = new Set()
   for (const entry of parsed.cases) for (const step of entry.steps) for (const call of step.expect.calls) {
@@ -47,7 +47,7 @@ test('runner missing credentials writes blocked report and exits nonzero without
   const directory = mkdtempSync(join(tmpdir(),'nova-live-contract-'))
   try {
     const output = join(directory,'report.json')
-    const result = spawnSync(process.execPath,[fileURLToPath(new URL('./run.mjs',import.meta.url)),
+    const result = spawnSync(process.execPath,[fileURLToPath(new URL('../live-smoke.mjs',import.meta.url)),
       '--provider','qwen','--case','greeting','--output',output], {env:{PATH:process.env.PATH},encoding:'utf8'})
     assert.equal(result.status,2,result.stderr)
     const report = JSON.parse(readFileSync(output,'utf8'))
@@ -82,18 +82,27 @@ test('continuation reuses call id, validates the answer, and preserves partial p
 })
 
 
-test('catalogue paths exist and retired commands fail closed', () => {
+test('catalogue paths exist and retired targets have no executable', () => {
   const catalog = JSON.parse(readFileSync(new URL('./catalog.json',import.meta.url)))
   assert.equal(new Set(catalog.suites.map(suite => suite.id)).size,catalog.suites.length)
   for (const suite of catalog.suites) {
+    if (suite.retired) {
+      assert.equal(suite.entry,undefined,suite.id)
+      const directory = mkdtempSync(join(tmpdir(),'nova-retired-live-'))
+      try {
+        const output = join(directory,'report.json')
+        const result = spawnSync(process.execPath,[fileURLToPath(new URL('../live-smoke.mjs',import.meta.url)),
+          `--target=${suite.id}`,'--output',output], {env:{PATH:process.env.PATH},encoding:'utf8'})
+        assert.equal(result.status,2,result.stderr)
+        const report = JSON.parse(readFileSync(output,'utf8'))
+        assert.equal(report.results[0].reason,'retired_suite')
+        assert.equal(report.summary.accepted,false)
+      } finally { rmSync(directory,{recursive:true,force:true}) }
+      continue
+    }
     if (suite.entry === 'text-tools') continue
     const entry = new URL('../../'+suite.entry,import.meta.url)
     assert.ok(existsSync(entry),suite.id)
-    if (suite.retired) {
-      const result = spawnSync(process.execPath,[fileURLToPath(entry)],{encoding:'utf8'})
-      assert.equal(result.status,2)
-      assert.match(result.stderr,/retired/u)
-    }
   }
 })
 
@@ -151,3 +160,20 @@ test('optional memory fallback accepts an honest direct limitation or validates 
   assert.equal((await runTextCase(entry,{},1000,factory([recall,reply('没有记录')]))).status,'failed')
   assert.equal((await runTextCase(entry,{},1000,factory([recall,reply('搜索不可用')]))).status,'failed')
 })
+
+ test('clarification fixtures preserve user turns and refuse tool calls before the answer', async () => {
+   const entry = validateFixtures(fixture).cases.find(item => item.id === 'coding-clarify-before-dispatch')
+   let turn = 0
+   const result = await runTextCase(entry, {provider:'qwen',model:'test'}, 1000, () => ({open: () => ({
+     async *stream(input) {
+       turn++
+       assert.deepEqual(input.inputs, [{kind:'user_text',text:turn === 1 ? entry.text : entry.steps[0].user}])
+       if (turn === 1) yield {kind:'text_delta',text:'要网页还是桌面版？'}
+       else yield {kind:'tool_call',name:'dispatch',call_id:'d1',arguments:{executor:'codex',instruction:'贪吃蛇网页，方向键控制，显示分数，不安装依赖',origin_ref:'conversation:1',source_refs:['conversation:1']}}
+       yield {kind:'response_completed'}
+     },
+     close:async () => {},
+   })}))
+   assert.equal(result.status, 'passed')
+   assert.equal(turn, 2)
+ })

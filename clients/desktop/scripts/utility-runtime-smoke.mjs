@@ -1,3 +1,4 @@
+import {createBackendControl, createBackendSupervisor, classifyBackendFailure, createBackendDiagnosticCollector} from '../src/main/backend-supervisor.mjs'
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
@@ -9,20 +10,18 @@ import {createServer} from 'node:https'
 import {randomBytes} from 'node:crypto'
 import vm from 'node:vm'
 import {WebSocketServer} from 'ws'
-import {createBackendControl} from '../src/main/backend-control.mjs'
-import {createBackendSupervisor} from '../src/main/backend-supervisor.mjs'
-import {classifyBackendFailure, createBackendDiagnosticCollector} from '../src/main/backend-diagnostics.mjs'
 import {readCapabilityDocument} from '../src/main/capabilities-settings.mjs'
 import {requestDebugBoard} from '../src/main/debug-board-client.mjs'
 import {validateBootstrap} from '../src/main/security.mjs'
 import { WebSocket } from 'ws'
-import {generateReleaseSmokeCertificate} from './release-smoke-certificate.mjs'
+import {generateSmokeCertificate} from './smoke-tls.mjs'
 import {
   backendLaunchSpec,
   createReadinessListener,
   shutdownBackend,
   shutdownBackendBestEffort,
   watchBackendExit,
+  waitForBackendReadiness,
 } from '../src/main/backend.mjs'
 
 // Keep macOS Unix socket paths short; other platforms use their own temporary directory.
@@ -148,14 +147,13 @@ async function run() {
   if (envIndex !== -1 && !process.argv[envIndex + 1]) throw new Error('env-file path is required')
   const file = envIndex === -1 ? {} : parseEnv(await readFile(process.argv[envIndex + 1], 'utf8'))
   const parentEnv = {...file, ...process.env}
-  const {environmentContract} = await import('../../../runtime/dist/src/environment-contract.js')
+  const {environmentContract} = await import('../../../runtime/dist/src/config/environment-contract.js')
   for (const entry of environmentContract) if (entry.owner.startsWith('retired_')) delete parentEnv[entry.name]
   const isolated = cascaded ? await mkdtemp(resolve(tmpdir(), 'nova-utility-cascaded-')) : null
   if (isolated) {
     await writeFile(resolve(isolated, 'capabilities.json'), JSON.stringify({version: 1, modules: {
       coding: {enabled: false}, camera: {enabled: false}, search: {enabled: false},
     }}))
-    parentEnv.NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED = 'false'
   }
   const spec = backendLaunchSpec({
     backend: 'node',
@@ -190,8 +188,12 @@ async function run() {
       '{"type":"executor.state","executor":"codex","display_name":"Codex","state":"idle"}',
     ])
 
+    let forced = false
+    const kill = child.kill.bind(child)
+    child.kill = () => { forced = true; return kill() }
     await shutdownBackend(child, { graceMs: 2000 })
     assert.equal(await exited, 0, diagnostics)
+    assert.equal(forced, false, 'a drained utility must exit without the force-kill deadline')
   } catch (error) {
     const diagnostic = diagnostics.match(/\[(?:runtime|desktop)-diagnostic\] [a-z_]+/u)?.[0] ?? 'unavailable'
     throw new Error(`utility_runtime_smoke_failed diagnostic=${diagnostic}`, {cause: error})
@@ -214,7 +216,7 @@ async function runCapabilityStatus() {
   let listed = 0, called = 0, providerConnections = 0
   const providerPeers = []
   const certificate = resolve(root, 'cert.pem'), privateKey = resolve(root, 'key.pem')
-  await generateReleaseSmokeCertificate({certificate, privateKey})
+  await generateSmokeCertificate({certificate, privateKey})
   const cert = await readFile(certificate), key = await readFile(privateKey)
   const http = createServer({cert, key}, async (request, response) => {
     if (request.method !== 'POST') {response.writeHead(405); response.end(); return}
@@ -262,11 +264,11 @@ async function runCapabilityStatus() {
         NOVA_AUDIO_AGENT_MODEL_API_KEY: 'dummy-model-key', NOVA_AUDIO_AGENT_MODEL_BASE_URL: `https://127.0.0.1:${port}`,
         DASHSCOPE_API_KEY: 'dummy-dashscope-key', NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: `wss://127.0.0.1:${port}/qwen`,
         NOVA_AUDIO_AGENT_BLACKBOARD_PATH: resolve(root, 'blackboard.sqlite'), NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID: 'utility-smoke',
-        NOVA_AUDIO_AGENT_WORKSPACE_GRAPH_ENABLED: 'false', NODE_EXTRA_CA_CERTS: certificate}
+        NODE_EXTRA_CA_CERTS: certificate}
       const context = vm.createContext({readCapabilityDocument, classifyBackendFailure, createBackendDiagnosticCollector, createBackendControl,
         createReadinessListener: options => createReadinessListener({...options, onTimeout: () => {
           readinessTimeouts++; trace('readiness timeout requests child cleanup'); options.onTimeout?.()
-        }}), shutdownBackend, shutdownBackendBestEffort, watchBackendExit, validateBootstrap, backendLaunchSpec, randomBytes, resolve,
+        }}), shutdownBackend, shutdownBackendBestEffort, watchBackendExit, waitForBackendReadiness, validateBootstrap, backendLaunchSpec, randomBytes, resolve,
         process: {env: environment, cwd: () => root}, app: {isPackaged: false, getAppPath: () => packageRoot}, packageRoot,
         currentSettings: {capabilitiesConfigPath: path, pipelineMode: 'integrated'}, desktopConfig: {workspace: root, modelBaseUrl: `https://127.0.0.1:${port}`}, codexStatus: {status: 'ready'},
         settingsGeneration: 9, launchGeneration: 0, runtimeCapabilities: null, backendControl: null, backend: null, backendGeneration: 0,
@@ -319,7 +321,11 @@ async function runCapabilityStatus() {
         outcomes.push({budget, count: value.toolCount, state: value.state, events,
           publicStates: [...new Set(snapshots.map(snapshot => snapshot.runtime?.state).filter(Boolean))], readinessTimeouts, servers: value.servers,
           ...(memoryClear === undefined ? {} : {memoryClear})})
-      } finally {await context.backendSupervisor.stop()}
+      } finally {
+        const started = performance.now()
+        await context.backendSupervisor.stop()
+        assert.ok(performance.now() - started < 2000, 'drained utility exits without the 32-second kill deadline')
+      }
     }
     assert.equal(listed, 2)
     assert.equal(called, 0)

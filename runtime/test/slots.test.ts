@@ -7,7 +7,7 @@ import {
   wakeReasonSchema,
   type Slot,
   type WakeReason,
-} from '../src/slots.js'
+} from '../src/core/slots.js'
 
 const userWake = wakeReasonSchema.parse({
   kind: 'user_input',

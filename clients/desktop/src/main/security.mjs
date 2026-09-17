@@ -38,7 +38,6 @@ export function browserWindowOptions(preload, launchId, { opaque = false } = {})
     // window open when window-position.mjs shrinks it to rest.
     minWidth: DORMANT_ORB_WINDOW_SIZE.width,
     minHeight: DORMANT_ORB_WINDOW_SIZE.height,
-    maxWidth: 160,
     frame: false,
     // Compositors without a working transparent-visuals path (opted into via
     // NOVA_ORB_OPAQUE) get a solid plate instead of a broken/black surface.
@@ -98,8 +97,8 @@ export function boardWindowOptions(preload, launchId) {
 
 export function settingsWindowOptions(preload, launchId) {
   return panelWindowOptions(preload, launchId, {
-    width: 760,
-    height: 620,
+    width: 1140,
+    height: 930,
     minWidth: 620,
     minHeight: 520,
     title: '设置',
@@ -207,6 +206,7 @@ export async function resolveMicrophonePermission({ platform, systemPreferences 
 
 const API_KEY_PAGES = new Set(['https://bailian.console.aliyun.com/?apiKey=1&tab=model',
   'https://platform.openai.com/api-keys',
+  'https://platform.deepseek.com/api_keys',
   'https://console.volcengine.com/ark/apiKey',
   'https://console.volcengine.com/speech/new/setting/apikeys',
   'https://app.tavily.com/'])

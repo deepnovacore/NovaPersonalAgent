@@ -15,9 +15,9 @@
  */
 
 import type { z } from 'zod'
-import { compareCodePoints } from '../canonical-json.js'
-import { stripLikePython } from '../python-text.js'
-import type { outcomeSchema, trustSchema } from '../events.js'
+import { compareCodePoints } from '../text/canonical-json.js'
+import { stripLikePython } from '../text/python-text.js'
+import type { outcomeSchema, trustSchema } from '../core/events.js'
 import {
   CONVERSATION_CHANNEL,
   makeMemoryRef,
@@ -25,8 +25,8 @@ import {
   type Memory,
   type MemoryItem,
   type MemoryRef,
-} from '../memory.js'
-import { normalizeAndLowerPinned } from '../unicode-normalize.js'
+} from '../core/memory.js'
+import { normalizeAndLowerPinned } from '../text/unicode-normalize.js'
 import { safeMemoryEvidence, type CodingChannel } from './evidence.js'
 
 type Trust = z.infer<typeof trustSchema>

@@ -1,8 +1,4 @@
-import {
-  boardTabForKey,
-  createGraphTabController,
-  renderWorkspaceGraphBoard,
-} from './workspace-graph-board.mjs'
+import {boardTabForKey} from './channel-tabs.mjs'
 import {
   captureBoardScrollPositions,
   diagnosticScrollKey,
@@ -25,13 +21,9 @@ const exportButton = document.querySelector('#export')
 const clearButton = document.querySelector('#clear-conversation')
 const memoryTab = document.querySelector('#memory-tab')
 const diagnosticsTab = document.querySelector('#diagnostics-tab')
-const graphTab = document.querySelector('#graph-tab')
 const memoryPanel = document.querySelector('#memory-panel')
 const diagnosticsPanel = document.querySelector('#diagnostics-panel')
-const graphPanel = document.querySelector('#graph-panel')
 const diagnosticsRoot = document.querySelector('#diagnostics')
-const graphRoot = document.querySelector('#workspace-graph')
-const graphState = document.querySelector('#graph-state')
 
 let latestPayload = null
 let inFlight = false
@@ -41,6 +33,8 @@ let clearInFlight = false
 let activeTab = 'memory'
 let activeChannel = null
 let loadOwnership = 0
+let historyExpanded = false
+let pageInFlight = false
 
 function itemContent(raw) {
   try {
@@ -51,12 +45,15 @@ function itemContent(raw) {
 }
 
 function boardTime(item) {
-  return `t=${Number(item.ts).toFixed(1)}s`
+  return item.historical && Number.isFinite(item.recorded_at_ms)
+    ? `历史 · ${new Date(item.recorded_at_ms).toLocaleString()}`
+    : `t=${Number(item.ts).toFixed(1)}s`
 }
 
 function renderItem(item, conversation = false) {
   const article = document.createElement('article')
   article.className = 'item'
+  article.dataset.seq = String(item.seq)
   const meta = document.createElement('div')
   meta.className = 'meta'
   const trust = document.createElement('span')
@@ -89,13 +86,25 @@ function renderItem(item, conversation = false) {
     const role = payload?.role === 'user' || item.trust === 'trusted_user' ? 'user' : 'assistant'
     article.className = `item chat-message chat-${role}`
     article.tabIndex = 0
-    article.setAttribute('aria-label', role === 'user' ? '你的消息，聚焦查看详情' : 'Nova 的消息，聚焦查看详情')
+    article.setAttribute('aria-label', role === 'user' ? '你的消息，右键或 Shift+F10 查看详情' : 'Nova 的消息，右键或 Shift+F10 查看详情')
     const text = document.createElement('div')
     text.className = 'chat-text'
     text.textContent = typeof payload?.text === 'string' ? payload.text
       : typeof payload === 'string' ? payload : '非文本消息'
     const debug = document.createElement('div')
     debug.className = 'chat-debug'
+    debug.hidden = true
+    article.setAttribute('aria-expanded', 'false')
+    const toggleDetails = event => {
+      event.preventDefault()
+      debug.hidden = !debug.hidden
+      article.setAttribute('aria-expanded', String(!debug.hidden))
+    }
+    article.addEventListener('contextmenu', toggleDetails)
+    article.addEventListener('keydown', event => {
+      if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) toggleDetails(event)
+      if (event.key === 'Escape') { debug.hidden = true; article.setAttribute('aria-expanded', 'false') }
+    })
     debug.append(meta, content)
     article.append(text, debug)
   } else article.append(meta, content)
@@ -130,13 +139,44 @@ function renderChannel(channel, index) {
   const itemsRoot = document.createElement('div')
   itemsRoot.className = channel.name === 'conversation' ? 'channel-items chat-messages' : 'channel-items'
   itemsRoot.dataset.scrollKey = `channel:${channel.name}`
-  if (!channel.items.length) {
+  if (channel.name === 'conversation') {
+    const older = document.createElement('button')
+    older.className = 'history-load'
+    older.textContent = channel.has_more ? '向上滚动加载更早记录' : '已到可用记录的开头'
+    older.disabled = !channel.has_more
+    older.addEventListener('click', () => { void loadEarlier() })
+    itemsRoot.append(older)
+    itemsRoot.addEventListener('scroll', () => { if (itemsRoot.scrollTop === 0) void loadEarlier() })
+    itemsRoot.addEventListener('wheel', event => { if (event.deltaY < 0 && itemsRoot.scrollTop === 0) void loadEarlier() }, {passive: true})
+  }
+  const historical = channel.name === 'conversation' ? channel.items.filter(item => item.historical) : []
+  const current = channel.name === 'conversation' ? channel.items.filter(item => !item.historical) : channel.items
+  if (historical.length) {
+    const history = document.createElement('details')
+    history.className = 'conversation-history'
+    history.open = historyExpanded
+    history.addEventListener('toggle', () => { historyExpanded = history.open })
+    const label = document.createElement('summary')
+    label.textContent = `重启前的历史记录（最近 ${historical.length} 条）`
+    const historyItems = document.createElement('div')
+    historyItems.className = 'chat-messages'
+    for (const item of historical) historyItems.append(renderItem(item, true))
+    history.append(label, historyItems)
+    itemsRoot.append(history)
+  }
+  if (channel.name === 'conversation' && channel.historical_through_seq) {
+    const label = document.createElement('p')
+    label.className = 'conversation-boundary'
+    label.textContent = '本次连接'
+    itemsRoot.append(label)
+  }
+  if (!current.length) {
     const empty = document.createElement('p')
     empty.className = 'empty'
-    empty.textContent = '暂无记录'
+    empty.textContent = channel.name === 'conversation' ? '本次连接暂无对话' : '暂无记录'
     itemsRoot.append(empty)
   }
-  for (const item of channel.items) itemsRoot.append(renderItem(item, channel.name === 'conversation'))
+  for (const item of current) itemsRoot.append(renderItem(item, channel.name === 'conversation'))
   if (channel.name === 'conversation') section.append(header, itemsRoot)
   else section.append(header, summary, itemsRoot)
   return section
@@ -249,23 +289,46 @@ function renderChannelTabs() {
 async function load() {
   if (document.hidden) return
   if (clearInFlight) return
-  if (activeTab === 'graph') return
-  if (inFlight) return
+  if (inFlight || pageInFlight) return
   const owner = loadOwnership
   inFlight = true
   statusLabel.textContent = '加载中…'
   refreshButton.disabled = true
   try {
     const payload = await window.novaAudioAgentDesktop.memoryBoard.request()
-    if (owner !== loadOwnership || document.hidden || activeTab === 'graph') return
+    if (owner !== loadOwnership || document.hidden) return
     if (!payload || payload.error || !Array.isArray(payload.channels) || !validDiagnostics(payload)) {
       statusLabel.textContent = payload?.error === 'timeout' ? '后端无响应' : '加载失败'
       return
     }
+    const sameGeneration = latestPayload?.backend_generation === payload.backend_generation && latestPayload?.conversation_epoch === payload.conversation_epoch
+    const previous = sameGeneration ? latestPayload?.channels.find(c => c.name === 'conversation') : null
+    const recent = payload.channels.find(c => c.name === 'conversation')
+    if (previous && recent && recent.retention_revision === previous.retention_revision && recent.item_count >= previous.item_count) {
+      // Fill any interval missed while the board was hidden before merging the recent tail.
+      let cursor = recent.items[0]?.seq
+      const last = previous.items.at(-1)?.seq
+      const collected = [...recent.items]
+      while (last !== undefined && cursor > last + 1) {
+        const page = await window.novaAudioAgentDesktop.memoryBoard.request({channel: 'conversation', before_seq: cursor})
+        if (!page || page.error || !Array.isArray(page.channels)) throw new Error('history_page_failed')
+        if (owner !== loadOwnership || (page?.backend_generation !== payload.backend_generation || page?.conversation_epoch !== payload.conversation_epoch)) return
+        const channel = page.channels?.find(c => c.name === 'conversation')
+        if (!channel || channel.retention_revision !== recent.retention_revision) throw new Error('history_changed')
+        if (!channel.items.length) break
+        collected.push(...channel.items)
+        const next = channel.items[0].seq
+        if (next >= cursor) break
+        cursor = next
+      }
+      recent.items = mergeItems(previous.items, collected)
+      recent.has_more = previous.has_more
+      recent.next_before_seq = previous.next_before_seq
+    }
     latestPayload = payload
     const scrollPositions = captureBoardScrollPositions(document)
-    copyJsonButton.disabled = copyInFlight || activeTab === 'graph'
-    exportButton.disabled = exportInFlight || activeTab === 'graph'
+    copyJsonButton.disabled = copyInFlight
+    exportButton.disabled = exportInFlight
     renderChannelTabs()
     renderActiveChannelCard()
     diagnosticsRoot.replaceChildren(...payload.diagnostics.records.map(record => (
@@ -280,15 +343,47 @@ async function load() {
     restoreBoardScrollPositions(document, scrollPositions)
     statusLabel.textContent = `更新于 ${new Date().toLocaleTimeString()}`
   } catch {
-    if (owner !== loadOwnership || document.hidden || activeTab === 'graph') return
+    if (owner !== loadOwnership || document.hidden) return
     statusLabel.textContent = '加载失败'
   } finally {
     refreshButton.disabled = false
     inFlight = false
-    if (owner !== loadOwnership && !document.hidden && activeTab !== 'graph') {
+    if (owner !== loadOwnership && !document.hidden) {
       queueMicrotask(() => { void load() })
     }
   }
+}
+
+function mergeItems(older, newer) {
+  const items = new Map(older.map(item => [item.seq, item]))
+  for (const item of newer) {
+    const previous = items.get(item.seq)
+    if (!previous || !item.truncated || (previous.truncated && item.content.length > previous.content.length)) items.set(item.seq, item)
+  }
+  return [...items.values()].sort((a, b) => a.seq - b.seq)
+}
+
+async function loadEarlier() {
+  const channel = latestPayload?.channels.find(c => c.name === 'conversation')
+  if (activeChannel !== 'conversation' || !channel?.has_more || pageInFlight || inFlight || clearInFlight) return
+  const owner = loadOwnership, generation = latestPayload.backend_generation, epoch = latestPayload.conversation_epoch
+  const cursor = channel.next_before_seq
+  pageInFlight = true
+  try {
+    const payload = await window.novaAudioAgentDesktop.memoryBoard.request({channel: 'conversation', before_seq: cursor})
+    if (owner !== loadOwnership || payload?.backend_generation !== generation || latestPayload?.backend_generation !== generation || payload?.conversation_epoch !== epoch || latestPayload?.conversation_epoch !== epoch) return
+    const page = payload.channels?.find(c => c.name === 'conversation')
+    if (!page) { statusLabel.textContent = '历史记录加载失败，向上滚动重试'; return }
+    const current = latestPayload.channels.find(c => c.name === 'conversation')
+    if (!current || current.next_before_seq !== cursor || page.retention_revision !== current.retention_revision) return
+    const positions = captureBoardScrollPositions(document)
+    current.items = mergeItems(page.items, current.items)
+    current.has_more = page.has_more
+    current.next_before_seq = page.next_before_seq
+    renderActiveChannelCard()
+    restoreBoardScrollPositions(document, positions)
+  } catch { statusLabel.textContent = '历史记录加载失败，向上滚动重试' }
+  finally { pageInFlight = false }
 }
 
 async function copyBoardJson() {
@@ -302,7 +397,7 @@ async function copyBoardJson() {
     statusLabel.textContent = '复制失败'
   } finally {
     copyInFlight = false
-    copyJsonButton.disabled = activeTab === 'graph' || latestPayload === null
+    copyJsonButton.disabled = latestPayload === null
   }
 }
 
@@ -318,7 +413,7 @@ async function exportBoard() {
     statusLabel.textContent = '导出失败'
   } finally {
     exportInFlight = false
-    exportButton.disabled = activeTab === 'graph'
+    exportButton.disabled = latestPayload === null
   }
 }
 
@@ -344,72 +439,42 @@ async function clearConversation() {
   } finally {
     clearInFlight = false
     clearButton.disabled = false
-    copyJsonButton.disabled = activeTab === 'graph' || latestPayload === null
-    exportButton.disabled = activeTab === 'graph' || latestPayload === null
+    copyJsonButton.disabled = latestPayload === null
+    exportButton.disabled = latestPayload === null
   }
 }
 
-const graphController = createGraphTabController({
-  request: () => window.novaAudioAgentDesktop.graphBoard.request(),
-  visible: () => !document.hidden,
-  render: payload => {
-    renderWorkspaceGraphBoard(payload, {
-      document,
-      root: graphRoot,
-      status: graphState,
-    })
-    statusLabel.textContent = `更新于 ${new Date().toLocaleTimeString()}`
-  },
-  failure: reason => {
-    graphRoot.replaceChildren()
-    graphState.textContent = reason === 'unavailable' ? '后端无响应' : '图谱数据无效'
-    statusLabel.textContent = '加载失败'
-  },
-})
-
 function selectTab(tab) {
-  if (tab === 'graph' && activeTab !== 'graph') loadOwnership += 1
   activeTab = tab
-  const graphActive = activeTab === 'graph'
   const diagnosticsActive = activeTab === 'diagnostics'
-  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab, graph: graphTab}
+  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab}
   for (const [name, element] of Object.entries(tabElements)) {
     element.setAttribute('aria-selected', String(name === activeTab))
     element.tabIndex = name === activeTab ? 0 : -1
   }
   memoryPanel.hidden = activeTab !== 'memory'
   diagnosticsPanel.hidden = !diagnosticsActive
-  graphPanel.hidden = !graphActive
-  copyJsonButton.hidden = activeTab === 'graph'
-  copyJsonButton.disabled = graphActive || copyInFlight || latestPayload === null
-  exportButton.hidden = activeTab === 'graph'
+  copyJsonButton.disabled = copyInFlight || latestPayload === null
   clearButton.hidden = activeTab !== 'memory'
-  exportButton.disabled = graphActive || exportInFlight || latestPayload === null
-  if (graphActive) void graphController.activate()
-  else {
-    graphController.deactivate()
-    void load()
-  }
+  exportButton.disabled = exportInFlight || latestPayload === null
+  void load()
 }
 
 memoryTab.addEventListener('click', () => { selectTab('memory') })
 diagnosticsTab.addEventListener('click', () => { selectTab('diagnostics') })
-graphTab.addEventListener('click', () => { selectTab('graph') })
 function handleTabKey(event) {
   const nextTab = boardTabForKey(activeTab, event.key)
   if (nextTab === null) return
   event.preventDefault()
   selectTab(nextTab)
-  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab, graph: graphTab}
+  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab}
   const nextElement = tabElements[nextTab]
   nextElement.focus()
 }
 memoryTab.addEventListener('keydown', handleTabKey)
 diagnosticsTab.addEventListener('keydown', handleTabKey)
-graphTab.addEventListener('keydown', handleTabKey)
 refreshButton.addEventListener('click', () => {
-  if (activeTab === 'graph') void graphController.refresh()
-  else void load()
+  void load()
 })
 copyJsonButton.addEventListener('click', () => { void copyBoardJson() })
 exportButton.addEventListener('click', () => { void exportBoard() })
@@ -417,15 +482,12 @@ clearButton.addEventListener('click', () => { void clearConversation() })
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     loadOwnership += 1
-    if (activeTab === 'graph') graphController.deactivate()
     return
   }
-  if (activeTab === 'graph') void graphController.activate()
-  else void load()
+  void load()
 })
 setInterval(() => {
   if (document.hidden) return
-  if (activeTab === 'graph') void graphController.tick()
-  else void load()
+  void load()
 }, 2000)
 selectTab('memory')

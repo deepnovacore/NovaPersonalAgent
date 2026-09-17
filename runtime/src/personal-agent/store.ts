@@ -5,7 +5,7 @@ import { constants } from 'node:fs';
 import { open, rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { preparePrivateDatabasePath } from '../private-database.js';
+import { preparePrivateDatabasePath } from '../storage/private-database.js';
 import { feedItemSchema, personalSettingsSchema, type FeedItem, type PersonalSettings } from './contracts.js';
 export interface PersonalState {
     conversations:ConversationsState;

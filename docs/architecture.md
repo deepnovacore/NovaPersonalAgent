@@ -28,15 +28,14 @@ flowchart TB
 
 | Module | Responsibility |
 |---|---|
-| `runtime/src/causal-runtime.ts` | Event application, dispatch, single-flight slots, wake routing, delegate identity/deadline/terminal state, and the `ExecutorAdapter` port |
-| `runtime/src/memory.ts` | Append-only channel memory, accepted handoffs, and revision-bound intake snapshots; host authorization FSMs remain outside model state |
-| `runtime/src/context-view.ts` | The bounded model-facing view of current state |
-| `runtime/src/floor.ts` | Exclusive ownership of the user-facing speaking path |
-| `runtime/src/ports.ts` | Executor manifests, operation contracts, requests, and typed handoffs |
-| `runtime/src/assembly.ts`, `production-realtime-assembly.ts` | Configuration-driven construction of runtime, executor, and realtime graphs; dispatches `integrated` vs `cascaded` |
+| `runtime/src/core/causal-runtime.ts` | Event application, dispatch, single-flight slots, wake routing, delegate identity/deadline/terminal state, and the `ExecutorAdapter` port |
+| `runtime/src/core/memory.ts` | Append-only channel memory, accepted handoffs, and revision-bound intake snapshots; host authorization FSMs remain outside model state |
+| `runtime/src/core/context-view.ts` | The bounded model-facing view of current state |
+| `runtime/src/realtime/floor.ts` | Exclusive ownership of the user-facing speaking path |
+| `runtime/src/core/ports.ts` | Executor manifests, operation contracts, requests, and typed handoffs |
+| `runtime/src/composition/assembly.ts`, `cascaded-realtime-assembly.ts` | Configuration-driven construction of runtime, executor, and realtime graphs; dispatches `integrated` vs `cascaded` |
 | `runtime/src/realtime/` | Host response admission/ownership, shared frontend-instructions, provider transports, playback fencing, recovery, and telemetry |
 | `runtime/src/codex-*.ts` | Codex app-server transport and contract, plus the Workspace/Session project store (`codex-project-store.ts`) |
-| `runtime/src/workspace-graph/` | Opt-in durable workspace memory graph: store worker, identity, projector, recall, context budgeter, provider seam |
 | `runtime/src/executors/` | Deterministic simulators and adapter implementations |
 
 ## Executor boundary
@@ -82,17 +81,6 @@ can open the active managed workspace, or clear the active one or every managed 
 two confirmation dialogs; clearing empties directories while the project record, display name,
 Codex history, and Session metadata survive, so the store stays authoritative over the filesystem.
 
-## Workspace memory graph (opt-in)
-
-The Node runtime carries an opt-in durable workspace memory graph
-(`runtime/src/workspace-graph/`): a SQLite store on a worker thread, identity resolution for
-spoken workspace names, deterministic projection of confirmed lifecycle events into weak relation
-cards, and bounded recall. Graph context reaches model calls only through fixed budgets — a
-bounded header and a recall pack of at most two hints — and is marked low-authority: it can never
-authorize a workspace switch. The memory layering rationale is in the
-[memory volume](archs/02-memory.md) and the context rules in the
-[context-view volume](archs/03-context-view.md).
-
 ## Platform notes
 
 Wake capture carries an epoch on every frame (native macOS capture or browser fallback), so frames
@@ -124,7 +112,7 @@ identity, playback generation, and delegate identity. Renderer acknowledgements 
 and completion. Recovery injects bounded host-owned facts rather than replaying arbitrary provider
 state.
 
-The top-level pipeline shape is selected by `production-realtime-assembly.ts` from
+The top-level pipeline shape is selected by `cascaded-realtime-assembly.ts` from
 `pipeline_mode`. `integrated` (the default) runs one realtime speech-to-speech model — today Qwen
 realtime only. `cascaded` composes injectable endpointing, ASR, LLM, and TTS ports; today's
 provider matrix is Volcengine ASR, a Qwen (`qwen-flash`) or Ark LLM, Volcengine TTS, and an `auto`

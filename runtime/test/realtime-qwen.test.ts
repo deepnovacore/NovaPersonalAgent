@@ -12,7 +12,6 @@ import {
   QwenAudioRealtimeAdapter,
   QwenRealtimeError,
   QwenSocketClosedError,
-  workspaceGraphFrontendInstructions,
   type QwenSocket,
 } from '../src/realtime/qwen.js'
 import { ItemDeliveryUncertainError, type RealtimeProviderEvent } from '../src/realtime/protocol.js'
@@ -719,17 +718,6 @@ test('Qwen reconnect resets Header ownership and the new epoch starts without de
   assert.equal(proof.delivery.session_epoch, 2)
 })
 
-test('graph-enabled Qwen policy is conditional and default instructions stay byte-identical', async () => {
-  const scripted = scriptedSocket([...handshake])
-  const adapter = adapterFor(scripted, {workspaceGraphPolicy: true})
-  await adapter.connect({tools: [], signal: new AbortController().signal})
-  const update = scripted.sent.find(frame => frame.type === 'session.update')
-  const session = update?.session as Record<string, unknown>
-  assert.equal(session.instructions, workspaceGraphFrontendInstructions)
-  assert.match(String(session.instructions), /不得建议用户切换工作区/u)
-  assert.match(String(session.instructions), /不得仅因图谱提示调用动作工具/u)
-  assert.notEqual(workspaceGraphFrontendInstructions, FRONTEND_INSTRUCTIONS)
-})
 
 test('a tool output injects a function_call_output item', async () => {
   const scripted = scriptedSocket([...handshake])
@@ -1431,3 +1419,15 @@ test('integrated constructor history gates connect until the read-only item is c
     await connecting;assert.equal(connected,true)
   }finally{await adapter.close()}
 })
+for (const model of ['qwen3.5-omni-flash-realtime', 'qwen3.5-omni-plus-realtime']) {
+  test(`${model} uses Omni session settings`, async () => {
+    const scripted = scriptedSocket([...handshake])
+    const adapter = adapterFor(scripted, {model, voice: 'Ethan'})
+    await adapter.connect({tools: [], signal: new AbortController().signal})
+    const session = scripted.sent.find(frame => frame.type === 'session.update')!.session as Record<string, unknown>
+    assert.deepEqual(session.turn_detection, {type: 'semantic_vad'})
+    assert.equal(session.voice, 'Ethan')
+    assert.equal('max_history_turns' in session, false)
+    await adapter.close()
+  })
+}

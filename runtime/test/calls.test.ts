@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { classifySurrogateVerdict, runSurrogateCall } from '../src/calls.js'
-import type { Affordance, ContextView } from '../src/context-view.js'
-import { wakeReasonSchema } from '../src/slots.js'
+import { classifySurrogateVerdict, runSurrogateCall } from '../src/core/calls.js'
+import type { Affordance, ContextView } from '../src/core/context-view.js'
+import { wakeReasonSchema } from '../src/core/slots.js'
 
 const view: ContextView = {
   channels: [],

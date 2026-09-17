@@ -1,4 +1,4 @@
-const { chmod, readdir, readFile, rename, writeFile } = require('node:fs/promises')
+const { chmod, readdir, rename, writeFile } = require('node:fs/promises')
 const { resolve } = require('node:path')
 
 const ARCHITECTURES = Object.freeze({ 1: 'x64', 3: 'arm64', x64: 'x64', arm64: 'arm64' })
@@ -48,19 +48,10 @@ async function packagedResourceContext(context) {
 
 async function writeNativeResourceManifest(context) {
   const {resourcesRoot, targetId} = await packagedResourceContext(context)
-  const [
-    { generateNativeResourceManifest },
-    { parseStrictJson },
-  ] = await Promise.all([
-    import('./native-resource-contract.mjs'),
-    import('./strict-json.mjs'),
-  ])
-  const reportPath = resolve(__dirname, '../build/release/production-dependencies-v1.json')
-  const dependencyReport = parseStrictJson(await readFile(reportPath, 'utf8'))
+  const {generateNativeResourceManifest} = await import('./native-resource-contract.mjs')
   const manifest = await generateNativeResourceManifest({
     resourcesRoot,
     targetId,
-    dependencyReport,
   })
   const destination = resolve(resourcesRoot, 'native-resources-v1.json')
   const temporary = resolve(resourcesRoot, '.native-resources-v1.json.hook')

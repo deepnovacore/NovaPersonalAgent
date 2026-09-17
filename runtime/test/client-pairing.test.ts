@@ -5,22 +5,23 @@ import {join} from 'node:path'
 import {once} from 'node:events'
 import {test} from 'node:test'
 import {WebSocket} from 'ws'
-import {ClientPairing, pairingEndpoint} from '../src/client-pairing.js'
-import {ClientServer} from '../src/client-server.js'
-import {AoqChatServer} from '../src/aoq-chat-server.js'
+import {ClientPairing, pairingEndpoint} from '../src/server/client-pairing.js'
+import {ClientServer} from '../src/server/client-server.js'
+import {AoqChatServer} from '../src/server/aoq-chat-server.js'
 
 const master = 'a'.repeat(32)
 const endpoint = 'wss://mac.example/client/v1'
 
-test('pairing codes expire, rotate and redeem once; device hashes persist and revoke independently', {skip: process.platform === 'win32' && 'POSIX device store integration'}, t => {
+test('pairing codes do not expire, rotate and redeem once; device hashes persist and revoke independently', {skip: process.platform === 'win32' && 'POSIX device store integration'}, t => {
   const dir = mkdtempSync(join(tmpdir(), 'nova-pair-'))
   t.after(() => rmSync(dir, {recursive: true, force: true}))
   const path = join(dir, 'devices.json')
   let now = 1000
   const pairing = new ClientPairing(master, path, () => now)
-  const expired = pairing.create(endpoint)
-  now = expired.expires_at
-  assert.throws(() => pairing.redeem(expired.code, 'iPhone'))
+  const invitation = pairing.create(endpoint)
+  assert.equal(Object.hasOwn(invitation, 'expires_at'), false)
+  now += 365 * 24 * 60 * 60 * 1000
+  assert.equal(pairing.redeem(invitation.code, 'iPhone').type, 'pair.ready')
   const old = pairing.create(endpoint)
   const current = pairing.create(endpoint)
   assert.throws(() => pairing.redeem(old.code, 'iPhone'))

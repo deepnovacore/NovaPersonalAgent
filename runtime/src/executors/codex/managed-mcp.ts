@@ -1,5 +1,5 @@
-import {SensitiveContentPolicy} from '../../workspace-graph/sensitivity.js'
-import type {CapabilityRegistry, McpServerConfig, McpServerStatus} from '../../capability-registry.js'
+import {SensitiveContentPolicy} from '../../memory/sensitivity.js'
+import type {CapabilityRegistry, McpServerConfig, McpServerStatus} from '../../config/capability-registry.js'
 import {snapshotJsonRecord} from './safe-json.js'
 
 export interface ManagedMcpEntry {
@@ -135,7 +135,7 @@ export function managedMcpConfigToml(managed: ManagedCodexMcp | undefined): stri
   managedMcpEnvironment(managed)
   return `mcp_servers = ${toml(managed?.servers ?? {})}\n`
 }
-function toml(value: unknown): string {
+export function toml(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(toml).join(', ')}]`
   if (typeof value === 'object' && value !== null) return `{ ${Object.entries(value).map(([key, field]) => `${toml(key)} = ${toml(field)}`).join(', ')} }`
   return JSON.stringify(value).replaceAll('\u007f', '\\u007f')

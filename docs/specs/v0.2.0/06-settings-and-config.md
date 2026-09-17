@@ -12,9 +12,9 @@
   backend ([`settings-apply.mjs`](../../../desktop/nova-audio-agent-desktop/src/main/settings-apply.mjs)).
 - Backend env mapping:
   [`desktop/nova-audio-agent-desktop/src/main/backend.mjs`](../../../desktop/nova-audio-agent-desktop/src/main/backend.mjs).
-- Runtime schema: [`runtime/src/config.ts`](../../../runtime/src/config.ts)
+- Runtime schema: [`runtime/src/config/config.ts`](../../../runtime/src/config/config.ts)
   `settingsSchema` +
-  [`runtime/src/environment-contract.ts`](../../../runtime/src/environment-contract.ts).
+  [`runtime/src/config/environment-contract.ts`](../../../runtime/src/config/environment-contract.ts).
 - `novaaudio config` opens the same settings window; there is no separate CLI
   editor for most keys.
 - No keys today for approval mode, clarification, planner, bubbles, MCP
@@ -49,7 +49,7 @@ New persisted fields (desktop settings file; the legacy filename is retained for
 | `plannerModel` | string | `""` (means follow `fast_model`) | 02 |
 | `progressBubbles` | `off` \| `milestones` \| `all` | `milestones` | [05](05-progress-bubbles.md) |
 | `codingProgressNarration` | `smart` \| `continuous` | `smart` | 连续转述增加语音输出与模型用量 |
-| `embeddingProvider` | `dashscope` \| `local` | `dashscope` | [04](04-knowledge-base.md) |
+| `embeddingProvider` | `dashscope` | `dashscope` | [04](04-knowledge-base.md) |
 | `embeddingModel` | string | provider default | 04 |
 | `capabilitiesConfigPath` | string | `""` → default `~/.nova-audio-agent/capabilities.json` | [03](03-capability-registry-and-mcp.md) |
 | `knowledgePath` | string | `""` → default knowledge sqlite path | 04 |
@@ -86,7 +86,7 @@ Regenerate `.env.example` via `npm run check:env-contract` after
 | `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` | Web search MCP endpoint |
 | `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` | default `web_search` |
 | `NOVA_AUDIO_AGENT_KNOWLEDGE_PATH` | knowledge sqlite path |
-| `NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER` | `dashscope` \| `local` |
+| `NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER` | `dashscope` |
 | `NOVA_AUDIO_AGENT_EMBEDDING_MODEL` | embedding model id |
 
 `TAVILY_API_KEY` remains but is optional when search is disabled or provider is

@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process'
 import {mkdir, mkdtemp, rm} from 'node:fs/promises'
 import {resolve} from 'node:path'
 
-import {prepareWindowsSmokeHomeOwnership} from './installed-candidate-smoke.mjs'
+import {prepareWindowsSmokeHomeOwnership} from './windows-smoke-home.mjs'
 
 export const SOURCE_STARTUP_SMOKE_ARGUMENT = '--nova-source-startup-smoke-v1'
 const READY_LINE = '[desktop-smoke] source_window_ready\n'

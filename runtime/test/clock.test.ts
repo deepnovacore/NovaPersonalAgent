@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { VirtualClock } from '../src/clock.js'
+import { VirtualClock } from '../src/core/clock.js'
 
 test('virtual sleep resumes only after the clock advances', async () => {
   const clock = new VirtualClock()

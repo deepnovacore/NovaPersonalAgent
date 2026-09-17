@@ -1,15 +1,12 @@
+import {snapshotRegularFile, sameSnapshot, type FileSnapshot} from '../../storage/native-resource-snapshot.js'
+import {hostCodexHomeValue} from './process-owner.js'
 import {spawn} from 'node:child_process'
-import {createHash, randomUUID} from 'node:crypto'
-import {constants as fsConstants} from 'node:fs'
+import {randomUUID} from 'node:crypto'
 import {
   chmodSync,
-  closeSync,
-  fstatSync,
   lstatSync,
   mkdtempSync,
-  openSync,
   readFileSync,
-  readSync,
   realpathSync,
   rmSync,
   statSync,
@@ -47,13 +44,13 @@ import {
   type CodexCredentialDiagnosticCode,
 } from './credential-snapshot.js'
 import {expandUserPath, type CodexHostCatalog} from './host-config.js'
-import type {Settings} from '../../config.js'
+import type {Settings} from '../../config/config.js'
 import {
   loadProjectNativeHostFromResources,
   protectDefaultProjectDirectories,
   type ProjectNativeHost,
-} from '../../project-native-resource.js'
-import {stripLikePython} from '../../python-text.js'
+} from '../../projects/project-native-resource.js'
+import {stripLikePython} from '../../text/python-text.js'
 import {admitCodexCliVersion} from './version.js'
 
 const PROBE_ID = 'codex_sandbox_probe'
@@ -135,15 +132,6 @@ export type CodexHostDiagnosticCode =
   | 'codex_login_status_no_output'
   | 'codex_login_status_multiple_streams'
   | 'codex_login_status_unrecognized'
-
-interface FileSnapshot {
-  readonly bytes: Buffer
-  readonly device: bigint
-  readonly inode: bigint
-  readonly mode: bigint
-  readonly size: number
-  readonly sha256: string
-}
 
 export function loadPackagedCodexSandboxProbe(): ManifestBoundCodexSandboxProbe | null {
   const resourcesPath = (process as NodeJS.Process & {readonly resourcesPath?: unknown}).resourcesPath
@@ -230,9 +218,6 @@ export function createProductionCodexHost(
     environment: hostEnvironment,
     platform,
     ...(options.onDiagnostic === undefined ? {} : {onDiagnostic: options.onDiagnostic}),
-    ...(typeof hostEnvironment.CODEX_HOME === 'string' && hostEnvironment.CODEX_HOME !== ''
-      ? {sourceHome: hostEnvironment.CODEX_HOME}
-      : {}),
   })
   const transportFactory = new OwnedCodexBackendTransportFactory({
     processFactory: createPlatformCodexProcessOwnerFactory({
@@ -386,6 +371,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
           workspace,
           deadline,
           4096,
+          config.preserveHome ? {...this.#environment, CODEX_HOME: hostCodexHomeValue(config.codexHome).path} : this.#environment,
         )
         let identity: 'chatgpt' | 'api_key'
         try {
@@ -511,6 +497,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
     cwd: string,
     deadline: number,
     stdoutLimit: number,
+    environment: Readonly<Record<string, string>> = this.#environment,
   ): Promise<BoundedCodexCommandResult> {
     const remaining = deadline - Date.now()
     if (remaining <= 0) throw new CodexTransportError('preflight_timeout')
@@ -518,7 +505,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
       binary,
       argv: Object.freeze([...argv]),
       cwd,
-      environment: this.#environment,
+      environment,
       timeoutMs: remaining,
       stdoutLimit,
       stderrLimit: MAX_COMMAND_STDERR,
@@ -929,42 +916,6 @@ function requireProbeRecord(
   }
   if (selected === null) throw new Error('native resource rejected')
   return selected
-}
-
-function snapshotRegularFile(path: string, maximumBytes: number): FileSnapshot {
-  const descriptor = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0))
-  try {
-    const before = fstatSync(descriptor, {bigint: true})
-    if (!before.isFile() || before.size <= 0n || before.size > BigInt(maximumBytes)) throw new Error()
-    const size = Number(before.size)
-    const bytes = Buffer.allocUnsafe(size)
-    let offset = 0
-    while (offset < size) {
-      const count = readSync(descriptor, bytes, offset, size - offset, offset)
-      if (count === 0) throw new Error()
-      offset += count
-    }
-    const after = fstatSync(descriptor, {bigint: true})
-    if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size) throw new Error()
-    return Object.freeze({
-      bytes,
-      device: before.dev,
-      inode: before.ino,
-      mode: before.mode,
-      size,
-      sha256: createHash('sha256').update(bytes).digest('hex'),
-    })
-  } finally {
-    closeSync(descriptor)
-  }
-}
-
-function sameSnapshot(left: FileSnapshot, right: FileSnapshot): boolean {
-  return left.device === right.device
-    && left.inode === right.inode
-    && left.mode === right.mode
-    && left.size === right.size
-    && left.sha256 === right.sha256
 }
 
 function validExecutable(bytes: Buffer, platform: string, arch: string): boolean {

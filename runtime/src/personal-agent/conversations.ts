@@ -1,6 +1,6 @@
-import type {Suggestion} from '../suggestions.js'
-import type {WakeReason} from '../slots.js'
-import type {BridgeService} from '../desktop-bridge.js'
+import type {Suggestion} from '../core/suggestions.js'
+import type {WakeReason} from '../core/slots.js'
+import type {BridgeService} from '../desktop/desktop-session.js'
 import {z} from 'zod'
 import {randomUUID} from 'node:crypto'
 export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()

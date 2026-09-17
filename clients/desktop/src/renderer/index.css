@@ -37,10 +37,23 @@ html, body {
   align-items: center;
   pointer-events: none;
 }
+#bubble-stack[data-placement='above'] { inset: auto 0 calc(100% - var(--bubble-orb-y) + 55px); }
 #bubble-stack[data-placement='below'] { inset: auto 0 0; flex-direction: column; }
 #bubble-stack[data-alignment='left'] { align-items: flex-start; }
 #bubble-stack[data-alignment='right'] { align-items: flex-end; }
+#bubble-stack[data-placement='above']:has(.progress-bubble)::before,
+#bubble-stack[data-placement='above']:has(.progress-bubble)::after {
+  content: '';
+  position: absolute;
+  left: var(--bubble-orb-x);
+  transform: translateX(-50%);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  pointer-events: none;
+}
+#bubble-stack::before { width: 20px; height: 11px; bottom: -6px; background: #7a9e92; }
+#bubble-stack::after { width: 16px; height: 9px; bottom: -4px; background: #13161f; }
 .progress-bubble {
+  position: relative;
   width: calc(100% - 12px);
   max-width: 308px;
   height: 48px;
@@ -50,7 +63,7 @@ html, body {
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, .18);
   border-radius: 14px;
-  background: rgba(19, 22, 31, .96);
+  background: #13161f;
   color: #f5f5f7;
   font: 500 11px/1.5 system-ui, sans-serif;
   text-align: left;
@@ -75,12 +88,15 @@ html, body {
   left: var(--bubble-orb-x);
   transform: translateX(-50%);
   margin: 0;
+  max-width: 98px;
 }
 
 #shell[data-bubbles='true'] #orb-rail {
-  top: var(--bubble-orb-y);
+  top: calc(var(--bubble-orb-y) - 49px);
   right: auto;
   left: min(calc(var(--bubble-orb-x) + 54px), calc(100% - 27px));
+  transform: none;
+  gap: 3px;
 }
 /* Bubbles share main-owned bounds; approval remains on the opposite side. */
 #shell[data-bubbles='true'][data-confirmation-placement]:has(#codex-label[data-mode='confirmation']) #orb { top: calc(var(--bubble-orb-y) - 49px); left: var(--bubble-orb-x); }
@@ -602,6 +618,7 @@ body:hover #orb-rail,
   font-weight: 600;
   text-align: center;
   white-space: normal;
+  line-height: 12px;
 }
 
 #codex-label[data-mode='project'] #codex-summary {
@@ -610,6 +627,18 @@ body:hover #orb-rail,
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
+}
+
+#shell[data-bubbles='true'] #codex-label[data-mode='project'] {
+  position: absolute;
+  top: calc(var(--bubble-orb-y) + 87px);
+  left: var(--bubble-orb-x);
+  transform: translateX(-50%);
+}
+#shell:not([data-bubbles='true']):has(#codex-label[data-mode='project']) #orb-rail {
+  top: 0;
+  transform: none;
+  gap: 1px;
 }
 
 /* Only ever populated during confirmation mode (state.mjs sets this text
@@ -718,7 +747,31 @@ body:hover #orb-rail,
   #camera-toggle[data-camera-state="unavailable"] { color: #ff3b30; border-color: #ff3b30; }
 }
 
-.progress-bubble[data-kind='conversation'] { overflow-y: auto; white-space: pre-wrap; user-select: text; cursor: text; }
+.progress-bubble-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 16.5px;
+  max-height: 33px;
+  padding-right: 28px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.progress-bubble[data-expanded='true'] { height: auto; flex-basis: auto; max-height: 160px; }
+.progress-bubble[data-expanded='true'] .progress-bubble-text {
+  display: block;
+  -webkit-line-clamp: unset;
+  max-height: 146px;
+  overflow-y: auto;
+}
+.progress-bubble-toggle {
+  position: absolute; right: 7px; bottom: 6px;
+  padding: 0; border: 0; background: #13161f; color: #a6d6ff;
+  font: 10px/16.5px system-ui, sans-serif; cursor: pointer;
+}
+.progress-bubble-toggle[hidden] { display: none; }
 #last-result[hidden] { display: none; }
 
 /* Result access sits opposite the four existing controls, clear of the workspace pill. */
