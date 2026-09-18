@@ -1669,22 +1669,22 @@ export class RealtimeSession {
     switch (event.kind) {
       case 'user_transcript_delta':
         this.#state.trackUserCaption(event.item_id)
-        return this.#state.appendCaption({role: 'user', text: event.text, final: false})
+        return {...this.#state.appendCaption({role: 'user', text: event.text, final: false}), message_id: `user:${this.sessionEpoch}:${event.item_id}`}
       case 'user_transcript_final': {
         // A final the reducer refused is not the user's turn, so it must not reach the display.
         if (accepted === false) return null
         this.#state.resetUserCaptionTarget()
-        return {role: 'user', text: truncateCaptionText(event.text), final: true}
+        return {role: 'user', text: truncateCaptionText(event.text), final: true, full_text: event.text, message_id: `user:${this.sessionEpoch}:${event.item_id}`}
       }
       case 'response_transcript_delta': {
         if (!this.#captionAuthorized(event.response_id)) return null
         this.#state.trackAssistantCaption(event.response_id)
-        return this.#state.appendCaption({role: 'assistant', text: event.text, final: false})
+        return {...this.#state.appendCaption({role: 'assistant', text: event.text, final: false}), message_id: `assistant:${this.sessionEpoch}:${event.response_id}`}
       }
       case 'response_transcript_final': {
         if (!this.#captionAuthorized(event.response_id)) return null
         this.#state.resetAssistantCaptionTarget()
-        return {role: 'assistant', text: truncateCaptionText(event.text), final: true}
+        return {role: 'assistant', text: truncateCaptionText(event.text), final: true, full_text: event.text, message_id: `assistant:${this.sessionEpoch}:${event.response_id}`}
       }
       default:
         return null

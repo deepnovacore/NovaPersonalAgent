@@ -494,6 +494,8 @@ export function captionMessage(frame: CaptionFrame, sequence: number): string {
     text: frame.text,
     final: frame.final,
     sequence,
+    ...(frame.message_id===undefined?{}:{message_id:frame.message_id}),
+    ...(frame.full_text===undefined?{}:{full_text:frame.full_text}),
   })
 }
 

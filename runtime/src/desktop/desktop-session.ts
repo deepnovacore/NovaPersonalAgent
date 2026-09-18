@@ -352,7 +352,7 @@ export class DesktopSocketBridge {
     if (frame.role === 'assistant') {
       this.#latestAssistantCaptionSequence = this.#captionSequence
     }
-    this.#enqueue(captionMessage(frame, this.#captionSequence), {droppable: true})
+    this.#enqueue(captionMessage(frame, this.#captionSequence), {droppable: !frame.final || frame.full_text === undefined})
   }
 
   onExecutorProgress(input: ExecutorProgress, result?: ExecutorResult): void {

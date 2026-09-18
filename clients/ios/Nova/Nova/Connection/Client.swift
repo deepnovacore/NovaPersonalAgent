@@ -91,8 +91,8 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
         }
     }
 
-    @Published var server = UserDefaults.standard.string(forKey: "nova.server") ?? ""
-    @Published var token = ""
+    @Published var server = UserDefaults.standard.string(forKey: "nova.server") ?? "" { didSet { if oldValue != server { transcript = ChatTranscript() } } }
+    @Published var token = "" { didSet { if oldValue != token { transcript = ChatTranscript() } } }
     @Published var debugLocalhost = false
     @Published var mediaPreference = UserDefaults.standard.string(forKey: "nova.media") ?? "auto" {
         didSet { UserDefaults.standard.set(mediaPreference, forKey: "nova.media") }
@@ -115,6 +115,11 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
     @Published var speaker = false
     @Published var speechThreshold: Float = 0.045
     @Published var captions: [String: String] = [:]
+    @Published private(set) var transcript = ChatTranscript()
+    private func receiveCaption(role: String, text: String, final: Bool, id: String? = nil) {
+        captions[role] = text
+        transcript.receive(role: role, text: text, final: final, id: id.map { "\(generation.uuidString):\($0)" })
+    }
     @Published var project = "No project"
     @Published var taskStates: [String: String] = [:]
     @Published var results: [String: String] = [:]
@@ -302,7 +307,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                 aoqRequest = nil
                 let id = generation
                 let adapter = AOQAudio(); aoq = adapter
-                adapter.onCaption = { [weak self] role, text in guard let self, self.generation == id else { return }; self.captions[role] = text }
+                adapter.onCaption = { [weak self] role, text in guard let self, self.generation == id else { return }; self.receiveCaption(role: role, text: text, final: role == "user") }
                 adapter.onLevel = { [weak self] level in guard let self, self.generation == id else { return }; self.inputLevel = self.muted ? 0 : level }
                 adapter.onReady = { [weak self] in guard let self, self.generation == id else { return }; self.voiceStarting = false; self.voice = true; self.status = "正在聆听 · AOQ" }
                 adapter.onFailure = { [weak self] reason in guard let self, self.generation == id else { return }; self.end(); self.status = reason }
@@ -347,7 +352,9 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
             case "caption":
                 let sequence = try Wire.integer(value["sequence"])
                 if sequence > captionSequence, let text = value["text"] as? String, let role = value["role"] as? String, ["user", "assistant"].contains(role) {
-                    captionSequence = sequence; captions[role] = text
+                    captionSequence = sequence
+                    receiveCaption(role: role, text: value["full_text"] as? String ?? text,
+                                   final: value["final"] as? Bool ?? false, id: value["message_id"] as? String)
                 }
             case "project.state":
                 project = [value["workspace_display_name"], value["session_title"]].compactMap { $0 as? String }.joined(separator: " · ")

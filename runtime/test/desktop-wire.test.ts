@@ -555,3 +555,12 @@ test('an escaped key spelling is recognised as the field it decodes to', () => {
     1,
   )
 })
+
+
+test('chat caption carries complete final text alongside legacy rolling subtitle', () => {
+  const full = '完整内容。'.repeat(300)
+  const result = JSON.parse(captionMessage({role: 'assistant', text: full.slice(-160), final: true, full_text: full, message_id: 'assistant:1:r1'}, 3))
+  assert.equal(result.full_text, full)
+  assert.equal(result.message_id, 'assistant:1:r1')
+  assert.equal(result.sequence, 3)
+})

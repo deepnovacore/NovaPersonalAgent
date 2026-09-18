@@ -7,6 +7,19 @@ import XCTest
 #endif
 
 final class ProtocolTests: XCTestCase {
+    func testChatKeepsCompleteTurnsAndIgnoresLatePartial() {
+        var transcript = ChatTranscript()
+        let long = String(repeating: "完整的工作内容。", count: 300)
+        transcript.receive(role: "user", text: "请总结", final: true, id: "u1")
+        transcript.receive(role: "assistant", text: "正在查询", final: false, id: "a1")
+        transcript.receive(role: "assistant", text: long, final: true, id: "a1")
+        transcript.receive(role: "assistant", text: "迟到片段", final: false, id: "a1")
+        transcript.receive(role: "user", text: "下一条", final: true, id: "u2")
+        XCTAssertEqual(transcript.messages.count, 3)
+        XCTAssertEqual(transcript.messages[1].text, long)
+        XCTAssertTrue(transcript.messages[1].final)
+    }
+
 
     func testEnterpriseHealthRetriesTransientFailureAndHonorsCancellation() async throws {
         let config = URLSessionConfiguration.ephemeral

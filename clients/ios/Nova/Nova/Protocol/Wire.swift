@@ -1,5 +1,26 @@
 import Foundation
 
+struct ChatMessage: Identifiable, Equatable {
+    let id: String
+    let role: String
+    var text: String
+    var final: Bool
+}
+struct ChatTranscript {
+    private(set) var messages: [ChatMessage] = []
+    mutating func receive(role: String, text: String, final: Bool, id: String?) {
+        guard !text.isEmpty, ["user", "assistant"].contains(role) else { return }
+        if let id, let index = messages.firstIndex(where: { $0.id == id }) {
+            guard !messages[index].final || final else { return }
+            messages[index].text = text; messages[index].final = final
+        } else if id == nil, let last = messages.last, last.role == role, !last.final {
+            messages[messages.count - 1].text = text; messages[messages.count - 1].final = final
+        } else {
+            messages.append(ChatMessage(id: id ?? UUID().uuidString, role: role, text: text, final: final))
+        }
+    }
+}
+
 struct WireError: LocalizedError {
     let message: String
     var errorDescription: String? { message }

@@ -7,6 +7,8 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dictationPressed = false
+    @State private var conversationMode = 0
+    @State private var voiceInput = false
     @State private var settings = false
     @State private var scanning = false
     @State private var invitation: PairingCode?
@@ -39,14 +41,39 @@ struct ContentView: View {
             ink.ignoresSafeArea()
             RadialGradient(colors: [mint.opacity(0.085), .clear], center: .topTrailing,
                            startRadius: 0, endRadius: 500).ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 28) {
-                    header
-                    hero
-                    if !client.captions.isEmpty { conversation }
-                    if !client.approvals.isEmpty { decisions }
-                    if client.connected && (!client.taskStates.isEmpty || !client.results.isEmpty) { work }
-                }.padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 24)
+            VStack(spacing: 0) {
+                header.padding(.horizontal, 24).padding(.vertical, 12)
+                Picker("对话方式", selection: $conversationMode) {
+                    Text("聊天").tag(0)
+                    Text("实时对话").tag(1)
+                }.pickerStyle(.segmented).padding(.horizontal, 24).padding(.bottom, 12)
+                    .onChange(of: conversationMode) { _, mode in
+                        if mode == 0 { client.suspendAudio() }
+                        else { client.cancelDictation() }
+                    }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 18) {
+                            if conversationMode == 1 && client.transcript.messages.isEmpty { hero }
+                            if client.transcript.messages.isEmpty {
+                                Text("有什么想聊的？").foregroundStyle(.secondary).padding(.top, 60)
+                            }
+                            conversation
+                            if !client.approvals.isEmpty { decisions }
+                            Color.clear.frame(height: 1).id("latest")
+                        }.padding(.horizontal, 20).padding(.bottom, 18)
+                    }.scrollDismissesKeyboard(.interactively)
+                    .overlay(alignment: .bottomTrailing) {
+                        Button { withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
+                            Image(systemName: "arrow.down").padding(12).background(.ultraThinMaterial, in: Circle())
+                        }.accessibilityLabel("查看最新消息").padding(12)
+                    }
+                    .onChange(of: client.transcript.messages.count) { _, _ in
+                        if client.transcript.messages.last?.role == "user" {
+                            withAnimation { proxy.scrollTo(client.transcript.messages.last?.id, anchor: .top) }
+                        }
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { controls }
         }
@@ -79,28 +106,32 @@ struct ContentView: View {
         }
     }
     private var conversation: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            if let user = client.captions["user"], !user.isEmpty {
-                Text(user).font(.subheadline).foregroundStyle(.white.opacity(0.6))
-                    .textSelection(.enabled).accessibilityLabel("你：\(user)")
-                if client.captions["assistant"]?.isEmpty == false {
-                    Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                }
+        LazyVStack(alignment: .leading, spacing: 18) {
+            ForEach(client.transcript.messages) { message in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(message.role == "user" ? "你" : "Nova").font(.caption).foregroundStyle(.secondary)
+                    if message.role == "assistant" {
+                        ForEach(Array(message.text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                            let content = line.replacingOccurrences(of: "^#{1,6} +", with: "", options: .regularExpression)
+                            Text((try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(content))
+                                .font(.body).lineSpacing(5).fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        Text(message.text).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.textSelection(.enabled).padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(message.role == "user" ? mint.opacity(0.10) : .white.opacity(0.035), in: RoundedRectangle(cornerRadius: 18))
+                    .id(message.id)
             }
-            if let assistant = client.captions["assistant"], !assistant.isEmpty {
-                Text(assistant).font(.body).lineSpacing(6).foregroundStyle(.white.opacity(0.88))
-                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel("Nova：\(assistant)")
-            }
-            if client.connected && client.project != "No project" && client.project != "Waiting for host state" && !client.project.isEmpty {
-                Label(client.project, systemImage: "folder").font(.caption).foregroundStyle(mint.opacity(0.8))
-            }
-        }.padding(22).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.065)))
+        }
     }
     private var controls: some View {
         VStack(spacing: 14) {
-            if client.editableInput && !client.voice && !client.voiceStarting { inputComposer }
+            if conversationMode == 0 && client.editableInput && !client.voice && !client.voiceStarting { inputComposer }
+            if conversationMode == 0 && client.connected && !client.editableInput {
+                Text("当前连接仅支持实时对话").font(.caption).foregroundStyle(.secondary)
+            }
             if client.voice || client.voiceStarting {
                 HStack(spacing: 24) {
                     audioButton(client.muted ? "取消静音" : "静音", icon: client.muted ? "mic.slash.fill" : "mic.fill", active: client.muted) { client.toggleMute() }
@@ -110,7 +141,7 @@ struct ContentView: View {
                     }.accessibilityLabel("结束通话")
                     audioButton("扬声器", icon: "speaker.wave.2.fill", active: client.speaker) { client.toggleSpeaker() }
                 }.frame(maxWidth: .infinity)
-            } else {
+            } else if conversationMode == 1 || !client.connected {
                 Button {
                     if client.connected { Task { await client.startVoice() } }
                     else if client.server.isEmpty || client.token.isEmpty { settings = true }
@@ -131,11 +162,16 @@ struct ContentView: View {
     }
     private var inputComposer: some View {
         VStack(spacing: 10) {
-            TextField("输入消息…", text: $client.inputDraft, axis: .vertical)
+            HStack {
+                Button { voiceInput.toggle() } label: { Image(systemName: voiceInput ? "keyboard" : "mic").frame(width: 44, height: 44) }
+                    .accessibilityLabel(voiceInput ? "切换文字输入" : "切换语音输入")
+                TextField("输入消息…", text: $client.inputDraft, axis: .vertical)
                 .lineLimit(1...5).padding(12)
                 .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
                 .disabled(client.dictationRecording || client.dictationTranscribing)
+            }
             HStack {
+                if voiceInput {
                 Text(client.dictationRecording ? "松开转文字" : "按住说话")
                     .frame(maxWidth: .infinity).frame(minHeight: 44)
                     .background(mint.opacity(client.dictationRecording ? 0.25 : 0.08), in: Capsule())
@@ -146,6 +182,8 @@ struct ContentView: View {
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction { if client.dictationRecording { client.finishDictation() } else { client.beginDictation() } }
                     .accessibilityLabel(client.dictationRecording ? "结束录音并识别" : "开始语音识别")
+                }
+                Spacer(minLength: 0)
                 if client.dictationRecording || client.dictationTranscribing {
                     Button("取消") { client.cancelDictation() }.frame(minHeight: 44)
                 } else {

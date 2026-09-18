@@ -47,6 +47,8 @@ export interface CaptionFrame {
   readonly role: 'user' | 'assistant'
   readonly text: string
   readonly final: boolean
+  readonly message_id?: string
+  readonly full_text?: string
 }
 
 /** One delegate's session view: a task summary plus the latest progress slot. */
