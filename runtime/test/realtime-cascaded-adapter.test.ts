@@ -2649,3 +2649,21 @@ test('session close fences a camera result arriving after its user turn was canc
   assert.equal(llm.calls.length, 0)
   await watching.stop()
 })
+
+
+test('plain-text tool results continue instead of stranding the caller', async () => {
+  const llm = new FakeLlm([{kind: 'response_started', response_id: 'plain-result'},
+    {kind: 'response_completed', response_id: 'plain-result'}])
+  const adapter = new CascadedRealtimeAdapter({endpointing: new ScriptedEndpointing(),
+    asr: new FakeAsrClient(), llm, tts: new FakeTtsClient(), idFactory: ids('plain-session', 'plain-item')})
+  await adapter.connect({tools: [], signal: new AbortController().signal})
+  const watching = observe(adapter)
+  try {
+    const item = {kind: 'tool_output' as const, host_item_id: 'plain', event_id: 'plain-event',
+      call_id: 'plain-call', content: 'The requested service is temporarily unavailable.'}
+    await adapter.injectHostItem(item, directOptions())
+    await adapter.createResponse({kind: 'tool_result', item, task_summary: null, origin_spoken: false}, new AbortController().signal)
+    await waitFor('plain tool continuation', () => llm.calls.length === 1)
+    assert.deepEqual(llm.calls[0]?.inputs.at(-1), {kind: 'tool_result', call_id: 'plain-call', output: item.content})
+  } finally { await adapter.close(); await watching.stop() }
+})

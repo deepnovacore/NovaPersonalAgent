@@ -1477,7 +1477,8 @@ function hostInput(item: HostContextItem, asUserActivation: boolean): CascadedLl
     try {
       output = JSON.parse(item.content) as unknown
     } catch {
-      throw new CascadedRealtimeError('configuration')
+      // Tool output is evidence, not a command: plain text is a valid JSON string value.
+      output = item.content
     }
     const parsed = jsonValueSchema.safeParse(output)
     if (!parsed.success || item.call_id === null) throw new CascadedRealtimeError('configuration')
