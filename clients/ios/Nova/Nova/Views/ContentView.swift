@@ -7,7 +7,7 @@ struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dictationPressed = false
-    @State private var conversationMode = 0
+    @State private var conversationMode = 1
     @State private var voiceInput = false
     @State private var settings = false
     @State private var scanning = false
@@ -28,6 +28,7 @@ struct ContentView: View {
         personalBody
         .preferredColorScheme(.dark).tint(mint)
         .sheet(isPresented: $settings, onDismiss: { enterprise.cancel() }) { connectionSettings }
+        .onChange(of: client.editableInput) { _, enabled in if !enabled { conversationMode = 1 } }
         .onChange(of: client.connectionRevision) { _, _ in enterprise.cancel() }
         .onChange(of: client.server) { _, _ in enterprise.cancel() }
         .onChange(of: client.token) { _, _ in enterprise.cancel() }
@@ -44,7 +45,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 header.padding(.horizontal, 24).padding(.vertical, 12)
                 Picker("对话方式", selection: $conversationMode) {
-                    Text("聊天").tag(0)
+                    if client.editableInput { Text("文字聊天").tag(0) }
                     Text("实时对话").tag(1)
                 }.pickerStyle(.segmented).padding(.horizontal, 24).padding(.bottom, 12)
                     .onChange(of: conversationMode) { _, mode in
