@@ -1,3 +1,4 @@
+import {readBoundedResponse} from '../http/bounded-response.js'
 import {createHash} from 'node:crypto'
 import {lookup as dnsLookup} from 'node:dns/promises'
 import {constants} from 'node:fs'
@@ -371,39 +372,9 @@ function parseInWorker(kind: 'pdf' | 'docx', bytes: Uint8Array, signal?: AbortSi
 }
 
 async function readResponseBounded(response: Response, signal: AbortSignal): Promise<Uint8Array> {
-  const declared = response.headers.get('content-length')
-  if (declared !== null && (!/^\d+$/u.test(declared) || Number(declared) > MAX_FILE_BYTES)) {
-    void response.body?.cancel()
-    throw new KnowledgeDocumentFailure('file_too_large')
-  }
-  if (response.body === null) throw new KnowledgeDocumentFailure('empty_text')
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  try {
-    for (;;) {
-      signal.throwIfAborted()
-      const chunk: {readonly done?: boolean; readonly value?: Uint8Array} = await reader.read()
-      if (chunk.done) break
-      if (chunk.value === undefined) continue
-      total += chunk.value.byteLength
-      if (total > MAX_FILE_BYTES) {
-        await reader.cancel().catch(() => undefined)
-        throw new KnowledgeDocumentFailure('file_too_large')
-      }
-      chunks.push(chunk.value)
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  if (total === 0) throw new KnowledgeDocumentFailure('empty_text')
-  const result = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    result.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return result
+  const bytes=await readBoundedResponse(response,{limit:MAX_FILE_BYTES,signal,failure:()=>new KnowledgeDocumentFailure('file_too_large')})
+  if(!bytes.length)throw new KnowledgeDocumentFailure('empty_text')
+  return bytes
 }
 
 function admittedUrl(value: string): URL {
