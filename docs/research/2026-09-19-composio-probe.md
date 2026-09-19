@@ -41,6 +41,6 @@ Plan 1 已提交至 `4a7f0201`（六个实现提交，从 `13b3ff2d` 起）：sc
 
 ## 可重复执行与剩余工作
 
-运行离线检查：`node --test runtime/scripts/composio-probe.test.mjs`。运行公开目录认证探测：`node runtime/scripts/composio-probe.mjs catalog`，key 仅从进程环境读取。未配置时输出 unobserved 并不访问网络。当前 CLI 仅开放 catalog；`executeRead` 关闭，link/inspect/gmail/calendar/routing 尚未实现。
+运行离线检查：`node --test runtime/scripts/composio-probe.test.mjs`。运行公开目录认证探测：`node runtime/scripts/composio-probe.mjs catalog`，key 仅从进程环境读取。未配置时输出 unobserved 并不访问网络。可附加一个不存在的输出文件路径，全部 schema 通过 slug、日期版本、结构检查后保存公开 input/output schema 与 SHA-256；不会覆盖现有文件。新增契约检查后离线共 10 项通过。当前 CLI 仅开放 catalog；`executeRead` 关闭，link/inspect/gmail/calendar/routing 尚未实现。
 
 裁定：没有 key 和账号范围时，不猜 schema、不搭建不可验证的 OAuth/采集流程。Phase 0 Task 1 部分完成、Task 4 离线实验完成；Task 2/3 和 schema 保存保持未完成。后续需在本机配置 key、选择测试账号和只读标签/日历，补齐安全 link、身份检查、分页探针，取得真实契约后再写 Plan 2。临时 SDK 项目可在后续核对结束后删除：`/private/tmp/nova-composio-probe-6FGUGC`。

@@ -1,10 +1,17 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {spawn} from 'node:child_process'
-import {requestJson,summarize,classify,effectiveKey,createBudget,executeRead} from './composio-probe.mjs'
+import {requestJson,summarize,classify,effectiveKey,createBudget,executeRead,toolContract} from './composio-probe.mjs'
 
 const path='/api/v3.1/tools/GMAIL_GET_PROFILE?version=20260915_00'
 const options={method:'GET',apiKey:'fixture'}
+test('catalog captures only pinned public schema and rejects misleading successful envelopes',()=>{
+ const data={slug:'GMAIL_GET_PROFILE',version:'20260915_00',input_parameters:{type:'object'},output_parameters:{type:'object'},token:'private'}
+ const contract=toolContract(data.slug,{status:200,data})
+ assert.deepEqual(contract.input_parameters,{type:'object'});assert.equal(contract.schema_sha256.length,64)
+ assert.equal('token' in contract,false)
+ for(const result of [{status:200,data:{}},{status:200,data:{...data,version:'latest'}},{status:401,data}])assert.throws(()=>toolContract(data.slug,result),/invalid_tool_contract/)
+})
 test('probe report drops all raw private response fields',()=>{
  assert.deepEqual(summarize({caseId:'routing',status:'pass',layer:'live',checks:{identity_matches:true},raw:'private body',token:'secret'}),{caseId:'routing',status:'pass',layer:'live',checks:{identity_matches:true}})
  assert.throws(()=>summarize({caseId:'routing',status:'pass',layer:'live',checks:{body:'private'}}))

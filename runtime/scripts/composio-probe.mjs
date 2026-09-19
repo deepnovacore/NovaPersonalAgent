@@ -1,9 +1,17 @@
 import {pathToFileURL} from 'node:url'
+import {createHash} from 'node:crypto'
+import {writeFile} from 'node:fs/promises'
 
 export const VERSION = '20260915_00'
 export const READ_TOOLS = ['GMAIL_GET_PROFILE','GMAIL_LIST_HISTORY','GMAIL_FETCH_EMAILS','GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID','GMAIL_LIST_LABELS','GOOGLECALENDAR_GET_CURRENT_USER','GOOGLECALENDAR_LIST_CALENDARS','GOOGLECALENDAR_EVENTS_LIST','GOOGLECALENDAR_EVENTS_GET','GOOGLECALENDAR_EVENTS_INSTANCES']
 export const createBudget = () => ({requests:0,bytes:0,started:Date.now()})
 export const effectiveKey = (setting,parent) => setting.kind==='cleared'?undefined:setting.kind==='saved'?setting.value:parent
+export function toolContract(slug,{status,data}) {
+  const schema=value=>value!==null&&typeof value==='object'&&!Array.isArray(value)&&value.type==='object'
+  if(status!==200||!READ_TOOLS.includes(slug)||data?.slug!==slug||data.version!==VERSION||!schema(data.input_parameters)||!schema(data.output_parameters))throw Error('invalid_tool_contract')
+  const contract={slug,version:VERSION,input_parameters:data.input_parameters,output_parameters:data.output_parameters}
+  return {...contract,schema_sha256:createHash('sha256').update(JSON.stringify(contract)).digest('hex')}
+}
 export function summarize({caseId,status,layer,checks={}}) {
   if (!/^[a-z-]{1,60}$/.test(caseId)||!['pass','fail','unobserved'].includes(status)||!['offline','live','catalog'].includes(layer)) throw Error('invalid_summary')
   for (const [key,value] of Object.entries(checks)) if(!/^[a-z_]{1,60}$/.test(key)||!(typeof value==='boolean'||typeof value==='number'&&Number.isSafeInteger(value)&&value>=0)) throw Error('invalid_check')
@@ -58,9 +66,12 @@ async function main() {
   if(mode!=='catalog')throw Error('usage: node runtime/scripts/composio-probe.mjs catalog')
   if(!process.env.COMPOSIO_API_KEY){console.log(JSON.stringify(summarize({caseId:'catalog',status:'unobserved',layer:'live',checks:{key_present:false}})));return}
   const budget=createBudget()
+  const contracts=[]
   for(const slug of READ_TOOLS){
     const result=await requestJson(`/api/v3.1/tools/${slug}?version=${VERSION}`,{apiKey:process.env.COMPOSIO_API_KEY,budget})
-    console.log(JSON.stringify(summarize({caseId:'catalog',status:result.status===200?'pass':'fail',layer:'live',checks:{http_status:result.status,schema_present:result.data!==null}})))
+    contracts.push(toolContract(slug,result))
+    console.log(JSON.stringify(summarize({caseId:'catalog',status:'pass',layer:'live',checks:{http_status:result.status,schema_present:true}})))
   }
+  if(process.argv[3])await writeFile(process.argv[3],JSON.stringify({checked_at:new Date().toISOString(),tool_version:VERSION,contracts},null,2)+'\n',{flag:'wx',mode:0o600})
 }
 if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)main().catch(()=>{console.error('composio_probe_failed');process.exitCode=1})
