@@ -4,7 +4,8 @@ import {z} from 'zod'
 import {canonicalJson} from '../text/canonical-json.js'
 import {trustSchema} from '../core/events.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
-import {initializeSourceState} from './source-state.js'
+import {initializeSourceState,isCurrentEvidence} from './source-state.js'
+import {sourceOperation} from './source-operations.js'
 import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 
 const id = z.string().min(1).max(512)
@@ -87,13 +88,18 @@ function all(db:GraphDatabase):EntryRevision[]{return rows(db,'SELECT r.payload_
 function evidence(db:GraphDatabase,evidenceId:string):EvidenceRecord|null {const row=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(evidenceId);return row?EvidenceRecordSchema.parse(JSON.parse(String(row.payload_json))):null}
 export function retrievalEvidence(db:GraphDatabase,evidenceId:string):EvidenceRecord|null {
   const ref=evidence(db,evidenceId);if(!ref)return null
+  if(!isCurrentEvidence(db,ref.id,ref.source_id))return null
+  if(ref.retention_until!==null&&Date.parse(ref.retention_until)<=Date.now())return null
   if(db.prepare('SELECT hash FROM memory_suppressed WHERE hash=?').get(ref.hash))return null
   if(ref.raw_text!==null&&db.prepare('SELECT hash FROM memory_legacy_suppressed WHERE hash=? AND substr(?,1,length(scope))=scope').get(createHash('sha256').update(ref.raw_text.normalize('NFKC').trim().toLowerCase()).digest('hex'),ref.source_id))return null
   return ref
 }
 function write(db:GraphDatabase,candidate:Candidate,deleted=false):EntryRevision|null {
   const previous=current(db,candidate.entry_id)
+  if(candidate.expected_revision!==undefined&&candidate.expected_revision!==(previous?.revision??0))throw Error('STORE_STALE_REVISION')
   const refs=candidate.evidence_refs.map(ref=>evidence(db,ref))
+  if(!deleted&&candidate.written_by!=='user_correction'&&refs.some(ref=>ref&&db.prepare('SELECT 1 FROM memory_suppressed WHERE hash=?').get(ref.hash)))return previous
+  if(!deleted&&refs.some(ref=>ref!==null&&!retrievalEvidence(db,ref.id)))throw Error('STORE_NOT_FOUND')
   if (!deleted && (refs.every(ref=>ref===null)||refs.some((ref,index)=>ref===null&&!previous?.evidence_refs.includes(candidate.evidence_refs[index]!)))) throw new Error('STORE_NOT_FOUND')
   if (candidate.origin==='stated' && refs.every(ref=>ref?.trust!=='trusted_user')) throw new Error('STORE_INVALID_OPERATION')
   const redactions:string[]=[]
@@ -109,13 +115,23 @@ function write(db:GraphDatabase,candidate:Candidate,deleted=false):EntryRevision
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'
+export type MemoryOperation = 'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'
 export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   if(transaction)db.exec('BEGIN IMMEDIATE')
   try {
     let result:unknown=null
     switch(operation){
+      case 'source_connection':case 'source_apply_page':case 'source_pending':case 'source_revision':result=sourceOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
+      case 'invalidate_evidence': {
+        const ids=z.array(id).max(256).parse(value.ids)
+        for(const entry of all(db))if(entry.op!=='tombstone'&&entry.origin==='inferred'&&entry.evidence_refs.some(ref=>ids.includes(ref))){
+          const fields={...entry};Reflect.deleteProperty(fields,'revision');Reflect.deleteProperty(fields,'supersedes')
+          write(db,CandidateSchema.parse({...fields,op:'tombstone',content:{reason:'evidence_superseded'},recorded_at:new Date().toISOString()}),true)
+          for(const ref of entry.evidence_refs)if(retrievalEvidence(db,ref))db.prepare('DELETE FROM memory_extractions WHERE evidence_id=?').run(ref)
+        }
+        break
+      }
       case 'pending_vectors':case 'write_vectors':case 'search':result=memoryRetrieval(db,operation,input);break
       case 'append_evidence': {
         const parsed=EvidenceRecordSchema.parse(value)
@@ -139,7 +155,14 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
       case 'extraction_done':result=db.prepare('SELECT 1 FROM memory_extractions WHERE evidence_id=? LIMIT 1').get(id.parse(value.id))!==undefined;break
       case 'pending_evidence': {
         const prefix=id.parse(value.source_prefix);const limit=z.number().int().min(1).max(100).parse(value.limit??100)
-        result=rows(db,"SELECT e.payload_json FROM memory_evidence e WHERE substr(e.source_id,1,length(?))=? AND json_extract(e.payload_json,'$.raw_text') IS NOT NULL AND json_extract(e.payload_json,'$.source_kind') <> 'user_correction' AND NOT EXISTS (SELECT 1 FROM memory_extractions x WHERE x.evidence_id=e.id) ORDER BY e.id LIMIT ?",prefix,prefix,String(limit));break
+        result=rows(db,`SELECT e.payload_json FROM memory_evidence e WHERE substr(e.source_id,1,length(?))=?
+          AND json_extract(e.payload_json,'$.raw_text') IS NOT NULL AND json_extract(e.payload_json,'$.source_kind') <> 'user_correction'
+          AND (json_extract(e.payload_json,'$.retention_until') IS NULL OR julianday(json_extract(e.payload_json,'$.retention_until'))>julianday('now'))
+          AND NOT EXISTS (SELECT 1 FROM memory_suppressed s WHERE s.hash=e.hash)
+          AND NOT EXISTS (SELECT 1 FROM memory_extractions x WHERE x.evidence_id=e.id)
+          AND NOT EXISTS (SELECT 1 FROM source_objects o JOIN source_connections c ON c.id=o.connection_id WHERE json_extract(o.payload_json,'$.source_id')=e.source_id AND
+            (o.generation<>json_extract(c.payload_json,'$.fence.generation') OR NOT EXISTS (SELECT 1 FROM json_each(o.payload_json,'$.current_evidence_ids') r WHERE r.value=e.id)))
+          ORDER BY e.id LIMIT ?`,prefix,prefix,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null);break
       }
       case 'record_extraction': {
         const evidenceId=id.parse(value.evidence_id);if(!evidence(db,evidenceId))throw new Error('STORE_NOT_FOUND')

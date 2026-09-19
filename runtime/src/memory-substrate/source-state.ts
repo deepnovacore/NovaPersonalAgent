@@ -13,6 +13,24 @@ export type Activation=z.infer<typeof activationSchema>
 export const extractionTicketSchema=z.object({evidence_id:z.string().min(1).max(512),activation:activationSchema.nullable(),consent_revision:revisionSchema,extraction_provider:sourceIdSchema,fence:fenceSchema.nullable()}).strict()
 export type ExtractionTicket=z.infer<typeof extractionTicketSchema>
 export type SourceChange={revision:number;phase:'invalidated'|'ready'}
+const boundedJson=z.json().refine(v=>Buffer.byteLength(JSON.stringify(v))<=65536,'source state too large')
+export const connectionSchema=z.object({fence:fenceSchema,namespace:sourceIdSchema,state:z.enum(['connected','paused','disconnected']),scope:boundedJson,checkpoint:boundedJson,continuation:boundedJson,pending_ids:z.array(sourceIdSchema).max(200),batch:revisionSchema,completed_batch:revisionSchema,deleting:z.array(revisionSchema).max(100)}).strict()
+export type SourceConnection=z.infer<typeof connectionSchema>
+export const sourceObjectSchema=z.object({connection_id:sourceIdSchema,generation:revisionSchema,object_key:sourceIdSchema,source_id:sourceIdSchema,semantic_hash:sourceIdSchema,metadata:z.record(z.string(),z.json()),current_evidence_ids:z.array(z.string().min(1).max(512)).max(256),activation_revision:revisionSchema,status:z.enum(['current','coverage_removed','provider_deleted']),observed_at:z.iso.datetime({offset:true})}).strict()
+export type SourceObject=z.infer<typeof sourceObjectSchema>
+export function readConnection(db:GraphDatabase,id:string):SourceConnection|null{
+ const row=db.prepare('SELECT payload_json FROM source_connections WHERE id=?').get(id)
+ return row?connectionSchema.parse(JSON.parse(String(row.payload_json))):null
+}
+export function sourceObjectFor(db:GraphDatabase,sourceId:string):SourceObject|null{
+ const row=db.prepare("SELECT payload_json FROM source_objects WHERE json_extract(payload_json,'$.source_id')=?").get(sourceId)
+ return row?sourceObjectSchema.parse(JSON.parse(String(row.payload_json))):null
+}
+export function isCurrentEvidence(db:GraphDatabase,evidenceId:string,sourceId:string):boolean{
+ const object=sourceObjectFor(db,sourceId);if(!object)return true
+ const connection=readConnection(db,object.connection_id)
+ return connection!==null&&connection.fence.generation===object.generation&&object.status==='current'&&object.current_evidence_ids.includes(evidenceId)
+}
 export const sha256=(text:string):string=>createHash('sha256').update(text).digest('hex')
 export function connectorSourceId(namespace:string,generation:number,objectKey:string):string{
  sourceIdSchema.parse(namespace);revisionSchema.parse(generation);z.string().min(1).max(16384).parse(objectKey)

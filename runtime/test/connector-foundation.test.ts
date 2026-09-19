@@ -6,6 +6,7 @@ import {join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import {connectorSourceId,initializeSourceState,assertSourceStateSchema} from '../src/memory-substrate/source-state.js'
 import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
+import {initializeMemory,memoryOperation,EvidenceRecordSchema,CandidateSchema,type MemoryOperation,type EntryRevision} from '../src/memory-substrate/store.js'
 
 test('source identity separates accounts and deletion generations within reference budget',()=>{
  const a=connectorSourceId('account',0,'x'.repeat(4096))
@@ -47,5 +48,46 @@ test('source schema rejects missing uniqueness rather than silently accepting da
   initializeSourceState(db);assertSourceStateSchema(db)
   db.exec('DROP TABLE source_grants; CREATE TABLE source_grants(source_id TEXT,payload_json TEXT NOT NULL) STRICT')
   assert.throws(()=>assertSourceStateSchema(db),/SCHEMA/)
+ }finally{db.close()}
+})
+
+test('object activation withdraws derived memory, reuses A, and ignores metadata-only changes',()=>{
+ const db=new DatabaseSync(':memory:');initializeMemory(db)
+ const run=(op:string,input:unknown)=>memoryOperation(db,op as MemoryOperation,input)
+ try{
+  run('source_connection',{action:'create',id:'c',namespace:'n'})
+  const connected=run('source_connection',{action:'fence',id:'c',state:'connected',expected_epoch:0}) as {fence:unknown}
+  const source=connectorSourceId('n',0,'message')
+  const raw=(id:string)=>EvidenceRecordSchema.parse({id,source_id:source,source_kind:'mail',locator:'mail/message',observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),raw_text:id,hash:id,trust:'untrusted_external'})
+  const a=raw('a'),b=raw('b')
+  const page=(id:string,e:typeof a,metadata:Record<string,boolean>={})=>({fence:connected.fence,batch_id:'1',page_id:id,changes:[{object_key:'message',source_id:source,semantic_hash:e.id,metadata,evidence:[e],status:'current'}],pending_ids:[],continuation:null,checkpoint:null,complete:false})
+  const first=run('source_apply_page',page('1',a)) as {revision:number;activations:{revision:number}[]}
+  const candidate=CandidateSchema.parse({entry_id:'promise',kind:'fact',origin:'inferred',written_by:'merge',evidence_refs:['a'],content:{text:'promise from A'},recorded_at:new Date().toISOString()})
+  run('merge',candidate)
+  const independent=raw('independent');independent.source_id='user-source';independent.source_kind='user_correction';independent.trust='trusted_user'
+  run('append_evidence',independent)
+  run('merge',{...candidate,entry_id:'mixed',evidence_refs:['a','independent']})
+  run('merge',{...candidate,entry_id:'user',origin:'stated',written_by:'user_correction',evidence_refs:['independent']})
+  run('source_apply_page',page('2',b))
+  assert.equal(run('retrieval_evidence',{id:'a'}),null)
+  assert.equal((run('history',{entry_id:'promise'}) as EntryRevision[]).at(-1)!.op,'tombstone')
+  assert.equal((run('history',{entry_id:'mixed'}) as EntryRevision[]).at(-1)!.op,'tombstone')
+  assert.ok((run('list',{}) as EntryRevision[]).some(e=>e.entry_id==='user'))
+  assert.throws(()=>run('merge',{...candidate,entry_id:'late'}),/NOT_FOUND/)
+  assert.ok(!(run('pending_evidence',{source_prefix:'connector:'}) as {id:string}[]).some(e=>e.id==='a'))
+  const back=run('source_apply_page',page('3',a)) as typeof first
+  assert.equal(back.activations[0]!.revision,3)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM memory_evidence WHERE id=?').get('a')!.n,1)
+  assert.notEqual(run('retrieval_evidence',{id:'a'}),null)
+  const flags=run('source_apply_page',page('4',a,{read:true})) as typeof first
+  assert.equal(flags.activations.length,0)
+  const replay=run('source_apply_page',page('4',a,{read:true})) as {applied:boolean;revision:number}
+  assert.equal(replay.applied,false);assert.equal(replay.revision,flags.revision)
+  assert.throws(()=>run('source_apply_page',page('4',b)),/IDEMPOTENCY/)
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM memory_deleted_sources').get()!.n,0)
+  db.prepare('INSERT INTO memory_suppressed VALUES(?)').run('a')
+  run('source_apply_page',page('5',b));run('source_apply_page',page('6',a))
+  assert.equal(run('retrieval_evidence',{id:'a'}),null,'reactivation cannot defeat forgetting')
+  assert.equal(run('merge',{...candidate,entry_id:'forgotten'}),null)
  }finally{db.close()}
 })
