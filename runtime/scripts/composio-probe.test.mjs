@@ -5,6 +5,15 @@ import {requestJson,summarize,classify,effectiveKey,createBudget,executeRead,too
 
 const path='/api/v3.1/tools/GMAIL_GET_PROFILE?version=20260915_00'
 const options={method:'GET',apiKey:'fixture'}
+test('probe admits only fixed connection routes and rejects write tools at transport boundary',async()=>{
+ const fake=async()=>new Response('{}')
+ await assert.doesNotReject(requestJson('/api/v3.1/connected_accounts?auth_config_ids=ac_fixture',options,fake))
+ await assert.rejects(requestJson('/api/v3.1/connected_accounts?auth_config_ids=ac_fixture&extra=yes',options,fake),/route_denied/)
+ await assert.doesNotReject(requestJson('/api/v3.1/auth_configs?toolkit_slug=gmail',options,fake))
+ await assert.doesNotReject(requestJson('/api/v3.1/connected_accounts/link',{...options,method:'POST',body:{auth_config_id:'ac_fixture',user_id:'nova-fixture'}},fake))
+ await assert.rejects(requestJson('/api/v3.1/tools/execute/GMAIL_SEND_EMAIL',{...options,method:'POST',body:{}},fake),/route_denied/)
+ await assert.rejects(requestJson('/api/v3.1/connected_accounts/ca_x?redirect=https://evil.test',options,fake),/route_denied/)
+})
 test('catalog captures only pinned public schema and rejects misleading successful envelopes',()=>{
  const data={slug:'GMAIL_GET_PROFILE',version:'20260915_00',input_parameters:{type:'object'},output_parameters:{type:'object'},token:'private'}
  const contract=toolContract(data.slug,{status:200,data})
@@ -62,4 +71,51 @@ test('spawn captures environment until a new process starts',async()=>{
  assert.deepEqual(await oldResult,{matchesExpected:true})
  const next=spawn(process.execPath,['-e',"console.log(JSON.stringify({matchesExpected:process.env.COMPOSIO_API_KEY==='fixture-new'}))"],{env:nextEnv,stdio:['ignore','pipe','pipe']})
  assert.deepEqual(await collect(next),{matchesExpected:true})
+})
+
+test('live probe gates source reads on unique route and actual provider identity',async()=>{
+ const {runReadProbe}=await import('./composio-probe.mjs')
+ const connection={toolkit:'gmail',userId:'nova-fixture',connectedAccountId:'ca_fixture',expectedIdentity:'fixture@example.test',scope:{kind:'gmail',label:'INBOX',pastDays:30}}
+ let calls=[]
+ const fake=async(url,options)=>{calls.push(url);return new Response(JSON.stringify(url.includes('connected_accounts?')?{items:[{id:'ca_fixture',toolkit:{slug:'gmail'}}]}:{successful:true,data:{emailAddress:'wrong@example.test'}}))}
+ await assert.rejects(runReadProbe('gmail',connection,'fixture',fake),/identity_mismatch/)
+ assert.equal(calls.length,2)
+ calls=[]
+ await assert.rejects(runReadProbe('gmail',connection,'fixture',async()=>{calls.push(1);return new Response(JSON.stringify({items:[]}))}),/routing_unverified/)
+ assert.equal(calls.length,1)
+})
+test('live Gmail probe follows opaque pagination and returns only bounded summary',async()=>{
+ const {runReadProbe}=await import('./composio-probe.mjs')
+ const connection={toolkit:'gmail',userId:'nova-fixture',connectedAccountId:'ca_fixture',expectedIdentity:'fixture@example.test',scope:{kind:'gmail',label:'INBOX',pastDays:30}}
+ let pages=0
+ const fake=async(url,options)=>{
+  if(url.includes('connected_accounts?'))return new Response(JSON.stringify({items:[{id:'ca_fixture',toolkit:{slug:'gmail'}}]}))
+  const body=JSON.parse(options.body);assert.equal(body.version,'20260915_00');assert.equal(body.connected_account_id,'ca_fixture')
+  let data
+  if(url.endsWith('GMAIL_GET_PROFILE'))data={emailAddress:connection.expectedIdentity,historyId:'900719925474099300'}
+  else if(url.endsWith('GMAIL_FETCH_EMAILS')){assert.deepEqual(body.arguments.label_ids,['INBOX']);assert.match(body.arguments.query,/^after:\d+ before:\d+$/);assert.equal(body.arguments.max_results,2);if(pages)assert.equal(body.arguments.page_token,'opaque');data={messages:[{messageId:String(++pages)}],nextPageToken:pages===1?'opaque':''}}
+  else if(url.endsWith('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID'))data={messageId:'1',labelIds:['INBOX'],messageTimestamp:new Date(Date.now()-1000).toISOString(),messageText:'secret'}
+  else if(url.endsWith('GMAIL_LIST_HISTORY')){assert.equal(body.arguments.start_history_id,'900719925474099300');data={history:[],historyId:'900719925474099301'}}
+  else assert.fail('unexpected tool')
+  return new Response(JSON.stringify({successful:true,data}))
+ }
+ const report=await runReadProbe('gmail',connection,'fixture',fake)
+ assert.equal(report.status,'pass');assert.equal(report.checks.pages,2);assert.equal(report.checks.objects,2)
+ assert.equal(JSON.stringify(report).includes('secret'),false)
+})
+
+test('calendar probe treats HTTP 200 successful false as failure and empty calendars honestly',async()=>{
+ const {runReadProbe}=await import('./composio-probe.mjs')
+ const c={toolkit:'googlecalendar',userId:'nova-fixture',connectedAccountId:'ca_fixture',expectedIdentity:'fixture@example.test',scope:{kind:'calendar',calendar:'primary',pastDays:30,futureDays:90}}
+ const transport=failed=>async(url)=>new Response(JSON.stringify(url.includes('connected_accounts?')?{items:[{id:c.connectedAccountId,toolkit:{slug:c.toolkit}}]}:url.endsWith('GET_CURRENT_USER')?{successful:true,data:{email:c.expectedIdentity}}:failed?{successful:false,data:{status_code:410},error:'private detail'}:{successful:true,data:{items:[],nextSyncToken:'private cursor'}}))
+ await assert.rejects(runReadProbe('calendar',c,'fixture',transport(true)),/provider_read_failed/)
+ const r=await runReadProbe('calendar',c,'fixture',transport(false))
+ assert.equal(r.checks.objects,0);assert.equal(r.checks.sync_token_present,true)
+ assert.equal(JSON.stringify(r).includes('private'),false)
+})
+
+test('missing or different approved scope fails before any network request',async()=>{
+ const {runReadProbe}=await import('./composio-probe.mjs')
+ const c={toolkit:'gmail',userId:'nova-fixture',connectedAccountId:'ca_fixture',expectedIdentity:'fixture@example.test'}
+ for(const scope of [undefined,{kind:'gmail',label:'OTHER',pastDays:30}])await assert.rejects(runReadProbe('gmail',{...c,scope},'fixture',async()=>assert.fail('must not read')),/scope_unverified/)
 })
