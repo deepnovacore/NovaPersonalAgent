@@ -1,5 +1,5 @@
 import {z} from 'zod'
-import {EntryRevisionSchema,retrievalEvidence,effectiveEvidence,type EntryRevision} from './store.js'
+import {EntryRevisionSchema,retrievalEvidence,effectiveEvidence,processingStamp,type EntryRevision} from './store.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
 
 const vectorSchema=z.array(z.number().finite()).min(1).max(4096).refine(vector=>vector.some(value=>value!==0),'zero embedding')
@@ -18,14 +18,14 @@ export function memoryRetrieval(db:GraphDatabase,operation:'pending_vectors'|'wr
  const value=z.record(z.string(),z.unknown()).parse(input)
  const prefix=key.parse(value.entry_prefix);const provider=key.parse(value.provider)
  if(operation==='write_vectors'){
-  const batch=z.array(z.object({entry_id:key,revision:z.number().int().positive(),vector:vectorSchema}).strict()).max(100).parse(value.entries)
+  const batch=z.array(z.object({entry_id:key,revision:z.number().int().positive(),vector:vectorSchema,stamp:z.string().min(1).max(128)}).strict()).max(100).parse(value.entries)
   let count=0
   for(const item of batch){
    if(!item.entry_id.startsWith(prefix))throw Error('STORE_INVALID_OPERATION')
    const raw=db.prepare(`SELECT payload_json FROM (${latest}) WHERE entry_id=?`).get(item.entry_id)
    if(!raw)continue
    const entry=EntryRevisionSchema.parse(JSON.parse(String(raw.payload_json)))
-   if(entry.revision!==item.revision||!active(entry)||!hasEvidence(db,entry)||!consented(db,entry,provider))continue
+   if(item.stamp!==processingStamp(db,entry.evidence_refs,'embedding',provider)||entry.revision!==item.revision||!active(entry)||!hasEvidence(db,entry)||!consented(db,entry,provider))continue
    db.prepare('INSERT INTO memory_vectors VALUES(?,?,?,?) ON CONFLICT(entry_id,provider) DO UPDATE SET revision=excluded.revision,vector_json=excluded.vector_json').run(item.entry_id,item.revision,provider,JSON.stringify(item.vector));count++
   }
   return count

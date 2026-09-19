@@ -62,6 +62,9 @@ test('object activation withdraws derived memory, reuses A, and ignores metadata
   const a=raw('a'),b=raw('b')
   const page=(id:string,e:typeof a,metadata:Record<string,boolean>={})=>({fence:connected.fence,batch_id:'1',page_id:id,changes:[{object_key:'message',source_id:source,semantic_hash:e.id,metadata,evidence:[e],status:'current'}],pending_ids:[],continuation:null,checkpoint:null,complete:false})
   const first=run('source_apply_page',page('1',a)) as {revision:number;activations:{revision:number}[]}
+  run('source_grant',{source_id:source,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:'fixture',embedding_provider:null}})
+  const ticket=run('extraction_ticket',{evidence_id:'a',provider:'fixture'})
+  assert.ok(ticket)
   const candidate=CandidateSchema.parse({entry_id:'promise',kind:'fact',origin:'inferred',written_by:'merge',evidence_refs:['a'],content:{text:'promise from A'},recorded_at:new Date().toISOString()})
   run('merge',candidate)
   const independent=raw('independent');independent.source_id='user-source';independent.source_kind='user_correction';independent.trust='trusted_user'
@@ -76,6 +79,16 @@ test('object activation withdraws derived memory, reuses A, and ignores metadata
   assert.throws(()=>run('merge',{...candidate,entry_id:'late'}),/NOT_FOUND/)
   assert.ok(!(run('pending_evidence',{source_prefix:'connector:'}) as {id:string}[]).some(e=>e.id==='a'))
   const back=run('source_apply_page',page('3',a)) as typeof first
+  assert.deepEqual(run('commit_extraction',{ticket,candidates:[{...candidate,entry_id:'stale-ticket'}],extracted:{entries:[]}}),{applied:false})
+  const fresh=run('extraction_ticket',{evidence_id:'a',provider:'fixture'})
+  assert.ok(fresh)
+  assert.deepEqual(run('commit_extraction',{ticket:fresh,candidates:[{...candidate,entry_id:'fresh-ticket'}],extracted:{entries:[]}}),{applied:true})
+  assert.equal(run('extraction_ticket',{evidence_id:'a',provider:'fixture'}),null)
+  run('source_grant',{source_id:source,expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:'fixture',embedding_provider:'embed'}})
+  const stamp=run('processing_stamp',{ids:['a'],purpose:'embedding',provider:'embed'})
+  run('source_grant',{source_id:source,expected_revision:2,grant:{revision:3,scope_revision:0,extraction_provider:'fixture',embedding_provider:null}})
+  run('source_grant',{source_id:source,expected_revision:3,grant:{revision:4,scope_revision:0,extraction_provider:'fixture',embedding_provider:'embed'}})
+  assert.equal(run('write_vectors',{entry_prefix:'fresh-',provider:'embed',entries:[{entry_id:'fresh-ticket',revision:1,vector:[1,0],stamp}]}),0,'revoked and regranted consent cannot authorize an old embedding result')
   assert.equal(back.activations[0]!.revision,3)
   assert.equal(db.prepare('SELECT COUNT(*) n FROM memory_evidence WHERE id=?').get('a')!.n,1)
   assert.notEqual(run('retrieval_evidence',{id:'a'}),null)

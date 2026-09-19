@@ -1,8 +1,8 @@
 import {z} from 'zod'
 import type {GraphDatabase} from '../workspace-graph/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
-import {EvidenceRecordSchema,type MemoryOperation} from './store.js'
-import {connectionSchema,readConnection,sourceObjectSchema,sourceIdSchema,revisionSchema,fenceSchema,connectorSourceId,sha256,readProcessingGrant,processingGrantSchema,type SourceConnection,type Activation} from './source-state.js'
+import {EvidenceRecordSchema,CandidateSchema,type MemoryOperation} from './store.js'
+import {connectionSchema,readConnection,sourceObjectSchema,sourceIdSchema,revisionSchema,fenceSchema,connectorSourceId,sha256,readProcessingGrant,processingGrantSchema,extractionTicketSchema,sourceObjectFor,type ExtractionTicket,type SourceConnection,type Activation} from './source-state.js'
 
 type Run=(operation:MemoryOperation,input:unknown)=>unknown
 const changeSchema=z.object({object_key:sourceIdSchema,source_id:sourceIdSchema,semantic_hash:sourceIdSchema,metadata:z.record(z.string(),z.json()),evidence:z.array(z.lazy(()=>EvidenceRecordSchema)).max(256),status:z.enum(['current','coverage_removed','provider_deleted'])}).strict()
@@ -14,6 +14,30 @@ export function advanceSourceRevision(db:GraphDatabase):number{db.exec('UPDATE s
 function save(db:GraphDatabase,c:SourceConnection):void{db.prepare('INSERT INTO source_connections VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json').run(c.fence.connection_id,canonicalJson(connectionSchema.parse(c)))}
 export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,run:Run):unknown{
  const v=z.record(z.string(),z.unknown()).parse(input)
+ if(operation==='extraction_ticket'){
+  const q=z.object({evidence_id:z.string().min(1).max(512),provider:sourceIdSchema,force:z.boolean().optional()}).strict().parse(v)
+  const raw=run('processing_evidence',{id:q.evidence_id,purpose:'extraction',provider:q.provider});if(!raw)return null
+  const e=EvidenceRecordSchema.parse(raw);if(!e.raw_text||e.source_kind==='user_correction')return null
+  const object=sourceObjectFor(db,e.source_id),grant=readProcessingGrant(db,e.source_id)!
+  const ticket:ExtractionTicket={evidence_id:e.id,activation:object?{object_key:object.object_key,revision:object.activation_revision}:null,consent_revision:grant.revision,extraction_provider:q.provider,fence:object?readConnection(db,object.connection_id)!.fence:null}
+  if(!q.force&&(db.prepare('SELECT 1 FROM source_extractions WHERE ticket_key=?').get(sha256(canonicalJson(ticket)))||(!object&&db.prepare('SELECT 1 FROM memory_extractions WHERE evidence_id=? LIMIT 1').get(e.id))))return null
+  return ticket
+ }
+ if(operation==='commit_extraction'){
+  const q=z.object({ticket:extractionTicketSchema,candidates:z.array(CandidateSchema).max(9),extracted:z.record(z.string(),z.json())}).strict().parse(v)
+  const current=sourceOperation(db,'extraction_ticket',{evidence_id:q.ticket.evidence_id,provider:q.ticket.extraction_provider,force:true},run)
+  if(!current||canonicalJson(current)!==canonicalJson(q.ticket))return {applied:false}
+  for(const candidate of q.candidates){
+   if(!candidate.evidence_refs.includes(q.ticket.evidence_id))throw Error('STORE_INVALID_OPERATION')
+   for(const id of candidate.evidence_refs)if(!run('processing_evidence',{id,purpose:'extraction',provider:q.ticket.extraction_provider}))return {applied:false}
+  }
+  for(const candidate of q.candidates)run('merge',candidate)
+  // The ticket and all candidates share the enclosing worker transaction.
+  const key=sha256(canonicalJson(q.ticket))
+  run('record_extraction',{evidence_id:q.ticket.evidence_id,attempt_id:key,extracted:q.extracted})
+  db.prepare('INSERT OR IGNORE INTO source_extractions VALUES(?,?)').run(key,canonicalJson({ticket:q.ticket}))
+  return {applied:true}
+ }
  if(operation==='source_revision')return sourceRevision(db)
  if(operation==='source_grant'){
   const q=z.object({source_id:z.string().min(1).max(512),action:z.literal('get').optional(),expected_revision:revisionSchema.optional(),grant:processingGrantSchema.optional()}).strict().parse(v)

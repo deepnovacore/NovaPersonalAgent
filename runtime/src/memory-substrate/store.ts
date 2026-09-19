@@ -4,7 +4,7 @@ import {z} from 'zod'
 import {canonicalJson} from '../text/canonical-json.js'
 import {trustSchema} from '../core/events.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
-import {initializeSourceState,isCurrentEvidence,allowsProcessing} from './source-state.js'
+import {initializeSourceState,isCurrentEvidence,allowsProcessing,readProcessingGrant,sourceObjectFor,readConnection,sha256} from './source-state.js'
 import {sourceOperation} from './source-operations.js'
 import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 
@@ -14,7 +14,7 @@ const object = z.record(z.string(), z.json())
 export const EvidenceRecordSchema = z.object({
   id, source_id:id, source_kind:z.enum(['conversation','file','mail','calendar','im','task_result','user_correction']),
   consent:z.object({provider_fingerprint:id}).optional(),
-  source_metadata:z.object({sender_id:id,account_id:id}).optional(),
+  source_metadata:z.object({sender_id:id,account_id:id,provider:id.optional()}).optional(),
   locator:z.string().max(4096), cursor:z.string().max(4096).nullable().default(null),
   observed_at:date, recorded_at:date, raw_text:z.string().max(100_000).nullable(),
   extracted:object.default({}), hash:z.string().min(1).max(128),
@@ -95,6 +95,10 @@ export function effectiveEvidence(db:GraphDatabase,evidenceId:string,options:{pu
   if(ref.raw_text!==null&&db.prepare('SELECT hash FROM memory_legacy_suppressed WHERE hash=? AND substr(?,1,length(scope))=scope').get(createHash('sha256').update(ref.raw_text.normalize('NFKC').trim().toLowerCase()).digest('hex'),ref.source_id))return null
   return ref
 }
+export function processingStamp(db:GraphDatabase,ids:readonly string[],purpose:'extraction'|'embedding',provider:string):string|null{
+  const records=ids.map(id=>effectiveEvidence(db,id,{purpose,provider}));if(!records.length||records.some(e=>e===null))return null
+  return sha256(canonicalJson(records.map(e=>{const object=sourceObjectFor(db,e!.source_id);return {id:e!.id,grant:readProcessingGrant(db,e!.source_id),activation:object?.activation_revision??null,fence:object?readConnection(db,object.connection_id)?.fence:null}})))
+}
 export const retrievalEvidence=(db:GraphDatabase,id:string):EvidenceRecord|null=>effectiveEvidence(db,id)
 function write(db:GraphDatabase,candidate:Candidate,deleted=false):EntryRevision|null {
   const previous=current(db,candidate.entry_id)
@@ -117,21 +121,22 @@ function write(db:GraphDatabase,candidate:Candidate,deleted=false):EntryRevision
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'
+export type MemoryOperation = 'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'
 export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   if(transaction)db.exec('BEGIN IMMEDIATE')
   try {
     let result:unknown=null
     switch(operation){
-      case 'source_connection':case 'source_apply_page':case 'source_pending':case 'source_revision':case 'source_grant':result=sourceOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
+      case 'source_connection':case 'source_apply_page':case 'source_pending':case 'source_revision':case 'source_grant':case 'extraction_ticket':case 'commit_extraction':result=sourceOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
+      case 'processing_stamp':result=processingStamp(db,z.array(id).min(1).max(256).parse(value.ids),z.enum(['extraction','embedding']).parse(value.purpose),id.parse(value.provider));break
       case 'processing_evidence':result=effectiveEvidence(db,id.parse(value.id),{purpose:z.enum(['extraction','embedding']).parse(value.purpose),provider:id.parse(value.provider)});break
       case 'invalidate_evidence': {
         const ids=z.array(id).max(256).parse(value.ids)
         for(const entry of all(db))if(entry.op!=='tombstone'&&entry.origin==='inferred'&&entry.evidence_refs.some(ref=>ids.includes(ref))){
           const fields={...entry};Reflect.deleteProperty(fields,'revision');Reflect.deleteProperty(fields,'supersedes')
           write(db,CandidateSchema.parse({...fields,op:'tombstone',content:{reason:'evidence_superseded'},recorded_at:new Date().toISOString()}),true)
-          for(const ref of entry.evidence_refs)if(retrievalEvidence(db,ref))db.prepare('DELETE FROM memory_extractions WHERE evidence_id=?').run(ref)
+          for(const ref of entry.evidence_refs)if(retrievalEvidence(db,ref)){db.prepare('DELETE FROM memory_extractions WHERE evidence_id=?').run(ref);db.prepare("DELETE FROM source_extractions WHERE json_extract(payload_json,'$.ticket.evidence_id')=?").run(ref)}
         }
         break
       }

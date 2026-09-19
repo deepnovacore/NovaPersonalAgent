@@ -34,6 +34,20 @@ test('revocation survives late admission and provider changes require fresh proc
  }finally{await resource.close();await rm(root,{recursive:true,force:true})}
 })
 
+test('model reply after consent revocation never commits partial candidates or a completion',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-late-processing-'));let begin!:()=>void,finish!:(r:{text:string})=>void
+ const started=new Promise<void>(r=>{begin=r}),response=new Promise<{text:string}>(r=>{finish=r})
+ const gateway:ModelGateway={async *stream(){},complete(){begin();return response}}
+ const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'test',gateway,model:'fixture'})
+ try{
+  await resource.open();await resource.ingestEvidence({sourceId:'im',locator:'one',text:'给你报告',observedAt:new Date().toISOString(),kind:'im',processingConsent:resource.processingGrant(true)})
+  await started;await resource.setProcessingConsent('im',resource.processingGrant(false,2))
+  finish({text:'{"entries":[{"key":"late","text":"旧结果","topic":"计划","kind":"fact","due":null,"direction":null,"status":null,"valid_until":null}]}'})
+  await resource.flush();assert.equal((await resource.list()).entries.length,0)
+  const pending=await client.memory('pending_evidence',{source_prefix:resource.prefix}) as unknown[];assert.equal(pending.length,1)
+ }finally{finish?.({text:'{"entries":[]}'});await resource.close();await rm(root,{recursive:true,force:true})}
+})
+
 test('substrate resource keeps identity, correction, restart and source deletion on worker',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-substrate-'));const path=join(root,'memory.sqlite')
  let calls=0
