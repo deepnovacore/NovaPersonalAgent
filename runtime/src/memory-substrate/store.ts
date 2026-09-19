@@ -187,7 +187,7 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
       }
       case 'delete_source': {
         const source=id.parse(value.source_id);const affected=rows(db,'SELECT payload_json FROM memory_evidence WHERE source_id=?',source).map(row=>EvidenceRecordSchema.parse(row).id)
-        for(const ref of affected)db.prepare('DELETE FROM memory_extractions WHERE evidence_id=?').run(ref)
+        for(const ref of affected){db.prepare('DELETE FROM memory_extractions WHERE evidence_id=?').run(ref);db.prepare("DELETE FROM source_extractions WHERE json_extract(payload_json,'$.ticket.evidence_id')=?").run(ref)}
         for(const entry of all(db))if(entry.evidence_refs.some(ref=>affected.includes(ref)))db.prepare('DELETE FROM memory_vectors WHERE entry_id=?').run(entry.entry_id)
         db.prepare('INSERT OR IGNORE INTO memory_deleted_sources VALUES(?)').run(source)
         db.prepare('DELETE FROM memory_evidence WHERE source_id=?').run(source)

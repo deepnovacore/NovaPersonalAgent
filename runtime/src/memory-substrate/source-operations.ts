@@ -12,6 +12,18 @@ export type PageResult={revision:number;applied:boolean;activations:Activation[]
 export function sourceRevision(db:GraphDatabase):number{return Number(db.prepare('SELECT revision FROM source_clock WHERE id=1').get()!.revision)}
 export function advanceSourceRevision(db:GraphDatabase):number{db.exec('UPDATE source_clock SET revision=revision+1 WHERE id=1');return sourceRevision(db)}
 function save(db:GraphDatabase,c:SourceConnection):void{db.prepare('INSERT INTO source_connections VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json').run(c.fence.connection_id,canonicalJson(connectionSchema.parse(c)))}
+function withdrawObjects(db:GraphDatabase,c:SourceConnection,run:Run,generation=c.fence.generation):void{
+ let after=''
+ for(;;){
+  const rows=db.prepare('SELECT payload_json FROM source_objects WHERE connection_id=? AND generation=? AND object_key>? ORDER BY object_key LIMIT 200').all(c.fence.connection_id,generation,after)
+  for(const row of rows){const object=sourceObjectSchema.parse(JSON.parse(String(row.payload_json)));after=object.object_key
+   const ids=object.current_evidence_ids;object.current_evidence_ids=[];object.status='coverage_removed';object.activation_revision++
+   db.prepare('UPDATE source_objects SET payload_json=? WHERE connection_id=? AND generation=? AND object_key=?').run(canonicalJson(object),object.connection_id,object.generation,object.object_key)
+   run('invalidate_evidence',{ids})
+  }
+  if(rows.length<200)break
+ }
+}
 export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,run:Run):unknown{
  const v=z.record(z.string(),z.unknown()).parse(input)
  if(operation==='extraction_ticket'){
@@ -58,6 +70,30 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
    save(db,fresh);return fresh
   }
   if(!c)throw Error('STORE_NOT_FOUND')
+  if(v.action==='scope'){
+   const q=z.object({action:z.literal('scope'),id:sourceIdSchema,expected_scope_revision:revisionSchema,scope:z.json()}).strict().parse(v)
+   if(q.expected_scope_revision!==c.fence.scope_revision)throw Error('STORE_STALE_REVISION')
+   c.scope=q.scope;c.fence.scope_revision++;c.fence.epoch++;c.pending_ids=[];c.continuation=null;c.checkpoint=null;c.completed_batch=c.batch
+   save(db,c);withdrawObjects(db,c,run);advanceSourceRevision(db);return c
+  }
+  if(v.action==='delete_begin'){
+   const q=z.object({action:z.literal('delete_begin'),id:sourceIdSchema,expected_epoch:revisionSchema}).strict().parse(v)
+   if(q.expected_epoch!==c.fence.epoch)throw Error('STORE_STALE_REVISION')
+   c.deleting.push(c.fence.generation);c.fence.generation++;c.fence.epoch++;c.state='paused';c.pending_ids=[];c.continuation=null;c.checkpoint=null;c.completed_batch=c.batch
+   save(db,c);withdrawObjects(db,c,run,c.fence.generation-1);advanceSourceRevision(db);return c
+  }
+  if(v.action==='delete_step'){
+   const q=z.object({action:z.literal('delete_step'),id:sourceIdSchema,limit:z.number().int().min(1).max(200).default(200)}).strict().parse(v)
+   const generation=c.deleting[0];if(generation===undefined)return {remaining:false}
+   if(generation>=c.fence.generation)throw Error('STORE_INVALID_OPERATION')
+   const rows=db.prepare('SELECT payload_json FROM source_objects WHERE connection_id=? AND generation=? ORDER BY object_key LIMIT ?').all(q.id,generation,q.limit)
+   for(const row of rows){const object=sourceObjectSchema.parse(JSON.parse(String(row.payload_json)))
+    run('delete_source',{source_id:object.source_id});db.prepare('DELETE FROM source_grants WHERE source_id=?').run(object.source_id)
+    db.prepare('DELETE FROM source_objects WHERE connection_id=? AND generation=? AND object_key=?').run(q.id,generation,object.object_key)
+   }
+   if(!db.prepare('SELECT 1 FROM source_objects WHERE connection_id=? AND generation=? LIMIT 1').get(q.id,generation))c.deleting.shift()
+   save(db,c);return {remaining:c.deleting.length>0}
+  }
   if(v.action==='fence'){
    const q=z.object({action:z.literal('fence'),id:sourceIdSchema,state:z.enum(['connected','paused','disconnected']),expected_epoch:revisionSchema}).strict().parse(v)
    if(q.expected_epoch!==c.fence.epoch)throw Error('STORE_STALE_REVISION')
@@ -78,7 +114,11 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
   const hash=sha256(canonicalJson(q))
   const receipt=db.prepare('SELECT payload_hash,result_json FROM source_pages WHERE connection_id=? AND batch_id=? AND page_id=?').get(q.fence.connection_id,q.batch_id,q.page_id)
   if(receipt){if(receipt.payload_hash!==hash)throw Error('STORE_IDEMPOTENCY_CONFLICT');return {...JSON.parse(String(receipt.result_json)) as PageResult,applied:false}}
+  const batch=Number(q.batch_id)
+  if(batch<c.batch||batch<=c.completed_batch||(batch>c.batch&&c.batch!==c.completed_batch))throw Error('STORE_STALE_REVISION')
   if(q.complete&&q.pending_ids.length)throw Error('STORE_INVALID_OPERATION')
+  const appliedKeys=new Set(q.changes.map(change=>change.object_key))
+  if(c.pending_ids.some(id=>!q.pending_ids.includes(id)&&!appliedKeys.has(id)))throw Error('STORE_INVALID_OPERATION')
   const activations:Activation[]=[]
   const seen=new Set<string>()
   for(const change of q.changes){
@@ -103,6 +143,7 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
   save(db,c)
   const result:PageResult={revision:advanceSourceRevision(db),applied:true,activations}
   db.prepare('INSERT INTO source_pages VALUES(?,?,?,?,?)').run(q.fence.connection_id,q.batch_id,q.page_id,hash,canonicalJson(result))
+  if(q.complete)db.prepare('DELETE FROM source_pages WHERE connection_id=? AND CAST(batch_id AS INTEGER)<?').run(q.fence.connection_id,c.completed_batch-1)
   return result
  }
  throw Error('STORE_INVALID_OPERATION')

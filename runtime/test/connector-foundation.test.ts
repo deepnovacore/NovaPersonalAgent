@@ -6,6 +6,7 @@ import {join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import {connectorSourceId,initializeSourceState,assertSourceStateSchema} from '../src/memory-substrate/source-state.js'
 import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
+import type {SourceConnection} from '../src/memory-substrate/source-state.js'
 import {initializeMemory,memoryOperation,EvidenceRecordSchema,CandidateSchema,type MemoryOperation,type EntryRevision} from '../src/memory-substrate/store.js'
 
 test('source identity separates accounts and deletion generations within reference budget',()=>{
@@ -103,4 +104,36 @@ test('object activation withdraws derived memory, reuses A, and ignores metadata
   assert.equal(run('retrieval_evidence',{id:'a'}),null,'reactivation cannot defeat forgetting')
   assert.equal(run('merge',{...candidate,entry_id:'forgotten'}),null)
  }finally{db.close()}
+})
+
+test('unfinished pages and generation cleanup resume from disk without skipping bodies or deleting new data',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-page-resume-')),path=join(root,'memory.sqlite');let client=new WorkspaceGraphStoreClient(path)
+ try{
+  await client.open();await client.memory('source_connection',{action:'create',id:'c',namespace:'n'})
+  let c=await client.memory('source_connection',{action:'fence',id:'c',state:'connected',expected_epoch:0}) as SourceConnection
+  const ids=Array.from({length:200},(_,i)=>'m'+i)
+  const page={fence:c.fence,batch_id:'1',page_id:'list',changes:[],pending_ids:ids,continuation:{page:'next'},checkpoint:{cursor:'done'},complete:false}
+  await client.memory('source_apply_page',page)
+  const changes=ids.slice(0,20).map(id=>{const source_id=connectorSourceId('n',0,id);return {object_key:id,source_id,semantic_hash:id,metadata:{},status:'current',evidence:[EvidenceRecordSchema.parse({id,source_id,source_kind:'mail',locator:id,observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),raw_text:id,hash:id,trust:'untrusted_external'})]}})
+  const body={...page,page_id:'body',changes,pending_ids:ids.slice(20)}
+  await client.memory('source_apply_page',body);await client.close();client=new WorkspaceGraphStoreClient(path);await client.open()
+  c=await client.memory('source_connection',{action:'get',id:'c'}) as SourceConnection
+  assert.equal(c.pending_ids.length,180);assert.equal(c.checkpoint,null)
+  assert.equal((await client.memory('source_apply_page',body) as {applied:boolean}).applied,false)
+  await assert.rejects(client.memory('source_apply_page',{...body,page_id:'bad',complete:true}))
+  await assert.rejects(client.memory('source_apply_page',{...page,page_id:'skip',pending_ids:[],complete:true}),'cannot drop unread IDs to claim completion')
+  await assert.rejects(client.memory('source_apply_page',{...page,batch_id:'2'}),'cannot abandon incomplete batch')
+  const old=c.fence
+  c=await client.memory('source_connection',{action:'delete_begin',id:'c',expected_epoch:c.fence.epoch}) as SourceConnection
+  assert.equal(c.fence.generation,1);assert.deepEqual(c.deleting,[0])
+  await client.close();client=new WorkspaceGraphStoreClient(path);await client.open()
+  assert.equal((await client.memory('source_connection',{action:'delete_step',id:'c',limit:10}) as {remaining:boolean}).remaining,true)
+  c=await client.memory('source_connection',{action:'fence',id:'c',state:'connected',expected_epoch:c.fence.epoch}) as SourceConnection
+  const source_id=connectorSourceId('n',1,'m0'),change={...changes[0]!,source_id,evidence:[{...changes[0]!.evidence[0]!,id:'new-m0',source_id}]}
+  await client.memory('source_apply_page',{...page,fence:c.fence,batch_id:'2',page_id:'new',changes:[change],pending_ids:[],complete:true})
+  await client.memory('source_connection',{action:'delete_step',id:'c',limit:200})
+  assert.notEqual(await client.memory('evidence',{id:'new-m0'}),null)
+  assert.equal(await client.memory('evidence',{id:'m0'}),null)
+  await assert.rejects(client.memory('source_apply_page',{...page,fence:old,page_id:'late'}))
+ }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
