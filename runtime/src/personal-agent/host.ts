@@ -143,6 +143,7 @@ export class PersonalAgentHost {
     } = { entries: [], cursor: null };
     #sources: PersonalSources | undefined;
     #feishu: PersonalFeishu | undefined;
+    #connectors: PersonalFeishu | undefined;
     #listeners = new Set<() => void>();
     #tail: Promise<unknown> = Promise.resolve();
     #timer: ReturnType<typeof setInterval> | undefined;
@@ -198,6 +199,7 @@ export class PersonalAgentHost {
     constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
+    setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
     setFeishu(feishu: PersonalFeishu): void { this.#feishu = feishu; }
     setSources(sources: PersonalSources): void { this.#sources = sources; }
     subscribe(listener: () => void): () => void { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
@@ -218,6 +220,7 @@ export class PersonalAgentHost {
             this.#opened = true;
             await this.#sources?.open?.();
             await this.#feishu?.open();
+            await this.#connectors?.open();
             await this.refreshMemory();
             await this.revalidate();
             for (const item of this.#state.feed) {
@@ -239,6 +242,7 @@ export class PersonalAgentHost {
         this.#abort.abort();
         for (const item of this.#state.feed) if (item.suggestion_id) this.options.pool.withdraw(item.suggestion_id);
         try {
+            await this.#connectors?.close().catch(() => { /* connector shutdown cannot block remaining resources */ });
             await this.#feishu?.close().catch(() => { /* optional connector failure must not prevent runtime shutdown */ });
             await this.#sources?.close?.();
             await this.#briefing?.catch(()=>{/* aborted preparation */});
@@ -307,7 +311,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, revision: Math.max(this.#projectionRevision, this.#state.revision), conversations:this.conversationSnapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, revision: Math.max(this.#projectionRevision, this.#state.revision), conversations:this.conversationSnapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     async #commit(next: PersonalState): Promise<void> { next.revision = this.#state.revision + 1; await this.#store.write(next); this.#state = next; this.#notify(); }
     async #evidence(ref: string): Promise<Evidence|null> {
         const direct=this.options.evidence(ref)??this.#sources?.evidence?.(ref);if(direct)return direct
@@ -478,6 +482,11 @@ export class PersonalAgentHost {
         }
         else if (command.method === 'feed.action')
             data = await this.action(p);
+        else if (command.method.startsWith('connector.')) {
+            if (!this.#connectors) throw Error('unsupported');
+            data = await this.#connectors.command(command.method, p);
+            this.connectionChanged();
+        }
         else if (command.method.startsWith('feishu.')) {
             if (!this.#feishu) throw Error('unsupported');
             data = await this.#feishu.command(command.method, p);

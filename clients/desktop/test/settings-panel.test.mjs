@@ -586,6 +586,7 @@ test('both voice fields offer presets while keeping a bounded custom id path', (
 
 test('every API key is a password field with a badge, hint, and clear button', () => {
   for (const key of [
+    'composioApiKey',
     'dashscopeApiKey',
     'tavilyApiKey',
     'arkApiKey',
@@ -595,14 +596,14 @@ test('every API key is a password field with a badge, hint, and clear button', (
     assert.match(html, new RegExp(`<input type="password" id="${key}"[^>]*placeholder="输入新密钥；留空保持不变"`))
     assert.match(html, new RegExp(`<span class="badge" id="badge-${key}">未设置</span>`))
     assert.match(html, new RegExp(`<span class="key-usage" id="usage-${key}">`))
-    assert.match(html, new RegExp(`<button type="button" class="clear" data-key="${key}">清除</button>`))
+    assert.match(html, new RegExp(`<button type="button" class="clear" data-key="${key}">清除(?:并停用)?</button>`))
   }
   assert.match(html, /DashScope/)
   assert.match(html, /Tavily/)
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
   assert.match(html, /火山语音/)
-  assert.equal((html.match(/type="password"/g) || []).length, 5)
+  assert.equal((html.match(/type="password"/g) || []).length, 6)
 })
 
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {

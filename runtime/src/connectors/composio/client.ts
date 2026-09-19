@@ -14,8 +14,13 @@ export type GoogleScope=z.infer<typeof googleScopeSchema>
 export const bindingSchema=z.object({toolkit:toolkitSchema,userId:id,accountId:id,authConfigId:id,identity:z.string().email().max(320)}).strict()
 export type GoogleBinding=z.infer<typeof bindingSchema>
 export interface VerifiedConnection {readonly identity:string;readonly scope:GoogleScope}
-export interface ComposioBudget {requests:number;bytes:number;deadline:number;signal:AbortSignal}
-export const createComposioBudget=(signal?:AbortSignal):ComposioBudget=>({requests:0,bytes:0,deadline:Date.now()+30000,signal:AbortSignal.any([AbortSignal.timeout(30000),...(signal?[signal]:[])])})
+export interface ComposioBudget {requests:number;bytes:number;deadline:number;scopeAnchor:number;signal:AbortSignal}
+export function createComposioBudget(signal?:AbortSignal,scopeAnchor=Date.now()):ComposioBudget{
+ const now=Date.now()
+ if(!Number.isFinite(scopeAnchor)||scopeAnchor<now-86400000||scopeAnchor>now+60000)throw new ComposioFailure('snapshot_expired')
+ return {requests:0,bytes:0,deadline:now+30000,scopeAnchor,signal:AbortSignal.any([AbortSignal.timeout(30000),...(signal?[signal]:[])])}
+}
+
 export class ComposioFailure extends Error {
  constructor(readonly code:string,readonly retryAfter:number|null=null){super(code);this.name='ComposioFailure'}
 }
@@ -92,11 +97,18 @@ export class ComposioClient {
   this.#verified.set(handle,{binding:structuredClone(binding),scope:structuredClone(scope),budget})
   return handle
  }
+ async scopes(binding:GoogleBinding,pageToken?:string):Promise<{items:{id:string;name:string}[];next:string|null}>{
+  const budget=createComposioBudget(),scope:GoogleScope=binding.toolkit==='gmail'?{kind:'gmail',labels:['INBOX'],pastDays:30}:{kind:'calendar',calendars:['primary'],pastDays:30,futureDays:90}
+  const verified=await this.verify(binding,scope,budget)
+  const d=await this.read(verified,binding.toolkit==='gmail'?{kind:'gmail.labels'}:{kind:'calendar.calendars',...(pageToken?{pageToken}:{})},budget)
+  const items=parse(z.array(z.object({id:z.string().min(1).max(1024),name:z.string().max(1000).optional(),summary:z.string().max(1000).optional()})).max(1000),d[binding.toolkit==='gmail'?'labels':'calendars'])
+  return {items:items.map(i=>({id:i.id,name:i.name??i.summary??i.id})),next:parse(opaque.nullable(),d.next_page_token??null)}
+ }
  async read(handle:VerifiedConnection,input:GoogleRead,budget:ComposioBudget):Promise<Record<string,unknown>>{
   const verified=this.#verified.get(handle);if(verified?.budget!==budget)throw failure('connection_unverified')
   const request=parse(readSchema,input),{binding,scope}=verified
   if(request.kind.startsWith('gmail.')!==(scope.kind==='gmail'))throw failure('scope_denied')
-  const now=budget.deadline-30000
+  const now=budget.scopeAnchor
   let slug:string,args:Record<string,unknown>
   switch(request.kind){
    case 'gmail.profile':slug='GMAIL_GET_PROFILE';args={user_id:'me'};break
@@ -108,7 +120,7 @@ export class ComposioClient {
    case 'gmail.message':slug='GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID';args={user_id:'me',message_id:request.messageId,format:request.format};break
    // Read all history metadata so label removals are not lost; the provider scopes message bodies.
    case 'gmail.history':slug='GMAIL_LIST_HISTORY';args={user_id:'me',start_history_id:request.historyId,max_results:100,...(request.pageToken?{page_token:request.pageToken}:{})};break
-   case 'calendar.calendars':slug='GOOGLECALENDAR_LIST_CALENDARS';args={...(request.pageToken?{page_token:request.pageToken}:{})};break
+   case 'calendar.calendars':slug='GOOGLECALENDAR_LIST_CALENDARS';args={max_results:100,...(request.pageToken?{page_token:request.pageToken}:{})};break
    case 'calendar.list':{
     if(scope.kind!=='calendar'||!scope.calendars.includes(request.calendarId)||Date.parse(request.timeMin)<now-scope.pastDays*86400000-60000||Date.parse(request.timeMax)>now+scope.futureDays*86400000+60000||Date.parse(request.timeMax)<=Date.parse(request.timeMin)||Date.parse(request.timeMax)-Date.parse(request.timeMin)>(scope.pastDays+scope.futureDays+1)*86400000)throw failure('scope_denied')
     slug='GOOGLECALENDAR_EVENTS_LIST';args={calendarId:request.calendarId,timeMin:request.timeMin,timeMax:request.timeMax,singleEvents:true,showDeleted:true,maxResults:100,...(request.pageToken?{pageToken:request.pageToken}:{})};break

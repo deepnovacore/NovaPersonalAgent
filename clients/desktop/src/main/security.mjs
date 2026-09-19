@@ -225,3 +225,10 @@ export function feishuVerificationUrl(value) {
       !['feishu.cn', 'larksuite.com'].some(domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`))) throw new Error('授权链接无效')
   return url.href
 }
+
+export function connectorAuthorizationUrl(value) {
+  if (typeof value !== 'string' || value.length > 4096) throw new Error('authorization request rejected')
+  const url = new URL(value)
+  if (url.origin !== 'https://connect.composio.dev' || url.username || url.password || !url.pathname.startsWith('/link/')) throw new Error('authorization request rejected')
+  return url.href
+}

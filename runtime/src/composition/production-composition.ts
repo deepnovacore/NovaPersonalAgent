@@ -1,3 +1,6 @@
+import {MacCalendarClient} from '../connectors/macos/calendar.js'
+import {ComposioConnector} from '../connectors/composio/index.js'
+import {ComposioClient} from '../connectors/composio/client.js'
 import {scopeApprovalController} from '../personal-agent/approval-scope.js'
 import type {PersonalAgentHost} from '../personal-agent/host.js'
 import {conversationRuntimeFactory} from '../personal-agent/conversation-runtime.js'
@@ -181,6 +184,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     onExecutorProgress:(progress,result)=>composition.desktop.bridge.onExecutorProgress(progress,result),
     onAudioFrame:frame=>composition.desktop.bridge.onAudioFrame(frame),onAudioClear:(id,epoch)=>composition.desktop.bridge.onAudioClear(id,epoch),onAudioAlert:(id,epoch)=>composition.desktop.bridge.onAudioAlert(id,epoch),onAudioTerminal:(id,epoch)=>composition.desktop.bridge.onAudioTerminal(id,epoch),
   }),frame=>composition.desktop.bridge.onPersonalFrame(frame))
+  host.setConnectors(new ComposioConnector({...(process.platform==='darwin'&&environment.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH?{local:new MacCalendarClient(environment.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH)}:{}),memory:()=>{const memory=composition.realtime.personalMemory;return memory instanceof SubstrateMemoryResource?memory:undefined},client:environment.COMPOSIO_API_KEY?new ComposioClient(environment.COMPOSIO_API_KEY):null,onChange:()=>{void host.connectionChanged()}}))
   const feishu = new FeishuConnector({
     executable: environment.NOVA_AUDIO_AGENT_FEISHU_CLI_PATH ?? 'lark-cli',
     credentialRoot: join(host.path + '.feishu', 'credentials'),

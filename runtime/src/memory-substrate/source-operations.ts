@@ -1,3 +1,4 @@
+import {syncStatusSchema} from './source-state.js'
 import {z} from 'zod'
 import type {GraphDatabase} from '../workspace-graph/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
@@ -84,6 +85,12 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
   return q.grant
  }
  if(operation==='source_connection'){
+  if(v.action==='list'){
+   const q=z.object({action:z.literal('list'),prefix:sourceIdSchema,after:sourceIdSchema.nullable().optional(),limit:z.number().int().min(1).max(100).default(100)}).strict().parse(v)
+   const rows=db.prepare('SELECT payload_json FROM source_connections WHERE substr(id,1,length(?))=? AND id>? ORDER BY id LIMIT ?').all(q.prefix,q.prefix,q.after??'',q.limit+1)
+   const connections=rows.slice(0,q.limit).map(row=>connectionSchema.parse(JSON.parse(String(row.payload_json))))
+   return {connections,next:rows.length>q.limit?connections.at(-1)!.fence.connection_id:null}
+  }
   const id=sourceIdSchema.parse(v.id),c=readConnection(db,id)
   if(v.action==='get')return c
   if(v.action==='create'){
@@ -93,6 +100,17 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
    save(db,fresh);return fresh
   }
   if(!c)throw Error('STORE_NOT_FOUND')
+  if(v.action==='sync_status'){
+   const q=z.object({action:z.literal('sync_status'),id:sourceIdSchema,expected_epoch:revisionSchema,status:syncStatusSchema}).strict().parse(v)
+   if(q.expected_epoch!==c.fence.epoch)throw Error('STORE_STALE_REVISION')
+   c.sync_status=q.status;save(db,c);return c
+  }
+  if(v.action==='reset_sync'){
+   const q=z.object({action:z.literal('reset_sync'),id:sourceIdSchema,expected_epoch:revisionSchema}).strict().parse(v)
+   if(q.expected_epoch!==c.fence.epoch)throw Error('STORE_STALE_REVISION')
+   c.fence.epoch++;c.pending_ids=[];c.continuation=null;c.checkpoint=null;c.completed_batch=c.batch
+   save(db,c);return c
+  }
   if(v.action==='scope'){
    const q=z.object({action:z.literal('scope'),id:sourceIdSchema,expected_scope_revision:revisionSchema,scope:z.json()}).strict().parse(v)
    if(q.expected_scope_revision!==c.fence.scope_revision)throw Error('STORE_STALE_REVISION')

@@ -273,7 +273,7 @@ export function buildTextRealtimeAssembly(
   })
   const intake=options.intake??defaultIntake(core,support.gateway,support.settings)
   const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
-  const composition=composeRealtime(core,provider,{...options,...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4,...(createPersonalMemory===undefined?{}:{createPersonalMemory})})
+  const composition=composeRealtime(core,provider,{...options,...(createPersonalMemory===undefined?{}:{createPersonalMemory}),...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4})
   return composition
 }
 
@@ -384,12 +384,12 @@ export function buildCascadedRealtimeAssembly(
   const composition = composeRealtime(core, provider, {
     ...options,
     ...(intake === undefined ? {} : {intake}),
+    ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
     idFactory: () => ids.next('realtime'),
   }, {
     controlledPreemptiveAlertReconnect: false,
     preemptiveAlertHistoryRecovery: 'none',
     preemptiveAlertHistoryPairs: 4,
-    ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
   })
   return composition
 }
@@ -591,12 +591,12 @@ export function buildQwenRealtimeAssembly(
   return composeRealtime(core, provider, {
     ...options,
     ...(intake === undefined ? {} : {intake}),
+    ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
     idFactory: () => ids.next('realtime'),
   }, {
     controlledPreemptiveAlertReconnect: options.settings.qwen_controlled_guard_reconnect,
     preemptiveAlertHistoryRecovery: options.settings.qwen_guard_history_recovery,
     preemptiveAlertHistoryPairs: options.settings.qwen_guard_history_pairs,
-    ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
   })
 }
 

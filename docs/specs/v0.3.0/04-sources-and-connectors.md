@@ -57,13 +57,13 @@ MCP 是工具暴露方式。可复用现有 MCP server 作为查询工具，但*
 
 ### 2.3 邮件与日历（M8-Mail）
 
-以**一个**服务商生态验证闭环再扩展。2026-09-19 已确认 Composio + Gmail / Google Calendar，先只读后台同步；[详细设计](../../superpowers/specs/2026-09-19-composio-connectors-design.md) 已批准，真实契约待 Phase 0 探针验证。
+以**一个**服务商生态验证闭环再扩展。2026-09-19 已确认 Composio + Gmail / Google Calendar，先只读后台同步；[详细设计](../../superpowers/specs/2026-09-19-composio-connectors-design.md) 已批准，固定版本契约已完成探针验证；实现与 live 层级见 [验收记录](../../research/2026-09-20-connector-acceptance.md)。
 
 - **日历**：保留事件 ID、日历归属、时区、全天语义、重复规则与例外、取消状态。
 - **邮件**：保留消息 ID、线程归属、参与人、时间、正文及必要状态。"是否待回复"需检查线程，
   不由一封历史邮件决定。
 - **同步**：初次同步明确范围（时间窗、标签 / 日历选择）；后续保存 provider cursor。变化与 cursor
-  的持久化必须保证失败后可安全重试。Google Calendar 用 syncToken，失效时全量重同步；
+  的持久化必须保证失败后可安全重试。Google Calendar v1 先用有界窗口快照核对；syncToken 接口已探针确认，非空增量生命周期验收后再启用；
   Gmail 用 historyId，历史过期时恢复同步；Microsoft Graph 后续可用 delta 适配。
 - **删除与取消**传播到检索与关联建议；临时网络失败不能被当成来源已删除。
 - 第一阶段后台增量轮询；网络恢复后补同步。推送只用于改善时效，不替代差量拉取。

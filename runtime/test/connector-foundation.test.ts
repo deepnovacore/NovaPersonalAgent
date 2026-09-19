@@ -171,3 +171,20 @@ test('unfinished pages and generation cleanup resume from disk without skipping 
   await assert.rejects(client.memory('source_apply_page',{...page,fence:old,page_id:'late'}))
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
+
+test('connection consent revocation blocks untouched object grants after an interrupted fanout',()=>{
+ const db=new DatabaseSync(':memory:');initializeMemory(db)
+ const run=(op:MemoryOperation,input:unknown)=>memoryOperation(db,op,input)
+ try{
+  run('source_connection',{action:'create',id:'c',namespace:'c'})
+  const c=run('source_connection',{action:'fence',id:'c',state:'connected',expected_epoch:0}) as SourceConnection
+  const source_id=connectorSourceId('c',0,'object'),grant={revision:1,scope_revision:0,extraction_provider:'fixture',embedding_provider:'embed'}
+  run('source_grant',{source_id:'c',expected_revision:0,grant});run('source_grant',{source_id,expected_revision:0,grant})
+  run('source_apply_page',{fence:c.fence,batch_id:'1',page_id:'page',changes:[{object_key:'object',source_id,semantic_hash:'e',metadata:{},status:'current',evidence:[EvidenceRecordSchema.parse({id:'e',source_id,source_kind:'mail',locator:'fixture',observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),raw_text:'fixture',hash:'fixture',trust:'untrusted_external'})]}],pending_ids:[],continuation:null,checkpoint:null,complete:true})
+  assert.ok(run('processing_evidence',{id:'e',purpose:'extraction',provider:'fixture'}))
+  run('source_grant',{source_id:'c',expected_revision:1,grant:{...grant,revision:2,extraction_provider:null,embedding_provider:null}})
+  assert.equal(run('processing_evidence',{id:'e',purpose:'extraction',provider:'fixture'}),null)
+  assert.equal(run('processing_evidence',{id:'e',purpose:'embedding',provider:'embed'}),null)
+  assert.deepEqual(run('pending_evidence',{source_prefix:'connector:',provider:'fixture'}),[])
+ }finally{db.close()}
+})

@@ -22,6 +22,7 @@ import {
 } from '../src/main/settings-store.mjs'
 
 const ALL_SECRET_KEYS = Object.freeze([
+  'composioApiKey',
   'dashscopeApiKey',
   'tavilyApiKey',
   'modelApiKey',
@@ -582,6 +583,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   )
 
   assert.deepEqual(secretsPresent(settings), {
+    composioApiKey: false,
     dashscopeApiKey: true,
     tavilyApiKey: false,
     modelApiKey: false,
@@ -593,6 +595,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   })
   assert.doesNotMatch(JSON.stringify(secretsPresent(settings)), /sk-dash|sk-codex|sealed/)
   assert.deepEqual(secretsPresent(undefined), {
+    composioApiKey: false,
     dashscopeApiKey: false,
     tavilyApiKey: false,
     modelApiKey: false,
@@ -604,7 +607,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   })
 })
 
-test('all eight secret fields seal, report presence, round-trip, and clear independently', () => {
+test('all secret fields seal, report presence, round-trip, and clear independently', () => {
   const codec = fakeCodec()
   const values = Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, `${key}-value`]))
   const stored = applySettingsUpdate(DEFAULT_SETTINGS, { secrets: values }, codec)
@@ -620,7 +623,7 @@ test('all eight secret fields seal, report presence, round-trip, and clear indep
     { secrets: Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, ''])) },
     codec,
   )
-  assert.deepEqual(cleared.secrets, {})
+  assert.deepEqual(cleared.secrets, {composioApiKey:{enc:'cleared',data:''}})
   assert.deepEqual(secretsPresent(cleared), Object.fromEntries(ALL_SECRET_KEYS.map(key => [key, false])))
 })
 

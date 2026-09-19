@@ -1,8 +1,10 @@
+import {renderConnectors} from './connectors-view.mjs'
 import {renderDailyBrief} from './daily-brief-view.mjs'
 import {memoryOverview} from './memory-overview.mjs'
 import {PersonalController} from './personal-controller.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 export function mountPersonalView({send,start,stop,tasks,taskAction,results,openResults,api}) {
+ const connectorLocal={}
  const readMessages=new Set();let unreadProjection=null
  const root=el('main',undefined,'personal-workspace');root.id='personal-workspace';document.body.prepend(root)
  const header=el('header');header.append(el('strong','✦ Nova'))
@@ -123,6 +125,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
     button('确认删除来源数据',()=>c.command('sources.delete',{id:source.id}),deletion);button('取消删除',()=>{deletion.hidden=true},deletion)
     button('删除来源数据',()=>{deletion.hidden=false;deletion.querySelector('button').focus()},a);a.append(deletion)
    }
+   renderConnectors({state:s?.connectors,local:connectorLocal,card,el,button,command:(method,params)=>c.command(method,params),api,refresh:renderPanel})
    renderDailyBrief({settings:s?.settings,connected:c.connected,card,el,button,command:(method,params)=>c.command(method,params)})
    const discovery=card('主动发现','有依据才提出建议。关闭后仍可主动交办任务。');const select=el('select');select.setAttribute('aria-label','主动发现间隔');for(const [value,label]of [['0','关闭'],['15','每 15 分钟'],['30','每 30 分钟'],['60','每小时'],['120','每两小时']]){const option=el('option',label);option.value=value;select.append(option)}select.value=s?.settings?.discovery_enabled?String(s.settings.discovery_interval_minutes):'0';select.disabled=!caps.discovery;select.addEventListener('change',()=>run(()=>c.command('discovery.configure',{enabled:select.value!=='0',...(select.value!=='0'?{interval_minutes:Number(select.value)}:{})})));discovery.append(select)
   }

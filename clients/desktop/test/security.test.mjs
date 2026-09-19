@@ -323,3 +323,8 @@ test('main microphone helper resolves macOS TCC only when the renderer requests 
     assert.deepEqual(result, { status: expectedStatus }, name)
   }
 })
+
+test('connector authorization opens only Composio HTTPS link pages', () => {
+ assert.equal(securityModule.connectorAuthorizationUrl('https://connect.composio.dev/link/fixture'),'https://connect.composio.dev/link/fixture')
+ for(const url of ['https://connect.composio.dev.evil.test/link/x','http://connect.composio.dev/link/x','https://user@connect.composio.dev/link/x','https://connect.composio.dev/other'])assert.throws(()=>securityModule.connectorAuthorizationUrl(url))
+})

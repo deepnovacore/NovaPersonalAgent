@@ -1367,3 +1367,12 @@ test('DeepSeek cascade injects only its selected official model credential', () 
   assert.equal(view.secretsPresent.deepseekApiKey, true)
   assert.equal(view.secretSources.deepseekApiKey, 'dotenv')
 })
+
+test('Composio saved key overrides dotenv and explicit clear disables inherited credentials', () => {
+  const environment={COMPOSIO_API_KEY:'parent-fixture'},dev={COMPOSIO_API_KEY:'dotenv-fixture'}
+  assert.equal(resolveSecretConfiguration({composioApiKey:'saved-fixture'},environment,dev).secrets.composioApiKey,'saved-fixture')
+  const cleared=resolveSecretConfiguration({composioApiKey:''},environment,dev)
+  assert.equal(cleared.secretsPresent.composioApiKey,false)
+  assert.equal(capabilityEnvironment({},cleared.secrets,environment).COMPOSIO_API_KEY,'')
+  assert.equal(resolveSecretConfiguration({},environment,dev).secrets.composioApiKey,'dotenv-fixture')
+})

@@ -16,7 +16,8 @@ export function allowsProcessing(db:GraphDatabase,sourceId:string,purpose:'extra
  const grant=readProcessingGrant(db,sourceId);if(grant?.[purpose==='extraction'?'extraction_provider':'embedding_provider']!==provider)return false
  const object=sourceObjectFor(db,sourceId)
  if(!object)return true
- const c=readConnection(db,object.connection_id)
+ const c=readConnection(db,object.connection_id),connectionGrant=readProcessingGrant(db,object.connection_id)
+ if(connectionGrant&&(connectionGrant.revision!==grant.revision||connectionGrant.scope_revision!==grant.scope_revision||connectionGrant[purpose==='extraction'?'extraction_provider':'embedding_provider']!==provider))return false
  return c!==null&&c.state==='connected'&&c.fence.scope_revision===grant.scope_revision&&c.fence.generation===object.generation
 }
 export const activationSchema=z.object({object_key:sourceIdSchema,revision:revisionSchema}).strict()
@@ -25,7 +26,8 @@ export const extractionTicketSchema=z.object({evidence_id:z.string().min(1).max(
 export type ExtractionTicket=z.infer<typeof extractionTicketSchema>
 export interface SourceChange {revision:number;phase:'invalidated'|'ready'}
 const boundedJson=z.json().refine(v=>Buffer.byteLength(JSON.stringify(v))<=65536,'source state too large')
-export const connectionSchema=z.object({fence:fenceSchema,namespace:sourceIdSchema,state:z.enum(['connected','paused','disconnected']),scope:boundedJson,checkpoint:boundedJson,continuation:boundedJson,pending_ids:z.array(sourceIdSchema).max(200),batch:revisionSchema,completed_batch:revisionSchema,deleting:z.array(revisionSchema).max(100)}).strict()
+export const syncStatusSchema=z.object({attempt_at:z.number(),complete_at:z.number().nullable(),error:z.string().max(64).nullable(),failures:z.number().int().nonnegative(),retry_at:z.number()}).strict()
+export const connectionSchema=z.object({fence:fenceSchema,namespace:sourceIdSchema,state:z.enum(['connected','paused','disconnected']),scope:boundedJson,checkpoint:boundedJson,continuation:boundedJson,pending_ids:z.array(sourceIdSchema).max(200),batch:revisionSchema,completed_batch:revisionSchema,deleting:z.array(revisionSchema).max(100),sync_status:syncStatusSchema.optional()}).strict()
 export type SourceConnection=z.infer<typeof connectionSchema>
 export const sourceObjectSchema=z.object({connection_id:sourceIdSchema,generation:revisionSchema,object_key:sourceIdSchema,source_id:sourceIdSchema,semantic_hash:sourceIdSchema,metadata:z.record(z.string(),z.json()),current_evidence_ids:z.array(z.string().min(1).max(512)).max(256),activation_revision:revisionSchema,status:z.enum(['current','coverage_removed','provider_deleted']),observed_at:z.iso.datetime({offset:true})}).strict()
 export type SourceObject=z.infer<typeof sourceObjectSchema>

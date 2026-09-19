@@ -108,3 +108,5 @@
 ## 2026-09-12 工作台执行进展
 
 多会话、纯文字启动、唯一语音归属、主动提醒会话、只读准备、简报设置与菜单栏未读已接入，仍在当前 worktree，未提交。真实文本与端到端合成语音历史回忆通过；级联重连 ASR 接收错误和飞书平台创建/授权后的真实链路仍未验收完成。细项见 [工作台实施记录](WORKBENCH-IMPLEMENTATION.md)，不得据此将全部 v0.3.0 标记为已验收。
+
+- 2026-09-20：Google provider、桌面入口与 macOS EventKit 本地 provider 已实现，真实 Gmail 有界入库与空 Calendar 快照通过；安装版验收进行中。证据和未测边界见 [connector 验收记录](../../research/2026-09-20-connector-acceptance.md)。

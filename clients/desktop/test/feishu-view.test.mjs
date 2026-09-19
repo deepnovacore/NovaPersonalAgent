@@ -54,7 +54,7 @@ test('only official HTTPS verification destinations can open outside the applica
 
 test('the real authorization IPC rejects other windows before opening a URL',async()=>{
  const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
- const block=source.slice(source.indexOf("  ipcMain.handle('nova:personal:feishu-verification'"),source.indexOf("  ipcMain.handle('nova:personal:directory'"))
+ const block=source.slice(source.indexOf("  ipcMain.handle('nova:personal:feishu-verification'"),source.indexOf("  ipcMain.handle('nova:personal:connector-authorization'"))
  const mainWindow={webContents:{}},settingsWindow={webContents:{}},opened=[];let handler
  new Function('ipcMain','mainWindow','shell','feishuVerificationUrl','settingsWindow',block)({handle:(_,fn)=>{handler=fn}},mainWindow,{openExternal:async url=>opened.push(url)},feishuVerificationUrl,settingsWindow)
  await assert.rejects(handler({sender:{}},'https://accounts.feishu.cn/login'),/rejected/)
@@ -189,4 +189,17 @@ test('persisted scope completion finishes all steps and offers adjustment',()=>{
  assert.ok(v.button('调整会话'));assert.equal(v.button('完成配置'),undefined)
  const editing=view({available:true,configured:true,state:'ready',scope_configured:true,chats:[{id:'saved',selected:true}]},{accountKey:null,editScope:true})
  assert.ok(editing.button('完成配置'));assert.equal(editing.button('完成配置').disabled,true)
+})
+
+test('app connectors keep read selection and model processing consent separate',async()=>{
+ const {renderConnectors}=await import('../src/renderer/connectors-view.mjs')
+ const nodes=[],commands=[],local={fixture:{choices:{items:[{id:'INBOX',name:'Inbox'}],next:null},selected:new Set(['INBOX'])}}
+ const el=(tag,text)=>{const n=new Node(tag,text);nodes.push(n);return n}
+ renderConnectors({state:{available:true,connections:[{id:'fixture',toolkit:'gmail',state:'paused',identity:'fixture@example.test',scope:null,processing_allowed:false}]},local,card:()=>el('article'),el,button:(label,action,parent)=>{const b=el('button',label);b.action=action;parent.append(b);return b},command:async(method,params)=>{commands.push({method,params})},api:{personal:{}},refresh(){}})
+ assert.deepEqual(commands,[])
+ const checks=nodes.filter(n=>n.tag==='input'&&n.type==='checkbox')
+ assert.equal(checks[0].checked,true);assert.equal(checks[1].checked,false)
+ await nodes.find(n=>n.text==='保存范围并开始同步').action()
+ assert.equal(commands[0].method,'connector.configure');assert.equal(commands[0].params.processingConsent,false)
+ assert.deepEqual(commands[0].params.scope,{kind:'gmail',labels:['INBOX'],pastDays:30})
 })

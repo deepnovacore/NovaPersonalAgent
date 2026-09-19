@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     wake: () => ipcRenderer.invoke('nova:personal:wake'),
     setCollapsed: value => ipcRenderer.invoke('nova:personal:collapse', value),
     openFeishuVerification: url => ipcRenderer.invoke('nova:personal:feishu-verification', url),
+    openConnectorAuthorization: url => ipcRenderer.invoke('nova:personal:connector-authorization', url),
     chooseDirectory: () => ipcRenderer.invoke('nova:personal:directory'),
     onCollapsed: callback => {
       const listener = (_event, value) => { if (typeof value === 'boolean') callback(value) }

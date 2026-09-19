@@ -7,6 +7,7 @@ import {isAbsolute, resolve} from 'node:path'
 export const SETTINGS_VERSION = 4
 
 export const SECRET_KEYS = Object.freeze([
+  'composioApiKey',
   'dashscopeApiKey',
   'tavilyApiKey',
   'modelApiKey',
@@ -224,6 +225,7 @@ function normalizeSecrets(raw) {
   const secrets = {}
   if (!isRecord(raw)) return secrets
   for (const key of SECRET_KEYS) {
+    if (key === 'composioApiKey' && raw[key]?.enc === 'cleared') { secrets[key] = {enc:'cleared',data:''}; continue }
     const entry = validSecretEntry(raw[key])
     if (entry) secrets[key] = entry
   }
@@ -365,7 +367,7 @@ export function orbSettings(settings) {
 export function secretsPresent(settings) {
   const { secrets } = normalizeSettings(settings)
   const present = {}
-  for (const key of SECRET_KEYS) present[key] = Boolean(secrets[key])
+  for (const key of SECRET_KEYS) present[key] = Boolean(secrets[key]) && secrets[key].enc !== 'cleared'
   return present
 }
 
@@ -440,7 +442,8 @@ function updatedSecrets(stored, updates, codec) {
       continue
     }
     if (value === '') {
-      delete secrets[key]
+      if (key === 'composioApiKey') secrets[key] = {enc:'cleared',data:''}
+      else delete secrets[key]
       continue
     }
     // Per field, like every other validator here: an unusable key is refused on
@@ -535,6 +538,7 @@ export function readSecret(settings, key, codec) {
   if (!SECRET_KEY_SET.has(key)) return null
   const entry = normalizeSettings(settings).secrets[key]
   if (!entry) return null
+  if (entry.enc === 'cleared') return ''
   const raw = Buffer.from(entry.data, 'base64')
   if (entry.enc === 'none') return raw.toString('utf8')
   try {

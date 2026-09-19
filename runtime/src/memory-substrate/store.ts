@@ -168,11 +168,12 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
           AND (json_extract(e.payload_json,'$.retention_until') IS NULL OR julianday(json_extract(e.payload_json,'$.retention_until'))>julianday('now'))
           AND (?='' OR EXISTS (SELECT 1 FROM source_grants g WHERE g.source_id=e.source_id AND json_extract(g.payload_json,'$.extraction_provider')=?))
           AND (?='' OR NOT EXISTS (SELECT 1 FROM source_objects o JOIN source_connections c ON c.id=o.connection_id JOIN source_grants g ON g.source_id=e.source_id WHERE json_extract(o.payload_json,'$.source_id')=e.source_id AND (json_extract(c.payload_json,'$.state')<>'connected' OR json_extract(c.payload_json,'$.fence.scope_revision')<>json_extract(g.payload_json,'$.scope_revision'))))
+          AND (?='' OR NOT EXISTS (SELECT 1 FROM source_objects o JOIN source_connections c ON c.id=o.connection_id JOIN source_grants g ON g.source_id=e.source_id JOIN source_grants cg ON cg.source_id=c.id WHERE json_extract(o.payload_json,'$.source_id')=e.source_id AND (json_extract(cg.payload_json,'$.revision') IS NOT json_extract(g.payload_json,'$.revision') OR json_extract(cg.payload_json,'$.scope_revision') IS NOT json_extract(g.payload_json,'$.scope_revision') OR json_extract(cg.payload_json,'$.extraction_provider') IS NOT json_extract(g.payload_json,'$.extraction_provider'))))
           AND NOT EXISTS (SELECT 1 FROM memory_suppressed s WHERE s.hash=e.hash)
           AND NOT EXISTS (SELECT 1 FROM memory_extractions x WHERE x.evidence_id=e.id)
           AND NOT EXISTS (SELECT 1 FROM source_objects o JOIN source_connections c ON c.id=o.connection_id WHERE json_extract(o.payload_json,'$.source_id')=e.source_id AND
             (o.generation<>json_extract(c.payload_json,'$.fence.generation') OR NOT EXISTS (SELECT 1 FROM json_each(o.payload_json,'$.current_evidence_ids') r WHERE r.value=e.id)))
-          ORDER BY e.id LIMIT ?`,prefix,prefix,provider,provider,provider,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null);break
+          ORDER BY e.id LIMIT ?`,prefix,prefix,provider,provider,provider,provider,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null);break
       }
       case 'record_extraction': {
         const evidenceId=id.parse(value.evidence_id);if(!evidence(db,evidenceId))throw new Error('STORE_NOT_FOUND')

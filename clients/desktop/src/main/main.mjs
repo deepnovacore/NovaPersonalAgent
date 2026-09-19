@@ -110,6 +110,7 @@ import {
   allowRendererNavigation,
   apiKeyWindowOpenHandler,
   feishuVerificationUrl,
+  connectorAuthorizationUrl,
   boardWindowOptions,
   browserWindowOptions,
   configureWindowSecurity,
@@ -277,7 +278,8 @@ function settingsView() {
   const {secretsPresent: effectivePresence, secretSources} = resolveSecretConfiguration(
     {}, process.env, developmentEnv)
   for (const [key, present] of Object.entries(secretsPresent(currentSettings))) {
-    if (present && secretSources[key] !== 'dotenv') {
+    if (key === 'composioApiKey' && currentSettings.secrets?.[key]?.enc === 'cleared') { effectivePresence[key]=false; secretSources[key]='cleared'; continue }
+    if (present && (key === 'composioApiKey' || secretSources[key] !== 'dotenv')) {
       effectivePresence[key] = true
       secretSources[key] = 'settings'
     }
@@ -737,6 +739,7 @@ function decryptSecretsForSpawn(settings, codec) {
   const present = secretsPresent(settings)
   const decrypted = {}
   for (const key of SECRET_KEYS) {
+    if (key === 'composioApiKey' && settings.secrets?.[key]?.enc === 'cleared') { decrypted[key]=''; continue }
     if (!present[key]) continue
     const plaintext = readSecret(settings, key, codec)
     if (typeof plaintext !== 'string' || !plaintext) {
@@ -1128,6 +1131,10 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   ipcMain.handle('nova:personal:feishu-verification', async (event, value) => {
     if (event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) throw new Error('authorization request rejected')
     await shell.openExternal(feishuVerificationUrl(value))
+  })
+  ipcMain.handle('nova:personal:connector-authorization', async (event, value) => {
+    if (event.sender !== mainWindow.webContents) throw new Error('authorization request rejected')
+    await shell.openExternal(connectorAuthorizationUrl(value))
   })
   ipcMain.handle('nova:personal:directory', async event => {
     if (event.sender !== mainWindow.webContents) throw new Error('directory request rejected')

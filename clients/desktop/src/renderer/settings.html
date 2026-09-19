@@ -334,6 +334,13 @@
         </summary>
         <div class="secret-content">
           <p id="keyring-warning" class="warning" hidden>密钥将以明文保存(系统未提供钥匙串)</p>
+          <div class="secret" data-key="composioApiKey">
+            <label for="composioApiKey">Composio</label>
+            <span class="badge" id="badge-composioApiKey">未设置</span>
+            <span class="key-usage" id="usage-composioApiKey">应用连接；修改后重启运行时</span>
+            <input type="password" id="composioApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
+            <button type="button" class="clear" data-key="composioApiKey">清除并停用</button>
+          </div>
           <div class="secret" data-key="dashscopeApiKey">
             <label for="dashscopeApiKey">DashScope</label>
             <span class="badge" id="badge-dashscopeApiKey">未设置</span>

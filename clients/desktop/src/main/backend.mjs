@@ -52,6 +52,7 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 // `.env` (or parent environment) keeps winning. Names match the Settings
 // aliases accepted by the Node runtime configuration contract exactly.
 export const SECRET_ENV_MAP = Object.freeze({
+  composioApiKey: 'COMPOSIO_API_KEY',
   dashscopeApiKey: 'DASHSCOPE_API_KEY',
   tavilyApiKey: 'TAVILY_API_KEY',
   modelApiKey: 'NOVA_AUDIO_AGENT_MODEL_API_KEY',
@@ -66,7 +67,8 @@ export const SECRET_ENV_MAP = Object.freeze({
 export function resolveSecretConfiguration(saved = {}, environment = {}, developmentEnv = {}) {
   const secrets = {}, secretsPresent = {}, secretSources = {}
   for (const [key, name] of Object.entries(SECRET_ENV_MAP)) {
-    const candidates = [['dotenv', developmentEnv[name]], ['settings', saved[key]], ['environment', environment[name]]]
+    if (key === 'composioApiKey' && saved[key] === '') { secrets[key]=''; secretsPresent[key]=false; secretSources[key]='cleared'; continue }
+    const candidates = key === 'composioApiKey' ? [['settings',saved[key]],['dotenv',developmentEnv[name]],['environment',environment[name]]] : [['dotenv', developmentEnv[name]], ['settings', saved[key]], ['environment', environment[name]]]
     const selected = candidates.find(([, value]) => typeof value === 'string' && value.trim() && !CONTROL_CHARACTERS.test(value))
     secretsPresent[key] = Boolean(selected)
     if (selected) {
@@ -78,6 +80,7 @@ export function resolveSecretConfiguration(saved = {}, environment = {}, develop
 }
 
 const ALWAYS_ACTIVE_SECRET_KEYS = Object.freeze([
+  'composioApiKey',
   'tavilyApiKey',
   'modelApiKey',
   'codexApiKey',
@@ -650,6 +653,7 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
     for (const [secretKey, envName] of Object.entries(SECRET_ENV_MAP)) {
       if (!activeSecretKeys.has(secretKey)) continue
       const value = decryptedSecrets[secretKey]
+      if (secretKey === 'composioApiKey' && value === '') { env[envName]=''; continue }
       if (typeof value !== 'string') continue
       if (CONTROL_CHARACTERS.test(value)) continue
       const trimmed = value.trim()

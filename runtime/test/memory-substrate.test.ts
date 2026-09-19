@@ -84,3 +84,25 @@ test('corrections never enter pending extraction and graph timestamps use second
   assert.equal(evidence.observed_at,now)
  }finally{db.close()}
 })
+
+test('connector inventory is prefix-isolated and paginates without exposing other users',()=>{
+ const db=new DatabaseSync(':memory:');initializeMemory(db)
+ try{
+  for(const id of ['personal:a:connector:1','personal:a:connector:2','personal:b:connector:1'])memoryOperation(db,'source_connection',{action:'create',id,namespace:id})
+  const first=memoryOperation(db,'source_connection',{action:'list',prefix:'personal:a:connector:',limit:1}) as {connections:{fence:{connection_id:string}}[];next:string|null}
+  assert.equal(first.connections.length,1);assert.equal(first.connections[0]?.fence.connection_id,'personal:a:connector:1')
+  const second=memoryOperation(db,'source_connection',{action:'list',prefix:'personal:a:connector:',after:first.next,limit:1}) as typeof first
+  assert.equal(second.connections[0]?.fence.connection_id,'personal:a:connector:2');assert.equal(second.next,null)
+ }finally{db.close()}
+})
+
+test('resetting an expired sync fences late pages without changing scope or generation',()=>{
+ const db=new DatabaseSync(':memory:');initializeMemory(db)
+ try{
+  const id='personal:a:connector:reset'
+  memoryOperation(db,'source_connection',{action:'create',id,namespace:id})
+  const next=memoryOperation(db,'source_connection',{action:'reset_sync',id,expected_epoch:0}) as {fence:{epoch:number;generation:number;scope_revision:number};checkpoint:unknown;continuation:unknown}
+  assert.equal(next.fence.epoch,1);assert.equal(next.fence.generation,0);assert.equal(next.fence.scope_revision,0);assert.equal(next.checkpoint,null);assert.equal(next.continuation,null)
+  assert.throws(()=>memoryOperation(db,'source_connection',{action:'reset_sync',id,expected_epoch:0}),/STALE/)
+ }finally{db.close()}
+})

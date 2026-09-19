@@ -260,3 +260,5 @@ PR / commit 已创建（URL 或 SHA）、命令返回码与截断输出、`EXECU
 ## 2026-09-12 实施约定
 
 Knowledge 作为 A 的派生索引，统一回忆属于 C 阶段。个人记忆和 历史工作区存储 共用现有 Worker/SQLite；旧 VoiceMem 数据只读迁入并保留原数据库。候选抽取复用现有模型 gateway，merge 是唯一修订入口。工作区旧表作为修订结果的物化视图保留。人按连接器稳定身份记录，不自动跨账号归一。当前范围与验收状态见 [本轮实现记录](MEMORY-AND-FEISHU-IMPLEMENTATION.md)。
+
+2026-09-20 实现补充：连接级 processing grant 是对象 grant 的上层效力门控；撤回同意在对象级传播中崩溃后，恢复同步也不能重新允许旧对象处理。同步状态、continuation 和删除代际恢复均复用来源存储。见 [验收记录](../../research/2026-09-20-connector-acceptance.md)。
