@@ -1,6 +1,6 @@
 # v0.3.0 实现与验收状态
 
-日期：2026-09-11。工作分支：`v0.3.0dev`，独立 worktree；未合入 main、未推送、未发布。
+日期：2026-09-19（本次更新 M8-Mail 决策）。工作分支：`v0.3.0dev`，独立 worktree；未合入 main、未推送、未发布。
 
 本版已实现 M5–M7。2026-09-12 决定：M8 邮件/日历与飞书 IM **留在 v0.3.0**（M8-Mail、M8-IM，见下方"待实现里程碑"），
 推翻 09-11 移至 v0.4.0 的划分；M9-C Kimi Code / pi、M9-G GUI/AutoGLM 与 M9-Demo 仍在 [v0.4.0](../v0.4.0/00-overview.md)。
@@ -80,7 +80,7 @@
 | 里程碑 | 一句话 | 依赖 | 退出条件 | 状态 |
 |---|---|---|---|---|
 | **记忆底座** | 06 卷 `evidence_record` / `entry_revision` schema 与 fixtures；merge 纯函数；fold 与四种投影；Workspace Graph 作为第一写入方迁入；M6-A 已实现的 VoiceMem 路径迁为写入方 | 06 卷评审通过 | 06 卷场景 12、13、14、16、17 通过；VoiceMem 迁移路径拍板 | 已有实现与本地回归；真实数据验收待完成 |
-| **M8-Mail** 一个邮件 / 日历 provider | 增量同步、cursor 失效恢复、删除传播、改期冲突完整场景 | M7、记忆底座 | 04 卷场景 8、9、10 通过 | ⬜ 未开始 |
+| **M8-Mail** 一个邮件 / 日历 provider | 增量同步、cursor 失效恢复、删除传播、改期冲突完整场景 | M7、记忆底座 | 04 卷场景 8、9、10 通过 | 设计已批准；Phase 0 / Plan 1 已编写待实施，产品代码及真实账号验收未开始 |
 | **M8-IM** 飞书连接器 | 通用部署配置；读授权会话写账本、入库抽承诺；bot 推送 proposal 并回收用户动作；与 M8-Mail 并行 | M7、记忆底座 | 04 卷场景 18、19 与 06 卷场景 15 通过；公共边界测试允许"通用飞书连接器"且判定标准写清 | 已有实现与本地回归；真实账号验收待完成 |
 
 ### 2026-09-12 决策
@@ -96,7 +96,8 @@
 
 ### 待拍板与待验收
 
-- M8-Mail 的首个 provider（Google / Microsoft / IMAP + CalDAV）、原文保留期与首版写入范围仍未确定，尚未实现。
+- M8-Mail 已确认 Composio + Gmail / Google Calendar、只读后台同步、邮件接收后 30 天及日历结束后 30 天原文保留。先做 Phase 0 契约探针与 provider 无关的 Plan 1；Plan 2（Google / 桌面）等探针结论，Plan 3 再做安装版验收。详见 [已批准设计](../../superpowers/specs/2026-09-19-composio-connectors-design.md)。设计决定不等于实现或账号验收通过。
+- 已编写 [Phase 0 探针计划](../../superpowers/plans/2026-09-19-composio-contract-probe.md) 与 [Plan 1 底座计划](../../superpowers/plans/2026-09-19-connector-foundation.md)，可独立推进；无账号不阻塞 Plan 1。
 - 飞书真实 OAuth、读取所选会话、本人 bot 送达及回调尚未验收；本地 fixture 测试不能替代真实账号验收。
 - 预检索真实语音延迟与相关性、现有个人目录上的迁移及摘要效果尚未验收；不引用 VoiceMem 上游时延作为本实现结果。
 - 代码、自动检查与验收状态分别记录于 [本轮实现记录](MEMORY-AND-FEISHU-IMPLEMENTATION.md)。
