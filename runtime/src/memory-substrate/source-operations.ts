@@ -2,7 +2,7 @@ import {z} from 'zod'
 import type {GraphDatabase} from '../workspace-graph/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {EvidenceRecordSchema,type MemoryOperation} from './store.js'
-import {connectionSchema,readConnection,sourceObjectSchema,sourceIdSchema,revisionSchema,fenceSchema,connectorSourceId,sha256,type SourceConnection,type Activation} from './source-state.js'
+import {connectionSchema,readConnection,sourceObjectSchema,sourceIdSchema,revisionSchema,fenceSchema,connectorSourceId,sha256,readProcessingGrant,processingGrantSchema,type SourceConnection,type Activation} from './source-state.js'
 
 type Run=(operation:MemoryOperation,input:unknown)=>unknown
 const changeSchema=z.object({object_key:sourceIdSchema,source_id:sourceIdSchema,semantic_hash:sourceIdSchema,metadata:z.record(z.string(),z.json()),evidence:z.array(z.lazy(()=>EvidenceRecordSchema)).max(256),status:z.enum(['current','coverage_removed','provider_deleted'])}).strict()
@@ -15,6 +15,15 @@ function save(db:GraphDatabase,c:SourceConnection):void{db.prepare('INSERT INTO 
 export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,run:Run):unknown{
  const v=z.record(z.string(),z.unknown()).parse(input)
  if(operation==='source_revision')return sourceRevision(db)
+ if(operation==='source_grant'){
+  const q=z.object({source_id:z.string().min(1).max(512),action:z.literal('get').optional(),expected_revision:revisionSchema.optional(),grant:processingGrantSchema.optional()}).strict().parse(v)
+  const old=readProcessingGrant(db,q.source_id)
+  if(q.action==='get')return old
+  if(!q.grant||q.expected_revision!==(old?.revision??0)||q.grant.revision<=q.expected_revision)throw Error('STORE_STALE_REVISION')
+  db.prepare('INSERT INTO source_grants VALUES(?,?) ON CONFLICT(source_id) DO UPDATE SET payload_json=excluded.payload_json').run(q.source_id,canonicalJson(q.grant))
+  db.prepare("DELETE FROM memory_vectors WHERE entry_id IN (SELECT r.entry_id FROM memory_revisions r,json_each(r.payload_json,'$.evidence_refs') refs JOIN memory_evidence e ON e.id=refs.value WHERE e.source_id=?)").run(q.source_id)
+  return q.grant
+ }
  if(operation==='source_connection'){
   const id=sourceIdSchema.parse(v.id),c=readConnection(db,id)
   if(v.action==='get')return c

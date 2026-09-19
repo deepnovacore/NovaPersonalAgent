@@ -19,7 +19,7 @@ export interface KnowledgeChunkInput {
   readonly heading_path: string
   readonly text: string
   readonly token_estimate: number
-  readonly vector: readonly number[]
+  readonly vector: readonly number[] | null
 }
 
 export interface ReplaceKnowledgeSourceInput {

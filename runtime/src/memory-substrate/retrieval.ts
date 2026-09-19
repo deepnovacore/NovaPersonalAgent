@@ -1,5 +1,5 @@
 import {z} from 'zod'
-import {EntryRevisionSchema,retrievalEvidence,type EntryRevision} from './store.js'
+import {EntryRevisionSchema,retrievalEvidence,effectiveEvidence,type EntryRevision} from './store.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
 
 const vectorSchema=z.array(z.number().finite()).min(1).max(4096).refine(vector=>vector.some(value=>value!==0),'zero embedding')
@@ -12,7 +12,7 @@ function active(entry:EntryRevision):boolean{return entry.op!=='tombstone'&&(ent
 function hasEvidence(db:GraphDatabase,entry:EntryRevision):boolean{return entry.evidence_refs.some(id=>retrievalEvidence(db,id)!==null)}
 function consented(db:GraphDatabase,entry:EntryRevision,provider:string):boolean {
  const live=entry.evidence_refs.map(id=>retrievalEvidence(db,id)).filter(value=>value!==null)
- return live.length>0&&live.every(value=>value.consent?.provider_fingerprint===provider)
+ return live.length===entry.evidence_refs.length&&live.every(value=>effectiveEvidence(db,value.id,{purpose:'embedding',provider})!==null)
 }
 export function memoryRetrieval(db:GraphDatabase,operation:'pending_vectors'|'write_vectors'|'search',input:unknown):unknown {
  const value=z.record(z.string(),z.unknown()).parse(input)
@@ -32,7 +32,7 @@ export function memoryRetrieval(db:GraphDatabase,operation:'pending_vectors'|'wr
  }
  const limit=operation==='pending_vectors'?z.number().int().min(1).max(100).parse(value.limit??100):value.scope==='recent'?200:5000
  // ponytail: scan the bounded current namespace in the existing Worker; add ANN only beyond 5000 active entries.
- const candidates=db.prepare(`SELECT r.payload_json,v.vector_json FROM (${latest}) r LEFT JOIN memory_vectors v ON v.entry_id=r.entry_id AND v.revision=r.revision AND v.provider=? WHERE substr(r.entry_id,1,length(?))=? AND json_extract(r.payload_json,'$.op')<>'tombstone' AND (json_extract(r.payload_json,'$.valid_until') IS NULL OR julianday(json_extract(r.payload_json,'$.valid_until'))>julianday(?)) ${operation==='pending_vectors'?"AND v.entry_id IS NULL AND NOT EXISTS (SELECT 1 FROM json_each(r.payload_json,'$.evidence_refs') refs JOIN memory_evidence e ON e.id=refs.value WHERE json_extract(e.payload_json,'$.consent.provider_fingerprint') IS NOT ?)":''} ORDER BY json_extract(r.payload_json,'$.recorded_at') DESC,r.entry_id LIMIT ?`).all(provider,prefix,prefix,new Date().toISOString(),...(operation==='pending_vectors'?[provider]:[]),limit+1)
+ const candidates=db.prepare(`SELECT r.payload_json,v.vector_json FROM (${latest}) r LEFT JOIN memory_vectors v ON v.entry_id=r.entry_id AND v.revision=r.revision AND v.provider=? WHERE substr(r.entry_id,1,length(?))=? AND json_extract(r.payload_json,'$.op')<>'tombstone' AND (json_extract(r.payload_json,'$.valid_until') IS NULL OR julianday(json_extract(r.payload_json,'$.valid_until'))>julianday(?)) ${operation==='pending_vectors'?'AND v.entry_id IS NULL':''} ORDER BY json_extract(r.payload_json,'$.recorded_at') DESC,r.entry_id LIMIT ?`).all(provider,prefix,prefix,new Date().toISOString(),limit+1)
  const usable=candidates.slice(0,limit).map(row=>({entry:EntryRevisionSchema.parse(JSON.parse(String(row.payload_json))),vector:row.vector_json===null?null:vectorSchema.parse(JSON.parse(String(row.vector_json)))})).filter(row=>hasEvidence(db,row.entry))
  if(operation==='pending_vectors')return usable.filter(row=>consented(db,row.entry,provider)).map(row=>row.entry)
  const query=z.string().min(1).max(4000).parse(value.query);const k=z.number().int().min(1).max(20).parse(value.limit??8)

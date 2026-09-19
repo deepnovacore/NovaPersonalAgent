@@ -1,3 +1,4 @@
+import type {ProcessingGrant} from '../memory-substrate/source-state.js'
 import {randomUUID} from 'node:crypto'
 import {opendir, realpath} from 'node:fs/promises'
 import {join} from 'node:path'
@@ -10,7 +11,9 @@ import type {KnowledgeSource} from './types.js'
 import type {PersonalMemoryResource} from '../memory/personal-memory.js'
 
 export interface KnowledgeEvidenceLedger {
-  record(input: {sourceId: string; locator: string; text: string; observedAt: string; kind: 'file'; embeddingConsent: boolean}): Promise<{evidence_id: string}>
+  processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant | undefined
+  canProcess?: (id:string,purpose:'extraction'|'embedding')=>Promise<boolean>
+  record(input: {sourceId: string; locator: string; text: string; observedAt: string; kind: 'file'; embeddingConsent: boolean;processingConsent?:ProcessingGrant}): Promise<{evidence_id: string}>
   read: NonNullable<PersonalMemoryResource['readEvidence']>
   remove(sourceId: string): Promise<void>
 }
@@ -110,13 +113,13 @@ export class KnowledgeService {
   }
 
   /** Directory-source admission retains its grant and cancellation through the actual file read. */
-  async syncFile(locator: string, root: string, signal: AbortSignal, sourceId?: string): Promise<{id: string; excerpt: string; evidence_ids?: string[]}> {
+  async syncFile(locator: string, root: string, signal: AbortSignal, sourceId?: string,processingConsent?:ProcessingGrant): Promise<{id: string; excerpt: string; evidence_ids?: string[]}> {
     this.#assertLedger()
     signal.throwIfAborted()
     this.#stop.signal.throwIfAborted()
     if (this.#active || this.#folderBusy) throw failure('knowledge_busy')
     if (sourceId !== undefined && !idSchema.safeParse(sourceId).success) throw failure('invalid_request')
-    const active: {id: string; abort: AbortController; root: string} = {id: sourceId ?? randomUUID(), abort: new AbortController(), root}
+    const active = {id: sourceId ?? randomUUID(), abort: new AbortController(), root,...(processingConsent?{processingConsent}:{}),processingAuthorized:false}
     this.#active = active
     const cancel = () => active.abort.abort()
     signal.addEventListener('abort', cancel, {once: true})
@@ -161,7 +164,7 @@ export class KnowledgeService {
       if (!parsed.success) throw failure('invalid_request')
       if (this.#active || this.#folderBusy) return {error: 'knowledge_busy'}
       // Claim the id before any asynchronous read, so remove can fence this reindex.
-      const active = {id: parsed.data.id, abort: new AbortController()}
+      const active = {id: parsed.data.id, abort: new AbortController(),processingAuthorized:parsed.data.consent}
       this.#active = active
       try {
         const source = (await this.#store.listSources()).find(value => value.id === active.id)
@@ -181,13 +184,13 @@ export class KnowledgeService {
   }
 
   async #ingest(kind: KnowledgeSource['kind'], locator: string): Promise<unknown> {
-    const active = {id: randomUUID(), abort: new AbortController()}
+    const active = {id: randomUUID(), abort: new AbortController(),processingAuthorized:true}
     this.#active = active
     try {return await this.#index(kind, locator, active)}
     finally {if (this.#active === active) this.#active = undefined}
   }
 
-  async #index(kind: KnowledgeSource['kind'], locator: string, active: {id: string; abort: AbortController; root?: string}, old?: KnowledgeSource, onIndexed?: (text: string) => void) {
+  async #index(kind: KnowledgeSource['kind'], locator: string, active: {id: string; abort: AbortController; root?: string;processingAuthorized?:boolean;processingConsent?:ProcessingGrant}, old?: KnowledgeSource, onIndexed?: (text: string) => void) {
     const signal = AbortSignal.any([active.abort.signal, this.#stop.signal,
       ...(this.#folderSignal === undefined ? [] : [this.#folderSignal]), AbortSignal.timeout(120000)])
     const job = {id: randomUUID(), source_id: active.id, updated_at: Date.now(), error_code: null}
@@ -198,16 +201,19 @@ export class KnowledgeService {
       signal.throwIfAborted()
       if (old === undefined && (await this.#store.listSources()).some(value => value.locator === document.locator)) throw failure('source_exists')
       const chunks = chunkKnowledgeText(document.text)
+      const processingConsent=active.processingConsent??(active.processingAuthorized?this.#ledger?.processingGrant?.(true):undefined)
       const evidenceIds: (string | undefined)[] = []
       for (const [ordinal, chunk] of chunks.entries()) {
         signal.throwIfAborted()
-        const evidence = await this.#ledger?.record({sourceId: `knowledge:${active.id}`, locator: `${document.locator}#chunk=${ordinal}`, text: chunk.text, observedAt: new Date().toISOString(), kind: 'file', embeddingConsent: true})
+        const evidence = await this.#ledger?.record({sourceId: `knowledge:${active.id}`, locator: `${document.locator}#chunk=${ordinal}`, text: chunk.text, observedAt: new Date().toISOString(), kind: 'file', embeddingConsent: active.processingAuthorized===true||Boolean(processingConsent?.embedding_provider),...(processingConsent?{processingConsent}:{})})
         evidenceIds.push(evidence?.evidence_id)
       }
       signal.throwIfAborted()
-      const vectors = await this.#embedding.embed(chunks.map(chunk => chunk.text), signal)
+      const allowed=async()=>{if(this.#ledger)return evidenceIds.length>0&&(await Promise.all(evidenceIds.map(id=>id?this.#ledger?.canProcess?.(id,'embedding')??false:false))).every(Boolean);return active.processingAuthorized===true||processingConsent?.embedding_provider===this.#embedding.id}
+      const vectors = await allowed()?await this.#embedding.embed(chunks.map(chunk => chunk.text), signal):null
       signal.throwIfAborted()
-      if (vectors.length !== chunks.length) throw failure('embedding_invalid_result')
+      if (vectors!==null&&vectors.length !== chunks.length) throw failure('embedding_invalid_result')
+      const keepVectors=vectors!==null&&await allowed()
       const now = Date.now()
       const title = [...document.title].slice(0, 256).join('')
       // No await between this fence and enqueueing the atomic replacement. Remove enqueues after it.
@@ -218,7 +224,7 @@ export class KnowledgeService {
         // Plain text and extracted PDF/DOCX need not contain Markdown headings.
         chunks: chunks.map((chunk, index) => ({...chunk,
           ...(evidenceIds[index] === undefined ? {} : {evidence_id: evidenceIds[index]}),
-          heading_path: [...(chunk.heading_path || title)].slice(0, 256).join(''), vector: [...vectors[index]!]})),
+          heading_path: [...(chunk.heading_path || title)].slice(0, 256).join(''), vector: keepVectors&&vectors?[...vectors[index]!]:null})),
       })
       await this.#store.recordJob({...job, updated_at: Date.now(), state: 'complete'})
       onIndexed?.(document.text)

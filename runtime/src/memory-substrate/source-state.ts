@@ -8,6 +8,17 @@ export const fenceSchema=z.object({connection_id:sourceIdSchema,generation:revis
 export type Fence=z.infer<typeof fenceSchema>
 export const processingGrantSchema=z.object({revision:revisionSchema,scope_revision:revisionSchema,extraction_provider:sourceIdSchema.nullable(),embedding_provider:sourceIdSchema.nullable()}).strict()
 export type ProcessingGrant=z.infer<typeof processingGrantSchema>
+export function readProcessingGrant(db:GraphDatabase,sourceId:string):ProcessingGrant|null{
+ const row=db.prepare('SELECT payload_json FROM source_grants WHERE source_id=?').get(sourceId)
+ return row?processingGrantSchema.parse(JSON.parse(String(row.payload_json))):null
+}
+export function allowsProcessing(db:GraphDatabase,sourceId:string,purpose:'extraction'|'embedding',provider:string):boolean{
+ const grant=readProcessingGrant(db,sourceId);if(!grant||grant[purpose==='extraction'?'extraction_provider':'embedding_provider']!==provider)return false
+ const object=sourceObjectFor(db,sourceId)
+ if(!object)return true
+ const c=readConnection(db,object.connection_id)
+ return c!==null&&c.state==='connected'&&c.fence.scope_revision===grant.scope_revision&&c.fence.generation===object.generation
+}
 export const activationSchema=z.object({object_key:sourceIdSchema,revision:revisionSchema}).strict()
 export type Activation=z.infer<typeof activationSchema>
 export const extractionTicketSchema=z.object({evidence_id:z.string().min(1).max(512),activation:activationSchema.nullable(),consent_revision:revisionSchema,extraction_provider:sourceIdSchema,fence:fenceSchema.nullable()}).strict()

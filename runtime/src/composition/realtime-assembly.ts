@@ -263,6 +263,8 @@ export class RealtimeAssembly {
   readonly #createPersonalMemory: (() => PersonalMemoryResource) | undefined
   #personalMemory: PersonalMemoryResource | undefined
   readonly #knowledgeLedger:KnowledgeEvidenceLedger={
+    processingGrant:(...args)=>this.#personalMemory?.processingGrant?.(...args),
+    canProcess:(id,purpose)=>this.#personalMemory?.canProcessEvidence?.(id,purpose)??Promise.resolve(false),
     record:input=>this.#personalMemory?.recordEvidence?.(input)??Promise.reject(Error('memory_unavailable')),
     read:id=>this.#personalMemory?.readEvidence?.(id)??Promise.resolve(null),
     remove:id=>this.#personalMemory?.forgetSource?.(id)??Promise.reject(Error('memory_unavailable')),
@@ -1284,6 +1286,7 @@ export function composeRealtime(
   const createPersonalMemory = useLocalLedger ? () => {
     const memory = new SubstrateMemoryResource({client:getClient(),userId:local?.userId??options.settings.memory_user_id,
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?options.settings.model_base_url:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
+      extractionFingerprint:embeddingHash('sha256').update(options.settings.model_base_url+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
       personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:false,
       gateway:core.gateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},
       ...(local?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
@@ -1293,7 +1296,7 @@ export function composeRealtime(
     let opened=false
     return {open:async()=>{await memory.open();opened=true},close:async()=>{opened=false;await memory.close()},
       recall:(_query,queryOptions)=>opened?Promise.resolve({source:'personal',state:'empty',scope:queryOptions?.scope??'any',hits:[],degraded:false}):Promise.reject(Error('memory_unavailable')),
-      recordEvidence:input=>memory.recordEvidence(input),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),
+      canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),
     } satisfies PersonalMemoryResource
   } : options.createPersonalMemory
   return buildRealtimeAssembly({

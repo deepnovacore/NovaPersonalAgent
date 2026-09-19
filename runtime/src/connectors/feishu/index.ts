@@ -1,3 +1,4 @@
+import {processingGrantSchema,type ProcessingGrant} from '../../memory-substrate/source-state.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -5,6 +6,7 @@ import { createFeishuRunner, FeishuAppNotConfigured, object, parseFeishuJson, ty
 
 export const FEISHU_SCOPES = ['offline_access', 'im:chat:read', 'im:message:readonly', 'im:message.reactions:read'];
 export interface FeishuMessage {
+  processing_consent?: ProcessingGrant;
   id: string; source_id: string; source_kind: 'im'; locator: string; raw_text: string;
   observed_at: string; retention_until: string; sender_id: string; account_id: string;
 }
@@ -14,12 +16,14 @@ export interface FeishuSnapshot {
   last_sync?: string; error?: string; bot_enabled: boolean; retention_days: 30; verification_url?: string;
   app_id?: string;
   scope_configured?: boolean;
+  processing_consent_required?: boolean;
   app_setup?: {state: 'idle' | 'waiting' | 'ready' | 'error'; verification_url?: string; error?: string};
 }
 interface Cursor { start: string; end?: string; page?: string }
 interface Saved {
   account?: string; openId?: string; name?: string; paused: boolean; connected: boolean;
   scopeConfigured?: boolean;
+  processingConsent?: ProcessingGrant;
   bot: boolean; selected: string[]; cursors: Record<string, Cursor>; lastSync?: string;
   deliveries: Record<string, { nonce: string; message?: string; chat?: string }>;
   actions: string[];
@@ -29,6 +33,8 @@ export interface FeishuOptions {
   executable: string; credentialRoot: string; statePath: string;
   run?: FeishuRun;
   bootstrapOnly?: boolean;
+  processingGrant?: (consent:boolean,revision:number,scopeRevision:number)=>ProcessingGrant | undefined;
+  onProcessingConsent?: (sources:string[],grant:ProcessingGrant)=>Promise<void>;
   ingest?: (message: FeishuMessage) => Promise<void>;
   deleteSource?: (sourceId: string) => Promise<void>;
   onAction?: (action: { proposal_id: string; action: 'open' | 'snooze' | 'ignore'; event_id: string }) => Promise<void>;
@@ -77,6 +83,7 @@ function readSaved(value: unknown): Saved {
     if (!str(row.nonce) || ['message', 'chat'].some((key) => row[key] !== undefined && typeof row[key] !== 'string')) throw new Error('Invalid Feishu delivery');
   }
   if (data.scopeConfigured !== undefined && typeof data.scopeConfigured !== 'boolean') throw new Error('Invalid Feishu scope state');
+  if(data.processingConsent!==undefined)processingGrantSchema.parse(data.processingConsent);
   return data as unknown as Saved;
 }
 
@@ -104,7 +111,7 @@ export class FeishuConnector {
     if (!options.bootstrapOnly && (!options.ingest || !options.deleteSource || !options.onAction)) throw new Error('Feishu collection callbacks required');
     this.run = options.run ?? createFeishuRunner(options.executable, options.credentialRoot);
   }
-  snapshot(): FeishuSnapshot { const view = structuredClone(this.view); view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; if (view.app_setup) delete view.app_setup.verification_url; return view; }
+  snapshot(): FeishuSnapshot { const view = structuredClone(this.view); view.processing_consent_required=!this.saved.processingConsent?.extraction_provider; view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; if (view.app_setup) delete view.app_setup.verification_url; return view; }
   private setupSnapshot(): FeishuSnapshot {return structuredClone(this.view);}
   private publish(): void {
     if (this.closed) return;
@@ -302,7 +309,13 @@ export class FeishuConnector {
     if (!consent || this.view.state === 'unauthorized' || !this.saved.account || chatIds.some((id) => !this.view.chats.some((chat) => chat.id === id))) throw new Error('请选择已授权的飞书会话');
     this.saved.scopeConfigured = true; this.saved.selected = [...new Set(chatIds)]; this.saved.connected = true; this.saved.paused = false;
     this.view.chats = this.view.chats.map((chat) => ({ ...chat, selected: chatIds.includes(chat.id) }));
-    this.view.state = 'ready'; await this.save();
+    this.view.state = 'ready'; await this.setProcessingConsent(consent,true); await this.save();
+  }
+  async setProcessingConsent(consent:boolean,scopeChanged=false):Promise<void>{
+    const prior=this.saved.processingConsent;
+    const grant=this.options.processingGrant?.(consent,(prior?.revision??0)+1,(prior?.scope_revision??0)+Number(scopeChanged));
+    if(!grant)return;this.saved.processingConsent=grant;await this.save();
+    await this.options.onProcessingConsent?.(this.saved.sources,grant);this.publish();
   }
   async sync(): Promise<void> {
     if (this.options.bootstrapOnly) throw new Error('Feishu collection unavailable during setup');
@@ -340,7 +353,7 @@ export class FeishuConnector {
             const numeric = Number(rawTime);
             const time = Number.isFinite(numeric) ? numeric < 1e12 ? numeric * 1000 : numeric : Date.parse(str(rawTime));
             if (!Number.isFinite(time) || time <= 0) throw new Error('Invalid Feishu message time');
-            await this.options.ingest!({ id: hash(`${sourceId}:${id}:${hash(text)}`), source_id: sourceId, source_kind: 'im', locator: `feishu://message/${encodeURIComponent(id)}`, raw_text: text, observed_at: new Date(time).toISOString(), retention_until: new Date(time + 30 * 86400_000).toISOString(), sender_id: senderId === this.saved.openId ? '' : senderId, account_id: this.saved.account! });
+            await this.options.ingest!({ ...(this.saved.processingConsent?{processing_consent:this.saved.processingConsent}:{}), id: hash(`${sourceId}:${id}:${hash(text)}`), source_id: sourceId, source_kind: 'im', locator: `feishu://message/${encodeURIComponent(id)}`, raw_text: text, observed_at: new Date(time).toISOString(), retention_until: new Date(time + 30 * 86400_000).toISOString(), sender_id: senderId === this.saved.openId ? '' : senderId, account_id: this.saved.account! });
             if (this.active.signal.aborted) return;
           }
           if (data.has_more !== true) {
@@ -453,6 +466,10 @@ export class FeishuConnector {
       case 'feishu.login': return this.beginLogin();
       case 'feishu.complete': case 'feishu.auth.complete': return this.completeLogin();
       case 'feishu.chats': return this.listChats();
+      case 'feishu.consent': {
+        if(typeof params.consent!=='boolean')throw Error('invalid_request');
+        await this.setProcessingConsent(params.consent);break;
+      }
       case 'feishu.configure': {
         if (!Array.isArray(params.chat_ids) || !params.chat_ids.every((id) => typeof id === 'string')) throw new Error('Invalid chat selection');
         await this.configure(params.chat_ids, params.consent === true); break;

@@ -1,3 +1,4 @@
+import {processingGrantSchema,type ProcessingGrant} from '../memory-substrate/source-state.js'
 import {randomUUID} from 'node:crypto'
 import {acquirePersonalLock} from './store.js'
 import {lstat, opendir, open, readFile, realpath, rename, rm, writeFile} from 'node:fs/promises'
@@ -18,12 +19,13 @@ const snapshotSchema = z.object({
   reasons: z.record(z.string(), z.number().int().nonnegative()),
   failures: z.array(z.object({path: z.string().max(4096), code: z.string().max(80)}).strict()).max(50),
   last_sync: z.string().datetime().nullable(), excludes: excludeSchema,
+  processing_consent_required:z.boolean().optional(),
   max_files: z.number().int().min(1).max(200), max_bytes: z.number().int().min(1).max(20 * 1024 * 1024),
 }).strict()
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
   evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
-const recordSchema = z.object({view: snapshotSchema, files: z.array(trackedSchema).max(20000),
+const recordSchema = z.object({processing_consent:processingGrantSchema.optional(),view: snapshotSchema, files: z.array(trackedSchema).max(20000),
   deleting: z.boolean().default(false), observation: z.string().max(500).default(''),
   pending: z.object({path: pathSchema, size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), previous_updated_at: z.number().nullable()}).strict().nullable().default(null)}).strict()
 type SourceRecord = z.infer<typeof recordSchema>
@@ -39,7 +41,9 @@ export interface LocalDirectorySourceOptions {
   readonly pollMs?: number
   readonly onChange?: (changed: boolean) => void | Promise<void>
   readonly onInvalidate?: (ref: string) => void | Promise<void>
-  readonly onObserve?: (source: {source_ref: {type: 'file'; ref: string; observed_at: string}; content: string; topic?: string; evidence_ids?: string[]}) => void | Promise<void>
+  readonly processingGrant?: (consent:boolean,revision:number,scopeRevision:number)=>ProcessingGrant | undefined
+  readonly onProcessingConsent?: (sourceIds:string[],grant:ProcessingGrant)=>Promise<void>
+  readonly onObserve?: (source: {source_ref: {type: 'file'; ref: string; observed_at: string}; content: string; topic?: string; evidence_ids?: string[]; processing_consent?:ProcessingGrant}) => void | Promise<void>
 }
 
 /** Opt-in local grants. Existing knowledge ingestion owns parsing, screening and embeddings. */
@@ -80,7 +84,7 @@ export class LocalDirectorySources {
     await this.#writes
     await this.#release?.(); this.#release = undefined
   }
-  list(): SourceSnapshot[] {return this.#records.map(record => ({...structuredClone(record.view), excludes: [...new Set([...SOURCE_EXCLUDES, ...record.view.excludes])]}))}
+  list(): SourceSnapshot[] {return this.#records.map(record => ({...structuredClone(record.view), processing_consent_required:!record.processing_consent?.extraction_provider, excludes: [...new Set([...SOURCE_EXCLUDES, ...record.view.excludes])]}))}
   evidence(ref: string) {
     for (const record of this.#records) {
       const file = record.files.find(file => refFor(file) === ref)
@@ -95,8 +99,8 @@ export class LocalDirectorySources {
   }
   command(method: string, params: unknown): Promise<unknown> {
     // Revocation fences the current ingestion immediately, before waiting for serialized commands.
-    if (['sources.pause', 'sources.disconnect', 'sources.delete'].includes(method)) {
-      const parsed = z.object({id: idSchema}).strict().safeParse(params)
+    if (['sources.pause', 'sources.disconnect', 'sources.delete','sources.consent'].includes(method)) {
+      const parsed = z.object({id: idSchema,consent:z.boolean().optional()}).strict().safeParse(params)
       if (parsed.success && this.#active?.id === parsed.data.id) this.#active.abort.abort()
     }
     const result = this.#commands.then(async () => {await this.#active?.done; return this.#command(method, params)})
@@ -116,10 +120,21 @@ export class LocalDirectorySources {
       const record: SourceRecord = {view: {id: randomUUID(), path, state: 'connected', scanned: 0, read: 0, skipped: 0,
         reasons: {}, failures: [], last_sync: null, excludes: parsed.data.excludes ?? [],
         max_files: parsed.data.max_files ?? 200, max_bytes: parsed.data.max_bytes ?? 20 * 1024 * 1024}, files: [], deleting: false, observation: '', pending: null}
+      const grant=this.#options.processingGrant?.(parsed.data.consent,1,0);if(grant)record.processing_consent=grant
       this.#records.push(record)
       try {await this.#save()} catch (error) {this.#records.pop(); throw error}
       await this.#sync(record)
       return {id: record.view.id}
+    }
+    if(method==='sources.consent'){
+      const q=z.object({id:idSchema,consent:z.boolean()}).strict().parse(params)
+      const record=this.#records.find(r=>r.view.id===q.id);if(!record)throw Error('source_gone')
+      const grant=this.#options.processingGrant?.(q.consent,(record.processing_consent?.revision??0)+1,record.processing_consent?.scope_revision??0)
+      if(!grant)throw Error('memory_unavailable')
+      record.processing_consent=grant;await this.#save()
+      await this.#options.onProcessingConsent?.(record.files.flatMap(f=>['knowledge:'+f.id,...(f.observation_ref?[f.observation_ref]:[])]),grant)
+      for(const file of record.files)file.observed=false
+      await this.#save();return {ok:true}
     }
     const parsed = z.object({id: idSchema}).strict().safeParse(params)
     if (!parsed.success) throw new Error('invalid_request')
@@ -216,7 +231,7 @@ export class LocalDirectorySources {
           if (await realpath(file.path) !== file.path) {skip('changed_path'); continue}
           record.pending = {...file, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
           await this.#save()
-          const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id)
+          const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent)
           const indexed = (await this.#options.knowledge.listSources()).find(item => item.id === result.id)
           if (!indexed) throw new Error('ingest_failed')
           const tracked = {...file, id: result.id, fingerprint: indexed.fingerprint, owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
@@ -242,7 +257,7 @@ export class LocalDirectorySources {
         const document = relative(view.path, file.path), project = dirname(document) === '.' ? basename(view.path) : dirname(document)
         const context = `文档 ${basename(view.path)}/${document}`.slice(0, 100) + '：'
         await this.#options.onObserve({source_ref: {type: 'file', ref: file.observation_ref, observed_at: view.last_sync},
-          content: context + file.excerpt.slice(0, 500 - context.length), topic: project.slice(0, 80), ...(file.evidence_ids ? {evidence_ids: file.evidence_ids} : {})})
+          ...(record.processing_consent?{processing_consent:record.processing_consent}:{}),content: context + file.excerpt.slice(0, 500 - context.length), topic: project.slice(0, 80), ...(file.evidence_ids ? {evidence_ids: file.evidence_ids} : {})})
         file.observed = true
         await this.#save()
       }

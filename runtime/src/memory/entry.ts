@@ -1,3 +1,4 @@
+import {processingGrantSchema} from '../memory-substrate/source-state.js'
 import {z} from 'zod'
 
 const text = (max: number) => z.string().min(1).max(max).refine(value => !value.includes('\0'))
@@ -27,5 +28,5 @@ export type MemoryListOptions = z.infer<typeof MemoryListOptionsSchema>
 export const MemoryPageSchema = z.object({entries:z.array(MemoryEntrySchema).max(100),cursor:z.string().nullable()}).strict()
 export type MemoryPage = z.infer<typeof MemoryPageSchema>
 
-export const MemoryObservationSchema = z.object({source_ref:MemorySourceRefSchema,content:text(500),topic:text(80).optional(),embedding_consent:z.boolean().optional(),evidence_ids:z.array(text(600)).min(1).max(2).optional()}).strict()
+export const MemoryObservationSchema = z.object({source_ref:MemorySourceRefSchema,content:text(500),topic:text(80).optional(),embedding_consent:z.boolean().optional(),processing_consent:processingGrantSchema.optional(),evidence_ids:z.array(text(600)).min(1).max(2).optional()}).strict()
 export type MemoryObservation = z.infer<typeof MemoryObservationSchema>

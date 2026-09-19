@@ -154,6 +154,8 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     const host = composition.realtime.personalAgent
     host.setSources(new LocalDirectorySources({
       path: host.path + '.sources.json', knowledge: knowledge.service,
+      processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
+      onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
       onChange: () => host.sourceChanged(),
       onInvalidate: async ref => {
         await host.invalidateEvidence(ref)
@@ -164,7 +166,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       onObserve: async observation => {
         const memory = composition.realtime.personalMemory
         if (!memory?.observeSource) return // Knowledge-only mode indexes A without enabling personal extraction.
-        await memory.observeSource({...observation, embedding_consent: true})
+        await memory.observeSource(observation)
       },
     }))
   }
@@ -184,10 +186,12 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     credentialRoot: join(host.path + '.feishu', 'credentials'),
     statePath: join(host.path + '.feishu', 'state.json'),
     onChange:()=>host.connectionChanged(),
+    processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
+    onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
     ingest: async message => {
       const memory = composition.realtime.personalMemory
       if (!(memory instanceof SubstrateMemoryResource)) throw Error('请先启用本地记忆')
-      await memory.ingestEvidence({sourceId:message.source_id,locator:message.locator,text:message.raw_text,observedAt:message.observed_at,kind:'im',embeddingConsent:true,retentionUntil:message.retention_until,senderId:message.sender_id,accountId:message.account_id})
+      await memory.ingestEvidence({sourceId:message.source_id,locator:message.locator,text:message.raw_text,observedAt:message.observed_at,kind:'im',...(message.processing_consent?{processingConsent:message.processing_consent}:{}),retentionUntil:message.retention_until,senderId:message.sender_id,accountId:message.account_id})
       await host.sourceChanged()
     },
     deleteSource: async ref => {

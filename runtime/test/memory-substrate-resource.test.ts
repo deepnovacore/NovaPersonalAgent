@@ -9,6 +9,31 @@ import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
 
+test('external ingestion without processing consent stays local even with conversation consent',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-no-processing-'));let calls=0
+ const gateway:ModelGateway={async *stream(){},complete(){calls++;return Promise.resolve({text:'{"entries":[]}'})}}
+ const resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),userId:'test',gateway,model:'fixture',inputConsent:true})
+ try{
+  await resource.open();await resource.ingestEvidence({sourceId:'old-im',locator:'one',text:'周五交报告',observedAt:new Date().toISOString(),kind:'im',embeddingConsent:true})
+  await resource.flush();assert.equal(calls,0)
+ }finally{await resource.close();await rm(root,{recursive:true,force:true})}
+})
+
+test('revocation survives late admission and provider changes require fresh processing consent',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-revoke-processing-'));const path=join(root,'memory.sqlite');let calls=0
+ const gateway:ModelGateway={async *stream(){},complete(){calls++;return Promise.resolve({text:'{"entries":[]}'})}}
+ let resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(path),userId:'test',gateway,model:'fixture',extractionFingerprint:'provider-a'})
+ try{
+  await resource.open();const grant=resource.processingGrant(true)
+  const input={sourceId:'im',locator:'one',text:'第一条',observedAt:new Date().toISOString(),kind:'im' as const,processingConsent:grant}
+  await resource.ingestEvidence(input);await resource.flush();assert.equal(calls,1)
+  await resource.setProcessingConsent('im',resource.processingGrant(false,2))
+  await resource.ingestEvidence({...input,locator:'two',text:'撤销后的条目'});await resource.flush();assert.equal(calls,1)
+  await resource.close();resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(path),userId:'test',gateway,model:'fixture',extractionFingerprint:'provider-b'})
+  await resource.open();await resource.ingestEvidence({...input,locator:'three',text:'新服务商'});await resource.flush();assert.equal(calls,1)
+ }finally{await resource.close();await rm(root,{recursive:true,force:true})}
+})
+
 test('substrate resource keeps identity, correction, restart and source deletion on worker',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-substrate-'));const path=join(root,'memory.sqlite')
  let calls=0
@@ -16,8 +41,8 @@ test('substrate resource keeps identity, correction, restart and source deletion
  let resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(path),userId:'test',gateway,model:'test'})
  try{
   await resource.open()
-  await resource.ingestEvidence({sourceId:'chat:one',locator:'message:one',text:'我周五给你报告',observedAt:'2026-09-12T10:00:00Z',kind:'im',senderId:'sender',accountId:'account'})
-  await resource.ingestEvidence({sourceId:'chat:one',locator:'message:one',text:'我周五给你报告',observedAt:'2026-09-12T10:00:00Z',kind:'im',senderId:'sender',accountId:'account'})
+  await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'chat:one',locator:'message:one',text:'我周五给你报告',observedAt:'2026-09-12T10:00:00Z',kind:'im',senderId:'sender',accountId:'account'})
+  await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'chat:one',locator:'message:one',text:'我周五给你报告',observedAt:'2026-09-12T10:00:00Z',kind:'im',senderId:'sender',accountId:'account'})
   await resource.flush()
   assert.equal(calls,1,'completed evidence does not repeat extraction')
   const first=(await resource.list()).entries[0]!;assert.equal(first.kind,'commitment');assert.equal(first.commitment?.status,'open');assert.equal(first.origin,'inferred');assert.equal(first.version,1)
@@ -26,7 +51,7 @@ test('substrate resource keeps identity, correction, restart and source deletion
   assert.equal((await resource.readEvidence(first.evidence_refs[0]!))?.locator,'message:one')
   assert.ok(first.source_refs.length,'legacy source references remain available')
   await resource.reextract(first.id);assert.equal(calls,2);assert.equal((await resource.get(first.id))?.version,1,'equivalent re-extraction does not append revisions')
-  await resource.ingestEvidence({sourceId:'expired',locator:'expired',text:'旧消息',observedAt:'2020-01-01T00:00:00Z',kind:'im',retentionUntil:'2020-02-01T00:00:00Z'});await resource.flush();assert.equal(calls,2,'expired raw text never reaches the model')
+  await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'expired',locator:'expired',text:'旧消息',observedAt:'2020-01-01T00:00:00Z',kind:'im',retentionUntil:'2020-02-01T00:00:00Z'});await resource.flush();assert.equal(calls,2,'expired raw text never reaches the model')
   const corrected=await resource.correct(first.id,first.version,'改到下周一交报告',{type:'conversation',ref:'correction:one',observed_at:'2026-09-12T11:00:00Z'})
   assert.equal(corrected.entry.commitment?.due,null,'free-text correction must not retain a stale parsed deadline')
   assert.equal(corrected.entry.id,first.id);assert.equal(corrected.entry.version,2);assert.equal(corrected.entry.origin,'stated')
@@ -61,7 +86,7 @@ test('connector admission resolves while model extraction is still pending',asyn
  const resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),userId:'test',gateway,model:'test'})
  try {
   await resource.open();let admitted=false
-  const admission=resource.ingestEvidence({sourceId:'chat',locator:'one',text:'待提取消息',observedAt:new Date().toISOString(),kind:'im'}).then(()=>{admitted=true})
+  const admission=resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'chat',locator:'one',text:'待提取消息',observedAt:new Date().toISOString(),kind:'im'}).then(()=>{admitted=true})
   await started;assert.equal(admitted,true,'sync cursor must not wait for model completion')
   finish({text:'{"entries":[]}'});await admission;await resource.flush()
  }finally{finish({text:'{"entries":[]}'});await resource.close();await rm(root,{recursive:true,force:true})}
@@ -76,8 +101,8 @@ test('semantic memory retrieval finds paraphrases and hydrates only current evid
  const resource=new SubstrateMemoryResource({client,userId:'semantic',gateway,model:'fixture',embedding,embeddingFingerprint:'endpoint-a:fixture:2'})
  try {
   await resource.open()
-  await resource.ingestEvidence({sourceId:'trip',locator:'trip',observedAt:new Date().toISOString(),text:'喜欢去海边旅行',kind:'im',embeddingConsent:true})
-  await resource.ingestEvidence({sourceId:'food',locator:'food',observedAt:new Date().toISOString(),text:'吃饭不放辣椒',kind:'im',embeddingConsent:true})
+  await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'trip',locator:'trip',observedAt:new Date().toISOString(),text:'喜欢去海边旅行',kind:'im',embeddingConsent:true})
+  await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'food',locator:'food',observedAt:new Date().toISOString(),text:'吃饭不放辣椒',kind:'im',embeddingConsent:true})
   await resource.flush()
   const answer=await resource.recall('假期安排',{limit:1});assert.equal(answer.degraded,false);assert.equal(answer.hits[0]?.text,'喜欢去海边旅行')
   const hit=answer.hits[0]
@@ -110,7 +135,7 @@ test('A backs document originals and denies automatic embedding without consent'
   const count=extractions
   const record=await resource.recordEvidence({sourceId:'knowledge:one',locator:'document#chunk:1',text:'原始文档内容',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
   assert.ok(record.evidence_id.startsWith(resource.prefix+'e:'));assert.equal((await resource.readEvidence(record.evidence_id))?.text,'原始文档内容')
-  const pending=await client.memory('pending_evidence',{source_prefix:resource.prefix}) as unknown[];assert.equal(pending.length,0)
+  const pending=await client.memory('pending_evidence',{source_prefix:resource.prefix}) as {id:string}[];assert.ok(!pending.some(row=>row.id===record.evidence_id));assert.equal(extractions,0,'unconsented local observation waits without extraction')
   await resource.flush();assert.equal(extractions,count,'document index owns extraction rather than maintenance')
   assert.equal(await resource.readEvidence('someone-else:e:1'),null)
   await resource.forgetSource('knowledge:one');assert.equal(await resource.readEvidence(record.evidence_id),null)
@@ -125,9 +150,9 @@ test('directory summary uses indexed A chunks and replacement withdraws obsolete
  const resource=new SubstrateMemoryResource({client,userId:'directory',gateway,model:'fixture'})
  const knowledge=new KnowledgeService({store:new KnowledgeStoreClient({path:join(root,'index','knowledge.sqlite')}),embedding:{id:'fixture',dims:2,embed:texts=>Promise.resolve(texts.map(()=>new Float32Array([1,0])))}})
  try{
-  await resource.open();await knowledge.open();await knowledge.bindEvidenceLedger({record:input=>resource.recordEvidence(input),read:id=>resource.readEvidence(id),remove:id=>resource.forgetSource(id)})
+  await resource.open();await knowledge.open();await knowledge.bindEvidenceLedger({processingGrant:(...args)=>resource.processingGrant(...args),canProcess:(...args)=>resource.canProcessEvidence(...args),record:input=>resource.recordEvidence(input),read:id=>resource.readEvidence(id),remove:id=>resource.forgetSource(id)})
   const path=join(root,'README.md');await writeFile(path,'旧计划')
-  const first=await knowledge.syncFile(path,root,new AbortController().signal)
+  const first=await knowledge.syncFile(path,root,new AbortController().signal,undefined,resource.processingGrant(true))
   assert.equal(first.evidence_ids?.length,1)
   const observation={source_ref:{type:'file' as const,ref:'knowledge:'+first.id,observed_at:new Date().toISOString()},content:'should never replace canonical original',evidence_ids:first.evidence_ids}
   await resource.observeSource(observation)
@@ -139,7 +164,7 @@ test('directory summary uses indexed A chunks and replacement withdraws obsolete
   assert.equal((await resource.list()).entries[0]!.version,version,'repeat extraction is a no-op revision')
   await assert.rejects(resource.observeSource({...observation,source_ref:{...observation.source_ref,ref:'knowledge:other'}}),/source_mismatch/u)
   await writeFile(path,'新计划')
-  const next=await knowledge.syncFile(path,root,new AbortController().signal,first.id)
+  const next=await knowledge.syncFile(path,root,new AbortController().signal,first.id,resource.processingGrant(true))
   assert.notEqual(next.id,first.id)
   assert.equal(await resource.readEvidence(first.evidence_ids[0]!),null)
   assert.equal((await resource.list()).entries.length,0,'retiring previous A withdraws all old B facts')

@@ -23,7 +23,7 @@ async function fixture(realMemory = false) {
   let memoryAvailable = true
   const invalidated: string[] = []
   const observations: {content: string; source_ref: {ref: string}}[] = []
-  const options = {path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
+  const options = {processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
     onObserve: async (value: {content: string; source_ref: {type:'file'; ref: string; observed_at:string}; topic?:string}) => {
       if (!memoryAvailable) throw new Error('memory_unavailable')
       if (memory) await memory.observeSource(value)
@@ -36,6 +36,20 @@ async function fixture(realMemory = false) {
     reopen: async () => {await sources.close(); sources = new LocalDirectorySources(options); await sources.open()},
     close: async () => {await sources.close(); await knowledge.close(); await native?.close(); await rm(root, {recursive: true, force: true})}}
 }
+
+test('legacy directory state without processing consent reads locally without embedding',async()=>{
+ const f=await fixture();let embeddings=0
+ try{
+  await writeFile(join(f.folder,'readme.md'),'before')
+  await f.sources.command('sources.add',{path:f.folder,consent:true});await f.sources.close()
+  const path=join(f.root,'db','sources.json');const state=JSON.parse(await readFile(path,'utf8'))
+  delete state.sources[0].processing_consent;await writeFile(path,JSON.stringify(state))
+  await writeFile(join(f.folder,'another.md'),'new local content')
+  f.setEmbeddingHook(()=>{embeddings++;return Promise.resolve()});await f.reopen()
+  assert.equal(embeddings,0);assert.equal(f.sources.list()[0]!.processing_consent_required,true)
+  assert.ok((await f.knowledge.listSources()).some(s=>s.locator.endsWith('another.md')))
+ }finally{await f.close()}
+})
 
 test('local sources use explicit grants, exclude private trees and reconcile durable scoped knowledge', async () => {
   const f = await fixture()

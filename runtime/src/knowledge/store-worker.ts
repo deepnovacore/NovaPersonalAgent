@@ -306,7 +306,7 @@ function replaceSource(value: unknown): null {
       const legacy = old?.content_digest === digest ? old.legacy_digest ?? null : null
       chunkStatement.run(id, input.source.id, chunk.heading_path, chunk.text, chunk.token_estimate, ordinal, digest, legacy)
       if (chunk.evidence_id) opened.prepare('INSERT INTO evidence_links(chunk_id,evidence_id) VALUES (?,?)').run(id, chunk.evidence_id)
-      embeddingStatement.run(id, input.provider_id, input.dims, vectorBlob(chunk.vector))
+      if(chunk.vector!==null)embeddingStatement.run(id, input.provider_id, input.dims, vectorBlob(chunk.vector))
       ftsStatement?.run(id, input.source.id, chunk.text, chunk.heading_path)
     }
     opened.exec('COMMIT')
@@ -420,7 +420,7 @@ function parseReplaceInput(value: unknown): ReplaceKnowledgeSourceInput {
   const providerId = screenContent(boundedString(value.provider_id, 160))
   const dims = positiveInteger(value.dims, 4096)
   const chunks = value.chunks.map(parseChunk)
-  for (const chunk of chunks) if (chunk.vector.length !== dims) throw new StoreError('STORE_INVALID_INPUT')
+  for (const chunk of chunks) if (chunk.vector!==null&&chunk.vector.length !== dims) throw new StoreError('STORE_INVALID_INPUT')
   return {source, chunks, provider_id: providerId, dims}
 }
 
@@ -450,7 +450,7 @@ function parseChunk(value: unknown): KnowledgeChunkInput {
     ...(value.evidence_id === undefined ? {} : {evidence_id: boundedString(value.evidence_id, 600)}),
     text: screenContent(boundedCodePoints(value.text, 3200)),
     token_estimate: nonnegativeInteger(value.token_estimate, 1_000_000),
-    vector: numericVector(value.vector),
+    vector: value.vector===null?null:numericVector(value.vector),
   }
 }
 
