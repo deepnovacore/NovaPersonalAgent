@@ -2,7 +2,7 @@
 
 日期：2026-09-19。目标分支：`v0.3.0dev`。
 
-状态：设计待用户审阅；尚未进入实现计划、产品实现或真实账号验收。
+状态：按用户审阅意见修订，待确认修订稿；尚未进入实现计划、产品实现或真实账号验收。执行拆分见 §14。
 
 ## 1. 目的与已确认方向
 
@@ -22,11 +22,11 @@ Composio 负责授权连接及云端服务调用。Nova 负责读取范围、后
 
 参考 OpenMausBot 的主机持有密钥、多账户选择及后端生成授权链接。不同于直接挂载完整 Composio MCP，本版由主机调用明确的 provider 操作，后台同步不通过模型规划工具调用。
 
-飞书目前跳过 deleted 消息；其定时器、连接状态模式可参考，但不据此宣称现有 IM 已具备完整删除同步。本次不顺带重写飞书或修改其状态文件。
+飞书目前跳过 deleted 消息；其定时器、连接状态模式可参考，但不据此宣称现有 IM 已具备完整删除同步。本次不重写飞书同步；唯一必要例外是共享模型处理同意门控：飞书和目录需显式传递、持久化已有用户同意，替换 composition 中硬编码的 true，兼容旧状态的安全默认值见 §5。
 
 ## 3. 范围与非目标
 
-首版包含：Composio project key 设置、Gmail/Calendar 独立授权、账户及范围选择、定期只读同步、按需只读查询、来源证据与记忆更新、暂停/断开/删除、覆盖与错误可见。
+首版包含：Composio project key 设置、Gmail/Calendar 独立授权、账户及范围选择、定期只读同步、来源证据与记忆更新、暂停/断开/删除、覆盖与错误可见。按需远程只读查询延后，不新增前脑工具面；已有本地记忆检索继续使用。
 
 首版不开放发送邮件、修改标签、创建草稿、修改/取消日程、Composio 远程代码沙箱、任意 HTTP proxy 或任意工具执行。后续写操作逐项进入 Nova 的结构化执行授权路径，读取许可不得变成写许可。
 
@@ -38,7 +38,9 @@ Composio 负责授权连接及云端服务调用。Nova 负责读取范围、后
 
 主机同步调度 → Gmail/Calendar provider → Composio 明确工具或受限 Proxy → 服务商 API。
 
-provider 变更 → 来源对象状态与证据账本 → 既有记忆抽取/索引 → host.sourceChanged → 建议重验及界面刷新。
+provider 变更 → 来源对象状态与证据账本 → 既有记忆抽取/索引 → 批次合并的宿主通知 → 建议重验及界面刷新。
+
+`sourceChanged()` 会刷新记忆、重验并可能触发 discovery；一轮 200 对象不得调用 200 次。每个已提交批次最多发一次来源失效通知，同步检查点不等待模型；本批抽取完成后合并发一次记忆就绪通知。通知带单调批次 revision，host 合并在途通知并使用包含 mail/calendar 对象激活版本的签名，不仅依赖现有本地目录 refs 签名。失效立即阻止旧建议交付，新内容抽取完成后才参与发现；禁止逐对象 flush 全局抽取队列。
 
 组件只按实际职责拆分：
 
@@ -52,29 +54,37 @@ provider 变更 → 来源对象状态与证据账本 → 既有记忆抽取/索
 
 Provider 最小能力为：账户/范围枚举、有界快照页、变更页、按 ID 读取。每页返回对象变更、下一页位置，以及本次范围是否完整；检查点为 provider 自己解释的持久 JSON。无变更游标的 provider 必须声明只支持快照核对，不能伪造游标能力。
 
-按需查询与后台读取复用同一 provider、账户和范围检查。查询不推进后台检查点，不默认把每次搜索结果永久写进记忆。对相同账户的请求共用并发限制。
+未来按需查询复用同一 provider、账户和范围检查，不推进后台检查点；本版不实现该入口。
 
 ## 5. 授权与凭据
 
-首版为用户自带 Composio project key，不内置共享项目密钥。桌面通过现有安全 IPC 写入系统加密存储；只在用户录入时短暂存在于输入表单，不在状态回传、模型、日志或持久 renderer 状态中出现。运行时仅由主机持有。
+首版为用户自带 Composio project key，不内置共享项目密钥。桌面新增 `SECRET_KEYS.composioApiKey` 条目和 `SECRET_ENV_MAP` 映射（即数组中的键名，不改变现有数据结构），经现有安全 IPC 写入系统加密存储，在 spawn 时注入 `COMPOSIO_API_KEY`；CLI 使用同一环境变量。密钥不在状态回传、模型、日志或持久 renderer 状态中出现，不转发给 agent/MCP 子进程。
 
-Nova profile 保存稳定随机 Composio user ID。一个 profile 可有多个 connected account；每次调用绑定明确 connected account ID，账号别名只用于展示。Gmail 和 Calendar 授权分别展示，不能假设登录 Gmail 自动授权日历，也不能只用相同邮箱推断它们是同一个连接。
+保存或清除 key 显示“重启 runtime 后生效”，使用既有受控重启流程；本版不实现热换 key。重启前停止并排空旧采集，重启后核对项目/连接归属，验证成功前暂停旧连接，不因新 key 无效清空旧数据。显式清除必须阻止父进程旧环境变量重新注入，区别于“未配置、允许 CLI 环境继承”；此覆盖语义纳入 backend 测试。key 轮换不自动删除来源或推进数据 generation。
 
-配置只读 auth config；核对实际授予的 scopes。OAuth scope 和 Nova 的标签/日历过滤分别展示，不能把内部过滤描述为服务商权限。授权完成不自动开始采集：用户选择范围并确认数据处理方式后开始。
+每个 Nova 连接分配并持久化独立随机 Composio user_id，一个该 user_id/toolkit 只允许一个可用 connected account；同时保存并在执行时显式传 connected account ID，别名只用于展示。账户数量异常或 provider 身份核对不一致时停止同步，不选择“最近连接”。Gmail 和 Calendar 分别建立连接；重新授权需禁用/移除旧的执行连接并再次核对身份。
 
-授权链接由后端生成并校验 HTTPS 与可信域，浏览器完成 OAuth，主机有界轮询连接状态。中断后重新查询连接状态，不把超时当成功。换 key 先验证新项目身份；不得沿用旧项目 connected account ID 或让在途响应进入新账户。
+这是降低路由歧义的隔离策略，仍须 Phase 0 实测，不宣称能绕过所有上游路由缺陷。issue #3470 报告 Google Ads 的 customer_id 注入问题，正文说明其他 toolkit 正常，且状态已关闭；不能推导 Gmail/Calendar 也有相同故障或独立 user_id 必定修复。Composio user_id 是执行路由标识，不进入服务商对象身份。
+
+v1 允许 Composio 托管 OAuth 默认 scopes，界面如实显示它们可能包含写权限；Nova 在主机操作白名单强制只读，不把两者混为一谈。请求 scope 与实际授予 scope 分开展示，实际值不可查询时标为未知，不推断只读。要求严格 OAuth 只读的部署可配置限制 scopes 的 auth config，作为 Phase 0 对照，不增加首版必须自建 Google OAuth 应用的门槛。
+
+官方当前文档支持使用托管 OAuth app 的 auth config 自定义 scopes；创建 auth config 与自行注册 OAuth app 不等价。Gmail/Calendar 的具体支持、默认范围及后台执行可用性由探针验证。授权完成不自动开始采集：用户选择范围并确认数据处理方式后开始。
+
+使用 connectedAccounts.link()/对应 hosted Connect Link API 生成授权链接，校验 HTTPS 与可信域，浏览器完成 OAuth，主机有界轮询连接状态。托管 OAuth 的 initiate() 已自 2026-07-03 起对所有组织停用，不采用旧示例。中断后重新查询连接状态，不把超时当成功；切换 key 后不能未经核对沿用旧项目的连接 ID。
 
 Composio Cloud 会托管 provider 凭据并代为请求。界面分别说明 Composio 处理和模型/embedding 外发，不把“本地存储记忆”描述为全链路本地。
 
 同意记录绑定连接、scope revision 和模型/embedding provider fingerprint。未授权模型处理时只保存获准读取的本地来源数据与同步状态，不调用 LLM 抽取、摘要或 embedding；不能只将 embeddingConsent 设为 false 却仍发出抽取请求。更换处理服务商要求重新核对同意，在队列出队和实际请求前检查；撤销同意后停止新外发。
 
-不依赖从 Composio 导出原始 provider token。同步使用固定操作清单；工具不暴露所需参数时，后端以固定 endpoint/method/query 构造 Proxy 请求，用户或模型不能提供任意目标。Proxy 不继承 Session 限制，因此本地范围与操作检查始终执行。若使用直接工具执行，固定日期版本并验证响应契约。
+门控落在共享 `SubstrateMemoryResource` 抽取入口、重抽取和实际模型请求边界上，不只包住 Composio 调用者。飞书/目录已有勾选框值通过 command → 持久同意记录 → 来源写入显式传递，移除 production-composition 的 `embeddingConsent:true` 和 `embedding_consent:true`。旧状态缺少同意证据时不从“曾同步过”推断同意：保留本地数据，暂停外发并提示补确认。只读采集许可不自动扩展到模型或 embedding；与此无关的飞书流程保持原状。
+
+不依赖从 Composio 导出原始 provider token。主路径为 pin 日期版本的明确工具：`GMAIL_GET_PROFILE`、`GMAIL_LIST_HISTORY`、邮件分页/正文工具和 `GOOGLECALENDAR_EVENTS_LIST`。Phase 0 保存实际 schema，验证 historyId、分页、syncToken/showDeleted、取消及原始错误的透传；目录列出工具不等于这些契约已验收。只有确认某个必须参数缺失时才启用对应固定 endpoint/method/query 的 Proxy 兜底，用户或模型不能提供任意目标。Proxy 不继承 Session 限制，本地范围与操作检查始终执行。
 
 ## 6. 数据身份与写入一致性
 
-连接状态保存 connection ID、provider、connected account ID、用户可读账户名、scope 配置和 scope revision、generation、授权状态、运行状态、检查点、最近尝试/成功时间与结构化错误。凭据仅保存引用。
+连接状态保存 connection ID、provider、connected account ID、用户可读账户名、scope 配置和 scope revision、data generation、run epoch、授权状态、运行状态、检查点、最近尝试/成功时间与结构化错误。凭据仅保存引用。
 
-凭据未配置、系统凭据库暂时不可读、服务商授权过期分别展示；暂时不可读不得清空连接列表或覆盖已有密钥。同步状态带 schema version，损坏时停止该连接并报告恢复路径，不能静默重置进度。主机单实例持有同步状态写锁，避免两个 runtime 同时采集和推进同一检查点。
+凭据未配置、系统凭据库暂时不可读、服务商授权过期分别展示；暂时不可读不得清空连接列表或覆盖已有密钥。状态结构升级使用现有 `schema_migrations`；损坏时停止该连接，不静默重置进度。复用 `acquirePersonalLock` 的主机锁，避免两个 runtime 推进同一检查点，不引入第二套锁实现。
 
 对象键由 provider + 明确账户身份 + 对象种类 + 原始对象 ID 组成；Calendar 加 calendar ID，重复实例保留 recurringEventId/originalStartTime。标题、正文和邮箱别名不能作主键。Composio 连接 ID 与服务商账户身份分别保存；重授权只有核对服务商身份后才能关联旧状态。
 
@@ -82,15 +92,21 @@ Composio Cloud 会托管 provider 凭据并代为请求。界面分别说明 Com
 
 身份字段有长度上限；内部键使用固定长度摘要，原始长 ID/URL 放在受控元数据中，避免越过现有 MemorySourceRef 的 256 字符限制。联系人元数据新增 provider 命名空间；不得沿用当前抽取代码中的“飞书联系人”标签描述邮件发件人。
 
-同一版本重放不重复入库。A→B→A 必须形成新的有效版本转换，不能只用正文哈希把最后一次变化吞掉。更新撤回被替代版本的当前效力，删除/取消撤回当前对象及其派生建议；其他独立依据支撑的记忆保留。原始来源时间与 Nova 观察时间分别保存。
+证据行保持现有内容寻址 ID，不增加 current/status/version 效力字段。对象表保存 `current_evidence_id`（分块时为集合）和单调 `activation_revision`；效力由对象 current 指针派生。A→B→A 的最后一个 A 复用第一行 A，但对象激活版本再次递增，必须重新应用派生状态。旧的 evidence ID 单独不足以授权迟到模型结果：还需匹配对象 activation_revision 和处理同意 revision。
 
-来源内容和变更先可靠落盘，再推进 provider 检查点。无需跨数据库强求分布式事务：采用持久变更批次和幂等应用，重启后先完成未应用批次，最后提交检查点。暂停/删除 generation 检查在最终写入边界执行；仅在网络调用前检查不够。
+“新语义版本”由规范化领域内容决定：邮件正文、主题、参与者、线程归属，日历时间/时区/全天/重复规则/例外/取消及事件内容属于语义输入；标签、已读/星标、provider etag/historyId 本身仅更新对象元数据。选中标签的变化仍可触发范围进出，但仅标为已读不得把承诺 tombstone。服务商 revision 用于传输顺序与去重，不直接等同语义版本。
+
+从 A 切到 B 时，在同一事务改变 current 指针并使 A 不再有效；只依赖失效依据的推断记忆形成 tombstone，清除相关向量并使建议失效，再对 B 重抽取。混合依据记忆只可保留仍由有效依据支持的内容；无法确定时阻止其参与发现，重抽取后恢复。用户明确陈述/纠正的独立依据不被外部修订覆盖。最后 A 重新激活时也要重建派生状态，不能被现有 evidence_id 级 `extraction_done` 跳过；抽取任务/完成标记需关联对象激活版本，仍可复用内容提取结果但重新校验及 merge。原始来源时间与观察时间分别保存。
+
+`source_id` 按对象粒度包含 connection namespace、data generation 和对象键摘要，限制在现有长度内。物理删除前先持久化递增 data generation，并保留待删旧 generation 清单供崩溃恢复；新采集永不重用登记在 `memory_deleted_sources` 的 ID。暂停、断开或重启只改变运行 epoch/取消旧任务，不增加数据 generation，也不调用 `delete_source`；断开保留已有内容。范围移出/普通修订采用 current 效力撤回，可重新进入，不能误用永久删除。
+
+来源内容和变更先可靠落盘，再推进 provider 检查点。无需跨数据库强求分布式事务：采用持久变更批次和幂等应用，重启后先完成未应用批次，最后提交检查点。run epoch、data generation 和 scope revision 的匹配检查在最终写入边界执行；仅在网络调用前检查不够。
 
 持久化优先复用现有 memory worker 的 SQLite：增加连接同步状态、对象当前版本和批次进度表，同一事务提交对象变化、证据有效性及本页已应用位置。密钥仍在系统凭据库；连接设置可在模型未启动时完成，采集需本地账本可用，缺失时明确暂停。初始列表返回的待取正文 IDs 和当前页剩余工作也要落盘，不能取得列表下一页 token 后就跳过本页未取正文。已提交页可恢复，内存队列仅用来唤醒工作。
 
 按对象维护来源引用，支持单个对象撤回和整连接删除。新增语义需要在现有账本接口补齐，不复制另一套记忆库。外部正文始终是低信任证据，不能直接变成 dispatch 或授权。
 
-当前 `delete_source` 会永久登记来源已删除，不适合作为普通版本替换接口；当前 `append_evidence` 也不替换同 ID 的 payload。实现需补充对象当前版本和证据效力的事务边界，普通修订与用户删除分别处理。记忆抽取在等待模型后、写 merge 前必须再次核对证据效力和 generation，防止旧任务复活已撤回内容。检索、pending extraction、索引和建议校验都使用同一有效证据判定。
+当前 `delete_source` 会永久登记来源已删除，不适合作为普通版本替换接口；当前 `append_evidence` 也不替换同 ID 的 payload。实现补充对象 current 事务边界，普通修订与用户删除分别处理。检索、pending extraction、模型返回后的 merge、索引和建议校验共用同一有效证据判定，包含 current、保留期、抑制标记及适用的处理同意。未纳入对象表的旧来源沿用兼容判定，不因没有 current 行被全部判失效；不得出现一个路径按存在性、另一个按 current 判定的分歧。
 
 ## 7. 同步算法与默认预算
 
@@ -112,7 +128,7 @@ Composio Cloud 会托管 provider 凭据并代为请求。界面分别说明 Com
 
 每个日历独立保存 syncToken 和分页状态。使用服务商允许的稳定查询参数获取初始集合及后续变更，不能把与 syncToken 不兼容的 timeMin/timeMax 塞进增量请求。Nova 本地执行已同意的正文保留窗口；若同步要求读取更宽的事件元数据，须在授权范围说明中明确。未获该同意则使用有界窗口快照核对并如实显示该模式。
 
-保留重复系列、例外及取消语义，按当前窗口形成实例视图。定期推进窗口并补取新进入窗口的实例，不能仅等待事件修改。410 触发新 generation 的重建；重建期间原结果标为陈旧，完整核对后再应用缺失对象撤回。被截断或失败的快照不能证明对象删除。
+保留重复系列、例外及取消语义，按当前窗口形成实例视图。定期推进窗口并补取新进入窗口的实例，不能仅等待事件修改。410 触发新的扫描批次重建，不改变用于来源身份的 data generation；重建期间原结果标为陈旧，完整核对后再应用缺失对象撤回。被截断或失败的快照不能证明对象删除。
 
 ### 周期核对
 
@@ -124,10 +140,10 @@ Composio Cloud 会托管 provider 凭据并代为请求。界面分别说明 Com
 
 | 操作 | 行为 |
 |---|---|
-| 暂停 | 持久化暂停并阻止新请求，取消在途请求，拒绝旧 generation 写入，已有记忆保留 |
+| 暂停 | 持久化暂停并阻止新请求，增加 run epoch 并取消在途请求，拒绝旧 epoch 写入，已有记忆保留 |
 | 恢复 | 重新核对授权/账户/范围，从可靠检查点继续；游标失效执行重建 |
-| 断开 | 先本地停止访问，再移除 Composio 连接；若 provider 撤销不支持或失败，显示所需的服务商手动撤销步骤，不声称已撤销授权 |
-| 删除本地来源数据 | 先暂停并增加 generation，清理全部对象、证据、索引及关联建议；不删除云端邮件/日历 |
+| 断开 | 先本地停止访问，再移除 Composio 连接；不调用 delete_source，保留本地内容并显示已断开；若 provider 撤销不支持或失败，显示手动撤销步骤，不声称已撤销授权 |
+| 删除本地来源数据 | 先暂停并持久化增加 data generation，再清理旧 generation 的对象、证据、索引及关联建议；不删除云端邮件/日历 |
 | 用户忘记 | 保留最小不含正文的抑制标记，防止重连或重放立即重新形成相同记忆；用户明确重置后才解除 |
 | 缩小范围 | 取消旧范围任务并撤回被移除范围的数据；扩大范围显式同意后补同步 |
 
@@ -141,7 +157,7 @@ Composio 连接替换、本地 provider 切换不按邮箱名自动合并。未�
 
 每行展示账号、服务、读取范围、授权状态、同步中/暂停/错误、最近成功时间、实际采集量；提供立即同步、暂停/恢复、断开、删除本地数据。错误使用可操作分类，日志不含 key、OAuth URL 参数和邮件正文。
 
-后台同步由主机调度，不受当前会话和当前 coding backend 影响。只读查询作为明确的邮件/日历能力注册，不把整个 Composio Session 通用执行工具直接交给前脑并信任其外层 readOnlyHint。查询结果仍受响应预算、范围及来源信任约束。
+后台同步由主机调度，不受当前会话和当前 coding backend 影响。连接操作扩展现有 `personalCommandSchema`，不再建立并行控制 API。本版不注册远程查询/通用 Composio 执行工具。已有有界 fetch 优先提取真正共用的响应预算/取消部分；保留各调用方端点及鉴权策略差异，不再复制第四套 readBounded，也不为统一而放宽 MCP 的网络边界。
 
 ## 10. 未来本地替换
 
@@ -169,6 +185,10 @@ Composio 连接替换、本地 provider 切换不按邮箱名自动合并。未�
 - [Composio 只读及工具限制](https://docs.composio.dev/kb/guide/platform-session-tool-policies)
 - [Gmail 同步](https://developers.google.com/workspace/gmail/api/guides/sync)
 - [Calendar 增量同步](https://developers.google.com/workspace/calendar/api/guides/sync)
+- [Composio Connected Accounts 与 link 迁移](https://docs.composio.dev/docs/auth-configuration/connected-accounts)
+- [托管 OAuth 的 scopes 配置](https://docs.composio.dev/docs/authentication/controlling-scopes)
+- [多账户模式](https://docs.composio.dev/docs/authentication/managing-multiple-connected-accounts)
+- [Google Ads 路由问题 #3470（非 Gmail 已知故障的证据）](https://github.com/ComposioHQ/composio/issues/3470)
 
 以上 API 资料已在本次调研读取；实现时对固定工具版本及原始 API 参数再次核对。OpenMausBot 仅作为接入模式参考，不迁入其企业/托管部署配置。
 
@@ -179,3 +199,18 @@ Composio 连接替换、本地 provider 切换不按邮箱名自动合并。未�
 本地自审已补齐：永久来源删除与普通修订分离、模型返回后的证据效力检查、读取/抽取/embedding 分别授权、长对象 ID、非飞书联系人身份、凭据库不可读与未配置区分、单实例状态锁、保留期固定基准、完整分页不等于原子快照。
 
 自审检查文档中的本地链接、占位项、范围与阶段声明。此记录证明设计审阅过程，不代表代码、账号或设备验收。后续仍需用户审阅本文，再编写实现计划。
+
+用户审阅提出的 7 项已在修订稿落实：current 派生效力及语义版本、generation 来源身份、共享同意门控、批次通知、link/默认 scope/连接隔离、spawn env 与 runtime 重启、分阶段交付。另采纳延后按需查询及复用锁/迁移/命令/fetch 的建议。scope 可调整与 Google Ads issue 的适用范围按本轮官方资料校正，不将未证实 API 行为当成事实。
+
+## 14. Phase 0 与三个独立实现计划
+
+本文不是单一实施计划。修订稿获确认后，先同步 04 卷 §4、06 卷 §10、STATUS 中本次已决策的条目；无关待评审项保留，不能把设计决定标为实现完成。再使用 writing-plans 编写 Phase 0 和 Plan 1；此时不展开 Plan 2/3 的逐文件任务。
+
+| 阶段 | 产物与退出条件 | 依赖 |
+|---|---|---|
+| Phase 0：契约探针 | 在隔离账号/状态中验证 link、默认及限制 scopes、pin 工具 schema、history/profile、Calendar syncToken/showDeleted/分页、错误映射；双账户交错读取验证独立 user_id + account ID 以及实际服务商身份；验证密钥重启通路。形成脱敏证据和通过/失败/未测矩阵，不能输出凭据或私有正文 | 经用户选择范围并授权的 Composio 测试连接；没有条件则明确阻塞对应实测，不凭 mock 通过 |
+| Plan 1：provider 无关底座 | 对象 current/activation、generation、统一证据效力、共享处理同意、幂等批次及检查点、合并宿主通知、schema migration；全部用伪 provider 与真实临时数据库可验证，保留 IM/目录兼容 | 修订 spec 确认；可与 Phase 0 并行，不依赖具体 Composio 成功 |
+| Plan 2：Composio + Google + 桌面 | 根据探针实际契约编写账号/授权、工具调用、Google 同步及设置集成计划；逐项落实第一版范围，不使用“看起来可用”的 API 假设 | Phase 0 结论落地，Plan 1 接口明确后才编写；底座完成后集成 |
+| Plan 3：安装版与跨层验收 | 连接真实账号、重启/睡眠、修改/取消/删除级联、真实权限撤销、回归及发布证据；新发现的问题回到负责模块修复，不能以验收阶段替代 Plan 1/2 的测试 | Plan 2 可用后编写，用户授权账号范围；发布/推送仍另行明确授权 |
+
+Plan 1 的关键回归必须包含：A→B 时 A 的承诺失效，B→A 时恢复正确且不复活旧已忘记记忆；只改已读/标签不触发无谓语义重抽取；删除后新 generation 可写，断开不删除；旧 IM/目录同意的显式传递；200 对象的批次通知次数有界；晚到抽取对已失效激活版本拒绝 merge。
