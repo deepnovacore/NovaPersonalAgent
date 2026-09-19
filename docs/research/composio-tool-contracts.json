@@ -1,0 +1,17 @@
+{
+  "checked_at": "2026-09-19",
+  "sdk": "@composio/core@0.18.1",
+  "client": "@composio/client@0.1.0-alpha.76",
+  "origin": "https://backend.composio.dev",
+  "api_prefix": "/api/v3.1",
+  "tool_version": "20260915_00",
+  "version_evidence": "public toolkit catalog, not authenticated metadata",
+  "schema_status": "unobserved: COMPOSIO_API_KEY unavailable",
+  "schemas": null,
+  "schema_sha256": null,
+  "gmail": ["GMAIL_GET_PROFILE", "GMAIL_LIST_HISTORY", "GMAIL_FETCH_EMAILS", "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID", "GMAIL_LIST_LABELS"],
+  "googlecalendar": ["GOOGLECALENDAR_GET_CURRENT_USER", "GOOGLECALENDAR_LIST_CALENDARS", "GOOGLECALENDAR_EVENTS_LIST", "GOOGLECALENDAR_EVENTS_GET", "GOOGLECALENDAR_EVENTS_INSTANCES"],
+  "live_routing": "unobserved",
+  "live_pagination": "unobserved",
+  "proxy_required": null
+}

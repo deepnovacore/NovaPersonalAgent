@@ -98,6 +98,7 @@
 
 - M8-Mail 已确认 Composio + Gmail / Google Calendar、只读后台同步、邮件接收后 30 天及日历结束后 30 天原文保留。先做 Phase 0 契约探针与 provider 无关的 Plan 1；Plan 2（Google / 桌面）等探针结论，Plan 3 再做安装版验收。详见 [已批准设计](../../superpowers/specs/2026-09-19-composio-connectors-design.md)。设计决定不等于实现或账号验收通过。
 - 已编写 [Phase 0 探针计划](../../superpowers/plans/2026-09-19-composio-contract-probe.md) 与 [Plan 1 底座计划](../../superpowers/plans/2026-09-19-connector-foundation.md)，可独立推进；无账号不阻塞 Plan 1。
+- Plan 1 已实现对象 current/generation、处理同意与异步结果 fencing、可恢复分页/删除及批次宿主通知；独立审阅问题已补回归修复。Phase 0 仅完成公开版本核对与离线探针，缺少本机 key 和测试账户范围，账号路由、scope、分页与错误透传仍未测；详见 [探针记录](../../research/2026-09-19-composio-probe.md)。尚未实现 Google/桌面生产连接，Plan 2 门槛仍未满足。
 - 飞书真实 OAuth、读取所选会话、本人 bot 送达及回调尚未验收；本地 fixture 测试不能替代真实账号验收。
 - 预检索真实语音延迟与相关性、现有个人目录上的迁移及摘要效果尚未验收；不引用 VoiceMem 上游时延作为本实现结果。
 - 代码、自动检查与验收状态分别记录于 [本轮实现记录](MEMORY-AND-FEISHU-IMPLEMENTATION.md)。
