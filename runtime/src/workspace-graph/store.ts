@@ -1,6 +1,7 @@
 import {recordWorkspaceRevision} from '../memory-substrate/workspace.js'
 import {migrateLegacyMemory} from '../memory-substrate/migration.js'
 import {initializeMemory, memoryOperation, type MemoryOperation} from '../memory-substrate/store.js'
+import {initializeSourceState,assertSourceStateSchema} from '../memory-substrate/source-state.js'
 import { createHash } from 'node:crypto'
 
 import { z } from 'zod'
@@ -42,7 +43,7 @@ import {
   type WorkspaceGraphProjectionState,
 } from './projector.js'
 
-export const WORKSPACE_GRAPH_SCHEMA_VERSION = 3
+export const WORKSPACE_GRAPH_SCHEMA_VERSION = 4
 const DERIVED_TABLE_ROW_CAP = 128
 const OBSERVATION_ROW_CAP_PER_WORKSPACE = 512
 const OBSERVATION_ROW_CAP_GLOBAL = 4_096
@@ -986,8 +987,8 @@ export class WorkspaceGraphStore {
         this.#createV1Schema(database)
         this.#createV2Schema(database)
         this.#createV3Schema(database)
-        this.#recordMigration(database, WORKSPACE_GRAPH_SCHEMA_VERSION)
-        version = WORKSPACE_GRAPH_SCHEMA_VERSION
+        this.#recordMigration(database, 3)
+        version = 3
       }
       if (version === 1) {
         this.#assertSchemaShape(database, V1_TABLE_SHAPES)
@@ -1001,7 +1002,13 @@ export class WorkspaceGraphStore {
         this.#recordMigration(database, 3)
         version = 3
       }
+      if (version === 3) {
+        initializeSourceState(database)
+        this.#recordMigration(database, 4)
+        version = 4
+      }
       if (version !== WORKSPACE_GRAPH_SCHEMA_VERSION) throw new Error('schema version gap')
+      assertSourceStateSchema(database)
       this.#assertSchemaShape(database, V3_TABLE_SHAPES)
       this.#createIndexes(database)
       database.exec('COMMIT')

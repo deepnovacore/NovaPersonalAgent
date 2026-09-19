@@ -4,6 +4,7 @@ import {z} from 'zod'
 import {canonicalJson} from '../text/canonical-json.js'
 import {trustSchema} from '../core/events.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
+import {initializeSourceState} from './source-state.js'
 import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 
 const id = z.string().min(1).max(512)
@@ -63,6 +64,7 @@ export function merge(current:EntryRevision|null,candidate:Candidate,policy:{sup
 }
 
 export function initializeMemory(database:GraphDatabase):void {
+  initializeSourceState(database)
   initializeRetrieval(database)
   database.exec(`CREATE TABLE IF NOT EXISTS memory_evidence(id TEXT PRIMARY KEY,source_id TEXT NOT NULL,hash TEXT NOT NULL,payload_json TEXT NOT NULL);
     CREATE INDEX IF NOT EXISTS memory_evidence_source ON memory_evidence(source_id);
