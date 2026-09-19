@@ -12,7 +12,7 @@ import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
 async function fixture(realMemory = false) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-directory-'))
   const folder = join(root, 'allowed'); await mkdir(folder)
-  let failEmbedding = false, failInvalidation = false
+  let failEmbedding = false, failInvalidation = false, failConsent=false
   let embeddingHook: () => Promise<void> = () => Promise.resolve()
   const knowledge = new KnowledgeService({store: new KnowledgeStoreClient({path: join(root, 'db', 'knowledge.sqlite')}),
     embedding: {id: 'test', dims: 2, embed: texts => failEmbedding ? Promise.reject(new Error('offline')) : embeddingHook().then(() => texts.map(() => new Float32Array([1, 0])))}})
@@ -24,6 +24,7 @@ async function fixture(realMemory = false) {
   const invalidated: string[] = []
   const observations: {content: string; source_ref: {ref: string}}[] = []
   const options = {processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
+    onProcessingConsent:()=>failConsent?Promise.reject(Error('grant_write_failed')):Promise.resolve(),
     onObserve: async (value: {content: string; source_ref: {type:'file'; ref: string; observed_at:string}; topic?:string}) => {
       if (!memoryAvailable) throw new Error('memory_unavailable')
       if (memory) await memory.observeSource(value)
@@ -32,18 +33,38 @@ async function fixture(realMemory = false) {
     onInvalidate: (ref: string) => { if (failInvalidation) throw new Error('interrupted'); invalidated.push(ref); memory?.forgetSource(ref) }}
   let sources = new LocalDirectorySources(options)
   await sources.open()
-  return {root, folder, knowledge, invalidated, observations, memory, setMemoryAvailable(value:boolean) {memoryAvailable=value}, setEmbeddingHook(hook: () => Promise<void>) {embeddingHook = hook}, setFail(value: boolean) {failEmbedding = value}, setFailInvalidation(value: boolean) {failInvalidation = value}, get sources() {return sources},
+  return {root, folder, knowledge, invalidated, observations, memory, setFailConsent(value:boolean){failConsent=value},setMemoryAvailable(value:boolean) {memoryAvailable=value}, setEmbeddingHook(hook: () => Promise<void>) {embeddingHook = hook}, setFail(value: boolean) {failEmbedding = value}, setFailInvalidation(value: boolean) {failInvalidation = value}, get sources() {return sources},
     reopen: async () => {await sources.close(); sources = new LocalDirectorySources(options); await sources.open()},
     close: async () => {await sources.close(); await knowledge.close(); await native?.close(); await rm(root, {recursive: true, force: true})}}
 }
+
+test('failed authority update does not publish a durable successful consent revocation',async()=>{
+ const f=await fixture()
+ try{
+  await f.sources.command('sources.add',{path:f.folder,consent:true});f.setFailConsent(true)
+  await assert.rejects(f.sources.command('sources.consent',{id:f.sources.list()[0]!.id,consent:false}),/grant_write_failed/)
+  await f.reopen()
+  assert.equal(f.sources.list()[0]!.processing_consent_required,false)
+ }finally{await f.close()}
+})
+
+test('changed processing provider requires renewed consent',async()=>{
+ const f=await fixture()
+ try{
+  await f.sources.command('sources.add',{path:f.folder,consent:true});await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{processing_consent:{extraction_provider:string}}[]}
+  state.sources[0]!.processing_consent.extraction_provider='old-provider';await writeFile(path,JSON.stringify(state));await f.reopen()
+  assert.equal(f.sources.list()[0]!.processing_consent_required,true)
+ }finally{await f.close()}
+})
 
 test('legacy directory state without processing consent reads locally without embedding',async()=>{
  const f=await fixture();let embeddings=0
  try{
   await writeFile(join(f.folder,'readme.md'),'before')
   await f.sources.command('sources.add',{path:f.folder,consent:true});await f.sources.close()
-  const path=join(f.root,'db','sources.json');const state=JSON.parse(await readFile(path,'utf8'))
-  delete state.sources[0].processing_consent;await writeFile(path,JSON.stringify(state))
+  const path=join(f.root,'db','sources.json');const state=JSON.parse(await readFile(path,'utf8')) as {sources:{processing_consent?:unknown}[]}
+  delete state.sources[0]!.processing_consent;await writeFile(path,JSON.stringify(state))
   await writeFile(join(f.folder,'another.md'),'new local content')
   f.setEmbeddingHook(()=>{embeddings++;return Promise.resolve()});await f.reopen()
   assert.equal(embeddings,0);assert.equal(f.sources.list()[0]!.processing_consent_required,true)

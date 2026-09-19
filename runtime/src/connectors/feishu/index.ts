@@ -111,7 +111,7 @@ export class FeishuConnector {
     if (!options.bootstrapOnly && (!options.ingest || !options.deleteSource || !options.onAction)) throw new Error('Feishu collection callbacks required');
     this.run = options.run ?? createFeishuRunner(options.executable, options.credentialRoot);
   }
-  snapshot(): FeishuSnapshot { const view = structuredClone(this.view); view.processing_consent_required=!this.saved.processingConsent?.extraction_provider; view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; if (view.app_setup) delete view.app_setup.verification_url; return view; }
+  snapshot(): FeishuSnapshot { const view = structuredClone(this.view),expected=this.options.processingGrant?.(true,1,0); view.processing_consent_required=!this.saved.processingConsent?.extraction_provider||this.saved.processingConsent.extraction_provider!==expected?.extraction_provider||this.saved.processingConsent.embedding_provider!==expected?.embedding_provider; view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; if (view.app_setup) delete view.app_setup.verification_url; return view; }
   private setupSnapshot(): FeishuSnapshot {return structuredClone(this.view);}
   private publish(): void {
     if (this.closed) return;
@@ -314,8 +314,9 @@ export class FeishuConnector {
   async setProcessingConsent(consent:boolean,scopeChanged=false):Promise<void>{
     const prior=this.saved.processingConsent;
     const grant=this.options.processingGrant?.(consent,(prior?.revision??0)+1,(prior?.scope_revision??0)+Number(scopeChanged));
-    if(!grant)return;this.saved.processingConsent=grant;await this.save();
-    await this.options.onProcessingConsent?.(this.saved.sources,grant);this.publish();
+    if(!grant)return;
+    await this.options.onProcessingConsent?.(this.saved.sources,grant);
+    this.saved.processingConsent=grant;await this.save();this.publish();
   }
   async sync(): Promise<void> {
     if (this.options.bootstrapOnly) throw new Error('Feishu collection unavailable during setup');

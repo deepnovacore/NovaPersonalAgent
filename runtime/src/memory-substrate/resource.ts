@@ -1,4 +1,5 @@
-import {processingGrantSchema,extractionTicketSchema,type ExtractionTicket,type ProcessingGrant} from './source-state.js'
+import type {ApplyPage,PageResult} from './source-operations.js'
+import {processingGrantSchema,extractionTicketSchema,type SourceChange,type ExtractionTicket,type ProcessingGrant} from './source-state.js'
 import type {EmbeddingProvider} from '../knowledge/embeddings.js'
 import type {JsonValue} from '../core/events.js'
 import {createHash, randomUUID} from 'node:crypto'
@@ -23,6 +24,46 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   readonly prefix:string
   #onChange:(()=>void)|undefined
   setOnChange(listener:()=>void):void{this.#onChange=listener}
+  #sourceListener:((change:SourceChange)=>Promise<void>)|undefined
+  #sourceWork:Promise<void>|null=null
+  #sourceEvents:Promise<void>|null=null
+  #sourceEventCursor=0
+  setOnSourceChange(listener:(change:SourceChange)=>Promise<void>):void{this.#sourceListener=listener;this.#wakeSources()}
+  async applySourcePage(input:ApplyPage):Promise<PageResult>{
+    this.#ready();if(!input.fence.connection_id.startsWith(this.prefix)||input.changes.some(c=>!c.source_id.startsWith(this.prefix)||c.evidence.some(e=>!e.id.startsWith(this.prefix+'e:'))))throw Error('STORE_INVALID_OPERATION')
+    const result=await this.options.client.memory('source_apply_page',input) as PageResult
+    await this.#notifySources();this.#wakeSources();return result
+  }
+  #wakeSources():void{
+    if(this.#sourceWork||!this.#opened)return
+    this.#sourceWork=(async()=>{
+      await this.#notifySources()
+      for(let n=0;n<10&&this.#opened;n++){
+        const pending=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('pending_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),limit:20}))
+        if(!pending.length)break
+        for(const e of pending)this.#queue(e)
+        await this.#pending
+      }
+      await this.#notifySources()
+    })().catch(()=>{ /* Durable pages and evidence remain retryable at maintenance. */ }).finally(()=>{this.#sourceWork=null})
+  }
+  #notifySources():Promise<void>{
+    if(this.#sourceEvents)return this.#sourceEvents
+    this.#sourceEvents=(async()=>{
+      if(!this.#sourceListener||!this.#opened)return
+      for(let page=0;page<20;page++){
+      const result=await this.options.client.memory('source_events',{prefix:this.prefix,provider:this.#extractionFingerprint(),after:this.#sourceEventCursor}) as {events:SourceChange[];next:number|null}
+      for(const event of result.events){
+        await this.#refresh(false)
+        await this.#sourceListener(event)
+        await this.options.client.memory('source_events',{prefix:this.prefix,provider:this.#extractionFingerprint(),ack:event})
+      }
+      this.#sourceEventCursor=result.next??0
+      if(result.next===null)break
+      }
+    })().finally(()=>{this.#sourceEvents=null})
+    return this.#sourceEvents
+  }
   #maintenance:ReturnType<typeof setInterval>|undefined
   #queued=new Set<string>()
   #extracting=new Map<string,Promise<void>>()
@@ -36,8 +77,8 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     this.prefix='personal:'+digest(options.userId)+':'
   }
   async open():Promise<void>{if(this.#opened)return;await this.options.client.open();await this.options.migrate?.();this.#opened=true;this.#abort=new AbortController();await this.#maintain();this.#maintenance=setInterval(()=>{void this.#maintain().catch(()=>{ /* retry on the next maintenance tick */ })},60000);this.#maintenance.unref();await this.#refresh()}
-  async close():Promise<void>{this.#opened=false;clearInterval(this.#maintenance);this.#abort.abort();await this.#pending;await this.#indexing;this.#adaptation={revision:0,replyPreferences:[]};if(this.options.closeClient!==false){await this.options.client.close();this.options.onClose?.()}}
-  async #maintain():Promise<void>{await this.options.client.memory('expire',{});if(this.options.personalMemoryEnabled===false)return;await this.#refresh();this.#queueIndex();const pending=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('pending_evidence',{source_prefix:this.prefix,limit:20}));for(const e of pending)this.#queue(e)}
+  async close():Promise<void>{this.#opened=false;clearInterval(this.#maintenance);this.#abort.abort();await this.#sourceWork;await this.#sourceEvents;await this.#pending;await this.#indexing;this.#adaptation={revision:0,replyPreferences:[]};if(this.options.closeClient!==false){await this.options.client.close();this.options.onClose?.()}}
+  async #maintain():Promise<void>{this.#wakeSources();await this.options.client.memory('expire',{});if(this.options.personalMemoryEnabled===false)return;await this.#refresh();this.#queueIndex();const pending=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('pending_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),limit:20}));for(const e of pending)this.#queue(e)}
   #ready():void{if(!this.#opened)throw Error('personal_memory_unavailable')}
   capabilities(){return {list:true,get:true,correct:true,forgetEntry:true,forgetSource:true,observeSource:true}}
   responseAdaptation():PersonalMemoryResponseAdaptation{this.#ready();return structuredClone(this.#adaptation)}
@@ -52,7 +93,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const commitment=row.kind==='commitment'?z.object({direction:z.enum(['owed_by_me','owed_to_me']),due:z.iso.datetime({offset:true}).nullable(),status:z.enum(['open','done','dropped']),counterparty:z.string().optional()}).safeParse(row.content):null
     return {id:row.entry_id,version:row.revision,content:text.slice(0,500),editable:!workspace,...(commitment?.success?{commitment:commitment.data}:{}),kind:workspace?'entity':['fact','preference','plan','concern','commitment','entity','topic'].includes(row.kind)?row.kind as MemoryEntry['kind']:'fact',origin:row.origin,source_refs:refs,evidence_refs:row.evidence_refs,observed_at:refs[0]!.observed_at,recorded_at:row.recorded_at,topic:displayText(row.content.topic),status:row.op==='tombstone'?'forgotten':row.valid_until!==null&&Date.parse(row.valid_until)<=Date.now()?'expired':'active',corrected_to:null,confidence_note:null}
   }
-  async #refresh():Promise<void>{const rows=await this.#rows();const signature=JSON.stringify(rows);if(signature===this.#snapshotSignature)return;this.#snapshotSignature=signature;this.#adaptation={revision:this.#adaptation.revision+1,replyPreferences:rows.filter(r=>r.kind==='preference'&&r.origin==='stated').slice(0,16).map(r=>({id:r.entry_id,text:displayText(r.content.text),evidenceIds:r.evidence_refs}))};this.#queueIndex();this.options.onChange?.();this.#onChange?.()}
+  async #refresh(notify=true):Promise<void>{const rows=await this.#rows();const signature=JSON.stringify(rows);if(signature===this.#snapshotSignature)return;this.#snapshotSignature=signature;this.#adaptation={revision:this.#adaptation.revision+1,replyPreferences:rows.filter(r=>r.kind==='preference'&&r.origin==='stated').slice(0,16).map(r=>({id:r.entry_id,text:displayText(r.content.text),evidenceIds:r.evidence_refs}))};if(notify){this.#queueIndex();this.options.onChange?.();this.#onChange?.()}}
   async list(options:Parameters<NonNullable<PersonalMemoryResource['list']>>[0]={}){const q=MemoryListOptionsSchema.parse(options);const offset=q.cursor?Number(q.cursor):0;if(!Number.isSafeInteger(offset)||offset<0)throw Error('invalid_cursor');const rows=(await this.#rows(q.include_expired??false,true)).filter(row=>row.op!=='tombstone'&&!(row.kind==='entity'&&row.content.entity_kind==='person')&&!(row.entry_id.startsWith('workspace:')&&['inactive','suppressed','stale'].includes(displayText(row.content.status))));const limit=q.limit??100;return {entries:await Promise.all(rows.slice(offset,offset+limit).map(r=>this.#entry(r))),cursor:offset+limit<rows.length?String(offset+limit):null}}
   async get(id:string):Promise<MemoryEntry|null>{const row=(await this.#rows(true,true)).find(r=>r.entry_id===id);return row?this.#entry(row):null}
   async recall(query:string,options:{scope?:'recent'|'any';limit?:number;signal?:AbortSignal}={}){
@@ -72,6 +113,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   }
   #extractionFingerprint():string{return this.options.extractionFingerprint??this.options.model}
   async canProcessEvidence(id:string,purpose:'extraction'|'embedding'):Promise<boolean>{return await this.options.client.memory('processing_evidence',{id,purpose,provider:purpose==='extraction'?this.#extractionFingerprint():this.#fingerprint()})!==null}
+  async processingStamp(ids:string[]):Promise<string|null>{return await this.options.client.memory('processing_stamp',{ids,purpose:'embedding',provider:this.#fingerprint()}) as string|null}
   processingGrant(consent:boolean,revision=1,scopeRevision=0):ProcessingGrant{return processingGrantSchema.parse({revision,scope_revision:scopeRevision,extraction_provider:consent?this.#extractionFingerprint():null,embedding_provider:consent&&this.options.embedding?this.#fingerprint():null})}
   async setProcessingConsent(sourceId:string,grant:ProcessingGrant):Promise<void>{
     const source_id=sourceId.startsWith(this.prefix)?sourceId:this.prefix+sourceId
@@ -155,7 +197,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const source=MemorySourceRefSchema.parse({type:input.kind==='task_result'?'task':input.kind,ref:input.locator,observed_at:input.observedAt});const record=await this.#admit(source,input.text,input.kind,input.sourceId,input.retentionUntil,false,input.senderId&&input.accountId?{sender_id:input.senderId,account_id:input.accountId,provider:input.provider??(input.kind==='im'?'feishu':input.kind)}:undefined,input.embeddingConsent===true,input.processingConsent);this.#queue(record)
   }
   /** Wait for currently admitted extraction work; admission itself only waits for persistence. */
-  async flush():Promise<void>{await this.#pending;await this.#indexing;this.#queueIndex();await this.#indexing}
+  async flush():Promise<void>{await this.#sourceWork;await this.#pending;await this.#notifySources();await this.#indexing;this.#queueIndex();await this.#indexing}
   #queue(evidence:EvidenceRecord):void{if(this.options.personalMemoryEnabled===false||this.#queued.has(evidence.id)||this.#queued.size>=20)return;this.#queued.add(evidence.id);this.#pending=this.#pending.then(async()=>{if(this.#opened)await this.#extract(evidence)}).catch(()=>{ /* durable pending evidence is retried by maintenance */ }).finally(()=>{this.#queued.delete(evidence.id)})}
   async #extract(evidence:EvidenceRecord,topic?:string,force=false):Promise<void>{
     const raw=await this.options.client.memory('extraction_ticket',{evidence_id:evidence.id,provider:this.#extractionFingerprint(),force})
@@ -191,7 +233,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(sender&&personId&&result.entries.some(item=>item.kind==='commitment'))candidates.push(CandidateSchema.parse({entry_id:personId,kind:'entity',origin:'inferred',written_by:'merge',evidence_refs:[evidence.id],content:{entity_kind:'person',external_id:sender.sender_id,account_id:sender.account_id,provider,text:provider==='feishu'?'飞书联系人':'应用联系人'},recorded_at:new Date().toISOString()}))
     for(const item of result.entries){const entryId=this.prefix+digest(item.kind+':'+item.key);const old=(await this.#rows()).find(r=>r.entry_id===entryId);const counterparty=personId??(displayText(old?.content.counterparty)||null);const retained:string[]=[];for(const ref of old?.evidence_refs??[])if(await this.options.client.memory('processing_evidence',{id:ref,purpose:'extraction',provider:this.#extractionFingerprint()})!==null)retained.push(ref);const candidate=CandidateSchema.parse({entry_id:entryId,kind:item.kind,origin:evidence.trust==='trusted_user'?'stated':'inferred',written_by:'merge',evidence_refs:[...new Set([...retained,evidence.id])].slice(-256),entity_refs:item.kind==='commitment'&&counterparty?[counterparty]:[],content:{...item,...(item.kind==='commitment'&&counterparty?{counterparty}:{})},valid_until:item.valid_until,recorded_at:new Date().toISOString()});candidates.push(candidate)}
     await this.options.client.memory('commit_extraction',{ticket,candidates,extracted:result})
-    await this.#refresh()
+    if(ticket.activation===null)await this.#refresh()
   }
   async reextract(id:string):Promise<void>{
     const row=(await this.#rows(true)).find(entry=>entry.entry_id===id);if(!row||row.op==='tombstone')throw Error('STORE_NOT_FOUND')

@@ -121,14 +121,14 @@ function write(db:GraphDatabase,candidate:Candidate,deleted=false):EntryRevision
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'
+export type MemoryOperation = 'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
 export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   if(transaction)db.exec('BEGIN IMMEDIATE')
   try {
     let result:unknown=null
     switch(operation){
-      case 'source_connection':case 'source_apply_page':case 'source_pending':case 'source_revision':case 'source_grant':case 'extraction_ticket':case 'commit_extraction':result=sourceOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
+      case 'source_connection':case 'source_apply_page':case 'source_pending':case 'source_revision':case 'source_grant':case 'extraction_ticket':case 'commit_extraction':case 'source_events':result=sourceOperation(db,operation,input,(op,v)=>memoryOperation(db,op,v,false));break
       case 'processing_stamp':result=processingStamp(db,z.array(id).min(1).max(256).parse(value.ids),z.enum(['extraction','embedding']).parse(value.purpose),id.parse(value.provider));break
       case 'processing_evidence':result=effectiveEvidence(db,id.parse(value.id),{purpose:z.enum(['extraction','embedding']).parse(value.purpose),provider:id.parse(value.provider)});break
       case 'invalidate_evidence': {
@@ -162,15 +162,17 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
       case 'retrieval_evidence':result=retrievalEvidence(db,id.parse(value.id));break
       case 'extraction_done':result=db.prepare('SELECT 1 FROM memory_extractions WHERE evidence_id=? LIMIT 1').get(id.parse(value.id))!==undefined;break
       case 'pending_evidence': {
-        const prefix=id.parse(value.source_prefix);const limit=z.number().int().min(1).max(100).parse(value.limit??100)
+        const prefix=id.parse(value.source_prefix);const provider=value.provider===undefined?'':id.parse(value.provider);const limit=z.number().int().min(1).max(100).parse(value.limit??100)
         result=rows(db,`SELECT e.payload_json FROM memory_evidence e WHERE substr(e.source_id,1,length(?))=?
           AND json_extract(e.payload_json,'$.raw_text') IS NOT NULL AND json_extract(e.payload_json,'$.source_kind') <> 'user_correction'
           AND (json_extract(e.payload_json,'$.retention_until') IS NULL OR julianday(json_extract(e.payload_json,'$.retention_until'))>julianday('now'))
+          AND (?='' OR EXISTS (SELECT 1 FROM source_grants g WHERE g.source_id=e.source_id AND json_extract(g.payload_json,'$.extraction_provider')=?))
+          AND (?='' OR NOT EXISTS (SELECT 1 FROM source_objects o JOIN source_connections c ON c.id=o.connection_id JOIN source_grants g ON g.source_id=e.source_id WHERE json_extract(o.payload_json,'$.source_id')=e.source_id AND (json_extract(c.payload_json,'$.state')<>'connected' OR json_extract(c.payload_json,'$.fence.scope_revision')<>json_extract(g.payload_json,'$.scope_revision'))))
           AND NOT EXISTS (SELECT 1 FROM memory_suppressed s WHERE s.hash=e.hash)
           AND NOT EXISTS (SELECT 1 FROM memory_extractions x WHERE x.evidence_id=e.id)
           AND NOT EXISTS (SELECT 1 FROM source_objects o JOIN source_connections c ON c.id=o.connection_id WHERE json_extract(o.payload_json,'$.source_id')=e.source_id AND
             (o.generation<>json_extract(c.payload_json,'$.fence.generation') OR NOT EXISTS (SELECT 1 FROM json_each(o.payload_json,'$.current_evidence_ids') r WHERE r.value=e.id)))
-          ORDER BY e.id LIMIT ?`,prefix,prefix,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null);break
+          ORDER BY e.id LIMIT ?`,prefix,prefix,provider,provider,provider,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null);break
       }
       case 'record_extraction': {
         const evidenceId=id.parse(value.evidence_id);if(!evidence(db,evidenceId))throw new Error('STORE_NOT_FOUND')

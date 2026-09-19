@@ -84,7 +84,7 @@ export class LocalDirectorySources {
     await this.#writes
     await this.#release?.(); this.#release = undefined
   }
-  list(): SourceSnapshot[] {return this.#records.map(record => ({...structuredClone(record.view), processing_consent_required:!record.processing_consent?.extraction_provider, excludes: [...new Set([...SOURCE_EXCLUDES, ...record.view.excludes])]}))}
+  list(): SourceSnapshot[] {const expected=this.#options.processingGrant?.(true,1,0);return this.#records.map(record => ({...structuredClone(record.view), processing_consent_required:!record.processing_consent?.extraction_provider||record.processing_consent.extraction_provider!==expected?.extraction_provider||record.processing_consent.embedding_provider!==expected?.embedding_provider, excludes: [...new Set([...SOURCE_EXCLUDES, ...record.view.excludes])]}))}
   evidence(ref: string) {
     for (const record of this.#records) {
       const file = record.files.find(file => refFor(file) === ref)
@@ -131,8 +131,8 @@ export class LocalDirectorySources {
       const record=this.#records.find(r=>r.view.id===q.id);if(!record)throw Error('source_gone')
       const grant=this.#options.processingGrant?.(q.consent,(record.processing_consent?.revision??0)+1,record.processing_consent?.scope_revision??0)
       if(!grant)throw Error('memory_unavailable')
-      record.processing_consent=grant;await this.#save()
       await this.#options.onProcessingConsent?.(record.files.flatMap(f=>['knowledge:'+f.id,...(f.observation_ref?[f.observation_ref]:[])]),grant)
+      record.processing_consent=grant
       for(const file of record.files)file.observed=false
       await this.#save();return {ok:true}
     }

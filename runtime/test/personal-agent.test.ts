@@ -15,6 +15,34 @@ import { ClientCommands } from '../src/server/client-protocol.js';
 const now = new Date('2026-09-11T10:00:00Z');
 const entry = (id = 'plan', version = 1): MemoryEntry => ({ id, version, content: 'Today prepare a demo', kind: 'plan', origin: 'stated', source_refs: [{ type: 'conversation', ref: 'conversation:1', observed_at: now.toISOString() }], observed_at: now.toISOString(), recorded_at: now.toISOString(), topic: 'work', status: 'active', corrected_to: null, confidence_note: null });
 const proposal = (id = 'plan', version = 1) => ({ kind: 'question' as const, summary: 'Check demo materials?', why_now: 'You said the demo is today', evidence_refs: [] as string[], memory_refs: [{ entry_id: id, version }] });
+test('batch notifications coalesce and ready at the same revision is not swallowed',async()=>{
+ const f=await fixture();let refreshes=0,discoveries=0
+ const refresh=f.host.refreshMemory.bind(f.host)
+ f.host.refreshMemory=async()=>{refreshes++;await refresh()}
+ f.host.discover=()=>{discoveries++;return Promise.resolve()}
+ try{
+  await f.host.admit(proposal(),await f.host.discoverySnapshot());const id=f.host.snapshot().feed[0]!.id
+  f.entries.delete('plan')
+  await Promise.all(Array.from({length:200},()=>f.host.sourceChanged({revision:1,phase:'invalidated'})))
+  assert.ok(refreshes<=2);assert.equal(discoveries,0);assert.equal(await f.host.canDeliver(id),false)
+  await Promise.all(Array.from({length:200},()=>f.host.sourceChanged({revision:1,phase:'ready'})))
+  assert.equal(discoveries,1)
+  await f.host.sourceChanged({revision:1,phase:'ready'});assert.equal(discoveries,1)
+  await f.host.sourceChanged({revision:3,phase:'ready'});assert.equal(discoveries,2)
+  await f.host.sourceChanged({revision:2,phase:'ready'});assert.equal(discoveries,3,'an older batch completing later still triggers discovery')
+ }finally{await f.close()}
+})
+test('failed batch refresh remains retryable and arrivals during refresh are drained',async()=>{
+ const f=await fixture();const refresh=f.host.refreshMemory.bind(f.host);let fail=true,discoveries=0
+ f.host.refreshMemory=async()=>{if(fail){fail=false;throw Error('temporary')}await refresh()}
+ f.host.discover=()=>{discoveries++;return Promise.resolve()}
+ try{
+  await assert.rejects(f.host.sourceChanged({revision:1,phase:'invalidated'}),/temporary/)
+  await f.host.sourceChanged({revision:1,phase:'invalidated'})
+  await Promise.all([f.host.sourceChanged({revision:2,phase:'invalidated'}),f.host.sourceChanged({revision:2,phase:'ready'}),f.host.sourceChanged({revision:3,phase:'ready'})])
+  assert.equal(discoveries,1)
+ }finally{await f.close()}
+})
 async function fixture() { const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-host-')); const entries = new Map([['plan', entry()]]); const memory = { get: (id: string) => Promise.resolve(entries.get(id) ?? null), list: () => Promise.resolve({ entries: [...entries.values()], cursor: null }) } as unknown as PersonalMemoryResource; const make = () => new PersonalAgentHost({ path: join(dir, 'feed.json'), userScope: 'local', memory: () => memory, pool: new SuggestionPool(), now: () => now, evidence: ref => ref.startsWith('task:') ? { subject_key: 'task:demo', source: { type: 'task', ref }, task_ref: { work_id: 'demo' } } : ref.startsWith('conversation:') ? {subject_key:ref,source:{type:'conversation',ref}} : null }); const host = make(); await host.open(); return { dir, entries, host, make, close: async () => { await host.close(); await rm(dir, { recursive: true, force: true }); } }; }
 test('ten positive deterministic admission cases with stable evidence; not live model quality', async () => { const f = await fixture(); try {
     const cases=JSON.parse(readFileSync(new URL('../../../fixtures/personal-agent/v1/discovery-cases.json',import.meta.url),'utf8')) as {positive:{id:string;content:string;summary:string}[]};

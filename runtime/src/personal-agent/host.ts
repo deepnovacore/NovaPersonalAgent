@@ -1,3 +1,4 @@
+import type {SourceChange} from '../memory-substrate/source-state.js'
 import type {WakeReason} from '../core/slots.js';
 import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
 import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool, type ConversationRuntimeFactory} from './conversations.js';
@@ -151,6 +152,9 @@ export class PersonalAgentHost {
     #nextDiscovery=0;
     #opened = false;
     #sourceSignature = '';
+    #sourcePending={invalidated:0,ready:new Set<number>(),legacy:false};
+    #sourceSeen={invalidated:0,ready:new Set<number>()};
+    #sourceDrain:Promise<void>|null=null;
     #projectionRevision = 0;
     #memoryRefresh = 0;
     #overviewKey = '';
@@ -383,7 +387,27 @@ export class PersonalAgentHost {
             if (item.suggestion_id)
                 this.options.pool.withdraw(item.suggestion_id);
         } await this.#commit(next); }); }
-    async sourceChanged(): Promise<void> { await this.refreshMemory(); await this.revalidate(); await this.#serial(() => this.#commit(structuredClone(this.#state))); const signature=hash((this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref).sort());if(signature!==this.#sourceSignature){this.#sourceSignature=signature;await this.discover();} }
+    sourceChanged(change?:SourceChange):Promise<void>{
+        if(change){const q=z.object({revision:z.number().int().positive(),phase:z.enum(['invalidated','ready'])}).strict().parse(change);if(q.phase==='invalidated')this.#sourcePending.invalidated=Math.max(this.#sourcePending.invalidated,q.revision);else if(!this.#sourceSeen.ready.has(q.revision))this.#sourcePending.ready.add(q.revision)}else this.#sourcePending.legacy=true;
+        if(this.#sourceDrain)return this.#sourceDrain;
+        const work=Promise.resolve().then(async()=>{
+            while(this.#sourcePending.legacy||this.#sourcePending.invalidated>this.#sourceSeen.invalidated||this.#sourcePending.ready.size){
+                const next={...this.#sourcePending,ready:[...this.#sourcePending.ready]};this.#sourcePending.legacy=false;
+                try{
+                    await this.refreshMemory();await this.revalidate();await this.#serial(()=>this.#commit(structuredClone(this.#state)));
+                    if(next.legacy||next.ready.length){
+                        const signature=hash({refs:(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref).sort(),revision:next.ready});
+                        if(signature!==this.#sourceSignature){await this.discover();this.#sourceSignature=signature;}
+                    }
+                    this.#sourceSeen.invalidated=Math.max(this.#sourceSeen.invalidated,next.invalidated);
+                    for(const revision of next.ready){this.#sourceSeen.ready.add(revision);this.#sourcePending.ready.delete(revision);}
+                    // ponytail: retain 2048 duplicate receipts in memory; durable acknowledgements cover older delivery.
+                    while(this.#sourceSeen.ready.size>2048)this.#sourceSeen.ready.delete(this.#sourceSeen.ready.values().next().value!);
+                }catch(error){this.#sourcePending.legacy ||= next.legacy;throw error;}
+            }
+        }).finally(()=>{this.#sourceDrain=null;});
+        this.#sourceDrain=work;return work;
+    }
     async taskResult(workId: string, title: string): Promise<void> { await this.#serial(async () => { const next = structuredClone(this.#state); const owner=next.conversations.items.find(c=>c.id===next.conversations.work_owners[workId]);let item = next.feed.find(f => f.task_ref?.work_id === workId)??next.feed.find(f=>owner?.feed_ids.includes(f.id)&&f.task_ref===null); if (!item) {
         const now = this.#now().toISOString();
         item = { id: randomUUID(), kind: 'task_result', title: '', why_now: '任务已有结果', evidence_refs: [], memory_refs: [], source: { type: 'task', ref: workId }, task_ref: { work_id: workId }, suggestion_id: null, subject_key: 'task:' + workId, priority: 40, created_at: now, updated_at: now, expires_at: null, user_state: 'new', snooze_until: null, lifecycle: 'resolved', delivery: { presented_at: null, notified_at: null, spoken_at: null } };

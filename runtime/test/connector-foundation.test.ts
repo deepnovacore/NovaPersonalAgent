@@ -19,6 +19,39 @@ test('source identity separates accounts and deletion generations within referen
  assert.throws(()=>connectorSourceId('account',Number.MAX_SAFE_INTEGER+1,'x'))
 })
 
+test('paused and outdated-scope sources cannot starve extraction admission',()=>{
+ const db=new DatabaseSync(':memory:');initializeMemory(db)
+ const run=(op:MemoryOperation,input:unknown)=>memoryOperation(db,op,input)
+ try{
+  for(const [index,name] of ['paused','outdated','active'].entries()){
+   run('source_connection',{action:'create',id:name,namespace:name})
+   const c=run('source_connection',{action:'fence',id:name,state:'connected',expected_epoch:0}) as SourceConnection
+   const source_id=connectorSourceId(name,0,'object'),id=String(index)
+   run('source_apply_page',{fence:c.fence,batch_id:'1',page_id:'page',changes:[{object_key:'object',source_id,semantic_hash:id,metadata:{},status:'current',evidence:[EvidenceRecordSchema.parse({id,source_id,source_kind:'mail',locator:id,observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),raw_text:id,hash:id,trust:'untrusted_external'})]}],pending_ids:[],continuation:null,checkpoint:null,complete:true})
+   run('source_grant',{source_id,expected_revision:0,grant:{revision:1,scope_revision:name==='outdated'?1:0,extraction_provider:'fixture',embedding_provider:null}})
+   if(name==='paused')run('source_connection',{action:'fence',id:name,state:'paused',expected_epoch:c.fence.epoch})
+  }
+  assert.deepEqual((run('pending_evidence',{source_prefix:'connector:',provider:'fixture',limit:1}) as {id:string}[]).map(e=>e.id),['2'])
+ }finally{db.close()}
+})
+
+test('undelivered source phases survive later batches and paginate beyond 200 receipts',()=>{
+ const db=new DatabaseSync(':memory:');initializeMemory(db)
+ const run=(op:MemoryOperation,input:unknown)=>memoryOperation(db,op,input)
+ try{
+  run('source_connection',{action:'create',id:'c',namespace:'n'})
+  const c=run('source_connection',{action:'fence',id:'c',state:'connected',expected_epoch:0}) as SourceConnection
+  for(let n=1;n<=202;n++)run('source_apply_page',{fence:c.fence,batch_id:String(n),page_id:'p',changes:[],pending_ids:[],continuation:null,checkpoint:null,complete:true})
+  const first=run('source_events',{prefix:'c',provider:'fixture'}) as {events:{revision:number;phase:string}[];next:number|null}
+  assert.equal(first.events[0]?.revision,1);assert.equal(first.events.length,200);assert.equal(first.next,200)
+  const next=run('source_events',{prefix:'c',provider:'fixture',after:first.next}) as typeof first
+  assert.deepEqual(next.events.map(e=>e.revision),[201,202]);assert.equal(next.next,null)
+  run('source_events',{prefix:'c',provider:'fixture',ack:{revision:1,phase:'invalidated'}})
+  const ready=run('source_events',{prefix:'c',provider:'fixture'}) as typeof first
+  assert.deepEqual(ready.events[0],{revision:1,phase:'ready'})
+ }finally{db.close()}
+})
+
 test('v3 migration preserves evidence and suppression and does not reset source clock',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-source-migration-'));const path=join(root,'memory.sqlite')
  let client=new WorkspaceGraphStoreClient(path)
@@ -66,6 +99,7 @@ test('object activation withdraws derived memory, reuses A, and ignores metadata
   run('source_grant',{source_id:source,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:'fixture',embedding_provider:null}})
   const ticket=run('extraction_ticket',{evidence_id:'a',provider:'fixture'})
   assert.ok(ticket)
+  assert.equal(first.activations[0]!.revision,1)
   const candidate=CandidateSchema.parse({entry_id:'promise',kind:'fact',origin:'inferred',written_by:'merge',evidence_refs:['a'],content:{text:'promise from A'},recorded_at:new Date().toISOString()})
   run('merge',candidate)
   const independent=raw('independent');independent.source_id='user-source';independent.source_kind='user_correction';independent.trust='trusted_user'

@@ -8,7 +8,7 @@ type Run=(operation:MemoryOperation,input:unknown)=>unknown
 const changeSchema=z.object({object_key:sourceIdSchema,source_id:sourceIdSchema,semantic_hash:sourceIdSchema,metadata:z.record(z.string(),z.json()),evidence:z.array(z.lazy(()=>EvidenceRecordSchema)).max(256),status:z.enum(['current','coverage_removed','provider_deleted'])}).strict()
 export const applyPageSchema=z.object({fence:fenceSchema,batch_id:z.string().regex(/^[1-9][0-9]{0,14}$/u),page_id:sourceIdSchema,changes:z.array(changeSchema).max(200),pending_ids:z.array(sourceIdSchema).max(200),continuation:z.json(),checkpoint:z.json(),complete:z.boolean()}).strict()
 export type ApplyPage=z.infer<typeof applyPageSchema>
-export type PageResult={revision:number;applied:boolean;activations:Activation[]}
+export interface PageResult {revision:number;applied:boolean;activations:Activation[]}
 export function sourceRevision(db:GraphDatabase):number{return Number(db.prepare('SELECT revision FROM source_clock WHERE id=1').get()!.revision)}
 export function advanceSourceRevision(db:GraphDatabase):number{db.exec('UPDATE source_clock SET revision=revision+1 WHERE id=1');return sourceRevision(db)}
 function save(db:GraphDatabase,c:SourceConnection):void{db.prepare('INSERT INTO source_connections VALUES(?,?) ON CONFLICT(id) DO UPDATE SET payload_json=excluded.payload_json').run(c.fence.connection_id,canonicalJson(connectionSchema.parse(c)))}
@@ -26,6 +26,28 @@ function withdrawObjects(db:GraphDatabase,c:SourceConnection,run:Run,generation=
 }
 export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,run:Run):unknown{
  const v=z.record(z.string(),z.unknown()).parse(input)
+ if(operation==='source_events'){
+  const q=z.object({prefix:sourceIdSchema,provider:sourceIdSchema,after:revisionSchema.optional(),ack:z.object({revision:revisionSchema,phase:z.enum(['invalidated','ready'])}).strict().optional()}).strict().parse(v)
+  const rows=q.ack?db.prepare("SELECT connection_id,batch_id,page_id,result_json FROM source_pages WHERE substr(connection_id,1,length(?))=? AND json_extract(result_json,'$.revision')=?").all(q.prefix,q.prefix,q.ack.revision):db.prepare("SELECT connection_id,batch_id,page_id,result_json FROM source_pages WHERE substr(connection_id,1,length(?))=? AND coalesce(json_extract(result_json,'$.ready'),0)=0 AND json_extract(result_json,'$.revision')>? ORDER BY json_extract(result_json,'$.revision') LIMIT 200").all(q.prefix,q.prefix,q.after??0)
+  const events:{revision:number;phase:'invalidated'|'ready'}[]=[]
+  for(const row of rows){
+   const r=JSON.parse(String(row.result_json)) as PageResult&{fence:ApplyPage['fence'];invalidated?:boolean;ready?:boolean}
+   if(q.ack){if(r.revision===q.ack.revision){r[q.ack.phase]=true;db.prepare('UPDATE source_pages SET result_json=? WHERE connection_id=? AND batch_id=? AND page_id=?').run(canonicalJson(r),String(row.connection_id),String(row.batch_id),String(row.page_id))}continue}
+   if(!r.invalidated){events.push({revision:r.revision,phase:'invalidated'});continue}
+   if(r.ready)continue
+   let ready=true
+   for(const activation of r.activations){
+    const objectRow=db.prepare('SELECT payload_json FROM source_objects WHERE connection_id=? AND generation=? AND object_key=?').get(String(row.connection_id),r.fence.generation,activation.object_key)
+    if(!objectRow)continue
+    const object=sourceObjectSchema.parse(JSON.parse(String(objectRow.payload_json)))
+    if(object.activation_revision!==activation.revision)continue
+    for(const id of object.current_evidence_ids)if(!run('processing_evidence',{id,purpose:'extraction',provider:q.provider})||sourceOperation(db,'extraction_ticket',{evidence_id:id,provider:q.provider},run)!==null){ready=false;break}
+    if(!ready)break
+   }
+   if(ready)events.push({revision:r.revision,phase:'ready'})
+  }
+  return {events:events.sort((a,b)=>a.revision-b.revision),next:rows.length===200?(JSON.parse(String(rows.at(-1)!.result_json)) as PageResult).revision:null}
+ }
  if(operation==='extraction_ticket'){
   const q=z.object({evidence_id:z.string().min(1).max(512),provider:sourceIdSchema,force:z.boolean().optional()}).strict().parse(v)
   const raw=run('processing_evidence',{id:q.evidence_id,purpose:'extraction',provider:q.provider});if(!raw)return null
@@ -57,6 +79,7 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
   if(q.action==='get')return old
   if(!q.grant||q.expected_revision!==(old?.revision??0)||q.grant.revision<=q.expected_revision)throw Error('STORE_STALE_REVISION')
   db.prepare('INSERT INTO source_grants VALUES(?,?) ON CONFLICT(source_id) DO UPDATE SET payload_json=excluded.payload_json').run(q.source_id,canonicalJson(q.grant))
+  db.prepare("DELETE FROM memory_extractions WHERE attempt_id<>'knowledge-index' AND evidence_id IN (SELECT id FROM memory_evidence WHERE source_id=?)").run(q.source_id)
   db.prepare("DELETE FROM memory_vectors WHERE entry_id IN (SELECT r.entry_id FROM memory_revisions r,json_each(r.payload_json,'$.evidence_refs') refs JOIN memory_evidence e ON e.id=refs.value WHERE e.source_id=?)").run(q.source_id)
   return q.grant
  }
@@ -110,7 +133,7 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
  if(operation==='source_apply_page'){
   if(Buffer.byteLength(JSON.stringify(v))>5*1024*1024)throw Error('STORE_INVALID_OPERATION')
   const q=applyPageSchema.parse(v),c=readConnection(db,q.fence.connection_id)
-  if(!c||c.state!=='connected'||canonicalJson(c.fence)!==canonicalJson(q.fence))throw Error('STORE_STALE_REVISION')
+  if(c?.state!=='connected'||canonicalJson(c.fence)!==canonicalJson(q.fence))throw Error('STORE_STALE_REVISION')
   const hash=sha256(canonicalJson(q))
   const receipt=db.prepare('SELECT payload_hash,result_json FROM source_pages WHERE connection_id=? AND batch_id=? AND page_id=?').get(q.fence.connection_id,q.batch_id,q.page_id)
   if(receipt){if(receipt.payload_hash!==hash)throw Error('STORE_IDEMPOTENCY_CONFLICT');return {...JSON.parse(String(receipt.result_json)) as PageResult,applied:false}}
@@ -126,7 +149,7 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
    if(change.source_id!==connectorSourceId(c.namespace,c.fence.generation,change.object_key)||change.evidence.some(e=>e.source_id!==change.source_id)||((change.status==='current')!==(change.evidence.length>0)))throw Error('STORE_INVALID_OPERATION')
    const oldRow=db.prepare('SELECT payload_json FROM source_objects WHERE connection_id=? AND generation=? AND object_key=?').get(q.fence.connection_id,q.fence.generation,change.object_key)
    const old=oldRow?sourceObjectSchema.parse(JSON.parse(String(oldRow.payload_json))):null
-   const changed=!old||old.semantic_hash!==change.semantic_hash||old.status!==change.status
+   const changed=old?.semantic_hash!==change.semantic_hash||old.status!==change.status
    // Metadata-only updates must not replace the content-addressed current set.
    if(!changed&&canonicalJson(old.current_evidence_ids)!==canonicalJson(change.evidence.map(e=>e.id)))throw Error('STORE_IDEMPOTENCY_CONFLICT')
    for(const evidence of change.evidence)run('append_evidence',evidence)
@@ -142,8 +165,8 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
   if(q.complete){c.checkpoint=q.checkpoint;c.completed_batch=c.batch}
   save(db,c)
   const result:PageResult={revision:advanceSourceRevision(db),applied:true,activations}
-  db.prepare('INSERT INTO source_pages VALUES(?,?,?,?,?)').run(q.fence.connection_id,q.batch_id,q.page_id,hash,canonicalJson(result))
-  if(q.complete)db.prepare('DELETE FROM source_pages WHERE connection_id=? AND CAST(batch_id AS INTEGER)<?').run(q.fence.connection_id,c.completed_batch-1)
+  db.prepare('INSERT INTO source_pages VALUES(?,?,?,?,?)').run(q.fence.connection_id,q.batch_id,q.page_id,hash,canonicalJson({...result,fence:q.fence}))
+  if(q.complete)db.prepare("DELETE FROM source_pages WHERE connection_id=? AND CAST(batch_id AS INTEGER)<? AND json_extract(result_json,'$.ready')=1").run(q.fence.connection_id,c.completed_batch-1)
   return result
  }
  throw Error('STORE_INVALID_OPERATION')

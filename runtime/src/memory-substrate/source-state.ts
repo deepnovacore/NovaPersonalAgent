@@ -13,7 +13,7 @@ export function readProcessingGrant(db:GraphDatabase,sourceId:string):Processing
  return row?processingGrantSchema.parse(JSON.parse(String(row.payload_json))):null
 }
 export function allowsProcessing(db:GraphDatabase,sourceId:string,purpose:'extraction'|'embedding',provider:string):boolean{
- const grant=readProcessingGrant(db,sourceId);if(!grant||grant[purpose==='extraction'?'extraction_provider':'embedding_provider']!==provider)return false
+ const grant=readProcessingGrant(db,sourceId);if(grant?.[purpose==='extraction'?'extraction_provider':'embedding_provider']!==provider)return false
  const object=sourceObjectFor(db,sourceId)
  if(!object)return true
  const c=readConnection(db,object.connection_id)
@@ -23,7 +23,7 @@ export const activationSchema=z.object({object_key:sourceIdSchema,revision:revis
 export type Activation=z.infer<typeof activationSchema>
 export const extractionTicketSchema=z.object({evidence_id:z.string().min(1).max(512),activation:activationSchema.nullable(),consent_revision:revisionSchema,extraction_provider:sourceIdSchema,fence:fenceSchema.nullable()}).strict()
 export type ExtractionTicket=z.infer<typeof extractionTicketSchema>
-export type SourceChange={revision:number;phase:'invalidated'|'ready'}
+export interface SourceChange {revision:number;phase:'invalidated'|'ready'}
 const boundedJson=z.json().refine(v=>Buffer.byteLength(JSON.stringify(v))<=65536,'source state too large')
 export const connectionSchema=z.object({fence:fenceSchema,namespace:sourceIdSchema,state:z.enum(['connected','paused','disconnected']),scope:boundedJson,checkpoint:boundedJson,continuation:boundedJson,pending_ids:z.array(sourceIdSchema).max(200),batch:revisionSchema,completed_batch:revisionSchema,deleting:z.array(revisionSchema).max(100)}).strict()
 export type SourceConnection=z.infer<typeof connectionSchema>
@@ -45,7 +45,8 @@ export function isCurrentEvidence(db:GraphDatabase,evidenceId:string,sourceId:st
 export const sha256=(text:string):string=>createHash('sha256').update(text).digest('hex')
 export function connectorSourceId(namespace:string,generation:number,objectKey:string):string{
  sourceIdSchema.parse(namespace);revisionSchema.parse(generation);z.string().min(1).max(16384).parse(objectKey)
- return `connector:${sha256(namespace)}:${generation}:${sha256(objectKey)}`
+ const personal=/^personal:[a-f0-9]{64}:/u.exec(namespace)?.[0]??''
+ return `${personal}connector:${sha256(namespace)}:${generation}:${sha256(objectKey)}`
 }
 
 /** Called by the graph schema migration; also supports isolated in-memory memory tests. */

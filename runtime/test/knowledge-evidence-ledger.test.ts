@@ -26,6 +26,8 @@ test('production index refuses reads and mutations until canonical evidence bind
 function ledger() {
   const rows = new Map<string, Original>(), deleted = new Set<string>(), consent: boolean[] = [];
   const value: KnowledgeEvidenceLedger = {
+    processingStamp: ids => Promise.resolve(ids.every(id=>rows.has(id))&&consent.at(-1)===true?'fixture-grant':null),
+    canProcess: id => Promise.resolve(rows.has(id) && consent.at(-1) === true),
     record: input => {
       if (deleted.has(input.sourceId)) return Promise.reject(new Error('source_deleted'));
       consent.push(input.embeddingConsent);
@@ -71,6 +73,23 @@ test('existing document vectors migrate offline to canonical evidence and cannot
     assert.deepEqual(await service.recall('lamp', 1), []);
   } finally { await service.close(); await rm(directory, {recursive: true, force: true}); }
 });
+
+test('regrant cannot commit knowledge vectors from a revoked embedding request',async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'knowledge-grant-fence-'))
+ const file=join(directory,'manual.md');await writeFile(file,'Private document')
+ const authority=ledger();let revision='grant-1',release!:()=>void,entered!:()=>void
+ const gate=new Promise<void>(r=>release=r),started=new Promise<void>(r=>entered=r)
+ const store=new KnowledgeStoreClient({path:join(directory,'db','knowledge.sqlite')})
+ const service=new KnowledgeService({store,embedding:{id:'fixture',dims:2,embed:async texts=>{entered();await gate;return texts.map(()=>new Float32Array([1,0]))}}})
+ try{
+  await service.open();await service.bindEvidenceLedger({...authority.value,processingStamp:()=>Promise.resolve(revision)})
+  const ingest=service.handle('knowledge.ingest',{kind:'file',locator:file,consent:true});await started
+  revision='grant-3';release();await ingest
+  const source=(await service.listSources())[0]!
+  assert.equal((await store.recall('unmatched-query',[1,0],'fixture',5)).length,0,'old vectors must not survive revoke and regrant')
+  assert.equal((await store.listChunks(source.id)).length,1,'local evidence remains')
+ }finally{release?.();await service.close();await rm(directory,{recursive:true,force:true})}
+})
 
 test('new indexing admits A before embedding; deletion fences in-flight reindex and clears both stores', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-ledger-write-'));

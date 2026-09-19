@@ -8,10 +8,12 @@ import {join} from 'node:path'
 import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
+import {connectorSourceId,type SourceConnection,type SourceChange} from '../src/memory-substrate/source-state.js'
+import {EvidenceRecordSchema} from '../src/memory-substrate/store.js'
 
 test('external ingestion without processing consent stays local even with conversation consent',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-no-processing-'));let calls=0
- const gateway:ModelGateway={async *stream(){},complete(){calls++;return Promise.resolve({text:'{"entries":[]}'})}}
+ const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){calls++;return Promise.resolve({text:'{"entries":[]}'})}}
  const resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),userId:'test',gateway,model:'fixture',inputConsent:true})
  try{
   await resource.open();await resource.ingestEvidence({sourceId:'old-im',locator:'one',text:'周五交报告',observedAt:new Date().toISOString(),kind:'im',embeddingConsent:true})
@@ -21,7 +23,7 @@ test('external ingestion without processing consent stays local even with conver
 
 test('revocation survives late admission and provider changes require fresh processing consent',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-revoke-processing-'));const path=join(root,'memory.sqlite');let calls=0
- const gateway:ModelGateway={async *stream(){},complete(){calls++;return Promise.resolve({text:'{"entries":[]}'})}}
+ const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){calls++;return Promise.resolve({text:'{"entries":[]}'})}}
  let resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(path),userId:'test',gateway,model:'fixture',extractionFingerprint:'provider-a'})
  try{
   await resource.open();const grant=resource.processingGrant(true)
@@ -37,7 +39,7 @@ test('revocation survives late admission and provider changes require fresh proc
 test('model reply after consent revocation never commits partial candidates or a completion',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-late-processing-'));let begin!:()=>void,finish!:(r:{text:string})=>void
  const started=new Promise<void>(r=>{begin=r}),response=new Promise<{text:string}>(r=>{finish=r})
- const gateway:ModelGateway={async *stream(){},complete(){begin();return response}}
+ const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){begin();return response}}
  const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'test',gateway,model:'fixture'})
  try{
   await resource.open();await resource.ingestEvidence({sourceId:'im',locator:'one',text:'给你报告',observedAt:new Date().toISOString(),kind:'im',processingConsent:resource.processingGrant(true)})
@@ -46,6 +48,29 @@ test('model reply after consent revocation never commits partial candidates or a
   await resource.flush();assert.equal((await resource.list()).entries.length,0)
   const pending=await client.memory('pending_evidence',{source_prefix:resource.prefix}) as unknown[];assert.equal(pending.length,1)
  }finally{finish?.({text:'{"entries":[]}'});await resource.close();await rm(root,{recursive:true,force:true})}
+})
+
+test('two hundred connector objects emit one invalidation and one ready notification',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-batch-events-'));let calls=0,begin!:()=>void,release!:()=>void
+ const started=new Promise<void>(r=>{begin=r}),gate=new Promise<void>(r=>{release=r})
+ const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },async complete(){calls++;begin();await gate;return {text:'{"entries":[]}'}}}
+ const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'batch',gateway,model:'fixture'})
+ const events:SourceChange[]=[]
+ try{
+  await resource.open();resource.setOnSourceChange(e=>{events.push(e);return Promise.resolve()})
+  const id=resource.prefix+'connection';await client.memory('source_connection',{action:'create',id,namespace:id})
+  const c=await client.memory('source_connection',{action:'fence',id,state:'connected',expected_epoch:0}) as SourceConnection
+  const changes=[]
+  for(let n=0;n<200;n++){
+   const key='object-'+n,source_id=connectorSourceId(id,0,key)
+   await resource.setProcessingConsent(source_id,resource.processingGrant(true))
+   changes.push({object_key:key,source_id,semantic_hash:key,metadata:{},status:'current' as const,evidence:[EvidenceRecordSchema.parse({id:resource.prefix+'e:'+key,source_id,source_kind:'mail',locator:key,observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),raw_text:key,hash:key,trust:'untrusted_external'})]})
+  }
+  await resource.applySourcePage({fence:c.fence,batch_id:'1',page_id:'1',changes,pending_ids:[],continuation:null,checkpoint:null,complete:true})
+  await started;assert.deepEqual(events.map(e=>e.phase),['invalidated'])
+  release();await resource.flush();assert.equal(calls,200)
+  assert.deepEqual(events.map(e=>e.phase),['invalidated','ready'])
+ }finally{release?.();await resource.close();await rm(root,{recursive:true,force:true})}
 })
 
 test('substrate resource keeps identity, correction, restart and source deletion on worker',async()=>{

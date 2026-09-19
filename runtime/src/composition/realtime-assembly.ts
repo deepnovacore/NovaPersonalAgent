@@ -265,6 +265,7 @@ export class RealtimeAssembly {
   readonly #knowledgeLedger:KnowledgeEvidenceLedger={
     processingGrant:(...args)=>this.#personalMemory?.processingGrant?.(...args),
     canProcess:(id,purpose)=>this.#personalMemory?.canProcessEvidence?.(id,purpose)??Promise.resolve(false),
+    processingStamp:ids=>this.#personalMemory?.processingStamp?.(ids)??Promise.resolve(null),
     record:input=>this.#personalMemory?.recordEvidence?.(input)??Promise.reject(Error('memory_unavailable')),
     read:id=>this.#personalMemory?.readEvidence?.(id)??Promise.resolve(null),
     remove:id=>this.#personalMemory?.forgetSource?.(id)??Promise.reject(Error('memory_unavailable')),
@@ -349,7 +350,7 @@ export class RealtimeAssembly {
       if(event.kind==='observation'||event.kind==='handoff')void this.personalAgent.discover().catch(()=>{ /* optional host projection failure */ })
     })
     this.#personalMemory = input.personalMemory
-    if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) })
+    if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) {this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) });this.#personalMemory.setOnSourceChange(change=>this.personalAgent.sourceChanged(change))}
     this.#createPersonalMemory = input.createPersonalMemory
     this.#personalMemoryTurnTracker = input.personalMemoryTurnTracker
     this.#unsubscribeProjectView = lifecycleProjectAdapter === undefined
@@ -703,7 +704,7 @@ export class RealtimeAssembly {
     try {
       if (this.#personalMemory === undefined && this.#createPersonalMemory !== undefined) {
         this.#personalMemory = this.#createPersonalMemory()
-        if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) })
+        if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) {this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) });this.#personalMemory.setOnSourceChange(change=>this.personalAgent.sourceChanged(change))}
       }
       if (this.#personalMemory === undefined) return
       const opened = await this.#cleanupWithinGrace(
@@ -1296,7 +1297,7 @@ export function composeRealtime(
     let opened=false
     return {open:async()=>{await memory.open();opened=true},close:async()=>{opened=false;await memory.close()},
       recall:(_query,queryOptions)=>opened?Promise.resolve({source:'personal',state:'empty',scope:queryOptions?.scope??'any',hits:[],degraded:false}):Promise.reject(Error('memory_unavailable')),
-      canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),
+      processingStamp:ids=>memory.processingStamp(ids),canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),
     } satisfies PersonalMemoryResource
   } : options.createPersonalMemory
   return buildRealtimeAssembly({

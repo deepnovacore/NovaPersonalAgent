@@ -13,6 +13,7 @@ import type {PersonalMemoryResource} from '../memory/personal-memory.js'
 export interface KnowledgeEvidenceLedger {
   processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant | undefined
   canProcess?: (id:string,purpose:'extraction'|'embedding')=>Promise<boolean>
+  processingStamp?: (ids:string[])=>Promise<string|null>
   record(input: {sourceId: string; locator: string; text: string; observedAt: string; kind: 'file'; embeddingConsent: boolean;processingConsent?:ProcessingGrant}): Promise<{evidence_id: string}>
   read: NonNullable<PersonalMemoryResource['readEvidence']>
   remove(sourceId: string): Promise<void>
@@ -209,11 +210,12 @@ export class KnowledgeService {
         evidenceIds.push(evidence?.evidence_id)
       }
       signal.throwIfAborted()
-      const allowed=async()=>{if(this.#ledger)return evidenceIds.length>0&&(await Promise.all(evidenceIds.map(id=>id?this.#ledger?.canProcess?.(id,'embedding')??false:false))).every(Boolean);return active.processingAuthorized===true||processingConsent?.embedding_provider===this.#embedding.id}
-      const vectors = await allowed()?await this.#embedding.embed(chunks.map(chunk => chunk.text), signal):null
+      const allowed=async()=>{if(this.#ledger)return evidenceIds.length>0&&(await Promise.all(evidenceIds.map(async id=>id?await (this.#ledger?.canProcess?.(id,'embedding')??Promise.resolve(false)):false))).every(Boolean);return active.processingAuthorized===true||processingConsent?.embedding_provider===this.#embedding.id}
+      const stamp=this.#ledger?await this.#ledger.processingStamp?.(evidenceIds.filter((id):id is string=>id!==undefined))??null:'standalone'
+      const vectors = stamp!==null&&await allowed()?await this.#embedding.embed(chunks.map(chunk => chunk.text), signal):null
       signal.throwIfAborted()
       if (vectors!==null&&vectors.length !== chunks.length) throw failure('embedding_invalid_result')
-      const keepVectors=vectors!==null&&await allowed()
+      const keepVectors=vectors!==null&&await allowed()&&(!this.#ledger||stamp===await this.#ledger.processingStamp?.(evidenceIds.filter((id):id is string=>id!==undefined)))
       const now = Date.now()
       const title = [...document.title].slice(0, 256).join('')
       // No await between this fence and enqueueing the atomic replacement. Remove enqueues after it.
