@@ -621,6 +621,7 @@ test('the compact theme preserves motion contrast and forced-color accessibility
 })
 
 test('pipeline selection shows selectable stages and relative cost guidance', () => {
+  assert.doesNotMatch(html, /KV\s*Cache|缓存命中率/i)
   assert.doesNotMatch(html, /id="cascadedEndpointingProvider"/)
   assert.match(html, /相对集成式管线[\s\S]*<strong class="cost-saving">70%<\/strong>/)
   assert.match(html, /<input type="radio" name="pipelineMode" value="integrated">/)
