@@ -37,7 +37,7 @@ if (values.realtime) {
     await delay(150)
     assert.equal(runtime.status, 'ready', 'detector must remain healthy')
     assert.equal(hits, Number(values['expect-hits']))
-    console.log(JSON.stringify({engine: 'sherpa-onnx', keyword: '你好星核', realtime: true,
+    console.log(JSON.stringify({engine: 'sherpa-onnx', keywords: ['你好星核', 'Hi Nova'], realtime: true,
       hits, offered, accepted, droppedFrames: runtime.droppedFrames, pcm: values.pcm, appRoot}))
   } finally { runtime.stop() }
   return
@@ -65,7 +65,7 @@ try {
     await consumed
   }
   assert.equal(hits, Number(values['expect-hits']))
-  console.log(JSON.stringify({engine: 'sherpa-onnx', keyword: '你好星核', hits, pcm: values.pcm, appRoot}))
+  console.log(JSON.stringify({engine: 'sherpa-onnx', keywords: ['你好星核', 'Hi Nova'], hits, pcm: values.pcm, appRoot}))
 } finally {
   clearTimeout(timeout)
   await worker.terminate()

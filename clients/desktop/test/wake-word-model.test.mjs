@@ -27,8 +27,14 @@ test('verified keyword cache works offline and stale keywords cannot be reused',
     validateKeywords(dir)
     const offline = {fetchImpl: async () => { throw new Error('offline') }}
     assert.equal(await ensureWakeWordModel(root, offline), dir)
+    await writeFile(join(dir, 'keywords.txt'), 'n ǐ h ǎo x īng h é @你好星核\n')
+    assert.equal(await ensureWakeWordModel(root, offline), dir)
+    assert.equal(await readFile(join(dir, 'keywords.txt'), 'utf8'), WAKE_WORD_KEYWORDS)
+    assert.match(WAKE_WORD_KEYWORDS, /HH AY1 N OW1 V AH0 @HI_NOVA/)
     await writeFile(join(dir, 'tokens.txt'), 'wrong 0')
     assert.throws(() => validateKeywords(dir), /token/)
+    // An unusable cache must fall through to a re-download, not fail permanently.
+    await assert.rejects(ensureWakeWordModel(root, offline), /offline/)
     await writeFile(join(dir, 'keywords.txt'), '你好千问')
     await assert.rejects(ensureWakeWordModel(root, offline), /offline/)
   } finally { await rm(root, {recursive: true, force: true}) }
