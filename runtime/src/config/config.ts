@@ -5,6 +5,7 @@ import {supportsVision} from '../model/vision-capability.js'
 
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
+const promptLanguageSchema = z.enum(['zh-CN', 'en'])
 const integratedProviderNameSchema = z.enum(['qwen'])
 const cascadedEndpointingProviderNameSchema = z.enum(['auto'])
 const cascadedAsrProviderNameSchema = z.enum(['volcengine'])
@@ -35,6 +36,7 @@ export const settingsSchema = z.object({
   monitor_camera_device_id: z.string().max(256).refine(value => !/[\x00-\x1f]/u.test(value)).default(''),
   surrogate_model: z.string().default('qwen-plus'),
   compressor_model: z.string().default('qwen-flash'),
+  language: promptLanguageSchema.default('zh-CN'),
   pipeline_mode: pipelineModeSchema.default('integrated'),
   integrated_provider: integratedProviderNameSchema.default('qwen'),
   cascade_endpointing_provider: cascadedEndpointingProviderNameSchema.default('auto'),
@@ -238,6 +240,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     monitor_camera_device_id: optionalString(environment.NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID),
     surrogate_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_SURROGATE_MODEL),
     compressor_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_COMPRESSOR_MODEL),
+    language: parsePromptLanguageSetting(environment.NOVA_AUDIO_AGENT_LANGUAGE),
     pipeline_mode: pipelineMode,
     camera_module_enabled: optionalBoolean(
       environment.NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED,
@@ -627,6 +630,10 @@ function parseExecutors(raw: string | undefined, fallback: string): string[] {
 
 function parsePipelineMode(value: string | undefined): PipelineMode {
   return parseSelector(pipelineModeSchema, value, 'integrated', 'NOVA_AUDIO_AGENT_PIPELINE_MODE')
+}
+
+function parsePromptLanguageSetting(value: string | undefined): z.infer<typeof promptLanguageSchema> {
+  return parseSelector(promptLanguageSchema, value, 'zh-CN', 'NOVA_AUDIO_AGENT_LANGUAGE')
 }
 
 function parseIntegratedProvider(value: string | undefined): IntegratedProviderName {

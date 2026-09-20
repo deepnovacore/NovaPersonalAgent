@@ -1,3 +1,5 @@
+import {translateSystemPrompt, type PromptLanguage} from '../prompt-language.js'
+import {cascadedNarrationInstructions} from './llm.js'
 import {originalImageUrl} from './llm.js'
 import {randomUUID} from 'node:crypto'
 import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
@@ -8,7 +10,6 @@ import type { JsonValue } from '../../core/events.js'
 import {
   MAX_CASCADED_LLM_HISTORY_CODEPOINTS,
   MAX_CASCADED_LLM_HISTORY_ITEMS,
-  CASCADED_NARRATION_INSTRUCTIONS,
   type CascadedLlmEvent,
   type CascadedLlmFactory,
   type CascadedLlmInput,
@@ -66,14 +67,14 @@ class Session implements CascadedLlmSession {
     this.#idleTimeoutMs = options.idleTimeoutMs ?? 30_000; this.#closeTimeoutMs = options.closeTimeoutMs ?? 1_000
     if (!Number.isFinite(this.#idleTimeoutMs) || this.#idleTimeoutMs <= 0 || !Number.isFinite(this.#closeTimeoutMs) || this.#closeTimeoutMs <= 0) throw fail('configuration')
   }
-  async *stream(input: {readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
+  async *stream(input: {readonly language?: PromptLanguage; readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
     if (this.#closed) throw fail('closed'); if (input.signal.aborted) throw fail('aborted')
     const current = input.inputs.map(message), unresolved = this.#unresolved
     if (unresolved === null && input.inputs.some(item => item.kind === 'tool_result')) throw fail('protocol')
     if (unresolved !== null) this.#checkResults(input.inputs, unresolved)
     this.#trim(unresolved ?? [])
     const factOnly = input.inputs.some(item => item.kind === 'host_activation')
-    const systemContent = [factOnly ? CASCADED_NARRATION_INSTRUCTIONS : this.#instructions,
+    const systemContent = [factOnly ? cascadedNarrationInstructions(input.language) : translateSystemPrompt(this.#instructions, input.language),
       factOnly ? null : input.workspaceContext, input.responseAdaptation]
       .filter((item): item is string => item !== null && item !== undefined)
       .join('\n\n')

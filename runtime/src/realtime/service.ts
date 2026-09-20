@@ -1,3 +1,4 @@
+import type {PromptLanguage} from './prompt-language.js'
 export type { AgentControllerFactory,DelegateLike,DeliverySnapshot,ExecutorManifestLike,RealtimeServiceOptions,ServiceProvider,ServiceRuntime } from './service-ports.js'
 export { formatSeconds } from './service-state.js'
 import { CodingProgressNarrationState,type CodingProgressNarration } from './coding-progress-narration.js'
@@ -89,6 +90,8 @@ function sameAgentDescriptors(
 const SHUTDOWN_GRACE_MS = 250
 
 export class RealtimeService {
+  async setLanguage(language?: PromptLanguage): Promise<void> { await this.#provider.setLanguage?.(language) }
+
   playbackStarted(utteranceId: string, generationEpoch: number): boolean {return this.#host.playbackStarted(utteranceId, generationEpoch)}
 
   readonly #confirmation: ProjectConfirmationFlow

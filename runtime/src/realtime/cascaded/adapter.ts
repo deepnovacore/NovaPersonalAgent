@@ -1,3 +1,4 @@
+import type {PromptLanguage} from '../prompt-language.js'
 import {dispatchSourceContext} from '../history.js'
 import {cascadedResponseGuidance, validateOriginalImage} from './llm.js'
 import type {Frame} from '../../executors/watcher.js'
@@ -56,6 +57,7 @@ export const CASCADED_PREEMPTIVE_ALERT_POLICY = Object.freeze({
 })
 
 export interface CascadedRealtimeAdapterOptions {
+  readonly language?: PromptLanguage
   readonly endpointing: EndpointingPort
   readonly asr: AsrClient
   readonly llm: CascadedLlmSession
@@ -281,6 +283,8 @@ class BoundedEventQueue {
 
 export class CascadedRealtimeAdapter implements RealtimeProvider {
   readonly userResponseMode = 'requested' as const
+  readonly #defaultLanguage: PromptLanguage
+  #language: PromptLanguage
   readonly #endpointing: EndpointingPort
   readonly #asrClient: AsrClient
   readonly #ttsClient: TtsClient
@@ -301,7 +305,11 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
   #legacyLlmUsed = false
   #legacyLlmClosePromise: Promise<void> | null = null
 
+  async setLanguage(language: PromptLanguage = this.#defaultLanguage): Promise<void> { this.#language = language }
+
   constructor(options: CascadedRealtimeAdapterOptions) {
+    this.#defaultLanguage = options.language ?? 'zh-CN'
+    this.#language = this.#defaultLanguage
     this.#endpointing = options.endpointing
     this.#asrClient = options.asr
     this.#ttsClient = options.tts
@@ -965,6 +973,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     inputs: readonly CascadedLlmInput[],
     allowTools: boolean,
   ): Promise<void> {
+    const language = this.#language
     let llmResponseId: string | null = null
     let llmFailureCode: string | null = null
     let textSeen = false
@@ -1000,6 +1009,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       this.#record('cascaded.llm.requested', {epoch: owner.epoch, response_id: active.id})
       this.#warmStandbyTts(owner)
       for await (const event of owner.llm.stream({
+        language,
         inputs: visualInputs.map(item => structuredClone(item)),
         tools: allowTools ? owner.tools.map(tool => structuredClone(tool)) : [],
         workspaceContext: allowTools ? owner.workspaceContext?.item.content ?? null : null,
@@ -1007,7 +1017,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           allowTools ? [...owner.pending.values()].filter(pending => pending.item.speech_content !== undefined)
             .map(pending => pending.item.content).join('\n') : null,
           allowTools ? dispatchSourceContext(owner.responseAdaptation?.user_sources) : null,
-          cascadedResponseGuidance(allowTools),
+          cascadedResponseGuidance(allowTools, language),
         ].filter(Boolean).join('\n'),
         signal,
       })) {

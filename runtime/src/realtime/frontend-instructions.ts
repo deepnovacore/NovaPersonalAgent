@@ -1,3 +1,4 @@
+import {translateSystemPrompt, type PromptLanguage} from './prompt-language.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import type {ProjectConfirmationView} from '../projects/project-confirmation.js'
 import {activeExecutorContextData, type DelegateRecord} from './session-state.js'
@@ -132,7 +133,7 @@ export interface FrontendModuleSelection {
   readonly coding?: boolean
   readonly knowledge?: boolean
 }
-export function frontendInstructions(modules: FrontendModuleSelection = {}, executorApproval = false): string {
+export function frontendInstructions(modules: FrontendModuleSelection = {}, executorApproval = false, language: PromptLanguage = 'zh-CN'): string {
   return [
     NOVA_VOICE_IDENTITY,
     ...FRONTEND_INSTRUCTIONS_BEFORE_CODEX_APPROVAL,
@@ -152,7 +153,7 @@ export function frontendInstructions(modules: FrontendModuleSelection = {}, exec
       '检索片段未覆盖问题中的操作条件或限制时，先针对缺失条款继续检索；仍无证据就明确无法确认，不凭常识补全。保留原文的禁止、必须、尚未完成等事实边界，不把禁令弱化为建议，不把个案操作写成通用规定。'] : []),
     ...(modules.coding === false ? [] : ['用户追加或修改 coding 任务时，只澄清开始所必需而上下文无法确定的信息，随后调用 dispatch（executor=codex），instruction 保留该任务多轮的完整要求和最新纠正；尚未澄清不调用工具，明确后不能只口头答应。']),
     '回答提议原因或执行情况时只依据已有事实；未提供的触发请求、原因和历史明确说未知，不补出前情。',
-  ].join('\n')
+  ].map(line => translateSystemPrompt(line, language)).join('\n')
 }
 export const FRONTEND_INSTRUCTIONS = frontendInstructions()
 export const CODEX_APPROVAL_FRONTEND_INSTRUCTIONS = frontendInstructions({}, true)
