@@ -80,7 +80,7 @@
 | 里程碑 | 一句话 | 依赖 | 退出条件 | 状态 |
 |---|---|---|---|---|
 | **记忆底座** | 06 卷 `evidence_record` / `entry_revision` schema 与 fixtures；merge 纯函数；fold 与四种投影；Workspace Graph 作为第一写入方迁入；M6-A 已实现的 VoiceMem 路径迁为写入方 | 06 卷评审通过 | 06 卷场景 12、13、14、16、17 通过；VoiceMem 迁移路径拍板 | 已有实现与本地回归；真实数据验收待完成 |
-| **M8-Mail** 一个邮件 / 日历 provider | 增量同步、cursor 失效恢复、删除传播、改期冲突完整场景 | M7、记忆底座 | 04 卷场景 8、9、10 通过 | 设计已批准；Phase 0 / Plan 1 已编写待实施，产品代码及真实账号验收未开始 |
+| **M8-Mail** 一个邮件 / 日历 provider | 增量同步、cursor 失效恢复、删除传播、改期冲突完整场景 | M7、记忆底座 | 04 卷场景 8、9、10 通过 | 底座、Google 和 macOS provider 已实现；真实邮件与本机日历只读同步通过，删除/改期等 live 生命周期仍待验 |
 | **M8-IM** 飞书连接器 | 通用部署配置；读授权会话写账本、入库抽承诺；bot 推送 proposal 并回收用户动作；与 M8-Mail 并行 | M7、记忆底座 | 04 卷场景 18、19 与 06 卷场景 15 通过；公共边界测试允许"通用飞书连接器"且判定标准写清 | 已有实现与本地回归；真实账号验收待完成 |
 
 ### 2026-09-12 决策
@@ -98,7 +98,7 @@
 
 - M8-Mail 已确认 Composio + Gmail / Google Calendar、只读后台同步、邮件接收后 30 天及日历结束后 30 天原文保留。先做 Phase 0 契约探针与 provider 无关的 Plan 1；Plan 2（Google / 桌面）等探针结论，Plan 3 再做安装版验收。详见 [已批准设计](../../superpowers/specs/2026-09-19-composio-connectors-design.md)。设计决定不等于实现或账号验收通过。
 - 已编写 [Phase 0 探针计划](../../superpowers/plans/2026-09-19-composio-contract-probe.md) 与 [Plan 1 底座计划](../../superpowers/plans/2026-09-19-connector-foundation.md)，可独立推进；无账号不阻塞 Plan 1。
-- Plan 1 已实现对象 current/generation、处理同意与异步结果 fencing、可恢复分页/删除及批次宿主通知；独立审阅问题已补回归修复。Phase 0 仅完成公开版本核对与离线探针，缺少本机 key 和测试账户范围，账号路由、scope、分页与错误透传仍未测；详见 [探针记录](../../research/2026-09-19-composio-probe.md)。尚未实现 Google/桌面生产连接，Plan 2 门槛仍未满足。
+- Plan 1 已实现对象 current/generation、处理同意与异步结果 fencing、可恢复分页/删除及批次宿主通知；独立审阅问题已补回归修复。Phase 0 已完成真实账号契约探针，Google/桌面生产连接已实现；真实读取与剩余边界见 [connector 验收记录](../../research/2026-09-20-connector-acceptance.md)。
 - 飞书真实 OAuth、读取所选会话、本人 bot 送达及回调尚未验收；本地 fixture 测试不能替代真实账号验收。
 - 预检索真实语音延迟与相关性、现有个人目录上的迁移及摘要效果尚未验收；不引用 VoiceMem 上游时延作为本实现结果。
 - 代码、自动检查与验收状态分别记录于 [本轮实现记录](MEMORY-AND-FEISHU-IMPLEMENTATION.md)。
@@ -109,4 +109,4 @@
 
 多会话、纯文字启动、唯一语音归属、主动提醒会话、只读准备、简报设置与菜单栏未读已接入，仍在当前 worktree，未提交。真实文本与端到端合成语音历史回忆通过；级联重连 ASR 接收错误和飞书平台创建/授权后的真实链路仍未验收完成。细项见 [工作台实施记录](WORKBENCH-IMPLEMENTATION.md)，不得据此将全部 v0.3.0 标记为已验收。
 
-- 2026-09-20：Google provider、桌面入口与 macOS EventKit 本地 provider 已实现，真实 Gmail 有界入库与空 Calendar 快照通过；安装版验收进行中。证据和未测边界见 [connector 验收记录](../../research/2026-09-20-connector-acceptance.md)。
+- 2026-09-20：Google provider、桌面入口与 macOS EventKit 本地 provider 已实现，真实 Gmail 有界入库与空 Calendar 快照通过；本地打包客户端已验证 macOS 权限、15 条现有日程入库及重启保留，系统日历日期对照通过；正式签名发布和变更/删除 live 生命周期仍未验。证据和未测边界见 [connector 验收记录](../../research/2026-09-20-connector-acceptance.md)。
