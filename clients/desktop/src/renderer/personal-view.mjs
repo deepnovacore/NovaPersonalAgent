@@ -1,3 +1,5 @@
+import {renderLife,renderProfile} from './life-view.mjs'
+import {renderNews} from './news-view.mjs'
 import {renderConnectors} from './connectors-view.mjs'
 import {renderDailyBrief} from './daily-brief-view.mjs'
 import {memoryOverview} from './memory-overview.mjs'
@@ -5,6 +7,7 @@ import {PersonalController} from './personal-controller.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 export function mountPersonalView({send,start,stop,tasks,taskAction,results,openResults,api}) {
  const connectorLocal={}
+ const lifeLocal={},newsLocal={}
  const readMessages=new Set();let unreadProjection=null
  const root=el('main',undefined,'personal-workspace');root.id='personal-workspace';document.body.prepend(root)
  const header=el('header');header.append(el('strong','✦ Nova'))
@@ -12,7 +15,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const button=(label,action,parent=header)=>{const b=el('button',label);b.type='button';b.addEventListener('click',()=>run(action));parent.append(b);return b}
  const error=el('p','','personal-error');error.setAttribute('role','alert')
  const run=async(action)=>{try{c.error='';await action()}catch(e){c.error=e.message;if(/conflict|version/i.test(e.message)&&c.connected)await c.command('state').catch(()=>{})}update()}
- button('连接与权限',()=>{setSideOpen(true);selected='来源';renderPanel()});button('设置',()=>api.orbMenu.openSettings());button('收起',()=>collapse(true))
+ button('主动提醒',()=>{setSideOpen(true);selected='动态';renderPanel()});button('连接与权限',()=>{setSideOpen(true);selected='来源';renderPanel()});button('设置',()=>api.orbMenu.openSettings());button('收起',()=>collapse(true))
  const columns=el('div',undefined,'personal-columns');root.append(header,columns)
  const conversations=el('aside',undefined,'personal-conversations');conversations.setAttribute('aria-label','会话');const newChat=button('新对话',()=>c.create(),conversations);newChat.className='personal-new-chat';const conversationList=el('nav');conversationList.setAttribute('aria-label','会话列表');conversations.append(conversationList);columns.append(conversations)
  const chat=el('section',undefined,'personal-chat');chat.setAttribute('aria-label','对话');columns.append(chat)
@@ -30,15 +33,17 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const voice=button('持续对话',()=>c.isVoiceConversation?c.stopVoice():c.voice(),inputActions);voice.className='composer-voice';const submit=button('↑',()=>c.submit(),inputActions);submit.className='primary composer-submit';submit.setAttribute('aria-label','发送消息')
  const hint=el('p','','personal-hint');composer.append(draft,inputActions,hint,error);chat.append(history,composer)
  const side=el('section',undefined,'personal-side');side.id='personal-side';side.setAttribute('aria-label','个人空间');columns.append(side)
- let sideOpen=false
- const sideToggle=button('侧栏',()=>{setSideOpen(!sideOpen);renderPanel()});sideToggle.setAttribute('aria-label','显示动态、任务和记忆');sideToggle.setAttribute('aria-controls',side.id)
+ let sideOpen=true
+ const sideToggle=button('侧栏',()=>{setSideOpen(!sideOpen);renderPanel()});sideToggle.setAttribute('aria-label','显示个人空间');sideToggle.setAttribute('aria-controls',side.id)
  function setSideOpen(value){sideOpen=value;side.hidden=!value;root.dataset.sideOpen=String(value);sideToggle.setAttribute('aria-expanded',String(value))}
- setSideOpen(false)
+ setSideOpen(true)
  const tabs=el('nav',undefined,'personal-tabs');tabs.setAttribute('aria-label','个人空间视图');const panel=el('div',undefined,'personal-panel');side.append(tabs,panel)
- let selected='动态',ignored=false,debugEvidence=false,renderedSnapshot=null,taskRevision=-1
+ let selected='Feeds',ignored=false,debugEvidence=false,renderedSnapshot=null,taskRevision=-1
  const presented=new Set()
- const tabButtons=new Map();for(const title of ['动态','任务','记忆'])tabButtons.set(title,button(title,()=>{selected=title;renderPanel()},tabs))
+ button('整理最新发言',()=>c.command('understanding.start'),header)
+ const tabButtons=new Map();for(const title of ['Todos','Feeds','Ideas','Goals','Profile'])tabButtons.set(title,button(title,()=>{selected=title;renderPanel()},tabs))
  const expand=el('button','展开 Nova');expand.id='personal-expand';expand.type='button';expand.addEventListener('click',()=>run(()=>collapse(false)));document.querySelector('#shell').append(expand)
+ panel.addEventListener('focusout',()=>setTimeout(()=>{if(!panel.contains?.(document.activeElement))update()},0))
  const c=new PersonalController({send,start,stop,changed:update})
  const chips=(parent,values)=>{const row=el('div',undefined,'personal-chips');for(const value of values.filter(Boolean))row.append(el('span',value));parent.append(row)}
  const card=(title,summary)=>{const a=el('article',undefined,'personal-card');a.append(el('h3',title));if(summary)a.append(el('p',summary));panel.append(a);return a}
@@ -63,7 +68,18 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  function renderPanel(){
   panel.replaceChildren();for(const [name,b]of tabButtons)b.setAttribute('aria-current',String(name===selected))
   const s=c.snapshot;const caps=s?.capabilities??{}
-  if(selected==='动态'){
+  if(s?.understanding?.status==='working')panel.append(el('p','正在整理最新一条发言中的结构化候选…'))
+  if(s?.understanding?.error)panel.append(el('p','整理未成功，请稍后重试。'))
+  const candidateKind=({Todos:'todo',Ideas:'idea',Goals:'goal',Profile:'profile'})[selected]
+  for(const item of s?.understanding?.items??[]){if(item.kind!==candidateKind)continue;const a=card('待确认的结构化候选',item.text);a.append(el('p',`依据：${item.quote}`));if(item.kind==='profile')a.append(el('p','确认后将追加到个人介绍，不会替换已有内容。'));const edit=el('textarea');edit.value=lifeLocal['candidate:'+item.id]??item.text;edit.maxLength=1000;edit.setAttribute('aria-label','候选内容');edit.addEventListener('input',()=>{lifeLocal['candidate:'+item.id]=edit.value});a.append(edit);button('确认加入',()=>c.command('understanding.action',{id:item.id,action:'accept',text:edit.value,...(item.kind==='profile'?{expected_profile_version:s.life.profile.version}:{})}),a);button('忽略候选',()=>c.command('understanding.action',{id:item.id,action:'dismiss'}),a)}
+  if(['Todos','Ideas','Goals'].includes(selected)){
+   renderLife(panel,{kind:({Todos:'todo',Ideas:'idea',Goals:'goal'})[selected],state:s?.life,command:(m,p)=>c.command(m,p),button,run,local:lifeLocal,rerender:renderPanel,delegate:async text=>{if(!c.selectedId||c.isVoiceConversation)await c.create();c.draft=text;update();draft.focus()}})
+   if(selected==='Todos')button('查看 Agent 执行任务',()=>{selected='任务';renderPanel()},panel)
+  }else if(selected==='Feeds'){
+   renderNews(panel,{news:s?.news,command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='Profile';renderPanel()},openArticle:url=>api.personal.openArticle(url)})
+  }else if(selected==='Profile'){
+   renderProfile(panel,{state:s?.life,news:s?.news,command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel,showMemory:()=>{selected='记忆';renderPanel()}})
+  }else if(selected==='动态'){
    const heading=el('div',undefined,'personal-section-heading');heading.append(el('h2','动态'));button(ignored?'返回当前':'查看已忽略',()=>{ignored=!ignored;renderPanel()},heading);panel.append(heading)
    const feed=(s?.feed??[]).filter(item=>ignored?item.user_state==='dismissed'||item.user_state==='dismiss':item.user_state!=='dismissed'&&item.user_state!=='dismiss')
    if(!feed.length)card(ignored?'没有已忽略的动态':'暂无动态','有新建议时会显示在这里。')
@@ -184,7 +200,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
   const unread=c.connected?c.snapshot?.conversations?.unread_count:undefined
   if(Number.isSafeInteger(unread)&&unread>=0&&unreadProjection!==unread){unreadProjection=unread;void api.personal.setUnread?.(unread)}
   markVisibleRead()
-  if(renderedSnapshot!==c.snapshot||taskRevision!==JSON.stringify(tasks())){renderedSnapshot=c.snapshot;taskRevision=JSON.stringify(tasks());renderPanel()}
+  if((renderedSnapshot!==c.snapshot||taskRevision!==JSON.stringify(tasks()))&&!(panel.contains?.(document.activeElement)&&['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))){renderedSnapshot=c.snapshot;taskRevision=JSON.stringify(tasks());renderPanel()}
  }
 
  function markVisibleRead(){

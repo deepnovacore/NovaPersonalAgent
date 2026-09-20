@@ -233,3 +233,10 @@ export function connectorAuthorizationUrl(value) {
   if (url.origin !== 'https://connect.composio.dev' || url.username || url.password || !url.pathname.startsWith('/link/')) throw new Error('authorization request rejected')
   return url.href
 }
+
+export function newsArticleUrl(value) {
+ if(typeof value!=='string'||value.length>4096)throw new Error('资讯链接无效')
+ const url=new URL(value)
+ if(!['https:','http:'].includes(url.protocol)||url.username||url.password||url.hostname==='localhost'||url.hostname.endsWith('.local')||url.hostname.includes(':')||/^\d+(?:\.\d+){3}$/u.test(url.hostname))throw new Error('资讯链接无效')
+ return url.href
+}

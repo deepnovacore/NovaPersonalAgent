@@ -1,3 +1,8 @@
+import {PersonalUnderstanding} from './understanding.js';
+import type {UnderstandingPipeline} from '../understanding/pipeline.js';
+import {LifeService} from './life.js';
+import {NewsService} from '../news/service.js';
+import type {NewsRanker} from '../news/ranking.js';
 import type {SourceChange} from '../memory-substrate/source-state.js'
 import type {WakeReason} from '../core/slots.js';
 import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
@@ -49,6 +54,8 @@ export interface PersonalFeishu {
     close(): Promise<void>;
 }
 export interface HostOptions {
+    rankNews?: NewsRanker;
+    understand?: UnderstandingPipeline;
     context?: () => ContextView;
     path: string;
     userScope: string;
@@ -66,6 +73,9 @@ export interface HostOptions {
 }
 const hash = (s: unknown): string => createHash('sha256').update(JSON.stringify(s)).digest('hex');
 export class PersonalAgentHost {
+    readonly understanding:PersonalUnderstanding;
+    readonly news: NewsService;
+    readonly life: LifeService;
     #voiceTransition=false;
     #clearingConversations=new Set<string>();
     #conversationEmit:((frame:Record<string,unknown>)=>void)|undefined;
@@ -196,7 +206,7 @@ export class PersonalAgentHost {
         this.#overviewRun = run;
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
-    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); }
+    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.life=new LifeService(options.path+'.life.json',()=>this.#notify()); this.news=new NewsService({path:options.path+'.news.json',...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),source:()=>{const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const m=c?.messages.filter(m=>m.role==='user').at(-1);return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,origin:'user'}:null}}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -218,6 +228,9 @@ export class PersonalAgentHost {
 
             this.#abort = new AbortController();
             this.#opened = true;
+            this.understanding.reopen();
+            await this.life.open();
+            await this.news.open();
             await this.#sources?.open?.();
             await this.#feishu?.open();
             await this.#connectors?.open();
@@ -227,6 +240,7 @@ export class PersonalAgentHost {
                 if (item.lifecycle === 'active' && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime())) this.#pool(item);
             }
             this.#schedule();
+            void this.news.refresh().catch(()=>{/* optional cleanup/observer */});
         } catch (error) {
             await this.close().catch(() => { /* preserve primary lifecycle failure */ });
             throw error;
@@ -242,6 +256,9 @@ export class PersonalAgentHost {
         this.#abort.abort();
         for (const item of this.#state.feed) if (item.suggestion_id) this.options.pool.withdraw(item.suggestion_id);
         try {
+            await this.understanding.close();
+            await this.news.close();
+            await this.life.close();
             await this.#connectors?.close().catch(() => { /* connector shutdown cannot block remaining resources */ });
             await this.#feishu?.close().catch(() => { /* optional connector failure must not prevent runtime shutdown */ });
             await this.#sources?.close?.();
@@ -311,7 +328,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, revision: Math.max(this.#projectionRevision, this.#state.revision), conversations:this.conversationSnapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, revision: Math.max(this.#projectionRevision, this.#state.revision), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     async #commit(next: PersonalState): Promise<void> { next.revision = this.#state.revision + 1; await this.#store.write(next); this.#state = next; this.#notify(); }
     async #evidence(ref: string): Promise<Evidence|null> {
         const direct=this.options.evidence(ref)??this.#sources?.evidence?.(ref);if(direct)return direct
@@ -479,6 +496,15 @@ export class PersonalAgentHost {
             await this.revalidate();
             await this.refreshMemory();
             data = this.snapshot();
+        }
+        else if(command.method==='understanding.start'){this.understanding.start();data=this.understanding.snapshot();}
+        else if(command.method==='understanding.action')data=await this.understanding.action(p);
+        else if (command.method==='life.mutate') data=await this.life.mutate(p,command.request_id);
+        else if (command.method.startsWith('news.')) {
+            if(command.method==='news.configure')await this.news.configure(p);
+            else if(command.method==='news.action')await this.news.action(p);
+            if(command.method==='news.refresh'||command.method==='news.configure')void this.news.refresh().catch(()=>{/* optional cleanup/observer */});
+            data=this.news.snapshot();
         }
         else if (command.method === 'feed.action')
             data = await this.action(p);

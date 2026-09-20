@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
   personal: Object.freeze({
+    openArticle: url => ipcRenderer.invoke('nova:personal:article', url),
     setUnread: value => ipcRenderer.invoke('nova:personal:unread', value),
     wake: () => ipcRenderer.invoke('nova:personal:wake'),
     setCollapsed: value => ipcRenderer.invoke('nova:personal:collapse', value),

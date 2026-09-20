@@ -112,6 +112,7 @@ import {
   apiKeyWindowOpenHandler,
   feishuVerificationUrl,
   connectorAuthorizationUrl,
+  newsArticleUrl,
   boardWindowOptions,
   browserWindowOptions,
   configureWindowSecurity,
@@ -1143,6 +1144,10 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   ipcMain.handle('nova:personal:connector-authorization', async (event, value) => {
     if (event.sender !== mainWindow.webContents) throw new Error('authorization request rejected')
     await shell.openExternal(connectorAuthorizationUrl(value))
+  })
+  ipcMain.handle('nova:personal:article', async (event, value) => {
+    if (event.sender !== mainWindow.webContents) throw new Error('article request rejected')
+    await shell.openExternal(newsArticleUrl(value))
   })
   ipcMain.handle('nova:personal:directory', async event => {
     if (event.sender !== mainWindow.webContents) throw new Error('directory request rejected')

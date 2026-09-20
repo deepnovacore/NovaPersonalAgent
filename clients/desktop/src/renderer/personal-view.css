@@ -49,3 +49,17 @@ body[data-personal-collapsed="true"] .personal-workspace{display:none}#personal-
 .personal-workspace .personal-side[hidden]{display:none}
 .personal-workspace[data-side-open="false"] .personal-chat{width:100%;max-width:900px;justify-self:center}
 @media(max-width:900px){.personal-workspace[data-side-open="false"] .personal-columns{grid-template-columns:110px minmax(0,1fr)}}
+
+.personal-tabs { flex-wrap: wrap; }
+.life-form { display: grid; gap: 8px; padding-bottom: 16px; }
+.life-form label { display: grid; gap: 4px; }
+.personal-panel textarea, .life-form input, .life-form select { box-sizing: border-box; width: 100%; padding: 8px; border-radius: 8px; border: 1px solid var(--border, #5555); background: transparent; color: inherit; }
+.personal-panel textarea { min-height: 80px; }
+.news-card small { opacity: .7; }
+.news-card button, .life-form button { margin: 4px; }
+
+@media(min-width:1000px){.personal-workspace[data-side-open="true"] .personal-columns{grid-template-columns:130px minmax(250px,.7fr) minmax(430px,1.3fr)}}
+.personal-tabs button[aria-current="true"]{background:#e3edfa;color:#274f82;border-color:#bdcfe6}
+
+.news-excerpt{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;line-height:1.65}
+.personal-workspace>header{flex-wrap:wrap;gap:10px}

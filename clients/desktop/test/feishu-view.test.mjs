@@ -74,7 +74,8 @@ test('read-only project entries have no correction or forget controls',async()=>
  view.controller.connect()
  const entry=(id,editable)=>({id,editable,version:1,topic:id,content:'项目进展',kind:'topic',status:'active',source_refs:[]})
  view.receive({type:'personal.state',revision:1,memory:{entries:[entry('只读项目',false),entry('个人记忆',true)]},capabilities:{memory:{list:true,correct:true,forgetEntry:true}}})
- await body.querySelectorAll('button').find(button=>button.textContent==='记忆').listeners.click()
+ await body.querySelectorAll('button').find(button=>button.textContent==='Profile').listeners.click()
+ await body.querySelectorAll('button').find(button=>button.textContent==='查看与纠正已有记忆').listeners.click()
  const articles=body.querySelectorAll('article')
  const buttons=topic=>articles.find(article=>article.querySelector('h4')?.textContent===topic).querySelectorAll('button').map(button=>button.textContent)
  assert.deepEqual(buttons('只读项目'),['接着聊'])
@@ -152,14 +153,14 @@ test('text captions never duplicate persisted users; voice captions and generati
  assert.equal(body.querySelectorAll('p').filter(n=>n.textContent==='live voice').length,1)
 })
 
-test('side panel starts closed and toggles locally with accessible state',async()=>{
+test('side panel starts open and toggles locally with accessible state',async()=>{
  const body=new Node('body'),shell=new Node('div');body.append(shell)
  globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createTextNode:text=>new Node('text',text),querySelector:()=>shell}
  const calls=[];mountPersonalView({send:frame=>(calls.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}})
  const side=body.querySelectorAll('section').find(node=>node.id==='personal-side'),root=body.querySelector('main'),toggle=body.querySelectorAll('button').find(node=>node.textContent==='侧栏')
- assert.equal(side.hidden,true);assert.equal(root.dataset.sideOpen,'false');assert.equal(toggle['aria-expanded'],'false')
- await toggle.listeners.click();assert.equal(side.hidden,false);assert.equal(root.dataset.sideOpen,'true');assert.equal(toggle['aria-expanded'],'true')
- await toggle.listeners.click();assert.equal(side.hidden,true);assert.equal(calls.length,0)
+ assert.equal(side.hidden,false);assert.equal(root.dataset.sideOpen,'true');assert.equal(toggle['aria-expanded'],'true')
+ await toggle.listeners.click();assert.equal(side.hidden,true);assert.equal(root.dataset.sideOpen,'false');assert.equal(toggle['aria-expanded'],'false')
+ await toggle.listeners.click();assert.equal(side.hidden,false);assert.equal(calls.length,0)
 })
 
 test('guide progress follows actual application and OAuth state, with an explicit waiting handoff',()=>{
