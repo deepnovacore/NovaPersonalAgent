@@ -62,12 +62,42 @@ For more details about the architecture, check [Architecture](docs/architecture.
 ## Main Features
 
 <table>
-<tr><td width="36%"><b>Talk while work gets done</b><br>Assign tasks, clarify requirements, and follow progress without leaving the conversation.</td><td><img src="assets/features/conversation.en.png" alt="Voice conversation and workspace status" width="480"></td></tr>
-<tr><td><b>Camera monitoring and timely alerts</b><br>Ask Nova to watch for a condition and tell you when it occurs.</td><td><img src="assets/features/vision.en.png" alt="Camera monitoring and translated narration from the v0.1 demo" width="560"><br><sub>v0.1 demo · 02:08</sub></td></tr>
-<tr><td><b>You approve the next step</b><br>Review workspace changes, command execution, and network access.</td><td><img src="assets/features/approvals.en.png" alt="Network access and workspace approval cards" width="560"></td></tr>
-<tr><td><b>Bring your tools and knowledge</b><br>Configure ASR / LLM / TTS and MCP; ask questions across your documents.</td><td><img src="assets/features/knowledge.en.png" alt="Knowledge-base answer using the CN-27 demo documents" width="480"></td></tr>
-<tr><td><b>Memory that stays with you</b><br>mem0 recalls personal context across conversations, with source text you can inspect.</td><td><img src="assets/features/mem0.en.png" alt="Four local mem0 memories with source details" width="560"></td></tr>
-<tr><td><b>Take Nova with you</b><br>Connect your iPhone over Tailscale to talk and approve tasks on your PC.</td><td><img src="assets/features/iphone.en.png" alt="iPhone home and connection settings" width="480"></td></tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Talk while work gets done</h3>
+      <p>Assign tasks, clarify requirements, and follow progress without leaving the conversation.</p>
+      <img src="assets/features/conversation.en.png" alt="Voice conversation and workspace status" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>Camera monitoring and timely alerts</h3>
+      <p>Ask Nova to watch for a condition and tell you when it occurs.</p>
+      <img src="assets/features/vision.en.png" alt="Camera monitoring and translated narration from the v0.1 demo" width="100%"><br><sub>v0.1 demo · 02:08</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>You approve the next step</h3>
+      <p>Review workspace changes, command execution, and network access.</p>
+      <img src="assets/features/approvals.en.png" alt="Network access and workspace approval cards" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>Bring your tools and knowledge</h3>
+      <p>Configure ASR / LLM / TTS and MCP; ask questions across your documents.</p>
+      <img src="assets/features/knowledge.en.png" alt="Knowledge-base answer using the CN-27 demo documents" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Memory that stays with you</h3>
+      <p>mem0 recalls personal context across conversations, with source text you can inspect.</p>
+      <img src="assets/features/mem0.en.png" alt="Four local mem0 memories with source details" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>Take Nova with you</h3>
+      <p>Connect your iPhone over Tailscale to talk and approve tasks on your PC.</p>
+      <img src="assets/features/iphone.en.png" alt="iPhone home and connection settings" width="100%">
+    </td>
+  </tr>
 </table>
 
 <sub>Demo data; screenshots cleaned up, composited and translated for presentation.</sub>
