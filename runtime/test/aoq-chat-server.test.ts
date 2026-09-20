@@ -502,8 +502,13 @@ test('chat isolation rejects runtime offer, event path and host transport writes
 test('runtime allows only the directional event vocabulary and keeps larger data off the control lane', {timeout: 5000}, async t => {
   let hook!: ProviderConnection
   const received: string[] = []
-  const server = new AoqChatServer({token, port: 0, heartbeatMs: 30, issueCredential: () => Promise.resolve(allocation), runtime: runtimeOptions({
-    onProviderConnect: c => { hook = c }, onProviderEvent: (_id, event) => { received.push(String(event.type)) },
+  let finishInbound!: () => void
+  const inboundComplete = new Promise<void>(resolve => { finishInbound = resolve })
+  const server = new AoqChatServer({token, port: 0, issueCredential: () => Promise.resolve(allocation), runtime: runtimeOptions({
+    onProviderConnect: c => { hook = c }, onProviderEvent: (_id, event) => {
+      received.push(String(event.type))
+      if (event.type === 'response.audio.done') finishInbound()
+    },
   })})
   t.after(() => server.close())
   const client = await peer((await server.start()).port)
@@ -537,7 +542,7 @@ test('runtime allows only the directional event vocabulary and keeps larger data
     'response.function_call_arguments.delta', 'response.function_call_arguments.done', 'response.audio.done']
   for (const [index, type] of inbound.entries()) providerEvent(client.socket, hook.id, index + 1,
     {type, ...(type === 'response.text.delta' ? {delta: 'x'.repeat(32_768)} : {})})
-  await once(client.socket, 'ping')
+  await inboundComplete
   assert.deepEqual(received, inbound)
   await assert.rejects(server.sendText(JSON.stringify({type: 'caption', text: 'x'.repeat(16_384)})))
   client.socket.send(JSON.stringify({type: 'client.command', connection_id: hook.id, request_id: 'too-big',
