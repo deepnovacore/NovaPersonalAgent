@@ -384,7 +384,10 @@ export class RealtimeSession {
    * A response that never happened has its host event answer withdrawn, because it must be
    * answerable again -- whereas one that completed stays answered, since the user heard it.
    */
-  async reconnect(options: {readonly tools: readonly Record<string, unknown>[]}): Promise<void> {
+  async reconnect(options: {
+    readonly tools: readonly Record<string, unknown>[]
+    readonly withProviderTransition?: (work: () => Promise<void>) => Promise<void>
+  }): Promise<void> {
     this.#preemptiveAlertHandoffGeneration = null
     const interruptedResponseIds: string[] = []
     const generation = this.#playback.fenceCurrent()
@@ -409,8 +412,12 @@ export class RealtimeSession {
     this.#floor = new Floor()
     this.#userHoldSince = null
 
-    const identity = await this.#replaceProviderSession(options.tools)
-    this.#state.beginEpoch(identity.epoch)
+    const replace = async (): Promise<void> => {
+      const identity = await this.#replaceProviderSession(options.tools)
+      this.#state.beginEpoch(identity.epoch)
+    }
+    if (options.withProviderTransition === undefined) await replace()
+    else await options.withProviderTransition(replace)
     await this.#injectRecoveryItem(null)
     this.#state.advanceSnapshot()
   }

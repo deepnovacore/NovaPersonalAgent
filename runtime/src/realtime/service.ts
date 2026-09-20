@@ -855,7 +855,10 @@ export class RealtimeService {
         this.#approvalHost.invalidateExecutorApproval('provider_replaced')
         this.#host.beginReconnect(oldEpoch)
         // Provider identity and session epoch must advance before queued host delivery resumes.
-        await this.#host.withDeliveryLock(() => this.session.reconnect({tools: structuredClone(this.#providerSchemas)}))
+        await this.session.reconnect({
+          tools: structuredClone(this.#providerSchemas),
+          withProviderTransition: work => this.#host.withDeliveryLock(work),
+        })
         // Only if nothing cleared it while we were awaiting. A user who started speaking during the
         // reconnect has already activated the new session, so demanding an activation would be wrong.
         this.#host.finishReconnect(oldEpoch)
