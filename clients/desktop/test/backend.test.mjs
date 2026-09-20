@@ -322,6 +322,14 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
   assert.equal('NOVA_AUDIO_AGENT_KNOWLEDGE_PATH' in empty.env, false)
 })
 
+test('plan generation settings override the parent environment and preserve explicit false', () => {
+  for (const [settings, expected] of [[undefined, 'true'], [{generatePlan: true}, 'true'], [{generatePlan: false}, 'false']]) {
+    const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152',
+      parentEnv: {NOVA_AUDIO_AGENT_GENERATE_PLAN: 'false'}, settings})
+    assert.equal(spec.env.NOVA_AUDIO_AGENT_GENERATE_PLAN, expected)
+  }
+})
+
 test('the runtime receives the exact state root resolved for desktop maintenance', () => {
   const resolvedConfig = resolveDesktopConfig({
     settings: {},
@@ -399,6 +407,15 @@ test('launch spec strips a stale inherited readiness pipe', () => {
   })
 
   assert.equal('NOVA_AUDIO_AGENT_DESKTOP_READY_FD' in spec.env, false)
+})
+
+test('a local runtime entry override is absolute and ignored by packaged clients', () => {
+  const options = {appPath: '/repo/clients/desktop', packageRoot: '/repo/clients/desktop',
+    environment: {NOVA_AUDIO_AGENT_DEV_BACKEND_ENTRY: '/private/tmp/local-entry.mjs'}}
+  assert.equal(nodeRuntimeEntry({...options, isPackaged: false}), '/private/tmp/local-entry.mjs')
+  assert.notEqual(nodeRuntimeEntry({...options, isPackaged: true}), '/private/tmp/local-entry.mjs')
+  assert.throws(() => nodeRuntimeEntry({...options, isPackaged: false,
+    environment: {NOVA_AUDIO_AGENT_DEV_BACKEND_ENTRY: '../relative.mjs'}}), /absolute/u)
 })
 
 test('integrated launch injects all active public settings and only its platform credential', () => {

@@ -144,7 +144,7 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
     container.hidden = !controller.state().visible || !(value?.taskHeightCss > 0) || value?.suppressed === true
   }
   function render(view) {
-    container.dataset.working = String(view.connected && view.tasks.some(task => task.phase === 'working'))
+    container.dataset.working = String(view.connected && view.tasks.some(task => RUNNING.has(task.phase)))
     container.hidden = !view.visible || !(layout?.taskHeightCss > 0) || layout?.suppressed === true
     const shown = expanded ? view.tasks : view.tasks.slice(0, 3)
     for (const [id, card] of cards) if (!view.tasks.some(task => task.work_id === id)) {card.remove(); cards.delete(id)}
@@ -153,7 +153,7 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
       if (!card) {
         card = container.ownerDocument.createElement('article')
         card.className = 'task-card'
-        card.innerHTML = '<div class="task-card-heading"><strong data-title></strong><span data-status></span></div><p data-summary></p><div class="task-card-footer"><span data-project></span><button data-open type="button" aria-label="打开项目"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M21 3l-11 11M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></svg></button><button data-stop type="button" aria-label="停止任务" title="停止任务"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div><p data-error role="alert" hidden></p>'
+        card.innerHTML = '<div class="task-card-heading"><span data-project></span><span aria-hidden="true"> · </span><strong data-title></strong></div><p data-summary></p><p data-error role="alert" hidden></p><span data-status></span><div class="task-card-footer"><button data-open type="button" aria-label="打开项目"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M21 3l-11 11M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></svg></button><button data-stop type="button" aria-label="停止任务" title="停止任务"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div>'
         for (const [selector, action] of [['[data-open]', 'open'], ['[data-stop]', 'cancel']]) card.querySelector(selector).addEventListener('click', () => {controller.select(task.work_id); controller.action(action)})
         cards.set(task.work_id, card); list.append(card)
       }
@@ -165,6 +165,8 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
       set('[data-summary]', task.summary)
       set('[data-status]', !view.connected ? '连接已断开' : task.cancelling ? '正在停止' : STATUS[task.phase])
       set('[data-error]', task.error)
+      card.querySelector('[data-summary]').hidden = !!task.error
+      card.title = `${task.project} · ${task.title}`
       card.querySelector('[data-error]').hidden = !task.error
       card.querySelector('[data-open]').disabled = !view.connected || task.opening
       card.querySelector('[data-open]').title = platform === 'darwin' ? '在 Finder 中打开项目' : '在文件管理器中打开项目'

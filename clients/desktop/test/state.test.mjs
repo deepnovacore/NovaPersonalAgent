@@ -52,7 +52,7 @@ test('projects voice and Codex state into one compact visible line', () => {
 
   assert.equal(state.statusLine, '聆听中')
   assert.doesNotMatch(state.statusLine, /工作区|Session|AEC/u)
-  assert.equal(state.projectLabel, '工作区 alpha · Session Task 1')
+  assert.equal(state.projectLabel, '当前对话 · alpha · Task 1')
   assert.equal(state.codexMode, 'project')
 
   const waitingInput = {
@@ -83,7 +83,7 @@ test('hides the project row only when neither workspace nor session is known', (
   assert.equal(hidden.codexMode, 'hidden')
 
   const workspaceOnly = deriveOrbState({...base, workspace: 'alpha'})
-  assert.equal(workspaceOnly.projectLabel, '工作区 alpha')
+  assert.equal(workspaceOnly.projectLabel, '当前对话 · alpha')
   assert.equal(workspaceOnly.codexMode, 'project')
 })
 

@@ -590,12 +590,80 @@ function sleepOrb() {
   wakeWord?.sleep('bubble')
 }
 
+async function applyDesktopSettings(payload, restart = false) {
+  // Plaintext keys travel from the panel into the writer, and are decrypted
+  // only in main for validation or backend spawn. Public settings replies
+  // contain presence flags and rejected key names, never secret values.
+  if (typeof restart !== 'boolean') throw new Error('invalid restart mode')
+  const pendingRestart = settingsRestartPending
+  const previousSettings = currentSettings
+  const recoveryPending = settingsRecoveryAvailable
+  let capabilitiesChanged = false
+  const applied = await applySettingsTransaction({
+    deferRestart: !restart,
+    needsBackendRestart: () => restart || pendingRestart || recoveryPending || capabilitiesChanged || JSON.stringify(backendSettings(previousSettings))
+      !== JSON.stringify(backendSettings(currentSettings)),
+    coordinator: lifecycleCoordinator,
+    patch: payload,
+    write: async value => {
+      try {
+        if (settingsRecoveryAvailable) await rollbackSettings(false)
+        const commit = parseSettingsCommit(value)
+        capabilitiesChanged = commit.capabilitiesDocument !== undefined
+        return await settingsWriter(commit.settingsPatch ?? {}, next => {
+          validatePreparedSettings(commit.settingsPatch, publicSettings(next))
+          if ([resolve(settingsFile()), resolve(`${settingsFile()}.recovery`)].includes(capabilityPath(next, process.env))) throw invalidCommit('capability_settings_path_conflict')
+          const document = commit.capabilitiesDocument ?? readCapabilityDocument(next, process.env)
+          const secrets = decryptSecretsForSpawn(next, secretCodec)
+          return prepareCapabilityCommit({settings: next, sourceSettings: currentSettings, document: commit.capabilitiesDocument, expectedRevision: commit.capabilitiesBaseRevision,
+            environment: capabilityEnvironment(next, secrets, process.env, document), knownSecrets: Object.values(secrets),
+            beforeWrite: async capability => {
+              await saveSettingsRecovery(settingsFile(), currentSettings, capability)
+              settingsRecoveryAvailable = true
+            }})
+        })
+      } catch (error) {
+        console.error(`[desktop-diagnostic] settings_save_failure type=${error.name}`)
+        throw error
+      }
+    },
+    publishCommitted: publishCommittedSettings,
+    rollback: rollbackSettings,
+    complete: completeSettings,
+    prepareConfiguration: async () => {
+      try {
+        return await prepareDesktopConfiguration()
+      } catch (error) {
+        console.error(`[desktop-diagnostic] settings_apply_failure type=${error.name}`)
+        throw error
+      }
+    },
+    commitConfiguration: commitDesktopConfiguration,
+    discardConfiguration: discardDesktopConfiguration,
+    restartBackend: restartSettingsBackend,
+    publishStatus: publishSettingsApplyStatus,
+  })
+  if (applied.operationStatus === 'pending_restart') settingsRestartPending = true
+  else if (applied.operationStatus === 'applied') settingsRestartPending = false
+  return {...settingsView(), ...applied}
+}
+
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
     { label: '连接 iPhone…', click: () => { void openPairingWindow() } },
     { label: '记忆面板', click: () => openMemoryBoard(launchId) },
     { label: '设置…', click: () => openSettingsWindow(launchId) },
     { label: 'MCP 服务', submenu: activeMcpSubmenu(launchId) },
+    { label: '重启后台', enabled: currentSettings !== null && !lifecycleCoordinator.busy, click: async () => {
+      try {
+        const result = await applyDesktopSettings({settingsPatch: {}}, true)
+        if (result.operationStatus === 'applied') return
+        dialog.showErrorBox('后台未重启', result.operationStatus === 'busy'
+          ? '另一项操作正在进行，请稍后重试。' : '重启失败，请打开设置检查配置。')
+      } catch {
+        dialog.showErrorBox('后台未重启', '重启失败，请打开设置检查配置。')
+      }
+    } },
     { type: 'separator' },
     { label: '退出 Nova Audio Agent', click: () => app.quit() },
   ]).popup({ window: mainWindow })
@@ -955,6 +1023,7 @@ function initializeDesktopBootstrap(cameraSource) {
   nativeAudio?.setCaptureEpoch(wakeWord?.epoch ?? 0)
   bootstrap = Object.freeze({
     audioMode: 'inactive',
+    startMuted: !app.isPackaged && process.env.NOVA_AUDIO_AGENT_DEV_START_MUTED === '1',
     nativeAvailable,
     platform: process.platform,
     opaque,
@@ -1356,61 +1425,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
       throw new Error('settings update rejected')
     }
-    // Plaintext keys travel from the panel into the writer, and are decrypted
-    // only in main for validation or backend spawn. Public settings replies
-    // contain presence flags and rejected key names, never secret values.
-    if (typeof restart !== 'boolean') throw new Error('invalid restart mode')
-    const pendingRestart = settingsRestartPending
-    const previousSettings = currentSettings
-    const recoveryPending = settingsRecoveryAvailable
-    let capabilitiesChanged = false
-    const applied = await applySettingsTransaction({
-      deferRestart: !restart,
-      needsBackendRestart: () => restart || pendingRestart || recoveryPending || capabilitiesChanged || JSON.stringify(backendSettings(previousSettings))
-        !== JSON.stringify(backendSettings(currentSettings)),
-      coordinator: lifecycleCoordinator,
-      patch: payload,
-      write: async value => {
-        try {
-          if (settingsRecoveryAvailable) await rollbackSettings(false)
-          const commit = parseSettingsCommit(value)
-          capabilitiesChanged = commit.capabilitiesDocument !== undefined
-          return await settingsWriter(commit.settingsPatch ?? {}, next => {
-            validatePreparedSettings(commit.settingsPatch, publicSettings(next))
-            if ([resolve(settingsFile()), resolve(`${settingsFile()}.recovery`)].includes(capabilityPath(next, process.env))) throw invalidCommit('capability_settings_path_conflict')
-            const document = commit.capabilitiesDocument ?? readCapabilityDocument(next, process.env)
-            const secrets = decryptSecretsForSpawn(next, secretCodec)
-            return prepareCapabilityCommit({settings: next, sourceSettings: currentSettings, document: commit.capabilitiesDocument, expectedRevision: commit.capabilitiesBaseRevision,
-              environment: capabilityEnvironment(next, secrets, process.env, document), knownSecrets: Object.values(secrets),
-              beforeWrite: async capability => {
-                await saveSettingsRecovery(settingsFile(), currentSettings, capability)
-                settingsRecoveryAvailable = true
-              }})
-          })
-        } catch (error) {
-          console.error(`[desktop-diagnostic] settings_save_failure type=${error.name}`)
-          throw error
-        }
-      },
-      publishCommitted: publishCommittedSettings,
-      rollback: rollbackSettings,
-      complete: completeSettings,
-      prepareConfiguration: async () => {
-        try {
-          return await prepareDesktopConfiguration()
-        } catch (error) {
-          console.error(`[desktop-diagnostic] settings_apply_failure type=${error.name}`)
-          throw error
-        }
-      },
-      commitConfiguration: commitDesktopConfiguration,
-      discardConfiguration: discardDesktopConfiguration,
-      restartBackend: restartSettingsBackend,
-      publishStatus: publishSettingsApplyStatus,
-    })
-    if (applied.operationStatus === 'pending_restart') settingsRestartPending = true
-    else if (applied.operationStatus === 'applied') settingsRestartPending = false
-    return {...settingsView(), ...applied}
+    return applyDesktopSettings(payload, restart)
   })
   ipcMain.handle('nova:bootstrap', event => {
     // The renderer binds its backend-exit listener only after this reply lands, so a push

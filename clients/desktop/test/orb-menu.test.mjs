@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import {runInNewContext} from 'node:vm'
 
 import {
   activeMcpMenuDescriptor,
@@ -9,6 +10,40 @@ import {
   mcpServerStatusLabel,
   toolCountLabel,
 } from '../src/main/orb-menu.mjs'
+
+test('orb restart applies saved settings through the shared transaction and reports failure', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  assert.match(source, /let currentSettings = null/)
+  const start = source.indexOf('function showOrbMenu(launchId) {')
+  const menuSource = source.slice(start, source.indexOf('\n}', start) + 2)
+  for (const status of ['applied', 'busy', 'restart_failed', 'throw']) {
+    let rows, called = 0
+    const errors = []
+    const coordinator = {busy: false}
+    const context = {
+      Menu: {buildFromTemplate: value => { rows = value; return {popup() {}} }},
+      mainWindow: {}, currentSettings: {}, lifecycleCoordinator: coordinator,
+      activeMcpSubmenu: () => [],
+      applyDesktopSettings: async (patch, restart) => {
+        called++
+        assert.equal(JSON.stringify(patch), '{"settingsPatch":{}}')
+        assert.equal(restart, true)
+        if (status === 'throw') throw new Error('unavailable')
+        return {operationStatus: status}
+      },
+      dialog: {showErrorBox: (...args) => errors.push(args)},
+    }
+    runInNewContext(`${menuSource}\nshowOrbMenu('test')`, context)
+    const restart = rows.find(row => row.label === '重启后台')
+    assert.equal(restart.enabled, true)
+    await restart.click()
+    assert.equal(called, 1)
+    assert.equal(errors.length, status === 'applied' ? 0 : 1)
+    coordinator.busy = true
+    runInNewContext(`${menuSource}\nshowOrbMenu('test')`, context)
+    assert.equal(rows.find(row => row.label === '重启后台').enabled, false)
+  }
+})
 
 // The shape backend-supervisor.mjs sanitizes into, with main's own state overlay.
 function runtime(overrides = {}) {

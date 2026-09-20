@@ -119,12 +119,17 @@ export function selectedBackend(env = process.env, { isPackaged = false } = {}) 
   return value
 }
 
-export function nodeRuntimeEntry({ isPackaged, appPath, packageRoot }) {
+export function nodeRuntimeEntry({ isPackaged, appPath, packageRoot, environment = process.env }) {
   if (typeof appPath !== 'string' || !isAbsolute(appPath)) {
     throw new Error('absolute Electron app path is required')
   }
   if (typeof packageRoot !== 'string' || !isAbsolute(packageRoot)) {
     throw new Error('absolute desktop package root is required')
+  }
+  const override = environment.NOVA_AUDIO_AGENT_DEV_BACKEND_ENTRY
+  if (!isPackaged && override) {
+    if (typeof override !== 'string' || !isAbsolute(override)) throw new Error('absolute development runtime entry is required')
+    return override
   }
   return isPackaged
     ? resolve(

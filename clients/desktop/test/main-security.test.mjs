@@ -281,8 +281,8 @@ test('settings IPC is sender-validated and answers from main without an orb rela
   assert.match(source, /function publishCommittedSettings\(\) \{[\s\S]*sendToOrb\('nova:settings:changed', orbSettings\(currentSettings\)\)/)
   // No requestId machinery: settings live in main, so nothing round-trips
   // through the orb renderer the way the memory board has to.
-  const set = source.slice(source.indexOf("ipcMain.handle('nova:settings:set'"))
-  assert.doesNotMatch(set.slice(0, set.indexOf('\n  })')), /requestId|pendingBoardRequests/)
+  const set = source.slice(source.indexOf("async function applyDesktopSettings"))
+  assert.doesNotMatch(set.slice(0, set.indexOf('\n}')), /requestId|pendingBoardRequests/)
 })
 
 test('Codex rescan is restricted to the settings window sender', async () => {
@@ -357,8 +357,8 @@ test('rollback recovery gates startup, save restart, rescan, and explicit backen
   assert.match(recoveryBody, /stopBackend:/)
   assert.match(recoveryBody, /backendSupervisor\.stop\(\)/)
   assert.match(recoveryBody, /retryBackend:[\s\S]*backendSupervisor\.status\(\)\.state === 'connected'/)
-  const settings = source.slice(source.indexOf("ipcMain.handle('nova:settings:set'"))
-  const settingsHandler = settings.slice(0, settings.indexOf('\n  })'))
+  const settings = source.slice(source.indexOf("async function applyDesktopSettings"))
+  const settingsHandler = settings.slice(0, settings.indexOf('\n}'))
   assert.match(settingsHandler, /restartBackend: restartSettingsBackend/)
   const activation = source.slice(source.indexOf('async function restartSettingsBackend'))
   assert.match(activation.slice(0, activation.indexOf('\n}')), /managedWorkspaceBackendRecovery\.restart\(\)/)
@@ -413,8 +413,8 @@ test('every settings write goes through one queue so overlapping patches merge',
   assert.match(body, /save: next => saveSettings\(settingsFile\(\), next\)/)
   assert.match(body, /codec: secretCodec/)
 
-  const set = source.slice(source.indexOf("ipcMain.handle('nova:settings:set'"))
-  const handler = set.slice(0, set.indexOf('\n  })'))
+  const set = source.slice(source.indexOf("async function applyDesktopSettings"))
+  const handler = set.slice(0, set.indexOf('\n}'))
   assert.match(handler, /applySettingsTransaction\(\{/)
   assert.match(handler, /write: async value => \{[\s\S]*await settingsWriter\(commit\.settingsPatch \?\? \{\}, next =>/)
   assert.match(handler, /coordinator: lifecycleCoordinator/)
@@ -549,8 +549,8 @@ test('supervisor publishes live connection state to an open settings panel', asy
 test('a saved configuration reports bounded transaction phases without falsifying backend status', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const apply = await readFile(new URL('../src/main/settings-apply.mjs', import.meta.url), 'utf8')
-  const set = source.slice(source.indexOf("ipcMain.handle('nova:settings:set'"))
-  const handler = set.slice(0, set.indexOf('\n  })'))
+  const set = source.slice(source.indexOf("async function applyDesktopSettings"))
+  const handler = set.slice(0, set.indexOf('\n}'))
 
   assert.match(source, /settingsApplyStatus/)
   assert.match(handler, /publishStatus: publishSettingsApplyStatus/)
@@ -774,7 +774,7 @@ test('drag and orb menu paths stay sender validated and bounded', async () => {
 test('renderer always activates after microphone preflight and never delegates activation to the orb', async () => {
   const renderer = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
 
-  assert.match(renderer, /if \(microphone === 'granted'\) \{\s*await activateCapture\(\)\s*\}/)
+  assert.match(renderer, /if \(microphone === 'granted'\) \{\s*axes\.muted = bootstrap\.startMuted === true\s*await activateCapture\(\)\s*\}/)
   assert.match(renderer, /async function retryMicrophonePermission\(\)/)
   assert.match(renderer, /const microphone = await refreshMicrophonePermission\(\)/)
   assert.match(renderer, /if \(microphone === 'granted' && !axes\.activated\) await activateCapture\(\)/)
@@ -852,7 +852,9 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
   const {default: vm} = await import('node:vm')
   const {backendSettings, DEFAULT_SETTINGS} = await import('../src/main/settings-store.mjs')
   const start = source.indexOf("  ipcMain.handle('nova:settings:set'")
-  const handlerSource = source.slice(start, source.indexOf('\n  })', start) + 5)
+  const sharedStart = source.indexOf('async function applyDesktopSettings')
+  const sharedSource = source.slice(sharedStart, source.indexOf('\n}', sharedStart) + 2)
+  const handlerSource = sharedSource + '\n' + source.slice(start, source.indexOf('\n  })', start) + 5)
   for (const [payload, expectedRestart, pendingRecovery = false] of [
     [{settingsPatch: {wakeWordEnabled: true}}, false],
     [{settingsPatch: {autoHideSeconds: 120}}, false],

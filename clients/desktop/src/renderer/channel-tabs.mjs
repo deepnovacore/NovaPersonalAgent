@@ -67,7 +67,7 @@ export function channelAccent(name) {
 }
 
 export function boardTabForKey(activeTab, key) {
-  const tabs = ['memory', 'diagnostics']
+  const tabs = ['memory', 'personal', 'diagnostics']
   if (key === 'Home') return 'memory'
   if (key === 'End') return 'diagnostics'
   const current = tabs.indexOf(activeTab)

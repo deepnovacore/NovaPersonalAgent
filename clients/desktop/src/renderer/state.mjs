@@ -115,15 +115,12 @@ export function deriveOrbState(input) {
       input.workspace ? `工作区 ${input.workspace}` : '',
       input.session ? `Session ${input.session}` : '',
     ].filter(Boolean)
-  const projectLabel = [
-    input.workspace ? `工作区 ${input.workspace}` : '',
-    input.session ? `Session ${input.session}` : '',
-  ].filter(Boolean).join(' · ')
+  const target = [input.workspace, input.session].filter(Boolean).join(' · ')
+  const projectLabel = target ? `当前对话 · ${target}` : ''
   const codexMode = pendingConfirmation
     ? 'confirmation'
     : projectLabel === '' ? 'hidden' : 'project'
-  const codexLabel = project
-    .join(pendingConfirmation ? '\n' : ' · ')
+  const codexLabel = pendingConfirmation ? project.join('\n') : projectLabel
   const label = name === 'permission-denied' && input.platform === 'win32'
     ? WINDOWS_PERMISSION_DENIED_LABEL
     : LABELS[name]

@@ -12,9 +12,8 @@
     <main id="shell" data-state="booting" data-confirmation-placement="below">
       <div id="bubble-stack" aria-label="任务进度" aria-live="polite"></div>
       <section id="task-banner" class="task-banner" aria-label="编程任务" hidden>
-        <header class="task-list-heading"><span data-task-count></span><button data-task-hide type="button" aria-label="隐藏任务卡片，任务继续运行">×</button></header>
+        <header class="task-list-heading"><span data-task-count></span><button data-task-expand type="button" aria-expanded="false" hidden>展开</button><button data-task-hide type="button" aria-label="隐藏任务卡片，任务继续运行">×</button></header>
         <div data-task-list class="task-list"></div>
-        <button data-task-expand type="button" aria-expanded="false" hidden>展开</button>
       </section>
       <div id="orb" role="img" aria-label="Nova Audio Agent 正在启动">
         <canvas class="orb-canvas" aria-hidden="true"></canvas>
@@ -48,7 +47,7 @@
         <span id="codex-expiry" aria-hidden="true"></span>
         <span id="codex-confirmation-actions" aria-label="工作区确认操作" hidden>
           <button id="codex-confirm" type="button" aria-label="确认工作区操作">✓</button>
-          <button id="codex-allow-session" type="button" aria-label="本会话始终允许该执行器的权限请求" hidden>本会话允许</button>
+          <button id="codex-allow-session" type="button" aria-label="本会话内允许该执行器的权限请求" hidden>本会话内允许</button>
           <button id="codex-cancel" type="button" aria-label="取消工作区操作">×</button>
         </span>
       </p>

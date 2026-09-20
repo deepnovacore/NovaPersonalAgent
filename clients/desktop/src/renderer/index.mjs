@@ -1274,6 +1274,7 @@ async function boot() {
     else handleBackendExit()
     const microphone = await refreshMicrophonePermission()
     if (microphone === 'granted') {
+      axes.muted = bootstrap.startMuted === true
       await activateCapture()
     }
   } catch {

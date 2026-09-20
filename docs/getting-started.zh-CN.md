@@ -185,17 +185,18 @@ DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
 | `NOVA_AUDIO_AGENT_CODEX_APPROVAL_MODE` | `codex` | 否 | ask | Codex 审批模式。 |
 | `NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH` | `core` | 否 | balanced | 意图理解的最大澄清深度。 |
 | `NOVA_AUDIO_AGENT_PLAN_READBACK` | `core` | 否 | summary | 规划回读模式。 |
+| `NOVA_AUDIO_AGENT_GENERATE_PLAN` | `core` | 否 | true | 执行前生成计划。 |
 | `NOVA_AUDIO_AGENT_PLANNER_MODEL` | `core` | 否 | 无 | 可选的规划模型覆盖。 |
 | `NOVA_AUDIO_AGENT_PROGRESS_BUBBLES` | `core` | 否 | milestones | 进度气泡显示模式。 |
 | `NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG` | `core` | 否 | ~/.nova-audio-agent/capabilities.json | 能力注册表路径。 |
 | `NOVA_AUDIO_AGENT_SEARCH_PROVIDER` | `search` | 否 | tavily | CLI 或 CI 搜索提供方覆盖。 |
 | `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` | `search` | 否 | 无 | 网页搜索 MCP 地址覆盖；选择 MCP 且未设置时使用已核对的百炼预设。 |
-| `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` | `search` | 否 | web_search | 网页搜索 MCP 工具覆盖（通用默认 web_search；百炼预设 bailian_web_search）。 |
+| `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` | `search` | 否 | web_search | 网页搜索 MCP 工具覆盖（通用默认 web_search；百炼预设 search_pro）。 |
 | `NOVA_AUDIO_AGENT_KNOWLEDGE_PATH` | `core` | 否 | ~/.nova-audio-agent/knowledge.sqlite | 知识库 SQLite 数据库路径。 |
 | `NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER` | `core` | 否 | dashscope | 知识库 embedding 提供方。 |
 | `NOVA_AUDIO_AGENT_EMBEDDING_MODEL` | `core` | 否 | text-embedding-v4 | 知识库 embedding 模型。 |
-| `NOVA_AUDIO_AGENT_MEMORY_CONNECTION` | `core` | 否 | disabled | 记忆连接：disabled、local 或 remote。 |
-| `NOVA_AUDIO_AGENT_MEMORY_PROVIDER` | `core` | 否 | 无 | 本地引擎：voicemem。远程引擎由服务端选择。 |
+| `NOVA_AUDIO_AGENT_MEMORY_CONNECTION` | `core` | 否 | local | 记忆连接：disabled、local 或 remote。 |
+| `NOVA_AUDIO_AGENT_MEMORY_PROVIDER` | `core` | 否 | 无 | 本地引擎：mem0（默认）或 voicemem。远程引擎由服务端选择。 |
 | `NOVA_AUDIO_AGENT_BLACKBOARD_PATH` | `core` | 否 | ~/.nova-audio-agent/blackboard.sqlite | 会话恢复数据库路径。 |
 | `NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID` | `core` | 否 | local | 稳定的会话恢复所有者。 |
 | `NOVA_AUDIO_AGENT_MEMORY_URL` | `core` | 选择该能力时 | 无 | HTTP 记忆服务地址；仅 HTTPS 或数字回环 HTTP。 |
@@ -241,13 +242,13 @@ DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
 | `NOVA_ORB_OPAQUE` | `core` | 否 | 0 | 使用不透明桌面悬浮球窗口。 |
 <!-- END GENERATED ENV CONTRACT -->
 
-接入宿主管理的共享记忆服务时，设置 `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`，并显式提供 `NOVA_AUDIO_AGENT_MEMORY_URL` 与宿主签发的 `NOVA_AUDIO_AGENT_MEMORY_TOKEN`。地址仅支持 HTTPS 或数字回环 HTTP，不接受路径、查询参数、内嵌凭据和重定向。身份由令牌绑定；`MEMORY_PATH` 和 `MEMORY_USER_ID` 仅用于本地 VoiceMem。偏好缓存在打开及成功记住、召回、删除后刷新。此客户端不负责部署服务，也不向模型开放身份选择。
+接入宿主管理的共享记忆服务时，设置 `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`，并显式提供 `NOVA_AUDIO_AGENT_MEMORY_URL` 与宿主签发的 `NOVA_AUDIO_AGENT_MEMORY_TOKEN`。地址仅支持 HTTPS 或数字回环 HTTP，不接受路径、查询参数、内嵌凭据和重定向。身份由令牌绑定；`MEMORY_PATH` 和 `MEMORY_USER_ID` 仅用于本地 mem0 / VoiceMem。偏好缓存在打开及成功记住、召回、删除后刷新。此客户端不负责部署服务，也不向模型开放身份选择。
 
 ### 能力注册表与可选 MCP 搜索
 
 运行时读取 `~/.nova-audio-agent/capabilities.json`，可用 `NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG` 指定路径。默认文件不存在时使用内置值：搜索、摄像头、Coding 开启，知识库关闭。显式指定的文件缺失或格式错误会阻止启动，错误信息不包含文件内容或密钥。模块按「环境变量覆盖 > 注册表 > 默认值」生效；生产装配会记录覆盖变量的名称。关闭搜索不需要任何搜索凭据；选择 MCP 不需要 Tavily Key。
 
-完整配置示例见 [英文接入说明](getting-started.md#optional-capability-registry-and-mcp-search)。百炼 Streamable HTTP 预设是 `https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp`，使用 `Authorization: Bearer ${DASHSCOPE_API_KEY}`，工具名为 `bailian_web_search`。已于 2026-09-05 核对[官方外部调用文档](https://docs.agent.bailian.aliyun.com/zh/mcp/external-invocation)和[联网搜索文档](https://help.aliyun.com/zh/model-studio/web-search/)，运行时仍通过 `tools/list` 核对工具名。其他服务可用 `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` / `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` 覆盖。
+完整配置示例见 [英文接入说明](getting-started.md#optional-capability-registry-and-mcp-search)。百炼 Streamable HTTP 预设是 `https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp`，使用 `Authorization: Bearer ${DASHSCOPE_API_KEY}`，工具名为 `search_pro`。已于 2026-09-19 实测该预设，接口见[官方工具文档](https://help.aliyun.com/zh/model-studio/token-plan-harness-tool)，运行时仍通过 `tools/list` 核对工具名。其他服务可用 `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` / `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` 覆盖。
 
 `novaaudio doctor` 与运行时共用验证器，显示模块状态、单个服务器失败原因和环境覆盖。`missing_environment:变量名` 表示缺少引用的凭据；`insecure_mcp_endpoint` 表示地址或 HTTP 鉴权头不符合规则；`search_tool_missing` 表示未发现配置的工具；`frontbrain_tool_budget_exceeded: N/B` 显示完整前台工具数量与预算，需减少前台选中的工具，运行时不会静默截断。
 
@@ -271,9 +272,9 @@ Windows 和真人语音验收仍需独立完成。
 
 ### 记忆引擎与连接方式
 
-本地模式设置 `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local`，使用现有 Node Worker 和 SDK；此时 `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` 可省略。共享服务设置 `MEMORY_CONNECTION=remote`，并提供地址与身份绑定令牌。远程模式不能设置 `MEMORY_PROVIDER`，引擎由服务端决定。远程不可用时明确返回不可用，不创建本地回退数据库。
+默认启用本地 mem0（`NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local`，provider 省略时为 `mem0`）。使用 `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` 切换 VoiceMem，或 `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=disabled` 停用长期记忆。mem0 原文与向量存储位于 `${MEMORY_PATH}.mem0/<用户 ID 的 SHA-256>/`，与 VoiceMem SQLite 分开；抽取与 embedding 使用配置的模型服务。共享服务设置 `MEMORY_CONNECTION=remote`，并提供地址与身份绑定令牌。远程模式不能设置 `MEMORY_PROVIDER`，引擎由服务端决定。远程不可用时明确返回不可用，不创建本地回退数据库。
 
-仅支持 `MEMORY_CONNECTION` 和本地 `MEMORY_PROVIDER`。旧 `MEMORY_BACKEND` 已移除，填写时会明确报错。单独填写 provider 不会自动启用记忆。
+仅支持 `MEMORY_CONNECTION` 和本地 `MEMORY_PROVIDER`。旧 `MEMORY_BACKEND` 已移除，填写时会明确报错。显式关闭或选择 remote 后不能填写本地 provider。
 
 运行时继续依赖 `PersonalMemoryResource`，通过可选的 `remember`、`forget`、缓存式 `responseAdaptation` 表达能力。适配器只有在满足接口保证时才能提供对应方法：`stored` 表示已经可靠保存原始记录，不代表仅接受请求，也不代表已完成抽取。证据 ID 必须有真实来源，不比较不同引擎的相关性分数。当前 HTTP 连接器要求服务满足 v1 的 preferences、remember、recall、forget 契约，不能直接指向任意 mem0 地址。原生 mem0 适配器保留在源集成分支，等待独立打包契约。只读实现可通过现有 assembly factory 注入，不暴露写入能力。
 

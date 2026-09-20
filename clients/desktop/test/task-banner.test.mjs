@@ -182,3 +182,23 @@ test('refused task cards say not executed instead of rejected', async () => {
   assert.equal(card.dataset.phase, 'refused')
   assert.equal(card.querySelector('[data-status]').textContent, '未执行')
 })
+
+test('compact task cards keep host identity and only connected active work animates', async () => {
+  const {container, list} = taskContainer()
+  const reservations = []
+  const banner = module.mountTaskBanner({container, send: () => true,
+    reserveArea: async rows => { reservations.push(rows); return {taskHeightCss: rows * 72 + 30} }})
+  const longTitle = '会话标题'.repeat(20)
+  banner.receive(frame([{...task('a', 'started'), project: '后台项目', title: longTitle}]))
+  await Promise.resolve()
+  assert.equal(list.children[0].querySelector('[data-project]').textContent, '后台项目')
+  assert.equal(list.children[0].querySelector('[data-title]').textContent, longTitle)
+  assert.equal(list.children[0].title, `后台项目 · ${longTitle}`)
+  assert.equal(container.dataset.working, 'true')
+  banner.disconnect()
+  assert.equal(container.dataset.working, 'false')
+  banner.receive(frame([{...task('a', 'failed'), project: '后台项目', title: longTitle}], 2))
+  assert.equal(container.dataset.working, 'false')
+  assert.deepEqual(reservations, [1])
+  banner.dispose()
+})

@@ -9,10 +9,33 @@ import {
   createProgressBubbleController,
   parseLastResultFrame,
   parseProgressFrame,
+  parseConversationBubble,
 } from '../src/renderer/bubbles.mjs'
 
 const workArea = {x: 0, y: 0, width: 1440, height: 900}
 const normalBounds = {x: 600, y: 300, width: 160, height: 160}
+
+test('task speech and progress retain only complete host-provided workspace and session identities', async () => {
+  const progress = {type: 'executor.progress', delegate_id: 'old-work', executor: 'codex', phase: 'working',
+    summary: '正在验证', level: 'detail', ts: 12, project: '旧工作区', title: '修复音频'}
+  const parsed = parseProgressFrame(progress)
+  assert.equal(parsed.project, '旧工作区')
+  assert.equal(parsed.title, '修复音频')
+  const speech = parseConversationBubble({type: 'caption', role: 'assistant', final: true, text: '已完成',
+    project: progress.project, title: progress.title}, 'all')
+  assert.equal(speech.project, progress.project)
+  assert.equal(speech.title, progress.title)
+  const controller = createProgressBubbleController({reserveBubbleArea: async () => ({}), render() {}, schedule: () => 1, cancel() {}})
+  await controller.push(speech)
+  assert.equal(controller.items[0].project, progress.project)
+  assert.equal(controller.items[0].title, progress.title)
+  for (const metadata of [{project: 'current'}, {project: 'bad\nlabel', title: 'session'}, {project: 'x', title: 'x'.repeat(241)}]) {
+    const item = parseProgressFrame({...progress, project: undefined, title: undefined, ...metadata})
+    assert.equal(item.project, undefined)
+    assert.equal(item.title, undefined)
+  }
+  assert.equal(parseConversationBubble({type: 'caption', role: 'assistant', final: true, text: '工作区 Fake · Session Fake'}, 'all').project, undefined)
+})
 
 test('reserves enough native area for a banner and three independent alerts', () => {
   const layout = bubbleWindowLayout({normalBounds, rows: 6, zoomFactor: 1, scaleFactor: 2, workArea})

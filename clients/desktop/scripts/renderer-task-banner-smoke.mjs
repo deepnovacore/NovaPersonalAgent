@@ -70,8 +70,42 @@ try {
   await page.goto('http://nova.test/index.html')
   await page.waitForFunction(()=>window.__socket?.readyState===1)
   const task = (work_id, project, title, summary, phase='working', ts=1) => ({work_id, executor:'codex', project, title, summary, phase, ts})
+  let revision = 0
+  for (const count of [1, 2, 5]) {
+    const compactTasks = Array.from({length: count}, (_, i) => task(`compact-${i}`, '一个很长但仍需明确展示的工作区名称', `会话 ${i + 1}：修复声音与多任务交互的长标题`, '正在检查实现和运行结果。'))
+    await page.evaluate(({tasks, revision}) => window.__frame({type:'executor.tasks', revision, active_project: tasks[0].project, tasks}), {tasks: compactTasks, revision: ++revision})
+    await page.waitForFunction(() => !document.querySelector('#task-banner').hidden)
+    if (count > 3) await page.locator('[data-task-expand]').click()
+    await page.waitForFunction(count => document.querySelectorAll('.task-card:not([hidden])').length === count, count)
+    for (const factor of [1, 1.5, 2]) {
+      zoom = factor
+      position = {x: 1800, y: 1000, width: 160, height: 160}
+      await page.evaluate(z => document.documentElement.style.zoom = z, zoom)
+      await page.evaluate(view => window.__bubbleLayout(view), await layout())
+      const geometry = await page.locator('#task-banner').evaluate(banner => ({
+        width: parseFloat(getComputedStyle(banner).width), height: parseFloat(getComputedStyle(banner).height),
+        rows: [...banner.querySelectorAll('.task-card:not([hidden])')].map(card => parseFloat(getComputedStyle(card).height)),
+        buttons: [...banner.querySelectorAll('button:not([hidden])')].map(button => parseFloat(getComputedStyle(button).height)),
+        overlay: getComputedStyle(banner, '::after').pointerEvents,
+        animation: getComputedStyle(banner, '::after').animationName,
+      }))
+      assert.equal(geometry.width, 320)
+      assert.ok(geometry.rows.every(height => height === 72))
+      assert.ok(geometry.buttons.every(height => height >= 28))
+      assert.equal(geometry.overlay, 'none')
+      assert.equal(geometry.animation, 'none', 'reduced motion disables shimmer')
+      const card = await page.locator('#task-banner').boundingBox()
+      assert.ok(card.y + card.height <= page.viewportSize().height + 1)
+      if (factor === 1) assert.equal(geometry.height, 30 + count * 72)
+      await page.screenshot({path: `${output}/compact-${count}-tasks-${factor}.png`})
+    }
+    if (count > 3) await page.locator('[data-task-expand]').click()
+  }
+  zoom = 1
+  position = {x: 400, y: 400, width: 160, height: 160}
+  await page.evaluate(() => document.documentElement.style.zoom = 1)
   const tasks = Array.from({length: 6}, (_, i) => task(String(i), `工作区 ${i+1}`, `编程任务 ${i+1}`, '正在检查实现和运行结果。'))
-  await page.evaluate(tasks=>window.__frame({type:'executor.tasks',revision:1,active_project:'工作区 1',tasks}),tasks)
+  await page.evaluate(tasks=>window.__frame({type:'executor.tasks',revision:100,active_project:'工作区 1',tasks}),tasks)
   await page.waitForFunction(()=>!document.querySelector('#task-banner').hidden)
   assert.equal(await page.locator('.task-card:visible').count(), 3)
   assert.equal(await page.locator('[data-task-expand]').textContent(), '展开其余 3 个任务')
@@ -107,6 +141,12 @@ try {
   assert.ok(alert.y+alert.height <= orb.y+1, 'chat stays above orb')
   assert.ok(cards.y >= orb.y+orb.height, 'cards stay below orb with chat present')
   await page.screenshot({path:`${output}/tasks-and-chat.png`})
+  await page.evaluate(() => {
+    window.__settingsChanged({progressBubbles:'all'})
+    window.__frame({type:'caption',role:'assistant',final:true,text:'任务已完成，验证结果正常。',project:'后台工作区',title:'音频修复',sequence:9})
+  })
+  await page.waitForFunction(() => document.querySelector('.progress-bubble-origin')?.textContent === '后台工作区 · 音频修复')
+  await page.screenshot({path:`${output}/host-task-speech.png`})
   await page.locator('[data-task-hide]').click()
   assert.equal(await page.locator('#task-banner').isVisible(),false)
   await page.locator('#last-result').dispatchEvent('click')

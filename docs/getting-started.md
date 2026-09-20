@@ -207,17 +207,18 @@ inputs are intentionally excluded.
 | `NOVA_AUDIO_AGENT_CODEX_APPROVAL_MODE` | `codex` | No | ask | Codex approval mode. |
 | `NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH` | `core` | No | balanced | Maximum clarification depth for intake. |
 | `NOVA_AUDIO_AGENT_PLAN_READBACK` | `core` | No | summary | Plan readback mode. |
+| `NOVA_AUDIO_AGENT_GENERATE_PLAN` | `core` | No | true | Generate a plan before execution. |
 | `NOVA_AUDIO_AGENT_PLANNER_MODEL` | `core` | No | None | Optional planner model override. |
 | `NOVA_AUDIO_AGENT_PROGRESS_BUBBLES` | `core` | No | milestones | Progress bubble display mode. |
 | `NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG` | `core` | No | ~/.nova-audio-agent/capabilities.json | Capabilities registry path. |
 | `NOVA_AUDIO_AGENT_SEARCH_PROVIDER` | `search` | No | tavily | CLI or CI search provider override. |
 | `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` | `search` | No | None | Web search MCP endpoint override; unset uses the verified Bailian preset when MCP is selected. |
-| `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` | `search` | No | web_search | Web search MCP tool override (generic default web_search; Bailian preset bailian_web_search). |
+| `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` | `search` | No | web_search | Web search MCP tool override (generic default web_search; Bailian preset search_pro). |
 | `NOVA_AUDIO_AGENT_KNOWLEDGE_PATH` | `core` | No | ~/.nova-audio-agent/knowledge.sqlite | Knowledge SQLite database path. |
 | `NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER` | `core` | No | dashscope | Knowledge embedding provider. |
 | `NOVA_AUDIO_AGENT_EMBEDDING_MODEL` | `core` | No | text-embedding-v4 | Knowledge embedding model. |
-| `NOVA_AUDIO_AGENT_MEMORY_CONNECTION` | `core` | No | disabled | Memory connection: disabled, local, or remote. |
-| `NOVA_AUDIO_AGENT_MEMORY_PROVIDER` | `core` | No | None | Local engine: voicemem. Remote engines are service-owned. |
+| `NOVA_AUDIO_AGENT_MEMORY_CONNECTION` | `core` | No | local | Memory connection: disabled, local, or remote. |
+| `NOVA_AUDIO_AGENT_MEMORY_PROVIDER` | `core` | No | None | Local engine: mem0 (default) or voicemem. Remote engines are service-owned. |
 | `NOVA_AUDIO_AGENT_BLACKBOARD_PATH` | `core` | No | ~/.nova-audio-agent/blackboard.sqlite | Conversation recovery database path. |
 | `NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID` | `core` | No | local | Stable conversation recovery owner. |
 | `NOVA_AUDIO_AGENT_MEMORY_URL` | `core` | When selected | None | HTTP memory service origin; HTTPS or numeric loopback HTTP. |
@@ -263,7 +264,7 @@ inputs are intentionally excluded.
 | `NOVA_ORB_OPAQUE` | `core` | No | 0 | Use an opaque desktop orb window. |
 <!-- END GENERATED ENV CONTRACT -->
 
-For a host-managed shared memory service, set `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`, an explicit origin in `NOVA_AUDIO_AGENT_MEMORY_URL`, and its host-issued `NOVA_AUDIO_AGENT_MEMORY_TOKEN`. Only HTTPS or numeric loopback HTTP is accepted; URL paths, query strings, embedded credentials, and redirects are rejected. The token fixes the identity; `MEMORY_PATH` and `MEMORY_USER_ID` apply only to local VoiceMem. Preferences refresh on open and successful remember, recall, or forget calls. This client does not provision the service or expose identity selection to the model.
+For a host-managed shared memory service, set `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`, an explicit origin in `NOVA_AUDIO_AGENT_MEMORY_URL`, and its host-issued `NOVA_AUDIO_AGENT_MEMORY_TOKEN`. Only HTTPS or numeric loopback HTTP is accepted; URL paths, query strings, embedded credentials, and redirects are rejected. The token fixes the identity; `MEMORY_PATH` and `MEMORY_USER_ID` apply only to local mem0 / VoiceMem. Preferences refresh on open and successful remember, recall, or forget calls. This client does not provision the service or expose identity selection to the model.
 
 ### Optional capability registry and MCP search
 
@@ -279,8 +280,8 @@ Tavily remains the default. Set `modules.search.enabled` to `false` to disable s
       "enabled": true,
       "provider": "mcp",
       "mcp": {
-        "url": "https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp",
-        "tool": "bailian_web_search",
+        "url": "https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp",
+        "tool": "search_pro",
         "headers": {"authorization": "Bearer ${DASHSCOPE_API_KEY}"}
       }
     }
@@ -320,11 +321,11 @@ and MCP retrieval passed on 2026-09-05; Windows and human-voice acceptance remai
 
 ### Memory providers and connections
 
-Use `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local` for the local Node Worker and SDK; `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` is optional in this mode. Use `remote` for the shared HTTP service, with its URL and identity-bound token. Do not set `MEMORY_PROVIDER` for a remote connection: its engine is selected by the service. An unavailable remote service reports unavailable; it never creates a local fallback database.
+Local Node memory is enabled by default; an omitted `NOVA_AUDIO_AGENT_MEMORY_PROVIDER` selects mem0. Set it to `voicemem` to choose VoiceMem. Use `remote` for the shared HTTP service, with its URL and identity-bound token. Do not set `MEMORY_PROVIDER` for a remote connection: its engine is selected by the service. An unavailable remote service reports unavailable; it never creates a local fallback database.
 
-Only `MEMORY_CONNECTION` and the local `MEMORY_PROVIDER` selector are supported. `MEMORY_BACKEND` has been removed and is rejected with a migration error. A provider without an enabled local connection is rejected rather than silently enabling memory.
+Only `MEMORY_CONNECTION` and the local `MEMORY_PROVIDER` selector are supported. `MEMORY_BACKEND` has been removed and is rejected with a migration error. An explicit provider is rejected when the connection is disabled or remote.
 
-The runtime consumes `PersonalMemoryResource`, including optional `remember`, `forget`, and cached `responseAdaptation`. Adapter methods must only exist when their guarantees can be met. In particular, `stored` means durable admission, not merely acceptance or completed extraction. Evidence IDs must refer to real sources; provider relevance scores are not comparable across engines. The HTTP connector currently requires the documented v1 preferences, remember, recall and forget service contract. An arbitrary mem0 endpoint is not that contract. The native mem0 adapter remains in the integration source branch pending an isolated packaging contract. A read-only provider can be injected through the existing assembly factory without advertising writes.
+The runtime consumes `PersonalMemoryResource`, including optional `remember`, `forget`, and cached `responseAdaptation`. Adapter methods must only exist when their guarantees can be met. In particular, `stored` means durable admission, not merely acceptance or completed extraction. Evidence IDs must refer to real sources; provider relevance scores are not comparable across engines. The HTTP connector currently requires the documented v1 preferences, remember, recall and forget service contract. An arbitrary mem0 endpoint is not that contract. Local mem0 is enabled by default (`MEMORY_CONNECTION=local`, omitted provider selects `mem0`). Set `MEMORY_PROVIDER=voicemem` for VoiceMem or `MEMORY_CONNECTION=disabled` to opt out. The ledger and vectors live under `${MEMORY_PATH}.mem0/<SHA-256 of user ID>/`; extraction and embeddings use the configured model endpoint. Desktop builds retain separate Node/Electron SQLite binaries. A read-only provider can be injected through the existing assembly factory without advertising writes.
 
 The small preference cache is a disposable projection, not another writable memory store.
 
