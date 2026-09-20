@@ -1,3 +1,4 @@
+import {t} from './locale.mjs'
 import {EXECUTOR_APPROVAL} from './wire-frame-types.mjs'
 const MAX_PROPOSAL_ID_CODE_POINTS = 128
 const PYTHON_BLANK_CHARACTERS = new Set([
@@ -233,11 +234,11 @@ function parseLocalDetail(detail, kind) {
 }
 
 function approvalOperation(detail) {
-  if (detail.kind === 'permissions') return `提升权限：${detail.scope}`
-  if (detail.kind === 'command_execution' || detail.kind === 'network') return `${detail.kind === 'network' ? '访问网络' : '执行命令'}：${detail.command}${detail.scope ? `；${detail.scope}` : ''}`
+  if (detail.kind === 'permissions') return t("提升权限：{0}", detail.scope)
+  if (detail.kind === 'command_execution' || detail.kind === 'network') return `${detail.kind === 'network' ? t("访问网络") : t("执行命令")}：${detail.command}${detail.scope ? `；${detail.scope}` : ''}`
   const paths = detail.changes.slice(0, 3).map(change => change.path).join('、')
-  const suffix = detail.changes.length > 3 ? ` 等 ${detail.changes.length} 个文件` : ''
-  return `修改文件：${paths}${suffix}`
+  const suffix = detail.changes.length > 3 ? t(" 等 {0} 个文件", detail.changes.length) : ''
+  return t("修改文件：{0}{1}", paths, suffix)
 }
 
 function validText(value, limit) {

@@ -1,3 +1,4 @@
+import {setLanguage, currentLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure} from './desktop-startup.mjs'
 import {VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
@@ -399,8 +400,12 @@ function wait(ms, schedule = setTimeout) {
   return new Promise(resolve => schedule(resolve, ms))
 }
 
+function localizedWindowOptions(options) {
+  return {...options, ...(options.title ? {title: t(options.title)} : {}), webPreferences: {...options.webPreferences, additionalArguments: [`--nova-language=${currentLanguage()}`]}}
+}
+
 async function createWindow(launchId) {
-  const window = new BrowserWindow(browserWindowOptions(preload, launchId, { opaque }))
+  const window = new BrowserWindow(localizedWindowOptions(browserWindowOptions(preload, launchId, { opaque })))
   const positionFile = windowPositionFile()
   const primary = screen.getPrimaryDisplay().workArea
   const fallback = { x: primary.x + primary.width - 208, y: primary.y + 24 }
@@ -420,7 +425,7 @@ function openMemoryBoard(launchId) {
     boardWindow.focus()
     return
   }
-  const window = new BrowserWindow(boardWindowOptions(preload, launchId))
+  const window = new BrowserWindow(localizedWindowOptions(boardWindowOptions(preload, launchId)))
   // webContents-level walls only: the shared session's permission handlers stay
   // bound to the orb window, so the microphone grant is not rebound to the board.
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -447,7 +452,7 @@ function openSettingsWindow(launchId, { category } = {}) {
   }
   // Held for the cold-open path, where no push can reach the panel yet.
   pendingSettingsCategory = category ?? null
-  const window = new BrowserWindow(settingsWindowOptions(preload, launchId))
+  const window = new BrowserWindow(localizedWindowOptions(settingsWindowOptions(preload, launchId)))
   // Same rule as the board: webContents-level walls only. Re-binding the
   // session's permission handlers here would move the orb's microphone grant
   // onto a panel that has no business holding it.
@@ -650,22 +655,22 @@ async function applyDesktopSettings(payload, restart = false) {
 
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
-    { label: '连接 iPhone…', click: () => { void openPairingWindow() } },
-    { label: '记忆面板', click: () => openMemoryBoard(launchId) },
-    { label: '设置…', click: () => openSettingsWindow(launchId) },
-    { label: 'MCP 服务', submenu: activeMcpSubmenu(launchId) },
-    { label: '重启后台', enabled: currentSettings !== null && !lifecycleCoordinator.busy, click: async () => {
+    { label: t("连接 iPhone…"), click: () => { void openPairingWindow() } },
+    { label: t("记忆面板"), click: () => openMemoryBoard(launchId) },
+    { label: t("设置…"), click: () => openSettingsWindow(launchId) },
+    { label: t("MCP 服务"), submenu: activeMcpSubmenu(launchId) },
+    { label: t("重启后台"), enabled: currentSettings !== null && !lifecycleCoordinator.busy, click: async () => {
       try {
         const result = await applyDesktopSettings({settingsPatch: {}}, true)
         if (result.operationStatus === 'applied') return
-        dialog.showErrorBox('后台未重启', result.operationStatus === 'busy'
-          ? '另一项操作正在进行，请稍后重试。' : '重启失败，请打开设置检查配置。')
+        dialog.showErrorBox(t("后台未重启"), result.operationStatus === 'busy'
+          ? t("另一项操作正在进行，请稍后重试。") : t("重启失败，请打开设置检查配置。"))
       } catch {
-        dialog.showErrorBox('后台未重启', '重启失败，请打开设置检查配置。')
+        dialog.showErrorBox(t("后台未重启"), t("重启失败，请打开设置检查配置。"))
       }
     } },
     { type: 'separator' },
-    { label: '退出 Nova Audio Agent', click: () => app.quit() },
+    { label: t("退出 Nova Audio Agent"), click: () => app.quit() },
   ]).popup({ window: mainWindow })
 }
 
@@ -717,9 +722,9 @@ function createTray() {
   const next = new Tray(trayImage())
   next.setToolTip('Nova Audio Agent Desktop')
   next.setContextMenu(Menu.buildFromTemplate([
-    { label: '显示', click: () => wakeWord?.wake() },
+    { label: t("显示"), click: () => wakeWord?.wake() },
     { type: 'separator' },
-    { label: '退出', click: () => app.quit() },
+    { label: t("退出"), click: () => app.quit() },
   ]))
   next.on('click', () => mainWindow?.isVisible() ? hideOrb() : wakeWord?.wake())
   return next
@@ -1036,12 +1041,13 @@ async function loadStartupSettings() {
   try {
     const recovered = await restoreSettingsRecovery(settingsFile())
     settingsRecoveryAvailable = recovered !== null
-    currentSettings = recovered ?? await loadSettings(settingsFile())
+    currentSettings = recovered ?? await loadSettings(settingsFile(), app.getPreferredSystemLanguages())
     if (recovered) publishSettingsApplyStatus('recovery_pending')
     return true
   } catch (error) {
     if (error?.code === 'embedding_provider_invalid') throw error
-    currentSettings = await loadSettings(settingsFile())
+    // Recovery failed and the user may still restore the previous file; do not rewrite it here.
+    currentSettings = await loadSettings(settingsFile(), app.getPreferredSystemLanguages(), {initialize: false})
     settingsRecoveryAvailable = true
     publishSettingsApplyStatus('recovery_failed')
     openSettingsRequested = true
@@ -1051,6 +1057,7 @@ async function loadStartupSettings() {
 
 async function startSelectedCamera(camera, backendKind, smokeChannel) {
   const settingsReady = await loadStartupSettings()
+  setLanguage(currentSettings.language)
   if (settingsReady) await refreshDesktopConfiguration()
   initializeDesktopBootstrap(camera.source)
   const launchId = randomBytes(8).toString('hex')
@@ -1123,7 +1130,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       const done = rows => { clearTimeout(timer); ipcMain.removeListener('nova:camera:devices-result', receive); resolve(rows) }
       const receive = (reply, value) => {
         if (reply.sender !== renderer || value?.id !== id) return
-        done((Array.isArray(value.devices) ? value.devices : []).slice(0, 32).filter(item => typeof item.deviceId === 'string' && item.deviceId.length <= 256 && !/[\x00-\x1f]/u.test(item.deviceId)).map((item, index) => ({deviceId: item.deviceId, label: typeof item.label === 'string' ? item.label.slice(0, 128) : `摄像头 ${index + 1}`})))
+        done((Array.isArray(value.devices) ? value.devices : []).slice(0, 32).filter(item => typeof item.deviceId === 'string' && item.deviceId.length <= 256 && !/[\x00-\x1f]/u.test(item.deviceId)).map((item, index) => ({deviceId: item.deviceId, label: typeof item.label === 'string' ? item.label.slice(0, 128) : t("摄像头 {0}", index + 1)})))
       }
       const timer = setTimeout(() => done([]), 5000)
       ipcMain.on('nova:camera:devices-result', receive)
@@ -1213,10 +1220,10 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     clearingConversation = (async () => {
       try {
         const choice = await dialog.showMessageBox(window, {
-          type: 'question', title: '清除近期会话记录',
-          message: '清除近期对话、摘要和会话中的任务记录？',
-          detail: '后台任务会继续运行，旧任务结果不会重新写入本次会话。长期个人记忆不受影响。',
-          buttons: ['取消', '清除记录'], defaultId: 0, cancelId: 0, noLink: true,
+          type: 'question', title: t("清除近期会话记录"),
+          message: t("清除近期对话、摘要和会话中的任务记录？"),
+          detail: t("后台任务会继续运行，旧任务结果不会重新写入本次会话。长期个人记忆不受影响。"),
+          buttons: [t("取消"), t("清除记录")], defaultId: 0, cancelId: 0, noLink: true,
         })
         if (choice.response !== 1) return {canceled: true}
         if (owner !== backendControl || generation !== backendGeneration || window !== boardWindow || window.isDestroyed()) return {error: 'unavailable'}
@@ -1377,7 +1384,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('knowledge action rejected')
     const owner = backendControl, generation = settingsGeneration
     const knowledgeActions = createKnowledgeActions({
-      pick: properties => dialog.showOpenDialog(settingsWindow, {title: '导入知识库', properties}),
+      pick: properties => dialog.showOpenDialog(settingsWindow, {title: t("导入知识库"), properties}),
       request: (method, params) => {
         if (!owner || owner !== backendControl || generation !== settingsGeneration
           || runtimeCapabilities?.modules?.knowledge?.enabled !== true) throw new Error('knowledge unavailable')
@@ -1618,9 +1625,9 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   }
   if (!settingsReady) {
     void dialog.showMessageBox(mainWindow, {
-      type: 'error', message: '设置恢复未完成，后端尚未启动',
-      detail: `恢复记录已保留：${settingsFile()}.recovery\n请修复该文件或配置冲突，再在设置中点击“恢复上次可用设置”。`,
-      buttons: ['打开配置目录', '稍后处理'], cancelId: 1,
+      type: 'error', message: t("设置恢复未完成，后端尚未启动"),
+      detail: t("恢复记录已保留：{0}.recovery\n请修复该文件或配置冲突，再在设置中点击“恢复上次可用设置”。", settingsFile()),
+      buttons: [t("打开配置目录"), t("稍后处理")], cancelId: 1,
     }).then(result => {
       if (result.response === 0) return shell.openPath(dirname(settingsFile()))
     }).catch(() => console.error('[desktop-diagnostic] settings_recovery_help_unavailable'))
@@ -1738,9 +1745,12 @@ if (packagedSourceRollbackUnavailable) {
       iconFile: resolve(packageRoot, 'resources/icon-source/1024x1024.png'),
     })
     return start()
-  }).catch(error => {
+  }).catch(async error => {
+    // start() can fail before the language is applied; resolve the saved preference first so the
+    // one message that matters most is not stuck in the default language. Never write here.
+    try { setLanguage((await loadSettings(settingsFile(), app.getPreferredSystemLanguages(), {initialize: false})).language) } catch { /* keep the default */ }
     reportStartupFailure(error, {
-      showError: message => dialog.showErrorBox('向量服务配置不受支持', `${message}\n设置文件：${settingsFile()}（如有 .recovery 文件也需检查）`),
+      showError: message => dialog.showErrorBox(t("向量服务配置不受支持"), t("{0}\n设置文件：{1}（如有 .recovery 文件也需检查）", message, settingsFile())),
     })
     app.quit()
   })

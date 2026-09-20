@@ -1,10 +1,11 @@
+import {t} from './locale.mjs'
 import {EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT} from './wire-frame-types.mjs'
 import {parseProgressFrame, validProjectLabel} from './bubbles.mjs'
 
 const RUNNING = new Set(['started', 'working'])
 const AUTO_HIDE = new Set(['completed', 'cancelled'])
 const PHASES = new Set([...RUNNING, ...AUTO_HIDE, 'failed', 'refused', 'unknown'])
-const STATUS = {started: '已开始', working: '进行中', completed: '已完成', cancelled: '已停止', failed: '执行失败', refused: '未执行', unknown: '结果待确认'}
+const STATUS = {started: t("已开始"), working: t("进行中"), completed: t("已完成"), cancelled: t("已停止"), failed: t("执行失败"), refused: t("未执行"), unknown: t("结果待确认")}
 
 export function parseTaskSnapshot(frame) {
   if (!frame || frame.type !== EXECUTOR_TASKS || !Number.isSafeInteger(frame.revision) || frame.revision < 0
@@ -97,12 +98,12 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
     if (action === 'cancel') cancelling.add(item.work_id)
     const timer = schedule(() => {
       pending.delete(request_id); cancelling.delete(item.work_id)
-      errors.set(item.work_id, '操作响应超时，请核对任务状态后重试。'); emit()
+      errors.set(item.work_id, t("操作响应超时，请核对任务状态后重试。")); emit()
     }, 10000)
     pending.set(request_id, {...request, timer})
     if (!send(request)) {
       cancel(timer); pending.delete(request_id); cancelling.delete(item.work_id)
-      errors.set(item.work_id, '连接不可用，请稍后重试。')
+      errors.set(item.work_id, t("连接不可用，请稍后重试。"))
     }
     emit(); return true
   }
@@ -113,7 +114,7 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
       || !['opened', 'cancelling', 'not_running', 'unavailable', 'failed'].includes(result.status)) return false
     cancel(request.timer); pending.delete(result.request_id)
     if (result.status !== 'cancelling') cancelling.delete(result.work_id)
-    const error = {not_running: '任务已结束，无法继续停止。', unavailable: '此任务的项目目录暂不可用。', failed: '操作未成功，请稍后重试。'}[result.status]
+    const error = {not_running: t("任务已结束，无法继续停止。"), unavailable: t("此任务的项目目录暂不可用。"), failed: t("操作未成功，请稍后重试。")}[result.status]
     if (error) errors.set(result.work_id, error)
     emit(); return true
   }
@@ -153,7 +154,7 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
       if (!card) {
         card = container.ownerDocument.createElement('article')
         card.className = 'task-card'
-        card.innerHTML = '<div class="task-card-heading"><span data-project></span><span aria-hidden="true"> · </span><strong data-title></strong></div><p data-summary></p><p data-error role="alert" hidden></p><span data-status></span><div class="task-card-footer"><button data-open type="button" aria-label="打开项目"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3h7v7M21 3l-11 11M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></svg></button><button data-stop type="button" aria-label="停止任务" title="停止任务"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></button></div>'
+        card.innerHTML = t("<div class=\"task-card-heading\"><span data-project></span><span aria-hidden=\"true\"> · </span><strong data-title></strong></div><p data-summary></p><p data-error role=\"alert\" hidden></p><span data-status></span><div class=\"task-card-footer\"><button data-open type=\"button\" aria-label=\"打开项目\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M14 3h7v7M21 3l-11 11M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5\"/></svg></button><button data-stop type=\"button\" aria-label=\"停止任务\" title=\"停止任务\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"2\"/></svg></button></div>")
         for (const [selector, action] of [['[data-open]', 'open'], ['[data-stop]', 'cancel']]) card.querySelector(selector).addEventListener('click', () => {controller.select(task.work_id); controller.action(action)})
         cards.set(task.work_id, card); list.append(card)
       }
@@ -163,18 +164,18 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
       set('[data-title]', task.title)
       set('[data-project]', task.project)
       set('[data-summary]', task.summary)
-      set('[data-status]', !view.connected ? '连接已断开' : task.cancelling ? '正在停止' : STATUS[task.phase])
+      set('[data-status]', !view.connected ? t("连接已断开") : task.cancelling ? t("正在停止") : STATUS[task.phase])
       set('[data-error]', task.error)
       card.querySelector('[data-summary]').hidden = !!task.error
       card.title = `${task.project} · ${task.title}`
       card.querySelector('[data-error]').hidden = !task.error
       card.querySelector('[data-open]').disabled = !view.connected || task.opening
-      card.querySelector('[data-open]').title = platform === 'darwin' ? '在 Finder 中打开项目' : '在文件管理器中打开项目'
+      card.querySelector('[data-open]').title = platform === 'darwin' ? t("在 Finder 中打开项目") : t("在文件管理器中打开项目")
       card.querySelector('[data-stop]').disabled = !view.connected || task.cancelling || !RUNNING.has(task.phase)
     }
-    container.querySelector('[data-task-count]').textContent = `任务 · ${view.tasks.length}`
+    container.querySelector('[data-task-count]').textContent = t("任务 · {0}", view.tasks.length)
     expand.hidden = view.tasks.length <= 3
-    expand.textContent = expanded ? '收起' : `展开其余 ${Math.max(0, view.tasks.length - 3)} 个任务`
+    expand.textContent = expanded ? t("收起") : t("展开其余 {0} 个任务", Math.max(0, view.tasks.length - 3))
     expand.setAttribute('aria-expanded', String(expanded))
     const rows = view.visible ? Math.min(shown.length, 5) : 0
     if (reserved !== rows) {reserved = rows; void reserveArea(rows).then(applyLayout).catch(() => {container.hidden = true})}

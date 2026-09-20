@@ -1,3 +1,4 @@
+import {t} from '../renderer/locale.mjs'
 import {
   codexCandidates,
   resolveDesktopCodex,
@@ -214,7 +215,7 @@ export function reportStartupFailure(error, {
   const code = startupFailureCode(error)
   write(`[desktop-diagnostic] startup_failure code=${code}\n`)
   if (code === 'embedding_provider_invalid') {
-    showError?.('embeddingProvider 仅支持 dashscope，后端未启动，原配置未修改。请在设置文件中明确选择云端服务后再重启。')
+    showError?.(t("embeddingProvider 仅支持 dashscope，后端未启动，原配置未修改。请在设置文件中明确选择云端服务后再重启。"))
   }
   return code
 }

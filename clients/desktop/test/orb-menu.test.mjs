@@ -21,6 +21,7 @@ test('orb restart applies saved settings through the shared transaction and repo
     const errors = []
     const coordinator = {busy: false}
     const context = {
+      t: value => value,
       Menu: {buildFromTemplate: value => { rows = value; return {popup() {}} }},
       mainWindow: {}, currentSettings: {}, lifecycleCoordinator: coordinator,
       activeMcpSubmenu: () => [],
@@ -146,11 +147,11 @@ test('the orb menu hangs MCP status off a submenu without its own separator', as
   const menu = source.slice(source.indexOf('function showOrbMenu('))
   const body = menu.slice(0, menu.indexOf('.popup('))
 
-  assert.match(body, /\{ label: 'MCP 服务', submenu: activeMcpSubmenu\(launchId\) \}/)
+  assert.match(body, /\{ label: t\("MCP 服务"\), submenu: activeMcpSubmenu\(launchId\) \}/)
   // The template's single separator is what the menu-order contract keys on.
   assert.equal((body.match(/type: 'separator'/g) || []).length, 1)
   assert.ok(
-    body.indexOf("label: 'MCP 服务'") < body.indexOf("{ type: 'separator' }"),
+    body.indexOf('label: t("MCP 服务")') < body.indexOf("{ type: 'separator' }"),
     'MCP status sits above the quit separator',
   )
 

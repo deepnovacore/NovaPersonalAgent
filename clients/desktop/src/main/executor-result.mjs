@@ -1,3 +1,4 @@
+import {t} from '../renderer/locale.mjs'
 import {parseProjectRoster, validProjectLabel, validDiagnostic} from '../renderer/bubbles.mjs'
 
 const OUTCOMES = new Set(['ok', 'failed', 'refused', 'unknown', 'cancelled'])
@@ -46,14 +47,14 @@ export function parseExecutorResult(value) {
 
 export function executorResultDialogOptions(result) {
   const outcome = {
-    ok: '已完成', failed: '失败', refused: '已拒绝', unknown: '结果未知', cancelled: '已停止',
+    ok: t("已完成"), failed: t("失败"), refused: t("已拒绝"), unknown: t("结果未知"), cancelled: t("已停止"),
   }[result.outcome]
   return Object.freeze({
     type: result.outcome === 'ok' ? 'info' : 'warning',
-    title: '任务结果',
+    title: t("任务结果"),
     message: outcome,
-    detail: `${result.project ?? result.executor} · ${result.title ?? result.delegateId}\n${result.summary}${result.diagnostic === undefined ? "" : `\n\n${result.executor} ${result.diagnostic.method} (${result.diagnostic.server_code})\n${result.diagnostic.message}`}\n\n变更文件：${result.changedFiles === null ? '未知' : result.changedFiles}\n开始：${formatSeconds(result.startedAt)}\n结束：${formatSeconds(result.endedAt)}\n耗时：${formatSeconds(result.endedAt - result.startedAt, false)}`,
-    buttons: ['打开 记忆面板', '关闭'],
+    detail: t("{0} · {1}\n{2}{3}\n\n变更文件：{4}\n开始：{5}\n结束：{6}\n耗时：{7}", result.project ?? result.executor, result.title ?? result.delegateId, result.summary, result.diagnostic === undefined ? "" : `\n\n${result.executor} ${result.diagnostic.method} (${result.diagnostic.server_code})\n${result.diagnostic.message}`, result.changedFiles === null ? t("未知") : result.changedFiles, formatSeconds(result.startedAt), formatSeconds(result.endedAt), formatSeconds(result.endedAt - result.startedAt, false)),
+    buttons: [t("打开 记忆面板"), t("关闭")],
     defaultId: 0,
     cancelId: 1,
     noLink: true,
@@ -69,7 +70,7 @@ export function executorResultMenuTemplate(value, openResult) {
   return [
     ...roster.flatMap(entry => [
       {label: entry.name, enabled: false},
-      ...entry.running.map(work => ({label: `进行中 · ${work.title}`, enabled: false})),
+      ...entry.running.map(work => ({label: t("进行中 · {0}", work.title), enabled: false})),
     ]),
     ...(roster.length && results.length ? [{type: 'separator'}] : []),
     ...results.map(result => ({

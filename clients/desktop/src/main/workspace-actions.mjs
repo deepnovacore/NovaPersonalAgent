@@ -1,3 +1,4 @@
+import {t} from '../renderer/locale.mjs'
 const CANCEL_RESPONSE = 1
 const MANAGED_WORKSPACE_HEALTH = new Set([
   'ready',
@@ -143,13 +144,13 @@ export async function coordinateBackendRetry({coordinator, retry}) {
 function firstDialog(preview) {
   const target = preview.scope === 'current_managed'
     ? `“${preview.display_name}”`
-    : `${preview.count} 个 Nova workspaces`
+    : t("{0} 个 Nova workspaces", preview.count)
   return Object.freeze({
     type: 'question',
-    title: '确认清空 workspace',
-    message: `将清空 ${target}`,
-    detail: '此操作需要先停止当前后台任务，完成后会自动尝试恢复连接。',
-    buttons: Object.freeze(['继续', '取消']),
+    title: t("确认清空 workspace"),
+    message: t("将清空 {0}", target),
+    detail: t("此操作需要先停止当前后台任务，完成后会自动尝试恢复连接。"),
+    buttons: Object.freeze([t("继续"), t("取消")]),
     defaultId: CANCEL_RESPONSE,
     cancelId: CANCEL_RESPONSE,
     noLink: true,
@@ -158,14 +159,14 @@ function firstDialog(preview) {
 
 function destructiveDialog(scope) {
   const label = scope === 'current_managed'
-    ? '永久清空当前 workspace'
-    : '永久清空全部 workspaces'
+    ? t("永久清空当前 workspace")
+    : t("永久清空全部 workspaces")
   return Object.freeze({
     type: 'warning',
-    title: '此操作不可撤销',
-    message: 'workspace 内的所有内容将被永久删除。',
-    detail: '项目记录、显示名称、Codex 历史和会话元数据会保留。',
-    buttons: Object.freeze([label, '取消']),
+    title: t("此操作不可撤销"),
+    message: t("workspace 内的所有内容将被永久删除。"),
+    detail: t("项目记录、显示名称、Codex 历史和会话元数据会保留。"),
+    buttons: Object.freeze([label, t("取消")]),
     defaultId: CANCEL_RESPONSE,
     cancelId: CANCEL_RESPONSE,
     noLink: true,

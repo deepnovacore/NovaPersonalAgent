@@ -1,15 +1,16 @@
+import {t} from './locale.mjs'
 // The board's channel rail. Channel names are executor names — the runtime
 // pins manifest.name === policy.channel — but the wire payload carries no
 // display_name, so labels are mirrored here from the manifests rather than
 // translated: renaming an executor in the UI alone would desync it from the
 // runtime and the docs.
 const CHANNEL_LABELS = Object.freeze({
-  conversation: '对话',
+  conversation: t("对话"),
   watch: 'Watch',
   guard: 'Guard',
   codex: 'Codex',
-  search: '搜索',
-  mcp__nova_knowledge: '知识库',
+  search: t("搜索"),
+  mcp__nova_knowledge: t("知识库"),
 })
 const MCP_PREFIX = /^mcp__/
 /** A dynamic external server's manifest display_name is the bare server name. */

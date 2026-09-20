@@ -1,3 +1,4 @@
+import {t} from './locale.mjs'
 // The renderer's state machine is deliberately independent of the DOM so a
 // deferred settings bridge can be exercised deterministically. Secret patches
 // are write-only: they never enter `view`, drafts, or rendered state.
@@ -260,7 +261,7 @@ export function createSettingsController({ api, render, status, notice = () => {
     if (Object.keys(secrets).length > 0) outbound.secrets = secrets
     inFlight = {submitted, restartTransitionSeen: false}
     const syncRevisionAtStart = mainSyncRevision
-    status('保存中…')
+    status(t("保存中…"))
     renderCurrent()
     try {
       const remoteView = publicPatch(await api.set(outbound))
@@ -306,9 +307,9 @@ export function createSettingsController({ api, render, status, notice = () => {
       renderCurrent()
       const failurePhase = applyFailurePhase()
       const requiresRestart = remoteView?.restarted !== false
-      status(!persisted ? remoteView?.operationStatus === 'busy' ? '另一项操作进行中，草稿未保存' : capabilityDocumentChanged ? '能力注册表已在外部修改，请关闭并重新打开设置后重试' : remoteView?.operationStatus === 'invalid' ? '配置校验失败，草稿未保存' + (Array.isArray(remoteView.problems) && remoteView.problems.length ? '：' + remoteView.problems.join(' · ') : '') : remoteView?.settingsRecoveryAvailable === true ? '未生效，已保留上次设置；请恢复后端' : '保存失败'
-        : rejectedPublicFields.length > 0 ? '部分设置未保存'
-        : confirmedView?.settingsApplyStatus === 'pending_restart' ? '已保存，待重启' : confirmedView?.settingsApplyStatus === 'applied' ? '已生效' : '设置已保存')
+      status(!persisted ? remoteView?.operationStatus === 'busy' ? t("另一项操作进行中，草稿未保存") : capabilityDocumentChanged ? t("能力注册表已在外部修改，请关闭并重新打开设置后重试") : remoteView?.operationStatus === 'invalid' ? t("配置校验失败，草稿未保存") + (Array.isArray(remoteView.problems) && remoteView.problems.length ? '：' + remoteView.problems.join(' · ') : '') : remoteView?.settingsRecoveryAvailable === true ? t("未生效，已保留上次设置；请恢复后端") : t("保存失败")
+        : rejectedPublicFields.length > 0 ? t("部分设置未保存")
+        : confirmedView?.settingsApplyStatus === 'pending_restart' ? t("已保存，待重启") : confirmedView?.settingsApplyStatus === 'applied' ? t("已生效") : t("设置已保存"))
       if (
         persisted
         && rejectedPublicFields.length === 0
@@ -355,7 +356,7 @@ export function createSettingsController({ api, render, status, notice = () => {
       }
     } catch {
       renderCurrent()
-      status('保存失败')
+      status(t("保存失败"))
       return {
         saved: false,
         view: effectiveView(),

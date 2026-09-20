@@ -1,3 +1,4 @@
+import {t} from './locale.mjs'
 export function createKnowledgePanel({document, action}) {
   const node = name => document.querySelector(`#knowledge-${name}`)
   const controls = ['files', 'folder', 'refresh', 'add-url'].map(node)
@@ -12,7 +13,7 @@ export function createKnowledgePanel({document, action}) {
     const revision = epoch
     busy = true
     controls.forEach(value => {value.disabled = true})
-    node('status').textContent = '处理中…'
+    node('status').textContent = t("处理中…")
     try {
       const result = await action(input)
       if (revision !== epoch || !enabled) return
@@ -24,7 +25,7 @@ export function createKnowledgePanel({document, action}) {
       for (const source of (state.sources ?? []).slice(0, 100)) {
         const row = element('li', '')
         row.append(element('span', `${source.title} · ${source.status}`))
-        for (const [name, label] of [['reindex', '重建索引'], ['remove', '移除']]) {
+        for (const [name, label] of [['reindex', t("重建索引")], ['remove', t("移除")]]) {
           const button = element('button', label)
           button.type = 'button'
           button.addEventListener('click', () => run({action: name, id: source.id}))
@@ -33,9 +34,9 @@ export function createKnowledgePanel({document, action}) {
         node('sources').append(row)
       }
       const failed = (state.jobs ?? []).filter(job => job.state === 'failed').length
-      const search = state.fts === false ? '；FTS5 不可用，已使用基础词法匹配（无相关性排序）。' : state.fts === true ? '；FTS5 已启用。' : ''
-      node('status').textContent = `${state.sources?.length ?? 0} 个来源${search}${failed ? `；${failed} 个失败任务，请检查文件格式、敏感内容或服务连接后重试。` : ''}`
-    } catch {if (revision === epoch) node('status').textContent = '知识库操作失败；请确认模块已启用、后端正在运行，或检查文档与服务连接。'}
+      const search = state.fts === false ? t("；FTS5 不可用，已使用基础词法匹配（无相关性排序）。") : state.fts === true ? t("；FTS5 已启用。") : ''
+      node('status').textContent = t("{0} 个来源{1}{2}", state.sources?.length ?? 0, search, failed ? t("；{0} 个失败任务，请检查文件格式、敏感内容或服务连接后重试。", failed) : '')
+    } catch {if (revision === epoch) node('status').textContent = t("知识库操作失败；请确认模块已启用、后端正在运行，或检查文档与服务连接。")}
     finally {busy = false; controls.forEach(value => {value.disabled = !enabled})}
   }
   node('files').addEventListener('click', () => run({action: 'files'}))
@@ -46,7 +47,7 @@ export function createKnowledgePanel({document, action}) {
     const next = view.capabilities?.runtime?.modules?.knowledge?.enabled === true
     const nextProvider = JSON.stringify([view.embeddingProvider, view.embeddingModel, view.modelBaseUrl])
     if (next !== enabled || nextProvider !== provider) {
-      epoch++; node('sources').replaceChildren(); node('status').textContent = '点击刷新查看知识库。'
+      epoch++; node('sources').replaceChildren(); node('status').textContent = t("点击刷新查看知识库。")
     }
     enabled = next; provider = nextProvider
     node('panel').hidden = !enabled

@@ -1,6 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
+  language: process.argv.includes('--nova-language=en') ? 'en' : 'zh-CN',
   wakeWord: Object.freeze({
     sleep: () => ipcRenderer.send('nova:wake-word:sleep'),
     wake: () => ipcRenderer.send('nova:wake-word:wake'),

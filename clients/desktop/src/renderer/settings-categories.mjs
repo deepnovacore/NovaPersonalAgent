@@ -1,19 +1,20 @@
+import {t} from './locale.mjs'
 // The panel's page-level navigation, kept DOM-free so the category table and
 // its keyboard mapping stay unit-testable. Category membership lives here and
 // never as markup attributes: the section tags themselves carry contract-pinned
 // text that additive attributes would disturb.
 export const SETTINGS_CATEGORIES = Object.freeze([
-  Object.freeze({id: 'general', label: '通用', sections: Object.freeze([
-    'wake-word-section', 'notifications-section',
+  Object.freeze({id: 'general', label: t("通用"), sections: Object.freeze([
+    'language-section', 'wake-word-section', 'notifications-section',
     'intent-section', 'proactivity-section',
   ])}),
-  Object.freeze({id: 'usage', label: '用量', sections: Object.freeze(['frontend-usage-section'])}),
-  Object.freeze({id: 'pipeline', label: '语音管线', sections: Object.freeze(['pipeline'])}),
-  Object.freeze({id: 'capabilities', label: '执行器与 MCP', sections: Object.freeze(['capabilities-section'])}),
-  Object.freeze({id: 'knowledge', label: '知识库', sections: Object.freeze(['knowledge-section'])}),
-  Object.freeze({id: 'secrets', label: 'API 密钥', sections: Object.freeze(['secrets'])}),
-  Object.freeze({id: 'phone', label: '连接 iPhone', sections: Object.freeze(['phone-connection-section'])}),
-  Object.freeze({id: 'codex', label: '编程', sections: Object.freeze([
+  Object.freeze({id: 'usage', label: t("用量"), sections: Object.freeze(['frontend-usage-section'])}),
+  Object.freeze({id: 'pipeline', label: t("语音管线"), sections: Object.freeze(['pipeline'])}),
+  Object.freeze({id: 'capabilities', label: t("执行器与 MCP"), sections: Object.freeze(['capabilities-section'])}),
+  Object.freeze({id: 'knowledge', label: t("知识库"), sections: Object.freeze(['knowledge-section'])}),
+  Object.freeze({id: 'secrets', label: t("API 密钥"), sections: Object.freeze(['secrets'])}),
+  Object.freeze({id: 'phone', label: t("连接 iPhone"), sections: Object.freeze(['phone-connection-section'])}),
+  Object.freeze({id: 'codex', label: t("编程"), sections: Object.freeze([
     'codex-approval-section', 'codex-projects',
   ])}),
 ])
