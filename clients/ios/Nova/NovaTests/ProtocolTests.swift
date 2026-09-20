@@ -7,6 +7,16 @@ import XCTest
 #endif
 
 final class ProtocolTests: XCTestCase {
+    func testLanguageInitializationPersistsAndMapsChineseVariants() {
+        let suite = "nova-language-test-" + UUID().uuidString
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertEqual(L10n.initialLanguage(defaults: defaults, languages: ["zh-Hant-TW"]), "zh-CN")
+        XCTAssertEqual(L10n.initialLanguage(defaults: defaults, languages: ["en-US"]), "zh-CN")
+        defaults.removeObject(forKey: "nova.language")
+        XCTAssertEqual(L10n.initialLanguage(defaults: defaults, languages: ["ja-JP", "zh-CN"]), "en")
+    }
+
     func testChatKeepsCompleteTurnsAndIgnoresLatePartial() {
         var transcript = ChatTranscript()
         let long = String(repeating: "完整的工作内容。", count: 300)
