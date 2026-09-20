@@ -253,10 +253,14 @@ app.whenReady().then(async () => {
       shell.style.removeProperty('--bubble-orb-y')
     })()`)
 
+    // Use the production five-button rail, not the legacy three-button fixture.
+    await window.loadFile(join(__dirname, '../src/renderer/index.html'))
+    await window.webContents.insertCSS('#orb-rail { opacity: 1 !important; pointer-events: auto !important; transition: none !important; }')
     const confirmationLayouts = []
     for (const zoomFactor of [1, 1.25, 1.5]) {
+      for (const placement of ['below', 'above']) {
       window.webContents.setZoomFactor(zoomFactor)
-      window.setSize(WINDOW_SIZE, Math.max(WINDOW_SIZE, Math.ceil(WINDOW_SIZE * zoomFactor)))
+      window.setSize(Math.ceil(WINDOW_SIZE * zoomFactor), Math.ceil(WINDOW_SIZE * zoomFactor))
       const layout = await window.webContents.executeJavaScript(`new Promise(resolve => {
         const shell = document.getElementById('shell')
         const label = document.getElementById('codex-label')
@@ -265,7 +269,9 @@ app.whenReady().then(async () => {
         const actions = document.getElementById('codex-confirmation-actions')
         const confirm = document.getElementById('codex-confirm')
         const cancel = document.getElementById('codex-cancel')
-        shell.dataset.confirmationPlacement = 'below'
+        shell.dataset.confirmationPlacement = '${placement}'
+        actions.hidden = false
+        document.getElementById('mute-toggle').disabled = false
         label.dataset.mode = 'confirmation'
         operation.textContent = '恢复 “' + '工'.repeat(120) + ' / ' + '任'.repeat(120) + '”'
         expiry.textContent = '90 秒'
@@ -282,6 +288,10 @@ app.whenReady().then(async () => {
             }
           }
           resolve({
+            controls: [...document.querySelectorAll('#orb-rail button')].map(button => ({
+              id: button.id, ...rect(button),
+              hit: document.elementFromPoint(rect(button).left + rect(button).width / 2, rect(button).top + rect(button).height / 2)?.closest('button')?.id,
+            })),
             viewport: {width: innerWidth, height: innerHeight},
             shell: rect(document.getElementById('shell')),
             orb: rect(document.getElementById('orb')),
@@ -312,7 +322,11 @@ app.whenReady().then(async () => {
           })
         }))
       })`)
-      confirmationLayouts.push({zoomFactor, ...layout})
+      confirmationLayouts.push({zoomFactor, placement, ...layout})
+      if (process.env.NOVA_CONFIRMATION_SCREENSHOT && zoomFactor === 1 && placement === 'below') {
+        require('node:fs').writeFileSync(process.env.NOVA_CONFIRMATION_SCREENSHOT, (await window.webContents.capturePage()).toPNG())
+      }
+      }
     }
     process.stdout.write(`${JSON.stringify({ naturalProject, bubbleLayouts, boxShadow, secondaryDisplays, standbyStyles, contrastDiscSizes, dormantLayout, dormantWithBubbles, confirmationLayouts })}\n`)
     if (visualSmoke) {
