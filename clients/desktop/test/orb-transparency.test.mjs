@@ -8,12 +8,14 @@ import { fileURLToPath } from 'node:url'
 const execFileAsync = promisify(execFile)
 const require = createRequire(import.meta.url)
 const electron = require('electron')
+// Cold Electron startup plus all scale/edge layouts can exceed 15 seconds on CI.
+const probeTimeout = 30_000
 const probe = fileURLToPath(new URL('../scripts/orb-transparency-probe.cjs', import.meta.url))
 
 test('message reservations keep the full orb inside the native window at screen edges', {
   skip: process.platform !== 'darwin',
 }, async () => {
-  const { stdout } = await execFileAsync(electron, [probe], { timeout: 15_000 })
+  const { stdout } = await execFileAsync(electron, [probe], { timeout: probeTimeout })
   const natural = JSON.parse(stdout.trim().split('\n').at(-1)).naturalProject
   assert.ok(natural['codex-label'].top >= natural['state-label'].bottom)
   assert.ok(natural['codex-label'].top >= natural['orb-rail'].bottom, 'restored workspace must clear controls')
@@ -46,7 +48,7 @@ test('transparent orb renders without an outer shadow', {
 }, async () => {
   const { stdout } = await execFileAsync(electron, [probe], {
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' },
-    timeout: 15_000,
+    timeout: probeTimeout,
   })
   const result = JSON.parse(stdout.trim().split('\n').at(-1))
 
@@ -58,7 +60,7 @@ test('the dormant bubble stays centred in the shrunken window', {
 }, async () => {
   const { stdout } = await execFileAsync(electron, [probe], {
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' },
-    timeout: 15_000,
+    timeout: probeTimeout,
   })
   const layout = JSON.parse(stdout.trim().split('\n').at(-1)).dormantLayout
 
@@ -106,7 +108,7 @@ test('bubble mode outranks resting so a stale attribute cannot hide the orb', {
 }, async () => {
   const { stdout } = await execFileAsync(electron, [probe], {
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' },
-    timeout: 15_000,
+    timeout: probeTimeout,
   })
   const collided = JSON.parse(stdout.trim().split('\n').at(-1)).dormantWithBubbles
 
@@ -124,7 +126,7 @@ test('the standby states yield their softened styling to high contrast', {
 }, async () => {
   const { stdout } = await execFileAsync(electron, [probe], {
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' },
-    timeout: 15_000,
+    timeout: probeTimeout,
   })
   const { normal, highContrast } = JSON.parse(stdout.trim().split('\n').at(-1)).standbyStyles
 
@@ -171,7 +173,7 @@ test('transparent orb hides every secondary text row', {
 }, async () => {
   const { stdout } = await execFileAsync(electron, [probe], {
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' },
-    timeout: 15_000,
+    timeout: probeTimeout,
   })
   const result = JSON.parse(stdout.trim().split('\n').at(-1))
 
@@ -187,7 +189,7 @@ test('confirmation capsule keeps a natural orb and compact controls visible thro
 }, async () => {
   const { stdout } = await execFileAsync(electron, [probe], {
     env: { ...process.env, ELECTRON_DISABLE_SECURITY_WARNINGS: 'true' },
-    timeout: 15_000,
+    timeout: probeTimeout,
   })
   const result = JSON.parse(stdout.trim().split('\n').at(-1))
 

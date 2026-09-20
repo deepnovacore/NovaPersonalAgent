@@ -328,7 +328,9 @@ app.whenReady().then(async () => {
       }
       }
     }
-    process.stdout.write(`${JSON.stringify({ naturalProject, bubbleLayouts, boxShadow, secondaryDisplays, standbyStyles, contrastDiscSizes, dormantLayout, dormantWithBubbles, confirmationLayouts })}\n`)
+    await new Promise((resolve, reject) => {
+      process.stdout.write(`${JSON.stringify({ naturalProject, bubbleLayouts, boxShadow, secondaryDisplays, standbyStyles, contrastDiscSizes, dormantLayout, dormantWithBubbles, confirmationLayouts })}\n`, error => error ? reject(error) : resolve())
+    })
     if (visualSmoke) {
       window.center()
       window.setAlwaysOnTop(true, 'floating')
