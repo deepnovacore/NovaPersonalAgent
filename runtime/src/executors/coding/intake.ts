@@ -44,13 +44,15 @@ export interface IntakeSession {
   delegate_id: string | null
   request: Readonly<Record<string, JsonValue>>
   opening: string
-  turns: {question: string | null; answer: string}[]
+  turns: {question: string | null; answer: string; project_question?: string; project_confirmation_superseded?: boolean}[]
   slots: IntakeSlots
   discovery: string[]
   questions_asked: number
   intent_to_proceed: boolean
   stop_asking: boolean
   pending_question: string | null
+  pending_project_question: string | null
+  confirmed_project: {project: string; turn_index: number; evidence: string} | null
   missing_goal_grace: number | null
   kind: IntakeKind | null
   execution_mode?: 'direct' | 'plan'
@@ -125,6 +127,43 @@ function evidenceOccurs(evidence: string, project: string, utterances: readonly 
   if (span === '' || !utterances.some(text => normalize(text).includes(span))) return false
   const named = roster.map(normalize).filter(name => span.includes(name) || name.includes(span))
   return named.length === 1 && named[0] === normalize(project)
+}
+
+/** Missing/misbound model fields are service failures, never additional user questions. */
+function projectConfirmationProblem(result: z.infer<typeof assessSchema>, snapshot: IntakeSession, active: string | null, roster: readonly string[]): string | null {
+  const turns = snapshot.turns
+  if (result.abandon) return null
+  const confirmation = result.project_confirmation
+  const latestProjectTurn = turns.findLastIndex(turn => turn.project_question !== undefined)
+  if (latestProjectTurn === turns.length - 1 && latestProjectTurn >= 0 && confirmation === null) {
+    return 'Interpret the latest project_question answer and return project_confirmation with its turn_index, decision and exact answer evidence.'
+  }
+  if (confirmation === null) {
+    if (!['unclear', 'create'].includes(result.kind) && result.project_evidence === null
+      && snapshot.confirmed_project?.project !== (result.project ?? active)
+      && turns.some(turn => turn.project_question === (result.project ?? active))) {
+      return 'Preserve a still-valid project confirmation by referencing its question turn and exact answer; otherwise resolve the changed target.'
+    }
+    return null
+  }
+  const turn = turns[confirmation.turn_index]
+  if (!turn?.project_question || turn.project_confirmation_superseded || confirmation.turn_index !== latestProjectTurn || !turn.answer.includes(confirmation.evidence)) {
+    return 'project_confirmation must quote the answer to the most recent host-owned project_question; never invent or reuse superseded evidence.'
+  }
+  const selected = result.project ?? active
+  if (confirmation.decision === 'confirmed') {
+    if (['create', 'unclear'].includes(result.kind) || selected !== turn.project_question) return 'A confirmed project_question must select that same existing project.'
+  } else if (confirmation.decision === 'redirected') {
+    if (result.kind === 'unclear' || result.project === null || selected === turn.project_question) {
+      return 'A redirected answer must explicitly select a different target; otherwise return rejected/unclear with kind unclear.'
+    }
+    if (result.kind !== 'create' && !evidenceOccurs(result.project_evidence ?? '', result.project, [turn.answer], roster)) {
+      return 'Redirecting to an existing project requires project_evidence naming that project in the answer to this question.'
+    }
+  } else if (result.kind !== 'unclear') {
+    return 'Rejected or unclear project answers require kind unclear. Do not create a workspace or fall back to the active project. Use redirected only for an explicit replacement target.'
+  }
+  return null
 }
 
 /** Spoken rendering of a resolution error / cancel result: code first, then what the model needs to offer. */
@@ -232,7 +271,7 @@ export class IntakeController {
       workspace: null, session_id: sessionId,
       origin_ref: originRef, state: 'open', outcome: null, delegate_id: null,
       request: structuredClone(request), opening: limit(text, 4000), turns: [], slots: emptySlots(), discovery: [],
-      questions_asked: 0, intent_to_proceed: false, stop_asking: false, pending_question: null,
+      questions_asked: 0, intent_to_proceed: false, stop_asking: false, pending_question: null, pending_project_question: null, confirmed_project: null,
       missing_goal_grace: null, kind: null, decision: null, target: null, work_order: null, title: null,
     }
     this.#assessPending = true
@@ -247,7 +286,8 @@ export class IntakeController {
     if (current.session_id !== sessionId) { this.cancel(); return }
     if (current.origin_ref === originRef) return
     if (stripLikePython(text) === '') { this.cancel(); return }
-    current.turns.push({question: current.pending_question, answer: limit(text, 2000)})
+    current.turns.push({question: current.pending_question, answer: limit(text, 2000),
+      ...(current.pending_project_question === null ? {} : {project_question: current.pending_project_question})})
     if (current.turns.length > 8) { this.#close('abandoned'); return }
     this.#modelResults.clear()
     this.#modelBudgets.clear()
@@ -260,6 +300,7 @@ export class IntakeController {
     if (current.proposal_id !== null) this.#options.invalidateProposal()
     current.proposal_id = null
     current.pending_question = null
+    current.pending_project_question = null
     current.stop_asking = current.questions_asked >= this.#budget()
     current.state = 'clarifying'
     this.#planPending = false
@@ -319,7 +360,7 @@ export class IntakeController {
       instruction: current.request.work_order ?? current.request.instruction ?? null,
       conversation_context: current.request.conversation_context ?? [],
       source_quotes: current.request.source_quotes ?? [],
-      turns: structuredClone(current.turns), slots: structuredClone(current.slots),
+      turns: structuredClone(current.turns), confirmed_project: structuredClone(current.confirmed_project), slots: structuredClone(current.slots),
       discovery: [...current.discovery], intent_to_proceed: current.intent_to_proceed,
       questions_asked: current.questions_asked, question_budget: this.#budget(),
       roster: this.#options.roster().slice(0, MAX_ROSTER), active_project: this.#options.activeProject(),
@@ -349,7 +390,10 @@ export class IntakeController {
     let stage: IntakeStage = 'assess'
     try {
       const input = this.#input(snapshot)
-      const result = await this.#model(snapshot, 'assess', assessSchema, input, abort)
+      const result = await this.#model(snapshot, 'assess', assessSchema.superRefine((result, ctx) => {
+        const problem = projectConfirmationProblem(result, snapshot, input.active_project as string | null, (input.roster as readonly RosterEntry[]).map(entry => entry.name))
+        if (problem !== null) ctx.addIssue({code: 'custom', message: problem, path: ['project_confirmation']})
+      }), input, abort)
       if (result === null) return
       let current = this.#current(snapshot.intake_id, snapshot.revision)
       if (current === null) return
@@ -368,11 +412,30 @@ export class IntakeController {
       let question = result.candidate_question?.owner === 'user' ? result.candidate_question.text : null
       const active = this.#options.activeProject()
       const project = result.project ?? (kind === 'create' ? null : active)
-      // A selected project needs quoted user evidence. For a host question, the assessor
-      // selects the project and quotes the affirmative answer; the host checks that provenance.
-      const latest = current.turns.at(-1)
-      const affirmed = latest?.question === `是在 ${project} 里做吗？`
-        && result.project_evidence != null && latest.answer.includes(result.project_evidence)
+      // The model interprets the answer; the host validates the exact question/answer provenance.
+      const confirmation = result.project_confirmation
+      if (confirmation !== null && confirmation.decision !== 'confirmed') {
+        current.turns[confirmation.turn_index]!.project_confirmation_superseded = true
+      }
+      if (kind === 'unclear' && confirmation === null) {
+        for (const turn of current.turns) if (turn.project_question !== undefined) turn.project_confirmation_superseded = true
+      }
+      const prior = current.confirmed_project
+      if (prior !== null && (kind === 'unclear' || kind === 'create' || project !== prior.project
+        || (confirmation !== null && confirmation.decision !== 'confirmed'))) {
+        current.turns[prior.turn_index]!.project_confirmation_superseded = true
+        current.confirmed_project = null
+      }
+      if (confirmation?.decision === 'confirmed' && !['unclear', 'create'].includes(kind)) {
+        current.confirmed_project = {project: project!, turn_index: confirmation.turn_index, evidence: confirmation.evidence}
+      }
+      const affirmed = current.confirmed_project?.project === project
+      let projectQuestion: string | undefined
+      if (kind === 'unclear' && confirmation?.decision === 'unclear'
+        && project === current.turns[confirmation.turn_index]?.project_question) {
+        question = `是在 ${project} 里做吗？`
+        projectQuestion = project ?? undefined
+      }
       if (kind !== 'create' && kind !== 'unclear' && project !== null && project !== active && !affirmed
         && !evidenceOccurs(result.project_evidence ?? '', project,
           this.#userEvidence(current), this.#options.roster().map(entry => entry.name))
@@ -380,14 +443,16 @@ export class IntakeController {
         this.#options.diagnostic('intake_project_evidence_missing')
         kind = 'unclear'
         question = `是在 ${project} 里做吗？`
+        projectQuestion = project
       }
       if (sessionTitle && project !== null && !this.#namedSessionEvidence(project, sessionTitle, current)) {
         kind = 'unclear'
         question = '请明确要继续的项目和会话名称。'
+        projectQuestion = undefined
       }
       current.kind = kind
       if (kind === 'unclear' || (kind === 'create' && project === null)) {
-        this.#ask(current, kind === 'create' ? '新项目叫什么名字？' : question ?? '请说明要在哪个项目里做什么。')
+        this.#ask(current, kind === 'create' ? '新项目叫什么名字？' : question ?? '请说明要在哪个项目里做什么。', projectQuestion)
         return
       }
       // Keep the user's request and later corrections together. A project affirmation is target
@@ -539,10 +604,11 @@ export class IntakeController {
     } finally { abort.abort(); this.#abort.delete(abort) }
   }
 
-  #ask(current: IntakeSession, question: string): void {
+  #ask(current: IntakeSession, question: string, project?: string): void {
     if (current.questions_asked >= this.#budget()) { this.#close('abandoned'); return }
     current.questions_asked += 1
     current.pending_question = question
+    current.pending_project_question = project ?? null
     current.state = 'clarifying'
     this.#options.fact(current, `只问下面这一个问题，不调用编码工具：${question}`)
   }
@@ -589,18 +655,20 @@ export class IntakeController {
     const budget = this.#modelBudgets.get(key) ?? {attempts: 0, deadline: this.#clock.now() + 30}
     this.#modelBudgets.set(key, budget)
     const deadline = budget.deadline
+    let modelInput = input
     while (budget.attempts < 2) {
       if (abort.signal.aborted || this.#live(snapshot.intake_id, snapshot.revision) === null) return null
       if (this.#clock.now() >= deadline) {
         this.#failure(snapshot, stage, new DOMException('model deadline', 'TimeoutError'), budget.attempts)
         return null
       }
+      const requestInput = modelInput
       const started = this.#clock.now()
       const attempt = ++budget.attempts
       const timeout = new AbortController()
       const signal = AbortSignal.any([abort.signal, timeout.signal])
       try {
-        const raw = await raceDeadline(this.#options.models[stage](input, signal), this.#clock,
+        const raw = await raceDeadline(this.#options.models[stage](requestInput, signal), this.#clock,
           Math.max(0, deadline - this.#clock.now()), abort.signal,
           () => { timeout.abort(); return new DOMException('model deadline', 'TimeoutError') })
         if (this.#current(snapshot.intake_id, snapshot.revision) === null) return null
@@ -612,6 +680,8 @@ export class IntakeController {
         if (abort.signal.aborted || this.#live(snapshot.intake_id, snapshot.revision) === null) return null
         const retrying = attempt < 2 && this.#clock.now() + 1 < deadline
           && ['rate_limit', 'server_error', 'transport', 'timeout', 'invalid_output'].includes(failureReason(error))
+        if (error instanceof z.ZodError) modelInput = {...input, validation_feedback:
+          error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ').slice(0, 2000)}
         this.#failure(snapshot, stage, error, attempt, retrying)
         if (!retrying) return null
         try { await this.#clock.sleep(1, abort.signal) } catch { return null }
@@ -622,7 +692,7 @@ export class IntakeController {
           : (this.#options.settings.planner_model ?? '') !== ''
             ? this.#options.settings.planner_model : this.#options.settings.fast_model
         if (current !== null) this.#options.record(current, 'intake.timing', {stage, attempt,
-          ...(model === undefined ? {} : {model}), input_chars: JSON.stringify(input).length,
+          ...(model === undefined ? {} : {model}), input_chars: JSON.stringify(requestInput).length,
           elapsed_ms: Math.round((this.#clock.now() - started) * 1000)})
       }
     }

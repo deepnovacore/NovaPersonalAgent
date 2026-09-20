@@ -21,6 +21,10 @@ const assessment = (input: Readonly<Record<string, unknown>>, changes = {}) => (
   intent_to_proceed: true, candidate_question: null, discovery: [], early_exit: false, abandon: false,
   ...changes,
 })
+const projectAnswer = (input: Readonly<Record<string, unknown>>, decision: 'confirmed' | 'rejected' | 'unclear' | 'redirected') => {
+  const turns = input.turns as {answer: string}[]
+  return {turn_index: turns.length - 1, decision, evidence: turns.at(-1)!.answer}
+}
 const plan = (input: Readonly<Record<string, unknown>>) => ({intake_id: input.intake_id, revision: input.revision, work_order: order})
 
 test('adaptive direct work preserves requirements without calling the planner or announcing a plan', async () => {
@@ -396,7 +400,7 @@ test('coordinator: an affirmed host question is the only host-authored project e
   // An alias (博客 → blog) can never be quoted; the host's own `是在 blog 里做吗？` becomes the evidence once
   // the user affirms it -- and only then: a negative or a new instruction leaves the question unanswered.
   for (const [answer, dispatched] of [['对，就在你刚才问的那个项目里做', true], ['不是', false], ['先修登录', false]] as const) {
-    const alias = harness({roster, models: {assess: input => Promise.resolve(assessment(input, {project: 'blog', project_evidence: input.revision === 1 || !dispatched ? 'blog' : answer}))}})
+    const alias = harness({roster, models: {assess: input => Promise.resolve(assessment(input, {project: 'blog', project_evidence: null, ...(input.revision === 1 ? {} : {kind: dispatched ? 'work' : 'unclear', project_confirmation: projectAnswer(input, dispatched ? 'confirmed' : answer === '不是' ? 'rejected' : 'unclear')})}))}})
     alias.intake.open(request, '改一下博客的暗色模式', 'u1', 'e')
     await alias.intake.settled()
     assert.equal(alias.intake.view?.kind, 'unclear', answer)
@@ -415,7 +419,7 @@ test('coordinator: unclear asks the model question; a resolution error routes wi
   assert.ok(unclear.facts.some(text => text.includes('是哪个项目？')))
 
   const unknown = harness({
-    models: {assess: input => Promise.resolve(assessment(input, {project: 'blgo', project_evidence: input.revision === 1 ? 'blgo' : '对'}))},
+    models: {assess: input => Promise.resolve(assessment(input, {project: 'blgo', project_evidence: input.revision === 1 ? 'blgo' : null, ...(input.revision === 1 ? {} : {project_confirmation: projectAnswer(input, 'confirmed')})}))},
     resolveTarget: () => Promise.reject(new ProjectResolutionError('unknown_project', {project: 'blgo', suggestions: ['blog'], hint: 'create'})),
   })
   unknown.intake.open(request, '在 blgo 里修测试', 'u1', 'e')
@@ -432,7 +436,7 @@ test('coordinator: unclear asks the model question; a resolution error routes wi
 
 test('coordinator: steer preserves the request and amendments after project clarification', async () => {
   const h = harness({models: {
-    assess: input => Promise.resolve(assessment(input, {kind: 'steer', project: 'blog', project_evidence: input.revision === 3 ? '是的' : null})),
+    assess: input => Promise.resolve(assessment(input, {kind: input.revision === 2 ? 'unclear' : 'steer', project: 'blog', project_evidence: null, ...(input.revision === 1 ? {} : {project_confirmation: projectAnswer(input, input.revision === 3 ? 'confirmed' : 'unclear')})})),
   }})
   h.intake.open(request, '把博客那个正在做的页面字体再调大', 'u1', 'e')
   await h.intake.settled()
@@ -1156,5 +1160,192 @@ test('intake timing falls back for empty or absent planner models and keeps expl
     h.intake.open(request, 'Fix empty password', 'conversation:1', 'epoch1')
     await h.intake.settled()
     assert.deepEqual(timings, [planner_model === 'planner' ? 'planner' : 'fast'])
+  }
+})
+
+test('project confirmation repairs the logged null-evidence failure without asking again', async () => {
+  let replies = 0
+  let repair: Readonly<Record<string, unknown>> | undefined
+  const h = harness({resolveTarget: () => Promise.resolve({...target, workspace_display_name: 'blog'}),models: {assess: input => {
+    if (input.revision === 1) return Promise.resolve(assessment(input, {project: 'blog'}))
+    if (++replies === 1) return Promise.resolve(assessment(input, {project: 'blog'}))
+    repair = input
+    return Promise.resolve(assessment(input, {project: 'blog', project_confirmation: projectAnswer(input, 'confirmed')}))
+  }}})
+  h.intake.open(request, '做一个博客页面', 'u1', 'e')
+  await h.intake.settled()
+  h.intake.open(request, '对对对', 'u2', 'e')
+  await h.intake.settled()
+  assert.equal(replies, 2)
+  assert.match(String(repair?.validation_feedback), /project_confirmation/)
+  assert.equal(h.intake.view?.questions_asked, 1)
+  assert.equal(h.decisions.length, 1)
+  assert.equal(h.intake.view?.state, 'readback', 'cross-project execution still needs the existing workspace proposal')
+  assert.equal(h.dispatched.length, 0)
+  confirmProposal(h)
+  assert.equal(h.intake.view?.outcome, 'dispatched')
+})
+
+test('exhausted confirmation repair retains the original task instead of exhausting user questions', async () => {
+  let calls = 0
+  const h = harness({models: {assess: input => {
+    calls++
+    return Promise.resolve(assessment(input, {project: 'blog'}))
+  }}})
+  h.intake.open(request, '做一个博客页面', 'u1', 'e')
+  await h.intake.settled()
+  h.intake.open(request, '是的', 'u2', 'e')
+  await h.intake.settled()
+  assert.equal(calls, 3)
+  assert.equal(h.intake.view?.questions_asked, 1)
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(h.intake.view?.outcome, null)
+  assert.equal(h.intake.view?.opening, '做一个博客页面')
+  assert.match(h.facts.at(-1)!, /原需求已保留/)
+  assert.equal(h.decisions.length, 0)
+  assert.equal(h.dispatched.length, 0)
+})
+
+for (const invalid of ['wrong_turn', 'invented_quote', 'wrong_project', 'rejected_selection'] as const) {
+  test(`invalid project confirmation ${invalid} cannot authorize a target`, async () => {
+    const h = harness({models: {assess: input => {
+      if (input.revision === 1) return Promise.resolve(assessment(input, {project: 'blog'}))
+      const confirmation = projectAnswer(input, invalid === 'rejected_selection' ? 'rejected' : 'confirmed')
+      if (invalid === 'wrong_turn') confirmation.turn_index = 9
+      if (invalid === 'invented_quote') confirmation.evidence = '没有说过这句话'
+      return Promise.resolve(assessment(input, {project: invalid === 'wrong_project' ? 'Project' : 'blog', project_confirmation: confirmation}))
+    }}})
+    h.intake.open(request, '做一个博客页面', 'u1', 'e')
+    await h.intake.settled()
+    h.intake.open(request, invalid === 'rejected_selection' ? '不是' : '是的', 'u2', 'e')
+    await h.intake.settled()
+    assert.equal(h.intake.view?.state, 'failed')
+    assert.equal(h.intake.view?.questions_asked, 1)
+    assert.equal(h.decisions.length, 0)
+  })
+}
+
+test('confirmed project survives requirement answers without another project question', async () => {
+  const inputs: Readonly<Record<string, unknown>>[] = []
+  const h = harness({resolveTarget: () => Promise.resolve({...target, workspace_display_name: 'blog'}),settings: {clarification_depth: 'thorough', plan_readback: 'silent'}, models: {assess: input => {
+    inputs.push(input)
+    if (input.revision === 1) return Promise.resolve(assessment(input, {project: 'blog'}))
+    if (input.revision === 2) return Promise.resolve(assessment(input, {project: 'blog',
+      project_confirmation: projectAnswer(input, 'confirmed'), slots: {...slots, constraints: missing},
+      candidate_question: {owner: 'user', text: '需要深色模式吗？'}}))
+    return Promise.resolve(assessment(input, {project: 'blog'}))
+  }}})
+  h.intake.open(request, '做一个博客页面', 'u1', 'e')
+  await h.intake.settled()
+  h.intake.open(request, '对', 'u2', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.pending_question, '需要深色模式吗？')
+  h.intake.open(request, '需要', 'u3', 'e')
+  await h.intake.settled()
+  assert.deepEqual(inputs.at(-1)?.confirmed_project, {project: 'blog', turn_index: 0, evidence: '对'})
+  assert.equal(h.intake.view?.questions_asked, 2)
+  assert.equal(h.intake.view?.state, 'readback')
+  assert.equal(h.decisions.length, 2)
+})
+
+test('changing target invalidates earlier confirmed evidence and cannot resurrect it later', async () => {
+  const h = harness({settings: {clarification_depth: 'thorough', plan_readback: 'silent'}, models: {assess: input => {
+    if (input.revision === 1) return Promise.resolve(assessment(input, {project: 'blog'}))
+    if (input.revision === 2) return Promise.resolve(assessment(input, {project: 'blog',
+      project_confirmation: projectAnswer(input, 'confirmed'), slots: {...slots, constraints: missing},
+      candidate_question: {owner: 'user', text: '需要深色模式吗？'}}))
+    if (input.revision === 3) return Promise.resolve(assessment(input, {project: 'Project',
+      slots: {...slots, constraints: missing}, candidate_question: {owner: 'user', text: '需要保留什么？'}}))
+    return Promise.resolve(assessment(input, {project: 'blog', project_confirmation: {turn_index: 0, decision: 'confirmed', evidence: '对'}}))
+  }}})
+  h.intake.open(request, '做一个博客页面', 'u1', 'e')
+  await h.intake.settled()
+  h.intake.open(request, '对', 'u2', 'e')
+  await h.intake.settled()
+  h.intake.open(request, '改到 Project 项目，先确定保留哪些内容', 'u3', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.confirmed_project, null)
+  const decisions = h.decisions.length
+  h.intake.open(request, '保留登录页面', 'u4', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(h.decisions.length, decisions)
+  assert.equal(h.dispatched.length, 0)
+})
+
+test('cancellation after a project question does not require confirmation fields', async () => {
+  const h = harness({models: {assess: input => Promise.resolve(assessment(input,
+    input.revision === 1 ? {project: 'blog'} : {abandon: true}))}})
+  h.intake.open(request, '做一个博客页面', 'u1', 'e')
+  await h.intake.settled()
+  h.intake.open(request, '算了，取消', 'u2', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.outcome, 'cancelled')
+  assert.equal(h.dispatched.length, 0)
+})
+
+test('a rejected answer cannot later be relabelled as a confirmation', async () => {
+  const h = harness({models: {assess: input => {
+    if (input.revision === 1) return Promise.resolve(assessment(input, {project: 'blog'}))
+    if (input.revision === 2) return Promise.resolve(assessment(input, {kind: 'unclear', project: null,
+      project_confirmation: projectAnswer(input, 'rejected'), candidate_question: {owner: 'user', text: '请选择项目。'}}))
+    return Promise.resolve(assessment(input, {project: 'blog', project_confirmation: {turn_index: 0, decision: 'confirmed', evidence: '不是'}}))
+  }}})
+  h.intake.open(request, '做一个博客页面', 'u1', 'e')
+  await h.intake.settled()
+  h.intake.open(request, '不是', 'u2', 'e')
+  await h.intake.settled()
+  h.intake.open(request, '先保留登录页', 'u3', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(h.decisions.length, 0)
+})
+
+for (const action of ['cancel', 'revise'] as const) {
+  test(`late project confirmation cannot survive ${action}`, async () => {
+    let release!: (value: unknown) => void
+    let oldInput!: Readonly<Record<string, unknown>>
+    const h = harness({models: {assess: input => {
+      if (input.revision === 1) return Promise.resolve(assessment(input, {project: 'blog'}))
+      if (input.revision === 2) { oldInput = input; return new Promise(resolve => { release = resolve }) }
+      return Promise.resolve(assessment(input, {abandon: true}))
+    }}})
+    h.intake.open(request, '做一个博客页面', 'u1', 'e')
+    await h.intake.settled()
+    h.intake.open(request, '对', 'u2', 'e')
+    if (action === 'cancel') h.intake.cancel()
+    else h.intake.open(request, '不是，取消', 'u3', 'e')
+    release(assessment(oldInput, {project: 'blog', project_confirmation: projectAnswer(oldInput, 'confirmed')}))
+    await h.intake.settled()
+    assert.equal(h.intake.view?.outcome, 'cancelled')
+    assert.equal(h.intake.view?.confirmed_project, null)
+    assert.equal(h.decisions.length, 0)
+  })
+}
+
+for (const decision of ['rejected', 'unclear'] as const) for (const kind of ['create', 'work'] as const) {
+  test(`${decision} cannot silently ${kind} in another project`, async () => {
+    const h = harness({models: {assess: input => Promise.resolve(assessment(input, input.revision === 1
+      ? {project: 'blog'} : {kind, project: kind === 'create' ? 'new-blog' : 'Project', project_confirmation: projectAnswer(input, decision)}))}})
+    h.intake.open(request, '做一个博客页面', 'u1', 'e')
+    await h.intake.settled()
+    h.intake.open(request, decision === 'rejected' ? '不是' : '还没决定', 'u2', 'e')
+    await h.intake.settled()
+    assert.equal(h.intake.view?.state, 'failed')
+    assert.equal(h.decisions.length, 0)
+    assert.equal(h.dispatched.length, 0)
+  })
+}
+
+test('an explicit redirect names its new project in the same answer', async () => {
+  for (const evidence of ['Project', null]) {
+    const h = harness({models: {assess: input => Promise.resolve(assessment(input, input.revision === 1
+      ? {project: 'blog'} : {project: 'Project', project_evidence: evidence, project_confirmation: projectAnswer(input, 'redirected')}))}})
+    h.intake.open(request, '做一个博客页面', 'u1', 'e')
+    await h.intake.settled()
+    h.intake.open(request, '不是，用 Project 项目', 'u2', 'e')
+    await h.intake.settled()
+    assert.equal(h.decisions.length, evidence === null ? 0 : 1)
+    assert.equal(h.intake.view?.state, evidence === null ? 'failed' : 'closed')
   }
 })
