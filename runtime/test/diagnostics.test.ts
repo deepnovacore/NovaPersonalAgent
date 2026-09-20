@@ -116,6 +116,7 @@ test('cascaded diagnostics never read the unselected LLM platform', async () => 
       ? new Set<PropertyKey>(['ARK_API_KEY', 'NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL'])
       : new Set<PropertyKey>(['DASHSCOPE_API_KEY'])
     const environment = new Proxy<NodeJS.ProcessEnv>({
+      NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
       NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
       NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: provider,
       ...(provider === 'qwen'

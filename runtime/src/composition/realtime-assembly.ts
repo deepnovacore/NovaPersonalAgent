@@ -1,3 +1,4 @@
+import type {MemoryInspectionQuery} from '../memory/personal-memory-inspection.js'
 import type {UsageReporter} from '../realtime/usage.js'
 import {recentDispatchSources} from '../realtime/history.js'
 import type {ApprovalController} from '../core/approval-port.js'
@@ -310,6 +311,10 @@ export class RealtimeAssembly {
       }
       await this.#enqueueProjectContextPublication()
     })
+  }
+
+  inspectPersonalMemory(query: MemoryInspectionQuery) {
+    return this.#personalMemory?.inspect?.(query) ?? Promise.resolve(null)
   }
 
   start(): Promise<void> {

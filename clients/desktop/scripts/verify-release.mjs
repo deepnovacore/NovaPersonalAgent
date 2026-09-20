@@ -3,7 +3,7 @@ import {spawn, spawnSync} from 'node:child_process'
 import {once} from 'node:events'
 import {createServer} from 'node:https'
 import {cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm} from 'node:fs/promises'
-import {basename, resolve} from 'node:path'
+import {basename, normalize, resolve} from 'node:path'
 import {parseArgs} from 'node:util'
 import {listPackage, statFile} from '@electron/asar'
 import {WebSocket, WebSocketServer} from 'ws'
@@ -26,7 +26,7 @@ export async function inspectApplication(resourcesRoot, targetId) {
   assert.ok(files.includes('src/main/main.mjs'), 'packaged main missing')
   for (const path of files) {
     assert.ok(path !== '' && !path.split('/').some(part => part === '..' || part === '.' || part === ''), 'invalid ASAR path')
-    const entry = statFile(archive, path)
+    const entry = statFile(archive, normalize(path))
     assert.ok(!entry.link, `ASAR link forbidden: ${path}`)
     if (entry.files) continue
     const allowed = path.startsWith('node_modules/sherpa-onnx/') || (path.startsWith('node_modules/') && native.test(path))
@@ -42,7 +42,7 @@ export async function inspectApplication(resourcesRoot, targetId) {
     const status = await lstat(resolve(unpackedRoot, path))
     assert.ok(!status.isSymbolicLink(), `unpacked link forbidden: ${local}`)
     if (status.isDirectory()) continue
-    assert.ok(files.includes(local) && statFile(archive, local).unpacked, `unexpected unpacked file: ${local}`)
+    assert.ok(files.includes(local) && statFile(archive, normalize(local)).unpacked, `unexpected unpacked file: ${local}`)
   }
   for (const resource of expectedNativeResources(targetId)) {
     const status = await lstat(resolve(resourcesRoot, resource.relative_path))

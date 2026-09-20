@@ -1,3 +1,4 @@
+import {memoryInspectionSchema, memoryInspectionQuerySchema, type MemoryInspectionQuery} from '../memory/personal-memory-inspection.js'
 import {Worker, type WorkerOptions} from 'node:worker_threads'
 
 import {PersonalMemoryError, type PersonalMemoryRecallScope, type PersonalMemoryRecallResult, type PersonalMemoryRecallHit, type PersonalMemoryAdmissionReceipt, type PersonalMemoryRememberTurn, type PersonalMemoryResource, type PersonalMemoryResponseAdaptation} from '../memory/personal-memory.js'
@@ -219,6 +220,12 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
       if (receipt.source_id !== sourceId || receipt.state !== 'forgotten') throw this.#protocolFailure()
       return {sourceId, state:'deleted'}
     } catch (error) {this.#fail('WORKER_PROTOCOL_FAILURE'); throw error}
+  }
+
+  async inspectStore(query: MemoryInspectionQuery) {
+    const parsed = memoryInspectionQuerySchema.parse(query)
+    if (!this.#opened) throw new PersonalMemoryStoreClientError('STORE_CLOSED')
+    return memoryInspectionSchema.parse(await this.#request('inspect', parsed))
   }
 
   close(): Promise<void> {

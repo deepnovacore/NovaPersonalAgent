@@ -1377,8 +1377,8 @@ test('callbacks route once through the single playback, session, bridge, and ser
   assert.equal(deliveries.length, 1)
   assert.equal(deliveries[0]?.text, 'hello')
   assert.deepEqual(captions, [
-    {role: 'assistant', text: 'hel', final: false},
-    {role: 'assistant', text: 'hello', final: true},
+    {role: 'assistant', text: 'hel', final: false, message_id: 'assistant:1:r-1'},
+    {role: 'assistant', text: 'hello', final: true, full_text: 'hello', message_id: 'assistant:1:r-1'},
   ])
   assert.deepEqual(executorStates, ['running'])
   assert.deepEqual(projectViews, [{
@@ -3413,7 +3413,7 @@ function recordingConnector(options: {readonly failFirstWith?: Error} = {}): Rec
 }
 
 function settings(environment: NodeJS.ProcessEnv = {}): Settings {
-  return loadSettings({
+  return loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
     TAVILY_API_KEY: 'tavily-test-key',
     ...environment,
   })
@@ -4030,7 +4030,7 @@ test('Qwen connector failure rolls core back safely and permits one later retry'
 })
 
 test('qwen rejects the final tool budget after evaluating the provider view once', () => {
-  const configured = loadSettings({
+  const configured = loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
     NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
     DASHSCOPE_API_KEY: 'fixture-only', DOUBAO_BIGMODEL_API_KEY: 'fixture-only',
   })
@@ -4045,7 +4045,7 @@ test('qwen rejects the final tool budget after evaluating the provider view once
 
 {
 function settings(environment: NodeJS.ProcessEnv = {}): Settings {
-  return loadSettings({
+  return loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
     NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
     NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
     ARK_API_KEY: 'ark-test-key',
@@ -4327,7 +4327,7 @@ function recordingRegistries(calls: string[]): CascadedProviderRegistries {
 test('cascaded defaults resolve endpointing, ASR, Qwen LLM, and TTS in order', () => {
   const calls: string[] = []
   buildCascadedRealtimeAssembly({
-    settings: loadSettings({
+    settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
       NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
       DASHSCOPE_API_KEY: 'dash-secret',
       DOUBAO_BIGMODEL_API_KEY: 'doubao-secret',
@@ -4342,7 +4342,7 @@ test('cascaded defaults resolve endpointing, ASR, Qwen LLM, and TTS in order', (
 test('explicit Ark resolves no Qwen factory', () => {
   const calls: string[] = []
   buildCascadedRealtimeAssembly({
-    settings: loadSettings({
+    settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
       NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
       NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
       NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-explicit',
@@ -4361,7 +4361,7 @@ test('cascaded assembly never reads unselected LLM credentials or config', () =>
     const inaccessible = provider === 'qwen'
       ? new Set<PropertyKey>(['ark_api_key', 'volcengine_ark_base_url'])
       : new Set<PropertyKey>(['dashscope_api_key'])
-    const base = loadSettings({
+    const base = loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
       NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
       NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: provider,
       ...(provider === 'ark' ? {NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-explicit'} : {}),
@@ -4860,7 +4860,7 @@ test('core gateway preserves generic models or applies all Ark support overrides
   })
 
 test('cascaded rejects the final tool budget after evaluating the provider view once', () => {
-  const configured = loadSettings({
+  const configured = loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
     NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
     DASHSCOPE_API_KEY: 'fixture-only', DOUBAO_BIGMODEL_API_KEY: 'fixture-only',
   })

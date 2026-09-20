@@ -1555,6 +1555,10 @@ export function buildDesktopRealtimeComposition(
     })(),
     stop: options.stop,
     memoryBoard: async (requestId, detail, page) => {
+      if (page?.channel === 'personal') {
+        const personal = await realtime.inspectPersonalMemory({query: page.query ?? '', ...(page.before_seq === undefined ? {} : {before: page.before_seq})})
+        return JSON.stringify({type: 'memory.board', request_id: requestId, channels: [], diagnostics: {version: 1, records: []}, personal})
+      }
       await realtime.runtime.flushMemory(true)
       return memoryBoardMessage(requestId, realtime.runtime.memory, options.telemetry?.diagnostics?.(),
         {...page, conversationEpoch: realtime.runtime.core.conversationEpoch, ...(detail === undefined ? {} : {detail})})

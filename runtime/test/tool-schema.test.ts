@@ -76,6 +76,9 @@ test('compiled tool schemas preserve the frozen contract with the native persona
       fn.description = '从当前会话的历史记忆中查找与用户问题相关的证据'
       const properties = record(record(fn.parameters).properties)
       delete properties.source
+      const parameters = record(fn.parameters)
+      assert.ok(Array.isArray(parameters.required))
+      parameters.required = parameters.required.filter(field => field !== 'source')
       record(properties.scope).description = 'recent 优先最近记录；any 在当前会话记忆内扩大查找'
     }
     assert.equal(
@@ -105,13 +108,13 @@ test('the golden is not vacuous', () => {
   assert.match(rendered, /slow_sim__set_light/u)
 })
 
-test('memory recall defaults to session and exposes only the bounded personal source choice', () => {
+test('memory recall requires an explicit bounded source choice', () => {
   const recall = record(record(compileToolSchema([], {includeMemoryRecall: true}).schemas[0]).function)
   const parameters = record(recall.parameters)
   const source = record(record(parameters.properties).source)
   assert.deepEqual(source.enum, ['session', 'personal'])
-  assert.equal(source.default, 'session')
-  assert.deepEqual(parameters.required, ['query', 'scope'])
+  assert.equal(source.default, undefined)
+  assert.deepEqual(parameters.required, ['query', 'scope', 'source'])
   assert.equal(parameters.additionalProperties, false)
   assert.equal('user' in record(parameters.properties), false)
   assert.equal('path' in record(parameters.properties), false)

@@ -1,3 +1,4 @@
+import {createMem0PersonalMemory} from '../mem0/resource.js'
 import {homedir} from 'node:os'
 import {resolve} from 'node:path'
 import {requirePersonalMemory, type Settings} from '../config/config.js'
@@ -14,5 +15,7 @@ export function personalMemoryFactory(
   const path = resolve(configured.path.startsWith('~/')
     ? resolve(homedir(), configured.path.slice(2))
     : configured.path)
-  return () => new PersonalMemoryStoreClient({...configured, path})
+  return () => configured.provider === 'mem0'
+    ? createMem0PersonalMemory({...configured, path})
+    : new PersonalMemoryStoreClient({...configured, path})
 }

@@ -71,7 +71,7 @@ test('pipeline defaults are product-shaped and cascaded defaults use DeepSeek Fl
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '~/.nova-audio-agent/capabilities.json',
     knowledgePath: '~/.nova-audio-agent/knowledge.sqlite',
-    memoryConnection: 'disabled',
+    memoryConnection: 'local',
     memoryPath: '~/.nova-audio-agent/memory.sqlite',
     memoryUserId: 'local',
   })
@@ -89,7 +89,7 @@ test('camera module env mapping is strict and supports disabling the production 
   )
 })
 
-test('personal memory selects VoiceMem explicitly and maps its host-owned settings', () => {
+test('personal memory selects mem0 by default and maps its host-owned settings', () => {
   const configured = loadSettings({
     NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'local',
     NOVA_AUDIO_AGENT_MEMORY_PATH: '/state/personal.sqlite',
@@ -109,7 +109,7 @@ test('personal memory selects VoiceMem explicitly and maps its host-owned settin
     error => error instanceof ConfigurationError
       && error.message === 'invalid configuration: NOVA_AUDIO_AGENT_MEMORY_PROVIDER',
   )
-  assert.equal(requirePersonalMemory(loadSettings({})), null)
+  assert.equal(requirePersonalMemory(loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled'})), null)
   assert.deepEqual(requirePersonalMemory(loadSettings({
     NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://embedding.example/v1/',
     NOVA_AUDIO_AGENT_MODEL_API_KEY: 'embedding-key',
@@ -119,7 +119,7 @@ test('personal memory selects VoiceMem explicitly and maps its host-owned settin
     NOVA_AUDIO_AGENT_MEMORY_USER_ID: 'owner-1',
   })), {
     connection: 'local',
-    provider: 'voicemem',
+    provider: 'mem0',
     path: '/state/personal.sqlite',
     userId: 'owner-1',
     extractionModel: 'qwen3-vl-plus',
@@ -718,11 +718,11 @@ test('memory connection separates local provider selection from remote engine ow
   const local = {NOVA_AUDIO_AGENT_MEMORY_CONNECTION:'local',
     NOVA_AUDIO_AGENT_MODEL_API_KEY:'test', NOVA_AUDIO_AGENT_MODEL_BASE_URL:'https://example.com/v1'}
   assert.deepEqual(requirePersonalMemory(loadSettings(local)),
-    requirePersonalMemory(loadSettings({...local, NOVA_AUDIO_AGENT_MEMORY_PROVIDER:'voicemem'})))
+    requirePersonalMemory(loadSettings({...local, NOVA_AUDIO_AGENT_MEMORY_PROVIDER:'mem0'})))
   assert.equal(requirePersonalMemory(loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION:'disabled'})), null)
   assert.throws(() => loadSettings({...remote, NOVA_AUDIO_AGENT_MEMORY_PROVIDER:'voicemem'}), ConfigurationError)
   assert.throws(() => loadSettings({...local, NOVA_AUDIO_AGENT_MEMORY_PROVIDER:'unknown'}), ConfigurationError)
-  assert.throws(() => loadSettings({NOVA_AUDIO_AGENT_MEMORY_PROVIDER:'voicemem'}), ConfigurationError)
+  assert.equal(requirePersonalMemory(loadSettings({...local, NOVA_AUDIO_AGENT_MEMORY_PROVIDER:'voicemem'}))?.connection, 'local')
   assert.throws(() => requirePersonalMemory(loadSettings({...remote,NOVA_AUDIO_AGENT_MEMORY_TOKEN:''})), ConfigurationError)
 })
 
@@ -732,8 +732,15 @@ test('removed memory backend configuration fails explicitly instead of silently 
   }
 })
 
-test('deferred native memory provider is rejected explicitly', () => {
-  assert.throws(() => loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'local', NOVA_AUDIO_AGENT_MEMORY_PROVIDER: 'mem0'}), /MEMORY_PROVIDER/u)
+test('default memory config resolves mem0 without opt-in and allows explicit disable', () => {
+  const config = requirePersonalMemory(loadSettings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'test'}))
+  assert.ok(config?.connection === 'local')
+  assert.equal(config.provider, 'mem0')
+  assert.equal(requirePersonalMemory(loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled'})), null)
+  const independent = requirePersonalMemory(loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+    NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark', ARK_API_KEY: 'ark-only', DASHSCOPE_API_KEY: 'memory-only'}))
+  assert.ok(independent?.connection === 'local')
+  assert.equal(independent.embedding.apiKey, 'memory-only')
 })
 
 test('unsupported embedding providers are rejected without a cloud fallback', () => {

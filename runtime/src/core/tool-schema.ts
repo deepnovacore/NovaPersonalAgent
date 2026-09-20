@@ -83,11 +83,10 @@ export function compileToolSchema(
           source: {
             type: 'string',
             enum: ['session', 'personal'],
-            default: 'session',
-            description: 'session 查当前会话；personal 查用户自己的跨会话个人记忆',
+            description: '必须明确选择：用户自己的事实、习惯、偏好用 personal；当前会话的对话步骤或任务执行记录用 session',
           },
         },
-        required: ['query', 'scope'],
+        required: ['query', 'scope', 'source'],
         additionalProperties: false,
       },
     ))

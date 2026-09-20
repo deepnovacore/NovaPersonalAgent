@@ -36,7 +36,7 @@ class BoardDocument extends EventTarget {
     this.scrollingElement = new BoardElement('page')
     this.elements = new Map([
       'channels', 'status', 'refresh', 'export', 'copy-json', 'memory-tab',
-      'diagnostics-tab', 'memory-panel', 'diagnostics-panel',
+      'diagnostics-tab', 'memory-panel', 'diagnostics-panel', 'personal-tab', 'personal-panel',
       'diagnostics',
       'clear-conversation', 'channel-tabs',
     ].map(id => [`#${id}`, new BoardElement(id)]))
@@ -547,13 +547,13 @@ test('a refresh reuses the channel buttons so keyboard focus survives it', async
 })
 
 
-test('memory board keyboard navigation stays within the two retained tabs', async () => {
+test('memory board keyboard navigation includes local memory', async () => {
   const {boardTabForKey} = await import('../src/renderer/channel-tabs.mjs')
-  for (const key of ['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown']) {
-    assert.equal(boardTabForKey('memory', key), 'diagnostics')
-    assert.equal(boardTabForKey('diagnostics', key), 'memory')
-  }
-  assert.equal(boardTabForKey('diagnostics', 'Home'), 'memory')
+  assert.equal(boardTabForKey('memory', 'ArrowRight'), 'personal')
+  assert.equal(boardTabForKey('personal', 'ArrowRight'), 'diagnostics')
+  assert.equal(boardTabForKey('diagnostics', 'ArrowRight'), 'memory')
+  assert.equal(boardTabForKey('memory', 'ArrowLeft'), 'diagnostics')
+  assert.equal(boardTabForKey('personal', 'Home'), 'memory')
   assert.equal(boardTabForKey('memory', 'End'), 'diagnostics')
   assert.equal(boardTabForKey('unknown', 'ArrowRight'), null)
   assert.equal(boardTabForKey('memory', 'Enter'), null)

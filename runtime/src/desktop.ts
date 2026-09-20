@@ -80,7 +80,8 @@ const debugBoardRequestSchema = z.object({
   detail: z.enum(['compact', 'full']),
   channel: z.string().min(1).max(128).optional(),
   before_seq: z.number().int().positive().optional(),
-}).strict().refine(value => value.before_seq === undefined || value.channel !== undefined)
+  query: z.string().max(200).optional(),
+}).strict().refine(value => (value.before_seq === undefined || value.channel !== undefined) && (value.query === undefined || value.channel === 'personal'))
 
 export const playbackTelemetrySchema = z.object({
   type: z.literal('playback.telemetry'),

@@ -1124,7 +1124,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       const snapshot = await requestBoardSnapshot(connection, {
         board: 'memory',
         detail: detail === 'full' ? 'full' : 'compact',
-        ...(detail && typeof detail === 'object' ? {channel: detail.channel, before_seq: detail.before_seq} : {}),
+        ...(detail && typeof detail === 'object' ? {channel: detail.channel, before_seq: detail.before_seq, ...(detail.query === undefined ? {} : {query: detail.query})} : {}),
       })
       if (backendStatus.connection !== connection || backendGeneration !== generation) {
         return { error: 'unavailable' }

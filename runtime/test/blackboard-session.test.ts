@@ -398,7 +398,7 @@ test('session recall waits for an outstanding real commit before publishing opti
     const bridge = new RealtimeRuntimeBridge({runtime, tools: compileToolSchema([workerManifest], {includeMemoryRecall: true}), idFactory: () => 'recall'})
     let published = false
     const recall = bridge.acceptToolCall({kind: 'tool_call_ready', call_id: 'recall', item_id: 'recall-item',
-      name: 'memory__recall', arguments: {query: 'milestone', scope: 'any'}, response_id: 'response', session_epoch: 1},
+      name: 'memory__recall', arguments: {query: 'milestone', scope: 'any', source: 'session'}, response_id: 'response', session_epoch: 1},
     {originRef: origin}).then(value => { published = true; return value })
     await delay(30)
     assert.equal(published, false)

@@ -1,3 +1,5 @@
+import type {MemoryInspection, MemoryInspectionQuery} from './personal-memory-inspection.js'
+
 /** Nova's durable personal-memory boundary. No provider types or execution authority. */
 export type PersonalMemoryRecallScope = 'recent' | 'any'
 
@@ -75,6 +77,8 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  /** Read-only host inspection; never exposed as an LLM tool. */
+  readonly inspect?: (query: MemoryInspectionQuery) => Promise<MemoryInspection>
   open(): Promise<void>
   close(): Promise<void>
   /** Absent for read-only providers. Resolve only after durable admission, or reject. */

@@ -102,8 +102,8 @@ export const settingsSchema = z.object({
   embedding_model: z.string().default('text-embedding-v4'),
   blackboard_path: z.string().min(1).default('~/.nova-audio-agent/blackboard.sqlite'),
   blackboard_owner_id: z.string().min(1).max(512).default('local'),
-  memory_connection: memoryConnectionSchema.default('disabled'),
-  memory_provider: z.enum(['voicemem']).nullable().default(null),
+  memory_connection: memoryConnectionSchema.default('local'),
+  memory_provider: z.enum(['voicemem', 'mem0']).nullable().default(null),
   memory_url: z.string().default(''),
   memory_token: z.string().nullable().default(null),
   memory_path: z.string().min(1).default('~/.nova-audio-agent/memory.sqlite'),
@@ -171,7 +171,7 @@ export type PersonalMemoryConfig = {readonly connection: 'remote'; readonly url:
 
 interface LocalPersonalMemoryConfig {
   readonly connection: 'local'
-  readonly provider: 'voicemem'
+  readonly provider: 'voicemem' | 'mem0'
   readonly extractionModel: string
   readonly path: string
   readonly userId: string
@@ -336,6 +336,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     blackboard_path: optionalString(environment.NOVA_AUDIO_AGENT_BLACKBOARD_PATH),
     blackboard_owner_id: optionalString(environment.NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID),
     memory_connection: optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_CONNECTION),
+    ...((optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_CONNECTION) ?? 'local') === 'local'
+      ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
     memory_provider: optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_PROVIDER),
     memory_url: optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_URL),
     memory_token: optionalSecret(environment.NOVA_AUDIO_AGENT_MEMORY_TOKEN),
@@ -381,7 +383,7 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
   })
   return Object.freeze({
     connection: 'local',
-    provider: settings.memory_provider ?? 'voicemem',
+    provider: settings.memory_provider ?? 'mem0',
     path: requiredSetting(settings.memory_path, 'NOVA_AUDIO_AGENT_MEMORY_PATH'),
     userId: requiredSetting(settings.memory_user_id, 'NOVA_AUDIO_AGENT_MEMORY_USER_ID'),
     extractionModel: requiredSetting(settings.fast_model, 'NOVA_AUDIO_AGENT_FAST_MODEL'),

@@ -1,3 +1,4 @@
+import {personalMemoryBoard} from './personal-memory-board.mjs'
 import {boardTabForKey} from './channel-tabs.mjs'
 import {
   captureBoardScrollPositions,
@@ -24,6 +25,10 @@ const diagnosticsTab = document.querySelector('#diagnostics-tab')
 const memoryPanel = document.querySelector('#memory-panel')
 const diagnosticsPanel = document.querySelector('#diagnostics-panel')
 const diagnosticsRoot = document.querySelector('#diagnostics')
+
+const personalTab = document.querySelector('#personal-tab')
+const personalPanel = document.querySelector('#personal-panel')
+const personalBoard = personalMemoryBoard(personalPanel, query => window.novaAudioAgentDesktop.memoryBoard.request(query))
 
 let latestPayload = null
 let inFlight = false
@@ -288,6 +293,7 @@ function renderChannelTabs() {
 
 async function load() {
   if (document.hidden) return
+  if (activeTab === 'personal') return
   if (clearInFlight) return
   if (inFlight || pageInFlight) return
   const owner = loadOwnership
@@ -447,19 +453,24 @@ async function clearConversation() {
 function selectTab(tab) {
   activeTab = tab
   const diagnosticsActive = activeTab === 'diagnostics'
-  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab}
+  const tabElements = {memory: memoryTab, personal: personalTab, diagnostics: diagnosticsTab}
   for (const [name, element] of Object.entries(tabElements)) {
     element.setAttribute('aria-selected', String(name === activeTab))
     element.tabIndex = name === activeTab ? 0 : -1
   }
   memoryPanel.hidden = activeTab !== 'memory'
   diagnosticsPanel.hidden = !diagnosticsActive
+  personalPanel.hidden = activeTab !== 'personal'
+  copyJsonButton.hidden = exportButton.hidden = activeTab === 'personal'
+  statusLabel.hidden = activeTab === 'personal'
+  if (activeTab === 'personal') void personalBoard.load()
   copyJsonButton.disabled = copyInFlight || latestPayload === null
   clearButton.hidden = activeTab !== 'memory'
   exportButton.disabled = exportInFlight || latestPayload === null
   void load()
 }
 
+personalTab.addEventListener('click', () => { selectTab('personal') })
 memoryTab.addEventListener('click', () => { selectTab('memory') })
 diagnosticsTab.addEventListener('click', () => { selectTab('diagnostics') })
 function handleTabKey(event) {
@@ -467,13 +478,15 @@ function handleTabKey(event) {
   if (nextTab === null) return
   event.preventDefault()
   selectTab(nextTab)
-  const tabElements = {memory: memoryTab, diagnostics: diagnosticsTab}
+  const tabElements = {memory: memoryTab, personal: personalTab, diagnostics: diagnosticsTab}
   const nextElement = tabElements[nextTab]
   nextElement.focus()
 }
+personalTab.addEventListener('keydown', handleTabKey)
 memoryTab.addEventListener('keydown', handleTabKey)
 diagnosticsTab.addEventListener('keydown', handleTabKey)
 refreshButton.addEventListener('click', () => {
+  if (activeTab === 'personal') { void personalBoard.load(); return }
   void load()
 })
 copyJsonButton.addEventListener('click', () => { void copyBoardJson() })
