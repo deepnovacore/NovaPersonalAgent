@@ -36,11 +36,10 @@ A concurrent work [qwen-audio-agent](https://github.com/QwenAudio/qwen-audio-age
 worth it at all** (see the [historical design post](docs/blog/2026-08-proactive-voice-agent-design-space.md) for more details).
 
 
-- **Restrained proactivity:** Not all words are created equal: trivial coding progress can stay quiet while milestones are reported. Vision Guard alerts have higher speaking rights and may preempt Nova playback, never user speech.
-- **Workspace management.** No need to manage your workspaces manually as in codex, our agent does that for you. Workspaces/sessions can be created/switched via pure voice control(proposed and confirmed).
-- **Revision-bound intake.** For under-specified requirements, host-owned intake slots clarify the request before dispatch. The M1.5c live validation gate is still pending; no token-saving percentage is claimed here.
-- **Real-time steering**. Our codex executor is built upon native codex app-server instead of ACP, which allows real-time steering.
-- **Local wake word.** Opt-in offline detection for “你好星核” and “Hi Nova” hides the idle orb and wakes it locally; see [setup](docs/getting-started.md#enable-a-wake-word).
+- **Restrained proactivity.** Important progress gets reported; routine updates stay quiet, and reminders never interrupt you while you speak.
+- **Voice-run workspaces.** Create and switch workspaces and sessions by voice, with your confirmation.
+- **Clarify before acting.** Nova asks about unclear requirements before handing work to the background executor.
+- **Steer while it runs.** Add requirements and constraints by voice while a task is in progress.
 
 ## 2. Architecture
 
@@ -64,13 +63,14 @@ For more details about the architecture, check [Architecture](docs/architecture.
 
 <table>
 <tr><td width="36%"><b>Talk while work gets done</b><br>Assign tasks, clarify requirements, and follow progress without leaving the conversation.</td><td><img src="assets/features/conversation.en.png" alt="Voice conversation and workspace status" width="480"></td></tr>
+<tr><td><b>Camera monitoring and timely alerts</b><br>Ask Nova to watch for a condition and tell you when it occurs.</td><td><img src="assets/features/vision.en.png" alt="Camera monitoring and translated narration from the v0.1 demo" width="560"><br><sub>v0.1 demo · 02:08</sub></td></tr>
 <tr><td><b>You approve the next step</b><br>Review workspace changes, command execution, and network access.</td><td><img src="assets/features/approvals.en.png" alt="Network access and workspace approval cards" width="560"></td></tr>
 <tr><td><b>Bring your tools and knowledge</b><br>Configure ASR / LLM / TTS and MCP; ask questions across your documents.</td><td><img src="assets/features/knowledge.en.png" alt="Knowledge-base answer using the CN-27 demo documents" width="480"></td></tr>
 <tr><td><b>Memory that stays with you</b><br>mem0 recalls personal context across conversations, with source text you can inspect.</td><td><img src="assets/features/mem0.en.png" alt="Four local mem0 memories with source details" width="560"></td></tr>
 <tr><td><b>Take Nova with you</b><br>Connect your iPhone over Tailscale to talk and approve tasks on your PC.</td><td><img src="assets/features/iphone.en.png" alt="iPhone home and connection settings" width="480"></td></tr>
 </table>
 
-<sub>Demo data; screenshots cleaned up and translated for presentation.</sub>
+<sub>Demo data; screenshots cleaned up, composited and translated for presentation.</sub>
 
 ## 3. Quickstart
 

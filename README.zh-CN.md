@@ -36,11 +36,10 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 （详见[历史设计探索文档](docs/blog/2026-08-proactive-voice-agent-design-space.md)）。
 
 
-- **主动有分寸：** 话有轻重。Coding 的琐碎进度不必说，里程碑应该汇报；Vision Guard 告警说话权更高，可以打断 Nova 正在播放的语音，但绝不打断用户说话。
-- **语音管工作区。** 不必像 Codex 那样自己切工作区，Agent 帮你代劳，全程通过语音创建和、切换 workspace / session，提案会让你确认。
-- **先问清再派活。** 需求说不清时，主机拥有的 revision-bound intake slots 先澄清请求再下发；M1.5c 真实验证仍待完成，不在此宣称 token 节省比例。
-- **实时 steer 你的 coding agent。** Codex执行器基于原生 app-server而非ACP实现，任务进行中可以随时加约束。
-- **本地唤醒词。** 可选的离线“你好星核” / “Hi Nova”关键词检测，空闲时隐藏悬浮球；唤醒音频留在本机，详见[使用指南](docs/getting-started.zh-CN.md#本地唤醒词)。
+- **主动有分寸。** 重要进展及时说，琐碎过程保持安静，提醒不抢用户说话。
+- **语音管理工作区。** 创建、切换工作区与会话，由你确认。
+- **先问清，再动手。** 需求不明确时先澄清，再交给后台执行。
+- **执行中随时调整。** 任务进行中，通过语音补充要求和约束。
 
 ## 2. 设计架构
 
@@ -65,6 +64,7 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 
 <table>
 <tr><td width="36%"><b>边聊边做</b><br>语音交办、澄清需求、查看进度，不用离开对话。</td><td><img src="assets/features/conversation.png" alt="语音对话与工作区状态" width="480"></td></tr>
+<tr><td><b>视觉监控与主动提醒</b><br>告诉 Nova 要关注的画面变化，条件触发时主动提醒。</td><td><img src="assets/features/vision.png" alt="v0.1 演示中的摄像头监控与播报字幕" width="560"><br><sub>v0.1 演示 · 02:08</sub></td></tr>
 <tr><td><b>操作由你确认</b><br>创建工作区、执行命令、访问网络，在前台审批。</td><td><img src="assets/features/approvals.png" alt="网络访问与工作区创建审批" width="560"></td></tr>
 <tr><td><b>接入工具与知识</b><br>自由配置 ASR / LLM / TTS 和 MCP，基于自己的资料问答。</td><td><img src="assets/features/knowledge.png" alt="基于 CN-27 演示资料的知识库回答" width="480"></td></tr>
 <tr><td><b>记住与你有关的事</b><br>mem0 跨对话回忆个人信息，随时查看记忆与原话。</td><td><img src="assets/features/mem0.png" alt="mem0 本机记忆及原话入口" width="560"></td></tr>
