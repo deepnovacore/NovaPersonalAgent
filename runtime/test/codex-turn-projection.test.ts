@@ -382,3 +382,44 @@ test('activity count saturates at the fixed bound', () => {
   })
   assert.equal(completion?.internal_activity, MAX_INTERNAL_ACTIVITY)
 })
+
+for (const eager of [false, true]) {
+  test(`tool progress is factual, bounded and eager-only: ${eager}`, () => {
+    const clock = new VirtualClock()
+    const events: ExecutorProgress[] = []
+    const projection = new AppServerTurnProjection({clock, eagerProgress: eager, workingInterval: 30,
+      onProgress: value => events.push(value)})
+    projection.bindThread(ephemeralThread(), {workspace: '/workspace'})
+    projection.notification('turn/started', {threadId: 'PRIVATE-THREAD', turn: {id: 'PRIVATE-TURN'}})
+    const completed = {type: 'commandExecution', status: 'completed', command: 'SECRET-COMMAND', aggregatedOutput: 'SECRET-OUTPUT'}
+    clock.advanceTo(30)
+    item(projection, completed)
+    assert.equal(events.at(-1)?.summary, null)
+    clock.advanceTo(60)
+    item(projection, completed)
+    assert.equal(events.at(-1)?.summary, eager ? '一条工作区命令已执行结束，尚未确认任务最终结果。' : null)
+    clock.advanceTo(120)
+    item(projection, completed)
+    assert.equal(events.at(-1)?.summary, null, 'same operational status is not repeated')
+    item(projection, {type: 'fileChange', status: 'completed', changes: [{path: 'SECRET-PATH'}]})
+    if (eager) assert.equal(events.at(-1)?.summary, '已应用一批文件修改，尚未确认验证结果。')
+    clock.advanceTo(180)
+    item(projection, {...completed, status: 'failed'})
+    assert.equal(events.at(-1)?.summary, eager ? '一条工作区命令执行失败，尚未确认恢复结果。' : null)
+    clock.advanceTo(240)
+    item(projection, {type: 'reasoning', text: 'SECRET-REASONING'})
+    assert.equal(events.at(-1)?.summary, null)
+    item(projection, {type: 'agentMessage', text: 'Actual explanation'})
+    assert.equal(events.at(-1)?.summary, 'Actual explanation')
+    clock.advanceTo(270)
+    item(projection, {...completed, status: 'failed'})
+    assert.equal(events.at(-1)?.summary, null, 'fresh commentary suppresses fallback for a minute')
+    clock.advanceTo(300)
+    const countBeforeForeign = events.length
+    projection.notification('item/completed', {threadId: 'OTHER', turnId: 'PRIVATE-TURN', item: completed})
+    assert.equal(events.length, countBeforeForeign, 'foreign events do not create progress')
+    item(projection, {...completed, status: 'inProgress'})
+    assert.equal(events.at(-1)?.summary, null, 'unknown or nonterminal status cannot invent completion')
+    assert.ok(!JSON.stringify(events).includes('SECRET'))
+  })
+}

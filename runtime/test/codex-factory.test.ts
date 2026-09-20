@@ -441,6 +441,7 @@ test('realtime mode always opens one project store and exposes only project tool
   assert.equal(transportFactory.calls.length, 1, 'startup owns one fixed preflight transport')
   assert.equal(transportFactory.calls[0]?.mode, 'live')
   assert.equal(transportFactory.calls[0]?.managedMcp, managedMcp)
+  assert.equal(transportFactory.calls[0]?.eagerProgress, config.eagerProgress)
   const projectStart = resource.start()
   assert.equal(resource.start(), projectStart)
   await projectStart

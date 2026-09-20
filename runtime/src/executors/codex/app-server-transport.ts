@@ -104,6 +104,7 @@ export interface CodexAppServerLaunchConfig {
   readonly resumeThreadId: string | null
   readonly persistent: boolean
   readonly workingInterval?: number
+  readonly eagerProgress?: boolean
   readonly approvalPolicy?: 'never' | 'on-request'
   readonly approvalController?: ApprovalPort
   readonly launchProfile?: CodexLaunchProfile
@@ -399,6 +400,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
       const projection = new AppServerTurnProjection({
         clock: this.#scheduler.clock,
         workingInterval: this.#config.workingInterval,
+        eagerProgress: this.#config.eagerProgress === true,
       })
       if (!this.#connectionOnly) this.#bindThread(projection, session.threadResponse)
       await this.#scheduler.yieldIo()
@@ -486,6 +488,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
       const projection = new AppServerTurnProjection({
         clock: this.#scheduler.clock,
         workingInterval: this.#config.workingInterval,
+        eagerProgress: this.#config.eagerProgress === true,
         ...(progress === undefined ? {} : {onProgress: progress}),
       })
       session.projection = projection
@@ -1753,6 +1756,7 @@ function validateLaunchConfig(config: CodexAppServerLaunchConfig): ValidatedCode
   return Object.freeze({
     ...(config.managedMcp === undefined ? {} : {managedMcp: config.managedMcp}),
     generateTitles: config.generateTitles === true,
+    eagerProgress: config.eagerProgress === true,
     preserveHome: config.preserveHome === true,
     binary: config.binary,
     prefixArgs: Object.freeze([...(config.prefixArgs ?? [])]),

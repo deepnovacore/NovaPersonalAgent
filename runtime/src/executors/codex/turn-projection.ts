@@ -13,6 +13,8 @@ import {
   WORKING_INTERVAL,
 } from './protocol.js'
 
+const EAGER_ACTIVITY_INTERVAL_SECONDS = 60
+
 export interface TurnCompletion {
   readonly status: 'completed' | 'failed'
   readonly final_text: string | null
@@ -24,6 +26,9 @@ export class AppServerTurnProjection {
   readonly #clock: Clock
   readonly #onProgress: ((progress: ExecutorProgress) => void) | undefined
   readonly #workingInterval: number
+  readonly #eagerProgress: boolean
+  #reportedActivities = new Set<string>()
+  #lastSummaryAt: number | null = null
   #threadId: string | null = null
   #notificationTurnId: string | null = null
   #responseTurnId: string | null = null
@@ -43,10 +48,12 @@ export class AppServerTurnProjection {
     readonly clock: Clock
     readonly onProgress?: (progress: ExecutorProgress) => void
     readonly workingInterval?: number
+    readonly eagerProgress?: boolean
   }) {
     this.#clock = options.clock
     this.#onProgress = options.onProgress
     this.#workingInterval = options.workingInterval ?? WORKING_INTERVAL
+    this.#eagerProgress = options.eagerProgress === true
     if (!Number.isFinite(this.#workingInterval) || this.#workingInterval < 0) {
       throw new RangeError('working interval must be non-negative and finite')
     }
@@ -193,6 +200,8 @@ export class AppServerTurnProjection {
     this.#lastEmittedProse = null
     this.#startedAt = this.#clock.now()
     this.#lastWorkingAt = this.#startedAt
+    this.#lastSummaryAt = this.#startedAt
+    this.#reportedActivities.clear()
     this.#emit({phase: 'started', internal_activity: 0, elapsed: 0, summary: null})
   }
 
@@ -228,7 +237,22 @@ export class AppServerTurnProjection {
     const elapsed = Math.max(0, now - this.#startedAt)
     const intervalElapsed = this.#lastWorkingAt !== null
       && now - this.#lastWorkingAt >= this.#workingInterval
-    const summary = this.#summaryProse !== this.#lastEmittedProse ? this.#summaryProse : null
+    let summary = this.#summaryProse !== this.#lastEmittedProse ? this.#summaryProse : null
+    if (summary !== null) this.#reportedActivities.clear()
+    else if (this.#eagerProgress && this.#lastSummaryAt !== null
+      && now - this.#lastSummaryAt >= Math.max(EAGER_ACTIVITY_INTERVAL_SECONDS, this.#workingInterval)) {
+      // Use only structured completion facts. Never summarize commands, paths, output or reasoning.
+      const activity = completedItem.type === 'commandExecution'
+        ? completedItem.status === 'failed' ? '一条工作区命令执行失败，尚未确认恢复结果。'
+          : completedItem.status === 'completed' ? '一条工作区命令已执行结束，尚未确认任务最终结果。' : null
+        : completedItem.type === 'fileChange' && completedItem.status === 'completed'
+          ? '已应用一批文件修改，尚未确认验证结果。' : null
+      if (activity !== null && !this.#reportedActivities.has(activity)) {
+        summary = activity
+        this.#reportedActivities.add(activity)
+      }
+    }
+    if (summary !== null) this.#lastSummaryAt = now
     if (!intervalElapsed && summary === null) return
     this.#lastWorkingAt = now
     this.#lastEmittedProse = this.#summaryProse
