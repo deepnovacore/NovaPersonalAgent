@@ -14,12 +14,17 @@ test('Mail Apple-event failures cannot report an empty successful snapshot',{ski
  static func main() {
   if CommandLine.arguments[1] == "batch-over-limit" {_=MailReader.batchIDs("fixture",["INBOX"],499,8);MailReader.emit(["unexpected":true])}
   var event=AppleEvent()
+  if CommandLine.arguments[1] == "partial-timeout" {
+   let errors=MailErrors();errors.onTimeout={MailReader.emit(["complete":false,"kept":2,"cursor":2])}
+   _=errors.eventDidFail(&event,withError:NSError(domain:NSOSStatusErrorDomain,code:-1712))
+  }
   _=MailErrors().eventDidFail(&event,withError:NSError(domain:NSOSStatusErrorDomain,code:Int(CommandLine.arguments[1])!))
   MailReader.emit(["complete":true,"messages":[]])
  }
 }
 `)
   execFileSync('xcrun',['swiftc','-module-cache-path',join(dir,'cache'),'-parse-as-library',join(dir,'check.swift'),'-o',join(dir,'check')])
+  assert.deepEqual(JSON.parse(execFileSync(join(dir,'check'),['partial-timeout'],{encoding:'utf8'})),{complete:false,kept:2,cursor:2})
   for(const [code,error] of [['-1712','timeout'],['-1743','native_unavailable'],['batch-over-limit','scope_denied']]){
    assert.deepEqual(JSON.parse(execFileSync(join(dir,'check'),[code],{encoding:'utf8'})),{error})
   }

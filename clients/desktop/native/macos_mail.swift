@@ -3,7 +3,9 @@ import ScriptingBridge
 import Carbon
 
 final class MailErrors:NSObject,SBApplicationDelegate {
+ var onTimeout:(()->Void)?
  func eventDidFail(_ event:UnsafePointer<AppleEvent>,withError error:Error)->Any? {
+  if (error as NSError).code == -1712 {onTimeout?()}
   MailReader.fail((error as NSError).code == -1712 ? "timeout" : "native_unavailable")
  }
 }
@@ -60,7 +62,7 @@ final class MailErrors:NSObject,SBApplicationDelegate {
   guard let app=SBApplication(bundleIdentifier:"com.apple.mail") else {fail("native_unavailable")}
   // Apple-event timeouts use ticks (60/second). Never treat a failed count as an empty mailbox.
   app.timeout=600
-  app.delegate=MailErrors()
+  let errors=MailErrors();app.delegate=errors
   let accounts=list(app,"accounts");guard accounts.count<=50 else {fail("response_too_large")}
   var roots:[(String,String,SBObject)]=[("@local","本机",app)]
   for i in 0..<accounts.count {let a=object(accounts,i);roots.append((string(a,"id"),string(a,"name"),a))}
@@ -91,8 +93,14 @@ final class MailErrors:NSObject,SBApplicationDelegate {
   let pageStarted=Date()
   // ponytail: Mail has no transactional snapshot; restart if count or boundary IDs change, rescan every completed poll.
   while boxIndex<boxes.count && scanned<20 && messages.count<8 && Date().timeIntervalSince(pageStarted)<8 {
+   errors.onTimeout=nil
    let (account,array,limit,path)=boxes[boxIndex];if offset>=limit {boxIndex+=1;offset=0;continue}
    if idsBox != boxIndex || offset>=idsOffset+ids.count {ids=batchIDs(account,path,offset+1,min(8,limit-offset));idsOffset=offset;idsBox=boxIndex}
+   if !messages.isEmpty {
+    // Commit the successful prefix, leaving the slow message at the cursor for retry.
+    let prefix:[String:Any]=["status":"granted","messages":messages,"complete":false,"capped":capped,"cursor":["box":boxIndex,"offset":offset,"fingerprints":fingerprints]]
+    errors.onTimeout={emit(prefix)}
+   }
    guard let m=array.object(withID:NSNumber(value:ids[offset-idsOffset])) as? SBObject else {fail("invalid_contract")};offset+=1;scanned+=1
    guard let received=m.value(forKey:"dateReceived") as? Date else {fail("invalid_contract")}
    if received<start || received>=end {continue}
