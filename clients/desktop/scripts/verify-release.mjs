@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {spawn, spawnSync} from 'node:child_process'
 import {once} from 'node:events'
 import {createServer} from 'node:https'
-import {cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm} from 'node:fs/promises'
+import {cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile} from 'node:fs/promises'
 import {basename, normalize, resolve} from 'node:path'
 import {parseArgs} from 'node:util'
 import {listPackage, statFile} from '@electron/asar'
@@ -127,6 +127,11 @@ async function smoke(executable, scratch) {
   const home = resolve(scratch, 'home')
   await mkdir(home, {mode: 0o700})
   prepareWindowsSmokeHomeOwnership({home, environment: process.env})
+  // Installed-backend acceptance uses only the loopback provider, never a host Codex or external tools.
+  const capabilities = resolve(home, 'capabilities.json')
+  await writeFile(capabilities, JSON.stringify({version: 1, modules: {
+    coding: {enabled: false}, search: {enabled: false}, camera: {enabled: false}, knowledge: {enabled: false},
+  }}))
   const mock = await provider(scratch)
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(PATH|SYSTEMROOT|WINDIR|COMSPEC|PATHEXT|LANG|LC_.*|DISPLAY|WAYLAND_DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR)$/iu.test(key)))
   Object.assign(env, {
@@ -134,6 +139,8 @@ async function smoke(executable, scratch) {
     XDG_CONFIG_HOME: home, XDG_DATA_HOME: home, XDG_CACHE_HOME: home,
     NODE_EXTRA_CA_CERTS: mock.certificate,
     NOVA_AUDIO_AGENT_RELEASE_SMOKE: 'installed-candidate-v1',
+    NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG: capabilities,
+    NOVA_AUDIO_AGENT_CODEX_BIN: resolve(home, 'unavailable-codex'),
     NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: mock.endpoint,
     NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL: 'release-smoke-model',
     NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE: 'release-smoke-voice',
