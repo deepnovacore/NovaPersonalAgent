@@ -1265,13 +1265,16 @@ export class ApprovalHost {
       'function',
       telemetryOutcome,
       telemetryReason,
+      decision?.accepted === true && (telemetryOutcome === 'accepted' || telemetryReason === 'unsupported_scope')
+        ? decision.scope ?? 'once' : undefined,
     )
     await this.#port.session.injectToolOutput({
       kind: 'tool_output',
       host_item_id: this.#port.idFactory(),
       event_id: this.#port.idFactory(),
       call_id: event.call_id,
-      content: JSON.stringify({code, state}),
+      content: JSON.stringify({code, state,
+        ...(code === 'approval_accepted' && decision?.scope === 'session' ? {scope: 'session'} : {})}),
     })
   }
 
@@ -1280,10 +1283,10 @@ export class ApprovalHost {
     source: 'function' | 'renderer',
     outcome: 'accepted' | 'refused',
     reason?: ExecutorApprovalDecisionReason,
+    scope?: 'once' | 'session',
   ): void {
-    this.#port.telemetry?.record('approval.decision', reason === undefined
-      ? {session_epoch: sessionEpoch, source, outcome}
-      : {session_epoch: sessionEpoch, source, outcome, reason})
+    this.#port.telemetry?.record('approval.decision', {session_epoch: sessionEpoch, source, outcome,
+      ...(reason === undefined ? {} : {reason}), ...(scope === undefined ? {} : {requested_scope: scope})})
   }
 
   invalidateExecutorApproval(reason: string): void {
