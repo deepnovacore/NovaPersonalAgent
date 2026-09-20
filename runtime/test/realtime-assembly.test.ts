@@ -2313,6 +2313,22 @@ test('personal memory opens before voice resources and closes inside their order
   assert.ok(actions.indexOf('memory:close') < actions.indexOf('core:stop'))
 })
 
+test('personal memory cold start may exceed shutdown grace before voice starts', async () => {
+  const actions: string[] = []
+  const realtime = buildRealtimeAssembly({
+    core: realCore(new RecordingFrameSource(actions)),
+    provider: new AbortAwareProvider(actions),
+    createPersonalMemory: () => ({
+      open: () => delay(1_200),
+      recall: () => Promise.reject(new Error('unused')),
+      close: () => Promise.resolve(),
+    }),
+    onDiagnostic: () => undefined,
+  })
+  try { await realtime.start(); assert.ok(actions.includes('provider:connect')) }
+  finally { await realtime.stop() }
+})
+
 test('personal learning uses host session identity and only the accepted user evidence', async () => {
   const remembered: {sourceId: string; sessionId: string; sequence: number; text: string; occurredAt: string | null}[] = []
   for (let run = 0; run < 2; run += 1) {

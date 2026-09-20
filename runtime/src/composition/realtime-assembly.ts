@@ -640,9 +640,11 @@ export class RealtimeAssembly {
         this.#personalMemory = this.#createPersonalMemory()
       }
       if (this.#personalMemory === undefined) return
-      const opened = await this.#cleanupWithinGrace(
-        () => this.#personalMemory!.open(),
+      // Cold SDK/Worker initialization needs the full memory RPC deadline, not shutdown grace.
+      const opened = await this.#settleWithinGrace(
+        this.#personalMemory.open(),
         'personal_memory_open_abandoned',
+        5_000,
       )
       if (opened.kind === 'rejected') throw opened.error
       if (opened.kind === 'abandoned') throw new AssemblyError('personal memory open was abandoned')
@@ -655,6 +657,7 @@ export class RealtimeAssembly {
   async #settleWithinGrace(
     work: Promise<void>,
     abandonedDiagnostic: string,
+    timeoutMs = REALTIME_ASSEMBLY_SHUTDOWN_GRACE_MS,
   ): Promise<CleanupResult> {
     const settled: Promise<CleanupResult> = work.then(
       () => ({kind: 'resolved'}),
@@ -664,7 +667,7 @@ export class RealtimeAssembly {
     const deadline = new Promise<CleanupResult>(resolve => {
       timer = setTimeout(
         () => resolve({kind: 'abandoned'}),
-        REALTIME_ASSEMBLY_SHUTDOWN_GRACE_MS,
+        timeoutMs,
       )
     })
     const result = await Promise.race([settled, deadline])
