@@ -198,6 +198,8 @@ idle
   → readback        planReadback summary / confirm / silent
   → committing      re-entrancy guard; calling dispatchExternal /
                     dispatchConfirmedExternal
+  → failed          recoverable preparation failure; retain the original request
+  → dispatch_unknown admission receipt missing; do not submit again
   → closed          dispatched | admission_refused | cancelled | abandoned
 ```
 
@@ -289,9 +291,25 @@ idle
   === 'user'`, it asks the host's fact callback to inject a bounded host fact so
   FrontBrain asks **exactly** that question. If closed, FrontBrain is told not
   to ask.
-- Malformed output: the turn is treated as “no new information”; after two
-  consecutive malformed results the intake closes `abandoned` with a spoken
-  apology. Malformed assess never plans or dispatches.
+- Model calls alone may retry once for transient transport/provider failures or
+  invalid output, within a shared 30-second stage deadline. Authentication and
+  other permanent failures do not retry. Exhaustion enters `failed`, preserving
+  requirements for the next structured `dispatch`; conversation alone does not
+  restart it. Failures never consume clarification budgets or become `abandoned`.
+  Cancellation/revision changes abort old work; late results cannot dispatch.
+  Speech pauses do not reset the same revision's retry budget. Target resolution
+  and evidence retrieval each have a 30-second deadline without automatic retries;
+  preparation failure invalidates any pending proposal.
+  The `intake.failure` memory and telemetry record includes stage, reason,
+  attempt and retrying, bound to intake ID and revision, without provider bodies.
+- In cascaded mode, intake uses the resolved support connection's model settings.
+  When reusing the selected provider, assessment and the default planner use that
+  provider's selected model; an explicit planner override is retained. A generic
+  support connection retains its own model configuration. Never send default Qwen
+  model names to a selected DeepSeek or Ark endpoint.
+- Preparation feedback is “让我先梳理一下计划。” Actual coding `started` progress
+  emits “需求梳理完毕，交给 {executor display_name} 执行。” once per delegate.
+  Admission alone never triggers that startup announcement.
 
 ### What enters intake
 
@@ -463,6 +481,10 @@ Rules:
     coding-task action (new intake) or, if the refusal was
     `unknown`-fence related, a verify-then-retry after the user confirms.
   Never mark `dispatched` before the admission result is known.
+- An exception after dispatch/steer/confirmed commit may have lost an admission
+  receipt. Enter `dispatch_unknown`, say the task may have started, and block
+  re-submission pending verification/cancellation. Never retry side effects or
+  describe an unknown outcome as a definite refusal or “尚未执行”.
 - The dispatched request preserves the coordinator's resolved `project`,
   `session` (`latest` \| `new`), and the compiled work order. `origin_ref` is
   the content-changing utterance of `plan_revision`.
@@ -507,6 +529,10 @@ Rules:
       before proposal accept; proposal accept does not recompile.
 - [ ] Pure “确认” against a pending `proposal_id` does not bump `revision`;
       amend does; stale `(intake_id, revision)` results are dropped.
+- [ ] Failed ASR preserves the intake and pending proposal with its original deadline;
+      release only the failed utterance reservation and ask again, never infer consent.
+      Without a proposal, keep planning paused until a new structured dispatch revises it;
+      an unrelated conversational reply must not resume the old plan.
 - [ ] `cancel` / `confirm` / direct `${name}__${op}` tools / Vision monitor
       calls never open coding intake; dispatch to another registered controller
       stays on that controller's typed contract.

@@ -9,6 +9,7 @@ import {ProjectConfirmationController} from '../src/projects/project-confirmatio
 import {renderWorkOrder, workOrderSchema} from '../src/executors/coding/work-order.js'
 import {ProjectResolutionError, type CoordinatorDecision, type IntakeTarget} from '../src/executors/coding-executor.js'
 import {validateCodexRequest} from '../src/executors/codex/contract.js'
+import {GatewayError} from '../src/model/model-gateway.js'
 
 const stated = (note: string) => ({state: 'stated' as const, note})
 const missing = {state: 'missing' as const, note: ''}
@@ -21,6 +22,26 @@ const assessment = (input: Readonly<Record<string, unknown>>, changes = {}) => (
   ...changes,
 })
 const plan = (input: Readonly<Record<string, unknown>>) => ({intake_id: input.intake_id, revision: input.revision, work_order: order})
+
+test('adaptive direct work preserves requirements without calling the planner or announcing a plan', async () => {
+  const h = harness({models: {assess: input => Promise.resolve(assessment(input, {execution_mode: 'direct'}))}})
+  h.intake.open(request, 'Fix empty password', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.dispatched.length, 1)
+  assert.equal(h.planned(), 0)
+  for (const slot of Object.values(slots)) assert.ok(h.intake.view?.work_order?.includes(slot.note))
+  assert.ok(h.facts.every(text => !text.includes('梳理一下计划')))
+})
+
+test('adaptive direct work still honors explicit confirmation settings', async () => {
+  const h = harness({settings: {clarification_depth: 'balanced', plan_readback: 'confirm'},
+    models: {assess: input => Promise.resolve(assessment(input, {execution_mode: 'direct'}))}})
+  h.intake.open(request, 'Fix empty password', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.planned(), 0)
+  assert.equal(h.dispatched.length, 0)
+  assert.ok(h.intake.view?.proposal_id)
+})
 
 test('intake assess schema keeps session mode and title mutually exclusive', () => {
   const base = assessment({intake_id: 'schema-intake', revision: 1})
@@ -89,7 +110,7 @@ test('intake zero-question fast path compiles once, preserves target/session and
   assert.equal(h.intake.view?.workspace, '/canonical/project')
   assert.equal(h.intake.view?.target?.session_title, 'Named task')
   assert.equal(h.intake.view?.title, 'Fix empty password')
-  assert.deepEqual(h.records, ['intake.assess', 'plan.compile', 'intake.dispatch'])
+  assert.deepEqual(h.records.filter(kind => kind !== 'intake.timing'), ['intake.assess', 'plan.compile', 'intake.dispatch'])
   assert.equal(h.dispatched.length, 1)
   assert.equal(h.planned(), 1)
   assert.match(h.intake.view.work_order!, /^WorkOrder v2/)
@@ -265,7 +286,8 @@ test('intake assess is single-flight; stale and malformed output cannot speak or
   await broken.intake.settled()
   broken.intake.open(request, 'Try again', 'u2', 'e')
   await broken.intake.settled()
-  assert.equal(broken.intake.view?.outcome, 'abandoned')
+  assert.equal(broken.intake.view?.state, 'failed')
+  assert.equal(broken.intake.view?.outcome, null)
   assert.equal(broken.dispatched.length, 0)
 })
 
@@ -761,9 +783,11 @@ test('accepted dispatch and steer remain launchable after intake closes normally
 
 test('an unrelated completed frontend turn releases paused work without rewriting its requirements', async () => {
   let release!: (value: unknown) => void
+  let calls = 0
   let entered!: () => void
   const started = new Promise<void>(resolve => {entered = resolve})
   const h = harness({models: {plan: async input => {
+    calls++
     if (input.revision === 1 && !release) {entered(); return await new Promise(resolve => {release = resolve})}
     return plan(input)
   }}})
@@ -779,12 +803,15 @@ test('an unrelated completed frontend turn releases paused work without rewritin
   assert.equal(h.dispatched.length, 1)
   assert.equal(h.intake.view?.opening, 'Fix empty password')
   assert.equal(h.intake.view?.revision, 1)
+  assert.equal(calls, 1)
+  assert.equal(h.records.filter(kind => kind === 'intake.assess').length, 1)
+  assert.equal(h.records.filter(kind => kind === 'plan.compile').length, 1)
 })
 
 test('accepted dispatch emits immediate feedback once and cancellation invalidates it', () => {
   const h = harness({models: {assess: () => new Promise(() => { /* deliberately pending */ })}})
   h.intake.open(request, 'Build a page', 'conversation:1', '1')
-  assert.deepEqual(h.facts, ['马上安排。'])
+  assert.deepEqual(h.facts, ['收到，我来处理。'])
   const s = h.intake.view!
   const event = `intake:${s.intake_id}:${s.revision}:accepted`
   assert.equal(h.intake.factEligible(event, 1), true)
@@ -805,4 +832,329 @@ test('idle workspaces do not advertise or admit steer, even if a model invents i
   assert.equal(h.steered.length, 0)
   assert.equal(h.dispatched.length, 0, 'the host must not invent a replacement operation')
   assert.match(h.facts.at(-1)!, /code=no_active_turn/)
+})
+
+test('transient assessment failure retries the same requirement and dispatches once', async () => {
+  let calls = 0
+  const h = harness({models: {assess: input => {
+    if (++calls === 1) return Promise.reject(new GatewayError('HTTPStatus503'))
+    return Promise.resolve(assessment(input))
+  }}})
+  h.intake.open(request, 'Fix empty password', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.outcome, 'dispatched')
+  assert.equal(h.dispatched.length, 1)
+  assert.equal(calls, 2)
+  assert.ok(!h.facts.some(text => text.includes('请补充') || text.includes('需求已结束')))
+})
+
+test('exhausted service failures retain requirements and only structured dispatch resumes them', async () => {
+  let unavailable = true, calls = 0
+  let resumed: Readonly<Record<string, unknown>> | undefined
+  const failures: unknown[] = []
+  const h = harness({record: (_s, kind, data) => { if (kind === 'intake.failure') failures.push(data) }, models: {
+    assess: input => {
+      calls++
+      if (unavailable) return Promise.reject(new GatewayError('HTTPStatus503'))
+      resumed = input
+      return Promise.resolve(assessment(input))
+    },
+  }})
+  h.intake.open({...request, source_quotes: ['original user goal']}, 'Fix empty password', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(h.intake.view?.outcome, null)
+  assert.equal(h.intake.preparing, false)
+  assert.equal(calls, 2)
+  assert.equal(failures.length, 2)
+  assert.match(h.facts.at(-1)!, /原需求已保留/)
+  h.intake.userInputStarted()
+  h.intake.userInputEnded()
+  h.intake.userResponseCompleted()
+  await h.intake.settled()
+  assert.equal(calls, 2, 'unrelated conversation must not restart an unavailable service')
+  unavailable = false
+  h.intake.open(request, 'Continue', 'u2', 'e')
+  await h.intake.settled()
+  assert.equal(h.dispatched.length, 1)
+  assert.equal(resumed?.opening, 'Fix empty password')
+  assert.deepEqual(resumed?.source_quotes, ['original user goal'])
+  assert.deepEqual(resumed?.turns, [{question: null, answer: 'Continue'}])
+})
+
+test('authentication failures pause without retry or blaming the user', async () => {
+  let calls = 0
+  const failures: unknown[] = []
+  const h = harness({record: (_s, kind, data) => { if (kind === 'intake.failure') failures.push(data) }, models: {
+    assess: () => { calls++; return Promise.reject(new GatewayError('HTTPStatus401')) },
+  }})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(calls, 1)
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.deepEqual(failures, [{stage: 'assess', reason: 'authentication', attempt: 1, retrying: false}])
+  assert.match(h.facts.at(-1)!, /配置/)
+})
+
+test('plan generation retries independently but admission exceptions never retry', async () => {
+  let assessments = 0, plans = 0, admissions = 0
+  const h = harness({models: {
+    assess: input => { assessments++; return Promise.resolve(assessment(input)) },
+    plan: input => ++plans === 1 ? Promise.reject(new GatewayError('HTTPStatus429')) : Promise.resolve(plan(input)),
+  }, dispatch: () => { admissions++; throw new Error('receipt lost after admission') }})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(assessments, 1)
+  assert.equal(plans, 2)
+  assert.equal(admissions, 1)
+  assert.equal(h.intake.view?.state, 'dispatch_unknown')
+  assert.match(h.facts.at(-1)!, /可能已开始/)
+  assert.doesNotMatch(h.facts.at(-1)!, /尚未执行/)
+  h.intake.open(request, 'Try again', 'u2', 'e')
+  h.intake.userInputStarted()
+  h.intake.userResponseCompleted()
+  await h.intake.settled()
+  assert.equal(admissions, 1)
+})
+
+for (const action of ['cancel', 'revise', 'interrupt'] as const) {
+  test(`a ${action} during retry backoff cannot launch the old requirement`, async () => {
+    let failed!: () => void
+    const failure = new Promise<void>(resolve => { failed = resolve })
+    const revisions: unknown[] = []
+    const h = harness({record: (_s, kind) => { if (kind === 'intake.failure') failed() }, models: {
+      assess: input => {
+        revisions.push(input.revision)
+        if (revisions.length === 1) return Promise.reject(new GatewayError('HTTPStatus503'))
+        return Promise.resolve(assessment(input))
+      },
+    }})
+    h.intake.open(request, 'Fix it', 'u1', 'e')
+    // The old implementation has only the diagnostic, no durable failure record.
+    await Promise.race([failure, h.intake.settled()])
+    if (action === 'cancel') h.intake.cancel()
+    else if (action === 'revise') h.intake.open(request, 'Fix the new requirement', 'u2', 'e')
+    else h.intake.userInputStarted()
+    await h.intake.settled()
+    assert.deepEqual(revisions, action === 'revise' ? [1, 2] : action === 'interrupt' ? [1, 1] : [1])
+    assert.equal(h.dispatched.length, action === 'revise' ? 1 : 0)
+    if (action === 'interrupt') {
+      h.intake.userInputEnded()
+      h.intake.userResponseCompleted()
+      await h.intake.settled()
+      assert.equal(h.dispatched.length, 1)
+    }
+  })
+}
+
+test('a lost confirmed admission receipt remains unknown and cannot be re-confirmed', async () => {
+  const h = harness({settings: {clarification_depth: 'balanced', plan_readback: 'confirm'}})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await h.intake.settled()
+  const operation = h.confirmation.acceptDirectDecision({proposalId: h.intake.view!.proposal_id!, confirmed: true}).operation!
+  assert.equal(h.intake.beginConfirmed(operation), true)
+  h.intake.settleConfirmed({accepted: false, code: 'callback_failed'})
+  assert.equal(h.intake.view?.state, 'dispatch_unknown')
+  assert.match(h.facts.at(-1)!, /可能已开始/)
+  assert.equal(h.intake.beginConfirmed(operation), false)
+})
+
+test('a noncooperative model hits the deadline without dispatch and ignores its late result', async () => {
+  const clock = new VirtualClock()
+  let release!: (value: unknown) => void
+  const h = harness({clock, models: {assess: () => new Promise(resolve => { release = resolve })}})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  clock.advanceTo(30)
+  await h.intake.settled()
+  assert.equal(h.intake.view?.state, 'failed')
+  release(assessment({intake_id: h.intake.view.intake_id, revision: 1}))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.dispatched.length, 0)
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(clock.waiterCount(), 0)
+})
+
+test('a spoken interruption during steering does not discard an accepted receipt', async () => {
+  let release!: (value: {accepted: boolean; delegate_id: string}) => void
+  let entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const h = harness({running: () => [{work_id: 'running', project: 'Project', title: 'Task'}],
+    models: {assess: input => Promise.resolve(assessment(input, {kind: 'steer'}))},
+    steer: () => { entered(); return new Promise(resolve => { release = resolve }) },
+  })
+  h.intake.open(request, 'Update the task', 'u1', 'e')
+  await started
+  h.intake.userInputStarted()
+  release({accepted: true, delegate_id: 'running'})
+  await h.intake.settled()
+  assert.equal(h.intake.view?.outcome, 'routed')
+  assert.equal(h.intake.preparing, false)
+})
+
+test('speech pauses preserve the failed assessment retry budget', async () => {
+  let calls = 0
+  let failed!: () => void
+  const firstFailure = new Promise<void>(resolve => { failed = resolve })
+  const h = harness({record: (_s, kind) => { if (kind === 'intake.failure') failed() }, models: {
+    assess: () => { calls++; return Promise.reject(new GatewayError('HTTPStatus503')) },
+  }})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await firstFailure
+  h.intake.userInputStarted()
+  await h.intake.settled()
+  h.intake.userResponseCompleted()
+  await h.intake.settled()
+  assert.equal(calls, 2)
+  assert.equal(h.intake.view?.state, 'failed')
+})
+
+test('stuck evidence retrieval times out and aborts without launching', async () => {
+  const clock = new VirtualClock()
+  let entered!: () => void
+  let signal!: AbortSignal
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const h = harness({clock, attachEvidence: (_order, _workspace, abortSignal) => {
+    signal = abortSignal; entered(); return new Promise(() => { /* deliberately noncooperative */ })
+  }})
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await started
+  clock.advanceTo(30)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(signal.aborted, true)
+  assert.equal(h.dispatched.length, 0)
+})
+
+test('failed proposal delivery invalidates its pending confirmation', async () => {
+  const h = harness({settings: {clarification_depth: 'balanced', plan_readback: 'confirm'},
+    fact: (session) => { if (session.proposal_id !== null) throw new Error('delivery unavailable') },
+  })
+  h.intake.open(request, 'Fix it', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.intake.view?.state, 'failed')
+  assert.equal(h.intake.view?.proposal_id, null)
+})
+
+test('failed speech preserves a pending intake proposal and accepts the next explicit confirmation', async () => {
+  const h = harness({settings: {clarification_depth: 'balanced', plan_readback: 'confirm'}})
+  h.intake.open(request, 'Fix empty password', 'u1', 'e')
+  await h.intake.settled()
+  const before = h.intake.view!
+  h.intake.userInputStarted()
+  h.intake.userInputFailed()
+  assert.equal(h.intake.view?.proposal_id, before.proposal_id)
+  assert.equal(h.intake.view?.intake_id, before.intake_id)
+  assert.equal(h.dispatched.length, 0)
+  confirmProposal(h)
+  assert.equal(h.intake.view?.outcome, 'dispatched')
+  assert.equal(h.planned(), 1)
+})
+
+test('failed speech during planning keeps the draft paused through unrelated turns until dispatch revises it', async () => {
+  let release!: (value: unknown) => void
+  let input!: Readonly<Record<string, unknown>>
+  const h = harness({models: {plan: current => {input = current; return new Promise(resolve => {release = resolve})}}})
+  h.intake.open(request, 'Fix empty password', 'u1', 'e')
+  await new Promise(resolve => setImmediate(resolve))
+  h.intake.userInputStarted()
+  h.intake.userInputFailed()
+  release(plan(input))
+  await h.intake.settled()
+  h.intake.userInputStarted()
+  h.intake.userInputEnded()
+  h.intake.userResponseCompleted()
+  await h.intake.settled()
+  assert.equal(h.dispatched.length, 0)
+  assert.notEqual(h.intake.view?.state, 'closed')
+  h.intake.open(request, 'Fix the corrected requirement', 'u2', 'e')
+  await new Promise(resolve => setImmediate(resolve))
+  release(plan(input))
+  await h.intake.settled()
+  assert.equal(h.dispatched.length, 1)
+})
+
+for (const readback of ['summary', 'confirm'] as const) {
+  test(`planning disabled preserves validated work order and ${readback} confirmation`, async () => {
+    const h = harness({settings: {clarification_depth: 'balanced', plan_readback: readback, generate_plan: false}})
+    h.intake.open(request, 'Fix empty password', 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.planned(), 0)
+    assert.match(h.intake.view!.work_order!, /Login only/)
+    assert.match(h.intake.view!.work_order!, /Keep public API/)
+    assert.equal(h.dispatched.length, readback === 'confirm' ? 0 : 1)
+    if (readback === 'confirm') assert.ok(h.intake.view!.proposal_id)
+  })
+}
+
+for (const kind of ['switch', 'create'] as const) {
+  test(`${kind}-only resumes a cached assessment after speech without planning or duplicate proposal`, async () => {
+    let assessments = 0, resolutions = 0
+    let release!: (value: IntakeTarget) => void
+    let entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const h = harness({
+      models: {assess: input => { assessments++; return Promise.resolve(assessment(input, {
+        kind, project: 'Project', slots: {...slots, goal: missing},
+      })) }},
+      resolveTarget: () => {
+        if (++resolutions > 1) return Promise.resolve({...target, action: kind === 'create' ? 'create' : 'select'})
+        entered()
+        return new Promise(resolve => { release = resolve })
+      },
+    })
+    h.intake.open(request, kind === 'switch' ? 'Switch to Project' : 'Create Project', 'u1', 'e')
+    await started
+    h.intake.userInputStarted()
+    release({...target, action: kind === 'create' ? 'create' : 'select'})
+    await h.intake.settled()
+    assert.equal(h.intake.view?.proposal_id, null)
+    assert.equal(h.intake.view?.work_order, null)
+    h.intake.userResponseCompleted()
+    await h.intake.settled()
+    assert.equal(assessments, 1)
+    assert.equal(h.planned(), 0)
+    assert.equal(h.dispatched.length, 0)
+    assert.ok(h.intake.view?.proposal_id)
+    assert.equal(h.facts.filter(text => text.includes('仅通过 confirm')).length, 1)
+    h.intake.userInputStarted()
+    h.intake.userInputEnded()
+    h.intake.userResponseCompleted()
+    await h.intake.settled()
+    assert.equal(h.facts.filter(text => text.includes('仅通过 confirm')).length, 1)
+  })
+}
+
+test('a cached successful assessment does not repeat its clarification after an unrelated turn', async () => {
+  let assessments = 0
+  let release!: (value: unknown) => void
+  let input!: Readonly<Record<string, unknown>>
+  const h = harness({models: {assess: current => {
+    assessments++; input = current; return new Promise(resolve => { release = resolve })
+  }}})
+  h.intake.open(request, 'Fix something', 'u1', 'e')
+  h.intake.userInputStarted()
+  release(assessment(input, {kind: 'unclear', candidate_question: {owner: 'user', text: 'Which feature?'}}))
+  await h.intake.settled()
+  h.intake.userResponseCompleted()
+  await h.intake.settled()
+  assert.equal(assessments, 1)
+  assert.equal(h.intake.view?.questions_asked, 1)
+  assert.equal(h.facts.filter(text => text.includes('Which feature?')).length, 1)
+  assert.equal(h.planned(), 0)
+})
+
+test('intake timing falls back for empty or absent planner models and keeps explicit models', async () => {
+  for (const planner_model of [undefined, '', 'planner']) {
+    const timings: unknown[] = []
+    const h = harness({
+      settings: {clarification_depth: 'balanced', plan_readback: 'summary',
+        ...(planner_model === undefined ? {} : {planner_model}), fast_model: 'fast'},
+      record: (_current, kind, detail) => {
+        if (kind === 'intake.timing' && detail.stage === 'plan') timings.push(detail.model)
+      },
+    })
+    h.intake.open(request, 'Fix empty password', 'conversation:1', 'epoch1')
+    await h.intake.settled()
+    assert.deepEqual(timings, [planner_model === 'planner' ? 'planner' : 'fast'])
+  }
 })

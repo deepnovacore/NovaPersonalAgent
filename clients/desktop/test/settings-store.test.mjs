@@ -100,6 +100,7 @@ test('the default settings are the documented schema', () => {
     codexApprovalMode: 'ask',
     clarificationDepth: 'balanced',
     planReadback: 'summary',
+    generatePlan: true,
     plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
@@ -273,6 +274,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     codexApprovalMode: 'ask',
     clarificationDepth: 'balanced',
     planReadback: 'summary',
+    generatePlan: true,
     plannerModel: '',
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
@@ -343,6 +345,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
+    'generatePlan',
     'integratedModel',
     'integratedProvider',
     'integratedVoice',
@@ -540,6 +543,7 @@ test('publicSettings never carries the secrets object', () => {
     'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
+    'generatePlan',
     'integratedModel',
     'integratedProvider',
     'integratedVoice',
@@ -1138,6 +1142,24 @@ test('coding progress narration round trips and defaults to smart', () => {
   const settings = normalizeSettings({codingProgressNarration: 'continuous'})
   assert.equal(publicSettings(settings).codingProgressNarration, 'continuous')
   assert.equal(normalizeSettings({codingProgressNarration: 'invalid'}).codingProgressNarration, 'smart')
+})
+
+test('plan generation defaults on, persists explicit false, and rejects non-boolean patches', async t => {
+  assert.equal(normalizeSettings({}).generatePlan, true)
+  const next = applySettingsUpdate(DEFAULT_SETTINGS, {generatePlan: false})
+  assert.equal(publicSettings(next).generatePlan, false)
+  assert.equal(backendSettings(next).generatePlan, false)
+  assert.notDeepEqual(backendSettings(next), backendSettings(DEFAULT_SETTINGS))
+  for (const value of ['false', 'true', 0, 1, null]) {
+    assert.equal(applySettingsUpdate(next, {generatePlan: value}).generatePlan, false)
+    assert.equal(normalizeSettings({generatePlan: value}).generatePlan, true)
+  }
+  const dir = await mkdtemp(join(tmpdir(), 'nova-planning-settings-'))
+  t.after(() => rm(dir, {recursive: true, force: true}))
+  const file = join(dir, 'settings.json')
+  await saveSettings(file, next)
+  assert.equal(publicSettings(await loadSettings(file)).generatePlan, false)
+  assert.equal(applySettingsUpdate(next, {generatePlan: true}).generatePlan, true)
 })
 
 

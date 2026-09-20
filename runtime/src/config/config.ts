@@ -91,6 +91,7 @@ export const settingsSchema = z.object({
   codex_approval_mode: executorApprovalModeSchema.default('ask'),
   clarification_depth: clarificationDepthSchema.default('balanced'),
   plan_readback: planReadbackSchema.default('summary'),
+  generate_plan: z.boolean().default(true),
   planner_model: z.string().default(''),
   progress_bubbles: progressBubblesSchema.default('milestones'),
   capabilities_config_path: z.string().default('~/.nova-audio-agent/capabilities.json'),
@@ -320,6 +321,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
       environment.NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH,
     ),
     plan_readback: parsePlanReadback(environment.NOVA_AUDIO_AGENT_PLAN_READBACK),
+    generate_plan: optionalBoolean(environment.NOVA_AUDIO_AGENT_GENERATE_PLAN),
     planner_model: optionalString(environment.NOVA_AUDIO_AGENT_PLANNER_MODEL),
     progress_bubbles: parseProgressBubbles(environment.NOVA_AUDIO_AGENT_PROGRESS_BUBBLES),
     capabilities_config_path: optionalString(

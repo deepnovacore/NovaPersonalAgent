@@ -307,7 +307,7 @@ function validateApprovalId(value: string): string {
 
 /** Host-owned voice approval authority. Realtime supplies transport and forwards lifecycle events. */
 
-const APPROVAL_CLARIFICATION = '请明确说同意或拒绝。'
+const APPROVAL_CLARIFICATION = '这次授权还没有确认，操作仍在等待。请问你同意还是拒绝？'
 interface ApprovalHostPort {
   readonly session: RealtimeSession
   readonly clock: Clock
@@ -326,6 +326,7 @@ interface ApprovalHostPort {
 }
 
 type ExecutorApprovalDecisionReason =
+  | 'unsupported_scope'
   | 'not_pending'
   | 'epoch_mismatch'
   | 'authority_missing'
@@ -374,6 +375,7 @@ function approvalFactText(view: ApprovalView, id: string, executorDisplayName: s
   const queued = view.queued > 0 ? `（还有 ${view.queued} 个等待）` : ''
   const summary = (view.operation_summary ?? '').replace(/。$/u, '')
   const text = `权限请求 id=${id}：${who} 请求批准 ${view.kind ?? ''}：${summary}${queued}。`
+    + (view.allowed_decisions === undefined ? '' : `allowed_decisions=${JSON.stringify(view.allowed_decisions)}。`)
     + '只有用户本轮明确同意或拒绝后才调用 confirm(id, accepted)；不要朗读 id。'
   return [...text].slice(0, MAX_HOST_FACT_CHARS).join('')
 }
@@ -531,6 +533,7 @@ export class ApprovalHost {
         event_id: `approval:${view.pending_approval_id}:requested`,
         content: approvalFactText(view, view.pending_approval_id, this.#port.displayName()),
       }).item
+      contextItem.speech_content = `${view.work === null ? this.#port.displayName() : view.work.project}需要你的授权：${view.operation_summary ?? '执行当前操作'}。是否允许？`
       const authority: ExecutorApprovalAuthorityState = {
         approvalId: view.pending_approval_id,
         sessionEpoch: this.#port.session.sessionEpoch,
@@ -1240,9 +1243,13 @@ export class ApprovalHost {
               || revision !== this.#port.session.userInputRevision
             ? 'revision_mismatch'
             : 'response_mismatch'
+      } else if (decision.scope === 'session' && !(controller.view.allowed_decisions ?? []).includes('acceptForSession')) {
+        code = 'approval_scope_unsupported'
+        state = 'retryable'
+        telemetryReason = 'unsupported_scope'
       } else if (controller.acceptDecision({
         approvalId: decision.id,
-        decision: decision.accepted ? 'accept' : 'decline',
+        decision: decision.accepted ? decision.scope === 'session' ? 'acceptForSession' : 'accept' : 'decline',
       })) {
         this.#port.session.settleUserResponse(responseId)
         code = decision.accepted ? 'approval_accepted' : 'approval_declined'

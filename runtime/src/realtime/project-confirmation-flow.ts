@@ -47,7 +47,7 @@ function projectCommitSuccessText(
   operation: ConfirmedProjectOperation,
   code: string,
 ): string {
-  if (code !== 'committed') return '正在启动任务。'
+  if (code !== 'committed') return ''
   if (operation.action === 'create') {
     return `已确认，已创建并切换到工作区 ${operation.workspace_display_name}。`
   }
@@ -877,7 +877,7 @@ export class ProjectConfirmationFlow {
         let text: string | null = null
         let expiryOwnsFact = false
         const decision = confirmArguments(event.arguments)
-        if (decision === null) {
+        if (decision === null || decision.scope !== undefined) {
           code = 'confirmation_invalid'
           text = '确认请求无效，操作尚未执行。'
         } else {
@@ -909,7 +909,6 @@ export class ProjectConfirmationFlow {
         }
         if (
           text !== null
-          && text !== ''
           && !expiryOwnsFact
           && code !== 'confirmation_invalid'
           && code !== 'confirmation_not_pending'
@@ -927,6 +926,7 @@ export class ProjectConfirmationFlow {
         content: JSON.stringify({code, state}),
       }
       const toolOutputInjected = await this.session.injectToolOutput(item)
+      // Empty text is a silent admission, but its carrier still needs settlement and fencing.
       if (confirmationText !== null) {
         if (toolOutputInjected && confirmationResponseId !== null) {
           this.session.settleUserResponse(confirmationResponseId)
@@ -934,7 +934,7 @@ export class ProjectConfirmationFlow {
         const carrierNeedsCancellation = confirmationResponseId === null
           ? false
           : this.#prepareProjectConfirmationCarrier(event.session_epoch, confirmationResponseId)
-        this.#queueProjectConfirmationFact(
+        if (confirmationText !== '') this.#queueProjectConfirmationFact(
           confirmationText,
           this.#projectConfirmationLifecycleId(),
           `decision:${code}:${state}`,
@@ -1052,12 +1052,13 @@ export class ProjectConfirmationFlow {
       })
     } catch (failure) {
       if (intakeOperation) this.#ports.intake()?.settleConfirmed({accepted: false, code: 'callback_failed'})
+      if (intakeOperation) this.#ports.projectConfirmation?.rejectConfirmed(operation)
       if (isAbort(failure)) {
         this.#projectConfirmationCommittingLifecycles.delete(lifecycleId)
         this.#projectConfirmationExpiryFactOwners.delete(lifecycleId)
         throw failure
       }
-      this.#ports.projectConfirmation?.rollbackConfirmed(operation)
+      if (!intakeOperation) this.#ports.projectConfirmation?.rollbackConfirmed(operation)
       this.#ports.telemetry?.record(this.#ports.projectConfirmation?.pending === true
         ? 'project_confirmation.commit_rollback'
         : 'project_confirmation.commit_settled', {
@@ -1069,7 +1070,7 @@ export class ProjectConfirmationFlow {
       })
       return this.#finishConfirmedProjectCommit(lifecycleId, {
         state: 'failed',
-        text: '已确认，但操作未执行。',
+        text: intakeOperation ? '' : '已确认，但操作未执行。',
       })
     }
   }
@@ -1123,7 +1124,7 @@ export class ProjectConfirmationFlow {
     return true
   }
 
-  /** Transcription failed, so the answer is unknowable and the proposal is cancelled. */
+  /** Transcription failed: release this answer and ask again without granting authority. */
   async #failProjectConfirmation(epoch: number, itemId: string): Promise<void> {
     if (this.#projectConfirmationClosingItems.has(callKey(epoch, itemId))) {
       await this.#closeConfirmationDeferredCalls(itemId)

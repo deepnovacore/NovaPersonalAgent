@@ -67,6 +67,7 @@ export interface CompleteRequest {
   readonly prompt: string
   readonly jsonSchema?: Readonly<Record<string, JsonValue>> | null
   readonly images?: readonly GatewayImage[]
+  readonly reasoning?: 'disabled'
   readonly signal?: AbortSignal
 }
 
@@ -77,11 +78,11 @@ export interface ModelGateway {
 
 /** A provider failure whose message carries only a stable classification. */
 export class GatewayError extends Error {
-  constructor(classification: string) {
+  constructor(readonly classification: string) {
     // Python interpolates the CPython exception type name here. That name cannot
     // exist in Node, so this uses a stable classification instead, the same choice
-    // made for ExecutorContractError. The text is diagnostic only and never becomes
-    // durable evidence: a model port failure reaches the reducer as `port_failure`.
+    // made for ExecutorContractError. Intake records only fixed failure categories;
+    // a model port failure reaches the reducer as `port_failure`.
     super(`模型请求失败（${classification}）`)
     this.name = 'GatewayError'
   }
@@ -214,6 +215,7 @@ export interface OpenAIGatewayOptions {
   readonly clock: Clock
   readonly metrics?: MetricsSink
   readonly fetch?: typeof globalThis.fetch
+  readonly thinkingControl?: 'deepseek'
   readonly requestTimeout?: number
   /** Maximum silence between SSE body chunks, in seconds. */
   readonly streamIdleTimeout?: number
@@ -226,6 +228,7 @@ export class OpenAIModelGateway implements ModelGateway {
   readonly #clock: Clock
   readonly #metrics: MetricsSink
   readonly #fetch: typeof globalThis.fetch
+  readonly #thinkingControl: 'deepseek' | undefined
   readonly #requestTimeout: number
   readonly #streamIdleTimeout: number
 
@@ -238,6 +241,7 @@ export class OpenAIModelGateway implements ModelGateway {
     this.#clock = options.clock
     this.#metrics = options.metrics ?? new LoggingMetrics()
     this.#fetch = options.fetch ?? globalThis.fetch
+    this.#thinkingControl = options.thinkingControl
     this.#requestTimeout = options.requestTimeout ?? 120
     this.#streamIdleTimeout = options.streamIdleTimeout ?? 600
     if (!Number.isFinite(this.#streamIdleTimeout) || this.#streamIdleTimeout <= 0) {
@@ -304,7 +308,9 @@ export class OpenAIModelGateway implements ModelGateway {
     let finishReason: string | null = null
     let errorType: string | null = null
     try {
-      const pending = await this.#post(completeRequestBody(request), request.signal)
+      const body = completeRequestBody(request)
+      const pending = await this.#post(this.#thinkingControl === 'deepseek' && request.reasoning === 'disabled'
+        ? {...body, thinking: {type: 'disabled'}} : body, request.signal)
       let raw: unknown
       try {
         raw = await pending.response.json()
@@ -390,9 +396,9 @@ export class OpenAIModelGateway implements ModelGateway {
 
 function classify(error: unknown): string {
   if (error instanceof GatewayError) {
-    const match = /（(.+)）/u.exec(error.message)
-    return match?.[1] ?? 'GatewayError'
+    return error.classification
   }
+  if (error instanceof SyntaxError || error instanceof z.ZodError) return 'InvalidResponse'
   if (error instanceof Error) {
     return error.name === 'TimeoutError' || error.name === 'AbortError'
       ? error.name

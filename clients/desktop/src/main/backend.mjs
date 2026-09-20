@@ -32,6 +32,7 @@ const SETTINGS_DEFAULTS = Object.freeze({
   codexApprovalMode: 'ask',
   clarificationDepth: 'balanced',
   planReadback: 'summary',
+  generatePlan: true,
   plannerModel: '',
   progressBubbles: 'milestones',
   embeddingProvider: 'dashscope',
@@ -197,6 +198,7 @@ export function backendLaunchSpec({
       ?? SETTINGS_DEFAULTS.codexApprovalMode,
     NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH: settings?.clarificationDepth
       ?? SETTINGS_DEFAULTS.clarificationDepth,
+    NOVA_AUDIO_AGENT_GENERATE_PLAN: String(settings?.generatePlan ?? SETTINGS_DEFAULTS.generatePlan),
     NOVA_AUDIO_AGENT_PLAN_READBACK: settings?.planReadback ?? SETTINGS_DEFAULTS.planReadback,
     NOVA_AUDIO_AGENT_PROGRESS_BUBBLES: settings?.progressBubbles
       ?? SETTINGS_DEFAULTS.progressBubbles,

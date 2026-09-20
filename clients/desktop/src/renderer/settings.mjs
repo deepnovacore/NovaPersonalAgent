@@ -81,6 +81,7 @@ const codingProgressNarrationInput = document.querySelector('#coding-progress-na
 const proactivityInputs = [...document.querySelectorAll('input[name="proactivity"]')]
 const pipelineModeInputs = [...document.querySelectorAll('input[name="pipelineMode"]')]
 const codexApprovalModeInputs = [...document.querySelectorAll('input[name="codexApprovalMode"]')]
+const generatePlanInput = document.querySelector('#generatePlan')
 const planReadbackInputs = [...document.querySelectorAll('input[name="planReadback"]')]
 const progressBubblesInputs = [...document.querySelectorAll('input[name="progressBubbles"]')]
 const heartbeat = document.querySelector('#heartbeat')
@@ -360,6 +361,7 @@ function render(view, _drafts, state) {
   for (const input of codexApprovalModeInputs) {
     input.checked = input.value === view.codexApprovalMode
   }
+  generatePlanInput.checked = view.generatePlan !== false
   for (const input of planReadbackInputs) input.checked = input.value === view.planReadback
   for (const input of progressBubblesInputs) input.checked = input.value === view.progressBubbles
   yoloWarning.hidden = view.codexApprovalMode !== 'yolo'
@@ -487,6 +489,7 @@ for (const input of pipelineModeInputs) bindStage(input, 'change', () => ({pipel
 for (const input of codexApprovalModeInputs) {
   bindStage(input, 'change', () => ({codexApprovalMode: input.value}))
 }
+bindStage(generatePlanInput, 'change', () => ({generatePlan: generatePlanInput.checked}))
 for (const input of planReadbackInputs) bindStage(input, 'change', () => ({planReadback: input.value}))
 for (const input of progressBubblesInputs) {
   bindStage(input, 'change', () => ({progressBubbles: input.value}))

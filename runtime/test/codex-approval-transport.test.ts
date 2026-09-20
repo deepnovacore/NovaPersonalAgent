@@ -71,6 +71,19 @@ function commandParams(workspace: string): Record<string, unknown> {
   }
 }
 
+test('command approval explains the executor-provided purpose with secrets redacted', async t => {
+  const {base, controller, workspace} = fixture(t)
+  const routed = routeCodexApprovalServerRequest({...base,
+    method: 'item/commandExecution/requestApproval',
+    params: {...commandParams(workspace), reason: '启动本地网页服务并验证页面 token=private-value'},
+    signal: new AbortController().signal,
+  })
+  assert.match(controller.view.operation_summary!, /启动本地网页服务并验证页面/u)
+  assert.doesNotMatch(controller.view.operation_summary!, /private-value/u)
+  controller.acceptDecision({approvalId: 'public-1', decision: 'decline'})
+  await routed
+})
+
 test('correlated file approval projects only canonical workspace display facts', async t => {
   const {base, controller, workspace} = fixture(t)
   const routed = routeCodexApprovalServerRequest({

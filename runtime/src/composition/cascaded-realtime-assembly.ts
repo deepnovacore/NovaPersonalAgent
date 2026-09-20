@@ -331,7 +331,7 @@ export function buildCascadedRealtimeAssembly(
     ...(options.telemetry === undefined ? {} : {telemetry: options.telemetry}),
     idFactory: () => ids.next('cascaded'),
   })
-  const intake = options.intake ?? defaultIntake(core, support.gateway, options.settings)
+  const intake = options.intake ?? defaultIntake(core, support.gateway, support.settings)
   return composeRealtime(core, provider, {
     ...options,
     ...(intake === undefined ? {} : {intake}),
@@ -362,6 +362,7 @@ function supportComposition(
   const gateway = new OpenAIModelGateway({
     baseUrl: connection.baseUrl,
     apiKey: connection.apiKey,
+    ...(connection.source !== 'generic' && provider === 'deepseek' ? {thinkingControl: 'deepseek' as const} : {}),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })
@@ -372,6 +373,7 @@ function supportComposition(
   Object.assign(settings, {
     watch_model: watchModel,
     surrogate_model: model,
+    planner_model: stripLikePython(options.settings.planner_model) || model,
     compressor_model: model,
   })
   Object.freeze(settings)

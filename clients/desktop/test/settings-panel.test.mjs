@@ -681,6 +681,7 @@ test('settings preserve approval, planning, and progress controls alongside the 
     assert.match(html, new RegExp(`<input type="radio" name="planReadback" value="${value}"`))
   }
   assert.doesNotMatch(html, /id="plannerModel"/)
+  assert.match(html, /<input type="checkbox" id="generatePlan">/)
   for (const value of ['off', 'milestones', 'all']) {
     assert.match(html, new RegExp(`<input type="radio" name="progressBubbles" value="${value}"`))
   }
@@ -688,6 +689,26 @@ test('settings preserve approval, planning, and progress controls alongside the 
   assert.match(script, /yoloWarning\.hidden = view\.codexApprovalMode !== 'yolo'/)
   assert.doesNotMatch(script, /plannerModel\.value = view\.plannerModel/u)
   assert.doesNotMatch(html, /searchProvider|MCP 服务器|MCP 编辑器/u)
+})
+
+test('plan generation checkbox renders the persisted value and saves explicit false', async () => {
+  const patches = []
+  const panel = await mountSettingsPanel(publicView({generatePlan: true}), {
+    set: async ({settingsPatch}) => {
+      patches.push(settingsPatch)
+      return publicView({...settingsPatch, settingsApplyStatus: 'applied'})
+    },
+  })
+  assert.equal(panel.node('#generatePlan').checked, true)
+  panel.node('#generatePlan').checked = false
+  panel.node('#generatePlan').listeners.change()
+  panel.click('#settings-save')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(patches.length, 1)
+  assert.equal(patches[0].generatePlan, false)
+  assert.equal(panel.node('#generatePlan').checked, false)
+  panel.push(publicView({generatePlan: true}))
+  assert.equal(panel.node('#generatePlan').checked, true)
 })
 
 test('automatic discovery hides manual Codex and Projects configuration', () => {
@@ -931,7 +952,9 @@ test('the Orb receives one committed palette notification only inside the save t
   ) ?? []
   assert.equal(notifications.length, 1)
   const handler = mainScript.slice(mainScript.indexOf("ipcMain.handle('nova:settings:set'"))
-  const body = handler.slice(0, handler.indexOf('\n  })'))
+  assert.match(handler.slice(0, handler.indexOf('\n  })')), /return applyDesktopSettings\(payload, restart\)/)
+  const shared = mainScript.slice(mainScript.indexOf('async function applyDesktopSettings('))
+  const body = shared.slice(0, shared.indexOf('\n}'))
   assert.match(body, /publishCommitted: publishCommittedSettings/)
   assert.ok(body.indexOf('write: async value') < body.indexOf('publishCommitted:'))
 })

@@ -53,6 +53,7 @@ const rows: readonly Row[] = [
   ['NOVA_AUDIO_AGENT_CODEX_APPROVAL_MODE', 'codex', false, true, 'never', 'ask', 'Codex approval mode.', 'Codex 审批模式。'],
   ['NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH', 'core', false, true, 'never', 'balanced', 'Maximum clarification depth for intake.', '意图理解的最大澄清深度。'],
   ['NOVA_AUDIO_AGENT_PLAN_READBACK', 'core', false, true, 'never', 'summary', 'Plan readback mode.', '规划回读模式。'],
+  ['NOVA_AUDIO_AGENT_GENERATE_PLAN', 'core', false, true, 'never', 'true', 'Generate a plan before execution.', '执行前生成计划。'],
   ['NOVA_AUDIO_AGENT_PLANNER_MODEL', 'core', false, true, 'never', null, 'Optional planner model override.', '可选的规划模型覆盖。'],
   ['NOVA_AUDIO_AGENT_PROGRESS_BUBBLES', 'core', false, true, 'never', 'milestones', 'Progress bubble display mode.', '进度气泡显示模式。'],
   ['NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG', 'core', false, true, 'never', '~/.nova-audio-agent/capabilities.json', 'Capabilities registry path.', '能力注册表路径。'],
