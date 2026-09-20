@@ -115,6 +115,7 @@ async function extractedMemoryBoardClear(dialog, owner) {
   const sender = {}
   const context = createContext({
     ipcMain: {handle: (_channel, value) => { handler = value }},
+    t: value => value,
     dialog, backendControl: owner, backendGeneration: 1,
     backendStatus: {state: 'connected'}, clearingConversation: null,
     boardWindow: {webContents: sender, isDestroyed: () => false},
@@ -245,9 +246,9 @@ test('the orb menu opens the settings panel above the quit separator', async () 
   const menu = source.slice(source.indexOf('function showOrbMenu('))
   const body = menu.slice(0, menu.indexOf('.popup('))
 
-  assert.match(body, /label: '设置…', click: \(\) => openSettingsWindow\(launchId\)/)
+  assert.match(body, /label: t\("设置…"\), click: \(\) => openSettingsWindow\(launchId\)/)
   assert.ok(
-    body.indexOf("label: '设置…'") < body.indexOf("{ type: 'separator' }"),
+    body.indexOf('label: t("设置…")') < body.indexOf("{ type: 'separator' }"),
     'the settings entry sits above the separator',
   )
   assert.ok(
@@ -464,7 +465,7 @@ test('the bootstrap payload carries only orb-owned settings', async () => {
 
   const assignment = source.slice(source.indexOf('bootstrap = Object.freeze({'))
   assert.match(assignment.slice(0, assignment.indexOf('})')), /settings: orbSettings\(currentSettings\)/)
-  assert.match(source, /currentSettings = recovered \?\? await loadSettings\(settingsFile\(\)\)/)
+  assert.match(source, /currentSettings = recovered \?\? await loadSettings\(settingsFile\(\), app\.getPreferredSystemLanguages\(\)\)/)
 })
 
 test('quitting drains the backend on the stdin sentinel instead of killing it', async () => {
@@ -764,7 +765,7 @@ test('drag and orb menu paths stay sender validated and bounded', async () => {
   assert.match(mainSource, /validDragDelta/)
   assert.match(mainSource, /ipcMain\.on\('nova:confirmation-mode', \(event, active\) => \{\n\s*if \(!mainWindow \|\| event\.sender !== mainWindow\.webContents\) return\n\s*if \(typeof active !== 'boolean'\) return/u)
   assert.match(mainSource, /orbWindow\.finishDrag\(position\)/u)
-  assert.match(mainSource, /label: '退出 Nova Audio Agent'/)
+  assert.match(mainSource, /label: t\("退出 Nova Audio Agent"\)/)
   assert.match(mainSource, /click: \(\) => app\.quit\(\)/)
   assert.doesNotMatch(rendererSource, /orb\.addEventListener\('click'/)
   assert.match(rendererSource, /event\.preventDefault\(\)/)
@@ -920,6 +921,7 @@ test('corrupt recovery keeps the startup settings UI available without starting 
     for (const corrupt of ['{truncated', JSON.stringify({version: 999, settings: previous})]) {
       await writeFile(`${file}.recovery`, corrupt, {mode: 0o600})
       const context = vm.createContext({
+        app: {getPreferredSystemLanguages: () => ['zh-CN']},
         settingsFile: () => file, loadSettings, restoreSettingsRecovery,
         settingsRecoveryAvailable: false, openSettingsRequested: false,
         publishSettingsApplyStatus: value => { context.phase = value },

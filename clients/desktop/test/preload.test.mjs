@@ -16,6 +16,7 @@ async function loadPreload() {
   ipcRenderer.send = (channel, payload) => { sends.push({ channel, payload }) }
   let exposed
   vm.runInNewContext(source, {
+    process: {argv: []},
     require(name) {
       assert.equal(name, 'electron')
       return { contextBridge: { exposeInMainWorld(_name, value) { exposed = value } }, ipcRenderer }
