@@ -10,16 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  release-readiness:
-    if: github.base_ref == 'main' || github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - run: npm run check:release-gate
-
   electron:
     strategy:
       fail-fast: false

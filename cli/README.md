@@ -28,7 +28,7 @@ In the desktop settings, configure your [DashScope](https://platform.qianwenai.c
 API key for the default Qwen realtime voice service and your
 [Tavily](https://docs.tavily.com) API key for web search. For coding tasks, set up
 a logged-in Codex executable; see the
-[setup guide](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/getting-started.md).
+[setup guide](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/en/getting-started.md).
 Allow microphone access when prompted, then launch Nova:
 
 ```bash
@@ -66,14 +66,14 @@ for your installed version.
 
 ## Installation details
 
-The CLI downloads the matching `v0.1.1` desktop release from
-[GitHub Releases](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.1.1)
+The CLI downloads the matching `v0.2.0` desktop release from
+[GitHub Releases](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)
 into `~/.nova-audio-agent/cli/releases/` and verifies its published SHA-256 digest
 before launching it. It reuses the desktop client's encrypted settings store;
 the CLI does not read or print secret values.
 
 Documentation-only npm updates may have a newer package version while retaining
-the same desktop release. `novaaudio --version` continues to report `0.1.1`.
+the same desktop release. `novaaudio --version` continues to report `0.2.0`.
 
 This release supports macOS arm64 and Windows x64. Linux and Intel Mac desktop
 downloads are not included. The desktop application is currently unsigned, so
@@ -81,9 +81,9 @@ macOS Gatekeeper or Windows SmartScreen may display a security warning.
 
 ## Learn more
 
-- [Getting started and integrations](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/getting-started.md)
-- [Runtime architecture](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/architecture.md)
-- [Design: when should a proactive voice agent speak?](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/blog/2026-08-proactive-voice-agent-design-space.md)
+- [Getting started and integrations](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/en/getting-started.md)
+- [Runtime architecture](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/en/architecture.md)
+- [Design: when should a proactive voice agent speak?](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/en/blog/2026-08-proactive-voice-agent-design-space.md)
 - [Report an issue](https://github.com/deepnovacore/NovaAudioAgent/issues)
 - [Build from source and contribute](https://github.com/deepnovacore/NovaAudioAgent/blob/main/CONTRIBUTING.md)
 
