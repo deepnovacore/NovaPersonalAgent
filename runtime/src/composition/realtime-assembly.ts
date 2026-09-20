@@ -58,7 +58,8 @@ import type {CoordinatorDecision} from '../executors/coding-executor.js'
 const USER_AWAITED_TOOL = {kind: 'realtime_tool', priority: USER_PRIORITY, routing_class: 'user_awaited', origin: null, selected_suggestion: null} as const
 import {intakeModels, type IntakeModels} from '../executors/coding/intake-model.js'
 import type {IntakeOptions, IntakeSettings, IntakeSession} from '../executors/coding/intake.js'
-import type {ModelGateway} from '../model/model-gateway.js'
+import {OpenAIModelGateway,type ModelGateway} from '../model/model-gateway.js'
+import {RealClock} from '../core/clock.js'
 import type {PersonalMemoryResource} from '../memory/personal-memory.js'
 
 export type {CodingAgentControllerFactory} from '../executors/coding-executor.js'
@@ -1283,13 +1284,14 @@ export function composeRealtime(
   let sharedClient: WorkspaceGraphStoreClient | undefined
   const getClient = () => sharedClient ??= new WorkspaceGraphStoreClient(memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
   const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
+  const memoryGateway=local?new OpenAIModelGateway({baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,clock:new RealClock()}):core.gateway
   const useLocalLedger=local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
   const createPersonalMemory = useLocalLedger ? () => {
     const memory = new SubstrateMemoryResource({client:getClient(),userId:local?.userId??options.settings.memory_user_id,
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?options.settings.model_base_url:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
       extractionFingerprint:embeddingHash('sha256').update(options.settings.model_base_url+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
       personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:false,
-      gateway:core.gateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},
+      gateway:memoryGateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},
       ...(local?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
     })
     if(local)return memory

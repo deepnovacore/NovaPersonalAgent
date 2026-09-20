@@ -16,6 +16,13 @@ import {
   settingsSchema,
 } from '../src/config/config.js'
 
+test('local memory retains DashScope credentials with a non-Qwen conversation model', () => {
+  const settings=loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE:'cascaded',NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'deepseek',NOVA_AUDIO_AGENT_MEMORY_CONNECTION:'local',DASHSCOPE_API_KEY:'memory-key',DEEPSEEK_API_KEY:'conversation-key'})
+  const memory=requirePersonalMemory(settings)
+  assert.equal(memory?.connection,'local')
+  if(memory?.connection==='local')assert.equal(memory.embedding.apiKey,'memory-key')
+})
+
 test('DashScope key also configures support models only on the DashScope endpoint', () => {
   const env = {DASHSCOPE_API_KEY: 'dashscope-test-key'}
   assert.equal(resolveModelApiKey(loadSettings(env)), env.DASHSCOPE_API_KEY)

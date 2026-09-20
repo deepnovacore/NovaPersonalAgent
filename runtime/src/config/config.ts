@@ -232,6 +232,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     fast_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_FAST_MODEL),
     watch_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_WATCH_MODEL),
     ...(supportsVision('qwen', environment.NOVA_AUDIO_AGENT_WATCH_MODEL ?? '')
+      || environment.NOVA_AUDIO_AGENT_MEMORY_CONNECTION?.trim() === 'local'
       ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
     ...(supportsVision('ark', environment.NOVA_AUDIO_AGENT_WATCH_MODEL ?? '')
       ? {ark_api_key: optionalSecret(environment.ARK_API_KEY),

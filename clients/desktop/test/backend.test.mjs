@@ -20,6 +20,11 @@ import {
 } from '../src/main/backend.mjs'
 import { resolveDesktopConfig } from '../src/main/platform-config.mjs'
 
+test('local memory injects its saved DashScope key independently of conversation provider',()=>{
+  const env=capabilityEnvironment({pipelineMode:'cascaded',cascadedLlmProvider:'deepseek'},{dashscopeApiKey:'memory-key'},{NOVA_AUDIO_AGENT_MEMORY_CONNECTION:'local'},{modules:{knowledge:{enabled:false},search:{enabled:false}}})
+  assert.equal(env.DASHSCOPE_API_KEY,'memory-key')
+})
+
 const TOKEN = 'b'.repeat(32)
 const SETTINGS_V2 = Object.freeze({
   version: 2,

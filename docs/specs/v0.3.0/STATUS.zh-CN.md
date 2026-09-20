@@ -112,3 +112,5 @@
 - 2026-09-20：Google provider、桌面入口与 macOS EventKit 本地 provider 已实现，真实 Gmail 有界入库与空 Calendar 快照通过；本地打包客户端已验证 macOS 权限、15 条现有日程入库及重启保留，系统日历日期对照通过；正式签名发布和变更/删除 live 生命周期仍未验。证据和未测边界见 [connector 验收记录](../../research/2026-09-20-connector-acceptance.md)。
 
 - 2026-09-20 本机邮件扩展：Apple Mail 只读 provider 已实现，最近最多 180 天、每轮最多检查 500 封，正文每轮最多 8 封；模型处理默认关闭。Mail 分页无法证明完整删除集合，因此不根据扫描缺失撤回旧证据。桌面回归通过，Mail 系统权限、真实正文读取、暂停/断开/恢复及重启保留已验证，按用户要求已排除本机 Google 文件夹，其他账户新增落盘 19 封（含旧数据共 106 封）；正文超时现在保留本页成功前缀。500 候选边界探针通过，其他账户也出现正文超时，整轮验收仍未完成，runtime 全量仍有实时启动超时；见 [本机邮件验收记录](../../research/2026-09-20-macos-mail-acceptance.md)。
+
+- 2026-09-20 memory live：合成材料经真实模型抽取、真实向量检索、证据 ID、重启保留和来源删除失效通过；打包 Nova 新会话/重启后的召回及记忆页展示通过。实测修复了 DeepSeek 对话配置下本地 memory 凭据遗漏与抽取网关错配。真实私有 connector 模型处理仍关闭，完整原生重建受当前 Xcode/SDK 环境阻塞；见 [memory live 验收记录](../../research/2026-09-20-memory-live-acceptance.md)。

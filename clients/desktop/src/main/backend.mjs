@@ -645,8 +645,9 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
       consumers.push({...search?.mcp, headers: search?.mcp?.headers ?? (preset ? {authorization: '${DASHSCOPE_API_KEY}'} : {})})
     }
     const references = JSON.stringify(consumers)
-    if (document?.modules?.knowledge?.enabled === true
-      && (settings?.embeddingProvider ?? 'dashscope') === 'dashscope') activeSecretKeys.add('dashscopeApiKey')
+    if (parentEnv.NOVA_AUDIO_AGENT_MEMORY_CONNECTION?.trim() === 'local'
+      || (document?.modules?.knowledge?.enabled === true
+      && (settings?.embeddingProvider ?? 'dashscope') === 'dashscope')) activeSecretKeys.add('dashscopeApiKey')
     for (const [key, name] of Object.entries(SECRET_ENV_MAP)) {
       if (references.includes('${' + name + '}') || (search?.enabled !== false && provider === 'tavily' && search?.tavily?.apiKeyEnv === name)) activeSecretKeys.add(key)
     }
