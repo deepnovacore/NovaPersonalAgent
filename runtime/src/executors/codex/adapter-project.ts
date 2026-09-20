@@ -1,5 +1,5 @@
 import {basename} from 'node:path'
-import {realpathSync} from 'node:fs'
+import {realpath} from 'node:fs/promises'
 import {readLocalCodexSessions, localRolloutAvailable} from './local-sessions.js'
 import {hostPersistentHomeFromConfig, hostWorkspaceFromConfig} from '../../projects/host-paths.js'
 import {hostWorkspacePath} from '../../projects/host-paths.js'
@@ -200,7 +200,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     const refresh = (async () => {
       const ids = new Set<string>()
       try {
-        const home = realpathSync(this.#localCodexHome!)
+        const home = await realpath(this.#localCodexHome!)
         const catalog = await readLocalCodexSessions(home)
         // Keep the same ten-project intake budget. Older projects remain in Codex.
         const paths = new Set<string>()
@@ -819,13 +819,13 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     if (resumed?.executor_home && resumed.origin !== 'nova') {
       await this.#refreshLocalSessions()
       if (!this.#localCodexHome || !this.#catalogHealthy || !this.#localSessionIds.has(resumed.session_id)
-        || realpathSync(this.#localCodexHome) !== resumed.executor_home) return failureHandoff('resume_unavailable', 'run')
+        || await realpath(this.#localCodexHome) !== resumed.executor_home) return failureHandoff('resume_unavailable', 'run')
     }
     let codexHome: HostCodexHome
     let canonicalHome: string | undefined
     try {
       const executorHome = resumed === null ? this.#localCodexHome : resumed.executor_home
-      canonicalHome = executorHome === undefined ? undefined : realpathSync(executorHome)
+      canonicalHome = executorHome === undefined ? undefined : await realpath(executorHome)
       if (resumed?.executor_home && canonicalHome !== resumed.executor_home) return failureHandoff('resume_unavailable', 'run')
       codexHome = canonicalHome === undefined
         ? await this.#store.persistentHome(workspace.workspace_id, {create: resumed === null})
