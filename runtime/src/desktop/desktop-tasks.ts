@@ -34,7 +34,7 @@ export class DesktopTasks {
       if (evict === undefined) return
       this.#tasks.delete(evict)
     }
-    this.#tasks.set(frame.delegate_id, {work_id: frame.delegate_id, executor: frame.executor, project: previous?.project ?? bounded(frame.executor, 120), title: previous?.title ?? '任务', phase: frame.phase, summary: frame.summary, ts: frame.ts})
+    this.#tasks.set(frame.delegate_id, {work_id: frame.delegate_id, executor: frame.executor, project: frame.project === undefined ? previous?.project ?? bounded(frame.executor, 120) : bounded(frame.project, 120) || bounded(frame.executor, 120), title: frame.title === undefined ? previous?.title ?? '任务' : bounded(frame.title, 120) || '任务', phase: frame.phase, summary: frame.summary, ts: frame.ts})
     this.#revision++
     if (this.#view !== null) this.project(this.#view)
   }

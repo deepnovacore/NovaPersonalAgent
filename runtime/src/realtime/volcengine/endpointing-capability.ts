@@ -1117,7 +1117,7 @@ export function scanLiveKitPublicSurface(
   for (const source of inventory.productionSources) {
     for (const specifier of liveKitLiteralSpecifiers(source.source)) {
       // Standalone EOT uses only the pinned package's public predict API.
-      const localEot = source.path === 'runtime/src/realtime/volcengine/local-eot-executor.ts'
+      const localEot = source.path.replaceAll('\\', '/') === 'runtime/src/realtime/volcengine/local-eot-executor.ts'
         && specifier === LIVEKIT_LOCAL_INFERENCE
       if (specifier !== LIVEKIT_AGENTS_ROOT && !localEot) {
         violations.push(Object.freeze({
@@ -1145,7 +1145,7 @@ export function scanLiveKitPublicSurface(
       const dependencies = asStringRecord(manifest[section])
       if (dependencies === null) continue
       if (Object.hasOwn(dependencies, LIVEKIT_LOCAL_INFERENCE)
-        && !(manifestEntry.path === 'runtime/package.json' && section === 'dependencies'
+        && !(manifestEntry.path.replaceAll('\\', '/') === 'runtime/package.json' && section === 'dependencies'
           && dependencies[LIVEKIT_LOCAL_INFERENCE] === '0.2.7')) {
         violations.push(Object.freeze({
           code: 'forbidden_dependency',

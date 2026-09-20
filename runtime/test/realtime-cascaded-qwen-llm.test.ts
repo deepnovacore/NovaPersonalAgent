@@ -171,7 +171,7 @@ test('Qwen joins fragmented tool calls and retains a matched tool result with it
   assert.ok(messages.some(message => message.role === 'tool' && message.tool_call_id === 'call-1'))
   assert.equal(messages.some(message => message.content === '只读历史'), false)
   assert.equal(messages.at(-1)?.role, 'user')
-  assert.equal(messages.at(-1)?.content, 'Nova Audio Agent 宿主激活事实：最新问题')
+  assert.deepEqual(JSON.parse(messages.at(-1)?.content as string), {text_to_say: 'Nova Audio Agent 宿主激活事实：最新问题'})
 })
 
 for (const factOnly of [false, true]) test(`Qwen completes two sequential tool hops (factOnly=${factOnly})`, async () => {

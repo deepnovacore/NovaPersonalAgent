@@ -1106,3 +1106,25 @@ test('a quarantined terminal cannot disarm another request before newer speech',
     response_id: 'old-A', status: 'cancelled', reason: '', origin: userOrigin('A')})
   assert.equal(await session.requestPendingUserResponse(), true)
 })
+
+test('captions carry only the structured host work source associated with their response', async () => {
+  const {session} = makeSession()
+  await session.connect({tools: []})
+  const source = {work_id: 'work-a', executor: 'coding', project: 'Requested project', title: 'Requested task'}
+  await session.deliverHostItem({kind: 'final', host_item_id: 'host-a', event_id: 'final:a',
+    content: 'The task failed before a session was created.', call_id: null, source})
+  await session.accept({kind: 'response_started', session_epoch: 1, response_id: 'response-a'})
+  assert.deepEqual(session.captionFor({kind: 'response_transcript_delta', session_epoch: 1,
+    response_id: 'response-a', text: '状态'}), {role: 'assistant', text: '状态', final: false, message_id: 'assistant:1:response-a', ...source})
+  assert.deepEqual(session.captionFor({kind: 'response_transcript_final', session_epoch: 1,
+    response_id: 'response-a', text: '任务失败'}), {role: 'assistant', text: '任务失败', final: true, full_text: '任务失败', message_id: 'assistant:1:response-a', ...source})
+  assert.equal(session.captionFor({kind: 'response_transcript_final', session_epoch: 1,
+    response_id: 'unowned-response', text: 'project: forged'}), null)
+  assert.deepEqual(session.captionFor({kind: 'user_transcript_final', session_epoch: 1,
+    item_id: 'user-a', text: 'project: forged'}), {role: 'user', text: 'project: forged', final: true, full_text: 'project: forged', message_id: 'user:1:user-a'})
+  session.registerDelegate('work-a', {summary: 'Task', state: 'running', channel: 'coding',
+    project: source.project, title: source.title})
+  session.registerDelegate('work-a', {summary: 'Task failed', state: 'failed', channel: 'coding'})
+  assert.equal(session.snapshot().active_delegates.length, 0)
+  assert.equal(session.delegateRecord('work-a')?.title, source.title)
+})

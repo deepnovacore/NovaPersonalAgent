@@ -1,4 +1,4 @@
-import {originalImageUrl, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
+import {originalImageUrl, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS, CASCADED_NARRATION_INSTRUCTIONS} from './llm.js'
 import { jsonValueSchema, type JsonValue } from '../../core/events.js'
 import { codePointLengthLikePython, stripLikePython } from '../../text/python-text.js'
 import { MAX_REALTIME_TEXT, type JsonObject } from '../protocol.js'
@@ -67,7 +67,7 @@ function inputItem(input: CascadedLlmInput): JsonObject {
   if (input.kind === 'tool_result') {
     return {type: 'function_call_output', call_id: input.call_id, output: JSON.stringify(input.output)}
   }
-  return {role: input.kind === 'user_text' || input.kind === 'host_activation' ? 'user' : 'system', content: input.kind === 'user_text' ? (input.image ? [{type: 'input_text', text: input.text}, {type: 'input_image', image_url: originalImageUrl(input.image)}] : input.text) : input.content}
+  return {role: input.kind === 'user_text' || input.kind === 'host_activation' ? 'user' : 'system', content: input.kind === 'user_text' ? (input.image ? [{type: 'input_text', text: input.text}, {type: 'input_image', image_url: originalImageUrl(input.image)}] : input.text) : input.kind === 'host_activation' ? JSON.stringify({text_to_say: input.content}) : input.content}
 }
 
 function toolSchema(tool: CascadedLlmTool): JsonObject {
@@ -104,9 +104,10 @@ class Session implements CascadedLlmSession {
     if (this.#closed) throw fail('closed')
     if (input.signal.aborted) throw fail('aborted')
     const current = input.inputs.map(inputItem)
+    const factOnly = input.inputs.some(item => item.kind === 'host_activation')
     if (input.inputs.some(item => item.kind === 'user_text' && item.image)) this.#visualHistory = true
     const continuing = this.#pendingToolContinuation
-    const localHistory = this.#visualHistory && !continuing
+    const localHistory = (this.#visualHistory || (this.#previousResponseId === null && this.#history.length > 0)) && !continuing
     if (!continuing) this.#turnItems = []
     this.#turnItems.push(...input.inputs.map(item => item.kind === 'user_text' ? {role: 'user', content: item.text} : inputItem(item)))
     let outputText = ''
@@ -116,11 +117,12 @@ class Session implements CascadedLlmSession {
     let pendingTool: Extract<CascadedLlmEvent, {kind: 'tool_call'}> | null = null
     try {
       for await (const event of this.#gateway.stream({
-        inputItems: localHistory ? [...this.#history.flat(), ...current] : current,
+        inputItems: factOnly ? input.inputs.filter(item => item.kind === 'host_activation' || item.kind === 'tool_result').map(inputItem)
+          : localHistory ? [...this.#history.flat(), ...current] : current,
         tools: input.tools.map(toolSchema),
-        previousResponseId: localHistory ? null : this.#previousResponseId,
-        workspaceContext: input.workspaceContext ?? null,
-        responseAdaptation: input.responseAdaptation ?? null,
+        previousResponseId: localHistory || (factOnly && !continuing) ? null : this.#previousResponseId,
+        workspaceContext: factOnly ? null : input.workspaceContext ?? null,
+        responseAdaptation: factOnly ? CASCADED_NARRATION_INSTRUCTIONS : input.responseAdaptation ?? null,
         signal: input.signal,
       })) {
         if (event.kind === 'response_started') {
@@ -148,7 +150,7 @@ class Session implements CascadedLlmSession {
             this.#turnItems = []
             while (this.#history.length && (this.#history.flat().length > MAX_CASCADED_LLM_HISTORY_ITEMS || codePointLengthLikePython(JSON.stringify(this.#history)) > MAX_CASCADED_LLM_HISTORY_CODEPOINTS)) this.#history.shift()
           }
-          this.#previousResponseId = event.response_id
+          this.#previousResponseId = factOnly && pendingTool === null ? null : event.response_id
           this.#pendingToolContinuation = pendingTool !== null
           yield event
           return

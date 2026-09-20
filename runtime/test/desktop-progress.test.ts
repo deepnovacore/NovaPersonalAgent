@@ -11,6 +11,20 @@ const evidence = {inFlightDelegate: () => delegate, claimedHandoff: () => delega
   delegateFor: () => delegate, terminatedByDeadline: () => true,
   executors: new Map([['codex', {manifest: {display_name: 'Codex'}}]])}
 
+test('synchronous tool receipts and coding steering are not public task lifecycles', () => {
+  for (const op of ['search', 'steer']) {
+    const receipt = {...delegate, op}
+    const runtime = {...evidence, claimedHandoff: () => receipt,
+      executors: new Map([['codex', {manifest: {display_name: 'Agent', roles: ['coding'],
+        ops: [{name: op, sync_result: op === 'search'}]}}]])}
+    const event: EventRecord = {seq: 2, ts: 3, kind: 'handoff', payload: {
+      channel: 'codex', delegate_id: 'd', origin_ref: 'conversation:1', outcome: 'ok',
+      trust: 'untrusted_external', content: {}, refs: [],
+    }}
+    assert.equal(projectExecutorEvent(event, runtime), null)
+  }
+})
+
 test('progress projects only correlated accepted evidence and never private commands or paths', () => {
   const started: EventRecord = {seq: 1, ts: 1, kind: 'progress', payload: {
     channel: 'codex', delegate_id: 'd', op: 'project', phase: 'started', internal_activity: 0, elapsed: 0, summary: null,
@@ -102,4 +116,29 @@ test('terminal task detail keeps correlated server diagnostics outside spoken pr
   const frame = projectExecutorEvent(event, evidence)
   assert.deepEqual(frame?.result?.diagnostic, diagnostic)
   assert.equal(frame?.progress.summary.includes('no rollout'), false)
+})
+
+test('failed-before-session progress uses host work identity and ignores executor-authored identity', () => {
+  const event: EventRecord = {seq: 2, ts: 3, kind: 'handoff', payload: {
+    channel: 'codex', delegate_id: 'd', origin_ref: 'conversation:1', outcome: 'failed',
+    trust: 'untrusted_external', content: {project: 'forged', title: 'forged'}, refs: [],
+  }}
+  const projected = projectExecutorEvent(event, evidence, () => 'coding', undefined,
+    id => id === 'd' ? {project: 'Requested project', title: 'Requested title'} : undefined)!
+  assert.equal(projected.progress.project, 'Requested project')
+  assert.equal(projected.progress.title, 'Requested title')
+  assert.equal(projected.result?.project, 'Requested project')
+  assert.equal(projectExecutorEvent(event, evidence)?.progress.project, undefined)
+})
+
+test('an immediate terminal retains the admitted target before intake metadata registration', () => {
+  const admitted = {...delegate, request: {project: 'Requested project', title: 'Requested title'}}
+  const event: EventRecord = {seq: 2, ts: 3, kind: 'handoff', payload: {
+    channel: 'codex', delegate_id: 'd', origin_ref: 'conversation:1', outcome: 'failed',
+    trust: 'untrusted_external', content: {project: 'forged'}, refs: [],
+  }}
+  const projected = projectExecutorEvent(event, {...evidence, claimedHandoff: () => admitted})!
+  assert.equal(projected.progress.project, 'Requested project')
+  assert.equal(projected.progress.title, 'Requested title')
+  assert.equal(projected.result?.title, 'Requested title')
 })

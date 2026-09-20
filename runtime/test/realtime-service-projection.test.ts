@@ -40,8 +40,8 @@ test('every projection matches the Python-exported golden outside Node display l
     const localizedName = spec.display_name === 'watch'
       ? '观察'
       : spec.display_name === 'guard' ? '监控' : null
-    // Coding intake owns startup acknowledgement in the desktop product.
-    const expected = spec.name === 'progress-started' ? {...pythonExpected, content: null} : localizedName === null || typeof pythonExpected.content !== 'string'
+    // Node distinguishes preparation feedback from actual executor startup.
+    const expected = spec.name === 'progress-started' ? {...pythonExpected, content: `交给 ${spec.display_name} 执行。`} : localizedName === null || typeof pythonExpected.content !== 'string'
       ? pythonExpected
       : {...pythonExpected, content: pythonExpected.content.replace(spec.display_name, localizedName)}
     if (canonicalJson(actual) !== canonicalJson(expected)) {
@@ -554,7 +554,7 @@ test('a surrogate-reported channel does not also speak its own working progress'
   service.projectRuntimeEvent(progressEvent({seq: 1, summary: 'running tests', activity: 1}))
   assert.deepEqual(queued(), [], 'working is silent')
 
-  // Intake already acknowledged this task; startup is state-only.
+  // Startup is an explicit lifecycle notification, independent of smart working summaries.
   service.projectRuntimeEvent({
     kind: 'progress',
     seq: 2,
@@ -569,7 +569,7 @@ test('a surrogate-reported channel does not also speak its own working progress'
       summary: null,
     },
   })
-  assert.equal(queued().length, 0)
+  assert.deepEqual(queued(), ['交给 Codex 执行。'])
 })
 
 test('Guard working heartbeats update state without creating another spoken turn', () => {
@@ -918,9 +918,8 @@ test('a progress event with an empty op is refused', () => {
   assert.deepEqual(queued(), [])
 })
 
-test('a thread-ready started fact is silent when the delegate already owns an acknowledgement', async () => {
-  // Submission owns the one user-facing acknowledgement for this delegate. Projecting thread-ready
-  // still updates live state below, but must not create a second turn that says the same thing again.
+test('actual coding startup is announced separately from submission acknowledgement', async () => {
+  // An admission receipt must not suppress the later, authoritative execution-start fact.
   const {service} = realtimeServiceHarness('pipeline')
   await service.connect()
   await service.handleEvent({
@@ -965,21 +964,22 @@ test('a thread-ready started fact is silent when the delegate already owns an ac
     payload: {
       channel: 'codex',
       delegate_id: 'd-1',
-      op: 'start',
+      op: 'run',
       phase: 'started',
       internal_activity: 0,
       elapsed: 0,
       summary: null,
     },
   })
-  assert.equal(service.pendingHostItemCount, 0)
+  assert.equal(service.pendingHostItemCount, 1)
   assert.equal(service.session.delegateState('d-1'), 'running')
 })
 
-test('coding startup updates state without duplicating the intake acknowledgement', () => {
-  const {service, queued} = realtimeServiceHarness('projection')
+test('coding startup uses the executor display name and announces each delegate only once', () => {
+  const {service, queued} = realtimeServiceHarness('projection', {displayName: 'Test Builder'})
+  assert.deepEqual(queued(), [], 'admission alone is not a started event')
 
-  service.projectRuntimeEvent({
+  const started: EventRecord = {
     kind: 'progress',
     seq: 1,
     ts: 1,
@@ -992,9 +992,11 @@ test('coding startup updates state without duplicating the intake acknowledgemen
       elapsed: 0,
       summary: null,
     },
-  })
+  }
+  service.projectRuntimeEvent(started)
+  service.projectRuntimeEvent({...started, seq: 2})
 
-  assert.deepEqual(queued(), [])
+  assert.deepEqual(queued(), ['交给 Test Builder 执行。'])
   assert.equal(service.session.delegateState('d-1'), 'running')
 })
 
@@ -1103,4 +1105,18 @@ test('latency telemetry binds accepted speech, audio and playback without conver
   for (const kind of kinds) assert.equal(telemetry.filter(row => row.kind === kind).length, 1, kind)
   assert.deepEqual(telemetry.find(row => row.kind === 'provider.first_audio_delta')?.payload, {session_epoch: 1, response_id: 'r'})
   assert.equal(JSON.stringify(telemetry.filter(row => kinds.includes(row.kind))).includes('private profiling test'), false)
+})
+
+
+test('steer receipts settle internally without startup or final narration', () => {
+  const {service, queued} = realtimeServiceHarness('projection', {delegate: {executor: 'codex', op: 'steer', routing_class: 'user_awaited'}})
+  service.projectRuntimeEvent({kind: 'progress', seq: 1, ts: 1, payload: {
+    channel: 'codex', delegate_id: 'd-1', op: 'steer', phase: 'started', internal_activity: 0, elapsed: 0, summary: null,
+  }})
+  service.projectRuntimeEvent({kind: 'handoff', seq: 2, ts: 2, payload: {
+    channel: 'codex', delegate_id: 'd-1', origin_ref: 'conversation:1', outcome: 'ok', trust: 'trusted_system',
+    content: {op: 'steer', code: 'accepted'}, refs: [],
+  }})
+  assert.equal(service.session.delegateState('d-1'), 'completed')
+  assert.deepEqual(queued(), [])
 })

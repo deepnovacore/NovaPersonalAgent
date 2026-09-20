@@ -48,6 +48,7 @@ interface ConnectionOwner {
 export interface RealtimeProviderSessionOptions {
   /** Synchronous host cache; failures are advisory and never delay audio indefinitely. */
   readonly responseAdaptation?: () => ResponseAdaptationContext | undefined
+  readonly onResponseAdaptationApplied?: (context: ResponseAdaptationContext, epoch: number) => void
   readonly onDiagnostic?: (diagnostic: {
     readonly kind: 'response_adaptation'
     readonly reason: 'read_failed' | 'invalid' | 'replace_failed'
@@ -67,6 +68,7 @@ export class RealtimeProviderSession {
   #reading: AbortController | null = null
   #closing: Promise<void> | null = null
   readonly #responseAdaptation: (() => ResponseAdaptationContext | undefined) | undefined
+  readonly #onResponseAdaptationApplied: RealtimeProviderSessionOptions['onResponseAdaptationApplied']
   readonly #onDiagnostic: RealtimeProviderSessionOptions['onDiagnostic']
   #responseAdaptationTail: Promise<void> = Promise.resolve()
   #audioAdaptationRefresh: Promise<void> | undefined
@@ -84,6 +86,7 @@ export class RealtimeProviderSession {
   constructor(provider: RealtimeProvider, options: RealtimeProviderSessionOptions = {}) {
     this.#provider = provider
     this.#responseAdaptation = options.responseAdaptation
+    this.#onResponseAdaptationApplied = options.onResponseAdaptationApplied
     this.#onDiagnostic = options.onDiagnostic
   }
 
@@ -462,7 +465,8 @@ export class RealtimeProviderSession {
         this.#reportAdaptationDiagnostic('invalid', owner.identity.epoch, null)
         return
       }
-      const context = includeUserSources ? parsed.data : {revision: parsed.data.revision, content: parsed.data.content}
+      const context = includeUserSources ? parsed.data : {revision: parsed.data.revision, content: parsed.data.content,
+        ...(parsed.data.delivery_version === undefined ? {} : {delivery_version: parsed.data.delivery_version})}
       const signature = JSON.stringify({content: context.content, user_sources: context.user_sources})
       const previous = this.#responseAdaptationAttempt
       if (previous !== null && previous.epoch === owner.identity.epoch
@@ -471,6 +475,7 @@ export class RealtimeProviderSession {
         this.#responseAdaptationAttempt = {
           epoch: owner.identity.epoch, revision: context.revision, signature, confirmed: true,
         }
+        this.#onResponseAdaptationApplied?.(context, owner.identity.epoch)
         return
       }
       if (previous !== null && previous.epoch === owner.identity.epoch
@@ -487,6 +492,7 @@ export class RealtimeProviderSession {
         this.#responseAdaptationAttempt = {
           epoch: owner.identity.epoch, revision: context.revision, signature, confirmed: true,
         }
+        this.#onResponseAdaptationApplied?.(context, owner.identity.epoch)
       } catch {
         // Guidance cannot grant execution authority. The owner is checked again before sending.
         this.#reportAdaptationDiagnostic('replace_failed', owner.identity.epoch, context.revision)

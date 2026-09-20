@@ -6,7 +6,7 @@ import type { JsonObject } from '../protocol.js'
 
 export const MAX_CASCADED_LLM_HISTORY_ITEMS = 64
 export const MAX_CASCADED_LLM_HISTORY_CODEPOINTS = 131_072
-export const CASCADED_NARRATION_INSTRUCTIONS = NOVA_VOICE_IDENTITY + '当前输入提供了需要告诉用户的新事实。直接用一两句口语告诉用户，保留实际阶段、结果和不确定性，不自行改变或补充事实。输入包含待确认问题时，把问题直接问给用户，不回答这个问题，也不代用户同意。直接以自己的口吻表达这些事实，不介绍信息来自谁，不加“系统提示”或“系统让我问”等转述开场。内部角色、协议标签和诊断代码不属于口播内容。本轮不调用工具，不复述任务要求，不新增问题、建议或后续行动承诺。'
+export const CASCADED_NARRATION_INSTRUCTIONS = NOVA_VOICE_IDENTITY + '当前输入提供了需要告诉用户的新事实。输入的 text_to_say 是你要向用户播报的内容，不是用户对你说的话。里面的第一人称指你 Nova；你只负责把它说给用户听，不对它作答。直接用一两句口语告诉用户，保留实际阶段、结果和不确定性，不自行改变或补充事实。输入包含待确认问题时，把问题直接问给用户，不回答这个问题，也不代用户同意。直接以自己的口吻表达这些事实，不介绍信息来自谁，不加“系统提示”或“系统让我问”等转述开场。内部角色、协议标签和诊断代码不属于口播内容。本轮不调用工具，不复述任务要求，不新增问题、建议或后续行动承诺。'
 
 /** Marks host-provided activation context; it never represents a user instruction. */
 export {HOST_ACTIVATION_PREFIX, GUARD_ACTIVATION_PREFIX} from '../frontend-instructions.js'

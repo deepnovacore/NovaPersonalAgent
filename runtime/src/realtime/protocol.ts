@@ -29,16 +29,34 @@ export const hostItemKindSchema = z.enum([
   'workspace_context',
 ])
 
+const hostWorkSourceSchema = z.object({
+  work_id: realtimeIdentifierSchema,
+  /** Canonical host event sequence, scoped by work_id; unrelated to provider epochs. */
+  event_seq: z.number().int().nonnegative().optional(),
+  executor: realtimeIdentifierSchema,
+  project: z.string().min(1).max(240).optional(),
+  title: z.string().min(1).max(240).optional(),
+}).strict()
+export type HostWorkSource = z.infer<typeof hostWorkSourceSchema>
+
 export const hostContextItemSchema = z.object({
   kind: hostItemKindSchema,
   host_item_id: realtimeIdentifierSchema,
   event_id: realtimeIdentifierSchema,
   content: boundedText(),
+  /** Host-authored public wording; private context is never used as the narration payload. */
+  speech_content: boundedText().optional(),
+  /** Explicit host classification: control receipts are not recoverable results. */
+  recovery_eligible: z.boolean().optional(),
+  source: hostWorkSourceSchema.optional(),
   call_id: realtimeIdentifierSchema.nullable().default(null),
   session_epoch: epochSchema.optional(),
   workspace_instance_id: realtimeIdentifierSchema.optional(),
   revision: z.number().int().nonnegative().optional(),
 }).strict().superRefine((item, context) => {
+  if (item.speech_content !== undefined && item.kind !== 'progress' && item.kind !== 'final') {
+    context.addIssue({code: 'custom', path: ['speech_content'], message: 'public narration requires a progress or final fact'})
+  }
   if (
     item.kind === 'dialogue_context'
     && [...item.content].length > MAX_PACKED_RECOVERY_CONTENT
@@ -407,11 +425,13 @@ export type JsonObject = Readonly<Record<string, JsonValue>>
 export interface ResponseAdaptationContext {
   readonly revision: number
   readonly content: string | null
+  readonly delivery_version?: number | undefined
   readonly user_sources?: readonly {readonly ref: string; readonly text: string}[] | undefined
 }
 export const responseAdaptationContextSchema = z.object({
   revision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
   content: z.string().max(16_000).nullable(),
+  delivery_version: z.number().int().nonnegative().optional(),
   user_sources: z.array(z.object({ref: z.string(), text: z.string()}).strict()).max(8)
     .refine(sources => JSON.stringify(sources).length <= 6000).optional(),
 }).strict()

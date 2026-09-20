@@ -253,6 +253,10 @@ test('standalone EOT permits only its isolated public inference adapter and exac
   const inventory = {productionSources: [{path, source}], packageManifests: [{path: 'runtime/package.json',
     manifest: {dependencies: {'@livekit/local-inference': '0.2.7'}}}]}
   assert.deepEqual(scanLiveKitPublicSurface(inventory), [])
+  assert.deepEqual(scanLiveKitPublicSurface({
+    productionSources: inventory.productionSources.map(entry => ({...entry, path: entry.path.replaceAll('/', '\\')})),
+    packageManifests: inventory.packageManifests.map(entry => ({...entry, path: entry.path.replaceAll('/', '\\')})),
+  }), [])
   assert.equal(scanLiveKitPublicSurface({...inventory, productionSources: [{path: 'other.ts', source}]}).length, 1)
   assert.equal(scanLiveKitPublicSurface({...inventory, productionSources: [{path, source: source.replace('local-inference', 'local-inference/private')}]}).length, 1)
   for (const version of ['^0.2.7', '0.2.8']) {

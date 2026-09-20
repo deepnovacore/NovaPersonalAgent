@@ -518,7 +518,7 @@ export class ToolContinuations {
   #confirmSyncOutput(state: ToolCallState, content: string): void {
     const previous = state.acceptance.host_item
     if (previous.call_id === null) return
-    const hostItem: HostContextItem = {...previous, content}
+    const hostItem: HostContextItem = {...previous, content, recovery_eligible: true}
     state.acceptance = {
       ...state.acceptance,
       host_item: hostItem,
@@ -1257,6 +1257,10 @@ export class ToolContinuations {
     switch (result.code) {
       case 'intake_opened':
       case 'intake_in_progress':
+        if (result.detail.state === 'dispatch_unknown') return canonicalJson({
+          code: result.code, execution_started: null,
+          message: '派单结果暂时无法确认，任务可能已开始。先核实执行状态，不要重复派单。',
+        })
         return canonicalJson({
           code: result.code,
           execution_started: false,

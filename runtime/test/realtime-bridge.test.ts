@@ -185,7 +185,8 @@ async function runScenario(scenario: Scenario): Promise<Record<string, unknown>>
               call_id: step.call_id!,
               item_id: step.item_id ?? 'item-1',
               name: step.name!,
-              arguments: {...(step.arguments ?? {})},
+              // The legacy Python fixture predates explicit recall sources.
+              arguments: {...(step.name === 'memory__recall' ? {source: 'session'} : {}), ...(step.arguments ?? {})},
               response_id: step.response_id ?? null,
             },
             {originRef: step.origin_ref ?? null},
@@ -220,7 +221,10 @@ test('every bridge scenario matches the Python-exported golden', async () => {
   const mismatched: string[] = []
   for (const [index, scenario] of document.scenarios.entries()) {
     const actual = await runScenario(scenario)
-    if (canonicalJson(actual) !== canonicalJson(golden.scenarios[index])) {
+    // The legacy oracle predates host-only recovery eligibility; its tool payload stays identical.
+    // Eligibility itself is asserted by the recall contract test below.
+    const legacy = JSON.parse(JSON.stringify(actual, (key, value: unknown) => key === 'recovery_eligible' ? undefined : value)) as unknown
+    if (canonicalJson(legacy) !== canonicalJson(golden.scenarios[index])) {
       mismatched.push(scenario.name)
     }
   }
@@ -445,7 +449,7 @@ test('a recall origin is required by the bridge and again by recall itself', asy
     call_id: 'call-1',
     item_id: 'item-1',
     name: 'memory__recall',
-    arguments: {query: 'compile', scope: 'recent'},
+    arguments: {query: 'compile', scope: 'recent', source: 'session'},
     response_id: null,
   }))
   assert.equal(refused.code, 'missing_origin_ref')
@@ -501,6 +505,7 @@ test('personal recall shares schema and trusted-origin gates, then emits bounded
   const result = await bridge.acceptPersonalMemoryRecall(call, {originRef: `${origin.channel}:${origin.seq}`, signal})
   assert.equal(result.accepted, true)
   assert.equal(result.inline_fulfilled, true)
+  assert.equal(result.host_item?.recovery_eligible, true)
   assert.ok([...result.host_item.content].length <= 3_000)
   const content = JSON.parse(result.host_item.content) as {
     readonly source: string; readonly state: string; readonly omitted: number
@@ -622,7 +627,7 @@ test('a clock that moved backwards reports zero elapsed rather than a negative',
     call_id: 'call-1',
     item_id: 'item-1',
     name: 'memory__recall',
-    arguments: {query: 'compile', scope: 'recent'},
+    arguments: {query: 'compile', scope: 'recent', source: 'session'},
     response_id: null,
   }, {originRef: 'conversation:2'}))
   assert.equal(result.telemetry?.elapsed, 0)

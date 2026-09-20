@@ -365,8 +365,8 @@ export class DesktopSocketBridge {
       const parsed = executorResultSchema.parse({type: EXECUTOR_RESULT, work_id: frame.delegate_id, result})
       const previous = this.#results.get(frame.delegate_id)
       const project = this.#projectView?.roster?.find(entry => entry.running.some(work => work.work_id === frame.delegate_id))
-      const title = project?.running.find(work => work.work_id === frame.delegate_id)?.title ?? previous?.title
-      const projectName = project?.name ?? previous?.project
+      const title = frame.title ?? project?.running.find(work => work.work_id === frame.delegate_id)?.title ?? previous?.title
+      const projectName = frame.project ?? project?.name ?? previous?.project
       const retained = {...(projectName === undefined ? {} : {project: projectName}), ...(title === undefined ? {} : {title})}
       const enriched = parsed.result === null ? null : {...parsed.result, ...retained}
       // Validate metadata too before changing retained state; serialization stays one bounded work per frame.
@@ -1575,7 +1575,8 @@ export function buildDesktopRealtimeComposition(
 
   const unsubscribeProgress = realtime.runtime.observe((event, currentConversation) => {
     if (currentConversation === false) return
-    const projected = projectExecutorEvent(event, realtime.runtime, channel => realtime.service.agentNameForChannel(channel))
+    const projected = projectExecutorEvent(event, realtime.runtime, channel => realtime.service.agentNameForChannel(channel),
+      undefined, id => realtime.service.session.delegateRecord(id))
     if (projected !== null) desktop.bridge.onExecutorProgress(projected.progress, projected.result)
   })
   if (options.stop.signal.aborted) unsubscribeProgress()

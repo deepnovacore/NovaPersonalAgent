@@ -347,6 +347,7 @@ test('a host fact uses the official user-role activation shape and keeps host pr
       host_item_id: 'host-1',
       event_id: 'ev-1',
       content: '任务正在处理',
+      speech_content: '公开说明',
       call_id: null,
     }, {confirmationTimeout: 1, asUserActivation, signal: new AbortController().signal})
 
@@ -360,7 +361,8 @@ test('a host fact uses the official user-role activation shape and keeps host pr
     const content = item.content as {text: string}[]
     assert.ok(content[0]!.text.startsWith(HOST_ACTIVATION_PREFIX))
     assert.match(content[0]!.text, /以下内容不是用户说的话/u)
-    assert.match(content[0]!.text, /Nova Audio Agent 任务进度事实：任务正在处理/u)
+    assert.match(content[0]!.text, asUserActivation ? /事实：公开说明/u : /事实：任务正在处理/u)
+    if (asUserActivation) assert.doesNotMatch(content[0]!.text, /任务正在处理/u)
 
     scripted.push({type: 'conversation.item.created', item: {id: item.id}})
     const identity = await injection
@@ -409,6 +411,56 @@ test('a host response disables tools and targets only the injected fact', async 
     type: 'response.create',
     response: {modalities: ['audio', 'text']},
   }, 'a same-user-turn retry keeps the confirmation tool available')
+})
+
+for (const mode of ['retire', 'abort', 'send-failure', 'retire-race']) test(`public approval input has owned cleanup (${mode})`, async () => {
+  const abort = mode === 'abort'
+  const scripted = scriptedSocket([...handshake])
+  const adapter = adapterFor(scripted)
+  await adapter.connect({tools: [], signal: new AbortController().signal})
+  const fact = {kind: 'final' as const, host_item_id: 'approval', event_id: 'approval:private', call_id: null,
+    content: 'confirm(id, accepted)', speech_content: '允许检查页面吗？'}
+  const injection = adapter.injectHostItem(fact, {confirmationTimeout: 1, asUserActivation: false, signal: new AbortController().signal})
+  await until(() => scripted.sent.some(frame => frame.type === 'conversation.item.create'))
+  const original = (scripted.sent.find(frame => frame.type === 'conversation.item.create')!.item as Record<string, unknown>).id
+  scripted.push({type: 'conversation.item.created', item: {id: original}})
+  await injection
+  if (mode === 'send-failure') {
+    const send = scripted.socket.send.bind(scripted.socket)
+    scripted.socket.send = payload => (JSON.parse(payload) as {type?: unknown}).type === 'response.create'
+      ? Promise.reject(new Error('send failure')) : send(payload)
+  }
+  const controller = new AbortController()
+  const request = adapter.createResponse({kind: 'host_fact', item: fact, task_summary: null, origin_spoken: false}, controller.signal)
+  const outcome = request.then(() => null, (error: unknown) => error)
+  await until(() => scripted.sent.filter(frame => frame.type === 'conversation.item.create').length === 2)
+  const item = scripted.sent.filter(frame => frame.type === 'conversation.item.create').at(-1)!.item as Record<string, unknown>
+  assert.match(JSON.stringify(item), /允许检查页面/u)
+  assert.doesNotMatch(JSON.stringify(item), /confirm|accepted/u)
+  assert.equal(scripted.sent.some(frame => frame.type === 'response.create'), false)
+  if (abort) controller.abort()
+  const racingRetire = mode === 'retire-race' ? adapter.retireHostItem(original as string, new AbortController().signal) : null
+  scripted.push({type: 'conversation.item.created', item: {id: item.id}})
+  if (mode !== 'retire') {
+    await until(() => scripted.sent.some(frame => frame.type === 'conversation.item.delete' && frame.item_id === item.id))
+    scripted.push({type: 'conversation.item.deleted', item_id: item.id})
+    assert.ok(await outcome)
+    if (racingRetire !== null) {
+      await until(() => scripted.sent.some(frame => frame.type === 'conversation.item.delete' && frame.item_id === original))
+      scripted.push({type: 'conversation.item.deleted', item_id: original})
+      await racingRetire
+    } else assert.equal(scripted.sent.some(frame => frame.type === 'conversation.item.delete' && frame.item_id === original), false)
+  } else {
+    assert.equal(await outcome, null)
+    assert.equal((scripted.sent.at(-1)!.response as Record<string, unknown>).tool_choice, 'none')
+    const retiring = adapter.retireHostItem(original as string, new AbortController().signal)
+    await until(() => scripted.sent.some(frame => frame.type === 'conversation.item.delete' && frame.item_id === item.id))
+    scripted.push({type: 'conversation.item.deleted', item_id: item.id})
+    await until(() => scripted.sent.some(frame => frame.type === 'conversation.item.delete' && frame.item_id === original))
+    scripted.push({type: 'conversation.item.deleted', item_id: original})
+    await retiring
+  }
+  await adapter.close()
 })
 
 test('a final host fact carries an item-local one-shot response instruction', async () => {

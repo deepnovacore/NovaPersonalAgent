@@ -465,7 +465,7 @@ export class RealtimeRuntimeBridge {
     code: string,
     telemetry: Readonly<Record<string, JsonValue>>,
   ): ToolAcceptance {
-    const hostItem = this.#toolOutputContent(call, content)
+    const hostItem = {...this.#toolOutputContent(call, content), recovery_eligible: true}
     return acceptance({
       accepted: true,
       code,

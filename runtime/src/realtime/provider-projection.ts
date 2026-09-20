@@ -9,7 +9,7 @@ import type { WakeReason } from '../core/slots.js';
 import type { Suggestion } from '../core/suggestions.js';
 import { finalSpeechView,genericFinalSpeechView,type CodingChannel } from './evidence.js';
 import type {
-HostResponseIntent
+HostResponseIntent, HostWorkSource
 } from './protocol.js';
 import type { DelegateLike,ExecutorManifestLike,HostItemOptions,ServiceRuntime } from './service-ports.js';
 import {
@@ -50,6 +50,7 @@ interface ProviderProjectionPorts {
  readonly runtime: ServiceRuntime
  readonly clock: Clock
  readonly coding: CodingChannel | null
+ readonly generatePlan?: boolean
  readonly codingProgressNarration: CodingProgressNarrationState
  readonly telemetry: RealtimeTelemetry | undefined
  readonly idFactory: () => string
@@ -135,8 +136,9 @@ export class ProviderProjection {
   #executorState: ExecutorState = 'idle'
 
  readonly #lastProgressSummary = new Map<string, string>()
+ readonly #startedDelegates = new Set<string>()
  constructor(private readonly ports: ProviderProjectionPorts) {}
- reset(): void { this.#lastProgressSummary.clear() }
+ reset(): void { this.#lastProgressSummary.clear(); this.#startedDelegates.clear() }
 /** Resolve synchronous results before ordinary channel projection can consume them. */
 projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
     if (!currentConversation) {
@@ -209,6 +211,7 @@ projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
       elapsed: 0,
     })
     this.#lastProgressSummary.delete(delegateId)
+    this.#startedDelegates.delete(delegateId)
     this.publishExecutorState()
   }
 
@@ -227,6 +230,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       kind: this.#isSelectedProgress(suggestion) ? 'progress' : 'final',
       host_item_id: this.ports.idFactory(),
       event_id: `suggestion:${suggestion.id}`,
+      ...(reason.origin === null ? {} : {source: this.#workSource(reason.origin)}),
       content: suggestionSpeechView(suggestion.content),
     }), {
       priority: hit ? Math.max(reason.priority, HIT_ALERT_MIN_PRIORITY) : reason.priority,
@@ -281,11 +285,13 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     // A settled delegate leaves no dedup residue behind, or a later run of the same delegate id would
     // inherit a summary it never produced.
     this.#lastProgressSummary.delete(delegateId)
+    this.#startedDelegates.delete(delegateId)
     this.publishExecutorState()
     this.ports.queueHostItem(hostFactIntent({
       kind: 'final',
       host_item_id: this.ports.idFactory(),
       event_id: `deadline:${delegateId}`,
+      source: this.#workSource(delegateId, event.seq),
       content: `${displayName} 的委派任务超时，未能确认结果。`,
     }), {priority: manifest.policy.priority})
   }
@@ -320,6 +326,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       kind: 'final',
       host_item_id: this.ports.idFactory(),
       event_id: `observation:${event.payload.delegate_id}:${event.seq}`,
+      source: this.#workSource(event.payload.delegate_id, event.seq),
       content,
     }), {
       // A monitoring hit outranks routine executor announcements; only its policy may authorize a floor preempt.
@@ -390,10 +397,16 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       elapsed: payload.elapsed,
     })
     this.publishExecutorState()
-    // Intake owns the immediate acknowledgement; executor startup updates UI only.
-    if (coding && payload.phase === 'started') return
+    if (manifest.ops.find(op => op.name === delegate.op)?.sync_result === true
+      || (manifest.roles.includes('coding') && delegate.op === 'steer')) return
+    // Preparation and actual execution are different lifecycle facts. Deduplicate by delegate,
+    // never by spoken text, and let normal owner/expiry fences suppress obsolete startup facts.
+    if (coding && payload.phase === 'started') {
+      if (this.#startedDelegates.has(payload.delegate_id)) return
+      this.#startedDelegates.add(payload.delegate_id)
+    }
     if (
-      payload.phase === 'started'
+      !coding && payload.phase === 'started'
       && this.ports.hasSemanticAcknowledgement(`background:${payload.delegate_id}`)
     ) return
     // A monitor's periodic heartbeat is operational state, not a new user-facing event. Speaking it
@@ -406,7 +419,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
 
     let content: string
     if (payload.phase === 'started') {
-      content = `${displayName} 已开始处理这个任务。`
+      content = coding ? `交给 ${manifest.display_name} 执行。` : `${displayName} 已开始处理这个任务。`
     } else if (summary !== null) {
       // Same-summary skip: state registration already happened, only the host injection is
       // suppressed. A summary-less event keeps the field template and is never deduped this way.
@@ -417,7 +430,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       content = `${displayName} 仍在处理这个任务，目前已推进 ${payload.internal_activity} 个步骤。`
     }
     const eventId = `progress:${payload.delegate_id}:${payload.phase}:${payload.internal_activity}`
-    if (coding) {
+    if (coding && payload.phase === 'working') {
       // Coalesce queued updates per task; the latest fact retains existing owner/floor/expiry fences.
       if (this.ports.codingProgressNarration.mode === 'continuous') {
         this.ports.retireDelegateHostEvents(payload.delegate_id)
@@ -430,6 +443,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       kind: 'progress',
       host_item_id: this.ports.idFactory(),
       event_id: eventId,
+      source: this.#workSource(payload.delegate_id, event.seq),
       content,
     }), {
       priority: manifest.policy.priority,
@@ -467,7 +481,10 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     })
     // CP1: a settled delegate leaves no dedup residue behind.
     this.#lastProgressSummary.delete(payload.delegate_id)
+    this.#startedDelegates.delete(payload.delegate_id)
     this.publishExecutorState()
+    if (manifest.ops.find(op => op.name === claimed.op)?.sync_result === true
+      || (manifest.roles.includes('coding') && claimed.op === 'steer')) return
     if (
       isMonitorPolicy(manifest.policy)
       && monitorAlertDelivery(manifest.policy) === 'none'
@@ -500,6 +517,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       kind: 'final',
       host_item_id: this.ports.idFactory(),
       event_id: `final:${payload.delegate_id}`,
+      source: this.#workSource(payload.delegate_id, event.seq),
       content,
     }), {
       priority: hit
@@ -511,6 +529,20 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       preemptiveAlert: preemptiveMonitorHit,
       preemptiveAlertDelegateId: preemptiveMonitorHit ? payload.delegate_id : null,
     })
+  }
+
+#workSource(delegateId: string, eventSeq?: number): HostWorkSource | undefined {
+    const record = this.ports.session.delegateRecord(delegateId)
+    const delegate = this.ports.runtime.delegateFor(delegateId)
+    const channel = record?.channel ?? delegate?.executor
+    if (channel === undefined) return undefined
+    const request = channel === this.ports.coding?.channel ? delegate?.request : undefined
+    const label = (value: string | undefined): string | undefined => value === undefined
+      ? undefined : [...value.replace(/[\p{C}]/gu, '')].slice(0, 120).join('') || undefined
+    const project = label(record?.project ?? (typeof request?.project === 'string' ? request.project : undefined))
+    const title = label(record?.title ?? (typeof request?.title === 'string' ? request.title : undefined))
+    return {work_id: delegateId, ...(eventSeq === undefined ? {} : {event_seq: eventSeq}), executor: this.ports.agentNameForChannel(channel) ?? channel,
+      ...(project === undefined ? {} : {project}), ...(title === undefined ? {} : {title})}
   }
 
 #delegateSummary(delegateId: string, displayName: string): string {

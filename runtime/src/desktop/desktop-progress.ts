@@ -22,6 +22,7 @@ const executorResultBodySchema = z.object({
 })
 export const executorProgressSchema = z.object({
   type: z.literal('executor.progress'), delegate_id: identifier, executor: identifier,
+  project: projectLabel.optional(), title: projectLabel.optional(),
   phase: z.enum(['started', 'working', 'completed', 'failed', 'refused', 'unknown', 'cancelled', 'alert']),
   summary, level: z.enum(['milestone', 'detail']), ts: z.number().finite().nonnegative(),
 })
@@ -37,6 +38,8 @@ type RuntimeEvidence = Pick<CausalRuntime, 'inFlightDelegate' | 'claimedHandoff'
   & {readonly executors?: ReadonlyMap<string, {readonly manifest: {
     readonly display_name?: string | undefined
     readonly policy?: HandoffPolicy | undefined
+    readonly roles?: readonly string[]
+    readonly ops?: readonly {readonly name: string; readonly sync_result?: boolean}[]
   }}>}
 
 /** Prefer a neutral reminder to exposing a command, path or credential in the orb. */
@@ -54,6 +57,7 @@ export function projectExecutorEvent(
   runtime: RuntimeEvidence,
   agentNameForChannel: (channel: string) => string | null = () => null,
   policyForChannel: (channel: string) => HandoffPolicy | null = () => null,
+  workMetadata: (id: string) => {readonly project?: string; readonly title?: string} | undefined = () => undefined,
 ): {
   progress: ExecutorProgress; result?: ExecutorResult
 } | null {
@@ -66,6 +70,10 @@ export function projectExecutorEvent(
   if (event.kind !== 'deadline' && delegate.executor !== event.payload.channel) return null
   if ((event.kind === 'progress' || event.kind === 'observation') && delegate.op !== event.payload.op) return null
   if ((event.kind === 'handoff' || event.kind === 'observation') && delegate.origin_ref !== event.payload.origin_ref) return null
+  const manifest = runtime.executors?.get(delegate.executor)?.manifest
+  // Receipts update canonical state, but are not independent user work.
+  if (manifest?.ops?.find(op => op.name === delegate.op)?.sync_result === true
+    || (manifest?.roles?.includes('coding') && delegate.op === 'steer')) return null
   const policy = policyForChannel(delegate.executor)
     ?? runtime.executors?.get(delegate.executor)?.manifest.policy
     ?? null
@@ -121,7 +129,22 @@ export function projectExecutorEvent(
       started_at: delegate.dispatched_at, ended_at: event.ts,
       changed_files: typeof changed === 'number' && Number.isSafeInteger(changed) && changed >= 0 ? changed : null}
   }
-  const parsed = executorProgressSchema.safeParse({type: EXECUTOR_PROGRESS, delegate_id: id,
+  const retained = workMetadata(id)
+  // Admission can emit a terminal before intake has registered its richer session record.
+  const metadata = {
+    project: retained?.project ?? (typeof delegate.request.project === 'string' ? delegate.request.project : undefined),
+    title: retained?.title ?? (typeof delegate.request.title === 'string' ? delegate.request.title : undefined),
+  }
+  const labels: {project?: string; title?: string} = {}
+  for (const key of ['project', 'title'] as const) {
+    const value = metadata?.[key]
+    if (value !== undefined) {
+      const bounded = [...value.replace(/[\p{C}]/gu, '')].slice(0, 120).join('')
+      if (bounded) labels[key] = bounded
+    }
+  }
+  if (result != null) result = {...result, ...labels}
+  const parsed = executorProgressSchema.safeParse({...labels, type: EXECUTOR_PROGRESS, delegate_id: id,
     executor: publicExecutor, phase, summary: text, level, ts: event.ts})
   if (!parsed.success) return null
   if (result === undefined) return {progress: parsed.data}

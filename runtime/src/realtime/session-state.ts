@@ -16,7 +16,7 @@
 
 import { z } from 'zod'
 import { PROGRESS_SUMMARY_LIMIT } from '../core/events.js'
-import type { HostResponseIntent, RealtimeProviderEvent } from './protocol.js'
+import type { HostResponseIntent, HostWorkSource, RealtimeProviderEvent } from './protocol.js'
 
 export const MAX_TRACKED_USER_TRANSCRIPTS = 4_096
 export const MAX_CAPTION_CHARS = 160
@@ -43,7 +43,7 @@ export type ProviderTurnPhase = z.infer<typeof providerTurnPhaseSchema>
 export type ContinuationRequestResult = 'requested' | 'retryable' | 'rejected'
 
 /** A speculative display-only caption: revisable, never persisted. */
-export interface CaptionFrame {
+export interface CaptionFrame extends Partial<HostWorkSource> {
   readonly role: 'user' | 'assistant'
   readonly text: string
   readonly final: boolean
@@ -580,6 +580,11 @@ export class RealtimeSessionState {
       ...(title === undefined ? {} : {title}),
     })
     this.advanceSnapshot()
+  }
+
+  delegateRecord(delegateId: string): DelegateRecord | undefined {
+    const record = this.#delegates.get(delegateId)
+    return record === undefined ? undefined : {...record}
   }
 
   delegateState(delegateId: string): DelegateState | undefined {
