@@ -2913,7 +2913,7 @@ test('streaming speech reaches TTS before completion and cleans split markup wit
       for (const text of formatted) yield {kind: 'text_delta', text}
       yield {kind: 'response_completed', response_id: 'streaming-format'}
     },
-    abandonPendingResponse: async () => {}, close: async () => {},
+    abandonPendingResponse: () => Promise.resolve(), close: () => Promise.resolve(),
   }
   const adapter = new CascadedRealtimeAdapter({endpointing: new ScriptedEndpointing(), asr: new FakeAsrClient(),
     llm, tts: new FakeTtsClient(tts), idFactory: ids('session-format', 'speech-format', 'item-format')})

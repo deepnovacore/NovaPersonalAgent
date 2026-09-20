@@ -785,9 +785,10 @@ test('cascaded English translates conversation and narration prompts but preserv
   const requests: {messages: {role: string; content: string}[]}[] = []
   const {frontendInstructions} = await import('../src/realtime/frontend-instructions.js')
   const llm = createQwenCascadedLlmFactory({baseUrl: 'https://example.test', apiKey: 'test', model: 'test', instructions: frontendInstructions(),
-    fetchImpl: async (_url, init) => {
-      requests.push(JSON.parse(String(init?.body)))
-      return new Response('data: {"id":"r","choices":[{"delta":{"content":"Hello"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {headers: {'content-type': 'text/event-stream'}})
+    fetchImpl: (_url, init) => {
+      assert.equal(typeof init?.body, 'string')
+      requests.push(JSON.parse(init!.body as string) as {messages: {role: string; content: string}[]})
+      return Promise.resolve(new Response('data: {"id":"r","choices":[{"delta":{"content":"Hello"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {headers: {'content-type': 'text/event-stream'}}))
     },
   }).open()
   const signal = new AbortController().signal

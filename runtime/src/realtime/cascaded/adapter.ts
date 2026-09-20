@@ -305,7 +305,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
   #legacyLlmUsed = false
   #legacyLlmClosePromise: Promise<void> | null = null
 
-  async setLanguage(language: PromptLanguage = this.#defaultLanguage): Promise<void> { this.#language = language }
+  setLanguage(language: PromptLanguage = this.#defaultLanguage): Promise<void> { this.#language = language; return Promise.resolve() }
 
   constructor(options: CascadedRealtimeAdapterOptions) {
     this.#defaultLanguage = options.language ?? 'zh-CN'
