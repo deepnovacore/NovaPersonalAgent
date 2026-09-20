@@ -220,6 +220,7 @@ export function backendLaunchSpec({
     NOVA_AUDIO_AGENT_PROACTIVITY_PRESET: proactivity,
     NOVA_AUDIO_AGENT_CODING_PROGRESS_NARRATION: settings?.codingProgressNarration ?? 'smart',
     NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL: String(codexHeartbeatSeconds),
+    NOVA_AUDIO_AGENT_LANGUAGE: settings?.language ?? 'zh-CN',
     NOVA_AUDIO_AGENT_PIPELINE_MODE: pipelineMode,
     NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,

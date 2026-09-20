@@ -1,3 +1,4 @@
+import type {PromptLanguage} from '../realtime/prompt-language.js'
 import type {RealtimeTelemetry} from '../realtime/telemetry.js'
 import {supportsVision} from '../model/vision-capability.js'
 import {captureConversationFrame} from '../core/camera-session.js'
@@ -322,6 +323,7 @@ export function buildCascadedRealtimeAssembly(
       : {executors: [...(options.executors ?? []), ...(options.codexResource === undefined ? [] : [options.codexResource.adapter])]}),
   })
   const provider = new CascadedRealtimeProvider({
+    language: options.settings.language,
     ...(options.settings.conversation_vision_enabled && supportsVision(selection.llmProvider, selection.llmModel)
       ? {captureFrame: (signal: AbortSignal) => captureConversationFrame(core.frameSource, signal, core.mediaStore)} : {}),
     endpointingFactory,
@@ -455,6 +457,7 @@ export interface BuildQwenRealtimeAssemblyOptions
 
 /** Narrow provider-only form used by the integrated provider registry. */
 export interface BuildQwenRealtimeProviderOptions {
+  readonly language?: PromptLanguage
   readonly onUsage?: UsageReporter
 
 
@@ -483,6 +486,7 @@ export function buildQwenRealtimeAssembly(
 ): RealtimeAssembly | QwenAudioRealtimeAdapter {
   if ('config' in options) {
     return new QwenAudioRealtimeAdapter({
+      ...(options.language === undefined ? {} : {language: options.language}),
       ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, options.config.url)!}),
       url: options.config.url,
       apiKey: options.config.apiKey,
@@ -523,6 +527,7 @@ export function buildQwenRealtimeAssembly(
       : {executors: [...(options.executors ?? []), ...(options.codexResource === undefined ? [] : [options.codexResource.adapter])]}),
   })
   const provider = options.qwenProvider ?? buildQwenRealtimeAssembly({
+    language: options.settings.language,
     ...(options.onUsage === undefined ? {} : {onUsage: options.onUsage}),
     config: qwen,
     ...(options.connector === undefined ? {} : {connector: options.connector}),
@@ -579,6 +584,7 @@ export function buildIntegratedRealtimeAssembly(
   const ids = options.ids ?? new MonotonicIdFactory()
   const capabilities = options.capabilities ?? capabilitiesFromSettings(options.settings)
   const qwenProvider = registry[provider]({
+    language: options.settings.language,
     ...(options.onUsage === undefined ? {} : {onUsage: options.onUsage}),
     config,
     ...(options.connector === undefined ? {} : {connector: options.connector}),

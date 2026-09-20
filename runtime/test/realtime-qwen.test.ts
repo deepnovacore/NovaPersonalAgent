@@ -1433,3 +1433,34 @@ for (const model of ['qwen3.5-omni-flash-realtime', 'qwen3.5-omni-plus-realtime'
     await adapter.close()
   })
 }
+
+
+test('language switches only system instructions, serializes updates, and restores the default for old clients', async () => {
+  const scripted = scriptedSocket(handshake)
+  const adapter = adapterFor(scripted, {language: 'en'})
+  await adapter.connect({tools: [{name: 'dispatch'}], signal: new AbortController().signal})
+  const initial = scripted.sent[0]?.session as Record<string, unknown>
+  assert.match(String(initial.instructions), /^You are Nova/)
+  await Promise.all([adapter.setLanguage('zh-CN'), adapter.setLanguage('en')])
+  await adapter.setLanguage('zh-CN')
+  await adapter.setLanguage()
+  const updates = scripted.sent.slice(1).map(frame => frame.session as Record<string, unknown>)
+  assert.equal(updates.length, 4)
+  assert.ok(updates.every(update => Object.keys(update).join() === 'instructions'))
+  assert.match(String(updates.at(-1)?.instructions), /^You are Nova/)
+  await adapter.close()
+})
+
+
+test('language selected during provider handshake reaches the connected session', async () => {
+  const scripted = scriptedSocket(handshake.slice(0, 1))
+  const adapter = adapterFor(scripted)
+  const connecting = adapter.connect({tools: [], signal: new AbortController().signal})
+  await until(() => scripted.sent.length === 1)
+  await adapter.setLanguage('en')
+  scripted.push(handshake[1]!)
+  await connecting
+  assert.equal(scripted.sent.length, 2)
+  assert.match(String((scripted.sent[1]?.session as Record<string, unknown>).instructions), /^You are Nova/)
+  await adapter.close()
+})

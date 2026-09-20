@@ -1,3 +1,4 @@
+import type {PromptLanguage} from '../prompt-language.js'
 import type {Frame} from '../../executors/watcher.js'
 import type {
   HostContextItem,
@@ -23,6 +24,7 @@ import type {
 } from './ports.js'
 
 export interface CascadedRealtimeProviderOptions {
+  readonly language?: PromptLanguage
   readonly endpointingFactory: EndpointingFactory
   readonly asrFactory: AsrFactory
   readonly llmFactory: CascadedLlmFactory
@@ -37,6 +39,8 @@ type ProviderState = 'disconnected' | 'connecting' | 'connected' | 'closing'
 /** Lazily owns one complete, independently fenced cascaded epoch per successful connect. */
 export class CascadedRealtimeProvider implements RealtimeProvider {
   readonly userResponseMode = 'requested' as const
+  readonly #defaultLanguage: PromptLanguage
+  #language: PromptLanguage
   readonly #endpointingFactory: EndpointingFactory
   readonly #asrFactory: AsrFactory
   readonly #llmFactory: CascadedLlmFactory
@@ -53,6 +57,8 @@ export class CascadedRealtimeProvider implements RealtimeProvider {
   #connectSettled: Promise<void> | null = null
 
   constructor(options: CascadedRealtimeProviderOptions) {
+    this.#defaultLanguage = options.language ?? 'zh-CN'
+    this.#language = this.#defaultLanguage
     this.#endpointingFactory = options.endpointingFactory
     this.#asrFactory = options.asrFactory
     this.#llmFactory = options.llmFactory
@@ -60,6 +66,11 @@ export class CascadedRealtimeProvider implements RealtimeProvider {
     this.#captureFrame = options.captureFrame
     this.#telemetry = options.telemetry
     this.#idFactory = options.idFactory
+  }
+
+  async setLanguage(language: PromptLanguage = this.#defaultLanguage): Promise<void> {
+    this.#language = language
+    await this.#adapter?.setLanguage(language)
   }
 
   async connect(options: {
@@ -92,6 +103,7 @@ export class CascadedRealtimeProvider implements RealtimeProvider {
       const tts = this.#ttsFactory.openClient()
       if (signal.aborted) throw abortReason(signal)
       adapter = new CascadedRealtimeAdapter({
+        language: this.#language,
         ...(this.#captureFrame ? {captureFrame: this.#captureFrame} : {}),
         endpointing,
         asr,

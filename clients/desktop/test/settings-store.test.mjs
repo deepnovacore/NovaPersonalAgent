@@ -75,6 +75,7 @@ async function withTempDirectory(run) {
 test('the default settings are the documented schema', () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
     version: 4,
+    language: 'zh-CN',
     palette: 'ember',
     proactivity: 'balanced',
     codingProgressNarration: 'smart',
@@ -221,6 +222,7 @@ test('normalizeSettings rebuilds defaults from nothing at all', () => {
 test('normalizeSettings keeps valid fields and defaults each invalid one on its own', () => {
   const normalized = normalizeSettings({
     version: 99,
+    language: 'zh-CN',
     palette: 'graphite',
     proactivity: 'reckless',
     codexHeartbeatSeconds: 45,
@@ -249,6 +251,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
 
   assert.deepEqual(normalized, {
     version: 4,
+    language: 'zh-CN',
     palette: 'graphite',
     proactivity: 'balanced',
     codingProgressNarration: 'smart',
@@ -318,6 +321,7 @@ test('normalizeSettings defaults every invalid v2 field independently', () => {
 
 test('normalizeSettings drops unknown keys instead of carrying them forward', () => {
   const normalized = normalizeSettings({
+    language: 'zh-CN',
     palette: 'ember',
     __proto__polluted: true,
     endpoint: 'ws://127.0.0.1:1/',
@@ -350,6 +354,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'integratedProvider',
     'integratedVoice',
     'knowledgePath',
+    'language',
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
@@ -452,6 +457,7 @@ test('normalizeSettings treats cascadedLlmModels as a strict independent three-p
 
 test('normalizeSettings falls back per field to a caller-supplied base', () => {
   const base = normalizeSettings({
+    language: 'zh-CN',
     palette: 'graphite',
     proactivity: 'eager',
     codexHeartbeatSeconds: 90,
@@ -461,6 +467,7 @@ test('normalizeSettings falls back per field to a caller-supplied base', () => {
     cascadedLlmModels: { qwen: 'qwen-kept', ark: 'ark-kept' },
   })
   const merged = normalizeSettings({
+    language: 'zh-CN',
     palette: 'ember',
     proactivity: 'nonsense',
     integratedModel: '',
@@ -548,6 +555,7 @@ test('publicSettings never carries the secrets object', () => {
     'integratedProvider',
     'integratedVoice',
     'knowledgePath',
+    'language',
     'modelBaseUrl',
     'monitorCameraDeviceId',
     'palette',
@@ -567,11 +575,12 @@ test('publicSettings never carries the secrets object', () => {
 
 test('orb settings expose only renderer-owned appearance and activation fields', () => {
   assert.deepEqual(orbSettings({
+    language: 'zh-CN',
     palette: 'graphite',
     startListeningOnLaunch: true,
     codexBinaryPath: 'C:\\private\\codex.exe',
     modelBaseUrl: 'https://private.example/v1',
-  }), {conversationVisionEnabled: false, progressBubbles: 'milestones', codingProgressNarration: 'smart', palette: 'graphite', startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
+  }), {conversationVisionEnabled: false, progressBubbles: 'milestones', codingProgressNarration: 'smart', language: 'zh-CN', palette: 'graphite', startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
 })
 
 test('secretsPresent reports booleans for every key and leaks no ciphertext', () => {
@@ -627,6 +636,7 @@ test('all eight secret fields seal, report presence, round-trip, and clear indep
 test('applySettingsUpdate seals plaintext through the codec and round-trips it back', () => {
   const codec = fakeCodec()
   const updated = applySettingsUpdate(DEFAULT_SETTINGS, {
+    language: 'zh-CN',
     palette: 'graphite',
     secrets: { tavilyApiKey: 'tvly-secret' },
   }, codec)
@@ -811,6 +821,7 @@ test('a secret carrying a NUL or other control character is refused, not stored'
   // that contains one would brick the next launch. The field is rejected on
   // its own; everything else in the same patch still lands.
   const patched = applySettingsUpdate(stored, {
+    language: 'zh-CN',
     palette: 'graphite',
     secrets: { dashscopeApiKey: 'sk-\u0000poison', tavilyApiKey: 'tvly-fine' },
   }, codec)
@@ -921,6 +932,7 @@ test('applySettingsUpdate clears a stored key on an empty string and ignores the
 test('applySettingsUpdate keeps unspecified fields and refuses malformed secret values', () => {
   const codec = fakeCodec()
   const stored = applySettingsUpdate(DEFAULT_SETTINGS, {
+    language: 'zh-CN',
     palette: 'graphite',
     proactivity: 'eager',
     codexHeartbeatSeconds: 75,
@@ -981,7 +993,8 @@ test('saveSettings round-trips through loadSettings and leaves no temporary behi
   await withTempDirectory(async directory => {
     const file = join(directory, 'nova-audio-agent-desktop-settings.json')
     const settings = applySettingsUpdate(DEFAULT_SETTINGS, {
-      palette: 'graphite',
+      language: 'zh-CN',
+    palette: 'graphite',
       proactivity: 'conservative',
       codexHeartbeatSeconds: 60,
       integratedVoice: 'longcheng',

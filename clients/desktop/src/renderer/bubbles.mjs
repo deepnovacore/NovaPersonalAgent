@@ -1,3 +1,4 @@
+import {t} from './locale.mjs'
 import {EXECUTOR_PROGRESS, EXECUTOR_RESULT} from './wire-frame-types.mjs'
 const DETAIL_MS = 6_000
 const MILESTONE_MS = 12_000
@@ -280,7 +281,7 @@ export function mountProgressBubbles({container, reserveBubbleArea, document = w
         const toggle = document.createElement('button')
         toggle.type = 'button'
         toggle.className = 'progress-bubble-toggle'
-        toggle.textContent = item.expanded ? '收起' : '展开'
+        toggle.textContent = item.expanded ? t("收起") : t("展开")
         toggle.setAttribute('aria-expanded', String(item.expanded))
         toggle.addEventListener('click', () => { void bubbles.toggleExpanded(item.key) })
         bubble.append(text, toggle)

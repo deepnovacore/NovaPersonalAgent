@@ -1,3 +1,6 @@
+import {t} from './locale.mjs'
+import {localizeDocument} from './locale.mjs'
+localizeDocument(document)
 import { WakeAudioRouter, canAutoSleep } from './wake-audio.mjs'
 import {DESKTOP_ACTIVITY, CLOCK_PING, PLAYBACK_CLEAR, PLAYBACK_ALERT, PLAYBACK_TERMINAL, EXECUTOR_STATE, PROJECT_STATE, EXECUTOR_APPROVAL, CAPTION, EXECUTOR_PROGRESS, EXECUTOR_RESULTS_RESET, EXECUTOR_RESULT, EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT} from './wire-frame-types.mjs'
 import {
@@ -76,7 +79,7 @@ function updateResultButton() {
   const tasks = taskBanner?.state()
   lastResultButton.hidden = retainedResults.size === 0 && !tasks?.tasks.length
   lastResultButton.title = tasks?.tasks.length && !tasks.visible
-    ? `查看任务 · ${tasks.runningCount} 个运行中` : '查看任务结果'
+    ? t("查看任务 · {0} 个运行中", tasks.runningCount) : t("查看任务结果")
   lastResultButton.setAttribute('aria-label', lastResultButton.title)
 }
 const applyBubbleLayout = layout => {
@@ -220,7 +223,7 @@ const axes = {
   cameraSource: 'local',
 }
 
-window.novaAudioAgentDesktop.camera.onEnumerate?.(async () => (await navigator.mediaDevices.enumerateDevices()).filter(item => item.kind === 'videoinput').map((item, index) => ({deviceId: item.deviceId, label: item.label || `摄像头 ${index + 1}`})))
+window.novaAudioAgentDesktop.camera.onEnumerate?.(async () => (await navigator.mediaDevices.enumerateDevices()).filter(item => item.kind === 'videoinput').map((item, index) => ({deviceId: item.deviceId, label: item.label || t("摄像头 {0}", index + 1)})))
 
 const confirmationCountdown = new ConfirmationCountdown({
   onTick: seconds => {
@@ -321,7 +324,7 @@ function render() {
   const state = deriveOrbState({...axes, tasks: taskBanner?.state().tasks ?? []})
   shell.dataset.state = state.name
   const sleeping = axes.wakeState === 'sleeping'
-  setText(stateLabel, sleeping ? '已休眠 · 点击唤醒' : state.statusLine)
+  setText(stateLabel, sleeping ? t("已休眠 · 点击唤醒") : state.statusLine)
   setAttribute(orb, 'role', sleeping ? 'button' : 'img')
   setAttribute(orb, 'tabindex', sleeping ? '0' : '-1')
   setText(codexSummary, state.projectLabel)
@@ -363,19 +366,19 @@ function render() {
   confirmationAllowSession.disabled = !decisionEnabled
   confirmationCancel.disabled = !decisionEnabled
   setText(aecLabel, state.aecLabel)
-  setAttribute(orb, 'aria-label', sleeping ? '已休眠，点击唤醒' : `${state.label}；${state.accessibleCodexLabel}`)
+  setAttribute(orb, 'aria-label', sleeping ? t("已休眠，点击唤醒") : `${state.label}；${state.accessibleCodexLabel}`)
   orb.dataset.captureActive = String(axes.activated)
   muteToggle.disabled = !axes.activated
   muteToggle.setAttribute('aria-pressed', String(axes.muted))
-  muteToggle.setAttribute('aria-label', axes.muted ? '取消闭麦' : '闭麦')
+  muteToggle.setAttribute('aria-label', axes.muted ? t("取消闭麦") : t("闭麦"))
   speakerToggle.disabled = axes.outputMutePending
   speakerToggle.setAttribute('aria-pressed', String(!axes.outputMuted))
-  speakerToggle.setAttribute('aria-label', axes.outputMuted ? '开启 Nova 声音' : '关闭 Nova 声音')
+  speakerToggle.setAttribute('aria-label', axes.outputMuted ? t("开启 Nova 声音") : t("关闭 Nova 声音"))
   cameraToggle.hidden = axes.cameraSource === 'file'
   cameraToggle.disabled = axes.booting
     || axes.cameraSource !== 'local'
     || axes.camera === 'requesting'
-  cameraToggle.setAttribute('aria-label', '视觉设置')
+  cameraToggle.setAttribute('aria-label', t("视觉设置"))
   visual.setState(state.name, { codexWorking: axes.codex === 'working' })
 }
 
@@ -415,7 +418,7 @@ function applyConfirmationPresentation() {
     if (previousKind !== null) {
       setText(
         confirmationAnnouncement,
-        previousKind === 'project' ? '项目确认已结束。' : `${axes.executorName || '执行器'} 授权确认已结束。`,
+        previousKind === 'project' ? t("项目确认已结束。") : t("{0} 授权确认已结束。", axes.executorName || t("执行器")),
       )
     }
     return
@@ -437,7 +440,7 @@ function applyConfirmationPresentation() {
     const operation = active.kind === 'codex'
       ? active.operation
       : deriveOrbState(axes).confirmationOperation
-    setText(confirmationAnnouncement, `${operation}；尚未执行，需要你的确认。`)
+    setText(confirmationAnnouncement, t("{0}；尚未执行，需要你的确认。", operation))
   }
 }
 
@@ -623,7 +626,7 @@ function applyWakeState(value) {
   if (!wasSleeping && axes.wakeState === 'sleeping') axes.hovered = false
   taskBanner.setSuspended(axes.wakeState === 'sleeping')
   if (axes.wakeState === 'sleeping') void progressBubbles.clear()
-  sleepButton.title = value?.status === 'ready' && !axes.muted ? '休眠（Ctrl+L）；点击或说“你好星核”唤醒' : '休眠；唤醒词不可用时请点击恢复'
+  sleepButton.title = value?.status === 'ready' && !axes.muted ? t("休眠（Ctrl+L）；点击或说“你好星核 / Hi Nova”唤醒") : t("休眠；唤醒词不可用时请点击恢复")
   if (value?.state === 'blocked') {
     axes.muted = true
   }

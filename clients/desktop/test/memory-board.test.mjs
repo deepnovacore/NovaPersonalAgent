@@ -17,6 +17,7 @@ class BoardElement extends EventTarget {
     this.children = []
     this.attributes = new Map()
     this.disabled = false
+    this.documentElement = {}
     this.hidden = false
     this.tabIndex = 0
     this.textContent = ''
@@ -32,6 +33,7 @@ class BoardElement extends EventTarget {
 class BoardDocument extends EventTarget {
   constructor() {
     super()
+    this.documentElement = {}
     this.hidden = false
     this.scrollingElement = new BoardElement('page')
     this.elements = new Map([
@@ -42,9 +44,10 @@ class BoardDocument extends EventTarget {
     ].map(id => [`#${id}`, new BoardElement(id)]))
   }
 
+  createTreeWalker() { return {nextNode: () => null} }
   querySelector(selector) { return this.elements.get(selector) ?? null }
   querySelectorAll(selector) {
-    assert.equal(selector, '[data-scroll-key]')
+    assert.ok(['[data-scroll-key]', '[title], [placeholder], [aria-label], [alt]'].includes(selector))
     return []
   }
   createElement(tagName) { return new BoardElement(tagName) }
@@ -73,7 +76,7 @@ test('board refresh preserves page and keyed panel scroll positions after DOM re
   const oldChannel = {dataset: {scrollKey: 'channel:alpha'}, scrollTop: 83, scrollLeft: 11}
   const oldDiagnostic = {dataset: {scrollKey: 'diagnostic:one'}, scrollTop: 47, scrollLeft: 13}
   const document = {scrollingElement: page, querySelectorAll: selector => {
-    assert.equal(selector, '[data-scroll-key]')
+    assert.ok(['[data-scroll-key]', '[title], [placeholder], [aria-label], [alt]'].includes(selector))
     return [oldChannel, oldDiagnostic]
   }}
 

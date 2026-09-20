@@ -26,6 +26,14 @@
       <button type="button" class="nav-item" id="category-codex" data-category="codex" aria-current="false" tabindex="-1">编程</button>
     </nav>
     <main>
+      <section class="setting-section" id="language-section">
+        <h2>语言 / Language</h2>
+        <label for="language">语言 / Language</label>
+        <select id="language"><option value="zh-CN">简体中文</option><option value="en">English</option></select>
+        <p class="hint">首次按系统首选语言设置；之后保留你的选择。界面语言将在重新打开 App 后生效。</p>
+        <p class="hint">AI 仅切换 system prompt 的语言，不保证回复始终使用该语言；不自动识别或切换语言，也不更换语音模型或音色。</p>
+        <p class="hint">AI 提示词在保存并重启后台后生效。</p>
+      </section>
       <section class="setting-section" id="phone-connection-section">
         <div class="phone-heading"><div><h2>连接 iPhone</h2><p>将 iPhone 安全连接到这台 Nova。</p></div><span class="phone-badge" id="phone-state">私人设备连接</span></div>
         <ol class="phone-steps" aria-label="连接步骤">
@@ -110,7 +118,7 @@
         <h2>语音唤醒</h2>
         <fieldset>
           <legend>本地语音唤醒</legend>
-          <label class="toggle-row" title="空闲后悬浮球缩成小气泡，在本机监听“你好星核”；闭麦时停止唤醒检测。"><input id="wake-word-enabled" type="checkbox" role="switch">启用“你好星核”唤醒</label>
+          <label class="toggle-row" title="空闲后悬浮球缩成小气泡，在本机监听“你好星核 / Hi Nova”；闭麦时停止唤醒检测。"><input id="wake-word-enabled" type="checkbox" role="switch">启用“你好星核 / Hi Nova”唤醒</label>
           <small>空闲后悬浮球缩成小气泡，仅在本机监听唤醒词，听到唤醒词即恢复原状；闭麦也会停止唤醒检测。首次开启需下载模型。</small>
           <div class="field">
             <label for="auto-hide-seconds" title="空闲多久后休眠；0 表示不自动休眠。">空闲休眠秒数</label>

@@ -1,4 +1,6 @@
-import {originalImageUrl, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS, CASCADED_NARRATION_INSTRUCTIONS} from './llm.js'
+import type {PromptLanguage} from '../prompt-language.js'
+import {cascadedNarrationInstructions} from './llm.js'
+import {originalImageUrl, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
 import { jsonValueSchema, type JsonValue } from '../../core/events.js'
 import { codePointLengthLikePython, stripLikePython } from '../../text/python-text.js'
 import { MAX_REALTIME_TEXT, type JsonObject } from '../protocol.js'
@@ -95,6 +97,7 @@ class Session implements CascadedLlmSession {
   }
 
   async *stream(input: {
+    readonly language?: PromptLanguage
     readonly inputs: readonly CascadedLlmInput[]
     readonly tools: readonly CascadedLlmTool[]
     readonly workspaceContext?: string | null
@@ -117,12 +120,13 @@ class Session implements CascadedLlmSession {
     let pendingTool: Extract<CascadedLlmEvent, {kind: 'tool_call'}> | null = null
     try {
       for await (const event of this.#gateway.stream({
+        ...(input.language === undefined ? {} : {language: input.language}),
         inputItems: factOnly ? input.inputs.filter(item => item.kind === 'host_activation' || item.kind === 'tool_result').map(inputItem)
           : localHistory ? [...this.#history.flat(), ...current] : current,
         tools: input.tools.map(toolSchema),
         previousResponseId: localHistory || (factOnly && !continuing) ? null : this.#previousResponseId,
         workspaceContext: factOnly ? null : input.workspaceContext ?? null,
-        responseAdaptation: factOnly ? CASCADED_NARRATION_INSTRUCTIONS : input.responseAdaptation ?? null,
+        responseAdaptation: factOnly ? cascadedNarrationInstructions(input.language) : input.responseAdaptation ?? null,
         signal: input.signal,
       })) {
         if (event.kind === 'response_started') {

@@ -167,6 +167,7 @@ DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
 | `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | 否 | qwen-plus | Surrogate 模型。 |
 | `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | 否 | qwen-flash | 记忆压缩模型。 |
 | `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | 否 | integrated | 产品管线形态：集成或级联。 |
+| `NOVA_AUDIO_AGENT_LANGUAGE` | `core` | 否 | zh-CN | AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。 |
 | `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | 否 | false | 为已确认支持图片的级联模型附加默认摄像头画面。 |
 | `NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID` | `camera` | 否 | 无 | 监控摄像头设备 ID；空值使用默认设备。 |
 | `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` | `camera` | 否 | true | 启用独立视觉监控。 |

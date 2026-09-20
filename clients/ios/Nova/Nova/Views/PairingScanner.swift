@@ -13,25 +13,25 @@ struct PairingScanner: View {
                 if allowed && error.isEmpty {
                     ScannerCamera(onScan: onScan, onError: { error = $0 })
                         .overlay(alignment: .bottom) {
-                            Text("扫描 Mac 上的 Nova 配对二维码")
+                            Text(L10n.text("扫描 Mac 上的 Nova 配对二维码"))
                                 .padding().background(.regularMaterial, in: Capsule()).padding()
                         }
                 } else {
-                    ContentUnavailableView(error.isEmpty ? "正在准备相机" : "无法扫码", systemImage: "qrcode.viewfinder",
+                    ContentUnavailableView(error.isEmpty ? L10n.text("正在准备相机") : L10n.text("无法扫码"), systemImage: "qrcode.viewfinder",
                                            description: Text(error))
                 }
             }
-            .navigationTitle("扫码连接").navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+            .navigationTitle(L10n.text("扫码连接")).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L10n.text("取消")) { dismiss() } } }
         }
         .task {
             guard DataScannerViewController.isSupported else {
-                error = "此设备不支持扫码，请使用手动连接。"; return
+                error = L10n.text("此设备不支持扫码，请使用手动连接。"); return
             }
             let granted = await AVCaptureDevice.requestAccess(for: .video)
             guard !Task.isCancelled else { return }
             if granted && DataScannerViewController.isAvailable { allowed = true }
-            else { error = "请在 iPhone 设置中允许 Nova 使用相机，或使用手动连接。" }
+            else { error = L10n.text("请在 iPhone 设置中允许 Nova 使用相机，或使用手动连接。") }
         }
     }
 }
@@ -45,7 +45,7 @@ private struct ScannerCamera: UIViewControllerRepresentable {
             qualityLevel: .balanced, recognizesMultipleItems: false, isGuidanceEnabled: true, isHighlightingEnabled: true)
         scanner.delegate = context.coordinator
         do { try scanner.startScanning() }
-        catch { DispatchQueue.main.async { onError("相机无法启动，请重试或使用手动连接。") } }
+        catch { DispatchQueue.main.async { onError(L10n.text("相机无法启动，请重试或使用手动连接。")) } }
         return scanner
     }
     func updateUIViewController(_ controller: DataScannerViewController, context: Context) {}
@@ -64,7 +64,7 @@ private struct ScannerCamera: UIViewControllerRepresentable {
             }
         }
         func dataScanner(_ scanner: DataScannerViewController, becameUnavailableWithError error: DataScannerViewController.ScanningUnavailable) {
-            scanner.stopScanning(); onError("相机暂时不可用，请重试或使用手动连接。")
+            scanner.stopScanning(); onError(L10n.text("相机暂时不可用，请重试或使用手动连接。"))
         }
     }
 }

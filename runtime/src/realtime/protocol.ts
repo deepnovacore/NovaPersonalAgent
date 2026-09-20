@@ -1,3 +1,4 @@
+import type {PromptLanguage} from './prompt-language.js'
 import { z } from 'zod'
 import { jsonValueSchema, type JsonValue } from '../core/events.js'
 import { MAX_PACKED_RECOVERY_CONTENT } from './history.js'
@@ -437,6 +438,8 @@ export const responseAdaptationContextSchema = z.object({
 }).strict()
 
 export interface RealtimeProvider {
+  setLanguage?(language?: PromptLanguage): Promise<void>
+
   /** Automatic providers may start before transcript final; requested providers wait for the host.
    * Omission preserves existing third-party adapters' automatic contract. Production adapters declare it.
    */

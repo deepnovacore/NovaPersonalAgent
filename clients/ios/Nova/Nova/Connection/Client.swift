@@ -44,7 +44,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
         Task {
         let granted = await AVAudioApplication.requestRecordPermission()
         guard dictationHolding, dictationID == id, current == generation, connected, UIApplication.shared.applicationState == .active else { return }
-        guard granted else { dictationHolding = false; inputNotice = "请在系统设置中允许麦克风访问"; return }
+        guard granted else { dictationHolding = false; inputNotice = L10n.text("请在系统设置中允许麦克风访问"); return }
         dictationBase = inputDraft; inputNotice = ""
         if let request = command(["type": "input.dictation", "id": id, "action": "start"]) { dictationCommands.insert(request) }
         do {
@@ -54,7 +54,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                 try? await Task.sleep(for: .seconds(45))
                 guard !Task.isCancelled else { return }; self?.finishDictation()
             }
-        } catch { cancelDictation(); inputNotice = "无法启动录音，请重试" }
+        } catch { cancelDictation(); inputNotice = L10n.text("无法启动录音，请重试") }
         }
     }
     func finishDictation() {
@@ -66,7 +66,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
         dictationTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(35))
             guard !Task.isCancelled, let self, self.dictationID == id else { return }
-            self.cancelDictation(); self.inputNotice = "识别超时，请重试。原草稿已保留。"
+            self.cancelDictation(); self.inputNotice = L10n.text("识别超时，请重试。原草稿已保留。")
         }
     }
     func cancelDictation() {
@@ -80,14 +80,14 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
         guard editableInput, connected, !voice, !voiceStarting, !dictationHolding, !dictationTranscribing, !textSending,
               !text.isEmpty, text.utf16.count <= 4000 else { return }
         do { try audio.start(threshold: speechThreshold, capture: false) }
-        catch { inputNotice = "无法启动语音播放，请重试"; return }
+        catch { inputNotice = L10n.text("无法启动语音播放，请重试"); return }
         guard let id = command(["type": "input.text", "text": text]) else { return }
         textSending = true; textRequest = (id, text); inputNotice = ""
         textTimeout = Task { [weak self] in
             try? await Task.sleep(for: .seconds(15))
             guard !Task.isCancelled, let self, self.textRequest?.id == id else { return }
             self.textSending = false; self.textRequest = nil
-            self.inputNotice = "未收到发送确认，请先查看回复，避免重复发送。草稿已保留。"
+            self.inputNotice = L10n.text("未收到发送确认，请先查看回复，避免重复发送。草稿已保留。")
         }
     }
 
@@ -106,7 +106,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
     private var aoqBridge: AOQRuntimeBridge?
     private var hostHeartbeat: Task<Void, Never>?
     private var offeredTransports: [String] = []
-    @Published var status = "尚未连接"
+    @Published var status = L10n.text("尚未连接")
     @Published var connected = false
     @Published var connecting = false
     @Published var voice = false
@@ -170,7 +170,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
         end()
         do {
             let url = try Wire.endpoint(server, debugLocalhost: debugLocalhost)
-            guard token.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil else { throw WireError("连接密钥应为 32 位小写十六进制字符。") }
+            guard token.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil else { throw WireError(L10n.text("连接密钥应为 32 位小写十六进制字符。")) }
             try Credentials.save(token, server: url.absoluteString)
             endpoint = url
             UserDefaults.standard.set(url.absoluteString, forKey: "nova.server")
@@ -179,9 +179,9 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
     }
     func pair(_ invitation: PairingCode) {
         end()
-        guard invitation.expiresAt.map({ $0 > Date() }) ?? true else { status = "二维码已过期，请在 Mac 上重新生成。"; return }
+        guard invitation.expiresAt.map({ $0 > Date() }) ?? true else { status = L10n.text("二维码已过期，请在 Mac 上重新生成。"); return }
         let id = generation
-        pairing = true; connecting = true; status = "正在配对主机"
+        pairing = true; connecting = true; status = L10n.text("正在配对主机")
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 10
         let session = URLSession(configuration: config)
@@ -202,19 +202,19 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                 let message = try await socket.receive()
                 guard let self, self.generation == id, !Task.isCancelled else { return }
                 guard UIApplication.shared.applicationState == .active else {
-                    self.end(); self.status = "配对已取消，请回到 App 后重新扫码。"; return
+                    self.end(); self.status = L10n.text("配对已取消，请回到 App 后重新扫码。"); return
                 }
                 let data: Data
                 switch message {
                 case .string(let text): data = Data(text.utf8)
                 case .data(let bytes): data = bytes
-                @unknown default: throw WireError("配对响应无效")
+                @unknown default: throw WireError(L10n.text("配对响应无效"))
                 }
                 let reply = try Wire.json(data, limit: 4096)
                 guard reply["type"] as? String == "pair.ready", let credential = reply["token"] as? String,
                       credential.range(of: "^[0-9a-f]{32}$", options: .regularExpression) != nil,
                       let deviceID = reply["device_id"] as? String, UUID(uuidString: deviceID) != nil else {
-                    throw WireError("配对失败：二维码可能已过期或已使用，请在 Mac 上重新生成。")
+                    throw WireError(L10n.text("配对失败：二维码可能已过期或已使用，请在 Mac 上重新生成。"))
                 }
                 try Credentials.save(credential, server: invitation.server.absoluteString)
                 self.server = invitation.server.absoluteString; self.token = credential
@@ -223,7 +223,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
             } catch {
                 guard let self, self.generation == id, !Task.isCancelled else { return }
                 self.pairingTask = nil; self.end()
-                self.status = "配对失败，请检查网络，并在 Mac 上重新生成二维码后重试。"
+                self.status = L10n.text("配对失败，请检查网络，并在 Mac 上重新生成二维码后重试。")
             }
         }
     }
@@ -233,13 +233,13 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
         let aoqTransports = ["qwen_aoq_runtime_v1", "qwen_aoq_chat_v1"]
         offeredTransports = mediaPreference == "aoq" ? (AOQAudio.available ? aoqTransports : [])
             : mediaPreference == "relay" || !AOQAudio.available ? ["host_pcm_v1"] : ["host_pcm_v1"] + aoqTransports
-        guard !offeredTransports.isEmpty else { requested = false; status = "此构建未包含 AOQ SDK"; return }
-        connecting = true; status = "正在连接"
+        guard !offeredTransports.isEmpty else { requested = false; status = L10n.text("此构建未包含 AOQ SDK"); return }
+        connecting = true; status = L10n.text("正在连接")
         let delegate = SocketDelegate()
         delegate.closed = { [weak self] task, code in
             Task { @MainActor in
                 guard let self, self.generation == id, self.socket === task else { return }
-                self.failed(code: code, reason: "尚未连接")
+                self.failed(code: code, reason: L10n.text("尚未连接"))
             }
         }
         let config = URLSessionConfiguration.ephemeral
@@ -252,12 +252,12 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
         readyWatchdog = Task { [weak self] in
             try? await Task.sleep(for: .seconds(10))
             guard !Task.isCancelled, let self, self.generation == id, self.connection == nil else { return }
-            self.failed(code: 0, reason: "连接握手超时，请检查 Mac 地址")
+            self.failed(code: 0, reason: L10n.text("连接握手超时，请检查 Mac 地址"))
         }
         receiveTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let hello: [String: Any] = ["type": "hello", "token": self.token, "protocol_version": 1, "media": ["transports": self.offeredTransports]]
+                let hello: [String: Any] = ["type": "hello", "token": self.token, "protocol_version": 1, "language": L10n.initialLanguage(), "media": ["transports": self.offeredTransports]]
                 let data = try JSONSerialization.data(withJSONObject: hello)
                 try await socket.send(.string(String(decoding: data, as: UTF8.self)))
                 while !Task.isCancelled {
@@ -271,7 +271,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                 try? await Task.sleep(for: .milliseconds(100))
                 guard self.generation == id, !Task.isCancelled else { return }
                 self.failed(code: Wire.receiveFailureCode(error, ready: self.connection != nil, serverCode: socket.closeCode.rawValue),
-                            reason: error is WireError ? error.localizedDescription : "连接中断，正在尝试恢复")
+                            reason: error is WireError ? error.localizedDescription : L10n.text("连接中断，正在尝试恢复"))
             }
         }
     }
@@ -281,7 +281,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
             let ready = try Wire.ready(Wire.json(Data(text.utf8)),
                                        allowAOQ: offeredTransports.contains("qwen_aoq_chat_v1"),
                                        allowAOQRuntime: offeredTransports.contains("qwen_aoq_runtime_v1"))
-            guard ready.aoqChat || offeredTransports.contains("host_pcm_v1") else { throw WireError("主机当前未启用 AOQ，请切换服务端模式") }
+            guard ready.aoqChat || offeredTransports.contains("host_pcm_v1") else { throw WireError(L10n.text("主机当前未启用 AOQ，请切换服务端模式")) }
             pipeline = ready.pipeline; editableInput = ready.editableInput
             aoqChat = ready.aoqChat
             aoqRuntime = ready.aoqRuntime
@@ -289,7 +289,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
             instance = ready.instance; connection = ready.connection
             readyWatchdog?.cancel(); recovery.markReady(atMS: Wire.renderMS)
             connected = true; connecting = false
-            status = restarted ? "Mac 服务已重启，旧任务不会重复提交" : "已连接"
+            status = restarted ? L10n.text("Mac 服务已重启，旧任务不会重复提交") : L10n.text("已连接")
             if aoqChat {
                 if aoqRuntime { aoqBridge = AOQRuntimeBridge(connection: ready.connection) }
                 status = "AOQ"; monitorHost(id: generation)
@@ -297,19 +297,19 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
             return
         }
         if aoqChat {
-            guard case .string(let text) = message else { throw WireError("AOQ 控制连接不接受音频") }
+            guard case .string(let text) = message else { throw WireError(L10n.text("AOQ 控制连接不接受音频")) }
             let value = try Wire.json(Data(text.utf8), limit: max(Wire.maxJSON, aoqRuntime ? AOQRuntimeBridge.maxEnvelope : Wire.maxJSON))
             switch value["type"] as? String {
             case "aoq.credentials":
                 guard voiceStarting, let request = aoqRequest, value["request_id"] as? String == request,
                       value["connection_id"] as? String == connection,
-                      !aoqRuntime || (value["mode"] as? String == "runtime" && value["session"] == nil) else { throw WireError("过期的 AOQ 连接凭证") }
+                      !aoqRuntime || (value["mode"] as? String == "runtime" && value["session"] == nil) else { throw WireError(L10n.text("过期的 AOQ 连接凭证")) }
                 aoqRequest = nil
                 let id = generation
                 let adapter = AOQAudio(); aoq = adapter
                 adapter.onCaption = { [weak self] role, text in guard let self, self.generation == id else { return }; self.receiveCaption(role: role, text: text, final: role == "user") }
                 adapter.onLevel = { [weak self] level in guard let self, self.generation == id else { return }; self.inputLevel = self.muted ? 0 : level }
-                adapter.onReady = { [weak self] in guard let self, self.generation == id else { return }; self.voiceStarting = false; self.voice = true; self.status = "正在聆听 · AOQ" }
+                adapter.onReady = { [weak self] in guard let self, self.generation == id else { return }; self.voiceStarting = false; self.voice = true; self.status = L10n.text("正在聆听 · AOQ") }
                 adapter.onFailure = { [weak self] reason in guard let self, self.generation == id else { return }; self.end(); self.status = reason }
                 adapter.onEvent = { [weak self] event in
                     guard let self, self.generation == id, var bridge = self.aoqBridge else { return }
@@ -319,16 +319,16 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                             let data = try JSONSerialization.data(withJSONObject: envelope)
                             self.enqueue(.string(String(decoding: data, as: UTF8.self)), bytes: data.count)
                         }
-                    } catch { self.failed(code: 0, reason: "AOQ 返回了不兼容的数据") }
+                    } catch { self.failed(code: 0, reason: L10n.text("AOQ 返回了不兼容的数据")) }
                 }
                 try adapter.start(value, runtime: aoqRuntime)
             case "aoq.command":
-                guard aoqRuntime, var bridge = aoqBridge, let aoq else { throw WireError("AOQ Runtime 尚未启动") }
+                guard aoqRuntime, var bridge = aoqBridge, let aoq else { throw WireError(L10n.text("AOQ Runtime 尚未启动")) }
                 let event = try bridge.command(value); aoqBridge = bridge
                 try aoq.command(event)
-            case "aoq.error": end(); status = "AOQ 暂不可用，请检查主机配置后重连"
+            case "aoq.error": end(); status = L10n.text("AOQ 暂不可用，请检查主机配置后重连")
             default:
-                guard aoqRuntime else { throw WireError("AOQ 返回不兼容的控制消息") }
+                guard aoqRuntime else { throw WireError(L10n.text("AOQ 返回不兼容的控制消息")) }
                 try receiveHost(value)
             }
             return
@@ -346,7 +346,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                 if aoqRuntime { try aoq?.interruptPlayback() } else { audio.clear(try Wire.identity(value)) }
             case "playback.terminal":
                 if !aoqRuntime { audio.terminal(try Wire.identity(value)) }
-            case "playback.alert": status = "播放暂时中断"
+            case "playback.alert": status = L10n.text("播放暂时中断")
             case "clock.ping":
                 command(["type": "clock.pong", "ping_id": try Wire.identifier(value["ping_id"]), "t_render_ms": Wire.renderMS])
             case "caption":
@@ -363,8 +363,8 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                    let id = value["pending_confirmation_id"] as? String, !id.isEmpty, id.unicodeScalars.count <= 128 {
                     approvals.append(ApprovalCard(id: id, executor: nil,
                         project: value["pending_workspace_display_name"] as? String ?? project,
-                        title: value["pending_session_title"] as? String ?? "确认项目",
-                        detail: value["pending_action"] as? String ?? "请确认这个项目",
+                        title: value["pending_session_title"] as? String ?? L10n.text("确认项目"),
+                        detail: value["pending_action"] as? String ?? L10n.text("请确认这个项目"),
                         decisions: ["accept", "decline"], deadline: deadline(value["pending_expires_in_seconds"]),
                         busy: value["pending_confirmation_busy"] as? Bool != false))
                 }
@@ -398,24 +398,24 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                 guard let id = value["id"] as? String, id == dictationID, dictationTranscribing else { return }
                 if let text = value["text"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, text.utf16.count <= 4000 {
                     inputDraft = dictationBase.isEmpty ? text : dictationBase + "\n" + text
-                    inputNotice = "可编辑后发送"
-                } else { inputNotice = "未能识别语音，请重试。原草稿已保留。" }
+                    inputNotice = L10n.text("可编辑后发送")
+                } else { inputNotice = L10n.text("未能识别语音，请重试。原草稿已保留。") }
                 cancelDictation()
             case "client.command_result":
                 if let id = value["request_id"] as? String {
                     if dictationCommands.remove(id) != nil, value["status"] as? String != "applied" {
-                        cancelDictation(); inputNotice = "主机未接受语音识别，请重试"
+                        cancelDictation(); inputNotice = L10n.text("主机未接受语音识别，请重试")
                     }
                     if let request = textRequest, request.id == id {
                         textTimeout?.cancel(); textRequest = nil; textSending = false
                         if value["status"] as? String == "applied" {
                             if inputDraft.trimmingCharacters(in: .whitespacesAndNewlines) == request.text { inputDraft = "" }
-                        } else { inputNotice = "消息未被接受，草稿已保留" }
+                        } else { inputNotice = L10n.text("消息未被接受，草稿已保留") }
                     }
                 }
                 if let id = value["request_id"] as? String, approvalRequests.removeValue(forKey: id) != nil {
                     let result = value["status"] as? String ?? "unknown"
-                    commandStatus = result == "applied" ? "已发送，等待 Mac 确认" : (result == "rejected" ? "Mac 未接受这次操作" : result == "stale" ? "操作已过期，请等待新的确认" : "Mac 返回：\(result)")
+                    commandStatus = result == "applied" ? L10n.text("已发送，等待 Mac 确认") : (result == "rejected" ? L10n.text("Mac 未接受这次操作") : result == "stale" ? L10n.text("操作已过期，请等待新的确认") : L10n.text("Mac 返回：{0}", result))
                 }
             default: break // Unknown display events have no authority.
             }
@@ -444,7 +444,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
             if decision == "acceptForSession" { payload["scope"] = "session" }
         } else { payload = ["type": "project.confirmation_decision", "proposal_id": card.id, "confirmed": decision == "accept"] }
         submitted.insert(card.id)
-        commandStatus = "正在提交你的决定…"
+        commandStatus = L10n.text("正在提交你的决定…")
         command(payload, approval: card.id)
     }
     @discardableResult
@@ -457,11 +457,11 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
             if let approval { approvalRequests[id] = approval }
             enqueue(.string(String(decoding: data, as: UTF8.self)), bytes: data.count)
             return id
-        } catch { failed(code: 0, reason: "暂时无法发送操作"); return nil }
+        } catch { failed(code: 0, reason: L10n.text("暂时无法发送操作")); return nil }
     }
     private func enqueue(_ message: URLSessionWebSocketTask.Message, bytes: Int) {
         guard connected, let socket else { return }
-        guard queuedBytes + bytes <= 131072, queue.count < 128 else { failed(code: 0, reason: "网络出现积压，正在重新连接"); return }
+        guard queuedBytes + bytes <= 131072, queue.count < 128 else { failed(code: 0, reason: L10n.text("网络出现积压，正在重新连接")); return }
         queue.append((message, bytes)); queuedBytes += bytes
         #if DEBUG
         if case .data = message {
@@ -478,7 +478,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                 self.sendWatchdog = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(5))
                     guard !Task.isCancelled, let self, self.generation == id else { return }
-                    self.failed(code: 0, reason: "音频上传暂时中断")
+                    self.failed(code: 0, reason: L10n.text("音频上传暂时中断"))
                 }
                 do {
                     try await socket.send(item.0)
@@ -492,7 +492,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                 catch {
                     try? await Task.sleep(for: .milliseconds(100))
                     guard self.generation == id, !Task.isCancelled else { return }
-                    self.failed(code: socket.closeCode.rawValue, reason: "发送失败，正在尝试恢复"); return
+                    self.failed(code: socket.closeCode.rawValue, reason: L10n.text("发送失败，正在尝试恢复")); return
                 }
                 guard self.generation == id else { return }
                 self.sendWatchdog?.cancel(); self.queue.removeFirst(); self.queuedBytes -= item.1
@@ -508,12 +508,12 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
                 let deadline = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(5))
                     guard !Task.isCancelled, let self, self.generation == id else { return }
-                    self.end(); self.status = "主机连接中断，AOQ 通话已停止"
+                    self.end(); self.status = L10n.text("主机连接中断，AOQ 通话已停止")
                 }
                 socket.sendPing { [weak self] error in
                     deadline.cancel()
                     guard error != nil else { return }
-                    Task { @MainActor in guard let self, self.generation == id else { return }; self.end(); self.status = "主机连接中断，AOQ 通话已停止" }
+                    Task { @MainActor in guard let self, self.generation == id else { return }; self.end(); self.status = L10n.text("主机连接中断，AOQ 通话已停止") }
                 }
                 // Ping callbacks own their timeout; do not let an old timeout affect a new connection.
                 try? await Task.sleep(for: .seconds(5))
@@ -522,7 +522,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
     }
     private func clearConnection() {
         dictationTask?.cancel(); dictationID = nil; dictationHolding = false; dictationRecording = false; dictationTranscribing = false; dictationCommands.removeAll()
-        if textSending { inputNotice = "连接中断，草稿已保留。请先查看回复，避免重复发送。" }
+        if textSending { inputNotice = L10n.text("连接中断，草稿已保留。请先查看回复，避免重复发送。") }
         textTimeout?.cancel(); textRequest = nil; textSending = false; editableInput = false; pipeline = nil
         pairingTask?.cancel(); pairingTask = nil; pairingSession?.invalidateAndCancel(); pairingSession = nil; pairing = false
         generation = UUID(); connected = false; connecting = false; connection = nil
@@ -539,12 +539,12 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
     }
     private func failed(code: Int, reason: String) {
         clearConnection()
-        let refusal = [4003: "连接密钥不正确，请在设置中检查", 4006: "客户端与 Mac 服务版本不兼容", 4009: "另一台设备正在通话，请先断开它"]
+        let refusal = [4003: L10n.text("连接密钥不正确，请在设置中检查"), 4006: L10n.text("客户端与 Mac 服务版本不兼容"), 4009: L10n.text("另一台设备正在通话，请先断开它")]
         if let message = refusal[code] { requested = false; status = message; return }
-        status = code == 4008 ? "正在刷新连接" : reason
+        status = code == 4008 ? L10n.text("正在刷新连接") : reason
         guard requested else { return }
         guard let delay = recovery.nextDelay(atMS: Wire.renderMS) else {
-            requested = false; status = "连接未恢复，请检查网络后重新连接。"; return
+            requested = false; status = L10n.text("连接未恢复，请检查网络后重新连接。"); return
         }
         connecting = true
         retryTask = Task { [weak self] in
@@ -556,7 +556,7 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
     func end() {
         connectionRevision = UUID()
         requested = false; retryTask?.cancel(); retryTask = nil
-        clearConnection(); status = "已断开"
+        clearConnection(); status = L10n.text("已断开")
     }
     func startVoice() async {
         guard connected, !voice, !voiceStarting, !dictationRecording, !dictationTranscribing, !textSending else { return }
@@ -566,30 +566,30 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
         let id = generation
         let granted = await AVAudioApplication.requestRecordPermission()
         guard generation == id, connected, UIApplication.shared.applicationState == .active else { return }
-        guard granted else { voiceStarting = false; status = "请在 iPhone 设置 → 隐私与安全性 → 麦克风中允许 Nova 使用麦克风。"; return }
+        guard granted else { voiceStarting = false; status = L10n.text("请在 iPhone 设置 → 隐私与安全性 → 麦克风中允许 Nova 使用麦克风。"); return }
         if aoqChat {
             guard let connection else { voiceStarting = false; return }
             let request = UUID().uuidString; aoqRequest = request
             do {
                 let data = try JSONSerialization.data(withJSONObject: ["type": "aoq.connect", "connection_id": connection, "request_id": request])
                 enqueue(.string(String(decoding: data, as: UTF8.self)), bytes: data.count)
-                status = "正在连接 AOQ"
+                status = L10n.text("正在连接 AOQ")
                 readyWatchdog = Task { [weak self] in
                     try? await Task.sleep(for: .seconds(25))
                     guard !Task.isCancelled, let self, self.generation == id, self.voiceStarting else { return }
-                    self.end(); self.status = "AOQ 启动超时，请重新连接"
+                    self.end(); self.status = L10n.text("AOQ 启动超时，请重新连接")
                 }
-            } catch { end(); status = "AOQ 请求失败" }
+            } catch { end(); status = L10n.text("AOQ 请求失败") }
             return
         }
-        do { try audio.start(threshold: speechThreshold); voiceStarting = false; voice = true; muted = false; speaker = false; status = "正在聆听" }
+        do { try audio.start(threshold: speechThreshold); voiceStarting = false; voice = true; muted = false; speaker = false; status = L10n.text("正在聆听") }
         catch { end(); status = error.localizedDescription }
     }
     func toggleMute() {
         guard voice, !voiceStarting else { return }
         do {
             if aoqChat { try aoq?.mute(!muted) } else { try audio.mute(!muted) }; muted.toggle()
-            status = muted ? "麦克风已静音" : "正在聆听"
+            status = muted ? L10n.text("麦克风已静音") : L10n.text("正在聆听")
         }
         catch { end(); status = error.localizedDescription }
     }
@@ -601,6 +601,6 @@ private final class SocketDelegate: NSObject, URLSessionWebSocketDelegate, @unch
     func suspendAudio() {
         guard voice || voiceStarting else { return } // Permission UI may make a read-only connection inactive.
         end() // Stop capture and use the existing host connection-release boundary.
-        status = "通话已结束"
+        status = L10n.text("通话已结束")
     }
 }

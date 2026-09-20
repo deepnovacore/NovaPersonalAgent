@@ -1,3 +1,4 @@
+import {t, localizeDocument} from '../src/renderer/locale.mjs'
 import {createPhonePanel} from '../src/renderer/phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from '../src/renderer/frontend-usage.mjs'
 import assert from 'node:assert/strict'
@@ -71,10 +72,11 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    t, localizeDocument, createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
     createKnowledgePanel: () => ({render() {}}),
     document: {
+      documentElement: {}, createTreeWalker: () => ({nextNode: () => null}),
       querySelector: node, querySelectorAll: () => [], getElementById: id => node(`#${id}`),
       createElement: () => ({children: [], append(...items) {this.children.push(...items)}}), addEventListener() {},
     },
@@ -909,14 +911,14 @@ test('one save names any rejected secret by its panel label', () => {
   assert.match(script, /tavilyApiKey: 'Tavily',/)
   assert.doesNotMatch(script, /codexApiKey: 'Codex',/)
   assert.match(script, /arkApiKey: 'Ark',/)
-  assert.match(script, /doubaoBigmodelApiKey: '火山语音',/)
+  assert.match(script, /doubaoBigmodelApiKey: t\("火山语音"\),/)
   // Each exact queued request retains its own rejection list. The renderer
   // names only keys this save submitted, so a coalesced neighbour cannot make
   // a different field's error appear in its status line.
   assert.match(script, /if \(result\.rejectedSecrets && result\.rejectedSecrets\.length\) \{/)
   assert.match(
     script,
-    /statusLabel\.textContent = `部分密钥未保存\(含非法字符\): \$\{labels\.join\('、'\)\}`/,
+    /statusLabel\.textContent = t\("部分密钥未保存\(含非法字符\): \{0\}", labels\.join\('、'\)\)/,
   )
   assert.match(
     script,

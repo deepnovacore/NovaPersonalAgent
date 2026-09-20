@@ -1,54 +1,55 @@
+import {t} from './locale.mjs'
 const LABELS = Object.freeze({
-  booting: 'Nova Audio Agent 正在启动',
-  inactive: '语音未启用',
-  idle: '语音已启用，等待输入',
-  candidate: '检测到可能的语音',
-  listening: '正在聆听',
-  speaking: 'Nova Audio Agent 正在说话',
-  muted: '已闭麦，暂停接收麦克风输入',
-  'permission-denied': '麦克风权限被拒绝',
-  'microphone-restricted': '麦克风被系统策略限制',
-  'microphone-no-device': '未检测到麦克风输入设备',
-  'microphone-busy': '麦克风正被其他应用占用',
-  'microphone-unavailable': '当前环境的麦克风采集不可用',
-  'audio-pipeline-error': '麦克风音频管线启动失败',
-  disconnected: 'Nova Audio Agent 已断开',
-  reconnecting: 'Nova Audio Agent 正在重新连接',
-  'configuration-required': 'Nova Audio Agent 需要补全配置',
-  'authentication-failed': 'Nova Audio Agent 鉴权失败',
-  'backend-unavailable': 'Nova Audio Agent 后台不可用',
-  error: 'Nova Audio Agent 发生错误',
+  booting: t("Nova Audio Agent 正在启动"),
+  inactive: t("语音未启用"),
+  idle: t("语音已启用，等待输入"),
+  candidate: t("检测到可能的语音"),
+  listening: t("正在聆听"),
+  speaking: t("Nova Audio Agent 正在说话"),
+  muted: t("已闭麦，暂停接收麦克风输入"),
+  'permission-denied': t("麦克风权限被拒绝"),
+  'microphone-restricted': t("麦克风被系统策略限制"),
+  'microphone-no-device': t("未检测到麦克风输入设备"),
+  'microphone-busy': t("麦克风正被其他应用占用"),
+  'microphone-unavailable': t("当前环境的麦克风采集不可用"),
+  'audio-pipeline-error': t("麦克风音频管线启动失败"),
+  disconnected: t("Nova Audio Agent 已断开"),
+  reconnecting: t("Nova Audio Agent 正在重新连接"),
+  'configuration-required': t("Nova Audio Agent 需要补全配置"),
+  'authentication-failed': t("Nova Audio Agent 鉴权失败"),
+  'backend-unavailable': t("Nova Audio Agent 后台不可用"),
+  error: t("Nova Audio Agent 发生错误"),
 })
 
 // The compact line is the only status text the transparent orb still shows, so
 // keep its expected states concise and fall back to readable copy if a future
 // state reaches the renderer before this table is extended.
 const COMPACT_LABELS = Object.freeze({
-  booting: '启动中',
-  inactive: '未启用',
-  idle: '待命',
-  candidate: '检测中',
-  listening: '聆听中',
-  speaking: '回复中',
-  muted: '已闭麦',
-  'permission-denied': '麦克风未授权',
-  'microphone-restricted': '麦克风被限制',
-  'microphone-no-device': '无麦克风',
-  'microphone-busy': '麦克风被占用',
-  'microphone-unavailable': '麦克风不可用',
-  'audio-pipeline-error': '音频管线错误',
-  disconnected: '已断开',
-  reconnecting: '重连中',
-  'configuration-required': '配置不完整',
-  'authentication-failed': '鉴权失败',
-  'backend-unavailable': '后台不可用',
-  error: '出错',
+  booting: t("启动中"),
+  inactive: t("未启用"),
+  idle: t("待命"),
+  candidate: t("检测中"),
+  listening: t("聆听中"),
+  speaking: t("回复中"),
+  muted: t("已闭麦"),
+  'permission-denied': t("麦克风未授权"),
+  'microphone-restricted': t("麦克风被限制"),
+  'microphone-no-device': t("无麦克风"),
+  'microphone-busy': t("麦克风被占用"),
+  'microphone-unavailable': t("麦克风不可用"),
+  'audio-pipeline-error': t("音频管线错误"),
+  disconnected: t("已断开"),
+  reconnecting: t("重连中"),
+  'configuration-required': t("配置不完整"),
+  'authentication-failed': t("鉴权失败"),
+  'backend-unavailable': t("后台不可用"),
+  error: t("出错"),
 })
 
 export function compactOrbLabel(name) {
   return typeof name === 'string' && Object.hasOwn(COMPACT_LABELS, name)
     ? COMPACT_LABELS[name]
-    : '状态异常'
+    : t("状态异常")
 }
 
 // The single source of truth for the `data-state` vocabulary: the visual layer
@@ -59,7 +60,7 @@ export const ORB_STATE_NAMES = Object.freeze(Object.keys(LABELS))
 // label carries its own navigation hint there; other platforms keep the
 // shorter copy above.
 const WINDOWS_PERMISSION_DENIED_LABEL =
-  '麦克风权限被拒绝(请在 系统设置 → 隐私 → 麦克风 中允许桌面应用)'
+  t("麦克风权限被拒绝(请在 系统设置 → 隐私 → 麦克风 中允许桌面应用)")
 
 export function deriveOrbState(input) {
   const microphone = input.microphone
@@ -94,17 +95,17 @@ export function deriveOrbState(input) {
   const pendingSeconds = Number.isFinite(input.pendingExpiresInSeconds)
     ? Math.ceil(Math.max(0, input.pendingExpiresInSeconds)).toFixed(0)
     : ''
-  const pendingExpiry = pendingSeconds === '' ? '' : `${pendingSeconds} 秒后自动取消`
+  const pendingExpiry = pendingSeconds === '' ? '' : t("{0} 秒后自动取消", pendingSeconds)
   const pendingOperation = pendingConfirmation ? confirmationOperation(input) : ''
   const pendingStatus = pendingConfirmation
-    ? ['尚未执行', pendingExpiry].filter(Boolean).join(' · ')
+    ? [t("尚未执行"), pendingExpiry].filter(Boolean).join(' · ')
     : ''
   const confirmationCompactStatus = pendingConfirmation
     ? input.pendingConfirmationBusy === true
-      ? '处理中'
+      ? t("处理中")
       : pendingSeconds !== ''
-        ? `${pendingSeconds} 秒`
-        : '待确认'
+        ? t("{0} 秒", pendingSeconds)
+        : t("待确认")
     : ''
   const project = pendingConfirmation
     ? [
@@ -112,11 +113,11 @@ export function deriveOrbState(input) {
       pendingStatus,
     ].filter(Boolean)
     : [
-      input.workspace ? `工作区 ${input.workspace}` : '',
+      input.workspace ? t("工作区 {0}", input.workspace) : '',
       input.session ? `Session ${input.session}` : '',
     ].filter(Boolean)
   const target = [input.workspace, input.session].filter(Boolean).join(' · ')
-  const projectLabel = target ? `当前对话 · ${target}` : ''
+  const projectLabel = target ? t("当前对话 · {0}", target) : ''
   const codexMode = pendingConfirmation
     ? 'confirmation'
     : projectLabel === '' ? 'hidden' : 'project'
@@ -128,25 +129,25 @@ export function deriveOrbState(input) {
     name,
     label,
     statusLine: pendingConfirmation
-      ? '需要你的确认'
-      : name === 'idle' && input.codex === 'preparing' ? '正在安排任务' : compactOrbLabel(name),
+      ? t("需要你的确认")
+      : name === 'idle' && input.codex === 'preparing' ? t("正在安排任务") : compactOrbLabel(name),
     codexLabel,
     projectLabel,
     codexMode,
     sessionWorking: codexMode === 'project' && !!input.session && input.codex === 'working'
       && (input.tasks ?? []).some(task => task.project === input.workspace && task.phase === 'working'),
     accessibleCodexLabel: pendingConfirmation
-      ? `${pendingOperation}；尚未执行；等待你的确认`
+      ? t("{0}；尚未执行；等待你的确认", pendingOperation)
       : codexLabel,
     confirmationVisible: pendingConfirmation,
     confirmationOperation: pendingOperation,
     confirmationStatus: pendingStatus,
     confirmationCompactStatus,
     aecLabel: input.audioMode === 'voice_processing_io'
-      ? '系统级 AEC'
+      ? t("系统级 AEC")
       : input.audioMode === 'browser_aec'
-        ? '浏览器 AEC'
-        : 'AEC 未启用',
+        ? t("浏览器 AEC")
+        : t("AEC 未启用"),
     shellExpanded: input.shellExpanded === true,
   })
 }
@@ -169,16 +170,16 @@ function confirmationOperation(input) {
   const workspace = typeof input.pendingWorkspace === 'string' ? input.pendingWorkspace : ''
   const session = typeof input.pendingSession === 'string' ? input.pendingSession : ''
   if (input.pendingAction === 'create_workspace' && workspace) {
-    return `创建工作区 “${workspace}”`
+    return t("创建工作区 “{0}”", workspace)
   }
   if (input.pendingAction === 'reuse_workspace' && workspace) {
-    return `使用现有工作区 “${workspace}”并开始任务`
+    return t("使用现有工作区 “{0}”并开始任务", workspace)
   }
   if (input.pendingAction === 'select_workspace' && workspace) {
-    return `切换到工作区 “${workspace}”`
+    return t("切换到工作区 “{0}”", workspace)
   }
   if (input.pendingAction === 'resume_session' && workspace && session) {
-    return `恢复 “${workspace} / ${session}”`
+    return t("恢复 “{0} / {1}”", workspace, session)
   }
-  return '项目操作等待确认'
+  return t("项目操作等待确认")
 }

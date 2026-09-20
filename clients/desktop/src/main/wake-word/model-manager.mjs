@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   promises as fs,
   writeFileSync,
 } from 'node:fs'
@@ -34,7 +35,7 @@ const ARCHIVE_FILES = new Set([
   WAKE_WORD_MODEL_FILES.joiner,
   WAKE_WORD_MODEL_FILES.tokens,
 ])
-export const WAKE_WORD_KEYWORDS = 'n ǐ h ǎo x īng h é @你好星核\n'
+export const WAKE_WORD_KEYWORDS = 'n ǐ h ǎo x īng h é @你好星核\nHH AY1 N OW1 V AH0 @HI_NOVA\n'
 
 export function validateKeywords(directory) {
   const tokens = new Set(readFileSync(resolve(directory, WAKE_WORD_MODEL_FILES.tokens), 'utf8').split(/\r?\n/).map(line => line.trim().split(/\s+/)[0]))
@@ -43,12 +44,21 @@ export function validateKeywords(directory) {
   }
 }
 
-const REQUIRED_FILES = new Set(Object.values(WAKE_WORD_MODEL_FILES))
 const preparations = new Map()
 
+// A predicate: any unusable cache reports incomplete so the caller re-downloads rather than failing hard.
 function complete(directory) {
-  if (![...REQUIRED_FILES].every(file => existsSync(resolve(directory, file)))) return false
-  return readFileSync(resolve(directory, WAKE_WORD_MODEL_FILES.keywords), 'utf8') === WAKE_WORD_KEYWORDS
+  if (![...ARCHIVE_FILES].every(file => existsSync(resolve(directory, file)))) return false
+  try {
+    validateKeywords(directory)
+    const file = resolve(directory, WAKE_WORD_MODEL_FILES.keywords)
+    if (!existsSync(file) || readFileSync(file, 'utf8') !== WAKE_WORD_KEYWORDS) {
+      const temporary = `${file}.${process.pid}.${threadId}.tmp`
+      writeFileSync(temporary, WAKE_WORD_KEYWORDS, {encoding: 'utf8', mode: 0o600})
+      renameSync(temporary, file)
+    }
+    return true
+  } catch { return false }
 }
 
 async function sha256(path) {

@@ -1,3 +1,6 @@
+import {t} from './locale.mjs'
+import {localizeDocument} from './locale.mjs'
+localizeDocument(document)
 import {personalMemoryBoard} from './personal-memory-board.mjs'
 import {boardTabForKey} from './channel-tabs.mjs'
 import {
@@ -51,7 +54,7 @@ function itemContent(raw) {
 
 function boardTime(item) {
   return item.historical && Number.isFinite(item.recorded_at_ms)
-    ? `历史 · ${new Date(item.recorded_at_ms).toLocaleString()}`
+    ? t("历史 · {0}", new Date(item.recorded_at_ms).toLocaleString())
     : `t=${Number(item.ts).toFixed(1)}s`
 }
 
@@ -80,7 +83,7 @@ function renderItem(item, conversation = false) {
   if (item.truncated) {
     const truncated = document.createElement('span')
     truncated.className = 'tag tag-truncated'
-    truncated.textContent = '已截断'
+    truncated.textContent = t("已截断")
     meta.append(truncated)
   }
   const content = document.createElement('pre')
@@ -91,11 +94,11 @@ function renderItem(item, conversation = false) {
     const role = payload?.role === 'user' || item.trust === 'trusted_user' ? 'user' : 'assistant'
     article.className = `item chat-message chat-${role}`
     article.tabIndex = 0
-    article.setAttribute('aria-label', role === 'user' ? '你的消息，右键或 Shift+F10 查看详情' : 'Nova 的消息，右键或 Shift+F10 查看详情')
+    article.setAttribute('aria-label', role === 'user' ? t("你的消息，右键或 Shift+F10 查看详情") : t("Nova 的消息，右键或 Shift+F10 查看详情"))
     const text = document.createElement('div')
     text.className = 'chat-text'
     text.textContent = typeof payload?.text === 'string' ? payload.text
-      : typeof payload === 'string' ? payload : '非文本消息'
+      : typeof payload === 'string' ? payload : t("非文本消息")
     const debug = document.createElement('div')
     debug.className = 'chat-debug'
     debug.hidden = true
@@ -133,13 +136,13 @@ function renderChannel(channel, index) {
   count.className = 'channel-count'
   count.textContent = channel.item_count > shown ? `${shown} / ${channel.item_count}` : String(channel.item_count)
   count.setAttribute('aria-label', channel.item_count > shown
-    ? `显示最近 ${shown} 条，共 ${channel.item_count} 条`
-    : `共 ${channel.item_count} 条`)
+    ? t("显示最近 {0} 条，共 {1} 条", shown, channel.item_count)
+    : t("共 {0} 条", channel.item_count))
   header.append(title, count)
 
   const summary = document.createElement('p')
   summary.className = 'channel-summary'
-  summary.textContent = channel.summary || '尚未生成频道摘要'
+  summary.textContent = channel.summary || t("尚未生成频道摘要")
 
   const itemsRoot = document.createElement('div')
   itemsRoot.className = channel.name === 'conversation' ? 'channel-items chat-messages' : 'channel-items'
@@ -147,7 +150,7 @@ function renderChannel(channel, index) {
   if (channel.name === 'conversation') {
     const older = document.createElement('button')
     older.className = 'history-load'
-    older.textContent = channel.has_more ? '向上滚动加载更早记录' : '已到可用记录的开头'
+    older.textContent = channel.has_more ? t("向上滚动加载更早记录") : t("已到可用记录的开头")
     older.disabled = !channel.has_more
     older.addEventListener('click', () => { void loadEarlier() })
     itemsRoot.append(older)
@@ -162,7 +165,7 @@ function renderChannel(channel, index) {
     history.open = historyExpanded
     history.addEventListener('toggle', () => { historyExpanded = history.open })
     const label = document.createElement('summary')
-    label.textContent = `重启前的历史记录（最近 ${historical.length} 条）`
+    label.textContent = t("重启前的历史记录（最近 {0} 条）", historical.length)
     const historyItems = document.createElement('div')
     historyItems.className = 'chat-messages'
     for (const item of historical) historyItems.append(renderItem(item, true))
@@ -172,13 +175,13 @@ function renderChannel(channel, index) {
   if (channel.name === 'conversation' && channel.historical_through_seq) {
     const label = document.createElement('p')
     label.className = 'conversation-boundary'
-    label.textContent = '本次连接'
+    label.textContent = t("本次连接")
     itemsRoot.append(label)
   }
   if (!current.length) {
     const empty = document.createElement('p')
     empty.className = 'empty'
-    empty.textContent = channel.name === 'conversation' ? '本次连接暂无对话' : '暂无记录'
+    empty.textContent = channel.name === 'conversation' ? t("本次连接暂无对话") : t("暂无记录")
     itemsRoot.append(empty)
   }
   for (const item of current) itemsRoot.append(renderItem(item, channel.name === 'conversation'))
@@ -298,13 +301,13 @@ async function load() {
   if (inFlight || pageInFlight) return
   const owner = loadOwnership
   inFlight = true
-  statusLabel.textContent = '加载中…'
+  statusLabel.textContent = t("加载中…")
   refreshButton.disabled = true
   try {
     const payload = await window.novaAudioAgentDesktop.memoryBoard.request()
     if (owner !== loadOwnership || document.hidden) return
     if (!payload || payload.error || !Array.isArray(payload.channels) || !validDiagnostics(payload)) {
-      statusLabel.textContent = payload?.error === 'timeout' ? '后端无响应' : '加载失败'
+      statusLabel.textContent = payload?.error === 'timeout' ? t("后端无响应") : t("加载失败")
       return
     }
     const sameGeneration = latestPayload?.backend_generation === payload.backend_generation && latestPayload?.conversation_epoch === payload.conversation_epoch
@@ -343,14 +346,14 @@ async function load() {
     if (payload.diagnostics.records.length === 0) {
       const empty = document.createElement('p')
       empty.className = 'empty'
-      empty.textContent = '暂无诊断记录'
+      empty.textContent = t("暂无诊断记录")
       diagnosticsRoot.append(empty)
     }
     restoreBoardScrollPositions(document, scrollPositions)
-    statusLabel.textContent = `更新于 ${new Date().toLocaleTimeString()}`
+    statusLabel.textContent = t("更新于 {0}", new Date().toLocaleTimeString())
   } catch {
     if (owner !== loadOwnership || document.hidden) return
-    statusLabel.textContent = '加载失败'
+    statusLabel.textContent = t("加载失败")
   } finally {
     refreshButton.disabled = false
     inFlight = false
@@ -379,7 +382,7 @@ async function loadEarlier() {
     const payload = await window.novaAudioAgentDesktop.memoryBoard.request({channel: 'conversation', before_seq: cursor})
     if (owner !== loadOwnership || payload?.backend_generation !== generation || latestPayload?.backend_generation !== generation || payload?.conversation_epoch !== epoch || latestPayload?.conversation_epoch !== epoch) return
     const page = payload.channels?.find(c => c.name === 'conversation')
-    if (!page) { statusLabel.textContent = '历史记录加载失败，向上滚动重试'; return }
+    if (!page) { statusLabel.textContent = t("历史记录加载失败，向上滚动重试"); return }
     const current = latestPayload.channels.find(c => c.name === 'conversation')
     if (!current || current.next_before_seq !== cursor || page.retention_revision !== current.retention_revision) return
     const positions = captureBoardScrollPositions(document)
@@ -388,7 +391,7 @@ async function loadEarlier() {
     current.next_before_seq = page.next_before_seq
     renderActiveChannelCard()
     restoreBoardScrollPositions(document, positions)
-  } catch { statusLabel.textContent = '历史记录加载失败，向上滚动重试' }
+  } catch { statusLabel.textContent = t("历史记录加载失败，向上滚动重试") }
   finally { pageInFlight = false }
 }
 
@@ -398,9 +401,9 @@ async function copyBoardJson() {
   copyJsonButton.disabled = true
   try {
     const result = await window.novaAudioAgentDesktop.memoryBoard.copyJson()
-    statusLabel.textContent = result?.copied ? '已复制 JSON' : '复制失败'
+    statusLabel.textContent = result?.copied ? t("已复制 JSON") : t("复制失败")
   } catch {
-    statusLabel.textContent = '复制失败'
+    statusLabel.textContent = t("复制失败")
   } finally {
     copyInFlight = false
     copyJsonButton.disabled = latestPayload === null
@@ -413,10 +416,10 @@ async function exportBoard() {
   exportButton.disabled = true
   try {
     const result = await window.novaAudioAgentDesktop.memoryBoard.export()
-    if (result?.saved) statusLabel.textContent = `已导出：${result.saved}`
-    else if (result?.error) statusLabel.textContent = '导出失败'
+    if (result?.saved) statusLabel.textContent = t("已导出：{0}", result.saved)
+    else if (result?.error) statusLabel.textContent = t("导出失败")
   } catch {
-    statusLabel.textContent = '导出失败'
+    statusLabel.textContent = t("导出失败")
   } finally {
     exportInFlight = false
     exportButton.disabled = latestPayload === null
@@ -430,18 +433,18 @@ async function clearConversation() {
   clearButton.disabled = true
   copyJsonButton.disabled = true
   exportButton.disabled = true
-  statusLabel.textContent = '等待清除确认…'
+  statusLabel.textContent = t("等待清除确认…")
   try {
     const result = await window.novaAudioAgentDesktop.memoryBoard.clear()
     if (result?.cleared) {
       latestPayload = null
       channelsRoot.replaceChildren()
       channelTabsRoot.replaceChildren()
-      statusLabel.textContent = '近期会话记录已清除'
-    } else if (result?.canceled) statusLabel.textContent = '已取消清除'
-    else statusLabel.textContent = '无法确认清除结果，请刷新检查'
+      statusLabel.textContent = t("近期会话记录已清除")
+    } else if (result?.canceled) statusLabel.textContent = t("已取消清除")
+    else statusLabel.textContent = t("无法确认清除结果，请刷新检查")
   } catch {
-    statusLabel.textContent = '无法确认清除结果，请刷新检查'
+    statusLabel.textContent = t("无法确认清除结果，请刷新检查")
   } finally {
     clearInFlight = false
     clearButton.disabled = false

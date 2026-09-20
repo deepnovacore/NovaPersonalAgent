@@ -189,6 +189,7 @@ inputs are intentionally excluded.
 | `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | No | qwen-plus | Surrogate model. |
 | `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | No | qwen-flash | Memory compressor model. |
 | `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | No | integrated | Product pipeline shape: integrated or cascaded. |
+| `NOVA_AUDIO_AGENT_LANGUAGE` | `core` | No | zh-CN | AI system prompt language: zh-CN or en; desktop supplies its saved preference. |
 | `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | No | false | Attach a default-camera frame to user turns on verified cascaded VLMs. |
 | `NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID` | `camera` | No | None | Exact monitor camera device ID; empty uses the default device. |
 | `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` | `camera` | No | true | Enable independent Vision monitoring. |

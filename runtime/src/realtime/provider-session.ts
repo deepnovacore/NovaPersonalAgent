@@ -1,3 +1,4 @@
+import type {PromptLanguage} from './prompt-language.js'
 import { jsonValueSchema } from '../core/events.js'
 import { canonicalJson } from '../text/canonical-json.js'
 import {
@@ -60,6 +61,8 @@ export interface RealtimeProviderSessionOptions {
 class InternalProtocolError extends RealtimeProtocolError {}
 
 export class RealtimeProviderSession {
+  async setLanguage(language?: PromptLanguage): Promise<void> { await this.#provider.setLanguage?.(language) }
+
   readonly #provider: RealtimeProvider
   #state: RealtimeProviderSessionState = 'new'
   #identity: SessionIdentity | null = null

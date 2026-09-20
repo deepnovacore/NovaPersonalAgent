@@ -1,3 +1,6 @@
+import {t} from './locale.mjs'
+import {localizeDocument} from './locale.mjs'
+localizeDocument(document)
 import {createPhonePanel} from './phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from './frontend-usage.mjs'
 import {createCapabilitiesEditor} from './capabilities-editor.mjs'
@@ -31,26 +34,26 @@ const SECRET_LABELS = {
   dashscopeApiKey: 'DashScope',
   tavilyApiKey: 'Tavily',
   arkApiKey: 'Ark',
-  deepseekApiKey: 'DeepSeek（官方）',
-  doubaoBigmodelApiKey: '火山语音',
+  deepseekApiKey: t("DeepSeek（官方）"),
+  doubaoBigmodelApiKey: t("火山语音"),
 }
 const WORKSPACE_STATUS_TEXT = Object.freeze({
-  opened: '已打开当前工作区',
-  open_failed: '系统未能打开当前工作区',
-  cleared: '已清空工作区',
-  cancelled: '已取消',
-  not_managed: '当前工作区不在 Nova 工作区根目录中',
-  empty: '没有可清空的工作区',
-  busy: '另一项保存或维护操作正在进行',
-  stop_failed: '后台未能安全停止，未清空工作区',
-  clear_failed: '工作区清空未完整完成，可重试清理',
-  restart_failed: '工作区已处理，但后台恢复失败，请重试连接',
-  clear_and_restart_failed: '工作区清理未完整完成，后台恢复也失败；请重启后重试清理',
-  rollback_pending: '工作区原内容尚未安全恢复，后台保持停止；请先处理回滚',
-  cleanup_pending: '工作区清理仍在进行，请稍后重试',
-  unavailable: '工作区维护状态暂时不可用',
-  recovered: '工作区恢复完成，后台已开始重新连接',
-  recovery_failed: '工作区恢复尚未完成，后台保持停止；请重试恢复',
+  opened: t("已打开当前工作区"),
+  open_failed: t("系统未能打开当前工作区"),
+  cleared: t("已清空工作区"),
+  cancelled: t("已取消"),
+  not_managed: t("当前工作区不在 Nova 工作区根目录中"),
+  empty: t("没有可清空的工作区"),
+  busy: t("另一项保存或维护操作正在进行"),
+  stop_failed: t("后台未能安全停止，未清空工作区"),
+  clear_failed: t("工作区清空未完整完成，可重试清理"),
+  restart_failed: t("工作区已处理，但后台恢复失败，请重试连接"),
+  clear_and_restart_failed: t("工作区清理未完整完成，后台恢复也失败；请重启后重试清理"),
+  rollback_pending: t("工作区原内容尚未安全恢复，后台保持停止；请先处理回滚"),
+  cleanup_pending: t("工作区清理仍在进行，请稍后重试"),
+  unavailable: t("工作区维护状态暂时不可用"),
+  recovered: t("工作区恢复完成，后台已开始重新连接"),
+  recovery_failed: t("工作区恢复尚未完成，后台保持停止；请重试恢复"),
 })
 
 const secretRevisions = createSecretRevisions(SECRET_KEYS)
@@ -159,7 +162,7 @@ document.getElementById('coding-executor-configure').addEventListener('click', (
 const capabilitySettings = ['embeddingProvider', 'embeddingModel', 'knowledgePath', 'capabilitiesConfigPath'].map(key => document.getElementById(key))
 const knowledgePanel = createKnowledgePanel({document, action: payload => api.knowledgeAction(payload)})
 
-function populatePresetOptions(select, presets, customLabel = '自定义音色 ID…') {
+function populatePresetOptions(select, presets, customLabel = t("自定义音色 ID…")) {
   select.replaceChildren()
   for (const preset of presets) {
     const option = document.createElement('option')
@@ -184,12 +187,12 @@ function renderBadges(present, sources) {
     const badge = document.querySelector(`#badge-${key}`)
     const stored = present?.[key] === true
     const fromFile = sources?.[key] === 'dotenv'
-    badge.textContent = fromFile ? '来自 .env' : stored ? (sources?.[key] === 'environment' ? '来自环境变量' : '已设置') : '未设置'
+    badge.textContent = fromFile ? t("来自 .env") : stored ? (sources?.[key] === 'environment' ? t("来自环境变量") : t("已设置")) : t("未设置")
     secretInput(key).hidden = stored && !dirtySecretKeys.has(key)
     secretInput(key).disabled = fromFile
     secretClearButton(key).disabled = fromFile
-    secretClearButton(key).title = fromFile ? '此密钥由 .env 管理，请在文件中清除并重启' : '清除并输入新密钥'
-    secretInput(key).placeholder = fromFile ? '在 repo .env 中修改，重启后生效' : '输入新密钥'
+    secretClearButton(key).title = fromFile ? t("此密钥由 .env 管理，请在文件中清除并重启") : t("清除并输入新密钥")
+    secretInput(key).placeholder = fromFile ? t("在 repo .env 中修改，重启后生效") : t("输入新密钥")
     badge.dataset.present = stored ? '1' : '0'
   }
 }
@@ -198,12 +201,12 @@ function renderBadges(present, sources) {
 function keyUsage(view) {
   return {
     dashscopeApiKey: view.pipelineMode === 'integrated'
-      || view.cascadedLlmProvider === 'qwen' ? '必需' : '当前未使用',
-    deepseekApiKey: view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'deepseek' ? '必需' : '当前未使用',
+      || view.cascadedLlmProvider === 'qwen' ? t("必需") : t("当前未使用"),
+    deepseekApiKey: view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'deepseek' ? t("必需") : t("当前未使用"),
     arkApiKey: view.pipelineMode === 'cascaded'
-      && view.cascadedLlmProvider === 'ark' ? '必需' : '当前未使用',
-    doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' ? '必需' : '当前未使用',
-    tavilyApiKey: '可选',
+      && view.cascadedLlmProvider === 'ark' ? t("必需") : t("当前未使用"),
+    doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' ? t("必需") : t("当前未使用"),
+    tavilyApiKey: t("可选"),
   }
 }
 
@@ -223,11 +226,11 @@ function renderPreset(select, customInput, value, presets) {
 function renderCodexStatus(view) {
   const status = view.codexStatus
   if (status?.status !== 'ready') {
-    codexStatus.textContent = '未找到可用的 Codex CLI；可刷新或指定原生可执行文件。'
+    codexStatus.textContent = t("未找到可用的 Codex CLI；可刷新或指定原生可执行文件。")
     codexStatus.dataset.ready = '0'
     return
   }
-  codexStatus.textContent = `已连接 ${status.version}`
+  codexStatus.textContent = t("已连接 {0}", status.version)
   codexStatus.dataset.ready = '1'
 }
 
@@ -263,15 +266,15 @@ function renderVision(view) {
   const watchSelect = document.getElementById('watch-model')
   const presets = Object.entries(view.visionModels ?? {}).flatMap(([provider, models]) =>
     view.secretsPresent?.[({qwen: 'dashscopeApiKey', ark: 'arkApiKey'})[provider]]
-      ? models.map(model => ({value: model, label: `${provider === 'qwen' ? 'Qwen' : '豆包'} · ${model}`})) : [])
+      ? models.map(model => ({value: model, label: `${provider === 'qwen' ? 'Qwen' : t("豆包")} · ${model}`})) : [])
   watchSelect.replaceChildren()
-  for (const row of [{value: '', label: presets.length ? '选择监控模型' : '请先配置视觉模型 API Key'}, ...presets]) {
+  for (const row of [{value: '', label: presets.length ? t("选择监控模型") : t("请先配置视觉模型 API Key")}, ...presets]) {
     const option = document.createElement('option'); option.value = row.value; option.textContent = row.label
     option.disabled = row.value === ''; watchSelect.append(option)
   }
   if (view.watchModel && !presets.some(row => row.value === view.watchModel)) {
     const option = document.createElement('option'); option.value = view.watchModel
-    option.textContent = `${view.watchModel}（当前不可选）`; option.disabled = true; watchSelect.append(option)
+    option.textContent = t("{0}（当前不可选）", view.watchModel); option.disabled = true; watchSelect.append(option)
   }
   watchSelect.value = view.watchModel ?? ''
   watchSelect.disabled = !enabled || presets.length === 0
@@ -279,8 +282,8 @@ function renderVision(view) {
   document.getElementById('camera-refresh').disabled = !enabled
   const selected = view.monitorCameraDeviceId ?? ''
   monitorCamera.replaceChildren()
-  const rows = [{deviceId: '', label: '系统默认摄像头'}, ...cameraDevices]
-  if (selected && !rows.some(row => row.deviceId === selected)) rows.push({deviceId: selected, label: '已选摄像头（未检测到）'})
+  const rows = [{deviceId: '', label: t("系统默认摄像头")}, ...cameraDevices]
+  if (selected && !rows.some(row => row.deviceId === selected)) rows.push({deviceId: selected, label: t("已选摄像头（未检测到）")})
   for (const row of rows) {
     const option = document.createElement('option'); option.value = row.deviceId; option.textContent = row.label; monitorCamera.append(option)
   }
@@ -290,7 +293,7 @@ conversationVision.addEventListener('change', async () => {
   const enabled = conversationVision.checked
   if (enabled) {
     try { if (await window.novaAudioAgentDesktop.camera.requestPermission() !== 'granted') throw Error('permission') }
-    catch { conversationVision.checked = false; document.getElementById('conversation-vision-status').textContent = '摄像头权限未授予'; return }
+    catch { conversationVision.checked = false; document.getElementById('conversation-vision-status').textContent = t("摄像头权限未授予"); return }
   }
   if (conversationVision.checked !== enabled || conversationVision.disabled) return
   controller.stage({conversationVisionEnabled: enabled})
@@ -303,9 +306,9 @@ document.getElementById('camera-refresh').addEventListener('click', async () => 
   const status = document.getElementById('camera-devices-status')
   try {
     cameraDevices = await window.novaAudioAgentDesktop.camera.listDevices()
-    status.textContent = cameraDevices.length ? '' : '未检测到摄像头；授权并连接设备后重试'
+    status.textContent = cameraDevices.length ? '' : t("未检测到摄像头；授权并连接设备后重试")
     renderVision(currentView)
-  } catch { status.textContent = '无法获取摄像头列表' }
+  } catch { status.textContent = t("无法获取摄像头列表") }
 })
 
 let usageScope = 'session'
@@ -316,17 +319,17 @@ function renderUsage() {
     const value = scope === 'history' ? usage?.history : usage
     const cost = value?.requests && !value?.unavailable ? frontendUsageText(value).split('\n')[0] : '—'
     document.getElementById(`usage-${scope}-cost`).textContent = cost
-    document.getElementById(`usage-${scope}-count`).textContent = value?.unavailable ? '读取失败' : `${value?.requests ?? 0} 次调用`
+    document.getElementById(`usage-${scope}-count`).textContent = value?.unavailable ? t("读取失败") : t("{0} 次调用", value?.requests ?? 0)
     document.getElementById(`usage-${scope}`).dataset.empty = String(!value?.requests)
     document.getElementById(`usage-${scope}`).setAttribute('aria-pressed', String(usageScope === scope))
   }
   const notices = []
-  if (selected?.missingReports) notices.push(`缺少用量 ${selected.missingReports} 次`)
-  if (selected?.unpricedReports) notices.push(`无法估价 ${selected.unpricedReports} 次`)
+  if (selected?.missingReports) notices.push(t("缺少用量 {0} 次", selected.missingReports))
+  if (selected?.unpricedReports) notices.push(t("无法估价 {0} 次", selected.unpricedReports))
   const status = document.getElementById('frontend-usage')
   status.textContent = usage?.persistenceError
-    ? (usage.persistenceError === 'read_failed' ? '历史记录读取失败，原文件已保留；当前仅显示本次启动用量。' : '历史用量保存失败，本次用量仍保留在内存中。')
-    : selected?.requests ? notices.join(' · ') : '开始对话后显示用量'
+    ? (usage.persistenceError === 'read_failed' ? t("历史记录读取失败，原文件已保留；当前仅显示本次启动用量。") : t("历史用量保存失败，本次用量仍保留在内存中。"))
+    : selected?.requests ? notices.join(' · ') : t("开始对话后显示用量")
   status.hidden = !status.textContent
   const breakdown = document.getElementById('usage-breakdown')
   breakdown.hidden = !selected?.requests
@@ -340,6 +343,7 @@ for (const scope of ['history', 'session']) document.getElementById(`usage-${sco
 
 function render(view, _drafts, state) {
   if (!view) return
+  document.getElementById('language').value = view.language ?? 'zh-CN'
   currentView = view
   renderUsage()
   renderVision(view)
@@ -352,7 +356,7 @@ function render(view, _drafts, state) {
   wakeEnabled.checked = view.wakeWordEnabled === true
   autoHideSeconds.value = String(view.autoHideSeconds ?? 60)
   wakeStatus.hidden = !['loading', 'error'].includes(view.wakeWord?.status)
-  wakeStatus.textContent = ({off: '', loading: '正在准备唤醒模型…', ready: '本地唤醒已就绪', error: '唤醒模型不可用，请重试；可用托盘显示窗口。'})[view.wakeWord?.status] ?? ''
+  wakeStatus.textContent = ({off: '', loading: t("正在准备唤醒模型…"), ready: t("本地唤醒已就绪"), error: t("唤醒模型不可用，请重试；可用托盘显示窗口。")})[view.wakeWord?.status] ?? ''
   wakeRetry.hidden = view.wakeWord?.status !== 'error'
 
   codingProgressNarrationInput.value = view.codingProgressNarration
@@ -367,7 +371,7 @@ function render(view, _drafts, state) {
   yoloWarning.hidden = view.codexApprovalMode !== 'yolo'
   clarificationDepth.value = view.clarificationDepth
   heartbeat.value = String(view.codexHeartbeatSeconds)
-  heartbeatValue.textContent = `${view.codexHeartbeatSeconds} 秒`
+  heartbeatValue.textContent = t("{0} 秒", view.codexHeartbeatSeconds)
   for (const input of codexModeInputs) input.checked = input.value === view.codexBinaryMode
   const codexVisibility = codexModeVisibility(view.codexBinaryMode)
   codexManualSettings.hidden = codexVisibility.manualConfigurationHidden
@@ -386,22 +390,22 @@ function render(view, _drafts, state) {
     const option = document.createElement('option'); option.value = view.integratedModel; option.textContent = view.integratedModel; integratedModel.append(option)
   }
   integratedModel.value = view.integratedModel ?? ''
-  const voices = view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: 'Ethan（默认）'}] : QWEN_VOICES
+  const voices = view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : QWEN_VOICES
   populatePresetOptions(integratedVoicePreset, voices)
   renderPreset(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, voices)
   cascadedAsrProvider.value = view.cascadedAsrProvider
   cascadedLlmProvider.value = view.cascadedLlmProvider
   const modelPresets = ({
     qwen: [
-      {value: 'qwen3.8-flash', label: 'qwen3.8-flash · 第一档 · ★★★★★'},
-      {value: 'qwen-flash', label: 'qwen-flash · 第二档 · ★★★★☆'},
-      {value: 'qwen3.8-max', label: 'qwen3.8-max · 第二档 · ★★★★☆'},
-      {value: 'qwen-plus', label: 'qwen-plus · 第三档 · ★★★☆☆'},
+      {value: 'qwen3.8-flash', label: t("qwen3.8-flash · 第一档 · ★★★★★")},
+      {value: 'qwen-flash', label: t("qwen-flash · 第二档 · ★★★★☆")},
+      {value: 'qwen3.8-max', label: t("qwen3.8-max · 第二档 · ★★★★☆")},
+      {value: 'qwen-plus', label: t("qwen-plus · 第三档 · ★★★☆☆")},
     ],
-    deepseek: [{value: 'deepseek-flash', label: 'deepseek-flash · 第一档 · ★★★★★'}],
+    deepseek: [{value: 'deepseek-flash', label: t("deepseek-flash · 第一档 · ★★★★★")}],
     ark: [{value: 'doubao-seed-2-0-pro-260215', label: 'doubao-seed-2-0-pro-260215'}],
   }[view.cascadedLlmProvider] ?? [])
-  populatePresetOptions(cascadedLlmModelPreset, modelPresets, '自定义模型 ID…')
+  populatePresetOptions(cascadedLlmModelPreset, modelPresets, t("自定义模型 ID…"))
   renderPreset(cascadedLlmModelPreset, cascadedLlmModel, view.cascadedLlmModels?.[view.cascadedLlmProvider], modelPresets)
   cascadedTtsProvider.value = view.cascadedTtsProvider
   renderPreset(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
@@ -430,26 +434,26 @@ function updateRestartNotice(phase) {
   restartNotice.hidden = false
   restartNotice.dataset.state = phase
   if (phase === 'restarting') {
-    restartNotice.textContent = '已保存，后台正在重启并重新连接'
+    restartNotice.textContent = t("已保存，后台正在重启并重新连接")
     return
   }
   if (phase === 'failed') {
-    restartNotice.textContent = '未生效：请恢复上次可用设置，再检查未保存的草稿'
+    restartNotice.textContent = t("未生效：请恢复上次可用设置，再检查未保存的草稿")
     return
   }
   if (phase === 'restart_failed') {
-    restartNotice.textContent = '后端未启动：上次设置已保留，请恢复后端'
+    restartNotice.textContent = t("后端未启动：上次设置已保留，请恢复后端")
     return
   }
   if (phase === 'recovery_pending') {
-    restartNotice.textContent = '上次设置已还原，请点击恢复以确认后端可用'
+    restartNotice.textContent = t("上次设置已还原，请点击恢复以确认后端可用")
     return
   }
   if (phase === 'recovery_failed') {
-    restartNotice.textContent = '设置恢复未完成，恢复记录已保留；若重试仍失败，请修复配置目录中的 settings.json.recovery 或配置冲突后再恢复'
+    restartNotice.textContent = t("设置恢复未完成，恢复记录已保留；若重试仍失败，请修复配置目录中的 settings.json.recovery 或配置冲突后再恢复")
     return
   }
-  restartNotice.textContent = '设置已生效'
+  restartNotice.textContent = t("设置已生效")
 }
 
 const controller = createSettingsController({
@@ -471,11 +475,12 @@ function bindStage(element, event, patch) {
 
 for (const [key, input] of Object.entries(phoneFields)) bindStage(input, 'input', () => ({[key]: key === 'phoneServerPort' ? Number(input.value) : input.value}))
 
+bindStage(document.getElementById('language'), 'change', () => ({language: document.getElementById('language').value}))
 bindStage(wakeEnabled, 'change', () => ({wakeWordEnabled: wakeEnabled.checked}))
 bindStage(autoHideSeconds, 'change', () => {
   const value = Number(autoHideSeconds.value)
   const valid = Number.isInteger(value) && (value === 0 || value >= 30 && value <= 3600)
-  autoHideSeconds.setCustomValidity(valid ? '' : '请输入 0 或 30–3600 的整数')
+  autoHideSeconds.setCustomValidity(valid ? '' : t("请输入 0 或 30–3600 的整数"))
   autoHideSeconds.reportValidity()
   return valid ? {autoHideSeconds: value} : {}
 })
@@ -497,7 +502,7 @@ for (const input of progressBubblesInputs) {
 bindStage(clarificationDepth, 'change', () => ({clarificationDepth: clarificationDepth.value}))
 for (const input of capabilitySettings) bindStage(input, 'change', () => ({[input.id]: input.value}))
 heartbeat.addEventListener('input', () => {
-  heartbeatValue.textContent = `${heartbeat.value} 秒`
+  heartbeatValue.textContent = t("{0} 秒", heartbeat.value)
   controller.stage({codexHeartbeatSeconds: Number(heartbeat.value)})
 })
 for (const input of codexModeInputs) bindStage(input, 'change', () => ({codexBinaryMode: input.value}))
@@ -580,7 +585,7 @@ async function saveAll() {
   renderBadges(currentView?.secretsPresent, currentView?.secretSources)
   if (result.rejectedSecrets && result.rejectedSecrets.length) {
     const labels = result.rejectedSecrets.map(key => SECRET_LABELS[key])
-    statusLabel.textContent = `部分密钥未保存(含非法字符): ${labels.join('、')}`
+    statusLabel.textContent = t("部分密钥未保存(含非法字符): {0}", labels.join('、'))
   }
   updateButtons()
   return result
@@ -591,55 +596,55 @@ settingsRestart.addEventListener('click', async () => {
   if (restarting) return
   restarting = true
   updateButtons()
-  statusLabel.textContent = '正在重启后台…'
+  statusLabel.textContent = t("正在重启后台…")
   try {
     const view = await api.restart()
     controller.syncView(view, {trackRestart: false})
-    statusLabel.textContent = view.operationStatus === 'applied' ? '后台已重启' : view.operationStatus === 'busy' ? '另一项操作进行中，请稍后重试' : '重启失败，请检查配置'
-  } catch { statusLabel.textContent = '重启失败，请稍后重试' }
+    statusLabel.textContent = view.operationStatus === 'applied' ? t("后台已重启") : view.operationStatus === 'busy' ? t("另一项操作进行中，请稍后重试") : t("重启失败，请检查配置")
+  } catch { statusLabel.textContent = t("重启失败，请稍后重试") }
   finally { restarting = false; updateButtons() }
 })
 
 codexRescan.addEventListener('click', async () => {
   codexRescan.disabled = true
   codexRescan.setAttribute('aria-busy', 'true')
-  statusLabel.textContent = '正在刷新 Codex…'
+  statusLabel.textContent = t("正在刷新 Codex…")
   try {
     const view = await api.rescanCodex()
     controller.syncView(view, {trackRestart: false})
     statusLabel.textContent = view.operationStatus === 'recovery_pending'
-      ? 'Codex 未刷新：请先恢复上次可用设置'
-      : view.operationStatus === 'busy' ? '另一项操作进行中，Codex 未刷新'
-      : view.operationStatus == null ? 'Codex 刷新完成' : 'Codex 刷新未完成'
+      ? t("Codex 未刷新：请先恢复上次可用设置")
+      : view.operationStatus === 'busy' ? t("另一项操作进行中，Codex 未刷新")
+      : view.operationStatus == null ? t("Codex 刷新完成") : t("Codex 刷新未完成")
   } catch {
-    statusLabel.textContent = 'Codex 刷新失败'
+    statusLabel.textContent = t("Codex 刷新失败")
   } finally {
     codexRescan.disabled = false
     codexRescan.setAttribute('aria-busy', 'false')
   }
 })
 document.querySelector('#projects-repair').addEventListener('click', async () => {
-  statusLabel.textContent = '正在修复 Projects 目录权限…'
+  statusLabel.textContent = t("正在修复 Projects 目录权限…")
   try {
     const results = await Promise.all(['state', 'managed', 'workspace'].map(root => api.repairProjects(root)))
     statusLabel.textContent = results.every(result => result?.status === 'ok')
-      ? 'Projects 目录权限已修复'
-      : '部分 Projects 目录无法修复，请检查路径是否存在'
+      ? t("Projects 目录权限已修复")
+      : t("部分 Projects 目录无法修复，请检查路径是否存在")
   } catch {
-    statusLabel.textContent = 'Projects 目录权限修复失败'
+    statusLabel.textContent = t("Projects 目录权限修复失败")
   }
 })
 
 async function runWorkspaceAction(action) {
   workspaceBusy = true
-  workspaceActionStatus.textContent = '正在处理…'
+  workspaceActionStatus.textContent = t("正在处理…")
   updateButtons()
   try {
     const result = await action()
-    workspaceActionStatus.textContent = WORKSPACE_STATUS_TEXT[result?.status] ?? '操作未完成'
+    workspaceActionStatus.textContent = WORKSPACE_STATUS_TEXT[result?.status] ?? t("操作未完成")
     if (result?.view) controller.syncView(result.view, {trackRestart: false})
   } catch {
-    workspaceActionStatus.textContent = '操作未完成'
+    workspaceActionStatus.textContent = t("操作未完成")
   } finally {
     workspaceBusy = false
     updateButtons()
@@ -653,8 +658,8 @@ settingsRestore.addEventListener('click', async () => {
     const view = await api.retryBackend()
     controller.syncView(view, {trackRestart: false})
     statusLabel.textContent = view.settingsRecoveryAvailable === false && view.settingsApplyStatus === 'applied'
-      ? '上次设置已恢复并生效；草稿尚未保存' : '恢复未完成，请重试'
-  } catch { statusLabel.textContent = '恢复未完成，请重试' }
+      ? t("上次设置已恢复并生效；草稿尚未保存") : t("恢复未完成，请重试")
+  } catch { statusLabel.textContent = t("恢复未完成，请重试") }
   finally { workspaceBusy = false; updateButtons() }
 })
 
@@ -696,6 +701,6 @@ void (async () => {
     if (isValidCategory(initial?.focusCategory)) applyCategory(initial.focusCategory)
     controller.setView(initial)
   } catch {
-    statusLabel.textContent = '读取设置失败'
+    statusLabel.textContent = t("读取设置失败")
   }
 })()

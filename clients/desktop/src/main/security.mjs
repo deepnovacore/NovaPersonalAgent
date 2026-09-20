@@ -1,3 +1,4 @@
+import {t} from '../renderer/locale.mjs'
 import { DORMANT_ORB_WINDOW_SIZE } from './window-position.mjs'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
@@ -91,7 +92,7 @@ export function boardWindowOptions(preload, launchId) {
     height: 760,
     minWidth: 720,
     minHeight: 520,
-    title: '记忆面板',
+    title: t("记忆面板"),
   })
 }
 
@@ -101,7 +102,7 @@ export function settingsWindowOptions(preload, launchId) {
     height: 930,
     minWidth: 620,
     minHeight: 520,
-    title: '设置',
+    title: t("设置"),
   })
 }
 

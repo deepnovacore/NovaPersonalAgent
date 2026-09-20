@@ -53,6 +53,9 @@ After building runtime, run `node runtime/scripts/client-protocol-mock.mjs`. It 
 ## Media selection (backward-compatible v1 extension)
 
 New clients include `media: {transports: ["host_pcm_v1"]}` in `hello`.
+
+`hello` may also include `language: "zh-CN" | "en"`. The host validates this enum after authentication and before accepting input. It selects translated AI system instructions for this connection, including task narration; it does not translate user messages, force a response language, or change ASR/TTS models or voices. Omitting it restores the host's configured default (`NOVA_AUDIO_AGENT_LANGUAGE`, otherwise `zh-CN`), rather than inheriting the previous client's choice. Unsupported values reject the connection. Relay and both AOQ modes support the field; older hosts may ignore it. Clients reconnect to apply a changed language.
+
 The authenticated host selects its configured pipeline and returns in `client.ready`:
 
 ```json
