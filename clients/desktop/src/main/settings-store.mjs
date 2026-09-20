@@ -11,6 +11,7 @@ export const SECRET_KEYS = Object.freeze([
   'composioApiKey',
   'dashscopeApiKey',
   'tavilyApiKey',
+  'openrouterApiKey',
   'modelApiKey',
   'codexApiKey',
   'arkApiKey',

@@ -1,5 +1,7 @@
+import {createJevJudge} from '../understanding/jev.js'
+import {createJevNewsRanker} from '../news/jev-ranking.js'
 import {createUnderstandingPipeline,type UnderstandingPipeline} from '../understanding/pipeline.js'
-import {createNewsRanker,type NewsRanker} from '../news/ranking.js'
+import {type NewsRanker} from '../news/ranking.js'
 import type {DailyBriefSlot} from '../personal-agent/daily-brief.js'
 import {memoryOverviewSchema, validateMemoryOverview, type MemoryOverview} from '../personal-agent/memory-overview.js'
 import type {MemoryEntry} from '../memory/entry.js'
@@ -64,21 +66,24 @@ export interface SurrogateVerdict {
 export class GatewaySurrogate {
   readonly #gateway: ModelGateway
   readonly #model: string
+  readonly #jevApiKey: string
   readonly #proactivityPreset: ProactivityPreset
 
   constructor(options: {
     readonly gateway: ModelGateway
     readonly model: string
     readonly proactivityPreset: ProactivityPreset
+    readonly jevApiKey?: string | undefined
   }) {
     this.#gateway = options.gateway
+    this.#jevApiKey = options.jevApiKey ?? ''
     this.#model = options.model
     this.#proactivityPreset = options.proactivityPreset
   }
 
-  readonly understand: UnderstandingPipeline = (source,signal)=>createUnderstandingPipeline({gateway:this.#gateway,model:this.#model})(source,signal)
+  readonly understand: UnderstandingPipeline = (source,signal)=>createUnderstandingPipeline({gateway:this.#gateway,model:this.#model,judge:createJevJudge({apiKey:this.#jevApiKey})})(source,signal)
 
-  readonly rankNews: NewsRanker = (interests,articles,signal)=>createNewsRanker(this.#gateway,this.#model)(interests,articles,signal)
+  readonly rankNews: NewsRanker = (interests,articles,signal)=>createJevNewsRanker({apiKey:this.#jevApiKey})(interests,articles,signal)
 
   async summarizeMemory(entries: readonly MemoryEntry[], signal: AbortSignal): Promise<MemoryOverview | null> {
     const active = entries.filter(entry => entry.status === 'active' && entry.version !== null)

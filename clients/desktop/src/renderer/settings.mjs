@@ -30,13 +30,14 @@ const api = window.novaAudioAgentDesktop.settings
 const imPanel = createImPanel({document, api})
 const SECRET_KEYS = [
   'composioApiKey',
-  'dashscopeApiKey', 'tavilyApiKey',
+  'dashscopeApiKey', 'tavilyApiKey', 'openrouterApiKey',
   'arkApiKey', 'deepseekApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
   composioApiKey: 'Composio',
   dashscopeApiKey: 'DashScope',
   tavilyApiKey: 'Tavily',
+  openrouterApiKey: 'OpenRouter · Jev',
   arkApiKey: 'Ark',
   deepseekApiKey: t("DeepSeek（官方）"),
   doubaoBigmodelApiKey: t("火山语音"),
@@ -214,6 +215,7 @@ function keyUsage(view) {
     doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' ? t("必需") : t("当前未使用"),
     composioApiKey: t('应用连接；修改后重启运行时'),
     tavilyApiKey: t("可选"),
+    openrouterApiKey: 'Jev',
   }
 }
 

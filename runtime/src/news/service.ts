@@ -34,7 +34,7 @@ export class NewsService{
    await this.#save(next)
   })
  }
- snapshot(){const s=this.#state,now=this.#now().getTime();const visible=s.items.filter(a=>!s.blocked.includes(a.source_id));const weight=(a:typeof s.items[number])=>a.ranking?.profile_version===s.profile_version?Math.max(0,...a.ranking.matches.map(m=>m.score*(s.interests.find(i=>i.id===m.interest_id)?.weight??0))):0
+ snapshot(){const s=this.#state,now=this.#now().getTime();const visible=s.items.filter(a=>!s.blocked.includes(a.source_id));const weight=(a:typeof s.items[number])=>a.ranking?.profile_version===s.profile_version?Math.max(0,...a.ranking.matches.map(m=>m.score*(a.ranking?.judgment?.substance==='promotional'?0.5:a.ranking?.judgment?.substance==='thin'?0.85:1)*(s.interests.find(i=>i.id===m.interest_id)?.weight??0))):0
   const fresh=visible.filter(a=>now-Date.parse(a.published_at??a.first_seen)<7*86400000)
   const ready=fresh.filter(a=>a.ranking?.profile_version===s.profile_version);const fallback=ready.length===0
   const ranked=(fallback?fresh:fresh.filter(a=>weight(a)>0)).slice().sort((a,b)=>fallback?b.first_seen.localeCompare(a.first_seen):(weight(b)/(1+Math.max(0,now-Date.parse(b.published_at??b.first_seen))/86400000))-(weight(a)/(1+Math.max(0,now-Date.parse(a.published_at??a.first_seen))/86400000))||a.id.localeCompare(b.id))

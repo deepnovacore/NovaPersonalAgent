@@ -12,6 +12,7 @@ const input=z.discriminatedUnion('op',[
  z.object({op:z.literal('create'),kind,title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
  z.object({op:z.literal('update'),kind,id:z.string(),expected_version:z.number().int().nonnegative(),title:z.string().trim().min(1).max(200).optional(),note:z.string().max(4000).optional(),status:z.string().optional(),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
  z.object({op:z.literal('convert'),id:z.string(),target:z.enum(['todo','goal']),expected_version:z.number().int().nonnegative()}).strict(),
+ z.object({op:z.literal('undo_create'),id:z.string(),expected_version:z.literal(1)}).strict(),
  z.object({op:z.literal('profile'),about:z.string().max(4000),expected_version:z.number().int().nonnegative()}).strict(),
 ])
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex')
@@ -22,8 +23,8 @@ export class LifeService{
  async open(){this.#state=await this.#store.read(this.#state)}
  async close(){await this.#tail}
  snapshot(){const state=structuredClone(this.#state);return {todos:state.todos.map(r=>({...r,kind:'todo' as const})),ideas:state.ideas.map(r=>({...r,kind:'idea' as const})),profile:state.profile,goals:state.goals.map(g=>{const todos=state.todos.filter(t=>t.goal_id===g.id&&t.status!=='cancelled');return {...g,kind:'goal' as const,progress:{done:todos.filter(t=>t.status==='done').length,total:todos.length}}})}}
- mutate(raw:unknown,requestId:string):Promise<{id:string;version:number}>{const p=input.parse(raw),payload=hash(JSON.stringify(p));const run=this.#tail.then(async()=>{
-  const next=structuredClone(this.#state),prior=next.receipts[requestId];if(prior){if(prior.hash!==payload)throw Error('request_id_conflict');return prior.result}
+ mutate(raw:unknown,requestId:string,guard?:()=>void):Promise<{id:string;version:number}>{const p=input.parse(raw),payload=hash(JSON.stringify(p));const run=this.#tail.then(async()=>{
+  guard?.();const next=structuredClone(this.#state),prior=next.receipts[requestId];if(prior){if(prior.hash!==payload)throw Error('request_id_conflict');return prior.result}
   const now=new Date().toISOString();let result:{id:string;version:number}
   const base=(title:string,note:string,id=hash(requestId))=>({id,title,note,version:1,created_at:now,updated_at:now})
   if('kind'in p){
@@ -34,7 +35,8 @@ export class LifeService{
   if('goal_id'in p&&p.goal_id){const previous=p.op==='update'?(p.kind==='todo'?next.todos:next.ideas).find(r=>r.id===p.id)?.goal_id:null
    if(!next.goals.some(g=>g.id===p.goal_id&&(g.status!=='archived'||previous===p.goal_id)))throw Error('goal_not_found')
   }
-  if(p.op==='profile'){if(next.profile.version!==p.expected_version)throw Error('version_conflict');next.profile={about:p.about,version:p.expected_version+1};result={id:'profile',version:next.profile.version}}
+  if(p.op==='undo_create'){const old=next.todos.find(r=>r.id===p.id);if(!old)throw Error('item_not_found');if(old.version!==p.expected_version)throw Error('version_conflict');next.todos=next.todos.filter(r=>r.id!==p.id);result={id:p.id,version:old.version}}
+  else if(p.op==='profile'){if(next.profile.version!==p.expected_version)throw Error('version_conflict');next.profile={about:p.about,version:p.expected_version+1};result={id:'profile',version:next.profile.version}}
   else if(p.op==='create'){
    const b=base(p.title,p.note)
    if(p.kind==='todo')next.todos.push({...b,status:'open',due:p.due??null,goal_id:p.goal_id??null,idea_id:null})

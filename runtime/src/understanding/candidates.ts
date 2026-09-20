@@ -1,11 +1,11 @@
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
 
-export const sourceSchema=z.object({id:z.string().min(1),version:z.number().int().nonnegative(),text:z.string().min(1).max(64000),origin:z.enum(['user','assistant','public','import'])}).strict()
+export const sourceSchema=z.object({id:z.string().min(1),version:z.number().int().nonnegative(),text:z.string().min(1).max(64000),origin:z.enum(['user','assistant','public','import']),context:z.string().max(16000).optional()}).strict()
 export type EvidenceSource=z.infer<typeof sourceSchema>
 const inputSchema=z.object({source_id:z.string(),source_version:z.number().int(),span:z.object({start:z.number().int().nonnegative(),end:z.number().int().positive(),quote:z.string().min(1)}).strict(),kind:z.enum(['todo','idea','goal','profile']),text:z.string().min(1).max(1000)}).strict()
 export type Candidate=z.infer<typeof inputSchema>&{id:string}
-export const decisionSchema=z.object({attribution:z.enum(['user','other','uncertain']),modality:z.enum(['commitment','request','preference','aspiration','tentative','rejected','uncertain']),support:z.enum(['supported','contradicted','insufficient']),importance:z.enum(['transient','useful','lasting','critical'])}).strict()
+export const decisionSchema=z.object({attribution:z.enum(['user','other','uncertain']),modality:z.enum(['commitment','request','preference','aspiration','tentative','rejected','uncertain']),support:z.enum(['supported','contradicted','insufficient']),importance:z.enum(['transient','useful','lasting','critical']),capture:z.enum(['explicit','suggested','none']).optional(),probabilities:z.record(z.string(),z.record(z.string(),z.number().min(0).max(1))).optional()}).strict()
 export type CandidateDecision=z.infer<typeof decisionSchema>
 export type CandidateJudge=(source:EvidenceSource,candidates:Candidate[],signal:AbortSignal)=>Promise<Record<string,CandidateDecision>>
 export interface EvaluatedCandidate {candidate:Candidate;source:EvidenceSource;decision:CandidateDecision;status:'proposed'|'withheld';reasons:string[]}
@@ -20,6 +20,7 @@ export function validateCandidate(source:EvidenceSource,raw:unknown):Candidate{
 }
 function policy(source:EvidenceSource,c:Candidate,d:CandidateDecision):string[]{
  const reasons:string[]=[]
+ if(d.capture==='none')reasons.push('no_record')
  if(source.origin!=='user')reasons.push('not_direct_user_source')
  if(d.attribution!=='user')reasons.push('not_user_attribution')
  if(d.support!=='supported')reasons.push('not_supported')

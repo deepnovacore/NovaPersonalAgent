@@ -292,6 +292,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     gateway,
     model: settings.surrogate_model,
     proactivityPreset: settings.proactivity_preset,
+    jevApiKey: settings.openrouter_api_key ?? undefined,
   })
   const compressor = new GatewayCompressor({gateway, model: settings.compressor_model})
 

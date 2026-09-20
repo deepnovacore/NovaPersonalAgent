@@ -3,7 +3,7 @@ import type {Article} from './feeds.js'
 import type {ModelGateway} from '../model/model-gateway.js'
 import type {JsonValue} from '../core/events.js'
 export interface Interest {id:string;text:string;weight:number}
-export const scoreSchema=z.object({id:z.string(),matches:z.array(z.object({interest_id:z.string(),score:z.number().min(0).max(1),quote:z.string().min(1).max(250)}).strict()).max(8),reason:z.string().max(240)}).strict()
+export const scoreSchema=z.object({id:z.string(),matches:z.array(z.object({interest_id:z.string(),score:z.number().min(0).max(1),quote:z.string().min(1).max(250)}).strict()).max(8),reason:z.string().max(240),judgment:z.object({provider:z.literal('jev'),substance:z.enum(['concrete','thin','promotional']),confidence:z.number().min(0).max(1),probabilities:z.record(z.string(),z.number().min(0).max(1))}).strict().optional()}).strict()
 export type Score=z.infer<typeof scoreSchema>
 export type NewsRanker=(interests:Interest[],articles:Article[],signal:AbortSignal)=>Promise<Score[]>
 export function validateScores(raw:unknown,interests:Interest[],articles:Article[]):Score[]{

@@ -7,10 +7,10 @@ import {understandingFixture} from '../src/understanding/fixture.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
 test('Jev sends all independent dimensions in one request and rejects missing answers',async()=>{
  const rows=understandingFixture();let calls=0
- const judge=createJevJudge({apiKey:'synthetic-test',fetcher:async(url,init)=>{calls++;assert.equal(url,'https://openrouter.ai/api/alpha/decisions');const body=JSON.parse(init?.body as string) as {questions:Record<string,unknown>};assert.equal(Object.keys(body.questions).length,12)
-  return Response.json({answers:Object.fromEntries(rows.flatMap((r,i)=>Object.entries(r.decision).map(([d,v])=>[`c${i}_${d}`,{type:'choice',choice:v,confidence:0.9,probabilities:{[v]:1}}])))})}})
+ const judge=createJevJudge({apiKey:'synthetic-test',fetcher:async(url,init)=>{calls++;assert.equal(url,'https://openrouter.ai/api/alpha/decisions');const body=JSON.parse(init?.body as string) as {questions:Record<string,unknown>};assert.equal(Object.keys(body.questions).length,15)
+  return Response.json({answers:Object.fromEntries(rows.flatMap((r,i)=>Object.entries({...r.decision,capture:'suggested'}).map(([d,v])=>[`c${i}_${d}`,{type:'choice',choice:v,confidence:0.9,probabilities:Object.fromEntries(Object.keys((body.questions[`c${i}_${d}`] as {criteria:Record<string,string>}).criteria).map(k=>[k,k===v?1:0]))}])))})}})
  const result=await judge(rows[0]!.source,rows.map(r=>r.candidate),new AbortController().signal)
- assert.equal(calls,1);assert.deepEqual(result[rows[0]!.candidate.id],rows[0]!.decision)
+ assert.equal(calls,1);assert.equal(result[rows[0]!.candidate.id]!.capture,'suggested');assert.equal(result[rows[0]!.candidate.id]!.probabilities!.support!.supported,1)
  const invalid=createJevJudge({apiKey:'synthetic-test',fetcher:async()=>Response.json({answers:{}})})
  await assert.rejects(invalid(rows[0]!.source,rows.map(r=>r.candidate),new AbortController().signal),/incomplete/)
 })

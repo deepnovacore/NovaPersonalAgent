@@ -29,6 +29,7 @@ export const DASHSCOPE_COMPATIBLE_BASE_URL =
 export const settingsSchema = z.object({
   model_base_url: z.url().default(DASHSCOPE_COMPATIBLE_BASE_URL),
   model_api_key: z.string().nullable().default(null),
+  openrouter_api_key: z.string().nullable().default(null),
   tavily_api_key: z.string().nullable().default(null),
   fast_model: z.string().default('qwen3-vl-plus'),
   watch_model: z.string().nullable().default(null),
@@ -231,6 +232,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
   const candidate = {
     model_base_url: optionalString(environment.NOVA_AUDIO_AGENT_MODEL_BASE_URL),
     model_api_key: optionalSecret(environment.NOVA_AUDIO_AGENT_MODEL_API_KEY),
+    openrouter_api_key: optionalSecret(environment.OPENROUTER_API_KEY),
     tavily_api_key: optionalSecret(environment.TAVILY_API_KEY),
     fast_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_FAST_MODEL),
     watch_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_WATCH_MODEL),
@@ -847,6 +849,7 @@ function configurationFieldName(field: string): string {
     doubao_asr_api_key: 'DOUBAO_ASR_API_KEY',
     doubao_bigmodel_api_key: 'DOUBAO_BIGMODEL_API_KEY',
     tavily_api_key: 'TAVILY_API_KEY',
+    openrouter_api_key: 'OPENROUTER_API_KEY',
   }
   return aliases[field] ?? `NOVA_AUDIO_AGENT_${field.toUpperCase()}`
 }

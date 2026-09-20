@@ -1398,3 +1398,8 @@ test('Composio saved key overrides dotenv and explicit clear disables inherited 
   assert.equal(capabilityEnvironment({},cleared.secrets,environment).COMPOSIO_API_KEY,'')
   assert.equal(resolveSecretConfiguration({},environment,dev).secrets.composioApiKey,'dotenv-fixture')
 })
+
+test('OpenRouter secret reaches runtime independently of conversation provider', () => {
+  const environment = capabilityEnvironment({}, {openrouterApiKey:'synthetic-openrouter'}, {})
+  assert.equal(environment.OPENROUTER_API_KEY, 'synthetic-openrouter')
+})

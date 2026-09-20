@@ -40,7 +40,6 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const tabs=el('nav',undefined,'personal-tabs');tabs.setAttribute('aria-label','个人空间视图');const panel=el('div',undefined,'personal-panel');side.append(tabs,panel)
  let selected='Feeds',ignored=false,debugEvidence=false,renderedSnapshot=null,taskRevision=-1
  const presented=new Set()
- button('整理最新发言',()=>c.command('understanding.start'),header)
  const tabButtons=new Map();for(const title of ['Todos','Feeds','Ideas','Goals','Profile'])tabButtons.set(title,button(title,()=>{selected=title;renderPanel()},tabs))
  const expand=el('button','展开 Nova');expand.id='personal-expand';expand.type='button';expand.addEventListener('click',()=>run(()=>collapse(false)));document.querySelector('#shell').append(expand)
  panel.addEventListener('focusout',()=>setTimeout(()=>{if(!panel.contains?.(document.activeElement))update()},0))
@@ -68,10 +67,10 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  function renderPanel(){
   panel.replaceChildren();for(const [name,b]of tabButtons)b.setAttribute('aria-current',String(name===selected))
   const s=c.snapshot;const caps=s?.capabilities??{}
-  if(s?.understanding?.status==='working')panel.append(el('p','正在整理最新一条发言中的结构化候选…'))
-  if(s?.understanding?.error)panel.append(el('p','整理未成功，请稍后重试。'))
+  if(s?.understanding?.error)panel.append(el('p','这条发言暂时没能记下来，你仍可以手动添加。'))
+  for(const item of s?.understanding?.recorded??[]){const a=card('已记下待办',item.text);const current=s.life?.todos?.find(t=>t.id===item.object_id);if(current?.version===item.version)button('撤销记录',()=>c.command('understanding.action',{id:item.id,action:'undo'}),a)}
   const candidateKind=({Todos:'todo',Ideas:'idea',Goals:'goal',Profile:'profile'})[selected]
-  for(const item of s?.understanding?.items??[]){if(item.kind!==candidateKind)continue;const a=card('待确认的结构化候选',item.text);a.append(el('p',`依据：${item.quote}`));if(item.kind==='profile')a.append(el('p','确认后将追加到个人介绍，不会替换已有内容。'));const edit=el('textarea');edit.value=lifeLocal['candidate:'+item.id]??item.text;edit.maxLength=1000;edit.setAttribute('aria-label','候选内容');edit.addEventListener('input',()=>{lifeLocal['candidate:'+item.id]=edit.value});a.append(edit);button('确认加入',()=>c.command('understanding.action',{id:item.id,action:'accept',text:edit.value,...(item.kind==='profile'?{expected_profile_version:s.life.profile.version}:{})}),a);button('忽略候选',()=>c.command('understanding.action',{id:item.id,action:'dismiss'}),a)}
+  for(const item of s?.understanding?.items??[]){if(item.kind!==candidateKind)continue;const a=card('可能想记下',item.text);a.append(el('p',`依据：${item.quote}`));if(item.kind==='profile')a.append(el('p','确认后将追加到个人介绍，不会替换已有内容。'));const edit=el('textarea');edit.value=lifeLocal['candidate:'+item.id]??item.text;edit.maxLength=1000;edit.setAttribute('aria-label','候选内容');edit.addEventListener('input',()=>{lifeLocal['candidate:'+item.id]=edit.value});a.append(edit);button('记下来',()=>c.command('understanding.action',{id:item.id,action:'accept',text:edit.value,...(item.kind==='profile'?{expected_profile_version:s.life.profile.version}:{})}),a);button('略过',()=>c.command('understanding.action',{id:item.id,action:'dismiss'}),a)}
   if(['Todos','Ideas','Goals'].includes(selected)){
    renderLife(panel,{kind:({Todos:'todo',Ideas:'idea',Goals:'goal'})[selected],state:s?.life,command:(m,p)=>c.command(m,p),button,run,local:lifeLocal,rerender:renderPanel,delegate:async text=>{if(!c.selectedId||c.isVoiceConversation)await c.create();c.draft=text;update();draft.focus()}})
    if(selected==='Todos')button('查看 Agent 执行任务',()=>{selected='任务';renderPanel()},panel)

@@ -48,6 +48,7 @@ export function settingsButtonState({
 const SECRET_KEY_NAMES = [
   'dashscopeApiKey',
   'tavilyApiKey',
+  'openrouterApiKey',
   'modelApiKey',
   'codexApiKey',
   'arkApiKey',

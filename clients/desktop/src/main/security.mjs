@@ -210,7 +210,8 @@ const API_KEY_PAGES = new Set(['https://bailian.console.aliyun.com/?apiKey=1&tab
   'https://platform.deepseek.com/api_keys',
   'https://console.volcengine.com/ark/apiKey',
   'https://console.volcengine.com/speech/new/setting/apikeys',
-  'https://app.tavily.com/'])
+  'https://app.tavily.com/',
+  'https://openrouter.ai/settings/keys'])
 
 export function apiKeyWindowOpenHandler(openExternal) {
   return ({url}) => {

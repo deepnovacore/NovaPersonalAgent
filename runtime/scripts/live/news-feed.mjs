@@ -2,15 +2,12 @@ import assert from 'node:assert/strict'
 import {mkdir,writeFile,realpath,chmod} from 'node:fs/promises'
 import {resolve} from 'node:path'
 import {NewsService} from '../../dist/src/news/service.js'
-import {createNewsRanker} from '../../dist/src/news/ranking.js'
-import {loadSettings,resolveModelApiKey} from '../../dist/src/config/config.js'
-import {OpenAIModelGateway} from '../../dist/src/model/model-gateway.js'
-import {RealClock} from '../../dist/src/core/clock.js'
+import {createJevNewsRanker} from '../../dist/src/news/jev-ranking.js'
+import {loadSettings} from '../../dist/src/config/config.js'
 const output=resolve(process.argv[2]??'output/news-live');await mkdir(output,{recursive:true,mode:0o700});await chmod(output,0o700);const directory=await realpath(output)
-const settings=loadSettings(),key=resolveModelApiKey(settings);assert.ok(key,'live model credential required')
-const gateway=new OpenAIModelGateway({baseUrl:settings.model_base_url,apiKey:key,clock:new RealClock()})
-const report={model:settings.fast_model,started_at:new Date().toISOString(),checks:[],sources:[],limitations:['No 24-hour soak or human-blinded relevance evaluation in this run.','Synthetic explicit interests only; no private profile or memory opened.']}
-const rank=createNewsRanker(gateway,settings.fast_model)
+const settings=loadSettings();assert.ok(settings.openrouter_api_key,'OpenRouter credential required')
+const report={model:'typesafe/jev-1.13',started_at:new Date().toISOString(),checks:[],sources:[],limitations:['No 24-hour soak or human-blinded relevance evaluation in this run.','Synthetic explicit interests only; no private profile or memory opened.']}
+const rank=createJevNewsRanker({apiKey:settings.openrouter_api_key??''})
 const make=()=>new NewsService({path:directory+'/news.json',rank:async(...args)=>{try{return await rank(...args)}catch(error){report.ranking_error={name:error.name,message:String(error.message).slice(0,500)};throw error}}})
 let service=make();await service.open()
 try{

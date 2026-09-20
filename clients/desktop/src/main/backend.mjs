@@ -56,6 +56,7 @@ export const SECRET_ENV_MAP = Object.freeze({
   composioApiKey: 'COMPOSIO_API_KEY',
   dashscopeApiKey: 'DASHSCOPE_API_KEY',
   tavilyApiKey: 'TAVILY_API_KEY',
+  openrouterApiKey: 'OPENROUTER_API_KEY',
   modelApiKey: 'NOVA_AUDIO_AGENT_MODEL_API_KEY',
   codexApiKey: 'NOVA_AUDIO_AGENT_CODEX_API_KEY',
   arkApiKey: 'ARK_API_KEY',
@@ -81,6 +82,7 @@ export function resolveSecretConfiguration(saved = {}, environment = {}, develop
 }
 
 const ALWAYS_ACTIVE_SECRET_KEYS = Object.freeze([
+  'openrouterApiKey',
   'composioApiKey',
   'tavilyApiKey',
   'modelApiKey',
