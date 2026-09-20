@@ -14,7 +14,9 @@ export async function verifyCandidateArtifacts(root, version) {
     const hash = createHash('sha256')
     for await (const chunk of createReadStream(join(root, name))) hash.update(chunk)
     const checksum = (await readFile(join(root, `${name}.sha256`), 'utf8')).trim()
-    assert.equal(checksum, `${hash.digest('hex')}  ${name}`, `${name} checksum mismatch`)
+    const digest = hash.digest('hex')
+    // sha256sum marks binary mode with '*', including its Windows default.
+    assert.ok(checksum === `${digest}  ${name}` || checksum === `${digest} *${name}`, `${name} checksum mismatch`)
   }
 }
 
