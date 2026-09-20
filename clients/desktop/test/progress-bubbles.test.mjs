@@ -346,12 +346,13 @@ test('renderer routes coding progress by wire identity and preserves coding aler
 })
 
 
-test('all bubble mode shows only finalized assistant replies, preserving multiline text', async () => {
+test('all bubble mode shows streaming and finalized assistant replies, preserving multiline text', async () => {
   const {parseConversationBubble} = await import('../src/renderer/bubbles.mjs')
   const frame = {type: 'caption', role: 'assistant', final: true, sequence: 4, text: '已经完成。\n文件在 /tmp/demo'}
   for (const mode of ['milestones', 'off']) assert.equal(parseConversationBubble(frame, mode), null)
   assert.equal(parseConversationBubble({...frame, role: 'user'}, 'all'), null)
-  assert.equal(parseConversationBubble({...frame, final: false}, 'all'), null)
+  assert.equal(parseConversationBubble({...frame, final: false}, 'all').summary, frame.text)
+  assert.equal(parseConversationBubble({...frame, final: undefined}, 'all'), null)
   assert.equal(parseConversationBubble({...frame, text: ''}, 'all'), null)
   const reply = parseConversationBubble(frame, 'all')
   assert.equal(reply.summary, frame.text)
@@ -381,4 +382,37 @@ test('expanding a reply reserves three rows and collapsing releases them', async
   assert.equal(rows.at(-1), 3)
   await bubbles.toggleExpanded(key)
   assert.equal(rows.at(-1), 1)
+})
+
+
+test('speech bubble appears before transcript final and streaming updates retain interaction state', async () => {
+  let clock = 100
+  const renders = []
+  const bubbles = createProgressBubbleController({reserveBubbleArea: async () => ({}),
+    render: items => renders.push(items.map(item => item.summary)), now: () => clock,
+    schedule: () => 1, cancel() {}})
+  const caption = {type: 'caption', role: 'assistant', message_id: 'assistant:1:reply-1',
+    sequence: 1, final: false, text: '正在'}
+  await bubbles.push(parseConversationBubble(caption, 'all'))
+  assert.deepEqual(renders.at(-1), ['正在'])
+  const key = bubbles.items[0].key
+  await bubbles.toggleExpanded(key)
+  bubbles.pause(key)
+  clock += 3000
+  await bubbles.push(parseConversationBubble({...caption, sequence: 2, text: '正在检查项目。'}, 'all'))
+  assert.equal(bubbles.items.length, 1)
+  assert.equal(bubbles.items[0].key, key)
+  assert.equal(bubbles.items[0].expanded, true)
+  assert.equal(bubbles.items[0].paused, true)
+  clock += 5000
+  await bubbles.push(parseConversationBubble({...caption, sequence: 3, final: true, text: '正在检查项目。'}, 'all'))
+  assert.equal(bubbles.items.length, 1)
+  bubbles.resume(key)
+  assert.equal(bubbles.items[0].expiresAt, clock + 12000)
+  await bubbles.push(parseConversationBubble({...caption, message_id: 'assistant:1:reply-2', sequence: 4,
+    text: '检查完成'}, 'all'))
+  assert.equal(bubbles.items.length, 1)
+  assert.notEqual(bubbles.items[0].key, key)
+  assert.equal(bubbles.items[0].expanded, false)
+  await bubbles.clear()
 })
