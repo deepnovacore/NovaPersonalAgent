@@ -122,7 +122,8 @@ test('public probe refuses secret-bearing tool names, redacts descriptions and k
 test('Ark plus enabled MCP or knowledge independently exports DashScope only when needed', () => {
   const settings = {...SETTINGS_DEFAULTS, pipelineMode: 'cascaded', cascadedLlmProvider: 'ark'}
   const secrets = {dashscopeApiKey: 'dummy-dashscope', arkApiKey: 'dummy-ark'}
-  assert.equal(capabilityEnvironment(settings, secrets, {}, document).DASHSCOPE_API_KEY, undefined)
+  assert.equal(capabilityEnvironment(settings, secrets, {NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled'}, document).DASHSCOPE_API_KEY, undefined)
+  assert.equal(capabilityEnvironment(settings, secrets, {}, document).DASHSCOPE_API_KEY, 'dummy-dashscope')
   for (const doc of [{version: 1, modules: {search: {provider: 'mcp'}}}, {version: 1, modules: {search: {enabled: false}, knowledge: {enabled: true}}}]) {
     const env = capabilityEnvironment(settings, secrets, {}, doc)
     assert.equal(env.DASHSCOPE_API_KEY, 'dummy-dashscope')

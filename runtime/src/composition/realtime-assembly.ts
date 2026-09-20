@@ -12,6 +12,7 @@ import {PersonalAgentHost} from '../personal-agent/host.js'
 import {tmpdir} from 'node:os'
 import {realpathSync} from 'node:fs'
 import {join} from 'node:path'
+import type {MemoryInspectionQuery} from '../memory/personal-memory-inspection.js'
 import type {UsageReporter} from '../realtime/usage.js'
 import type {ApprovalController} from '../core/approval-port.js'
 import {capabilityStatus, type CapabilityStatus} from '../config/capability-registry.js'
@@ -376,6 +377,10 @@ export class RealtimeAssembly {
       }
       await this.#enqueueProjectContextPublication()
     })
+  }
+
+  inspectPersonalMemory(query: MemoryInspectionQuery) {
+    return this.#personalMemory?.inspect?.(query) ?? Promise.resolve(null)
   }
 
   start(): Promise<void> {
@@ -801,8 +806,10 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       const preferences = responseAdaptationFor(personalMemoryHolder.current)
       const conversation = core.runtime.memory.channels.get('conversation')
       const sources = recentDispatchSources(conversation?.items ?? [])
+      const recovery = sessionHolder.current?.deliveryRecoveryContext()
       const context = {
-        content: preferences?.content ?? null,
+        content: [preferences?.content, recovery?.content].filter(Boolean).join('\n') || null,
+        ...(recovery?.content ? {delivery_version: recovery.version} : {}),
         ...(sources.length === 0 ? {} : {user_sources: sources}),
       }
       const signature = JSON.stringify({context, preferenceRevision: preferences?.revision})
@@ -811,6 +818,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
         responseAdaptationSignature = signature
       }
       return {revision: responseAdaptationRevision, ...context}
+    },
+    onResponseAdaptationApplied: (context, epoch) => {
+      if (context.delivery_version !== undefined) sessionHolder.current?.confirmDeliveryRecovery(context.delivery_version, epoch)
     },
     onDiagnostic: diagnostic => {
       onDiagnostic(

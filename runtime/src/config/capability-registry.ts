@@ -4,8 +4,8 @@ import {homedir} from 'node:os'
 import {join} from 'node:path'
 
 export const DEFAULT_CAPABILITIES_PATH = '~/.nova-audio-agent/capabilities.json'
-export const BAILIAN_SEARCH_MCP_URL = 'https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp'
-export const BAILIAN_SEARCH_MCP_TOOL = 'bailian_web_search'
+export const BAILIAN_SEARCH_MCP_URL = 'https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp'
+export const BAILIAN_SEARCH_MCP_TOOL = 'search_pro'
 export const DEFAULT_FRONTBRAIN_TOOL_BUDGET = 24
 export const MCP_NON_AUTH_HEADERS = ['accept', 'content-type', 'user-agent'] as const
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/u

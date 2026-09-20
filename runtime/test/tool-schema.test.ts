@@ -76,6 +76,9 @@ test('compiled tool schemas preserve the frozen contract with the native persona
       fn.description = '从当前会话的历史记忆中查找与用户问题相关的证据'
       const properties = record(record(fn.parameters).properties)
       delete properties.source
+      const parameters = record(fn.parameters)
+      assert.ok(Array.isArray(parameters.required))
+      parameters.required = parameters.required.filter(field => field !== 'source')
       record(properties.scope).description = 'recent 优先最近记录；any 在当前会话记忆内扩大查找'
     }
     assert.equal(

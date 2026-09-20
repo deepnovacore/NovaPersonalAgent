@@ -41,7 +41,7 @@ test('every projection matches the Python-exported golden outside Node display l
       ? '观察'
       : spec.display_name === 'guard' ? '监控' : null
     // Node distinguishes preparation feedback from actual executor startup.
-    const expected = spec.name === 'progress-started' ? {...pythonExpected, content: `需求梳理完毕，交给 ${spec.display_name} 执行。`} : localizedName === null || typeof pythonExpected.content !== 'string'
+    const expected = spec.name === 'progress-started' ? {...pythonExpected, content: `交给 ${spec.display_name} 执行。`} : localizedName === null || typeof pythonExpected.content !== 'string'
       ? pythonExpected
       : {...pythonExpected, content: pythonExpected.content.replace(spec.display_name, localizedName)}
     if (canonicalJson(actual) !== canonicalJson(expected)) {
@@ -569,7 +569,7 @@ test('a surrogate-reported channel does not also speak its own working progress'
       summary: null,
     },
   })
-  assert.deepEqual(queued(), ['需求梳理完毕，交给 Codex 执行。'])
+  assert.deepEqual(queued(), ['交给 Codex 执行。'])
 })
 
 test('Guard working heartbeats update state without creating another spoken turn', () => {
@@ -996,7 +996,7 @@ test('coding startup uses the executor display name and announces each delegate 
   service.projectRuntimeEvent(started)
   service.projectRuntimeEvent({...started, seq: 2})
 
-  assert.deepEqual(queued(), ['需求梳理完毕，交给 Test Builder 执行。'])
+  assert.deepEqual(queued(), ['交给 Test Builder 执行。'])
   assert.equal(service.session.delegateState('d-1'), 'running')
 })
 
@@ -1121,4 +1121,18 @@ test('caption source identity distinguishes adjacent same-role provider turns wi
     assert.equal(captions[0]!.turn_id,captions[1]!.turn_id)
     assert.notEqual(captions[0]!.turn_id,captions[2]!.turn_id)
   } finally {await service.close()}
+})
+
+
+test('steer receipts settle internally without startup or final narration', () => {
+  const {service, queued} = realtimeServiceHarness('projection', {delegate: {executor: 'codex', op: 'steer', routing_class: 'user_awaited'}})
+  service.projectRuntimeEvent({kind: 'progress', seq: 1, ts: 1, payload: {
+    channel: 'codex', delegate_id: 'd-1', op: 'steer', phase: 'started', internal_activity: 0, elapsed: 0, summary: null,
+  }})
+  service.projectRuntimeEvent({kind: 'handoff', seq: 2, ts: 2, payload: {
+    channel: 'codex', delegate_id: 'd-1', origin_ref: 'conversation:1', outcome: 'ok', trust: 'trusted_system',
+    content: {op: 'steer', code: 'accepted'}, refs: [],
+  }})
+  assert.equal(service.session.delegateState('d-1'), 'completed')
+  assert.deepEqual(queued(), [])
 })

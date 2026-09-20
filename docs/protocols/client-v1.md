@@ -53,6 +53,9 @@ After building runtime, run `node runtime/scripts/client-protocol-mock.mjs`. It 
 ## Media selection (backward-compatible v1 extension)
 
 New clients include `media: {transports: ["host_pcm_v1"]}` in `hello`.
+
+`hello` may also include `language: "zh-CN" | "en"`. The host validates this enum after authentication and before accepting input. It selects translated AI system instructions for this connection, including task narration; it does not translate user messages, force a response language, or change ASR/TTS models or voices. Omitting it restores the host's configured default (`NOVA_AUDIO_AGENT_LANGUAGE`, otherwise `zh-CN`), rather than inheriting the previous client's choice. Unsupported values reject the connection. Relay and both AOQ modes support the field; older hosts may ignore it. Clients reconnect to apply a changed language.
+
 The authenticated host selects its configured pipeline and returns in `client.ready`:
 
 ```json
@@ -164,3 +167,17 @@ accept that same ID. Clients must echo the ID from the approval frame, never inf
 it from the currently selected conversation. An unknown scoped target is rejected
 without falling back to the global service. Backend-instance and request-ID text
 replay rules above still apply.
+## Conversation presentation
+
+The iOS UI starts in realtime mode. It offers text chat only when the host selects
+cascaded media and advertises both `text_input` and `dictation`; losing that
+capability returns the UI to realtime. Switching the UI mode does not reconfigure
+the host pipeline. Entering text mode suspends live audio; leaving it cancels the
+in-progress dictation while preserving the editable text draft.
+
+The Swift client accumulates captions as an in-memory conversation list,
+using `message_id` / final text to update a message rather than rendering each
+partial caption as a new reply. This is client presentation, not a remote history
+pagination API or a guarantee of persistence across app restart. Desktop memory
+history pagination uses its separate local host interface. Approval decisions
+continue through the existing connection-bound command contract.

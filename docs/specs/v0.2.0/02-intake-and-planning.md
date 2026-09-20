@@ -24,7 +24,7 @@ contract.
   revision-bound IntakeSession below.
 - Dispatch payload is the model-authored `work_order` string sent as
   `turn/start` input text
-  ([`runtime/src/codex-app-server-transport.ts`](../../../runtime/src/codex-app-server-transport.ts)).
+  ([`runtime/src/codex-app-server-transport.ts`](../../../runtime/src/executors/codex/app-server-transport.ts)).
 - Every delegate already passes admission via `dispatchExternal` /
   `dispatchConfirmedExternal` in
   [`runtime/src/core/runtime.ts`](../../../runtime/src/core/runtime.ts): schema, known
@@ -529,6 +529,10 @@ Rules:
       before proposal accept; proposal accept does not recompile.
 - [ ] Pure “确认” against a pending `proposal_id` does not bump `revision`;
       amend does; stale `(intake_id, revision)` results are dropped.
+- [ ] Failed ASR preserves the intake and pending proposal with its original deadline;
+      release only the failed utterance reservation and ask again, never infer consent.
+      Without a proposal, keep planning paused until a new structured dispatch revises it;
+      an unrelated conversational reply must not resume the old plan.
 - [ ] `cancel` / `confirm` / direct `${name}__${op}` tools / Vision monitor
       calls never open coding intake; dispatch to another registered controller
       stays on that controller's typed contract.

@@ -67,6 +67,7 @@ export interface CompleteRequest {
   readonly prompt: string
   readonly jsonSchema?: Readonly<Record<string, JsonValue>> | null
   readonly images?: readonly GatewayImage[]
+  readonly reasoning?: 'disabled'
   readonly signal?: AbortSignal
 }
 
@@ -214,6 +215,7 @@ export interface OpenAIGatewayOptions {
   readonly clock: Clock
   readonly metrics?: MetricsSink
   readonly fetch?: typeof globalThis.fetch
+  readonly thinkingControl?: 'deepseek'
   readonly requestTimeout?: number
   /** Maximum silence between SSE body chunks, in seconds. */
   readonly streamIdleTimeout?: number
@@ -226,6 +228,7 @@ export class OpenAIModelGateway implements ModelGateway {
   readonly #clock: Clock
   readonly #metrics: MetricsSink
   readonly #fetch: typeof globalThis.fetch
+  readonly #thinkingControl: 'deepseek' | undefined
   readonly #requestTimeout: number
   readonly #streamIdleTimeout: number
 
@@ -238,6 +241,7 @@ export class OpenAIModelGateway implements ModelGateway {
     this.#clock = options.clock
     this.#metrics = options.metrics ?? new LoggingMetrics()
     this.#fetch = options.fetch ?? globalThis.fetch
+    this.#thinkingControl = options.thinkingControl
     this.#requestTimeout = options.requestTimeout ?? 120
     this.#streamIdleTimeout = options.streamIdleTimeout ?? 600
     if (!Number.isFinite(this.#streamIdleTimeout) || this.#streamIdleTimeout <= 0) {
@@ -304,7 +308,9 @@ export class OpenAIModelGateway implements ModelGateway {
     let finishReason: string | null = null
     let errorType: string | null = null
     try {
-      const pending = await this.#post(completeRequestBody(request), request.signal)
+      const body = completeRequestBody(request)
+      const pending = await this.#post(this.#thinkingControl === 'deepseek' && request.reasoning === 'disabled'
+        ? {...body, thinking: {type: 'disabled'}} : body, request.signal)
       let raw: unknown
       try {
         raw = await pending.response.json()

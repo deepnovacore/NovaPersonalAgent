@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   ArkCascadedLlmFailure,
   createArkCascadedLlmFactory,
+  createArkCascadedLlmSession,
   responsesToolSchema,
 } from '../src/realtime/cascaded/ark-llm.js'
 import type { CascadedLlmEvent } from '../src/realtime/cascaded/llm.js'
@@ -19,6 +20,31 @@ function sse(...events: readonly Record<string, unknown>[]): Response {
     headers: {'content-type': 'text/event-stream'},
   })
 }
+
+test('Ark narration isolates the fact from prior user requests and preserves conversation on return', async () => {
+  const requests: Record<string, unknown>[] = []
+  const session = createArkCascadedLlmSession({
+    async *stream(input) {
+      await Promise.resolve()
+      requests.push(input as unknown as Record<string, unknown>)
+      const response_id = `r${requests.length}`
+      yield {kind: 'response_started', response_id}
+      yield {kind: 'text_delta', response_id, text: '回答'}
+      yield {kind: 'response_completed', response_id}
+    },
+    close: () => Promise.resolve(),
+  })
+  const signal = new AbortController().signal
+  await collect(session.stream({inputs: [{kind: 'user_text', text: '之前的用户请求'}], tools: [], signal}))
+  await collect(session.stream({inputs: [{kind: 'host_activation', content: '授权尚未确认，请问你同意还是拒绝？'}], tools: [], signal}))
+  assert.equal(requests[1]?.previousResponseId, null)
+  assert.deepEqual(JSON.parse((requests[1]?.inputItems as {content: string}[])[0]!.content),
+    {text_to_say: '授权尚未确认，请问你同意还是拒绝？'})
+  assert.match(String(requests[1]?.responseAdaptation), /不代用户同意/u)
+  await collect(session.stream({inputs: [{kind: 'user_text', text: '继续'}], tools: [], signal}))
+  assert.match(JSON.stringify(requests[2]?.inputItems), /之前的用户请求/u)
+  await session.close()
+})
 
 test('Ark semantic tool translation validates identifiers and copies public fields', () => {
   const parameters = {type: 'object', properties: {city: {type: 'string'}}}

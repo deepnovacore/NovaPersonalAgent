@@ -125,6 +125,7 @@ test('production preflight uses the fixed native probe and never passes credenti
       hasApiKey: false,
       commandRunner,
     })
+    const stages: string[] = []
     const result = await runner.run({
       binary: hostBinaryForTest(await realpath(binary)),
       workspace: hostWorkspaceForTest(await realpath(workspace)),
@@ -135,7 +136,8 @@ test('production preflight uses the fixed native probe and never passes credenti
       persistent: false,
       preserveHome: true,
       workingInterval: 30,
-    }, 5_000)
+    }, 5_000, event => { stages.push(event) })
+    assert.deepEqual(stages, ['version', 'login', 'sandbox'])
     assert.deepEqual(result, {
       version: '0.151.0-alpha.7.2',
       root_matches: true,
@@ -626,7 +628,9 @@ test('bounded POSIX command waits for pipe EOF and reaps a leader-first descenda
     }), {status: 0, stdout: Buffer.from('ready')})
     const childCode = `require('node:fs').writeFileSync(${JSON.stringify(pidFile)},String(process.pid));setInterval(()=>{},1000)`
     const leaderCode = `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(childCode)}],{stdio:'inherit'}).unref()`
+    const cleanupEvents: string[] = []
     await assert.rejects(runBoundedCodexCommand({
+      observe: event => { cleanupEvents.push(event); throw new Error('advisory observer') },
       binary: process.execPath,
       argv: ['-e', leaderCode],
       cwd: root,
@@ -640,6 +644,7 @@ test('bounded POSIX command waits for pipe EOF and reaps a leader-first descenda
       && error !== null
       && Reflect.get(error, 'code') === 'preflight_timeout'
     ))
+    assert.deepEqual(cleanupEvents, ['cleanup_started', 'cleanup_completed'])
     const descendant = Number(await readFile(pidFile, 'utf8'))
     assert.ok(Number.isSafeInteger(descendant) && descendant > 0)
     assert.throws(() => process.kill(descendant, 0), error => (

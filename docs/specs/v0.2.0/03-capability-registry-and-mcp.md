@@ -2,11 +2,11 @@
 
 > Vision update: camera MCP and side-VLM foreground projection below are superseded by [native vision and independent monitoring](../../archs/11-vision.md). The current default foreground has five host/native tools; camera capture is not a tool.
 
-> 摘要：用 `capabilities.json` + 设置「能力」页统一管理内置模块（search / camera / coding / knowledge）与外部 MCP。内置 search / coding 仍是原生 executor；Camera 和 Knowledge 经内置 MCP 暴露直接工具（Knowledge 默认关闭，见 04）。搜索新增 MCP Provider（百炼 / DashScope WebSearch 预设）；**默认值在真实接入验证通过之前保持 Tavily**。外部 MCP 的工具白名单是唯一真相：前台按白名单装配，Codex 侧通过私有 `CODEX_HOME` 的 `enabled_tools` 投射同一份白名单，并在线程启动后用 `mcpServerStatus/list` 核对实际可见工具。MCP manifest 通过一层显式的适配规则进入现有工具编译器：不伪造只读属性，不兼容的服务器单独失效。
+> 摘要：用 `capabilities.json` + 设置「能力」页统一管理内置模块（search / camera / coding / knowledge）与外部 MCP。内置 search / coding 仍是原生 executor；Camera 使用原生视觉；Knowledge 经内置 MCP 暴露直接工具（Knowledge 默认关闭，见 04）。搜索新增 MCP Provider（百炼 / DashScope WebSearch 预设）；**默认值在真实接入验证通过之前保持 Tavily**。外部 MCP 的工具白名单是唯一真相：前台按白名单装配，Codex 侧通过私有 `CODEX_HOME` 的 `enabled_tools` 投射同一份白名单，并在线程启动后用 `mcpServerStatus/list` 核对实际可见工具。MCP manifest 通过一层显式的适配规则进入现有工具编译器：不伪造只读属性，不兼容的服务器单独失效。
 >
 > 修订（2026-09-03）：回应评审 P1-4（白名单未在 Codex 侧闭环）、P2-5（manifest 规则与编译器不兼容）及产品建议「先验证再切默认」；再修订回应 P2（别名在 32 字符 server 下可达 66 → 按 server 长度动态预算）。
 
-## Baseline (today)
+## Historical baseline (2026-09-03)
 
 - Executor names are arbitrary manifest keys and host routing is by declared
   roles; this spec has no fixed executor-name enum. A configured coding role is
@@ -57,11 +57,9 @@ summaries, and owned runtime channels come from the `AgentDescriptor` /
 executor projection is likewise defined there. In particular, an MCP server
 cannot become a hidden agent merely by changing its manifest.
 
-The built-in Camera MCP is the explicit exception to the earlier native-only
-boundary: `mcp__nova_camera__snapshot` is a Nova-owned direct tool, not an
-external server, not an agent, and not a dispatch/intake route. Search keeps
-the stable `SearchAdapter` contract; MCP is only a transport behind it, and
-the public tool remains `search__search`.
+Camera capture is host-owned native vision, not an MCP tool. Independent
+monitoring retains the Vision controller and hidden channels. Search keeps the
+stable `SearchAdapter` contract; MCP is a transport behind `search__search`.
 
 ## Goals
 
@@ -80,8 +78,8 @@ the public tool remains `search__search`.
 ## Non-goals
 
 - Rewriting native search / coding executors as external MCP servers. The
-  built-in Camera MCP (`mcp__nova_camera__snapshot`) is the explicit direct
-  tool exception documented above.
+  camera path remains native; Knowledge MCP and external MCP retain their
+  separate direct-tool boundaries.
 - Editing Codex’s own `~/.codex/config.toml` (Nova manages the per-workspace
   private home only).
 - Routing MCP tool approvals from Codex through the Nova broker in v0.2.0.
@@ -153,81 +151,24 @@ Constraints (v1):
   is a configuration error (no secret echo).
 - Remote HTTP requires HTTPS; loopback HTTP allowed only without auth headers.
 
-`camera` gates the built-in Camera MCP snapshot and the Vision controller's
-hidden monitoring channels together. The hardware-camera privacy toggle in the
-orb is orthogonal.
+### Current native vision contract
 
-For the current M1.5c production implementation, the sole camera-module source
-is `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` → strict
-`Settings.camera_module_enabled` → assembly, defaulting to `true`. The
-capabilities registry does not yet control this gate. The built-in Camera MCP
-is not an entry under user `mcpServers` and cannot be separately reconfigured
-as an external server.
-
-The later M3 registry will make `modules.camera.enabled` the persisted source;
-at that point the explicit CLI/CI env override will take precedence (`env >
-registry > true`). M3 is not implemented by the current M1.5c runtime.
-
-### M1.5c Vision and Camera contract
-
-The current M1.5c Vision controller owns the hidden `watch` and `guard`
-channels. Its only voice entry points are `dispatch(executor: 'vision', ...)`
-and `cancel(executor: 'vision', ...)`; `watch` and `guard` are never direct
-model tools, and Vision does not add a separate confirmation tool. The camera
-module is one assembly gate: in current M1.5c production, when
-`NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED=false` resolves to
-`Settings.camera_module_enabled=false`, assembly removes
-`mcp__nova_camera__snapshot`, the Vision controller, and its hidden `watch` /
-`guard` channels together.
-
-Monitoring is policy-driven: the host owns sampling cadence, wake priority,
-side-VLM invocation policy, and delivery mode. Watch/guard cannot alter those
-policies through model output, and both remain behind the same camera-module
-assembly gate.
-
-Vision clarification is a new dispatch, not a Coding intake continuation.
-On `clarification_required`, the frontend asks the user to restate the complete
-condition, notification preference, and duration. That next complete user
-request is sent through `dispatch(executor: 'vision', instruction: ...)` with
-its own origin and revision; Vision does not retain a pending clarification.
-
-The Camera MCP is deliberately in-process and in-memory. It supports exactly
-one image result per snapshot, with supported MIME types limited to
-`image/jpeg`, `image/png`, and `image/webp`. The boundary validates canonical
-base64 (no alternate textual encodings, malformed padding, or hidden second
-image) and the decoded payload is at most 5 MiB. The validated bytes are
-written to `MediaStore`, which returns the authoritative digest and
-`evidence_ref`; raw bytes, paths, and arbitrary MCP result objects do not cross
-into Qwen.
-
-The `watch_model` side VLM receives that one stored image plus the host-provided
-objective; the objective input is not subject to the observation output bound.
-It must produce strict JSON with exactly one `observation` string, whose
-length is at most 400 characters. JSON parse failure, extra or missing fields,
-an oversized observation, or model refusal fails with
-`vision_description_unavailable`. The snapshot binding's provider-facing
-`ToolAcceptance` / tool-result envelope must preserve that exact code (plus
-only a fixed host-authored message, if the envelope includes one); it must not
-remap the failure to generic `untrusted_external` or any other code. Qwen
-receives only the resulting
-`observation`, `captured_at`, image `dimensions`, and `evidence_ref`. Qwen's
-original-image capability remains `false` pending a separately verified future
-provider; an image ref in the Qwen context is evidence metadata, not an
-implicit image input.
+`modules.camera.enabled` gates independent monitoring, with an explicit
+`NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` override. Assembly can also receive a
+host-owned camera override, for example disabling camera in remote service mode.
+Conversation vision has its separate opt-in switch and verified model capability;
+monitoring owns its device, inference and lifecycle. Neither exposes a foreground
+camera snapshot tool. The current authority is [native vision and independent
+monitoring](../../archs/11-vision.md). The earlier Camera MCP design is preserved
+in the historical appendix below, not used as a current acceptance requirement.
 
 ### Precedence
 
-The registry is the source for MCP servers and the planned persisted module
-enablement; current M1.5c camera enablement is sourced from the runtime env
-mapping described above. Precedence for the current camera gate is simply:
-
-1. `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` when set (explicit CLI / CI
-   override);
-2. built-in default (`true`).
-
-When the M3 registry is implemented, camera precedence will become `env >
-registry > true`, with `modules.camera.enabled` as the persisted registry
-value. Precedence for the search provider is:
+The registry is the persisted source for MCP servers and module enablement.
+For the camera module, normal configuration precedence is explicit
+`NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` > `modules.camera.enabled` > `true`.
+A composition-level host override remains authoritative for disabled remote camera
+access. Search provider precedence is:
 
 1. `NOVA_AUDIO_AGENT_SEARCH_PROVIDER` env, if set (CLI / CI override, logged as
    an override);
@@ -263,8 +204,8 @@ An enabled coding role with duplicate coding-role adapters remains an
 ### FrontBrain visible-tool budget
 
 After registry filtering and manifest compilation, assembly counts every tool
-schema visible to the Qwen realtime FrontBrain — host/native tools, the
-built-in Camera MCP, and user-selected direct MCP tools — as `N` against the
+schema visible to the Qwen realtime FrontBrain — host/native tools, enabled
+Knowledge MCP, and user-selected direct MCP tools — as `N` against the
 configured budget `B`. If `N > B`, assembly fails closed with
 `frontbrain_tool_budget_exceeded`; the 能力 panel must show the exact `N/B`
 count and the over-budget selection. It must never silently truncate a user's
@@ -432,7 +373,7 @@ No MCP SDK in the sandboxed renderer.
 
 | Phase | Scope | Gate |
 |---|---|---|
-| M1.5c | Thin frontend contract: final six-tool Nova surface; in-process Camera MCP + side-VLM projection; Vision controller owns hidden `watch` / `guard`; camera module gate and policy-driven monitoring | Exact 6-tool compile; Camera boundary and `vision_description_unavailable` checks; Vision hidden-channel/controller checks; rerun applicable 08 live acceptance |
+| M1.5c | Thin frontend contract: five host/native tools; native conversation vision; Vision controller owns hidden `watch` / `guard`; camera module gate and policy-driven monitoring | Exact native tool compilation; conversation vision and missing-frame checks; Vision hidden-channel/controller checks; rerun applicable 08 live acceptance |
 | 03a | Registry schema + load + precedence; module enable filters; MCP `SearchTransport` + Bailian preset (opt-in); Tavily optional | Deterministic tests green |
 | 03a-flip | Default search provider → `mcp` | Live smoke recorded in Getting Started |
 | 03b | `McpExecutorAdapter` + compiler adaptation; desktop MCP editor; Codex projection with closure rules 1–5 | Fake MCP server + fake app-server fixtures green; live Codex run shows only allowlisted tools |
@@ -441,9 +382,9 @@ No MCP SDK in the sandboxed renderer.
 
 - [ ] Registry schema rejects oversize / bad keys / missing `${VAR}`.
 - [ ] Per-server failure isolates: one bad server → `failed`, others assembled.
-- [ ] FrontBrain tool count is exact: the final Nova surface counts as six
-      (`dispatch`, `cancel`, `confirm`, `memory__recall`, `search__search`,
-      `mcp__nova_camera__snapshot`) before external direct tools; `N/B` is
+- [ ] FrontBrain tool count is exact: the default host/native surface counts as five
+      (`dispatch`, `cancel`, `confirm`, `memory__recall`, `search__search`)
+      before enabled Knowledge MCP and external direct tools; `N/B` is
       shown in the 能力 panel and `N > B` fails assembly with no truncation or
       partial tool table. The candidate default `B = 24` remains explicitly
       pending Qwen realtime live validation.
@@ -457,19 +398,12 @@ No MCP SDK in the sandboxed renderer.
       approval FSM created and no dispatch/intake route. A valid call preserves
       the exact origin and revision; ASR semantic mishearing remains outside
       this provenance fence.
-- [ ] Camera M1.5c: in-process/in-memory MCP accepts exactly one image with
-      supported MIME (`image/jpeg`, `image/png`, or `image/webp`), canonical
-      base64, and decoded bytes ≤5 MiB; it stores bytes in `MediaStore` and
-      returns its digest/ref. `watch_model` must return strict JSON with only
-      `observation` ≤400 chars; malformed JSON, extra/missing fields, an
-      oversized observation, or model refusal returns
-      `vision_description_unavailable`; the provider-facing acceptance/result
-      preserves that exact code and never remaps it to a generic trust/error
-      label. The input objective is not bounded by that output limit. Qwen
-      receives only observation, captured_at, dimensions, evidence_ref; Qwen
-      original-image capability is false until a future provider is verified.
-- [ ] Disabled search / camera / coding / knowledge → tools absent from compiled
-      schema and Qwen instructions.
+- [ ] Native vision: no snapshot MCP tool; opt-in conversation capture and
+      independent monitoring follow [volume 11](../../archs/11-vision.md).
+- [ ] Disabled search / coding / knowledge → corresponding tools absent from
+      compiled schema and instructions; disabled camera removes its controller
+      for independent monitoring. Conversation capture follows its separate
+      opt-in and verified model-capability gate, not this registry toggle.
 - [ ] Fake MCP search server → `SearchAdapter` digests match golden URL rules;
       Tavily path unchanged; assembly succeeds with neither when disabled.
 - [ ] Search provider precedence: env > registry > default; desktop stores no
@@ -573,3 +507,82 @@ normalization. Tool approval is `auto`, supported by the pinned schema.
 UI must state: `maxCallsPerTurn` and `maxResultBytes` apply only to FrontBrain.
 Codex uses its native timeout and context handling. Generated private TOML contains
 references only, and host MCP configuration is never copied.
+
+## Historical Camera MCP proposal (superseded)
+
+The following original design and checklist are retained for traceability only.
+They do not describe the current native vision implementation or its release gate.
+
+`camera` gates the built-in Camera MCP snapshot and the Vision controller's
+hidden monitoring channels together. The hardware-camera privacy toggle in the
+orb is orthogonal.
+
+For the current M1.5c production implementation, the sole camera-module source
+is `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` → strict
+`Settings.camera_module_enabled` → assembly, defaulting to `true`. The
+capabilities registry does not yet control this gate. The built-in Camera MCP
+is not an entry under user `mcpServers` and cannot be separately reconfigured
+as an external server.
+
+The later M3 registry will make `modules.camera.enabled` the persisted source;
+at that point the explicit CLI/CI env override will take precedence (`env >
+registry > true`). M3 is not implemented by the current M1.5c runtime.
+
+### M1.5c Vision and Camera contract
+
+The current M1.5c Vision controller owns the hidden `watch` and `guard`
+channels. Its only voice entry points are `dispatch(executor: 'vision', ...)`
+and `cancel(executor: 'vision', ...)`; `watch` and `guard` are never direct
+model tools, and Vision does not add a separate confirmation tool. The camera
+module is one assembly gate: in current M1.5c production, when
+`NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED=false` resolves to
+`Settings.camera_module_enabled=false`, assembly removes
+`mcp__nova_camera__snapshot`, the Vision controller, and its hidden `watch` /
+`guard` channels together.
+
+Monitoring is policy-driven: the host owns sampling cadence, wake priority,
+side-VLM invocation policy, and delivery mode. Watch/guard cannot alter those
+policies through model output, and both remain behind the same camera-module
+assembly gate.
+
+Vision clarification is a new dispatch, not a Coding intake continuation.
+On `clarification_required`, the frontend asks the user to restate the complete
+condition, notification preference, and duration. That next complete user
+request is sent through `dispatch(executor: 'vision', instruction: ...)` with
+its own origin and revision; Vision does not retain a pending clarification.
+
+The Camera MCP is deliberately in-process and in-memory. It supports exactly
+one image result per snapshot, with supported MIME types limited to
+`image/jpeg`, `image/png`, and `image/webp`. The boundary validates canonical
+base64 (no alternate textual encodings, malformed padding, or hidden second
+image) and the decoded payload is at most 5 MiB. The validated bytes are
+written to `MediaStore`, which returns the authoritative digest and
+`evidence_ref`; raw bytes, paths, and arbitrary MCP result objects do not cross
+into Qwen.
+
+The `watch_model` side VLM receives that one stored image plus the host-provided
+objective; the objective input is not subject to the observation output bound.
+It must produce strict JSON with exactly one `observation` string, whose
+length is at most 400 characters. JSON parse failure, extra or missing fields,
+an oversized observation, or model refusal fails with
+`vision_description_unavailable`. The snapshot binding's provider-facing
+`ToolAcceptance` / tool-result envelope must preserve that exact code (plus
+only a fixed host-authored message, if the envelope includes one); it must not
+remap the failure to generic `untrusted_external` or any other code. Qwen
+receives only the resulting
+`observation`, `captured_at`, image `dimensions`, and `evidence_ref`. Qwen's
+original-image capability remains `false` pending a separately verified future
+provider; an image ref in the Qwen context is evidence metadata, not an
+implicit image input.
+
+- [ ] Camera M1.5c: in-process/in-memory MCP accepts exactly one image with
+      supported MIME (`image/jpeg`, `image/png`, or `image/webp`), canonical
+      base64, and decoded bytes ≤5 MiB; it stores bytes in `MediaStore` and
+      returns its digest/ref. `watch_model` must return strict JSON with only
+      `observation` ≤400 chars; malformed JSON, extra/missing fields, an
+      oversized observation, or model refusal returns
+      `vision_description_unavailable`; the provider-facing acceptance/result
+      preserves that exact code and never remaps it to a generic trust/error
+      label. The input objective is not bounded by that output limit. Qwen
+      receives only observation, captured_at, dimensions, evidence_ref; Qwen
+      original-image capability is false until a future provider is verified.

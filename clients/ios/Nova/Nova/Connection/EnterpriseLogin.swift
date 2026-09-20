@@ -34,7 +34,7 @@ import SwiftUI
     }
     deinit { monitor.cancel(); probe?.cancel(); exchange?.cancel(); expiry?.cancel(); session.invalidateAndCancel(); exchangeSession.invalidateAndCancel() }
     func refresh() {
-        guard let origin else { available = false; status = "此构建尚未配置飞书登录服务"; return }
+        guard let origin else { available = false; status = L10n.text("此构建尚未配置飞书登录服务"); return }
         probe?.cancel(); let id = UUID(); probeID = id; checking = true
         probe = Task { [weak self] in
             guard let self else { return }
@@ -58,31 +58,31 @@ import SwiftUI
         do {
             let attempt = try EnterpriseSSO.Attempt(origin: origin)
             let id = loginID
-            self.completion = completion; anchor = window; busy = true; status = "正在等待飞书登录"
+            self.completion = completion; anchor = window; busy = true; status = L10n.text("正在等待飞书登录")
             let web = ASWebAuthenticationSession(url: attempt.startURL, callbackURLScheme: "nova-sso") { [weak self] url, error in
                 Task { @MainActor in
                     guard let self, self.loginID == id, self.busy else { return }
                     self.web = nil
                     guard let url, error == nil else {
-                        self.cancel(); self.status = "飞书登录已取消"; return
+                        self.cancel(); self.status = L10n.text("飞书登录已取消"); return
                     }
                     do { self.redeem(try EnterpriseSSO.callback(url, state: attempt.state), verifier: attempt.verifier, id: id) }
-                    catch { self.cancel(); self.status = "飞书登录回调无效，请重试。" }
+                    catch { self.cancel(); self.status = L10n.text("飞书登录回调无效，请重试。") }
                 }
             }
             web.presentationContextProvider = self
             self.web = web
-            guard web.start() else { cancel(); status = "无法打开飞书登录，请重试。"; return }
+            guard web.start() else { cancel(); status = L10n.text("无法打开飞书登录，请重试。"); return }
             expiry = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(300))
                 guard !Task.isCancelled, let self, self.loginID == id else { return }
-                self.cancel(); self.status = "飞书登录超时，请重试。"
+                self.cancel(); self.status = L10n.text("飞书登录超时，请重试。")
             }
         } catch { cancel(); status = error.localizedDescription }
     }
     private func redeem(_ code: String, verifier: String, id: UUID) {
         guard let origin else { return }
-        status = "正在完成飞书登录"
+        status = L10n.text("正在完成飞书登录")
         exchange = Task { [weak self] in
             guard let self else { return }
             do {
@@ -96,13 +96,13 @@ import SwiftUI
                 self.deliverIfActive()
             } catch {
                 guard self.loginID == id, !Task.isCancelled else { return }
-                self.cancel(); self.status = "飞书登录失败，请检查网络后重试。"
+                self.cancel(); self.status = L10n.text("飞书登录失败，请检查网络后重试。")
             }
         }
     }
     private func deliverIfActive() {
         guard UIApplication.shared.applicationState == .active, let pending, let completion else { return }
-        guard pending.expiresAt > Date() else { cancel(); status = "飞书登录已过期，请重试。"; return }
+        guard pending.expiresAt > Date() else { cancel(); status = L10n.text("飞书登录已过期，请重试。"); return }
         // Clear ownership before Client.connect changes the connection revision.
         cancel(); completion(pending)
     }

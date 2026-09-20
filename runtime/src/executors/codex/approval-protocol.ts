@@ -211,7 +211,10 @@ function commandExecutionOffer(
       kind: isNetwork ? 'network' : 'command_execution', command: redactApprovalDetail(params.command), cwd: workspace,
       ...(scope ? {scope} : {}),
     }),
-    operation_summary: isNetwork ? 'Codex 请求访问网络。' : extra ? 'Codex 请求提升命令权限。' : 'Codex 请求执行一条工作区命令。',
+    operation_summary: approvalSummary(
+      isNetwork ? 'Codex 请求访问网络。' : extra ? 'Codex 请求提升命令权限。' : 'Codex 请求执行一条工作区命令。',
+      params.reason,
+    ),
     allowed_decisions: Object.freeze([...allowed]),
   })
 }
@@ -436,6 +439,12 @@ export function validateAndSnapshotOffer(input: ApprovalOffer): ApprovalOffer {
     operation_summary: summary,
     ...decisions,
   })
+}
+
+function approvalSummary(action: string, reason: unknown): string {
+  const purpose = typeof reason === 'string'
+    ? redactApprovalDetail(reason).replace(/[\s\p{Cc}\p{Cf}]+/gu, ' ').trim() : ''
+  return purpose ? [...`${action}执行器说明的用途：${JSON.stringify(purpose)}`].slice(0, CODEX_APPROVAL_SUMMARY_LIMIT).join('') : action
 }
 
 function boundedText(value: string, limit: number, strip = true): string {

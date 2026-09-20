@@ -11,7 +11,7 @@ import {buildQwenRealtimeAssembly} from '../src/composition/cascaded-realtime-as
 import {frontendInstructions} from '../src/realtime/qwen.js'
 import {CODEX_PROJECT_MANIFEST} from '../src/executors/codex/contract.js'
 
-const settings = () => settingsSchema.parse({executors: [], model_api_key: 'test-only', dashscope_api_key: 'test-only'})
+const settings = () => settingsSchema.parse({memory_connection: 'disabled', executors: [], model_api_key: 'test-only', dashscope_api_key: 'test-only'})
 const server = {transport: 'streamable-http', url: 'https://example.test/mcp', tools: {lookup: {enabled: true}}}
 
 test('registry default file absent is optional; explicit unreadable, malformed and invalid envelope fail redacted', () => {

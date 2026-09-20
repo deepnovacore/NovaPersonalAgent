@@ -21,6 +21,8 @@ import {
   type CodexAppServerLaunchConfig,
   type CodexHostPreflightRunner,
   type CodexLiveSchemaProbe,
+  type CodexPreflightObserver,
+  type CodexPreflightEvent,
 } from './app-server-transport.js'
 import {
   APP_SERVER_APPROVAL_SCHEMA_FILES,
@@ -74,6 +76,7 @@ const LIMIT_NAMES = Object.freeze(['cpu', 'as', 'nofile'] as const)
 const LIMIT_CLASSES = new Set(['finite', 'unbounded', 'unavailable'])
 
 export interface BoundedCodexCommand {
+  readonly observe?: CodexPreflightObserver
   readonly binary: string
   readonly argv: readonly string[]
   readonly cwd: string
@@ -347,7 +350,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
     this.#onDiagnostic = options.onDiagnostic ?? (() => undefined)
   }
 
-  async run(config: CodexAppServerLaunchConfig, timeoutMs: number): Promise<unknown> {
+  async run(config: CodexAppServerLaunchConfig, timeoutMs: number, observe?: CodexPreflightObserver): Promise<unknown> {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       throw new CodexTransportError('preflight_timeout')
     }
@@ -357,14 +360,16 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
       const prefixArgs = config.prefixArgs ?? []
       const workspace = hostWorkspacePath(config.workspace)
       requireWorkspaceRoot(workspace)
+      observePreflight(observe, 'version')
       const versionResult = await this.#command(
-        binary, [...prefixArgs, '--version'], workspace, deadline, 4096,
+        binary, [...prefixArgs, '--version'], workspace, deadline, 4096, this.#environment, observe,
       )
       const version = parseVersion(versionResult)
       let credential
       if (this.#hasApiKey) {
         credential = Object.freeze({present: true, identity: 'api_key', policy: 'process_only'})
       } else {
+        observePreflight(observe, 'login')
         const loginResult = await this.#command(
           binary,
           [...prefixArgs, 'login', 'status'],
@@ -372,6 +377,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
           deadline,
           4096,
           config.preserveHome ? {...this.#environment, CODEX_HOME: hostCodexHomeValue(config.codexHome).path} : this.#environment,
+          observe,
         )
         let identity: 'chatgpt' | 'api_key'
         try {
@@ -382,7 +388,8 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
         }
         credential = Object.freeze({present: true, identity, policy: 'saved_login'})
       }
-      const limits = await this.#runSandboxProbe(binary, prefixArgs, workspace, deadline)
+      observePreflight(observe, 'sandbox')
+      const limits = await this.#runSandboxProbe(binary, prefixArgs, workspace, deadline, observe)
       return Object.freeze({
         version,
         root_matches: true,
@@ -407,6 +414,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
     prefixArgs: readonly string[],
     workspace: string,
     deadline: number,
+    observe?: CodexPreflightObserver,
   ): Promise<Readonly<Record<string, string>>> {
     const materialized = this.#materializeProbe()
     const parent = dirname(workspace)
@@ -429,7 +437,7 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
         '-c', 'shell_environment_policy.include_only=["PATH","LANG","LC_ALL","TERM"]',
         materialized.path,
         '--main', workspace, canonicalCanary, marker, String(port),
-      ], workspace, deadline, MAX_COMMAND_STDOUT)
+      ], workspace, deadline, MAX_COMMAND_STDOUT, this.#environment, observe)
       const limits = parseProbe(result)
       if (readFileSync(canary, 'utf8') !== 'host-created-canary') {
         throw new CodexTransportError('sandbox_failed')
@@ -498,10 +506,12 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
     deadline: number,
     stdoutLimit: number,
     environment: Readonly<Record<string, string>> = this.#environment,
+    observe?: CodexPreflightObserver,
   ): Promise<BoundedCodexCommandResult> {
     const remaining = deadline - Date.now()
     if (remaining <= 0) throw new CodexTransportError('preflight_timeout')
     return this.#runCommand(Object.freeze({
+      ...(observe === undefined ? {} : {observe}),
       binary,
       argv: Object.freeze([...argv]),
       cwd,
@@ -530,6 +540,7 @@ export class NativeCodexLiveSchemaProbe implements CodexLiveSchemaProbe {
   async generate(
     config: CodexAppServerLaunchConfig,
     timeoutMs: number,
+    observe?: CodexPreflightObserver,
   ): Promise<Readonly<Record<string, unknown>>> {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
       throw new CodexTransportError('preflight_timeout')
@@ -538,6 +549,7 @@ export class NativeCodexLiveSchemaProbe implements CodexLiveSchemaProbe {
     chmodSync(directory, 0o700)
     try {
       const result = await this.#runCommand(Object.freeze({
+        ...(observe === undefined ? {} : {observe}),
         binary: hostBinaryPath(config.binary),
         argv: Object.freeze([
           ...(config.prefixArgs ?? []),
@@ -648,12 +660,23 @@ export async function runBoundedCodexCommand(
       ...(stderr.byteLength === 0 ? {} : {stderr}),
     })
   } catch (error) {
-    await stopAndReapCommandTree(child.pid, exit, stdoutClosed, stderrClosed)
+    observePreflight(command.observe, 'cleanup_started')
+    try {
+      await stopAndReapCommandTree(child.pid, exit, stdoutClosed, stderrClosed)
+      observePreflight(command.observe, 'cleanup_completed')
+    } catch (cleanupError) {
+      observePreflight(command.observe, 'cleanup_failed')
+      throw cleanupError
+    }
     if (error instanceof CodexTransportError) throw error
     throw new CodexTransportError('preflight_failed')
   } finally {
     clearTimeout(timeout)
   }
+}
+
+function observePreflight(observe: CodexPreflightObserver | undefined, event: CodexPreflightEvent): void {
+  try { observe?.(event) } catch { /* Diagnostics must never interrupt process-tree cleanup. */ }
 }
 
 function streamClosed(stream: NodeJS.ReadableStream): Promise<void> {

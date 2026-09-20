@@ -95,6 +95,36 @@ test('AOQ hello, one credential allocation, chat-only session and repeat fence',
   assert.equal(calls, 1)
 })
 
+test('chat-only instructions follow hello language, else the host-configured default', {timeout: 5000}, async t => {
+  const ZH = '你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行主机工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。'
+  // Per docs/protocols/client-v1.md, omitting `language` restores the host default rather than zh-CN.
+  for (const [configured, sent, expectEnglish] of [
+    [undefined, undefined, false], [undefined, 'en', true],
+    ['en', undefined, true], ['en', 'zh-CN', false], ['zh-CN', 'en', true],
+  ] as const) {
+    const server = new AoqChatServer({token, port: 0,
+      ...(configured === undefined ? {} : {language: configured}),
+      issueCredential: () => Promise.resolve(allocation)})
+    t.after(() => server.close())
+    const {port} = await server.start()
+    const client = await peer(port)
+    hello(client.socket, sent === undefined ? {} : {language: sent})
+    const ready = await client.next()
+    assert.equal(ready.type, 'client.ready')
+    connect(client.socket, ready.connection_id)
+    const reply = await client.next()
+    assert.equal(reply.type, 'aoq.credentials')
+    const instructions = String((reply.session as Record<string, unknown>).instructions)
+    const label = `configured=${String(configured)} sent=${String(sent)}`
+    if (expectEnglish) {
+      assert.match(instructions, /^You are Nova/, label)
+      assert.doesNotMatch(instructions, /[\u3400-\u9fff]/u, label)
+    } else {
+      assert.equal(instructions, ZH, label)
+    }
+    await server.close()
+  }
+})
 test('rejects bad auth, incompatible hello, tools, binary PCM, raw events and stale IDs', {timeout: 5000}, async t => {
   let calls = 0
   const server = new AoqChatServer({token, port: 0, issueCredential: () => { calls++; return Promise.resolve(allocation) }, authTimeoutMs: 40})

@@ -7,7 +7,7 @@ import {buildCascadedTextProvider} from '../src/cascaded-text-provider.js'
 import type {CascadedLlmInput} from '../src/realtime/cascaded/llm.js'
 
 test('production text factory only validates and constructs selected LLM with no speech credentials',async()=>{
- const settings={...loadSettings({DASHSCOPE_API_KEY:'test',NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'qwen'},true),doubao_tts_endpoint:'invalid',doubao_asr_endpoint:'invalid',volcengine_vad_threshold:-1}
+ const settings={...loadSettings({DASHSCOPE_API_KEY:'test',NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'qwen',NOVA_AUDIO_AGENT_LANGUAGE:'en'},true),doubao_tts_endpoint:'invalid',doubao_asr_endpoint:'invalid',volcengine_vad_threshold:-1}
  let sequence=0,opened=0,recalled=0,consumed=0,metered=0
  let adaptation:string|null|undefined
  const received:CascadedLlmInput[][]=[]
@@ -16,7 +16,7 @@ test('production text factory only validates and constructs selected LLM with no
   ...cascadedProviderRegistries,
   endpointing:{auto:forbidden},asr:{volcengine:forbidden},tts:{volcengine:forbidden},
   llm:{...cascadedProviderRegistries.llm,qwen:factoryInput=>({open:()=>{opened++;return {
-    async *stream(input){adaptation=input.responseAdaptation;factoryInput.onUsage?.({id:'usage',service:'llm',provider:'qwen',model:'test',status:'complete',inputTokens:3,outputTokens:2});received.push([...input.inputs]);await Promise.resolve();yield {kind:'response_started',response_id:'r'};yield {kind:'text_delta',text:'reply'};yield {kind:'response_completed',response_id:'r'}},
+    async *stream(input){assert.equal(input.language,'en');adaptation=input.responseAdaptation;factoryInput.onUsage?.({id:'usage',service:'llm',provider:'qwen',model:'test',status:'complete',inputTokens:3,outputTokens:2});received.push([...input.inputs]);await Promise.resolve();yield {kind:'response_started',response_id:'r'};yield {kind:'text_delta',text:'reply'};yield {kind:'response_completed',response_id:'r'}},
     abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),
   }}})},
  })

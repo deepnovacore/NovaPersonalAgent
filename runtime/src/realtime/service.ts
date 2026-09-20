@@ -1,3 +1,4 @@
+import type {PromptLanguage} from './prompt-language.js'
 export type { AgentControllerFactory,DelegateLike,DeliverySnapshot,ExecutorManifestLike,RealtimeServiceOptions,ServiceProvider,ServiceRuntime } from './service-ports.js'
 export { formatSeconds } from './service-state.js'
 import { CodingProgressNarrationState,type CodingProgressNarration } from './coding-progress-narration.js'
@@ -89,6 +90,8 @@ function sameAgentDescriptors(
 const SHUTDOWN_GRACE_MS = 250
 
 export class RealtimeService {
+  async setLanguage(language?: PromptLanguage): Promise<void> { await this.#provider.setLanguage?.(language) }
+
   playbackStarted(utteranceId: string, generationEpoch: number): boolean {return this.#host.playbackStarted(utteranceId, generationEpoch)}
 
   readonly #confirmation: ProjectConfirmationFlow
@@ -263,7 +266,7 @@ export class RealtimeService {
       ...options.intake,
       clock: this.#clock,
       record: (intake, kind, data) => {
-        if (kind === 'intake.failure') this.#telemetry?.record(kind, {
+        if (kind === 'intake.failure' || kind === 'intake.timing') this.#telemetry?.record(kind, {
           intake_id: intake.intake_id, revision: intake.revision, ...data,
         })
         options.intake!.record(intake, kind, data)
@@ -419,7 +422,8 @@ export class RealtimeService {
 
     this.#projection = new ProviderProjection({
       session: this.session, runtime: this.#runtime, clock: this.#clock, coding: this.#coding,
-      codingProgressNarration: this.#codingProgressNarration, telemetry: this.#telemetry,
+      codingProgressNarration: this.#codingProgressNarration,
+      generatePlan: options.intake?.settings.generate_plan !== false, telemetry: this.#telemetry,
       idFactory: this.#idFactory,
       queueHostItem: (intent, options) => this.queueHostItem(intent, options),
       agentNameForChannel: channel => this.#agentRegistry.agentNameForChannel(channel),
@@ -1274,7 +1278,11 @@ export class RealtimeService {
       }
     } else if (event.kind === 'user_transcript_failed') {
       if (accepted) {
-        this.#intake?.cancel()
+        // Failed speech is neither cancellation nor authorization. Release an existing
+        // proposal's speech hold; unfinished planning stays paused for a valid user turn.
+        if (this.#userOrigins.revisionForItem(event.session_epoch, event.item_id) === this.session.userInputRevision) {
+          this.#intake?.userInputFailed()
+        }
         if (this.#userOrigins.revisionForItem(event.session_epoch, event.item_id) === undefined) {
           this.#rememberUnboundUserOrigin(
             event.session_epoch,

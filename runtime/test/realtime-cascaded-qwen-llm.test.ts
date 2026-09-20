@@ -171,7 +171,7 @@ test('Qwen joins fragmented tool calls and retains a matched tool result with it
   assert.ok(messages.some(message => message.role === 'tool' && message.tool_call_id === 'call-1'))
   assert.equal(messages.some(message => message.content === '只读历史'), false)
   assert.equal(messages.at(-1)?.role, 'user')
-  assert.equal(messages.at(-1)?.content, 'Nova Audio Agent 宿主激活事实：最新问题')
+  assert.deepEqual(JSON.parse(messages.at(-1)?.content as string), {text_to_say: 'Nova Audio Agent 宿主激活事实：最新问题'})
 })
 
 for (const factOnly of [false, true]) test(`Qwen completes two sequential tool hops (factOnly=${factOnly})`, async () => {
@@ -797,4 +797,26 @@ test('thinking and buffered text do not start an idle TTS session', async () => 
     assert.deepEqual(received.map(event => event.kind), ['response_started', 'text_delta', 'response_completed'])
     await session.close()
   }
+})
+
+
+test('cascaded English translates conversation and narration prompts but preserves user content and history', async () => {
+  const requests: {messages: {role: string; content: string}[]}[] = []
+  const {frontendInstructions} = await import('../src/realtime/frontend-instructions.js')
+  const llm = createQwenCascadedLlmFactory({baseUrl: 'https://example.test', apiKey: 'test', model: 'test', instructions: frontendInstructions(),
+    fetchImpl: (_url, init) => {
+      assert.equal(typeof init?.body, 'string')
+      requests.push(JSON.parse(init!.body as string) as {messages: {role: string; content: string}[]})
+      return Promise.resolve(new Response('data: {"id":"r","choices":[{"delta":{"content":"Hello"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n', {headers: {'content-type': 'text/event-stream'}}))
+    },
+  }).open()
+  const signal = new AbortController().signal
+  await collect(llm.stream({language: 'en', inputs: [{kind: 'user_text', text: '用户原话不翻译'}], tools: [], signal}))
+  await collect(llm.stream({language: 'en', inputs: [{kind: 'host_activation', content: '任务已完成'}], tools: [], signal}))
+  assert.match(requests[0]!.messages[0]!.content, /^You are Nova/)
+  assert.equal(requests[0]!.messages[1]!.content, '用户原话不翻译')
+  assert.match(requests[1]!.messages[0]!.content, /text_to_say/)
+  assert.doesNotMatch(requests[1]!.messages[0]!.content, /[\u3400-\u9fff]/u)
+  assert.match(requests[1]!.messages[1]!.content, /任务已完成/)
+  await llm.close()
 })

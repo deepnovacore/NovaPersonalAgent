@@ -1,4 +1,5 @@
 import {personalCommandSchema} from './personal-agent/contracts.js'
+import {parsePromptLanguage, type PromptLanguage} from './realtime/prompt-language.js'
 export {VISION_MODELS, supportsVision} from './model/vision-capability.js'
 import {taskActionSchema} from './desktop/desktop-tasks.js'
 import { timingSafeEqual } from 'node:crypto'
@@ -81,7 +82,8 @@ const debugBoardRequestSchema = z.object({
   detail: z.enum(['compact', 'full']),
   channel: z.string().min(1).max(128).optional(),
   before_seq: z.number().int().positive().optional(),
-}).strict().refine(value => value.before_seq === undefined || value.channel !== undefined)
+  query: z.string().max(200).optional(),
+}).strict().refine(value => (value.before_seq === undefined || value.channel !== undefined) && (value.query === undefined || value.channel === 'personal'))
 
 export const playbackTelemetrySchema = z.object({
   type: z.literal('playback.telemetry'),
@@ -252,7 +254,7 @@ export interface DesktopServerOptions {
   readonly onControl?: (control: DesktopControl) => void | Promise<void>
   readonly onAudio?: (pcm: Uint8Array) => void | Promise<void>
   readonly onClientDisconnect?: (media?: {readonly hadProviderAttachment: boolean}) => void
-  readonly onClientAuthenticated?: () => void | Promise<void>
+  readonly onClientAuthenticated?: (language?: PromptLanguage) => void | Promise<void>
   readonly onDebugBoardRequest?: (
     request: DesktopDebugBoardRequest,
   ) => string | Promise<string>
@@ -552,6 +554,7 @@ export class NodeDesktopServer {
         if (!authenticated) {
           if (isBinary) throw new DesktopProtocolError('desktop authentication frame must be text')
           authenticateDesktopFrame(rawText(data), this.#options.token)
+          const language = parsePromptLanguage((JSON.parse(rawText(data)) as {language?: unknown}).language)
           authenticated = true
           this.#authenticated = true
           clearTimeout(authTimer)
@@ -560,7 +563,7 @@ export class NodeDesktopServer {
           }
           if (this.#active !== socket || this.#connectionGeneration !== generation
             || socket.readyState !== WebSocket.OPEN) return
-          await this.#options.onClientAuthenticated?.()
+          await this.#options.onClientAuthenticated?.(language)
           return
         }
         if (isBinary) {

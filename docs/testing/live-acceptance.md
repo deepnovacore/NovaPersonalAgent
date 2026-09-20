@@ -149,3 +149,26 @@ false-execution claims. Original policy-probe wording remains unchanged: common-
 case failure is not by itself a model-capability verdict. Diagnostic explicit-wording experiments
 were not substituted for the original acceptance questions. Production frontend prompts were not
 changed as part of this investigation.
+
+## Recovery and memory scenarios
+
+Run these against the actual candidate after the relevant deterministic suites.
+Record commit, platform, pipeline/provider, input, host control IDs, visible result
+and evidence limits. A test file's existence is not a passing run.
+
+| Scenario | Required observation |
+|---|---|
+| ASR fails while a proposal or approval is pending | Pending control remains; failure neither confirms, rejects nor cancels; later explicit confirmation consumes only the live request |
+| User interrupts a response, then the provider recovers | Stale response/audio is fenced; continuation belongs to the intended user turn; no duplicate executor dispatch |
+| Host progress narration overlaps a tool continuation | Factual narration cannot call tools; the bound continuation retains tools under current authority; captions and audio keep the same response ownership |
+| Long-running work with an independent approval | Task is not killed by a blanket task timer; bounded request expiry and explicit cancellation remain observable |
+| Desktop saves while a draft differs from disk | Save returns pending restart for service settings; explicit restart applies saved values and leaves unrelated drafts intact |
+| Personal memory survives a new session/restart | Inspect the source and learning state; recall through personal memory with provenance, using the [memory procedure](../personal-memory.md#use-it) |
+| iOS mode and reconnect | Realtime is default; text is capability-gated; captions update the client message list; reconnect never replays an approval automatically |
+
+The standalone mem0 script is opt-in and writes synthetic records using real
+models. It is separate from the live catalogue unless explicitly registered there.
+Human microphone/headset/speaker, native desktop and installed-platform checks
+remain separate. Add candidate-specific evidence to the existing
+[implementation index](../specs/v0.2.0/IMPLEMENTATION.md); only reviewed evidence can
+change [release declarations](../specs/v0.2.0/RELEASE-GATE.md).

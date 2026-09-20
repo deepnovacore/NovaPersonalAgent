@@ -361,7 +361,7 @@ export class ProjectConfirmationController {
     return true
   }
 
-  /** Transcription failed, so the answer is unknowable and the operation is cancelled. */
+  /** An unreadable answer releases only its reservation, never the proposal or its deadline. */
   failTranscript(input: {readonly epoch: number; readonly itemId: string}): ConfirmationOutcome {
     if (
       this.#proposal === null
@@ -370,9 +370,9 @@ export class ProjectConfirmationController {
     ) {
       return outcome('ignored')
     }
-    this.#clearAll()
-    this.#publish()
-    return outcome('cancelled', {responseText: '语音识别失败，本次操作已取消。'})
+    if (this.#isExpired(this.#proposal)) return this.#expireDecision()
+    this.releaseUndecided(input)
+    return outcome('ignored', {responseText: '刚才没听清，任务还没有开始。请再说一次是否同意。'})
   }
 
   /** Expire a proposal that is past its deadline. A proposal still in time is left alone. */

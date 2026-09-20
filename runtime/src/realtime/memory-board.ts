@@ -17,6 +17,7 @@ export type MemoryBoardDetail = 'compact' | 'full'
 export interface MemoryBoardMessageOptions {
   readonly detail?: MemoryBoardDetail
   readonly channel?: string
+  readonly query?: string
   readonly before_seq?: number
   readonly conversationEpoch?: number
 }

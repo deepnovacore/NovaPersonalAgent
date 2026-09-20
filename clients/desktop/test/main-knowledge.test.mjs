@@ -14,6 +14,7 @@ test('actual Main knowledge handler fences native picker across backend/settings
   const sender = {}
   let calls = 0
   const context = vm.createContext({
+    t: value => value,
     ipcMain: {handle: (_channel, fn) => {receive = fn}},
     settingsWindow: {webContents: sender}, settingsGeneration: 1,
     backendControl: {request: async () => {calls++; return {ok: true}}},

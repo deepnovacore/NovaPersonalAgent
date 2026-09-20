@@ -179,3 +179,23 @@ test('server rejects an invalid configured media path before allocating a listen
     assert.throws(() => new ClientServer({token, port: 0, media: media as unknown as ClientMedia}))
   }
 })
+
+
+test('authenticated language is validated and omitted language does not inherit the prior client', {timeout: 5000}, async t => {
+  const languages: unknown[] = []
+  const server = new ClientServer({token, port: 0, onClientAuthenticated: language => { languages.push(language) }})
+  t.after(() => server.close())
+  const {port} = await server.start()
+  for (const language of ['en', undefined]) {
+    const client = await peer(port)
+    client.socket.send(JSON.stringify({type: 'hello', token, protocol_version: 1, language}))
+    await client.next()
+    await server.disconnectClient()
+  }
+  assert.deepEqual(languages, ['en', undefined])
+  const invalid = await peer(port)
+  const closed = once(invalid.socket, 'close')
+  invalid.socket.send(JSON.stringify({type: 'hello', token, protocol_version: 1, language: 'fr'}))
+  await closed
+  assert.deepEqual(languages, ['en', undefined])
+})

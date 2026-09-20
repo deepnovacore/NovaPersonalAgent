@@ -1,3 +1,4 @@
+import {t} from './locale.mjs'
 import {EXECUTOR_PROGRESS, EXECUTOR_RESULT} from './wire-frame-types.mjs'
 const DETAIL_MS = 6_000
 const MILESTONE_MS = 12_000
@@ -10,7 +11,7 @@ export function parseConversationBubble(frame, mode) {
   if (mode !== 'all' || frame?.type !== 'caption' || frame.role !== 'assistant'
     || frame.final !== true || typeof frame.text !== 'string' || !frame.text.trim()) return null
   return {kind: 'conversation', delegateId: `reply-${frame.sequence ?? ''}`,
-    summary: frame.text.slice(0, 4000), level: 'milestone'}
+    summary: frame.text.slice(0, 4000), level: 'milestone', ...workIdentity(frame)}
 }
 
 export function parseProgressFrame(frame) {
@@ -27,6 +28,7 @@ export function parseProgressFrame(frame) {
     summary: frame.summary,
     level: frame.level,
     ts: frame.ts,
+    ...workIdentity(frame),
   })
 }
 
@@ -67,6 +69,12 @@ export function parseLastResultFrame(frame) {
 
 export function validProjectLabel(value) {
   return validText(value, 240) && [...value].length <= 120
+}
+
+// Both labels must come from the host frame; never infer an origin from spoken text.
+function workIdentity(frame) {
+  return validProjectLabel(frame.project) && validProjectLabel(frame.title)
+    ? {project: frame.project, title: frame.title} : {}
 }
 
 /** Same bounded public roster is checked before renderer display and native menu IPC. */
@@ -158,6 +166,7 @@ export function createProgressBubbleController({
         delegateId,
         kind: value.kind === 'conversation' ? 'conversation' : 'progress',
         summary: value.summary,
+        ...workIdentity(value),
         level: value.level,
         ts: Number.isFinite(value.ts) ? value.ts : 0,
         paused: false,
@@ -262,11 +271,17 @@ export function mountProgressBubbles({container, reserveBubbleArea, document = w
         bubble.dataset.expanded = String(item.expanded)
         const text = document.createElement('span')
         text.className = 'progress-bubble-text'
-        text.textContent = item.summary
+        if (item.project && item.title) {
+          const origin = document.createElement('strong')
+          origin.className = 'progress-bubble-origin'
+          origin.textContent = `${item.project} · ${item.title}`
+          origin.title = origin.textContent
+          text.append(origin, document.createTextNode(item.summary))
+        } else text.textContent = item.summary
         const toggle = document.createElement('button')
         toggle.type = 'button'
         toggle.className = 'progress-bubble-toggle'
-        toggle.textContent = item.expanded ? '收起' : '展开'
+        toggle.textContent = item.expanded ? t("收起") : t("展开")
         toggle.setAttribute('aria-expanded', String(item.expanded))
         toggle.addEventListener('click', () => { void bubbles.toggleExpanded(item.key) })
         bubble.append(text, toggle)

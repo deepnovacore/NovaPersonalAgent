@@ -17,6 +17,7 @@ class BoardElement extends EventTarget {
     this.children = []
     this.attributes = new Map()
     this.disabled = false
+    this.documentElement = {}
     this.hidden = false
     this.tabIndex = 0
     this.textContent = ''
@@ -32,19 +33,21 @@ class BoardElement extends EventTarget {
 class BoardDocument extends EventTarget {
   constructor() {
     super()
+    this.documentElement = {}
     this.hidden = false
     this.scrollingElement = new BoardElement('page')
     this.elements = new Map([
       'channels', 'status', 'refresh', 'export', 'copy-json', 'memory-tab',
-      'diagnostics-tab', 'memory-panel', 'diagnostics-panel',
+      'diagnostics-tab', 'memory-panel', 'diagnostics-panel', 'personal-tab', 'personal-panel',
       'diagnostics',
       'clear-conversation', 'channel-tabs',
     ].map(id => [`#${id}`, new BoardElement(id)]))
   }
 
+  createTreeWalker() { return {nextNode: () => null} }
   querySelector(selector) { return this.elements.get(selector) ?? null }
   querySelectorAll(selector) {
-    assert.equal(selector, '[data-scroll-key]')
+    assert.ok(['[data-scroll-key]', '[title], [placeholder], [aria-label], [alt]'].includes(selector))
     return []
   }
   createElement(tagName) { return new BoardElement(tagName) }
@@ -73,7 +76,7 @@ test('board refresh preserves page and keyed panel scroll positions after DOM re
   const oldChannel = {dataset: {scrollKey: 'channel:alpha'}, scrollTop: 83, scrollLeft: 11}
   const oldDiagnostic = {dataset: {scrollKey: 'diagnostic:one'}, scrollTop: 47, scrollLeft: 13}
   const document = {scrollingElement: page, querySelectorAll: selector => {
-    assert.equal(selector, '[data-scroll-key]')
+    assert.ok(['[data-scroll-key]', '[title], [placeholder], [aria-label], [alt]'].includes(selector))
     return [oldChannel, oldDiagnostic]
   }}
 
@@ -547,13 +550,13 @@ test('a refresh reuses the channel buttons so keyboard focus survives it', async
 })
 
 
-test('memory board keyboard navigation stays within the two retained tabs', async () => {
+test('memory board keyboard navigation includes local memory', async () => {
   const {boardTabForKey} = await import('../src/renderer/channel-tabs.mjs')
-  for (const key of ['ArrowLeft', 'ArrowUp', 'ArrowRight', 'ArrowDown']) {
-    assert.equal(boardTabForKey('memory', key), 'diagnostics')
-    assert.equal(boardTabForKey('diagnostics', key), 'memory')
-  }
-  assert.equal(boardTabForKey('diagnostics', 'Home'), 'memory')
+  assert.equal(boardTabForKey('memory', 'ArrowRight'), 'personal')
+  assert.equal(boardTabForKey('personal', 'ArrowRight'), 'diagnostics')
+  assert.equal(boardTabForKey('diagnostics', 'ArrowRight'), 'memory')
+  assert.equal(boardTabForKey('memory', 'ArrowLeft'), 'diagnostics')
+  assert.equal(boardTabForKey('personal', 'Home'), 'memory')
   assert.equal(boardTabForKey('memory', 'End'), 'diagnostics')
   assert.equal(boardTabForKey('unknown', 'ArrowRight'), null)
   assert.equal(boardTabForKey('memory', 'Enter'), null)

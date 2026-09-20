@@ -5,6 +5,7 @@ import {supportsVision} from '../model/vision-capability.js'
 
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
+const promptLanguageSchema = z.enum(['zh-CN', 'en'])
 const integratedProviderNameSchema = z.enum(['qwen'])
 const cascadedEndpointingProviderNameSchema = z.enum(['auto'])
 const cascadedAsrProviderNameSchema = z.enum(['volcengine'])
@@ -35,6 +36,7 @@ export const settingsSchema = z.object({
   monitor_camera_device_id: z.string().max(256).refine(value => !/[\x00-\x1f]/u.test(value)).default(''),
   surrogate_model: z.string().default('qwen-plus'),
   compressor_model: z.string().default('qwen-flash'),
+  language: promptLanguageSchema.default('zh-CN'),
   pipeline_mode: pipelineModeSchema.default('integrated'),
   integrated_provider: integratedProviderNameSchema.default('qwen'),
   cascade_endpointing_provider: cascadedEndpointingProviderNameSchema.default('auto'),
@@ -91,6 +93,7 @@ export const settingsSchema = z.object({
   codex_approval_mode: executorApprovalModeSchema.default('ask'),
   clarification_depth: clarificationDepthSchema.default('balanced'),
   plan_readback: planReadbackSchema.default('summary'),
+  generate_plan: z.boolean().default(true),
   planner_model: z.string().default(''),
   progress_bubbles: progressBubblesSchema.default('milestones'),
   capabilities_config_path: z.string().default('~/.nova-audio-agent/capabilities.json'),
@@ -103,8 +106,8 @@ export const settingsSchema = z.object({
   blackboard_path: z.string().min(1).default('~/.nova-audio-agent/blackboard.sqlite'),
   blackboard_owner_id: z.string().min(1).max(512).default('local'),
   memory_prerecall_enabled: z.boolean().default(true),
-  memory_connection: memoryConnectionSchema.default('disabled'),
-  memory_provider: z.enum(['voicemem']).nullable().default(null),
+  memory_connection: memoryConnectionSchema.default('local'),
+  memory_provider: z.enum(['voicemem', 'mem0']).nullable().default(null),
   memory_url: z.string().default(''),
   memory_token: z.string().nullable().default(null),
   memory_path: z.string().min(1).default('~/.nova-audio-agent/memory.sqlite'),
@@ -174,7 +177,7 @@ export type PersonalMemoryConfig = {readonly connection: 'remote'; readonly url:
 
 interface LocalPersonalMemoryConfig {
   readonly connection: 'local'
-  readonly provider: 'voicemem'
+  readonly provider: 'voicemem' | 'mem0'
   readonly extractionModel: string
   readonly path: string
   readonly userId: string
@@ -241,6 +244,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     monitor_camera_device_id: optionalString(environment.NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID),
     surrogate_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_SURROGATE_MODEL),
     compressor_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_COMPRESSOR_MODEL),
+    language: parsePromptLanguageSetting(environment.NOVA_AUDIO_AGENT_LANGUAGE),
     pipeline_mode: pipelineMode,
     camera_module_enabled: optionalBoolean(
       environment.NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED,
@@ -328,6 +332,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
       environment.NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH,
     ),
     plan_readback: parsePlanReadback(environment.NOVA_AUDIO_AGENT_PLAN_READBACK),
+    generate_plan: optionalBoolean(environment.NOVA_AUDIO_AGENT_GENERATE_PLAN),
     planner_model: optionalString(environment.NOVA_AUDIO_AGENT_PLANNER_MODEL),
     progress_bubbles: parseProgressBubbles(environment.NOVA_AUDIO_AGENT_PROGRESS_BUBBLES),
     capabilities_config_path: optionalString(
@@ -345,6 +350,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     blackboard_owner_id: optionalString(environment.NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID),
     memory_prerecall_enabled: optionalBoolean(environment.NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED),
     memory_connection: optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_CONNECTION),
+    ...((optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_CONNECTION) ?? 'local') === 'local'
+      ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
     memory_provider: optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_PROVIDER),
     memory_url: optionalString(environment.NOVA_AUDIO_AGENT_MEMORY_URL),
     memory_token: optionalSecret(environment.NOVA_AUDIO_AGENT_MEMORY_TOKEN),
@@ -633,6 +640,10 @@ function parseExecutors(raw: string | undefined, fallback: string): string[] {
 
 function parsePipelineMode(value: string | undefined): PipelineMode {
   return parseSelector(pipelineModeSchema, value, 'integrated', 'NOVA_AUDIO_AGENT_PIPELINE_MODE')
+}
+
+function parsePromptLanguageSetting(value: string | undefined): z.infer<typeof promptLanguageSchema> {
+  return parseSelector(promptLanguageSchema, value, 'zh-CN', 'NOVA_AUDIO_AGENT_LANGUAGE')
 }
 
 function parseIntegratedProvider(value: string | undefined): IntegratedProviderName {

@@ -677,7 +677,7 @@ test('an inline-fulfilled call gets no background acknowledgement on reconnect',
     call_id: 'call-1',
     item_id: 'tool-1',
     name: 'memory__recall',
-    arguments: {query: 'decide', scope: 'recent'},
+    arguments: {query: 'decide', scope: 'recent', source: 'session'},
     response_id: 'r-1',
   })
   const accepted = service.toolCallAcceptances()[0]

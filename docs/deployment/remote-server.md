@@ -8,7 +8,11 @@ camera transport is available. Desktop still launches its own child service.
 
 Stop the desktop instance before starting this service on the same host/project
 state. Do not let two runtimes own the same writable workspace or state directory.
-This service is not included automatically in existing desktop release packaging.
+These instructions describe a separately launched service. The current macOS
+desktop also has an opt-in managed phone service (see the pairing section below),
+with separate state under its `phone` directory. That isolation allows coexistence;
+it does not authorize launching a second service over the desktop's writable state.
+Installed-package acceptance remains separate.
 
 ## Host platform scope
 

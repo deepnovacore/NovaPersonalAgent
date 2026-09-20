@@ -1,6 +1,7 @@
 import type {ProcessingGrant} from '../memory-substrate/source-state.js'
 import type {MemoryCapabilities, MemoryObservation, MemoryEntry, MemoryListOptions, MemoryPage, MemorySourceRef, MemoryVersion} from './entry.js'
 export * from './entry.js'
+import type {MemoryInspection, MemoryInspectionQuery} from './personal-memory-inspection.js'
 
 /** Nova's durable personal-memory boundary. No provider types or execution authority. */
 export type PersonalMemoryRecallScope = 'recent' | 'any'
@@ -97,6 +98,8 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly correct?: (id: string, expectedVersion: MemoryVersion, content: string, userSource: MemorySourceRef) => Promise<{previous: MemoryEntry; entry: MemoryEntry}>
   readonly forgetEntry?: (id: string, expectedVersion: MemoryVersion) => Promise<MemoryEntry>
   readonly forgetSource?: (ref: string) => Promise<void>
+  /** Read-only host inspection; never exposed as an LLM tool. */
+  readonly inspect?: (query: MemoryInspectionQuery) => Promise<MemoryInspection>
   open(): Promise<void>
   close(): Promise<void>
   /** Absent for read-only providers. Resolve only after durable admission, or reject. */

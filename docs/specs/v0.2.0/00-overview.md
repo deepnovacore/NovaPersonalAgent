@@ -1,4 +1,4 @@
-# Nova Audio Agent v0.2.0 Spec Series
+# Documentation
 
 > Vision update: camera MCP and side-VLM foreground projection below are superseded by [native vision and independent monitoring](../../archs/11-vision.md). The current default foreground has five host/native tools; camera capture is not a tool.
 
@@ -335,3 +335,4 @@ maps each second-round finding to its resolution, retained decision and regressi
   criteria.
 - Do not claim a feature is shipped until its verification checklist is green
   on `v0.2.0dev`.
+[English](../../README.md) · [简体中文](../../README.zh-CN.md)

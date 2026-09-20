@@ -12,7 +12,7 @@
       <div class="board-title">
         <span class="eyebrow">NOVA / 记忆</span>
         <h1>记忆面板</h1>
-        <p>按记录频道查看 Nova 的上下文；频道记录不代表服务当前启用</p>
+        <p>查看会话记录与本机记忆</p>
       </div>
       <div class="board-actions">
         <span id="status" aria-live="polite"></span>
@@ -23,7 +23,8 @@
       </div>
     </header>
     <nav class="board-tabs" role="tablist" aria-label="记忆面板 视图">
-      <button id="memory-tab" type="button" role="tab" aria-selected="true" aria-controls="memory-panel">记忆</button>
+      <button id="memory-tab" type="button" role="tab" aria-selected="true" aria-controls="memory-panel">会话记录</button>
+      <button id="personal-tab" type="button" role="tab" aria-selected="false" aria-controls="personal-panel" tabindex="-1">本机记忆</button>
       <button id="diagnostics-tab" type="button" role="tab" aria-selected="false" aria-controls="diagnostics-panel" tabindex="-1">诊断</button>
     </nav>
     <main>
@@ -31,6 +32,7 @@
         <nav class="channel-tabs" id="channel-tabs" role="tablist" aria-label="记忆频道"></nav>
         <div id="channels"></div>
       </section>
+      <section id="personal-panel" role="tabpanel" aria-labelledby="personal-tab" hidden></section>
       <section id="diagnostics-panel" role="tabpanel" aria-labelledby="diagnostics-tab" hidden>
         <div id="diagnostics"></div>
       </section>

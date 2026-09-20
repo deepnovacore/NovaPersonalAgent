@@ -1,3 +1,4 @@
+import {preferredLanguage} from '../renderer/locale.mjs'
 import { randomBytes } from 'node:crypto'
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import {isAbsolute, resolve} from 'node:path'
@@ -37,6 +38,7 @@ const MAX_CIPHERTEXT_BASE64 = 8192
 
 export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,
+  language: 'zh-CN',
   palette: 'ember',
   proactivity: 'balanced',
   codingProgressNarration: 'smart',
@@ -66,6 +68,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   codexApprovalMode: 'ask',
   clarificationDepth: 'balanced',
   planReadback: 'summary',
+  generatePlan: true,
   plannerModel: '',
   progressBubbles: 'milestones',
   conversationVisionEnabled: false,
@@ -245,6 +248,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     : typeof rawVersion === 'number' && rawVersion >= SETTINGS_VERSION
   return {
     version: SETTINGS_VERSION,
+    language: pick(source.language, fallback.language, DEFAULT_SETTINGS.language, value => ['zh-CN', 'en'].includes(value) ? value : null),
     palette: pick(source.palette, fallback.palette, DEFAULT_SETTINGS.palette, validPalette),
     codingProgressNarration: pick(source.codingProgressNarration, fallback.codingProgressNarration, DEFAULT_SETTINGS.codingProgressNarration, value => value === 'smart' || value === 'continuous' ? value : null),
     proactivity: pick(source.proactivity, fallback.proactivity, DEFAULT_SETTINGS.proactivity, validProactivity),
@@ -279,6 +283,7 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     cascadedTtsVoice: pick(source.cascadedTtsVoice, fallback.cascadedTtsVoice, DEFAULT_SETTINGS.cascadedTtsVoice, validModelOrVoice),
     codexApprovalMode: pick(acceptsV4Fields ? source.codexApprovalMode : undefined, acceptsV4Fields ? fallback.codexApprovalMode : undefined, DEFAULT_SETTINGS.codexApprovalMode, validCodexApprovalMode),
     clarificationDepth: pick(acceptsV4Fields ? source.clarificationDepth : undefined, acceptsV4Fields ? fallback.clarificationDepth : undefined, DEFAULT_SETTINGS.clarificationDepth, validClarificationDepth),
+    generatePlan: pick(source.generatePlan, fallback.generatePlan, DEFAULT_SETTINGS.generatePlan, validBoolean),
     planReadback: pick(acceptsV4Fields ? source.planReadback : undefined, acceptsV4Fields ? fallback.planReadback : undefined, DEFAULT_SETTINGS.planReadback, validPlanReadback),
     plannerModel: pick(acceptsV4Fields ? source.plannerModel : undefined, acceptsV4Fields ? fallback.plannerModel : undefined, DEFAULT_SETTINGS.plannerModel, validDesktopString),
     progressBubbles: pick(acceptsV4Fields ? source.progressBubbles : undefined, acceptsV4Fields ? fallback.progressBubbles : undefined, DEFAULT_SETTINGS.progressBubbles, validProgressBubbles),
@@ -309,6 +314,7 @@ export function publicSettings(settings) {
   const normalized = normalizeSettings(settings)
   return {
     version: normalized.version,
+    language: normalized.language,
     palette: normalized.palette,
     proactivity: normalized.proactivity,
     codingProgressNarration: normalized.codingProgressNarration,
@@ -334,6 +340,7 @@ export function publicSettings(settings) {
     codexApprovalMode: normalized.codexApprovalMode,
     clarificationDepth: normalized.clarificationDepth,
     planReadback: normalized.planReadback,
+    generatePlan: normalized.generatePlan,
     plannerModel: normalized.plannerModel,
     progressBubbles: normalized.progressBubbles,
     conversationVisionEnabled: normalized.conversationVisionEnabled,
@@ -356,6 +363,7 @@ export function orbSettings(settings) {
   return Object.freeze({
     progressBubbles: normalized.progressBubbles,
     codingProgressNarration: normalized.codingProgressNarration,
+    language: normalized.language,
     palette: normalized.palette,
     conversationVisionEnabled: normalized.conversationVisionEnabled,
     startListeningOnLaunch: normalized.startListeningOnLaunch,
@@ -550,14 +558,20 @@ export function readSecret(settings, key, codec) {
   }
 }
 
-export async function loadSettings(file) {
+/** `initialize` pins a first-launch language choice to disk; pass false where the settings file
+ *  must stay untouched, such as the recovery-failed path that still offers the previous file. */
+export async function loadSettings(file, systemLanguages, {initialize = true} = {}) {
   let raw
+  let readable = true
   try {
     raw = JSON.parse(await readFile(file, 'utf8'))
-  } catch {
-    return normalizeSettings(undefined)
+  } catch (error) {
+    readable = error?.code === 'ENOENT'
+    raw = undefined
   }
-  return normalizeSettings(raw)
+  const settings = normalizeSettings(raw, {...DEFAULT_SETTINGS, language: systemLanguages ? preferredLanguage(systemLanguages) : DEFAULT_SETTINGS.language})
+  if (initialize && systemLanguages && readable && !['zh-CN', 'en'].includes(raw?.language)) await saveSettings(file, settings)
+  return settings
 }
 
 export async function saveSettings(file, settings) {

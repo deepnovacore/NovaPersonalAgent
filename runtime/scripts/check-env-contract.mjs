@@ -4,6 +4,19 @@ import {fileURLToPath} from 'node:url'
 
 import {publicEnvironmentContract} from '../dist/src/config/environment-contract.js'
 
+// Common user settings only; .env.example retains the complete public contract.
+const coreNames = new Set([
+  'DASHSCOPE_API_KEY', 'TAVILY_API_KEY', 'DEEPSEEK_API_KEY', 'ARK_API_KEY',
+  'DOUBAO_BIGMODEL_API_KEY', 'DOUBAO_ASR_API_KEY',
+  'NOVA_AUDIO_AGENT_LANGUAGE',
+  'NOVA_AUDIO_AGENT_PIPELINE_MODE', 'NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER',
+  'NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL', 'NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL',
+  'NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE', 'NOVA_AUDIO_AGENT_CODEX_BIN',
+  'NOVA_AUDIO_AGENT_CODEX_WORKSPACE', 'NOVA_AUDIO_AGENT_CODEX_APPROVAL_MODE',
+  'NOVA_AUDIO_AGENT_MEMORY_CONNECTION', 'NOVA_AUDIO_AGENT_MEMORY_PROVIDER',
+  'NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG',
+])
+
 const mode = process.argv[2]
 if (mode !== '--check' && mode !== '--write') {
   process.stderr.write('Usage: node runtime/scripts/check-env-contract.mjs --check|--write\n')
@@ -19,13 +32,13 @@ if (mode !== '--check' && mode !== '--write') {
       render: renderEnv,
     },
     {
-      path: resolve(repositoryRoot, 'docs/getting-started.md'),
+      path: resolve(repositoryRoot, 'docs/configuration.md'),
       start: '<!-- BEGIN GENERATED ENV CONTRACT -->',
       end: '<!-- END GENERATED ENV CONTRACT -->',
       render: () => renderMarkdown('en'),
     },
     {
-      path: resolve(repositoryRoot, 'docs/getting-started.zh-CN.md'),
+      path: resolve(repositoryRoot, 'docs/configuration.zh-CN.md'),
       start: '<!-- BEGIN GENERATED ENV CONTRACT -->',
       end: '<!-- END GENERATED ENV CONTRACT -->',
       render: () => renderMarkdown('zh'),
@@ -66,15 +79,12 @@ function renderEnv() {
 
 function renderMarkdown(language) {
   const heading = language === 'en'
-    ? '| Variable | Owner | Required | Default | Description |\n|---|---|---|---|---|'
-    : '| 变量 | 所属 | 必需条件 | 默认 | 说明 |\n|---|---|---|---|---|'
-  const rows = publicEnvironmentContract().map(entry => {
-    const required = language === 'en'
-      ? (entry.required === 'never' ? 'No' : 'When selected')
-      : (entry.required === 'never' ? '否' : '选择该能力时')
+    ? '| Variable | Default | Purpose |\n|---|---|---|'
+    : '| 变量 | 默认 | 用途 |\n|---|---|---|'
+  const rows = publicEnvironmentContract().filter(entry => coreNames.has(entry.name)).map(entry => {
     const fallback = language === 'en' ? 'None' : '无'
     const description = language === 'en' ? entry.descriptionEn : entry.descriptionZh
-    return `| \`${entry.name}\` | \`${entry.owner}\` | ${required} | ${escapeCell(entry.defaultLabel ?? fallback)} | ${escapeCell(description)} |`
+    return `| \`${entry.name}\` | ${escapeCell(entry.defaultLabel ?? fallback)} | ${escapeCell(description)} |`
   })
   return [heading, ...rows].join('\n')
 }

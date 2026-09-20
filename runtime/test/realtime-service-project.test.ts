@@ -340,7 +340,7 @@ test('pre-context speech cannot authorize retroactively and gets one host clarif
     item.intent.item.event_id === `approval:${approvalId}:clarification`
   ))
   assert.equal(clarifications.length, 1)
-  assert.equal(clarifications[0]?.intent.item.content, '请明确说同意或拒绝。')
+  assert.equal(clarifications[0]?.intent.item.content, '这次授权还没有确认，操作仍在等待。请问你同意还是拒绝？')
 
   assert.equal(service.executorApprovalDecision(approvalId, false), true)
   assert.deepEqual(await waiting, {decision: 'decline'})
@@ -1603,7 +1603,7 @@ test('attempt-one retry exhaustion opens one audible host clarification and a fr
     item.event_id === `approval:${approvalId}:clarification`
   ))
   assert.equal(clarification.length, 1)
-  assert.equal(clarification[0]?.content, '请明确说同意或拒绝。')
+  assert.equal(clarification[0]?.content, '这次授权还没有确认，操作仍在等待。请问你同意还是拒绝？')
   await service.flushHostItems()
   assert.equal(
     actions.filter(action => action === `inject:approval:${approvalId}:clarification`).length,
@@ -2165,7 +2165,7 @@ test('the dedicated confirmation function commits the reserved proposal', async 
   assert.equal(controller.pending, false)
 })
 
-test('a committed confirmation has one host-owned reply and suppresses the tool continuation', async () => {
+test('an admitted confirmation stays silent and suppresses the tool continuation', async () => {
   const {service, controller, injected, actions} = realtimeServiceHarness('confirmation', {
     commit: () => Promise.resolve({accepted: true, code: 'accepted'}),
   })
@@ -2184,17 +2184,16 @@ test('a committed confirmation has one host-owned reply and suppresses the tool 
   assert.equal(
     service.session.currentGeneration,
     null,
-    'the provider continuation must not speak in parallel with the deterministic host fact',
+    'the provider continuation must not speak after silent admission',
   )
   const confirmationFacts = [
     ...injected,
     ...service.queuedHostItems().map(item => item.intent.item),
   ].filter(item => item.event_id.startsWith('project-confirmation:'))
-  assert.equal(confirmationFacts.length, 1)
-  assert.equal(confirmationFacts[0]?.content, '正在启动任务。')
+  assert.equal(confirmationFacts.length, 0)
 })
 
-test('a voice confirmation quarantines the carrier and delivers the host fact after terminal', async () => {
+test('a silent voice confirmation quarantines the carrier without an acknowledgement after terminal', async () => {
   const {service, controller, injected, actions} = realtimeServiceHarness('confirmation', {
     commit: () => Promise.resolve({accepted: true, code: 'accepted'}),
   })
@@ -2203,11 +2202,12 @@ test('a voice confirmation quarantines the carrier and delivers the host fact af
 
   await confirmationTurn(service, {proposalId: proposal.proposal_id, confirmed: true})
   assert.equal(actions.includes('cancel:response-1'), true)
-  assert.ok(
+  assert.equal(
     service.queuedHostItems().some(item => (
       item.intent.item.content === '正在启动任务。'
     )),
-    'the confirmation fact is queued immediately',
+    false,
+    'no startup acknowledgement is queued',
   )
 
   await service.handleEvent({
@@ -2218,14 +2218,15 @@ test('a voice confirmation quarantines the carrier and delivers the host fact af
     reason: '',
   })
 
-  assert.ok(
+  assert.equal(
     injected.some(item => item.content === '正在启动任务。'),
-    'the confirmation fact is delivered once the carrier turn ends',
+    false,
+    'terminal does not produce a startup acknowledgement',
   )
   assert.equal(controller.pending, false)
 })
 
-test('a settled voice confirmation still owns its host reply after the carrier started speaking', async () => {
+test('a silent confirmation stops a carrier that already started speaking', async () => {
   const {service, controller, actions, injected} = realtimeServiceHarness('confirmation')
   await service.connect()
   const proposal = propose(controller)
@@ -2252,11 +2253,11 @@ test('a settled voice confirmation still owns its host reply after the carrier s
 
   assert.equal(actions.filter(action => action === 'commit').length, 1)
   assert.equal(actions.includes('cancel:spoken-carrier'), true)
-  assert.equal(toldAboutConfirmation(service, actions), true)
+  assert.equal(toldAboutConfirmation(service, actions), false)
   assert.equal([
     ...injected,
     ...service.queuedHostItems().map(item => item.intent.item),
-  ].filter(item => item.event_id.startsWith('project-confirmation:')).length, 1)
+  ].filter(item => item.event_id.startsWith('project-confirmation:')).length, 0)
 })
 
 test('a confirmation carrier cancel rejection reconnects without the Guard gate', async () => {
@@ -2288,8 +2289,8 @@ test('a confirmation carrier cancel rejection reconnects without the Guard gate'
   assert.equal([
     ...injected,
     ...service.queuedHostItems().map(item => item.intent.item),
-  ].filter(item => item.event_id.startsWith('project-confirmation:')).length, 1,
-  'the queued confirmation receipt survives reconnect exactly once')
+  ].filter(item => item.event_id.startsWith('project-confirmation:')).length, 0,
+  'silent admission remains silent across reconnect')
   await service.handleEvent({
     kind: 'response_audio_delta',
     session_epoch: 1,
@@ -2473,11 +2474,11 @@ test('a confirmation transition has a stable event id within its proposal lifecy
   }
   const first = realtimeServiceHarness('confirmation', {
     idFactory: lifecycleFactory('first'),
-    commit: () => Promise.resolve({accepted: true, code: 'accepted'}),
+    commit: () => Promise.resolve({accepted: true, code: 'committed'}),
   })
   const second = realtimeServiceHarness('confirmation', {
     idFactory: lifecycleFactory('second'),
-    commit: () => Promise.resolve({accepted: true, code: 'accepted'}),
+    commit: () => Promise.resolve({accepted: true, code: 'committed'}),
   })
   await first.service.connect()
   await second.service.connect()
@@ -2501,14 +2502,14 @@ test('identical confirmation text in different proposal lifecycles has different
       let count = 0
       return () => ++count === 1 ? 'proposal-a' : `a-${count}`
     })(),
-    commit: () => Promise.resolve({accepted: true, code: 'accepted'}),
+    commit: () => Promise.resolve({accepted: true, code: 'committed'}),
   })
   const second = realtimeServiceHarness('confirmation', {
     idFactory: (() => {
       let count = 0
       return () => ++count === 1 ? 'proposal-b' : `b-${count}`
     })(),
-    commit: () => Promise.resolve({accepted: true, code: 'accepted'}),
+    commit: () => Promise.resolve({accepted: true, code: 'committed'}),
   })
   await first.service.connect()
   await second.service.connect()
@@ -2574,14 +2575,7 @@ test('a second utterance captured during the reserved confirmation cannot produc
     status: 'completed',
     reason: 'completed',
   })
-  await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'response-2'})
-  await service.handleEvent({
-    kind: 'response_terminal',
-    session_epoch: 1,
-    response_id: 'response-2',
-    status: 'completed',
-    reason: 'completed',
-  })
+  // Silent admission creates no host acknowledgement response; the next response is the duplicate user turn.
   await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'response-3'})
   await service.handleEvent({
     kind: 'response_audio_delta',
@@ -3100,7 +3094,7 @@ test('a confirmation terminal before transcript final retries the same user turn
   assert.ok(telemetry.some(record => record.kind === 'project_confirmation.decision_retry_requested'))
 })
 
-test('a tool-first terminal confirmation delivers its host acknowledgement without another turn', async () => {
+test('a tool-first terminal admission settles silently without another turn', async () => {
   const {service, controller, actions, injected} = realtimeServiceHarness('confirmation')
   await service.connect()
   const proposal = propose(controller)
@@ -3150,15 +3144,15 @@ test('a tool-first terminal confirmation delivers its host acknowledgement witho
   assert.equal(actions.filter(action => action === 'ensure-response').length, 0)
   assert.equal(
     injected.filter(item => item.content === '正在启动任务。').length,
-    1,
-    'the idle floor receives exactly one acknowledgement in the same event pass',
+    0,
+    'silent admission produces no startup acknowledgement',
   )
   assert.equal(
     service.queuedHostItems().some(item => (
       item.intent.item.content === '正在启动任务。'
     )),
     false,
-    'the acknowledgement does not wait for another user turn or progress event',
+    'no startup acknowledgement remains queued',
   )
 })
 
@@ -3196,10 +3190,10 @@ test('a settled tool-first confirmation cannot consume the next proposal retry',
   assert.equal(actions.filter(action => action === 'ensure-response').length, 0)
   assert.equal(
     injected.filter(item => item.content === '正在启动任务。').length,
-    1,
-    'the first acknowledgement was injected before its provider response starts',
+    0,
+    'the first admission is silent',
   )
-  assert.equal(actions.filter(action => action === 'create:host_fact').length, 1)
+  assert.equal(actions.filter(action => action === 'create:host_fact').length, 0)
   assert.equal(
     service.queuedHostItems().some(item => (
       item.intent.item.content === '正在启动任务。'
@@ -3208,13 +3202,6 @@ test('a settled tool-first confirmation cannot consume the next proposal retry',
     'the first acknowledgement is not merely waiting in the host queue',
   )
 
-  await service.handleEvent({
-    kind: 'response_started', session_epoch: 1, response_id: 'first-ack-response',
-  })
-  await service.handleEvent({
-    kind: 'response_terminal', session_epoch: 1,
-    response_id: 'first-ack-response', status: 'completed', reason: '',
-  })
 
   const secondProposal = propose(controller)
   await reserveConfirmationTurn(service, {
@@ -3262,6 +3249,10 @@ test('a deduplicated confirmation output does not settle the user response debt'
   const duplicateId = 'duplicate-confirmation-output'
   const {service, controller, actions, injected} = realtimeServiceHarness('confirmation', {
     idFactory: () => duplicateId,
+    commit: () => {
+      actions.push('commit')
+      return Promise.resolve({accepted: true, code: 'committed'})
+    },
   })
   await service.connect()
   await service.session.injectToolOutput({
@@ -3306,13 +3297,13 @@ test('a deduplicated confirmation output does not settle the user response debt'
     'only the seed output reached the provider',
   )
   assert.equal(
-    injected.filter(item => item.content === '正在启动任务。').length,
+    injected.filter(item => item.content === '已确认，已创建并切换到工作区 研究项目。').length,
     0,
     'the acknowledgement cannot run ahead of a tool output the provider did not receive',
   )
   assert.ok(
     service.queuedHostItems().some(item => (
-      item.intent.item.content === '正在启动任务。'
+      item.intent.item.content === '已确认，已创建并切换到工作区 研究项目。'
     )),
     'the unresolved user-response debt keeps the acknowledgement queued',
   )
@@ -3536,10 +3527,10 @@ test('a user utterance with no item id cancels rather than waiting for an answer
   assert.ok(toldAboutConfirmation(service, actions))
 })
 
-test('a failed transcript cancels the confirmation', async () => {
-  const {service, controller} = realtimeServiceHarness('confirmation')
+test('a failed transcript preserves the proposal for a fresh confirmation', async () => {
+  const {service, controller, diagnostics, actions} = realtimeServiceHarness('confirmation')
   await service.connect()
-  propose(controller)
+  const proposal = propose(controller)
   await service.handleEvent({
     kind: 'user_speech_started',
     session_epoch: 1,
@@ -3557,7 +3548,12 @@ test('a failed transcript cancels the confirmation', async () => {
     session_epoch: 1,
     item_id: 'user-item-1',
   })
-  assert.equal(controller.pending, false)
+  assert.equal(controller.pending, true)
+  await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'retry-question'})
+  await finishProviderResponse(service, 'retry-question')
+  await confirmationTurn(service, {proposalId: proposal.proposal_id, confirmed: true,
+    itemId: 'retry-item', responseId: 'retry-response', transcript: '同意'})
+  assert.equal(controller.pending, false, JSON.stringify({diagnostics, actions}))
 })
 
 test('a banner decision reconnects when its quarantined carrier never reaches terminal', async () => {

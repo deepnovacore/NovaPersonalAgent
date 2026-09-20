@@ -177,12 +177,16 @@ export interface CodexAppServerTransport {
   close(reason?: 'shutdown' | 'cancel' | 'failure'): Promise<void>
 }
 
+export type CodexPreflightEvent = 'version' | 'login' | 'sandbox' | 'schema'
+  | 'cleanup_started' | 'cleanup_completed' | 'cleanup_failed'
+export type CodexPreflightObserver = (event: CodexPreflightEvent) => void
+
 export interface CodexHostPreflightRunner {
-  run(config: CodexAppServerLaunchConfig, timeoutMs: number): Promise<unknown>
+  run(config: CodexAppServerLaunchConfig, timeoutMs: number, observe?: CodexPreflightObserver): Promise<unknown>
 }
 
 export interface CodexLiveSchemaProbe {
-  generate(config: CodexAppServerLaunchConfig, timeoutMs: number): Promise<Readonly<Record<string, unknown>>>
+  generate(config: CodexAppServerLaunchConfig, timeoutMs: number, observe?: CodexPreflightObserver): Promise<Readonly<Record<string, unknown>>>
 }
 
 interface CredentialProvider {
@@ -742,28 +746,59 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     const probeConfig = {...this.#config, apiKey: null}
     delete probeConfig.managedMcp
     Object.freeze(probeConfig)
+    const started = Date.now()
+    let stage: CodexPreflightEvent = 'version'
+    let stageStarted = started
+    let cleanupStarted: number | null = null
+    let cleanupStatus = 'not_started'
+    const stages: Record<string, number> = {}
+    const observe: CodexPreflightObserver = event => {
+      if (event === 'cleanup_started') {
+        cleanupStarted = Date.now()
+        cleanupStatus = 'running'
+      } else if (event === 'cleanup_completed' || event === 'cleanup_failed') {
+        cleanupStatus = event === 'cleanup_completed' ? 'completed' : 'failed'
+      } else if (event !== stage) {
+        stages[stage] = Math.max(0, Date.now() - stageStarted)
+        stage = event
+        stageStarted = Date.now()
+      }
+    }
+    const failure = (error: unknown, fallback: CodexTransportCode): CodexTransportError => {
+      const safe = safeTransportError(error, fallback)
+      return new CodexTransportError(safe.code, {
+        method: `preflight/${stage}`, server_code: null,
+        elapsed_ms: Math.max(0, Date.now() - started),
+        message: JSON.stringify({stage_elapsed_ms: Math.max(0, Date.now() - stageStarted),
+          completed_stages_ms: stages, cleanup_status: cleanupStatus,
+          cleanup_elapsed_ms: cleanupStarted === null ? 0 : Math.max(0, Date.now() - cleanupStarted)}),
+      })
+    }
     let report: unknown
     try {
       report = await runWithin(
-        this.#preflightRunner.run(probeConfig, Math.max(0, hardDeadline - Date.now())),
+        this.#preflightRunner.run(probeConfig, Math.max(0, hardDeadline - Date.now()), observe),
         bounded,
         'preflight_timeout',
       )
     } catch (error) {
-      throw safeTransportError(error, 'preflight_failed')
+      throw failure(error, 'preflight_failed')
     }
-    const admitted = requireCompletePreflightReport(report)
+    let admitted: SafePreflightReport
+    try { admitted = requireCompletePreflightReport(report) }
+    catch (error) { throw failure(error, 'preflight_failed') }
     let bundle: Readonly<Record<string, unknown>>
     try {
+      observe('schema')
       bundle = await runWithin(
-        this.#schemaProbe.generate(probeConfig, Math.max(0, hardDeadline - Date.now())),
+        this.#schemaProbe.generate(probeConfig, Math.max(0, hardDeadline - Date.now()), observe),
         bounded,
         'preflight_timeout',
       )
       validateCodexSchemaBundle(bundle)
     } catch (error) {
-      if (error instanceof CodexTransportError && error.code === 'preflight_timeout') throw error
-      throw new CodexTransportError('unsupported_protocol')
+      throw failure(error instanceof CodexTransportError && error.code === 'preflight_timeout'
+        ? error : new CodexTransportError('unsupported_protocol'), 'unsupported_protocol')
     }
     return admitted
   }

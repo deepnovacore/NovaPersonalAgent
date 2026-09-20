@@ -1,7 +1,7 @@
 # GPT-Live / Codex Voice 对 Nova Audio Agent 的启发
 
-日期：2026-09-07  
-本地核对基线：`v0.2.0dev`，`aef12656051c3687c61e3ecd43701f1b0163727d`  
+日期：2026-09-07
+本地核对基线：`v0.2.0dev`，`aef12656051c3687c61e3ecd43701f1b0163727d`
 性质：基于公开资料与当前代码的分析和建议；本次只写文档，不修改运行时，不宣称建议已经实现或完成真人验收。
 
 ## 1. 结论
@@ -54,7 +54,7 @@ flowchart TD
 
 - [`turn-projection.ts`](../../runtime/src/executors/codex/turn-projection.ts)：从 app-server 通知生成 started / working 进度与最终文本；进度摘要由计数和最近 prose 组合，有长度限制。
 - [`service.ts`](../../runtime/src/realtime/service.ts)：`projectRuntimeEvent`、`onSuggestionSelected`、`#projectProgress`、`#projectHandoff` 决定哪些事实进入实时模型；包含身份校验、进度去重与终态处理。
-- [`prompting.ts`](../../runtime/src/prompting.ts)：Surrogate 不生成用户话语，也不调用工具，只选择是否开口及对应 suggestion；普通内部活动不应因为“新”就播报。
+- `runtime/src/prompting.ts`（历史路径；现见 [model/prompting.ts](../../runtime/src/model/prompting.ts)）：Surrogate 不生成用户话语，也不调用工具，只选择是否开口及对应 suggestion；普通内部活动不应因为“新”就播报。
 - [`speech-prep.ts`](../../runtime/src/realtime/speech-prep.ts)：确定性清理 Markdown、代码块、URL 等，并裁剪语音投影。它不是语义总结器。
 - [`frontend-instructions.ts`](../../runtime/src/realtime/frontend-instructions.ts)：明确要求自然口语、挑一两个要点、不朗读内部标识，不把进度说成完成。
 
@@ -138,7 +138,7 @@ Nova 前台已经要求“只转述最后一条尚未转述的 host 事实”，
 - 指令接线：检查 thread/start、thread/resume 与现有 launch validation；后续 steer 不应丢失约束或重复累积指令。
 - 若修改投影：在现有 [`codex-turn-projection.test.ts`](../../runtime/test/codex-turn-projection.test.ts) 增加一条能暴露结论被截断的回归。
 - 若修改清理：沿用 [`realtime-speech-prep.test.ts`](../../runtime/test/realtime-speech-prep.test.ts)，不另起测试框架。
-- 若修改前台指令或交付：遵循其 golden/模型边界约束，并覆盖 [`realtime-service.test.ts`](../../runtime/test/realtime-service.test.ts) 中相应路径。
+- 若修改前台指令或交付：遵循其 golden/模型边界约束，并覆盖 `runtime/test/realtime-service.test.ts`（历史测试路径，已拆分） 中相应路径。
 - 文本对照后再做真人语音测试：口语衔接、用户打断、扬声器回声和恢复不能由纯文本结果代替。
 
 本次没有运行这些实验，也没有运行运行时测试；它们是后续实施的验收建议，不是完成记录。当前发布状态仍以项目现有发布台账为准。

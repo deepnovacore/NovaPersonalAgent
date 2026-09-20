@@ -32,6 +32,21 @@ function prepareSelect(controller: ProjectConfirmationController) {
   })
 }
 
+test('failed ASR releases only its own answer and never extends the proposal deadline', () => {
+  const clock = new VirtualClock(10)
+  const controller = createController(clock)
+  const proposal = prepareSelect(controller)
+  controller.reserveUserItem({epoch: 1, itemId: 'failed'})
+  assert.match(controller.failTranscript({epoch: 1, itemId: 'failed'}).response_text!, /没听清/u)
+  assert.equal(controller.pending, true)
+  assert.equal(controller.reserveUserItem({epoch: 1, itemId: 'next'}), true)
+  assert.equal(controller.failTranscript({epoch: 1, itemId: 'failed'}).kind, 'ignored')
+  assert.equal(controller.acceptDecision({epoch: 1, itemId: 'failed', proposalId: proposal.proposal_id, confirmed: true}).kind, 'ignored')
+  clock.advanceTo(proposal.expires_at)
+  assert.equal(controller.failTranscript({epoch: 1, itemId: 'next'}).kind, 'expired')
+  assert.equal(controller.pending, false)
+})
+
 test('a matching structured true decision grants one-shot identity authority', () => {
   const controller = createController()
   const proposal = prepareSelect(controller)

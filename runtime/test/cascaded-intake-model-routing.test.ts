@@ -68,7 +68,8 @@ test('cascaded intake binds assessment and planning models to the selected suppo
     const previous = globalThis.fetch
     globalThis.fetch = (url, init) => {
       assert.equal(typeof init?.body, 'string')
-      const body = JSON.parse(init!.body as string) as {model: string}
+      const body = JSON.parse(init!.body as string) as {model: string; thinking?: unknown}
+      assert.deepEqual(body.thinking, scenario.provider === 'deepseek' && !scenario.generic ? {type: 'disabled'} : undefined)
       records.push({endpoint: typeof url === 'string' ? url : url instanceof URL ? url.href : url.url, model: body.model})
       return Promise.resolve(new Response(JSON.stringify({choices: [{message: {content: '{}'}}]}), {status: 200}))
     }

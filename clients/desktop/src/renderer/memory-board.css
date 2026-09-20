@@ -406,3 +406,11 @@ button:focus-visible {
 .history-load { align-self: center; padding: 6px 12px; border: 0; border-radius: 8px; background: transparent; color: #687586; font-size: 12px; cursor: pointer; }
 .history-load:hover:not(:disabled) { background: #e9effa; color: #4a658b; }
 .history-load:disabled { cursor: default; }
+
+#personal-panel input{font:inherit;padding:8px 12px;border:1px solid #cbd5e1;border-radius:8px;min-width:240px}
+#personal-panel .item{margin:12px 0;padding:16px}
+#personal-panel .board-actions{justify-content:flex-start}
+#personal-panel p{font-size:14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere}
+#personal-panel small{color:#64748b}
+#personal-panel details{margin-top:12px}
+#personal-panel summary{cursor:pointer}

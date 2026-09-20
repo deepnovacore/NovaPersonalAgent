@@ -41,10 +41,16 @@ test('host tool specs fold every registered controller into one enum with one de
   assert.equal(MAX_CONCURRENT_WORK, 3)
 })
 
-test('confirmArguments accepts exactly {id, accepted} and nothing else', () => {
+test('confirmArguments accepts exact one-shot or explicit positive session decisions', () => {
   assert.deepEqual(confirmArguments({id: 'p-1', accepted: true}), {id: 'p-1', accepted: true})
   assert.deepEqual(confirmArguments({accepted: false, id: 'a'}), {id: 'a', accepted: false})
+  assert.deepEqual(confirmArguments({id: 'p', accepted: true, scope: 'session'}), {id: 'p', accepted: true, scope: 'session'})
+  let getterRead = false
+  assert.equal(confirmArguments({id: 'p', accepted: true, get scope() { getterRead = true; return 'session' }}), null)
+  assert.equal(getterRead, false)
   for (const bad of [
+    {id: 'p', accepted: false, scope: 'session'}, {id: 'p', accepted: true, scope: 'global'},
+    {id: 'p', accepted: true, scope: undefined},
     null, 'x', [], {}, {id: 'p'}, {accepted: true}, {id: '', accepted: true}, {id: 'p', accepted: 'yes'},
     {id: 'p', accepted: true, extra: 1}, {id: 'x'.repeat(129), accepted: true},
   ]) assert.equal(confirmArguments(bad), null, JSON.stringify(bad))

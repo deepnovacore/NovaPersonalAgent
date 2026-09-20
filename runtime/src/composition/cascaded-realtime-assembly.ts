@@ -1,6 +1,7 @@
 import type {CommittedConversationPair} from '../realtime/history.js'
 import {transcribeDraft} from '../realtime/cascaded/transcribe.js'
 import {prerecallContext} from '../memory/prerecall.js'
+import type {PromptLanguage} from '../realtime/prompt-language.js'
 import type {RealtimeTelemetry} from '../realtime/telemetry.js'
 import {supportsVision} from '../model/vision-capability.js'
 import {captureConversationFrame} from '../core/camera-session.js'
@@ -260,7 +261,7 @@ export function buildTextRealtimeAssembly(
     :registry.llm.ark({...common,config:selected.config,...(options.arkLlmFactory===undefined?{}:{factory:options.arkLlmFactory})})
   const support=supportComposition(options,selected.provider,selected.config.model,selected.config.apiKey,selected.config.baseUrl,clock)
   const core=buildAssembly({...options,settings:support.settings,clock,ids,gateway:support.gateway,...((options.executors===undefined&&options.codexResource===undefined)?{}:{executors:[...(options.executors??[]),...(options.codexResource===undefined?[]:[options.codexResource.adapter])]})})
-  const provider=Object.assign(new CascadedRealtimeAdapter({textOnly:true,llm:llmFactory.open(),llmFactory,idFactory:()=>ids.next('text'),
+  const provider=Object.assign(new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,llm:llmFactory.open(),llmFactory,idFactory:()=>ids.next('text'),
     ...(options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await composition.retrieval.recall(query,{scope:'any',limit:3,signal});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await composition.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();composition.personalAgent.setPrefetchedRetrieval(query,current);return prerecallContext(query,current)}}}:{}),
     ...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),
   }),{
@@ -371,6 +372,7 @@ export function buildCascadedRealtimeAssembly(
         return prerecallContext(query, current)
       }
     }} : {}),
+    language: options.settings.language,
     ...(options.settings.conversation_vision_enabled && supportsVision(selection.llmProvider, selection.llmModel)
       ? {captureFrame: (signal: AbortSignal) => captureConversationFrame(core.frameSource, signal, core.mediaStore)} : {}),
     endpointingFactory,
@@ -412,6 +414,7 @@ function supportComposition(
   const gateway = new OpenAIModelGateway({
     baseUrl: connection.baseUrl,
     apiKey: connection.apiKey,
+    ...(connection.source !== 'generic' && provider === 'deepseek' ? {thinkingControl: 'deepseek' as const} : {}),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })
@@ -505,6 +508,7 @@ export interface BuildQwenRealtimeAssemblyOptions
 /** Narrow provider-only form used by the integrated provider registry. */
 export interface BuildQwenRealtimeProviderOptions {
   readonly history?:readonly CommittedConversationPair[]
+  readonly language?: PromptLanguage
   readonly onUsage?: UsageReporter
 
 
@@ -534,6 +538,7 @@ export function buildQwenRealtimeAssembly(
   if ('config' in options) {
     return new QwenAudioRealtimeAdapter({
       ...(options.history===undefined?{}:{history:options.history}),
+      ...(options.language === undefined ? {} : {language: options.language}),
       ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, options.config.url)!}),
       url: options.config.url,
       apiKey: options.config.apiKey,
@@ -574,6 +579,7 @@ export function buildQwenRealtimeAssembly(
       : {executors: [...(options.executors ?? []), ...(options.codexResource === undefined ? [] : [options.codexResource.adapter])]}),
   })
   const provider = options.qwenProvider ?? buildQwenRealtimeAssembly({
+    language: options.settings.language,
     ...(options.onUsage === undefined ? {} : {onUsage: options.onUsage}),
     config: qwen,
     ...(options.connector === undefined ? {} : {connector: options.connector}),
@@ -630,6 +636,7 @@ export function buildIntegratedRealtimeAssembly(
   const ids = options.ids ?? new MonotonicIdFactory()
   const capabilities = options.capabilities ?? capabilitiesFromSettings(options.settings)
   const qwenProvider = registry[provider]({
+    language: options.settings.language,
     ...(options.onUsage === undefined ? {} : {onUsage: options.onUsage}),
     config,
     ...(options.connector === undefined ? {} : {connector: options.connector}),

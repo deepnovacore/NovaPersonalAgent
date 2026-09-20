@@ -21,6 +21,7 @@ export function buildCascadedVoiceProvider(options:ConversationVoiceProviderOpti
   const instructions=frontendInstructions({search:capabilities.modules.search.enabled,camera:options.captureFrame!==undefined,coding:capabilities.modules.coding.enabled,knowledge:capabilities.modules.knowledge.enabled},options.executorApproval===true)
   const llm=registry.llm[selected.llm.provider === 'deepseek' ? 'qwen' : selected.llm.provider]({config:selected.llm.config,clock:options.clock,ids,instructions,...metering(selected.llm.config.baseUrl)})
   return new CascadedRealtimeProvider({
+    language:options.settings.language,
     endpointingFactory:registry.endpointing[selected.selection.endpointingProvider]({config:selected.endpointing,clock:options.clock}),
     asrFactory:registry.asr[selected.selection.asrProvider]({config:selected.asr,ids,...metering(selected.asr.endpoint)}),
     ttsFactory:registry.tts[selected.selection.ttsProvider]({config:selected.tts,ids,...metering(selected.tts.endpoint)}),
@@ -36,7 +37,7 @@ export function buildConversationVoiceProvider(options:ConversationVoiceProvider
   if(options.settings.pipeline_mode==='cascaded')return buildCascadedVoiceProvider(options)
   const capabilities=capabilitiesFromSettings(options.settings)
   return integratedProviderRegistry[options.settings.integrated_provider]({
-    config:requireIntegratedRealtime(options.settings),idFactory:options.idFactory,now:()=>options.clock.now(),
+    language:options.settings.language,config:requireIntegratedRealtime(options.settings),idFactory:options.idFactory,now:()=>options.clock.now(),
     executorApproval:options.executorApproval===true,
     modules:{search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,knowledge:capabilities.modules.knowledge.enabled},
     ...(options.onUsage===undefined?{}:{onUsage:options.onUsage}),

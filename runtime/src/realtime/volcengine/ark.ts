@@ -1,3 +1,4 @@
+import {translateSystemPrompt, type PromptLanguage} from '../prompt-language.js'
 import {randomUUID} from 'node:crypto'
 import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
 import { jsonValueSchema, type JsonValue } from '../../core/events.js'
@@ -71,6 +72,7 @@ export type ArkEvent =
   | ArkResponseFailed
 
 export interface ArkStreamInput {
+  readonly language?: PromptLanguage
   readonly inputItems: readonly JsonObject[]
   readonly tools: readonly JsonObject[]
   readonly previousResponseId: string | null
@@ -283,7 +285,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
     }
     const body = JSON.stringify({
       model: this.#model,
-      instructions: [this.#instructions, input.workspaceContext, input.responseAdaptation]
+      instructions: [translateSystemPrompt(this.#instructions, input.language), input.workspaceContext, input.responseAdaptation]
         .filter((item): item is string => item !== null && item !== undefined)
         .join('\n\n'),
       input: inputItems,

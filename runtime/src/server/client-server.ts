@@ -1,3 +1,4 @@
+import {parsePromptLanguage} from '../realtime/prompt-language.js'
 import type {ClientPairing} from './client-pairing.js'
 import {randomUUID} from 'node:crypto'
 import {WebSocket, WebSocketServer, type RawData} from 'ws'
@@ -137,8 +138,9 @@ export class ClientServer {
           const raw = bytes.toString('utf8')
           const credential = this.#options.pairing?.authenticate(raw)
           if (credential === undefined) authenticateDesktopFrame(raw, this.#options.token)
-          const hello = JSON.parse(raw) as {protocol_version?: unknown; media?: unknown}
+          const hello = JSON.parse(raw) as {protocol_version?: unknown; media?: unknown; language?: unknown}
           if (hello.protocol_version !== 1 || !acceptsClientMedia(hello.media)) { this.#reject(connection, 4006); return }
+          const language = parsePromptLanguage(hello.language)
           connection.authenticated = true
           if (credential !== undefined) {
             const untrack = this.#options.pairing!.track(credential, () => this.#reject(connection, 4003))
@@ -147,7 +149,7 @@ export class ClientServer {
           clearTimeout(timer)
           await this.#send(connection, clientReady(this.#instanceId, id, this.#options.media))
           if (this.#active === connection) {
-            await this.#options.onClientAuthenticated?.()
+            await this.#options.onClientAuthenticated?.(language)
           }
         } else if (binary) {
           const pcm = validateInputPcm(bytes)

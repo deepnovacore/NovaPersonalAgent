@@ -1242,7 +1242,7 @@ for (const race of ['assess-steer'] as const) {
 }
 
 for (const terminal of ['failed', 'empty'] as const) {
-  test(`intake ${terminal} transcript abandons pending speech safely and a new request can proceed`, async () => {
+  test(`intake ${terminal} transcript preserves the requirement without dispatching and accepts a correction`, async () => {
     const effects: string[] = []
     const {service} = realtimeServiceHarness('pipeline', {projectTool: true, intake: intakePorts({
       models: {
@@ -1266,16 +1266,21 @@ for (const terminal of ['failed', 'empty'] as const) {
       ? {kind: 'user_transcript_failed', session_epoch: 1, item_id: 'u2'}
       : {kind: 'user_transcript_final', session_epoch: 1, item_id: 'u2', text: '   '})
     await service.settleIntakeForTest()
-    assert.equal(service.intakeSession?.state, terminal === 'failed' ? 'closed' : 'clarifying')
+    assert.equal(service.intakeSession?.state, 'clarifying')
     assert.deepEqual(effects, [])
     if (terminal === 'empty') { await service.close(); return }
     await service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: 'r1', status: 'completed', reason: ''})
+    await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'held-question'})
+    await service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: 'held-question', status: 'completed', reason: ''})
+    await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'repeat-question'})
+    await service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: 'repeat-question', status: 'completed', reason: ''})
     await speak(service, 'u3', 'Discuss a new task')
     await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'r3'})
     await service.handleEvent({kind: 'tool_call_ready', session_epoch: 1, response_id: 'r3', item_id: 't3', call_id: 'c3', name: 'dispatch', arguments: {executor: 'codex', instruction: 'Discuss a new task'}})
     await service.settleIntakeForTest()
     assert.notEqual(service.intakeSession?.state, 'closed', JSON.stringify(service.toolCallAcceptances().at(-1)?.acceptance))
-    assert.equal(service.intakeSession?.opening, 'Discuss a new task')
+    assert.equal(service.intakeSession?.opening, 'Discuss adjusting the task')
+    assert.equal(service.intakeSession?.turns.at(-1)?.answer, 'Discuss a new task', JSON.stringify(service.toolCallAcceptances()))
     await service.close()
   })
 }

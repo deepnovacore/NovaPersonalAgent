@@ -1,4 +1,6 @@
 import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
+import {translateSystemPrompt, type PromptLanguage} from '../prompt-language.js'
+import {cascadedNarrationInstructions} from './llm.js'
 import {originalImageUrl} from './llm.js'
 import {randomUUID} from 'node:crypto'
 import {reportUsage, type UsageReporter, type UsageReport} from '../usage.js'
@@ -9,7 +11,6 @@ import type { JsonValue } from '../../core/events.js'
 import {
   MAX_CASCADED_LLM_HISTORY_CODEPOINTS,
   MAX_CASCADED_LLM_HISTORY_ITEMS,
-  CASCADED_NARRATION_INSTRUCTIONS,
   type CascadedLlmEvent,
   type CascadedLlmFactory,
   type CascadedLlmInput,
@@ -49,7 +50,7 @@ function jsonObject(value: unknown): value is JsonObject { return object(value) 
 function id(value: unknown): value is string { return typeof value === 'string' && value.length > 0 }
 function copy(value: JsonValue): JsonValue { return structuredClone(value) }
 function endpoint(baseUrl: string): string { try { const url = new URL(baseUrl); url.pathname = `${url.pathname.replace(/\/+$/u, '')}/chat/completions`; return url.toString() } catch { throw fail('configuration') } }
-function message(input: CascadedLlmInput): Message { return input.kind === 'tool_result' ? {role: 'tool', content: JSON.stringify(copy(input.output)), tool_call_id: input.call_id} : {role: input.kind === 'user_text' || input.kind === 'host_activation' ? 'user' : 'system', content: input.kind === 'user_text' ? (input.image ? [{type: 'text', text: input.text}, {type: 'image_url', image_url: {url: originalImageUrl(input.image)}}] : input.text) : input.content} }
+function message(input: CascadedLlmInput): Message { return input.kind === 'tool_result' ? {role: 'tool', content: JSON.stringify(copy(input.output)), tool_call_id: input.call_id} : {role: input.kind === 'user_text' || input.kind === 'host_activation' ? 'user' : 'system', content: input.kind === 'user_text' ? (input.image ? [{type: 'text', text: input.text}, {type: 'image_url', image_url: {url: originalImageUrl(input.image)}}] : input.text) : input.kind === 'host_activation' ? JSON.stringify({text_to_say: input.content}) : input.content} }
 function schema(tool: CascadedLlmTool): JsonObject { return {type: 'function', function: {name: tool.name, ...(tool.description === undefined ? {} : {description: tool.description}), parameters: copy(tool.parameters)}} }
 function size(units: readonly (readonly Message[])[]): {items: number; codepoints: number} { const all = units.flat(); return {items: all.length, codepoints: all.reduce((sum, item) => sum + codePointLengthLikePython(JSON.stringify(withoutImage(item))), 0)} }
 
@@ -69,7 +70,7 @@ class Session implements CascadedLlmSession {
     if(history!==undefined)this.#seed(history)
     if (!Number.isFinite(this.#idleTimeoutMs) || this.#idleTimeoutMs <= 0 || !Number.isFinite(this.#closeTimeoutMs) || this.#closeTimeoutMs <= 0) throw fail('configuration')
   }
-  async *stream(input: {readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
+  async *stream(input: {readonly language?: PromptLanguage; readonly inputs: readonly CascadedLlmInput[]; readonly tools: readonly CascadedLlmTool[]; readonly workspaceContext?: string | null; readonly responseAdaptation?: string | null; readonly signal: AbortSignal}): AsyncIterable<CascadedLlmEvent> {
     if (this.#closed) throw fail('closed'); if (input.signal.aborted) throw fail('aborted')
     this.#started = true
     const current = input.inputs.map(message), unresolved = this.#unresolved
@@ -77,7 +78,7 @@ class Session implements CascadedLlmSession {
     if (unresolved !== null) this.#checkResults(input.inputs, unresolved)
     this.#trim(unresolved ?? [])
     const factOnly = input.inputs.some(item => item.kind === 'host_activation')
-    const systemContent = [factOnly ? CASCADED_NARRATION_INSTRUCTIONS : this.#instructions,
+    const systemContent = [factOnly ? cascadedNarrationInstructions(input.language) : translateSystemPrompt(this.#instructions, input.language),
       factOnly ? null : input.workspaceContext, input.responseAdaptation]
       .filter((item): item is string => item !== null && item !== undefined)
       .join('\n\n')

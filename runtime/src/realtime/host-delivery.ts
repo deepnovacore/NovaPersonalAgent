@@ -193,6 +193,9 @@ export class HostDelivery {
         await this.session.requestPendingUserResponse()
       }
       await this.#flushHostItemsLocked()
+      if (this.#hostItems.length === 0 && !this.#ports.approvalHost.pending) {
+        await this.session.requestDeliveryRecovery()
+      }
       shouldRedriveContinuations = eligiblePreemptWasArmed
         && (
           !this.hasEligiblePreempt()

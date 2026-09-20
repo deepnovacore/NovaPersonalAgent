@@ -1,3 +1,4 @@
+import {t, localizeDocument} from '../src/renderer/locale.mjs'
 import {createPhonePanel} from '../src/renderer/phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from '../src/renderer/frontend-usage.mjs'
 import assert from 'node:assert/strict'
@@ -71,11 +72,12 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    t, localizeDocument, createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createKnowledgePanel: () => ({render() {}}),
     document: {
+      documentElement: {}, createTreeWalker: () => ({nextNode: () => null}),
       querySelector: node, querySelectorAll: () => [], getElementById: id => node(`#${id}`),
       createElement: () => ({children: [], append(...items) {this.children.push(...items)}}), addEventListener() {},
     },
@@ -621,6 +623,7 @@ test('the compact theme preserves motion contrast and forced-color accessibility
 })
 
 test('pipeline selection shows selectable stages and relative cost guidance', () => {
+  assert.doesNotMatch(html, /KV\s*Cache|缓存命中率/i)
   assert.doesNotMatch(html, /id="cascadedEndpointingProvider"/)
   assert.match(html, /相对集成式管线[\s\S]*<strong class="cost-saving">70%<\/strong>/)
   assert.match(html, /<input type="radio" name="pipelineMode" value="integrated">/)
@@ -683,6 +686,7 @@ test('settings preserve approval, planning, and progress controls alongside the 
     assert.match(html, new RegExp(`<input type="radio" name="planReadback" value="${value}"`))
   }
   assert.doesNotMatch(html, /id="plannerModel"/)
+  assert.match(html, /<input type="checkbox" id="generatePlan">/)
   for (const value of ['off', 'milestones', 'all']) {
     assert.match(html, new RegExp(`<input type="radio" name="progressBubbles" value="${value}"`))
   }
@@ -690,6 +694,26 @@ test('settings preserve approval, planning, and progress controls alongside the 
   assert.match(script, /yoloWarning\.hidden = view\.codexApprovalMode !== 'yolo'/)
   assert.doesNotMatch(script, /plannerModel\.value = view\.plannerModel/u)
   assert.doesNotMatch(html, /searchProvider|MCP 服务器|MCP 编辑器/u)
+})
+
+test('plan generation checkbox renders the persisted value and saves explicit false', async () => {
+  const patches = []
+  const panel = await mountSettingsPanel(publicView({generatePlan: true}), {
+    set: async ({settingsPatch}) => {
+      patches.push(settingsPatch)
+      return publicView({...settingsPatch, settingsApplyStatus: 'applied'})
+    },
+  })
+  assert.equal(panel.node('#generatePlan').checked, true)
+  panel.node('#generatePlan').checked = false
+  panel.node('#generatePlan').listeners.change()
+  panel.click('#settings-save')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(patches.length, 1)
+  assert.equal(patches[0].generatePlan, false)
+  assert.equal(panel.node('#generatePlan').checked, false)
+  panel.push(publicView({generatePlan: true}))
+  assert.equal(panel.node('#generatePlan').checked, true)
 })
 
 test('automatic discovery hides manual Codex and Projects configuration', () => {
@@ -890,14 +914,14 @@ test('one save names any rejected secret by its panel label', () => {
   assert.match(script, /tavilyApiKey: 'Tavily',/)
   assert.doesNotMatch(script, /codexApiKey: 'Codex',/)
   assert.match(script, /arkApiKey: 'Ark',/)
-  assert.match(script, /doubaoBigmodelApiKey: '火山语音',/)
+  assert.match(script, /doubaoBigmodelApiKey: t\("火山语音"\),/)
   // Each exact queued request retains its own rejection list. The renderer
   // names only keys this save submitted, so a coalesced neighbour cannot make
   // a different field's error appear in its status line.
   assert.match(script, /if \(result\.rejectedSecrets && result\.rejectedSecrets\.length\) \{/)
   assert.match(
     script,
-    /statusLabel\.textContent = `部分密钥未保存\(含非法字符\): \$\{labels\.join\('、'\)\}`/,
+    /statusLabel\.textContent = t\("部分密钥未保存\(含非法字符\): \{0\}", labels\.join\('、'\)\)/,
   )
   assert.match(
     script,
@@ -932,8 +956,10 @@ test('the Orb receives one committed palette notification only inside the save t
     /'nova:settings:changed', orbSettings\(currentSettings\)/g,
   ) ?? []
   assert.equal(notifications.length, 1)
-  const handler = mainScript.slice(mainScript.indexOf('async function applyDesktopSettings'))
-  const body = handler.slice(0, handler.indexOf('\n}'))
+  const handler = mainScript.slice(mainScript.indexOf("ipcMain.handle('nova:settings:set'"))
+  assert.match(handler.slice(0, handler.indexOf('\n  })')), /return applyDesktopSettings\(payload, restart\)/)
+  const shared = mainScript.slice(mainScript.indexOf('async function applyDesktopSettings('))
+  const body = shared.slice(0, shared.indexOf('\n}'))
   assert.match(body, /publishCommitted: publishCommittedSettings/)
   assert.ok(body.indexOf('write: async value') < body.indexOf('publishCommitted:'))
 })

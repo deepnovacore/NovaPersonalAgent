@@ -1,3 +1,4 @@
+import type {PromptLanguage} from './prompt-language.js'
 import {
 type AgentController
 } from '../executors/agent-controller.js'
@@ -149,6 +150,8 @@ export type ProviderReconnectReason =
 
 /** The provider surface the service uses directly: three calls, everything else via the session. */
 export interface ServiceProvider {
+  setLanguage?(language?: PromptLanguage): Promise<void>
+
   transcribeDraft?(pcm: Uint8Array, signal: AbortSignal): Promise<string>
   submitText?(text: string, signal: AbortSignal): Promise<void>
   sendAudio(pcm: Uint8Array, signal?: AbortSignal): Promise<void>

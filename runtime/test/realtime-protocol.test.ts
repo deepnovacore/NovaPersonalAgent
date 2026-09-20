@@ -282,3 +282,8 @@ test('response origin carries exact provider evidence without accepting business
     ]) assert.equal(realtimeProviderEventSchema.safeParse({...started, origin}).success, false)
   }
 })
+
+
+test('public narration cannot be attached to control tool output', () => {
+  assert.equal(hostContextItemSchema.safeParse({...toolOutput, speech_content: 'public'}).success, false)
+})

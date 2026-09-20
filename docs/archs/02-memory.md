@@ -10,8 +10,11 @@ of prompt text.
   FSMs are separate host state, never model-writable planning state. Entries carry time, trust,
   priority, outcome, and evidence references. Applying an event precedes any response derived from
   it. Only the causal runtime owns current task/executor state.
-- **Personal memory.** Optional VoiceMem retains user-approved facts across conversations.
-  Its lifecycle, recall and deletion are independent of live task state.
+- **Personal memory.** Local mem0 is enabled by default; VoiceMem, a host-managed remote
+  connection, or disabled memory can be selected explicitly. Durable source admission and
+  asynchronous extraction retain facts across conversations. Recall, host deletion and optional
+  inspection are independent of live task state. See [personal memory](../personal-memory.md)
+  for configuration, model data flow and the limits of the current desktop view.
 
 ## Separate document knowledge (K)
 
@@ -31,5 +34,4 @@ There is no automatic corpus injection into ContextView. See
 [spec 04](../specs/v0.2.0/04-knowledge-base.md) and its separate live acceptance ledger.
 
 Sensitive path and content gates live in `runtime/src/memory/sensitivity.ts` and are shared by knowledge
-and executor reference handling. The future memory substrate is specified separately in
-[06](../specs/v0.3.0/06-memory-substrate.md); it is not implemented.
+and executor reference handling.

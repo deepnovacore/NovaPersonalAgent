@@ -2,11 +2,14 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
+    @AppStorage("nova.language") private var language = L10n.initialLanguage()
     @StateObject private var client = Client()
     @StateObject private var enterprise = EnterpriseLogin()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var dictationPressed = false
+    @State private var conversationMode = 1
+    @State private var voiceInput = false
     @State private var settings = false
     @State private var scanning = false
     @State private var invitation: PairingCode?
@@ -17,15 +20,16 @@ struct ContentView: View {
     private let ink = Color(red: 0.035, green: 0.055, blue: 0.08)
 
     private var stateLabel: String {
-        if client.connecting { return "正在连接" }
-        if !client.connected { return "尚未连接" }
-        if client.muted { return "麦克风已静音" }
-        return client.voice ? "正在聆听" : "已连接"
+        if client.connecting { return L10n.text("正在连接") }
+        if !client.connected { return L10n.text("尚未连接") }
+        if client.muted { return L10n.text("麦克风已静音") }
+        return client.voice ? L10n.text("正在聆听") : L10n.text("已连接")
     }
     var body: some View {
         personalBody
         .preferredColorScheme(.dark).tint(mint)
         .sheet(isPresented: $settings, onDismiss: { enterprise.cancel() }) { connectionSettings }
+        .onChange(of: client.editableInput) { _, enabled in if !enabled { conversationMode = 1 } }
         .onChange(of: client.connectionRevision) { _, _ in enterprise.cancel() }
         .onChange(of: client.server) { _, _ in enterprise.cancel() }
         .onChange(of: client.token) { _, _ in enterprise.cancel() }
@@ -39,14 +43,39 @@ struct ContentView: View {
             ink.ignoresSafeArea()
             RadialGradient(colors: [mint.opacity(0.085), .clear], center: .topTrailing,
                            startRadius: 0, endRadius: 500).ignoresSafeArea()
-            ScrollView {
-                VStack(spacing: 28) {
-                    header
-                    hero
-                    if !client.captions.isEmpty { conversation }
-                    if !client.approvals.isEmpty { decisions }
-                    if client.connected && (!client.taskStates.isEmpty || !client.results.isEmpty) { work }
-                }.padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 24)
+            VStack(spacing: 0) {
+                header.padding(.horizontal, 24).padding(.vertical, 12)
+                Picker(L10n.text("对话方式"), selection: $conversationMode) {
+                    if client.editableInput { Text(L10n.text("文字聊天")).tag(0) }
+                    Text(L10n.text("实时对话")).tag(1)
+                }.pickerStyle(.segmented).padding(.horizontal, 24).padding(.bottom, 12)
+                    .onChange(of: conversationMode) { _, mode in
+                        if mode == 0 { client.suspendAudio() }
+                        else { client.cancelDictation() }
+                    }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(spacing: 18) {
+                            if conversationMode == 1 && client.transcript.messages.isEmpty { hero }
+                            if client.transcript.messages.isEmpty {
+                                Text(L10n.text("有什么想聊的？")).foregroundStyle(.secondary).padding(.top, 60)
+                            }
+                            conversation
+                            if !client.approvals.isEmpty { decisions }
+                            Color.clear.frame(height: 1).id("latest")
+                        }.padding(.horizontal, 20).padding(.bottom, 18)
+                    }.scrollDismissesKeyboard(.interactively)
+                    .overlay(alignment: .bottomTrailing) {
+                        Button { withAnimation { proxy.scrollTo("latest", anchor: .bottom) } } label: {
+                            Image(systemName: "arrow.down").padding(12).background(.ultraThinMaterial, in: Circle())
+                        }.accessibilityLabel(L10n.text("查看最新消息")).padding(12)
+                    }
+                    .onChange(of: client.transcript.messages.count) { _, _ in
+                        if client.transcript.messages.last?.role == "user" {
+                            withAnimation { proxy.scrollTo(client.transcript.messages.last?.id, anchor: .top) }
+                        }
+                    }
+                }
             }
             .safeAreaInset(edge: .bottom, spacing: 0) { controls }
         }
@@ -62,7 +91,7 @@ struct ContentView: View {
                 }.foregroundStyle(.white.opacity(0.8)).padding(.horizontal, 14).frame(minHeight: 44)
                     .background(.white.opacity(0.055), in: Capsule())
                     .overlay(Capsule().strokeBorder(.white.opacity(0.09)))
-            }.accessibilityLabel("连接设置，\(stateLabel)")
+            }.accessibilityLabel(L10n.text("连接设置，{0}", stateLabel))
         }
     }
     private var hero: some View {
@@ -79,38 +108,42 @@ struct ContentView: View {
         }
     }
     private var conversation: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            if let user = client.captions["user"], !user.isEmpty {
-                Text(user).font(.subheadline).foregroundStyle(.white.opacity(0.6))
-                    .textSelection(.enabled).accessibilityLabel("你：\(user)")
-                if client.captions["assistant"]?.isEmpty == false {
-                    Rectangle().fill(.white.opacity(0.08)).frame(height: 1)
-                }
+        LazyVStack(alignment: .leading, spacing: 18) {
+            ForEach(client.transcript.messages) { message in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(message.role == "user" ? L10n.text("你") : "Nova").font(.caption).foregroundStyle(.secondary)
+                    if message.role == "assistant" {
+                        ForEach(Array(message.text.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+                            let content = line.replacingOccurrences(of: "^#{1,6} +", with: "", options: .regularExpression)
+                            Text((try? AttributedString(markdown: content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(content))
+                                .font(.body).lineSpacing(5).fixedSize(horizontal: false, vertical: true)
+                        }
+                    } else {
+                        Text(message.text).fixedSize(horizontal: false, vertical: true)
+                    }
+                }.textSelection(.enabled).padding(18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(message.role == "user" ? mint.opacity(0.10) : .white.opacity(0.035), in: RoundedRectangle(cornerRadius: 18))
+                    .id(message.id)
             }
-            if let assistant = client.captions["assistant"], !assistant.isEmpty {
-                Text(assistant).font(.body).lineSpacing(6).foregroundStyle(.white.opacity(0.88))
-                    .textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-                    .accessibilityLabel("Nova：\(assistant)")
-            }
-            if client.connected && client.project != "No project" && client.project != "Waiting for host state" && !client.project.isEmpty {
-                Label(client.project, systemImage: "folder").font(.caption).foregroundStyle(mint.opacity(0.8))
-            }
-        }.padding(22).background(.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 24))
-            .overlay(RoundedRectangle(cornerRadius: 24).strokeBorder(.white.opacity(0.065)))
+        }
     }
     private var controls: some View {
         VStack(spacing: 14) {
-            if client.editableInput && !client.voice && !client.voiceStarting { inputComposer }
+            if conversationMode == 0 && client.editableInput && !client.voice && !client.voiceStarting { inputComposer }
+            if conversationMode == 0 && client.connected && !client.editableInput {
+                Text(L10n.text("当前连接仅支持实时对话")).font(.caption).foregroundStyle(.secondary)
+            }
             if client.voice || client.voiceStarting {
                 HStack(spacing: 24) {
-                    audioButton(client.muted ? "取消静音" : "静音", icon: client.muted ? "mic.slash.fill" : "mic.fill", active: client.muted) { client.toggleMute() }
+                    audioButton(client.muted ? L10n.text("取消静音") : L10n.text("静音"), icon: client.muted ? "mic.slash.fill" : "mic.fill", active: client.muted) { client.toggleMute() }
                     Button { client.suspendAudio() } label: {
                         Image(systemName: "phone.down.fill").font(.title2).foregroundStyle(.white)
                             .frame(width: 74, height: 62).background(Color(red: 0.76, green: 0.28, blue: 0.30), in: Capsule())
-                    }.accessibilityLabel("结束通话")
-                    audioButton("扬声器", icon: "speaker.wave.2.fill", active: client.speaker) { client.toggleSpeaker() }
+                    }.accessibilityLabel(L10n.text("结束通话"))
+                    audioButton(L10n.text("扬声器"), icon: "speaker.wave.2.fill", active: client.speaker) { client.toggleSpeaker() }
                 }.frame(maxWidth: .infinity)
-            } else {
+            } else if conversationMode == 1 || !client.connected {
                 Button {
                     if client.connected { Task { await client.startVoice() } }
                     else if client.server.isEmpty || client.token.isEmpty { settings = true }
@@ -118,7 +151,7 @@ struct ContentView: View {
                 } label: {
                     HStack(spacing: 10) {
                         Image(systemName: client.connected ? "mic.fill" : "link")
-                        Text(client.connected ? "开始对话" : "连接").fontWeight(.semibold)
+                        Text(client.connected ? L10n.text("开始对话") : L10n.text("连接")).fontWeight(.semibold)
                         Spacer()
                         Image(systemName: "arrow.up.right").font(.subheadline)
                     }.padding(.horizontal, 24).frame(minHeight: 58)
@@ -131,12 +164,17 @@ struct ContentView: View {
     }
     private var inputComposer: some View {
         VStack(spacing: 10) {
-            TextField("输入消息…", text: $client.inputDraft, axis: .vertical)
+            HStack {
+                Button { voiceInput.toggle() } label: { Image(systemName: voiceInput ? "keyboard" : "mic").frame(width: 44, height: 44) }
+                    .accessibilityLabel(voiceInput ? L10n.text("切换文字输入") : L10n.text("切换语音输入"))
+                TextField(L10n.text("输入消息…"), text: $client.inputDraft, axis: .vertical)
                 .lineLimit(1...5).padding(12)
                 .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 14))
                 .disabled(client.dictationRecording || client.dictationTranscribing)
+            }
             HStack {
-                Text(client.dictationRecording ? "松开转文字" : "按住说话")
+                if voiceInput {
+                Text(client.dictationRecording ? L10n.text("松开转文字") : L10n.text("按住说话"))
                     .frame(maxWidth: .infinity).frame(minHeight: 44)
                     .background(mint.opacity(client.dictationRecording ? 0.25 : 0.08), in: Capsule())
                     .contentShape(Capsule())
@@ -145,18 +183,20 @@ struct ContentView: View {
                         .onEnded { _ in dictationPressed = false; client.finishDictation() })
                     .accessibilityAddTraits(.isButton)
                     .accessibilityAction { if client.dictationRecording { client.finishDictation() } else { client.beginDictation() } }
-                    .accessibilityLabel(client.dictationRecording ? "结束录音并识别" : "开始语音识别")
+                    .accessibilityLabel(client.dictationRecording ? L10n.text("结束录音并识别") : L10n.text("开始语音识别"))
+                }
+                Spacer(minLength: 0)
                 if client.dictationRecording || client.dictationTranscribing {
-                    Button("取消") { client.cancelDictation() }.frame(minHeight: 44)
+                    Button(L10n.text("取消")) { client.cancelDictation() }.frame(minHeight: 44)
                 } else {
                     Button { client.sendDraft() } label: { Image(systemName: "arrow.up").frame(width: 44, height: 44).background(mint, in: Circle()).foregroundStyle(ink) }
-                        .accessibilityLabel("发送消息")
+                        .accessibilityLabel(L10n.text("发送消息"))
                         .disabled(client.textSending || client.inputDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || client.inputDraft.utf16.count > 4000)
                 }
             }
-            if client.dictationTranscribing { ProgressView("正在识别…") }
+            if client.dictationTranscribing { ProgressView(L10n.text("正在识别…")) }
             if !client.inputNotice.isEmpty { Text(client.inputNotice).font(.caption).foregroundStyle(.secondary) }
-            if client.inputDraft.utf16.count > 4000 { Text("消息过长，请缩短后发送").font(.caption).foregroundStyle(.secondary) }
+            if client.inputDraft.utf16.count > 4000 { Text(L10n.text("消息过长，请缩短后发送")).font(.caption).foregroundStyle(.secondary) }
         }
     }
     private func audioButton(_ title: String, icon: String, active: Bool, action: @escaping () -> Void) -> some View {
@@ -170,18 +210,18 @@ struct ContentView: View {
     }
     private var decisions: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("需要你确认", systemImage: "hand.raised").font(.headline).foregroundStyle(mint)
+            Label(L10n.text("需要你确认"), systemImage: "hand.raised").font(.headline).foregroundStyle(mint)
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 ForEach(client.approvals) { card in
                     VStack(alignment: .leading, spacing: 12) {
                         Text(card.project).font(.caption).foregroundStyle(.secondary)
                         Text(card.title).font(.headline)
                         Text(card.detail).font(.subheadline).textSelection(.enabled)
-                        Text(card.busy ? "正在等待 Mac" : card.deadline.map { $0 > context.date ? "\(max(0, Int($0.timeIntervalSince(context.date)))) 秒内有效" : "已过期，等待更新" } ?? "等待 Mac 更新")
+                        Text(card.busy ? L10n.text("正在等待 Mac") : card.deadline.map { $0 > context.date ? L10n.text("{0} 秒内有效", max(0, Int($0.timeIntervalSince(context.date)))) : L10n.text("已过期，等待更新") } ?? L10n.text("等待 Mac 更新"))
                             .font(.caption).foregroundStyle(.secondary)
-                        if client.submitted.contains(card.id) { Text("已提交，等待 Mac 确认").font(.caption).foregroundStyle(mint) }
+                        if client.submitted.contains(card.id) { Text(L10n.text("已提交，等待 Mac 确认")).font(.caption).foregroundStyle(mint) }
                         ForEach(card.decisions, id: \.self) { decision in
-                            Button(decision == "decline" ? "拒绝" : decision == "acceptForSession" ? "本次会话允许" : "允许",
+                            Button(decision == "decline" ? L10n.text("拒绝") : decision == "acceptForSession" ? L10n.text("本次会话允许") : L10n.text("允许"),
                                    role: decision == "decline" ? .destructive : nil) { client.decide(card, decision: decision) }
                                 .buttonStyle(.bordered).frame(minHeight: 44)
                                 .disabled(!card.actionable(at: context.date) || client.submitted.contains(card.id))
@@ -195,7 +235,7 @@ struct ContentView: View {
     }
     private var work: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Label("任务", systemImage: "desktopcomputer").font(.headline)
+            Label(L10n.text("任务"), systemImage: "desktopcomputer").font(.headline)
             ForEach(client.taskStates.keys.sorted(), id: \.self) { key in
                 VStack(alignment: .leading, spacing: 5) {
                     Text(key).font(.caption).foregroundStyle(.secondary)
@@ -212,11 +252,24 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 Section {
+                    Picker(L10n.text("语言 / Language"), selection: $language) {
+                        Text(verbatim: "简体中文").tag("zh-CN")
+                        Text(verbatim: "English").tag("en")
+                    }.disabled(client.connected || client.connecting || client.pairing)
+                        .onChange(of: language) { _, _ in client.status = L10n.text("尚未连接") }
+                } footer: {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L10n.text("首次按系统首选语言设置，之后保留你的选择。更改语言前请先断开连接。"))
+                        Text(L10n.text("AI 仅切换 system prompt 的语言，不保证回复始终使用该语言；不自动识别或切换语言，也不更换语音模型或音色。"))
+                        Text(L10n.text("AI 提示词在下次连接支持此设置的主机时生效。"))
+                    }
+                }
+                Section {
                     if enterprise.busy {
                         ProgressView(enterprise.status)
-                        Button("取消飞书登录", role: .cancel) { enterprise.cancel() }
+                        Button(L10n.text("取消飞书登录"), role: .cancel) { enterprise.cancel() }
                     } else {
-                        Button("飞书登录") {
+                        Button(L10n.text("飞书登录")) {
                             let revision = client.connectionRevision
                             enterprise.start { credential in
                                 guard client.connectionRevision == revision, !client.connected, !client.connecting else { return }
@@ -227,39 +280,39 @@ struct ContentView: View {
                             .accessibilityIdentifier("feishu-login")
                     }
                     if !enterprise.status.isEmpty { Text(enterprise.status).font(.caption) }
-                } footer: { Text("由部署方配置登录服务后启用。") }
+                } footer: { Text(L10n.text("由部署方配置登录服务后启用。")) }
                 Section {
-                    Button { enterprise.cancel(); scanning = true } label: { Label("扫码连接主机", systemImage: "qrcode.viewfinder") }
+                    Button { enterprise.cancel(); scanning = true } label: { Label(L10n.text("扫码连接主机"), systemImage: "qrcode.viewfinder") }
                         .disabled(client.connected || client.connecting)
                         .accessibilityIdentifier("scan-to-connect")
-                } footer: { Text("扫描 Mac 上的 Nova 二维码，自动填入地址并安全保存连接凭据。") }
+                } footer: { Text(L10n.text("扫描 Mac 上的 Nova 二维码，自动填入地址并安全保存连接凭据。")) }
                 Section {
-                    TextField("wss://你的 Mac.ts.net", text: $client.server)
+                    TextField(L10n.text("wss://你的 Mac.ts.net"), text: $client.server)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                         .onSubmit { client.loadCredential() }
-                    SecureField("连接密钥", text: $client.token).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    Picker("语音接入", selection: $client.mediaPreference) {
-                        Text("跟随主机").tag("auto")
-                        Text("主机中转").tag("relay")
+                    SecureField(L10n.text("连接密钥"), text: $client.token).textInputAutocapitalization(.never).autocorrectionDisabled()
+                    Picker(L10n.text("语音接入"), selection: $client.mediaPreference) {
+                        Text(L10n.text("跟随主机")).tag("auto")
+                        Text(L10n.text("主机中转")).tag("relay")
                         if Client.aoqAvailable { Text("AOQ").tag("aoq") }
                     }.disabled(client.connected || client.connecting)
-                } header: { Text("手动连接") } footer: { Text("填写 Mac 的私网地址与连接密钥。密钥仅保存在这台 iPhone 的钥匙串中。") }
+                } header: { Text(L10n.text("手动连接")) } footer: { Text(L10n.text("填写 Mac 的私网地址与连接密钥。密钥仅保存在这台 iPhone 的钥匙串中。")) }
                     .disabled(client.connected || client.connecting)
                 if client.connected || client.connecting {
-                    Section { Button("断开连接", role: .destructive) { client.end() } }
+                    Section { Button(L10n.text("断开连接"), role: .destructive) { client.end() } }
                 }
                 Section {
-                    Slider(value: $client.speechThreshold, in: 0.01...0.15).accessibilityLabel("语音检测阈值")
-                    Text("环境嘈杂时调高；轻声说话时调低。当前阈值 \(client.speechThreshold, specifier: "%.3f")。")
+                    Slider(value: $client.speechThreshold, in: 0.01...0.15).accessibilityLabel(L10n.text("语音检测阈值"))
+                    Text(L10n.text("环境嘈杂时调高；轻声说话时调低。当前阈值 {0}。", String(format: "%.3f", client.speechThreshold)))
                         .font(.caption).foregroundStyle(.secondary)
-                } header: { Text("语音检测") }
+                } header: { Text(L10n.text("语音检测")) }
                 #if DEBUG
-                Section("开发选项") {
-                    Toggle("允许本机 ws 连接", isOn: $client.debugLocalhost).disabled(client.connected || client.connecting)
+                Section(L10n.text("开发选项")) {
+                    Toggle(L10n.text("允许本机 ws 连接"), isOn: $client.debugLocalhost).disabled(client.connected || client.connecting)
                 }
                 #endif
-            }.navigationTitle("连接设置").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { enterprise.cancel(); settings = false } } }
+            }.navigationTitle(L10n.text("连接设置")).navigationBarTitleDisplayMode(.inline)
+                .toolbar { ToolbarItem(placement: .confirmationAction) { Button(L10n.text("完成")) { enterprise.cancel(); settings = false } } }
             .sheet(isPresented: $scanning, onDismiss: {
                 if invitation != nil { confirmPairing = true }
                 else if !scanError.isEmpty { showScanError = true }
@@ -270,15 +323,15 @@ struct ContentView: View {
                     scanning = false
                 }
             }
-            .alert("连接这台主机？", isPresented: $confirmPairing) {
-                Button("取消", role: .cancel) { invitation = nil }
-                Button("连接") {
+            .alert(L10n.text("连接这台主机？"), isPresented: $confirmPairing) {
+                Button(L10n.text("取消"), role: .cancel) { invitation = nil }
+                Button(L10n.text("连接")) {
                     if let invitation { client.pair(invitation) }
                     invitation = nil
                 }
             } message: { Text(invitation?.server.absoluteString ?? "") }
-            .alert("无法使用二维码", isPresented: $showScanError) {
-                Button("好") { scanError = "" }
+            .alert(L10n.text("无法使用二维码"), isPresented: $showScanError) {
+                Button(L10n.text("好")) { scanError = "" }
             } message: { Text(scanError) }
         }.preferredColorScheme(.dark).tint(mint).presentationDragIndicator(.visible)
             .onAppear { enterprise.refresh() }

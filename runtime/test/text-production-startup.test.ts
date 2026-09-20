@@ -16,7 +16,7 @@ test('desktop text graph connects without speech credentials or initializing aud
  assert.equal(typeof assembly.provider.transcribeDraft,'function')
  await assert.rejects(async()=>assembly.provider.transcribeDraft!(new Uint8Array(320),signal),/DOUBAO_ASR_API_KEY/)
  assert.equal(audio,0)
- await assembly.provider.close()
+ await assembly.stop()
 })
 
 test('actual desktop production composition starts with text credentials only and canonical private storage',async()=>{

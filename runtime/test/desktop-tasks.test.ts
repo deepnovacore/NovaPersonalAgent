@@ -129,3 +129,13 @@ setInterval(() => {}, 1000);
     await rm(directory, {recursive: true, force: true})
   }
 })
+
+test('terminal work that never entered the roster keeps its requested project and title', () => {
+  const tasks = new DesktopTasks('coding')
+  tasks.progress({type: 'executor.progress', executor: 'coding', delegate_id: 'not-started',
+    phase: 'failed', summary: '启动失败', level: 'milestone', ts: 1,
+    project: 'Requested project', title: 'Requested title'})
+  tasks.project({workspace_display_name: 'Other project', roster: []} as never)
+  assert.equal(tasks.snapshot().tasks[0]?.project, 'Requested project')
+  assert.equal(tasks.snapshot().tasks[0]?.title, 'Requested title')
+})

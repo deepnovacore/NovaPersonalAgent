@@ -518,7 +518,7 @@ export class ToolContinuations {
   #confirmSyncOutput(state: ToolCallState, content: string): void {
     const previous = state.acceptance.host_item
     if (previous.call_id === null) return
-    const hostItem: HostContextItem = {...previous, content}
+    const hostItem: HostContextItem = {...previous, content, recovery_eligible: true}
     state.acceptance = {
       ...state.acceptance,
       host_item: hostItem,

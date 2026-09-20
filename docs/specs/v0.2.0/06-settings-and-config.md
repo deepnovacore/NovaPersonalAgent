@@ -4,21 +4,17 @@
 >
 > 修订（2026-09-03）：回应评审 P2-6（两文件提交顺序、busy / 重启失败导致三处状态不一致、search provider 三处来源）。
 
-## Baseline (before v0.2.0)
+## Current implementation
 
-- Desktop store: `SETTINGS_VERSION = 3`,
-  [`desktop/nova-audio-agent-desktop/src/main/settings-store.mjs`](../../../desktop/nova-audio-agent-desktop/src/main/settings-store.mjs).
-- Apply path: `applySettingsTransaction` writes, publishes, then restarts the
-  backend ([`settings-apply.mjs`](../../../desktop/nova-audio-agent-desktop/src/main/settings-apply.mjs)).
-- Backend env mapping:
-  [`desktop/nova-audio-agent-desktop/src/main/backend.mjs`](../../../desktop/nova-audio-agent-desktop/src/main/backend.mjs).
-- Runtime schema: [`runtime/src/config/config.ts`](../../../runtime/src/config/config.ts)
-  `settingsSchema` +
-  [`runtime/src/config/environment-contract.ts`](../../../runtime/src/config/environment-contract.ts).
-- `novaaudio config` opens the same settings window; there is no separate CLI
-  editor for most keys.
-- No keys today for approval mode, clarification, planner, bubbles, MCP
-  registry, or knowledge.
+The store is version 4 in `clients/desktop/src/main/settings-store.mjs`.
+`settings-apply.mjs` coordinates writes; `main.mjs` selects deferred activation for
+Save and immediate activation for Restart. Runtime configuration is validated by
+`runtime/src/config/config.ts` and `environment-contract.ts`.
+
+Save persists panel drafts. Backend-affecting changes report `pending_restart`;
+Restart uses already saved configuration and keeps unsaved panel drafts intact.
+Desktop-only appearance and wake settings apply on save. `novaaudio config` opens
+the same window; environment-managed fields still follow their documented precedence.
 
 ## Goals
 
@@ -33,7 +29,7 @@
   necessary links.
 - Live hot-reload of Codex / MCP without backend restart in v0.2.0 (keep
   transaction + restart). Desktop-only wake settings in [11](11-local-wake-word.md)
-  apply immediately; a combined capability save still restarts the backend.
+  apply immediately; a combined capability save waits for the explicit restart action.
 - Storing MCP secrets inside `capabilities.json` plaintext; use `${ENV}` and
   desktop `safeStorage` secrets that populate env for the child.
 
@@ -71,8 +67,9 @@ Migration rules:
 
 ## Env contract additions
 
-Regenerate `.env.example` via `npm run check:env-contract` after
-`environment-contract.ts` updates.
+`npm run check:env-contract` checks generated environment blocks; it does not
+rewrite them. After source contract changes, run `node runtime/scripts/check-env-contract.mjs --write` after building runtime
+and review the generated differences before running the check.
 
 | Env | Maps from / meaning |
 |---|---|
@@ -119,11 +116,12 @@ Doctor / CLI validate both layers.
 ## Coordinated commit
 
 `applySettingsTransaction`
-([`settings-apply.mjs`](../../../desktop/nova-audio-agent-desktop/src/main/settings-apply.mjs))
-runs one `coordinator.run('settings_save')` for validation, durable recovery
-snapshot, file writes, configuration preparation, and backend activation. `busy`
-changes neither file. Failed activation restores the preceding files; saving is
-acknowledged only when the requested settings have applied.
+([`settings-apply.mjs`](../../../clients/desktop/src/main/settings-apply.mjs))
+runs one `coordinator.run('settings_save')` for validation, recovery snapshot and
+file writes. With `deferRestart`, a backend-affecting save completes the journal
+and returns `saved:true, operationStatus:'pending_restart'` without activation.
+The separate restart action prepares and activates the saved configuration.
+`busy` changes neither file. Activation failures use the recovery path below.
 
 Rules:
 
@@ -147,8 +145,12 @@ Rules:
 3. **Write both atomically enough.** Persist the recovery record first, then
    write `capabilities.json` and settings using temporary siblings and rename.
    On failure restore the exact prior capability bytes and sealed settings.
-   Keep the recovery record until successful activation, including across crashes.
-4. **Saved vs applied.** `saved:true` requires successful application. Failures
+   Keep the record until the transaction completes: durable save for deferred
+   activation, or successful activation on the restart path. Interrupted transactions
+   retain their record across crashes.
+4. **Saved vs applied.** `saved:true` acknowledges durable persistence;
+   `pending_restart` means the backend still uses its earlier configuration.
+   `applied` requires activation or a desktop-only change. Failures
    return `saved:false` with `failed` (prepare/commit failure), `restart_failed`
    (backend activation failure), or `recovery_failed` (restoration incomplete).
    The panel retains drafts and exposes the recovery action. It must never show
@@ -198,10 +200,10 @@ the recovery-file problem without exposing sealed secret contents. A native dial
 can open the configuration folder for manual repair; the existing recovery action
 retries after repair and clears the journal only after successful restoration and
 backend activation. It never silently resets settings or deletes the corrupt
-record. A successful save removes the record after
-activation; desktop-only wake/appearance changes retain their immediate apply
-path without restarting the backend unless a prior recovery remains pending.
-A pending recovery always requires backend activation before clearing its record.
+record. A successful deferred save clears its transaction record and reports
+`pending_restart`; it is not itself a failed-activation recovery. Desktop-only
+wake/appearance changes retain their immediate apply path. A prior recovery is
+restored before another write; explicit restart performs backend activation.
 Startup exposes `recovery_pending` with the explicit recovery action, independently
 of the supervisor connection state. The transaction's `publishStatus` callback
 is the sole application-status writer; supervisor connection notifications only
@@ -213,7 +215,10 @@ the owner of restoration and activation.
 
 ## Panel IA
 
-Suggested tabs / sections (Chinese UI labels):
+Current controls are grouped by user task; the table describes settings ownership,
+not a promise of one visible tab per row. The runtime planner model remains
+configurable, but the desktop no longer exposes its own planner-model field or
+an add-MCP-server editor. Existing MCP configuration remains supported.
 
 | Tab | Contents |
 |---|---|
@@ -226,10 +231,10 @@ Suggested tabs / sections (Chinese UI labels):
 | (existing) | appearance, proactivity, pipeline, Codex binary/workspace, API keys |
 
 Exact layout may reuse a single scroll page with headings if tabs are costly;
-acceptance is that each feature’s controls are reachable without editing JSON
-by hand on desktop.
+current availability must match the actual panel. Advanced runtime-only options
+remain in the environment/configuration contract.
 
-## Implementation order
+## Historical implementation order (initial v4 rollout)
 
 Land schema + migration stubs early; wire controls as each feature merges:
 
@@ -255,7 +260,9 @@ Land schema + migration stubs early; wire controls as each feature merges:
 - [ ] Coordinated commit: `busy` leaves both files byte-identical; invalid
       capabilities document leaves both files untouched; simulated failure on
       the second write restores the first file; `failed` / `restart_failed` /
-      `applied` render as three distinct panel states.
+      `pending_restart` / `applied` render as distinct panel states.
+- [ ] Save does not restart; explicit Restart uses saved values and preserves drafts.
+- [ ] Desktop-only appearance and wake saves apply immediately.
 - [ ] Search provider persisted only in the registry; desktop store schema has
       no `searchProvider`; env override is logged.
 
@@ -265,13 +272,12 @@ No new architecture decision beyond those in 01–05. This volume is the
 configuration surface for those decisions.
 
 
-## Desktop presentation (2026-09-10)
+## Desktop presentation
 
 - 设置中的「气泡通知」控制屏幕文字提示：关闭不显示任务进度气泡，里程碑过滤详细进度，全部同时显示普通对话的最终回复。主动性另行决定主动开口门槛与冷却时间。
 - 密钥默认只显示配置状态，清除后展开输入框；开发版 `.env` 管理的值在文件中修改。面板不再提供 Codex 密钥或规划模型，也暂不提供新增 MCP 服务器入口；既有服务与运行时配置继续兼容。
 - 费用明细以调用统计、模型费用卡片和用量网格展示，不显示计费规则。
 - 记忆面板的对话使用左右消息布局；JSON 详情仅在悬停或键盘聚焦时显示。
 
-- 底部固定操作栏分别提供「保存」与「重启」：保存仅持久化，需重启的配置标为待重启；重启使用已保存配置，保留面板中尚未保存的草稿。外观与唤醒等桌面设置保存后即时应用。
 
 - 「主动性」按主动性档位、编程进度播报、Coding 执行器播报间隔排列；通用档位提供悬停说明。Orb 状态栏只显示语音状态，暂时隐藏「查看任务结果」入口。

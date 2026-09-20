@@ -1,144 +1,58 @@
-# Architecture
+# How Nova works
 
-Nova Audio Agent is organized around a continuous event loop rather than a turn-bound tool loop.
-The runtime accepts user input, dispatches work, receives progress or terminal handoffs, writes the
-result to memory, and independently decides whether another response is useful.
+**English** | [简体中文](architecture.zh-CN.md)
 
-The v0.2 target keeps Nova's stable host/native voice surface to five tools — `dispatch`, `cancel`,
-`confirm`, `memory__recall`, and `search__search`. External MCP servers are user-selected surface and context cost, not
-something Nova may silently trim. The M1.5c thin-frontend/live and Windows gates remain pending.
+Nova combines conversation with background work. You describe a task, Nova clarifies what is needed, and an executor such as Codex carries it out. You can keep talking while the task runs.
+
+## From a request to a result
 
 ```mermaid
-flowchart TB
-  I["Input: text, audio, media"] --> Q["Event queue"]
-  Q --> RT["Runtime spine"]
-  RT --> FB["FrontBrain slot"]
-  RT --> EX["Executor slots"]
-  EX --> H["Typed handoff"]
-  H --> MEM["Canonical memory"]
-  MEM --> VIEW["Bounded context view"]
-  VIEW --> FB
-  MEM --> SG["Suggestion pool and Surrogate"]
-  SG --> FLOOR["Floor ownership"]
-  FLOOR --> FB
-  FB --> OUT["Speech or text output"]
+flowchart LR
+  U[Voice or text] --> N[Conversation]
+  N --> C[Clarify and confirm]
+  C --> E[Execute the task]
+  E --> R[Progress and result]
+  R --> N
 ```
 
-## Core modules
+The conversation model interprets your request. Nova manages project selection, permissions and task state. Executors perform the actual work and report progress and results.
 
-| Module | Responsibility |
+Creating or switching projects requires confirmation. Permission requests belong to a specific operation; a previous approval does not automatically authorize unrelated work. Recognition failure is not treated as approval, rejection or cancellation.
+
+## Projects and sessions
+
+A **project** is a working directory. A **session** is a Codex conversation within that project. Project files and session records let you resume work later.
+
+Requests to change a running task are kept separate from new tasks. Cancelling work does not delete its project or conversation history. Disconnecting a phone does not cancel computer-side work.
+
+## Voice and interruptions
+
+The default **integrated** mode uses Qwen to process speech directly. **Cascaded** mode connects speech recognition, a language model and speech synthesis as separate stages.
+
+You can interrupt spoken output. Nova tracks each response so late audio and results are not mistaken for a newer reply. Recovering speech delivery does not mean executing the task again. Progress narration reports what happened; it cannot grant permission for another action.
+
+## Memory and documents
+
+| Information | Purpose |
 |---|---|
-| `runtime/src/core/causal-runtime.ts` | Event application, dispatch, single-flight slots, wake routing, delegate identity/deadline/terminal state, and the `ExecutorAdapter` port |
-| `runtime/src/core/memory.ts` | Append-only channel memory, accepted handoffs, and revision-bound intake snapshots; host authorization FSMs remain outside model state |
-| `runtime/src/core/context-view.ts` | The bounded model-facing view of current state |
-| `runtime/src/realtime/floor.ts` | Exclusive ownership of the user-facing speaking path |
-| `runtime/src/core/ports.ts` | Executor manifests, operation contracts, requests, and typed handoffs |
-| `runtime/src/composition/assembly.ts`, `cascaded-realtime-assembly.ts` | Configuration-driven construction of runtime, executor, and realtime graphs; dispatches `integrated` vs `cascaded` |
-| `runtime/src/realtime/` | Host response admission/ownership, shared frontend-instructions, provider transports, playback fencing, recovery, and telemetry |
-| `runtime/src/codex-*.ts` | Codex app-server transport and contract, plus the Workspace/Session project store (`codex-project-store.ts`) |
-| `runtime/src/executors/` | Deterministic simulators and adapter implementations |
+| Conversation and task state | Keep the current interaction and running work consistent |
+| Personal memory | Recall information from earlier conversations; local mem0 is the default |
+| Document knowledge | Search files you explicitly import |
 
-## Executor boundary
+These stores have separate purposes. Remembered facts and retrieved documents are information, not instructions that can override your permissions. Local storage may still use remote models for extraction and embeddings. See [personal memory](personal-memory.md).
 
-An executor declares a manifest containing its operations, input schema, deadline, trust level, and
-channel policy. Assembly exposes only manifests selected by configuration. Runtime binds each tool
-request to a delegate identity before dispatch and accepts progress or completion only for that
-identity. Revision-bound intake slots are host-owned and an executor cannot mutate them, host
-authorization, or the speaking path. AgentController descriptors and owned hidden channels are
-registered separately from executor manifests; direct MCP tools are model-visible only through
-their consumer-specific projection.
+## Vision and external tools
 
-## Memory and attention
+Conversation vision is optional and requires a supported cascaded model. It captures an image for the submitted turn. Independent monitoring observes a selected camera for the condition you requested and releases it when monitoring ends.
 
-All observations reach canonical memory before conversational projection. User-awaited work wakes
-the realtime FrontBrain directly. Eligible unsolicited observations (channels whose policy allows
-suggestions) first become pooled suggestions and pass through the Surrogate attention policy; urgent
-Vision Guard facts bypass the pool and wake FrontBrain directly.
+MCP connects configured external services. Only selected tools are exposed. Nova does not silently add services or discard tools to fit a model's limits.
 
-Floor is not a mutex but a three-way arbiter: for every speech attempt it rules `allow`, `preempt`,
-or `defer`, comparing the priority bound to the triggering event against the priority of whatever
-is currently speaking. Priorities are assigned by the runtime, never by the model — user input is
-fixed at 100, the Guard monitor at 90, active executors at 50, and ambient observations at 40 — so
-a model cannot escalate its own urgency. Preemptive means interrupting Nova playback currently being
-spoken; it never interrupts user speech. On the text path a `preempt` verdict is bookkeeping (there
-is no audio to cut); on the realtime path only channels at or above the preemption band (today only
-Guard) actually cancel in-flight Nova playback. A deferred utterance
-is not dropped: it lands in the suggestion pool, where a fired entry cools down and re-arms only
-when new evidence arrives on its channel.
+## Desktop and phone
 
-## Workspaces and Sessions
+The computer runs models, memory and task execution. The iPhone client handles input, playback, messages and approval controls, connecting to the computer's service.
 
-The Codex project surface is a two-level durable store (`runtime/src/codex-project-store.ts`): a
-Workspace is an isolated filesystem/Git project with its own `CODEX_HOME`, and a Session is a
-resumable Codex thread bound to exactly one Workspace. Voice-driven create, switch, and resume are
-staged propose-and-confirm mutations that fail closed on rejection, ID mismatch, or replay, and a
-registry admits only one live Orb owner at a time (a second Orb fails with `state_busy`). Runtime
-and desktop tests cover discovery, confirmation, switching, persistence, and recovery as one
-contract.
+Settings separate **Save** from **Restart**. Service changes take effect after restarting the backend; appearance and wake settings apply after saving. See the [setup guide](getting-started.md) and [phone connection guide](iphone.md).
 
-Maintenance of managed workspaces is a host surface rather than a voice capability. Nova Desktop
-can open the active managed workspace, or clear the active one or every managed workspace behind
-two confirmation dialogs; clearing empties directories while the project record, display name,
-Codex history, and Session metadata survive, so the store stays authoritative over the filesystem.
+## Developer reference
 
-## Platform notes
-
-Wake capture carries an epoch on every frame (native macOS capture or browser fallback), so frames
-from an old capture owner cannot wake a newer session. Linux remains a source-test platform;
-macOS arm64/x64 and Windows x64 are the current release targets.
-
-The runtime and desktop client carry win32, darwin, and linux code paths. Release packaging
-targets macOS and Windows NSIS; retained Linux AppImage/deb scripts do not establish a supported
-release target. Native echo-cancelled audio capture
-(VoiceProcessingIO) exists on macOS only; Windows and Linux use Chromium's audio stack, and both
-camera paths use Chromium's capture pipeline on every platform. Cross-platform CI and hardware
-validation status must remain explicit in release evidence and test results.
-
-Panel edits remain drafts until an explicit save. Backend-affecting settings use one coordinated
-transaction and controlled restart, with a recovery record retaining the last usable configuration
-if activation fails. Saved and applied status are separate. Desktop-only wake and appearance
-changes apply immediately after save; a combined capability save still restarts the backend.
-See [settings and recovery](specs/v0.2.0/06-settings-and-config.md).
-
-## Realtime path
-
-Both integrated and cascaded pipelines use host-owned response admission and request ownership.
-`frontend-instructions.ts` renders shared frontend context. A `response_origin` is correlation
-evidence, never authorization: host narration disables tools, while a bound `tool_output`
-continuation retains tools and still needs current user/confirmation evidence for side effects.
-
-The realtime service translates provider events into host events while preserving provider response
-identity, playback generation, and delegate identity. Renderer acknowledgements fence audio clear
-and completion. Recovery injects bounded host-owned facts rather than replaying arbitrary provider
-state.
-
-The top-level pipeline shape is selected by `cascaded-realtime-assembly.ts` from
-`pipeline_mode`. `integrated` (the default) runs one realtime speech-to-speech model — today Qwen
-realtime only. `cascaded` composes injectable endpointing, ASR, LLM, and TTS ports; today's
-provider matrix is Volcengine ASR, a Qwen (`qwen-flash`) or Ark LLM, Volcengine TTS, and an `auto`
-endpointing stage that probes a LiveKit-style v1-mini turn detector with a bounded-silence
-fallback. There is no automatic provider failover.
-
-Two assembly differences distinguish this path from the text CLI. First, there is no separate
-secondary model call: the realtime provider model itself fills the FrontBrain role (the code calls
-this port the realtime front brain), reading the same host-compiled context and tool schemas.
-Second, the Codex executor is assembled on its live app-server backend, which adds the
-`codex.steer` operation for same-turn steering, and the read-only `memory.recall` tool is exposed.
-Neither is exposed by the text CLI; steering is also reachable through the explicit
-`build_codex_live_assembly` entry point used by live evaluations.
-
-`FASTBRAIN_SYSTEM` is retained legacy/dead code and is deferred for removal or reuse; it is not a
-live second model, planning-state writer, or authorization path.
-
-## Security boundaries
-
-During wake-word sleep, microphone frames go only to the local desktop Worker. Explicit mute stops
-wake capture. Wake detection resumes the UI; it does not authorize any executor operation.
-
-- Configuration errors never echo secret values.
-- External search and visual content are evidence, never instructions.
-- Desktop renderers use context isolation, sandboxing, and a narrow preload bridge.
-- Codex workspaces are validated before use.
-- Local recordings, runtime data, caches, and credentials are excluded from Git.
-
-The design rationale is expanded in the [architecture series](archs/00-overview.md).
+The [architecture series](archs/00-overview.md) explains runtime state, executor interfaces, memory, speech ownership and native vision. The [client protocol](protocols/client-v1.md) defines remote messages and control receipts.

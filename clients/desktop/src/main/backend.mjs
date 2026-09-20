@@ -32,6 +32,7 @@ const SETTINGS_DEFAULTS = Object.freeze({
   codexApprovalMode: 'ask',
   clarificationDepth: 'balanced',
   planReadback: 'summary',
+  generatePlan: true,
   plannerModel: '',
   progressBubbles: 'milestones',
   embeddingProvider: 'dashscope',
@@ -121,12 +122,17 @@ export function selectedBackend(env = process.env, { isPackaged = false } = {}) 
   return value
 }
 
-export function nodeRuntimeEntry({ isPackaged, appPath, packageRoot }) {
+export function nodeRuntimeEntry({ isPackaged, appPath, packageRoot, environment = process.env }) {
   if (typeof appPath !== 'string' || !isAbsolute(appPath)) {
     throw new Error('absolute Electron app path is required')
   }
   if (typeof packageRoot !== 'string' || !isAbsolute(packageRoot)) {
     throw new Error('absolute desktop package root is required')
+  }
+  const override = environment.NOVA_AUDIO_AGENT_DEV_BACKEND_ENTRY
+  if (!isPackaged && override) {
+    if (typeof override !== 'string' || !isAbsolute(override)) throw new Error('absolute development runtime entry is required')
+    return override
   }
   return isPackaged
     ? resolve(
@@ -200,6 +206,7 @@ export function backendLaunchSpec({
       ?? SETTINGS_DEFAULTS.codexApprovalMode,
     NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH: settings?.clarificationDepth
       ?? SETTINGS_DEFAULTS.clarificationDepth,
+    NOVA_AUDIO_AGENT_GENERATE_PLAN: String(settings?.generatePlan ?? SETTINGS_DEFAULTS.generatePlan),
     NOVA_AUDIO_AGENT_PLAN_READBACK: settings?.planReadback ?? SETTINGS_DEFAULTS.planReadback,
     NOVA_AUDIO_AGENT_PROGRESS_BUBBLES: settings?.progressBubbles
       ?? SETTINGS_DEFAULTS.progressBubbles,
@@ -216,6 +223,7 @@ export function backendLaunchSpec({
     NOVA_AUDIO_AGENT_PROACTIVITY_PRESET: proactivity,
     NOVA_AUDIO_AGENT_CODING_PROGRESS_NARRATION: settings?.codingProgressNarration ?? 'smart',
     NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL: String(codexHeartbeatSeconds),
+    NOVA_AUDIO_AGENT_LANGUAGE: settings?.language ?? 'zh-CN',
     NOVA_AUDIO_AGENT_PIPELINE_MODE: pipelineMode,
     NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,
@@ -645,7 +653,7 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
       consumers.push({...search?.mcp, headers: search?.mcp?.headers ?? (preset ? {authorization: '${DASHSCOPE_API_KEY}'} : {})})
     }
     const references = JSON.stringify(consumers)
-    if (parentEnv.NOVA_AUDIO_AGENT_MEMORY_CONNECTION?.trim() === 'local'
+    if ((parentEnv.NOVA_AUDIO_AGENT_MEMORY_CONNECTION?.trim() || 'local') === 'local'
       || (document?.modules?.knowledge?.enabled === true
       && (settings?.embeddingProvider ?? 'dashscope') === 'dashscope')) activeSecretKeys.add('dashscopeApiKey')
     for (const [key, name] of Object.entries(SECRET_ENV_MAP)) {

@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 
 import { checkJavaScriptFiles, generateWireFrameTypes } from './build-contract.mjs'
 import { buildProjectNativeAddon } from './build-project-native.mjs'
+import { buildMem0Native } from './build-mem0-native.mjs'
 import { buildCodexSandboxProbe } from './build-codex-sandbox-probe.mjs'
 import { buildWindowsJobGuardian } from './build-windows-job-guardian.mjs'
 import { stageReleaseApplication } from './stage-release-app.mjs'
@@ -34,6 +35,7 @@ const targetId = process.platform === 'darwin'
   : process.platform === 'win32'
     ? `win32-${process.arch}`
     : `linux-${process.arch}-gnu`
+await buildMem0Native()
 await stageReleaseApplication({packageRoot: root})
 
 await buildProjectNativeAddon({

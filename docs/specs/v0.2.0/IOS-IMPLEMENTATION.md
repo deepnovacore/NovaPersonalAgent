@@ -162,7 +162,7 @@ iOS 在工程落地后使用 shared scheme `Nova` 执行 `xcodebuild test`，des
 - Tailscale 1.102.3 已安装，系统扩展和 VPN 权限获准。初次安装的 IPC 卡死在 Mac 重启后恢复；CLI 已能返回 Logged out，Safari 已打开登录页。等待用户登录后配置 Serve，尚无 tailnet WSS 地址。此前系统级 VPN 管理器重启被自动审批拒绝，该操作未由本任务执行。
 - `fishwowater的iPhone` 在 Mac 重启后恢复可达，Nova 已安装成功。初次启动需信任开发者；本机签名检查通过，profile 包含该 UDID 且有效。用户已确认“Nova 已打开”，真机安装/启动通过。扬声器/AirPods、静音恢复、打断延迟、蜂窝/direct/relay、真实 Codex 授权执行均未验收。
 
-详细构建、操作和限制见 [iOS README](../../../ios/Nova/README.md)、[部署说明](../../deployment/remote-server.md) 和 [协议](../../protocols/client-v1.md)。上述工作包复选框保留为完整验收门槛，代码已实现不等于全部门槛通过。
+详细构建、操作和限制见 [iOS README](../../../clients/ios/Nova/README.md)、[部署说明](../../deployment/remote-server.md) 和 [协议](../../protocols/client-v1.md)。上述工作包复选框保留为完整验收门槛，代码已实现不等于全部门槛通过。
 
 ### 自动化验证快照
 

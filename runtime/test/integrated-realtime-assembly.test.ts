@@ -34,7 +34,7 @@ test('integrated registry resolves only Qwen and passes an immutable selected co
   }
 
   const actual = buildIntegratedRealtimeAssembly({
-    settings: loadSettings({
+    settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
       NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
       NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER: 'qwen',
       NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
@@ -52,7 +52,7 @@ test('integrated registry resolves only Qwen and passes an immutable selected co
 test('integrated registry receives only selected provider inputs and cannot inspect host composition', () => {
   const connector = () => Promise.reject(new Error('unused'))
   let insideRegistry = false
-  const settings = new Proxy(loadSettings({
+  const settings = new Proxy(loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
     NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
     DASHSCOPE_API_KEY: 'selected-dash-secret',
     TAVILY_API_KEY: 'host-search-secret',
@@ -84,7 +84,7 @@ test('integrated registry receives only selected provider inputs and cannot insp
         assert.equal('searchTransport' in input, false)
         assert.equal('codexResource' in input, false)
         assert.deepEqual(Object.keys(input).sort(), [
-          'config', 'connector', 'executorApproval', 'idFactory', 'modules', 'now',
+          'config', 'connector', 'executorApproval', 'idFactory', 'language', 'modules', 'now',
         ])
         assert.equal(input.executorApproval, false)
         assert.equal(Object.isFrozen(input.config), true)
@@ -123,7 +123,7 @@ test('integrated registry receives only selected provider inputs and cannot insp
 
 test('integrated selection rejects a missing own registry entry before provider construction', () => {
   assert.throws(() => buildIntegratedRealtimeAssembly({
-    settings: loadSettings({DASHSCOPE_API_KEY: 'selected-dash-secret'}),
+    settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled', DASHSCOPE_API_KEY: 'selected-dash-secret'}),
   }, Object.create({qwen: () => { throw new Error('inherited factory invoked') }}) as IntegratedProviderRegistry),
   /NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER/)
 })

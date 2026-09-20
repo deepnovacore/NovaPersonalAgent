@@ -1,5 +1,6 @@
+import {t} from './locale.mjs'
 const PRESET = {url: 'https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp', tool: 'bailian_web_search', headers: {authorization: 'Bearer ${DASHSCOPE_API_KEY}'}}
-const DESCRIPTIONS = {搜索: '查找网络信息，为回答补充资料', '视觉监控': '观察摄像头画面，在符合条件时通知你', '编程': '执行编程任务与项目操作', 知识库: '检索已导入的本地资料', '向编程执行器开放知识库': '允许编程执行器检索已导入的资料'}
+const DESCRIPTIONS = {[t("搜索")]: t("查找网络信息，为回答补充资料"), [t("视觉监控")]: t("观察摄像头画面，在符合条件时通知你"), [t("编程")]: t("执行编程任务与项目操作"), [t("知识库")]: t("检索已导入的本地资料"), [t("向编程执行器开放知识库")]: t("允许编程执行器检索已导入的资料")}
 const DEFAULT_TOOL = {enabled: false, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2}
 const node = (tag, text, parent) => {const element = document.createElement(tag); if (text) element.textContent = text; parent?.append(element); return element}
 
@@ -33,7 +34,7 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
     if (max !== undefined) input.max = max
     input.addEventListener('change', () => {
       if (!input.checkValidity()) {input.reportValidity(); return}
-      try { change(type === 'checkbox' ? input.checked : type === 'number' ? Number(input.value) : input.value) } catch { problemsLabel.hidden = false; problemsLabel.textContent = '字段格式无效，请检查每行 key=${ENV}。' }
+      try { change(type === 'checkbox' ? input.checked : type === 'number' ? Number(input.value) : input.value) } catch { problemsLabel.hidden = false; problemsLabel.textContent = t("字段格式无效，请检查每行 key=${ENV}。") }
     })
     return input
   }
@@ -71,7 +72,7 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
       cameraRoot.replaceChildren()
       codingRoot.replaceChildren()
       if (typeof view.capabilitiesRevision !== 'string') {
-        node('p', '注册表无法安全显示，请在本机修正文件，凭据改用 ${ENV} 引用。' + (state.path ?? ''), root)
+        node('p', t("注册表无法安全显示，请在本机修正文件，凭据改用 ${ENV} 引用。") + (state.path ?? ''), root)
         return
       }
     }
@@ -83,81 +84,81 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
     const focused = roots.some(target => target.contains(document.activeElement)) ? document.activeElement.dataset.field : null
     const opened = new Set([...root.querySelectorAll('details[open]')].map(item => item.dataset.server))
     root.replaceChildren()
-    if (view.capabilitiesDocument === null) node('p', '注册表无法安全显示；修改下方草稿并保存可替换该文件，凭据改用 ${ENV} 引用。' + (state.path ?? ''), root)
+    if (view.capabilitiesDocument === null) node('p', t("注册表无法安全显示；修改下方草稿并保存可替换该文件，凭据改用 ${ENV} 引用。") + (state.path ?? ''), root)
     const modules = doc.modules ?? {}
-    for (const [name, label, target] of [['camera', '视觉监控', cameraRoot], ['coding', '编程', codingRoot]]) {
+    for (const [name, label, target] of [['camera', t("视觉监控"), cameraRoot], ['coding', t("编程"), codingRoot]]) {
       target.replaceChildren()
       field(target, label, modules[name]?.enabled ?? true, enabled => update(next => {
         next.modules ??= {}; next.modules[name] = {...next.modules[name], enabled}
       }), {type: 'checkbox'})
     }
     const searchGroup = node('section', '', root); searchGroup.className = 'mcp-module'; searchGroup.dataset.module = 'search'
-    field(searchGroup, '搜索', modules.search?.enabled ?? true, enabled => update(next => {next.modules ??= {}; next.modules.search = {...next.modules.search, enabled}}), {type: 'checkbox'})
+    field(searchGroup, t("搜索"), modules.search?.enabled ?? true, enabled => update(next => {next.modules ??= {}; next.modules.search = {...next.modules.search, enabled}}), {type: 'checkbox'})
     const search = node('div', '', searchGroup); search.className = 'mcp-module-config'
     const changeSearch = patch => update(next => {next.modules ??= {}; next.modules.search = {...next.modules.search, ...patch}})
-    field(search, '搜索服务', modules.search?.provider ?? 'tavily', provider => changeSearch({provider}), {options: ['tavily', 'mcp']})
+    field(search, t("搜索服务"), modules.search?.provider ?? 'tavily', provider => changeSearch({provider}), {options: ['tavily', 'mcp']})
     if (modules.search?.provider === 'mcp') {
       const mcp = modules.search.mcp ?? PRESET
       const changeMcp = patch => changeSearch({mcp: {...mcp, ...patch}})
-      node('p', '百炼预设需 DashScope 凭据；真实接入验证尚未完成，默认搜索仍为 Tavily。', search).className = 'hint'
-      button(search, '使用百炼 WebSearch 预设', () => changeSearch({mcp: structuredClone(PRESET)}))
-      field(search, 'MCP 地址', mcp.url, url => changeMcp({url}))
-      field(search, '原始搜索工具名', mcp.tool, tool => changeMcp({tool}))
-      mapping(search, '搜索请求头（每行 key=${ENV}）', mcp.headers, headers => changeMcp({headers}))
-      button(search, '检测搜索连接（仅 tools/list）', () => runProbe('$search')).disabled = probeBusy
-      node('p', probes.get('$search')?.status ?? '未检测', search)
+      node('p', t("百炼预设需 DashScope 凭据；真实接入验证尚未完成，默认搜索仍为 Tavily。"), search).className = 'hint'
+      button(search, t("使用百炼 WebSearch 预设"), () => changeSearch({mcp: structuredClone(PRESET)}))
+      field(search, t("MCP 地址"), mcp.url, url => changeMcp({url}))
+      field(search, t("原始搜索工具名"), mcp.tool, tool => changeMcp({tool}))
+      mapping(search, t("搜索请求头（每行 key=${ENV}）"), mcp.headers, headers => changeMcp({headers}))
+      button(search, t("检测搜索连接（仅 tools/list）"), () => runProbe('$search')).disabled = probeBusy
+      node('p', probes.get('$search')?.status ?? t("未检测"), search)
     }
     const statuses = running?.servers ?? state.status?.servers ?? []
     const knowledge = node('section', '', root); knowledge.className = 'mcp-module'; knowledge.dataset.module = 'knowledge'
-    field(knowledge, '知识库', modules.knowledge?.enabled ?? false, enabled => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, enabled}}), {type: 'checkbox'})
+    field(knowledge, t("知识库"), modules.knowledge?.enabled ?? false, enabled => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, enabled}}), {type: 'checkbox'})
     const knowledgeConfig = node('div', '', knowledge); knowledgeConfig.className = 'mcp-module-config secondary-toggle'
-    field(knowledgeConfig, '向编程执行器开放知识库', modules.knowledge?.exposeToCodex ?? false, exposeToCodex => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, exposeToCodex}}), {type: 'checkbox'})
+    field(knowledgeConfig, t("向编程执行器开放知识库"), modules.knowledge?.exposeToCodex ?? false, exposeToCodex => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, exposeToCodex}}), {type: 'checkbox'})
     for (const [name, server] of Object.entries(doc.mcpServers ?? {})) {
       const details = node('details', '', root); details.dataset.server = name; details.open = opened.has(name)
       if (!server || typeof server !== 'object' || Array.isArray(server)) {
-        node('summary', `${name} · 配置失败（配置格式无效）`, details)
-        button(details, '删除无效服务器', () => update(next => {delete next.mcpServers[name]}))
+        node('summary', t("{0} · 配置失败（配置格式无效）", name), details)
+        button(details, t("删除无效服务器"), () => update(next => {delete next.mcpServers[name]}))
         continue
       }
       const status = statuses.find(item => item.name === name)
-      node('summary', `${name} · ${server.enabled === false ? '已停用' : ({ready: '已连接', configured: '已配置', failed: '连接失败', disabled: '已停用'}[status?.status] ?? '已配置')}${status?.codex ? ' · Codex ' + status.codex.status : ''}`, details)
+      node('summary', `${name} · ${server.enabled === false ? t("已停用") : ({ready: t("已连接"), configured: t("已配置"), failed: t("连接失败"), disabled: t("已停用")}[status?.status] ?? t("已配置"))}${status?.codex ? ' · Codex ' + status.codex.status : ''}`, details)
       if (status?.reason || status?.codex?.reason) node('p', [status.reason, status.codex?.reason].filter(Boolean).join(' · '), details)
       const change = patch => update(next => {next.mcpServers[name] = {...next.mcpServers[name], ...patch}})
-      field(details, `${name} 启用`, server.enabled ?? true, enabled => change({enabled}), {type: 'checkbox'})
-      field(details, `${name} 传输`, server.transport ?? 'streamable-http', transport => update(next => {
+      field(details, t("{0} 启用", name), server.enabled ?? true, enabled => change({enabled}), {type: 'checkbox'})
+      field(details, t("{0} 传输", name), server.transport ?? 'streamable-http', transport => update(next => {
         const previous = next.mcpServers[name]
         const {url, headers, command, args, env, ...common} = previous
         next.mcpServers[name] = {...common, transport, ...(transport === 'stdio' ? {command: 'node', args: [], env: {}} : {url: 'https://example.com/mcp', headers: {}})}
       }), {options: ['streamable-http', 'stdio']})
       if (server.transport === 'stdio') {
-        field(details, `${name} 命令`, server.command, command => change({command}))
-        field(details, `${name} 参数（每行一项）`, (server.args ?? []).join('\n'), args => change({args: args ? args.split('\n') : []}), {multiline: true})
-        mapping(details, `${name} 环境变量（每行 KEY=\${ENV}）`, server.env, env => change({env}))
+        field(details, t("{0} 命令", name), server.command, command => change({command}))
+        field(details, t("{0} 参数（每行一项）", name), (server.args ?? []).join('\n'), args => change({args: args ? args.split('\n') : []}), {multiline: true})
+        mapping(details, t("{0} 环境变量（每行 KEY=${ENV}）", name), server.env, env => change({env}))
       } else {
-        field(details, `${name} 地址`, server.url, url => change({url}))
-        mapping(details, `${name} 请求头（每行 key=\${ENV}）`, server.headers, headers => change({headers}))
+        field(details, t("{0} 地址", name), server.url, url => change({url}))
+        mapping(details, t("{0} 请求头（每行 key=${ENV}）", name), server.headers, headers => change({headers}))
       }
-      for (const consumer of ['frontbrain', 'codex']) field(details, `${name} 对 ${consumer === 'frontbrain' ? '前台' : 'Codex'} 开放`, server.exposeTo?.[consumer] ?? consumer === 'codex', enabled => change({exposeTo: {...{frontbrain: false, codex: true}, ...server.exposeTo, [consumer]: enabled}}), {type: 'checkbox'})
-      button(details, '检测连接与工具（仅 tools/list）', () => runProbe(name)).disabled = probeBusy
+      for (const consumer of ['frontbrain', 'codex']) field(details, t("{0} 对 {1} 开放", name, consumer === 'frontbrain' ? t("前台") : 'Codex'), server.exposeTo?.[consumer] ?? consumer === 'codex', enabled => change({exposeTo: {...{frontbrain: false, codex: true}, ...server.exposeTo, [consumer]: enabled}}), {type: 'checkbox'})
+      button(details, t("检测连接与工具（仅 tools/list）"), () => runProbe(name)).disabled = probeBusy
       const discovered = probes.get(name)
-      node('p', discovered ? `上次检测 ${discovered.status}${discovered.reason ? ' · ' + discovered.reason : ''} · 修改连接后请重新检测` : '尚未检测连接', details)
+      node('p', discovered ? t("上次检测 {0}{1} · 修改连接后请重新检测", discovered.status, discovered.reason ? ' · ' + discovered.reason : '') : t("尚未检测连接"), details)
       const allTools = new Set([...Object.keys(server.tools ?? {}), ...(discovered?.tools ?? []).map(tool => tool.name)])
       for (const toolName of allTools) {
         const tool = server.tools?.[toolName] ?? DEFAULT_TOOL
         const toolBox = node('fieldset', '', details); node('legend', toolName, toolBox)
         const metadata = discovered?.tools?.find(item => item.name === toolName)
-        if (metadata) node('p', `${metadata.readOnlyHint ? '声明只读' : '未声明只读'} · ${metadata.description}`, toolBox)
+        if (metadata) node('p', `${metadata.readOnlyHint ? t("声明只读") : t("未声明只读")} · ${metadata.description}`, toolBox)
         const changeTool = patch => change({tools: {...server.tools, [toolName]: {...tool, ...patch}}})
-        field(toolBox, `${name}/${toolName} 允许调用`, tool.enabled, enabled => changeTool({enabled}), {type: 'checkbox'})
-        for (const [key, label, max] of [['timeoutMs', '超时 ms', 60000], ['maxResultBytes', '结果字节', 1048576], ['maxCallsPerTurn', '每轮次数', 32]]) {
+        field(toolBox, t("{0}/{1} 允许调用", name, toolName), tool.enabled, enabled => changeTool({enabled}), {type: 'checkbox'})
+        for (const [key, label, max] of [['timeoutMs', t("超时 ms"), 60000], ['maxResultBytes', t("结果字节"), 1048576], ['maxCallsPerTurn', t("每轮次数"), 32]]) {
           field(toolBox, `${toolName} ${label}`, tool[key], value => changeTool({[key]: value}), {type: 'number', min: 1, max})
         }
       }
-      const toolName = field(details, `${name} 添加原始工具名`, '', () => {})
-      button(details, '添加工具（默认不启用）', () => {
+      const toolName = field(details, t("{0} 添加原始工具名", name), '', () => {})
+      button(details, t("添加工具（默认不启用）"), () => {
         if (toolName.value && !Object.hasOwn(server.tools ?? {}, toolName.value)) change({tools: {...server.tools, [toolName.value]: {...DEFAULT_TOOL}}})
       })
-      button(details, '删除服务器', () => update(next => {delete next.mcpServers[name]}))
+      button(details, t("删除服务器"), () => update(next => {delete next.mcpServers[name]}))
     }
     if (focused) roots.flatMap(target => [...target.querySelectorAll('[data-field]')]).find(item => item.dataset.field === focused)?.focus()
   }

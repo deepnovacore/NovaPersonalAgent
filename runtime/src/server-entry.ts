@@ -37,6 +37,7 @@ export async function runServerEntry(options: {
         return 2
       }
       const server = new AoqChatServer({token: config.token, pairing, port: config.port,
+        ...(config.language === undefined ? {} : {language: config.language}),
         issueCredential: signal => issueAoqCredential(environment.DASHSCOPE_API_KEY ?? '', signal, apiHost)})
       try {
         if (stop.signal.aborted) return 0
@@ -77,7 +78,7 @@ export async function runServerEntry(options: {
             NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL: 'qwen-audio-3.0-realtime-plus',
             NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE: 'longanqian'} : environment,
           ...(link === undefined ? {} : {integratedProviders: {qwen: input => new aoqProvider!.AoqRealtimeAdapter({
-            ...input.config, link, onDiagnostic, idFactory: input.idFactory, now: input.now,
+            ...input.config, ...(input.language === undefined ? {} : {language: input.language}), link, onDiagnostic, idFactory: input.idFactory, now: input.now,
             executorApproval: input.executorApproval,
             ...(input.modules === undefined ? {} : {modules: input.modules}),
           })}}),

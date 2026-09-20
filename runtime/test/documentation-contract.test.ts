@@ -31,7 +31,8 @@ test('current docs state the Node release truth and do not advertise retired cap
   }
   const gettingStarted = documents.find(item => item.file === 'docs/getting-started.md')!.text
   assert.match(gettingStarted, /Node\.js and TypeScript[^\n]*only product runtime/iu)
-  assert.match(gettingStarted, /M1\.5c\/live\/Windows acceptance remains pending/iu)
+  assert.match(gettingStarted, /Desktop targets macOS and Windows/iu)
+  assert.match(gettingStarted, /Linux is available for source use/iu)
 })
 
 test('audio pipeline docs distinguish the selectable topology, credentials, and deferred settings effects', async () => {
@@ -44,7 +45,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
 
   assert.match(english, /integrated.*cascaded/isu)
   assert.match(english, /qwen-audio-3\.0-realtime-plus.*longanqian/isu)
-  assert.match(english, /Volcengine ASR\s*->\s*Qwen `qwen-plus`\s*->\s*Volcengine TTS/u)
+  assert.match(english, /Volcengine ASR\s*->\s*DeepSeek `deepseek-flash`\s*->\s*Volcengine TTS/u)
   assert.match(english, /Ark.*explicit.*cascaded LLM/isu)
   assert.match(english, /one key per platform.*reused/isu)
   assert.match(english, /ASR.*fallback.*DOUBAO_BIGMODEL_API_KEY/isu)
@@ -55,7 +56,7 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
 
   assert.match(chinese, /集成.*级联/su)
   assert.match(chinese, /qwen-audio-3\.0-realtime-plus.*longanqian/su)
-  assert.match(chinese, /火山 ASR\s*->\s*Qwen `qwen-plus`\s*->\s*火山 TTS/u)
+  assert.match(chinese, /火山 ASR\s*->\s*DeepSeek `deepseek-flash`\s*->\s*火山 TTS/u)
   assert.match(chinese, /Ark.*显式.*级联 LLM/su)
   assert.match(chinese, /每个平台.*一把密钥.*复用/su)
   assert.match(chinese, /ASR.*回退.*DOUBAO_BIGMODEL_API_KEY/su)
@@ -70,24 +71,27 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
   }
 })
 
-test('English, Chinese, and env example generated blocks contain every public variable once', async () => {
-  const files = ['.env.example', 'docs/getting-started.md', 'docs/getting-started.zh-CN.md'] as const
-  const documents = await Promise.all(files.map(file => readFile(resolve(repositoryRoot, file), 'utf8')))
+test('configuration guides share a concise public subset and env example stays complete', async () => {
+  const example = generatedBlock(await readFile(resolve(repositoryRoot, '.env.example'), 'utf8'))
   for (const entry of publicEnvironmentContract()) {
-    for (const [index, document] of documents.entries()) {
-      const generated = generatedBlock(document)
-      const escaped = entry.name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
-      assert.equal(
-        [...generated.matchAll(new RegExp(`(?<![A-Z0-9_])${escaped}(?![A-Z0-9_])`, 'gu'))].length,
-        1,
-        `${files[index]}: ${entry.name}`,
-      )
-    }
+    assert.equal(example.split(`# ${entry.name}=`).length - 1, 1, entry.name)
   }
-  for (const document of documents) {
-    assert.doesNotMatch(document, /NOVA_AUDIO_AGENT_REALTIME_PROVIDER\s*=/u)
-    assert.doesNotMatch(document, /NOVA_AUDIO_AGENT_(?:HA|AUTOGLM)_[A-Z_]+\s*=/u)
-    assert.doesNotMatch(document, /NOVA_AUDIO_AGENT_DESKTOP_(?:TOKEN|READY_ENDPOINT|READY_FD)\s*=/u)
+  const publicNames = new Set(publicEnvironmentContract().map(entry => entry.name))
+  const selections: string[][] = []
+  for (const file of ['docs/configuration.md', 'docs/configuration.zh-CN.md']) {
+    const block = generatedBlock(await readFile(resolve(repositoryRoot, file), 'utf8'))
+    const names = [...block.matchAll(/^\| `([A-Z0-9_]+)` \|/gmu)].map(match => match[1]!)
+    assert.equal(new Set(names).size, names.length, file)
+    assert.ok(names.length <= 20 && names.length > 0, file)
+    for (const name of names) assert.ok(publicNames.has(name), `${file}: ${name}`)
+    for (const essential of ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'NOVA_AUDIO_AGENT_PIPELINE_MODE', 'NOVA_AUDIO_AGENT_MEMORY_CONNECTION']) {
+      assert.ok(names.includes(essential), `${file}: ${essential}`)
+    }
+    selections.push(names)
+  }
+  assert.deepEqual(selections[0], selections[1])
+  for (const file of ['docs/getting-started.md', 'docs/getting-started.zh-CN.md']) {
+    assert.doesNotMatch(await readFile(resolve(repositoryRoot, file), 'utf8'), /BEGIN GENERATED ENV CONTRACT/u)
   }
 })
 
@@ -189,5 +193,14 @@ test('current architecture and numbered specs do not depend on the retired graph
       assert.doesNotMatch(text, /workspace-graph\/|workspace_graph|NOVA_AUDIO_AGENT_WORKSPACE_GRAPH|GraphContext|PublishedGraphSnapshot/u, `${root}/${file}`)
       assert.doesNotMatch(text, /Workspace Graph|workspace graph|工作区图/u, `${root}/${file}`)
     }
+  }
+})
+
+
+test('focused user guides describe use without branch or documentation-maintenance labels', async () => {
+  for (const file of ['docs/README.md', 'docs/README.zh-CN.md', 'docs/getting-started.md', 'docs/getting-started.zh-CN.md', 'docs/configuration.md', 'docs/configuration.zh-CN.md', 'docs/personal-memory.md', 'docs/personal-memory.zh-CN.md', 'docs/features.md', 'docs/features.zh-CN.md', 'docs/iphone.md', 'docs/iphone.zh-CN.md', 'docs/architecture.md', 'docs/architecture.zh-CN.md']) {
+    const markdown = await readFile(resolve(repositoryRoot, file), 'utf8')
+    const visible = markdown.replace(/\]\([^)]+\)/gu, ']')
+    assert.doesNotMatch(visible, /v0\.[23](?:\.0)?(?:dev)?|M1\.5c|Documentation verification|文档维护|本轮|本地基线/u, file)
   }
 })

@@ -15,6 +15,7 @@ import * as runtime from '../src/executors/codex/index.js'
 import {
   OwnedCodexAppServerTransport,
   type TransportObserver,
+  type CodexHostPreflightRunner,
 } from '../src/executors/codex/app-server-transport.js'
 import {MAX_STDOUT} from '../src/executors/codex/protocol.js'
 import {resolveCodexLaunchProfile, type CodexLaunchProfile} from '../src/executors/codex/launch-profile.js'
@@ -275,7 +276,10 @@ test('preflight is hard-capped and caller cancellation settles before spawn', as
     spawnCount += 1
     return new MemoryAppServerOwner([])
   }}, {
-    preflightRunner: {run: async () => {
+    preflightRunner: {run: async (_config, _timeout, observe) => {
+      observe?.('login')
+      observe?.('sandbox')
+      observe?.('cleanup_started')
       entered.resolve()
       return await new Promise<never>(() => {})
     }},
@@ -287,7 +291,14 @@ test('preflight is hard-capped and caller cancellation settles before spawn', as
   )
   await entered.promise
   controller.abort()
-  assert.deepEqual(await running, {
+  const failed = await running
+  assert.equal(failed.diagnostic?.method, 'preflight/sandbox')
+  assert.ok((failed.diagnostic?.elapsed_ms ?? -1) >= 0)
+  const detail = JSON.parse(failed.diagnostic.message) as Record<string, unknown>
+  assert.equal(detail.cleanup_status, 'running')
+  assert.deepEqual(Object.keys(detail.completed_stages_ms as object), ['version', 'login'])
+  assert.deepEqual({...failed, diagnostic: undefined}, {
+    diagnostic: undefined,
     classification: 'refused',
     code: 'preflight_timeout',
     turnStartWritten: false,
@@ -2904,7 +2915,7 @@ function threadResponse(
 function createTransport(
   processFactory: CodexProcessOwnerFactory,
   overrides: {
-    readonly preflightRunner?: {run: (config: unknown, timeoutMs: number) => Promise<unknown>}
+    readonly preflightRunner?: CodexHostPreflightRunner
     readonly schemaProbe?: {
       generate: (config: unknown, timeoutMs: number) => Promise<Readonly<Record<string, unknown>>>
     }

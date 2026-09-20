@@ -50,6 +50,24 @@ below.
 - Frontend instructions naming `codex__project` etc.: `qwen.ts:134–250`;
   intake fact text `codex__confirm_project_action`: `intake.ts:293`.
 
+## Task lifecycle
+
+The pre-change baseline below and dated review rows retain their original context.
+Current coding intake is revision-bound: accepted user turns can amend or replace
+an intention only through the structured controller; host narration and failed
+recognition cannot serve as new user authority. Project confirmation and executor
+approval keep separate IDs and ownership.
+
+Long-running Codex execution is not terminated by an overall task wall-clock
+limit. Bounded model assessment, startup/protocol operations, explicit cancellation
+and approval expiry still have their own lifecycles. A client action receipt or a
+“preparing task” message is not evidence that Codex executed the requested work.
+Late results and duplicate confirmations must not start a second task.
+
+Current desktop task feedback is described in [05](05-progress-bubbles.md),
+recovery in [architecture](../../architecture.md#voice-and-interruptions),
+and acceptance remains in [RELEASE-GATE](RELEASE-GATE.md).
+
 ## Goals
 
 1. **One round-trip for the common case.** "改博客的暗色模式" with `blog`

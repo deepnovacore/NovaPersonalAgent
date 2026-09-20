@@ -1,4 +1,5 @@
 import {randomUUID,createHash} from 'node:crypto'
+import type {PromptLanguage} from '../realtime/prompt-language.js'
 import {
   DesktopTasks,
   executorTasksSchema,
@@ -92,6 +93,8 @@ export interface DesktopCommand {
 /** The service surface the bridge drives. Narrow: six calls and one read. */
 export interface BridgeService {
   readonly inputCapabilities?: readonly string[]
+  setLanguage?(language?: PromptLanguage): Promise<void>
+
   readonly executorState: ExecutorState
   setCodingProgressNarration?(mode: 'smart' | 'continuous'): void
   discardInputAudio?(): Promise<void>
@@ -372,7 +375,7 @@ export class DesktopSocketBridge {
     if (frame.role === 'assistant') {
       this.#latestAssistantCaptionSequence = this.#captionSequence
     }
-    this.#enqueue(captionMessage(frame, this.#captionSequence), {droppable: true})
+    this.#enqueue(captionMessage(frame, this.#captionSequence), {droppable: !frame.final || frame.full_text === undefined})
   }
 
   onExecutorProgress(input: ExecutorProgress, result?: ExecutorResult): void {
@@ -385,8 +388,8 @@ export class DesktopSocketBridge {
       const parsed = executorResultSchema.parse({type: EXECUTOR_RESULT, work_id: frame.delegate_id, result})
       const previous = this.#results.get(frame.delegate_id)
       const project = this.#projectView?.roster?.find(entry => entry.running.some(work => work.work_id === frame.delegate_id))
-      const title = project?.running.find(work => work.work_id === frame.delegate_id)?.title ?? previous?.title
-      const projectName = project?.name ?? previous?.project
+      const title = frame.title ?? project?.running.find(work => work.work_id === frame.delegate_id)?.title ?? previous?.title
+      const projectName = frame.project ?? project?.name ?? previous?.project
       const retained = {...(projectName === undefined ? {} : {project: projectName}), ...(title === undefined ? {} : {title})}
       const enriched = parsed.result === null ? null : {...parsed.result, ...retained}
       // Validate metadata too before changing retained state; serialization stays one bounded work per frame.
@@ -1348,7 +1351,10 @@ export class DesktopRealtime {
     this.serverOptions = {
       token: options.token,
       bootstrapTextFrames: [READY_FRAME],
-      onClientAuthenticated: () => this.#authenticated(),
+      onClientAuthenticated: async language => {
+        this.#authenticated()
+        await options.service.setLanguage?.(language)
+      },
       onClientDisconnect: media => this.#disconnected(media?.hadProviderAttachment ?? true),
       onDebugBoardRequest: request => {
         if (memoryBoard === undefined) throw new DesktopProtocolError('desktop memory board is unavailable')
@@ -1616,6 +1622,10 @@ export function buildDesktopRealtimeComposition(
     })(),
     stop: options.stop,
     memoryBoard: async (requestId, detail, page) => {
+      if (page?.channel === 'personal') {
+        const personal = await realtime.inspectPersonalMemory({query: page.query ?? '', ...(page.before_seq === undefined ? {} : {before: page.before_seq})})
+        return JSON.stringify({type: 'memory.board', request_id: requestId, channels: [], diagnostics: {version: 1, records: []}, personal})
+      }
       await realtime.runtime.flushMemory(true)
       return memoryBoardMessage(requestId, realtime.runtime.memory, options.telemetry?.diagnostics?.(),
         {...page, conversationEpoch: realtime.runtime.core.conversationEpoch, ...(detail === undefined ? {} : {detail})})
@@ -1634,10 +1644,9 @@ export function buildDesktopRealtimeComposition(
 
   const unsubscribeProgress = realtime.runtime.observe((event, currentConversation) => {
     if (currentConversation === false) return
-    const projected = projectExecutorEvent(event, realtime.runtime, channel => realtime.service.agentNameForChannel(channel))
-    if (projected !== null) {
-      desktop.bridge.onExecutorProgress(projected.progress, projected.result)
-    }
+    const projected = projectExecutorEvent(event, realtime.runtime, channel => realtime.service.agentNameForChannel(channel),
+      undefined, id => realtime.service.session.delegateRecord(id))
+    if (projected !== null) desktop.bridge.onExecutorProgress(projected.progress, projected.result)
   })
   if (options.stop.signal.aborted) unsubscribeProgress()
   else options.stop.signal.addEventListener('abort', unsubscribeProgress, {once: true})

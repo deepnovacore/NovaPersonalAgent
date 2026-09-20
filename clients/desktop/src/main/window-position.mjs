@@ -152,7 +152,7 @@ export function bubbleWindowLayout({
   const bubbleHeight = Math.ceil(BUBBLE_ROW_HEIGHT_CSS * rows * zoomFactor)
   const bubbleWidth = Math.max(
     NATURAL_ORB_WINDOW_SIZE.width,
-    Math.ceil(BUBBLE_WIDTH_CSS * zoomFactor),
+    Math.ceil((rows ? BUBBLE_WIDTH_CSS : 332) * zoomFactor),
   )
   const orbScreenCenter = rectangleCenter(normalBounds)
   const x = clampWindowPosition({
@@ -230,7 +230,7 @@ function bubbleOnlyLayout({normalBounds, zoomFactor, bubbleHeight, bubbleWidth, 
   }
   const orbOffset = 55 * zoomFactor
   const available = Math.floor((workArea.height - naturalHeight - bubbleHeight) / zoomFactor)
-  const taskHeightCss = taskRows && available >= 128 ? Math.min(taskRows * 96 + 64, available) : 0
+  const taskHeightCss = taskRows && available >= 102 ? Math.min(taskRows * 72 + 30, available) : 0
   return {
     taskHeightCss,
     bubblePlacement: 'above',

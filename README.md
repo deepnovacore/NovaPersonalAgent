@@ -9,12 +9,21 @@
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
 [![Architecture](https://img.shields.io/badge/Arch-ControlPlane-7B2CBF.svg)](#2-architecture)
 [![Blog](https://img.shields.io/badge/Blog-Design-0B7285.svg)](docs/blog/2026-08-proactive-voice-agent-design-space.md)
-[![YouTube](https://img.shields.io/badge/YouTube-Demo(CN)-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
 
 > **An always-on voice agent with restrained proactivity and the capability of workspace management.**
 
-https://github.com/user-attachments/assets/061697f3-fff6-47d6-924b-8a29eef4ab45
+
+## News
+
+- **2026-09-22 · v0.2.0**
+  - Cross-platform approvals for sandbox network access and command execution.
+  - A leaner voice layer; workspace/session scheduling moves into the coding executor.
+  - Pluggable ASR / LLM / TTS pipelines, decoupled from QwenAudioRealtime.
+  - Custom MCP servers for search and RAG; wake words “你好星核” and “Hi Nova”. Chinese/English interface and system prompts.
+  - Personal memory with mem0 / VoiceMem, plus improved Workspace Graph.
+  - An iPhone client connected to your PC runtime over Tailscale.
+- **2026-08-31 · v0.1.0** — Always-on voice, background Codex tasks, live steering, workspace/session management, and selective progress updates.
 
 ## 1. Highlights
 
@@ -27,11 +36,10 @@ A concurrent work [qwen-audio-agent](https://github.com/QwenAudio/qwen-audio-age
 worth it at all** (see the [historical design post](docs/blog/2026-08-proactive-voice-agent-design-space.md) for more details).
 
 
-- **Restrained proactivity:** Not all words are created equal: trivial coding progress can stay quiet while milestones are reported. Vision Guard alerts have higher speaking rights and may preempt Nova playback, never user speech.
-- **Workspace management.** No need to manage your workspaces manually as in codex, our agent does that for you. Workspaces/sessions can be created/switched via pure voice control(proposed and confirmed).
-- **Revision-bound intake.** For under-specified requirements, host-owned intake slots clarify the request before dispatch. The M1.5c live validation gate is still pending; no token-saving percentage is claimed here.
-- **Real-time steering**. Our codex executor is built upon native codex app-server instead of ACP, which allows real-time steering.
-- **Local wake word.** Opt-in offline Chinese keyword detection hides the idle orb and wakes it locally; see [setup](docs/getting-started.md#local-wake-word).
+- **Restrained proactivity.** Important progress gets reported; routine updates stay quiet, and reminders never interrupt you while you speak.
+- **Voice-run workspaces.** Create and switch workspaces and sessions by voice, with your confirmation.
+- **Clarify before acting.** Nova asks about unclear requirements before handing work to the background executor.
+- **Steer while it runs.** Add requirements and constraints by voice while a task is in progress.
 
 ## 2. Architecture
 
@@ -51,6 +59,49 @@ For more details about the architecture, check [Architecture](docs/architecture.
 
 
 
+## Main Features
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Talk while work gets done</h3>
+      <p>Assign tasks, clarify requirements, and follow progress without leaving the conversation.</p>
+      <img src="assets/features/conversation.en.png" alt="Voice conversation and workspace status" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>Camera monitoring and timely alerts</h3>
+      <p>Ask Nova to watch for a condition and tell you when it occurs.</p>
+      <img src="assets/features/vision.en.png" alt="Camera monitoring and translated narration from the v0.1 demo" width="100%"><br><sub>v0.1 demo · 02:08</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>You approve the next step</h3>
+      <p>Review workspace changes, command execution, and network access.</p>
+      <img src="assets/features/approvals.en.png" alt="Network access and workspace approval cards" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>Bring your tools and knowledge</h3>
+      <p>Configure ASR / LLM / TTS and MCP; ask questions across your documents.</p>
+      <img src="assets/features/knowledge.en.png" alt="Knowledge-base answer using the CN-27 demo documents" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Memory that stays with you</h3>
+      <p>mem0 recalls personal context across conversations, with source text you can inspect.</p>
+      <img src="assets/features/mem0.en.png" alt="Four local mem0 memories with source details" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>Take Nova with you</h3>
+      <p>Connect your iPhone over Tailscale to talk and approve tasks on your PC.</p>
+      <img src="assets/features/iphone.en.png" alt="iPhone home and connection settings" width="100%">
+    </td>
+  </tr>
+</table>
+
+<sub>Demo data; screenshots cleaned up, composited and translated for presentation.</sub>
+
 ## 3. Quickstart
 
 Requirements: Node.js 22+, npm, Git, a logged-in `codex` executable (app-server is the only
@@ -63,7 +114,7 @@ npm install --global nova-audio-agent@0.1.1
 # open the shipped app
 novaaudio
 # open the settings panel in the app
-# get api key from dashscope and tavily to fill up 
+# get api key from dashscope and tavily to fill up
 novaaudio config
 novaaudio doctor
 ```
@@ -95,7 +146,7 @@ Native echo-cancelled capture (VoiceProcessingIO) is macOS-only. Wake detection 
 capture when available; Windows, Linux source runs, and macOS fallback use Chromium
 `getUserMedia` + AudioWorklet. While sleeping, microphone frames go only to the local
 wake-word Worker; explicit mute stops wake detection. See
-[wake-word setup](docs/getting-started.md#local-wake-word).
+[wake-word setup](docs/getting-started.md#enable-a-wake-word).
 
 ## 4. Documentation
 

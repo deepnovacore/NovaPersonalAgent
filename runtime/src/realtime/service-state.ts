@@ -14,7 +14,7 @@
 
 import type { PlaybackGeneration } from './playback.js'
 import type { ToolAcceptance,ToolCallReady } from './bridge.js'
-import type { HostResponseIntent } from './protocol.js'
+import type { HostResponseIntent, HostWorkSource } from './protocol.js'
 
 /** Longest host fact the provider will be given. Beyond this the model stops attending to it. */
 export const MAX_HOST_FACT_CHARS = 3_000
@@ -321,6 +321,7 @@ export function parseCallKey(key: string): {readonly sessionEpoch: number; reado
 
 /** A host fact carrying one context item. */
 export function hostFactIntent(item: {
+  readonly source?: HostWorkSource | undefined
   readonly kind: 'progress' | 'final' | 'recovery' | 'dialogue_context'
   readonly host_item_id: string
   readonly event_id: string

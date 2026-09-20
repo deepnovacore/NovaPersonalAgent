@@ -759,6 +759,7 @@ body:hover #orb-rail,
   overflow-wrap: anywhere;
   user-select: text;
 }
+.progress-bubble-origin { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #c6b9d4; font-size: 10px; font-weight: 600; }
 .progress-bubble[data-expanded='true'] { height: auto; flex-basis: auto; max-height: 160px; }
 .progress-bubble[data-expanded='true'] .progress-bubble-text {
   display: block;

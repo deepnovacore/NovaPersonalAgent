@@ -1,3 +1,4 @@
+import {translateSystemPrompt, type PromptLanguage} from '../realtime/prompt-language.js'
 import type {ClientPairing} from './client-pairing.js'
 /** AOQ credential/data broker; Runtime ownership is supplied through hooks, never constructed here. */
 import {randomUUID, timingSafeEqual} from 'node:crypto'
@@ -59,7 +60,7 @@ const allocationSchema = z.object({
   sidExpiresInSecs: z.number().positive().max(2_147_483),
 })
 type Allocation = z.infer<typeof allocationSchema>
-const helloSchema = z.object({type: z.literal('hello'), token: z.string()})
+const helloSchema = z.object({type: z.literal('hello'), token: z.string(), language: z.enum(['zh-CN', 'en']).optional()})
 const mediaSchema = z.object({protocol_version: z.literal(1),
   media: z.object({transports: z.array(z.string()).max(32)})})
 const connectSchema = z.object({type: z.literal('aoq.connect'), connection_id: z.uuid(), request_id: z.uuid()}).strict()
@@ -125,6 +126,8 @@ export interface AoqChatServerOptions {
   readonly token: string
   readonly issueCredential: (signal: AbortSignal) => Promise<Allocation>
   readonly voice?: string
+  /** Host-configured default when a client's hello omits `language`. */
+  readonly language?: PromptLanguage
   readonly authTimeoutMs?: number
   readonly credentialTimeoutMs?: number
   readonly heartbeatMs?: number
@@ -143,6 +146,8 @@ interface Connection {
   providerConnected: boolean
   inboundSequence: number
   outboundSequence: number
+  language?: PromptLanguage
+  authentication?: Promise<void>
   authenticated: boolean
   requested: boolean
   alive: boolean
@@ -307,6 +312,7 @@ export class AoqChatServer implements DesktopServerTransport {
     const size = Buffer.byteLength(raw)
     if (++c.pendingControls > 128 || (c.pendingControlBytes += size) > MAX_BUFFERED_BYTES) { this.#reject(c, 4008); return }
     c.controlLane = c.controlLane.then(async () => {
+      await c.authentication
       if (this.#active !== c || !c.commands) return
       const result = await c.commands.receive(raw, control => {
         if (this.#active !== c || !this.#options.runtime?.onControl) throw new Error('AOQ control unavailable')
@@ -363,6 +369,7 @@ export class AoqChatServer implements DesktopServerTransport {
           const runtime = this.#options.runtime
           const transport = runtime ? RUNTIME_TRANSPORT : TRANSPORT
           if (!media.success || !media.data.media.transports.includes(transport)) { this.#reject(c, 4006); return }
+          if (hello.language !== undefined) c.language = hello.language
           c.authenticated = true
           if (this.#options.pairing) {
             const untrack = this.#options.pairing.track(hello.token, () => this.#reject(c, 4003, 'device_revoked'))
@@ -373,9 +380,8 @@ export class AoqChatServer implements DesktopServerTransport {
             input_audio: {encoding: 'pcm_s16le', sample_rate: 16000, channels: 1},
             output_audio: {encoding: 'pcm_s16le', sample_rate: 24000, channels: 1}, capabilities: runtime ? ['audio', 'captions', 'projects', 'executor'] : ['audio', 'captions'],
             media: {transport, path: 'direct', audio_owner: 'aoq_sdk', pipeline: 'integrated', mode: runtime ? 'runtime' : 'chat_only'}})
-          if (this.#active === c) {
-            try { void Promise.resolve(runtime?.onClientAuthenticated?.()).catch(() => this.#reject(c)) } catch { this.#reject(c) }
-          }
+          c.authentication = Promise.resolve(runtime?.onClientAuthenticated?.(hello.language))
+          void c.authentication.catch(() => this.#reject(c))
           return
         }
         if (this.#options.runtime && type === 'aoq.event') {
@@ -411,9 +417,15 @@ export class AoqChatServer implements DesktopServerTransport {
 
   async #allocate(c: Connection, requestId: string, started: number): Promise<void> {
     try {
-      const result = allocationSchema.parse(await this.#options.issueCredential(c.abort.signal))
+      // Issue the credential in parallel with the language hook so credentialTimeoutMs keeps
+      // covering issuance alone, then settle the hook before the provider attaches or
+      // instructions render -- c.language itself is already assigned synchronously at hello.
+      const credential = this.#options.issueCredential(c.abort.signal)
+      const result = allocationSchema.parse(await credential)
       if (this.#active !== c || c.abort.signal.aborted) return
       clearTimeout(c.credentialTimer)
+      await c.authentication
+      if (this.#active !== c || c.abort.signal.aborted) return
       const {sidExpiresInSecs, clientRelayEndpoints, ...fields} = result
       const credentials = {...fields, clientRelayEndpoints: clientRelayEndpoints.map(({endpoint, port, route_index}, index) => ({
         endpoint, port, routeIndex: route_index ?? index,
@@ -423,7 +435,7 @@ export class AoqChatServer implements DesktopServerTransport {
       const frame = {type: 'aoq.credentials', connection_id: c.id, request_id: requestId, credentials,
         ...(this.#options.runtime ? {mode: 'runtime'} : {session: {modalities: ['text', 'audio'], voice: this.#options.voice ?? 'longanqian',
           input_audio_format: 'pcm', output_audio_format: 'pcm',
-          instructions: '你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行主机工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。',
+          instructions: translateSystemPrompt('你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行主机工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。', c.language ?? this.#options.language),
           turn_detection: {type: 'smart_turn'}}})}
       if (Buffer.byteLength(JSON.stringify(frame)) >= MAX_JSON_BYTES) { this.#unavailable(c); return }
       if (this.#options.runtime) {

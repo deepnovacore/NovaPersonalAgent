@@ -1,10 +1,10 @@
 # 05. Progress Bubbles
 
-> 摘要：设置 `progressBubbles: off | milestones | all`（默认 milestones）。Runtime 通过新的 `executor.progress` 线框把委派进展推到桌面；orb 上方最多叠 3 条气泡。气泡是**提醒**，不是审计：几秒即逝、最多三条。审计与结果回看走「最近一次结果」入口（常驻、可点开）。审批仍走横幅，不进气泡。气泡不得改变 orb 状态或 Floor 优先级。原生窗口尺寸、屏幕边缘、缩放与横幅共存进入验收。
+> 摘要：设置 `progressBubbles: off | milestones | all`（默认 milestones）。Runtime 通过新的 `executor.progress` 线框把委派进展推到桌面；orb 上方最多叠 3 条气泡。气泡是**提醒**，不是审计：几秒即逝、最多三条。结果数据独立保留；当前任务横幅与记忆面板承担反馈，Orb 的旧「查看任务结果」入口已隐藏，原常驻入口验收要求尚未闭合。审批仍走横幅，不进气泡。气泡不得改变 orb 状态或 Floor 优先级。原生窗口尺寸、屏幕边缘、缩放与横幅共存进入验收。
 >
 > 修订（2026-09-03）：回应产品建议「气泡适合提醒，不适合承担审计」。
 
-## Baseline (today)
+## Historical baseline (before progress UI)
 
 - Orb shows `#state-label` (`待命 · Codex 空闲`, etc.) and a confirmation pill
   for project / Codex approval. There is no toast or bubble stack
@@ -19,10 +19,9 @@
 
 1. Optional glanceable progress above the orb without forcing speech.
 2. Levels that match existing attention bands (milestone vs detail).
-3. A persistent “last result” entry so a missed bubble is never the only record
-   of what a task did (qwen-audio-agent keeps a Task record as a delivery
-   receipt; Nova’s equivalent is the Codex project store + Memory Board, and
-   the orb needs one affordance that opens it).
+3. Retain task outcomes independently of transient bubbles. The original persistent
+   Orb last-result affordance is an open UX acceptance requirement; current
+   presentation and the remaining gap are stated below.
 4. Keep approval UX on the dedicated banner path; bubbles never carry
    authorization, never drive orb state, never change Floor.
 
@@ -90,13 +89,17 @@ Rules:
 Exact mapping table lives next to the projector implementation and is covered
 by unit tests. Prefer missing a detail bubble over leaking sensitive text.
 
-## Last-result entry
+## Current task feedback and retained results
 
-- The `#state-label` (or a small affordance beside it) becomes clickable when
-  the most recent delegate has a terminal outcome. Clicking opens the existing
-  Memory Board / project-store view scrolled to that delegate (or, until that
-  view has deep links, a compact native panel listing outcome, summary,
-  changed-file count, and start/end time).
+Current desktop uses the task banner for active-work feedback and actions; the
+memory panel provides conversation history with upward pagination. Task progress,
+terminal outcome and request receipts are separate states. A cancel request is
+shown as pending until host feedback arrives, not as immediate completion.
+
+The Orb state label currently shows voice status; the former “查看任务结果” entry
+is hidden. This does not establish the original always-reachable last-result UX.
+Retained result data is separate from whether the interface exposes an entry point:
+
 - With concurrent works ([08](08-project-and-work.md)) the entry is keyed by
   `work_id` (= `delegate_id`): each running work gets its own entry and a new
   dispatch replaces only the entry for the same work, never another work's.
@@ -111,10 +114,10 @@ by unit tests. Prefer missing a detail bubble over leaking sensitive text.
   `executor.result {work_id, result}` frame per retained slot on updates and
   reconnect. `result:null` clears only that work; non-null result identity must
   equal `work_id`. Never aggregate the snapshot into a frame over 16 KiB.
-- The existing affordance opens a native project/result menu; each retained
-  result opens the compact single-result dialog. Project/title disambiguate
-  concurrent work. Project roster and running titles share this read-only menu.
-- YOLO runs show the same entry; audit goes there, not into bubbles.
+- Retained project/result menu and dialog code does not itself prove a visible
+  entry point. Verify user reachability on the candidate application; project and
+  title must disambiguate concurrent work.
+- YOLO results use the same retained records; bubbles are not the audit record.
 
 ## Renderer UX
 
@@ -156,13 +159,13 @@ channel. Product copy in README may note: milestones can be glanced as bubbles
 so Surrogate can stay quiet more often — but Surrogate policy changes are not
 required to ship bubbles.
 
-## Implementation touchpoints
+## Implementation touchpoints (current paths)
 
 | Area | Files |
 |---|---|
-| Projection | `runtime/src/desktop/desktop-session.ts`, possibly a small progress-projector module |
+| Projection | `runtime/src/desktop/desktop-session.ts`, `runtime/src/desktop/desktop-progress.ts` |
 | Wire | `runtime/src/desktop/desktop-wire.ts`, `runtime/src/desktop.ts` inbound/outbound schemas if needed |
-| Orb | new `bubbles.mjs` (or equivalent), `index.mjs`, `index.css` |
+| Orb | `clients/desktop/src/renderer/bubbles.mjs`, `task-banner.mjs`, `index.mjs` |
 | Settings | store v4 + 通知 tab |
 
 ## Verification checklist

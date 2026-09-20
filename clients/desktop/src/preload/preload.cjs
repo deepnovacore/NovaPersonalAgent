@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
       return () => ipcRenderer.removeListener('nova:personal:collapsed', listener)
     },
   }),
+  language: process.argv.includes('--nova-language=en') ? 'en' : 'zh-CN',
   wakeWord: Object.freeze({
     sleep: () => ipcRenderer.send('nova:wake-word:sleep'),
     wake: () => ipcRenderer.send('nova:wake-word:wake'),
