@@ -15,6 +15,8 @@ const currentDocs = [
   'docs/en/getting-started.md',
   'docs/zh-CN/getting-started.md',
   'docs/en/architecture.md',
+  'docs/en/archs/06-verification.md',
+  'docs/zh-CN/archs/06-verification.md',
 ] as const
 
 test('current docs state the Node release truth and do not advertise retired capabilities', async () => {
@@ -30,7 +32,7 @@ test('current docs state the Node release truth and do not advertise retired cap
     assert.doesNotMatch(text, /v1-mini[^\n]*(?:real|actual) executor[^\n]*(?:proven|pass)|v1-mini path runs locally/iu, file)
   }
   const gettingStarted = documents.find(item => item.file === 'docs/en/getting-started.md')!.text
-  assert.match(gettingStarted, /Node\.js and TypeScript[^\n]*only product runtime/iu)
+  assert.match(documents.find(item => item.file === 'docs/en/archs/06-verification.md')!.text, /Node\.js and TypeScript[^\n]*only product runtime/iu)
   assert.match(gettingStarted, /Desktop targets macOS and Windows/iu)
   assert.match(gettingStarted, /Linux is available for source use/iu)
 })
@@ -40,8 +42,8 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
     file,
     await readFile(resolve(repositoryRoot, file), 'utf8'),
   ] as const)))
-  const english = `${documents.get('README.md')}\n${documents.get('docs/en/getting-started.md')}`
-  const chinese = `${documents.get('README.zh-CN.md')}\n${documents.get('docs/zh-CN/getting-started.md')}`
+  const english = `${documents.get('README.md')}\n${documents.get('docs/en/getting-started.md')}\n${documents.get('docs/en/archs/06-verification.md')}`
+  const chinese = `${documents.get('README.zh-CN.md')}\n${documents.get('docs/zh-CN/getting-started.md')}\n${documents.get('docs/zh-CN/archs/06-verification.md')}`
 
   assert.match(english, /integrated.*cascaded/isu)
   assert.match(english, /qwen-audio-3\.0-realtime-plus.*longanqian/isu)
@@ -146,7 +148,7 @@ function generatedBlock(document: string): string {
 
 test('current Node Codex transport claim remains exact', async () => {
   const gettingStarted = await readFile(
-    resolve(repositoryRoot, 'docs/en/getting-started.md'),
+    resolve(repositoryRoot, 'docs/en/archs/06-verification.md'),
     'utf8',
   )
   assert.match(gettingStarted, /Codex is app-server-only; JSONL is\s+fixture-parser-only/iu)
