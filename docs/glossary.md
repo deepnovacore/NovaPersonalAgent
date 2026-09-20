@@ -7,6 +7,9 @@
 | Surrogate | A bounded attention policy for unsolicited suggestions; it selects pooled entries and never generates words |
 | Runtime spine | The event loop that applies state and coordinates work |
 | Memory | Canonical per-channel observations, accepted handoffs, and revision-bound intake facts |
+| Personal memory | Cross-session facts; local mem0 by default, optional VoiceMem or remote resource; never execution authority |
+| Knowledge corpus | Separately admitted documents and retrieval through Knowledge MCP; not the personal-memory store |
+| Saved / applied | Persisted configuration versus configuration activated by the backend; service changes can be saved but pending restart |
 | Channel | One append-only observation stream per capability: `conversation`, `search`, camera evidence, hidden Vision `watch`/`guard`, plus one per active executor |
 | ContextView | A bounded snapshot compiled for a model call |
 | Floor | Speaking-path arbitration with three verdicts: `allow`, `preempt`, `defer` |
@@ -16,7 +19,7 @@
 | Executor | A manifest-declared capability behind the port contract |
 | AgentController | A host registry entry describing a model-facing controller and its owned hidden channels; separate from executor manifests |
 | Direct MCP tool | A consumer-projected `${name}__${op}` operation, never an executor dispatch target or intake writer |
-| Delegate | One identity-bound, deadline-bounded unit of dispatched work |
+| Delegate | One identity-bound unit of dispatched work; long-running coding work and bounded approval/model requests have separate lifetimes |
 | Progress | A non-terminal executor event bound to its delegate |
 | Observation | A non-terminal fact emitted by an active delegate outside the progress cadence (for example a monitoring hit) |
 | Handoff | A typed terminal executor result returned to Runtime |

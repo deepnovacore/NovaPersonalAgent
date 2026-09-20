@@ -24,7 +24,7 @@ contract.
   revision-bound IntakeSession below.
 - Dispatch payload is the model-authored `work_order` string sent as
   `turn/start` input text
-  ([`runtime/src/codex-app-server-transport.ts`](../../../runtime/src/codex-app-server-transport.ts)).
+  ([`runtime/src/codex-app-server-transport.ts`](../../../runtime/src/executors/codex/app-server-transport.ts)).
 - Every delegate already passes admission via `dispatchExternal` /
   `dispatchConfirmedExternal` in
   [`runtime/src/core/runtime.ts`](../../../runtime/src/core/runtime.ts): schema, known

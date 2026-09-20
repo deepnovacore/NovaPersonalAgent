@@ -1,339 +1,105 @@
-<!-- Keep in sync with docs/getting-started.zh-CN.md -->
-
 # Getting Started
 
-## Current release boundary
+Nova runs on your computer, talks with you by voice, and uses Codex to carry out coding tasks.
 
-Node.js and TypeScript are the only product runtime. Codex is app-server-only; JSONL is
-fixture-parser-only and has no production process execution path. The v0.2dev thin-frontend target
-projects direct camera evidence through the Vision controller's hidden Watch/Guard channels;
-M1.5c/live/Windows acceptance remains pending.
+[Documentation](README.md) · [中文指南](getting-started.zh-CN.md)
 
-## Install for source development
+## 1. Prepare your computer
 
-Install Node.js 22+, npm, Git, and a logged-in `codex` executable. Native builds additionally
-require one platform toolchain:
+To run from source, install Node.js 22.13 or later, npm, Git, and Codex. Sign in to Codex before starting Nova.
 
-- macOS: Xcode Command Line Tools (`xcode-select --install`);
-- Linux: a C compiler available at `/usr/bin/cc`;
-- Windows: Visual Studio Build Tools with the **Desktop development with C++** workload.
+Native components also need a platform toolchain:
 
-On Linux, desktop sessions run on X11; Wayland sessions go through XWayland.
+- macOS: Xcode Command Line Tools (`xcode-select --install`).
+- Windows: Visual Studio Build Tools with **Desktop development with C++**.
+- Linux: a C compiler and X11 or XWayland for the desktop.
+
+Desktop targets macOS and Windows. Linux is available for source use.
+
+## 2. Install and start
 
 ```bash
-git clone \
-  https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
+git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
 cd nova-audio-agent
 npm ci
 cp .env.example .env
 ```
 
-For the default integrated Qwen path, set `TAVILY_API_KEY` and either `DASHSCOPE_API_KEY` or the
-supported generic fallback in `.env`. The fallback is `NOVA_AUDIO_AGENT_MODEL_API_KEY`, and it is
-accepted for Qwen realtime only with the exact base URL documented below. Search is always
-assembled, so Tavily is required. The launcher parses `.env` as data without shell evaluation;
-variables already set in the invoking shell take precedence.
+Add the default voice and search credentials to `.env`:
 
-Start the desktop client:
+```dotenv
+DASHSCOPE_API_KEY=your-dashscope-key
+TAVILY_API_KEY=your-tavily-key
+```
+
+You can disable search in the capability configuration if you do not need it. Start the desktop:
 
 ```bash
 npm run start:client
 ```
 
-For integrated-Qwen source startup, `DASHSCOPE_API_KEY` is the normal realtime credential.
-`NOVA_AUDIO_AGENT_MODEL_API_KEY` can be used instead only when
-`NOVA_AUDIO_AGENT_MODEL_BASE_URL` is exactly
-`https://dashscope.aliyuncs.com/compatible-mode/v1`; a different base URL does not make the
-generic key a Qwen realtime credential. When both credentials are set, `DASHSCOPE_API_KEY` takes
-precedence.
+When running from source, the project `.env` takes precedence over matching shell variables. Restart the desktop after editing it.
 
-## Always-on Codex project mode
+## 3. Give Nova a task
 
-The realtime Codex project surface has no enable/disable toggle. Ordinary non-realtime Codex keeps
-`codex__run` and its existing semantics; the realtime provider does not expose `codex__run`. A
-Workspace is a filesystem/Git project; a Session is a resumable Codex thread within one Workspace.
-Managed Workspaces default to
-`~/.nova-audio-agent/workspaces`, the registry to
-`~/.nova-audio-agent/codex-projects-v1.json`, and per-Workspace Codex homes to
-`~/.nova-audio-agent/codex-homes`. `NOVA_AUDIO_AGENT_CODEX_WORKSPACE` optionally imports an existing
-repository at startup. The desktop Settings Panel exposes the active workspace and the managed
-workspace root, alongside actions that open the active managed workspace and clear the active one
-or every managed workspace behind two confirmation dialogs; clearing empties the directory while
-the project record, display name, Codex history, and Session metadata survive. Registering an
-arbitrary existing directory still goes through `NOVA_AUDIO_AGENT_CODEX_WORKSPACE`, and voice can
-create new managed directories only.
+Try: “Create a webpage to showcase my work.” Nova asks for any missing information, requests confirmation when creating or switching projects, and sends the task to Codex.
 
-Each realtime turn receives only the active Workspace and its active Session, if any. Nova lists
-Workspace or Session candidates only on demand and never injects historical candidates into the
-standing turn context. Create, switch, and resume are staged proposals: the next user turn becomes a
-dedicated structured confirmation carrying the exact proposal ID and a JSON boolean. False, a wrong
-ID, or a replay makes no state change. After switching Workspace, ask to list or resume Sessions
-there. Persistence and recovery remain bound to the selected Workspace and Session records.
+You can add requirements, ask about progress, or request a stop. The task banner shows work status; bubbles provide brief updates. Operations that need permission have a separate approval prompt.
 
-Registry retention is bounded to 200 Sessions per Workspace and 1000 globally: oldest unavailable
-Sessions are pruned first, then inactive ready Sessions, while starting and active Sessions are
-protected. If protected records fill the limit, creation returns `session_limit`; lock contention
-returns `state_busy` immediately. Changing `NOVA_AUDIO_AGENT_CODEX_WORKSPACE` later registers
-another workspace with a deterministic suffix without replacing the current active Workspace, and
-untitled Sessions use speakable `任务 N` labels. Each project work order starts a fresh app-server
-process, so project mode intentionally disables Codex prewarm. A persistent workspace home
-refreshes its saved login when the host credential changes, using owner-only atomic files; a
-destination-only credential refresh is preserved while the host source is unchanged.
+A project is a directory containing your files. A session is an ongoing Codex conversation within that project. You can start a new session without discarding project files, or continue an existing session.
 
-## Local wake word
+## 4. Change settings
 
-Local Chinese wake-word detection is off by default. Enabling it in settings downloads the
-keyword model on first use and runs detection in a desktop Worker. The orb hides after 60
-idle seconds by default; choose `0` to disable auto-hide or `30..3600` seconds.
-The wake switch and idle timeout apply immediately without restarting the backend.
+Choose Chinese or English in Settings for the interface and AI system prompts. When local wake detection is enabled, both “你好星核” and “Hi Nova” are available.
 
-macOS uses native capture; other platforms use browser capture as the fallback. While asleep,
-microphone frames go only to local wake detection. Explicit mute stops this capture too:
-speech cannot unmute the app, so unmute manually. Installed Windows Worker/WASM loading,
-model replacement and spoken wake-word acceptance remain pending.
+Right-click the orb and open Settings.
 
-For manual Codex discovery on Windows select `codex.exe`, or the supported Node entry pairing
-`node.exe + codex.js`; `codex.cmd` is not a directly executable binary.
+- **保存 (Save)** stores changes. Service settings show a pending-restart notice.
+- **重启 (Restart)** starts the backend with saved settings and preserves unsaved drafts.
+- Appearance and wake-word changes apply immediately after saving.
 
-## Unsigned Windows development candidates
+Keys are write-only: the panel shows presence, not their values. Edit `.env` to change keys managed by that file.
 
-The GitHub Actions workflow **Unsigned Windows packages** produces unsigned development
-candidates. Download `unsigned-win32-x64` and use its `nova-win32-x64.exe`.
-Linux is deferred from release targets; Ubuntu still runs source builds and automated tests.
-Retained Linux packaging scripts do not establish a supported release candidate.
-Verify the intended workflow run before using a download.
+### Choose a voice mode
 
-Windows may show a SmartScreen warning for the unsigned `nova-win32-x64.exe`. Keep SmartScreen and
-other Windows security protections enabled; verify the workflow run and file before deciding
-whether to use the candidate. The workflow records an individual candidate's build and
-validation state; this guide does not claim native CI has passed.
+| Mode | How it works | Defaults |
+|---|---|---|
+| `integrated` | One model handles speech directly | Qwen `qwen-audio-3.0-realtime-plus`, voice `longanqian` |
+| `cascaded` | Separate recognition, language model and speech synthesis | Volcengine ASR -> DeepSeek `deepseek-flash` -> Volcengine TTS |
 
-The repository-owned Node checks are offline and deterministic:
+One key per platform is reused across selected services: DeepSeek uses `DEEPSEEK_API_KEY`; Qwen uses `DASHSCOPE_API_KEY`; Volcengine speech uses `DOUBAO_BIGMODEL_API_KEY`. An optional `DOUBAO_ASR_API_KEY` overrides recognition credentials; the ASR fallback is `DOUBAO_BIGMODEL_API_KEY`.
 
-```bash
-npm run build --workspace @nova-audio-agent/runtime
-node runtime/dist/src/cli.js diagnose --json
-node runtime/dist/src/cli.js demo all
-node runtime/dist/src/cli.js scorecard fixture check
-```
+Ark is an explicit cascaded LLM option using `ARK_API_KEY`. The conditional Settings Panel shows only the selected mode's controls. Service settings take effect on the backend's next launch. Nova does not automatically fail over to another provider.
 
-`diagnose` validates configuration only. It does not connect to a provider, spawn Codex, open a
-camera or microphone, launch Chromium, or disclose credentials and paths. Committed product
-fixtures are read-only during ordinary checks.
+### Enable a wake word
 
-## Realtime pipelines, credentials, and settings
+Local wake-word detection is off by default. Enabling it downloads the model on first use. The orb hides after 60 idle seconds by default; choose 30–3600 seconds, or 0 to disable automatic hiding.
 
-`integrated` and `cascaded` are the top-level pipeline shapes. Integrated Qwen is the default: it
-uses `qwen-audio-3.0-realtime-plus`, the `longanqian` voice, and `DASHSCOPE_API_KEY`, with no ASR,
-LLM, or TTS subnode controls. Cascaded mode exposes endpointing, ASR, LLM, and TTS; its default is
-Volcengine ASR -> Qwen `qwen-plus` -> Volcengine TTS. Ark is an explicit cascaded LLM selection,
-not an alternate integrated provider:
+While asleep, microphone input goes to local wake detection. Explicit mute stops detection too; unmute manually to resume.
 
-```bash
-NOVA_AUDIO_AGENT_PIPELINE_MODE=cascaded
-NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER=ark
-ARK_API_KEY=replace-with-your-ark-key
-```
+## 5. Memory, documents and iPhone
 
-One key per platform is reused for every selected node on that platform. Qwen uses
-`DASHSCOPE_API_KEY`; the explicit Ark LLM uses `ARK_API_KEY`; Volcengine TTS uses
-`DOUBAO_BIGMODEL_API_KEY`. `DOUBAO_ASR_API_KEY` is an optional ASR override, and its fallback is
-`DOUBAO_BIGMODEL_API_KEY` when it is absent. Only selected providers are validated or constructed;
-there is no automatic provider failover.
+- **Personal memory** uses local mem0 by default. Open the memory panel from the orb menu to inspect original wording and learned facts. See [personal memory](personal-memory.md).
+- **Document knowledge** is enabled in capability settings. Review the data-processing notice before importing files; embedding sends text to your configured model service.
+- **iPhone connection**: on macOS, choose “连接 iPhone…” from the orb menu, enable the phone service, and follow the network and QR-code instructions. See [remote service and pairing](iphone.md).
 
-The conditional Settings Panel places pipeline mode before provider configuration. Integrated mode
-shows its provider, model, and voice; cascaded mode shows endpointing, ASR, LLM, and TTS cards. API
-keys remain one field per platform, are write-only, and return presence booleans only. Panel edits
-stay in the Settings window as drafts until the save-and-restart button (labelled `保存并重启`,
-since the interface is Chinese-first) writes them, refreshes resolved
-configuration, and performs exactly one controlled backend restart. Pipeline, provider, model,
-voice, and key values therefore take effect on that next launch of the backend rather than
-mid-session, and the palette commits on the same boundary instead of applying live.
+## Troubleshooting
 
-Configured executor names are arbitrary unique manifest keys routed by roles; there is no fixed
-executor enum. The source-generated contract below selects no executor by default; explicit
-`fast_sim` remains a test fixture selector rather than a production default. Codex
-ordinary/live/project modes share the bounded app-server transport. Camera file input
-accepts only an absolute host-validated path, and both the local-camera default and
-`NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE` playback use Chromium's camera pipeline. External MCP settings
-are not shipped as a user-facing configuration surface.
+| Problem | What to check |
+|---|---|
+| Voice cannot connect | Credentials, service access and connectivity for the selected mode |
+| Codex cannot run | Codex sign-in and access to the project directory |
+| Saved settings have no effect | Look for the pending-restart notice and restart the backend |
+| Search is unavailable | Search credentials; MCP search also needs the selected service enabled |
+| A recent fact is missing | Learning takes time; check its state in the memory panel |
+| iPhone has no text-chat option | The host must use cascaded mode and support editable input |
 
-M1.5c thin-frontend acceptance, live provider, microphone/speaker, camera, Codex login, WindowServer,
-Windows descendant cleanup, clean-machine installer, signing, and publication checks are pending
-external evidence. The candidate realtime direct-tool budget B=24 is pending Qwen live validation,
-not a proven constant; Codex projection is outside that budget.
+## Advanced configuration
 
-### Opt-in live smoke
+Capabilities are stored in `~/.nova-audio-agent/capabilities.json`. Disable unneeded modules or configure external MCP services and their allowed tools. Only enabled services need credentials.
 
-The repository's Qwen smoke contacts a real provider and needs a credential; it is opt-in and is not
-recorded here as having run or passed. With an intentionally supplied DashScope key, run:
+Search defaults to Tavily. MCP search uses its own service credentials and does not need a Tavily key. Remote MCP requires HTTPS; unauthenticated local testing can use loopback HTTP.
 
-```bash
-DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
-```
+Node.js and TypeScript are the only product runtime. Codex is app-server-only; JSONL is fixture-parser-only. Developer references: [architecture](architecture.md), [capability configuration](specs/v0.2.0/03-capability-registry-and-mcp.md), and [opt-in live smoke](testing/live-acceptance.md).
 
-For opt-in live cascaded verification run `npm run smoke:cascaded --workspace @nova-audio-agent/runtime` with the provider credentials. The host controls response admission and request ownership; response origin is evidence, never authorization. Human acceptance remains pending.
-
-## Public environment reference
-
-The following block is generated from `runtime/src/config/environment-contract.ts`. Host-private handshake
-inputs are intentionally excluded.
-
-<!-- BEGIN GENERATED ENV CONTRACT -->
-| Variable | Owner | Required | Default | Description |
-|---|---|---|---|---|
-| `NOVA_AUDIO_AGENT_MODEL_BASE_URL` | `core` | No | DashScope compatible endpoint | FastBrain compatible API endpoint. |
-| `NOVA_AUDIO_AGENT_MODEL_API_KEY` | `core` | No | None | Optional generic support-model API credential override. |
-| `NOVA_AUDIO_AGENT_FAST_MODEL` | `core` | No | qwen3-vl-plus | FastBrain model. |
-| `NOVA_AUDIO_AGENT_WATCH_MODEL` | `core` | No | fast model | Watch model override. |
-| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | No | qwen-plus | Surrogate model. |
-| `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | No | qwen-flash | Memory compressor model. |
-| `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | No | integrated | Product pipeline shape: integrated or cascaded. |
-| `NOVA_AUDIO_AGENT_LANGUAGE` | `core` | No | zh-CN | AI system prompt language: zh-CN or en; desktop supplies its saved preference. |
-| `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | No | false | Attach a default-camera frame to user turns on verified cascaded VLMs. |
-| `NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID` | `camera` | No | None | Exact monitor camera device ID; empty uses the default device. |
-| `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` | `camera` | No | true | Enable independent Vision monitoring. |
-| `NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER` | `core` | No | qwen | Integrated realtime provider. |
-| `NOVA_AUDIO_AGENT_CASCADE_ENDPOINTING_PROVIDER` | `core` | No | auto | Cascaded endpointing provider. |
-| `NOVA_AUDIO_AGENT_CASCADE_ASR_PROVIDER` | `core` | No | volcengine | Cascaded ASR provider. |
-| `NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER` | `core` | No | deepseek | Cascaded LLM provider. |
-| `NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL` | `core` | No | provider default | Cascaded LLM model override. |
-| `NOVA_AUDIO_AGENT_CASCADE_TTS_PROVIDER` | `core` | No | volcengine | Cascaded TTS provider. |
-| `NOVA_AUDIO_AGENT_EXECUTOR` | `core` | No | None | Optional single executor selector; unset selects none. |
-| `NOVA_AUDIO_AGENT_EXECUTORS` | `core` | No | None | Optional ordered executor list; unset selects none. |
-| `NOVA_AUDIO_AGENT_CODING_PROGRESS_NARRATION` | `core` | No | smart | Coding progress narration. |
-| `NOVA_AUDIO_AGENT_PROACTIVITY_PRESET` | `core` | No | balanced | Proactivity preset. |
-| `NOVA_AUDIO_AGENT_SUGGESTION_COOLDOWN` | `core` | No | preset | Suggestion cooldown override in seconds. |
-| `NOVA_AUDIO_AGENT_FRESH_WINDOW` | `core` | No | preset | Fresh-context window override in seconds. |
-| `NOVA_AUDIO_AGENT_CODEX_APPROVAL_MODE` | `codex` | No | ask | Codex approval mode. |
-| `NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH` | `core` | No | balanced | Maximum clarification depth for intake. |
-| `NOVA_AUDIO_AGENT_PLAN_READBACK` | `core` | No | summary | Plan readback mode. |
-| `NOVA_AUDIO_AGENT_GENERATE_PLAN` | `core` | No | true | Generate a plan before execution. |
-| `NOVA_AUDIO_AGENT_PLANNER_MODEL` | `core` | No | None | Optional planner model override. |
-| `NOVA_AUDIO_AGENT_PROGRESS_BUBBLES` | `core` | No | milestones | Progress bubble display mode. |
-| `NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG` | `core` | No | ~/.nova-audio-agent/capabilities.json | Capabilities registry path. |
-| `NOVA_AUDIO_AGENT_SEARCH_PROVIDER` | `search` | No | tavily | CLI or CI search provider override. |
-| `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` | `search` | No | None | Web search MCP endpoint override; unset uses the verified Bailian preset when MCP is selected. |
-| `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` | `search` | No | web_search | Web search MCP tool override (generic default web_search; Bailian preset search_pro). |
-| `NOVA_AUDIO_AGENT_KNOWLEDGE_PATH` | `core` | No | ~/.nova-audio-agent/knowledge.sqlite | Knowledge SQLite database path. |
-| `NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER` | `core` | No | dashscope | Knowledge embedding provider. |
-| `NOVA_AUDIO_AGENT_EMBEDDING_MODEL` | `core` | No | text-embedding-v4 | Knowledge embedding model. |
-| `NOVA_AUDIO_AGENT_MEMORY_CONNECTION` | `core` | No | local | Memory connection: disabled, local, or remote. |
-| `NOVA_AUDIO_AGENT_MEMORY_PROVIDER` | `core` | No | None | Local engine: mem0 (default) or voicemem. Remote engines are service-owned. |
-| `NOVA_AUDIO_AGENT_BLACKBOARD_PATH` | `core` | No | ~/.nova-audio-agent/blackboard.sqlite | Conversation recovery database path. |
-| `NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID` | `core` | No | local | Stable conversation recovery owner. |
-| `NOVA_AUDIO_AGENT_MEMORY_URL` | `core` | When selected | None | HTTP memory service origin; HTTPS or numeric loopback HTTP. |
-| `NOVA_AUDIO_AGENT_MEMORY_TOKEN` | `core` | When selected | None | Host-issued identity-bound memory bearer token. |
-| `NOVA_AUDIO_AGENT_MEMORY_PATH` | `core` | No | ~/.nova-audio-agent/memory.sqlite | Personal memory database path. |
-| `NOVA_AUDIO_AGENT_MEMORY_USER_ID` | `core` | No | local | Stable personal memory user identity. |
-| `DASHSCOPE_API_KEY` | `qwen` | When selected | None | Qwen realtime credential. |
-| `NOVA_AUDIO_AGENT_QWEN_REALTIME_URL` | `qwen` | No | DashScope realtime endpoint | Qwen secure realtime endpoint. |
-| `NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL` | `qwen` | No | qwen-audio-3.0-realtime-plus | Qwen realtime model. |
-| `NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE` | `qwen` | No | longanqian | Qwen realtime voice. |
-| `NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT` | `qwen` | No | false | Allow controlled Guard reconnect. |
-| `NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY` | `qwen` | No | none | Guard history recovery mode. |
-| `NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS` | `qwen` | No | 4 | Guard history pair count. |
-| `DEEPSEEK_API_KEY` | `deepseek` | When selected | None | Official DeepSeek cascaded LLM credential. |
-| `ARK_API_KEY` | `ark` | When selected | None | Ark cascaded LLM credential. |
-| `DOUBAO_ASR_API_KEY` | `volcengine` | No | Doubao big-model key | Volcengine ASR credential override. |
-| `DOUBAO_BIGMODEL_API_KEY` | `volcengine` | When selected | None | Volcengine TTS and ASR fallback credential. |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL` | `ark` | No | Volcengine Ark endpoint | Ark secure endpoint. |
-| `NOVA_AUDIO_AGENT_DOUBAO_ASR_ENDPOINT` | `volcengine` | No | Doubao ASR endpoint | Doubao ASR secure endpoint. |
-| `NOVA_AUDIO_AGENT_DOUBAO_ASR_RESOURCE_ID` | `volcengine` | No | volc.seedasr.sauc.duration | Doubao ASR resource ID. |
-| `NOVA_AUDIO_AGENT_DOUBAO_ASR_CHUNK_MS` | `volcengine` | No | 200 | ASR input chunk duration. |
-| `NOVA_AUDIO_AGENT_DOUBAO_TTS_ENDPOINT` | `volcengine` | No | Doubao TTS endpoint | Doubao TTS secure endpoint. |
-| `NOVA_AUDIO_AGENT_DOUBAO_TTS_RESOURCE_ID` | `volcengine` | No | seed-tts-2.0 | Doubao TTS resource ID. |
-| `NOVA_AUDIO_AGENT_DOUBAO_TTS_VOICE` | `volcengine` | No | zh_female_vv_uranus_bigtts | Doubao TTS voice. |
-| `NOVA_AUDIO_AGENT_DOUBAO_TTS_OUTPUT_SAMPLE_RATE` | `volcengine` | No | 24000 | Doubao TTS output sample rate. |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_THRESHOLD` | `volcengine` | No | 0.5 | VAD speech threshold. |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_PRE_ROLL_MS` | `volcengine` | No | 260 | VAD pre-roll duration. |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MIN_SPEECH_MS` | `volcengine` | No | 250 | VAD minimum speech duration. |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SILENCE_END_MS` | `volcengine` | No | 300 | VAD silence endpoint duration. |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SPEECH_PAD_MS` | `volcengine` | No | 30 | VAD speech padding. |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MAX_UTTERANCE_MS` | `volcengine` | No | 60000 | VAD maximum utterance duration. |
-| `NOVA_AUDIO_AGENT_CODEX_WORKSPACE` | `codex` | When selected | None | Host-approved Codex workspace. |
-| `NOVA_AUDIO_AGENT_CODEX_BIN` | `codex` | No | codex | Host-approved Codex app-server binary. |
-| `NOVA_AUDIO_AGENT_CODEX_API_KEY` | `codex` | No | Codex login | Optional Codex credential override. |
-| `NOVA_AUDIO_AGENT_CODEX_PREWARM` | `codex` | No | true | Prewarm Codex app-server. |
-| `NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT` | `codex` | No | ~/.nova-audio-agent/workspaces | Managed project root. |
-| `NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT` | `codex` | No | ~/.nova-audio-agent | Project state root. |
-| `NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL` | `codex` | No | 30 | Codex progress interval in seconds. |
-| `TAVILY_API_KEY` | `search` | When selected | None | Tavily search credential. |
-| `NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE` | `camera` | No | None | Absolute deterministic desktop video input. |
-| `NOVA_AUDIO_AGENT_REALTIME_TELEMETRY` | `telemetry` | No | ~/.nova-audio-agent/realtime-telemetry.jsonl | Source-runtime telemetry output path; set an empty value to disable. |
-| `NOVA_AUDIO_AGENT_REALTIME_TRACE` | `telemetry` | No | 0 | Enable source-runtime trace records. |
-| `NOVA_ORB_OPAQUE` | `core` | No | 0 | Use an opaque desktop orb window. |
-<!-- END GENERATED ENV CONTRACT -->
-
-For a host-managed shared memory service, set `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`, an explicit origin in `NOVA_AUDIO_AGENT_MEMORY_URL`, and its host-issued `NOVA_AUDIO_AGENT_MEMORY_TOKEN`. Only HTTPS or numeric loopback HTTP is accepted; URL paths, query strings, embedded credentials, and redirects are rejected. The token fixes the identity; `MEMORY_PATH` and `MEMORY_USER_ID` apply only to local mem0 / VoiceMem. Preferences refresh on open and successful remember, recall, or forget calls. This client does not provision the service or expose identity selection to the model.
-
-### Optional capability registry and MCP search
-
-Nova loads `~/.nova-audio-agent/capabilities.json`; use `NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG` for another path. A missing default file keeps search/camera/coding enabled and knowledge disabled. An explicit missing or invalid file fails startup with a redacted configuration reason. Registry module values override defaults; explicit `NOVA_AUDIO_AGENT_SEARCH_PROVIDER`, `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED`, `NOVA_AUDIO_AGENT_SEARCH_MCP_URL`, and `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` override the registry and are reported by name. Desktop persists these choices in the registry, not a separate search-provider setting.
-
-Tavily remains the default. Set `modules.search.enabled` to `false` to disable search without credentials, or opt into MCP:
-
-```json
-{
-  "version": 1,
-  "modules": {
-    "search": {
-      "enabled": true,
-      "provider": "mcp",
-      "mcp": {
-        "url": "https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp",
-        "tool": "search_pro",
-        "headers": {"authorization": "Bearer ${DASHSCOPE_API_KEY}"}
-      }
-    }
-  },
-  "frontbrainToolBudget": 24,
-  "mcpServers": {}
-}
-```
-
-The endpoint and Bearer authorization are verified against [Bailian external invocation](https://docs.agent.bailian.aliyun.com/zh/mcp/external-invocation); the search tool name is documented in [Bailian web search](https://help.aliyun.com/zh/model-studio/web-search/) (checked 2026-09-05). An MCP selection without an endpoint uses this Bailian preset. Nova still verifies the exact configured tool with `tools/list`; use the URL/tool overrides for other servers. Enable the WebSearch service in the Bailian console and provide its key through the environment. MCP search does not require `TAVILY_API_KEY`. The public tool stays `search__search`; results retain URL canonicalization, evidence digests and `untrusted_external` trust.
-
-Only HTTPS is allowed remotely. Loopback HTTP is available for unauthenticated local testing; custom or authentication headers require HTTPS. URLs, headers, and stdio environment values support `${VARIABLE}` interpolation. A missing value reports only `missing_environment:VARIABLE`. Disabled modules/servers do not require their credentials. External servers are limited to 8, with 32 allowlisted tools each; invalid servers report individual failed status and expose nothing. Tools require `enabled: true`; external-server discovery and exposure are handled by the MCP host. `frontbrain_tool_budget_exceeded: N/B` means the complete selected FrontBrain surface exceeds the budget; reduce the selected FrontBrain tools. The runtime never truncates that surface.
-
-Run `novaaudio doctor` for the shared registry validation, per-server failures and override names. `search_tool_missing` means the configured name was absent from discovery; `search_tool_failed` is a tool-reported error; `authentication` requires checking the selected provider key/service entitlement; `timeout` and `response_too_large` are bounded transport failures. Search defaults to an 8-second operation and 256-KiB response limit (registry `mcp.timeoutMs` / `mcp.maxResultBytes`). Each search terminates its owned remote session (with a separate 250-ms cleanup bound) and closes its SDK resources; no background reconnect is used.
-
-```sh
-npm run runtime:smoke:search:mcp
-```
-
-The smoke uses environment/registry credentials, makes one actual MCP search and prints only status and result count. It forces MCP only for that invocation and never changes the persisted default. **macOS passed on 2026-09-05 (v0.2.0dev, Node v24.8.0): three canonical results with evidence refs and untrusted trust. Windows remains pending.** A 404 body stating the MCP is not enabled requires activating WebSearch in the Bailian console; it does not imply a Tavily endpoint error. Switching the default is a separate change after both platform gates.
-
-### Optional document knowledge (M4)
-
-Enable `modules.knowledge.enabled` in desktop capabilities and restart/apply the backend settings.
-In the knowledge panel, read and accept the data-flow disclosure before adding files, folders or a
-public URL. Storage is local, but ingestion and queries go to the configured embedding provider
-(default DashScope `text-embedding-v4`); recalled excerpts go to the consuming model. PDF/DOCX
-parsing runs in a bounded Worker. The local embedding option is disabled until implemented.
-
-FrontBrain gains only `mcp__nova_knowledge__recall`. To let Codex resolve full cited chunks, enable
-`modules.knowledge.exposeToCodex`; the host supplies an authenticated loopback MCP with read-only
-`recall` and `get_chunk`. Remove/reindex remain settings-only. `memory__recall` is unchanged.
-Run `npm run smoke:knowledge --workspace @nova-audio-agent/runtime` with model credentials in the
-environment for a synthetic-document smoke. It sends no existing user corpus. macOS real embedding
-and MCP retrieval passed on 2026-09-05; Windows and human-voice acceptance remain separate gates.
-
-
-### Memory providers and connections
-
-Local Node memory is enabled by default; an omitted `NOVA_AUDIO_AGENT_MEMORY_PROVIDER` selects mem0. Set it to `voicemem` to choose VoiceMem. Use `remote` for the shared HTTP service, with its URL and identity-bound token. Do not set `MEMORY_PROVIDER` for a remote connection: its engine is selected by the service. An unavailable remote service reports unavailable; it never creates a local fallback database.
-
-Only `MEMORY_CONNECTION` and the local `MEMORY_PROVIDER` selector are supported. `MEMORY_BACKEND` has been removed and is rejected with a migration error. An explicit provider is rejected when the connection is disabled or remote.
-
-The runtime consumes `PersonalMemoryResource`, including optional `remember`, `forget`, and cached `responseAdaptation`. Adapter methods must only exist when their guarantees can be met. In particular, `stored` means durable admission, not merely acceptance or completed extraction. Evidence IDs must refer to real sources; provider relevance scores are not comparable across engines. The HTTP connector currently requires the documented v1 preferences, remember, recall and forget service contract. An arbitrary mem0 endpoint is not that contract. Local mem0 is enabled by default (`MEMORY_CONNECTION=local`, omitted provider selects `mem0`). Set `MEMORY_PROVIDER=voicemem` for VoiceMem or `MEMORY_CONNECTION=disabled` to opt out. The ledger and vectors live under `${MEMORY_PATH}.mem0/<SHA-256 of user ID>/`; extraction and embeddings use the configured model endpoint. Desktop builds retain separate Node/Electron SQLite binaries. A read-only provider can be injected through the existing assembly factory without advertising writes.
-
-The small preference cache is a disposable projection, not another writable memory store.
-
-SDK upgrades must pass the real Worker contract tests before changing the dependency lock. After unpacking/building an SDK candidate, run:
-
-```sh
-node runtime/scripts/check-memory-sdk.mjs /absolute/path/to/built-sdk
-```
-
-This compiles current runtime sources into a temporary directory against the candidate exports and runs the actual Worker tests with a test-only module resolver. Required loopback tests must execute; permission failures cannot count as a pass. It does not replace installed dependencies. Check package origin, exact version and integrity before adopting an npm release. A local source snapshot passing this check is compatibility evidence, not a published release or a memory-quality benchmark.
+[Core environment variables](configuration.md)

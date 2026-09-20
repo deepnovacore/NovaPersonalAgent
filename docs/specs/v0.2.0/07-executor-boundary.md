@@ -4,7 +4,21 @@
 >
 > 依据：2026-09-03 对 `runtime/src` 的三份静态审计（耦合面、端口契约、project/session 流程），行号以当日 `v0.2.0dev` 工作树为准。
 
-## Baseline (today)
+## Implementation map
+
+Codex transport and approval request mapping live under `runtime/src/executors/codex/`.
+The shared approval FIFO and port are `runtime/src/core/approval.ts` and
+`approval-port.ts`; coding intake uses `runtime/src/executors/coding/`, and project
+persistence uses `runtime/src/projects/project-store.ts`. Current source interfaces,
+not the original migration sketches below, define exact TypeScript shapes.
+
+The original audit, proposed filenames, line counts and migration interfaces below
+are retained as design history. In particular, the sketched `ApprovalBroker` and
+`executors/codex/approval-broker.ts` are not a current source API/file. Concurrent
+work and approval ordering follow [08](08-project-and-work.md) and
+[01](01-codex-approvals.md); this volume's single-work migration baseline is historical.
+
+## Historical baseline (2026-09-03)
 
 What is already clean:
 

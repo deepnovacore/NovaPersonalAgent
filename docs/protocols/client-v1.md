@@ -102,3 +102,18 @@ All media modes share pairing; the existing `hello` and media protocol are uncha
 - `input.audio`：结束草稿输入模式，显式恢复连续语音；草稿完成后的迟到音频不会自动进入模型。
 
 识别返回 `input.transcription`，包含匹配的 `id` 和 `text`，失败时只返回 `error: recognition_failed`。草稿不是用户轮次，不触发 LLM 或工具；客户端必须显式发送编辑后的 input.text。
+
+## Conversation presentation
+
+The iOS UI starts in realtime mode. It offers text chat only when the host selects
+cascaded media and advertises both `text_input` and `dictation`; losing that
+capability returns the UI to realtime. Switching the UI mode does not reconfigure
+the host pipeline. Entering text mode suspends live audio; leaving it cancels the
+in-progress dictation while preserving the editable text draft.
+
+The Swift client accumulates captions as an in-memory conversation list,
+using `message_id` / final text to update a message rather than rendering each
+partial caption as a new reply. This is client presentation, not a remote history
+pagination API or a guarantee of persistence across app restart. Desktop memory
+history pagination uses its separate local host interface. Approval decisions
+continue through the existing connection-bound command contract.

@@ -2,7 +2,7 @@
 
 Ports separate the runtime from domain integrations. An executor manifest declares a name, channel
 policy, and operations. Each operation specifies JSON parameters, `readonly`, `confirm`, a
-`deadline_budget`, optional `verifies` targets, `sensitive_params`, and whether the host waits for a
+nullable `deadline_budget` (`null` means no overall deadline), optional `verifies` targets, `sensitive_params`, and whether the host waits for a
 `sync_result`. Trust is classified on the returned handoff, not on the op spec.
 
 Runtime binds a validated request into a delegate and passes a dispatch context to the adapter. The

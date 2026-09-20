@@ -1,290 +1,107 @@
-<!-- Keep in sync with docs/getting-started.md -->
-
 # 上手指南
 
-## 当前发布边界
+Nova 运行在电脑上，通过语音与你交流，并调用 Codex 完成编码任务。
 
-Node.js 与 TypeScript 是唯一的产品运行时。Codex 只使用 app-server；JSONL 仅为
-fixture-parser，不再拥有生产进程执行路径。v0.2dev 薄前端目标通过 Vision controller 的隐藏
-Watch/Guard 通道独立采集和判断摄像头画面；M1.5c、live 与 Windows 验收仍待完成。遗留 HA 或 AutoGLM
-配置会在 provider、进程、设备和桌面构造前返回稳定且
-不泄露凭据的迁移错误。
+[文档首页](README.zh-CN.md) · [功能概览](features.zh-CN.md) · [English](getting-started.md)
 
-## 源码开发安装
+## 1. 准备环境
 
-先安装 Node.js 22+、npm、Git 和已登录的 `codex` 可执行文件。原生构建还需要对应平台工具链：
+源码运行需要 Node.js 22.13 或更新版本、npm、Git，以及已安装并登录的 Codex。
 
-- macOS：Xcode Command Line Tools（`xcode-select --install`）；
-- Linux：`/usr/bin/cc` 位置可用的 C 编译器；
-- Windows：Visual Studio Build Tools，并勾选 **Desktop development with C++** 工作负载。
+原生组件还需要对应平台的构建工具：
 
-Linux 桌面会话运行在 X11 上；Wayland 会话经由 XWayland。
+- macOS：Xcode Command Line Tools，可运行 `xcode-select --install` 安装。
+- Windows：Visual Studio Build Tools，选择 **Desktop development with C++**。
+- Linux：C 编译器；桌面需要 X11 或 XWayland。
+
+桌面面向 macOS 和 Windows。Linux 可从源码运行。
+
+## 2. 安装和启动
 
 ```bash
-git clone \
-  https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
+git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
 cd nova-audio-agent
 npm ci
 cp .env.example .env
 ```
 
-默认集成 Qwen 链路需要在 `.env` 中设置 `TAVILY_API_KEY`，并在 `DASHSCOPE_API_KEY` 与受支持的
-通用回退凭据中二选一。通用回退凭据是 `NOVA_AUDIO_AGENT_MODEL_API_KEY`，且只有配合下文所列的
-精确 base URL 时才能作为 Qwen realtime 凭据。Search 始终装配，因此 Tavily 是必需配置。启动器只把
-`.env` 当数据解析，不做 shell 求值；启动 shell 里已存在的变量优先于 `.env`。
+在 `.env` 中填写默认语音和搜索服务的密钥：
 
-启动桌面客户端：
+```dotenv
+DASHSCOPE_API_KEY=你的百炼密钥
+TAVILY_API_KEY=你的Tavily密钥
+```
+
+不需要搜索时，可以在能力配置中关闭搜索。随后启动桌面：
 
 ```bash
 npm run start:client
 ```
 
-对于集成 Qwen 的源码启动，通常使用 `DASHSCOPE_API_KEY` 作为 realtime 凭据。只有当
-`NOVA_AUDIO_AGENT_MODEL_BASE_URL` **完全等于**
-`https://dashscope.aliyuncs.com/compatible-mode/v1` 时，才可以改用
-`NOVA_AUDIO_AGENT_MODEL_API_KEY`；不同地址不会让通用密钥成为 Qwen realtime 凭据。两种凭据同时设置时，
-`DASHSCOPE_API_KEY` 优先。
+源码启动时，项目 `.env` 中的值优先于同名 shell 环境变量。修改 `.env` 后需重新启动桌面应用。
 
-## 始终开启的 Codex project mode
+## 3. 交办第一个任务
 
-实时 Codex project surface 没有启用/禁用 toggle。普通非实时 Codex 保留 `codex__run` 及原有语义；
-realtime provider 不暴露 `codex__run`。Workspace 是文件系统/Git 项目；Session 是该 Workspace 内
-可恢复的 Codex thread。托管 Workspace 默认位于 `~/.nova-audio-agent/workspaces`，注册表默认是
-`~/.nova-audio-agent/codex-projects-v1.json`，各 Workspace 的 Codex home 默认位于
-`~/.nova-audio-agent/codex-homes`。`NOVA_AUDIO_AGENT_CODEX_WORKSPACE` 可在启动时导入已有仓库。
-桌面设置面板暴露当前 workspace 和 workspace 根目录，另有三个操作：打开当前托管 workspace、
-经两道确认对话框清空当前托管 workspace 或全部托管 workspace；清空只倒空目录，项目记录、显示
-名称、Codex 历史和 Session 元数据都会保留。注册任意已有目录仍须使用
-`NOVA_AUDIO_AGENT_CODEX_WORKSPACE`，语音只能创建新的托管目录。
+直接说：“帮我创建一个展示个人作品的网页。”Nova 会询问必要的信息，并在需要新建或切换项目时请求确认，然后交给 Codex 执行。
 
-每个 realtime turn 只注入 active Workspace 及其 active Session（如果存在）。Nova 只在请求时列出
-Workspace 或 Session 候选项，历史候选项不会进入每轮常驻上下文。create、switch、resume 采用
-分阶段提案：用户下一轮会成为专用 structured confirmation，携带完全匹配的 proposal ID 和 JSON
-boolean。false、错误 ID 或重放均不改变状态。切换 Workspace 后，再请求列出或恢复其中的 Session。
-持久化与恢复始终绑定到当前选中的 Workspace 和 Session 记录。
+任务开始后，可以补充要求、询问进度或要求停止。任务横幅显示工作状态，进度气泡用于提醒；需要授权的操作会单独请求确认。
 
-注册表每个 Workspace 最多保留 200 个 Session、全局最多 1000 个：先清理最旧的 unavailable
-Session，再清理非 active 的 ready Session；starting 和 active Session 始终受保护。若受保护记录
-已经占满配额，创建返回 `session_limit`；锁竞争则立即返回 `state_busy`。之后修改
-`NOVA_AUDIO_AGENT_CODEX_WORKSPACE` 会用确定性后缀登记另一个工作区，不会覆盖当前 active
-Workspace；未命名 Session 使用便于朗读的“任务 N”。每个工作单都会启动新的 app-server 进程，
-因此 project mode 有意禁用 Codex prewarm。持久 workspace home 会在宿主登录凭据变化时用
-owner-only 的原子文件刷新；如果只更新了 workspace home 内的凭据而宿主源没有变化，这次
-destination-only 更新会被保留。
+项目是存放文件的工作目录，会话是该项目下的一次持续交流。新会话可以保留项目文件，已有会话可以继续之前的工作。
 
-## 本地唤醒词
+## 4. 调整设置
 
-本地中文唤醒默认关闭。在设置中启用后，首次使用会下载关键词模型；检测在桌面 Worker
-中完成。空闲默认 60 秒后隐藏悬浮球，时长可设 `0`（禁用自动隐藏）或 `30..3600` 秒。
-唤醒开关和空闲时长保存后立即生效，不重启后端。
+在设置中选择中文或 English，可切换界面和 AI 系统提示词语言。开启本地唤醒后，“你好星核”和“Hi Nova”同时可用。
 
-macOS 使用原生采集，其他平台使用浏览器采集回退。隐藏休眠时麦克风帧只送本地
-唤醒检测；显式静音会停止这条采集，不能靠说唤醒词解除静音，需手动解除。
-Windows 安装包的 Worker、WASM、模型替换和实际语音唤醒仍需验收。
+右键悬浮球打开「设置」。
 
-Windows 手动配置 Codex 时请选择 `codex.exe`，或通过支持的 Node 入口组合
-`node.exe + codex.js`；`codex.cmd` 不能作为直接可执行文件。
+- **保存**：保存修改；影响后台的配置会显示「待重启」。
+- **重启**：使用已保存配置重启后台，保留面板中未保存的草稿。
+- 外观和唤醒设置保存后立即生效。
 
-## 未签名 Windows 开发候选包
+密钥只显示是否已配置，不回显明文。来自 `.env` 的密钥需在文件中修改。
 
-GitHub Actions 工作流 **Unsigned Windows packages** 产出未签名开发候选包。下载
-`unsigned-win32-x64` artifact 并使用其中的 `nova-win32-x64.exe`。
-Linux 已暂时移出发布目标，Ubuntu 保留源码构建与自动化测试；已有 Linux 打包脚本
-不代表可发布的候选包。使用前确认下载来自预期的工作流运行。
+### 选择语音模式
 
-未签名的 `nova-win32-x64.exe` 在 Windows 上可能触发 SmartScreen 警告。请保持 SmartScreen 和其他
-Windows 安全防护开启；先核验工作流运行和文件，再决定是否使用该候选包。每个候选包的构建和验证
-状态以对应工作流为准；本指南不声称原生 CI 已通过。
+| 模式 | 特点 | 默认服务 |
+|---|---|---|
+| 集成 `integrated` | 一个模型直接处理语音，配置较少 | Qwen `qwen-audio-3.0-realtime-plus`，音色 `longanqian` |
+| 级联 `cascaded` | 分别配置识别、语言模型和合成 | 火山 ASR -> DeepSeek `deepseek-flash` -> 火山 TTS |
 
-仓库内 Node 检查均可离线、确定性运行：
+每个平台使用一把密钥，在选中的服务间复用：DeepSeek 使用 `DEEPSEEK_API_KEY`，Qwen 使用 `DASHSCOPE_API_KEY`，火山语音使用 `DOUBAO_BIGMODEL_API_KEY`。可通过 `DOUBAO_ASR_API_KEY` 单独指定识别密钥；未填写时，ASR 回退到 `DOUBAO_BIGMODEL_API_KEY`。
 
-```bash
-npm run build --workspace @nova-audio-agent/runtime
-node runtime/dist/src/cli.js diagnose --json
-node runtime/dist/src/cli.js demo all
-node runtime/dist/src/cli.js scorecard fixture check
-```
+Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板只显示当前模式需要的配置；密钥只写并返回存在状态。服务配置在后台下次启动时生效，不会自动切换到其他供应商。
 
-`diagnose` 只验证配置，不连接 provider、不启动 Codex、不请求摄像头或麦克风、不启动 Chromium，
-也不输出凭据和路径。普通检查只读已提交的产品 fixture。
+<a id="本地唤醒词"></a>
 
-## 实时管线、凭据与设置
+### 使用唤醒词
 
-`integrated` 和 `cascaded` 是顶层管线形态。默认是集成 Qwen：使用
-`qwen-audio-3.0-realtime-plus`、`longanqian` 音色和 `DASHSCOPE_API_KEY`，没有 ASR、LLM 或 TTS
-子节点控件。级联模式显示端点检测、ASR、LLM 和 TTS；默认链路是
-火山 ASR -> Qwen `qwen-plus` -> 火山 TTS。Ark 是显式的级联 LLM 选择，不是另一种集成 provider：
+本地唤醒词默认关闭。开启后首次使用会下载模型，悬浮球默认空闲 60 秒后隐藏；可调整为 30–3600 秒，设为 0 则不自动隐藏。
 
-```bash
-NOVA_AUDIO_AGENT_PIPELINE_MODE=cascaded
-NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER=ark
-ARK_API_KEY=replace-with-your-ark-key
-```
+待机时，麦克风输入交给本地唤醒检测。主动静音会停止检测，需要手动解除静音。
 
-每个平台只存一把密钥，并为该平台的每个选中节点复用。Qwen 使用 `DASHSCOPE_API_KEY`；显式 Ark
-LLM 使用 `ARK_API_KEY`；火山 TTS 使用 `DOUBAO_BIGMODEL_API_KEY`。`DOUBAO_ASR_API_KEY` 是可选 ASR
-覆盖，未填写时 ASR 回退到 `DOUBAO_BIGMODEL_API_KEY`。只验证和构造被选中的 provider；没有自动
-provider 故障转移。
+## 5. 记忆、知识库与手机
 
-条件式设置面板把管线模式放在 provider 配置之前。集成模式显示 provider、模型和音色；级联模式显示
-端点检测、ASR、LLM 和 TTS 卡片。API 密钥仍是每个平台一个字段、只写，且只返回存在状态。面板上
-的改动先以草稿留在设置窗口里，点 `保存并重启` 才会一次性写盘、刷新生效配置，并做恰好一次受控
-的后台重启。因此管线、provider、模型、音色和密钥的取值是在那一次下次启动时生效，而不是会话
-中途热更；配色也改为在同一个提交点生效，不再实时应用。
+- **个人记忆**默认使用本地 mem0。右键悬浮球打开「记忆面板」，可查看原话与整理结果。详见[个人记忆](personal-memory.zh-CN.md)。
+- **文档知识库**需在能力设置中启用。导入文件前会说明数据处理方式；生成向量会把文本发送给配置的模型服务。
+- **连接 iPhone**：macOS 桌面右键悬浮球，选择「连接 iPhone…」，启用手机连接后按页面提示设置网络并扫码。详见[手机连接与远程服务](iphone.zh-CN.md)。
 
-Node 执行器名称是任意唯一的 manifest key，由 role 路由，不再使用固定执行器枚举。下面的源码生成
-契约默认不选择执行器；显式 `fast_sim` 仅保留为测试 fixture 选择器，而非生产默认值。Codex 的
-ordinary/live/project 模式共用有界 app-server transport。Camera 文件输入只接受主机验证过的
-绝对路径；默认本地摄像头和 `NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE` 回放均使用 Chromium
-摄像头链路。外部 MCP 设置尚未作为面向用户的配置面交付。
+## 常见问题
 
-M1.5c 薄前端验收、真实 provider、麦克风/扬声器、Camera、Codex 登录、WindowServer、Windows
-后代进程清理、clean-machine installer、签名和发布仍是 pending external evidence。实时 direct-tool
-候选预算 B=24 仍待 Qwen live 验证，并非已证明的常量；Codex 投影不受该预算限制。
+| 问题 | 检查方式 |
+|---|---|
+| 语音连接失败 | 检查所选模式的密钥、服务权限和网络连接 |
+| Codex 无法执行 | 确认 Codex 已登录，项目目录可访问 |
+| 保存后没有变化 | 查看是否提示「待重启」，点击重启后台 |
+| 搜索不可用 | 检查搜索服务密钥；使用 MCP 搜索时确认相应服务已开通 |
+| 找不到刚说过的记忆 | 记忆整理需要时间，在记忆面板查看学习状态 |
+| 手机没有文字聊天入口 | 主机需使用级联模式并支持可编辑输入 |
 
-### 可选在线 smoke
+## 高级配置
 
-仓库中的 Qwen smoke 会连接真实 provider，且需要凭据；它是可选在线 smoke，本文不声称它已经运行或
-通过。刻意提供 DashScope 密钥后，可运行：
+能力配置默认位于 `~/.nova-audio-agent/capabilities.json`。可以关闭不需要的模块，或配置外部 MCP 服务及允许使用的工具。只有启用的服务需要凭据。
 
-```bash
-DASHSCOPE_API_KEY=replace-with-your-qwen-key npm run runtime:smoke:qwen
-```
+默认搜索服务是 Tavily。选择 MCP 搜索后使用对应服务的密钥，不再需要 Tavily 密钥。远程 MCP 需要 HTTPS；本机无认证测试可使用回环 HTTP。
 
-级联管线的可选真实验证：`npm run smoke:cascaded --workspace @nova-audio-agent/runtime`。需要相应 provider 凭据；宿主控制 response admission 和请求归属，模型 response origin 不是授权。真人验收仍待完成。
+Node.js 与 TypeScript 提供运行时，Codex 通过 app-server 连接。开发者可参考[工作原理](architecture.zh-CN.md)、[能力配置](specs/v0.2.0/03-capability-registry-and-mcp.md)和[可选在线 smoke](testing/live-acceptance.md)。
 
-## 公共环境变量参考
-
-下表由 `runtime/src/config/environment-contract.ts` 生成。主机私有握手变量不会进入表格。
-
-<!-- BEGIN GENERATED ENV CONTRACT -->
-| 变量 | 所属 | 必需条件 | 默认 | 说明 |
-|---|---|---|---|---|
-| `NOVA_AUDIO_AGENT_MODEL_BASE_URL` | `core` | 否 | DashScope compatible endpoint | FastBrain 兼容 API 地址。 |
-| `NOVA_AUDIO_AGENT_MODEL_API_KEY` | `core` | 否 | 无 | 可选的通用辅助模型 API 凭据覆盖。 |
-| `NOVA_AUDIO_AGENT_FAST_MODEL` | `core` | 否 | qwen3-vl-plus | FastBrain 模型。 |
-| `NOVA_AUDIO_AGENT_WATCH_MODEL` | `core` | 否 | fast model | Watch 模型覆盖。 |
-| `NOVA_AUDIO_AGENT_SURROGATE_MODEL` | `core` | 否 | qwen-plus | Surrogate 模型。 |
-| `NOVA_AUDIO_AGENT_COMPRESSOR_MODEL` | `core` | 否 | qwen-flash | 记忆压缩模型。 |
-| `NOVA_AUDIO_AGENT_PIPELINE_MODE` | `core` | 否 | integrated | 产品管线形态：集成或级联。 |
-| `NOVA_AUDIO_AGENT_LANGUAGE` | `core` | 否 | zh-CN | AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。 |
-| `NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED` | `camera` | 否 | false | 为已确认支持图片的级联模型附加默认摄像头画面。 |
-| `NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID` | `camera` | 否 | 无 | 监控摄像头设备 ID；空值使用默认设备。 |
-| `NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED` | `camera` | 否 | true | 启用独立视觉监控。 |
-| `NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER` | `core` | 否 | qwen | 集成实时提供方。 |
-| `NOVA_AUDIO_AGENT_CASCADE_ENDPOINTING_PROVIDER` | `core` | 否 | auto | 级联端点检测提供方。 |
-| `NOVA_AUDIO_AGENT_CASCADE_ASR_PROVIDER` | `core` | 否 | volcengine | 级联 ASR 提供方。 |
-| `NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER` | `core` | 否 | deepseek | 级联 LLM 提供方。 |
-| `NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL` | `core` | 否 | provider default | 级联 LLM 模型覆盖。 |
-| `NOVA_AUDIO_AGENT_CASCADE_TTS_PROVIDER` | `core` | 否 | volcengine | 级联 TTS 提供方。 |
-| `NOVA_AUDIO_AGENT_EXECUTOR` | `core` | 否 | 无 | 可选的单执行器选择器；未设置时不选择执行器。 |
-| `NOVA_AUDIO_AGENT_EXECUTORS` | `core` | 否 | 无 | 可选的有序执行器列表；未设置时不选择执行器。 |
-| `NOVA_AUDIO_AGENT_CODING_PROGRESS_NARRATION` | `core` | 否 | smart | 编程进度播报模式。 |
-| `NOVA_AUDIO_AGENT_PROACTIVITY_PRESET` | `core` | 否 | balanced | 主动性预设。 |
-| `NOVA_AUDIO_AGENT_SUGGESTION_COOLDOWN` | `core` | 否 | preset | 建议冷却秒数覆盖。 |
-| `NOVA_AUDIO_AGENT_FRESH_WINDOW` | `core` | 否 | preset | 新鲜上下文窗口秒数覆盖。 |
-| `NOVA_AUDIO_AGENT_CODEX_APPROVAL_MODE` | `codex` | 否 | ask | Codex 审批模式。 |
-| `NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH` | `core` | 否 | balanced | 意图理解的最大澄清深度。 |
-| `NOVA_AUDIO_AGENT_PLAN_READBACK` | `core` | 否 | summary | 规划回读模式。 |
-| `NOVA_AUDIO_AGENT_GENERATE_PLAN` | `core` | 否 | true | 执行前生成计划。 |
-| `NOVA_AUDIO_AGENT_PLANNER_MODEL` | `core` | 否 | 无 | 可选的规划模型覆盖。 |
-| `NOVA_AUDIO_AGENT_PROGRESS_BUBBLES` | `core` | 否 | milestones | 进度气泡显示模式。 |
-| `NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG` | `core` | 否 | ~/.nova-audio-agent/capabilities.json | 能力注册表路径。 |
-| `NOVA_AUDIO_AGENT_SEARCH_PROVIDER` | `search` | 否 | tavily | CLI 或 CI 搜索提供方覆盖。 |
-| `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` | `search` | 否 | 无 | 网页搜索 MCP 地址覆盖；选择 MCP 且未设置时使用已核对的百炼预设。 |
-| `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` | `search` | 否 | web_search | 网页搜索 MCP 工具覆盖（通用默认 web_search；百炼预设 search_pro）。 |
-| `NOVA_AUDIO_AGENT_KNOWLEDGE_PATH` | `core` | 否 | ~/.nova-audio-agent/knowledge.sqlite | 知识库 SQLite 数据库路径。 |
-| `NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER` | `core` | 否 | dashscope | 知识库 embedding 提供方。 |
-| `NOVA_AUDIO_AGENT_EMBEDDING_MODEL` | `core` | 否 | text-embedding-v4 | 知识库 embedding 模型。 |
-| `NOVA_AUDIO_AGENT_MEMORY_CONNECTION` | `core` | 否 | local | 记忆连接：disabled、local 或 remote。 |
-| `NOVA_AUDIO_AGENT_MEMORY_PROVIDER` | `core` | 否 | 无 | 本地引擎：mem0（默认）或 voicemem。远程引擎由服务端选择。 |
-| `NOVA_AUDIO_AGENT_BLACKBOARD_PATH` | `core` | 否 | ~/.nova-audio-agent/blackboard.sqlite | 会话恢复数据库路径。 |
-| `NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID` | `core` | 否 | local | 稳定的会话恢复所有者。 |
-| `NOVA_AUDIO_AGENT_MEMORY_URL` | `core` | 选择该能力时 | 无 | HTTP 记忆服务地址；仅 HTTPS 或数字回环 HTTP。 |
-| `NOVA_AUDIO_AGENT_MEMORY_TOKEN` | `core` | 选择该能力时 | 无 | 宿主提供的身份绑定记忆令牌。 |
-| `NOVA_AUDIO_AGENT_MEMORY_PATH` | `core` | 否 | ~/.nova-audio-agent/memory.sqlite | 个人记忆数据库路径。 |
-| `NOVA_AUDIO_AGENT_MEMORY_USER_ID` | `core` | 否 | local | 稳定的个人记忆用户身份。 |
-| `DASHSCOPE_API_KEY` | `qwen` | 选择该能力时 | 无 | Qwen 实时凭据。 |
-| `NOVA_AUDIO_AGENT_QWEN_REALTIME_URL` | `qwen` | 否 | DashScope realtime endpoint | Qwen 安全实时地址。 |
-| `NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL` | `qwen` | 否 | qwen-audio-3.0-realtime-plus | Qwen 实时模型。 |
-| `NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE` | `qwen` | 否 | longanqian | Qwen 实时音色。 |
-| `NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT` | `qwen` | 否 | false | 允许受控 Guard 重连。 |
-| `NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY` | `qwen` | 否 | none | Guard 历史恢复模式。 |
-| `NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS` | `qwen` | 否 | 4 | Guard 历史对话对数。 |
-| `DEEPSEEK_API_KEY` | `deepseek` | 选择该能力时 | 无 | DeepSeek 官方级联 LLM 凭据。 |
-| `ARK_API_KEY` | `ark` | 选择该能力时 | 无 | 方舟级联 LLM 凭据。 |
-| `DOUBAO_ASR_API_KEY` | `volcengine` | 否 | Doubao big-model key | 火山 ASR 凭据覆盖。 |
-| `DOUBAO_BIGMODEL_API_KEY` | `volcengine` | 选择该能力时 | 无 | 火山 TTS 及 ASR 回退凭据。 |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL` | `ark` | 否 | Volcengine Ark endpoint | 方舟安全地址。 |
-| `NOVA_AUDIO_AGENT_DOUBAO_ASR_ENDPOINT` | `volcengine` | 否 | Doubao ASR endpoint | 豆包 ASR 安全地址。 |
-| `NOVA_AUDIO_AGENT_DOUBAO_ASR_RESOURCE_ID` | `volcengine` | 否 | volc.seedasr.sauc.duration | 豆包 ASR 资源 ID。 |
-| `NOVA_AUDIO_AGENT_DOUBAO_ASR_CHUNK_MS` | `volcengine` | 否 | 200 | ASR 输入分块时长。 |
-| `NOVA_AUDIO_AGENT_DOUBAO_TTS_ENDPOINT` | `volcengine` | 否 | Doubao TTS endpoint | 豆包 TTS 安全地址。 |
-| `NOVA_AUDIO_AGENT_DOUBAO_TTS_RESOURCE_ID` | `volcengine` | 否 | seed-tts-2.0 | 豆包 TTS 资源 ID。 |
-| `NOVA_AUDIO_AGENT_DOUBAO_TTS_VOICE` | `volcengine` | 否 | zh_female_vv_uranus_bigtts | 豆包 TTS 音色。 |
-| `NOVA_AUDIO_AGENT_DOUBAO_TTS_OUTPUT_SAMPLE_RATE` | `volcengine` | 否 | 24000 | 豆包 TTS 输出采样率。 |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_THRESHOLD` | `volcengine` | 否 | 0.5 | VAD 语音阈值。 |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_PRE_ROLL_MS` | `volcengine` | 否 | 260 | VAD 预滚时长。 |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MIN_SPEECH_MS` | `volcengine` | 否 | 250 | VAD 最短语音时长。 |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SILENCE_END_MS` | `volcengine` | 否 | 300 | VAD 静音断句时长。 |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_SPEECH_PAD_MS` | `volcengine` | 否 | 30 | VAD 语音补边。 |
-| `NOVA_AUDIO_AGENT_VOLCENGINE_VAD_MAX_UTTERANCE_MS` | `volcengine` | 否 | 60000 | VAD 最长话语时长。 |
-| `NOVA_AUDIO_AGENT_CODEX_WORKSPACE` | `codex` | 选择该能力时 | 无 | 主机批准的 Codex 工作区。 |
-| `NOVA_AUDIO_AGENT_CODEX_BIN` | `codex` | 否 | codex | 主机批准的 Codex app-server 可执行文件。 |
-| `NOVA_AUDIO_AGENT_CODEX_API_KEY` | `codex` | 否 | Codex login | 可选 Codex 凭据覆盖。 |
-| `NOVA_AUDIO_AGENT_CODEX_PREWARM` | `codex` | 否 | true | 预热 Codex app-server。 |
-| `NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT` | `codex` | 否 | ~/.nova-audio-agent/workspaces | 托管项目根目录。 |
-| `NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT` | `codex` | 否 | ~/.nova-audio-agent | 项目状态根目录。 |
-| `NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL` | `codex` | 否 | 30 | Codex 进度间隔秒数。 |
-| `TAVILY_API_KEY` | `search` | 选择该能力时 | 无 | Tavily 搜索凭据。 |
-| `NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE` | `camera` | 否 | 无 | 桌面确定性视频输入的绝对路径。 |
-| `NOVA_AUDIO_AGENT_REALTIME_TELEMETRY` | `telemetry` | 否 | ~/.nova-audio-agent/realtime-telemetry.jsonl | 源码运行时遥测输出路径；设置为空值可禁用。 |
-| `NOVA_AUDIO_AGENT_REALTIME_TRACE` | `telemetry` | 否 | 0 | 启用源码运行时跟踪记录。 |
-| `NOVA_ORB_OPAQUE` | `core` | 否 | 0 | 使用不透明桌面悬浮球窗口。 |
-<!-- END GENERATED ENV CONTRACT -->
-
-接入宿主管理的共享记忆服务时，设置 `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`，并显式提供 `NOVA_AUDIO_AGENT_MEMORY_URL` 与宿主签发的 `NOVA_AUDIO_AGENT_MEMORY_TOKEN`。地址仅支持 HTTPS 或数字回环 HTTP，不接受路径、查询参数、内嵌凭据和重定向。身份由令牌绑定；`MEMORY_PATH` 和 `MEMORY_USER_ID` 仅用于本地 mem0 / VoiceMem。偏好缓存在打开及成功记住、召回、删除后刷新。此客户端不负责部署服务，也不向模型开放身份选择。
-
-### 能力注册表与可选 MCP 搜索
-
-运行时读取 `~/.nova-audio-agent/capabilities.json`，可用 `NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG` 指定路径。默认文件不存在时使用内置值：搜索、摄像头、Coding 开启，知识库关闭。显式指定的文件缺失或格式错误会阻止启动，错误信息不包含文件内容或密钥。模块按「环境变量覆盖 > 注册表 > 默认值」生效；生产装配会记录覆盖变量的名称。关闭搜索不需要任何搜索凭据；选择 MCP 不需要 Tavily Key。
-
-完整配置示例见 [英文接入说明](getting-started.md#optional-capability-registry-and-mcp-search)。百炼 Streamable HTTP 预设是 `https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp`，使用 `Authorization: Bearer ${DASHSCOPE_API_KEY}`，工具名为 `search_pro`。已于 2026-09-19 实测该预设，接口见[官方工具文档](https://help.aliyun.com/zh/model-studio/token-plan-harness-tool)，运行时仍通过 `tools/list` 核对工具名。其他服务可用 `NOVA_AUDIO_AGENT_SEARCH_MCP_URL` / `NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL` 覆盖。
-
-`novaaudio doctor` 与运行时共用验证器，显示模块状态、单个服务器失败原因和环境覆盖。`missing_environment:变量名` 表示缺少引用的凭据；`insecure_mcp_endpoint` 表示地址或 HTTP 鉴权头不符合规则；`search_tool_missing` 表示未发现配置的工具；`frontbrain_tool_budget_exceeded: N/B` 显示完整前台工具数量与预算，需减少前台选中的工具，运行时不会静默截断。
-
-执行 `npm run runtime:smoke:search:mcp` 可做一次真实搜索，读取现有环境凭据，只输出状态和结果数量，不改变默认值。默认仍为 Tavily。**2026-09-05 已在 macOS / Node v24.8.0 / v0.2.0dev 通过真实百炼搜索：3 条 canonical 结果、evidence ref 与 untrusted 标记；Windows 待验。** 若 404 响应为“未开通该MCP或非可用开通状态”，需在百炼控制台开通 WebSearch，不是 Tavily 地址错误；两平台均过后再单独切默认值。
-
-### 可选文档知识库（M4）
-
-在桌面能力设置启用 `modules.knowledge.enabled` 并应用/重启后端。知识库面板会先展示数据流向；
-勾选同意后才能添加文件、文件夹或公开网页。存储在本地，但导入文本和查询会发送给当前 Embedding
-服务商（默认 DashScope `text-embedding-v4`），检索摘录会进入使用它的模型上下文。PDF/DOCX 在
-有资源上限的 Worker 中解析；尚未实现的 local embedding 选项不可选择。
-
-语音前台只增加 `mcp__nova_knowledge__recall`，不新增原生工具。若需要 Codex 解析完整引用，启用
-`modules.knowledge.exposeToCodex`；宿主提供带临时鉴权的本地 MCP，仅含 `recall / get_chunk`。
-移除和重建仍只在设置面板进行；原来的 `memory__recall` 不变。
-
-凭据已在环境中时，可运行 `npm run smoke:knowledge --workspace @nova-audio-agent/runtime`，仅发送
-脚本内的合成文档，不读取用户知识库。macOS 真实 embedding→检索→MCP 引用已于 2026-09-05 通过；
-Windows 和真人语音验收仍需独立完成。
-
-
-### 记忆引擎与连接方式
-
-默认启用本地 mem0（`NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local`，provider 省略时为 `mem0`）。使用 `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` 切换 VoiceMem，或 `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=disabled` 停用长期记忆。mem0 原文与向量存储位于 `${MEMORY_PATH}.mem0/<用户 ID 的 SHA-256>/`，与 VoiceMem SQLite 分开；抽取与 embedding 使用配置的模型服务。共享服务设置 `MEMORY_CONNECTION=remote`，并提供地址与身份绑定令牌。远程模式不能设置 `MEMORY_PROVIDER`，引擎由服务端决定。远程不可用时明确返回不可用，不创建本地回退数据库。
-
-仅支持 `MEMORY_CONNECTION` 和本地 `MEMORY_PROVIDER`。旧 `MEMORY_BACKEND` 已移除，填写时会明确报错。显式关闭或选择 remote 后不能填写本地 provider。
-
-运行时继续依赖 `PersonalMemoryResource`，通过可选的 `remember`、`forget`、缓存式 `responseAdaptation` 表达能力。适配器只有在满足接口保证时才能提供对应方法：`stored` 表示已经可靠保存原始记录，不代表仅接受请求，也不代表已完成抽取。证据 ID 必须有真实来源，不比较不同引擎的相关性分数。当前 HTTP 连接器要求服务满足 v1 的 preferences、remember、recall、forget 契约，不能直接指向任意 mem0 地址。原生 mem0 适配器保留在源集成分支，等待独立打包契约。只读实现可通过现有 assembly factory 注入，不暴露写入能力。
-
-客户端偏好缓存只是可重建的投影，不是另一份可写的记忆存储。
-
-升级 SDK 前，对已构建或解包的候选 SDK 执行：
-
-```sh
-node runtime/scripts/check-memory-sdk.mjs /absolute/path/to/built-sdk
-```
-
-该命令针对候选包的类型导出，将当前 runtime 源码编译到临时目录，再通过仅用于测试的模块解析器让真实 Worker 使用候选 SDK，不替换已安装依赖。回环权限不足导致的测试跳过不会被当作验收通过。采用 npm 版本前还要核对来源、确切版本及完整性。源码快照通过兼容检查不等于已发布，也不等于记忆效果评测通过。
+[核心环境变量](configuration.zh-CN.md)

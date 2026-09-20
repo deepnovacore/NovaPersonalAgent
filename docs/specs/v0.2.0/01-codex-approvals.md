@@ -39,25 +39,25 @@ host FSM and unified `confirm(id, accepted)` boundary above and below are the
 target contract.
 
 - `codexApprovalPolicyForTransport` in
-  [`runtime/src/codex-factory.ts`](../../../runtime/src/codex-factory.ts)
+  [`runtime/src/codex-factory.ts`](../../../runtime/src/executors/codex/factory.ts)
   returns `on-request` only for `win32 + project + foregroundBroker`. Darwin and
   Linux always get `never` and a null `HostApprovalController`.
 - `#threadRequest` in
-  [`runtime/src/codex-app-server-transport.ts`](../../../runtime/src/codex-app-server-transport.ts)
+  [`runtime/src/codex-app-server-transport.ts`](../../../runtime/src/executors/codex/app-server-transport.ts)
   sends only `approvalPolicy`, `cwd`, `ephemeral`, `developerInstructions`. It
   sends **neither** `sandbox` nor `permissions`; the sandbox comes entirely from
   `-c default_permissions="nova_audio_agent"` in
-  [`CODEX_APP_SERVER_ARGV`](../../../runtime/src/codex-process-owner.ts).
+  [`CODEX_APP_SERVER_ARGV`](../../../runtime/src/executors/codex/process-owner.ts).
 - Process argv is fixed to `-a never`, so on Windows the thread asks for
   `on-request` while the process default says `never`.
 - `validateEffectiveCodexConfig`
-  ([`runtime/src/codex-app-server-schema.ts`](../../../runtime/src/codex-app-server-schema.ts))
+  ([`runtime/src/codex-app-server-schema.ts`](../../../runtime/src/executors/codex/app-server-schema.ts))
   hard-codes one accepted shape: `default_permissions === 'nova_audio_agent'`,
   exactly one profile, `network.enabled === false`, `web_search === 'disabled'`,
   `mcp_servers` empty, all listed features off. Any other shape throws
   `config_not_isolated` and the run never starts.
 - `routeCodexApprovalServerRequest`
-  ([`runtime/src/realtime/codex-approval.ts`](../../../runtime/src/realtime/codex-approval.ts))
+  ([`runtime/src/realtime/codex-approval.ts`](../../../runtime/src/core/approval.ts))
   accepts `item/fileChange/requestApproval` and
   `item/commandExecution/requestApproval` only. A command request with a non-null
   `networkApprovalContext`, `proposedNetworkPolicyAmendments`, or
@@ -183,6 +183,20 @@ Rules:
   outside the workspace **may** be shown; the summary must say so explicitly.
 - Redaction posture is unchanged: `operation_summary` is neutral,
   `local_detail` stays in the desktop process, secret-like spans are dropped.
+
+### Current offer and recognition boundaries
+
+The decision table below is constrained by the current host offer's
+`allowed_decisions`: neither UI nor model may invent a session grant because
+another approval supported it. The voice boolean remains turn-scoped.
+A permissions grant returns the exact validated requested profile, never a
+broader replacement. Current production parsing and mapping live in
+`runtime/src/executors/codex/approval-protocol.ts`.
+
+Recognition failure (`user_transcript_failed`) is not an affirmative, rejection
+or cancellation. It leaves pending control state intact; a later valid structured
+confirmation still checks the live ID, scope and authority. Request expiry and
+one-shot consumption remain independent of the coding task's execution lifetime.
 
 ### Decision mapping per request kind
 
