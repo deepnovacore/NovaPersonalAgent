@@ -1,3 +1,4 @@
+import {type MacMailClient,macMailScopeSchema} from '../macos/mail.js'
 import {hostname,userInfo} from 'node:os'
 import type {MacCalendarClient} from '../macos/calendar.js'
 import {randomUUID,createHash} from 'node:crypto'
@@ -10,13 +11,13 @@ import {EvidenceRecordSchema} from '../../memory-substrate/store.js'
 import type {ApplyPage} from '../../memory-substrate/source-operations.js'
 import {canonicalJson} from '../../text/canonical-json.js'
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex')
-const configSchema=z.object({provider:z.enum(['composio','macos_calendar']),toolkit:z.union([toolkitSchema,z.literal('macos_calendar')]),userId:z.string(),authConfigId:z.string(),accountId:z.string(),identity:z.string().nullable(),selection:googleScopeSchema.nullable()}).strict()
+const configSchema=z.object({provider:z.enum(['composio','macos_calendar','macos_mail']),toolkit:z.union([toolkitSchema,z.enum(['macos_calendar','macos_mail'])]),userId:z.string(),authConfigId:z.string(),accountId:z.string(),identity:z.string().nullable(),selection:z.union([googleScopeSchema,macMailScopeSchema]).nullable()}).strict()
 const stateSchema=z.object({providerCursor:z.json().nullable(),anchor:z.number(),snapshot:z.boolean(),reconciling:z.boolean(),after:z.string().nullable(),nextCheckpoint:z.json().nullable()}).strict()
-const checkpointSchema=z.object({historyId:z.string().optional(),fullAt:z.number()})
+const checkpointSchema=z.object({historyId:z.string().optional(),fullAt:z.number(),limited:z.boolean().optional()})
 const inventorySchema=z.object({connections:z.array(connectionSchema),next:z.string().nullable()})
 type Client=Pick<ComposioClient,'createAuthConfig'|'link'|'inspect'|'verify'>&Partial<Pick<ComposioClient,'scopes'>>
 type Provider=Pick<GoogleProvider,'page'>
-interface Options {memory:()=>SubstrateMemoryResource|undefined;client:Client|null;provider?:Provider;onChange:()=>void;automatic?:boolean;local?:MacCalendarClient}
+interface Options {memory:()=>SubstrateMemoryResource|undefined;client:Client|null;provider?:Provider;onChange:()=>void;automatic?:boolean;local?:MacCalendarClient;mail?:MacMailClient}
 /** One host owns this manager; the existing personal host lock owns its SQLite namespace. */
 export class ComposioConnector {
  #timer:ReturnType<typeof setTimeout>|undefined
@@ -26,7 +27,7 @@ export class ComposioConnector {
  #rows:Record<string,unknown>[]=[]
  readonly #provider:Provider|null
  constructor(readonly options:Options){this.#provider=options.provider??(options.client instanceof ComposioClient?new GoogleProvider(options.client):null)}
- snapshot(){return {available:!!this.options.client,memory_available:!!this.options.memory(),local_available:!!this.options.local,connections:structuredClone(this.#rows)}}
+ snapshot(){return {available:!!this.options.client,memory_available:!!this.options.memory(),local_available:!!this.options.local,mail_available:!!this.options.mail,connections:structuredClone(this.#rows)}}
  #memory():SubstrateMemoryResource{const m=this.options.memory();if(!m)throw new ComposioFailure('memory_unavailable');return m}
  async #get(id:string):Promise<SourceConnection>{
   const m=this.#memory();if(!id.startsWith(m.prefix+'connector:'))throw new ComposioFailure('connection_unverified')
@@ -38,11 +39,12 @@ export class ComposioConnector {
   return result
  }
  async #refresh():Promise<void>{
-  this.#rows=[]
+  const rows:Record<string,unknown>[]=[]
   for(const c of await this.#list()){
    const conf=configSchema.parse(c.scope),grant=await this.#grant(c),expected=this.#memory().processingGrant(true,grant.revision,c.fence.scope_revision)
-   this.#rows.push({id:c.fence.connection_id,toolkit:conf.toolkit,identity:conf.identity,state:conf.identity?c.state:'authorizing',scope:conf.selection,mode:conf.toolkit==='gmail'?'history':'window_snapshot',processing_allowed:!!grant.extraction_provider&&grant.extraction_provider===expected.extraction_provider&&grant.embedding_provider===expected.embedding_provider,has_pending:!!c.continuation||c.deleting.length>0,error:c.sync_status?.error??null,last_attempt:c.sync_status?.attempt_at??null,last_complete:c.sync_status?.complete_at??null,checkpoint_present:!!c.checkpoint})
+   rows.push({id:c.fence.connection_id,toolkit:conf.toolkit,identity:conf.identity,state:conf.identity?c.state:'authorizing',scope:conf.selection,mode:conf.toolkit==='gmail'?'history':'window_snapshot',processing_allowed:!!grant.extraction_provider&&grant.extraction_provider===expected.extraction_provider&&grant.embedding_provider===expected.embedding_provider,has_pending:!!c.continuation||c.deleting.length>0,error:c.sync_status?.error??null,last_attempt:c.sync_status?.attempt_at??null,last_complete:c.sync_status?.complete_at??null,scan_limited:c.checkpoint!==null&&checkpointSchema.parse(c.checkpoint).limited===true,checkpoint_present:!!c.checkpoint})
   }
+  this.#rows=rows
   this.options.onChange()
  }
  async open():Promise<void>{this.#closed=false;if(this.options.memory()){for(const c of await this.#list())if(c.deleting.length)await this.#deleteStep(c.fence.connection_id);await this.#refresh();}this.#schedule(1000)}
@@ -61,6 +63,15 @@ export class ComposioConnector {
   if(this.#closed)throw new ComposioFailure('connector_closed')
   if(method==='connector.status'){await this.#refresh();return this.snapshot()}
   const m=this.#memory(),client=this.options.client
+  if(['connector.mail_status','connector.mail_access','connector.mail_connect'].includes(method)){
+   z.object({}).strict().parse(params)
+   const mail=this.options.mail;if(!mail)throw new ComposioFailure('native_unavailable')
+   if(method!=='connector.mail_connect')return mail.request({command:method==='connector.mail_access'?'request_access':'status'})
+   if((await mail.request({command:'status'})).status!=='granted')throw new ComposioFailure('permission_denied')
+   const identity=hash(hostname()+':'+userInfo().uid),id=m.prefix+'connector:macos-mail:'+identity.slice(0,16)
+   if(await m.options.client.memory('source_connection',{action:'get',id})===null){const c=connectionSchema.parse(await m.options.client.memory('source_connection',{action:'create',id,namespace:id}));await m.options.client.memory('source_connection',{action:'scope',id,expected_scope_revision:c.fence.scope_revision,scope:{provider:'macos_mail',toolkit:'macos_mail',userId:identity,authConfigId:'local',accountId:'local',identity:'Apple Mail',selection:null}})}
+   await this.#refresh();return {id}
+  }
   if(method==='connector.local_status'||method==='connector.local_access'){
    z.object({}).strict().parse(params)
    if(!this.options.local)throw new ComposioFailure('native_unavailable')
@@ -86,18 +97,19 @@ export class ComposioConnector {
   const p=z.object({id:z.string().min(1).max(256)}).passthrough().parse(params),c=await this.#get(p.id),config=configSchema.parse(c.scope)
   if(method==='connector.scopes'){
    const q=z.object({id:z.string(),pageToken:z.string().max(16384).optional()}).strict().parse(params)
+   if(config.provider==='macos_mail'){if(!this.options.mail)throw new ComposioFailure('native_unavailable');const r=await this.options.mail.request({command:'list_mailboxes'});if(r.complete!==true)throw new ComposioFailure('snapshot_incomplete');return {items:r.items,next:null}}
    if(config.provider==='macos_calendar'){if(!this.options.local)throw new ComposioFailure('native_unavailable');const r=await this.options.local.request({command:'list_calendars'});return {items:r.items,next:null}}
    if(!config.identity||!client?.scopes)throw new ComposioFailure('connection_unverified')
    return client.scopes(bindingSchema.parse({toolkit:config.toolkit,userId:config.userId,accountId:config.accountId,authConfigId:config.authConfigId,identity:config.identity}),q.pageToken)
   }
   if(method==='connector.complete'){
    z.object({id:z.string()}).strict().parse(params)
-   if(!client||config.toolkit==='macos_calendar')throw new ComposioFailure('key_required')
+   if(!client||config.toolkit==='macos_calendar'||config.toolkit==='macos_mail')throw new ComposioFailure('key_required')
    const identity=await client.inspect(config.toolkit,config.userId,config.accountId,config.authConfigId,createComposioBudget())
    await m.options.client.memory('source_connection',{action:'scope',id:p.id,expected_scope_revision:c.fence.scope_revision,scope:{...config,identity:identity.identity}})
   }else if(method==='connector.configure'){
-   const q=z.object({id:z.string(),scope:googleScopeSchema,processingConsent:z.boolean()}).strict().parse(params)
-   if(!config.identity||(config.toolkit==='gmail')!==(q.scope.kind==='gmail'))throw new ComposioFailure('scope_denied')
+   const q=z.object({id:z.string(),scope:z.union([googleScopeSchema,macMailScopeSchema]),processingConsent:z.boolean()}).strict().parse(params)
+   if(!config.identity||(config.toolkit==='gmail')!==(q.scope.kind==='gmail')||(config.toolkit==='macos_mail')!==(q.scope.kind==='macos_mail'))throw new ComposioFailure('scope_denied')
    this.#active.get(p.id)?.abort.abort()
    const next=connectionSchema.parse(await m.options.client.memory('source_connection',{action:'scope',id:p.id,expected_scope_revision:c.fence.scope_revision,scope:{...config,selection:q.scope}}))
    await this.#setGrant(next,q.processingConsent)
@@ -159,20 +171,23 @@ export class ComposioConnector {
    state.after=rows.next;complete=rows.next===null
   }else{
    const checkpoint=state.snapshot?null:checkpointSchema.parse(c.checkpoint)
-   let page:GooglePage
-   if(config.provider==='macos_calendar'){
+   let page:Omit<GooglePage,'continuation'>&{continuation:z.infer<typeof stateSchema>['providerCursor'];scanLimited?:boolean}
+   if(config.provider==='macos_mail'){
+    if(!this.options.mail)throw new ComposioFailure('native_unavailable')
+    page=await this.options.mail.page(macMailScopeSchema.parse(config.selection),state.providerCursor,state.anchor,signal).catch(async(error:unknown)=>{if(error instanceof ComposioFailure&&error.code==='snapshot_expired'&&!signal.aborted)await m.options.client.memory('source_connection',{action:'reset_sync',id,expected_epoch:c.fence.epoch});throw error})
+   }else if(config.provider==='macos_calendar'){
     if(!this.options.local)throw new ComposioFailure('native_unavailable')
-    page=await this.options.local.page(config.selection,signal)
+    page=await this.options.local.page(googleScopeSchema.parse(config.selection),signal)
    }else{
     if(!client||!provider)throw new ComposioFailure('key_required')
-    const budget=createComposioBudget(signal,state.anchor),binding:GoogleBinding=bindingSchema.parse({toolkit:config.toolkit,userId:config.userId,accountId:config.accountId,authConfigId:config.authConfigId,identity:config.identity}),verified=await client.verify(binding,config.selection,budget)
+    const budget=createComposioBudget(signal,state.anchor),binding:GoogleBinding=bindingSchema.parse({toolkit:config.toolkit,userId:config.userId,accountId:config.accountId,authConfigId:config.authConfigId,identity:config.identity}),verified=await client.verify(binding,googleScopeSchema.parse(config.selection),budget)
     page=await provider.page(verified,state.providerCursor,budget,checkpoint?.historyId?{historyId:checkpoint.historyId}:null).catch(async(error:unknown)=>{if(error instanceof ComposioFailure&&['cursor_expired','snapshot_expired','history_too_large'].includes(error.code)&&!signal.aborted)await m.options.client.memory('source_connection',{action:'reset_sync',id,expected_epoch:c.fence.epoch});throw error})
    }
    if(!page.complete&&!page.objects.length&&canonicalJson(page.continuation)===canonicalJson(state.providerCursor))throw new ComposioFailure('no_progress')
    const grant=await this.#grant(c)
    for(const o of page.objects){const change=this.#change(c,o,batch);await m.setProcessingConsent(change.source_id,grant);changes.push(change)}
-   state.providerCursor=page.continuation;state.nextCheckpoint={...page.checkpoint,fullAt:state.snapshot?state.anchor:checkpoint?.fullAt??state.anchor}
-   if(page.complete){if(state.snapshot){state.reconciling=true;state.after=null}else complete=true}
+   state.providerCursor=page.continuation;state.nextCheckpoint={...page.checkpoint,fullAt:state.snapshot?state.anchor:checkpoint?.fullAt??state.anchor,...(config.provider==='macos_mail'?{limited:page.scanLimited===true}:{})}
+   if(page.complete){if(state.snapshot&&!(config.provider==='macos_mail'&&!page.snapshot)){state.reconciling=true;state.after=null}else complete=true}
   }
   signal.throwIfAborted()
   await m.applySourcePage({fence:c.fence,batch_id:String(batch),page_id:hash(canonicalJson(c.continuation)),changes,pending_ids:state.providerCursor&&typeof state.providerCursor==='object'&&!Array.isArray(state.providerCursor)&&Array.isArray(state.providerCursor.pending)?state.providerCursor.pending.map(item=>hash('mail::'+z.object({id:z.string()}).parse(item).id)):[],continuation:complete?null:state,checkpoint:complete?state.nextCheckpoint:c.checkpoint,complete})

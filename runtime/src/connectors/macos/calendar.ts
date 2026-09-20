@@ -1,13 +1,9 @@
-import {spawn} from 'node:child_process'
-import {realpathSync} from 'node:fs'
-import {resolve,isAbsolute} from 'node:path'
+import {MacNativeReader} from './reader.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
-import {snapshotRegularFile} from '../../storage/native-resource-snapshot.js'
 import {canonicalJson} from '../../text/canonical-json.js'
 import {ComposioFailure,type GoogleScope} from '../composio/client.js'
 import type {GoogleObject,GooglePage} from '../composio/google.js'
-const record=z.record(z.string(),z.unknown())
 const requestSchema=z.discriminatedUnion('command',[
  z.object({command:z.enum(['status','request_access','list_calendars'])}).strict(),
  z.object({command:z.literal('snapshot'),calendars:z.array(z.string().min(1).max(1024)).min(1).max(20),start:z.iso.datetime(),end:z.iso.datetime()}).strict(),
@@ -21,28 +17,7 @@ export function normalizeMacCalendarEvent(value:unknown):GoogleObject {
 /** Only a desktop-owned resources root is accepted; requests cannot choose an executable. */
 export class MacCalendarClient {
  constructor(readonly resourcesRoot:string){}
- #executable():string {
-  if(process.platform!=='darwin'||!isAbsolute(this.resourcesRoot)||realpathSync(this.resourcesRoot)!==this.resourcesRoot)throw new ComposioFailure('native_unavailable')
-  const manifest=z.object({schema_version:z.literal(1),target:z.literal('darwin-'+process.arch),resources:z.array(record).max(256)}).parse(JSON.parse(snapshotRegularFile(resolve(this.resourcesRoot,'native-resources-v1.json'),1024*1024).bytes.toString('utf8')))
-  const rows=manifest.resources.filter(r=>r.logical_id==='macos_calendar')
-  const r=z.object({relative_path:z.literal('native/macos_calendar'),kind:z.literal('executable'),platform:z.literal('darwin'),architecture:z.literal(process.arch),byte_size:z.number().int().positive(),sha256:z.string().regex(/^[a-f0-9]{64}$/u),build_contract_version:z.literal(1)}).parse(rows.length===1?rows[0]:null)
-  const path=resolve(this.resourcesRoot,r.relative_path);if(realpathSync(path)!==path)throw new ComposioFailure('native_unavailable')
-  const file=snapshotRegularFile(path,16*1024*1024)
-  if(file.size!==r.byte_size||file.sha256!==r.sha256)throw new ComposioFailure('native_unavailable')
-  return path
- }
- request(input:unknown,signal=AbortSignal.timeout(30000)):Promise<Record<string,unknown>> {
-  const body=JSON.stringify(requestSchema.parse(input));if(Buffer.byteLength(body)>65536)throw new ComposioFailure('request_too_large')
-  const executable=this.#executable()
-  return new Promise((resolve,reject)=>{
-   const child=spawn(executable,[],{shell:false,stdio:['pipe','pipe','ignore'],signal:AbortSignal.any([signal,AbortSignal.timeout(30000)])})
-   let bytes=0;const chunks:Buffer[]=[]
-   child.on('error',()=>reject(new ComposioFailure('native_unavailable')))
-   child.stdout.on('data',(chunk:Buffer)=>{bytes+=chunk.length;if(bytes>2*1024*1024){child.kill();reject(new ComposioFailure('response_too_large'))}else chunks.push(chunk)})
-   child.on('close',code=>{try{if(code!==0)throw new ComposioFailure('native_unavailable');const result=record.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));if(result.error)throw new ComposioFailure(z.enum(['native_unavailable','permission_denied','calendar_unavailable','response_too_large','timeout','scope_denied','invalid_request']).catch('native_unavailable').parse(result.error));resolve(result)}catch(error){reject(error instanceof ComposioFailure?error:new ComposioFailure('invalid_contract'))}})
-   child.stdin.on('error',()=>{ /* child failure is reported on close/error */ });child.stdin.end(body)
-  })
- }
+ request(input:unknown,signal=AbortSignal.timeout(30000)){return new MacNativeReader(this.resourcesRoot,'macos_calendar').request(requestSchema.parse(input),signal)}
  async page(scope:GoogleScope,signal:AbortSignal):Promise<GooglePage>{
   if(scope.kind!=='calendar')throw new ComposioFailure('scope_denied')
   const now=Date.now(),result=await this.request({command:'snapshot',calendars:scope.calendars,start:new Date(now-scope.pastDays*86400000).toISOString(),end:new Date(now+scope.futureDays*86400000).toISOString()},signal)

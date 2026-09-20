@@ -14,6 +14,7 @@ const TARGETS = Object.freeze({
 })
 const SOURCE_HOST_RESOURCE_IDS = new Set([
   'macos_calendar',
+  'macos_mail',
   'windows_job_guardian',
   'project_native_addon',
   'codex_sandbox_probe',
@@ -58,6 +59,7 @@ export function expectedNativeResources(targetId) {
     resource('codex_sandbox_probe', `native/codex-sandbox-probe${executableSuffix}`, 'executable'),
   )
   if (target.platform === 'darwin') {
+    resources.push(resource('macos_mail', 'native/macos_mail', 'executable'))
     resources.push(resource('macos_calendar', 'native/macos_calendar', 'executable'))
     resources.push(resource('macos_voice_io', 'native/macos_voice_io', 'executable'))
   }
