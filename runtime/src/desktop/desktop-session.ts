@@ -1,3 +1,4 @@
+import type {PromptLanguage} from '../realtime/prompt-language.js'
 import {
   DesktopTasks,
   executorTasksSchema,
@@ -90,6 +91,8 @@ export interface DesktopCommand {
 
 /** The service surface the bridge drives. Narrow: six calls and one read. */
 export interface BridgeService {
+  setLanguage?(language?: PromptLanguage): Promise<void>
+
   readonly executorState: ExecutorState
   setCodingProgressNarration?(mode: 'smart' | 'continuous'): void
   discardInputAudio?(): Promise<void>
@@ -1299,7 +1302,10 @@ export class DesktopRealtime {
     this.serverOptions = {
       token: options.token,
       bootstrapTextFrames: [READY_FRAME],
-      onClientAuthenticated: () => this.#authenticated(),
+      onClientAuthenticated: async language => {
+        this.#authenticated()
+        await options.service.setLanguage?.(language)
+      },
       onClientDisconnect: media => this.#disconnected(media?.hadProviderAttachment ?? true),
       onDebugBoardRequest: request => {
         if (memoryBoard === undefined) throw new DesktopProtocolError('desktop memory board is unavailable')

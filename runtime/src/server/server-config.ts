@@ -1,10 +1,13 @@
 import {randomBytes} from 'node:crypto'
 import {constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync} from 'node:fs'
 import {isAbsolute} from 'node:path'
+import {parsePromptLanguage, type PromptLanguage} from '../realtime/prompt-language.js'
 import type {Settings} from '../config/config.js'
 import type {ClientMedia} from './client-protocol.js'
 
-export interface ServerConfig {readonly port: number; readonly token: string; readonly mediaMode: 'relay' | 'aoq_chat' | 'aoq_runtime'}
+export interface ServerConfig {readonly port: number; readonly token: string; readonly mediaMode: 'relay' | 'aoq_chat' | 'aoq_runtime';
+  /** Host-configured AI system prompt language; clients may override it per connection. */
+  readonly language?: PromptLanguage}
 
 export class ServerConfigurationError extends Error {
   override readonly name = 'ServerConfigurationError'
@@ -30,6 +33,10 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
   requirePosixServerStorage()
   const mediaMode = environment.NOVA_AUDIO_AGENT_SERVER_MEDIA_MODE ?? 'relay'
   if (mediaMode !== 'relay' && mediaMode !== 'aoq_chat' && mediaMode !== 'aoq_runtime') throw new ServerConfigurationError('invalid server media mode')
+  const rawLanguage = (environment.NOVA_AUDIO_AGENT_LANGUAGE ?? '').trim()
+  let language: PromptLanguage | undefined
+  try { language = parsePromptLanguage(rawLanguage === '' ? undefined : rawLanguage) }
+  catch { throw new ServerConfigurationError('invalid configuration: NOVA_AUDIO_AGENT_LANGUAGE') }
   const rawPort = environment.NOVA_AUDIO_AGENT_SERVER_PORT ?? ''
   if (!/^[0-9]+$/u.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535) {
     throw new ServerConfigurationError('server port must be an integer from 1 to 65535')
@@ -45,7 +52,7 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
     const token = readFileSync(fd, 'utf8').trim()
     // Keep headless configuration independent of the desktop/host-control import graph.
     if (!/^[a-f0-9]{32}$/u.test(token)) throw new ServerConfigurationError('invalid server token')
-    return {port: Number(rawPort), token, mediaMode}
+    return {port: Number(rawPort), token, mediaMode, ...(language === undefined ? {} : {language})}
   } finally { closeSync(fd) }
 }
 
