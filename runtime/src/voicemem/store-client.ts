@@ -248,8 +248,9 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
         // Termination below owns a Worker that cannot accept the close signal.
       }
     }
-    worker.unref?.()
     try { await Promise.race([worker.terminate(), wait(CLOSE_GRACE_MS)]) } catch { /* already gone */ }
+    // terminate() refs the worker again; release that reference even when its grace expires.
+    worker.unref?.()
     this.#rejectPending('CLIENT_CLOSED')
     this.#dropped.clear()
   }
@@ -330,8 +331,8 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
     this.#failed = true
     this.#failure = code
     this.#rejectPending(code)
-    this.#worker?.unref?.()
     void this.#worker?.terminate().catch(() => undefined)
+    this.#worker?.unref?.()
   }
 
   #ensureWorker(): void {
