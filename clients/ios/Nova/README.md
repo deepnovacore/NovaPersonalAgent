@@ -37,7 +37,7 @@ For a generic device build use `-target Nova -sdk iphoneos`. The parent handles 
 
 ## Mock and controls
 
-Have the runtime owner build the runtime, then start `node runtime/scripts/client-protocol-mock.mjs`. Connect a simulator to `ws://127.0.0.1:8787` with the Debug switch and public mock token documented in `docs/protocols/client-v1.md`. The mock is synthetic and does not use models or Codex. A native, microphone-free smoke check is also runnable against a mock started with `--port=18787`:
+Have the runtime owner build the runtime, then start `node runtime/scripts/client-protocol-mock.mjs`. Connect a simulator to `ws://127.0.0.1:8787` with the Debug switch and public mock token documented in `docs/en/protocols/client-v1.md`. The mock is synthetic and does not use models or Codex. A native, microphone-free smoke check is also runnable against a mock started with `--port=18787`:
 
 ```sh
 xcrun swiftc -D DEBUG -module-cache-path /private/tmp/nova-ios-clang \

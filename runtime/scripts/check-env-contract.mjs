@@ -32,13 +32,13 @@ if (mode !== '--check' && mode !== '--write') {
       render: renderEnv,
     },
     {
-      path: resolve(repositoryRoot, 'docs/configuration.md'),
+      path: resolve(repositoryRoot, 'docs/en/configuration.md'),
       start: '<!-- BEGIN GENERATED ENV CONTRACT -->',
       end: '<!-- END GENERATED ENV CONTRACT -->',
       render: () => renderMarkdown('en'),
     },
     {
-      path: resolve(repositoryRoot, 'docs/configuration.zh-CN.md'),
+      path: resolve(repositoryRoot, 'docs/zh-CN/configuration.md'),
       start: '<!-- BEGIN GENERATED ENV CONTRACT -->',
       end: '<!-- END GENERATED ENV CONTRACT -->',
       render: () => renderMarkdown('zh'),

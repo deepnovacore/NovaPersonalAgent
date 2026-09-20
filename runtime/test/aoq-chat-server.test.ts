@@ -97,7 +97,7 @@ test('AOQ hello, one credential allocation, chat-only session and repeat fence',
 
 test('chat-only instructions follow hello language, else the host-configured default', {timeout: 5000}, async t => {
   const ZH = '你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行主机工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。'
-  // Per docs/protocols/client-v1.md, omitting `language` restores the host default rather than zh-CN.
+  // Per docs/en/protocols/client-v1.md, omitting `language` restores the host default rather than zh-CN.
   for (const [configured, sent, expectEnglish] of [
     [undefined, undefined, false], [undefined, 'en', true],
     ['en', undefined, true], ['en', 'zh-CN', false], ['zh-CN', 'en', true],

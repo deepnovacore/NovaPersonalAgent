@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
 [![Architecture](https://img.shields.io/badge/Arch-ControlPlane-7B2CBF.svg)](#2-architecture)
-[![Blog](https://img.shields.io/badge/Blog-Design-0B7285.svg)](docs/blog/2026-08-proactive-voice-agent-design-space.md)
+[![Blog](https://img.shields.io/badge/Blog-Design-0B7285.svg)](docs/en/blog/2026-08-proactive-voice-agent-design-space.md)
 
 
 > **An always-on voice agent with restrained proactivity and the capability of workspace management.**
@@ -16,12 +16,12 @@
 
 ## News
 
-- **2026-09-22 · v0.2.0**
+- **2026-09-20 · v0.2.0**
   - Cross-platform approvals for sandbox network access and command execution.
   - A leaner voice layer; workspace/session scheduling moves into the coding executor.
   - Pluggable ASR / LLM / TTS pipelines, decoupled from QwenAudioRealtime.
   - Custom MCP servers for search and RAG; wake words “你好星核” and “Hi Nova”. Chinese/English interface and system prompts.
-  - Personal memory with mem0 / VoiceMem, plus improved Workspace Graph.
+  - Personal memory with mem0 / VoiceMem.
   - An iPhone client connected to your PC runtime over Tailscale.
 - **2026-08-31 · v0.1.0** — Always-on voice, background Codex tasks, live steering, workspace/session management, and selective progress updates.
 
@@ -33,7 +33,7 @@ keeps responsive while doing long-running tasks in the background, reporting
 
 A concurrent work [qwen-audio-agent](https://github.com/QwenAudio/qwen-audio-agent) answers
 *how to keep an agent talking while it works*, while we ask a step further — **when is talking
-worth it at all** (see the [historical design post](docs/blog/2026-08-proactive-voice-agent-design-space.md) for more details).
+worth it at all** (see the [design article](docs/en/blog/2026-08-proactive-voice-agent-design-space.md) for more details).
 
 
 - **Restrained proactivity.** Important progress gets reported; routine updates stay quiet, and reminders never interrupt you while you speak.
@@ -55,7 +55,7 @@ Essential roles and ideas:
 * **Memory and ContextView**: short-term events from different capabilities are stored in different channels. Only bounded evidence and intake facts are compiled into ContextView for FrontBrain.
 * **Executors and controllers**: role-based manifests run asynchronous work; an AgentController registry owns model-facing controllers and hidden Vision watch/guard channels. Camera frames go directly to the selected VLM; monitoring owns its complete loop.
 
-For more details about the architecture, check [Architecture](docs/architecture.md).
+For more details about the architecture, check [Architecture](docs/en/architecture.md).
 
 
 
@@ -64,21 +64,33 @@ For more details about the architecture, check [Architecture](docs/architecture.
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>Talk while work gets done</h3>
-      <p>Assign tasks, clarify requirements, and follow progress without leaving the conversation.</p>
-      <img src="assets/features/conversation.en.png" alt="Voice conversation and workspace status" width="100%">
+      <h3>Voice Vibe Coding</h3>
+      <p>Describe a feature and refine it by voice while Codex writes and tests the code. Nova reports key milestones and keeps routine progress quiet.</p>
+      <img src="assets/features/coding.en.svg" alt="Voice requests flow to Codex for coding and testing" width="100%">
     </td>
     <td width="50%" valign="top">
-      <h3>Camera monitoring and timely alerts</h3>
-      <p>Ask Nova to watch for a condition and tell you when it occurs.</p>
-      <img src="assets/features/vision.en.png" alt="Camera monitoring and translated narration from the v0.1 demo" width="100%"><br><sub>v0.1 demo · 02:08</sub>
+      <h3>Understands what you mean</h3>
+      <p>Describe your goal naturally. Nova asks for the missing details before turning it into a task.</p>
+      <img src="assets/features/conversation.en.png" alt="Nova clarifies the requested application before starting" width="100%">
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>You approve the next step</h3>
-      <p>Review workspace changes, command execution, and network access.</p>
-      <img src="assets/features/approvals.en.png" alt="Network access and workspace approval cards" width="100%">
+      <h3>Manage workspaces by voice</h3>
+      <p>Create a workspace, switch projects, or resume a session—with your confirmation.</p>
+      <img src="assets/features/workspace.en.png" alt="Nova asks to create the Pet Manager workspace" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>You control permissions</h3>
+      <p>Review requests to run commands or access the network, then allow or deny them.</p>
+      <img src="assets/features/permission.en.png" alt="Network permission request with allow and deny controls" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Camera monitoring and timely alerts</h3>
+      <p>Ask Nova to watch for a condition and tell you when it occurs.</p>
+      <img src="assets/features/vision-camera.png" alt="Camera observation and spoken alert" width="100%">
     </td>
     <td width="50%" valign="top">
       <h3>Bring your tools and knowledge</h3>
@@ -90,7 +102,10 @@ For more details about the architecture, check [Architecture](docs/architecture.
     <td width="50%" valign="top">
       <h3>Memory that stays with you</h3>
       <p>mem0 recalls personal context across conversations, with source text you can inspect.</p>
-      <img src="assets/features/mem0.en.png" alt="Four local mem0 memories with source details" width="100%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="assets/features/mem0-dark.en.png">
+        <img src="assets/features/mem0.en.png" alt="Four local mem0 memories with source details" width="100%">
+      </picture>
     </td>
     <td width="50%" valign="top">
       <h3>Take Nova with you</h3>
@@ -110,7 +125,7 @@ Codex transport).
 Besides the shipped app from releases, you can also install using npm
 
 ```bash
-npm install --global nova-audio-agent@0.1.1
+npm install --global nova-audio-agent@0.2.0
 # open the shipped app
 novaaudio
 # open the settings panel in the app
@@ -146,27 +161,24 @@ Native echo-cancelled capture (VoiceProcessingIO) is macOS-only. Wake detection 
 capture when available; Windows, Linux source runs, and macOS fallback use Chromium
 `getUserMedia` + AudioWorklet. While sleeping, microphone frames go only to the local
 wake-word Worker; explicit mute stops wake detection. See
-[wake-word setup](docs/getting-started.md#enable-a-wake-word).
+[wake-word setup](docs/en/getting-started.md#enable-a-wake-word).
 
 ## 4. Documentation
 
 | Read this | For |
 |---|---|
-| [Architecture](docs/architecture.md) | Modules and boundaries |
-| [Glossary and invariants](docs/glossary.md) | Vocabulary and rules |
-| [Getting started](docs/getting-started.md) | Setup and integrations |
-| [v0.2.0 specs](docs/specs/v0.2.0/00-overview.md) | In-progress feature contracts on `v0.2.0dev` |
-| [Historical design exploration: A Tradeoff Ruler for Proactive Voice Agents](docs/blog/2026-08-proactive-voice-agent-design-space.md) | Historical design-space essay |
+| [Architecture](docs/en/architecture.md) | Modules and boundaries |
+| [Glossary and invariants](docs/en/glossary.md) | Vocabulary and rules |
+| [Getting started](docs/en/getting-started.md) | Setup and integrations |
+| [When should a voice agent speak?](docs/en/blog/2026-08-proactive-voice-agent-design-space.md) | Voice interaction design |
 | [Node runtime migration archive](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
 
 ## 5. Roadmap
 
-- [ ] **v0.2.0 (`v0.2.0dev`):** cross-platform approval forwarding; fewer native FrontBrain tools with workspace/session coordination inside the coding executor; replaceable ASR/LLM/TTS and provider-neutral contracts; custom MCP, search/RAG and the Chinese wake phrase “你好星核”; VoiceMem for personal memory; native iOS connected to a PC runtime through Tailscale. Existing implementation and outstanding acceptance are tracked separately in the [specs](docs/specs/v0.2.0/00-overview.md) and [release gate](docs/specs/v0.2.0/RELEASE-GATE.md).
-- [ ] **v0.3.0:** **Kimi Code + pi agent** coding backends; a **GUI executor with AutoGLM as the first example**, demonstrated through real agent2agent workflows; **Surrogate + Proactive + Memory** for memory-grounded need discovery and considerate follow-up. Retain the planned text/voice main window, feed/tasks/memory views, correctable personal memory and authorized sources; executor integration does not wait for mail/calendar connectors. See [specs](docs/specs/v0.3.0/00-overview.md), [milestones](docs/specs/v0.3.0/STATUS.zh-CN.md) and the [full roadmap](docs/archs/09-roadmap.md).
+- [ ] **v0.3.0:** bring text and voice into one main window with conversation, activity, task and memory views; add memory-grounded suggestions and follow-up; make personal memories traceable, correctable and removable; connect user-authorized folders, email, calendars and Feishu conversations.
+- [ ] **v0.4.0:** expand coding backends with Kimi Code and pi agent; add a GUI executor with AutoGLM as the first example, enabling collaboration across specialist agents.
 
-`v0.2.0dev` integrates after automated gates; `main` requires all feature and supported-platform
-acceptance in the [release ledger](docs/specs/v0.2.0/RELEASE-GATE.md). Linux releases are deferred;
-Ubuntu source tests remain.
+Releases require feature and supported-platform acceptance. Linux packages remain outside the release scope; Ubuntu source tests continue.
 
 ## 6. Contribution
 

@@ -12,9 +12,9 @@ const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const currentDocs = [
   'README.md',
   'README.zh-CN.md',
-  'docs/getting-started.md',
-  'docs/getting-started.zh-CN.md',
-  'docs/architecture.md',
+  'docs/en/getting-started.md',
+  'docs/zh-CN/getting-started.md',
+  'docs/en/architecture.md',
 ] as const
 
 test('current docs state the Node release truth and do not advertise retired capabilities', async () => {
@@ -29,7 +29,7 @@ test('current docs state the Node release truth and do not advertise retired cap
     assert.doesNotMatch(text, /live (?:DashScope )?smoke[^\n]*(?:landed|pass)|runtime:smoke:qwen[^\n]*pass/iu, file)
     assert.doesNotMatch(text, /v1-mini[^\n]*(?:real|actual) executor[^\n]*(?:proven|pass)|v1-mini path runs locally/iu, file)
   }
-  const gettingStarted = documents.find(item => item.file === 'docs/getting-started.md')!.text
+  const gettingStarted = documents.find(item => item.file === 'docs/en/getting-started.md')!.text
   assert.match(gettingStarted, /Node\.js and TypeScript[^\n]*only product runtime/iu)
   assert.match(gettingStarted, /Desktop targets macOS and Windows/iu)
   assert.match(gettingStarted, /Linux is available for source use/iu)
@@ -40,8 +40,8 @@ test('audio pipeline docs distinguish the selectable topology, credentials, and 
     file,
     await readFile(resolve(repositoryRoot, file), 'utf8'),
   ] as const)))
-  const english = `${documents.get('README.md')}\n${documents.get('docs/getting-started.md')}`
-  const chinese = `${documents.get('README.zh-CN.md')}\n${documents.get('docs/getting-started.zh-CN.md')}`
+  const english = `${documents.get('README.md')}\n${documents.get('docs/en/getting-started.md')}`
+  const chinese = `${documents.get('README.zh-CN.md')}\n${documents.get('docs/zh-CN/getting-started.md')}`
 
   assert.match(english, /integrated.*cascaded/isu)
   assert.match(english, /qwen-audio-3\.0-realtime-plus.*longanqian/isu)
@@ -78,7 +78,7 @@ test('configuration guides share a concise public subset and env example stays c
   }
   const publicNames = new Set(publicEnvironmentContract().map(entry => entry.name))
   const selections: string[][] = []
-  for (const file of ['docs/configuration.md', 'docs/configuration.zh-CN.md']) {
+  for (const file of ['docs/en/configuration.md', 'docs/zh-CN/configuration.md']) {
     const block = generatedBlock(await readFile(resolve(repositoryRoot, file), 'utf8'))
     const names = [...block.matchAll(/^\| `([A-Z0-9_]+)` \|/gmu)].map(match => match[1]!)
     assert.equal(new Set(names).size, names.length, file)
@@ -90,7 +90,7 @@ test('configuration guides share a concise public subset and env example stays c
     selections.push(names)
   }
   assert.deepEqual(selections[0], selections[1])
-  for (const file of ['docs/getting-started.md', 'docs/getting-started.zh-CN.md']) {
+  for (const file of ['docs/en/getting-started.md', 'docs/zh-CN/getting-started.md']) {
     assert.doesNotMatch(await readFile(resolve(repositoryRoot, file), 'utf8'), /BEGIN GENERATED ENV CONTRACT/u)
   }
 })
@@ -146,7 +146,7 @@ function generatedBlock(document: string): string {
 
 test('current Node Codex transport claim remains exact', async () => {
   const gettingStarted = await readFile(
-    resolve(repositoryRoot, 'docs/getting-started.md'),
+    resolve(repositoryRoot, 'docs/en/getting-started.md'),
     'utf8',
   )
   assert.match(gettingStarted, /Codex is app-server-only; JSONL is\s+fixture-parser-only/iu)
@@ -185,7 +185,7 @@ async function sourceFiles(root: string): Promise<string[]> {
 
 
 test('current architecture and numbered specs do not depend on the retired graph', async () => {
-  const roots = ['docs/archs', 'docs/specs/v0.2.0', 'docs/specs/v0.3.0']
+  const roots = ['docs/en/archs']
   for (const root of roots) {
     for (const file of await readdir(resolve(repositoryRoot, root))) {
       if (!/^\d.*\.md$/u.test(file)) continue
@@ -198,7 +198,7 @@ test('current architecture and numbered specs do not depend on the retired graph
 
 
 test('focused user guides describe use without branch or documentation-maintenance labels', async () => {
-  for (const file of ['docs/README.md', 'docs/README.zh-CN.md', 'docs/getting-started.md', 'docs/getting-started.zh-CN.md', 'docs/configuration.md', 'docs/configuration.zh-CN.md', 'docs/personal-memory.md', 'docs/personal-memory.zh-CN.md', 'docs/features.md', 'docs/features.zh-CN.md', 'docs/iphone.md', 'docs/iphone.zh-CN.md', 'docs/architecture.md', 'docs/architecture.zh-CN.md']) {
+  for (const file of ['docs/en/README.md', 'docs/zh-CN/README.md', 'docs/en/getting-started.md', 'docs/zh-CN/getting-started.md', 'docs/en/configuration.md', 'docs/zh-CN/configuration.md', 'docs/en/knowledge-base.md', 'docs/zh-CN/knowledge-base.md', 'docs/en/personal-memory.md', 'docs/zh-CN/personal-memory.md', 'docs/en/features.md', 'docs/zh-CN/features.md', 'docs/en/iphone.md', 'docs/zh-CN/iphone.md', 'docs/en/architecture.md', 'docs/zh-CN/architecture.md']) {
     const markdown = await readFile(resolve(repositoryRoot, file), 'utf8')
     const visible = markdown.replace(/\]\([^)]+\)/gu, ']')
     assert.doesNotMatch(visible, /v0\.[23](?:\.0)?(?:dev)?|M1\.5c|Documentation verification|文档维护|本轮|本地基线/u, file)
