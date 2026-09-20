@@ -202,6 +202,7 @@ async function findApp(directory, depth = 0) {
 export async function verifyRelease({app, artifact, distRoot, unsigned = false}) {
   const scratch = await realpath(await mkdtemp(resolve(candidateScratchParent(), 'nova-release-')))
   const install = resolve(scratch, 'install')
+  const mount = resolve(scratch, 'dmg')
   await mkdir(install)
   let mounted = false
   let uninstall
@@ -209,7 +210,11 @@ export async function verifyRelease({app, artifact, distRoot, unsigned = false})
     if (artifact) {
       artifact = resolve(artifact)
       if (artifact.endsWith('.dmg') && process.platform === 'darwin') {
-        run('/usr/bin/hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', install, artifact]); mounted = true
+        await mkdir(mount)
+        run('/usr/bin/hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', mount, artifact]); mounted = true
+        const bundled = await findApp(mount)
+        assert.ok(bundled, 'DMG application not found')
+        await cp(bundled, resolve(install, basename(bundled)), {recursive: true, verbatimSymlinks: true})
       } else if (artifact.endsWith('.zip')) {
         if (process.platform === 'darwin') run('/usr/bin/ditto', ['-x', '-k', artifact, install])
         else run('tar', ['-xf', artifact, '-C', install])
@@ -245,7 +250,7 @@ export async function verifyRelease({app, artifact, distRoot, unsigned = false})
     process.stdout.write('release verification passed: ASAR/native placement and installed backend handshake\n')
   } finally {
     try { if (uninstall) uninstall() } finally {
-      if (mounted) run('/usr/bin/hdiutil', ['detach', install])
+      if (mounted) run('/usr/bin/hdiutil', ['detach', mount])
       await rm(scratch, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})
     }
   }
