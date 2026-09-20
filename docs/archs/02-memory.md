@@ -10,7 +10,7 @@ of prompt text.
   FSMs are separate host state, never model-writable planning state. Entries carry time, trust,
   priority, outcome, and evidence references. Applying an event precedes any response derived from
   it. Only the causal runtime owns current task/executor state.
-- **Personal memory.** Local mem0 is enabled by default; VoiceMem, a host-managed remote
+- **Personal memory.** The unified local ledger is enabled by default through the VoiceMem-compatible selection; explicit mem0, a host-managed remote
   connection, or disabled memory can be selected explicitly. Durable source admission and
   asynchronous extraction retain facts across conversations. Recall, host deletion and optional
   inspection are independent of live task state. See [personal memory](../personal-memory.md)

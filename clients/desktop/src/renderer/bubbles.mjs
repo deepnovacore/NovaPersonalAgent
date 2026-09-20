@@ -6,11 +6,11 @@ const MAX_BUBBLES = 3
 const PROGRESS_PHASES = new Set(['started', 'working', 'completed', 'failed', 'refused', 'unknown', 'cancelled', 'alert'])
 const RESULT_OUTCOMES = new Set(['ok', 'failed', 'refused', 'unknown', 'cancelled'])
 
-// Captions are complete user-visible replies, unlike path-free executor summaries.
+// Captions are cumulative user-visible replies, including streaming text before TTS ends.
 export function parseConversationBubble(frame, mode) {
   if (mode !== 'all' || frame?.type !== 'caption' || frame.role !== 'assistant'
-    || frame.final !== true || typeof frame.text !== 'string' || !frame.text.trim()) return null
-  return {kind: 'conversation', delegateId: `reply-${frame.sequence ?? ''}`,
+    || typeof frame.final !== 'boolean' || typeof frame.text !== 'string' || !frame.text.trim()) return null
+  return {kind: 'conversation', delegateId: `reply-${frame.message_id ?? frame.sequence ?? ''}`,
     summary: frame.text.slice(0, 4000), level: 'milestone', ...workIdentity(frame)}
 }
 
@@ -161,6 +161,8 @@ export function createProgressBubbleController({
       if (version !== generation) return false
       const lifetime = value.level === 'milestone' ? MILESTONE_MS : DETAIL_MS
       const delegateId = value.delegateId || value.delegate_id || ''
+      const existing = value.kind === 'conversation'
+        ? items.find(item => item.kind === 'conversation' && item.delegateId === delegateId) : undefined
       const item = {
         key: `${delegateId}:${value.ts ?? now()}:${value.summary}`,
         delegateId,
@@ -173,7 +175,13 @@ export function createProgressBubbleController({
         expanded: false,
         expiresAt: now() + lifetime,
       }
-      if (items.some(current => current.key === item.key)) return false
+      if (existing) {
+        // A streaming revision belongs to the same bubble: retain expansion and hover state.
+        item.key = existing.key
+        item.expanded = existing.expanded
+        item.paused = existing.paused
+        if (existing.paused) item.remainingMs = lifetime
+      } else if (items.some(current => current.key === item.key)) return false
       const previous = items.filter(current => item.kind === 'conversation'
         ? current.kind !== 'conversation'
         : !item.delegateId || current.kind !== 'progress' || current.delegateId !== item.delegateId)

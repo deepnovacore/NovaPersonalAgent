@@ -36,7 +36,7 @@ You can interrupt spoken output. Nova tracks each response so late audio and res
 | Information | Purpose |
 |---|---|
 | Conversation and task state | Keep the current interaction and running work consistent |
-| Personal memory | Recall information from earlier conversations; local mem0 is the default |
+| Personal memory | Recall information from earlier conversations; the unified local ledger is the default; mem0 is an explicit alternative |
 | Document knowledge | Search files you explicitly import |
 
 These stores have separate purposes. Remembered facts and retrieved documents are information, not instructions that can override your permissions. Local storage may still use remote models for extraction and embeddings. See [personal memory](personal-memory.md).

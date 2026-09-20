@@ -112,6 +112,8 @@ export class RealtimeSession {
   #userResponseSequence = 0
   #fenceNextResponse = false
   #fenceInterruption: FenceInterruption | null = null
+  #providerReplacementRevision = 0
+  #replacementEpoch: number | null | undefined
   #providerResponseId: string | null = null
   #hostPreemptResponseId: string | null = null
   #hostPreemptPending = false
@@ -574,9 +576,14 @@ export class RealtimeSession {
   async #replaceProviderSession(
     tools: readonly Record<string, unknown>[],
   ): Promise<{readonly epoch: number}> {
-    if (this.#provider.reconnect !== undefined) return this.#provider.reconnect(tools)
-    await this.#provider.close()
-    return this.#provider.connect({tools})
+    this.#providerReplacementRevision++
+    this.#replacementEpoch = null
+    const identity = this.#provider.reconnect !== undefined
+      ? await this.#provider.reconnect(tools)
+      : await (async () => { await this.#provider.close(); return this.#provider.connect({tools}) })()
+    // Keep delivery fenced until the caller publishes this identity into the host state.
+    this.#replacementEpoch = identity.epoch
+    return identity
   }
 
   /** The fields that belong to one provider session and none other. */
@@ -822,6 +829,11 @@ export class RealtimeSession {
     item: HostContextItem,
     options: {readonly confirmationTimeout: number | null; readonly asUserActivation: boolean},
   ): Promise<boolean> {
+    if (this.#replacementEpoch !== undefined && this.#replacementEpoch !== this.sessionEpoch) {
+      throw new RealtimeDeliveryError('provider session replacement is pending')
+    }
+    const replacementRevision = this.#providerReplacementRevision
+    const epoch = this.sessionEpoch
     if (this.#state.injectedEventEpoch(item.event_id) !== undefined) return false
     let identity: {
       readonly session_epoch: number
@@ -844,6 +856,11 @@ export class RealtimeSession {
       // retry it as though it had not.
       if (cause instanceof ItemDeliveryUncertainError) throw cause
       throw new RealtimeDeliveryError(`host item injection failed: ${String(cause)}`)
+    }
+    // Late acknowledgements from an abandoned provider are transient delivery failures,
+    // not malformed identities in the new session. Never publish them into its ledger.
+    if (replacementRevision !== this.#providerReplacementRevision || epoch !== this.sessionEpoch) {
+      throw new RealtimeDeliveryError('provider session changed during host item injection')
     }
     if (
       identity.session_epoch !== this.sessionEpoch
