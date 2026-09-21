@@ -61,6 +61,9 @@ jobs:
           - os: windows-latest
             script: package:win
             artifact: nova-audio-agent-desktop-win
+          - os: ubuntu-22.04
+            script: package:linux
+            artifact: nova-audio-agent-desktop-linux
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -72,8 +75,14 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm install --global npm@11.6.0
       - run: npm ci
+      - name: Prepare Linux packaging
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y g++-12 xvfb libasound2 libgtk-3-0 libnss3 libgbm1 libsecret-1-0
+          echo "CXX=g++-12" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=-UV8_DEPRECATION_WARNINGS" >> "$GITHUB_ENV"
       - run: npm run ${{ matrix.script }}
-      - run: npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned
+      - run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

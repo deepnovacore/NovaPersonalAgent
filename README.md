@@ -126,7 +126,7 @@ Codex transport).
 Besides the shipped app from releases, you can also install using npm
 
 ```bash
-npm install --global nova-audio-agent@0.2.0
+npm install --global nova-audio-agent@0.2.2
 # open the shipped app
 novaaudio
 # open the settings panel in the app

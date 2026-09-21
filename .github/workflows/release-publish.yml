@@ -114,11 +114,11 @@ jobs:
           gh release create "v$RELEASE_VERSION" release-artifacts/* \
             --target "$EXPECTED_COMMIT" \
             --title "Nova Audio Agent v$RELEASE_VERSION" \
-            --notes "Nova Audio Agent v$RELEASE_VERSION adds bilingual documentation and a public website, improves project clarification and session approvals, and refines desktop captions and Codex progress feedback. This release includes Ubuntu 22.04+ x64 desktop packages and a headless npm service, alongside unsigned macOS arm64 and Windows x64 applications; macOS Gatekeeper and Windows SmartScreen may display security warnings." \
+            --notes "Nova Audio Agent v$RELEASE_VERSION adds Ubuntu 22.04+ x64 desktop installers and npm launch support, plus the nova-audio-agent-server package for headless hosting and terminal QR pairing. macOS arm64 and Windows x64 remain supported. Desktop applications are unsigned; macOS Gatekeeper and Windows SmartScreen may display security warnings." \
             --latest
           tarball="$(find npm-package -maxdepth 1 -name '*.tgz' -type f)"
           tarball="$(realpath "$tarball")"
-          npm publish "release-artifacts/nova-audio-agent-server-$RELEASE_VERSION.tgz" --access public
+          npm publish "./release-artifacts/nova-audio-agent-server-$RELEASE_VERSION.tgz" --access public
           npm publish "$tarball" --access public
           published=''
           for attempt in $(seq 1 12); do

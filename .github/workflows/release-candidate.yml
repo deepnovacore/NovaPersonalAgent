@@ -6,7 +6,7 @@ on:
       release_version:
         description: Application version to validate
         required: true
-        default: 0.2.0
+        default: 0.2.2
         type: string
       candidate_scope:
         description: Full release evidence or a Windows-only repair run
@@ -123,7 +123,7 @@ jobs:
           cp clients/desktop/dist/*.AppImage candidate/nova-audio-agent-${{ inputs.release_version }}-linux-x64.AppImage
           cp clients/desktop/dist/*.deb candidate/nova-audio-agent-${{ inputs.release_version }}-linux-x64.deb
           node scripts/pack-server.mjs candidate
-          npm install --prefix server-smoke candidate/nova-audio-agent-server-${{ inputs.release_version }}.tgz
+          npm install --prefix server-smoke ./candidate/nova-audio-agent-server-${{ inputs.release_version }}.tgz
           server-smoke/node_modules/.bin/novaaudio-server --help
           node scripts/verify-server-package.mjs server-smoke/node_modules/.bin/novaaudio-server
           xvfb-run -a npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-audio-agent-${{ inputs.release_version }}-linux-x64.AppImage"
