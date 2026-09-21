@@ -2,57 +2,65 @@
 
 **An always-on voice agent with restrained proactivity and voice-controlled workspaces.**
 
+[![npm](https://img.shields.io/npm/v/nova-audio-agent.svg)](https://www.npmjs.com/package/nova-audio-agent)
+[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://github.com/deepnovacore/NovaAudioAgent/blob/main/LICENSE)
+[![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](https://nodejs.org)
+
+[Website](https://deepnovacore.github.io/NovaAudioAgent/en) ·
 [GitHub](https://github.com/deepnovacore/NovaAudioAgent) ·
 [简体中文](https://github.com/deepnovacore/NovaAudioAgent/blob/main/README.zh-CN.md) ·
-[Watch the demo (Chinese)](https://youtu.be/t1c-2O-QsxE) ·
-[Desktop downloads](https://github.com/deepnovacore/NovaAudioAgent/releases)
+[Watch the demo (Chinese)](https://youtu.be/t1c-2O-QsxE)
 
 Nova (小诺) keeps a conversation going while longer tasks run in the background.
-It is designed to report useful milestones, clarify requests, and let you steer
-work through voice without narrating every small step.
+It reports useful milestones, clarifies requests, and lets you steer work through
+voice without narrating every small step.
 
-This npm package provides the `novaaudio` command to install and launch the
-desktop application. You do not need to clone or build the repository to use it.
+![Nova in conversation](https://raw.githubusercontent.com/deepnovacore/NovaAudioAgent/v0.2.0/assets/features/conversation.en.png)
 
-## Get started
+This package provides the `novaaudio` command, which installs and launches the
+desktop application. You do not need to clone or build the repository.
 
-Requirements: **Node.js 22.13.0 or newer**, npm, and **macOS on Apple Silicon**
-or **Windows x64**. The first launch needs access to GitHub to download the app.
+## Install
+
+Requires **Node.js 22.13.0 or newer**, npm, and either **macOS on Apple Silicon**
+or **Windows x64**. Intel Macs and Linux are not covered by the desktop build.
+The application is not yet signed, so macOS Gatekeeper and Windows SmartScreen
+will warn on first launch.
 
 ```bash
 npm install --global nova-audio-agent
+```
+
+## Configure
+
+Open the desktop settings, which downloads the app on first run:
+
+```bash
 novaaudio config
 ```
 
-In the desktop settings, configure your [DashScope](https://platform.qianwenai.com)
-API key for the default Qwen realtime voice service and your
-[Tavily](https://docs.tavily.com) API key for web search. For coding tasks, set up
-a logged-in Codex executable; see the
-[setup guide](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/en/getting-started.md).
-Allow microphone access when prompted, then launch Nova:
+Then add the keys for the services you want:
+
+- **[DashScope](https://platform.qianwenai.com)** — the default Qwen realtime voice service. Required.
+- **[Tavily](https://docs.tavily.com)** — web search. Optional.
+- **Codex** — a logged-in Codex executable, for coding tasks. Optional. See the [setup guide](https://deepnovacore.github.io/NovaAudioAgent/en/docs/getting-started).
+
+Allow microphone access when prompted.
+
+## Run
 
 ```bash
 novaaudio
 ```
 
-Hover over the desktop orb to access its controls. Open settings again with
-`novaaudio config`, or inspect your local setup with `novaaudio doctor`.
+Hover over the desktop orb to reach its controls.
 
 ## Why Nova?
 
-- **Talk while work continues.** Long-running tasks execute in the background
-  while Nova stays available for conversation.
-- **Progress worth hearing.** Restrained proactivity aims to surface meaningful
-  updates without reading out every coding event.
-- **Manage workspaces by voice.** Create or switch workspaces and sessions
-  through proposals that you confirm.
-- **Steer ongoing work.** The Codex integration uses its native app-server
-  transport to support real-time steering.
-
-The repository also documents ongoing development. Features and acceptance
-status on development branches may differ from the shipped desktop release;
-check the [release notes](https://github.com/deepnovacore/NovaAudioAgent/releases)
-for your installed version.
+- **Talk while work continues.** Long-running tasks execute in the background while Nova stays available for conversation.
+- **Progress worth hearing.** Restrained proactivity surfaces meaningful updates instead of reading out every coding event.
+- **Manage workspaces by voice.** Create or switch workspaces and sessions through proposals you confirm.
+- **Steer ongoing work.** The Codex integration uses its native app-server transport, so you can redirect a task while it runs.
 
 ## Commands
 
@@ -64,25 +72,21 @@ for your installed version.
 | `novaaudio --version` | Print the desktop release version used by the CLI |
 | `novaaudio --help` | Show command help |
 
-## Installation details
+## How it works
 
-The CLI downloads the matching `v0.2.0` desktop release from
-[GitHub Releases](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)
-into `~/.nova-audio-agent/cli/releases/` and verifies its published SHA-256 digest
-before launching it. It reuses the desktop client's encrypted settings store;
-the CLI does not read or print secret values.
+The CLI downloads the matching desktop release from
+[GitHub Releases](https://github.com/deepnovacore/NovaAudioAgent/releases) into
+`~/.nova-audio-agent/cli/releases/` and verifies its published SHA-256 digest
+before launching it. It reuses the desktop client's encrypted settings store and
+never reads or prints secret values.
 
-Documentation-only npm updates may have a newer package version while retaining
-the same desktop release. `novaaudio --version` continues to report `0.2.0`.
-
-This release supports macOS arm64 and Windows x64. Linux and Intel Mac desktop
-downloads are not included. The desktop application is currently unsigned, so
-macOS Gatekeeper or Windows SmartScreen may display a security warning.
+Run `novaaudio doctor` to see which release is installed and whether your
+configuration is complete.
 
 ## Learn more
 
-- [Getting started and integrations](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/en/getting-started.md)
-- [Runtime architecture](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/en/architecture.md)
+- [Getting started and integrations](https://deepnovacore.github.io/NovaAudioAgent/en/docs/getting-started)
+- [How Nova works](https://deepnovacore.github.io/NovaAudioAgent/en/docs/architecture)
 - [Design: when should a proactive voice agent speak?](https://github.com/deepnovacore/NovaAudioAgent/blob/main/docs/en/blog/2026-08-proactive-voice-agent-design-space.md)
 - [Report an issue](https://github.com/deepnovacore/NovaAudioAgent/issues)
 - [Build from source and contribute](https://github.com/deepnovacore/NovaAudioAgent/blob/main/CONTRIBUTING.md)
