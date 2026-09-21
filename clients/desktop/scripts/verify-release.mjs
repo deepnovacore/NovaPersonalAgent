@@ -154,7 +154,15 @@ async function smoke(executable, scratch) {
     detached: process.platform !== 'win32',
   })
   let output = ''
-  for (const stream of [child.stdout, child.stderr]) stream.on('data', data => { output = (output + data).slice(-8192) })
+  let settingsOutput = ''
+  let settingsReady
+  const settingsLoaded = new Promise(resolveReady => { settingsReady = resolveReady })
+  child.stdout.on('data', chunk => {
+    output = (output + chunk).slice(-8192)
+    settingsOutput = (settingsOutput + chunk).slice(-8192)
+    if (settingsOutput.includes('[desktop-smoke] settings_ready\n')) settingsReady()
+  })
+  child.stderr.on('data', data => { output = (output + data).slice(-8192) })
   const exited = once(child, 'exit')
   // Register rejection immediately, including failed spawn before readiness arrives.
   exited.catch(() => {})
@@ -162,7 +170,7 @@ async function smoke(executable, scratch) {
   try {
     await Promise.race([
       (async () => {
-        await authenticate(await readReadiness(child.stdio[3]))
+        await Promise.all([authenticate(await readReadiness(child.stdio[3])), settingsLoaded])
         child.stdio[4].end('quit\n')
         const [code, signal] = await exited
         assert.equal(code, 0, `application exit: ${signal}`)

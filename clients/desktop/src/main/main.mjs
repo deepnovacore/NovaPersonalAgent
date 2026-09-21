@@ -470,7 +470,28 @@ function openSettingsWindow(launchId, { category } = {}) {
   void refreshManagedWorkspaceCapabilities().then(() => {
     sendToSettings('nova:settings:changed', settingsFocusView(category))
   })
-  void window.loadURL('nova://orb/settings.html')
+  return window.loadURL('nova://orb/settings.html')
+}
+
+async function verifySettingsRenderer() {
+  const ready = await settingsWindow.webContents.executeJavaScript(`(async () => {
+    if (location.href !== 'nova://orb/settings.html'
+      || typeof window.novaAudioAgentDesktop?.settings?.get !== 'function'
+      || document.querySelectorAll('#language option').length !== 2) return false
+    const view = await window.novaAudioAgentDesktop.settings.get()
+    if (!['en', 'zh-CN'].includes(view.language)) return false
+    const general = document.querySelector('#category-general')
+    const usage = document.querySelector('#category-usage')
+    if (!general || !usage) return false
+    usage.click()
+    const switched = usage.getAttribute('aria-current') === 'true'
+      && document.querySelector('#language-section').hidden
+    general.click()
+    return switched && general.getAttribute('aria-current') === 'true'
+      && !document.querySelector('#language-section').hidden
+  })()`)
+  if (!ready) throw new Error('settings_renderer_unavailable')
+  process.stdout.write('[desktop-smoke] settings_ready\n')
 }
 
 // The orb's MCP submenu asks for a category; every other caller omits it and
@@ -1061,7 +1082,6 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   if (settingsReady) await refreshDesktopConfiguration()
   initializeDesktopBootstrap(camera.source)
   const launchId = randomBytes(8).toString('hex')
-  activeLaunchId = launchId
   if (process.platform === 'linux') await wait(LINUX_WINDOW_DELAY_MS)
   mainWindow = await createWindow(launchId)
   wakeWord = new WakeWordRuntime({
@@ -1560,7 +1580,13 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     cameraFile: camera.source === 'file' ? camera.file : undefined,
     fetchCameraFile: (url, init) => net.fetch(url, init),
   })
+  // Secondary windows share this session's protocol. Do not expose their
+  // launch id or open them until the asynchronous asset graph is registered.
+  await rendererLoaded
+  activeLaunchId = launchId
   if (sourceStartupSmoke) {
+    await openSettingsWindow(launchId)
+    await verifySettingsRenderer()
     await Promise.all([rendererLoaded, windowShown])
     sourceSmokeStage('window_ready')
     process.stdout.write('[desktop-smoke] source_window_ready\n', () => {
@@ -1621,7 +1647,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   if (settingsReady) void managedWorkspaceBackendRecovery.start()
   if (openSettingsRequested) {
     openSettingsRequested = false
-    openSettingsWindow(launchId)
+    await openSettingsWindow(launchId)
+    if (smokeChannel !== null) await verifySettingsRenderer()
   }
   if (!settingsReady) {
     void dialog.showMessageBox(mainWindow, {
