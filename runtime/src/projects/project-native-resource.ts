@@ -273,11 +273,11 @@ function requireProjectRecord(
   let selected: ProjectRecord | null = null
   const ids = new Set<string>()
   const paths = new Set<string>()
-  for (const resource of manifest.resources) {
+  for (const resource of manifest.resources as readonly unknown[]) {
     requireExactRecord(resource, [
       'logical_id', 'relative_path', 'byte_size', 'sha256', 'kind', 'platform',
       'architecture', 'electron_abi', 'build_contract_version',
-      ...(typeof resource === 'object' && resource !== null && 'node_api_version' in resource ? ['node_api_version'] : []),
+      ...(typeof resource === 'object' && resource !== null && 'kind' in resource && resource.kind === 'node_addon' && Object.hasOwn(resource, 'node_api_version') ? ['node_api_version'] : []),
     ])
     if (
       typeof resource.logical_id !== 'string'
@@ -293,7 +293,7 @@ function requireProjectRecord(
       || resource.kind !== 'node_addon'
       || resource.platform !== platform
       || resource.architecture !== arch
-      || ('node_api_version' in resource
+      || (Object.hasOwn(resource, 'node_api_version')
         ? resource.node_api_version !== 10 || resource.electron_abi !== null || Number(process.versions.napi ?? 0) < 10
         : resource.electron_abi !== 148 || electronAbi !== '148')
       || resource.build_contract_version !== 1

@@ -135,7 +135,7 @@ novaaudio config
 novaaudio doctor
 ```
 
-Headless Ubuntu 22.04+: install `nova-audio-agent-server` with npm; run `novaaudio-server start` and, in a second terminal, `novaaudio-server pair wss://your-host.ts.net` for a one-use QR. See the [configuration guide](docs/en/deployment/remote-server.md).
+Headless Ubuntu 22.04+: install `nova-audio-agent-server` with npm, configure it and initialize credentials; run `novaaudio-server start` and, in a second terminal, `novaaudio-server pair wss://your-host.ts.net` for a one-use QR. See the [configuration guide](docs/en/deployment/remote-server.md).
 
 For development from source:
 

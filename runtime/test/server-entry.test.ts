@@ -165,8 +165,12 @@ test('AOQ entry starts without loading the desktop/provider graph and closes on 
   assert.ok(address && typeof address !== 'string')
   await new Promise<void>(resolve => probe.close(() => resolve()))
   // A fresh module loader catches eager imports as well as accidental construction.
+  const forbiddenGraph = /(?:^|[/-])(desktop|production-composition|client-server|client-protocol|realtime-assembly|codex)(?:[/.-]|$)/u
+  assert.match('./desktop-entry.js', forbiddenGraph)
+  assert.match('./cascaded-realtime-assembly.js', forbiddenGraph)
+  assert.doesNotMatch('/repo/.codex/worktrees/task/runtime/src/server-entry.js', forbiddenGraph)
   const loader = `export function resolve(specifier, context, nextResolve) {
-    if (/(?:^|[/])(desktop|production-composition|client-server|client-protocol|realtime-assembly|codex)(?:[/.]|$)/u.test(specifier)) throw new Error('forbidden graph import');
+    if (${forbiddenGraph}.test(specifier)) throw new Error('forbidden graph import');
     return nextResolve(specifier, context);
   }`
   const script = `

@@ -10,9 +10,9 @@ Nova 运行在电脑上，通过语音与你交流，并调用 Codex 完成编�
 
 - macOS：Xcode Command Line Tools，可运行 `xcode-select --install` 安装。
 - Windows：Visual Studio Build Tools，选择 **Desktop development with C++**。
-- Linux：C 编译器；桌面需要 X11 或 XWayland。
+- Ubuntu 22.04+ x64：C/C++20 编译器（GCC 12 或更新版本）、X11 或 XWayland，以及 Chromium 用户命名空间权限。
 
-桌面面向 macOS 和 Windows。Linux 可从源码运行。
+桌面支持 macOS arm64、Windows x64 和 Ubuntu 22.04+ x64。
 
 ## 2. 安装和启动
 

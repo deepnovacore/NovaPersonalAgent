@@ -37,6 +37,6 @@ iPhone 默认显示实时对话。连接支持可编辑输入的级联服务时�
 - 本地记忆和知识库仍可能调用远程模型处理文本。
 - 个人记忆查看页暂不提供编辑、删除功能。
 - 手机使用依赖电脑服务在线及网络可达，不支持手机摄像头和后台唤醒词。
-- 桌面面向 macOS 和 Windows；Linux 保留源码运行方式。
+- 桌面支持 macOS arm64、Windows x64 和 Ubuntu 22.04+ x64。
 
 [开始使用](getting-started.md) · [个人记忆](personal-memory.md) · [连接手机](iphone.md)

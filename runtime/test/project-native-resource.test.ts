@@ -298,7 +298,7 @@ test('headless Node loads a manifest-bound Node-API addon without pretending to 
     const save = async (): Promise<void> => { await writeFile(join(root, 'native-resources-v1.json'), JSON.stringify({schema_version: 1, target: 'darwin-arm64', resources: [record]})) }
     await save()
     const load = (): ProjectNativeHost | null => loadProjectNativeHostFromResources({resourcesPath: root, platform: 'darwin', arch: 'arm64', electronAbi: '137', moduleLoader: () => fakeAddon()})
-    assert.notEqual(load(), null)
+    assert.equal(load() !== null, Number(process.versions.napi ?? 0) >= 10)
     record.node_api_version = 99; await save(); assert.equal(load(), null)
     record.node_api_version = 10; await save()
     await writeFile(join(root, 'native/project-native/nova_project_native.node'), Buffer.alloc(body.length))

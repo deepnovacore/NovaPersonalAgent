@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
+import {spawnSync} from 'node:child_process'
+import {fileURLToPath} from 'node:url'
 import {main} from '../src/command.mjs'
 
 test('help and malformed arguments never load the runtime', async () => {
@@ -27,8 +29,17 @@ test('server commands reuse runtime entry, credentials and terminal pairing', as
 test('env file is loaded before runtime composition', async () => {
   const events = []
   assert.equal(await main(['--env-file', '/tmp/server.env', 'start'], {
+    environment: {},
     loadEnvFile: path => events.push(path),
     load: async () => ({runServerEntry: async () => {events.push('start'); return 2}}),
   }), 2)
   assert.deepEqual(events, ['/tmp/server.env', 'start'])
+})
+
+test('CLI failures do not expose private file paths', () => {
+  const privatePath = fileURLToPath(new URL('..', import.meta.url))
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../bin/novaaudio-server.mjs', import.meta.url)), 'start'], {encoding: 'utf8'})
+  assert.equal(result.status, 2)
+  assert.match(result.stderr, /runtime-diagnostic.*command_failed/u)
+  assert.ok(!result.stderr.includes(privatePath))
 })

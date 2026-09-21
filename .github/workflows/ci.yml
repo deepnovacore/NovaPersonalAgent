@@ -46,6 +46,13 @@ jobs:
       - run: npm run smoke:capability-status --workspace @nova-audio-agent/desktop
         if: runner.os == 'macOS'
       - run: npm run build
+      - name: Verify installed headless npm package
+        if: runner.os == 'Linux'
+        run: |
+          umask 077
+          tarball="$(node scripts/pack-server.mjs server-candidate)"
+          npm install --prefix server-smoke "$tarball"
+          node scripts/verify-server-package.mjs server-smoke/node_modules/.bin/novaaudio-server
 
   package:
     if: startsWith(github.ref, 'refs/tags/v')

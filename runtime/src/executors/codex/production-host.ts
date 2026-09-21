@@ -3,6 +3,8 @@ import {hostCodexHomeValue} from './process-owner.js'
 import {spawn} from 'node:child_process'
 import {randomUUID} from 'node:crypto'
 import {
+  accessSync,
+  constants,
   chmodSync,
   lstatSync,
   mkdtempSync,
@@ -282,12 +284,9 @@ export function loadCodexSandboxProbeFromResources(
       before.size !== record.byteSize
       || before.sha256 !== record.sha256
       || !validExecutable(before.bytes, options.platform, options.arch)
-      || (
-        process.platform !== 'win32'
-        && options.platform !== 'win32'
-        && (before.mode & 0o111n) !== 0o111n
-      )
+
     ) return null
+    if (process.platform !== 'win32' && options.platform !== 'win32') accessSync(probePath, constants.X_OK)
     const after = snapshotRegularFile(probePath, MAX_PROBE_BYTES)
     if (!sameSnapshot(before, after)) return null
     const capability = Object.freeze({[sandboxProbeBrand]: true as const})
@@ -907,11 +906,11 @@ function requireProbeRecord(
   let selected: {readonly byteSize: number; readonly sha256: string} | null = null
   const ids = new Set<string>()
   const paths = new Set<string>()
-  for (const resource of manifest.resources) {
+  for (const resource of manifest.resources as readonly unknown[]) {
     requireExactRecord(resource, [
       'logical_id', 'relative_path', 'byte_size', 'sha256', 'kind', 'platform',
       'architecture', 'electron_abi', 'build_contract_version',
-      ...(typeof resource === 'object' && resource !== null && 'node_api_version' in resource ? ['node_api_version'] : []),
+      ...(typeof resource === 'object' && resource !== null && 'kind' in resource && resource.kind === 'node_addon' && Object.hasOwn(resource, 'node_api_version') ? ['node_api_version'] : []),
     ])
     if (
       typeof resource.logical_id !== 'string'

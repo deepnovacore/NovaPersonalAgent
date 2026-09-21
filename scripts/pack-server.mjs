@@ -1,4 +1,5 @@
-import {cp, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
+import assert from 'node:assert/strict'
+import {chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {resolve, join} from 'node:path'
 import {spawnSync} from 'node:child_process'
@@ -31,7 +32,7 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     await cp(join(root, 'LICENSE'), join(stage, 'LICENSE'))
     for (const path of ['dist/src', 'dist/eval', 'scripts/pair-device.mjs']) {
       await mkdir(resolve(stage, 'runtime', path, '..'), {recursive: true})
-      await cp(join(root, 'runtime', path), join(stage, 'runtime', path), {recursive: true})
+      await cp(join(root, 'runtime', path), join(stage, 'runtime', path), {recursive: true, filter: source => !source.endsWith('.map') && !source.endsWith('.d.ts')})
     }
     const resourcesRoot = join(stage, 'resources')
     const nativeOptions = {packageRoot: join(root, 'clients/desktop'), outputRoot: resourcesRoot, platform: process.platform, arch: process.arch}
@@ -42,9 +43,22 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     const resources = nativeManifest.resources.map(record => record.logical_id === 'project_native_addon'
       ? {...record, electron_abi: null, node_api_version: 10} : record)
     await writeFile(join(resourcesRoot, 'native-resources-v1.json'), JSON.stringify({...nativeManifest, resources}) + '\n')
+    const executables = new Set(['bin/novaaudio-server.mjs', 'resources/native/codex-sandbox-probe'])
+    for (const name of ['', ...await readdir(stage, {recursive: true})]) {
+      const path = join(stage, name)
+      await chmod(path, (await stat(path)).isDirectory() || executables.has(name) ? 0o755 : 0o644)
+    }
     const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', stage, '--ignore-scripts', '--pack-destination', output, '--json'], {encoding: 'utf8'})
     if (result.status !== 0) throw new Error(result.stderr || 'server npm pack failed')
-    const [{filename}] = JSON.parse(result.stdout)
+    const [{filename, files}] = JSON.parse(result.stdout)
+    const allowed = new Set(['package.json', 'README.md', 'LICENSE', 'bin/novaaudio-server.mjs', 'src/command.mjs',
+      'runtime/scripts/pair-device.mjs', 'resources/native-resources-v1.json',
+      'resources/native/project-native/nova_project_native.node', 'resources/native/codex-sandbox-probe',
+      ...['MANIFEST.json', 'LICENSE.silero-vad.txt', 'speech-16k-s16le.pcm', 'silence-16k-s16le.pcm'].map(name => `resources/endpointing/volcengine-v1/${name}`)])
+    for (const {path, mode} of files) {
+      assert.ok(!path.split('/').includes('..') && (allowed.has(path) || /^runtime\/dist\/(src|eval)\/.+\.js$/u.test(path)), `unexpected server package file: ${path}`)
+      assert.equal(mode & 0o777, executables.has(path) ? 0o755 : 0o644, `server package mode: ${path}`)
+    }
     return join(output, filename)
   } finally { await rm(stage, {recursive: true, force: true}) }
 }
