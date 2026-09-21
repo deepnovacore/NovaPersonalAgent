@@ -65,13 +65,13 @@ jobs:
                   assert (before/name).read_bytes() == (after/name).read_bytes(), f'Executable payload changed: {name}'
           print('Only README, homepage and patch version differ from npm latest')
           PY
-          npm install --prefix smoke --ignore-scripts candidate/*.tgz
+          npm install --prefix smoke --ignore-scripts ./candidate/*.tgz
           test "$(smoke/node_modules/.bin/novaaudio --version)" = "$(node --input-type=module -e "import {PRODUCT_VERSION} from './cli/src/target.mjs'; console.log(PRODUCT_VERSION)")"
           smoke/node_modules/.bin/novaaudio --help
       - name: Publish the audited tarball
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish candidate/*.tgz --access public
+        run: npm publish ./candidate/*.tgz --access public
       - name: Verify registry version and README
         run: |
           node --input-type=module <<'JS'
