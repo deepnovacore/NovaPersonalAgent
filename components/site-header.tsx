@@ -20,7 +20,7 @@ export function Header({
   alternate?: string;
   section?: 'users' | 'developers';
 }) {
-  const home = sitePath(en ? '/en' : '/');
+  const home = sitePath(en ? '/' : '/zh');
   const doc = sitePath(en ? '/en/docs' : '/docs');
   const developers = doc + '/archs/00-overview';
   return (
@@ -56,7 +56,7 @@ export function Header({
 export function Footer({ en = false }: { en?: boolean }) {
   return (
     <footer className="footer wrap">
-      <a className="brand" href={sitePath(en ? '/en' : '/')}>
+      <a className="brand" href={sitePath(en ? '/' : '/zh')}>
         <NovaMark />nova
       </a>
       <span>© 2026 {en ? 'DeepNovaCore' : '深穹星核'}</span>
