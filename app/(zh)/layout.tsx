@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   description:
     '实时语音、后台执行、视觉监控、个人记忆和知识库，让小诺在值得你关注时主动开口。',
   icons: { icon: sitePath('/favicon.svg') },
-  alternates: { languages: { 'zh-CN': sitePath('/'), en: sitePath('/en') } },
+  alternates: { languages: { en: sitePath('/'), 'zh-CN': sitePath('/zh'), 'x-default': sitePath('/') } },
 };
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (

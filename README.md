@@ -2,6 +2,8 @@
 
 The product homepage and documentation site are built with React and Next.js, exported as static files for GitHub Pages. The original product design comes from the sibling `nova-audio-agent-website` prototype; that directory is preserved.
 
+The site root serves English by default. The Chinese homepage is at `/zh/`; `/en/` remains an English homepage alias. Existing English (`/en/docs/`) and Chinese (`/docs/`) documentation URLs stay available. Language switches preserve the current page or homepage section.
+
 ## One documentation source
 
 Edit `../docs/en/**/*.md` or `../docs/zh-CN/**/*.md`. `scripts/docs.mjs` generates page content, heading IDs, navigation and links at build time. Only these two documentation directories and their referenced images are included. Demo state and other development documents are excluded. Generated content and copied images are ignored by Git.
@@ -17,7 +19,7 @@ npm ci
 npm run dev -- --hostname 127.0.0.1 --port 3108
 ```
 
-Open `http://127.0.0.1:3108/docs/` or `/en/docs/`. Changes to Markdown regenerate the content while the development server is running.
+Open `http://127.0.0.1:3108/` or `/en/docs/`. Changes to Markdown regenerate the content while the development server is running.
 
 ## Preview the exact GitHub Pages output
 
@@ -27,7 +29,7 @@ NEXT_PUBLIC_BASE_PATH=/NovaAudioAgent npm run check:links
 NEXT_PUBLIC_BASE_PATH=/NovaAudioAgent npm start
 ```
 
-Open `http://127.0.0.1:3108/NovaAudioAgent/docs/`. The server binds only to loopback. Set `PORT` to choose another port. Rebuild after editing source when using this static preview.
+Open `http://127.0.0.1:3108/NovaAudioAgent/`. The server binds only to loopback. Set `PORT` to choose another port. Rebuild after editing source when using this static preview.
 
 ## GitHub Pages
 
