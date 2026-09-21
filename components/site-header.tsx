@@ -35,7 +35,7 @@ export function Header({
         <div className="header-leading">
         <a href={home} className="brand" aria-label="Nova Audio Agent">
           <NovaMark />
-          <span>nova</span>
+          <span className="brand-name">nova</span>
           <span className="brand-caption">{en ? 'by DeepNovaCore' : '深穹星核'}</span>
         </a>
         <DocsSearch en={en} />
