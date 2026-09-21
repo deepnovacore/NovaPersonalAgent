@@ -34,7 +34,10 @@ export function InstallCommand({ en = false }: { en?: boolean }) {
           {state === 'copied' ? <Check size={16} /> : <Copy size={16} />}
         </button>
       </div>
-      <span className="copy-status" role="status">
+      <span
+        className={state === 'error' ? 'copy-status is-error' : 'copy-status'}
+        role="status"
+      >
         {state === 'copied'
           ? en
             ? 'Command copied'

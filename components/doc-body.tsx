@@ -1,16 +1,48 @@
 'use client';
 import { useEffect, useRef } from 'react';
+import { currentMermaidTheme, mermaidTheme } from '../lib/mermaid-theme';
 export function DocBody({ html }: { html: string }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     let cancelled = false;
-    const nodes = root.current?.querySelectorAll<HTMLElement>('.mermaid');
-    if (nodes?.length) import('mermaid').then(async ({ default: mermaid }) => {
-      if (cancelled) return;
-      mermaid.initialize({ startOnLoad: false, theme: 'base', securityLevel: 'strict', themeVariables: { primaryColor: '#15263b', primaryTextColor: '#dce8f7', primaryBorderColor: '#4c698f', lineColor: '#7397c4', secondaryColor: '#1b3047', tertiaryColor: '#101c2b', fontFamily: 'system-ui, sans-serif', fontSize: '15px' } });
-      await mermaid.run({ nodes: Array.from(nodes) });
-    }).catch(console.error);
-    return () => { cancelled = true; };
+    const nodes = Array.from(
+      root.current?.querySelectorAll<HTMLElement>('.mermaid') ?? [],
+    );
+    if (!nodes.length) return;
+    // Rendering replaces each node's source with an SVG and marks it done, so
+    // re-theming means restoring the source first. Capture it up front.
+    const sources = new Map(nodes.map((node) => [node, node.textContent ?? '']));
+    let pending = Promise.resolve();
+    function draw(theme: keyof typeof mermaidTheme) {
+      pending = pending
+        .then(async () => {
+          if (cancelled) return;
+          const { default: mermaid } = await import('mermaid');
+          if (cancelled) return;
+          mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            securityLevel: 'strict',
+            themeVariables: { ...mermaidTheme[theme] },
+          });
+          for (const node of nodes) {
+            node.removeAttribute('data-processed');
+            node.textContent = sources.get(node) ?? '';
+          }
+          await mermaid.run({ nodes });
+        })
+        .catch(console.error);
+    }
+    draw(currentMermaidTheme());
+    // Redraw on any theme change, whatever flips the attribute.
+    const observer = new MutationObserver(() => draw(currentMermaidTheme()));
+    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] });
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
   }, [html]);
-  return <div ref={root} className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />;
+  return (
+    <div ref={root} className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+  );
 }

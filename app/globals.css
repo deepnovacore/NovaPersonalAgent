@@ -590,6 +590,9 @@ video:focus-visible {
   color: var(--text-link);
   padding-top: 4px;
 }
+.copy-status.is-error {
+  color: var(--danger);
+}
 .requirements {
   font-size: 10px;
   color: var(--text-faint);
