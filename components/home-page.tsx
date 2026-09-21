@@ -5,6 +5,7 @@ import { ArrowRight, ArrowUpRight, Play } from 'lucide-react';
 import { Header, Footer, repo } from './site-header';
 import { InstallCommand } from './install-command';
 import { StarField } from './star-field';
+import { HeroHeaderScope } from './hero-header-scope';
 export function HomePage({ en = false }: { en?: boolean }) {
   const doc = sitePath(en ? '/en/docs' : '/docs');
   const highlights = en ? [
@@ -18,9 +19,10 @@ export function HomePage({ en = false }: { en?: boolean }) {
   ];
   return (
     <>
-      <Header en={en} />
+      <Header en={en} hero />
+      <HeroHeaderScope />
       <main id="main">
-        <section className="cosmos-hero" id="overview">
+        <section className="cosmos-hero theme-dark" id="overview">
           <StarField en={en} />
           <div className="hero-content">
             <p className="hero-kicker">

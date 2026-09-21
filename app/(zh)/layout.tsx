@@ -1,5 +1,6 @@
 import { sitePath } from '../../lib/site-path';
 import type { Metadata } from 'next';
+import { ThemeScript } from '../../components/theme-script';
 import '../globals.css';
 export const metadata: Metadata = {
   title: 'Nova Audio Agent — 随时交流，专心做事。',
@@ -10,8 +11,11 @@ export const metadata: Metadata = {
 };
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
-      <body>{children}</body>
+    <html suppressHydrationWarning lang="zh-CN">
+      <body>
+        <ThemeScript />
+        {children}
+      </body>
     </html>
   );
 }

@@ -2,6 +2,7 @@ import { sitePath } from '../lib/site-path';
 import { ArrowUpRight } from 'lucide-react';
 import { DocsSearch } from './docs-search';
 import { LanguageSwitch } from './language-switch';
+import { ThemeToggle } from './theme-toggle';
 function NovaMark() {
   return <svg className="nova-mark" viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
     <path d="M16 1.5 19.2 12.8 30.5 16 19.2 19.2 16 30.5 12.8 19.2 1.5 16 12.8 12.8Z" />
@@ -14,11 +15,13 @@ export function Header({
   docs = false,
   alternate,
   section,
+  hero = false,
 }: {
   en?: boolean;
   docs?: boolean;
   alternate?: string;
   section?: 'users' | 'developers';
+  hero?: boolean;
 }) {
   const home = sitePath(en ? '/en' : '/');
   const doc = sitePath(en ? '/en/docs' : '/docs');
@@ -28,7 +31,7 @@ export function Header({
       <a className="skip" href="#main">
         {en ? 'Skip to content' : '跳转到正文'}
       </a>
-      <header className="header">
+      <header className={hero ? 'header theme-dark' : 'header'}>
         <div className="header-leading">
         <a href={home} className="brand" aria-label="Nova Audio Agent">
           <NovaMark />
@@ -47,7 +50,10 @@ export function Header({
           <a className="nav-github" href={repo} target="_blank" rel="noreferrer">
             GitHub <ArrowUpRight size={12} />
           </a>
-          <LanguageSwitch en={en} docs={docs} alternate={alternate} />
+          <div className="header-controls">
+            <ThemeToggle en={en} />
+            <LanguageSwitch en={en} docs={docs} alternate={alternate} />
+          </div>
         </nav>
       </header>
     </>
