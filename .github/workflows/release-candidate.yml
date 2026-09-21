@@ -60,7 +60,9 @@ jobs:
         if: inputs.candidate_scope == 'full'
       - run: npm run test:runtime
         if: inputs.candidate_scope == 'full' && runner.os != 'Windows'
-      - run: npm run test:runtime:win
+      # Full runtime regression runs on macOS/Linux; Windows keeps platform
+      # coverage plus the desktop/native/installer acceptance below.
+      - run: npm run test:runtime:win:platform
         if: runner.os == 'Windows'
       # npm may restore the Electron package without its platform binary from
       # cache. The pinned install script is idempotent and closes that gap.

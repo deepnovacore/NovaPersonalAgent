@@ -48,7 +48,8 @@
     "smoke:search:mcp": "npm run build && node scripts/live-smoke.mjs --target=search-mcp",
     "smoke:knowledge": "npm run build && node scripts/live-smoke.mjs --target=knowledge",
     "test:live": "npm run build && node scripts/live-smoke.mjs",
-    "test:live:contract": "npm run build && node --test scripts/live/*contract.test.mjs"
+    "test:live:contract": "npm run build && node --test scripts/live/*contract.test.mjs",
+    "test:win:platform": "npm run build && node scripts/test-windows.mjs --platform-only"
   },
   "dependencies": {
     "@livekit/agents": "1.6.4",

@@ -29,7 +29,9 @@ jobs:
       - run: npm run check
       - run: npm run test:runtime
         if: runner.os != 'Windows'
-      - run: npm run test:runtime:win
+      # Full runtime regression runs on macOS/Linux; Windows keeps platform
+      # coverage plus the desktop/native/installer acceptance below.
+      - run: npm run test:runtime:win:platform
         if: runner.os == 'Windows'
       - run: npm run test:live:contract --workspace @nova-audio-agent/runtime
       - run: npm run test:cli
