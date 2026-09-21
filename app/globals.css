@@ -1,12 +1,36 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
-:root {
+/* Palette tokens.
+
+   `.theme-dark` re-declares the same names instead of duplicating rules: a
+   custom property resolves against the element a rule matches, so pinning a
+   subtree dark on a light page costs one class, not a second stylesheet.
+
+   The light block lives at the end of this file and must stay after this one.
+   `<html>` matches both `:root` and `[data-theme='light']` at the same
+   specificity (0,1,0), so source order decides the winner. */
+:root,
+[data-theme='dark'],
+.theme-dark {
   color-scheme: dark;
-  --background: #080c11;
-  --foreground: #e7e9ed;
-  --muted: #939aa5;
-  --line: #ffffff14;
-  --accent: #d8e5f4;
+  --surface-canvas: #080c11;
+  --surface-raised: #10161f;
+  --surface-raised-strong: #182333;
+  --surface-sunken: #060a0f;
+  --border-subtle: #ffffff14;
+  --border-default: #293449;
+  --border-strong: #597498;
+  --text-primary: #e7e9ed;
+  --text-secondary: #98a3b3;
+  --text-tertiary: #78859a;
+  --accent: #597498;
+  --focus-ring: #bed6f4;
+  --focus-chip-bg: #e5e9f1;
+  --focus-chip-fg: #080c11;
+  --header-scrim: #080c11d9;
+  --danger: #e08585;
+}
+:root {
   --font-sans:
     'Inter', 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
@@ -19,8 +43,8 @@ html {
 }
 body {
   margin: 0;
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--surface-canvas);
+  color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 15px;
   font-weight: 400;
@@ -349,7 +373,7 @@ video:focus-visible {
   display: grid;
   grid-template-columns: 45px 1fr;
   gap: 17px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .feature-row:last-child {
   border: 0;
@@ -394,7 +418,7 @@ video:focus-visible {
   align-items: center;
   margin: 45px 0 32px;
   padding: 26px 0;
-  border-block: 1px solid var(--line);
+  border-block: 1px solid var(--border-subtle);
 }
 .architecture-strip > div {
   display: flex;
@@ -500,7 +524,7 @@ video:focus-visible {
   color: #c0ccdc;
 }
 .footer {
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--border-subtle);
   padding: 31px 0;
   display: flex;
   align-items: center;
@@ -611,7 +635,7 @@ video:focus-visible {
 }
 .docs-article pre {
   background: #0e151f;
-  border: 1px solid var(--line);
+  border: 1px solid var(--border-subtle);
   border-radius: 5px;
   padding: 21px;
   overflow: auto;
@@ -642,7 +666,7 @@ video:focus-visible {
   grid-template-columns: 175px 1fr;
   gap: 20px;
   padding: 17px 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 12px;
   line-height: 1.9;
 }
@@ -659,7 +683,7 @@ video:focus-visible {
   justify-content: space-between;
   gap: 20px;
   padding-top: 25px;
-  border-top: 1px solid var(--line);
+  border-top: 1px solid var(--border-subtle);
   font-size: 11px;
   color: #a2b7d4;
 }
@@ -903,7 +927,7 @@ html[lang='en'] .section-label {
   }
   .docs-sidebar {
     position: static;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--border-subtle);
     padding-bottom: 23px;
   }
   .docs-sidebar nav {
@@ -1013,9 +1037,9 @@ html[lang='en'] .section-label {
 .docs-sidebar .nav-group-label { color: #d0d8e5; font-size: 14px; font-weight: 500; letter-spacing: 0; margin: 0 8px 10px; }
 .docs-sidebar nav { margin-top: 0; gap: 2px; }
 .docs-sidebar nav a { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.developer-nav { margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--line); }
+.developer-nav { margin-top: 30px; padding-top: 24px; border-top: 1px solid var(--border-subtle); }
 .locale-badge { color: #8492a6; font-size: 12px; letter-spacing: .04em; }
-.reference-subnav { margin-left: 8px; padding-left: 12px; border-left: 1px solid var(--line); }
+.reference-subnav { margin-left: 8px; padding-left: 12px; border-left: 1px solid var(--border-subtle); }
 .reference-subnav a { font-size: 13px !important; }
 .docs-sidebar .source-link { margin-left: 8px; font-size: 13px; }
 .docs-overview-layout { grid-template-columns: 210px minmax(0, 940px); gap: 64px; }
@@ -1047,7 +1071,7 @@ html[lang='en'] .section-label {
 .docs-mobile-nav { display: none; }
 @media (max-width: 760px) {
   .docs-layout > .docs-sidebar { display: none; }
-  .docs-mobile-nav { display: flex; align-items: center; gap: 14px; padding-bottom: 20px; border-bottom: 1px solid var(--line); margin-bottom: 30px; }
+  .docs-mobile-nav { display: flex; align-items: center; gap: 14px; padding-bottom: 20px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 30px; }
   .docs-mobile-nav label { color: #9aaac0; font-size: 14px; flex-shrink: 0; }
   .docs-mobile-nav [data-slot="native-select-wrapper"] { flex: 1; }
   .docs-mobile-nav select { height: 42px; border-color: #314259; color: #d3deed; background: #141e2b; font-size: 15px; }
