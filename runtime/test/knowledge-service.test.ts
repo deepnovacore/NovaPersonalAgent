@@ -6,6 +6,9 @@ import test from 'node:test'
 import {KnowledgeService} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
 
+// close() bounds worker shutdown; Windows can retain the SQLite file lock
+// briefly after that deadline. Retry cleanup without changing service assertions.
+
 test('knowledge service ingests, retrieves evidence and emits only safe host status', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-service-'))
   const file = join(directory, 'manual.md')
@@ -24,7 +27,7 @@ test('knowledge service ingests, retrieves evidence and emits only safe host sta
     assert.ok(!JSON.stringify(status).includes('blue lamp'))
     await service.handle('knowledge.remove', {id: hits[0]!.source_id})
     assert.deepEqual(await service.recall('blue lamp', 3), [])
-  } finally {await service.close(); await rm(directory, {recursive: true, force: true})}
+  } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
 
 test('remove while reindex embedding waits cannot resurrect a source', async () => {
@@ -50,7 +53,7 @@ test('remove while reindex embedding waits cannot resurrect a source', async () 
     release()
     await reindex
     assert.equal((await service.listSources()).length, 0)
-  } finally {release?.(); await service.close(); await rm(directory, {recursive: true, force: true})}
+  } finally {release?.(); await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
 
 test('failed reindex records a safe failure and preserves the prior source and chunk', async () => {
@@ -78,7 +81,7 @@ test('failed reindex records a safe failure and preserves the prior source and c
     const status = await service.handle('knowledge.status', {}) as {readonly jobs: readonly {readonly source_id: string; readonly state: string; readonly error_code: string | null}[]}
     assert.ok(status.jobs.some(job => job.source_id === before.id && job.state === 'failed' && job.error_code === 'ingest_failed'))
     assert.ok(!JSON.stringify(status).includes('private-value'))
-  } finally {await service.close(); await rm(directory, {recursive: true, force: true})}
+  } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
 
 test('close aborts deferred reindex and a late embedding release cannot overwrite the reopened store', async () => {
@@ -117,7 +120,7 @@ test('close aborts deferred reindex and a late embedding release cannot overwrit
     release?.()
     await reopened?.close()
     await service.close()
-    await rm(directory, {recursive: true, force: true})
+    await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})
   }
 })
 
@@ -128,5 +131,5 @@ test('knowledge status exposes forced lexical fallback from the real worker', as
   try {
     await service.open()
     assert.deepEqual(await service.handle('knowledge.status', {}), {fts: false, sources: [], jobs: []})
-  } finally {await service.close(); await rm(directory, {recursive: true, force: true})}
+  } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
