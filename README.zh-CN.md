@@ -133,6 +133,8 @@ novaaudio config
 novaaudio doctor
 ```
 
+无头 Ubuntu 22.04+：通过 npm 安装 `nova-audio-agent-server`，运行 `novaaudio-server start`；另开终端运行 `novaaudio-server pair wss://your-host.ts.net` 显示一次性配对二维码。配置见[远程服务指南](docs/zh-CN/deployment/remote-server.md)。
+
 从源码开发时：
 
 ```bash
@@ -175,7 +177,7 @@ Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia`
 - [ ] **v0.3.0：** 将文字与语音整合进主窗口，提供对话、动态、任务和记忆视图；围绕记忆发现需求、提出建议并持续跟进；让个人记忆可追溯、可纠正、可删除；接入用户授权的目录、邮件、日历和飞书会话。
 - [ ] **v0.4.0：** 扩展 Kimi Code、pi agent 等 coding 后端；以 AutoGLM 为首个示例接入 GUI 执行器，支持专长 Agent 之间的协作。
 
-发布前须完成功能与支持平台验收。Linux 暂不发布安装包，保留 Ubuntu 源码测试。
+发布前须完成功能与支持平台验收。Ubuntu 22.04+ x64 桌面端与无头 npm 包纳入候选发布验收。
 
 ## 6. 贡献
 

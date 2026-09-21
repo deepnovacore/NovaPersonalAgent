@@ -28,13 +28,15 @@
     "runtime:fixtures": "npm run fixtures:check --workspace @nova-audio-agent/runtime",
     "runtime:smoke:qwen": "npm run smoke:qwen --workspace @nova-audio-agent/runtime",
     "runtime:smoke:qwen:clarification": "npm run smoke:qwen:clarification --workspace @nova-audio-agent/runtime",
-    "test": "npm run test:runtime && npm run test:desktop && npm run test:cli",
+    "test": "npm run test:runtime && npm run test:desktop && npm run test:cli && npm run test:server-cli",
     "test:cli": "npm test --workspace nova-audio-agent",
     "test:desktop": "npm test --workspace @nova-audio-agent/desktop",
     "test:runtime": "npm test --workspace @nova-audio-agent/runtime",
     "test:runtime:win": "npm run test:win --workspace @nova-audio-agent/runtime",
     "runtime:smoke:search:mcp": "npm run smoke:search:mcp --workspace @nova-audio-agent/runtime",
-    "test:runtime:win:platform": "npm run test:win:platform --workspace @nova-audio-agent/runtime"
+    "test:runtime:win:platform": "npm run test:win:platform --workspace @nova-audio-agent/runtime",
+    "test:server-cli": "node --test server-cli/test/*.test.mjs",
+    "pack:server": "npm run build --workspace @nova-audio-agent/runtime && node scripts/pack-server.mjs"
   },
   "devDependencies": {
     "@types/node": "22.20.1",

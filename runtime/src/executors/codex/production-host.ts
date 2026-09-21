@@ -911,6 +911,7 @@ function requireProbeRecord(
     requireExactRecord(resource, [
       'logical_id', 'relative_path', 'byte_size', 'sha256', 'kind', 'platform',
       'architecture', 'electron_abi', 'build_contract_version',
+      ...(typeof resource === 'object' && resource !== null && 'node_api_version' in resource ? ['node_api_version'] : []),
     ])
     if (
       typeof resource.logical_id !== 'string'

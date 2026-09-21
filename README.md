@@ -135,6 +135,7 @@ novaaudio config
 novaaudio doctor
 ```
 
+Headless Ubuntu 22.04+: install `nova-audio-agent-server` with npm; run `novaaudio-server start` and, in a second terminal, `novaaudio-server pair wss://your-host.ts.net` for a one-use QR. See the [configuration guide](docs/en/deployment/remote-server.md).
 
 For development from source:
 
@@ -179,7 +180,7 @@ wake-word Worker; explicit mute stops wake detection. See
 - [ ] **v0.3.0:** bring text and voice into one main window with conversation, activity, task and memory views; add memory-grounded suggestions and follow-up; make personal memories traceable, correctable and removable; connect user-authorized folders, email, calendars and Feishu conversations.
 - [ ] **v0.4.0:** expand coding backends with Kimi Code and pi agent; add a GUI executor with AutoGLM as the first example, enabling collaboration across specialist agents.
 
-Releases require feature and supported-platform acceptance. Linux packages remain outside the release scope; Ubuntu source tests continue.
+Releases require feature and supported-platform acceptance. Ubuntu 22.04+ x64 desktop and headless npm packages are included in the candidate release checks.
 
 ## 6. Contribution
 

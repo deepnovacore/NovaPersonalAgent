@@ -166,7 +166,7 @@ test('AOQ entry starts without loading the desktop/provider graph and closes on 
   await new Promise<void>(resolve => probe.close(() => resolve()))
   // A fresh module loader catches eager imports as well as accidental construction.
   const loader = `export function resolve(specifier, context, nextResolve) {
-    if (/(desktop|production-composition|client-server|client-protocol|realtime-assembly|codex)/u.test(specifier)) throw new Error('forbidden graph import');
+    if (/(?:^|[/])(desktop|production-composition|client-server|client-protocol|realtime-assembly|codex)(?:[/.]|$)/u.test(specifier)) throw new Error('forbidden graph import');
     return nextResolve(specifier, context);
   }`
   const script = `

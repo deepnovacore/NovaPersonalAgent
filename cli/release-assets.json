@@ -11,6 +11,11 @@
       "artifact": "nova-audio-agent-0.2.0-windows-x64-portable.zip",
       "executable": "Nova Audio Agent Desktop.exe",
       "archive": "zip"
+    },
+    "linux-x64": {
+      "artifact": "nova-audio-agent-0.2.0-linux-x64.AppImage",
+      "executable": "nova-audio-agent.AppImage",
+      "archive": "file"
     }
   }
 }

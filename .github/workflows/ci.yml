@@ -34,10 +34,14 @@ jobs:
       - run: npm run test:runtime:win:platform
         if: runner.os == 'Windows'
       - run: npm run test:live:contract --workspace @nova-audio-agent/runtime
+      - run: npm run test:server-cli
       - run: npm run test:cli
       # npm may restore the Electron package without its platform binary from
       # cache. The pinned install script is idempotent and closes that gap.
       - run: node clients/desktop/node_modules/electron/install.js
+      - name: Configure Linux V8 header compatibility
+        if: runner.os == 'Linux'
+        run: echo "CXXFLAGS=-UV8_DEPRECATION_WARNINGS" >> "$GITHUB_ENV"
       - run: npm run test:desktop
       - run: npm run smoke:capability-status --workspace @nova-audio-agent/desktop
         if: runner.os == 'macOS'

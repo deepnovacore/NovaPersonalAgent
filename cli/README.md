@@ -1,5 +1,7 @@
 # Nova Audio Agent
 
+![Nova Audio Agent chalkboard architecture](https://raw.githubusercontent.com/deepnovacore/NovaAudioAgent/main/assets/ideas/v3/nova-audio-agent-runtime-chalkboard.png)
+
 **An always-on voice agent with restrained proactivity and voice-controlled workspaces.**
 
 [GitHub](https://github.com/deepnovacore/NovaAudioAgent) ·
@@ -16,8 +18,9 @@ desktop application. You do not need to clone or build the repository to use it.
 
 ## Get started
 
-Requirements: **Node.js 22.13.0 or newer**, npm, and **macOS on Apple Silicon**
-or **Windows x64**. The first launch needs access to GitHub to download the app.
+Requirements: **Node.js 22.13.0 or newer**, npm, and **macOS on Apple Silicon**,
+**Windows x64**, or **Ubuntu 22.04+ x64** with a desktop session. The first launch needs access to GitHub to download the app.
+Linux also requires Chromium user namespaces to be permitted by the host or container policy.
 
 ```bash
 npm install --global nova-audio-agent
@@ -75,9 +78,11 @@ the CLI does not read or print secret values.
 Documentation-only npm updates may have a newer package version while retaining
 the same desktop release. `novaaudio --version` continues to report `0.2.0`.
 
-This release supports macOS arm64 and Windows x64. Linux and Intel Mac desktop
-downloads are not included. The desktop application is currently unsigned, so
+Desktop targets are macOS arm64, Windows x64, and Ubuntu 22.04+ x64 (AppImage). Intel Mac
+and Linux ARM64 downloads are not included. The desktop application is currently unsigned, so
 macOS Gatekeeper or Windows SmartScreen may display a security warning.
+
+For headless Ubuntu 22.04+, install `nova-audio-agent-server` and use `novaaudio-server start`; `novaaudio-server pair wss://your-host.ts.net` shows a terminal pairing QR after configuring the service.
 
 ## Learn more
 

@@ -10,12 +10,15 @@ test('candidate assets require exact names and matching checksums', async () => 
   const root = await mkdtemp(join(tmpdir(), 'nova-candidate-'))
   const name = 'nova-audio-agent-0.2.0-macos-arm64-app.zip'
   try {
-    for (const suffix of ['macos-arm64-app.zip', 'macos-arm64.dmg', 'windows-x64-portable.zip', 'windows-x64.exe']) {
+    for (const suffix of ['macos-arm64-app.zip', 'macos-arm64.dmg', 'windows-x64-portable.zip', 'windows-x64.exe', 'linux-x64.AppImage', 'linux-x64.deb']) {
       const file = `nova-audio-agent-0.2.0-${suffix}`
       await writeFile(join(root, file), 'candidate')
       const mode = suffix.startsWith('windows-') ? '*' : ' '
       await writeFile(join(root, `${file}.sha256`), `${createHash('sha256').update('candidate').digest('hex')} ${mode}${file}\n`)
     }
+    const server = 'nova-audio-agent-server-0.2.0.tgz'
+    await writeFile(join(root, server), 'server')
+    await writeFile(join(root, `${server}.sha256`), `${createHash('sha256').update('server').digest('hex')}  ${server}\n`)
     await verifyCandidateArtifacts(root, '0.2.0')
     await writeFile(join(root, name), 'corrupted')
     await assert.rejects(verifyCandidateArtifacts(root, '0.2.0'), /checksum/)

@@ -7,8 +7,9 @@ import {fileURLToPath} from 'node:url'
 
 export async function verifyCandidateArtifacts(root, version) {
   assert.match(version ?? '', /^\d+\.\d+\.\d+$/u)
-  const names = ['macos-arm64-app.zip', 'macos-arm64.dmg', 'windows-x64-portable.zip', 'windows-x64.exe']
+  const names = ['macos-arm64-app.zip', 'macos-arm64.dmg', 'windows-x64-portable.zip', 'windows-x64.exe', 'linux-x64.AppImage', 'linux-x64.deb']
     .map(suffix => `nova-audio-agent-${version}-${suffix}`)
+  names.push(`nova-audio-agent-server-${version}.tgz`)
   assert.deepEqual((await readdir(root)).sort(), names.flatMap(name => [name, `${name}.sha256`]).sort(), 'candidate asset names mismatch')
   for (const name of names) {
     const hash = createHash('sha256')

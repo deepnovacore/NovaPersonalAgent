@@ -162,7 +162,6 @@ function loadSupportedProjectNativeHostFromResources(
   options: ProjectNativeLoadOptions,
 ): ProjectNativeHost | null {
   try {
-    if (options.electronAbi !== '148') return null
     const target = supportedTarget(options.platform, options.arch)
     if (target === null || !isAbsolute(options.resourcesPath)) return null
     const resourcesRoot = resolve(options.resourcesPath)
@@ -172,7 +171,7 @@ function loadSupportedProjectNativeHostFromResources(
       MAX_MANIFEST_BYTES,
     )
     const manifest = JSON.parse(manifestSnapshot.bytes.toString('utf8')) as unknown
-    const record = requireProjectRecord(manifest, target, options.platform, options.arch)
+    const record = requireProjectRecord(manifest, target, options.platform, options.arch, options.electronAbi)
     const addonPath = resolve(resourcesRoot, PROJECT_ADDON_PATH)
     if (realpathSync(addonPath) !== addonPath) return null
     const before = snapshotRegularFile(addonPath, MAX_ADDON_BYTES)
@@ -262,6 +261,7 @@ function requireProjectRecord(
   target: string,
   platform: string,
   arch: string,
+  electronAbi: string | undefined,
 ): ProjectRecord {
   requireExactRecord(manifest, ['schema_version', 'target', 'resources'])
   if (manifest.schema_version !== 1 || manifest.target !== target || !Array.isArray(manifest.resources)) {
@@ -277,6 +277,7 @@ function requireProjectRecord(
     requireExactRecord(resource, [
       'logical_id', 'relative_path', 'byte_size', 'sha256', 'kind', 'platform',
       'architecture', 'electron_abi', 'build_contract_version',
+      ...(typeof resource === 'object' && resource !== null && 'node_api_version' in resource ? ['node_api_version'] : []),
     ])
     if (
       typeof resource.logical_id !== 'string'
@@ -292,7 +293,9 @@ function requireProjectRecord(
       || resource.kind !== 'node_addon'
       || resource.platform !== platform
       || resource.architecture !== arch
-      || resource.electron_abi !== 148
+      || ('node_api_version' in resource
+        ? resource.node_api_version !== 10 || resource.electron_abi !== null || Number(process.versions.napi ?? 0) < 10
+        : resource.electron_abi !== 148 || electronAbi !== '148')
       || resource.build_contract_version !== 1
       || typeof resource.byte_size !== 'number'
       || !Number.isSafeInteger(resource.byte_size)
