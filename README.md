@@ -16,7 +16,8 @@
 
 ## News
 
-- **2026-09-20 · v0.2.0**
+- **🎉 [v0.2.0 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)** · 2026-09-21
+  Configurable voice pipelines, personal memory, and a bilingual desktop experience, now available for macOS and Windows.
   - Cross-platform approvals for sandbox network access and command execution.
   - A leaner voice layer; workspace/session scheduling moves into the coding executor.
   - Pluggable ASR / LLM / TTS pipelines, decoupled from QwenAudioRealtime.
