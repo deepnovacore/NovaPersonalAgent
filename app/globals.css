@@ -6,7 +6,7 @@
    custom property resolves against the element a rule matches, so pinning a
    subtree dark on a light page costs one class, not a second stylesheet.
 
-   The light block lives at the end of this file and must stay after this one.
+   The light block follows immediately below and must stay after this one:
    `<html>` matches both `:root` and `[data-theme='light']` at the same
    specificity (0,1,0), so source order decides the winner. */
 :root,
