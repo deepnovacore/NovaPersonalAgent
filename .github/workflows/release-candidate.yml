@@ -136,6 +136,16 @@ jobs:
           for artifact in *; do
             if command -v sha256sum >/dev/null; then sha256sum "$artifact" > "$artifact.sha256"; else shasum -a 256 "$artifact" > "$artifact.sha256"; fi
           done
+      - name: Verify npm CLI installation and candidate launch
+        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+        run: |
+          mkdir -p candidate-cli
+          npm pack ./cli --pack-destination candidate-cli
+          npm install --prefix cli-smoke --ignore-scripts ./candidate-cli/nova-audio-agent-${{ inputs.release_version }}.tgz
+          ${{ matrix.platform == 'linux' && 'xvfb-run -a' || '' }} node scripts/verify-npm-desktop.mjs cli-smoke/node_modules/nova-audio-agent candidate
       - uses: actions/upload-artifact@v4
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         with:
