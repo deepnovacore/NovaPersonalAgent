@@ -18,7 +18,8 @@ https://github.com/user-attachments/assets/061697f3-fff6-47d6-924b-8a29eef4ab45
 
 ## News
 
-- **2026-09-20 · v0.2.0**
+- **🎉 [v0.2.0 正式发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)** · 2026-09-21
+  可配置语音管线、个人记忆与双语桌面体验，现已提供 macOS 和 Windows 版本。
   - 完善跨平台审批：沙箱网络访问、命令执行等请求转交前台确认。
   - 精简快脑工具，将 workspace/session 调度下沉至编码执行器。
   - 接入可配置 ASR / LLM / TTS 的级联管线，协议与 QwenAudioRealtime 解耦。
