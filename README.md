@@ -16,6 +16,8 @@
 
 ## News
 
+- **2026-09-21 · 🎉 [v0.2.2 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — Ubuntu 22.04+ x64 joins macOS and Windows, with npm desktop installation and the new `nova-audio-agent-server` package for headless hosting and terminal QR pairing.
+
 - **2026-09-21 ·** **🎉 [v0.2.0 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)**
   Configurable voice pipelines, personal memory, and a bilingual desktop experience, now available for macOS and Windows.
   - Cross-platform approvals for sandbox network access and command execution.
