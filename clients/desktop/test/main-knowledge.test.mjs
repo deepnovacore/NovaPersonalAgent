@@ -7,7 +7,7 @@ import {createKnowledgeActions} from '../src/main/knowledge-actions.mjs'
 const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 const handler = source.slice(source.indexOf("  ipcMain.handle('nova:knowledge:action'"), source.indexOf("  ipcMain.handle('nova:capabilities:probe'"))
 
-test('actual Main knowledge handler fences native picker across backend/settings replacement', async () => {
+test('actual Main knowledge handler fences native picker across backend/settings replacement', {timeout: 5000}, async () => {
   let receive, release, entered
   const picked = new Promise(resolve => {release = resolve})
   const started = new Promise(resolve => {entered = resolve})

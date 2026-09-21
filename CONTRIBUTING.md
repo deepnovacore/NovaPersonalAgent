@@ -2,7 +2,7 @@
 
 Thank you for considering a contribution. Nova Audio Agent is an experimental control plane; the
 architecture invariants matter more than any individual feature, so please read
-[Glossary and invariants](docs/glossary.md) before proposing changes.
+[Glossary and invariants](docs/en/glossary.md) before proposing changes.
 
 ## Development setup
 
@@ -33,16 +33,16 @@ deterministic tests; keep their outputs in ignored local artifact directories, a
 credentials, recordings, or runtime traces.
 
 The README ships in two languages — [README.md](README.md) and
-[README.zh-CN.md](README.zh-CN.md) — and so does the getting-started guide —
-[docs/getting-started.md](docs/getting-started.md) and
-[docs/getting-started.zh-CN.md](docs/getting-started.zh-CN.md). A change to either file of a pair
-must be mirrored in the other.
+[README.zh-CN.md](README.zh-CN.md). Published documentation is mirrored under
+[docs/en/](docs/en/) and [docs/zh-CN/](docs/zh-CN/), one file per language with the same
+name. A change to either file of a pair must be mirrored in the other. Working notes live in
+`docs/internal/`, which is untracked and never published.
 
 ## Integration and release history
 
 `v0.2.0dev` is the integration branch: deterministic checks permit integration.
 Merging into `main` is the release boundary and requires every applicable feature
-and platform acceptance in [the release ledger](docs/specs/v0.2.0/RELEASE-GATE.md).
+and platform to have recorded acceptance evidence.
 Human acceptance stays pending until evidence is recorded; it does not block dev CI.
 Linux source tests remain on Ubuntu; Linux installers are deferred.
 
@@ -53,7 +53,7 @@ with `--no-ff` when following the branch integration roadmap.
 
 ## What a change must preserve
 
-The runtime invariants in [docs/glossary.md](docs/glossary.md) are the review baseline. In short:
+The runtime invariants in [docs/en/glossary.md](docs/en/glossary.md) are the review baseline. In short:
 
 - the event-loop body never awaits executor completion;
 - executors never speak to the user; results become typed handoffs into canonical memory;
@@ -71,7 +71,7 @@ integrations demonstrate the same missing primitive.
 
 ## Adding an executor
 
-Follow [Executor onboarding](docs/archs/10-executor-onboarding.md):
+Follow [Executor onboarding](docs/en/archs/10-executor-onboarding.md):
 
 1. Write the manifest and parameter schemas.
 2. Define `readonly`, `confirm`, `deadline_budget`, `verifies`, `sensitive_params`, and
@@ -83,7 +83,7 @@ Follow [Executor onboarding](docs/archs/10-executor-onboarding.md):
    `mcp__nova_camera__snapshot`.
 5. Add invalid-input, timeout, cancellation, sanitization, and registry-adapter contract tests.
 6. Add a live smoke only after deterministic lifecycle coverage passes.
-7. Document credentials and least-privilege setup in [Getting started](docs/getting-started.md).
+7. Document credentials and least-privilege setup in [Getting started](docs/en/getting-started.md).
 
 The host tools `dispatch`, `cancel`, and `confirm` compile when at least one `AgentController` is
 registered. A missing `coding` role removes only coding intake/controller wiring; a Vision controller

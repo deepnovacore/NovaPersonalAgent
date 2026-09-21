@@ -554,7 +554,7 @@ export class NodeDesktopServer {
         if (!authenticated) {
           if (isBinary) throw new DesktopProtocolError('desktop authentication frame must be text')
           authenticateDesktopFrame(rawText(data), this.#options.token)
-          const language = parsePromptLanguage((JSON.parse(rawText(data)) as {language?: unknown}).language)
+          const language = parsePromptLanguage((JSON.parse(rawText(data)) as Record<string, unknown>).language)
           authenticated = true
           this.#authenticated = true
           clearTimeout(authTimer)

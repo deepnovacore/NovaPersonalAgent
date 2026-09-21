@@ -500,6 +500,14 @@ body:hover #orb-rail,
 #shell:has(#codex-label[data-mode='confirmation']) #orb-rail {
   top: 53px;
   transform: translateY(-50%);
+  /* Five controls must fit beside the orb, clear of the confirmation capsule. */
+  gap: 1px;
+}
+
+#shell:has(#codex-label[data-mode='confirmation']) #orb-rail button {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 #shell[data-confirmation-placement='above']:has(#codex-label[data-mode='confirmation']) #orb-rail {

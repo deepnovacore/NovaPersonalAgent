@@ -276,3 +276,12 @@ test('an explicit allowlisted absolute binary does not require an implicit catal
   assert.ok(resolved !== null)
   assert.equal(hostBinaryPath(resolved.binary), fixture.binary)
 })
+
+test('eager tool progress is enabled only by eager proactivity', t => {
+  const fixture = hostFixture(t)
+  for (const preset of ['conservative', 'balanced', 'eager']) {
+    const config = resolveCodexHostConfig(loadSettings({NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
+      NOVA_AUDIO_AGENT_CODEX_WORKSPACE: fixture.workspace, NOVA_AUDIO_AGENT_PROACTIVITY_PRESET: preset}), fixture.catalog)
+    assert.equal(config?.eagerProgress, preset === 'eager')
+  }
+})

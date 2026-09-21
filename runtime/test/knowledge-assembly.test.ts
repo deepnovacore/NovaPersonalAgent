@@ -38,7 +38,10 @@ test('prepared knowledge contributes unified recall instead of a separate fronte
       await assembly.stop()
       await assert.rejects(knowledge.service.listSources())
     } finally {await knowledge.close()}
-  } finally {await rm(directory, {recursive: true, force: true})}
+  } finally {
+    // Bounded worker shutdown may finish releasing a native SQLite handle just after close().
+    await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})
+  }
 })
 
 test('Codex knowledge projection contains both resolvers and keeps token out of persisted config', async () => {
@@ -58,7 +61,7 @@ test('Codex knowledge projection contains both resolvers and keeps token out of 
       assert.ok(secret)
       assert.ok(!managedMcpConfigToml(managed).includes(secret))
     } finally {await knowledge.close()}
-  } finally {await rm(directory, {recursive: true, force: true})}
+  } finally {await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
 
 test('knowledge close failure does not skip camera cleanup', async () => {
@@ -76,5 +79,5 @@ test('knowledge close failure does not skip camera cleanup', async () => {
     await assembly.start()
     await assert.rejects(assembly.stop(), /close_failed/)
     assert.equal(stopped, true)
-  } finally {await knowledge.close(); await rm(directory, {recursive: true, force: true})}
+  } finally {await knowledge.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })

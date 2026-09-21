@@ -27,8 +27,10 @@ test('local catalog reads named top-level sessions and excludes archived, agents
 
 
 test('a discovered title resolves to and resumes the original thread/home, not the newest session', async () => {
-  const home = await realpath(await mkdtemp(join(tmpdir(), 'nova-shared-session-')))
-  const value = await fixture({localCodexHome: home})
+  // Keep the configured spelling: Windows TEMP can contain an 8.3 user-directory alias.
+  const configuredHome = await mkdtemp(join(tmpdir(), 'nova-shared-session-'))
+  const home = await realpath(configuredHome)
+  const value = await fixture({localCodexHome: configuredHome})
   try {
     const db = new DatabaseSync(join(home, 'state_5.sqlite'))
     db.exec('CREATE TABLE threads (id TEXT, name TEXT, title TEXT, cwd TEXT, source TEXT, archived INTEGER, updated_at INTEGER)')
@@ -91,9 +93,10 @@ test('shared config disables quoted MCP names without admitting inherited tools 
 
 
 test('Nova shared sessions persist HOME and remain resumable without catalog or the current HOME selection', async () => {
-  const home = await realpath(await mkdtemp(join(tmpdir(), 'nova-owned-home-')))
+  const configuredHome = await mkdtemp(join(tmpdir(), 'nova-owned-home-'))
+  const home = await realpath(configuredHome)
   const otherHome = await realpath(await mkdtemp(join(tmpdir(), 'nova-selected-home-')))
-  const value = await fixture({localCodexHome: home})
+  const value = await fixture({localCodexHome: configuredHome})
   let switched: ProjectCodexAdapter | undefined
   try {
     await value.adapter.initialize()

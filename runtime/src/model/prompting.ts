@@ -52,6 +52,7 @@ const SURROGATE_PROACTIVITY_POLICY: Readonly<Record<ProactivityPreset, readonly 
   ],
   eager: [
     'action_required、blocker 和真正的 milestone 应倾向 speak=true。',
+    '长时间没有文字进度后，首次出现的真实执行阶段变化（命令执行结束、文件修改已应用、命令执行失败）可以简短播报；只陈述事件，不把命令结束当验证通过，也不把单条命令失败当整个任务阻塞。重复同一状态仍保持沉默。',
     'eager 可以播报 routine_delta 中首次出现的具体工作方向、实现决定或检查发现，不必等到完成里程碑；摘要只是计数从一个数变成另一个数时，必须 speak=false。',
     '只增加文件或命令计数、重复旧计划、没有实质信息的更新仍保持沉默；不要为了播报把 routine_delta 改称 milestone。',
     '示例：previous_summary=已修改2个文件，summary=已修改3个文件；应输出 speak=false、suggestion_id=null、progress_class=routine_delta，因为没有说明新的工作内容。',

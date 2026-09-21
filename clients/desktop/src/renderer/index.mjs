@@ -439,6 +439,7 @@ function applyConfirmationPresentation() {
   if (remaining === null) confirmationCountdown.stop()
   else confirmationCountdown.start(remaining)
   if (previousKind !== active.kind || previousId !== active.id) {
+    clearAssistantCaption()
     const operation = active.kind === 'codex'
       ? active.operation
       : deriveOrbState(axes).confirmationOperation
@@ -563,6 +564,7 @@ function detectLocalOnset(pcm) {
     : onsetTracker.pending ? 'candidate' : 'idle'
   if (verdict) {
     alertTone.stop()
+    if (verdict.type === 'onset') clearAssistantCaption()
     send({ type: 'speech.onset', speech_id: verdict.speechId, t_render_ms: now })
   }
   render()
@@ -801,6 +803,7 @@ async function fallBackAfterNativeFailure() {
 }
 
 function clearAssistantCaption() {
+  void progressBubbles.clearConversation()
   if (captionLabel.dataset.role !== 'user') {
     captionLabel.textContent = ''
     captionLabel.hidden = true

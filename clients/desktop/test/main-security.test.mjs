@@ -125,6 +125,7 @@ async function extractedMemoryBoardClear(dialog, owner) {
   const context = createContext({
     t: value => value,
     ipcMain: {handle: (_channel, value) => { handler = value }},
+    t: value => value,
     dialog, backendControl: owner, backendGeneration: 1,
     backendStatus: {state: 'connected'}, clearingConversation: null,
     boardWindow: {webContents: sender, isDestroyed: () => false},
@@ -937,6 +938,7 @@ test('corrupt recovery keeps the startup settings UI available without starting 
     for (const corrupt of ['{truncated', JSON.stringify({version: 999, settings: previous})]) {
       await writeFile(`${file}.recovery`, corrupt, {mode: 0o600})
       const context = vm.createContext({
+        app: {getPreferredSystemLanguages: () => ['zh-CN']},
         settingsFile: () => file, loadSettings, restoreSettingsRecovery,
         app: {getPreferredSystemLanguages: () => ['zh-CN']}, setLanguage: () => {},
         settingsRecoveryAvailable: false, openSettingsRequested: false,

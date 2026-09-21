@@ -859,7 +859,11 @@ export class RealtimeService {
         this.#confirmation.invalidateProjectConfirmation('provider_replaced')
         this.#approvalHost.invalidateExecutorApproval('provider_replaced')
         this.#host.beginReconnect(oldEpoch)
-        await this.session.reconnect({tools: structuredClone(this.#providerSchemas)})
+        // Provider identity and session epoch must advance before queued host delivery resumes.
+        await this.session.reconnect({
+          tools: structuredClone(this.#providerSchemas),
+          withProviderTransition: work => this.#host.withDeliveryLock(work),
+        })
         // Only if nothing cleared it while we were awaiting. A user who started speaking during the
         // reconnect has already activated the new session, so demanding an activation would be wrong.
         this.#host.finishReconnect(oldEpoch)
@@ -1527,7 +1531,7 @@ export class RealtimeService {
    * that should not happen.
    *
    * `#reconnectLock` before `#deliveryLock`, never the reverse: that order is fixed across this layer,
-   * and this is the one method that holds both.
+   * and every replacement path that holds both follows this order.
    *
    * Seven conditions have to hold before the permit is spent. Together they say: this rejection is
    * about *this* preemption, in the current session, for a turn that is still trying to cancel and has

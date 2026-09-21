@@ -41,6 +41,7 @@ clients/desktop/resources/generated/
 # Internal working material (demo video production)
 docs/demos/
 docs/superpowers/
+docs/internal/
 .superpowers/
 assets/demos/cat-sofa-guard/*-preroll.mp4
 assets/demos/video-cut
@@ -78,3 +79,7 @@ video/
 
 # Test pollution: a literal "~" directory appears when an unexpanded ~ path is passed as HOME.
 clients/desktop/~/
+
+# Local verification and private recovery artifacts
+/output/
+/runtime/dist-independent-review/

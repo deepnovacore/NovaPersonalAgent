@@ -38,7 +38,6 @@ jobs:
         with:
           node-version: "22"
           registry-url: https://registry.npmjs.org
-      - run: npm run check:release-gate
       - run: npm install --global npm@11.6.0
       - name: Verify candidate identity, platform builds, version, and release authority
         env:
@@ -52,8 +51,11 @@ jobs:
           node clients/desktop/scripts/check-release-version.mjs
           test "$EXPECTED_COMMIT" = "$(git rev-parse HEAD)"
           git merge-base --is-ancestor "$EXPECTED_COMMIT" origin/main
-          gh run view "$CANDIDATE_RUN_ID" --json headSha,jobs,name > candidate-run.json
+          gh run view "$CANDIDATE_RUN_ID" --json headSha,jobs,name,status,conclusion,event,url > candidate-run.json
           test "$(jq -r .name candidate-run.json)" = "Release candidate evidence"
+          test "$(jq -r .status candidate-run.json)" = "completed"
+          test "$(jq -r .conclusion candidate-run.json)" = "success"
+          test "$(jq -r .event candidate-run.json)" = "workflow_dispatch"
           test "$(jq -r .headSha candidate-run.json)" = "$EXPECTED_COMMIT"
           test "$(jq '[.jobs[] | select(.name | startswith("platform-candidate (macos-14, darwin, darwin-arm64")) | select(.conclusion == "success")] | length' candidate-run.json)" = "1"
           test "$(jq '[.jobs[] | select(.name | startswith("platform-candidate (windows-latest, win32, win32-x64")) | select(.conclusion == "success")] | length' candidate-run.json)" = "1"
@@ -82,7 +84,7 @@ jobs:
           gh run download "$CANDIDATE_RUN_ID" --name candidate-win32-x64 --dir downloaded/candidate-win32-x64
           mkdir release-artifacts
           cp downloaded/candidate-darwin-arm64/* downloaded/candidate-win32-x64/* release-artifacts/
-          test "$(find release-artifacts -maxdepth 1 -type f | wc -l)" -eq 8
+          RELEASE_VERSION="${{ inputs.release_version }}" node clients/desktop/scripts/verify-candidate-artifacts.mjs release-artifacts
       - name: Pack and audit the public npm package
         run: |
           set -euo pipefail
@@ -105,7 +107,7 @@ jobs:
           gh release create "v$RELEASE_VERSION" release-artifacts/* \
             --target "$EXPECTED_COMMIT" \
             --title "Nova Audio Agent v$RELEASE_VERSION" \
-            --notes "Nova Audio Agent v$RELEASE_VERSION updates the project documentation and improves Windows Codex project reliability. This release includes unsigned macOS arm64 and Windows x64 portable applications plus installers; macOS Gatekeeper and Windows SmartScreen may display security warnings." \
+            --notes "Nova Audio Agent v$RELEASE_VERSION adds bilingual documentation and a public website, improves project clarification and session approvals, and refines desktop captions and Codex progress feedback. This release includes unsigned macOS arm64 and Windows x64 portable applications plus installers; macOS Gatekeeper and Windows SmartScreen may display security warnings." \
             --latest
           tarball="$(find npm-package -maxdepth 1 -name '*.tgz' -type f)"
           tarball="$(realpath "$tarball")"

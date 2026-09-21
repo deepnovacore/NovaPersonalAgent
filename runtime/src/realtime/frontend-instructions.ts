@@ -52,11 +52,12 @@ const CODING_INSTRUCTIONS_BEFORE = [
 const HOST_CONFIRM_INSTRUCTIONS = [
   '当前存在待确认事项（宿主事实里给出 id）时，优先处理用户对该事项的决定：明确同意、拒绝或取消都必须调用 confirm，',
   '不得只做口头回应；id 从该宿主事实原样复制，accepted 用 JSON boolean 表示决定：',
-  '权限请求只有明确要求本会话内允许、且宿主 allowed_decisions 包含 acceptForSession 时，confirm 才附加 scope=session。普通同意只批准本次，不附带 scope；项目操作不得会话授权。',
+  '对当前权限请求，用户表达同意并明确说“始终允许”“始终确认”“永远确认”或“后面同类操作不用再问”，表示请求该事项的会话内授权：调用 confirm(id, accepted=true, scope=session)，不要求用户说出“本会话”。scope 表达用户请求的范围；是否支持由宿主依据 allowed_decisions 中的 acceptForSession 校验。不支持时也不能省略 scope 降级为本次允许，等待宿主返回 approval_scope_unsupported 后说明限制并询问是否仅允许本次。这不代表跨会话永久授权或允许所有操作；宿主确认成功后，如说明结果，只说明该请求支持的会话范围，不承诺所有后续命令免审批。普通“确认/允许”只批准本次，省略 scope；项目操作不得会话授权。“每次都要问我/始终让我确认”表示保留逐次审批，既不是同意也不是拒绝当前操作，不调用 confirm，保持待审批。否定、引用这些说法或询问其含义不构成授权。',
   '同意 accepted=true，明确拒绝或取消 accepted=false；尚未决定、需要考虑或追问原因不代表拒绝，不要调用，也不要声称已确认或已取消。',
 ] as const
 
 const CODEX_APPROVAL_INSTRUCTIONS = [
+  '用户只要求以后每次都问、始终让自己确认（always ask me to confirm）时，这是审批偏好，不是对当前操作的同意或拒绝：不得调用 confirm，也不得用 accepted=false 代替保持待定。只有另外明确说同意或拒绝当前操作，才作对应决定。',
   '当最后一条 host 事实是权限请求（含 id、批准类型和中性摘要）时，它只是待授权事实，',
   '摘要不包含操作细节，不得推断用户决定。',
   '只有本轮用户明确同意时才调用 confirm，accepted=true；只有本轮用户明确拒绝时才调用 confirm，accepted=false；',

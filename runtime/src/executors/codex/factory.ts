@@ -1,3 +1,4 @@
+import {EAGER_CODING_PROGRESS_INSTRUCTIONS} from './progress-instructions.js'
 import type {ManagedCodexMcp} from './managed-mcp.js'
 import type {CodingExecutorResource} from '../coding-executor.js'
 import {codexAgentDescriptor, codingAgentControllerFactory} from './controller.js'
@@ -66,6 +67,7 @@ export interface CodexTransportBinding {
   readonly credential: CodexCredentialProfile
   readonly resumeThreadId: string | null
   readonly workingInterval: number
+  readonly eagerProgress?: boolean
   readonly launchProfile: CodexLaunchProfile
   /** Project mode: the shared controller scoped to the run's work (`forWork`), so one work's turn end never drops another's approval. */
   readonly approvalController: ApprovalPort | null
@@ -107,7 +109,8 @@ export class OwnedCodexBackendTransportFactory implements CodexBackendTransportF
         workspace: binding.workspace,
         codexHome,
         apiKey: codexCredentialApiKey(binding.credential),
-        developerInstructions: null,
+        developerInstructions: binding.eagerProgress === true ? EAGER_CODING_PROGRESS_INSTRUCTIONS : null,
+        eagerProgress: binding.eagerProgress === true,
         resumeThreadId: binding.resumeThreadId,
         persistent: project,
         workingInterval: binding.workingInterval,
@@ -289,6 +292,7 @@ async function createProjectResource(
       credential: options.config.credential,
       resumeThreadId: null,
       workingInterval: options.config.workingInterval,
+      eagerProgress: options.config.eagerProgress,
       launchProfile: warmHome !== null ? launchProfile : resolveCodexLaunchProfile({
         approvalMode: options.config.codexApprovalMode, project: false, foregroundBroker: false,
       }),
@@ -338,6 +342,7 @@ async function createProjectResource(
             credential: options.config.credential,
             resumeThreadId: binding.resumeThreadId,
             workingInterval: options.config.workingInterval,
+            eagerProgress: options.config.eagerProgress,
             launchProfile,
             approvalController: approvalController?.forWork(binding.work) ?? null,
           }))
