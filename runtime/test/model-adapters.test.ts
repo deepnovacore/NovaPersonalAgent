@@ -223,3 +223,11 @@ test('Surrogate receives the actual progress trigger, not an unlabelled snapshot
   await surrogate.watch({...emptyView, trigger_kind: 'progress'})
   assert.match(gateway.completions[0]!.prompt, /当前触发事件：progress/u)
 })
+
+test('workbench generation includes its schema in the provider-visible prompt',async()=>{
+ const gateway=new ScriptedGateway([],JSON.stringify({cards:[]}))
+ const surrogate=new GatewaySurrogate({gateway,model:'same',proactivityPreset:'balanced'})
+ await surrogate.generateContext([{id:'source:doc',version:'v1',content:'A project document'}],new AbortController().signal)
+ const prompt=JSON.parse(gateway.completions[0]!.prompt) as {output_schema:{properties:{cards:unknown}}}
+ assert.ok(prompt.output_schema.properties.cards)
+})

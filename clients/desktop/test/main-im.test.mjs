@@ -24,7 +24,7 @@ test('settings connections bridge only forwards sources, connectors and discover
  const control={request:async(method,params)=>{calls.push({method,params});return {sources:[]}}}
  new Function('ipcMain','settingsWindow','backendControl','settingsGeneration',block)({handle:(_,fn)=>{receive=fn}},{webContents:sender},control,1)
  await assert.rejects(receive({sender:{}},{method:'state',params:{}}),/rejected/)
- for(const method of ['memory.list','memory.evidence','feed.action','conversations.select','life.mutate','news.refresh','understanding.action','sources.consent','feishu.status'])await assert.rejects(receive({sender},{method,params:{}}),/rejected/)
+ for(const method of ['memory.list','memory.evidence','feed.action','conversations.select','life.mutate','news.refresh','understanding.action','feishu.status'])await assert.rejects(receive({sender},{method,params:{}}),/rejected/)
  await assert.rejects(receive({sender},{method:'state',params:{},extra:true}),/rejected/)
  await assert.rejects(receive({sender},{method:'state',params:null}),/rejected/)
  await assert.rejects(receive({sender},{method:'sources.add',params:{path:'x'.repeat(17000),consent:true}}),/rejected/)

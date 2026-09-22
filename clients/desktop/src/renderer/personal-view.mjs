@@ -46,6 +46,13 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  function renderPanel(){
   panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
   const s=c.snapshot;const caps=s?.capabilities??{}
+  if(selected!=='tasks'){
+   const context=s?.workbench_context
+   if(!(s?.sources?.length))button('连接本机资料，自动整理工作台',()=>openSettings('connections'),panel)
+   if(context?.status==='working')panel.append(el('p','正在根据已授权资料整理内容…','hint'))
+   if(context?.status==='failed')panel.append(el('p','本轮整理未完成；已有内容保留，后台会重试。','hint'))
+   for(const item of context?.cards??[]){if(item.tab!==selected)continue;const a=card(item.title,item.body);a.append(el('p','Nova 根据资料整理 · 建议不代表已承诺或已执行','hint'));const refs=el('details');refs.append(el('summary','查看依据'));for(const ref of item.refs){const entry=s.memory?.entries?.find(e=>e.id===ref.entry_id&&e.version===ref.version);refs.append(el('p',ref.label??entry?.content??ref.entry_id))}a.append(refs);button('继续讨论',()=>continueChat(item.title+'：'+item.body),a);button('隐藏',()=>c.command('context.dismiss',{id:item.id}),a)}
+  }
   const candidateKind=({todos:'todo',ideas:'idea',goals:'goal',profile:'profile'})[selected]
   const pending=el('section',undefined,'pending-group');pending.setAttribute('aria-label','待确认')
   if(s?.understanding?.error&&candidateKind)pending.append(el('p','这条发言暂时没能记下来，你仍可以手动添加。','hint'))

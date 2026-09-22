@@ -897,6 +897,10 @@ function validateOutboundText(raw: string, label = 'desktop outbound text frame'
     throw new DesktopOutboundValidationError(`${label} is invalid`)
   }
   if (Buffer.byteLength(raw, 'utf8') > MAX_DESKTOP_JSON_BYTES) {
+    // Personal snapshots contain bounded cards, sources and memory pages; input limits stay unchanged.
+    if (Buffer.byteLength(raw, 'utf8') <= 1024 * 1024) {
+      try { const frame = JSON.parse(raw) as {type?: unknown}; if (frame.type === 'personal.state' || frame.type === 'personal.result') return } catch { /* reject malformed oversized frames */ }
+    }
     throw new DesktopOutboundValidationError(`${label} is too large`)
   }
 }

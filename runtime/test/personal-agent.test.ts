@@ -379,3 +379,13 @@ test('failed orb transition can retry backlog admission without changing mode ag
   assert.notEqual(f.host.snapshot().feed[0]!.suggestion_id,first)
  }finally{await f.close()}
 })
+
+test('automatic generation requires current extraction consent for every evidence reference',async()=>{
+ const f=await fixture();try{
+  const row={...entry(),evidence_refs:['one','two']};const memory=f.host.options.memory()!;
+  assert.deepEqual(await f.host.authorizedGenerationEntries([row]),[]);
+  let allowed=true;Object.assign(memory,{canProcessEvidence:(id:string,purpose:string)=>Promise.resolve(purpose==='extraction'&&(allowed||id==='one'))});
+  assert.deepEqual(await f.host.authorizedGenerationEntries([row]),[row]);allowed=false;
+  assert.deepEqual(await f.host.authorizedGenerationEntries([row]),[]);
+ }finally{await f.close()}
+})

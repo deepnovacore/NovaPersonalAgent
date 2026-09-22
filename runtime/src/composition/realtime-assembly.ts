@@ -355,7 +355,7 @@ export class RealtimeAssembly {
       context:()=>{const view=compileContextView(input.core.runtime.memory,input.core.runtime.core.floor.state,input.core.runtime.clock.now(),{suggestions:input.core.runtime.core.suggestions.all(),triggerKind:'discovery_tick'});return {...view,channels:view.channels.slice(-8),affordances:view.affordances.slice(-8),in_flight:view.in_flight.slice(-8)}},
       onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}})},
       evidenceRefs:()=>[...input.core.runtime.memory.channels.values()].flatMap(channel=>channel.items.slice(-4).map(item=>`${item.channel}:${item.seq}`)).slice(-16),
-      ...(input.core.personalAgentConfig?{rankNews:input.core.personalAgentConfig.surrogate.rankNews,understand:input.core.personalAgentConfig.surrogate.understand,prepareBrief:(snapshot,slot,signal)=>input.core.personalAgentConfig!.surrogate.prepareBrief(snapshot,slot,signal),prepareProposal:(snapshot,proposal,signal)=>input.core.personalAgentConfig!.surrogate.prepareProposal(snapshot,proposal,signal),summarizeMemory:(entries,signal)=>input.core.personalAgentConfig!.surrogate.summarizeMemory(entries,signal),discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
+      ...(input.core.personalAgentConfig?{generateContext:input.core.personalAgentConfig.surrogate.generateContext,rankNews:input.core.personalAgentConfig.surrogate.rankNews,understand:input.core.personalAgentConfig.surrogate.understand,prepareBrief:(snapshot,slot,signal)=>input.core.personalAgentConfig!.surrogate.prepareBrief(snapshot,slot,signal),prepareProposal:(snapshot,proposal,signal)=>input.core.personalAgentConfig!.surrogate.prepareProposal(snapshot,proposal,signal),summarizeMemory:(entries,signal)=>input.core.personalAgentConfig!.surrogate.summarizeMemory(entries,signal),discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
     })
     if (!this.#sharedPersonal) this.personalAgent.setRetrieval(input.retrieval)
@@ -739,7 +739,7 @@ export class RealtimeAssembly {
       const opened = await this.#settleWithinGrace(
         this.#personalMemory.open(),
         'personal_memory_open_abandoned',
-        5_000,
+        30_000,
       )
       if (opened.kind === 'rejected') throw opened.error
       if (opened.kind === 'abandoned') throw new AssemblyError('personal memory open was abandoned')

@@ -967,6 +967,8 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
   // dial it; the readiness timeout still kills a backend that never arrives.
   const listener = createReadinessListener({
     token,
+    // Restoring local memory and the knowledge index can exceed the empty-state deadline.
+    timeoutMs: 60_000,
     onTimeout: () => {
       if (spawnedBackend) void shutdownBackendBestEffort(spawnedBackend)
     },
@@ -1516,10 +1518,14 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   })
   ipcMain.handle('nova:settings:personal', async (event, payload) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('connections request rejected')
-    const allowed = ['state', 'sources.add', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete', 'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent', 'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete', 'connector.local_status', 'connector.local_connect', 'connector.local_access', 'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure']
+    const allowed = ['state', 'sources.add', 'sources.authorize_computer', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete', 'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent', 'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete', 'connector.local_status', 'connector.local_connect', 'connector.local_access', 'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure']
     if (!payload || Object.getPrototypeOf(payload) !== Object.prototype || Object.keys(payload).sort().join(',') !== 'method,params'
       || !allowed.includes(payload.method) || !payload.params || Object.getPrototypeOf(payload.params) !== Object.prototype
       || JSON.stringify(payload.params).length > 16384) throw new Error('connections request rejected')
+    if (['sources.add','sources.authorize_computer'].includes(payload.method) && payload.params.consent === true && runtimeCapabilities?.modules?.knowledge?.enabled !== true) {
+      const document = readCapabilityDocument(currentSettings, process.env)
+      await applyDesktopSettings({settingsPatch:{},capabilitiesDocument:{...document,modules:{...document.modules,knowledge:{...document.modules?.knowledge,enabled:true}}},capabilitiesBaseRevision:capabilityDocumentRevision(currentSettings, process.env)},true)
+    }
     const owner = backendControl, generation = settingsGeneration
     if (!owner) throw new Error('connections unavailable')
     const result = await owner.request(payload.method, payload.params, {timeoutMs: 180000})

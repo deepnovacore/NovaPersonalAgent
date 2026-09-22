@@ -56,3 +56,11 @@ Codex 审阅（首轮）指出三项并已修复：设置桥的 `state` 原样�
 第二轮审阅指出四项并已修复：feed 消息卡丢弃 `prepared.text`（简报正文，现以 Markdown 渲染在卡内）；`presented` 回执绑定在转写重建上而非可见性（改为 `deliverPresented` 在每次 update / 展开时按可见性重查，失败可重试）；未闭合强调符号重复扫描后缀（改为每遍只检查一次）；任务页「询问任务进展」打开会话后对话栏仍收起（改为打开后展开并聚焦输入框）。新增 `chat-pane.test.mjs` 覆盖这三条行为。
 
 验证：runtime `desktop-control` 测试与桌面全部测试通过；隔离 Electron 用合成快照截取 Todos / Profile / 主动提醒 / Feeds / 窄窗口截图（`output/workbench-preview/`，不入库）。物理麦克风、真实主机下的设置窗口来源操作与深链尚未真机验收。
+
+## 2026-09-22 Authorized local context
+
+Connections & permissions now groups Local files, Mail & calendar, and Proactive reminders into keyboard-accessible secondary tabs. UI copy follows the selected language. Folder grants and whole-computer grants share the existing source authority and configured model consent; granting a source enables the knowledge service when necessary.
+
+Whole-computer access walks the accessible filesystem in persisted batches, with source statistics, permission failures, pause/disconnect/delete controls, and excluded credential/system/dependency/cache locations. A grant is not a claim of complete coverage: unsupported formats, OS permission failures, and index limits remain visible. Existing directory grants remain separately managed. On macOS the filesystem root includes mounted volumes; Windows currently uses the home drive.
+
+Workbench cards derive from authorized, screened document excerpts as well as eligible memory. They remain separate from confirmed Life objects, retain versioned source citations, can be hidden, and become invisible when their supporting inputs are no longer eligible. Generation uses up to 40 recent inputs plus 24 previously cited inputs per request; the source index remains available for deeper retrieval. This is a bounded overview, not an exhaustive representation of every indexed file. Public RSS configuration is preserved rather than silently changing the user's existing subscription settings.
