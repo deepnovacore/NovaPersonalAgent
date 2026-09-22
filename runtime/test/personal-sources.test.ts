@@ -302,3 +302,80 @@ test('nested documents retain project context and unavailable observations retry
     assert.equal(f.memory!.list().entries.length,0)
   } finally {await f.close()}
 })
+
+test('project-balanced admission preserves a small old collection beside a crowded Git project',async()=>{
+ const f=await fixture()
+ try{
+  await mkdir(join(f.folder,'large','.git'),{recursive:true});await mkdir(join(f.folder,'papers'))
+  for(let i=0;i<12;i++){const d=join(f.folder,'large','part'+i);await mkdir(d);await writeFile(join(d,'README.md'),'Large project section '+i)}
+  const note=join(f.folder,'papers','reading-notes.md');await writeFile(note,'Optical imaging research notes, collected in the past.');await utimes(note,new Date('2020-01-01'),new Date('2020-01-01'))
+  await f.sources.command('sources.add',{path:f.folder,consent:true,max_files:4})
+  assert.ok((await f.knowledge.listSources()).some(s=>s.locator===note),'small non-README collection must receive body budget')
+  assert.ok(f.observations.some(o=>o.content.includes('Optical imaging')),'notes must supply representative observations')
+ }finally{await f.close()}
+})
+test('project overview budget is stable across unchanged syncs and generated files stay out',async()=>{
+ const f=await fixture()
+ try{
+  await mkdir(join(f.folder,'.git'));for(let i=0;i<20;i++)await writeFile(join(f.folder,'note-'+i+'.md'),'Distinct project note '+i)
+  await writeFile(join(f.folder,'package-lock.json'),'{}');await f.sources.command('sources.add',{path:f.folder,consent:true})
+  const before=await f.knowledge.listSources();assert.ok(before.length<=8,'one project must not consume all file slots');assert.ok(before.every(s=>!s.locator.endsWith('package-lock.json')))
+  await f.sources.command('sources.sync',{id:f.sources.list()[0]!.id});assert.equal((await f.knowledge.listSources()).length,before.length);assert.equal(f.sources.list()[0]!.read,0)
+ }finally{await f.close()}
+})
+test('evidence snapshot represents both roots',async()=>{
+ const f=await fixture()
+ try{
+  const other=join(f.root,'other');await mkdir(other)
+  for(let i=0;i<8;i++){await writeFile(join(f.folder,'a'+i+'.md'),'First collection '+i);await writeFile(join(other,'b'+i+'.md'),'Second collection '+i)}
+  await f.sources.command('sources.add',{path:f.folder,consent:true});await f.sources.command('sources.add',{path:other,consent:true})
+  const snapshot=f.sources.evidenceSnapshot();assert.equal(snapshot.length,8);assert.ok(snapshot.some(s=>/a\d+\.md/u.test(s.summary)));assert.ok(snapshot.some(s=>/b\d+\.md/u.test(s.summary)))
+ }finally{await f.close()}
+})
+
+test('a Git metadata ceiling leaves sibling collections reachable and retains unseen indexed files',async()=>{
+ const f=await fixture()
+ try{
+  const repo=join(f.folder,'large'),papers=join(f.folder,'papers');await mkdir(join(repo,'.git'),{recursive:true});await mkdir(papers)
+  await Promise.all(Array.from({length:2050},(_,i)=>writeFile(join(repo,'part-'+i+'.txt'),'Project data '+i)))
+  await writeFile(join(papers,'notes.md'),'Independent scientific reading notes.')
+  await f.sources.command('sources.add',{path:f.folder,consent:true,max_files:3})
+  assert.ok(f.sources.list()[0]!.reasons.project_metadata_limit)
+  assert.ok((await f.knowledge.listSources()).some(s=>s.locator===join(papers,'notes.md')))
+  const before=(await f.knowledge.listSources()).map(s=>s.id).sort()
+  await f.sources.command('sources.sync',{id:f.sources.list()[0]!.id})
+  assert.deepEqual((await f.knowledge.listSources()).map(s=>s.id).sort().filter(id=>before.includes(id)),before)
+ }finally{await f.close()}
+})
+test('identical content occupies one snapshot slot without losing separate source ownership',async()=>{
+ const f=await fixture()
+ try{
+  for(const name of ['one','two']){await mkdir(join(f.folder,name));await writeFile(join(f.folder,name,'README.md'),'Identical checkout overview.')}
+  await f.sources.command('sources.add',{path:f.folder,consent:true})
+  assert.equal((await f.knowledge.listSources()).length,2)
+  assert.equal(f.sources.evidenceSnapshot().length,1)
+ }finally{await f.close()}
+})
+
+test('a changed file outside the project overview budget cannot keep stale evidence',async()=>{
+ const f=await fixture()
+ try{
+  await mkdir(join(f.folder,'.git'));const code=join(f.folder,'example.ts');await writeFile(code,'export const version = 1')
+  await f.sources.command('sources.add',{path:f.folder,consent:true});const old=f.sources.evidenceSnapshot()[0]!.ref
+  for(let i=0;i<8;i++){const dir=join(f.folder,'part'+i);await mkdir(dir);await writeFile(join(dir,'README.md'),'Overview '+i)}
+  await writeFile(code,'export const version = 222')
+  await f.sources.command('sources.sync',{id:f.sources.list()[0]!.id})
+  assert.equal(f.sources.evidence(old),null);assert.ok(f.invalidated.includes(old))
+  assert.ok((await f.knowledge.listSources()).every(s=>s.locator!==code))
+ }finally{await f.close()}
+})
+
+test('project overview favors the root README over newer nested README files',async()=>{
+ const f=await fixture()
+ try{
+  await mkdir(join(f.folder,'.git'));const overview=join(f.folder,'README.md');await writeFile(overview,'Whole project overview');await utimes(overview,new Date('2020-01-01'),new Date('2020-01-01'))
+  for(let i=0;i<10;i++){const dir=join(f.folder,'part'+i);await mkdir(dir);await writeFile(join(dir,'README.md'),'Nested implementation '+i)}
+  await f.sources.command('sources.add',{path:f.folder,consent:true,max_files:1})
+  assert.equal((await f.knowledge.listSources())[0]!.locator,overview)
+ }finally{await f.close()}
+})

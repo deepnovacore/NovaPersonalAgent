@@ -37,6 +37,7 @@ const rows: readonly Row[] = [
   ['NOVA_AUDIO_AGENT_SURROGATE_MODEL', 'core', false, true, 'never', 'qwen-plus', 'Surrogate model.', 'Surrogate 模型。'],
   ['NOVA_AUDIO_AGENT_COMPRESSOR_MODEL', 'core', false, true, 'never', 'qwen-flash', 'Memory compressor model.', '记忆压缩模型。'],
   ['NOVA_AUDIO_AGENT_PIPELINE_MODE', 'core', false, true, 'never', 'integrated', 'Product pipeline shape: integrated or cascaded.', '产品管线形态：集成或级联。'],
+  ['NOVA_AUDIO_AGENT_NEWS_LANGUAGE', 'core', false, true, 'never', 'en', 'Native RSS language: zh-CN or en. Desktop supplies OS language independently of UI preference; applied at runtime start.', '原生 RSS 语言：zh-CN 或 en；桌面传入系统语言，独立于界面偏好，运行时启动时生效。'],
   ['NOVA_AUDIO_AGENT_LANGUAGE', 'core', false, true, 'never', 'zh-CN', 'AI system prompt language: zh-CN or en; desktop supplies its saved preference.', 'AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。'],
   ['NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED', 'camera', false, true, 'never', 'false', 'Attach a default-camera frame to user turns on verified cascaded VLMs.', '为已确认支持图片的级联模型附加默认摄像头画面。'],
   ['NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID', 'camera', false, true, 'never', null, 'Exact monitor camera device ID; empty uses the default device.', '监控摄像头设备 ID；空值使用默认设备。'],

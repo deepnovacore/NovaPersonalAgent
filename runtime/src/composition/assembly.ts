@@ -92,7 +92,7 @@ export interface AssemblyOptions {
 }
 
 export interface Assembly {
-  readonly personalAgentConfig?: {path:string;userScope:string;surrogate:GatewaySurrogate}
+  readonly personalAgentConfig?: {path:string;userScope:string;surrogate:GatewaySurrogate;newsLanguage:string}
 
   readonly capabilities: CapabilityRegistry
   readonly capabilityStatus: CapabilityStatus
@@ -371,7 +371,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     return pending
   }
   return {
-    ...(options.blackboard===undefined?{}:{personalAgentConfig: {path: options.blackboard.path + '.personal.json', userScope: settings.blackboard_owner_id, surrogate}}),
+    ...(options.blackboard===undefined?{}:{personalAgentConfig: {path: options.blackboard.path + '.personal.json', userScope: settings.blackboard_owner_id, newsLanguage: settings.news_language, surrogate}}),
     capabilities,
     capabilityStatus: capabilityStatus(capabilities, tools.schemas.length),
     runtime,

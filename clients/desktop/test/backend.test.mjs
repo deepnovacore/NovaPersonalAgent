@@ -1374,10 +1374,10 @@ test('dev dotenv keys override saved keys in both public metadata and runtime co
   assert.doesNotMatch(JSON.stringify({secretsPresent: resolved.secretsPresent, secretSources: resolved.secretSources}), /repo-key|speech-key|stored-key/)
 })
 
-test('memory prerecall switch overrides inherited env and defaults on', () => {
+test('memory prerecall switch overrides inherited env and defaults off', () => {
   for (const enabled of [undefined, false, true]) {
     const spec=nodeLaunchSpec({workspace:'/workspace',token:TOKEN,readyEndpoint:'127.0.0.1:49152',parentEnv:{NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED:'stale'},settings:{...SETTINGS_V2,...(enabled===undefined?{}:{memoryPrerecallEnabled:enabled})}})
-    assert.equal(spec.env.NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED,String(enabled??true))
+    assert.equal(spec.env.NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED,String(enabled??false))
   }
 })
 
@@ -1402,4 +1402,12 @@ test('Composio saved key overrides dotenv and explicit clear disables inherited 
 test('OpenRouter secret reaches runtime independently of conversation provider', () => {
   const environment = capabilityEnvironment({}, {openrouterApiKey:'synthetic-openrouter'}, {})
   assert.equal(environment.OPENROUTER_API_KEY, 'synthetic-openrouter')
+})
+
+test('RSS language uses the system signal independently of saved UI language',()=>{
+ for(const [newsLanguage,language] of [['zh-CN','en'],['en','zh-CN']]){
+  const spec=nodeLaunchSpec({workspace:'/workspace',token:TOKEN,readyEndpoint:'127.0.0.1:12345',parentEnv:{},settings:{...SETTINGS_V2,language},newsLanguage})
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_NEWS_LANGUAGE,newsLanguage)
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_LANGUAGE,language)
+ }
 })

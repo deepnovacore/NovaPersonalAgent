@@ -1,17 +1,17 @@
 import {z} from 'zod'
 import {newsArticleSchema} from '../personal-agent/life.js'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
-import {NEWS_SOURCES,digest,fetchFeed,type Article,type NewsSource} from './feeds.js'
+import {NEWS_SOURCES,newsLanguage,digest,fetchFeed,type Article,type NewsSource} from './feeds.js'
 import {scoreSchema,validateScores,type NewsRanker} from './ranking.js'
 const interest=z.object({id:z.string(),text:z.string().min(1).max(100),weight:z.number().min(0).max(2)})
 const article=z.object({id:z.string(),source_id:z.string(),title:z.string().max(300),summary:z.string().max(1500),url:z.string().url(),published_at:z.string().nullable(),first_seen:z.string(),content_hash:z.string(),read:z.boolean(),saved:z.boolean(),ranking:scoreSchema.extend({profile_version:z.number(),ready_at:z.string()}).nullable()})
 const schema=z.object({version:z.literal(1),profile_version:z.number(),enabled:z.boolean(),explore:z.boolean(),interests:z.array(interest).max(8),blocked:z.array(z.string()).max(20),items:z.array(article).max(500),sources:z.array(z.object({id:z.string(),last_attempt:z.string().nullable(),last_success:z.string().nullable(),error:z.string().nullable(),count:z.number()})),rank_error:z.string().nullable()})
 type State=z.infer<typeof schema>
-export interface NewsOptions {path:string;sources?:NewsSource[];rank?:NewsRanker;fetcher?:typeof fetch;changed?:()=>void;now?:()=>Date}
+export interface NewsOptions {path:string;language?:string;sources?:NewsSource[];rank?:NewsRanker;fetcher?:typeof fetch;changed?:()=>void;now?:()=>Date}
 // ponytail: bounded 500-article cache; add indexed storage only if this measured ceiling grows.
 export class NewsService{
  #store:BoundedJsonStore<State>;#state:State;#opened=false;#abort=new AbortController();#timer:ReturnType<typeof setInterval>|undefined;#run:Promise<void>|undefined;#rerun=false;#tail:Promise<unknown>=Promise.resolve();#sources:NewsSource[]
- constructor(readonly options:NewsOptions){this.#store=new BoundedJsonStore(options.path,schema);this.#sources=options.sources??NEWS_SOURCES;this.#state={version:1,profile_version:0,enabled:false,explore:true,interests:[],blocked:[],items:[],sources:this.#sources.map(s=>({id:s.id,last_attempt:null,last_success:null,error:null,count:0})),rank_error:null}}
+ constructor(readonly options:NewsOptions){this.#store=new BoundedJsonStore(options.path,schema);this.#sources=(options.sources??NEWS_SOURCES).filter(s=>(s.language??'en')===newsLanguage(options.language??'en'));this.#state={version:1,profile_version:0,enabled:false,explore:true,interests:[],blocked:[],items:[],sources:this.#sources.map(s=>({id:s.id,last_attempt:null,last_success:null,error:null,count:0})),rank_error:null}}
  #now(){return this.options.now?.()??new Date()}
  #serial<T>(fn:()=>Promise<T>):Promise<T>{const run=this.#tail.then(fn);this.#tail=run.catch(()=>{/* optional cleanup/observer */});return run}
  async #save(next:State){await this.#store.write(next);this.#state=next;this.options.changed?.()}
@@ -38,18 +38,18 @@ export class NewsService{
  /** Resolve only a user-selected cached article; this method never records personal facts. */
  conversionInput(raw:unknown){
   const p=z.object({id:z.string(),content_hash:z.string(),kind:z.enum(['idea','todo','goal']),title:z.string().trim().min(1).max(200),note:z.string().max(4000).default('')}).strict().parse(raw)
-  const row=this.#state.items.find(item=>item.id===p.id);if(!row)throw Error('article_not_found')
+  const row=this.#state.items.find(item=>item.id===p.id&&this.#sources.some(source=>source.id===item.source_id));if(!row)throw Error('article_not_found')
   if(row.content_hash!==p.content_hash)throw Error('article_changed')
   return {op:'from_news' as const,kind:p.kind,title:p.title,note:p.note,article:newsArticleSchema.parse({article_id:row.id,source_id:row.source_id,url:row.url,content_hash:row.content_hash,title:row.title,summary:row.summary,published_at:row.published_at})}
  }
- snapshot(){const s=this.#state,now=this.#now().getTime();const visible=s.items.filter(a=>!s.blocked.includes(a.source_id));const weight=(a:typeof s.items[number])=>a.ranking?.profile_version===s.profile_version?Math.max(0,...a.ranking.matches.map(m=>m.score*(a.ranking?.judgment?.substance==='promotional'?0.5:a.ranking?.judgment?.substance==='thin'?0.85:1)*(s.interests.find(i=>i.id===m.interest_id)?.weight??0))):0
+ snapshot(){const s=this.#state,now=this.#now().getTime();const visible=s.items.filter(a=>this.#sources.some(source=>source.id===a.source_id)&&!s.blocked.includes(a.source_id));const weight=(a:typeof s.items[number])=>a.ranking?.profile_version===s.profile_version?Math.max(0,...a.ranking.matches.map(m=>m.score*(a.ranking?.judgment?.substance==='promotional'?0.5:a.ranking?.judgment?.substance==='thin'?0.85:1)*(s.interests.find(i=>i.id===m.interest_id)?.weight??0))):0
   const fresh=visible.filter(a=>now-Date.parse(a.published_at??a.first_seen)<7*86400000)
   const ready=fresh.filter(a=>a.ranking?.profile_version===s.profile_version);const fallback=ready.length===0
   const ranked=(fallback?fresh:fresh.filter(a=>weight(a)>0)).slice().sort((a,b)=>fallback?b.first_seen.localeCompare(a.first_seen):(weight(b)/(1+Math.max(0,now-Date.parse(b.published_at??b.first_seen))/86400000))-(weight(a)/(1+Math.max(0,now-Date.parse(a.published_at??a.first_seen))/86400000))||a.id.localeCompare(b.id))
   const selected:typeof ranked=[];const counts=new Map<string,number>();for(const a of ranked){if((counts.get(a.source_id)??0)>=5)continue;selected.push(a);counts.set(a.source_id,(counts.get(a.source_id)??0)+1);if(selected.length>=10)break}
   const exploration=new Set<string>();if(s.explore&&!fallback){for(const a of ready.filter(a=>a.ranking?.matches.length===0).sort((a,b)=>b.first_seen.localeCompare(a.first_seen))){if(exploration.size>=2)break;if((counts.get(a.source_id)??0)>=5)continue;selected.push(a);exploration.add(a.id);counts.set(a.source_id,(counts.get(a.source_id)??0)+1)}}
   const map=(a:typeof s.items[number])=>({...a,summary:a.summary.slice(0,700),ranking:a.ranking?.profile_version===s.profile_version?a.ranking:null,exploration:exploration.has(a.id)})
-  return {enabled:s.enabled,explore:s.explore,interests:structuredClone(s.interests),profile_version:s.profile_version,refreshing:!!this.#run,mode:fallback?'timeline':'personalized',rank_error:s.rank_error,pending:fresh.filter(a=>a.ranking?.profile_version!==s.profile_version).length,total:s.items.length,items:selected.map(map),saved:s.items.filter(a=>a.saved).map(map),sources:this.#sources.map(source=>({...source,...s.sources.find(s=>s.id===source.id),blocked:s.blocked.includes(source.id)}))}
+  return {enabled:s.enabled,explore:s.explore,interests:structuredClone(s.interests),profile_version:s.profile_version,refreshing:!!this.#run,mode:fallback?'timeline':'personalized',rank_error:s.rank_error,pending:fresh.filter(a=>a.ranking?.profile_version!==s.profile_version).length,total:visible.length,items:selected.map(map),saved:s.items.filter(a=>a.saved&&this.#sources.some(source=>source.id===a.source_id)).map(map),sources:this.#sources.map(source=>({...source,...s.sources.find(s=>s.id===source.id),blocked:s.blocked.includes(source.id)}))}
  }
  refresh():Promise<void>{if(this.#run){this.#rerun=true;return this.#run}if(!this.#opened||!this.#state.enabled||!this.#state.interests.length)return Promise.resolve()
   const run=(async()=>{do{this.#rerun=false;await this.#refresh()}while(this.#rerun&&this.#opened&&this.#state.enabled)})();this.#run=run;this.options.changed?.();void run.finally(()=>{this.#run=undefined;this.options.changed?.()}).catch(()=>{/* optional cleanup/observer */});return run

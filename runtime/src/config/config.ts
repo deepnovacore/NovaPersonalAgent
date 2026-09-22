@@ -38,6 +38,7 @@ export const settingsSchema = z.object({
   surrogate_model: z.string().default('qwen-plus'),
   compressor_model: z.string().default('qwen-flash'),
   language: promptLanguageSchema.default('zh-CN'),
+  news_language: promptLanguageSchema.default('en'),
   pipeline_mode: pipelineModeSchema.default('integrated'),
   integrated_provider: integratedProviderNameSchema.default('qwen'),
   cascade_endpointing_provider: cascadedEndpointingProviderNameSchema.default('auto'),
@@ -250,6 +251,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     surrogate_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_SURROGATE_MODEL),
     compressor_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_COMPRESSOR_MODEL),
     language: parsePromptLanguageSetting(environment.NOVA_AUDIO_AGENT_LANGUAGE),
+    news_language: parseSelector(promptLanguageSchema, environment.NOVA_AUDIO_AGENT_NEWS_LANGUAGE, 'en', 'NOVA_AUDIO_AGENT_NEWS_LANGUAGE'),
     pipeline_mode: pipelineMode,
     camera_module_enabled: optionalBoolean(
       environment.NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED,

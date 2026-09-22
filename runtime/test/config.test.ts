@@ -781,3 +781,9 @@ test('daily memory consolidation uses a validated configurable hour and timezone
  assert.equal(configured.memory_consolidation_enabled,false);assert.equal(configured.memory_consolidation_hour,9);assert.equal(configured.memory_consolidation_timezone,'Asia/Shanghai')
  assert.throws(()=>loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_HOUR:'24'}));assert.throws(()=>loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_TIMEZONE:'not-a-timezone'}))
 })
+
+ test('native RSS language is independent of conversational language',()=>{
+  assert.equal(loadSettings({NOVA_AUDIO_AGENT_LANGUAGE:'en',NOVA_AUDIO_AGENT_NEWS_LANGUAGE:'zh-CN'}).news_language,'zh-CN')
+  assert.equal(loadSettings({NOVA_AUDIO_AGENT_LANGUAGE:'zh-CN',NOVA_AUDIO_AGENT_NEWS_LANGUAGE:'en'}).news_language,'en')
+  assert.equal(loadSettings({}).news_language,'en')
+ })

@@ -175,6 +175,7 @@ export function backendLaunchSpec({
   decryptedSecrets,
   resolvedConfig,
   searchProxyUrl,
+  newsLanguage = 'en',
   capabilitiesDocument,
 }) {
   if (backend !== 'node') throw new Error('backend kind is invalid')
@@ -226,10 +227,11 @@ export function backendLaunchSpec({
     NOVA_AUDIO_AGENT_CODING_PROGRESS_NARRATION: settings?.codingProgressNarration ?? 'smart',
     NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL: String(codexHeartbeatSeconds),
     NOVA_AUDIO_AGENT_LANGUAGE: settings?.language ?? 'zh-CN',
+    NOVA_AUDIO_AGENT_NEWS_LANGUAGE: newsLanguage === 'zh-CN' ? 'zh-CN' : 'en',
     NOVA_AUDIO_AGENT_PIPELINE_MODE: pipelineMode,
     NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,
-    NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED: String(settings?.memoryPrerecallEnabled ?? true),
+    NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED: String(settings?.memoryPrerecallEnabled ?? false),
     NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED: String(settings?.conversationVisionEnabled ?? false),
     NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID: settings?.monitorCameraDeviceId ?? '',
   }

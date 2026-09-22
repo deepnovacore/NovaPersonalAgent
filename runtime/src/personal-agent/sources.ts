@@ -1,8 +1,9 @@
 import {processingGrantSchema,type ProcessingGrant} from '../memory-substrate/source-state.js'
+import {interleave} from './sampling.js'
 import {randomUUID} from 'node:crypto'
 import {acquirePersonalLock} from './store.js'
 import {lstat, opendir, open, readFile, realpath, rename, rm, writeFile} from 'node:fs/promises'
-import {basename, dirname, extname, isAbsolute, join, relative} from 'node:path'
+import {basename, dirname, extname, isAbsolute, join, relative, sep} from 'node:path'
 import {z} from 'zod'
 import {preparePrivateDatabasePath} from '../storage/private-database.js'
 import {SensitivePathPolicy} from '../memory/sensitivity.js'
@@ -23,7 +24,7 @@ const snapshotSchema = z.object({
   max_files: z.number().int().min(1).max(200), max_bytes: z.number().int().min(1).max(20 * 1024 * 1024),
 }).strict()
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
-const trackedSchema = z.object({path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
+const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
   evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
 const recordSchema = z.object({processing_consent:processingGrantSchema.optional(),view: snapshotSchema, files: z.array(trackedSchema).max(20000),
   deleting: z.boolean().default(false), observation: z.string().max(500).default(''),
@@ -32,6 +33,16 @@ type SourceRecord = z.infer<typeof recordSchema>
 const diskSchema = z.object({version: z.literal(1), sources: z.array(recordSchema).max(8)}).strict()
 const supported = new Set(['.txt', '.md', '.markdown', '.json', '.yaml', '.yml', '.csv', '.ts', '.tsx', '.js', '.jsx', '.py', '.rs', '.go', '.java', '.c', '.h', '.cpp', '.pdf', '.docx'])
 const overviewDocument = (path: string) => /^(?:readme(?:[._-][a-z]+)?|overview|about|project)\.(?:md|markdown|txt)$/iu.test(basename(path))
+const representativeDocument = (path: string) => /\.(?:md|markdown|txt|pdf|docx)$/iu.test(path)
+const generatedFile = (path: string) => /^(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$|\.min\.js$|\.d\.ts$|\.generated\./iu.test(basename(path))
+function balanced<T extends {path: string; unit?: string | undefined}>(files: T[], root: string): T[] {
+  const groups = new Map<string, T[]>()
+  for (const file of files) {
+    const unit = file.unit ?? join(root, relative(root, file.path).split(sep).slice(0, -1)[0] ?? '')
+    const group = groups.get(unit) ?? []; group.push(file); groups.set(unit, group)
+  }
+  return interleave(groups.values(), files.length)
+}
 const refFor = (file: SourceRecord['files'][number]) => `file:${file.id}:${file.fingerprint}`
 const errorCode = (error: unknown) => error instanceof Error && /^(?:knowledge_busy|ingest_failed|source_busy)$/u.test(error.message) ? error.message : 'source_unavailable'
 
@@ -93,9 +104,15 @@ export class LocalDirectorySources {
     return null
   }
   evidenceSnapshot(): {ref: string; summary: string}[] {
-    return this.#records.filter(record => !record.deleting).flatMap(record => record.files.filter(file => file.valid).slice(-8).map(file => ({
-      ref: refFor(file), summary: `已授权本地文件：${relative(record.view.path, file.path).slice(0, 160)}`,
-    }))).slice(-8)
+    const fingerprints = new Set<string>()
+    return interleave(this.#records.filter(record => !record.deleting).map(record =>
+      balanced(record.files.filter(file => file.valid), record.view.path).map(file => ({
+        ref: refFor(file), fingerprint: file.fingerprint,
+        summary: `已授权本地文件：${relative(record.view.path, file.path).slice(0, 160)}`,
+      }))), Infinity).filter(file => {
+        if (fingerprints.has(file.fingerprint)) return false
+        fingerprints.add(file.fingerprint); return true
+      }).slice(0, 8).map(({ref, summary}) => ({ref, summary}))
   }
   command(method: string, params: unknown): Promise<unknown> {
     // Revocation fences the current ingestion immediately, before waiting for serialized commands.
@@ -174,31 +191,43 @@ export class LocalDirectorySources {
     const beforeObservation = record.observation
     view.scanned = 0; view.read = 0; view.skipped = 0; view.reasons = {}; view.failures = []
     const skip = (reason: string) => {view.skipped++; view.reasons[reason] = (view.reasons[reason] ?? 0) + 1}
-    const files: {path: string; size: number; mtime: number}[] = []
+    const files: {path: string; size: number; mtime: number; unit: string}[] = []
     const seen = new Set<string>(), excluded = new Set([...SOURCE_EXCLUDES, ...view.excludes].map(name => name.toLowerCase()))
-    const directories = [{path: view.path, depth: 0}]
+    const directories = [{path: view.path, depth: 0, project: null as string | null}]
+    const projectEntries = new Map<string, number>()
+    const projects = new Set<string>()
     let complete = true, visited = 0
     try {
       if (await realpath(view.path) !== view.path) throw new Error('path_denied')
       while (directories.length > 0 && visited < 20000) {
         signal.throwIfAborted()
-        const directory = directories.pop()!
+        const directory = directories.shift()!
         if (await realpath(directory.path) !== directory.path) {complete = false; skip('changed_path'); continue}
+        const marker = await lstat(join(directory.path, '.git')).catch(() => null)
+        if (marker && !marker.isSymbolicLink() && (marker.isDirectory() || marker.isFile())) {
+          directory.project = directory.path; projects.add(directory.path)
+        }
         for await (const entry of await opendir(directory.path)) {
           signal.throwIfAborted()
+          if (directory.project) {
+            const count = (projectEntries.get(directory.project) ?? 0) + 1
+            projectEntries.set(directory.project, count)
+            if (count > 2000) {complete = false; skip('project_metadata_limit'); break}
+          }
           if (++visited > 20000) {complete = false; break}
           const path = join(directory.path, entry.name)
           if (excluded.has(entry.name.toLowerCase()) || !policy.allows(path)) {skip('excluded'); continue}
           if (entry.isSymbolicLink()) {skip('symbolic_link'); continue}
           if (entry.isDirectory()) {
-            if (directory.depth < 16) directories.push({path, depth: directory.depth + 1})
+            if (directory.depth < 16) directories.push({path, depth: directory.depth + 1, project: directory.project})
             else {skip('depth_limit'); complete = false}
           } else if (entry.isFile()) {
             view.scanned++; seen.add(path)
+            if (generatedFile(path)) {skip('generated_file'); continue}
             if (!supported.has(extname(path).toLowerCase())) {skip('unsupported_type'); continue}
             const stat = await lstat(path)
             if (!stat.isFile() || stat.isSymbolicLink()) {skip('changed_path'); complete = false; continue}
-            files.push({path, size: stat.size, mtime: stat.mtimeMs})
+            files.push({path, size: stat.size, mtime: stat.mtimeMs, unit: directory.project ?? (directory.depth === 0 ? view.path : join(view.path, relative(view.path, directory.path).split(sep)[0]!))})
           }
         }
       }
@@ -211,10 +240,26 @@ export class LocalDirectorySources {
       }
       const known = new Map((await this.#options.knowledge.listSources()).map(item => [item.locator, item]))
       let bytes = 0
-      for (const file of files.sort((a, b) => Number(overviewDocument(b.path)) - Number(overviewDocument(a.path)) || b.mtime - a.mtime || a.path.localeCompare(b.path))) {
+      const counts = new Map<string, number>()
+      const selected = files.sort((a, b) => Number(overviewDocument(b.path)) - Number(overviewDocument(a.path)) || Number(representativeDocument(b.path)) - Number(representativeDocument(a.path)) || relative(a.unit, a.path).split(sep).length - relative(b.unit, b.path).split(sep).length || b.mtime - a.mtime || a.path.localeCompare(b.path)).filter(file => {
+        const count = (counts.get(file.unit) ?? 0) + 1; counts.set(file.unit, count)
+        // ponytail: Git overview reads eight documents; task-directed retrieval owns deeper investigation.
+        if (projects.has(file.unit) && count > 8) {skip('project_budget'); return false}
+        return true
+      })
+      const selectedPaths = new Set(selected.map(file => file.path))
+      // Budgeting must not keep a changed, no-longer-selected version authoritative.
+      for (const file of files) {
+        const previous = record.files.find(old => old.path === file.path)
+        if (previous && !selectedPaths.has(file.path) && (previous.mtime !== file.mtime || previous.size !== file.size)) {
+          signal.throwIfAborted(); previous.valid = false; await this.#save(); await this.#removeFile(record, previous)
+        }
+      }
+      for (const file of balanced(selected, view.path)) {
         signal.throwIfAborted()
         const previous = record.files.find(old => old.path === file.path)
-        if (previous?.valid && previous.mtime === file.mtime && previous.size === file.size && known.has(file.path) && (!overviewDocument(file.path) || previous.excerpt !== null)) continue
+        if (previous) previous.unit = file.unit
+        if (previous?.valid && previous.mtime === file.mtime && previous.size === file.size && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) continue
         if (previous?.valid) {
           previous.valid = false
           await this.#save()
@@ -229,7 +274,7 @@ export class LocalDirectorySources {
         if (record.files.length >= 20000 && !previous) {skip('index_limit'); continue}
         try {
           if (await realpath(file.path) !== file.path) {skip('changed_path'); continue}
-          record.pending = {...file, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
+          record.pending = {path: file.path, size: file.size, mtime: file.mtime, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
           await this.#save()
           const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent)
           const indexed = (await this.#options.knowledge.listSources()).find(item => item.id === result.id)
@@ -250,12 +295,12 @@ export class LocalDirectorySources {
       view.state = view.failures.length > 0 ? 'error' : 'connected'; view.last_sync = new Date().toISOString()
       // Scan statistics belong in source settings, not in the user's memory.
       if (record.observation) {await this.#options.onInvalidate?.(view.id); record.observation = ''; await this.#save()}
-      for (const file of record.files.filter(file => file.valid && overviewDocument(file.path)).slice(0, 8)) {
+      for (const file of balanced(record.files.filter(file => file.valid && !file.observed && representativeDocument(file.path) && selectedPaths.has(file.path)), view.path).slice(0, 8)) {
         signal.throwIfAborted()
         if (file.observed || !file.excerpt || !this.#options.onObserve) continue
         if (!file.observation_ref) {file.observation_ref = randomUUID(); await this.#save()}
         const document = relative(view.path, file.path), project = dirname(document) === '.' ? basename(view.path) : dirname(document)
-        const context = `文档 ${basename(view.path)}/${document}`.slice(0, 100) + '：'
+        const context = `文档 ${basename(view.path)}/${document}`.slice(0, 100) + '（资料摘录；作者与当前承诺未确认）：'
         await this.#options.onObserve({source_ref: {type: 'file', ref: file.observation_ref, observed_at: view.last_sync},
           ...(record.processing_consent?{processing_consent:record.processing_consent}:{}),content: context + file.excerpt.slice(0, 500 - context.length), topic: project.slice(0, 80), ...(file.evidence_ids ? {evidence_ids: file.evidence_ids} : {})})
         file.observed = true

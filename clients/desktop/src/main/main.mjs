@@ -1,6 +1,6 @@
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
-import {setLanguage, currentLanguage, t} from '../renderer/locale.mjs'
+import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure} from './desktop-startup.mjs'
 import {FeishuConnector, VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
@@ -532,7 +532,8 @@ const managedPhone = createManagedPhoneService({
     try { initializeServerToken(tokenFile) } catch (error) { if (error.code !== 'EEXIST') throw error }
     const environment = {NOVA_AUDIO_AGENT_SERVER_PORT: '19876', NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: tokenFile}
     phoneConfig = loadServerConfig(environment)
-    const spec = backendLaunchSpec({backend: 'node', nodeEntry: entry,
+    const spec = backendLaunchSpec({
+      newsLanguage: preferredLanguage(app.getPreferredSystemLanguages()),backend: 'node', nodeEntry: entry,
       nodeResourcesPath: app.isPackaged ? process.resourcesPath : resolve(packageRoot, 'build'),
       workspace: desktopConfig?.workspace || process.cwd(), token: phoneConfig.token,
       readyEndpoint: '127.0.0.1:1', parentEnv: process.env, settings: currentSettings,
@@ -977,6 +978,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
       // Proxy discovery is best-effort. Explicit HTTP(S)_PROXY values still flow through parentEnv.
     }
     const spec = backendLaunchSpec({
+      newsLanguage: preferredLanguage(app.getPreferredSystemLanguages()),
       backend: backendKind,
       nodeEntry: nodeRuntimeEntry({
         isPackaged: app.isPackaged,

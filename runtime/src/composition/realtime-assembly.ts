@@ -345,6 +345,7 @@ export class RealtimeAssembly {
     this.#unbindSuggestionSelected = input.unbindSuggestionSelected
     this.#sharedPersonal = input.sharedPersonal !== undefined
     this.personalAgent = input.sharedPersonal?.host ?? new PersonalAgentHost({
+      newsLanguage: input.core.personalAgentConfig?.newsLanguage ?? 'en',
       path: input.core.personalAgentConfig?.path ?? join(realpathSync(tmpdir()), `nova-personal-${randomUUID()}.json`),
       userScope: input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
       pool: input.core.runtime.core.suggestions,

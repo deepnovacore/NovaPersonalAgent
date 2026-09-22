@@ -1,12 +1,16 @@
 import {createHash} from 'node:crypto'
 import {SaxesParser} from 'saxes'
-export interface NewsSource {id:string;name:string;url:string}
+export interface NewsSource {id:string;name:string;url:string;language?:'zh-CN'|'en'}
 export interface Article {id:string;source_id:string;title:string;summary:string;url:string;published_at:string|null;first_seen:string;content_hash:string}
 export const NEWS_SOURCES:NewsSource[]=[
- {id:'bbc',name:'BBC News',url:'https://feeds.bbci.co.uk/news/rss.xml'},
- {id:'guardian',name:'The Guardian · Technology',url:'https://www.theguardian.com/technology/rss'},
- {id:'ithome',name:'IT之家',url:'https://www.ithome.com/rss/'},
+ {id:'bbc',name:'BBC News',url:'https://feeds.bbci.co.uk/news/rss.xml',language:'en'},
+ {id:'guardian',name:'The Guardian · Technology',url:'https://www.theguardian.com/uk/technology/rss',language:'en'},
+ {id:'ithome',name:'IT之家',url:'https://www.ithome.com/rss/',language:'zh-CN'},
+ {id:'sspai',name:'少数派',url:'https://sspai.com/feed',language:'zh-CN'},
+ {id:'solidot',name:'Solidot',url:'https://www.solidot.org/index.rss',language:'zh-CN'},
+ {id:'36kr',name:'36氪',url:'https://www.36kr.com/feed',language:'zh-CN'},
 ]
+export const newsLanguage=(locale:string):'zh-CN'|'en'=>/^zh(?:[-_]|$)/iu.test(locale)?'zh-CN':'en'
 export const digest=(text:string)=>createHash('sha256').update(text).digest('hex')
 export function articleUrl(value:string):string|null{
  try{const u=new URL(value);if(value.length>4096||!['http:','https:'].includes(u.protocol)||u.username||u.password)return null

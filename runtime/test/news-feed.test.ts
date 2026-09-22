@@ -65,3 +65,16 @@ test('news conversion input is explicit, immutable, and rejects stale article co
   assert.throws(()=>service.conversionInput({...params,kind:'profile'}))
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('Chinese and non-Chinese systems fetch only their native-language catalog without cross-language fallback',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-language-'))
+ try{for(const language of ['zh-CN','zh-Hant-TW','en-US','ja-JP']){
+  const urls:string[]=[];const options={path:join(dir,language+'.json'),language,fetcher:(url:Parameters<typeof fetch>[0])=>{urls.push(typeof url==='string'?url:url instanceof URL?url.href:url.url);return Promise.resolve(new Response('offline',{status:503}))}}
+  const news=new NewsService(options);await news.open();try{await news.configure({enabled:true,interests:['graphics'],explore:true});await news.refresh();assert.ok(urls.length>=2);if(language.startsWith('zh'))assert.ok(urls.every(u=>!u.includes('bbc')&&!u.includes('theguardian')));else assert.ok(urls.every(u=>!u.includes('ithome')&&!u.includes('sspai')&&!u.includes('solidot')&&!u.includes('36kr')))}finally{await news.close()}
+ }}finally{await rm(dir,{recursive:true,force:true})}
+})
+test('language restart hides foreign cached and saved items without deleting user saves',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-switch-')),path=join(dir,'news.json');const make=(language:string)=>new NewsService({path,language,fetcher:()=>Promise.resolve(new Response(xml))})
+ let news=make('en');await news.open()
+ try{await news.configure({enabled:true,interests:['AI'],explore:false});await news.refresh();const row=news.snapshot().items[0]!;await news.action({action:'save',id:row.id,value:true});await news.close();news=make('zh-CN');await news.open();assert.equal(news.snapshot().items.length,0);assert.equal(news.snapshot().saved.length,0);assert.equal(news.snapshot().pending,0);assert.throws(()=>news.conversionInput({id:row.id,content_hash:row.content_hash,kind:'idea',title:'Old language'}),/article_not_found/);await news.close();news=make('en');await news.open();assert.ok(news.snapshot().saved.some(a=>a.id===row.id))}finally{await news.close();await rm(dir,{recursive:true,force:true})}
+})
