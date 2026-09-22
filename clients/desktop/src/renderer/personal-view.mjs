@@ -9,7 +9,7 @@ const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!=
 const PAGE_TITLE=Object.fromEntries(RAIL_ITEMS.map(item=>[item.id,`${item.label} · ${item.title}`]))
 /** The workbench: icon rail, personal-object pages in the middle, Nova as a collapsible pane on the right. */
 export function mountPersonalView({send,start,stop,tasks,taskAction,results,openResults,api,applyPresentation}) {
- const lifeLocal={},newsLocal={}
+ const lifeLocal={},newsLocal={},preferencesLocal={}
  let unreadProjection=null
  const root=el('main',undefined,'workbench personal-workspace');root.id='personal-workspace';document.body.prepend(root)
  const run=async(action)=>{try{c.error='';await action()}catch(e){c.error=e.message;if(c.presentationMode==='background')void api.personal.showPresentationError?.(e.message);if(/conflict|version/i.test(e.message)&&c.connected)await c.command('state').catch(()=>{})}update()}
@@ -44,6 +44,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const continueChat=text=>chat.focusDraft(`关于「${text}」：`)
  let renderedSnapshot=null,taskRevision=-1
  function renderPanel(){
+  const focused=panel.contains?.(document.activeElement)?document.activeElement:null,focusLabel=focused?.getAttribute?.('aria-label'),focusText=focused?.tagName==='BUTTON'?focused.textContent:null
   panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
   const s=c.snapshot;const caps=s?.capabilities??{}
   if(selected!=='tasks'){
@@ -63,15 +64,16 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
    renderLife(panel,{kind:({todos:'todo',ideas:'idea',goals:'goal'})[selected],state:s?.life,openArticle:url=>api.personal.openArticle(url),command:(m,p)=>c.command(m,p),button,run,local:lifeLocal,rerender:renderPanel,delegate:text=>chat.focusDraft(text)})
    if(selected==='todos')button('查看 Agent 执行任务',()=>{selected='tasks';renderPanel()},panel).className='link-button'
   }else if(selected==='feeds'){
-   renderNews(panel,{news:s?.news,command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings})
+   renderNews(panel,{news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings})
   }else if(selected==='tasks'){
    renderTasksPage(panel,{tasks,taskAction,results,openResults,card,chips,button,askProgress:task=>{const feed=c.snapshot?.feed?.find(item=>item.task_ref?.work_id===task.work_id);if(!feed)return continueChat(`${task.title} · ${task.work_id}`);return c.openFeed(feed.id,'询问任务进展').then(result=>{chat.reveal();return result})}})
    button('任务控制与结果',openResults,panel).className='link-button'
   }else if(selected==='profile'){
-   renderProfile(panel,{state:s?.life,news:s?.news,command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
+   renderProfile(panel,{state:s?.life,news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    renderMemorySection(panel,{snapshot:s,caps,el,button,chips,command:(m,p)=>c.command(m,p),continueChat,connected:c.connected,local:lifeLocal})
   }
   for(const b of panel.querySelectorAll('button'))if(!c.connected)b.disabled=true
+  if(focusLabel||focusText){const target=[...panel.querySelectorAll('button,input,textarea,select')].find(node=>focusLabel?node.getAttribute('aria-label')===focusLabel:node.textContent===focusText);if(target&&!target.disabled)target.focus?.({preventScroll:true})}
  }
  function update(){
   document.body.dataset.personalCollapsed=String(c.collapsed)

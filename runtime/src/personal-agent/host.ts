@@ -1,4 +1,5 @@
 import {WorkbenchContext,type ContextGenerator,type ContextEntry} from './workbench-context.js'
+import {ProfileWarmup,type ProfileGenerator} from './profile-warmup.js'
 import {interleave} from './sampling.js';
 import type {CodingTarget, CodingTargetPort} from './coding-targets.js'
 import type {ApprovalView} from '../core/approval-port.js'
@@ -64,6 +65,7 @@ export interface HostOptions {
     generateContext?: ContextGenerator;
     newsLanguage?: string;
     rankNews?: NewsRanker;
+    generateProfile?: ProfileGenerator;
     understand?: UnderstandingPipeline;
     context?: () => ContextView;
     path: string;
@@ -110,6 +112,7 @@ export class PersonalAgentHost {
     readonly workbenchContext:WorkbenchContext;
     readonly understanding:PersonalUnderstanding;
     readonly news: NewsService;
+    readonly profileWarmup: ProfileWarmup;
     readonly life: LifeService;
     #voiceTransition=false;
     #clearingConversations=new Set<string>();
@@ -263,7 +266,7 @@ export class PersonalAgentHost {
         this.#overviewRun = run;
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
-    constructor(readonly options: HostOptions) { this.workbenchContext=new WorkbenchContext(options.path+'.context.json',options.generateContext?async(entries,signal)=>{const allowed=[...await this.authorizedGenerationEntries(this.#memory.entries),...(this.#sources?.contextEntries?.()??[])];if(entries.some(e=>!allowed.some(a=>a.id===e.id&&a.version===e.version)))throw Error('processing_consent_required');return options.generateContext!(entries,signal)}:undefined,()=>this.#notify()); this.#store = new PersonalStore(options.path); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.()); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
+    constructor(readonly options: HostOptions) { this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',options.generateProfile?async(entries,signal)=>{const memory=options.memory(),current=await Promise.all(entries.map(e=>memory?.get?.(e.id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];if(entries.some(e=>!allowed.some(a=>a.id===e.id&&a.version===e.version)))throw Error('processing_consent_required');signal.throwIfAborted();return options.generateProfile!(entries,signal)}:undefined,()=>this.#notify()); this.workbenchContext=new WorkbenchContext(options.path+'.context.json',options.generateContext?async(entries,signal)=>{const current=await Promise.all(entries.map(e=>options.memory()?.get?.(e.id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];if(entries.some(e=>!allowed.some(a=>a.id===e.id&&a.version===e.version)))throw Error('processing_consent_required');return options.generateContext!(entries,signal)}:undefined,()=>this.#notify()); this.#store = new PersonalStore(options.path); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.()); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -289,6 +292,7 @@ export class PersonalAgentHost {
             await this.workbenchContext.open();
             await this.life.open();
             await this.news.open();
+            await this.profileWarmup.open();
             await this.#sources?.open?.();
             await this.#feishu?.open();
             await this.#connectors?.open();
@@ -317,6 +321,7 @@ export class PersonalAgentHost {
             await this.workbenchContext.close();
             await this.understanding.close();
             await this.news.close();
+            await this.profileWarmup.close();
             await this.life.close();
             await this.#connectors?.close().catch(() => { /* connector shutdown cannot block remaining resources */ });
             await this.#feishu?.close().catch(() => { /* optional connector failure must not prevent runtime shutdown */ });
@@ -388,8 +393,11 @@ export class PersonalAgentHost {
         const page = memory?.list ? await memory.list({ ...(cursor ? { cursor } : {}), limit,...(includeExpired?{include_expired:true}:{}) }) : {entries: [], cursor: null};
         const pending_purges=await memory?.pendingPurges?.()??[];
         if (refresh !== this.#memoryRefresh || !this.#opened) return;
-        const authorized = await this.authorizedGenerationEntries(page.entries);
-        if (refresh !== this.#memoryRefresh || !this.#opened) return;
+        const initialPage=cursor&&memory?.list?await memory.list({limit:100}):page;
+        if(refresh!==this.#memoryRefresh||!this.#opened)return;
+        const authorized=await this.authorizedGenerationEntries(initialPage.entries);
+        if(refresh!==this.#memoryRefresh||!this.#opened)return;
+        this.profileWarmup.update([...authorized.filter(memoryEligibleForDiscovery),...(this.#sources?.contextEntries?.()??[]).map(e=>({...e,origin:'inferred' as const}))]);
         this.workbenchContext.update([...authorized.filter(memoryEligibleForDiscovery),...(this.#sources?.contextEntries?.()??[])]);
         const key = hash(page);
         this.#overviewAbort.abort();
@@ -398,7 +406,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, workbench_context:this.workbenchContext.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, workbench_context:this.workbenchContext.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), conversations:this.conversationSnapshot(), news:this.news.snapshot(),profile_preparation:this.profileWarmup.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         const selected=next.conversations.items.find(c=>c.id===next.conversations.selected_id),latest=selected?.messages.findLast(m=>m.role==='user');
@@ -486,6 +494,7 @@ export class PersonalAgentHost {
                 this.options.pool.withdraw(item.suggestion_id);
         } await this.#commit(next); }); }
     sourceChanged(change?:SourceChange):Promise<void>{
+        this.profileWarmup.invalidate();this.#notify();
         if(change){const q=z.object({revision:z.number().int().positive(),phase:z.enum(['invalidated','ready'])}).strict().parse(change);if(q.phase==='invalidated')this.#sourcePending.invalidated=Math.max(this.#sourcePending.invalidated,q.revision);else if(!this.#sourceSeen.ready.has(q.revision))this.#sourcePending.ready.add(q.revision)}else this.#sourcePending.legacy=true;
         if(this.#sourceDrain)return this.#sourceDrain;
         const work=Promise.resolve().then(async()=>{
@@ -592,6 +601,7 @@ export class PersonalAgentHost {
             data = this.snapshot();
         }
         else if(command.method==='context.dismiss'){const q=z.object({id:z.string().min(1).max(128)}).strict().parse(p);await this.workbenchContext.dismiss(q.id);data={ok:true}}
+        else if(command.method==='profile.refresh'){z.object({}).strict().parse(p);void this.profileWarmup.refresh(true);data={ok:true};}
         else if(command.method==='understanding.start'){this.understanding.start();data=this.understanding.snapshot();}
         else if(command.method==='understanding.action')data=await this.understanding.action(p);
         else if (command.method==='life.mutate') {if(p.op==='from_news')throw Error('news_conversion_command_required');data=await this.life.mutate(p,command.request_id);}
@@ -635,7 +645,8 @@ export class PersonalAgentHost {
             const q=z.object({id:z.string().min(1).max(512),expected_version:versionSchema}).strict().parse(p);
             if(!m?.purgeEntry)throw Error('unsupported');
             this.#invalidateOverview();this.#overviewCache=undefined;
-            await this.workbenchContext.close();
+            await this.workbenchContext.clear();
+            await this.profileWarmup.clear();
             await this.understanding.close();this.understanding.reopen();
             let purged=await m.purgeEntry(q.id,q.expected_version,command.request_id);
             if(purged.index_evidence_ids?.length&&m.completePurgeIndex){
@@ -670,6 +681,7 @@ export class PersonalAgentHost {
             const q = z.object({ id: z.string().min(1).max(256), expected_version: versionSchema, content: z.string().trim().min(1).max(500).optional() }).strict().parse(p);
             this.#invalidateOverview();
             this.#overviewCache = undefined;
+            await this.profileWarmup.clear();
             if (command.method === 'memory.correct') {
                 if (!m?.correct || !q.content)
                     throw Error('unsupported');

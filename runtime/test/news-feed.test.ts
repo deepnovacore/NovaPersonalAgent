@@ -78,3 +78,21 @@ test('language restart hides foreign cached and saved items without deleting use
  let news=make('en');await news.open()
  try{await news.configure({enabled:true,interests:['AI'],explore:false});await news.refresh();const row=news.snapshot().items[0]!;await news.action({action:'save',id:row.id,value:true});await news.close();news=make('zh-CN');await news.open();assert.equal(news.snapshot().items.length,0);assert.equal(news.snapshot().saved.length,0);assert.equal(news.snapshot().pending,0);assert.throws(()=>news.conversionInput({id:row.id,content_hash:row.content_hash,kind:'idea',title:'Old language'}),/article_not_found/);await news.close();news=make('en');await news.open();assert.ok(news.snapshot().saved.some(a=>a.id===row.id))}finally{await news.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('stale preference edits cannot re-enable updates after the user pauses them',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-config-')),service=new NewsService({path:join(dir,'news.json')})
+ try{await service.open();await service.configure({enabled:true,explore:true,interests:['AI']});const version=service.snapshot().profile_version
+  await service.configure({enabled:false,explore:true,interests:['AI'],expected_version:version})
+  await assert.rejects(service.configure({enabled:true,explore:false,interests:['AI'],expected_version:version}),/version_conflict/)
+  assert.equal(service.snapshot().enabled,false)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('first explicit empty preference save is durable and advances its version',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-empty-')),service=new NewsService({path:join(dir,'news.json')})
+ try{await service.open();await service.configure({enabled:false,explore:true,interests:[],expected_version:0});assert.equal(service.snapshot().profile_version,1);assert.deepEqual(service.snapshot().interests,[])
+  await service.close();await service.open();assert.equal(service.snapshot().profile_version,1);assert.deepEqual(service.snapshot().interests,[])
+  await assert.rejects(service.configure({enabled:true,explore:true,interests:['AI'],expected_version:0}),/version_conflict/)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})

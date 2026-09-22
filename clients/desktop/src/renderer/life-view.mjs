@@ -1,3 +1,4 @@
+import {renderInterests,renderWarmup} from './profile-preferences.mjs'
 const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n}
 const labels={todo:'待办',idea:'想法',goal:'目标'}
 const statuses={todo:{open:'待办',doing:'进行中',waiting:'等待他人',done:'已完成',cancelled:'已取消'},idea:{active:'保留',archived:'已归档'},goal:{active:'推进中',paused:'已暂停',completed:'已达成',archived:'已归档'}}
@@ -31,15 +32,24 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
   if(kind==='todo'&&!['done','cancelled'].includes(row.status))button('请 Nova 协助',()=>delegate(`请帮我处理待办「${row.title}」。${row.note}。先和我确认处理方式。`),card)
  }
 }
-export function renderProfile(panel,{state,news,command,button,local,rerender}){
- panel.append(el('h2','Profile · 关于我'),el('p','由你明确填写的信息；新闻阅读和收藏不会自动改写这里。'))
- const draft=local.profile??={about:state?.profile?.about??'',version:state?.profile?.version??0}
- const about=el('textarea');about.value=draft.about;about.maxLength=4000;about.setAttribute('aria-label','关于我');about.addEventListener('input',()=>{draft.about=about.value});panel.append(about)
- button('保存个人介绍',async()=>{await command('life.mutate',{op:'profile',expected_version:draft.version,about:draft.about});delete local.profile;rerender()},panel)
- panel.append(el('h3','资讯兴趣'),el('p','一行一个主题，最多 8 个。只把这些主题与公开新闻摘要发送给推荐模型。'))
- const interestDraft=local.interests??={text:(news?.interests??[]).map(i=>i.text).join('\n'),enabled:news?.enabled??false,explore:news?.explore??true,version:news?.profile_version??0}
- const interests=el('textarea');interests.value=interestDraft.text;interests.setAttribute('aria-label','资讯兴趣');interests.maxLength=808;interests.addEventListener('input',()=>{interestDraft.text=interests.value});panel.append(interests)
- for(const [key,label]of [['enabled','启用资讯获取与推荐'],['explore','允许少量探索内容']]){const wrapper=el('label',label),input=el('input');input.type='checkbox';input.checked=interestDraft[key];input.addEventListener('change',()=>{interestDraft[key]=input.checked});wrapper.append(input);panel.append(wrapper)}
- button('保存兴趣与开关',async()=>{await command('news.configure',{interests:interestDraft.text.split('\n').map(s=>s.trim()).filter(Boolean),enabled:interestDraft.enabled,explore:interestDraft.explore,expected_version:interestDraft.version});delete local.interests;rerender()},panel)
- for(const interest of news?.interests??[]){const row=el('p',`${interest.text} · 推荐权重 ${interest.weight}`);button('恢复默认权重',()=>command('news.action',{action:'weight',interest_id:interest.id,value:1}),row);panel.append(row)}
+export function renderProfile(panel,{state,news,warmup,command,button,local,preferencesLocal=local,rerender,delegate}){
+ panel.append(el('h2','Profile · 关于我'))
+ renderWarmup(panel,{warmup,command,button})
+ const card=el('section');card.className='preference-card';panel.append(card)
+ const confirmed=state?.profile?.about??'',suggested=state?.profile?.version>0?'':warmup?.draft?.about?.text??'',about=confirmed||suggested
+ card.append(el('h3','关于我'))
+ if(local.profile){
+  const draft=local.profile,input=el('textarea');input.value=draft.about;input.maxLength=4000;input.setAttribute('aria-label','关于我');input.addEventListener('input',()=>{draft.about=input.value});card.append(input)
+  const actions=el('div');actions.className='preference-actions';card.append(actions)
+  button('保存介绍',async()=>{await command('life.mutate',{op:'profile',expected_version:draft.version,about:draft.about});delete local.profile;rerender()},actions).className='page-add'
+  button('取消编辑',()=>{delete local.profile;rerender()},actions)
+ }else{
+  const caption=el('p',confirmed?'你已确认的信息':suggested?'根据已授权资料生成 · 尚未确认为个人信息':'随着你使用 Nova，这里会逐渐形成介绍。也可以随时补充一句。');caption.className='preference-caption';card.append(caption)
+  if(about){const preview=el('p',about);preview.className='profile-preview';card.append(preview)}
+  const actions=el('div');actions.className='preference-actions';card.append(actions)
+  if(!confirmed&&suggested)button('确认介绍',()=>command('life.mutate',{op:'profile',expected_version:state?.profile?.version??0,about:suggested}),actions).className='page-add'
+  button(about?'编辑介绍':'补充一句',()=>{local.profile={about,version:state?.profile?.version??0};rerender()},actions)
+  if(delegate)button('和 Nova 聊聊',()=>delegate('我想完善个人介绍，请根据已有资料和我一起调整。'),actions)
+ }
+ renderInterests(panel,{news,warmup,command,button,local:preferencesLocal,rerender,delegate})
 }

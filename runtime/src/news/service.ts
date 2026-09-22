@@ -19,7 +19,7 @@ export class NewsService{
  async close(){this.#opened=false;clearInterval(this.#timer);this.#abort.abort();await this.#run?.catch(()=>{/* optional cleanup/observer */});await this.#tail}
  async configure(raw:unknown){const value=z.object({enabled:z.boolean(),interests:z.array(z.string().trim().min(1).max(100)).max(8),explore:z.boolean(),expected_version:z.number().int().optional()}).strict().refine(v=>!v.enabled||v.interests.length>0,'interests_required').parse(raw)
   return this.#serial(async()=>{if(value.expected_version!==undefined&&value.expected_version!==this.#state.profile_version)throw Error('version_conflict');const next=structuredClone(this.#state);const texts=[...new Set(value.interests)];const interests=texts.map(text=>({id:digest(text).slice(0,16),text,weight:next.interests.find(i=>i.text===text)?.weight??1}))
-   if(JSON.stringify(interests.map(i=>i.text).sort())!==JSON.stringify(next.interests.map(i=>i.text).sort()))next.profile_version++
+   if(next.profile_version===0||value.enabled!==next.enabled||value.explore!==next.explore||JSON.stringify(interests.map(i=>i.text).sort())!==JSON.stringify(next.interests.map(i=>i.text).sort()))next.profile_version++
    Object.assign(next,{enabled:value.enabled,explore:value.explore,interests,rank_error:null});await this.#save(next)
   })
  }

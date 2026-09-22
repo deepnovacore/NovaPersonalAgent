@@ -15,6 +15,7 @@ export class WorkbenchContext{
  constructor(path:string,readonly generate:ContextGenerator|undefined,readonly changed:()=>void){this.#store=new BoundedJsonStore(path,diskSchema)}
  async open(){this.#state=await this.#store.read(this.#state);this.#opened=true;this.#abort=new AbortController()}
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#abort.abort();await this.#run;await this.#tail}
+ async clear(){const reopen=this.#opened;await this.close();this.#entries=[];await this.#write(next=>{next.cards=[];next.key='';next.dismissed=[]});this.#abort=new AbortController();this.#opened=reopen;this.#status='idle'}
  #valid(card:ContextCards['cards'][number]){return card.refs.every(ref=>this.#entries.some(e=>e.id===ref.entry_id&&e.version===ref.version))}
  snapshot(){return {status:this.#status,cards:this.#state.cards.filter(c=>this.#valid(c)&&!this.#state.dismissed.includes(keyOf(c))).map(c=>({...structuredClone(c),id:keyOf(c),refs:c.refs.map(ref=>({...ref,label:this.#entries.find(e=>e.id===ref.entry_id)?.content.slice(0,700)??ref.entry_id}))}))}}
  #write(fn:(next:z.infer<typeof diskSchema>)=>void){const run=this.#tail.then(async()=>{const next=structuredClone(this.#state);fn(next);await this.#store.write(next);this.#state=next;this.changed()});this.#tail=run.catch(()=>undefined);return run}

@@ -16,6 +16,7 @@ test('automatic cards are grounded, persistent, dismissible, and disappear after
   await context.refresh();assert.equal(calls,1)
   const id=context.snapshot().cards[0]!.id;await context.dismiss(id);assert.equal(context.snapshot().cards.length,0)
   await context.close();const reopened=new WorkbenchContext(path,generate,()=>undefined);await reopened.open();reopened.update([entry]);assert.equal(reopened.snapshot().cards.length,0);await reopened.close()
+  await context.open();context.update([entry]);await context.clear();assert.equal(context.snapshot().cards.length,0);context.update([entry]);await context.refresh();assert.equal(context.snapshot().cards.length,1,'clearing private drafts does not disable future generation');
   const invalid=new WorkbenchContext(join(dir,'invalid.json'),()=>Promise.resolve({cards:[{tab:'profile',title:'Invalid',body:'Missing source',refs:[{entry_id:'invented',version:1}]}]}),()=>undefined)
   await invalid.open();invalid.update([entry]);await invalid.refresh();assert.equal(invalid.snapshot().cards.length,0);assert.equal(invalid.snapshot().status,'failed');await invalid.close()
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
