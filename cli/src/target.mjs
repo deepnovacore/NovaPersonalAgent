@@ -1,10 +1,15 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const PRODUCT_VERSION = '0.2.0'
+export const PRODUCT_VERSION = '0.2.2'
 export const RELEASE_REPOSITORY = 'deepnovacore/NovaAudioAgent'
 
 const DEFINITIONS = Object.freeze({
+  'linux-x64': Object.freeze({
+    artifact: `nova-audio-agent-${PRODUCT_VERSION}-linux-x64.AppImage`,
+    executable: 'nova-audio-agent.AppImage',
+    archive: 'file',
+  }),
   'darwin-arm64': Object.freeze({
     artifact: `nova-audio-agent-${PRODUCT_VERSION}-macos-arm64-app.zip`,
     executable: 'Nova Audio Agent Desktop.app/Contents/MacOS/Nova Audio Agent Desktop',

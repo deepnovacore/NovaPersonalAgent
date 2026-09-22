@@ -1,14 +1,20 @@
 # 远程服务
 
-在 Mac 上以 Node 服务运行 Nova，通过私有 Tailscale 网络连接 iPhone，无需 Electron。服务默认使用 `relay` 媒体模式，通过 `/client/v1` 提供连接；远程会话不支持原生摄像头采集。
+在 Ubuntu 22.04+ x64 或 Mac 上以 Node 服务运行 Nova，通过私有 Tailscale 网络连接 iPhone，无需 Electron。服务默认使用 `relay` 媒体模式，通过 `/client/v1` 提供连接；远程会话不支持原生摄像头采集。
 
 桌面用户可直接从 Nova 菜单选择“连接 iPhone…”，参见 [iPhone 指南](../iphone.md)。下面介绍独立管理服务的方式。
 
 请为服务准备独立的可写工作区与状态目录。若要复用桌面端的状态，先退出桌面实例，避免两个运行时同时写入。桌面托管的手机服务使用单独的 `phone` 目录，可以与桌面端共存。
 
-远程凭据存储依赖 POSIX 属主和私有文件权限，当前不支持 Windows 远程宿主；这不影响 Windows 桌面应用。本文以 macOS 为部署环境，不涵盖 Linux 部署。
+远程凭据存储依赖 POSIX 属主和私有文件权限，当前不支持 Windows 远程宿主；这不影响 Windows 桌面应用。npm 包面向 Ubuntu 22.04+ x64，macOS 可使用源码入口；下文 launchd 示例仅适用于 macOS。
 
-## 构建与配置
+## 通过 npm 安装
+
+使用 Node.js >=22.14.0，运行 `npm install --global nova-audio-agent-server`。按下文配置环境后，运行 `novaaudio-server token-init`，再运行 `novaaudio-server --env-file /absolute/path/server.env start`。另开交互终端，使用相同配置运行 `novaaudio-server --env-file /absolute/path/server.env pair wss://your-host.ts.net` 显示一次性二维码（SSH 需加 `-t`）。无需 Electron 或图形会话。
+
+Ubuntu 下直接使用已安装的 `tailscale` 命令完成下文的私有 WSS 配置；服务可在前台运行，也可由进程管理器以相同用户和显式环境文件托管。
+
+## 构建与配置（源码方式）
 
 使用 Node >=22.13，并确保检出目录已安装常规工作区依赖。构建需与桌面端串行执行，因为两者都会写入 `runtime/dist`：
 
@@ -30,7 +36,7 @@ npm run server:token-init --workspace @nova-audio-agent/runtime
 
 初始化会生成一个随机的 128 位小写十六进制 token，权限为 0600，并拒绝覆盖任何已存在的文件。加载器拒绝相对路径、符号链接、非普通文件、非本用户属主，以及 0600 以外的权限。设备独立凭据请使用下方二维码配对。手动兜底方式是在本机读取该文件，再把 token 填入手机端由 Keychain 支持的连接设置；不要把它放进 URL、shell 参数、日志或 Git。
 
-模型/执行器配置需显式写入私有环境文件，例如 `$HOME/.nova-remote/server.env`（0600），沿用既有的 Runtime 环境变量约定。该文件是 Node `--env-file` 文件，不是 shell 脚本，需写绝对路径，不会展开 `$HOME`/`~`。至少配置所需的 pipeline 及其凭据。使用 Codex 还需设置 `NOVA_AUDIO_AGENT_EXECUTORS=codex`、绝对路径的 `NOVA_AUDIO_AGENT_CODEX_WORKSPACE`，并把 `NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT` 指向预期的私有状态目录。无界面入口不读取 Electron Settings，也不从 cwd 推断项目。Codex 登录及可执行文件/资源路径配置必须对运行该服务的同一 macOS 用户可用；GUI 应用的环境变量不会被继承。
+模型/执行器配置需显式写入私有环境文件，例如 `$HOME/.nova-remote/server.env`（0600），沿用既有的 Runtime 环境变量约定。该文件是 Node `--env-file` 文件，不是 shell 脚本，需写绝对路径，不会展开 `$HOME`/`~`。至少配置所需的 pipeline 及其凭据。使用 Codex 还需设置 `NOVA_AUDIO_AGENT_EXECUTORS=codex`、绝对路径的 `NOVA_AUDIO_AGENT_CODEX_WORKSPACE`，并把 `NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT` 指向预期的私有状态目录。无界面入口不读取 Electron Settings，也不从 cwd 推断项目。Codex 登录及可执行文件/资源路径配置必须对运行该服务的同一用户可用；GUI 应用的环境变量不会被继承。
 
 兼容管线见[支持矩阵](../support-matrix.md)。远程音频使用单声道 PCM16 LE，输入 16000 Hz、输出 24000 Hz；不兼容的格式会被拒绝。
 

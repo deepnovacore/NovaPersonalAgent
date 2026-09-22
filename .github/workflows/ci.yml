@@ -34,14 +34,25 @@ jobs:
       - run: npm run test:runtime:win:platform
         if: runner.os == 'Windows'
       - run: npm run test:live:contract --workspace @nova-audio-agent/runtime
+      - run: npm run test:server-cli
       - run: npm run test:cli
       # npm may restore the Electron package without its platform binary from
       # cache. The pinned install script is idempotent and closes that gap.
       - run: node clients/desktop/node_modules/electron/install.js
+      - name: Configure Linux V8 header compatibility
+        if: runner.os == 'Linux'
+        run: echo "CXXFLAGS=-UV8_DEPRECATION_WARNINGS" >> "$GITHUB_ENV"
       - run: npm run test:desktop
       - run: npm run smoke:capability-status --workspace @nova-audio-agent/desktop
         if: runner.os == 'macOS'
       - run: npm run build
+      - name: Verify installed headless npm package
+        if: runner.os == 'Linux'
+        run: |
+          umask 077
+          tarball="$(node scripts/pack-server.mjs server-candidate)"
+          npm install --prefix server-smoke "$tarball"
+          node scripts/verify-server-package.mjs server-smoke/node_modules/.bin/novaaudio-server
 
   package:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -57,6 +68,9 @@ jobs:
           - os: windows-latest
             script: package:win
             artifact: nova-audio-agent-desktop-win
+          - os: ubuntu-22.04
+            script: package:linux
+            artifact: nova-audio-agent-desktop-linux
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -68,8 +82,14 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm install --global npm@11.6.0
       - run: npm ci
+      - name: Prepare Linux packaging
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y g++-12 xvfb libasound2 libgtk-3-0 libnss3 libgbm1 libsecret-1-0
+          echo "CXX=g++-12" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=-UV8_DEPRECATION_WARNINGS" >> "$GITHUB_ENV"
       - run: npm run ${{ matrix.script }}
-      - run: npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned
+      - run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

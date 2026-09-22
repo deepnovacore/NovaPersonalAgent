@@ -62,6 +62,8 @@ test('Codex sandbox probe resolves only the fixed manifest-bound executable', as
     assert.equal(codexSandboxProbePathForTest(loaded!), probe)
 
     if (process.platform !== 'win32') {
+      await chmod(probe, 0o700)
+      assert.notEqual(loadCodexSandboxProbeFromResources({resourcesPath: root, platform: 'darwin', arch: 'arm64'}), null)
       await chmod(probe, 0o644)
       assert.equal(loadCodexSandboxProbeFromResources({
         resourcesPath: root,

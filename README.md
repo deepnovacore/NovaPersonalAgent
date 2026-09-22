@@ -16,7 +16,10 @@
 
 ## News
 
-- **2026-09-20 · v0.2.0**
+- **2026-09-21 · 🎉 [v0.2.2 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — Ubuntu 22.04+ x64 joins macOS and Windows, with npm desktop installation and the new `nova-audio-agent-server` package for headless hosting and terminal QR pairing.
+
+- **2026-09-21 ·** **🎉 [v0.2.0 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)**
+  Configurable voice pipelines, personal memory, and a bilingual desktop experience, now available for macOS and Windows.
   - Cross-platform approvals for sandbox network access and command execution.
   - A leaner voice layer; workspace/session scheduling moves into the coding executor.
   - Pluggable ASR / LLM / TTS pipelines, decoupled from QwenAudioRealtime.
@@ -125,7 +128,7 @@ Codex transport).
 Besides the shipped app from releases, you can also install using npm
 
 ```bash
-npm install --global nova-audio-agent@0.2.0
+npm install --global nova-audio-agent@0.2.2
 # open the shipped app
 novaaudio
 # open the settings panel in the app
@@ -134,6 +137,7 @@ novaaudio config
 novaaudio doctor
 ```
 
+Headless Ubuntu 22.04+: install `nova-audio-agent-server` with npm, configure it and initialize credentials; run `novaaudio-server start` and, in a second terminal, `novaaudio-server pair wss://your-host.ts.net` for a one-use QR. See the [configuration guide](docs/en/deployment/remote-server.md).
 
 For development from source:
 
@@ -180,7 +184,7 @@ Ongoing development uses `v0.3.0dev`; `main` remains the released baseline.
 - [ ] **v0.3.0:** bring text and voice into one main window with conversation, activity, task and memory views; add memory-grounded suggestions and follow-up; make personal memories traceable, correctable and removable; connect user-authorized folders, email, calendars and Feishu conversations.
 - [ ] **v0.4.0:** expand coding backends with Kimi Code and pi agent; add a GUI executor with AutoGLM as the first example, enabling collaboration across specialist agents.
 
-Releases require feature and supported-platform acceptance. Linux packages remain outside the release scope; Ubuntu source tests continue.
+Releases require feature and supported-platform acceptance. Ubuntu 22.04+ x64 desktop and headless npm packages are included in the candidate release checks.
 
 ## 6. Contribution
 

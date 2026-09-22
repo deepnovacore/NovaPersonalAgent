@@ -1,14 +1,20 @@
 # Remote service
 
-Run Nova as a Node service on your Mac and connect from an iPhone over a private Tailscale network. Electron is not required. The service uses the `relay` media mode by default and exposes `/client/v1`; native camera capture is unavailable in remote sessions.
+Run Nova as a Node service on Ubuntu 22.04+ x64 or your Mac and connect from an iPhone over a private Tailscale network. Electron is not required. The service uses the `relay` media mode by default and exposes `/client/v1`; native camera capture is unavailable in remote sessions.
 
 For the simplest desktop setup, use **Connect iPhone…** from Nova's menu; see the [iPhone guide](../iphone.md). The instructions below are for a separately managed service.
 
 Use a dedicated writable workspace and state directory. Stop the desktop instance before starting another runtime against the same state. The desktop-managed phone service uses a separate `phone` directory and may coexist.
 
-Remote credential storage requires POSIX ownership and private file permissions. Windows remote hosting is unsupported; this does not affect the Windows desktop application. This guide targets macOS; Linux hosting is not covered.
+Remote credential storage requires POSIX ownership and private file permissions. Windows remote hosting is unsupported; this does not affect the Windows desktop application. The npm package targets Ubuntu 22.04+ x64; macOS can use the source entry; the launchd example below is macOS-only.
 
-## Build and configure
+## Install from npm
+
+Use Node.js >=22.14.0 and `npm install --global nova-audio-agent-server`. After setting the environment below, use `novaaudio-server token-init`, then `novaaudio-server --env-file /absolute/path/server.env start`. In a second interactive terminal with the same configuration, run `novaaudio-server --env-file /absolute/path/server.env pair wss://your-host.ts.net` for the one-use QR (SSH needs `-t`). No Electron or display session is needed.
+
+On Ubuntu, invoke the installed `tailscale` CLI directly for the private WSS setup below. Run the service in the foreground or under your process supervisor with the same user and explicit environment file.
+
+## Build and configure (source alternative)
 
 Use Node >=22.13 and a checkout with its normal workspace dependencies installed.
 Run builds serially with desktop work because both builds write `runtime/dist`:
@@ -45,7 +51,7 @@ absolute `NOVA_AUDIO_AGENT_CODEX_WORKSPACE`. Set
 `NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT` to the intended private state directory.
 The headless entry does not read Electron Settings or infer a project from cwd.
 Codex login and any executable/resource-path configuration must be available to the
-same macOS user running the service; a GUI application's environment is not inherited.
+same user running the service; a GUI application's environment is not inherited.
 
 Choose a compatible pipeline from the [support matrix](../support-matrix.md). Remote audio uses mono PCM16 LE at 16000 Hz input and 24000 Hz output; incompatible formats are rejected.
 

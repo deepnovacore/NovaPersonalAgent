@@ -160,7 +160,7 @@ async function extractArtifact({artifact, payload, target, platform}) {
   if (platform === 'darwin') {
     await run('/usr/bin/ditto', ['-x', '-k', artifact, payload])
   } else {
-    await run(platform === 'win32' ? 'tar.exe' : 'tar', ['-xf', artifact, '-C', payload])
+    await run(platform === 'win32' ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar', ['-xf', artifact, '-C', payload])
   }
   const executable = resolve(payload, target.executable)
   const executableRelative = relative(resolve(payload), executable)

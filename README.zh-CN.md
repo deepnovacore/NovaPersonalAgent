@@ -18,7 +18,10 @@ https://github.com/user-attachments/assets/061697f3-fff6-47d6-924b-8a29eef4ab45
 
 ## News
 
-- **2026-09-20 · v0.2.0**
+- **2026-09-21 · 🎉 [v0.2.2 已发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — 新增 Ubuntu 22.04+ x64 桌面 npm 安装与启动，以及支持终端二维码配对的无头服务包 `nova-audio-agent-server`；继续支持 macOS 和 Windows。
+
+- **2026-09-21 ·** **🎉 [v0.2.0 正式发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)**
+  可配置语音管线、个人记忆与双语桌面体验，现已提供 macOS 和 Windows 版本。
   - 完善跨平台审批：沙箱网络访问、命令执行等请求转交前台确认。
   - 精简快脑工具，将 workspace/session 调度下沉至编码执行器。
   - 接入可配置 ASR / LLM / TTS 的级联管线，协议与 QwenAudioRealtime 解耦。
@@ -124,13 +127,15 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 
 ```bash
 # 全局安装
-npm install --global nova-audio-agent@0.2.0
+npm install --global nova-audio-agent@0.2.2
 # 启动客户端
 novaaudio
 # 打开设置面板（配置 dashscope 和 tavily api key）
 novaaudio config
 novaaudio doctor
 ```
+
+无头 Ubuntu 22.04+：通过 npm 安装 `nova-audio-agent-server`，完成配置与凭据初始化后运行 `novaaudio-server start`；另开终端运行 `novaaudio-server pair wss://your-host.ts.net` 显示一次性配对二维码。配置见[远程服务指南](docs/zh-CN/deployment/remote-server.md)。
 
 从源码开发时：
 
@@ -176,7 +181,7 @@ Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia`
 - [ ] **v0.3.0：** 将文字与语音整合进主窗口，提供对话、动态、任务和记忆视图；围绕记忆发现需求、提出建议并持续跟进；让个人记忆可追溯、可纠正、可删除；接入用户授权的目录、邮件、日历和飞书会话。
 - [ ] **v0.4.0：** 扩展 Kimi Code、pi agent 等 coding 后端；以 AutoGLM 为首个示例接入 GUI 执行器，支持专长 Agent 之间的协作。
 
-发布前须完成功能与支持平台验收。Linux 暂不发布安装包，保留 Ubuntu 源码测试。
+发布前须完成功能与支持平台验收。Ubuntu 22.04+ x64 桌面端与无头 npm 包纳入候选发布验收。
 
 ## 6. 贡献
 

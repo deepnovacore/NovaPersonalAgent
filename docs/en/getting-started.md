@@ -10,9 +10,9 @@ Native components also need a platform toolchain:
 
 - macOS: Xcode Command Line Tools (`xcode-select --install`).
 - Windows: Visual Studio Build Tools with **Desktop development with C++**.
-- Linux: a C compiler and X11 or XWayland for the desktop.
+- Ubuntu 22.04+ x64: a C/C++20 compiler (GCC 12 or newer), X11 or XWayland, and permission to use Chromium user namespaces.
 
-Desktop targets macOS and Windows. Linux is available for source use.
+Desktop targets macOS arm64, Windows x64, and Ubuntu 22.04+ x64.
 
 ## 2. Install and start
 

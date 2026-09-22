@@ -35,6 +35,6 @@ iPhone starts in realtime mode. Hosts supporting cascaded editable input also of
 
 Coding needs a working, signed-in Codex installation. Model and search services need credentials. Local memory and document knowledge can still send text to remote models.
 
-Memory inspection has no edit or delete buttons. Phone use needs the computer online; phone cameras and background wake words are not supported. Desktop targets macOS and Windows; Linux supports source use.
+Memory inspection has no edit or delete buttons. Phone use needs the computer online; phone cameras and background wake words are not supported. Desktop targets macOS arm64, Windows x64, and Ubuntu 22.04+ x64.
 
 [Get started](getting-started.md) · [Personal memory](personal-memory.md) · [Connect iPhone](iphone.md)

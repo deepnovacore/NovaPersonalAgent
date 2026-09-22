@@ -33,8 +33,8 @@ test('current docs state the Node release truth and do not advertise retired cap
   }
   const gettingStarted = documents.find(item => item.file === 'docs/en/getting-started.md')!.text
   assert.match(documents.find(item => item.file === 'docs/en/archs/06-verification.md')!.text, /Node\.js and TypeScript[^\n]*only product runtime/iu)
-  assert.match(gettingStarted, /Desktop targets macOS and Windows/iu)
-  assert.match(gettingStarted, /Linux is available for source use/iu)
+  assert.match(gettingStarted, /Desktop targets macOS arm64, Windows x64, and Ubuntu 22\.04\+ x64/iu)
+  assert.doesNotMatch(gettingStarted, /Linux is available for source use/iu)
 })
 
 test('audio pipeline docs distinguish the selectable topology, credentials, and deferred settings effects', async () => {
