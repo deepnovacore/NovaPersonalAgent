@@ -181,6 +181,14 @@ test('real scoped task executor survives conversation clear, targeted input and 
   assert.equal(cleared.ok,true)
   assert.equal(value.adapter.running().length,1,'clear must not abort the real project adapter')
   assert.equal(value.factory.transports[1]?.closeCalls,0)
+  let notifications=0;const unsubscribe=host.subscribe(()=>notifications++)
+  value.factory.transports[1].observers[0]!.onActivity?.({thread_id:'thread-existing',turn_id:'turn:2',item_id:'message:2',stage:'completed',kind:'message',sender:'executor',text:'Retained worker update',refs:[]})
+  await until(()=>host.tasks.events(task.id,0).items.some(event=>event.text==='Retained worker update'))
+  const page=await host.command({type:'personal.command',request_id:'activity-page',method:'tasks.get',params:{task_id:task.id,after:0}},{client_id:'client'}) as {ok:boolean;data:{events:{items:{text:string;work_id:string;session_id:string;thread_id:string}[]};capabilities:{detail:string}}}
+  const publicItem=page.data.events.items.find(event=>event.text==='Retained worker update')!
+  assert.equal(publicItem.session_id,session.session_id);assert.equal(publicItem.thread_id,'thread-existing')
+  assert.ok(host.tasks.get(task.id).work_ids.includes(publicItem.work_id));assert.equal(page.data.capabilities.detail,'public-events');assert.ok(notifications>0);unsubscribe()
+
   assert.equal(hostCodexHomeValue(value.factory.bindings[1].codexHome).path,originalHome)
   const cancelled=await host.command({type:'personal.command',request_id:'stop',method:'tasks.cancel',params:{...fence,control_revision:1}},{client_id:'client'}) as {ok:boolean}
   assert.equal(cancelled.ok,true)

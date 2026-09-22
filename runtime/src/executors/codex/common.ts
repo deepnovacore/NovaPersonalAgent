@@ -20,6 +20,7 @@ import {
 } from './contract.js'
 import {snapshotJsonRecord} from './safe-json.js'
 import type {
+  ExecutorActivity,
   ExecutorDispatchContext,
   ExecutorHandoff,
   ExecutorProgress,
@@ -221,6 +222,7 @@ export class CodexAdapterCore {
     })
 
     const observer = {
+      onActivity:(event:ExecutorActivity):void=>{if(observerOpen&&this.#runToken===runToken)context.activity?.(event)},
       onThreadReady: (): void => {
         if (!observerOpen || this.#runToken !== runToken) return
         processStarted = true

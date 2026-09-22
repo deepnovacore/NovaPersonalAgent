@@ -25,6 +25,19 @@ export interface ModelPort {
   complete(call: ModelCall, signal: AbortSignal): Promise<unknown>
 }
 
+/** Only protocol-supported public display content, never reasoning or raw protocol payloads. */
+export interface ExecutorActivity {
+ readonly thread_id:string
+ readonly turn_id:string
+ readonly item_id:string
+ readonly stage:'started'|'completed'
+ readonly kind:'message'|'tool'|'artifact'
+ readonly sender?:'executor'|'user-to-executor'
+ readonly text:string
+ readonly refs:string[]
+ readonly text_truncated?:boolean
+}
+
 export interface ExecutorProgress {
   readonly phase: 'started' | 'working'
   readonly internal_activity: number
@@ -61,6 +74,7 @@ export interface ExecutorDispatchContext {
   readonly clock: Clock
   readonly delegate: Delegate
   readonly signal: AbortSignal
+  readonly activity?: (payload: ExecutorActivity) => void
   readonly progress: (payload: ExecutorProgress) => void
   readonly observe?: (payload: ExecutorObservation) => void
   readonly userTurn?: UserTurnAuthority
@@ -562,9 +576,12 @@ export class CausalRuntime {
           return Promise.resolve({outcome: 'refused', trust: 'trusted_system', content: {error: 'superseded'}, refs: []})
         }
         const grant=this.#taskGrants.get(delegate.delegate_id);this.#taskGrants.delete(delegate.delegate_id)
+        const activityTasks=grant?taskGrantService(grant):undefined
+        let activitySession:string|undefined
         const context: ExecutorDispatchContext = {
+        ...(activityTasks?{activity:(item:ExecutorActivity)=>{void activityTasks.appendEvent({task_id:grant!.fence.task_id,work_id:delegate.delegate_id,thread_id:item.thread_id,turn_id:item.turn_id,item_id:item.item_id,stage:item.stage,...(activitySession?{session_id:activitySession}:{}),kind:item.kind,...(item.sender?{sender:item.sender}:{}),text:item.text,refs:item.refs,...(item.text_truncated?{text_truncated:true}:{})},JSON.stringify([delegate.delegate_id,item.thread_id,item.turn_id,item.item_id,item.stage])).catch(()=>{/* display persistence cannot change executor outcome */})}}:{}),
         instructionAccepted:()=>{this.#instructionReceipts.get(delegate.delegate_id)?.('accepted');this.#instructionReceipts.delete(delegate.delegate_id)},
-        ...(grant?{bindSession:async(sessionId:string)=>{const tasks=taskGrantService(grant);await tasks.bindWork(grant.fence,delegate.delegate_id,sessionId)}}:{}),
+        ...(grant?{bindSession:async(sessionId:string)=>{const tasks=taskGrantService(grant);await tasks.bindWork(grant.fence,delegate.delegate_id,sessionId);activitySession=sessionId}}:{}),
         ...(wanted === undefined ? {} : {beforeWrite:()=>{if(!wanted())throw Error('superseded')}}),
         ...(userTurn === undefined ? {} : {userTurn}),
         clock: this.#clock,

@@ -1,5 +1,5 @@
-import {resolve} from 'node:path'
-import type {ExecutorProgress} from '../../core/causal-runtime.js'
+import {isAbsolute,relative,resolve} from 'node:path'
+import type {ExecutorProgress,ExecutorActivity} from '../../core/causal-runtime.js'
 import type {Clock} from '../../core/clock.js'
 import {snapshotJsonRecord} from './safe-json.js'
 import type {CodexLaunchProfile} from './launch-profile.js'
@@ -9,6 +9,7 @@ import {
   CodexProtocolError,
   MAX_FINAL_TEXT_INPUT,
   MAX_INTERNAL_ACTIVITY,
+  MAX_STDOUT,
   SUMMARY_PROSE_LIMIT,
   WORKING_INTERVAL,
 } from './protocol.js'
@@ -23,6 +24,12 @@ export interface TurnCompletion {
 }
 
 export class AppServerTurnProjection {
+  readonly #sanitizePublicText:((text:string)=>string)|undefined
+  readonly #onActivity:((event:ExecutorActivity)=>void)|undefined
+  readonly #publicStages=new Set<string>()
+  #pendingPublic:ExecutorActivity[]=[]
+  #pendingPublicBytes=0
+  #workspace:string|null=null
   readonly #clock: Clock
   readonly #onProgress: ((progress: ExecutorProgress) => void) | undefined
   readonly #workingInterval: number
@@ -46,10 +53,14 @@ export class AppServerTurnProjection {
 
   constructor(options: {
     readonly clock: Clock
+    readonly sanitizePublicText?:(text:string)=>string
+    readonly onActivity?:(event:ExecutorActivity)=>void
     readonly onProgress?: (progress: ExecutorProgress) => void
     readonly workingInterval?: number
     readonly eagerProgress?: boolean
   }) {
+    this.#sanitizePublicText=options.sanitizePublicText
+    this.#onActivity=options.onActivity
     this.#clock = options.clock
     this.#onProgress = options.onProgress
     this.#workingInterval = options.workingInterval ?? WORKING_INTERVAL
@@ -134,6 +145,7 @@ export class AppServerTurnProjection {
         const profile = requireObject(envelope.activePermissionProfile)
         if (profile.id !== 'nova_audio_agent') throw new TypeError('profile')
       }
+      this.#workspace=options.workspace
       this.#threadId = threadId
     } catch {
       throw new CodexProtocolError('unsupported_protocol')
@@ -149,9 +161,12 @@ export class AppServerTurnProjection {
       throw new CodexProtocolError('unsupported_protocol')
     }
     if (this.#notificationTurnId !== null && this.#notificationTurnId !== turnId) {
+      this.#pendingPublic=[];this.#pendingPublicBytes=0
       throw new CodexProtocolError('turn_identity_mismatch')
     }
     this.#responseTurnId = turnId
+    const pending=this.#pendingPublic;this.#pendingPublic=[];this.#pendingPublicBytes=0
+    for(const event of pending)this.#emitActivity(event)
     return turnId
   }
 
@@ -207,6 +222,7 @@ export class AppServerTurnProjection {
 
   #itemStarted(params: Readonly<Record<string, unknown>>): void {
     if (!this.#matchesItem(params)) return
+    this.#publicItem(params.item,'started')
     const startedItem = params.item
     if (
       startedItem.type !== 'fileChange'
@@ -226,6 +242,7 @@ export class AppServerTurnProjection {
 
   #itemCompleted(params: Readonly<Record<string, unknown>>): void {
     if (!this.#matchesItem(params) || this.#startedAt === null) return
+    this.#publicItem(params.item,'completed')
     const completedItem = params.item
     if (typeof completedItem.id === 'string') this.#fileChangeItems.delete(completedItem.id)
     if (completedItem.type === 'agentMessage' && typeof completedItem.text === 'string') {
@@ -264,6 +281,34 @@ export class AppServerTurnProjection {
     })
   }
 
+  #publicItem(item:Readonly<Record<string,unknown>>,stage:'started'|'completed'):void{
+    if(!this.#onActivity)return
+    if(typeof item.id!=='string'||!item.id||item.id.length>512)return
+    const key=JSON.stringify([item.id,stage]);if(this.#publicStages.has(key)||(stage==='started'&&this.#publicStages.has(JSON.stringify([item.id,'completed']))))return
+    let kind:ExecutorActivity['kind'],text:string,sender:ExecutorActivity['sender']
+    if(item.type==='agentMessage'&&typeof item.text==='string'){kind='message';text=item.text;sender='executor'}
+    else if(item.type==='commandExecution'||item.type==='fileChange'||item.type==='mcpToolCall'||item.type==='webSearch'){
+      kind='tool';text=String(item.type)+' '+stage+(typeof item.status==='string'&&['completed','failed','inProgress','declined'].includes(item.status)?': '+item.status:'')
+    }else return
+    this.#publicStages.add(key)
+    const refs:string[]=[]
+    if(item.type==='fileChange'&&Array.isArray(item.changes)&&this.#workspace)for(const change of item.changes){
+      if(!isPlainObject(change)||typeof change.path!=='string')continue
+      const path=relative(this.#workspace,resolve(this.#workspace,change.path))
+      if(path&&!isAbsolute(path)&&path!=='..'&&!path.startsWith('../')&&!/[\p{C}]/u.test(path)&&path.length<=480)refs.push('workspace-file:'+path)
+      if(refs.length===128)break
+    }
+    const originalLength=text.length;text=this.#sanitizePublicText?.(text)??text
+    const event:ExecutorActivity={thread_id:this.#threadId!,turn_id:this.#activeTurnId!,item_id:item.id,stage,kind,...(sender?{sender}:{}),text:text.slice(0,16000),refs,...(originalLength>16000?{text_truncated:true}:{})}
+    if(this.#responseTurnId===null){
+      this.#pendingPublicBytes+=Buffer.byteLength(JSON.stringify(event))
+      if(this.#pendingPublicBytes>MAX_STDOUT){this.#pendingPublic=[];this.#pendingPublicBytes=0;throw new CodexProtocolError('unsupported_protocol')}
+      this.#pendingPublic.push(event)
+    }else this.#emitActivity(event)
+  }
+  #emitActivity(event:ExecutorActivity):void{try{this.#onActivity?.(event)}catch{/* public display is advisory */}}
+
+
   #reduceSummaryItem(item: Readonly<Record<string, unknown>>): void {
     const type = item.type
     if (type === 'agentMessage' || type === 'plan') {
@@ -296,6 +341,7 @@ export class AppServerTurnProjection {
     ) throw new CodexProtocolError('unsupported_protocol')
     let finalText: string | null = null
     for (const candidate of turn.items) {
+      if(isPlainObject(candidate))this.#publicItem(candidate,'completed')
       if (
         isPlainObject(candidate)
         && candidate.type === 'agentMessage'

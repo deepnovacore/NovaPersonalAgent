@@ -1033,14 +1033,15 @@ test('work order, API key, workspace, and controls are redacted from progress an
   const workOrder = 'private-work-order-token'
   const finalText = `${workOrder} api-key-sentinel ${workspace}\u0000 useful result`
   const owner = new MemoryAppServerOwner([], {finalText})
-  const progress: unknown[] = []
+  const progress: unknown[] = [],activity:unknown[]=[]
   const transport = createTransport({spawn: async () => owner})
   const result = await transport.run(
     {workOrder},
-    {onProgress: value => { progress.push(value) }},
+    {onProgress: value => { progress.push(value) },onActivity:value=>{activity.push(value)}},
     {expiresAtMs: Date.now() + 5000},
   )
-  const rendered = JSON.stringify({result, progress})
+  assert.equal(activity.length,1)
+  const rendered = JSON.stringify({result, progress,activity})
   assert.equal(rendered.includes(workOrder), false)
   assert.equal(rendered.includes('api-key-sentinel'), false)
   assert.equal(rendered.includes(workspace), false)
@@ -2835,7 +2836,7 @@ class MemoryAppServerOwner {
     }
     this.#send({method: 'item/completed', params: {
       threadId: this.#options.threadId, turnId: 'turn-1',
-      item: {type: 'agentMessage', text: this.#options.echoSteerInFinal && this.#lastSteer !== null
+      item: {id:'public-message-1',type: 'agentMessage', text: this.#options.echoSteerInFinal && this.#lastSteer !== null
         ? `${this.#options.finalText} ${this.#lastSteer}`
         : this.#options.finalText},
     }})
@@ -3295,4 +3296,15 @@ test('task authority is checked at the final turn/start and turn/steer write bou
     assert.equal(result.written,false)
     factory.owner!.release('turn_start');await running
   }finally{await active.close().catch(()=>undefined);await factory.owner?.killTree().catch(()=>undefined);await factory.owner?.dispose().catch(()=>undefined)}
+})
+
+test('public activity redacts before clipping and never forwards filesystem URLs',async()=>{
+ const workOrder='private-work-order-token',activity: {text:string;text_truncated?:boolean}[]=[]
+ const owner=new MemoryAppServerOwner([],{finalText:'file:///private/secrets '+ 'x'.repeat(15965)+workOrder})
+ const transport=createTransport({spawn:async()=>owner})
+ await transport.run({workOrder},{onActivity:event=>{activity.push(event)}},{expiresAtMs:Date.now()+5000})
+ assert.equal(activity.length,1)
+ assert.equal(activity[0]!.text.includes('file:///'),false)
+ assert.equal(activity[0]!.text.includes('private-work'),false)
+ assert.ok(activity[0]!.text.length<=16000)
 })

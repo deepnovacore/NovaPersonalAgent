@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import type {ExecutorProgress} from '../src/core/causal-runtime.js'
+import type {ExecutorProgress,ExecutorActivity} from '../src/core/causal-runtime.js'
 import {VirtualClock, type Clock} from '../src/core/clock.js'
 import {CodexProtocolError, MAX_FINAL_TEXT_INPUT, MAX_INTERNAL_ACTIVITY} from '../src/executors/codex/protocol.js'
 import {AppServerTurnProjection} from '../src/executors/codex/turn-projection.js'
@@ -423,3 +423,59 @@ for (const eager of [false, true]) {
     assert.ok(!JSON.stringify(events).includes('SECRET'))
   })
 }
+
+test('public projection rejects wrong pairs, hides reasoning, and preserves item stages',()=>{
+ const events: ExecutorActivity[]=[]
+ const projection=new AppServerTurnProjection({clock:new VirtualClock(),onActivity:event=>events.push(event)})
+ projection.bindThread(ephemeralThread(),{workspace:'/workspace'})
+ projection.bindTurnResponse({turn:{id:'PRIVATE-TURN'}})
+ const event={threadId:'PRIVATE-THREAD',turnId:'PRIVATE-TURN',item:{id:'m',type:'agentMessage',text:'Checking'}}
+ projection.notification('item/completed',event)
+ projection.notification('turn/started',{threadId:'PRIVATE-THREAD',turn:{id:'PRIVATE-TURN'}})
+ projection.notification('item/completed',{...event,turnId:'wrong'})
+ item(projection,{id:'reason',type:'reasoning',text:'Never display'})
+ projection.notification('item/started',event)
+ projection.notification('item/started',event)
+ projection.notification('item/completed',event)
+ assert.equal(events.length,2)
+ assert.deepEqual(events.map(event=>event.stage),['started','completed'])
+ assert.ok(events.every(event=>event.sender==='executor'&&event.text==='Checking'))
+ item(projection,{id:'long',type:'agentMessage',text:'x'.repeat(17000)})
+ assert.equal(events.at(-1)?.text.length,16000);assert.equal(events.at(-1)?.text_truncated,true)
+})
+
+test('public file changes retain workspace artifact refs and ignore late started stage',()=>{
+ const events:ExecutorActivity[]=[]
+ const projection=new AppServerTurnProjection({clock:new VirtualClock(),onActivity:event=>events.push(event)})
+ projection.bindThread(ephemeralThread(),{workspace:'/workspace'})
+ projection.bindTurnResponse({turn:{id:'PRIVATE-TURN'}})
+ projection.notification('turn/started',{threadId:'PRIVATE-THREAD',turn:{id:'PRIVATE-TURN'}})
+ const change={id:'file',type:'fileChange',status:'completed',changes:[{path:'/workspace/src/login.ts',kind:{type:'update'}},{path:'/private/secrets',kind:{type:'update'}}]}
+ item(projection,change)
+ projection.notification('item/started',{threadId:'PRIVATE-THREAD',turnId:'PRIVATE-TURN',item:change})
+ assert.equal(events.length,1);assert.deepEqual(events[0]?.refs,['workspace-file:src/login.ts'])
+})
+
+test('turn completion replays public items omitted from item notifications exactly once',()=>{
+ const events:ExecutorActivity[]=[]
+ const projection=new AppServerTurnProjection({clock:new VirtualClock(),onActivity:event=>events.push(event)})
+ projection.bindThread(ephemeralThread(),{workspace:'/workspace'})
+ projection.bindTurnResponse({turn:{id:'PRIVATE-TURN'}})
+ projection.notification('turn/started',{threadId:'PRIVATE-THREAD',turn:{id:'PRIVATE-TURN'}})
+ item(projection,{id:'a',type:'agentMessage',text:'Already seen'})
+ projection.notification('turn/completed',{threadId:'PRIVATE-THREAD',turn:{id:'PRIVATE-TURN',status:'completed',items:[{id:'a',type:'agentMessage',text:'Already seen'},{id:'b',type:'agentMessage',text:'Completion only'}]}})
+ assert.deepEqual(events.map(event=>event.text),['Already seen','Completion only'])
+})
+
+test('public activity waits for turn response identity and mismatched responses never release it',()=>{
+ for(const responseId of ['PRIVATE-TURN','wrong']){
+  const events:ExecutorActivity[]=[]
+  const projection=new AppServerTurnProjection({clock:new VirtualClock(),onActivity:event=>events.push(event)})
+  projection.bindThread(ephemeralThread(),{workspace:'/workspace'})
+  projection.notification('turn/started',{threadId:'PRIVATE-THREAD',turn:{id:'PRIVATE-TURN'}})
+  item(projection,{id:'early',type:'agentMessage',text:'Not yet confirmed'})
+  assert.equal(events.length,0)
+  if(responseId==='wrong'){assert.throws(()=>projection.bindTurnResponse({turn:{id:responseId}}),/turn_identity_mismatch/);assert.equal(events.length,0)}
+  else{projection.bindTurnResponse({turn:{id:responseId}});assert.equal(events.length,1);projection.bindTurnResponse({turn:{id:responseId}});assert.equal(events.length,1)}
+ }
+})
