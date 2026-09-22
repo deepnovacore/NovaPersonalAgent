@@ -1,15 +1,27 @@
+import {renderInterests,renderWarmup} from './profile-preferences.mjs'
 const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n}
-export function renderNews(panel,{news,command,button,local,rerender,profile,openArticle,openSettings}){
- panel.append(el('h2','Feeds · 为你发现'),el('p','根据你确认的兴趣筛选公开资讯。标题和摘录来自订阅源，点击查看原文。'))
- button('编辑兴趣',profile,panel)
- if(!news?.enabled){const notice=el('p','资讯获取已关闭。在 Profile 中启用后可更新；已有收藏和缓存仍可阅读。');notice.className='hint';panel.append(notice);if(openSettings)button('前往设置',()=>openSettings('connections'),panel);if(!news)return}
- const refresh=button(!news.enabled?'已暂停获取':news.refreshing?'正在更新…':'刷新资讯',()=>command('news.refresh'),panel);refresh.disabled=news.refreshing||!news.enabled
- panel.append(el('p',`${news.mode==='personalized'?'兴趣推荐':'时间线（暂无可用个性化评分）'} · ${news.pending} 条待评分${news.rank_error?' · 部分评分未成功，保留已完成推荐，可刷新重试':''}`))
- button(local.saved?'返回推荐':'查看收藏',()=>{local.saved=!local.saved;rerender()},panel)
+export function renderNews(panel,{news,warmup,command,button,local,preferencesLocal=local,rerender,profile,openArticle,delegate}){
+ panel.append(el('h2','Feeds · 为你发现'))
+ renderWarmup(panel,{warmup,command,button})
+ if(!news){const pending=el('p','正在连接资讯…');pending.setAttribute('role','status');panel.append(pending);return}
+ const bar=el('div');bar.className='news-toolbar';panel.append(bar)
+ const tabs=el('div');tabs.className='preference-segments';tabs.setAttribute('role','group');tabs.setAttribute('aria-label','资讯视图');bar.append(tabs)
+ for(const [saved,label]of [[false,'为你推荐'],[true,'收藏']]){const b=button(label,()=>{local.saved=saved;rerender()},tabs);b.setAttribute('aria-pressed',String(Boolean(local.saved)===saved))}
+ if(news.enabled){button(local.preferences?'收起兴趣':'调整兴趣',()=>{local.preferences=!local.preferences;rerender()},bar)
+  const refresh=button(news.refreshing?'正在更新…':'刷新',()=>command('news.refresh'),bar);refresh.disabled=news.refreshing
+ }
+ if(!news.enabled||local.preferences)renderInterests(panel,{news,warmup,command,button,local:preferencesLocal,rerender,delegate})
+ if(!news.enabled&&(news.items.length||news.saved.length)){const note=el('p','资讯更新已暂停，已获取的内容和收藏仍可阅读。');note.className='hint';panel.append(note)}
+ if(news.refreshing){const loading=el('div');loading.className='warmup-status';loading.setAttribute('role','status');const spinner=el('span');spinner.className='warmup-spinner';spinner.setAttribute('aria-hidden','true');loading.append(spinner,el('p',news.items.length?'正在更新，已有内容仍可阅读。':'正在准备第一批资讯…'));panel.append(loading)}
+ const items=local.saved?news.saved:news.items
+ if(!items.length){const empty=el('section');empty.className='news-empty';panel.append(empty)
+  empty.append(el('h3',local.saved?'值得留住的内容，会在这里':!news.enabled?'为你准备一份资讯精选':news.refreshing?'好内容正在路上':'暂时没有新内容'))
+  empty.append(el('p',local.saved?'看到喜欢的文章，点一下收藏。':!news.enabled?'兴趣已准备好，开启资讯即可开始，也可以先调整。':news.refreshing?'你可以继续和 Nova 聊天，稍后回来查看。':news.sources.some(s=>s.error)?'部分来源暂时无法连接，请稍后重试。':'稍后刷新，或调整兴趣试试。'))
+ }
  const sources=el('details');sources.append(el('summary','来源与同步状态'));panel.append(sources)
  for(const source of news.sources){const row=el('div');row.append(el('p',`${source.name} · ${source.blocked?'已屏蔽':source.error?'获取失败：'+source.error:source.last_success?'最近成功：'+new Date(source.last_success).toLocaleString():'尚未获取'} · ${source.count??0} 条`));button(source.blocked?'恢复来源':'屏蔽来源',()=>command('news.action',{action:'block',source_id:source.id,value:!source.blocked}),row);sources.append(row)}
- const items=local.saved?news.saved:news.items
- if(!items.length)panel.append(el('p',local.saved?'尚未收藏资讯。':'暂无可展示资讯。请检查来源状态，或稍后刷新。'))
+ if(news.rank_error)sources.append(el('p','推荐排序暂不可用，先展示已获取的资讯。'))
+ if(!news.items.length&&!news.saved.length&&!news.sources.some(s=>s.error))sources.hidden=true
  for(const item of items){const card=el('article');card.className='personal-card news-card';card.dataset.articleId=item.id;panel.append(card)
   card.append(el('small',`${news.sources.find(s=>s.id===item.source_id)?.name??item.source_id} · ${item.published_at?new Date(item.published_at).toLocaleString():'来源未提供发布时间'}${item.read?' · 已读':''}${item.exploration?' · 探索':''}`),el('h3',item.title));const excerpt=el('p',item.summary);excerpt.className='news-excerpt';card.append(excerpt)
   if(item.ranking?.reason)card.append(el('p',`推荐理由：${item.ranking.reason}`))

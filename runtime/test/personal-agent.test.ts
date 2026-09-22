@@ -379,3 +379,26 @@ test('failed orb transition can retry backlog admission without changing mode ag
   assert.notEqual(f.host.snapshot().feed[0]!.suggestion_id,first)
  }finally{await f.close()}
 })
+
+test('profile warmup generates grounded suggestions without writing facts or enabling news',async()=>{
+ const f=await fixture();await f.host.close();let calls=0
+ f.entries.set('plan',{...entry(),evidence_refs:['e:plan']});const memory={...f.host.options.memory()!,canProcessEvidence:async()=>true}
+ const host=new PersonalAgentHost({...f.host.options,memory:()=>memory,generateProfile:entries=>{calls++;return Promise.resolve({about:null,interests:[{text:'Product design',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]}]})}})
+ try{await host.open();await host.profileWarmup.refresh();const state=host.snapshot();assert.equal(state.profile_preparation.status,'ready');assert.equal(state.life.profile.about,'');assert.equal(state.news.enabled,false);assert.deepEqual(state.news.interests,[])
+  await host.refreshMemory();await host.profileWarmup.refresh();assert.equal(calls,1,'ordinary snapshot reads do not restart warmup')
+  f.entries.clear();await host.sourceChanged();await host.profileWarmup.refresh();assert.equal(host.snapshot().profile_preparation.draft,null)
+ }finally{await host.close();await f.close()}
+})
+
+
+test('profile warmup requires current consent for every evidence reference',async()=>{
+ const f=await fixture();await f.host.close();let allowed=false,calls=0
+ f.entries.set('plan',{...entry(),evidence_refs:['e:plan','e:other']})
+ const memory={...f.host.options.memory()!,canProcessEvidence:async(id:string)=>id==='e:plan'||allowed}
+ const host=new PersonalAgentHost({...f.host.options,memory:()=>memory,generateProfile:async()=>{calls++;return {about:null,interests:[]}}})
+ try{await host.open();await host.profileWarmup.refresh();assert.equal(calls,0,'one revoked evidence denies automatic generation');assert.equal(host.snapshot().memory.entries.length,1,'local visibility remains available')
+  allowed=true;await host.refreshMemory();await host.profileWarmup.refresh();assert.equal(calls,1)
+  allowed=false;await host.profileWarmup.refresh(true);assert.equal(calls,1,'explicit retry rechecks consent immediately before sending')
+  await host.sourceChanged();assert.equal(host.profileWarmup.snapshot().draft,null)
+ }finally{await host.close();await f.close()}
+})
