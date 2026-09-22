@@ -30,6 +30,7 @@ export interface McpServerConfig {
   readonly args?: readonly string[]
   readonly env?: Readonly<Record<string, string>>
   readonly tools: Readonly<Record<string, McpToolConfig>>
+  readonly computerUse?: {readonly resource:string|null}
   readonly exposeTo: {readonly frontbrain: boolean; readonly codex: boolean}
 }
 export interface SearchMcpConfig {
@@ -203,7 +204,9 @@ export function parseCapabilityRegistry(input: unknown, environment: Environment
   frontbrainToolBudget: integer(document.frontbrainToolBudget, DEFAULT_FRONTBRAIN_TOOL_BUDGET, 256, 'frontbrainToolBudget')}
 }
 function parseServer(value: unknown, environment: Environment): McpServerConfig {
-  const config = object(value, 'server', ['enabled', 'transport', 'url', 'headers', 'command', 'args', 'env', 'tools', 'exposeTo'])
+  const config = object(value, 'server', ['enabled', 'transport', 'url', 'headers', 'command', 'args', 'env', 'tools', 'exposeTo', 'computerUse'])
+  const physical=config.computerUse===undefined?undefined:object(config.computerUse,'server.computerUse',['resource'])
+  const computerUse=physical===undefined?{}:{computerUse:{resource:physical.resource===null?null:string(physical.resource,'server.computerUse.resource',512).trim()}}
   const enabled = bool(config.enabled, true, 'server.enabled')
   const transport = config.transport
   if (transport !== 'streamable-http' && transport !== 'stdio') invalid('server.transport')
@@ -226,7 +229,7 @@ function parseServer(value: unknown, environment: Environment): McpServerConfig 
     const headers = enabled ? interpolateMap(rawHeaders, environment) : rawHeaders
     const url = enabled ? interpolateCapabilityValue(rawUrl, environment) : rawUrl
     if (enabled) validateMcpEndpoint(url, headers)
-    return {enabled, transport, url, urlInterpolated: /\$\{[A-Za-z_][A-Za-z0-9_]*\}/u.test(rawUrl), headers, tools, exposeTo}
+    return {...computerUse, enabled, transport, url, urlInterpolated: /\$\{[A-Za-z_][A-Za-z0-9_]*\}/u.test(rawUrl), headers, tools, exposeTo}
   }
   if (config.url !== undefined || config.headers !== undefined) invalid('server.transport_fields')
   const command = string(config.command, 'server.command')
@@ -234,7 +237,7 @@ function parseServer(value: unknown, environment: Environment): McpServerConfig 
   if (!Array.isArray(args) || args.length > 64 || args.some(arg => typeof arg !== 'string' || arg.length > 8192 || arg.includes('\0'))) invalid('server.args')
   const env = stringMap(config.env, 'server.env')
   if (Object.keys(env).some(key => !ENV_NAME.test(key))) invalid('server.env')
-  return {enabled, transport, command, args: args as string[], env: enabled ? interpolateMap(env, environment) : env, tools, exposeTo}
+  return {...computerUse, enabled, transport, command, args: args as string[], env: enabled ? interpolateMap(env, environment) : env, tools, exposeTo}
 }
 export function loadCapabilityRegistry(options: {readonly environment?: Environment; readonly path?: string; readonly home?: string} = {}): CapabilityRegistry {
   const environment = options.environment ?? process.env

@@ -13,7 +13,7 @@ import type {NewsRanker} from '../news/ranking.js';
 import type {SourceChange} from '../memory-substrate/source-state.js'
 import type {WakeReason} from '../core/slots.js';
 import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
-import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool, type ConversationRuntimeFactory} from './conversations.js';
+import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool, type ConversationRuntimeFactory,type ConversationRuntime} from './conversations.js';
 import type {UnifiedRetrieval,UnifiedRetrievalResult} from '../memory/retrieval.js';
 import {validateMemoryOverview, type MemoryOverview} from './memory-overview.js';
 import type { ContextView } from '../core/context-view.js';
@@ -87,6 +87,7 @@ const hash = (s: unknown): string => createHash('sha256').update(JSON.stringify(
 export type PresentationMode = 'background' | 'workbench' | 'orb'
 export interface PresentedDecision {approval_id?:string|undefined;conversation_id?:string|undefined;proposal_id?:string|undefined}
 export interface TaskRuntimePort {
+ recover?(task:TaskRecord):Promise<string|null>
  routes?():readonly string[]
  readonly detail?:'public-events'|'summary-only'
  ready?(task:TaskRecord):boolean
@@ -98,13 +99,40 @@ export interface TaskRuntimePort {
 }
 export class PersonalAgentHost {
     readonly taskLoop:TaskLoop;
-    wakeTask(taskId:string):Promise<void>{return this.taskLoop.wake(taskId)}
-    async taskOutcome(workId:string,outcome:string,content:unknown,refs:string[]=[]):Promise<void>{const task=this.tasks.list().find(task=>task.work_ids.includes(workId));if(!task)return;await this.tasks.recordWorkOutcome(workId,outcome,content,refs);await this.wakeTask(task.id)}
-    async cancelTask(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{const task=await this.tasks.cancel(requestId,fence,actor);try{this.taskRuntime(task.id).cancelTask?.(task.id)}catch{/* no attached runtime */}if(task.work_ids.length){const port=this.taskRuntime(task.id);for(const work of task.work_ids)port.cancel(work)}return task}
+    wakeTask(taskId:string):Promise<void>{if(this.#recovering||this.#recoveryBlocked.has(taskId))return Promise.resolve();return this.taskLoop.wake(taskId)}
+    async taskOutcome(workId:string,outcome:string,content:unknown,refs:string[]=[]):Promise<void>{const task=this.tasks.list().find(task=>task.work_ids.includes(workId));if(!task)return;await this.tasks.recordWorkOutcome(workId,outcome,content,refs);if(this.#recoveryBlocked.has(task.id))await this.recoverTasks();else await this.wakeTask(task.id)}
+    async cancelTask(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{const task=await this.tasks.cancel(requestId,fence,actor);try{const port=this.taskRuntime(task.id);port.cancelTask?.(task.id);for(const work of this.tasks.activeWork(task.id))port.cancel(work)}catch{/* durable cancellation intent remains pending until the original executor confirms stop */}return task}
+    #recovering=false;
+    #recoveryBlocked=new Set<string>();
+    #recoveryFactory:ConversationRuntimeFactory|undefined;
+    #recoveredRuntimes:ConversationRuntime[]=[];
+    async recoverTasks():Promise<void>{
+      if(this.#recovering)return;this.#recovering=true;
+      try{
+        const groups=new Map<string,TaskRecord[]>();
+        for(const task of this.tasks.list()){if(task.phase==='completed'||task.phase==='cancelled'&&!this.tasks.activeWork(task.id).length&&!task.pending_delivery)continue;const key=task.conversation_id+':'+task.conversation_generation;const group=groups.get(key)??[];group.push(task);groups.set(key,group)}
+        for(const group of groups.values()){const first=group[0]!;let unavailable:string|null=null;
+          try{this.taskRuntime(first.id)}catch{
+            const original=this.#state.conversations.items.find(item=>item.id===first.conversation_id);
+            if(first.conversation_generation===undefined||!original)unavailable='task_origin_unavailable';
+            else if(!this.#recoveryFactory)unavailable='task_runtime_unavailable';
+            else try{const restored={...structuredClone(original),generation:first.conversation_generation,messages:original.generation===first.conversation_generation?original.messages:[],prepared:null,coding_target:null};if(original.generation===first.conversation_generation&&this.#conversationPool)await this.#conversationPool.restore(restored);else{const runtime=await this.#recoveryFactory(restored,()=>{/* retired generation never repopulates foreground history */},'text',this.#abort.signal,true);this.#recoveredRuntimes.push(runtime)}}catch(error){unavailable=error instanceof Error&&error.message.startsWith('task_')?error.message:'task_runtime_recovery_unavailable'}
+          }
+          for(const task of group){let reason=unavailable;
+            if(!reason)try{reason=await this.taskRuntime(task.id).recover?.(task)??null}catch{reason='task_session_recovery_unavailable'}
+            reason=task.waiting_reason==='work_fence_unavailable'?'work_fence_unavailable':task.pending_delivery?'task_delivery_uncertain':this.tasks.pendingEffect(task.id)||this.tasks.inputReceipts(task.id).some(item=>item.status==='unknown')||this.tasks.evidence(task.id).some(item=>item.outcome==='unknown')?'uncertain_recovery':reason;
+            if(!reason&&this.tasks.activeWork(task.id).length)reason='task_work_recovery_unavailable';
+            if(reason)this.#recoveryBlocked.add(task.id);else this.#recoveryBlocked.delete(task.id);
+            await this.tasks.recoveryWait(task.id,reason);
+          }
+        }
+      }finally{this.#recovering=false}
+      for(const task of this.tasks.list())if(task.phase==='completed'||task.controller.kind==='nova')void this.wakeTask(task.id);
+    }
     #taskRuntimes=new Map<string,TaskRuntimePort>();
     attachTaskRuntime(conversationId:string,generation:number,port:TaskRuntimePort):()=>void{const key=conversationId+':'+generation;this.#taskRuntimes.set(key,port);return()=>{if(this.#taskRuntimes.get(key)===port)this.#taskRuntimes.delete(key)}}
     taskRuntime(taskId:string):TaskRuntimePort{const task=this.tasks.get(taskId),port=this.#taskRuntimes.get(task.conversation_id+':'+(task.conversation_generation??0));if(!port)throw Error('task_runtime_unavailable');return port}
-    taskCapabilities(taskId:string){try{const port=this.taskRuntime(taskId);return {detail:port.detail??'summary-only',input:true}}catch{return {detail:'summary-only' as const,input:false}}}
+    taskCapabilities(taskId:string){try{const port=this.taskRuntime(taskId);return {detail:port.detail??'summary-only',input:true,todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}catch{return {detail:'summary-only' as const,input:false,todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}}
     continueTask(grant:TaskDispatchContext,instruction:string,sessionId?:string):Promise<unknown>{this.tasks.validateContinuation(grant);return this.taskRuntime(grant.fence.task_id).dispatch(grant,instruction,sessionId)}
 
     #codingTargets:CodingTargetPort|undefined;
@@ -146,8 +174,10 @@ export class PersonalAgentHost {
     #announcementTail:Promise<void>=Promise.resolve();
     #conversationPool: ConversationRuntimePool | undefined;
     setConversationRuntime(factory:ConversationRuntimeFactory,emit:(frame:Record<string,unknown>)=>void):void {
+        this.#recoveryFactory=factory;
         this.#conversationEmit=emit;
         this.#conversationPool=new ConversationRuntimePool(factory,frame=>{emit(frame);void this.#persistConversationFrame(frame).catch(()=>{ /* retry via next snapshot */ })});
+        if(this.#opened&&this.tasks.list().length)void this.recoverTasks();
     }
     async #persistConversationFrame(frame:Record<string,unknown>):Promise<void>{
         const background=frame.type==='conversation.completed';
@@ -290,7 +320,7 @@ export class PersonalAgentHost {
         this.#overviewRun = run;
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
-    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify()); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{ready:task=>{try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}let grant:TaskDispatchContext;try{grant=this.tasks.continuationContext(fence);this.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}await this.continueTask(grant,instruction)},publish:task=>this.taskResult('verified:'+task.id+':'+task.goal_revision,'任务已完成：'+task.goal,task),syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
+    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify()); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{ready:task=>{if(this.#recovering||this.#recoveryBlocked.has(task.id))return false;try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}let grant:TaskDispatchContext;try{grant=this.tasks.continuationContext(fence);this.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}await this.continueTask(grant,instruction)},publish:task=>this.taskResult('verified:'+task.id+':'+task.goal_revision,'任务已完成：'+task.goal,task),syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -315,6 +345,7 @@ export class PersonalAgentHost {
             this.understanding.reopen();
             await this.life.open();
             await this.tasks.open();
+            await this.recoverTasks();
             await this.news.open();
             await this.#sources?.open?.();
             await this.#feishu?.open();
@@ -334,6 +365,7 @@ export class PersonalAgentHost {
     async close(): Promise<void> {
         const loopClosed=this.taskLoop.close();
         await this.#conversationPool?.close();
+        await Promise.allSettled(this.#recoveredRuntimes.map(runtime=>runtime.close()));this.#recoveredRuntimes=[];
         await loopClosed;
         await Promise.allSettled([...this.#taskInputRuns]);
         this.#opened = false;
@@ -594,6 +626,7 @@ export class PersonalAgentHost {
     command(raw: unknown, context?:PersonalCommandContext): Promise<unknown> { const parsed = personalCommandSchema.parse(raw); if (!this.#opened || this.#pendingCommands >= 8)
         return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context));if(parsed.method==='tasks.input'){this.#taskInputRuns.add(run);void run.finally(()=>{this.#taskInputRuns.delete(run);this.#pendingCommands--}).catch(()=>{ /* caller receives rejection */ });return run} this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
+        if(this.#recovering&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};
         const taskCommand=command.method.startsWith('tasks.'),scoped=taskCommand||command.method==='presentation.set';
         const client=context?.client_id;
         if(taskCommand&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
@@ -620,6 +653,8 @@ export class PersonalAgentHost {
                 const {action,...fence}=q;
                 if(action==='takeover'&&context?.can_takeover===false)throw Error('task_control_unavailable');
                 data=await this.tasks.controlClient(receiptId,fence,client!,action);
+            }else if(command.method==='tasks.continue'&&this.tasks.get(taskFenceSchema.parse(p).task_id).phase==='completed'){
+                const fence=taskFenceSchema.parse(p),task=this.tasks.get(fence.task_id);this.tasks.assertCurrent(fence,task.controller);if(task.todo_sync==='pending')await this.wakeTask(task.id);data=this.tasks.get(task.id);
             }else{
                 const q=command.method==='tasks.input'?taskFenceSchema.extend({session_id:z.string().trim().min(1).max(512),text:z.string().trim().min(1).max(16000)}).strict().parse(p):taskFenceSchema.parse(p);
                 const fence={task_id:q.task_id,control_revision:q.control_revision,goal_revision:q.goal_revision};
@@ -629,8 +664,7 @@ export class PersonalAgentHost {
                     if(!this.#taskRuntimes.size)throw Error('task_input_unavailable');const port=this.taskRuntime(q.task_id),session=q.session_id,text=q.text;
                     const status=await this.tasks.input(receiptId,fence,{kind:'user',client_id:client!},session,text,grant=>port.input(grant,session,text));if(status!=='accepted')throw Error('task_input_'+status);data={status};
                 }else if(command.method==='tasks.cancel'){
-                    const port=this.tasks.get(q.task_id).work_ids.length?this.taskRuntime(q.task_id):undefined,task=await this.tasks.cancel(receiptId,fence,{kind:'user',client_id:client!});
-                    try{this.taskRuntime(task.id).cancelTask?.(task.id)}catch{/* no attached runtime */}for(const work of task.work_ids)port!.cancel(work);
+                    const task=await this.cancelTask(receiptId,fence,{kind:'user',client_id:client!});
                     data=task;
                 }else if(command.method==='tasks.continue'){data=await this.tasks.continue(receiptId,fence,{kind:'user',client_id:client!});void this.wakeTask(q.task_id)}else throw Error('task_execution_unavailable');
             }

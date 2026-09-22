@@ -1,3 +1,4 @@
+import type {TaskDispatchContext} from '../core/task-tools.js'
 import {ProjectResolutionError, type CoordinatorDecision, type IntakeTarget} from '../executors/coding-executor.js'
 
 export interface CodingTargetSelection {
@@ -16,7 +17,7 @@ export interface CodingTargetPort {
   list(): Promise<readonly CodingTarget[]>
   forWork?(workId: string): Promise<CodingTarget | null>
   validate(selection: CodingTargetSelection): Promise<CodingTarget>
-  resolve(decision: CoordinatorDecision, selection?: CodingTargetSelection): Promise<IntakeTarget>
+  resolve(decision: CoordinatorDecision, selection?: CodingTargetSelection,taskContext?:TaskDispatchContext): Promise<IntakeTarget>
 }
 
 /** Owned by one conversation. Global project/session focus is never a default here. */
@@ -67,16 +68,16 @@ export class CodingTargetController {
     this.#target = target === null ? null : {...target}
     return this.target
   }
-  async resolveTarget(decision: CoordinatorDecision): Promise<IntakeTarget> {
+  async resolveTarget(decision: CoordinatorDecision,taskContext?:TaskDispatchContext): Promise<IntakeTarget> {
     const target = this.#target
-    if (decision.kind === 'create') return this.port.resolve(decision)
+    if (decision.kind === 'create') return this.port.resolve(decision,undefined,taskContext)
     if (target !== null && (decision.project === null || decision.project.toLowerCase() === target.project.toLowerCase())) {
       return this.port.resolve({...decision, project: target.project}, {
         workspace_id: target.workspace_id,
         session_id: decision.session === 'new' || decision.session_title ? null : target.session_id,
-      })
+      },taskContext)
     }
     if (decision.project === null) throw new ProjectResolutionError('unknown_project', {reason: 'explicit_project_required'})
-    return this.port.resolve(decision)
+    return this.port.resolve(decision,undefined,taskContext)
   }
 }

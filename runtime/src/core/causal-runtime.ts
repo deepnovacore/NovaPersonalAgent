@@ -68,6 +68,7 @@ export interface UserTurnAuthority {
 }
 
 export interface ExecutorDispatchContext {
+  readonly resourceWaiting?: (reason:string|null)=>Promise<void>
   readonly instructionAccepted?: ()=>void
   readonly beforeWrite?: () => void
   readonly bindSession?: (sessionId:string)=>Promise<void>
@@ -92,6 +93,7 @@ export interface ExecutorAdapter {
    * branches) or whose synchronous-result decision depends on the arguments. Absent or `null`:
    * the op's `params` schema and `sync_result` flag apply.
    */
+  taskResource?():string|null
   admitRequest?(op: string, request: Readonly<Record<string, JsonValue>>): ExecutorAdmission | null
   dispatch(
     op: string,
@@ -365,6 +367,7 @@ export class CausalRuntime {
       request,
       reason,
       capability,
+      taskContext,
     )
     if (admission.accepted) {
       if (admission.delegate_id !== null) {
@@ -579,6 +582,7 @@ export class CausalRuntime {
         const activityTasks=grant?taskGrantService(grant):undefined
         let activitySession:string|undefined
         const context: ExecutorDispatchContext = {
+        ...(activityTasks?{resourceWaiting:(reason:string|null)=>activityTasks.resourceState(grant!.fence.task_id,reason)}:{}),
         ...(activityTasks?{activity:(item:ExecutorActivity)=>{void Promise.resolve().then(()=>activityTasks.appendEvent({task_id:grant!.fence.task_id,work_id:delegate.delegate_id,thread_id:item.thread_id,turn_id:item.turn_id,item_id:item.item_id,stage:item.stage,...(activitySession?{session_id:activitySession}:{}),kind:item.kind,...(item.sender?{sender:item.sender}:{}),text:item.text,refs:item.refs,...(item.text_truncated?{text_truncated:true}:{})},JSON.stringify([delegate.delegate_id,item.thread_id,item.turn_id,item.item_id,item.stage]))).catch(()=>{this.core.diagnostics.push({code:'task_event_persistence_failed',details:{task_id:grant!.fence.task_id,work_id:delegate.delegate_id}});activityTasks.markReplayIncomplete(grant!.fence.task_id)})}}:{}),
         instructionAccepted:()=>{this.#instructionReceipts.get(delegate.delegate_id)?.('accepted');this.#instructionReceipts.delete(delegate.delegate_id)},
         ...(grant?{bindSession:async(sessionId:string)=>{const tasks=taskGrantService(grant);await tasks.bindWork(grant.fence,delegate.delegate_id,sessionId);activitySession=sessionId}}:{}),

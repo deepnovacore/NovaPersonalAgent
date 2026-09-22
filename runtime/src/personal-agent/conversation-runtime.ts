@@ -1,3 +1,6 @@
+import {quarantineTaskResources} from '../executors/task-resources.js'
+import {access} from 'node:fs/promises'
+import {parseMemoryRef} from '../core/memory.js'
 import {GatewaySurrogate} from '../model/model-adapters.js'
 import type {TaskFence} from './tasks.js'
 import {TaskExecutionRejected} from './task-loop.js'
@@ -37,7 +40,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
  createVoiceProvider?:typeof buildConversationVoiceProvider;
  host:PersonalAgentHost; memory:()=>PersonalMemoryResource|undefined
 }):ConversationRuntimeFactory {
- return async(conversation,emit,mode='text',lifetime=new AbortController().signal)=>{
+ return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false)=>{
   const targetPort=options.codexResource?.mode==='project'?(options.codexResource.adapter as ProjectExecutorAdapter).targetPort:undefined
   const codingTarget=targetPort?new CodingTargetController(targetPort,(target,stillCurrent)=>options.host.rememberCodingTarget(conversation.id,conversation.generation,target,()=>!lifetime.aborted&&stillCurrent())):undefined
   if(codingTarget&&conversation.coding_target){
@@ -59,6 +62,11 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const selectedLlm=requireSelectedCascadedLlmConfig(options.settings)
   const captureFrame=options.settings.conversation_vision_enabled&&options.frameSource&&supportsVision(selectedLlm.provider,selectedLlm.config.model)?(signal:AbortSignal)=>captureConversationFrame(options.frameSource!,signal,core.mediaStore):undefined
   const suffix=createHash('sha256').update(conversation.id+':'+conversation.generation).digest('hex').slice(0,24)
+  if(recovery&&options.host.tasks.list().some(task=>task.conversation_id===conversation.id&&task.conversation_generation===conversation.generation&&task.execution_route!=='nova'&&(options.host.tasks.activeWork(task.id).length||options.host.tasks.pendingEffect(task.id)!==null||options.host.tasks.inputReceipts(task.id).some(receipt=>receipt.status==='unknown')||options.host.tasks.evidence(task.id).some(evidence=>evidence.outcome==='unknown')))){
+   if(options.codexResource?.mode==='project')(options.codexResource.adapter as ProjectExecutorAdapter).taskPort?.quarantineResources?.()
+   quarantineTaskResources(options.externalMcp?.adapters.flatMap(adapter=>adapter.taskResource()?[adapter.taskResource()!]:[])??[])
+  }
+  if(recovery){if(!options.blackboard)throw Error('task_blackboard_unavailable');try{await access(options.blackboard.path+'.conversation-'+suffix)}catch{throw Error('task_blackboard_unavailable')}}
   const core=buildAssembly({...options,taskHost:true,sharedResources:true,cameraModuleEnabled:false,conversationId:conversation.id+':'+conversation.generation,
    ...(options.blackboard?{blackboard:{...options.blackboard,path:options.blackboard.path+'.conversation-'+suffix}}:{}),
    ids:{next:namespace=>namespace+'-'+randomUUID()},
@@ -165,6 +173,11 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   }
   const taskVerifier=core.personalAgentConfig?.surrogate??new GatewaySurrogate({gateway:core.gateway,model:options.settings.surrogate_model,proactivityPreset:options.settings.proactivity_preset})
   const detachTaskRuntime=options.host.attachTaskRuntime(conversation.id,conversation.generation,{
+   recover:async task=>{
+    const [channel,sequence]=parseMemoryRef(task.origin_ref);if(!core.runtime.memory.channels.get(channel)?.getBySeq(sequence))return 'task_origin_unavailable';
+    for(const session of task.session_ids){if(!adapter?.taskPort?.inspectSession)return 'task_session_inspection_unavailable';const reason=await adapter.taskPort.inspectSession(session);if(reason)return reason}
+    return null
+   },
    routes:()=>['nova',...graph.service.taskRoutes()],
    ready:task=>{if(currentResponse||taskTurnContinuing)deferredTaskWakes.add(task.id);return currentResponse===undefined&&!taskTurnContinuing},
    detail:adapter?'public-events':'summary-only',

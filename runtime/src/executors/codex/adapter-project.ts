@@ -1,3 +1,7 @@
+import {taskGrantService} from '../../personal-agent/tasks.js'
+import type {TaskDispatchContext} from '../../core/task-tools.js'
+import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources,taskResourcesUncertain} from '../task-resources.js'
+import {managedMcpResources,type ManagedCodexMcp} from './managed-mcp.js'
 import type {CodingTarget, CodingTargetPort, CodingTargetSelection} from '../../personal-agent/coding-targets.js'
 import {basename} from 'node:path'
 import {realpath} from 'node:fs/promises'
@@ -105,6 +109,7 @@ export interface ProjectTransportFactory {
 export type {ProjectCommitResult, ProjectRuntimeDispatch}
 
 export interface ProjectCodexAdapterOptions {
+  readonly managedMcp?:ManagedCodexMcp
   readonly localCodexHome?: string
 
   readonly store: ProjectStore
@@ -142,9 +147,19 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   readonly #status = new CodexLiveAdapter(NULL_TRANSPORT, undefined, {sharedState: this.#liveState})
   readonly #confirmedBindings = new WeakMap<object, ConfirmedDelegateBinding>()
   readonly #retainedTransportCleanups = new Set<CodexAppServerTransport>()
+  readonly #resourceKeys:readonly string[]|null
+  readonly #slotWaiters=new Set<()=>void>()
+  taskResource():string|null{return this.#resourceKeys?.length===1?this.#resourceKeys[0]!:null}
   readonly #slots = new Map<string, RunSlot>()
   readonly #taskWorkspaces = new Map<string, {readonly workspace_id: string; readonly session_id?: string}>()
   readonly taskPort = {
+    quarantineResources:()=>{quarantineTaskResources(this.#resourceKeys??[])},
+    inspectSession:async(sessionId:string):Promise<string|null>=>{
+      const snapshot=await this.#store.snapshot(),session=snapshot.sessions.find(item=>item.session_id===sessionId);
+      if(!session)return 'task_session_not_found';if(session.state!=='ready')return 'task_session_'+session.state;
+      try{await this.#store.revalidateWorkspace(session.workspace_id);if(!await this.#rolloutAvailable(session))return 'task_session_resume_unavailable'}catch{return 'task_session_resume_unavailable'}
+      if(this.#slots.has(session.workspace_id))return 'task_session_running';return null
+    },
     resolveSession:async(sessionId:string)=>{
       const snapshot=await this.#store.snapshot(),session=snapshot.sessions.find(item=>item.session_id===sessionId)
       const workspace=snapshot.workspaces.find(item=>item.workspace_id===session?.workspace_id)
@@ -179,6 +194,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     this.manifest = options.codexApproval === undefined
       ? CODEX_PROJECT_MANIFEST
       : CODEX_PROJECT_APPROVAL_MANIFEST
+    this.#resourceKeys=managedMcpResources(options.managedMcp)
     this.#localCodexHome = options.localCodexHome
     this.#store = options.store
     this.#confirmation = options.confirmation
@@ -243,7 +259,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       catch (error) { if (error instanceof ProjectResolutionError) return null; throw error }
     },
     validate: selection => this.#validateCodingTarget(selection),
-    resolve: (decision, selection) => this.resolveIntakeTarget(decision, selection),
+    resolve: (decision, selection,taskContext) => this.resolveIntakeTarget(decision, selection,taskContext),
   }
 
   async #listCodingTargets(): Promise<readonly CodingTarget[]> {
@@ -299,7 +315,8 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
    * resolves to `select` and, like every other change of the active project, is committed only by
    * `commitConfirmed` after the user confirmed it.
    */
-  async resolveIntakeTarget(decision: CoordinatorDecision, selection?: CodingTargetSelection): Promise<IntakeTarget> {
+  async resolveIntakeTarget(decision: CoordinatorDecision, selection?: CodingTargetSelection,taskContext?:TaskDispatchContext): Promise<IntakeTarget> {
+    if(taskContext)taskGrantService(taskContext)
     if (decision.kind === 'create') {
       const name = await this.#store.validateManagedCreate(decision.project ?? '')
       return {
@@ -313,7 +330,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       || (decision.project !== null && workspace.display_name.toLowerCase() !== decision.project.toLowerCase()))) {
       throw new ProjectResolutionError('unknown_project', {reason: 'target_mismatch'})
     }
-    if (decision.kind === 'work') {
+    if (decision.kind === 'work'&&!taskContext) {
       const slot = this.#slots.get(workspace.workspace_id)
       if (slot !== undefined) {
         throw new ProjectResolutionError('busy_project', {
@@ -555,15 +572,26 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     run: (slot: RunSlot, runContext: ExecutorDispatchContext) => Promise<ExecutorHandoff>,
   ): Promise<ExecutorHandoff> {
     if (this.#closed) return failureHandoff('closed', 'run')
-    const existing = this.#slots.get(workspace.workspace_id)
-    if (existing !== undefined) {
-      return refusedRunHandoff('busy_project', {
-        project: workspace.display_name, work_id: existing.work.work_id, title: existing.work.title,
-      })
+    if(this.#resourceKeys===null)return failureHandoff('computer_resource_unavailable','run')
+    const busy=()=>this.#slots.has(workspace.workspace_id)?'busy_project':this.#slots.size>=MAX_CONCURRENT_WORK?'capacity':null
+    if(!context.resourceWaiting&&busy()){const existing=this.#slots.get(workspace.workspace_id);return existing?refusedRunHandoff('busy_project',{project:workspace.display_name,work_id:existing.work.work_id,title:existing.work.title}):refusedRunHandoff('capacity',{running:this.running().map(work=>({...work}))})}
+    let release:(()=>void)|undefined
+    if(this.#resourceKeys.length){
+      if(taskResourcesBusy(this.#resourceKeys))await context.resourceWaiting?.(taskResourcesUncertain(this.#resourceKeys)?'computer_resource_uncertain':'computer_resource_busy')
+      release=await acquireTaskResources(this.#resourceKeys,context.signal)
     }
-    if (this.#slots.size >= MAX_CONCURRENT_WORK) {
-      return refusedRunHandoff('capacity', {running: this.running().map(work => ({...work}))})
-    }
+    try{
+      while(busy()){
+        if(!context.resourceWaiting){release?.();return refusedRunHandoff(busy()!,{running:this.running().map(work=>({...work}))})}
+        await context.resourceWaiting(busy())
+        await new Promise<void>((resolve,reject)=>{
+          const changed=()=>{if(!busy()||this.#closed){cleanup();resolve()}},abort=()=>{cleanup();reject(context.signal.reason instanceof Error?context.signal.reason:new Error('aborted'))},cleanup=()=>{this.#slotWaiters.delete(changed);context.signal.removeEventListener('abort',abort)}
+          this.#slotWaiters.add(changed);context.signal.addEventListener('abort',abort,{once:true});if(context.signal.aborted)abort();else changed()
+        })
+        if(this.#closed)throw Error('closed')
+      }
+      context.signal.throwIfAborted();context.beforeWrite?.()
+    }catch(error){release?.();throw error}
     const controller = new AbortController()
     const onAbort = (): void => { controller.abort() }
     if (context.signal.aborted) controller.abort()
@@ -581,16 +609,20 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       if (oldest !== undefined) this.#taskWorkspaces.delete(oldest)
     }
     this.#taskWorkspaces.set(slot.work.work_id, {workspace_id: workspace.workspace_id})
-    const task = run(slot, {...context, signal: controller.signal})
+    const task = Promise.resolve().then(async()=>{await context.resourceWaiting?.(null);controller.signal.throwIfAborted();context.beforeWrite?.();return run(slot, {...context, signal: controller.signal})})
     slot.task = task
     try {
-      return await task
+      const result=await task
+      if(result.outcome==='unknown'||this.#retainedTransportCleanups.size){quarantineTaskResources(this.#resourceKeys);release=undefined}
+      return result
     } catch (error) {
       if (error instanceof ProjectStateError) return projectProblemHandoff(error.code)
+      quarantineTaskResources(this.#resourceKeys);release=undefined
       throw error
     } finally {
       context.signal.removeEventListener('abort', onAbort)
       if (this.#slots.get(workspace.workspace_id) === slot) this.#slots.delete(workspace.workspace_id)
+      release?.();for(const changed of this.#slotWaiters)changed()
     }
   }
 
@@ -761,6 +793,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   }
 
   async #close(): Promise<void> {
+    for(const changed of this.#slotWaiters)changed()
     await this.#catalogRefresh
     const slots = [...this.#slots.values()]
     for (const slot of slots) slot.controller.abort()

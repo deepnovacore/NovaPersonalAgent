@@ -76,7 +76,7 @@ export interface IntakeOptions {
   readonly roster: () => readonly RosterEntry[]
   readonly running: () => readonly RunningWork[]
   readonly activeProject: () => string | null
-  readonly resolveTarget: (decision: CoordinatorDecision) => Promise<IntakeTarget>
+  readonly resolveTarget: (decision: CoordinatorDecision,taskContext?:TaskDispatchContext) => Promise<IntakeTarget>
   /** Open the project-confirmation proposal for `session.target`; the confirmed commit is the only side effect. */
   readonly prepare: (session: Readonly<IntakeSession>) => ProjectProposal
   readonly dispatch: (session: Readonly<IntakeSession>, stillWanted?: () => boolean) => IntakeAdmission | Promise<IntakeAdmission>
@@ -196,6 +196,7 @@ export function renderResolutionError(error: ProjectResolutionError): string {
 
 /** Two controller-owned single-flight slots; latest revision replaces pending work, never active work. */
 export class IntakeController {
+  #taskContext:TaskDispatchContext|undefined
   #taskAuthority: (()=>boolean)|undefined
   readonly #options: IntakeOptions
   readonly #clock: Clock
@@ -263,6 +264,7 @@ export class IntakeController {
   open(request: Readonly<Record<string, JsonValue>>, text: string, originRef: string, sessionId: string, taskContext?: TaskDispatchContext,inputOriginRef=originRef): 'intake_opened' | 'intake_in_progress' {
     const previous=this.#session?.task_fence
     if(this.active&&taskContext&&(previous?.task_id!==taskContext.fence.task_id||previous.goal_revision!==taskContext.fence.goal_revision||previous.control_revision!==taskContext.fence.control_revision))this.cancel()
+    this.#taskContext=taskContext
     this.#taskAuthority=taskContext?.stillWanted
     this.#userInputPending = false
     this.#failedUserInput = false
@@ -492,7 +494,7 @@ export class IntakeController {
       let target: IntakeTarget
       stage = 'resolve'
       try {
-        target = await raceDeadline(this.#options.resolveTarget(decision), this.#clock, 30, abort.signal,
+        target = await raceDeadline(this.#options.resolveTarget(decision,this.#taskContext), this.#clock, 30, abort.signal,
           () => new DOMException('resolution deadline', 'TimeoutError'))
       } catch (error) {
         current = this.#current(snapshot.intake_id, snapshot.revision)

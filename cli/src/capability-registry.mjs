@@ -183,7 +183,9 @@ export function parseCapabilityRegistry(input, environment = {}) {
         frontbrainToolBudget: integer(document.frontbrainToolBudget, DEFAULT_FRONTBRAIN_TOOL_BUDGET, 256, 'frontbrainToolBudget') };
 }
 function parseServer(value, environment) {
-    const config = object(value, 'server', ['enabled', 'transport', 'url', 'headers', 'command', 'args', 'env', 'tools', 'exposeTo']);
+    const config = object(value, 'server', ['enabled', 'transport', 'url', 'headers', 'command', 'args', 'env', 'tools', 'exposeTo', 'computerUse']);
+    const physical = config.computerUse === undefined ? undefined : object(config.computerUse, 'server.computerUse', ['resource']);
+    const computerUse = physical === undefined ? {} : { computerUse: { resource: physical.resource === null ? null : string(physical.resource, 'server.computerUse.resource', 512).trim() } };
     const enabled = bool(config.enabled, true, 'server.enabled');
     const transport = config.transport;
     if (transport !== 'streamable-http' && transport !== 'stdio')
@@ -210,7 +212,7 @@ function parseServer(value, environment) {
         const url = enabled ? interpolateCapabilityValue(rawUrl, environment) : rawUrl;
         if (enabled)
             validateMcpEndpoint(url, headers);
-        return { enabled, transport, url, urlInterpolated: /\$\{[A-Za-z_][A-Za-z0-9_]*\}/u.test(rawUrl), headers, tools, exposeTo };
+        return { ...computerUse, enabled, transport, url, urlInterpolated: /\$\{[A-Za-z_][A-Za-z0-9_]*\}/u.test(rawUrl), headers, tools, exposeTo };
     }
     if (config.url !== undefined || config.headers !== undefined)
         invalid('server.transport_fields');
@@ -221,7 +223,7 @@ function parseServer(value, environment) {
     const env = stringMap(config.env, 'server.env');
     if (Object.keys(env).some(key => !ENV_NAME.test(key)))
         invalid('server.env');
-    return { enabled, transport, command, args: args, env: enabled ? interpolateMap(env, environment) : env, tools, exposeTo };
+    return { ...computerUse, enabled, transport, command, args: args, env: enabled ? interpolateMap(env, environment) : env, tools, exposeTo };
 }
 export function loadCapabilityRegistry(options = {}) {
     const environment = options.environment ?? process.env;

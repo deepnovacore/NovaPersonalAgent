@@ -1035,7 +1035,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       roster: () => projectAdapter.roster(),
       running: () => projectAdapter.running().filter(work=>options.sharedPersonal===undefined||core.runtime.inFlightDelegate(work.work_id)!==undefined),
       activeProject: () => options.codingTarget?.activeProject() ?? (options.sharedPersonal ? null : projectAdapter.publicProjectView(false).workspace_display_name),
-      resolveTarget: (decision: CoordinatorDecision) => {if(options.codingTarget)return options.codingTarget.resolveTarget(decision);if(options.sharedPersonal&&decision.project===null)throw new ProjectResolutionError('unknown_project',{reason:'explicit_project_required'});return projectAdapter.resolveIntakeTarget(decision)},
+      resolveTarget: (decision: CoordinatorDecision,taskContext?:TaskDispatchContext) => {if(options.codingTarget)return options.codingTarget.resolveTarget(decision,taskContext);if(options.sharedPersonal&&decision.project===null)throw new ProjectResolutionError('unknown_project',{reason:'explicit_project_required'});return projectAdapter.resolveIntakeTarget(decision,undefined,taskContext)},
       // Spec 08: the coordinator's decision rides with the work order; the adapter re-resolves at run time.
       dispatch: async (intake: IntakeSession, stillWanted?: () => boolean) => {
         const targetRevision = options.codingTarget?.revision

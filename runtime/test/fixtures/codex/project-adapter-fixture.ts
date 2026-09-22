@@ -3,6 +3,7 @@
  * `ProjectConfirmationController`, and a recording fake transport factory (one fake per run).
  */
 import assert from 'node:assert/strict'
+import type {ManagedCodexMcp} from '../../../src/executors/codex/managed-mcp.js'
 import {
   chmodSync,
   fstatSync,
@@ -399,6 +400,7 @@ export interface Fixture {
 }
 
 export async function fixture(options: {
+  readonly managedMcp?: ManagedCodexMcp
   readonly localCodexHome?: string
   readonly preexistingSession?: boolean
   readonly decorateStore?: (store: ProjectStore) => ProjectStore
@@ -438,6 +440,7 @@ export async function fixture(options: {
   })
   const factory = new RecordingProjectTransportFactory()
   const adapter = new ProjectCodexAdapter({
+    ...(options.managedMcp?{managedMcp:options.managedMcp}:{}),
     ...(options.localCodexHome ? {localCodexHome: options.localCodexHome} : {}),
     store: options.decorateStore?.(store) ?? store,
     confirmation,

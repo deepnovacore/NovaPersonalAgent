@@ -43,7 +43,7 @@ export class TaskLoop{
  }
  async #execute(task:TaskRecord,instruction:string,fence:TaskFence,effectId:string):Promise<void>{
   let invoked=false
-  try{this.#stop.signal.throwIfAborted();this.tasks.assertWritable(fence,{kind:'nova'});invoked=true;await this.ports.execute(task,instruction,fence);await this.tasks.settleEffect(effectId,'accepted')}
+  try{this.#stop.signal.throwIfAborted();this.tasks.assertWritable(fence,{kind:'nova'});await this.tasks.markEffectDispatching(effectId);this.tasks.assertWritable(fence,{kind:'nova'});invoked=true;await this.ports.execute(task,instruction,fence);await this.tasks.settleEffect(effectId,'accepted')}
   catch(error){const known=!invoked||error instanceof TaskExecutionRejected;await this.tasks.settleEffect(effectId,known?'failed':'unknown');if(this.#stop.signal.aborted)return;try{await this.tasks.wait(fence,known?(error instanceof Error?error.message:'task_execution_rejected'):'task_execution_unconfirmed')}catch{/* a newer owner wins */}}
  }
 }

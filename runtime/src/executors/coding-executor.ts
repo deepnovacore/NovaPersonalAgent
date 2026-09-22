@@ -1,3 +1,4 @@
+import type {TaskDispatchContext} from '../core/task-tools.js'
 /**
  * Port between the host and whichever executor carries the `coding` role.
  *
@@ -14,7 +15,7 @@ import type {JsonValue} from '../core/events.js'
 import type {DelegateRequest, ExecutorManifest} from '../core/ports.js'
 import type {ConfirmedProjectOperation, ProjectAction, ProjectConfirmationController} from '../projects/project-confirmation.js'
 import type {PublicProjectContext, PublicProjectView, WorkspaceRecord} from '../projects/project-store.js'
-import type {CodingTargetPort} from '../personal-agent/coding-targets.js'
+import type {CodingTargetPort,CodingTargetSelection} from '../personal-agent/coding-targets.js'
 import type {WakeReason} from '../core/slots.js'
 
 /** Where a work order will run, as resolved by the project adapter for the intake FSM; `select` is a bare switch. */
@@ -100,7 +101,7 @@ export interface AgentExecutor {
    * Every change of the active project (`switch`, `work` elsewhere, `create`) is then confirmed by the
    * user through the project-confirmation FSM and committed by `commitConfirmed` (decision 2026-09-04).
    */
-  resolveIntakeTarget(decision: CoordinatorDecision): Promise<IntakeTarget>
+  resolveIntakeTarget(decision: CoordinatorDecision,selection?:CodingTargetSelection,taskContext?:TaskDispatchContext): Promise<IntakeTarget>
 }
 
 export type ProjectRuntimeDispatch = (
@@ -119,6 +120,8 @@ export interface ProjectCommitResult {
 
 /** Optional exact host action surface, independent of voice cancellation resolution. */
 export interface CodingTaskPort {
+  quarantineResources?():void
+  inspectSession?(sessionId:string):Promise<string|null>
   resolveSession?(sessionId:string):Promise<{project:string;session_id:string;active:boolean;work_id?:string}>
   cancelTask(workId: string): 'cancelling' | 'not_running'
   taskDirectory(workId: string): Promise<string | null>
