@@ -11,12 +11,12 @@ class Node{
 const controllers=[]
 afterEach(async()=>{for(const c of controllers.splice(0))c.disconnect();await new Promise(resolve=>setImmediate(resolve))})
 function mount(){
- const body=new Node('body'),shell=new Node('div');body.append(shell);const sent=[]
+ const body=new Node('body'),shell=new Node('div');body.append(shell);const sent=[],callbacks={}
  globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,visibilityState:'visible',hasFocus:()=>true,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),createTextNode:text=>new Node('#text',text),querySelector:()=>shell}
- const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],openResults(){},api:{orbMenu:{},personal:{setUnread(){},openArticle:async()=>{}}}})
+ const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],openResults(){},api:{orbMenu:{},personal:{setUnread(){},openArticle:async()=>{},onPresentationRequest:fn=>{callbacks.presentation=fn},onCollapsed:fn=>{callbacks.collapsed=fn}}}})
  controllers.push(view.controller);view.controller.connect();view.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input']})
  const all=n=>[n,...n.children.flatMap(all)]
- return {body,sent,view,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
+ return {body,sent,view,callbacks,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
 const feedState=(revision,selected='chat:proactive',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:proactive',kind:'proactive',title:'主动提醒',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'T\n## 前瞻\n- 一条'}]},...extra})
 test('feed messages render as cards with the prepared body as markdown, and receipts follow visibility',()=>{
@@ -59,4 +59,28 @@ test('task approval header stays in workbench and remains actionable while prese
  m.view.receive(feedState(1,'c',{feed:[],tasks:[task],pending_approvals:[{task_id:'t',conversation_id:'c',approval_id:'original',summary:'Run'}],conversations:{selected_id:'c',items:[{id:'c',title:'C'}],messages:[]}}));m.view.controller.presentationPending=true;m.view.controller.presentationReady=false;m.view.refresh()
  const header=m.all().find(n=>n.textContent==='处理审批：Run');assert.equal(header.disabled,false);const opening=header.listeners.click(),request=m.sent.findLast(f=>f.method==='tasks.get');m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:task});await opening
  assert.equal(m.sent.some(f=>f.method==='presentation.set'||f.method==='conversations.select'),false);assert.ok(m.all().some(n=>n.className==='task-detail'))
+})
+
+test('orb task deep link enters workbench before reading detail and never takes control',async()=>{
+ const m=mount();m.view.controller.presentationMode='orb';const opening=m.view.openTask('exact-task'),mode=m.sent.at(-1)
+ assert.equal(mode.method,'presentation.set');assert.equal(mode.params.mode,'workbench');assert.equal(m.sent.some(f=>f.method==='tasks.get'),false)
+ m.view.receive({type:'personal.result',request_id:mode.request_id,ok:true,data:{mode:'workbench',returned_task_ids:[]}});await new Promise(r=>setImmediate(r))
+ const read=m.sent.at(-1);assert.equal(read.method,'tasks.get');assert.equal(read.params.task_id,'exact-task');assert.equal(read.params.after,0)
+ m.view.receive({type:'personal.result',request_id:read.request_id,ok:true,data:{id:'exact-task',goal:'Result',phase:'completed',controller:{kind:'nova'},events:{items:[],next:8}}});await opening
+ assert.equal(m.sent.some(f=>f.method==='tasks.control'),false)
+})
+
+
+test('main presentation request enters host path while collapsed display ACK sends no command',async()=>{
+ const m=mount(),change=m.callbacks.presentation('orb'),request=m.sent.at(-1)
+ assert.equal(request.method,'presentation.set');assert.equal(request.params.mode,'orb');const count=m.sent.length;m.callbacks.collapsed(true);assert.equal(m.sent.length,count)
+ m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{mode:'orb',returned_task_ids:['t'],task_control_revisions:{t:2}}});await change
+ assert.equal(m.view.controller.taskNotice,'已交还 Nova，未发送的草稿已保留')
+})
+
+test('late detail response after background exit neither steals focus nor advances the viewed cursor',async()=>{
+ const m=mount(),origin=new Node('button');origin.focus();const opening=m.view.openTask('late'),read=m.sent.at(-1)
+ m.view.controller.presentationMode='background';m.view.receive({type:'personal.result',request_id:read.request_id,ok:true,data:{id:'late',goal:'Late result',phase:'completed',controller:{kind:'nova'},events:{items:[{seq:9,text:'Unseen'}],next:9}}});await opening;assert.equal(document.activeElement,origin)
+ m.view.controller.presentationMode='workbench';const again=m.view.openTask('late'),request=m.sent.at(-1);assert.equal(request.params.after,0)
+ m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{id:'late',goal:'Late result',phase:'completed',controller:{kind:'nova'},events:{items:[],next:9}}});await again
 })

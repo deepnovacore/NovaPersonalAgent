@@ -1,4 +1,10 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "部分公开活动缺失，请核对执行器与任务结果。": "Some public activity is missing. Check the executor and task results.",
+  "交还状态待确认，草稿已保留": "Handback pending; drafts preserved",
+  "已交还 Nova，未发送的草稿已保留": "Returned to Nova; unsent drafts preserved",
+  "自上次查看后有 {0} 条新活动": "{0} new events since your last view",
+  "任务：{0} 进行中 · {1} 待处理 · {2} 新结果": "Tasks: {0} active · {1} waiting · {2} new results",
+
   " · {0} 个任务已绑定（此处选择仅用于向 Nova 提问）": " · {0} tasks already bound (this selection addresses Nova)",
   "用户控制": "User control",
   "关联待办 · {0}（移除）": "Linked Todo · {0} (remove)",

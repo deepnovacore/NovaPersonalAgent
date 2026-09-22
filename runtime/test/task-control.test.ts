@@ -43,6 +43,7 @@ test('explicit mode exit returns only this client tasks with durable retry recei
   const before=f.host.snapshot().pending_approvals
   const reply=await f.command('presentation.set',{mode:'orb'},'exit')
   assert.equal(reply.ok,true)
+  assert.deepEqual(reply.data,{mode:'orb',returned_task_ids:[a.id,b.id],task_control_revisions:{[a.id]:2,[b.id]:2}})
   for(const task of [a,b]){assert.deepEqual(f.host.tasks.get(task.id).controller,{kind:'nova'});assert.equal(f.host.tasks.get(task.id).control_revision,2)}
   assert.deepEqual(f.host.tasks.get(other.id),other)
   assert.deepEqual(f.host.snapshot().pending_approvals,before)

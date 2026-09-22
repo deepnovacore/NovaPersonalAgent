@@ -211,3 +211,6 @@ body[data-personal-collapsed="true"] .workbench{display:none}
 .conversation-task-cards { display: grid; gap: 6px; padding: 8px; }
 .task-card { text-align: left; overflow-wrap: anywhere; }
 @media (max-width: 959px) { .workbench[data-task-detail="true"] .chat-pane { display: none; } }
+
+.personal-orb-modes .personal-orb-task{position:absolute;bottom:28px;left:0;right:0;width:100%;font-size:10px}
+.personal-orb-modes [role="status"]{position:absolute;bottom:48px;left:0;right:0;margin:0;white-space:normal;font:10px/1.3 system-ui;text-align:center}

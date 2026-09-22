@@ -46,3 +46,15 @@ test('single-panel task inspection uses the same breakpoint as the chat overlay 
  const detail=css.match(/@media\s*\(max-width:\s*(\d+)px\)\s*\{\s*\.workbench\[data-task-detail/)[1]
  assert.equal(detail,drawer);assert.ok(Number(detail)>=959)
 })
+
+test('event refresh uses the exact received cursor and retains preceding public events',async()=>{
+ const m=mount(async()=>task({events:{items:[{seq:9,text:'New result'}],next:9}}))
+ m.view.update(task({events:{items:[{seq:7,text:'Viewed result'}],next:7}}));m.view.receive({type:'personal.state',tasks:[]});await new Promise(r=>setImmediate(r))
+ assert.equal(m.calls.at(-1)[1].after,7)
+ assert.ok(m.all().some(n=>n.textContent==='Viewed result'));assert.ok(m.all().some(n=>n.textContent==='New result'))
+})
+
+test('missing and truncated public history remains visibly incomplete after incremental refresh',()=>{
+ const m=mount();m.view.update(task({events:{items:[],next:4,incomplete:true,truncated:true}}));assert.ok(m.all().some(n=>n.textContent==='部分公开活动缺失，请核对执行器与任务结果。'))
+ m.view.update(task({events:{items:[],next:4,incomplete:false,truncated:false}}));assert.ok(m.all().some(n=>n.textContent==='部分公开活动缺失，请核对执行器与任务结果。'));assert.ok(m.all().some(n=>n.textContent?.includes('较早活动已截断')))
+})

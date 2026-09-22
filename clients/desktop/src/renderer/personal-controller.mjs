@@ -1,7 +1,7 @@
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,changed=()=>{}}) {
-    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,connected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
+    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,connected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,taskNotice:'',presentationRequests:new Map(),captureConversationId:null,capturePending:false})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
@@ -16,7 +16,7 @@ export class PersonalController {
     if(this.applyPresentation){
       this.presentationReady=false
       for(let attempt=0;attempt<2&&!this.presentationReady&&this.connected;attempt++){
-        try{await this.setPresentation(this.desiredPresentation,{activate:false})}
+        try{const desired=this.desiredPresentation;for(const request of [...this.presentationRequests.values()])await this.setPresentation(request.mode,{activate:false,request,reconcileOnly:request.mode!==desired});if(this.presentationMode!==desired||!this.presentationReady)await this.setPresentation(desired,{activate:false})}
         catch(error){this.error=error.message}
       }
       if(!this.presentationReady&&this.connected)await this.applyMode('background',{activate:false})
@@ -32,17 +32,24 @@ export class PersonalController {
     for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
     this.pending.clear();void this.stop();this.error='连接已断开，草稿已保留';this.changed()
   }
-  async setPresentation(mode,{activate=true}={}){
+  async setPresentation(mode,{activate=true,request,reconcileOnly=false}={}){
     if(!['background','workbench','orb'].includes(mode))throw new Error('无效的显示模式')
     if(this.presentationPending&&mode!=='background')throw new Error('正在切换模式，请稍候')
+    if(!request&&!this.presentationPending&&mode!=='background'){const outstanding=[...this.presentationRequests.values()];for(const prior of outstanding)if(prior.mode!==mode)await this.setPresentation(prior.mode,{activate:false,request:prior})}
+    request??=[...this.presentationRequests.values()].findLast(value=>value.mode===mode)??{mode,request_id:crypto.randomUUID()}
+    this.presentationRequests.set(request.request_id,request)
     const sequence=++this.presentationSequence
-    this.desiredPresentation=mode;this.presentationPending=true;if(mode==='background')this.presentationReady=false;this.changed()
+    if(!reconcileOnly)this.desiredPresentation=mode;this.presentationPending=true;if(mode!=='workbench')this.taskNotice='交还状态待确认，草稿已保留';this.presentationReady=false;this.changed()
     try{
       const local=mode==='background'?this.applyMode(mode,{activate:false}):null
       if(!this.connected){if(local)await local;else await this.applyMode(mode,{activate});this.presentationReady=false;return}
-      const [,result]=await Promise.all([local,this.command('presentation.set',{mode})])
-      if(sequence!==this.presentationSequence)return
+      const [,result]=await Promise.all([local,this.command('presentation.set',{mode},{request_id:request.request_id})])
       if(result?.mode!==mode)throw new Error('显示模式未确认，请重试')
+      this.presentationRequests.delete(request.request_id)
+      if(result.returned_task_ids?.length&&result.returned_task_ids.every(id=>Number.isSafeInteger(result.task_control_revisions?.[id])))this.taskNotice='已交还 Nova，未发送的草稿已保留'
+      else if(mode!=='workbench')this.taskNotice=''
+      if(sequence!==this.presentationSequence)return
+      if(reconcileOnly)return
       if(mode!=='background')await this.applyMode(mode,{activate})
       this.presentationReady=true
     }catch(error){if(sequence===this.presentationSequence)this.error=error.message;throw error}

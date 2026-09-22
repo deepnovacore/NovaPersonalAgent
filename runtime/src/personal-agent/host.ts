@@ -675,17 +675,18 @@ export class PersonalAgentHost {
         }
         else if(command.method==='presentation.set'){
             const q=z.object({mode:z.enum(['background','workbench','orb'])}).strict().parse(p);
+            let returned:TaskRecord[]=[];
             // Reserve identity before either handback or presentation listeners can take effect.
             try{
                 await this.tasks.reservePresentationRequest(receiptId,client??'host:unscoped',canonicalJson(command));
                 // Explicit exits also reconcile ownership left behind by a disconnect/restart.
-                if(client&&q.mode!=='workbench'){const returned=await this.tasks.returnClientTasks(receiptId,client);for(const task of returned)void this.wakeTask(task.id);}
+                if(client&&q.mode!=='workbench'){returned=await this.tasks.returnClientTasks(receiptId,client);for(const task of returned)void this.wakeTask(task.id);}
             }catch(error){
                 if(error instanceof Error&&error.message==='request_conflict')throw error;
                 if(q.mode==='background')await this.#setPresentation('background');
                 return {type:'personal.result',request_id:command.request_id,ok:false,error:q.mode==='workbench'?'presentation_sync_failed':'handback_pending'};
             }
-            await this.#setPresentation(q.mode);data={mode:q.mode};
+            await this.#setPresentation(q.mode);data={mode:q.mode,returned_task_ids:returned.map(task=>task.id),task_control_revisions:Object.fromEntries(returned.map(task=>[task.id,task.control_revision]))};
         }
         else if(command.method==='presentation.seen'){const q=z.object({approval_id:z.string().min(1).max(128).optional(),conversation_id:z.string().min(1).max(128).optional(),proposal_id:z.string().min(1).max(128).optional()}).strict().parse(p);if(!this.#presentationMode)throw Error('presentation_unavailable');await this.#setPresentation(this.#presentationMode,q);data={mode:this.#presentationMode}}
         else if(command.method==='conversations.approve'){if(!client)throw Error('unauthenticated');const q=z.object({id:z.string().min(1).max(128),approval_id:z.string().min(1).max(128),approved:z.boolean()}).strict().parse(p);if(!this.#pendingDecisions().pending_approvals.some(a=>a.approval_id===q.approval_id&&a.conversation_id===q.id))throw Error('approval_not_owned');if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');await this.#conversationPool.approve(q.id,q.approval_id,q.approved);data={accepted:true}}

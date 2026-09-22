@@ -1,3 +1,4 @@
+import {summarizeTasks} from './task-banner.mjs'
 import {t} from './locale.mjs'
 import {renderLife,renderProfile} from './life-view.mjs'
 import {renderNews} from './news-view.mjs'
@@ -21,9 +22,10 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const openSettings=category=>api.orbMenu.openSettings?.(category)
  // Rail
  let selected='todos',inspector=null,inspectedId=null,returnFocus=null,openSequence=0
+ const viewedCursors=new Map(),viewedResults=new Set()
  const durableTasks=()=>({tasks:c.snapshot?.tasks??[]})
  function closeTask(){openSequence++;inspector?.dispose();inspector=null;const originId=inspectedId;inspectedId=null;root.dataset.taskDetail='false';renderPanel();if(returnFocus?.isConnected!==false)returnFocus?.focus();else panel.querySelector?.(`[data-task-id="${originId}"] button`)?.focus()}
- async function openTask(id,approval=false){const sequence=++openSequence,originFocus=document.activeElement;const next=await c.command('tasks.get',{task_id:id});if(sequence!==openSequence)return;if(inspectedId!==id){inspector?.dispose();returnFocus=originFocus;panel.replaceChildren();const holder=el('section');panel.append(holder);inspector=mountTaskDetail(holder,{command:(...args)=>c.command(...args),onClose:closeTask});inspectedId=id}root.dataset.taskDetail='true';pageTitle.textContent=t('任务详情');inspector.update(next);if(approval)inspector.focusApproval();else inspector.focus()}
+ async function openTask(id,approval=false){const sequence=++openSequence,originFocus=document.activeElement;if(c.presentationMode!=='workbench')await c.setPresentation('workbench');const next=await c.command('tasks.get',{task_id:id,after:viewedCursors.get(id)??0});if(sequence!==openSequence)return;if(inspectedId!==id){inspector?.dispose();returnFocus=originFocus;panel.replaceChildren();const holder=el('section');panel.append(holder);inspector=mountTaskDetail(holder,{command:(...args)=>c.command(...args),onClose:closeTask,after:viewedCursors.get(id)??0,onViewed:(taskId,cursor)=>{if(c.presentationMode==='workbench'&&taskId&&Number.isSafeInteger(cursor))viewedCursors.set(taskId,cursor)}});inspectedId=id}root.dataset.taskDetail='true';pageTitle.textContent=t('任务详情');inspector.setVisible(c.presentationMode==='workbench');inspector.update(next);if(c.presentationMode==='workbench'){if(next.phase==='completed')viewedResults.add(id);if(approval)inspector.focusApproval();else inspector.focus()}}
  const rail=mountRail(root,{onSelect:id=>{selected=id;closeTask()},footer:[
   {label:'收起',title:'收起为悬浮球',icon:'M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7',onClick:()=>run(()=>collapse(true))},
   {label:'设置',title:'打开设置',icon:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',onClick:()=>openSettings()},
@@ -35,6 +37,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const presentation=el('select');presentation.setAttribute('aria-label','显示模式');for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','后台']]){const option=el('option',label);option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
  pageHead.append(pageTitle,status,presentation,chatToggle);workspace.append(pageHead)
  const error=el('p','','page-error');error.setAttribute('role','alert');error.hidden=true;workspace.append(error)
+ const taskNotice=el('p');taskNotice.setAttribute('role','status');taskNotice.setAttribute('aria-live','polite');workspace.append(taskNotice)
  const waiting=el('div',undefined,'presentation-waiting');workspace.append(waiting)
  const panel=el('div',undefined,'workbench-page');workspace.append(panel)
  // Chat pane
@@ -43,6 +46,8 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const expand=el('button','展开 Nova');expand.id='personal-expand';expand.type='button';expand.addEventListener('click',()=>run(()=>collapse(false)));const orbModes=el('div',undefined,'personal-orb-modes');orbModes.append(expand);document.querySelector('#shell').append(orbModes)
  const orbVoice=button('开始语音',()=>c.mode==='voice'?c.stopVoice():c.voiceId?c.resumeVoice():c.voice(),orbModes)
  button('后台',()=>c.setPresentation('background'),orbModes)
+ const orbTask=button('',()=>openTask(orbTask.dataset.taskId),orbModes);orbTask.className='personal-orb-task'
+ const orbNotice=el('p');orbNotice.setAttribute('role','status');orbNotice.setAttribute('aria-live','polite');orbModes.append(orbNotice)
  const orbError=el('p','','personal-orb-error');orbError.setAttribute('role','alert');document.querySelector('#shell').append(orbError)
  panel.addEventListener('focusout',()=>setTimeout(()=>{if(!panel.contains?.(document.activeElement))update()},0))
  const card=(title,summary)=>{const a=el('article',undefined,'card');a.append(el('h3',title));if(summary)a.append(el('p',summary));panel.append(a);return a}
@@ -77,6 +82,9 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
   document.body.dataset.presentationMode=c.presentationMode;presentation.value=c.presentationMode;presentation.disabled=c.presentationPending
   const active=activeTaskCount(durableTasks());status.textContent=c.connected?`运行中 · ${active} 个后台任务`:'已断开 · 草稿保留';status.dataset.state=c.connected?'connected':'disconnected'
   rail.badge('tasks',active)
+  inspector?.setVisible(c.presentationMode==='workbench')
+  for(const node of [taskNotice,orbNotice]){const text=t(c.taskNotice);if(node.textContent!==text)node.textContent=text;node.hidden=!text}
+  const aggregate=summarizeTasks(c.snapshot?.tasks??[],[...viewedResults]),decision=(c.snapshot?.pending_approvals??[]).find(item=>item.task_id);orbTask.dataset.taskId=decision?.task_id??aggregate.task_id;orbTask.hidden=!orbTask.dataset.taskId;orbTask.disabled=!c.connected;orbTask.textContent=t('任务：{0} 进行中 · {1} 待处理 · {2} 新结果',aggregate.active,Math.max(aggregate.decisions,decision?1:0),aggregate.results)
   error.textContent=c.error;error.hidden=!c.error||c.presentationMode!=='workbench';orbError.textContent=c.error;orbError.hidden=!c.error||c.presentationMode!=='orb'
   orbVoice.textContent=c.mode==='voice'?'结束语音':c.voiceId?'恢复语音':'开始语音';orbVoice.disabled=!c.connected||!c.presentationReady||c.mode==='starting'
   const pending=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
@@ -92,5 +100,5 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  async function collapse(value){await c.setPresentation(value?'orb':'workbench')}
  function receive(frame){chat.receive(frame);c.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.(mode=>run(()=>c.setPresentation(mode)));
- api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update}
+ api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update,openTask:id=>run(()=>openTask(id))}
 }
