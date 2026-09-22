@@ -1,6 +1,5 @@
 import type {CommittedConversationPair} from '../realtime/history.js'
 import {transcribeDraft} from '../realtime/cascaded/transcribe.js'
-import {prerecallContext} from '../memory/prerecall.js'
 import type {PromptLanguage} from '../realtime/prompt-language.js'
 import type {RealtimeTelemetry} from '../realtime/telemetry.js'
 import {supportsVision} from '../model/vision-capability.js'
@@ -262,7 +261,6 @@ export function buildTextRealtimeAssembly(
   const support=supportComposition(options,selected.provider,selected.config.model,selected.config.apiKey,selected.config.baseUrl,clock)
   const core=buildAssembly({...options,settings:support.settings,clock,ids,gateway:support.gateway,...((options.executors===undefined&&options.codexResource===undefined)?{}:{executors:[...(options.executors??[]),...(options.codexResource===undefined?[]:[options.codexResource.adapter])]})})
   const provider=Object.assign(new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,llm:llmFactory.open(),llmFactory,idFactory:()=>ids.next('text'),
-    ...(options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await composition.retrieval.recall(query,{scope:'any',limit:3,signal});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await composition.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();composition.personalAgent.setPrefetchedRetrieval(query,current);return prerecallContext(query,current)}}}:{}),
     ...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),
   }),{
     transcribeDraft:(pcm:Uint8Array,signal:AbortSignal)=>{
@@ -274,7 +272,7 @@ export function buildTextRealtimeAssembly(
   })
   const intake=options.intake??defaultIntake(core,support.gateway,support.settings)
   const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
-  const composition=composeRealtime(core,provider,{...options,...(createPersonalMemory===undefined?{}:{createPersonalMemory}),...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4})
+  const composition=composeRealtime(core,provider,{...options,memoryReadMode:'voice',...(createPersonalMemory===undefined?{}:{createPersonalMemory}),...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4})
   return composition
 }
 
@@ -362,16 +360,6 @@ export function buildCascadedRealtimeAssembly(
       : {executors: [...(options.executors ?? []), ...(options.codexResource === undefined ? [] : [options.codexResource.adapter])]}),
   })
   const provider = new CascadedRealtimeProvider({
-    ...(options.settings.memory_prerecall_enabled ? {prerecall: async (query: string, signal: AbortSignal) => {
-      const result = await composition.retrieval.recall(query, {scope: 'any', limit: 3, signal})
-      signal.throwIfAborted()
-      return async (consumeSignal: AbortSignal) => {
-        const current = await composition.retrieval.revalidate(result, consumeSignal)
-        consumeSignal.throwIfAborted()
-        composition.personalAgent.setPrefetchedRetrieval(query, current)
-        return prerecallContext(query, current)
-      }
-    }} : {}),
     language: options.settings.language,
     ...(options.settings.conversation_vision_enabled && supportsVision(selection.llmProvider, selection.llmModel)
       ? {captureFrame: (signal: AbortSignal) => captureConversationFrame(core.frameSource, signal, core.mediaStore)} : {}),

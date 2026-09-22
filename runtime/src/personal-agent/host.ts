@@ -1,3 +1,4 @@
+import {memoryEligibleForDiscovery} from '../memory/entry.js';
 import {PersonalUnderstanding} from './understanding.js';
 import type {UnderstandingPipeline} from '../understanding/pipeline.js';
 import {LifeService} from './life.js';
@@ -150,6 +151,7 @@ export class PersonalAgentHost {
         entries: MemoryEntry[];
         cursor: string | null;
         overview?: MemoryOverview | null;
+        pending_purges?: {entry_id:string;expected_revision:number;operation_id:string}[];
     } = { entries: [], cursor: null };
     #sources: PersonalSources | undefined;
     #feishu: PersonalFeishu | undefined;
@@ -206,7 +208,7 @@ export class PersonalAgentHost {
         this.#overviewRun = run;
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
-    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.life=new LifeService(options.path+'.life.json',()=>this.#notify()); this.news=new NewsService({path:options.path+'.news.json',...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,source:()=>this.#understandingSource()}); }
+    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.()); this.news=new NewsService({path:options.path+'.news.json',...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -316,20 +318,22 @@ export class PersonalAgentHost {
         }
     }
     async refreshMemory(cursor?: string, limit = 100, includeExpired=this.#includeExpired): Promise<void> {
+        await this.life.refresh();
         this.#includeExpired=includeExpired;
         this.#invalidateOverview();
         const refresh = this.#memoryRefresh, memory = this.options.memory();
         const page = memory?.list ? await memory.list({ ...(cursor ? { cursor } : {}), limit,...(includeExpired?{include_expired:true}:{}) }) : {entries: [], cursor: null};
+        const pending_purges=await memory?.pendingPurges?.()??[];
         if (refresh !== this.#memoryRefresh || !this.#opened) return;
         const key = hash(page);
         this.#overviewAbort.abort();
         this.#overviewKey = key;
-        this.#memory = {...page, include_expired:includeExpired, overview: this.#overviewCache?.key === key ? this.#overviewCache.value : null};
+        this.#memory = {...page, pending_purges, include_expired:includeExpired, overview: this.#overviewCache?.key === key ? this.#overviewCache.value : null};
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, revision: Math.max(this.#projectionRevision, this.#state.revision), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
-    #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, revision: Math.max(this.#projectionRevision, this.#state.revision), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         const selected=next.conversations.items.find(c=>c.id===next.conversations.selected_id),latest=selected?.messages.findLast(m=>m.role==='user');
         const isNew=!!latest&&!this.#state.conversations.items.find(c=>c.id===selected?.id)?.messages.some(m=>m.id===latest.id);
@@ -347,7 +351,7 @@ export class PersonalAgentHost {
         if (!await this.#evidence(ref))
             return false; for (const ref of p.memory_refs) {
         const entry = await this.options.memory()?.get?.(ref.entry_id);
-        if (entry?.status !== 'active' || entry.version !== ref.version || (entry.commitment !== undefined && entry.commitment.status !== 'open'))
+        if (!memoryEligibleForDiscovery(entry) || entry.version !== ref.version)
             return false;
     } return true; }
     async discoverySnapshot(): Promise<DiscoverySnapshot> {
@@ -358,12 +362,13 @@ export class PersonalAgentHost {
             const cached=this.#prefetched?.query===query&&now.getTime()-this.#prefetched.at>=0&&now.getTime()-this.#prefetched.at<30000
             retrieval=cached?structuredClone(this.#prefetched!.result):await this.#retrieval.recall(query,{scope:'any',limit:8,signal:this.#abort.signal})
             if(cached){const current=await Promise.all(retrieval.snippets.map(row=>this.#retrieval!.evidence(row.evidence_id,{signal:this.#abort.signal})));retrieval.snippets=current.flatMap(result=>result.evidence?[{...result.evidence,text:result.evidence.text.slice(0,300)}]:[])}
-            if(memory?.get){const hits=await Promise.all(retrieval.entries.map(async ref=>{const row=await memory.get!(ref.entry_id);return row?.version===ref.revision?row:null}));relevant=[...hits.filter((e):e is MemoryEntry=>e!==null),...relevant];retrieval.entries=retrieval.entries.filter(ref=>hits.some(hit=>hit?.id===ref.entry_id&&hit.version===ref.revision&&hit.status==='active'&&(hit.commitment===undefined||hit.commitment.status==='open')))}else{retrieval.entries=[]}
+            if(memory?.get){const hits=await Promise.all(retrieval.entries.map(async ref=>{const row=await memory.get!(ref.entry_id);return row?.version===ref.revision?row:null}));relevant=[...hits.filter((e):e is MemoryEntry=>e!==null),...relevant];retrieval.entries=retrieval.entries.filter(ref=>hits.some(hit=>hit?.id===ref.entry_id&&hit.version===ref.revision&&memoryEligibleForDiscovery(hit)))}else{retrieval.entries=[]}
         }else if(memory?.get&&typeof memory.recall==='function'){
             const recalled=await memory.recall(query,{scope:'recent',limit:8,signal:AbortSignal.any([this.#abort.signal,AbortSignal.timeout(5000)])});const hits=await Promise.all(recalled.hits.slice(0,8).map(hit=>memory.get!(hit.memoryId)));relevant=[...hits.filter((e):e is MemoryEntry=>e!==null),...relevant]
         }
-        relevant=relevant.filter((e,i,all)=>all.findIndex(a=>a.id===e.id)===i)
-        return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,memory:relevant.filter(e=>e.status==='active'&&e.version!==null&&(e.commitment===undefined||e.commitment.status==='open')).slice(0,16),evidence_refs:[...new Set([...(this.options.evidenceRefs?.()??[]),...(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),...(retrieval?.snippets??[]).map(item=>item.evidence_id)])].slice(-16),recent_delivery:this.#state.feed.filter(f=>Object.values(f.delivery).some(Boolean)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
+        const dueDate=(entry:MemoryEntry):string=>entry.life?.due??(entry.commitment?.due?new Date(entry.commitment.due).toLocaleDateString('en-CA',{timeZone:timezone}):'9999-12-31')
+        relevant=relevant.filter((e,i,all)=>all.findIndex(a=>a.id===e.id)===i).sort((a,b)=>dueDate(a).localeCompare(dueDate(b)))
+        return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,memory:relevant.filter(memoryEligibleForDiscovery).slice(0,16),evidence_refs:[...new Set([...(this.options.evidenceRefs?.()??[]),...(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),...(retrieval?.snippets??[]).map(item=>item.evidence_id)])].slice(-16),recent_delivery:this.#state.feed.filter(f=>Object.values(f.delivery).some(Boolean)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
     }
     discover(): Promise<void> { if (this.#discovery)
         return this.#discovery; if (!this.#opened || !this.#state.settings.discovery_enabled || !this.options.discover)
@@ -505,7 +510,8 @@ export class PersonalAgentHost {
         }
         else if(command.method==='understanding.start'){this.understanding.start();data=this.understanding.snapshot();}
         else if(command.method==='understanding.action')data=await this.understanding.action(p);
-        else if (command.method==='life.mutate') data=await this.life.mutate(p,command.request_id);
+        else if (command.method==='life.mutate') {if(p.op==='from_news')throw Error('news_conversion_command_required');data=await this.life.mutate(p,command.request_id);}
+        else if(command.method==='news.convert'){const input=this.news.conversionInput(p);data=await this.life.mutate(input,command.request_id,()=>{this.news.conversionInput(p)});}
         else if (command.method.startsWith('news.')) {
             if(command.method==='news.configure')await this.news.configure(p);
             else if(command.method==='news.action')await this.news.action(p);
@@ -541,6 +547,40 @@ export class PersonalAgentHost {
             await this.refreshMemory(q.cursor, q.limit, q.include_expired??false);
             data = this.#memory;
         }
+        else if (command.method === 'memory.purge') {
+            const q=z.object({id:z.string().min(1).max(512),expected_version:versionSchema}).strict().parse(p);
+            if(!m?.purgeEntry)throw Error('unsupported');
+            this.#invalidateOverview();this.#overviewCache=undefined;
+            await this.understanding.close();this.understanding.reopen();
+            let purged=await m.purgeEntry(q.id,q.expected_version,command.request_id);
+            if(purged.index_evidence_ids?.length&&m.completePurgeIndex){
+                try{
+                    if(!this.#retrieval)throw Error('knowledge_purge_unavailable');
+                    await this.#retrieval.purgeEvidence(purged.index_evidence_ids);
+                    purged=await m.completePurgeIndex(q.id,purged.operation_id);
+                }catch{/* Keep the durable incomplete receipt so the same cleanup can be retried. */}
+            }
+            data=purged;
+            const removedEvidence=new Set(purged.removed_evidence_ids??[]),removedEntries=new Set([q.id,...(purged.removed_entry_ids??[])]);
+            const removedFeeds=new Set(this.#state.feed.filter(item=>item.memory_refs.some(ref=>removedEntries.has(ref.entry_id))||[...item.evidence_refs,...(item.prepared?.evidence_refs??[])].some(ref=>removedEvidence.has(ref))).map(item=>item.id));
+            const affectedConversations=new Set(this.#state.conversations.items.filter(item=>item.feed_ids.some(id=>removedFeeds.has(id))||(item.prepared?.evidence_refs.some(ref=>removedEvidence.has(ref))??false)||item.messages.some(message=>removedFeeds.has(message.id.replace(/^feed:/u,'')))).map(item=>item.id));
+            for(const id of affectedConversations)await this.#conversationPool?.clear(id);
+            // Host-owned cached suggestions and command receipts must not retain the selected memory.
+            await this.#serial(async()=>{
+                const next=structuredClone(this.#state);
+                const removed=removedFeeds;
+                for(const item of next.feed)if(removed.has(item.id)&&item.suggestion_id)this.options.pool.withdraw(item.suggestion_id);
+                next.feed=next.feed.filter(item=>!removed.has(item.id));
+                for(const conversation of next.conversations.items){if(affectedConversations.has(conversation.id)){conversation.prepared=null;conversation.generation++;if(next.conversations.voice_id===conversation.id)next.conversations.voice_id=null;}conversation.messages=conversation.messages.filter(message=>!removed.has(message.id.replace(/^feed:/u,'')));conversation.feed_ids=conversation.feed_ids.filter(id=>!removed.has(id));}
+                const references=(value:unknown):boolean=>{if(Array.isArray(value))return value.some(references);if(value&&typeof value==='object'){const record=value as Record<string,unknown>;return (typeof record.id==='string'&&removedEntries.has(record.id))||(typeof record.entry_id==='string'&&removedEntries.has(record.entry_id))||Object.values(record).some(references)}return false};
+                for(const [id,receipt] of Object.entries(next.receipts))if(references(receipt.result))delete next.receipts[id];
+                await this.#commit(next);
+            });
+            this.#memory.entries=this.#memory.entries.filter(entry=>!removedEntries.has(entry.id));
+            this.#memory.pending_purges=purged.status==='incomplete'?[{entry_id:q.id,expected_revision:Number(q.expected_version),operation_id:purged.operation_id}]:[];
+            this.#notify();
+            try{await this.revalidate();await this.refreshMemory()}catch(error){if(purged.status==='complete')throw error}
+        }
         else if (command.method === 'memory.correct' || command.method === 'memory.forget') {
             const q = z.object({ id: z.string().min(1).max(256), expected_version: versionSchema, content: z.string().trim().min(1).max(500).optional() }).strict().parse(p);
             this.#invalidateOverview();
@@ -575,6 +615,6 @@ export class PersonalAgentHost {
     }
     catch (e) {
         result = { type: 'personal.result', request_id: command.request_id, ok: false, error: e instanceof Error ? e.message : 'unavailable' };
-    } await this.#serial(async () => { const next = structuredClone(this.#state); const receipt={...result as Record<string,unknown>}; if(Object.hasOwn(receipt,'data')){delete receipt.data;receipt.reload_required=true;} next.receipts[command.request_id] = { payload, result:receipt }; const keys = Object.keys(next.receipts); for (const key of keys.slice(0, Math.max(0, keys.length - 256)))
+    } await this.#serial(async () => { const next = structuredClone(this.#state); const receipt={...result as Record<string,unknown>}; if(Object.hasOwn(receipt,'data')&&command.method!=='memory.purge'){delete receipt.data;receipt.reload_required=true;} next.receipts[command.request_id] = { payload, result:receipt }; const keys = Object.keys(next.receipts); for (const key of keys.slice(0, Math.max(0, keys.length - 256)))
         delete next.receipts[key]; await this.#commit(next); }); return result; }
 }

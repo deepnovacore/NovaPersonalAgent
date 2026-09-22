@@ -1,4 +1,5 @@
-import {existsSync} from 'node:fs'
+import {isPermanentlyPurged} from './purge.js'
+import {existsSync,lstatSync} from 'node:fs'
 import {z} from 'zod'
 import {canonicalJson} from '../text/canonical-json.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
@@ -8,7 +9,10 @@ import {contentHash,memoryOperation} from './store.js'
 export function migrateLegacyMemory(db:GraphDatabase,input:unknown,openLegacy:(path:string)=>GraphDatabase):number {
  const {path,user_id,entry_prefix,source_prefix}=z.object({path:z.string().min(1),user_id:z.string().min(1),entry_prefix:z.string().min(1),source_prefix:z.string().min(1)}).strict().parse(input)
  const marker=canonicalJson([path,user_id]);db.exec('CREATE TABLE IF NOT EXISTS memory_migrations(id TEXT PRIMARY KEY)')
- if(db.prepare('SELECT id FROM memory_migrations WHERE id=?').get(marker)||!existsSync(path))return 0
+ if(!existsSync(path))return 0
+ const stat=lstatSync(path);if(stat.isSymbolicLink()||!stat.isFile()||stat.nlink!==1)throw Error('STORE_MIGRATION_FAILED')
+ db.prepare('INSERT OR IGNORE INTO memory_migration_paths VALUES(?,?,?,?,?,?)').run(path,user_id,entry_prefix,source_prefix,stat.dev,stat.ino)
+ if(db.prepare('SELECT id FROM memory_migrations WHERE id=?').get(marker))return 0
  const legacy=openLegacy(path);let count=0
  try {
   const tables=legacy.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(row=>row.name)
@@ -18,6 +22,7 @@ export function migrateLegacyMemory(db:GraphDatabase,input:unknown,openLegacy:(p
   try {
    for(const row of records){
     const record=z.object({id:z.string(),kind:z.string(),text:z.string(),evidenceIds:z.array(z.string()),authority:z.string(),recordedAt:z.string(),occurredAt:z.string().nullable(),supersededBy:z.string().nullable()}).passthrough().parse(JSON.parse(String(row.payload)))
+    if(isPermanentlyPurged(db,entry_prefix+record.id))continue
     const refs:string[]=[]
     let corrected=false
     for(const originalId of record.evidenceIds){
@@ -28,6 +33,7 @@ export function migrateLegacyMemory(db:GraphDatabase,input:unknown,openLegacy:(p
      let ref={type:'conversation',ref:originalId,observed_at:source.occurredAt??source.recordedAt}
      if(tables.includes('vm_meta')){const saved=legacy.prepare('SELECT value FROM vm_meta WHERE key=?').get(JSON.stringify(['nova-entry',user_id,'personal','source',originalId]));if(saved)ref=z.object({type:z.string(),ref:z.string(),observed_at:z.string()}).parse(JSON.parse(String(saved.value)))}
      const evidenceId=source_prefix+'legacy-e:'+contentHash(originalId)
+     if(isPermanentlyPurged(db,evidenceId))continue
      const correction=source.sessionId?.startsWith('correction:')===true
      corrected ||= correction
      memoryOperation(db,'append_evidence',{id:evidenceId,source_id:source_prefix+ref.ref,source_kind:correction?'user_correction':ref.type==='task'?'task_result':ref.type,locator:ref.ref,observed_at:ref.observed_at,recorded_at:source.recordedAt,raw_text:source.text,hash:contentHash(user_id+':'+source.text),trust:correction?'trusted_user':'untrusted_external'},false)

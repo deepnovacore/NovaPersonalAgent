@@ -51,3 +51,17 @@ test('refresh requested during ranking runs again for changed interests',async()
  const service=new NewsService({path:join(dir,'news.json'),sources:[source],fetcher:()=>Promise.resolve(new Response(xml)),rank:async(interests,articles)=>{profiles.push(interests[0]!.text);if(profiles.length===1){entered();await new Promise<void>(r=>{release=r})}return articles.map(a=>({id:a.id,matches:[],reason:''}))}})
  await service.open();try{await service.configure({enabled:true,interests:['AI'],explore:false});const first=service.refresh();await started;await service.configure({enabled:true,interests:['Travel'],explore:false});const second=service.refresh();release();await Promise.all([first,second]);assert.deepEqual(profiles,['AI','Travel']);assert.equal(service.snapshot().pending,0)}finally{release();await service.close();await rm(dir,{recursive:true,force:true})}
 })
+test('news conversion input is explicit, immutable, and rejects stale article content',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-convert-'));let feed=xml
+ const service=new NewsService({path:join(dir,'news.json'),sources:[source],now:()=>new Date('2026-09-20T11:00:00Z'),fetcher:()=>Promise.resolve(new Response(feed))});await service.open()
+ try{
+  await service.configure({enabled:true,interests:['AI'],explore:false});await service.refresh();const row=service.snapshot().items[0]!
+  const params={id:row.id,content_hash:row.content_hash,kind:'idea',title:'My interpretation',note:'Public source, not my own fact'}
+  const input=service.conversionInput(params);assert.equal(input.op,'from_news');assert.equal(input.title,'My interpretation');assert.equal(input.article.url,row.url);assert.equal(input.article.summary,row.summary)
+  input.article.title='Mutated copy';assert.equal(service.snapshot().items[0]!.title,row.title)
+  assert.throws(()=>service.conversionInput({...params,id:'missing'}),/article_not_found/)
+  assert.throws(()=>service.conversionInput({...params,content_hash:'old'}),/article_changed/)
+  feed=xml.replace('AI research','Updated AI research');await service.refresh();assert.throws(()=>service.conversionInput(params),/article_changed/)
+  assert.throws(()=>service.conversionInput({...params,kind:'profile'}))
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})

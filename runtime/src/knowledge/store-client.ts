@@ -120,6 +120,8 @@ export class KnowledgeStoreClient {
     await this.#request('replace_source', {input})
   }
 
+  async purgeEvidence(ids: readonly string[]): Promise<void> { await this.#request('purge_evidence', {ids: [...ids]}) }
+
   async removeSource(id: string): Promise<void> { await this.#request('remove_source', {id}) }
 
   recall(

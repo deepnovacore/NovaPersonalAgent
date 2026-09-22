@@ -1,8 +1,9 @@
+import {resolutionContextSchema} from './resolution.js'
 import {syncStatusSchema} from './source-state.js'
 import {z} from 'zod'
 import type {GraphDatabase} from '../workspace-graph/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
-import {EvidenceRecordSchema,CandidateSchema,type MemoryOperation} from './store.js'
+import {EvidenceRecordSchema,CandidateSchema,EntryRevisionSchema,processingStamp,type MemoryOperation} from './store.js'
 import {connectionSchema,readConnection,sourceObjectSchema,sourceIdSchema,revisionSchema,fenceSchema,connectorSourceId,sha256,readProcessingGrant,processingGrantSchema,extractionTicketSchema,sourceObjectFor,type ExtractionTicket,type SourceConnection,type Activation} from './source-state.js'
 
 type Run=(operation:MemoryOperation,input:unknown)=>unknown
@@ -59,9 +60,16 @@ export function sourceOperation(db:GraphDatabase,operation:string,input:unknown,
   return ticket
  }
  if(operation==='commit_extraction'){
-  const q=z.object({ticket:extractionTicketSchema,candidates:z.array(CandidateSchema).max(9),extracted:z.record(z.string(),z.json())}).strict().parse(v)
+  const q=z.object({ticket:extractionTicketSchema,candidates:z.array(CandidateSchema).max(9),contexts:z.array(resolutionContextSchema).max(20).default([]),extracted:z.record(z.string(),z.json())}).strict().parse(v)
   const current=sourceOperation(db,'extraction_ticket',{evidence_id:q.ticket.evidence_id,provider:q.ticket.extraction_provider,force:true},run)
   if(!current||canonicalJson(current)!==canonicalJson(q.ticket))return {applied:false}
+  for(const context of q.contexts){
+   const row=db.prepare('SELECT payload_json FROM memory_revisions WHERE entry_id=? ORDER BY revision DESC LIMIT 1').get(context.entry_id)
+   if(!row)throw Error('STORE_STALE_REVISION')
+   const entry=EntryRevisionSchema.parse(JSON.parse(String(row.payload_json)))
+   if(entry.revision!==context.revision||entry.op==='tombstone'||(entry.valid_until!==null&&Date.parse(entry.valid_until)<=Date.now()))throw Error('STORE_STALE_REVISION')
+   if(processingStamp(db,entry.evidence_refs,'extraction',q.ticket.extraction_provider)!==context.stamp)return {applied:false}
+  }
   for(const candidate of q.candidates){
    if(!candidate.evidence_refs.includes(q.ticket.evidence_id))throw Error('STORE_INVALID_OPERATION')
    for(const id of candidate.evidence_refs)if(!run('processing_evidence',{id,purpose:'extraction',provider:q.ticket.extraction_provider}))return {applied:false}

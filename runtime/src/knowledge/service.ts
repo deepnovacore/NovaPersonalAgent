@@ -48,6 +48,7 @@ export class KnowledgeService {
     this.#stop.abort(); this.#active?.abort.abort()
     await this.#store.close()
   }
+  purgeEvidence(ids:readonly string[]):Promise<void>{return this.#store.purgeEvidence(ids)}
   listSources(): Promise<readonly KnowledgeSource[]> {return this.#store.listSources()}
   async getChunk(locator: string) {
     this.#assertLedger()

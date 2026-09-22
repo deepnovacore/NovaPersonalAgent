@@ -6,18 +6,19 @@ export const sourceIdSchema=z.string().min(1).max(256)
 export const revisionSchema=z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
 export const fenceSchema=z.object({connection_id:sourceIdSchema,generation:revisionSchema,epoch:revisionSchema,scope_revision:revisionSchema}).strict()
 export type Fence=z.infer<typeof fenceSchema>
-export const processingGrantSchema=z.object({revision:revisionSchema,scope_revision:revisionSchema,extraction_provider:sourceIdSchema.nullable(),embedding_provider:sourceIdSchema.nullable()}).strict()
+export const processingGrantSchema=z.object({revision:revisionSchema,scope_revision:revisionSchema,extraction_provider:sourceIdSchema.nullable(),embedding_provider:sourceIdSchema.nullable(),conversation_providers:z.array(sourceIdSchema).max(8).optional()}).strict()
 export type ProcessingGrant=z.infer<typeof processingGrantSchema>
 export function readProcessingGrant(db:GraphDatabase,sourceId:string):ProcessingGrant|null{
  const row=db.prepare('SELECT payload_json FROM source_grants WHERE source_id=?').get(sourceId)
  return row?processingGrantSchema.parse(JSON.parse(String(row.payload_json))):null
 }
-export function allowsProcessing(db:GraphDatabase,sourceId:string,purpose:'extraction'|'embedding',provider:string):boolean{
- const grant=readProcessingGrant(db,sourceId);if(grant?.[purpose==='extraction'?'extraction_provider':'embedding_provider']!==provider)return false
+export function allowsProcessing(db:GraphDatabase,sourceId:string,purpose:'extraction'|'embedding'|'conversation',provider:string):boolean{
+ const permitted=(grant:ProcessingGrant|null)=>purpose==='conversation'?(grant?.conversation_providers??[]).includes(provider):grant?.[purpose==='extraction'?'extraction_provider':'embedding_provider']===provider
+ const grant=readProcessingGrant(db,sourceId);if(!grant||!permitted(grant))return false
  const object=sourceObjectFor(db,sourceId)
  if(!object)return true
  const c=readConnection(db,object.connection_id),connectionGrant=readProcessingGrant(db,object.connection_id)
- if(connectionGrant&&(connectionGrant.revision!==grant.revision||connectionGrant.scope_revision!==grant.scope_revision||connectionGrant[purpose==='extraction'?'extraction_provider':'embedding_provider']!==provider))return false
+ if(connectionGrant&&(connectionGrant.revision!==grant.revision||connectionGrant.scope_revision!==grant.scope_revision||!permitted(connectionGrant)))return false
  return c!==null&&c.state==='connected'&&c.fence.scope_revision===grant.scope_revision&&c.fence.generation===object.generation
 }
 export const activationSchema=z.object({object_key:sourceIdSchema,revision:revisionSchema}).strict()
@@ -73,4 +74,18 @@ export function assertSourceStateSchema(db:GraphDatabase):void{
   if(actual.length!==columns.length||actual.some((c,i)=>c.name!==columns[i]||c.type!==(c.name==='generation'||table==='source_clock'?'INTEGER':'TEXT')||Number(c.pk)!==(i<keys?i+1:0)||Number(c.notnull)!==(table==='source_clock'&&i===0?0:1)))throw Error('STORE_SCHEMA_UNSUPPORTED')
   if(db.prepare('SELECT strict FROM pragma_table_list WHERE name=?').get(table)?.strict!==1)throw Error('STORE_SCHEMA_UNSUPPORTED')
  }
+}
+
+/** A manual correction inherits only the intersection of still-authorized source destinations. */
+export function correctionProcessingGrant(db:GraphDatabase,sourceIds:readonly string[]):ProcessingGrant|null {
+ if(!sourceIds.length)return null
+ const sources=[...new Set(sourceIds)],grants=sources.map(source=>readProcessingGrant(db,source))
+ if(grants.some(grant=>grant===null))return null
+ const first=grants[0]!
+ const authorized=(purpose:'extraction'|'embedding'|'conversation',provider:string|null)=>provider!==null&&sources.every(source=>allowsProcessing(db,source,purpose,provider))
+ const extraction=authorized('extraction',first.extraction_provider)?first.extraction_provider:null
+ const embedding=authorized('embedding',first.embedding_provider)?first.embedding_provider:null
+ const conversations=(first.conversation_providers??[]).filter(provider=>authorized('conversation',provider))
+ if(extraction===null&&embedding===null&&!conversations.length)return null
+ return {revision:1,scope_revision:0,extraction_provider:extraction,embedding_provider:embedding,conversation_providers:conversations}
 }

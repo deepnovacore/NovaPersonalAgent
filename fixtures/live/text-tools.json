@@ -280,7 +280,7 @@
                       "不涉及业务逻辑",
                       "不要修改业务逻辑",
                       "不得改动任何业务逻辑",
-                  "不得改动业务逻辑"
+                      "不得改动业务逻辑"
                     ]
                   ]
                 }
@@ -861,6 +861,26 @@
                     "conversation:1",
                     "conversation:2"
                   ]
+                }
+              }
+            ],
+            "text": "forbidden"
+          }
+        }
+      ]
+    },
+    {
+      "id": "memory-evidence",
+      "text": "请打开刚才那条回忆引用的原文。",
+      "context": "当前用户内容 ref=conversation:1\n刚才 memory__recall 返回的证据 ID 为 synthetic-evidence-7319，正文尚未读取。",
+      "steps": [
+        {
+          "expect": {
+            "calls": [
+              {
+                "name": "memory__evidence",
+                "args": {
+                  "evidence_id": "synthetic-evidence-7319"
                 }
               }
             ],

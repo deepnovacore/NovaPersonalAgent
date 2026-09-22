@@ -1,3 +1,8 @@
+import {completePurgeIndex,purgeEntry,purgeStatus,recoverMemoryPurges} from '../memory-substrate/purge.js'
+import {enableMemoryFiles,flushMemoryFiles,hasMemoryFileAuthority,memoryFilesEnabled} from '../memory-substrate/file-authority.js'
+import {MarkdownRepository} from '../memory-substrate/markdown-repository.js'
+import {consumeWorkspaceProjectionChange} from '../memory-substrate/workspace-projections.js'
+import {reconcileMemoryFiles} from '../memory-substrate/store.js'
 import {recordWorkspaceRevision} from '../memory-substrate/workspace.js'
 import {migrateLegacyMemory} from '../memory-substrate/migration.js'
 import {initializeMemory, memoryOperation, type MemoryOperation} from '../memory-substrate/store.js'
@@ -424,6 +429,7 @@ export type WorkspaceGraphStoreErrorCode =
   | 'STORE_SENSITIVE_CONTENT_REJECTED'
   | 'STORE_SENSITIVE_PATH_DENIED'
   | 'STORE_STALE_REVISION'
+  | 'STORE_MEMORY_CONFLICT'
   | 'STORE_WRITE_FAILED'
 
 const storeErrorMessages: Readonly<Record<WorkspaceGraphStoreErrorCode, string>> = {
@@ -442,6 +448,7 @@ const storeErrorMessages: Readonly<Record<WorkspaceGraphStoreErrorCode, string>>
   STORE_SENSITIVE_CONTENT_REJECTED: 'workspace graph sensitive content was rejected',
   STORE_SENSITIVE_PATH_DENIED: 'workspace graph sensitive path was denied',
   STORE_STALE_REVISION: 'workspace graph revision is stale',
+  STORE_MEMORY_CONFLICT: 'memory documents conflict; user edits were preserved',
   STORE_WRITE_FAILED: 'workspace graph write failed',
 }
 
@@ -463,6 +470,8 @@ export class WorkspaceGraphStore {
   readonly #afterRelationStatement: (() => void) | undefined
   #database: GraphDatabase | undefined
   #publicationRevision = 0
+  #memoryLockHeld = false
+  readonly #fileRepository: MarkdownRepository
 
   constructor(
     path: string,
@@ -470,6 +479,7 @@ export class WorkspaceGraphStore {
     options: WorkspaceGraphStoreOptions = {},
   ) {
     this.#path = path
+    this.#fileRepository = new MarkdownRepository(path+'.memory')
     this.#databaseFactory = databaseFactory
     this.#pathPolicy = new SensitivePathPolicy(
       options.deniedRoots === undefined ? {} : {deniedRoots: options.deniedRoots},
@@ -478,7 +488,9 @@ export class WorkspaceGraphStore {
     this.#afterRelationStatement = options.afterRelationStatement
   }
 
-  open(): void {
+  open(): void {this.withMemoryFilesLock(()=>this.#openLocked())}
+
+  #openLocked(): void {
     if (this.#database !== undefined) throw new WorkspaceGraphStoreError('STORE_ALREADY_OPEN')
     let database: GraphDatabase | undefined
     try {
@@ -487,6 +499,10 @@ export class WorkspaceGraphStore {
       database.exec('PRAGMA foreign_keys=ON')
       this.#migrate(database)
       initializeMemory(database)
+      recoverMemoryPurges(database,this.#path)
+      const authoritative=hasMemoryFileAuthority(database,this.#path+'.memory')
+      if(authoritative){enableMemoryFiles(database,this.#path+'.memory',{alreadyLocked:true});reconcileMemoryFiles(database)}
+      else {
       database.exec('BEGIN IMMEDIATE')
       try {
         for (const [table, kind] of [['logical_workspaces','LogicalWorkspace'],['workspace_instances','WorkspaceInstance'],['relation_cards','RelationCard']] as const) {
@@ -496,6 +512,7 @@ export class WorkspaceGraphStore {
         }
         database.exec('COMMIT')
       } catch (error) { database.exec('ROLLBACK'); throw error }
+      }
       // A fresh database must finish its serialized schema transaction before
       // concurrent clients negotiate WAL. On Windows, racing journal_mode with
       // another connection's first migration fails immediately despite the busy
@@ -513,18 +530,46 @@ export class WorkspaceGraphStore {
         // The stable migration error below is the only failure exposed across RPC.
       }
       if (error instanceof WorkspaceGraphStoreError) throw error
+      if(error instanceof Error&&error.message.startsWith('MEMORY_MARKDOWN_'))throw new WorkspaceGraphStoreError('STORE_MEMORY_CONFLICT')
       throw new WorkspaceGraphStoreError('STORE_MIGRATION_FAILED')
     }
   }
 
   memory(operation: MemoryOperation, input: unknown, openLegacy?: GraphDatabaseFactory): unknown {
-    try { return operation === 'migrate_legacy' ? migrateLegacyMemory(this.#requireDatabase(), input, openLegacy ?? (() => {throw new Error('STORE_INVALID_OPERATION')})) : memoryOperation(this.#requireDatabase(), operation, input) }
-    catch (error) {
-      const code = error instanceof Error ? error.message : ''
-      if (['STORE_STALE_REVISION','STORE_NOT_FOUND','STORE_INVALID_OPERATION','STORE_IDEMPOTENCY_CONFLICT'].includes(code)) throw new WorkspaceGraphStoreError(code as WorkspaceGraphStoreErrorCode)
-      throw new WorkspaceGraphStoreError('STORE_WRITE_FAILED')
-    }
+    return this.withMemoryFilesLock(()=>{
+      if(operation==='enable_files'){
+        enableMemoryFiles(this.#requireDatabase(),this.#path+'.memory',{alreadyLocked:true})
+        reconcileMemoryFiles(this.#requireDatabase());return {enabled:true}
+      }
+      try {
+      if(operation==='purge')return purgeEntry(this.#requireDatabase(),this.#path,input)
+      if(operation==='purge_index_complete')return completePurgeIndex(this.#requireDatabase(),this.#path,input)
+      if(operation==='purge_status')return purgeStatus(this.#requireDatabase(),z.object({entry_prefix:z.string().min(1)}).strict().parse(input).entry_prefix)
+      this.#joinMemoryFileAuthority()
+      return operation === 'migrate_legacy' ? migrateLegacyMemory(this.#requireDatabase(), input, openLegacy ?? (() => {throw new Error('STORE_INVALID_OPERATION')})) : memoryOperation(this.#requireDatabase(), operation, input) }
+      catch (error) {
+        const message = error instanceof Error ? error.message : ''
+        const code=({version_conflict:'STORE_STALE_REVISION',request_id_conflict:'STORE_IDEMPOTENCY_CONFLICT',item_not_found:'STORE_NOT_FOUND'} as Record<string,string>)[message]??message
+        if(message.startsWith('MEMORY_MARKDOWN_'))throw new WorkspaceGraphStoreError('STORE_MEMORY_CONFLICT')
+        if (['STORE_STALE_REVISION','STORE_NOT_FOUND','STORE_INVALID_OPERATION','STORE_IDEMPOTENCY_CONFLICT'].includes(code)) throw new WorkspaceGraphStoreError(code as WorkspaceGraphStoreErrorCode)
+        throw new WorkspaceGraphStoreError('STORE_WRITE_FAILED')
+      }
+    })
   }
+
+  /** Process and worker independent path lock; only this store's synchronous nested calls may reuse it. */
+  withMemoryFilesLock<T>(fn:()=>T):T {
+    if(this.#memoryLockHeld||this.#path===':memory:')return fn()
+    return this.#fileRepository.withLock(()=>{this.#memoryLockHeld=true;try{return fn()}finally{this.#memoryLockHeld=false}})
+  }
+  #joinMemoryFileAuthority():void {
+    const db=this.#database
+    if(db)recoverMemoryPurges(db,this.#path)
+    if(db&&!memoryFilesEnabled(db)&&hasMemoryFileAuthority(db,this.#path+'.memory'))enableMemoryFiles(db,this.#path+'.memory',{alreadyLocked:true})
+  }
+  syncMemoryFiles():void {if(this.#database){this.#joinMemoryFileAuthority();reconcileMemoryFiles(this.#database)}}
+  flushMemoryFiles():void {if(this.#database)flushMemoryFiles(this.#database)}
+  consumeMemoryProjectionChange():boolean{return this.#database?consumeWorkspaceProjectionChange(this.#database):false}
 
   close(): void {
     if (this.#database === undefined) return

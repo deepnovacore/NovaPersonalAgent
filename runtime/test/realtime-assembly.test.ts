@@ -2414,6 +2414,28 @@ test('personal reply preferences refresh response style without invoking recall'
   } finally { await realtime.stop() }
 })
 
+test('memory reading modes select bounded low-trust snapshots without invoking retrieval',async()=>{
+ for(const mode of ['text','voice'] as const){
+  const provider=new ResponseAdaptationProvider();let recalled=0
+  let context={text:'Text directory: synthetic-entry@1',voice:'Voice profile and one-page summary'}
+  const realtime=buildRealtimeAssembly({core:realCore(),provider,memoryReadMode:mode,memoryConsumerFingerprint:'fixture-consumer',
+   createPersonalMemory:()=>({open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>{recalled++;return Promise.reject(Error('unexpected recall'))},prepareResponseAdaptation:consumer=>{assert.equal(consumer,'fixture-consumer');return Promise.resolve({revision:1,replyPreferences:[],memoryContext:context})}}),onDiagnostic:()=>undefined})
+  try{
+   await realtime.start();await realtime.service.sendAudio(new Uint8Array([0,1]))
+   const content=provider.adaptations.at(-1)?.content??''
+   assert.ok(content.includes(context[mode]));assert.ok(!content.includes(context[mode==='text'?'voice':'text']))
+   assert.match(content,/untrusted|low.trust/i);assert.match(content,/cannot authorize/)
+   assert.equal(recalled,0)
+   context={text:'x'.repeat(10000)+'OMITTED_TAIL',voice:'y'.repeat(10000)+'OMITTED_TAIL'}
+   await realtime.service.sendAudio(new Uint8Array([2,3]));await new Promise<void>(resolve=>setImmediate(resolve))
+   const bounded=provider.adaptations.at(-1)?.content??''
+   assert.ok(bounded.length<(mode==='text'?6500:4500));assert.ok(!bounded.includes('OMITTED_TAIL'))
+   context={text:'',voice:''};await realtime.service.sendAudio(new Uint8Array([2,3]));await new Promise<void>(resolve=>setImmediate(resolve))
+   assert.equal(provider.adaptations.at(-1)?.content,null)
+  }finally{await realtime.stop()}
+ }
+})
+
 test('response-adaptation failure stays advisory and emits only fixed diagnostic metadata', async () => {
   const provider = new ResponseAdaptationProvider()
   provider.adaptationSteps.push(() => Promise.reject(new Error('secret provider detail')))

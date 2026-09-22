@@ -10,6 +10,60 @@ import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
 import {connectorSourceId,type SourceConnection,type SourceChange} from '../src/memory-substrate/source-state.js'
 import {EvidenceRecordSchema} from '../src/memory-substrate/store.js'
+import type {EntryRevision} from '../src/memory-substrate/store.js'
+
+test('delayed extraction cannot replace a revision written while the model was running',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-extraction-race-'))
+ let started!:()=>void,release!:()=>void,calls=0
+ const waiting=new Promise<void>(resolve=>{started=resolve}),gate=new Promise<void>(resolve=>{release=resolve})
+ const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },async complete(){
+  if(++calls===2){started();await gate}
+  return {text:JSON.stringify({entries:[{key:'spicy',text:calls===1?'我不吃辣':'最近可以吃一点',topic:'饮食',kind:'preference',due:null,direction:null,status:null,valid_until:null}]})}
+ }}
+ const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const resource=new SubstrateMemoryResource({client,userId:'race',gateway,model:'fixture',inputConsent:true})
+ try{
+  await resource.open();await resource.remember({sourceId:'first',sessionId:'session',sequence:1,occurredAt:new Date().toISOString(),text:'我不吃辣'});await resource.flush()
+  const first=(await resource.list()).entries[0]!
+  await resource.remember({sourceId:'second',sessionId:'session',sequence:2,occurredAt:new Date().toISOString(),text:'最近可以吃一点'});await waiting
+  const old=(await client.memory('list',{}) as EntryRevision[]).find(row=>row.entry_id===first.id)!
+  await client.memory('merge',{entry_id:old.entry_id,expected_revision:old.revision,kind:old.kind,origin:old.origin,written_by:'merge',evidence_refs:old.evidence_refs,content:{...old.content,text:'最新状态：仍然不吃辣'},recorded_at:new Date().toISOString()})
+  release();await resource.flush()
+  assert.equal((await resource.get(first.id))?.content,'最新状态：仍然不吃辣')
+  assert.equal((await resource.get(first.id))?.version,2)
+  assert.equal((await client.memory('pending_evidence',{source_prefix:resource.prefix,provider:'fixture'}) as unknown[]).length,1,'conflict leaves evidence retryable')
+ }finally{release?.();await resource.close();await rm(root,{recursive:true,force:true})}
+})
+
+test('duplicate extraction targets reject the whole batch without a completion receipt',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-extraction-duplicates-'))
+ const entry={key:'spicy',text:'我不吃辣',topic:'饮食',kind:'preference',due:null,direction:null,status:null,valid_until:null}
+ const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){return Promise.resolve({text:JSON.stringify({entries:[entry,{...entry,text:'我喜欢吃辣'}]})})}}
+ const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const resource=new SubstrateMemoryResource({client,userId:'duplicate',gateway,model:'fixture',inputConsent:true})
+ try{
+  await resource.open();await resource.remember({sourceId:'first',sessionId:'session',sequence:1,occurredAt:new Date().toISOString(),text:'我不吃辣'});await resource.flush()
+  assert.equal((await resource.list()).entries.length,0)
+  assert.equal((await client.memory('pending_evidence',{source_prefix:resource.prefix,provider:'fixture'}) as unknown[]).length,1)
+ }finally{await resource.close();await rm(root,{recursive:true,force:true})}
+})
+
+test('a forgotten target stays forgotten without blocking other candidates in a new batch',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-extraction-forgotten-'));let calls=0
+ const entry={key:'spicy',text:'我不吃辣',topic:'饮食',kind:'preference',due:null,direction:null,status:null,valid_until:null}
+ const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){return Promise.resolve({text:JSON.stringify({entries:++calls===1?[entry]:[entry,{...entry,key:'travel',text:'我喜欢海边旅行',topic:'旅行'}]})})}}
+ const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const resource=new SubstrateMemoryResource({client,userId:'forget',gateway,model:'fixture',inputConsent:true})
+ try{
+  await resource.open();await resource.remember({sourceId:'first',sessionId:'session',sequence:1,occurredAt:new Date().toISOString(),text:'我不吃辣'});await resource.flush()
+  const first=(await resource.list()).entries[0]!
+  await resource.forgetEntry(first.id,first.version)
+  await resource.remember({sourceId:'second',sessionId:'session',sequence:2,occurredAt:new Date().toISOString(),text:'我不吃辣，我喜欢海边旅行'});await resource.flush()
+  assert.deepEqual((await resource.list()).entries.map(row=>row.content),['我喜欢海边旅行'])
+  assert.equal((await resource.get(first.id))?.status,'forgotten')
+  assert.equal((await client.memory('pending_evidence',{source_prefix:resource.prefix,provider:'fixture'}) as unknown[]).length,0)
+ }finally{await resource.close();await rm(root,{recursive:true,force:true})}
+})
 
 test('external ingestion without processing consent stays local even with conversation consent',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-no-processing-'));let calls=0
@@ -136,13 +190,14 @@ test('semantic memory retrieval finds paraphrases and hydrates only current evid
  let release!:(vectors:Float32Array[])=>void;let markStarted!:()=>void
  const started=new Promise<void>(resolve=>{markStarted=resolve})
  const embedding={id:'fixture',dims:2,embed(texts:readonly string[]){if(texts[0]==='延迟查询'){markStarted();return new Promise<Float32Array[]>(resolve=>{release=resolve})}return Promise.resolve(texts.map(text=>new Float32Array(text.includes('旅行')||text.includes('假期')?[1,0]:[0,1])))}}
- const gateway:ModelGateway={async *stream(){ /* unused */ },complete(request){const {source}=JSON.parse(request.prompt) as {source:string};return Promise.resolve({text:JSON.stringify({entries:[{key:source,text:source,topic:'生活',kind:'fact',due:null,direction:null,status:null,valid_until:null}]})})}}
+ const gateway:ModelGateway={async *stream(){ /* unused */ },complete(request){const {source,candidates}=JSON.parse(request.prompt) as {source:string;candidates?:unknown[]};return Promise.resolve({text:JSON.stringify(candidates?{decisions:candidates.map((_,candidate_index)=>({candidate_index,action:'add',target_id:null}))}:{entries:[{key:source,text:source,topic:'生活',kind:'fact',due:null,direction:null,status:null,valid_until:null}]})})}}
  const resource=new SubstrateMemoryResource({client,userId:'semantic',gateway,model:'fixture',embedding,embeddingFingerprint:'endpoint-a:fixture:2'})
  try {
   await resource.open()
   await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'trip',locator:'trip',observedAt:new Date().toISOString(),text:'喜欢去海边旅行',kind:'im',embeddingConsent:true})
   await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'food',locator:'food',observedAt:new Date().toISOString(),text:'吃饭不放辣椒',kind:'im',embeddingConsent:true})
   await resource.flush()
+  assert.equal((await resource.list()).entries.length,2,'both unrelated memories survive valid resolver add decisions')
   const answer=await resource.recall('假期安排',{limit:1});assert.equal(answer.degraded,false);assert.equal(answer.hits[0]?.text,'喜欢去海边旅行')
   const hit=answer.hits[0]
   assert.equal((await resource.evidenceFor(hit.memoryId,hit.revision))[0]?.text,'喜欢去海边旅行')
@@ -184,7 +239,7 @@ test('A backs document originals and denies automatic embedding without consent'
 test('directory summary uses indexed A chunks and replacement withdraws obsolete facts',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-canonical-directory-'))
  let calls=0
- const gateway:ModelGateway={async *stream(){ /* extraction is non-streaming */ },complete(){calls++;return Promise.resolve({text:JSON.stringify({entries:[{key:calls<3?'old':'new',text:calls<3?'旧计划':'新计划',topic:'计划',kind:'fact',due:null,direction:null,status:null,valid_until:null}]})})}}
+ const gateway:ModelGateway={async *stream(){ /* extraction is non-streaming */ },complete(){calls++;return Promise.resolve({text:JSON.stringify({entries:[{key:'plan',text:calls<3?'旧计划':'新计划',topic:'计划',kind:'fact',due:null,direction:null,status:null,valid_until:null}]})})}}
  const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
  const resource=new SubstrateMemoryResource({client,userId:'directory',gateway,model:'fixture'})
  const knowledge=new KnowledgeService({store:new KnowledgeStoreClient({path:join(root,'index','knowledge.sqlite')}),embedding:{id:'fixture',dims:2,embed:texts=>Promise.resolve(texts.map(()=>new Float32Array([1,0])))}})
@@ -199,6 +254,7 @@ test('directory summary uses indexed A chunks and replacement withdraws obsolete
   const original=await resource.evidenceFor(rows.entries[0]!.id,rows.entries[0]!.version)
   assert.equal(original[0]?.id,first.evidence_ids[0]);assert.equal(original[0]?.text,'旧计划')
   const version=rows.entries[0]!.version
+  const stableId=rows.entries[0]!.id
   await resource.observeSource(observation)
   assert.equal((await resource.list()).entries[0]!.version,version,'repeat extraction is a no-op revision')
   await assert.rejects(resource.observeSource({...observation,source_ref:{...observation.source_ref,ref:'knowledge:other'}}),/source_mismatch/u)
@@ -209,6 +265,7 @@ test('directory summary uses indexed A chunks and replacement withdraws obsolete
   assert.equal((await resource.list()).entries.length,0,'retiring previous A withdraws all old B facts')
   await resource.observeSource({...observation,source_ref:{...observation.source_ref,ref:'knowledge:'+next.id},evidence_ids:next.evidence_ids!})
   rows=await resource.list();assert.equal(rows.entries[0]?.content,'新计划')
+  assert.equal(rows.entries[0]?.id,stableId,'replacement evidence continues the same understanding')
   assert.equal((await resource.evidenceFor(rows.entries[0].id,rows.entries[0].version))[0]?.id,next.evidence_ids![0])
  }finally{await knowledge.close();await resource.close();await rm(root,{recursive:true,force:true})}
 })

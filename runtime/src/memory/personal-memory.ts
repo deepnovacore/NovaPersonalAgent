@@ -1,3 +1,6 @@
+import type {EvaluatedCandidate} from '../understanding/candidates.js'
+import type {ResolvedLifeCandidate} from '../memory-substrate/resolution.js'
+import type {LifeBackend} from '../personal-agent/life.js'
 import type {ProcessingGrant} from '../memory-substrate/source-state.js'
 import type {MemoryCapabilities, MemoryObservation, MemoryEntry, MemoryListOptions, MemoryPage, MemorySourceRef, MemoryVersion} from './entry.js'
 export * from './entry.js'
@@ -5,6 +8,8 @@ import type {MemoryInspection, MemoryInspectionQuery} from './personal-memory-in
 
 /** Nova's durable personal-memory boundary. No provider types or execution authority. */
 export type PersonalMemoryRecallScope = 'recent' | 'any'
+
+export interface PersonalMemoryPurgeResult {status:'complete'|'incomplete';operation_id:string;removed_entries:number;removed_evidence:number;removed_entry_ids?:string[];removed_evidence_ids?:string[];index_evidence_ids?:string[];backup_cleanup:{status:'complete'|'incomplete';unresolved:string[]}}
 
 export interface PersonalMemoryRecallHit {
   readonly revision?: MemoryVersion
@@ -60,6 +65,8 @@ export interface PersonalMemoryReplyPreference {
  * resource instance; callers must not compare it across providers or identities.
  */
 export interface PersonalMemoryResponseAdaptation {
+  /** Authorized, bounded derived understanding; reference data only, never action authority. */
+  readonly memoryContext?: {readonly text: string; readonly voice: string}
   readonly revision: number
   readonly replyPreferences: readonly PersonalMemoryReplyPreference[]
 }
@@ -83,8 +90,11 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  readonly resolveLifeCandidate?: (row:EvaluatedCandidate,signal:AbortSignal,guard:()=>void)=>Promise<ResolvedLifeCandidate>
+  readonly lifeBackend?: () => LifeBackend
   readonly readEvidence?: (id:string) => Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}|null>
   readonly canProcessEvidence?: (id:string,purpose:'extraction'|'embedding')=>Promise<boolean>
+  readonly canReadConversationEvidence?: (id:string,consumer:string)=>Promise<boolean>
   readonly processingStamp?: (ids:string[])=>Promise<string|null>
   readonly processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant
   readonly setProcessingConsent?: (sourceId:string,grant:ProcessingGrant)=>Promise<void>
@@ -97,6 +107,10 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly get?: (id: string) => Promise<MemoryEntry | null>
   readonly correct?: (id: string, expectedVersion: MemoryVersion, content: string, userSource: MemorySourceRef) => Promise<{previous: MemoryEntry; entry: MemoryEntry}>
   readonly forgetEntry?: (id: string, expectedVersion: MemoryVersion) => Promise<MemoryEntry>
+  /** Explicit local-user erasure only; never expose this operation as a model tool. */
+  readonly purgeEntry?: (id:string,version:MemoryVersion,requestId:string)=>Promise<PersonalMemoryPurgeResult>
+  readonly completePurgeIndex?: (id:string,operationId:string)=>Promise<PersonalMemoryPurgeResult>
+  readonly pendingPurges?: ()=>Promise<(PersonalMemoryPurgeResult & {entry_id:string;expected_revision:number})[]>
   readonly forgetSource?: (ref: string) => Promise<void>
   /** Read-only host inspection; never exposed as an LLM tool. */
   readonly inspect?: (query: MemoryInspectionQuery) => Promise<MemoryInspection>
@@ -112,6 +126,8 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
    * unavailable resources throw rather than exposing a prior identity's cached context.
    */
   readonly responseAdaptation?: () => PersonalMemoryResponseAdaptation
+  /** Revalidate current revisions and grants for the actual destination before sending memory. */
+  readonly prepareResponseAdaptation?: (consumer:string,signal?:AbortSignal)=>Promise<PersonalMemoryResponseAdaptation>
 }
 
 export class PersonalMemoryError extends Error {

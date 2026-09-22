@@ -272,3 +272,51 @@ process.stdout.write('{}');
     assert.equal(await readFile(join(credentials,'initialized'),'utf8'),'1');
   } finally {await rm(directory,{recursive:true,force:true});}
 });
+
+
+test('Feishu read scope never grants model processing and settings reports current provider consent', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nova-feishu-consent-'));
+  let provider = 'provider-one'; let conversationProviders = ['chat-one']; let failConsent = false;
+  const connector = new FeishuConnector({
+    executable: 'unused', credentialRoot: directory, statePath: join(directory, 'state.json'),
+    ingest: () => Promise.resolve(), deleteSource: () => Promise.resolve(), onAction: () => Promise.resolve(),
+    processingGrant: (allowed, revision, scope_revision) => ({revision, scope_revision, extraction_provider: allowed ? provider : null, embedding_provider: null, conversation_providers: allowed ? [...conversationProviders] : []}),
+    onProcessingConsent: () => failConsent ? Promise.reject(new Error('consent_unavailable')) : Promise.resolve(),
+    run: args => {
+      if (args[0] === '--version') return Promise.resolve('lark-cli 1.0.69');
+      if (args[1] === 'status') return Promise.resolve(JSON.stringify({appId: 'cli_fixture', verified: true, identities: {user: {openId: 'ou_fixture', status: 'authenticated', scopes: FEISHU_SCOPES}}}));
+      if (args[1] === '+chat-list') return Promise.resolve(JSON.stringify({items: [{chat_id: 'oc_fixture'}], has_more: false}));
+      return Promise.resolve('{}');
+    },
+  });
+  try {
+    await connector.open(); await connector.listChats();
+    await connector.command('feishu.configure', {chat_ids: ['oc_fixture'], consent: true});
+    let state = await connector.command('feishu.status');
+    assert.equal(state.scope_configured, true);
+    assert.equal(state.processing_consent_required, true);
+    await connector.command('feishu.consent', {consent: true});
+    assert.equal((await connector.command('feishu.status')).processing_consent_required, false);
+    conversationProviders = ['chat-two', 'chat-one'];
+    assert.equal((await connector.command('feishu.status')).processing_consent_required, true);
+    await connector.command('feishu.consent', {consent: true});
+    conversationProviders = ['chat-one', 'chat-two'];
+    assert.equal((await connector.command('feishu.status')).processing_consent_required, false);
+    provider = 'provider-two';
+    assert.equal((await connector.command('feishu.status')).processing_consent_required, true);
+    await connector.command('feishu.consent', {consent: true});
+    assert.equal((await connector.command('feishu.status')).processing_consent_required, false);
+    await connector.command('feishu.consent', {consent: false});
+    state = await connector.command('feishu.status');
+    assert.equal(state.processing_consent_required, true); assert.equal(state.state, 'ready');
+    await connector.command('feishu.consent', {consent: true});
+    failConsent = true;
+    await assert.rejects(connector.command('feishu.configure', {chat_ids: [], consent: true}), /consent_unavailable/);
+    assert.equal(connector.snapshot().state, 'paused');
+    const stored = JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')) as {selected: string[]};
+    assert.deepEqual(stored.selected, ['oc_fixture']);
+    failConsent = false;
+    await connector.command('feishu.configure', {chat_ids: ['oc_fixture'], consent: true});
+    assert.equal(connector.snapshot().processing_consent_required, true);
+  } finally { await connector.close(); await rm(directory, {recursive: true, force: true}); }
+});

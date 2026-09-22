@@ -103,3 +103,15 @@ test('recent stays within the memory candidate window and its linked originals',
   assert.deepEqual(result.snippets.map(hit => hit.evidence_id), ['e:m1']);
   await engine.recall('项目', {scope: 'any'}); assert.equal(rawQueries, 1);
 });
+
+test('model-facing recall and evidence require the actual consumer while local reads remain available',async()=>{
+ const personal=memory([memoryHit('m1')]);let granted=true
+ personal.canReadConversationEvidence=(_id,consumer)=>Promise.resolve(granted&&consumer==='allowed-model')
+ const engine=new UnifiedRetrieval({memory:()=>personal})
+ const permitted=await engine.recall('项目',{consumer:'allowed-model'});assert.equal(permitted.entries.length,1);assert.equal(permitted.snippets.length,1)
+ const denied=await engine.recall('项目',{consumer:'other-model'});assert.equal(denied.entries.length,0);assert.equal(denied.snippets.length,0)
+ assert.equal((await engine.evidence('e:m1',{consumer:'other-model'})).state,'gone')
+ assert.equal((await engine.evidence('e:m1')).state,'ok')
+ granted=false
+ const revoked=await engine.revalidate(permitted,new AbortController().signal);assert.equal(revoked.entries.length,0);assert.equal(revoked.snippets.length,0)
+})

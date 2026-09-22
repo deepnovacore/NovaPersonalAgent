@@ -6,6 +6,7 @@ import type {PersonalMemoryResource, MemoryVersion} from './personal-memory.js'
 export interface RetrievedEntry extends Record<string, JsonValue> {
   entry_id: string; revision: Exclude<MemoryVersion, null>; reference: string;
   text: string; origin: 'stated' | 'inferred'; evidence_refs: string[];
+  kind: string; life: JsonValue;
 }
 export interface RetrievedSnippet extends Record<string, JsonValue> {
   evidence_id: string; source_kind: string; locator: string; text: string;
@@ -31,10 +32,18 @@ const deadline = (signal?: AbortSignal): AbortSignal => AbortSignal.any([...(sig
 /** C projection: entries and raw-index candidates resolve against the same A/B authority. */
 export class UnifiedRetrieval {
   private readonly owners = new WeakMap<UnifiedRetrievalResult, PersonalMemoryResource>();
+  private readonly consumers = new WeakMap<UnifiedRetrievalResult,string>();
   constructor(private readonly options: {
     memory: () => PersonalMemoryResource | undefined;
+    rawPurgeEvidence?: (ids: readonly string[]) => Promise<void>;
     rawRecall?: (query: string, limit: number, signal: AbortSignal) => Promise<readonly {evidence_id: string; score?: number}[]>;
   }) {}
+
+  get canPurgeEvidence(): boolean { return this.options.rawPurgeEvidence !== undefined; }
+  async purgeEvidence(ids: readonly string[]): Promise<void> {
+    if (!this.options.rawPurgeEvidence) throw Error('knowledge_purge_unavailable');
+    await this.options.rawPurgeEvidence(ids);
+  }
 
   /** Consume a prefetched projection using current A/B rows, without another embedding request. */
   async revalidate(result: UnifiedRetrievalResult, signal: AbortSignal): Promise<UnifiedRetrievalResult> {
@@ -55,7 +64,20 @@ export class UnifiedRetrieval {
     const current = {...result, entries: entries.filter((item): item is RetrievedEntry => item !== null), snippets: snippets.filter((item): item is RetrievedSnippet => item !== null)};
     current.state = current.entries.length || current.snippets.length ? 'ok' : 'empty';
     this.owners.set(current, resource);
-    return current;
+    const consumer=this.consumers.get(result);if(consumer!==undefined)this.consumers.set(current,consumer);
+    return this.authorize(current,resource,consumer,signal);
+  }
+
+  private async authorize(result:UnifiedRetrievalResult,resource:PersonalMemoryResource,consumer:string|undefined,signal:AbortSignal):Promise<UnifiedRetrievalResult>{
+    if(consumer===undefined||!resource.canReadConversationEvidence)return result;
+    const allowed=async(ids:readonly string[])=>ids.length>0&&(await Promise.all(ids.map(id=>abortable(resource.canReadConversationEvidence!(id,consumer),signal)))).every(Boolean);
+    const entries=await Promise.all(result.entries.map(async entry=>await allowed(entry.evidence_refs)?entry:null));
+    const snippets=await Promise.all(result.snippets.map(async snippet=>await allowed([snippet.evidence_id])?snippet:null));
+    signal.throwIfAborted();
+    if(this.options.memory()!==resource)return {state:'unavailable',scope:result.scope,entries:[],snippets:[],degraded:true};
+    result.entries=entries.filter((entry):entry is RetrievedEntry=>entry!==null);result.snippets=snippets.filter((snippet):snippet is RetrievedSnippet=>snippet!==null);
+    result.state=result.entries.length||result.snippets.length?'ok':result.degraded?'unavailable':'empty';
+    return result;
   }
 
   private snippet(row: NonNullable<Awaited<ReturnType<NonNullable<PersonalMemoryResource['readEvidence']>>>>, bytes: number): RetrievedSnippet | null {
@@ -64,7 +86,7 @@ export class UnifiedRetrieval {
     return {evidence_id: row.evidence_id, source_kind: row.source_kind, locator: row.locator, text, observed_at: row.observed_at, trust: 'untrusted_external'};
   }
 
-  async evidence(id: string, options: {signal?: AbortSignal} = {}): Promise<RetrievedEvidenceResult> {
+  async evidence(id: string, options: {signal?: AbortSignal;consumer?:string} = {}): Promise<RetrievedEvidenceResult> {
     if (!safeId(id)) throw new Error('invalid_evidence_request');
     const signal = deadline(options.signal); signal.throwIfAborted();
     const resource = this.options.memory();
@@ -73,7 +95,10 @@ export class UnifiedRetrieval {
       const row = await abortable(resource.readEvidence(id), signal);
       options.signal?.throwIfAborted();
       if (this.options.memory() !== resource) return {state: 'unavailable', evidence: null};
-      const evidence = row?.evidence_id === id ? this.snippet(row, 2000) : null;
+      const allowed=options.consumer===undefined||!resource.canReadConversationEvidence||await abortable(resource.canReadConversationEvidence(id,options.consumer),signal);
+      options.signal?.throwIfAborted();
+      if(this.options.memory()!==resource)return {state:'unavailable',evidence:null};
+      const evidence = allowed&&row?.evidence_id === id ? this.snippet(row, 2000) : null;
       return {state: evidence ? 'ok' : 'gone', evidence};
     } catch {
       options.signal?.throwIfAborted();
@@ -81,7 +106,7 @@ export class UnifiedRetrieval {
     }
   }
 
-  async recall(query: string, options: {scope?: 'recent' | 'any'; limit?: number; signal?: AbortSignal} = {}): Promise<UnifiedRetrievalResult> {
+  async recall(query: string, options: {scope?: 'recent' | 'any'; limit?: number; signal?: AbortSignal;consumer?:string} = {}): Promise<UnifiedRetrievalResult> {
     const scope = options.scope ?? 'any', requested = options.limit ?? 8;
     if (typeof query !== 'string' || !query.trim() || query.length > 512 || query.includes('\0')
       || !['recent', 'any'].includes(scope) || !Number.isSafeInteger(requested) || requested < 1) throw new Error('invalid_retrieval_request');
@@ -116,7 +141,7 @@ export class UnifiedRetrieval {
           const text = excerpt(current.content, 1000); if (!text) continue;
           const refs = [...new Set(hit.evidenceIds.filter(safeId))].slice(0, 16);
           const rank = 1 / (60 + index + 1);
-          entries.set(current.id, {rank, entry: {entry_id: current.id, revision: current.version, reference: `${current.id}@${current.version}`, origin: current.origin, text, evidence_refs: refs}});
+          entries.set(current.id, {rank, entry: {entry_id: current.id, revision: current.version, reference: `${current.id}@${current.version}`, origin: current.origin, text, evidence_refs: refs, kind:current.kind, life:current.life?{...current.life,due_precision:current.life.due===null?null:'date',due_time:null}:null}});
           // The same evidence appearing in several memories counts once in this ranked channel.
           for (const id of refs) if (!evidenceRanks.has(id)) evidenceRanks.set(id, rank);
         } catch { degraded = true; }
@@ -180,6 +205,7 @@ export class UnifiedRetrieval {
     const resultSnippets = checked.flatMap(candidate => candidate?.evidenceId ? [snippets.get(candidate.evidenceId)!] : []);
     const result: UnifiedRetrievalResult = {state: resultEntries.length || resultSnippets.length ? 'ok' : degraded ? 'unavailable' : 'empty', scope, entries: resultEntries, snippets: resultSnippets, degraded};
     this.owners.set(result, resource);
-    return result;
+    if(options.consumer!==undefined)this.consumers.set(result,options.consumer);
+    return this.authorize(result,resource,options.consumer,signal);
   }
 }

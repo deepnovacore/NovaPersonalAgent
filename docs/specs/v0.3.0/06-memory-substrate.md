@@ -64,6 +64,8 @@ A / B / C 是记忆层**内部的三个阶段**，不是三个部署单元：同
 一个 Worker 独占核心账本与修订；Knowledge 可沿用独立 Worker 维护可重建索引，原文仍以 A 为准。主线程与语音热路径只读发布快照（沿用 `docs/archs/02-memory.md` L1 / L3 的规则）。
 数据只向上流；控制只有一条向下的路，就是用户纠正，而它也是先写进 A 再经 merge 进 B。
 
+**2026-09-21 调整（见 [07 卷](07-memory-channels-and-interaction.md)）：** A 账本仍由 SQLite Worker 独占；B 修订与 C 投影的权威表示改为用户数据目录内 Git 仓库的 Markdown 文件（profile、五象限对象、entity、一页纸），SQLite 中的 `memory_revisions` 与向量表退为可重建索引。`merge` 签名、NOOP／add／update／tombstone 语义、纠正优先与乐观并发不变，只是输出从写行改为写一批文件加一次 commit。原文不进 Git，保留期与物理删除规则不受影响。
+
 | 阶段 | 变更模型 | 写入者 | 读者 | 对应 archs/02 |
 |---|---|---|---|---|
 | A 账本 | 只追加；用户删除来源数据时物理删除该来源的行 | 连接器、对话轮次入账、执行器结果入账、用户纠正 | merge、重抽取、记忆页"查看依据" | L1 观测 |
@@ -169,6 +171,8 @@ embedding 外发仍须显式同意，并绑定授权范围与 provider。没有�
 
 ### 5.2 两级检索与语音管线
 
+> 历史实现说明：以下预检索段落记录此前已验收的路径。2026-09-21 的新读取策略以 07 卷为准：文本默认目录＋按需工具（可显式开启文本预检索），实时语音默认 profile＋一页纸；`MEMORY_PRERECALL_ENABLED` 默认改为 `false`。新实现及验收进度见 [MEMORY-ARCHITECTURE-IMPLEMENTATION.md](MEMORY-ARCHITECTURE-IMPLEMENTATION.md)。
+
 一级预检索仅用于 cascaded：每轮用户输入在 LLM 开口前读取 §5.1 的有界结果，最多 3 条并限制总上下文预算；低于相关性门槛、超时或失败不注入。以可替换、低信任的上下文拼入本轮 system，明确“可能相关，不确定时忽略”，不写入对话历史，不覆盖回复偏好。用户可设置 `NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED=false` 关闭预检索，退回显式回忆。默认开启；桌面设置的“回答前查找相关记忆”也可关闭，保存并重启生效。
 
 二级为模型按需调用 `memory__recall` / `memory__evidence`，接受一次工具往返。integrated 按 D2 保持纯语音低延迟模式，只使用二级，不向下一轮异步塞入本轮检索结果。
@@ -216,7 +220,7 @@ PR / commit 已创建（URL 或 SHA）、命令返回码与截断输出、`EXECU
 ## 9. 不做
 
 - 不生成叙事式人物画像作为主体（D3 不变）。
-- 不引入向量数据库或 mem0 作为依赖；mem0 的贡献只是 §4 的 merge 动作集合。
+- 不引入向量数据库或 mem0 作为依赖；mem0 的贡献只是 §4 的 merge 动作集合。2026-09-21 核实 mem0ai 3.2.0 OSS 的 `add()` 只做 ADD，不承担合并判定，不进写路径。
 - 不在 06 卷底座之外新建记忆存储；VoiceMem 与 历史工作区存储 改为写入方，不再各自为真。
 - 不让 renderer、模型或语音热路径直接读写底座 SQLite。
 - 不另起 RAG 真相源或规格卷；复用现有知识索引，归入 §5.1。
@@ -231,6 +235,7 @@ PR / commit 已创建（URL 或 SHA）、命令返回码与截断输出、`EXECU
 | IM 与邮件原文默认保留期（已定） | IM 保持现有 30 天；邮件接收后 30 天；日历结束后 30 天 | 见 [M8-Mail 设计 §7](../../superpowers/specs/2026-09-19-composio-connectors-design.md)；原文到期与服务商删除区分 |
 | person 实体归一 | 复用 `identity.ts` 的 candidate / confirmed / suppressed 机制 / 只按连接器给的稳定 ID，不做跨来源归一 | 前者能把飞书里的人和邮件里的人对上，误合并风险需 ASR 式置信上限 |
 | 历史工作区存储 迁移时机 | 底座里程碑内一次迁 / 先并行写、后切换 | 前者干净，后者可分步验收 |
+| B／C Markdown 迁移顺序（2026-09-21） | 先统一写入契约再迁 LifeService JSON 与修订表 / 先迁 LifeService 再迁修订表 | 前者双写窗口短但一次改动大；后者可分步验收但两套契约并存更久 |
 
 ## 11. 验收场景
 
@@ -260,5 +265,7 @@ PR / commit 已创建（URL 或 SHA）、命令返回码与截断输出、`EXECU
 ## 2026-09-12 实施约定
 
 Knowledge 作为 A 的派生索引，统一回忆属于 C 阶段。个人记忆和 历史工作区存储 共用现有 Worker/SQLite；旧 VoiceMem 数据只读迁入并保留原数据库。候选抽取复用现有模型 gateway，merge 是唯一修订入口。工作区旧表作为修订结果的物化视图保留。人按连接器稳定身份记录，不自动跨账号归一。当前范围与验收状态见 [本轮实现记录](MEMORY-AND-FEISHU-IMPLEMENTATION.md)。
+
+2026-09-21 设计调整：B／C 权威表示改为 Markdown + Git，A 留 SQLite；整理节奏为逐条入库加每日批量；详见 [07 卷](07-memory-channels-and-interaction.md)。尚未实施。
 
 2026-09-20 实现补充：连接级 processing grant 是对象 grant 的上层效力门控；撤回同意在对象级传播中崩溃后，恢复同步也不能重新允许旧对象处理。同步状态、continuation 和删除代际恢复均复用来源存储。见 [验收记录](../../research/2026-09-20-connector-acceptance.md)。

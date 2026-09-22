@@ -90,6 +90,7 @@ function execute(request: Request): unknown {
     case 'list_chunks': return listChunks(request.source_id, request.offset)
     case 'link_evidence': return linkEvidence(request.links)
     case 'replace_source': return replaceSource(request.input)
+    case 'purge_evidence': return purgeEvidence(request.ids)
     case 'remove_source': return removeSource(request.id)
     case 'recall': return recall(request.query, request.vector, request.provider_id, request.k)
     case 'get_chunk': return getChunk(request.locator)
@@ -130,6 +131,7 @@ function open(): {readonly fts: boolean} {
         chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
         evidence_id TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS knowledge_suppressed (hash TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS knowledge_metadata (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
       INSERT OR IGNORE INTO knowledge_metadata(key, value) VALUES ('fts_dirty', 1);
       CREATE INDEX IF NOT EXISTS chunks_source_idx ON chunks(source_id);
@@ -277,7 +279,7 @@ function replaceSource(value: unknown): null {
 
   try {
     opened.exec('BEGIN IMMEDIATE')
-    const previous = opened.prepare('SELECT id, content_digest, legacy_digest FROM chunks WHERE source_id = ? ORDER BY ordinal').all(input.source.id) as Row[]
+    const previous = new Map((opened.prepare('SELECT id, ordinal, content_digest, legacy_digest FROM chunks WHERE source_id = ? ORDER BY ordinal').all(input.source.id) as Row[]).map(row=>[numberValue(row,'ordinal'),row]))
     if (ftsAvailable) opened.prepare('DELETE FROM chunks_fts WHERE source_id = ?').run(input.source.id)
     else opened.exec("UPDATE knowledge_metadata SET value = 1 WHERE key = 'fts_dirty'")
     opened.prepare('DELETE FROM sources WHERE id = ?').run(input.source.id)
@@ -300,7 +302,8 @@ function replaceSource(value: unknown): null {
     `) : undefined
     // ponytail: ordinal correspondence; use semantic matching only if stable section tracking is required.
     for (const [ordinal, chunk] of input.chunks.entries()) {
-      const old = previous[ordinal]
+      if ((chunk.evidence_id && opened.prepare('SELECT 1 FROM knowledge_suppressed WHERE hash=?').get(purgeHash(chunk.evidence_id))) || opened.prepare('SELECT 1 FROM knowledge_suppressed WHERE hash=?').get(purgeHash(input.source.id+'\0'+chunk.text))) continue
+      const old = previous.get(ordinal)
       const id = old === undefined ? randomUUID() : textValue(old, 'id')
       const digest = contentDigest(input.source.title, chunk.heading_path, chunk.text)
       const legacy = old?.content_digest === digest ? old.legacy_digest ?? null : null
@@ -316,6 +319,38 @@ function replaceSource(value: unknown): null {
     if (error instanceof StoreError) throw error
     throw new StoreError('STORE_WRITE_FAILED')
   }
+}
+
+function purgeHash(value:string):string {return createHash('sha256').update(value).digest('hex')}
+
+/** Persist the fence and remove all managed copies atomically; every retry compacts again. */
+function purgeEvidence(value:unknown):null {
+ if(!Array.isArray(value)||value.length>4096)throw new StoreError('STORE_INVALID_INPUT')
+ const ids=[...new Set(value.map(id=>boundedString(id,600)))],opened=db()
+ opened.exec('PRAGMA secure_delete=ON; BEGIN IMMEDIATE')
+ try{
+  for(const id of ids){
+   opened.prepare('INSERT OR IGNORE INTO knowledge_suppressed VALUES(?)').run(purgeHash(id))
+   const chunks=opened.prepare('SELECT c.id,c.source_id,c.text FROM chunks c JOIN evidence_links e ON e.chunk_id=c.id WHERE e.evidence_id=?').all(id)
+   for(const chunk of chunks){
+    opened.prepare('INSERT OR IGNORE INTO knowledge_suppressed VALUES(?)').run(purgeHash(String(chunk.source_id)+'\0'+String(chunk.text)))
+    // Even a lexical-only worker must clean an existing FTS copy created by a prior runtime.
+    if(opened.prepare("SELECT 1 FROM sqlite_master WHERE name='chunks_fts'").get())opened.prepare('DELETE FROM chunks_fts WHERE chunk_id=?').run(String(chunk.id))
+    opened.prepare('DELETE FROM chunks WHERE id=?').run(String(chunk.id))
+   }
+  }
+  opened.exec('COMMIT')
+ }catch(error){try{opened.exec('ROLLBACK')}catch{/* preserve failure */}throw error}
+ // FTS internal segments retain deleted tokens until merged; rebuild contains only surviving chunks.
+ if(opened.prepare("SELECT 1 FROM sqlite_master WHERE name='chunks_fts'").get()){
+  opened.exec("DROP TABLE chunks_fts; CREATE VIRTUAL TABLE chunks_fts USING fts5(chunk_id UNINDEXED,source_id UNINDEXED,text,heading_path); INSERT INTO chunks_fts(chunk_id,source_id,text,heading_path) SELECT id,source_id,text,heading_path FROM chunks")
+ }
+ const checkpoint=opened.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()
+ if(checkpoint&&Number(checkpoint.busy)>0)throw new StoreError('STORE_WRITE_FAILED')
+ opened.exec('VACUUM')
+ const after=opened.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get()
+ if(after&&Number(after.busy)>0)throw new StoreError('STORE_WRITE_FAILED')
+ return null
 }
 
 function removeSource(value: unknown): null {

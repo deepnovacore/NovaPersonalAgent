@@ -767,3 +767,17 @@ test('DeepSeek cascade uses its official credential and Flash model', () => {
   assert.equal(requireCascadedCredentials(settings, selection).llmApiKey, 'deepseek-test')
   assert.throws(() => requireCascadedCredentials(loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded', NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'deepseek', DASHSCOPE_API_KEY: 'wrong-key'}), selection), /DEEPSEEK_API_KEY/)
 })
+
+test('memory prerecall is opt-in and preserves explicit enabled configuration',()=>{
+ assert.equal(loadSettings({}).memory_prerecall_enabled,false)
+ assert.equal(loadSettings({NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED:'true'}).memory_prerecall_enabled,true)
+ assert.equal(loadSettings({NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED:'false'}).memory_prerecall_enabled,false)
+})
+
+test('daily memory consolidation uses a validated configurable hour and timezone',()=>{
+ const defaults=loadSettings({})
+ assert.equal(defaults.memory_consolidation_enabled,true);assert.equal(defaults.memory_consolidation_hour,0);assert.equal(defaults.memory_consolidation_timezone,'UTC')
+ const configured=loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_ENABLED:'false',NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_HOUR:'9',NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_TIMEZONE:'Asia/Shanghai'})
+ assert.equal(configured.memory_consolidation_enabled,false);assert.equal(configured.memory_consolidation_hour,9);assert.equal(configured.memory_consolidation_timezone,'Asia/Shanghai')
+ assert.throws(()=>loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_HOUR:'24'}));assert.throws(()=>loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_TIMEZONE:'not-a-timezone'}))
+})

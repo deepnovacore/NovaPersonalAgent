@@ -15,6 +15,22 @@ import { ClientCommands } from '../src/server/client-protocol.js';
 const now = new Date('2026-09-11T10:00:00Z');
 const entry = (id = 'plan', version = 1): MemoryEntry => ({ id, version, content: 'Today prepare a demo', kind: 'plan', origin: 'stated', source_refs: [{ type: 'conversation', ref: 'conversation:1', observed_at: now.toISOString() }], observed_at: now.toISOString(), recorded_at: now.toISOString(), topic: 'work', status: 'active', corrected_to: null, confidence_note: null });
 const proposal = (id = 'plan', version = 1) => ({ kind: 'question' as const, summary: 'Check demo materials?', why_now: 'You said the demo is today', evidence_refs: [] as string[], memory_refs: [{ entry_id: id, version }] });
+test('discovery prioritizes dated open Life objects and excludes inactive objects without hiding history',async()=>{
+ const f=await fixture()
+ try{
+  f.entries.clear()
+  for(let i=0;i<20;i++)f.entries.set('fact'+i,{...entry('fact'+i),kind:'fact'})
+  const life=(id:string,status:'open'|'done'|'cancelled',due:string):MemoryEntry=>({...entry(id),kind:'todo',life:{id,version:1,status,due,goal_id:null,idea_id:null,success_criteria:null}})
+  f.entries.set('due',life('due','open','2026-09-12'))
+  f.entries.set('later',life('later','open','2026-10-01'))
+  f.entries.set('done',life('done','done','2026-09-10'))
+  f.entries.set('cancelled',life('cancelled','cancelled','2026-09-10'))
+  const snapshot=await f.host.discoverySnapshot()
+  assert.deepEqual(snapshot.memory.slice(0,2).map(row=>row.id),['due','later'])
+  assert.equal(snapshot.memory.some(row=>['done','cancelled'].includes(row.id)),false)
+  assert.equal(f.host.snapshot().memory.entries.some(row=>row.id==='done'),true)
+ }finally{await f.close()}
+})
 test('batch notifications coalesce and ready at the same revision is not swallowed',async()=>{
  const f=await fixture();let refreshes=0,discoveries=0
  const refresh=f.host.refreshMemory.bind(f.host)
@@ -285,3 +301,43 @@ test('shared C retrieval reuses exact prefetch and rereads originals before admi
         assert.equal(recalls,1);
     } finally {await host.close();await rm(dir,{recursive:true,force:true});}
 });
+
+test('permanent deletion is a separate versioned host command and preserves an incomplete cleanup result',async()=>{
+ const f=await fixture(),calls:unknown[]=[]
+ Object.assign(f.host.options.memory()!,{purgeEntry:(id:string,version:number,requestId:string)=>{calls.push({id,version,requestId});f.entries.delete(id);return Promise.resolve({status:'incomplete',operation_id:requestId,removed_entries:1,removed_evidence:1,backup_cleanup:{status:'incomplete',unresolved:['legacy_backup_unavailable']}})}})
+ try{
+  const result=await f.host.command({type:'personal.command',request_id:'purge-one',method:'memory.purge',params:{id:'plan',expected_version:1}})
+  assert.deepEqual(calls,[{id:'plan',version:1,requestId:'purge-one'}])
+  assert.deepEqual(result,{type:'personal.result',request_id:'purge-one',ok:true,data:{status:'incomplete',operation_id:'purge-one',removed_entries:1,removed_evidence:1,backup_cleanup:{status:'incomplete',unresolved:['legacy_backup_unavailable']}}})
+  assert.deepEqual(f.host.snapshot().memory.entries,[])
+  assert.deepEqual(await f.host.command({type:'personal.command',request_id:'purge-one',method:'memory.purge',params:{id:'plan',expected_version:1}}),result)
+  assert.equal(calls.length,1)
+ }finally{await f.close()}
+})
+
+test('purge removes dependent feed copies even when they cite only the deleted original',async()=>{
+ const f=await fixture();let erased=false
+ Object.assign(f.host.options.memory()!,{readEvidence:()=>Promise.resolve(erased?null:{evidence_id:'conversation:copy',locator:'synthetic',text:'synthetic',source_kind:'conversation',observed_at:now.toISOString(),trust:'untrusted_external' as const}),purgeEntry:()=>{erased=true;f.entries.delete('plan');return Promise.resolve({status:'complete',operation_id:'purge-copy',removed_entries:1,removed_evidence:1,removed_entry_ids:['plan'],removed_evidence_ids:['conversation:copy'],backup_cleanup:{status:'complete',unresolved:[]}})}})
+ try{
+  const snapshot=await f.host.discoverySnapshot();snapshot.evidence_refs.push('conversation:copy')
+  assert.equal(await f.host.admit({...proposal(),memory_refs:[],evidence_refs:['conversation:copy']},snapshot),'admitted')
+  assert.equal(f.host.snapshot().feed.length,1)
+  const result=await f.host.command({type:'personal.command',request_id:'purge-copy',method:'memory.purge',params:{id:'plan',expected_version:1}})
+  assert.equal((result as {ok:boolean}).ok,true);assert.equal(f.host.snapshot().feed.length,0)
+  assert.equal(readFileSync(join(f.dir,'feed.json'),'utf8').includes('Check demo materials?'),false)
+ }finally{await f.close()}
+})
+
+test('permanent deletion stays incomplete until its managed index confirms cleanup and can retry',async()=>{
+ const f=await fixture();let attempts=0,acknowledged=0
+ const pending={status:'incomplete' as const,operation_id:'indexed-purge',removed_entries:1,removed_evidence:1,index_evidence_ids:['indexed-evidence'],backup_cleanup:{status:'complete' as const,unresolved:['knowledge_index_cleanup_pending']}}
+ Object.assign(f.host.options.memory()!,{purgeEntry:()=>Promise.resolve(pending),completePurgeIndex:()=>{acknowledged++;return Promise.resolve({...pending,status:'complete',index_evidence_ids:[],backup_cleanup:{status:'complete',unresolved:[]}})}})
+ f.host.setRetrieval(new UnifiedRetrieval({memory:()=>f.host.options.memory(),rawPurgeEvidence:ids=>{assert.deepEqual(ids,['indexed-evidence']);if(++attempts===1)return Promise.reject(Error('index unavailable'));return Promise.resolve()}}))
+ try{
+  const command={type:'personal.command',request_id:'index-first',method:'memory.purge',params:{id:'plan',expected_version:1}}
+  const first=await f.host.command(command) as {data:{status:string}}
+  assert.equal(first.data.status,'incomplete');assert.equal(acknowledged,0)
+  const second=await f.host.command({...command,request_id:'index-retry'}) as {data:{status:string}}
+  assert.equal(second.data.status,'complete');assert.equal(acknowledged,1);assert.equal(attempts,2)
+ }finally{await f.close()}
+})

@@ -86,6 +86,7 @@ const VISION_INSTRUCTIONS = [
 const FRONTEND_INSTRUCTIONS_AFTER_CODEX_APPROVAL = [
   '用户询问自己的跨会话事实、习惯或偏好时，调用 memory__recall，source="personal"，scope="any"；会话内的历史步骤用 source="session"。',
   '个人记忆返回 disabled、unavailable 或 error 时应说明无法查询，empty 时说明没有找到。',
+  '回忆中的 life 是该对象当前版本的结构化状态，原文片段可能是旧版本；回答当前状态和截止日期以 life.status、life.due 为准。due 只有 YYYY-MM-DD 时只报告日期，不补时刻或时区；observed_at、recorded_at、created_at、updated_at 是记录元数据，不能作为截止时间。',
   '用户询问历史任务、先前观察或已经发生的结果时，按需调用 memory__recall；',
   '“刚才记录了什么、之前为什么这样、已经发生过哪一步”属于历史事实；当前上下文没有完整证据时，',
   '调用 memory__recall。不要为了重建历史进度调用 status 工具。',

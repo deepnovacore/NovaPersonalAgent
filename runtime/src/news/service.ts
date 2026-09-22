@@ -1,4 +1,5 @@
 import {z} from 'zod'
+import {newsArticleSchema} from '../personal-agent/life.js'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 import {NEWS_SOURCES,digest,fetchFeed,type Article,type NewsSource} from './feeds.js'
 import {scoreSchema,validateScores,type NewsRanker} from './ranking.js'
@@ -33,6 +34,13 @@ export class NewsService{
    else{const row=next.items.find(i=>i.id===p.id);if(!row)throw Error('article_not_found');if(p.action==='save'&&p.value&&!row.saved&&next.items.filter(i=>i.saved).length>=100)throw Error('saved_limit_100');row[p.action==='save'?'saved':'read']=p.value}
    await this.#save(next)
   })
+ }
+ /** Resolve only a user-selected cached article; this method never records personal facts. */
+ conversionInput(raw:unknown){
+  const p=z.object({id:z.string(),content_hash:z.string(),kind:z.enum(['idea','todo','goal']),title:z.string().trim().min(1).max(200),note:z.string().max(4000).default('')}).strict().parse(raw)
+  const row=this.#state.items.find(item=>item.id===p.id);if(!row)throw Error('article_not_found')
+  if(row.content_hash!==p.content_hash)throw Error('article_changed')
+  return {op:'from_news' as const,kind:p.kind,title:p.title,note:p.note,article:newsArticleSchema.parse({article_id:row.id,source_id:row.source_id,url:row.url,content_hash:row.content_hash,title:row.title,summary:row.summary,published_at:row.published_at})}
  }
  snapshot(){const s=this.#state,now=this.#now().getTime();const visible=s.items.filter(a=>!s.blocked.includes(a.source_id));const weight=(a:typeof s.items[number])=>a.ranking?.profile_version===s.profile_version?Math.max(0,...a.ranking.matches.map(m=>m.score*(a.ranking?.judgment?.substance==='promotional'?0.5:a.ranking?.judgment?.substance==='thin'?0.85:1)*(s.interests.find(i=>i.id===m.interest_id)?.weight??0))):0
   const fresh=visible.filter(a=>now-Date.parse(a.published_at??a.first_seen)<7*86400000)

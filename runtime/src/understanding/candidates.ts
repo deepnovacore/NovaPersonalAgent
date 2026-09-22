@@ -1,9 +1,10 @@
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
 
-export const sourceSchema=z.object({id:z.string().min(1),version:z.number().int().nonnegative(),text:z.string().min(1).max(64000),origin:z.enum(['user','assistant','public','import']),context:z.string().max(16000).optional()}).strict()
+export const sourceSchema=z.object({id:z.string().min(1),version:z.number().int().nonnegative(),text:z.string().min(1).max(64000),origin:z.enum(['user','assistant','public','import']),context:z.string().max(16000).optional(),observed_at:z.iso.datetime({offset:true}).optional(),timezone:z.string().min(1).max(100).optional()}).strict()
 export type EvidenceSource=z.infer<typeof sourceSchema>
-const inputSchema=z.object({source_id:z.string(),source_version:z.number().int(),span:z.object({start:z.number().int().nonnegative(),end:z.number().int().positive(),quote:z.string().min(1)}).strict(),kind:z.enum(['todo','idea','goal','profile']),text:z.string().min(1).max(1000)}).strict()
+export const candidatePatchSchema=z.object({title:z.string().trim().min(1).max(200).optional(),note:z.string().max(1000).optional(),due:z.string().date().nullable().optional(),status:z.enum(['open','doing','waiting','done','cancelled','active','archived','paused','completed']).optional()}).strict()
+const inputSchema=z.object({source_id:z.string(),source_version:z.number().int(),span:z.object({start:z.number().int().nonnegative(),end:z.number().int().positive(),quote:z.string().min(1)}).strict(),kind:z.enum(['todo','idea','goal','profile']),text:z.string().min(1).max(1000),operation:z.enum(['record','update']).optional(),patch:candidatePatchSchema.optional()}).strict()
 export type Candidate=z.infer<typeof inputSchema>&{id:string}
 export const decisionSchema=z.object({attribution:z.enum(['user','other','uncertain']),modality:z.enum(['commitment','request','preference','aspiration','tentative','rejected','uncertain']),support:z.enum(['supported','contradicted','insufficient']),importance:z.enum(['transient','useful','lasting','critical']),capture:z.enum(['explicit','suggested','none']).optional(),probabilities:z.record(z.string(),z.record(z.string(),z.number().min(0).max(1))).optional()}).strict()
 export type CandidateDecision=z.infer<typeof decisionSchema>
@@ -15,7 +16,12 @@ export function validateCandidate(source:EvidenceSource,raw:unknown):Candidate{
  const c=inputSchema.parse(raw)
  if(c.source_id!==source.id||c.source_version!==source.version)throw Error('candidate_stale_source')
  if(c.span.end<=c.span.start||source.text.slice(c.span.start,c.span.end)!==c.span.quote||c.span.end>source.text.length)throw Error('candidate_invalid_span')
- const id=createHash('sha256').update(JSON.stringify([source.id,source.version,source.text,c.span,c.kind,c.text])).digest('hex')
+ if(c.operation!=='update'&&Object.keys(c.patch??{}).some(key=>key!=='due'))throw Error('candidate_update_operation_required')
+ if(c.operation==='update'&&(c.kind==='profile'||!c.patch||!Object.keys(c.patch).length))throw Error('candidate_invalid_update')
+ if(c.patch?.due!==undefined&&c.kind!=='todo')throw Error('candidate_invalid_due')
+ if(c.patch?.due!==undefined&&(!source.observed_at||!source.timezone))throw Error('candidate_missing_time_anchor')
+ if(c.patch?.status!==undefined){const allowed=c.kind==='todo'?['open','doing','waiting','done','cancelled']:c.kind==='idea'?['active','archived']:c.kind==='goal'?['active','paused','completed','archived']:[];if(!allowed.includes(c.patch.status))throw Error('candidate_invalid_status')}
+ const id=createHash('sha256').update(JSON.stringify([source.id,source.version,source.text,c.span,c.kind,c.text,...(c.operation?[c.operation]:[]),...(c.patch?[c.patch]:[])])).digest('hex')
  return {...c,id}
 }
 function policy(source:EvidenceSource,c:Candidate,d:CandidateDecision):string[]{

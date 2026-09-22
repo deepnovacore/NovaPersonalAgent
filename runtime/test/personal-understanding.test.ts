@@ -54,3 +54,18 @@ test('voice partial and duplicate final never capture; final captures once and e
   await assert.rejects(host.understanding.action({id:notice.id,action:'undo'}),/version_conflict/);assert.equal(host.life.snapshot().todos[0]!.title,'牛奶和面包')
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+
+test('local-only host keeps explicit creates but refuses unresolved status updates',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-auto-local-update-'));let update=false
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null,understand:source=>{
+  const row=record(source)
+  if(update){const {id,...raw}=row.candidate;assert.ok(id);row.candidate=validateCandidate(source,{...raw,operation:'update',patch:{status:'done'}})}
+  return Promise.resolve([row])
+ }})
+ try{await host.open();host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'好'}),close:()=>Promise.resolve()}),()=>{/* observer */})
+  await host.submitConversationText('chat:main','记录学习任务');await host.waitConversation('chat:main');await tick();assert.equal(host.life.snapshot().todos.length,1)
+  update=true;await host.submitConversationText('chat:main','把学习任务标为完成');await host.waitConversation('chat:main');await tick()
+  assert.equal(host.life.snapshot().todos.length,1);assert.equal(host.life.snapshot().todos[0]!.status,'open');assert.equal(host.understanding.snapshot().status,'failed')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})

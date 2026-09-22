@@ -81,17 +81,17 @@ port.on('message', message => {
     return
   }
   try {
-    const {result, publish} = execute(request)
+    const {result,snapshot,publicationFailed}=store.withMemoryFilesLock(()=>{
+      if(request.operation!=='memory'&&request.operation!=='close')store.syncMemoryFiles()
+      const response=execute(request)
+      if(request.operation!=='memory'&&request.operation!=='close')store.flushMemoryFiles()
+      const dirty=request.operation==='close'?false:store.consumeMemoryProjectionChange()
+      let snapshot:unknown
+      let publicationFailed=false
+      if(response.publish||dirty){try{snapshot=store.publishSnapshot()}catch{publicationFailed=true}}
+      return {result:response.result,snapshot,publicationFailed}
+    })
     if (data.testHooks?.exitAfterCommitBeforeResponse === request.operation) process.exit(86)
-    let snapshot: unknown
-    let publicationFailed = false
-    if (publish) {
-      try {
-        snapshot = store.publishSnapshot()
-      } catch {
-        publicationFailed = true
-      }
-    }
     port.postMessage({
       kind: 'response',
       request_id: request.request_id,
@@ -112,8 +112,11 @@ port.on('message', message => {
 
 function execute(request: StoreRequest): {readonly result: unknown; readonly publish: boolean} {
   switch (request.operation) {
-    case 'memory':
-      return {result: store.memory(stringField(request, 'memoryOperation') as MemoryOperation, request.input, path => new DatabaseSync(path, {readOnly:true,allowExtension:false})), publish: false}
+    case 'memory': {
+      const operation=stringField(request,'memoryOperation') as MemoryOperation
+      const result=store.memory(operation,request.input,path=>new DatabaseSync(path,{readOnly:true,allowExtension:false}))
+      return {result,publish:false}
+    }
     case 'open':
       store.open()
       const path=privateGraphPath(data.path);secureSidecar(path,'-wal');secureSidecar(path,'-shm')
@@ -298,7 +301,7 @@ function optionalStringField(request: StoreRequest, key: string): string | undef
 }
 
 function safeErrorCode(error: unknown): WorkspaceGraphStoreErrorCode {
-  return error instanceof WorkspaceGraphStoreError ? error.code : 'STORE_WRITE_FAILED'
+  return error instanceof WorkspaceGraphStoreError ? error.code : error instanceof Error&&error.message.startsWith('MEMORY_MARKDOWN_')?'STORE_MEMORY_CONFLICT':'STORE_WRITE_FAILED'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -59,7 +59,18 @@ test('production scoped graph completes a real text adapter turn without closing
     restoreHistory:()=>Promise.resolve(),abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),
   })})}}),
  });const runtime=await factory(createConversation('chat','A'),()=>{ /* no renderer */ });
- try{const result=await runtime.runTurn('hello',AbortSignal.timeout(5000));assert.equal(result.assistant,'scoped reply');assert.match(result.turn_id??'',/:assistant:cascaded-response-1-1$/)}finally{await runtime.close()}
+ try{
+  const service=runtime.bridgeService!;assert.ok(typeof service.submitText==='function')
+  const submit=service.submitText.bind(service)
+  service.submitText=()=>Promise.reject(Error('synthetic_submit_failed'))
+  await assert.rejects(runtime.runTurn('rejected',AbortSignal.timeout(5000)),/synthetic_submit_failed/)
+  const switchableAfterFailure=runtime.canSwitch?.()
+  service.submitText=submit
+  // A real retry also settles the failed implementation's abandoned pending slot before teardown.
+  const result=await runtime.runTurn('hello',AbortSignal.timeout(5000))
+  assert.equal(switchableAfterFailure,true,'a rejected submit must release the pending turn')
+  assert.equal(result.assistant,'scoped reply');assert.match(result.turn_id??'',/:assistant:cascaded-response-1-1$/)
+ }finally{await runtime.close()}
  const result=await host.command({type:'personal.command',request_id:'still-open',method:'state',params:{}}) as {ok:boolean};assert.equal(result.ok,true)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
@@ -111,4 +122,38 @@ test('playback epoch allocation spans independent conversation registries',async
  const first=new PlaybackRegistry(options),second=new PlaybackRegistry(options)
  assert.equal(first.openResponse({sessionEpoch:1,responseId:'a'}).generation_epoch,1)
  assert.equal(second.openResponse({sessionEpoch:1,responseId:'b'}).generation_epoch,2)
+})
+
+
+test('failed voice initialization aborts its lifetime and leaves host text usable',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-voice-init-failure-'))
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const frames:Record<string,unknown>[]=[],lifetimes:AbortSignal[]=[];let lateEmit:(frame:Record<string,unknown>)=>void=()=>{/* assigned by failed factory */}
+ try{
+  await host.open();host.setConversationRuntime((_conversation,emit,mode,lifetime)=>{
+   if(mode==='voice'){lateEmit=emit;lifetimes.push(lifetime!);return Promise.reject(Error('synthetic_voice_init_failed'))}
+   return Promise.resolve({runTurn:text=>Promise.resolve({assistant:'Recovered: '+text}),close:()=>Promise.resolve()})
+  },frame=>frames.push(frame))
+  const result=await host.command({type:'personal.command',request_id:'voice-fails',method:'conversations.voice',params:{id:'chat:main',enabled:true}}) as {ok:boolean;error:string}
+  assert.equal(result.ok,false);assert.equal(result.error,'synthetic_voice_init_failed');assert.equal(host.conversationSnapshot().voice_id,null)
+  assert.equal(lifetimes[0]?.aborted,true,'host must not retain a failed factory lifetime')
+  lateEmit({type:'executor.progress',text:'obsolete runtime'});assert.equal(frames.length,0)
+  await host.submitConversationText('chat:main','try text');await host.waitConversation('chat:main')
+  assert.equal(host.conversationSnapshot().messages.at(-1)?.text,'Recovered: try text')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('failed text initialization also aborts stale emitters before retry',async()=>{
+ const lifetimes:AbortSignal[]=[],emissions:Record<string,unknown>[]=[],emitters:((frame:Record<string,unknown>)=>void)[]=[]
+ const pool=new ConversationRuntimePool((_conversation,emit,_mode,lifetime)=>{
+  lifetimes.push(lifetime!);emitters.push(emit)
+  return lifetimes.length===1?Promise.reject(Error('synthetic_text_init_failed')):Promise.resolve({runTurn:text=>Promise.resolve({assistant:text}),close:()=>Promise.resolve()})
+ },frame=>emissions.push(frame))
+ const conversation=createConversation('chat','Retry',null,'retry')
+ try{
+  await assert.rejects(pool.run(conversation,'first'),/synthetic_text_init_failed/)
+  assert.equal(lifetimes[0]?.aborted,true)
+  emitters[0]!({type:'executor.progress'});assert.equal(emissions.length,0)
+  assert.deepEqual(await pool.run(conversation,'second'),{assistant:'second'})
+ }finally{await pool.close()}
 })

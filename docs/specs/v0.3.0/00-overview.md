@@ -23,7 +23,12 @@ here propose deltas and never silently rewrite those volumes.
 | [03 用户视角记忆](03-user-memory-view.md) | `memory_entry` 投影；来源、stated/inferred；纠正与忘记的回写与传播；概览段落的覆盖声明 | A 与 B 交界 |
 | [04 来源与 connector](04-sources-and-connectors.md) | 用户配置的本地目录；一个邮件/日历 provider；飞书 IM 作为来源与投递渠道；授权、暂停、断开、删除；MCP 作为暴露方式 | C |
 | [06 记忆底座](06-memory-substrate.md) | 账本 / 条目 / 视图三阶段；`evidence_record` 与 `entry_revision` 契约；merge 唯一写入口；Discovery 拆为抽取与筛选 | A 与 C 交界 |
+| [07 Memory、信息渠道与交互（设计稿）](07-memory-channels-and-interaction.md) | A 留 SQLite、B／C Markdown + Git 权威；混合整理节奏；mem0 不进写路径；文本／语音／IM 读取策略；现状、差距及验收边界 | 共同，待评审 |
 | [STATUS](STATUS.zh-CN.md) | 白话进度页：里程碑、依赖、退出条件、待拍板事项 | 共同 |
+
+2026-09-21 新增 07 卷并于同日脑暴收敛为设计稿：理解层（B／C）以 Markdown + Git 为权威、原文账本留 SQLite；整理节奏为逐条入库加每日批量；mem0 不进写路径；飞书私聊纳入文本入口。D8 已追加对应修订；各卷实施契约待评审后另立计划，不代表功能已经实现。
+
+补充 review：07 卷已加入黑板报及 [§9 架构评审](07-memory-channels-and-interaction.md)，聚焦事实与摘要、来源生命周期、访问范围、写入恢复和读取预算；均为待讨论建议。
 
 ## 本版范围（2026-09-11，2026-09-12 调整）
 
@@ -57,7 +62,7 @@ M9-C Kimi Code / pi agent、M9-G GUI/AutoGLM、M9-Demo 仍在 [v0.4.0](../v0.4.0
 | D5 | **同一个输入框三态**：打字；长按录音，松手得到可编辑草稿，发送才算一轮；切到全双工，麦克风常开，输入框位置显示实时转写。 | 三种入口在协议上已分别对应 `input.text`、`input.dictation`、`input.audio`；UI 上收敛为一个控件，用户不用理解管线。 |
 | D6 | **两个主机拥有的契约对象**：`feed_item`（首页事项）与 `memory_entry`（用户视角的记忆投影，不是新存储）。UI 不持有任何权威副本。 | 它们是 A 轨与 B 轨的接口。A 轨产出并维护，B 轨渲染并回传用户动作。任务列表沿用已有的 `EXECUTOR_TASKS`。 |
 | D7 | **新开 v0.3.0 系列，里程碑从 M5 续编号。** | 定位转型在版本号上可见；v0.2.0 的"一句话目标"不被稀释。 |
-| D8 | **记忆收敛为一套三阶段底座（2026-09-12）。** A 账本只追加并**存原文**，用户删除来源数据时物理删除；B 条目是只追加的修订日志，merge 是唯一写入口，用户纠正与模型合并是同一种修订记录；C 视图只读重算，统一回忆融合 B 当前态与 A 原文索引；Knowledge 退为索引并继承外发同意。VoiceMem 与 历史工作区存储 改为写入方。Discovery 拆为入库抽取与 tick 筛选。飞书 IM 与邮件都在本版范围（M8-IM、M8-Mail）。 | 三套互不打通的记忆无法满足 D3 / D6 要求的逐条 ID、版本、纠正传播；按参考项目分层会加剧分散。可追溯是属性不是层。存原文换来重抽取能力，代价是字段级敏感策略、物理删除与保留期成为硬要求。详见 [06 卷](06-memory-substrate.md) 与 [对照记录](../../design-notes/2026-09-12-memory-references-comparison.zh-CN.md)。 |
+| D8 | **记忆收敛为一套三阶段底座（2026-09-12）。** A 账本只追加并**存原文**，用户删除来源数据时物理删除；B 条目是只追加的修订日志，merge 是唯一写入口，用户纠正与模型合并是同一种修订记录；C 视图只读重算，统一回忆融合 B 当前态与 A 原文索引；Knowledge 退为索引并继承外发同意。VoiceMem 与 历史工作区存储 改为写入方。Discovery 拆为入库抽取与 tick 筛选。飞书 IM 与邮件都在本版范围（M8-IM、M8-Mail）。 | 三套互不打通的记忆无法满足 D3 / D6 要求的逐条 ID、版本、纠正传播；按参考项目分层会加剧分散。可追溯是属性不是层。存原文换来重抽取能力，代价是字段级敏感策略、物理删除与保留期成为硬要求。详见 [06 卷](06-memory-substrate.md) 与 [对照记录](../../design-notes/2026-09-12-memory-references-comparison.zh-CN.md)。**2026-09-21 修订：** B／C 权威表示改为 Markdown + Git，A 仍为 SQLite；merge 唯一写入口不变。详见 [07 卷](07-memory-channels-and-interaction.md)。 |
 
 ## Goals
 

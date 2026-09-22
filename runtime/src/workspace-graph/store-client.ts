@@ -73,6 +73,7 @@ const clientErrorMessages: Readonly<Record<WorkspaceGraphStoreClientErrorCode, s
   STORE_SENSITIVE_CONTENT_REJECTED: 'workspace graph sensitive content was rejected',
   STORE_SENSITIVE_PATH_DENIED: 'workspace graph sensitive path was denied',
   STORE_STALE_REVISION: 'workspace graph revision is stale',
+  STORE_MEMORY_CONFLICT: 'memory documents conflict; user edits were preserved',
   STORE_WRITE_FAILED: 'workspace graph write failed',
 }
 
@@ -461,7 +462,9 @@ export class WorkspaceGraphStoreClient {
     }
     const hasPublicationOutcome = response.snapshot !== undefined
       || response.publication_failed === true
-    if (pending.expectsPublication !== hasPublicationOutcome) {
+    // A memory read may admit a hand-edited workspace document and refresh its projection.
+    const optionalPublication=['memory','load_graph_state','get_operation_receipt','list_observations','get_observation','list_logical_workspaces','get_logical_workspace','list_workspace_instances','get_workspace_instance','list_relations','get_relation','list_relation_evidence','diagnostics'].includes(pending.request.operation)
+    if (pending.expectsPublication !== hasPublicationOutcome && !(optionalPublication&&!pending.expectsPublication)) {
       this.#fail('WORKER_PROTOCOL_FAILURE')
       return
     }

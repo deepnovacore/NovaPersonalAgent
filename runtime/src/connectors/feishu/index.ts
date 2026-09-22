@@ -111,8 +111,8 @@ export class FeishuConnector {
     if (!options.bootstrapOnly && (!options.ingest || !options.deleteSource || !options.onAction)) throw new Error('Feishu collection callbacks required');
     this.run = options.run ?? createFeishuRunner(options.executable, options.credentialRoot);
   }
-  snapshot(): FeishuSnapshot { const view = structuredClone(this.view),expected=this.options.processingGrant?.(true,1,0); view.processing_consent_required=!this.saved.processingConsent?.extraction_provider||this.saved.processingConsent.extraction_provider!==expected?.extraction_provider||this.saved.processingConsent.embedding_provider!==expected?.embedding_provider; view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; if (view.app_setup) delete view.app_setup.verification_url; return view; }
-  private setupSnapshot(): FeishuSnapshot {return structuredClone(this.view);}
+  snapshot(): FeishuSnapshot { const view = structuredClone(this.view),expected=this.options.processingGrant?.(true,1,0); view.processing_consent_required=!this.saved.processingConsent?.extraction_provider||this.saved.processingConsent.extraction_provider!==expected?.extraction_provider||this.saved.processingConsent.embedding_provider!==expected?.embedding_provider||JSON.stringify([...(this.saved.processingConsent.conversation_providers??[])].sort())!==JSON.stringify([...(expected?.conversation_providers??[])].sort()); view.scope_configured = this.saved.scopeConfigured ?? this.saved.selected.length > 0; if (view.app_setup) delete view.app_setup.verification_url; return view; }
+  private setupSnapshot(): FeishuSnapshot {const view=this.snapshot();if(this.view.app_setup)view.app_setup=structuredClone(this.view.app_setup);return view;}
   private publish(): void {
     if (this.closed) return;
     const snapshot = this.snapshot(); const key = JSON.stringify(snapshot);
@@ -307,9 +307,11 @@ export class FeishuConnector {
   }
   async configure(chatIds: string[], consent: boolean): Promise<void> {
     if (!consent || this.view.state === 'unauthorized' || !this.saved.account || chatIds.some((id) => !this.view.chats.some((chat) => chat.id === id))) throw new Error('请选择已授权的飞书会话');
+    await this.pause();
+    await this.setProcessingConsent(false,true);
     this.saved.scopeConfigured = true; this.saved.selected = [...new Set(chatIds)]; this.saved.connected = true; this.saved.paused = false;
     this.view.chats = this.view.chats.map((chat) => ({ ...chat, selected: chatIds.includes(chat.id) }));
-    this.view.state = 'ready'; await this.setProcessingConsent(consent,true); await this.save();
+    this.view.state = 'ready'; await this.save();
   }
   async setProcessingConsent(consent:boolean,scopeChanged=false):Promise<void>{
     const prior=this.saved.processingConsent;

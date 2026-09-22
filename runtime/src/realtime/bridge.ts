@@ -119,6 +119,7 @@ export function requiresSynchronousResult(
 export class RealtimeRuntimeBridge {
   readonly #runtime: BridgeRuntime
   readonly #retrieval:UnifiedRetrieval|undefined
+  readonly #conversationConsumer:string
   readonly #personalMemory: PersonalMemoryRecallPort | undefined
   readonly #tools: CompiledTools
   readonly #idFactory: () => string
@@ -136,6 +137,7 @@ export class RealtimeRuntimeBridge {
   constructor(options: {
     readonly runtime: BridgeRuntime
     readonly retrieval?:UnifiedRetrieval
+    readonly conversationConsumer?:string
     readonly personalMemory?: PersonalMemoryRecallPort
     readonly tools: CompiledTools
     readonly idFactory: () => string
@@ -145,6 +147,7 @@ export class RealtimeRuntimeBridge {
     this.#runtime = options.runtime
     this.#personalMemory = options.personalMemory
     this.#retrieval=options.retrieval
+    this.#conversationConsumer=options.conversationConsumer??''
     this.#tools = options.tools
     this.#idFactory = options.idFactory
     this.#queryDigestKey = options.queryDigestKey ?? randomBytes(32)
@@ -293,14 +296,14 @@ export class RealtimeRuntimeBridge {
       const origin = options.originRef ?? this.#latestUserOriginRef
       if (!schema || !validParams(call.arguments, schema) || typeof call.arguments.evidence_id !== 'string' || call.arguments.evidence_id.includes('\0')) return this.#refused(call, 'invalid_params')
       if (!origin || !trustedUserOrigin(this.#runtime.memory, origin)) return this.#refused(call, 'missing_origin_ref')
-      const result = this.#retrieval ? await this.#retrieval.evidence(call.arguments.evidence_id, options) : {state: 'unavailable', evidence: null}
+      const result = this.#retrieval ? await this.#retrieval.evidence(call.arguments.evidence_id, {...options,consumer:this.#conversationConsumer}) : {state: 'unavailable', evidence: null}
       return this.#inlineToolResult(call, JSON.stringify(result), result.state, {})
     }
     const request = this.#memoryRecallRequest(call, options.originRef ?? null)
     if (!request.ok) return request.acceptance
     if (request.source === 'session') return this.#acceptMemoryRecall(call, options.originRef ?? null)
     if (this.#retrieval) {
-      const result = await this.#retrieval.recall(request.query, {scope: request.scope, limit: 8, ...(options.signal ? {signal: options.signal} : {})})
+      const result = await this.#retrieval.recall(request.query, {consumer:this.#conversationConsumer,scope: request.scope, limit: 8, ...(options.signal ? {signal: options.signal} : {})})
       return this.#inlineToolResult(call, JSON.stringify(result), result.state, {hit_count: result.entries.length + result.snippets.length, degraded: result.degraded})
     }
     if (request.source !== 'personal') return this.#refused(call, 'unsupported_tool')
