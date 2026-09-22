@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {chmod,mkdtemp,realpath,rm} from 'node:fs/promises'
+import {chmod,mkdtemp,readFile,realpath,rm,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {dirname,join} from 'node:path'
 import {test} from 'node:test'
@@ -34,6 +34,25 @@ test('control and goal changes reject stale or unauthorized fences',async()=>{
   const revised=await tasks.reviseGoal('goal:1',{...fence,control_revision:1},{kind:'user',client_id:'workbench'},'Fix login safely',['regression passes','audit passes'])
   assert.equal(revised.goal_revision,1);assert.equal(revised.goal,'Fix login safely')
   await assert.rejects(tasks.reviseGoal('goal:2',{...fence,control_revision:1},{kind:'user',client_id:'workbench'},'Stale',[]),/stale_task/)
+ }finally{await tasks.close();await rm(dirname(path),{recursive:true,force:true})}
+})
+
+test('control retries ignore equivalent fence and actor key order',async()=>{
+ const path=await temporaryPath(),tasks=new TaskService(path)
+ try{await tasks.open();const task=await tasks.delegate('request:1',input)
+  await tasks.control('takeover:1',{task_id:task.id,control_revision:0,goal_revision:0},{kind:'nova'},{kind:'user',client_id:'workbench'})
+  const returned=await tasks.control('return:1',{task_id:task.id,control_revision:1,goal_revision:0},{kind:'user',client_id:'workbench'},{kind:'nova'})
+  const retried=await tasks.control('return:1',{goal_revision:0,task_id:task.id,control_revision:1},{client_id:'workbench',kind:'user'},{kind:'nova'})
+  assert.equal(retried.control_revision,returned.control_revision)
+ }finally{await tasks.close();await rm(dirname(path),{recursive:true,force:true})}
+})
+
+test('open rejects persisted blank waiting reasons',async()=>{
+ const path=await temporaryPath(),tasks=new TaskService(path)
+ try{await tasks.open();await tasks.delegate('request:1',input);await tasks.close()
+  const persisted=JSON.parse(await readFile(path,'utf8')) as {tasks:{waiting_reason:string|null}[]}
+  persisted.tasks[0]!.waiting_reason='   ';await writeFile(path,JSON.stringify(persisted))
+  await assert.rejects(new TaskService(path).open())
  }finally{await tasks.close();await rm(dirname(path),{recursive:true,force:true})}
 })
 
