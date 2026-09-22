@@ -28,7 +28,7 @@ import {
   MAX_CONTINUATION_TASK_SUMMARY,
   MAX_PENDING_HOST_EVENTS
 } from './session-state.js'
-import {RealtimeDeliveryError, type RealtimeSession} from './session.js'
+import {RealtimeDeliveryError, ResponseRequestUncertainError, type RealtimeSession} from './session.js'
 import type {RealtimeTelemetry} from './telemetry.js'
 
 import {Mutex, diagnosticName, isAbort} from './service-state.js'
@@ -670,7 +670,8 @@ export class HostDelivery {
         // Preserve the item after transport failure; a response may already have been requested.
         // Later queue invalidation must not claim this uncertain delivery was never sent.
         this.#uncertainQueuedDeliveries.add(queued)
-        heapPush(this.#hostItems, queued)
+        if(queued.intent.kind!=='task_continuation'||!(cause instanceof ResponseRequestUncertainError))heapPush(this.#hostItems, queued)
+        else if(queued.preemptive)this.#recomputePreemptPriority()
         throw cause
       }
       const delivered = delivery.accepted
