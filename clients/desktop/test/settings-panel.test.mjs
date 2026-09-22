@@ -75,6 +75,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
     t, localizeDocument, createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
+    createConnectionsPanel: () => ({load: () => Promise.resolve()}),
     createKnowledgePanel: () => ({render() {}}),
     document: {
       documentElement: {}, createTreeWalker: () => ({nextNode: () => null}),
@@ -1336,7 +1337,6 @@ test('memory prerecall switch stages and saves explicit off without hiding on in
   assert.equal(saved.memoryPrerecallEnabled,false)
   assert.equal(toggle.checked,false)
   assert.match(html,/回答前查找相关记忆/u)
-  assert.match(html,/仅逐段语音模式；关闭后仍可按需回忆/u)
 })
 
 test('pairing polling keeps the QR and regenerate button stable while manual refresh shows progress', async t => {

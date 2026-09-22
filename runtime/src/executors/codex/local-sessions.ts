@@ -10,7 +10,7 @@ export interface LocalCodexSession {
 }
 
 /** Read-only discovery. Resume always goes through app-server, never through copied rollout files. */
-export async function readLocalCodexSessions(home: string): Promise<readonly LocalCodexSession[]> {
+export async function readLocalCodexSessions(home: string, threadId?: string): Promise<readonly LocalCodexSession[]> {
   const files = (await readdir(home)).filter(name => /^state_\d+\.sqlite$/u.test(name))
     .sort((a, b) => Number(b.slice(6, -7)) - Number(a.slice(6, -7)))
   if (!files[0]) return []
@@ -20,8 +20,8 @@ export async function readLocalCodexSessions(home: string): Promise<readonly Loc
     const columns = db.prepare('PRAGMA table_info(threads)').all().map(row => row.name)
     const name = columns.includes('name') ? "COALESCE(NULLIF(name, ''), title)" : 'title'
     rows = db.prepare(`SELECT id, ${name} AS title, cwd, updated_at, ${columns.includes('rollout_path') ? 'rollout_path' : 'NULL AS rollout_path'} FROM threads
-      WHERE archived = 0 AND source IN ('cli', 'vscode', 'exec', 'app-server')
-      ORDER BY updated_at DESC, id LIMIT 200`).all()
+      WHERE archived = 0 AND source IN ('cli', 'vscode', 'exec', 'app-server')${threadId === undefined ? '' : ' AND id = ?'}
+      ORDER BY updated_at DESC, id LIMIT 200`).all(...(threadId === undefined ? [] : [threadId]))
   } finally { db.close() }
   const sessions: LocalCodexSession[] = []
   for (const row of rows) {

@@ -1,3 +1,4 @@
+import type {CodingTargetController} from '../personal-agent/coding-targets.js'
 import {requireSelectedCascadedLlmConfig} from '../config/cascaded-realtime-config.js'
 import {requireIntegratedRealtime} from '../config/config.js'
 import type {RealtimeProviderEvent} from '../realtime/protocol.js'
@@ -226,6 +227,7 @@ export interface RealtimeAssemblyOptions {
   readonly controlledGuardReconnect?: boolean
   readonly guardHistoryRecovery?: PreemptiveAlertHistoryRecovery
   readonly guardHistoryPairs?: number
+  readonly codingTarget?: CodingTargetController
   readonly projectConfirmation?: ProjectConfirmationController
   readonly projectAdapter?: ProjectExecutorAdapter
   readonly commitProjectOperation?: (
@@ -808,7 +810,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const projectConfirmation = options.sharedPersonal ? options.projectConfirmation : projectAdapter?.confirmationController ?? options.projectConfirmation
   const commitProjectOperation = projectAdapter === undefined
     ? options.commitProjectOperation
-    : ((operation: ConfirmedProjectOperation) => projectAdapter.commitConfirmed(
+    : (async (operation: ConfirmedProjectOperation) => {
+      const targetRevision = options.codingTarget?.revision
+      const result = await projectAdapter.commitConfirmed(
         operation,
         (request, reason, capability, launchAuthorized) => core.runtime.dispatchConfirmedExternal(
           request,
@@ -817,7 +821,16 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
           launchAuthorized,
         ),
         projectConfirmation,
-      ))
+      )
+      if (result.accepted && options.codingTarget && targetRevision !== undefined) {
+        try {
+          const selection = operation.workspace_id !== null ? {workspace_id: operation.workspace_id, session_id: operation.session_id}
+            : result.delegate_id ? null : (await options.codingTarget.list()).find(target => target.project === operation.workspace_display_name && target.session_id === null) ?? null
+          await options.codingTarget.accepted(selection, result.delegate_id, targetRevision)
+        } catch { options.onDiagnostic?.('[runtime-diagnostic] coding_target_update_failed') }
+      }
+      return result
+    })
   const provider = options.provider
   const onDiagnostic = options.onDiagnostic ?? (line => { console.log(line) })
   const personalMemoryHolder: {current: PersonalMemoryResource | undefined} = {current: undefined}
@@ -999,17 +1012,26 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       )) satisfies NonNullable<IntakeOptions['attachEvidence']>}),
       roster: () => projectAdapter.roster(),
       running: () => projectAdapter.running().filter(work=>options.sharedPersonal===undefined||core.runtime.inFlightDelegate(work.work_id)!==undefined),
-      activeProject: () => options.sharedPersonal ? null : projectAdapter.publicProjectView(false).workspace_display_name,
-      resolveTarget: (decision: CoordinatorDecision) => {if(options.sharedPersonal&&decision.project===null)throw new ProjectResolutionError('unknown_project',{reason:'explicit_project_required'});return projectAdapter.resolveIntakeTarget(decision)},
+      activeProject: () => options.codingTarget?.activeProject() ?? (options.sharedPersonal ? null : projectAdapter.publicProjectView(false).workspace_display_name),
+      resolveTarget: (decision: CoordinatorDecision) => {if(options.codingTarget)return options.codingTarget.resolveTarget(decision);if(options.sharedPersonal&&decision.project===null)throw new ProjectResolutionError('unknown_project',{reason:'explicit_project_required'});return projectAdapter.resolveIntakeTarget(decision)},
       // Spec 08: the coordinator's decision rides with the work order; the adapter re-resolves at run time.
-      dispatch: (intake: IntakeSession, stillWanted?: () => boolean) => core.runtime.dispatchExternal({
+      dispatch: async (intake: IntakeSession, stillWanted?: () => boolean) => {
+        const targetRevision = options.codingTarget?.revision
+        const admission = await core.runtime.dispatchExternal({
         executor: projectAdapter.manifest.name, op: 'run', origin_ref: intake.origin_ref,
         request: {
           work_order: intake.work_order!, project: intake.target?.workspace_display_name ?? null,
           ...(intake.target?.session_id ? {session_id: intake.target.session_id} : {}),
-          session: intake.decision?.session ?? 'latest', ...(intake.title === null ? {} : {title: intake.title}),
+          session: options.codingTarget && !intake.target?.session_id ? 'new' : intake.decision?.session ?? 'latest', ...(intake.title === null ? {} : {title: intake.title}),
         },
-      }, USER_AWAITED_TOOL, undefined, stillWanted),
+      }, USER_AWAITED_TOOL, undefined, stillWanted)
+        if (admission.accepted && options.codingTarget && targetRevision !== undefined) {
+          const selection = intake.target?.workspace_id ? {workspace_id: intake.target.workspace_id, session_id: intake.target.session_id} : null
+          try { await options.codingTarget.accepted(selection, admission.delegate_id ?? undefined, targetRevision) }
+          catch { options.onDiagnostic?.('[runtime-diagnostic] coding_target_update_failed') }
+        }
+        return admission
+      },
       steer: (intake: IntakeSession, project: string | null, instruction: string, stillWanted?: () => boolean) => {if(options.sharedPersonal&&!projectAdapter.running().some(work=>work.project===project&&core.runtime.inFlightDelegate(work.work_id)!==undefined))throw new ProjectResolutionError('unknown_project',{reason:'work_not_owned'});return core.runtime.dispatchExternal({
         executor: projectAdapter.manifest.name, op: 'steer', origin_ref: intake.origin_ref, request: {instruction, project},
       }, USER_AWAITED_TOOL, undefined, stillWanted)},

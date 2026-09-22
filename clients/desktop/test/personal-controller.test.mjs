@@ -63,3 +63,85 @@ test('empty transcription cannot erase the editable draft',async()=>{
 test('late microphone permission cannot stop a newer capture',async()=>{
  let release;const h=harness({start:()=>new Promise(resolve=>{release=resolve})});const pending=h.c.dictate();await Promise.resolve();await h.c.text();await assert.rejects(h.c.dictate(),/结束持续对话/);release();await pending;assert.equal(h.c.mode,'text');assert.equal(h.starts,1)
 })
+
+function presentationHarness(){
+ const sent=[],applied=[];let starts=0,stops=0
+ const c=new PersonalController({send:frame=>{sent.push(frame);return true},start:async()=>{starts++},stop:async()=>{stops++},applyPresentation:async mode=>{applied.push(mode)}})
+ const ack=(ok=true)=>{const request=sent.findLast(frame=>frame.method==='presentation.set');c.receive({type:'personal.result',request_id:request.request_id,ok,data:{mode:request.params.mode},error:ok?undefined:'mode rejected'})}
+ return {c,sent,applied,ack,get starts(){return starts},get stops(){return stops}}
+}
+test('presentation waits for host ACK, preserves voice ownership and drafts, resumes only explicitly',async()=>{
+ const h=presentationHarness(),ready=h.c.connect();assert.deepEqual(h.applied,[]);assert.equal(h.c.presentationReady,false);h.ack();await ready
+ h.c.receive({type:'personal.state',revision:1,presentation_mode:'workbench',conversations:{selected_id:'a',voice_id:'a',items:[]}})
+ h.c.mode='voice';h.c.captureConversationId='a';h.c.draft='keep';const pending=h.c.setPresentation('background')
+ assert.equal(h.c.presentationMode,'background');assert.equal(h.stops,1);h.ack();await pending
+ assert.equal(h.c.presentationMode,'background');assert.equal(h.c.voiceId,'a');assert.equal(h.c.draft,'keep');assert.equal(h.stops,1)
+ assert.equal(h.sent.some(frame=>frame.method==='conversations.voice'),false)
+ await h.c.resumeVoice();assert.equal(h.starts,0)
+ const restore=h.c.setPresentation('orb');h.ack();await restore;assert.equal(h.starts,0)
+ await h.c.resumeVoice();assert.equal(h.starts,1);assert.equal(h.c.mode,'voice');assert.equal(h.sent.at(-1).conversation_id,'a')
+})
+test('reconnect restores desired presentation before replaying pending text; rejection stays visible',async()=>{
+ const h=presentationHarness(),ready=h.c.connect();h.ack();await ready
+ h.c.state('a').submission={request_id:'original',text:'keep',instance:'host',restored:false}
+ const hide=h.c.setPresentation('background');h.ack();await hide;h.c.disconnect();h.sent.length=0
+ const reconnect=h.c.connect();assert.equal(h.sent[0].method,'presentation.set');assert.equal(h.sent[0].params.mode,'background');assert.equal(h.sent.length,1)
+ h.ack();await reconnect;assert.equal(h.sent[1].type,'input.text');assert.equal(h.sent[1].request_id,'original')
+ const show=h.c.setPresentation('orb');h.ack(false);await assert.rejects(show,/mode rejected/);assert.equal(h.c.presentationMode,'background');assert.equal(h.c.error,'mode rejected')
+ await assert.rejects(h.c.setPresentation('invalid'),/无效/)
+})
+test('snapshot presentation update pauses capture without changing host voice owner',async()=>{
+ const h=presentationHarness(),ready=h.c.connect();h.ack();await ready
+ h.c.receive({type:'personal.state',revision:1,presentation_mode:'background',conversations:{selected_id:'a',voice_id:'a',items:[]}})
+ await Promise.resolve();assert.equal(h.c.presentationMode,'background');assert.equal(h.c.voiceId,'a');assert.equal(h.starts,0);assert.equal(h.stops,1)
+})
+
+test('background during pending microphone permission keeps the acquired voice owner',async()=>{
+ let rejectStart;const h=presentationHarness(),ready=h.c.connect();h.ack();await ready
+ h.c.start=()=>new Promise((_resolve,reject)=>{rejectStart=reject})
+ h.c.receive({type:'personal.state',revision:1,conversations:{selected_id:'a',voice_id:null,items:[]}})
+ const voice=h.c.voice(),claim=h.sent.at(-1)
+ h.c.receive({type:'personal.state',revision:2,conversations:{selected_id:'a',voice_id:'a',items:[]}})
+ h.c.receive({type:'personal.result',request_id:claim.request_id,ok:true});for(let n=0;n<10&&!rejectStart;n++)await Promise.resolve();assert.equal(typeof rejectStart,'function')
+ const background=h.c.setPresentation('background');h.ack();await background
+ rejectStart(new Error('permission denied'));await voice
+ assert.equal(h.c.voiceId,'a');assert.equal(h.c.mode,'text');assert.equal(h.sent.filter(frame=>frame.method==='conversations.voice').length,1)
+})
+
+test('offline background is immediate and foreground remains available without capture',async()=>{
+ const h=presentationHarness();h.c.draft='offline draft';await h.c.setPresentation('background')
+ assert.equal(h.c.presentationMode,'background');assert.equal(h.sent.length,0);assert.equal(h.stops,1)
+ await h.c.setPresentation('workbench');assert.equal(h.c.presentationMode,'workbench');assert.equal(h.starts,0);assert.equal(h.c.draft,'offline draft');assert.equal(h.c.presentationReady,false)
+})
+test('background preempts an outstanding foreground request and a late ACK cannot reopen',async()=>{
+ const h=presentationHarness(),ready=h.c.connect();h.ack();await ready
+ const foreground=h.c.setPresentation('orb'),older=h.sent.at(-1)
+ const background=h.c.setPresentation('background');assert.equal(h.c.presentationMode,'background')
+ h.c.receive({type:'personal.result',request_id:older.request_id,ok:true,data:{mode:'orb'}});await foreground
+ assert.equal(h.c.presentationMode,'background');h.ack();await background;assert.equal(h.c.desiredPresentation,'background')
+})
+test('presentation recovery retries once without requesting focus and replays only after success',async()=>{
+ const h=presentationHarness(),activations=[];h.c.applyPresentation=async(_mode,options)=>activations.push(options.activate)
+ h.c.state('a').submission={request_id:'kept',text:'draft',instance:'host'}
+ const ready=h.c.connect();h.ack(false)
+ for(let n=0;n<10&&h.sent.length<2;n++)await Promise.resolve()
+ assert.equal(h.sent.length,2);assert.equal(h.sent[1].method,'presentation.set');h.ack();await ready
+ assert.equal(h.c.presentationReady,true);assert.deepEqual(activations,[false]);assert.equal(h.sent[2].type,'input.text')
+})
+test('failed presentation retries leave a safe offline-style view and preserve pending delivery',async()=>{
+ const h=presentationHarness();h.c.state('a').submission={request_id:'kept',text:'draft',instance:'host'}
+ const ready=h.c.connect();h.ack(false);for(let n=0;n<10&&h.sent.length<2;n++)await Promise.resolve();h.ack(false);await ready
+ assert.equal(h.c.presentationMode,'background');assert.equal(h.c.presentationReady,false);assert.equal(h.c.presentationPending,false);assert.equal(h.sent.some(frame=>frame.type==='input.text'),false)
+ const state=h.c.command('state'),request=h.sent.at(-1);h.c.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await state
+})
+test('conversation notices stay scoped and do not create failed response state',()=>{
+ const h=harness();h.c.receive({type:'conversation.notice',conversation_id:'b',code:'coding_target_unavailable',message:'重新选择目标'})
+ assert.equal(h.c.error,'');assert.equal(h.c.state('b').error,'重新选择目标');assert.equal(h.c.state('b').submission,null)
+})
+
+test('failed background synchronization cannot be undone by a stale foreground snapshot',async()=>{
+ const h=presentationHarness(),ready=h.c.connect();h.ack();await ready
+ const hidden=h.c.setPresentation('background');h.ack(false);await assert.rejects(hidden,/mode rejected/)
+ h.c.receive({type:'personal.state',revision:1,presentation_mode:'workbench',conversations:{selected_id:'a',voice_id:null,items:[]}})
+ assert.equal(h.c.presentationMode,'background');assert.equal(h.c.presentationReady,false)
+})

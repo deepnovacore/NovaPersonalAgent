@@ -84,10 +84,15 @@ export function renderFeishu({state={},local,card,el,button,command,refresh,api}
    button('全选',()=>setAll(true),bulk);button('取消全选',()=>setAll(false),bulk)
    group.append(el('p','最近活跃优先','personal-hint'))
    for(const chat of chats){const input=check(chat.name||'未命名会话',selected.has(chat.id),list);choices.push({chat,input});input.addEventListener('change',()=>input.checked?selected.add(chat.id):selected.delete(chat.id))}
-   const consent=check('允许读取所选会话，并交由设置中的模型服务整理为记忆和建议',false)
+   const consent=check('允许读取所选会话并保存在本机',false)
    const save=button('完成配置',async()=>{await call('configure',{chat_ids:[...selected],consent:true});local.chats=null;local.editScope=false;refresh()},a);save.disabled=true
    consent.addEventListener('change',()=>{save.disabled=!consent.checked})
   }else if(local.chats)note('没有可选会话。请确认账号权限后重新加载。')
+  const processing=check('允许设置中的模型服务处理飞书内容',state.processing_consent_required===false)
+  processing.disabled=!completed
+  note('读取与模型处理分别授权。关闭模型处理后，已读取的内容保留在本机；保存新的会话范围后需重新开启。')
+  if(state.processing_consent_required)note('尚未同意当前模型处理，或模型服务已变更；开启后才会交由当前服务整理。')
+  processing.addEventListener('change',async()=>{const consent=processing.checked;processing.disabled=true;try{await call('consent',{consent})}catch(error){processing.checked=!consent;local.onError(error)}finally{processing.disabled=!completed}})
   if(state.last_sync)note(`上次同步：${state.last_sync}`)
   button('立即同步',()=>call('sync'),a)
   button(state.state==='paused'?'恢复同步':'暂停同步',()=>call(state.state==='paused'?'resume':'pause'),a)

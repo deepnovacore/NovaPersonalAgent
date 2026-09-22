@@ -902,12 +902,12 @@ footer { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20; min-height:
 
 .usage-scope[data-empty="true"] strong { color: var(--ink-dim); font-weight: 400; }
 
-#im-section .im-card { padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); }
-#im-section .im-card p { line-height: 1.7; color: var(--ink-dim); }
-#im-section .im-card button { margin: 6px 8px 6px 0; }
-#im-section .personal-consent { display: flex; align-items: center; gap: 8px; margin: 16px 0; line-height: 1.6; }
-#im-section fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 18px 0; }
-#im-error { color: var(--danger, #b42318); }
+#im-section .im-card, #connections-section .im-card { padding: 24px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); }
+#im-section .im-card p, #connections-section .im-card p { line-height: 1.7; color: var(--ink-dim); }
+#im-section .im-card button, #connections-section .im-card button { margin: 6px 8px 6px 0; }
+#im-section .personal-consent, #connections-section .personal-consent { display: flex; align-items: center; gap: 8px; margin: 16px 0; line-height: 1.6; }
+#im-section fieldset, #connections-section fieldset { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; margin: 18px 0; }
+#im-error, #connections-error { color: var(--danger, #b42318); }
 
 .im-steps { display: flex; gap: 24px; padding: 16px 0; list-style-position: inside; color: var(--ink-dim); border-bottom: 1px solid var(--line); }
 .im-steps [aria-current="step"] { color: var(--accent); font-weight: 600; }

@@ -1,6 +1,6 @@
 # Five-tab personal space
 
-The desktop personal panel now exposes Todos, Feeds, Ideas, Goals and Profile. Existing proactive reminders, executor tasks, memory inspection and source controls remain reachable through explicit secondary actions.
+The desktop workbench's icon rail exposes Todos, Ideas, Goals, Feeds, 任务 (executor tasks) and Profile (2026-09-21: memory inspection is a disclosure at the bottom of Profile). Proactive reminders are messages in the pinned 主动提醒 conversation of the right-hand Nova pane, each rendered as a card with its discuss/snooze/dismiss actions; source and connector controls live in the settings window under 连接与权限.
 
 - Todos are user-owned actions with open/doing/waiting/done/cancelled state, optional due date and goal link. Asking Nova for help drafts a conversation; it does not imply execution or mark the Todo completed.
 - Ideas can be edited, archived and converted once each to a Todo or Goal. Related objects survive archiving. Only child-to-parent links are stored.

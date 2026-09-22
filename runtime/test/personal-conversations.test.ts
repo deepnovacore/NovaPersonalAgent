@@ -43,13 +43,14 @@ test('host persists selection and messages and clears selected conversation only
 })
 
 test('production scoped graph completes a real text adapter turn without closing global host',async()=>{
+ const {VirtualClock}=await import('../src/core/clock.js');const clock=new VirtualClock()
  const {conversationRuntimeFactory}=await import('../src/personal-agent/conversation-runtime.js')
  const {settingsSchema}=await import('../src/config/config.js')
  const {buildCascadedTextProvider}=await import('../src/cascaded-text-provider.js')
  const {cascadedProviderRegistries}=await import('../src/composition/cascaded-realtime-assembly.js')
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-conversation-graph-'))
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
- try{await host.open();const factory=conversationRuntimeFactory({host,memory:()=>undefined,
+ try{await host.open();const factory=conversationRuntimeFactory({host,clock,memory:()=>undefined,
   settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),
   searchTransport:{search:()=>Promise.reject(Error('unexpected search'))},
   gateway:{complete:()=>Promise.reject(Error('unexpected model')),async *stream(){await Promise.resolve();throw Error('unexpected stream')}},
@@ -61,6 +62,11 @@ test('production scoped graph completes a real text adapter turn without closing
  });const runtime=await factory(createConversation('chat','A'),()=>{ /* no renderer */ });
  try{
   const service=runtime.bridgeService!;assert.ok(typeof service.submitText==='function')
+  const transitions:boolean[]=[]
+  const disconnect=service.playbackDisconnected.bind(service)
+  service.playbackDisconnected=options=>{transitions.push(options?.resumeDelivery===true);return disconnect(options)}
+  for(const mode of ['background','workbench','orb'])await host.command({type:'personal.command',request_id:mode,method:'presentation.set',params:{mode}})
+  assert.deepEqual(transitions,[false,true],'foreground restores delivery; workbench/orb switching does not interrupt it')
   const submit=service.submitText.bind(service)
   service.submitText=()=>Promise.reject(Error('synthetic_submit_failed'))
   await assert.rejects(runtime.runTurn('rejected',AbortSignal.timeout(5000)),/synthetic_submit_failed/)
@@ -70,6 +76,17 @@ test('production scoped graph completes a real text adapter turn without closing
   const result=await runtime.runTurn('hello',AbortSignal.timeout(5000))
   assert.equal(switchableAfterFailure,true,'a rejected submit must release the pending turn')
   assert.equal(result.assistant,'scoped reply');assert.match(result.turn_id??'',/:assistant:cascaded-response-1-1$/)
+  const {RealtimeService}=await import('../src/realtime/service.js');assert.ok(service instanceof RealtimeService)
+  let cleared=0,clearing=Promise.resolve()
+  const clear=service.clearConversation.bind(service)
+  service.clearConversation=()=>{cleared++;clearing=clear();return clearing}
+  service.submitText=()=>Promise.resolve()
+  const timed=assert.rejects(runtime.runTurn('never started',new AbortController().signal),{name:'TimeoutError'})
+  clock.advanceTo(clock.now()+121);await timed;await clearing
+  assert.equal(cleared,1,'a timeout before response_started still installs the provider epoch fence')
+  service.submitText=submit
+  assert.equal((await runtime.runTurn('retry after timeout',AbortSignal.timeout(5000))).assistant,'scoped reply')
+
  }finally{await runtime.close()}
  const result=await host.command({type:'personal.command',request_id:'still-open',method:'state',params:{}}) as {ok:boolean};assert.equal(result.ok,true)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
@@ -85,6 +102,10 @@ test('voice belongs to one conversation while other conversations still accept t
  await assert.rejects(host.submitConversationText('chat:main','blocked'),/voice_active/)
  assert.equal((await command('chat:proactive',true)).ok,false)
  await host.sendConversationAudio('chat:main',new Uint8Array([0,0]));assert.deepEqual(audio,['chat:main'])
+ await host.command({type:'personal.command',request_id:'hide',method:'presentation.set',params:{mode:'background'}})
+ await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array([0,0])),/presentation_hidden/)
+ assert.equal(host.conversationSnapshot().voice_id,'chat:main')
+ await host.command({type:'personal.command',request_id:'show',method:'presentation.set',params:{mode:'workbench'}})
  await host.submitConversationText('chat:proactive','allowed');await host.waitConversation('chat:proactive')
  assert.equal((await command('chat:main',false)).ok,true)
  await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array([0,0])),/voice_not_owned/)
@@ -156,4 +177,75 @@ test('failed text initialization also aborts stale emitters before retry',async(
   emitters[0]!({type:'executor.progress'});assert.equal(emissions.length,0)
   assert.deepEqual(await pool.run(conversation,'second'),{assistant:'second'})
  }finally{await pool.close()}
+})
+
+
+test('presentation policy is validated and never changes conversation or work ownership',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-presence-'))
+ const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{await host.open();await host.rememberWorkOwner('work-a','chat:main','approval-a')
+ for(const mode of ['background','orb','workbench']){
+  const result=await host.command({type:'personal.command',request_id:mode,method:'presentation.set',params:{mode}}) as {ok:boolean}
+  assert.equal(result.ok,true)
+  assert.equal((host.snapshot() as unknown as {presentation_mode:string}).presentation_mode,mode)
+  assert.equal(host.conversationSnapshot().selected_id,'chat:main');assert.equal(host.workConversation('work-a'),'chat:main')
+ }
+ const result=await host.command({type:'personal.command',request_id:'bad-mode',method:'presentation.set',params:{mode:'loud'}}) as {ok:boolean}
+ assert.equal(result.ok,false)
+ assert.equal((host.snapshot() as unknown as {presentation_mode:string}).presentation_mode,'workbench')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('host coding defaults are per conversation and reject changing a busy runtime',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-target-host-'))
+ const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const target={workspace_id:'workspace-a',session_id:'session-a',project:'Alpha',title:'Fix',executor:'codex' as const}
+ try{await host.open();
+  host.setCodingTargets({list:()=>Promise.resolve([target]),validate:selection=>selection.session_id==='session-a'?Promise.resolve(target):Promise.reject(Error('session_unavailable')),resolve:()=>Promise.reject(Error('unused'))})
+  const result=await host.command({type:'personal.command',request_id:'target',method:'conversations.target',params:{id:'chat:main',target:{workspace_id:'workspace-a',session_id:'session-a'}}}) as {ok:boolean};assert.equal(result.ok,true)
+  await host.command({type:'personal.command',request_id:'create-b',method:'conversations.create',params:{title:'B'}})
+  const items=host.conversationSnapshot().items as unknown as {id:string;coding_target:unknown}[]
+  assert.deepEqual(items.find(i=>i.id==='chat:main')?.coding_target,target)
+  assert.equal(items.find(i=>i.id===host.conversationSnapshot().selected_id)?.coding_target,null)
+  host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'ok'}),canSwitch:()=>false,close:()=>Promise.resolve()}),()=>{ /* no renderer */ })
+  await host.submitConversationText('chat:main','start');await host.waitConversation('chat:main')
+  const busy=await host.command({type:'personal.command',request_id:'busy',method:'conversations.target',params:{id:'chat:main',target:null}}) as {ok:boolean};assert.equal(busy.ok,false)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('orb announcements use one output runtime without claiming microphone or changing selected chat',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-announcements-')),pool=new SuggestionPool()
+ const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'test',memory:()=>undefined,pool,evidence:()=>null})
+ const created:string[]=[],delivered:string[]=[]
+ try{await host.open();host.setConversationRuntime((c,_emit,mode)=>{created.push(c.id+':'+mode);return Promise.resolve({runTurn:()=>Promise.resolve({assistant:''}),deliverSuggestion:s=>{delivered.push(s.id)},close:()=>Promise.resolve()})},()=>{ /* no renderer */ })
+ const suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready'},salience:40,expires_at:1e15})
+ const reason={kind:'suggestion_selected',priority:40,routing_class:'ambient' as const,origin:null,selected_suggestion:suggestion.id}
+ await host.command({type:'personal.command',request_id:'mode-w',method:'presentation.set',params:{mode:'workbench'}})
+ host.routePersonalSuggestion(suggestion,reason);await new Promise(resolve=>setImmediate(resolve));assert.equal(delivered.length,0)
+ await host.command({type:'personal.command',request_id:'mode-o',method:'presentation.set',params:{mode:'orb'}})
+ host.routePersonalSuggestion(suggestion,reason);host.routePersonalSuggestion({...suggestion,id:'next'},reason)
+ await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve))
+ assert.deepEqual(created,['chat:proactive:voice']);assert.deepEqual(delivered,[suggestion.id,'next'])
+ assert.equal(host.conversationSnapshot().selected_id,'chat:main');assert.equal(host.conversationSnapshot().voice_id,null)
+ await host.command({type:'personal.command',request_id:'voice-on',method:'conversations.voice',params:{id:'chat:main',enabled:true}})
+ await host.command({type:'personal.command',request_id:'voice-off',method:'conversations.voice',params:{id:'chat:main',enabled:false}})
+ host.routePersonalSuggestion({...suggestion,id:'after-voice'},reason)
+ await new Promise(resolve=>setImmediate(resolve));await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(delivered.at(-1),'after-voice');assert.deepEqual(created,['chat:proactive:voice','chat:main:voice','chat:proactive:voice'])
+ await host.submitConversationText('chat:proactive','Tell me more');await host.waitConversation('chat:proactive')
+ assert.equal(created.at(-1),'chat:proactive:text')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('a failing playback listener cannot prevent another runtime from parking its approvals',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-mode-listeners-'))
+ const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const seen:string[]=[]
+ try{await host.open();host.subscribePresentation(()=>{throw Error('playback_failed')});host.subscribePresentation(mode=>{seen.push(mode)})
+  const result=await host.command({type:'personal.command',request_id:'hide',method:'presentation.set',params:{mode:'background'}}) as {ok:boolean}
+  assert.equal(result.ok,false);assert.deepEqual(seen,['background']);assert.equal(host.presentationMode,'background')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })

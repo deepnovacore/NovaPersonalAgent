@@ -341,3 +341,41 @@ test('permanent deletion stays incomplete until its managed index confirms clean
   assert.equal(second.data.status,'complete');assert.equal(acknowledged,1);assert.equal(attempts,2)
  }finally{await f.close()}
 })
+
+
+test('mode reconnect keeps suggestion identity; delayed spoken ack survives re-pooling without blocking IM',async()=>{
+ const f=await fixture()
+ try{
+  await f.host.admit(proposal(),await f.host.discoverySnapshot())
+  const mode=(value:string)=>f.host.command({type:'personal.command',request_id:crypto.randomUUID(),method:'presentation.set',params:{mode:value}})
+  await mode('orb');const first=f.host.snapshot().feed[0]!
+  await mode('orb');assert.equal(f.host.snapshot().feed[0]!.suggestion_id,first.suggestion_id)
+  await mode('workbench');await mode('orb')
+  assert.notEqual(f.host.snapshot().feed[0]!.suggestion_id,first.suggestion_id)
+  await f.host.spoken(first.suggestion_id!)
+  assert.ok(f.host.snapshot().feed[0]!.delivery.spoken_at)
+  assert.equal(await f.host.canDeliver(first.id),true,'speech acknowledgement must not suppress independent IM delivery')
+ }finally{await f.close()}
+})
+
+test('local evidence survives a full runtime evidence budget and host selects native Chinese RSS',async()=>{
+ const f=await fixture()
+ const host=new PersonalAgentHost({path:join(f.dir,'balanced.json'),userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),newsLanguage:'zh-CN',evidence:()=>null,evidenceRefs:()=>Array.from({length:32},(_,i)=>'task:'+i)})
+ try{
+  host.setSources({list:()=>[],command:()=>Promise.resolve({}),evidenceSnapshot:()=>[{ref:'file:local',summary:'Independent collection'}]})
+  await host.open();assert.ok((await host.discoverySnapshot()).evidence_refs.includes('file:local'))
+  const sources=host.snapshot().news.sources;assert.ok(sources.length>0);assert.ok(sources.every(s=>s.language==='zh-CN'))
+ }finally{await host.close();await f.close()}
+})
+
+
+test('failed orb transition can retry backlog admission without changing mode again',async()=>{
+ const f=await fixture();let fail=true
+ try{
+  await f.host.admit(proposal(),await f.host.discoverySnapshot());const first=f.host.snapshot().feed[0]!.suggestion_id
+  f.host.subscribePresentation(()=>{if(fail)throw Error('playback_failed')})
+  const mode=()=>f.host.command({type:'personal.command',request_id:crypto.randomUUID(),method:'presentation.set',params:{mode:'orb'}}) as Promise<{ok:boolean}>
+  assert.equal((await mode()).ok,false);fail=false;assert.equal((await mode()).ok,true)
+  assert.notEqual(f.host.snapshot().feed[0]!.suggestion_id,first)
+ }finally{await f.close()}
+})

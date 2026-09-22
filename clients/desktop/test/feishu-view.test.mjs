@@ -68,25 +68,26 @@ test('the real authorization IPC rejects other windows before opening a URL',asy
 test('read-only project entries have no correction or forget controls',async()=>{
  const body=new Node('body'),shell=new Node('div');body.append(shell)
  globalThis.window={addEventListener(){}}
- globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createTextNode:text=>new Node('text',text),querySelector:selector=>selector==='#shell'?shell:null}
+ globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),visibilityState:'hidden',hasFocus:()=>false,createTextNode:text=>new Node('text',text),querySelector:selector=>selector==='#shell'?shell:null}
  const sent=[]
  const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction:()=>{},results:()=>[],openResults:()=>{},api:{orbMenu:{},personal:{}}})
  view.controller.connect()
  const entry=(id,editable)=>({id,editable,version:1,topic:id,content:'项目进展',kind:'topic',status:'active',source_refs:[]})
  view.receive({type:'personal.state',revision:1,memory:{entries:[entry('只读项目',false),entry('个人记忆',true)]},capabilities:{memory:{list:true,correct:true,forgetEntry:true}}})
- await body.querySelectorAll('button').find(button=>button.textContent==='Profile').listeners.click()
- await body.querySelectorAll('button').find(button=>button.textContent==='查看与纠正已有记忆').listeners.click()
+ await body.querySelectorAll('button').find(button=>button.children.some(c=>c.className==='rail-label'&&c.textContent==='Profile')).listeners.click()
+ assert.ok(body.querySelectorAll('details').some(node=>node.className==='memory-section'),'memory lives under Profile as a disclosure')
  const articles=body.querySelectorAll('article')
  const buttons=topic=>articles.find(article=>article.querySelector('h4')?.textContent===topic).querySelectorAll('button').map(button=>button.textContent)
  assert.deepEqual(buttons('只读项目'),['接着聊'])
  assert.deepEqual(buttons('个人记忆'),['纠正','忘记','接着聊'])
- const toggle=body.querySelectorAll('input').find(input=>input.type==='checkbox');assert.equal(toggle.checked,false)
+ const expiredToggle=()=>body.querySelectorAll('label').find(label=>label.children.some(child=>child.text==='包含已过期')).children[0]
+ const toggle=expiredToggle();assert.equal(toggle.checked,false)
  toggle.checked=true;const pending=toggle.listeners.change();const request=sent.at(-1)
  assert.deepEqual(request.params,{limit:50,include_expired:true})
  const expired={...entry('过期安排',true),status:'expired',content:'已经过期的安排'}
  view.receive({type:'personal.state',revision:2,memory:{include_expired:true,entries:[entry('个人记忆',true),expired]},capabilities:{memory:{list:true,correct:true,forgetEntry:true}}})
  view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await pending
- assert.equal(body.querySelectorAll('input').find(input=>input.type==='checkbox').checked,true)
+ assert.equal(expiredToggle().checked,true)
  assert.ok(body.querySelectorAll('h4').some(node=>node.textContent==='过期安排'))
  assert.ok(body.querySelectorAll('span').some(node=>node.textContent==='已过期'))
  assert.ok(!body.querySelectorAll('p').filter(node=>node.className==='memory-overview-copy').some(node=>node.textContent.includes('已经过期')))
@@ -141,7 +142,7 @@ test('settings waits for status without claiming CLI is missing',async()=>{
 
 test('text captions never duplicate persisted users; voice captions and generation states remain visible',()=>{
  const body=new Node('body'),shell=new Node('div');body.append(shell)
- globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createTextNode:text=>new Node('text',text),querySelector:()=>shell}
+ globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),visibilityState:'hidden',hasFocus:()=>false,createTextNode:text=>new Node('text',text),querySelector:()=>shell}
  const view=mountPersonalView({send:()=>true,start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}});view.controller.connect()
  const snapshot=(revision,voice,status='pending')=>view.receive({type:'personal.state',revision,conversations:{selected_id:'a',voice_id:voice,items:[{id:'a',kind:'chat',title:'A'}],messages:[{id:'u',conversation_id:'a',role:'user',text:'one admitted text',generation_status:status}]},memory:{entries:[]}})
  snapshot(1,null)
@@ -153,14 +154,17 @@ test('text captions never duplicate persisted users; voice captions and generati
  assert.equal(body.querySelectorAll('p').filter(n=>n.textContent==='live voice').length,1)
 })
 
-test('side panel starts open and toggles locally with accessible state',async()=>{
+test('the Nova pane starts open and collapses locally with accessible state',async()=>{
  const body=new Node('body'),shell=new Node('div');body.append(shell)
- globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createTextNode:text=>new Node('text',text),querySelector:()=>shell}
+ globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),visibilityState:'hidden',hasFocus:()=>false,createTextNode:text=>new Node('text',text),querySelector:()=>shell}
  const calls=[];mountPersonalView({send:frame=>(calls.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}})
- const side=body.querySelectorAll('section').find(node=>node.id==='personal-side'),root=body.querySelector('main'),toggle=body.querySelectorAll('button').find(node=>node.textContent==='侧栏')
- assert.equal(side.hidden,false);assert.equal(root.dataset.sideOpen,'true');assert.equal(toggle['aria-expanded'],'true')
- await toggle.listeners.click();assert.equal(side.hidden,true);assert.equal(root.dataset.sideOpen,'false');assert.equal(toggle['aria-expanded'],'false')
- await toggle.listeners.click();assert.equal(side.hidden,false);assert.equal(calls.length,0)
+ const pane=body.querySelectorAll('aside').find(node=>node.id==='chat-pane'),root=body.querySelector('main'),toggle=body.querySelectorAll('button').find(node=>node.className==='chat-toggle')
+ assert.equal(body.querySelectorAll('select').find(node=>node['aria-label']==='显示模式').disabled,false);assert.equal(pane.hidden,false);assert.equal(root.dataset.chatOpen,'true');assert.equal(toggle['aria-expanded'],'true');assert.equal(toggle.textContent,'收起对话栏')
+ await toggle.listeners.click();assert.equal(pane.hidden,true);assert.equal(root.dataset.chatOpen,'false');assert.equal(toggle['aria-expanded'],'false');assert.equal(toggle.textContent,'展开对话栏')
+ const close=body.querySelectorAll('button').find(node=>node.className==='chat-close')
+ await toggle.listeners.click();assert.equal(pane.hidden,false);await close.listeners.click();assert.equal(pane.hidden,true);assert.equal(calls.length,0)
+ const rail=body.querySelectorAll('button').filter(node=>node.className==='rail-item').map(node=>node.children.find(c=>c.className==='rail-label')?.textContent)
+ assert.deepEqual(rail,['Todos','Ideas','Goals','Feeds','任务','Profile','收起','设置'])
 })
 
 test('guide progress follows actual application and OAuth state, with an explicit waiting handoff',()=>{
@@ -203,4 +207,64 @@ test('app connectors keep read selection and model processing consent separate',
  await nodes.find(n=>n.text==='保存范围并开始同步').action()
  assert.equal(commands[0].method,'connector.configure');assert.equal(commands[0].params.processingConsent,false)
  assert.deepEqual(commands[0].params.scope,{kind:'gmail',labels:['INBOX'],pastDays:30})
+})
+
+test('permanent memory deletion requires its own confirmation and reports incomplete cleanup',async()=>{
+ const body=new Node('body'),shell=new Node('div');body.append(shell)
+ globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),visibilityState:'hidden',hasFocus:()=>false,createTextNode:text=>new Node('text',text),querySelector:()=>shell}
+ const sent=[],view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}});view.controller.connect()
+ view.receive({type:'personal.state',revision:1,memory:{entries:[{id:'selected',version:3,content:'合成记忆',kind:'preference',status:'active',source_refs:[]}]},capabilities:{memory:{list:true,purgeEntry:true}}})
+ const click=label=>body.querySelectorAll('button').find(node=>node.textContent===label||node.children.some(c=>c.className==='rail-label'&&c.textContent===label)).listeners.click()
+ await click('Profile');await click('彻底删除')
+ assert.equal(sent.filter(frame=>frame.method==='memory.purge').length,0)
+ const pending=click('确认彻底删除');const request=sent.at(-1)
+ assert.equal(request.method,'memory.purge');assert.deepEqual(request.params,{id:'selected',expected_version:3})
+ view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{status:'incomplete',backup_cleanup:{status:'incomplete',unresolved:['legacy_backup_unavailable']}}});await pending
+ assert.match(view.controller.error,/未完成|未清除/)
+ view.receive({type:'personal.state',revision:2,memory:{entries:[],pending_purges:[{entry_id:'selected',expected_revision:3,operation_id:'purge-1'}]},capabilities:{memory:{list:true,purgeEntry:true}}})
+ const retry=click('继续清理');const next=sent.at(-1)
+ assert.equal(next.method,'memory.purge');assert.deepEqual(next.params,{id:'selected',expected_version:3})
+ view.receive({type:'personal.result',request_id:next.request_id,ok:true,data:{status:'complete'}});await retry
+ assert.equal(view.controller.error,'')
+})
+
+
+test('Feishu processing consent is independent and provider changes require a fresh grant',async()=>{
+ for(const required of [true,false]){
+  const v=view({available:true,configured:true,state:'ready',scope_configured:true,processing_consent_required:required,chats:[]})
+  const label=v.nodes.find(n=>n.tag==='label'&&n.children.some(child=>child.text==='允许设置中的模型服务处理飞书内容'))
+  assert.ok(label)
+  const toggle=label.children[0];assert.equal(toggle.checked,!required)
+  assert.equal(v.commands.length,0)
+  toggle.checked=required;await toggle.listeners.change()
+  assert.deepEqual(v.commands,[{method:'feishu.consent',params:{consent:required}}])
+  if(required)assert.ok(v.nodes.some(n=>n.text?.includes('模型服务已变更')))
+ }
+ const initial=view({available:true,configured:true,state:'paused',scope_configured:false,chats:[]})
+ const label=initial.nodes.find(n=>n.tag==='label'&&n.children.some(child=>child.text==='允许设置中的模型服务处理飞书内容'))
+ assert.equal(label.children[0].checked,false);assert.equal(label.children[0].disabled,true)
+})
+
+test('coding target picker keeps exact host pairs and ignores stale conversation loads',async()=>{
+ const body=new Node('body'),shell=new Node('div');body.append(shell)
+ globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),visibilityState:'hidden',hasFocus:()=>false,createTextNode:text=>new Node('text',text),querySelector:()=>shell}
+ const sent=[];const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}});await view.controller.connect()
+ const snapshot=(revision,id)=>view.receive({type:'personal.state',revision,conversations:{selected_id:id,voice_id:null,items:[{id:'a',kind:'chat',title:'A'},{id:'b',kind:'chat',title:'B'}],messages:[]},memory:{entries:[]}})
+ const reply=data=>{const request=sent.at(-1);view.receive({type:'personal.result',request_id:request.request_id,ok:true,data})}
+ const flush=async()=>{await Promise.resolve();await Promise.resolve();await Promise.resolve()}
+ snapshot(1,'a')
+ const load=body.querySelectorAll('button').find(node=>node.textContent==='选择项目会话')
+ const select=body.querySelectorAll('select').find(node=>node['aria-label']==='此对话的编程目标')
+ const target={workspace_id:'ws-1',session_id:'session-7',project:'Project',title:'Session',executor:'codex'}
+ load.listeners.click();assert.equal(sent.at(-1).method,'conversations.targets');snapshot(2,'b');reply({targets:[target]});await flush();assert.equal(select.children.length,1)
+ load.listeners.click();reply({targets:[target]});await flush();assert.equal(select.children.length,2)
+ select.value=select.children[1].value;select.listeners.change();assert.deepEqual(sent.at(-1).params,{id:'b',target:{workspace_id:'ws-1',session_id:'session-7'}})
+ snapshot(3,'a');reply({});await flush();assert.equal(select.value,'');assert.equal(select.children.length,1)
+ assert.equal(sent.filter(frame=>frame.method==='conversations.target').length,1)
+})
+
+test('opening a waiting approval never acknowledges an unseen card',async()=>{
+ const source=await readFile(new URL('../src/renderer/personal-view.mjs',import.meta.url),'utf8')
+ assert.equal(source.includes("c.command('presentation.seen'"),false)
+ assert.match(source,/item.conversation_id!==c.selectedId\)await c.select\(item.conversation_id\);await c.setPresentation\('orb'\)/)
 })

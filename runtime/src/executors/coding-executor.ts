@@ -14,6 +14,7 @@ import type {JsonValue} from '../core/events.js'
 import type {DelegateRequest, ExecutorManifest} from '../core/ports.js'
 import type {ConfirmedProjectOperation, ProjectAction, ProjectConfirmationController} from '../projects/project-confirmation.js'
 import type {PublicProjectContext, PublicProjectView, WorkspaceRecord} from '../projects/project-store.js'
+import type {CodingTargetPort} from '../personal-agent/coding-targets.js'
 import type {WakeReason} from '../core/slots.js'
 
 /** Where a work order will run, as resolved by the project adapter for the intake FSM; `select` is a bare switch. */
@@ -124,6 +125,7 @@ export interface CodingTaskPort {
 
 /** A coding executor that also owns project (workspace + session) bookkeeping. */
 export interface ProjectExecutorAdapter extends ExecutorAdapter, AgentExecutor {
+  readonly targetPort?: CodingTargetPort
   readonly taskPort?: CodingTaskPort
   readonly confirmationController: ProjectConfirmationController
   initialize(): Promise<void>

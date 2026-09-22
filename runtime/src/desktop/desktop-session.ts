@@ -1611,9 +1611,10 @@ export function buildDesktopRealtimeComposition(
     voiceService:()=>realtime.personalAgent.voiceService(),
     sendConversationAudio:(id,pcm)=>realtime.personalAgent.sendConversationAudio(id,pcm),
     submitConversationText:(id,text,requestId)=>realtime.personalAgent.submitConversationText(id,text,requestId),
-    validateConversationInput:(kind,id)=>{const state=realtime.personalAgent.conversationSnapshot();if(id!==undefined&&!state.items.some(item=>item.id===id))throw Error('conversation_not_found');if(kind==='audio'&&((id!==undefined&&state.voice_id!==id)||(id===undefined&&state.voice_id!==null)))throw Error('voice_not_owned');if(kind==='dictation'&&state.voice_id!==null)throw Error('voice_active')},
+    validateConversationInput:(kind,id)=>{if(realtime.personalAgent.presentationMode==='background')throw Error('presentation_hidden');const state=realtime.personalAgent.conversationSnapshot();if(id!==undefined&&!state.items.some(item=>item.id===id))throw Error('conversation_not_found');if(kind==='audio'&&((id!==undefined&&state.voice_id!==id)||(id===undefined&&state.voice_id!==null)))throw Error('voice_not_owned');if(kind==='dictation'&&state.voice_id!==null)throw Error('voice_active')},
     personalCommand: command => realtime.personalAgent.command(command),
     personalSnapshot: () => realtime.personalAgent.snapshot(),
+    onConnectionReleased:()=>{if(realtime.personalAgent.presentationMode!==null)void realtime.personalAgent.command({type:'personal.command',request_id:randomUUID(),method:'presentation.set',params:{mode:'background'}}).catch(()=>{ /* pending decisions remain fail-closed during shutdown */ })},
     executor: codingExecutorIdentity(realtime) ?? options.approvalExecutor ?? null,
     ...(() => {
       const adapter = [...realtime.runtime.executors.values()].find(adapter => adapter.manifest.roles.includes('coding'))

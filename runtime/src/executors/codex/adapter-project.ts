@@ -1,3 +1,4 @@
+import type {CodingTarget, CodingTargetPort, CodingTargetSelection} from '../../personal-agent/coding-targets.js'
 import {basename} from 'node:path'
 import {realpath} from 'node:fs/promises'
 import {readLocalCodexSessions, localRolloutAvailable} from './local-sessions.js'
@@ -142,11 +143,11 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   readonly #confirmedBindings = new WeakMap<object, ConfirmedDelegateBinding>()
   readonly #retainedTransportCleanups = new Set<CodexAppServerTransport>()
   readonly #slots = new Map<string, RunSlot>()
-  readonly #taskWorkspaces = new Map<string, string>()
+  readonly #taskWorkspaces = new Map<string, {readonly workspace_id: string; readonly session_id?: string}>()
   readonly taskPort = {
     cancelTask: (workId: string): 'cancelling' | 'not_running' => this.#cancelWork(workId) ? 'cancelling' : 'not_running',
     taskDirectory: async (workId: string): Promise<string | null> => {
-      const workspaceId = this.#taskWorkspaces.get(workId)
+      const workspaceId = this.#taskWorkspaces.get(workId)?.workspace_id
       return workspaceId === undefined ? null : hostWorkspacePath(await this.#store.revalidateWorkspace(workspaceId))
     },
   }
@@ -224,6 +225,57 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     return this.#catalogRefresh
   }
 
+  readonly targetPort: CodingTargetPort = {
+    list: () => this.#listCodingTargets(),
+    forWork: async workId => {
+      const binding = this.#taskWorkspaces.get(workId)
+      if (binding?.session_id === undefined) return null
+      try { return await this.#validateCodingTarget({workspace_id: binding.workspace_id, session_id: binding.session_id}) }
+      catch (error) { if (error instanceof ProjectResolutionError) return null; throw error }
+    },
+    validate: selection => this.#validateCodingTarget(selection),
+    resolve: (decision, selection) => this.resolveIntakeTarget(decision, selection),
+  }
+
+  async #listCodingTargets(): Promise<readonly CodingTarget[]> {
+    await this.#refreshLocalSessions()
+    const snapshot = await this.#store.snapshot()
+    const targets: CodingTarget[] = []
+    for (const workspace of [...snapshot.workspaces].sort((a, b) => b.last_used_at - a.last_used_at).slice(0, MAX_ROSTER)) {
+      try { await this.#store.revalidateWorkspace(workspace.workspace_id) } catch { continue }
+      const base = {workspace_id: workspace.workspace_id, project: workspace.display_name, executor: 'codex' as const}
+      targets.push({...base, session_id: null, title: workspace.display_name})
+      for (const session of snapshot.sessions.filter(item => item.workspace_id === workspace.workspace_id
+        && item.state === 'ready' && item.codex_thread_id !== null
+        && (!item.executor_home || item.origin === 'nova' || (this.#catalogHealthy && this.#localSessionIds.has(item.session_id))))
+        .sort((a, b) => b.last_used_at - a.last_used_at).slice(0, 20)) {
+        if (await this.#rolloutAvailable(session)) targets.push({...base, session_id: session.session_id, title: session.display_title})
+      }
+    }
+    return targets
+  }
+
+  async #validateCodingTarget(selection: CodingTargetSelection): Promise<CodingTarget> {
+    const snapshot = await this.#store.snapshot()
+    const workspace = snapshot.workspaces.find(item => item.workspace_id === selection.workspace_id)
+    if (!workspace) throw new ProjectResolutionError('unknown_project', {reason: 'target_unavailable'})
+    try { await this.#store.revalidateWorkspace(workspace.workspace_id) }
+    catch (error) {
+      if (error instanceof ProjectStateError && ['workspace_invalid', 'workspace_not_found', 'workspace_boundary_changed'].includes(error.code)) {
+        throw new ProjectResolutionError('unknown_project', {reason: 'target_unavailable'})
+      }
+      throw error
+    }
+    const base = {workspace_id: workspace.workspace_id, project: workspace.display_name, executor: 'codex' as const}
+    if (selection.session_id === null) return {...base, session_id: null, title: workspace.display_name}
+    const session = snapshot.sessions.find(item => item.workspace_id === workspace.workspace_id && item.session_id === selection.session_id)
+    if (session?.state !== 'ready' || session.codex_thread_id === null
+      || !await this.#externalSessionAvailable(workspace, session) || !await this.#rolloutAvailable(session)) {
+      throw new ProjectResolutionError('unknown_session', {reason: 'target_unavailable'})
+    }
+    return {...base, session_id: session.session_id, title: session.display_title}
+  }
+
   async activeCommittedWorkspace(): Promise<WorkspaceRecord | null> {
     const snapshot = await this.#store.snapshot()
     if (snapshot.active_workspace_id === null) return null
@@ -238,7 +290,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
    * resolves to `select` and, like every other change of the active project, is committed only by
    * `commitConfirmed` after the user confirmed it.
    */
-  async resolveIntakeTarget(decision: CoordinatorDecision): Promise<IntakeTarget> {
+  async resolveIntakeTarget(decision: CoordinatorDecision, selection?: CodingTargetSelection): Promise<IntakeTarget> {
     if (decision.kind === 'create') {
       const name = await this.#store.validateManagedCreate(decision.project ?? '')
       return {
@@ -246,7 +298,12 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
         session_title: null, session_id: null,
       }
     }
-    const workspace = await this.#resolveProject(decision.project)
+    const selected = selection === undefined ? undefined : await this.#validateCodingTarget(selection)
+    const workspace = await this.#resolveProject(selected?.project ?? decision.project)
+    if (selected && (workspace.workspace_id !== selected.workspace_id
+      || (decision.project !== null && workspace.display_name.toLowerCase() !== decision.project.toLowerCase()))) {
+      throw new ProjectResolutionError('unknown_project', {reason: 'target_mismatch'})
+    }
     if (decision.kind === 'work') {
       const slot = this.#slots.get(workspace.workspace_id)
       if (slot !== undefined) {
@@ -262,10 +319,16 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     await this.#store.revalidateWorkspace(workspace.workspace_id)
     let session: ProjectSessionRecord | null = null
     if (decision.kind === 'work' && decision.session === 'latest') {
-      try { session = decision.session_title ? await this.#store.resolveSession(workspace.workspace_id, decision.session_title) : await this.#latestReadySession(workspace) }
+      try {
+        session = decision.session_title ? await this.#store.resolveSession(workspace.workspace_id, decision.session_title)
+          : selected === undefined ? await this.#latestReadySession(workspace)
+          : selected.session_id === null ? null
+          : (await this.#store.listSessions(workspace)).find(item => item.session_id === selected.session_id && item.state === 'ready') ?? null
+        if (selected?.session_id && !decision.session_title && session === null) throw new Error('session_unavailable')
+      }
       catch { throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: decision.session_title ?? ''}) }
       if (session !== null && !(await this.#rolloutAvailable(session))) throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: session.display_title})
-      if (session?.executor_home && session.origin !== 'nova' && !this.#localSessionIds.has(session.session_id)) throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: session.display_title})
+      if (session !== null && !await this.#externalSessionAvailable(workspace, session)) throw new ProjectResolutionError('unknown_session', {project: workspace.display_name, title: session.display_title})
     }
     return {
       workspace: workspace.canonical_path,
@@ -363,6 +426,17 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       throw error
     }
     return session.state === 'ready' && session.codex_thread_id !== null && await this.#rolloutAvailable(session) ? session : null
+  }
+
+  /** Exact resume authority cannot depend on the discovery catalog's UI page limit. */
+  async #externalSessionAvailable(workspace: WorkspaceRecord, session: ProjectSessionRecord): Promise<boolean> {
+    if (!session.executor_home || session.origin === 'nova') return true
+    if (!this.#localCodexHome || !session.codex_thread_id) return false
+    try {
+      const home = await realpath(this.#localCodexHome)
+      if (home !== session.executor_home) return false
+      return (await readLocalCodexSessions(home, session.codex_thread_id)).some(item => item.cwd === workspace.canonical_path)
+    } catch { return false }
   }
 
   async #rolloutAvailable(session: ProjectSessionRecord): Promise<boolean> {
@@ -493,7 +567,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       const oldest = [...this.#taskWorkspaces.keys()].find(id => !this.running().some(work => work.work_id === id))
       if (oldest !== undefined) this.#taskWorkspaces.delete(oldest)
     }
-    this.#taskWorkspaces.set(slot.work.work_id, workspace.workspace_id)
+    this.#taskWorkspaces.set(slot.work.work_id, {workspace_id: workspace.workspace_id})
     const task = run(slot, {...context, signal: controller.signal})
     slot.task = task
     try {
@@ -727,9 +801,9 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     if (workspace.workspace_id !== operation.workspace_id) {
       throw new ProjectStateError('workspace_boundary_changed')
     }
-    const session = await this.#store.resolveSession(workspace.workspace_id, operation.session_title)
+    const session = (await this.#store.listSessions(workspace)).find(item => item.session_id === operation.session_id)
     if (
-      session.session_id !== operation.session_id
+      session?.session_id !== operation.session_id
       || session.state !== 'ready'
       || session.codex_thread_id === null
     ) throw new ProjectStateError('session_unavailable')
@@ -782,8 +856,8 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     if (workspace.workspace_id !== operation.workspace_id) {
       return failureHandoff('workspace_boundary_changed', 'run')
     }
-    const session = await this.#store.resolveSession(workspace.workspace_id, operation.session_title)
-    if (session.session_id !== operation.session_id || session.state !== 'ready') {
+    const session = (await this.#store.listSessions(workspace)).find(item => item.session_id === operation.session_id)
+    if (session?.session_id !== operation.session_id || session.state !== 'ready') {
       return projectProblemHandoff('session_unavailable')
     }
     return await this.#runInSlot(workspace, session.display_title, context, (slot, runContext) =>
@@ -819,8 +893,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     if (resumed !== null && !(await this.#rolloutAvailable(resumed))) return failureHandoff('resume_unavailable', 'run', 'thread_start')
     if (resumed?.executor_home && resumed.origin !== 'nova') {
       await this.#refreshLocalSessions()
-      if (!this.#localCodexHome || !this.#catalogHealthy || !this.#localSessionIds.has(resumed.session_id)
-        || await realpath(this.#localCodexHome) !== resumed.executor_home) return failureHandoff('resume_unavailable', 'run')
+      if (!await this.#externalSessionAvailable(workspace, resumed)) return failureHandoff('resume_unavailable', 'run')
     }
     let codexHome: HostCodexHome
     let canonicalHome: string | undefined
@@ -890,6 +963,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       throw error
     }
     const sessionId = session.session_id
+    this.#taskWorkspaces.set(slot.work.work_id, {workspace_id: workspace.workspace_id, session_id: sessionId})
     const transport = new ThreadObservingTransport(inner, {
       threadName: resumed === null ? title : null,
       onThreadReady: threadId => {

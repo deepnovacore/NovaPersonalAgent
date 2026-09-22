@@ -123,6 +123,7 @@ import {
   validateBootstrap,
 } from './security.mjs'
 import { validReleaseCameraResult } from '../renderer/release-camera-contract.mjs'
+import { isValidCategory } from '../renderer/settings-categories.mjs'
 
 configureDesktopIdentity(app)
 registerAppScheme(protocol)
@@ -182,6 +183,17 @@ let settingsWindow = null
 let pendingSettingsCategory = null
 let wakeWord = null
 let tray = null
+let presentationMode = 'workbench'
+function enterBackground(){
+  presentationMode='background'
+  mainWindow?.hide();wakeWord?.stop();wakeWord?.reset()
+  nativeAudio?.setPlaybackMuted(true)
+  void nativeAudio?.deactivate().catch(()=>{})
+}
+const requestPresentation = mode => {
+  if(mode==='background')enterBackground()
+  sendToOrb('nova:personal:presentation-request',mode)
+}
 let bootstrap = null
 let activeLaunchId = null
 let openSettingsRequested = shouldOpenSettings(process.argv)
@@ -354,7 +366,7 @@ const settingsWriter = createSettingsWriter({
 function publishCommittedSettings() {
   if (!currentSettings.phoneConnectionEnabled) void managedPhone.stop()
   capabilityEditorCache = null
-  wakeWord?.configure(currentSettings)
+  if(presentationMode!=='background')wakeWord?.configure(currentSettings)
   settingsGeneration += 1
   sendToOrb('nova:settings:changed', orbSettings(currentSettings))
   sendToSettings('nova:settings:changed', settingsView())
@@ -743,19 +755,18 @@ function trayImage() {
 }
 
 function hideOrb() {
-  if (wakeWord?.state === 'blocked') wakeWord.wake()
-  else if (!wakeWord?.enabled || !wakeWord.sleep('manual')) mainWindow?.hide()
+  requestPresentation('background')
 }
 
 function createTray() {
   const next = new Tray(trayImage())
   next.setToolTip('Nova Audio Agent Desktop')
   next.setContextMenu(Menu.buildFromTemplate([
-    { label: t("显示"), click: () => wakeWord?.wake() },
+    ...[['workbench','工作台'],['orb','悬浮球'],['background','后台']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
     { type: 'separator' },
     { label: t("退出"), click: () => app.quit() },
   ]))
-  next.on('click', () => mainWindow?.isVisible() ? hideOrb() : wakeWord?.wake())
+  next.on('click', () => mainWindow?.isVisible() ? hideOrb() : requestPresentation('workbench'))
   return next
 }
 
@@ -1097,7 +1108,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   mainWindow = await createWindow(launchId)
   wakeWord = new WakeWordRuntime({
     modelRoot: resolve(app.getPath('userData'), 'models/wake-word'),
-    show: () => { mainWindow?.show(); mainWindow?.focus() },
+    show: () => { if(presentationMode !== 'background'){ mainWindow?.show(); mainWindow?.focus() } },
     // An idle timeout no longer clears the screen: the renderer sees the same
     // 'sleeping' state arrive on nova:wake-word:changed and shrinks the window
     // to a bubble through nova:orb:dormant, so the window must stay visible for
@@ -1123,7 +1134,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     : null
   let personalCollapsed = false
   let personalBounds = null
-  const initialOrbBounds = mainWindow.getBounds()
+  let initialOrbBounds = mainWindow.getBounds()
   const setPersonalCollapsed = value => {
     if (value === personalCollapsed && personalBounds !== null) return
     if (value) {
@@ -1135,6 +1146,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       mainWindow.setBounds(initialOrbBounds)
       orbWindow.sync()
     } else {
+      if(personalCollapsed)initialOrbBounds=mainWindow.getBounds()
       personalCollapsed = false
       const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
       const width = Math.min(1120, area.width), height = Math.min(780, area.height)
@@ -1147,9 +1159,22 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     }
     sendToOrb('nova:personal:collapsed', value)
   }
+  ipcMain.handle('nova:personal:presentation-error', (event, message) => {
+    if(event.sender !== mainWindow.webContents || typeof message !== 'string' || message.length > 2000) throw new Error('presentation error rejected')
+    return dialog.showMessageBox({type:'error',title:'Nova',message})
+  })
+  ipcMain.handle('nova:personal:presentation', (event, mode, activate=true) => {
+    if(event.sender !== mainWindow.webContents || !['background','workbench','orb'].includes(mode) || typeof activate!=='boolean') throw new Error('presentation request rejected')
+    if(mode === 'background'){enterBackground();return}
+    const wasBackground=presentationMode==='background'
+    presentationMode=mode
+    setPersonalCollapsed(mode === 'orb')
+    if(wasBackground)wakeWord?.configure(currentSettings)
+    if(activate){mainWindow.show();mainWindow.focus()}
+  })
   ipcMain.handle('nova:personal:collapse', (event, value) => {
     if (event.sender !== mainWindow.webContents || typeof value !== 'boolean') throw new Error('window request rejected')
-    setPersonalCollapsed(value)
+    requestPresentation(value ? 'orb' : 'workbench')
   })
   ipcMain.handle('nova:personal:unread', (event, value) => {
     if (event.sender !== mainWindow.webContents || !Number.isSafeInteger(value) || value < 0 || value > 1000000) throw new Error('unread request rejected')
@@ -1157,14 +1182,14 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   })
   ipcMain.handle('nova:personal:wake', event => {
     if (event.sender !== mainWindow.webContents) throw new Error('wake request rejected')
-    wakeWord?.wake()
+    if(presentationMode !== 'background') wakeWord?.wake()
   })
   ipcMain.handle('nova:personal:feishu-verification', async (event, value) => {
     if (event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) throw new Error('authorization request rejected')
     await shell.openExternal(feishuVerificationUrl(value))
   })
   ipcMain.handle('nova:personal:connector-authorization', async (event, value) => {
-    if (event.sender !== mainWindow.webContents) throw new Error('authorization request rejected')
+    if (event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) throw new Error('authorization request rejected')
     await shell.openExternal(connectorAuthorizationUrl(value))
   })
   ipcMain.handle('nova:personal:article', async (event, value) => {
@@ -1172,14 +1197,14 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     await shell.openExternal(newsArticleUrl(value))
   })
   ipcMain.handle('nova:personal:directory', async event => {
-    if (event.sender !== mainWindow.webContents) throw new Error('directory request rejected')
-    const result = await dialog.showOpenDialog(mainWindow, {title:'选择允许 Nova 读取的目录', properties:['openDirectory']})
+    if (event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) throw new Error('directory request rejected')
+    const result = await dialog.showOpenDialog(event.sender === settingsWindow?.webContents ? settingsWindow : mainWindow, {title:'选择允许 Nova 读取的目录', properties:['openDirectory']})
     return result.canceled ? null : result.filePaths[0] ?? null
   })
   mainWindow.on('close', event => {
     if (app.isQuitting) return
     event.preventDefault()
-    setPersonalCollapsed(true)
+    requestPresentation('background')
   })
   const orbWindow = createOrbWindowController({
     getBounds: () => personalCollapsed ? mainWindow.getBounds() : initialOrbBounds,
@@ -1276,8 +1301,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   ipcMain.on('nova:pairing:open', (event, ...args) => {
     if (settingsWindow && event.sender === settingsWindow.webContents && args.length === 0) void openPairingWindow(launchId)
   })
-  ipcMain.on('nova:settings:open', event => {
-    if (mainWindow && event.sender === mainWindow.webContents) openSettingsWindow(launchId)
+  ipcMain.on('nova:settings:open', (event, category) => {
+    if (mainWindow && event.sender === mainWindow.webContents) openSettingsWindow(launchId, isValidCategory(category) ? {category} : {})
   })
   ipcMain.handle('nova:memory-board:request', async (event, detail) => {
     if (!boardWindow || event.sender !== boardWindow.webContents) {
@@ -1474,7 +1499,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   })
   ipcMain.handle('nova:settings:feishu', async (event, payload) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('IM request rejected')
-    const allowed = ['feishu.status', 'feishu.app.start', 'feishu.app.status', 'feishu.app.cancel', 'feishu.app.bind', 'feishu.login', 'feishu.complete', 'feishu.chats', 'feishu.configure', 'feishu.sync', 'feishu.pause', 'feishu.resume', 'feishu.disconnect', 'feishu.delete', 'feishu.bot.configure']
+    const allowed = ['feishu.status', 'feishu.app.start', 'feishu.app.status', 'feishu.app.cancel', 'feishu.app.bind', 'feishu.login', 'feishu.complete', 'feishu.chats', 'feishu.configure', 'feishu.consent', 'feishu.sync', 'feishu.pause', 'feishu.resume', 'feishu.disconnect', 'feishu.delete', 'feishu.bot.configure']
     if (!payload || Object.getPrototypeOf(payload) !== Object.prototype || Object.keys(payload).sort().join(',') !== 'method,params'
       || !allowed.includes(payload.method) || !payload.params || Object.getPrototypeOf(payload.params) !== Object.prototype
       || JSON.stringify(payload.params).length > 16384) throw new Error('IM request rejected')
@@ -1487,6 +1512,18 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!owner) throw new Error('IM connection unavailable')
     const result = await owner.request(payload.method, payload.params, {timeoutMs: 180000})
     if (owner !== backendControl || generation !== settingsGeneration) throw new Error('IM connection changed')
+    return result
+  })
+  ipcMain.handle('nova:settings:personal', async (event, payload) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('connections request rejected')
+    const allowed = ['state', 'sources.add', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete', 'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent', 'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete', 'connector.local_status', 'connector.local_connect', 'connector.local_access', 'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure']
+    if (!payload || Object.getPrototypeOf(payload) !== Object.prototype || Object.keys(payload).sort().join(',') !== 'method,params'
+      || !allowed.includes(payload.method) || !payload.params || Object.getPrototypeOf(payload.params) !== Object.prototype
+      || JSON.stringify(payload.params).length > 16384) throw new Error('connections request rejected')
+    const owner = backendControl, generation = settingsGeneration
+    if (!owner) throw new Error('connections unavailable')
+    const result = await owner.request(payload.method, payload.params, {timeoutMs: 180000})
+    if (owner !== backendControl || generation !== settingsGeneration) throw new Error('connections changed')
     return result
   })
   ipcMain.handle('nova:knowledge:action', async (event, payload) => {
@@ -1521,20 +1558,20 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (event.sender === mainWindow?.webContents) wakeWord?.report(value)
   })
   ipcMain.on('nova:wake-word:audio', (event, value) => {
-    if (event.sender === mainWindow?.webContents) wakeWord?.accept(value)
+    if (presentationMode !== 'background' && event.sender === mainWindow?.webContents) wakeWord?.accept(value)
   })
   ipcMain.on('nova:wake-word:sleep', (event, ...args) => {
     if (mainWindow && event.sender === mainWindow.webContents && args.length === 0) sleepOrb()
   })
   ipcMain.on('nova:wake-word:wake', (event, ...args) => {
-    if (mainWindow && event.sender === mainWindow.webContents && args.length === 0) wakeWord?.wake()
+    if (presentationMode !== 'background' && mainWindow && event.sender === mainWindow.webContents && args.length === 0) wakeWord?.wake()
   })
   ipcMain.on('nova:wake-word:activity', event => {
     if (event.sender === mainWindow?.webContents || event.sender === settingsWindow?.webContents) wakeWord?.activity()
   })
   ipcMain.handle('nova:wake-word:retry', event => {
     if (event.sender !== settingsWindow?.webContents) throw new Error('wake word retry rejected')
-    wakeWord?.start()
+    if(presentationMode!=='background')wakeWord?.start()
     return settingsView()
   })
   ipcMain.handle('nova:settings:set', async (event, payload, restart = false) => {
@@ -1559,6 +1596,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
       throw new Error('native capture request rejected')
     }
+    if (enabled === true && presentationMode === 'background') throw new Error('capture disabled in background')
     if (enabled !== true) {
       return nativeAudio?.deactivate() || Object.freeze({ audioMode: 'inactive' })
     }
@@ -1568,10 +1606,10 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
       throw new Error('native playback mute request rejected')
     }
-    return nativeAudio?.setPlaybackMuted(muted === true) ?? true
+    return nativeAudio?.setPlaybackMuted(presentationMode === 'background' || muted === true) ?? true
   })
   ipcMain.on('nova:native-audio:play', (event, payload) => {
-    if (mainWindow && event.sender === mainWindow.webContents && payload) {
+    if (presentationMode !== 'background' && mainWindow && event.sender === mainWindow.webContents && payload) {
       nativeAudio?.play(payload.pcm, payload.utteranceId, payload.generationEpoch)
     }
   })
@@ -1695,7 +1733,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   })
   tray = createTray()
   const shortcutRegistered = globalShortcut.register('CommandOrControl+Shift+Space', () => {
-    mainWindow?.isVisible() ? hideOrb() : wakeWord?.wake()
+    mainWindow?.isVisible() ? hideOrb() : requestPresentation('workbench')
   })
   // Wayland/XWayland sessions may silently refuse global shortcuts; surface
   // that instead of leaving the user to wonder why the hotkey never fires.

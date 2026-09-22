@@ -1,3 +1,4 @@
+import type {ProjectExecutorAdapter} from '../executors/coding-executor.js'
 import {MacMailClient} from '../connectors/macos/mail.js'
 import {MacCalendarClient} from '../connectors/macos/calendar.js'
 import {ComposioConnector} from '../connectors/composio/index.js'
@@ -176,6 +177,20 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   }
   const host = composition.realtime.personalAgent
   conversationOwner.host=host
+  const projectAdapter=codexResource?.mode==='project'?codexResource.adapter as ProjectExecutorAdapter:undefined
+  if(projectAdapter?.targetPort)host.setCodingTargets(projectAdapter.targetPort)
+  host.setApprovalView(()=>codexResource?.approvalController?.view)
+  if(codexResource?.approvalController)ownership.own(codexResource.approvalController.observe(()=>host.connectionChanged()))
+  if(projectAdapter)ownership.own(projectAdapter.observeProjectView(view=>host.recordConfirmation('',view)))
+  let presentationPaused=false
+  ownership.own(host.subscribePresentation(async(mode,seen)=>{
+    const broker=codexResource?.approvalController
+    if(mode==='background'){broker?.hold('background');projectAdapter?.confirmationController.setBackground(true)}
+    else if(!seen){broker?.release('background',{awaitPresentation:true});projectAdapter?.confirmationController.setBackground(false,{awaitPresentation:true})}
+    else if(seen?.approval_id&&broker?.view.pending_approval_id===seen.approval_id)broker.release('background')
+    if(mode!=='background'&&seen?.proposal_id&&!seen.conversation_id&&projectAdapter?.confirmationController.view.pending_confirmation_id===seen.proposal_id)projectAdapter.confirmationController.setBackground(false)
+    if(!seen){const paused=mode==='background';if(paused||presentationPaused)await composition.realtime.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
+  }))
   host.setConversationRuntime(conversationRuntimeFactory({settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
     ...(onUsage===undefined?{}:{onUsage}),
     ...(composition.realtime.core.frameSource?{frameSource:composition.realtime.core.frameSource}:{}),

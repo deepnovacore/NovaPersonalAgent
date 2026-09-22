@@ -110,7 +110,7 @@ test('the default settings are the documented schema', () => {
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
-    memoryPrerecallEnabled: true,
+    memoryPrerecallEnabled: false,
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
     phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
@@ -287,7 +287,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
-    memoryPrerecallEnabled: true,
+    memoryPrerecallEnabled: false,
     conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
     phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
     secrets: {},
@@ -1207,12 +1207,12 @@ test('explicit integrated preference is preserved for existing users', () => {
   assert.equal(normalizeSettings({version:4,pipelineMode:'integrated'}).pipelineMode, 'integrated')
 })
 
-test('memory prerecall defaults on and preserves an explicit off setting', () => {
-  assert.equal(normalizeSettings({}).memoryPrerecallEnabled,true)
-  const settings=normalizeSettings({memoryPrerecallEnabled:false})
-  assert.equal(publicSettings(settings).memoryPrerecallEnabled,false)
-  assert.equal(backendSettings(settings).memoryPrerecallEnabled,false)
-  assert.equal(normalizeSettings({memoryPrerecallEnabled:'false'}).memoryPrerecallEnabled,true)
+test('memory prerecall defaults off and preserves explicit opt-in', () => {
+  assert.equal(normalizeSettings({}).memoryPrerecallEnabled,false)
+  const settings=normalizeSettings({memoryPrerecallEnabled:true})
+  assert.equal(publicSettings(settings).memoryPrerecallEnabled,true)
+  assert.equal(backendSettings(settings).memoryPrerecallEnabled,true)
+  assert.equal(normalizeSettings({memoryPrerecallEnabled:'false'}).memoryPrerecallEnabled,false)
 })
 
 test('phone pairing configuration persists but does not restart or leak into the voice backend', async t => {

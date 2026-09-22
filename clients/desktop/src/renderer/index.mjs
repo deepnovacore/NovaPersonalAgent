@@ -322,6 +322,20 @@ const backendRecovery = new BackendReconnectController({
   onConnectionReplaced: () => resetRendererConnection(true),
 })
 
+const seenPresentations = new Set()
+function acknowledgeVisibleConfirmation(state){
+  const c=personalView?.controller
+  if(!c?.presentationReady||c.presentationPending||c.presentationMode==='background'||!state.confirmationVisible||document.visibilityState!=='visible'||!document.hasFocus())return
+  const active=axes.pendingConfirmationKind==='codex'?latestCodexApproval:latestProjectConfirmation
+  if(!active?.id)return
+  const key=`${active.kind}:${active.id}`
+  if(seenPresentations.has(key))return
+  seenPresentations.add(key)
+  const params=active.kind==='codex'?{approval_id:active.id}:{proposal_id:active.id,...(active.conversationId?{conversation_id:active.conversationId}:{})}
+  void c.command('presentation.seen',params).catch(error=>{seenPresentations.delete(key);c.error=error.message;personalView.refresh()})
+}
+window.addEventListener('focus',()=>render())
+document.addEventListener('visibilitychange',()=>render())
 function render() {
   const state = deriveOrbState({...axes, tasks: taskBanner?.state().tasks ?? []})
   shell.dataset.state = state.name
@@ -382,6 +396,7 @@ function render() {
     || axes.camera === 'requesting'
   cameraToggle.setAttribute('aria-label', t("视觉设置"))
   visual.setState(state.name, { codexWorking: axes.codex === 'working' })
+  acknowledgeVisibleConfirmation(state)
 }
 
 function confirmationDeadline(seconds) {
@@ -660,6 +675,7 @@ function toggleOutputMuted() {
 }
 
 async function activateCapture() {
+  if (personalView?.controller.presentationMode === 'background') return
   if (axes.activated) return deactivateCapture()
   if (axes.activationPending) return
   axes.activationPending = true
@@ -673,6 +689,7 @@ async function activateCapture() {
       },
       activateBrowser: startBrowserCapture,
     })
+    if(personalView?.controller.presentationMode==='background'){await window.novaAudioAgentDesktop.nativeAudio.setCaptureEnabled(false);nativeReady=false;releaseBrowserCapture();return}
     axes.audioMode = result.audioMode
     axes.activated = true
     axes.microphone = 'granted'
@@ -856,6 +873,7 @@ async function handleControl(message) {
   } else if (message.type === PLAYBACK_ALERT) {
     clearAssistantCaption()
     const hasIdentity = Object.hasOwn(message, 'utterance_id')
+    if(personalView.controller.presentationMode === 'background') return
     const result = await applyAlertCommand(playback, message, {
       startTone: startAlertTone,
       clearNative: (utteranceId, generationEpoch) => {
@@ -960,7 +978,7 @@ async function handleControl(message) {
           && pendingExpires >= 0
           && pendingExpires <= PROJECT_CONFIRMATION_TTL_SECONDS))
       && (message.pending_confirmation
-        ? (!pendingMetadata || (pendingWorkspace !== null && pendingExpires !== null))
+        ? (!pendingMetadata || pendingWorkspace !== null)
         : !pendingMetadata)
     if (valid) {
       projectRoster = roster
@@ -973,6 +991,7 @@ async function handleControl(message) {
         ? {
             kind: 'project',
             id: pendingConfirmationId ?? null,
+            conversationId: message.conversation_id,
             busy: pendingBusy,
             action: pendingAction,
             workspace: pendingWorkspace || '',
@@ -1056,6 +1075,7 @@ async function handleSocketMessage(event, delivery) {
     await handleControl(JSON.parse(event.data))
     return
   }
+  if(personalView.controller.presentationMode === 'background') return
   alertTone.stop()
   const frame = decodeAudioFrame(new Uint8Array(event.data))
   const backend = playback.current?.backend || (nativeReady ? 'native' : 'browser')
@@ -1147,10 +1167,8 @@ function openBackendSocket(connection) {
   nextSocket.onopen = () => {
     if (!nextConnection.isCurrent()) return
     nextConnection.delivery.sendText(JSON.stringify({ type: 'hello', token: connection.token }))
-    if (pendingNarrationMode && send({type: 'coding.progress_narration', mode: pendingNarrationMode})) pendingNarrationMode = null
     axes.connected = true
-    personalView.controller.connect()
-    void personalView.controller.command('state').catch(error => {personalView.controller.error=error.message;personalView.refresh()})
+    void personalView.controller.connect().then(()=>{if(pendingNarrationMode&&send({type:'coding.progress_narration',mode:pendingNarrationMode}))pendingNarrationMode=null;return personalView.controller.command('state')}).catch(error => {personalView.controller.error=error.message;personalView.refresh()})
     axes.error = ''
     backendRecovery.socketOpened()
     render()
@@ -1305,6 +1323,14 @@ personalView = mountPersonalView({send,
     if (!axes.activated) throw new Error('麦克风启动失败')
   },
   stop: deactivateCapture,
+  applyPresentation: async (mode,{activate=false}={}) => {
+    await window.novaAudioAgentDesktop.personal.setPresentation(mode,activate)
+    if(mode === 'background'){
+      seenPresentations.clear();alertTone.stop();playback.disconnect();nativeFrames.clear();nativeLevel.clear();await window.novaAudioAgentDesktop.nativeAudio.clear();axes.playback='idle'
+      await window.novaAudioAgentDesktop.nativeAudio.setPlaybackMuted(true)
+    }else await window.novaAudioAgentDesktop.nativeAudio.setPlaybackMuted(axes.outputMuted)
+    requestAnimationFrame(()=>render())
+  },
   taskAction: (id, action) => { taskBanner.select(id); taskBanner.action(action) },
   tasks: () => taskBanner?.state(), results: () => [...retainedResults.values()],
   openResults: () => window.novaAudioAgentDesktop.executorResult.open({results: [...retainedResults.values()], roster: projectRoster}),

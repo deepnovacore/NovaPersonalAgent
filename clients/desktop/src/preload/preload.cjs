@@ -5,6 +5,13 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     openArticle: url => ipcRenderer.invoke('nova:personal:article', url),
     setUnread: value => ipcRenderer.invoke('nova:personal:unread', value),
     wake: () => ipcRenderer.invoke('nova:personal:wake'),
+    showPresentationError: message => ipcRenderer.invoke('nova:personal:presentation-error', message),
+    setPresentation: (mode,activate=true) => ipcRenderer.invoke('nova:personal:presentation', mode,activate),
+    onPresentationRequest: callback => {
+      const listener = (_event, mode) => { if (['background','workbench','orb'].includes(mode)) callback(mode) }
+      ipcRenderer.on('nova:personal:presentation-request', listener)
+      return () => ipcRenderer.removeListener('nova:personal:presentation-request', listener)
+    },
     setCollapsed: value => ipcRenderer.invoke('nova:personal:collapse', value),
     openFeishuVerification: url => ipcRenderer.invoke('nova:personal:feishu-verification', url),
     openConnectorAuthorization: url => ipcRenderer.invoke('nova:personal:connector-authorization', url),
@@ -50,7 +57,7 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
   },
   orbMenu: Object.freeze({
     show: () => ipcRenderer.send('nova:orb-menu:show'),
-    openSettings: () => ipcRenderer.send('nova:settings:open'),
+    openSettings: category => ipcRenderer.send('nova:settings:open', category),
   }),
   releaseCamera: Object.freeze({
     report: result => ipcRenderer.send('nova:release-camera:result', result),
@@ -178,6 +185,9 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     restart: () => ipcRenderer.invoke('nova:settings:set', {settingsPatch: {}}, true),
     probeCapabilities: payload => ipcRenderer.invoke('nova:capabilities:probe', payload),
     feishuCommand: (method, params = {}) => ipcRenderer.invoke('nova:settings:feishu', {method, params}),
+    personalCommand: (method, params = {}) => ipcRenderer.invoke('nova:settings:personal', {method, params}),
+    openConnectorAuthorization: url => ipcRenderer.invoke('nova:personal:connector-authorization', url),
+    chooseDirectory: () => ipcRenderer.invoke('nova:personal:directory'),
     openFeishuVerification: url => ipcRenderer.invoke('nova:personal:feishu-verification', url),
     knowledgeAction: payload => ipcRenderer.invoke('nova:knowledge:action', payload),
     onChanged: callback => {

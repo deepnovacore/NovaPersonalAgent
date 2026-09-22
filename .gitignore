@@ -83,3 +83,5 @@ clients/desktop/~/
 # Local verification and private recovery artifacts
 /output/
 /runtime/dist-independent-review/
+
+references/

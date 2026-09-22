@@ -73,6 +73,37 @@ export function desktopBudgetFailure(error: unknown): DesktopCapabilityState | u
 }
 
 
+/** The settings window may manage sources, connectors and discovery scheduling; nothing that reads memory, feeds or conversations. */
+export const PERSONAL_SETTINGS_METHODS: readonly string[] = Object.freeze([
+  'state', 'sources.add', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete',
+  'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent',
+  'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete',
+  'connector.local_status', 'connector.local_connect', 'connector.local_access',
+  'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure',
+])
+/** The only snapshot fields the settings window may see: no conversations, memory, feed, life, news or understanding. */
+export function connectionsProjection(snapshot: unknown): Record<string, unknown> {
+  const s = (snapshot ?? {}) as Record<string, unknown>
+  const capabilities = (s.capabilities ?? {}) as Record<string, unknown>
+  return {
+    revision: s.revision,
+    sources: Array.isArray(s.sources) ? s.sources : [],
+    connectors: s.connectors ?? null,
+    settings: s.settings ?? {},
+    capabilities: {sources: capabilities.sources === true, discovery: capabilities.discovery === true},
+  }
+}
+export async function handlePersonalSettings(command: (input: unknown) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
+  if (!PERSONAL_SETTINGS_METHODS.includes(method)) return {error: 'unsupported'}
+  const parsed = personalCommandSchema.safeParse({type: 'personal.command', request_id: randomUUID(), method, params})
+  if (!parsed.success) return {error: 'invalid_request'}
+  const result = await command(parsed.data) as {ok?: boolean; data?: unknown; error?: string}
+  if (result.ok !== true) return {error: result.error ?? 'unavailable'}
+  if (method === 'state') return connectionsProjection(result.data)
+  // Commands that persist without a payload (discovery.configure) must still read as success across the port.
+  return result.data === undefined ? {ok: true} : result.data
+}
+
 /** Settings may configure IM; they cannot read memory or authorize tasks through this port. */
 export async function handleFeishuSettings(command: (input: unknown) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
   if (!method.startsWith('feishu.')) return {error: 'unsupported'}

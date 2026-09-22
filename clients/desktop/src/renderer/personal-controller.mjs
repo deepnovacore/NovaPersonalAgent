@@ -1,7 +1,7 @@
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 export class PersonalController {
-  constructor({send,start,stop,changed=()=>{}}) {
-    Object.assign(this,{send,start,stop,changed,connected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
+  constructor({send,start,stop,applyPresentation,changed=()=>{}}) {
+    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,connected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
@@ -11,9 +11,18 @@ export class PersonalController {
   get submittedRequestId(){return this.state().submission?.request_id??null}
   get submittedDraft(){return this.state().submission?.text??null}
   get isVoiceConversation(){return Boolean(this.selectedId&&(this.voiceId===this.selectedId||(!this.dictationId&&['starting','voice'].includes(this.mode)&&this.captureConversationId===this.selectedId)))}
-  connect(){
+  async connect(){
     this.connected=true;this.error='';this.capabilities=[];this.snapshot=null
-    for(const [id,state]of this.drafts)if(state.submission)this.sendSubmission(id,state.submission)
+    if(this.applyPresentation){
+      this.presentationReady=false
+      for(let attempt=0;attempt<2&&!this.presentationReady&&this.connected;attempt++){
+        try{await this.setPresentation(this.desiredPresentation,{activate:false})}
+        catch(error){this.error=error.message}
+      }
+      if(!this.presentationReady&&this.connected)await this.applyMode('background',{activate:false})
+    }
+    if(this.presentationReady)this.error=''
+    if(this.presentationReady)for(const [id,state]of this.drafts)if(state.submission)this.sendSubmission(id,state.submission)
     this.changed()
   }
   sendSubmission(id,value){return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id})}
@@ -23,8 +32,42 @@ export class PersonalController {
     for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
     this.pending.clear();void this.stop();this.error='连接已断开，草稿已保留';this.changed()
   }
+  async setPresentation(mode,{activate=true}={}){
+    if(!['background','workbench','orb'].includes(mode))throw new Error('无效的显示模式')
+    if(this.presentationPending&&mode!=='background')throw new Error('正在切换模式，请稍候')
+    const sequence=++this.presentationSequence
+    this.desiredPresentation=mode;this.presentationPending=true;if(mode==='background')this.presentationReady=false;this.changed()
+    try{
+      const local=mode==='background'?this.applyMode(mode,{activate:false}):null
+      if(!this.connected){if(local)await local;else await this.applyMode(mode,{activate});this.presentationReady=false;return}
+      const [,result]=await Promise.all([local,this.command('presentation.set',{mode})])
+      if(sequence!==this.presentationSequence)return
+      if(result?.mode!==mode)throw new Error('显示模式未确认，请重试')
+      if(mode!=='background')await this.applyMode(mode,{activate})
+      this.presentationReady=true
+    }catch(error){if(sequence===this.presentationSequence)this.error=error.message;throw error}
+    finally{if(sequence===this.presentationSequence)this.presentationPending=false;this.changed()}
+  }
+  async applyMode(mode,{activate=false}={}){
+    this.presentationMode=mode;this.collapsed=mode!=='workbench'
+    if(mode==='background'){
+      this.generation++;if(this.dictationId)this.send({type:'input.dictation',id:this.dictationId,action:'cancel',conversation_id:this.dictationConversationId})
+      this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
+      await Promise.all([this.stop(),this.applyPresentation?.(mode,{activate:false})])
+    }else await this.applyPresentation?.(mode,{activate})
+    this.changed()
+  }
+  async resumeVoice(){
+    const id=this.voiceId
+    if(!id||!this.connected||!this.presentationReady||this.presentationMode==='background'||this.capturePending||this.mode!=='text')return
+    const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.changed()
+    try{await this.startCapture();if(generation!==this.generation){await this.stop();return}if(!this.send({type:'input.audio',conversation_id:id}))throw new Error('连接已断开');this.mode='voice'}
+    catch(error){this.captureConversationId=null;this.mode='text';await this.stop();throw error}
+    finally{this.changed()}
+  }
   collapse(value){this.collapsed=value;if(value&&this.dictationId)void this.text();this.changed()}
   receive(frame){
+    if(frame.type==='conversation.notice'&&typeof frame.conversation_id==='string'&&typeof frame.message==='string')this.state(frame.conversation_id).error=frame.message
     if(frame.type==='conversation.error'&&typeof frame.conversation_id==='string')this.state(frame.conversation_id).error='回复失败，请重试。'
     if(frame.type==='input.text_result')for(const [id,state]of this.drafts){
       const request=state.submission
@@ -36,6 +79,7 @@ export class PersonalController {
     if(['client.ready','desktop.capabilities'].includes(frame.type)){this.capabilities=frame.capabilities??[];this.inputInstance=frame.input_instance_id??null}
     if(frame.type==='personal.state'&&Number.isSafeInteger(frame.revision)&&(!this.snapshot||frame.revision>this.snapshot.revision)){
       const previous=this.selectedId;this.snapshot=frame
+      if(this.applyPresentation&&this.presentationReady&&!this.presentationPending&&['background','workbench','orb'].includes(frame.presentation_mode)&&frame.presentation_mode!==this.presentationMode){this.desiredPresentation=frame.presentation_mode;void this.applyMode(frame.presentation_mode).catch(error=>{this.error=error.message;this.changed()})}
       if(this.mode==='voice'&&this.voiceId!==this.captureConversationId){this.generation++;this.mode='text';this.captureConversationId=null;void this.stop()}
       if(this.voiceId&&this.dictationId)void this.text()
       if(!previous&&this.selectedId&&this.drafts.has(null)){const scratch=this.drafts.get(null);if(scratch.draft&&!this.state().draft)this.state().draft=scratch.draft;this.drafts.delete(null)}
@@ -53,6 +97,7 @@ export class PersonalController {
   }
   async command(method,params={}){
     if(!this.connected)throw new Error('尚未连接')
+    if(this.applyPresentation&&!this.presentationReady&&!['presentation.set','state'].includes(method))throw new Error('正在恢复显示模式，请稍候')
     if(this.pending.size>=32)throw new Error('请等待当前操作完成')
     const request_id=crypto.randomUUID()
     return new Promise((resolve,reject)=>{
@@ -78,6 +123,7 @@ export class PersonalController {
   async startCapture(){this.capturePending=true;try{await this.start()}finally{this.capturePending=false}}
   async voice(){
     const id=this.selectedId
+    if(!this.presentationReady||this.presentationMode==='background')throw new Error('请先切换到工作台或悬浮球')
     if(!id||!this.connected)throw new Error('尚未选择会话')
     if(this.capturePending||this.voiceId||this.mode!=='text')throw new Error('请先结束当前语音或录音')
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.changed()
@@ -88,12 +134,12 @@ export class PersonalController {
       if(generation!==this.generation){await this.stop();return}
       if(!this.send({type:'input.audio',conversation_id:id}))throw new Error('连接已断开')
       this.mode='voice'
-    }catch(error){this.mode='text';this.captureConversationId=null;await this.stop();if(this.connected)await this.command('conversations.voice',{id,enabled:false}).catch(()=>{});throw error}
+    }catch(error){if(generation!==this.generation)return;this.mode='text';this.captureConversationId=null;await this.stop();if(this.connected)await this.command('conversations.voice',{id,enabled:false}).catch(()=>{});throw error}
     finally{this.changed()}
   }
   async dictate(){
     const id=this.selectedId
-    if(!id||!this.connected||!this.capabilities.includes('dictation'))return
+    if(!this.presentationReady||this.presentationMode==='background'||!id||!this.connected||!this.capabilities.includes('dictation'))return
     if(this.capturePending||this.voiceId||this.mode!=='text')throw new Error('请先结束持续对话，再使用录音')
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.dictationConversationId=id;this.dictationId=crypto.randomUUID();this.changed()
     if(!this.send({type:'input.dictation',id:this.dictationId,action:'start',conversation_id:id})){await this.text();throw new Error('发送失败')}
@@ -107,7 +153,7 @@ export class PersonalController {
   }
   async submit(){
     const id=this.selectedId,state=this.state(id)
-    if(!id||state.submission||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
+    if(!this.presentationReady||!id||state.submission||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
     const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';this.changed();return false}
     state.submission=request;state.draft='';state.error='';this.changed();return true

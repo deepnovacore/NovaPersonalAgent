@@ -22,6 +22,7 @@
       <button type="button" class="nav-item" id="category-pipeline" data-category="pipeline" aria-current="false" tabindex="-1">语音管线</button>
       <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">执行器与 MCP</button>
       <button type="button" class="nav-item" id="category-im" data-category="im" aria-current="false" tabindex="-1">IM 渠道</button>
+      <button type="button" class="nav-item" id="category-connections" data-category="connections" aria-current="false" tabindex="-1">连接与权限</button>
       <button type="button" class="nav-item" id="category-knowledge" data-category="knowledge" aria-current="false" tabindex="-1">知识库</button>
       <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
       <button type="button" class="nav-item" id="category-phone" data-category="phone" aria-current="false" tabindex="-1">连接 iPhone</button>
@@ -102,10 +103,11 @@
         </div>
       </section>
       <section class="setting-section" id="im-section" hidden><h2>IM 渠道</h2><p class="hint">连接你使用的聊天工具，选择同步范围与提醒方式。</p><div id="im-connection"></div><p id="im-error" role="status" aria-live="polite"></p></section>
+      <section class="setting-section" id="connections-section" hidden><h2>连接与权限</h2><p class="hint">只读取你授权的目录和会话。正文可能交由设置中的模型服务处理；读取权限不授予修改或发送权限。</p><div id="connections-panel"></div><p id="connections-error" role="status" aria-live="polite"></p></section>
       <section class="setting-section" id="knowledge-section">
         <h2>知识库配置</h2>
-        <label class="toggle-row">回答前查找相关记忆<input id="memory-prerecall-enabled" type="checkbox" role="switch" aria-describedby="memory-prerecall-hint"></label>
-        <p class="hint" id="memory-prerecall-hint">仅逐段语音模式；关闭后仍可按需回忆。保存并重启后生效。</p>
+        <label class="toggle-row">文字回答前查找相关记忆<input id="memory-prerecall-enabled" type="checkbox" role="switch" aria-describedby="memory-prerecall-hint"></label>
+        <p class="hint" id="memory-prerecall-hint">默认关闭，文字对话仍可按需回忆；语音使用记忆摘要。保存并重启后生效。</p>
         <p class="hint">在「执行器与 MCP」中启用知识库，保存并重启后生效。文档保存在本机，向量计算与回答会使用所选模型服务。</p>
         <div class="field"><label for="embeddingProvider">向量服务</label><select id="embeddingProvider"><option value="dashscope">DashScope</option></select></div>
         <div class="field"><label for="embeddingModel">向量模型</label><input id="embeddingModel" type="text"></div>

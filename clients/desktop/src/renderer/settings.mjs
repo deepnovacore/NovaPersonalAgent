@@ -1,4 +1,5 @@
 import {createImPanel} from './im-panel.mjs'
+import {createConnectionsPanel} from './connections-panel.mjs'
 import {t} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
@@ -28,6 +29,7 @@ import {
 
 const api = window.novaAudioAgentDesktop.settings
 const imPanel = createImPanel({document, api})
+const connectionsPanel = createConnectionsPanel({document, api})
 const SECRET_KEYS = [
   'composioApiKey',
   'dashscopeApiKey', 'tavilyApiKey', 'openrouterApiKey',
@@ -129,6 +131,7 @@ function applyCategory(id) {
   if (!isValidCategory(id)) return
   activeCategory = id
   if (id === 'im') void imPanel.load()
+  if (id === 'connections') void connectionsPanel.load()
   phonePanel.setActive(id === 'phone')
   document.querySelector('footer').hidden = id === 'phone'
   for (const category of SETTINGS_CATEGORIES) {
@@ -358,7 +361,7 @@ function render(view, _drafts, state) {
   renderVision(view)
   capabilityEditor.render(view)
   knowledgePanel.render(view)
-  memoryPrerecall.checked = view.memoryPrerecallEnabled !== false
+  memoryPrerecall.checked = view.memoryPrerecallEnabled === true
   for (const input of capabilitySettings) input.value = view[input.id] ?? ''
   for (const [key, input] of Object.entries(phoneFields)) input.value = String(view[key] || '')
   phonePairingOpen.disabled = state.busy

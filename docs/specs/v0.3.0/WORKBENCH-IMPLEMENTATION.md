@@ -46,3 +46,13 @@
 真实桌面最终重启回归：原会话仍准确回答原合成代号，用户与 AI 消息各显示一次。另在隔离 PersonalStore 预置一条明确标注的合成提醒；启动后打开「主动提醒」，确认该条 read=true、未读数从1到0已持久化。此项证明真实主机/renderer 的已读接线，不是来源发现或真实飞书消息验收；菜单栏绘制调用有回归，系统菜单栏截图未取得。
 
 按最新参考，右侧面板默认收起、通过侧栏按钮展开；宽输入框采用圆角白底、下排实时语音入口/麦克风/圆形发送按钮，保留现有输入实现。最后21项控制器/面板测试通过。
+
+## 2026-09-21 工作台重做
+
+按 01 卷 2026-09-21 修订实施：左图标栏 / 中工作区 / 右对话栏，`personal-view.css` 由 `workbench.css` 取代并支持深浅双主题；新增 `workbench-rail.mjs`、`chat-pane.mjs`、`feed-card.mjs`、`markdown.mjs`、`tasks-page.mjs`、`memory-page.mjs`，`personal-view.mjs` 退化为装配器，`mountPersonalView` 签名不变。动态页删除，feed 动作进入主动提醒会话的消息卡；连接与权限迁入设置窗口（`connections-panel.mjs`，runtime `handlePersonalSettings` + 主进程 `nova:settings:personal`）。
+
+Codex 审阅（首轮）指出三项并已修复：设置桥的 `state` 原样返回完整快照（改为投影）；无返回值的成功命令被控制端口当作失败（改为显式 `{ok:true}`）；Markdown 行内解析对未闭合 `[` 呈二次方（改为单遍扫描并加 20k 字符对抗测试）。
+
+第二轮审阅指出四项并已修复：feed 消息卡丢弃 `prepared.text`（简报正文，现以 Markdown 渲染在卡内）；`presented` 回执绑定在转写重建上而非可见性（改为 `deliverPresented` 在每次 update / 展开时按可见性重查，失败可重试）；未闭合强调符号重复扫描后缀（改为每遍只检查一次）；任务页「询问任务进展」打开会话后对话栏仍收起（改为打开后展开并聚焦输入框）。新增 `chat-pane.test.mjs` 覆盖这三条行为。
+
+验证：runtime `desktop-control` 测试与桌面全部测试通过；隔离 Electron 用合成快照截取 Todos / Profile / 主动提醒 / Feeds / 窄窗口截图（`output/workbench-preview/`，不入库）。物理麦克风、真实主机下的设置窗口来源操作与深链尚未真机验收。

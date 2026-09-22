@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import { createContext, runInContext } from 'node:vm'
 
 test('main owns single-instance lifecycle and denies renderer escape', async () => {
@@ -60,6 +61,9 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:personal:connector-authorization',
     'nova:personal:directory',
     'nova:personal:feishu-verification',
+    'nova:personal:presentation',
+    'nova:personal:presentation-error',
+    'nova:personal:presentation-request',
     'nova:personal:unread',
     'nova:personal:wake',
     'nova:phone:action',
@@ -69,6 +73,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:settings:feishu',
     'nova:settings:get',
     'nova:settings:open',
+    'nova:settings:personal',
     'nova:settings:set',
     'nova:wake-word:activity',
     'nova:wake-word:audio',
@@ -248,8 +253,28 @@ test('registers the settings-open channel exactly once and sender-bound', async 
   assert.equal(registrations.length, 1)
   assert.match(
     source,
-    /ipcMain\.on\('nova:settings:open', event => \{\n    if \(mainWindow && event\.sender === mainWindow\.webContents\) openSettingsWindow\(launchId\)\n  \}\)/,
+    /ipcMain\.on\('nova:settings:open', \(event, category\) => \{\n    if \(mainWindow && event\.sender === mainWindow\.webContents\) openSettingsWindow\(launchId, isValidCategory\(category\) \? \{category\} : \{\}\)\n  \}\)/,
   )
+})
+
+test('the settings-open channel forwards only known categories', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const block = source.slice(source.indexOf("  ipcMain.on('nova:settings:open'"), source.indexOf("  ipcMain.handle('nova:memory-board:request'"))
+  const opened = []
+  let receive
+  new Function('ipcMain', 'mainWindow', 'openSettingsWindow', 'launchId', 'isValidCategory', block)(
+    {on: (_, fn) => { receive = fn }}, {webContents: {}}, (...args) => opened.push(args), 'launch', settingsCategories.isValidCategory)
+  const sender = {}
+  receive({sender}, 'connections')
+  receive({sender: {webContents: {}}}, 'connections')
+  for (const bad of ['__proto__', 'x'.repeat(4096), 42, null, undefined, {id: 'im'}]) receive({sender}, bad)
+  assert.equal(opened.length, 0, 'a foreign sender never opens settings')
+  const main = {webContents: sender}
+  new Function('ipcMain', 'mainWindow', 'openSettingsWindow', 'launchId', 'isValidCategory', block)(
+    {on: (_, fn) => { receive = fn }}, main, (...args) => opened.push(args), 'launch', settingsCategories.isValidCategory)
+  receive({sender}, 'connections')
+  for (const bad of ['__proto__', 'x'.repeat(4096), 42, null, undefined, {id: 'im'}]) receive({sender}, bad)
+  assert.deepEqual(opened, [['launch', {category: 'connections'}], ...Array(6).fill(['launch', {}])])
 })
 
 test('the orb menu opens the settings panel above the quit separator', async () => {
@@ -737,7 +762,7 @@ test('warns instead of silently failing when the global shortcut cannot register
 
   const registration = source.slice(source.indexOf('globalShortcut.register('))
   assert.match(
-    registration.slice(0, 400),
+    registration.slice(0, 500),
     /console\.warn\('\[nova-audio-agent-desktop\] global shortcut unavailable on this session'\)/,
   )
 })
@@ -1084,9 +1109,9 @@ test('sleep and wake IPC reject other windows and unexpected arguments', async (
     const start = source.indexOf(`ipcMain.on('nova:wake-word:${action}',`)
     const body = source.slice(start, source.indexOf('\n  })', start) + 5)
     let handler, calls = 0
-    new Function('ipcMain', 'mainWindow', 'sleepOrb', 'wakeWord', body)(
+    new Function('ipcMain', 'mainWindow', 'sleepOrb', 'wakeWord', 'presentationMode', body)(
       {on: (_name, callback) => { handler = callback }}, {webContents: sender},
-      () => calls++, {wake: () => calls++})
+      () => calls++, {wake: () => calls++}, 'workbench')
     handler({sender: {}})
     handler({sender}, 'unexpected')
     assert.equal(calls, 0)
@@ -1141,4 +1166,41 @@ test('unsupported embedding in recovery reaches startup diagnostics without muta
     assert.deepEqual(await loadSettings(file), current)
     assert.equal(await readFile(`${file}.recovery`, 'utf8'), journal)
   } finally {await rm(root, {recursive: true, force: true})}
+})
+
+test('presentation IPC validates sender and modes and hides without changing conversation state',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf("ipcMain.handle('nova:personal:presentation',")
+ const body=source.slice(start,source.indexOf('\n  })',start)+5)
+ const sender={},calls=[];let handler
+ const background=source.slice(source.indexOf('function enterBackground(){'),source.indexOf('const requestPresentation ='))
+ const install=new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord','nativeAudio','currentSettings',`let presentationMode='workbench';${background};${body};return ()=>presentationMode`)
+ const mode=install({handle:(_name,callback)=>{handler=callback}},{webContents:sender,hide:()=>calls.push('hide'),show:()=>calls.push('show'),focus:()=>calls.push('focus')},value=>calls.push(value),{stop(){},reset(){},configure(){}},null,{})
+ assert.throws(()=>handler({sender:{}},'background'),/rejected/);assert.throws(()=>handler({sender},'invalid'),/rejected/)
+ handler({sender},'background');assert.equal(mode(),'background');assert.deepEqual(calls,['hide'])
+ calls.length=0;handler({sender},'orb');assert.deepEqual(calls,[true,'show','focus'])
+ calls.length=0;handler({sender},'workbench',false);assert.deepEqual(calls,[false]);assert.throws(()=>handler({sender},'orb','yes'),/rejected/)
+})
+test('background wake IPC cannot reactivate capture or show the window',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf("ipcMain.on('nova:wake-word:wake',")
+ const body=source.slice(start,source.indexOf('\n  })',start)+5)
+ const sender={};let handler,calls=0
+ new Function('ipcMain','mainWindow','wakeWord','presentationMode',body)({on:(_name,callback)=>{handler=callback}},{webContents:sender},{wake:()=>calls++},'background')
+ handler({sender});assert.equal(calls,0)
+})
+
+test('background entry stops detector and native mic before waiting for renderer or host',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const body=source.slice(source.indexOf('function enterBackground(){'),source.indexOf('const requestPresentation ='))
+ const calls=[]
+ new Function('mainWindow','wakeWord','nativeAudio',`let presentationMode='orb';${body};enterBackground();return presentationMode`)({hide:()=>calls.push('hide')},{stop:()=>calls.push('detector-stop'),reset:()=>calls.push('fence')},{setPlaybackMuted:value=>calls.push(value),deactivate:async()=>calls.push('mic-stop')})
+ assert.deepEqual(calls,['hide','detector-stop','fence',true,'mic-stop'])
+})
+test('foreground changes native presentation before unmuting playback',async()=>{
+ const source=await readFile(new URL('../src/renderer/index.mjs',import.meta.url),'utf8')
+ const body=source.slice(source.indexOf('applyPresentation: async ')+19,source.indexOf('\n  taskAction:',source.indexOf('applyPresentation: async '))).replace(/,\s*$/,'')
+ const calls=[],window={novaAudioAgentDesktop:{personal:{setPresentation:async(mode,activate)=>calls.push(['presentation',mode,activate])},nativeAudio:{setPlaybackMuted:async muted=>calls.push(['muted',muted])}}}
+ const apply=new Function('window','axes','requestAnimationFrame','render',`return ${body}`)(window,{outputMuted:false},()=>{},()=>{})
+ await apply('workbench',{activate:false});assert.deepEqual(calls,[['presentation','workbench',false],['muted',false]])
 })

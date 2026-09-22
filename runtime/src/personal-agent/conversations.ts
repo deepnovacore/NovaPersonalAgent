@@ -4,12 +4,13 @@ import type {BridgeService} from '../desktop/desktop-session.js'
 import {z} from 'zod'
 import {randomUUID} from 'node:crypto'
 export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
-export const conversationSchema=z.object({id:z.string().min(1).max(128),kind:z.enum(['chat','topic','proactive']),title:z.string().min(1).max(120),subject_key:z.string().max(512).nullable(),created_at:z.string().datetime(),updated_at:z.string().datetime(),generation:z.number().int().nonnegative(),messages:z.array(conversationMessageSchema).max(512),feed_ids:z.array(z.string().max(128)).max(256),read_through_id:z.string().nullable().default(null),prepared:z.object({trust:z.literal('untrusted_external'),text:z.string().max(12000),evidence_refs:z.array(z.string().max(512)).max(32)}).strict().nullable()}).strict()
+export const codingTargetSchema=z.object({workspace_id:z.string().min(1).max(128),session_id:z.string().min(1).max(128).nullable(),project:z.string().min(1).max(120),title:z.string().max(120),executor:z.literal('codex')}).strict()
+export const conversationSchema=z.object({coding_target:codingTargetSchema.nullable().default(null),id:z.string().min(1).max(128),kind:z.enum(['chat','topic','proactive']),title:z.string().min(1).max(120),subject_key:z.string().max(512).nullable(),created_at:z.string().datetime(),updated_at:z.string().datetime(),generation:z.number().int().nonnegative(),messages:z.array(conversationMessageSchema).max(512),feed_ids:z.array(z.string().max(128)).max(256),read_through_id:z.string().nullable().default(null),prepared:z.object({trust:z.literal('untrusted_external'),text:z.string().max(12000),evidence_refs:z.array(z.string().max(512)).max(32)}).strict().nullable()}).strict()
 export type Conversation=z.infer<typeof conversationSchema>
 export type ConversationMessage=z.infer<typeof conversationMessageSchema>
 export const conversationsStateSchema=z.object({selected_id:z.string(),voice_id:z.string().nullable(),items:z.array(conversationSchema).min(2).max(128),work_owners:z.record(z.string(),z.string()),approval_owners:z.record(z.string(),z.string())}).strict()
 export type ConversationsState=z.infer<typeof conversationsStateSchema>
-export function createConversation(kind:Conversation['kind'],title:string,subject_key:string|null=null,id:string=randomUUID()):Conversation {const at=new Date().toISOString();return {id,kind,title,subject_key,created_at:at,updated_at:at,generation:0,messages:[],feed_ids:[],read_through_id:null,prepared:null}}
+export function createConversation(kind:Conversation['kind'],title:string,subject_key:string|null=null,id:string=randomUUID()):Conversation {const at=new Date().toISOString();return {id,kind,title,subject_key,coding_target:null,created_at:at,updated_at:at,generation:0,messages:[],feed_ids:[],read_through_id:null,prepared:null}}
 export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat','新对话',null,'chat:main'),createConversation('proactive','主动提醒',null,'chat:proactive')],work_owners:{},approval_owners:{}}}
 export interface ConversationRuntime {
  runTurn(text:string,signal:AbortSignal):Promise<{assistant:string;turn_id?:string}>
@@ -49,6 +50,8 @@ export class ConversationRuntimePool {
   this.#tails.set(id,operation.catch(()=>{ /* the next turn may retry after an explicit failure */ }))
   return operation.finally(()=>{const count=(this.#busy.get(id)??1)-1;if(count)this.#busy.set(id,count);else this.#busy.delete(id)})
  }
+ canChangeTarget(id:string):boolean{return !this.#busy.has(id)&&this.#ready.get(id)?.canSwitch?.()!==false}
+ hasVoice(id:string):boolean{return this.#modes.get(id)==='voice'}
  acceptsText(id:string):boolean{return this.#modes.get(id)!=='voice'&&(this.#modes.get(id)!=='parked'||this.#ready.get(id)?.canSwitch?.()!==false)}
  async stopVoice(id:string):Promise<void>{const runtime=this.#ready.get(id);await runtime?.parkVoice?.();this.#modes.set(id,'parked')}
  async clear(id:string):Promise<void>{this.#modes.delete(id);this.#lifetimes.get(id)?.abort();this.#lifetimes.delete(id);this.#controllers.get(id)?.abort();await this.#tails.get(id);const runtime=this.#runtimes.get(id);this.#runtimes.delete(id);this.#ready.delete(id);this.#controllers.delete(id);this.#tails.delete(id);if(runtime)await (await runtime).close()}

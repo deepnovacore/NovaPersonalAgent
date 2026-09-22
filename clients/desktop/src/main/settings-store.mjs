@@ -83,7 +83,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   embeddingModel: 'text-embedding-v4',
   capabilitiesConfigPath: '',
   knowledgePath: '',
-  memoryPrerecallEnabled: true,
+  memoryPrerecallEnabled: false,
   secrets: Object.freeze({}),
 })
 
