@@ -1,7 +1,7 @@
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,changed=()=>{}}) {
-    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,connected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,taskNotice:'',presentationRequests:new Map(),captureConversationId:null,capturePending:false})
+    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,connected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),captureConversationId:null,capturePending:false})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
@@ -32,7 +32,12 @@ export class PersonalController {
     for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
     this.pending.clear();void this.stop();this.error='连接已断开，草稿已保留';this.changed()
   }
-  async setPresentation(mode,{activate=true,request,reconcileOnly=false}={}){
+  setPresentation(mode,options={}){
+    if(this.presentationInFlight.has(mode))return this.presentationInFlight.get(mode)
+    const pending=this.changePresentation(mode,options).finally(()=>{if(this.presentationInFlight.get(mode)===pending)this.presentationInFlight.delete(mode)})
+    this.presentationInFlight.set(mode,pending);return pending
+  }
+  async changePresentation(mode,{activate=true,request,reconcileOnly=false}={}){
     if(!['background','workbench','orb'].includes(mode))throw new Error('无效的显示模式')
     if(this.presentationPending&&mode!=='background')throw new Error('正在切换模式，请稍候')
     if(!request&&!this.presentationPending&&mode!=='background'){const outstanding=[...this.presentationRequests.values()];for(const prior of outstanding)if(prior.mode!==mode)await this.setPresentation(prior.mode,{activate:false,request:prior})}

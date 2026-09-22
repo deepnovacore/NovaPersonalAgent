@@ -33,3 +33,10 @@ test('background remains immediate when an earlier orb handback failed',async()=
  const h=harness(),ready=h.c.connect();h.ack();await ready;const orb=h.c.setPresentation('orb');h.ack({},false);await assert.rejects(orb)
  const background=h.c.setPresentation('background');assert.equal(h.c.presentationMode,'background');assert.equal(h.sent.at(-1).params.mode,'background');h.ack({returned_task_ids:[],task_control_revisions:{}});await background
 })
+
+test('repeated in-flight background intent shares one command and settles both callers',async()=>{
+ const h=harness(),ready=h.c.connect();h.ack();await ready
+ const first=h.c.setPresentation('background'),second=h.c.setPresentation('background');const requests=h.sent.filter(f=>f.params.mode==='background')
+ h.ack({returned_task_ids:[],task_control_revisions:{}});await second
+ assert.equal(requests.length,1);await first;assert.equal(h.c.pending.size,0)
+})

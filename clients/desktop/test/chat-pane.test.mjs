@@ -2,7 +2,7 @@ import test,{afterEach} from 'node:test'
 import assert from 'node:assert/strict'
 import {mountPersonalView} from '../src/renderer/personal-view.mjs'
 class Node{
- constructor(tag,text){this.tag=tag;this.tagName=tag.toUpperCase();this.text=text;this.children=[];this.listeners={};this.dataset={};this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
+ constructor(tag,text){this.tag=tag;this.tagName=tag.toUpperCase();this.text=text;this.children=[];this.listeners={};this.dataset=new Proxy({},{set:(object,key,value)=>{object[key]=String(value);return true}});this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
  append(...c){for(const n of c)n.parentElement=this;this.children.push(...c)}prepend(...c){for(const n of c)n.parentElement=this;this.children.unshift(...c)}replaceChildren(...c){this.children=[];this.append(...c)}setAttribute(k,v){this[k]=v;this.attrs[k]=v}addEventListener(n,f){this.listeners[n]=f}
  querySelectorAll(sel){const tags=sel.split(',');return this.children.flatMap(n=>[...(tags.includes(n.tag)?[n]:[]),...n.querySelectorAll(sel)])}querySelector(sel){return this.querySelectorAll(sel)[0]}focus(){this.focused=(this.focused??0)+1;document.activeElement=this}contains(node){return this===node||this.children.some(child=>child.contains(node))}
  dispatchEvent(event){this.listeners[event.type]?.(event);if(event.bubbles)this.parentElement?.dispatchEvent(event)}
@@ -81,6 +81,24 @@ test('main presentation request enters host path while collapsed display ACK sen
 test('late detail response after background exit neither steals focus nor advances the viewed cursor',async()=>{
  const m=mount(),origin=new Node('button');origin.focus();const opening=m.view.openTask('late'),read=m.sent.at(-1)
  m.view.controller.presentationMode='background';m.view.receive({type:'personal.result',request_id:read.request_id,ok:true,data:{id:'late',goal:'Late result',phase:'completed',controller:{kind:'nova'},events:{items:[{seq:9,text:'Unseen'}],next:9}}});await opening;assert.equal(document.activeElement,origin)
- m.view.controller.presentationMode='workbench';const again=m.view.openTask('late'),request=m.sent.at(-1);assert.equal(request.params.after,0)
+ m.view.controller.presentationMode='workbench';const again=m.view.openTask('late'),request=m.sent.at(-1);assert.equal(request.params.after,9)
  m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{id:'late',goal:'Late result',phase:'completed',controller:{kind:'nova'},events:{items:[],next:9}}});await again
+})
+
+
+test('empty durable task aggregate does not expose a phantom null deep link',()=>{const m=mount();m.view.refresh();const button=m.all().find(n=>n.className==='personal-orb-task');assert.equal(button.hidden,true);assert.equal(button.dataset.taskId,'')})
+
+test('closing and reopening detail retains earlier public history alongside the viewed cursor',async()=>{
+ const m=mount(),task={id:'history',goal:'History',phase:'running',controller:{kind:'nova'},events:{items:[{seq:9,text:'Earlier public event'}],next:9}}
+ const opening=m.view.openTask('history');m.view.receive({type:'personal.result',request_id:m.sent.at(-1).request_id,ok:true,data:task});await opening
+ m.all().find(n=>n.textContent==='返回任务卡片').listeners.click()
+ const reopened=m.view.openTask('history');m.view.receive({type:'personal.result',request_id:m.sent.at(-1).request_id,ok:true,data:{...task,events:{items:[{seq:12,text:'Later public event'}],next:12}}});await reopened
+ assert.ok(m.all().some(n=>n.textContent==='Earlier public event'));assert.ok(m.all().some(n=>n.textContent==='Later public event'));assert.ok(m.all().some(n=>n.textContent==='自上次查看后有 1 条新活动'))
+})
+
+test('completion arriving in a visible inspector is already viewed in the orb aggregate',async()=>{
+ const m=mount(),task={id:'visible',goal:'Visible',phase:'running',controller:{kind:'nova'},events:{items:[],next:0}}
+ const opening=m.view.openTask(task.id);m.view.receive({type:'personal.result',request_id:m.sent.at(-1).request_id,ok:true,data:task});await opening
+ m.view.receive(feedState(1,'c',{tasks:[{...task,phase:'completed'}]}));m.view.receive({type:'personal.result',request_id:m.sent.at(-1).request_id,ok:true,data:{...task,phase:'completed'}});await new Promise(r=>setImmediate(r));m.view.refresh()
+ assert.match(m.all().find(n=>n.className==='personal-orb-task').textContent,/0 新结果/)
 })

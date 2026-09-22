@@ -58,3 +58,27 @@ test('missing and truncated public history remains visibly incomplete after incr
  const m=mount();m.view.update(task({events:{items:[],next:4,incomplete:true,truncated:true}}));assert.ok(m.all().some(n=>n.textContent==='部分公开活动缺失，请核对执行器与任务结果。'))
  m.view.update(task({events:{items:[],next:4,incomplete:false,truncated:false}}));assert.ok(m.all().some(n=>n.textContent==='部分公开活动缺失，请核对执行器与任务结果。'));assert.ok(m.all().some(n=>n.textContent?.includes('较早活动已截断')))
 })
+
+test('Nova-only detail uses a normal goal paragraph, criteria list and no empty executor controls',()=>{
+ const m=mount(),goal='Long delegated goal '.repeat(30);m.view.update(task({goal,execution_route:'nova',session_ids:[],acceptance:['First criterion','Second criterion'],capabilities:{detail:'summary-only',input:false}}))
+ assert.equal(m.all().find(n=>n.tagName==='H2').textContent,'任务详情');assert.ok(m.all().some(n=>n.tagName==='P'&&n.textContent===goal));assert.equal(m.all().filter(n=>n.tagName==='LI').length,2)
+ assert.equal(m.find('执行器会话').hidden,true);assert.ok(m.find('回复执行器'));assert.ok(m.all().find(n=>n.children.includes(m.find('回复执行器'))).hidden);assert.ok(m.find('接管任务'))
+})
+
+test('verification status is readable while its exact public receipt and refs remain expandable',()=>{
+ const m=mount(),raw=JSON.stringify({kind:'correct',instruction:'Add the missing regression',evidence_refs:['evidence:1']});m.view.update(task({phase:'waiting',waiting_reason:'task_check_unavailable',events:{items:[{seq:1,kind:'verification',text:raw,refs:['evidence:1']}],next:1}}))
+ assert.ok(m.all().some(n=>n.textContent?.includes('暂时无法验证任务结果')));assert.ok(m.all().some(n=>n.textContent==='需要修正：Add the missing regression'))
+ const receipt=m.all().find(n=>n.tagName==='DETAILS');assert.ok(receipt);assert.ok(receipt.children.some(n=>n.tagName==='PRE'&&n.textContent.includes(raw)&&n.textContent.includes('evidence:1')))
+})
+
+test('long task cards have a bounded scrolling area and cannot shrink the Nova composer',async()=>{
+ const {readFile}=await import('node:fs/promises'),css=await readFile(new URL('../src/renderer/workbench.css',import.meta.url),'utf8')
+ assert.match(css,/\.conversation-task-cards\s*\{[^}]*max-height:[^}]*overflow:\s*auto/);assert.match(css,/\.conversation-task-cards \.task-card\s*\{[^}]*-webkit-line-clamp:\s*2/);assert.match(css,/\.composer\s*\{[^}]*flex-shrink:\s*0/)
+})
+
+test('quiet completed task can load public activity beyond the first hundred events',async()=>{
+ const initial=Array.from({length:100},(_,n)=>({seq:n+1,kind:'message',sender:'executor',text:`Public event ${n+1}`}))
+ const m=mount(async(_method,params)=>{assert.equal(params.after,100);return task({phase:'completed',events:{items:[{seq:101,kind:'message',sender:'executor',text:'Final public event'}],next:101}})})
+ m.view.update(task({phase:'completed',events:{items:initial,next:100}}));const more=m.find('加载更多活动');assert.equal(more.hidden,false);await more.listeners.click()
+ assert.ok(m.all().some(n=>n.textContent==='Public event 1'));assert.ok(m.all().some(n=>n.textContent==='Final public event'));assert.equal(more.hidden,true)
+})

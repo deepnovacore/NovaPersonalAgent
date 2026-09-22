@@ -379,3 +379,58 @@ test('failed orb transition can retry backlog admission without changing mode ag
   assert.notEqual(f.host.snapshot().feed[0]!.suggestion_id,first)
  }finally{await f.close()}
 })
+
+for(const timing of ['before','during'] as const)test(`startup source notification ${timing} host loading preserves the owned store and drains after initialization`,async t=>{
+ const {PersonalStore,initialState}=await import('../src/personal-agent/store.js'),{readFile}=await import('node:fs/promises')
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'host-startup-source-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState()
+ state.user_scope='local';state.revision=77;state.settings={discovery_enabled:false,discovery_interval_minutes:17};state.receipts.saved={payload:'unchanged',result:{ok:true}};state.dedupe=['retained']
+ state.conversations.items.find(item=>item.id==='chat:main')!.messages.push({id:'original',conversation_id:'chat:main',role:'assistant',text:'Original retained transcript',created_at:now.toISOString()});await store.write(state)
+ const original=await readFile(path,'utf8'),host=new PersonalAgentHost({path,userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let release=()=>undefined as void,opening:Promise<void>|undefined
+ try{
+  if(timing==='during'){
+   let entered!:()=>void;const started=new Promise<void>(r=>{entered=r}),gate=new Promise<void>(r=>{release=r})
+   // eslint-disable-next-line @typescript-eslint/unbound-method -- the wrapper preserves its receiver with read.call(this).
+   const read=PersonalStore.prototype.read
+   t.mock.method(PersonalStore.prototype,'read',async function(this:InstanceType<typeof PersonalStore>){const loaded=await read.call(this);if(this.path===path){entered();await gate}return loaded})
+   opening=host.open();await started
+  }
+  await host.sourceChanged({revision:1,phase:'ready'});assert.equal(await readFile(path,'utf8'),original)
+  release();await (opening??host.open());await host.sourceChanged({revision:1,phase:'ready'});assert.deepEqual(host.snapshot().conversations.messages.map(message=>message.text),['Original retained transcript'])
+  const restored=await store.read();assert.deepEqual(restored.receipts,state.receipts);assert.deepEqual(restored.settings,state.settings);assert.deepEqual(restored.dedupe,state.dedupe);assert.ok(restored.revision>77,'queued ready notification drained after loading')
+ }finally{release();await opening?.catch(()=>undefined);await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('all direct host store mutations reject outside the loaded lock lifetime',async()=>{
+ const {PersonalStore,initialState}=await import('../src/personal-agent/store.js'),{readFile}=await import('node:fs/promises')
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'host-write-lifetime-')),path=join(dir,'personal.json'),store=new PersonalStore(path);await store.write(initialState())
+ const host=new PersonalAgentHost({path,userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{
+  const before=await readFile(path,'utf8');await assert.rejects(host.invalidateEvidence('missing'),/personal_host_not_open/);assert.equal(await readFile(path,'utf8'),before)
+  await host.open();await host.close();const closed=await readFile(path,'utf8');await host.sourceChanged();assert.equal(await readFile(path,'utf8'),closed)
+  await assert.rejects(host.invalidateEvidence('missing'),/personal_host_not_open/);await assert.rejects(host.taskResult('late','Late result'),/personal_host_not_open/);assert.equal(await readFile(path,'utf8'),closed)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('optional queued discovery failure cannot block opening the loaded personal store',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'host-startup-discovery-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ host.discover=()=>Promise.reject(Error('discovery offline'))
+ try{await host.sourceChanged({revision:1,phase:'ready'});await host.open();await assert.rejects(host.sourceChanged({revision:1,phase:'ready'}),/discovery offline/);assert.equal(host.snapshot().conversations.selected_id,'chat:main')}
+ finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('shutdown persists an admitted command receipt before releasing write ownership',async()=>{
+ const {PersonalStore}=await import('../src/personal-agent/store.js')
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'host-shutdown-receipt-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let release!:()=>void,entered!:()=>void,closingConnector!:()=>void
+ const gate=new Promise<void>(r=>{release=r}),started=new Promise<void>(r=>{entered=r}),draining=new Promise<void>(r=>{closingConnector=r})
+ host.setConnectors({snapshot:()=>null,open:()=>Promise.resolve(),close:()=>{closingConnector();return Promise.resolve()},command:async()=>{entered();await gate;return {accepted:true}}})
+ let command:Promise<unknown>|undefined,closing:Promise<void>|undefined
+ try{
+  await host.open();command=host.command({type:'personal.command',request_id:'accepted-before-close',method:'connector.status',params:{}});await started
+  closing=host.close();assert.deepEqual(await Promise.race([host.command({type:'personal.command',request_id:'too-late',method:'state',params:{}}),new Promise<unknown>(resolve=>setImmediate(()=>resolve('admission_still_open')))]),{type:'personal.result',request_id:'too-late',ok:false,error:'unavailable'});await draining
+  release();const result=await command as {ok:boolean};assert.equal(result.ok,true);await closing
+  const stored=await new PersonalStore(host.path).read();assert.deepEqual(stored.receipts['accepted-before-close']?.result,{type:'personal.result',request_id:'accepted-before-close',ok:true,reload_required:true});assert.equal(stored.receipts['too-late'],undefined)
+  await assert.rejects(host.invalidateEvidence('late'),/personal_host_not_open/)
+ }finally{release();await Promise.allSettled([command,closing]);await host.close();await rm(dir,{recursive:true,force:true})}
+})

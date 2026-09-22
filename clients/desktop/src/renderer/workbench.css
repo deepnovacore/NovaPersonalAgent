@@ -156,7 +156,7 @@ body[data-personal-collapsed="false"]{background:var(--surface,#f4f5f7);overflow
 .feed-card h3{font-size:14px;font-weight:600}
 .feed-card .feed-why{font-size:13px;color:var(--ink-dim)}
 .feed-card[data-dismissed="true"]{opacity:.55}
-.composer{margin:8px 12px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-raised);padding:8px 8px 6px;transition:border-color .12s}
+.composer{flex-shrink:0;margin:8px 12px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-raised);padding:8px 8px 6px;transition:border-color .12s}
 .composer:focus-within{border-color:var(--accent)}
 .composer textarea{display:block;border:0;background:transparent;padding:6px 6px 8px;min-height:72px;max-height:220px;font-size:14px;line-height:1.6}
 .composer textarea:focus-visible{outline:0}
@@ -208,7 +208,12 @@ body[data-personal-collapsed="true"] .workbench{display:none}
 .task-detail textarea { width: 100%; min-height: 96px; }
 .task-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .task-detail button, .task-detail select { margin: 4px; }
-.conversation-task-cards { display: grid; gap: 6px; padding: 8px; }
+.conversation-task-cards { display: grid; gap: 6px; padding: 8px; max-height: 160px; overflow: auto; flex-shrink: 0; }
+.conversation-task-cards .task-card { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.task-detail .task-goal { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; margin: 12px 0; }
+.task-criteria { padding-left: 22px; }
+.task-detail article { margin: 12px 0; }
+.task-detail details { margin-top: 6px; color: var(--ink-dim); }
 .task-card { text-align: left; overflow-wrap: anywhere; }
 @media (max-width: 959px) { .workbench[data-task-detail="true"] .chat-pane { display: none; } }
 

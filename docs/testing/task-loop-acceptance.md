@@ -30,7 +30,8 @@ Capture commands, exit status, test counts, skipped checks, and named failures. 
 7. Repeat exit during an active executor turn and an actual pending approval. Existing approval identity and decision remain unchanged until explicitly acted on. Takeover does not claim physical device control; use the adapter's explicit stop/pause before manually operating its surface.
 8. Interrupt the connection while an exit acknowledgment is outstanding, then reconnect. Check the original presentation request ID and parameters are retried and reconciled, with no duplicate handback or instruction. An attempted return to workbench must first reconcile the outstanding exit. Unknown input delivery remains blocked pending exact receipt reconciliation; do not resend with a new ID.
 9. Observe the real Codex run repair the fixture, capture failing and passing check output, and use the real configured computer-use tool to activate the fixture and read back its result. Verify same-device calls are exclusive. Confirm task verification, completion, linked Todo projection, and artifact references. A passing executor summary alone is insufficient.
-10. Confirm the Nova-only deliverable was actually delivered and verified without a fabricated executor session. Verify keyboard opening/Back/Escape, focus restoration, narrow layouts through 959px, long activity scroll, and preserved unsent drafts. Background must stop capture and must not speak the handback notice.
+10. Close and normally restart the same isolated app profile without clearing or editing its files. Confirm the original conversation text, saved command receipts, nondefault settings, task history and Todo remain intact; memory initialization must not overwrite them.
+11. Confirm the Nova-only deliverable was actually delivered and verified without a fabricated executor session. Verify keyboard opening/Back/Escape, focus restoration, narrow layouts through 959px, long activity scroll, and preserved unsent drafts. Background must stop capture and must not speak the handback notice.
 
 ## Evidence record
 
@@ -38,13 +39,13 @@ Complete each row with dated evidence, exact revision, and links to local logs/s
 
 | Gate | Evidence at implementation handoff |
 | --- | --- |
-| Automated runtime/desktop/CLI checks | Runtime 2943 passed / 8 skipped; desktop 1027 passed / 3 skipped; CLI 21 passed; server CLI 4 passed; repository check passed. Final focused UI 48 passed. See isolated Task8 logs for revision and command context |
+| Automated runtime/desktop/CLI checks | Runtime 2949 passed / 8 skipped; desktop 1036 passed / 3 skipped; CLI 21 passed; server CLI 4 passed; repository check passed. Final focused UI 56 passed. See isolated Task8 logs for revision and command context |
 | Real Nova text/model preflight | Parent observed preflight only; not task completion evidence |
 | Two live tasks / takeover / accepted correction / retained draft | Pending parent acceptance |
 | Orb/background / tray/hotkey / reconnect / pending approval | Pending parent acceptance |
 | Real Codex failing-then-passing task and linked Todo | Pending parent acceptance |
 | Real computer-use observable result and exclusive device | Pending parent acceptance |
-| Nova-only verified deliverable | Pending parent acceptance; initial live attempt exposed a separate verification prerequisite issue |
+| Nova-only verified deliverable | Pending parent acceptance after transcript, verifier-contract, and startup-persistence fixes |
 | Keyboard / focus / narrow layout / scroll | Automated fixture coverage; real GUI pending parent acceptance |
 
 No live task-loop acceptance is claimed by this document at implementation handoff.

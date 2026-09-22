@@ -1,4 +1,5 @@
 import {t} from './locale.mjs'
+import {TASK_PHASE_LABEL} from './tasks-page.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {renderFeedCard,sendPresented} from './feed-card.mjs'
 
@@ -140,7 +141,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
   renderSource()
   const tasks=(c.snapshot?.tasks??[]).filter(t=>t.conversation_id===c.selectedId)
   for(const [id,node]of cardNodes)if(!tasks.some(t=>t.id===id)){node.remove?.();cardNodes.delete(id)}
-  for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}node.textContent=`${task.goal} · ${task.phase} · ${task.controller.kind==='nova'?t('Nova 控制'):t('用户控制')}`}
+  for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}node.title=task.goal;node.textContent=`${task.goal} · ${t(TASK_PHASE_LABEL[task.phase]??task.phase)} · ${task.controller.kind==='nova'?t('Nova 控制'):t('用户控制')}`}
   if(draft.value!==c.draft)draft.value=c.draft
   const localDictation=c.dictationConversationId===c.selectedId&&Boolean(c.dictationId)
   draft.disabled=!c.presentationReady||!c.connected||!c.selectedId||!c.inputInstance||Boolean(c.submittedRequestId)||c.isVoiceConversation||localDictation||!c.capabilities.includes('text_input')

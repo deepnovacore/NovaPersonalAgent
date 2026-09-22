@@ -278,6 +278,7 @@ export class PersonalAgentHost {
     #briefing: Promise<void> | undefined;
     #nextDiscovery=0;
     #opened = false;
+    #loaded = false;
     #sourceSignature = '';
     #sourcePending={invalidated:0,ready:new Set<number>(),legacy:false};
     #sourceSeen={invalidated:0,ready:new Set<number>()};
@@ -343,6 +344,7 @@ export class PersonalAgentHost {
             if(recovered){this.#state.revision++;await this.#store.write(this.#state);}
 
             this.#abort = new AbortController();
+            this.#loaded = true;
             this.#opened = true;
             this.understanding.reopen();
             await this.life.open();
@@ -354,6 +356,7 @@ export class PersonalAgentHost {
             await this.#connectors?.open();
             await this.refreshMemory();
             await this.revalidate();
+            void this.#drainSourceChanges().catch(()=>{/* optional discovery cannot block startup; queued changes retry on the next notification */});
             for (const item of this.#state.feed) {
                 if (item.lifecycle === 'active' && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime())) this.#pool(item);
             }
@@ -365,12 +368,12 @@ export class PersonalAgentHost {
         }
     }
     async close(): Promise<void> {
+        this.#opened = false;
         const loopClosed=this.taskLoop.close();
         await this.#conversationPool?.close();
         await Promise.allSettled(this.#recoveredRuntimes.map(runtime=>runtime.close()));this.#recoveredRuntimes=[];
         await loopClosed;
         await Promise.allSettled([...this.#taskInputRuns]);
-        this.#opened = false;
         this.#prefetched=undefined;
         this.#invalidateOverview();
         this.#overviewCache = undefined;
@@ -391,6 +394,7 @@ export class PersonalAgentHost {
             await this.#tail;
         } finally {
             const release=this.#release;
+            this.#loaded=false;
             this.#release=undefined;
             await release?.();
         }
@@ -456,6 +460,7 @@ export class PersonalAgentHost {
     snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
+        if(!this.#loaded||!this.#release)throw Error('personal_host_not_open');
         const selected=next.conversations.items.find(c=>c.id===next.conversations.selected_id),latest=selected?.messages.findLast(m=>m.role==='user');
         const isNew=!!latest&&!this.#state.conversations.items.find(c=>c.id===selected?.id)?.messages.some(m=>m.id===latest.id);
         next.revision = this.#state.revision + 1; await this.#store.write(next); this.#state = next;
@@ -542,9 +547,14 @@ export class PersonalAgentHost {
         } await this.#commit(next); }); }
     sourceChanged(change?:SourceChange):Promise<void>{
         if(change){const q=z.object({revision:z.number().int().positive(),phase:z.enum(['invalidated','ready'])}).strict().parse(change);if(q.phase==='invalidated')this.#sourcePending.invalidated=Math.max(this.#sourcePending.invalidated,q.revision);else if(!this.#sourceSeen.ready.has(q.revision))this.#sourcePending.ready.add(q.revision)}else this.#sourcePending.legacy=true;
-        if(this.#sourceDrain)return this.#sourceDrain;
+        return this.#drainSourceChanges();
+    }
+    #drainSourceChanges():Promise<void>{
+        if(!this.#opened||!this.#release)return Promise.resolve();
+        if(this.#sourceDrain)return this.#sourceDrain.then(()=>this.#drainSourceChanges());
+        if(!this.#sourcePending.legacy&&this.#sourcePending.invalidated<=this.#sourceSeen.invalidated&&!this.#sourcePending.ready.size)return Promise.resolve();
         const work=Promise.resolve().then(async()=>{
-            while(this.#sourcePending.legacy||this.#sourcePending.invalidated>this.#sourceSeen.invalidated||this.#sourcePending.ready.size){
+            while(this.#opened&&(this.#sourcePending.legacy||this.#sourcePending.invalidated>this.#sourceSeen.invalidated||this.#sourcePending.ready.size)){
                 const next={...this.#sourcePending,ready:[...this.#sourcePending.ready]};this.#sourcePending.legacy=false;
                 try{
                     await this.refreshMemory();await this.revalidate();await this.#serial(()=>this.#commit(structuredClone(this.#state)));

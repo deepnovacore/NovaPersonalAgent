@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve,join } from 'node:path'
+import {mkdtemp,rm,realpath} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
 import { test } from 'node:test'
 import { VirtualClock } from '../src/core/clock.js'
 import type { ContextView } from '../src/core/context-view.js'
@@ -222,4 +224,22 @@ test('Surrogate receives the actual progress trigger, not an unlabelled snapshot
   const surrogate = new GatewaySurrogate({gateway, model: 'm', proactivityPreset: 'eager'})
   await surrogate.watch({...emptyView, trigger_kind: 'progress'})
   assert.match(gateway.completions[0]!.prompt, /当前触发事件：progress/u)
+})
+
+test('task verifier sends its actual decision schema through the JSON-object gateway and applies a correction',async()=>{
+ const {OpenAIModelGateway}=await import('../src/model/model-gateway.js'),{TaskService}=await import('../src/personal-agent/tasks.js'),{taskDecisionSchema}=await import('../src/personal-agent/task-loop.js'),{z}=await import('zod')
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-verifier-schema-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',goal:'Three steps',acceptance:['three distinct steps'],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await tasks.recordDelivery(fence,'first','Step one only');const evidence=tasks.evidence(task.id)
+  const decision={kind:'correct' as const,instruction:'Provide all three distinct steps',evidence_refs:[evidence[0]!.ref]};let requests=0,receivedSchema:unknown,receivedFormat:unknown
+  const gateway=new OpenAIModelGateway({baseUrl:'https://example.invalid/v1',apiKey:'test',clock:new VirtualClock(),metrics:{record:()=>undefined},fetch:(_url,init)=>{
+   assert.ok(typeof init?.body==='string')
+   const body=JSON.parse(init.body) as {messages:{role:string;content:string}[];response_format:unknown},prompt=JSON.parse(body.messages.find(message=>message.role==='user')!.content) as {output_schema:unknown}
+   requests++;receivedFormat=body.response_format;receivedSchema=prompt.output_schema
+   return Promise.resolve(new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(decision)}}]}),{status:200}))
+  }})
+  const verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'}),actual=await verifier.evaluateTask(task,evidence,new AbortController().signal)
+  assert.deepEqual(receivedFormat,{type:'json_object'});assert.deepEqual(receivedSchema,z.toJSONSchema(taskDecisionSchema));assert.deepEqual(actual,decision);const corrected=await tasks.applyDecision(fence,actual);assert.equal(corrected.corrections,1);assert.equal(corrected.phase,'queued');assert.equal(requests,1)
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })
