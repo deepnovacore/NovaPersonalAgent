@@ -62,7 +62,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const selectedLlm=requireSelectedCascadedLlmConfig(options.settings)
   const captureFrame=options.settings.conversation_vision_enabled&&options.frameSource&&supportsVision(selectedLlm.provider,selectedLlm.config.model)?(signal:AbortSignal)=>captureConversationFrame(options.frameSource!,signal,core.mediaStore):undefined
   const suffix=createHash('sha256').update(conversation.id+':'+conversation.generation).digest('hex').slice(0,24)
-  if(recovery&&options.host.tasks.list().some(task=>task.conversation_id===conversation.id&&task.conversation_generation===conversation.generation&&task.execution_route!=='nova'&&(options.host.tasks.activeWork(task.id).length||options.host.tasks.pendingEffect(task.id)!==null||options.host.tasks.inputReceipts(task.id).some(receipt=>receipt.status==='unknown')||options.host.tasks.evidence(task.id).some(evidence=>evidence.outcome==='unknown')))){
+  if(recovery&&options.host.tasks.list().some(task=>task.conversation_id===conversation.id&&task.conversation_generation===conversation.generation&&task.execution_route!=='nova'&&options.host.tasks.hasUnresolvedExecution(task.id))){
    if(options.codexResource?.mode==='project')(options.codexResource.adapter as ProjectExecutorAdapter).taskPort?.quarantineResources?.()
    quarantineTaskResources(options.externalMcp?.adapters.flatMap(adapter=>adapter.taskResource()?[adapter.taskResource()!]:[])??[])
   }
