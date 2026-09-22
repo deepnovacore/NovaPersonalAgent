@@ -618,7 +618,8 @@ test('API keys live in a collapsed semantic disclosure with a readable summary',
 
 test('the compact theme preserves motion contrast and forced-color accessibility', () => {
   assert.match(css, /color-scheme:\s*light/)
-  assert.doesNotMatch(css, /color-scheme:\s*dark/)
+  assert.match(css, /@media \(prefers-color-scheme: dark\)/)
+  assert.match(css, /color-scheme:\s*dark/)
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/)
   assert.match(css, /@media \(prefers-contrast: more\)/)
   assert.match(css, /@media \(forced-colors: active\)/)

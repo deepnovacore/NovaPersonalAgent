@@ -35,3 +35,20 @@ test('the panel never asks for memory, feed or conversation methods',async()=>{
  const h=harness(snapshot);await h.panel.load();for(const b of all(h.root).filter(n=>n.tag==='button'))if(b.listeners.click){await b.listeners.click();await new Promise(r=>setImmediate(r))}
  assert.ok(h.calls.every(([m])=>/^(state|sources\.|connector\.|discovery\.configure)/.test(m)),JSON.stringify(h.calls.map(c=>c[0])))
 })
+test('whole-computer authorization is explicit and never accepts a renderer supplied root',async()=>{
+ const h=harness(snapshot);await h.panel.load()
+ const whole=h.button('授权本机全部可访问数据');assert.ok(whole);assert.equal(whole.disabled,true)
+ const check=all(h.root).find(n=>n.tag==='input'&&n.type==='checkbox');check.checked=true;check.listeners.change()
+ assert.equal(whole.disabled,false);await whole.listeners.click();await new Promise(r=>setImmediate(r))
+ assert.deepEqual(h.calls.at(-2),['sources.authorize_computer',{consent:true}])
+})
+test('English connections settings use secondary tabs without translating source data',async()=>{
+ const {setLanguage}=await import('../src/renderer/locale.mjs');setLanguage('en')
+ try{
+  const h=harness(()=>snapshot({sources:[{path:'/资料/原始内容',state:'connected',scope:'computer',indexed:2,scan_pending:true}]}));await h.panel.load()
+  assert.deepEqual(all(h.root).filter(n=>n.role==='tab').map(n=>n.textContent),['Local files','Mail & calendar','Proactive reminders'])
+  assert.equal(all(h.root).filter(n=>n.role==='tabpanel'&&!n.hidden).length,1)
+  for(const tab of ['Mail & calendar','Proactive reminders','Local files']){await h.button(tab).listeners.click();await new Promise(r=>setImmediate(r));assert.equal(all(h.root).find(n=>n.role==='tab'&&n['aria-selected']==='true').textContent,tab)}
+  const copy=all(h.root).map(n=>n.textContent).join('\n').replaceAll('/资料/原始内容','');assert.ok(!/[\u4e00-\u9fff]/u.test(copy),copy)
+ }finally{setLanguage('zh-CN')}
+})
