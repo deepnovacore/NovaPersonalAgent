@@ -24,7 +24,7 @@ export interface TurnCompletion {
 }
 
 export class AppServerTurnProjection {
-  readonly #sanitizePublicText:((text:string)=>string)|undefined
+  readonly #sanitizePublicText:((text:string)=>{text:string;truncated:boolean})|undefined
   readonly #onActivity:((event:ExecutorActivity)=>void)|undefined
   readonly #publicStages=new Set<string>()
   #pendingPublic:ExecutorActivity[]=[]
@@ -53,7 +53,7 @@ export class AppServerTurnProjection {
 
   constructor(options: {
     readonly clock: Clock
-    readonly sanitizePublicText?:(text:string)=>string
+    readonly sanitizePublicText?:(text:string)=>{text:string;truncated:boolean}
     readonly onActivity?:(event:ExecutorActivity)=>void
     readonly onProgress?: (progress: ExecutorProgress) => void
     readonly workingInterval?: number
@@ -298,8 +298,8 @@ export class AppServerTurnProjection {
       if(path&&!isAbsolute(path)&&path!=='..'&&!path.startsWith('../')&&!/[\p{C}]/u.test(path)&&path.length<=480)refs.push('workspace-file:'+path)
       if(refs.length===128)break
     }
-    const originalLength=text.length;text=this.#sanitizePublicText?.(text)??text
-    const event:ExecutorActivity={thread_id:this.#threadId!,turn_id:this.#activeTurnId!,item_id:item.id,stage,kind,...(sender?{sender}:{}),text:text.slice(0,16000),refs,...(originalLength>16000?{text_truncated:true}:{})}
+    const sanitized=this.#sanitizePublicText?.(text)??{text,truncated:false};text=sanitized.text
+    const event:ExecutorActivity={thread_id:this.#threadId!,turn_id:this.#activeTurnId!,item_id:item.id,stage,kind,...(sender?{sender}:{}),text:text.slice(0,16000),refs,...(sanitized.truncated||text.length>16000?{text_truncated:true}:{})}
     if(this.#responseTurnId===null){
       this.#pendingPublicBytes+=Buffer.byteLength(JSON.stringify(event))
       if(this.#pendingPublicBytes>MAX_STDOUT){this.#pendingPublic=[];this.#pendingPublicBytes=0;throw new CodexProtocolError('unsupported_protocol')}

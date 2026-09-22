@@ -95,3 +95,21 @@ test('receipt growth prunes display bytes before the bounded store fills',async(
   assert.equal(Object.keys(saved.effects).length,count+10)
  }finally{await restored?.close();await tasks.close();await rm(dir,{recursive:true,force:true})}
 })
+
+import {BoundedJsonStore} from '../src/storage/bounded-json.js'
+test('incomplete replay survives publication of an already in-flight state clone',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-incomplete-race-')),path=join(dir,'tasks.json'),tasks=new TaskService(path)
+ // eslint-disable-next-line @typescript-eslint/unbound-method -- restored below and invoked with an explicit store receiver via call.
+ const write=BoundedJsonStore.prototype.write
+ let release!:()=>void,entered!:()=>void
+ const writing=new Promise<void>(resolve=>{entered=resolve}),gate=new Promise<void>(resolve=>{release=resolve})
+ try{await tasks.open();const task=await tasks.delegate('r',{conversation_id:'c',goal:'Fix',acceptance:[],origin_ref:'user:1'})
+  assert.equal(typeof tasks.markReplayIncomplete,'function')
+  BoundedJsonStore.prototype.write=async function(state:unknown){if(this.path===path){entered();await gate}await write.call(this,state)}
+  const pending=tasks.appendEvent({task_id:task.id,kind:'status',text:'In flight',refs:[]},'first')
+  await writing;tasks.markReplayIncomplete(task.id);release();await pending
+  assert.equal(tasks.events(task.id,0).incomplete,true)
+  await tasks.appendEvent({task_id:task.id,kind:'status',text:'Next',refs:[]},'second')
+  const restored=new TaskService(path);await restored.open();assert.equal(restored.events(task.id,0).incomplete,true);await restored.close()
+ }finally{release();BoundedJsonStore.prototype.write=write;await tasks.close();await rm(dir,{recursive:true,force:true})}
+})

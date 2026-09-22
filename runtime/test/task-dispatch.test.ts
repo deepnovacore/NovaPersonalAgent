@@ -199,7 +199,7 @@ test('real scoped task executor survives conversation clear, targeted input and 
  }finally{release?.(COMPLETE);await host.close();await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
 })
 
-import {CausalRuntime} from '../src/core/causal-runtime.js'
+import {CausalRuntime,type ExecutorDispatchContext} from '../src/core/causal-runtime.js'
 import {RealClock} from '../src/core/clock.js'
 import {MonotonicIdFactory} from '../src/core/ids.js'
 import {fixtureSlowSimManifest} from '../eval/sim.js'
@@ -333,4 +333,36 @@ test('Nova-mediated return uses current user authority inside durable serializat
    assert.equal(tasks.get(task.id).control_revision,2)
   }finally{await service.close()}
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('failed activity persistence diagnoses an incomplete replay while later activity and execution succeed',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-replay-failure-'))
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let executor:ExecutorDispatchContext|undefined,finish!:()=>void
+ const complete=new Promise<void>(resolve=>{finish=resolve})
+ const runtime=new CausalRuntime({clock:new RealClock(),ids:new MonotonicIdFactory(),executors:[{manifest:fixtureSlowSimManifest,dispatch:async(_op,_request,context)=>{await context.bindSession?.('session');executor=context;await complete;return {outcome:'ok',trust:'trusted_system',content:{}}}}]})
+ const stop=new AbortController();let serving:Promise<void>|undefined
+ try{await host.open();const origin=runtime.memory.append('conversation',{ts:0,trust:'trusted_user',priority:100,content:{text:'task'}})
+  const task=await host.tasks.delegate('task',{conversation_id:'chat:main',goal:'task',acceptance:[],origin_ref:origin.channel+':'+origin.seq}),grant=host.tasks.continuationContext({task_id:task.id,control_revision:0,goal_revision:0})
+  let completed:string|undefined,notifications=0;host.subscribe(()=>notifications++)
+  const append=host.tasks.appendEvent.bind(host.tasks)
+  host.tasks.appendEvent=(event,key)=>{if(event.item_id==='lost-sync')throw Error('private sync-error-content');return event.item_id==='lost'?Promise.reject(Error('private disk-error-content')):append(event,key)}
+  assert.equal((await runtime.dispatchTaskExternal({executor:'slow_sim',op:'set_light',request:{level:1},origin_ref:grant.origin_ref},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant,status=>{completed=status})).accepted,true)
+  serving=runtime.serve(stop.signal);await until(()=>executor!==undefined)
+  const before=notifications,event={thread_id:'thread',turn_id:'turn',stage:'completed' as const,kind:'message' as const,sender:'executor' as const,refs:[]}
+  executor!.activity?.({...event,item_id:'lost',text:'Missing message'})
+  await until(()=>runtime.core.diagnostics.some(item=>item.code==='task_event_persistence_failed'))
+  assert.ok(notifications>before,'host is notified even though persistence failed')
+  assert.equal(host.tasks.events(task.id,0).incomplete,true)
+  assert.equal(JSON.stringify(runtime.core.diagnostics).includes('private disk-error-content'),false)
+  assert.doesNotThrow(()=>executor!.activity?.({...event,item_id:'lost-sync',text:'Missing synchronous message'}))
+  await until(()=>runtime.core.diagnostics.filter(item=>item.code==='task_event_persistence_failed').length===2)
+  assert.equal(JSON.stringify(runtime.core.diagnostics).includes('private sync-error-content'),false)
+  executor!.activity?.({...event,item_id:'saved',text:'Later message'})
+  await until(()=>host.tasks.events(task.id,0).items.some(item=>item.text==='Later message'))
+  const response=await host.command({type:'personal.command',request_id:'page',method:'tasks.get',params:{task_id:task.id}},{client_id:'client'}) as {data:{events:{incomplete:boolean;items:{text:string}[]}}}
+  assert.equal(response.data.events.incomplete,true);assert.deepEqual(response.data.events.items.map(item=>item.text),['Later message'])
+  const restored=new TaskService(host.tasks.path);await restored.open();assert.equal(restored.events(task.id,0).incomplete,true);await restored.close()
+  finish();await until(()=>completed!==undefined);assert.equal(completed,'accepted')
+ }finally{finish();stop.abort();await serving;await host.close();await rm(dir,{recursive:true,force:true})}
 })

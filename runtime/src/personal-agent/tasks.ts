@@ -21,15 +21,16 @@ const controlChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,next
 const goalChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,goal:goalSchema.shape.goal,acceptance:goalSchema.shape.acceptance}).strict()
 const recordSchema=taskInputSchema.extend({id,phase:z.enum(['queued','running','verifying','waiting','completed','cancelled']),controller:actorSchema,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative(),corrections:z.number().int().nonnegative(),work_ids:z.array(id),session_ids:z.array(id),evidence_refs:z.array(id),artifact_refs:z.array(id).default([]),waiting_reason:z.string().trim().min(1).max(4000).nullable(),todo_sync:z.enum(['none','pending','synced','conflict'])}).strict()
 type StoredTask=z.infer<typeof recordSchema>
-const stateSchema=z.object({events:z.array(eventSchema).default([]),event_keys:z.record(z.string(),z.object({seq:z.number().int().positive(),hash:z.string()})).default({}),event_seq:z.number().int().nonnegative().default(0),truncated:z.record(z.string(),z.number().int().nonnegative()).default({}),effects:z.record(z.string(),z.object({hash:z.string(),status:z.enum(['accepted','failed','unknown']),task_id:id.optional(),session_id:id.optional(),fence:taskFenceSchema.optional(),actor:actorSchema.optional(),text:z.string().max(16000).optional()}).strict()).default({}),tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict()),handbacks:z.record(z.string(),z.object({hash:z.string(),command:z.string().max(16384).optional(),result:z.array(recordSchema).optional()}).strict()).default({})}).strict()
+const stateSchema=z.object({replay_incomplete:z.array(id).default([]),events:z.array(eventSchema).default([]),event_keys:z.record(z.string(),z.object({seq:z.number().int().positive(),hash:z.string()})).default({}),event_seq:z.number().int().nonnegative().default(0),truncated:z.record(z.string(),z.number().int().nonnegative()).default({}),effects:z.record(z.string(),z.object({hash:z.string(),status:z.enum(['accepted','failed','unknown']),task_id:id.optional(),session_id:id.optional(),fence:taskFenceSchema.optional(),actor:actorSchema.optional(),text:z.string().max(16000).optional()}).strict()).default({}),tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict()),handbacks:z.record(z.string(),z.object({hash:z.string(),command:z.string().max(16384).optional(),result:z.array(recordSchema).optional()}).strict()).default({})}).strict()
 type TaskState=z.infer<typeof stateSchema>
-const empty=():TaskState=>({events:[],event_keys:{},event_seq:0,truncated:{},tasks:[],receipts:{},handbacks:{},effects:{}})
+const empty=():TaskState=>({replay_incomplete:[],events:[],event_keys:{},event_seq:0,truncated:{},tasks:[],receipts:{},handbacks:{},effects:{}})
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex')
 
 const grants=new WeakMap<object,{tasks:TaskService;actor:TaskActor}>()
 export function taskGrantService(context:TaskDispatchContext):TaskService{const grant=grants.get(context);if(!grant)throw Error('invalid_continuation');grant.tasks.assertWritable(context.fence,grant.actor);if(grant.tasks.get(context.fence.task_id).origin_ref!==context.origin_ref)throw Error('invalid_origin_ref');return grant.tasks}
 export class TaskService{
  #grants=new WeakSet<object>()
+ #incompleteReplay=new Set<string>()
  continuationContext(fence:TaskFence):TaskDispatchContext{return this.instructionContext(fence,{kind:'nova'})}
  instructionContext(fence:TaskFence,actor:TaskActor):TaskDispatchContext{fence=Object.freeze(taskFenceSchema.parse(fence));actor=Object.freeze(actorSchema.parse(actor));this.assertWritable(fence,actor);const context=Object.freeze({fence,origin_ref:this.get(fence.task_id).origin_ref,stillWanted:()=>{try{this.assertWritable(fence,actor);return true}catch{return false}}});this.#grants.add(context);grants.set(context,{tasks:this,actor:structuredClone(actor)});return context}
  validateContinuation(context:TaskDispatchContext):void{if(!this.#grants.has(context))throw Error('invalid_continuation');this.assertWritable(context.fence,{kind:'nova'});if(context.origin_ref!==this.get(context.fence.task_id).origin_ref)throw Error('invalid_origin_ref')}
@@ -70,10 +71,11 @@ export class TaskService{
    return structuredClone(item) as TaskEvent
   })
  }
- events(taskId:string,after:number):{items:TaskEvent[];next:number;truncated:boolean}{
+ markReplayIncomplete(taskId:string):void{this.get(taskId);this.#incompleteReplay.add(taskId);try{this.changed()}catch{/* notification failure cannot change executor outcome */}}
+ events(taskId:string,after:number):{items:TaskEvent[];next:number;truncated:boolean;incomplete:boolean}{
   this.get(taskId);z.number().int().nonnegative().parse(after)
   const items=this.#state.events.filter(event=>event.task_id===taskId&&event.seq>after).slice(0,100)
-  return {items:structuredClone(items) as TaskEvent[],next:items.at(-1)?.seq??after,truncated:(this.#state.truncated[taskId]??0)>after}
+  return {incomplete:this.#incompleteReplay.has(taskId)||this.#state.replay_incomplete.includes(taskId),items:structuredClone(items) as TaskEvent[],next:items.at(-1)?.seq??after,truncated:(this.#state.truncated[taskId]??0)>after}
  }
  inputReceipts(taskId:string){return Object.entries(this.#state.effects).filter(([,receipt])=>receipt.task_id===taskId).map(([request_id,receipt])=>({request_id,...structuredClone(receipt)}))}
  list():TaskRecord[]{return structuredClone(this.#state.tasks) as TaskRecord[]}
@@ -138,5 +140,5 @@ export class TaskService{
    const size=Buffer.byteLength(JSON.stringify(event));counts.set(event.task_id,counts.get(event.task_id)!-1);bytes.set(event.task_id,bytes.get(event.task_id)!-size);total-=size;next.truncated[event.task_id]=Math.max(next.truncated[event.task_id]??0,event.seq);return false
   })
  }
- #mutate<T>(change:(next:TaskState)=>Promise<T>|T):Promise<T>{const run=this.#tail.then(async()=>{const next=structuredClone(this.#state),result=await change(next);this.#pruneDisplay(next);await this.#store.write(next);this.#state=next;this.changed();return result});this.#tail=run.catch(()=>{/* keep mutation queue available */});return run}
+ #mutate<T>(change:(next:TaskState)=>Promise<T>|T):Promise<T>{const run=this.#tail.then(async()=>{const next=structuredClone(this.#state),result=await change(next);for(const taskId of this.#incompleteReplay)if(!next.replay_incomplete.includes(taskId))next.replay_incomplete.push(taskId);this.#pruneDisplay(next);await this.#store.write(next);this.#state=next;this.changed();return result});this.#tail=run.catch(()=>{/* keep mutation queue available */});return run}
 }

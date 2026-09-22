@@ -489,7 +489,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         }
       const projection = new AppServerTurnProjection({
         clock: this.#scheduler.clock,
-        sanitizePublicText:text=>this.#sanitizeText(text.replace(/file:\/\/[^\s<>"']+/giu,'[FILE_REFERENCE]'),16000).text,
+        sanitizePublicText:text=>{const sanitized=this.#sanitizeText(text.replace(/file:\/\/[^\s<>"']+/giu,'[FILE_REFERENCE]'),16000);return {text:sanitized.text,truncated:sanitized.originalChars>16000}},
         onActivity:event=>observer.onActivity?.(event),
         workingInterval: this.#config.workingInterval,
         eagerProgress: this.#config.eagerProgress === true,

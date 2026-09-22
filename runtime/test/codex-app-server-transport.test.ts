@@ -3308,3 +3308,11 @@ test('public activity redacts before clipping and never forwards filesystem URLs
  assert.equal(activity[0]!.text.includes('private-work'),false)
  assert.ok(activity[0]!.text.length<=16000)
 })
+
+test('public activity flags clipping caused by expanding redaction',async()=>{
+ const activity:{text:string;text_truncated?:boolean}[]=[],owner=new MemoryAppServerOwner([],{finalText:'e'.repeat(2000)})
+ const transport=createTransport({spawn:async()=>owner})
+ await transport.run({workOrder:'e'},{onActivity:event=>{activity.push(event)}},{expiresAtMs:Date.now()+5000})
+ assert.equal(activity[0]?.text.length,16000)
+ assert.equal(activity[0]?.text_truncated,true)
+})
