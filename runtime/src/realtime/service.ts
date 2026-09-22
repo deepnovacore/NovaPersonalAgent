@@ -1,3 +1,5 @@
+import type {TaskDispatchContext} from '../core/task-tools.js'
+import {taskGrantService} from '../personal-agent/tasks.js'
 import type {PromptLanguage} from './prompt-language.js'
 export type { AgentControllerFactory,DelegateLike,DeliverySnapshot,ExecutorManifestLike,RealtimeServiceOptions,ServiceProvider,ServiceRuntime } from './service-ports.js'
 export { formatSeconds } from './service-state.js'
@@ -143,6 +145,15 @@ export class RealtimeService {
   playbackCleared(utteranceId: string, generationEpoch: number, playedMs: number | null): boolean { return this.#host.playbackCleared(utteranceId, generationEpoch, playedMs) }
 
   playbackDone(utteranceId: string, generationEpoch: number, playedMs: number | null): boolean { return this.#host.playbackDone(utteranceId, generationEpoch, playedMs) }
+
+  taskRoutes():readonly string[]{return this.#agentRegistry.descriptors.map(item=>item.name)}
+  taskTurnOrigin():string|undefined{return this.#intakeUser?.origin_ref}
+  async dispatchTask(grant:TaskDispatchContext,instruction:string){
+    const tasks=taskGrantService(grant);tasks.validateContinuation(grant);const task=tasks.get(grant.fence.task_id)
+    const controller=task.execution_route?this.#agentRegistry.controllers.get(task.execution_route):undefined
+    if(!controller)throw Error('task_executor_unavailable')
+    return controller.dispatch({taskContext:grant,continuationGrant:grant,instruction,originalUserText:task.original_goal??task.goal,origin_ref:grant.origin_ref,sessionEpoch:this.session.sessionEpoch,acceptedUserInputRevision:0,stillWanted:grant.stillWanted})
+  }
 
   queueHostItem(
     intent: HostResponseIntent,

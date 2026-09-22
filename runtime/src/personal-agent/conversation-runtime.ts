@@ -1,3 +1,6 @@
+import {GatewaySurrogate} from '../model/model-adapters.js'
+import type {TaskFence} from './tasks.js'
+import {TaskExecutionRejected} from './task-loop.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
 import {createTurnDeadline} from './turn-deadline.js'
 import {CodingTargetController} from './coding-targets.js'
@@ -75,6 +78,28 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   let assistant=''
   let assistantTurnId:string|undefined
   const captionIds=new Map<string,string>()
+  const taskResponses=new Map<string,Map<string,TaskFence>>()
+  const taskForegroundResponses=new Set<string>()
+  const deferredTaskWakes=new Set<string>()
+  const taskHostItems=new Map<string,TaskFence>()
+  let currentResponse:string|undefined
+  const captureTaskResponse=()=>{
+   if(!currentResponse||!taskForegroundResponses.has(currentResponse))return
+   const selected=taskResponses.get(currentResponse);if(!selected)return
+   const origin=graph.service.taskTurnOrigin()
+   for(const task of options.host.tasks.list())if(task.origin_ref===origin&&task.conversation_id===conversation.id&&(task.conversation_generation??0)===conversation.generation&&task.phase!=='completed'&&task.phase!=='cancelled'&&!selected.has(task.id))selected.set(task.id,{task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
+  }
+  const settleTaskResponse=async(responseId:string,text:string,delivered:boolean)=>{
+   const selected=taskResponses.get(responseId);if(!selected)return
+   taskResponses.delete(responseId);taskForegroundResponses.delete(responseId)
+   for(const fence of selected.values())try{
+    const task=options.host.tasks.get(fence.task_id)
+    if(delivered&&text.trim()&&(!task.execution_route||task.execution_route==='nova'))await options.host.tasks.recordDelivery(fence,responseId+':'+task.id,text)
+    if(task.execution_route&&task.execution_route!=='nova'&&!task.work_ids.length){if(task.phase==='queued')await options.host.tasks.wait(fence,'executor_admission_pending');continue}
+    if((!delivered||!text.trim())&&(!task.execution_route||task.execution_route==='nova')){await options.host.tasks.wait(fence,'delivery_interrupted');continue}
+    await options.host.wakeTask(task.id)
+   }catch{options.onDiagnostic?.('[runtime-diagnostic] task_delivery_or_check_failed')}
+  }
   const projectConfirmation=options.codexResource?.mode==='project'?new ProjectConfirmationController({clock:core.runtime.clock,idFactory:()=>randomUUID(),onChange:view=>{notifyWaiting();options.host.recordConfirmation(conversation.id,view);emit(JSON.parse(projectStateMessage(view)) as Record<string,unknown>)}}):undefined
   const graph=buildRealtimeAssembly({core,provider,memoryReadMode:mode,taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
@@ -85,9 +110,9 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    ...(approval?{executorApproval:approval}:{}),
    ...(defaultIntake(core,core.gateway,options.settings)?{intake:defaultIntake(core,core.gateway,options.settings)!}:{}),
    ...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
-   onDelivery:completion=>{const payload=deliveryToEvent(completion);if(payload)core.runtime.post({kind:'assistant_spoken',payload});if(completion.disposition!=='suppressed'&&completion.text)emit({type:'conversation.delivered',role:'assistant',text:completion.text,turn_id:captionIds.get(completion.response_id)??completion.utterance_id,delivery:completion.disposition==='spoken'?'completed':'interrupted',final:true})},
+   onDelivery:completion=>{if(mode==='voice')void settleTaskResponse(completion.response_id,completion.text,completion.disposition==='spoken').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)});const payload=deliveryToEvent(completion);if(payload)core.runtime.post({kind:'assistant_spoken',payload});if(completion.disposition!=='suppressed'&&completion.text)emit({type:'conversation.delivered',role:'assistant',text:completion.text,turn_id:captionIds.get(completion.response_id)??completion.utterance_id,delivery:completion.disposition==='spoken'?'completed':'interrupted',final:true})},
    onCaption:frame=>{if(frame.role==='assistant'){assistant=frame.text;assistantTurnId=frame.turn_id;if(frame.turn_id){const marker=frame.turn_id.indexOf(':assistant:');if(marker>=0)captionIds.set(frame.turn_id.slice(marker+11),frame.turn_id);if(captionIds.size>128)captionIds.delete(captionIds.keys().next().value!)}}emit({type:'caption',...frame})},
-   onProviderEvent:event=>{if(event.kind==='response_started'){assistant='';assistantTurnId=undefined}if(event.kind==='response_terminal'&&event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending))emit({type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true});if(event.kind==='response_terminal'&&pending&&(event.status!=='completed'||assistant.trim()!=='')){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...(assistantTurnId?{turn_id:assistantTurnId}:{})});else current.reject(Error('response_'+event.status))}},
+   onProviderEvent:event=>{if(event.kind==='response_started'){assistant='';assistantTurnId=undefined;currentResponse=event.response_id;const bound=event.origin?.kind==='host_request'?taskHostItems.get(event.origin.host_item_id):undefined;taskResponses.set(event.response_id,bound?new Map([[bound.task_id,bound]]):new Map<string,TaskFence>());if(!bound&&(!event.origin||event.origin.kind==='user_item'||(event.origin.kind==='host_request'&&graph.service.session.responseIsToolContinuation(event.response_id)))){taskForegroundResponses.add(event.response_id);captureTaskResponse()}}if(event.kind==='response_terminal'&&event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending))emit({type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true});if(event.kind==='response_terminal'){captureTaskResponse();if(currentResponse===event.response_id)currentResponse=undefined;if(mode==='text'||event.status!=='completed')void settleTaskResponse(event.response_id,assistant,event.status==='completed').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)})}if(event.kind==='response_terminal'&&pending&&(event.status!=='completed'||assistant.trim()!=='')){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...(assistantTurnId?{turn_id:assistantTurnId}:{})});else current.reject(Error('response_'+event.status))}},
   })
   const unsubscribeProgress=core.runtime.observe((event,current)=>{if(current===false)return;refreshCodingTarget();const projected=projectExecutorEvent(event,core.runtime,channel=>graph.service.agentNameForChannel(channel));if(!projected)return;void options.host.rememberWorkOwner(projected.progress.delegate_id,conversation.id).catch(()=>{ /* host projection failure */ });options.onExecutorProgress?.(projected.progress,projected.result);if(mode==='voice'&&!voiceEnabled&&projected.result)emit({type:'conversation.completed',role:'assistant',text:projected.result.summary,turn_id:'task:'+projected.result.delegate_id,delivery:'completed',final:true})})
   projectConfirmation?.setBackground(options.host.presentationMode==='background')
@@ -113,8 +138,12 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(!grant.stillWanted())return {accepted:false,delegate_id:null}
    return core.runtime.dispatchTaskExternal({executor:adapter.manifest.name,op:target.active?'steer':'run',origin_ref:grant.origin_ref,request:target.active?{instruction:text,project:target.project,session_id:target.session_id,work_id:target.work_id!}:{work_order:text,project:target.project,session_id:target.session_id,session:'latest'}},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant,receipt)
   }
-  const detachTaskRuntime=adapter?.taskPort?.resolveSession?options.host.attachTaskRuntime(conversation.id,conversation.generation,{
-   detail:'public-events',
+  const taskVerifier=core.personalAgentConfig?.surrogate??new GatewaySurrogate({gateway:core.gateway,model:options.settings.surrogate_model,proactivityPreset:options.settings.proactivity_preset})
+  const detachTaskRuntime=options.host.attachTaskRuntime(conversation.id,conversation.generation,{
+   routes:()=>['nova',...graph.service.taskRoutes()],
+   ready:task=>{if(currentResponse)deferredTaskWakes.add(task.id);return currentResponse===undefined},
+   detail:adapter?'public-events':'summary-only',
+   evaluate:(task,signal)=>taskVerifier.evaluateTask(task,options.host.tasks.evidence(task.id),signal),
    input:async(grant,sessionId,text)=>{
     let resolve!:(status:'accepted'|'failed'|'unknown')=>void
     const acknowledged=new Promise<'accepted'|'failed'|'unknown'>(done=>{resolve=done})
@@ -122,17 +151,30 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     if(!admission.accepted)return 'failed'
     return acknowledged
    },
-   cancel:workId=>{core.runtime.cancelPendingDispatch(workId);adapter.taskPort?.cancelTask(workId)},
+   cancelTask:taskId=>{for(const [responseId,tasks] of taskResponses)if(tasks.has(taskId))void provider.cancelResponse(responseId,new AbortController().signal).catch(()=>options.onDiagnostic?.('[runtime-diagnostic] task_response_cancel_failed'))},
+   cancel:workId=>{core.runtime.cancelPendingDispatch(workId);adapter?.taskPort?.cancelTask(workId)},
    dispatch:async(grant,instruction,sessionId)=>{
     options.host.tasks.validateContinuation(grant)
     const sessions=options.host.tasks.get(grant.fence.task_id).session_ids
     const target=sessionId??(sessions.length===1?sessions[0]:undefined)
-    if(!target)throw Error('task_session_required')
-    return dispatchTarget(grant,target,instruction)
+    if(target){const result=await dispatchTarget(grant,target,instruction);if(!result.accepted)throw new TaskExecutionRejected('executor_admission_refused');return result}
+    const task=options.host.tasks.get(grant.fence.task_id)
+    if(task.execution_route&&task.execution_route!=='nova'){
+     if(!graph.service.taskRoutes().includes(task.execution_route))throw new TaskExecutionRejected('task_executor_unavailable')
+     const result=await graph.service.dispatchTask(grant,instruction)
+     if(result.code!=='delegated'&&result.code!=='intake_opened'&&result.code!=='intake_in_progress')throw new TaskExecutionRejected(result.code)
+     if(result.code!=='delegated')await options.host.tasks.wait(grant.fence,'executor_'+result.detail.state)
+     return result
+    }
+    const itemId='task-response:'+randomUUID();taskHostItems.set(itemId,grant.fence)
+    graph.service.queueHostItem({kind:'task_continuation',item:{kind:'recovery',host_item_id:itemId,event_id:itemId,call_id:null,content:JSON.stringify({purpose:'continue_authorized_task',task_id:task.id,original_goal:task.original_goal,goal:task.goal,acceptance:task.acceptance,instruction,origin_ref:task.origin_ref})},task_summary:null,origin_spoken:false},{stillWanted:grant.stillWanted})
+    await graph.service.flushHostItems()
+    return {accepted:true}
    },
-  }):undefined
+  })
+  const unsubscribeTaskCapture=options.host.subscribe(captureTaskResponse)
   let closed=false
-  const close=async()=>{if(closed)return;closed=true;lifetime.removeEventListener('abort',detachForeground);unsubscribeTasks();detachTaskRuntime?.();unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()}
+  const close=async()=>{if(closed)return;closed=true;lifetime.removeEventListener('abort',detachForeground);unsubscribeTasks();unsubscribeTaskCapture();detachTaskRuntime();unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()}
   const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
   return {
    retainTasks:ownsTask,

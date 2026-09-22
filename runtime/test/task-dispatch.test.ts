@@ -366,3 +366,60 @@ test('failed activity persistence diagnoses an incomplete replay while later act
   finish();await until(()=>completed!==undefined);assert.equal(completed,'accepted')
  }finally{finish();stop.abort();await serving;await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('real Nova declaration and confirmed content drive correction and verified completion without Codex',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-content-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let responses=0,checks=0,continuationGuidance=''
+ try{await host.open();const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),searchTransport:{search:async()=>{throw Error('unused')}},gateway:{complete:async request=>{const input=JSON.parse(request.prompt) as {task:{id:string};evidence:{ref:string}[]};checks++;return {text:JSON.stringify(checks===1?{kind:'correct',instruction:'Include all three steps',evidence_refs:[input.evidence[0]!.ref]}:{kind:'complete',evidence_refs:[input.evidence.at(-1)!.ref]})}},async *stream(){throw Error('unused')}},
+ createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({async *stream(input){const n=++responses,r='nova:'+n;yield {kind:'response_started',response_id:r};if(n===1)yield {kind:'tool_call',item_id:'declare',call_id:'declare',name:'task',arguments:{operation:'declare',goal:'Write three steps',acceptance:['Three steps'],source_refs:[],origin_ref:'conversation:1'}};else {if(n>=3)continuationGuidance=input.responseAdaptation??'';yield {kind:'text_delta',text:n===2?'Step one':'Step one. Step two. Step three.'}}yield {kind:'response_completed',response_id:r}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{}})})}})})
+ host.setConversationRuntime(factory,()=>{});await host.submitConversationText('chat:main','Write three steps');await until(()=>host.tasks.list()[0]?.phase==='completed')
+ const task=host.tasks.list()[0]!;assert.equal(task.corrections,1);assert.equal(checks,2);assert.equal(task.work_ids.length,0);assert.match(continuationGuidance,/actual requested deliverable/);assert.equal(host.tasks.evidence(task.id).filter(item=>item.kind==='delivery').length,2)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('host coding delegate starts through actual controller without a session, verifies terminal result and syncs Todo',async()=>{
+ let releaseForeground!:()=>void;const foreground=new Promise<void>(resolve=>{releaseForeground=resolve})
+ const value=await fixture(),host=new PersonalAgentHost({path:join(await realpath(value.root),'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let responses=0,checks=0
+ try{await host.open();await value.adapter.initialize();const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:['codex'],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),codexResource:{mode:'project',adapter:value.adapter,agentDescriptor:CODEX_AGENT_DESCRIPTOR,agentControllerFactory:{create:context=>new CodexAgentController({channel:context.channel,resolveCancelTarget:async()=>null,dispatchPort:{dispatch:request=>context.dispatchPort.dispatch({...request,request:{...request.request,project:'alpha'}})}})},projectView:null,approvalController:null,start:async()=>{},close:async()=>{}},searchTransport:{search:async()=>{throw Error('unused')}},gateway:{complete:async request=>{const input=JSON.parse(request.prompt) as {evidence:{ref:string;kind:string;content:string}[]};checks++;assert.ok(input.evidence.some(item=>item.kind==='work'&&item.content.includes('done')));return {text:JSON.stringify({kind:'complete',evidence_refs:input.evidence.filter(item=>item.kind==='work').map(item=>item.ref)})}},async *stream(){throw Error('unused')}},createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({async *stream(){const r='coding:'+ ++responses;yield {kind:'response_started',response_id:r};await foreground;yield {kind:'text_delta',text:'Ready'};yield {kind:'response_completed',response_id:r}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{}})})}})})
+ host.setConversationRuntime(factory,()=>{});const submitted=host.submitConversationText('chat:main','Please implement the fix');await until(()=>responses===1)
+ const todo=await host.life.mutate({op:'create',kind:'todo',title:'Fix',note:'unchanged'},'todo')
+ const result=await host.command({type:'personal.command',request_id:'delegate',method:'tasks.delegate',params:{conversation_id:'chat:main',goal:'Implement the fix',acceptance:['done result'],origin_ref:'conversation:1',execution_route:'codex',todo_ref:todo}},{client_id:'client'}) as {ok:boolean;error?:string;data:{id:string}}
+ assert.equal(result.ok,true,result.error);releaseForeground();await submitted;await until(()=>host.tasks.get(result.data.id).todo_sync==='synced')
+ assert.equal(value.factory.transports.length,1);assert.equal(checks,1);assert.equal(host.tasks.get(result.data.id).corrections,0);assert.equal(host.life.snapshot().todos[0]!.status,'done');assert.equal(host.life.snapshot().todos[0]!.note,'unchanged')
+ }finally{releaseForeground();await host.close();await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
+})
+
+test('explicit model task stop cancels Nova-only and bound work and prevents restart',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-stop-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});try{await host.open();for(const bound of [false,true]){const task=await host.tasks.delegate('task:'+bound,{conversation_id:'chat:main',goal:'stop me',acceptance:[],origin_ref:'conversation:1'});if(bound){await host.tasks.bindWork({task_id:task.id,goal_revision:0,control_revision:0},'work');host.attachTaskRuntime('chat:main',0,{input:async()=> 'accepted',dispatch:async()=>assert.fail('restart'),cancel:work=>assert.equal(work,'work')})}
+ const {service}=realtimeServiceHarness('pipeline',{taskHost:{tasks:host.tasks,conversation_id:'chat:main',cancel:(request,fence)=>host.cancelTask(request,fence,{kind:'nova'})}});await service.connect();const result=await dispatchTurn(service,'task',{operation:'cancel',task_id:task.id,source_refs:[],origin_ref:'conversation:1'},'cancel:'+bound);assert.equal(result.accepted,true);assert.equal(host.tasks.get(task.id).phase,'cancelled');await host.wakeTask(task.id);await service.close()}
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('explicit continue cannot silently choose Nova for a host task with no route',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-route-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});let dispatches=0
+ try{await host.open();host.attachTaskRuntime('chat:main',0,{routes:()=>['nova'],input:async()=> 'accepted',cancel:()=>{},dispatch:async()=>{dispatches++}})
+ const result=await host.command({type:'personal.command',request_id:'unrouted',method:'tasks.delegate',params:{conversation_id:'chat:main',goal:'Do work',acceptance:[],origin_ref:'conversation:1'}},{client_id:'client'}) as {data:{id:string}}
+ const task=host.tasks.get(result.data.id);await host.tasks.continue('continue',{task_id:task.id,control_revision:0,goal_revision:0},{kind:'nova'});await host.wakeTask(task.id)
+ assert.equal(dispatches,0);assert.equal(host.tasks.get(task.id).waiting_reason,'execution_route_required')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('presentation and Nova-mediated handback wake verification after durable ownership return',async()=>{
+ for(const action of ['presentation','model']){const dir=await mkdtemp(join(await realpath(tmpdir()),'task-return-wake-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{await host.open();const task=await host.tasks.delegate('task',{conversation_id:'chat:main',goal:'answer',acceptance:[],origin_ref:'conversation:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0};await host.tasks.recordDelivery(fence,'reply','answer');await host.tasks.controlClient('take',fence,'client','takeover')
+ host.attachTaskRuntime('chat:main',0,{input:async()=> 'accepted',cancel:()=>{},dispatch:async()=>assert.fail('already delivered'),evaluate:async()=>({kind:'complete',evidence_refs:['task-delivery:reply']})})
+ if(action==='presentation')await host.command({type:'personal.command',request_id:'orb',method:'presentation.set',params:{mode:'orb'}},{client_id:'client'})
+ else{const {service}=realtimeServiceHarness('pipeline',{taskHost:{tasks:host.tasks,conversation_id:'chat:main',wake:id=>host.wakeTask(id)}});try{await service.connect();const result=await dispatchTurn(service,'task',{operation:'return',task_id:task.id,source_refs:[],origin_ref:'conversation:1'});assert.equal(result.accepted,true)}finally{await service.close()}}
+ await until(()=>host.tasks.get(task.id).phase==='completed')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}}
+})
+
+test('unrelated host narration is not evidence for a task sharing the latest user origin',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-host-fact-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});let responses=0,captured:Awaited<ReturnType<ReturnType<typeof conversationRuntimeFactory>>>|undefined
+ try{await host.open();const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),searchTransport:{search:async()=>{throw Error('unused')}},gateway:{complete:async()=>{throw Error('not task evidence')},async *stream(){throw Error('unused')}},createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({async *stream(){const n=++responses;yield {kind:'response_started',response_id:'fact:'+n};yield {kind:'text_delta',text:n===1?'Ready':'Unrelated host notice'};yield {kind:'response_completed',response_id:'fact:'+n}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{}})})}})})
+ host.setConversationRuntime(async(...args)=>{captured=await factory(...args);return captured},()=>{});await host.submitConversationText('chat:main','Write a plan');const task=await host.tasks.delegate('task',{conversation_id:'chat:main',goal:'Write a plan',acceptance:[],origin_ref:'conversation:1'})
+ const bridge=captured!.bridgeService as RealtimeService;bridge.queueHostItem({kind:'host_fact',item:{kind:'recovery',host_item_id:'unrelated',event_id:'unrelated',call_id:null,content:'Unrelated host notice'},task_summary:null,origin_spoken:false});await (captured!.bridgeService as RealtimeService).flushHostItems();await until(()=>host.conversationSnapshot().messages.some(item=>item.text==='Unrelated host notice'));await host.tasks.close()
+ assert.equal(host.tasks.evidence(task.id).length,0)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})

@@ -1,3 +1,4 @@
+import type {TaskRecord} from './tasks.js'
 import {z} from 'zod'
 import {createHash} from 'node:crypto'
 import {constants} from 'node:fs'
@@ -111,6 +112,17 @@ export class LifeService{
   this.#state=lifeStateSchema.parse(fresh.state);this.#revision=fresh.revision;this.changed()
  });this.#tail=run.catch(()=>{/* preserve the mutation queue after a failed refresh */});return run}
  snapshot(){const state=structuredClone(this.#state);return {todos:state.todos.map(r=>({...r,kind:'todo' as const})),ideas:state.ideas.map(r=>({...r,kind:'idea' as const})),profile:state.profile,goals:state.goals.map(g=>{const todos=state.todos.filter(t=>t.goal_id===g.id&&t.status!=='cancelled');return {...g,kind:'goal' as const,progress:{done:todos.filter(t=>t.status==='done').length,total:todos.length}}})}}
+ async completeTaskTodo(task:TaskRecord):Promise<'synced'|'conflict'>{
+  if(!task.todo_ref)return 'synced'
+  const receipt='task-complete:'+task.id+':'+task.goal_revision
+  await this.refresh()
+  // Receipt is checked before the captured-version/state guard, including a lost acknowledgement.
+  if(this.#state.receipts[receipt])return 'synced'
+  const todo=this.#state.todos.find(item=>item.id===task.todo_ref!.id)
+  if(todo?.version!==task.todo_ref.version||todo.status==='cancelled'||todo.status==='done')return 'conflict'
+  try{await this.mutate({op:'update',kind:'todo',id:task.todo_ref.id,expected_version:task.todo_ref.version,status:'done'},receipt);return 'synced'}
+  catch(error){if(error instanceof Error&&['version_conflict','item_not_found'].includes(error.message))return 'conflict';throw error}
+ }
  mutate(raw:unknown,requestId:string,guard?:()=>void,provenance?:LifeProvenance):Promise<{id:string;version:number}>{const p=lifeInputSchema.parse(raw);const run=this.#tail.then(async()=>{
   guard?.()
   if(this.#backend){

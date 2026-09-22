@@ -369,6 +369,7 @@ export class RealtimeAssembly {
     this.#unsubscribePersonalEvents=input.core.runtime.observe((event,current)=>{
       if(current===false)return
       if(event.kind==='handoff'&&input.core.runtime.claimedHandoff(event.seq)){
+        const boundTask=this.personalAgent.tasks.list().find(task=>task.work_ids.includes(event.payload.delegate_id));if(boundTask){void this.personalAgent.taskOutcome(event.payload.delegate_id,event.payload.outcome,event.payload.content,event.payload.refs).catch(()=>this.#diagnose('task_outcome_persistence_failed'));return}
         const title=event.payload.outcome==='ok'?'任务已完成':`任务结束：${event.payload.outcome}`
         void this.personalAgent.taskResult(event.payload.delegate_id,title).catch(()=>{ /* optional host projection failure */ })
         if (event.payload.outcome === 'ok' && this.#personalMemory instanceof SubstrateMemoryResource) {
@@ -974,7 +975,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
         taskContext=options.sharedPersonal.host.tasks.continuationContext({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
       }
       if(!request.stillWanted())return {accepted:false,delegate_id:null}
-      if(taskContext)return core.runtime.dispatchTaskExternal({executor:request.channel,op:request.op,request:request.request,origin_ref:taskContext.origin_ref},USER_AWAITED_TOOL,taskContext)
+      if(taskContext){await options.sharedPersonal!.host.tasks.setRoute(taskContext.fence,service.agentNameForChannel(request.channel)??request.channel);return core.runtime.dispatchTaskExternal({executor:request.channel,op:request.op,request:request.request,origin_ref:taskContext.origin_ref},USER_AWAITED_TOOL,taskContext)}
       return core.runtime.dispatchExternal({
         executor: request.channel, op: request.op, request: request.request, origin_ref: request.origin_ref,
       }, USER_AWAITED_TOOL, undefined, request.stillWanted)
@@ -1017,7 +1018,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       }).then(() => undefined)
     }}),
     onIntakePrepared:(intake,proposal)=>{taskIntakes.clear();taskIntakes.set(proposal.proposal_id,structuredClone(intake))},
-    ...(options.sharedPersonal && options.taskConversationId ? {taskHost:{...(options.taskFrontendCurrent?{isCurrent:options.taskFrontendCurrent}:{}),tasks:options.sharedPersonal.host.tasks,conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration})}} : {}),
+    ...(options.sharedPersonal && options.taskConversationId ? {taskHost:{wake:taskId=>options.sharedPersonal!.host.wakeTask(taskId),cancel:(requestId,fence)=>options.sharedPersonal!.host.cancelTask(requestId,fence,{kind:'nova'}),...(options.taskFrontendCurrent?{isCurrent:options.taskFrontendCurrent}:{}),tasks:options.sharedPersonal.host.tasks,conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration})}} : {}),
     provider: providerSession,
     runtime: core.runtime,
     tools: core.tools,
@@ -1042,7 +1043,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
         let grant
         if(tasks&&options.taskConversationId){
           const task=intake.task_fence?tasks.get(intake.task_fence.task_id):await tasks.delegate('intake:'+intake.intake_id,{conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration}),goal:intake.slots.goal.note,acceptance:[intake.slots.acceptance.note].filter(Boolean),origin_ref:intake.origin_ref})
-          grant=tasks.continuationContext(intake.task_fence??{task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
+          grant=tasks.continuationContext(intake.task_fence??{task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision});await tasks.setRoute(grant.fence,service.agentNameForChannel(projectAdapter.manifest.name)??projectAdapter.manifest.name)
         }
         if(stillWanted?.()===false)return {accepted:false,delegate_id:null,problem:'superseded'}
         const dispatchRequest={

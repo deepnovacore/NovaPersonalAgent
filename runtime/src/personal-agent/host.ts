@@ -1,3 +1,4 @@
+import {TaskLoop,TaskExecutionRejected,type TaskDecision} from './task-loop.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
 import {interleave} from './sampling.js';
 import type {CodingTarget, CodingTargetPort} from './coding-targets.js'
@@ -24,7 +25,7 @@ import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
 import { personalCommandSchema, personalSettingsSchema, preparedContentSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
-import {TaskService,taskInputSchema,taskFenceSchema} from './tasks.js';
+import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {canonicalJson} from '../text/canonical-json.js';
 /** Supplied only by an authenticated transport, never command params. */
 export interface PersonalCommandContext {client_id:string;can_takeover?:boolean}
@@ -86,12 +87,20 @@ const hash = (s: unknown): string => createHash('sha256').update(JSON.stringify(
 export type PresentationMode = 'background' | 'workbench' | 'orb'
 export interface PresentedDecision {approval_id?:string|undefined;conversation_id?:string|undefined;proposal_id?:string|undefined}
 export interface TaskRuntimePort {
+ routes?():readonly string[]
  readonly detail?:'public-events'|'summary-only'
+ ready?(task:TaskRecord):boolean
+ evaluate?(task:TaskRecord,signal:AbortSignal):Promise<TaskDecision>
  input(grant:TaskDispatchContext,sessionId:string,text:string):Promise<'accepted'|'failed'|'unknown'>
+ cancelTask?(taskId:string):void
  cancel(workId:string):void
  dispatch(grant:TaskDispatchContext,instruction:string,sessionId?:string):Promise<unknown>
 }
 export class PersonalAgentHost {
+    readonly taskLoop:TaskLoop;
+    wakeTask(taskId:string):Promise<void>{return this.taskLoop.wake(taskId)}
+    async taskOutcome(workId:string,outcome:string,content:unknown,refs:string[]=[]):Promise<void>{const task=this.tasks.list().find(task=>task.work_ids.includes(workId));if(!task)return;await this.tasks.recordWorkOutcome(workId,outcome,content,refs);await this.wakeTask(task.id)}
+    async cancelTask(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{const task=await this.tasks.cancel(requestId,fence,actor);try{this.taskRuntime(task.id).cancelTask?.(task.id)}catch{/* no attached runtime */}if(task.work_ids.length){const port=this.taskRuntime(task.id);for(const work of task.work_ids)port.cancel(work)}return task}
     #taskRuntimes=new Map<string,TaskRuntimePort>();
     attachTaskRuntime(conversationId:string,generation:number,port:TaskRuntimePort):()=>void{const key=conversationId+':'+generation;this.#taskRuntimes.set(key,port);return()=>{if(this.#taskRuntimes.get(key)===port)this.#taskRuntimes.delete(key)}}
     taskRuntime(taskId:string):TaskRuntimePort{const task=this.tasks.get(taskId),port=this.#taskRuntimes.get(task.conversation_id+':'+(task.conversation_generation??0));if(!port)throw Error('task_runtime_unavailable');return port}
@@ -281,7 +290,7 @@ export class PersonalAgentHost {
         this.#overviewRun = run;
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
-    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify()); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.()); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
+    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify()); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{ready:task=>{try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}await this.continueTask(this.tasks.continuationContext(fence),instruction)},syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -323,6 +332,7 @@ export class PersonalAgentHost {
         }
     }
     async close(): Promise<void> {
+        await this.taskLoop.close();
         await this.#conversationPool?.close();
         await Promise.allSettled([...this.#taskInputRuns]);
         this.#opened = false;
@@ -408,7 +418,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:false}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         const selected=next.conversations.items.find(c=>c.id===next.conversations.selected_id),latest=selected?.messages.findLast(m=>m.role==='user');
@@ -603,7 +613,7 @@ export class PersonalAgentHost {
         if(taskCommand){
             if(command.method==='tasks.list'){z.object({}).strict().parse(p);data=this.tasks.list()}
             else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512),after:z.number().int().nonnegative().default(0)}).strict().parse(p);data={...this.tasks.get(q.task_id),events:this.tasks.events(q.task_id,q.after),approvals:this.taskApprovals(q.task_id),input_receipts:this.tasks.inputReceipts(q.task_id),capabilities:this.taskCapabilities(q.task_id)}}
-            else if(command.method==='tasks.delegate'){const {todo_ref,...q}=taskInputSchema.parse(p);if(!this.#state.conversations.items.some(item=>item.id===q.conversation_id))throw Error('conversation_not_found');data=await this.tasks.delegate(receiptId,{...q,conversation_generation:this.#state.conversations.items.find(item=>item.id===q.conversation_id)!.generation,...(todo_ref?{todo_ref}:{})});}
+            else if(command.method==='tasks.delegate'){const {todo_ref,...q}=taskInputSchema.parse(p);if(!this.#state.conversations.items.some(item=>item.id===q.conversation_id))throw Error('conversation_not_found');data=await this.tasks.delegate(receiptId,{...q,conversation_generation:this.#state.conversations.items.find(item=>item.id===q.conversation_id)!.generation,...(todo_ref?{todo_ref}:{})});const task=data as TaskRecord;if(!q.execution_route)data=await this.tasks.wait({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision},'execution_route_required');else{let port:TaskRuntimePort|undefined;try{port=this.taskRuntime(task.id)}catch{/* original runtime unavailable */}if(!port?.routes?.().includes(q.execution_route)){data=await this.tasks.wait({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision},'task_executor_unavailable')}else void this.wakeTask(task.id);}}
             else if(command.method==='tasks.control'){
                 const q=taskFenceSchema.extend({action:z.enum(['takeover','return'])}).strict().parse(p);
                 const {action,...fence}=q;
@@ -619,11 +629,12 @@ export class PersonalAgentHost {
                     const status=await this.tasks.input(receiptId,fence,{kind:'user',client_id:client!},session,text,grant=>port.input(grant,session,text));if(status!=='accepted')throw Error('task_input_'+status);data={status};
                 }else if(command.method==='tasks.cancel'){
                     const port=this.tasks.get(q.task_id).work_ids.length?this.taskRuntime(q.task_id):undefined,task=await this.tasks.cancel(receiptId,fence,{kind:'user',client_id:client!});
-                    for(const work of task.work_ids)port!.cancel(work);
+                    try{this.taskRuntime(task.id).cancelTask?.(task.id)}catch{/* no attached runtime */}for(const work of task.work_ids)port!.cancel(work);
                     data=task;
-                }else throw Error('task_execution_unavailable');
+                }else if(command.method==='tasks.continue'){data=await this.tasks.continue(receiptId,fence,{kind:'user',client_id:client!});void this.wakeTask(q.task_id)}else throw Error('task_execution_unavailable');
             }
             this.#notify();
+            if(command.method==='tasks.control'&&(p as {action?:string}).action==='return')void this.wakeTask((data as TaskRecord).id);
         }
         else if(command.method==='presentation.set'){
             const q=z.object({mode:z.enum(['background','workbench','orb'])}).strict().parse(p);
@@ -631,7 +642,7 @@ export class PersonalAgentHost {
             try{
                 await this.tasks.reservePresentationRequest(receiptId,client??'host:unscoped',canonicalJson(command));
                 // Explicit exits also reconcile ownership left behind by a disconnect/restart.
-                if(client&&q.mode!=='workbench')await this.tasks.returnClientTasks(receiptId,client);
+                if(client&&q.mode!=='workbench'){const returned=await this.tasks.returnClientTasks(receiptId,client);for(const task of returned)void this.wakeTask(task.id);}
             }catch(error){
                 if(error instanceof Error&&error.message==='request_conflict')throw error;
                 if(q.mode==='background')await this.#setPresentation('background');

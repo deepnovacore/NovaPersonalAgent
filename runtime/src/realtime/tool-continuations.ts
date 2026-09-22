@@ -1208,7 +1208,9 @@ export class ToolContinuations {
           if(task.conversation_id!==host.conversation_id)throw Error('task_not_owned')
           const fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
           if(args.operation==='revise')task=await host.tasks.reviseGoal(event.call_id,fence,{kind:'nova'},args.goal,args.acceptance)
-          else if(args.operation==='return')task=await host.tasks.returnFromUserOrigin(event.call_id,fence,{conversation_id:host.conversation_id,conversation_generation:host.conversation_generation??0,origin_ref:user.origin_ref},()=>authority.stillWanted()&&(host.isCurrent?.()??true))
+          else if(args.operation==='return'){task=await host.tasks.returnFromUserOrigin(event.call_id,fence,{conversation_id:host.conversation_id,conversation_generation:host.conversation_generation??0,origin_ref:user.origin_ref},()=>authority.stillWanted()&&(host.isCurrent?.()??true));void host.wake?.(task.id)}
+          else if(args.operation==='continue'){task=await host.tasks.continue(event.call_id,fence,{kind:'nova'});void host.wake?.(task.id)}
+          else if(args.operation==='cancel'){if(!host.cancel)throw Error('task_execution_unavailable');await host.cancel(event.call_id,fence)}
           else throw Error('task_execution_unavailable')
         }
         return {...this.#refusalAcceptance(event,'accepted',canonicalJson({code:'accepted',task_id:task.id})),accepted:true,inline_fulfilled:true}
@@ -1257,7 +1259,7 @@ export class ToolContinuations {
         if(!host||typeof event.arguments.task_id!=='string')throw Error('invalid_task')
         const task=host.tasks.get(event.arguments.task_id)
         if(task.conversation_id!==host.conversation_id)throw Error('task_not_owned')
-        taskContext=host.tasks.continuationContext({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
+        taskContext=host.tasks.continuationContext({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision});await host.tasks.setRoute(taskContext.fence,executor)
       }catch(error){const code=error instanceof Error?error.message:'invalid_task';return this.#refusalAcceptance(event,code,canonicalJson({code}))}
     }
     const fence = ()=>authority.stillWanted()&&(taskContext?.stillWanted()??true)

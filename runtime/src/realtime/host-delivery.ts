@@ -489,6 +489,7 @@ export class HostDelivery {
     this.#ports.telemetry?.record('hostitem.queued', {event_id: intent.item.event_id})
     this.#hostItemSeq += 1
     const queued: QueuedHostResponse = {
+      ...(options.stillWanted?{stillWanted:options.stillWanted}:{}),
       sortKey: [-effectivePriority, preemptive ? -1 : 0, this.#hostItemSeq],
       intent,
       priority: effectivePriority,
@@ -713,6 +714,7 @@ export class HostDelivery {
 
   /** Revalidate lifecycle eligibility at the final provider boundary. */
   #queuedHostItemEligible(queued: QueuedHostResponse): boolean {
+    if(queued.stillWanted&&!queued.stillWanted())return false
     const eventId = queued.intent.item.event_id
     if (this.#codingProgressQueued.has(queued) && !this.#codingProgressHostEventIds.has(eventId)) return false
     if (eventId.startsWith('intake:') && this.#ports.intakeFactEligible(eventId, this.session.sessionEpoch) !== true) return false

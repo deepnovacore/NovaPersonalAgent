@@ -105,6 +105,7 @@ export interface ServiceRuntime {
   }
 }
 export interface HostItemOptions {
+      readonly stillWanted?:()=>boolean
       readonly semanticEventId?: string | null
       readonly priority?: number
       readonly preemptive?: boolean

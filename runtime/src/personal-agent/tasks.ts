@@ -2,28 +2,32 @@ import {createHash,randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
+import {taskDecisionSchema,type TaskDecision} from './task-loop.js'
 import {canonicalJson} from '../text/canonical-json.js'
 
 export type TaskPhase='queued'|'running'|'verifying'|'waiting'|'completed'|'cancelled'
 export type TaskActor={kind:'nova'}|{kind:'user';client_id:string}
 export interface TaskFence{task_id:string;control_revision:number;goal_revision:number}
-export interface TaskInput{conversation_generation?:number|undefined;conversation_id:string;goal:string;acceptance:string[];origin_ref:string;todo_ref?:{id:string;version:number}}
-export interface TaskRecord extends TaskInput{id:string;phase:TaskPhase;controller:TaskActor;control_revision:number;goal_revision:number;corrections:number;work_ids:string[];session_ids:string[];evidence_refs:string[];artifact_refs:string[];waiting_reason:string|null;todo_sync:'none'|'pending'|'synced'|'conflict'}
+export interface TaskInput{execution_route?:string|undefined;conversation_generation?:number|undefined;conversation_id:string;goal:string;acceptance:string[];origin_ref:string;todo_ref?:{id:string;version:number}}
+export interface TaskRecord extends TaskInput{original_goal?:string;execution_route?:string|undefined;id:string;phase:TaskPhase;controller:TaskActor;control_revision:number;goal_revision:number;corrections:number;work_ids:string[];session_ids:string[];evidence_refs:string[];artifact_refs:string[];waiting_reason:string|null;todo_sync:'none'|'pending'|'synced'|'conflict'}
 
 export interface TaskEvent {seq:number;task_id:string;work_id?:string;session_id?:string;thread_id?:string;turn_id?:string;item_id?:string;stage?:'started'|'completed';kind:'message'|'tool'|'artifact'|'control'|'verification'|'status';sender?:'nova'|'user-to-executor'|'executor';text:string;refs:string[];text_truncated?:boolean}
 const eventSchema=z.object({thread_id:z.string().min(1).max(512).optional(),turn_id:z.string().min(1).max(512).optional(),item_id:z.string().min(1).max(512).optional(),stage:z.enum(['started','completed']).optional(),seq:z.number().int().positive(),task_id:z.string().min(1).max(512),work_id:z.string().min(1).max(512).optional(),session_id:z.string().min(1).max(512).optional(),kind:z.enum(['message','tool','artifact','control','verification','status']),sender:z.enum(['nova','user-to-executor','executor']).optional(),text:z.string().max(16000),refs:z.array(z.string().min(1).max(512)).max(128),text_truncated:z.boolean().optional()}).strict().refine(event=>event.kind!=='message'||event.sender!==undefined,'message_sender_required')
 const id=z.string().trim().min(1).max(512)
-export const taskInputSchema=z.object({conversation_generation:z.number().int().nonnegative().optional(),conversation_id:id,goal:z.string().trim().min(1).max(16000),acceptance:z.array(z.string().trim().min(1).max(2000)).max(64),origin_ref:id,todo_ref:z.object({id,version:z.number().int().nonnegative()}).strict().optional()}).strict()
+export const taskInputSchema=z.object({execution_route:id.optional(),conversation_generation:z.number().int().nonnegative().optional(),conversation_id:id,goal:z.string().trim().min(1).max(16000),acceptance:z.array(z.string().trim().min(1).max(2000)).max(64),origin_ref:id,todo_ref:z.object({id,version:z.number().int().nonnegative()}).strict().optional()}).strict()
 const actorSchema=z.union([z.object({kind:z.literal('nova')}).strict(),z.object({kind:z.literal('user'),client_id:id}).strict()])
 export const taskFenceSchema=z.object({task_id:id,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative()}).strict()
 const goalSchema=taskInputSchema.pick({goal:true,acceptance:true})
 const controlChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,nextActor:actorSchema}).strict()
 const goalChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,goal:goalSchema.shape.goal,acceptance:goalSchema.shape.acceptance}).strict()
-const recordSchema=taskInputSchema.extend({id,phase:z.enum(['queued','running','verifying','waiting','completed','cancelled']),controller:actorSchema,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative(),corrections:z.number().int().nonnegative(),work_ids:z.array(id),session_ids:z.array(id),evidence_refs:z.array(id),artifact_refs:z.array(id).default([]),waiting_reason:z.string().trim().min(1).max(4000).nullable(),todo_sync:z.enum(['none','pending','synced','conflict'])}).strict()
+const recordSchema=taskInputSchema.extend({original_goal:z.string().optional(),execution_route:z.string().optional(),id,phase:z.enum(['queued','running','verifying','waiting','completed','cancelled']),controller:actorSchema,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative(),corrections:z.number().int().nonnegative(),work_ids:z.array(id),session_ids:z.array(id),evidence_refs:z.array(id),artifact_refs:z.array(id).default([]),waiting_reason:z.string().trim().min(1).max(4000).nullable(),todo_sync:z.enum(['none','pending','synced','conflict'])}).strict()
 type StoredTask=z.infer<typeof recordSchema>
-const stateSchema=z.object({replay_incomplete:z.array(id).default([]),events:z.array(eventSchema).default([]),event_keys:z.record(z.string(),z.object({seq:z.number().int().positive(),hash:z.string()})).default({}),event_seq:z.number().int().nonnegative().default(0),truncated:z.record(z.string(),z.number().int().nonnegative()).default({}),effects:z.record(z.string(),z.object({hash:z.string(),status:z.enum(['accepted','failed','unknown']),task_id:id.optional(),session_id:id.optional(),fence:taskFenceSchema.optional(),actor:actorSchema.optional(),text:z.string().max(16000).optional()}).strict()).default({}),tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict()),handbacks:z.record(z.string(),z.object({hash:z.string(),command:z.string().max(16384).optional(),result:z.array(recordSchema).optional()}).strict()).default({})}).strict()
+const evidenceSchema=z.object({ref:id,task_id:id,goal_revision:z.number().int().nonnegative(),kind:z.enum(['work','delivery','input']),work_id:id.optional(),outcome:z.string(),content:z.string().max(131072),refs:z.array(id).max(128)}).strict()
+export type TaskEvidence=z.infer<typeof evidenceSchema>
+const pendingSchema=z.object({id,task_id:id,fence:taskFenceSchema,instruction:z.string().max(16000),status:z.enum(['pending','accepted','failed','unknown'])}).strict()
+const stateSchema=z.object({instruction_work_ids:z.array(id).default([]),outcomes:z.array(evidenceSchema).default([]),work_fences:z.record(z.string(),taskFenceSchema).default({}),pending_effects:z.record(z.string(),pendingSchema).default({}),replay_incomplete:z.array(id).default([]),events:z.array(eventSchema).default([]),event_keys:z.record(z.string(),z.object({seq:z.number().int().positive(),hash:z.string()})).default({}),event_seq:z.number().int().nonnegative().default(0),truncated:z.record(z.string(),z.number().int().nonnegative()).default({}),effects:z.record(z.string(),z.object({hash:z.string(),status:z.enum(['accepted','failed','unknown']),task_id:id.optional(),session_id:id.optional(),fence:taskFenceSchema.optional(),actor:actorSchema.optional(),text:z.string().max(16000).optional()}).strict()).default({}),tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict()),handbacks:z.record(z.string(),z.object({hash:z.string(),command:z.string().max(16384).optional(),result:z.array(recordSchema).optional()}).strict()).default({})}).strict()
 type TaskState=z.infer<typeof stateSchema>
-const empty=():TaskState=>({replay_incomplete:[],events:[],event_keys:{},event_seq:0,truncated:{},tasks:[],receipts:{},handbacks:{},effects:{}})
+const empty=():TaskState=>({instruction_work_ids:[],outcomes:[],work_fences:{},pending_effects:{},replay_incomplete:[],events:[],event_keys:{},event_seq:0,truncated:{},tasks:[],receipts:{},handbacks:{},effects:{}})
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex')
 
 const grants=new WeakMap<object,{tasks:TaskService;actor:TaskActor}>()
@@ -38,8 +42,8 @@ export class TaskService{
 
  #store:BoundedJsonStore<TaskState>;#state:TaskState=empty();#tail:Promise<unknown>=Promise.resolve()
  constructor(readonly path:string,readonly changed:()=>void=()=>{ /* optional projection observer */ }){this.#store=new BoundedJsonStore(path,stateSchema,16*1024*1024)}
- async open():Promise<void>{try{this.#state=await this.#store.read(empty())}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}}
- cancel(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{return this.#change(requestId,{fence:taskFenceSchema.parse(fence),actor:actorSchema.parse(actor),operation:'cancel'},task=>{task.phase='cancelled';task.waiting_reason=null})}
+ async open():Promise<void>{try{this.#state=await this.#store.read(empty());for(const task of this.#state.tasks)task.original_goal??=Object.values(this.#state.receipts).find(receipt=>receipt.task_id===task.id&&receipt.result?.goal_revision===0)?.result?.goal??(task.goal_revision===0?task.goal:'Original goal unavailable')}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}}
+ cancel(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{return this.#change(requestId,{fence:taskFenceSchema.parse(fence),actor:actorSchema.parse(actor),operation:'cancel'},task=>{if(task.phase==='completed')throw Error('task_terminal');task.phase='cancelled';task.waiting_reason=null})}
  async input(requestId:string,fence:TaskFence,actor:TaskActor,sessionId:string,text:string,send:(grant:TaskDispatchContext)=>Promise<'accepted'|'failed'|'unknown'>):Promise<'accepted'|'failed'|'unknown'>{
   const request=id.parse(requestId),session=id.parse(sessionId),instruction=z.string().trim().min(1).max(16000).parse(text),body=hash({fence,actor,session,instruction})
   const prior=await this.#mutate(next=>{
@@ -81,7 +85,7 @@ export class TaskService{
  list():TaskRecord[]{return structuredClone(this.#state.tasks) as TaskRecord[]}
  delegate(requestId:string,input:TaskInput):Promise<TaskRecord>{const request=id.parse(requestId),parsed=taskInputSchema.parse(input),payload=hash(parsed);return this.#mutate<TaskRecord>(next=>{
   const prior=next.receipts[request];if(prior){if(prior.hash!==payload)throw Error('request_conflict');if(!prior.result)throw Error('receipt_invalid');return structuredClone(prior.result) as TaskRecord}
-  const task:TaskRecord={...(parsed.conversation_generation===undefined?{}:{conversation_generation:parsed.conversation_generation}),conversation_id:parsed.conversation_id,goal:parsed.goal,acceptance:parsed.acceptance,origin_ref:parsed.origin_ref,...(parsed.todo_ref?{todo_ref:parsed.todo_ref}:{}),id:randomUUID(),phase:'queued',controller:{kind:'nova'},control_revision:0,goal_revision:0,corrections:0,work_ids:[],session_ids:[],evidence_refs:[],artifact_refs:[],waiting_reason:null,todo_sync:'none'}
+  const task:TaskRecord={...(parsed.execution_route?{execution_route:parsed.execution_route}:{}),original_goal:parsed.goal,...(parsed.conversation_generation===undefined?{}:{conversation_generation:parsed.conversation_generation}),conversation_id:parsed.conversation_id,goal:parsed.goal,acceptance:parsed.acceptance,origin_ref:parsed.origin_ref,...(parsed.todo_ref?{todo_ref:parsed.todo_ref}:{}),id:randomUUID(),phase:'queued',controller:{kind:'nova'},control_revision:0,goal_revision:0,corrections:0,work_ids:[],session_ids:[],evidence_refs:[],artifact_refs:[],waiting_reason:null,todo_sync:'none'}
   next.tasks.push(task);next.receipts[request]={hash:payload,task_id:task.id,result:structuredClone(task)};return structuredClone(task)
  })}
  control(requestId:string,fence:TaskFence,actor:TaskActor,nextActor:TaskActor):Promise<TaskRecord>{const parsed=controlChangeSchema.parse({fence,actor,nextActor});return this.#change(requestId,parsed,task=>{task.controller=parsed.nextActor;task.control_revision++})}
@@ -114,15 +118,46 @@ export class TaskService{
   })
  }
  assertCurrent(fence:TaskFence,actor:TaskActor):void{const parsed=taskFenceSchema.parse(fence),task=this.#state.tasks.find(item=>item.id===parsed.task_id);if(!task)throw Error('task_not_found');this.#assert(task,parsed,actorSchema.parse(actor))}
- bindWork(fence:TaskFence,workId:string,sessionId?:string):Promise<void>{const parsed=taskFenceSchema.parse(fence),work=id.parse(workId),session=sessionId===undefined?undefined:id.parse(sessionId);return this.#mutate(next=>{
+ bindWork(fence:TaskFence,workId:string,sessionId?:string,primary=true):Promise<void>{const parsed=taskFenceSchema.parse(fence),work=id.parse(workId),session=sessionId===undefined?undefined:id.parse(sessionId);return this.#mutate(next=>{
   const task=next.tasks.find(item=>item.id===parsed.task_id);if(!task)throw Error('task_not_found');this.#assertFence(task,parsed);if(task.phase==='completed'||task.phase==='cancelled')throw Error('task_terminal')
   const active=(item:StoredTask)=>item.phase!=='completed'&&item.phase!=='cancelled'
   if(next.tasks.some(item=>item.id!==task.id&&active(item)&&item.work_ids.includes(work)))throw Error('work_active')
   if(session&&next.tasks.some(item=>item.id!==task.id&&active(item)&&item.session_ids.includes(session)))throw Error('session_active')
   if(task.phase==='queued'||task.phase==='waiting'){task.phase='running';task.waiting_reason=null}
-  if(!task.work_ids.includes(work))task.work_ids.push(work);if(session&&!task.session_ids.includes(session))task.session_ids.push(session)
+  if(!primary&&!next.instruction_work_ids.includes(work))next.instruction_work_ids.push(work);next.work_fences[work]??=parsed;if(!task.work_ids.includes(work))task.work_ids.push(work);if(session&&!task.session_ids.includes(session))task.session_ids.push(session)
  })}
- reviseGoal(requestId:string,fence:TaskFence,actor:TaskActor,goal:string,acceptance:string[]):Promise<TaskRecord>{const parsed=goalChangeSchema.parse({fence,actor,goal,acceptance});return this.#change(requestId,parsed,task=>{task.goal=parsed.goal;task.acceptance=parsed.acceptance;task.goal_revision++})}
+ reviseGoal(requestId:string,fence:TaskFence,actor:TaskActor,goal:string,acceptance:string[]):Promise<TaskRecord>{const parsed=goalChangeSchema.parse({fence,actor,goal,acceptance});return this.#change(requestId,parsed,task=>{if(task.phase==='completed'||task.phase==='cancelled')throw Error('task_terminal');task.goal=parsed.goal;task.acceptance=parsed.acceptance;task.goal_revision++})}
+ setRoute(fence:TaskFence,route:string):Promise<void>{return this.#mutate(next=>{this.assertWritable(fence,{kind:'nova'});next.tasks.find(task=>task.id===fence.task_id)!.execution_route=id.parse(route)})}
+ evidence(taskId:string):TaskEvidence[]{this.get(taskId);return structuredClone(this.#state.outcomes.filter(item=>item.task_id===taskId))}
+ activeWork(taskId:string):string[]{return this.get(taskId).work_ids.filter(work=>!this.#state.outcomes.some(item=>item.task_id===taskId&&item.work_id===work))}
+ pendingEffect(taskId:string){return structuredClone(Object.values(this.#state.pending_effects).find(item=>item.task_id===taskId&&(item.status==='pending'||item.status==='unknown'))??null)}
+ async recordWorkOutcome(workId:string,outcome:string,content:unknown,refs:string[]=[]):Promise<string|null>{
+  return this.#mutate(next=>{const task=next.tasks.find(task=>task.work_ids.includes(workId));if(!task)return null
+   const ref='task-work:'+workId,prior=next.outcomes.find(item=>item.ref===ref);if(prior)return ref
+   const workFence=next.work_fences[workId];if(!workFence)throw Error('work_fence_unavailable')
+   next.outcomes.push(evidenceSchema.parse({ref,task_id:task.id,goal_revision:workFence.goal_revision,kind:next.instruction_work_ids.includes(workId)?'input':'work',work_id:workId,outcome,content:JSON.stringify(content).slice(0,131072),refs}));return ref
+  })
+ }
+ recordDelivery(fence:TaskFence,deliveryId:string,text:string):Promise<void>{return this.#mutate(next=>{this.assertWritable(fence,{kind:'nova'});const task=next.tasks.find(task=>task.id===fence.task_id)!;task.execution_route??='nova';const ref='task-delivery:'+id.parse(deliveryId);const prior=next.outcomes.find(item=>item.ref===ref);if(prior){if(prior.task_id!==fence.task_id||prior.content!==text)throw Error('evidence_conflict');return}next.outcomes.push(evidenceSchema.parse({ref,task_id:fence.task_id,goal_revision:fence.goal_revision,kind:'delivery',outcome:'delivered',content:text,refs:[]}))})}
+ continue(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{return this.#change(requestId,{fence,actor,operation:'continue'},task=>{if(task.phase==='cancelled'||task.phase==='completed')throw Error('task_terminal');task.controller={kind:'nova'};task.corrections=0;task.waiting_reason=null;task.phase=task.work_ids.length?'verifying':'queued';task.control_revision++})}
+ wait(fence:TaskFence,reason:string):Promise<TaskRecord>{return this.applyDecision(fence,{kind:'wait',reason,evidence_refs:[]})}
+ applyDecision(fence:TaskFence,raw:TaskDecision):Promise<TaskRecord>{const decision=taskDecisionSchema.parse(raw);return this.#mutate(next=>{
+  this.assertWritable(fence,{kind:'nova'});const task=next.tasks.find(task=>task.id===fence.task_id)!
+  if(this.activeWork(task.id).length)throw Error('task_work_active')
+  const evidence=this.evidence(task.id).filter(item=>item.goal_revision===task.goal_revision&&item.kind!=='input')
+  if(decision.evidence_refs.some(ref=>!evidence.some(item=>item.ref===ref)))throw Error('invalid_evidence')
+  if(decision.kind==='complete'&&!decision.evidence_refs.length)throw Error('missing_evidence')
+  if(decision.kind==='complete'&&(this.pendingEffect(task.id)||this.inputReceipts(task.id).some(receipt=>receipt.status==='unknown')))throw Error('task_effect_unknown')
+  task.evidence_refs=decision.evidence_refs
+  if(decision.kind==='complete'){task.phase='completed';task.waiting_reason=null;task.todo_sync=task.todo_ref?'pending':'none'}
+  else if(decision.kind==='wait'){task.phase='waiting';task.waiting_reason=decision.reason}
+  else if(task.corrections>=3){task.phase='waiting';task.waiting_reason='correction_limit'}
+  else{task.corrections++;task.phase='queued';task.waiting_reason=null;const effectId=task.id+':'+task.control_revision+':'+task.goal_revision+':'+task.corrections;next.pending_effects[effectId]={id:effectId,task_id:task.id,fence,instruction:decision.instruction,status:'pending'}}
+  next.events.push({seq:++next.event_seq,task_id:task.id,kind:'verification',text:JSON.stringify(decision),refs:decision.evidence_refs});return structuredClone(task) as TaskRecord
+ })}
+ reserveInitial(fence:TaskFence):Promise<string>{return this.#mutate(next=>{this.assertWritable(fence,{kind:'nova'});const task=next.tasks.find(task=>task.id===fence.task_id)!,effectId=task.id+':initial:'+task.control_revision+':'+task.goal_revision;if(next.pending_effects[effectId])throw Error('task_effect_exists');next.pending_effects[effectId]={id:effectId,task_id:task.id,fence,instruction:task.goal,status:'pending'};return effectId})}
+ settleEffect(effectId:string,status:'accepted'|'failed'|'unknown'):Promise<void>{return this.#mutate(next=>{const effect=next.pending_effects[effectId];if(!effect)throw Error('effect_not_found');effect.status=status})}
+ markTodoSync(taskId:string,goalRevision:number,status:'synced'|'conflict'):Promise<void>{return this.#mutate(next=>{const task=next.tasks.find(task=>task.id===taskId);if(task?.phase!=='completed'||task.goal_revision!==goalRevision)throw Error('stale_task');task.todo_sync=status})}
  #change(requestId:string,parsed:{fence:TaskFence;actor:TaskActor}&Record<string,unknown>,change:(task:StoredTask)=>void,authorize?:(task:StoredTask)=>void):Promise<TaskRecord>{const request=id.parse(requestId),body=hash(parsed);return this.#mutate(next=>{
   const prior=next.receipts[request];if(prior){if(prior.hash!==body)throw Error('request_conflict');if(!prior.result)throw Error('receipt_invalid');return structuredClone(prior.result) as TaskRecord}
   const task=next.tasks.find(item=>item.id===parsed.fence.task_id);if(!task)throw Error('task_not_found');if(authorize)authorize(task);else this.#assert(task,parsed.fence,parsed.actor);change(task);next.events.push({seq:++next.event_seq,task_id:task.id,kind:'control',text:JSON.stringify({operation:parsed.operation??parsed.action??('nextActor' in parsed?'controller_changed':'goal_revised'),controller:task.controller,control_revision:task.control_revision,goal_revision:task.goal_revision}),refs:[]});const result=structuredClone(task);next.receipts[request]={hash:body,task_id:task.id,result};return result as TaskRecord

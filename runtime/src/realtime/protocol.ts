@@ -212,6 +212,7 @@ export type WorkspaceContextDeliveryRecord = z.infer<typeof workspaceContextDeli
 
 export const hostResponseKindSchema = z.enum([
   'host_fact',
+  'task_continuation',
   'tool_result',
   'delegation_acknowledgement',
 ])
@@ -222,6 +223,7 @@ export const hostResponseIntentSchema = z.object({
   task_summary: boundedText().nullable().default(null),
   origin_spoken: z.boolean().default(false),
 }).strict().superRefine((intent, context) => {
+  if(intent.kind==='task_continuation'&&intent.item.kind!=='recovery')context.addIssue({code:'custom',path:['item'],message:'task continuation requires recovery context'})
   if (intent.item.kind === 'workspace_context') {
     context.addIssue({
       code: 'custom',

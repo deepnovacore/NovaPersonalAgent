@@ -333,7 +333,7 @@ export class CausalRuntime {
       this.#taskGrants.set(work,grant)
       this.#launchChecks.set(work,()=>grant.stillWanted()&&(stillWanted?.()??true))
       if(receipt)this.#instructionReceipts.set(work,receipt)
-      const binding=tasks.bindWork(grant.fence,work)
+      const binding=tasks.bindWork(grant.fence,work,undefined,request.op!=='steer')
       this.#taskBindings.set(work,binding)
       this.#notifyWork()
       await binding
@@ -370,7 +370,7 @@ export class CausalRuntime {
       if (admission.delegate_id !== null) {
         if(taskContext){
           this.#taskGrants.set(admission.delegate_id,taskContext)
-          const binding=taskGrantService(taskContext).bindWork(taskContext.fence,admission.delegate_id)
+          const binding=taskGrantService(taskContext).bindWork(taskContext.fence,admission.delegate_id,undefined,request.op!=='steer')
           this.#taskBindings.set(admission.delegate_id,binding);void binding.catch(()=>{ /* launch owns the failed binding */ })
         }
         this.#hostExecutorCapabilities.set(admission.delegate_id, capability)
