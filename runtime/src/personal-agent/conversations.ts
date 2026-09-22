@@ -3,7 +3,9 @@ import type {WakeReason} from '../core/slots.js'
 import type {BridgeService} from '../desktop/desktop-session.js'
 import {z} from 'zod'
 import {randomUUID} from 'node:crypto'
-export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
+export const sourceTodoSchema=z.object({id:z.string().min(1).max(512),version:z.number().int().nonnegative()}).strict()
+export interface ConversationTurnContext {source_todo?:z.infer<typeof sourceTodoSchema>}
+export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),source_todo:sourceTodoSchema.optional(),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
 export const codingTargetSchema=z.object({workspace_id:z.string().min(1).max(128),session_id:z.string().min(1).max(128).nullable(),project:z.string().min(1).max(120),title:z.string().max(120),executor:z.literal('codex')}).strict()
 export const conversationSchema=z.object({coding_target:codingTargetSchema.nullable().default(null),id:z.string().min(1).max(128),kind:z.enum(['chat','topic','proactive']),title:z.string().min(1).max(120),subject_key:z.string().max(512).nullable(),created_at:z.string().datetime(),updated_at:z.string().datetime(),generation:z.number().int().nonnegative(),messages:z.array(conversationMessageSchema).max(512),feed_ids:z.array(z.string().max(128)).max(256),read_through_id:z.string().nullable().default(null),prepared:z.object({trust:z.literal('untrusted_external'),text:z.string().max(12000),evidence_refs:z.array(z.string().max(512)).max(32)}).strict().nullable()}).strict()
 export type Conversation=z.infer<typeof conversationSchema>
@@ -14,7 +16,7 @@ export function createConversation(kind:Conversation['kind'],title:string,subjec
 export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat','新对话',null,'chat:main'),createConversation('proactive','主动提醒',null,'chat:proactive')],work_owners:{},approval_owners:{}}}
 export interface ConversationRuntime {
  retainTasks?():boolean
- runTurn(text:string,signal:AbortSignal):Promise<{assistant:string;turn_id?:string}>
+ runTurn(text:string,signal:AbortSignal,context?:ConversationTurnContext):Promise<{assistant:string;turn_id?:string}>
  parkVoice?():Promise<void>
  canSwitch?():boolean
  deliverSuggestion?(suggestion:Suggestion,reason:WakeReason):void
@@ -43,7 +45,7 @@ export class ConversationRuntimePool {
   const promise=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal,true);this.#runtimes.set(id,promise)
   try{const runtime=await promise;this.#ready.set(id,runtime);return runtime}catch(error){lifetime.abort();this.#runtimes.delete(id);this.#lifetimes.delete(id);this.#modes.delete(id);throw error}
  }
- run(conversation:Conversation,text:string):Promise<{assistant:string;turn_id?:string}>{
+ run(conversation:Conversation,text:string,context?:ConversationTurnContext):Promise<{assistant:string;turn_id?:string}>{
   if(this.#closed)return Promise.reject(Error('conversation_runtime_closed'))
   if(!this.acceptsText(conversation.id))return Promise.reject(Error('conversation_busy'))
   this.#busy.set(conversation.id,(this.#busy.get(conversation.id)??0)+1)
@@ -53,7 +55,7 @@ export class ConversationRuntimePool {
    if(this.#modes.get(id)==='parked'){this.#lifetimes.get(id)?.abort();this.#lifetimes.delete(id);const previous=this.#ready.get(id);this.#ready.delete(id);this.#runtimes.delete(id);this.#modes.delete(id);await previous?.close()}
    let runtime=this.#runtimes.get(id)
    if(!runtime){this.#modes.set(id,'text');const lifetime=new AbortController();this.#lifetimes.set(id,lifetime);runtime=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal);this.#runtimes.set(id,runtime);void runtime.catch(()=>{lifetime.abort();if(this.#runtimes.get(id)===runtime){this.#runtimes.delete(id);this.#lifetimes.delete(id);this.#modes.delete(id)}})}
-   const ready=await runtime;this.#ready.set(id,ready);return ready.runTurn(text,controller.signal)
+   const ready=await runtime;this.#ready.set(id,ready);return ready.runTurn(text,controller.signal,context)
   })
   this.#tails.set(id,operation.catch(()=>{ /* the next turn may retry after an explicit failure */ }))
   return operation.finally(()=>{const count=(this.#busy.get(id)??1)-1;if(count)this.#busy.set(id,count);else this.#busy.delete(id)})

@@ -1,17 +1,19 @@
-import test from 'node:test'
+import test,{afterEach} from 'node:test'
 import assert from 'node:assert/strict'
 import {mountPersonalView} from '../src/renderer/personal-view.mjs'
 class Node{
- constructor(tag,text){this.tag=tag;this.text=text;this.children=[];this.listeners={};this.dataset={};this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
+ constructor(tag,text){this.tag=tag;this.tagName=tag.toUpperCase();this.text=text;this.children=[];this.listeners={};this.dataset={};this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
  append(...c){this.children.push(...c)}prepend(...c){this.children.unshift(...c)}replaceChildren(...c){this.children=c}setAttribute(k,v){this[k]=v;this.attrs[k]=v}addEventListener(n,f){this.listeners[n]=f}
- querySelectorAll(sel){const tags=sel.split(',');return this.children.flatMap(n=>[...(tags.includes(n.tag)?[n]:[]),...n.querySelectorAll(sel)])}querySelector(sel){return this.querySelectorAll(sel)[0]}focus(){this.focused=(this.focused??0)+1}contains(){return false}
+ querySelectorAll(sel){const tags=sel.split(',');return this.children.flatMap(n=>[...(tags.includes(n.tag)?[n]:[]),...n.querySelectorAll(sel)])}querySelector(sel){return this.querySelectorAll(sel)[0]}focus(){this.focused=(this.focused??0)+1;document.activeElement=this}contains(node){return this===node||this.children.some(child=>child.contains(node))}
  get childElementCount(){return this.children.length}
 }
+const controllers=[]
+afterEach(async()=>{for(const c of controllers.splice(0))c.disconnect();await new Promise(resolve=>setImmediate(resolve))})
 function mount(){
  const body=new Node('body'),shell=new Node('div');body.append(shell);const sent=[]
  globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,visibilityState:'visible',hasFocus:()=>true,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),createTextNode:text=>new Node('#text',text),querySelector:()=>shell}
  const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],openResults(){},api:{orbMenu:{},personal:{setUnread(){},openArticle:async()=>{}}}})
- view.controller.connect();view.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input']})
+ controllers.push(view.controller);view.controller.connect();view.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input']})
  const all=n=>[n,...n.children.flatMap(all)]
  return {body,sent,view,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
@@ -30,24 +32,29 @@ test('collapsed chat pane defers receipts until it reopens, and failed receipts 
  const request=m.sent.findLast(f=>f.method==='feed.action');m.view.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'offline'});await new Promise(r=>setImmediate(r))
  m.view.refresh();assert.deepEqual(m.receipts(),['f1','f1'],'a failed receipt is retried by a plain update')
 })
-test('asking for task progress through a feed opens the chat pane', async()=>{
- const state={tasks:[{work_id:'w1',title:'修复',phase:'working',project:'p',executor:'codex',summary:''}]}
- const body=new Node('body'),shell=new Node('div');body.append(shell);const sent=[]
- globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,visibilityState:'visible',hasFocus:()=>true,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),createTextNode:text=>new Node('#text',text),querySelector:()=>shell}
- const v=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>state,taskAction(){},results:()=>[],openResults(){},api:{orbMenu:{},personal:{setUnread(){},openArticle:async()=>{}}}})
- v.controller.connect();v.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input']})
- const all=()=>[body].flatMap(function walk(n){return [n,...n.children.flatMap(walk)]})
- const s=feedState(1,'c');s.feed[0].task_ref={work_id:'w1'};v.receive(s)
- await all().find(n=>n.className==='chat-toggle').listeners.click();assert.equal(all().find(n=>n.id==='chat-pane').hidden,true)
- all().find(n=>n.className==='rail-item'&&n.children.some(c=>c.className==='rail-label'&&c.textContent==='任务')).listeners.click()
- const ask=all().find(n=>n.tag==='button'&&n.textContent==='询问任务进展');assert.ok(ask,'task page shows the progress action')
- const pending=ask.listeners.click();const req=sent.findLast(f=>f.method==='conversations.open_feed');assert.ok(req)
- v.receive({type:'personal.result',request_id:req.request_id,ok:true,data:{}});await pending
- assert.equal(all().find(n=>n.id==='chat-pane').hidden,false,'pane revealed after the feed conversation opens')
+test('durable cards browse a persistent central detail through snapshots, executor frames, and focusout',async()=>{
+ const m=mount(),task={id:'t1',goal:'Task one',conversation_id:'c',phase:'running',controller:{kind:'nova'},control_revision:0,goal_revision:0,session_ids:['s1'],events:{items:[]},capabilities:{input:true},viewer:{client_id:'a',can_takeover:true}}
+ m.view.receive(feedState(1,'c',{feed:[],tasks:[task,{...task,id:'t2',goal:'Task two'}],conversations:{selected_id:'c',items:[{id:'c',title:'C'}],messages:[]}}))
+ const cards=m.all().filter(n=>n.className==='task-card');assert.equal(cards.length,2)
+ cards[0].focus();const opening=cards[0].listeners.click(),req=m.sent.findLast(f=>f.method==='tasks.get');m.view.receive({type:'personal.result',request_id:req.request_id,ok:true,data:task});await opening
+ const draft=m.all().find(n=>n['aria-label']==='回复执行器'),panel=m.all().find(n=>n.className==='workbench-page');draft.value='keep';draft.focus();panel.scrollTop=88
+ assert.equal(m.sent.some(f=>f.method==='tasks.control'),false)
+ m.view.receive({type:'executor.tasks',tasks:[]});assert.ok(m.all().includes(draft));assert.equal(panel.scrollTop,88)
+ m.view.receive({...m.view.controller.snapshot,revision:2,tasks:[{...task,phase:'waiting'}]});const refresh=m.sent.findLast(f=>f.method==='tasks.get');m.view.receive({type:'personal.result',request_id:refresh.request_id,ok:true,data:{...task,phase:'waiting'}});await new Promise(r=>setImmediate(r));assert.ok(m.all().includes(draft))
+ const nova=m.all().find(n=>n['aria-label']==='消息草稿');nova.focus();panel.listeners.focusout();await new Promise(r=>setTimeout(r,1));assert.ok(m.all().includes(draft));assert.equal(draft.value,'keep')
+ nova.value='Ask Nova';nova.listeners.input();await nova.listeners.keydown({key:'Enter',preventDefault(){}});assert.ok(m.sent.some(f=>f.type==='input.text'&&f.text==='Ask Nova'));assert.equal(m.sent.some(f=>f.method==='tasks.input'),false)
+ m.all().find(n=>n.className==='task-detail').listeners.keydown({key:'Escape',preventDefault(){}});assert.equal(document.activeElement,cards[0]);assert.equal(m.sent.some(f=>f.method==='tasks.control'),false)
 })
 
 test('hidden or unfocused windows defer presented receipts until visible and focused',()=>{
  const m=mount();document.visibilityState='hidden';m.view.receive(feedState(1));assert.deepEqual(m.receipts(),[])
  document.visibilityState='visible';document.hasFocus=()=>false;m.view.refresh();assert.deepEqual(m.receipts(),[])
  document.hasFocus=()=>true;m.view.refresh();assert.deepEqual(m.receipts(),['f1'])
+})
+
+test('task approval header stays in workbench and remains actionable while presentation sync is pending',async()=>{
+ const m=mount(),task={id:'t',conversation_id:'c',goal:'Task',phase:'running',controller:{kind:'nova'},session_ids:[],approvals:[],viewer:{client_id:'a'},capabilities:{input:false}}
+ m.view.receive(feedState(1,'c',{feed:[],tasks:[task],pending_approvals:[{task_id:'t',conversation_id:'c',approval_id:'original',summary:'Run'}],conversations:{selected_id:'c',items:[{id:'c',title:'C'}],messages:[]}}));m.view.controller.presentationPending=true;m.view.controller.presentationReady=false;m.view.refresh()
+ const header=m.all().find(n=>n.textContent==='处理审批：Run');assert.equal(header.disabled,false);const opening=header.listeners.click(),request=m.sent.findLast(f=>f.method==='tasks.get');m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:task});await opening
+ assert.equal(m.sent.some(f=>f.method==='presentation.set'||f.method==='conversations.select'),false);assert.ok(m.all().some(n=>n.className==='task-detail'))
 })

@@ -148,7 +148,7 @@ const ordinaryDesktopControlSchema = z.discriminatedUnion('type', [
   personalCommandSchema,
   z.object({type: z.literal('input.audio'), conversation_id: identifierSchema.optional()}).strict(),
   z.object({type: z.literal('input.dictation'), conversation_id: identifierSchema.optional(), id: identifierSchema, action: z.enum(['start', 'finish', 'cancel'])}).strict(),
-  z.object({type: z.literal('input.text'), conversation_id: identifierSchema.optional(), request_id: z.string().min(1).max(128).optional(), input_instance_id: z.string().min(1).max(128).optional(), text: z.string().min(1).max(4000).refine(value => value.trim().length > 0)}).strict(),
+  z.object({type: z.literal('input.text'), source_todo:z.object({id:z.string().min(1).max(512),version:z.number().int().nonnegative()}).strict().optional(), conversation_id: identifierSchema.optional(), request_id: z.string().min(1).max(128).optional(), input_instance_id: z.string().min(1).max(128).optional(), text: z.string().min(1).max(4000).refine(value => value.trim().length > 0)}).strict(),
   z.object({
     type: z.literal('speech.onset'),
     speech_id: identifierSchema,

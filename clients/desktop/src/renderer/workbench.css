@@ -203,3 +203,11 @@ body[data-personal-collapsed="true"] .workbench{display:none}
 .chat-target button{font-size:11px;white-space:nowrap}
 .feed-card .feed-body{font-size:13px;color:var(--ink)}
 .feed-card .md{display:flex;flex-direction:column;gap:6px}
+
+.task-detail { padding: 16px; overflow: auto; height: 100%; }
+.task-detail textarea { width: 100%; min-height: 96px; }
+.task-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.task-detail button, .task-detail select { margin: 4px; }
+.conversation-task-cards { display: grid; gap: 6px; padding: 8px; }
+.task-card { text-align: left; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .workbench[data-task-detail="true"] .chat-pane { display: none; } }

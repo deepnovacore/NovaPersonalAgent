@@ -1202,7 +1202,7 @@ export class ToolContinuations {
       if(!authority.stillWanted())return this.#refusalAcceptance(event,'superseded','{"code":"superseded"}')
       try {
         let task
-        if(args.operation==='declare')task=await host.tasks.delegate(event.call_id,{conversation_id:host.conversation_id,...(host.conversation_generation===undefined?{}:{conversation_generation:host.conversation_generation}),goal:args.goal,acceptance:args.acceptance,origin_ref:user.origin_ref})
+        if(args.operation==='declare'){const todo=args.link_source_todo?host.sourceTodo?.(user.origin_ref):undefined;if(args.link_source_todo&&!todo)throw Error('source_todo_unavailable');task=await host.tasks.delegate(event.call_id,{conversation_id:host.conversation_id,...(host.conversation_generation===undefined?{}:{conversation_generation:host.conversation_generation}),goal:args.goal,acceptance:args.acceptance,origin_ref:user.origin_ref,...(todo?{todo_ref:todo}:{})})}
         else {
           task=host.tasks.get(args.task_id)
           if(task.conversation_id!==host.conversation_id)throw Error('task_not_owned')

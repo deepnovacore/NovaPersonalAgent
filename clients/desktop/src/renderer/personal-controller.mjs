@@ -6,7 +6,7 @@ export class PersonalController {
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
   state(id=this.selectedId){if(!this.drafts.has(id))this.drafts.set(id,{draft:'',error:'',submission:null});return this.drafts.get(id)}
-  get draft(){return this.state().draft} set draft(value){this.state().draft=value}
+  get draft(){return this.state().draft} set draft(value){this.state().draft=value;if(!value.trim())this.state().source_todo=null}
   get error(){return this.state().error} set error(value){this.state().error=value}
   get submittedRequestId(){return this.state().submission?.request_id??null}
   get submittedDraft(){return this.state().submission?.text??null}
@@ -25,9 +25,9 @@ export class PersonalController {
     if(this.presentationReady)for(const [id,state]of this.drafts)if(state.submission)this.sendSubmission(id,state.submission)
     this.changed()
   }
-  sendSubmission(id,value){return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id})}
+  sendSubmission(id,value){return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id,...(value.source_todo?{source_todo:value.source_todo}:{})})}
   disconnect(){
-    for(const state of this.drafts.values())if(state.submission&&!state.submission.restored){state.draft=[state.submission.text,state.draft].filter(Boolean).join('\n');state.submission.restored=true}
+    for(const state of this.drafts.values())if(state.submission&&!state.submission.restored){state.draft=[state.submission.text,state.draft].filter(Boolean).join('\n');state.source_todo=state.submission.source_todo??null;state.submission.restored=true}
     this.connected=false;this.capabilities=[];this.generation++;this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
     for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
     this.pending.clear();void this.stop();this.error='连接已断开，草稿已保留';this.changed()
@@ -72,8 +72,8 @@ export class PersonalController {
     if(frame.type==='input.text_result')for(const [id,state]of this.drafts){
       const request=state.submission
       if(!request||request.request_id!==frame.request_id||(frame.conversation_id&&frame.conversation_id!==id))continue
-      if(!frame.ok){if(!request.restored)state.draft=[request.text,state.draft].filter(Boolean).join('\n');state.error=frame.error==='outcome_unknown'?'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。':frame.error||'文字发送失败，草稿已保留'}
-      else if(request.restored&&state.draft===request.text)state.draft=''
+      if(!frame.ok){state.source_todo=request.source_todo??null;if(!request.restored)state.draft=[request.text,state.draft].filter(Boolean).join('\n');state.error=frame.error==='outcome_unknown'?'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。':frame.error||'文字发送失败，草稿已保留'}
+      else if(request.restored&&state.draft===request.text){state.draft='';state.source_todo=null}
       state.submission=null
     }
     if(['client.ready','desktop.capabilities'].includes(frame.type)){this.capabilities=frame.capabilities??[];this.inputInstance=frame.input_instance_id??null}
@@ -95,11 +95,11 @@ export class PersonalController {
     }
     this.changed()
   }
-  async command(method,params={}){
+  async command(method,params={},options={}){
     if(!this.connected)throw new Error('尚未连接')
-    if(this.applyPresentation&&!this.presentationReady&&!['presentation.set','state'].includes(method))throw new Error('正在恢复显示模式，请稍候')
+    if(this.applyPresentation&&!this.presentationReady&&!['presentation.set','state','tasks.get','tasks.list','conversations.approve'].includes(method))throw new Error('正在恢复显示模式，请稍候')
     if(this.pending.size>=32)throw new Error('请等待当前操作完成')
-    const request_id=crypto.randomUUID()
+    const request_id=options.request_id??crypto.randomUUID()
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{this.pending.delete(request_id);reject(new Error('操作超时，请刷新状态后重试'))},30000)
       this.pending.set(request_id,{resolve,reject,timer})
@@ -154,8 +154,8 @@ export class PersonalController {
   async submit(){
     const id=this.selectedId,state=this.state(id)
     if(!this.presentationReady||!id||state.submission||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
-    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false}
+    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false,...(state.source_todo?{source_todo:{...state.source_todo}}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';this.changed();return false}
-    state.submission=request;state.draft='';state.error='';this.changed();return true
+    state.submission=request;state.draft='';state.source_todo=null;state.error='';this.changed();return true
   }
 }

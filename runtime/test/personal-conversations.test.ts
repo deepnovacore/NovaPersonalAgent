@@ -249,3 +249,29 @@ test('a failing playback listener cannot prevent another runtime from parking it
   assert.equal(result.ok,false);assert.deepEqual(seen,['background']);assert.equal(host.presentationMode,'background')
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('Todo source is canonical per submission, survives exact retry, and never leaks into a later turn',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-source-todo-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const contexts:unknown[]=[]
+ try{await host.open();await host.command({type:'personal.command',request_id:'todo',method:'life.mutate',params:{op:'create',kind:'todo',title:'Linked todo',note:''}});const todo=host.life.snapshot().todos[0]!,source={id:todo.id,version:todo.version}
+ host.setConversationRuntime(()=>Promise.resolve({runTurn:(_text,_signal,context)=>{contexts.push(context);return Promise.resolve({assistant:'ack'})},close:()=>Promise.resolve()}),()=>{/* no renderer transport */})
+ await host.submitConversationText('chat:main','Handle this','source',source);await host.waitConversation('chat:main');await host.submitConversationText('chat:main','Handle this','source',source)
+ assert.deepEqual(host.conversationSnapshot().messages[0]!.source_todo,source);assert.deepEqual(contexts,[{source_todo:source}])
+ await assert.rejects(host.submitConversationText('chat:main','Handle this','source'),/request_id_conflict/)
+ await assert.rejects(host.submitConversationText('chat:main','Handle this','different',{...source,version:source.version+1}),/source_todo_conflict/)
+ await host.submitConversationText('chat:main','Unrelated','later');await host.waitConversation('chat:main');assert.deepEqual(contexts[1],{})
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('authenticated task approval retains original ID and routes to retired runtime without presentation exit',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-retired-approval-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});const decisions:unknown[]=[]
+ try{await host.open();host.setConversationRuntime(conversation=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'ack'}),retainTasks:()=>true,approvalDecision:(id,approved)=>{if(conversation.generation!==0)return Promise.reject(Error('not_owned'));decisions.push({id,approved,generation:conversation.generation});return Promise.resolve()},close:()=>Promise.resolve()}),()=>{/* no renderer transport */})
+ await host.submitConversationText('chat:main','Start');await host.waitConversation('chat:main');const task=await host.tasks.delegate('task',{conversation_id:'chat:main',conversation_generation:0,goal:'Task',acceptance:[],origin_ref:'conversation:1'});await host.tasks.bindWork({task_id:task.id,goal_revision:0,control_revision:0},'work')
+ await host.command({type:'personal.command',request_id:'clear',method:'conversations.clear',params:{id:'chat:main',expected_generation:0}})
+ await host.submitConversationText('chat:main','Later');await host.waitConversation('chat:main')
+ host.recordTaskApproval('chat:main',0,{pending_approval:true,pending_approval_busy:false,pending_approval_id:'original',kind:'command_execution',local_detail:null,operation_summary:'Run command',expires_at:null,work:{work_id:'work',project:'P',title:'Task'},queued:0})
+ assert.equal(host.snapshot().pending_approvals[0]!.task_id,task.id)
+ const raw={type:'personal.command',request_id:'approve',method:'conversations.approve',params:{id:'chat:main',approval_id:'original',approved:true}}
+ assert.equal((await host.command(raw) as {ok:boolean}).ok,false);const mode=host.presentationMode;assert.equal((await host.command(raw,{client_id:'A'}) as {ok:boolean}).ok,true);assert.deepEqual(decisions,[{id:'original',approved:true,generation:0}]);assert.equal(host.presentationMode,mode)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})

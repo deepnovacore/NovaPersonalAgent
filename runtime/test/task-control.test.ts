@@ -149,3 +149,12 @@ test('workbench synchronization failures also reserve their request before retry
   assert.equal((await f.command('presentation.set',{mode:'workbench'},'enter-identity')).ok,true)
  }finally{await f.close()}
 })
+
+test('detail exposes authenticated viewer and reconciles only that client exact input receipt',async()=>{
+ const f=await fixture();try{const task=await f.take(await f.delegate('detail'));await f.host.tasks.bindWork(f.fence(task),'work','session')
+ const {createHash}=await import('node:crypto'),request_id='exact',key=createHash('sha256').update(JSON.stringify({client:'A',request:request_id})).digest('hex')
+ await f.host.tasks.input(key,f.fence(task),{kind:'user',client_id:'A'},'session','hello',()=>Promise.resolve('accepted'))
+ const read=async(client_id:string)=>f.host.command({type:'personal.command',request_id:crypto.randomUUID(),method:'tasks.get',params:{task_id:task.id,input_request_id:request_id}},{client_id,can_takeover:false}) as Promise<{ok:boolean;data:{viewer:{client_id:string;can_takeover:boolean};input_receipt?:{request_id:string;status:string}}}>
+ const a=await read('A');assert.equal(a.ok,true);assert.deepEqual(a.data.viewer,{client_id:'A',can_takeover:false});assert.deepEqual(a.data.input_receipt,{request_id:'exact',status:'accepted'});assert.equal((await read('B')).data.input_receipt,undefined)
+ }finally{await f.close()}
+})

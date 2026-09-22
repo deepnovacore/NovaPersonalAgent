@@ -115,7 +115,8 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    }catch{options.onDiagnostic?.('[runtime-diagnostic] task_delivery_or_check_failed')}
   }
   const projectConfirmation=options.codexResource?.mode==='project'?new ProjectConfirmationController({clock:core.runtime.clock,idFactory:()=>randomUUID(),onChange:view=>{notifyWaiting();options.host.recordConfirmation(conversation.id,view);emit(JSON.parse(projectStateMessage(view)) as Record<string,unknown>)}}):undefined
-  const graph=buildRealtimeAssembly({core,provider,memoryReadMode:mode,taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
+  let sourceTodo:{id:string;version:number}|undefined,sourceOrigin:string|undefined
+  const graph=buildRealtimeAssembly({core,provider,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
    ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(conversation.id!=='chat:proactive'||options.host.conversationSnapshot().voice_id===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
@@ -127,6 +128,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    onDelivery:completion=>{if(mode==='voice'&&!taskToolResponses.has(completion.response_id))void settleTaskResponse(completion.response_id,completion.text,completion.disposition==='spoken').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)});const payload=deliveryToEvent(completion);if(payload)core.runtime.post({kind:'assistant_spoken',payload});if(completion.disposition!=='suppressed'&&completion.text)emit({type:'conversation.delivered',role:'assistant',text:completion.text,turn_id:captionIds.get(completion.response_id)??completion.utterance_id,delivery:completion.disposition==='spoken'?'completed':'interrupted',final:true})},
    onCaption:frame=>{if(frame.role==='assistant'){assistant=frame.text;assistantTurnId=frame.turn_id;if(frame.turn_id){const marker=frame.turn_id.indexOf(':assistant:');if(marker>=0)captionIds.set(frame.turn_id.slice(marker+11),frame.turn_id);if(captionIds.size>128)captionIds.delete(captionIds.keys().next().value!)}}emit({type:'caption',...frame})},
    onProviderEvent:event=>{
+    if(event.kind==='user_transcript_final'&&event.input_kind==='text'&&sourceTodo&&sourceOrigin===undefined)sourceOrigin=graph.service.taskTurnOrigin()
     if(event.kind==='tool_call_ready'&&currentResponse){taskToolResponses.add(currentResponse);taskTurnContinuing=true}
     if(event.kind==='response_started'){
      assistant='';assistantTurnId=undefined;currentResponse=event.response_id
@@ -220,9 +222,9 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    canSwitch:()=>!pending&&!approval?.pending&&!projectConfirmation?.pending&&core.runtime.core.activeDelegates().length===0&&(voiceEnabled?graph.service.pendingHostItemCount===0:true)&&graph.playback.current===null,
    deliverSuggestion:(suggestion,reason)=>graph.service.onSuggestionSelected(suggestion,reason),
    ownsWork:id=>core.runtime.inFlightDelegate(id)!==undefined,bridgeService:graph.service,sendAudio:(pcm)=>graph.service.sendAudio(pcm),
-   runTurn:async(text,callerSignal)=>{
+   runTurn:async(text,callerSignal,context)=>{
     const deadline=createTurnDeadline({clock:core.runtime.clock,parent:callerSignal,isWaiting:()=>(approval?.pending===true||projectConfirmation?.pending===true),subscribe:listener=>{waitingListeners.add(listener);return()=>waitingListeners.delete(listener)}})
-    const signal=deadline.signal;signal.throwIfAborted();assistant='';assistantTurnId=undefined
+    const signal=deadline.signal;signal.throwIfAborted();sourceTodo=context?.source_todo;sourceOrigin=undefined;assistant='';assistantTurnId=undefined
     const done=new Promise<{assistant:string;turn_id?:string}>((resolve,reject)=>{pending={resolve,reject}}),current=pending
     const abort=()=>{
      pending?.reject(signal.reason??Error('conversation_cleared'));pending=undefined
@@ -233,8 +235,8 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
      else void graph.service.clearConversation().catch(()=>{ /* clear installs its epoch fence before asynchronous teardown */ })
     }
     signal.addEventListener('abort',abort,{once:true})
-    try{const [,result]=await Promise.all([graph.service.submitText(text),done]);return result}
-    finally{deadline.close();if(pending===current)pending=undefined;signal.removeEventListener('abort',abort)}
+    try{if(sourceTodo)await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({purpose:'selected_todo_context',linked_todo_available:true,instruction:'The upcoming user text has a selected Todo source. Only declarations explicitly handling that Todo should set link_source_todo=true. Independent tasks must omit it. This context does not authorize execution.'})},{confirmationTimeout:null,asUserActivation:false,signal});const [,result]=await Promise.all([graph.service.submitText(text),done]);return result}
+    finally{sourceTodo=undefined;sourceOrigin=undefined;deadline.close();if(pending===current)pending=undefined;signal.removeEventListener('abort',abort)}
    },
    close,
    approvalDecision:(id,approved)=>approval?.acceptDecision({approvalId:id,decision:approved?'accept':'decline'})?Promise.resolve():Promise.reject(Error('approval_not_owned')),

@@ -28,7 +28,7 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
   const select=el('select');select.setAttribute('aria-label',`${row.title}状态`);for(const [value,label]of Object.entries(statuses[kind])){const opt=el('option',label);opt.value=value;select.append(opt)}select.value=row.status;select.addEventListener('change',()=>{const value=select.value;select.value=row.status;void run(()=>command('life.mutate',{op:'update',kind,id:row.id,expected_version:row.version,status:value}))});card.append(select)
   button('编辑',()=>{local[formKey]={...row};rerender()},card)
   if(kind==='idea'){const converted=[...(state?.todos??[]),...(state?.goals??[])].filter(r=>r.idea_id===row.id);for(const target of ['todo','goal']){const existing=converted.find(r=>r.kind===target);if(existing)card.append(el('p',`已转为${labels[target]}：${existing.title}`));else if(row.status!=='archived')button(`转为${labels[target]}`,()=>command('life.mutate',{op:'convert',id:row.id,target,expected_version:row.version}),card)}}
-  if(kind==='todo'&&!['done','cancelled'].includes(row.status))button('请 Nova 协助',()=>delegate(`请帮我处理待办「${row.title}」。${row.note}。先和我确认处理方式。`),card)
+  if(kind==='todo'&&!['done','cancelled'].includes(row.status))button('请 Nova 协助',()=>delegate(`请帮我处理待办「${row.title}」。${row.note}。先和我确认处理方式。`,{id:row.id,version:row.version}),card)
  }
 }
 export function renderProfile(panel,{state,news,command,button,local,rerender}){

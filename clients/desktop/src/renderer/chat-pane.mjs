@@ -1,3 +1,4 @@
+import {t} from './locale.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {renderFeedCard,sendPresented} from './feed-card.mjs'
 
@@ -20,7 +21,7 @@ export function markVisibleRead({c,document,history,readMessages,chatOpen=true})
 export const conversationTitle=item=>item?.kind==='proactive'?'主动提醒':item?.title??'对话'
 
 /** The right-hand Nova pane: conversation switcher, transcript, three-state composer. */
-export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()=>{}}){
+export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpenChange=()=>{}}){
  const pane=el('aside',undefined,'chat-pane');pane.id='chat-pane';pane.setAttribute('aria-label','Nova 对话');columns.append(pane)
  const head=el('header',undefined,'chat-head');pane.append(head)
  head.append(el('span','✦ Nova','chat-brand'))
@@ -43,6 +44,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
   const current=c.snapshot?.conversations?.items?.find(item=>item.id===c.selectedId)?.coding_target??null
   if(targetConversation!==c.selectedId){targetConversation=c.selectedId;targetOptions=null;targetKey=''}
   targetLabel.textContent=current?`${current.project} / ${current.title} · ${current.executor}`:'未绑定项目会话'
+  const bound=(c.snapshot?.tasks??[]).filter(t=>t.conversation_id===c.selectedId&&!['completed','cancelled'].includes(t.phase));if(bound.length)targetLabel.textContent+=t(' · {0} 个任务已绑定（此处选择仅用于向 Nova 提问）',bound.length)
   const key=JSON.stringify([targetConversation,current,targetOptions])
   if(key!==targetKey){
    targetKey=key;targetSelect.replaceChildren();const empty=el('option','不绑定项目会话');empty.value='';targetSelect.append(empty)
@@ -56,8 +58,9 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
  const voiceLine=el('div',undefined,'chat-voice');const voiceStatus=el('span','','conversation-voice-status');voiceLine.append(voiceStatus);const resumeVoice=button('恢复语音',()=>c.resumeVoice(),voiceLine);resumeVoice.hidden=true;const endVoice=button('结束语音',()=>c.stopVoice(),voiceLine);endVoice.hidden=true;pane.append(voiceLine)
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1','有什么需要帮忙？'),el('p','交办一件事、问一个问题，或从左侧的待办与资讯里「接着聊」。','hint'))
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
+ const taskCards=el('section',undefined,'conversation-task-cards');taskCards.setAttribute('aria-label',t('此对话的任务'));pane.append(taskCards);const cardNodes=new Map()
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder='输入消息…';draft.maxLength=4000;draft.setAttribute('aria-label','消息草稿');draft.rows=3
- draft.addEventListener('input',()=>{c.draft=draft.value})
+ draft.addEventListener('input',()=>{c.draft=draft.value;if(!draft.value.trim())c.state().source_todo=null;renderSource()})
  draft.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void run(()=>c.submit())}})
  const inputActions=el('div',undefined,'composer-actions');const dictate=button('按住说话',()=>{},inputActions);dictate.className='composer-dictate';dictate.setAttribute('aria-label','按住说话');dictate.title='按住说话'
  dictate.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();dictate.setPointerCapture(e.pointerId);void run(()=>c.dictate())})
@@ -65,6 +68,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
  dictate.addEventListener('keydown',e=>{if([' ','Enter'].includes(e.key)&&!e.repeat){e.preventDefault();void run(()=>c.dictate())}})
  dictate.addEventListener('keyup',e=>{if([' ','Enter'].includes(e.key)){e.preventDefault();void run(()=>c.finish())}})
  const voice=button('持续对话',()=>c.isVoiceConversation?c.stopVoice():c.voice(),inputActions);voice.className='composer-voice';const submit=button('↑',()=>c.submit(),inputActions);submit.className='composer-submit';submit.setAttribute('aria-label','发送消息')
+ const sourceChip=button(t('移除关联待办'),()=>{c.state().source_todo=null;renderSource()},composer)
+ function renderSource(){const source=c.state().source_todo;sourceChip.hidden=!source;sourceChip.textContent=source?t('关联待办 · {0}（移除）',c.snapshot?.life?.todos?.find(t=>t.id===source.id)?.title??source.id):''}
  const hint=el('p','','hint composer-hint');composer.append(draft,inputActions,hint);pane.append(composer)
 
  let open=true
@@ -132,6 +137,10 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
   }
  }
  function update(){
+  renderSource()
+  const tasks=(c.snapshot?.tasks??[]).filter(t=>t.conversation_id===c.selectedId)
+  for(const [id,node]of cardNodes)if(!tasks.some(t=>t.id===id)){node.remove?.();cardNodes.delete(id)}
+  for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}node.textContent=`${task.goal} · ${task.phase} · ${task.controller.kind==='nova'?t('Nova 控制'):t('用户控制')}`}
   if(draft.value!==c.draft)draft.value=c.draft
   const localDictation=c.dictationConversationId===c.selectedId&&Boolean(c.dictationId)
   draft.disabled=!c.presentationReady||!c.connected||!c.selectedId||!c.inputInstance||Boolean(c.submittedRequestId)||c.isVoiceConversation||localDictation||!c.capabilities.includes('text_input')
@@ -142,7 +151,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
   hint.textContent=!c.connected?'连接已断开，草稿已保留':c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 松开后生成草稿'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行'
   renderTarget();renderConversations();renderHistory();deliverPresented();read()
  }
- async function focusDraft(text){if(!c.selectedId||c.isVoiceConversation)await c.create();if(text!==undefined)c.draft=text;setOpen(true);update();draft.focus()}
+ async function focusDraft(text,source=null){if(!c.selectedId||c.isVoiceConversation)await c.create();if(text!==undefined)c.draft=text;c.state().source_todo=source;setOpen(true);update();draft.focus()}
  function reveal(){setOpen(true);update();draft.focus()}
  function receive(frame){
   if(frame.type==='caption'&&typeof frame.text==='string'&&frame.conversation_id&&frame.turn_id&&(frame.role!=='user'||frame.conversation_id===c.voiceId)){

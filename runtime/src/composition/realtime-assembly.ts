@@ -198,6 +198,7 @@ export interface RealtimeAssemblyOptions {
   readonly memoryConsumerFingerprint?: string
   readonly nextPlaybackGeneration?:()=>number
   readonly onProviderEvent?: (event:RealtimeProviderEvent)=>void
+  readonly taskSourceTodo?: (origin:string)=>{id:string;version:number}|undefined
   readonly taskFrontendCurrent?: ()=>boolean
   readonly taskConversationGeneration?: number
   readonly taskConversationId?: string
@@ -327,7 +328,8 @@ export class RealtimeAssembly {
     readonly idFactory: () => string
     readonly wallClockNow: () => number
     readonly unbindSuggestionSelected?: () => void
-    readonly taskFrontendCurrent?: ()=>boolean
+    readonly taskSourceTodo?: (origin:string)=>{id:string;version:number}|undefined
+  readonly taskFrontendCurrent?: ()=>boolean
   readonly taskConversationGeneration?: number
   readonly taskConversationId?: string
   readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
@@ -1018,7 +1020,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       }).then(() => undefined)
     }}),
     onIntakePrepared:(intake,proposal)=>{taskIntakes.clear();taskIntakes.set(proposal.proposal_id,structuredClone(intake))},
-    ...(options.sharedPersonal && options.taskConversationId ? {taskHost:{wake:taskId=>options.sharedPersonal!.host.wakeTask(taskId),cancel:(requestId,fence)=>options.sharedPersonal!.host.cancelTask(requestId,fence,{kind:'nova'}),...(options.taskFrontendCurrent?{isCurrent:options.taskFrontendCurrent}:{}),tasks:options.sharedPersonal.host.tasks,conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration})}} : {}),
+    ...(options.sharedPersonal && options.taskConversationId ? {taskHost:{...(options.taskSourceTodo?{sourceTodo:options.taskSourceTodo}:{}),wake:taskId=>options.sharedPersonal!.host.wakeTask(taskId),cancel:(requestId,fence)=>options.sharedPersonal!.host.cancelTask(requestId,fence,{kind:'nova'}),...(options.taskFrontendCurrent?{isCurrent:options.taskFrontendCurrent}:{}),tasks:options.sharedPersonal.host.tasks,conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration})}} : {}),
     provider: providerSession,
     runtime: core.runtime,
     tools: core.tools,

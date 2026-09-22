@@ -69,7 +69,7 @@ test('task page reads remain fresh and do not copy replay pages into command rec
  const dir=await mkdtemp(join(await realpath(tmpdir()),'task-pages-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  try{await host.open();const task=await host.tasks.delegate('r',{conversation_id:'chat:main',goal:'Fix',acceptance:[],origin_ref:'user:1'})
   const request={type:'personal.command' as const,request_id:'get-page',method:'tasks.get',params:{task_id:task.id}}
-  await host.command(request,{client_id:'client'})
+  let notifications=0;const unsubscribe=host.subscribe(()=>notifications++);await host.command(request,{client_id:'client'});unsubscribe();assert.equal(notifications,0,'detail reads do not create a snapshot/read feedback loop')
   await host.tasks.appendEvent({task_id:task.id,kind:'message',sender:'nova',text:'Fresh summary',refs:[]},'summary:1')
   const response=await host.command(request,{client_id:'client'}) as {data:{events:{items:{text:string}[]}}}
   assert.equal(response.data.events.items[0]?.text,'Fresh summary')

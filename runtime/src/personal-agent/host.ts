@@ -13,7 +13,7 @@ import type {NewsRanker} from '../news/ranking.js';
 import type {SourceChange} from '../memory-substrate/source-state.js'
 import type {WakeReason} from '../core/slots.js';
 import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
-import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool, type ConversationRuntimeFactory,type ConversationRuntime} from './conversations.js';
+import {sourceTodoSchema,markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool, type ConversationRuntimeFactory,type ConversationRuntime} from './conversations.js';
 import type {UnifiedRetrieval,UnifiedRetrievalResult} from '../memory/retrieval.js';
 import {validateMemoryOverview, type MemoryOverview} from './memory-overview.js';
 import type { ContextView } from '../core/context-view.js';
@@ -132,7 +132,7 @@ export class PersonalAgentHost {
     #taskRuntimes=new Map<string,TaskRuntimePort>();
     attachTaskRuntime(conversationId:string,generation:number,port:TaskRuntimePort):()=>void{const key=conversationId+':'+generation;this.#taskRuntimes.set(key,port);return()=>{if(this.#taskRuntimes.get(key)===port)this.#taskRuntimes.delete(key)}}
     taskRuntime(taskId:string):TaskRuntimePort{const task=this.tasks.get(taskId),port=this.#taskRuntimes.get(task.conversation_id+':'+(task.conversation_generation??0));if(!port)throw Error('task_runtime_unavailable');return port}
-    taskCapabilities(taskId:string){try{const port=this.taskRuntime(taskId);return {detail:port.detail??'summary-only',input:!this.#recovering&&!this.#recoveryBlocked.has(taskId),todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}catch{return {detail:'summary-only' as const,input:false,todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}}
+    taskCapabilities(taskId:string){try{const port=this.taskRuntime(taskId);return {detail:port.detail??'summary-only',input:port.detail!=='summary-only'&&!this.#recovering&&!this.#recoveryBlocked.has(taskId),todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}catch{return {detail:'summary-only' as const,input:false,todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}}
     continueTask(grant:TaskDispatchContext,instruction:string,sessionId?:string):Promise<unknown>{this.tasks.validateContinuation(grant);return this.taskRuntime(grant.fence.task_id).dispatch(grant,instruction,sessionId)}
 
     #codingTargets:CodingTargetPort|undefined;
@@ -144,7 +144,7 @@ export class PersonalAgentHost {
     #taskApprovals=new Map<string,{conversation_id:string;generation:number;view:ApprovalView}>();
     recordTaskApproval(conversationId:string,generation:number,view:ApprovalView):void{const key=conversationId+':'+generation;if(view.pending_approval)this.#taskApprovals.set(key,{conversation_id:conversationId,generation,view:structuredClone(view)});else this.#taskApprovals.delete(key);this.#notify()}
     taskApprovals(taskId:string):ApprovalView[]{const task=this.tasks.get(taskId);return [...this.#taskApprovals.values()].filter(entry=>entry.conversation_id===task.conversation_id&&entry.generation===(task.conversation_generation??0)&&entry.view.work&&task.work_ids.includes(entry.view.work.work_id)).map(entry=>structuredClone(entry.view))}
-    #pendingDecisions(){const views=[...this.#taskApprovals.values()].map(entry=>({view:entry.view,conversation_id:entry.conversation_id})),global=this.#approvalView?.();if(global?.pending_approval&&!views.some(entry=>entry.view.pending_approval_id===global.pending_approval_id))views.push({view:global,conversation_id:global.work?this.workConversation(global.work.work_id)??'':''});return {pending_approvals:views.filter(entry=>entry.view.pending_approval&&entry.view.pending_approval_id).map(({view,conversation_id})=>({approval_id:view.pending_approval_id!,conversation_id:conversation_id||null,summary:view.operation_summary??'',queued:view.queued})),pending_confirmations:[...this.#confirmationViews].map(([id,view])=>({proposal_id:view.pending_confirmation_id,conversation_id:id||null,summary:view.pending_workspace_display_name??view.workspace_display_name??''}))}}
+    #pendingDecisions(){const views=[...this.#taskApprovals.values()].map(entry=>({view:entry.view,conversation_id:entry.conversation_id})),global=this.#approvalView?.();if(global?.pending_approval&&!views.some(entry=>entry.view.pending_approval_id===global.pending_approval_id))views.push({view:global,conversation_id:global.work?this.workConversation(global.work.work_id)??'':''});return {pending_approvals:views.filter(entry=>entry.view.pending_approval&&entry.view.pending_approval_id).map(({view,conversation_id})=>({approval_id:view.pending_approval_id!,conversation_id:conversation_id||null,summary:view.operation_summary??'',queued:view.queued,task_id:view.work?this.tasks.list().find(task=>task.work_ids.includes(view.work!.work_id))?.id:undefined})),pending_confirmations:[...this.#confirmationViews].map(([id,view])=>({proposal_id:view.pending_confirmation_id,conversation_id:id||null,summary:view.pending_workspace_display_name??view.workspace_display_name??''}))}}
     #presentationMode:PresentationMode|null=null;
     #presentationNeedsRetry=false;
     #presentationListeners=new Set<(mode:PresentationMode,seen?:PresentedDecision)=>void|Promise<void>>();
@@ -194,21 +194,23 @@ export class PersonalAgentHost {
     }
 
     conversationSnapshot(){const c=this.#state.conversations;return {selected_id:c.selected_id,voice_id:c.voice_id,unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(c.items.find(item=>item.id===c.selected_id)?.messages??[])}}
-    async submitConversationText(id:string,text:string,requestId?:string):Promise<void>{
+    async submitConversationText(id:string,text:string,requestId?:string,sourceTodo?:{id:string;version:number}):Promise<void>{
         if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');
+        if(sourceTodo)sourceTodo=sourceTodoSchema.parse(sourceTodo);
         let conversation=this.#state.conversations.items.find(item=>item.id===id);
         if(!conversation)throw Error('conversation_not_found');
         if(this.#clearingConversations.has(id))throw Error('conversation_clearing');
         if(this.#state.conversations.voice_id===id||this.#voiceTransition)throw Error('voice_active');
         if(id==='chat:proactive'&&this.#conversationPool.hasVoice(id)){this.#voiceTransition=true;try{await this.#announcementTail;await this.#conversationPool.stopVoice(id)}finally{this.#voiceTransition=false}}
         if(!this.#conversationPool.acceptsText(id))throw Error('conversation_busy');
-        if(requestId&&conversation.messages.some(message=>message.request_id===requestId))return;
+        if(requestId){const prior=conversation.messages.find(message=>message.request_id===requestId);if(prior){if(prior.text!==text||canonicalJson(prior.source_todo??null)!==canonicalJson(sourceTodo??null))throw Error('request_id_conflict');return}}
+        if(sourceTodo){const todo=this.life.snapshot().todos.find(todo=>todo.id===sourceTodo.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict')}
         const userMessageId=randomUUID();
-        await this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(this.#clearingConversations.has(id))throw Error('conversation_clearing');if(requestId&&item.messages.some(message=>message.request_id===requestId))return;item.messages.push({id:userMessageId,conversation_id:id,role:'user',generation_status:'pending',text,created_at:this.#now().toISOString(),...(requestId?{request_id:requestId}:{})});item.messages=item.messages.slice(-512);item.updated_at=this.#now().toISOString();await this.#commit(next)});
+        await this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(this.#clearingConversations.has(id))throw Error('conversation_clearing');if(requestId){const prior=item.messages.find(message=>message.request_id===requestId);if(prior){if(prior.text!==text||canonicalJson(prior.source_todo??null)!==canonicalJson(sourceTodo??null))throw Error('request_id_conflict');return}}item.messages.push({id:userMessageId,conversation_id:id,role:'user',generation_status:'pending',text,...(sourceTodo?{source_todo:sourceTodo}:{}),created_at:this.#now().toISOString(),...(requestId?{request_id:requestId}:{})});item.messages=item.messages.slice(-512);item.updated_at=this.#now().toISOString();await this.#commit(next)});
         conversation=this.#state.conversations.items.find(item=>item.id===id)!;
         if(!conversation.messages.some(message=>message.id===userMessageId))return;
         const generation=conversation.generation;
-        const operation=this.#conversationPool.run(conversation,text).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';item.messages.push({id:randomUUID(),conversation_id:id,role:'assistant',reply_to:userMessageId,text:result.assistant.slice(0,16000),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{})});item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed'})});
+        const operation=this.#conversationPool.run(conversation,text,sourceTodo?{source_todo:sourceTodo}:{}).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';item.messages.push({id:randomUUID(),conversation_id:id,role:'assistant',reply_to:userMessageId,text:result.assistant.slice(0,16000),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{})});item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed'})});
         this.#conversationRuns.set(id,operation);
         void operation.catch(()=>{this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'status_persistence_failed'})});
     }
@@ -627,9 +629,9 @@ export class PersonalAgentHost {
         return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context));if(parsed.method==='tasks.input'){this.#taskInputRuns.add(run);void run.finally(()=>{this.#taskInputRuns.delete(run);this.#pendingCommands--}).catch(()=>{ /* caller receives rejection */ });return run} this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
         if(this.#recovering&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};
-        const taskCommand=command.method.startsWith('tasks.'),scoped=taskCommand||command.method==='presentation.set';
+        const taskCommand=command.method.startsWith('tasks.'),scoped=taskCommand||command.method==='presentation.set'||command.method==='conversations.approve';
         const client=context?.client_id;
-        if(taskCommand&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
+        if((taskCommand||command.method==='conversations.approve')&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
         const receiptId=scoped?hash({client:client??null,request:command.request_id}):command.request_id;
         const taskRead=command.method==='tasks.get'||command.method==='tasks.list';
         const payload=scoped?hash(canonicalJson(command)):hash(command),prior=taskRead?undefined:this.#state.receipts[receiptId];if(prior)
@@ -646,7 +648,7 @@ export class PersonalAgentHost {
         }
         if(taskCommand){
             if(command.method==='tasks.list'){z.object({}).strict().parse(p);data=this.tasks.list()}
-            else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512),after:z.number().int().nonnegative().default(0)}).strict().parse(p);data={...this.tasks.get(q.task_id),events:this.tasks.events(q.task_id,q.after),approvals:this.taskApprovals(q.task_id),input_receipts:this.tasks.inputReceipts(q.task_id),capabilities:this.taskCapabilities(q.task_id)}}
+            else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512),after:z.number().int().nonnegative().default(0),input_request_id:z.string().min(1).max(128).optional()}).strict().parse(p);const receipt=q.input_request_id?this.tasks.inputReceipts(q.task_id).find(r=>r.request_id===hash({client,request:q.input_request_id})):undefined;data={viewer:{client_id:client,can_takeover:context?.can_takeover!==false},...(receipt?{input_receipt:{request_id:q.input_request_id,status:receipt.status}}:{}),...this.tasks.get(q.task_id),events:this.tasks.events(q.task_id,q.after),approvals:this.taskApprovals(q.task_id),input_receipts:this.tasks.inputReceipts(q.task_id),capabilities:this.taskCapabilities(q.task_id)}}
             else if(command.method==='tasks.delegate'){const {todo_ref,...q}=taskInputSchema.parse(p);if(!this.#state.conversations.items.some(item=>item.id===q.conversation_id))throw Error('conversation_not_found');data=await this.tasks.delegate(receiptId,{...q,conversation_generation:this.#state.conversations.items.find(item=>item.id===q.conversation_id)!.generation,...(todo_ref?{todo_ref}:{})});const task=data as TaskRecord;if(!q.execution_route)data=await this.tasks.wait({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision},'execution_route_required');else{let port:TaskRuntimePort|undefined;try{port=this.taskRuntime(task.id)}catch{/* original runtime unavailable */}if(!port?.routes?.().includes(q.execution_route)){data=await this.tasks.wait({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision},'task_executor_unavailable')}else void this.wakeTask(task.id);}}
             else if(command.method==='tasks.control'){
                 const q=taskFenceSchema.extend({action:z.enum(['takeover','return'])}).strict().parse(p);
@@ -668,7 +670,7 @@ export class PersonalAgentHost {
                     data=task;
                 }else if(command.method==='tasks.continue'){data=await this.tasks.continue(receiptId,fence,{kind:'user',client_id:client!});void this.wakeTask(q.task_id)}else throw Error('task_execution_unavailable');
             }
-            this.#notify();
+            if(!taskRead)this.#notify();
             if(command.method==='tasks.control'&&(p as {action?:string}).action==='return')void this.wakeTask((data as TaskRecord).id);
         }
         else if(command.method==='presentation.set'){
@@ -686,6 +688,7 @@ export class PersonalAgentHost {
             await this.#setPresentation(q.mode);data={mode:q.mode};
         }
         else if(command.method==='presentation.seen'){const q=z.object({approval_id:z.string().min(1).max(128).optional(),conversation_id:z.string().min(1).max(128).optional(),proposal_id:z.string().min(1).max(128).optional()}).strict().parse(p);if(!this.#presentationMode)throw Error('presentation_unavailable');await this.#setPresentation(this.#presentationMode,q);data={mode:this.#presentationMode}}
+        else if(command.method==='conversations.approve'){if(!client)throw Error('unauthenticated');const q=z.object({id:z.string().min(1).max(128),approval_id:z.string().min(1).max(128),approved:z.boolean()}).strict().parse(p);if(!this.#pendingDecisions().pending_approvals.some(a=>a.approval_id===q.approval_id&&a.conversation_id===q.id))throw Error('approval_not_owned');if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');await this.#conversationPool.approve(q.id,q.approval_id,q.approved);data={accepted:true}}
         else if(command.method.startsWith('conversations.')) {data=await this.#conversationCommand(command.method,p);if(command.method==='conversations.open_feed'&&this.#conversationPool){const id=this.#state.conversations.selected_id;const label=typeof p.label==='string'?p.label:'聊聊这条建议';await this.submitConversationText(id,label,'feed:'+String(p.feed_id))}}
         else if (command.method === 'state') {
             await this.revalidate();

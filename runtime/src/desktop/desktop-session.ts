@@ -120,7 +120,7 @@ export interface DesktopBridgeOptions {
   readonly conversationService?:(id:string)=>BridgeService|undefined
   readonly voiceService?:()=>BridgeService|undefined
   readonly sendConversationAudio?: (id:string,pcm:Uint8Array)=>Promise<void>
-  readonly submitConversationText?: (id:string,text:string,requestId?:string)=>Promise<void>
+  readonly submitConversationText?: (id:string,text:string,requestId?:string,sourceTodo?:{id:string;version:number})=>Promise<void>
   readonly validateConversationInput?: (kind:'audio'|'dictation',id:string|undefined)=>void
   readonly token: string
   readonly service: BridgeService
@@ -540,7 +540,7 @@ export class DesktopSocketBridge {
     if (control.type === 'input.text') {
       const submit=async()=>{
         if (this.#dictation) throw new Error('dictation active')
-        if(control.conversation_id){if(!this.#submitConversationText)throw Error('conversation_runtime_unavailable');await this.#submitConversationText(control.conversation_id,control.text,control.request_id);return}
+        if(control.conversation_id){if(!this.#submitConversationText)throw Error('conversation_runtime_unavailable');await this.#submitConversationText(control.conversation_id,control.text,control.request_id,control.source_todo);return}
         if (!this.#service.submitText) throw new Error('text input unavailable')
         await this.#service.submitText(control.text)
       }
@@ -548,7 +548,7 @@ export class DesktopSocketBridge {
       const id=control.request_id
       const result=(ok:boolean,error?:string)=>({type:'input.text_result' as const,request_id:id,ok,...(control.conversation_id?{conversation_id:control.conversation_id}:{}),...(error===undefined?{}:{error})})
       let receipt:ReturnType<typeof result>
-      const hash=createHash('sha256').update(JSON.stringify([control.conversation_id??null,control.text])).digest('hex')
+      const hash=createHash('sha256').update(JSON.stringify([control.conversation_id??null,control.text,control.source_todo??null])).digest('hex')
       const prior=this.#textReceipts.get(id)
       if(control.input_instance_id!==undefined&&control.input_instance_id!==this.#inputInstanceId)receipt=result(false,'outcome_unknown')
       else if(prior)receipt=prior.hash===hash?await prior.result:result(false,'request_id_conflict')
@@ -1611,7 +1611,7 @@ export function buildDesktopRealtimeComposition(
     conversationService:id=>realtime.personalAgent.conversationService(id),
     voiceService:()=>realtime.personalAgent.voiceService(),
     sendConversationAudio:(id,pcm)=>realtime.personalAgent.sendConversationAudio(id,pcm),
-    submitConversationText:(id,text,requestId)=>realtime.personalAgent.submitConversationText(id,text,requestId),
+    submitConversationText:(id,text,requestId,sourceTodo)=>realtime.personalAgent.submitConversationText(id,text,requestId,sourceTodo),
     validateConversationInput:(kind,id)=>{if(realtime.personalAgent.presentationMode==='background')throw Error('presentation_hidden');const state=realtime.personalAgent.conversationSnapshot();if(id!==undefined&&!state.items.some(item=>item.id===id))throw Error('conversation_not_found');if(kind==='audio'&&((id!==undefined&&state.voice_id!==id)||(id===undefined&&state.voice_id!==null)))throw Error('voice_not_owned');if(kind==='dictation'&&state.voice_id!==null)throw Error('voice_active')},
     personalCommand: (command,context) => realtime.personalAgent.command(command,context),
     personalSnapshot: () => realtime.personalAgent.snapshot(),

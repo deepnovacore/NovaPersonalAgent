@@ -145,3 +145,10 @@ test('failed background synchronization cannot be undone by a stale foreground s
  h.c.receive({type:'personal.state',revision:1,presentation_mode:'workbench',conversations:{selected_id:'a',voice_id:null,items:[]}})
  assert.equal(h.c.presentationMode,'background');assert.equal(h.c.presentationReady,false)
 })
+
+test('Todo source drafts stay per conversation and exact submission context survives reconnect',async()=>{
+ const h=harness(),source={id:'todo',version:4};h.c.draft='Todo help';h.c.state().source_todo=source;h.snapshot('b');h.c.draft='Other';assert.equal(h.c.state().source_todo,undefined);h.snapshot('a');assert.deepEqual(h.c.state().source_todo,source)
+ await h.c.submit();const first=h.sent.findLast(f=>f.type==='input.text');assert.deepEqual(first.source_todo,source);assert.equal(h.c.state().source_todo,null)
+ h.c.disconnect();assert.deepEqual(h.c.state('a').source_todo,source);await h.c.connect();assert.deepEqual(h.sent.findLast(f=>f.type==='input.text'),first)
+ h.c.receive({type:'input.text_result',request_id:first.request_id,conversation_id:'a',ok:false,error:'submission_failed'});h.snapshot('a');assert.deepEqual(h.c.state().source_todo,source);h.c.draft='';assert.equal(h.c.state().source_todo,null)
+})
