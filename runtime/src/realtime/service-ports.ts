@@ -1,3 +1,6 @@
+import type {IntakeSession} from '../executors/coding/intake.js'
+import type {ProjectProposal} from '../projects/project-confirmation.js'
+import type {TaskToolHost} from '../core/task-tools.js'
 import type {PromptLanguage} from './prompt-language.js'
 import {
 type AgentController
@@ -167,6 +170,8 @@ export interface ServiceProvider {
 }
 
 export interface RealtimeServiceOptions {
+  readonly onIntakePrepared?:(intake:Readonly<IntakeSession>,proposal:ProjectProposal)=>void
+  readonly taskHost?: TaskToolHost
   readonly onProviderEvent?: (event: RealtimeProviderEvent) => void
   readonly intake?: Pick<
     IntakeOptions,

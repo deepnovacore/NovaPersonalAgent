@@ -119,6 +119,7 @@ type ValidatedCodexAppServerLaunchConfig = Omit<
 }
 
 export interface TransportDeadline {
+  readonly beforeWrite?: () => void
   readonly expiresAtMs: number
   readonly signal?: AbortSignal
 }
@@ -521,6 +522,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
           if (session!.unexpectedServerRequest) {
             throw new CodexProtocolError('unexpected_server_request')
           }
+          deadline.beforeWrite?.()
           session!.turnStartAdmitted = true
           return {threadId: projection.threadId, input: [{type: 'text', text: workOrder}]}
         },
@@ -626,6 +628,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         () => {
           const pair = projection.activePair
           if (pair === null) throw new CodexProtocolError('stale_turn')
+          deadline.beforeWrite?.()
           expectedTurnId = pair[1]
           this.#sensitiveInputs.push(instruction)
           return {

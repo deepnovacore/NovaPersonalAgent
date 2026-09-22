@@ -1,3 +1,4 @@
+import type {TaskDispatchContext} from '../core/task-tools.js'
 import {interleave} from './sampling.js';
 import type {CodingTarget, CodingTargetPort} from './coding-targets.js'
 import type {ApprovalView} from '../core/approval-port.js'
@@ -84,7 +85,17 @@ export interface HostOptions {
 const hash = (s: unknown): string => createHash('sha256').update(JSON.stringify(s)).digest('hex');
 export type PresentationMode = 'background' | 'workbench' | 'orb'
 export interface PresentedDecision {approval_id?:string|undefined;conversation_id?:string|undefined;proposal_id?:string|undefined}
+export interface TaskRuntimePort {
+ input(grant:TaskDispatchContext,sessionId:string,text:string):Promise<'accepted'|'failed'|'unknown'>
+ cancel(workId:string):void
+ dispatch(grant:TaskDispatchContext,instruction:string,sessionId?:string):Promise<unknown>
+}
 export class PersonalAgentHost {
+    #taskRuntimes=new Map<string,TaskRuntimePort>();
+    attachTaskRuntime(conversationId:string,generation:number,port:TaskRuntimePort):()=>void{const key=conversationId+':'+generation;this.#taskRuntimes.set(key,port);return()=>{if(this.#taskRuntimes.get(key)===port)this.#taskRuntimes.delete(key)}}
+    taskRuntime(taskId:string):TaskRuntimePort{const task=this.tasks.get(taskId),port=this.#taskRuntimes.get(task.conversation_id+':'+(task.conversation_generation??0));if(!port)throw Error('task_runtime_unavailable');return port}
+    continueTask(grant:TaskDispatchContext,instruction:string,sessionId?:string):Promise<unknown>{this.tasks.validateContinuation(grant);return this.taskRuntime(grant.fence.task_id).dispatch(grant,instruction,sessionId)}
+
     #codingTargets:CodingTargetPort|undefined;
     setCodingTargets(port:CodingTargetPort):void{this.#codingTargets=port}
     #approvalView:(()=>ApprovalView|undefined)|undefined;
@@ -265,7 +276,7 @@ export class PersonalAgentHost {
         this.#overviewRun = run;
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
-    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json'); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.()); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
+    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify()); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.()); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -308,6 +319,7 @@ export class PersonalAgentHost {
     }
     async close(): Promise<void> {
         await this.#conversationPool?.close();
+        await Promise.allSettled([...this.#taskInputRuns]);
         this.#opened = false;
         this.#prefetched=undefined;
         this.#invalidateOverview();
@@ -391,7 +403,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:false,cancel:false,continue:false}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:false}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         const selected=next.conversations.items.find(c=>c.id===next.conversations.selected_id),latest=selected?.messages.findLast(m=>m.role==='user');
@@ -504,7 +516,7 @@ export class PersonalAgentHost {
         item = { id: randomUUID(), kind: 'task_result', title: '', why_now: '任务已有结果', evidence_refs: [], memory_refs: [], source: { type: 'task', ref: workId }, task_ref: { work_id: workId }, suggestion_id: null, subject_key: 'task:' + workId, priority: 40, created_at: now, updated_at: now, expires_at: null, user_state: 'new', snooze_until: null, lifecycle: 'resolved', delivery: { presented_at: null, notified_at: null, spoken_at: null } };
         next.feed.push(item);
     } item.task_ref={work_id:workId};item.title = title.slice(0, 120); item.kind = 'task_result'; item.lifecycle = 'resolved'; item.updated_at = this.#now().toISOString(); if (item.suggestion_id)
-        this.options.pool.withdraw(item.suggestion_id); if(owner){const prior=owner.messages.find(m=>m.turn_id==='task:'+workId);if(prior)prior.text=title.slice(0,16000);else owner.messages.push({id:'task:'+workId,conversation_id:owner.id,role:'assistant',text:title.slice(0,16000),created_at:item.updated_at,turn_id:'task:'+workId,delivery:'completed'});owner.messages=owner.messages.slice(-512);owner.updated_at=item.updated_at;}await this.#commit(next);if(this.#presentationMode==='orb'&&this.#state.conversations.voice_id!==owner?.id&&!item.delivery.spoken_at)this.#pool(item); }); }
+        this.options.pool.withdraw(item.suggestion_id); const durableTask=this.tasks.list().find(task=>task.work_ids.includes(workId));if(owner&&(!durableTask||(durableTask.conversation_generation??0)===owner.generation)){const prior=owner.messages.find(m=>m.turn_id==='task:'+workId);if(prior)prior.text=title.slice(0,16000);else owner.messages.push({id:'task:'+workId,conversation_id:owner.id,role:'assistant',text:title.slice(0,16000),created_at:item.updated_at,turn_id:'task:'+workId,delivery:'completed'});owner.messages=owner.messages.slice(-512);owner.updated_at=item.updated_at;}await this.#commit(next);if(this.#presentationMode==='orb'&&this.#state.conversations.voice_id!==owner?.id&&!item.delivery.spoken_at)this.#pool(item); }); }
     async spoken(suggestionId: string): Promise<void> { await this.#serial(async () => { const next = structuredClone(this.#state); const feedId=this.options.pool.get(suggestionId)?.content.personal_feed_id; const item = next.feed.find(f => f.id===feedId || f.suggestion_id === suggestionId); if (!item)
         return; item.delivery.spoken_at ??= this.#now().toISOString(); item.updated_at = this.#now().toISOString(); await this.#commit(next); }); }
     async imDelivered(id: string): Promise<void> { await this.#serial(async () => {
@@ -562,8 +574,9 @@ export class PersonalAgentHost {
     }
     else if (p.action === 'open')
         item.user_state = 'seen'; item.updated_at = this.#now().toISOString(); await this.#commit(next); return item; }); }
+    #taskInputRuns=new Set<Promise<unknown>>();
     command(raw: unknown, context?:PersonalCommandContext): Promise<unknown> { const parsed = personalCommandSchema.parse(raw); if (!this.#opened || this.#pendingCommands >= 8)
-        return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context)); this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
+        return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context));if(parsed.method==='tasks.input'){this.#taskInputRuns.add(run);void run.finally(()=>{this.#taskInputRuns.delete(run);this.#pendingCommands--}).catch(()=>{ /* caller receives rejection */ });return run} this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
         const taskCommand=command.method.startsWith('tasks.'),scoped=taskCommand||command.method==='presentation.set';
         const client=context?.client_id;
@@ -583,8 +596,8 @@ export class PersonalAgentHost {
         }
         if(taskCommand){
             if(command.method==='tasks.list'){z.object({}).strict().parse(p);data=this.tasks.list()}
-            else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512)}).strict().parse(p);data=this.tasks.get(q.task_id)}
-            else if(command.method==='tasks.delegate'){const {todo_ref,...q}=taskInputSchema.parse(p);if(!this.#state.conversations.items.some(item=>item.id===q.conversation_id))throw Error('conversation_not_found');data=await this.tasks.delegate(receiptId,{...q,...(todo_ref?{todo_ref}:{})});}
+            else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512)}).strict().parse(p);data={...this.tasks.get(q.task_id),input_receipts:this.tasks.inputReceipts(q.task_id)}}
+            else if(command.method==='tasks.delegate'){const {todo_ref,...q}=taskInputSchema.parse(p);if(!this.#state.conversations.items.some(item=>item.id===q.conversation_id))throw Error('conversation_not_found');data=await this.tasks.delegate(receiptId,{...q,conversation_generation:this.#state.conversations.items.find(item=>item.id===q.conversation_id)!.generation,...(todo_ref?{todo_ref}:{})});}
             else if(command.method==='tasks.control'){
                 const q=taskFenceSchema.extend({action:z.enum(['takeover','return'])}).strict().parse(p);
                 const {action,...fence}=q;
@@ -595,7 +608,14 @@ export class PersonalAgentHost {
                 const fence={task_id:q.task_id,control_revision:q.control_revision,goal_revision:q.goal_revision};
                 this.tasks.assertCurrent(fence,{kind:'user',client_id:client!});
                 if('session_id' in q&&typeof q.session_id==='string'&&!this.tasks.get(q.task_id).session_ids.includes(q.session_id))throw Error('session_not_found');
-                throw Error(command.method==='tasks.input'?'task_input_unavailable':'task_execution_unavailable');
+                if(command.method==='tasks.input'&&'session_id' in q&&typeof q.session_id==='string'&&'text' in q&&typeof q.text==='string'){
+                    if(!this.#taskRuntimes.size)throw Error('task_input_unavailable');const port=this.taskRuntime(q.task_id),session=q.session_id,text=q.text;
+                    const status=await this.tasks.input(receiptId,fence,{kind:'user',client_id:client!},session,text,grant=>port.input(grant,session,text));if(status!=='accepted')throw Error('task_input_'+status);data={status};
+                }else if(command.method==='tasks.cancel'){
+                    const port=this.tasks.get(q.task_id).work_ids.length?this.taskRuntime(q.task_id):undefined,task=await this.tasks.cancel(receiptId,fence,{kind:'user',client_id:client!});
+                    for(const work of task.work_ids)port!.cancel(work);
+                    data=task;
+                }else throw Error('task_execution_unavailable');
             }
             this.#notify();
         }

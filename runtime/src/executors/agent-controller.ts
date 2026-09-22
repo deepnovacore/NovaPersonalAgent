@@ -1,3 +1,4 @@
+import type {TaskDispatchContext} from '../core/task-tools.js'
 /**
  * Host-owned agent control surface.
  *
@@ -16,6 +17,8 @@ export interface AgentDescriptor {
 }
 
 export interface AgentDispatchRequest {
+  readonly taskContext?: TaskDispatchContext
+  readonly continuationGrant?: TaskDispatchContext
   readonly sourceQuotes?: readonly string[]
   readonly conversationContext?: readonly {readonly role: 'user' | 'assistant'; readonly text: string; readonly sequence: number}[]
   readonly instruction: string
@@ -39,6 +42,7 @@ export interface AgentCancelRequest {
 export interface AgentRuntimeDispatchPort {
   cancelPendingDispatch?(delegateId: string): boolean
   dispatch(request: {
+    readonly taskContext?: TaskDispatchContext
     readonly channel: string
     readonly op: string
     readonly request: Readonly<Record<string, JsonValue>>

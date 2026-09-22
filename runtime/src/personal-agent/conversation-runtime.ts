@@ -1,3 +1,4 @@
+import type {TaskDispatchContext} from '../core/task-tools.js'
 import {createTurnDeadline} from './turn-deadline.js'
 import {CodingTargetController} from './coding-targets.js'
 import {ProjectResolutionError, type ProjectExecutorAdapter} from '../executors/coding-executor.js'
@@ -45,6 +46,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     emit({type:'conversation.notice',code:'coding_target_unavailable',message:'之前选择的编程项目或会话已不可用，已清除默认目标。你仍可继续聊天；需要编程时请重新选择目标。'})
    }
   }
+  const ownsTask=()=>options.host.tasks.list().some(task=>task.conversation_id===conversation.id&&(task.conversation_generation??0)===conversation.generation&&task.phase!=='completed'&&task.phase!=='cancelled')
   const history:{user:string;assistant:string}[]=[]
   let user:string|undefined
   for(const message of conversation.messages){if(message.role==='user')user=message.text;else {if(message.delivery!==undefined&&message.delivery!=='completed'){user=undefined;continue;}const paired=message.reply_to?conversation.messages.find(item=>item.id===message.reply_to&&item.role==='user')?.text:user;if(paired!==undefined)history.push({user:paired,assistant:message.text});user=undefined}}
@@ -53,7 +55,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const selectedLlm=requireSelectedCascadedLlmConfig(options.settings)
   const captureFrame=options.settings.conversation_vision_enabled&&options.frameSource&&supportsVision(selectedLlm.provider,selectedLlm.config.model)?(signal:AbortSignal)=>captureConversationFrame(options.frameSource!,signal,core.mediaStore):undefined
   const suffix=createHash('sha256').update(conversation.id+':'+conversation.generation).digest('hex').slice(0,24)
-  const core=buildAssembly({...options,sharedResources:true,cameraModuleEnabled:false,conversationId:conversation.id+':'+conversation.generation,
+  const core=buildAssembly({...options,taskHost:true,sharedResources:true,cameraModuleEnabled:false,conversationId:conversation.id+':'+conversation.generation,
    ...(options.blackboard?{blackboard:{...options.blackboard,path:options.blackboard.path+'.conversation-'+suffix}}:{}),
    ids:{next:namespace=>namespace+'-'+randomUUID()},
    ...(options.codexResource?{executors:[options.codexResource.adapter],agentDescriptors:options.codexResource.agentDescriptor?[options.codexResource.agentDescriptor]:[]}:{}),
@@ -74,7 +76,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   let assistantTurnId:string|undefined
   const captionIds=new Map<string,string>()
   const projectConfirmation=options.codexResource?.mode==='project'?new ProjectConfirmationController({clock:core.runtime.clock,idFactory:()=>randomUUID(),onChange:view=>{notifyWaiting();options.host.recordConfirmation(conversation.id,view);emit(JSON.parse(projectStateMessage(view)) as Record<string,unknown>)}}):undefined
-  const graph=buildRealtimeAssembly({core,provider,memoryReadMode:mode,
+  const graph=buildRealtimeAssembly({core,provider,memoryReadMode:mode,taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
    ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(conversation.id!=='chat:proactive'||options.host.conversationSnapshot().voice_id===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
@@ -97,7 +99,39 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(!seen){const paused=!textOnly&&!voiceEnabled||mode==='background'||mode==='workbench'&&conversation.id==='chat:proactive'&&options.host.conversationSnapshot().voice_id!==conversation.id;if(paused||presentationPaused)await graph.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
   })
   try{await graph.start();if(conversation.prepared&&await maySendPreparedMemory(options.memory(),memoryConsumerFingerprint,conversation.prepared.evidence_refs))await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({trust:'untrusted_external',purpose:'read_only_topic_background',text:conversation.prepared.text.slice(0,2000),evidence_refs:conversation.prepared.evidence_refs.slice(0,2)})},{confirmationTimeout:null,asUserActivation:false,signal:AbortSignal.timeout(10000)})}catch(error){unsubscribeTarget?.();unsubscribePresentation();unsubscribeProgress();unsubscribeApproval?.();await graph.stop();await core.stop();throw error}
+  const detachForeground=()=>{if(ownsTask()){graph.service.detachTaskConversation();voiceEnabled=false;void graph.service.playbackDisconnected({resumeDelivery:false})}}
+  lifetime.addEventListener('abort',detachForeground,{once:true})
+  const adapter=options.codexResource?.mode==='project'?options.codexResource.adapter as ProjectExecutorAdapter:undefined
+  const dispatchTarget=async(grant:TaskDispatchContext,sessionId:string,text:string,receipt?: (status:'accepted'|'failed'|'unknown')=>void)=>{
+   const task=options.host.tasks.get(grant.fence.task_id)
+   if(!task.session_ids.includes(sessionId))throw Error('session_not_found')
+   const target=await adapter?.taskPort?.resolveSession?.(sessionId)
+   if(!target||!adapter)throw Error('task_input_unavailable')
+   if(!grant.stillWanted())return {accepted:false,delegate_id:null}
+   return core.runtime.dispatchTaskExternal({executor:adapter.manifest.name,op:target.active?'steer':'run',origin_ref:grant.origin_ref,request:target.active?{instruction:text,project:target.project}:{work_order:text,project:target.project,session_id:target.session_id,session:'latest'}},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant,receipt)
+  }
+  const detachTaskRuntime=adapter?.taskPort?.resolveSession?options.host.attachTaskRuntime(conversation.id,conversation.generation,{
+   input:async(grant,sessionId,text)=>{
+    let resolve!:(status:'accepted'|'failed'|'unknown')=>void
+    const acknowledged=new Promise<'accepted'|'failed'|'unknown'>(done=>{resolve=done})
+    const admission=await dispatchTarget(grant,sessionId,text,resolve)
+    if(!admission.accepted)return 'failed'
+    return acknowledged
+   },
+   cancel:workId=>{core.runtime.cancelPendingDispatch(workId);adapter.taskPort?.cancelTask(workId)},
+   dispatch:async(grant,instruction,sessionId)=>{
+    options.host.tasks.validateContinuation(grant)
+    const sessions=options.host.tasks.get(grant.fence.task_id).session_ids
+    const target=sessionId??(sessions.length===1?sessions[0]:undefined)
+    if(!target)throw Error('task_session_required')
+    return dispatchTarget(grant,target,instruction)
+   },
+  }):undefined
+  let closed=false
+  const close=async()=>{if(closed)return;closed=true;lifetime.removeEventListener('abort',detachForeground);unsubscribeTasks();detachTaskRuntime?.();unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()}
+  const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
   return {
+   retainTasks:ownsTask,
    parkVoice:async()=>{voiceEnabled=false;await graph.service.playbackDisconnected({resumeDelivery:false})},
    canSwitch:()=>!pending&&!approval?.pending&&!projectConfirmation?.pending&&core.runtime.core.activeDelegates().length===0&&(voiceEnabled?graph.service.pendingHostItemCount===0:true)&&graph.playback.current===null,
    deliverSuggestion:(suggestion,reason)=>graph.service.onSuggestionSelected(suggestion,reason),
@@ -108,13 +142,14 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     const done=new Promise<{assistant:string;turn_id?:string}>((resolve,reject)=>{pending={resolve,reject}}),current=pending
     const abort=()=>{
      pending?.reject(signal.reason??Error('conversation_cleared'));pending=undefined
-     void graph.service.clearConversation().catch(()=>{ /* clear installs its epoch fence before asynchronous teardown */ })
+     if(ownsTask()){graph.service.detachTaskConversation();voiceEnabled=false;void graph.service.playbackDisconnected({resumeDelivery:false})}
+     else void graph.service.clearConversation().catch(()=>{ /* clear installs its epoch fence before asynchronous teardown */ })
     }
     signal.addEventListener('abort',abort,{once:true})
     try{const [,result]=await Promise.all([graph.service.submitText(text),done]);return result}
     finally{deadline.close();if(pending===current)pending=undefined;signal.removeEventListener('abort',abort)}
    },
-   close:async()=>{unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()},
+   close,
    approvalDecision:(id,approved)=>approval?.acceptDecision({approvalId:id,decision:approved?'accept':'decline'})?Promise.resolve():Promise.reject(Error('approval_not_owned')),
   }
  }

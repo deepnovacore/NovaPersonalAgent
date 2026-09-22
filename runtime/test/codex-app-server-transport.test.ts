@@ -3275,3 +3275,24 @@ test('a warmed project routes approval to the later work-scoped controller', asy
     await factory.owner?.dispose().catch(() => undefined)
   }
 })
+
+test('task authority is checked at the final turn/start and turn/steer write boundary', async () => {
+  const owner=new MemoryAppServerOwner([])
+  const transport=createTransport({spawn:async()=>owner})
+  try {
+    let checks=0
+    const result=await transport.run({workOrder:'must not write'}, {}, {expiresAtMs:Date.now()+5000,beforeWrite:()=>{checks++;throw Error('stale_task')}})
+    assert.equal(checks,1)
+    assert.equal(result.turnStartWritten,false)
+    assert.equal(owner.received.some(message=>message.method==='turn/start'),false)
+  }finally{await transport.close()}
+  const factory=new FakeAppServerOwnerFactory('delayed-turn'),active=createTransport(factory)
+  try{
+    const running=active.run({workOrder:'running'}, {}, {expiresAtMs:Date.now()+10000})
+    await settleUntil(()=>factory.owner!==null,'owner')
+    await factory.owner!.waitForBarrier('turn_start')
+    const result=await active.steer({instruction:'stale direct input'},{expiresAtMs:Date.now()+5000,beforeWrite:()=>{throw Error('stale_task')}})
+    assert.equal(result.written,false)
+    factory.owner!.release('turn_start');await running
+  }finally{await active.close().catch(()=>undefined);await factory.owner?.killTree().catch(()=>undefined);await factory.owner?.dispose().catch(()=>undefined)}
+})

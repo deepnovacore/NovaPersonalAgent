@@ -1,3 +1,4 @@
+import type {TaskDispatchContext} from '../core/task-tools.js'
 import type {CodingTargetController} from '../personal-agent/coding-targets.js'
 import {requireSelectedCascadedLlmConfig} from '../config/cascaded-realtime-config.js'
 import {requireIntegratedRealtime} from '../config/config.js'
@@ -197,6 +198,9 @@ export interface RealtimeAssemblyOptions {
   readonly memoryConsumerFingerprint?: string
   readonly nextPlaybackGeneration?:()=>number
   readonly onProviderEvent?: (event:RealtimeProviderEvent)=>void
+  readonly taskFrontendCurrent?: ()=>boolean
+  readonly taskConversationGeneration?: number
+  readonly taskConversationId?: string
   readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
 
   readonly onUsage?: UsageReporter
@@ -323,7 +327,10 @@ export class RealtimeAssembly {
     readonly idFactory: () => string
     readonly wallClockNow: () => number
     readonly unbindSuggestionSelected?: () => void
-    readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
+    readonly taskFrontendCurrent?: ()=>boolean
+  readonly taskConversationGeneration?: number
+  readonly taskConversationId?: string
+  readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
     readonly personalMemory?: PersonalMemoryResource
     readonly createPersonalMemory?: () => PersonalMemoryResource
     readonly personalMemoryTurnTracker: PersonalMemoryTurnTracker
@@ -808,18 +815,22 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     }
   }
   const projectConfirmation = options.sharedPersonal ? options.projectConfirmation : projectAdapter?.confirmationController ?? options.projectConfirmation
+  const taskIntakes=new Map<string,Readonly<IntakeSession>>()
   const commitProjectOperation = projectAdapter === undefined
     ? options.commitProjectOperation
     : (async (operation: ConfirmedProjectOperation) => {
       const targetRevision = options.codingTarget?.revision
       const result = await projectAdapter.commitConfirmed(
         operation,
-        (request, reason, capability, launchAuthorized) => core.runtime.dispatchConfirmedExternal(
-          request,
-          reason,
-          capability,
-          launchAuthorized,
-        ),
+        async(request, reason, capability, launchAuthorized) => {
+          const intake=taskIntakes.get(operation.proposal_id),tasks=options.sharedPersonal?.host.tasks
+          let grant:TaskDispatchContext|undefined
+          if(tasks&&options.taskConversationId){
+            const task=intake?.task_fence?tasks.get(intake.task_fence.task_id):await tasks.delegate('proposal:'+operation.proposal_id,{conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration}),goal:intake?.slots.goal.note??operation.work_order!,acceptance:intake?[intake.slots.acceptance.note].filter(Boolean):[],origin_ref:operation.origin_ref})
+            grant=tasks.continuationContext(intake?.task_fence??{task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
+          }
+          return core.runtime.dispatchConfirmedExternal(request,reason,capability,()=>launchAuthorized()&&(grant?.stillWanted()??true),grant)
+        },
         projectConfirmation,
       )
       if (result.accepted && options.codingTarget && targetRevision !== undefined) {
@@ -946,7 +957,8 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     : (instruction, running) => resolvedIntakeModels.resolveCancelTarget(instruction, running)
   const agentDispatchPort = {
     cancelPendingDispatch: (id: string) => core.runtime.cancelPendingDispatch(id),
-    dispatch: (request: {
+    dispatch: async (request: {
+      readonly taskContext?: TaskDispatchContext
       readonly channel: string
       readonly op: string
       readonly request: Readonly<Record<string, JsonValue>>
@@ -956,6 +968,13 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       // This is the runtime-side fence paired with the controller's last check. It must be
       // immediately adjacent to dispatchExternal so a superseding user turn cannot start work.
       if (!request.stillWanted()) return {accepted: false, delegate_id: null}
+      let taskContext=request.taskContext
+      if(!taskContext&&options.sharedPersonal&&options.taskConversationId&&request.op==='run'&&typeof request.request.work_order==='string'){
+        const task=await options.sharedPersonal.host.tasks.delegate('dispatch:'+idFactory(),{conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration}),goal:request.request.work_order,acceptance:[],origin_ref:request.origin_ref})
+        taskContext=options.sharedPersonal.host.tasks.continuationContext({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
+      }
+      if(!request.stillWanted())return {accepted:false,delegate_id:null}
+      if(taskContext)return core.runtime.dispatchTaskExternal({executor:request.channel,op:request.op,request:request.request,origin_ref:taskContext.origin_ref},USER_AWAITED_TOOL,taskContext)
       return core.runtime.dispatchExternal({
         executor: request.channel, op: request.op, request: request.request, origin_ref: request.origin_ref,
       }, USER_AWAITED_TOOL, undefined, request.stillWanted)
@@ -997,6 +1016,8 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
         ...(previousAssistantReply === undefined ? {} : {previousAssistantReply}),
       }).then(() => undefined)
     }}),
+    onIntakePrepared:(intake,proposal)=>{taskIntakes.clear();taskIntakes.set(proposal.proposal_id,structuredClone(intake))},
+    ...(options.sharedPersonal && options.taskConversationId ? {taskHost:{...(options.taskFrontendCurrent?{isCurrent:options.taskFrontendCurrent}:{}),tasks:options.sharedPersonal.host.tasks,conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration})}} : {}),
     provider: providerSession,
     runtime: core.runtime,
     tools: core.tools,
@@ -1017,14 +1038,22 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       // Spec 08: the coordinator's decision rides with the work order; the adapter re-resolves at run time.
       dispatch: async (intake: IntakeSession, stillWanted?: () => boolean) => {
         const targetRevision = options.codingTarget?.revision
-        const admission = await core.runtime.dispatchExternal({
+        const tasks=options.sharedPersonal?.host.tasks
+        let grant
+        if(tasks&&options.taskConversationId){
+          const task=intake.task_fence?tasks.get(intake.task_fence.task_id):await tasks.delegate('intake:'+intake.intake_id,{conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration}),goal:intake.slots.goal.note,acceptance:[intake.slots.acceptance.note].filter(Boolean),origin_ref:intake.origin_ref})
+          grant=tasks.continuationContext(intake.task_fence??{task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
+        }
+        if(stillWanted?.()===false)return {accepted:false,delegate_id:null,problem:'superseded'}
+        const dispatchRequest={
         executor: projectAdapter.manifest.name, op: 'run', origin_ref: intake.origin_ref,
         request: {
           work_order: intake.work_order!, project: intake.target?.workspace_display_name ?? null,
           ...(intake.target?.session_id ? {session_id: intake.target.session_id} : {}),
           session: options.codingTarget && !intake.target?.session_id ? 'new' : intake.decision?.session ?? 'latest', ...(intake.title === null ? {} : {title: intake.title}),
         },
-      }, USER_AWAITED_TOOL, undefined, stillWanted)
+      }
+        const admission=grant?await core.runtime.dispatchTaskExternal(dispatchRequest,USER_AWAITED_TOOL,grant):await core.runtime.dispatchExternal(dispatchRequest,USER_AWAITED_TOOL,undefined,stillWanted)
         if (admission.accepted && options.codingTarget && targetRevision !== undefined) {
           const selection = intake.target?.workspace_id ? {workspace_id: intake.target.workspace_id, session_id: intake.target.session_id} : null
           try { await options.codingTarget.accepted(selection, admission.delegate_id ?? undefined, targetRevision) }

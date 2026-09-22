@@ -64,6 +64,7 @@ export class AssemblyError extends Error {
 }
 
 export interface AssemblyOptions {
+  readonly taskHost?: boolean
   /** Borrow deployment resources; this scoped core closes only its own state. */
   readonly sharedResources?: boolean
   readonly blackboard?: BlackboardSessionOptions
@@ -286,7 +287,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       || !descriptor.ownedChannels.some(channel => (options.executors ?? []).some(adapter => adapter.manifest.name === channel && adapter.manifest.roles.includes('coding')))),
     ...(cameraModuleEnabled ? [VISION_AGENT_DESCRIPTOR] : []),
   ]
-  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, agentDescriptors})
+  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, agentDescriptors, includeTasks: options.taskHost === true})
 
   const surrogate = new GatewaySurrogate({
     gateway,

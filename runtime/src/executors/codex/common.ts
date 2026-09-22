@@ -246,6 +246,7 @@ export class CodexAdapterCore {
         if (!observerOpen || this.#runToken !== runToken) return
         sideEffectSeen = true
         turnBound = true
+        context.instructionAccepted?.()
         try { options.onTurnBound?.() } catch { /* advisory state never owns the worker */ }
       },
     }
@@ -285,7 +286,7 @@ export class CodexAdapterCore {
       let rawOutcome: TransportOutcome
       try {
         rawOutcome = await awaitCodexPhase(
-          () => this.#transport.run({workOrder}, observer, deadline.transport, null),
+          () => this.#transport.run({workOrder}, observer, context.beforeWrite?{...deadline.transport,beforeWrite:context.beforeWrite}:deadline.transport, null),
           deadline, false,
         )
       } catch (error) {

@@ -288,7 +288,9 @@ export class RealtimeService {
         this.#deliveryReady.set()
       },
       prepare: intake => {
-        return this.#confirmation.prepareIntake(intake)
+        const proposal=this.#confirmation.prepareIntake(intake)
+        options.onIntakePrepared?.(intake,proposal)
+        return proposal
       },
     }
     this.#approvalHost = new ApprovalHost({
@@ -378,6 +380,7 @@ export class RealtimeService {
       throw new TypeError('agent controller registry does not match compiled tool descriptors')
     }
     this.#continuations = new ToolContinuations({
+      ...(options.taskHost ? {taskHost:options.taskHost} : {}),
       session: this.session, host: this.#host, runtime: this.#runtime,
       bridge: this.#bridge, tools: this.#tools, intake: this.#intake, approvalHost: this.#approvalHost,
       coding: this.#coding, telemetry: this.#telemetry, idFactory: this.#idFactory,
@@ -647,6 +650,10 @@ export class RealtimeService {
   #discardedInputEpoch = -1
 
   /** Replace only the provider session; host work remains owned by the existing graph. */
+  detachTaskConversation():void{
+    this.#conversationClearRevision++
+    this.#intakeUser=null
+  }
   discardInputAudio(): Promise<void> {
     // A phone-owned provider may still be awaiting its first successful SDK handshake.
     if (!this.#connected) return Promise.resolve()

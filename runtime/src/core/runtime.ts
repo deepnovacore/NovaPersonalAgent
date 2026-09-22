@@ -1,3 +1,5 @@
+import {taskGrantService} from '../personal-agent/tasks.js'
+import type {TaskDispatchContext} from './task-tools.js'
 import {CodingProgressNarrationState, codingProgressSummary} from '../realtime/coding-progress-narration.js'
 import {createHash, randomUUID} from 'node:crypto'
 import { canonicalJson, compareCodePoints } from '../text/canonical-json.js'
@@ -651,6 +653,12 @@ export class CoreRuntime {
    * caller cite a memory item that has aged out of the recent window -- the one check that turns
    * "may only reference what it has actually seen" into something enforceable.
    */
+  dispatchTaskExternal(request:DelegateRequest,reason:WakeReason,grant:TaskDispatchContext):RuntimeDispatchResult {
+    taskGrantService(grant)
+    if(request.origin_ref!==grant.origin_ref)throw Error('invalid_origin_ref')
+    const admission=this.#dispatch(request,reason,new Set([grant.origin_ref]))
+    return {accepted:admission.accepted,delegate_id:admission.delegate_id,problem:admission.problem}
+  }
   dispatchExternal(request: DelegateRequest, reason: WakeReason): RuntimeDispatchResult {
     const admission = this.#dispatch(request, reason, this.#visibleMemoryRefs())
     return {

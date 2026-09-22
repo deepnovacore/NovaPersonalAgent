@@ -13,6 +13,7 @@ export type ConversationsState=z.infer<typeof conversationsStateSchema>
 export function createConversation(kind:Conversation['kind'],title:string,subject_key:string|null=null,id:string=randomUUID()):Conversation {const at=new Date().toISOString();return {id,kind,title,subject_key,coding_target:null,created_at:at,updated_at:at,generation:0,messages:[],feed_ids:[],read_through_id:null,prepared:null}}
 export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat','新对话',null,'chat:main'),createConversation('proactive','主动提醒',null,'chat:proactive')],work_owners:{},approval_owners:{}}}
 export interface ConversationRuntime {
+ retainTasks?():boolean
  runTurn(text:string,signal:AbortSignal):Promise<{assistant:string;turn_id?:string}>
  parkVoice?():Promise<void>
  canSwitch?():boolean
@@ -28,6 +29,7 @@ export type ConversationRuntimeFactory=(conversation:Readonly<Conversation>,emit
 export class ConversationRuntimePool {
  readonly #modes=new Map<string,'text'|'voice'|'parked'>()
  readonly #lifetimes=new Map<string,AbortController>()
+ readonly #retired=new Map<string,Set<ConversationRuntime>>()
  readonly #ready=new Map<string,ConversationRuntime>()
  readonly #runtimes=new Map<string,Promise<ConversationRuntime>>()
  readonly #tails=new Map<string,Promise<unknown>>()
@@ -54,14 +56,14 @@ export class ConversationRuntimePool {
  hasVoice(id:string):boolean{return this.#modes.get(id)==='voice'}
  acceptsText(id:string):boolean{return this.#modes.get(id)!=='voice'&&(this.#modes.get(id)!=='parked'||this.#ready.get(id)?.canSwitch?.()!==false)}
  async stopVoice(id:string):Promise<void>{const runtime=this.#ready.get(id);await runtime?.parkVoice?.();this.#modes.set(id,'parked')}
- async clear(id:string):Promise<void>{this.#modes.delete(id);this.#lifetimes.get(id)?.abort();this.#lifetimes.delete(id);this.#controllers.get(id)?.abort();await this.#tails.get(id);const runtime=this.#runtimes.get(id);this.#runtimes.delete(id);this.#ready.delete(id);this.#controllers.delete(id);this.#tails.delete(id);if(runtime)await (await runtime).close()}
+ async clear(id:string):Promise<void>{this.#modes.delete(id);this.#lifetimes.get(id)?.abort();this.#lifetimes.delete(id);this.#controllers.get(id)?.abort();await this.#tails.get(id);const runtime=this.#runtimes.get(id);this.#runtimes.delete(id);this.#ready.delete(id);this.#controllers.delete(id);this.#tails.delete(id);if(runtime){const ready=await runtime;if(!this.#closed&&ready.retainTasks?.()){await ready.parkVoice?.();const retained=this.#retired.get(id)??new Set<ConversationRuntime>();retained.add(ready);this.#retired.set(id,retained)}else await ready.close()}}
  async startVoice(conversation:Conversation):Promise<void>{if(this.#busy.has(conversation.id)||this.#ready.get(conversation.id)?.canSwitch?.()===false)throw Error('conversation_busy');await this.clear(conversation.id);this.#modes.set(conversation.id,'voice');const lifetime=new AbortController();this.#lifetimes.set(conversation.id,lifetime);const runtime=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(conversation.id)===lifetime)this.emit({...frame,conversation_id:conversation.id})},'voice',lifetime.signal);this.#runtimes.set(conversation.id,runtime);try{this.#ready.set(conversation.id,await runtime)}catch(error){lifetime.abort();if(this.#runtimes.get(conversation.id)===runtime){this.#runtimes.delete(conversation.id);this.#lifetimes.delete(conversation.id);this.#modes.delete(conversation.id)}throw error}}
  deliverSuggestion(id:string,suggestion:Suggestion,reason:WakeReason):void{this.#ready.get(id)?.deliverSuggestion?.(suggestion,reason)}
- workConversation(id:string):string|undefined{for(const [conversation,runtime] of this.#ready)if(runtime.ownsWork?.(id))return conversation;return undefined}
+ workConversation(id:string):string|undefined{for(const [conversation,runtime] of this.#ready)if(runtime.ownsWork?.(id))return conversation;for(const [conversation,runtimes] of this.#retired)for(const runtime of runtimes)if(runtime.ownsWork?.(id))return conversation;return undefined}
  service(id:string):BridgeService|undefined{return this.#ready.get(id)?.bridgeService}
  async sendAudio(id:string,pcm:Uint8Array):Promise<void>{const runtime=await this.#runtimes.get(id);if(!runtime?.sendAudio)throw Error('voice_unavailable');await runtime.sendAudio(pcm)}
- async approve(id:string,approvalId:string,approved:boolean):Promise<void>{const runtime=await this.#runtimes.get(id);if(!runtime?.approvalDecision)throw Error('approval_unavailable');await runtime.approvalDecision(approvalId,approved)}
- async close():Promise<void>{this.#closed=true;await Promise.all([...new Set([...this.#controllers.keys(),...this.#runtimes.keys()])].map(id=>this.clear(id)))}
+ async approve(id:string,approvalId:string,approved:boolean):Promise<void>{const candidates=[await this.#runtimes.get(id),...(this.#retired.get(id)??[])];for(const runtime of candidates){if(!runtime?.approvalDecision)continue;try{await runtime.approvalDecision(approvalId,approved);return}catch{}}throw Error('approval_unavailable')}
+ async close():Promise<void>{this.#closed=true;await Promise.all([...new Set([...this.#controllers.keys(),...this.#runtimes.keys()])].map(id=>this.clear(id)));await Promise.all([...this.#retired.values()].flatMap(items=>[...items].map(runtime=>runtime.close())));this.#retired.clear()}
 }
 
 /** Acknowledgements cover only messages actually visible, never later arrivals. */

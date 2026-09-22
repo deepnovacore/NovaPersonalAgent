@@ -320,6 +320,7 @@ export class ProjectTransport implements CodexAppServerTransport {
     completionDeadline?: TransportDeadline | null,
   ): Promise<TransportOutcome> {
     assert.equal(completionDeadline, null, 'project transport must forward the explicit unbounded completion policy')
+    deadline.beforeWrite?.()
     this.workOrders.push(input.workOrder)
     this.runInputs.push(input)
     this.observers.push(observer)
@@ -339,7 +340,8 @@ export class ProjectTransport implements CodexAppServerTransport {
     })])
   }
 
-  steer(): Promise<SteerTransportResult> {
+  steer(_input:unknown,deadline:TransportDeadline): Promise<SteerTransportResult> {
+    deadline.beforeWrite?.()
     return Promise.resolve({code: 'accepted', written: true})
   }
 

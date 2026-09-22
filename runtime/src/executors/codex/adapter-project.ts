@@ -145,6 +145,15 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
   readonly #slots = new Map<string, RunSlot>()
   readonly #taskWorkspaces = new Map<string, {readonly workspace_id: string; readonly session_id?: string}>()
   readonly taskPort = {
+    resolveSession:async(sessionId:string)=>{
+      const snapshot=await this.#store.snapshot(),session=snapshot.sessions.find(item=>item.session_id===sessionId)
+      const workspace=snapshot.workspaces.find(item=>item.workspace_id===session?.workspace_id)
+      if(!session||!workspace||session.state!=='ready')throw Error('session_not_found')
+      await this.#store.revalidateWorkspace(workspace.workspace_id)
+      const activeSlot=this.#slots.get(workspace.workspace_id)
+      if(activeSlot&&this.#taskWorkspaces.get(activeSlot.work.work_id)?.session_id!==sessionId)throw Error('session_active')
+      return {project:workspace.display_name,session_id:sessionId,active:!!activeSlot}
+    },
     cancelTask: (workId: string): 'cancelling' | 'not_running' => this.#cancelWork(workId) ? 'cancelling' : 'not_running',
     taskDirectory: async (workId: string): Promise<string | null> => {
       const workspaceId = this.#taskWorkspaces.get(workId)?.workspace_id
@@ -963,6 +972,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       throw error
     }
     const sessionId = session.session_id
+    await context.bindSession?.(sessionId)
     this.#taskWorkspaces.set(slot.work.work_id, {workspace_id: workspace.workspace_id, session_id: sessionId})
     const transport = new ThreadObservingTransport(inner, {
       threadName: resumed === null ? title : null,
