@@ -290,6 +290,13 @@ export class AppServerTurnProjection {
     else if(item.type==='commandExecution'||item.type==='fileChange'||item.type==='mcpToolCall'||item.type==='webSearch'){
       kind='tool';text=String(item.type)+' '+stage+(typeof item.status==='string'&&['completed','failed','inProgress','declined'].includes(item.status)?': '+item.status:'')
     }else return
+    const status=typeof item.status==='string'&&['completed','failed','inProgress','declined'].includes(item.status)?item.status:null
+    if(stage==='completed'&&item.type==='commandExecution')text=JSON.stringify({type:item.type,status,command:typeof item.command==='string'?item.command:null,output:typeof item.aggregatedOutput==='string'?item.aggregatedOutput:null,exit_code:Number.isSafeInteger(item.exitCode)?item.exitCode:null})
+    if(stage==='completed'&&item.type==='mcpToolCall'){
+      const result=isPlainObject(item.result)&&Array.isArray(item.result.content)?item.result.content:[]
+      const readback=result.filter((part):part is Record<string,unknown>=>isPlainObject(part)&&part.type==='text'&&typeof part.text==='string').map(part=>part.text as string).join('\n')
+      text=JSON.stringify({type:item.type,server:typeof item.server==='string'?item.server:null,tool:typeof item.tool==='string'?item.tool:null,status,is_error:isPlainObject(item.result)&&typeof item.result.isError==='boolean'?item.result.isError:null,readback})
+    }
     this.#publicStages.add(key)
     const refs:string[]=[]
     if(item.type==='fileChange'&&Array.isArray(item.changes)&&this.#workspace)for(const change of item.changes){

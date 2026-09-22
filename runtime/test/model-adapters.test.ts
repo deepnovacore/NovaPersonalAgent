@@ -243,3 +243,12 @@ test('task verifier sends its actual decision schema through the JSON-object gat
   assert.deepEqual(receivedFormat,{type:'json_object'});assert.deepEqual(receivedSchema,z.toJSONSchema(taskDecisionSchema));assert.deepEqual(actual,decision);const corrected=await tasks.applyDecision(fence,actual);assert.equal(corrected.corrections,1);assert.equal(corrected.phase,'queued');assert.equal(requests,1)
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('task evaluation separates accepted user steering from executor evidence and requests durable reconciliation',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-input-verifier-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{await tasks.open();let task=await tasks.delegate('declare',{conversation_id:'c',goal:'red',acceptance:['red observed'],origin_ref:'user:1'});let fence={task_id:task.id,control_revision:0,goal_revision:0};await tasks.bindWork(fence,'work','session');task=await tasks.controlClient('take',fence,'client','takeover');fence={...fence,control_revision:task.control_revision};await tasks.input('blue',fence,task.controller,'session','Change goal to blue',()=>Promise.resolve('accepted'));task=await tasks.controlClient('return',fence,'client','return')
+ const decision={kind:'reconcile',input_refs:['blue'],goal_change:{goal:'blue',acceptance:['blue observed']}},gateway=new ScriptedGateway([],JSON.stringify(decision)),verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'})
+ const evaluate=verifier.evaluateTask.bind(verifier) as (...args:unknown[])=>Promise<unknown>;assert.deepEqual(await evaluate(task,[],new AbortController().signal,tasks.inputReceipts(task.id)),decision)
+ const prompt=JSON.parse(gateway.completions[0]!.prompt) as {accepted_user_inputs:{request_id:string;text:string}[]};assert.deepEqual(prompt.accepted_user_inputs.map(x=>({request_id:x.request_id,text:x.text})),[{request_id:'blue',text:'Change goal to blue'}])
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})

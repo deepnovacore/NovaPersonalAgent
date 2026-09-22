@@ -479,3 +479,18 @@ test('public activity waits for turn response identity and mismatched responses 
   else{projection.bindTurnResponse({turn:{id:responseId}});assert.equal(events.length,1);projection.bindTurnResponse({turn:{id:responseId}});assert.equal(events.length,1)}
  }
 })
+
+test('public check observations preserve command output and managed MCP readback without reasoning or image payloads',()=>{
+ const events:ExecutorActivity[]=[],projection=new AppServerTurnProjection({clock:new VirtualClock(),onActivity:event=>events.push(event),sanitizePublicText:text=>({text:text.replaceAll('SECRET','[REDACTED]'),truncated:false})})
+ projection.bindThread(ephemeralThread(),{workspace:'/workspace'});projection.notification('turn/started',{threadId:'PRIVATE-THREAD',turn:{id:'PRIVATE-TURN'}});projection.bindTurnResponse({turn:{id:'PRIVATE-TURN'}})
+ item(projection,{id:'cmd',type:'commandExecution',command:'npm test',aggregatedOutput:'2 passed SECRET',exitCode:0,status:'completed',reasoning:'PRIVATE_REASONING'})
+ item(projection,{id:'readback',type:'mcpToolCall',server:'nova_computer',tool:'browser_snapshot',status:'completed',result:{content:[{type:'text',text:'button is blue'},{type:'image',data:'PRIVATE_IMAGE',mimeType:'image/png'}]},arguments:{secret:'SECRET'}})
+ const observed=JSON.stringify(events);assert.match(observed,/npm test/u);assert.match(observed,/2 passed/u);assert.match(observed,/exit_code/u);assert.match(observed,/button is blue/u);assert.doesNotMatch(observed,/PRIVATE_REASONING|PRIVATE_IMAGE|SECRET/u)
+})
+
+test('truncated check observations advertise missing output and redact secrets before clipping',()=>{
+ const events:ExecutorActivity[]=[],secret='SECRET-TOKEN',projection=new AppServerTurnProjection({clock:new VirtualClock(),onActivity:event=>events.push(event),sanitizePublicText:text=>({text:text.replaceAll(secret,'[REDACTED]'),truncated:false})})
+ projection.bindThread(ephemeralThread(),{workspace:'/workspace'});projection.notification('turn/started',{threadId:'PRIVATE-THREAD',turn:{id:'PRIVATE-TURN'}});projection.bindTurnResponse({turn:{id:'PRIVATE-TURN'}})
+ item(projection,{id:'cmd',type:'commandExecution',command:'npm test',aggregatedOutput:'x'.repeat(9996)+secret+'y'.repeat(10000),exitCode:0,status:'completed'})
+ assert.equal(events[0]?.text_truncated,true);assert.ok(events[0].text.length<=16000);assert.doesNotMatch(events[0].text,/SECR/u)
+})

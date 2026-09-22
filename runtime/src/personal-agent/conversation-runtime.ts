@@ -183,7 +183,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    routes:()=>['nova',...graph.service.taskRoutes()],
    ready:task=>{if(currentResponse||taskTurnContinuing)deferredTaskWakes.add(task.id);return currentResponse===undefined&&!taskTurnContinuing},
    detail:adapter?'public-events':'summary-only',
-   evaluate:(task,signal)=>taskVerifier.evaluateTask(task,options.host.tasks.evidence(task.id),signal),
+   evaluate:(task,signal)=>taskVerifier.evaluateTask(task,options.host.tasks.evidence(task.id),signal,options.host.tasks.inputReceipts(task.id)),
    input:async(grant,sessionId,text)=>{
     let resolve!:(status:'accepted'|'failed'|'unknown')=>void
     const acknowledged=new Promise<'accepted'|'failed'|'unknown'>(done=>{resolve=done})

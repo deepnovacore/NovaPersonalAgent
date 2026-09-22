@@ -133,7 +133,7 @@ export class PersonalAgentHost {
     attachTaskRuntime(conversationId:string,generation:number,port:TaskRuntimePort):()=>void{const key=conversationId+':'+generation;this.#taskRuntimes.set(key,port);return()=>{if(this.#taskRuntimes.get(key)===port)this.#taskRuntimes.delete(key)}}
     taskRuntime(taskId:string):TaskRuntimePort{const task=this.tasks.get(taskId),port=this.#taskRuntimes.get(task.conversation_id+':'+(task.conversation_generation??0));if(!port)throw Error('task_runtime_unavailable');return port}
     taskCapabilities(taskId:string){try{const port=this.taskRuntime(taskId);return {detail:port.detail??'summary-only',input:port.detail!=='summary-only'&&!this.#recovering&&!this.#recoveryBlocked.has(taskId),todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}catch{return {detail:'summary-only' as const,input:false,todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}}
-    continueTask(grant:TaskDispatchContext,instruction:string,sessionId?:string):Promise<unknown>{this.tasks.validateContinuation(grant);return this.taskRuntime(grant.fence.task_id).dispatch(grant,instruction,sessionId)}
+    continueTask(grant:TaskDispatchContext,instruction:string,sessionId?:string):Promise<unknown>{this.tasks.validateContinuation(grant);const task=this.tasks.get(grant.fence.task_id),inputs=this.tasks.acceptedUserInputs(task.id).map(({request_id,text})=>({request_id,text}));return this.taskRuntime(task.id).dispatch(grant,inputs.length?JSON.stringify({purpose:'continue_authorized_task',goal:task.goal,acceptance:task.acceptance,accepted_user_inputs:inputs,instruction}):instruction,sessionId)}
 
     #codingTargets:CodingTargetPort|undefined;
     setCodingTargets(port:CodingTargetPort):void{this.#codingTargets=port}
@@ -674,7 +674,7 @@ export class PersonalAgentHost {
                 if('session_id' in q&&typeof q.session_id==='string'&&!this.tasks.get(q.task_id).session_ids.includes(q.session_id))throw Error('session_not_found');
                 if(command.method==='tasks.input'&&'session_id' in q&&typeof q.session_id==='string'&&'text' in q&&typeof q.text==='string'){
                     if(!this.#taskRuntimes.size)throw Error('task_input_unavailable');const port=this.taskRuntime(q.task_id),session=q.session_id,text=q.text;
-                    inputStatus='unknown';const status=await this.tasks.input(receiptId,fence,{kind:'user',client_id:client!},session,text,grant=>port.input(grant,session,text));if(status==='failed')inputStatus='failed';if(status!=='accepted')throw Error('task_input_'+status);data={status};
+                    inputStatus='unknown';const status=await this.tasks.input(receiptId,fence,{kind:'user',client_id:client!},session,text,grant=>port.input(grant,session,text));void this.wakeTask(q.task_id);if(status==='failed')inputStatus='failed';if(status!=='accepted')throw Error('task_input_'+status);data={status};
                 }else if(command.method==='tasks.cancel'){
                     const task=await this.cancelTask(receiptId,fence,{kind:'user',client_id:client!});
                     data=task;

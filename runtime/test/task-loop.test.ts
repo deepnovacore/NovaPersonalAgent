@@ -98,3 +98,67 @@ test('a pending Nova delivery coalesces repeated wakes until its exact dispositi
  const f=await setup();let executions=0;await f.tasks.recordDelivery(fence(f.task),'initial','incomplete');const loop=new TaskLoop(f.tasks,{evaluate:async()=>({kind:'correct',instruction:'finish',evidence_refs:['task-delivery:initial']}),execute:async(_task,_instruction,bound)=>{executions++;await f.tasks.beginDelivery(bound,'delivery:'+executions)},syncTodo:async()=> 'synced'})
  try{await loop.wake(f.task.id);for(let i=0;i<3;i++)await loop.wake(f.task.id);assert.equal(executions,1);assert.equal(f.tasks.get(f.task.id).corrections,1);await f.tasks.finishDelivery(f.task.id,'wrong');await loop.wake(f.task.id);assert.equal(executions,1);await f.tasks.finishDelivery(f.task.id,'delivery:1');await loop.wake(f.task.id);assert.equal(executions,2)}finally{await loop.close();await f.close()}
 })
+
+test('unknown primary outcomes fence evaluation, decisions, continue and direct input in the same process',async()=>{
+ const f=await setup();let evaluated=0,executions=0,sent=0
+ try{await f.tasks.bindWork(fence(f.task),'uncertain','session');await f.tasks.recordWorkOutcome('uncertain','unknown',{reason:'lost acknowledgement'})
+ const loop=new TaskLoop(f.tasks,{evaluate:async()=>{evaluated++;return {kind:'correct',instruction:'retry',evidence_refs:[]}},execute:async()=>{executions++},syncTodo:async()=> 'synced'})
+ await loop.wake(f.task.id);assert.equal(evaluated,0);assert.equal(executions,0);assert.equal(f.tasks.get(f.task.id).waiting_reason,'task_effect_unknown')
+ for(const decision of [{kind:'complete' as const,evidence_refs:['task-work:uncertain']},{kind:'correct' as const,instruction:'retry',evidence_refs:[]}])await assert.rejects(f.tasks.applyDecision(fence(f.task),decision),/task_effect_unknown/)
+ await assert.rejects(f.tasks.continue('continue',fence(f.task),{kind:'nova'}),/task_effect_unknown/)
+ await assert.rejects(f.tasks.input('input',fence(f.task),{kind:'nova'},'session','retry',async()=>{sent++;return 'accepted'}),/task_effect_unknown/);assert.equal(sent,0)
+ await assert.rejects(f.tasks.reserveInitial(fence(f.task)),/task_effect_unknown/);await loop.close()
+ }finally{await f.close()}
+})
+
+test('changed goal completes the task but conflicts with the original delegated Todo scope',async()=>{
+ const f=await setup(),life=new LifeService(f.tasks.path+'.life');await life.open()
+ try{const todo=await life.mutate({op:'create',kind:'todo',title:'Implement login'},'todo');let task=await f.tasks.delegate('linked-scope',{conversation_id:'c',goal:'Implement login',acceptance:['login works'],origin_ref:'user:1',todo_ref:todo})
+ task=await f.tasks.reviseGoal('plan-only',fence(task),{kind:'nova'},'Only write a plan; do not implement',['plan delivered']);await f.tasks.recordDelivery(fence(task),'plan','Implementation plan')
+ const loop=new TaskLoop(f.tasks,{evaluate:async()=>({kind:'complete',evidence_refs:['task-delivery:plan']}),execute:async()=>assert.fail('no implementation'),syncTodo:t=>life.completeTaskTodo(t)})
+ await loop.wake(task.id);assert.equal(f.tasks.get(task.id).phase,'completed');assert.equal(f.tasks.get(task.id).todo_sync,'conflict');assert.notEqual(life.snapshot().todos[0]!.status,'done');await loop.close()
+ }finally{await life.close();await f.close()}
+})
+
+test('accepted direct steering must reconcile before verification and persists a fenced goal change',async()=>{
+ const f=await setup();try{await f.tasks.bindWork(fence(f.task),'work','session');let task=await f.tasks.controlClient('take',fence(f.task),'client','takeover')
+ await f.tasks.input('blue',fence(task),task.controller,'session','Change the goal to blue',async()=> 'accepted');await f.tasks.recordWorkOutcome('work','ok',{final:'blue'});task=await f.tasks.controlClient('return',fence(task),'client','return')
+ await assert.rejects(f.tasks.applyDecision(fence(task),{kind:'complete',evidence_refs:['task-work:work']}),/task_input_reconciliation_required/)
+ const reconciliation={kind:'reconcile',input_refs:['blue'],goal_change:{goal:'Make blue',acceptance:['blue observed']}}
+ task=await f.tasks.applyDecision(fence(task),reconciliation as never);assert.equal(task.goal,'Make blue');assert.equal(task.goal_revision,1)
+ const reopened=new TaskService(f.tasks.path);await reopened.open();assert.equal(reopened.get(task.id).goal,'Make blue');await assert.rejects(reopened.applyDecision(fence(task),reconciliation as never),/task_input_reconciliation_stale/);await reopened.close()
+ await assert.rejects(f.tasks.applyDecision(fence(task),{kind:'complete',evidence_refs:['task-work:work']}),/invalid_evidence/)
+ }finally{await f.close()}
+})
+
+test('new accepted steering during reconciliation rejects the stale input cursor and ordinary steering remains context',async()=>{
+ const f=await setup();try{await f.tasks.bindWork(fence(f.task),'work','session');await f.tasks.recordWorkOutcome('work','ok',{});let task=await f.tasks.controlClient('take',fence(f.task),'client','takeover')
+ await f.tasks.input('one',fence(task),task.controller,'session','Use existing CSS',async()=> 'accepted');await f.tasks.input('two',fence(task),task.controller,'session','Keep keyboard support',async()=> 'accepted');task=await f.tasks.controlClient('return',fence(task),'client','return')
+ await assert.rejects(f.tasks.applyDecision(fence(task),{kind:'reconcile',input_refs:['one'],goal_change:null} as never),/task_input_reconciliation_stale/)
+ task=await f.tasks.applyDecision(fence(task),{kind:'reconcile',input_refs:['one','two'],goal_change:null} as never);assert.equal(task.goal_revision,0);assert.equal(f.tasks.inputReceipts(task.id).filter(x=>x.status==='accepted').length,2)
+ await f.tasks.applyDecision(fence(task),{kind:'complete',evidence_refs:['task-work:work']});assert.equal(f.tasks.get(task.id).phase,'completed')
+ }finally{await f.close()}
+})
+
+test('work evidence carries bounded actual check observations for the exact work and session, never prose-only proof',async()=>{
+ const f=await setup();try{await f.tasks.bindWork(fence(f.task),'work','session');await f.tasks.bindWork(fence(f.task),'other','other-session')
+ await f.tasks.appendEvent({task_id:f.task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',item_id:'check',stage:'completed',kind:'tool',text:'{"type":"commandExecution","command":"npm test","exit_code":0,"output":"2 passed"}',refs:[]},'check')
+ await f.tasks.appendEvent({task_id:f.task.id,work_id:'other',session_id:'other-session',kind:'tool',stage:'completed',text:'unrelated check',refs:[]},'other')
+ await f.tasks.recordWorkOutcome('work','ok',{final_message:'tests passed'});const evidence=f.tasks.evidence(f.task.id)[0] as unknown as {observations?:{work_id:string;session_id:string;text:string}[]}
+ assert.equal(evidence.observations?.length,1);assert.equal(evidence.observations?.[0]?.work_id,'work');assert.equal(evidence.observations?.[0]?.session_id,'session');assert.match(evidence.observations?.[0]?.text??'',/2 passed/u)
+ await f.tasks.recordWorkOutcome('other','ok',{final_message:'UI passed'});assert.doesNotMatch(JSON.stringify(evidence.observations),/UI passed|unrelated/u)
+ }finally{await f.close()}
+})
+
+test('reconciling ordinary steering invalidates a verifier started before that reconciliation',async()=>{
+ const f=await setup();try{await f.tasks.bindWork(fence(f.task),'work','session');await f.tasks.recordWorkOutcome('work','ok',{});let task=await f.tasks.controlClient('take',fence(f.task),'client','takeover');await f.tasks.input('css',fence(task),task.controller,'session','Use existing CSS',async()=> 'accepted');task=await f.tasks.controlClient('return',fence(task),'client','return');const before=fence(task)
+ await f.tasks.applyDecision(before,{kind:'reconcile',input_refs:['css'],goal_change:null});await assert.rejects(f.tasks.applyDecision(before,{kind:'complete',evidence_refs:['task-work:work']}),/stale_task/)
+ }finally{await f.close()}
+})
+
+test('unknown work arriving after effect admission fences the last dispatch boundary',async()=>{
+ const f=await setup();let executed=0;const mark=f.tasks.markEffectDispatching.bind(f.tasks)
+ try{await f.tasks.recordDelivery(fence(f.task),'partial','incomplete');f.tasks.markEffectDispatching=async effect=>{await mark(effect);await f.tasks.bindWork(fence(f.tasks.get(f.task.id)),'late');await f.tasks.recordWorkOutcome('late','unknown',{})}
+ const loop=new TaskLoop(f.tasks,{evaluate:async()=>({kind:'correct',instruction:'finish',evidence_refs:['task-delivery:partial']}),execute:async()=>{executed++},syncTodo:async()=> 'synced'});await loop.wake(f.task.id);assert.equal(executed,0);assert.equal(f.tasks.get(f.task.id).waiting_reason,'task_effect_unknown');await loop.close()
+ }finally{await f.close()}
+})

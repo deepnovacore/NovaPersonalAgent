@@ -114,6 +114,8 @@ export class LifeService{
  snapshot(){const state=structuredClone(this.#state);return {todos:state.todos.map(r=>({...r,kind:'todo' as const})),ideas:state.ideas.map(r=>({...r,kind:'idea' as const})),profile:state.profile,goals:state.goals.map(g=>{const todos=state.todos.filter(t=>t.goal_id===g.id&&t.status!=='cancelled');return {...g,kind:'goal' as const,progress:{done:todos.filter(t=>t.status==='done').length,total:todos.length}}})}}
  async completeTaskTodo(task:TaskRecord):Promise<'synced'|'conflict'>{
   if(!task.todo_ref)return 'synced'
+  // The Todo was delegated at revision zero; a changed scope needs explicit reconciliation.
+  if(task.goal_revision!==0)return 'conflict'
   const receipt='task-complete:'+task.id+':'+task.goal_revision
   await this.refresh()
   // Receipt is checked before the captured-version/state guard, including a lost acknowledgement.

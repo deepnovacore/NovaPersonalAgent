@@ -174,3 +174,15 @@ test('accepted input with failed status persistence remains unknown and cannot b
  const failure=await f.host.command({type:'personal.command',request_id:'reconcile-stale',method:'tasks.get',params:{task_id:task.id,input_request_id:stale.request_id}},{client_id:'A'}) as {data:{input_receipt:{status:string}}};assert.equal(failure.data.input_receipt.status,'failed')
  }finally{if(damaged){await rm(path,{recursive:true});await rename(backup,path)}await f.close()}
 })
+
+test('input acknowledgement settling after handback wakes reconciliation even without another work outcome',async()=>{
+ const f=await fixture();let accept!:(status:'accepted')=>void,entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve}),receipt=new Promise<'accepted'>(resolve=>{accept=resolve})
+ try{const task=await f.delegate('late-input');await f.host.tasks.bindWork(f.fence(task),'finished','session');await f.host.tasks.recordWorkOutcome('finished','ok',{result:'done'});const owned=await f.take(task)
+ f.host.attachTaskRuntime('chat:main',0,{input:()=>{entered();return receipt},cancel:()=>undefined,dispatch:()=>Promise.reject(Error('must not dispatch')),evaluate:current=>{const pending=f.host.tasks.pendingUserInputs(current.id);return Promise.resolve(pending.length?{kind:'reconcile',input_refs:pending.map(input=>input.request_id),goal_change:null}:{kind:'complete',evidence_refs:['task-work:finished']})}})
+ const input=f.command('tasks.input',{...f.fence(owned),session_id:'session',text:'Keep keyboard support'},'late-ack');await started
+ await f.command('tasks.control',{...f.fence(owned),action:'return'});await f.host.taskLoop.wake(task.id);assert.equal(f.host.tasks.get(task.id).waiting_reason,'task_effect_unknown')
+ accept('accepted');assert.equal((await input).ok,true)
+ for(let i=0;i<50&&f.host.tasks.get(task.id).phase!=='completed';i++)await new Promise(resolve=>setTimeout(resolve,10))
+ assert.equal(f.host.tasks.get(task.id).phase,'completed');assert.equal(f.host.tasks.get(task.id).goal_revision,0)
+ }finally{accept?.('accepted');await f.close()}
+})
