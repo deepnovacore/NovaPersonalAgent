@@ -117,3 +117,35 @@ test('disconnect background safety runs after an in-flight explicit mode transit
   assert.equal(f.host.presentationMode,'background')
  }finally{await f.close()}
 })
+test('failed presentation synchronization retains canonical request identity through retry, eviction and restart',async()=>{
+ const f=await fixture();try{
+  await f.command('presentation.set',{mode:'workbench'})
+  const task=await f.take(await f.delegate('identity'))
+  let fail=true
+  f.host.subscribePresentation(()=>{if(fail)throw Error('listener unavailable')})
+  assert.equal((await f.command('presentation.set',{mode:'orb'},'exit-identity')).error,'presentation_sync_failed')
+  assert.equal(f.host.tasks.get(task.id).control_revision,2)
+  fail=false
+  for(const mode of ['background','workbench'])assert.equal((await f.command('presentation.set',{mode},'exit-identity')).error,'request_conflict')
+  assert.equal((await f.command('presentation.set',{mode:'orb'},'exit-identity')).ok,true)
+  assert.equal(f.host.tasks.get(task.id).control_revision,2)
+  for(let i=0;i<256;i++)await f.command('tasks.list',{},'evict:'+i)
+  await f.host.close();const restored=f.make();await restored.open()
+  try{
+   const retry=(mode:string)=>restored.command({type:'personal.command',method:'presentation.set',request_id:'exit-identity',params:{mode}},{client_id:'A'}) as Promise<{ok:boolean;error?:string}>
+   for(const mode of ['workbench','background'])assert.equal((await retry(mode)).error,'request_conflict')
+   assert.equal((await retry('orb')).ok,true)
+   assert.equal(restored.tasks.get(task.id).control_revision,2)
+  }finally{await restored.close()}
+ }finally{await f.close()}
+})
+test('workbench synchronization failures also reserve their request before retry',async()=>{
+ const f=await fixture();try{
+  let fail=true
+  f.host.subscribePresentation(()=>{if(fail)throw Error('listener unavailable')})
+  assert.equal((await f.command('presentation.set',{mode:'workbench'},'enter-identity')).error,'presentation_sync_failed')
+  fail=false
+  assert.equal((await f.command('presentation.set',{mode:'orb'},'enter-identity')).error,'request_conflict')
+  assert.equal((await f.command('presentation.set',{mode:'workbench'},'enter-identity')).ok,true)
+ }finally{await f.close()}
+})

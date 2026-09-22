@@ -18,7 +18,7 @@ const controlChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,next
 const goalChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,goal:goalSchema.shape.goal,acceptance:goalSchema.shape.acceptance}).strict()
 const recordSchema=taskInputSchema.extend({id,phase:z.enum(['queued','running','verifying','waiting','completed','cancelled']),controller:actorSchema,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative(),corrections:z.number().int().nonnegative(),work_ids:z.array(id),session_ids:z.array(id),evidence_refs:z.array(id),waiting_reason:z.string().trim().min(1).max(4000).nullable(),todo_sync:z.enum(['none','pending','synced','conflict'])}).strict()
 type StoredTask=z.infer<typeof recordSchema>
-const stateSchema=z.object({tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict()),handbacks:z.record(z.string(),z.object({hash:z.string(),result:z.array(recordSchema)}).strict()).default({})}).strict()
+const stateSchema=z.object({tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict()),handbacks:z.record(z.string(),z.object({hash:z.string(),command:z.string().max(16384).optional(),result:z.array(recordSchema).optional()}).strict()).default({})}).strict()
 type TaskState=z.infer<typeof stateSchema>
 const empty=():TaskState=>({tasks:[],receipts:{},handbacks:{}})
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex')
@@ -36,11 +36,15 @@ export class TaskService{
   next.tasks.push(task);next.receipts[request]={hash:payload,task_id:task.id,result:structuredClone(task)};return structuredClone(task)
  })}
  control(requestId:string,fence:TaskFence,actor:TaskActor,nextActor:TaskActor):Promise<TaskRecord>{const parsed=controlChangeSchema.parse({fence,actor,nextActor});return this.#change(requestId,parsed,task=>{task.controller=parsed.nextActor;task.control_revision++})}
+ reservePresentationRequest(requestId:string,clientId:string,command:string):Promise<void>{const request=id.parse(requestId),body=hash({client:id.parse(clientId)}),identity=z.string().min(1).max(16384).parse(command);return this.#mutate(next=>{
+  const prior=next.handbacks[request];if(prior){if(prior.hash!==body||prior.command!==identity)throw Error('request_conflict');return}
+  next.handbacks[request]={hash:body,command:identity}
+ })}
  returnClientTasks(requestId:string,clientId:string):Promise<TaskRecord[]>{const request=id.parse(requestId),client=id.parse(clientId),body=hash({client});return this.#mutate(next=>{
-  const prior=next.handbacks[request];if(prior){if(prior.hash!==body)throw Error('request_conflict');return structuredClone(prior.result) as TaskRecord[]}
+  const prior=next.handbacks[request];if(prior){if(prior.hash!==body)throw Error('request_conflict');if(prior.result)return structuredClone(prior.result) as TaskRecord[]}
   const result=next.tasks.filter(task=>task.controller.kind==='user'&&task.controller.client_id===client)
   for(const task of result){task.controller={kind:'nova'};task.control_revision++}
-  next.handbacks[request]={hash:body,result:structuredClone(result)};return structuredClone(result) as TaskRecord[]
+  next.handbacks[request]={...prior,hash:body,result:structuredClone(result)};return structuredClone(result) as TaskRecord[]
  })}
  controlClient(requestId:string,fence:TaskFence,clientId:string,action:'takeover'|'return'):Promise<TaskRecord>{
   const parsed={fence:taskFenceSchema.parse(fence),actor:actorSchema.parse({kind:'user',client_id:clientId}),action:z.enum(['takeover','return']).parse(action)}

@@ -601,12 +601,15 @@ export class PersonalAgentHost {
         }
         else if(command.method==='presentation.set'){
             const q=z.object({mode:z.enum(['background','workbench','orb'])}).strict().parse(p);
-            // Explicit exits also reconcile ownership left behind by a disconnect/restart.
-            if(client&&q.mode!=='workbench'){
-                try{await this.tasks.returnClientTasks(receiptId,client)}catch{
-                    if(q.mode==='background')await this.#setPresentation('background');
-                    return {type:'personal.result',request_id:command.request_id,ok:false,error:'handback_pending'};
-                }
+            // Reserve identity before either handback or presentation listeners can take effect.
+            try{
+                await this.tasks.reservePresentationRequest(receiptId,client??'host:unscoped',canonicalJson(command));
+                // Explicit exits also reconcile ownership left behind by a disconnect/restart.
+                if(client&&q.mode!=='workbench')await this.tasks.returnClientTasks(receiptId,client);
+            }catch(error){
+                if(error instanceof Error&&error.message==='request_conflict')throw error;
+                if(q.mode==='background')await this.#setPresentation('background');
+                return {type:'personal.result',request_id:command.request_id,ok:false,error:q.mode==='workbench'?'presentation_sync_failed':'handback_pending'};
             }
             await this.#setPresentation(q.mode);data={mode:q.mode};
         }
