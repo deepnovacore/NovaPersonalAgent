@@ -1,3 +1,4 @@
+import type {PersonalCommandContext} from './personal-agent/host.js'
 import {personalCommandSchema} from './personal-agent/contracts.js'
 import {parsePromptLanguage, type PromptLanguage} from './realtime/prompt-language.js'
 export {VISION_MODELS, supportsVision} from './model/vision-capability.js'
@@ -251,7 +252,7 @@ export interface DesktopCameraTimer {
 
 export interface DesktopServerOptions {
   readonly token: string
-  readonly onControl?: (control: DesktopControl) => void | Promise<void>
+  readonly onControl?: (control: DesktopControl, context?:PersonalCommandContext) => void | Promise<void>
   readonly onAudio?: (pcm: Uint8Array) => void | Promise<void>
   readonly onClientDisconnect?: (media?: {readonly hadProviderAttachment: boolean}) => void
   readonly onClientAuthenticated?: (language?: PromptLanguage) => void | Promise<void>

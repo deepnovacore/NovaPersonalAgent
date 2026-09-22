@@ -1,3 +1,4 @@
+import type {PersonalCommandContext} from '../personal-agent/host.js'
 import {randomUUID,createHash} from 'node:crypto'
 import type {PromptLanguage} from '../realtime/prompt-language.js'
 import {
@@ -1294,7 +1295,7 @@ export interface DesktopServerTransport {
 }
 
 export interface DesktopRealtimeOptions extends DesktopBridgeOptions {
-  readonly personalCommand?: (command: unknown) => Promise<unknown>
+  readonly personalCommand?: (command: unknown,context?:PersonalCommandContext) => Promise<unknown>
   readonly personalSnapshot?: () => unknown
   readonly taskPort?: CodingTaskPort
   readonly openTaskDirectory?: (path: string) => Promise<void>
@@ -1361,11 +1362,11 @@ export class DesktopRealtime {
         return memoryBoard(request.request_id, request.detail, request)
       },
       onAudio: pcm => this.bridge.receiveAudio(pcm),
-      onControl: async control => {
+      onControl: async (control,context) => {
         const generation = this.#activeGeneration
         if (generation === null) throw new DesktopProtocolError('desktop control is unauthenticated')
         if (control.type === 'personal.command') {
-          const result = options.personalCommand ? await options.personalCommand(control) : {type:'personal.result',request_id:control.request_id,ok:false,error:'unavailable'}
+          const result = options.personalCommand ? await options.personalCommand(control,context??(transportFailure==='disconnect'?undefined:{client_id:'desktop:local'})) : {type:'personal.result',request_id:control.request_id,ok:false,error:'unavailable'}
           if (this.#activeGeneration === generation) { this.bridge.onPersonalFrame(result); if (options.personalSnapshot) this.bridge.onPersonalFrame(options.personalSnapshot()) }
           return
         }
@@ -1612,9 +1613,9 @@ export function buildDesktopRealtimeComposition(
     sendConversationAudio:(id,pcm)=>realtime.personalAgent.sendConversationAudio(id,pcm),
     submitConversationText:(id,text,requestId)=>realtime.personalAgent.submitConversationText(id,text,requestId),
     validateConversationInput:(kind,id)=>{if(realtime.personalAgent.presentationMode==='background')throw Error('presentation_hidden');const state=realtime.personalAgent.conversationSnapshot();if(id!==undefined&&!state.items.some(item=>item.id===id))throw Error('conversation_not_found');if(kind==='audio'&&((id!==undefined&&state.voice_id!==id)||(id===undefined&&state.voice_id!==null)))throw Error('voice_not_owned');if(kind==='dictation'&&state.voice_id!==null)throw Error('voice_active')},
-    personalCommand: command => realtime.personalAgent.command(command),
+    personalCommand: (command,context) => realtime.personalAgent.command(command,context),
     personalSnapshot: () => realtime.personalAgent.snapshot(),
-    onConnectionReleased:()=>{if(realtime.personalAgent.presentationMode!==null)void realtime.personalAgent.command({type:'personal.command',request_id:randomUUID(),method:'presentation.set',params:{mode:'background'}}).catch(()=>{ /* pending decisions remain fail-closed during shutdown */ })},
+    onConnectionReleased:()=>{if(realtime.personalAgent.presentationMode!==null)void realtime.personalAgent.disconnectPresentation().catch(()=>{ /* pending decisions remain fail-closed during shutdown */ })},
     executor: codingExecutorIdentity(realtime) ?? options.approvalExecutor ?? null,
     ...(() => {
       const adapter = [...realtime.runtime.executors.values()].find(adapter => adapter.manifest.roles.includes('coding'))

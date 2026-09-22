@@ -10,17 +10,17 @@ export interface TaskInput{conversation_id:string;goal:string;acceptance:string[
 export interface TaskRecord extends TaskInput{id:string;phase:TaskPhase;controller:TaskActor;control_revision:number;goal_revision:number;corrections:number;work_ids:string[];session_ids:string[];evidence_refs:string[];waiting_reason:string|null;todo_sync:'none'|'pending'|'synced'|'conflict'}
 
 const id=z.string().trim().min(1).max(512)
-const inputSchema=z.object({conversation_id:id,goal:z.string().trim().min(1).max(16000),acceptance:z.array(z.string().trim().min(1).max(2000)).max(64),origin_ref:id,todo_ref:z.object({id,version:z.number().int().nonnegative()}).strict().optional()}).strict()
+export const taskInputSchema=z.object({conversation_id:id,goal:z.string().trim().min(1).max(16000),acceptance:z.array(z.string().trim().min(1).max(2000)).max(64),origin_ref:id,todo_ref:z.object({id,version:z.number().int().nonnegative()}).strict().optional()}).strict()
 const actorSchema=z.union([z.object({kind:z.literal('nova')}).strict(),z.object({kind:z.literal('user'),client_id:id}).strict()])
-const fenceSchema=z.object({task_id:id,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative()}).strict()
-const goalSchema=inputSchema.pick({goal:true,acceptance:true})
-const controlChangeSchema=z.object({fence:fenceSchema,actor:actorSchema,nextActor:actorSchema}).strict()
-const goalChangeSchema=z.object({fence:fenceSchema,actor:actorSchema,goal:goalSchema.shape.goal,acceptance:goalSchema.shape.acceptance}).strict()
-const recordSchema=inputSchema.extend({id,phase:z.enum(['queued','running','verifying','waiting','completed','cancelled']),controller:actorSchema,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative(),corrections:z.number().int().nonnegative(),work_ids:z.array(id),session_ids:z.array(id),evidence_refs:z.array(id),waiting_reason:z.string().trim().min(1).max(4000).nullable(),todo_sync:z.enum(['none','pending','synced','conflict'])}).strict()
+export const taskFenceSchema=z.object({task_id:id,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative()}).strict()
+const goalSchema=taskInputSchema.pick({goal:true,acceptance:true})
+const controlChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,nextActor:actorSchema}).strict()
+const goalChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,goal:goalSchema.shape.goal,acceptance:goalSchema.shape.acceptance}).strict()
+const recordSchema=taskInputSchema.extend({id,phase:z.enum(['queued','running','verifying','waiting','completed','cancelled']),controller:actorSchema,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative(),corrections:z.number().int().nonnegative(),work_ids:z.array(id),session_ids:z.array(id),evidence_refs:z.array(id),waiting_reason:z.string().trim().min(1).max(4000).nullable(),todo_sync:z.enum(['none','pending','synced','conflict'])}).strict()
 type StoredTask=z.infer<typeof recordSchema>
-const stateSchema=z.object({tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict())}).strict()
+const stateSchema=z.object({tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict()),handbacks:z.record(z.string(),z.object({hash:z.string(),result:z.array(recordSchema)}).strict()).default({})}).strict()
 type TaskState=z.infer<typeof stateSchema>
-const empty=():TaskState=>({tasks:[],receipts:{}})
+const empty=():TaskState=>({tasks:[],receipts:{},handbacks:{}})
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex')
 
 export class TaskService{
@@ -30,14 +30,27 @@ export class TaskService{
  async close():Promise<void>{await this.#tail}
  get(taskId:string):TaskRecord{const task=this.#state.tasks.find(item=>item.id===id.parse(taskId));if(!task)throw Error('task_not_found');return structuredClone(task) as TaskRecord}
  list():TaskRecord[]{return structuredClone(this.#state.tasks) as TaskRecord[]}
- delegate(requestId:string,input:TaskInput):Promise<TaskRecord>{const request=id.parse(requestId),parsed=inputSchema.parse(input),payload=hash(parsed);return this.#mutate<TaskRecord>(next=>{
-  const prior=next.receipts[request];if(prior){if(prior.hash!==payload)throw Error('request_conflict');const task=next.tasks.find(item=>item.id===prior.task_id);if(!task)throw Error('task_not_found');return structuredClone(task) as TaskRecord}
+ delegate(requestId:string,input:TaskInput):Promise<TaskRecord>{const request=id.parse(requestId),parsed=taskInputSchema.parse(input),payload=hash(parsed);return this.#mutate<TaskRecord>(next=>{
+  const prior=next.receipts[request];if(prior){if(prior.hash!==payload)throw Error('request_conflict');if(!prior.result)throw Error('receipt_invalid');return structuredClone(prior.result) as TaskRecord}
   const task:TaskRecord={conversation_id:parsed.conversation_id,goal:parsed.goal,acceptance:parsed.acceptance,origin_ref:parsed.origin_ref,...(parsed.todo_ref?{todo_ref:parsed.todo_ref}:{}),id:randomUUID(),phase:'queued',controller:{kind:'nova'},control_revision:0,goal_revision:0,corrections:0,work_ids:[],session_ids:[],evidence_refs:[],waiting_reason:null,todo_sync:'none'}
-  next.tasks.push(task);next.receipts[request]={hash:payload,task_id:task.id,result:task};return structuredClone(task)
+  next.tasks.push(task);next.receipts[request]={hash:payload,task_id:task.id,result:structuredClone(task)};return structuredClone(task)
  })}
  control(requestId:string,fence:TaskFence,actor:TaskActor,nextActor:TaskActor):Promise<TaskRecord>{const parsed=controlChangeSchema.parse({fence,actor,nextActor});return this.#change(requestId,parsed,task=>{task.controller=parsed.nextActor;task.control_revision++})}
- assertCurrent(fence:TaskFence,actor:TaskActor):void{const parsed=fenceSchema.parse(fence),task=this.#state.tasks.find(item=>item.id===parsed.task_id);if(!task)throw Error('task_not_found');this.#assert(task,parsed,actorSchema.parse(actor))}
- bindWork(fence:TaskFence,workId:string,sessionId?:string):Promise<void>{const parsed=fenceSchema.parse(fence),work=id.parse(workId),session=sessionId===undefined?undefined:id.parse(sessionId);return this.#mutate(next=>{
+ returnClientTasks(requestId:string,clientId:string):Promise<TaskRecord[]>{const request=id.parse(requestId),client=id.parse(clientId),body=hash({client});return this.#mutate(next=>{
+  const prior=next.handbacks[request];if(prior){if(prior.hash!==body)throw Error('request_conflict');return structuredClone(prior.result) as TaskRecord[]}
+  const result=next.tasks.filter(task=>task.controller.kind==='user'&&task.controller.client_id===client)
+  for(const task of result){task.controller={kind:'nova'};task.control_revision++}
+  next.handbacks[request]={hash:body,result:structuredClone(result)};return structuredClone(result) as TaskRecord[]
+ })}
+ controlClient(requestId:string,fence:TaskFence,clientId:string,action:'takeover'|'return'):Promise<TaskRecord>{
+  const parsed={fence:taskFenceSchema.parse(fence),actor:actorSchema.parse({kind:'user',client_id:clientId}),action:z.enum(['takeover','return']).parse(action)}
+  return this.#change(requestId,parsed,task=>{task.controller=parsed.action==='takeover'?parsed.actor:{kind:'nova'};task.control_revision++},task=>{
+   this.#assertFence(task,parsed.fence)
+   if(parsed.action==='takeover'&&task.controller.kind==='user'&&task.controller.client_id!==clientId)throw Error('not_controller')
+  })
+ }
+ assertCurrent(fence:TaskFence,actor:TaskActor):void{const parsed=taskFenceSchema.parse(fence),task=this.#state.tasks.find(item=>item.id===parsed.task_id);if(!task)throw Error('task_not_found');this.#assert(task,parsed,actorSchema.parse(actor))}
+ bindWork(fence:TaskFence,workId:string,sessionId?:string):Promise<void>{const parsed=taskFenceSchema.parse(fence),work=id.parse(workId),session=sessionId===undefined?undefined:id.parse(sessionId);return this.#mutate(next=>{
   const task=next.tasks.find(item=>item.id===parsed.task_id);if(!task)throw Error('task_not_found');this.#assertFence(task,parsed)
   const active=(item:StoredTask)=>item.phase!=='completed'&&item.phase!=='cancelled'
   if(next.tasks.some(item=>item.id!==task.id&&active(item)&&item.work_ids.includes(work)))throw Error('work_active')
@@ -45,9 +58,9 @@ export class TaskService{
   if(!task.work_ids.includes(work))task.work_ids.push(work);if(session&&!task.session_ids.includes(session))task.session_ids.push(session)
  })}
  reviseGoal(requestId:string,fence:TaskFence,actor:TaskActor,goal:string,acceptance:string[]):Promise<TaskRecord>{const parsed=goalChangeSchema.parse({fence,actor,goal,acceptance});return this.#change(requestId,parsed,task=>{task.goal=parsed.goal;task.acceptance=parsed.acceptance;task.goal_revision++})}
- #change(requestId:string,parsed:{fence:TaskFence;actor:TaskActor}&Record<string,unknown>,change:(task:StoredTask)=>void):Promise<TaskRecord>{const request=id.parse(requestId),body=hash(parsed);return this.#mutate(next=>{
+ #change(requestId:string,parsed:{fence:TaskFence;actor:TaskActor}&Record<string,unknown>,change:(task:StoredTask)=>void,authorize?:(task:StoredTask)=>void):Promise<TaskRecord>{const request=id.parse(requestId),body=hash(parsed);return this.#mutate(next=>{
   const prior=next.receipts[request];if(prior){if(prior.hash!==body)throw Error('request_conflict');if(!prior.result)throw Error('receipt_invalid');return structuredClone(prior.result) as TaskRecord}
-  const task=next.tasks.find(item=>item.id===parsed.fence.task_id);if(!task)throw Error('task_not_found');this.#assert(task,parsed.fence,parsed.actor);change(task);const result=structuredClone(task);next.receipts[request]={hash:body,task_id:task.id,result};return result as TaskRecord
+  const task=next.tasks.find(item=>item.id===parsed.fence.task_id);if(!task)throw Error('task_not_found');if(authorize)authorize(task);else this.#assert(task,parsed.fence,parsed.actor);change(task);const result=structuredClone(task);next.receipts[request]={hash:body,task_id:task.id,result};return result as TaskRecord
  })}
  #assert(task:StoredTask,fence:TaskFence,actor:TaskActor):void{this.#assertFence(task,fence);if(JSON.stringify(task.controller)!==JSON.stringify(actor))throw Error('not_controller')}
  #assertFence(task:StoredTask,fence:TaskFence):void{if(task.control_revision!==fence.control_revision||task.goal_revision!==fence.goal_revision)throw Error('stale_task')}

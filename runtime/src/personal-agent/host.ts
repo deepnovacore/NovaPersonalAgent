@@ -23,7 +23,10 @@ import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
 import { personalCommandSchema, personalSettingsSchema, preparedContentSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
-import {TaskService} from './tasks.js';
+import {TaskService,taskInputSchema,taskFenceSchema} from './tasks.js';
+import {canonicalJson} from '../text/canonical-json.js';
+/** Supplied only by an authenticated transport, never command params. */
+export interface PersonalCommandContext {client_id:string;can_takeover?:boolean}
 export interface Evidence {
     subject_key: string;
     source: FeedItem['source'];
@@ -93,6 +96,7 @@ export class PersonalAgentHost {
     #presentationNeedsRetry=false;
     #presentationListeners=new Set<(mode:PresentationMode,seen?:PresentedDecision)=>void|Promise<void>>();
     get presentationMode(){return this.#presentationMode}
+    disconnectPresentation():Promise<void>{const run=this.#commands.then(()=>this.#setPresentation('background'));this.#commands=run.catch(()=>{/* transport shutdown preserves background safety */});return run;}
     subscribePresentation(listener:(mode:PresentationMode,seen?:PresentedDecision)=>void|Promise<void>):()=>void{this.#presentationListeners.add(listener);return()=>this.#presentationListeners.delete(listener)}
     async #setPresentation(mode:PresentationMode,seen?:PresentedDecision):Promise<void>{
         if(seen&&this.#presentationMode==='background')throw Error('presentation_hidden');
@@ -387,7 +391,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:false,cancel:false,continue:false}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         const selected=next.conversations.items.find(c=>c.id===next.conversations.selected_id),latest=selected?.messages.findLast(m=>m.role==='user');
@@ -558,10 +562,15 @@ export class PersonalAgentHost {
     }
     else if (p.action === 'open')
         item.user_state = 'seen'; item.updated_at = this.#now().toISOString(); await this.#commit(next); return item; }); }
-    command(raw: unknown): Promise<unknown> { const parsed = personalCommandSchema.parse(raw); if (!this.#opened || this.#pendingCommands >= 8)
-        return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed)); this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
-    async #executeCommand(raw: unknown): Promise<unknown> { const command = personalCommandSchema.parse(raw), payload = hash(command), prior = this.#state.receipts[command.request_id]; if (prior)
-        return prior.payload === payload ? prior.result : { type: 'personal.result', request_id: command.request_id, ok: false, error: 'request_id_conflict' }; let result: unknown; try {
+    command(raw: unknown, context?:PersonalCommandContext): Promise<unknown> { const parsed = personalCommandSchema.parse(raw); if (!this.#opened || this.#pendingCommands >= 8)
+        return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context)); this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
+    async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
+        const taskCommand=command.method.startsWith('tasks.'),scoped=taskCommand||command.method==='presentation.set';
+        const client=context?.client_id;
+        if(taskCommand&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
+        const receiptId=scoped?hash({client:client??null,request:command.request_id}):command.request_id;
+        const payload=scoped?hash(canonicalJson(command)):hash(command),prior=this.#state.receipts[receiptId];if(prior)
+        return prior.payload === payload ? prior.result : { type: 'personal.result', request_id: command.request_id, ok: false, error: scoped?'request_conflict':'request_id_conflict' }; let result: unknown; try {
         let data: unknown;
         const m = this.options.memory(), p = command.params;
         if(command.method==='feed.action' && p.action==='act') {
@@ -572,7 +581,35 @@ export class PersonalAgentHost {
                 await this.#commit(next);
             });
         }
-        if(command.method==='presentation.set'){const q=z.object({mode:z.enum(['background','workbench','orb'])}).strict().parse(p);await this.#setPresentation(q.mode);data={mode:q.mode}}
+        if(taskCommand){
+            if(command.method==='tasks.list'){z.object({}).strict().parse(p);data=this.tasks.list()}
+            else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512)}).strict().parse(p);data=this.tasks.get(q.task_id)}
+            else if(command.method==='tasks.delegate'){const {todo_ref,...q}=taskInputSchema.parse(p);if(!this.#state.conversations.items.some(item=>item.id===q.conversation_id))throw Error('conversation_not_found');data=await this.tasks.delegate(receiptId,{...q,...(todo_ref?{todo_ref}:{})});}
+            else if(command.method==='tasks.control'){
+                const q=taskFenceSchema.extend({action:z.enum(['takeover','return'])}).strict().parse(p);
+                const {action,...fence}=q;
+                if(action==='takeover'&&context?.can_takeover===false)throw Error('task_control_unavailable');
+                data=await this.tasks.controlClient(receiptId,fence,client!,action);
+            }else{
+                const q=command.method==='tasks.input'?taskFenceSchema.extend({session_id:z.string().trim().min(1).max(512),text:z.string().trim().min(1).max(16000)}).strict().parse(p):taskFenceSchema.parse(p);
+                const fence={task_id:q.task_id,control_revision:q.control_revision,goal_revision:q.goal_revision};
+                this.tasks.assertCurrent(fence,{kind:'user',client_id:client!});
+                if('session_id' in q&&typeof q.session_id==='string'&&!this.tasks.get(q.task_id).session_ids.includes(q.session_id))throw Error('session_not_found');
+                throw Error(command.method==='tasks.input'?'task_input_unavailable':'task_execution_unavailable');
+            }
+            this.#notify();
+        }
+        else if(command.method==='presentation.set'){
+            const q=z.object({mode:z.enum(['background','workbench','orb'])}).strict().parse(p);
+            // Explicit exits also reconcile ownership left behind by a disconnect/restart.
+            if(client&&q.mode!=='workbench'){
+                try{await this.tasks.returnClientTasks(receiptId,client)}catch{
+                    if(q.mode==='background')await this.#setPresentation('background');
+                    return {type:'personal.result',request_id:command.request_id,ok:false,error:'handback_pending'};
+                }
+            }
+            await this.#setPresentation(q.mode);data={mode:q.mode};
+        }
         else if(command.method==='presentation.seen'){const q=z.object({approval_id:z.string().min(1).max(128).optional(),conversation_id:z.string().min(1).max(128).optional(),proposal_id:z.string().min(1).max(128).optional()}).strict().parse(p);if(!this.#presentationMode)throw Error('presentation_unavailable');await this.#setPresentation(this.#presentationMode,q);data={mode:this.#presentationMode}}
         else if(command.method.startsWith('conversations.')) {data=await this.#conversationCommand(command.method,p);if(command.method==='conversations.open_feed'&&this.#conversationPool){const id=this.#state.conversations.selected_id;const label=typeof p.label==='string'?p.label:'聊聊这条建议';await this.submitConversationText(id,label,'feed:'+String(p.feed_id))}}
         else if (command.method === 'state') {
@@ -687,6 +724,7 @@ export class PersonalAgentHost {
     }
     catch (e) {
         result = { type: 'personal.result', request_id: command.request_id, ok: false, error: e instanceof Error ? e.message : 'unavailable' };
-    } await this.#serial(async () => { const next = structuredClone(this.#state); const receipt={...result as Record<string,unknown>}; if(Object.hasOwn(receipt,'data')&&command.method!=='memory.purge'){delete receipt.data;receipt.reload_required=true;} next.receipts[command.request_id] = { payload, result:receipt }; const keys = Object.keys(next.receipts); for (const key of keys.slice(0, Math.max(0, keys.length - 256)))
+    } if(command.method==='presentation.set'&&(result as {ok:boolean}).ok===false)return result;
+    await this.#serial(async () => { const next = structuredClone(this.#state); const receipt={...result as Record<string,unknown>}; if(Object.hasOwn(receipt,'data')&&command.method!=='memory.purge'&&!scoped){delete receipt.data;receipt.reload_required=true;} next.receipts[receiptId] = { payload, result:receipt }; const keys = Object.keys(next.receipts); for (const key of keys.slice(0, Math.max(0, keys.length - 256)))
         delete next.receipts[key]; await this.#commit(next); }); return result; }
 }

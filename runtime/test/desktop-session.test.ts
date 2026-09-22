@@ -1861,4 +1861,19 @@ test('a pending folder launch does not block subsequent inbound audio', async ()
     assert.ok(calls.includes('audio:0,0'))
   } finally { release?.() }
 })
+test('personal commands use stable host desktop identity across reconnect and never default remote to local',async()=>{
+ const {service}=serviceHarness(),identities:unknown[]=[]
+ for(const transportFailure of ['abort','disconnect'] as const){
+  const desktop=new DesktopRealtime({token:TOKEN,service,stop:new AbortController(),transportFailure,
+   personalCommand:(_command,context)=>{identities.push(context);return Promise.resolve({ok:true})},
+   createServer:()=>({sendText:()=>Promise.resolve(),sendBinary:()=>Promise.resolve(),disconnectClient:()=>Promise.resolve(),start:()=>Promise.resolve({} as never),close:()=>Promise.resolve()})})
+  for(let i=0;i<2;i++){
+   await desktop.serverOptions.onClientAuthenticated?.()
+   await desktop.serverOptions.onControl?.({type:'personal.command',request_id:'identity',method:'tasks.list',params:{}})
+   desktop.serverOptions.onClientDisconnect?.()
+  }
+ }
+ assert.deepEqual(identities,[{client_id:'desktop:local'},{client_id:'desktop:local'},undefined,undefined])
+})
+
 }
