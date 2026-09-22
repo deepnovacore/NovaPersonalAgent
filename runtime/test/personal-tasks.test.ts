@@ -31,6 +31,8 @@ test('control and goal changes reject stale or unauthorized fences',async()=>{
   assert.equal(controlled.control_revision,1)
   await assert.rejects(tasks.control('control:2',fence,{kind:'nova'},{kind:'user',client_id:'other'}),/stale_task/)
   await assert.rejects(tasks.reviseGoal('goal:bad',{...fence,control_revision:1},{kind:'nova'},'Wrong',[]),/not_controller/)
+  const unchanged=await tasks.reviseGoal('goal:unchanged',{...fence,control_revision:1},{kind:'user',client_id:'workbench'},input.goal,input.acceptance)
+  assert.equal(unchanged.goal_revision,0)
   const revised=await tasks.reviseGoal('goal:1',{...fence,control_revision:1},{kind:'user',client_id:'workbench'},'Fix login safely',['regression passes','audit passes'])
   assert.equal(revised.goal_revision,1);assert.equal(revised.goal,'Fix login safely')
   await assert.rejects(tasks.reviseGoal('goal:2',{...fence,control_revision:1},{kind:'user',client_id:'workbench'},'Stale',[]),/stale_task/)

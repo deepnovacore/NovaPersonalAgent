@@ -29,6 +29,7 @@ const stateSchema=z.object({instruction_work_ids:z.array(id).default([]),outcome
 type TaskState=z.infer<typeof stateSchema>
 const empty=():TaskState=>({instruction_work_ids:[],outcomes:[],work_fences:{},pending_effects:{},replay_incomplete:[],events:[],event_keys:{},event_seq:0,truncated:{},tasks:[],receipts:{},handbacks:{},effects:{}})
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex')
+const sameGoal=(task:Pick<TaskInput,'goal'|'acceptance'>,goal:string,acceptance:readonly string[])=>task.goal===goal&&task.acceptance.length===acceptance.length&&task.acceptance.every((criterion,index)=>criterion===acceptance[index])
 
 const grants=new WeakMap<object,{tasks:TaskService;actor:TaskActor}>()
 export function taskGrantService(context:TaskDispatchContext):TaskService{const grant=grants.get(context);if(!grant)throw Error('invalid_continuation');grant.tasks.assertExecutionAllowed(context.fence.task_id,grant.actor);grant.tasks.assertWritable(context.fence,grant.actor);if(grant.tasks.get(context.fence.task_id).origin_ref!==context.origin_ref)throw Error('invalid_origin_ref');return grant.tasks}
@@ -126,7 +127,7 @@ export class TaskService{
   if(task.phase==='queued'||task.phase==='waiting'){task.phase='running';task.waiting_reason=null}
   if(!primary&&!next.instruction_work_ids.includes(work))next.instruction_work_ids.push(work);next.work_fences[work]??=parsed;if(!task.work_ids.includes(work))task.work_ids.push(work);if(session&&!task.session_ids.includes(session))task.session_ids.push(session)
  })}
- reviseGoal(requestId:string,fence:TaskFence,actor:TaskActor,goal:string,acceptance:string[]):Promise<TaskRecord>{const parsed=goalChangeSchema.parse({fence,actor,goal,acceptance});return this.#change(requestId,parsed,task=>{if(task.phase==='completed'||task.phase==='cancelled')throw Error('task_terminal');task.goal=parsed.goal;task.acceptance=parsed.acceptance;task.goal_revision++})}
+ reviseGoal(requestId:string,fence:TaskFence,actor:TaskActor,goal:string,acceptance:string[]):Promise<TaskRecord>{const parsed=goalChangeSchema.parse({fence,actor,goal,acceptance});return this.#change(requestId,parsed,task=>{if(task.phase==='completed'||task.phase==='cancelled')throw Error('task_terminal');if(!sameGoal(task,parsed.goal,parsed.acceptance)){task.goal=parsed.goal;task.acceptance=parsed.acceptance;task.goal_revision++}})}
  setRoute(fence:TaskFence,route:string):Promise<void>{return this.#mutate(next=>{this.assertWritable(fence,{kind:'nova'});next.tasks.find(task=>task.id===fence.task_id)!.execution_route=id.parse(route)})}
  evidence(taskId:string):TaskEvidence[]{this.get(taskId);return structuredClone(this.#state.outcomes.filter(item=>item.task_id===taskId))}
  assertExecutionAllowed(taskId:string,actor?:TaskActor):void{this.get(taskId);this.admitExecution(taskId);if(this.hasUnknownWork(taskId))throw Error('task_effect_unknown');if(actor?.kind==='nova'&&this.pendingUserInputs(taskId).length)throw Error('task_input_reconciliation_required')}
@@ -156,7 +157,7 @@ export class TaskService{
    if(!pending.length||hash(pending)!==hash(decision.input_refs))throw Error('task_input_reconciliation_stale')
    if(this.pendingEffect(task.id)||this.inputReceipts(task.id).some(receipt=>receipt.status==='unknown'))throw Error('task_effect_unknown')
    task.reconciled_inputs.push(...pending);task.control_revision++
-   if(decision.goal_change){task.goal=decision.goal_change.goal;task.acceptance=decision.goal_change.acceptance;task.goal_revision++}
+   if(decision.goal_change&&!sameGoal(task,decision.goal_change.goal,decision.goal_change.acceptance)){task.goal=decision.goal_change.goal;task.acceptance=decision.goal_change.acceptance;task.goal_revision++}
    task.phase='verifying';task.waiting_reason=null;next.events.push({seq:++next.event_seq,task_id:task.id,kind:'control',text:JSON.stringify(decision),refs:[]});return structuredClone(task) as TaskRecord
   }
   if(decision.kind!=='wait'&&this.pendingUserInputs(task.id).length)throw Error('task_input_reconciliation_required')

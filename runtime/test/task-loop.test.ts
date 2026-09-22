@@ -131,6 +131,28 @@ test('accepted direct steering must reconcile before verification and persists a
  }finally{await f.close()}
 })
 
+test('identical reconciliation preserves evidence revision while an acceptance change fences old evidence',async()=>{
+ const f=await setup();try{
+  await f.tasks.bindWork(fence(f.task),'same-work','same-session');await f.tasks.recordWorkOutcome('same-work','ok',{checked:true})
+  let same=await f.tasks.controlClient('take-same',fence(f.task),'client','takeover')
+  await f.tasks.input('same-input',fence(same),same.controller,'same-session','Keep the goal unchanged',async()=> 'accepted')
+  same=await f.tasks.controlClient('return-same',fence(same),'client','return')
+  const priorControl=same.control_revision
+  same=await f.tasks.applyDecision(fence(same),{kind:'reconcile',input_refs:['same-input'],goal_change:{goal:'original',acceptance:['checked']}})
+  assert.equal(same.goal_revision,0);assert.equal(same.control_revision,priorControl+1);assert.deepEqual(same.reconciled_inputs,['same-input'])
+  await f.tasks.applyDecision(fence(same),{kind:'complete',evidence_refs:['task-work:same-work']});assert.equal(f.tasks.get(same.id).phase,'completed')
+
+  let changed=await f.tasks.delegate('changed',{conversation_id:'c',goal:'original',acceptance:['checked'],origin_ref:'conversation:2'})
+  await f.tasks.bindWork(fence(changed),'changed-work','changed-session');await f.tasks.recordWorkOutcome('changed-work','ok',{checked:true})
+  changed=await f.tasks.controlClient('take-changed',fence(changed),'client','takeover')
+  await f.tasks.input('changed-input',fence(changed),changed.controller,'changed-session','Also verify audit output',async()=> 'accepted')
+  changed=await f.tasks.controlClient('return-changed',fence(changed),'client','return')
+  changed=await f.tasks.applyDecision(fence(changed),{kind:'reconcile',input_refs:['changed-input'],goal_change:{goal:'original',acceptance:['checked','audit output']}})
+  assert.equal(changed.goal_revision,1)
+  await assert.rejects(f.tasks.applyDecision(fence(changed),{kind:'complete',evidence_refs:['task-work:changed-work']}),/invalid_evidence/)
+ }finally{await f.close()}
+})
+
 test('new accepted steering during reconciliation rejects the stale input cursor and ordinary steering remains context',async()=>{
  const f=await setup();try{await f.tasks.bindWork(fence(f.task),'work','session');await f.tasks.recordWorkOutcome('work','ok',{});let task=await f.tasks.controlClient('take',fence(f.task),'client','takeover')
  await f.tasks.input('one',fence(task),task.controller,'session','Use existing CSS',async()=> 'accepted');await f.tasks.input('two',fence(task),task.controller,'session','Keep keyboard support',async()=> 'accepted');task=await f.tasks.controlClient('return',fence(task),'client','return')
