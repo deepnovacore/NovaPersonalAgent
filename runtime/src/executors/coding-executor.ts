@@ -119,7 +119,7 @@ export interface ProjectCommitResult {
 
 /** Optional exact host action surface, independent of voice cancellation resolution. */
 export interface CodingTaskPort {
-  resolveSession?(sessionId:string):Promise<{project:string;session_id:string;active:boolean}>
+  resolveSession?(sessionId:string):Promise<{project:string;session_id:string;active:boolean;work_id?:string}>
   cancelTask(workId: string): 'cancelling' | 'not_running'
   taskDirectory(workId: string): Promise<string | null>
 }

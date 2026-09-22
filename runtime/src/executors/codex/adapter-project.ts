@@ -152,7 +152,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       await this.#store.revalidateWorkspace(workspace.workspace_id)
       const activeSlot=this.#slots.get(workspace.workspace_id)
       if(activeSlot&&this.#taskWorkspaces.get(activeSlot.work.work_id)?.session_id!==sessionId)throw Error('session_active')
-      return {project:workspace.display_name,session_id:sessionId,active:!!activeSlot}
+      return {project:workspace.display_name,session_id:sessionId,active:!!activeSlot,...(activeSlot?{work_id:activeSlot.work.work_id}:{})}
     },
     cancelTask: (workId: string): 'cancelling' | 'not_running' => this.#cancelWork(workId) ? 'cancelling' : 'not_running',
     taskDirectory: async (workId: string): Promise<string | null> => {
@@ -513,9 +513,13 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       return projectProblemHandoff(projectErrorCode(error), op)
     }
     if (op === 'steer') {
-      const live = this.#slots.get(workspace.workspace_id)?.live
-      if (live === undefined || live === null) return projectNoActiveTurn()
-      return await live.dispatch(op, {instruction: String(admitted.value.instruction)}, context)
+      const slot = this.#slots.get(workspace.workspace_id),live=slot?.live
+      if (!slot || !live) return projectNoActiveTurn()
+      const wanted=()=>this.#slots.get(workspace.workspace_id)===slot&&slot.live===live
+        &&(admitted.value.work_id===undefined||admitted.value.work_id===slot.work.work_id)
+        &&(admitted.value.session_id===undefined||admitted.value.session_id===this.#taskWorkspaces.get(slot.work.work_id)?.session_id)
+      if(!wanted())return failureHandoff('superseded',op)
+      return await live.dispatch(op, {instruction: String(admitted.value.instruction)}, {...context,beforeWrite:()=>{context.beforeWrite?.();if(!wanted())throw Error('superseded')}})
     }
     return await this.#dispatchRun(workspace, admitted.value as unknown as ProjectRunInput, context)
   }
@@ -972,7 +976,6 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       throw error
     }
     const sessionId = session.session_id
-    await context.bindSession?.(sessionId)
     this.#taskWorkspaces.set(slot.work.work_id, {workspace_id: workspace.workspace_id, session_id: sessionId})
     const transport = new ThreadObservingTransport(inner, {
       threadName: resumed === null ? title : null,
@@ -1000,7 +1003,10 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       onValidatedOutcome: value => { disposition.value = value },
     })
     slot.live = active
+    let sessionBound=false
     try {
+      await context.bindSession?.(sessionId)
+      sessionBound=true
       result = await active.dispatch('run', {work_order: workOrder}, context)
       await titleUpdates
     } catch (error) {
@@ -1043,6 +1049,8 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
             {wait: true},
           ).catch(() => false)
         }
+      } else if(!sessionBound&&resumeRollback!==null){
+        await this.#store.rollbackSessionResume(resumeRollback,{wait:true}).catch(()=>false)
       } else if (
         bindingMismatch
         || disposition.value?.code === 'resume_unavailable'

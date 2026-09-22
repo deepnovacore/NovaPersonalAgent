@@ -103,12 +103,15 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   lifetime.addEventListener('abort',detachForeground,{once:true})
   const adapter=options.codexResource?.mode==='project'?options.codexResource.adapter as ProjectExecutorAdapter:undefined
   const dispatchTarget=async(grant:TaskDispatchContext,sessionId:string,text:string,receipt?: (status:'accepted'|'failed'|'unknown')=>void)=>{
-   const task=options.host.tasks.get(grant.fence.task_id)
-   if(!task.session_ids.includes(sessionId))throw Error('session_not_found')
-   const target=await adapter?.taskPort?.resolveSession?.(sessionId)
-   if(!target||!adapter)throw Error('task_input_unavailable')
+   let target
+   try{
+    const task=options.host.tasks.get(grant.fence.task_id)
+    if(!task.session_ids.includes(sessionId))return {accepted:false,delegate_id:null}
+    target=await adapter?.taskPort?.resolveSession?.(sessionId)
+   }catch{return {accepted:false,delegate_id:null}}
+   if(!target||!adapter)return {accepted:false,delegate_id:null}
    if(!grant.stillWanted())return {accepted:false,delegate_id:null}
-   return core.runtime.dispatchTaskExternal({executor:adapter.manifest.name,op:target.active?'steer':'run',origin_ref:grant.origin_ref,request:target.active?{instruction:text,project:target.project}:{work_order:text,project:target.project,session_id:target.session_id,session:'latest'}},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant,receipt)
+   return core.runtime.dispatchTaskExternal({executor:adapter.manifest.name,op:target.active?'steer':'run',origin_ref:grant.origin_ref,request:target.active?{instruction:text,project:target.project,session_id:target.session_id,work_id:target.work_id!}:{work_order:text,project:target.project,session_id:target.session_id,session:'latest'}},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant,receipt)
   }
   const detachTaskRuntime=adapter?.taskPort?.resolveSession?options.host.attachTaskRuntime(conversation.id,conversation.generation,{
    input:async(grant,sessionId,text)=>{
@@ -142,7 +145,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     const done=new Promise<{assistant:string;turn_id?:string}>((resolve,reject)=>{pending={resolve,reject}}),current=pending
     const abort=()=>{
      pending?.reject(signal.reason??Error('conversation_cleared'));pending=undefined
-     if(ownsTask()){graph.service.detachTaskConversation();voiceEnabled=false;void graph.service.playbackDisconnected({resumeDelivery:false})}
+     if(ownsTask()){
+      if(lifetime.aborted)detachForeground()
+      else void graph.service.playbackDisconnected({resumeDelivery:true}).catch(()=>{ /* response teardown is fenced by the service */ })
+     }
      else void graph.service.clearConversation().catch(()=>{ /* clear installs its epoch fence before asynchronous teardown */ })
     }
     signal.addEventListener('abort',abort,{once:true})

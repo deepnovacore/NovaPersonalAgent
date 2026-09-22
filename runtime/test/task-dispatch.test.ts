@@ -5,6 +5,7 @@ import {test} from 'node:test'
 import {mkdtemp,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
+import type {RealtimeService} from '../src/realtime/service.js'
 import {TaskService} from '../src/personal-agent/tasks.js'
 import {compileToolSchema} from '../src/core/tool-schema.js'
 
@@ -24,7 +25,7 @@ test('task mutations notify their host and terminal lifecycle fences writes',asy
 })
 
 import {CodexAgentController} from '../src/executors/codex/controller.js'
-import type {IntakeOptions} from '../src/executors/coding/intake.js'
+import type {IntakeOptions,IntakeSession} from '../src/executors/coding/intake.js'
 test('deferred task planning survives foreground clear but takeover fences every session',async()=>{
  for(const action of ['takeover','foreground_clear']){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'task-race-'))
@@ -43,6 +44,12 @@ test('deferred task planning survives foreground clear but takeover fences every
   const controller=new CodexAgentController({intake,resolveCancelTarget:async()=>null})
   await controller.dispatch({taskContext:context,instruction:'Fix login',originalUserText:'Fix login',origin_ref:context.origin_ref,sessionEpoch:1,acceptedUserInputRevision:1,stillWanted:()=>foregroundCurrent})
   await planned
+  const answer={taskContext:context,instruction:'Fix login with email',originalUserText:'Email login',origin_ref:context.origin_ref,input_origin_ref:'conversation:answer',sessionEpoch:1,acceptedUserInputRevision:2,stillWanted:()=>foregroundCurrent}
+  await controller.dispatch(answer)
+  assert.equal(controller.inspectIntakeForTest()?.revision,2)
+  assert.equal(controller.inspectIntakeForTest()?.origin_ref,context.origin_ref)
+  await controller.dispatch(answer)
+  assert.equal(controller.inspectIntakeForTest()?.revision,2,'same current answer is deduplicated')
   if(action==='takeover')await tasks.controlClient('takeover',fence,'client','takeover');else foregroundCurrent=false
   release();await controller.settleIntakeForTest()
   assert.equal(writes,action==='takeover'?0:1)
@@ -106,7 +113,7 @@ import {buildCascadedTextProvider} from '../src/cascaded-text-provider.js'
 import {cascadedProviderRegistries} from '../src/composition/cascaded-realtime-assembly.js'
 import {codingAgentControllerFactory,CODEX_AGENT_DESCRIPTOR} from '../src/executors/codex/controller.js'
 import {hostCodexHomeValue} from '../src/executors/codex/process-owner.js'
-import {fixture,COMPLETE,settleWithin} from './fixtures/codex/project-adapter-fixture.js'
+import {fixture,COMPLETE,settleWithin,context,run} from './fixtures/codex/project-adapter-fixture.js'
 import type {TransportOutcome} from '../src/executors/codex/app-server-transport.js'
 import {setTimeout as delay} from 'node:timers/promises'
 async function until(check:()=>boolean){for(let i=0;i<100;i++){if(check())return;await delay(10)}assert.fail('condition did not settle')}
@@ -115,19 +122,21 @@ test('real scoped task executor survives conversation clear, targeted input and 
  const value=await fixture({preexistingSession:true})
  const host=new PersonalAgentHost({path:join(await realpath(value.root),'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  let release!:(outcome:TransportOutcome)=>void
+ let providerResponse=0
+ let captured:Awaited<ReturnType<ReturnType<typeof conversationRuntimeFactory>>>|undefined,intakePort:IntakeOptions|undefined
  try{
   await host.open();await value.adapter.initialize()
   const factory=conversationRuntimeFactory({host,memory:()=>undefined,
    settings:settingsSchema.parse({executors:['codex'],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),
-   codexResource:{mode:'project',adapter:value.adapter,agentDescriptor:CODEX_AGENT_DESCRIPTOR,agentControllerFactory:codingAgentControllerFactory,projectView:null,approvalController:null,start:async()=>{},close:async()=>{}},
+   codexResource:{mode:'project',adapter:value.adapter,agentDescriptor:CODEX_AGENT_DESCRIPTOR,agentControllerFactory:{create:context=>{intakePort=context.intake;return codingAgentControllerFactory.create(context)}},projectView:null,approvalController:null,start:async()=>{},close:async()=>{}},
    searchTransport:{search:async()=>{throw Error('unexpected search')}},
    gateway:{complete:async()=>{throw Error('unexpected model')},async *stream(){throw Error('unexpected stream')}},
    onDiagnostic:()=>{},
    createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({
-    async *stream(){yield {kind:'response_started',response_id:'response'};yield {kind:'text_delta',text:'ready'};yield {kind:'response_completed',response_id:'response'}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{},
+    async *stream(){const responseId='response:'+ ++providerResponse;yield {kind:'response_started',response_id:responseId};yield {kind:'text_delta',text:'ready'};yield {kind:'response_completed',response_id:responseId}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{},
    })})}}),
   })
-  host.setConversationRuntime(factory,()=>{})
+  host.setConversationRuntime(async(...args)=>{captured=await factory(...args);return captured},()=>{})
   await host.submitConversationText('chat:main','Work on the existing task')
   await until(()=>host.conversationSnapshot().messages.some(message=>message.role==='assistant'))
   const task=await host.tasks.delegate('declared',{conversation_id:'chat:main',conversation_generation:0,goal:'Complete the task',acceptance:['Verified result'],origin_ref:'conversation:1'})
@@ -140,7 +149,26 @@ test('real scoped task executor survives conversation clear, targeted input and 
   await until(()=>value.factory.transports[0]?.workOrders.length===1)
   assert.equal(value.factory.bindings[0]?.resumeThreadId,'thread-existing')
   const originalHome=hostCodexHomeValue(value.factory.bindings[0].codexHome).path
+  assert.ok(intakePort)
+  const legacy={origin_ref:task.origin_ref} as IntakeSession
+  assert.equal((await intakePort.steer(legacy,'alpha','Nova addition'))?.accepted,true)
   await host.tasks.controlClient('take',fence,'client','takeover')
+  assert.throws(()=>intakePort!.steer(legacy,'alpha','must not overwrite user'),/not_controller/)
+  const resolveSession=value.adapter.taskPort.resolveSession
+  value.adapter.taskPort.resolveSession=async()=>{throw Error('session_active')}
+  const missing=await host.command({type:'personal.command',request_id:'unavailable',method:'tasks.input',params:{...fence,control_revision:1,session_id:session.session_id,text:'not deliverable'}},{client_id:'client'}) as {ok:boolean;error:string}
+  assert.equal(missing.error,'task_input_failed')
+  assert.equal(host.tasks.inputReceipts(task.id).find(receipt=>receipt.text==='not deliverable')?.status,'failed')
+  value.adapter.taskPort.resolveSession=resolveSession
+  const service=captured!.bridgeService as RealtimeService
+  let detached=0;const detach=service.detachTaskConversation.bind(service)
+  service.detachTaskConversation=()=>{detached++;detach()}
+  const timedOut=new AbortController(),pendingTurn=captured!.runTurn('timeout',timedOut.signal)
+  timedOut.abort(new DOMException('turn expired','TimeoutError'))
+  await assert.rejects(pendingTurn,/turn expired/)
+  assert.equal(detached,0,'a response timeout does not detach the task conversation')
+  await delay(30)
+  assert.equal((await settleWithin('response after timeout',captured!.runTurn('after timeout',new AbortController().signal))).assistant,'ready')
   const input=await settleWithin('direct steer',host.command({type:'personal.command',request_id:'direct',method:'tasks.input',params:{...fence,control_revision:1,session_id:session.session_id,text:'Use the revised detail'}},{client_id:'client'})) as {ok:boolean;data:{status:string}}
   assert.equal(input.ok,true);assert.equal(input.data.status,'accepted')
   release(COMPLETE);await until(()=>value.adapter.running().length===0)
@@ -209,4 +237,92 @@ test('Nova-only cancellation is durable and mode exit invalidates pending host i
   assert.deepEqual((await pending).error,'task_input_failed');assert.equal(writes,0)
   assert.equal(host.tasks.inputReceipts(second.id)[0]?.session_id,'session')
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('task input steer carries exact session and original work identity across a replaced slot',async()=>{
+ const value=await fixture({preexistingSession:true});let release!:(outcome:TransportOutcome)=>void
+ try{
+  await value.adapter.initialize()
+  value.factory.runGate=new Promise(resolve=>{release=resolve})
+  const first=run(value,'first',{delegateId:'first'})
+  await until(()=>value.factory.transports[0]?.workOrders.length===1)
+  const session=(await value.store.listSessions(await value.store.resolveWorkspace('alpha')))[0]!
+  const request={instruction:'exact steer',project:'alpha',session_id:session.session_id,work_id:'first'}
+  const accepted=await value.adapter.dispatch('steer',request,context('steer',request,value.clock))
+  assert.equal(accepted.outcome,'ok')
+  release(COMPLETE);await first
+  value.factory.runGate=new Promise(resolve=>{release=resolve})
+  const second=run(value,'second',{session:'new',delegateId:'second'})
+  await until(()=>value.factory.transports[1]?.workOrders.length===1)
+  const refused=await value.adapter.dispatch('steer',request,context('steer',request,value.clock))
+  assert.notEqual(refused.outcome,'ok')
+  release(COMPLETE);await second
+ }finally{release?.(COMPLETE);await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
+})
+
+test('failed durable session binding rolls back preparation and closes the transport',async()=>{
+ const value=await fixture()
+ try{
+  await value.adapter.initialize()
+  const before=await value.store.listSessions(await value.store.resolveWorkspace('alpha'))
+  const request={work_order:'new work',project:'alpha',session:'new'}
+  await assert.rejects(value.adapter.dispatch('run',request,{...context('run',request,value.clock),bindSession:async()=>{throw Error('takeover')}}),/takeover/)
+  assert.equal(value.factory.transports[0]?.closeCalls,1)
+  assert.deepEqual(await value.store.listSessions(await value.store.resolveWorkspace('alpha')),before)
+  assert.equal(value.adapter.running().length,0)
+ }finally{await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
+})
+
+test('task launch keeps intake cancellation predicate and adapter exceptions settle receipts',async()=>{
+ for(const variant of ['cancel','throw']){
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-launch-'))
+ const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
+ let writes=0,current=true
+ const runtime=new CausalRuntime({clock:new RealClock(),ids:new MonotonicIdFactory(),executors:[{manifest:fixtureSlowSimManifest,dispatch:async()=>{writes++;throw Error('adapter failed')}}]})
+ const stop=new AbortController();let serving:Promise<void>|undefined
+ try{
+  const origin=runtime.memory.append('conversation',{ts:0,trust:'trusted_user',priority:100,content:{text:'task'}})
+  const task=await tasks.delegate('task',{conversation_id:'c',goal:'task',acceptance:[],origin_ref:origin.channel+':'+origin.seq})
+  const grant=tasks.continuationContext({task_id:task.id,goal_revision:0,control_revision:0})
+  let receipt:string|undefined
+  let release!:()=>void,entered!:()=>void
+  const enteredBinding=new Promise<void>(resolve=>{entered=resolve}),gate=new Promise<void>(resolve=>{release=resolve})
+  const bind=tasks.bindWork.bind(tasks)
+  tasks.bindWork=async(...args)=>{entered();await gate;return bind(...args)}
+  const dispatch=runtime.dispatchTaskExternal.bind(runtime)
+  const admission=dispatch({executor:'slow_sim',op:'set_light',request:{level:1},origin_ref:grant.origin_ref},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant,status=>{receipt=status},()=>current)
+  await enteredBinding
+  if(variant==='cancel')current=false
+  release();assert.equal((await admission).accepted,true)
+  serving=runtime.serve(stop.signal)
+  await until(()=>receipt!==undefined)
+  assert.equal(receipt,variant==='cancel'?'failed':'unknown')
+  assert.equal(writes,variant==='cancel'?0:1)
+ }finally{stop.abort();await serving;await tasks.close();await rm(dir,{recursive:true,force:true})}
+ }
+})
+
+
+test('Nova-mediated return uses current user authority inside durable serialization',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-handback-'))
+ const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
+ try{
+  const task=await tasks.delegate('task',{conversation_id:'chat:main',goal:'task',acceptance:[],origin_ref:'conversation:1'})
+  const fence={task_id:task.id,goal_revision:0,control_revision:0}
+  await tasks.controlClient('take',fence,'client','takeover');fence.control_revision=1
+  let current=true
+  const stale=tasks.returnFromUserOrigin('stale',fence,{conversation_id:'chat:main',conversation_generation:0,origin_ref:'conversation:2'},()=>current)
+  current=false
+  await assert.rejects(stale,/superseded/)
+  assert.equal(tasks.get(task.id).controller.kind,'user')
+  const {service}=realtimeServiceHarness('pipeline',{taskHost:{tasks,conversation_id:'chat:main'}})
+  try{
+   await service.connect()
+   const returned=await dispatchTurn(service,'task',{operation:'return',task_id:task.id,source_refs:[],origin_ref:'conversation:1'})
+   assert.equal(returned.accepted,true)
+   assert.deepEqual(tasks.get(task.id).controller,{kind:'nova'})
+   assert.equal(tasks.get(task.id).control_revision,2)
+  }finally{await service.close()}
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })

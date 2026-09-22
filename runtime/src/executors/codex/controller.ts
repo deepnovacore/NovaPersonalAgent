@@ -89,6 +89,7 @@ export class CodexAgentController implements AgentController {
       request.origin_ref,
       String(request.sessionEpoch),
       request.taskContext,
+      request.input_origin_ref,
     )
     const state = intake.view?.state
     if (state === undefined) return {code: 'runtime_rejected', accepted: false, detail: {}}

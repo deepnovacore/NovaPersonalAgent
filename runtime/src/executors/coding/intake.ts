@@ -33,6 +33,7 @@ export interface IntakeAdmission {
   readonly problem?: string | null
 }
 export interface IntakeSession {
+  input_origin_ref?: string
   task_fence?: TaskFence
   intake_id: string
   revision: number
@@ -259,7 +260,7 @@ export class IntakeController {
       && (!eventId.endsWith(':accepted') || (this.preparing && intake.plan_revision === null && intake.state !== 'committing' && !this.#userInputPending))
   }
 
-  open(request: Readonly<Record<string, JsonValue>>, text: string, originRef: string, sessionId: string, taskContext?: TaskDispatchContext): 'intake_opened' | 'intake_in_progress' {
+  open(request: Readonly<Record<string, JsonValue>>, text: string, originRef: string, sessionId: string, taskContext?: TaskDispatchContext,inputOriginRef=originRef): 'intake_opened' | 'intake_in_progress' {
     const previous=this.#session?.task_fence
     if(this.active&&taskContext&&(previous?.task_id!==taskContext.fence.task_id||previous.goal_revision!==taskContext.fence.goal_revision||previous.control_revision!==taskContext.fence.control_revision))this.cancel()
     this.#taskAuthority=taskContext?.stillWanted
@@ -270,14 +271,14 @@ export class IntakeController {
       const current = this.#session!
       if (current.state === 'committing' || current.state === 'dispatch_unknown') return 'intake_in_progress'
       // A provider repeats the draft for an already-ingested answer: one content revision per turn.
-      if (current.origin_ref !== originRef) this.#revise(text, originRef, sessionId)
+      if ((current.input_origin_ref??current.origin_ref) !== inputOriginRef) this.#revise(text, inputOriginRef, sessionId)
       return 'intake_in_progress'
     }
     this.#session = {
       ...(taskContext ? {task_fence:{...taskContext.fence}} : {}),
       intake_id: this.#options.idFactory(), revision: 1, plan_revision: null, proposal_id: null,
       workspace: null, session_id: sessionId,
-      origin_ref: originRef, state: 'open', outcome: null, delegate_id: null,
+      origin_ref: originRef, input_origin_ref:inputOriginRef, state: 'open', outcome: null, delegate_id: null,
       request: structuredClone(request), opening: limit(text, 4000), turns: [], slots: emptySlots(), discovery: [],
       questions_asked: 0, intent_to_proceed: false, stop_asking: false, pending_question: null, pending_project_question: null, confirmed_project: null,
       missing_goal_grace: null, kind: null, decision: null, target: null, work_order: null, title: null,
@@ -292,7 +293,7 @@ export class IntakeController {
     const current = this.#session
     if (current === null || !this.active) return
     if (current.session_id !== sessionId) { this.cancel(); return }
-    if (current.origin_ref === originRef) return
+    if ((current.input_origin_ref??current.origin_ref) === originRef) return
     if (stripLikePython(text) === '') { this.cancel(); return }
     current.turns.push({question: current.pending_question, answer: limit(text, 2000),
       ...(current.pending_project_question === null ? {} : {project_question: current.pending_project_question})})
@@ -301,7 +302,8 @@ export class IntakeController {
     this.#modelBudgets.clear()
     current.revision += 1
     for (const abort of this.#abort) abort.abort()
-    current.origin_ref = originRef
+    current.input_origin_ref=originRef
+    if(!current.task_fence)current.origin_ref = originRef
     current.plan_revision = null
     current.work_order = null
     current.title = null

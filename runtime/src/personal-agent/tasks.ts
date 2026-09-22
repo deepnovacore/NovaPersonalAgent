@@ -46,7 +46,9 @@ export class TaskService{
   })
   if(prior)return prior
   let status:'accepted'|'failed'|'unknown'='unknown'
-  try{status=await send(this.instructionContext(fence,actor))}catch{status='unknown'}
+  let grant:TaskDispatchContext|undefined
+  try{grant=this.instructionContext(fence,actor)}catch{status='failed'}
+  if(grant)try{status=await send(grant)}catch{status='unknown'}
   await this.#mutate(next=>{next.effects[request]={...next.effects[request]!,hash:body,status}})
   return status
  }
@@ -60,6 +62,17 @@ export class TaskService{
   next.tasks.push(task);next.receipts[request]={hash:payload,task_id:task.id,result:structuredClone(task)};return structuredClone(task)
  })}
  control(requestId:string,fence:TaskFence,actor:TaskActor,nextActor:TaskActor):Promise<TaskRecord>{const parsed=controlChangeSchema.parse({fence,actor,nextActor});return this.#change(requestId,parsed,task=>{task.controller=parsed.nextActor;task.control_revision++})}
+ returnFromUserOrigin(requestId:string,fence:TaskFence,provenance:{conversation_id:string;conversation_generation:number;origin_ref:string},stillWanted:()=>boolean):Promise<TaskRecord>{
+  const request=id.parse(requestId),parsed={fence:taskFenceSchema.parse(fence),provenance:z.object({conversation_id:id,conversation_generation:z.number().int().nonnegative(),origin_ref:id}).strict().parse(provenance),operation:'user_origin_return'},body=hash(parsed)
+  return this.#mutate(next=>{
+   const prior=next.receipts[request];if(prior){if(prior.hash!==body)throw Error('request_conflict');return structuredClone(prior.result) as TaskRecord}
+   if(!stillWanted())throw Error('superseded')
+   const task=next.tasks.find(task=>task.id===parsed.fence.task_id);if(!task)throw Error('task_not_found')
+   this.#assertFence(task,parsed.fence);if(task.conversation_id!==parsed.provenance.conversation_id)throw Error('task_not_owned')
+   task.controller={kind:'nova'};task.control_revision++
+   const result=structuredClone(task);next.receipts[request]={hash:body,task_id:task.id,result};return result as TaskRecord
+  })
+ }
  reservePresentationRequest(requestId:string,clientId:string,command:string):Promise<void>{const request=id.parse(requestId),body=hash({client:id.parse(clientId)}),identity=z.string().min(1).max(16384).parse(command);return this.#mutate(next=>{
   const prior=next.handbacks[request];if(prior){if(prior.hash!==body||prior.command!==identity)throw Error('request_conflict');return}
   next.handbacks[request]={hash:body,command:identity}

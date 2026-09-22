@@ -1053,7 +1053,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
           session: options.codingTarget && !intake.target?.session_id ? 'new' : intake.decision?.session ?? 'latest', ...(intake.title === null ? {} : {title: intake.title}),
         },
       }
-        const admission=grant?await core.runtime.dispatchTaskExternal(dispatchRequest,USER_AWAITED_TOOL,grant):await core.runtime.dispatchExternal(dispatchRequest,USER_AWAITED_TOOL,undefined,stillWanted)
+        const admission=grant?await core.runtime.dispatchTaskExternal(dispatchRequest,USER_AWAITED_TOOL,grant,undefined,stillWanted):await core.runtime.dispatchExternal(dispatchRequest,USER_AWAITED_TOOL,undefined,stillWanted)
         if (admission.accepted && options.codingTarget && targetRevision !== undefined) {
           const selection = intake.target?.workspace_id ? {workspace_id: intake.target.workspace_id, session_id: intake.target.session_id} : null
           try { await options.codingTarget.accepted(selection, admission.delegate_id ?? undefined, targetRevision) }
@@ -1061,9 +1061,15 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
         }
         return admission
       },
-      steer: (intake: IntakeSession, project: string | null, instruction: string, stillWanted?: () => boolean) => {if(options.sharedPersonal&&!projectAdapter.running().some(work=>work.project===project&&core.runtime.inFlightDelegate(work.work_id)!==undefined))throw new ProjectResolutionError('unknown_project',{reason:'work_not_owned'});return core.runtime.dispatchExternal({
-        executor: projectAdapter.manifest.name, op: 'steer', origin_ref: intake.origin_ref, request: {instruction, project},
-      }, USER_AWAITED_TOOL, undefined, stillWanted)},
+      steer: (intake: IntakeSession, project: string | null, instruction: string, stillWanted?: () => boolean) => {
+        const work=projectAdapter.running().find(work=>work.project===project&&core.runtime.inFlightDelegate(work.work_id)!==undefined)
+        if(options.sharedPersonal&&!work)throw new ProjectResolutionError('unknown_project',{reason:'work_not_owned'})
+        const tasks=options.sharedPersonal?.host.tasks,task=tasks?.list().find(task=>work&&task.work_ids.includes(work.work_id))
+        if(options.sharedPersonal&&!task)throw Error('task_not_found')
+        if(task&&intake.task_fence&&intake.task_fence.task_id!==task.id)throw Error('task_work_mismatch')
+        const request={executor:projectAdapter.manifest.name,op:'steer',origin_ref:task?.origin_ref??intake.origin_ref,request:{instruction,project,...(work?{work_id:work.work_id}:{})}}
+        return task&&tasks?core.runtime.dispatchTaskExternal(request,USER_AWAITED_TOOL,tasks.continuationContext(intake.task_fence??{task_id:task.id,goal_revision:task.goal_revision,control_revision:task.control_revision}),undefined,stillWanted):core.runtime.dispatchExternal(request,USER_AWAITED_TOOL,undefined,stillWanted)
+      },
       record: (intake: IntakeSession, kind: string, data: Readonly<Record<string, JsonValue>>) => {
         core.runtime.memory.append(projectAdapter.manifest.name, {
           ts: core.runtime.clock.now(), trust: 'trusted_system', priority: USER_PRIORITY - 1,

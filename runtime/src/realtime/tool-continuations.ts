@@ -1208,7 +1208,7 @@ export class ToolContinuations {
           if(task.conversation_id!==host.conversation_id)throw Error('task_not_owned')
           const fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
           if(args.operation==='revise')task=await host.tasks.reviseGoal(event.call_id,fence,{kind:'nova'},args.goal,args.acceptance)
-          else if(args.operation==='return')task=await host.tasks.control(event.call_id,fence,task.controller,{kind:'nova'})
+          else if(args.operation==='return')task=await host.tasks.returnFromUserOrigin(event.call_id,fence,{conversation_id:host.conversation_id,conversation_generation:host.conversation_generation??0,origin_ref:user.origin_ref},()=>authority.stillWanted()&&(host.isCurrent?.()??true))
           else throw Error('task_execution_unavailable')
         }
         return {...this.#refusalAcceptance(event,'accepted',canonicalJson({code:'accepted',task_id:task.id})),accepted:true,inline_fulfilled:true}
@@ -1264,7 +1264,7 @@ export class ToolContinuations {
     const rawResult = event.name === DISPATCH_TOOL
       ? await controller.dispatch({
         ...(taskContext ? {taskContext} : {}),
-        instruction: instruction!, originalUserText: user.text, origin_ref: taskContext?.origin_ref ?? user.origin_ref,
+        instruction: instruction!, originalUserText: user.text, input_origin_ref:user.origin_ref, origin_ref: taskContext?.origin_ref ?? user.origin_ref,
         conversationContext, sourceQuotes,
         sessionEpoch: event.session_epoch, acceptedUserInputRevision: revision, stillWanted: fence,
       })

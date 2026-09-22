@@ -308,7 +308,7 @@ export class CausalRuntime {
     return admission
   }
 
-  async dispatchTaskExternal(request:DelegateRequest,reason:WakeReason,grant:TaskDispatchContext,receipt?:(status:'accepted'|'failed'|'unknown')=>void):Promise<RuntimeDispatchResult>{
+  async dispatchTaskExternal(request:DelegateRequest,reason:WakeReason,grant:TaskDispatchContext,receipt?:(status:'accepted'|'failed'|'unknown')=>void,stillWanted?:()=>boolean):Promise<RuntimeDispatchResult>{
     const tasks=taskGrantService(grant)
     if(this.#failure!==undefined)throw this.#failure
     if(this.#blackboard!==undefined&&!this.#memoryOpened)return {accepted:false,delegate_id:null,problem:'memory_not_ready'}
@@ -317,7 +317,7 @@ export class CausalRuntime {
     if(admission.accepted&&admission.delegate_id){
       const work=admission.delegate_id
       this.#taskGrants.set(work,grant)
-      this.#launchChecks.set(work,grant.stillWanted)
+      this.#launchChecks.set(work,()=>grant.stillWanted()&&(stillWanted?.()??true))
       if(receipt)this.#instructionReceipts.set(work,receipt)
       const binding=tasks.bindWork(grant.fence,work)
       this.#taskBindings.set(work,binding)
@@ -583,7 +583,7 @@ export class CausalRuntime {
         return adapter.dispatch(delegate.op, structuredClone(delegate.request), context)
       },
       output => {this.#instructionReceipts.get(delegate.delegate_id)?.((output as {outcome?:unknown})?.outcome==='unknown'?'unknown':(output as {outcome?:unknown})?.outcome==='ok'?'accepted':'failed');this.#instructionReceipts.delete(delegate.delegate_id);this.core.postExecutorResult(dispatchIndex, output, this.#clock.now())},
-      () => this.core.postExecutorCompletion(dispatchIndex, {
+      () => {this.#instructionReceipts.get(delegate.delegate_id)?.('unknown');this.#instructionReceipts.delete(delegate.delegate_id);this.core.postExecutorCompletion(dispatchIndex, {
         outcome: 'unknown',
         trust: 'trusted_system',
         content: {
@@ -592,7 +592,7 @@ export class CausalRuntime {
           detail: 'dispatch_failed',
         },
         refs: [],
-      }, this.#clock.now()),
+      }, this.#clock.now())},
       true,
     )
   }

@@ -17,6 +17,7 @@ export interface AgentDescriptor {
 }
 
 export interface AgentDispatchRequest {
+  readonly input_origin_ref?: string
   readonly taskContext?: TaskDispatchContext
   readonly continuationGrant?: TaskDispatchContext
   readonly sourceQuotes?: readonly string[]
