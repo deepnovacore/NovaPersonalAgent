@@ -91,7 +91,7 @@ export interface CancelContext {
  * and dispatch. The adapter side of the port is below.
  */
 export interface AgentExecutor {
-  /** ≤10 entries, most recently used first; `running` merged from the adapter's run slots. */
+  /** Complete bounded registry, most recently used first; recent entries include session history. */
   roster(): readonly RosterEntry[]
   running(): readonly RunningWork[]
   /** Async: >1 running works with an instruction needs one `resolveCancelTarget` call. */

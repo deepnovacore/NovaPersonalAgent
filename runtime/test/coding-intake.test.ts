@@ -1,4 +1,6 @@
 import {readFileSync} from 'node:fs'
+import {mkdtemp, rm} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
 import {resolve} from 'node:path'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
@@ -10,6 +12,7 @@ import {renderWorkOrder, workOrderSchema} from '../src/executors/coding/work-ord
 import {ProjectResolutionError, type CoordinatorDecision, type IntakeTarget} from '../src/executors/coding-executor.js'
 import {validateCodexRequest} from '../src/executors/codex/contract.js'
 import {GatewayError} from '../src/model/model-gateway.js'
+import {fixture} from './fixtures/codex/project-adapter-fixture.js'
 
 const stated = (note: string) => ({state: 'stated' as const, note})
 const missing = {state: 'missing' as const, note: ''}
@@ -390,6 +393,70 @@ test('coordinator: work on the active project resolves without evidence; a non-a
     assert.equal(unverified.dispatched.length, 0)
   }
 
+})
+
+test('registered projects beyond display caps remain intake evidence without expanding session history', async () => {
+  const home = await mkdtemp(resolve(tmpdir(), 'nova-intake-roster-'))
+  const value = await fixture({localCodexHome: home})
+  try {
+    const counter = await value.store.createManaged('counter')
+    const previous = await value.store.beginSession(counter.workspace_id, 'Previous counter task')
+    await value.store.markSessionReady(previous.session_id, 'previous-counter-thread')
+    await value.store.importSession(counter.workspace_id, {home, threadId: 'counter-thread', title: 'Counter history', updatedAt: 100})
+    const archived = await value.store.createManaged('alpha-archive')
+    await value.store.importSession(archived.workspace_id, {home, threadId: 'archive-thread', title: 'Archived history', updatedAt: 101})
+    for (let index = 0; index < 21; index++) {
+      const workspace = index === 0 ? await value.store.resolveWorkspace('alpha') : await value.store.createManaged(`project-${index}`)
+      const session = await value.store.beginSession(workspace.workspace_id, `Task ${index}`)
+      await value.store.markSessionReady(session.session_id, `task-thread-${index}`)
+      await value.store.importSession(workspace.workspace_id, {home, threadId: `recent-thread-${index}`, title: `History ${index}`, updatedAt: 200 + index})
+    }
+    await value.adapter.initialize()
+    const roster = value.adapter.roster()
+    assert.equal(roster.length, 23)
+    assert.deepEqual(roster.at(-1), {name: 'counter', last_used_at: 100, last_session_title: null, running: []})
+    assert.equal(roster.filter(entry => entry.sessions !== undefined).length, 10)
+    assert.ok(roster.slice(0, 10).every(entry => entry.sessions?.length === 1 && entry.last_session_title?.startsWith('Task ')))
+    assert.equal(roster.slice(10).some(entry => entry.last_session_title !== null), false)
+    assert.equal(value.adapter.publicProjectView(false).roster.length, 10)
+    assert.equal((await value.store.publicView(false)).roster.length, 20)
+    const before = await value.store.snapshot()
+    for (const mode of ['explicit', 'confirmed', 'redirected', 'ambiguous', 'unknown'] as const) {
+      const inputs: Readonly<Record<string, unknown>>[] = []
+      const h = harness({roster: () => value.adapter.roster(), activeProject: () => null,
+        resolveTarget: decision => value.adapter.resolveIntakeTarget(decision), models: {assess: input => {
+          inputs.push(input)
+          const followup = input.revision !== 1
+          const project = mode === 'unknown' ? 'missing-project' : mode === 'ambiguous' ? 'alpha' : mode === 'redirected' && !followup ? 'alpha' : 'counter'
+          return Promise.resolve(assessment(input, {project, session: {mode: 'new'}, execution_mode: 'direct',
+            project_evidence: mode === 'explicit' || mode === 'ambiguous' || mode === 'unknown' || (mode === 'redirected' && followup) ? project : null,
+            ...(followup ? {project_confirmation: projectAnswer(input, mode === 'redirected' ? 'redirected' : 'confirmed')} : {}),
+          }))
+        }}})
+      h.intake.open(request, mode === 'explicit' ? 'Fix counter' : mode === 'ambiguous' ? 'Fix alpha' : mode === 'unknown' ? 'Fix missing-project' : 'Fix the counter page', 'u1', 'e')
+      await h.intake.settled()
+      assert.deepEqual((inputs[0]!.roster as {name: string}[]).map(entry => entry.name), roster.map(entry => entry.name))
+      if (mode === 'confirmed' || mode === 'redirected') {
+        assert.equal(h.intake.view?.kind, 'unclear', mode)
+        h.intake.open(request, mode === 'confirmed' ? 'Yes, counter' : 'No, use counter', 'u2', 'e')
+        await h.intake.settled()
+      }
+      if (mode === 'ambiguous' || mode === 'unknown') {
+        assert.equal(h.intake.view?.kind, 'unclear', mode)
+        assert.equal(h.decisions.length, 0, mode)
+      } else {
+        assert.deepEqual(h.decisions, [{kind: 'work', project: 'counter', session: 'new'}], mode)
+        assert.equal(h.intake.view?.target?.workspace_id, counter.workspace_id, mode)
+        assert.equal(h.intake.view?.questions_asked, mode === 'explicit' ? 0 : 1, mode)
+        assert.equal(h.records.includes('intake.failure'), false, mode)
+      }
+    }
+    assert.deepEqual(await value.store.snapshot(), before, 'catalog projection and resolution do not change recency, active project or sessions')
+  } finally {
+    await value.adapter.close()
+    await rm(value.root, {recursive: true, force: true})
+    await rm(home, {recursive: true, force: true})
+  }
 })
 
 test('coordinator: an affirmed host question is the only host-authored project evidence', async () => {

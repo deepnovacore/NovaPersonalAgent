@@ -4,6 +4,7 @@ import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources,taskResou
 import {managedMcpResources,type ManagedCodexMcp} from './managed-mcp.js'
 import type {CodingTarget, CodingTargetPort, CodingTargetSelection} from '../../personal-agent/coding-targets.js'
 import {basename} from 'node:path'
+import {compareCodePoints} from '../../text/canonical-json.js'
 import {realpath} from 'node:fs/promises'
 import {readLocalCodexSessions, localRolloutAvailable} from './local-sessions.js'
 import {hostPersistentHomeFromConfig, hostWorkspaceFromConfig} from '../../projects/host-paths.js'
@@ -71,7 +72,7 @@ import {
   type ValidatedCodexDisposition,
 } from './common.js'
 
-/** Coordinator input is bounded (spec 08): ≤10 roster rows, most recently used first. */
+/** Recent-project budget for display, local discovery and rich session history. */
 const MAX_ROSTER = 10
 
 export interface ProjectTransportBinding {
@@ -228,7 +229,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       try {
         const home = await realpath(this.#localCodexHome!)
         const catalog = await readLocalCodexSessions(home)
-        // Keep the same ten-project intake budget. Older projects remain in Codex.
+        // Discover at most ten local projects; registered projects remain in the intake roster.
         const paths = new Set<string>()
         for (const item of catalog) { if (paths.size < MAX_ROSTER) paths.add(item.cwd) }
         for (const item of [...catalog].reverse()) {
@@ -366,17 +367,20 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
 
   roster(): readonly RosterEntry[] {
     const snapshot = this.#snapshot
-    return this.#publicView.roster.slice(0, MAX_ROSTER).map(entry => {
-      const workspace = snapshot?.workspaces.find(record => record.display_name === entry.name)
-      const session = snapshot?.sessions.find(record => record.session_id === workspace?.active_session_id)
+    // The store bounds the registry at 100; display limits must not hide valid project evidence.
+    return [...(snapshot?.workspaces ?? [])].sort((left, right) =>
+      right.last_used_at - left.last_used_at || right.created_at - left.created_at
+      || compareCodePoints(right.workspace_id, left.workspace_id),
+    ).map((workspace, index) => {
+      const session = index < MAX_ROSTER ? snapshot?.sessions.find(record => record.session_id === workspace.active_session_id) : undefined
       return {
-        name: entry.name,
-        last_used_at: entry.last_used_at,
+        name: workspace.display_name,
+        last_used_at: workspace.last_used_at,
         last_session_title: session?.display_title ?? null,
-        ...(this.#localCodexHome ? {sessions: (snapshot?.sessions ?? [])
-          .filter(item => item.workspace_id === workspace?.workspace_id && item.state === 'ready' && (!item.executor_home || item.origin === 'nova' || this.#localSessionIds.has(item.session_id)))
+        ...(this.#localCodexHome && index < MAX_ROSTER ? {sessions: (snapshot?.sessions ?? [])
+          .filter(item => item.workspace_id === workspace.workspace_id && item.state === 'ready' && (!item.executor_home || item.origin === 'nova' || this.#localSessionIds.has(item.session_id)))
           .sort((a, b) => b.last_used_at - a.last_used_at).slice(0, 20).map(item => item.display_title)} : {}),
-        running: this.#runningIn(entry.name),
+        running: this.#runningIn(workspace.display_name),
       }
     })
   }

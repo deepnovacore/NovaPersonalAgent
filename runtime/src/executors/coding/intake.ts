@@ -99,7 +99,6 @@ const emptySlots = (): IntakeSlots => ({
   acceptance: {state: 'missing', note: ''}, constraints: {state: 'missing', note: ''},
 })
 const limit = (value: string, count: number): string => [...value].slice(0, count).join('')
-const MAX_ROSTER = 10
 type IntakeStage = 'assess' | 'plan' | 'resolve' | 'prepare' | 'evidence' | 'dispatch' | 'steer'
 
 /** Only fixed classifications enter memory or speech; never provider bodies or error messages. */
@@ -375,7 +374,7 @@ export class IntakeController {
       turns: structuredClone(current.turns), confirmed_project: structuredClone(current.confirmed_project), slots: structuredClone(current.slots),
       discovery: [...current.discovery], intent_to_proceed: current.intent_to_proceed,
       questions_asked: current.questions_asked, question_budget: this.#budget(),
-      roster: this.#options.roster().slice(0, MAX_ROSTER), active_project: this.#options.activeProject(),
+      roster: this.#options.roster(), active_project: this.#options.activeProject(),
       running: this.#options.running(),
     }
   }
