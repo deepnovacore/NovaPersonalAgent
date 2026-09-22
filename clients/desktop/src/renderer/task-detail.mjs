@@ -28,7 +28,7 @@ export function mountTaskDetail(root,{command,onClose,storage=globalThis.localSt
   const sentSession=session,sentKey=key(),state=draftState,params={...fence(),session_id:session,text:draft.value},request_id=crypto.randomUUID()
   state.pending={request_id,params};save();busy=true;render()
   try{const receipt=await command('tasks.input',params,{request_id});if(receipt?.status==='accepted'){state.text='';delete state.pending;if(session===sentSession)draft.value=''}else error.textContent=t('发送状态待确认，草稿已保留。')}
-  catch(e){error.textContent=e.message;if(!/unknown|超时|断开|发送失败/.test(e.message))delete state.pending}
+  catch(e){error.textContent=e.message;if(e.input_status==='failed')delete state.pending}
   finally{if(sentKey)try{storage?.setItem(sentKey,JSON.stringify(state))}catch{}busy=false;render();await refresh().catch(()=>{})}
  },composer)
  composer.append(recipient,draft);root.append(title,status,summary,select,notice,controls,approvals,activity,artifacts,composer,error)
@@ -55,5 +55,5 @@ export function mountTaskDetail(root,{command,onClose,storage=globalThis.localSt
   render()
  }
  const escape=e=>{if(e.key==='Escape'){e.preventDefault();onClose()}};root.addEventListener('keydown',escape)
- return {update,receive:frame=>{if(frame.type==='personal.state'&&detail){const latest=frame.tasks?.find(t=>t.id===detail.id);if(latest)update({...detail,...latest});void refresh().catch(e=>{error.textContent=e.message})}},dispose(){save();disposed=true;root.removeEventListener?.('keydown',escape)},focusApproval(){(approvals.querySelector?.('button')??back).focus()}}
+ return {update,focus(){back.focus()},receive:frame=>{if(frame.type==='personal.state'&&detail){const latest=frame.tasks?.find(t=>t.id===detail.id);if(latest)update({...detail,...latest});void refresh().catch(e=>{error.textContent=e.message})}},dispose(){save();disposed=true;root.removeEventListener?.('keydown',escape)},focusApproval(){(approvals.querySelector?.('button')??back).focus()}}
 }

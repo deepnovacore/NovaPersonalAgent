@@ -3,8 +3,9 @@ import assert from 'node:assert/strict'
 import {mountPersonalView} from '../src/renderer/personal-view.mjs'
 class Node{
  constructor(tag,text){this.tag=tag;this.tagName=tag.toUpperCase();this.text=text;this.children=[];this.listeners={};this.dataset={};this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
- append(...c){this.children.push(...c)}prepend(...c){this.children.unshift(...c)}replaceChildren(...c){this.children=c}setAttribute(k,v){this[k]=v;this.attrs[k]=v}addEventListener(n,f){this.listeners[n]=f}
+ append(...c){for(const n of c)n.parentElement=this;this.children.push(...c)}prepend(...c){for(const n of c)n.parentElement=this;this.children.unshift(...c)}replaceChildren(...c){this.children=[];this.append(...c)}setAttribute(k,v){this[k]=v;this.attrs[k]=v}addEventListener(n,f){this.listeners[n]=f}
  querySelectorAll(sel){const tags=sel.split(',');return this.children.flatMap(n=>[...(tags.includes(n.tag)?[n]:[]),...n.querySelectorAll(sel)])}querySelector(sel){return this.querySelectorAll(sel)[0]}focus(){this.focused=(this.focused??0)+1;document.activeElement=this}contains(node){return this===node||this.children.some(child=>child.contains(node))}
+ dispatchEvent(event){this.listeners[event.type]?.(event);if(event.bubbles)this.parentElement?.dispatchEvent(event)}
  get childElementCount(){return this.children.length}
 }
 const controllers=[]
@@ -37,6 +38,7 @@ test('durable cards browse a persistent central detail through snapshots, execut
  m.view.receive(feedState(1,'c',{feed:[],tasks:[task,{...task,id:'t2',goal:'Task two'}],conversations:{selected_id:'c',items:[{id:'c',title:'C'}],messages:[]}}))
  const cards=m.all().filter(n=>n.className==='task-card');assert.equal(cards.length,2)
  cards[0].focus();const opening=cards[0].listeners.click(),req=m.sent.findLast(f=>f.method==='tasks.get');m.view.receive({type:'personal.result',request_id:req.request_id,ok:true,data:task});await opening
+ assert.equal(document.activeElement.textContent,'返回任务卡片');document.activeElement.dispatchEvent({type:'keydown',key:'Escape',bubbles:true,preventDefault(){}});assert.equal(document.activeElement,cards[0]);const reopened=cards[0].listeners.click(),again=m.sent.findLast(f=>f.method==='tasks.get');m.view.receive({type:'personal.result',request_id:again.request_id,ok:true,data:task});await reopened
  const draft=m.all().find(n=>n['aria-label']==='回复执行器'),panel=m.all().find(n=>n.className==='workbench-page');draft.value='keep';draft.focus();panel.scrollTop=88
  assert.equal(m.sent.some(f=>f.method==='tasks.control'),false)
  m.view.receive({type:'executor.tasks',tasks:[]});assert.ok(m.all().includes(draft));assert.equal(panel.scrollTop,88)

@@ -635,7 +635,7 @@ export class PersonalAgentHost {
         const receiptId=scoped?hash({client:client??null,request:command.request_id}):command.request_id;
         const taskRead=command.method==='tasks.get'||command.method==='tasks.list';
         const payload=scoped?hash(canonicalJson(command)):hash(command),prior=taskRead?undefined:this.#state.receipts[receiptId];if(prior)
-        return prior.payload === payload ? prior.result : { type: 'personal.result', request_id: command.request_id, ok: false, error: scoped?'request_conflict':'request_id_conflict' }; let result: unknown; try {
+        return prior.payload === payload ? prior.result : { type: 'personal.result', request_id: command.request_id, ok: false, error: scoped?'request_conflict':'request_id_conflict' }; let result: unknown,inputStatus:'failed'|'unknown'='failed'; try {
         let data: unknown;
         const m = this.options.memory(), p = command.params;
         if(command.method==='feed.action' && p.action==='act') {
@@ -648,7 +648,7 @@ export class PersonalAgentHost {
         }
         if(taskCommand){
             if(command.method==='tasks.list'){z.object({}).strict().parse(p);data=this.tasks.list()}
-            else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512),after:z.number().int().nonnegative().default(0),input_request_id:z.string().min(1).max(128).optional()}).strict().parse(p);const receipt=q.input_request_id?this.tasks.inputReceipts(q.task_id).find(r=>r.request_id===hash({client,request:q.input_request_id})):undefined;data={viewer:{client_id:client,can_takeover:context?.can_takeover!==false},...(receipt?{input_receipt:{request_id:q.input_request_id,status:receipt.status}}:{}),...this.tasks.get(q.task_id),events:this.tasks.events(q.task_id,q.after),approvals:this.taskApprovals(q.task_id),input_receipts:this.tasks.inputReceipts(q.task_id),capabilities:this.taskCapabilities(q.task_id)}}
+            else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512),after:z.number().int().nonnegative().default(0),input_request_id:z.string().min(1).max(128).optional()}).strict().parse(p);const inputKey=q.input_request_id?hash({client,request:q.input_request_id}):undefined,commandReceipt=inputKey?this.#state.receipts[inputKey]?.result as {input_status?:string;input_task_id?:string}|undefined:undefined;const receipt=inputKey?this.tasks.inputReceipts(q.task_id).find(r=>r.request_id===inputKey)??(commandReceipt?.input_status==='failed'&&commandReceipt.input_task_id===q.task_id?{status:'failed'}:undefined):undefined;data={viewer:{client_id:client,can_takeover:context?.can_takeover!==false},...(receipt?{input_receipt:{request_id:q.input_request_id,status:receipt.status}}:{}),...this.tasks.get(q.task_id),events:this.tasks.events(q.task_id,q.after),approvals:this.taskApprovals(q.task_id),input_receipts:this.tasks.inputReceipts(q.task_id),capabilities:this.taskCapabilities(q.task_id)}}
             else if(command.method==='tasks.delegate'){const {todo_ref,...q}=taskInputSchema.parse(p);if(!this.#state.conversations.items.some(item=>item.id===q.conversation_id))throw Error('conversation_not_found');data=await this.tasks.delegate(receiptId,{...q,conversation_generation:this.#state.conversations.items.find(item=>item.id===q.conversation_id)!.generation,...(todo_ref?{todo_ref}:{})});const task=data as TaskRecord;if(!q.execution_route)data=await this.tasks.wait({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision},'execution_route_required');else{let port:TaskRuntimePort|undefined;try{port=this.taskRuntime(task.id)}catch{/* original runtime unavailable */}if(!port?.routes?.().includes(q.execution_route)){data=await this.tasks.wait({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision},'task_executor_unavailable')}else void this.wakeTask(task.id);}}
             else if(command.method==='tasks.control'){
                 const q=taskFenceSchema.extend({action:z.enum(['takeover','return'])}).strict().parse(p);
@@ -664,7 +664,7 @@ export class PersonalAgentHost {
                 if('session_id' in q&&typeof q.session_id==='string'&&!this.tasks.get(q.task_id).session_ids.includes(q.session_id))throw Error('session_not_found');
                 if(command.method==='tasks.input'&&'session_id' in q&&typeof q.session_id==='string'&&'text' in q&&typeof q.text==='string'){
                     if(!this.#taskRuntimes.size)throw Error('task_input_unavailable');const port=this.taskRuntime(q.task_id),session=q.session_id,text=q.text;
-                    const status=await this.tasks.input(receiptId,fence,{kind:'user',client_id:client!},session,text,grant=>port.input(grant,session,text));if(status!=='accepted')throw Error('task_input_'+status);data={status};
+                    inputStatus='unknown';const status=await this.tasks.input(receiptId,fence,{kind:'user',client_id:client!},session,text,grant=>port.input(grant,session,text));if(status==='failed')inputStatus='failed';if(status!=='accepted')throw Error('task_input_'+status);data={status};
                 }else if(command.method==='tasks.cancel'){
                     const task=await this.cancelTask(receiptId,fence,{kind:'user',client_id:client!});
                     data=task;
@@ -801,7 +801,7 @@ export class PersonalAgentHost {
         result = { type: 'personal.result', request_id: command.request_id, ok: true, ...(data === undefined ? {} : { data }) };
     }
     catch (e) {
-        result = { type: 'personal.result', request_id: command.request_id, ok: false, error: e instanceof Error ? e.message : 'unavailable' };
+        result = { type: 'personal.result', request_id: command.request_id, ok: false, error: e instanceof Error ? e.message : 'unavailable',...(command.method==='tasks.input'?{input_status:inputStatus,input_task_id:command.params.task_id}:{}) };
     } if(taskRead)return result;
     if(command.method==='presentation.set'&&(result as {ok:boolean}).ok===false)return result;
     await this.#serial(async () => { const next = structuredClone(this.#state); const receipt={...result as Record<string,unknown>}; if(Object.hasOwn(receipt,'data')&&command.method!=='memory.purge'&&!scoped){delete receipt.data;receipt.reload_required=true;} next.receipts[receiptId] = { payload, result:receipt }; const keys = Object.keys(next.receipts); for (const key of keys.slice(0, Math.max(0, keys.length - 256)))

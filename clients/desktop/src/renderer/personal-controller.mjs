@@ -86,7 +86,7 @@ export class PersonalController {
     }
     if(frame.type==='personal.result'){
       const entry=this.pending.get(frame.request_id)
-      if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(new Error(frame.error||'操作失败'));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
+      if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(Object.assign(new Error(frame.error||'操作失败'),{input_status:frame.input_status}));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
     }
     if(frame.type==='input.transcription'&&frame.id===this.dictationId&&(!frame.conversation_id||frame.conversation_id===this.dictationConversationId)){
       const state=this.state(this.dictationConversationId)
@@ -96,14 +96,15 @@ export class PersonalController {
     this.changed()
   }
   async command(method,params={},options={}){
-    if(!this.connected)throw new Error('尚未连接')
-    if(this.applyPresentation&&!this.presentationReady&&!['presentation.set','state','tasks.get','tasks.list','conversations.approve'].includes(method))throw new Error('正在恢复显示模式，请稍候')
-    if(this.pending.size>=32)throw new Error('请等待当前操作完成')
+    const notSent=message=>Object.assign(new Error(message),method==='tasks.input'?{input_status:'failed'}:{})
+    if(!this.connected)throw notSent('尚未连接')
+    if(this.applyPresentation&&!this.presentationReady&&!['presentation.set','state','tasks.get','tasks.list','conversations.approve'].includes(method))throw notSent('正在恢复显示模式，请稍候')
+    if(this.pending.size>=32)throw notSent('请等待当前操作完成')
     const request_id=options.request_id??crypto.randomUUID()
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{this.pending.delete(request_id);reject(new Error('操作超时，请刷新状态后重试'))},30000)
       this.pending.set(request_id,{resolve,reject,timer})
-      if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(new Error('发送失败'))}
+      if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(notSent('发送失败'))}
     })
   }
   select(id){return this.command('conversations.select',{id})}

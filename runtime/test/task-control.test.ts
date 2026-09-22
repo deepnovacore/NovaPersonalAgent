@@ -158,3 +158,18 @@ test('detail exposes authenticated viewer and reconciles only that client exact 
  const a=await read('A');assert.equal(a.ok,true);assert.deepEqual(a.data.viewer,{client_id:'A',can_takeover:false});assert.deepEqual(a.data.input_receipt,{request_id:'exact',status:'accepted'});assert.equal((await read('B')).data.input_receipt,undefined)
  }finally{await f.close()}
 })
+
+test('accepted input with failed status persistence remains unknown and cannot be submitted twice',async()=>{
+ const f=await fixture();let writes=0,damaged=false
+ const path=f.host.tasks.path,backup=path+'.before-status'
+ try{const task=await f.take(await f.delegate('persist-failure'));await f.host.tasks.bindWork(f.fence(task),'work','session')
+ f.host.attachTaskRuntime('chat:main',0,{input:async()=>{writes++;await rename(path,backup);await mkdir(path);damaged=true;return 'accepted'},cancel(){/* no active executor */},dispatch:()=>Promise.resolve()})
+ const params={...f.fence(task),session_id:'session',text:'send once'},raw={type:'personal.command',request_id:'persist-failure-input',method:'tasks.input',params}
+ const result=await f.host.command(raw,{client_id:'A'}) as {ok:boolean;input_status:string};assert.equal(result.ok,false);assert.equal(result.input_status,'unknown');assert.equal(writes,1)
+ await rm(path,{recursive:true});await rename(backup,path);damaged=false
+ const read=await f.host.command({type:'personal.command',request_id:'reconcile-persistence',method:'tasks.get',params:{task_id:task.id,input_request_id:raw.request_id}},{client_id:'A'}) as {data:{input_receipt:{request_id:string;status:string}}}
+ assert.deepEqual(read.data.input_receipt,{request_id:raw.request_id,status:'unknown'});await f.host.command(raw,{client_id:'A'});assert.equal(writes,1)
+ const stale={...raw,request_id:'stale-input',params:{...params,control_revision:0}},rejected=await f.host.command(stale,{client_id:'A'}) as {input_status:string};assert.equal(rejected.input_status,'failed')
+ const failure=await f.host.command({type:'personal.command',request_id:'reconcile-stale',method:'tasks.get',params:{task_id:task.id,input_request_id:stale.request_id}},{client_id:'A'}) as {data:{input_receipt:{status:string}}};assert.equal(failure.data.input_receipt.status,'failed')
+ }finally{if(damaged){await rm(path,{recursive:true});await rename(backup,path)}await f.close()}
+})

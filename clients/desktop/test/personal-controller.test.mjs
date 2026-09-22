@@ -152,3 +152,13 @@ test('Todo source drafts stay per conversation and exact submission context surv
  h.c.disconnect();assert.deepEqual(h.c.state('a').source_todo,source);await h.c.connect();assert.deepEqual(h.sent.findLast(f=>f.type==='input.text'),first)
  h.c.receive({type:'input.text_result',request_id:first.request_id,conversation_id:'a',ok:false,error:'submission_failed'});h.snapshot('a');assert.deepEqual(h.c.state().source_todo,source);h.c.draft='';assert.equal(h.c.state().source_todo,null)
 })
+
+test('command rejection preserves host input delivery status without interpreting error text',async()=>{
+ const h=harness(),pending=h.c.command('tasks.input',{task_id:'t'}),request=h.sent.at(-1)
+ h.c.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'arbitrary disk failure',input_status:'unknown'})
+ await assert.rejects(pending,error=>error.input_status==='unknown'&&error.message==='arbitrary disk failure')
+})
+
+test('a local pre-send rejection is explicitly failed rather than uncertain',async()=>{
+ const h=harness();h.c.disconnect();await assert.rejects(h.c.command('tasks.input',{task_id:'t'}),error=>error.input_status==='failed');assert.equal(h.sent.some(frame=>frame.method==='tasks.input'),false)
+})

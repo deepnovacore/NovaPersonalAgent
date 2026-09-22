@@ -210,4 +210,4 @@ body[data-personal-collapsed="true"] .workbench{display:none}
 .task-detail button, .task-detail select { margin: 4px; }
 .conversation-task-cards { display: grid; gap: 6px; padding: 8px; }
 .task-card { text-align: left; overflow-wrap: anywhere; }
-@media (max-width: 760px) { .workbench[data-task-detail="true"] .chat-pane { display: none; } }
+@media (max-width: 959px) { .workbench[data-task-detail="true"] .chat-pane { display: none; } }

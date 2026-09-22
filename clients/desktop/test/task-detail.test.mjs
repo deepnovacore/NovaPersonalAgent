@@ -23,9 +23,26 @@ test('unsupported detail preserves summary and disallows input; Escape closes wi
 
 test('only exact accepted input receipt clears pending draft, and stale errors retain text',async()=>{
  const owned=task({controller:{kind:'user',client_id:'client'},control_revision:1});let stale=false
- const m=mount(async method=>{if(method==='tasks.input')throw Error(stale?'stale_task':'task_input_unknown');return owned});m.view.update(owned)
+ const m=mount(async method=>{if(method==='tasks.input')throw Object.assign(Error(stale?'stale_task':'task_input_unknown'),{input_status:stale?'failed':'unknown'});return owned});m.view.update(owned)
  const draft=m.find('回复执行器');draft.value='exact';draft.listeners.input();await m.find('发送给执行器').listeners.click();const request=m.calls.find(([method])=>method==='tasks.input')[2].request_id
  m.view.update({...owned,input_receipt:{request_id:'other',status:'accepted'}});assert.equal(draft.value,'exact');assert.equal(draft.disabled,true)
  m.view.update({...owned,input_receipt:{request_id:request,status:'accepted'}});assert.equal(draft.value,'');assert.equal(draft.disabled,false)
  stale=true;draft.value='retain stale';draft.listeners.input();await m.find('发送给执行器').listeners.click();assert.equal(draft.value,'retain stale');assert.equal(draft.disabled,false)
+})
+
+test('accepted adapter input followed by unclassified status persistence error retains exact pending request',async()=>{
+ const owned=task({controller:{kind:'user',client_id:'client'},control_revision:1});let writes=0
+ const m=mount(async method=>{if(method==='tasks.input'){writes++;throw Error('EIO: status rename failed')}return owned});m.view.update(owned)
+ const draft=m.find('回复执行器');draft.value='sent once';draft.listeners.input();await m.find('发送给执行器').listeners.click()
+ const request=m.calls.find(([method])=>method==='tasks.input')[2].request_id
+ assert.equal(draft.disabled,true);assert.equal(JSON.parse(m.storage.getItem(taskDraftKey('client','t','s1'))).pending.request_id,request)
+ await m.find('发送给执行器').listeners.click();assert.equal(writes,1);assert.ok(m.calls.some(([method,params])=>method==='tasks.get'&&params.input_request_id===request))
+ m.view.update({...owned,input_receipt:{request_id:request,status:'accepted'}});assert.equal(draft.value,'')
+})
+
+test('single-panel task inspection uses the same breakpoint as the chat overlay drawer',async()=>{
+ const {readFile}=await import('node:fs/promises'),css=await readFile(new URL('../src/renderer/workbench.css',import.meta.url),'utf8')
+ const drawer=css.match(/@media\s*\(max-width:\s*(\d+)px\)\{[\s\S]*?\.chat-pane\{position:absolute/)[1]
+ const detail=css.match(/@media\s*\(max-width:\s*(\d+)px\)\s*\{\s*\.workbench\[data-task-detail/)[1]
+ assert.equal(detail,drawer);assert.ok(Number(detail)>=959)
 })
