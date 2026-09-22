@@ -1369,7 +1369,11 @@ export class DesktopRealtime {
         if (generation === null) throw new DesktopProtocolError('desktop control is unauthenticated')
         if (control.type === 'personal.command') {
           const result = options.personalCommand ? await options.personalCommand(control,context??(transportFailure==='disconnect'?undefined:{client_id:'desktop:local'})) : {type:'personal.result',request_id:control.request_id,ok:false,error:'unavailable'}
-          if (this.#activeGeneration === generation) { this.bridge.onPersonalFrame(result); if (options.personalSnapshot) this.bridge.onPersonalFrame(options.personalSnapshot()) }
+          if (this.#activeGeneration === generation) {
+            this.bridge.onPersonalFrame(result)
+            // Inspector reads must not publish state and trigger another inspector read.
+            if (options.personalSnapshot && !['tasks.get', 'tasks.list'].includes(control.method)) this.bridge.onPersonalFrame(options.personalSnapshot())
+          }
           return
         }
         if (control.type === 'coding.progress_narration') { options.service.setCodingProgressNarration?.(control.mode); return }

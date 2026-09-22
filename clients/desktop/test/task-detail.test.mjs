@@ -82,3 +82,49 @@ test('quiet completed task can load public activity beyond the first hundred eve
  m.view.update(task({phase:'completed',events:{items:initial,next:100}}));const more=m.find('加载更多活动');assert.equal(more.hidden,false);await more.listeners.click()
  assert.ok(m.all().some(n=>n.textContent==='Public event 1'));assert.ok(m.all().some(n=>n.textContent==='Final public event'));assert.equal(more.hidden,true)
 })
+
+
+test('real command-state-inspector feedback settles control actions and refreshes new activity with bounded reads',async()=>{
+ const {DesktopRealtime}=await import('../../../runtime/dist/src/desktop/desktop-session.js')
+ const {PersonalController}=await import('../src/renderer/personal-controller.mjs')
+ const {WebSocket}=await import('ws'),{once}=await import('node:events')
+ const token='0'.repeat(32),stop=new AbortController(),methods=[],frames=[]
+ let revision=1,current=task({viewer:{client_id:'desktop:local',can_takeover:true}})
+ const snapshot=()=>({type:'personal.state',revision,tasks:[current]})
+ const realtime=new DesktopRealtime({token,stop,executor:{executor:'codex',display_name:'Codex'},
+  service:{executorState:'idle',playbackDisconnected:async()=>true},personalSnapshot:snapshot,
+  personalCommand:async command=>{
+   methods.push(command.method)
+   if(command.method==='tasks.control'){current={...current,controller:{kind:'user',client_id:'desktop:local'},control_revision:1};revision++}
+   const data=command.method==='tasks.list'?[current]:{...current,events:{items:current.events.items.filter(event=>event.seq>(command.params.after??0)),next:current.events.next??0}}
+   return {type:'personal.result',request_id:command.request_id,ok:true,data}
+  }})
+ const ready=await realtime.server.start(),socket=new WebSocket(`ws://127.0.0.1:${ready.port}/`)
+ const controller=new PersonalController({send:frame=>{socket.send(JSON.stringify(frame));return true},stop:async()=>{}})
+ const m=mount((...args)=>controller.command(...args))
+ socket.on('message',raw=>{const frame=JSON.parse(raw.toString());frames.push(frame);controller.receive(frame);m.view.receive(frame)})
+ const waitFor=async(predicate,label)=>{const deadline=Date.now()+1000;while(!predicate()){if(Date.now()>deadline)throw Error(label);await new Promise(resolve=>setTimeout(resolve,5))}}
+ try{
+  await once(socket,'open');await controller.connect();socket.send(JSON.stringify({type:'hello',token}))
+  await waitFor(()=>frames.some(frame=>frame.type==='executor.tasks'),'bootstrap missing')
+  m.view.update(current)
+  let settled=false;const takeover=m.find('接管并回复').listeners.click().then(()=>{settled=true})
+  await waitFor(()=>settled,'takeover stays busy in command/state refresh feedback');await takeover
+  assert.equal(m.find('回复执行器').disabled,false);assert.equal(m.find('交还 Nova').disabled,false)
+  assert.ok(methods.filter(method=>method==='tasks.get').length<=2,'takeover refresh must settle after bounded reads')
+  const beforeStates=frames.filter(frame=>frame.type==='personal.state').length
+  await controller.command('tasks.list')
+  await controller.command('tasks.get',{task_id:'t'})
+  await new Promise(resolve=>setTimeout(resolve,20))
+  assert.equal(frames.filter(frame=>frame.type==='personal.state').length,beforeStates,'task reads do not publish state changes')
+  const beforeReads=methods.filter(method=>method==='tasks.get').length
+  current={...current,events:{items:[{seq:1,kind:'message',sender:'executor',text:'Fresh executor activity'}],next:1}};revision++
+  realtime.bridge.onPersonalFrame(snapshot())
+  await waitFor(()=>m.all().some(node=>node.textContent==='Fresh executor activity'),'new public activity was not refreshed')
+  await new Promise(resolve=>setTimeout(resolve,20))
+  assert.equal(methods.filter(method=>method==='tasks.get').length,beforeReads+1)
+  assert.equal(stop.signal.aborted,false)
+ }finally{
+  m.view.dispose();controller.disconnect();socket.terminate();await realtime.server.close()
+ }
+})
