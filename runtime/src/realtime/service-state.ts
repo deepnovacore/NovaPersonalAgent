@@ -237,6 +237,7 @@ export interface ProjectExpiryBatch {
  */
 export interface QueuedHostResponse {
   readonly stillWanted?:()=>boolean
+  readonly onNotDelivered?:()=>Promise<void>
   readonly sortKey: readonly [number, number, number]
   readonly intent: HostResponseIntent
   readonly priority: number
