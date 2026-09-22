@@ -1418,6 +1418,38 @@ test('configured bootstrap frames precede the authenticated notification', async
   }
 })
 
+test('personal outbound allowance is bounded and cannot relax inbound or unrelated frames', async () => {
+  const server = new NodeDesktopServer({token: TOKEN})
+  const readiness = await startDesktopServer(server)
+  const socket = await connectDesktopClient(server, readiness.port)
+  const limit = 8 * 1024 * 1024
+  try {
+    await authenticate(socket)
+    for (const envelope of [
+      {type: 'personal.state', revision: 1},
+      {type: 'personal.result', request_id: 'detail', ok: true},
+    ]) {
+      const empty = JSON.stringify({...envelope, data: ''})
+      const raw = JSON.stringify({...envelope, data: 'x'.repeat(limit - Buffer.byteLength(empty))})
+      assert.equal(Buffer.byteLength(raw), limit)
+      const received = nextTextFrames(socket, 1)
+      const [, frames] = await Promise.all([server.sendText(raw), received])
+      assert.equal(frames[0], raw)
+      await assert.rejects(server.sendText(raw + ' '), /too large/u)
+    }
+    for (const envelope of [
+      {type: 'unrelated'}, {type: 'memory.board'},
+      {type: 'personal.state', revision: -1}, {type: 'personal.state', revision: '1'},
+      {type: 'personal.result', request_id: '', ok: true},
+      {type: 'personal.result', request_id: 'detail', ok: 'yes'},
+      {type: 'personal.result', request_id: 'x'.repeat(129), ok: true},
+    ]) await assert.rejects(server.sendText(JSON.stringify({...envelope, data: 'x'.repeat(16384)})), /too large/u)
+    assert.throws(() => parseDesktopControl(JSON.stringify({type: 'personal.command', request_id: 'oversized', method: 'state', params: {data: 'x'.repeat(16384)}})), /too large/u)
+  } finally {
+    await closeDesktopClientAndServer(socket, server)
+  }
+})
+
 test('desktop outbound applies size and pending-send bounds', async () => {
   const server = new NodeDesktopServer({token: TOKEN})
   const readiness = await startDesktopServer(server)

@@ -53,6 +53,9 @@ export {
 
 import {DESKTOP_READY, MAX_DESKTOP_JSON_BYTES, MAX_DESKTOP_PCM_BYTES} from './desktop/desktop-wire.js'
 export {MAX_DESKTOP_JSON_BYTES, MAX_DESKTOP_PCM_BYTES, WIRE_FRAME_TYPES} from './desktop/desktop-wire.js'
+// Task detail includes up to 100 public events of 16,000 characters, plus receipts.
+// Keep personal projections bounded independently of inbound/control text.
+export const MAX_DESKTOP_PERSONAL_JSON_BYTES = 8 * 1024 * 1024
 export const MAX_DESKTOP_OUTBOUND_BINARY_BYTES = 8 * 1024 * 1024
 export const MAX_DESKTOP_PENDING_SENDS = 128
 export const MAX_DESKTOP_DEBUG_CONNECTIONS = 4
@@ -212,6 +215,13 @@ export class DesktopOutboundValidationError extends DesktopProtocolError {
   }
 }
 
+
+export class DesktopPersonalFrameTooLargeError extends DesktopOutboundValidationError {
+  constructor(readonly frameType: 'personal.state' | 'personal.result', readonly bytes: number, readonly requestId?: string) {
+    super('desktop personal frame is too large')
+    this.name = 'DesktopPersonalFrameTooLargeError'
+  }
+}
 
 export type DesktopCameraErrorCode = 'invalid_request' | 'capture_unavailable'
 
@@ -893,12 +903,26 @@ function copyBootstrapTextFrames(frames: readonly string[] | undefined): readonl
   return copied
 }
 
+const personalOutboundEnvelopeSchema = z.discriminatedUnion('type', [
+  z.object({type: z.literal('personal.state'), revision: z.number().int().nonnegative()}),
+  z.object({type: z.literal('personal.result'), request_id: z.string().min(1).max(128), ok: z.boolean()}),
+])
+
 function validateOutboundText(raw: string, label = 'desktop outbound text frame'): void {
   if (typeof raw !== 'string') {
     throw new DesktopOutboundValidationError(`${label} is invalid`)
   }
-  if (Buffer.byteLength(raw, 'utf8') > MAX_DESKTOP_JSON_BYTES) {
+  const bytes = Buffer.byteLength(raw, 'utf8')
+  if (bytes <= MAX_DESKTOP_JSON_BYTES) return
+  let value: unknown
+  try { value = JSON.parse(raw) as unknown } catch {
     throw new DesktopOutboundValidationError(`${label} is too large`)
+  }
+  const envelope = personalOutboundEnvelopeSchema.safeParse(value)
+  if (!envelope.success) throw new DesktopOutboundValidationError(`${label} is too large`)
+  if (bytes > MAX_DESKTOP_PERSONAL_JSON_BYTES) {
+    throw new DesktopPersonalFrameTooLargeError(envelope.data.type, bytes,
+      envelope.data.type === 'personal.result' ? envelope.data.request_id : undefined)
   }
 }
 

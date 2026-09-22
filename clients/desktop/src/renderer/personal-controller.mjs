@@ -96,6 +96,10 @@ export class PersonalController {
       if(this.voiceId&&this.dictationId)void this.text()
       if(!previous&&this.selectedId&&this.drafts.has(null)){const scratch=this.drafts.get(null);if(scratch.draft&&!this.state().draft)this.state().draft=scratch.draft;this.drafts.delete(null)}
     }
+    if(['personal.error','personal.result'].includes(frame.type)&&frame.error==='personal_frame_too_large'){
+      frame={...frame,error:'个人状态或任务详情过大，暂时无法显示。操作可能已完成，请先刷新状态核对，再决定是否重试。'}
+      this.error=frame.error
+    }
     if(frame.type==='personal.result'){
       const entry=this.pending.get(frame.request_id)
       if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(Object.assign(new Error(frame.error||'操作失败'),{input_status:frame.input_status}));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}

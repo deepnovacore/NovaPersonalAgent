@@ -39,6 +39,8 @@ import {
   playbackTelemetrySchema,
   type DesktopControl,
   DesktopOutboundValidationError,
+  DesktopPersonalFrameTooLargeError,
+  MAX_DESKTOP_PERSONAL_JSON_BYTES,
   DesktopProtocolError,
   NodeDesktopServer,
   type DesktopReadiness,
@@ -1440,6 +1442,19 @@ export class DesktopRealtime {
             await this.#send(delivery)
           } catch (error) {
             if (this.#activeGeneration !== generation) break
+            if (error instanceof DesktopPersonalFrameTooLargeError) {
+              this.#telemetry?.record('desktop.personal_frame_rejected', {
+                frame_type: error.frameType, bytes: error.bytes, limit: MAX_DESKTOP_PERSONAL_JSON_BYTES,
+              })
+              try {
+                // A command may already have committed. Reject its response without replaying it.
+                await this.server.sendText(JSON.stringify(error.frameType === 'personal.result'
+                  ? {type: 'personal.result', request_id: error.requestId, ok: false, error: 'personal_frame_too_large', input_status: 'unknown'}
+                  : {type: 'personal.error', error: 'personal_frame_too_large'}))
+                continue
+              } catch { /* A failed error delivery still follows the transport failure policy. */ }
+              if (this.#activeGeneration !== generation) break
+            }
             if (delivery.policy === 'required' && this.#transportFailure === 'abort') this.#stop.abort()
             else if (delivery.policy !== 'required' && error instanceof DesktopOutboundValidationError) {
               this.#telemetry?.record('desktop.outbound_validation_dropped', {

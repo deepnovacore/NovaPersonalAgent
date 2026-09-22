@@ -162,3 +162,13 @@ test('command rejection preserves host input delivery status without interpretin
 test('a local pre-send rejection is explicitly failed rather than uncertain',async()=>{
  const h=harness();h.c.disconnect();await assert.rejects(h.c.command('tasks.input',{task_id:'t'}),error=>error.input_status==='failed');assert.equal(h.sent.some(frame=>frame.method==='tasks.input'),false)
 })
+
+test('oversized personal projections show an error without replacing retained state or replaying commands',async()=>{
+ const {c,sent}=harness();const retained=c.snapshot
+ c.receive({type:'personal.error',error:'personal_frame_too_large'})
+ assert.match(c.error,/过大/);assert.equal(c.snapshot,retained);assert.equal(c.connected,true)
+ const pending=c.command('tasks.get',{task_id:'task'});const request=sent.at(-1),count=sent.length
+ c.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'personal_frame_too_large',input_status:'unknown'})
+ await assert.rejects(pending,error=>error.input_status==='unknown'&&/过大/.test(error.message))
+ assert.equal(sent.length,count);assert.equal(c.snapshot,retained)
+})

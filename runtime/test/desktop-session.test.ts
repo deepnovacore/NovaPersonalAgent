@@ -1401,6 +1401,44 @@ test('real loopback covers every declared orb frame, preemption, and duplex traf
   }
 })
 
+for (const oversized of [false, true]) test(`personal frames ${oversized ? 'over the bound report errors' : 'above 16 KiB arrive intact'} without stopping realtime`, async () => {
+  const {service} = serviceHarness()
+  const stop = new AbortController()
+  const telemetry = new RecordingTelemetry()
+  const snapshot = {type: 'personal.state', revision: 1, tasks: [], feed: [], memory: {entries: []}, conversations: {items: [], messages: []}, data: ''}
+  const result = {type: 'personal.result', request_id: 'detail', ok: true, data: ''}
+  const bytes = oversized ? 8 * 1024 * 1024 + 1 : 20 * 1024
+  snapshot.data = 'x'.repeat(bytes - Buffer.byteLength(JSON.stringify(snapshot)))
+  result.data = 'x'.repeat(bytes - Buffer.byteLength(JSON.stringify(result)))
+  const realtime = new DesktopRealtime({token: TOKEN, executor: CODEX, service, stop, telemetry,
+    personalCommand: () => Promise.resolve(result), personalSnapshot: () => snapshot})
+  const readiness = await realtime.server.start()
+  const socket = await connectDesktop(readiness.port)
+  try {
+    const initial = nextFrames(socket, 3, 'personal frame bootstrap')
+    socket.send(JSON.stringify({type: 'hello', token: TOKEN}))
+    await initial
+    const response = nextFrames(socket, 2, 'personal command and snapshot')
+    socket.send(JSON.stringify({type: 'personal.command', request_id: 'detail', method: 'state', params: {}}))
+    const frames = (await response).map(frame => JSON.parse(text(frame)) as unknown)
+    assert.deepEqual(frames, oversized ? [
+      {type: 'personal.result', request_id: 'detail', ok: false, error: 'personal_frame_too_large', input_status: 'unknown'},
+      {type: 'personal.error', error: 'personal_frame_too_large'},
+    ] : [result, snapshot])
+    const update = nextFrames(socket, 1, 'healthy executor update after personal delivery')
+    realtime.bridge.onExecutorState('idle')
+    assert.equal((JSON.parse(text((await update)[0]!)) as {state: string}).state, 'idle')
+    assert.equal(stop.signal.aborted, false)
+    if (oversized) assert.deepEqual(telemetry.records.filter(record => record.kind === 'desktop.personal_frame_rejected').map(record => record.payload), [
+      {frame_type: 'personal.result', bytes, limit: 8 * 1024 * 1024},
+      {frame_type: 'personal.state', bytes, limit: 8 * 1024 * 1024},
+    ])
+  } finally {
+    await closeDesktop(socket)
+    await realtime.server.close()
+  }
+})
+
 test('renderer reconnect receives current state and project without aborting the application', async () => {
   const {service, calls} = serviceHarness()
   const stop = new AbortController()
