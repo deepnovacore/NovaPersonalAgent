@@ -34,6 +34,7 @@ export async function maySendPreparedMemory(memory: PersonalMemoryResource|undef
 export function conversationRuntimeFactory(options:AssemblyOptions & Pick<RealtimeAssemblyOptions,'codexResource'|'onDiagnostic'|'onAudioFrame'|'onAudioClear'|'onAudioAlert'|'onAudioTerminal'|'nextPlaybackGeneration'|'onUsage'> & {
  onExecutorProgress?:(progress:ExecutorProgress,result?:ExecutorResult)=>void;
  createTextProvider?:typeof buildCascadedTextProvider;
+ createVoiceProvider?:typeof buildConversationVoiceProvider;
  host:PersonalAgentHost; memory:()=>PersonalMemoryResource|undefined
 }):ConversationRuntimeFactory {
  return async(conversation,emit,mode='text',lifetime=new AbortController().signal)=>{
@@ -71,7 +72,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const approval=broker?scopeApprovalController(broker,view=>!!view.work&&core.runtime.inFlightDelegate(view.work.work_id)!==undefined):undefined
   const unsubscribeApproval=approval?.observe(view=>{options.host.recordTaskApproval(conversation.id,conversation.generation,view);notifyWaiting();if(view.work)void options.host.rememberWorkOwner(view.work.work_id,conversation.id,view.pending_approval_id).catch(()=>{ /* durable projection retried on work event */ });const manifest=options.codexResource!.adapter.manifest;emit(JSON.parse(executorApprovalMessage(view,core.runtime.clock.now(),{executor:manifest.name,display_name:manifest.display_name})) as Record<string,unknown>)})
   const memoryConsumerFingerprint=configuredMemoryConsumer(options.settings,mode)
-  const provider=(mode==='voice'?buildConversationVoiceProvider:(options.createTextProvider??buildCascadedTextProvider))({settings:options.settings,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,...(captureFrame?{captureFrame}:{}),executorApproval:approval!==undefined,...(options.onUsage?{onUsage:options.onUsage}:{}),...(options.telemetry?{telemetry:options.telemetry}:{}),...(mode==='text'&&options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await graph.retrieval.recall(query,{scope:'any',limit:3,signal,consumer:memoryConsumerFingerprint??''});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await graph.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();return prerecallContext(query,current)}}}:{})})
+  const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings:options.settings,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,...(captureFrame?{captureFrame}:{}),executorApproval:approval!==undefined,...(options.onUsage?{onUsage:options.onUsage}:{}),...(options.telemetry?{telemetry:options.telemetry}:{}),...(mode==='text'&&options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await graph.retrieval.recall(query,{scope:'any',limit:3,signal,consumer:memoryConsumerFingerprint??''});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await graph.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();return prerecallContext(query,current)}}}:{})})
   let pending:{resolve:(result:{assistant:string;turn_id?:string})=>void;reject:(error:unknown)=>void}|undefined
   const textOnly=mode==='text'
   let voiceEnabled=!textOnly
@@ -82,6 +83,9 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const taskForegroundResponses=new Set<string>()
   const deferredTaskWakes=new Set<string>()
   const taskHostItems=new Map<string,TaskFence>()
+  const taskResponseItems=new Map<string,string>()
+  const taskToolResponses=new Set<string>()
+  let taskTurnContinuing=false
   let currentResponse:string|undefined
   const captureTaskResponse=()=>{
    if(!currentResponse||!taskForegroundResponses.has(currentResponse))return
@@ -91,13 +95,15 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   }
   const settleTaskResponse=async(responseId:string,text:string,delivered:boolean)=>{
    const selected=taskResponses.get(responseId);if(!selected)return
+   const itemId=taskResponseItems.get(responseId);taskResponseItems.delete(responseId);if(itemId)taskHostItems.delete(itemId)
    taskResponses.delete(responseId);taskForegroundResponses.delete(responseId)
    for(const fence of selected.values())try{
+    if(itemId)await options.host.tasks.finishDelivery(fence.task_id,itemId)
     const task=options.host.tasks.get(fence.task_id)
     if(delivered&&text.trim()&&(!task.execution_route||task.execution_route==='nova'))await options.host.tasks.recordDelivery(fence,responseId+':'+task.id,text)
     if(task.execution_route&&task.execution_route!=='nova'&&!task.work_ids.length){if(task.phase==='queued')await options.host.tasks.wait(fence,'executor_admission_pending');continue}
-    if((!delivered||!text.trim())&&(!task.execution_route||task.execution_route==='nova')){await options.host.tasks.wait(fence,'delivery_interrupted');continue}
-    await options.host.wakeTask(task.id)
+    if(!delivered&&(!task.execution_route||task.execution_route==='nova')){await options.host.tasks.wait(fence,'delivery_interrupted');continue}
+    if(text.trim())await options.host.wakeTask(task.id)
    }catch{options.onDiagnostic?.('[runtime-diagnostic] task_delivery_or_check_failed')}
   }
   const projectConfirmation=options.codexResource?.mode==='project'?new ProjectConfirmationController({clock:core.runtime.clock,idFactory:()=>randomUUID(),onChange:view=>{notifyWaiting();options.host.recordConfirmation(conversation.id,view);emit(JSON.parse(projectStateMessage(view)) as Record<string,unknown>)}}):undefined
@@ -112,7 +118,26 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    ...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
    onDelivery:completion=>{if(mode==='voice')void settleTaskResponse(completion.response_id,completion.text,completion.disposition==='spoken').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)});const payload=deliveryToEvent(completion);if(payload)core.runtime.post({kind:'assistant_spoken',payload});if(completion.disposition!=='suppressed'&&completion.text)emit({type:'conversation.delivered',role:'assistant',text:completion.text,turn_id:captionIds.get(completion.response_id)??completion.utterance_id,delivery:completion.disposition==='spoken'?'completed':'interrupted',final:true})},
    onCaption:frame=>{if(frame.role==='assistant'){assistant=frame.text;assistantTurnId=frame.turn_id;if(frame.turn_id){const marker=frame.turn_id.indexOf(':assistant:');if(marker>=0)captionIds.set(frame.turn_id.slice(marker+11),frame.turn_id);if(captionIds.size>128)captionIds.delete(captionIds.keys().next().value!)}}emit({type:'caption',...frame})},
-   onProviderEvent:event=>{if(event.kind==='response_started'){assistant='';assistantTurnId=undefined;currentResponse=event.response_id;const bound=event.origin?.kind==='host_request'?taskHostItems.get(event.origin.host_item_id):undefined;taskResponses.set(event.response_id,bound?new Map([[bound.task_id,bound]]):new Map<string,TaskFence>());if(!bound&&(!event.origin||event.origin.kind==='user_item'||(event.origin.kind==='host_request'&&graph.service.session.responseIsToolContinuation(event.response_id)))){taskForegroundResponses.add(event.response_id);captureTaskResponse()}}if(event.kind==='response_terminal'&&event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending))emit({type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true});if(event.kind==='response_terminal'){captureTaskResponse();if(currentResponse===event.response_id)currentResponse=undefined;if(mode==='text'||event.status!=='completed')void settleTaskResponse(event.response_id,assistant,event.status==='completed').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)})}if(event.kind==='response_terminal'&&pending&&(event.status!=='completed'||assistant.trim()!=='')){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...(assistantTurnId?{turn_id:assistantTurnId}:{})});else current.reject(Error('response_'+event.status))}},
+   onProviderEvent:event=>{
+    if(event.kind==='tool_call_ready'&&currentResponse){taskToolResponses.add(currentResponse);taskTurnContinuing=true}
+    if(event.kind==='response_started'){
+     assistant='';assistantTurnId=undefined;currentResponse=event.response_id
+     const hostItems=graph.service.session.responseHostItemIds(event.response_id)
+     const itemId=event.origin?.kind==='host_request'?event.origin.host_item_id:hostItems.find(id=>taskHostItems.has(id)),bound=itemId?taskHostItems.get(itemId):undefined
+     if(bound&&itemId)taskResponseItems.set(event.response_id,itemId)
+     taskResponses.set(event.response_id,bound?new Map([[bound.task_id,bound]]):new Map<string,TaskFence>())
+     if(!bound&&((!event.origin&&hostItems.length===0)||event.origin?.kind==='user_item'||graph.service.session.responseIsToolContinuation(event.response_id))){taskForegroundResponses.add(event.response_id);captureTaskResponse()}
+    }
+    if(event.kind==='response_terminal'){
+     const hasTools=taskToolResponses.delete(event.response_id)
+     captureTaskResponse();if(currentResponse===event.response_id)currentResponse=undefined
+     if(!hasTools||event.status!=='completed')taskTurnContinuing=false
+     if(event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending))emit({type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true})
+     if(hasTools&&event.status==='completed'){taskResponses.delete(event.response_id);taskForegroundResponses.delete(event.response_id)}
+     else if(mode==='text'||event.status!=='completed')void settleTaskResponse(event.response_id,assistant,event.status==='completed').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)})
+     if(pending&&!hasTools&&(event.status!=='completed'||assistant.trim()!=='')){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...(assistantTurnId?{turn_id:assistantTurnId}:{})});else current.reject(Error('response_'+event.status))}
+    }
+   },
   })
   const unsubscribeProgress=core.runtime.observe((event,current)=>{if(current===false)return;refreshCodingTarget();const projected=projectExecutorEvent(event,core.runtime,channel=>graph.service.agentNameForChannel(channel));if(!projected)return;void options.host.rememberWorkOwner(projected.progress.delegate_id,conversation.id).catch(()=>{ /* host projection failure */ });options.onExecutorProgress?.(projected.progress,projected.result);if(mode==='voice'&&!voiceEnabled&&projected.result)emit({type:'conversation.completed',role:'assistant',text:projected.result.summary,turn_id:'task:'+projected.result.delegate_id,delivery:'completed',final:true})})
   projectConfirmation?.setBackground(options.host.presentationMode==='background')
@@ -141,7 +166,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const taskVerifier=core.personalAgentConfig?.surrogate??new GatewaySurrogate({gateway:core.gateway,model:options.settings.surrogate_model,proactivityPreset:options.settings.proactivity_preset})
   const detachTaskRuntime=options.host.attachTaskRuntime(conversation.id,conversation.generation,{
    routes:()=>['nova',...graph.service.taskRoutes()],
-   ready:task=>{if(currentResponse)deferredTaskWakes.add(task.id);return currentResponse===undefined},
+   ready:task=>{if(currentResponse||taskTurnContinuing)deferredTaskWakes.add(task.id);return currentResponse===undefined&&!taskTurnContinuing},
    detail:adapter?'public-events':'summary-only',
    evaluate:(task,signal)=>taskVerifier.evaluateTask(task,options.host.tasks.evidence(task.id),signal),
    input:async(grant,sessionId,text)=>{
@@ -151,10 +176,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     if(!admission.accepted)return 'failed'
     return acknowledged
    },
-   cancelTask:taskId=>{for(const [responseId,tasks] of taskResponses)if(tasks.has(taskId))void provider.cancelResponse(responseId,new AbortController().signal).catch(()=>options.onDiagnostic?.('[runtime-diagnostic] task_response_cancel_failed'))},
+   cancelTask:taskId=>{for(const [itemId,fence] of taskHostItems)if(fence.task_id===taskId)taskHostItems.delete(itemId);for(const [responseId,tasks] of taskResponses)if(tasks.has(taskId))void provider.cancelResponse(responseId,new AbortController().signal).catch(()=>options.onDiagnostic?.('[runtime-diagnostic] task_response_cancel_failed'))},
    cancel:workId=>{core.runtime.cancelPendingDispatch(workId);adapter?.taskPort?.cancelTask(workId)},
    dispatch:async(grant,instruction,sessionId)=>{
-    options.host.tasks.validateContinuation(grant)
+    try{options.host.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}
     const sessions=options.host.tasks.get(grant.fence.task_id).session_ids
     const target=sessionId??(sessions.length===1?sessions[0]:undefined)
     if(target){const result=await dispatchTarget(grant,target,instruction);if(!result.accepted)throw new TaskExecutionRejected('executor_admission_refused');return result}
@@ -166,7 +191,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
      if(result.code!=='delegated')await options.host.tasks.wait(grant.fence,'executor_'+result.detail.state)
      return result
     }
-    const itemId='task-response:'+randomUUID();taskHostItems.set(itemId,grant.fence)
+    const itemId='task-response:'+randomUUID();try{await options.host.tasks.beginDelivery(grant.fence,itemId)}catch{throw new TaskExecutionRejected('task_delivery_admission_failed')}taskHostItems.set(itemId,grant.fence)
     graph.service.queueHostItem({kind:'task_continuation',item:{kind:'recovery',host_item_id:itemId,event_id:itemId,call_id:null,content:JSON.stringify({purpose:'continue_authorized_task',task_id:task.id,original_goal:task.original_goal,goal:task.goal,acceptance:task.acceptance,instruction,origin_ref:task.origin_ref})},task_summary:null,origin_spoken:false},{stillWanted:grant.stillWanted})
     await graph.service.flushHostItems()
     return {accepted:true}

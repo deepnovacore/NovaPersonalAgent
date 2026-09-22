@@ -274,6 +274,10 @@ export class RealtimeSession {
     return items !== undefined && items.length > 0 && items.every(item => item.kind === 'tool_output')
   }
 
+  responseHostItemIds(responseId: string): readonly string[] {
+    return (this.#responseItems.get(this.#turnKey(responseId)) ?? []).map(item => item.host_item_id)
+  }
+
   responseEventIds(responseId: string): readonly string[] {
     return (this.#responseItems.get(this.#turnKey(responseId)) ?? []).map(item => item.event_id)
   }

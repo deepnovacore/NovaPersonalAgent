@@ -65,3 +65,36 @@ test('projection failure retries only the Todo and model failure waits without e
 test('an accepted steer receipt cannot serve as primary completion evidence',async()=>{
  const f=await setup();try{await f.tasks.bindWork(fence(f.task),'steer',undefined,false);const ref=await f.tasks.recordWorkOutcome('steer','ok',{accepted:true});await assert.rejects(f.tasks.applyDecision(fence(f.task),{kind:'complete',evidence_refs:[ref!]}),/evidence/)}finally{await f.close()}
 })
+
+test('unknown user input blocks correction after terminal work and handback, including serialized effect admission',async()=>{
+ const f=await setup();let executions=0;try{await f.tasks.bindWork(fence(f.task),'work','session');await f.tasks.controlClient('take',fence(f.task),'client','takeover');const owned=f.tasks.get(f.task.id)
+ assert.equal(await f.tasks.input('input',fence(owned),{kind:'user',client_id:'client'},'session','change it',async()=> 'unknown'),'unknown');await f.tasks.recordWorkOutcome('work','ok',{checks:['failed']});await f.tasks.controlClient('return',fence(owned),'client','return');const returned=f.tasks.get(f.task.id)
+ const decision={kind:'correct' as const,instruction:'retry change',evidence_refs:['task-work:work']};const loop=new TaskLoop(f.tasks,{evaluate:async()=>decision,execute:async()=>{executions++},syncTodo:async()=> 'synced'})
+ await loop.wake(f.task.id);assert.equal(executions,0);assert.equal(f.tasks.get(f.task.id).waiting_reason,'task_effect_unknown');assert.equal(f.tasks.get(f.task.id).corrections,0)
+ await assert.rejects(f.tasks.applyDecision(fence(returned),decision),/task_effect_unknown/);await assert.rejects(f.tasks.reserveInitial(fence(returned)),/task_effect_unknown/);await loop.close()
+ }finally{await f.close()}
+})
+
+test('input acknowledgement becoming unknown during evaluation fences the corrective decision',async()=>{
+ const f=await setup();let release!:()=>void,entered!:()=>void,executions=0;const started=new Promise<void>(resolve=>{entered=resolve}),gate=new Promise<void>(resolve=>{release=resolve})
+ try{await f.tasks.bindWork(fence(f.task),'work','session');await f.tasks.recordWorkOutcome('work','ok',{checks:['failed']});const loop=new TaskLoop(f.tasks,{evaluate:async()=>{entered();await gate;return {kind:'correct',instruction:'fix',evidence_refs:['task-work:work']}},execute:async()=>{executions++},syncTodo:async()=> 'synced'});const run=loop.wake(f.task.id);await started;await f.tasks.input('input',fence(f.task),{kind:'nova'},'session','update',async()=> 'unknown');release();await run;assert.equal(executions,0);assert.equal(f.tasks.get(f.task.id).waiting_reason,'task_effect_unknown');await loop.close()}finally{release?.();await f.close()}
+})
+
+import {TaskExecutionRejected} from '../src/personal-agent/task-loop.js'
+test('known refused initial attempts retry without verification or correction allowance',async()=>{
+ const f=await setup();let attempts=0;const loop=new TaskLoop(f.tasks,{evaluate:async()=>assert.fail('initial admission is not verification'),execute:async()=>{attempts++;throw new TaskExecutionRejected('busy')},syncTodo:async()=> 'synced'})
+ try{await loop.wake(f.task.id);await loop.wake(f.task.id);assert.equal(attempts,2);assert.equal(f.tasks.get(f.task.id).corrections,0);assert.equal(f.tasks.get(f.task.id).waiting_reason,'busy')}finally{await loop.close();await f.close()}
+})
+test('shutdown during evaluation does not write an unavailable check',async()=>{
+ const f=await setup();let entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve});await f.tasks.recordDelivery(fence(f.task),'reply','answer');const loop=new TaskLoop(f.tasks,{evaluate:async(_task,signal)=>{entered();await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}));signal.throwIfAborted();return {kind:'wait',reason:'unused',evidence_refs:[]}},execute:async()=>assert.fail('shutdown'),syncTodo:async()=> 'synced'})
+ try{const run=loop.wake(f.task.id);await started;await loop.close();await run;assert.equal(f.tasks.get(f.task.id).waiting_reason,null)}finally{await f.close()}
+})
+test('takeover after effect reservation is a failed preflight rather than an unknown write',async()=>{
+ const f=await setup(),reserve=f.tasks.reserveInitial.bind(f.tasks);f.tasks.reserveInitial=async bound=>{const id=await reserve(bound);await f.tasks.controlClient('take',bound,'client','takeover');return id};const loop=new TaskLoop(f.tasks,{evaluate:async()=>assert.fail('initial'),execute:async()=>assert.fail('preflight stopped it'),syncTodo:async()=> 'synced'})
+ try{await loop.wake(f.task.id);assert.equal(f.tasks.pendingEffect(f.task.id),null)}finally{await loop.close();await f.close()}
+})
+
+test('a pending Nova delivery coalesces repeated wakes until its exact disposition',async()=>{
+ const f=await setup();let executions=0;await f.tasks.recordDelivery(fence(f.task),'initial','incomplete');const loop=new TaskLoop(f.tasks,{evaluate:async()=>({kind:'correct',instruction:'finish',evidence_refs:['task-delivery:initial']}),execute:async(_task,_instruction,bound)=>{executions++;await f.tasks.beginDelivery(bound,'delivery:'+executions)},syncTodo:async()=> 'synced'})
+ try{await loop.wake(f.task.id);for(let i=0;i<3;i++)await loop.wake(f.task.id);assert.equal(executions,1);assert.equal(f.tasks.get(f.task.id).corrections,1);await f.tasks.finishDelivery(f.task.id,'wrong');await loop.wake(f.task.id);assert.equal(executions,1);await f.tasks.finishDelivery(f.task.id,'delivery:1');await loop.wake(f.task.id);assert.equal(executions,2)}finally{await loop.close();await f.close()}
+})

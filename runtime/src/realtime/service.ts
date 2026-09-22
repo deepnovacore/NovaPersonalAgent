@@ -1,3 +1,4 @@
+import {TaskExecutionRejected} from '../personal-agent/task-loop.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
 import {taskGrantService} from '../personal-agent/tasks.js'
 import type {PromptLanguage} from './prompt-language.js'
@@ -149,9 +150,9 @@ export class RealtimeService {
   taskRoutes():readonly string[]{return this.#agentRegistry.descriptors.map(item=>item.name)}
   taskTurnOrigin():string|undefined{return this.#intakeUser?.origin_ref}
   async dispatchTask(grant:TaskDispatchContext,instruction:string){
-    const tasks=taskGrantService(grant);tasks.validateContinuation(grant);const task=tasks.get(grant.fence.task_id)
+    let tasks;try{tasks=taskGrantService(grant);tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}const task=tasks.get(grant.fence.task_id)
     const controller=task.execution_route?this.#agentRegistry.controllers.get(task.execution_route):undefined
-    if(!controller)throw Error('task_executor_unavailable')
+    if(!controller)throw new TaskExecutionRejected('task_executor_unavailable')
     return controller.dispatch({taskContext:grant,continuationGrant:grant,instruction,originalUserText:task.original_goal??task.goal,origin_ref:grant.origin_ref,sessionEpoch:this.session.sessionEpoch,acceptedUserInputRevision:0,stillWanted:grant.stillWanted})
   }
 
