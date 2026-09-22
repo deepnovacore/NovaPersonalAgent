@@ -1547,6 +1547,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     normalized = [...normalized].map(character => (
       isOtherCategory(character.codePointAt(0)!) ? ' ' : character
     )).join('')
+    normalized = redactApprovalDetail(normalized)
     normalized = normalized.replace(
       /(?:bearer[\u0009-\u000d\u0020\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+[A-Za-z0-9._~+\/-]+=*|(?:sk|rk|pk)-[A-Za-z0-9_./+=-]{8,})/giu,
       '[REDACTED]',

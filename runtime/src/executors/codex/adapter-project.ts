@@ -164,9 +164,13 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     resolveSession:async(sessionId:string)=>{
       const snapshot=await this.#store.snapshot(),session=snapshot.sessions.find(item=>item.session_id===sessionId)
       const workspace=snapshot.workspaces.find(item=>item.workspace_id===session?.workspace_id)
-      if(!session||!workspace||session.state!=='ready')throw Error('session_not_found')
-      await this.#store.revalidateWorkspace(workspace.workspace_id)
+      if(!session||!workspace)throw Error('session_not_found')
       const activeSlot=this.#slots.get(workspace.workspace_id)
+      const activeBinding=activeSlot===undefined?undefined:this.#taskWorkspaces.get(activeSlot.work.work_id)
+      const liveStartingSession=session.state==='starting'&&activeSlot!==undefined&&activeSlot.live!==null
+        &&activeBinding?.workspace_id===workspace.workspace_id&&activeBinding.session_id===sessionId
+      if(session.state!=='ready'&&!liveStartingSession)throw Error('session_not_found')
+      await this.#store.revalidateWorkspace(workspace.workspace_id)
       if(activeSlot&&this.#taskWorkspaces.get(activeSlot.work.work_id)?.session_id!==sessionId)throw Error('session_active')
       return {project:workspace.display_name,session_id:sessionId,active:!!activeSlot,...(activeSlot?{work_id:activeSlot.work.work_id}:{})}
     },

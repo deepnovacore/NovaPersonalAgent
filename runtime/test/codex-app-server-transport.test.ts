@@ -3337,3 +3337,17 @@ test('command and MCP observations redact escaped configured secrets at the real
   }finally{await transport.close()}
  }
 })
+
+test('public MCP readback redacts URL query credentials and preserves benign query fields',async()=>{
+ const activity:{kind:string;text:string}[]=[],owner=new MemoryAppServerOwner([],{delayTurnStart:true})
+ const transport=createTransport({spawn:async()=>owner})
+ try{
+  const running=transport.run({workOrder:'observe URL readback'},{onActivity:event=>{activity.push(event)}},{expiresAtMs:Date.now()+5000})
+  await owner.turnStartReceived.promise
+  owner.stdout.write(encoder.encode(JSON.stringify({method:'item/completed',params:{threadId:'thread-1',turnId:'turn-1',item:{id:'mcp-url',type:'mcpToolCall',status:'completed',server:'nova_computer',tool:'browser_snapshot',result:{content:[{type:'text',text:'https://example.test/read?token=synthetic-value&view=summary'}]}}}})+'\n'))
+  owner.completeDelayedTurn();assert.equal((await running).classification,'completed')
+  const readback=activity.filter(event=>event.kind==='tool').map(event=>JSON.parse(event.text) as {readback?:string})[0]?.readback
+  assert.equal(readback,'https://example.test/read?token=[REDACTED]&view=summary')
+  assert.doesNotMatch(JSON.stringify(activity),/synthetic-value/u)
+ }finally{await transport.close()}
+})

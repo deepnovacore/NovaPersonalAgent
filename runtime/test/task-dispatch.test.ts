@@ -199,6 +199,44 @@ test('real scoped task executor survives conversation clear, targeted input and 
  }finally{release?.(COMPLETE);await host.close();await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
 })
 
+test('taken-over task input reaches its exact live first-run session while unmatched starting sessions stay fenced',async()=>{
+ const value=await fixture()
+ const host=new PersonalAgentHost({path:join(await realpath(value.root),'personal-new-session.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let release!:(outcome:TransportOutcome)=>void
+ try{
+  await host.open();await value.adapter.initialize()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,
+   settings:settingsSchema.parse({executors:['codex'],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),
+   codexResource:{mode:'project',adapter:value.adapter,agentDescriptor:CODEX_AGENT_DESCRIPTOR,agentControllerFactory:codingAgentControllerFactory,projectView:null,approvalController:null,start:async()=>{},close:async()=>{}},
+   searchTransport:{search:async()=>{throw Error('unexpected search')}},
+   gateway:{complete:async()=>{throw Error('unexpected model')},async *stream(){throw Error('unexpected stream')}},
+   createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({
+    async *stream(){yield {kind:'response_started',response_id:'ready'};yield {kind:'text_delta',text:'ready'};yield {kind:'response_completed',response_id:'ready'}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{},
+   })})}}),
+  }),()=>{})
+  await host.submitConversationText('chat:main','Prepare task input routing')
+  await until(()=>host.conversationSnapshot().messages.some(message=>message.role==='assistant'))
+  value.factory.runGate=new Promise(resolve=>{release=resolve})
+  const running=run(value,'first run',{session:'new',delegateId:'first-work'})
+  await until(()=>value.factory.transports[0]?.workOrders.length===1)
+  const workspace=await value.store.resolveWorkspace('alpha')
+  const session=(await value.store.listSessions(workspace)).find(item=>item.display_title==='first run')!
+  assert.equal(session.state,'starting')
+  const unmatched=await value.store.beginSessionForRun(workspace.workspace_id,'unmatched starting')
+  await assert.rejects(value.adapter.taskPort.resolveSession(unmatched.session.session_id),/session_not_found/)
+  await value.store.rollbackSessionStartForRun(unmatched.rollback,{wait:true})
+  assert.deepEqual(await value.adapter.taskPort.resolveSession(session.session_id),{project:'alpha',session_id:session.session_id,active:true,work_id:'first-work'})
+  const task=await host.tasks.delegate('declare-new-session',{conversation_id:'chat:main',conversation_generation:0,goal:'Complete first run',acceptance:[],origin_ref:'conversation:1'})
+  const fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await host.tasks.bindWork(fence,'first-work',session.session_id)
+  await host.tasks.controlClient('take-new-session',fence,'client','takeover')
+  const input=await settleWithin('first-run direct steer',host.command({type:'personal.command',request_id:'new-session-input',method:'tasks.input',params:{...fence,control_revision:1,session_id:session.session_id,text:'Apply the revised constraint'}},{client_id:'client'})) as {ok:boolean;data:{status:string}}
+  assert.equal(input.ok,true);assert.equal(input.data.status,'accepted')
+  assert.equal((await value.store.listSessions(workspace)).find(item=>item.session_id===session.session_id)?.state,'starting')
+  release(COMPLETE);await running
+ }finally{release?.(COMPLETE);await host.close();await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
+})
+
 import {CausalRuntime,type ExecutorDispatchContext} from '../src/core/causal-runtime.js'
 import {RealClock} from '../src/core/clock.js'
 import {MonotonicIdFactory} from '../src/core/ids.js'
