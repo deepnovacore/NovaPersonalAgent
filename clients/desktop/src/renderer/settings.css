@@ -1019,3 +1019,6 @@ input:is([type="date"], [type="time"]) { min-height: 40px; padding: 8px 12px; bo
   input::placeholder { color: var(--ink-faint); }
   #settings-save { color: #191c20; }
 }
+
+#connections-section .personal-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+#connections-section .personal-chips span { padding: 4px 8px; border-radius: 6px; background: var(--surface-strong, var(--surface)); }

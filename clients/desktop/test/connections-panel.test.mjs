@@ -8,8 +8,9 @@ function harness(snapshot,{failState=false}={}){
  const root=new Node('div'),error=new Node('p'),calls=[],chosen=[],opened=[]
  const document={querySelector:sel=>sel==='#connections-panel'?root:error,createElement:tag=>new Node(tag),createTextNode:text=>{const n=new Node('#text');n.textContent=text;return n}}
  const api={personalCommand:async(method,params)=>{calls.push([method,params]);if(method==='state')return failState?{error:'unavailable'}:snapshot();return {ok:true}},chooseDirectory:async()=>{chosen.push(1);return '/tmp/docs'},openConnectorAuthorization:async url=>{opened.push(url)}}
+ let tick;document.defaultView={setInterval:fn=>{tick=fn;return 1},addEventListener(){},clearInterval(){}};document.visibilityState='visible';root.offsetParent={};root.contains=node=>all(root).includes(node)
  const panel=createConnectionsPanel({document,api})
- return {root,error,calls,chosen,opened,panel,button:label=>all(root).find(n=>n.tag==='button'&&n.textContent===label)}
+ return {root,error,calls,chosen,opened,panel,document,api,tick:()=>tick(),button:label=>all(root).find(n=>n.tag==='button'&&n.textContent===label)}
 }
 const snapshot=(o={})=>({capabilities:{sources:true,discovery:true},sources:[{id:'s1',path:'/Users/me/notes',state:'connected',scanned:3,read:2,skipped:1,last_sync:'today'}],connectors:{available:false,memory_available:true},settings:{discovery_enabled:true,discovery_interval_minutes:30},...o})
 test('load fetches state once and renders sources, connectors, brief and discovery from it',async()=>{
@@ -51,4 +52,10 @@ test('English connections settings use secondary tabs without translating source
   for(const tab of ['Mail & calendar','Proactive reminders','Local files']){await h.button(tab).listeners.click();await new Promise(r=>setImmediate(r));assert.equal(all(h.root).find(n=>n.role==='tab'&&n['aria-selected']==='true').textContent,tab)}
   const copy=all(h.root).map(n=>n.textContent).join('\n').replaceAll('/资料/原始内容','');assert.ok(!/[\u4e00-\u9fff]/u.test(copy),copy)
  }finally{setLanguage('zh-CN')}
+})
+
+test('background progress polling keeps controls enabled and preserves an active authorization choice',async()=>{
+ const h=harness(()=>snapshot({sources:[{id:'s1',path:'/notes',state:'connected',scan_pending:true}]}));await h.panel.load();
+ let resolve;h.api.personalCommand=()=>new Promise(done=>{resolve=done});h.tick();assert.equal(h.button('暂停同步').disabled,false);resolve(snapshot({sources:[{id:'s1',path:'/notes',state:'connected',scan_pending:true}]}));await new Promise(r=>setImmediate(r));
+ const check=all(h.root).find(n=>n.tag==='input'&&n.type==='checkbox');check.checked=true;check.listeners.change();h.document.activeElement=check;let calls=0;h.api.personalCommand=()=>{calls++;return Promise.resolve(snapshot())};h.tick();assert.equal(calls,0);assert.equal(check.checked,true);assert.equal(h.button('授权本机全部可访问数据').disabled,false)
 })

@@ -55,7 +55,9 @@ export function createConnectionsPanel({document, api}) {
   }finally{busy=false;render()}
  }
  async function load(){if(busy)return;try{await command('state')}catch(caught){root.replaceChildren(el('p',t('未能读取连接状态，请重试。')));local.onError(caught)}}
- const timer=document.defaultView?.setInterval(()=>{if(!busy&&selected==='files'&&state?.sources?.some(s=>s.scan_pending)&&document.visibilityState==='visible'&&root.offsetParent!==null&&!['INPUT','SELECT','TEXTAREA'].includes(document.activeElement?.tagName))void load()},5000)
+ let polling=false
+ const canPoll=()=>!busy&&selected==='files'&&state?.sources?.some(s=>s.scan_pending)&&document.visibilityState==='visible'&&root.offsetParent!==null&&!root.contains(document.activeElement)
+ const timer=document.defaultView?.setInterval(()=>{if(polling||!canPoll())return;polling=true;void api.personalCommand('state',{}).then(next=>{if(canPoll()&&!next?.error){state=next;render()}}).catch(()=>{/* Keep the last status during a transient disconnect. */}).finally(()=>{polling=false})},5000)
  document.defaultView?.addEventListener('pagehide',()=>document.defaultView.clearInterval(timer),{once:true})
  render()
  return {load}
