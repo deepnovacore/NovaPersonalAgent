@@ -3316,3 +3316,24 @@ test('public activity flags clipping caused by expanding redaction',async()=>{
  assert.equal(activity[0]?.text.length,16000)
  assert.equal(activity[0]?.text_truncated,true)
 })
+
+test('command and MCP observations redact escaped configured secrets at the real transport boundary',async()=>{
+ for(const secret of ['multiline\nprivate instruction','private "quoted" instruction','private \\escaped\\ instruction']){
+  const activity:{kind:string;text:string}[]=[],owner=new MemoryAppServerOwner([],{delayTurnStart:true,finalText:secret+' useful result'})
+  const transport=createTransport({spawn:async()=>owner},{developerInstructions:secret})
+  try{
+   const running=transport.run({workOrder:'observe checks'},{onActivity:event=>{activity.push(event)}},{expiresAtMs:Date.now()+5000})
+   await owner.turnStartReceived.promise
+   for(const item of [
+    {id:'command',type:'commandExecution',status:'completed',command:'run '+secret,aggregatedOutput:secret+' check passed',exitCode:0},
+    {id:'mcp',type:'mcpToolCall',status:'completed',server:secret,tool:secret,result:{content:[{type:'text',text:secret+' observed state'}]}},
+   ])owner.stdout.write(encoder.encode(JSON.stringify({method:'item/completed',params:{threadId:'thread-1',turnId:'turn-1',item}})+'\n'))
+   owner.completeDelayedTurn();assert.equal((await running).classification,'completed')
+   assert.equal(activity.find(event=>event.kind==='message')?.text,'[REDACTED] useful result')
+   const observations=activity.filter(event=>event.kind==='tool').map(event=>JSON.parse(event.text) as Record<string,unknown>)
+   assert.equal(observations.length,2)
+   assert.equal(observations[0]?.command,'run [REDACTED]');assert.equal(observations[0]?.output,'[REDACTED] check passed');assert.equal(observations[0]?.exit_code,0)
+   assert.equal(observations[1]?.server,'[REDACTED]');assert.equal(observations[1]?.tool,'[REDACTED]');assert.equal(observations[1]?.readback,'[REDACTED] observed state')
+  }finally{await transport.close()}
+ }
+})
