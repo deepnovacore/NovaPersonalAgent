@@ -978,7 +978,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
         cwd: hostWorkspacePath(this.#config.workspace),
       }, deadline)
       if (this.#config.preserveHome && this.#sharedHomeOverrides === null) {
-        this.#sharedHomeOverrides = sharedHomeOverrides(configResponse, Object.keys(this.#config.managedMcp?.servers ?? {}))
+        this.#sharedHomeOverrides = sharedHomeOverrides(configResponse, this.#config.managedMcp)
         const cleanup = await this.#cleanup(session, false)
         if (!cleanup.complete || !cleanup.treeGone) throw new CodexTransportError('transport_lost')
         this.#session = null

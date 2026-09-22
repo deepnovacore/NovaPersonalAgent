@@ -831,6 +831,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
           if(tasks&&options.taskConversationId){
             const task=intake?.task_fence?tasks.get(intake.task_fence.task_id):await tasks.delegate('proposal:'+operation.proposal_id,{conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration}),goal:intake?.slots.goal.note??operation.work_order!,acceptance:intake?[intake.slots.acceptance.note].filter(Boolean):[],origin_ref:operation.origin_ref})
             grant=tasks.continuationContext(intake?.task_fence??{task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
+            await tasks.setRoute(grant.fence,service.agentNameForChannel(request.executor)??request.executor)
           }
           return core.runtime.dispatchConfirmedExternal(request,reason,capability,()=>launchAuthorized()&&(grant?.stillWanted()??true),grant)
         },
