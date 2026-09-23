@@ -16,6 +16,7 @@ import {
 } from '../src/realtime/qwen.js'
 import { ItemDeliveryUncertainError, type RealtimeProviderEvent } from '../src/realtime/protocol.js'
 import { RealtimeProviderSession } from '../src/realtime/provider-session.js'
+import {createStepFunWireProfile} from '../src/realtime/integrated-wire-profile.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -150,6 +151,36 @@ test('connect performs the Qwen handshake and never logs the credential', async 
   assert.equal(session.instructions, FRONTEND_INSTRUCTIONS)
   // A credential must never ride along inside the session payload.
   assert.doesNotMatch(JSON.stringify(update), /secret-key-value/u)
+})
+
+test('StepFun profile uses the shared lifecycle with its own session and PCM boundary', async () => {
+  const scripted = scriptedSocket([...handshake])
+  const adapter = adapterFor(scripted, {model: 'stepaudio-3-realtime-preview', voice: '',
+    wireProfile: createStepFunWireProfile()})
+  await adapter.connect({tools: [{type: 'function', name: 'lookup', description: 'Look up',
+    parameters: {type: 'object', properties: {}}}], signal: new AbortController().signal})
+  const update = scripted.sent.find(frame => frame.type === 'session.update')
+  assert.ok(update)
+  const session = update.session as Record<string, unknown>
+  assert.deepEqual(session.turn_detection, {type: 'server_vad', prefix_padding_ms: 500})
+  assert.equal(session.input_audio_format, 'pcm16')
+  assert.deepEqual(session.tools, [{type: 'function', function: {name: 'lookup',
+    description: 'Look up', parameters: {type: 'object', properties: {}}}}])
+  await adapter.sendAudio(new Uint8Array(new Int16Array([0, 600, 1200, 1800]).buffer),
+    new AbortController().signal)
+  const append = scripted.sent.find(frame => frame.type === 'input_audio_buffer.append')
+  assert.ok(append)
+  assert.equal(Buffer.from(append.audio as string, 'base64').byteLength, 10)
+  const events = adapter.events(new AbortController().signal)[Symbol.asyncIterator]()
+  const next = events.next()
+  scripted.push({type: 'response.audio.delta', response_id: 'r1',
+    delta: Buffer.from(new Int16Array([0, 600, 1200, 1800]).buffer).toString('base64')})
+  const received = await next
+  assert.equal(received.done, false)
+  assert.equal(received.value?.kind, 'response_audio_delta')
+  if (received.value?.kind === 'response_audio_delta') assert.equal(received.value.pcm.byteLength, 8)
+  await events.return?.(undefined)
+  await adapter.close()
 })
 
 test('connect-time response adaptation ACK starts the reader without blocking later events', async () => {
