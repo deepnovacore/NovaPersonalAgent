@@ -17,7 +17,7 @@ export function nextComputerRoot<T extends RootSignal>(roots:readonly T[],turn:n
   const now=Date.now()
   const tiers=[roots.filter(root=>root.selected||root.currentWorkspace),roots.filter(root=>!root.selected&&!root.currentWorkspace&&root.lastGitCommitMs!==null&&now-root.lastGitCommitMs<30*86_400_000),roots.filter(root=>!root.selected&&!root.currentWorkspace&&(root.lastGitCommitMs===null||now-root.lastGitCommitMs>=30*86_400_000))]
   const preferred=[0,0,0,0,1,1,2][turn%7]!
-  for(const tier of [preferred,0,1,2]){
+  for(const tier of [preferred,(preferred+1)%3,(preferred+2)%3]){
     const available=tiers[tier]!.filter(root=>!skipped.has(root.path))
     if(!available.length)continue
     const cursor=cursors[tier]??0

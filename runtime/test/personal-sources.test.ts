@@ -727,6 +727,9 @@ test('streamed directory scan reports exact cap as complete and excess as partia
   await writeFile(join(f.folder,'fourth.md'),'Fourth note')
   const partial=await scanDirectory(f.folder,new AbortController().signal,()=>undefined,{hardSafetyCap:3})
   assert.equal(partial.complete,false);assert.equal(partial.seen,3)
+  let changed=false
+  const mutation=await scanDirectory(f.folder,new AbortController().signal,async()=>{if(!changed){changed=true;await writeFile(join(f.folder,'during-scan.md'),'Mutation during scan')}},{hardSafetyCap:10})
+  assert.equal(mutation.complete,false);assert.equal(mutation.capped,false)
  }finally{await f.close()}
 })
 
@@ -801,6 +804,7 @@ test('directory ledger rollback emits a readable legacy checkpoint',async()=>{
   await writeFile(input,JSON.stringify(state))
   const script=new URL('../../scripts/rollback-source-walk.mjs',import.meta.url)
   execFileSync(process.execPath,[script.pathname,input,output])
+  assert.throws(()=>execFileSync(process.execPath,[script.pathname,input,join(f.root,'db','..','db','sources.json')],{stdio:'pipe'}))
   const legacy=JSON.parse(await readFile(output,'utf8')) as {sources:{walk:{queue:{path:string;offset:number}[];pending:unknown[];deferred:unknown[];ledger?:unknown}}[]}
   assert.deepEqual(legacy.sources[0]!.walk.queue,[{path:f.folder,offset:0}])
   assert.equal(legacy.sources[0]!.walk.pending.length,1)
@@ -808,5 +812,99 @@ test('directory ledger rollback emits a readable legacy checkpoint',async()=>{
   assert.equal(legacy.sources[0]!.walk.ledger,undefined)
   const reopened=new LocalDirectorySources({path:output,computerRoot:f.folder,knowledge:f.knowledge,pollMs:0,scanOnOpen:false})
   try{await reopened.open();assert.equal(reopened.list().length,1)}finally{await reopened.close()}
+ }finally{await f.close()}
+})
+
+test('one large computer directory never persists more than the pending cap',async()=>{
+ const f=await fixture()
+ try{
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  for(let i=0;i<205;i++)await writeFile(join(f.folder,`note-${i}.md`),`Note ${i}`)
+  const path=join(f.root,'db','sources.json'),disk=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown}[]}
+  disk.sources[0]!.walk={queue:[{path:f.folder}],ledger:[],generation:1,pending:[],deferred:[]}
+  await writeFile(path,JSON.stringify(disk))
+  const sources=new LocalDirectorySources({path,computerRoot:f.folder,knowledge:f.knowledge,pollMs:0,scanOnOpen:false})
+  try{
+   await sources.open()
+   let release!:()=>void,entered!:()=>void
+   const gate=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
+   f.setEmbeddingHook(()=>{entered();return gate})
+   const sync=sources.command('sources.sync',{id})
+   try{
+    await started
+    const saved=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{pending:unknown[];queue:unknown[]}}[]}
+    assert.ok(saved.sources[0]!.walk.pending.length<=16)
+    assert.ok(saved.sources[0]!.walk.queue.length>0)
+   }finally{release();await sync}
+   assert.notEqual(sources.list()[0]!.state,'error')
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
+test('queued ledger entry without queue recovers after restart',async()=>{
+ const f=await fixture()
+ try{
+  const document=join(f.folder,'recovered.md')
+  await f.sources.command('sources.authorize_computer',{consent:true})
+  await f.sources.close()
+  await writeFile(document,'Recovery note')
+  const path=join(f.root,'db','sources.json'),disk=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown;files:unknown[]}[]}
+  disk.sources[0]!.files=[]
+  disk.sources[0]!.walk={queue:[],ledger:[{path:f.folder,generation:2,status:'queued'}],generation:2,pending:[],deferred:[]}
+  await writeFile(path,JSON.stringify(disk))
+  await f.reopen()
+  for(let i=0;i<30&&!(await f.knowledge.listSources()).some(item=>item.locator===document);i++)await new Promise(resolve=>setTimeout(resolve,50))
+  assert.ok((await f.knowledge.listSources()).some(item=>item.locator===document))
+ }finally{await f.close()}
+})
+
+test('dirty hint keeps prior directory identity before deletion reconciliation',async()=>{
+ let workspace:string|null=null
+ const f=await fixture(false,()=>Promise.resolve(workspace))
+ try{
+  const project=join(f.folder,'project');await mkdir(project)
+  const document=join(project,'old.md');await writeFile(document,'Previously indexed note')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id});await f.sources.close()
+  const path=join(f.root,'db','sources.json'),disk=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown}[]}
+  disk.sources[0]!.walk={queue:[],ledger:[{path:project,generation:1,status:'done',identity:{dev:'-1',ino:'-1',mtimeNs:'0'}}],generation:1,pending:[],deferred:[]}
+  await writeFile(path,JSON.stringify(disk));await rm(document)
+  workspace=project
+  await f.reopen();await f.sources.command('sources.sync',{id})
+  assert.ok((await f.knowledge.listSources()).some(item=>item.locator===document))
+ }finally{await f.close()}
+})
+
+test('computer batch turn persists so lower tier progresses beside four busy priorities',async()=>{
+ const f=await fixture()
+ try{
+  const priorities:string[]=[]
+  for(let i=0;i<4;i++){const dir=join(f.folder,`high-${i}`);priorities.push(dir);await mkdir(dir);for(let j=0;j<12;j++)await writeFile(join(dir,`note-${j}.md`),`High ${i} note ${j}`)}
+  const other=join(f.folder,'other');await mkdir(other);await writeFile(join(other,'README.md'),'Other root overview')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),disk=JSON.parse(await readFile(path,'utf8')) as {sources:{view:{priority_dirs:string[]};walk:unknown;files:unknown[]}[]}
+  disk.sources[0]!.view.priority_dirs=priorities
+  disk.sources[0]!.walk={queue:[...priorities,other].map(path=>({path})),ledger:[],generation:1,pending:[],deferred:[]}
+  disk.sources[0]!.files=[]
+  await writeFile(path,JSON.stringify(disk))
+  const sources=new LocalDirectorySources({path,computerRoot:f.folder,knowledge:f.knowledge,pollMs:0,scanOnOpen:false})
+  try{await sources.open();for(let i=0;i<2;i++)await sources.command('sources.sync',{id});assert.ok((await f.knowledge.listSources()).some(item=>item.locator===join(other,'README.md')))}finally{await sources.close()}
+ }finally{await f.close()}
+})
+
+test('past-due partial directory waits behind future pending files without hot loop',async()=>{
+ const f=await fixture()
+ try{
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),disk=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown}[]}
+  const future=Date.now()+60_000
+  disk.sources[0]!.walk={queue:[],ledger:[{path:f.folder,generation:1,status:'partial',eligible_at:0}],generation:1,pending:Array.from({length:16},(_,i)=>({path:join(f.folder,`future-${i}.md`),size:1,mtime:1,unit:f.folder,eligible_at:future})),deferred:[]}
+  await writeFile(path,JSON.stringify(disk))
+  let changes=0
+  const sources=new LocalDirectorySources({path,computerRoot:f.folder,knowledge:f.knowledge,pollMs:0,scanOnOpen:false,onChange:()=>{changes++}})
+  try{await sources.open();await sources.command('sources.sync',{id});await new Promise(resolve=>setTimeout(resolve,100));assert.ok(changes<=4)}finally{await sources.close()}
  }finally{await f.close()}
 })

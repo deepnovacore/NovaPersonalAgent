@@ -37,8 +37,8 @@ const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, i
   evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
 const walkFileSchema=z.object({path:pathSchema,size:z.number().nonnegative(),mtime:z.number(),unit:pathSchema,attempts:z.number().int().nonnegative().optional(),eligible_at:z.number().optional(),reason:z.enum(['body_budget','retry']).optional()}).strict()
 const deferredFileSchema=walkFileSchema.extend({eligible_at:z.number().default(0),attempts:z.number().int().nonnegative().default(0),reason:z.enum(['body_budget','retry']).default('retry')}).strict()
-const directoryLedgerSchema=z.object({path:pathSchema,unit:pathSchema.optional(),generation:z.number().int().nonnegative(),status:z.enum(['queued','done','partial']),identity:z.object({dev:z.string(),ino:z.string(),mtimeNs:z.string()}).strict().optional(),eligible_at:z.number().optional()}).strict()
-const walkSchema=z.object({queue:z.array(z.object({path:pathSchema,offset:z.number().int().nonnegative().optional(),unit:pathSchema.optional()}).strict()).max(20000),ledger:z.array(directoryLedgerSchema).max(20000).default([]),generation:z.number().int().nonnegative().default(1),pending:z.array(walkFileSchema).max(200),deferred:z.array(deferredFileSchema).max(200).default([]),workspace_seeded:pathSchema.optional()}).strict()
+const directoryLedgerSchema=z.object({path:pathSchema,unit:pathSchema.optional(),generation:z.number().int().nonnegative(),status:z.enum(['queued','done','partial']),identity:z.object({dev:z.string(),ino:z.string(),mtimeNs:z.string()}).strict().optional(),eligible_at:z.number().optional(),attempts:z.number().int().nonnegative().default(0)}).strict()
+const walkSchema=z.object({queue:z.array(z.object({path:pathSchema,offset:z.number().int().nonnegative().optional(),unit:pathSchema.optional()}).strict()).max(20000),ledger:z.array(directoryLedgerSchema).max(20000).default([]),generation:z.number().int().nonnegative().default(1),turn:z.number().int().nonnegative().default(0),cursors:z.array(z.number().int().nonnegative()).length(3).default([0,0,0]),pending:z.array(walkFileSchema).max(200),deferred:z.array(deferredFileSchema).max(200).default([]),workspace_seeded:pathSchema.optional()}).strict()
 const recordSchema = z.object({walk:walkSchema.nullable().default(null),processing_consent:processingGrantSchema.optional(),view: snapshotSchema, files: z.array(trackedSchema).max(20000),
   deleting: z.boolean().default(false), observation: z.string().max(500).default(''),
   pending: z.object({path: pathSchema, size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), previous_updated_at: z.number().nullable()}).strict().nullable().default(null)}).strict()
@@ -124,6 +124,7 @@ export class LocalDirectorySources {
   #activityCache=new Map<string,{value:Awaited<ReturnType<typeof rootActivity>>;checked:number}>()
   #watchers:FSWatcher[]=[]
   #dirtyHints=new Map<string,Set<string>>()
+  #hintTimers=new Map<string,ReturnType<typeof setTimeout>>()
 
   constructor(options: LocalDirectorySourceOptions) {this.#options = options}
   async open(): Promise<void> {
@@ -155,6 +156,8 @@ export class LocalDirectorySources {
     this.#closed = true
     for(const watcher of this.#watchers)watcher.close()
     this.#watchers=[]
+    for(const timer of this.#hintTimers.values())clearTimeout(timer)
+    this.#hintTimers.clear()
     clearInterval(this.#timer)
     this.#active?.abort.abort()
     await this.#active?.done
@@ -164,7 +167,22 @@ export class LocalDirectorySources {
   }
   list(): SourceSnapshot[] {const expected=this.#options.processingGrant?.(true,1,0);return this.#records.map(record => ({...structuredClone(record.view), processing_consent_required:!record.processing_consent?.extraction_provider||record.processing_consent.extraction_provider!==expected?.extraction_provider||record.processing_consent.embedding_provider!==expected?.embedding_provider, excludes: [...new Set([...SOURCE_EXCLUDES, ...(record.view.scope==='computer'?COMPUTER_EXCLUDES:[]), ...record.view.excludes])]}))}
   #watchComputer(record:SourceRecord):void {
-    const hint=(path:string)=>{if(!['connected','error'].includes(record.view.state))return;this.#activityCache.clear();const pending=this.#dirtyHints.get(record.view.id)??new Set<string>();pending.add(path);this.#dirtyHints.set(record.view.id,pending);const timer=setTimeout(()=>{if(this.#closed||!['connected','error'].includes(record.view.state))return;const active=this.#active;if(active)void active.done.finally(()=>{if(!this.#closed&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)});else void this.#sync(record).catch(()=>undefined)},1000);timer.unref()}
+    const hint=(path:string)=>{
+      if(!['connected','error'].includes(record.view.state))return
+      const pending=this.#dirtyHints.get(record.view.id)??new Set<string>()
+      if(pending.size>=64){pending.clear();pending.add(record.view.path)}else if(!pending.has(record.view.path))pending.add(path)
+      this.#dirtyHints.set(record.view.id,pending)
+      if(this.#hintTimers.has(record.view.id))return
+      this.#activityCache.clear()
+      const timer=setTimeout(()=>{
+        this.#hintTimers.delete(record.view.id)
+        if(this.#closed||!['connected','error'].includes(record.view.state))return
+        const active=this.#active
+        if(active)void active.done.catch(()=>undefined).then(()=>{if(!this.#closed&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)})
+        else void this.#sync(record).catch(()=>undefined)
+      },1000)
+      timer.unref();this.#hintTimers.set(record.view.id,timer)
+    }
     try{
       const watcher=watch(record.view.path,{recursive:true},(_event,filename)=>{
         const path=filename?join(record.view.path,String(filename)):record.view.path
@@ -292,17 +310,23 @@ export class LocalDirectorySources {
     return {id:record.view.id}
   }
   async #computerBatch(record:SourceRecord,signal:AbortSignal,force=false):Promise<{path:string;size:number;mtime:number;unit:string}[]>{
-    const walk:z.infer<typeof walkSchema>=record.walk??(record.walk={queue:[...record.view.priority_dirs.map(path=>({path})),{path:record.view.path}],ledger:[],generation:1,pending:[],deferred:[]})
+    const walk:z.infer<typeof walkSchema>=record.walk??(record.walk={queue:[...record.view.priority_dirs.map(path=>({path})),{path:record.view.path}],ledger:[],generation:1,turn:0,cursors:[0,0,0],pending:[],deferred:[]})
     // v1 offsets are deliberately ignored: reopening a changed directory starts a new pass.
     const ledger=new Map(walk.ledger.map(item=>[item.path,item]))
-    for(const item of walk.queue)if(!ledger.has(item.path))ledger.set(item.path,{path:item.path,unit:item.unit,generation:walk.generation,status:'queued'})
+    for(const item of walk.queue)if(!ledger.has(item.path)){
+      if(ledger.size>=20000){record.view.reasons.directory_capacity=(record.view.reasons.directory_capacity??0)+1;continue}
+      ledger.set(item.path,{path:item.path,unit:item.unit,generation:walk.generation,status:'queued',attempts:0})
+    }
+    walk.queue=walk.queue.filter(item=>ledger.has(item.path))
+    const resumePaths=new Set(walk.queue.map(item=>item.path))
+    for(const item of ledger.values())if(item.status==='queued'&&!resumePaths.has(item.path)&&walk.queue.length<20000){walk.queue.push({path:item.path,...(item.unit?{unit:item.unit}:{})});resumePaths.add(item.path)}
     if(force&&walk.queue.length===0&&walk.pending.length===0&&walk.deferred.length===0&&ledger.size>0){walk.generation++;for(const entry of ledger.values())entry.status='queued';walk.queue=[...record.view.priority_dirs.map(path=>({path})),{path:record.view.path}]}
     else if(walk.queue.length===0&&walk.pending.length===0&&walk.deferred.length===0){
       const due=[...ledger.values()].filter(item=>(item.eligible_at??Infinity)<=Date.now()).slice(0,64)
       if(due.length){walk.generation++;for(const item of due){item.generation=walk.generation;item.status='queued';walk.queue.push({path:item.path,...(item.unit?{unit:item.unit}:{})})}}
     }
     const hints=this.#dirtyHints.get(record.view.id)
-    if(hints?.size){walk.generation++;const existing=new Set(walk.queue.map(item=>item.path));for(const path of [...hints].slice(0,64)){const old=ledger.get(path);ledger.set(path,{path,generation:walk.generation,status:'queued',...(old?.unit?{unit:old.unit}:{})});if(!existing.has(path)){walk.queue.push({path,...(old?.unit?{unit:old.unit}:{})});existing.add(path)}hints.delete(path)}}
+    if(hints?.size){walk.generation++;const existing=new Set(walk.queue.map(item=>item.path));for(const path of [...hints].slice(0,64)){const old=ledger.get(path);if(!old&&ledger.size>=20000||!existing.has(path)&&walk.queue.length>=20000){record.view.reasons.directory_capacity=(record.view.reasons.directory_capacity??0)+1;hints.delete(path);continue}ledger.set(path,{...old,path,generation:walk.generation,status:'queued',attempts:old?.attempts??0});if(!existing.has(path)){walk.queue.push({path,...(old?.unit?{unit:old.unit}:{})});existing.add(path)}hints.delete(path)}}
     const now=Date.now()
     const eligible=walk.deferred.filter(item=>item.eligible_at<=now).slice(0,Math.max(0,200-walk.pending.length))
     const eligiblePaths=new Set(eligible.map(item=>item.path))
@@ -317,7 +341,7 @@ export class LocalDirectorySources {
       const prior=ledger.get(path)
       if(prior?.generation===walk.generation&&(prior.status==='done'||prior.status==='partial'||queuedPaths.has(path)))return
       if(walk.queue.length>=20000||ledger.size>=20000){record.view.reasons.directory_capacity=(record.view.reasons.directory_capacity??0)+1;return}
-      ledger.set(path,{path,unit,generation:walk.generation,status:'queued'})
+      ledger.set(path,{...prior,path,unit,generation:walk.generation,status:'queued',attempts:prior?.attempts??0})
       walk.queue.push({path,...(unit?{unit}:{})});queuedPaths.add(path)
     }
     if(workspace&&walk.workspace_seeded!==workspace){
@@ -335,21 +359,22 @@ export class LocalDirectorySources {
     let metadataSeen=0
     let statCalls=0
     const yielded=new Set<string>()
-    const cursors=[0,0,0]
+    const cursors=walk.cursors
     try{
     while(walk.queue.length&&walk.pending.length<16&&metadataSeen<20_000&&statCalls<20_000&&turns++<64){
       signal.throwIfAborted()
       // Rotate roots; ranking is a tier hint, not a permanent sort of every turn.
       const front=walk.queue.slice(0,Math.min(32,walk.queue.length))
       const signals=await Promise.all(front.map(item=>signalFor(item.path)))
-      const candidate=nextComputerRoot(signals,turns-1,cursors,yielded)??nextComputerRoot(signals,turns-1,cursors)!
+      const turn=walk.turn++
+      const candidate=nextComputerRoot(signals,turn,cursors,yielded)??nextComputerRoot(signals,turn,cursors)!
       const selected=front.find(item=>item.path===candidate.path)!
       const index=walk.queue.indexOf(selected),directory=walk.queue.splice(index,1)[0]!
       queuedPaths.delete(directory.path)
-      const item=ledger.get(directory.path)??{path:directory.path,generation:walk.generation,status:'queued' as const}
+      const item=ledger.get(directory.path)??{path:directory.path,generation:walk.generation,status:'queued' as const,attempts:0}
       item.generation=walk.generation
       ledger.set(directory.path,item)
-      if(directory.path!==record.view.path&&(isAutoHiddenPath(record.view.path,directory.path,record.view.priority_dirs)||relative(record.view.path,directory.path).split(sep).some(part=>excluded.has(part.toLowerCase()))))continue
+      if(directory.path!==record.view.path&&(isAutoHiddenPath(record.view.path,directory.path,record.view.priority_dirs)||relative(record.view.path,directory.path).split(sep).some(part=>excluded.has(part.toLowerCase())))){ledger.delete(directory.path);continue}
       const seen=new Set<string>()
       let admitted=0
       try{
@@ -369,8 +394,7 @@ export class LocalDirectorySources {
             record.view.scanned++
             if(!supported.has(extname(path).toLowerCase())||generatedFile(path)){record.view.skipped++;return}
             if(pendingPaths.has(path))return
-            if(admitted>=4&&walk.queue.length)throw Error('directory_yield')
-            if(statCalls>=20_000)throw Error('directory_yield')
+            if(walk.pending.length>=16||admitted>=4&&walk.queue.length)throw Error('directory_yield')
             const stat=await lstat(path)
             statCalls++
             if(!stat.isFile()||stat.isSymbolicLink())return
@@ -383,18 +407,24 @@ export class LocalDirectorySources {
         metadataSeen+=result.seen
         if(result.complete&&(!item.identity||item.identity.dev===result.identity.dev&&item.identity.ino===result.identity.ino)){
           // A complete, same-filesystem parent pass is the sole deletion authority.
-          for(const file of [...record.files])if(within(directory.path,file.path)&&file.path!==directory.path&&!seen.has(relative(directory.path,file.path).split(sep)[0]!))await this.#removeFile(record,file)
-          item.status='done';item.identity=result.identity;item.eligible_at=Date.now()+(record.view.priority_dirs.some(path=>within(path,directory.path))||!!workspace&&within(workspace,directory.path)?300_000:86_400_000)
-        }else if(!result.complete&&passCap<safetyCap){
+          if(item.identity){
+            for(const file of [...record.files])if(within(directory.path,file.path)&&file.path!==directory.path&&!seen.has(relative(directory.path,file.path).split(sep)[0]!))await this.#removeFile(record,file)
+            const removed=new Set<string>()
+            for(const path of ledger.keys())if(path!==directory.path&&within(directory.path,path)&&!seen.has(relative(directory.path,path).split(sep)[0]!)){ledger.delete(path);queuedPaths.delete(path);removed.add(path)}
+            if(removed.size)walk.queue=walk.queue.filter(entry=>!removed.has(entry.path))
+          }
+          item.status='done';item.identity=result.identity;item.attempts=0;item.eligible_at=Date.now()+(record.view.priority_dirs.some(path=>within(path,directory.path))||!!workspace&&within(workspace,directory.path)?300_000:86_400_000)
+        }else if(result.capped&&passCap<safetyCap){
           walk.queue.push(directory);queuedPaths.add(directory.path)
         }else{
-          item.status='partial';item.identity=result.identity;item.eligible_at=Date.now()+86_400_000
+          const changedFilesystem=!!item.identity&&(item.identity.dev!==result.identity.dev||item.identity.ino!==result.identity.ino)
+          item.status='partial';item.eligible_at=Date.now()+(result.capped||changedFilesystem?86_400_000:60_000)
           record.view.reasons.directory_partial=(record.view.reasons.directory_partial??0)+1
         }
       }catch(error){
-        signal.throwIfAborted()
+        if(signal.aborted){walk.queue.push(directory);queuedPaths.add(directory.path);signal.throwIfAborted()}
         if(error instanceof Error&&error.message==='directory_yield'){walk.queue.push(directory);queuedPaths.add(directory.path);yielded.add(directory.path);continue}
-        item.status='partial';item.eligible_at=Date.now()+60_000
+        item.status='partial';item.attempts++;item.eligible_at=Date.now()+Math.min(6*60*60_000,60_000*2**Math.min(item.attempts-1,8))
         record.view.reasons.directory_unavailable=(record.view.reasons.directory_unavailable??0)+1
         if(record.view.failures.length<50)record.view.failures.push({path:directory.path,code:error instanceof Error&&'code' in error?String(error.code):'directory_unavailable'})
       }
@@ -416,7 +446,7 @@ export class LocalDirectorySources {
   async #sync(record: SourceRecord,force=false): Promise<void> {
     if (this.#closed || this.#active) return
     const abort = new AbortController()
-    const done=this.#scan(record,abort.signal,force).finally(()=>{this.#active=undefined;if(record.view.scope==='computer'&&record.view.scan_pending&&!this.#closed&&['connected','error'].includes(record.view.state)){const walk=record.walk;const now=Date.now();const duePending=!!walk?.pending.some(item=>(item.eligible_at??0)<=now);const canDiscover=!!walk?.queue.length&&walk.pending.length<16;const immediate=duePending||canDiscover;const pendingDue=walk?.pending.filter(item=>(item.eligible_at??0)>now).map(item=>item.eligible_at!)??[];const deferredDue=walk&&walk.pending.length<200?walk.deferred.map(item=>item.eligible_at):[];const directoryDue=walk?.ledger.filter(item=>item.status==='partial'&&item.eligible_at!==undefined).map(item=>item.eligible_at!)??[];const due=Math.min(...pendingDue,...deferredDue,...directoryDue,Infinity);const delay=immediate?(record.view.state==='error'?30000:1000):Number.isFinite(due)?Math.min(Math.max(1,due-now),6*60*60_000):30000;const timer=setTimeout(()=>{if(!this.#closed&&!this.#active&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},delay);timer.unref()}})
+    const done=this.#scan(record,abort.signal,force).finally(()=>{this.#active=undefined;if(record.view.scope==='computer'&&record.view.scan_pending&&!this.#closed&&['connected','error'].includes(record.view.state)){const walk=record.walk;const now=Date.now();const duePending=!!walk?.pending.some(item=>(item.eligible_at??0)<=now);const canDiscover=!!walk?.queue.length&&walk.pending.length<16;const immediate=duePending||canDiscover;const pendingDue=walk?.pending.filter(item=>(item.eligible_at??0)>now).map(item=>item.eligible_at!)??[];const deferredDue=walk&&walk.pending.length<200?walk.deferred.map(item=>item.eligible_at):[];const directoryDue=walk&&!walk.queue.length&&!walk.pending.length&&!walk.deferred.length?walk.ledger.filter(item=>item.status==='partial'&&item.eligible_at!==undefined).map(item=>item.eligible_at!):[];const due=Math.min(...pendingDue,...deferredDue,...directoryDue,Infinity);const delay=immediate?(record.view.state==='error'?30000:1000):Number.isFinite(due)?Math.min(Math.max(1,due-now),6*60*60_000):30000;const timer=setTimeout(()=>{if(!this.#closed&&!this.#active&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},delay);timer.unref()}})
     this.#active = {id: record.view.id, abort, done}
     await done
   }
