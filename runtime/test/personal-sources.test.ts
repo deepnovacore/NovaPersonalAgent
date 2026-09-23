@@ -908,3 +908,30 @@ test('past-due partial directory waits behind future pending files without hot l
   try{await sources.open();await sources.command('sources.sync',{id});await new Promise(resolve=>setTimeout(resolve,100));assert.ok(changes<=4)}finally{await sources.close()}
  }finally{await f.close()}
 })
+
+test('stat budget counts work across directory yields in one batch',async()=>{
+ const f=await fixture()
+ try{
+  const alpha=join(f.folder,'alpha'),beta=join(f.folder,'beta');await mkdir(alpha);await mkdir(beta)
+  for(let i=0;i<6;i++)await writeFile(join(alpha,`old-${i}.md`),`Old note ${i}`)
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  for(let i=0;i<3&&(await f.knowledge.listSources()).length<6;i++)await f.sources.command('sources.sync',{id})
+  assert.equal((await f.knowledge.listSources()).length,6)
+  await f.sources.close()
+  for(let i=0;i<5;i++)await writeFile(join(alpha,`z-new-${i}.md`),`New note ${i}`)
+  for(let i=0;i<3;i++)await writeFile(join(beta,`beta-${i}.md`),`Beta note ${i}`)
+  const path=join(f.root,'db','sources.json'),disk=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown;view:{priority_dirs:string[]}}[]}
+  disk.sources[0]!.view.priority_dirs=[alpha]
+  disk.sources[0]!.walk={queue:[{path:alpha},{path:beta}],ledger:[],generation:2,pending:[],deferred:[]}
+  await writeFile(path,JSON.stringify(disk))
+  let statCalls=0
+  const sources=new LocalDirectorySources({path,computerRoot:f.folder,knowledge:f.knowledge,pollMs:0,scanOnOpen:false,metadataStatBudget:12,onMetadataStat:()=>{statCalls++}})
+  try{
+   await sources.open();await sources.command('sources.sync',{id})
+   assert.ok(statCalls<=12,`stat calls exceeded batch budget: ${statCalls}`)
+   assert.equal(statCalls,12)
+   const saved=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{queue:{path:string}[]}}[]}
+   assert.ok(saved.sources[0]!.walk.queue.length>0)
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})

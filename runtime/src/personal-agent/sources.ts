@@ -99,6 +99,9 @@ export interface LocalDirectorySourceOptions {
   readonly priorityWorkspace?: () => Promise<string | null>
   /** Testable bound; production uses the scanner's hard default. */
   readonly directorySafetyCap?: number
+  /** Testable metadata stat budget; production defaults to 20,000 per batch. */
+  readonly metadataStatBudget?: number
+  readonly onMetadataStat?: () => void
   readonly path: string
   readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'>
   readonly pollMs?: number
@@ -358,10 +361,11 @@ export class LocalDirectorySources {
     let turns=0
     let metadataSeen=0
     let statCalls=0
+    const statBudget=this.#options.metadataStatBudget??20_000
     const yielded=new Set<string>()
     const cursors=walk.cursors
     try{
-    while(walk.queue.length&&walk.pending.length<16&&metadataSeen<20_000&&statCalls<20_000&&turns++<64){
+    while(walk.queue.length&&walk.pending.length<16&&metadataSeen<20_000&&statCalls<statBudget&&turns++<64){
       signal.throwIfAborted()
       // Rotate roots; ranking is a tier hint, not a permanent sort of every turn.
       const front=walk.queue.slice(0,Math.min(32,walk.queue.length))
@@ -384,6 +388,7 @@ export class LocalDirectorySources {
         const safetyCap=this.#options.directorySafetyCap??20_000
         const passCap=Math.min(safetyCap,20_000-metadataSeen)
         const result=await scanDirectory(directory.path,signal,async entry=>{
+          metadataSeen++
           const path=join(directory.path,entry.name)
           seen.add(entry.name)
           if(isAutoHiddenPath(record.view.path,path,record.view.priority_dirs)||excluded.has(entry.name.toLowerCase())||!policy.allows(path)||entry.isSymbolicLink()){record.view.skipped++;return}
@@ -395,8 +400,10 @@ export class LocalDirectorySources {
             if(!supported.has(extname(path).toLowerCase())||generatedFile(path)){record.view.skipped++;return}
             if(pendingPaths.has(path))return
             if(walk.pending.length>=16||admitted>=4&&walk.queue.length)throw Error('directory_yield')
+            if(statCalls>=statBudget)throw Error('stat_budget')
             const stat=await lstat(path)
             statCalls++
+            this.#options.onMetadataStat?.()
             if(!stat.isFile()||stat.isSymbolicLink())return
             const prior=knownFiles.get(path)
             if(prior?.size===stat.size&&prior.mtime===stat.mtimeMs)return
@@ -404,7 +411,6 @@ export class LocalDirectorySources {
             pendingPaths.add(path);admitted++
           }
         },{hardSafetyCap:passCap})
-        metadataSeen+=result.seen
         if(result.complete&&(!item.identity||item.identity.dev===result.identity.dev&&item.identity.ino===result.identity.ino)){
           // A complete, same-filesystem parent pass is the sole deletion authority.
           if(item.identity){
@@ -423,7 +429,7 @@ export class LocalDirectorySources {
         }
       }catch(error){
         if(signal.aborted){walk.queue.push(directory);queuedPaths.add(directory.path);signal.throwIfAborted()}
-        if(error instanceof Error&&error.message==='directory_yield'){walk.queue.push(directory);queuedPaths.add(directory.path);yielded.add(directory.path);continue}
+        if(error instanceof Error&&['directory_yield','stat_budget'].includes(error.message)){walk.queue.push(directory);queuedPaths.add(directory.path);yielded.add(directory.path);continue}
         item.status='partial';item.attempts++;item.eligible_at=Date.now()+Math.min(6*60*60_000,60_000*2**Math.min(item.attempts-1,8))
         record.view.reasons.directory_unavailable=(record.view.reasons.directory_unavailable??0)+1
         if(record.view.failures.length<50)record.view.failures.push({path:directory.path,code:error instanceof Error&&'code' in error?String(error.code):'directory_unavailable'})
