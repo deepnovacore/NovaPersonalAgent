@@ -183,8 +183,11 @@ export function publicRuntimeCapabilityStatus(value) {
     result.modules = {}
     for (const name of ['search', 'camera', 'coding', 'knowledge']) {
       const module = value.modules[name]
-      if (typeof module?.enabled === 'boolean') result.modules[name] = {enabled: module.enabled}
+      if (typeof module?.enabled !== 'boolean') continue
+      result.modules[name] = {enabled: module.enabled}
+      if (typeof module.reason === 'string' && /^missing_environment:[A-Z][A-Z0-9_]{0,63}$/u.test(module.reason)) result.modules[name].reason = module.reason
     }
+    if (result.modules.search && value.modules.search.fallback === 'bailian_mcp') result.modules.search.fallback = 'bailian_mcp'
     if (result.modules.search && ['mcp', 'tavily'].includes(value.modules.search.provider)) result.modules.search.provider = value.modules.search.provider
     if (result.modules.knowledge) result.modules.knowledge.exposeToCodex = value.modules.knowledge.exposeToCodex === true
   }
@@ -192,9 +195,16 @@ export function publicRuntimeCapabilityStatus(value) {
   const status = server => ({status: states.includes(server?.status) ? server.status : 'failed',
     ...(typeof server?.reason === 'string' && /^[a-zA-Z0-9_.: -]{1,160}$/u.test(server.reason) ? {reason: server.reason} : {})})
   result.servers = (Array.isArray(value.servers) ? value.servers : []).slice(0, 8).filter(server => /^[a-z][a-z0-9_]{0,31}$/u.test(server?.name ?? '')).map(server => ({name: server.name, ...status(server), ...(server.codex ? {codex: status(server.codex)} : {})}))
-  result.overrides = (Array.isArray(value.overrides) ? value.overrides : []).filter(name => ['SEARCH_PROVIDER', 'SEARCH_MCP_URL', 'SEARCH_MCP_TOOL', 'CAMERA_MODULE_ENABLED'].includes(name))
+  if (result.state === 'startup_failed' && value.reason === 'configuration_required') {
+    result.reason = 'configuration_required'
+    if (['integrated', 'cascaded'].includes(value.pipeline)) result.pipeline = value.pipeline
+    result.missing = (Array.isArray(value.missing) ? value.missing : []).slice(0, 4).filter(name => BLOCKING_CREDENTIALS.has(name))
+  }
+  result.overrides = (Array.isArray(value.overrides) ? value.overrides : []).filter(name => ['SEARCH_PROVIDER', 'SEARCH_MCP_URL', 'SEARCH_MCP_TOOL', 'CAMERA_MODULE_ENABLED', 'CODING_MODULE_ENABLED'].includes(name))
   return result
 }
+
+const BLOCKING_CREDENTIALS = new Set(['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
 
 /** One private utility child owns every pending request; replacement closes this handle. */
 export function createBackendControl(child, {onStatus = () => {}, onUsage = () => {}} = {}) {

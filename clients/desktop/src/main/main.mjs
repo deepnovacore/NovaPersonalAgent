@@ -29,6 +29,7 @@ import {
   utilityProcess,
 } from 'electron'
 import {
+  describeMissingBlockingEnvironment,
   inspectProjectNativeHostFromResources,
   ManagedWorkspaceMaintenanceService,
 } from '@nova-audio-agent/runtime/desktop'
@@ -115,8 +116,11 @@ import {
   resolveCameraPermission,
   resolveMicrophonePermission,
   settingsWindowOptions,
+  setupWindowOptions,
   validateBootstrap,
 } from './security.mjs'
+import {probeApiKey} from './key-probe.mjs'
+import {SETUP_KEYS, setupCommit} from './setup-choice.mjs'
 import { validReleaseCameraResult } from '../renderer/release-camera-contract.mjs'
 
 configureDesktopIdentity(app)
@@ -173,6 +177,7 @@ let mainWindow = null
 let boardWindow = null
 let clearingConversation = null
 let settingsWindow = null
+let setupWindow = null
 let pendingSettingsCategory = null
 let wakeWord = null
 let tray = null
@@ -228,6 +233,37 @@ function sendToOrb(channel, ...args) {
 
 function sendToSettings(channel, ...args) {
   sendToWindow(settingsWindow, channel, ...args)
+  if (channel === 'nova:settings:changed') sendToWindow(setupWindow, 'nova:setup:changed', setupView())
+}
+
+// First-run projection: which pipeline is chosen, which of its keys exist, and what the last launch lacked.
+function setupView() {
+  const {secretsPresent: present} = settingsView()
+  return Object.freeze({
+    pipelineMode: currentSettings.pipelineMode,
+    cascadedLlmProvider: currentSettings.cascadedLlmProvider,
+    secretsPresent: Object.fromEntries(SETUP_KEYS.map(key => [key, present[key] === true])),
+    missing: runtimeCapabilities?.reason === 'configuration_required' ? runtimeCapabilities.missing ?? [] : [],
+    backendStatus: backendStatus.state,
+  })
+}
+
+function openSetupWindow() {
+  if (!activeLaunchId) return
+  if (setupWindow) {
+    setupWindow.show()
+    setupWindow.focus()
+    return
+  }
+  const window = new BrowserWindow(localizedWindowOptions(setupWindowOptions(preload, activeLaunchId)))
+  window.webContents.setWindowOpenHandler(apiKeyWindowOpenHandler(url => shell.openExternal(url)))
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!allowRendererNavigation(url)) event.preventDefault()
+  })
+  window.once('ready-to-show', () => window.show())
+  window.on('closed', () => { setupWindow = null })
+  setupWindow = window
+  return window.loadURL('nova://orb/setup.html')
 }
 
 function windowPositionFile() {
@@ -939,7 +975,8 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
   const configurationCode = codingEnabled ? desktopConfig?.codexConfigurationError
     ?? desktopConfig?.modelConfigurationError : desktopConfig?.modelConfigurationError
   if (configurationCode) throw classifyBackendFailure(configurationCode)
-  if (codingEnabled && codexStatus.status !== 'ready') throw classifyBackendFailure('codex_unavailable')
+  // Coding is optional: without a usable Codex CLI the runtime starts with the coding module off.
+  const codingUnavailable = codingEnabled && codexStatus.status !== 'ready'
   const token = randomBytes(16).toString('hex')
   const workspace = desktopConfig?.workspace || process.cwd()
   let spawnedBackend = null
@@ -988,6 +1025,14 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
       resolvedConfig: desktopConfig,
       searchProxyUrl,
     })
+    if (codingUnavailable) spec.env.CODING_MODULE_ENABLED = 'false'
+    const blocking = describeMissingBlockingEnvironment(spec.env)
+    if (blocking && blocking.missing.length > 0) {
+      runtimeCapabilities = Object.freeze({state: 'startup_failed', toolCount: null, toolBudget: 24,
+        reason: 'configuration_required', pipeline: blocking.pipeline, missing: blocking.missing, generation, diskGeneration})
+      if (smokeChannel === null) void openSetupWindow()
+      throw classifyBackendFailure('configuration_required')
+    }
     spawnedBackend = utilityProcess.fork(spec.entry, spec.argv, {
       cwd: workspace,
       env: spec.env,
@@ -1203,6 +1248,26 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   })
   ipcMain.on('nova:pairing:open', (event, ...args) => {
     if (settingsWindow && event.sender === settingsWindow.webContents && args.length === 0) void openPairingWindow(launchId)
+  })
+  ipcMain.on('nova:setup:open', event => {
+    if (mainWindow && event.sender === mainWindow.webContents) void openSetupWindow()
+  })
+  ipcMain.handle('nova:setup:status', event => {
+    if (!setupWindow || event.sender !== setupWindow.webContents) throw new Error('setup request rejected')
+    return setupView()
+  })
+  ipcMain.handle('nova:setup:test-key', (event, key, value) => {
+    if (!setupWindow || event.sender !== setupWindow.webContents) throw new Error('setup request rejected')
+    if (!SETUP_KEYS.includes(key)) throw new Error('setup request rejected')
+    return probeApiKey(key, value)
+  })
+  ipcMain.handle('nova:setup:save', async (event, choice) => {
+    if (!setupWindow || event.sender !== setupWindow.webContents) throw new Error('setup request rejected')
+    const result = await applyDesktopSettings(setupCommit(choice), true)
+    return Object.freeze({
+      saved: result?.saved !== false,
+      rejectedSecrets: Array.isArray(result?.rejectedSecrets) ? result.rejectedSecrets.filter(key => SETUP_KEYS.includes(key)) : [],
+    })
   })
   ipcMain.on('nova:settings:open', event => {
     if (mainWindow && event.sender === mainWindow.webContents) openSettingsWindow(launchId)

@@ -34,6 +34,19 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     ipcRenderer.on('nova:backend-status', listener)
     return () => ipcRenderer.removeListener('nova:backend-status', listener)
   },
+  setup: Object.freeze({
+    open: () => ipcRenderer.send('nova:setup:open'),
+    status: () => ipcRenderer.invoke('nova:setup:status'),
+    // The key travels into main for the probe or the save; replies never carry it back.
+    testKey: (key, value) => ipcRenderer.invoke('nova:setup:test-key', key, value),
+    save: choice => ipcRenderer.invoke('nova:setup:save', choice),
+    onChanged: callback => {
+      if (typeof callback !== 'function') return () => {}
+      const listener = (_event, value) => callback(value)
+      ipcRenderer.on('nova:setup:changed', listener)
+      return () => ipcRenderer.removeListener('nova:setup:changed', listener)
+    },
+  }),
   orbMenu: Object.freeze({
     show: () => ipcRenderer.send('nova:orb-menu:show'),
     openSettings: () => ipcRenderer.send('nova:settings:open'),

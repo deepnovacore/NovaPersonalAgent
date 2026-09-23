@@ -106,6 +106,16 @@ export function settingsWindowOptions(preload, launchId) {
   })
 }
 
+export function setupWindowOptions(preload, launchId) {
+  return panelWindowOptions(preload, launchId, {
+    width: 720,
+    height: 640,
+    minWidth: 520,
+    minHeight: 520,
+    title: t("开始使用 Nova"),
+  })
+}
+
 export function createBootstrapAccess(bootstrap, renderer) {
   if (!bootstrap || !renderer) throw new Error('desktop bootstrap unavailable')
   return requester => {

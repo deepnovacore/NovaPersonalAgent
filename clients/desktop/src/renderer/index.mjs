@@ -325,6 +325,9 @@ function render() {
   shell.dataset.state = state.name
   const sleeping = axes.wakeState === 'sleeping'
   setText(stateLabel, sleeping ? t("已休眠 · 点击唤醒") : state.statusLine)
+  const setupAction = !sleeping && state.statusAction === 'setup'
+  stateLabel.dataset.action = setupAction ? 'setup' : ''
+  setAttribute(stateLabel, 'tabindex', setupAction ? '0' : '-1')
   setAttribute(orb, 'role', sleeping ? 'button' : 'img')
   setAttribute(orb, 'tabindex', sleeping ? '0' : '-1')
   setText(codexSummary, state.projectLabel)
@@ -1321,6 +1324,15 @@ orb.addEventListener('keydown', event => {
   if (axes.wakeState === 'sleeping' && ['Enter', ' '].includes(event.key)) {
     event.preventDefault()
     window.novaAudioAgentDesktop.wakeWord.wake()
+  }
+})
+stateLabel.addEventListener('click', () => {
+  if (stateLabel.dataset.action === 'setup') window.novaAudioAgentDesktop.setup.open()
+})
+stateLabel.addEventListener('keydown', event => {
+  if (stateLabel.dataset.action === 'setup' && ['Enter', ' '].includes(event.key)) {
+    event.preventDefault()
+    window.novaAudioAgentDesktop.setup.open()
   }
 })
 orb.addEventListener('pointerup', () => finishDrag(false))
