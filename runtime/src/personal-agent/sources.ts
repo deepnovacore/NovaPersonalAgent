@@ -20,6 +20,7 @@ const idSchema = z.string().uuid()
 const excludeSchema = z.array(z.string().min(1).max(100).regex(/^[^/\\\0]+$/u)).max(32)
 const snapshotSchema = z.object({
   scope: z.enum(['directory','computer']).default('directory'), scan_pending:z.boolean().default(false), indexed:z.number().int().nonnegative().default(0),
+  coverage:z.enum(['complete','partial']).optional(), health:z.enum(['healthy','degraded','error']).optional(),
   priority_dirs:z.array(pathSchema).max(16).default([]),
   id: idSchema, path: pathSchema, state: z.enum(['connected', 'paused', 'disconnected', 'error']),
   scanned: z.number().int().nonnegative(), read: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(),
@@ -32,7 +33,9 @@ const snapshotSchema = z.object({
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
   evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
-const walkSchema=z.object({queue:z.array(z.object({path:pathSchema,offset:z.number().int().nonnegative(),unit:pathSchema.optional()}).strict()).max(20000),pending:z.array(z.object({path:pathSchema,size:z.number(),mtime:z.number(),unit:pathSchema}).strict()).max(200),workspace_seeded:pathSchema.optional()}).strict()
+const walkFileSchema=z.object({path:pathSchema,size:z.number().nonnegative(),mtime:z.number(),unit:pathSchema,attempts:z.number().int().nonnegative().optional()}).strict()
+const deferredFileSchema=walkFileSchema.extend({eligible_at:z.number().default(0),attempts:z.number().int().nonnegative().default(0),reason:z.enum(['body_budget','retry']).default('retry')}).strict()
+const walkSchema=z.object({queue:z.array(z.object({path:pathSchema,offset:z.number().int().nonnegative(),unit:pathSchema.optional()}).strict()).max(20000),pending:z.array(walkFileSchema).max(200),deferred:z.array(deferredFileSchema).max(200).default([]),workspace_seeded:pathSchema.optional()}).strict()
 const recordSchema = z.object({walk:walkSchema.nullable().default(null),processing_consent:processingGrantSchema.optional(),view: snapshotSchema, files: z.array(trackedSchema).max(20000),
   deleting: z.boolean().default(false), observation: z.string().max(500).default(''),
   pending: z.object({path: pathSchema, size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), previous_updated_at: z.number().nullable()}).strict().nullable().default(null)}).strict()
@@ -73,6 +76,17 @@ function computerUnit(root:string,path:string):string {
   const base=within(home,path)&&within(root,home)?home:root
   if(dirname(path)===base)return base
   return join(base,relative(base,path).split(sep)[0]??'')
+}
+function settlePending(record:SourceRecord,path:string):void {
+  if(record.walk)record.walk.pending=record.walk.pending.filter(item=>item.path!==path)
+}
+function deferPending(record:SourceRecord,file:{path:string;size:number;mtime:number;unit:string;attempts?:number},reason:'body_budget'|'retry',eligibleAt:number):void {
+  if(!record.walk)return
+  settlePending(record,file.path)
+  const previous=record.walk.deferred.find(item=>item.path===file.path)
+  const attempts=Math.max(file.attempts??0,previous?.attempts??0)+(reason==='retry'?1:0)
+  record.walk.deferred=record.walk.deferred.filter(item=>item.path!==file.path)
+  record.walk.deferred.push({...file,eligible_at:eligibleAt,attempts,reason})
 }
 
 export interface LocalDirectorySourceOptions {
@@ -255,7 +269,11 @@ export class LocalDirectorySources {
     return {id:record.view.id}
   }
   async #computerBatch(record:SourceRecord,signal:AbortSignal):Promise<{path:string;size:number;mtime:number;unit:string}[]>{
-    const walk:z.infer<typeof walkSchema>=record.walk??(record.walk={queue:[...record.view.priority_dirs.map(path=>({path,offset:0})),{path:record.view.path,offset:0}],pending:[]})
+    const walk:z.infer<typeof walkSchema>=record.walk??(record.walk={queue:[...record.view.priority_dirs.map(path=>({path,offset:0})),{path:record.view.path,offset:0}],pending:[],deferred:[]})
+    const now=Date.now()
+    const eligible=walk.deferred.filter(item=>item.eligible_at<=now)
+    walk.deferred=walk.deferred.filter(item=>item.eligible_at>now)
+    for(const item of eligible)if(!walk.pending.some(file=>file.path===item.path))walk.pending.push({path:item.path,size:item.size,mtime:item.mtime,unit:item.unit,attempts:item.attempts})
     const excluded=new Set([...SOURCE_EXCLUDES,...COMPUTER_EXCLUDES,...record.view.excludes].map(s=>s.toLowerCase()))
     let visited=0
     const workspace=await this.#options.priorityWorkspace?.().then(path=>path&&within(record.view.path,path)?path:null).catch(()=>null)??null
@@ -311,7 +329,7 @@ export class LocalDirectorySources {
         if(directory.offset>=entries.length)walk.queue.shift()
       }catch(error){signal.throwIfAborted();if(error instanceof Error&&'code' in error&&error.code==='ENOENT')for(const file of [...record.files])if(within(directory.path,file.path))await this.#removeFile(record,file);if(record.view.failures.length<50)record.view.failures.push({path:directory.path,code:error instanceof Error&&'code' in error?String(error.code):'directory_unavailable'});walk.queue.shift()}
     }
-    record.view.scan_pending=walk.queue.length>0||walk.pending.length>0
+    record.view.scan_pending=walk.queue.length>0||walk.pending.length>0||walk.deferred.length>0
     await this.#save()
     return [...walk.pending]
   }
@@ -325,7 +343,7 @@ export class LocalDirectorySources {
   async #sync(record: SourceRecord): Promise<void> {
     if (this.#closed || this.#active) return
     const abort = new AbortController()
-    const done=this.#scan(record,abort.signal).finally(()=>{this.#active=undefined;if(record.view.scope==='computer'&&record.view.scan_pending&&!this.#closed&&['connected','error'].includes(record.view.state)){const timer=setTimeout(()=>{if(!this.#closed&&!this.#active&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},record.view.state==='error'?30000:1000);timer.unref()}})
+    const done=this.#scan(record,abort.signal).finally(()=>{this.#active=undefined;if(record.view.scope==='computer'&&record.view.scan_pending&&!this.#closed&&['connected','error'].includes(record.view.state)){const walk=record.walk;const immediate=!!(walk?.queue.length||walk?.pending.length);const due=walk?.deferred.length?Math.min(...walk.deferred.map(item=>item.eligible_at)):Infinity;const delay=immediate?(record.view.state==='error'?30000:1000):Number.isFinite(due)?Math.min(Math.max(1,due-Date.now()),6*60*60_000):30000;const timer=setTimeout(()=>{if(!this.#closed&&!this.#active&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},delay);timer.unref()}})
     this.#active = {id: record.view.id, abort, done}
     await done
   }
@@ -335,7 +353,7 @@ export class LocalDirectorySources {
     const beforeObservation = record.observation
     view.read=0; if(view.scope!=='computer'||record.walk===null){view.scanned=0;view.skipped=0;view.reasons={};view.failures=[]}
     const skip = (reason: string) => {view.skipped++; view.reasons[reason] = (view.reasons[reason] ?? 0) + 1}
-    const files: {path: string; size: number; mtime: number; unit: string}[] = []
+    const files: {path: string; size: number; mtime: number; unit: string; attempts?:number}[] = []
     const seen = new Set<string>(), excluded = new Set([...SOURCE_EXCLUDES, ...view.excludes].map(name => name.toLowerCase()))
     const directories = [{path: view.path, depth: 0, project: null as string | null}]
     const projectEntries = new Map<string, number>()
@@ -349,7 +367,7 @@ export class LocalDirectorySources {
           if(previous.valid){previous.valid=false;await this.#save()}
           await this.#removeFile(record,previous)
         }
-        if(record.walk)record.walk.pending=record.walk.pending.filter(file=>!isComputerExcludedPath(view,file.path))
+        if(record.walk){record.walk.pending=record.walk.pending.filter(file=>!isComputerExcludedPath(view,file.path));record.walk.deferred=record.walk.deferred.filter(file=>!isComputerExcludedPath(view,file.path))}
       }
       if(view.scope==='computer'){files.push(...await this.#computerBatch(record,signal));directories.length=0;complete=false}
       while (directories.length > 0 && visited < 20000) {
@@ -412,7 +430,7 @@ export class LocalDirectorySources {
         signal.throwIfAborted()
         const previous = record.files.find(old => old.path === file.path)
         if (previous) previous.unit = file.unit
-        if (previous?.valid && previous.mtime === file.mtime && previous.size === file.size && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) {if(record.walk)record.walk.pending=record.walk.pending.filter(f=>f.path!==file.path);continue}
+        if (previous?.valid && previous.mtime === file.mtime && previous.size === file.size && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) {settlePending(record,file.path);continue}
         if (previous?.valid) {
           previous.valid = false
           await this.#save()
@@ -422,11 +440,12 @@ export class LocalDirectorySources {
           await this.#invalidateFile(previous)
           if (previous.owned) {await this.#options.knowledge.handle('knowledge.remove', {id: previous.id}); known.delete(file.path)}
         }
-        if (file.size > 10 * 1024 * 1024 || file.size === 0) {skip('file_size');if(record.walk)record.walk.pending=record.walk.pending.filter(f=>f.path!==file.path);continue}
-        if (view.read >= view.max_files || bytes + file.size > view.max_bytes) {skip('body_budget'); continue}
-        if (record.files.length >= 20000 && !previous) {skip('index_limit'); continue}
+        if (file.size > 10 * 1024 * 1024 || file.size === 0) {skip('file_size');settlePending(record,file.path);continue}
+        if(file.size>view.max_bytes){skip('body_budget');settlePending(record,file.path);continue}
+        if (view.read >= view.max_files || bytes + file.size > view.max_bytes) {skip('body_budget');deferPending(record,file,'body_budget',Date.now()+60_000);continue}
+        if (record.files.length >= 20000 && !previous) {skip('index_limit');settlePending(record,file.path);continue}
         try {
-          if (await realpath(file.path) !== file.path) {skip('changed_path'); continue}
+          if (await realpath(file.path) !== file.path) {skip('changed_path');settlePending(record,file.path);continue}
           record.pending = {path: file.path, size: file.size, mtime: file.mtime, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
           await this.#save()
           const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent)
@@ -434,20 +453,26 @@ export class LocalDirectorySources {
           if (!indexed) throw new Error('ingest_failed')
           const tracked = {...file, id: result.id, fingerprint: indexed.fingerprint, owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
           record.files = record.files.filter(old => old.path !== file.path); record.files.push(tracked); record.pending = null
-          if(record.walk)record.walk.pending=record.walk.pending.filter(f=>f.path!==file.path)
+          settlePending(record,file.path)
           bytes += file.size; view.read++
           await this.#save()
         } catch (error) {
           await this.#recoverPending(record)
           signal.throwIfAborted()
-          if(record.walk)record.walk.pending=record.walk.pending.filter(f=>f.path!==file.path)
+          settlePending(record,file.path)
           skip('read_failed')
-          if (view.failures.length < 50) view.failures.push({path: relative(view.path, file.path), code: errorCode(error)})
-          if (errorCode(error) === 'knowledge_busy') break
+          const code=errorCode(error)
+          if (view.failures.length < 50) view.failures.push({path: relative(view.path, file.path), code})
+          if(record.walk&&['knowledge_busy','source_busy','ingest_failed','source_unavailable'].includes(code)&&(file.attempts??0)<5){const attempts=(file.attempts??0)+1;deferPending(record,file,'retry',Date.now()+Math.min(6*60*60_000,30_000*2**attempts))}
+          if (code === 'knowledge_busy') break
         }
       }
       signal.throwIfAborted()
-      view.state = view.failures.length > 0 ? 'error' : 'connected'; view.last_sync = new Date().toISOString()
+      if(view.state!=='paused'&&view.state!=='disconnected')view.state='connected'
+      const partial=!!(record.walk?.queue.length||record.walk?.pending.length||record.walk?.deferred.length)||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','metadata_limit','project_metadata_limit','depth_limit'].includes(reason))
+      view.health=partial?'degraded':'healthy'
+      view.coverage=partial?'partial':'complete'
+      view.last_sync = new Date().toISOString()
       // Scan statistics belong in source settings, not in the user's memory.
       if (record.observation) {await this.#options.onInvalidate?.(view.id); record.observation = ''; await this.#save()}
       await this.#options.onChange?.(beforeEvidence!==record.files.filter(file=>file.valid).map(refFor).sort().join())
@@ -463,10 +488,10 @@ export class LocalDirectorySources {
         await this.#save()
       }
     } catch (error) {
-      if (!signal.aborted) {view.state = 'error'; view.failures.splice(0,Math.max(0,view.failures.length-49));view.failures.push({path: '', code: errorCode(error)})}
+      if (!signal.aborted) {view.state = 'error';view.health='error';view.coverage='partial';view.failures.splice(0,Math.max(0,view.failures.length-49));view.failures.push({path: '', code: errorCode(error)})}
     }
     view.indexed=record.files.filter(f=>f.valid).length
-    if(record.walk){view.scan_pending=!!(record.walk.queue.length||record.walk.pending.length||record.files.some(f=>f.valid&&!f.observed&&f.excerpt&&representativeDocument(f.path)&&this.#options.onObserve));if(!view.scan_pending)record.walk=null}
+    if(record.walk){view.scan_pending=!!(record.walk.queue.length||record.walk.pending.length||record.walk.deferred.length||record.files.some(f=>f.valid&&!f.observed&&f.excerpt&&representativeDocument(f.path)&&this.#options.onObserve));if(!view.scan_pending)record.walk=null}
     await this.#save()
     await this.#options.onChange?.(beforeEvidence !== record.files.filter(file => file.valid).map(refFor).sort().join() || beforeObservation !== record.observation)
   }
@@ -502,6 +527,7 @@ export class LocalDirectorySources {
     await this.#save(); await this.#options.onChange?.(false)
   }
   #save(): Promise<void> {
+    for(const record of this.#records)record.view.failures=record.view.failures.slice(-50)
     const data = JSON.stringify({version: 1, sources: this.#records})
     if (Buffer.byteLength(data) > 32 * 1024 * 1024) return Promise.reject(new Error('sources_state_too_large'))
     const write = this.#writes.then(async () => {

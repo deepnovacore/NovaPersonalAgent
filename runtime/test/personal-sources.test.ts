@@ -86,6 +86,92 @@ test('source state with a legacy 51st failure still opens and keeps the failure 
  }finally{await f.close()}
 })
 
+test('computer scan settles files larger than its total byte budget without retrying them',async()=>{
+ const f=await fixture()
+ try{
+  const oversized=join(f.folder,'oversized.md');await writeFile(oversized,'01234567890')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{view:{max_bytes:number};walk:unknown}[]}
+  state.sources[0]!.view.max_bytes=10
+  state.sources[0]!.walk={queue:[],pending:[{path:oversized,size:11,mtime:1,unit:f.folder}]}
+  await writeFile(path,JSON.stringify(state))
+  const sources=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,computerRoot:f.folder,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+  try{
+   await sources.open();await sources.command('sources.sync',{id})
+   const source=sources.list()[0]!
+   const saved=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{pending:{path:string}[]}|null}[]}
+   assert.equal(source.reasons.body_budget,1)
+   assert.equal(source.scan_pending,false)
+   assert.equal(source.coverage,'partial')
+   assert.equal(source.health,'degraded')
+   assert.equal(saved.sources[0]!.walk?.pending?.some(file=>file.path===oversized)??false,false)
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
+test('computer snapshots migrate legacy failures and clear current health after a clean batch',async()=>{
+ const f=await fixture()
+ try{
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{view:{state:string;failures:{path:string;code:string}[]};walk:unknown}[]}
+  state.sources[0]!.view.failures=Array.from({length:51},(_,index)=>({path:`file-${index}`,code:'source_unavailable'}))
+  state.sources[0]!.view.state='error'
+  state.sources[0]!.walk={queue:[],pending:[]}
+  await writeFile(path,JSON.stringify(state))
+  const sources=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,computerRoot:f.folder,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+  try{
+   await sources.open();assert.ok(sources.list()[0]!.failures.length<=50)
+   await sources.command('sources.sync',{id})
+   const source=sources.list()[0]!
+   assert.equal(source.state,'connected')
+   assert.ok(source.failures.length<=50)
+   assert.equal(source.failures.at(-1)?.path,'file-50')
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
+test('computer walk migrates legacy pending items at the index limit and settles them',async()=>{
+ const f=await fixture()
+ try{
+  const pending=join(f.folder,'overflow.md');await writeFile(pending,'overflow')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown;files:unknown[];view:unknown}[]}
+  state.sources[0]!.files=Array.from({length:20000},(_,index)=>({path:join(f.folder,`old-${index}.md`),id:`id-${index}`,fingerprint:'x',size:1,mtime:1,owned:true,valid:true,excerpt:null,observed:true,observation_ref:null}))
+  state.sources[0]!.walk={queue:[],pending:[{path:pending,size:8,mtime:1,unit:f.folder}]}
+  await writeFile(path,JSON.stringify(state))
+  const sources=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,computerRoot:f.folder,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+  try{
+   await sources.open();await sources.command('sources.sync',{id})
+   assert.equal(sources.list()[0]!.reasons.index_limit,1)
+   assert.equal(sources.list()[0]!.scan_pending,false)
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
+test('computer ingestion failures move to a bounded future retry with an attempt count',async()=>{
+ const f=await fixture()
+ try{
+  const file=join(f.folder,'retry.md');await writeFile(file,'retry this later')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown}[]}
+  state.sources[0]!.walk={queue:[],pending:[{path:file,size:16,mtime:1,unit:f.folder}]}
+  await writeFile(path,JSON.stringify(state));f.setFail(true)
+  const sources=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,computerRoot:f.folder,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+  try{
+   await sources.open();await sources.command('sources.sync',{id})
+   const saved=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{deferred:{path:string;attempts:number;eligible_at:number}[]}|null}[]}
+   const retry=saved.sources[0]!.walk?.deferred.find(item=>item.path===file)
+   assert.equal(sources.list()[0]!.scan_pending,true)
+   assert.equal(retry?.attempts,1)
+   assert.ok((retry?.eligible_at??0)>Date.now())
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
 test('legacy directory state without processing consent reads locally without embedding',async()=>{
  const f=await fixture();let embeddings=0
  try{
