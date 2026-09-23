@@ -6,7 +6,7 @@ import {supportsVision} from '../model/vision-capability.js'
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
 const promptLanguageSchema = z.enum(['zh-CN', 'en'])
-const integratedProviderNameSchema = z.enum(['qwen'])
+const integratedProviderNameSchema = z.enum(['qwen', 'stepfun'])
 const cascadedEndpointingProviderNameSchema = z.enum(['auto'])
 const cascadedAsrProviderNameSchema = z.enum(['volcengine'])
 const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark', 'deepseek'])
@@ -25,6 +25,8 @@ const searchProviderSchema = z.enum(['mcp', 'tavily'])
 const volcFloatSchema = z.custom<number>(value => typeof value === 'number')
 export const DASHSCOPE_COMPATIBLE_BASE_URL =
   'https://dashscope.aliyuncs.com/compatible-mode/v1'
+export const STEPFUN_COMPATIBLE_BASE_URL = 'https://api.stepfun.com/v1'
+const STEPFUN_SUPPORT_MODEL = 'step-3.7-flash'
 
 export const settingsSchema = z.object({
   model_base_url: z.url().default(DASHSCOPE_COMPATIBLE_BASE_URL),
@@ -50,6 +52,10 @@ export const settingsSchema = z.object({
   qwen_realtime_url: z.string().default('wss://dashscope.aliyuncs.com/api-ws/v1/realtime'),
   qwen_realtime_model: z.string().default('qwen-audio-3.0-realtime-plus'),
   qwen_realtime_voice: z.string().default('longanqian'),
+  stepfun_realtime_url: z.string().default('wss://api.stepfun.com/v1/realtime'),
+  stepfun_realtime_model: z.string().default('stepaudio-3-realtime-preview'),
+  stepfun_realtime_voice: z.string().default(''),
+  stepfun_api_key: z.string().nullable().default(null),
   dashscope_api_key: z.string().nullable().default(null),
   ark_api_key: z.string().nullable().default(null),
   deepseek_api_key: z.string().nullable().default(null),
@@ -237,13 +243,20 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ? null
     : configuredExecutor
   const executors = parseExecutors(environment.NOVA_AUDIO_AGENT_EXECUTORS, configuredExecutor ?? '')
+  // StepFun support chat defaults to its own model. fast_model keeps its DashScope default
+  // because local memory extraction reaches it through the DashScope embedding connection;
+  // an empty watch or planner model would fall back to it, so empty counts as unset there.
+  const stepfunSupport = integratedProvider === 'stepfun'
+    && (optionalSecret(environment.NOVA_AUDIO_AGENT_MODEL_API_KEY) ?? '').trim() === ''
+  const supportDefault = (value: string | undefined): string | undefined =>
+    value ?? (stepfunSupport ? STEPFUN_SUPPORT_MODEL : undefined)
   const candidate = {
     model_base_url: optionalString(environment.NOVA_AUDIO_AGENT_MODEL_BASE_URL),
     model_api_key: optionalSecret(environment.NOVA_AUDIO_AGENT_MODEL_API_KEY),
     openrouter_api_key: optionalSecret(environment.OPENROUTER_API_KEY),
     tavily_api_key: optionalSecret(environment.TAVILY_API_KEY),
     fast_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_FAST_MODEL),
-    watch_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_WATCH_MODEL),
+    watch_model: supportDefault(emptyAsUnset(rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_WATCH_MODEL))),
     ...(supportsVision('qwen', environment.NOVA_AUDIO_AGENT_WATCH_MODEL ?? '')
       || environment.NOVA_AUDIO_AGENT_MEMORY_CONNECTION?.trim() === 'local'
       ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
@@ -252,8 +265,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
           volcengine_ark_base_url: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL)} : {}),
     conversation_vision_enabled: optionalBoolean(environment.NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED),
     monitor_camera_device_id: optionalString(environment.NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID),
-    surrogate_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_SURROGATE_MODEL),
-    compressor_model: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_COMPRESSOR_MODEL),
+    surrogate_model: supportDefault(rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_SURROGATE_MODEL)),
+    compressor_model: supportDefault(rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_COMPRESSOR_MODEL)),
     language: parsePromptLanguageSetting(environment.NOVA_AUDIO_AGENT_LANGUAGE),
     news_language: parseSelector(promptLanguageSchema, environment.NOVA_AUDIO_AGENT_NEWS_LANGUAGE, 'en', 'NOVA_AUDIO_AGENT_NEWS_LANGUAGE'),
     pipeline_mode: pipelineMode,
@@ -269,8 +282,13 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
       qwen_realtime_url: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_URL),
       qwen_realtime_model: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL),
       qwen_realtime_voice: optionalString(environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE)
-        ?? (environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL?.startsWith('qwen3.5-omni-') ? 'Ethan' : undefined),
+        ?? (environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL?.startsWith('qwen3.5-omni-') ? 'Ethan'
+          : environment.NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL === 'qwen-audio-3.1-realtime-plus' ? 'longanqian_v3.1' : undefined),
       dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY),
+      stepfun_realtime_url: optionalString(environment.NOVA_AUDIO_AGENT_STEPFUN_REALTIME_URL),
+      stepfun_realtime_model: optionalString(environment.NOVA_AUDIO_AGENT_STEPFUN_REALTIME_MODEL),
+      stepfun_realtime_voice: optionalString(environment.NOVA_AUDIO_AGENT_STEPFUN_REALTIME_VOICE),
+      stepfun_api_key: optionalSecret(environment.STEPFUN_API_KEY),
       qwen_controlled_guard_reconnect: optionalBoolean(
         environment.NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT,
       ),
@@ -348,7 +366,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ),
     plan_readback: parsePlanReadback(environment.NOVA_AUDIO_AGENT_PLAN_READBACK),
     generate_plan: optionalBoolean(environment.NOVA_AUDIO_AGENT_GENERATE_PLAN),
-    planner_model: optionalString(environment.NOVA_AUDIO_AGENT_PLANNER_MODEL),
+    planner_model: supportDefault(emptyAsUnset(optionalString(environment.NOVA_AUDIO_AGENT_PLANNER_MODEL))),
     progress_bubbles: parseProgressBubbles(environment.NOVA_AUDIO_AGENT_PROGRESS_BUBBLES),
     capabilities_config_path: optionalString(
       environment.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG,
@@ -459,6 +477,15 @@ export function requireQwenRealtime(settings: Settings): QwenRealtimeConfig {
 }
 
 export function requireIntegratedRealtime(settings: Settings): QwenRealtimeConfig {
+  if (settings.integrated_provider === 'stepfun') {
+    const url = secureEndpoint(settings.stepfun_realtime_url, 'wss', 'NOVA_AUDIO_AGENT_STEPFUN_REALTIME_URL')
+    const model = stripLikePython(settings.stepfun_realtime_model)
+    const voice = stripLikePython(settings.stepfun_realtime_voice)
+    const apiKey = stripLikePython(settings.stepfun_api_key ?? '')
+    if (model === '') throw new ConfigurationError('NOVA_AUDIO_AGENT_STEPFUN_REALTIME_MODEL 不能为空')
+    if (apiKey === '') throw new ConfigurationError('缺少 STEPFUN_API_KEY')
+    return Object.freeze({url, model, voice, apiKey})
+  }
   const url = secureEndpoint(
     settings.qwen_realtime_url,
     'wss',
@@ -491,6 +518,10 @@ export function resolveModelApiKey(settings: Settings): string | null {
 /** Preset monitor models keep their credential on their own provider endpoint. */
 export function resolveWatchModelConnection(settings: Settings): {readonly baseUrl: string; readonly apiKey: string} | null {
   const model = stripLikePython(settings.watch_model ?? '')
+  if (supportsVision('stepfun', model)) return {
+    baseUrl: STEPFUN_COMPATIBLE_BASE_URL,
+    apiKey: requiredCredential(settings.stepfun_api_key, 'STEPFUN_API_KEY'),
+  }
   if (supportsVision('qwen', model)) return {
     baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
     apiKey: requiredCredential(settings.dashscope_api_key
@@ -813,6 +844,10 @@ function optionalPydanticFloat(value: string | undefined): number | string | und
   const normalized = value.replace(pydanticNumericEdges, '').replaceAll('_', '')
   const parsed = Number(normalized.toLowerCase().replace('infinity', 'Infinity').replace('inf', 'Infinity'))
   return Number.isNaN(parsed) && !/^[+-]?nan$/iu.test(normalized) ? value : parsed
+}
+
+function emptyAsUnset(value: string | undefined): string | undefined {
+  return value === '' ? undefined : value
 }
 
 function rawEnvironmentValue(value: string | undefined): string | undefined {
