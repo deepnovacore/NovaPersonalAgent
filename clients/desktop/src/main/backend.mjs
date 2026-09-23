@@ -379,7 +379,7 @@ export function parseReadiness(raw, token) {
  */
 export function createReadinessListener({
   token,
-  timeoutMs = 15_000,
+  timeoutMs = 60_000,
   socketAuthTimeoutMs = READINESS_SOCKET_AUTH_TIMEOUT_MS,
   onTimeout = () => {},
 } = {}) {

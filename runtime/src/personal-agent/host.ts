@@ -1,5 +1,7 @@
 import {TaskLoop,TaskExecutionRejected,type TaskDecision} from './task-loop.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
+import {WorkbenchContext,type ContextGenerator,type ContextEntry} from './workbench-context.js'
+import {ProfileWarmup,type ProfileGenerator} from './profile-warmup.js'
 import {interleave} from './sampling.js';
 import type {CodingTarget, CodingTargetPort} from './coding-targets.js'
 import type {ApprovalView} from '../core/approval-port.js'
@@ -48,6 +50,7 @@ export interface DiscoverySnapshot {
     recent_delivery: FeedItem[];
 }
 export interface PersonalSources {
+    contextEntries?():ContextEntry[];
     list(): unknown[];
     command(method: string, params: unknown): Promise<unknown>;
     evidence?(ref: string): Evidence | null;
@@ -65,8 +68,10 @@ export interface PersonalFeishu {
     close(): Promise<void>;
 }
 export interface HostOptions {
+    generateContext?: ContextGenerator;
     newsLanguage?: string;
     rankNews?: NewsRanker;
+    generateProfile?: ProfileGenerator;
     understand?: UnderstandingPipeline;
     context?: () => ContextView;
     path: string;
@@ -162,8 +167,10 @@ export class PersonalAgentHost {
         if(!seen&&changed&&mode==='orb')for(const item of this.#state.feed){if((item.lifecycle==='active'||item.kind==='task_result')&&item.user_state!=='dismissed'&&!item.delivery.spoken_at){if(item.suggestion_id)this.options.pool.withdraw(item.suggestion_id);this.#pool(item)}}
         this.#notify();
     }
+    readonly workbenchContext:WorkbenchContext;
     readonly understanding:PersonalUnderstanding;
     readonly news: NewsService;
+    readonly profileWarmup: ProfileWarmup;
     readonly life: LifeService;
     readonly tasks:TaskService;
     #voiceTransition=false;
@@ -323,7 +330,7 @@ export class PersonalAgentHost {
         this.#overviewRun = run;
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
-    constructor(readonly options: HostOptions) { this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify(),taskId=>{if(this.#recovering||this.#recoveryBlocked.has(taskId))throw new TaskExecutionRejected('task_recovery_blocked')}); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{ready:task=>{if(this.#recovering||this.#recoveryBlocked.has(task.id))return false;try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}let grant:TaskDispatchContext;try{grant=this.tasks.continuationContext(fence);this.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}await this.continueTask(grant,instruction)},publish:task=>this.taskResult('verified:'+task.id+':'+task.goal_revision,'任务已完成：'+task.goal,task),syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
+    constructor(readonly options: HostOptions) {     this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',options.generateProfile?async(entries,signal)=>{const memory=options.memory(),current=await Promise.all(entries.map(e=>memory?.get?.(e.id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];if(entries.some(e=>!allowed.some(a=>a.id===e.id&&a.version===e.version)))throw Error('processing_consent_required');signal.throwIfAborted();return options.generateProfile!(entries,signal)}:undefined,()=>this.#notify()); this.workbenchContext=new WorkbenchContext(options.path+'.context.json',options.generateContext?async(entries,signal)=>{const current=await Promise.all(entries.map(e=>options.memory()?.get?.(e.id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];if(entries.some(e=>!allowed.some(a=>a.id===e.id&&a.version===e.version)))throw Error('processing_consent_required');return options.generateContext!(entries,signal)}:undefined,()=>this.#notify()); this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify(),taskId=>{if(this.#recovering||this.#recoveryBlocked.has(taskId))throw new TaskExecutionRejected('task_recovery_blocked')}); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{ready:task=>{if(this.#recovering||this.#recoveryBlocked.has(task.id))return false;try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}let grant:TaskDispatchContext;try{grant=this.tasks.continuationContext(fence);this.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}await this.continueTask(grant,instruction)},publish:task=>this.taskResult('verified:'+task.id+':'+task.goal_revision,'任务已完成：'+task.goal,task),syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -347,10 +354,12 @@ export class PersonalAgentHost {
             this.#loaded = true;
             this.#opened = true;
             this.understanding.reopen();
+            await this.workbenchContext.open();
             await this.life.open();
             await this.tasks.open();
             await this.recoverTasks();
             await this.news.open();
+            await this.profileWarmup.open();
             await this.#sources?.open?.();
             await this.#feishu?.open();
             await this.#connectors?.open();
@@ -381,8 +390,10 @@ export class PersonalAgentHost {
         this.#abort.abort();
         for (const item of this.#state.feed) if (item.suggestion_id) this.options.pool.withdraw(item.suggestion_id);
         try {
+            await this.workbenchContext.close();
             await this.understanding.close();
             await this.news.close();
+            await this.profileWarmup.close();
             await this.life.close();
             await this.tasks.close();
             await this.#connectors?.close().catch(() => { /* connector shutdown cannot block remaining resources */ });
@@ -442,6 +453,12 @@ export class PersonalAgentHost {
             await this.#admit({kind:'notify',summary:slot.kind==='outlook'?'今日前瞻':'今日回顾',why_now:slot.kind==='outlook'?'根据当前可用信息准备的今日前瞻':'根据当前可用信息准备的今日回顾',evidence_refs:prepared.prepared.evidence_refs,memory_refs:prepared.memory_refs},snapshot,prepared,slot.dedupe_key);
         }
     }
+    async authorizedGenerationEntries(entries: readonly MemoryEntry[]): Promise<MemoryEntry[]> {
+        const memory=this.options.memory();
+        if(!memory?.canProcessEvidence)return [];
+        const allowed=await Promise.all(entries.map(async entry=>entry.evidence_refs?.length&&entry.evidence_refs.length<=256&&(await Promise.all(entry.evidence_refs.map(id=>memory.canProcessEvidence!(id,'extraction')))).every(Boolean)));
+        return entries.filter((_,index)=>allowed[index]);
+    }
     async refreshMemory(cursor?: string, limit = 100, includeExpired=this.#includeExpired): Promise<void> {
         await this.life.refresh();
         this.#includeExpired=includeExpired;
@@ -450,6 +467,12 @@ export class PersonalAgentHost {
         const page = memory?.list ? await memory.list({ ...(cursor ? { cursor } : {}), limit,...(includeExpired?{include_expired:true}:{}) }) : {entries: [], cursor: null};
         const pending_purges=await memory?.pendingPurges?.()??[];
         if (refresh !== this.#memoryRefresh || !this.#opened) return;
+        const initialPage=cursor&&memory?.list?await memory.list({limit:100}):page;
+        if(refresh!==this.#memoryRefresh||!this.#opened)return;
+        const authorized=await this.authorizedGenerationEntries(initialPage.entries);
+        if(refresh!==this.#memoryRefresh||!this.#opened)return;
+        this.profileWarmup.update([...authorized.filter(memoryEligibleForDiscovery),...(this.#sources?.contextEntries?.()??[]).map(e=>({...e,origin:'inferred' as const}))]);
+        this.workbenchContext.update([...authorized.filter(memoryEligibleForDiscovery),...(this.#sources?.contextEntries?.()??[])]);
         const key = hash(page);
         this.#overviewAbort.abort();
         this.#overviewKey = key;
@@ -457,7 +480,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, workbench_context:this.workbenchContext.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), profile_preparation:this.profileWarmup.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         if(!this.#loaded||!this.#release)throw Error('personal_host_not_open');
@@ -546,6 +569,7 @@ export class PersonalAgentHost {
                 this.options.pool.withdraw(item.suggestion_id);
         } await this.#commit(next); }); }
     sourceChanged(change?:SourceChange):Promise<void>{
+        this.profileWarmup.invalidate();this.#notify();
         if(change){const q=z.object({revision:z.number().int().positive(),phase:z.enum(['invalidated','ready'])}).strict().parse(change);if(q.phase==='invalidated')this.#sourcePending.invalidated=Math.max(this.#sourcePending.invalidated,q.revision);else if(!this.#sourceSeen.ready.has(q.revision))this.#sourcePending.ready.add(q.revision)}else this.#sourcePending.legacy=true;
         return this.#drainSourceChanges();
     }
@@ -706,6 +730,8 @@ export class PersonalAgentHost {
             await this.refreshMemory();
             data = this.snapshot();
         }
+        else if(command.method==='context.dismiss'){const q=z.object({id:z.string().min(1).max(128)}).strict().parse(p);await this.workbenchContext.dismiss(q.id);data={ok:true}}
+        else if(command.method==='profile.refresh'){z.object({}).strict().parse(p);void this.profileWarmup.refresh(true);data={ok:true};}
         else if(command.method==='understanding.start'){this.understanding.start();data=this.understanding.snapshot();}
         else if(command.method==='understanding.action')data=await this.understanding.action(p);
         else if (command.method==='life.mutate') {if(p.op==='from_news')throw Error('news_conversion_command_required');data=await this.life.mutate(p,command.request_id);}
@@ -749,6 +775,8 @@ export class PersonalAgentHost {
             const q=z.object({id:z.string().min(1).max(512),expected_version:versionSchema}).strict().parse(p);
             if(!m?.purgeEntry)throw Error('unsupported');
             this.#invalidateOverview();this.#overviewCache=undefined;
+            await this.workbenchContext.clear();
+            await this.profileWarmup.clear();
             await this.understanding.close();this.understanding.reopen();
             let purged=await m.purgeEntry(q.id,q.expected_version,command.request_id);
             if(purged.index_evidence_ids?.length&&m.completePurgeIndex){
@@ -783,6 +811,7 @@ export class PersonalAgentHost {
             const q = z.object({ id: z.string().min(1).max(256), expected_version: versionSchema, content: z.string().trim().min(1).max(500).optional() }).strict().parse(p);
             this.#invalidateOverview();
             this.#overviewCache = undefined;
+            await this.profileWarmup.clear();
             if (command.method === 'memory.correct') {
                 if (!m?.correct || !q.content)
                     throw Error('unsupported');

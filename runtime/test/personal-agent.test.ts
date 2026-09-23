@@ -434,3 +434,43 @@ test('shutdown persists an admitted command receipt before releasing write owner
   await assert.rejects(host.invalidateEvidence('late'),/personal_host_not_open/)
  }finally{release();await Promise.allSettled([command,closing]);await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('automatic generation requires current extraction consent for every evidence reference',async()=>{
+ const f=await fixture();try{
+  const row={...entry(),evidence_refs:['one','two']};const memory=f.host.options.memory()!;
+  assert.deepEqual(await f.host.authorizedGenerationEntries([row]),[]);
+  let allowed=true;Object.assign(memory,{canProcessEvidence:(id:string,purpose:string)=>Promise.resolve(purpose==='extraction'&&(allowed||id==='one'))});
+  assert.deepEqual(await f.host.authorizedGenerationEntries([row]),[row]);allowed=false;
+  assert.deepEqual(await f.host.authorizedGenerationEntries([row]),[]);
+ }finally{await f.close()}
+})
+
+test('profile warmup generates grounded suggestions without writing facts or enabling news',async()=>{
+ const f=await fixture();await f.host.close();let calls=0
+ f.entries.set('plan',{...entry(),evidence_refs:['e:plan']});const memory={...f.host.options.memory()!,canProcessEvidence:()=>Promise.resolve(true)}
+ const host=new PersonalAgentHost({...f.host.options,memory:()=>memory,generateProfile:entries=>{calls++;return Promise.resolve({about:null,interests:[{text:'Product design',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]}]})}})
+ try{await host.open();await host.profileWarmup.refresh();const state=host.snapshot();assert.equal(state.profile_preparation.status,'ready');assert.equal(state.life.profile.about,'');assert.equal(state.news.enabled,false);assert.deepEqual(state.news.interests,[])
+  await host.refreshMemory();await host.profileWarmup.refresh();assert.equal(calls,1,'ordinary snapshot reads do not restart warmup')
+  f.entries.clear();await host.sourceChanged();await host.profileWarmup.refresh();assert.equal(host.snapshot().profile_preparation.draft,null)
+ }finally{await host.close();await f.close()}
+})
+
+
+test('profile warmup requires current consent for every evidence reference',async()=>{
+ const f=await fixture();await f.host.close();let allowed=false,calls=0
+ f.entries.set('plan',{...entry(),evidence_refs:['e:plan','e:other']})
+ const memory={...f.host.options.memory()!,canProcessEvidence:(id:string)=>Promise.resolve(id==='e:plan'||allowed)}
+ const host=new PersonalAgentHost({...f.host.options,memory:()=>memory,generateProfile:()=>{calls++;return Promise.resolve({about:null,interests:[]})}})
+ try{await host.open();await host.profileWarmup.refresh();assert.equal(calls,0,'one revoked evidence denies automatic generation');assert.equal(host.snapshot().memory.entries.length,1,'local visibility remains available')
+  allowed=true;await host.refreshMemory();await host.profileWarmup.refresh();assert.equal(calls,1)
+  allowed=false;await host.profileWarmup.refresh(true);assert.equal(calls,1,'explicit retry rechecks consent immediately before sending')
+  await host.sourceChanged();assert.equal(host.profileWarmup.snapshot().draft,null)
+ }finally{await host.close();await f.close()}
+})
+
+test('authorized local excerpts seed interest drafts as inferred context and revoke cleanly',async()=>{
+ const f=await fixture();await f.host.close();let available=true,calls=0;
+ const host=new PersonalAgentHost({...f.host.options,generateProfile:entries=>{calls++;assert.equal(entries[0]!.origin,'inferred');return Promise.resolve({about:null,interests:[{text:'Design',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]}]})}});
+ host.setSources({list:()=>[],contextEntries:()=>available?[{id:'source:document',version:'v1',content:'Product design notes'}]:[],command:()=>Promise.resolve({})});
+ try{await host.open();await host.profileWarmup.refresh();assert.equal(calls,1);assert.equal(host.profileWarmup.snapshot().draft?.about,null);available=false;await host.sourceChanged();assert.equal(host.profileWarmup.snapshot().draft,null)}finally{await host.close();await f.close()}
+})

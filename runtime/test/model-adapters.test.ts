@@ -252,3 +252,44 @@ test('task evaluation separates accepted user steering from executor evidence an
  const prompt=JSON.parse(gateway.completions[0]!.prompt) as {accepted_user_inputs:{request_id:string;text:string}[]};assert.deepEqual(prompt.accepted_user_inputs.map(x=>({request_id:x.request_id,text:x.text})),[{request_id:'blue',text:'Change goal to blue'}])
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('workbench generation includes its schema in the provider-visible prompt',async()=>{
+ const gateway=new ScriptedGateway([],JSON.stringify({cards:[]}))
+ const surrogate=new GatewaySurrogate({gateway,model:'same',proactivityPreset:'balanced'})
+ await surrogate.generateContext([{id:'source:doc',version:'v1',content:'A project document'}],new AbortController().signal)
+ const prompt=JSON.parse(gateway.completions[0]!.prompt) as {output_schema:{properties:{cards:unknown}}}
+ assert.ok(prompt.output_schema.properties.cards)
+})
+
+
+test('coding evaluator cannot complete from prose, truncated checks, or another work/session',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-proof-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Run checks',acceptance:['actual check output'],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await tasks.bindWork(fence,'work','session')
+  await tasks.appendEvent({task_id:task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',item_id:'check',kind:'tool',stage:'completed',text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'1 passed',exit_code:0}),refs:[]},'check')
+  await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'All tests and UI passed'})
+  const current=tasks.get(task.id),valid=tasks.evidence(task.id),decision={kind:'complete',evidence_refs:[valid[0]!.ref]}
+  for(const invalid of [
+   {...valid[0]!,observations:[]},
+   {...valid[0]!,observations_truncated:true},
+   {...valid[0]!,outcome:'failed'},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'test failed',exit_code:1})}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text_truncated:true}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,thread_id:undefined}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text:JSON.stringify({type:'mcpToolCall',server:'cua_live',tool:'js',status:'completed',is_error:true,readback:'tool failed'})}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,work_id:'other'}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,session_id:'other'}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text:'commandExecution completed'}]},
+  ]){
+   const gateway=new ScriptedGateway([],JSON.stringify(decision)),verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'})
+   assert.equal((await verifier.evaluateTask(current,[invalid],new AbortController().signal)).kind,'wait')
+   assert.equal((await verifier.evaluateTask({...current,execution_route:undefined},[invalid],new AbortController().signal)).kind,'wait')
+  }
+  const gateway=new ScriptedGateway([],JSON.stringify(decision)),verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'})
+  assert.deepEqual(await verifier.evaluateTask(current,valid,new AbortController().signal),decision)
+  assert.deepEqual((JSON.parse(gateway.completions[0]!.prompt) as {evidence:{observations:unknown}[]}).evidence[0]!.observations,valid[0]!.observations)
+  const mcp=structuredClone(valid);mcp[0]!.observations[0]!.text=JSON.stringify({type:'mcpToolCall',server:'cua_live',tool:'js',status:'completed',is_error:false,readback:'Counter value: 1'})
+  assert.deepEqual(await verifier.evaluateTask(current,mcp,new AbortController().signal),decision)
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})

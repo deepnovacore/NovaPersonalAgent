@@ -8,8 +8,9 @@ function harness(snapshot,{failState=false}={}){
  const root=new Node('div'),error=new Node('p'),calls=[],chosen=[],opened=[]
  const document={querySelector:sel=>sel==='#connections-panel'?root:error,createElement:tag=>new Node(tag),createTextNode:text=>{const n=new Node('#text');n.textContent=text;return n}}
  const api={personalCommand:async(method,params)=>{calls.push([method,params]);if(method==='state')return failState?{error:'unavailable'}:snapshot();return {ok:true}},chooseDirectory:async()=>{chosen.push(1);return '/tmp/docs'},openConnectorAuthorization:async url=>{opened.push(url)}}
+ let tick;document.defaultView={setInterval:fn=>{tick=fn;return 1},addEventListener(){},clearInterval(){}};document.visibilityState='visible';root.offsetParent={};root.contains=node=>all(root).includes(node)
  const panel=createConnectionsPanel({document,api})
- return {root,error,calls,chosen,opened,panel,button:label=>all(root).find(n=>n.tag==='button'&&n.textContent===label)}
+ return {root,error,calls,chosen,opened,panel,document,api,tick:()=>tick(),button:label=>all(root).find(n=>n.tag==='button'&&n.textContent===label)}
 }
 const snapshot=(o={})=>({capabilities:{sources:true,discovery:true},sources:[{id:'s1',path:'/Users/me/notes',state:'connected',scanned:3,read:2,skipped:1,last_sync:'today'}],connectors:{available:false,memory_available:true},settings:{discovery_enabled:true,discovery_interval_minutes:30},...o})
 test('load fetches state once and renders sources, connectors, brief and discovery from it',async()=>{
@@ -34,4 +35,27 @@ test('mutations go through the bridge and refresh the snapshot; failures surface
 test('the panel never asks for memory, feed or conversation methods',async()=>{
  const h=harness(snapshot);await h.panel.load();for(const b of all(h.root).filter(n=>n.tag==='button'))if(b.listeners.click){await b.listeners.click();await new Promise(r=>setImmediate(r))}
  assert.ok(h.calls.every(([m])=>/^(state|sources\.|connector\.|discovery\.configure)/.test(m)),JSON.stringify(h.calls.map(c=>c[0])))
+})
+test('whole-computer authorization is explicit and never accepts a renderer supplied root',async()=>{
+ const h=harness(snapshot);await h.panel.load()
+ const whole=h.button('授权本机全部可访问数据');assert.ok(whole);assert.equal(whole.disabled,true)
+ const check=all(h.root).find(n=>n.tag==='input'&&n.type==='checkbox');check.checked=true;check.listeners.change()
+ assert.equal(whole.disabled,false);await whole.listeners.click();await new Promise(r=>setImmediate(r))
+ assert.deepEqual(h.calls.at(-2),['sources.authorize_computer',{consent:true}])
+})
+test('English connections settings use secondary tabs without translating source data',async()=>{
+ const {setLanguage}=await import('../src/renderer/locale.mjs');setLanguage('en')
+ try{
+  const h=harness(()=>snapshot({sources:[{path:'/资料/原始内容',state:'connected',scope:'computer',indexed:2,scan_pending:true}]}));await h.panel.load()
+  assert.deepEqual(all(h.root).filter(n=>n.role==='tab').map(n=>n.textContent),['Local files','Mail & calendar','Proactive reminders'])
+  assert.equal(all(h.root).filter(n=>n.role==='tabpanel'&&!n.hidden).length,1)
+  for(const tab of ['Mail & calendar','Proactive reminders','Local files']){await h.button(tab).listeners.click();await new Promise(r=>setImmediate(r));assert.equal(all(h.root).find(n=>n.role==='tab'&&n['aria-selected']==='true').textContent,tab)}
+  const copy=all(h.root).map(n=>n.textContent).join('\n').replaceAll('/资料/原始内容','');assert.ok(!/[\u4e00-\u9fff]/u.test(copy),copy)
+ }finally{setLanguage('zh-CN')}
+})
+
+test('background progress polling keeps controls enabled and preserves an active authorization choice',async()=>{
+ const h=harness(()=>snapshot({sources:[{id:'s1',path:'/notes',state:'connected',scan_pending:true}]}));await h.panel.load();
+ let resolve;h.api.personalCommand=()=>new Promise(done=>{resolve=done});h.tick();assert.equal(h.button('暂停同步').disabled,false);resolve(snapshot({sources:[{id:'s1',path:'/notes',state:'connected',scan_pending:true}]}));await new Promise(r=>setImmediate(r));
+ const check=all(h.root).find(n=>n.tag==='input'&&n.type==='checkbox');check.checked=true;check.listeners.change();h.document.activeElement=check;let calls=0;h.api.personalCommand=()=>{calls++;return Promise.resolve(snapshot())};h.tick();assert.equal(calls,0);assert.equal(check.checked,true);assert.equal(h.button('授权本机全部可访问数据').disabled,false)
 })

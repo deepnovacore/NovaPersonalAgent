@@ -118,6 +118,41 @@ import type {TransportOutcome} from '../src/executors/codex/app-server-transport
 import {setTimeout as delay} from 'node:timers/promises'
 async function until(check:()=>boolean){for(let i=0;i<100;i++){if(check())return;await delay(10)}assert.fail('condition did not settle')}
 
+test('conversation task verification reconciles accepted takeover input before checking the revised goal',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-handback-verifier-'))
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const prompts:{task:{goal:string;goal_revision:number};accepted_user_inputs:{request_id:string;text:string}[];unreconciled_input_refs:string[];evidence:unknown[]}[]=[]
+ try{
+  await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,
+   settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),
+   searchTransport:{search:async()=>{throw Error('unexpected search')}},
+   gateway:{complete:async request=>{
+    const prompt=JSON.parse(request.prompt) as typeof prompts[number];prompts.push(prompt)
+    assert.deepEqual(prompt.accepted_user_inputs,[{request_id:'blue',text:'Change the goal to blue'}])
+    if(prompt.unreconciled_input_refs.length){assert.deepEqual(prompt.unreconciled_input_refs,['blue']);return {text:JSON.stringify({kind:'reconcile',input_refs:['blue'],goal_change:{goal:'Make blue',acceptance:['blue observed']}})}}
+    assert.equal(prompt.task.goal,'Make blue');assert.equal(prompt.task.goal_revision,1);assert.deepEqual(prompt.evidence,[])
+    return {text:JSON.stringify({kind:'wait',reason:'Need observations for the revised blue goal',evidence_refs:[]})}
+   },async *stream(){throw Error('unexpected stream')}},
+   createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({
+    async *stream(){yield {kind:'response_started',response_id:'ready'};yield {kind:'text_delta',text:'ready'};yield {kind:'response_completed',response_id:'ready'}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{},
+   })})}}),
+  }),()=>{})
+  await host.submitConversationText('chat:main','Prepare the task runtime')
+  await until(()=>host.conversationSnapshot().messages.some(message=>message.role==='assistant'))
+  let task=await host.tasks.delegate('declare',{conversation_id:'chat:main',conversation_generation:0,goal:'Make red',acceptance:['red observed'],origin_ref:'conversation:1'})
+  const fence=()=>({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
+  await host.tasks.bindWork(fence(),'work','session');task=await host.tasks.controlClient('take',fence(),'client','takeover')
+  await host.tasks.input('blue',fence(),task.controller,'session','Change the goal to blue',async()=> 'accepted')
+  await host.tasks.input('failed',fence(),task.controller,'session','Change the goal to green',async()=> 'failed')
+  await host.tasks.recordWorkOutcome('work','ok',{final_message:'blue'})
+  task=await host.tasks.controlClient('return',fence(),'client','return');await host.wakeTask(task.id)
+  const current=host.tasks.get(task.id)
+  assert.equal(prompts.length,2);assert.equal(prompts[0]!.task.goal,'Make red');assert.equal(current.goal,'Make blue');assert.equal(current.goal_revision,1)
+  assert.deepEqual(current.reconciled_inputs,['blue']);assert.equal(current.corrections,0);assert.equal(current.waiting_reason,'Need observations for the revised blue goal')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
 test('real scoped task executor survives conversation clear, targeted input and cancel retain its original session',async()=>{
  const value=await fixture({preexistingSession:true})
  const host=new PersonalAgentHost({path:join(await realpath(value.root),'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
@@ -420,17 +455,27 @@ test('real Nova declaration and confirmed content drive correction and verified 
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
+async function recordSuccessfulCodingCheck(value:Awaited<ReturnType<typeof fixture>>,host:PersonalAgentHost):Promise<void>{
+ await until(()=>value.factory.transports[0]?.observers[0]!==undefined)
+ const transport=value.factory.transports[0]!,task=host.tasks.list()[0]!
+ transport.observers[0]!.onActivity?.({thread_id:transport.threadId,turn_id:'turn-check',item_id:'check',kind:'tool',stage:'completed',text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'1 passed',exit_code:0}),refs:[]})
+ await until(()=>host.tasks.events(task.id,0).items.some(event=>event.item_id==='check'))
+ const observation=host.tasks.events(task.id,0).items.find(event=>event.item_id==='check')!
+ assert.equal(observation.task_id,task.id);assert.equal(observation.work_id,task.work_ids[0]);assert.equal(observation.session_id,task.session_ids[0])
+}
+
 test('host coding delegate starts through actual controller without a session, verifies terminal result and syncs Todo',async()=>{
  let releaseForeground!:()=>void;const foreground=new Promise<void>(resolve=>{releaseForeground=resolve})
  const value=await fixture(),host=new PersonalAgentHost({path:join(await realpath(value.root),'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
- let responses=0,checks=0
+ let responses=0,checks=0,releaseCodex!:(outcome:TransportOutcome)=>void
+ value.factory.runGate=new Promise(resolve=>{releaseCodex=resolve})
  try{await host.open();await value.adapter.initialize();const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:['codex'],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),codexResource:{mode:'project',adapter:value.adapter,agentDescriptor:CODEX_AGENT_DESCRIPTOR,agentControllerFactory:{create:context=>new CodexAgentController({channel:context.channel,resolveCancelTarget:async()=>null,dispatchPort:{dispatch:request=>context.dispatchPort.dispatch({...request,request:{...request.request,project:'alpha'}})}})},projectView:null,approvalController:null,start:async()=>{},close:async()=>{}},searchTransport:{search:async()=>{throw Error('unused')}},gateway:{complete:async request=>{const input=JSON.parse(request.prompt) as {evidence:{ref:string;kind:string;content:string}[]};checks++;assert.ok(input.evidence.some(item=>item.kind==='work'&&item.content.includes('done')));return {text:JSON.stringify({kind:'complete',evidence_refs:input.evidence.filter(item=>item.kind==='work').map(item=>item.ref)})}},async *stream(){throw Error('unused')}},createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({async *stream(){const r='coding:'+ ++responses;yield {kind:'response_started',response_id:r};await foreground;yield {kind:'text_delta',text:'Ready'};yield {kind:'response_completed',response_id:r}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{}})})}})})
  host.setConversationRuntime(factory,()=>{});const submitted=host.submitConversationText('chat:main','Please implement the fix');await until(()=>responses===1)
  const todo=await host.life.mutate({op:'create',kind:'todo',title:'Fix',note:'unchanged'},'todo')
  const result=await host.command({type:'personal.command',request_id:'delegate',method:'tasks.delegate',params:{conversation_id:'chat:main',goal:'Implement the fix',acceptance:['done result'],origin_ref:'conversation:1',execution_route:'codex',todo_ref:todo}},{client_id:'client'}) as {ok:boolean;error?:string;data:{id:string}}
- assert.equal(result.ok,true,result.error);releaseForeground();await submitted;await until(()=>host.tasks.get(result.data.id).todo_sync==='synced')
+ assert.equal(result.ok,true,result.error);releaseForeground();await submitted;await recordSuccessfulCodingCheck(value,host);releaseCodex(COMPLETE);await until(()=>host.tasks.get(result.data.id).todo_sync==='synced')
  assert.equal(value.factory.transports.length,1);assert.equal(checks,1);assert.equal(host.tasks.get(result.data.id).corrections,0);assert.equal(host.life.snapshot().todos[0]!.status,'done');assert.equal(host.life.snapshot().todos[0]!.note,'unchanged')
- }finally{releaseForeground();await host.close();await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
+ }finally{releaseForeground();releaseCodex(COMPLETE);await host.close();await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
 })
 
 test('explicit model task stop cancels Nova-only and bound work and prevents restart',async()=>{
@@ -470,12 +515,13 @@ test('unrelated host narration is not evidence for a task sharing the latest use
 test('model declare and dispatch in one foreground turn admit exactly one coding attempt',async()=>{
  for(const mode of ['text','voice'] as const){
  const value=await fixture(),host=new PersonalAgentHost({path:join(await realpath(value.root),'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
- let checks=0;let native:Awaited<ReturnType<ReturnType<typeof conversationRuntimeFactory>>>|undefined
+ let checks=0;let native:Awaited<ReturnType<ReturnType<typeof conversationRuntimeFactory>>>|undefined;let releaseCodex!:(outcome:TransportOutcome)=>void
+ value.factory.runGate=new Promise(resolve=>{releaseCodex=resolve})
  const qwen=scriptedTaskQwen(n=>{if(n===1)setTimeout(()=>qwen.reply('dispatch','',{name:'dispatch',args:{executor:'codex',instruction:'Implement the fix',task_id:host.tasks.list()[0]!.id,source_refs:['conversation:1'],origin_ref:'conversation:1'}}),40);else qwen.reply('ready:'+n,'Ready')})
  try{await host.open();await value.adapter.initialize();const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:['codex'],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),codexResource:{mode:'project',adapter:value.adapter,agentDescriptor:CODEX_AGENT_DESCRIPTOR,agentControllerFactory:{create:context=>new CodexAgentController({channel:context.channel,resolveCancelTarget:async()=>null,dispatchPort:{dispatch:request=>context.dispatchPort.dispatch({...request,request:{...request.request,project:'alpha'}})}})},projectView:null,approvalController:null,start:async()=>{},close:async()=>{}},searchTransport:{search:async()=>{throw Error('unused')}},gateway:{complete:async request=>{const input=JSON.parse(request.prompt) as {evidence:{ref:string;kind:string;content:string}[]};checks++;assert.ok(input.evidence.some(item=>item.kind==='work'&&item.content.includes('done')));return {text:JSON.stringify({kind:'complete',evidence_refs:input.evidence.filter(item=>item.kind==='work').map(item=>item.ref)})}},async *stream(){throw Error('unused')}},onAudioTerminal:(id,epoch)=>{(native?.bridgeService as RealtimeService|undefined)?.playbackDone(id,epoch,20)},createTextProvider:()=>qwen.adapter,createVoiceProvider:()=>qwen.adapter})
- native=await factory(createConversation('chat','Test',null,'chat:main'),()=>{},mode);qwen.user('Please implement the fix');await until(()=>native!.bridgeService!==undefined&&(native!.bridgeService as RealtimeService).taskTurnOrigin()!==undefined);qwen.reply('declare','I will work on it',{name:'task',args:{operation:'declare',goal:'Implement the fix',acceptance:['done result'],source_refs:[],origin_ref:'conversation:1'}});await until(()=>host.tasks.list()[0]?.phase==='completed').catch(error=>{throw Error(JSON.stringify({checks,tasks:host.tasks.list(),transports:value.factory.transports.length})+String(error))})
+ native=await factory(createConversation('chat','Test',null,'chat:main'),()=>{},mode);qwen.user('Please implement the fix');await until(()=>native!.bridgeService!==undefined&&(native!.bridgeService as RealtimeService).taskTurnOrigin()!==undefined);qwen.reply('declare','I will work on it',{name:'task',args:{operation:'declare',goal:'Implement the fix',acceptance:['done result'],source_refs:[],origin_ref:'conversation:1'}});await recordSuccessfulCodingCheck(value,host);releaseCodex(COMPLETE);await until(()=>host.tasks.list()[0]?.phase==='completed').catch(error=>{throw Error(JSON.stringify({checks,tasks:host.tasks.list(),transports:value.factory.transports.length})+String(error))})
  assert.equal(host.tasks.evidence(host.tasks.list()[0]!.id).filter(item=>item.kind==='delivery').length,0);assert.equal(value.factory.transports.length,1);assert.equal(host.tasks.list()[0]!.work_ids.length,1);assert.equal(checks,1);assert.equal(host.tasks.list()[0]!.corrections,0);assert.equal(host.tasks.events(host.tasks.list()[0]!.id,0).items.some(item=>item.text.includes('delivery_interrupted')),false)
- }finally{await native?.close();await host.close();await value.adapter.close();await rm(value.root,{recursive:true,force:true})}}
+ }finally{releaseCodex(COMPLETE);await native?.close();await host.close();await value.adapter.close();await rm(value.root,{recursive:true,force:true})}}
 })
 
 

@@ -23,7 +23,7 @@ async function fixture(realMemory = false) {
   let memoryAvailable = true
   const invalidated: string[] = []
   const observations: {content: string; source_ref: {ref: string}}[] = []
-  const options = {processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
+  const options = {computerRoot:folder,processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
     onProcessingConsent:()=>failConsent?Promise.reject(Error('grant_write_failed')):Promise.resolve(),
     onObserve: async (value: {content: string; source_ref: {type:'file'; ref: string; observed_at:string}; topic?:string}) => {
       if (!memoryAvailable) throw new Error('memory_unavailable')
@@ -377,5 +377,25 @@ test('project overview favors the root README over newer nested README files',as
   for(let i=0;i<10;i++){const dir=join(f.folder,'part'+i);await mkdir(dir);await writeFile(join(dir,'README.md'),'Nested implementation '+i)}
   await f.sources.command('sources.add',{path:f.folder,consent:true,max_files:1})
   assert.equal((await f.knowledge.listSources())[0]!.locator,overview)
+ }finally{await f.close()}
+})
+
+
+test('whole-computer grant resumes batches past the directory overview budget without admitting credentials',async()=>{
+ const f=await fixture()
+ try{
+  await mkdir(join(f.folder,'.git'))
+  for(let n=0;n<19;n++)await writeFile(join(f.folder,`note-${String(n).padStart(2,'0')}.md`),`Distinct project document ${n}: implementation notes.`)
+  await writeFile(join(f.folder,'.env'),'SECRET=never-read')
+  await assert.rejects(f.sources.command('sources.authorize_computer',{consent:true,path:'/'}))
+  const grant=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id:grant.id})
+  assert.equal((await f.knowledge.listSources()).length,19)
+  assert.equal(f.sources.list()[0]!.scope,'computer')
+  assert.equal(f.sources.contextEntries().length,19)
+  await f.sources.command('sources.consent',{id:grant.id,consent:false});assert.equal(f.sources.contextEntries().length,0)
+  await f.reopen()
+  assert.equal(f.sources.list()[0]!.scope,'computer')
+  assert.equal((await f.knowledge.listSources()).length,19)
  }finally{await f.close()}
 })

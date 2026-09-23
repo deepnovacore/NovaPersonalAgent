@@ -494,3 +494,13 @@ test('truncated check observations advertise missing output and redact secrets b
  item(projection,{id:'cmd',type:'commandExecution',command:'npm test',aggregatedOutput:'x'.repeat(9996)+secret+'y'.repeat(10000),exitCode:0,status:'completed'})
  assert.equal(events[0]?.text_truncated,true);assert.ok(events[0].text.length<=16000);assert.doesNotMatch(events[0].text,/SECR/u)
 })
+
+
+test('public check observations redact unknown credentials in command output and MCP URLs',()=>{
+ const events:ExecutorActivity[]=[],projection=new AppServerTurnProjection({clock:new VirtualClock(),onActivity:event=>events.push(event)})
+ projection.bindThread(ephemeralThread(),{workspace:'/workspace'});projection.notification('turn/started',{threadId:'PRIVATE-THREAD',turn:{id:'PRIVATE-TURN'}});projection.bindTurnResponse({turn:{id:'PRIVATE-TURN'}})
+ item(projection,{id:'cmd',type:'commandExecution',command:'node --test',aggregatedOutput:'1 passed; password=unknown-password-value',exitCode:0,status:'completed'})
+ item(projection,{id:'mcp',type:'mcpToolCall',server:'cua_live',tool:'js',status:'completed',result:{isError:false,content:[{type:'text',text:'Counter value: 1; https://example.invalid/?token=unknown-query-value'}]}})
+ assert.match(events[0]!.text,/1 passed/);assert.match(events[1]!.text,/Counter value: 1/)
+ assert.doesNotMatch(JSON.stringify(events),/unknown-password-value|unknown-query-value/)
+})

@@ -1,3 +1,4 @@
+import {SensitiveContentPolicy} from '../../memory/sensitivity.js'
 import {isAbsolute,relative,resolve} from 'node:path'
 import type {ExecutorProgress,ExecutorActivity} from '../../core/causal-runtime.js'
 import type {Clock} from '../../core/clock.js'
@@ -14,6 +15,7 @@ import {
   WORKING_INTERVAL,
 } from './protocol.js'
 
+const observationSensitivity = new SensitiveContentPolicy()
 const EAGER_ACTIVITY_INTERVAL_SECONDS = 60
 
 export interface TurnCompletion {
@@ -293,7 +295,9 @@ export class AppServerTurnProjection {
     let fieldTruncated=false
     const publicField=(value:unknown):string|null=>{
       if(typeof value!=='string')return null
-      const sanitized=this.#sanitizePublicText?.(value)??{text:value,truncated:false}
+      const scrubbed=observationSensitivity.scrub('executor_observation',value)
+      const safe=scrubbed.kind==='clean'?value:scrubbed.kind==='redacted'?scrubbed.value:'[redacted]'
+      const sanitized=this.#sanitizePublicText?.(safe)??{text:safe,truncated:false}
       fieldTruncated||=sanitized.truncated;return sanitized.text
     }
     const status=typeof item.status==='string'&&['completed','failed','inProgress','declined'].includes(item.status)?item.status:null

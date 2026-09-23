@@ -1467,6 +1467,12 @@ test('desktop outbound applies size and pending-send bounds', async () => {
     )
     await settleWithin('accepted pending desktop sends', Promise.all(pending))
     await settleWithin('bounded pending desktop sends', delivered)
+    const personal = JSON.stringify({type:'personal.state', cards:'x'.repeat(32000)})
+    const personalFrames = nextFrames(socket, 1)
+    await server.sendText(personal)
+    assert.equal((await personalFrames)[0]?.bytes.length, Buffer.byteLength(personal))
+    await assert.rejects(server.sendText(JSON.stringify({type:'personal.state', cards:'x'.repeat(1024 * 1024)})), DesktopProtocolError)
+    await assert.rejects(server.sendText(JSON.stringify({type:'other', cards:'x'.repeat(32000)})), DesktopProtocolError)
     await assert.rejects(
       settleWithin('oversized desktop text send', server.sendText('x'.repeat(MAX_DESKTOP_JSON_BYTES + 1))),
       error => error instanceof DesktopProtocolError,

@@ -78,7 +78,7 @@ test('settings IM port admits only bounded Feishu methods and unwraps no memory 
 test('settings connections port admits only sources, connectors and discovery scheduling', async () => {
   const calls: unknown[] = []
   const command = (input: unknown) => {calls.push(input); return Promise.resolve({ok:true,data:{sources:[]}})}
-  for (const method of ['memory.list','feed.action','conversations.select','life.mutate','news.refresh','understanding.action','sources.consent','feishu.status'])
+  for (const method of ['memory.list','feed.action','conversations.select','life.mutate','news.refresh','understanding.action','feishu.status'])
     assert.deepEqual(await handlePersonalSettings(command,method,{}),{error:'unsupported'},method)
   assert.deepEqual(await handlePersonalSettings(command,'discovery.configure','enabled'),{error:'invalid_request'})
   assert.equal(calls.length,0)
@@ -90,6 +90,8 @@ test('settings connections port admits only sources, connectors and discovery sc
   assert.ok(!JSON.stringify(projected).includes('SECRET'))
   assert.deepEqual(connectionsProjection(null).sources,[])
   assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:true}),'discovery.configure',{enabled:false}),{ok:true},'payload-less success is not an error')
+  assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:true}),'sources.authorize_computer',{consent:true}),{ok:true})
+  assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:true}),'sources.consent',{id:'x',consent:false}),{ok:true})
   assert.ok(PERSONAL_SETTINGS_METHODS.every(method => !method.startsWith('feishu.')))
   assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:false,error:'unavailable'}),'sources.sync',{id:'s'}),{error:'unavailable'})
 })
