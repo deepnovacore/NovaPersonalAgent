@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import {execFileSync} from 'node:child_process'
 import {VoiceMem} from 'voicemem'
 import {VersionedMemory} from '../src/voicemem/versioned-memory.js'
 import {mkdtemp, mkdir, writeFile, rm, realpath, symlink, rename, readFile, utimes} from 'node:fs/promises'
@@ -6,11 +7,12 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import test from 'node:test'
 import {LocalDirectorySources} from '../src/personal-agent/sources.js'
-import {orderComputerRoots} from '../src/personal-agent/source-priority.js'
+import {nextComputerRoot,orderComputerRoots} from '../src/personal-agent/source-priority.js'
+import {scanDirectory} from '../src/personal-agent/source-walk.js'
 import {KnowledgeService} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
 
-async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string|null>) {
+async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string|null>, directorySafetyCap?:number) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-directory-'))
   const folder = join(root, 'allowed'); await mkdir(folder)
   let failEmbedding = false, failInvalidation = false, failConsent=false
@@ -24,7 +26,7 @@ async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string
   let memoryAvailable = true
   const invalidated: string[] = []
   const observations: {content: string; source_ref: {ref: string}}[] = []
-  const options = {computerRoot:folder,...(priorityWorkspace?{priorityWorkspace}:{}),processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
+  const options = {computerRoot:folder,...(priorityWorkspace?{priorityWorkspace}:{}),...(directorySafetyCap?{directorySafetyCap}:{}),processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
     onProcessingConsent:()=>failConsent?Promise.reject(Error('grant_write_failed')):Promise.resolve(),
     onObserve: async (value: {content: string; source_ref: {type:'file'; ref: string; observed_at:string}; topic?:string}) => {
       if (!memoryAvailable) throw new Error('memory_unavailable')
@@ -231,7 +233,7 @@ test('successful retry clears current degraded health while retaining read failu
    await sources.close()
    const retryState=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{deferred:{eligible_at:number}[]}|null}[]}
    assert.ok(retryState.sources[0]!.walk?.deferred.length)
-   retryState.sources[0]!.walk!.deferred[0]!.eligible_at=0
+   retryState.sources[0]!.walk.deferred[0]!.eligible_at=0
    await writeFile(path,JSON.stringify(retryState));f.setFail(false)
    const retrying=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,computerRoot:f.folder,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
    try{
@@ -683,6 +685,13 @@ test('computer roots rank selected and current work ahead of recent Git and mtim
  ]
  assert.deepEqual(orderComputerRoots(roots).map(root=>root.path),['/selected','/current','/git','/older'])
 })
+test('weighted root turns include lower tiers while rotating peers',()=>{
+ const now=Date.now(),base={mtimeMs:1,lastGitCommitMs:null}
+ const roots=[{...base,path:'/selected-a',selected:true,currentWorkspace:false},{...base,path:'/selected-b',selected:true,currentWorkspace:false},{...base,path:'/active',selected:false,currentWorkspace:false,lastGitCommitMs:now},{...base,path:'/other',selected:false,currentWorkspace:false}]
+ const cursors=[0,0,0]
+ const chosen=Array.from({length:7},(_,turn)=>nextComputerRoot(roots,turn,cursors)!.path)
+ assert.deepEqual(chosen,['/selected-a','/selected-b','/selected-a','/selected-b','/active','/active','/other'])
+})
 test('first computer batches include more than one visible project root',async()=>{
  const f=await fixture()
  try{
@@ -705,5 +714,99 @@ test('current workspace reaches the first computer batches even behind a long sa
   const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
   await f.sources.command('sources.sync',{id})
   assert.ok((await f.knowledge.listSources()).some(source=>source.locator===join(workspace!,'README.md')))
+ }finally{await f.close()}
+})
+
+test('streamed directory scan reports exact cap as complete and excess as partial',async()=>{
+ const f=await fixture()
+ try{
+  for(let i=0;i<3;i++)await writeFile(join(f.folder,`note-${i}.md`),`Note ${i}`)
+  const seen:string[]=[]
+  const exact=await scanDirectory(f.folder,new AbortController().signal,entry=>{seen.push(entry.name)},{hardSafetyCap:3})
+  assert.equal(exact.complete,true);assert.equal(exact.seen,3);assert.equal(typeof exact.identity.dev,'string')
+  await writeFile(join(f.folder,'fourth.md'),'Fourth note')
+  const partial=await scanDirectory(f.folder,new AbortController().signal,()=>undefined,{hardSafetyCap:3})
+  assert.equal(partial.complete,false);assert.equal(partial.seen,3)
+ }finally{await f.close()}
+})
+
+test('computer scan exposes a safety-cap partial pass without deleting prior evidence',async()=>{
+ const f=await fixture(false,undefined,3)
+ try{
+  for(let i=0;i<4;i++)await writeFile(join(f.folder,`note-${i}.md`),`Note ${i}`)
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id})
+  assert.equal(f.sources.list()[0]!.coverage,'partial')
+  assert.ok((f.sources.list()[0]!.reasons.directory_partial??0)>0)
+ }finally{await f.close()}
+})
+
+test('unavailable computer root retains indexed evidence',async()=>{
+ const f=await fixture()
+ try{
+  const document=join(f.folder,'README.md');await writeFile(document,'Prior project evidence')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id})
+  assert.ok((await f.knowledge.listSources()).some(s=>s.locator===document))
+  await rename(f.folder,join(f.root,'unmounted'))
+  await f.sources.command('sources.sync',{id})
+  assert.ok((await f.knowledge.listSources()).some(s=>s.locator===document))
+  assert.equal(f.sources.list()[0]!.coverage,'partial')
+ }finally{await f.close()}
+})
+
+test('computer reconciliation admits a changed tracked file',async()=>{
+ const f=await fixture()
+ try{
+  const document=join(f.folder,'README.md');await writeFile(document,'Original work note')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id})
+  await writeFile(document,'Updated work note with a new conclusion')
+  await f.sources.command('sources.sync',{id})
+  assert.ok(f.sources.contextEntries().some(item=>item.content.includes('Updated work note')))
+ }finally{await f.close()}
+})
+
+test('legacy offset checkpoint migrates without dropping pending and deferred files',async()=>{
+ const f=await fixture()
+ try{
+  const project=join(f.folder,'project');await mkdir(project)
+  const old=join(project,'z-old.md'),added=join(project,'a-new.md')
+  await writeFile(old,'Old project note')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown}[]}
+  const deferred=join(project,'later.md')
+  state.sources[0]!.walk={queue:[{path:project,offset:1}],pending:[{path:old,size:16,mtime:1,unit:project}],deferred:[{path:deferred,size:1,mtime:1,unit:project,eligible_at:Date.now()+60_000,attempts:1,reason:'retry'}]}
+  await writeFile(path,JSON.stringify(state))
+  await writeFile(added,'New project note')
+  await f.reopen()
+  for(let i=0;i<3;i++)await f.sources.command('sources.sync',{id})
+  const locators=(await f.knowledge.listSources()).map(s=>s.locator)
+  assert.equal(locators.filter(p=>p===old).length,1)
+  assert.equal(locators.filter(p=>p===added).length,1)
+  const saved=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{deferred:{path:string}[]}|null}[]}
+  assert.ok(saved.sources[0]!.walk?.deferred.some(item=>item.path===deferred))
+ }finally{await f.close()}
+})
+
+test('directory ledger rollback emits a readable legacy checkpoint',async()=>{
+ const f=await fixture()
+ try{
+  await f.sources.command('sources.authorize_computer',{consent:true})
+  await f.sources.close()
+  const input=join(f.root,'db','sources.json'),output=join(f.root,'db','sources-legacy.json')
+  const state=JSON.parse(await readFile(input,'utf8')) as {sources:{walk:unknown}[]}
+  state.sources[0]!.walk={generation:3,queue:[],ledger:[{path:f.folder,generation:3,status:'queued'}],pending:[{path:join(f.folder,'pending.md'),size:1,mtime:1,unit:f.folder}],deferred:[{path:join(f.folder,'later.md'),size:1,mtime:1,unit:f.folder,eligible_at:Date.now()+60_000,attempts:1,reason:'retry'}]}
+  await writeFile(input,JSON.stringify(state))
+  const script=new URL('../../scripts/rollback-source-walk.mjs',import.meta.url)
+  execFileSync(process.execPath,[script.pathname,input,output])
+  const legacy=JSON.parse(await readFile(output,'utf8')) as {sources:{walk:{queue:{path:string;offset:number}[];pending:unknown[];deferred:unknown[];ledger?:unknown}}[]}
+  assert.deepEqual(legacy.sources[0]!.walk.queue,[{path:f.folder,offset:0}])
+  assert.equal(legacy.sources[0]!.walk.pending.length,1)
+  assert.equal(legacy.sources[0]!.walk.deferred.length,1)
+  assert.equal(legacy.sources[0]!.walk.ledger,undefined)
+  const reopened=new LocalDirectorySources({path:output,computerRoot:f.folder,knowledge:f.knowledge,pollMs:0,scanOnOpen:false})
+  try{await reopened.open();assert.equal(reopened.list().length,1)}finally{await reopened.close()}
  }finally{await f.close()}
 })

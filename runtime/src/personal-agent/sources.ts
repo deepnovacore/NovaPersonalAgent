@@ -1,11 +1,13 @@
 import {homedir} from 'node:os'
+import {watch, type FSWatcher} from 'node:fs'
 import {processingGrantSchema,type ProcessingGrant} from '../memory-substrate/source-state.js'
 import {interleave} from './sampling.js'
-import {orderComputerRoots,rootActivity} from './source-priority.js'
+import {nextComputerRoot,rootActivity} from './source-priority.js'
+import {scanDirectory} from './source-walk.js'
 import type {ContextInput} from './context-candidates.js'
 import {randomUUID} from 'node:crypto'
 import {acquirePersonalLock} from './store.js'
-import {lstat, readdir, opendir, open, readFile, realpath, rename, rm, writeFile} from 'node:fs/promises'
+import {lstat, opendir, open, readFile, realpath, rename, rm, writeFile} from 'node:fs/promises'
 import {basename, parse, dirname, extname, isAbsolute, join, relative, sep} from 'node:path'
 import {z} from 'zod'
 import {preparePrivateDatabasePath} from '../storage/private-database.js'
@@ -35,7 +37,8 @@ const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, i
   evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
 const walkFileSchema=z.object({path:pathSchema,size:z.number().nonnegative(),mtime:z.number(),unit:pathSchema,attempts:z.number().int().nonnegative().optional(),eligible_at:z.number().optional(),reason:z.enum(['body_budget','retry']).optional()}).strict()
 const deferredFileSchema=walkFileSchema.extend({eligible_at:z.number().default(0),attempts:z.number().int().nonnegative().default(0),reason:z.enum(['body_budget','retry']).default('retry')}).strict()
-const walkSchema=z.object({queue:z.array(z.object({path:pathSchema,offset:z.number().int().nonnegative(),unit:pathSchema.optional()}).strict()).max(20000),pending:z.array(walkFileSchema).max(200),deferred:z.array(deferredFileSchema).max(200).default([]),workspace_seeded:pathSchema.optional()}).strict()
+const directoryLedgerSchema=z.object({path:pathSchema,unit:pathSchema.optional(),generation:z.number().int().nonnegative(),status:z.enum(['queued','done','partial']),identity:z.object({dev:z.string(),ino:z.string(),mtimeNs:z.string()}).strict().optional(),eligible_at:z.number().optional()}).strict()
+const walkSchema=z.object({queue:z.array(z.object({path:pathSchema,offset:z.number().int().nonnegative().optional(),unit:pathSchema.optional()}).strict()).max(20000),ledger:z.array(directoryLedgerSchema).max(20000).default([]),generation:z.number().int().nonnegative().default(1),pending:z.array(walkFileSchema).max(200),deferred:z.array(deferredFileSchema).max(200).default([]),workspace_seeded:pathSchema.optional()}).strict()
 const recordSchema = z.object({walk:walkSchema.nullable().default(null),processing_consent:processingGrantSchema.optional(),view: snapshotSchema, files: z.array(trackedSchema).max(20000),
   deleting: z.boolean().default(false), observation: z.string().max(500).default(''),
   pending: z.object({path: pathSchema, size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), previous_updated_at: z.number().nullable()}).strict().nullable().default(null)}).strict()
@@ -94,6 +97,8 @@ export interface LocalDirectorySourceOptions {
   /** Load persisted source context without recovery, scanning or polling (isolated acceptance copies). */
   readonly scanOnOpen?: boolean
   readonly priorityWorkspace?: () => Promise<string | null>
+  /** Testable bound; production uses the scanner's hard default. */
+  readonly directorySafetyCap?: number
   readonly path: string
   readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'>
   readonly pollMs?: number
@@ -116,6 +121,9 @@ export class LocalDirectorySources {
   #writes: Promise<void> = Promise.resolve()
   #commands: Promise<unknown> = Promise.resolve()
   #workspacePath:string|null=null
+  #activityCache=new Map<string,{value:Awaited<ReturnType<typeof rootActivity>>;checked:number}>()
+  #watchers:FSWatcher[]=[]
+  #dirtyHints=new Map<string,Set<string>>()
 
   constructor(options: LocalDirectorySourceOptions) {this.#options = options}
   async open(): Promise<void> {
@@ -139,11 +147,14 @@ export class LocalDirectorySources {
       if (record.deleting) await this.#delete(record)
       else if (record.view.state === 'connected' || record.view.state === 'error') {if(record.view.scope==='computer'){const timer=setTimeout(()=>{if(!this.#closed)void this.#sync(record).catch(()=>undefined)},0);timer.unref()}else await this.#sync(record)}
     }
+    for(const record of this.#records)if(record.view.scope==='computer'&&record.view.state==='connected')this.#watchComputer(record)
     const pollMs = this.#options.pollMs ?? 300000
     if (pollMs > 0) {this.#timer = setInterval(() => {void this.#poll().catch(() => undefined)}, pollMs); this.#timer.unref()}
   }
   async close(): Promise<void> {
     this.#closed = true
+    for(const watcher of this.#watchers)watcher.close()
+    this.#watchers=[]
     clearInterval(this.#timer)
     this.#active?.abort.abort()
     await this.#active?.done
@@ -152,6 +163,17 @@ export class LocalDirectorySources {
     await this.#release?.(); this.#release = undefined
   }
   list(): SourceSnapshot[] {const expected=this.#options.processingGrant?.(true,1,0);return this.#records.map(record => ({...structuredClone(record.view), processing_consent_required:!record.processing_consent?.extraction_provider||record.processing_consent.extraction_provider!==expected?.extraction_provider||record.processing_consent.embedding_provider!==expected?.embedding_provider, excludes: [...new Set([...SOURCE_EXCLUDES, ...(record.view.scope==='computer'?COMPUTER_EXCLUDES:[]), ...record.view.excludes])]}))}
+  #watchComputer(record:SourceRecord):void {
+    const hint=(path:string)=>{if(!['connected','error'].includes(record.view.state))return;this.#activityCache.clear();const pending=this.#dirtyHints.get(record.view.id)??new Set<string>();pending.add(path);this.#dirtyHints.set(record.view.id,pending);const timer=setTimeout(()=>{if(this.#closed||!['connected','error'].includes(record.view.state))return;const active=this.#active;if(active)void active.done.finally(()=>{if(!this.#closed&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)});else void this.#sync(record).catch(()=>undefined)},1000);timer.unref()}
+    try{
+      const watcher=watch(record.view.path,{recursive:true},(_event,filename)=>{
+        const path=filename?join(record.view.path,String(filename)):record.view.path
+        hint(within(record.view.path,path)?dirname(path):record.view.path)
+      })
+      watcher.on('error',()=>hint(record.view.path))
+      this.#watchers.push(watcher)
+    }catch{hint(record.view.path)}
+  }
   evidence(ref: string) {
     for (const record of this.#records) {
       const file = record.files.find(file => refFor(file) === ref)
@@ -199,7 +221,7 @@ export class LocalDirectorySources {
           if(computer.view.priority_dirs.length>=16)throw Error('source_limit')
           computer.view.priority_dirs.push(path);await this.#save()
         }
-        if(computer.walk){computer.walk.queue=computer.walk.queue.filter(entry=>entry.path!==path);computer.walk.queue.unshift({path,offset:0});await this.#save()}
+        if(computer.walk){computer.walk.queue=computer.walk.queue.filter(entry=>entry.path!==path);computer.walk.queue.unshift({path});computer.walk.ledger=computer.walk.ledger.filter(entry=>entry.path!==path);await this.#save()}
         if(computer.view.state==='connected'||computer.view.state==='error')void this.#sync(computer).catch(()=>undefined)
       }else{
         computer.view.priority_dirs=computer.view.priority_dirs.filter(value=>value!==path)
@@ -253,7 +275,7 @@ export class LocalDirectorySources {
     } else if (method === 'sources.resume') {
       record.view.state = 'connected'; await this.#save(); await this.#sync(record)
     } else if (method === 'sources.sync') {
-      if (record.view.state === 'connected' || record.view.state === 'error') await this.#sync(record)
+      if (record.view.state === 'connected' || record.view.state === 'error') await this.#sync(record,true)
     } else throw new Error('invalid_request')
     await this.#options.onChange?.(false)
     return {ok: true}
@@ -266,72 +288,122 @@ export class LocalDirectorySources {
     this.#records.push(record);try{await this.#save()}catch(error){this.#records.pop();throw error}
     // The grant returns immediately; indexing cannot block the settings window.
     void this.#sync(record).catch(()=>undefined)
+    this.#watchComputer(record)
     return {id:record.view.id}
   }
-  async #computerBatch(record:SourceRecord,signal:AbortSignal):Promise<{path:string;size:number;mtime:number;unit:string}[]>{
-    const walk:z.infer<typeof walkSchema>=record.walk??(record.walk={queue:[...record.view.priority_dirs.map(path=>({path,offset:0})),{path:record.view.path,offset:0}],pending:[],deferred:[]})
+  async #computerBatch(record:SourceRecord,signal:AbortSignal,force=false):Promise<{path:string;size:number;mtime:number;unit:string}[]>{
+    const walk:z.infer<typeof walkSchema>=record.walk??(record.walk={queue:[...record.view.priority_dirs.map(path=>({path})),{path:record.view.path}],ledger:[],generation:1,pending:[],deferred:[]})
+    // v1 offsets are deliberately ignored: reopening a changed directory starts a new pass.
+    const ledger=new Map(walk.ledger.map(item=>[item.path,item]))
+    for(const item of walk.queue)if(!ledger.has(item.path))ledger.set(item.path,{path:item.path,unit:item.unit,generation:walk.generation,status:'queued'})
+    if(force&&walk.queue.length===0&&walk.pending.length===0&&walk.deferred.length===0&&ledger.size>0){walk.generation++;for(const entry of ledger.values())entry.status='queued';walk.queue=[...record.view.priority_dirs.map(path=>({path})),{path:record.view.path}]}
+    else if(walk.queue.length===0&&walk.pending.length===0&&walk.deferred.length===0){
+      const due=[...ledger.values()].filter(item=>(item.eligible_at??Infinity)<=Date.now()).slice(0,64)
+      if(due.length){walk.generation++;for(const item of due){item.generation=walk.generation;item.status='queued';walk.queue.push({path:item.path,...(item.unit?{unit:item.unit}:{})})}}
+    }
+    const hints=this.#dirtyHints.get(record.view.id)
+    if(hints?.size){walk.generation++;const existing=new Set(walk.queue.map(item=>item.path));for(const path of [...hints].slice(0,64)){const old=ledger.get(path);ledger.set(path,{path,generation:walk.generation,status:'queued',...(old?.unit?{unit:old.unit}:{})});if(!existing.has(path)){walk.queue.push({path,...(old?.unit?{unit:old.unit}:{})});existing.add(path)}hints.delete(path)}}
     const now=Date.now()
     const eligible=walk.deferred.filter(item=>item.eligible_at<=now).slice(0,Math.max(0,200-walk.pending.length))
     const eligiblePaths=new Set(eligible.map(item=>item.path))
     walk.deferred=walk.deferred.filter(item=>!eligiblePaths.has(item.path))
-    for(const item of eligible)if(!walk.pending.some(file=>file.path===item.path))walk.pending.push({path:item.path,size:item.size,mtime:item.mtime,unit:item.unit,attempts:item.attempts})
+    const pendingPaths=new Set(walk.pending.map(item=>item.path))
+    const queuedPaths=new Set(walk.queue.map(item=>item.path))
+    for(const item of eligible)if(!pendingPaths.has(item.path)){walk.pending.push({...item});pendingPaths.add(item.path)}
     const excluded=new Set([...SOURCE_EXCLUDES,...COMPUTER_EXCLUDES,...record.view.excludes].map(s=>s.toLowerCase()))
-    let visited=0
     const workspace=await this.#options.priorityWorkspace?.().then(path=>path&&within(record.view.path,path)?path:null).catch(()=>null)??null
     this.#workspacePath=workspace
+    const enqueue=(path:string,unit?:string)=>{
+      const prior=ledger.get(path)
+      if(prior?.generation===walk.generation&&(prior.status==='done'||prior.status==='partial'||queuedPaths.has(path)))return
+      if(walk.queue.length>=20000||ledger.size>=20000){record.view.reasons.directory_capacity=(record.view.reasons.directory_capacity??0)+1;return}
+      ledger.set(path,{path,unit,generation:walk.generation,status:'queued'})
+      walk.queue.push({path,...(unit?{unit}:{})});queuedPaths.add(path)
+    }
     if(workspace&&walk.workspace_seeded!==workspace){
       walk.workspace_seeded=workspace
-      if(workspace!==record.view.path&&!isComputerExcludedPath(record.view,workspace)&&policy.allows(workspace)&&await realpath(workspace).catch(()=>null)===workspace&&await lstat(workspace).then(stat=>stat.isDirectory()).catch(()=>false)){
-        const existing=walk.queue.findIndex(entry=>entry.path===workspace)
-        if(existing>0)walk.queue.unshift(walk.queue.splice(existing,1)[0]!)
-        else if(existing<0&&walk.queue.length<20000)walk.queue.unshift({path:workspace,offset:0})
-      }
+      if(workspace!==record.view.path&&!isComputerExcludedPath(record.view,workspace)&&policy.allows(workspace)&&await realpath(workspace).catch(()=>null)===workspace&&await lstat(workspace).then(stat=>stat.isDirectory()).catch(()=>false)){enqueue(workspace);const index=walk.queue.findIndex(item=>item.path===workspace);if(index>0)walk.queue.unshift(walk.queue.splice(index,1)[0]!)}
     }
-    const activity=new Map<string,Awaited<ReturnType<typeof rootActivity>>>()
-    const readsByUnit=new Map<string,number>()
-    const deferred=new Set<string>()
+    const knownFiles=new Map(record.files.filter(file=>file.valid).map(file=>[file.path,file]))
     const signalFor=async(path:string)=>{
-      let recent=activity.get(path)
-      if(!recent){recent=await rootActivity(path);activity.set(path,recent)}
+      let cached=this.#activityCache.get(path)
+      if(!cached||Date.now()-cached.checked>300_000){cached={value:await rootActivity(path),checked:Date.now()};this.#activityCache.set(path,cached)}
+      const recent=cached.value
       return {path,selected:record.view.priority_dirs.some(value=>within(value,path)),currentWorkspace:!!workspace&&within(workspace,path),...recent}
     }
-    while(walk.queue.length&&walk.pending.length<16&&visited<20000){
-      if(walk.queue.every(entry=>deferred.has(entry.path)))break
-      const front=walk.queue.slice(0,64)
-      const ranked=orderComputerRoots(await Promise.all(front.map(entry=>signalFor(entry.path))))
-      walk.queue.splice(0,front.length,...ranked.map(item=>front.find(entry=>entry.path===item.path)!).sort((a,b)=>Number(deferred.has(a.path))-Number(deferred.has(b.path))))
-      signal.throwIfAborted();const directory=walk.queue[0]!
+    let turns=0
+    let metadataSeen=0
+    let statCalls=0
+    const yielded=new Set<string>()
+    const cursors=[0,0,0]
+    try{
+    while(walk.queue.length&&walk.pending.length<16&&metadataSeen<20_000&&statCalls<20_000&&turns++<64){
+      signal.throwIfAborted()
+      // Rotate roots; ranking is a tier hint, not a permanent sort of every turn.
+      const front=walk.queue.slice(0,Math.min(32,walk.queue.length))
+      const signals=await Promise.all(front.map(item=>signalFor(item.path)))
+      const candidate=nextComputerRoot(signals,turns-1,cursors,yielded)??nextComputerRoot(signals,turns-1,cursors)!
+      const selected=front.find(item=>item.path===candidate.path)!
+      const index=walk.queue.indexOf(selected),directory=walk.queue.splice(index,1)[0]!
+      queuedPaths.delete(directory.path)
+      const item=ledger.get(directory.path)??{path:directory.path,generation:walk.generation,status:'queued' as const}
+      item.generation=walk.generation
+      ledger.set(directory.path,item)
+      if(directory.path!==record.view.path&&(isAutoHiddenPath(record.view.path,directory.path,record.view.priority_dirs)||relative(record.view.path,directory.path).split(sep).some(part=>excluded.has(part.toLowerCase()))))continue
+      const seen=new Set<string>()
+      let admitted=0
       try{
-        if(directory.path!==record.view.path&&(isAutoHiddenPath(record.view.path,directory.path,record.view.priority_dirs)||relative(record.view.path,directory.path).split(sep).some(part=>excluded.has(part.toLowerCase())))){walk.queue.shift();continue}
-        if(await realpath(directory.path)!==directory.path){walk.queue.shift();continue}
+        if(await realpath(directory.path)!==directory.path)throw Error('changed_path')
         const marker=await lstat(join(directory.path,'.git')).catch(()=>null)
         if(marker&&(marker.isDirectory()||marker.isFile())&&!marker.isSymbolicLink())directory.unit=directory.path
-        const entries=(await readdir(directory.path,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))
-        const names=new Set(entries.map(e=>e.name));for(const file of [...record.files])if(within(directory.path,file.path)&&file.path!==directory.path&&!names.has(relative(directory.path,file.path).split(sep)[0]!))await this.#removeFile(record,file)
-        while(directory.offset<entries.length&&walk.pending.length<16&&visited++<20000){
-          const entry=entries[directory.offset++]!,path=join(directory.path,entry.name)
-          if(isAutoHiddenPath(record.view.path,path,record.view.priority_dirs)||excluded.has(entry.name.toLowerCase())||!policy.allows(path)||entry.isSymbolicLink()){record.view.skipped++;continue}
+        const safetyCap=this.#options.directorySafetyCap??20_000
+        const passCap=Math.min(safetyCap,20_000-metadataSeen)
+        const result=await scanDirectory(directory.path,signal,async entry=>{
+          const path=join(directory.path,entry.name)
+          seen.add(entry.name)
+          if(isAutoHiddenPath(record.view.path,path,record.view.priority_dirs)||excluded.has(entry.name.toLowerCase())||!policy.allows(path)||entry.isSymbolicLink()){record.view.skipped++;return}
           if(entry.isDirectory()){
-            if(this.#records.some(r=>r!==record&&within(r.view.path,path)))continue
-            if(record.view.priority_dirs.includes(path))continue
-            if(walk.queue.length>=20000)throw Error('directory_capacity')
-            if(!walk.queue.some(item=>item.path===path))walk.queue.push({path,offset:0,...(directory.unit?{unit:directory.unit}:{})})
+            if(this.#records.some(r=>r!==record&&within(r.view.path,path))||record.view.priority_dirs.includes(path))return
+            enqueue(path,directory.unit)
           }else if(entry.isFile()){
             record.view.scanned++
-            if(!supported.has(extname(path).toLowerCase())||generatedFile(path)){record.view.skipped++;continue}
-            const stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink())continue
-            const unit=directory.unit??computerUnit(record.view.path,path)
-            const anotherRoot=walk.queue.some(other=>other.path!==directory.path&&(other.unit??computerUnit(record.view.path,join(other.path,'file.md')))!==unit)
-            if((readsByUnit.get(unit)??0)>=4&&anotherRoot){directory.offset--;walk.queue.shift();walk.queue.push(directory);deferred.add(directory.path);break}
-            readsByUnit.set(unit,(readsByUnit.get(unit)??0)+1)
-            walk.pending.push({path,size:stat.size,mtime:stat.mtimeMs,unit})
+            if(!supported.has(extname(path).toLowerCase())||generatedFile(path)){record.view.skipped++;return}
+            if(pendingPaths.has(path))return
+            if(admitted>=4&&walk.queue.length)throw Error('directory_yield')
+            if(statCalls>=20_000)throw Error('directory_yield')
+            const stat=await lstat(path)
+            statCalls++
+            if(!stat.isFile()||stat.isSymbolicLink())return
+            const prior=knownFiles.get(path)
+            if(prior?.size===stat.size&&prior.mtime===stat.mtimeMs)return
+            walk.pending.push({path,size:stat.size,mtime:stat.mtimeMs,unit:directory.unit??computerUnit(record.view.path,path)})
+            pendingPaths.add(path);admitted++
           }
+        },{hardSafetyCap:passCap})
+        metadataSeen+=result.seen
+        if(result.complete&&(!item.identity||item.identity.dev===result.identity.dev&&item.identity.ino===result.identity.ino)){
+          // A complete, same-filesystem parent pass is the sole deletion authority.
+          for(const file of [...record.files])if(within(directory.path,file.path)&&file.path!==directory.path&&!seen.has(relative(directory.path,file.path).split(sep)[0]!))await this.#removeFile(record,file)
+          item.status='done';item.identity=result.identity;item.eligible_at=Date.now()+(record.view.priority_dirs.some(path=>within(path,directory.path))||!!workspace&&within(workspace,directory.path)?300_000:86_400_000)
+        }else if(!result.complete&&passCap<safetyCap){
+          walk.queue.push(directory);queuedPaths.add(directory.path)
+        }else{
+          item.status='partial';item.identity=result.identity;item.eligible_at=Date.now()+86_400_000
+          record.view.reasons.directory_partial=(record.view.reasons.directory_partial??0)+1
         }
-        if(directory.offset>=entries.length)walk.queue.shift()
-      }catch(error){signal.throwIfAborted();if(error instanceof Error&&'code' in error&&error.code==='ENOENT')for(const file of [...record.files])if(within(directory.path,file.path))await this.#removeFile(record,file);if(record.view.failures.length<50)record.view.failures.push({path:directory.path,code:error instanceof Error&&'code' in error?String(error.code):'directory_unavailable'});walk.queue.shift()}
+      }catch(error){
+        signal.throwIfAborted()
+        if(error instanceof Error&&error.message==='directory_yield'){walk.queue.push(directory);queuedPaths.add(directory.path);yielded.add(directory.path);continue}
+        item.status='partial';item.eligible_at=Date.now()+60_000
+        record.view.reasons.directory_unavailable=(record.view.reasons.directory_unavailable??0)+1
+        if(record.view.failures.length<50)record.view.failures.push({path:directory.path,code:error instanceof Error&&'code' in error?String(error.code):'directory_unavailable'})
+      }
     }
-    record.view.scan_pending=walk.queue.length>0||walk.pending.length>0||walk.deferred.length>0
+    }finally{
+    walk.ledger=[...ledger.values()]
+    record.view.scan_pending=walk.queue.length>0||walk.pending.length>0||walk.deferred.length>0||walk.ledger.some(item=>item.status==='partial')
     await this.#save()
+    }
     return walk.pending.filter(item=>(item.eligible_at??0)<=Date.now())
   }
   async #poll(): Promise<void> {
@@ -341,14 +413,14 @@ export class LocalDirectorySources {
       if (record.view.state === 'connected' || record.view.state === 'error') await this.#sync(record)
     }
   }
-  async #sync(record: SourceRecord): Promise<void> {
+  async #sync(record: SourceRecord,force=false): Promise<void> {
     if (this.#closed || this.#active) return
     const abort = new AbortController()
-    const done=this.#scan(record,abort.signal).finally(()=>{this.#active=undefined;if(record.view.scope==='computer'&&record.view.scan_pending&&!this.#closed&&['connected','error'].includes(record.view.state)){const walk=record.walk;const now=Date.now();const duePending=!!walk?.pending.some(item=>(item.eligible_at??0)<=now);const canDiscover=!!walk?.queue.length&&walk.pending.length<16;const immediate=duePending||canDiscover;const pendingDue=walk?.pending.filter(item=>(item.eligible_at??0)>now).map(item=>item.eligible_at!)??[];const deferredDue=walk&&walk.pending.length<200?walk.deferred.map(item=>item.eligible_at):[];const due=Math.min(...pendingDue,...deferredDue,Infinity);const delay=immediate?(record.view.state==='error'?30000:1000):Number.isFinite(due)?Math.min(Math.max(1,due-now),6*60*60_000):30000;const timer=setTimeout(()=>{if(!this.#closed&&!this.#active&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},delay);timer.unref()}})
+    const done=this.#scan(record,abort.signal,force).finally(()=>{this.#active=undefined;if(record.view.scope==='computer'&&record.view.scan_pending&&!this.#closed&&['connected','error'].includes(record.view.state)){const walk=record.walk;const now=Date.now();const duePending=!!walk?.pending.some(item=>(item.eligible_at??0)<=now);const canDiscover=!!walk?.queue.length&&walk.pending.length<16;const immediate=duePending||canDiscover;const pendingDue=walk?.pending.filter(item=>(item.eligible_at??0)>now).map(item=>item.eligible_at!)??[];const deferredDue=walk&&walk.pending.length<200?walk.deferred.map(item=>item.eligible_at):[];const directoryDue=walk?.ledger.filter(item=>item.status==='partial'&&item.eligible_at!==undefined).map(item=>item.eligible_at!)??[];const due=Math.min(...pendingDue,...deferredDue,...directoryDue,Infinity);const delay=immediate?(record.view.state==='error'?30000:1000):Number.isFinite(due)?Math.min(Math.max(1,due-now),6*60*60_000):30000;const timer=setTimeout(()=>{if(!this.#closed&&!this.#active&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},delay);timer.unref()}})
     this.#active = {id: record.view.id, abort, done}
     await done
   }
-  async #scan(record: SourceRecord, signal: AbortSignal): Promise<void> {
+  async #scan(record: SourceRecord, signal: AbortSignal, force=false): Promise<void> {
     const view = record.view
     const beforeEvidence = record.files.filter(file => file.valid).map(refFor).sort().join()
     const beforeObservation = record.observation
@@ -362,7 +434,7 @@ export class LocalDirectorySources {
     let complete = true, visited = 0
     let currentReadFailure=false
     try {
-      if (await realpath(view.path) !== view.path) throw new Error('path_denied')
+      if (view.scope!=='computer'&&await realpath(view.path) !== view.path) throw new Error('path_denied')
       if(view.scope==='computer'){
         for(const previous of [...record.files].filter(file=>isComputerExcludedPath(view,file.path))){
           signal.throwIfAborted()
@@ -371,7 +443,7 @@ export class LocalDirectorySources {
         }
         if(record.walk){record.walk.pending=record.walk.pending.filter(file=>!isComputerExcludedPath(view,file.path));record.walk.deferred=record.walk.deferred.filter(file=>!isComputerExcludedPath(view,file.path))}
       }
-      if(view.scope==='computer'){files.push(...await this.#computerBatch(record,signal));directories.length=0;complete=false}
+      if(view.scope==='computer'){files.push(...await this.#computerBatch(record,signal,force));directories.length=0;complete=false}
       while (directories.length > 0 && visited < 20000) {
         signal.throwIfAborted()
         const directory = directories.shift()!
@@ -472,7 +544,7 @@ export class LocalDirectorySources {
       }
       signal.throwIfAborted()
       if(view.state!=='paused'&&view.state!=='disconnected')view.state='connected'
-      const partial=!!(record.walk?.queue.length||record.walk?.pending.length||record.walk?.deferred.length)||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','metadata_limit','project_metadata_limit','depth_limit'].includes(reason))
+      const partial=[record.walk?.queue.length,record.walk?.pending.length,record.walk?.deferred.length].some(count=>!!count)||!!record.walk?.ledger.some(item=>item.status==='partial')||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','metadata_limit','project_metadata_limit','depth_limit','directory_capacity'].includes(reason))
       view.health=partial||currentReadFailure?'degraded':'healthy'
       view.coverage=partial||currentReadFailure?'partial':'complete'
       view.last_sync = new Date().toISOString()
@@ -494,7 +566,7 @@ export class LocalDirectorySources {
       if (!signal.aborted) {view.state = 'error';view.health='error';view.coverage='partial';view.failures.splice(0,Math.max(0,view.failures.length-49));view.failures.push({path: '', code: errorCode(error)})}
     }
     view.indexed=record.files.filter(f=>f.valid).length
-    if(record.walk){view.scan_pending=!!(record.walk.queue.length||record.walk.pending.length||record.walk.deferred.length||record.files.some(f=>f.valid&&!f.observed&&f.excerpt&&representativeDocument(f.path)&&this.#options.onObserve));if(!view.scan_pending)record.walk=null}
+    if(record.walk){view.scan_pending=!!(record.walk.queue.length||record.walk.pending.length||record.walk.deferred.length||record.walk.ledger.some(item=>item.status==='partial')||record.files.some(f=>f.valid&&!f.observed&&f.excerpt&&representativeDocument(f.path)&&this.#options.onObserve));if(!view.scan_pending&&view.scope!=='computer')record.walk=null}
     await this.#save()
     await this.#options.onChange?.(beforeEvidence !== record.files.filter(file => file.valid).map(refFor).sort().join() || beforeObservation !== record.observation)
   }
