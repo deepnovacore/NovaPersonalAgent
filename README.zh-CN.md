@@ -16,6 +16,8 @@
 
 https://github.com/user-attachments/assets/061697f3-fff6-47d6-924b-8a29eef4ab45
 
+> **分支预览 · Nova Visor：** [已选定的透明桌面 HUD 效果与 Demo 目标](docs/DESKTOP_VISOR_DEMO.md)。面向“可交互桌面壁纸”的 Jarvis 体验，保留正常电脑操作。当前为静态概念展示，桌面叠加层尚未实现。
+
 ## News
 
 - **2026-09-21 · 🎉 [v0.2.2 已发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — 新增 Ubuntu 22.04+ x64 桌面 npm 安装与启动，以及支持终端二维码配对的无头服务包 `nova-audio-agent-server`；继续支持 macOS 和 Windows。

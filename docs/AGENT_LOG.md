@@ -21,3 +21,13 @@
 - GitHub: continue existing Issue #10 and `codex/orb-skins`; no new issue or release.
 - Verification: checked existing schema/state names, Markdown links, whitespace and staged sensitive-data scan. Runtime/UI suites were not rerun for documentation-only changes.
 - Next: implement and freeze JSON Schemas and validator before accepting v2 packages.
+
+## 2026-09-23 19:41 CST — Pin the approved transparent desktop HUD concept
+
+- Request: put the selected transparent visor image into branch goals as a simple demo; explore the product as interactive desktop wallpaper.
+- Planned commit: `docs: pin transparent desktop visor demo and branch goals`.
+- Added the exact user-selected concept under `docs/assets/desktop-visor/` and `docs/DESKTOP_VISOR_DEMO.md`; linked it from both root READMEs.
+- Distinguishes interactive-wallpaper experience from above-app transparent HUD implementation. Normal desktop operation, mouse pass-through, explicit control hit areas, readable data and collapsible density are the first runnable demo goals.
+- GitHub: update Issue #11 to the approved transparent first-person visor direction, preserve Issue #10 skin scope.
+- Validation: checked image identity, Markdown references, staged diff/whitespace and sensitive-data scan. No runtime changes or new UI tests.
+- Current deliverable is a static concept demo and specification, not a functioning overlay or release.
