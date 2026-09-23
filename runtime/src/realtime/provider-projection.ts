@@ -59,6 +59,7 @@ interface ProviderProjectionPorts {
  readonly clearingConversation: () => boolean
  readonly onActiveWorkChanged: () => void
  readonly preparing: () => boolean
+ readonly taskOwnsWork?: (workId: string) => boolean
  readonly onExecutorState: (state: ExecutorState) => void
  readonly onDiagnostic: (line: string) => void
  resolveSyncResult(event: Extract<EventRecord, {kind: 'handoff'}>): boolean
@@ -483,6 +484,8 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     this.#lastProgressSummary.delete(payload.delegate_id)
     this.#startedDelegates.delete(payload.delegate_id)
     this.publishExecutorState()
+    // Tracked tasks publish only after host verification, never from executor terminal prose.
+    if (this.ports.taskOwnsWork?.(payload.delegate_id)) return
     if (manifest.ops.find(op => op.name === claimed.op)?.sync_result === true
       || (manifest.roles.includes('coding') && claimed.op === 'steer')) return
     if (

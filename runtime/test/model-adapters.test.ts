@@ -272,7 +272,6 @@ test('coding evaluator cannot complete from prose, truncated checks, or another 
   const current=tasks.get(task.id),valid=tasks.evidence(task.id),decision={kind:'complete',evidence_refs:[valid[0]!.ref]}
   for(const invalid of [
    {...valid[0]!,observations:[]},
-   {...valid[0]!,observations_truncated:true},
    {...valid[0]!,outcome:'failed'},
    {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'test failed',exit_code:1})}]},
    {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text_truncated:true}]},
@@ -291,5 +290,29 @@ test('coding evaluator cannot complete from prose, truncated checks, or another 
   assert.deepEqual((JSON.parse(gateway.completions[0]!.prompt) as {evidence:{observations:unknown}[]}).evidence[0]!.observations,valid[0]!.observations)
   const mcp=structuredClone(valid);mcp[0]!.observations[0]!.text=JSON.stringify({type:'mcpToolCall',server:'cua_live',tool:'js',status:'completed',is_error:false,readback:'Counter value: 1'})
   assert.deepEqual(await verifier.evaluateTask(current,mcp,new AbortController().signal),decision)
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('coding evaluator can use complete later checks despite an unrelated truncated observation',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-partial-proof-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Verify the fix',acceptance:['actual check output'],origin_ref:'user:1'})
+  await tasks.bindWork({task_id:task.id,control_revision:0,goal_revision:0},'work','session')
+  const identity={task_id:task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',kind:'tool' as const,stage:'completed' as const,refs:[]}
+  await tasks.appendEvent({...identity,item_id:'docs',text_truncated:true,text:'Truncated tool documentation'},'docs')
+  await tasks.appendEvent({...identity,item_id:'test',text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'1 passed',exit_code:0})},'test')
+  await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'Done'})
+  const current=tasks.get(task.id),evidence=tasks.evidence(task.id),decision={kind:'complete',evidence_refs:[evidence[0]!.ref]}
+  assert.equal(evidence[0]!.observations_truncated,true)
+  const gateway=new ScriptedGateway([],JSON.stringify(decision)),verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'})
+  assert.deepEqual(await verifier.evaluateTask(current,evidence,new AbortController().signal),decision)
+  assert.equal((JSON.parse(gateway.completions[0]!.prompt) as {evidence:{observations_truncated:boolean}[]}).evidence[0]!.observations_truncated,true)
+  const mcp=structuredClone(evidence);mcp[0]!.observations[1]!.text=JSON.stringify({type:'mcpToolCall',server:'cua_live',tool:'js',status:'completed',is_error:false,readback:'Counter value: 2'})
+  assert.deepEqual(await verifier.evaluateTask(current,mcp,new AbortController().signal),decision)
+  for(const incomplete of [evidence,mcp]){
+   incomplete[0]!.observations[1]!.text_truncated=true
+   assert.equal((await verifier.evaluateTask(current,incomplete,new AbortController().signal)).kind,'wait')
+  }
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })

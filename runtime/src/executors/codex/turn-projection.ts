@@ -1,4 +1,4 @@
-import {SensitiveContentPolicy} from '../../memory/sensitivity.js'
+import {SensitiveContentPolicy,SensitivePathPolicy} from '../../memory/sensitivity.js'
 import {isAbsolute,relative,resolve} from 'node:path'
 import type {ExecutorProgress,ExecutorActivity} from '../../core/causal-runtime.js'
 import type {Clock} from '../../core/clock.js'
@@ -16,6 +16,7 @@ import {
 } from './protocol.js'
 
 const observationSensitivity = new SensitiveContentPolicy()
+const artifactPathSensitivity = new SensitivePathPolicy()
 const EAGER_ACTIVITY_INTERVAL_SECONDS = 60
 
 export interface TurnCompletion {
@@ -311,8 +312,9 @@ export class AppServerTurnProjection {
     const refs:string[]=[]
     if(item.type==='fileChange'&&Array.isArray(item.changes)&&this.#workspace)for(const change of item.changes){
       if(!isPlainObject(change)||typeof change.path!=='string')continue
-      const path=relative(this.#workspace,resolve(this.#workspace,change.path))
-      if(path&&!isAbsolute(path)&&path!=='..'&&!path.startsWith('../')&&!/[\p{C}]/u.test(path)&&path.length<=480)refs.push('workspace-file:'+path)
+      const absolutePath=resolve(this.#workspace,change.path)
+      const path=relative(this.#workspace,absolutePath)
+      if(path&&!isAbsolute(path)&&path!=='..'&&!path.startsWith('../')&&!/[\p{C}]/u.test(path)&&path.length<=480&&artifactPathSensitivity.allows(absolutePath)&&observationSensitivity.scrub('artifact_path',path).kind==='clean')refs.push('workspace-file:'+path)
       if(refs.length===128)break
     }
     const sanitized=this.#sanitizePublicText?.(text)??{text,truncated:false};text=sanitized.text

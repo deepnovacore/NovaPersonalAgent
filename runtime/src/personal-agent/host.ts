@@ -569,7 +569,7 @@ export class PersonalAgentHost {
                 this.options.pool.withdraw(item.suggestion_id);
         } await this.#commit(next); }); }
     sourceChanged(change?:SourceChange):Promise<void>{
-        this.profileWarmup.invalidate();this.#notify();
+        this.profileWarmup.invalidate();this.workbenchContext.update([]);this.#notify();
         if(change){const q=z.object({revision:z.number().int().positive(),phase:z.enum(['invalidated','ready'])}).strict().parse(change);if(q.phase==='invalidated')this.#sourcePending.invalidated=Math.max(this.#sourcePending.invalidated,q.revision);else if(!this.#sourceSeen.ready.has(q.revision))this.#sourcePending.ready.add(q.revision)}else this.#sourcePending.legacy=true;
         return this.#drainSourceChanges();
     }

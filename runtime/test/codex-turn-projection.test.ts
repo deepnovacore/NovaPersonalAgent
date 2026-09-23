@@ -450,7 +450,14 @@ test('public file changes retain workspace artifact refs and ignore late started
  projection.bindThread(ephemeralThread(),{workspace:'/workspace'})
  projection.bindTurnResponse({turn:{id:'PRIVATE-TURN'}})
  projection.notification('turn/started',{threadId:'PRIVATE-THREAD',turn:{id:'PRIVATE-TURN'}})
- const change={id:'file',type:'fileChange',status:'completed',changes:[{path:'/workspace/src/login.ts',kind:{type:'update'}},{path:'/private/secrets',kind:{type:'update'}}]}
+ const change={id:'file',type:'fileChange',status:'completed',changes:[
+  {path:'/workspace/src/login.ts',kind:{type:'update'}},
+  {path:'/workspace/.env.local',kind:{type:'update'}},
+  {path:'/workspace/config/api_key.txt',kind:{type:'update'}},
+  {path:'/workspace/certs/server.pem',kind:{type:'update'}},
+  {path:'/workspace/notes/token=private-value.txt',kind:{type:'update'}},
+  {path:'/private/secrets',kind:{type:'update'}},
+ ]}
  item(projection,change)
  projection.notification('item/started',{threadId:'PRIVATE-THREAD',turnId:'PRIVATE-TURN',item:change})
  assert.equal(events.length,1);assert.deepEqual(events[0]?.refs,['workspace-file:src/login.ts'])

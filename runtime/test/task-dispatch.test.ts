@@ -512,6 +512,30 @@ test('unrelated host narration is not evidence for a task sharing the latest use
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
+test('parked voice executor results cannot publish task completion before verification',async()=>{
+ const value=await fixture(),host=new PersonalAgentHost({path:join(await realpath(value.root),'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let native:Awaited<ReturnType<ReturnType<typeof conversationRuntimeFactory>>>|undefined,releaseCodex!:(outcome:TransportOutcome)=>void
+ const emitted:Record<string,unknown>[]=[],qwen=scriptedTaskQwen(n=>qwen.reply('ready:'+n,'Ready'))
+ value.factory.runGate=new Promise(resolve=>{releaseCodex=resolve})
+ try{
+  await host.open();await value.adapter.initialize()
+  const factory=conversationRuntimeFactory({host,memory:()=>undefined,
+   settings:settingsSchema.parse({executors:['codex'],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),
+   codexResource:{mode:'project',adapter:value.adapter,agentDescriptor:CODEX_AGENT_DESCRIPTOR,agentControllerFactory:{create:context=>new CodexAgentController({channel:context.channel,resolveCancelTarget:async()=>null,dispatchPort:{dispatch:request=>context.dispatchPort.dispatch({...request,request:{...request.request,project:'alpha'}})}})},projectView:null,approvalController:null,start:async()=>{},close:async()=>{}},
+   searchTransport:{search:async()=>{throw Error('unused')}},gateway:{complete:async()=>({text:JSON.stringify({kind:'wait',reason:'completion evidence gate',evidence_refs:[]})}),async *stream(){throw Error('unused')}},
+   onAudioTerminal:(id,epoch)=>{(native?.bridgeService as RealtimeService|undefined)?.playbackDone(id,epoch,20)},createVoiceProvider:()=>qwen.adapter,
+  })
+  native=await factory(createConversation('chat','Test',null,'chat:main'),event=>emitted.push(event),'voice')
+  qwen.user('Please implement the fix');await until(()=>(native!.bridgeService as RealtimeService).taskTurnOrigin()!==undefined)
+  const task=await host.tasks.delegate('task',{conversation_id:'chat:main',goal:'Implement the fix',acceptance:['verified observations'],origin_ref:'conversation:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await host.tasks.setRoute(fence,'codex');await host.continueTask(host.tasks.continuationContext(fence),'Implement the fix')
+  await until(()=>value.factory.transports[0]?.workOrders.length===1);await native.parkVoice?.();releaseCodex(COMPLETE)
+  await until(()=>host.tasks.get(task.id).waiting_reason==='completion evidence gate')
+  assert.equal(host.tasks.get(task.id).phase,'waiting');assert.equal(emitted.some(event=>event.type==='conversation.completed'),false)
+  assert.equal(host.conversationSnapshot().messages.some(message=>message.turn_id?.startsWith('task:verified:')),false)
+ }finally{releaseCodex(COMPLETE);await native?.close();await host.close();await value.adapter.close();await rm(value.root,{recursive:true,force:true})}
+})
+
 test('model declare and dispatch in one foreground turn admit exactly one coding attempt',async()=>{
  for(const mode of ['text','voice'] as const){
  const value=await fixture(),host=new PersonalAgentHost({path:join(await realpath(value.root),'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})

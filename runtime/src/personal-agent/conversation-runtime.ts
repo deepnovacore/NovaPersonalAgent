@@ -149,7 +149,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     }
    },
   })
-  const unsubscribeProgress=core.runtime.observe((event,current)=>{if(current===false)return;refreshCodingTarget();const projected=projectExecutorEvent(event,core.runtime,channel=>graph.service.agentNameForChannel(channel));if(!projected)return;void options.host.rememberWorkOwner(projected.progress.delegate_id,conversation.id).catch(()=>{ /* host projection failure */ });options.onExecutorProgress?.(projected.progress,projected.result);if(mode==='voice'&&!voiceEnabled&&projected.result)emit({type:'conversation.completed',role:'assistant',text:projected.result.summary,turn_id:'task:'+projected.result.delegate_id,delivery:'completed',final:true})})
+  const unsubscribeProgress=core.runtime.observe((event,current)=>{if(current===false)return;refreshCodingTarget();const projected=projectExecutorEvent(event,core.runtime,channel=>graph.service.agentNameForChannel(channel));if(!projected)return;void options.host.rememberWorkOwner(projected.progress.delegate_id,conversation.id).catch(()=>{ /* host projection failure */ });options.onExecutorProgress?.(projected.progress,projected.result);if(mode==='voice'&&!voiceEnabled&&projected.result&&!options.host.tasks.list().some(task=>task.work_ids.includes(projected.result!.delegate_id)))emit({type:'conversation.completed',role:'assistant',text:projected.result.summary,turn_id:'task:'+projected.result.delegate_id,delivery:'completed',final:true})})
   projectConfirmation?.setBackground(options.host.presentationMode==='background')
   let presentationPaused=false
   const unsubscribePresentation=options.host.subscribePresentation(async(mode,seen)=>{

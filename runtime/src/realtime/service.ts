@@ -437,6 +437,7 @@ export class RealtimeService {
 
     this.#projection = new ProviderProjection({
       session: this.session, runtime: this.#runtime, clock: this.#clock, coding: this.#coding,
+      ...(options.taskHost ? {taskOwnsWork: (workId: string) => options.taskHost!.tasks.list().some(task => task.work_ids.includes(workId))} : {}),
       codingProgressNarration: this.#codingProgressNarration,
       generatePlan: options.intake?.settings.generate_plan !== false, telemetry: this.#telemetry,
       idFactory: this.#idFactory,

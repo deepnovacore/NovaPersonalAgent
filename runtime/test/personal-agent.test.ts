@@ -474,3 +474,15 @@ test('authorized local excerpts seed interest drafts as inferred context and rev
  host.setSources({list:()=>[],contextEntries:()=>available?[{id:'source:document',version:'v1',content:'Product design notes'}]:[],command:()=>Promise.resolve({})});
  try{await host.open();await host.profileWarmup.refresh();assert.equal(calls,1);assert.equal(host.profileWarmup.snapshot().draft?.about,null);available=false;await host.sourceChanged();assert.equal(host.profileWarmup.snapshot().draft,null)}finally{await host.close();await f.close()}
 })
+
+test('source invalidation hides generated cards even when memory refresh fails',async()=>{
+ const f=await fixture();await f.host.close();let available=true
+ const host=new PersonalAgentHost({...f.host.options,generateContext:()=>Promise.resolve({cards:[{tab:'todos',title:'Review design',body:'Suggested from a local document.',refs:[{entry_id:'source:document',version:'v1'}]}]})})
+ host.setSources({list:()=>[],contextEntries:()=>available?[{id:'source:document',version:'v1',content:'Product design notes'}]:[],command:()=>Promise.resolve({})})
+ try{
+  await host.open();await host.workbenchContext.refresh();assert.equal(host.snapshot().workbench_context.cards.length,1)
+  available=false;host.refreshMemory=()=>Promise.reject(Error('temporary_refresh_failure'))
+  await assert.rejects(host.sourceChanged(),/temporary_refresh_failure/)
+  assert.equal(host.snapshot().workbench_context.cards.length,0)
+ }finally{await host.close();await f.close()}
+})
