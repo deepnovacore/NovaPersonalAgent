@@ -30,6 +30,40 @@ test('knowledge service ingests, retrieves evidence and emits only safe host sta
   } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
 
+test('syncFile reports bounded document, embedding and store failures without losing prior index', async () => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-codes-'))
+  const file = join(directory, 'manual.md'), unsupported = join(directory, 'manual.bin')
+  const store = new KnowledgeStoreClient({path: join(directory, 'db', 'knowledge.sqlite')})
+  let failEmbedding = false, failStore = false
+  const replace = store.replaceSource.bind(store)
+  store.replaceSource = async input => {if (failStore) throw Error('store credential=private-value'); await replace(input)}
+  const service = new KnowledgeService({store, embedding: {id: 'fake-v1', dims: 2, embed: texts => failEmbedding
+    ? Promise.reject(Error('embedding credential=private-value'))
+    : Promise.resolve(texts.map(() => new Float32Array([1, 0])))}})
+  const sync = (path: string, id?: string) => service.syncFile(path, directory, new AbortController().signal, id,
+    {revision: 1, scope_revision: 0, extraction_provider: 'fake-v1', embedding_provider: 'fake-v1'})
+  try {
+    await service.open()
+    await writeFile(unsupported, 'Unsupported data')
+    await assert.rejects(sync(unsupported), /^Error: unsupported_file$/u)
+    const secret = 'token=credential-value-123456789'
+    await writeFile(file, secret)
+    await assert.rejects(sync(file), /^Error: screening_rejected$/u)
+    await writeFile(file, 'Original durable text')
+    const before = await sync(file)
+    const fingerprint = (await service.listSources())[0]!.fingerprint
+    await writeFile(file, 'Replacement text')
+    failEmbedding = true
+    await assert.rejects(sync(file, before.id), /^Error: embedding_failed$/u)
+    assert.equal((await service.listSources())[0]!.fingerprint, fingerprint)
+    failEmbedding = false; failStore = true
+    await assert.rejects(sync(file, before.id), /^Error: store_failed$/u)
+    assert.equal((await service.listSources())[0]!.fingerprint, fingerprint)
+    const status = JSON.stringify(await service.handle('knowledge.status', {}))
+    assert.ok(!status.includes(secret) && !status.includes('private-value'))
+  } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
+})
+
 test('remove while reindex embedding waits cannot resurrect a source', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-race-'))
   const file = join(directory, 'manual.md')
@@ -73,13 +107,13 @@ test('failed reindex records a safe failure and preserves the prior source and c
     await writeFile(file, 'Replacement must not overwrite durable evidence')
     fail = true
 
-    assert.deepEqual(await service.handle('knowledge.reindex', {id: before.id, consent: true}), {error: 'ingest_failed', id: before.id})
+    assert.deepEqual(await service.handle('knowledge.reindex', {id: before.id, consent: true}), {error: 'embedding_failed', id: before.id})
     assert.equal((await service.listSources())[0]!.fingerprint, before.fingerprint)
     assert.deepEqual(await service.getChunk(hit.locator), {
       status: 'ok', text: 'Original durable evidence', title: 'manual.md', heading_path: 'manual.md', source_id: before.id,
     })
     const status = await service.handle('knowledge.status', {}) as {readonly jobs: readonly {readonly source_id: string; readonly state: string; readonly error_code: string | null}[]}
-    assert.ok(status.jobs.some(job => job.source_id === before.id && job.state === 'failed' && job.error_code === 'ingest_failed'))
+    assert.ok(status.jobs.some(job => job.source_id === before.id && job.state === 'failed' && job.error_code === 'embedding_failed'))
     assert.ok(!JSON.stringify(status).includes('private-value'))
   } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })

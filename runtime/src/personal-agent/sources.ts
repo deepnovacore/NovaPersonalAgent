@@ -12,6 +12,7 @@ import {basename, parse, dirname, extname, isAbsolute, join, relative, sep} from
 import {z} from 'zod'
 import {preparePrivateDatabasePath} from '../storage/private-database.js'
 import {SensitivePathPolicy} from '../memory/sensitivity.js'
+import {readKnowledgeFile} from '../knowledge/documents.js'
 import type {KnowledgeService} from '../knowledge/service.js'
 
 export const SOURCE_EXCLUDES = ['.git', '.worktrees', '.codex', '.claude', 'node_modules', 'dist', 'build', 'target', '.cache', '__pycache__', '.venv', 'venv', 'Library', 'Browser', 'Chrome', 'Chromium', 'Firefox', 'Safari'] as const
@@ -34,7 +35,7 @@ const snapshotSchema = z.object({
 }).strict()
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
-  evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
+  evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), checked_at: z.number().optional(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
 const walkFileSchema=z.object({path:pathSchema,size:z.number().nonnegative(),mtime:z.number(),unit:pathSchema,attempts:z.number().int().nonnegative().optional(),eligible_at:z.number().optional(),reason:z.enum(['body_budget','retry']).optional()}).strict()
 const deferredFileSchema=walkFileSchema.extend({eligible_at:z.number().default(0),attempts:z.number().int().nonnegative().default(0),reason:z.enum(['body_budget','retry']).default('retry')}).strict()
 const directoryLedgerSchema=z.object({path:pathSchema,unit:pathSchema.optional(),generation:z.number().int().nonnegative(),status:z.enum(['queued','done','partial']),identity:z.object({dev:z.string(),ino:z.string(),mtimeNs:z.string()}).strict().optional(),eligible_at:z.number().optional(),attempts:z.number().int().nonnegative().default(0)}).strict()
@@ -57,7 +58,7 @@ function balanced<T extends {path: string; unit?: string | undefined}>(files: T[
   return interleave(groups.values(), files.length)
 }
 const refFor = (file: SourceRecord['files'][number]) => `file:${file.id}:${file.fingerprint}`
-const errorCode = (error: unknown) => error instanceof Error && /^(?:knowledge_busy|ingest_failed|source_busy)$/u.test(error.message) ? error.message : 'source_unavailable'
+const errorCode = (error: unknown) => error instanceof Error && /^(?:screening_rejected|unsupported_file|file_changed|file_unavailable|embedding_failed|store_failed|knowledge_busy|ingest_failed|source_busy)$/u.test(error.message) ? error.message : 'source_unavailable'
 function isAutoHiddenPath(root: string, path: string, selected: readonly string[] = []): boolean {
   const parts = relative(root, path).split(sep)
   if (parts.includes('.git')) return true
@@ -101,6 +102,7 @@ export interface LocalDirectorySourceOptions {
   readonly directorySafetyCap?: number
   /** Testable metadata stat budget; production defaults to 20,000 per batch. */
   readonly metadataStatBudget?: number
+  readonly contentRecheckMs?: number
   readonly onMetadataStat?: () => void
   readonly path: string
   readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'>
@@ -361,6 +363,7 @@ export class LocalDirectorySources {
     let turns=0
     let metadataSeen=0
     let statCalls=0
+    let recheckAdmitted=0
     const statBudget=this.#options.metadataStatBudget??20_000
     const yielded=new Set<string>()
     const cursors=walk.cursors
@@ -406,7 +409,10 @@ export class LocalDirectorySources {
             this.#options.onMetadataStat?.()
             if(!stat.isFile()||stat.isSymbolicLink())return
             const prior=knownFiles.get(path)
-            if(prior?.size===stat.size&&prior.mtime===stat.mtimeMs)return
+            if(prior?.size===stat.size&&prior.mtime===stat.mtimeMs){
+              if((prior.checked_at??0)+(this.#options.contentRecheckMs??300_000)>Date.now()||recheckAdmitted>=4)return
+              recheckAdmitted++
+            }
             walk.pending.push({path,size:stat.size,mtime:stat.mtimeMs,unit:directory.unit??computerUnit(record.view.path,path)})
             pendingPaths.add(path);admitted++
           }
@@ -529,6 +535,7 @@ export class LocalDirectorySources {
         return true
       })
       const selectedPaths = new Set(selected.map(file => file.path))
+      let rechecks=0
       // Budgeting must not keep a changed, no-longer-selected version authoritative.
       for (const file of files) {
         const previous = record.files.find(old => old.path === file.path)
@@ -540,7 +547,16 @@ export class LocalDirectorySources {
         signal.throwIfAborted()
         const previous = record.files.find(old => old.path === file.path)
         if (previous) previous.unit = file.unit
-        if (previous?.valid && previous.mtime === file.mtime && previous.size === file.size && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) {settlePending(record,file.path);continue}
+        if (previous?.valid && previous.mtime === file.mtime && previous.size === file.size && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) {
+          if ((previous.checked_at??0)+(this.#options.contentRecheckMs??300_000)>Date.now() || rechecks++>=4) {settlePending(record,file.path);continue}
+          const checked = await readKnowledgeFile(file.path, signal, view.path).catch(() => null)
+          if (checked?.fingerprint === previous.fingerprint) {
+            previous.checked_at = Date.now()
+            settlePending(record,file.path)
+            await this.#save()
+            continue
+          }
+        }
         if (previous?.valid) {
           previous.valid = false
           await this.#save()
@@ -548,20 +564,21 @@ export class LocalDirectorySources {
         if (previous) {
           // Retry propagation after interruption before accepting a replacement version.
           await this.#invalidateFile(previous)
-          if (previous.owned) {await this.#options.knowledge.handle('knowledge.remove', {id: previous.id}); known.delete(file.path)}
+          // The owned knowledge index remains until a replacement is committed.
         }
-        if (file.size > 10 * 1024 * 1024 || file.size === 0) {skip('file_size');settlePending(record,file.path);continue}
-        if(file.size>view.max_bytes){skip('body_budget');settlePending(record,file.path);continue}
-        if (view.read >= view.max_files || bytes + file.size > view.max_bytes) {skip('body_budget');deferPending(record,file,'body_budget',Date.now()+60_000);continue}
+        const discardStaleIndex = async () => {if (previous?.owned) {await this.#options.knowledge.handle('knowledge.remove', {id: previous.id}); known.delete(file.path)}}
+        if (file.size > 10 * 1024 * 1024 || file.size === 0) {await discardStaleIndex();skip('file_size');settlePending(record,file.path);continue}
+        if(file.size>view.max_bytes){await discardStaleIndex();skip('body_budget');settlePending(record,file.path);continue}
+        if (view.read >= view.max_files || bytes + file.size > view.max_bytes) {await discardStaleIndex();skip('body_budget');deferPending(record,file,'body_budget',Date.now()+60_000);continue}
         if (record.files.length >= 20000 && !previous) {skip('index_limit');settlePending(record,file.path);continue}
         try {
-          if (await realpath(file.path) !== file.path) {skip('changed_path');settlePending(record,file.path);continue}
+          if (await realpath(file.path) !== file.path) {await discardStaleIndex();skip('changed_path');settlePending(record,file.path);continue}
           record.pending = {path: file.path, size: file.size, mtime: file.mtime, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
           await this.#save()
           const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent)
           const indexed = (await this.#options.knowledge.listSources()).find(item => item.id === result.id)
           if (!indexed) throw new Error('ingest_failed')
-          const tracked = {...file, id: result.id, fingerprint: indexed.fingerprint, owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
+          const tracked = {...file, id: result.id, fingerprint: indexed.fingerprint, checked_at: Date.now(), owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
           record.files = record.files.filter(old => old.path !== file.path); record.files.push(tracked); record.pending = null
           settlePending(record,file.path)
           bytes += file.size; view.read++
@@ -574,7 +591,7 @@ export class LocalDirectorySources {
           const code=errorCode(error)
           currentReadFailure=true
           if (view.failures.length < 50) view.failures.push({path: relative(view.path, file.path), code})
-          if(record.walk&&['knowledge_busy','source_busy','ingest_failed','source_unavailable'].includes(code)&&(file.attempts??0)<5){const attempts=(file.attempts??0)+1;deferPending(record,file,'retry',Date.now()+Math.min(6*60*60_000,30_000*2**attempts))}
+          if(record.walk&&['knowledge_busy','source_busy','ingest_failed','source_unavailable','file_changed','file_unavailable','embedding_failed','store_failed'].includes(code)&&(file.attempts??0)<5){const attempts=(file.attempts??0)+1;deferPending(record,file,'retry',Date.now()+Math.min(6*60*60_000,30_000*2**attempts))}
           if (code === 'knowledge_busy') break
         }
       }
@@ -609,12 +626,14 @@ export class LocalDirectorySources {
   async #recoverPending(record: SourceRecord): Promise<void> {
     const pending = record.pending
     if (!pending) return
-    const indexed = (await this.#options.knowledge.listSources()).find(item => item.locator === pending.path)
+    const indexed = (await this.#options.knowledge.listSources()).filter(item => item.locator === pending.path)
+      .sort((a,b) => b.updated_at-a.updated_at)[0]
     if (indexed && indexed.updated_at !== pending.previous_updated_at) {
       const previous = record.files.find(item => item.path === pending.path)
       if (previous && previous.fingerprint !== indexed.fingerprint) {
         await this.#invalidateFile(previous)
       }
+      if (previous?.owned && previous.id !== indexed.id) await this.#options.knowledge.handle('knowledge.remove', {id: previous.id})
       record.files = record.files.filter(item => item.path !== pending.path)
       record.files.push({path: pending.path, size: pending.size, mtime: pending.mtime, owned: pending.owned, id: indexed.id, fingerprint: indexed.fingerprint, valid: true, excerpt: null, observed: false, observation_ref: randomUUID()})
     }

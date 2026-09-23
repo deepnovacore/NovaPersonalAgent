@@ -4,7 +4,7 @@ import {opendir, realpath} from 'node:fs/promises'
 import {join} from 'node:path'
 import {z} from 'zod'
 import {SensitivePathPolicy} from '../memory/sensitivity.js'
-import {chunkKnowledgeText, fetchKnowledgeUrl, readKnowledgeFile, knowledgeExcerpt} from './documents.js'
+import {chunkKnowledgeText, fetchKnowledgeUrl, readKnowledgeFile, knowledgeExcerpt, KnowledgeDocumentFailure} from './documents.js'
 import type {EmbeddingProvider} from './embeddings.js'
 import type {KnowledgeStoreClient} from './store-client.js'
 import type {KnowledgeSource} from './types.js'
@@ -22,6 +22,16 @@ export interface KnowledgeEvidenceLedger {
 const idSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u)
 const ingestSchema = z.object({kind: z.enum(['file', 'url', 'folder']), locator: z.string().min(1).max(4096), consent: z.literal(true)}).strict()
 const failure = (code: string): Error => new Error(code)
+function ingestionCode(cause: unknown, stage: 'read' | 'evidence' | 'embedding' | 'store'): string {
+  if (cause instanceof KnowledgeDocumentFailure) {
+    if (['sensitive_content', 'path_denied'].includes(cause.code)) return 'screening_rejected'
+    if (['unsupported_mime', 'invalid_file', 'file_too_large', 'empty_text', 'invalid_text', 'parse_failed', 'parse_timeout'].includes(cause.code)) return 'unsupported_file'
+    if (cause.code === 'file_changed') return 'file_changed'
+    if (cause.code === 'file_unavailable') return 'file_unavailable'
+  }
+  if (cause instanceof Error && cause.message === 'knowledge_busy') return 'knowledge_busy'
+  return stage === 'embedding' ? 'embedding_failed' : stage === 'evidence' || stage === 'store' ? 'store_failed' : 'ingest_failed'
+}
 
 /** Host-only mutations; all public model surfaces receive read-only evidence. */
 export class KnowledgeService {
@@ -126,16 +136,21 @@ export class KnowledgeService {
     const cancel = () => active.abort.abort()
     signal.addEventListener('abort', cancel, {once: true})
     try {
-      let old = (await this.#store.listSources()).find(source => source.locator === locator)
+      const old = (await this.#store.listSources()).find(source => source.locator === locator)
       signal.throwIfAborted()
       if (sourceId !== undefined && this.#ledger) {
         if (old && old.id !== sourceId) throw failure('source_changed')
-        if (old) {await this.#ledger.remove(`knowledge:${old.id}`);await this.#store.removeSource(old.id)}
-        active.id = randomUUID(); old = undefined
+        // Build under a fresh ID. The old index stays queryable if reading,
+        // embedding, or the atomic replacement fails.
+        active.id = randomUUID()
       } else if (old !== undefined) active.id = old.id
       let excerpt = ''
       const result = await this.#index('folder_child', locator, active, old, text => {excerpt = knowledgeExcerpt(text)})
       if ('error' in result) throw failure(result.error)
+      if (old && old.id !== active.id) {
+        await this.#ledger?.remove(`knowledge:${old.id}`)
+        await this.#store.removeSource(old.id)
+      }
       const evidence_ids = (await this.#store.listChunks(active.id, 0)).flatMap(chunk => chunk.evidence_id ? [chunk.evidence_id] : []).slice(0, 2)
       return {id: active.id, excerpt, ...(evidence_ids.length ? {evidence_ids} : {})}
     } finally {
@@ -196,15 +211,19 @@ export class KnowledgeService {
     const signal = AbortSignal.any([active.abort.signal, this.#stop.signal,
       ...(this.#folderSignal === undefined ? [] : [this.#folderSignal]), AbortSignal.timeout(120000)])
     const job = {id: randomUUID(), source_id: active.id, updated_at: Date.now(), error_code: null}
+    let stage: 'read' | 'evidence' | 'embedding' | 'store' = 'store'
+    let committed = false
     try {
       signal.throwIfAborted()
       await this.#store.recordJob({...job, state: 'running'})
+      stage = 'read'
       const document = await (kind === 'url' ? fetchKnowledgeUrl(locator, signal) : readKnowledgeFile(locator, signal, active.root))
       signal.throwIfAborted()
       if (old === undefined && (await this.#store.listSources()).some(value => value.locator === document.locator)) throw failure('source_exists')
       const chunks = chunkKnowledgeText(document.text)
       const processingConsent=active.processingConsent??(active.processingAuthorized?this.#ledger?.processingGrant?.(true):undefined)
       const evidenceIds: (string | undefined)[] = []
+      stage = 'evidence'
       for (const [ordinal, chunk] of chunks.entries()) {
         signal.throwIfAborted()
         const evidence = await this.#ledger?.record({sourceId: `knowledge:${active.id}`, locator: `${document.locator}#chunk=${ordinal}`, text: chunk.text, observedAt: new Date().toISOString(), kind: 'file', embeddingConsent: active.processingAuthorized===true||Boolean(processingConsent?.embedding_provider),...(processingConsent?{processingConsent}:{})})
@@ -213,6 +232,7 @@ export class KnowledgeService {
       signal.throwIfAborted()
       const allowed=async()=>{if(this.#ledger)return evidenceIds.length>0&&(await Promise.all(evidenceIds.map(async id=>id?await (this.#ledger?.canProcess?.(id,'embedding')??Promise.resolve(false)):false))).every(Boolean);return active.processingAuthorized===true||processingConsent?.embedding_provider===this.#embedding.id}
       const stamp=this.#ledger?await this.#ledger.processingStamp?.(evidenceIds.filter((id):id is string=>id!==undefined))??null:'standalone'
+      stage = 'embedding'
       const vectors = stamp!==null&&await allowed()?await this.#embedding.embed(chunks.map(chunk => chunk.text), signal):null
       signal.throwIfAborted()
       if (vectors!==null&&vectors.length !== chunks.length) throw failure('embedding_invalid_result')
@@ -220,6 +240,7 @@ export class KnowledgeService {
       const now = Date.now()
       const title = [...document.title].slice(0, 256).join('')
       // No await between this fence and enqueueing the atomic replacement. Remove enqueues after it.
+      stage = 'store'
       await this.#store.replaceSource({
         source: {id: active.id, title, kind, locator: document.locator, mime: document.mime,
           fingerprint: document.fingerprint, bytes: document.bytes, created_at: old?.created_at ?? now, updated_at: now, status: 'ready'},
@@ -229,11 +250,13 @@ export class KnowledgeService {
           ...(evidenceIds[index] === undefined ? {} : {evidence_id: evidenceIds[index]}),
           heading_path: [...(chunk.heading_path || title)].slice(0, 256).join(''), vector: keepVectors&&vectors?[...vectors[index]!]:null})),
       })
+      committed = true
       await this.#store.recordJob({...job, updated_at: Date.now(), state: 'complete'})
       onIndexed?.(document.text)
       return {ok: true, id: active.id}
-    } catch {
-      const code = signal.aborted ? 'ingest_cancelled' : 'ingest_failed'
+    } catch (cause) {
+      const code = signal.aborted ? 'ingest_cancelled' : ingestionCode(cause, stage)
+      if (!committed && old?.id !== active.id) await this.#ledger?.remove(`knowledge:${active.id}`).catch(() => undefined)
       if (!this.#stop.signal.aborted) await this.#store.recordJob({...job, updated_at: Date.now(), state: 'failed', error_code: code}).catch(() => undefined)
       return {error: code, id: active.id}
     }

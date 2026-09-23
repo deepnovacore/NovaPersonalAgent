@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {execFileSync} from 'node:child_process'
 import {VoiceMem} from 'voicemem'
 import {VersionedMemory} from '../src/voicemem/versioned-memory.js'
-import {mkdtemp, mkdir, writeFile, rm, realpath, symlink, rename, readFile, utimes} from 'node:fs/promises'
+import {mkdtemp, mkdir, writeFile, rm, realpath, symlink, rename, readFile, utimes, stat} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import test from 'node:test'
@@ -12,7 +12,7 @@ import {scanDirectory} from '../src/personal-agent/source-walk.js'
 import {KnowledgeService} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
 
-async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string|null>, directorySafetyCap?:number) {
+async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string|null>, directorySafetyCap?:number, contentRecheckMs?:number) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-directory-'))
   const folder = join(root, 'allowed'); await mkdir(folder)
   let failEmbedding = false, failInvalidation = false, failConsent=false
@@ -26,7 +26,7 @@ async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string
   let memoryAvailable = true
   const invalidated: string[] = []
   const observations: {content: string; source_ref: {ref: string}}[] = []
-  const options = {computerRoot:folder,...(priorityWorkspace?{priorityWorkspace}:{}),...(directorySafetyCap?{directorySafetyCap}:{}),processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
+  const options = {computerRoot:folder,...(priorityWorkspace?{priorityWorkspace}:{}),...(directorySafetyCap?{directorySafetyCap}:{}),...(contentRecheckMs!==undefined?{contentRecheckMs}:{}),processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
     onProcessingConsent:()=>failConsent?Promise.reject(Error('grant_write_failed')):Promise.resolve(),
     onObserve: async (value: {content: string; source_ref: {type:'file'; ref: string; observed_at:string}; topic?:string}) => {
       if (!memoryAvailable) throw new Error('memory_unavailable')
@@ -216,6 +216,20 @@ test('current read failures report partial health without making source state er
  }finally{await f.close()}
 })
 
+test('screening rejection is a local bounded diagnostic and never publishes file body', async () => {
+  const f = await fixture()
+  try {
+    const secret = 'token=credential-value-123456789'
+    await writeFile(join(f.folder, 'notes.md'), secret)
+    await f.sources.command('sources.add', {path: f.folder, consent: true})
+    const source = f.sources.list()[0]!
+    assert.equal(source.failures[0]!.code, 'screening_rejected')
+    assert.equal(source.state, 'connected')
+    assert.deepEqual(f.sources.contextEntries(), [])
+    assert.ok(!JSON.stringify(source).includes(secret))
+  } finally {await f.close()}
+})
+
 test('successful retry clears current degraded health while retaining read failure diagnostics',async()=>{
  const f=await fixture()
  try{
@@ -333,7 +347,7 @@ test('scoped ingestion rejects a replaced directory resolving outside the grant'
     await mkdir(join(f.root, 'other'))
     await writeFile(join(f.root, 'other', 'readme.md'), 'Must not upload outside grant')
     await symlink(join(f.root, 'other'), join(f.folder, 'link'))
-    await assert.rejects(f.knowledge.syncFile(join(f.folder, 'link', 'readme.md'), f.folder, new AbortController().signal), /path_denied|ingest_failed/)
+    await assert.rejects(f.knowledge.syncFile(join(f.folder, 'link', 'readme.md'), f.folder, new AbortController().signal), /screening_rejected|ingest_failed/)
     assert.equal((await f.knowledge.listSources()).length, 0)
   } finally {await f.close()}
 })
@@ -354,6 +368,35 @@ test('failed refresh retries the changed file rather than blessing stale index m
     await f.sources.command('sources.sync', {id: source.id})
     assert.notEqual((await f.knowledge.listSources())[0]!.fingerprint, before.fingerprint)
     assert.equal((await f.knowledge.recall('Updated', 1))[0]!.text, 'Updated source after an interrupted synchronization')
+  } finally {await f.close()}
+})
+
+test('bounded recheck detects same-size same-mtime replacement and invalidates old version first', async () => {
+  const f = await fixture(false, undefined, undefined, 0)
+  try {
+    const path = join(f.folder, 'notes.md'), original = 'Alpha project note', replacement = 'Bravo project note'
+    await writeFile(path, original)
+    const stableTime = new Date(Math.floor(Date.now() / 1000) * 1000)
+    await utimes(path, stableTime, stableTime)
+    await f.sources.command('sources.add', {path: f.folder, consent: true})
+    const source = f.sources.list()[0]!, oldRef = f.sources.evidenceSnapshot()[0]!.ref
+    await f.sources.command('sources.sync', {id: source.id})
+    assert.equal(f.sources.evidenceSnapshot()[0]!.ref, oldRef)
+    assert.ok(!f.invalidated.includes(oldRef))
+    const before = await stat(path)
+    await writeFile(path, replacement)
+    await utimes(path, before.atime, before.mtime)
+    const after = await stat(path)
+    assert.equal(after.size, before.size)
+    assert.equal(after.mtimeMs, before.mtimeMs)
+    await f.sources.command('sources.sync', {id: source.id})
+    assert.equal(f.sources.evidence(oldRef), null)
+    assert.ok(f.invalidated.includes(oldRef))
+    const current = f.sources.evidenceSnapshot()
+    assert.equal(current.length, 1)
+    assert.notEqual(current[0]!.ref, oldRef)
+    assert.match(f.sources.contextEntries()[0]!.content, /Bravo/u)
+    assert.ok(!(await f.knowledge.listSources()).some(item => item.fingerprint === oldRef.split(':').at(-1)))
   } finally {await f.close()}
 })
 
