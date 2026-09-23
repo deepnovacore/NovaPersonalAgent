@@ -467,6 +467,22 @@ test('integrated launch injects all active public settings and only its platform
   }
 })
 
+test('StepFun launch selects its model and credential without leaking inactive provider keys', () => {
+  const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN,
+    readyEndpoint: '127.0.0.1:49152', parentEnv: {},
+    settings: {...SETTINGS_V2, integratedProvider: 'stepfun',
+      integratedModel: 'stepaudio-3-realtime-preview', integratedVoice: 'default'},
+    decryptedSecrets: {stepfunApiKey: 'step-key', dashscopeApiKey: 'support-key', arkApiKey: 'unused-key'},
+  })
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER, 'stepfun')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_STEPFUN_REALTIME_MODEL, 'stepaudio-3-realtime-preview')
+  assert.equal(spec.env.NOVA_AUDIO_AGENT_STEPFUN_REALTIME_VOICE, 'default')
+  assert.equal(spec.env.STEPFUN_API_KEY, 'step-key')
+  assert.equal(spec.env.DASHSCOPE_API_KEY, 'support-key')
+  assert.equal('NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL' in spec.env, false)
+  assert.equal('ARK_API_KEY' in spec.env, false)
+})
+
 test('cascaded Qwen launch injects active selectors, remembered model, and Doubao credentials', () => {
   const settings = {
     ...SETTINGS_V2,

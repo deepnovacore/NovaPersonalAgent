@@ -210,6 +210,7 @@ export async function resolveMicrophonePermission({ platform, systemPreferences 
 const API_KEY_PAGES = new Set(['https://bailian.console.aliyun.com/?apiKey=1&tab=model',
   'https://platform.openai.com/api-keys',
   'https://platform.deepseek.com/api_keys',
+  'https://platform.stepfun.com/interface-key',
   'https://console.volcengine.com/ark/apiKey',
   'https://console.volcengine.com/speech/new/setting/apikeys',
   'https://app.tavily.com/',

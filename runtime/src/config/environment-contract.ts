@@ -1,5 +1,5 @@
 export type EnvironmentOwner =
-  | 'core' | 'qwen' | 'ark' | 'deepseek' | 'volcengine' | 'codex' | 'search' | 'camera'
+  | 'core' | 'qwen' | 'stepfun' | 'ark' | 'deepseek' | 'volcengine' | 'codex' | 'search' | 'camera'
   | 'telemetry' | 'host_private'
 
 export interface EnvironmentVariableContract {
@@ -84,6 +84,10 @@ const rows: readonly Row[] = [
   ['NOVA_AUDIO_AGENT_QWEN_REALTIME_URL', 'qwen', false, true, 'never', 'DashScope realtime endpoint', 'Qwen secure realtime endpoint.', 'Qwen 安全实时地址。'],
   ['NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL', 'qwen', false, true, 'never', 'qwen-audio-3.0-realtime-plus', 'Qwen realtime model.', 'Qwen 实时模型。'],
   ['NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE', 'qwen', false, true, 'never', 'longanqian', 'Qwen realtime voice.', 'Qwen 实时音色。'],
+  ['STEPFUN_API_KEY', 'stepfun', true, true, 'when_selected', null, 'StepFun realtime credential.', 'StepFun 实时凭据。'],
+  ['NOVA_AUDIO_AGENT_STEPFUN_REALTIME_URL', 'stepfun', false, true, 'never', 'wss://api.stepfun.com/v1/realtime', 'StepFun secure realtime endpoint.', 'StepFun 安全实时地址。'],
+  ['NOVA_AUDIO_AGENT_STEPFUN_REALTIME_MODEL', 'stepfun', false, true, 'never', 'stepaudio-3-realtime-preview', 'StepFun realtime model.', 'StepFun 实时模型。'],
+  ['NOVA_AUDIO_AGENT_STEPFUN_REALTIME_VOICE', 'stepfun', false, true, 'never', '', 'StepFun realtime voice; empty uses the service default.', 'StepFun 实时音色；留空使用服务默认音色。'],
   ['NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT', 'qwen', false, true, 'never', 'false', 'Allow controlled Guard reconnect.', '允许受控 Guard 重连。'],
   ['NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY', 'qwen', false, true, 'never', 'none', 'Guard history recovery mode.', 'Guard 历史恢复模式。'],
   ['NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS', 'qwen', false, true, 'never', '4', 'Guard history pair count.', 'Guard 历史对话对数。'],

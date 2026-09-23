@@ -67,6 +67,14 @@
       "scope": "Qwen realtime connection and audio provider contract; no business tools."
     },
     {
+      "id": "stepfun",
+      "layer": "provider",
+      "entry": "scripts/live/stepfun.mjs",
+      "requires": [["STEPFUN_API_KEY"]],
+      "timeoutMs": 120000,
+      "scope": "StepAudio 3 realtime connection and audio provider contract; no business tools."
+    },
+    {
       "id": "qwen-surrogate",
       "layer": "model-planning",
       "entry": "scripts/live/qwen-surrogate.mjs",

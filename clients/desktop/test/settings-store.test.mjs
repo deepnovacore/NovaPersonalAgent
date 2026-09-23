@@ -24,6 +24,7 @@ import {
 const ALL_SECRET_KEYS = Object.freeze([
   'composioApiKey',
   'dashscopeApiKey',
+  'stepfunApiKey',
   'tavilyApiKey',
   'openrouterApiKey',
   'modelApiKey',
@@ -604,6 +605,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   assert.deepEqual(secretsPresent(settings), {
     composioApiKey: false,
     dashscopeApiKey: true,
+    stepfunApiKey: false,
     tavilyApiKey: false,
     openrouterApiKey: false,
     modelApiKey: false,
@@ -617,6 +619,7 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
   assert.deepEqual(secretsPresent(undefined), {
     composioApiKey: false,
     dashscopeApiKey: false,
+    stepfunApiKey: false,
     tavilyApiKey: false,
     openrouterApiKey: false,
     modelApiKey: false,

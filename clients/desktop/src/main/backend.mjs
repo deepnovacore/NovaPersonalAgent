@@ -55,6 +55,7 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 export const SECRET_ENV_MAP = Object.freeze({
   composioApiKey: 'COMPOSIO_API_KEY',
   dashscopeApiKey: 'DASHSCOPE_API_KEY',
+  stepfunApiKey: 'STEPFUN_API_KEY',
   tavilyApiKey: 'TAVILY_API_KEY',
   openrouterApiKey: 'OPENROUTER_API_KEY',
   modelApiKey: 'NOVA_AUDIO_AGENT_MODEL_API_KEY',
@@ -305,13 +306,14 @@ export function backendLaunchSpec({
         ?? SETTINGS_DEFAULTS.cascadedTtsVoice,
     })
   } else {
+    const stepfun = settings?.integratedProvider === 'stepfun'
     Object.assign(env, {
       NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER: settings?.integratedProvider
         ?? SETTINGS_DEFAULTS.integratedProvider,
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL: settings?.integratedModel
-        ?? SETTINGS_DEFAULTS.integratedModel,
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE: settings?.integratedVoice
-        ?? SETTINGS_DEFAULTS.integratedVoice,
+      [stepfun ? 'NOVA_AUDIO_AGENT_STEPFUN_REALTIME_MODEL' : 'NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL']:
+        settings?.integratedModel ?? SETTINGS_DEFAULTS.integratedModel,
+      [stepfun ? 'NOVA_AUDIO_AGENT_STEPFUN_REALTIME_VOICE' : 'NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE']:
+        settings?.integratedVoice ?? SETTINGS_DEFAULTS.integratedVoice,
     })
   }
   // The inherited fd-3 readiness pipe is gone: stdio stops at stderr and the
@@ -651,7 +653,8 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
       // big-model key; Main does not synthesize a duplicate secret value.
       activeSecretKeys.add('doubaoAsrApiKey')
     } else {
-      activeSecretKeys.add('dashscopeApiKey')
+      activeSecretKeys.add(settings?.integratedProvider === 'stepfun' ? 'stepfunApiKey' : 'dashscopeApiKey')
+      if (settings?.integratedProvider === 'stepfun') activeSecretKeys.add('dashscopeApiKey')
     }
     const search = document?.modules?.search
     const provider = parentEnv.NOVA_AUDIO_AGENT_SEARCH_PROVIDER?.trim() || search?.provider || 'tavily'

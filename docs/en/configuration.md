@@ -13,6 +13,8 @@ TAVILY_API_KEY=your-tavily-key
 
 Disabling search removes the need for a Tavily key. Cascaded mode defaults to Volcengine recognition, DeepSeek and Volcengine synthesis, requiring `DOUBAO_BIGMODEL_API_KEY` and `DEEPSEEK_API_KEY`. Keep `DASHSCOPE_API_KEY` for supporting models such as personal-memory processing.
 
+For Qwen Audio 3.1, select `qwen-audio-3.1-realtime-plus` and its matching `longanqian_v3.1` voice. StepAudio 3 is a preview integration awaiting live acceptance. To use it, select StepFun and provide `STEPFUN_API_KEY`; Step 3.7 Flash uses the same key for auxiliary chat and vision by default. Local memory embeddings still need a configured embedding service. To use a custom auxiliary gateway, set `NOVA_AUDIO_AGENT_MODEL_API_KEY` and `NOVA_AUDIO_AGENT_MODEL_BASE_URL`.
+
 ## Common options
 
 Set only what you need to change. Keep credentials out of Git.
@@ -22,6 +24,7 @@ Set only what you need to change. Keep credentials out of Git.
 |---|---|---|
 | `NOVA_AUDIO_AGENT_PIPELINE_MODE` | integrated | Product pipeline shape: integrated or cascaded. |
 | `NOVA_AUDIO_AGENT_LANGUAGE` | zh-CN | AI system prompt language: zh-CN or en; desktop supplies its saved preference. |
+| `NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER` | qwen | Integrated realtime provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER` | deepseek | Cascaded LLM provider. |
 | `NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL` | provider default | Cascaded LLM model override. |
 | `NOVA_AUDIO_AGENT_CODEX_APPROVAL_MODE` | ask | Codex approval mode. |
@@ -31,6 +34,7 @@ Set only what you need to change. Keep credentials out of Git.
 | `DASHSCOPE_API_KEY` | None | Qwen realtime credential. |
 | `NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL` | qwen-audio-3.0-realtime-plus | Qwen realtime model. |
 | `NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE` | longanqian | Qwen realtime voice. |
+| `STEPFUN_API_KEY` | None | StepFun realtime credential. |
 | `DEEPSEEK_API_KEY` | None | Official DeepSeek cascaded LLM credential. |
 | `ARK_API_KEY` | None | Ark cascaded LLM credential. |
 | `DOUBAO_ASR_API_KEY` | Doubao big-model key | Volcengine ASR credential override. |
