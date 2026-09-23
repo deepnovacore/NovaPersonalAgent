@@ -394,6 +394,8 @@ test('whole-computer grant resumes batches past the directory overview budget wi
   assert.equal((await f.knowledge.listSources()).length,19)
   assert.equal(f.sources.list()[0]!.scope,'computer')
   assert.equal(f.sources.contextEntries().length,19)
+  assert.equal(f.sources.contextEntries()[0]!.kind,'file')
+  assert.doesNotMatch(f.sources.contextEntries()[0]!.content,/^note-\d+\.md:/u)
   await f.sources.command('sources.consent',{id:grant.id,consent:false});assert.equal(f.sources.contextEntries().length,0)
   await f.reopen()
   assert.equal(f.sources.list()[0]!.scope,'computer')

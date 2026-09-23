@@ -227,7 +227,7 @@ test('Surrogate receives the actual progress trigger, not an unlabelled snapshot
 test('workbench generation includes its schema in the provider-visible prompt',async()=>{
  const gateway=new ScriptedGateway([],JSON.stringify({cards:[]}))
  const surrogate=new GatewaySurrogate({gateway,model:'same',proactivityPreset:'balanced'})
- await surrogate.generateContext([{id:'source:doc',version:'v1',content:'A project document'}],new AbortController().signal)
+ await surrogate.generateContext([{candidate_id:'c1',id:'c1',version:'v1',content:'A project document',tab:'ideas',primaryFileId:'doc',refs:[{entry_id:'source:doc',version:'v1'}],excerpt:'A project document',reason_code:'document_idea',root:'/project',priority:0,mtime_ms:1}],new AbortController().signal)
  const prompt=JSON.parse(gateway.completions[0]!.prompt) as {output_schema:{properties:{cards:unknown}}}
  assert.ok(prompt.output_schema.properties.cards)
 })

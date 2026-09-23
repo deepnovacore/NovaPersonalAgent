@@ -2,6 +2,7 @@ import {homedir} from 'node:os'
 import {processingGrantSchema,type ProcessingGrant} from '../memory-substrate/source-state.js'
 import {interleave} from './sampling.js'
 import {orderComputerRoots,rootActivity} from './source-priority.js'
+import type {ContextInput} from './context-candidates.js'
 import {randomUUID} from 'node:crypto'
 import {acquirePersonalLock} from './store.js'
 import {lstat, readdir, opendir, open, readFile, realpath, rename, rm, writeFile} from 'node:fs/promises'
@@ -87,6 +88,7 @@ export class LocalDirectorySources {
   #active: {id: string; abort: AbortController; done: Promise<void>} | undefined
   #writes: Promise<void> = Promise.resolve()
   #commands: Promise<unknown> = Promise.resolve()
+  #workspacePath:string|null=null
 
   constructor(options: LocalDirectorySourceOptions) {this.#options = options}
   async open(): Promise<void> {
@@ -122,9 +124,9 @@ export class LocalDirectorySources {
     }
     return null
   }
-  contextEntries():{id:string;version:string;content:string}[]{
+  contextEntries():ContextInput[]{
     const expected=this.#options.processingGrant?.(true,1,0)
-    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isAutoHiddenPath(record.view.path,f.path,record.view.priority_dirs))).map(file=>({id:'source:'+file.id,version:file.fingerprint,content:`${relative(record.view.path,file.path)}: ${file.excerpt}`.slice(0,1200)})))
+    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isAutoHiddenPath(record.view.path,f.path,record.view.priority_dirs))).map(file=>({kind:'file' as const,id:'source:'+file.id,version:file.fingerprint,content:file.excerpt!,source_id:record.view.id,file_id:file.id,root:file.unit??record.view.path,rel_path:relative(file.unit??record.view.path,file.path),role:/\.(?:md|markdown|txt|pdf|docx)$/iu.test(file.path)?'document' as const:/\.(?:json|yaml|yml|csv)$/iu.test(file.path)?'config' as const:'code' as const,mtime_ms:file.mtime,priority:record.view.priority_dirs.some(dir=>within(dir,file.path))?3:record.view.scope==='directory'?2:this.#workspacePath&&within(this.#workspacePath,file.path)?2:0})))
   }
   evidenceSnapshot(): {ref: string; summary: string}[] {
     const fingerprints = new Set<string>()
@@ -235,6 +237,7 @@ export class LocalDirectorySources {
     const excluded=new Set([...SOURCE_EXCLUDES,...COMPUTER_EXCLUDES,...record.view.excludes].map(s=>s.toLowerCase()))
     let visited=0
     const workspace=await this.#options.priorityWorkspace?.().then(path=>path&&within(record.view.path,path)?path:null).catch(()=>null)??null
+    this.#workspacePath=workspace
     const activity=new Map<string,Awaited<ReturnType<typeof rootActivity>>>()
     const readsByUnit=new Map<string,number>()
     const deferred=new Set<string>()
