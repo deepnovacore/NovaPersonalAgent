@@ -12,7 +12,7 @@ import {basename, parse, dirname, extname, isAbsolute, join, relative, sep} from
 import {z} from 'zod'
 import {preparePrivateDatabasePath} from '../storage/private-database.js'
 import {SensitivePathPolicy} from '../memory/sensitivity.js'
-import {readKnowledgeFile} from '../knowledge/documents.js'
+import {readKnowledgeFile, KnowledgeDocumentFailure} from '../knowledge/documents.js'
 import type {KnowledgeService} from '../knowledge/service.js'
 
 export const SOURCE_EXCLUDES = ['.git', '.worktrees', '.codex', '.claude', 'node_modules', 'dist', 'build', 'target', '.cache', '__pycache__', '.venv', 'venv', 'Library', 'Browser', 'Chrome', 'Chromium', 'Firefox', 'Safari'] as const
@@ -550,13 +550,21 @@ export class LocalDirectorySources {
         signal.throwIfAborted()
         const previous = record.files.find(old => old.path === file.path)
         if (previous) previous.unit = file.unit
+        const discardStaleIndex = async () => {if (previous?.owned) {await this.#options.knowledge.handle('knowledge.remove', {id: previous.id}); known.delete(file.path)}}
         if (previous?.valid && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) {
           const sameMetadata = previous.mtime === file.mtime && previous.size === file.size
           if (sameMetadata && ((previous.checked_at??0)+(this.#options.contentRecheckMs??300_000)>Date.now() || rechecks++>=4)) {settlePending(record,file.path);continue}
-          const checked = await readKnowledgeFile(file.path, signal, view.path).catch(() => null)
-          if (sameMetadata && checked === null) {
+          let recheckError: unknown
+          const checked = await readKnowledgeFile(file.path, signal, view.path).catch(error => {recheckError=error;return null})
+          signal.throwIfAborted()
+          const terminal = recheckError instanceof KnowledgeDocumentFailure && ['sensitive_content','path_denied','unsupported_mime','invalid_file','file_too_large','empty_text','invalid_text','parse_failed','parse_timeout'].includes(recheckError.code)
+          if (sameMetadata && checked === null && !terminal) {
             settlePending(record,file.path)
-            if (record.walk) deferPending(record,file,'retry',Date.now()+30_000)
+            if ((file.attempts??0)>=5) {
+              previous.valid=false;await this.#save();await this.#invalidateFile(previous);await discardStaleIndex()
+              skip('read_failed');currentReadFailure=true
+              if(view.failures.length<50)view.failures.push({path:relative(view.path,file.path),code:errorCode(recheckError)})
+            } else if (record.walk) deferPending(record,file,'retry',Date.now()+30_000)
             continue
           }
           if (checked?.fingerprint === previous.fingerprint) {
@@ -577,7 +585,6 @@ export class LocalDirectorySources {
           await this.#invalidateFile(previous)
           // The owned knowledge index remains until a replacement is committed.
         }
-        const discardStaleIndex = async () => {if (previous?.owned) {await this.#options.knowledge.handle('knowledge.remove', {id: previous.id}); known.delete(file.path)}}
         if (file.size > 10 * 1024 * 1024 || file.size === 0) {await discardStaleIndex();skip('file_size');settlePending(record,file.path);continue}
         if(file.size>view.max_bytes){await discardStaleIndex();skip('body_budget');settlePending(record,file.path);continue}
         if (view.read >= view.max_files || bytes + file.size > view.max_bytes) {await discardStaleIndex();skip('body_budget');deferPending(record,file,'body_budget',Date.now()+60_000);continue}

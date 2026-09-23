@@ -439,7 +439,7 @@ test('exhausted transient retry retires stale owned knowledge index', async () =
     state.sources[0]!.walk = {queue: [], ledger: [], generation: 1, pending: [{path, size: info.size, mtime: info.mtimeMs, unit: f.folder, attempts: 5}], deferred: []}
     await writeFile(statePath, JSON.stringify(state))
     f.setFail(true)
-    const sources = new LocalDirectorySources({path: statePath, computerRoot: f.folder, knowledge: f.knowledge, pollMs: 0, scanOnOpen: false,
+    const sources = new LocalDirectorySources({path: statePath, computerRoot: f.folder, knowledge: f.knowledge, pollMs: 0, scanOnOpen: false, contentRecheckMs: 0,
       processingGrant: (consent, revision, scope_revision) => ({revision, scope_revision, extraction_provider: consent ? 'test' : null, embedding_provider: consent ? 'test' : null})})
     try {
       await sources.open(); await sources.command('sources.sync', {id})
@@ -464,6 +464,54 @@ test('same-metadata recheck read failure keeps verified evidence available', asy
     await chmod(path, 0o600)
     await f.sources.command('sources.sync', {id})
     assert.equal(f.sources.evidenceSnapshot()[0]!.ref, ref)
+  } finally {await chmod(join(f.folder, 'notes.md'), 0o600).catch(() => undefined); await f.close()}
+})
+
+test('same-size same-mtime screened replacement retires prior index', async () => {
+  const f = await fixture(false, undefined, undefined, 0)
+  try {
+    const path = join(f.folder, 'notes.md'), secret = 'token=credential-value-123456789'
+    await writeFile(path, 'A'.repeat(secret.length))
+    const stableTime = new Date(Math.floor(Date.now() / 1000) * 1000)
+    await utimes(path, stableTime, stableTime)
+    await f.sources.command('sources.add', {path: f.folder, consent: true})
+    const id = f.sources.list()[0]!.id, oldRef = f.sources.evidenceSnapshot()[0]!.ref
+    const before = await stat(path)
+    await writeFile(path, secret)
+    await utimes(path, stableTime, stableTime)
+    const after = await stat(path)
+    assert.equal(after.size, before.size)
+    assert.equal(after.mtimeMs, before.mtimeMs)
+    await f.sources.command('sources.sync', {id})
+    assert.equal(f.sources.evidence(oldRef), null)
+    assert.deepEqual(await f.knowledge.listSources(), [])
+    assert.equal(f.sources.list()[0]!.failures[0]!.code, 'screening_rejected')
+  } finally {await f.close()}
+})
+
+test('persistent same-metadata read failure exhausts the computer retry budget', async () => {
+  const f = await fixture()
+  try {
+    const path = join(f.folder, 'notes.md')
+    await writeFile(path, 'Previously verified computer note')
+    const {id} = await f.sources.command('sources.authorize_computer', {consent: true}) as {id: string}
+    for (let i = 0; i < 3 && !(await f.knowledge.listSources()).length; i++) await f.sources.command('sources.sync', {id})
+    assert.equal((await f.knowledge.listSources()).length, 1)
+    await f.sources.close()
+    const info = await stat(path)
+    await chmod(path, 0o000)
+    const statePath = join(f.root, 'db', 'sources.json')
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as {sources: {walk: unknown}[]}
+    state.sources[0]!.walk = {queue: [], ledger: [], generation: 1, pending: [{path, size: info.size, mtime: info.mtimeMs, unit: f.folder, attempts: 5}], deferred: []}
+    await writeFile(statePath, JSON.stringify(state))
+    const sources = new LocalDirectorySources({path: statePath, computerRoot: f.folder, knowledge: f.knowledge, pollMs: 0, scanOnOpen: false, contentRecheckMs: 0,
+      processingGrant: (consent, revision, scope_revision) => ({revision, scope_revision, extraction_provider: consent ? 'test' : null, embedding_provider: consent ? 'test' : null})})
+    try {
+      await sources.open(); await sources.command('sources.sync', {id})
+      assert.deepEqual(await f.knowledge.listSources(), [])
+      const saved = JSON.parse(await readFile(statePath, 'utf8')) as {sources: {walk: {deferred: unknown[]}}[]}
+      assert.equal(saved.sources[0]!.walk.deferred.length, 0)
+    } finally {await sources.close()}
   } finally {await chmod(join(f.folder, 'notes.md'), 0o600).catch(() => undefined); await f.close()}
 })
 
