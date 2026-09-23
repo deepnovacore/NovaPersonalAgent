@@ -49,6 +49,12 @@ function balanced<T extends {path: string; unit?: string | undefined}>(files: T[
 }
 const refFor = (file: SourceRecord['files'][number]) => `file:${file.id}:${file.fingerprint}`
 const errorCode = (error: unknown) => error instanceof Error && /^(?:knowledge_busy|ingest_failed|source_busy)$/u.test(error.message) ? error.message : 'source_unavailable'
+function isAutoHiddenPath(root: string, path: string, selected: readonly string[] = []): boolean {
+  const parts = relative(root, path).split(sep)
+  if (parts.includes('.git')) return true
+  if (selected.some(value => within(value, path))) return false
+  return parts.some(part => part.startsWith('.'))
+}
 
 export interface LocalDirectorySourceOptions {
   readonly computerRoot?: string
@@ -104,18 +110,18 @@ export class LocalDirectorySources {
   evidence(ref: string) {
     for (const record of this.#records) {
       const file = record.files.find(file => refFor(file) === ref)
-      if (file?.valid && !record.deleting) return {subject_key: `file:${file.id}`, source: {type: 'file' as const, ref}}
+      if (file?.valid && !record.deleting && (record.view.scope !== 'computer' || !isAutoHiddenPath(record.view.path, file.path))) return {subject_key: `file:${file.id}`, source: {type: 'file' as const, ref}}
     }
     return null
   }
   contextEntries():{id:string;version:string;content:string}[]{
     const expected=this.#options.processingGrant?.(true,1,0)
-    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt).map(file=>({id:'source:'+file.id,version:file.fingerprint,content:`${relative(record.view.path,file.path)}: ${file.excerpt}`.slice(0,1200)})))
+    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isAutoHiddenPath(record.view.path,f.path))).map(file=>({id:'source:'+file.id,version:file.fingerprint,content:`${relative(record.view.path,file.path)}: ${file.excerpt}`.slice(0,1200)})))
   }
   evidenceSnapshot(): {ref: string; summary: string}[] {
     const fingerprints = new Set<string>()
     return interleave(this.#records.filter(record => !record.deleting).map(record =>
-      balanced(record.files.filter(file => file.valid), record.view.path).map(file => ({
+      balanced(record.files.filter(file => file.valid && (record.view.scope!=='computer'||!isAutoHiddenPath(record.view.path,file.path))), record.view.path).map(file => ({
         ref: refFor(file), fingerprint: file.fingerprint,
         summary: `已授权本地文件：${relative(record.view.path, file.path).slice(0, 160)}`,
       }))), Infinity).filter(file => {
@@ -202,13 +208,13 @@ export class LocalDirectorySources {
     while(walk.queue.length&&walk.pending.length<16&&visited<20000){
       signal.throwIfAborted();const directory=walk.queue[0]!
       try{
-        if(directory.path!==record.view.path&&relative(record.view.path,directory.path).split(sep).some(part=>excluded.has(part.toLowerCase()))){walk.queue.shift();continue}
+        if(directory.path!==record.view.path&&(isAutoHiddenPath(record.view.path,directory.path)||relative(record.view.path,directory.path).split(sep).some(part=>excluded.has(part.toLowerCase())))){walk.queue.shift();continue}
         if(await realpath(directory.path)!==directory.path){walk.queue.shift();continue}
         const entries=(await readdir(directory.path,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))
         const names=new Set(entries.map(e=>e.name));for(const file of [...record.files])if(dirname(file.path)===directory.path&&!names.has(basename(file.path)))await this.#removeFile(record,file)
         while(directory.offset<entries.length&&walk.pending.length<16&&visited++<20000){
           const entry=entries[directory.offset++]!,path=join(directory.path,entry.name)
-          if(excluded.has(entry.name.toLowerCase())||!policy.allows(path)||entry.isSymbolicLink()){record.view.skipped++;continue}
+          if(isAutoHiddenPath(record.view.path,path)||excluded.has(entry.name.toLowerCase())||!policy.allows(path)||entry.isSymbolicLink()){record.view.skipped++;continue}
           if(entry.isDirectory()){
             if(this.#records.some(r=>r!==record&&within(r.view.path,path)))continue
             if(walk.queue.length>=20000)throw Error('directory_capacity')
@@ -255,6 +261,14 @@ export class LocalDirectorySources {
     let complete = true, visited = 0
     try {
       if (await realpath(view.path) !== view.path) throw new Error('path_denied')
+      if(view.scope==='computer'){
+        for(const previous of [...record.files].filter(file=>isAutoHiddenPath(view.path,file.path))){
+          signal.throwIfAborted()
+          if(previous.valid){previous.valid=false;await this.#save()}
+          await this.#removeFile(record,previous)
+        }
+        if(record.walk)record.walk.pending=record.walk.pending.filter(file=>!isAutoHiddenPath(view.path,file.path))
+      }
       if(view.scope==='computer'){files.push(...await this.#computerBatch(record,signal));directories.length=0;complete=false}
       while (directories.length > 0 && visited < 20000) {
         signal.throwIfAborted()

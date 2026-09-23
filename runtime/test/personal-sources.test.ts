@@ -399,3 +399,30 @@ test('whole-computer grant resumes batches past the directory overview budget wi
   assert.equal((await f.knowledge.listSources()).length,19)
  }finally{await f.close()}
 })
+
+test('whole-computer scan skips hidden content and invalidates a legacy hidden record',async()=>{
+ const f=await fixture()
+ try{
+  const visible=join(f.folder,'project');await mkdir(visible)
+  await writeFile(join(visible,'README.md'),'Visible project notes')
+  const hidden=join(f.folder,'.tool');await mkdir(hidden)
+  const hiddenFile=join(hidden,'notes.md');await writeFile(hiddenFile,'Hidden tool setting')
+  await writeFile(join(f.folder,'.private.md'),'Hidden root note')
+  const grant=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id:grant.id})
+  assert.ok((await f.knowledge.listSources()).some(s=>s.locator===join(visible,'README.md')))
+  assert.ok(!(await f.knowledge.listSources()).some(s=>s.locator===hiddenFile))
+  await f.sources.close()
+  await f.knowledge.handle('knowledge.ingest',{kind:'file',locator:hiddenFile,consent:true})
+  const indexed=(await f.knowledge.listSources()).find(s=>s.locator===hiddenFile)!
+  const statePath=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(statePath,'utf8'))
+  state.sources[0].files.push({path:hiddenFile,id:indexed.id,fingerprint:indexed.fingerprint,size:19,mtime:1,owned:true,valid:true,excerpt:'Hidden tool setting',observed:false,observation_ref:null})
+  await writeFile(statePath,JSON.stringify(state))
+  const legacyRef=`file:${indexed.id}:${indexed.fingerprint}`
+  await f.reopen()
+  assert.equal(f.sources.contextEntries().some(e=>e.content.includes('Hidden tool setting')),false)
+  await f.sources.command('sources.sync',{id:grant.id})
+  assert.ok(f.invalidated.includes(legacyRef))
+  assert.ok(!(await f.knowledge.listSources()).some(s=>s.locator===hiddenFile))
+ }finally{await f.close()}
+})
