@@ -38,3 +38,14 @@ test('dismissal follows evidence identity across model paraphrases and old cache
   await context.close()
  }finally{await rm(dir,{recursive:true,force:true})}
 })
+test('invalid or raw-field cards are omitted without hiding a valid suggestion',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-filter-')),path=join(dir,'cards.json')
+ const input:ContextInput={kind:'file',id:'source:doc',version:'v1',content:'An idea for a simpler setup.',source_id:'s',file_id:'doc',root:'/project',rel_path:'notes.md',role:'document',mtime_ms:1,priority:2}
+ const id=candidateId('ideas','doc','v1')
+ const context=new WorkbenchContext(path,()=>Promise.resolve({cards:[
+  {candidate_id:id,tab:'ideas',title:'Simplify setup',body:'The notes describe a simpler setup.',refs:[{entry_id:'source:doc',version:'v1'}]},
+  {candidate_id:'invented',tab:'ideas',title:'Unrelated',body:'No evidence',refs:[{entry_id:'source:doc',version:'v1'}]},
+  {candidate_id:id,tab:'ideas',title:'Leaked',body:'api_key: secret',refs:[{entry_id:'source:doc',version:'v1'}]},
+ ]}),()=>undefined)
+ try{await context.open();context.update([input]);await context.refresh();assert.deepEqual(context.snapshot().cards.map(card=>card.title),['Simplify setup'])}finally{await context.close();await rm(dir,{recursive:true,force:true})}
+})

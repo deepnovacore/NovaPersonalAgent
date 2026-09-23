@@ -243,7 +243,7 @@ export class PersonalAgentHost {
     #summarize(): void {
         if (this.#overviewRun || !this.#opened || !this.options.summarizeMemory || !this.#overviewKey) return;
         const key = this.#overviewKey, generation = this.#memoryRefresh;
-        const entries = structuredClone(this.#memory.entries.filter(e => e.status === 'active' && e.version !== null));
+        const entries = structuredClone(this.#memory.entries.filter(e => e.status === 'active' && e.version !== null && e.origin === 'stated'));
         if (!entries.length) return;
         const controller = new AbortController();
         this.#overviewAbort = controller;
@@ -397,7 +397,7 @@ export class PersonalAgentHost {
         if(refresh!==this.#memoryRefresh||!this.#opened)return;
         const authorized=await this.authorizedGenerationEntries(initialPage.entries);
         if(refresh!==this.#memoryRefresh||!this.#opened)return;
-        this.profileWarmup.update([...authorized.filter(memoryEligibleForDiscovery),...(this.#sources?.contextEntries?.()??[]).map(e=>({...e,origin:'inferred' as const}))]);
+        this.profileWarmup.update(authorized.filter(entry=>memoryEligibleForDiscovery(entry)&&entry.origin==='stated'));
         this.workbenchContext.update([...authorized.filter(memoryEligibleForDiscovery),...(this.#sources?.contextEntries?.()??[])]);
         const key = hash(page);
         this.#overviewAbort.abort();

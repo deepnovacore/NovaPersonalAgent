@@ -230,4 +230,11 @@ test('workbench generation includes its schema in the provider-visible prompt',a
  await surrogate.generateContext([{candidate_id:'c1',id:'c1',version:'v1',content:'A project document',tab:'ideas',primaryFileId:'doc',refs:[{entry_id:'source:doc',version:'v1'}],excerpt:'A project document',reason_code:'document_idea',root:'/project',priority:0,mtime_ms:1}],new AbortController().signal)
  const prompt=JSON.parse(gateway.completions[0]!.prompt) as {output_schema:{properties:{cards:unknown}}}
  assert.ok(prompt.output_schema.properties.cards)
+ assert.doesNotMatch(gateway.completions[0]!.prompt,/\/project/u)
+})
+test('workbench generation allows no candidates and makes no model call',async()=>{
+ const gateway=new ScriptedGateway([],JSON.stringify({cards:[]}))
+ const surrogate=new GatewaySurrogate({gateway,model:'same',proactivityPreset:'balanced'})
+ assert.deepEqual(await surrogate.generateContext([],new AbortController().signal),{cards:[]})
+ assert.equal(gateway.completions.length,0)
 })

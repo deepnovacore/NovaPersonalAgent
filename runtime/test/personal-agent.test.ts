@@ -413,9 +413,9 @@ test('profile warmup requires current consent for every evidence reference',asyn
  }finally{await host.close();await f.close()}
 })
 
-test('authorized local excerpts seed interest drafts as inferred context and revoke cleanly',async()=>{
+test('authorized local excerpts do not become personal profile drafts',async()=>{
  const f=await fixture();await f.host.close();let available=true,calls=0;
  const host=new PersonalAgentHost({...f.host.options,generateProfile:entries=>{calls++;assert.equal(entries[0]!.origin,'inferred');return Promise.resolve({about:null,interests:[{text:'Design',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]}]})}});
  host.setSources({list:()=>[],contextEntries:()=>available?[{id:'source:document',version:'v1',content:'Product design notes'}]:[],command:()=>Promise.resolve({})});
- try{await host.open();await host.profileWarmup.refresh();assert.equal(calls,1);assert.equal(host.profileWarmup.snapshot().draft?.about,null);available=false;await host.sourceChanged();assert.equal(host.profileWarmup.snapshot().draft,null)}finally{await host.close();await f.close()}
+ try{await host.open();await host.profileWarmup.refresh();assert.equal(calls,0);assert.equal(host.profileWarmup.snapshot().draft,null);available=false;await host.sourceChanged();assert.equal(host.profileWarmup.snapshot().draft,null)}finally{await host.close();await f.close()}
 })

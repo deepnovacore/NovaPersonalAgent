@@ -6,8 +6,8 @@ import {versionSchema} from './contracts.js'
 import {selectContextCandidates,type ContextCandidate,type ContextInput} from './context-candidates.js'
 
 const refSchema=z.object({entry_id:z.string().min(1),version:versionSchema}).strict()
-const cardSchema=z.object({candidate_id:z.string().min(1).max(128),tab:z.enum(['todos','ideas']),title:z.string().trim().min(1).max(160),body:z.string().trim().min(1).max(1200),refs:z.array(refSchema).min(1).max(8)}).strict()
-export const contextCardsSchema=z.object({cards:z.array(cardSchema).max(20)}).strict()
+export const contextCardSchema=z.object({candidate_id:z.string().min(1).max(128),tab:z.enum(['todos','ideas']),title:z.string().trim().min(1).max(160),body:z.string().trim().min(1).max(1200),refs:z.array(refSchema).min(1).max(8)}).strict()
+export const contextCardsSchema=z.object({cards:z.array(contextCardSchema).max(20)}).strict()
 export type ContextCards=z.infer<typeof contextCardsSchema>
 export type ContextEntry=ContextInput | (Pick<MemoryEntry,'id'|'version'|'content'> & {origin?:'stated'|'inferred'})
 export type ContextGenerator=(candidates:readonly ContextCandidate[],signal:AbortSignal)=>Promise<ContextCards>
@@ -23,6 +23,7 @@ const diskSchema=z.preprocess(value=>{
 },stateSchema)
 const emptyState=():State=>({version:2,cards:[],key:'',dismissed:[],legacyDismissed:[]})
 const sameRef=(a:{entry_id:string;version:string|number},b:{entry_id:string;version:string|number})=>a.entry_id===b.entry_id&&a.version===b.version
+const leaksRawField=(card:ContextCards['cards'][number])=>/\/(?:Users|home|Volumes)\/|\b(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=：]|\b[a-f\d]{40,}\b/iu.test(`${card.title} ${card.body}`)
 
 /** Disposable, source-grounded suggestions. Saved Life records live elsewhere. */
 export class WorkbenchContext{
@@ -53,7 +54,8 @@ export class WorkbenchContext{
   const signal=AbortSignal.any([this.#abort.signal,AbortSignal.timeout(120000)])
   const run=(async()=>{try{
    const result=contextCardsSchema.parse(await this.generate!(candidates,signal));signal.throwIfAborted()
-   const cards=result.cards.filter(card=>this.#candidate(card)&&card.refs.every(ref=>candidates.some(candidate=>candidate.candidate_id===card.candidate_id&&candidate.refs.some(allowed=>sameRef(ref,allowed)))))
+   const seen=new Set<string>()
+   const cards=result.cards.filter(card=>{if(seen.has(card.candidate_id)||leaksRawField(card)||!this.#candidate(card)||!card.refs.every(ref=>candidates.some(candidate=>candidate.candidate_id===card.candidate_id&&candidate.refs.some(allowed=>sameRef(ref,allowed)))))return false;seen.add(card.candidate_id);return true})
    await this.#write(next=>{next.cards=cards;next.key=key});this.#status='ready'
   }catch(error){this.#status='failed';console.error('[workbench-context] generation_failed',error instanceof z.ZodError?JSON.stringify(error.issues.map(i=>({code:i.code,path:i.path}))):error instanceof Error?error.name:'unknown')}finally{this.#run=undefined;this.changed();if(this.#opened){if(generation!==keyOf(this.#candidates.map(candidate=>[candidate.candidate_id,candidate.version,candidate.priority,candidate.mtime_ms])))this.update(this.#inputs);else if(this.#status==='failed'){this.#timer=setTimeout(()=>{void this.refresh()},300000);this.#timer.unref()}}}})();this.#run=run;await run
  }
