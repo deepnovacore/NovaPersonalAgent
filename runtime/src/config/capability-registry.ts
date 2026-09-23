@@ -51,7 +51,7 @@ export interface CapabilityModules {
   }
   readonly camera: {readonly enabled: boolean; readonly reason?: string}
   readonly coding: {readonly enabled: boolean}
-  readonly knowledge: {readonly enabled: boolean; readonly exposeToCodex: boolean}
+  readonly knowledge: {readonly enabled: boolean; readonly exposeToCodex: boolean; readonly reason?: string}
 }
 export interface McpServerStatus {
   /** Codex uses native timeout/context bounds; maxCallsPerTurn/maxResultBytes apply only to FrontBrain. */

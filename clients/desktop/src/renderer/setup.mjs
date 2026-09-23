@@ -20,6 +20,7 @@ let view = null
 let starting = false
 // A push can still carry the previous launch's failure; judge only after the restart is seen.
 let restartSeen = false
+let closeTimer = null
 
 function pipeline() {
   return document.querySelector('input[name="pipeline"]:checked').value
@@ -82,6 +83,8 @@ async function start() {
   }
   starting = true
   restartSeen = false
+  clearTimeout(closeTimer)
+  closeTimer = null
   render()
   setStatus(t("正在保存并启动…"))
   try {
@@ -90,27 +93,34 @@ async function start() {
       : {pipelineMode: 'cascaded', cascadedLlmProvider: llmSelect.value, secrets}
     const result = await api.save(choice)
     if (!result.saved || result.rejectedSecrets.length > 0) {
-      starting = false
+      stopStarting()
       setStatus(t("密钥未能保存，请检查后重试"), 'warn')
     }
   } catch {
-    starting = false
+    stopStarting()
     setStatus(t("保存失败，请重试"), 'warn')
   }
   render()
 }
 
+function stopStarting() {
+  starting = false
+  clearTimeout(closeTimer)
+  closeTimer = null
+}
+
 function update(next) {
   view = next
   if (starting && view.backendStatus === 'starting') restartSeen = true
-  if (starting && view.backendStatus === 'connected') {
+  // An already connected backend reports connected until the save restarts it.
+  if (starting && restartSeen && view.backendStatus === 'connected') {
     setStatus(t("已就绪，可以开始对话了"), 'ok')
-    setTimeout(() => window.close(), 1200)
+    closeTimer ??= setTimeout(() => window.close(), 1200)
   } else if (starting && restartSeen && view.missing.length > 0) {
-    starting = false
+    stopStarting()
     setStatus(t("仍缺少 {0}", view.missing.join(', ')), 'warn')
   } else if (starting && restartSeen && ['configuration_required', 'authentication_failed', 'unavailable'].includes(view.backendStatus)) {
-    starting = false
+    stopStarting()
     setStatus(t("启动失败，请检查密钥后重试"), 'warn')
   }
   render()

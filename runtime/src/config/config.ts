@@ -497,12 +497,22 @@ export function missingWatchModelCredential(settings: Settings): string | null {
   return null
 }
 
-/** Camera watch is optional: without its model credential the module is reported off rather than failing startup. */
-export function withoutUncredentialedCamera(registry: CapabilityRegistry, settings: Settings): CapabilityRegistry {
-  const missing = registry.modules.camera.enabled ? missingWatchModelCredential(settings) : null
-  return missing === null ? registry : {
-    ...registry, modules: {...registry.modules, camera: {enabled: false, reason: `missing_environment:${missing}`}},
-  }
+/** Knowledge embeds through the generic model gateway, so it needs that gateway's key. */
+export function missingKnowledgeCredential(settings: Settings): string | null {
+  if (resolveModelApiKey(settings)) return null
+  return settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'MODEL_API_KEY'
+}
+
+/** Camera watch and knowledge are optional: without their credential they are reported off rather than failing startup. */
+export function withoutUncredentialedModules(registry: CapabilityRegistry, settings: Settings): CapabilityRegistry {
+  const camera = registry.modules.camera.enabled ? missingWatchModelCredential(settings) : null
+  const knowledge = registry.modules.knowledge.enabled ? missingKnowledgeCredential(settings) : null
+  if (camera === null && knowledge === null) return registry
+  return {...registry, modules: {
+    ...registry.modules,
+    ...(camera === null ? {} : {camera: {enabled: false, reason: `missing_environment:${camera}`}}),
+    ...(knowledge === null ? {} : {knowledge: {enabled: false, exposeToCodex: false, reason: `missing_environment:${knowledge}`}}),
+  }}
 }
 
 /** Mirrors requireIntegratedRealtime and requireCascadedCredentials without throwing, for first-run guidance. */
@@ -903,7 +913,7 @@ function configurationFieldName(field: string): string {
 
 /** Injected settings never trigger ambient filesystem reads. Production passes its loaded registry explicitly. */
 export function capabilitiesFromSettings(settings: Settings): CapabilityRegistry {
-  return withoutUncredentialedCamera(parseCapabilityRegistry({version: 1, modules: {
+  return withoutUncredentialedModules(parseCapabilityRegistry({version: 1, modules: {
     camera: {enabled: settings.camera_module_enabled},
     search: {provider: settings.search_provider, ...(settings.search_mcp_url === '' ? {} : {mcp: {
       url: settings.search_mcp_url, tool: settings.search_mcp_tool,

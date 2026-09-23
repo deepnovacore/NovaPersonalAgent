@@ -972,11 +972,11 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
   try { launchDocument = readCapabilityDocument(currentSettings, process.env) }
   catch { throw classifyBackendFailure('configuration_required') }
   const codingEnabled = launchDocument?.modules?.coding?.enabled !== false
-  const configurationCode = codingEnabled ? desktopConfig?.codexConfigurationError
-    ?? desktopConfig?.modelConfigurationError : desktopConfig?.modelConfigurationError
-  if (configurationCode) throw classifyBackendFailure(configurationCode)
-  // Coding is optional: without a usable Codex CLI the runtime starts with the coding module off.
-  const codingUnavailable = codingEnabled && codexStatus.status !== 'ready'
+  if (desktopConfig?.modelConfigurationError) throw classifyBackendFailure(desktopConfig.modelConfigurationError)
+  // Coding is optional: without a usable Codex CLI, including an unfinished manual path,
+  // the runtime starts with the coding module off.
+  const codingUnavailable = codingEnabled
+    && (Boolean(desktopConfig?.codexConfigurationError) || codexStatus.status !== 'ready')
   const token = randomBytes(16).toString('hex')
   const workspace = desktopConfig?.workspace || process.cwd()
   let spawnedBackend = null

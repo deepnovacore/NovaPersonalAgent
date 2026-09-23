@@ -7,9 +7,10 @@ import {
   describeMissingBlockingCredentials,
   describeMissingBlockingEnvironment,
   loadSettings,
+  missingKnowledgeCredential,
   missingWatchModelCredential,
   requireBlockingCredentials,
-  withoutUncredentialedCamera,
+  withoutUncredentialedModules,
 } from '../src/config/config.js'
 import {desktopConfigurationFailure} from '../src/desktop/desktop-control.js'
 
@@ -79,10 +80,20 @@ test('camera watch without its model credential is reported off instead of faili
   assert.equal(missingWatchModelCredential(loadSettings({})), null)
   assert.equal(missingWatchModelCredential(loadSettings({...vision, DASHSCOPE_API_KEY: 'k'})), null)
   assert.equal(missingWatchModelCredential(loadSettings(vision)), 'DASHSCOPE_API_KEY')
-  assert.deepEqual(withoutUncredentialedCamera(registry, loadSettings(vision)).modules.camera, {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY'})
-  assert.equal(withoutUncredentialedCamera(registry, loadSettings({...vision, DASHSCOPE_API_KEY: 'k'})), registry)
+  assert.deepEqual(withoutUncredentialedModules(registry, loadSettings(vision)).modules.camera, {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY'})
+  assert.equal(withoutUncredentialedModules(registry, loadSettings({...vision, DASHSCOPE_API_KEY: 'k'})), registry)
   const disabled = parseCapabilityRegistry({version: 1, modules: {camera: {enabled: false}}}, {})
-  assert.equal(withoutUncredentialedCamera(disabled, loadSettings(vision)), disabled)
+  assert.equal(withoutUncredentialedModules(disabled, loadSettings(vision)), disabled)
+})
+
+test('knowledge without its embedding credential is reported off instead of failing', () => {
+  const registry = parseCapabilityRegistry({version: 1, modules: {knowledge: {enabled: true, exposeToCodex: true}}}, {})
+  const cascaded = loadSettings({PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'd', DOUBAO_BIGMODEL_API_KEY: 'v'})
+  assert.equal(missingKnowledgeCredential(cascaded), 'DASHSCOPE_API_KEY')
+  assert.equal(missingKnowledgeCredential(loadSettings({DASHSCOPE_API_KEY: 'k'})), null)
+  assert.equal(missingKnowledgeCredential(loadSettings({MODEL_BASE_URL: 'https://models.example/v1'})), 'MODEL_API_KEY')
+  assert.deepEqual(withoutUncredentialedModules(registry, cascaded).modules.knowledge, {enabled: false, exposeToCodex: false, reason: 'missing_environment:DASHSCOPE_API_KEY'})
+  assert.equal(withoutUncredentialedModules(registry, loadSettings({DASHSCOPE_API_KEY: 'k'})), registry)
 })
 
 test('desktop configuration failure carries only bounded key names', () => {

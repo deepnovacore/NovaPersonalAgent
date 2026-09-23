@@ -53,3 +53,62 @@ test('settings explain an unconfigured or switched module from the runtime reaso
   assert.equal(moduleStatusNote({enabled: false, reason: 'private secret'}), '')
   assert.equal(moduleStatusNote(undefined), '')
 })
+
+async function loadSetupPage(t, api) {
+  const element = (extra = {}) => {
+    const listeners = {}
+    return {dataset: {}, hidden: false, disabled: false, textContent: '', value: '', placeholder: '', listeners,
+      addEventListener: (type, listener) => { listeners[type] = listener },
+      setAttribute(name, value) { this[name] = value }, getAttribute(name) { return this[name] ?? null }, focus() {}, ...extra}
+  }
+  const input = element({value: 'sk-new'})
+  const row = element({dataset: {key: 'dashscopeApiKey'}})
+  const parts = {input, '.test': element(), '.key-result': element(), label: element({textContent: 'DashScope API Key'})}
+  row.querySelector = selector => parts[selector] ?? null
+  const radio = element({value: 'integrated', checked: true})
+  const nodes = {'#status': element(), '#start': element(), '#llm-provider': element({value: 'deepseek'}),
+    '#integrated-fields': element(), '#cascaded-fields': element(), 'input[name="pipeline"]:checked': radio}
+  const lists = {'.key-row input': [input], 'input[name="pipeline"]': [radio], '.key-row': [row], '#integrated-fields .key-row': [row]}
+  let closed = 0
+  const previous = {document: globalThis.document, window: globalThis.window}
+  globalThis.document = {documentElement: {}, createTreeWalker: () => ({nextNode: () => null}),
+    querySelector: selector => nodes[selector] ?? (selector.startsWith('input[name="pipeline"][value=') ? radio : null),
+    querySelectorAll: selector => lists[selector] ?? []}
+  globalThis.window = {close: () => { closed++ }, novaAudioAgentDesktop: {setup: api}}
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous)) if (value === undefined) delete globalThis[name]; else globalThis[name] = value
+  })
+  await import(`../src/renderer/setup.mjs?case=${Math.random()}`)
+  return {start: () => nodes['#start'].listeners.click(), status: () => nodes['#status'].textContent, closed: () => closed}
+}
+
+test('setup closes only after the restart it caused has connected', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']})
+  const view = backendStatus => ({backendStatus, missing: [], secretsPresent: {dashscopeApiKey: true}, pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek'})
+  let push
+  let finishSave
+  const page = await loadSetupPage(t, {
+    status: async () => view('connected'),
+    onChanged: listener => { push = listener },
+    save: () => new Promise(resolve => { finishSave = resolve }),
+  })
+  page.start()
+  // The old backend is still connected while the save is in flight.
+  push(view('connected'))
+  t.mock.timers.tick(2000)
+  assert.equal(page.closed(), 0)
+  push(view('starting'))
+  finishSave({saved: true, rejectedSecrets: []})
+  await new Promise(resolve => setImmediate(resolve))
+  push(view('authentication_failed'))
+  t.mock.timers.tick(2000)
+  assert.equal(page.closed(), 0)
+  assert.match(page.status(), /启动失败/u)
+
+  page.start()
+  push(view('starting'))
+  push(view('connected'))
+  push(view('connected'))
+  t.mock.timers.tick(1200)
+  assert.equal(page.closed(), 1)
+})

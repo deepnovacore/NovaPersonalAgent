@@ -124,6 +124,7 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
     const statuses = running?.servers ?? state.status?.servers ?? []
     const knowledge = node('section', '', root); knowledge.className = 'mcp-module'; knowledge.dataset.module = 'knowledge'
     field(knowledge, t("知识库"), modules.knowledge?.enabled ?? false, enabled => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, enabled}}), {type: 'checkbox'})
+    moduleNote(knowledge, running?.modules?.knowledge)
     const knowledgeConfig = node('div', '', knowledge); knowledgeConfig.className = 'mcp-module-config secondary-toggle'
     field(knowledgeConfig, t("向编程执行器开放知识库"), modules.knowledge?.exposeToCodex ?? false, exposeToCodex => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, exposeToCodex}}), {type: 'checkbox'})
     for (const [name, server] of Object.entries(doc.mcpServers ?? {})) {

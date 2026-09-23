@@ -5,7 +5,7 @@ import {prepareKnowledge} from '../knowledge/assembly.js'
 import {randomUUID} from 'node:crypto'
 import {loadCapabilityRegistry} from '../config/capability-registry.js'
 import {prepareExternalMcp} from '../executors/mcp.js'
-import {loadSettings, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedCamera} from '../config/config.js'
+import {loadSettings, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedModules} from '../config/config.js'
 import {requireSelectedCascadedRealtimeConfig} from '../config/cascaded-realtime-config.js'
 import {remoteClientMedia} from '../server/server-config.js'
 import type {ClientMedia} from '../server/client-protocol.js'
@@ -36,7 +36,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   requireBlockingCredentials(loadedSettings)
   if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
   else requireSelectedCascadedRealtimeConfig(loadedSettings)
-  const externalMcp = await prepareExternalMcp(withoutUncredentialedCamera(loadCapabilityRegistry({environment: remote
+  const externalMcp = await prepareExternalMcp(withoutUncredentialedModules(loadCapabilityRegistry({environment: remote
       ? {...environment, CAMERA_MODULE_ENABLED: 'false'} : environment}), loadedSettings), stop.signal)
   const releaseExternal = ownership.own(() => externalMcp.close())
   const capabilities = externalMcp.capabilities
