@@ -204,3 +204,34 @@ test('desktop launch reports an executable spawn failure', async () => {
   })
   await assert.rejects(launch, /desktop launch failed/u)
 })
+
+test('doctor names the voice pipeline keys and probes only environment keys when online', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const appData = join(home, 'appdata')
+  const settings = join(appData, 'Nova Audio Agent Ambient Orb/ambient-orb-settings.json')
+  await mkdir(join(settings, '..'), {recursive: true})
+  await writeFile(settings, JSON.stringify({pipelineMode: 'cascaded', cascadedLlmProvider: 'deepseek', secrets: {doubaoBigmodelApiKey: 'saved-value'}}))
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({url: String(url), authorization: init.headers.authorization})
+    return new Response('{}', {status: 401})
+  }
+  const environment = {APPDATA: appData, DEEPSEEK_API_KEY: 'env-value'}
+  const offline = await inspectDoctor({...TARGET_OPTIONS, home, environment, fetchImpl})
+  assert.deepEqual(offline.voice, {pipeline: 'cascaded', keys: [
+    {name: 'DEEPSEEK_API_KEY', source: 'environment'},
+    {name: 'DOUBAO_BIGMODEL_API_KEY', source: 'settings'},
+  ]})
+  assert.equal(calls.length, 0)
+  const online = await inspectDoctor({...TARGET_OPTIONS, home, environment, fetchImpl, online: true})
+  assert.deepEqual(online.voice.keys[0], {name: 'DEEPSEEK_API_KEY', source: 'environment', probe: 'rejected'})
+  assert.equal(online.voice.keys[1].probe, undefined)
+  assert.deepEqual(calls, [{url: 'https://api.deepseek.com/models', authorization: 'Bearer env-value'}])
+  assert.doesNotMatch(JSON.stringify(online), /env-value|saved-value/u)
+})
+
+test('doctor defaults a fresh install to the integrated DashScope key', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const report = await inspectDoctor({...TARGET_OPTIONS, home, environment: {APPDATA: join(home, 'appdata')}})
+  assert.deepEqual(report.voice, {pipeline: 'integrated', keys: [{name: 'DASHSCOPE_API_KEY', source: null}]})
+})
