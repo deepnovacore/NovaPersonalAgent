@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,realpath,writeFile} from 'node:fs/promises'
+import {mkdtemp,rm,realpath,readFile,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {WorkbenchContext,contextCardSchema} from '../src/personal-agent/workbench-context.js'
@@ -112,10 +112,29 @@ test('candidate changes during generation queue one trailing automatic call',asy
  let calls=0,release:()=>void=()=>undefined
  const blocked=new Promise<void>(resolve=>{release=resolve})
  const context=new WorkbenchContext(path,async()=>{calls++;if(calls===1)await blocked;return {cards:[]}},()=>undefined)
- const until=async(check:()=>boolean)=>{for(let n=0;n<1000&&!check();n++)await new Promise<void>(resolve=>setImmediate(resolve));assert.ok(check())}
+ const until=async(check:()=>boolean)=>{for(let n=0;n<10000&&!check();n++)await new Promise<void>(resolve=>setImmediate(resolve));assert.ok(check(),`calls=${calls}`)}
  try{
   await context.open();context.update([input]);t.mock.timers.tick(3000);await until(()=>calls===1)
   context.update([{...input,version:'v1'}]);context.update([{...input,version:'v2'}]);t.mock.timers.tick(120_000);assert.equal(calls,1)
   release();await until(()=>context.snapshot().status==='ready');t.mock.timers.tick(0);await context.refresh();assert.equal(calls,2)
  }finally{release();t.mock.timers.reset();await context.close();await rm(dir,{recursive:true,force:true})}
+})
+test('automatic failures retry with backoff and retain the hourly cap after reopen',async t=>{
+ t.mock.timers.enable({apis:['setTimeout','Date']});t.mock.method(console,'error',()=>undefined)
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-retry-')),path=join(dir,'cards.json')
+ const input:ContextInput={kind:'file',id:'source:doc',version:'v0',content:'Next step: review the launch plan.',source_id:'s',file_id:'doc',root:'/project',rel_path:'plan.md',role:'document',mtime_ms:1,priority:2}
+ let calls=0;const generate=()=>{calls++;return Promise.reject(Error('offline'))}
+ const until=async(check:()=>boolean)=>{for(let n=0;n<10000&&!check();n++)await new Promise<void>(resolve=>setImmediate(resolve));assert.ok(check(),`calls=${calls}`)}
+ const context=new WorkbenchContext(path,generate,()=>undefined)
+ try{
+  await context.open();context.update([input]);t.mock.timers.tick(3000);await until(()=>calls===1&&context.snapshot().status==='failed')
+  t.mock.timers.tick(299_999);assert.equal(calls,1);t.mock.timers.tick(1);await until(()=>calls===2&&context.snapshot().status==='failed')
+  for(let n=3;n<=6;n++){t.mock.timers.tick(300_000);await until(()=>calls===n&&context.snapshot().status==='failed')}
+  const persisted=JSON.parse(await readFile(path,'utf8')) as {automatic_call_times:number[];retry_not_before:number}
+  assert.equal(persisted.automatic_call_times.length,6);assert.ok(persisted.retry_not_before>Date.now())
+  t.mock.timers.tick(300_000);assert.equal(calls,6,'automatic failures still consume the hourly quota')
+  await context.close();const reopened=new WorkbenchContext(path,generate,()=>undefined)
+  await reopened.open();reopened.update([input]);t.mock.timers.tick(1_799_999);assert.equal(calls,6)
+  t.mock.timers.tick(1);await until(()=>calls===7&&reopened.snapshot().status==='failed');await reopened.close()
+ }finally{t.mock.timers.reset();await context.close();await rm(dir,{recursive:true,force:true})}
 })
