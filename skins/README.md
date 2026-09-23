@@ -1,5 +1,7 @@
 # Nova orb skins (v1)
 
+For the proposed multi-file custom skin package and review criteria, see [Skin specification draft](../docs/SKIN_SPEC.md). That v2 format is not implemented; this page describes the currently supported v1 import.
+
 Open **Settings → General → Orb skin**, import `jarvis.nova-skin.json`, review the static preview and click **Save**. The orb switches live; the voice backend does not restart for a skin-only change. Choose **Nova** to return to the original visual. **Discard skin changes** restores the saved skin/library without discarding other settings drafts.
 
 **Remove selected skin** removes an imported skin and selects Nova. Removal is staged until Save. Duplicate IDs are rejected: remove the old skin before importing its replacement. Closing the settings window without saving discards the draft. The import copies validated data into the desktop settings file, so the source JSON may be moved or deleted afterward. No account or API key is needed for skins.
