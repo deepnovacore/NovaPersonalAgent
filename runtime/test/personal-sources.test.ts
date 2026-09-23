@@ -501,14 +501,31 @@ test('directory recheck retries survive reopen and retire stale evidence once ex
     await f.sources.command('sources.sync', {id})
     assert.equal(f.invalidated.length, invalidations)
     assert.equal(f.observations.length, 1)
+    // A later reconciliation is bounded even when the file remains unreadable.
+    now += 24 * 60 * 60_000
+    await f.sources.command('sources.sync', {id})
+    await chmod(path, 0o600)
+    await f.reopen()
+    for (let poll = 0; poll < 7; poll++) await f.sources.command('sources.sync', {id})
+    assert.deepEqual(await f.knowledge.listSources(), [])
+    now += 24 * 60 * 60_000
+    await f.reopen()
+    await f.sources.command('sources.sync', {id})
+    assert.equal((await f.knowledge.listSources()).length, 1)
+    const recovered = f.sources.evidenceSnapshot()[0]!
+    assert.ok(recovered, 'same-metadata readable file recovers after the long retry delay')
+    assert.ok(f.sources.evidence(recovered.ref))
+    assert.match(f.sources.contextEntries()[0]!.content, /Previously verified directory note/u)
     const after = await stat(path)
     assert.equal(after.size, before.size)
     assert.equal(after.mtimeMs, before.mtimeMs)
   } finally {await chmod(join(f.folder, 'notes.md'), 0o600).catch(() => undefined); await f.close()}
 })
 
-test('same-size same-mtime screened replacement retires prior index', async () => {
+test('same-size same-mtime screened replacement retires prior index', async (t) => {
   const f = await fixture(false, undefined, undefined, 0)
+  let now = Date.now()
+  t.mock.method(Date, 'now', () => now)
   try {
     const path = join(f.folder, 'notes.md'), secret = 'token=credential-value-123456789'
     await writeFile(path, 'A'.repeat(secret.length))
@@ -526,6 +543,12 @@ test('same-size same-mtime screened replacement retires prior index', async () =
     assert.equal(f.sources.evidence(oldRef), null)
     assert.deepEqual(await f.knowledge.listSources(), [])
     assert.equal(f.sources.list()[0]!.failures[0]!.code, 'screening_rejected')
+    await writeFile(path, 'A'.repeat(secret.length))
+    await utimes(path, stableTime, stableTime)
+    now += 2 * 24 * 60 * 60_000
+    await f.reopen()
+    await f.sources.command('sources.sync', {id})
+    assert.deepEqual(await f.knowledge.listSources(), [], 'terminal screening cannot become an automatic age-based retry')
   } finally {await f.close()}
 })
 

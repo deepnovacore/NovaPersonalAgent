@@ -35,7 +35,7 @@ const snapshotSchema = z.object({
 }).strict()
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
-  evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), checked_at: z.number().optional(), recheck_attempts: z.number().int().nonnegative().optional(), recheck_eligible_at: z.number().optional(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
+  evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), checked_at: z.number().optional(), recheck_attempts: z.number().int().nonnegative().optional(), recheck_eligible_at: z.number().optional(), recheck_terminal: z.boolean().optional(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
 const walkFileSchema=z.object({path:pathSchema,size:z.number().nonnegative(),mtime:z.number(),unit:pathSchema,attempts:z.number().int().nonnegative().optional(),eligible_at:z.number().optional(),reason:z.enum(['body_budget','retry']).optional()}).strict()
 const deferredFileSchema=walkFileSchema.extend({eligible_at:z.number().default(0),attempts:z.number().int().nonnegative().default(0),reason:z.enum(['body_budget','retry']).default('retry')}).strict()
 const directoryLedgerSchema=z.object({path:pathSchema,unit:pathSchema.optional(),generation:z.number().int().nonnegative(),status:z.enum(['queued','done','partial']),identity:z.object({dev:z.string(),ino:z.string(),mtimeNs:z.string()}).strict().optional(),eligible_at:z.number().optional(),attempts:z.number().int().nonnegative().default(0)}).strict()
@@ -552,8 +552,18 @@ export class LocalDirectorySources {
         if (previous) previous.unit = file.unit
         if (previous && view.scope === 'directory') {
           if (previous.mtime !== file.mtime || previous.size !== file.size) {
-            delete previous.recheck_attempts; delete previous.recheck_eligible_at
-          } else if ((previous.recheck_attempts??0)>5 || (previous.recheck_eligible_at??0)>Date.now()) continue
+            delete previous.recheck_attempts; delete previous.recheck_eligible_at; delete previous.recheck_terminal
+          } else {
+            const exhausted = (previous.recheck_attempts??0)>5
+            const eligibleAt = previous.recheck_eligible_at??(exhausted?(previous.checked_at??0)+24*60*60_000:0)
+            if (previous.recheck_terminal || eligibleAt>Date.now()) continue
+            if (exhausted) {
+              // Exhausted transient gaps get one durable daily reconciliation attempt.
+              // Persist before I/O so a failed or interrupted attempt cannot hot-loop.
+              previous.recheck_eligible_at=Date.now()+24*60*60_000
+              await this.#save()
+            }
+          }
         }
         const discardStaleIndex = async () => {if (previous?.owned) {await this.#options.knowledge.handle('knowledge.remove', {id: previous.id}); known.delete(file.path)}}
         if (previous?.valid && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) {
@@ -570,7 +580,7 @@ export class LocalDirectorySources {
               previous.valid=false;await this.#save();await this.#invalidateFile(previous);await discardStaleIndex()
               skip('read_failed');currentReadFailure=true
               if(view.failures.length<50)view.failures.push({path:relative(view.path,file.path),code:errorCode(recheckError)})
-              if (!record.walk) {previous.recheck_attempts=attempts+1;delete previous.recheck_eligible_at}
+              if (!record.walk) {previous.recheck_attempts=attempts+1;previous.recheck_eligible_at=Date.now()+24*60*60_000}
             } else if (record.walk) deferPending(record,file,'retry',Date.now()+30_000)
             else {previous.recheck_attempts=attempts+1;previous.recheck_eligible_at=Date.now()+30_000}
             await this.#save()
@@ -619,6 +629,11 @@ export class LocalDirectorySources {
           const code=errorCode(error)
           currentReadFailure=true
           if (view.failures.length < 50) view.failures.push({path: relative(view.path, file.path), code})
+          if (previous && view.scope==='directory' && ['screening_rejected','unsupported_file'].includes(code)) {
+            previous.recheck_terminal=true
+            previous.size=file.size;previous.mtime=file.mtime
+            await this.#save()
+          }
           if (['screening_rejected','unsupported_file'].includes(code) || (file.attempts??0)>=5) await discardStaleIndex()
           if(record.walk&&['knowledge_busy','source_busy','ingest_failed','source_unavailable','file_changed','file_unavailable','embedding_failed','store_failed'].includes(code)&&(file.attempts??0)<5){const attempts=(file.attempts??0)+1;deferPending(record,file,'retry',Date.now()+Math.min(6*60*60_000,30_000*2**attempts))}
           if (code === 'knowledge_busy') break
