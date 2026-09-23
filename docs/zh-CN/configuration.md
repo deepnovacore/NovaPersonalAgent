@@ -6,14 +6,13 @@
 
 ## 最小配置
 
-默认使用 Qwen 实时语音和 Tavily 搜索：
+默认的 Qwen 实时语音只需要一把密钥：
 
 ```dotenv
 DASHSCOPE_API_KEY=你的百炼密钥
-TAVILY_API_KEY=你的Tavily密钥
 ```
 
-关闭搜索后不需要 Tavily 密钥。桌面切换级联模式时，默认使用火山识别、DeepSeek 和火山合成，需要 `DOUBAO_BIGMODEL_API_KEY`、`DEEPSEEK_API_KEY`。个人记忆等辅助模型仍使用百炼，保留 `DASHSCOPE_API_KEY`。
+只有所选语音管线的密钥是必填的。搜索、摄像头监控、记忆和知识库缺少密钥时自动关闭，设置页和 `novaaudio doctor` 会写明各自需要的密钥。配置了 `TAVILY_API_KEY` 时用 Tavily 搜索，否则用百炼 MCP 搜索。桌面切换级联模式时，默认使用火山识别、DeepSeek 和火山合成，需要 `DOUBAO_BIGMODEL_API_KEY`、`DEEPSEEK_API_KEY`。个人记忆等辅助模型仍使用百炼，保留 `DASHSCOPE_API_KEY`。
 
 ## 常用选项
 

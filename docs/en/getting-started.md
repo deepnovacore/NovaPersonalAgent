@@ -23,14 +23,13 @@ npm ci
 cp .env.example .env
 ```
 
-Add the default voice and search credentials to `.env`:
+Add the voice credential to `.env`:
 
 ```dotenv
 DASHSCOPE_API_KEY=your-dashscope-key
-TAVILY_API_KEY=your-tavily-key
 ```
 
-You can disable search in the capability configuration if you do not need it. Start the desktop:
+The same key covers memory, the camera and web search, which uses Bailian search until you add `TAVILY_API_KEY`. A feature whose key is missing stays off, and Settings shows the key it needs. Without a key, the desktop opens a setup window on first launch. Start the desktop:
 
 ```bash
 npm run start:client
@@ -88,7 +87,7 @@ While asleep, microphone input goes to local wake detection. Explicit mute stops
 | Voice cannot connect | Credentials, service access and connectivity for the selected mode |
 | Codex cannot run | Codex sign-in and access to the project directory |
 | Saved settings have no effect | Look for the pending-restart notice and restart the backend |
-| Search is unavailable | Search credentials; MCP search also needs the selected service enabled |
+| Search is unavailable | Search credentials; Bailian or other MCP search also needs the selected service enabled |
 | A recent fact is missing | Learning takes time; check its state in the memory panel |
 | iPhone has no text-chat option | The host must use cascaded mode and support editable input |
 
@@ -96,7 +95,7 @@ While asleep, microphone input goes to local wake detection. Explicit mute stops
 
 Capabilities are stored in `~/.nova-audio-agent/capabilities.json`. Disable unneeded modules or configure external MCP services and their allowed tools. Only enabled services need credentials.
 
-Search defaults to Tavily. MCP search uses its own service credentials and does not need a Tavily key. Remote MCP requires HTTPS; unauthenticated local testing can use loopback HTTP.
+Search uses Tavily when `TAVILY_API_KEY` is set, otherwise Bailian MCP search with `DASHSCOPE_API_KEY`, otherwise it stays off. MCP search uses its own service credentials and does not need a Tavily key. Remote MCP requires HTTPS; unauthenticated local testing can use loopback HTTP.
 
 For implementation details, see the [architecture guide](architecture.md).
 

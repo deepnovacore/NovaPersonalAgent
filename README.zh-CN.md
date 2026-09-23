@@ -128,10 +128,11 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 ```bash
 # 全局安装
 npm install --global nova-audio-agent@0.2.2
-# 启动客户端
+# 启动客户端；首次启动会弹出设置窗口，填一个 DashScope 密钥即可
 novaaudio
-# 打开设置面板（配置 dashscope 和 tavily api key）
+# 打开设置面板
 novaaudio config
+# 查看当前语音管线需要哪些密钥；加 --online 在线验证
 novaaudio doctor
 ```
 
@@ -143,7 +144,7 @@ novaaudio doctor
 git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
 cd nova-audio-agent
 npm ci && cp .env.example .env
-# 从 dashscope 和 tavily 获取 api key 并填入
+# 在 .env 中填入 DASHSCOPE_API_KEY
 ```
 
 启动桌面应用：
@@ -152,7 +153,7 @@ npm run start:client
 ```
 客户端包含麦克风、摄像头、声音开关等按钮，以及设置面板和外部 MCP 设置。你也可以试试把鼠标悬在桌面 orb 上，会有惊喜）
 
-从 [DashScope](https://platform.qianwenai.com) 和 [Tavily](https://docs.tavily.com) 获取 API Key 并配置 `DASHSCOPE_API_KEY` 和 `TAVILY_API_KEY`。
+从 [DashScope](https://platform.qianwenai.com) 获取 API Key 并配置 `DASHSCOPE_API_KEY`。这一把密钥就能用语音、记忆、摄像头和联网搜索；搜索默认走百炼，配置 [Tavily](https://docs.tavily.com) 的 `TAVILY_API_KEY` 后改用 Tavily。
 
 ```bash
 npm run build --workspace @nova-audio-agent/runtime

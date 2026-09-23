@@ -129,11 +129,11 @@ Besides the shipped app from releases, you can also install using npm
 
 ```bash
 npm install --global nova-audio-agent@0.2.2
-# open the shipped app
+# open the shipped app; the first launch asks for one DashScope API key
 novaaudio
 # open the settings panel in the app
-# get api key from dashscope and tavily to fill up
 novaaudio config
+# list the keys your voice pipeline needs; --online tests them
 novaaudio doctor
 ```
 
@@ -147,7 +147,7 @@ cd nova-audio-agent
 npm ci && cp .env.example .env
 ```
 
-Get API key from [DashScope](https://platform.qianwenai.com) and [Tavily](https://docs.tavily.com) . And then set `DASHSCOPE_API_KEY` and `TAVILY_API_KEY`.
+Get an API key from [DashScope](https://platform.qianwenai.com) and set `DASHSCOPE_API_KEY`. That one key runs voice, memory, the camera and web search. Search goes through Bailian until you add a [Tavily](https://docs.tavily.com) `TAVILY_API_KEY`.
 
 ```bash
 npm run start:client
