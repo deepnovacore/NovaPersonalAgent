@@ -4,7 +4,7 @@ import {interleave} from './sampling.js'
 
 type Ref={entry_id:string;version:string|number}
 export type ContextInput=
- | {kind:'file';id:string;version:string;content:string;source_id:string;file_id:string;root:string;rel_path:string;role:'document'|'code'|'config'|'cache';mtime_ms:number;priority:number}
+ | {kind:'file';id:string;version:string;content:string;source_id:string;file_id:string;root:string;rel_path:string;role:'document'|'code'|'config'|'cache';mtime_ms:number;priority:number;hidden_prefix_depth?:number}
  | {kind:'memory';id:string;version:string|number;content:string;origin:'stated'|'inferred'}
 export type ContextCandidate={candidate_id:string;id:string;version:string;content:string;tab:'todos'|'ideas';primaryFileId:string|null;refs:Ref[];excerpt:string;reason_code:'document_action'|'document_idea'|'stated_idea';root:string;priority:number;mtime_ms:number}
 
@@ -13,10 +13,10 @@ export const candidateId=(tab:string,primaryId:string,fingerprint:string)=>hash(
 const excludedParts=new Set(['node_modules','vendor','dist','build','target','coverage','out','tmp','temp','.git','.claude','.codex','.agents','test-results','playwright-report'])
 const excludedNames=/^(?:AGENTS|CLAUDE|SKILL|PROMPT|CONTRIBUTING|CHANGELOG|LICENSE|CODE_OF_CONDUCT)(?:\.[^/]*)?$/iu
 const generatedNames=/(?:generated|template|fixture|sample|example|snapshot|report[-_]?\d|lockfile)/iu
-export function eligibleDocument(path:string,role:string):boolean {
+export function eligibleDocument(path:string,role:string,hiddenPrefixDepth=0):boolean {
  if(role!=='document')return false
  const parts=path.split(/[\\/]/u)
- if(parts.some(part=>excludedParts.has(part.toLowerCase())||part.startsWith('.')))return false
+ if(parts.some((part,index)=>excludedParts.has(part.toLowerCase())||(part.startsWith('.')&&index>=hiddenPrefixDepth)))return false
  if(excludedNames.test(basename(path))||generatedNames.test(basename(path)))return false
  return new Set(['.md','.markdown','.txt','.pdf','.docx']).has(extname(path).toLowerCase())
 }
@@ -28,10 +28,10 @@ export function selectContextCandidates(inputs:readonly ContextInput[]):ContextC
  for(const input of sorted){
   if(!input.content.trim())continue
   if(input.kind==='memory'&&input.origin!=='stated')continue
-  if(input.kind==='file'&&!eligibleDocument(input.rel_path,input.role))continue
+  if(input.kind==='file'&&!eligibleDocument(input.rel_path,input.role,input.hidden_prefix_depth))continue
   const root=input.kind==='file'?input.root:'stated-memory'
   const version=String(input.version),primaryId=input.kind==='file'?input.file_id:input.id
-  const tabs:('todos'|'ideas')[]=input.kind==='file'&&input.priority>0&&actionLine(input.content)?['todos','ideas']:['ideas']
+  const tabs:('todos'|'ideas')[]=input.kind==='file'&&input.priority>=2&&actionLine(input.content)?['todos','ideas']:['ideas']
   if(input.kind==='memory'&&!/\bidea\b|想法|可以考虑|建议/u.test(input.content))continue
   for(const tab of tabs){
    const candidate_id=candidateId(tab,primaryId,version)

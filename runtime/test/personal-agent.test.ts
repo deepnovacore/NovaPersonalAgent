@@ -7,6 +7,7 @@ import { mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PersonalAgentHost, type DiscoverySnapshot } from '../src/personal-agent/host.js';
+import type {ContextInput} from '../src/personal-agent/context-candidates.js';
 import { SuggestionPool } from '../src/core/suggestions.js';
 import type { MemoryEntry } from '../src/memory/entry.js';
 import type { PersonalMemoryResource } from '../src/memory/personal-memory.js';
@@ -388,6 +389,17 @@ test('automatic generation requires current extraction consent for every evidenc
   assert.deepEqual(await f.host.authorizedGenerationEntries([row]),[row]);allowed=false;
   assert.deepEqual(await f.host.authorizedGenerationEntries([row]),[]);
  }finally{await f.close()}
+})
+
+test('a stated idea and an authorized file can generate together without rejecting the batch',async()=>{
+ const f=await fixture();const idea={...entry('idea'),content:'想法：简化首次使用',evidence_refs:['conversation:idea']}
+ const memory={...f.host.options.memory()!,get:(id:string)=>Promise.resolve(id==='idea'?idea:null),canProcessEvidence:()=>Promise.resolve(true)}
+ const file:ContextInput={kind:'file',id:'source:note',version:'v1',content:'An idea for simpler setup.',source_id:'source',file_id:'note',root:'/project',rel_path:'notes.md',role:'document',mtime_ms:1,priority:2}
+ let seen:string[]=[]
+ const host=new PersonalAgentHost({...f.host.options,path:join(f.dir,'context-host.json'),memory:()=>memory,generateContext:entries=>{seen=entries.flatMap(item=>item.refs.map(ref=>ref.entry_id));return Promise.resolve({cards:[]})}})
+ host.setSources({list:()=>[],command:()=>Promise.resolve({}),contextEntries:()=>[file]})
+ try{await host.open();host.workbenchContext.update([idea,file]);await host.workbenchContext.refresh();assert.deepEqual(new Set(seen),new Set(['idea','source:note']));assert.equal(host.workbenchContext.snapshot().status,'ready')}
+ finally{await host.close();await f.close()}
 })
 
 test('profile warmup generates grounded suggestions without writing facts or enabling news',async()=>{

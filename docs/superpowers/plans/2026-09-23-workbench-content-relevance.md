@@ -231,31 +231,11 @@ assert.doesNotMatch(savedTodos, /还没有待办/)
 **Interfaces:**
 - Consumes: all earlier tasks.
 - Produces: ten screenshots, an index.html, and a report with source-state, card-count, and real-data/isolated-profile labels.
-- Produces: snapshotPrivateProfile(realRoot: string, captureHome: string): Promise<void> in the capture script; it copies companion files and uses the existing runtime better-sqlite3 dependency for online database backups.
+- Produces: an offline Electron renderer capture using an isolated copy of the real local profile. SQLite databases use online backups; model and external calls stay disabled.
 
 - [ ] **Step 1: Run serial verification.** Run npm run build -w @nova-audio-agent/runtime; node --test runtime/dist/test/personal-sources.test.js runtime/dist/test/workbench-context.test.js runtime/dist/test/model-adapters.test.js runtime/dist/test/personal-agent.test.js; npm run build -w @nova-audio-agent/desktop; node --test clients/desktop/test/connections-panel.test.mjs clients/desktop/test/news-view.test.mjs clients/desktop/test/memory-overview.test.mjs clients/desktop/test/workbench-content.test.mjs; git diff --check. Investigate only concrete failures, then rerun affected checks.
-- [ ] **Step 2: Implement a generic capture script and verify its isolation guard.** Accept REAL_PROFILE_ROOT and CAPTURE_OUTPUT as absolute environment paths; refuse to run if output or copied state resolves inside the real profile. Copy all companion JSON and private state into a mode-0700 temporary home; use SQLite online backups for each live database rather than copying a changing database file. Copy Electron settings into the isolated user-data directory without writing the original. Launch the changed Electron app with --user-data-dir pointing into the copy and NOVA_AUDIO_AGENT_BLACKBOARD_PATH pointing at the copied blackboard; keep the persisted source paths pointed at the actual local files. Do not edit or reset the live profile.
+- [ ] **Step 2: Implement a generic capture script and verify its isolation guard.** Accept REAL_PROFILE_ROOT and CAPTURE_OUTPUT as absolute environment paths; refuse overlap with the real profile. Copy only relevant companion JSON and private state into a mode-0700 temporary home; use SQLite online backups for each live database. Instantiate the changed renderer and local memory/personal hosts against the copy, disable the model gateway, and do not edit or reset the live profile. A connected full-app capture with provider credentials was rejected by automatic approval review, so this offline capture is the authorized evidence boundary.
 
-~~~js
-const Database = createRequire(new URL('../../../runtime/package.json', import.meta.url))('better-sqlite3')
-const isWithin = (root, path) => {const child = relative(root, path); return child === '' || (child !== '..' && !child.startsWith('../') && !isAbsolute(child))}
-if (!isAbsolute(realRoot) || !isAbsolute(outputRoot) || isWithin(realRoot, outputRoot) || isWithin(outputRoot, realRoot)) throw Error('capture_path_unsafe')
-const captureHome = await mkdtemp(join(tmpdir(), 'nova-real-capture-'))
-await snapshotPrivateProfile(realRoot, captureHome)
-async function snapshotPrivateProfile(source, destination) {
-  await mkdir(destination, {recursive:true, mode:0o700})
-  for (const entry of await readdir(source, {withFileTypes:true})) {
-    if (entry.isSymbolicLink() || /(?:-wal|-shm|\.lock)$/u.test(entry.name)) continue
-    const from = join(source, entry.name), to = join(destination, entry.name)
-    if (entry.isDirectory()) await snapshotPrivateProfile(from, to)
-    else if (/\.(?:sqlite|db)$/u.test(entry.name)) {
-      const db = new Database(from, {readonly:true, fileMustExist:true})
-      try {await db.backup(to)} finally {db.close()}
-    } else if (entry.isFile()) await copyFile(from, to)
-  }
-}
-~~~
-
-- [ ] **Step 3: Capture every workbench page from the copied real profile.** Save 01-todos, 02-ideas, 03-goals, 04-feeds, 05-tasks, 06-profile, 07-profile-memory-expanded, 08-profile-memory-detail, 09-todos-chat-collapsed, and 10-desktop-orb. Generate an index.html linking each full-resolution image. Record the exact app commit, copy time, source scan state, card counts, and any model/provider failure. Mark every image and the index as real-data/isolated-profile. If a page is empty, preserve its actual placeholder rather than injecting fixture content.
+- [ ] **Step 3: Capture every workbench page from the copied real profile.** Save 01-todos, 02-ideas, 03-goals, 04-feeds, 05-tasks, 06-profile, 07-profile-memory-expanded, 08-profile-memory-detail, 09-todos-chat-collapsed, and 10-desktop-orb. Generate an index.html linking each full-resolution image. Record the exact app commit, copy time, source scan state, card counts, and disabled model status. Mark every image and the index as real-data/isolated-profile/offline renderer. If a page is empty, preserve its actual placeholder rather than injecting fixture content.
 - [ ] **Step 4: Review the branch with local Claude Opus 5.5 at the user's authorized code/data boundary.** Ask it to challenge source authority, partial-scan behavior, card meaning, empty states, and screenshot evidence. Verify each actionable finding against code and rerun only affected tests.
 - [ ] **Step 5: Commit the generic capture script and any verified fixes; leave private screenshots and report untracked outside the public repo.** Provide the image index to the user. Do not merge, push, deploy, or publish without a separate decision.

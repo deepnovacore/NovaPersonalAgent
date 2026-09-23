@@ -19,7 +19,7 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
  if(draft.id)button('取消编辑',()=>{delete local[formKey];delete local[openKey];rerender()},form)
  button(local[kind+':all']?'隐藏已完成／归档':'显示已完成／归档',()=>{local[kind+':all']=!local[kind+':all'];rerender()},panel)
  const visible=rows.filter(r=>local[kind+':all']||!['done','cancelled','archived','completed'].includes(r.status))
- if(!visible.length){const empty=el('section');empty.className='workbench-empty';const copy=rows.length?{todo:['当前没有进行中的待办','已完成的记录可以从上方展开。'],idea:['当前没有保留的想法','已归档的想法可以从上方展开。'],goal:['当前没有推进中的目标','已归档的目标可以从上方展开。']}[kind]:{todo:['还没有待办','想起一件要做的事，可以随时记在这里。'],idea:['还没有保存想法','有个念头时，先用一句话记下来就好。'],goal:['还没有设定目标','可以先写下想推进的方向，以及怎样算达成。']}[kind];empty.append(el('h3',copy[0]),el('p',copy[1]));panel.append(empty)}
+ if(!visible.length){const empty=el('section');empty.className='workbench-empty';const copy=!state?['正在读取已保存的内容','稍后会在这里显示你的记录。']:rows.length?{todo:['当前没有进行中的待办','已完成的记录可以从上方展开。'],idea:['当前没有保留的想法','已归档的想法可以从上方展开。'],goal:['当前没有推进中的目标','已归档的目标可以从上方展开。']}[kind]:{todo:['还没有待办','想起一件要做的事，可以随时记在这里。'],idea:['还没有保存想法','有个念头时，先用一句话记下来就好。'],goal:['还没有设定目标','可以先写下想推进的方向，以及怎样算达成。']}[kind];empty.append(el('h3',copy[0]),el('p',copy[1]));panel.append(empty)}
  for(const row of visible){const card=el('article');card.className='personal-card';card.dataset.lifeId=row.id;card.append(el('h3',row.title),el('p',row.note));panel.append(card)
   if(row.news_source){card.append(el('p',`由你从公开资讯保存：${row.news_source.title}`),el('p',row.news_source.url));if(openArticle)button('查看资讯原文',()=>openArticle(row.news_source.url),card)}
   if(row.due)card.append(el('p',`到期：${row.due}`))

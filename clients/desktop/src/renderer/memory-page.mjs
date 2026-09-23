@@ -34,7 +34,7 @@ export function renderMemorySection(parent,{snapshot:s,caps,el,button,chips,comm
  else{
   const hero=card('记忆总览');hero.classList.add('memory-hero')
   hero.append(el('p',overview.summary,'memory-overview-copy'))
-  if(!overview.generated&&entries.length)hero.append(el('p','摘要尚未生成，先显示已保存的内容。','hint'))
+  if(!overview.generated&&entries.length)hero.append(el('p','摘要尚未生成，原始记录仍可在下方查看。','hint'))
   hero.append(el('p',overview.coverage,'memory-coverage'))
   for(const group of overview.groups){const a=card(group.title,group.summary);a.classList.add('memory-group');chips(a,group.keywords)}
   const holder=el('div',undefined,'memory-records');section.append(holder)

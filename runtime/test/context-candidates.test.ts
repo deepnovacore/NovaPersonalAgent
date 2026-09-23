@@ -22,5 +22,12 @@ test('candidate selection excludes tool files and keeps diverse readable work',(
 test('activity never turns a cloned repository into a personal Todo or Goal',()=>{
  const selected=selectContextCandidates([file('clone','README.md','Next step: publish a release.',0,Date.now())])
  assert.ok(selected.every(item=>item.tab==='ideas'))
+ assert.ok(selectContextCandidates([file('workspace','README.md','Next step: publish a release.',1,Date.now())]).every(item=>item.tab==='ideas'))
+ assert.deepEqual(selectContextCandidates([file('vendor','vendor/tool/README.md','An idea for setup.',3,Date.now())]),[])
  assert.deepEqual(selectContextCandidates([file('config','config.yaml','key: value')]),[])
+})
+test('an explicitly selected hidden notes folder may contribute its documents only',()=>{
+ const selected={...file('hidden','.notes/idea.md','An idea for a simpler workflow.',3),hidden_prefix_depth:1} as Extract<ContextInput,{kind:'file'}>
+ assert.equal(selectContextCandidates([selected]).length,1)
+ assert.deepEqual(selectContextCandidates([{...selected,rel_path:'.notes/.nested/idea.md'}]),[])
 })

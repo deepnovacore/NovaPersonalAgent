@@ -390,7 +390,7 @@ test('whole-computer grant resumes batches past the directory overview budget wi
   await writeFile(join(f.folder,'.env'),'SECRET=never-read')
   await assert.rejects(f.sources.command('sources.authorize_computer',{consent:true,path:'/'}))
   const grant=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
-  await f.sources.command('sources.sync',{id:grant.id})
+  for(let i=0;i<3&&(await f.knowledge.listSources()).length<19;i++)await f.sources.command('sources.sync',{id:grant.id})
   assert.equal((await f.knowledge.listSources()).length,19)
   assert.equal(f.sources.list()[0]!.scope,'computer')
   assert.equal(f.sources.contextEntries().length,19)
@@ -435,16 +435,56 @@ test('priority directory changes scan order without changing computer authority'
  try{
   const alpha=join(f.folder,'alpha'),project=join(f.folder,'project')
   await mkdir(alpha);await mkdir(project)
-  await writeFile(join(alpha,'README.md'),'Alpha notes')
-  await writeFile(join(project,'README.md'),'Project notes')
+ await writeFile(join(alpha,'README.md'),'Alpha notes')
+ await writeFile(join(project,'README.md'),'Project notes')
+  await mkdir(join(project,'.github'));await writeFile(join(project,'.github','notes.md'),'Hidden project metadata')
   const grant=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
   await f.sources.command('sources.priority.add',{path:project})
   assert.deepEqual(f.sources.list()[0]!.priority_dirs,[project])
+  await f.sources.command('sources.sync',{id:grant.id})
+  assert.equal(f.sources.contextEntries().some(entry=>entry.content.includes('Hidden project metadata')),false)
   await f.sources.command('sources.priority.remove',{path:project})
   assert.deepEqual(f.sources.list()[0]!.priority_dirs,[])
   assert.equal(f.sources.list()[0]!.state,'connected')
   await f.sources.command('sources.sync',{id:grant.id})
   assert.ok((await f.knowledge.listSources()).some(s=>s.locator===join(project,'README.md')))
+ }finally{await f.close()}
+})
+test('adding a priority does not resume a paused computer grant',async()=>{
+ const f=await fixture()
+ try{
+  const project=join(f.folder,'project');await mkdir(project);await writeFile(join(project,'README.md'),'Project notes')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.pause',{id})
+  const before=f.sources.list()[0]!.read
+  await f.sources.command('sources.priority.add',{path:project})
+  assert.equal(f.sources.list()[0]!.state,'paused')
+  assert.equal(f.sources.list()[0]!.read,before)
+ }finally{await f.close()}
+})
+test('computer candidates keep nested Git repositories separate',async()=>{
+ const f=await fixture()
+ try{
+  const code=join(f.folder,'code');await mkdir(code)
+  for(const name of ['active','older']){const repo=join(code,name);await mkdir(repo);await mkdir(join(repo,'.git'));await writeFile(join(repo,'README.md'),`An idea for ${name} setup.`)}
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  for(let i=0;i<4&&(await f.knowledge.listSources()).length<2;i++)await f.sources.command('sources.sync',{id})
+  assert.deepEqual(new Set(f.sources.contextEntries().flatMap(item=>item.kind==='file'?[item.root]:[])),new Set([join(code,'active'),join(code,'older')]))
+ }finally{await f.close()}
+})
+test('whole-computer scan invalidates a file when its parent folder is deleted',async()=>{
+ const f=await fixture()
+ try{
+  const project=join(f.folder,'project'),nested=join(project,'notes');await mkdir(project);await mkdir(nested)
+  const document=join(nested,'plan.md');await writeFile(document,'An idea for a simpler setup.')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id})
+  const tracked=f.sources.contextEntries().find(item=>item.kind==='file'&&item.content.includes('simpler setup'))
+  assert.ok(tracked)
+  await rm(nested,{recursive:true})
+  await f.sources.command('sources.sync',{id})
+  assert.equal(f.sources.contextEntries().some(item=>item.kind==='file'&&item.content.includes('simpler setup')),false)
+  assert.equal((await f.knowledge.listSources()).some(item=>item.locator===document),false)
  }finally{await f.close()}
 })
 test('computer roots rank selected and current work ahead of recent Git and mtime',()=>{

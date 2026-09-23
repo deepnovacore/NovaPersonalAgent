@@ -25,6 +25,22 @@ test('empty Life and source states use specific copy without inventing work',t=>
  assert.match(text(h.panel),/正在整理已授权的资料/u)
  assert.doesNotMatch(text(h.panel),/值得关注|持续推进/u)
 })
+test('unloaded Life data and paused sources never claim an empty list or active scan',t=>{
+ const h=harness(t)
+ renderLife(h.panel,{...h,kind:'todo',state:undefined})
+ assert.match(text(h.panel),/正在读取已保存的内容/u)
+ assert.doesNotMatch(text(h.panel),/还没有待办/u)
+ renderSourceSuggestions(h.panel,{tab:'todos',context:{status:'idle',candidate_count:0,cards:[]},sources:[{state:'paused',scan_pending:true}],button:h.button,command:h.command,continueChat:()=>{}})
+ assert.match(text(h.panel),/资料来源已暂停/u)
+ assert.doesNotMatch(text(h.panel),/正在整理已授权的资料/u)
+})
+test('a partial source failure remains visible beside available suggestions',t=>{
+ const h=harness(t)
+ renderSourceSuggestions(h.panel,{tab:'ideas',context:{status:'ready',cards:[{id:'card',tab:'ideas',title:'Simplify setup',body:'The note suggests a shorter setup.',refs:[]}]},sources:[{scope:'computer',state:'error'}],button:h.button,command:h.command,continueChat:()=>{},openSettings:()=>{}})
+ assert.match(text(h.panel),/Simplify setup/u)
+ assert.match(text(h.panel),/整机资料尚未读完/u)
+ assert.match(text(h.panel),/查看来源/u)
+})
 test('disabled news has an honest empty state',t=>{
  const h=harness(t)
  renderNews(h.panel,{...h,news:{enabled:false,items:[],saved:[],sources:[],interests:[],profile_version:0}})
