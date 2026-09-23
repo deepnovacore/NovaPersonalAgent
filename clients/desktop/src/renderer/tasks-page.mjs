@@ -4,7 +4,7 @@ export const activeTaskCount=state=>(state?.tasks??[]).filter(t=>['started','wor
 export function renderTasksPage(panel,{tasks,taskAction,results,openResults,card,chips,button,askProgress}){
  const state=tasks()
  if(state?.error){const notice=card('任务列表暂时不可用',state.error);notice.classList.add('warn');notice.setAttribute('role','alert')}
- const list=state?.tasks??[];if(!list.length)card('暂无任务','开始对话后可在这里查看任务进展。')
+ const list=state?.tasks??[];if(!list.length){const empty=document.createElement('section');empty.className='empty-state';for(const [tag,text]of [['h3','暂无任务'],['p','开始对话后可在这里查看任务进展。']]){const node=document.createElement(tag);node.textContent=text;empty.append(node)}panel.append(empty)}
  for(const task of list){
   const a=card(task.title,task.summary);a.dataset.phase=task.phase
   chips(a,[task.project,TASK_PHASE_LABEL[task.phase]||task.phase,task.executor])

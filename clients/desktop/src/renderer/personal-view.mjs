@@ -33,47 +33,58 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const waiting=el('div',undefined,'presentation-waiting');workspace.append(waiting)
  const panel=el('div',undefined,'workbench-page');workspace.append(panel)
  // Chat pane
- const chat=mountChatPane(root,{c,el,button,run,api,chips,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.setAttribute('aria-expanded',String(value))}})
+ const chat=mountChatPane(root,{c,el,button,run,api,chips,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.title=chatToggle.textContent;chatToggle.setAttribute('aria-expanded',String(value))}})
  chat.setOpen(true)
  const expand=el('button','展开 Nova');expand.id='personal-expand';expand.type='button';expand.addEventListener('click',()=>run(()=>collapse(false)));const orbModes=el('div',undefined,'personal-orb-modes');orbModes.append(expand);document.querySelector('#shell').append(orbModes)
  const orbVoice=button('开始语音',()=>c.mode==='voice'?c.stopVoice():c.voiceId?c.resumeVoice():c.voice(),orbModes)
  button('后台',()=>c.setPresentation('background'),orbModes)
  const orbError=el('p','','personal-orb-error');orbError.setAttribute('role','alert');document.querySelector('#shell').append(orbError)
  panel.addEventListener('focusout',()=>setTimeout(()=>{if(!panel.contains?.(document.activeElement))update()},0))
+ // A semantic button lets keyboard and screen-reader users expand long bodies.
+ const expandedBodies=new Set()
+ const bodyMeasures=new WeakMap(),bodyObserver=globalThis.ResizeObserver?new ResizeObserver(entries=>{for(const entry of entries)bodyMeasures.get(entry.target)?.()}):null
+ const clampable=(node,id,title)=>{node.type='button';node.dataset.cardBodyId=id;const sync=()=>{const open=expandedBodies.has(id);node.dataset.expanded=String(open);node.setAttribute('aria-expanded',String(open));node.setAttribute('aria-label',`${open?'收起':'展开'}正文：${title}`)};const measure=()=>{if(node.isConnected===false||!node.clientHeight)return;node.disabled=!expandedBodies.has(id)&&node.scrollHeight<=node.clientHeight};sync();node.addEventListener('click',()=>{if(globalThis.getSelection?.()?.toString())return;expandedBodies.has(id)?expandedBodies.delete(id):expandedBodies.add(id);sync();measure()});bodyMeasures.set(node,measure);bodyObserver?.observe(node);globalThis.requestAnimationFrame?.(measure)}
  const card=(title,summary)=>{const a=el('article',undefined,'card');a.append(el('h3',title));if(summary)a.append(el('p',summary));panel.append(a);return a}
  const continueChat=text=>chat.focusDraft(`关于「${text}」：`)
  let renderedSnapshot=null,taskRevision=-1
  function renderPanel(){
-  const focused=panel.contains?.(document.activeElement)?document.activeElement:null,focusLabel=focused?.getAttribute?.('aria-label'),focusText=focused?.tagName==='BUTTON'?focused.textContent:null
-  panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
-  const s=c.snapshot;const caps=s?.capabilities??{}
+  const focused=panel.contains?.(document.activeElement)?document.activeElement:null,focusBodyId=focused?.dataset?.cardBodyId,focusLabel=focused?.getAttribute?.('aria-label'),focusText=focused?.tagName==='BUTTON'?focused.textContent:null
+  bodyObserver?.disconnect();panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
+  const s=c.snapshot;const caps=s?.capabilities??{};let suggestions=null
   if(selected!=='tasks'){
    const context=s?.workbench_context
    if(!(s?.sources?.length))button('连接本机资料，自动整理工作台',()=>openSettings('connections'),panel)
    if(context?.status==='working')panel.append(el('p','正在根据已授权资料整理内容…','hint'))
    if(context?.status==='failed')panel.append(el('p','本轮整理未完成；已有内容保留，后台会重试。','hint'))
-   for(const item of context?.cards??[]){if(item.tab!==selected)continue;const a=card(item.title,item.body);a.append(el('p','Nova 根据资料整理 · 建议不代表已承诺或已执行','hint'));const refs=el('details');refs.append(el('summary','查看依据'));for(const ref of item.refs){const entry=s.memory?.entries?.find(e=>e.id===ref.entry_id&&e.version===ref.version);refs.append(el('p',ref.label??entry?.content??ref.entry_id))}a.append(refs);button('继续讨论',()=>continueChat(item.title+'：'+item.body),a);button('隐藏',()=>c.command('context.dismiss',{id:item.id}),a)}
+   const cards=(context?.cards??[]).filter(item=>item.tab===selected)
+   if(cards.length){suggestions=el('section',undefined,'card-group');suggestions.setAttribute('aria-label','Nova 建议');suggestions.append(el('h3',`Nova 建议 · ${cards.length}`,'section-label'))}
+   for(const item of cards){const a=el('article',undefined,'card suggestion-card');a.append(el('h3',item.title));const body=el('button',item.body,'card-body');clampable(body,item.id,item.title);a.append(body)
+    const footer=el('div',undefined,'card-footer'),meta=el('div',undefined,'card-meta'),actions=el('div',undefined,'card-actions');footer.append(meta,actions);a.append(footer)
+    const refs=el('details');refs.append(el('summary','查看依据'));for(const ref of item.refs){const entry=s.memory?.entries?.find(e=>e.id===ref.entry_id&&e.version===ref.version);refs.append(el('p',ref.label??entry?.content??ref.entry_id))}meta.append(refs,el('p','Nova 根据资料整理 · 建议不代表已承诺或已执行','hint'))
+    button('继续讨论',()=>continueChat(item.title+'：'+item.body),actions).className='soft';button('隐藏',()=>c.command('context.dismiss',{id:item.id}),actions).className='ghost';suggestions.append(a)}
   }
   const candidateKind=({todos:'todo',ideas:'idea',goals:'goal',profile:'profile'})[selected]
   const pending=el('section',undefined,'pending-group');pending.setAttribute('aria-label','待确认')
   if(s?.understanding?.error&&candidateKind)pending.append(el('p','这条发言暂时没能记下来，你仍可以手动添加。','hint'))
   if(selected==='todos')for(const item of s?.understanding?.recorded??[]){const a=el('article',undefined,'card pending');a.append(el('h3','已记下待办'),el('p',item.text));pending.append(a);const current=s.life?.todos?.find(t=>t.id===item.object_id);if(current?.version===item.version)button('撤销记录',()=>c.command('understanding.action',{id:item.id,action:'undo'}),a)}
   for(const item of s?.understanding?.items??[]){if(item.kind!==candidateKind)continue;const a=el('article',undefined,'card pending');a.append(el('h3','可能想记下'),el('p',item.text),el('p',`依据：${item.quote}`,'hint'));if(item.kind==='profile')a.append(el('p','确认后将追加到个人介绍，不会替换已有内容。','hint'));const edit=el('textarea');edit.value=lifeLocal['candidate:'+item.id]??item.text;edit.maxLength=1000;edit.setAttribute('aria-label','候选内容');edit.addEventListener('input',()=>{lifeLocal['candidate:'+item.id]=edit.value});a.append(edit);button('记下来',()=>c.command('understanding.action',{id:item.id,action:'accept',text:edit.value,...(item.kind==='profile'?{expected_profile_version:s.life.profile.version}:{})}),a);button('略过',()=>c.command('understanding.action',{id:item.id,action:'dismiss'}),a);pending.append(a)}
-  if(pending.children?.length||pending.childElementCount)panel.append(pending)
+  const lead=[...(pending.children?.length||pending.childElementCount?[pending]:[]),...(suggestions?[suggestions]:[])]
+  const pageLinks=()=>{const links=el('div',undefined,'page-links');panel.append(links);return links}
   if(['todos','ideas','goals'].includes(selected)){
-   renderLife(panel,{kind:({todos:'todo',ideas:'idea',goals:'goal'})[selected],state:s?.life,openArticle:url=>api.personal.openArticle(url),command:(m,p)=>c.command(m,p),button,run,local:lifeLocal,rerender:renderPanel,delegate:text=>chat.focusDraft(text)})
-   if(selected==='todos')button('查看 Agent 执行任务',()=>{selected='tasks';renderPanel()},panel).className='link-button'
+   renderLife(panel,{kind:({todos:'todo',ideas:'idea',goals:'goal'})[selected],lead,clampable,state:s?.life,openArticle:url=>api.personal.openArticle(url),command:(m,p)=>c.command(m,p),button,run,local:lifeLocal,rerender:renderPanel,delegate:text=>chat.focusDraft(text)})
+   if(selected==='todos')button('查看 Agent 执行任务',()=>{selected='tasks';renderPanel()},pageLinks()).className='link-button'
   }else if(selected==='feeds'){
-   renderNews(panel,{news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings})
+   renderNews(panel,{news:s?.news,lead,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings})
   }else if(selected==='tasks'){
    renderTasksPage(panel,{tasks,taskAction,results,openResults,card,chips,button,askProgress:task=>{const feed=c.snapshot?.feed?.find(item=>item.task_ref?.work_id===task.work_id);if(!feed)return continueChat(`${task.title} · ${task.work_id}`);return c.openFeed(feed.id,'询问任务进展').then(result=>{chat.reveal();return result})}})
-   button('任务控制与结果',openResults,panel).className='link-button'
+   button('任务控制与结果',openResults,pageLinks()).className='link-button'
   }else if(selected==='profile'){
+   panel.append(...lead)
    renderProfile(panel,{state:s?.life,news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    renderMemorySection(panel,{snapshot:s,caps,el,button,chips,command:(m,p)=>c.command(m,p),continueChat,connected:c.connected,local:lifeLocal})
   }
   for(const b of panel.querySelectorAll('button'))if(!c.connected)b.disabled=true
-  if(focusLabel||focusText){const target=[...panel.querySelectorAll('button,input,textarea,select')].find(node=>focusLabel?node.getAttribute('aria-label')===focusLabel:node.textContent===focusText);if(target&&!target.disabled)target.focus?.({preventScroll:true})}
+  if(focusBodyId||focusLabel||focusText){const target=[...panel.querySelectorAll('button,input,textarea,select')].find(node=>focusBodyId?node.dataset?.cardBodyId===focusBodyId:focusLabel?node.getAttribute('aria-label')===focusLabel:node.textContent===focusText);if(target&&!target.disabled)target.focus?.({preventScroll:true})}
  }
  function update(){
   document.body.dataset.personalCollapsed=String(c.collapsed)

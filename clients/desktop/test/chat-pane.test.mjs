@@ -2,9 +2,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mountPersonalView} from '../src/renderer/personal-view.mjs'
 class Node{
- constructor(tag,text){this.tag=tag;this.text=text;this.children=[];this.listeners={};this.dataset={};this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
- append(...c){this.children.push(...c)}prepend(...c){this.children.unshift(...c)}replaceChildren(...c){this.children=c}setAttribute(k,v){this[k]=v;this.attrs[k]=v}addEventListener(n,f){this.listeners[n]=f}
- querySelectorAll(sel){const tags=sel.split(',');return this.children.flatMap(n=>[...(tags.includes(n.tag)?[n]:[]),...n.querySelectorAll(sel)])}querySelector(sel){return this.querySelectorAll(sel)[0]}focus(){this.focused=(this.focused??0)+1}contains(){return false}
+ constructor(tag,text){this.tag=tag;this.tagName=tag.toUpperCase();this.text=text;this.children=[];this.listeners={};this.dataset={};this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
+ append(...c){this.children.push(...c)}prepend(...c){this.children.unshift(...c)}replaceChildren(...c){this.children=c}setAttribute(k,v){this[k]=v;this.attrs[k]=v}getAttribute(k){return this.attrs[k]}addEventListener(n,f){this.listeners[n]=f}
+ querySelectorAll(sel){const tags=sel.split(',');return this.children.flatMap(n=>[...(tags.includes(n.tag)?[n]:[]),...n.querySelectorAll(sel)])}querySelector(sel){return this.querySelectorAll(sel)[0]}focus(){this.focused=(this.focused??0)+1;document.activeElement=this}contains(node){return this===node||this.children.some(child=>child.contains?.(node))}
  get childElementCount(){return this.children.length}
 }
 function mount(){
@@ -29,6 +29,26 @@ test('collapsed chat pane defers receipts until it reopens, and failed receipts 
  await toggle.listeners.click();assert.deepEqual(m.receipts(),['f1'])
  const request=m.sent.findLast(f=>f.method==='feed.action');m.view.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'offline'});await new Promise(r=>setImmediate(r))
  m.view.refresh();assert.deepEqual(m.receipts(),['f1','f1'],'a failed receipt is retried by a plain update')
+})
+test('suggestion body is an accessible control and remains expanded after a snapshot refresh',()=>{
+ const m=mount();const context={cards:[{id:'s1',tab:'todos',title:'Review',body:'A long recommendation '.repeat(30),refs:[]}],status:'ready'}
+ m.view.receive(feedState(1,'c',{workbench_context:context,sources:[{id:'local'}]}))
+ const body=()=>m.all().find(n=>n.className==='card-body')
+ assert.equal(body().tag,'button')
+ assert.equal(body().attrs['aria-expanded'],'false')
+ body().listeners.click()
+ assert.equal(body().attrs['aria-expanded'],'true')
+ body().focus()
+ m.view.receive(feedState(2,'c',{workbench_context:context,sources:[{id:'local'}]}))
+ assert.equal(body().attrs['aria-expanded'],'true')
+ assert.equal(document.activeElement,body())
+})
+test('a personal todo with a long note can expand its four-line body',()=>{
+ const m=mount();m.view.receive(feedState(1,'c',{sources:[{id:'local'}],life:{todos:[{id:'todo1',title:'Prepare',note:'Detailed note '.repeat(30),status:'open',version:1}],ideas:[],goals:[]}}))
+ const note=m.all().find(n=>n.className==='card-body'&&n.dataset.cardBodyId==='life:todo:todo1')
+ assert.equal(note?.tag,'button')
+ note.listeners.click()
+ assert.equal(note.attrs['aria-expanded'],'true')
 })
 test('asking for task progress through a feed opens the chat pane', async()=>{
  const state={tasks:[{work_id:'w1',title:'修复',phase:'working',project:'p',executor:'codex',summary:''}]}

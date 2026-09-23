@@ -1145,6 +1145,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       mainWindow.setResizable(false)
       mainWindow.setMinimumSize(1, 1)
       mainWindow.setAlwaysOnTop(true, 'floating')
+      mainWindow.setHasShadow(false)
       mainWindow.setBounds(initialOrbBounds)
       orbWindow.sync()
     } else {
@@ -1156,6 +1157,10 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       mainWindow.setResizable(true)
       mainWindow.setMinimumSize(Math.min(660, area.width), Math.min(520, area.height))
       mainWindow.setAlwaysOnTop(false)
+      // The orb window is created shadowless; the workbench needs the system
+      // shadow (macOS derives it from the rounded, transparent content) to read
+      // as a window against the desktop.
+      mainWindow.setHasShadow(true)
       mainWindow.setBounds(personalBounds ?? {x:area.x+Math.round((area.width-width)/2),y:area.y+Math.round((area.height-height)/2),width,height})
       personalBounds = mainWindow.getBounds()
     }

@@ -1,9 +1,9 @@
 import {renderInterests,renderWarmup} from './profile-preferences.mjs'
 const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n}
-export function renderNews(panel,{news,warmup,command,button,local,preferencesLocal=local,rerender,profile,openArticle,delegate}){
+export function renderNews(panel,{news,warmup,command,button,local,preferencesLocal=local,rerender,profile,openArticle,delegate,lead=[]}){
  panel.append(el('h2','Feeds · 为你发现'))
  renderWarmup(panel,{warmup,command,button})
- if(!news){const pending=el('p','正在连接资讯…');pending.setAttribute('role','status');panel.append(pending);return}
+ if(!news){const pending=el('p','正在连接资讯…');pending.setAttribute('role','status');panel.append(pending,...lead);return}
  const bar=el('div');bar.className='news-toolbar';panel.append(bar)
  const tabs=el('div');tabs.className='preference-segments';tabs.setAttribute('role','group');tabs.setAttribute('aria-label','资讯视图');bar.append(tabs)
  for(const [saved,label]of [[false,'为你推荐'],[true,'收藏']]){const b=button(label,()=>{local.saved=saved;rerender()},tabs);b.setAttribute('aria-pressed',String(Boolean(local.saved)===saved))}
@@ -13,6 +13,8 @@ export function renderNews(panel,{news,warmup,command,button,local,preferencesLo
  if(!news.enabled||local.preferences)renderInterests(panel,{news,warmup,command,button,local:preferencesLocal,rerender,delegate})
  if(!news.enabled&&(news.items.length||news.saved.length)){const note=el('p','资讯更新已暂停，已获取的内容和收藏仍可阅读。');note.className='hint';panel.append(note)}
  if(news.refreshing){const loading=el('div');loading.className='warmup-status';loading.setAttribute('role','status');const spinner=el('span');spinner.className='warmup-spinner';spinner.setAttribute('aria-hidden','true');loading.append(spinner,el('p',news.items.length?'正在更新，已有内容仍可阅读。':'正在准备第一批资讯…'));panel.append(loading)}
+ // Local-source summaries sit under the view switcher, ahead of the article list.
+ panel.append(...lead)
  const items=local.saved?news.saved:news.items
  if(!items.length){const empty=el('section');empty.className='news-empty';panel.append(empty)
   empty.append(el('h3',local.saved?'值得留住的内容，会在这里':!news.enabled?'为你准备一份资讯精选':news.refreshing?'好内容正在路上':'暂时没有新内容'))
