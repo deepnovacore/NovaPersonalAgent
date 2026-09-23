@@ -6,12 +6,14 @@ import {buildProductionComposition} from './composition/production-composition.j
 
 type UtilityProcess = NodeJS.Process & {readonly parentPort?: DesktopStopParentSource & {postMessage(message: unknown): void}}
 
-installAcceptanceGate()
+const acceptance=installAcceptanceGate()
+if(process.argv.includes('--nova-workbench-acceptance-required')&&!acceptance)throw Error('acceptance_gate_missing')
 
 const token = process.env.NOVA_AUDIO_AGENT_DESKTOP_TOKEN ?? ''
 const readyEndpoint = process.env.NOVA_AUDIO_AGENT_DESKTOP_READY_ENDPOINT ?? ''
 const stop = new AbortController()
 const parentPort = (process as UtilityProcess).parentPort
+if(acceptance)parentPort?.postMessage({type:'nova:acceptance:gate-ready',buildCommit:acceptance.buildCommit,probeBlocked:true})
 
 let capabilityView: (() => DesktopCapabilityState | undefined) = () => undefined
 let knowledgeHandle: ((method: string, params: unknown) => Promise<unknown>) | undefined

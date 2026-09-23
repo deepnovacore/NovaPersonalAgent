@@ -60,6 +60,8 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
  const source=JSON.parse(readFileSync(manifest.originalBlackboardPath+'.personal.json.sources.json','utf8')) as {sources?:{deleting?:boolean;view?:{state?:string};processing_consent?:{extraction_provider?:string|null;embedding_provider?:string|null}}[]}
  const grants=source.sources?.filter(record=>!record.deleting&&['connected','error'].includes(record.view?.state??''))??[]
  if(!grants.length)throw Error('acceptance_no_active_sources')
+ const sourceIdentities=new Set(grants.flatMap(record=>[record.processing_consent?.extraction_provider,record.processing_consent?.embedding_provider]).filter((id):id is string=>typeof id==='string'))
+ if(manifest.providers.some(provider=>!sourceIdentities.has(provider.identity))||manifest.allowedIdentities.some(identity=>!sourceIdentities.has(identity)))throw Error('acceptance_provider_outside_source_grant')
  for(const record of grants)for(const identity of [record.processing_consent?.extraction_provider,record.processing_consent?.embedding_provider])if(!identity||!manifest.allowedIdentities.includes(identity))throw Error('acceptance_processing_grant_mismatch')
  // Preserve the method for Reflect.apply with the calling socket below.
  // eslint-disable-next-line @typescript-eslint/unbound-method
@@ -79,9 +81,13 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
   transport.request=function(...args:unknown[]){
    const input=args[0]
    const url=typeof input==='string'||input instanceof URL?new URL(input):undefined
-   const options=input&&typeof input==='object'?input as {hostname?:string;host?:string}:undefined
-   const host=url?.hostname??options?.hostname??options?.host
-   if(!host||!url||!loopback.has(url.host)){blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error('acceptance_unapproved_http_transport')}
+   const rawOptions=url?args[1]:input
+   const options=rawOptions&&typeof rawOptions==='object'?rawOptions as {hostname?:string;host?:string;port?:string|number;protocol?:string;socketPath?:string}:undefined
+   const host=options?.hostname??options?.host??url?.hostname
+   const protocol=options?.protocol??url?.protocol??(transport===https?'https:':'http:')
+   const urlPort=url?.port===''?undefined:url?.port
+   const port=options?.port??urlPort??(protocol==='https:'?443:80)
+   if(options?.socketPath||protocol!=='http:'||host!=='127.0.0.1'||!loopback.has(host+':'+String(port))){blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error('acceptance_unapproved_http_transport')}
    return Reflect.apply(originalRequest,transport,args) as http.ClientRequest
   }
  }
@@ -113,7 +119,7 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
  // Exercise the real gate before callers may open a host.
  try{assertAcceptanceUrl('https://acceptance-blocked.invalid/probe');throw Error('acceptance_gate_probe_failed')}catch(error){if(!(error instanceof Error)||error.message!=='acceptance_unknown_outbound')throw error}
  appendAcceptanceCounts('gate_installed',{installed:1})
- appendAcceptanceCounts('disabled_modules',{news:1,proactive:1,connectors:1,phone:1,external_mcp:1,coding:1,voice_activation:1})
+ appendAcceptanceCounts('disabled_modules',{news:1,proactive:1,connectors:1,phone:1,external_mcp:1,coding:1,voice_activation:1,profile_warmup:1,understanding:1,memory_overview:1,search:1,camera_capability:1,wake_word:1})
  return manifest
 }
 export function acceptanceProfileHash(path:string):string{return createHash('sha256').update(canonical(path)).digest('hex')}
@@ -124,8 +130,9 @@ export function assertAcceptanceGrant(expected:{extraction_provider:string|null;
  if(!grants.length||grants.some(grant=>grant.extraction_provider!==expected.extraction_provider||grant.embedding_provider!==expected.embedding_provider))throw Error('acceptance_processing_grant_mismatch')
 }
 
-export function assertPersistedAcceptanceGrant(expected:{extraction_provider:string|null;embedding_provider:string|null}|undefined):void{
- if(!active)return
+export function assertPersistedAcceptanceGrant(expected:{extraction_provider:string|null;embedding_provider:string|null}|undefined,hostPath?:string):void{
+ if(!active){if(acceptanceEnabled())throw Error('acceptance_gate_missing');return}
+ if(hostPath!==undefined&&canonical(hostPath)!==canonical(active.originalBlackboardPath+'.personal.json'))throw Error('acceptance_wrong_host_path')
  const state=JSON.parse(readFileSync(active.originalBlackboardPath+'.personal.json.sources.json','utf8')) as {sources?:{deleting?:boolean;view?:{state?:string};processing_consent?:{extraction_provider:string|null;embedding_provider:string|null}}[]}
  assertAcceptanceGrant(expected,(state.sources??[]).filter(record=>!record.deleting&&['connected','error'].includes(record.view?.state??'')).map(record=>record.processing_consent??{extraction_provider:null,embedding_provider:null}))
 }

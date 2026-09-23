@@ -39,3 +39,60 @@ test('a held Electron singleton is rejected using a synthetic profile directory'
   assert.throws(()=>preflightLocks({originalUserData:join(root,'electron'),originalBlackboardPath:join(root,'blackboard.sqlite')}),/profile_locked/)
  }finally{rmSync(root,{recursive:true,force:true})}
 })
+
+test('Chromium gate attaches to actual production partition and counts its blocked request',async()=>{
+ const {installAcceptanceWindowGate}=await import('../src/main/workbench-native-acceptance.mjs')
+ const {browserWindowOptions}=await import('../src/main/security.mjs')
+ const partition=browserWindowOptions('/synthetic/preload','synthetic').webPreferences.partition
+ const sessions=new Map([[partition,{webRequest:{onBeforeRequest(handler){this.handler=handler}}}],['default',{webRequest:{onBeforeRequest(){throw Error('wrong session')}}}]])
+ let blocked=0
+ installAcceptanceWindowGate({webContents:{session:sessions.get(partition)}},url=>{if(url!=='nova://orb/index.html'){blocked++;throw Error('blocked')}})
+ const handler=sessions.get(partition).webRequest.handler
+ handler({url:'https://unknown.invalid'},decision=>assert.equal(decision.cancel,true))
+ handler({url:'nova://orb/index.html'},decision=>assert.equal(decision.cancel,false))
+ assert.equal(blocked,1)
+})
+test('initial acceptance wake configuration starts no worker and does not change saved settings',async()=>{
+ const {acceptanceWakeSettings}=await import('../src/main/workbench-native-acceptance.mjs')
+ const {WakeWordRuntime}=await import('../src/main/wake-word/runtime.mjs')
+ let workers=0
+ const wake=new WakeWordRuntime({modelRoot:'/synthetic/models',WorkerClass:class{constructor(){workers++;throw Error('worker must not start')}}})
+ const saved=Object.freeze({wakeWordEnabled:true,autoHideSeconds:30})
+ wake.configure(acceptanceWakeSettings(saved,true));wake.start()
+ assert.equal(workers,0);assert.equal(wake.status,'off');assert.equal(saved.wakeWordEnabled,true)
+ assert.equal(acceptanceWakeSettings(saved,false),saved)
+})
+
+test('partial lsof errors still reject an observed owner PID',async()=>{
+ const {preflightLocks}=await import('../scripts/workbench-native-live-acceptance.mjs')
+ assert.throws(()=>preflightLocks({originalUserData:'/synthetic',originalBlackboardPath:'/synthetic/blackboard.sqlite'},()=>{throw Object.assign(Error('partial paths'),{status:1,stdout:'1234\n'})}),/profile_locked/)
+})
+test('runtime gate proof is mandatory and bound to this build',async()=>{
+ const {EventEmitter}=await import('node:events')
+ const {waitForAcceptanceRuntimeGate}=await import('../src/main/workbench-native-acceptance.mjs')
+ const child=new EventEmitter()
+ const proof=waitForAcceptanceRuntimeGate(child,'a'.repeat(40),20)
+ child.emit('message',{type:'nova:acceptance:gate-ready',buildCommit:'a'.repeat(40),probeBlocked:true})
+ await proof
+ await assert.rejects(waitForAcceptanceRuntimeGate(new EventEmitter(),'a'.repeat(40),5),/gate_proof_missing/)
+ const wrong=new EventEmitter(),bad=waitForAcceptanceRuntimeGate(wrong,'a'.repeat(40),20)
+ wrong.emit('message',{type:'nova:acceptance:gate-ready',buildCommit:'b'.repeat(40),probeBlocked:true})
+ await assert.rejects(bad,/gate_proof_mismatch/)
+})
+
+test('stale capture manifests and PNGs cannot satisfy a new acceptance run',async()=>{
+ const {mkdtempSync,writeFileSync,unlinkSync,rmSync}=await import('node:fs')
+ const {tmpdir}=await import('node:os')
+ const {join}=await import('node:path')
+ const {assertFreshArtifacts}=await import('../scripts/workbench-native-live-acceptance.mjs')
+ const root=mkdtempSync(join(tmpdir(),'native-fresh-test-'))
+ try{for(const name of ['capture.json','final-todos.png','initial-profile.png','counts.ndjson','report.json']){writeFileSync(join(root,name),'stale');assert.throws(()=>assertFreshArtifacts(root),/fresh_output_required/);unlinkSync(join(root,name))}assert.doesNotThrow(()=>assertFreshArtifacts(root))}finally{rmSync(root,{recursive:true,force:true})}
+})
+test('production main installs partition gate before loading and overrides every wake configuration',async()=>{
+ const {readFile}=await import('node:fs/promises')
+ const main=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const creation=main.slice(main.indexOf('async function createWindow('),main.indexOf('function openMemoryBoard('))
+ assert.match(creation,/installAcceptanceWindowGate\(window,assertAcceptanceUrl\)/u)
+ assert.doesNotMatch(main,/session\.defaultSession|wakeWord\??\.configure\(currentSettings\)/u)
+ assert.equal([...main.matchAll(/wakeWord\??\.configure\(acceptanceWakeSettings/g)].length,3)
+})

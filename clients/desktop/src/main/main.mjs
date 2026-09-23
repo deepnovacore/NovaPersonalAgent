@@ -1,5 +1,5 @@
-import {allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-audio-agent/runtime/desktop'
-import {captureNativeWorkbench,waitForNativeWorkbench} from './workbench-native-acceptance.mjs'
+import {appendAcceptanceCounts, allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-audio-agent/runtime/desktop'
+import {captureNativeWorkbench,waitForNativeWorkbench,installAcceptanceWindowGate,acceptanceWakeSettings,waitForAcceptanceRuntimeGate} from './workbench-native-acceptance.mjs'
 import {writeFileSync as writeAcceptanceFile} from 'node:fs'
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
@@ -27,7 +27,6 @@ import {
   net,
   protocol,
   safeStorage,
-  session,
   screen,
   shell,
   systemPreferences,
@@ -131,6 +130,7 @@ import { isValidCategory } from '../renderer/settings-categories.mjs'
 
 configureDesktopIdentity(app)
 const acceptance = installAcceptanceGate()
+let acceptanceFailure=false
 if(acceptance)assertOriginalProfilePaths({userData:app.getPath('userData'),blackboardPath:process.env.NOVA_AUDIO_AGENT_BLACKBOARD_PATH},{userData:acceptance.originalUserData,blackboardPath:acceptance.originalBlackboardPath})
 registerAppScheme(protocol)
 
@@ -372,7 +372,7 @@ const settingsWriter = createSettingsWriter({
 function publishCommittedSettings() {
   if (!currentSettings.phoneConnectionEnabled) void managedPhone.stop()
   capabilityEditorCache = null
-  if(presentationMode!=='background')wakeWord?.configure(currentSettings)
+  if(presentationMode!=='background')wakeWord?.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
   settingsGeneration += 1
   sendToOrb('nova:settings:changed', orbSettings(currentSettings))
   sendToSettings('nova:settings:changed', settingsView())
@@ -439,6 +439,7 @@ async function createWindow(launchId) {
   const position = clampToNearestWorkArea(candidate)
   window.setPosition(position.x, position.y)
   window.setAlwaysOnTop(true, 'floating')
+  if(acceptance)installAcceptanceWindowGate(window,assertAcceptanceUrl)
   configureWindowSecurity(window)
   window.once('ready-to-show', () => window.showInactive())
   return window
@@ -1019,12 +1020,14 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
       searchProxyUrl,
     })
     await feishuSetupOwner.release()
-    spawnedBackend = utilityProcess.fork(spec.entry, spec.argv, {
+    if(acceptance&&(spec.env.NOVA_WORKBENCH_ACCEPTANCE_MANIFEST!==process.env.NOVA_WORKBENCH_ACCEPTANCE_MANIFEST||spec.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT!==process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT))throw Error('acceptance_child_environment_missing')
+    spawnedBackend = utilityProcess.fork(spec.entry, acceptance?[...spec.argv,'--nova-workbench-acceptance-required']:spec.argv, {
       cwd: workspace,
       env: spec.env,
       stdio: spec.stdio,
       serviceName: 'Nova Audio Agent Runtime',
     })
+    const acceptanceProof=acceptance?waitForAcceptanceRuntimeGate(spawnedBackend,acceptance.buildCommit):Promise.resolve()
     backend = spawnedBackend
     backendControl?.close()
     backendControl = createBackendControl(spawnedBackend, {onUsage: report => {
@@ -1059,7 +1062,8 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
         onExit(diagnostic.failure())
       },
     })
-    ready = await waitForBackendReadiness(spawnedBackend, listener.readiness, diagnostic)
+    ;[ready] = await Promise.all([waitForBackendReadiness(spawnedBackend, listener.readiness, diagnostic),acceptanceProof])
+    if(acceptance)appendAcceptanceCounts('runtime_gate_verified',{verified:1})
   } finally {
     listener.close()
   }
@@ -1130,7 +1134,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       sendToSettings('nova:settings:changed', settingsView())
     },
   })
-  wakeWord.configure(currentSettings)
+  wakeWord.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
 
   const windowShown = sourceStartupSmoke
     ? new Promise((resolveShown, rejectShown) => {
@@ -1179,7 +1183,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     const wasBackground=presentationMode==='background'
     presentationMode=mode
     setPersonalCollapsed(mode === 'orb')
-    if(wasBackground)wakeWord?.configure(currentSettings)
+    if(wasBackground)wakeWord?.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
     if(activate){mainWindow.show();mainWindow.focus()}
   })
   ipcMain.handle('nova:personal:collapse', (event, value) => {
@@ -1909,7 +1913,6 @@ if (packagedSourceRollbackUnavailable) {
     openSettingsWindow(activeLaunchId)
   })
   app.whenReady().then(() => {
-    if(acceptance)session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{try{assertAcceptanceUrl(details.url);callback({cancel:false})}catch{callback({cancel:true})}})
     configureDevelopmentDockIcon({
       app,
       platform: process.platform,
@@ -1924,7 +1927,7 @@ if (packagedSourceRollbackUnavailable) {
       result.screenshots.unshift(...initial.screenshots)
       writeAcceptanceFile(resolve(acceptance.outputDirectory,'capture.json'),JSON.stringify(result),{mode:0o600})
       app.quit()
-    }).catch(()=>app.quit())
+    }).catch(()=>{acceptanceFailure=true;appendAcceptanceCounts('capture_failed',{failed:1});app.quit()})
     return started
   }).catch(async error => {
     // start() can fail before the language is applied; resolve the saved preference first so the
@@ -1975,3 +1978,5 @@ app.on('before-quit', event => {
 })
 
 app.on('window-all-closed', event => event.preventDefault?.())
+
+app.on('will-quit',()=>{if(acceptanceFailure)app.exit(1)})

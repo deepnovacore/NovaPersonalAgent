@@ -26,3 +26,23 @@ export async function captureNativeWorkbench(window,outputDirectory,tag='final')
  writeFileSync(path,(await window.webContents.capturePage()).toPNG(),{mode:0o600});shots.push(path)
  return {screenshots:shots,dom_cards:cards}
 }
+
+/** Bind to the production window's partition before any page is loaded. */
+export function installAcceptanceWindowGate(window,assertUrl){
+ window.webContents.session.webRequest.onBeforeRequest((details,callback)=>{
+  try{assertUrl(details.url);callback({cancel:false})}catch{callback({cancel:true})}
+ })
+}
+export function acceptanceWakeSettings(settings,enabled){
+ return enabled?{...settings,wakeWordEnabled:false}:settings
+}
+
+export function waitForAcceptanceRuntimeGate(child,buildCommit,timeoutMs=10000){
+ return new Promise((resolve,reject)=>{
+  const finish=error=>{clearTimeout(timer);child.off('message',message);child.off('exit',exit);error?reject(error):resolve()}
+  const message=value=>{if(value?.type!=='nova:acceptance:gate-ready')return;finish(value.buildCommit===buildCommit&&value.probeBlocked===true?undefined:Error('acceptance_gate_proof_mismatch'))}
+  const exit=()=>finish(Error('acceptance_gate_proof_missing'))
+  const timer=setTimeout(exit,timeoutMs)
+  child.on('message',message);child.once('exit',exit)
+ })
+}
