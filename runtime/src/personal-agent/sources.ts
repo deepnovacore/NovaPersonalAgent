@@ -1,3 +1,4 @@
+import {assertAcceptanceGrant,appendAcceptanceCounts} from '../desktop/workbench-acceptance.js'
 import {homedir} from 'node:os'
 import {watch, type FSWatcher} from 'node:fs'
 import {processingGrantSchema,type ProcessingGrant} from '../memory-substrate/source-state.js'
@@ -146,6 +147,8 @@ export class LocalDirectorySources {
       if(view&&typeof view==='object'&&'failures' in view&&Array.isArray(view.failures)&&view.failures.length>50)view.failures=(view.failures as unknown[]).slice(-50)
     }
     this.#records = diskSchema.parse(raw).sources
+    assertAcceptanceGrant(this.#options.processingGrant?.(true,1,0),this.#records.filter(record=>!record.deleting&&['connected','error'].includes(record.view.state)).map(record=>record.processing_consent??{extraction_provider:null,embedding_provider:null}))
+    appendAcceptanceCounts('sources_open',{sources:this.#records.length,indexed:this.#records.reduce((sum,record)=>sum+record.files.filter(file=>file.valid).length,0)})
     this.#closed = false
     if(this.#options.scanOnOpen===false)return
     for (const record of [...this.#records]) {
@@ -169,6 +172,17 @@ export class LocalDirectorySources {
     await this.#commands.catch(() => undefined)
     await this.#writes
     await this.#release?.(); this.#release = undefined
+  }
+  acceptanceCounts():Record<string,number>{
+    const now=Date.now(),counts={sources:this.#records.length,indexed:0,excerpts:0,remaining_queue:0,eligible_queue:0,deferred_queue:0,next_due_at:0,body_budget:0,retry:0,directories:0};
+    for(const record of this.#records){
+      counts.indexed+=record.files.filter(file=>file.valid).length;
+      counts.excerpts+=record.files.filter(file=>file.valid&&file.excerpt).length;
+      const dueByPath=new Map((record.walk?.ledger??[]).map(row=>[row.path,row.eligible_at??0]));
+      const directories=(record.walk?.queue??[]).map(item=>({eligible_at:dueByPath.get(item.path)??0,reason:'directory'}));
+      const work=[...directories,...(record.walk?.pending??[]),...(record.walk?.deferred??[])];
+      for(const item of work){const due=Number(item.eligible_at??0);counts.remaining_queue++;if(item.reason==='body_budget')counts.body_budget++;else if(item.reason==='retry')counts.retry++;else if(item.reason==='directory')counts.directories++;if(due<=now)counts.eligible_queue++;else{counts.deferred_queue++;counts.next_due_at=counts.next_due_at===0?due:Math.min(counts.next_due_at,due)}}
+    }return counts
   }
   list(): SourceSnapshot[] {const expected=this.#options.processingGrant?.(true,1,0);return this.#records.map(record => ({...structuredClone(record.view), processing_consent_required:!record.processing_consent?.extraction_provider||record.processing_consent.extraction_provider!==expected?.extraction_provider||record.processing_consent.embedding_provider!==expected?.embedding_provider, excludes: [...new Set([...SOURCE_EXCLUDES, ...(record.view.scope==='computer'?COMPUTER_EXCLUDES:[]), ...record.view.excludes])]}))}
   #watchComputer(record:SourceRecord):void {

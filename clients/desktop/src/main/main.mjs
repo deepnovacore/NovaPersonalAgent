@@ -1,3 +1,6 @@
+import {allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-audio-agent/runtime/desktop'
+import {captureNativeWorkbench,waitForNativeWorkbench} from './workbench-native-acceptance.mjs'
+import {writeFileSync as writeAcceptanceFile} from 'node:fs'
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
@@ -24,6 +27,7 @@ import {
   net,
   protocol,
   safeStorage,
+  session,
   screen,
   shell,
   systemPreferences,
@@ -126,6 +130,8 @@ import { validReleaseCameraResult } from '../renderer/release-camera-contract.mj
 import { isValidCategory } from '../renderer/settings-categories.mjs'
 
 configureDesktopIdentity(app)
+const acceptance = installAcceptanceGate()
+if(acceptance)assertOriginalProfilePaths({userData:app.getPath('userData'),blackboardPath:process.env.NOVA_AUDIO_AGENT_BLACKBOARD_PATH},{userData:acceptance.originalUserData,blackboardPath:acceptance.originalBlackboardPath})
 registerAppScheme(protocol)
 
 // Windows groups taskbar/notification identity by AppUserModelID; a no-op
@@ -570,6 +576,7 @@ async function cancelPhonePairing(invalidate = true) {
 }
 
 async function phoneAction(action, deviceId, epoch = phoneEpoch) {
+  if(acceptance)throw Error('acceptance_phone_disabled')
   if (action === 'cancel') { await cancelPhonePairing(); return {state: 'idle'} }
   if (app.isQuitting) return {state: 'idle'}
   if (action === 'install') { await shell.openExternal('https://tailscale.com/download'); return {state: 'not_installed'} }
@@ -955,7 +962,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
   let launchDocument
   try { launchDocument = readCapabilityDocument(currentSettings, process.env) }
   catch { throw classifyBackendFailure('configuration_required') }
-  const codingEnabled = launchDocument?.modules?.coding?.enabled !== false
+  const codingEnabled = !acceptance && launchDocument?.modules?.coding?.enabled !== false
   const configurationCode = codingEnabled ? desktopConfig?.codexConfigurationError
     ?? desktopConfig?.modelConfigurationError : desktopConfig?.modelConfigurationError
   if (configurationCode) throw classifyBackendFailure(configurationCode)
@@ -983,7 +990,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
     runtimeCapabilities = null
     let searchProxyUrl = ''
     try {
-      const proxyRules = await mainWindow?.webContents.session.resolveProxy(
+      const proxyRules = acceptance ? '' : await mainWindow?.webContents.session.resolveProxy(
         'https://api.tavily.com/search',
       )
       searchProxyUrl = searchProxyUrlFromRules(proxyRules)
@@ -1057,6 +1064,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
     listener.close()
   }
   const validated = validateBootstrap({ endpoint: ready.endpoint, token })
+  allowAcceptanceLoopback(validated.endpoint)
   smokeChannel?.ready({endpoint: validated.endpoint, token: validated.token})
   return Object.freeze({backend: spawnedBackend, connection: validated})
 }
@@ -1577,7 +1585,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   })
   ipcMain.handle('nova:wake-word:retry', event => {
     if (event.sender !== settingsWindow?.webContents) throw new Error('wake word retry rejected')
-    if(presentationMode!=='background')wakeWord?.start()
+    if(!acceptance&&presentationMode!=='background')wakeWord?.start()
     return settingsView()
   })
   ipcMain.handle('nova:settings:set', async (event, payload, restart = false) => {
@@ -1606,6 +1614,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (enabled !== true) {
       return nativeAudio?.deactivate() || Object.freeze({ audioMode: 'inactive' })
     }
+    if(acceptance)return Object.freeze({audioMode:'inactive'})
     return nativeAudio?.activate() || Object.freeze({ audioMode: 'browser_aec' })
   })
   ipcMain.handle('nova:native-audio:playback-muted', (event, muted) => {
@@ -1746,7 +1755,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   if (!shortcutRegistered) {
     console.warn('[nova-audio-agent-desktop] global shortcut unavailable on this session')
   }
-  if (currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
+  if (!acceptance && currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
   for (const [key, action] of [
     ['Control+M', () => sendToOrb('nova:microphone:toggle')],
     ['Control+L', sleepOrb],
@@ -1900,12 +1909,23 @@ if (packagedSourceRollbackUnavailable) {
     openSettingsWindow(activeLaunchId)
   })
   app.whenReady().then(() => {
+    if(acceptance)session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{try{assertAcceptanceUrl(details.url);callback({cancel:false})}catch{callback({cancel:true})}})
     configureDevelopmentDockIcon({
       app,
       platform: process.platform,
       iconFile: resolve(packageRoot, 'resources/icon-source/1024x1024.png'),
     })
-    return start()
+    const started=start()
+    if(acceptance)void started.then(async()=>{
+      await waitForNativeWorkbench(mainWindow)
+      const initial=await captureNativeWorkbench(mainWindow,acceptance.outputDirectory,'initial')
+      await new Promise(resolve=>setTimeout(resolve,acceptance.runCapSeconds*1000))
+      const result=await captureNativeWorkbench(mainWindow,acceptance.outputDirectory)
+      result.screenshots.unshift(...initial.screenshots)
+      writeAcceptanceFile(resolve(acceptance.outputDirectory,'capture.json'),JSON.stringify(result),{mode:0o600})
+      app.quit()
+    }).catch(()=>app.quit())
+    return started
   }).catch(async error => {
     // start() can fail before the language is applied; resolve the saved preference first so the
     // one message that matters most is not stuck in the default language. Never write here.

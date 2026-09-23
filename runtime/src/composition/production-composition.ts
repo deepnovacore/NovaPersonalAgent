@@ -1,3 +1,4 @@
+import {acceptanceEnabled} from '../desktop/workbench-acceptance.js'
 import type {ProjectExecutorAdapter} from '../executors/coding-executor.js'
 import {MacMailClient} from '../connectors/macos/mail.js'
 import {MacCalendarClient} from '../connectors/macos/calendar.js'
@@ -49,8 +50,9 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   if (!remote) requireSelectedCascadedLlmConfig(loadedSettings)
   else if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
   else requireSelectedCascadedRealtimeConfig(loadedSettings)
-  const externalMcp = await prepareExternalMcp(loadCapabilityRegistry({environment: remote
-      ? {...environment, NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false'} : environment}), stop.signal)
+  const configuredCapabilities=loadCapabilityRegistry({environment:remote?{...environment,NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED:'false'}:environment})
+  const acceptanceCapabilities=acceptanceEnabled()?{...configuredCapabilities,mcpServers:{},modules:{...configuredCapabilities.modules,coding:{enabled:false},search:{...configuredCapabilities.modules.search,enabled:false},camera:{enabled:false}}}:configuredCapabilities
+  const externalMcp = await prepareExternalMcp(acceptanceCapabilities, stop.signal)
   const releaseExternal = ownership.own(() => externalMcp.close())
   const capabilities = externalMcp.capabilities
   // This entry owns the concrete Codex package; core gates injected adapters by their declared role.

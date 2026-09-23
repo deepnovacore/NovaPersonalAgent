@@ -1,3 +1,4 @@
+import {acceptanceEnabled,appendAcceptanceCounts,assertPersistedAcceptanceGrant} from '../desktop/workbench-acceptance.js'
 import {WorkbenchContext,type ContextGenerator,type ContextEntry} from './workbench-context.js'
 import {ProfileWarmup,type ProfileGenerator} from './profile-warmup.js'
 import {interleave} from './sampling.js';
@@ -44,6 +45,7 @@ export interface DiscoverySnapshot {
     recent_delivery: FeedItem[];
 }
 export interface PersonalSources {
+    acceptanceCounts?():Record<string,number>;
     contextEntries?():ContextEntry[];
     list(): unknown[];
     command(method: string, params: unknown): Promise<unknown>;
@@ -268,7 +270,7 @@ export class PersonalAgentHost {
         this.#overviewRun = run;
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
-    constructor(readonly options: HostOptions) { this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',options.generateProfile?async(entries,signal)=>{const memory=options.memory(),current=await Promise.all(entries.map(e=>memory?.get?.(e.id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];if(entries.some(e=>!allowed.some(a=>a.id===e.id&&a.version===e.version)))throw Error('processing_consent_required');signal.throwIfAborted();return options.generateProfile!(entries,signal)}:undefined,()=>this.#notify()); this.workbenchContext=new WorkbenchContext(options.path+'.context.json',options.generateContext?async(entries,signal)=>{const refs=[...new Set(entries.flatMap(entry=>entry.refs.map(ref=>ref.entry_id)))];const current=await Promise.all(refs.map(id=>options.memory()?.get?.(id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];const authorized=entries.filter(entry=>entry.refs.every(ref=>allowed.some(item=>item.id===ref.entry_id&&item.version===ref.version)));signal.throwIfAborted();return options.generateContext!(authorized,signal)}:undefined,()=>this.#notify()); this.#store = new PersonalStore(options.path); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.()); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
+    constructor(readonly options: HostOptions) { this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',options.generateProfile?async(entries,signal)=>{const memory=options.memory(),current=await Promise.all(entries.map(e=>memory?.get?.(e.id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];if(entries.some(e=>!allowed.some(a=>a.id===e.id&&a.version===e.version)))throw Error('processing_consent_required');signal.throwIfAborted();return options.generateProfile!(entries,signal)}:undefined,()=>this.#notify()); this.workbenchContext=new WorkbenchContext(options.path+'.context.json',options.generateContext?async(entries,signal)=>{const refs=[...new Set(entries.flatMap(entry=>entry.refs.map(ref=>ref.entry_id)))];const current=await Promise.all(refs.map(id=>options.memory()?.get?.(id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];const authorized=entries.filter(entry=>entry.refs.every(ref=>allowed.some(item=>item.id===ref.entry_id&&item.version===ref.version)));signal.throwIfAborted();appendAcceptanceCounts('context_model',{eligible_candidates:authorized.length,model_calls:1});return options.generateContext!(authorized,signal)}:undefined,()=>this.#notify()); this.#store = new PersonalStore(options.path); this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.()); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews?{rank:options.rankNews}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -279,6 +281,7 @@ export class PersonalAgentHost {
     #serial<T>(fn: () => Promise<T>): Promise<T> { const run = this.#tail.then(fn); this.#tail = run.catch(() => { /* optional observer or cleanup already reported */ }); return run; }
     async open(): Promise<void> {
         if (this.#opened) return;
+        assertPersistedAcceptanceGrant(this.options.memory()?.processingGrant?.(true,1,0));
         this.#release = await acquirePersonalLock(this.options.path);
         try {
             this.#state = await this.#store.read();
@@ -296,15 +299,16 @@ export class PersonalAgentHost {
             await this.news.open();
             await this.profileWarmup.open();
             await this.#sources?.open?.();
-            await this.#feishu?.open();
-            await this.#connectors?.open();
+            if(acceptanceEnabled()){this.#acceptanceSample();this.#acceptanceTimer=setInterval(()=>this.#acceptanceSample(),1000);this.#acceptanceTimer.unref()}
+            if(!acceptanceEnabled())await this.#feishu?.open();
+            if(!acceptanceEnabled())await this.#connectors?.open();
             await this.refreshMemory();
             await this.revalidate();
             for (const item of this.#state.feed) {
                 if (item.lifecycle === 'active' && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime())) this.#pool(item);
             }
             this.#schedule();
-            void this.news.refresh().catch(()=>{/* optional cleanup/observer */});
+            if(!acceptanceEnabled())void this.news.refresh().catch(()=>{/* optional cleanup/observer */});
         } catch (error) {
             await this.close().catch(() => { /* preserve primary lifecycle failure */ });
             throw error;
@@ -316,6 +320,7 @@ export class PersonalAgentHost {
         this.#prefetched=undefined;
         this.#invalidateOverview();
         this.#overviewCache = undefined;
+        clearInterval(this.#acceptanceTimer);
         clearInterval(this.#timer);
         clearTimeout(this.#sourceProgressTimer);
         this.#sourceProgressTimer=undefined;
@@ -340,11 +345,13 @@ export class PersonalAgentHost {
             await release?.();
         }
     }
+    #acceptanceTimer:ReturnType<typeof setInterval>|undefined;
+    #acceptanceSample():void{if(!acceptanceEnabled())return;appendAcceptanceCounts('source_state',this.#sources?.acceptanceCounts?.()??{sources:0,indexed:0,excerpts:0,remaining_queue:0,eligible_queue:0,deferred_queue:0,next_due_at:0});const context=this.workbenchContext.snapshot();appendAcceptanceCounts('context_state',{eligible_candidates:context.candidate_count,cards:context.cards.length})}
     #schedule(): void {
         clearInterval(this.#timer);
         const settings=dailyBriefSettings(this.#state.settings);
         this.#nextDiscovery=this.#now().getTime()+this.#state.settings.discovery_interval_minutes*60000;
-        if(this.#opened&&(this.#state.settings.discovery_enabled||settings.briefing_outlook_enabled||settings.briefing_review_enabled)){
+        if(!acceptanceEnabled()&&this.#opened&&(this.#state.settings.discovery_enabled||settings.briefing_outlook_enabled||settings.briefing_review_enabled)){
             this.#timer=setInterval(()=>{void this.scheduledTick().catch(()=>{/* next tick remains available */})},60000);
             this.#timer.unref();
         }
@@ -449,7 +456,7 @@ export class PersonalAgentHost {
         return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,memory:relevant.filter(memoryEligibleForDiscovery).slice(0,16),evidence_refs:[...new Set(interleave([(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),this.options.evidenceRefs?.()??[],(retrieval?.snippets??[]).map(item=>item.evidence_id)],48))].slice(0,16),recent_delivery:this.#state.feed.filter(f=>Object.values(f.delivery).some(Boolean)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
     }
     discover(): Promise<void> { if (this.#discovery)
-        return this.#discovery; if (!this.#opened || !this.#state.settings.discovery_enabled || !this.options.discover)
+        return this.#discovery; if (acceptanceEnabled() || !this.#opened || !this.#state.settings.discovery_enabled || !this.options.discover)
         return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); this.options.onTick?.(snapshot); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const proposal = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); if (proposal && !controller.signal.aborted && this.#opened && this.#state.settings.discovery_enabled)
         await this.admit(proposal, snapshot); })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
         this.#discovery = undefined; }).catch(() => { /* optional observer or cleanup already reported */ }); return run; }
@@ -619,7 +626,7 @@ export class PersonalAgentHost {
         else if (command.method.startsWith('news.')) {
             if(command.method==='news.configure')await this.news.configure(p);
             else if(command.method==='news.action')await this.news.action(p);
-            if(command.method==='news.refresh'||command.method==='news.configure')void this.news.refresh().catch(()=>{/* optional cleanup/observer */});
+            if(command.method==='news.refresh'||command.method==='news.configure')if(!acceptanceEnabled())void this.news.refresh().catch(()=>{/* optional cleanup/observer */});
             data=this.news.snapshot();
         }
         else if (command.method === 'feed.action')
