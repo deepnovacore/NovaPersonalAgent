@@ -1,6 +1,6 @@
 # Workbench content relevance and empty states
 
-Status: Design for user review. Product code remains unchanged at this stage.
+Status: User-approved design. Product code remains unchanged at this stage.
 
 ## Intent and observed failure
 
