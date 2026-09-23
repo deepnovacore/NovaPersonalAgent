@@ -35,7 +35,7 @@ const snapshotSchema = z.object({
 }).strict()
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
-  evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), checked_at: z.number().optional(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
+  evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), checked_at: z.number().optional(), recheck_attempts: z.number().int().nonnegative().optional(), recheck_eligible_at: z.number().optional(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
 const walkFileSchema=z.object({path:pathSchema,size:z.number().nonnegative(),mtime:z.number(),unit:pathSchema,attempts:z.number().int().nonnegative().optional(),eligible_at:z.number().optional(),reason:z.enum(['body_budget','retry']).optional()}).strict()
 const deferredFileSchema=walkFileSchema.extend({eligible_at:z.number().default(0),attempts:z.number().int().nonnegative().default(0),reason:z.enum(['body_budget','retry']).default('retry')}).strict()
 const directoryLedgerSchema=z.object({path:pathSchema,unit:pathSchema.optional(),generation:z.number().int().nonnegative(),status:z.enum(['queued','done','partial']),identity:z.object({dev:z.string(),ino:z.string(),mtimeNs:z.string()}).strict().optional(),eligible_at:z.number().optional(),attempts:z.number().int().nonnegative().default(0)}).strict()
@@ -550,6 +550,11 @@ export class LocalDirectorySources {
         signal.throwIfAborted()
         const previous = record.files.find(old => old.path === file.path)
         if (previous) previous.unit = file.unit
+        if (previous && view.scope === 'directory') {
+          if (previous.mtime !== file.mtime || previous.size !== file.size) {
+            delete previous.recheck_attempts; delete previous.recheck_eligible_at
+          } else if ((previous.recheck_attempts??0)>5 || (previous.recheck_eligible_at??0)>Date.now()) continue
+        }
         const discardStaleIndex = async () => {if (previous?.owned) {await this.#options.knowledge.handle('knowledge.remove', {id: previous.id}); known.delete(file.path)}}
         if (previous?.valid && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) {
           const sameMetadata = previous.mtime === file.mtime && previous.size === file.size
@@ -560,17 +565,22 @@ export class LocalDirectorySources {
           const terminal = recheckError instanceof KnowledgeDocumentFailure && ['sensitive_content','path_denied','unsupported_mime','invalid_file','file_too_large','empty_text','invalid_text','parse_failed','parse_timeout'].includes(recheckError.code)
           if (sameMetadata && checked === null && !terminal) {
             settlePending(record,file.path)
-            if ((file.attempts??0)>=5) {
+            const attempts = record.walk ? file.attempts??0 : previous.recheck_attempts??0
+            if (attempts>=5) {
               previous.valid=false;await this.#save();await this.#invalidateFile(previous);await discardStaleIndex()
               skip('read_failed');currentReadFailure=true
               if(view.failures.length<50)view.failures.push({path:relative(view.path,file.path),code:errorCode(recheckError)})
+              if (!record.walk) {previous.recheck_attempts=attempts+1;delete previous.recheck_eligible_at}
             } else if (record.walk) deferPending(record,file,'retry',Date.now()+30_000)
+            else {previous.recheck_attempts=attempts+1;previous.recheck_eligible_at=Date.now()+30_000}
+            await this.#save()
             continue
           }
           if (checked?.fingerprint === previous.fingerprint) {
             previous.size = file.size
             previous.mtime = file.mtime
             previous.checked_at = Date.now()
+            delete previous.recheck_attempts; delete previous.recheck_eligible_at
             settlePending(record,file.path)
             await this.#save()
             continue

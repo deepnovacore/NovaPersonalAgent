@@ -467,6 +467,46 @@ test('same-metadata recheck read failure keeps verified evidence available', asy
   } finally {await chmod(join(f.folder, 'notes.md'), 0o600).catch(() => undefined); await f.close()}
 })
 
+test('directory recheck retries survive reopen and retire stale evidence once exhausted', async (t) => {
+  const f = await fixture(false, undefined, undefined, 0)
+  let now = Date.now()
+  t.mock.method(Date, 'now', () => now)
+  try {
+    const path = join(f.folder, 'notes.md')
+    await writeFile(path, 'Previously verified directory note')
+    await f.sources.command('sources.add', {path: f.folder, consent: true})
+    const id = f.sources.list()[0]!.id, ref = f.sources.evidenceSnapshot()[0]!.ref
+    const observation = f.observations[0]!.source_ref.ref
+    const before = await stat(path)
+    await chmod(path, 0o000)
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await f.sources.command('sources.sync', {id})
+      assert.ok(f.sources.evidence(ref), 'verified evidence survives a retryable failure')
+      // Neither repeated polling nor reopening may consume the delayed retry.
+      for (let poll = 0; poll < 7; poll++) await f.sources.command('sources.sync', {id})
+      await f.reopen()
+      assert.ok(f.sources.evidence(ref))
+      assert.equal((await f.knowledge.listSources()).length, 1)
+      assert.ok(!f.invalidated.includes(ref))
+      now += 30_001
+    }
+    await f.sources.command('sources.sync', {id})
+    assert.equal(f.sources.evidence(ref), null)
+    assert.deepEqual(await f.knowledge.listSources(), [])
+    assert.equal(f.invalidated.filter(value => value === ref).length, 1)
+    assert.equal(f.invalidated.filter(value => value === observation).length, 1)
+    const invalidations = f.invalidated.length
+    now += 300_001
+    await f.reopen()
+    await f.sources.command('sources.sync', {id})
+    assert.equal(f.invalidated.length, invalidations)
+    assert.equal(f.observations.length, 1)
+    const after = await stat(path)
+    assert.equal(after.size, before.size)
+    assert.equal(after.mtimeMs, before.mtimeMs)
+  } finally {await chmod(join(f.folder, 'notes.md'), 0o600).catch(() => undefined); await f.close()}
+})
+
 test('same-size same-mtime screened replacement retires prior index', async () => {
   const f = await fixture(false, undefined, undefined, 0)
   try {
