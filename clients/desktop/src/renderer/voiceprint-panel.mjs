@@ -104,7 +104,7 @@ export function createVoiceprintPanel({document, api, stage}) {
       abort = null; paint()
       note.textContent=t('正在注册声纹…')
       const result = await api.voiceprint({action:'register',audio})
-      if (result.error) throw Object.assign(new Error(result.error), {orphanedId:result.orphanedId})
+      if (result.error) throw Object.assign(new Error(result.error), {orphanedId:result.orphanedId,retainedId:result.retainedId})
       // Main has saved the new identity; the settings push repaints it.
       note.textContent=t('声纹已注册。勾选验证并保存后生效；需要继续对话时，请重新开启麦克风。')
       if (result.previousDeleteFailed) note.textContent += ' ' + t('旧声纹未能从火山删除，请稍后手动删除：{0}', result.previousDeleteFailed)
@@ -117,6 +117,7 @@ export function createVoiceprintPanel({document, api, stage}) {
         voiceprint_settings_changed:t('注册期间语音 API Key 已更改，本次声纹已丢弃，请重新注册。'),
       }
       note.textContent = signal.aborted ? t('已取消') : messages[error.message] || t('声纹注册失败，请检查网络、麦克风和服务配置后重试。')
+      if (error.retainedId) note.textContent = t('已保留声纹：{0}。请先恢复设置，再重试注册。', error.retainedId)
       if (error.orphanedId) note.textContent += ' ' + t('本次声纹未能从火山删除，请稍后手动删除：{0}', error.orphanedId)
     } finally {
       await api.voiceprint({action:'stop'}).catch(()=>{})

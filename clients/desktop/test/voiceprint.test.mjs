@@ -158,3 +158,47 @@ test('the orb acknowledges a recording lease only after a pending activation set
   assert.match(activate, /presentationMode==='background'\|\|voiceprintRecording\)\{/, 'late activation releases capture during recording')
   assert.match(activate, /pendingActivation = null\n\s*settle\(\)/)
 })
+
+test('registration cleanup respects failed recovery and pending backend configuration', async t => {
+  const {runInNewContext} = await import('node:vm')
+  const {applySettingsTransaction} = await import('../src/main/settings-apply.mjs')
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const handlerSource = source.slice(source.indexOf("ipcMain.handle('nova:settings:voiceprint'"), source.indexOf("ipcMain.handle('nova:settings:get'"))
+  for (const scenario of ['rollback_failed', 'pending_restart', 'rollback_success']) await t.test(scenario, async () => {
+    let handler, restarts = 0
+    const deleted = [], events = [], sender = {}
+    const original = {voiceprintUploadUrl:'https://upload.example',voiceprintId:'old',voiceprintEnabled:scenario !== 'pending_restart'}
+    const context = {
+      settingsWindow:{webContents:sender},currentSettings:{...original},voiceprintBusy:false,
+      settingsRecoveryAvailable:false,settingsRestartPending:scenario === 'pending_restart',secretCodec:{},net:{fetch(){}},
+      decryptSecretsForSpawn:()=>({doubaoAsrApiKey:'key'}),voiceprintHealth:async()=>true,
+      registerVoiceprint:async()=>({id:'new',name:'new-name'}),
+      deleteVoiceprint:async({id})=>{deleted.push(id);events.push(`delete:${id}`)},
+      endVoiceprintRecording(){},ipcMain:{handle(_channel,fn){handler=fn}},
+      applyDesktopSettings:async(payload,restart)=>applySettingsTransaction({
+        coordinator:{run:async(_key,fn)=>({status:'done',value:await fn()})},patch:payload,
+        write:async value=>{context.currentSettings={...context.currentSettings,...value.settingsPatch};context.settingsRecoveryAvailable=true;return context.currentSettings},
+        publishCommitted(){},publishStatus(){},needsBackendRestart:()=>true,deferRestart:!restart,
+        prepareConfiguration:async()=>({}),commitConfiguration:async()=>({}),
+        restartBackend:async()=>{restarts++;if(scenario!=='pending_restart')throw Error('restart failed');events.push('restarted')},
+        rollback:async()=>{if(scenario==='rollback_failed')throw Error('backend could not stop');context.currentSettings={...original};context.settingsRecoveryAvailable=false},
+        complete:async()=>{context.settingsRecoveryAvailable=false},
+      }),
+    }
+    runInNewContext(handlerSource,context)
+    const result = await handler({sender},{action:'register',audio:new Uint8Array()})
+    if(scenario==='rollback_failed') {
+      assert.equal(context.currentSettings.voiceprintId,'new')
+      assert.deepEqual(deleted,[], 'an ID still referenced by failed recovery must survive')
+      assert.equal(result.retainedId,'new')
+    } else if(scenario==='pending_restart') {
+      assert.equal(restarts,1,'saved disabled does not prove the running backend stopped using the old ID')
+      assert.deepEqual(events,['restarted','delete:old'])
+      assert.equal(result.id,'new')
+    } else {
+      assert.equal(context.currentSettings.voiceprintId,'old')
+      assert.deepEqual(deleted,['new'])
+      assert.equal(result.error,'voiceprint_request_failed')
+    }
+  })
+})

@@ -798,4 +798,5 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "请自然朗读下面这段话：": "Read this passage in your natural voice:",
   "今天的天气很晴朗，窗外的树叶随风轻轻摇动。我准备好开始新的工作，也愿意慢慢讲清楚自己的想法。": "The sun is shining, and the leaves outside are moving gently in the breeze. I am ready to begin my work and share my thoughts clearly, one step at a time.",
   "保持平时说话的语速和音量，不要耳语或模仿音色。读完后如仍在录音，可从头再读一遍。": "Use your usual pace and volume. Do not whisper or imitate another voice. If recording continues after you finish, read the passage again.",
+  "已保留声纹：{0}。请先恢复设置，再重试注册。": "Voiceprint retained: {0}. Recover settings before trying registration again.",
 })

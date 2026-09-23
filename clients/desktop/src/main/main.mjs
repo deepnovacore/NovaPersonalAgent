@@ -1441,7 +1441,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     try {
       // Main owns the upload target: only the saved URL receives audio.
       const uploadUrl = currentSettings.voiceprintUploadUrl, apiKey = speechKey(currentSettings)
-      const previousId = currentSettings.voiceprintId, wasEnabled = currentSettings.voiceprintEnabled === true
+      const previousId = currentSettings.voiceprintId
       if (!uploadUrl || !apiKey) return {error:'voiceprint_configuration_required'}
       if (!await voiceprintHealth(uploadUrl, fetcher)) return {error:'voiceprint_unhealthy'}
       const result = await registerVoiceprint({audio:input.audio,uploadUrl,apiKey,fetcher})
@@ -1452,10 +1452,18 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       // A key saved mid-registration moves to another Volcengine app; never keep an ID from the old one.
       if (speechKey(currentSettings) !== apiKey) return discard('voiceprint_settings_changed')
       // Commit before deleting the old record, so saved settings never name a deleted SpeakId.
-      // The transaction reports busy/invalid/rollback as saved:false rather than throwing.
-      const committed = await applyDesktopSettings({settingsPatch:{voiceprintId:result.id,voiceprintName:result.name,voiceprintEnabled:false}}, wasEnabled)
+      // Saved preferences may differ from the running backend until restart.
+      // Always retire that backend before deleting a replaced voiceprint.
+      const committed = await applyDesktopSettings({settingsPatch:{voiceprintId:result.id,voiceprintName:result.name,voiceprintEnabled:false}}, Boolean(previousId))
         .catch(() => null)
-      if (committed?.saved !== true || currentSettings.voiceprintId !== result.id) return discard('voiceprint_request_failed')
+      if (committed?.saved !== true || currentSettings.voiceprintId !== result.id) {
+        // saved:false can follow a successful disk write and failed rollback.
+        // Uncertain recovery must keep the record, including when the transaction throws.
+        if (!committed || committed.operationStatus === 'recovery_failed' || currentSettings.voiceprintId === result.id) {
+          return {error:'voiceprint_recovery_required',retainedId:result.id}
+        }
+        return discard('voiceprint_request_failed')
+      }
       let previousDeleteFailed = false
       if (previousId && previousId !== result.id) {
         try {await deleteVoiceprint({id:previousId,apiKey,fetcher})} catch {previousDeleteFailed = true}
