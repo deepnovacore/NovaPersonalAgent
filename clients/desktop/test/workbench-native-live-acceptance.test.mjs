@@ -40,17 +40,19 @@ test('a held Electron singleton is rejected using a synthetic profile directory'
  }finally{rmSync(root,{recursive:true,force:true})}
 })
 
-test('Chromium gate attaches to actual production partition and counts its blocked request',async()=>{
- const {installAcceptanceWindowGate}=await import('../src/main/workbench-native-acceptance.mjs')
+test('Chromium gate covers default and actual production sessions and counts both blocked requests',async()=>{
+ const {installAcceptanceWindowGate,installAcceptanceSessionGate}=await import('../src/main/workbench-native-acceptance.mjs')
  const {browserWindowOptions}=await import('../src/main/security.mjs')
  const partition=browserWindowOptions('/synthetic/preload','synthetic').webPreferences.partition
- const sessions=new Map([[partition,{webRequest:{onBeforeRequest(handler){this.handler=handler}}}],['default',{webRequest:{onBeforeRequest(){throw Error('wrong session')}}}]])
+ const sessions=new Map([[partition,{webRequest:{onBeforeRequest(handler){this.handler=handler}}}],['default',{webRequest:{onBeforeRequest(handler){this.handler=handler}}}]])
  let blocked=0
  installAcceptanceWindowGate({webContents:{session:sessions.get(partition)}},url=>{if(url!=='nova://orb/index.html'){blocked++;throw Error('blocked')}})
+ installAcceptanceSessionGate(sessions.get('default'),()=>{blocked++;throw Error('blocked')})
+ sessions.get('default').webRequest.handler({url:'https://unknown.invalid'},decision=>assert.equal(decision.cancel,true))
  const handler=sessions.get(partition).webRequest.handler
  handler({url:'https://unknown.invalid'},decision=>assert.equal(decision.cancel,true))
  handler({url:'nova://orb/index.html'},decision=>assert.equal(decision.cancel,false))
- assert.equal(blocked,1)
+ assert.equal(blocked,2)
 })
 test('initial acceptance wake configuration starts no worker and does not change saved settings',async()=>{
  const {acceptanceWakeSettings}=await import('../src/main/workbench-native-acceptance.mjs')
@@ -70,14 +72,17 @@ test('partial lsof errors still reject an observed owner PID',async()=>{
 test('runtime gate proof is mandatory and bound to this build',async()=>{
  const {EventEmitter}=await import('node:events')
  const {waitForAcceptanceRuntimeGate}=await import('../src/main/workbench-native-acceptance.mjs')
- const child=new EventEmitter()
- const proof=waitForAcceptanceRuntimeGate(child,'a'.repeat(40),20)
- child.emit('message',{type:'nova:acceptance:gate-ready',buildCommit:'a'.repeat(40),probeBlocked:true})
+ const child=new EventEmitter(),expected={buildCommit:'a'.repeat(40),runtimeHash:'c'.repeat(64)}
+ const valid={type:'nova:acceptance:gate-ready',...expected,probeBlocked:true,probeTransport:'fetch',blockedAttempts:1}
+ const proof=waitForAcceptanceRuntimeGate(child,expected,20)
+ child.emit('message',valid)
  await proof
- await assert.rejects(waitForAcceptanceRuntimeGate(new EventEmitter(),'a'.repeat(40),5),/gate_proof_missing/)
- const wrong=new EventEmitter(),bad=waitForAcceptanceRuntimeGate(wrong,'a'.repeat(40),20)
- wrong.emit('message',{type:'nova:acceptance:gate-ready',buildCommit:'b'.repeat(40),probeBlocked:true})
- await assert.rejects(bad,/gate_proof_mismatch/)
+ await assert.rejects(waitForAcceptanceRuntimeGate(new EventEmitter(),expected,5),/gate_proof_missing/)
+ for(const mismatch of [{buildCommit:'b'.repeat(40)},{runtimeHash:'d'.repeat(64)},{probeTransport:'assertion'},{blockedAttempts:0}]){
+  const wrong=new EventEmitter(),bad=waitForAcceptanceRuntimeGate(wrong,expected,20)
+  wrong.emit('message',{...valid,...mismatch})
+  await assert.rejects(bad,/gate_proof_mismatch/)
+ }
 })
 
 test('stale capture manifests and PNGs cannot satisfy a new acceptance run',async()=>{
@@ -93,6 +98,7 @@ test('production main installs partition gate before loading and overrides every
  const main=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
  const creation=main.slice(main.indexOf('async function createWindow('),main.indexOf('function openMemoryBoard('))
  assert.match(creation,/installAcceptanceWindowGate\(window,assertAcceptanceUrl\)/u)
- assert.doesNotMatch(main,/session\.defaultSession|wakeWord\??\.configure\(currentSettings\)/u)
+ assert.match(main,/installAcceptanceSessionGate\(session\.defaultSession,assertAcceptanceUrl\)/u)
+ assert.doesNotMatch(main,/wakeWord\??\.configure\(currentSettings\)/u)
  assert.equal([...main.matchAll(/wakeWord\??\.configure\(acceptanceWakeSettings/g)].length,3)
 })

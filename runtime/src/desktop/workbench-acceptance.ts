@@ -8,12 +8,13 @@ import http from 'node:http'
 import https from 'node:https'
 import {syncBuiltinESMExports} from 'node:module'
 import {z} from 'zod'
+import type {CapabilityRegistry} from '../config/capability-registry.js'
 import {Dispatcher,getGlobalDispatcher,setGlobalDispatcher} from 'undici'
 
 const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300)}).strict()
 export type AcceptanceManifest=z.infer<typeof manifestSchema>
 let active:AcceptanceManifest|undefined
-let calls=0,blocked=0
+let calls=0,blocked=0,probeVerified=false
 const fetchOrigin=new AsyncLocalStorage<string>()
 const loopback=new Set<string>()
 export function allowAcceptanceLoopback(endpoint:string):void{if(!active)return;const url=new URL(endpoint.includes('://')?endpoint:'tcp://'+endpoint);if(url.hostname!=='127.0.0.1'||!url.port)throw Error('acceptance_loopback_endpoint_invalid');loopback.add(url.host)}
@@ -32,7 +33,8 @@ export function loadAcceptanceManifest(environment:NodeJS.ProcessEnv=process.env
  const output=canonical(value.outputDirectory),report=resolve(environment.NOVA_WORKBENCH_ACCEPTANCE_REPORT)
  for(const root of [value.originalUserData,dirname(value.originalBlackboardPath),value.repository])if(inside(canonical(root),output))throw Error('acceptance_output_inside_profile_or_repository')
  if(canonical(dirname(report))!==output)throw Error('acceptance_report_outside_output')
- for(const provider of value.providers){if(!value.allowedIdentities.includes(provider.identity))throw Error('acceptance_provider_not_authorized');const url=new URL(provider.origin);if(url.protocol!=='https:'||url.origin!==provider.origin||url.username||url.password)throw Error('acceptance_provider_origin_invalid')}
+ const identityOrigins=new Map<string,string>()
+ for(const provider of value.providers){if(identityOrigins.has(provider.identity)&&identityOrigins.get(provider.identity)!==provider.origin)throw Error('acceptance_provider_identity_multiple_origins');identityOrigins.set(provider.identity,provider.origin);if(!value.allowedIdentities.includes(provider.identity))throw Error('acceptance_provider_not_authorized');const url=new URL(provider.origin);if(url.protocol!=='https:'||url.origin!==provider.origin||url.username||url.password)throw Error('acceptance_provider_origin_invalid')}
  return value
 }
 function rejectEgress(code:string):never{blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error(code)}
@@ -116,9 +118,6 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
   }
   return fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}))
  }
- // Exercise the real gate before callers may open a host.
- try{assertAcceptanceUrl('https://acceptance-blocked.invalid/probe');throw Error('acceptance_gate_probe_failed')}catch(error){if(!(error instanceof Error)||error.message!=='acceptance_unknown_outbound')throw error}
- appendAcceptanceCounts('gate_installed',{installed:1})
  appendAcceptanceCounts('disabled_modules',{news:1,proactive:1,connectors:1,phone:1,external_mcp:1,coding:1,voice_activation:1,profile_warmup:1,understanding:1,memory_overview:1,search:1,camera_capability:1,wake_word:1})
  return manifest
 }
@@ -132,7 +131,26 @@ export function assertAcceptanceGrant(expected:{extraction_provider:string|null;
 
 export function assertPersistedAcceptanceGrant(expected:{extraction_provider:string|null;embedding_provider:string|null}|undefined,hostPath?:string):void{
  if(!active){if(acceptanceEnabled())throw Error('acceptance_gate_missing');return}
+ if(!probeVerified)throw Error('acceptance_gate_probe_missing')
  if(hostPath!==undefined&&canonical(hostPath)!==canonical(active.originalBlackboardPath+'.personal.json'))throw Error('acceptance_wrong_host_path')
  const state=JSON.parse(readFileSync(active.originalBlackboardPath+'.personal.json.sources.json','utf8')) as {sources?:{deleting?:boolean;view?:{state?:string};processing_consent?:{extraction_provider:string|null;embedding_provider:string|null}}[]}
  assertAcceptanceGrant(expected,(state.sources??[]).filter(record=>!record.deleting&&['connected','error'].includes(record.view?.state??'')).map(record=>record.processing_consent??{extraction_provider:null,embedding_provider:null}))
+}
+
+export async function probeAcceptanceGate():Promise<{probeBlocked:true;probeTransport:'fetch';blockedAttempts:1}>{
+ if(!active)throw Error('acceptance_gate_missing')
+ if(!probeVerified){
+  const before=blocked
+  try{await globalThis.fetch('https://acceptance-blocked.invalid/probe',{method:'POST',body:'{}'});throw Error('acceptance_gate_probe_failed')}
+  catch(error){if(!(error instanceof Error)||error.message!=='acceptance_unknown_outbound'||blocked!==before+1)throw Error('acceptance_gate_probe_failed')}
+  probeVerified=true
+  appendAcceptanceCounts('gate_installed',{installed:1,fetch_probe_blocked:1})
+ }
+ return {probeBlocked:true,probeTransport:'fetch',blockedAttempts:1}
+}
+export function acceptanceRuntimeHash(entry:string):string{
+ return createHash('sha256').update(readFileSync(entry)).update(readFileSync(new URL('./workbench-acceptance.js',import.meta.url))).digest('hex')
+}
+export function acceptanceCapabilityRegistry(configured:CapabilityRegistry,enabled=acceptanceEnabled()):CapabilityRegistry{
+ return enabled?{...configured,mcpServers:{},modules:{...configured.modules,coding:{enabled:false},search:{...configured.modules.search,enabled:false},camera:{enabled:false}}}:configured
 }

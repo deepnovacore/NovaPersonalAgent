@@ -1,4 +1,4 @@
-import {acceptanceEnabled} from '../desktop/workbench-acceptance.js'
+import {acceptanceCapabilityRegistry} from '../desktop/workbench-acceptance.js'
 import type {ProjectExecutorAdapter} from '../executors/coding-executor.js'
 import {MacMailClient} from '../connectors/macos/mail.js'
 import {MacCalendarClient} from '../connectors/macos/calendar.js'
@@ -51,7 +51,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   else if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
   else requireSelectedCascadedRealtimeConfig(loadedSettings)
   const configuredCapabilities=loadCapabilityRegistry({environment:remote?{...environment,NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED:'false'}:environment})
-  const acceptanceCapabilities=acceptanceEnabled()?{...configuredCapabilities,mcpServers:{},modules:{...configuredCapabilities.modules,coding:{enabled:false},search:{...configuredCapabilities.modules.search,enabled:false},camera:{enabled:false}}}:configuredCapabilities
+  const acceptanceCapabilities=acceptanceCapabilityRegistry(configuredCapabilities)
   const externalMcp = await prepareExternalMcp(acceptanceCapabilities, stop.signal)
   const releaseExternal = ownership.own(() => externalMcp.close())
   const capabilities = externalMcp.capabilities

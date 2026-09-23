@@ -1,4 +1,5 @@
-import {installAcceptanceGate} from './desktop/workbench-acceptance.js'
+import {fileURLToPath} from 'node:url'
+import {installAcceptanceGate,probeAcceptanceGate,acceptanceRuntimeHash} from './desktop/workbench-acceptance.js'
 import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, PERSONAL_SETTINGS_METHODS, desktopBudgetFailure, type DesktopCapabilityState} from './desktop/desktop-control.js'
 import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop/desktop-session.js'
 import {announceReadiness} from './desktop.js'
@@ -13,7 +14,8 @@ const token = process.env.NOVA_AUDIO_AGENT_DESKTOP_TOKEN ?? ''
 const readyEndpoint = process.env.NOVA_AUDIO_AGENT_DESKTOP_READY_ENDPOINT ?? ''
 const stop = new AbortController()
 const parentPort = (process as UtilityProcess).parentPort
-if(acceptance)parentPort?.postMessage({type:'nova:acceptance:gate-ready',buildCommit:acceptance.buildCommit,probeBlocked:true})
+const acceptanceProbe=acceptance?await probeAcceptanceGate():undefined
+if(acceptance&&acceptanceProbe)parentPort?.postMessage({type:'nova:acceptance:gate-ready',buildCommit:acceptance.buildCommit,runtimeHash:acceptanceRuntimeHash(fileURLToPath(import.meta.url)),...acceptanceProbe})
 
 let capabilityView: (() => DesktopCapabilityState | undefined) = () => undefined
 let knowledgeHandle: ((method: string, params: unknown) => Promise<unknown>) | undefined

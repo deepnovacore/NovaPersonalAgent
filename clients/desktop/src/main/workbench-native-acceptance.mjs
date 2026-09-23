@@ -29,7 +29,10 @@ export async function captureNativeWorkbench(window,outputDirectory,tag='final')
 
 /** Bind to the production window's partition before any page is loaded. */
 export function installAcceptanceWindowGate(window,assertUrl){
- window.webContents.session.webRequest.onBeforeRequest((details,callback)=>{
+ installAcceptanceSessionGate(window.webContents.session,assertUrl)
+}
+export function installAcceptanceSessionGate(session,assertUrl){
+ session.webRequest.onBeforeRequest((details,callback)=>{
   try{assertUrl(details.url);callback({cancel:false})}catch{callback({cancel:true})}
  })
 }
@@ -37,10 +40,10 @@ export function acceptanceWakeSettings(settings,enabled){
  return enabled?{...settings,wakeWordEnabled:false}:settings
 }
 
-export function waitForAcceptanceRuntimeGate(child,buildCommit,timeoutMs=10000){
+export function waitForAcceptanceRuntimeGate(child,expected,timeoutMs=10000){
  return new Promise((resolve,reject)=>{
   const finish=error=>{clearTimeout(timer);child.off('message',message);child.off('exit',exit);error?reject(error):resolve()}
-  const message=value=>{if(value?.type!=='nova:acceptance:gate-ready')return;finish(value.buildCommit===buildCommit&&value.probeBlocked===true?undefined:Error('acceptance_gate_proof_mismatch'))}
+  const message=value=>{if(value?.type!=='nova:acceptance:gate-ready')return;finish(value.buildCommit===expected.buildCommit&&value.runtimeHash===expected.runtimeHash&&value.probeBlocked===true&&value.probeTransport==='fetch'&&value.blockedAttempts===1?undefined:Error('acceptance_gate_proof_mismatch'))}
   const exit=()=>finish(Error('acceptance_gate_proof_missing'))
   const timer=setTimeout(exit,timeoutMs)
   child.on('message',message);child.once('exit',exit)

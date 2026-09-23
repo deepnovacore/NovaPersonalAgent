@@ -1180,4 +1180,4 @@ export {probeMcpServer} from './executors/mcp-client.js'
 
 export {SensitiveContentPolicy} from './memory/sensitivity.js'
 export {FeishuConnector} from './connectors/feishu/index.js'
-export {allowAcceptanceLoopback,installAcceptanceGate,loadAcceptanceManifest,assertAcceptanceUrl,assertOriginalProfilePaths,acceptanceProfileHash,acceptanceManifest,acceptanceCounts,appendAcceptanceCounts} from './desktop/workbench-acceptance.js'
+export {probeAcceptanceGate,acceptanceRuntimeHash,allowAcceptanceLoopback,installAcceptanceGate,loadAcceptanceManifest,assertAcceptanceUrl,assertOriginalProfilePaths,acceptanceProfileHash,acceptanceManifest,acceptanceCounts,appendAcceptanceCounts} from './desktop/workbench-acceptance.js'

@@ -1,5 +1,5 @@
-import {appendAcceptanceCounts, allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-audio-agent/runtime/desktop'
-import {captureNativeWorkbench,waitForNativeWorkbench,installAcceptanceWindowGate,acceptanceWakeSettings,waitForAcceptanceRuntimeGate} from './workbench-native-acceptance.mjs'
+import {probeAcceptanceGate,acceptanceRuntimeHash,appendAcceptanceCounts, allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-audio-agent/runtime/desktop'
+import {captureNativeWorkbench,waitForNativeWorkbench,installAcceptanceWindowGate,installAcceptanceSessionGate,acceptanceWakeSettings,waitForAcceptanceRuntimeGate} from './workbench-native-acceptance.mjs'
 import {writeFileSync as writeAcceptanceFile} from 'node:fs'
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
@@ -27,6 +27,7 @@ import {
   net,
   protocol,
   safeStorage,
+  session,
   screen,
   shell,
   systemPreferences,
@@ -1027,7 +1028,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
       stdio: spec.stdio,
       serviceName: 'Nova Audio Agent Runtime',
     })
-    const acceptanceProof=acceptance?waitForAcceptanceRuntimeGate(spawnedBackend,acceptance.buildCommit):Promise.resolve()
+    const acceptanceProof=acceptance?waitForAcceptanceRuntimeGate(spawnedBackend,{buildCommit:acceptance.buildCommit,runtimeHash:acceptanceRuntimeHash(spec.entry)}):Promise.resolve()
     backend = spawnedBackend
     backendControl?.close()
     backendControl = createBackendControl(spawnedBackend, {onUsage: report => {
@@ -1912,7 +1913,8 @@ if (packagedSourceRollbackUnavailable) {
     }
     openSettingsWindow(activeLaunchId)
   })
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    if(acceptance){installAcceptanceSessionGate(session.defaultSession,assertAcceptanceUrl);await probeAcceptanceGate()}
     configureDevelopmentDockIcon({
       app,
       platform: process.platform,

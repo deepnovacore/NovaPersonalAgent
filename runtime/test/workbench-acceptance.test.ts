@@ -34,11 +34,12 @@ test('report output cannot be inside original profile or repository',()=>{
 test('real fetch/socket/http transports fail closed before network; persisted grants cannot be widened',()=>{
  const f=fixture();try{
  const moduleUrl=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href
- const code=`import assert from 'node:assert/strict';import net from 'node:net';import https from 'node:https';import http from 'node:http';import {request as undiciRequest} from 'undici';import {allowAcceptanceLoopback,installAcceptanceGate,assertAcceptanceGrant,assertPersistedAcceptanceGrant} from ${JSON.stringify(moduleUrl)};
+ const code=`import assert from 'node:assert/strict';import net from 'node:net';import https from 'node:https';import http from 'node:http';import {request as undiciRequest} from 'undici';import {allowAcceptanceLoopback,installAcceptanceGate,assertAcceptanceGrant,assertPersistedAcceptanceGrant,probeAcceptanceGate} from ${JSON.stringify(moduleUrl)};
  net.Socket.prototype.connect=function(){return this};
  globalThis.fetch=async()=>{net.connect({host:'provider.invalid',port:443});return new Response('{}')};
  http.request=()=>({synthetic:true});
  installAcceptanceGate();
+ assert.deepEqual(await probeAcceptanceGate(),{probeBlocked:true,probeTransport:'fetch',blockedAttempts:1});
  assertPersistedAcceptanceGrant({extraction_provider:'known',embedding_provider:'known'},${JSON.stringify(f.manifest.originalBlackboardPath+'.personal.json')});
  assert.throws(()=>assertPersistedAcceptanceGrant({extraction_provider:'known',embedding_provider:'known'},${JSON.stringify(f.manifest.originalBlackboardPath)}),/wrong_host_path/);
  allowAcceptanceLoopback('ws://127.0.0.1:48000/');
@@ -87,5 +88,47 @@ test('mandatory acceptance entry rejects missing gate environment before opening
  assert.match(child.stderr,/acceptance_gate_missing/u)
  assert.equal(readFileSync(f.manifest.originalBlackboardPath,'utf8'),'')
  assert.equal(readFileSync(f.manifest.originalBlackboardPath+'.personal.json','utf8'),'{}')
+ }finally{f.close()}
+})
+
+test('one provider identity cannot authorize an additional origin',()=>{
+ const f=fixture();try{
+ writeFileSync(f.manifestPath,JSON.stringify({...f.manifest,providers:[...f.manifest.providers,{identity:'known',origin:'https://extra.invalid',models:['model']}]}))
+ assert.throws(()=>loadAcceptanceManifest(f.env),/provider_identity_multiple_origins/u)
+ }finally{f.close()}
+})
+
+test('acceptance capability projection removes actual search and camera assembly paths',async()=>{
+ const {acceptanceCapabilityRegistry}=await import('../src/desktop/workbench-acceptance.js')
+ const {parseCapabilityRegistry}=await import('../src/config/capability-registry.js')
+ const {settingsSchema}=await import('../src/config/config.js')
+ const {buildAssembly}=await import('../src/composition/assembly.js')
+ const configured=parseCapabilityRegistry({version:1,modules:{search:{enabled:true},camera:{enabled:true}}})
+ const capabilities=acceptanceCapabilityRegistry(configured,true)
+ const core=buildAssembly({settings:settingsSchema.parse({memory_connection:'disabled',executors:[],model_api_key:'synthetic'}),capabilities})
+ try{
+  assert.equal(core.runtime.executors.has('search'),false)
+  assert.equal(core.tools.bindings.has('search__search'),false)
+  assert.equal(core.visionController,undefined)
+  assert.deepEqual(capabilities.mcpServers,{})
+  assert.equal(configured.modules.search.enabled,true)
+  assert.equal(configured.modules.camera.enabled,true)
+  assert.equal(acceptanceCapabilityRegistry(configured,false),configured)
+ }finally{await core.stop()}
+})
+test('runtime fingerprint changes when entry bytes change',async()=>{
+ const {acceptanceRuntimeHash}=await import('../src/desktop/workbench-acceptance.js')
+ const f=fixture();try{
+ const entry=join(f.root,'entry.js');writeFileSync(entry,'first')
+ const before=acceptanceRuntimeHash(entry);writeFileSync(entry,'second')
+ assert.notEqual(acceptanceRuntimeHash(entry),before)
+ }finally{f.close()}
+})
+test('fetch probe cannot certify a stub error without an actual blocked counter increment',()=>{
+ const f=fixture();try{
+ const gate=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href
+ const code=`import assert from 'node:assert/strict';import {installAcceptanceGate,probeAcceptanceGate} from ${JSON.stringify(gate)};installAcceptanceGate();globalThis.fetch=async()=>{throw Error('acceptance_unknown_outbound')};await assert.rejects(probeAcceptanceGate(),/gate_probe_failed/);`
+ const child=spawnSync(process.execPath,['--input-type=module','-e',code],{env:f.env,encoding:'utf8'})
+ assert.equal(child.status,0,child.stderr)
  }finally{f.close()}
 })
