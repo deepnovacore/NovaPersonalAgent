@@ -91,6 +91,12 @@ body[data-personal-collapsed="false"]{background:var(--surface,#f4f5f7);overflow
 .workbench .personal-card{flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 8px}
 .workbench .personal-card>h3,.workbench .personal-card>p,.workbench .personal-card>.life-form,.workbench .personal-card>details{flex-basis:100%}
 .workbench .personal-card>select{width:auto;margin-right:4px}
+.workbench-suggestions{display:grid;gap:10px;margin-top:12px}
+.workbench-suggestions>h2{font-size:14px;color:var(--ink-dim);font-weight:600}
+.workbench-empty{border:1px dashed var(--line);border-radius:var(--radius);padding:24px;display:grid;gap:8px;color:var(--ink-dim)}
+.workbench-empty h3{font-size:15px;color:var(--ink);font-weight:600}
+.workbench-empty p{font-size:13px;line-height:1.6}
+.workbench-empty button{justify-self:start}
 .workbench-page>button{align-self:flex-start}
 .workbench-page>h2{display:none}
 .workbench label:has(>input[type=checkbox]),.workbench label:has(>input[type=radio]){display:flex;align-items:center;gap:8px;color:var(--ink)}

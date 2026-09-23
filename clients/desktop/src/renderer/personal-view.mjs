@@ -5,6 +5,7 @@ import {mountRail,RAIL_ITEMS} from './workbench-rail.mjs'
 import {mountChatPane} from './chat-pane.mjs'
 import {renderMemorySection} from './memory-page.mjs'
 import {renderTasksPage,activeTaskCount} from './tasks-page.mjs'
+import {renderSourceSuggestions} from './workbench-suggestions.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 const PAGE_TITLE=Object.fromEntries(RAIL_ITEMS.map(item=>[item.id,`${item.label} · ${item.title}`]))
 /** The workbench: icon rail, personal-object pages in the middle, Nova as a collapsible pane on the right. */
@@ -47,21 +48,15 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
   const focused=panel.contains?.(document.activeElement)?document.activeElement:null,focusLabel=focused?.getAttribute?.('aria-label'),focusText=focused?.tagName==='BUTTON'?focused.textContent:null
   panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
   const s=c.snapshot;const caps=s?.capabilities??{}
-  if(selected!=='tasks'){
-   const context=s?.workbench_context
-   if(!(s?.sources?.length))button('连接本机资料，自动整理工作台',()=>openSettings('connections'),panel)
-   if(context?.status==='working')panel.append(el('p','正在根据已授权资料整理内容…','hint'))
-   if(context?.status==='failed')panel.append(el('p','本轮整理未完成；已有内容保留，后台会重试。','hint'))
-   for(const item of context?.cards??[]){if(item.tab!==selected)continue;const a=card(item.title,item.body);a.append(el('p','Nova 根据资料整理 · 建议不代表已承诺或已执行','hint'));const refs=el('details');refs.append(el('summary','查看依据'));for(const ref of item.refs){const entry=s.memory?.entries?.find(e=>e.id===ref.entry_id&&e.version===ref.version);refs.append(el('p',ref.label??entry?.content??ref.entry_id))}a.append(refs);button('继续讨论',()=>continueChat(item.title+'：'+item.body),a);button('隐藏',()=>c.command('context.dismiss',{id:item.id}),a)}
-  }
   const candidateKind=({todos:'todo',ideas:'idea',goals:'goal',profile:'profile'})[selected]
   const pending=el('section',undefined,'pending-group');pending.setAttribute('aria-label','待确认')
   if(s?.understanding?.error&&candidateKind)pending.append(el('p','这条发言暂时没能记下来，你仍可以手动添加。','hint'))
   if(selected==='todos')for(const item of s?.understanding?.recorded??[]){const a=el('article',undefined,'card pending');a.append(el('h3','已记下待办'),el('p',item.text));pending.append(a);const current=s.life?.todos?.find(t=>t.id===item.object_id);if(current?.version===item.version)button('撤销记录',()=>c.command('understanding.action',{id:item.id,action:'undo'}),a)}
   for(const item of s?.understanding?.items??[]){if(item.kind!==candidateKind)continue;const a=el('article',undefined,'card pending');a.append(el('h3','可能想记下'),el('p',item.text),el('p',`依据：${item.quote}`,'hint'));if(item.kind==='profile')a.append(el('p','确认后将追加到个人介绍，不会替换已有内容。','hint'));const edit=el('textarea');edit.value=lifeLocal['candidate:'+item.id]??item.text;edit.maxLength=1000;edit.setAttribute('aria-label','候选内容');edit.addEventListener('input',()=>{lifeLocal['candidate:'+item.id]=edit.value});a.append(edit);button('记下来',()=>c.command('understanding.action',{id:item.id,action:'accept',text:edit.value,...(item.kind==='profile'?{expected_profile_version:s.life.profile.version}:{})}),a);button('略过',()=>c.command('understanding.action',{id:item.id,action:'dismiss'}),a);pending.append(a)}
-  if(pending.children?.length||pending.childElementCount)panel.append(pending)
   if(['todos','ideas','goals'].includes(selected)){
    renderLife(panel,{kind:({todos:'todo',ideas:'idea',goals:'goal'})[selected],state:s?.life,openArticle:url=>api.personal.openArticle(url),command:(m,p)=>c.command(m,p),button,run,local:lifeLocal,rerender:renderPanel,delegate:text=>chat.focusDraft(text)})
+   if(pending.children?.length||pending.childElementCount)panel.append(pending)
+   renderSourceSuggestions(panel,{tab:selected,context:s?.workbench_context,sources:s?.sources??[],button,command:(m,p)=>c.command(m,p),continueChat,openSettings})
    if(selected==='todos')button('查看 Agent 执行任务',()=>{selected='tasks';renderPanel()},panel).className='link-button'
   }else if(selected==='feeds'){
    renderNews(panel,{news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings})
@@ -70,6 +65,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
    button('任务控制与结果',openResults,panel).className='link-button'
   }else if(selected==='profile'){
    renderProfile(panel,{state:s?.life,news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
+   if(pending.children?.length||pending.childElementCount)panel.append(pending)
    renderMemorySection(panel,{snapshot:s,caps,el,button,chips,command:(m,p)=>c.command(m,p),continueChat,connected:c.connected,local:lifeLocal})
   }
   for(const b of panel.querySelectorAll('button'))if(!c.connected)b.disabled=true

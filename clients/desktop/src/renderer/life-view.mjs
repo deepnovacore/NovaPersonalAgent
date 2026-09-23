@@ -19,7 +19,7 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
  if(draft.id)button('取消编辑',()=>{delete local[formKey];delete local[openKey];rerender()},form)
  button(local[kind+':all']?'隐藏已完成／归档':'显示已完成／归档',()=>{local[kind+':all']=!local[kind+':all'];rerender()},panel)
  const visible=rows.filter(r=>local[kind+':all']||!['done','cancelled','archived','completed'].includes(r.status))
- if(!visible.length)panel.append(el('p',`暂无${labels[kind]}，可以从上方添加。`))
+ if(!visible.length){const empty=el('section');empty.className='workbench-empty';const copy=rows.length?{todo:['当前没有进行中的待办','已完成的记录可以从上方展开。'],idea:['当前没有保留的想法','已归档的想法可以从上方展开。'],goal:['当前没有推进中的目标','已归档的目标可以从上方展开。']}[kind]:{todo:['还没有待办','想起一件要做的事，可以随时记在这里。'],idea:['还没有保存想法','有个念头时，先用一句话记下来就好。'],goal:['还没有设定目标','可以先写下想推进的方向，以及怎样算达成。']}[kind];empty.append(el('h3',copy[0]),el('p',copy[1]));panel.append(empty)}
  for(const row of visible){const card=el('article');card.className='personal-card';card.dataset.lifeId=row.id;card.append(el('h3',row.title),el('p',row.note));panel.append(card)
   if(row.news_source){card.append(el('p',`由你从公开资讯保存：${row.news_source.title}`),el('p',row.news_source.url));if(openArticle)button('查看资讯原文',()=>openArticle(row.news_source.url),card)}
   if(row.due)card.append(el('p',`到期：${row.due}`))
@@ -44,7 +44,7 @@ export function renderProfile(panel,{state,news,warmup,command,button,local,pref
   button('保存介绍',async()=>{await command('life.mutate',{op:'profile',expected_version:draft.version,about:draft.about});delete local.profile;rerender()},actions).className='page-add'
   button('取消编辑',()=>{delete local.profile;rerender()},actions)
  }else{
-  const caption=el('p',confirmed?'你已确认的信息':suggested?'根据已授权资料生成 · 尚未确认为个人信息':'随着你使用 Nova，这里会逐渐形成介绍。也可以随时补充一句。');caption.className='preference-caption';card.append(caption)
+  const caption=el('p',confirmed?'你已确认的信息':suggested?'供你修改的介绍草稿 · 保存后才会成为个人信息':'还没有个人介绍。可以先补充一句你希望 Nova 记住的内容。');caption.className='preference-caption';card.append(caption)
   if(about){const preview=el('p',about);preview.className='profile-preview';card.append(preview)}
   const actions=el('div');actions.className='preference-actions';card.append(actions)
   if(!confirmed&&suggested)button('确认介绍',()=>command('life.mutate',{op:'profile',expected_version:state?.profile?.version??0,about:suggested}),actions).className='page-add'

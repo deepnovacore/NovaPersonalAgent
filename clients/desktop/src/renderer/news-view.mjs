@@ -15,8 +15,8 @@ export function renderNews(panel,{news,warmup,command,button,local,preferencesLo
  if(news.refreshing){const loading=el('div');loading.className='warmup-status';loading.setAttribute('role','status');const spinner=el('span');spinner.className='warmup-spinner';spinner.setAttribute('aria-hidden','true');loading.append(spinner,el('p',news.items.length?'正在更新，已有内容仍可阅读。':'正在准备第一批资讯…'));panel.append(loading)}
  const items=local.saved?news.saved:news.items
  if(!items.length){const empty=el('section');empty.className='news-empty';panel.append(empty)
-  empty.append(el('h3',local.saved?'值得留住的内容，会在这里':!news.enabled?'为你准备一份资讯精选':news.refreshing?'好内容正在路上':'暂时没有新内容'))
-  empty.append(el('p',local.saved?'看到喜欢的文章，点一下收藏。':!news.enabled?'兴趣已准备好，开启资讯即可开始，也可以先调整。':news.refreshing?'你可以继续和 Nova 聊天，稍后回来查看。':news.sources.some(s=>s.error)?'部分来源暂时无法连接，请稍后重试。':'稍后刷新，或调整兴趣试试。'))
+  empty.append(el('h3',local.saved?'还没有收藏的文章':!news.enabled?'资讯更新已关闭':news.refreshing?'正在获取资讯':'暂时没有新文章'))
+  empty.append(el('p',local.saved?'看到想保留的文章时，可以点收藏。':!news.enabled?'开启后，这里会显示新文章。':news.refreshing?'获取完成后会显示在这里。':news.sources.some(s=>s.error)?'部分来源暂时无法连接；可以在下方查看来源状态。':'可以稍后刷新，或调整关注的主题。'))
  }
  const sources=el('details');sources.append(el('summary','来源与同步状态'));panel.append(sources)
  for(const source of news.sources){const row=el('div');row.append(el('p',`${source.name} · ${source.blocked?'已屏蔽':source.error?'获取失败：'+source.error:source.last_success?'最近成功：'+new Date(source.last_success).toLocaleString():'尚未获取'} · ${source.count??0} 条`));button(source.blocked?'恢复来源':'屏蔽来源',()=>command('news.action',{action:'block',source_id:source.id,value:!source.blocked}),row);sources.append(row)}
