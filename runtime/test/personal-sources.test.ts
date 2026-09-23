@@ -1,15 +1,16 @@
 import assert from 'node:assert/strict'
+import {randomUUID} from 'node:crypto'
 import {execFileSync} from 'node:child_process'
 import {VoiceMem} from 'voicemem'
 import {VersionedMemory} from '../src/voicemem/versioned-memory.js'
-import {mkdtemp, mkdir, writeFile, rm, realpath, symlink, rename, readFile, utimes, stat} from 'node:fs/promises'
+import {mkdtemp, mkdir, writeFile, rm, realpath, symlink, rename, readFile, utimes, stat, chmod} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import test from 'node:test'
 import {LocalDirectorySources} from '../src/personal-agent/sources.js'
 import {nextComputerRoot,orderComputerRoots} from '../src/personal-agent/source-priority.js'
 import {scanDirectory} from '../src/personal-agent/source-walk.js'
-import {KnowledgeService} from '../src/knowledge/service.js'
+import {KnowledgeService, type KnowledgeEvidenceLedger} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
 
 async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string|null>, directorySafetyCap?:number, contentRecheckMs?:number) {
@@ -369,6 +370,101 @@ test('failed refresh retries the changed file rather than blessing stale index m
     assert.notEqual((await f.knowledge.listSources())[0]!.fingerprint, before.fingerprint)
     assert.equal((await f.knowledge.recall('Updated', 1))[0]!.text, 'Updated source after an interrupted synchronization')
   } finally {await f.close()}
+})
+
+test('committed replacement survives repeated old-ledger cleanup failures until pending recovery', async () => {
+  for (const owned of [true, false]) {
+   const f = await fixture()
+   try {
+    const path = join(f.folder, 'notes.md')
+    await writeFile(path, 'Initial verified note')
+    if (!owned) await f.knowledge.handle('knowledge.ingest', {kind: 'file', locator: path, consent: true})
+    await f.sources.command('sources.add', {path: f.folder, consent: true})
+    const id = f.sources.list()[0]!.id, oldRef = f.sources.evidenceSnapshot()[0]!.ref
+    const oldId = (await f.knowledge.listSources())[0]!.id
+    const rows = new Map<string, NonNullable<Awaited<ReturnType<KnowledgeEvidenceLedger['read']>>>>()
+    let cleanupFailures = 2
+    const removed: string[] = []
+    const ledger: KnowledgeEvidenceLedger = {
+      record: input => {const evidence_id = randomUUID(); rows.set(evidence_id, {
+        evidence_id, locator: input.locator, text: input.text, source_kind: 'file', observed_at: input.observedAt, trust: 'untrusted_external',
+      }); return Promise.resolve({evidence_id})},
+      read: evidenceId => Promise.resolve(rows.get(evidenceId) ?? null),
+      canProcess: () => Promise.resolve(true),
+      processingStamp: () => Promise.resolve('test-grant'),
+      remove: sourceId => {if (cleanupFailures-- > 0) return Promise.reject(Error('private cleanup detail')); removed.push(sourceId); return Promise.resolve()},
+    }
+    await f.knowledge.bindEvidenceLedger(ledger)
+    await writeFile(path, 'Replacement verified note')
+    await f.sources.command('sources.sync', {id})
+    assert.equal(f.sources.evidence(oldRef), null)
+    assert.equal(cleanupFailures, 0)
+    assert.equal(f.sources.evidenceSnapshot().length, 0)
+    await f.sources.command('sources.sync', {id})
+    assert.equal(f.sources.evidenceSnapshot().length, 1)
+    assert.match(f.sources.contextEntries()[0]!.content, /Replacement verified/u)
+    assert.equal((await f.knowledge.listSources()).length, 1)
+    assert.ok(removed.includes(`knowledge:${oldId}`))
+   } finally {await f.close()}
+  }
+})
+
+test('terminal screening rejection removes the stale owned knowledge index', async () => {
+  const f = await fixture()
+  try {
+    const path = join(f.folder, 'notes.md')
+    await writeFile(path, 'Previously searchable source')
+    await f.sources.command('sources.add', {path: f.folder, consent: true})
+    const id = f.sources.list()[0]!.id
+    await writeFile(path, 'token=credential-value-123456789')
+    await f.sources.command('sources.sync', {id})
+    assert.equal(f.sources.list()[0]!.failures[0]!.code, 'screening_rejected')
+    assert.deepEqual(await f.knowledge.listSources(), [])
+  } finally {await f.close()}
+})
+
+test('exhausted transient retry retires stale owned knowledge index', async () => {
+  const f = await fixture()
+  try {
+    const path = join(f.folder, 'notes.md')
+    await writeFile(path, 'Initial searchable content')
+    const {id} = await f.sources.command('sources.authorize_computer', {consent: true}) as {id: string}
+    for (let i = 0; i < 3 && !(await f.knowledge.listSources()).length; i++) await f.sources.command('sources.sync', {id})
+    assert.equal((await f.knowledge.listSources()).length, 1)
+    await f.sources.close()
+    await writeFile(path, 'Changed content needing embedding')
+    const info = await stat(path)
+    const statePath = join(f.root, 'db', 'sources.json')
+    const state = JSON.parse(await readFile(statePath, 'utf8')) as {sources: {walk: unknown}[]}
+    state.sources[0]!.walk = {queue: [], ledger: [], generation: 1, pending: [{path, size: info.size, mtime: info.mtimeMs, unit: f.folder, attempts: 5}], deferred: []}
+    await writeFile(statePath, JSON.stringify(state))
+    f.setFail(true)
+    const sources = new LocalDirectorySources({path: statePath, computerRoot: f.folder, knowledge: f.knowledge, pollMs: 0, scanOnOpen: false,
+      processingGrant: (consent, revision, scope_revision) => ({revision, scope_revision, extraction_provider: consent ? 'test' : null, embedding_provider: consent ? 'test' : null})})
+    try {
+      await sources.open(); await sources.command('sources.sync', {id})
+      assert.deepEqual(await f.knowledge.listSources(), [])
+      const saved = JSON.parse(await readFile(statePath, 'utf8')) as {sources: {walk: {deferred: unknown[]}}[]}
+      assert.equal(saved.sources[0]!.walk.deferred.length, 0)
+    } finally {await sources.close()}
+  } finally {await f.close()}
+})
+
+test('same-metadata recheck read failure keeps verified evidence available', async () => {
+  const f = await fixture(false, undefined, undefined, 0)
+  try {
+    const path = join(f.folder, 'notes.md')
+    await writeFile(path, 'Known good project note')
+    await f.sources.command('sources.add', {path: f.folder, consent: true})
+    const id = f.sources.list()[0]!.id, ref = f.sources.evidenceSnapshot()[0]!.ref
+    await chmod(path, 0o000)
+    await f.sources.command('sources.sync', {id})
+    assert.equal(f.sources.evidenceSnapshot()[0]!.ref, ref)
+    assert.ok(!f.invalidated.includes(ref))
+    await chmod(path, 0o600)
+    await f.sources.command('sources.sync', {id})
+    assert.equal(f.sources.evidenceSnapshot()[0]!.ref, ref)
+  } finally {await chmod(join(f.folder, 'notes.md'), 0o600).catch(() => undefined); await f.close()}
 })
 
 test('bounded recheck detects same-size same-mtime replacement and invalidates old version first', async () => {

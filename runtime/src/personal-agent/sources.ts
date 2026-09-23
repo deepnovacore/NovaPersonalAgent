@@ -476,6 +476,9 @@ export class LocalDirectorySources {
     let complete = true, visited = 0
     let currentReadFailure=false
     try {
+      // Finish an interrupted replacement before metadata discovery can
+      // overwrite the checkpoint with the already-committed index timestamp.
+      await this.#recoverPending(record)
       if (view.scope!=='computer'&&await realpath(view.path) !== view.path) throw new Error('path_denied')
       if(view.scope==='computer'){
         for(const previous of [...record.files].filter(file=>isComputerExcludedPath(view,file.path))){
@@ -551,6 +554,11 @@ export class LocalDirectorySources {
           const sameMetadata = previous.mtime === file.mtime && previous.size === file.size
           if (sameMetadata && ((previous.checked_at??0)+(this.#options.contentRecheckMs??300_000)>Date.now() || rechecks++>=4)) {settlePending(record,file.path);continue}
           const checked = await readKnowledgeFile(file.path, signal, view.path).catch(() => null)
+          if (sameMetadata && checked === null) {
+            settlePending(record,file.path)
+            if (record.walk) deferPending(record,file,'retry',Date.now()+30_000)
+            continue
+          }
           if (checked?.fingerprint === previous.fingerprint) {
             previous.size = file.size
             previous.mtime = file.mtime
@@ -594,6 +602,7 @@ export class LocalDirectorySources {
           const code=errorCode(error)
           currentReadFailure=true
           if (view.failures.length < 50) view.failures.push({path: relative(view.path, file.path), code})
+          if (['screening_rejected','unsupported_file'].includes(code) || (file.attempts??0)>=5) await discardStaleIndex()
           if(record.walk&&['knowledge_busy','source_busy','ingest_failed','source_unavailable','file_changed','file_unavailable','embedding_failed','store_failed'].includes(code)&&(file.attempts??0)<5){const attempts=(file.attempts??0)+1;deferPending(record,file,'retry',Date.now()+Math.min(6*60*60_000,30_000*2**attempts))}
           if (code === 'knowledge_busy') break
         }
@@ -636,7 +645,7 @@ export class LocalDirectorySources {
       if (previous && previous.fingerprint !== indexed.fingerprint) {
         await this.#invalidateFile(previous)
       }
-      if (previous?.owned && previous.id !== indexed.id) await this.#options.knowledge.handle('knowledge.remove', {id: previous.id})
+      if (previous && previous.id !== indexed.id) await this.#options.knowledge.handle('knowledge.remove', {id: previous.id})
       record.files = record.files.filter(item => item.path !== pending.path)
       record.files.push({path: pending.path, size: pending.size, mtime: pending.mtime, owned: pending.owned, id: indexed.id, fingerprint: indexed.fingerprint, valid: true, excerpt: null, observed: false, observation_ref: randomUUID()})
     }
