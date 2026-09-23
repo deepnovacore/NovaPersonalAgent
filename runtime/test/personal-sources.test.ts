@@ -6,6 +6,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import test from 'node:test'
 import {LocalDirectorySources} from '../src/personal-agent/sources.js'
+import {orderComputerRoots} from '../src/personal-agent/source-priority.js'
 import {KnowledgeService} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
 
@@ -424,5 +425,45 @@ test('whole-computer scan skips hidden content and invalidates a legacy hidden r
   await f.sources.command('sources.sync',{id:grant.id})
   assert.ok(f.invalidated.includes(legacyRef))
   assert.ok(!(await f.knowledge.listSources()).some(s=>s.locator===hiddenFile))
+ }finally{await f.close()}
+})
+
+test('priority directory changes scan order without changing computer authority',async()=>{
+ const f=await fixture()
+ try{
+  const alpha=join(f.folder,'alpha'),project=join(f.folder,'project')
+  await mkdir(alpha);await mkdir(project)
+  await writeFile(join(alpha,'README.md'),'Alpha notes')
+  await writeFile(join(project,'README.md'),'Project notes')
+  const grant=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.priority.add',{path:project})
+  assert.deepEqual(f.sources.list()[0]!.priority_dirs,[project])
+  await f.sources.command('sources.priority.remove',{path:project})
+  assert.deepEqual(f.sources.list()[0]!.priority_dirs,[])
+  assert.equal(f.sources.list()[0]!.state,'connected')
+  await f.sources.command('sources.sync',{id:grant.id})
+  assert.ok((await f.knowledge.listSources()).some(s=>s.locator===join(project,'README.md')))
+ }finally{await f.close()}
+})
+test('computer roots rank selected and current work ahead of recent Git and mtime',()=>{
+ const roots=[
+  {path:'/older',selected:false,currentWorkspace:false,lastGitCommitMs:null,mtimeMs:1},
+  {path:'/git',selected:false,currentWorkspace:false,lastGitCommitMs:9,mtimeMs:2},
+  {path:'/current',selected:false,currentWorkspace:true,lastGitCommitMs:null,mtimeMs:1},
+  {path:'/selected',selected:true,currentWorkspace:false,lastGitCommitMs:null,mtimeMs:1},
+ ]
+ assert.deepEqual(orderComputerRoots(roots).map(root=>root.path),['/selected','/current','/git','/older'])
+})
+test('first computer batches include more than one visible project root',async()=>{
+ const f=await fixture()
+ try{
+  const alpha=join(f.folder,'alpha'),beta=join(f.folder,'beta')
+  await mkdir(alpha);await mkdir(beta)
+  for(let i=0;i<48;i++)await writeFile(join(alpha,`note-${String(i).padStart(2,'0')}.md`),`Alpha note ${i}`)
+  await writeFile(join(beta,'README.md'),'Beta project overview')
+  await utimes(beta,new Date('2020-01-01'),new Date('2020-01-01'))
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id})
+  assert.ok((await f.knowledge.listSources()).some(source=>source.locator===join(beta,'README.md')))
  }finally{await f.close()}
 })

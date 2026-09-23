@@ -1,6 +1,7 @@
 import {homedir} from 'node:os'
 import {processingGrantSchema,type ProcessingGrant} from '../memory-substrate/source-state.js'
 import {interleave} from './sampling.js'
+import {orderComputerRoots,rootActivity} from './source-priority.js'
 import {randomUUID} from 'node:crypto'
 import {acquirePersonalLock} from './store.js'
 import {lstat, readdir, opendir, open, readFile, realpath, rename, rm, writeFile} from 'node:fs/promises'
@@ -18,6 +19,7 @@ const idSchema = z.string().uuid()
 const excludeSchema = z.array(z.string().min(1).max(100).regex(/^[^/\\\0]+$/u)).max(32)
 const snapshotSchema = z.object({
   scope: z.enum(['directory','computer']).default('directory'), scan_pending:z.boolean().default(false), indexed:z.number().int().nonnegative().default(0),
+  priority_dirs:z.array(pathSchema).max(16).default([]),
   id: idSchema, path: pathSchema, state: z.enum(['connected', 'paused', 'disconnected', 'error']),
   scanned: z.number().int().nonnegative(), read: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(),
   reasons: z.record(z.string(), z.number().int().nonnegative()),
@@ -55,9 +57,15 @@ function isAutoHiddenPath(root: string, path: string, selected: readonly string[
   if (selected.some(value => within(value, path))) return false
   return parts.some(part => part.startsWith('.'))
 }
+function computerUnit(root:string,path:string):string {
+  const home=homedir()
+  const base=within(home,path)&&within(root,home)?home:root
+  return join(base,relative(base,path).split(sep)[0]??'')
+}
 
 export interface LocalDirectorySourceOptions {
   readonly computerRoot?: string
+  readonly priorityWorkspace?: () => Promise<string | null>
   readonly path: string
   readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'>
   readonly pollMs?: number
@@ -110,18 +118,18 @@ export class LocalDirectorySources {
   evidence(ref: string) {
     for (const record of this.#records) {
       const file = record.files.find(file => refFor(file) === ref)
-      if (file?.valid && !record.deleting && (record.view.scope !== 'computer' || !isAutoHiddenPath(record.view.path, file.path))) return {subject_key: `file:${file.id}`, source: {type: 'file' as const, ref}}
+      if (file?.valid && !record.deleting && (record.view.scope !== 'computer' || !isAutoHiddenPath(record.view.path, file.path, record.view.priority_dirs))) return {subject_key: `file:${file.id}`, source: {type: 'file' as const, ref}}
     }
     return null
   }
   contextEntries():{id:string;version:string;content:string}[]{
     const expected=this.#options.processingGrant?.(true,1,0)
-    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isAutoHiddenPath(record.view.path,f.path))).map(file=>({id:'source:'+file.id,version:file.fingerprint,content:`${relative(record.view.path,file.path)}: ${file.excerpt}`.slice(0,1200)})))
+    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isAutoHiddenPath(record.view.path,f.path,record.view.priority_dirs))).map(file=>({id:'source:'+file.id,version:file.fingerprint,content:`${relative(record.view.path,file.path)}: ${file.excerpt}`.slice(0,1200)})))
   }
   evidenceSnapshot(): {ref: string; summary: string}[] {
     const fingerprints = new Set<string>()
     return interleave(this.#records.filter(record => !record.deleting).map(record =>
-      balanced(record.files.filter(file => file.valid && (record.view.scope!=='computer'||!isAutoHiddenPath(record.view.path,file.path))), record.view.path).map(file => ({
+      balanced(record.files.filter(file => file.valid && (record.view.scope!=='computer'||!isAutoHiddenPath(record.view.path,file.path,record.view.priority_dirs))), record.view.path).map(file => ({
         ref: refFor(file), fingerprint: file.fingerprint,
         summary: `已授权本地文件：${relative(record.view.path, file.path).slice(0, 160)}`,
       }))), Infinity).filter(file => {
@@ -141,6 +149,27 @@ export class LocalDirectorySources {
   }
   async #command(method: string, params: unknown): Promise<unknown> {
     if (this.#closed) throw new Error('sources_closed')
+    if(method==='sources.priority.add'||method==='sources.priority.remove'){
+      const {path}=z.object({path:pathSchema}).strict().parse(params)
+      const computer=this.#records.find(record=>record.view.scope==='computer'&&!record.deleting&&record.view.state!=='disconnected')
+      if(!computer)throw Error('source_gone')
+      if(method==='sources.priority.add'){
+        const canonical=await realpath(path)
+        if(canonical!==path||!within(computer.view.path,path)||!policy.allows(path)||relative(computer.view.path,path).split(sep).includes('.git'))throw Error('path_denied')
+        if(this.#records.some(record=>record!==computer&&within(record.view.path,path)))throw Error('source_exists')
+        if(!computer.view.priority_dirs.includes(path)){
+          if(computer.view.priority_dirs.length>=16)throw Error('source_limit')
+          computer.view.priority_dirs.push(path);await this.#save()
+        }
+        if(computer.walk){computer.walk.queue=computer.walk.queue.filter(entry=>entry.path!==path);computer.walk.queue.unshift({path,offset:0});await this.#save()}
+        void this.#sync(computer).catch(()=>undefined)
+      }else{
+        computer.view.priority_dirs=computer.view.priority_dirs.filter(value=>value!==path)
+        await this.#save()
+      }
+      await this.#options.onChange?.(false)
+      return {ok:true}
+    }
     if (method === 'sources.authorize_computer') {
       z.object({consent:z.literal(true)}).strict().parse(params)
       const existing=this.#records.find(r=>r.view.scope==='computer');if(existing)return {id:existing.view.id}
@@ -156,7 +185,7 @@ export class LocalDirectorySources {
       if (this.#records.some(record => within(record.view.path, path) || within(path, record.view.path))) throw new Error('source_exists')
       const record: SourceRecord = {walk:null,view: {scope:'directory',scan_pending:false,indexed:0,id: randomUUID(), path, state: 'connected', scanned: 0, read: 0, skipped: 0,
         reasons: {}, failures: [], last_sync: null, excludes: parsed.data.excludes ?? [],
-        max_files: parsed.data.max_files ?? 200, max_bytes: parsed.data.max_bytes ?? 20 * 1024 * 1024}, files: [], deleting: false, observation: '', pending: null}
+        priority_dirs:[],max_files: parsed.data.max_files ?? 200, max_bytes: parsed.data.max_bytes ?? 20 * 1024 * 1024}, files: [], deleting: false, observation: '', pending: null}
       const grant=this.#options.processingGrant?.(parsed.data.consent,1,0);if(grant)record.processing_consent=grant
       this.#records.push(record)
       try {await this.#save()} catch (error) {this.#records.pop(); throw error}
@@ -194,7 +223,7 @@ export class LocalDirectorySources {
   async #addComputer():Promise<{id:string}>{
     if(this.#records.length>=8)throw Error('source_limit')
     const path=await realpath(this.#options.computerRoot??parse(homedir()).root)
-    const record:SourceRecord={walk:null,view:{scope:'computer',scan_pending:true,indexed:0,id:randomUUID(),path,state:'connected',scanned:0,read:0,skipped:0,reasons:{},failures:[],last_sync:null,excludes:[],max_files:200,max_bytes:20*1024*1024},files:[],deleting:false,observation:'',pending:null}
+    const record:SourceRecord={walk:null,view:{scope:'computer',scan_pending:true,indexed:0,priority_dirs:[],id:randomUUID(),path,state:'connected',scanned:0,read:0,skipped:0,reasons:{},failures:[],last_sync:null,excludes:[],max_files:200,max_bytes:20*1024*1024},files:[],deleting:false,observation:'',pending:null}
     const grant=this.#options.processingGrant?.(true,1,0);if(grant)record.processing_consent=grant
     this.#records.push(record);try{await this.#save()}catch(error){this.#records.pop();throw error}
     // The grant returns immediately; indexing cannot block the settings window.
@@ -205,16 +234,29 @@ export class LocalDirectorySources {
     const walk=record.walk??={queue:[{path:record.view.path,offset:0}],pending:[]}
     const excluded=new Set([...SOURCE_EXCLUDES,...COMPUTER_EXCLUDES,...record.view.excludes].map(s=>s.toLowerCase()))
     let visited=0
+    const workspace=await this.#options.priorityWorkspace?.().then(path=>path&&within(record.view.path,path)?path:null).catch(()=>null)??null
+    const activity=new Map<string,Awaited<ReturnType<typeof rootActivity>>>()
+    const readsByUnit=new Map<string,number>()
+    const deferred=new Set<string>()
+    const signalFor=async(path:string)=>{
+      let recent=activity.get(path)
+      if(!recent){recent=await rootActivity(path);activity.set(path,recent)}
+      return {path,selected:record.view.priority_dirs.some(value=>within(path,value)||within(value,path)),currentWorkspace:!!workspace&&(within(path,workspace)||within(workspace,path)),...recent}
+    }
     while(walk.queue.length&&walk.pending.length<16&&visited<20000){
+      if(walk.queue.every(entry=>deferred.has(entry.path)))break
+      const front=walk.queue.slice(0,64)
+      const ranked=orderComputerRoots(await Promise.all(front.map(entry=>signalFor(entry.path))))
+      walk.queue.splice(0,front.length,...ranked.map(item=>front.find(entry=>entry.path===item.path)!).sort((a,b)=>Number(deferred.has(a.path))-Number(deferred.has(b.path))))
       signal.throwIfAborted();const directory=walk.queue[0]!
       try{
-        if(directory.path!==record.view.path&&(isAutoHiddenPath(record.view.path,directory.path)||relative(record.view.path,directory.path).split(sep).some(part=>excluded.has(part.toLowerCase())))){walk.queue.shift();continue}
+        if(directory.path!==record.view.path&&(isAutoHiddenPath(record.view.path,directory.path,record.view.priority_dirs)||relative(record.view.path,directory.path).split(sep).some(part=>excluded.has(part.toLowerCase())))){walk.queue.shift();continue}
         if(await realpath(directory.path)!==directory.path){walk.queue.shift();continue}
         const entries=(await readdir(directory.path,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))
         const names=new Set(entries.map(e=>e.name));for(const file of [...record.files])if(dirname(file.path)===directory.path&&!names.has(basename(file.path)))await this.#removeFile(record,file)
         while(directory.offset<entries.length&&walk.pending.length<16&&visited++<20000){
           const entry=entries[directory.offset++]!,path=join(directory.path,entry.name)
-          if(isAutoHiddenPath(record.view.path,path)||excluded.has(entry.name.toLowerCase())||!policy.allows(path)||entry.isSymbolicLink()){record.view.skipped++;continue}
+          if(isAutoHiddenPath(record.view.path,path,record.view.priority_dirs)||excluded.has(entry.name.toLowerCase())||!policy.allows(path)||entry.isSymbolicLink()){record.view.skipped++;continue}
           if(entry.isDirectory()){
             if(this.#records.some(r=>r!==record&&within(r.view.path,path)))continue
             if(walk.queue.length>=20000)throw Error('directory_capacity')
@@ -223,7 +265,11 @@ export class LocalDirectorySources {
             record.view.scanned++
             if(!supported.has(extname(path).toLowerCase())||generatedFile(path)){record.view.skipped++;continue}
             const stat=await lstat(path);if(!stat.isFile()||stat.isSymbolicLink())continue
-            walk.pending.push({path,size:stat.size,mtime:stat.mtimeMs,unit:dirname(path)})
+            const unit=computerUnit(record.view.path,path)
+            const anotherRoot=walk.queue.some(other=>other.path!==directory.path&&computerUnit(record.view.path,join(other.path,'file.md'))!==unit)
+            if((readsByUnit.get(unit)??0)>=4&&anotherRoot){directory.offset--;walk.queue.shift();walk.queue.push(directory);deferred.add(directory.path);break}
+            readsByUnit.set(unit,(readsByUnit.get(unit)??0)+1)
+            walk.pending.push({path,size:stat.size,mtime:stat.mtimeMs,unit})
           }
         }
         if(directory.offset>=entries.length)walk.queue.shift()
@@ -262,12 +308,12 @@ export class LocalDirectorySources {
     try {
       if (await realpath(view.path) !== view.path) throw new Error('path_denied')
       if(view.scope==='computer'){
-        for(const previous of [...record.files].filter(file=>isAutoHiddenPath(view.path,file.path))){
+        for(const previous of [...record.files].filter(file=>isAutoHiddenPath(view.path,file.path,view.priority_dirs))){
           signal.throwIfAborted()
           if(previous.valid){previous.valid=false;await this.#save()}
           await this.#removeFile(record,previous)
         }
-        if(record.walk)record.walk.pending=record.walk.pending.filter(file=>!isAutoHiddenPath(view.path,file.path))
+        if(record.walk)record.walk.pending=record.walk.pending.filter(file=>!isAutoHiddenPath(view.path,file.path,view.priority_dirs))
       }
       if(view.scope==='computer'){files.push(...await this.#computerBatch(record,signal));directories.length=0;complete=false}
       while (directories.length > 0 && visited < 20000) {
