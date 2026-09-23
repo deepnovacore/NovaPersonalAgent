@@ -76,6 +76,15 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     requestPermission: () => ipcRenderer.invoke('nova:camera:permission'),
   }),
   microphone: Object.freeze({
+    onVoiceprintRecording: callback => {
+      if (typeof callback !== 'function') return () => {}
+      const listener = async (_event, active) => {
+        await callback(active === true)
+        if (active === true) ipcRenderer.send('nova:voiceprint:gate-ready')
+      }
+      ipcRenderer.on('nova:voiceprint:recording', listener)
+      return () => ipcRenderer.removeListener('nova:voiceprint:recording', listener)
+    },
     onToggle: callback => {
       if (typeof callback !== 'function') return () => {}
       const listener = () => callback()
@@ -169,6 +178,7 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     },
   }),
   settings: Object.freeze({
+    voiceprint: input => ipcRenderer.invoke('nova:settings:voiceprint', input),
     phoneAction: (action, deviceId) => ipcRenderer.invoke('nova:phone:action', action, deviceId),
     openPairing: () => ipcRenderer.send('nova:pairing:open'),
     get: () => ipcRenderer.invoke('nova:settings:get'),

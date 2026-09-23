@@ -77,6 +77,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
     createImPanel: () => ({load: () => Promise.resolve()}),
     createConnectionsPanel: () => ({load: () => Promise.resolve()}),
     createKnowledgePanel: () => ({render() {}}),
+    createVoiceprintPanel: () => ({render() {}}),
     document: {
       documentElement: {}, createTreeWalker: () => ({nextNode: () => null}),
       querySelector: node, querySelectorAll: () => [], getElementById: id => node(`#${id}`),

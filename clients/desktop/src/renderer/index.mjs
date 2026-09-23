@@ -653,8 +653,17 @@ function applyWakeState(value) {
   render()
 }
 
+let voiceprintRecording = false
+let pendingActivation = null
+async function applyVoiceprintRecording(active) {
+  voiceprintRecording = active
+  if (!active) return
+  // An in-flight activation would otherwise finish after the gate acknowledges.
+  await pendingActivation
+  await deactivateCapture()
+}
 function microphoneGated() {
-  return !['dictation', 'voice'].includes(personalView.controller.mode) || axes.muted || performance.now() < muteDrainUntil
+  return voiceprintRecording || !['dictation', 'voice'].includes(personalView.controller.mode) || axes.muted || performance.now() < muteDrainUntil
 }
 
 function toggleMute() {
@@ -675,10 +684,13 @@ function toggleOutputMuted() {
 }
 
 async function activateCapture() {
+  if (voiceprintRecording) return
   if (personalView?.controller.presentationMode === 'background') return
   if (axes.activated) return deactivateCapture()
   if (axes.activationPending) return
   axes.activationPending = true
+  let settle
+  pendingActivation = new Promise(resolve => {settle = resolve})
   try {
     const result = await activateCaptureMode({
       nativeAvailable,
@@ -689,7 +701,7 @@ async function activateCapture() {
       },
       activateBrowser: startBrowserCapture,
     })
-    if(personalView?.controller.presentationMode==='background'){await window.novaAudioAgentDesktop.nativeAudio.setCaptureEnabled(false);nativeReady=false;releaseBrowserCapture();return}
+    if(personalView?.controller.presentationMode==='background'||voiceprintRecording){await window.novaAudioAgentDesktop.nativeAudio.setCaptureEnabled(false);nativeReady=false;releaseBrowserCapture();return}
     axes.audioMode = result.audioMode
     axes.activated = true
     axes.microphone = 'granted'
@@ -702,6 +714,8 @@ async function activateCapture() {
     window.novaAudioAgentDesktop.microphone.report(axes.microphone)
   } finally {
     axes.activationPending = false
+    pendingActivation = null
+    settle()
   }
   reportWakeActivity()
   render()
@@ -1249,6 +1263,7 @@ async function boot() {
       axes.backendState = status.state
       render()
     })
+    window.novaAudioAgentDesktop.microphone.onVoiceprintRecording(applyVoiceprintRecording)
     window.novaAudioAgentDesktop.microphone.onToggle(toggleMute)
     window.novaAudioAgentDesktop.microphone.onRetry(() => {
       void retryMicrophonePermission()

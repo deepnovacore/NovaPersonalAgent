@@ -1,3 +1,4 @@
+import {createVoiceprintPanel} from './voiceprint-panel.mjs'
 import {createImPanel} from './im-panel.mjs'
 import {createConnectionsPanel} from './connections-panel.mjs'
 import {t} from './locale.mjs'
@@ -30,6 +31,7 @@ import {
 const api = window.novaAudioAgentDesktop.settings
 const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
+const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
 const SECRET_KEYS = [
   'composioApiKey',
   'dashscopeApiKey', 'tavilyApiKey', 'openrouterApiKey',
@@ -353,7 +355,7 @@ for (const scope of ['history', 'session']) document.getElementById(`usage-${sco
   renderUsage()
 })
 
-function render(view, _drafts, state) {
+function render(view, drafts, state) {
   if (!view) return
   document.getElementById('language').value = view.language ?? 'zh-CN'
   currentView = view
@@ -406,6 +408,7 @@ function render(view, _drafts, state) {
   const voices = view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : QWEN_VOICES
   populatePresetOptions(integratedVoicePreset, voices)
   renderPreset(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, voices)
+  voiceprintPanel.render(view, drafts)
   cascadedAsrProvider.value = view.cascadedAsrProvider
   cascadedLlmProvider.value = view.cascadedLlmProvider
   const modelPresets = ({

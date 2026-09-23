@@ -1,3 +1,4 @@
+import {deleteVoiceprint, registerVoiceprint, voiceprintHealth} from './voiceprint.mjs'
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
@@ -168,6 +169,18 @@ let backendStatus = Object.freeze({
 })
 let backendGeneration = 0
 let settingsGeneration = 0
+let voiceprintRecording = false
+let voiceprintBusy = false
+let voiceprintGateReady = null
+let voiceprintRecordingTimer = null
+function endVoiceprintRecording() {
+  voiceprintRecording = false
+  clearTimeout(voiceprintRecordingTimer)
+  voiceprintGateReady?.(false)
+  voiceprintGateReady = null
+  sendToOrb('nova:voiceprint:recording', false)
+}
+
 let launchGeneration = 0
 let runtimeCapabilities = null
 let capabilityEditorCache = null
@@ -433,7 +446,7 @@ async function createWindow(launchId) {
   const position = clampToNearestWorkArea(candidate)
   window.setPosition(position.x, position.y)
   window.setAlwaysOnTop(true, 'floating')
-  configureWindowSecurity(window)
+  configureWindowSecurity(window, () => voiceprintRecording ? settingsWindow?.webContents : null)
   window.once('ready-to-show', () => window.showInactive())
   return window
 }
@@ -472,9 +485,8 @@ function openSettingsWindow(launchId, { category } = {}) {
   // Held for the cold-open path, where no push can reach the panel yet.
   pendingSettingsCategory = category ?? null
   const window = new BrowserWindow(localizedWindowOptions(settingsWindowOptions(preload, launchId)))
-  // Same rule as the board: webContents-level walls only. Re-binding the
-  // session's permission handlers here would move the orb's microphone grant
-  // onto a panel that has no business holding it.
+  // The shared session keeps its orb owner; it grants audio to this exact panel
+  // only while main has an active voiceprint recording lease.
   window.webContents.setWindowOpenHandler(apiKeyWindowOpenHandler(url => shell.openExternal(url)))
   window.webContents.on('will-navigate', (event, url) => {
     if (!allowRendererNavigation(url)) event.preventDefault()
@@ -482,6 +494,7 @@ function openSettingsWindow(launchId, { category } = {}) {
   window.once('ready-to-show', () => window.show())
   window.on('closed', () => {
     void cancelPhonePairing()
+    endVoiceprintRecording()
     settingsWindow = null
     pendingSettingsCategory = null
   })
@@ -1390,6 +1403,68 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       await unlink(temporary).catch(() => {})
     }
     return { saved: filePath }
+  })
+  ipcMain.on('nova:voiceprint:gate-ready', event => {
+    if (mainWindow && event.sender === mainWindow.webContents) voiceprintGateReady?.(true)
+  })
+  ipcMain.handle('nova:settings:voiceprint', async (event, input) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents || !input || typeof input !== 'object') throw new Error('voiceprint request rejected')
+    if (input.action === 'health') return {healthy: await voiceprintHealth(input.uploadUrl, (url, init) => net.fetch(url, init))}
+    if (input.action === 'stop') {endVoiceprintRecording(); return {ok:true}}
+    if (input.action === 'start') {
+      if (voiceprintRecording || voiceprintBusy) return {error:'voiceprint_busy'}
+      const secrets = decryptSecretsForSpawn(currentSettings, secretCodec)
+      if (!(secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey) || !currentSettings.voiceprintUploadUrl) return {error:'voiceprint_configuration_required'}
+      if (!await voiceprintHealth(currentSettings.voiceprintUploadUrl, (url, init) => net.fetch(url, init))) return {error:'voiceprint_unhealthy'}
+      if (voiceprintRecording || voiceprintBusy || settingsWindow?.webContents !== event.sender) return {error:'voiceprint_busy'}
+      voiceprintRecording = true
+      voiceprintRecordingTimer = setTimeout(endVoiceprintRecording, 40000)
+      const ready = await new Promise(resolve => {
+        voiceprintGateReady = resolve
+        sendToOrb('nova:voiceprint:recording', true)
+        const timeout = setTimeout(() => resolve(false), 3000)
+        timeout.unref()
+      })
+      voiceprintGateReady = null
+      if (!ready || !voiceprintRecording) {endVoiceprintRecording(); return {error:'voiceprint_busy'}}
+      const permission = await resolveMicrophonePermission({platform:process.platform,systemPreferences})
+      if (['denied','restricted'].includes(permission.status)) {endVoiceprintRecording(); return {error:'voiceprint_microphone_denied'}}
+      return {ok:true}
+    }
+    if (input.action !== 'register' || voiceprintBusy) return {error:'voiceprint_busy'}
+    voiceprintBusy = true
+    const fetcher = (url, init) => net.fetch(url, init)
+    const speechKey = settings => {
+      const secrets = decryptSecretsForSpawn(settings, secretCodec)
+      return secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey
+    }
+    try {
+      // Main owns the upload target: only the saved URL receives audio.
+      const uploadUrl = currentSettings.voiceprintUploadUrl, apiKey = speechKey(currentSettings)
+      const previousId = currentSettings.voiceprintId, wasEnabled = currentSettings.voiceprintEnabled === true
+      if (!uploadUrl || !apiKey) return {error:'voiceprint_configuration_required'}
+      if (!await voiceprintHealth(uploadUrl, fetcher)) return {error:'voiceprint_unhealthy'}
+      const result = await registerVoiceprint({audio:input.audio,uploadUrl,apiKey,fetcher})
+      // Discarding the new record must not lose it silently: a failed delete hands the ID back.
+      const discard = async error => {
+        try {await deleteVoiceprint({id:result.id,apiKey,fetcher}); return {error}} catch {return {error,orphanedId:result.id}}
+      }
+      // A key saved mid-registration moves to another Volcengine app; never keep an ID from the old one.
+      if (speechKey(currentSettings) !== apiKey) return discard('voiceprint_settings_changed')
+      // Commit before deleting the old record, so saved settings never name a deleted SpeakId.
+      // The transaction reports busy/invalid/rollback as saved:false rather than throwing.
+      const committed = await applyDesktopSettings({settingsPatch:{voiceprintId:result.id,voiceprintName:result.name,voiceprintEnabled:false}}, wasEnabled)
+        .catch(() => null)
+      if (committed?.saved !== true || currentSettings.voiceprintId !== result.id) return discard('voiceprint_request_failed')
+      let previousDeleteFailed = false
+      if (previousId && previousId !== result.id) {
+        try {await deleteVoiceprint({id:previousId,apiKey,fetcher})} catch {previousDeleteFailed = true}
+      }
+      return {id:result.id,...(previousDeleteFailed ? {previousDeleteFailed:previousId} : {})}
+    } catch (error) {
+      const known = ['voiceprint_busy','voiceprint_configuration_required','voiceprint_audio_invalid','voiceprint_rate_limited','voiceprint_provider_failed','voiceprint_response_invalid','voiceprint_request_failed']
+      return {error:known.includes(error.message) ? error.message : 'voiceprint_request_failed'}
+    } finally {voiceprintBusy = false; endVoiceprintRecording()}
   })
   ipcMain.handle('nova:settings:get', async event => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
