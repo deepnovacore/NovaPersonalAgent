@@ -33,7 +33,7 @@ const snapshotSchema = z.object({
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
   evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
-const walkFileSchema=z.object({path:pathSchema,size:z.number().nonnegative(),mtime:z.number(),unit:pathSchema,attempts:z.number().int().nonnegative().optional()}).strict()
+const walkFileSchema=z.object({path:pathSchema,size:z.number().nonnegative(),mtime:z.number(),unit:pathSchema,attempts:z.number().int().nonnegative().optional(),eligible_at:z.number().optional(),reason:z.enum(['body_budget','retry']).optional()}).strict()
 const deferredFileSchema=walkFileSchema.extend({eligible_at:z.number().default(0),attempts:z.number().int().nonnegative().default(0),reason:z.enum(['body_budget','retry']).default('retry')}).strict()
 const walkSchema=z.object({queue:z.array(z.object({path:pathSchema,offset:z.number().int().nonnegative(),unit:pathSchema.optional()}).strict()).max(20000),pending:z.array(walkFileSchema).max(200),deferred:z.array(deferredFileSchema).max(200).default([]),workspace_seeded:pathSchema.optional()}).strict()
 const recordSchema = z.object({walk:walkSchema.nullable().default(null),processing_consent:processingGrantSchema.optional(),view: snapshotSchema, files: z.array(trackedSchema).max(20000),
@@ -78,15 +78,15 @@ function computerUnit(root:string,path:string):string {
   return join(base,relative(base,path).split(sep)[0]??'')
 }
 function settlePending(record:SourceRecord,path:string):void {
-  if(record.walk)record.walk.pending=record.walk.pending.filter(item=>item.path!==path)
+  if(record.walk){record.walk.pending=record.walk.pending.filter(item=>item.path!==path);record.walk.deferred=record.walk.deferred.filter(item=>item.path!==path)}
 }
 function deferPending(record:SourceRecord,file:{path:string;size:number;mtime:number;unit:string;attempts?:number},reason:'body_budget'|'retry',eligibleAt:number):void {
   if(!record.walk)return
-  settlePending(record,file.path)
   const previous=record.walk.deferred.find(item=>item.path===file.path)
   const attempts=Math.max(file.attempts??0,previous?.attempts??0)+(reason==='retry'?1:0)
-  record.walk.deferred=record.walk.deferred.filter(item=>item.path!==file.path)
-  record.walk.deferred.push({...file,eligible_at:eligibleAt,attempts,reason})
+  settlePending(record,file.path)
+  if(record.walk.deferred.length<200)record.walk.deferred.push({...file,eligible_at:eligibleAt,attempts,reason})
+  else record.walk.pending.push({...file,eligible_at:eligibleAt,attempts,reason})
 }
 
 export interface LocalDirectorySourceOptions {
@@ -271,8 +271,9 @@ export class LocalDirectorySources {
   async #computerBatch(record:SourceRecord,signal:AbortSignal):Promise<{path:string;size:number;mtime:number;unit:string}[]>{
     const walk:z.infer<typeof walkSchema>=record.walk??(record.walk={queue:[...record.view.priority_dirs.map(path=>({path,offset:0})),{path:record.view.path,offset:0}],pending:[],deferred:[]})
     const now=Date.now()
-    const eligible=walk.deferred.filter(item=>item.eligible_at<=now)
-    walk.deferred=walk.deferred.filter(item=>item.eligible_at>now)
+    const eligible=walk.deferred.filter(item=>item.eligible_at<=now).slice(0,Math.max(0,200-walk.pending.length))
+    const eligiblePaths=new Set(eligible.map(item=>item.path))
+    walk.deferred=walk.deferred.filter(item=>!eligiblePaths.has(item.path))
     for(const item of eligible)if(!walk.pending.some(file=>file.path===item.path))walk.pending.push({path:item.path,size:item.size,mtime:item.mtime,unit:item.unit,attempts:item.attempts})
     const excluded=new Set([...SOURCE_EXCLUDES,...COMPUTER_EXCLUDES,...record.view.excludes].map(s=>s.toLowerCase()))
     let visited=0
@@ -331,7 +332,7 @@ export class LocalDirectorySources {
     }
     record.view.scan_pending=walk.queue.length>0||walk.pending.length>0||walk.deferred.length>0
     await this.#save()
-    return [...walk.pending]
+    return walk.pending.filter(item=>(item.eligible_at??0)<=Date.now())
   }
   async #poll(): Promise<void> {
     if (this.#closed || this.#active) return
@@ -343,7 +344,7 @@ export class LocalDirectorySources {
   async #sync(record: SourceRecord): Promise<void> {
     if (this.#closed || this.#active) return
     const abort = new AbortController()
-    const done=this.#scan(record,abort.signal).finally(()=>{this.#active=undefined;if(record.view.scope==='computer'&&record.view.scan_pending&&!this.#closed&&['connected','error'].includes(record.view.state)){const walk=record.walk;const immediate=!!(walk?.queue.length||walk?.pending.length);const due=walk?.deferred.length?Math.min(...walk.deferred.map(item=>item.eligible_at)):Infinity;const delay=immediate?(record.view.state==='error'?30000:1000):Number.isFinite(due)?Math.min(Math.max(1,due-Date.now()),6*60*60_000):30000;const timer=setTimeout(()=>{if(!this.#closed&&!this.#active&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},delay);timer.unref()}})
+    const done=this.#scan(record,abort.signal).finally(()=>{this.#active=undefined;if(record.view.scope==='computer'&&record.view.scan_pending&&!this.#closed&&['connected','error'].includes(record.view.state)){const walk=record.walk;const now=Date.now();const duePending=!!walk?.pending.some(item=>(item.eligible_at??0)<=now);const canDiscover=!!walk?.queue.length&&walk.pending.length<16;const immediate=duePending||canDiscover;const pendingDue=walk?.pending.filter(item=>(item.eligible_at??0)>now).map(item=>item.eligible_at!)??[];const deferredDue=walk&&walk.pending.length<200?walk.deferred.map(item=>item.eligible_at):[];const due=Math.min(...pendingDue,...deferredDue,Infinity);const delay=immediate?(record.view.state==='error'?30000:1000):Number.isFinite(due)?Math.min(Math.max(1,due-now),6*60*60_000):30000;const timer=setTimeout(()=>{if(!this.#closed&&!this.#active&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},delay);timer.unref()}})
     this.#active = {id: record.view.id, abort, done}
     await done
   }
@@ -359,6 +360,7 @@ export class LocalDirectorySources {
     const projectEntries = new Map<string, number>()
     const projects = new Set<string>()
     let complete = true, visited = 0
+    let currentReadFailure=false
     try {
       if (await realpath(view.path) !== view.path) throw new Error('path_denied')
       if(view.scope==='computer'){
@@ -462,6 +464,7 @@ export class LocalDirectorySources {
           settlePending(record,file.path)
           skip('read_failed')
           const code=errorCode(error)
+          currentReadFailure=true
           if (view.failures.length < 50) view.failures.push({path: relative(view.path, file.path), code})
           if(record.walk&&['knowledge_busy','source_busy','ingest_failed','source_unavailable'].includes(code)&&(file.attempts??0)<5){const attempts=(file.attempts??0)+1;deferPending(record,file,'retry',Date.now()+Math.min(6*60*60_000,30_000*2**attempts))}
           if (code === 'knowledge_busy') break
@@ -469,9 +472,9 @@ export class LocalDirectorySources {
       }
       signal.throwIfAborted()
       if(view.state!=='paused'&&view.state!=='disconnected')view.state='connected'
-      const partial=!!(record.walk?.queue.length||record.walk?.pending.length||record.walk?.deferred.length)||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','metadata_limit','project_metadata_limit','depth_limit'].includes(reason))
-      view.health=partial?'degraded':'healthy'
-      view.coverage=partial?'partial':'complete'
+      const partial=!!(record.walk?.queue.length||record.walk?.pending.length||record.walk?.deferred.length)||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','metadata_limit','project_metadata_limit','depth_limit','read_failed'].includes(reason))
+      view.health=partial||currentReadFailure?'degraded':'healthy'
+      view.coverage=partial||currentReadFailure?'partial':'complete'
       view.last_sync = new Date().toISOString()
       // Scan statistics belong in source settings, not in the user's memory.
       if (record.observation) {await this.#options.onInvalidate?.(view.id); record.observation = ''; await this.#save()}

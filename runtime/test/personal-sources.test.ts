@@ -172,6 +172,48 @@ test('computer ingestion failures move to a bounded future retry with an attempt
  }finally{await f.close()}
 })
 
+test('full pending and deferred computer queues stay bounded across sync and reopen',async()=>{
+ const f=await fixture()
+ try{
+  const first=join(f.folder,'pending-0.md');await writeFile(first,'x')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{view:{max_bytes:number};walk:unknown}[]}
+  const pending=Array.from({length:200},(_,index)=>({path:index===0?first:join(f.folder,`pending-${index}.md`),size:1,mtime:1,unit:f.folder}))
+  const deferred=Array.from({length:200},(_,index)=>({path:join(f.folder,`deferred-${index}.md`),size:1,mtime:1,unit:f.folder,eligible_at:0,attempts:1,reason:'retry'}))
+  state.sources[0]!.view.max_bytes=1
+  state.sources[0]!.walk={queue:[],pending,deferred}
+  await writeFile(path,JSON.stringify(state))
+  const sources=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,computerRoot:f.folder,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+  try{
+   await sources.open();await sources.command('sources.sync',{id})
+   assert.equal(sources.list()[0]!.scan_pending,true)
+   await sources.close()
+   const reopened=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,computerRoot:f.folder,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+   try{
+    await reopened.open()
+    const saved=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{pending:{path:string}[];deferred:{path:string}[]}|null}[]}
+    assert.ok((saved.sources[0]!.walk?.pending.length??0)<=200)
+    assert.ok((saved.sources[0]!.walk?.deferred.length??0)<=200)
+    assert.equal((saved.sources[0]!.walk?.pending.length??0)+(saved.sources[0]!.walk?.deferred.length??0),399)
+   }finally{await reopened.close()}
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
+test('current read failures report partial health without making source state error',async()=>{
+ const f=await fixture();f.setFail(true)
+ try{
+  await writeFile(join(f.folder,'failure.md'),'content that cannot be embedded now')
+  await f.sources.command('sources.add',{path:f.folder,consent:true})
+  const source=f.sources.list()[0]!
+  assert.equal(source.state,'connected')
+  assert.equal(source.health,'degraded')
+  assert.equal(source.coverage,'partial')
+  assert.equal(source.failures.length,1)
+ }finally{await f.close()}
+})
+
 test('legacy directory state without processing consent reads locally without embedding',async()=>{
  const f=await fixture();let embeddings=0
  try{
