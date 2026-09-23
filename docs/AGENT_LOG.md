@@ -31,3 +31,13 @@
 - GitHub: update Issue #11 to the approved transparent first-person visor direction, preserve Issue #10 skin scope.
 - Validation: checked image identity, Markdown references, staged diff/whitespace and sensitive-data scan. No runtime changes or new UI tests.
 - Current deliverable is a static concept demo and specification, not a functioning overlay or release.
+
+## 2026-09-23 21:09 CST — Move development to a personal fork and submit upstream
+
+- Request: push our branch to a personal fork, open a pull request and close the previous issues.
+- Planned commit: `docs: record personal fork contribution workflow`.
+- Fork: https://github.com/ZizhuangCui/NovaAudioAgent; `origin` now targets the fork, `upstream` retains deepnovacore/NovaAudioAgent; default pushes target origin. Branch remains `codex/orb-skins`.
+- PR scope: implemented orb skin switching/import and Jarvis skin, plus clearly marked future skin specification and transparent visor concept. Target upstream main.
+- Issue handling: #10 implementation submitted for review, not merged/released. #11 planning is consolidated into the fork's `docs/DESKTOP_VISOR_DEMO.md` and the PR follow-up checklist; closing it does not claim the desktop HUD has been implemented.
+- Validation: reuse prior 329 passing focused tests, runtime build and isolated Electron UI smoke; current changes are documentation only, with diff/whitespace and staged sensitive-data checks. No new live API or GUI tests.
+- Existing upstream branch is retained; no force push, history rewrite, branch deletion or deployment.
