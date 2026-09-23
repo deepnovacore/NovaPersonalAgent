@@ -1,4 +1,4 @@
-import {registerVoiceprint, voiceprintHealth} from './voiceprint.mjs'
+import {deleteVoiceprint, registerVoiceprint, voiceprintHealth} from './voiceprint.mjs'
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
@@ -1409,8 +1409,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (input.action === 'start') {
       if (voiceprintRecording || voiceprintBusy) return {error:'voiceprint_busy'}
       const secrets = decryptSecretsForSpawn(currentSettings, secretCodec)
-      if (!(secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey)) return {error:'voiceprint_configuration_required'}
-      if (!await voiceprintHealth(input.uploadUrl, (url, init) => net.fetch(url, init))) return {error:'voiceprint_unhealthy'}
+      if (!(secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey) || !currentSettings.voiceprintUploadUrl) return {error:'voiceprint_configuration_required'}
+      if (!await voiceprintHealth(currentSettings.voiceprintUploadUrl, (url, init) => net.fetch(url, init))) return {error:'voiceprint_unhealthy'}
       if (voiceprintRecording || voiceprintBusy || settingsWindow?.webContents !== event.sender) return {error:'voiceprint_busy'}
       voiceprintRecording = true
       voiceprintRecordingTimer = setTimeout(endVoiceprintRecording, 40000)
@@ -1428,13 +1428,34 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     }
     if (input.action !== 'register' || voiceprintBusy) return {error:'voiceprint_busy'}
     voiceprintBusy = true
-    const generation = settingsGeneration
+    const fetcher = (url, init) => net.fetch(url, init)
+    const speechKey = settings => {
+      const secrets = decryptSecretsForSpawn(settings, secretCodec)
+      return secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey
+    }
     try {
-      const secrets = decryptSecretsForSpawn(currentSettings, secretCodec)
-      if (!await voiceprintHealth(input.uploadUrl, (url, init) => net.fetch(url, init))) return {error:'voiceprint_unhealthy'}
-      const result = await registerVoiceprint({audio:input.audio,uploadUrl:input.uploadUrl,
-        apiKey:secrets.doubaoAsrApiKey || secrets.doubaoBigmodelApiKey,fetcher:(url,init)=>net.fetch(url,init)})
-      return {...result,settingsChanged:generation !== settingsGeneration}
+      // Main owns the upload target: only the saved URL receives audio.
+      const uploadUrl = currentSettings.voiceprintUploadUrl, apiKey = speechKey(currentSettings)
+      const previousId = currentSettings.voiceprintId, wasEnabled = currentSettings.voiceprintEnabled === true
+      if (!uploadUrl || !apiKey) return {error:'voiceprint_configuration_required'}
+      if (!await voiceprintHealth(uploadUrl, fetcher)) return {error:'voiceprint_unhealthy'}
+      const result = await registerVoiceprint({audio:input.audio,uploadUrl,apiKey,fetcher})
+      // Discarding the new record must not lose it silently: a failed delete hands the ID back.
+      const discard = async error => {
+        try {await deleteVoiceprint({id:result.id,apiKey,fetcher}); return {error}} catch {return {error,orphanedId:result.id}}
+      }
+      // A key saved mid-registration moves to another Volcengine app; never keep an ID from the old one.
+      if (speechKey(currentSettings) !== apiKey) return discard('voiceprint_settings_changed')
+      // Commit before deleting the old record, so saved settings never name a deleted SpeakId.
+      // The transaction reports busy/invalid/rollback as saved:false rather than throwing.
+      const committed = await applyDesktopSettings({settingsPatch:{voiceprintId:result.id,voiceprintName:result.name,voiceprintEnabled:false}}, wasEnabled)
+        .catch(() => null)
+      if (committed?.saved !== true || currentSettings.voiceprintId !== result.id) return discard('voiceprint_request_failed')
+      let previousDeleteFailed = false
+      if (previousId && previousId !== result.id) {
+        try {await deleteVoiceprint({id:previousId,apiKey,fetcher})} catch {previousDeleteFailed = true}
+      }
+      return {id:result.id,...(previousDeleteFailed ? {previousDeleteFailed:previousId} : {})}
     } catch (error) {
       const known = ['voiceprint_busy','voiceprint_configuration_required','voiceprint_audio_invalid','voiceprint_rate_limited','voiceprint_provider_failed','voiceprint_response_invalid','voiceprint_request_failed']
       return {error:known.includes(error.message) ? error.message : 'voiceprint_request_failed'}

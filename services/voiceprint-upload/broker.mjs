@@ -38,7 +38,7 @@ export function createBroker({database, ipSalt, storage, publicBase, perIp = 5, 
   const urlBase = publicBase.replace(/\/$/, '')
   const db = new DatabaseSync(database)
   db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS uploads (token TEXT PRIMARY KEY, object_key TEXT NOT NULL, ip TEXT NOT NULL, created INTEGER NOT NULL, expires INTEGER NOT NULL, reads INTEGER NOT NULL DEFAULT 0, ready INTEGER NOT NULL DEFAULT 0); CREATE INDEX IF NOT EXISTS quota_created ON uploads(created); CREATE INDEX IF NOT EXISTS quota_ip ON uploads(ip, created);')
-  let active = 0, cleaning = false
+  let active = 0, uploading = 0, cleaning = false
   async function remove(row) {
     await storage.delete(row.object_key)
     // Keep quota accounting after deletion, but forget the bearer and object name.
@@ -65,10 +65,13 @@ export function createBroker({database, ipSalt, storage, publicBase, perIp = 5, 
       const ok = healthy() && perIp > 0 && globalLimit > 0
       return send(res, ok ? 200 : 503, {ok})
     }
-    if (active >= 4) return send(res, 503, {error:'busy'})
+    const isUpload = req.method === 'POST' && req.url === '/uploads'
+    // Upload bodies can stall until the request timeout; keep a slot for the provider's audio read.
+    if (active >= 4 || (isUpload && uploading >= 3)) return send(res, 503, {error:'busy'})
     active++
+    if (isUpload) uploading++
     try {
-      if (req.method === 'POST' && req.url === '/uploads') {
+      if (isUpload) {
         if (!perIp || !globalLimit || !healthy()) throw fail(503, 'uploads_disabled')
         const length = Number(req.headers['content-length'])
         if (req.headers['content-type'] !== 'audio/wav' || !Number.isSafeInteger(length) || length < 160044 || length > MAX_BYTES) throw fail(400, 'invalid_audio')
@@ -116,7 +119,7 @@ export function createBroker({database, ipSalt, storage, publicBase, perIp = 5, 
       res.end(req.method === 'HEAD' ? undefined : audio)
     } catch (error) {
       if (!res.headersSent && !res.destroyed) send(res, error.status ?? 502, {error:error.status ? error.message : 'storage_unavailable'})
-    } finally {active--}
+    } finally {active--; if (isUpload) uploading--}
   }
   return {handler:(req, res) => {void handle(req, res)}, cleanup, close() {clearInterval(timer); db.close()}}
 }

@@ -18,6 +18,9 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "火山未能注册声纹，请检查语音服务权限或重新录音。": "Volcengine could not register the voiceprint. Check speech service permissions or record again.",
   "请在系统设置中允许 Nova 使用麦克风。": "Allow Nova to use the microphone in system settings.",
   "声纹注册失败，请检查网络、麦克风和服务配置后重试。": "Voiceprint registration failed. Check the network, microphone and service configuration before retrying.",
+  "注册期间语音 API Key 已更改，本次声纹已丢弃，请重新注册。": "The speech API key changed during registration. This voiceprint was discarded; please register again.",
+  "旧声纹未能从火山删除，请稍后手动删除：{0}": "The previous voiceprint could not be deleted from Volcengine. Delete it manually later: {0}",
+  "本次声纹未能从火山删除，请稍后手动删除：{0}": "This voiceprint could not be deleted from Volcengine. Delete it manually later: {0}",
 
   "尚未同步": "Not synced yet",
   "工作台": "Workbench",

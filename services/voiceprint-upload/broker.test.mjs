@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {createServer} from 'node:http'
+import {createServer, request} from 'node:http'
 import {mkdtemp, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
@@ -58,4 +58,33 @@ test('anonymous uploads enforce audio, durable quotas, bounded downloads and cle
     await broker.cleanup()
     assert.equal(objects.size, 0)
   } finally {if (server?.listening) await stop(); await rm(dir, {recursive:true,force:true})}
+})
+
+test('stalled anonymous uploads cannot take the audio read slot', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'voiceprint-test-'))
+  const objects = new Map()
+  const storage = {put: async (key, data) => objects.set(key, data), get: async key => objects.get(key), delete: async key => objects.delete(key)}
+  const broker = createBroker({database: join(dir, 'quota.sqlite'), ipSalt: 'test-salt-with-at-least-32-characters', storage,
+    publicBase: 'https://voice.example', trustedProxies: ['127.0.0.1', '::ffff:127.0.0.1']})
+  const server = createServer(broker.handler)
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const {port} = server.address(), base = `http://127.0.0.1:${port}`
+  const stalled = []
+  try {
+    const first = await (await fetch(`${base}/uploads`, {method:'POST', headers:{'Content-Type':'audio/wav','X-Real-IP':'10.0.0.1'}, body:wav()})).json()
+    for (let i = 2; i <= 4; i++) {
+      const pending = request({port, method:'POST', path:'/uploads', headers:{'Content-Type':'audio/wav','Content-Length':wav().length,'X-Real-IP':`10.0.0.${i}`}})
+      pending.on('error', () => {})
+      pending.write(wav().subarray(0, 1024))
+      stalled.push(pending)
+    }
+    await new Promise(resolve => setTimeout(resolve, 100))
+    const extra = await fetch(`${base}/uploads`, {method:'POST', headers:{'Content-Type':'audio/wav','X-Real-IP':'10.0.0.9'}, body:wav()})
+    assert.equal(extra.status, 503)
+    assert.equal((await fetch(base + new URL(first.audioUrl).pathname)).status, 200)
+  } finally {
+    for (const pending of stalled) pending.destroy()
+    server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); broker.close()
+    await rm(dir, {recursive:true,force:true})
+  }
 })

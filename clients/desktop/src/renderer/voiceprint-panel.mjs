@@ -64,13 +64,14 @@ export function createVoiceprintPanel({document, api, stage}) {
   const register = document.querySelector('#voiceprint-register')
   const cancel = document.querySelector('#voiceprint-cancel')
   const note = document.querySelector('#voiceprint-status')
-  let view = {}, healthy = false, checking = false, busy = false, abort = null, checkedUrl = null
+  let view = {}, urlUnsaved = false, healthy = false, checking = false, busy = false, abort = null, checkedUrl = null
   function paint() {
     const supported = view.pipelineMode === 'cascaded' && view.cascadedAsrProvider === 'volcengine'
     controls.hidden = !healthy || !supported
     enabled.checked = healthy && view.voiceprintEnabled === true
     enabled.disabled = busy || !view.voiceprintId || !view.voiceprintName
-    register.disabled = busy
+    // Main uploads only to the saved URL, so a staged one must be saved first.
+    register.disabled = busy || urlUnsaved
     cancel.hidden = !abort
     url.disabled = busy
     identity.textContent = view.voiceprintId || t('尚未注册声纹')
@@ -92,9 +93,9 @@ export function createVoiceprintPanel({document, api, stage}) {
   register.addEventListener('click',async()=>{
     if (busy || !healthy) return
     busy = true; abort = new AbortController(); paint()
-    const signal = abort.signal, uploadUrl = view.voiceprintUploadUrl
+    const signal = abort.signal
     try {
-      const started = await api.voiceprint({action:'start',uploadUrl})
+      const started = await api.voiceprint({action:'start'})
       if (!started.ok) throw new Error(started.error)
       signal.throwIfAborted()
       const audio = await record(signal,seconds=>{note.textContent=t('正在录音：{0}/12 秒',seconds)})
@@ -102,18 +103,21 @@ export function createVoiceprintPanel({document, api, stage}) {
       signal.throwIfAborted()
       abort = null; paint()
       note.textContent=t('正在注册声纹…')
-      const result = await api.voiceprint({action:'register',uploadUrl,audio})
-      if (result.error) throw new Error(result.error)
-      stage({voiceprintId:result.id,voiceprintName:result.name,voiceprintEnabled:false})
+      const result = await api.voiceprint({action:'register',audio})
+      if (result.error) throw Object.assign(new Error(result.error), {orphanedId:result.orphanedId})
+      // Main has saved the new identity; the settings push repaints it.
       note.textContent=t('声纹已注册。勾选验证并保存后生效；需要继续对话时，请重新开启麦克风。')
+      if (result.previousDeleteFailed) note.textContent += ' ' + t('旧声纹未能从火山删除，请稍后手动删除：{0}', result.previousDeleteFailed)
     } catch (error) {
       const messages = {
         voiceprint_rate_limited:t('今日注册次数已用完或操作过于频繁，请稍后重试。'),
         voiceprint_configuration_required:t('请先保存火山语音 API Key 和上传服务地址。'),
         voiceprint_provider_failed:t('火山未能注册声纹，请检查语音服务权限或重新录音。'),
         voiceprint_microphone_denied:t('请在系统设置中允许 Nova 使用麦克风。'),
+        voiceprint_settings_changed:t('注册期间语音 API Key 已更改，本次声纹已丢弃，请重新注册。'),
       }
       note.textContent = signal.aborted ? t('已取消') : messages[error.message] || t('声纹注册失败，请检查网络、麦克风和服务配置后重试。')
+      if (error.orphanedId) note.textContent += ' ' + t('本次声纹未能从火山删除，请稍后手动删除：{0}', error.orphanedId)
     } finally {
       await api.voiceprint({action:'stop'}).catch(()=>{})
       abort = null; busy = false; paint(); void check()
@@ -121,8 +125,9 @@ export function createVoiceprintPanel({document, api, stage}) {
   })
   const interval = setInterval(()=>{void check()},30000)
   window.addEventListener('pagehide',()=>{clearInterval(interval);abort?.abort(); void api.voiceprint({action:'stop'})})
-  return {render(next) {
+  return {render(next, drafts = {}) {
     view = next
+    urlUnsaved = Object.hasOwn(drafts, 'voiceprintUploadUrl')
     if (document.activeElement !== url) url.value=next.voiceprintUploadUrl || ''
     if (checkedUrl !== (next.voiceprintUploadUrl || '')) {healthy=false; void check()}
     if (next.pipelineMode !== 'cascaded') abort?.abort()

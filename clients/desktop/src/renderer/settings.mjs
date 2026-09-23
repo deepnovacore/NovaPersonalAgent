@@ -355,7 +355,7 @@ for (const scope of ['history', 'session']) document.getElementById(`usage-${sco
   renderUsage()
 })
 
-function render(view, _drafts, state) {
+function render(view, drafts, state) {
   if (!view) return
   document.getElementById('language').value = view.language ?? 'zh-CN'
   currentView = view
@@ -408,7 +408,7 @@ function render(view, _drafts, state) {
   const voices = view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : QWEN_VOICES
   populatePresetOptions(integratedVoicePreset, voices)
   renderPreset(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, voices)
-  voiceprintPanel.render(view)
+  voiceprintPanel.render(view, drafts)
   cascadedAsrProvider.value = view.cascadedAsrProvider
   cascadedLlmProvider.value = view.cascadedLlmProvider
   const modelPresets = ({

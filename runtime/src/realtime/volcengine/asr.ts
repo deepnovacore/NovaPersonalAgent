@@ -210,14 +210,27 @@ export class DoubaoAsrClient implements AsrClient {
   readonly #idFactory: () => string
   readonly #chunkBytes: number
   readonly #protocol: DoubaoAsrProtocol
+  readonly #plainProtocol = new DoubaoAsrProtocol()
+  readonly #voiceprintEndpoint: string | undefined
   readonly #voiceprintHealthUrl: string | undefined
   #healthCheckedAt = 0
   #health = false
+  #healthRefresh: Promise<void> | undefined
 
   constructor(options: DoubaoAsrClientOptions) {
     this.#protocol = new DoubaoAsrProtocol(options.voiceprint)
     this.#voiceprintHealthUrl = options.voiceprintHealthUrl
     if (this.#voiceprintHealthUrl && new URL(this.#voiceprintHealthUrl).protocol !== 'https:') throw new DoubaoAsrFailure('configuration')
+    if (options.voiceprint && nonblank(options.endpoint)) {
+      // Speaker verification needs the async endpoint; ordinary sessions keep the configured one.
+      try {
+        const url = new URL(options.endpoint)
+        url.pathname = '/api/v3/sauc/bigmodel_async'
+        this.#voiceprintEndpoint = url.href
+      } catch {
+        throw new DoubaoAsrFailure('configuration')
+      }
+    }
     const sampleRate = options.sampleRate ?? 16_000
     const connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_VOLC_CONNECT_TIMEOUT_MS
     const receiveTimeoutMs = options.receiveTimeoutMs ?? DEFAULT_VOLC_RECEIVE_TIMEOUT_MS
@@ -252,18 +265,11 @@ export class DoubaoAsrClient implements AsrClient {
     throwIfAborted(signal)
     let protocol = this.#protocol
     if (protocol.voiceprint && this.#voiceprintHealthUrl) {
-      if (Date.now() - this.#healthCheckedAt > 30_000) {
-        try {
-          const healthSignal = AbortSignal.timeout(2500)
-          const response = await fetch(this.#voiceprintHealthUrl, {signal:healthSignal,redirect:'error',headers:{'Cache-Control':'no-store'}})
-          const body = await readBoundedResponse(response, {limit:4096,signal:healthSignal,failure:code=>new Error(code)})
-          const status = JSON.parse(new TextDecoder().decode(body)) as unknown
-          this.#health = response.ok && isObject(status) && status.ok === true
-        } catch {this.#health = false}
-        this.#healthCheckedAt = Date.now()
-      }
+      // Only the first session waits; later ones use the cached verdict while it refreshes.
+      if (this.#healthCheckedAt === 0) await this.#refreshHealth()
+      else if (Date.now() - this.#healthCheckedAt > 30_000) void this.#refreshHealth()
       // Explicit product policy: upload-service failure disables the whole voiceprint feature.
-      if (!this.#health) protocol = new DoubaoAsrProtocol()
+      if (!this.#health) protocol = this.#plainProtocol
     }
     throwIfAborted(signal)
     const connectionSignal = signal ?? new AbortController().signal
@@ -271,7 +277,7 @@ export class DoubaoAsrClient implements AsrClient {
     let phase: DoubaoAsrFailureCode = 'connect'
     try {
       socket = await this.#connector({
-        endpoint: this.#options.endpoint,
+        endpoint: protocol.voiceprint ? this.#voiceprintEndpoint! : this.#options.endpoint,
         headers: {...asrHeaders({
           apiKey: this.#options.apiKey,
           resourceId: this.#options.resourceId,
@@ -315,6 +321,22 @@ export class DoubaoAsrClient implements AsrClient {
       if (error instanceof DoubaoAsrFailure) throw error
       throw new DoubaoAsrFailure(phase)
     }
+  }
+
+  #refreshHealth(): Promise<void> {
+    this.#healthRefresh ??= (async () => {
+      try {
+        const healthSignal = AbortSignal.timeout(2500)
+        const response = await fetch(this.#voiceprintHealthUrl!, {signal:healthSignal,redirect:'error',headers:{'Cache-Control':'no-store'}})
+        const body = await readBoundedResponse(response, {limit:4096,signal:healthSignal,failure:code=>new Error(code)})
+        const status = JSON.parse(new TextDecoder().decode(body)) as unknown
+        this.#health = response.ok && isObject(status) && status.ok === true
+      } catch {this.#health = false} finally {
+        this.#healthCheckedAt = Date.now()
+        this.#healthRefresh = undefined
+      }
+    })()
+    return this.#healthRefresh
   }
 }
 

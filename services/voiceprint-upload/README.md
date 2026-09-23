@@ -4,7 +4,7 @@ A small anonymous audio broker for Volcengine voiceprint enrollment. Each deskto
 
 The desktop Settings panel records 12 seconds of speech, uploads a canonical 16 kHz mono PCM WAV, registers the voiceprint, then requests deletion of the temporary recording. Record in a quiet room with only the intended speaker. Settings supplies an original localized reading passage so users can speak continuously at their usual pace and volume. It is a capture aid, not a vendor-prescribed passphrase or a liveness check. Save the speech key before registering. Enable verification and save afterwards; restart the microphone to continue the conversation. Only cascaded Volcengine ASR supports verification.
 
-The vendor retains the registered voiceprint after the temporary audio is deleted. Deleting audio or disabling verification does not unregister it. Vendor deletion is `UpdateVoiceprint` Action 2 with the registered `SpeakId`. Re-registering creates a new vendor record; keep/delete older IDs deliberately.
+The vendor retains the registered voiceprint after the temporary audio is deleted. Deleting audio or disabling verification does not unregister it. Re-registering saves the new `SpeakId` first, then deletes the previous one with `UpdateVoiceprint` Action 2; if that deletion fails, Settings shows the old ID for manual cleanup. If the speech key changes during registration, the new record is deleted and nothing is saved. The upload service only rejects stalled bodies at its request timeout, so it keeps one operation slot free for the provider's audio download.
 
 ## Deployment
 

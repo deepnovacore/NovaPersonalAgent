@@ -77,6 +77,7 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
   }),
   microphone: Object.freeze({
     onVoiceprintRecording: callback => {
+      if (typeof callback !== 'function') return () => {}
       const listener = async (_event, active) => {
         await callback(active === true)
         if (active === true) ipcRenderer.send('nova:voiceprint:gate-ready')
