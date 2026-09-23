@@ -3,8 +3,13 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {WorkbenchContext} from '../src/personal-agent/workbench-context.js'
+import {WorkbenchContext,contextCardSchema} from '../src/personal-agent/workbench-context.js'
 import {candidateId,type ContextInput} from '../src/personal-agent/context-candidates.js'
+test('generated suggestion copy stays short enough for a single readable card',()=>{
+ const card={candidate_id:'c',tab:'ideas',title:'具体提议',body:'一句简短的说明。',refs:[{entry_id:'source:doc',version:'v1'}]}
+ assert.equal(contextCardSchema.safeParse(card).success,true)
+ assert.equal(contextCardSchema.safeParse({...card,body:'细节'.repeat(61)}).success,false)
+})
 test('automatic cards are grounded, persistent, dismissible, and disappear after source invalidation',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-'));const path=join(dir,'cards.json')
  const entry:ContextInput={kind:'file',id:'source:m',version:'v1',content:'Next step: review the design.',source_id:'s',file_id:'m',root:'/project',rel_path:'notes.md',role:'document',mtime_ms:1,priority:2}

@@ -231,6 +231,7 @@ test('workbench generation includes its schema in the provider-visible prompt',a
  const prompt=JSON.parse(gateway.completions[0]!.prompt) as {output_schema:{properties:{cards:unknown}}}
  assert.ok(prompt.output_schema.properties.cards)
  assert.doesNotMatch(gateway.completions[0]!.prompt,/\/project/u)
+ assert.match(gateway.completions[0]!.system,/正文只写一句话/u)
 })
 test('workbench generation allows no candidates and makes no model call',async()=>{
  const gateway=new ScriptedGateway([],JSON.stringify({cards:[]}))

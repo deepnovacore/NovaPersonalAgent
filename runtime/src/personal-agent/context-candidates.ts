@@ -2,11 +2,11 @@ import {createHash} from 'node:crypto'
 import {basename,extname} from 'node:path'
 import {interleave} from './sampling.js'
 
-type Ref={entry_id:string;version:string|number}
+interface Ref {entry_id:string;version:string|number}
 export type ContextInput=
  | {kind:'file';id:string;version:string;content:string;source_id:string;file_id:string;root:string;rel_path:string;role:'document'|'code'|'config'|'cache';mtime_ms:number;priority:number;hidden_prefix_depth?:number}
  | {kind:'memory';id:string;version:string|number;content:string;origin:'stated'|'inferred'}
-export type ContextCandidate={candidate_id:string;id:string;version:string;content:string;tab:'todos'|'ideas';primaryFileId:string|null;refs:Ref[];excerpt:string;reason_code:'document_action'|'document_idea'|'stated_idea';root:string;priority:number;mtime_ms:number}
+export interface ContextCandidate {candidate_id:string;id:string;version:string;content:string;tab:'todos'|'ideas';primaryFileId:string|null;refs:Ref[];excerpt:string;reason_code:'document_action'|'document_idea'|'stated_idea';root:string;priority:number;mtime_ms:number}
 
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export const candidateId=(tab:string,primaryId:string,fingerprint:string)=>hash([tab,primaryId,fingerprint])
@@ -21,6 +21,8 @@ export function eligibleDocument(path:string,role:string,hiddenPrefixDepth=0):bo
  return new Set(['.md','.markdown','.txt','.pdf','.docx']).has(extname(path).toLowerCase())
 }
 const actionLine=(text:string)=>text.split(/\r?\n/u).some(line=>/^\s*(?:[-*]\s*)?(?:next step|todo|待办|下一步|下一步行动|行动项)\s*[:：-]\s*\S/iu.test(line))
+const ideaEvidence=(text:string)=>/\b(?:proposal|idea)\b|想法|提议|建议|可以考虑|计划|替代|改进方向|设计方案/iu.test(text)
+const genericOverview=(path:string)=>/^readme(?:[._-][a-z]+)?\.(?:md|markdown|txt)$/iu.test(basename(path))
 
 export function selectContextCandidates(inputs:readonly ContextInput[]):ContextCandidate[] {
  const groups=new Map<string,ContextCandidate[]>()
@@ -31,7 +33,8 @@ export function selectContextCandidates(inputs:readonly ContextInput[]):ContextC
   if(input.kind==='file'&&!eligibleDocument(input.rel_path,input.role,input.hidden_prefix_depth))continue
   const root=input.kind==='file'?input.root:'stated-memory'
   const version=String(input.version),primaryId=input.kind==='file'?input.file_id:input.id
-  const tabs:('todos'|'ideas')[]=input.kind==='file'&&input.priority>=2&&actionLine(input.content)?['todos','ideas']:['ideas']
+  const tabs:('todos'|'ideas')[]=input.kind==='file'?
+   [...(input.priority>=2&&actionLine(input.content)?['todos' as const]:[]),...(!genericOverview(input.rel_path)&&ideaEvidence(input.content)?['ideas' as const]:[])]:['ideas']
   if(input.kind==='memory'&&!/\bidea\b|想法|可以考虑|建议/u.test(input.content))continue
   for(const tab of tabs){
    const candidate_id=candidateId(tab,primaryId,version)

@@ -32,7 +32,7 @@ const snapshotSchema = z.object({
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
   evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
-const walkSchema=z.object({queue:z.array(z.object({path:pathSchema,offset:z.number().int().nonnegative(),unit:pathSchema.optional()}).strict()).max(20000),pending:z.array(z.object({path:pathSchema,size:z.number(),mtime:z.number(),unit:pathSchema}).strict()).max(200)}).strict()
+const walkSchema=z.object({queue:z.array(z.object({path:pathSchema,offset:z.number().int().nonnegative(),unit:pathSchema.optional()}).strict()).max(20000),pending:z.array(z.object({path:pathSchema,size:z.number(),mtime:z.number(),unit:pathSchema}).strict()).max(200),workspace_seeded:pathSchema.optional()}).strict()
 const recordSchema = z.object({walk:walkSchema.nullable().default(null),processing_consent:processingGrantSchema.optional(),view: snapshotSchema, files: z.array(trackedSchema).max(20000),
   deleting: z.boolean().default(false), observation: z.string().max(500).default(''),
   pending: z.object({path: pathSchema, size: z.number().nonnegative(), mtime: z.number(), owned: z.boolean(), previous_updated_at: z.number().nullable()}).strict().nullable().default(null)}).strict()
@@ -77,6 +77,8 @@ function computerUnit(root:string,path:string):string {
 
 export interface LocalDirectorySourceOptions {
   readonly computerRoot?: string
+  /** Load persisted source context without recovery, scanning or polling (isolated acceptance copies). */
+  readonly scanOnOpen?: boolean
   readonly priorityWorkspace?: () => Promise<string | null>
   readonly path: string
   readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'>
@@ -108,8 +110,16 @@ export class LocalDirectorySources {
     const info = await lstat(this.#path)
     if (info.size > 32 * 1024 * 1024) throw new Error('sources_state_too_large')
     const text = await readFile(this.#path, 'utf8')
-    this.#records = text.trim() ? diskSchema.parse(JSON.parse(text)).sources : []
+    const raw:unknown=text.trim()?JSON.parse(text):{version:1,sources:[]}
+    // Older scans could append a 51st terminal failure after the capped per-file list.
+    if(raw&&typeof raw==='object'&&'sources' in raw&&Array.isArray(raw.sources))for(const item of raw.sources as unknown[]){
+      if(!item||typeof item!=='object'||!('view' in item))continue
+      const view=item.view
+      if(view&&typeof view==='object'&&'failures' in view&&Array.isArray(view.failures)&&view.failures.length>50)view.failures=(view.failures as unknown[]).slice(-50)
+    }
+    this.#records = diskSchema.parse(raw).sources
     this.#closed = false
+    if(this.#options.scanOnOpen===false)return
     for (const record of [...this.#records]) {
       await this.#recoverPending(record)
       if (record.deleting) await this.#delete(record)
@@ -250,6 +260,14 @@ export class LocalDirectorySources {
     let visited=0
     const workspace=await this.#options.priorityWorkspace?.().then(path=>path&&within(record.view.path,path)?path:null).catch(()=>null)??null
     this.#workspacePath=workspace
+    if(workspace&&walk.workspace_seeded!==workspace){
+      walk.workspace_seeded=workspace
+      if(workspace!==record.view.path&&!isComputerExcludedPath(record.view,workspace)&&policy.allows(workspace)&&await realpath(workspace).catch(()=>null)===workspace&&await lstat(workspace).then(stat=>stat.isDirectory()).catch(()=>false)){
+        const existing=walk.queue.findIndex(entry=>entry.path===workspace)
+        if(existing>0)walk.queue.unshift(walk.queue.splice(existing,1)[0]!)
+        else if(existing<0&&walk.queue.length<20000)walk.queue.unshift({path:workspace,offset:0})
+      }
+    }
     const activity=new Map<string,Awaited<ReturnType<typeof rootActivity>>>()
     const readsByUnit=new Map<string,number>()
     const deferred=new Set<string>()
@@ -445,7 +463,7 @@ export class LocalDirectorySources {
         await this.#save()
       }
     } catch (error) {
-      if (!signal.aborted) {view.state = 'error'; view.failures.push({path: '', code: errorCode(error)})}
+      if (!signal.aborted) {view.state = 'error'; view.failures.splice(0,Math.max(0,view.failures.length-49));view.failures.push({path: '', code: errorCode(error)})}
     }
     view.indexed=record.files.filter(f=>f.valid).length
     if(record.walk){view.scan_pending=!!(record.walk.queue.length||record.walk.pending.length||record.files.some(f=>f.valid&&!f.observed&&f.excerpt&&representativeDocument(f.path)&&this.#options.onObserve));if(!view.scan_pending)record.walk=null}

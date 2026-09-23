@@ -10,7 +10,7 @@ import {orderComputerRoots} from '../src/personal-agent/source-priority.js'
 import {KnowledgeService} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
 
-async function fixture(realMemory = false) {
+async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string|null>) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-directory-'))
   const folder = join(root, 'allowed'); await mkdir(folder)
   let failEmbedding = false, failInvalidation = false, failConsent=false
@@ -24,7 +24,7 @@ async function fixture(realMemory = false) {
   let memoryAvailable = true
   const invalidated: string[] = []
   const observations: {content: string; source_ref: {ref: string}}[] = []
-  const options = {computerRoot:folder,processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
+  const options = {computerRoot:folder,...(priorityWorkspace?{priorityWorkspace}:{}),processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
     onProcessingConsent:()=>failConsent?Promise.reject(Error('grant_write_failed')):Promise.resolve(),
     onObserve: async (value: {content: string; source_ref: {type:'file'; ref: string; observed_at:string}; topic?:string}) => {
       if (!memoryAvailable) throw new Error('memory_unavailable')
@@ -56,6 +56,33 @@ test('changed processing provider requires renewed consent',async()=>{
   const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{processing_consent:{extraction_provider:string}}[]}
   state.sources[0]!.processing_consent.extraction_provider='old-provider';await writeFile(path,JSON.stringify(state));await f.reopen()
   assert.equal(f.sources.list()[0]!.processing_consent_required,true)
+ }finally{await f.close()}
+})
+
+test('snapshot open reads indexed file context without starting a scan',async()=>{
+ const f=await fixture()
+ try{
+  await writeFile(join(f.folder,'readme.md'),'Next step: review the local note.')
+  await f.sources.command('sources.add',{path:f.folder,consent:true})
+  await f.sources.close()
+  await writeFile(join(f.folder,'new.md'),'New file should not be indexed by a snapshot open.')
+  let syncCalls=0
+  const sources=new LocalDirectorySources({path:join(f.root,'db','sources.json'),pollMs:0,scanOnOpen:false,
+   processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),
+   knowledge:{listSources:()=>f.knowledge.listSources(),handle:(...args)=>f.knowledge.handle(...args),syncFile:(...args)=>{syncCalls++;return f.knowledge.syncFile(...args)}}})
+  try{await sources.open();assert.equal(syncCalls,0);assert.equal(sources.contextEntries().length,1);assert.match(sources.contextEntries()[0]!.content,/review the local note/u)}finally{await sources.close()}
+ }finally{await f.close()}
+})
+
+test('source state with a legacy 51st failure still opens and keeps the failure cap',async()=>{
+ const f=await fixture()
+ try{
+  await f.sources.command('sources.add',{path:f.folder,consent:true});await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{view:{failures:{path:string;code:string}[]}}[]}
+  state.sources[0]!.view.failures=Array.from({length:51},(_,index)=>({path:`file-${index}`,code:'source_unavailable'}))
+  await writeFile(path,JSON.stringify(state))
+  const sources=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+  try{await sources.open();assert.equal(sources.list()[0]!.failures.length,50);assert.equal(sources.list()[0]!.failures[0]!.path,'file-1');assert.equal(sources.list()[0]!.failures.at(-1)!.path,'file-50')}finally{await sources.close()}
  }finally{await f.close()}
 })
 
@@ -418,8 +445,8 @@ test('whole-computer scan skips hidden content and invalidates a legacy hidden r
   await f.sources.close()
   await f.knowledge.handle('knowledge.ingest',{kind:'file',locator:hiddenFile,consent:true})
   const indexed=(await f.knowledge.listSources()).find(s=>s.locator===hiddenFile)!
-  const statePath=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(statePath,'utf8'))
-  state.sources[0].files.push({path:hiddenFile,id:indexed.id,fingerprint:indexed.fingerprint,size:19,mtime:1,owned:true,valid:true,excerpt:'Hidden tool setting',observed:false,observation_ref:null})
+  const statePath=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(statePath,'utf8')) as {sources:{files:unknown[]}[]}
+  state.sources[0]!.files.push({path:hiddenFile,id:indexed.id,fingerprint:indexed.fingerprint,size:19,mtime:1,owned:true,valid:true,excerpt:'Hidden tool setting',observed:false,observation_ref:null})
   await writeFile(statePath,JSON.stringify(state))
   const legacyRef=`file:${indexed.id}:${indexed.fingerprint}`
   await f.reopen()
@@ -507,5 +534,16 @@ test('first computer batches include more than one visible project root',async()
   const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
   await f.sources.command('sources.sync',{id})
   assert.ok((await f.knowledge.listSources()).some(source=>source.locator===join(beta,'README.md')))
+ }finally{await f.close()}
+})
+test('current workspace reaches the first computer batches even behind a long saved queue',async()=>{
+ let workspace:string|null=null
+ const f=await fixture(false,()=>Promise.resolve(workspace))
+ try{
+  for(let i=0;i<80;i++){const dir=join(f.folder,`older-${String(i).padStart(2,'0')}`);await mkdir(dir);await writeFile(join(dir,'README.md'),`Older project ${i}`)}
+  workspace=join(f.folder,'zz-current');await mkdir(workspace);await writeFile(join(workspace,'README.md'),'Current working project overview')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id})
+  assert.ok((await f.knowledge.listSources()).some(source=>source.locator===join(workspace!,'README.md')))
  }finally{await f.close()}
 })

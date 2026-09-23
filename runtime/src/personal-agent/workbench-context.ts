@@ -6,7 +6,7 @@ import {versionSchema} from './contracts.js'
 import {selectContextCandidates,type ContextCandidate,type ContextInput} from './context-candidates.js'
 
 const refSchema=z.object({entry_id:z.string().min(1),version:versionSchema}).strict()
-export const contextCardSchema=z.object({candidate_id:z.string().min(1).max(128),tab:z.enum(['todos','ideas']),title:z.string().trim().min(1).max(160),body:z.string().trim().min(1).max(1200),refs:z.array(refSchema).min(1).max(8)}).strict()
+export const contextCardSchema=z.object({candidate_id:z.string().min(1).max(128),tab:z.enum(['todos','ideas']),title:z.string().trim().min(1).max(80),body:z.string().trim().min(1).max(120),refs:z.array(refSchema).min(1).max(8)}).strict()
 export const contextCardsSchema=z.object({cards:z.array(contextCardSchema).max(20)}).strict()
 export type ContextCards=z.infer<typeof contextCardsSchema>
 export type ContextEntry=ContextInput | (Pick<MemoryEntry,'id'|'version'|'content'> & {origin?:'stated'|'inferred'})
