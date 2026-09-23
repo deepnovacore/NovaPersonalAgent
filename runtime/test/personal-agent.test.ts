@@ -49,6 +49,13 @@ test('batch notifications coalesce and ready at the same revision is not swallow
   await f.host.sourceChanged({revision:2,phase:'ready'});assert.equal(discoveries,3,'an older batch completing later still triggers discovery')
  }finally{await f.close()}
 })
+test('source progress updates publish status at most every two seconds without refreshing memory or discovery',async t=>{
+ const f=await fixture();let refreshes=0,discoveries=0
+ f.host.refreshMemory=()=>{refreshes++;return Promise.resolve()}
+ f.host.discover=()=>{discoveries++;return Promise.resolve()}
+ let notices=0;const unsubscribe=f.host.subscribe(()=>{notices++})
+ try{t.mock.timers.enable({apis:['setTimeout','Date']});for(let n=0;n<100;n++)f.host.sourceProgressChanged();assert.equal(notices,0);t.mock.timers.tick(2000);assert.equal(notices,1);for(let n=0;n<100;n++)f.host.sourceProgressChanged();t.mock.timers.tick(1999);assert.equal(notices,1);t.mock.timers.tick(1);assert.equal(notices,2);assert.equal(refreshes,0);assert.equal(discoveries,0)}finally{t.mock.timers.reset();unsubscribe();await f.close()}
+})
 test('failed batch refresh remains retryable and arrivals during refresh are drained',async()=>{
  const f=await fixture();const refresh=f.host.refreshMemory.bind(f.host);let fail=true,discoveries=0
  f.host.refreshMemory=async()=>{if(fail){fail=false;throw Error('temporary')}await refresh()}

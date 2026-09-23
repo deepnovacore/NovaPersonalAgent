@@ -157,6 +157,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   })
   if (knowledge !== undefined) {
     const host = composition.realtime.personalAgent
+    let sourceRevision=0
     host.setSources(new LocalDirectorySources({
       path: host.path + '.sources.json', knowledge: knowledge.service,
       priorityWorkspace: async () => codexResource?.mode==='project'
@@ -164,7 +165,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         : null,
       processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
       onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
-      onChange: () => host.sourceChanged(),
+      onChange: changed => changed ? host.sourceChanged({phase:'ready',revision:++sourceRevision}) : host.sourceProgressChanged(),
       onInvalidate: async ref => {
         await host.invalidateEvidence(ref)
         await composition.realtime.personalMemory?.forgetSource?.(ref)

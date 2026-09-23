@@ -43,9 +43,19 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  panel.addEventListener('focusout',()=>setTimeout(()=>{if(!panel.contains?.(document.activeElement))update()},0))
  const card=(title,summary)=>{const a=el('article',undefined,'card');a.append(el('h3',title));if(summary)a.append(el('p',summary));panel.append(a);return a}
  const continueChat=text=>chat.focusDraft(`关于「${text}」：`)
- let renderedSnapshot=null,taskRevision=-1
+ let renderedPageKey=null
+ const pageKey=()=>{
+  const s=c.snapshot,sourceStates=s?.sources?.map(source=>[source.id,source.state,source.health,source.processing_consent_required])
+  if(['todos','ideas','goals'].includes(selected))return JSON.stringify([selected,s?.life,s?.understanding,s?.workbench_context,sourceStates,c.connected])
+  if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.profile_preparation,c.connected])
+  if(selected==='tasks')return JSON.stringify([selected,tasks(),s?.feed,c.connected])
+  return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.news,s?.capabilities,c.connected])
+ }
  function renderPanel(){
   const focused=panel.contains?.(document.activeElement)?document.activeElement:null,focusLabel=focused?.getAttribute?.('aria-label'),focusText=focused?.tagName==='BUTTON'?focused.textContent:null
+  const fields=[...panel.querySelectorAll('input,textarea,select')],focusIndex=focused?fields.indexOf(focused):-1
+  const edit=focusIndex>=0?{index:focusIndex,tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
+  const panelScroll=panel.scrollTop
   panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
   const s=c.snapshot;const caps=s?.capabilities??{}
   const candidateKind=({todos:'todo',ideas:'idea',goals:'goal',profile:'profile'})[selected]
@@ -69,7 +79,9 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
    renderMemorySection(panel,{snapshot:s,caps,el,button,chips,command:(m,p)=>c.command(m,p),continueChat,connected:c.connected,local:lifeLocal})
   }
   for(const b of panel.querySelectorAll('button'))if(!c.connected)b.disabled=true
-  if(focusLabel||focusText){const target=[...panel.querySelectorAll('button,input,textarea,select')].find(node=>focusLabel?node.getAttribute('aria-label')===focusLabel:node.textContent===focusText);if(target&&!target.disabled)target.focus?.({preventScroll:true})}
+  if(edit){const next=[...panel.querySelectorAll('input,textarea,select')],target=next[edit.index];if(target&&(target.tagName??target.tag)===edit.tag&&target.getAttribute?.('aria-label')===edit.label&&!target.disabled){target.value=edit.value;if(typeof edit.start==='number'&&typeof target.setSelectionRange==='function')target.setSelectionRange(edit.start,edit.end);else{target.selectionStart=edit.start;target.selectionEnd=edit.end}target.scrollTop=edit.scrollTop;target.focus?.({preventScroll:true})}}
+  else if(focusLabel||focusText){const target=[...panel.querySelectorAll('button,input,textarea,select')].find(node=>focusLabel?node.getAttribute('aria-label')===focusLabel:node.textContent===focusText);if(target&&!target.disabled)target.focus?.({preventScroll:true})}
+  panel.scrollTop=panelScroll;renderedPageKey=pageKey()
  }
  function update(){
   document.body.dataset.personalCollapsed=String(c.collapsed)
@@ -86,7 +98,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
   if(!c.connected)unreadProjection=null
   const unread=c.connected&&c.snapshot?((c.snapshot.conversations?.unread_count??0)+pending.reduce((sum,item)=>sum+1+(item.queued??0),0)):undefined
   if(Number.isSafeInteger(unread)&&unread>=0&&unreadProjection!==unread){unreadProjection=unread;void api.personal.setUnread?.(unread)}
-  if((renderedSnapshot!==c.snapshot||taskRevision!==JSON.stringify(tasks()))&&!(panel.contains?.(document.activeElement)&&['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))){renderedSnapshot=c.snapshot;taskRevision=JSON.stringify(tasks());renderPanel()}
+  if(renderedPageKey!==pageKey())renderPanel()
  }
  async function collapse(value){await c.setPresentation(value?'orb':'workbench')}
  function receive(frame){chat.receive(frame);c.receive(frame);if(frame.type==='executor.tasks')renderPanel()}

@@ -647,7 +647,7 @@ export class LocalDirectorySources {
       view.last_sync = new Date().toISOString()
       // Scan statistics belong in source settings, not in the user's memory.
       if (record.observation) {await this.#options.onInvalidate?.(view.id); record.observation = ''; await this.#save()}
-      await this.#options.onChange?.(beforeEvidence!==record.files.filter(file=>file.valid).map(refFor).sort().join())
+      await this.#options.onChange?.(false)
       for (const file of balanced(record.files.filter(file => file.valid && !file.observed && representativeDocument(file.path) && (view.scope==='computer'||selectedPaths.has(file.path))), view.path).slice(0, 8)) {
         signal.throwIfAborted()
         if (file.observed || !file.excerpt || !this.#options.onObserve) continue

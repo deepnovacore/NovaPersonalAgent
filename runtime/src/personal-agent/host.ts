@@ -225,6 +225,8 @@ export class PersonalAgentHost {
     #sourceSignature = '';
     #sourcePending={invalidated:0,ready:new Set<number>(),legacy:false};
     #sourceSeen={invalidated:0,ready:new Set<number>()};
+    #sourceProgressTimer:ReturnType<typeof setTimeout>|undefined;
+    #sourceProgressAt=0;
     #sourceDrain:Promise<void>|null=null;
     #projectionRevision = 0;
     #memoryRefresh = 0;
@@ -315,6 +317,8 @@ export class PersonalAgentHost {
         this.#invalidateOverview();
         this.#overviewCache = undefined;
         clearInterval(this.#timer);
+        clearTimeout(this.#sourceProgressTimer);
+        this.#sourceProgressTimer=undefined;
         this.#abort.abort();
         for (const item of this.#state.feed) if (item.suggestion_id) this.options.pool.withdraw(item.suggestion_id);
         try {
@@ -493,6 +497,12 @@ export class PersonalAgentHost {
             if (item.suggestion_id)
                 this.options.pool.withdraw(item.suggestion_id);
         } await this.#commit(next); }); }
+    sourceProgressChanged():void{
+        if(!this.#opened)return;
+        const now=Date.now();
+        if(now-this.#sourceProgressAt>=2000){this.#sourceProgressAt=now;this.#notify();return;}
+        if(!this.#sourceProgressTimer){this.#sourceProgressTimer=setTimeout(()=>{this.#sourceProgressTimer=undefined;if(this.#opened){this.#sourceProgressAt=Date.now();this.#notify()}},2000-(now-this.#sourceProgressAt));this.#sourceProgressTimer.unref()}
+    }
     sourceChanged(change?:SourceChange):Promise<void>{
         this.profileWarmup.invalidate();this.#notify();
         if(change){const q=z.object({revision:z.number().int().positive(),phase:z.enum(['invalidated','ready'])}).strict().parse(change);if(q.phase==='invalidated')this.#sourcePending.invalidated=Math.max(this.#sourcePending.invalidated,q.revision);else if(!this.#sourceSeen.ready.has(q.revision))this.#sourcePending.ready.add(q.revision)}else this.#sourcePending.legacy=true;

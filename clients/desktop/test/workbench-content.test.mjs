@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {renderLife} from '../src/renderer/life-view.mjs'
 import {renderNews} from '../src/renderer/news-view.mjs'
 import {renderSourceSuggestions} from '../src/renderer/workbench-suggestions.mjs'
+import {mountPersonalView} from '../src/renderer/personal-view.mjs'
 
 class Node{constructor(tag){this.tag=tag;this.children=[];this.textContent='';this.dataset={};this.className=''}append(...nodes){this.children.push(...nodes)}setAttribute(k,v){this[k]=v}addEventListener(){}}
 const all=node=>[node,...node.children.flatMap(all)]
@@ -46,4 +47,32 @@ test('disabled news has an honest empty state',t=>{
  renderNews(h.panel,{...h,news:{enabled:false,items:[],saved:[],sources:[],interests:[],profile_version:0}})
  assert.match(text(h.panel),/资讯更新已关闭/u)
  assert.doesNotMatch(text(h.panel),/资讯精选|好内容正在路上/u)
+})
+test('scan progress preserves a focused Todo draft and material content refresh restores it',t=>{
+ const previous=globalThis.document,oldWindow=globalThis.window
+ t.after(()=>{globalThis.document=previous;globalThis.window=oldWindow})
+ class DomNode extends Node{
+  constructor(tag){super(tag);this.listeners={};this.scrollTop=0;this.attrs={};this.classList={add(){}}}
+  prepend(...nodes){this.children.unshift(...nodes)}replaceChildren(...nodes){this.children=nodes}
+  addEventListener(name,fn){this.listeners[name]=fn}
+  querySelectorAll(selector){const tags=selector.split(',');return this.children.flatMap(node=>[...(tags.includes(node.tag)?[node]:[]),...node.querySelectorAll(selector)])}
+  querySelector(selector){return this.querySelectorAll(selector)[0]}
+  contains(node){return this.children.some(child=>child===node||child.contains(node))}
+  getAttribute(name){return this.attrs[name]}
+  setAttribute(name,value){this.attrs[name]=value}
+  focus(){document.activeElement=this}
+  get childElementCount(){return this.children.length}
+ }
+ const body=new DomNode('body'),shell=new DomNode('div');body.append(shell)
+ globalThis.window={addEventListener(){}}
+ globalThis.document={body,activeElement:null,visibilityState:'hidden',hasFocus:()=>false,addEventListener(){},createElement:tag=>new DomNode(tag),createElementNS:(_,tag)=>new DomNode(tag),createTextNode:()=>new DomNode('text'),querySelector:()=>shell}
+ const view=mountPersonalView({send:()=>true,start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],openResults(){},api:{orbMenu:{},personal:{}}})
+ view.controller.connect()
+ const state=(revision,title,scanned)=>({type:'personal.state',revision,life:{todos:[{id:'t',kind:'todo',title,note:'',status:'open',version:title==='Updated'?2:1}],ideas:[],goals:[]},sources:[{state:'connected',scanned}],conversations:{items:[]},memory:{entries:[]}})
+ view.receive(state(1,'Original',1))
+ const panel=body.querySelector('.workbench-page')??all(body).find(node=>node.className==='workbench-page')
+ const edit=panel.querySelectorAll('textarea')[0];edit.value='Unsaved words';edit.selectionStart=2;edit.selectionEnd=7;edit.focus();panel.scrollTop=73
+ view.receive(state(2,'Original',2));assert.equal(panel.querySelectorAll('textarea')[0],edit);assert.equal(document.activeElement,edit);assert.equal(panel.scrollTop,73);assert.match(all(body).find(node=>node.className==='page-title').textContent,/Todos/u)
+ view.receive(state(3,'Updated',2));assert.match(all(panel).map(node=>node.textContent).join(' '),/Updated/u)
+ const restored=panel.querySelectorAll('textarea')[0];assert.equal(document.activeElement,restored);assert.equal(restored.value,'Unsaved words');assert.equal(restored.selectionStart,2);assert.equal(restored.selectionEnd,7);assert.equal(panel.scrollTop,73)
 })
