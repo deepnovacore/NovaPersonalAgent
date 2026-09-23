@@ -24,6 +24,7 @@ export interface KnowledgeChunkInput {
 
 export interface ReplaceKnowledgeSourceInput {
   readonly source: KnowledgeSource
+  readonly replaces_source_id?: string
   readonly chunks: readonly KnowledgeChunkInput[]
   readonly provider_id: string
   readonly dims: number

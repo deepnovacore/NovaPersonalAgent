@@ -400,6 +400,22 @@ test('bounded recheck detects same-size same-mtime replacement and invalidates o
   } finally {await f.close()}
 })
 
+test('metadata-only touch preserves verified evidence and observation references', async () => {
+  const f = await fixture()
+  try {
+    const path = join(f.folder, 'README.md')
+    await writeFile(path, 'A verified project description')
+    await f.sources.command('sources.add', {path: f.folder, consent: true})
+    const id = f.sources.list()[0]!.id, ref = f.sources.evidenceSnapshot()[0]!.ref
+    const observationRef = f.observations[0]!.source_ref.ref
+    await utimes(path, new Date(), new Date(Date.now() + 2000))
+    await f.sources.command('sources.sync', {id})
+    assert.equal(f.sources.evidenceSnapshot()[0]!.ref, ref)
+    assert.equal(f.observations.length, 1)
+    assert.ok(!f.invalidated.includes(ref) && !f.invalidated.includes(observationRef))
+  } finally {await f.close()}
+})
+
 test('body-budget deferred changes cannot keep stale source evidence or owned searchable chunks', async () => {
   const f = await fixture()
   try {
@@ -493,7 +509,7 @@ test('README version replacement survives touch and A-B-A without overriding exp
     await utimes(path,new Date(),new Date(Date.now()+2000))
     await f.sources.command('sources.sync',{id})
     assert.equal(f.memory!.list().entries.length,1)
-    assert.notEqual(f.memory!.list().entries[0]!.source_refs[0]!.ref,firstRef)
+    assert.equal(f.memory!.list().entries[0]!.source_refs[0]!.ref,firstRef)
     await writeFile(path,'# Example\n\nA mobile evaluation project.')
     await f.sources.command('sources.sync',{id})
     assert.equal(f.memory!.list().entries.length,1)

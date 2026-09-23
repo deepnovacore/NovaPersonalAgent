@@ -270,18 +270,25 @@ function evidenceLink(chunkId: string): {evidence_id?: string} {
 function replaceSource(value: unknown): null {
   const input = parseReplaceInput(value)
   const opened = db()
-  const sourceExists = opened.prepare('SELECT 1 AS present FROM sources WHERE id = ?').get(input.source.id)
-  const sourceCount = numberValue(opened.prepare('SELECT COUNT(*) AS count FROM sources').get() as Row, 'count')
-  if (sourceExists === undefined && sourceCount >= data.maxSources) throw new StoreError('STORE_CAPACITY')
-  const oldCount = numberValue(opened.prepare('SELECT COUNT(*) AS count FROM chunks WHERE source_id = ?').get(input.source.id) as Row, 'count')
-  const totalCount = numberValue(opened.prepare('SELECT COUNT(*) AS count FROM chunks').get() as Row, 'count')
-  if (totalCount - oldCount + input.chunks.length > MAX_CHUNKS) throw new StoreError('STORE_CAPACITY')
-
   try {
     opened.exec('BEGIN IMMEDIATE')
+    const retiredId = input.replaces_source_id && input.replaces_source_id !== input.source.id ? input.replaces_source_id : undefined
+    const retiring = retiredId ? opened.prepare('SELECT locator FROM sources WHERE id = ?').get(retiredId) as Row | undefined : undefined
+    if (retiredId && retiring?.locator !== input.source.locator) throw new StoreError('STORE_INVALID_INPUT')
+    const sourceExists = opened.prepare('SELECT 1 AS present FROM sources WHERE id = ?').get(input.source.id)
+    const sourceCount = numberValue(opened.prepare('SELECT COUNT(*) AS count FROM sources').get() as Row, 'count')
+    if (sourceCount - Number(!!retiredId) + Number(sourceExists === undefined) > data.maxSources) throw new StoreError('STORE_CAPACITY')
+    const oldCount = numberValue(opened.prepare('SELECT COUNT(*) AS count FROM chunks WHERE source_id = ?').get(input.source.id) as Row, 'count')
+      + (retiredId ? numberValue(opened.prepare('SELECT COUNT(*) AS count FROM chunks WHERE source_id = ?').get(retiredId) as Row, 'count') : 0)
+    const totalCount = numberValue(opened.prepare('SELECT COUNT(*) AS count FROM chunks').get() as Row, 'count')
+    if (totalCount - oldCount + input.chunks.length > MAX_CHUNKS) throw new StoreError('STORE_CAPACITY')
     const previous = new Map((opened.prepare('SELECT id, ordinal, content_digest, legacy_digest FROM chunks WHERE source_id = ? ORDER BY ordinal').all(input.source.id) as Row[]).map(row=>[numberValue(row,'ordinal'),row]))
     if (ftsAvailable) opened.prepare('DELETE FROM chunks_fts WHERE source_id = ?').run(input.source.id)
     else opened.exec("UPDATE knowledge_metadata SET value = 1 WHERE key = 'fts_dirty'")
+    if (retiredId) {
+      if (ftsAvailable) opened.prepare('DELETE FROM chunks_fts WHERE source_id = ?').run(retiredId)
+      opened.prepare('DELETE FROM sources WHERE id = ?').run(retiredId)
+    }
     opened.prepare('DELETE FROM sources WHERE id = ?').run(input.source.id)
     opened.prepare(`
       INSERT INTO sources(id, title, kind, locator, mime, fingerprint, bytes, created_at, updated_at, status)
@@ -456,7 +463,8 @@ function parseReplaceInput(value: unknown): ReplaceKnowledgeSourceInput {
   const dims = positiveInteger(value.dims, 4096)
   const chunks = value.chunks.map(parseChunk)
   for (const chunk of chunks) if (chunk.vector!==null&&chunk.vector.length !== dims) throw new StoreError('STORE_INVALID_INPUT')
-  return {source, chunks, provider_id: providerId, dims}
+  const replacesSourceId = value.replaces_source_id === undefined ? undefined : boundedString(value.replaces_source_id, 200)
+  return {source, chunks, provider_id: providerId, dims, ...(replacesSourceId ? {replaces_source_id: replacesSourceId} : {})}
 }
 
 function parseSource(value: Record<string, unknown>): KnowledgeSource {

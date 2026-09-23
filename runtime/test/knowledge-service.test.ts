@@ -64,6 +64,27 @@ test('syncFile reports bounded document, embedding and store failures without lo
   } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
 
+test('syncFile bounds store failures before indexing and after commit', async () => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-outer-errors-'))
+  const file = join(directory, 'manual.md')
+  await writeFile(file, 'Verified text')
+  const store = new KnowledgeStoreClient({path: join(directory, 'db', 'knowledge.sqlite')})
+  const service = new KnowledgeService({store, embedding: {id: 'fake-v1', dims: 2,
+    embed: texts => Promise.resolve(texts.map(() => new Float32Array([1, 0])))}})
+  try {
+    await service.open()
+    const list = store.listSources.bind(store)
+    store.listSources = () => Promise.reject(Error('list credential=private-value'))
+    await assert.rejects(service.syncFile(file, directory, new AbortController().signal), /^Error: store_failed$/u)
+    store.listSources = list
+    const first = await service.syncFile(file, directory, new AbortController().signal)
+    const chunks = store.listChunks.bind(store)
+    store.listChunks = () => Promise.reject(Error('chunks credential=private-value'))
+    await assert.rejects(service.syncFile(file, directory, new AbortController().signal, first.id), /^Error: store_failed$/u)
+    store.listChunks = chunks
+  } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
+})
+
 test('remove while reindex embedding waits cannot resurrect a source', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-race-'))
   const file = join(directory, 'manual.md')

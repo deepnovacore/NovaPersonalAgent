@@ -149,10 +149,14 @@ export class KnowledgeService {
       if ('error' in result) throw failure(result.error)
       if (old && old.id !== active.id) {
         await this.#ledger?.remove(`knowledge:${old.id}`)
-        await this.#store.removeSource(old.id)
       }
       const evidence_ids = (await this.#store.listChunks(active.id, 0)).flatMap(chunk => chunk.evidence_id ? [chunk.evidence_id] : []).slice(0, 2)
       return {id: active.id, excerpt, ...(evidence_ids.length ? {evidence_ids} : {})}
+    } catch (cause) {
+      signal.throwIfAborted()
+      const code = cause instanceof Error && /^(?:screening_rejected|unsupported_file|file_changed|file_unavailable|embedding_failed|store_failed|knowledge_busy|ingest_failed)$/u.test(cause.message)
+        ? cause.message : 'store_failed'
+      throw failure(code)
     } finally {
       signal.removeEventListener('abort', cancel)
       if (this.#active === active) this.#active = undefined
@@ -244,6 +248,7 @@ export class KnowledgeService {
       await this.#store.replaceSource({
         source: {id: active.id, title, kind, locator: document.locator, mime: document.mime,
           fingerprint: document.fingerprint, bytes: document.bytes, created_at: old?.created_at ?? now, updated_at: now, status: 'ready'},
+        ...(old && old.id !== active.id ? {replaces_source_id: old.id} : {}),
         provider_id: this.#embedding.id, dims: this.#embedding.dims,
         // Plain text and extracted PDF/DOCX need not contain Markdown headings.
         chunks: chunks.map((chunk, index) => ({...chunk,
@@ -251,7 +256,7 @@ export class KnowledgeService {
           heading_path: [...(chunk.heading_path || title)].slice(0, 256).join(''), vector: keepVectors&&vectors?[...vectors[index]!]:null})),
       })
       committed = true
-      await this.#store.recordJob({...job, updated_at: Date.now(), state: 'complete'})
+      await this.#store.recordJob({...job, updated_at: Date.now(), state: 'complete'}).catch(() => undefined)
       onIndexed?.(document.text)
       return {ok: true, id: active.id}
     } catch (cause) {

@@ -547,10 +547,13 @@ export class LocalDirectorySources {
         signal.throwIfAborted()
         const previous = record.files.find(old => old.path === file.path)
         if (previous) previous.unit = file.unit
-        if (previous?.valid && previous.mtime === file.mtime && previous.size === file.size && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) {
-          if ((previous.checked_at??0)+(this.#options.contentRecheckMs??300_000)>Date.now() || rechecks++>=4) {settlePending(record,file.path);continue}
+        if (previous?.valid && known.has(file.path) && (!representativeDocument(file.path) || previous.excerpt !== null)) {
+          const sameMetadata = previous.mtime === file.mtime && previous.size === file.size
+          if (sameMetadata && ((previous.checked_at??0)+(this.#options.contentRecheckMs??300_000)>Date.now() || rechecks++>=4)) {settlePending(record,file.path);continue}
           const checked = await readKnowledgeFile(file.path, signal, view.path).catch(() => null)
           if (checked?.fingerprint === previous.fingerprint) {
+            previous.size = file.size
+            previous.mtime = file.mtime
             previous.checked_at = Date.now()
             settlePending(record,file.path)
             await this.#save()
