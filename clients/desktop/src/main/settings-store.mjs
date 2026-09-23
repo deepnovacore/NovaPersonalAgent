@@ -11,6 +11,7 @@ export const SETTINGS_VERSION = 4
 export const SECRET_KEYS = Object.freeze([
   'composioApiKey',
   'dashscopeApiKey',
+  'stepfunApiKey',
   'tavilyApiKey',
   'openrouterApiKey',
   'modelApiKey',
@@ -24,7 +25,7 @@ export const SECRET_KEYS = Object.freeze([
 export const PALETTES = Object.freeze(['ember', 'graphite'])
 export const PROACTIVITY_LEVELS = Object.freeze(['conservative', 'balanced', 'eager'])
 export const PIPELINE_MODES = Object.freeze(['integrated', 'cascaded'])
-export const INTEGRATED_PROVIDERS = Object.freeze(['qwen'])
+export const INTEGRATED_PROVIDERS = Object.freeze(['qwen', 'stepfun'])
 export const CASCADED_ENDPOINTING_PROVIDERS = Object.freeze(['auto'])
 export const CASCADED_ASR_PROVIDERS = Object.freeze(['volcengine'])
 export const CASCADED_LLM_PROVIDERS = Object.freeze(['qwen', 'ark', 'deepseek'])

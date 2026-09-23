@@ -24,6 +24,8 @@ import {
 import {
   CUSTOM_VOICE_VALUE,
   QWEN_VOICES,
+  QWEN_31_VOICES,
+  STEPFUN_VOICES,
   VOLCENGINE_TTS_VOICES,
   resolveVoiceChoice,
 } from './voice-choice.mjs'
@@ -34,12 +36,13 @@ const connectionsPanel = createConnectionsPanel({document, api})
 const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
 const SECRET_KEYS = [
   'composioApiKey',
-  'dashscopeApiKey', 'tavilyApiKey', 'openrouterApiKey',
+  'dashscopeApiKey', 'stepfunApiKey', 'tavilyApiKey', 'openrouterApiKey',
   'arkApiKey', 'deepseekApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
   composioApiKey: 'Composio',
   dashscopeApiKey: 'DashScope',
+  stepfunApiKey: 'StepFun',
   tavilyApiKey: 'Tavily',
   openrouterApiKey: 'OpenRouter · Jev',
   arkApiKey: 'Ark',
@@ -212,8 +215,11 @@ function renderBadges(present, sources) {
 // These labels reflect selected public providers only, never any key material.
 function keyUsage(view) {
   return {
-    dashscopeApiKey: view.pipelineMode === 'integrated'
-      || view.cascadedLlmProvider === 'qwen' ? t("必需") : t("当前未使用"),
+    dashscopeApiKey: (view.pipelineMode === 'integrated' && view.integratedProvider === 'qwen')
+      || (view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'qwen') ? t("必需")
+      : view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun'
+        ? t("仅本地记忆嵌入需要") : t("当前未使用"),
+    stepfunApiKey: view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun' ? t("必需") : t("当前未使用"),
     deepseekApiKey: view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'deepseek' ? t("必需") : t("当前未使用"),
     arkApiKey: view.pipelineMode === 'cascaded'
       && view.cascadedLlmProvider === 'ark' ? t("必需") : t("当前未使用"),
@@ -401,11 +407,22 @@ function render(view, drafts, state) {
   integratedSection.hidden = view.pipelineMode !== 'integrated'
   cascadedSection.hidden = view.pipelineMode !== 'cascaded'
   integratedProvider.value = view.integratedProvider
+  const integratedModels = view.integratedProvider === 'stepfun'
+    ? [{value: 'stepaudio-3-realtime-preview', label: 'StepAudio 3 Realtime Preview'}]
+    : [{value: 'qwen-audio-3.1-realtime-plus', label: 'Qwen Audio 3.1 Plus'},
+      {value: 'qwen-audio-3.0-realtime-plus', label: 'Qwen Audio 3.0 Plus'},
+      {value: 'qwen-audio-3.0-realtime-flash', label: 'Qwen Audio 3.0 Flash'},
+      {value: 'qwen3.5-omni-flash-realtime', label: 'Qwen3.5 Omni Flash Realtime'},
+      {value: 'qwen3.5-omni-plus-realtime', label: 'Qwen3.5 Omni Plus Realtime'}]
+  integratedModel.replaceChildren(...integratedModels.map(preset => {
+    const option = document.createElement('option'); option.value = preset.value; option.textContent = preset.label; return option
+  }))
   if (view.integratedModel && ![...integratedModel.children].some(option => option.value === view.integratedModel)) {
     const option = document.createElement('option'); option.value = view.integratedModel; option.textContent = view.integratedModel; integratedModel.append(option)
   }
   integratedModel.value = view.integratedModel ?? ''
-  const voices = view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : QWEN_VOICES
+  const voices = view.integratedProvider === 'stepfun' ? STEPFUN_VOICES
+    : view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : view.integratedModel === 'qwen-audio-3.1-realtime-plus' ? QWEN_31_VOICES : QWEN_VOICES
   populatePresetOptions(integratedVoicePreset, voices)
   renderPreset(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, voices)
   voiceprintPanel.render(view, drafts)
@@ -526,11 +543,15 @@ for (const input of codexModeInputs) bindStage(input, 'change', () => ({codexBin
 bindStage(codexBinaryPath, 'input', () => ({codexBinaryPath: codexBinaryPath.value}))
 bindStage(codexWorkspace, 'input', () => ({codexWorkspace: codexWorkspace.value}))
 bindStage(codexManagedRoot, 'input', () => ({codexManagedRoot: codexManagedRoot.value}))
-bindStage(integratedProvider, 'change', () => ({integratedProvider: integratedProvider.value}))
+bindStage(integratedProvider, 'change', () => ({
+  integratedProvider: integratedProvider.value,
+  integratedModel: integratedProvider.value === 'stepfun' ? 'stepaudio-3-realtime-preview' : 'qwen-audio-3.0-realtime-plus',
+  integratedVoice: integratedProvider.value === 'stepfun' ? 'default' : 'longanqian',
+}))
 bindStage(integratedModel, 'change', () => ({
   integratedModel: integratedModel.value,
-  ...(integratedModel.value.startsWith('qwen3.5-omni-') !== currentView?.integratedModel?.startsWith('qwen3.5-omni-')
-    ? {integratedVoice: integratedModel.value.startsWith('qwen3.5-omni-') ? 'Ethan' : 'longanqian'} : {}),
+  ...(integratedModel.value !== currentView?.integratedModel
+    ? {integratedVoice: integratedProvider.value === 'stepfun' ? 'default' : integratedModel.value.startsWith('qwen3.5-omni-') ? 'Ethan' : integratedModel.value === 'qwen-audio-3.1-realtime-plus' ? 'longanqian_v3.1' : 'longanqian'} : {}),
 }))
 bindStage(cascadedAsrProvider, 'change', () => ({cascadedAsrProvider: cascadedAsrProvider.value}))
 bindStage(cascadedLlmProvider, 'change', () => ({cascadedLlmProvider: cascadedLlmProvider.value}))

@@ -565,7 +565,7 @@ test('common choices use compact segmented groups without losing radio semantics
 test('the heartbeat slider and model fields carry Main-compatible bounds', () => {
   assert.match(html, /编程执行器播报间隔/)
   assert.match(html, /<input type="range" id="heartbeat" min="15" max="120" step="1"/)
-  assert.match(html, /Qwen 实时模型/)
+  assert.match(html, /<label for="integratedModel">实时模型<\/label>/)
   assert.match(html, /<select id="integratedModel"/)
   assert.match(html, /<input type="text" id="cascadedLlmModel"[^>]*maxlength="64"/)
 })
@@ -592,6 +592,7 @@ test('every API key is a password field with a badge, hint, and clear button', (
   for (const key of [
     'composioApiKey',
     'dashscopeApiKey',
+    'stepfunApiKey',
     'tavilyApiKey',
     'openrouterApiKey',
     'arkApiKey',
@@ -604,11 +605,12 @@ test('every API key is a password field with a badge, hint, and clear button', (
     assert.match(html, new RegExp(`<button type="button" class="clear" data-key="${key}">清除(?:并停用)?</button>`))
   }
   assert.match(html, /DashScope/)
+  assert.match(html, /StepFun/)
   assert.match(html, /Tavily/)
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
   assert.match(html, /火山语音/)
-  assert.equal((html.match(/type="password"/g) || []).length, 7)
+  assert.equal((html.match(/type="password"/g) || []).length, 8)
 })
 
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {
@@ -659,7 +661,8 @@ test('the active cascaded model follows its provider and preserves the other mod
 
 test('key usage labels are derived from public pipeline selection only', () => {
   assert.match(script, /function keyUsage\(view\)/)
-  assert.match(script, /dashscopeApiKey: view\.pipelineMode === 'integrated'/)
+  assert.match(script, /dashscopeApiKey: \(view\.pipelineMode === 'integrated' && view\.integratedProvider === 'qwen'\)/)
+  assert.match(script, /stepfunApiKey: view\.pipelineMode === 'integrated' && view\.integratedProvider === 'stepfun'/)
   assert.match(script, /arkApiKey: view\.pipelineMode === 'cascaded'/)
   assert.match(script, /doubaoBigmodelApiKey: view\.pipelineMode === 'cascaded'/)
   assert.doesNotMatch(script, /\.secrets\b|ciphertext|decrypt/)
