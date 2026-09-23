@@ -177,7 +177,7 @@ test('actual launch and validator share capability credentials and new registry 
   const validation = capabilityEnvironment(settings, decryptedSecrets, {}, doc)
   const spec = backendLaunchSpec({nodeEntry: '/private/tmp/runtime.js', nodeResourcesPath: root, workspace: root, token: 'a'.repeat(32), readyEndpoint: '127.0.0.1:12345', parentEnv: {}, settings, decryptedSecrets, capabilitiesDocument: doc})
   assert.equal(spec.env.DASHSCOPE_API_KEY, validation.DASHSCOPE_API_KEY)
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG, settings.capabilitiesConfigPath)
+  assert.equal(spec.env.CAPABILITIES_CONFIG, settings.capabilitiesConfigPath)
   const registry = parseCapabilityRegistry(doc, spec.env)
   assert.equal(registry.modules.coding.enabled, false)
   assert.equal(registry.modules.camera.enabled, false)
@@ -187,10 +187,10 @@ test('safe raw URL and headers preserve templates and environment overrides rema
   const root = await fixture(t), path = join(root, 'cap.json')
   const doc = {version: 1, modules: {search: {enabled: false}}, mcpServers: {docs: {enabled: false, transport: 'streamable-http', url: 'https://example.com/mcp?token=${DOCS_TOKEN}', headers: {authorization: 'Bearer ${DOCS_TOKEN}'}, tools: {}}}}
   await writeFile(path, JSON.stringify(doc))
-  const view = readCapabilityEditor({capabilitiesConfigPath: path}, {NOVA_AUDIO_AGENT_SEARCH_PROVIDER: 'mcp'})
+  const view = readCapabilityEditor({capabilitiesConfigPath: path}, {SEARCH_PROVIDER: 'mcp'})
   assert.deepEqual(view.document, doc)
   assert.equal(view.status.modules.search.provider, 'mcp')
-  assert.deepEqual(view.status.overrides, ['NOVA_AUDIO_AGENT_SEARCH_PROVIDER'])
+  assert.deepEqual(view.status.overrides, ['SEARCH_PROVIDER'])
 })
 
 test('all capability settings reach the public form and proposed snapshot validator', async () => {
@@ -219,7 +219,7 @@ test('relative registry paths resolve identically for main validation and a diff
   const {capabilityPath} = await import('../src/main/capabilities-settings.mjs')
   const settings = {...SETTINGS_DEFAULTS, capabilitiesConfigPath: 'config/capabilities.json'}
   const spec = backendLaunchSpec({nodeEntry: '/private/tmp/runtime.js', nodeResourcesPath: '/private/tmp', workspace: '/private/tmp/other-workspace', token: 'a'.repeat(32), readyEndpoint: '127.0.0.1:12345', parentEnv: {}, settings})
-  assert.equal(spec.env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG, capabilityPath(settings))
+  assert.equal(spec.env.CAPABILITIES_CONFIG, capabilityPath(settings))
 })
 
 test('literal harmless HTTP headers remain editable without admitting credential headers', async t => {

@@ -32,11 +32,11 @@ Nova 会从对话中整理信息，方便你在之后的会话中继续提问。
 
 | 选择 | 配置 |
 |---|---|
-| 本地 mem0（默认） | `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local`，不填写 provider |
-| 本地 VoiceMem | `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local` 和 `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` |
-| 关闭个人记忆 | `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=disabled`，移除 provider 配置 |
-| 连接远程记忆服务 | `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`，配置下述地址和令牌，移除 provider 配置 |
+| 本地 mem0（默认） | `MEMORY_CONNECTION=local`，不填写 provider |
+| 本地 VoiceMem | `MEMORY_CONNECTION=local` 和 `MEMORY_PROVIDER=voicemem` |
+| 关闭个人记忆 | `MEMORY_CONNECTION=disabled`，移除 provider 配置 |
+| 连接远程记忆服务 | `MEMORY_CONNECTION=remote`，配置下述地址和令牌，移除 provider 配置 |
 
-远程服务需要 `NOVA_AUDIO_AGENT_MEMORY_URL` 和 `NOVA_AUDIO_AGENT_MEMORY_TOKEN`。服务须兼容 Nova 的记忆接口；不能直接填写任意 mem0 服务地址。远程连接失败时会显示不可用，不会自动改存本地。
+远程服务需要 `MEMORY_URL` 和 `MEMORY_TOKEN`。服务须兼容 Nova 的记忆接口；不能直接填写任意 mem0 服务地址。远程连接失败时会显示不可用，不会自动改存本地。
 
 切换引擎不会自动迁移已有记忆，关闭记忆也不会删除已保存的数据。更多配置见[核心配置](configuration.md)。

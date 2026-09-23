@@ -129,7 +129,7 @@ test('actual desktop entry preserves production provider usage through private I
     export function buildDesktopRealtimeComposition({buildRealtime}) { return buildRealtime({}, {}); }`,
     [new URL('../src/config/config.js', import.meta.url).href]: `import {loadSettings as load} from ${JSON.stringify(configUrl)};
       export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)};
-      export function loadSettings() { return load({DASHSCOPE_API_KEY: 'fixture', NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated'}); }`,
+      export function loadSettings() { return load({DASHSCOPE_API_KEY: 'fixture', PIPELINE_MODE: 'integrated'}); }`,
     [new URL('../src/config/capability-registry.js', import.meta.url).href]: `import {parseCapabilityRegistry} from ${JSON.stringify(registryUrl)};
       export function loadCapabilityRegistry() { return parseCapabilityRegistry({version: 1, modules: {coding: {enabled: false}, knowledge: {enabled: false}, search: {enabled: false}, camera: {enabled: false}}}); }`,
     [new URL('../src/realtime/telemetry.js', import.meta.url).href]: `export function createRealtimeTelemetry() { return {record() {}, close() {}}; }`,

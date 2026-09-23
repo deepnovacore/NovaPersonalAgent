@@ -454,7 +454,7 @@ export async function inspectDoctor({
     codexPresent: findCodex(platform),
     capabilities: inspectCapabilities({
       environment: capabilitiesConfigPath === undefined ? environment : {
-        ...environment, NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG: capabilitiesConfigPath,
+        ...environment, CAPABILITIES_CONFIG: capabilitiesConfigPath,
       },
       ...(home === undefined ? {} : {home}),
     }),

@@ -16,7 +16,7 @@ app.whenReady().then(async () => {
     const key = readSecret(settings, 'dashscopeApiKey', createSafeStorageCodec(safeStorage))
     if (!key) { console.error('[runtime-diagnostic] stored_dashscope_key_unavailable'); app.exit(2); return }
     const code = await runServerEntry({environment: {
-      ...process.env, DASHSCOPE_API_KEY: key, NOVA_AUDIO_AGENT_SERVER_MEDIA_MODE: process.env.NOVA_AUDIO_AGENT_SERVER_MEDIA_MODE ?? 'aoq_runtime',
+      ...process.env, DASHSCOPE_API_KEY: key, SERVER_MEDIA_MODE: process.env.SERVER_MEDIA_MODE ?? 'aoq_runtime',
     }})
     app.exit(code)
   } catch {

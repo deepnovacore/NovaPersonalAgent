@@ -523,7 +523,7 @@ const managedPhone = createManagedPhoneService({
     await mkdir(phoneRoot(), {recursive: true, mode: 0o700})
     const tokenFile = resolve(phoneRoot(), 'host.token')
     try { initializeServerToken(tokenFile) } catch (error) { if (error.code !== 'EEXIST') throw error }
-    const environment = {NOVA_AUDIO_AGENT_SERVER_PORT: '19876', NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: tokenFile}
+    const environment = {SERVER_PORT: '19876', SERVER_TOKEN_FILE: tokenFile}
     phoneConfig = loadServerConfig(environment)
     const spec = backendLaunchSpec({backend: 'node', nodeEntry: entry,
       nodeResourcesPath: app.isPackaged ? process.resourcesPath : resolve(packageRoot, 'build'),
@@ -534,10 +534,10 @@ const managedPhone = createManagedPhoneService({
     if (app.isQuitting || !currentSettings.phoneConnectionEnabled) throw new Error('service_unavailable')
     return utilityProcess.fork(resolve(dirname(entry), 'desktop/phone-desktop-entry.js'), [], {
       cwd: desktopConfig?.workspace || process.cwd(), stdio: 'pipe', serviceName: 'Nova iPhone Service',
-      env: {...spec.env, ...environment, NOVA_AUDIO_AGENT_SERVER_MEDIA_MODE: 'relay',
-        NOVA_AUDIO_AGENT_BLACKBOARD_PATH: resolve(phoneRoot(), 'blackboard.sqlite'),
-        NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID: 'phone',
-        NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT: resolve(phoneRoot(), 'projects')},
+      env: {...spec.env, ...environment, SERVER_MEDIA_MODE: 'relay',
+        BLACKBOARD_PATH: resolve(phoneRoot(), 'blackboard.sqlite'),
+        BLACKBOARD_OWNER_ID: 'phone',
+        CODEX_PROJECT_STATE_ROOT: resolve(phoneRoot(), 'projects')},
     })
   },
 })
@@ -568,8 +568,8 @@ async function phoneAction(action, deviceId, epoch = phoneEpoch) {
       await managedPhone.stop()
       const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
       const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
-      const external = loadServerConfig({NOVA_AUDIO_AGENT_SERVER_PORT: String(currentSettings.phoneServerPort),
-        NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile})
+      const external = loadServerConfig({SERVER_PORT: String(currentSettings.phoneServerPort),
+        SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile})
       if (phoneConfig?.port !== external.port || phoneConfig?.token !== external.token) await cancelPhonePairing(false)
       phoneConfig = external
     } else {
@@ -1049,7 +1049,7 @@ function initializeDesktopBootstrap(cameraSource) {
   nativeAudio?.setCaptureEpoch(wakeWord?.epoch ?? 0)
   bootstrap = Object.freeze({
     audioMode: 'inactive',
-    startMuted: !app.isPackaged && process.env.NOVA_AUDIO_AGENT_DEV_START_MUTED === '1',
+    startMuted: !app.isPackaged && process.env.DEV_START_MUTED === '1',
     nativeAvailable,
     platform: process.platform,
     opaque,
@@ -1731,9 +1731,9 @@ function finishInstalledFileCameraSmoke(result) {
 }
 
 const installedFileCameraSmoke = app.isPackaged
-  && process.env.NOVA_AUDIO_AGENT_RELEASE_CAMERA_SMOKE === RELEASE_CAMERA_SMOKE_MODE
+  && process.env.RELEASE_CAMERA_SMOKE === RELEASE_CAMERA_SMOKE_MODE
 const packagedSourceRollbackUnavailable = app.isPackaged
-  && process.env.NOVA_AUDIO_AGENT_BACKEND === 'python'
+  && process.env.BACKEND === 'python'
 const sourceStartupSmoke = !app.isPackaged
   && process.argv.includes('--nova-source-startup-smoke-v1')
 

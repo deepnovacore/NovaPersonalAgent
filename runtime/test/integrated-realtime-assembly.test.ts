@@ -35,11 +35,11 @@ test('integrated registry resolves only Qwen and passes an immutable selected co
 
   const actual = buildIntegratedRealtimeAssembly({
     settings: loadSettings({
-      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
-      NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER: 'qwen',
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL: 'qwen-audio-test',
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE: 'voice-test',
+      PIPELINE_MODE: 'integrated',
+      INTEGRATED_PROVIDER: 'qwen',
+      QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
+      QWEN_REALTIME_MODEL: 'qwen-audio-test',
+      QWEN_REALTIME_VOICE: 'voice-test',
       DASHSCOPE_API_KEY: 'dash-secret',
       TAVILY_API_KEY: 'search-secret',
     }),
@@ -53,7 +53,7 @@ test('integrated registry receives only selected provider inputs and cannot insp
   const connector = () => Promise.reject(new Error('unused'))
   let insideRegistry = false
   const settings = new Proxy(loadSettings({
-    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
+    PIPELINE_MODE: 'integrated',
     DASHSCOPE_API_KEY: 'selected-dash-secret',
     TAVILY_API_KEY: 'host-search-secret',
   }), {
@@ -125,5 +125,5 @@ test('integrated selection rejects a missing own registry entry before provider 
   assert.throws(() => buildIntegratedRealtimeAssembly({
     settings: loadSettings({DASHSCOPE_API_KEY: 'selected-dash-secret'}),
   }, Object.create({qwen: () => { throw new Error('inherited factory invoked') }}) as IntegratedProviderRegistry),
-  /NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER/)
+  /INTEGRATED_PROVIDER/)
 })

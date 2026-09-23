@@ -114,19 +114,19 @@ export function parseCapabilityRegistry(input, environment = {}) {
     const configuredProvider = omittedDefault(search.provider, 'tavily');
     if (configuredProvider !== 'tavily' && configuredProvider !== 'mcp')
         invalid('modules.search.provider');
-    const provider = environmentOverride(environment, 'NOVA_AUDIO_AGENT_SEARCH_PROVIDER') ?? configuredProvider;
+    const provider = environmentOverride(environment, 'SEARCH_PROVIDER') ?? configuredProvider;
     if (provider !== 'tavily' && provider !== 'mcp')
-        invalid('NOVA_AUDIO_AGENT_SEARCH_PROVIDER');
+        invalid('SEARCH_PROVIDER');
     const overrides = [];
-    if (environment.NOVA_AUDIO_AGENT_SEARCH_PROVIDER?.trim())
-        overrides.push('NOVA_AUDIO_AGENT_SEARCH_PROVIDER');
+    if (environment.SEARCH_PROVIDER?.trim())
+        overrides.push('SEARCH_PROVIDER');
     let cameraEnabled = bool(camera.enabled, true, 'modules.camera.enabled');
-    const cameraOverride = environment.NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED?.trim().toLowerCase();
+    const cameraOverride = environment.CAMERA_MODULE_ENABLED?.trim().toLowerCase();
     if (cameraOverride) {
         if (!['true', 'false', '1', '0', 'yes', 'no', 'on', 'off'].includes(cameraOverride))
-            invalid('NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED');
+            invalid('CAMERA_MODULE_ENABLED');
         cameraEnabled = ['true', '1', 'yes', 'on'].includes(cameraOverride);
-        overrides.push('NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED');
+        overrides.push('CAMERA_MODULE_ENABLED');
     }
     const tavily = object(omittedDefault(search.tavily, {}), 'modules.search.tavily', ['apiKeyEnv']);
     const apiKeyEnv = string(omittedDefault(tavily.apiKeyEnv, 'TAVILY_API_KEY'), 'modules.search.tavily.apiKeyEnv', 128);
@@ -135,8 +135,8 @@ export function parseCapabilityRegistry(input, environment = {}) {
     let mcp;
     if (search.mcp !== undefined || (enabled && provider === 'mcp')) {
         const config = object(omittedDefault(search.mcp, {}), 'modules.search.mcp', ['url', 'tool', 'headers', 'timeoutMs', 'maxResultBytes']);
-        const urlOverride = environmentOverride(environment, 'NOVA_AUDIO_AGENT_SEARCH_MCP_URL');
-        const toolOverride = environmentOverride(environment, 'NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL');
+        const urlOverride = environmentOverride(environment, 'SEARCH_MCP_URL');
+        const toolOverride = environmentOverride(environment, 'SEARCH_MCP_TOOL');
         const preset = !urlOverride && config.url === undefined;
         const configuredUrl = string(omittedDefault(config.url, BAILIAN_SEARCH_MCP_URL), 'modules.search.mcp.url');
         const rawUrl = string(urlOverride ?? configuredUrl, 'modules.search.mcp.url');
@@ -151,9 +151,9 @@ export function parseCapabilityRegistry(input, environment = {}) {
             timeoutMs: integer(config.timeoutMs, 8000, 60000, 'modules.search.mcp.timeoutMs'),
             maxResultBytes: integer(config.maxResultBytes, 262144, 1048576, 'modules.search.mcp.maxResultBytes') };
         if (urlOverride)
-            overrides.push('NOVA_AUDIO_AGENT_SEARCH_MCP_URL');
+            overrides.push('SEARCH_MCP_URL');
         if (toolOverride)
-            overrides.push('NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL');
+            overrides.push('SEARCH_MCP_TOOL');
     }
     const servers = object(omittedDefault(document.mcpServers, {}), 'mcpServers');
     if (Object.keys(servers).length > 8)
@@ -225,7 +225,7 @@ function parseServer(value, environment) {
 }
 export function loadCapabilityRegistry(options = {}) {
     const environment = options.environment ?? process.env;
-    const explicitPath = (options.path === '' ? undefined : options.path) ?? environmentOverride(environment, 'NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG');
+    const explicitPath = (options.path === '' ? undefined : options.path) ?? environmentOverride(environment, 'CAPABILITIES_CONFIG');
     const path = explicitPath ?? DEFAULT_CAPABILITIES_PATH;
     const explicit = explicitPath !== undefined;
     const resolved = path.startsWith('~/') ? join(options.home ?? homedir(), path.slice(2)) : path;

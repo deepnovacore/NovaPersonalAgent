@@ -18,7 +18,7 @@ const repositoryRoot = resolve(import.meta.dirname, '../../..')
 function dotenv() {
   const values = {}
   try {
-    const envPath = process.env.NOVA_AUDIO_AGENT_ENV_FILE ?? resolve(repositoryRoot, '.env')
+    const envPath = process.env.ENV_FILE ?? resolve(repositoryRoot, '.env')
     for (const line of readFileSync(envPath, 'utf8').split('\n')) {
       const match = /^([A-Za-z0-9_]+)=(.*)$/.exec(line.trim())
       if (match) values[match[1]] = match[2].replace(/^["']|["']$/g, '')
@@ -29,14 +29,14 @@ function dotenv() {
 
 const file = dotenv()
 const setting = name => process.env[name] ?? file[name]
-const apiKey = setting('DASHSCOPE_API_KEY') ?? setting('NOVA_AUDIO_AGENT_MODEL_API_KEY')
+const apiKey = setting('DASHSCOPE_API_KEY') ?? setting('MODEL_API_KEY')
 if (!apiKey) {
-  console.error('missing DASHSCOPE_API_KEY or NOVA_AUDIO_AGENT_MODEL_API_KEY')
+  console.error('missing DASHSCOPE_API_KEY or MODEL_API_KEY')
   process.exit(2)
 }
 
 const gateway = new OpenAIModelGateway({
-  baseUrl: setting('NOVA_AUDIO_AGENT_MODEL_BASE_URL') ?? DASHSCOPE_COMPATIBLE_BASE_URL,
+  baseUrl: setting('MODEL_BASE_URL') ?? DASHSCOPE_COMPATIBLE_BASE_URL,
   apiKey,
   clock: new VirtualClock(0),
   requestTimeout: 45,
@@ -44,7 +44,7 @@ const gateway = new OpenAIModelGateway({
 })
 const surrogate = new GatewaySurrogate({
   gateway,
-  model: setting('NOVA_AUDIO_AGENT_SURROGATE_MODEL') ?? 'qwen-plus',
+  model: setting('SURROGATE_MODEL') ?? 'qwen-plus',
   proactivityPreset: 'eager',
 })
 

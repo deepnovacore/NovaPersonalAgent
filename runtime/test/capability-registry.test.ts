@@ -33,14 +33,14 @@ test('registry default file absent is optional; explicit unreadable, malformed a
 test('registry module settings beat defaults and explicit env overrides beat registry without leaking secrets', () => {
   const registry = parseCapabilityRegistry({version: 1, modules: {camera: {enabled: false}, search: {provider: 'mcp', mcp: {
     url: 'https://example.test/${ENDPOINT}', tool: 'search', headers: {authorization: 'Bearer ${TOKEN}'},
-  }}}}, {ENDPOINT: 'mcp', TOKEN: 'private-secret', NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'true', NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL: 'lookup', NOVA_AUDIO_AGENT_SEARCH_MCP_URL: 'https://override.test/mcp'})
+  }}}}, {ENDPOINT: 'mcp', TOKEN: 'private-secret', CAMERA_MODULE_ENABLED: 'true', SEARCH_MCP_TOOL: 'lookup', SEARCH_MCP_URL: 'https://override.test/mcp'})
   assert.equal(registry.modules.camera.enabled, true)
   assert.equal(registry.modules.search.provider, 'mcp')
   assert.equal(registry.modules.search.mcp?.tool, 'lookup')
   assert.equal(registry.modules.search.mcp?.url, 'https://override.test/mcp')
   assert.equal(registry.modules.search.mcp?.headers.authorization, 'Bearer private-secret')
   assert.equal(JSON.stringify(capabilityStatus(registry)).includes('private-secret'), false)
-  const tavily = parseCapabilityRegistry({version: 1, modules: {search: {provider: 'mcp'}}}, {NOVA_AUDIO_AGENT_SEARCH_PROVIDER: 'tavily'})
+  const tavily = parseCapabilityRegistry({version: 1, modules: {search: {provider: 'mcp'}}}, {SEARCH_PROVIDER: 'tavily'})
   assert.equal(tavily.modules.search.provider, 'tavily')
 })
 
@@ -87,15 +87,15 @@ test('disabled search and MCP search do not require Tavily; supplied settings ne
   const enabled = buildAssembly({settings: settings(), capabilities: mcp})
   assert.equal(enabled.runtime.executors.has('search'), true)
   await enabled.stop()
-  const environment = process.env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG
-  process.env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG = '/must-not-read'
+  const environment = process.env.CAPABILITIES_CONFIG
+  process.env.CAPABILITIES_CONFIG = '/must-not-read'
   try {
     const injected = buildAssembly({settings: {...settings(), tavily_api_key: 'test-only'}, cameraModuleEnabled: false})
     assert.equal(injected.capabilities.modules.search.provider, 'tavily')
     await injected.stop()
   } finally {
-    if (environment === undefined) delete process.env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG
-    else process.env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG = environment
+    if (environment === undefined) delete process.env.CAPABILITIES_CONFIG
+    else process.env.CAPABILITIES_CONFIG = environment
   }
 })
 
@@ -126,7 +126,7 @@ test('final provider tool composition enforces exact N/B without partial exposur
 test('disabled capability instruction sections are absent and doctor shares redacted validation', () => {
   const instructions = frontendInstructions({search: false, camera: false, coding: false})
   for (const phrase of ['搜索结果', 'Vision', 'Coding intake', '编程请求', '监控摄像头']) assert.equal(instructions.includes(phrase), false)
-  const status = inspectCapabilities({environment: {NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG: '/private-secret/missing'}})
+  const status = inspectCapabilities({environment: {CAPABILITIES_CONFIG: '/private-secret/missing'}})
   assert.equal(status.ok, false)
   assert.equal(JSON.stringify(status).includes('private-secret'), false)
 })
@@ -143,9 +143,9 @@ test('explicit null never restores registry defaults and malformed null servers 
   for (const document of invalid) {
     assert.throws(() => parseCapabilityRegistry({version: 1, ...document}), /invalid capabilities configuration/u, JSON.stringify(document))
     assert.throws(() => parseCapabilityRegistry({version: 1, ...document}, {
-      NOVA_AUDIO_AGENT_SEARCH_PROVIDER: 'mcp',
-      NOVA_AUDIO_AGENT_SEARCH_MCP_URL: 'https://example.test/mcp',
-      NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL: 'lookup',
+      SEARCH_PROVIDER: 'mcp',
+      SEARCH_MCP_URL: 'https://example.test/mcp',
+      SEARCH_MCP_TOOL: 'lookup',
     }), /invalid capabilities configuration/u, JSON.stringify(document))
   }
   for (const config of [

@@ -5,8 +5,8 @@ import {buildProductionComposition} from './composition/production-composition.j
 
 type UtilityProcess = NodeJS.Process & {readonly parentPort?: DesktopStopParentSource & {postMessage(message: unknown): void}}
 
-const token = process.env.NOVA_AUDIO_AGENT_DESKTOP_TOKEN ?? ''
-const readyEndpoint = process.env.NOVA_AUDIO_AGENT_DESKTOP_READY_ENDPOINT ?? ''
+const token = process.env.DESKTOP_TOKEN ?? ''
+const readyEndpoint = process.env.DESKTOP_READY_ENDPOINT ?? ''
 const stop = new AbortController()
 const parentPort = (process as UtilityProcess).parentPort
 

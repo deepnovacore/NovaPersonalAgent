@@ -192,7 +192,7 @@ export function publicRuntimeCapabilityStatus(value) {
   const status = server => ({status: states.includes(server?.status) ? server.status : 'failed',
     ...(typeof server?.reason === 'string' && /^[a-zA-Z0-9_.: -]{1,160}$/u.test(server.reason) ? {reason: server.reason} : {})})
   result.servers = (Array.isArray(value.servers) ? value.servers : []).slice(0, 8).filter(server => /^[a-z][a-z0-9_]{0,31}$/u.test(server?.name ?? '')).map(server => ({name: server.name, ...status(server), ...(server.codex ? {codex: status(server.codex)} : {})}))
-  result.overrides = (Array.isArray(value.overrides) ? value.overrides : []).filter(name => ['NOVA_AUDIO_AGENT_SEARCH_PROVIDER', 'NOVA_AUDIO_AGENT_SEARCH_MCP_URL', 'NOVA_AUDIO_AGENT_SEARCH_MCP_TOOL', 'NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED'].includes(name))
+  result.overrides = (Array.isArray(value.overrides) ? value.overrides : []).filter(name => ['SEARCH_PROVIDER', 'SEARCH_MCP_URL', 'SEARCH_MCP_TOOL', 'CAMERA_MODULE_ENABLED'].includes(name))
   return result
 }
 

@@ -143,7 +143,7 @@ function requireApiKey(settings: Settings): string {
   const key = stripLikePython(resolveModelApiKey(settings) ?? '')
   if (key === '') {
     // Never echo configuration values; the name is enough to act on.
-    throw new AssemblyError('缺少 DASHSCOPE_API_KEY 或 NOVA_AUDIO_AGENT_MODEL_API_KEY')
+    throw new AssemblyError('缺少 DASHSCOPE_API_KEY 或 MODEL_API_KEY')
   }
   return key
 }
