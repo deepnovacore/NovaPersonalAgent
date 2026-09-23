@@ -5,6 +5,7 @@ import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises'
 import {join} from 'node:path'
 import {createSettingsWriter, DEFAULT_SETTINGS as SETTINGS_DEFAULTS} from '../src/main/settings-store.mjs'
 import {prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, capabilityDocumentRevision} from '../src/main/capabilities-settings.mjs'
+import {parseCapabilityRegistry} from '@nova-audio-agent/runtime/desktop'
 
 const codec = {available: () => false}
 const document = {version: 1, modules: {search: {enabled: false}}, mcpServers: {}}
@@ -91,7 +92,15 @@ test('registry validation uses persistable secrets, rejects failed servers befor
   const root = await fixture(t), path = join(root, 'next.json')
   let writes = 0
   const writer = createSettingsWriter({getCurrent: () => ({...SETTINGS_DEFAULTS, capabilitiesConfigPath: path}), codec, commit: () => {}, save: async () => {writes++}})
-  const requiringKey = {version: 1, modules: {search: {provider: 'mcp'}}}
+  // Search is optional: an MCP search whose key cannot be persisted is saved switched off rather than rejected.
+  const searchOnly = {version: 1, modules: {search: {provider: 'mcp'}}}
+  const searchEnvironment = next => capabilityEnvironment(next, {}, {}, searchOnly)
+  let searchEnv
+  await writer({secrets: {dashscopeApiKey: 'dummy-key'}}, next => prepareCapabilityCommit({settings: next, document: searchOnly, environment: searchEnv = searchEnvironment(next)}))
+  assert.equal(parseCapabilityRegistry(searchOnly, searchEnv).modules.search.reason, 'missing_environment:DASHSCOPE_API_KEY')
+  await rm(path)
+  writes = 0
+  const requiringKey = {version: 1, mcpServers: {demo: {transport: 'streamable-http', url: 'https://example.com/mcp', headers: {authorization: 'Bearer ${DASHSCOPE_API_KEY}'}}}}
   await assert.rejects(writer({secrets: {dashscopeApiKey: 'dummy-key'}}, next => prepareCapabilityCommit({settings: next, document: requiringKey, environment: capabilityEnvironment(next, {}, {}, requiringKey)})), {code: 'invalid_settings_commit'})
   assert.equal(writes, 0)
   await assert.rejects(readFile(path), {code: 'ENOENT'})
@@ -169,7 +178,6 @@ test('combined operation validates settings, returns invalid/busy unchanged and 
 })
 test('actual launch and validator share capability credentials and new registry generation', async t => {
   const {backendLaunchSpec} = await import('../src/main/backend.mjs')
-  const {parseCapabilityRegistry} = await import('@nova-audio-agent/runtime/desktop')
   const root = await fixture(t)
   const settings = {...SETTINGS_DEFAULTS, pipelineMode: 'cascaded', cascadedLlmProvider: 'ark', capabilitiesConfigPath: join(root, 'generation.json')}
   const doc = {version: 1, modules: {search: {enabled: false}, coding: {enabled: false}, camera: {enabled: false}}, mcpServers: {docs: {enabled: true, transport: 'streamable-http', url: 'https://example.com/mcp', headers: {authorization: 'Bearer ${DASHSCOPE_API_KEY}'}, tools: {}, exposeTo: {frontbrain: false, codex: true}}}}

@@ -210,7 +210,7 @@ test('doctor names the voice pipeline keys and probes only environment keys when
   const appData = join(home, 'appdata')
   const settings = join(appData, 'Nova Audio Agent Ambient Orb/ambient-orb-settings.json')
   await mkdir(join(settings, '..'), {recursive: true})
-  await writeFile(settings, JSON.stringify({pipelineMode: 'cascaded', cascadedLlmProvider: 'deepseek', secrets: {doubaoBigmodelApiKey: 'saved-value'}}))
+  await writeFile(settings, JSON.stringify({pipelineMode: 'cascaded', cascadedLlmProvider: 'deepseek', secrets: {doubaoBigmodelApiKey: {enc: 'safeStorage', data: 'c2VhbGVk'}}}))
   const calls = []
   const fetchImpl = async (url, init) => {
     calls.push({url: String(url), authorization: init.headers.authorization})
@@ -227,7 +227,24 @@ test('doctor names the voice pipeline keys and probes only environment keys when
   assert.deepEqual(online.voice.keys[0], {name: 'DEEPSEEK_API_KEY', source: 'environment', probe: 'rejected'})
   assert.equal(online.voice.keys[1].probe, undefined)
   assert.deepEqual(calls, [{url: 'https://api.deepseek.com/models', authorization: 'Bearer env-value'}])
-  assert.doesNotMatch(JSON.stringify(online), /env-value|saved-value/u)
+  assert.doesNotMatch(JSON.stringify(online), /env-value|c2VhbGVk/u)
+})
+
+test('doctor counts only saved keys the desktop can load, and the DashScope-gateway model key', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const appData = join(home, 'appdata')
+  const settings = join(appData, 'Nova Audio Agent Ambient Orb/ambient-orb-settings.json')
+  await mkdir(join(settings, '..'), {recursive: true})
+  const voice = async (document, environment = {}) => {
+    await writeFile(settings, JSON.stringify(document))
+    return (await inspectDoctor({...TARGET_OPTIONS, home, environment: {APPDATA: appData, ...environment}})).voice.keys
+  }
+  // The desktop drops a plaintext or malformed entry, so it cannot satisfy the voice pipeline.
+  assert.deepEqual(await voice({secrets: {dashscopeApiKey: 'old-plaintext-value'}}), [{name: 'DASHSCOPE_API_KEY', source: null}])
+  assert.deepEqual(await voice({secrets: {dashscopeApiKey: {enc: 'rot13', data: 'c2VhbGVk'}}}), [{name: 'DASHSCOPE_API_KEY', source: null}])
+  assert.deepEqual(await voice({secrets: {modelApiKey: {enc: 'safeStorage', data: 'c2VhbGVk'}}}), [{name: 'MODEL_API_KEY', source: 'settings'}])
+  assert.deepEqual(await voice({}, {MODEL_API_KEY: 'm'}), [{name: 'MODEL_API_KEY', source: 'environment'}])
+  assert.deepEqual(await voice({modelBaseUrl: 'https://models.example/v1'}, {MODEL_API_KEY: 'm'}), [{name: 'DASHSCOPE_API_KEY', source: null}])
 })
 
 test('doctor defaults a fresh install to the integrated DashScope key', async () => {

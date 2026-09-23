@@ -80,6 +80,15 @@ export function interpolateCapabilityValue(value, environment) {
         invalid('interpolated_value_too_large');
     return resolved;
 }
+function missingEnvironment(values, environment) {
+    for (const value of values) {
+        for (const [, name = ''] of value.matchAll(/\$\{([^}]+)\}/gu)) {
+            if (ENV_NAME.test(name) && !environment[name]?.trim())
+                return name;
+        }
+    }
+    return undefined;
+}
 function interpolateMap(value, environment) {
     return Object.fromEntries(Object.entries(value).map(([key, val]) => [key, interpolateCapabilityValue(val, environment)]));
 }
@@ -144,9 +153,9 @@ export function parseCapabilityRegistry(input, environment = {}) {
     const tavilyUnavailable = requestedEnabled && requestedProvider === 'tavily' && !environment[apiKeyEnv]?.trim();
     const fallback = tavilyUnavailable && search.mcp === undefined && !environmentOverride(environment, 'SEARCH_MCP_URL')
         && Boolean(environment.DASHSCOPE_API_KEY?.trim()) ? 'bailian_mcp' : undefined;
-    const enabled = requestedEnabled && (!tavilyUnavailable || fallback !== undefined);
+    let enabled = requestedEnabled && (!tavilyUnavailable || fallback !== undefined);
     const provider = fallback === undefined ? requestedProvider : 'mcp';
-    const reason = tavilyUnavailable ? `missing_environment:${apiKeyEnv}` : undefined;
+    let reason = tavilyUnavailable ? `missing_environment:${apiKeyEnv}` : undefined;
     let mcp;
     if (search.mcp !== undefined || (enabled && provider === 'mcp')) {
         const config = object(omittedDefault(search.mcp, {}), 'modules.search.mcp', ['url', 'tool', 'headers', 'timeoutMs', 'maxResultBytes']);
@@ -158,6 +167,12 @@ export function parseCapabilityRegistry(input, environment = {}) {
         const configuredTool = string(omittedDefault(config.tool, preset ? BAILIAN_SEARCH_MCP_TOOL : 'web_search'), 'modules.search.mcp.tool', 256);
         const tool = string(toolOverride ?? configuredTool, 'modules.search.mcp.tool', 256);
         const rawHeaders = stringMap(omittedDefault(config.headers, preset ? { authorization: 'Bearer ${DASHSCOPE_API_KEY}' } : {}), 'modules.search.mcp.headers');
+        // A search endpoint whose key is not set turns search off, like a missing Tavily key.
+        const missing = enabled && provider === 'mcp' ? missingEnvironment([rawUrl, ...Object.values(rawHeaders)], environment) : undefined;
+        if (missing !== undefined) {
+            enabled = false;
+            reason = `missing_environment:${missing}`;
+        }
         const headers = enabled && provider === 'mcp' ? interpolateMap(rawHeaders, environment) : rawHeaders;
         const url = enabled && provider === 'mcp' ? interpolateCapabilityValue(rawUrl, environment) : rawUrl;
         if (enabled && provider === 'mcp')

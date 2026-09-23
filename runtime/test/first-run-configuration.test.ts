@@ -59,6 +59,14 @@ test('search falls back to the DashScope preset, else turns off, and never block
   // A custom MCP endpoint is the user's choice; it is not silently replaced by the preset.
   const custom = parseCapabilityRegistry({version: 1}, {DASHSCOPE_API_KEY: 'k', SEARCH_MCP_URL: 'https://search.example/mcp'}).modules.search
   assert.equal(custom.enabled, false)
+  // An MCP search whose endpoint key is not set turns off with that key named, instead of failing startup.
+  for (const [document, environment] of [[{version: 1, modules: {search: {provider: 'mcp'}}}, {}], [{version: 1}, {SEARCH_PROVIDER: 'mcp'}],
+    [{version: 1, modules: {search: {provider: 'mcp', mcp: {url: 'https://search.example/mcp', headers: {authorization: 'Bearer ${SEARCH_TOKEN}'}}}}}, {}]] as const) {
+    const search = parseCapabilityRegistry(document, environment).modules.search
+    assert.equal(search.enabled, false)
+    assert.match(search.reason ?? '', /^missing_environment:(DASHSCOPE_API_KEY|SEARCH_TOKEN)$/u)
+  }
+  assert.equal(parseCapabilityRegistry({version: 1, modules: {search: {provider: 'mcp'}}}, {DASHSCOPE_API_KEY: 'k'}).modules.search.enabled, true)
   // An explicitly disabled module stays off without a reason.
   const disabled = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}}}, {}).modules.search
   assert.equal(disabled.enabled, false)

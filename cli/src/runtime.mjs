@@ -431,13 +431,31 @@ function voiceRequirement(document) {
   return {pipeline, keys: pipeline === 'integrated' ? ['dashscopeApiKey'] : [CASCADED_LLM_KEYS[llm], 'doubaoBigmodelApiKey']}
 }
 
+const DASHSCOPE_COMPATIBLE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/u
+
+// Matches settings-store's validSecretEntry: anything else is dropped by the desktop and does not count as saved.
+function savedSecret(document, key) {
+  const entry = document?.secrets?.[key]
+  return entry !== null && typeof entry === 'object' && ['safeStorage', 'none'].includes(entry.enc)
+    && typeof entry.data === 'string' && entry.data !== '' && entry.data.length % 4 === 0 && BASE64.test(entry.data)
+}
+
 // Saved keys win over the environment in the desktop, and stay encrypted, so only environment keys can be probed here.
-async function inspectVoiceKeys(document, secretKeys, environment, {online, fetchImpl}) {
+async function inspectVoiceKeys(document, environment, {online, fetchImpl}) {
   const {pipeline, keys} = voiceRequirement(document)
+  const sourceOf = (key, name) => savedSecret(document, key) ? 'settings' : environment[name]?.trim() ? 'environment' : null
   const entries = []
   for (const key of keys) {
-    const name = VOICE_KEYS[key]
-    const source = secretKeys.includes(key) ? 'settings' : environment[name]?.trim() ? 'environment' : null
+    let name = VOICE_KEYS[key]
+    let source = sourceOf(key, name)
+    // Integrated voice also accepts the generic model key while the model gateway stays on DashScope.
+    const modelBaseUrl = typeof document?.modelBaseUrl === 'string' ? document.modelBaseUrl.trim() : ''
+    if (source === null && key === 'dashscopeApiKey' && pipeline === 'integrated'
+      && (modelBaseUrl === '' || modelBaseUrl === DASHSCOPE_COMPATIBLE_BASE_URL) && sourceOf('modelApiKey', 'MODEL_API_KEY') !== null) {
+      name = 'MODEL_API_KEY'
+      source = sourceOf('modelApiKey', name)
+    }
     const probe = online && source === 'environment' ? (await probeApiKey(key, environment[name], {fetch: fetchImpl})).status : undefined
     entries.push(Object.freeze({name, source, ...(probe === undefined ? {} : {probe})}))
   }
@@ -483,7 +501,7 @@ export async function inspectDoctor({
     desktopReady: await cachedInstallation({root, executable, target, platform}) !== null,
     settingsPresent: await access(settings).then(() => true, () => false),
     configuredSecretKeys: Object.freeze(secretKeys),
-    voice: await inspectVoiceKeys(document, secretKeys, environment, {online, fetchImpl}),
+    voice: await inspectVoiceKeys(document, environment, {online, fetchImpl}),
     codexPresent: findCodex(platform),
     capabilities: inspectCapabilities({
       environment: capabilitiesConfigPath === undefined ? environment : {

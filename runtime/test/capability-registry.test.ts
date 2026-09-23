@@ -73,7 +73,10 @@ test('interpolation, HTTPS and loopback auth policies fail closed without echoin
   assert.equal(missing.serverStatuses[0]?.reason, 'missing_environment:TOKEN')
   const stdio = parseCapabilityRegistry({version: 1, mcpServers: {local: {transport: 'stdio', command: 'node', env: {TOKEN: '${TOKEN}'}}}}, {TOKEN: 'private-secret'})
   assert.equal(stdio.mcpServers.local?.env?.TOKEN, 'private-secret')
-  assert.throws(() => parseCapabilityRegistry({version: 1, modules: {search: {provider: 'mcp'}}}), /missing_environment:DASHSCOPE_API_KEY/u)
+  assert.deepEqual(parseCapabilityRegistry({version: 1, modules: {search: {provider: 'mcp'}}}).modules.search, {
+    enabled: false, provider: 'mcp', tavily: {apiKeyEnv: 'TAVILY_API_KEY'}, reason: 'missing_environment:DASHSCOPE_API_KEY',
+    mcp: {url: 'https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp', tool: 'search_pro', headers: {authorization: 'Bearer ${DASHSCOPE_API_KEY}'}, timeoutMs: 8000, maxResultBytes: 262144},
+  })
 })
 
 test('disabled search and MCP search do not require Tavily; supplied settings never read ambient registry', async () => {
