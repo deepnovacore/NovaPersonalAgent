@@ -10,7 +10,7 @@ import {ConfigurationError, loadSettings} from '../src/config/config.js'
 import {buildDiagnosticReport, diagnosticReportSchema} from '../src/config/diagnostics.js'
 import {main} from '../src/cli.js'
 
-test('diagnostics require the credential for the unconditionally assembled Search adapter', async () => {
+test('diagnostics pass Search on the DashScope fallback when no Tavily key is set', async () => {
   const environment = {
     BACKEND: 'node',
     DASHSCOPE_API_KEY: 'dashscope-secret',
@@ -21,13 +21,13 @@ test('diagnostics require the credential for the unconditionally assembled Searc
   assert.deepEqual(report, {
     schema_version: 1,
     runtime: 'node',
-    ok: false,
+    ok: true,
     checks: [
       {id: 'node.version', status: 'pass', code: 'node_version_supported'},
       {id: 'configuration.parse', status: 'pass', code: 'configuration_valid'},
       {id: 'provider.qwen', status: 'pass', code: 'qwen_configuration_valid'},
       {id: 'executors.contract', status: 'pass', code: 'executor_configuration_valid'},
-      {id: 'search.credential', status: 'fail', code: 'search_credential_missing'},
+      {id: 'search.credential', status: 'pass', code: 'search_credential_present'},
       {id: 'camera.source', status: 'pass', code: 'camera_local_selected'},
     ],
   })

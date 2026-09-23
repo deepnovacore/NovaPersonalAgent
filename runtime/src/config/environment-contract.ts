@@ -51,6 +51,7 @@ const rows: readonly Row[] = [
   ['PROACTIVITY_PRESET', 'core', false, true, 'never', 'balanced', 'Proactivity preset.', '主动性预设。'],
   ['SUGGESTION_COOLDOWN', 'core', false, true, 'never', 'preset', 'Suggestion cooldown override in seconds.', '建议冷却秒数覆盖。'],
   ['FRESH_WINDOW', 'core', false, true, 'never', 'preset', 'Fresh-context window override in seconds.', '新鲜上下文窗口秒数覆盖。'],
+  ['CODING_MODULE_ENABLED', 'codex', false, true, 'never', 'true', 'Enable the coding module; the desktop turns it off when no Codex CLI is available.', '启用编程模块；桌面端在找不到 Codex CLI 时自动关闭。'],
   ['CODEX_APPROVAL_MODE', 'codex', false, true, 'never', 'ask', 'Codex approval mode.', 'Codex 审批模式。'],
   ['CLARIFICATION_DEPTH', 'core', false, true, 'never', 'balanced', 'Maximum clarification depth for intake.', '意图理解的最大澄清深度。'],
   ['PLAN_READBACK', 'core', false, true, 'never', 'summary', 'Plan readback mode.', '规划回读模式。'],

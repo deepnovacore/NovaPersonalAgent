@@ -132,9 +132,12 @@ test('personal memory selects mem0 by default and maps its host-owned settings',
       model: 'embedding-model',
     },
   })
+  // Local memory is optional: no embedding credential turns it off rather than blocking startup.
+  assert.equal(requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'local'})), null)
+  // Remote memory is an explicit opt-in, so its missing credential still fails loudly.
   assert.throws(
-    () => requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'local'})),
-    /MODEL_API_KEY/u,
+    () => requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example/'})),
+    /MEMORY_TOKEN/u,
   )
 })
 

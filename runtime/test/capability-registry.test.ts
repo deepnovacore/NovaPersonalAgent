@@ -18,7 +18,7 @@ test('registry default file absent is optional; explicit unreadable, malformed a
   const home = mkdtempSync(join(tmpdir(), 'nova-capabilities-'))
   try {
     const defaults = loadCapabilityRegistry({home, environment: {}})
-    assert.deepEqual(defaults.modules, {search: {enabled: true, provider: 'tavily', tavily: {apiKeyEnv: 'TAVILY_API_KEY'}}, camera: {enabled: true}, coding: {enabled: true}, knowledge: {enabled: false, exposeToCodex: false}})
+    assert.deepEqual(defaults.modules, {search: {enabled: false, provider: 'tavily', tavily: {apiKeyEnv: 'TAVILY_API_KEY'}, reason: 'missing_environment:TAVILY_API_KEY'}, camera: {enabled: true}, coding: {enabled: true}, knowledge: {enabled: false, exposeToCodex: false}})
     assert.equal(defaults.frontbrainToolBudget, 24)
     assert.throws(() => loadCapabilityRegistry({home, path: join(home, 'private-secret'), environment: {}}), /file_unreadable_or_invalid_json/u)
     const path = join(home, 'config.json')

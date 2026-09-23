@@ -371,7 +371,7 @@ test('actual desktop entry awaits discovery and owns cleanup when final exact fr
   const document = {version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}, coding: {enabled: false}, camera: {enabled: false}},
     mcpServers: {external: {transport: 'streamable-http', url: local.url, exposeTo: {frontbrain: true}, tools: {lookup: enabled}}}}
   const replacements = {
-    [new URL('../src/config/config.js', import.meta.url).href]: `import {loadSettings as load} from ${JSON.stringify(configUrl)}; export {requireIntegratedRealtime} from ${JSON.stringify(configUrl)}; export function loadSettings() {return {...load({MODEL_API_KEY:'fixture', DASHSCOPE_API_KEY:'fixture'}),executors:[]}}`,
+    [new URL('../src/config/config.js', import.meta.url).href]: `import {loadSettings as load} from ${JSON.stringify(configUrl)}; export {requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedCamera} from ${JSON.stringify(configUrl)}; export function loadSettings() {return {...load({MODEL_API_KEY:'fixture', DASHSCOPE_API_KEY:'fixture'}),executors:[]}}`,
     [new URL('../src/config/capability-registry.js', import.meta.url).href]: `import {parseCapabilityRegistry} from ${JSON.stringify(registryUrl)}; export function loadCapabilityRegistry() {return parseCapabilityRegistry(${JSON.stringify(document)})}`,
     [new URL('../src/desktop/desktop-session.js', import.meta.url).href]: `export {buildDesktopRealtimeComposition} from ${JSON.stringify(desktopUrl)};
       export async function runDesktopEntryWithStopSources({construct}) {

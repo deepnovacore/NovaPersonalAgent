@@ -1,0 +1,97 @@
+import assert from 'node:assert/strict'
+import {test} from 'node:test'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
+import {
+  BlockingConfigurationError,
+  ConfigurationError,
+  describeMissingBlockingCredentials,
+  describeMissingBlockingEnvironment,
+  loadSettings,
+  missingWatchModelCredential,
+  requireBlockingCredentials,
+  withoutUncredentialedCamera,
+} from '../src/config/config.js'
+import {desktopConfigurationFailure} from '../src/desktop/desktop-control.js'
+
+test('blocking credentials name only the selected pipeline minimum', () => {
+  assert.deepEqual(describeMissingBlockingCredentials(loadSettings({})), {pipeline: 'integrated', missing: ['DASHSCOPE_API_KEY']})
+  assert.deepEqual(describeMissingBlockingCredentials(loadSettings({DASHSCOPE_API_KEY: 'k'})), {pipeline: 'integrated', missing: []})
+  // Search, camera and memory keys are never blocking.
+  assert.deepEqual(describeMissingBlockingCredentials(loadSettings({DASHSCOPE_API_KEY: 'k', TAVILY_API_KEY: ''})).missing, [])
+  const cascaded = (environment: NodeJS.ProcessEnv) => describeMissingBlockingCredentials(loadSettings({PIPELINE_MODE: 'cascaded', ...environment}))
+  assert.deepEqual(cascaded({CASCADE_LLM_PROVIDER: 'deepseek'}), {pipeline: 'cascaded', missing: ['DEEPSEEK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY']})
+  assert.deepEqual(cascaded({CASCADE_LLM_PROVIDER: 'qwen', DOUBAO_BIGMODEL_API_KEY: 'v'}).missing, ['DASHSCOPE_API_KEY'])
+  assert.deepEqual(cascaded({CASCADE_LLM_PROVIDER: 'ark', DOUBAO_BIGMODEL_API_KEY: 'v'}).missing, ['ARK_API_KEY'])
+  assert.deepEqual(cascaded({CASCADE_LLM_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'd', DOUBAO_BIGMODEL_API_KEY: 'v'}).missing, [])
+})
+
+test('the blocking check throws a named configuration error without echoing values', () => {
+  assert.doesNotThrow(() => requireBlockingCredentials(loadSettings({DASHSCOPE_API_KEY: 'k'})))
+  assert.throws(() => requireBlockingCredentials(loadSettings({PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'deepseek', DEEPSEEK_API_KEY: 'secret-value'})), error => {
+    assert.ok(error instanceof BlockingConfigurationError)
+    assert.ok(error instanceof ConfigurationError)
+    assert.equal(error.pipeline, 'cascaded')
+    assert.deepEqual(error.missing, ['DOUBAO_BIGMODEL_API_KEY'])
+    assert.doesNotMatch(error.message, /secret-value/u)
+    return true
+  })
+})
+
+test('host preflight leaves unrelated configuration errors to the runtime', () => {
+  assert.deepEqual(describeMissingBlockingEnvironment({}), {pipeline: 'integrated', missing: ['DASHSCOPE_API_KEY']})
+  assert.equal(describeMissingBlockingEnvironment({PIPELINE_MODE: 'unknown'}), null)
+})
+
+test('search falls back to the DashScope preset, else turns off, and never blocks', () => {
+  const tavily = parseCapabilityRegistry({version: 1}, {TAVILY_API_KEY: 't', DASHSCOPE_API_KEY: 'k'}).modules.search
+  assert.equal(tavily.enabled, true)
+  assert.equal(tavily.provider, 'tavily')
+  assert.equal(tavily.fallback, undefined)
+  const bailian = parseCapabilityRegistry({version: 1}, {DASHSCOPE_API_KEY: 'k'}).modules.search
+  assert.equal(bailian.enabled, true)
+  assert.equal(bailian.provider, 'mcp')
+  assert.equal(bailian.fallback, 'bailian_mcp')
+  assert.equal(bailian.reason, 'missing_environment:TAVILY_API_KEY')
+  const off = parseCapabilityRegistry({version: 1}, {}).modules.search
+  assert.equal(off.enabled, false)
+  assert.equal(off.reason, 'missing_environment:TAVILY_API_KEY')
+  // A custom MCP endpoint is the user's choice; it is not silently replaced by the preset.
+  const custom = parseCapabilityRegistry({version: 1}, {DASHSCOPE_API_KEY: 'k', SEARCH_MCP_URL: 'https://search.example/mcp'}).modules.search
+  assert.equal(custom.enabled, false)
+  // An explicitly disabled module stays off without a reason.
+  const disabled = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}}}, {}).modules.search
+  assert.equal(disabled.enabled, false)
+  assert.equal(disabled.reason, undefined)
+})
+
+test('the coding module follows its environment override', () => {
+  assert.equal(parseCapabilityRegistry({version: 1}, {}).modules.coding.enabled, true)
+  const off = parseCapabilityRegistry({version: 1}, {CODING_MODULE_ENABLED: 'false'})
+  assert.equal(off.modules.coding.enabled, false)
+  assert.ok(off.overrides.includes('CODING_MODULE_ENABLED'))
+  assert.throws(() => parseCapabilityRegistry({version: 1}, {CODING_MODULE_ENABLED: 'maybe'}), /CODING_MODULE_ENABLED/u)
+})
+
+test('camera watch without its model credential is reported off instead of failing', () => {
+  const registry = parseCapabilityRegistry({version: 1}, {})
+  const vision = {WATCH_MODEL: 'qwen3-vl-plus'}
+  // Without a vision preset the watch reuses the main model gateway and needs no extra key.
+  assert.equal(missingWatchModelCredential(loadSettings({})), null)
+  assert.equal(missingWatchModelCredential(loadSettings({...vision, DASHSCOPE_API_KEY: 'k'})), null)
+  assert.equal(missingWatchModelCredential(loadSettings(vision)), 'DASHSCOPE_API_KEY')
+  assert.deepEqual(withoutUncredentialedCamera(registry, loadSettings(vision)).modules.camera, {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY'})
+  assert.equal(withoutUncredentialedCamera(registry, loadSettings({...vision, DASHSCOPE_API_KEY: 'k'})), registry)
+  const disabled = parseCapabilityRegistry({version: 1, modules: {camera: {enabled: false}}}, {})
+  assert.equal(withoutUncredentialedCamera(disabled, loadSettings(vision)), disabled)
+})
+
+test('desktop configuration failure carries only bounded key names', () => {
+  assert.deepEqual(desktopConfigurationFailure(new BlockingConfigurationError('integrated', ['DASHSCOPE_API_KEY'])), {
+    state: 'startup_failed', toolCount: null, toolBudget: 24,
+    reason: 'configuration_required', pipeline: 'integrated', missing: ['DASHSCOPE_API_KEY'],
+  })
+  const noisy = desktopConfigurationFailure(new BlockingConfigurationError('cascaded', ['A', 'lower', 'B', 'C', 'D', 'E']))
+  assert.deepEqual(noisy?.missing, ['A', 'B', 'C', 'D'])
+  assert.equal(desktopConfigurationFailure(new ConfigurationError('缺少 X')), undefined)
+  assert.equal(desktopConfigurationFailure(new Error('other')), undefined)
+})

@@ -1,4 +1,4 @@
-import {installDesktopControl, desktopBudgetFailure, type DesktopCapabilityState} from './desktop/desktop-control.js'
+import {installDesktopControl, desktopBudgetFailure, desktopConfigurationFailure, type DesktopCapabilityState} from './desktop/desktop-control.js'
 import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop/desktop-session.js'
 import {announceReadiness} from './desktop.js'
 import {buildProductionComposition} from './composition/production-composition.js'
@@ -37,7 +37,7 @@ const exitCode = await runDesktopEntryWithStopSources({
   ),
   onDiagnostic,
   onStartupFailure: error => {
-    const status = desktopBudgetFailure(error)
+    const status = desktopBudgetFailure(error) ?? desktopConfigurationFailure(error)
     capabilityView = () => status
     control.publish()
   },

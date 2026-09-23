@@ -205,6 +205,14 @@ export class ConfigurationError extends Error {
   }
 }
 
+/** Names the credentials the selected voice pipeline cannot start without, so the host can ask for exactly those. */
+export class BlockingConfigurationError extends ConfigurationError {
+  constructor(readonly pipeline: PipelineMode, readonly missing: readonly string[]) {
+    super(`缺少 ${missing.join(', ')}`)
+    this.name = 'BlockingConfigurationError'
+  }
+}
+
 export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Settings {
   const pipelineMode = parsePipelineMode(environment.PIPELINE_MODE)
   const integratedProvider = pipelineMode === 'integrated'
@@ -386,6 +394,8 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
     url: requiredSetting(settings.memory_url, 'MEMORY_URL'),
     token: requiredCredential(settings.memory_token, 'MEMORY_TOKEN'),
   })
+  // Local memory is optional: without an embedding credential it stays off instead of blocking the voice pipeline.
+  if (stripLikePython(resolveModelApiKey(settings) ?? '') === '') return null
   return Object.freeze({
     connection: 'local',
     provider: settings.memory_provider ?? 'mem0',
@@ -473,6 +483,56 @@ export function resolveWatchModelConnection(settings: Settings): {readonly baseU
     apiKey: requiredCredential(settings.ark_api_key, 'ARK_API_KEY'),
   }
   return null
+}
+
+/** The credential a vision watch model still needs, or null when it has one (or needs none). */
+export function missingWatchModelCredential(settings: Settings): string | null {
+  const model = stripLikePython(settings.watch_model ?? '')
+  if (supportsVision('qwen', model)) {
+    return stripLikePython(settings.dashscope_api_key
+      ?? (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null) ?? '') === ''
+      ? 'DASHSCOPE_API_KEY' : null
+  }
+  if (supportsVision('ark', model)) return stripLikePython(settings.ark_api_key ?? '') === '' ? 'ARK_API_KEY' : null
+  return null
+}
+
+/** Camera watch is optional: without its model credential the module is reported off rather than failing startup. */
+export function withoutUncredentialedCamera(registry: CapabilityRegistry, settings: Settings): CapabilityRegistry {
+  const missing = registry.modules.camera.enabled ? missingWatchModelCredential(settings) : null
+  return missing === null ? registry : {
+    ...registry, modules: {...registry.modules, camera: {enabled: false, reason: `missing_environment:${missing}`}},
+  }
+}
+
+/** Mirrors requireIntegratedRealtime and requireCascadedCredentials without throwing, for first-run guidance. */
+export function describeMissingBlockingCredentials(settings: Settings): {readonly pipeline: PipelineMode; readonly missing: readonly string[]} {
+  const present = (value: string | null) => stripLikePython(value ?? '') !== ''
+  if (settings.pipeline_mode === 'integrated') {
+    const compatibleGenericKey = settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null
+    return {pipeline: 'integrated', missing: present(settings.dashscope_api_key) || present(compatibleGenericKey) ? [] : ['DASHSCOPE_API_KEY']}
+  }
+  const llmField = settings.cascade_llm_provider === 'qwen'
+    ? 'dashscope_api_key' : settings.cascade_llm_provider === 'deepseek' ? 'deepseek_api_key' : 'ark_api_key'
+  return {pipeline: 'cascaded', missing: [
+    ...(present(settings[llmField]) ? [] : [configurationFieldName(llmField)]),
+    ...(present(settings.doubao_bigmodel_api_key) ? [] : ['DOUBAO_BIGMODEL_API_KEY']),
+  ]}
+}
+
+/** Host preflight over a launch environment; other configuration errors stay the runtime's to report. */
+export function describeMissingBlockingEnvironment(environment: NodeJS.ProcessEnv): ReturnType<typeof describeMissingBlockingCredentials> | null {
+  try {
+    return describeMissingBlockingCredentials(loadSettings(environment))
+  } catch (error) {
+    if (error instanceof ConfigurationError) return null
+    throw error
+  }
+}
+
+export function requireBlockingCredentials(settings: Settings): void {
+  const {pipeline, missing} = describeMissingBlockingCredentials(settings)
+  if (missing.length > 0) throw new BlockingConfigurationError(pipeline, missing)
 }
 
 /** Keeps a selected provider credential on its fixed compatible endpoint. */
@@ -843,7 +903,7 @@ function configurationFieldName(field: string): string {
 
 /** Injected settings never trigger ambient filesystem reads. Production passes its loaded registry explicitly. */
 export function capabilitiesFromSettings(settings: Settings): CapabilityRegistry {
-  return parseCapabilityRegistry({version: 1, modules: {
+  return withoutUncredentialedCamera(parseCapabilityRegistry({version: 1, modules: {
     camera: {enabled: settings.camera_module_enabled},
     search: {provider: settings.search_provider, ...(settings.search_mcp_url === '' ? {} : {mcp: {
       url: settings.search_mcp_url, tool: settings.search_mcp_tool,
@@ -852,5 +912,5 @@ export function capabilitiesFromSettings(settings: Settings): CapabilityRegistry
     ...(settings.search_provider !== 'mcp' || settings.search_mcp_url !== '' || settings.dashscope_api_key === null ? {} : {DASHSCOPE_API_KEY: settings.dashscope_api_key}),
     ...(settings.search_provider !== 'tavily' || settings.tavily_api_key === null ? {} : {TAVILY_API_KEY: settings.tavily_api_key}),
     ...(settings.search_mcp_tool === 'web_search' ? {} : {SEARCH_MCP_TOOL: settings.search_mcp_tool}),
-  })
+  }), settings)
 }

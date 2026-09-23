@@ -45,8 +45,11 @@ export interface CapabilityModules {
     readonly provider: 'tavily' | 'mcp'
     readonly mcp?: SearchMcpConfig
     readonly tavily: {readonly apiKeyEnv: string; readonly apiKey?: string}
+    /** Set when search could not use its selected service and was switched or turned off instead of failing startup. */
+    readonly fallback?: 'bailian_mcp'
+    readonly reason?: string
   }
-  readonly camera: {readonly enabled: boolean}
+  readonly camera: {readonly enabled: boolean; readonly reason?: string}
   readonly coding: {readonly enabled: boolean}
   readonly knowledge: {readonly enabled: boolean; readonly exposeToCodex: boolean}
 }
@@ -142,11 +145,11 @@ export function parseCapabilityRegistry(input: unknown, environment: Environment
   const camera = moduleConfig(modules.camera, 'modules.camera', [])
   const coding = moduleConfig(modules.coding, 'modules.coding', [])
   const knowledge = moduleConfig(modules.knowledge, 'modules.knowledge', ['exposeToCodex'])
-  const enabled = bool(search.enabled, true, 'modules.search.enabled')
+  const requestedEnabled = bool(search.enabled, true, 'modules.search.enabled')
   const configuredProvider = omittedDefault(search.provider, 'tavily')
   if (configuredProvider !== 'tavily' && configuredProvider !== 'mcp') invalid('modules.search.provider')
-  const provider = environmentOverride(environment, 'SEARCH_PROVIDER') ?? configuredProvider
-  if (provider !== 'tavily' && provider !== 'mcp') invalid('SEARCH_PROVIDER')
+  const requestedProvider = environmentOverride(environment, 'SEARCH_PROVIDER') ?? configuredProvider
+  if (requestedProvider !== 'tavily' && requestedProvider !== 'mcp') invalid('SEARCH_PROVIDER')
   const overrides: string[] = []
   if (environment.SEARCH_PROVIDER?.trim()) overrides.push('SEARCH_PROVIDER')
   let cameraEnabled = bool(camera.enabled, true, 'modules.camera.enabled')
@@ -156,9 +159,23 @@ export function parseCapabilityRegistry(input: unknown, environment: Environment
     cameraEnabled = ['true', '1', 'yes', 'on'].includes(cameraOverride)
     overrides.push('CAMERA_MODULE_ENABLED')
   }
+  let codingEnabled = bool(coding.enabled, true, 'modules.coding.enabled')
+  const codingOverride = environment.CODING_MODULE_ENABLED?.trim().toLowerCase()
+  if (codingOverride) {
+    if (!['true', 'false', '1', '0', 'yes', 'no', 'on', 'off'].includes(codingOverride)) invalid('CODING_MODULE_ENABLED')
+    codingEnabled = ['true', '1', 'yes', 'on'].includes(codingOverride)
+    overrides.push('CODING_MODULE_ENABLED')
+  }
   const tavily = object(omittedDefault(search.tavily, {}), 'modules.search.tavily', ['apiKeyEnv'])
   const apiKeyEnv = string(omittedDefault(tavily.apiKeyEnv, 'TAVILY_API_KEY'), 'modules.search.tavily.apiKeyEnv', 128)
   if (!ENV_NAME.test(apiKeyEnv)) invalid('modules.search.tavily.apiKeyEnv')
+  // Search is optional: a missing Tavily key reuses the DashScope key through the Bailian preset, or turns search off.
+  const tavilyUnavailable = requestedEnabled && requestedProvider === 'tavily' && !environment[apiKeyEnv]?.trim()
+  const fallback = tavilyUnavailable && search.mcp === undefined && !environmentOverride(environment, 'SEARCH_MCP_URL')
+    && Boolean(environment.DASHSCOPE_API_KEY?.trim()) ? 'bailian_mcp' as const : undefined
+  const enabled = requestedEnabled && (!tavilyUnavailable || fallback !== undefined)
+  const provider = fallback === undefined ? requestedProvider : 'mcp'
+  const reason = tavilyUnavailable ? `missing_environment:${apiKeyEnv}` : undefined
   let mcp: SearchMcpConfig | undefined
   if (search.mcp !== undefined || (enabled && provider === 'mcp')) {
     const config = object(omittedDefault(search.mcp, {}), 'modules.search.mcp', ['url', 'tool', 'headers', 'timeoutMs', 'maxResultBytes'])
@@ -196,8 +213,9 @@ export function parseCapabilityRegistry(input: unknown, environment: Environment
     }
   }
   return {version: 1, modules: {
-    search: {enabled, provider, tavily: {apiKeyEnv, ...(environment[apiKeyEnv] === undefined ? {} : {apiKey: environment[apiKeyEnv]})}, ...(mcp === undefined ? {} : {mcp})},
-    camera: {enabled: cameraEnabled}, coding: {enabled: bool(coding.enabled, true, 'modules.coding.enabled')},
+    search: {enabled, provider, tavily: {apiKeyEnv, ...(environment[apiKeyEnv] === undefined ? {} : {apiKey: environment[apiKeyEnv]})}, ...(mcp === undefined ? {} : {mcp}),
+      ...(fallback === undefined ? {} : {fallback}), ...(reason === undefined ? {} : {reason})},
+    camera: {enabled: cameraEnabled}, coding: {enabled: codingEnabled},
     knowledge: {enabled: bool(knowledge.enabled, false, 'modules.knowledge.enabled'), exposeToCodex: bool(knowledge.exposeToCodex, false, 'modules.knowledge.exposeToCodex')},
   }, mcpServers, serverStatuses, overrides,
   frontbrainToolBudget: integer(document.frontbrainToolBudget, DEFAULT_FRONTBRAIN_TOOL_BUDGET, 256, 'frontbrainToolBudget')}
@@ -255,7 +273,9 @@ export function loadCapabilityRegistry(options: {readonly environment?: Environm
 }
 export function capabilityStatus(registry: CapabilityRegistry, toolCount: number | null = null) {
   return {modules: {
-    search: {enabled: registry.modules.search.enabled, provider: registry.modules.search.provider},
+    search: {enabled: registry.modules.search.enabled, provider: registry.modules.search.provider,
+      ...(registry.modules.search.fallback === undefined ? {} : {fallback: registry.modules.search.fallback}),
+      ...(registry.modules.search.reason === undefined ? {} : {reason: registry.modules.search.reason})},
     camera: registry.modules.camera, coding: registry.modules.coding, knowledge: registry.modules.knowledge,
   }, servers: registry.serverStatuses, overrides: registry.overrides, toolCount, toolBudget: registry.frontbrainToolBudget}
 }
@@ -263,12 +283,8 @@ export type CapabilityStatus = ReturnType<typeof capabilityStatus>
 export function inspectCapabilities(options: Parameters<typeof loadCapabilityRegistry>[0] = {}) {
   try {
     const registry = loadCapabilityRegistry(options)
-    const environment = options.environment ?? process.env
-    const missingTavily = registry.modules.search.enabled && registry.modules.search.provider === 'tavily'
-      && !environment[registry.modules.search.tavily.apiKeyEnv]?.trim()
-    return {ok: !missingTavily && registry.serverStatuses.every(server => server.status !== 'failed'),
-      ...capabilityStatus(registry),
-      ...(missingTavily ? {reason: `missing_environment:${registry.modules.search.tavily.apiKeyEnv}`} : {})}
+    // A switched or disabled search is a reported degradation, not a failed configuration.
+    return {ok: registry.serverStatuses.every(server => server.status !== 'failed'), ...capabilityStatus(registry)}
   } catch (error) {
     return {ok: false, reason: error instanceof CapabilityConfigurationError ? error.reason : 'invalid_configuration'}
   }
