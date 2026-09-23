@@ -9,7 +9,7 @@ test('main owns single-instance lifecycle and denies renderer escape', async () 
 
   assert.match(source, /requestSingleInstanceLock/)
   assert.match(source, /setWindowOpenHandler\(\(\) => \(\{ action: 'deny' \}\)\)/)
-  assert.match(source, /configureWindowSecurity\(window\)/)
+  assert.match(source, /configureWindowSecurity\(window,/)
   assert.match(source, /loadAppWindow\(mainWindow/)
   assert.match(source, /Number\.isInteger\(code\) \? code\.toString\(\) : 'none'/)
   assert.match(source, /apiKeyWindowOpenHandler\(url => shell\.openExternal\(url\)\)/)
@@ -75,6 +75,9 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:settings:open',
     'nova:settings:personal',
     'nova:settings:set',
+    'nova:settings:voiceprint',
+    'nova:voiceprint:gate-ready',
+    'nova:voiceprint:recording',
     'nova:wake-word:activity',
     'nova:wake-word:audio',
     'nova:wake-word:changed',
@@ -845,7 +848,7 @@ test('the mute toggle drops microphone input at both ingress points', async () =
   // The gate covers mute itself plus a drain window after unmute, so capture
   // batches that straddle the unmute click (or arrive late from a stalled
   // queue) never leak audio that was recorded while muted.
-  assert.match(renderer, /return !\['dictation', 'voice'\]\.includes\(personalView\.controller\.mode\) \|\| axes\.muted \|\| performance\.now\(\) < muteDrainUntil/)
+  assert.match(renderer, /return voiceprintRecording \|\| !\['dictation', 'voice'\]\.includes\(personalView\.controller\.mode\) \|\| axes\.muted \|\| performance\.now\(\) < muteDrainUntil/)
   assert.match(renderer, /const UNMUTE_DRAIN_MS = 120/)
   assert.match(renderer, /muteDrainUntil = performance\.now\(\) \+ UNMUTE_DRAIN_MS/)
   // Deactivation discards the session's mute, and the rail buttons are wired.

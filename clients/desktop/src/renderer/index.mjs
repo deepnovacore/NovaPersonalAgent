@@ -653,8 +653,13 @@ function applyWakeState(value) {
   render()
 }
 
+let voiceprintRecording = false
+async function applyVoiceprintRecording(active) {
+  voiceprintRecording = active
+  if (active) await deactivateCapture()
+}
 function microphoneGated() {
-  return !['dictation', 'voice'].includes(personalView.controller.mode) || axes.muted || performance.now() < muteDrainUntil
+  return voiceprintRecording || !['dictation', 'voice'].includes(personalView.controller.mode) || axes.muted || performance.now() < muteDrainUntil
 }
 
 function toggleMute() {
@@ -675,6 +680,7 @@ function toggleOutputMuted() {
 }
 
 async function activateCapture() {
+  if (voiceprintRecording) return
   if (personalView?.controller.presentationMode === 'background') return
   if (axes.activated) return deactivateCapture()
   if (axes.activationPending) return
@@ -1249,6 +1255,7 @@ async function boot() {
       axes.backendState = status.state
       render()
     })
+    window.novaAudioAgentDesktop.microphone.onVoiceprintRecording(applyVoiceprintRecording)
     window.novaAudioAgentDesktop.microphone.onToggle(toggleMute)
     window.novaAudioAgentDesktop.microphone.onRetry(() => {
       void retryMicrophonePermission()

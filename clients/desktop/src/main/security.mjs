@@ -146,12 +146,14 @@ export function allowsOrbMediaRequest({
     && [...unique].every(type => type === 'audio' || type === 'video')
 }
 
-export function configureWindowSecurity(window) {
+export function configureWindowSecurity(window, recordingRenderer = () => null) {
   const renderer = window.webContents
   renderer.setWindowOpenHandler(() => ({ action: 'deny' }))
   renderer.on('will-navigate', (event, url) => {
     if (!allowRendererNavigation(url)) event.preventDefault()
   })
+  const recordingAudio = (contents, permission, origin, type) => Boolean(contents) && contents === recordingRenderer()
+    && permission === 'media' && (origin === '' || isExactOrbOrigin(origin)) && type === 'audio'
   const electronSession = renderer.session
   electronSession.setPermissionCheckHandler((contents, permission, origin, details) => (
     allowsOrbMediaCheck({
@@ -160,7 +162,7 @@ export function configureWindowSecurity(window) {
       permission,
       origin,
       mediaType: details?.mediaType,
-    })
+    }) || recordingAudio(contents, permission, origin, details?.mediaType)
   ))
   electronSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     callback(allowsOrbMediaRequest({
@@ -169,7 +171,7 @@ export function configureWindowSecurity(window) {
       permission,
       origin: details?.securityOrigin,
       mediaTypes: details?.mediaTypes,
-    }))
+    }) || (details?.mediaTypes?.length === 1 && recordingAudio(contents, permission, details.securityOrigin, details.mediaTypes[0])))
   })
 }
 

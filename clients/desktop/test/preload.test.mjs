@@ -64,7 +64,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   const { exposed, ipcRenderer, invokes } = await loadPreload()
 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
-    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'openPairing', 'personalCommand', 'phoneAction', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set',
+    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'openPairing', 'personalCommand', 'phoneAction', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'voiceprint',
   ])
   assert.ok(Object.isFrozen(exposed.settings))
 
@@ -103,7 +103,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
 test('preload exposes a bounded microphone permission lifecycle', async () => {
   const { exposed, ipcRenderer, invokes, sends } = await loadPreload()
 
-  assert.deepEqual(Object.keys(exposed.microphone).sort(), ['onRetry', 'onToggle', 'report', 'requestPermission'])
+  assert.deepEqual(Object.keys(exposed.microphone).sort(), ['onRetry', 'onToggle', 'onVoiceprintRecording', 'report', 'requestPermission'])
   await exposed.microphone.requestPermission()
   exposed.microphone.report('device_busy')
   const retries = []

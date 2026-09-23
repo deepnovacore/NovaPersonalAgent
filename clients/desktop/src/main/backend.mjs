@@ -289,6 +289,10 @@ export function backendLaunchSpec({
       ?? SETTINGS_DEFAULTS.cascadedLlmModels[llmProvider]
       ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen
     Object.assign(env, {
+      NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_ENABLED: String(settings?.voiceprintEnabled === true && Boolean(settings?.voiceprintUploadUrl)),
+      NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_HEALTH_URL: settings?.voiceprintUploadUrl ? `${settings.voiceprintUploadUrl}/healthz` : '',
+      NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_ID: settings?.voiceprintId ?? '',
+      NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_NAME: settings?.voiceprintName ?? '',
       NOVA_AUDIO_AGENT_CASCADE_ENDPOINTING_PROVIDER: settings?.cascadedEndpointingProvider
         ?? SETTINGS_DEFAULTS.cascadedEndpointingProvider,
       NOVA_AUDIO_AGENT_CASCADE_ASR_PROVIDER: settings?.cascadedAsrProvider

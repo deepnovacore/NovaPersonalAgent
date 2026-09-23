@@ -301,6 +301,23 @@
                 <option value="volcengine">火山引擎 ASR</option>
               </select>
             </div>
+            <section aria-label="声纹验证">
+              <h4>声纹验证</h4>
+              <p class="hint">声纹功能仅支持火山引擎 ASR。</p>
+              <div class="field"><label for="voiceprint-upload-url">声纹上传服务地址</label><input id="voiceprint-upload-url" type="url" placeholder="HTTPS" autocomplete="off"></div>
+              <p id="voiceprint-health" class="hint" role="status"></p>
+              <div id="voiceprint-controls" hidden>
+                <p class="hint">请在安静环境下独自朗读 12 秒。录音将上传至配置的服务和火山引擎用于注册；注册后清理临时录音，声纹保留在您的火山应用中。</p>
+                <p class="hint">录音期间会暂停对话。声纹服务不可用时，自动停用声纹验证。</p>
+                <p id="voiceprint-reading-label">请自然朗读下面这段话：</p>
+                <blockquote id="voiceprint-reading" aria-labelledby="voiceprint-reading-label">今天的天气很晴朗，窗外的树叶随风轻轻摇动。我准备好开始新的工作，也愿意慢慢讲清楚自己的想法。</blockquote>
+                <p class="hint">保持平时说话的语速和音量，不要耳语或模仿音色。读完后如仍在录音，可从头再读一遍。</p>
+                <p id="voiceprint-identity" class="hint"></p>
+                <label><input id="voiceprint-enabled" type="checkbox">只接收已注册说话人的语音</label>
+                <div class="actions"><button id="voiceprint-register" type="button">录制 12 秒并注册</button><button id="voiceprint-cancel" type="button" hidden>取消录音</button></div>
+              </div>
+              <p id="voiceprint-status" class="hint" role="status" aria-live="polite"></p>
+            </section>
           </div>
           <div class="pipeline-card">
             <h3>2. 对话模型</h3>

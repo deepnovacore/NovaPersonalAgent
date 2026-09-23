@@ -443,6 +443,8 @@ const defaultAsrClient: CascadedAsrClientFactory = input => new DoubaoAsrClient(
   apiKey: input.config.apiKey,
   resourceId: input.config.resourceId,
   chunkMs: input.config.chunkMs,
+  ...(input.config.voiceprint ? {voiceprint: input.config.voiceprint} : {}),
+  ...(input.config.voiceprintHealthUrl ? {voiceprintHealthUrl: input.config.voiceprintHealthUrl} : {}),
   idFactory: input.idFactory,
 })
 

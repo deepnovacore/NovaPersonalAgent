@@ -25,6 +25,8 @@ export interface VolcengineAsrConfig {
   readonly endpoint: string
   readonly resourceId: string
   readonly apiKey: string
+  readonly voiceprintHealthUrl?: string
+  readonly voiceprint?: {readonly id: string; readonly name: string}
   readonly chunkMs: number
 }
 
@@ -135,9 +137,24 @@ function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConf
   if (settings.doubao_asr_chunk_ms <= 0) {
     throw new ConfigurationError('NOVA_AUDIO_AGENT_DOUBAO_ASR_CHUNK_MS 必须为正整数')
   }
+  const voiceprint = settings.doubao_asr_voiceprint_enabled
+    ? {id: settings.doubao_asr_voiceprint_id, name: settings.doubao_asr_voiceprint_name} : undefined
+  if (voiceprint && (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(voiceprint.id)
+    || !voiceprint.name.trim() || /^\d+$/.test(voiceprint.name)
+    || voiceprint.name.length > 128 || /[\u0000-\u001f\u007f]/.test(voiceprint.name))) {
+    throw new ConfigurationError('请先注册有效声纹，再开启火山 ASR 声纹验证')
+  }
+  let endpoint = secureEndpoint(settings.doubao_asr_endpoint, 'wss', 'NOVA_AUDIO_AGENT_DOUBAO_ASR_ENDPOINT')
+  if (voiceprint) {
+    const url = new URL(endpoint)
+    url.pathname = '/api/v3/sauc/bigmodel_async'
+    endpoint = url.href
+  }
   return Object.freeze({
+    ...(voiceprint ? {voiceprint} : {}),
+    ...(settings.doubao_asr_voiceprint_health_url ? {voiceprintHealthUrl:secureEndpoint(settings.doubao_asr_voiceprint_health_url, 'https', 'NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_HEALTH_URL')} : {}),
     endpoint: secureEndpoint(
-      settings.doubao_asr_endpoint,
+      endpoint,
       'wss',
       'NOVA_AUDIO_AGENT_DOUBAO_ASR_ENDPOINT',
     ),

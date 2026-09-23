@@ -62,6 +62,10 @@ export const settingsSchema = z.object({
     'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel',
   ),
   doubao_asr_resource_id: z.string().default('volc.seedasr.sauc.duration'),
+  doubao_asr_voiceprint_enabled: z.boolean().default(false),
+  doubao_asr_voiceprint_id: z.string().default(''),
+  doubao_asr_voiceprint_name: z.string().default(''),
+  doubao_asr_voiceprint_health_url: z.string().default(''),
   doubao_asr_chunk_ms: z.number().int().default(200),
   doubao_tts_endpoint: z.string().default(
     'wss://openspeech.bytedance.com/api/v3/tts/bidirection',
@@ -296,6 +300,10 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
       doubao_asr_resource_id: rawEnvironmentValue(
         environment.NOVA_AUDIO_AGENT_DOUBAO_ASR_RESOURCE_ID,
       ),
+      doubao_asr_voiceprint_enabled: optionalBoolean(environment.NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_ENABLED),
+      doubao_asr_voiceprint_id: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_ID),
+      doubao_asr_voiceprint_name: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_NAME),
+      doubao_asr_voiceprint_health_url: rawEnvironmentValue(environment.NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_HEALTH_URL),
       doubao_asr_chunk_ms: optionalPydanticInteger(
         environment.NOVA_AUDIO_AGENT_DOUBAO_ASR_CHUNK_MS,
       ),

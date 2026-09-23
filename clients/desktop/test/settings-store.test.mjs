@@ -96,6 +96,7 @@ test('the default settings are the documented schema', () => {
     integratedVoice: 'longanqian',
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
+    voiceprintEnabled: false, voiceprintId: '', voiceprintName: '', voiceprintUploadUrl: '',
     cascadedLlmProvider: 'deepseek',
     cascadedLlmModels: { qwen: 'qwen-plus', ark: 'doubao-seed-2-0-pro-260215', deepseek: 'deepseek-flash' },
     cascadedTtsProvider: 'volcengine',
@@ -243,6 +244,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     integratedVoice: '  longxiaochun  ',
     cascadedEndpointingProvider: 'manual',
     cascadedAsrProvider: 'volcengine',
+    voiceprintEnabled: false, voiceprintId: '', voiceprintName: '', voiceprintUploadUrl: '',
     cascadedLlmProvider: 'ark',
     cascadedLlmModels: {
       qwen: '  qwen-plus  ',
@@ -273,6 +275,7 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     integratedVoice: 'longxiaochun',
     cascadedEndpointingProvider: 'auto',
     cascadedAsrProvider: 'volcengine',
+    voiceprintEnabled: false, voiceprintId: '', voiceprintName: '', voiceprintUploadUrl: '',
     cascadedLlmProvider: 'ark',
     cascadedLlmModels: { qwen: 'qwen-plus', ark: 'doubao-custom', deepseek: 'deepseek-flash' },
     cascadedTtsProvider: 'volcengine',
@@ -372,6 +375,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'secrets',
     'startListeningOnLaunch',
     'version',
+    'voiceprintEnabled', 'voiceprintId', 'voiceprintName', 'voiceprintUploadUrl',
     'wakeWordEnabled',
     'watchModel',
   ])
@@ -573,6 +577,7 @@ test('publicSettings never carries the secrets object', () => {
     'progressBubbles',
     'startListeningOnLaunch',
     'version',
+    'voiceprintEnabled', 'voiceprintId', 'voiceprintName', 'voiceprintUploadUrl',
     'wakeWordEnabled',
     'watchModel',
   ])
