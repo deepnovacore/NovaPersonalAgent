@@ -214,6 +214,38 @@ test('current read failures report partial health without making source state er
  }finally{await f.close()}
 })
 
+test('successful retry clears current degraded health while retaining read failure diagnostics',async()=>{
+ const f=await fixture()
+ try{
+  const file=join(f.folder,'recover.md');await writeFile(file,'retry can recover this source')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown}[]}
+  state.sources[0]!.walk={queue:[],pending:[{path:file,size:29,mtime:1,unit:f.folder}]}
+  await writeFile(path,JSON.stringify(state));f.setFail(true)
+  const sources=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,computerRoot:f.folder,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+  try{
+   await sources.open();await sources.command('sources.sync',{id})
+   assert.equal(sources.list()[0]!.health,'degraded')
+   assert.equal(sources.list()[0]!.coverage,'partial')
+   await sources.close()
+   const retryState=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{deferred:{eligible_at:number}[]}|null}[]}
+   assert.ok(retryState.sources[0]!.walk?.deferred.length)
+   retryState.sources[0]!.walk!.deferred[0]!.eligible_at=0
+   await writeFile(path,JSON.stringify(retryState));f.setFail(false)
+   const retrying=new LocalDirectorySources({path,pollMs:0,scanOnOpen:false,computerRoot:f.folder,knowledge:f.knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+   try{
+    await retrying.open();await retrying.command('sources.sync',{id})
+    const recovered=retrying.list()[0]!
+    assert.equal(recovered.scan_pending,false)
+    assert.equal(recovered.health,'healthy')
+    assert.equal(recovered.coverage,'complete')
+    assert.equal(recovered.reasons.read_failed,1)
+   }finally{await retrying.close()}
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
 test('legacy directory state without processing consent reads locally without embedding',async()=>{
  const f=await fixture();let embeddings=0
  try{

@@ -472,7 +472,7 @@ export class LocalDirectorySources {
       }
       signal.throwIfAborted()
       if(view.state!=='paused'&&view.state!=='disconnected')view.state='connected'
-      const partial=!!(record.walk?.queue.length||record.walk?.pending.length||record.walk?.deferred.length)||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','metadata_limit','project_metadata_limit','depth_limit','read_failed'].includes(reason))
+      const partial=!!(record.walk?.queue.length||record.walk?.pending.length||record.walk?.deferred.length)||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','metadata_limit','project_metadata_limit','depth_limit'].includes(reason))
       view.health=partial||currentReadFailure?'degraded':'healthy'
       view.coverage=partial||currentReadFailure?'partial':'complete'
       view.last_sync = new Date().toISOString()
