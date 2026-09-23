@@ -226,12 +226,12 @@ assert.equal(report.native_main, true)
 assert.equal(report.source_to_card.rendered, report.dom_cards.todos + report.dom_cards.ideas)
 assert.equal(JSON.stringify(report).includes(privateExcerpt), false)
 ```
-- [ ] **Step 2: Add only the read-only diagnostics needed by the normal runtime.** Expose time-series counts behind `NOVA_WORKBENCH_ACCEPTANCE_REPORT` with an explicit output path outside profile/repo; keep it off in ordinary runs. Preflight and gate known runtime/Electron outbound paths before host open: allow Claude Opus 5.5 and any provider whose identity matches the original source's still-valid processing grant, block unrelated news/proactive/connector refresh, and fail closed on an unknown provider. Assert `userData` and blackboard paths resolve to the original daily profile before data opens. Capture the actual native window with OS window capture or a read-only debug protocol. Do not create a second workbench window or seed the profile.
+- [ ] **Step 2: Add only the read-only diagnostics needed by the normal runtime.** Expose time-series counts behind `NOVA_WORKBENCH_ACCEPTANCE_REPORT` with an explicit output path outside profile/repo; keep it off in ordinary runs. Preflight and gate known runtime/Electron outbound paths before host open: allow Claude Opus 5.5 and any provider whose identity matches the original source's still-valid processing grant, block unrelated news/proactive/connector refresh, and fail closed on an unknown provider. Assert Electron `userData` equals the detected original daily Electron directory and the runtime blackboard path separately equals the original daily blackboard file before either opens; those paths differ. A development launch must use an explicit `--user-data-dir` when its default app name differs from the daily packaged client. Capture the actual native window with OS window capture or a read-only debug protocol. Do not create a second workbench window or seed the profile.
 
 ```js
 const reportPath = process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT
 if (reportPath) {
-  assertOriginalProfilePaths(app.getPath('userData'), blackboardPath)
+  assertOriginalProfilePaths({userData: app.getPath('userData'), blackboardPath}, {originalUserData, originalBlackboardPath})
   assertAcceptanceEgressGateInstalled()
   appendAcceptanceSample(reportPath, {source: sourceCounts(), candidates: candidateCounts(), model_calls: modelCallCounts()})
 }
