@@ -1,4 +1,5 @@
 import {createBackendControl, createBackendSupervisor, classifyBackendFailure, createBackendDiagnosticCollector} from '../src/main/backend-supervisor.mjs'
+import {describeMissingBlockingEnvironment} from '@nova-audio-agent/runtime/desktop'
 import assert from 'node:assert/strict'
 import { resolve } from 'node:path'
 import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
@@ -265,7 +266,7 @@ async function runCapabilityStatus() {
         DASHSCOPE_API_KEY: 'dummy-dashscope-key', QWEN_REALTIME_URL: `wss://127.0.0.1:${port}/qwen`,
         BLACKBOARD_PATH: resolve(root, 'blackboard.sqlite'), BLACKBOARD_OWNER_ID: 'utility-smoke',
         NODE_EXTRA_CA_CERTS: certificate}
-      const context = vm.createContext({readCapabilityDocument, classifyBackendFailure, createBackendDiagnosticCollector, createBackendControl,
+      const context = vm.createContext({readCapabilityDocument, describeMissingBlockingEnvironment, classifyBackendFailure, createBackendDiagnosticCollector, createBackendControl,
         createReadinessListener: options => createReadinessListener({...options, onTimeout: () => {
           readinessTimeouts++; trace('readiness timeout requests child cleanup'); options.onTimeout?.()
         }}), shutdownBackend, shutdownBackendBestEffort, watchBackendExit, waitForBackendReadiness, validateBootstrap, backendLaunchSpec, randomBytes, resolve,
