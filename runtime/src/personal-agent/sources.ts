@@ -22,6 +22,7 @@ const policy = new SensitivePathPolicy()
 const pathSchema = z.string().min(1).max(4096).refine(value => isAbsolute(value) && !value.includes('\0'))
 const idSchema = z.string().uuid()
 const excludeSchema = z.array(z.string().min(1).max(100).regex(/^[^/\\\0]+$/u)).max(32)
+const scanStageSchema = z.enum(['recover_pending','path_validation','cleanup','computer_batch','metadata_walk','reconcile','knowledge_list','recheck','ingest','health_update','on_invalidate','on_change','observe','finalize','on_change_final'])
 const snapshotSchema = z.object({
   scope: z.enum(['directory','computer']).default('directory'), scan_pending:z.boolean().default(false), indexed:z.number().int().nonnegative().default(0),
   coverage:z.enum(['complete','partial']).optional(), health:z.enum(['healthy','degraded','error']).optional(),
@@ -29,14 +30,14 @@ const snapshotSchema = z.object({
   id: idSchema, path: pathSchema, state: z.enum(['connected', 'paused', 'disconnected', 'error']),
   scanned: z.number().int().nonnegative(), read: z.number().int().nonnegative(), skipped: z.number().int().nonnegative(),
   reasons: z.record(z.string(), z.number().int().nonnegative()),
-  failures: z.array(z.object({path: z.string().max(4096), code: z.string().max(80)}).strict()).max(50),
+  failures: z.array(z.object({path: z.string().max(4096), code: z.string().max(80), stage:scanStageSchema.optional()}).strict()).max(50),
   last_sync: z.string().datetime().nullable(), excludes: excludeSchema,
   processing_consent_required:z.boolean().optional(),
   max_files: z.number().int().min(1).max(200), max_bytes: z.number().int().min(1).max(20 * 1024 * 1024),
 }).strict()
 export type SourceSnapshot = z.infer<typeof snapshotSchema>
 const trackedSchema = z.object({unit: pathSchema.optional(), path: pathSchema, id: z.string().min(1).max(80), fingerprint: z.string().max(256),
-  evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), checked_at: z.number().optional(), recheck_attempts: z.number().int().nonnegative().optional(), recheck_eligible_at: z.number().optional(), recheck_terminal: z.boolean().optional(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
+  evidence_ids: z.array(z.string().min(1).max(600)).min(1).max(2).optional(), size: z.number().nonnegative(), mtime: z.number(), checked_at: z.number().optional(), recheck_attempts: z.number().int().nonnegative().optional(), recheck_eligible_at: z.number().optional(), recheck_terminal: z.boolean().optional(), observe_attempts:z.number().int().nonnegative().optional(),observe_retry_at:z.number().optional(),observe_error:z.string().max(80).optional(), owned: z.boolean(), valid: z.boolean().default(true), excerpt: z.string().max(900).nullable().default(null), observed: z.boolean().default(false), observation_ref: z.string().max(80).nullable().default(null)}).strict()
 const walkFileSchema=z.object({path:pathSchema,size:z.number().nonnegative(),mtime:z.number(),unit:pathSchema,attempts:z.number().int().nonnegative().optional(),eligible_at:z.number().optional(),reason:z.enum(['body_budget','retry']).optional()}).strict()
 const deferredFileSchema=walkFileSchema.extend({eligible_at:z.number().default(0),attempts:z.number().int().nonnegative().default(0),reason:z.enum(['body_budget','retry']).default('retry')}).strict()
 const directoryLedgerSchema=z.object({path:pathSchema,unit:pathSchema.optional(),generation:z.number().int().nonnegative(),status:z.enum(['queued','done','partial']),identity:z.object({dev:z.string(),ino:z.string(),mtimeNs:z.string()}).strict().optional(),eligible_at:z.number().optional(),attempts:z.number().int().nonnegative().default(0)}).strict()
@@ -104,6 +105,8 @@ export interface LocalDirectorySourceOptions {
   /** Testable metadata stat budget; production defaults to 20,000 per batch. */
   readonly metadataStatBudget?: number
   readonly contentRecheckMs?: number
+  /** Testable lower bound; production observation retries start at 30 seconds. */
+  readonly observationRetryMs?:number
   readonly onMetadataStat?: () => void
   readonly path: string
   readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'>
@@ -488,17 +491,21 @@ export class LocalDirectorySources {
     const projectEntries = new Map<string, number>()
     const projects = new Set<string>()
     let complete = true, visited = 0
-    let currentReadFailure=false
+    let currentReadFailure=false, currentObserveFailure=false
+    let stage:z.infer<typeof scanStageSchema>='recover_pending'
     try {
       // Finish an interrupted replacement before metadata discovery can
       // overwrite the checkpoint with the already-committed index timestamp.
-      await this.#recoverPending(record)
+      stage='recover_pending';await this.#recoverPending(record)
+      stage='path_validation'
       if (view.scope!=='computer'&&await realpath(view.path) !== view.path) throw new Error('path_denied')
       if(view.scope==='computer'){
+        stage='cleanup'
         await this.#cleanupExcludedFiles(record,signal)
         if(record.walk){record.walk.pending=record.walk.pending.filter(file=>!isComputerExcludedPath(view,file.path));record.walk.deferred=record.walk.deferred.filter(file=>!isComputerExcludedPath(view,file.path))}
       }
-      if(view.scope==='computer'){files.push(...await this.#computerBatch(record,signal,force));directories.length=0;complete=false}
+      if(view.scope==='computer'){stage='computer_batch';files.push(...await this.#computerBatch(record,signal,force));directories.length=0;complete=false}
+      stage='metadata_walk'
       while (directories.length > 0 && visited < 20000) {
         signal.throwIfAborted()
         const directory = directories.shift()!
@@ -533,11 +540,13 @@ export class LocalDirectorySources {
       }
       if (directories.length || visited >= 20000) {complete = false; skip('metadata_limit')}
       // Reconcile only after a complete metadata pass; unreadable/offline is never deletion.
+      stage='reconcile'
       if (complete) for (const previous of [...record.files]) {
         if (seen.has(previous.path)) continue
         signal.throwIfAborted()
         await this.#removeFile(record, previous)
       }
+      stage='knowledge_list'
       const known = new Map((await this.#options.knowledge.listSources()).map(item => [item.locator, item]))
       let bytes = 0
       const counts = new Map<string, number>()
@@ -557,6 +566,7 @@ export class LocalDirectorySources {
         }
       }
       for (const file of balanced(selected, view.path)) {
+        stage='recheck'
         signal.throwIfAborted()
         const previous = record.files.find(old => old.path === file.path)
         if (previous) previous.unit = file.unit
@@ -620,6 +630,7 @@ export class LocalDirectorySources {
         if (view.read >= view.max_files || bytes + file.size > view.max_bytes) {await discardStaleIndex();skip('body_budget');deferPending(record,file,'body_budget',Date.now()+60_000);continue}
         if (record.files.length >= 20000 && !previous) {skip('index_limit');settlePending(record,file.path);continue}
         try {
+          stage='ingest'
           if (await realpath(file.path) !== file.path) {await discardStaleIndex();skip('changed_path');settlePending(record,file.path);continue}
           record.pending = {path: file.path, size: file.size, mtime: file.mtime, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
           await this.#save()
@@ -650,31 +661,49 @@ export class LocalDirectorySources {
         }
       }
       signal.throwIfAborted()
+      stage='health_update'
       if(view.state!=='paused'&&view.state!=='disconnected')view.state='connected'
       const partial=[record.walk?.queue.length,record.walk?.pending.length,record.walk?.deferred.length].some(count=>!!count)||!!record.walk?.ledger.some(item=>item.status==='partial')||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','metadata_limit','project_metadata_limit','depth_limit','directory_capacity'].includes(reason))
       view.health=partial||currentReadFailure?'degraded':'healthy'
       view.coverage=partial||currentReadFailure?'partial':'complete'
       view.last_sync = new Date().toISOString()
       // Scan statistics belong in source settings, not in the user's memory.
+      stage='on_invalidate'
       if (record.observation) {await this.#options.onInvalidate?.(view.id); record.observation = ''; await this.#save()}
+      stage='on_change'
       await this.#options.onChange?.(false)
+      stage='observe'
       for (const file of balanced(record.files.filter(file => file.valid && !file.observed && representativeDocument(file.path) && (view.scope==='computer'||selectedPaths.has(file.path))), view.path).slice(0, 8)) {
         signal.throwIfAborted()
         if (file.observed || !file.excerpt || !this.#options.onObserve) continue
+        if ((file.observe_retry_at??0)>Date.now()) {currentObserveFailure=true;continue}
         if (!file.observation_ref) {file.observation_ref = randomUUID(); await this.#save()}
         const document = relative(view.path, file.path), project = dirname(document) === '.' ? basename(view.path) : dirname(document)
         const context = `文档 ${basename(view.path)}/${document}`.slice(0, 100) + '（资料摘录；作者与当前承诺未确认）：'
-        await this.#options.onObserve({source_ref: {type: 'file', ref: file.observation_ref, observed_at: view.last_sync},
-          ...(record.processing_consent?{processing_consent:record.processing_consent}:{}),content: context + file.excerpt.slice(0, 500 - context.length), topic: project.slice(0, 80), ...(file.evidence_ids ? {evidence_ids: file.evidence_ids} : {})})
+        try {await this.#options.onObserve({source_ref: {type: 'file', ref: file.observation_ref, observed_at: view.last_sync},
+          ...(record.processing_consent?{processing_consent:record.processing_consent}:{}),content: context + file.excerpt.slice(0, 500 - context.length), topic: project.slice(0, 80), ...(file.evidence_ids ? {evidence_ids: file.evidence_ids} : {})})}
+        catch(error){
+          const attempts=(file.observe_attempts??0)+1,base=Math.max(1,this.#options.observationRetryMs??30_000)
+          file.observe_attempts=attempts;file.observe_retry_at=Date.now()+Math.min(6*60*60_000,base*2**Math.min(attempts-1,10));file.observe_error=errorCode(error)
+          currentObserveFailure=true
+          if(view.failures.length<50)view.failures.push({path:relative(view.path,file.path),code:file.observe_error,stage:'observe'})
+          await this.#save()
+          continue
+        }
         file.observed = true
+        delete file.observe_attempts;delete file.observe_retry_at;delete file.observe_error
         await this.#save()
       }
+      if(currentObserveFailure){view.health='degraded';view.coverage='partial'}
     } catch (error) {
-      if (!signal.aborted) {view.state = 'error';view.health='error';view.coverage='partial';view.failures.splice(0,Math.max(0,view.failures.length-49));view.failures.push({path: '', code: errorCode(error)})}
+      if (!signal.aborted) {view.state = 'error';view.health='error';view.coverage='partial';view.failures.splice(0,Math.max(0,view.failures.length-49));view.failures.push({path: '', code: errorCode(error),stage})}
     }
     view.indexed=record.files.filter(f=>f.valid).length
-    if(record.walk){view.scan_pending=!!(record.walk.queue.length||record.walk.pending.length||record.walk.deferred.length||record.walk.ledger.some(item=>item.status==='partial')||record.files.some(f=>f.valid&&!f.observed&&f.excerpt&&representativeDocument(f.path)&&this.#options.onObserve));if(!view.scan_pending&&view.scope!=='computer')record.walk=null}
-    await this.#save()
+    const observationPending=!!this.#options.onObserve&&record.files.some(f=>f.valid&&!f.observed&&f.excerpt&&representativeDocument(f.path))
+    if(record.walk){view.scan_pending=!!(record.walk.queue.length||record.walk.pending.length||record.walk.deferred.length||record.walk.ledger.some(item=>item.status==='partial')||observationPending);if(!view.scan_pending&&view.scope!=='computer')record.walk=null}
+    else view.scan_pending=observationPending
+    stage='finalize';await this.#save()
+    stage='on_change_final'
     await this.#options.onChange?.(beforeEvidence !== record.files.filter(file => file.valid).map(refFor).sort().join() || beforeObservation !== record.observation)
   }
   async #recoverPending(record: SourceRecord): Promise<void> {

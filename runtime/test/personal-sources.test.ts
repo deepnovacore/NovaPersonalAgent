@@ -27,9 +27,12 @@ async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string
   let memoryAvailable = true
   const invalidated: string[] = []
   const observations: {content: string; source_ref: {ref: string}}[] = []
+  let observeHook:(value:{content:string;source_ref:{type:'file';ref:string;observed_at:string};topic?:string})=>void|Promise<void>=()=>undefined
   const options = {computerRoot:folder,...(priorityWorkspace?{priorityWorkspace}:{}),...(directorySafetyCap?{directorySafetyCap}:{}),...(contentRecheckMs!==undefined?{contentRecheckMs}:{}),processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
     onProcessingConsent:()=>failConsent?Promise.reject(Error('grant_write_failed')):Promise.resolve(),
+    observationRetryMs:100,
     onObserve: async (value: {content: string; source_ref: {type:'file'; ref: string; observed_at:string}; topic?:string}) => {
+      await observeHook(value)
       if (!memoryAvailable) throw new Error('memory_unavailable')
       if (memory) await memory.observeSource(value)
       observations.push(value)
@@ -39,6 +42,7 @@ async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string
   await sources.open()
   return {root, folder, knowledge, invalidated, observations, memory, setFailConsent(value:boolean){failConsent=value},setMemoryAvailable(value:boolean) {memoryAvailable=value}, setEmbeddingHook(hook: () => Promise<void>) {embeddingHook = hook}, setFail(value: boolean) {failEmbedding = value}, setFailInvalidation(value: boolean) {failInvalidation = value}, get sources() {return sources},
     reopen: async () => {await sources.close(); sources = new LocalDirectorySources(options); await sources.open()},
+    setObserveHook(hook:typeof observeHook){observeHook=hook},
     close: async () => {await sources.close(); await knowledge.close(); await native?.close(); await rm(root, {recursive: true, force: true})}}
 }
 
@@ -246,6 +250,32 @@ test('current read failures report partial health without making source state er
   assert.equal(source.health,'degraded')
   assert.equal(source.coverage,'partial')
   assert.equal(source.failures.length,1)
+ }finally{await f.close()}
+})
+
+test('observation callback failures preserve indexed excerpts, continue, and retry after cooldown',async()=>{
+ const f=await fixture();let calls=0
+ f.setObserveHook(()=>{calls++;if(calls===1)throw Error('private callback details / secret')})
+ try{
+  await writeFile(join(f.folder,'a.md'),'first useful source excerpt')
+  await writeFile(join(f.folder,'b.md'),'second useful source excerpt')
+  const {id}=await f.sources.command('sources.add',{path:f.folder,consent:true}) as {id:string}
+  const first=f.sources.list()[0]!
+  assert.equal(first.state,'connected');assert.equal(first.indexed,2)
+  assert.equal(first.health,'degraded');assert.equal(first.coverage,'partial')
+  assert.equal(first.scan_pending,true)
+  assert.equal(first.failures.at(-1)?.stage,'observe')
+  assert.equal(first.failures.at(-1)?.code,'source_unavailable')
+  assert.ok(!JSON.stringify(first).includes('private callback details'))
+  assert.equal(f.observations.length,1)
+  await f.sources.command('sources.sync',{id})
+  assert.equal(calls,2,'a sync during cooldown does not retry the failed observation')
+  await new Promise(resolve=>setTimeout(resolve,110))
+  await f.sources.command('sources.sync',{id})
+  assert.equal(calls,3,'the failed observation is retried after cooldown')
+  assert.equal(f.sources.list()[0]!.indexed,2)
+  assert.equal(f.sources.list()[0]!.scan_pending,false)
+  assert.equal(f.observations.length,2)
  }finally{await f.close()}
 })
 
@@ -779,7 +809,9 @@ test('nested documents retain project context and unavailable observations retry
     f.setMemoryAvailable(false)
     await f.sources.command('sources.add',{path:f.folder,consent:true})
     assert.equal(f.memory!.list().entries.length,0)
-    assert.equal(f.sources.list()[0]!.state,'error')
+    assert.equal(f.sources.list()[0]!.state,'connected')
+    assert.equal(f.sources.list()[0]!.health,'degraded')
+    assert.equal(f.sources.list()[0]!.failures[0]!.stage,'observe')
     f.setMemoryAvailable(true)
     await f.reopen()
     const entries=f.memory!.list().entries
