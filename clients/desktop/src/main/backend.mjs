@@ -220,7 +220,7 @@ export function backendLaunchSpec({
     PROACTIVITY_PRESET: proactivity,
     CODING_PROGRESS_NARRATION: settings?.codingProgressNarration ?? 'smart',
     CODEX_WORKING_INTERVAL: String(codexHeartbeatSeconds),
-    LANGUAGE: settings?.language ?? 'zh-CN',
+    PROMPT_LANGUAGE: settings?.language ?? 'zh-CN',
     PIPELINE_MODE: pipelineMode,
     CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,

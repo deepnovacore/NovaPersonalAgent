@@ -3,6 +3,7 @@ import {test} from 'node:test'
 import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 import {
   BlockingConfigurationError,
+  capabilitiesFromSettings,
   ConfigurationError,
   describeMissingBlockingCredentials,
   describeMissingBlockingEnvironment,
@@ -13,6 +14,19 @@ import {
   withoutUncredentialedModules,
 } from '../src/config/config.js'
 import {desktopConfigurationFailure} from '../src/desktop/desktop-control.js'
+
+test('system LANGUAGE does not override or invalidate the prompt language', () => {
+  assert.equal(loadSettings({LANGUAGE: 'en_US:en'}).language, 'zh-CN')
+  assert.equal(loadSettings({LANGUAGE: 'en_US:en', PROMPT_LANGUAGE: 'en'}).language, 'en')
+  assert.throws(() => loadSettings({PROMPT_LANGUAGE: 'invalid'}), /PROMPT_LANGUAGE/u)
+})
+
+test('settings-based assemblies retain the DashScope search fallback', () => {
+  const search = capabilitiesFromSettings(loadSettings({DASHSCOPE_API_KEY: 'test-key'})).modules.search
+  assert.equal(search.enabled, true)
+  assert.equal(search.provider, 'mcp')
+  assert.equal(search.fallback, 'bailian_mcp')
+})
 
 test('blocking credentials name only the selected pipeline minimum', () => {
   assert.deepEqual(describeMissingBlockingCredentials(loadSettings({})), {pipeline: 'integrated', missing: ['DASHSCOPE_API_KEY']})

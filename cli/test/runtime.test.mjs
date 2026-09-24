@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {EventEmitter} from 'node:events'
-import {mkdir, mkdtemp, readFile, writeFile} from 'node:fs/promises'
+import {mkdir, mkdtemp, readFile, writeFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {dirname, join} from 'node:path'
 import {test} from 'node:test'
@@ -251,4 +251,16 @@ test('doctor defaults a fresh install to the integrated DashScope key', async ()
   const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
   const report = await inspectDoctor({...TARGET_OPTIONS, home, environment: {APPDATA: join(home, 'appdata')}})
   assert.deepEqual(report.voice, {pipeline: 'integrated', keys: [{name: 'DASHSCOPE_API_KEY', source: null}]})
+})
+
+test('doctor never probes a custom gateway key against DashScope', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  t.after(() => rm(home, {recursive: true, force: true}))
+  const calls = []
+  const report = await inspectDoctor({...TARGET_OPTIONS, home, online: true,
+    environment: {APPDATA: join(home, 'appdata'), MODEL_BASE_URL: 'https://models.example/v1', MODEL_API_KEY: 'custom-key'},
+    fetchImpl: async url => { calls.push(url); return new Response('{}', {status: 200}) },
+  })
+  assert.deepEqual(report.voice.keys, [{name: 'DASHSCOPE_API_KEY', source: null}])
+  assert.deepEqual(calls, [])
 })

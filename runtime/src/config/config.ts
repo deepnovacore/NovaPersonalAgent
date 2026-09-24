@@ -248,7 +248,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     monitor_camera_device_id: optionalString(environment.MONITOR_CAMERA_DEVICE_ID),
     surrogate_model: rawEnvironmentValue(environment.SURROGATE_MODEL),
     compressor_model: rawEnvironmentValue(environment.COMPRESSOR_MODEL),
-    language: parsePromptLanguageSetting(environment.LANGUAGE),
+    language: parsePromptLanguageSetting(environment.PROMPT_LANGUAGE),
     pipeline_mode: pipelineMode,
     camera_module_enabled: optionalBoolean(
       environment.CAMERA_MODULE_ENABLED,
@@ -703,7 +703,7 @@ function parsePipelineMode(value: string | undefined): PipelineMode {
 }
 
 function parsePromptLanguageSetting(value: string | undefined): z.infer<typeof promptLanguageSchema> {
-  return parseSelector(promptLanguageSchema, value, 'zh-CN', 'LANGUAGE')
+  return parseSelector(promptLanguageSchema, value, 'zh-CN', 'PROMPT_LANGUAGE')
 }
 
 function parseIntegratedProvider(value: string | undefined): IntegratedProviderName {
@@ -919,7 +919,7 @@ export function capabilitiesFromSettings(settings: Settings): CapabilityRegistry
       url: settings.search_mcp_url, tool: settings.search_mcp_tool,
     }})},
   }}, {
-    ...(settings.search_provider !== 'mcp' || settings.search_mcp_url !== '' || settings.dashscope_api_key === null ? {} : {DASHSCOPE_API_KEY: settings.dashscope_api_key}),
+    ...(settings.dashscope_api_key === null ? {} : {DASHSCOPE_API_KEY: settings.dashscope_api_key}),
     ...(settings.search_provider !== 'tavily' || settings.tavily_api_key === null ? {} : {TAVILY_API_KEY: settings.tavily_api_key}),
     ...(settings.search_mcp_tool === 'web_search' ? {} : {SEARCH_MCP_TOOL: settings.search_mcp_tool}),
   }), settings)

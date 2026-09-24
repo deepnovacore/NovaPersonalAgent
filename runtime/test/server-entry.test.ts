@@ -39,6 +39,9 @@ test('token file is private, valid, never overwritten, and invalid config alloca
     assert.equal(readFileSync(tokenFile, 'utf8'), original)
     const env = {SERVER_TOKEN_FILE: tokenFile, SERVER_PORT: '19876'}
     assert.deepEqual(loadServerConfig(env), {port: 19876, token: original.trim(), mediaMode: 'relay'})
+    assert.deepEqual(loadServerConfig({...env, LANGUAGE: 'en_US:en'}), loadServerConfig(env))
+    assert.equal(loadServerConfig({...env, LANGUAGE: 'en_US:en', PROMPT_LANGUAGE: 'en'}).language, 'en')
+    assert.throws(() => loadServerConfig({...env, PROMPT_LANGUAGE: 'invalid'}), /PROMPT_LANGUAGE/u)
     assert.equal(loadServerConfig({...env, SERVER_MEDIA_MODE: 'aoq_chat'}).mediaMode, 'aoq_chat')
     assert.equal(loadServerConfig({...env, SERVER_MEDIA_MODE: 'aoq_runtime'}).mediaMode, 'aoq_runtime')
     assert.throws(() => loadServerConfig({...env, SERVER_MEDIA_MODE: 'unknown'}))

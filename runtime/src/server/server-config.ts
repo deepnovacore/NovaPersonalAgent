@@ -33,10 +33,10 @@ export function loadServerConfig(environment: NodeJS.ProcessEnv = process.env): 
   requirePosixServerStorage()
   const mediaMode = environment.SERVER_MEDIA_MODE ?? 'relay'
   if (mediaMode !== 'relay' && mediaMode !== 'aoq_chat' && mediaMode !== 'aoq_runtime') throw new ServerConfigurationError('invalid server media mode')
-  const rawLanguage = (environment.LANGUAGE ?? '').trim()
+  const rawLanguage = (environment.PROMPT_LANGUAGE ?? '').trim()
   let language: PromptLanguage | undefined
   try { language = parsePromptLanguage(rawLanguage === '' ? undefined : rawLanguage) }
-  catch { throw new ServerConfigurationError('invalid configuration: LANGUAGE') }
+  catch { throw new ServerConfigurationError('invalid configuration: PROMPT_LANGUAGE') }
   const rawPort = environment.SERVER_PORT ?? ''
   if (!/^[0-9]+$/u.test(rawPort) || Number(rawPort) < 1 || Number(rawPort) > 65535) {
     throw new ServerConfigurationError('server port must be an integer from 1 to 65535')

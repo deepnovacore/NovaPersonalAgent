@@ -116,7 +116,7 @@ function update(next) {
   if (starting && restartSeen && view.backendStatus === 'connected') {
     setStatus(t("已就绪，可以开始对话了"), 'ok')
     closeTimer ??= setTimeout(() => window.close(), 1200)
-  } else if (starting && restartSeen && view.missing.length > 0) {
+  } else if (starting && restartSeen && view.backendStatus === 'configuration_required' && view.missing.length > 0) {
     stopStarting()
     setStatus(t("仍缺少 {0}", view.missing.join(', ')), 'warn')
   } else if (starting && restartSeen && ['configuration_required', 'authentication_failed', 'unavailable'].includes(view.backendStatus)) {

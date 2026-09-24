@@ -770,7 +770,7 @@ test('DeepSeek cascade uses its official credential and Flash model', () => {
 test('short environment names reach runtime settings and selected credentials', () => {
   const settings = loadSettings({PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'deepseek',
     CASCADE_LLM_MODEL: 'custom-model', DEEPSEEK_API_KEY: 'test-key', DOUBAO_BIGMODEL_API_KEY: 'voice-key',
-    LANGUAGE: 'en', MEMORY_CONNECTION: 'disabled', EXECUTORS: 'codex', CODEX_WORKSPACE: '/tmp/project'})
+    PROMPT_LANGUAGE: 'en', MEMORY_CONNECTION: 'disabled', EXECUTORS: 'codex', CODEX_WORKSPACE: '/tmp/project'})
   assert.equal(settings.pipeline_mode, 'cascaded')
   assert.equal(settings.language, 'en')
   assert.equal(settings.codex_workspace, '/tmp/project')

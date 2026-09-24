@@ -112,3 +112,19 @@ test('setup closes only after the restart it caused has connected', async t => {
   t.mock.timers.tick(1200)
   assert.equal(page.closed(), 1)
 })
+
+test('first-run setup ignores missing keys left over from the previous launch', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']})
+  const view = (backendStatus, missing = []) => ({backendStatus, missing, secretsPresent: {}, pipelineMode: 'integrated'})
+  let push
+  const page = await loadSetupPage(t, {
+    status: async () => view('configuration_required', ['DASHSCOPE_API_KEY']),
+    onChanged: listener => { push = listener },
+    save: async () => ({saved: true, rejectedSecrets: []}),
+  })
+  page.start()
+  push(view('starting', ['DASHSCOPE_API_KEY']))
+  push(view('connected'))
+  t.mock.timers.tick(1200)
+  assert.equal(page.closed(), 1)
+})

@@ -49,7 +49,7 @@ On disconnect clear local audio and actionable approval UI. New ready means use 
 
 New clients include `media: {transports: ["host_pcm_v1"]}` in `hello`.
 
-`hello` may also include `language: "zh-CN" | "en"`. The host validates this enum after authentication and before accepting input. It selects translated AI system instructions for this connection, including task narration; it does not translate user messages, force a response language, or change ASR/TTS models or voices. Omitting it restores the host's configured default (`LANGUAGE`, otherwise `zh-CN`), rather than inheriting the previous client's choice. Unsupported values reject the connection. Relay and both AOQ modes support the field; older hosts may ignore it. Clients reconnect to apply a changed language.
+`hello` may also include `language: "zh-CN" | "en"`. The host validates this enum after authentication and before accepting input. It selects translated AI system instructions for this connection, including task narration; it does not translate user messages, force a response language, or change ASR/TTS models or voices. Omitting it restores the host's configured default (`PROMPT_LANGUAGE`, otherwise `zh-CN`), rather than inheriting the previous client's choice. Unsupported values reject the connection. Relay and both AOQ modes support the field; older hosts may ignore it. Clients reconnect to apply a changed language.
 
 The authenticated host selects its configured pipeline and returns in `client.ready`:
 

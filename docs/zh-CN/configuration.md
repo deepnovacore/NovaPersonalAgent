@@ -24,7 +24,7 @@ DASHSCOPE_API_KEY=你的百炼密钥
 | 变量 | 默认 | 用途 |
 |---|---|---|
 | `PIPELINE_MODE` | integrated | 产品管线形态：集成或级联。 |
-| `LANGUAGE` | zh-CN | AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。 |
+| `PROMPT_LANGUAGE` | zh-CN | AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。 |
 | `CASCADE_LLM_PROVIDER` | qwen | 级联 LLM 提供方。 |
 | `CASCADE_LLM_MODEL` | provider default | 级联 LLM 模型覆盖。 |
 | `CODEX_APPROVAL_MODE` | ask | Codex 审批模式。 |

@@ -450,7 +450,8 @@ async function inspectVoiceKeys(document, environment, {online, fetchImpl}) {
     let name = VOICE_KEYS[key]
     let source = sourceOf(key, name)
     // Integrated voice also accepts the generic model key while the model gateway stays on DashScope.
-    const modelBaseUrl = typeof document?.modelBaseUrl === 'string' ? document.modelBaseUrl.trim() : ''
+    const savedBaseUrl = typeof document?.modelBaseUrl === 'string' ? document.modelBaseUrl.trim() : ''
+    const modelBaseUrl = savedBaseUrl || environment.MODEL_BASE_URL?.trim() || DASHSCOPE_COMPATIBLE_BASE_URL
     if (source === null && key === 'dashscopeApiKey' && pipeline === 'integrated'
       && (modelBaseUrl === '' || modelBaseUrl === DASHSCOPE_COMPATIBLE_BASE_URL) && sourceOf('modelApiKey', 'MODEL_API_KEY') !== null) {
       name = 'MODEL_API_KEY'

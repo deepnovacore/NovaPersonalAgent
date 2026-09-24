@@ -35,7 +35,7 @@ const rows: readonly Row[] = [
   ['SURROGATE_MODEL', 'core', false, true, 'never', 'qwen-plus', 'Surrogate model.', 'Surrogate 模型。'],
   ['COMPRESSOR_MODEL', 'core', false, true, 'never', 'qwen-flash', 'Memory compressor model.', '记忆压缩模型。'],
   ['PIPELINE_MODE', 'core', false, true, 'never', 'integrated', 'Product pipeline shape: integrated or cascaded.', '产品管线形态：集成或级联。'],
-  ['LANGUAGE', 'core', false, true, 'never', 'zh-CN', 'AI system prompt language: zh-CN or en; desktop supplies its saved preference.', 'AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。'],
+  ['PROMPT_LANGUAGE', 'core', false, true, 'never', 'zh-CN', 'AI system prompt language: zh-CN or en; desktop supplies its saved preference.', 'AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。'],
   ['CONVERSATION_VISION_ENABLED', 'camera', false, true, 'never', 'false', 'Attach a default-camera frame to user turns on verified cascaded VLMs.', '为已确认支持图片的级联模型附加默认摄像头画面。'],
   ['MONITOR_CAMERA_DEVICE_ID', 'camera', false, true, 'never', null, 'Exact monitor camera device ID; empty uses the default device.', '监控摄像头设备 ID；空值使用默认设备。'],
   ['CAMERA_MODULE_ENABLED', 'camera', false, true, 'never', 'true', 'Enable independent Vision monitoring.', '启用独立视觉监控。'],

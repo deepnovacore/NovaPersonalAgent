@@ -24,7 +24,7 @@ Set only what you need to change. Keep credentials out of Git.
 | Variable | Default | Purpose |
 |---|---|---|
 | `PIPELINE_MODE` | integrated | Product pipeline shape: integrated or cascaded. |
-| `LANGUAGE` | zh-CN | AI system prompt language: zh-CN or en; desktop supplies its saved preference. |
+| `PROMPT_LANGUAGE` | zh-CN | AI system prompt language: zh-CN or en; desktop supplies its saved preference. |
 | `CASCADE_LLM_PROVIDER` | qwen | Cascaded LLM provider. |
 | `CASCADE_LLM_MODEL` | provider default | Cascaded LLM model override. |
 | `CODEX_APPROVAL_MODE` | ask | Codex approval mode. |
