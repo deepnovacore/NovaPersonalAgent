@@ -99,6 +99,7 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant
   readonly setProcessingConsent?: (sourceId:string,grant:ProcessingGrant)=>Promise<void>
   readonly recordEvidence?: (input:{sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}) => Promise<{evidence_id:string}>
+  readonly recordEvidenceBatch?: (inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}[]) => Promise<{evidence_id:string}[]>
   readonly evidenceFor?: (id:string,revision:MemoryVersion) => Promise<readonly {id:string;source_kind:string;locator:string;text:string;observed_at:string}[]>
   readonly reextract?: (id:string) => Promise<void>
   readonly observeSource?: (input:MemoryObservation) => Promise<MemoryEntry|null>

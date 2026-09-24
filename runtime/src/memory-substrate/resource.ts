@@ -23,6 +23,7 @@ const extractionSchema=z.object({entries:z.array(z.object({
 }).strict()).max(8)}).strict()
 const purgeResultSchema=z.object({status:z.enum(['complete','incomplete']),operation_id:z.string().min(1),removed_entries:z.number().int().nonnegative(),removed_evidence:z.number().int().nonnegative(),removed_entry_ids:z.array(z.string().min(1)).max(4096).default([]),removed_evidence_ids:z.array(z.string().min(1)).max(4096).default([]),index_evidence_ids:z.array(z.string().min(1)).max(4096).default([]),backup_cleanup:z.object({status:z.enum(['complete','incomplete']),unresolved:z.array(z.string())}).strict()}).strict()
 const pendingPurgeSchema=purgeResultSchema.extend({entry_id:z.string().min(1),expected_revision:z.number().int().positive()})
+const evidenceInputSchema=z.object({sourceId:z.string().min(1).max(256),locator:z.string().min(1).max(4096),text:z.string().min(1).max(100000),observedAt:z.iso.datetime({offset:true}),kind:z.enum(['file','im']),embeddingConsent:z.boolean(),processingConsent:processingGrantSchema.optional()}).strict()
 const displayText=(value:unknown)=>typeof value==='string'?value:''
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex')
 
@@ -237,8 +238,19 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     }
     return results
   }
+  /** All chunks of one document in a single ledger transaction; the source grant is stated once. */
+  async recordEvidenceBatch(inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}[]):Promise<{evidence_id:string}[]>{
+    this.#ready()
+    const items=inputs.map(input=>evidenceInputSchema.parse(input))
+    if(!items.length)return []
+    const records=items.map(q=>this.#evidenceRecord({type:q.kind,ref:q.locator,observed_at:q.observedAt},q.text,q.kind,q.sourceId,undefined,false,undefined,q.embeddingConsent))
+    const saved=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('record_evidence_batch',{items:records.map(evidence=>({evidence,attempt_id:'knowledge-index'}))}))
+    const granted=new Set<string>()
+    for(const q of items)if(q.processingConsent&&!granted.has(q.sourceId)){granted.add(q.sourceId);await this.setProcessingConsent(q.sourceId,q.processingConsent)}
+    return saved.map(record=>({evidence_id:record.id}))
+  }
   async recordEvidence(input:{sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}):Promise<{evidence_id:string}>{
-    const q=z.object({sourceId:z.string().min(1).max(256),locator:z.string().min(1).max(4096),text:z.string().min(1).max(100000),observedAt:z.iso.datetime({offset:true}),kind:z.enum(['file','im']),embeddingConsent:z.boolean(),processingConsent:processingGrantSchema.optional()}).strict().parse(input)
+    const q=evidenceInputSchema.parse(input)
     const record=await this.#admit({type:q.kind,ref:q.locator,observed_at:q.observedAt},q.text,q.kind,q.sourceId,undefined,false,undefined,q.embeddingConsent,q.processingConsent)
     // Knowledge drives extraction/indexing explicitly; maintenance must not duplicate that work.
     await this.options.client.memory('record_extraction',{evidence_id:record.id,attempt_id:'knowledge-index',extracted:{}})
@@ -258,11 +270,13 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     return refs.length>0&&refs.every(ref=>ref.consent?.provider_fingerprint===this.#fingerprint())
   }
   async #admit(source:MemorySourceRef,text:string,kind:EvidenceRecord['source_kind']=source.type==='task'?'task_result':source.type,sourceId=source.ref,retentionUntil?:string,confirmed=false,sourceMetadata?:{sender_id:string;account_id:string;provider?:string},embeddingConsent=kind==='conversation'&&this.options.inputConsent===true,processingConsent?:ProcessingGrant):Promise<EvidenceRecord>{
-    this.#ready();const now=new Date().toISOString();const raw=EvidenceRecordSchema.parse({id:this.prefix+'e:'+digest(sourceId+':'+kind+':'+source.ref+':'+contentHash(text)),source_id:this.prefix+sourceId,source_kind:kind,locator:source.ref,observed_at:source.observed_at,recorded_at:now,raw_text:text,...(embeddingConsent&&this.options.embedding?{consent:{provider_fingerprint:this.#fingerprint()}}:{}),...(sourceMetadata?{source_metadata:sourceMetadata}:{}),...(retentionUntil?{retention_until:retentionUntil}:{}),hash:contentHash(this.options.userId+':'+text),trust:kind==='user_correction'||confirmed?'trusted_user':kind==='conversation'?'trusted_system':'untrusted_external'})
-    const saved=EvidenceRecordSchema.parse(await this.options.client.memory('append_evidence',raw))
+    const saved=EvidenceRecordSchema.parse(await this.options.client.memory('append_evidence',this.#evidenceRecord(source,text,kind,sourceId,retentionUntil,confirmed,sourceMetadata,embeddingConsent)))
     const grant=processingConsent??((kind==='conversation'||kind==='user_correction')&&this.options.inputConsent===true?this.processingGrant(true):undefined)
     if(grant)await this.setProcessingConsent(sourceId,grant)
     return saved
+  }
+  #evidenceRecord(source:MemorySourceRef,text:string,kind:EvidenceRecord['source_kind'],sourceId:string,retentionUntil:string|undefined,confirmed:boolean,sourceMetadata:{sender_id:string;account_id:string;provider?:string}|undefined,embeddingConsent:boolean):EvidenceRecord{
+    this.#ready();const now=new Date().toISOString();return EvidenceRecordSchema.parse({id:this.prefix+'e:'+digest(sourceId+':'+kind+':'+source.ref+':'+contentHash(text)),source_id:this.prefix+sourceId,source_kind:kind,locator:source.ref,observed_at:source.observed_at,recorded_at:now,raw_text:text,...(embeddingConsent&&this.options.embedding?{consent:{provider_fingerprint:this.#fingerprint()}}:{}),...(sourceMetadata?{source_metadata:sourceMetadata}:{}),...(retentionUntil?{retention_until:retentionUntil}:{}),hash:contentHash(this.options.userId+':'+text),trust:kind==='user_correction'||confirmed?'trusted_user':kind==='conversation'?'trusted_system':'untrusted_external'})
   }
   async remember(turn:PersonalMemoryRememberTurn){const ref=MemorySourceRefSchema.parse({type:'conversation',ref:turn.sourceId,observed_at:turn.occurredAt??new Date().toISOString()});const evidence=await this.#admit(ref,turn.text,'conversation',turn.sourceId,undefined,turn.confirmed===true);this.#queue(evidence);return {sourceId:turn.sourceId,state:'stored' as const}}
   async observeSource(input:MemoryObservation):Promise<MemoryEntry|null>{

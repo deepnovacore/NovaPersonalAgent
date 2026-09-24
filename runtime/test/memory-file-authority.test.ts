@@ -70,6 +70,18 @@ test('malformed Markdown never blocks raw admission or revoking a processing gra
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
 
+test('a knowledge extraction marker is ledger-only and never reconciles Markdown per chunk',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-file-marker-')),path=join(root,'ledger.sqlite')
+ const client=new WorkspaceGraphStoreClient(path)
+ try{
+  await client.open();await enable(client);await client.memory('append_evidence',evidence);await client.memory('merge',candidate)
+  const directory=join(path+'.memory','entries'),file=join(directory,(await readdir(directory))[0]!);await writeFile(file,'user unfinished document')
+  // Document indexing records one marker per chunk; a half-edited memory file must not block it or be read back each time.
+  await client.memory('record_extraction',{evidence_id:evidence.id,attempt_id:'knowledge-index',extracted:{}})
+  assert.equal(await readFile(file,'utf8'),'user unfinished document')
+ }finally{await client.close();await rm(root,{recursive:true,force:true})}
+})
+
 test('initial migration uses the ledger outbox and retries a failed first Git commit after restart',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-file-initial-')),path=join(root,'ledger.sqlite')
  let client=new WorkspaceGraphStoreClient(path)

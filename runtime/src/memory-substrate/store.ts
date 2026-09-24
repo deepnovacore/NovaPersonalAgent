@@ -134,7 +134,7 @@ function write(db:GraphDatabase,candidate:Candidate,deleted=false):EntryRevision
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
+export type MemoryOperation = 'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
 export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   const ledgerOnly=isLedgerOnlyOperation(operation,value)
@@ -217,6 +217,12 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
             (o.generation<>json_extract(c.payload_json,'$.fence.generation') OR NOT EXISTS (SELECT 1 FROM json_each(o.payload_json,'$.current_evidence_ids') r WHERE r.value=e.id)))
           ORDER BY e.id LIMIT ?`,prefix,prefix,provider,provider,provider,provider,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null);break
       }
+      case 'record_evidence_batch': {
+        // One transaction for a document's chunks: each is admitted, then marked as already extracted.
+        const q=z.object({items:z.array(z.object({evidence:z.unknown(),attempt_id:id}).strict()).min(1).max(256)}).strict().parse(value)
+        result=q.items.map(item=>{const saved=EvidenceRecordSchema.parse(memoryOperation(db,'append_evidence',item.evidence,false));memoryOperation(db,'record_extraction',{evidence_id:saved.id,attempt_id:item.attempt_id,extracted:{}},false);return saved})
+        break
+      }
       case 'record_extraction': {
         const evidenceId=id.parse(value.evidence_id);if(!evidence(db,evidenceId))throw new Error('STORE_NOT_FOUND')
         const attempt=id.parse(value.attempt_id);const redactions:string[]=[];const payload=canonicalJson(scrub(object.parse(value.extracted),redactions))
@@ -279,5 +285,7 @@ export function reconcileMemoryFiles(db:GraphDatabase):void {
 /** Raw admission and permission fences remain usable when editable documents need repair. */
 export function isLedgerOnlyOperation(operation:MemoryOperation,value:Record<string,unknown>):boolean {
  if(['append_evidence','evidence','retrieval_evidence','processing_evidence','processing_stamp','source_grant','expire','source_revision','extraction_ticket','source_pending','source_events'].includes(operation))return true
+ // An extraction marker only records that an attempt ran; it never writes entries.
+ if(operation==='record_extraction'||operation==='record_evidence_batch')return true
  return operation==='source_connection'&&['get','list','create','fence','sync_status','reset_sync'].includes(String(value.action))
 }

@@ -307,3 +307,29 @@ test('indexed files remain in knowledge without creating personal facts',async()
   assert.equal(calls,0,'file content never enters personal extraction')
  }finally{await knowledge.close();await resource.close();await rm(root,{recursive:true,force:true})}
 })
+
+test('a multi-chunk document lands in one batch with markers, in order, under a single source grant',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-evidence-batch-'))
+ const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const embedding={id:'fixture',dims:2,embed:(texts:readonly string[])=>Promise.resolve(texts.map(()=>new Float32Array([1,0])))}
+ const gateway:ModelGateway={async *stream(){ /* unused */ },complete(){throw new Error('file content never enters extraction')}}
+ const resource=new SubstrateMemoryResource({client,userId:'batch',gateway,model:'fixture',embedding})
+ const store=new KnowledgeStoreClient({path:join(root,'index','knowledge.sqlite')}),knowledge=new KnowledgeService({store,embedding})
+ const ops:string[]=[],memory=client.memory.bind(client)
+ client.memory=((operation:string,value:unknown)=>{ops.push(operation);return memory(operation as never,value)})
+ try{
+  await resource.open();await knowledge.open()
+  await knowledge.bindEvidenceLedger({processingGrant:(...args)=>resource.processingGrant(...args),canProcess:(...args)=>resource.canProcessEvidence(...args),record:input=>resource.recordEvidence(input),recordBatch:inputs=>resource.recordEvidenceBatch(inputs),read:id=>resource.readEvidence(id),remove:id=>resource.forgetSource(id)})
+  const path=join(root,'long.md');await writeFile(path,['甲','乙','丙'].map(mark=>`# ${mark}\n\n${mark}的段落`).join('\n\n'))
+  ops.length=0
+  const synced=await knowledge.syncFile(path,root,new AbortController().signal,undefined,resource.processingGrant(true))
+  const ids=(await store.listChunks(synced.id,0)).map(chunk=>chunk.evidence_id!);assert.equal(ids.length,3)
+  assert.equal(ops.filter(op=>op==='record_evidence_batch').length,1);assert.equal(ops.filter(op=>op==='append_evidence'||op==='record_extraction').length,0)
+  assert.equal(ops.filter(op=>op==='source_grant').length,2,'one read and one write for the whole document')
+  const texts=await Promise.all(ids.map(async id=>(await resource.readEvidence(id))?.text))
+  assert.deepEqual(texts.map(text=>text?.match(/[甲乙丙]/u)?.[0]),['甲','乙','丙'])
+  const pending=await client.memory('pending_evidence',{source_prefix:resource.prefix}) as {id:string}[]
+  assert.ok(!pending.some(row=>ids.includes(row.id)),'every chunk carries its extraction marker')
+  for(const id of ids)assert.equal(await resource.canProcessEvidence(id,'embedding'),true)
+ }finally{await knowledge.close();await resource.close();await rm(root,{recursive:true,force:true})}
+})

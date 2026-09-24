@@ -110,7 +110,7 @@ export interface LocalDirectorySourceOptions {
   readonly observationRetryMs?:number
   readonly onMetadataStat?: () => void
   readonly path: string
-  readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'> & Partial<Pick<KnowledgeService, 'setVectorGate' | 'resumeVectors'>>
+  readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'> & Partial<Pick<KnowledgeService, 'setVectorGate' | 'resumeVectors' | 'timings'>>
   readonly pollMs?: number
   readonly onChange?: (changed: boolean) => void | Promise<void>
   readonly onInvalidate?: (ref: string) => void | Promise<void>
@@ -144,6 +144,7 @@ export class LocalDirectorySources {
   #ignored=new Map<string,{dirs:Promise<Set<string>>;checked:number}>()
   // Cumulative scan time per stage, reported in acceptance counts.
   #stageTimes=new Map<string,{ms:number;n:number}>()
+  async #timed<T>(key:string,run:()=>Promise<T>):Promise<T>{const at=performance.now();try{return await run()}finally{const row=this.#stageTimes.get(key)??{ms:0,n:0};row.ms+=performance.now()-at;row.n++;this.#stageTimes.set(key,row)}}
 
   constructor(options: LocalDirectorySourceOptions) {this.#options = options}
   async open(): Promise<void> {
@@ -230,7 +231,7 @@ export class LocalDirectorySources {
     }
     const stages:Record<string,number>={}
     for(const [stage,row] of this.#stageTimes){stages[`scan_${stage}_ms`]=Math.round(row.ms);stages[`scan_${stage}_n`]=row.n}
-    return {...counts,...stages}
+    return {...counts,...stages,...this.#options.knowledge.timings?.()}
   }
   list(): SourceSnapshot[] {const expected=this.#options.processingGrant?.(true,1,0);return this.#records.map(record => ({...structuredClone(record.view), processing_consent_required:!record.processing_consent?.extraction_provider||record.processing_consent.extraction_provider!==expected?.extraction_provider||record.processing_consent.embedding_provider!==expected?.embedding_provider, excludes: [...new Set([...SOURCE_EXCLUDES, ...(record.view.scope==='computer'?COMPUTER_EXCLUDES:[]), ...record.view.excludes])]}))}
   #watchComputer(record:SourceRecord):void {
@@ -751,15 +752,15 @@ export class LocalDirectorySources {
           enter('ingest')
           if (await realpath(file.path) !== file.path) {await discardStaleIndex();skip('changed_path');settlePending(record,file.path);continue}
           record.pending = {path: file.path, size: file.size, mtime: file.mtime, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
-          await this.#save()
-          const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent,this.#lifecycle(record).signal)
-          const indexed = (await this.#options.knowledge.listSources()).find(item => item.id === result.id)
+          await this.#timed('ingest_save_pending',()=>this.#save())
+          const result = await this.#timed('ingest_sync_file',()=>this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent,this.#lifecycle(record).signal))
+          const indexed = (await this.#timed('ingest_readback',()=>this.#options.knowledge.listSources())).find(item => item.id === result.id)
           if (!indexed) throw new Error('ingest_failed')
           const tracked = {path:file.path,unit:file.unit,size:file.size,mtime:file.mtime,id: result.id, fingerprint: indexed.fingerprint, checked_at: Date.now(), owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
           record.files = record.files.filter(old => old.path !== file.path); record.files.push(tracked); record.pending = null
           settlePending(record,file.path)
           bytes += file.size; view.read++
-          await this.#save()
+          await this.#timed('ingest_save_tracked',()=>this.#save())
         } catch (error) {
           await this.#recoverPending(record)
           signal.throwIfAborted()

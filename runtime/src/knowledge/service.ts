@@ -19,6 +19,8 @@ export interface KnowledgeEvidenceLedger {
   canProcess?: (id:string,purpose:'extraction'|'embedding')=>Promise<boolean>
   processingStamp?: (ids:string[])=>Promise<string|null>
   record(input: {sourceId: string; locator: string; text: string; observedAt: string; kind: 'file'; embeddingConsent: boolean;processingConsent?:ProcessingGrant}): Promise<{evidence_id: string}>
+  /** A document's chunks in one ledger transaction, in order. */
+  recordBatch?(inputs: {sourceId: string; locator: string; text: string; observedAt: string; kind: 'file'; embeddingConsent: boolean;processingConsent?:ProcessingGrant}[]): Promise<{evidence_id: string}[]>
   read: NonNullable<PersonalMemoryResource['readEvidence']>
   remove(sourceId: string): Promise<void>
 }
@@ -57,6 +59,7 @@ export class KnowledgeService {
   readonly #requireLedger: boolean
   readonly #vectorQueue = new Map<string, {grant: ProcessingGrant | undefined; signal: AbortSignal | undefined}>()
   readonly #vectorRetries = new Map<string, number>()
+  readonly #timings = new Map<string, {ms: number; n: number}>()
   #vectorWork: Promise<void> | undefined
   #vectorGate: ((id: string, queuedByOwner: boolean) => VectorOwner | null | undefined) | undefined
   #resumeRequested = false
@@ -215,6 +218,17 @@ export class KnowledgeService {
 
   /** Directory-source admission retains its grant and cancellation through the actual file read. */
   /** `vectorSignal` outlives the scan: the source owner aborts it when the source is paused, removed, or withdrawn. */
+  /** Cumulative ingest time per step, for acceptance counts. */
+  timings(): Record<string, number> {
+    const out: Record<string, number> = {}
+    for (const [key, row] of this.#timings) {out[`${key}_ms`] = Math.round(row.ms); out[`${key}_n`] = row.n}
+    return out
+  }
+  async #timed<T>(key: string, run: () => Promise<T>): Promise<T> {
+    const at = performance.now()
+    try {return await run()} finally {const row = this.#timings.get(key) ?? {ms: 0, n: 0}; row.ms += performance.now() - at; row.n++; this.#timings.set(key, row)}
+  }
+
   async syncFile(locator: string, root: string, signal: AbortSignal, sourceId?: string,processingConsent?:ProcessingGrant,vectorSignal?:AbortSignal): Promise<{id: string; excerpt: string; evidence_ids?: string[]}> {
     this.#assertLedger()
     signal.throwIfAborted()
@@ -226,7 +240,7 @@ export class KnowledgeService {
     const cancel = () => active.abort.abort()
     signal.addEventListener('abort', cancel, {once: true})
     try {
-      const known=await this.#store.listSources()
+      const known=await this.#timed('ingest_list',()=>this.#store.listSources())
       const old = known.find(source => source.locator === locator)
       if(!old&&known.length>=this.#store.maxSources)throw failure('index_capacity')
       signal.throwIfAborted()
@@ -243,7 +257,7 @@ export class KnowledgeService {
         await this.#ledger?.remove(`knowledge:${old.id}`)
       }
       this.#queueVectors(active.id, processingConsent, vectorSignal)
-      const evidence_ids = (await this.#store.listChunks(active.id, 0)).flatMap(chunk => chunk.evidence_id ? [chunk.evidence_id] : []).slice(0, 2)
+      const evidence_ids = (await this.#timed('ingest_list_chunks',()=>this.#store.listChunks(active.id, 0))).flatMap(chunk => chunk.evidence_id ? [chunk.evidence_id] : []).slice(0, 2)
       return {id: active.id, excerpt, ...(evidence_ids.length ? {evidence_ids} : {})}
     } catch (cause) {
       signal.throwIfAborted()
@@ -312,23 +326,36 @@ export class KnowledgeService {
     let committed = false
     try {
       signal.throwIfAborted()
-      await this.#store.recordJob({...job, state: 'running'})
+      await this.#timed('ingest_job',()=>this.#store.recordJob({...job, state: 'running'}))
       stage = 'read'
-      const document = await (kind === 'url' ? fetchKnowledgeUrl(locator, signal) : readKnowledgeFile(locator, signal, active.root))
+      const document = await this.#timed('ingest_read',()=>kind === 'url' ? fetchKnowledgeUrl(locator, signal) : readKnowledgeFile(locator, signal, active.root))
       signal.throwIfAborted()
-      if (old === undefined && (await this.#store.listSources()).some(value => value.locator === document.locator)) throw failure('source_exists')
+      if (old === undefined && (await this.#timed('ingest_list',()=>this.#store.listSources())).some(value => value.locator === document.locator)) throw failure('source_exists')
       const chunks = chunkKnowledgeText(document.text)
       const processingConsent=active.processingConsent??(active.processingAuthorized?this.#ledger?.processingGrant?.(true):undefined)
       const evidenceIds: (string | undefined)[] = []
       stage = 'evidence'
-      for (const [ordinal, chunk] of chunks.entries()) {
+      const evidenceAt = performance.now()
+      // The grant belongs to the source, not the chunk: stating it once spares a read and write per chunk.
+      const inputs = chunks.map((chunk, ordinal) => ({sourceId: `knowledge:${active.id}`, locator: `${document.locator}#chunk=${ordinal}`, text: chunk.text, observedAt: new Date().toISOString(), kind: 'file' as const, embeddingConsent: active.processingAuthorized===true||Boolean(processingConsent?.embedding_provider),...(processingConsent&&ordinal===0?{processingConsent}:{})}))
+      const ledger = this.#ledger
+      if (ledger?.recordBatch) {
+        // One ledger transaction per 256 chunks instead of two round trips per chunk.
+        for (let start = 0; start < inputs.length; start += 256) {
+          signal.throwIfAborted()
+          const part = inputs.slice(start, start + 256), saved = await ledger.recordBatch(part)
+          if (saved.length !== part.length) throw failure('store_failed')
+          evidenceIds.push(...saved.map(row => row.evidence_id))
+        }
+      } else for (const input of inputs) {
         signal.throwIfAborted()
-        const evidence = await this.#ledger?.record({sourceId: `knowledge:${active.id}`, locator: `${document.locator}#chunk=${ordinal}`, text: chunk.text, observedAt: new Date().toISOString(), kind: 'file', embeddingConsent: active.processingAuthorized===true||Boolean(processingConsent?.embedding_provider),...(processingConsent?{processingConsent}:{})})
+        const evidence = await ledger?.record(input)
         evidenceIds.push(evidence?.evidence_id)
       }
+      {const row = this.#timings.get('ingest_evidence') ?? {ms: 0, n: 0}; row.ms += performance.now() - evidenceAt; row.n += chunks.length; this.#timings.set('ingest_evidence', row)}
       signal.throwIfAborted()
       const allowed=async()=>{if(this.#ledger)return evidenceIds.length>0&&(await Promise.all(evidenceIds.map(async id=>id?await (this.#ledger?.canProcess?.(id,'embedding')??Promise.resolve(false)):false))).every(Boolean);return active.processingAuthorized===true||processingConsent?.embedding_provider===this.#embedding.id}
-      const stamp=this.#ledger?await this.#ledger.processingStamp?.(evidenceIds.filter((id):id is string=>id!==undefined))??null:'standalone'
+      const stamp=this.#ledger?await this.#timed('ingest_stamp',async()=>await this.#ledger?.processingStamp?.(evidenceIds.filter((id):id is string=>id!==undefined)))??null:'standalone'
       stage = 'embedding'
       // Scan-time sources commit lexically now; #drainVectors embeds them off the scan path.
       const vectors = !active.deferVectors&&stamp!==null&&await allowed()?await withModelPurpose('embedding',()=>this.#embedding.embed(chunks.map(chunk => chunk.text), signal)):null
@@ -339,7 +366,7 @@ export class KnowledgeService {
       const title = [...document.title].slice(0, 256).join('')
       // No await between this fence and enqueueing the atomic replacement. Remove enqueues after it.
       stage = 'store'
-      await this.#store.replaceSource({
+      await this.#timed('ingest_store',()=>this.#store.replaceSource({
         source: {id: active.id, title, kind, locator: document.locator, mime: document.mime,
           fingerprint: document.fingerprint, bytes: document.bytes, created_at: old?.created_at ?? now, updated_at: now, status: 'ready'},
         ...(old && old.id !== active.id ? {replaces_source_id: old.id} : {}),
@@ -348,7 +375,7 @@ export class KnowledgeService {
         chunks: chunks.map((chunk, index) => ({...chunk,
           ...(evidenceIds[index] === undefined ? {} : {evidence_id: evidenceIds[index]}),
           heading_path: [...(chunk.heading_path || title)].slice(0, 256).join(''), vector: keepVectors&&vectors?[...vectors[index]!]:null})),
-      })
+      }))
       committed = true
       await this.#store.recordJob({...job, updated_at: Date.now(), state: 'complete'}).catch(() => undefined)
       onIndexed?.(document.text)
