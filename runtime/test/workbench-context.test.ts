@@ -62,6 +62,14 @@ test('project cards survive a digest rewrite until regenerated, but never once a
   assert.equal(context.snapshot().cards.length,2)
   context.update([file(a),file(c)],{items:digest([a],['source:a','source:b','source:c'],'A with B'),pending:0})
   assert.equal(context.snapshot().cards.length,0,'B left the eligible inputs, so cards derived from it go even when their candidate is unchanged')
+  // Present is not eligible: a priority-0 file stays among the inputs but no longer feeds a digest.
+  const idleB:ContextInput={kind:'file',id:b.entry_id,version:b.version,content:'Project notes.',source_id:'s',file_id:b.entry_id,root:'/nova',rel_path:'b.md',role:'document',mtime_ms:1,priority:0}
+  await context.clear();context.update([file(a),file(b)],{items:digest([a],['source:a','source:b'],'A with B'),pending:0});await context.refresh()
+  assert.equal(context.snapshot().cards.length,2)
+  context.update([file(a),idleB],{items:digest([a],['source:a'],'A only'),pending:0})
+  assert.equal(context.snapshot().cards.length,0,'B dropped to priority 0; the A-only successor must not revive cards written from it')
+  context.update([file(a),idleB],{items:digest([a],['source:a','source:b'],'A with B'),pending:0})
+  assert.equal(context.snapshot().cards.length,0,'nor may the unchanged candidate keep them')
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
 })
 test('refs-only provenance written by an earlier build is dropped, so it cannot revive a card',async()=>{

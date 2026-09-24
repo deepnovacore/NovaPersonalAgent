@@ -15,6 +15,8 @@ export const candidateId=(tab:string,primaryId:string,fingerprint:string)=>hash(
 const excludedParts=new Set(['node_modules','vendor','dist','build','target','coverage','out','tmp','temp','.git','.claude','.codex','.agents','test-results','playwright-report'])
 const excludedNames=/^(?:AGENTS|CLAUDE|SKILL|PROMPT|CONTRIBUTING|CHANGELOG|LICENSE|CODE_OF_CONDUCT)(?:\.[^/]*)?$/iu
 const generatedNames=/(?:generated|template|fixture|sample|example|snapshot|report[-_]?\d|lockfile)/iu
+/** Whether a file may feed a project digest; a card derived from a digest re-checks its sources with the same rule. */
+export function digestEligible(entry:ContextInput):boolean {return entry.kind==='file'&&entry.priority>=1&&!!entry.content.trim()&&eligibleDocument(entry.rel_path,entry.role,entry.hidden_prefix_depth)}
 export function eligibleDocument(path:string,role:string,hiddenPrefixDepth=0):boolean {
  if(role!=='document')return false
  const parts=path.split(/[\\/]/u)

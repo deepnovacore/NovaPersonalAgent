@@ -3,7 +3,7 @@ import {z} from 'zod'
 import type {MemoryEntry} from '../memory/entry.js'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 import {versionSchema} from './contracts.js'
-import {selectContextCandidates,type ContextCandidate,type ContextInput} from './context-candidates.js'
+import {digestEligible,selectContextCandidates,type ContextCandidate,type ContextInput} from './context-candidates.js'
 import type {ProjectDigest} from './project-digests.js'
 
 const refSchema=z.object({entry_id:z.string().min(1),version:versionSchema}).strict()
@@ -43,14 +43,15 @@ export class WorkbenchContext{
  #candidate(card:ContextCards['cards'][number]){return this.#candidates.find(candidate=>candidate.candidate_id===card.candidate_id&&candidate.tab===card.tab&&card.refs.every(ref=>candidate.refs.some(allowed=>sameRef(ref,allowed))))}
  /**
   * A project card outlives a digest rewrite until the next generation replaces it: during a first scan digests are rewritten far more often than cards are regenerated.
-  * Every entry the card was derived from, cited or read uncited by its digest, must still be eligible, so withdrawn material never resurfaces; the card then cites the successor's current refs.
+  * Every entry the card was derived from, cited or read uncited by its digest, must still be present, and for a project card still pass the digest rule, so withdrawn material never resurfaces; the card then cites the successor's current refs.
   * Document cards keep an exact match.
   */
  #shownRefs(card:ContextCards['cards'][number]){
   const basis=this.#state.card_sources[card.candidate_id]
-  if(basis&&!basis.entries.every(id=>this.#inputs.some(input=>input.id===id)))return null
+  const project=basis?.root.startsWith('project:')
+  if(basis&&!basis.entries.every(id=>this.#inputs.some(input=>input.id===id&&(!project||digestEligible(input)))))return null
   if(this.#candidate(card))return card.refs
-  if(!basis?.root.startsWith('project:'))return null
+  if(!basis||!project)return null
   return this.#candidates.find(candidate=>candidate.root===basis.root&&candidate.tab===card.tab)?.refs??null
  }
  #recapGrounded(recap:{refs:readonly {entry_id:string;version:string|number}[]},candidates:readonly ContextCandidate[]=this.#candidates){return recap.refs.every(ref=>candidates.some(c=>c.tab==='todos'&&c.refs.some(allowed=>sameRef(ref,allowed))))}

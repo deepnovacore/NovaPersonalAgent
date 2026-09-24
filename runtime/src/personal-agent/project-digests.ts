@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto'
 import {basename} from 'node:path'
 import {z} from 'zod'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
-import {eligibleDocument,type ContextInput} from './context-candidates.js'
+import {digestEligible,type ContextInput} from './context-candidates.js'
 import type {ContextEntry} from './workbench-context.js'
 type FileInput=Extract<ContextInput,{kind:'file'}>
 const ref=z.object({entry_id:z.string().min(1).max(256),version:z.string().min(1).max(128)}).strict()
@@ -68,7 +68,7 @@ export class ProjectDigests{
  update(entries:readonly ContextEntry[]){
   const now=this.#now(),groups=new Map<string,FileInput[]>(),eligible=new Set<string>()
   for(const entry of entries){
-   if(!('kind' in entry)||entry.kind!=='file'||entry.priority<1||!entry.content.trim()||!eligibleDocument(entry.rel_path,entry.role,entry.hidden_prefix_depth))continue
+   if(!('kind' in entry)||entry.kind!=='file'||!digestEligible(entry))continue
    eligible.add(entry.id)
    const group=groups.get(entry.root)??[];group.push(entry);groups.set(entry.root,group)
   }
