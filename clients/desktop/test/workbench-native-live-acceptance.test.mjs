@@ -91,7 +91,7 @@ test('stale capture manifests and PNGs cannot satisfy a new acceptance run',asyn
  const {join}=await import('node:path')
  const {assertFreshArtifacts}=await import('../scripts/workbench-native-live-acceptance.mjs')
  const root=mkdtempSync(join(tmpdir(),'native-fresh-test-'))
- try{for(const name of ['capture.json','final-todos.png','initial-profile.png','counts.ndjson','report.json']){writeFileSync(join(root,name),'stale');assert.throws(()=>assertFreshArtifacts(root),/fresh_output_required/);unlinkSync(join(root,name))}assert.doesNotThrow(()=>assertFreshArtifacts(root))}finally{rmSync(root,{recursive:true,force:true})}
+ try{for(const name of ['capture.json','final-todos.png','initial-profile.png','counts.ndjson','report.json','native.log']){writeFileSync(join(root,name),'stale');assert.throws(()=>assertFreshArtifacts(root),/fresh_output_required/);unlinkSync(join(root,name))}assert.doesNotThrow(()=>assertFreshArtifacts(root))}finally{rmSync(root,{recursive:true,force:true})}
 })
 test('production main installs partition gate before loading and overrides every wake configuration',async()=>{
  const {readFile}=await import('node:fs/promises')

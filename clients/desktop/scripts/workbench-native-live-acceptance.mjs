@@ -1,6 +1,6 @@
 /** Launches the package's NORMAL main entry with a controller-attested original profile. */
 import {spawn,execFileSync} from 'node:child_process'
-import {existsSync,lstatSync,realpathSync,readFileSync,writeFileSync,readdirSync} from 'node:fs'
+import {existsSync,lstatSync,realpathSync,readFileSync,writeFileSync,readdirSync,openSync,closeSync} from 'node:fs'
 import {dirname,resolve} from 'node:path'
 import {fileURLToPath,pathToFileURL} from 'node:url'
 import {createHash} from 'node:crypto'
@@ -27,7 +27,7 @@ export function preflightLocks(manifest,query=execFileSync){
  for(const path of [resolve(manifest.originalUserData,'SingletonLock'),manifest.originalBlackboardPath+'.personal.json.lock',manifest.originalBlackboardPath+'.personal.json.sources.json.lock'])assertNoProfileLock(existsIncludingDangling(path))
 }
 export function assertFreshArtifacts(directory){
- if(readdirSync(directory).some(name=>['counts.ndjson','capture.json','report.json'].includes(name)||/^(?:initial|final)-.*\.png$/u.test(name)))throw Error('acceptance_fresh_output_required')
+ if(readdirSync(directory).some(name=>['counts.ndjson','capture.json','report.json','native.log'].includes(name)||/^(?:initial|final)-.*\.png$/u.test(name)))throw Error('acceptance_fresh_output_required')
 }
 async function launch(manifestPath){
  if(!manifestPath)throw Error('usage: workbench-native-live-acceptance.mjs /absolute/manifest.json')
@@ -52,7 +52,10 @@ async function launch(manifestPath){
  const electron=(await import('electron')).default
  preflightLocks(manifest)
  assertFreshArtifacts(manifest.outputDirectory)
- const child=spawn(electron,[resolve(repository,'clients/desktop'),`--user-data-dir=${manifest.originalUserData}`],{cwd:repository,env:environment,stdio:['ignore','ignore','ignore']})
+ const diagnosticLog=openSync(resolve(manifest.outputDirectory,'native.log'),'wx',0o600)
+ let child
+ try{child=spawn(electron,[resolve(repository,'clients/desktop'),`--user-data-dir=${manifest.originalUserData}`],{cwd:repository,env:environment,stdio:['ignore',diagnosticLog,diagnosticLog]})}
+ finally{closeSync(diagnosticLog)}
  const timer=setTimeout(()=>child.kill('SIGTERM'),(manifest.runCapSeconds+90)*1000)
  const code=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve)})
  clearTimeout(timer)
