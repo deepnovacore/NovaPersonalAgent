@@ -37,7 +37,7 @@ export const projectKey=(root:string)=>createHash('sha256').update(root).digest(
  */
 export class ProjectDigests{
  #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#disk:z.infer<typeof diskSchema>={projects:{}};#opened=false
- #projects=new Map<string,Project>();#failures=new Map<string,{key:string;count:number;at:number}>();#spent:number[]=[]
+ #projects=new Map<string,Project>();#failures=new Map<string,{key:string;count:number;at:number}>();#blocked=new Map<string,string>();#spent:number[]=[]
  #timer:ReturnType<typeof setTimeout>|undefined;#run:Promise<void>|undefined;#runBatch:Project[]=[];#abort=new AbortController();#writes:Promise<void>=Promise.resolve()
  readonly #idleMs:number;readonly #batch:number;readonly #hourly:number;readonly #timeoutMs:number;readonly #now:()=>number
  constructor(path:string,readonly generate:DigestGenerator|undefined,readonly changed:()=>void,readonly options:ProjectDigestOptions={}){
@@ -50,7 +50,7 @@ export class ProjectDigests{
   this.#disk={projects:Object.fromEntries(Object.entries(disk.projects).filter(([,hit])=>hit.inputs.length))};this.#opened=true
  }
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#abort.abort();await this.#run;await this.#writes}
- async clear(){clearTimeout(this.#timer);this.#abort.abort();await this.#run;this.#projects.clear();this.#failures.clear();this.#disk={projects:{}};await this.#persist()}
+ async clear(){clearTimeout(this.#timer);this.#abort.abort();await this.#run;this.#projects.clear();this.#failures.clear();this.#blocked.clear();this.#disk={projects:{}};await this.#persist()}
  #persist(){const snapshot=structuredClone(this.#disk),write=this.#writes.then(()=>this.#store.write(snapshot));this.#writes=write.catch(()=>{/* The next change writes again. */});return write}
  /** Digests of projects that are currently eligible. A digest stays while its project is re-read, and yields once a fresh one lands. */
  digests():ProjectDigest[]{
@@ -98,7 +98,7 @@ export class ProjectDigests{
  #due(){
   const now=this.#now()
   return [...this.#projects.values()].filter(p=>{
-   if(this.#disk.projects[p.input.project_key]?.key===p.key)return false
+   if(this.#disk.projects[p.input.project_key]?.key===p.key||this.#blocked.get(p.input.project_key)===p.key)return false
    const failed=this.#failures.get(p.input.project_key);return failed?.key!==p.key||failed.count<3
   }).sort((a,b)=>b.priority-a.priority||b.recent-a.recent).map(p=>{
    // A project with no digest yet goes first and sooner; a failed one backs off 1, 4, then 16 minutes.
@@ -145,7 +145,9 @@ export class ProjectDigests{
     if(outcome.digests)await this.#persist()
    }catch(error){
     outcome.outcome=controller.signal.aborted?'aborted':signal.aborted?'timeout':error instanceof z.ZodError?'schema':error instanceof Error&&error.message==='processing_consent_required'?'consent':'provider'
-    if(outcome.outcome!=='aborted')for(const project of batch){const failed=this.#failures.get(project.input.project_key);this.#failures.set(project.input.project_key,{key:project.key,count:failed?.key===project.key?failed.count+1:1,at:now})}
+    // A consent rejection is not the provider's fault and nothing was sent: refund the budget and wait for the inputs to move.
+    if(outcome.outcome==='consent'){for(const project of batch)this.#blocked.set(project.input.project_key,project.key);this.#spent.splice(-batch.length,batch.length)}
+    else if(outcome.outcome!=='aborted')for(const project of batch){const failed=this.#failures.get(project.input.project_key);this.#failures.set(project.input.project_key,{key:project.key,count:failed?.key===project.key?failed.count+1:1,at:now})}
    }finally{outcome.latency_ms=this.#now()-now}
   })()
   this.#run=run

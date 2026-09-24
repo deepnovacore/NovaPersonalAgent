@@ -92,3 +92,14 @@ test('withdrawing one document of a project retires every digest that read it, c
   assert.deepEqual(service.digests(),[],'and it is gone from disk')
  }finally{await service.close();await rm(t.dir,{recursive:true,force:true})}
 })
+test('a consent rejection neither burns retries nor budget, and the project is digested once its inputs move',async()=>{
+ let consented=false
+ const t=await setup(p=>consented?Promise.resolve(answer(p)):Promise.reject(Error('processing_consent_required')),{hourlyProjects:1})
+ const service=t.make()
+ try{
+  await service.open();service.update([file('/r/a','README.md')]);await until(()=>t.outcomes.length===1)
+  assert.equal(t.outcomes[0]!.outcome,'consent');await new Promise(r=>setTimeout(r,50));assert.equal(t.calls.length,1,'no retry while inputs are unchanged')
+  consented=true;service.update([file('/r/a','README.md','v2')]);await until(()=>service.digests().length===1)
+  assert.equal(t.calls.length,2,'the refunded budget lets the next attempt run within the hour')
+ }finally{await service.close();await rm(t.dir,{recursive:true,force:true})}
+})
