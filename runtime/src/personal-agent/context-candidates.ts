@@ -4,7 +4,7 @@ import {interleave} from './sampling.js'
 
 interface Ref {entry_id:string;version:string|number}
 export type ContextInput=
- | {kind:'file';id:string;version:string;content:string;source_id:string;file_id:string;root:string;rel_path:string;role:'document'|'code'|'config'|'cache';mtime_ms:number;priority:number;hidden_prefix_depth?:number}
+ | {kind:'file';id:string;version:string;content:string;source_id:string;file_id:string;root:string;rel_path:string;role:'document'|'code'|'config'|'cache';mtime_ms:number;priority:number;hidden_prefix_depth?:number;last_commit_ms?:number|null;own_commits?:number}
  | {kind:'memory';id:string;version:string|number;content:string;origin:'stated'|'inferred'}
 export interface ContextCandidate {candidate_id:string;id:string;version:string;content:string;tab:'todos'|'ideas';primaryFileId:string|null;refs:Ref[];excerpt:string;reason_code:'document_action'|'document_idea'|'stated_idea';root:string;priority:number;mtime_ms:number}
 

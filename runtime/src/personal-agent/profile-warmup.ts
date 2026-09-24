@@ -52,7 +52,7 @@ export class ProfileWarmup{
   const draft=this.#cache.draft&&this.#prune(this.#cache.draft,this.#entries)
   // A visible draft reads as ready even while a background refresh runs or fails; the renderer never blanks it.
   const status=this.#run?'working' as const:draft?'ready' as const:this.#failures&&this.#failedKey===this.#key?'failed' as const:'idle' as const
-  return {status,draft:draft?structuredClone(draft):null,sources:this.#entries.map(e=>({id:e.id,version:e.version,label:e.source?`${e.source.project}/${e.source.document}`:'你提供的信息'}))}}
+  return {status,draft:draft?structuredClone(draft):null,sources:this.#entries.map(e=>({id:e.id,version:e.version,label:e.source?e.source.document?`${e.source.project}/${e.source.document}`:e.source.project:'你提供的信息'}))}}
  update(entries:readonly ProfileInput[]){
   const usable=entries.filter(e=>e.version!==null&&e.content.trim())
   const selected=[...usable.filter(e=>!e.source).slice(-16),...usable.filter(e=>e.source).slice(0,24)]

@@ -39,9 +39,9 @@ export function nextComputerRoot<T extends RootSignal>(roots:readonly T[],turn:n
 }
 
 const run = promisify(execFile)
-export async function rootActivity(path:string):Promise<{lastGitCommitMs:number|null;mtimeMs:number}> {
+export async function rootActivity(path:string):Promise<{lastGitCommitMs:number|null;ownCommits:number;mtimeMs:number}> {
   const stat=await lstat(path).catch(()=>null)
-  let lastGitCommitMs:number|null=null
+  let lastGitCommitMs:number|null=null,ownCommits=0
   const marker=await lstat(join(path,'.git')).catch(()=>null)
   if(marker&&(marker.isDirectory()||marker.isFile())&&!marker.isSymbolicLink()){
     try{
@@ -52,10 +52,10 @@ export async function rootActivity(path:string):Promise<{lastGitCommitMs:number|
         for(const line of stdout.trim().split('\n')){
           const at=line.lastIndexOf('|'),seconds=Number(line.slice(at+1))
           if(at>0&&line.slice(0,at).toLowerCase()===email&&Number.isFinite(seconds)&&seconds>0)
-            lastGitCommitMs=Math.max(lastGitCommitMs??0,seconds*1000)
+            {lastGitCommitMs=Math.max(lastGitCommitMs??0,seconds*1000);ownCommits++}
         }
       }
     }catch{/* A missing or unavailable Git history is only an absent ranking clue. */}
   }
-  return {lastGitCommitMs,mtimeMs:stat?.mtimeMs??0}
+  return {lastGitCommitMs,ownCommits,mtimeMs:stat?.mtimeMs??0}
 }

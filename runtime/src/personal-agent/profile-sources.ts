@@ -1,7 +1,9 @@
+import {createHash} from 'node:crypto'
 import {basename} from 'node:path'
 import {eligibleDocument,type ContextInput} from './context-candidates.js'
 import type {ProfileInput} from './profile-warmup.js'
 import type {ContextEntry} from './workbench-context.js'
+import type {ProjectDigest} from './project-digests.js'
 
 /** A small, varied set of active work material for the profile draft. */
 export function selectProfileSources(entries:readonly ContextEntry[]):ProfileInput[]{
@@ -21,4 +23,13 @@ export function selectProfileSources(entries:readonly ContextEntry[]):ProfileInp
     return {id:entry.id,version:entry.version,content:entry.content,origin:'inferred' as const,
       source:{project:basename(entry.root),document:basename(entry.rel_path)}}
   }))
+}
+
+/** The user's own projects, as profile input. Each digest stands in for the files it cites; its version moves when its text does. */
+export function profileInputsFromDigests(digests:readonly ProjectDigest[]):(ProfileInput&{refs:ProjectDigest['refs']})[]{
+  return digests.filter(digest=>digest.role==='own').slice(0,12).map(digest=>{
+    const content=[digest.summary,digest.focus&&'近期重点：'+digest.focus,digest.next_step&&'下一步：'+digest.next_step].filter(Boolean).join(' ')
+    return {id:'project:'+digest.project_key,version:createHash('sha256').update(digest.name+'\0'+content).digest('hex').slice(0,16),content:digest.name+'：'+content,
+      origin:'inferred' as const,source:{project:digest.name,document:''},refs:digest.refs}
+  })
 }
