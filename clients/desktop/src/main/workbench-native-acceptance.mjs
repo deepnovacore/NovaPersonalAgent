@@ -19,7 +19,7 @@ export async function captureNativeWorkbench(window,outputDirectory,tag='final')
   const path=resolve(outputDirectory,`${tag}-${page}.png`)
   writeFileSync(path,(await window.webContents.capturePage()).toPNG(),{mode:0o600});shots.push(path)
  }
- const expanded=await js("(()=>{const section=document.querySelector('details.memory-section');if(!section)return false;section.open=true;return true})()")
+ const expanded=await js("(()=>{const section=document.querySelector('details.memory-section');if(!section)return false;section.open=true;const records=section.querySelector('details.memory-group-details');if(!records)return false;records.open=true;records.scrollIntoView({block:'start'});return true})()")
  if(!expanded)throw Error('acceptance_memory_detail_missing')
  await new Promise(resolve=>setTimeout(resolve,250))
  const path=resolve(outputDirectory,`${tag}-profile-memory.png`)
