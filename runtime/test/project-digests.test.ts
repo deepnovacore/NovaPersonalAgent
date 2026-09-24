@@ -73,3 +73,22 @@ test('a withdrawal while the digest call runs keeps the withdrawn project off di
   assert.deepEqual(service.digests().map(d=>d.name),['b'],'the withdrawn project never reached disk')
  }finally{await service.close();await rm(t.dir,{recursive:true,force:true})}
 })
+test('withdrawing one document of a project retires every digest that read it, cited or not',async()=>{
+ let release!:()=>void;const gate=new Promise<void>(r=>{release=r})
+ const b=file('/r/p','b.md'),a={...file('/r/p','a.md'),mtime_ms:b.mtime_ms+1}
+ // The model is shown A and B but cites only B.
+ const citeB=(p:readonly ProjectInput[])=>({digests:p.map(x=>({...answer(p).digests[0],project_key:x.project_key,summary:x.documents.some(d=>d.entry_id===a.id)?'SECRET FROM A':'clean',refs:[{entry_id:b.id,version:b.version}]}))})
+ let held=true
+ const t=await setup(async p=>{if(held)await gate;return citeB(p)});let service=t.make()
+ try{
+  await service.open();service.update([a,b]);await until(()=>t.calls.length===1)
+  const forgot=service.forgetUnavailable(new Set([b.id]));service.update([b]);release();await forgot
+  await until(()=>t.outcomes.length>=1);assert.equal(t.outcomes[0]!.outcome,'aborted')
+  assert.ok(!service.digests().some(d=>d.summary==='SECRET FROM A'),'an in-flight digest that read A is discarded whole')
+  // At rest: a digest that read A and B but cites only B leaves when A is withdrawn.
+  held=false;await service.clear();service.update([a,b]);await until(()=>service.digests().length===1)
+  await service.forgetUnavailable(new Set([b.id]));assert.deepEqual(service.digests(),[])
+  await service.close();service=new ProjectDigests(join(t.dir,'digests.json'),undefined,()=>{/* observer fixture */});await service.open();service.update([b])
+  assert.deepEqual(service.digests(),[],'and it is gone from disk')
+ }finally{await service.close();await rm(t.dir,{recursive:true,force:true})}
+})

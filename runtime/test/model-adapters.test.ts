@@ -239,3 +239,15 @@ test('workbench generation allows no candidates and makes no model call',async()
  assert.deepEqual(await surrogate.generateContext([],new AbortController().signal),{cards:[]})
  assert.equal(gateway.completions.length,0)
 })
+test('a queued digest batch re-checks consent when it leaves the lane, and never sends after revocation',async()=>{
+ class HeldGateway extends ScriptedGateway{release!:()=>void
+  override complete(request:CompleteRequest):Promise<GatewayCompletion>{this.completions.push(request);if(this.completions.length>1)return Promise.resolve({text:JSON.stringify({digests:[]})});return new Promise(r=>{this.release=()=>r({text:JSON.stringify({cards:[]})})})}}
+ const gateway=new HeldGateway(),surrogate=new GatewaySurrogate({gateway,model:'same',proactivityPreset:'balanced'})
+ const candidate={candidate_id:'c1',id:'c1',version:'v1',content:'x',tab:'ideas' as const,primaryFileId:'doc',refs:[{entry_id:'source:doc',version:'v1'}],excerpt:'x',reason_code:'document_idea' as const,root:'/p',priority:0,mtime_ms:1}
+ const foreground=surrogate.generateContext([candidate],new AbortController().signal)
+ let consented=true
+ const digest=surrogate.generateDigests([{project_key:'k',name:'p',signals:{tier:1,own_commits_30d:0,last_own_commit_days:null,last_modified_days:0},documents:[{entry_id:'source:doc',version:'v1',document:'README.md',excerpt:'x'}]}],new AbortController().signal,()=>{if(!consented)throw Error('processing_consent_required')})
+ await new Promise(r=>setImmediate(r));assert.equal(gateway.completions.length,1,'the digest waits behind foreground work')
+ consented=false;gateway.release();await foreground
+ await assert.rejects(digest,/processing_consent_required/u);assert.equal(gateway.completions.length,1,'no digest request was sent')
+})

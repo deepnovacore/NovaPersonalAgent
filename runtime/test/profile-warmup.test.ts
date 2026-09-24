@@ -137,3 +137,16 @@ test('a source resumed with unchanged content is read again',async()=>{
   service.update([fileA,fileB]);assert.deepEqual(service.snapshot().sources.map(s=>s.id),[fileA.id,fileB.id])
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
+test('a profile answer citing a withdrawn project digest is dropped even when the project is re-digested before it returns',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let resolve!:(v:typeof fileDraft)=>void
+ const project={id:'project:k',version:'d1',content:'Voice agent from secret notes',origin:'inferred' as const,source:{project:'Nova',document:''}}
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>new Promise(r=>{resolve=r}),()=>{/* observer fixture */})
+ try{
+  await service.open();service.update([project,fileB]);const run=service.refresh()
+  await service.forgetUnavailable(new Set([fileB.id]))
+  service.update([{...project,version:'d2',content:'Voice agent'},fileB])
+  resolve({about:{text:'Works on secret notes',refs:[{entry_id:project.id,version:project.version}]},work:[],interests:[{text:'Speech models',refs:[{entry_id:fileB.id,version:fileB.version}]}]})
+  await run
+  assert.equal(service.snapshot().draft?.about??null,null,'the fact grounded in the withdrawn digest never lands')
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})

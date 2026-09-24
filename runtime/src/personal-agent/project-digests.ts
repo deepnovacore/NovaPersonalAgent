@@ -21,13 +21,15 @@ export interface ProjectInput {
  signals:{tier:number;own_commits_30d:number;last_own_commit_days:number|null;last_modified_days:number}
  documents:{entry_id:string;version:string;document:string;excerpt:string}[]
 }
-export type DigestGenerator=(projects:readonly ProjectInput[],signal:AbortSignal)=>Promise<{digests:unknown[]}>
+/** `authorize` runs right before the request leaves the process, after any queueing, and throws if consent moved. */
+export type DigestGenerator=(projects:readonly ProjectInput[],signal:AbortSignal,authorize?:()=>void)=>Promise<{digests:unknown[]}>
 export interface DigestOutcome {outcome:'ok'|'timeout'|'aborted'|'schema'|'consent'|'provider';projects:number;digests:number;latency_ms:number}
 export interface ProjectDigestOptions {report?:(outcome:DigestOutcome)=>void;idleMs?:number;batch?:number;hourlyProjects?:number;timeoutMs?:number;now?:()=>number}
 interface Project {input:ProjectInput;key:string;changedAt:number;priority:number;recent:number}
-const cached=z.object({key:z.string(),name:z.string(),digest:projectDigestSchema,at:z.number()})
+const DOCUMENTS=4,MAX_PROJECTS=24,EXCERPT=1200,KEEP=64,DAY=86_400_000
+// `inputs` lists every document the digest read, cited or not: withdrawing any of them retires the digest.
+const cached=z.object({key:z.string(),name:z.string(),digest:projectDigestSchema,at:z.number(),inputs:z.array(z.string()).max(DOCUMENTS).default([])})
 const diskSchema=z.object({projects:z.record(z.string(),cached)})
-const MAX_PROJECTS=24,DOCUMENTS=4,EXCERPT=1200,KEEP=64,DAY=86_400_000
 export const projectKey=(root:string)=>createHash('sha256').update(root).digest('hex').slice(0,16)
 /**
  * L1 of the workbench synthesis: one short digest per active project, cached by the exact document versions it read.
@@ -36,7 +38,7 @@ export const projectKey=(root:string)=>createHash('sha256').update(root).digest(
 export class ProjectDigests{
  #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#disk:z.infer<typeof diskSchema>={projects:{}};#opened=false
  #projects=new Map<string,Project>();#failures=new Map<string,{key:string;count:number;at:number}>();#spent:number[]=[]
- #timer:ReturnType<typeof setTimeout>|undefined;#run:Promise<void>|undefined;#abort=new AbortController();#writes:Promise<void>=Promise.resolve()
+ #timer:ReturnType<typeof setTimeout>|undefined;#run:Promise<void>|undefined;#runBatch:Project[]=[];#abort=new AbortController();#writes:Promise<void>=Promise.resolve()
  readonly #idleMs:number;readonly #batch:number;readonly #hourly:number;readonly #timeoutMs:number;readonly #now:()=>number
  constructor(path:string,readonly generate:DigestGenerator|undefined,readonly changed:()=>void,readonly options:ProjectDigestOptions={}){
   this.#store=new BoundedJsonStore(path,diskSchema);this.#idleMs=options.idleMs??30_000;this.#batch=options.batch??4
@@ -83,7 +85,9 @@ export class ProjectDigests{
  /** After a withdrawal: digests citing any file that is no longer eligible leave disk. */
  async forgetUnavailable(eligible:ReadonlySet<string>){
   let removed=false
-  for(const [key,hit] of Object.entries(this.#disk.projects))if(hit.digest.refs.some(r=>!eligible.has(r.entry_id))){delete this.#disk.projects[key];removed=true}
+  for(const [key,hit] of Object.entries(this.#disk.projects))if([...hit.inputs,...hit.digest.refs.map(r=>r.entry_id)].some(id=>!eligible.has(id))){delete this.#disk.projects[key];removed=true}
+  // An in-flight or queued batch that read a withdrawn document is cancelled: a queued one never sends, a sent one is discarded whole.
+  if(this.#runBatch.some(p=>p.input.documents.some(d=>!eligible.has(d.entry_id))))this.#abort.abort()
   for(const [key,project] of this.#projects)if(project.input.documents.some(d=>!eligible.has(d.entry_id)))this.#projects.delete(key)
   await this.#persist();if(removed)this.changed()
  }
@@ -116,7 +120,7 @@ export class ProjectDigests{
   const batch=this.#due().filter(item=>item.at<=now).slice(0,room).map(item=>item.project)
   if(!batch.length){this.#schedule();return Promise.resolve()}
   this.#spent.push(...batch.map(()=>now))
-  const controller=new AbortController();this.#abort=controller
+  const controller=new AbortController();this.#abort=controller;this.#runBatch=batch
   const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(this.#timeoutMs)]),inputs=structuredClone(batch.map(p=>p.input))
   const outcome:DigestOutcome={outcome:'ok',projects:batch.length,digests:0,latency_ms:0}
   const run=(async()=>{
@@ -126,12 +130,10 @@ export class ProjectDigests{
     for(const value of raw.digests){
      const parsed=projectDigestSchema.safeParse(value);if(!parsed.success)continue
      const project=byKey.get(parsed.data.project_key);if(!project)continue
-     // A digest may cite only the documents it was given for its own project, and only those still eligible now:
-     // a withdrawal that landed while the call ran has already removed them from #projects.
+     // A digest may cite only the documents it was given for its own project. A withdrawal during the call aborts it (see forgetUnavailable).
      const given=new Set(project.input.documents.map(d=>d.entry_id+'\0'+d.version))
-     const live=new Set(this.#projects.get(project.input.project_key)?.input.documents.map(d=>d.entry_id)??[])
-     const refs=parsed.data.refs.filter(r=>given.has(r.entry_id+'\0'+r.version)&&live.has(r.entry_id));if(!refs.length)continue
-     this.#disk.projects[project.input.project_key]={key:project.key,name:project.input.name,digest:{...parsed.data,refs},at:now}
+     const refs=parsed.data.refs.filter(r=>given.has(r.entry_id+'\0'+r.version));if(!refs.length)continue
+     this.#disk.projects[project.input.project_key]={key:project.key,name:project.input.name,digest:{...parsed.data,refs},at:now,inputs:project.input.documents.map(d=>d.entry_id)}
      byKey.delete(project.input.project_key);outcome.digests++;this.#failures.delete(project.input.project_key)
     }
     for(const project of byKey.values()){const failed=this.#failures.get(project.input.project_key);this.#failures.set(project.input.project_key,{key:project.key,count:failed?.key===project.key?failed.count+1:1,at:now})}
@@ -144,7 +146,7 @@ export class ProjectDigests{
   })()
   this.#run=run
   void run.finally(()=>{
-   this.#run=undefined
+   this.#run=undefined;this.#runBatch=[]
    try{this.options.report?.(outcome)}catch{/* Reporting never changes digests. */}
    if(!this.#opened)return
    if(outcome.digests)this.changed()

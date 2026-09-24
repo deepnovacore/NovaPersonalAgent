@@ -30,7 +30,7 @@ export class ProfileWarmup{
  #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#cache:z.infer<typeof diskSchema>={key:'',draft:null}
  #entries:ProfileInput[]=[];#key='';#opened=false
  #abort=new AbortController();#run:Promise<void>|undefined;#runEntries:ProfileInput[]=[];#writes:Promise<void>=Promise.resolve()
- #timer:ReturnType<typeof setTimeout>|undefined;#firstChangeAt=0;#lastRunAt=0;#failures=0;#failedKey='';#withdrawals=0
+ #timer:ReturnType<typeof setTimeout>|undefined;#firstChangeAt=0;#lastRunAt=0;#failures=0;#failedKey='';#withdrawals=0;#withdrawnDuringRun=new Set<string>()
  readonly #timeoutMs:number;readonly #backoffMs:readonly number[];readonly #minIntervalMs:number;readonly #report:((outcome:ProfileOutcome)=>void)|undefined
  constructor(path:string,readonly generate:ProfileGenerator|undefined,readonly changed:()=>void,options:ProfileWarmupOptions={}){
   this.#store=new BoundedJsonStore(path,diskSchema);this.#report=options.report
@@ -72,7 +72,9 @@ export class ProfileWarmup{
   * superseded memory refresh cannot leave stale eligibility). Facts it grounded leave disk as well as the view.
   */
  async forgetUnavailable(eligibleSources:ReadonlySet<string>){
-  this.#entries=this.#entries.filter(entry=>!entry.source||eligibleSources.has(entry.id));this.#key=inputKey(this.#entries);this.#withdrawals++
+  const withdrawn=this.#entries.filter(entry=>entry.source&&!eligibleSources.has(entry.id))
+  for(const entry of [...withdrawn,...this.#runEntries.filter(entry=>entry.source&&!eligibleSources.has(entry.id))])this.#withdrawnDuringRun.add(entry.id)
+  this.#entries=this.#entries.filter(entry=>!withdrawn.includes(entry));this.#key=inputKey(this.#entries);this.#withdrawals++
   const draft=this.#cache.draft
   const pruned=draft&&this.#prune(draft,this.#entries)
   if(draft&&(!pruned||factCount(pruned)!==factCount(draft)))this.#cache={key:pruned?this.#cache.key:'',draft:pruned}
@@ -103,7 +105,7 @@ export class ProfileWarmup{
   if(retry)this.#failures=0
   else if(this.#cache.key===this.#key)return Promise.resolve()
   const key=this.#key,entries=structuredClone(this.#entries),controller=new AbortController(),started=Date.now()
-  this.#abort=controller;this.#runEntries=entries;this.#lastRunAt=started
+  this.#abort=controller;this.#runEntries=entries;this.#lastRunAt=started;this.#withdrawnDuringRun=new Set()
   const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(this.#timeoutMs)])
   let outcome:ProfileOutcome={outcome:'ok',latency_ms:0,items:0}
   const run=(async()=>{
@@ -112,7 +114,8 @@ export class ProfileWarmup{
     const result=await Promise.race([this.generate!(entries,signal),new Promise<never>((_,reject)=>{cancel=()=>reject(Error('warmup_aborted'));signal.addEventListener('abort',cancel,{once:true});if(signal.aborted)cancel()})])
     signal.throwIfAborted()
     // Facts citing anything outside this call's inputs are invented; drop them and keep the grounded rest.
-    const draft=this.#prune(profileDraftSchema.parse(result),entries)
+    // Evidence withdrawn while the call ran stays withdrawn even if the same id (a re-digested project) is eligible again.
+    const draft=this.#prune(profileDraftSchema.parse(result),entries.filter(entry=>!this.#withdrawnDuringRun.has(entry.id)))
     if(!draft)throw Error('invalid_profile_evidence')
     outcome.items=factCount(draft)
     const current=this.#prune(draft,this.#entries)
