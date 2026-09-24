@@ -233,17 +233,32 @@ test('workbench generation includes its schema in the provider-visible prompt',a
  assert.doesNotMatch(gateway.completions[0]!.prompt,/\/project/u)
  assert.match(gateway.completions[0]!.system,/正文只写一句话/u)
  assert.match(gateway.completions[0]!.system,/每类最多三张/u)
- assert.equal(gateway.completions[0]!.maxTokens,8000,'nine full cards fit under the ceiling')
+ assert.equal(gateway.completions[0]!.maxTokens,4000,'nine full cards fit under the ceiling')
+ const sent=(JSON.parse(gateway.completions[0]!.prompt) as {candidates:Record<string,unknown>[]}).candidates
+ assert.deepEqual(sent,[{key:'c1',tab:'ideas',excerpt:'A project document',reason_code:'document_idea'}],'identifiers and refs stay with the adapter')
+})
+test('context cards cite short keys, and the adapter restores each candidate, its tab and its refs',async()=>{
+ const candidate=(id:string,tab:'todos'|'ideas'|'goals',refs:number)=>({candidate_id:id,id,version:'v1',content:'x',tab,primaryFileId:null,refs:Array.from({length:refs},(_,i)=>({entry_id:'source:'+id+String(i),version:'v'+String(i)})),excerpt:'x',reason_code:tab==='todos'?'project_focus' as const:tab==='goals'?'project_direction' as const:'document_idea' as const,root:'project:'+id,priority:3,mtime_ms:0})
+ const candidates=[candidate('long-todo-a','todos',6),candidate('long-todo-b','todos',6),candidate('long-idea','ideas',1),candidate('long-goal','goals',2)]
+ const card=(key:string,title:string)=>({key,title,body:'B',why:null,next:null})
+ const reply={recap:{text:'近况',keys:['c1','c2','c3','c9']},cards:[card('c1','a'),card('c9','forged'),card('c3','idea'),card('c4','goal'),{...card('c2','no refs'),refs:[]},card('c2','b')]}
+ const gateway=new ScriptedGateway([],JSON.stringify(reply))
+ const result=await new GatewaySurrogate({gateway,model:'m',proactivityPreset:'balanced'}).generateContext(candidates,new AbortController().signal)
+ assert.deepEqual(result.cards.map(item=>[item.candidate_id,item.tab,item.title]),[['long-todo-a','todos','a'],['long-idea','ideas','idea'],['long-goal','goals','goal'],['long-todo-b','todos','b']],'a forged key or an unknown field drops only that card')
+ assert.deepEqual(result.cards[2]!.refs,candidates[3]!.refs)
+ assert.deepEqual(result.recap?.refs.map(ref=>ref.entry_id),['source:long-todo-a0','source:long-todo-b0','source:long-todo-a1','source:long-todo-b1','source:long-todo-a2','source:long-todo-b2','source:long-todo-a3','source:long-todo-b3'],'the recap takes todo refs in turn, at most eight, and ignores non-todo and forged keys')
+ const onlyIdea=await new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({recap:{text:'近况',keys:['c3']},cards:[]})),model:'m',proactivityPreset:'balanced'}).generateContext(candidates,new AbortController().signal)
+ assert.equal(onlyIdea.recap,null,'a recap citing no todo candidate is withheld')
 })
 test('a cut-off context reply retries once with half the candidates, and each tab keeps at most three cards',async()=>{
  const candidate=(id:string)=>({candidate_id:id,id,version:'v1',content:'A project document',tab:'todos' as const,primaryFileId:id,refs:[{entry_id:'source:'+id,version:'v1'}],excerpt:'A project document',reason_code:'document_action' as const,root:'/project',priority:0,mtime_ms:1})
- const card=(id:string,tab:string)=>({candidate_id:id,tab,title:'T'+id,body:'B',why:null,next:null,refs:[{entry_id:'source:'+id,version:'v1'}]})
- const replies=['{"recap":null,"cards":[{"candidate_id":"a","tab":"todos","title":"cut',JSON.stringify({recap:null,cards:[card('a','todos'),card('b','todos'),card('c','todos'),card('d','todos'),card('e','ideas')]})]
+ const card=(key:string)=>({key,title:'T'+key,body:'B',why:null,next:null})
+ const replies=['{"recap":null,"cards":[{"key":"c1","title":"cut',JSON.stringify({recap:null,cards:[card('c1'),card('c2'),card('c3'),card('c4'),card('c5')]})]
  const prompts:string[]=[]
  const gateway={complete:(request:CompleteRequest)=>{prompts.push(request.prompt);return Promise.resolve({text:replies.shift()!})}} as unknown as ModelGateway
- const result=await new GatewaySurrogate({gateway,model:'m',proactivityPreset:'balanced'}).generateContext(['a','b','c','d','e'].map(candidate),new AbortController().signal)
+ const result=await new GatewaySurrogate({gateway,model:'m',proactivityPreset:'balanced'}).generateContext([...['a','b','c','d'].map(candidate),{...candidate('e'),tab:'ideas' as const}],new AbortController().signal)
  assert.equal(prompts.length,2);assert.equal((JSON.parse(prompts[1]!) as {candidates:unknown[]}).candidates.length,3)
- assert.deepEqual(result.cards.map(item=>item.candidate_id),['a','b','c','e'])
+ assert.deepEqual(result.cards.map(item=>item.candidate_id),['a','b','c'],'the retry only knows its own three keys, and each tab keeps at most three')
  const broken={complete:()=>Promise.resolve({text:'{'})} as unknown as ModelGateway
  await assert.rejects(new GatewaySurrogate({gateway:broken,model:'m',proactivityPreset:'balanced'}).generateContext([candidate('a'),candidate('b')],new AbortController().signal),SyntaxError,'a second failure surfaces for the backoff')
 })

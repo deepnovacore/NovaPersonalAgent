@@ -5,6 +5,8 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {WorkbenchContext,contextCardSchema} from '../src/personal-agent/workbench-context.js'
 import {candidateId,type ContextInput} from '../src/personal-agent/context-candidates.js'
+import {GatewaySurrogate} from '../src/model/model-adapters.js'
+import type {ModelGateway} from '../src/model/model-gateway.js'
 /** The documents a digest fixture cites, fed back as the eligible inputs they would be in production. */
 const refFile=(ref:{entry_id:string;version:string}):ContextInput=>({kind:'file',id:ref.entry_id,version:ref.version,content:'Project notes.',source_id:'s',file_id:ref.entry_id,root:'/nova',rel_path:'notes.md',role:'document',mtime_ms:1,priority:1})
 test('generated suggestion copy stays short enough for a single readable card',()=>{
@@ -232,6 +234,20 @@ test('the todo page gets a grounded recap, action cards with why and next, and o
   context.update([],{items:[],pending:0});assert.equal(context.snapshot().recap.text,null,'the recap leaves with its evidence')
   recapRefs=[{entry_id:'source:invented',version:'v1'}];await context.clear();context.update(digests.flatMap(d=>d.refs.map(refFile)),{items:digests,pending:0});await context.refresh()
   assert.equal(context.snapshot().recap.text,null,'an ungrounded recap is dropped');assert.equal(context.snapshot().cards.length,1)
+ }finally{await context.close();await rm(dir,{recursive:true,force:true})}
+})
+test('short-key replies from the model adapter pass every grounding check and keep their recap and cards',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-keys-'))
+ const refs=[{entry_id:'source:nova',version:'v1'}]
+ const digests=[{project_key:'k',name:'nova',role:'own' as const,summary:'Voice agent',focus:'Fixing workbench content',next_step:'Ship the digest layer',refs}]
+ const gateway={complete:(request:{prompt:string})=>{const {candidates}=JSON.parse(request.prompt) as {candidates:{key:string;tab:string}[]}
+  return Promise.resolve({text:JSON.stringify({recap:{text:'这周主要在做工作台。',keys:candidates.filter(c=>c.tab==='todos').map(c=>c.key)},cards:candidates.map(c=>({key:c.key,title:c.tab==='goals'?'让 Nova 成为每天在用的助手':'把摘要层收尾',body:'工作台已经在读项目摘要了。',why:null,next:'跑一次原生验收'}))})})}} as unknown as ModelGateway
+ const context=new WorkbenchContext(join(dir,'cards.json'),new GatewaySurrogate({gateway,model:'m',proactivityPreset:'balanced'}).generateContext,()=>undefined)
+ try{
+  await context.open();context.update(digests.flatMap(d=>d.refs.map(refFile)),{items:digests,pending:0});await context.refresh()
+  const snapshot=context.snapshot()
+  assert.equal(snapshot.recap.text,'这周主要在做工作台。')
+  assert.deepEqual(snapshot.cards.map(card=>[card.tab,card.refs.map(ref=>ref.entry_id)]),[['todos',['source:nova']],['goals',['source:nova']]])
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
 })
 test('a recap retires when a digest it drew on is replaced, even if its cited ref survives',async()=>{
