@@ -51,3 +51,12 @@ test('with project digests, todos come from own projects with a focus or next st
  assert.doesNotMatch(todos[0]!.excerpt,/\//u)
  assert.ok(selectContextCandidates(inputs).some(c=>c.tab==='todos'),'without digests the old document path still works')
 })
+test('own projects, and only own projects, offer at most one long-term direction each and three overall',()=>{
+ const digest=(key:string,role:'own'|'third_party'|'sample')=>({project_key:key,name:key,role,summary:`${key} 是一个长期在做的项目`,focus:null,next_step:null,refs:[{entry_id:`source:${key}`,version:'v1'}]})
+ const selected=selectContextCandidates([],[digest('a','own'),digest('lib','third_party'),digest('demo','sample'),digest('b','own'),digest('c','own'),digest('d','own')])
+ const goals=selected.filter(c=>c.tab==='goals')
+ assert.deepEqual(goals.map(c=>c.root),['project:a','project:b','project:c'])
+ assert.ok(goals.every(c=>c.reason_code==='project_direction'&&c.excerpt.includes('长期在做')))
+ assert.equal(selected.filter(c=>c.tab==='todos').length,0,'a project with no focus or next step is not a todo')
+ assert.equal(new Set(goals.map(c=>c.candidate_id)).size,3)
+})

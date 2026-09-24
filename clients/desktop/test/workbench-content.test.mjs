@@ -29,16 +29,16 @@ test('the Todo top shows a recap and action cards that hand a prepared request t
  const recap=nodes.find(node=>node.className==='workbench-recap'),section=nodes.find(node=>node.className==='workbench-suggestions')
  assert.ok(recap&&nodes.indexOf(recap)<nodes.indexOf(section),'recap sits above the cards')
  assert.equal(section.children.filter(node=>node.tag==='article').length,2,'the recap is not counted as a card')
- assert.match(output,/最近主要在做语音 Agent 的工作台/u);assert.match(output,/值得关注/u)
+ assert.match(output,/最近主要在做语音 Agent 的工作台/u);assert.match(output,/可以接着做/u)
  const project=nodes.find(node=>node['aria-label']==='nova · 正在修工作台内容');assert.deepEqual(project.children.map(node=>[node.tag,node.textContent]),[['strong','nova'],['span','正在修工作台内容']])
  assert.match(output,/下一步已经写明/u);assert.match(output,/下一步：跑一次原生验收/u);assert.match(output,/Only a body/u)
  assert.doesNotMatch(output,/需要你自行判断/u)
  const [first,second]=section.children.filter(node=>node.tag==='article')
  const row=card=>card.children.find(node=>node.className==='card-actions')
- const firstButtons=row(first).children;assert.deepEqual(firstButtons.map(node=>node.textContent),['交给 Nova','隐藏'],'actions share one row')
+ const firstButtons=row(first).children;assert.deepEqual(firstButtons.map(node=>node.textContent),['帮我做','隐藏'],'actions share one row')
  assert.equal(firstButtons[1].className,'quiet')
  firstButtons[0].action();assert.deepEqual(drafts,['请帮我推进「完成摘要层」：跑一次原生验收']);assert.deepEqual(chats,[])
- assert.equal(row(second).children[0].textContent,'继续讨论')
+ assert.equal(row(second).children[0].textContent,'聊聊这个')
  const popover=first.children.find(node=>node.className==='source-popover');assert.equal(popover.hidden,true);assert.match(text(popover),/notes\.md/u)
  assert.equal(first.dataset.sources,'true');assert.ok(!first.children.some(node=>node.tag==='details'))
  assert.ok(!second.children.some(node=>node.className==='source-info'),'no sources, no icon')
@@ -46,7 +46,7 @@ test('the Todo top shows a recap and action cards that hand a prepared request t
 test('while project digests are pending the Todo top says so instead of claiming nothing is there',t=>{
  const h=harness(t)
  renderSourceSuggestions(h.panel,{tab:'todos',context:{status:'ready',candidate_count:0,cards:[],empty_reason:'digests_pending',recap:{text:null,projects:[]}},sources:[{state:'connected'}],button:h.button,command:h.command,continueChat:()=>{}})
- assert.match(text(h.panel),/正在读取近期项目/u)
+ assert.match(text(h.panel),/还在看你最近的项目/u)
  assert.ok(!all(h.panel).some(node=>node.className==='workbench-recap'),'an empty recap is not rendered')
 })
 test('empty Life and source states use specific copy without inventing work',t=>{
@@ -54,7 +54,7 @@ test('empty Life and source states use specific copy without inventing work',t=>
  renderLife(h.panel,{...h,kind:'goal',state:{todos:[],ideas:[],goals:[]}})
  assert.match(text(h.panel),/还没有设定目标/u)
  renderSourceSuggestions(h.panel,{tab:'ideas',context:{status:'ready',candidate_count:0,cards:[],empty_reason:'no_eligible_sources'},sources:[{state:'connected',scan_pending:true}],button:h.button,command:h.command,continueChat:()=>{}})
- assert.match(text(h.panel),/正在整理已授权的资料/u)
+ assert.match(text(h.panel),/还在读你给我的资料/u)
  assert.doesNotMatch(text(h.panel),/值得关注|持续推进/u)
 })
 test('unloaded Life data and paused sources never claim an empty list or active scan',t=>{
@@ -64,19 +64,19 @@ test('unloaded Life data and paused sources never claim an empty list or active 
  assert.doesNotMatch(text(h.panel),/还没有待办/u)
  renderSourceSuggestions(h.panel,{tab:'todos',context:{status:'idle',candidate_count:0,cards:[]},sources:[{state:'paused',scan_pending:true}],button:h.button,command:h.command,continueChat:()=>{}})
  assert.match(text(h.panel),/资料来源已暂停/u)
- assert.doesNotMatch(text(h.panel),/正在整理已授权的资料/u)
+ assert.doesNotMatch(text(h.panel),/还在读你给我的资料/u)
 })
 test('disconnected source state does not claim that no sources are connected',t=>{
  const h=harness(t)
  renderSourceSuggestions(h.panel,{tab:'ideas',context:null,sources:[],button:h.button,command:h.command,continueChat:()=>{},connected:false})
- assert.match(text(h.panel),/资料来源状态暂不可用/u)
- assert.doesNotMatch(text(h.panel),/还没有连接资料/u)
+ assert.match(text(h.panel),/暂时连不上后台/u)
+ assert.doesNotMatch(text(h.panel),/还没给我看过资料/u)
 })
 test('a partial source failure remains visible beside available suggestions',t=>{
  const h=harness(t)
  renderSourceSuggestions(h.panel,{tab:'ideas',context:{status:'ready',cards:[{id:'card',tab:'ideas',title:'Simplify setup',body:'The note suggests a shorter setup.',refs:[]}]},sources:[{scope:'computer',state:'error'}],button:h.button,command:h.command,continueChat:()=>{},openSettings:()=>{}})
  assert.match(text(h.panel),/Simplify setup/u)
- assert.match(text(h.panel),/整机资料尚未读完/u)
+ assert.match(text(h.panel),/整机资料还没读完/u)
  assert.match(text(h.panel),/查看来源/u)
 })
 test('disabled news has an honest empty state',t=>{
@@ -122,4 +122,22 @@ test('scan progress preserves a focused Todo draft and material content refresh 
  assert.equal(document.activeElement,editors()[2]);assert.equal(editors()[2].selectionStart,1);assert.equal(editors()[2].selectionEnd,5);assert.equal(editors()[2].scrollTop,12);assert.equal(panel.scrollTop,81)
  view.receive(withCandidates(6,['b']))
  assert.equal(document.activeElement,editors()[0]);assert.equal(editors()[0].value,'Unsaved B');assert.equal(editors()[0].selectionStart,1);assert.equal(editors()[0].scrollTop,12);assert.equal(panel.scrollTop,81)
+})
+test('a goal suggestion becomes a goal only when the user sets it, and the page stays quiet without one',async t=>{
+ const h=harness(t),calls=[]
+ const command=(method,params)=>{calls.push([method,params]);return Promise.resolve()}
+ renderSourceSuggestions(h.panel,{tab:'goals',context:{status:'ready',candidate_count:1,cards:[],empty_reasons:{goals:'model_abstained'}},sources:[{state:'connected'}],button:h.button,command,continueChat:()=>{}})
+ assert.deepEqual(h.panel.children,[],'no empty suggestion block under the goal list')
+ const context={status:'ready',candidate_count:2,cards:[
+  {id:'g',tab:'goals',title:'让 Nova 成为每天在用的助手',body:'一周里大部分事情都交给它。',why:null,next:'先把待办页跑顺',refs:[{entry_id:'source:x',label:'README.md'}]},
+  {id:'t',tab:'todos',title:'Not a goal',body:'x',refs:[]},
+ ]}
+ renderSourceSuggestions(h.panel,{tab:'goals',context,sources:[{state:'connected'}],button:h.button,command,continueChat:()=>{}})
+ const output=text(h.panel),nodes=all(h.panel)
+ assert.match(output,/可以定下的方向/u);assert.match(output,/先从：先把待办页跑顺/u);assert.doesNotMatch(output,/Not a goal/u)
+ const actions=nodes.find(node=>node.className==='card-actions')
+ assert.deepEqual(actions.children.map(node=>node.textContent),['设为目标','隐藏'])
+ assert.equal(calls.length,0,'nothing is saved by rendering')
+ await actions.children[0].action()
+ assert.deepEqual(calls,[['life.mutate',{op:'create',kind:'goal',title:'让 Nova 成为每天在用的助手',note:'先从：先把待办页跑顺',success_criteria:'一周里大部分事情都交给它。'}],['context.dismiss',{id:'g'}]])
 })

@@ -24,8 +24,8 @@ test('acceptance source-to-card proof requires a current source ref and version'
   {tab:'ideas' as const,refs:[{entry_id:'memory:stated',version:4},{entry_id:'source:file-b',version:'v7'}]},
  ];
  const entries=[{kind:'file' as const,id:'source:file-a',version:'v2',content:'Current'}, {kind:'file' as const,id:'source:file-b',version:'v7',content:'Current'}];
- assert.deepEqual(countSourceGroundedContextCards(cards,entries),{cards:2,todos:1,ideas:1});
- assert.deepEqual(countSourceGroundedContextCards([],entries),{cards:0,todos:0,ideas:0});
+ assert.deepEqual(countSourceGroundedContextCards(cards,entries),{cards:2,todos:1,ideas:1,goals:0});
+ assert.deepEqual(countSourceGroundedContextCards([],entries),{cards:0,todos:0,ideas:0,goals:0});
 });
 test('discovery prioritizes dated open Life objects and excludes inactive objects without hiding history',async()=>{
  const f=await fixture()

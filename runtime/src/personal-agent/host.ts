@@ -90,10 +90,10 @@ export interface HostOptions {
 }
 const hash = (s: unknown): string => createHash('sha256').update(JSON.stringify(s)).digest('hex');
 /** Count cards that cite at least one source entry at its current version. */
-export function countSourceGroundedContextCards(cards:readonly {tab:'todos'|'ideas';refs:readonly {entry_id:string;version:string|number}[]}[],entries:readonly ContextEntry[]):{cards:number;todos:number;ideas:number}{
+export function countSourceGroundedContextCards(cards:readonly {tab:'todos'|'ideas'|'goals';refs:readonly {entry_id:string;version:string|number}[]}[],entries:readonly ContextEntry[]):{cards:number;todos:number;ideas:number;goals:number}{
     const current=new Set(entries.map(entry=>JSON.stringify([entry.id,entry.version])));
     const grounded=cards.filter(card=>card.refs.some(ref=>current.has(JSON.stringify([ref.entry_id,ref.version]))));
-    return {cards:grounded.length,todos:grounded.filter(card=>card.tab==='todos').length,ideas:grounded.filter(card=>card.tab==='ideas').length};
+    return {cards:grounded.length,todos:grounded.filter(card=>card.tab==='todos').length,ideas:grounded.filter(card=>card.tab==='ideas').length,goals:grounded.filter(card=>card.tab==='goals').length};
 }
 export type PresentationMode = 'background' | 'workbench' | 'orb'
 export interface PresentedDecision {approval_id?:string|undefined;conversation_id?:string|undefined;proposal_id?:string|undefined}

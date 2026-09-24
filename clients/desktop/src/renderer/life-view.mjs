@@ -6,7 +6,7 @@ const statuses={todo:{open:'待办',doing:'进行中',waiting:'等待他人',don
 export function renderLife(panel,{kind,state,command,button,local,rerender,delegate,openArticle,run=action=>action()}){
  const rows=state?.[kind==='todo'?'todos':kind==='idea'?'ideas':'goals']??[]
  panel.append(el('h2',`${{todo:'Todos',idea:'Ideas',goal:'Goals'}[kind]} · ${labels[kind]}`))
- panel.append(el('p',{todo:'自己要做的事、正在等待的事。需要协助时再交给 Nova。',idea:'先保存想法；准备行动时，再转成待办或目标。',goal:'记录方向和成功标准，用关联待办追踪行动。'}[kind]))
+ panel.append(el('p',{todo:'你要做的、在等别人回的，都放这里。要帮忙就叫我。',idea:'想到什么先放这里，想动手了再转成待办或目标。',goal:'写下想去的方向和怎样算到了，再挂几件待办一步步走。'}[kind]))
  const formKey=kind+':form';const draft=local[formKey]??={title:'',note:'',goal_id:'',due:'',success_criteria:''}
  const field=(parent,key,label,multiline=false)=>{const wrapper=el('label',label),input=el(multiline?'textarea':'input');input.value=draft[key]??'';input.maxLength=key==='title'?200:key==='success_criteria'?2000:4000;input.setAttribute('aria-label',label);if(key==='due')input.type='date';input.addEventListener('input',()=>{draft[key]=input.value});wrapper.append(input);parent.append(wrapper);return input}
  const openKey=kind+':formOpen',formOpen=Boolean(local[openKey])||Boolean(draft.id)
@@ -49,7 +49,7 @@ export function renderProfile(panel,{state,news,warmup,command,button,local,pref
   button('保存介绍',async()=>{await command('life.mutate',{op:'profile',expected_version:draft.version,about:draft.about});delete local.profile;rerender()},actions).className='page-add'
   button('取消编辑',()=>{delete local.profile;rerender()},actions)
  }else{
-  const caption=el('p',confirmed?'你写下的介绍':state?.profile?.version>0?'你已清空个人介绍，可以随时重新写一段。':suggested||work.length?'根据近期工作整理，可随时修改':'还没有个人概览。资料整理完成后会逐步出现，也可以自己写一段。');caption.className='preference-caption';card.append(caption)
+  const caption=el('p',confirmed?'你写下的介绍':state?.profile?.version>0?'你已清空个人介绍，可以随时重新写一段。':suggested||work.length?'我照你最近的工作写的，随时可以改':'我还不太了解你。看完你的资料会先写一版，你也可以自己写一段。');caption.className='preference-caption';card.append(caption)
   if(about){const holder=el('div');holder.className='profile-about';const preview=el('p',about);preview.className='profile-preview';holder.append(preview);card.append(holder);if(state?.profile?.version===0&&warmup?.draft?.about)sourceDetails(holder,warmup.draft.about.refs)}
   if(work.length){const grid=el('div');grid.className='profile-work';card.append(grid);for(const item of work){const block=el('article');block.className='profile-work-item';block.append(el('h4',item.title),el('p',item.text));sourceDetails(block,item.refs);grid.append(block)}}
   const actions=el('div');actions.className='preference-actions';card.append(actions)

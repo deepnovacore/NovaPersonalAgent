@@ -10,6 +10,22 @@ test('generated suggestion copy stays short enough for a single readable card',(
  assert.equal(contextCardSchema.safeParse(card).success,true)
  assert.equal(contextCardSchema.safeParse({...card,body:'细节'.repeat(61)}).success,false)
 })
+test('a goal suggestion is kept only against a goal candidate from the same project',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-'))
+ const refs=[{entry_id:'source:nova',version:'v1'}]
+ const digests=[{project_key:'k',name:'nova',role:'own' as const,summary:'Voice agent',focus:'Fixing workbench content',next_step:null,refs}]
+ let tabFor:(tab:string)=>'todos'|'goals'=tab=>tab as 'todos'|'goals'
+ const generate=(candidates:readonly {candidate_id:string;tab:string}[])=>Promise.resolve({recap:null,cards:candidates.map(c=>({candidate_id:c.candidate_id,tab:tabFor(c.tab),title:c.tab==='goals'?'让 Nova 成为每天在用的助手':'Finish the digest layer',body:'一周里大部分事情都交给它。',why:null,next:c.tab==='goals'?'先把待办页跑顺':null,refs}))})
+ const context=new WorkbenchContext(join(dir,'cards.json'),generate,()=>undefined)
+ try{
+  await context.open();context.update([],{items:digests,pending:0});await context.refresh()
+  const goal=context.snapshot().cards.find(card=>card.tab==='goals')
+  assert.equal(goal?.title,'让 Nova 成为每天在用的助手');assert.equal(goal?.next,'先把待办页跑顺')
+  assert.equal(context.snapshot().empty_reasons.goals,null)
+  tabFor=()=>'goals';await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+  assert.deepEqual(context.snapshot().cards.map(card=>card.tab),['goals'],'a todo candidate relabelled as a goal is dropped')
+ }finally{await context.close();await rm(dir,{recursive:true,force:true})}
+})
 test('automatic cards are grounded, persistent, dismissible, and disappear after source invalidation',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-'));const path=join(dir,'cards.json')
  const entry:ContextInput={kind:'file',id:'source:m',version:'v1',content:'Next step: review the design.',source_id:'s',file_id:'m',root:'/project',rel_path:'notes.md',role:'document',mtime_ms:1,priority:2}
