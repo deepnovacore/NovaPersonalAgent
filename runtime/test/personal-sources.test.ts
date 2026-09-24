@@ -435,6 +435,49 @@ test('pausing a source stops its background embedding and resuming finishes it',
  }finally{release();await f.close()}
 })
 
+test('startup never embeds chunks of a paused source that its record does not own yet',async()=>{
+ const f=await fixture();let calls=0
+ try{
+  await writeFile(join(f.folder,'a.md'),'Committed before the crash')
+  f.setEmbeddingHook(()=>Promise.reject(Error('offline')))
+  const {id}=await f.sources.command('sources.add',{path:f.folder,consent:true}) as {id:string}
+  await f.knowledge.vectorsSettled();await f.sources.close()
+  const path=join(f.root,'db','sources.json'),state=JSON.parse(await readFile(path,'utf8')) as {sources:{view:{state:string};files:{path:string;size:number;mtime:number}[];pending:unknown}[]}
+  const file=state.sources[0]!.files[0]!
+  state.sources[0]!.view.state='paused';state.sources[0]!.pending={path:file.path,size:file.size,mtime:file.mtime,owned:true,previous_updated_at:null};state.sources[0]!.files=[]
+  await writeFile(path,JSON.stringify(state))
+  f.setEmbeddingHook(()=>{calls++;return Promise.resolve()})
+  const [orphan]=(await f.knowledge.listSources()).map(source=>source.id)
+  let gate:Parameters<KnowledgeService['setVectorGate']>[0]|undefined
+  const knowledge={listSources:()=>f.knowledge.listSources(),handle:(method:string,params:unknown)=>f.knowledge.handle(method,params),
+   syncFile:(...args:Parameters<KnowledgeService['syncFile']>)=>f.knowledge.syncFile(...args),resumeVectors:()=>f.knowledge.resumeVectors(),
+   setVectorGate:(value:NonNullable<typeof gate>)=>{gate=value;f.knowledge.setVectorGate(value)}}
+  for(const scanOnOpen of [false,true]){
+   const sources=new LocalDirectorySources({path,pollMs:0,scanOnOpen,knowledge,processingGrant:(consent,revision,scope_revision)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null})})
+   try{
+    await sources.open();for(let n=0;n<10;n++)await new Promise(resolve=>setTimeout(resolve,10));await f.knowledge.vectorsSettled()
+    if(!scanOnOpen)assert.equal(gate?.(orphan!,false),null,'an id no record owns yet stays fenced, even with a ledger that would allow it')
+   }finally{await sources.close()}
+   assert.equal(calls,0,`scanOnOpen=${scanOnOpen}: a paused source's chunks are not uploaded at startup`)
+  }
+  assert.ok(id)
+ }finally{await f.reopen();await f.close()}
+})
+test('re-granting consent without a scan embeds what the withdrawal left pending',async()=>{
+ const f=await fixture();let calls=0
+ try{
+  await writeFile(join(f.folder,'a.md'),'Waiting for vectors')
+  f.setEmbeddingHook(()=>Promise.reject(Error('offline')))
+  const {id}=await f.sources.command('sources.add',{path:f.folder,consent:true}) as {id:string}
+  await f.knowledge.vectorsSettled()
+  await f.sources.command('sources.consent',{id,consent:false})
+  f.setEmbeddingHook(()=>{calls++;return Promise.resolve()})
+  await f.sources.command('sources.consent',{id,consent:true})
+  for(let n=0;n<50&&calls===0;n++)await new Promise(resolve=>setTimeout(resolve,10));await f.knowledge.vectorsSettled()
+  assert.equal(calls,1,'the re-grant lifts the withdrawal fence and requeues the pending vectors')
+ }finally{await f.close()}
+})
+
 test('legacy directory state without processing consent reads locally without embedding',async()=>{
  const f=await fixture();let embeddings=0
  try{
@@ -1442,5 +1485,17 @@ test('rotating tail probe admits a recently active deep project while old roots 
    assert.ok(saved.sources[0]!.walk.ledger.some(item=>oldRoots.includes(item.path)&&item.status==='done'),'older roots should continue making progress')
    assert.ok(saved.sources[0]!.walk.queue.length>0,'the scan should remain bounded and resumable')
   }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
+test('acceptance counts report cumulative scan time and entries per stage',async()=>{
+ const f=await fixture()
+ try{
+  await writeFile(join(f.folder,'a.md'),'Next step: review the local note.');await writeFile(join(f.folder,'b.md'),'An idea for the setup.')
+  await f.sources.command('sources.add',{path:f.folder,consent:true})
+  const counts=f.sources.acceptanceCounts()
+  assert.equal(counts.scan_ingest_n,2,'one ingest entry per read file')
+  for(const stage of ['recover_pending','metadata_walk','ingest','on_change_final'])assert.ok(Number.isInteger(counts[`scan_${stage}_ms`])&&counts[`scan_${stage}_ms`]!>=0,stage)
+  assert.ok(counts.scan_on_change_final_n!>=1,'the last stage is closed when the scan ends')
  }finally{await f.close()}
 })

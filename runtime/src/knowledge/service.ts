@@ -58,7 +58,7 @@ export class KnowledgeService {
   readonly #vectorQueue = new Map<string, {grant: ProcessingGrant | undefined; signal: AbortSignal | undefined}>()
   readonly #vectorRetries = new Map<string, number>()
   #vectorWork: Promise<void> | undefined
-  #vectorGate: ((id: string) => VectorOwner | null | undefined) | undefined
+  #vectorGate: ((id: string, queuedByOwner: boolean) => VectorOwner | null | undefined) | undefined
   #resumeRequested = false
 
   constructor(options: {store: KnowledgeStoreClient; embedding: EmbeddingProvider; requireEvidenceLedger?: boolean}) {
@@ -98,8 +98,9 @@ export class KnowledgeService {
 
   /** The source owner decides, per backfill round, whether a knowledge source may still be embedded:
    * null skips it now, an owner's signal cancels its in-flight uploads and its current grant replaces
-   * the one captured at queue time, undefined means no owner fences it. */
-  setVectorGate(gate: (id: string) => VectorOwner | null | undefined): void {this.#vectorGate = gate}
+   * the one captured at queue time, undefined means no owner fences it. `queuedByOwner` says the owner
+   * queued this work itself with a lifecycle signal, before it could record the new source id. */
+  setVectorGate(gate: (id: string, queuedByOwner: boolean) => VectorOwner | null | undefined): void {this.#vectorGate = gate}
 
   /** Scans commit lexically first; the source owner resumes vectors a previous run or a pause left unfinished. */
   async resumeVectors(): Promise<void> {
@@ -129,7 +130,7 @@ export class KnowledgeService {
       if (this.#stop.signal.aborted) return
       try {await this.#embedSource(id, grant, signal); this.#vectorRetries.delete(id)} catch (cause) {
         if (this.#stop.signal.aborted) return
-        const gate = this.#vectorGate?.(id)
+        const gate = this.#vectorGate?.(id, signal !== undefined)
         if (gate === null || gate?.signal.aborted || signal?.aborted) {this.#vectorRetries.delete(id); continue}
         const acceptance = acceptanceManifest()
         if (acceptance) appendFileSync(join(acceptance.outputDirectory, 'knowledge-errors.ndjson'), JSON.stringify({stage: 'embedding_backfill', code: ingestionCode(cause, 'embedding'), error: cause instanceof Error ? `${cause.name}: ${cause.message}`.slice(0, 300) : typeof cause}) + '\n', {mode: 0o600})
@@ -144,7 +145,7 @@ export class KnowledgeService {
   async #embedSource(id: string, grant: ProcessingGrant | undefined, owner: AbortSignal | undefined): Promise<void> {
     // One provider batch per round, so pause or revocation is observed before every upload.
     for (let round = 0; round < 2000; round++) {
-      const gate = this.#vectorGate?.(id)
+      const gate = this.#vectorGate?.(id, owner !== undefined)
       if (gate === null || gate?.signal.aborted || owner?.aborted) return
       const current = gate ? gate.grant : grant
       const pending = await this.#store.unembeddedChunks(id, this.#embedding.id, this.#embedding.dims)
@@ -152,7 +153,7 @@ export class KnowledgeService {
       const chunks = pending.chunks.slice(0, EMBED_BATCH)
       const evidenceIds = chunks.map(chunk => chunk.evidence_id), ids = evidenceIds.filter((value): value is string => value !== undefined)
       const ledger = this.#ledger
-      const fenced = () => {const now = this.#vectorGate?.(id); return now === null || !!now?.signal.aborted || !!gate?.signal.aborted || !!owner?.aborted || (gate !== undefined && now?.grant?.embedding_provider !== current?.embedding_provider)}
+      const fenced = () => {const now = this.#vectorGate?.(id, owner !== undefined); return now === null || !!now?.signal.aborted || !!gate?.signal.aborted || !!owner?.aborted || (gate !== undefined && now?.grant?.embedding_provider !== current?.embedding_provider)}
       const allowed = async () => !fenced() && (ledger
         ? evidenceIds.length > 0 && (await Promise.all(evidenceIds.map(async value => value ? await (ledger.canProcess?.(value, 'embedding') ?? Promise.resolve(false)) : false))).every(Boolean)
         : current?.embedding_provider === this.#embedding.id)

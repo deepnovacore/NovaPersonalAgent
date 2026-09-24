@@ -142,6 +142,8 @@ export class LocalDirectorySources {
   /** Outlives a scan so pause, removal, and withdrawal also stop background embedding. */
   #lifecycles=new Map<string,AbortController>()
   #ignored=new Map<string,{dirs:Promise<Set<string>>;checked:number}>()
+  // Cumulative scan time per stage, reported in acceptance counts.
+  #stageTimes=new Map<string,{ms:number;n:number}>()
 
   constructor(options: LocalDirectorySourceOptions) {this.#options = options}
   async open(): Promise<void> {
@@ -170,13 +172,14 @@ export class LocalDirectorySources {
     assertAcceptanceGrant(this.#options.processingGrant?.(true,1,0),this.#records.filter(record=>!record.deleting&&['connected','error'].includes(record.view.state)).map(record=>record.processing_consent??{extraction_provider:null,embedding_provider:null}))
     appendAcceptanceCounts('sources_open',{sources:this.#records.length,indexed:this.#records.reduce((sum,record)=>sum+record.files.filter(file=>file.valid).length,0)})
     this.#closed = false
-    this.#options.knowledge.setVectorGate?.(id=>{
+    this.#options.knowledge.setVectorGate?.((id,queuedByOwner)=>{
       const record=this.#records.find(item=>item.files.some(file=>file.id===id))
-      if(!record)return undefined
+      // An id no record owns may belong to an unrecovered pending file; only a file this
+      // instance is syncing right now, fenced by its lifecycle signal, may proceed unowned.
+      if(!record)return queuedByOwner?undefined:null
       if(this.#closed||record.deleting||!['connected','error'].includes(record.view.state))return null
       return {signal:this.#lifecycle(record).signal,grant:record.processing_consent}
     })
-    void this.#options.knowledge.resumeVectors?.().catch(()=>undefined)
     const roots=[...new Set(this.#records.filter(record=>!record.deleting&&['connected','error'].includes(record.view.state)).flatMap(record=>record.files.filter(file=>file.valid&&file.excerpt).map(file=>file.unit??computerUnit(record.view.path,file.path))))].slice(0,64)
     const activity=this.#activity=new GitActivityCache(join(dirname(this.#path),basename(this.#path,'.json')+'.activity.json'))
     this.#activityWarmup=(async()=>{
@@ -185,9 +188,12 @@ export class LocalDirectorySources {
       await activity.flush()
       if(!this.#closed&&roots.length)await this.#options.onChange?.(true)
     })().catch(()=>{/* Scan refreshes these optional hints later. */})
-    if(this.#options.scanOnOpen===false)return
+    const resumeVectors=()=>void this.#options.knowledge.resumeVectors?.().catch(()=>undefined)
+    if(this.#options.scanOnOpen===false){resumeVectors();return}
+    for (const record of [...this.#records]) await this.#recoverPending(record)
+    // Resume after pending ownership is recovered, so the gate can fence those files.
+    resumeVectors()
     for (const record of [...this.#records]) {
-      await this.#recoverPending(record)
       if (record.deleting) await this.#delete(record)
       else if (record.view.state === 'connected' || record.view.state === 'error') {if(record.view.scope==='computer'){const timer=setTimeout(()=>{if(!this.#closed)void this.#sync(record).catch(()=>undefined)},0);timer.unref()}else await this.#sync(record)}
     }
@@ -221,7 +227,10 @@ export class LocalDirectorySources {
       const directories=(record.walk?.queue??[]).map(item=>({eligible_at:dueByPath.get(item.path)??0,reason:'directory'}));
       const work=[...directories,...(record.walk?.pending??[]),...(record.walk?.deferred??[])];
       for(const item of work){const due=Number(item.eligible_at??0);counts.remaining_queue++;if(item.reason==='body_budget')counts.body_budget++;else if(item.reason==='retry')counts.retry++;else if(item.reason==='directory')counts.directories++;if(due<=now)counts.eligible_queue++;else{counts.deferred_queue++;counts.next_due_at=counts.next_due_at===0?due:Math.min(counts.next_due_at,due)}}
-    }return counts
+    }
+    const stages:Record<string,number>={}
+    for(const [stage,row] of this.#stageTimes){stages[`scan_${stage}_ms`]=Math.round(row.ms);stages[`scan_${stage}_n`]=row.n}
+    return {...counts,...stages}
   }
   list(): SourceSnapshot[] {const expected=this.#options.processingGrant?.(true,1,0);return this.#records.map(record => ({...structuredClone(record.view), processing_consent_required:!record.processing_consent?.extraction_provider||record.processing_consent.extraction_provider!==expected?.extraction_provider||record.processing_consent.embedding_provider!==expected?.embedding_provider, excludes: [...new Set([...SOURCE_EXCLUDES, ...(record.view.scope==='computer'?COMPUTER_EXCLUDES:[]), ...record.view.excludes])]}))}
   #watchComputer(record:SourceRecord):void {
@@ -339,7 +348,11 @@ export class LocalDirectorySources {
       record.processing_consent=grant
       for(const file of record.files)file.observed=false
       await this.#save()
-      if(q.consent)void this.#options.knowledge.resumeVectors?.().catch(()=>undefined)
+      if(q.consent){
+        // A re-grant lifts the fence a withdrawal left; a paused source stays fenced by its state.
+        if(this.#lifecycles.get(record.view.id)?.signal.aborted&&['connected','error'].includes(record.view.state))this.#lifecycles.delete(record.view.id)
+        void this.#options.knowledge.resumeVectors?.().catch(()=>undefined)
+      }
       await this.#options.onChange?.(false);return {ok:true}
     }
     const parsed = z.object({id: idSchema}).strict().safeParse(params)
@@ -594,19 +607,21 @@ export class LocalDirectorySources {
     let currentReadFailure=false, currentObserveFailure=false, currentCleanupFailure=false
     let observationPaths = new Set<string>()
     let stage:z.infer<typeof scanStageSchema>='recover_pending'
+    let stageAt=performance.now()
+    const enter=(next:typeof stage)=>{const now=performance.now(),row=this.#stageTimes.get(stage)??{ms:0,n:0};row.ms+=now-stageAt;row.n++;this.#stageTimes.set(stage,row);stage=next;stageAt=now}
     try {
       // Finish an interrupted replacement before metadata discovery can
       // overwrite the checkpoint with the already-committed index timestamp.
-      stage='recover_pending';await this.#recoverPending(record)
-      stage='path_validation'
+      await this.#recoverPending(record)
+      enter('path_validation')
       if (view.scope!=='computer'&&await realpath(view.path) !== view.path) throw new Error('path_denied')
       if(view.scope==='computer'){
-        stage='cleanup'
+        enter('cleanup')
         currentCleanupFailure=await this.#cleanupExcludedFiles(record,signal)
         if(record.walk){record.walk.pending=record.walk.pending.filter(file=>!isComputerExcludedPath(view,file.path));record.walk.deferred=record.walk.deferred.filter(file=>!isComputerExcludedPath(view,file.path))}
       }
-      if(view.scope==='computer'){stage='computer_batch';files.push(...await this.#computerBatch(record,signal,force));directories.length=0;complete=false}
-      stage='metadata_walk'
+      if(view.scope==='computer'){enter('computer_batch');files.push(...await this.#computerBatch(record,signal,force));directories.length=0;complete=false}
+      enter('metadata_walk')
       while (directories.length > 0 && visited < 20000) {
         signal.throwIfAborted()
         const directory = directories.shift()!
@@ -641,13 +656,13 @@ export class LocalDirectorySources {
       }
       if (directories.length || visited >= 20000) {complete = false; skip('metadata_limit')}
       // Reconcile only after a complete metadata pass; unreadable/offline is never deletion.
-      stage='reconcile'
+      enter('reconcile')
       if (complete) for (const previous of [...record.files]) {
         if (seen.has(previous.path)) continue
         signal.throwIfAborted()
         await this.#removeFile(record, previous)
       }
-      stage='knowledge_list'
+      enter('knowledge_list')
       const known = new Map((await this.#options.knowledge.listSources()).map(item => [item.locator, item]))
       let bytes = 0
       const counts = new Map<string, number>()
@@ -668,7 +683,7 @@ export class LocalDirectorySources {
         }
       }
       for (const file of balanced(selected, view.path)) {
-        stage='recheck'
+        enter('recheck')
         signal.throwIfAborted()
         const previous = record.files.find(old => old.path === file.path)
         if (previous) previous.unit = file.unit
@@ -732,7 +747,7 @@ export class LocalDirectorySources {
         if (view.read >= view.max_files || bytes + file.size > view.max_bytes) {await discardStaleIndex();skip('body_budget');deferPending(record,file,'body_budget',Date.now()+60_000);continue}
         if (record.files.length >= 20000 && !previous) {skip('index_limit');settlePending(record,file.path);continue}
         try {
-          stage='ingest'
+          enter('ingest')
           if (await realpath(file.path) !== file.path) {await discardStaleIndex();skip('changed_path');settlePending(record,file.path);continue}
           record.pending = {path: file.path, size: file.size, mtime: file.mtime, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
           await this.#save()
@@ -763,7 +778,7 @@ export class LocalDirectorySources {
         }
       }
       signal.throwIfAborted()
-      stage='health_update'
+      enter('health_update')
       if(view.state!=='paused'&&view.state!=='disconnected')view.state='connected'
       const cleanupPending=view.scope==='computer'&&record.files.some(file=>isComputerExcludedPath(view,file.path))
       const partial=cleanupPending||[record.walk?.queue.length,record.walk?.pending.length,record.walk?.deferred.length].some(count=>!!count)||!!record.walk?.ledger.some(item=>item.status==='partial')||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','index_capacity','metadata_limit','project_metadata_limit','depth_limit','directory_capacity'].includes(reason))
@@ -771,11 +786,11 @@ export class LocalDirectorySources {
       view.coverage=partial||currentReadFailure||currentCleanupFailure?'partial':'complete'
       view.last_sync = new Date().toISOString()
       // Scan statistics belong in source settings, not in the user's memory.
-      stage='on_invalidate'
+      enter('on_invalidate')
       if (record.observation) {await this.#options.onInvalidate?.(view.id); record.observation = ''; await this.#save()}
-      stage='on_change'
+      enter('on_change')
       await this.#options.onChange?.(false)
-      stage='observe'
+      enter('observe')
       for (const file of balanced(record.files.filter(file => file.valid && !file.observed && !!file.excerpt && representativeDocument(file.path) && (view.scope==='computer'||observationPaths.has(file.path))), view.path)
         .filter(file=>(file.observe_retry_at??0)<=Date.now()).slice(0, 8)) {
         signal.throwIfAborted()
@@ -807,10 +822,11 @@ export class LocalDirectorySources {
     const cleanupPending=view.scope==='computer'&&record.files.some(file=>isComputerExcludedPath(view,file.path))
     if(record.walk){view.scan_pending=!!(record.walk.queue.length||record.walk.pending.length||record.walk.deferred.length||record.walk.ledger.some(item=>item.status==='partial')||observationPending||cleanupPending);if(!view.scan_pending&&view.scope!=='computer')record.walk=null}
     else view.scan_pending=observationPending
-    stage='finalize';await this.#save()
-    stage='on_change_final'
+    enter('finalize');await this.#save()
+    enter('on_change_final')
     try{await this.#options.onChange?.(beforeEvidence !== record.files.filter(file => file.valid).map(refFor).sort().join() || beforeObservation !== record.observation)}
     catch(error){view.failures.splice(0,Math.max(0,view.failures.length-49));view.failures.push({path:'',code:errorCode(error),stage});await this.#save();throw error}
+    finally{enter(stage)}
   }
   async #recoverPending(record: SourceRecord): Promise<void> {
     const pending = record.pending
