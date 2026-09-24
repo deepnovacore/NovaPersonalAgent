@@ -85,6 +85,12 @@ export interface HostOptions {
     now?: () => Date;
 }
 const hash = (s: unknown): string => createHash('sha256').update(JSON.stringify(s)).digest('hex');
+/** Count cards that cite at least one source entry at its current version. */
+export function countSourceGroundedContextCards(cards:readonly {tab:'todos'|'ideas';refs:readonly {entry_id:string;version:string|number}[]}[],entries:readonly ContextEntry[]):{cards:number;todos:number;ideas:number}{
+    const current=new Set(entries.map(entry=>JSON.stringify([entry.id,entry.version])));
+    const grounded=cards.filter(card=>card.refs.some(ref=>current.has(JSON.stringify([ref.entry_id,ref.version]))));
+    return {cards:grounded.length,todos:grounded.filter(card=>card.tab==='todos').length,ideas:grounded.filter(card=>card.tab==='ideas').length};
+}
 export type PresentationMode = 'background' | 'workbench' | 'orb'
 export interface PresentedDecision {approval_id?:string|undefined;conversation_id?:string|undefined;proposal_id?:string|undefined}
 export class PersonalAgentHost {
@@ -346,7 +352,7 @@ export class PersonalAgentHost {
         }
     }
     #acceptanceTimer:ReturnType<typeof setInterval>|undefined;
-    #acceptanceSample():void{if(!acceptanceEnabled())return;appendAcceptanceCounts('source_state',this.#sources?.acceptanceCounts?.()??{sources:0,indexed:0,excerpts:0,remaining_queue:0,eligible_queue:0,deferred_queue:0,next_due_at:0});const context=this.workbenchContext.snapshot();appendAcceptanceCounts('context_state',{eligible_candidates:context.candidate_count,cards:context.cards.length})}
+    #acceptanceSample():void{if(!acceptanceEnabled())return;appendAcceptanceCounts('source_state',this.#sources?.acceptanceCounts?.()??{sources:0,indexed:0,excerpts:0,remaining_queue:0,eligible_queue:0,deferred_queue:0,next_due_at:0});const context=this.workbenchContext.snapshot(),entries=this.#sources?.contextEntries?.()??[],grounded=countSourceGroundedContextCards(context.cards,entries);appendAcceptanceCounts('context_state',{eligible_candidates:context.candidate_count,cards:context.cards.length,source_context_entries:entries.length,source_grounded_cards:grounded.cards,source_grounded_todos:grounded.todos,source_grounded_ideas:grounded.ideas})}
     #schedule(): void {
         clearInterval(this.#timer);
         const settings=dailyBriefSettings(this.#state.settings);

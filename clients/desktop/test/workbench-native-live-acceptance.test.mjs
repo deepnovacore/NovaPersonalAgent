@@ -12,11 +12,15 @@ test('provider identity must be explicitly authorized',()=>{
  assert.throws(()=>assertProvider('unknown',['known']),/provider_not_authorized/)
  assert.doesNotThrow(()=>assertProvider('known',['known']))
 })
-test('count-only report cannot copy private fields',()=>{
- const report=countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:1,post_sources:2,eligible_candidates:3,model_calls:4,todos:5,ideas:6,remaining_queue:7,screenshots:['/tmp/evidence/todos.png'],privateExcerpt:'PRIVATE EXCERPT'})
+test('count-only report separates DOM cards from source-grounded cards and cannot copy private fields',()=>{
+ const report=countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:1,post_sources:2,eligible_candidates:3,model_calls:4,todos:5,ideas:6,source_grounded_cards:2,source_grounded_todos:1,source_grounded_ideas:1,remaining_queue:7,screenshots:['/tmp/evidence/todos.png'],privateExcerpt:'PRIVATE EXCERPT'})
  assert.equal(report.profile_kind,'original');assert.equal(report.native_main,true)
- assert.equal(report.source_to_card.rendered,report.dom_cards.todos+report.dom_cards.ideas)
+ assert.equal(report.source_to_card.dom_rendered,report.dom_cards.todos+report.dom_cards.ideas)
+ assert.equal(report.source_to_card.verified_source_grounded,2)
+ assert.deepEqual(report.source_to_card.verified_source_grounded_by_tab,{todos:1,ideas:1})
  assert.equal(JSON.stringify(report).includes('PRIVATE EXCERPT'),false)
+ assert.throws(()=>countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:0,post_sources:0,eligible_candidates:0,model_calls:0,todos:0,ideas:0,source_grounded_cards:1,source_grounded_todos:0,source_grounded_ideas:0,remaining_queue:0,screenshots:[]}),/source_card_count_mismatch/)
+ assert.equal(countOnlyReport({build_commit:'a'.repeat(40),profile_hash:'b'.repeat(64),pre_sources:0,post_sources:0,eligible_candidates:0,model_calls:0,todos:0,ideas:0,source_grounded_cards:0,source_grounded_todos:0,source_grounded_ideas:0,remaining_queue:0,screenshots:[]}).source_to_card.verified_source_grounded,0)
 })
 
 test('harness cannot replace the profile, delete context, or construct a window',async()=>{

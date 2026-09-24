@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PersonalAgentHost, type DiscoverySnapshot } from '../src/personal-agent/host.js';
+import { PersonalAgentHost, countSourceGroundedContextCards, type DiscoverySnapshot } from '../src/personal-agent/host.js';
 import type {ContextInput} from '../src/personal-agent/context-candidates.js';
 import { SuggestionPool } from '../src/core/suggestions.js';
 import type { MemoryEntry } from '../src/memory/entry.js';
@@ -16,6 +16,17 @@ import { ClientCommands } from '../src/server/client-protocol.js';
 const now = new Date('2026-09-11T10:00:00Z');
 const entry = (id = 'plan', version = 1): MemoryEntry => ({ id, version, content: 'Today prepare a demo', kind: 'plan', origin: 'stated', source_refs: [{ type: 'conversation', ref: 'conversation:1', observed_at: now.toISOString() }], observed_at: now.toISOString(), recorded_at: now.toISOString(), topic: 'work', status: 'active', corrected_to: null, confidence_note: null });
 const proposal = (id = 'plan', version = 1) => ({ kind: 'question' as const, summary: 'Check demo materials?', why_now: 'You said the demo is today', evidence_refs: [] as string[], memory_refs: [{ entry_id: id, version }] });
+test('acceptance source-to-card proof requires a current source ref and version',()=>{
+ const cards=[
+  {tab:'todos' as const,refs:[{entry_id:'source:file-a',version:'v2'}]},
+  {tab:'ideas' as const,refs:[{entry_id:'source:file-a',version:'v1'}]},
+  {tab:'ideas' as const,refs:[{entry_id:'memory:unrelated',version:3}]},
+  {tab:'ideas' as const,refs:[{entry_id:'memory:stated',version:4},{entry_id:'source:file-b',version:'v7'}]},
+ ];
+ const entries=[{kind:'file' as const,id:'source:file-a',version:'v2',content:'Current'}, {kind:'file' as const,id:'source:file-b',version:'v7',content:'Current'}];
+ assert.deepEqual(countSourceGroundedContextCards(cards,entries),{cards:2,todos:1,ideas:1});
+ assert.deepEqual(countSourceGroundedContextCards([],entries),{cards:0,todos:0,ideas:0});
+});
 test('discovery prioritizes dated open Life objects and excludes inactive objects without hiding history',async()=>{
  const f=await fixture()
  try{
