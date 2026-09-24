@@ -104,9 +104,13 @@ The Responses-only proxy can emit model-catalog/unknown-model warnings because
 it does not serve `/models`. The pinned CLI/proxy has been smoke-tested with
 `qwen/qwen3.8-flash` for shell tool calling and a synthetic boundary-bug review;
 the explicit context setting avoids assuming the full advertised model window.
-This does not establish GitHub Linux runner acceptance or real-PR review quality.
+Fork end-to-end validation also exercised a real GitHub Linux runner, identified
+a deliberately broken release URL, and updated the same comment after correction:
+[validation PR](https://github.com/FishWoWater/NovaAudioAgent/pull/1).
+These samples do not establish general model accuracy.
 
 仅转发 Responses 的代理不提供 `/models`，可能出现模型目录或未知模型警告。
 固定版本 CLI/proxy 与 `qwen/qwen3.8-flash` 已通过 shell 工具调用和模拟边界错误
 评审测试；显式配置上下文大小，不直接假设完整的模型窗口。
-这不等于 GitHub Linux runner 验收，也不代表真实 PR 的审查质量已验证。
+fork 的真实 GitHub Linux runner 验证还覆盖了发现故意引入的发布 URL 错误，
+以及修复后更新同一条评论（见上方验证 PR）。这些样例不代表模型的一般准确率。

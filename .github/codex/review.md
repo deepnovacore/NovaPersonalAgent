@@ -1,5 +1,7 @@
-Review this PR's diff and trace its impact through relevant callers, contracts,
+Review this PR's final net diff and trace its impact through relevant callers, contracts,
 configuration and tests. This is a focused review, not a full-repository audit.
+Do not inspect per-commit diffs, git logs, authors, email addresses or commit
+messages. Do not suggest history cleanup, squashing, or publication-policy work.
 
 The checkout is trusted workflow code, NOT necessarily the PR's base or head.
 Use the BASE_SHA and HEAD_SHA supplied below:
@@ -26,6 +28,10 @@ not permission to claim full coverage when a large diff was only partly read.
 Ignore lockfile/generated-file detail unless directly relevant to an identified bug.
 Prioritize risky changes and state skipped areas explicitly. Do not claim tests ran.
 
+If the net diff only changes comments or documentation and you find no concrete
+behavior/contract mismatch, stop after verifying that narrow scope. Do not expand
+the task into artifact, release, privacy, architecture or extra-test audits.
+
 Return concise Markdown with these sections, English followed by a short Chinese
 translation (do not duplicate code):
 
@@ -42,7 +48,8 @@ numbers. If none, say no high-confidence actionable issues were found within the
 reviewed scope; do not describe the whole PR as safe or approved.
 
 ### Overall summary / 总体总结
-Two or three short bullets: overall impact, cross-module concerns, and any important
-verification gap. Include what was inspected and any coverage limits. Keep the
+At most three short bullets: actual impact, a demonstrated cross-module problem
+if any, and what was inspected/not verified. Do not invent concerns to fill these
+categories. No speculative refactors, extra tests, or history/author commentary. Keep the
 entire response below 3,000 characters. Do not repeat the findings in the summary. Do not include hidden HTML markers,
 user/team mentions, or approval commands.
