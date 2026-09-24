@@ -913,13 +913,15 @@ function configurationFieldName(field: string): string {
 
 /** Injected settings never trigger ambient filesystem reads. Production passes its loaded registry explicitly. */
 export function capabilitiesFromSettings(settings: Settings): CapabilityRegistry {
+  const needsDashscopeSearch = settings.search_mcp_url === ''
+    && (settings.search_provider === 'mcp' || !settings.tavily_api_key?.trim())
   return withoutUncredentialedModules(parseCapabilityRegistry({version: 1, modules: {
     camera: {enabled: settings.camera_module_enabled},
     search: {provider: settings.search_provider, ...(settings.search_mcp_url === '' ? {} : {mcp: {
       url: settings.search_mcp_url, tool: settings.search_mcp_tool,
     }})},
   }}, {
-    ...(settings.dashscope_api_key === null ? {} : {DASHSCOPE_API_KEY: settings.dashscope_api_key}),
+    ...(!needsDashscopeSearch || settings.dashscope_api_key === null ? {} : {DASHSCOPE_API_KEY: settings.dashscope_api_key}),
     ...(settings.search_provider !== 'tavily' || settings.tavily_api_key === null ? {} : {TAVILY_API_KEY: settings.tavily_api_key}),
     ...(settings.search_mcp_tool === 'web_search' ? {} : {SEARCH_MCP_TOOL: settings.search_mcp_tool}),
   }), settings)
