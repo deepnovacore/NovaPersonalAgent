@@ -30,7 +30,7 @@ test('knowledge service ingests, retrieves evidence and emits only safe host sta
   } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
 
-test('syncFile reports bounded document, embedding and store failures without losing prior index', async () => {
+test('syncFile reports bounded document and store failures without losing prior index, and embedding never blocks it', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-codes-'))
   const file = join(directory, 'manual.md'), unsupported = join(directory, 'manual.bin')
   const store = new KnowledgeStoreClient({path: join(directory, 'db', 'knowledge.sqlite')})
@@ -54,11 +54,17 @@ test('syncFile reports bounded document, embedding and store failures without lo
     const fingerprint = (await service.listSources())[0]!.fingerprint
     await writeFile(file, 'Replacement text')
     failEmbedding = true
-    await assert.rejects(sync(file, before.id), /^Error: embedding_failed$/u)
-    assert.equal((await service.listSources())[0]!.fingerprint, fingerprint)
-    failEmbedding = false; failStore = true
+    const replaced = await sync(file, before.id)
+    await service.vectorsSettled()
+    const current = (await service.listSources())[0]!.fingerprint
+    assert.notEqual(current, fingerprint, 'an embedding outage does not hold back the index')
+    assert.deepEqual(await store.unembeddedSources('fake-v1', 2), [replaced.id])
+    failEmbedding = false
+    assert.match((await service.recall('Replacement', 3))[0]?.text ?? '', /Replacement/u, 'unembedded text stays searchable lexically')
+    await writeFile(file, 'Third text')
+    failStore = true
     await assert.rejects(sync(file, before.id), /^Error: store_failed$/u)
-    assert.equal((await service.listSources())[0]!.fingerprint, fingerprint)
+    assert.equal((await service.listSources())[0]!.fingerprint, current)
     const status = JSON.stringify(await service.handle('knowledge.status', {}))
     assert.ok(!status.includes(secret) && !status.includes('private-value'))
   } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
@@ -186,5 +192,47 @@ test('knowledge status exposes forced lexical fallback from the real worker', as
   try {
     await service.open()
     assert.deepEqual(await service.handle('knowledge.status', {}), {fts: false, sources: [], jobs: []})
+  } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
+})
+
+test('scan-time sync commits before embedding and a stale backfill cannot write over newer content', async () => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-backfill-'))
+  const file = join(directory, 'notes.md')
+  const store = new KnowledgeStoreClient({path: join(directory, 'db', 'knowledge.sqlite')})
+  const seen: string[][] = []
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {release = resolve})
+  const service = new KnowledgeService({store, embedding: {id: 'fake-v1', dims: 2, embed: async texts => {
+    seen.push([...texts]); if (seen.length === 1) await gate
+    return texts.map(() => new Float32Array([1, 0]))}}})
+  const grant = {revision: 1, scope_revision: 0, extraction_provider: 'fake-v1', embedding_provider: 'fake-v1'}
+  try {
+    await service.open()
+    await writeFile(file, 'Old plan')
+    const first = await service.syncFile(file, directory, new AbortController().signal, undefined, grant)
+    assert.deepEqual(await store.unembeddedSources('fake-v1', 2), [first.id], 'sync returned while the embedding is still waiting')
+    await writeFile(file, 'New plan')
+    await service.syncFile(file, directory, new AbortController().signal, first.id, grant)
+    release(); await service.vectorsSettled()
+    assert.deepEqual(seen, [['Old plan'], ['New plan']])
+    assert.deepEqual(await store.unembeddedSources('fake-v1', 2), [])
+  } finally {release(); await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
+})
+
+test('vector writes require the embedded source fingerprint and chunk digest', async () => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-set-vectors-'))
+  const file = join(directory, 'notes.md')
+  const store = new KnowledgeStoreClient({path: join(directory, 'db', 'knowledge.sqlite')})
+  const service = new KnowledgeService({store, embedding: {id: 'fake-v1', dims: 2, embed: texts => Promise.resolve(texts.map(() => new Float32Array([1, 0])))}})
+  try {
+    await service.open(); await writeFile(file, 'A note')
+    const {id} = await service.syncFile(file, directory, new AbortController().signal)
+    const pending = await store.unembeddedChunks(id, 'fake-v1', 2), chunk = pending.chunks[0]!
+    const write = (fingerprint: string, content_digest: string) => store.setVectors({source_id: id, fingerprint, provider_id: 'fake-v1', dims: 2, vectors: [{chunk_id: chunk.chunk_id, content_digest, vector: [1, 0]}]})
+    assert.equal(await write('other', chunk.content_digest), 0)
+    assert.equal(await write(pending.fingerprint!, 'other'), 0)
+    assert.equal(await write(pending.fingerprint!, chunk.content_digest), 1)
+    assert.deepEqual(await store.unembeddedSources('fake-v1', 2), [])
+    assert.deepEqual(await store.unembeddedSources('fake-v2', 2), [id], 'a provider change makes the chunk pending again')
   } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })

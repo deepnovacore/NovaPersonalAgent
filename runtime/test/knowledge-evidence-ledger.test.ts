@@ -46,8 +46,9 @@ test('ledger-backed sync replaces at maxSources one and retains prior evidence a
   const file = join(directory, 'manual.md')
   await writeFile(file, 'Original verified content')
   const authority = ledger()
-  let failEmbedding = false
-  const store = new KnowledgeStoreClient({path: join(directory, 'db', 'knowledge.sqlite'), maxSources: 1})
+  let failEmbedding = false, failStore = false
+  const store = new KnowledgeStoreClient({path: join(directory, 'db', 'knowledge.sqlite'), maxSources: 1}), replace = store.replaceSource.bind(store)
+  store.replaceSource = async input => {if (failStore) throw Error('store credential=private-value'); await replace(input)}
   const service = new KnowledgeService({store, embedding: {id: 'fixture', dims: 2, embed: texts => failEmbedding
     ? Promise.reject(Error('secret provider detail'))
     : Promise.resolve(texts.map(() => new Float32Array([1, 0])))}})
@@ -61,12 +62,14 @@ test('ledger-backed sync replaces at maxSources one and retains prior evidence a
     await assert.rejects(service.syncFile(extra,directory,new AbortController().signal,undefined,grant),/^Error: index_capacity$/u)
     assert.deepEqual((await service.listSources()).map(item=>item.id),[first.id])
     await writeFile(file, 'Replacement verified content')
-    failEmbedding = true
-    await assert.rejects(service.syncFile(file, directory, new AbortController().signal, first.id, grant), /embedding_failed/u)
+    failStore = true
+    await assert.rejects(service.syncFile(file, directory, new AbortController().signal, first.id, grant), /store_failed/u)
     assert.deepEqual((await service.listSources()).map(item => item.id), [first.id])
     assert.ok(authority.rows.has(original))
-    failEmbedding = false
+    failStore = false; failEmbedding = true
     const second = await service.syncFile(file, directory, new AbortController().signal, first.id, grant)
+    await service.vectorsSettled(); failEmbedding = false
+    assert.deepEqual(await store.unembeddedSources('fixture', 2), [second.id], 'an embedding outage commits lexically and leaves vectors pending')
     assert.notEqual(second.id, first.id)
     assert.deepEqual((await service.listSources()).map(item => item.id), [second.id])
     assert.equal(authority.rows.has(original), false)

@@ -93,6 +93,9 @@ function execute(request: Request): unknown {
     case 'purge_evidence': return purgeEvidence(request.ids)
     case 'remove_source': return removeSource(request.id)
     case 'recall': return recall(request.query, request.vector, request.provider_id, request.k)
+    case 'unembedded_sources': return unembeddedSources(request.provider_id, request.dims)
+    case 'unembedded_chunks': return unembeddedChunks(request.source_id, request.provider_id, request.dims)
+    case 'set_vectors': return setVectors(request.input)
     case 'get_chunk': return getChunk(request.locator)
     case 'record_job': return recordJob(request.input)
     case 'list_jobs': return listJobs()
@@ -260,6 +263,53 @@ function linkEvidence(value: unknown): null {
     }
     opened.exec('COMMIT'); return null
   } catch (error) { try {opened.exec('ROLLBACK')} catch { /* no active transaction */ } throw error }
+}
+
+/** Chunks without a vector from this provider, so a scan can commit lexically and embed later. */
+function unembeddedSources(providerValue: unknown, dimsValue: unknown): readonly string[] {
+  const providerId = boundedString(providerValue, 160), dims = positiveInteger(dimsValue, 4096)
+  return (db().prepare(`SELECT DISTINCT c.source_id FROM chunks c LEFT JOIN embeddings e ON e.chunk_id = c.id AND e.provider_id = ? AND e.dims = ?
+    WHERE e.chunk_id IS NULL LIMIT 1000`).all(providerId, dims) as Row[]).map(row => textValue(row, 'source_id'))
+}
+
+function unembeddedChunks(sourceValue: unknown, providerValue: unknown, dimsValue: unknown): {fingerprint: string | null; chunks: readonly {chunk_id: string; content_digest: string; text: string; evidence_id?: string}[]} {
+  const sourceId = boundedString(sourceValue, 200), providerId = boundedString(providerValue, 160), dims = positiveInteger(dimsValue, 4096)
+  const opened = db(), source = opened.prepare('SELECT fingerprint FROM sources WHERE id = ?').get(sourceId) as Row | undefined
+  if (source === undefined) return {fingerprint: null, chunks: []}
+  const chunks = (opened.prepare(`SELECT c.id, c.content_digest, c.text, l.evidence_id FROM chunks c
+    LEFT JOIN embeddings e ON e.chunk_id = c.id AND e.provider_id = ? AND e.dims = ? LEFT JOIN evidence_links l ON l.chunk_id = c.id
+    WHERE c.source_id = ? AND e.chunk_id IS NULL ORDER BY c.ordinal, c.id LIMIT 100`).all(providerId, dims, sourceId) as Row[]).map(row => ({
+    chunk_id: textValue(row, 'id'), content_digest: textValue(row, 'content_digest'), text: textValue(row, 'text'),
+    ...(typeof row.evidence_id === 'string' ? {evidence_id: row.evidence_id} : {})}))
+  return {fingerprint: textValue(source, 'fingerprint'), chunks}
+}
+
+/** Writes only while the source fingerprint and each chunk digest still match what was embedded. */
+function setVectors(value: unknown): number {
+  if (!isRecord(value) || !Array.isArray(value.vectors) || value.vectors.length > 100) throw new StoreError('STORE_INVALID_INPUT')
+  const sourceId = boundedString(value.source_id, 200), fingerprint = boundedString(value.fingerprint, 200)
+  const providerId = boundedString(value.provider_id, 160), dims = positiveInteger(value.dims, 4096)
+  const vectors = value.vectors.map(item => {
+    if (!isRecord(item)) throw new StoreError('STORE_INVALID_INPUT')
+    const vector = numericVector(item.vector)
+    if (vector.length !== dims) throw new StoreError('STORE_INVALID_INPUT')
+    return {chunk_id: boundedString(item.chunk_id, 200), content_digest: boundedString(item.content_digest, 200), vector}
+  })
+  const opened = db()
+  try {
+    opened.exec('BEGIN IMMEDIATE')
+    let written = 0
+    if (opened.prepare('SELECT 1 FROM sources WHERE id = ? AND fingerprint = ?').get(sourceId, fingerprint)) {
+      const matches = opened.prepare('SELECT 1 FROM chunks WHERE id = ? AND source_id = ? AND content_digest = ?')
+      const write = opened.prepare('INSERT INTO embeddings(chunk_id, provider_id, dims, vector) VALUES (?, ?, ?, ?) ON CONFLICT(chunk_id) DO UPDATE SET provider_id = excluded.provider_id, dims = excluded.dims, vector = excluded.vector')
+      for (const item of vectors) if (matches.get(item.chunk_id, sourceId, item.content_digest)) {write.run(item.chunk_id, providerId, dims, vectorBlob(item.vector)); written++}
+    }
+    opened.exec('COMMIT'); return written
+  } catch (error) {
+    try {opened.exec('ROLLBACK')} catch { /* no active transaction */ }
+    if (error instanceof StoreError) throw error
+    throw new StoreError('STORE_WRITE_FAILED')
+  }
 }
 
 function evidenceLink(chunkId: string): {evidence_id?: string} {

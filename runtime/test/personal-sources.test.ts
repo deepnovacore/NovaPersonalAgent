@@ -17,9 +17,14 @@ async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string
   const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-directory-'))
   const folder = join(root, 'allowed'); await mkdir(folder)
   let failEmbedding = false, failInvalidation = false, failConsent=false
-  let embeddingHook: () => Promise<void> = () => Promise.resolve()
-  const knowledge = new KnowledgeService({store: new KnowledgeStoreClient({path: join(root, 'db', 'knowledge.sqlite')}),
-    embedding: {id: 'test', dims: 2, embed: texts => failEmbedding ? Promise.reject(new Error('offline')) : embeddingHook().then(() => texts.map(() => new Float32Array([1, 0])))}})
+  let embeddingHook: () => Promise<void> = () => Promise.resolve(), ingestHook: () => Promise<void> = () => Promise.resolve()
+  // Scan-time ingestion commits before embedding, so failures and gates are injected at the index commit.
+  const store = new KnowledgeStoreClient({path: join(root, 'db', 'knowledge.sqlite')}), replace = store.replaceSource.bind(store)
+  const record = store.recordJob.bind(store)
+  store.replaceSource = async input => {if (failEmbedding) throw new Error('offline'); await replace(input)}
+  store.recordJob = async input => {if (input.state === 'running') await ingestHook(); await record(input)}
+  const knowledge = new KnowledgeService({store,
+    embedding: {id: 'test', dims: 2, embed: texts => embeddingHook().then(() => texts.map(() => new Float32Array([1, 0])))}})
   await knowledge.open()
   const embeddings = {model:'test', embed: (texts: readonly string[]) => Promise.resolve(texts.map(() => [1,0]))}
   const native = realMemory ? new VoiceMem({path:join(root,'memory.sqlite'), userId:'test', embeddings, model:{complete:()=> Promise.resolve('{}')}}) : undefined
@@ -42,7 +47,7 @@ async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string
     onInvalidate: (ref: string) => { if (failInvalidation) throw new Error('interrupted'); invalidated.push(ref); memory?.forgetSource(ref) }}
   let sources = new LocalDirectorySources(options)
   await sources.open()
-  return {root, folder, knowledge, invalidated, observations, memory, setFailConsent(value:boolean){failConsent=value},setMemoryAvailable(value:boolean) {memoryAvailable=value}, setEmbeddingHook(hook: () => Promise<void>) {embeddingHook = hook}, setFail(value: boolean) {failEmbedding = value}, setFailInvalidation(value: boolean) {failInvalidation = value}, get sources() {return sources},
+  return {root, folder, knowledge, invalidated, observations, memory, setFailConsent(value:boolean){failConsent=value},setMemoryAvailable(value:boolean) {memoryAvailable=value}, setEmbeddingHook(hook: () => Promise<void>) {embeddingHook = hook}, setIngestHook(hook: () => Promise<void>) {ingestHook = hook}, setFail(value: boolean) {failEmbedding = value}, setFailInvalidation(value: boolean) {failInvalidation = value}, get sources() {return sources},
     reopen: async () => {await sources.close(); sources = new LocalDirectorySources(options); await sources.open()},
     setObserveHook(hook:typeof observeHook){observeHook=hook},
     setChangeHook(hook:typeof changeHook){changeHook=hook},
@@ -802,7 +807,7 @@ test('pause fences an in-flight body import before it can commit', async () => {
   const started = new Promise<void>(resolve => {entered = resolve})
   try {
     await writeFile(join(f.folder, 'notes.md'), 'An import being paused')
-    f.setEmbeddingHook(() => {entered(); return gate})
+    f.setIngestHook(() => {entered(); return gate})
     const adding = f.sources.command('sources.add', {path: f.folder, consent: true})
     await started
     const id = f.sources.list()[0]!.id
@@ -1258,7 +1263,7 @@ test('one large computer directory never persists more than the pending cap',asy
    await sources.open()
    let release!:()=>void,entered!:()=>void
    const gate=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
-   f.setEmbeddingHook(()=>{entered();return gate})
+   f.setIngestHook(()=>{entered();return gate})
    const sync=sources.command('sources.sync',{id})
    try{
     await started

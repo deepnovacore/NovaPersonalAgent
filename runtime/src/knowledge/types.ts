@@ -67,3 +67,8 @@ export interface KnowledgeJob {
   readonly error_code: string | null
   readonly updated_at: number
 }
+
+export interface KnowledgeUnembedded {
+  readonly fingerprint: string | null
+  readonly chunks: readonly {readonly chunk_id: string; readonly content_digest: string; readonly text: string; readonly evidence_id?: string}[]
+}

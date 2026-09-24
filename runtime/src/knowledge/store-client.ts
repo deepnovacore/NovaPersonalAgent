@@ -6,6 +6,7 @@ import type {
   KnowledgeRecallHit,
   KnowledgeSource,
   KnowledgeIndexChunk,
+  KnowledgeUnembedded,
   ReplaceKnowledgeSourceInput,
 } from './types.js'
 
@@ -136,6 +137,16 @@ export class KnowledgeStoreClient {
   }
 
   getChunk(locator: string): Promise<KnowledgeChunkResult> { return this.#request('get_chunk', {locator}) }
+
+  unembeddedSources(providerId: string, dims: number): Promise<readonly string[]> { return this.#request('unembedded_sources', {provider_id: providerId, dims}) }
+
+  unembeddedChunks(sourceId: string, providerId: string, dims: number): Promise<KnowledgeUnembedded> {
+    return this.#request('unembedded_chunks', {source_id: sourceId, provider_id: providerId, dims})
+  }
+
+  setVectors(input: {source_id: string; fingerprint: string; provider_id: string; dims: number; vectors: readonly {chunk_id: string; content_digest: string; vector: readonly number[]}[]}): Promise<number> {
+    return this.#request('set_vectors', {input})
+  }
 
   async recordJob(input: KnowledgeJob): Promise<void> { await this.#request('record_job', {input}) }
 

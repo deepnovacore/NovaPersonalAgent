@@ -52,6 +52,9 @@ export class KnowledgeService {
   #binding: Promise<void> | undefined
   #migrated = false
   readonly #requireLedger: boolean
+  readonly #vectorQueue = new Map<string, ProcessingGrant | undefined>()
+  readonly #vectorRetries = new Map<string, number>()
+  #vectorWork: Promise<void> | undefined
 
   constructor(options: {store: KnowledgeStoreClient; embedding: EmbeddingProvider; requireEvidenceLedger?: boolean}) {
     this.#store = options.store; this.#embedding = options.embedding
@@ -85,6 +88,61 @@ export class KnowledgeService {
     const work = this.#migrateEvidence(ledger)
     this.#binding = work
     try {await work; this.#migrated = true} finally {if (this.#binding === work) this.#binding = undefined}
+    // Scans commit lexically first; resume any vectors a previous run did not finish.
+    for (const id of await this.#store.unembeddedSources(this.#embedding.id, this.#embedding.dims)) this.#queueVectors(id, undefined)
+  }
+
+  /** Resolves once scan-committed chunks have been embedded or skipped. */
+  async vectorsSettled(): Promise<void> {while (this.#vectorWork) await this.#vectorWork}
+
+  #queueVectors(id: string, grant: ProcessingGrant | undefined): void {
+    if (this.#stop.signal.aborted) return
+    this.#vectorQueue.set(id, grant)
+    this.#vectorWork ??= this.#drainVectors().finally(() => {
+      this.#vectorWork = undefined
+      const next = this.#vectorQueue.entries().next().value
+      if (next) this.#queueVectors(...next)
+    })
+  }
+
+  /** One source at a time, off the scan path; a failure is retried twice with a growing delay. */
+  async #drainVectors(): Promise<void> {
+    for (const [id, grant] of this.#vectorQueue) {
+      this.#vectorQueue.delete(id)
+      if (this.#stop.signal.aborted) return
+      try {await this.#embedSource(id, grant); this.#vectorRetries.delete(id)} catch (cause) {
+        if (this.#stop.signal.aborted) return
+        const acceptance = acceptanceManifest()
+        if (acceptance) appendFileSync(join(acceptance.outputDirectory, 'knowledge-errors.ndjson'), JSON.stringify({stage: 'embedding_backfill', code: ingestionCode(cause, 'embedding'), error: cause instanceof Error ? `${cause.name}: ${cause.message}`.slice(0, 300) : typeof cause}) + '\n', {mode: 0o600})
+        const attempt = (this.#vectorRetries.get(id) ?? 0) + 1
+        if (attempt > 2) {this.#vectorRetries.delete(id); continue}
+        this.#vectorRetries.set(id, attempt)
+        setTimeout(() => this.#queueVectors(id, grant), 60000 * attempt).unref()
+      }
+    }
+  }
+
+  async #embedSource(id: string, grant: ProcessingGrant | undefined): Promise<void> {
+    const signal = AbortSignal.any([this.#stop.signal, AbortSignal.timeout(120000)])
+    for (let round = 0; round < 200; round++) {
+      const pending = await this.#store.unembeddedChunks(id, this.#embedding.id, this.#embedding.dims)
+      if (pending.fingerprint === null || pending.chunks.length === 0) return
+      const evidenceIds = pending.chunks.map(chunk => chunk.evidence_id), ids = evidenceIds.filter((value): value is string => value !== undefined)
+      const ledger = this.#ledger
+      const allowed = async () => ledger
+        ? evidenceIds.length > 0 && (await Promise.all(evidenceIds.map(async value => value ? await (ledger.canProcess?.(value, 'embedding') ?? Promise.resolve(false)) : false))).every(Boolean)
+        : grant?.embedding_provider === this.#embedding.id
+      const stamp = ledger ? await ledger.processingStamp?.(ids) ?? null : 'standalone'
+      if (stamp === null || !await allowed()) return
+      const vectors = await withModelPurpose('embedding', () => this.#embedding.embed(pending.chunks.map(chunk => chunk.text), signal))
+      signal.throwIfAborted()
+      if (vectors.length !== pending.chunks.length) throw failure('embedding_invalid_result')
+      if (!await allowed() || this.#ledger !== ledger || (ledger && stamp !== await ledger.processingStamp?.(ids))) return
+      // No await between this fence and enqueueing the fingerprint-checked write.
+      const written = await this.#store.setVectors({source_id: id, fingerprint: pending.fingerprint, provider_id: this.#embedding.id, dims: this.#embedding.dims,
+        vectors: pending.chunks.map((chunk, index) => ({chunk_id: chunk.chunk_id, content_digest: chunk.content_digest, vector: [...vectors[index]!]}))})
+      if (written === 0) return
+    }
   }
 
   async #migrateEvidence(ledger: KnowledgeEvidenceLedger): Promise<void> {
@@ -136,7 +194,7 @@ export class KnowledgeService {
     this.#stop.signal.throwIfAborted()
     if (this.#active || this.#folderBusy) throw failure('knowledge_busy')
     if (sourceId !== undefined && !idSchema.safeParse(sourceId).success) throw failure('invalid_request')
-    const active = {id: sourceId ?? randomUUID(), abort: new AbortController(), root,...(processingConsent?{processingConsent}:{}),processingAuthorized:false}
+    const active = {id: sourceId ?? randomUUID(), abort: new AbortController(), root,...(processingConsent?{processingConsent}:{}),processingAuthorized:false,deferVectors:true}
     this.#active = active
     const cancel = () => active.abort.abort()
     signal.addEventListener('abort', cancel, {once: true})
@@ -157,6 +215,7 @@ export class KnowledgeService {
       if (old && old.id !== active.id) {
         await this.#ledger?.remove(`knowledge:${old.id}`)
       }
+      this.#queueVectors(active.id, processingConsent)
       const evidence_ids = (await this.#store.listChunks(active.id, 0)).flatMap(chunk => chunk.evidence_id ? [chunk.evidence_id] : []).slice(0, 2)
       return {id: active.id, excerpt, ...(evidence_ids.length ? {evidence_ids} : {})}
     } catch (cause) {
@@ -218,7 +277,7 @@ export class KnowledgeService {
     finally {if (this.#active === active) this.#active = undefined}
   }
 
-  async #index(kind: KnowledgeSource['kind'], locator: string, active: {id: string; abort: AbortController; root?: string;processingAuthorized?:boolean;processingConsent?:ProcessingGrant}, old?: KnowledgeSource, onIndexed?: (text: string) => void) {
+  async #index(kind: KnowledgeSource['kind'], locator: string, active: {id: string; abort: AbortController; root?: string;processingAuthorized?:boolean;processingConsent?:ProcessingGrant;deferVectors?:boolean}, old?: KnowledgeSource, onIndexed?: (text: string) => void) {
     const signal = AbortSignal.any([active.abort.signal, this.#stop.signal,
       ...(this.#folderSignal === undefined ? [] : [this.#folderSignal]), AbortSignal.timeout(120000)])
     const job = {id: randomUUID(), source_id: active.id, updated_at: Date.now(), error_code: null}
@@ -244,7 +303,8 @@ export class KnowledgeService {
       const allowed=async()=>{if(this.#ledger)return evidenceIds.length>0&&(await Promise.all(evidenceIds.map(async id=>id?await (this.#ledger?.canProcess?.(id,'embedding')??Promise.resolve(false)):false))).every(Boolean);return active.processingAuthorized===true||processingConsent?.embedding_provider===this.#embedding.id}
       const stamp=this.#ledger?await this.#ledger.processingStamp?.(evidenceIds.filter((id):id is string=>id!==undefined))??null:'standalone'
       stage = 'embedding'
-      const vectors = stamp!==null&&await allowed()?await withModelPurpose('embedding',()=>this.#embedding.embed(chunks.map(chunk => chunk.text), signal)):null
+      // Scan-time sources commit lexically now; #drainVectors embeds them off the scan path.
+      const vectors = !active.deferVectors&&stamp!==null&&await allowed()?await withModelPurpose('embedding',()=>this.#embedding.embed(chunks.map(chunk => chunk.text), signal)):null
       signal.throwIfAborted()
       if (vectors!==null&&vectors.length !== chunks.length) throw failure('embedding_invalid_result')
       const keepVectors=vectors!==null&&await allowed()&&(!this.#ledger||stamp===await this.#ledger.processingStamp?.(evidenceIds.filter((id):id is string=>id!==undefined)))
