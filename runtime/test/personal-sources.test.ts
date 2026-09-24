@@ -1199,6 +1199,23 @@ test('persisted Git activity skips the Git probe for an unchanged repository aft
   assert.equal((await reopened.get(repo,0)).ownCommits,2);assert.equal(probes,2,'a new commit moves the key and reprobes')
  }finally{await rm(root,{recursive:true,force:true})}
 })
+test('persisted Git activity notices linked-worktree commits and inherited identity changes',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-git-worktree-')),repo=join(root,'repo'),tree=join(root,'tree'),global=join(root,'gitconfig')
+ const saved=process.env.GIT_CONFIG_GLOBAL;process.env.GIT_CONFIG_GLOBAL=global
+ let probes=0;const probe=(path:string)=>{probes++;return rootActivity(path)}
+ try{
+  await writeFile(global,'[user]\n\tname = Owner\n\temail = owner@example.test\n')
+  execFileSync('git',['init','-q',repo]);await writeFile(join(repo,'notes.md'),'first');execFileSync('git',['-C',repo,'add','notes.md']);execFileSync('git',['-C',repo,'commit','-qm','first'])
+  execFileSync('git',['-C',repo,'worktree','add','-q','-b','side',tree])
+  const cache=new GitActivityCache(undefined,probe)
+  assert.equal((await cache.get(tree,0)).ownCommits,1);assert.equal(probes,1)
+  assert.equal((await cache.get(tree,0)).ownCommits,1);assert.equal(probes,1,'an unchanged worktree reuses its clue')
+  await writeFile(join(tree,'notes.md'),'second');execFileSync('git',['-C',tree,'commit','-qam','second'])
+  assert.equal((await cache.get(tree,0)).ownCommits,2,'a commit behind a gitdir pointer moves the key')
+  await writeFile(global,'[user]\n\tname = Someone\n\temail = someone-else@example.test\n')
+  assert.equal((await cache.get(tree,0)).ownCommits,0,'a changed global author identity reprobes')
+ }finally{if(saved===undefined)delete process.env.GIT_CONFIG_GLOBAL;else process.env.GIT_CONFIG_GLOBAL=saved;await rm(root,{recursive:true,force:true})}
+})
 test('weighted root turns include lower tiers while rotating peers',()=>{
  const now=Date.now(),base={mtimeMs:1,lastGitCommitMs:null}
  const roots=[{...base,path:'/selected-a',selected:true,currentWorkspace:false},{...base,path:'/selected-b',selected:true,currentWorkspace:false},{...base,path:'/active',selected:false,currentWorkspace:false,lastGitCommitMs:now},{...base,path:'/other',selected:false,currentWorkspace:false}]

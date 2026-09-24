@@ -1,6 +1,8 @@
 import {execFile} from 'node:child_process'
-import {lstat} from 'node:fs/promises'
-import {join} from 'node:path'
+import {createHash} from 'node:crypto'
+import {homedir} from 'node:os'
+import {lstat,readFile} from 'node:fs/promises'
+import {join,resolve} from 'node:path'
 import {promisify} from 'node:util'
 import {z} from 'zod'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
@@ -67,7 +69,16 @@ export type RootActivity=Awaited<ReturnType<typeof rootActivity>>
 export async function activityKey(path:string):Promise<string>{
   const stamp=async(target:string)=>{const info=await lstat(target).catch(()=>null);return info?`${info.mtimeMs}:${info.size}`:'-'}
   const git=join(path,'.git')
-  return (await Promise.all([path,git,join(git,'HEAD'),join(git,'logs','HEAD'),join(git,'config')].map(stamp))).join('|')
+  // A linked worktree or submodule keeps a `gitdir:` pointer file; its HEAD and reflog live there.
+  const pointer=/^gitdir: (.+)$/mu.exec(await readFile(git,'utf8').catch(()=>''))?.[1]?.trim()
+  const dir=pointer?resolve(path,pointer):git
+  const shared=(await readFile(join(dir,'commondir'),'utf8').catch(()=>'')).trim()
+  const common=shared?resolve(dir,shared):dir
+  // The effective author identity also comes from global config and the environment.
+  const config=process.env.XDG_CONFIG_HOME?.trim() ? process.env.XDG_CONFIG_HOME : join(homedir(),'.config')
+  const identity=['GIT_AUTHOR_EMAIL','GIT_AUTHOR_NAME','EMAIL','GIT_CONFIG_GLOBAL'].map(name=>process.env[name]??'').join(',')
+  const stamps=await Promise.all([path,git,dir,join(dir,'HEAD'),join(dir,'logs','HEAD'),join(common,'config'),join(dir,'config.worktree'),process.env.GIT_CONFIG_GLOBAL?.trim() ? process.env.GIT_CONFIG_GLOBAL : join(homedir(),'.gitconfig'),join(config,'git','config')].map(stamp))
+  return [...stamps,createHash('sha256').update(identity).digest('hex').slice(0,16)].join('|')
 }
 
 const activitySchema=z.object({lastGitCommitMs:z.number().nullable(),ownCommits:z.number().int().nonnegative(),mtimeMs:z.number()})
