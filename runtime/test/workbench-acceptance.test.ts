@@ -132,6 +132,25 @@ test('fetch probe cannot certify a stub error without an actual blocked counter 
  assert.equal(child.status,0,child.stderr)
  }finally{f.close()}
 })
+test('a chat call records its token counts, and only its counts, without consuming the caller\'s body',()=>{
+ const f=fixture();try{
+ const moduleUrl=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href
+ const code=`import assert from 'node:assert/strict';import net from 'node:net';import {installAcceptanceGate} from ${JSON.stringify(moduleUrl)};
+ net.Socket.prototype.connect=function(){return this};
+ globalThis.fetch=async()=>{net.connect({host:'provider.invalid',port:443});return new Response(JSON.stringify({choices:[{message:{content:'private reply text'}}],usage:{prompt_tokens:1200,completion_tokens:340}}))};
+ installAcceptanceGate();
+ const response=await fetch('https://provider.invalid/v1/chat/completions',{method:'POST',body:JSON.stringify({model:'model'})});
+ assert.equal((await response.json()).choices[0].message.content,'private reply text');
+ await new Promise(resolve=>setTimeout(resolve,50));`
+ const child=spawnSync(process.execPath,['--input-type=module','-e',code],{env:f.env,encoding:'utf8'})
+ assert.equal(child.status,0,child.stderr)
+ const output=readFileSync(f.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT,'utf8')
+ const usage=output.trim().split('\n').map(line=>JSON.parse(line) as {kind:string;counts:Record<string,number>}).find(row=>row.kind==='model_usage')
+ assert.equal(usage?.counts.input_tokens,1200);assert.equal(usage?.counts.output_tokens,340)
+ assert.equal(output.includes('private reply text'),false)
+ }finally{f.close()}
+})
+
 test('news feeds pass the gate only when the manifest turns news on, and only as plain GETs',()=>{
  const f=fixture();try{
  const moduleUrl=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href

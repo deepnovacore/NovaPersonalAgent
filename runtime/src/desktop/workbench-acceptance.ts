@@ -124,8 +124,11 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
    if(typeof model!=='string'||!manifest.providers.some(item=>item.origin===new URL(url).origin&&item.models.includes(model)))rejectEgress('acceptance_unknown_model')
    calls++
    // One row per call, written when the response headers settle: purpose, endpoint, and time to first byte.
-   const labels={model_calls:calls,['purpose_'+currentModelPurpose()]:1,[new URL(url).pathname.endsWith('/embeddings')?'endpoint_embeddings':'endpoint_chat']:1},started=performance.now()
-   try{const response=await fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}));appendAcceptanceCounts('model_call',{...labels,latency_ms:Math.round(performance.now()-started),ok:Number(response.ok),status:response.status});return response}
+   const purpose=currentModelPurpose(),labels={model_calls:calls,['purpose_'+purpose]:1,[new URL(url).pathname.endsWith('/embeddings')?'endpoint_embeddings':'endpoint_chat']:1},started=performance.now()
+   try{const response=await fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}));appendAcceptanceCounts('model_call',{...labels,latency_ms:Math.round(performance.now()-started),ok:Number(response.ok),status:response.status})
+    // Token counts only, read from a copy so the caller's body is untouched.
+    if(response.ok&&!new URL(url).pathname.endsWith('/embeddings'))void response.clone().json().then((reply:unknown)=>{const usage=(reply as {usage?:{prompt_tokens?:unknown;completion_tokens?:unknown}}|null)?.usage;if(typeof usage?.completion_tokens==='number'&&typeof usage.prompt_tokens==='number')appendAcceptanceCounts('model_usage',{['purpose_'+purpose]:1,input_tokens:usage.prompt_tokens,output_tokens:usage.completion_tokens,body_ms:Math.round(performance.now()-started)})}).catch(()=>undefined)
+    return response}
    catch(error){appendAcceptanceCounts('model_call',{...labels,latency_ms:Math.round(performance.now()-started),ok:0,[error instanceof Error&&error.name==='AbortError'||error instanceof Error&&error.name==='TimeoutError'?'aborted':'network_error']:1});throw error}
   }
   if(newsOrigin(new URL(url).origin)){
