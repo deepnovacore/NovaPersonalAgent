@@ -1,0 +1,111 @@
+name: AI PR review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'PR number to review / 要审查的 PR 编号'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number || inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # Opt in only after creating a dedicated, capped OpenRouter key.
+    if: vars.PR_REVIEW_ENABLED == 'true' && github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      plan: ${{ steps.prepare.outputs.result }}
+      message: ${{ steps.codex.outputs.final-message }}
+    steps:
+      # All executable code/prompts come from the trusted workflow revision.
+      # Never check out a PR head under pull_request_target.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check eligibility and skip duplicate reviews
+        id: prepare
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          HAS_KEY: ${{ secrets.OPENROUTER_API_KEY != '' }}
+          PR_REVIEW_MODEL: ${{ vars.PR_REVIEW_MODEL }}
+        with:
+          script: |
+            const { prepare } = require('./.github/scripts/pr-review.cjs');
+            const plan = await prepare({ github, context });
+            core.setOutput('run', plan.run);
+            if (plan.reason) core.notice(plan.reason);
+            return plan;
+      - name: Fetch PR objects without executing or checking out PR code
+        if: steps.prepare.outputs.run == 'true'
+        env:
+          REVIEW_NUMBER: ${{ fromJSON(steps.prepare.outputs.result).number }}
+          REVIEW_HEAD: ${{ fromJSON(steps.prepare.outputs.result).head }}
+          REVIEW_BASE: ${{ fromJSON(steps.prepare.outputs.result).base }}
+        run: |
+          git -c core.hooksPath=/dev/null fetch --no-tags origin "+refs/pull/$REVIEW_NUMBER/head:refs/remotes/origin/review-head"
+          test "$(git rev-parse refs/remotes/origin/review-head)" = "$REVIEW_HEAD"
+          git -c core.hooksPath=/dev/null fetch --no-tags origin "$REVIEW_BASE"
+          git cat-file -e "$REVIEW_BASE^{commit}"
+          mkdir -p "$RUNNER_TEMP/nova-review-codex"
+          cp .github/codex/config.toml "$RUNNER_TEMP/nova-review-codex/config.toml"
+          {
+            cat .github/codex/review.md
+            printf '\nPR number: %s\nBASE_SHA: %s\nHEAD_SHA: %s\nRepository: %s\n' \
+              "$REVIEW_NUMBER" "$REVIEW_BASE" "$REVIEW_HEAD" "$GITHUB_REPOSITORY"
+          } > "$RUNNER_TEMP/nova-review-prompt.md"
+      - name: Review diff and its wider impact through OpenRouter
+        if: steps.prepare.outputs.run == 'true'
+        id: codex
+        timeout-minutes: 10
+        uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e
+        with:
+          codex-version: '0.156.1'
+          openai-api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          responses-api-endpoint: https://openrouter.ai/api/v1/responses
+          model: ${{ fromJSON(steps.prepare.outputs.result).model }}
+          effort: medium
+          safety-strategy: drop-sudo
+          permission-profile: ':read-only'
+          codex-home: ${{ runner.temp }}/nova-review-codex
+          prompt-file: ${{ runner.temp }}/nova-review-prompt.md
+          codex-args: '["--ephemeral"]'
+
+  publish:
+    needs: review
+    if: needs.review.result == 'success' && needs.review.outputs.message != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Update one comment only if the reviewed revision is still current
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        env:
+          REVIEW_PLAN: ${{ needs.review.outputs.plan }}
+          REVIEW_MESSAGE: ${{ needs.review.outputs.message }}
+        with:
+          script: |
+            const { publish } = require('./.github/scripts/pr-review.cjs');
+            await publish({ github, context, plan: JSON.parse(process.env.REVIEW_PLAN), message: process.env.REVIEW_MESSAGE });
