@@ -63,7 +63,7 @@ test('profile starts with a readable preview and editing is optional',async t=>{
  const flatten=node=>[node,...node.children.flatMap(flatten)]
  assert.equal(flatten(h.panel).filter(n=>n.tag==='textarea').length,0)
  assert.ok(flatten(h.panel).some(n=>n.textContent==='I build audio tools'))
- await h.buttons.find(b=>b.textContent==='编辑介绍').action()
+ await h.buttons.find(b=>b.textContent==='编辑概览').action()
  h.panel.children=[];h.buttons.length=0;renderProfile(h.panel,args)
  assert.equal(flatten(h.panel).filter(n=>n.tag==='textarea').length,1)
  assert.equal(h.calls.length,0)
@@ -82,8 +82,22 @@ test('a failed save preserves the exact draft across newer generated suggestions
  args.warmup.draft.interests=[{text:'Other topic'}];h.buttons.length=0;renderProfile(h.panel,args)
  await h.buttons.find(b=>b.textContent==='完成调整').action();assert.deepEqual(h.local.interestEdit.interests,['My topic']);assert.ok(h.local.interestError)
 })
-test('a user-cleared profile and interests are not repopulated by generated defaults',t=>{
- const h=harness(t);renderProfile(h.panel,{...h,state:{profile:{version:3,about:''}},news:{enabled:false,explore:true,profile_version:2,interests:[]},warmup:{status:'ready',draft:{about:{text:'Old suggestion'},interests:[{text:'Voice'}]}}})
- assert.equal(h.buttons.find(b=>b.textContent==='确认介绍'),undefined)
+test('a user-cleared profile and interests are not repopulated by generated defaults',async t=>{
+ const h=harness(t);renderProfile(h.panel,{...h,state:{profile:{version:3,about:''}},news:{enabled:false,explore:true,profile_version:2,interests:[]},warmup:{status:'ready',draft:{about:{text:'Old suggestion',refs:[{entry_id:'s',version:'v'}]},work:[{title:'Old project',text:'Old work',refs:[{entry_id:'s',version:'v'}]}],interests:[{text:'Voice'}]},sources:[{id:'s',version:'v',label:'project/readme.md'}]}})
+ const flatten=node=>[node,...node.children.flatMap(flatten)]
+ assert.equal(flatten(h.panel).some(n=>n.textContent==='Old suggestion'||n.textContent==='Old project'),false)
+ assert.equal(flatten(h.panel).some(n=>n.className==='profile-work-item'),false)
+ assert.ok(flatten(h.panel).some(n=>n.textContent==='你已清空个人介绍，可以随时重新写一段。'))
+ await h.buttons.find(b=>b.textContent==='自己写一段').action()
+ assert.equal(h.local.profile.about,'')
  assert.equal(h.buttons.find(b=>b.textContent==='开启资讯').disabled,true)
+})
+test('generated work is readable and its sources stay behind disclosure',t=>{
+ const h=harness(t);renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},news:{enabled:false,explore:true,profile_version:0,interests:[]},warmup:{status:'ready',draft:{about:{text:'Builds audio software',refs:[{entry_id:'s',version:'v'}]},work:[{title:'Audio Agent',text:'Works on voice interaction',refs:[{entry_id:'s',version:'v'}]}],interests:[]},sources:[{id:'s',version:'v',label:'NovaAudioAgent/README.md'}]}})
+ const flatten=node=>[node,...node.children.flatMap(flatten)],nodes=flatten(h.panel)
+ assert.ok(nodes.some(n=>n.textContent==='Builds audio software'))
+ assert.ok(nodes.some(n=>n.className==='profile-work-item'))
+ assert.equal(nodes.filter(n=>n.className==='profile-sources').length,2)
+ assert.ok(nodes.some(n=>n.textContent==='NovaAudioAgent/README.md'))
+ assert.equal(h.buttons.some(b=>b.textContent==='确认介绍'),false)
 })

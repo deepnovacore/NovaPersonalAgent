@@ -461,9 +461,9 @@ test('profile warmup requires current consent for every evidence reference',asyn
  }finally{await host.close();await f.close()}
 })
 
-test('authorized local excerpts do not become personal profile drafts',async()=>{
+test('active authorized project documents can ground a profile draft without becoming memory',async()=>{
  const f=await fixture();await f.host.close();let available=true,calls=0;
- const host=new PersonalAgentHost({...f.host.options,generateProfile:entries=>{calls++;assert.equal(entries[0]!.origin,'inferred');return Promise.resolve({about:null,interests:[{text:'Design',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]}]})}});
- host.setSources({list:()=>[],contextEntries:()=>available?[{id:'source:document',version:'v1',content:'Product design notes'}]:[],command:()=>Promise.resolve({})});
- try{await host.open();await host.profileWarmup.refresh();assert.equal(calls,0);assert.equal(host.profileWarmup.snapshot().draft,null);available=false;await host.sourceChanged();assert.equal(host.profileWarmup.snapshot().draft,null)}finally{await host.close();await f.close()}
+ const host=new PersonalAgentHost({...f.host.options,generateProfile:entries=>{calls++;assert.equal(entries[0]!.origin,'inferred');return Promise.resolve({about:{text:'Design systems',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]},work:[{title:'Design',text:'Builds design systems',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]}],interests:[]})}});
+ host.setSources({list:()=>[],contextEntries:()=>available?[{kind:'file',id:'source:document',version:'v1',content:'Product design notes',source_id:'s',file_id:'f',root:'/project',rel_path:'project/notes.md',role:'document',mtime_ms:Date.now(),priority:2}]:[],command:()=>Promise.resolve({})});
+ try{await host.open();const existing=host.snapshot().memory.entries.length;await host.profileWarmup.refresh();assert.equal(calls,1);assert.equal(host.profileWarmup.snapshot().draft?.work.length,1);assert.equal(host.snapshot().memory.entries.length,existing);available=false;await host.sourceChanged();assert.equal(host.profileWarmup.snapshot().draft,null)}finally{await host.close();await f.close()}
 })

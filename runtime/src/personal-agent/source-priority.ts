@@ -45,9 +45,16 @@ export async function rootActivity(path:string):Promise<{lastGitCommitMs:number|
   const marker=await lstat(join(path,'.git')).catch(()=>null)
   if(marker&&(marker.isDirectory()||marker.isFile())&&!marker.isSymbolicLink()){
     try{
-      const {stdout}=await run('git',['-C',path,'log','-1','--format=%ct'],{timeout:500,maxBuffer:256})
-      const seconds=Number(stdout.trim())
-      if(Number.isFinite(seconds)&&seconds>0)lastGitCommitMs=seconds*1000
+      const ident=await run('git',['-C',path,'var','GIT_AUTHOR_IDENT'],{timeout:500,maxBuffer:512})
+      const email=/<([^<>]+)>/u.exec(ident.stdout)?.[1]?.toLowerCase()
+      if(email){
+        const {stdout}=await run('git',['-C',path,'log','-50','--since=30.days','--format=%ae|%ct'],{timeout:500,maxBuffer:8192})
+        for(const line of stdout.trim().split('\n')){
+          const at=line.lastIndexOf('|'),seconds=Number(line.slice(at+1))
+          if(at>0&&line.slice(0,at).toLowerCase()===email&&Number.isFinite(seconds)&&seconds>0)
+            lastGitCommitMs=Math.max(lastGitCommitMs??0,seconds*1000)
+        }
+      }
     }catch{/* A missing or unavailable Git history is only an absent ranking clue. */}
   }
   return {lastGitCommitMs,mtimeMs:stat?.mtimeMs??0}

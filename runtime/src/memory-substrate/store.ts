@@ -92,6 +92,9 @@ function scrub(value:unknown, redactions:string[],path='content'):unknown {
 function rows(db:GraphDatabase,sql:string,...args:string[]):unknown[] {return db.prepare(sql).all(...args).map(row=>JSON.parse(String(row.payload_json)) as unknown)}
 function current(db:GraphDatabase,entryId:string):EntryRevision|null {const row=db.prepare('SELECT payload_json FROM memory_revisions WHERE entry_id=? ORDER BY revision DESC LIMIT 1').get(entryId);return row?EntryRevisionSchema.parse(JSON.parse(String(row.payload_json))):null}
 function all(db:GraphDatabase):EntryRevision[]{return rows(db,'SELECT r.payload_json FROM memory_revisions r JOIN (SELECT entry_id,MAX(revision) revision FROM memory_revisions GROUP BY entry_id) latest USING(entry_id,revision) ORDER BY r.entry_id').map(row=>EntryRevisionSchema.parse(row))}
+export function fileDerivedInference(db:GraphDatabase,row:EntryRevision):boolean{
+  return row.origin==='inferred'&&row.written_by!=='user_correction'&&row.evidence_refs.some(ref=>evidence(db,ref)?.source_kind==='file')
+}
 function evidence(db:GraphDatabase,evidenceId:string):EvidenceRecord|null {const row=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(evidenceId);return row?EvidenceRecordSchema.parse(JSON.parse(String(row.payload_json))):null}
 export function effectiveEvidence(db:GraphDatabase,evidenceId:string,options:{purpose:'local'|'extraction'|'embedding'|'conversation';provider?:string}={purpose:'local'}):EvidenceRecord|null {
   const ref=evidence(db,evidenceId);if(!ref)return null
@@ -146,7 +149,7 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
       case 'conversation_snapshot': {
         const q=z.object({entry_prefix:id,consumer:id}).strict().parse(value)
         const now=Date.now()
-        result=all(db).filter(row=>row.entry_id.startsWith(q.entry_prefix)&&row.op!=='tombstone'&&(row.valid_until===null||Date.parse(row.valid_until)>now)&&row.evidence_refs.every(ref=>effectiveEvidence(db,ref,{purpose:'conversation',provider:q.consumer})!==null))
+        result=all(db).filter(row=>row.entry_id.startsWith(q.entry_prefix)&&row.op!=='tombstone'&&!fileDerivedInference(db,row)&&(row.valid_until===null||Date.parse(row.valid_until)>now)&&row.evidence_refs.every(ref=>effectiveEvidence(db,ref,{purpose:'conversation',provider:q.consumer})!==null))
         break
       }
       case 'processing_stamp':result=processingStamp(db,z.array(id).min(1).max(256).parse(value.ids),z.enum(['extraction','embedding','conversation']).parse(value.purpose),id.parse(value.provider));break
@@ -193,8 +196,8 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
       }
       case 'merge':result=write(db,CandidateSchema.parse(value));break
       case 'list': {
-        const now=date.parse(value.now??new Date().toISOString());const includeHistory=z.boolean().parse(value.include_history??false)
-        result=all(db).filter(entry=>includeHistory || (entry.op!=='tombstone' && (entry.valid_until===null || Date.parse(entry.valid_until)>Date.parse(now))));break
+        const now=date.parse(value.now??new Date().toISOString());const includeHistory=z.boolean().parse(value.include_history??false),excludeFileInferences=z.boolean().parse(value.exclude_file_inferences??false)
+        result=all(db).filter(entry=>(includeHistory || (entry.op!=='tombstone' && (entry.valid_until===null || Date.parse(entry.valid_until)>Date.parse(now))))&&(!excludeFileInferences||!fileDerivedInference(db,entry)));break
       }
       case 'history':result=rows(db,'SELECT payload_json FROM memory_revisions WHERE entry_id=? ORDER BY revision',id.parse(value.entry_id));break
       case 'evidence':result=evidence(db,id.parse(value.id));break
@@ -203,7 +206,7 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
       case 'pending_evidence': {
         const prefix=id.parse(value.source_prefix);const provider=value.provider===undefined?'':id.parse(value.provider);const limit=z.number().int().min(1).max(100).parse(value.limit??100)
         result=rows(db,`SELECT e.payload_json FROM memory_evidence e WHERE substr(e.source_id,1,length(?))=?
-          AND json_extract(e.payload_json,'$.raw_text') IS NOT NULL AND json_extract(e.payload_json,'$.source_kind') <> 'user_correction'
+          AND json_extract(e.payload_json,'$.raw_text') IS NOT NULL AND json_extract(e.payload_json,'$.source_kind') NOT IN ('user_correction','file')
           AND (json_extract(e.payload_json,'$.retention_until') IS NULL OR julianday(json_extract(e.payload_json,'$.retention_until'))>julianday('now'))
           AND (?='' OR EXISTS (SELECT 1 FROM source_grants g WHERE g.source_id=e.source_id AND json_extract(g.payload_json,'$.extraction_provider')=?))
           AND (?='' OR NOT EXISTS (SELECT 1 FROM source_objects o JOIN source_connections c ON c.id=o.connection_id JOIN source_grants g ON g.source_id=e.source_id WHERE json_extract(o.payload_json,'$.source_id')=e.source_id AND (json_extract(c.payload_json,'$.state')<>'connected' OR json_extract(c.payload_json,'$.fence.scope_revision')<>json_extract(g.payload_json,'$.scope_revision'))))

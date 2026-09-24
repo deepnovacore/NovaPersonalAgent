@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import test from 'node:test'
 import {LocalDirectorySources} from '../src/personal-agent/sources.js'
-import {nextComputerRoot,orderComputerRoots} from '../src/personal-agent/source-priority.js'
+import {nextComputerRoot,orderComputerRoots,rootActivity} from '../src/personal-agent/source-priority.js'
 import {scanDirectory} from '../src/personal-agent/source-walk.js'
 import {KnowledgeService, type KnowledgeEvidenceLedger} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
@@ -1087,6 +1087,21 @@ test('computer roots rank selected and current work ahead of recent Git and mtim
   {path:'/selected',selected:true,currentWorkspace:false,lastGitCommitMs:null,mtimeMs:1},
  ]
  assert.deepEqual(orderComputerRoots(roots).map(root=>root.path),['/selected','/current','/git','/older'])
+})
+test('recent commits by someone else do not promote a cloned repository',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-git-owner-'))
+ try{
+  execFileSync('git',['init','-q',root])
+  execFileSync('git',['-C',root,'config','user.name','Owner'])
+  execFileSync('git',['-C',root,'config','user.email','owner@example.test'])
+  await writeFile(join(root,'README.md'),'upstream')
+  execFileSync('git',['-C',root,'add','README.md'])
+  execFileSync('git',['-C',root,'commit','-qm','upstream'],{env:{...process.env,GIT_AUTHOR_NAME:'Other',GIT_AUTHOR_EMAIL:'other@example.test',GIT_COMMITTER_NAME:'Other',GIT_COMMITTER_EMAIL:'other@example.test'}})
+  assert.equal((await rootActivity(root)).lastGitCommitMs,null)
+  await writeFile(join(root,'README.md'),'owner work')
+  execFileSync('git',['-C',root,'commit','-qam','owner work'])
+  assert.ok((await rootActivity(root)).lastGitCommitMs)
+ }finally{await rm(root,{recursive:true,force:true})}
 })
 test('weighted root turns include lower tiers while rotating peers',()=>{
  const now=Date.now(),base={mtimeMs:1,lastGitCommitMs:null}

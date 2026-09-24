@@ -10,12 +10,13 @@ export async function waitForNativeWorkbench(window){
 export async function captureNativeWorkbench(window,outputDirectory,tag='final'){
  if(!window||window.isDestroyed())throw Error('acceptance_native_window_missing')
  const js=source=>window.webContents.executeJavaScript(source)
- const shots=[],cards={todos:0,ideas:0}
+ const shots=[],cards={todos:0,ideas:0},profile={work_items:0,has_about:false}
  for(const page of ['todos','ideas','goals','feeds','tasks','profile']){
   const found=await js(`(()=>{const tab=document.querySelector('.rail-pages [data-page="${page}"]');if(!tab)return false;tab.click();return true})()`)
   if(!found)throw Error('acceptance_production_tab_missing')
   await new Promise(resolve=>setTimeout(resolve,250))
   if(page==='todos'||page==='ideas')cards[page]=await js("document.querySelectorAll('.workbench-suggestions > article.card').length")
+  if(page==='profile')Object.assign(profile,await js("({work_items:document.querySelectorAll('.profile-work-item').length,has_about:Boolean(document.querySelector('.profile-preview')?.textContent?.trim())})"))
   const path=resolve(outputDirectory,`${tag}-${page}.png`)
   writeFileSync(path,(await window.webContents.capturePage()).toPNG(),{mode:0o600});shots.push(path)
  }
@@ -24,7 +25,7 @@ export async function captureNativeWorkbench(window,outputDirectory,tag='final')
  await new Promise(resolve=>setTimeout(resolve,250))
  const path=resolve(outputDirectory,`${tag}-profile-memory.png`)
  writeFileSync(path,(await window.webContents.capturePage()).toPNG(),{mode:0o600});shots.push(path)
- return {screenshots:shots,dom_cards:cards}
+ return {screenshots:shots,dom_cards:cards,dom_profile:profile}
 }
 
 /** Bind to the production window's partition before any page is loaded. */

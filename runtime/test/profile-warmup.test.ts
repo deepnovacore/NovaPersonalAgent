@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {ProfileWarmup} from '../src/personal-agent/profile-warmup.js'
 const entries=[{id:'a',version:1,content:'I study voice interfaces',origin:'stated' as const}]
-const draft={about:{text:'I study voice interfaces',refs:[{entry_id:'a',version:1}]},interests:[{text:'Voice interfaces',refs:[{entry_id:'a',version:1}]}]}
+const draft={about:{text:'I study voice interfaces',refs:[{entry_id:'a',version:1}]},work:[],interests:[{text:'Voice interfaces',refs:[{entry_id:'a',version:1}]}]}
 test('warmup caches grounded drafts without repeating generation on reopen',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let calls=0
  const make=()=>new ProfileWarmup(join(dir,'draft.json'),()=>{calls++;return Promise.resolve(draft)},()=>{/* observer fixture */})

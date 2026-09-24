@@ -183,11 +183,6 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         await host.revalidate()
         await host.refreshMemory()
       },
-      onObserve: async observation => {
-        const memory = composition.realtime.personalMemory
-        if (!memory?.observeSource) return // Knowledge-only mode indexes A without enabling personal extraction.
-        await memory.observeSource(observation)
-      },
     }))
   }
   const host = composition.realtime.personalAgent

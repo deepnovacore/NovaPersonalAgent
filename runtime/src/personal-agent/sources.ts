@@ -135,6 +135,7 @@ export class LocalDirectorySources {
   #commands: Promise<unknown> = Promise.resolve()
   #workspacePath:string|null=null
   #activityCache=new Map<string,{value:Awaited<ReturnType<typeof rootActivity>>;checked:number}>()
+  #activityWarmup:Promise<void>|undefined
   #watchers:FSWatcher[]=[]
   #dirtyHints=new Map<string,Set<string>>()
   #hintTimers=new Map<string,ReturnType<typeof setTimeout>>()
@@ -162,9 +163,17 @@ export class LocalDirectorySources {
       }
     }
     this.#records = diskSchema.parse(raw).sources
+    this.#workspacePath=await this.#options.priorityWorkspace?.().catch(()=>null)??null
     assertAcceptanceGrant(this.#options.processingGrant?.(true,1,0),this.#records.filter(record=>!record.deleting&&['connected','error'].includes(record.view.state)).map(record=>record.processing_consent??{extraction_provider:null,embedding_provider:null}))
     appendAcceptanceCounts('sources_open',{sources:this.#records.length,indexed:this.#records.reduce((sum,record)=>sum+record.files.filter(file=>file.valid).length,0)})
     this.#closed = false
+    const roots=[...new Set(this.#records.filter(record=>!record.deleting&&['connected','error'].includes(record.view.state)).flatMap(record=>record.files.filter(file=>file.valid&&file.excerpt).map(file=>file.unit??computerUnit(record.view.path,file.path))))].slice(0,64)
+    this.#activityWarmup=(async()=>{
+      for(let i=0;i<roots.length&&!this.#closed;i+=8)await Promise.all(roots.slice(i,i+8).map(async root=>{
+        this.#activityCache.set(root,{value:await rootActivity(root),checked:Date.now()})
+      }))
+      if(!this.#closed&&roots.length)await this.#options.onChange?.(true)
+    })().catch(()=>{/* Scan refreshes these optional hints later. */})
     if(this.#options.scanOnOpen===false)return
     for (const record of [...this.#records]) {
       await this.#recoverPending(record)
@@ -177,6 +186,7 @@ export class LocalDirectorySources {
   }
   async close(): Promise<void> {
     this.#closed = true
+    await this.#activityWarmup
     for(const watcher of this.#watchers)watcher.close()
     this.#watchers=[]
     for(const timer of this.#hintTimers.values())clearTimeout(timer)
@@ -207,7 +217,8 @@ export class LocalDirectorySources {
       if(pending.size>=64){pending.clear();pending.add(record.view.path)}else if(!pending.has(record.view.path))pending.add(path)
       this.#dirtyHints.set(record.view.id,pending)
       if(this.#hintTimers.has(record.view.id))return
-      this.#activityCache.clear()
+      // Keep the last verified Git signal while the hinted root is rescanned.
+      // Dropping every root here made existing documents lose priority mid-session.
       const timer=setTimeout(()=>{
         this.#hintTimers.delete(record.view.id)
         if(this.#closed||!['connected','error'].includes(record.view.state))return
@@ -369,7 +380,7 @@ export class LocalDirectorySources {
     const queuedPaths=new Set(walk.queue.map(item=>item.path))
     for(const item of eligible)if(!pendingPaths.has(item.path)){walk.pending.push({...item});pendingPaths.add(item.path)}
     const excluded=new Set([...SOURCE_EXCLUDES,...COMPUTER_EXCLUDES,...record.view.excludes].map(s=>s.toLowerCase()))
-    const workspace=await this.#options.priorityWorkspace?.().then(path=>path&&within(record.view.path,path)?path:null).catch(()=>null)??null
+    const workspace=await this.#options.priorityWorkspace?.().catch(()=>null)??null
     this.#workspacePath=workspace
     const enqueue=(path:string,unit?:string)=>{
       const prior=ledger.get(path)

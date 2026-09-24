@@ -111,7 +111,18 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(this.options.conversationProviders?.includes(consumer))this.#preparedSignatures.set(consumer,{signature,revision})
     return {revision,...projection}
   }
-  async #rows(history=false,workspace=false):Promise<EntryRevision[]>{this.#ready();return z.array(EntryRevisionSchema).parse(await this.options.client.memory('list',{include_history:history})).filter(row=>row.entry_id.startsWith(this.prefix)||(workspace&&this.options.includeWorkspaceGraph===true&&row.entry_id.startsWith('workspace:')))}
+  async #rows(history=false,workspace=false,personalView=false):Promise<EntryRevision[]>{
+    this.#ready()
+    return z.array(EntryRevisionSchema).parse(await this.options.client.memory('list',{include_history:history,...(personalView?{exclude_file_inferences:true}:{})})).filter(row=>row.entry_id.startsWith(this.prefix)||(workspace&&this.options.includeWorkspaceGraph===true&&row.entry_id.startsWith('workspace:')))
+  }
+  async #fileInference(row:EntryRevision):Promise<boolean>{
+    if(row.origin!=='inferred'||row.written_by==='user_correction')return false
+    for(const ref of row.evidence_refs){
+      const raw=await this.options.client.memory('evidence',{id:ref})
+      if(raw&&EvidenceRecordSchema.parse(raw).source_kind==='file')return true
+    }
+    return false
+  }
   async #entry(row:EntryRevision):Promise<MemoryEntry>{
     const refs:MemorySourceRef[]=[]
     for(const id of row.evidence_refs){const raw=await this.options.client.memory('evidence',{id});if(raw===null)continue;const e=EvidenceRecordSchema.parse(raw);refs.push({type:e.source_kind==='user_correction'?'conversation':e.source_kind==='task_result'?'task':e.source_kind,ref:e.source_id.startsWith(this.prefix)?e.source_id.slice(this.prefix.length):e.source_id,observed_at:e.observed_at})}
@@ -134,7 +145,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     return {entries,contexts}
   }
   async #refresh(notify=true):Promise<void>{
-    const epoch=++this.#refreshEpoch,rows=await this.#rows(),authorized=await this.#authorizedRows(rows)
+    const epoch=++this.#refreshEpoch,rows=await this.#rows(false,false,true),authorized=await this.#authorizedRows(rows)
     if(epoch!==this.#refreshEpoch||!this.#opened)return
     const signature=JSON.stringify({rows,contexts:[...authorized.contexts.values()]})
     if(signature===this.#snapshotSignature)return
@@ -152,7 +163,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const workEpoch=this.#memoryWorkEpoch
     await this.#pending
     if(!this.#opened||this.#abort.signal.aborted)return
-    const rows=await this.#rows(),authorized=await this.#authorizedRows(rows),id=this.prefix+'summary:daily'
+    const rows=await this.#rows(false,false,true),authorized=await this.#authorizedRows(rows),id=this.prefix+'summary:daily'
     const previous=(await this.#rows(true)).find(row=>row.entry_id===id)??null
     const plan=prepareConsolidation(authorized.entries,previous,{now:new Date(),...this.options.consolidation})
     if(!plan)return
@@ -160,7 +171,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     for(const entry of plan.entries)if(await this.options.client.memory('processing_stamp',{ids:entry.evidence_refs,purpose:'extraction',provider:this.#extractionFingerprint()})!==authorized.contexts.get(entry.entry_id)!.stamp)return
     const content=await generateConsolidation(plan,{gateway:this.options.gateway,model:this.options.model,signal:this.#abort.signal})
     if(!this.#opened||this.#abort.signal.aborted||workEpoch!==this.#memoryWorkEpoch)return
-    const fresh=await this.#authorizedRows(await this.#rows())
+    const fresh=await this.#authorizedRows(await this.#rows(false,false,true))
     const refreshed=prepareConsolidation(fresh.entries,previous,{now:new Date(),...this.options.consolidation})
     if(!refreshed||JSON.stringify(refreshed.basis)!==JSON.stringify(plan.basis)||contexts.some(context=>fresh.contexts.get(context.entry_id)?.stamp!==context.stamp))return
     const candidate=prepareAutomaticCandidate({entry_id:id,kind:'memory_summary',origin:'inferred',evidence_refs:plan.evidence_refs,content:{...content},recorded_at:new Date().toISOString()},previous)
@@ -169,16 +180,16 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     await this.options.client.memory('commit_consolidation',{entry_prefix:this.prefix,provider:this.#extractionFingerprint(),candidate,contexts})
     if(this.#opened)await this.#refresh()
   }
-  async list(options:Parameters<NonNullable<PersonalMemoryResource['list']>>[0]={}){const q=MemoryListOptionsSchema.parse(options);const offset=q.cursor?Number(q.cursor):0;if(!Number.isSafeInteger(offset)||offset<0)throw Error('invalid_cursor');const rows=(await this.#rows(q.include_expired??false,true)).filter(row=>row.op!=='tombstone'&&row.kind!=='memory_summary'&&!(row.kind==='entity'&&row.content.entity_kind==='person')&&!(row.entry_id.startsWith('workspace:')&&['inactive','suppressed','stale'].includes(displayText(row.content.status))));const limit=q.limit??100;return {entries:await Promise.all(rows.slice(offset,offset+limit).map(r=>this.#entry(r))),cursor:offset+limit<rows.length?String(offset+limit):null}}
-  async get(id:string):Promise<MemoryEntry|null>{const row=(await this.#rows(true,true)).find(r=>r.entry_id===id);return row?this.#entry(row):null}
+  async list(options:Parameters<NonNullable<PersonalMemoryResource['list']>>[0]={}){const q=MemoryListOptionsSchema.parse(options);const offset=q.cursor?Number(q.cursor):0;if(!Number.isSafeInteger(offset)||offset<0)throw Error('invalid_cursor');const rows=(await this.#rows(q.include_expired??false,true,true)).filter(row=>row.op!=='tombstone'&&row.kind!=='memory_summary'&&!(row.kind==='entity'&&row.content.entity_kind==='person')&&!(row.entry_id.startsWith('workspace:')&&['inactive','suppressed','stale'].includes(displayText(row.content.status))));const limit=q.limit??100;return {entries:await Promise.all(rows.slice(offset,offset+limit).map(r=>this.#entry(r))),cursor:offset+limit<rows.length?String(offset+limit):null}}
+  async get(id:string):Promise<MemoryEntry|null>{const row=(await this.#rows(true,true,true)).find(r=>r.entry_id===id);return row?this.#entry(row):null}
   async recall(query:string,options:{scope?:'recent'|'any';limit?:number;signal?:AbortSignal}={}){
     this.#ready();const parsed=z.string().min(1).max(4000).parse(query);options.signal?.throwIfAborted()
     const scope=z.enum(['recent','any']).parse(options.scope??'recent');const limit=z.number().int().min(1).max(20).parse(options.limit??8)
     let vector:number[]|null=null
     try{if(this.options.embedding){const result=await this.options.embedding.embed([parsed],AbortSignal.any([this.#abort.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(10000)]));vector=this.#vector(result[0])}}catch{options.signal?.throwIfAborted();this.#abort.signal.throwIfAborted()}
-    const result=z.object({hits:z.array(z.object({entry:EntryRevisionSchema,score:z.number().finite()})),degraded:z.boolean()}).parse(await this.options.client.memory('search',{entry_prefix:this.prefix,provider:this.#fingerprint(),query:parsed,vector,scope,limit}))
+    const result=z.object({hits:z.array(z.object({entry:EntryRevisionSchema,score:z.number().finite()})),degraded:z.boolean()}).parse(await this.options.client.memory('search',{entry_prefix:this.prefix,provider:this.#fingerprint(),query:parsed,vector,scope,limit,exclude_file_inferences:true}))
     // Recheck after asynchronous provider work and before exposing any citations.
-    const current=new Map((await this.#rows()).map(row=>[row.entry_id,row]))
+    const current=new Map((await this.#rows(false,false,true)).map(row=>[row.entry_id,row]))
     const hits=[]
     for(const {entry,score} of result.hits){if(current.get(entry.entry_id)?.revision!==entry.revision)continue
       const evidenceIds:string[]=[];for(const id of entry.evidence_refs)if(await this.options.client.memory('retrieval_evidence',{id})!==null)evidenceIds.push(id)
@@ -203,9 +214,9 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #queueIndex():void{if(!this.options.embedding||this.#indexing||!this.#opened||this.options.personalMemoryEnabled===false)return;this.#indexing=this.#index().catch(()=>{ /* missing vectors remain eligible for the next maintenance tick */ }).finally(()=>{this.#indexing=null})}
   async #index():Promise<void>{
     const provider=this.options.embedding;if(!provider||!this.#opened)return
-    let pending=z.array(EntryRevisionSchema).parse(await this.options.client.memory('pending_vectors',{entry_prefix:this.prefix,provider:this.#fingerprint(),limit:100})).filter(entry=>displayText(entry.content.text).trim()!=='')
+    let pending=z.array(EntryRevisionSchema).parse(await this.options.client.memory('pending_vectors',{entry_prefix:this.prefix,provider:this.#fingerprint(),limit:100,exclude_file_inferences:true})).filter(entry=>displayText(entry.content.text).trim()!=='')
     const stamps=new Map<string,string>()
-    const current=new Map((await this.#rows()).map(row=>[row.entry_id,row.revision]))
+    const current=new Map((await this.#rows(false,false,true)).map(row=>[row.entry_id,row.revision]))
     for(const entry of pending){const stamp=await this.options.client.memory('processing_stamp',{ids:entry.evidence_refs,purpose:'embedding',provider:this.#fingerprint()});if(typeof stamp==='string'&&current.get(entry.entry_id)===entry.revision)stamps.set(entry.entry_id,stamp)}
     pending=pending.filter(entry=>stamps.has(entry.entry_id))
     if(!pending.length)return
@@ -256,6 +267,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   async remember(turn:PersonalMemoryRememberTurn){const ref=MemorySourceRefSchema.parse({type:'conversation',ref:turn.sourceId,observed_at:turn.occurredAt??new Date().toISOString()});const evidence=await this.#admit(ref,turn.text,'conversation',turn.sourceId,undefined,turn.confirmed===true);this.#queue(evidence);return {sourceId:turn.sourceId,state:'stored' as const}}
   async observeSource(input:MemoryObservation):Promise<MemoryEntry|null>{
     const q=MemoryObservationSchema.parse(input)
+    if(q.source_ref.type==='file')return null
     if(q.evidence_ids){
       for(const id of new Set(q.evidence_ids)){
         if(!await this.readEvidence(id))throw Error('memory_evidence_unavailable')
@@ -295,7 +307,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const raw=await this.options.client.memory('processing_evidence',{id:evidence.id,purpose:'extraction',provider:this.#extractionFingerprint()})
     if(raw===null)return
     evidence=EvidenceRecordSchema.parse(raw)
-    if(!evidence.raw_text||evidence.source_kind==='user_correction')return
+    if(!evidence.raw_text||evidence.source_kind==='user_correction'||evidence.source_kind==='file')return
     // Identity/version selection belongs to the host. Keep this snapshot across model work;
     // a late reply must not inherit the version of an intervening write.
     const snapshot=new Map((await this.#rows(true)).map(row=>[row.entry_id,row]))
@@ -318,7 +330,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
       if(this.options.embedding&&await this.options.client.memory('processing_stamp',{ids:[evidence.id],purpose:'embedding',provider:this.#fingerprint()})!==null){
         try{vector=this.#vector((await this.options.embedding.embed([query],AbortSignal.any([this.#abort.signal,AbortSignal.timeout(10000)])))[0])}catch{this.#abort.signal.throwIfAborted()}
       }
-      const hits=z.object({hits:z.array(z.object({entry:EntryRevisionSchema,extraction_stamp:z.string()})),degraded:z.boolean()}).parse(await this.options.client.memory('search',{entry_prefix:this.prefix,provider:this.#fingerprint(),extraction_provider:this.#extractionFingerprint(),kind:item.kind,query,vector,scope:'any',limit:4}))
+      const hits=z.object({hits:z.array(z.object({entry:EntryRevisionSchema,extraction_stamp:z.string()})),degraded:z.boolean()}).parse(await this.options.client.memory('search',{entry_prefix:this.prefix,provider:this.#fingerprint(),extraction_provider:this.#extractionFingerprint(),kind:item.kind,query,vector,scope:'any',limit:4,exclude_file_inferences:true}))
       for(const hit of hits.hits){
         if(hit.entry.evidence_refs.every(id=>id===evidence.id)&&result.entries.some(item=>this.prefix+digest(item.kind+':'+item.key)===hit.entry.entry_id))continue
         if(snapshot.get(hit.entry.entry_id)?.revision!==hit.entry.revision)throw Error('STORE_STALE_REVISION')
@@ -337,7 +349,11 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
       this.#abort.signal.throwIfAborted()
       decisions=validateResolution(JSON.parse(resolution.text),result.entries,[...oldEntries.values()])
     }
-    const targetIds=decisions.map(decision=>decision.target_id??this.prefix+digest(result.entries[decision.candidate_index]!.kind+':'+result.entries[decision.candidate_index]!.key))
+    const targetIds=await Promise.all(decisions.map(async decision=>{
+      if(decision.target_id)return decision.target_id
+      const item=result.entries[decision.candidate_index]!,key=item.kind+':'+item.key,id=this.prefix+digest(key)
+      return snapshot.has(id)&&await this.#fileInference(snapshot.get(id)!)?this.prefix+digest(key+':personal'):id
+    }))
     if(new Set(targetIds).size!==targetIds.length)throw Error('STORE_DUPLICATE_TARGET')
     const sender=evidence.source_metadata
     const provider=sender?.provider??(evidence.source_kind==='im'?'feishu':evidence.source_kind)
@@ -346,7 +362,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(sender&&personId&&result.entries.some(item=>item.kind==='commitment'))candidates.push(prepareAutomaticCandidate({entry_id:personId,kind:'entity',origin:'inferred',evidence_refs:[evidence.id],content:{entity_kind:'person',external_id:sender.sender_id,account_id:sender.account_id,provider,text:provider==='feishu'?'飞书联系人':'应用联系人'},recorded_at:new Date().toISOString()},snapshot.get(personId)??null))
     for(const decision of decisions){
       const item=result.entries[decision.candidate_index]!
-      const entryId=decision.target_id??this.prefix+digest(item.kind+':'+item.key),old=snapshot.get(entryId)
+      const entryId=targetIds[decision.candidate_index]!,old=snapshot.get(entryId)
       const origin=evidence.trust==='trusted_user'?'stated':'inferred'
       if(decision.action==='no_change'&&old&&!(old.origin==='inferred'&&origin==='stated'))continue
       const counterparty=personId??(displayText(old?.content.counterparty)||null),retained:string[]=[]

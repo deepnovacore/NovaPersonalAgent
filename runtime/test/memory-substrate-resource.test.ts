@@ -5,12 +5,37 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm,stat,writeFile,symlink,realpath} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
+import {createHash} from 'node:crypto'
 import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
 import {connectorSourceId,type SourceConnection,type SourceChange} from '../src/memory-substrate/source-state.js'
 import {EvidenceRecordSchema} from '../src/memory-substrate/store.js'
 import type {EntryRevision} from '../src/memory-substrate/store.js'
+
+test('legacy file fact cannot enter chat context or block a new stated memory with the same key',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-file-memory-boundary-'))
+ const item={key:'plan',text:'我在写项目报告',topic:'工作',kind:'fact',due:null,direction:null,status:null,valid_until:null}
+ const gateway:ModelGateway={async *stream(){/* unused */},complete(){return Promise.resolve({text:JSON.stringify({entries:[item]})})}}
+ const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const resource=new SubstrateMemoryResource({client,userId:'boundary',gateway,model:'fixture',inputConsent:true,conversationProviders:['consumer']})
+ try{
+  await resource.open()
+  const now=new Date().toISOString(),sourceId=resource.prefix+'old-file',evidenceId=resource.prefix+'e:old-file'
+  await client.memory('append_evidence',{id:evidenceId,source_id:sourceId,source_kind:'file',locator:'old-example',observed_at:now,recorded_at:now,raw_text:'小红的项目报告',hash:createHash('sha256').update('old-example').digest('hex'),trust:'untrusted_external'})
+  await client.memory('source_grant',{source_id:sourceId,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:'fixture',embedding_provider:null,conversation_providers:['consumer']}})
+  const oldId=resource.prefix+createHash('sha256').update('fact:plan').digest('hex')
+  await client.memory('merge',{entry_id:oldId,kind:'fact',origin:'inferred',written_by:'merge',evidence_refs:[evidenceId],content:{text:'小红的项目报告'},recorded_at:now})
+  assert.equal((await resource.list()).entries.length,0)
+  assert.equal((await resource.get(oldId)),null)
+  assert.ok(!JSON.stringify(await resource.prepareResponseAdaptation('consumer')).includes('小红'))
+  await resource.remember({sourceId:'fresh',sessionId:'s',sequence:1,occurredAt:now,text:'我在写项目报告',confirmed:true})
+  await resource.flush()
+  const entries=(await resource.list()).entries
+  assert.equal(entries.length,1);assert.equal(entries[0]?.content,'我在写项目报告');assert.notEqual(entries[0]?.id,oldId)
+  assert.equal((await client.memory('list',{}) as EntryRevision[]).filter(row=>row.entry_id===oldId).length,1,'legacy revision remains available for review')
+ }finally{await resource.close();await rm(root,{recursive:true,force:true})}
+})
 
 test('delayed extraction cannot replace a revision written while the model was running',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-extraction-race-'))
@@ -255,7 +280,7 @@ test('A backs document originals and denies automatic embedding without consent'
  }finally{await resource.close();await rm(root,{recursive:true,force:true})}
 })
 
-test('directory summary uses indexed A chunks and replacement withdraws obsolete facts',async()=>{
+test('indexed files remain in knowledge without creating personal facts',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-canonical-directory-'))
  let calls=0
  const gateway:ModelGateway={async *stream(){ /* extraction is non-streaming */ },complete(){calls++;return Promise.resolve({text:JSON.stringify({entries:[{key:'plan',text:calls<3?'旧计划':'新计划',topic:'计划',kind:'fact',due:null,direction:null,status:null,valid_until:null}]})})}}
@@ -269,22 +294,16 @@ test('directory summary uses indexed A chunks and replacement withdraws obsolete
   assert.equal(first.evidence_ids?.length,1)
   const observation={source_ref:{type:'file' as const,ref:'knowledge:'+first.id,observed_at:new Date().toISOString()},content:'should never replace canonical original',evidence_ids:first.evidence_ids}
   await resource.observeSource(observation)
-  let rows=await resource.list();assert.equal(rows.entries.length,1)
-  const original=await resource.evidenceFor(rows.entries[0]!.id,rows.entries[0]!.version)
-  assert.equal(original[0]?.id,first.evidence_ids[0]);assert.equal(original[0]?.text,'旧计划')
-  const version=rows.entries[0]!.version
-  const stableId=rows.entries[0]!.id
-  await resource.observeSource(observation)
-  assert.equal((await resource.list()).entries[0]!.version,version,'repeat extraction is a no-op revision')
-  await assert.rejects(resource.observeSource({...observation,source_ref:{...observation.source_ref,ref:'knowledge:other'}}),/source_mismatch/u)
+  assert.equal((await resource.list()).entries.length,0)
+  assert.equal((await resource.readEvidence(first.evidence_ids[0]!))?.text,'旧计划')
   await writeFile(path,'新计划')
   const next=await knowledge.syncFile(path,root,new AbortController().signal,first.id,resource.processingGrant(true))
   assert.notEqual(next.id,first.id)
   assert.equal(await resource.readEvidence(first.evidence_ids[0]!),null)
-  assert.equal((await resource.list()).entries.length,0,'retiring previous A withdraws all old B facts')
+  assert.equal((await resource.list()).entries.length,0)
   await resource.observeSource({...observation,source_ref:{...observation.source_ref,ref:'knowledge:'+next.id},evidence_ids:next.evidence_ids!})
-  rows=await resource.list();assert.equal(rows.entries[0]?.content,'新计划')
-  assert.equal(rows.entries[0]?.id,stableId,'replacement evidence continues the same understanding')
-  assert.equal((await resource.evidenceFor(rows.entries[0].id,rows.entries[0].version))[0]?.id,next.evidence_ids![0])
+  assert.equal((await resource.list()).entries.length,0)
+  assert.equal((await resource.readEvidence(next.evidence_ids![0]!))?.text,'新计划')
+  assert.equal(calls,0,'file content never enters personal extraction')
  }finally{await knowledge.close();await resource.close();await rm(root,{recursive:true,force:true})}
 })

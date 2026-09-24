@@ -11,7 +11,7 @@ import {z} from 'zod'
 import type {CapabilityRegistry} from '../config/capability-registry.js'
 import {Dispatcher,getGlobalDispatcher,setGlobalDispatcher} from 'undici'
 
-const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300)}).strict()
+const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300),profileGeneration:z.boolean().default(false)}).strict()
 export type AcceptanceManifest=z.infer<typeof manifestSchema>
 let active:AcceptanceManifest|undefined
 let calls=0,blocked=0,probeVerified=false
@@ -25,6 +25,7 @@ export function assertOriginalProfilePaths(actual:{userData?:string;blackboardPa
  if(canonical(actual.blackboardPath)!==canonical(expected.blackboardPath))throw Error('acceptance_wrong_blackboard')
 }
 export function acceptanceEnabled():boolean{return !!process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT}
+export function acceptanceProfileGenerationEnabled():boolean{return active?.profileGeneration===true}
 export function acceptanceManifest():AcceptanceManifest|undefined{return active}
 export function loadAcceptanceManifest(environment:NodeJS.ProcessEnv=process.env):AcceptanceManifest|undefined{
  if(!environment.NOVA_WORKBENCH_ACCEPTANCE_REPORT)return undefined
@@ -118,7 +119,7 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
   }
   return fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}))
  }
- appendAcceptanceCounts('disabled_modules',{news:1,proactive:1,connectors:1,phone:1,external_mcp:1,coding:1,voice_activation:1,profile_warmup:1,understanding:1,memory_overview:1,search:1,camera_capability:1,wake_word:1})
+ appendAcceptanceCounts('disabled_modules',{news:1,proactive:1,connectors:1,phone:1,external_mcp:1,coding:1,voice_activation:1,profile_warmup:Number(!manifest.profileGeneration),understanding:1,memory_overview:1,search:1,camera_capability:1,wake_word:1})
  return manifest
 }
 export function acceptanceProfileHash(path:string):string{return createHash('sha256').update(canonical(path)).digest('hex')}
