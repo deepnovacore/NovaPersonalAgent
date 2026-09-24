@@ -1,9 +1,11 @@
 import type {ProcessingGrant} from '../memory-substrate/source-state.js'
 import {randomUUID} from 'node:crypto'
+import {appendFileSync} from 'node:fs'
 import {opendir, realpath} from 'node:fs/promises'
 import {join} from 'node:path'
 import {z} from 'zod'
 import {SensitivePathPolicy} from '../memory/sensitivity.js'
+import {acceptanceManifest} from '../desktop/workbench-acceptance.js'
 import {chunkKnowledgeText, fetchKnowledgeUrl, readKnowledgeFile, knowledgeExcerpt, KnowledgeDocumentFailure} from './documents.js'
 import type {EmbeddingProvider} from './embeddings.js'
 import type {KnowledgeStoreClient} from './store-client.js'
@@ -261,6 +263,8 @@ export class KnowledgeService {
       return {ok: true, id: active.id}
     } catch (cause) {
       const code = signal.aborted ? 'ingest_cancelled' : ingestionCode(cause, stage)
+      const acceptance=acceptanceManifest()
+      if(acceptance)appendFileSync(join(acceptance.outputDirectory,'knowledge-errors.ndjson'),JSON.stringify({stage,code,error:cause instanceof Error?`${cause.name}: ${cause.message}`.slice(0,300):typeof cause})+'\n',{mode:0o600})
       if (!committed && old?.id !== active.id) await this.#ledger?.remove(`knowledge:${active.id}`).catch(() => undefined)
       if (!this.#stop.signal.aborted) await this.#store.recordJob({...job, updated_at: Date.now(), state: 'failed', error_code: code}).catch(() => undefined)
       return {error: code, id: active.id}
