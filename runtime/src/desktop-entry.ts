@@ -1,4 +1,6 @@
 import {fileURLToPath} from 'node:url'
+import {writeFileSync} from 'node:fs'
+import {dirname, resolve} from 'node:path'
 import {installAcceptanceGate,probeAcceptanceGate,acceptanceRuntimeHash} from './desktop/workbench-acceptance.js'
 import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, PERSONAL_SETTINGS_METHODS, desktopBudgetFailure, type DesktopCapabilityState} from './desktop/desktop-control.js'
 import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop/desktop-session.js'
@@ -51,6 +53,8 @@ const exitCode = await runDesktopEntryWithStopSources({
     if(acceptance){
       const detail=error instanceof Error?`${error.name}: ${error.message}`:typeof error
       onDiagnostic(`[acceptance-startup-error] ${detail.replace(/[\r\n]/gu,' ').slice(0,300)}`)
+      const report=process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT
+      if(report)writeFileSync(resolve(dirname(report),'startup-error.json'),JSON.stringify({detail,stack:error instanceof Error?error.stack?.split('\n').slice(0,8):undefined})+'\n',{mode:0o600})
     }
     const status = desktopBudgetFailure(error)
     capabilityView = () => status
