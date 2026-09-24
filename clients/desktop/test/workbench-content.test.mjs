@@ -155,3 +155,11 @@ test('a goal suggestion becomes a goal only when the user sets it, and the page 
  settle();await done;assert.equal(adopt.disabled,false)
  assert.deepEqual(calls,[['context.adopt',{id:'g'}]],'adoption is one backend command keyed by the suggestion')
 })
+
+test('the frameless workbench draws its own edge in both light and dark themes',async()=>{
+ const {readFile}=await import('node:fs/promises')
+ const css=await readFile(new URL('../src/renderer/workbench.css',import.meta.url),'utf8')
+ assert.match(css,/\.workbench::after\{[^}]*inset:0;border:1px solid var\(--edge\);pointer-events:none/)
+ const light=css.slice(0,css.indexOf('@media(prefers-color-scheme:dark)')),dark=css.slice(css.indexOf('@media(prefers-color-scheme:dark)'),css.indexOf('body[data-personal-collapsed="false"]'))
+ assert.match(light,/--edge:rgba\(20,24,31,/);assert.match(dark,/--edge:rgba\(220,226,235,/)
+})

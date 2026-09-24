@@ -1158,6 +1158,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       mainWindow.setResizable(false)
       mainWindow.setMinimumSize(1, 1)
       mainWindow.setAlwaysOnTop(true, 'floating')
+      // The resting orb is a transparent shape; a native shadow would outline its empty window rectangle.
+      mainWindow.setHasShadow(false)
       mainWindow.setBounds(initialOrbBounds)
       orbWindow.sync()
     } else {
@@ -1169,6 +1171,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       mainWindow.setResizable(true)
       mainWindow.setMinimumSize(Math.min(660, area.width), Math.min(520, area.height))
       mainWindow.setAlwaysOnTop(false)
+      // The workbench is an opaque frameless rectangle; the native shadow separates it from windows behind it.
+      mainWindow.setHasShadow(true)
       mainWindow.setBounds(personalBounds ?? {x:area.x+Math.round((area.width-width)/2),y:area.y+Math.round((area.height-height)/2),width,height})
       personalBounds = mainWindow.getBounds()
     }

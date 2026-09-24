@@ -11,7 +11,7 @@
 .workbench{
  color-scheme:light dark;
  --surface:#f4f5f7;--surface-raised:#ffffff;--surface-inset:#eceef1;
- --line:rgba(20,24,31,.09);--line-strong:rgba(20,24,31,.18);
+ --line:rgba(20,24,31,.09);--line-strong:rgba(20,24,31,.18);--edge:rgba(20,24,31,.22);
  --ink:#1b2027;--ink-dim:#5c6570;--ink-faint:#8a939e;
  --accent:#2f6fde;--accent-wash:rgba(47,111,222,.10);--accent-ink:#fff;
  --ok:#1e7a3a;--ok-wash:rgba(30,122,58,.10);--warn:#b42318;--warn-wash:rgba(180,35,24,.08);
@@ -21,7 +21,7 @@
 }
 @media(prefers-color-scheme:dark){.workbench{
  --surface:#0f1216;--surface-raised:#171b21;--surface-inset:#0b0e12;
- --line:rgba(220,226,235,.09);--line-strong:rgba(220,226,235,.18);
+ --line:rgba(220,226,235,.09);--line-strong:rgba(220,226,235,.18);--edge:rgba(220,226,235,.26);
  --ink:#e6e9ee;--ink-dim:#9aa4b1;--ink-faint:#6b7480;
  --accent:#6b9cff;--accent-wash:rgba(107,156,255,.14);--accent-ink:#0b1220;
  --ok:#5fc48a;--ok-wash:rgba(95,196,138,.12);--warn:#ff7b6e;--warn-wash:rgba(255,123,110,.12);
@@ -31,6 +31,9 @@ body[data-personal-collapsed="false"]{background:var(--surface,#f4f5f7);overflow
 .workbench{position:relative;display:grid;grid-template-columns:var(--rail-w) minmax(0,1fr) var(--chat-w);height:100vh;background:var(--surface);color:var(--ink);font:13px/1.6 var(--font);text-align:left;user-select:text;overflow:hidden}
 .workbench[data-chat-open="false"]{grid-template-columns:var(--rail-w) minmax(0,1fr) 0}
 .workbench button{font:inherit;color:inherit;user-select:none;cursor:pointer;border:1px solid var(--line);border-radius:var(--radius-sm);background:var(--surface-raised);padding:5px 10px;font-size:12px;line-height:1.4}
+/* Frameless windows have no system border; a hairline above every pane keeps the edge visible over other apps.
+   Dark mode needs the brighter line: the native shadow disappears against dark windows behind it. */
+.workbench::after{content:'';position:absolute;inset:0;border:1px solid var(--edge);pointer-events:none;z-index:50}
 .workbench button:hover:not(:disabled){border-color:var(--line-strong)}
 .workbench button:disabled{opacity:.45;cursor:default}
 .workbench button:focus-visible,.workbench textarea:focus-visible,.workbench input:focus-visible,.workbench select:focus-visible,.workbench summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

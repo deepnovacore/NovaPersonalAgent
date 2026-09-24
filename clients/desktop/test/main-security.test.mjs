@@ -1220,3 +1220,15 @@ test('foreground changes native presentation before unmuting playback',async()=>
  const apply=new Function('window','axes','requestAnimationFrame','render',`return ${body}`)(window,{outputMuted:false},()=>{},()=>{})
  await apply('workbench',{activate:false});assert.deepEqual(calls,[['presentation','workbench',false],['muted',false]])
 })
+
+test('the expanded workbench casts a native shadow and the resting orb does not',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf('  let personalCollapsed = false')
+ const body=source.slice(start,source.indexOf("  ipcMain.handle('nova:personal:presentation-error'",start))
+ const shadow=[],bounds={x:0,y:0,width:100,height:100}
+ const mainWindow={getBounds:()=>bounds,setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds(){},setHasShadow:value=>shadow.push(value)}
+ const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:{x:0,y:0,width:1440,height:900}})}
+ const set=new Function('mainWindow','screen','orbWindow','sendToOrb',`${body};return setPersonalCollapsed`)(mainWindow,screen,{sync(){}},()=>{})
+ set(false);set(true);set(false)
+ assert.deepEqual(shadow,[true,false,true])
+})
