@@ -18,6 +18,8 @@ https://github.com/user-attachments/assets/061697f3-fff6-47d6-924b-8a29eef4ab45
 
 ## News
 
+- **2026-09-24 · 🎉 [v0.2.3 已发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.3)** — 首次启动更顺手：只要一个 DashScope API Key 就能开始对话，设置窗口会先测试密钥再保存；搜索、摄像头与记忆在配好对应密钥后自动启用。
+
 - **2026-09-21 · 🎉 [v0.2.2 已发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — 新增 Ubuntu 22.04+ x64 桌面 npm 安装与启动，以及支持终端二维码配对的无头服务包 `nova-audio-agent-server`；继续支持 macOS 和 Windows。
 
 - **2026-09-21 ·** **🎉 [v0.2.0 正式发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)**
