@@ -124,7 +124,7 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
   }
   return fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}))
  }
- appendAcceptanceCounts('disabled_modules',{news:1,proactive:1,connectors:1,phone:1,external_mcp:1,coding:1,voice_activation:1,profile_warmup:Number(!manifest.profileGeneration),understanding:1,memory_overview:1,search:1,camera_capability:1,wake_word:1})
+ appendAcceptanceCounts('disabled_modules',{news:1,proactive:1,connectors:1,phone:1,external_mcp:1,coding:1,voice_activation:1,profile_generation:Number(!manifest.profileGeneration),understanding:1,memory_overview:1,search:1,camera_capability:1,wake_word:1})
  return manifest
 }
 export function acceptanceProfileHash(path:string):string{return createHash('sha256').update(canonical(path)).digest('hex')}

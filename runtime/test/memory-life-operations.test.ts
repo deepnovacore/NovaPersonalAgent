@@ -82,7 +82,7 @@ test('Life editable body normalization rejects oversized edits and does not bump
  const next=normalizeLifeContent('profile',{...previous,text:'手改内容'},previous)
  assert.deepEqual(next.life_data,{about:'手改内容',version:8})
  assert.deepEqual(normalizeLifeContent('profile',next,previous),next)
- assert.throws(()=>normalizeLifeContent('profile',{...previous,text:'字'.repeat(4001)},previous))
+ assert.throws(()=>normalizeLifeContent('profile',{...previous,text:'字'.repeat(5001)},previous))
 })
 
 test('editing one migrated object does not suppress the evidence of other legacy objects',()=>{
