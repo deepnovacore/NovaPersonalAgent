@@ -20,6 +20,7 @@ test('only projects whose documents changed are sent again, and the model never 
   await service.open();service.update([file('/home/u/nova','README.md'),file('/home/u/notes','plan.md')])
   await until(()=>service.digests().length===2);assert.equal(t.calls.length,1)
   assert.ok(!JSON.stringify(t.calls[0]).includes('/home/u'),'no absolute paths reach the model')
+  assert.deepEqual(service.digests().map(d=>d.inputs),t.calls[0]!.map(p=>p.documents.map(d=>d.entry_id)),'each digest names every document it read, cited or not')
   await service.close();service=t.make();await service.open()
   service.update([file('/home/u/nova','README.md'),file('/home/u/notes','plan.md','v2')])
   assert.equal(service.digests().length,2,'a project being re-read keeps its digest')

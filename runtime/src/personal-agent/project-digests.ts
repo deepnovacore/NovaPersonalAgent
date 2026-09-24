@@ -14,7 +14,8 @@ export const projectDigestSchema=z.object({
  next_step:z.string().trim().min(1).max(120).nullable(),
  refs:z.array(ref).min(1).max(8),
 }).strict()
-export type ProjectDigest=z.infer<typeof projectDigestSchema>&{name:string}
+/** `inputs` are every document the digest read, cited or not. */
+export type ProjectDigest=z.infer<typeof projectDigestSchema>&{name:string;inputs?:readonly string[]}
 /** What the model sees for one project: a display name, a few documents, and activity signals — never a path. */
 export interface ProjectInput {
  project_key:string;name:string
@@ -59,7 +60,7 @@ export class ProjectDigests{
    // Refs keep their file ids across re-reads; the version is refreshed to the current one so downstream evidence checks still pass.
    const versions=new Map(project.input.documents.map(d=>[d.entry_id,d.version]))
    const refs=hit?.digest.refs.flatMap(r=>{const version=versions.get(r.entry_id);return version?[{entry_id:r.entry_id,version}]:[]})??[]
-   return hit&&refs.length?[{...hit.digest,name:project.input.name,refs}]:[]
+   return hit&&refs.length?[{...hit.digest,name:project.input.name,refs,inputs:[...hit.inputs]}]:[]
   })
  }
  pending(){return [...this.#projects.values()].filter(p=>this.#disk.projects[p.input.project_key]?.key!==p.key).length}

@@ -26,31 +26,35 @@ test('a goal suggestion is kept only against a goal candidate from the same proj
   assert.deepEqual(context.snapshot().cards.map(card=>card.tab),['goals'],'a todo candidate relabelled as a goal is dropped')
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
 })
-test('project cards survive a digest rewrite until regenerated, but never one that drops a source',async()=>{
+test('project cards survive a digest rewrite until regenerated, but never once a source they drew on is withdrawn',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-roots-'))
- const a={entry_id:'source:a',version:'v1'},b={entry_id:'source:b',version:'v1'}
- const digest=(refs:typeof a[],focus:string)=>[{project_key:'k',name:'nova',role:'own' as const,summary:'Voice agent',focus,next_step:null,refs}]
+ const a={entry_id:'source:a',version:'v1'},b={entry_id:'source:b',version:'v1'},c={entry_id:'source:c',version:'v1'}
+ const file=(ref:typeof a):ContextInput=>({kind:'file',id:ref.entry_id,version:ref.version,content:'Project notes.',source_id:'s',file_id:ref.entry_id,root:'/nova',rel_path:ref.entry_id.slice(7)+'.md',role:'document',mtime_ms:1,priority:1})
+ // The digest cites only A but also read B and C.
+ const digest=(refs:typeof a[],inputs:string[],focus:string|null)=>[{project_key:'k',name:'nova',role:'own' as const,summary:'Voice agent',focus,next_step:null,refs,inputs}]
  const doc:ContextInput={kind:'file',id:'source:m',version:'v1',content:'An idea for a simpler setup.',source_id:'s',file_id:'m',root:'/project',rel_path:'notes.md',role:'document',mtime_ms:1,priority:2}
  const generate=(candidates:readonly {candidate_id:string;tab:string;refs:readonly {entry_id:string;version:string|number}[]}[])=>Promise.resolve({recap:null,cards:candidates.map(c=>({candidate_id:c.candidate_id,tab:c.tab as 'todos'|'ideas'|'goals',title:'Keep going on '+c.tab,body:'Still in progress.',why:null,next:c.tab==='ideas'?null:'Take the next step',refs:c.refs.map(ref=>({...ref}))}))})
  const context=new WorkbenchContext(join(dir,'cards.json'),generate,()=>undefined)
  try{
-  await context.open();context.update([doc],{items:digest([a,b],'A and B'),pending:0});await context.refresh()
+  await context.open();context.update([doc,file(a),file(b),file(c)],{items:digest([a],['source:a','source:b','source:c'],'A with B'),pending:0});await context.refresh()
   const before=context.snapshot().cards
   assert.deepEqual(before.map(card=>card.tab).sort(),['goals','ideas','todos'])
-  const reworded=digest([a,{...b,version:'v2'}],'A and B, reworded')
-  context.update([{...doc,version:'v2'}],{items:reworded,pending:0})
+  const a2={...a,version:'v2'}
+  const rewritten=digest([a2],['source:a','source:b','source:c'],'A with B, reworded')
+  context.update([{...doc,version:'v2'},file(a2),file(b),file(c)],{items:rewritten,pending:0})
   const after=context.snapshot().cards
   assert.deepEqual(after.map(card=>card.tab).sort(),['goals','todos'],'project cards stay; the document card needs an exact match')
   assert.deepEqual(after.map(card=>card.id).sort(),before.filter(card=>card.tab!=='ideas').map(card=>card.id).sort(),'the card keeps its identity for dismissal')
-  for(const card of after)assert.deepEqual(card.refs.map(({entry_id,version})=>({entry_id,version})),[a,{...b,version:'v2'}],'a kept card cites the current versions')
-  context.update([],{items:reworded.map(d=>({...d,focus:null})),pending:0})
+  for(const card of after)assert.deepEqual(card.refs.map(({entry_id,version})=>({entry_id,version})),[a2],'a kept card cites the current versions')
+  context.update([file(a2),file(b),file(c)],{items:rewritten.map(d=>({...d,focus:null})),pending:0})
   assert.deepEqual(context.snapshot().cards.map(card=>card.tab),['goals'],'a todo card needs a todo successor, not the project goal')
-  context.update([{...doc,version:'v2'}],{items:reworded,pending:0})
+  context.update([file(a2),file(b),file(c)],{items:rewritten,pending:0})
   await context.dismiss(after.find(card=>card.tab==='goals')!.id)
   assert.deepEqual(context.snapshot().cards.map(card=>card.tab),['todos'])
-  context.update([],{items:digest([a],'A only'),pending:0})
-  assert.equal(context.snapshot().cards.length,0,'a card written from B must not outlive B')
-  context.update([],{items:[],pending:0});assert.equal(context.snapshot().cards.length,0)
+  context.update([file(a2),file(c)],{items:digest([a2],['source:a','source:c'],'A only'),pending:0})
+  assert.equal(context.snapshot().cards.length,0,'B was read uncited; a card written from it must not outlive it even behind a safe successor')
+  context.update([file(a2),file(c)],{items:digest([a2],['source:a','source:c'],'A only'),pending:0})
+  context.update([file(a2),file(b),file(c)],{items:[],pending:0});assert.equal(context.snapshot().cards.length,0,'no successor, no card')
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
 })
 test('automatic cards are grounded, persistent, dismissible, and disappear after source invalidation',async()=>{

@@ -7,7 +7,8 @@ interface Ref {entry_id:string;version:string|number}
 export type ContextInput=
  | {kind:'file';id:string;version:string;content:string;source_id:string;file_id:string;root:string;rel_path:string;role:'document'|'code'|'config'|'cache';mtime_ms:number;priority:number;hidden_prefix_depth?:number;last_commit_ms?:number|null;own_commits?:number}
  | {kind:'memory';id:string;version:string|number;content:string;origin:'stated'|'inferred'}
-export interface ContextCandidate {candidate_id:string;id:string;version:string;content:string;tab:'todos'|'ideas'|'goals';primaryFileId:string|null;refs:Ref[];excerpt:string;reason_code:'document_action'|'document_idea'|'stated_idea'|'project_focus'|'project_direction';root:string;priority:number;mtime_ms:number}
+/** `sources` lists every entry the candidate's text was derived from, including uncited digest inputs. */
+export interface ContextCandidate {sources?:readonly string[];candidate_id:string;id:string;version:string;content:string;tab:'todos'|'ideas'|'goals';primaryFileId:string|null;refs:Ref[];excerpt:string;reason_code:'document_action'|'document_idea'|'stated_idea'|'project_focus'|'project_direction';root:string;priority:number;mtime_ms:number}
 
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export const candidateId=(tab:string,primaryId:string,fingerprint:string)=>hash([tab,primaryId,fingerprint])
@@ -52,7 +53,7 @@ function digestCandidates(digests:readonly ProjectDigest[]):ContextCandidate[]{
  const own=digests.filter(d=>d.role==='own')
  const project=(d:ProjectDigest,tab:'todos'|'goals',lines:string[]):ContextCandidate=>{
   const excerpt=lines.join('\n'),version=hash([excerpt,d.refs]).slice(0,32),candidate_id=candidateId(tab,'project:'+d.project_key,version)
-  return {candidate_id,id:candidate_id,version,content:excerpt,tab,primaryFileId:null,refs:d.refs.map(r=>({...r})),excerpt,reason_code:tab==='todos'?'project_focus':'project_direction',root:'project:'+d.project_key,priority:3,mtime_ms:0}
+  return {candidate_id,id:candidate_id,version,content:excerpt,tab,primaryFileId:null,refs:d.refs.map(r=>({...r})),sources:[...new Set([...(d.inputs??[]),...d.refs.map(r=>r.entry_id)])],excerpt,reason_code:tab==='todos'?'project_focus':'project_direction',root:'project:'+d.project_key,priority:3,mtime_ms:0}
  }
  const todos=own.filter(d=>d.focus??d.next_step).slice(0,6).map(d=>project(d,'todos',[`项目：${d.name}`,`概况：${d.summary}`,...(d.focus?[`近期：${d.focus}`]:[]),...(d.next_step?[`写明的下一步：${d.next_step}`]:[])]))
  const goals=own.slice(0,GOAL_PROJECTS).map(d=>project(d,'goals',[`项目：${d.name}`,`概况：${d.summary}`,...(d.focus?[`近期：${d.focus}`]:[])]))

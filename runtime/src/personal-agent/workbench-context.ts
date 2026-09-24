@@ -41,14 +41,15 @@ export class WorkbenchContext{
  #candidate(card:ContextCards['cards'][number]){return this.#candidates.find(candidate=>candidate.candidate_id===card.candidate_id&&candidate.tab===card.tab&&card.refs.every(ref=>candidate.refs.some(allowed=>sameRef(ref,allowed))))}
  /**
   * A project card outlives a digest rewrite until the next generation replaces it: during a first scan digests are rewritten far more often than cards are regenerated.
-  * The successor must still draw on every source the card was written from, so withdrawn material never resurfaces; the card then cites the successor's current refs.
+  * Every entry the card was derived from, cited or read uncited by its digest, must still be eligible, so withdrawn material never resurfaces; the card then cites the successor's current refs.
   * Document cards keep an exact match.
   */
  #shownRefs(card:ContextCards['cards'][number]){
   if(this.#candidate(card))return card.refs
   const basis=this.#state.card_basis[card.candidate_id]
   if(!basis?.root.startsWith('project:'))return null
-  return this.#candidates.find(candidate=>candidate.root===basis.root&&candidate.tab===card.tab&&basis.entries.every(id=>candidate.refs.some(ref=>ref.entry_id===id)))?.refs??null
+  if(!basis.entries.every(id=>this.#inputs.some(input=>input.id===id)))return null
+  return this.#candidates.find(candidate=>candidate.root===basis.root&&candidate.tab===card.tab)?.refs??null
  }
  #recapGrounded(recap:{refs:readonly {entry_id:string;version:string|number}[]},candidates:readonly ContextCandidate[]=this.#candidates){return recap.refs.every(ref=>candidates.some(c=>c.tab==='todos'&&c.refs.some(allowed=>sameRef(ref,allowed))))}
  /** Todo candidates a recap draws on; any of them changing or leaving retires the recap, even if its cited refs survive. */
@@ -103,7 +104,7 @@ export class WorkbenchContext{
    const cards=result.cards.filter(card=>{if(seen.has(card.candidate_id)||leaksRawField(card)||!this.#candidate(card)||!card.refs.every(ref=>candidates.some(candidate=>candidate.candidate_id===card.candidate_id&&candidate.refs.some(allowed=>sameRef(ref,allowed)))))return false;seen.add(card.candidate_id);return true})
    const basis=result.recap?this.#recapBasis(result.recap,candidates):[]
    const recap=result.recap&&basis.length&&!leaksRawText(result.recap.text)&&this.#recapGrounded(result.recap,candidates)?result.recap:null
-   const cardBasis=Object.fromEntries(cards.map(card=>{const candidate=candidates.find(c=>c.candidate_id===card.candidate_id)!;return [card.candidate_id,{root:candidate.root,entries:[...new Set(candidate.refs.map(ref=>ref.entry_id))]}]}))
+   const cardBasis=Object.fromEntries(cards.map(card=>{const candidate=candidates.find(c=>c.candidate_id===card.candidate_id)!;return [card.candidate_id,{root:candidate.root,entries:[...(candidate.sources??new Set(candidate.refs.map(ref=>ref.entry_id)))]}]}))
    await this.#write(next=>{next.recap=recap;next.recap_basis=recap?basis:[];next.card_basis=cardBasis;next.cards=cards;next.key=key;next.retry_key='';next.retry_not_before=0});this.#status='ready'
   }catch(error){failedAt=Date.now();if(this.#opened&&!signal.aborted)await this.#write(next=>{next.retry_key=key;next.retry_not_before=failedAt+300000}).catch(()=>undefined);this.#status='failed';console.error('[workbench-context] generation_failed',error instanceof z.ZodError?JSON.stringify(error.issues.map(i=>({code:i.code,path:i.path}))):error instanceof Error?error.name:'unknown')}finally{this.#run=undefined;this.changed();if(this.#opened){if(this.#manualPending){this.#manualPending=false;void this.refresh()}else if(key!==this.#key())this.update(this.#inputs,this.#digests&&{items:this.#digests,pending:this.#digestsPending});else if(this.#status==='failed'){this.#firstChangeAt=failedAt;this.#lastChangeAt=failedAt;this.#pendingKey=key;this.#schedule()}}}})();this.#run=run;await run
  }
