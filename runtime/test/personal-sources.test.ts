@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import test from 'node:test'
 import {LocalDirectorySources} from '../src/personal-agent/sources.js'
-import {GitActivityCache,nextComputerRoot,orderComputerRoots,rootActivity} from '../src/personal-agent/source-priority.js'
+import {GitActivityCache,gitIgnoredDirectories,nextComputerRoot,orderComputerRoots,rootActivity} from '../src/personal-agent/source-priority.js'
 import {scanDirectory} from '../src/personal-agent/source-walk.js'
 import {KnowledgeService, type KnowledgeEvidenceLedger} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
@@ -133,6 +133,15 @@ test('computer scan does not descend into directories a repository ignores',asyn
   assert.ok(!locators.some(locator=>locator.includes('outputs')),'ignored output is never read')
   assert.ok((f.sources.list()[0]!.reasons.git_ignored??0)>=1)
  }finally{await f.close()}
+})
+
+test('a failed ignore probe reports no answer instead of an empty repository',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-ignore-probe-'))
+ try{
+  assert.equal(await gitIgnoredDirectories(join(root,'missing')),null,'a failure must not be cached as nothing ignored')
+  execFileSync('git',['init','-q',root]);await mkdir(join(root,'out'));await writeFile(join(root,'out','x.md'),'x');await writeFile(join(root,'.gitignore'),'out/\n')
+  assert.deepEqual([...(await gitIgnoredDirectories(root))!],[join(root,'out')])
+ }finally{await rm(root,{recursive:true,force:true})}
 })
 
 test('computer scan settles files larger than its total byte budget without retrying them',async()=>{

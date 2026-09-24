@@ -555,10 +555,11 @@ export class LocalDirectorySources {
   #ignoredIn(root:string):Promise<Set<string>>{
     const cached=this.#ignored.get(root)
     if(cached&&Date.now()-cached.checked<600_000)return cached.dirs
-    const dirs=gitIgnoredDirectories(root)
-    this.#ignored.set(root,{dirs,checked:Date.now()})
+    // A timed-out or failed probe is not cached, so the next batch asks Git again.
+    const entry={dirs:gitIgnoredDirectories(root).then(found=>{if(!found&&this.#ignored.get(root)===entry)this.#ignored.delete(root);return found??new Set<string>()}),checked:Date.now()}
+    this.#ignored.set(root,entry)
     if(this.#ignored.size>256)this.#ignored.delete(this.#ignored.keys().next().value!)
-    return dirs
+    return entry.dirs
   }
   #lifecycle(record: SourceRecord): AbortController {
     let lifecycle=this.#lifecycles.get(record.view.id)
