@@ -158,3 +158,51 @@ test('the todo page gets a grounded recap, action cards with why and next, and o
   assert.equal(context.snapshot().recap.text,null,'an ungrounded recap is dropped');assert.equal(context.snapshot().cards.length,1)
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
 })
+test('a recap retires when a digest it drew on is replaced, even if its cited ref survives',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-basis-'))
+ const a={entry_id:'source:a',version:'v1'},b={entry_id:'source:b',version:'v1'}
+ const digest=(refs:typeof a[],focus:string)=>[{project_key:'k',name:'nova',role:'own' as const,summary:'Voice agent',focus,next_step:null,refs}]
+ let recapText='Working on A and the private B plan.'
+ const generate=(candidates:readonly {candidate_id:string}[])=>Promise.resolve({recap:{text:recapText,refs:[a]},cards:[{candidate_id:candidates[0]!.candidate_id,tab:'todos' as const,title:'Continue A',body:'A is in progress.',refs:[a]}]})
+ const context=new WorkbenchContext(join(dir,'cards.json'),generate,()=>undefined)
+ try{
+  await context.open();context.update([],{items:digest([a,b],'A and B'),pending:0});await context.refresh()
+  assert.equal(context.snapshot().recap.text,'Working on A and the private B plan.')
+  context.update([],{items:digest([a],'A only'),pending:0})
+  assert.equal(context.snapshot().recap.text,null,'B was withdrawn, so a recap written from it must not return')
+  recapText='Working on A.';await context.refresh();assert.equal(context.snapshot().recap.text,'Working on A.')
+ }finally{await context.close();await rm(dir,{recursive:true,force:true})}
+})
+test('recap and action text reject Windows, UNC, and general absolute paths',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-paths-'))
+ const refs=[{entry_id:'source:nova',version:'v1'}]
+ const digests=[{project_key:'k',name:'nova',role:'own' as const,summary:'Voice agent',focus:'Fixing content',next_step:'Ship',refs}]
+ let text='',next:string|null=null,why:string|null=null
+ const generate=(candidates:readonly {candidate_id:string}[])=>Promise.resolve({recap:{text,refs},cards:[{candidate_id:candidates[0]!.candidate_id,tab:'todos' as const,title:'Ship it',body:'Ready.',why,next,refs}]})
+ const context=new WorkbenchContext(join(dir,'cards.json'),generate,()=>undefined)
+ try{
+  await context.open()
+  for(const leak of ['C:\\Users\\someone\\private\\plan.md','\\\\server\\share\\plan.md','/private/tmp/private-plan.md','see /opt/app/config now']){
+   text=`Recap ${leak}`;why=`Because ${leak}`;next=null
+   await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+   assert.equal(context.snapshot().recap.text,null,leak);assert.equal(context.snapshot().cards.length,0,leak)
+   text='Plain recap.';why=null;next=`Open ${leak}`
+   await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+   assert.equal(context.snapshot().cards.length,0,leak)
+  }
+  text='前端/后端 都在推进。';why=null;next='比较 A/B 两种流程'
+  await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+  assert.equal(context.snapshot().recap.text,'前端/后端 都在推进。');assert.equal(context.snapshot().cards.length,1,'relative slashes are ordinary prose')
+ }finally{await context.close();await rm(dir,{recursive:true,force:true})}
+})
+test('an idea candidate does not mask pending project digests on the Todo page',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-tabs-'))
+ const context=new WorkbenchContext(join(dir,'cards.json'),()=>Promise.resolve({cards:[]}),()=>undefined)
+ try{
+  await context.open()
+  context.update([{id:'m',version:1,content:'一个想法：用更简单的引导流程替代现在的设置页。',origin:'stated'}],{items:[],pending:3});await context.refresh()
+  const snapshot=context.snapshot()
+  assert.equal(snapshot.candidate_count,1,'the idea is a real candidate')
+  assert.equal(snapshot.empty_reasons.todos,'digests_pending');assert.equal(snapshot.empty_reasons.ideas,'model_abstained')
+ }finally{await context.close();await rm(dir,{recursive:true,force:true})}
+})

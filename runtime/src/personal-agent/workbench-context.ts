@@ -17,18 +17,18 @@ export type ContextEntry=ContextInput | (Pick<MemoryEntry,'id'|'version'|'conten
 export type ContextGenerator=(candidates:readonly ContextCandidate[],signal:AbortSignal)=>Promise<z.input<typeof contextCardsSchema>>
 const keyOf=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const generationRevision='project-digest-v3'
-const stateSchema=contextCardsSchema.extend({version:z.literal(2),key:z.string(),automatic_call_times:z.array(z.number().int().nonnegative()).max(6).default([]),retry_key:z.string().default(''),retry_not_before:z.number().int().nonnegative().default(0),dismissed:z.array(z.string()).max(1000),legacyDismissed:z.array(z.object({tab:z.string(),refs:z.array(refSchema)}).strict()).max(1000)})
+const stateSchema=contextCardsSchema.extend({recap_basis:z.array(z.string().max(128)).max(20).default([]),version:z.literal(2),key:z.string(),automatic_call_times:z.array(z.number().int().nonnegative()).max(6).default([]),retry_key:z.string().default(''),retry_not_before:z.number().int().nonnegative().default(0),dismissed:z.array(z.string()).max(1000),legacyDismissed:z.array(z.object({tab:z.string(),refs:z.array(refSchema)}).strict()).max(1000)})
 type State=z.infer<typeof stateSchema>
 const diskSchema=z.preprocess(value=>{
  if(!value||typeof value!=='object'||'version' in value)return value
  const old=value as {cards?:unknown;dismissed?:unknown}
  const legacy=z.object({cards:z.array(z.object({tab:z.string(),title:z.string(),body:z.string(),refs:z.array(refSchema)}).passthrough()),dismissed:z.array(z.string()),key:z.string()}).safeParse(old)
  if(!legacy.success)return emptyState()
- return {version:2,recap:null,cards:[],key:'',dismissed:[],legacyDismissed:legacy.data.cards.filter(card=>legacy.data.dismissed.includes(keyOf(card))).map(card=>({tab:card.tab,refs:card.refs}))}
+ return {version:2,recap:null,recap_basis:[],cards:[],key:'',dismissed:[],legacyDismissed:legacy.data.cards.filter(card=>legacy.data.dismissed.includes(keyOf(card))).map(card=>({tab:card.tab,refs:card.refs}))}
 },stateSchema)
-const emptyState=():State=>({version:2,recap:null,cards:[],key:'',automatic_call_times:[],retry_key:'',retry_not_before:0,dismissed:[],legacyDismissed:[]})
+const emptyState=():State=>({version:2,recap:null,recap_basis:[],cards:[],key:'',automatic_call_times:[],retry_key:'',retry_not_before:0,dismissed:[],legacyDismissed:[]})
 const sameRef=(a:{entry_id:string;version:string|number},b:{entry_id:string;version:string|number})=>a.entry_id===b.entry_id&&a.version===b.version
-const leaksRawText=(text:string)=>/\/(?:Users|home|Volumes)\/|~\/\.|\b(?:source|file):[\w-]+|\b(?:src|config|docs|runtime|clients)\/[\w./-]+|\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\b|\b(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=：]|\b[a-f\d]{40,}\b/iu.test(text)
+const leaksRawText=(text:string)=>/(?:^|[^\w.])\/[\w.-]+\/[\w.-]|\b[A-Za-z]:[\\/]|\\\\[\w.$-]+\\|~[\\/]|\b(?:source|file):[\w-]+|\b(?:src|config|docs|runtime|clients)\/[\w./-]+|\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\b|\b(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=：]|\b[a-f\d]{40,}\b/iu.test(text)
 const leaksRawField=(card:ContextCards['cards'][number])=>leaksRawText([card.title,card.body,card.why??'',card.next??''].join(' '))
 
 /** Disposable, source-grounded suggestions. Saved Life records live elsewhere. */
@@ -40,10 +40,18 @@ export class WorkbenchContext{
  async clear(){const reopen=this.#opened;await this.close();this.#inputs=[];this.#candidates=[];this.#digests=undefined;this.#digestsPending=0;await this.#write(next=>Object.assign(next,emptyState()));this.#abort=new AbortController();this.#opened=reopen;this.#status='idle'}
  #candidate(card:ContextCards['cards'][number]){return this.#candidates.find(candidate=>candidate.candidate_id===card.candidate_id&&candidate.tab===card.tab&&card.refs.every(ref=>candidate.refs.some(allowed=>sameRef(ref,allowed))))}
  #recapGrounded(recap:{refs:readonly {entry_id:string;version:string|number}[]},candidates:readonly ContextCandidate[]=this.#candidates){return recap.refs.every(ref=>candidates.some(c=>c.tab==='todos'&&c.refs.some(allowed=>sameRef(ref,allowed))))}
+ /** Todo candidates a recap draws on; any of them changing or leaving retires the recap, even if its cited refs survive. */
+ #recapBasis(recap:{refs:readonly {entry_id:string;version:string|number}[]},candidates:readonly ContextCandidate[]){return candidates.filter(c=>c.tab==='todos'&&c.refs.some(allowed=>recap.refs.some(ref=>sameRef(ref,allowed)))).map(c=>c.candidate_id)}
+ #recapCurrent(){const basis=this.#state.recap_basis;return Boolean(this.#state.recap)&&basis.length>0&&basis.every(id=>this.#candidates.some(c=>c.tab==='todos'&&c.candidate_id===id))&&this.#recapGrounded(this.#state.recap!)}
+ #emptyReason(tab:'todos'|'ideas',cards:number){if(cards)return null;if(!this.#candidates.some(c=>c.tab===tab))return tab==='todos'&&this.#digestsPending?'digests_pending':'no_eligible_sources';return this.#status==='ready'?'model_abstained':this.#status==='failed'?'generation_failed':null}
  #key(){return keyOf([generationRevision,this.#candidates.map(candidate=>[candidate.candidate_id,candidate.version])])}
  /** Active own projects, one line each, straight from their digests; no model call. */
  #projects(){return (this.#digests??[]).filter(d=>d.role==='own').slice(0,4).map(d=>({name:d.name,line:d.focus??d.summary})).filter(p=>!leaksRawText(p.name+' '+p.line))}
- snapshot(){const recap=this.#state.recap&&this.#recapGrounded(this.#state.recap)?this.#state.recap.text:null,cards=this.#state.cards.filter(card=>this.#candidate(card)&&!this.#state.dismissed.includes(card.candidate_id)).map(card=>({...structuredClone(card),id:card.candidate_id,refs:card.refs.map(ref=>({...ref,label:this.#inputs.find(input=>input.id===ref.entry_id)?.content.slice(0,700)??ref.entry_id}))}));return {status:this.#status,candidate_count:this.#candidates.length,recap:{text:recap,projects:this.#projects()},empty_reason:this.#candidates.length===0?this.#digestsPending?'digests_pending':'no_eligible_sources':cards.length===0&&this.#status==='ready'?'model_abstained':cards.length===0&&this.#status==='failed'?'generation_failed':null,cards}}
+ snapshot(){
+  const recap=this.#recapCurrent()?this.#state.recap!.text:null,cards=this.#state.cards.filter(card=>this.#candidate(card)&&!this.#state.dismissed.includes(card.candidate_id)).map(card=>({...structuredClone(card),id:card.candidate_id,refs:card.refs.map(ref=>({...ref,label:this.#inputs.find(input=>input.id===ref.entry_id)?.content.slice(0,700)??ref.entry_id}))}))
+  const empty_reasons={todos:this.#emptyReason('todos',cards.filter(card=>card.tab==='todos').length),ideas:this.#emptyReason('ideas',cards.filter(card=>card.tab==='ideas').length)}
+  return {status:this.#status,candidate_count:this.#candidates.length,recap:{text:recap,projects:this.#projects()},empty_reason:this.#candidates.length===0?this.#digestsPending?'digests_pending':'no_eligible_sources':cards.length===0&&this.#status==='ready'?'model_abstained':cards.length===0&&this.#status==='failed'?'generation_failed':null,empty_reasons,cards}
+ }
  #write(fn:(next:State)=>void){const run=this.#tail.then(async()=>{const next=structuredClone(this.#state);fn(next);await this.#store.write(next);this.#state=next;this.changed()});this.#tail=run.catch(()=>undefined);return run}
  dismiss(id:string){if(!this.#state.cards.some(card=>card.candidate_id===id))throw Error('card_not_found');return this.#write(next=>{next.dismissed=[...new Set([...next.dismissed,id])].slice(-1000)})}
  update(entries:readonly ContextEntry[],digests?:{items:readonly ProjectDigest[];pending:number}){
@@ -82,8 +90,9 @@ export class WorkbenchContext{
    const result=contextCardsSchema.parse(await this.generate!(candidates,signal));signal.throwIfAborted()
    const seen=new Set<string>()
    const cards=result.cards.filter(card=>{if(seen.has(card.candidate_id)||leaksRawField(card)||!this.#candidate(card)||!card.refs.every(ref=>candidates.some(candidate=>candidate.candidate_id===card.candidate_id&&candidate.refs.some(allowed=>sameRef(ref,allowed)))))return false;seen.add(card.candidate_id);return true})
-   const recap=result.recap&&!leaksRawText(result.recap.text)&&this.#recapGrounded(result.recap,candidates)?result.recap:null
-   await this.#write(next=>{next.recap=recap;next.cards=cards;next.key=key;next.retry_key='';next.retry_not_before=0});this.#status='ready'
+   const basis=result.recap?this.#recapBasis(result.recap,candidates):[]
+   const recap=result.recap&&basis.length&&!leaksRawText(result.recap.text)&&this.#recapGrounded(result.recap,candidates)?result.recap:null
+   await this.#write(next=>{next.recap=recap;next.recap_basis=recap?basis:[];next.cards=cards;next.key=key;next.retry_key='';next.retry_not_before=0});this.#status='ready'
   }catch(error){failedAt=Date.now();if(this.#opened&&!signal.aborted)await this.#write(next=>{next.retry_key=key;next.retry_not_before=failedAt+300000}).catch(()=>undefined);this.#status='failed';console.error('[workbench-context] generation_failed',error instanceof z.ZodError?JSON.stringify(error.issues.map(i=>({code:i.code,path:i.path}))):error instanceof Error?error.name:'unknown')}finally{this.#run=undefined;this.changed();if(this.#opened){if(this.#manualPending){this.#manualPending=false;void this.refresh()}else if(key!==this.#key())this.update(this.#inputs,this.#digests&&{items:this.#digests,pending:this.#digestsPending});else if(this.#status==='failed'){this.#firstChangeAt=failedAt;this.#lastChangeAt=failedAt;this.#pendingKey=key;this.#schedule()}}}})();this.#run=run;await run
  }
 }

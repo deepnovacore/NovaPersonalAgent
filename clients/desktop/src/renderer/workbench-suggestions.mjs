@@ -24,6 +24,7 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  const failed=sources.filter(source=>source.state==='error'),sourceName=source=>source.scope==='computer'?'整机资料':source.path?.split(/[\\/]/u).filter(Boolean).pop()??'已连接目录'
  if(cards.length){if(failed.length){const note=el('p',`${failed.map(sourceName).join('、')}尚未读完；已显示可用内容。`,'hint');section.append(note);if(openSettings)button('查看来源',()=>openSettings('connections'),section)}return}
  const empty=el('div',undefined,'workbench-empty');section.append(empty)
+ const reason=context?.empty_reasons?.[tab]??context?.empty_reason
  let title='目前没有新的建议',body='你仍可以查询已连接的资料。'
  if(!sources.length&&!connected){title='资料来源状态暂不可用';body='工作台连接后，可以查看已连接的资料和建议。'}
  else if(!sources.length){title='还没有连接资料';body='连接后，Nova 才能根据这些资料提供建议。'}
@@ -32,10 +33,10 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  else if(failed.length){title=`${failed.map(sourceName).join('、')}暂时无法完整读取`;body='已获取的内容仍可使用；可在来源设置查看详情。'}
  else if(context?.status==='working'){title='正在整理建议';body='已有记录可以照常使用。'}
  else if(context?.status==='failed'){title='这次整理没有完成';body='已有记录可以照常使用，稍后会重试。'}
- else if(tab==='todos'&&context?.empty_reason==='digests_pending'){title='正在读取近期项目';body='整理好后会在这里显示近况和建议。'}
+ else if(tab==='todos'&&reason==='digests_pending'){title='正在读取近期项目';body='整理好后会在这里显示近况和建议。'}
  else if(sources.some(source=>source.scan_pending&&source.state==='connected')){title='正在整理已授权的资料';body='现有记录可以照常使用。'}
- else if(context?.empty_reason==='model_abstained'){title='目前没有新的建议';body='已整理当前可用资料，没有足够明确的建议。'}
- else if(context?.empty_reason==='no_eligible_sources'){title='目前没有新的建议';body='当前资料中还没有适合放到这里的内容。'}
+ else if(reason==='model_abstained'){title='目前没有新的建议';body='已整理当前可用资料，没有足够明确的建议。'}
+ else if(reason==='no_eligible_sources'){title='目前没有新的建议';body='当前资料中还没有适合放到这里的内容。'}
  empty.append(el('h3',title),el('p',body))
  if(!sources.length&&openSettings)button('连接资料',()=>openSettings('connections'),empty)
  else if(sources.some(source=>source.state==='error'||source.processing_consent_required)&&openSettings)button('查看来源',()=>openSettings('connections'),empty)
