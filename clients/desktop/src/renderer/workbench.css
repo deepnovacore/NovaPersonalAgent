@@ -93,6 +93,12 @@ body[data-personal-collapsed="false"]{background:var(--surface,#f4f5f7);overflow
 .workbench .personal-card>select{width:auto;margin-right:4px}
 .workbench-suggestions{display:grid;gap:10px;margin-top:12px}
 .workbench-suggestions>h2{font-size:14px;color:var(--ink-dim);font-weight:600}
+.workbench-recap{display:grid;gap:6px;margin-bottom:12px}
+.workbench-recap>h2{font-size:14px;color:var(--ink-dim);font-weight:600}
+.workbench-recap>p{font-size:14px;line-height:1.6}
+.workbench-recap ul{margin:0;padding-left:18px;display:grid;gap:2px;font-size:13px;color:var(--ink-dim)}
+.workbench-suggestions:first-child{margin-top:0}
+.workbench-next{font-size:13px;color:var(--ink-dim)}
 .workbench-empty{border:1px dashed var(--line);border-radius:var(--radius);padding:24px;display:grid;gap:8px;color:var(--ink-dim)}
 .workbench-empty h3{font-size:15px;color:var(--ink);font-weight:600}
 .workbench-empty p{font-size:13px;line-height:1.6}

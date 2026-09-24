@@ -10,13 +10,38 @@ const all=node=>[node,...node.children.flatMap(all)]
 function harness(t){const previous=globalThis.document;t.after(()=>{globalThis.document=previous});globalThis.document={createElement:tag=>new Node(tag)};const panel=new Node('main');const button=(label,action,parent)=>{const node=new Node('button');node.textContent=label;node.action=action;parent.append(node);return node};return {panel,button,command:async()=>{},local:{},rerender(){},delegate(){}}}
 const text=panel=>all(panel).map(node=>node.textContent).filter(Boolean).join('\n')
 
-test('saved Todo renders before suggestions and populated content has no saved-empty copy',t=>{
+test('populated saved Todos have no saved-empty copy beside suggestions',t=>{
  const h=harness(t)
- renderLife(h.panel,{...h,kind:'todo',state:{todos:[{id:'t',kind:'todo',title:'Call supplier',note:'',status:'open',version:1}],ideas:[],goals:[]}})
  renderSourceSuggestions(h.panel,{tab:'todos',context:{status:'ready',candidate_count:1,cards:[{id:'c',tab:'todos',title:'Compare flows',body:'The note lists a next step.',refs:[]}]},sources:[{state:'connected'}],button:h.button,command:h.command,continueChat:()=>{}})
+ renderLife(h.panel,{...h,kind:'todo',state:{todos:[{id:'t',kind:'todo',title:'Call supplier',note:'',status:'open',version:1}],ideas:[],goals:[]}})
  const output=text(h.panel)
- assert.ok(output.indexOf('Call supplier')<output.indexOf('Compare flows'))
+ assert.match(output,/Call supplier/u);assert.match(output,/Compare flows/u)
  assert.doesNotMatch(output,/还没有待办/u)
+})
+test('the Todo top shows a recap and action cards that hand a prepared request to Nova',t=>{
+ const h=harness(t),drafts=[],chats=[]
+ const context={status:'ready',candidate_count:2,recap:{text:'最近主要在做语音 Agent 的工作台。',projects:[{name:'nova',line:'正在修工作台内容'}]},cards:[
+  {id:'a',tab:'todos',title:'完成摘要层',body:'已接入项目摘要。',why:'下一步已经写明',next:'跑一次原生验收',refs:[{entry_id:'source:x',label:'notes.md'}]},
+  {id:'b',tab:'todos',title:'Old card',body:'Only a body.',why:null,next:null,refs:[]},
+ ]}
+ renderSourceSuggestions(h.panel,{tab:'todos',context,sources:[{state:'connected'}],button:h.button,command:h.command,continueChat:x=>chats.push(x),delegate:x=>drafts.push(x)})
+ const nodes=all(h.panel),output=text(h.panel)
+ const recap=nodes.find(node=>node.className==='workbench-recap'),section=nodes.find(node=>node.className==='workbench-suggestions')
+ assert.ok(recap&&nodes.indexOf(recap)<nodes.indexOf(section),'recap sits above the cards')
+ assert.equal(section.children.filter(node=>node.tag==='article').length,2,'the recap is not counted as a card')
+ assert.match(output,/最近主要在做语音 Agent 的工作台/u);assert.match(output,/nova · 正在修工作台内容/u);assert.match(output,/值得关注/u)
+ assert.match(output,/下一步已经写明/u);assert.match(output,/下一步：跑一次原生验收/u);assert.match(output,/Only a body/u)
+ assert.doesNotMatch(output,/需要你自行判断/u)
+ const [first,second]=section.children.filter(node=>node.tag==='article')
+ const firstButtons=first.children.filter(node=>node.tag==='button');assert.deepEqual(firstButtons.map(node=>node.textContent),['交给 Nova','隐藏'])
+ firstButtons[0].action();assert.deepEqual(drafts,['请帮我推进「完成摘要层」：跑一次原生验收']);assert.deepEqual(chats,[])
+ assert.equal(second.children.filter(node=>node.tag==='button')[0].textContent,'继续讨论')
+})
+test('while project digests are pending the Todo top says so instead of claiming nothing is there',t=>{
+ const h=harness(t)
+ renderSourceSuggestions(h.panel,{tab:'todos',context:{status:'ready',candidate_count:0,cards:[],empty_reason:'digests_pending',recap:{text:null,projects:[]}},sources:[{state:'connected'}],button:h.button,command:h.command,continueChat:()=>{}})
+ assert.match(text(h.panel),/正在读取近期项目/u)
+ assert.ok(!all(h.panel).some(node=>node.className==='workbench-recap'),'an empty recap is not rendered')
 })
 test('empty Life and source states use specific copy without inventing work',t=>{
  const h=harness(t)
