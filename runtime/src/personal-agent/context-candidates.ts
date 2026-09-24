@@ -83,5 +83,7 @@ export function selectContextCandidates(inputs:readonly ContextInput[],digests?:
    group.push(item);groups.set(root,group)
   }
  }
- return interleave(groups.values(),12)
+ // Goal candidates sit behind each project's todo, so a plain interleave would always drop them first; they keep their few slots.
+ const goals=[...groups.values()].flat().filter(c=>c.tab==='goals')
+ return [...interleave([...groups.values()].map(group=>group.filter(c=>c.tab!=='goals')),12-goals.length),...goals]
 }

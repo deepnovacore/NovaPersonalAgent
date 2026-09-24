@@ -63,6 +63,14 @@ test('evidence past the first 400 characters stays in the excerpt, with the firs
  const [idea]=selectContextCandidates([file('i','design.md','设计笔记\n'+filler+'\n可以考虑把来源收进右键菜单',3)])
  assert.equal(idea?.tab,'ideas');assert.ok(idea.excerpt.length<=400);assert.match(idea.excerpt,/可以考虑把来源收进右键菜单$/u)
 })
+test('goal candidates keep their slots when todos and documents alone would fill the twelve',()=>{
+ const digest=(key:string)=>({project_key:key,name:key,role:'own' as const,summary:`${key} 是一个长期在做的项目`,focus:`${key} 近期在收尾`,next_step:null,refs:[{entry_id:`source:${key}`,version:'v1'}]})
+ const docs=Array.from({length:10},(_,i)=>({...file(`d${i}`,`notes${i}.md`,'An idea for a simpler workflow.',2),root:`/root${i}`}) as ContextInput)
+ const selected=selectContextCandidates(docs,['a','b','c','d','e','f','g'].map(digest))
+ assert.equal(selected.length,12)
+ assert.deepEqual(selected.filter(c=>c.tab==='goals').map(c=>c.root),['project:a','project:b','project:c'])
+ assert.ok(selected.filter(c=>c.tab==='todos').length>0)
+})
 test('own projects, and only own projects, offer at most one long-term direction each and three overall',()=>{
  const digest=(key:string,role:'own'|'third_party'|'sample')=>({project_key:key,name:key,role,summary:`${key} 是一个长期在做的项目`,focus:null,next_step:null,refs:[{entry_id:`source:${key}`,version:'v1'}]})
  const selected=selectContextCandidates([],[digest('a','own'),digest('lib','third_party'),digest('demo','sample'),digest('b','own'),digest('c','own'),digest('d','own')])
