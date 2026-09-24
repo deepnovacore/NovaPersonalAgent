@@ -1046,6 +1046,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
       if (frontendUsage.add(generation, report) && settingsWindow) sendToSettings('nova:settings:changed', settingsView())
     }, onStatus: status => {
       if (backend !== spawnedBackend || launchGeneration !== generation) return
+      diagnostic.pushCapabilityStatus(status)
       runtimeCapabilities = {...status, generation, diskGeneration, state: backendStatus.state === 'connected' ? 'running' : status.state}
       sendToSettings('nova:settings:changed', settingsView())
     }})

@@ -54,6 +54,44 @@ test('readiness cleanup preserves explicit permanent failures and refuses unconf
   {kind: 'unavailable', code: 'backend_stop_failed'})
 })
 
+test('structured startup failures stay permanent when utility exit precedes stderr', async () => {
+  for (const status of [
+    {state: 'startup_failed', toolCount: 2, toolBudget: 1},
+    {state: 'startup_failed', toolCount: null, toolBudget: 24, reason: 'configuration_required', pipeline: 'integrated', missing: ['DASHSCOPE_API_KEY']},
+  ]) {
+    const diagnostic = createBackendDiagnosticCollector()
+    const child = new EventEmitter()
+    const control = createBackendControl(child, {onStatus: value => diagnostic.pushCapabilityStatus(value)})
+    const retries = []
+    const supervisor = createBackendSupervisor({
+      start: async onExit => {
+        child.once('exit', () => onExit(diagnostic.failure()))
+        child.emit('message', {type: 'nova.capabilities', status})
+        child.emit('exit', 2)
+        throw diagnostic.failure('backend_start_timeout')
+      },
+      stopBackend: async () => {},
+      onStatus: () => {},
+      schedule: callback => { retries.push(callback); return callback },
+    })
+    await supervisor.start()
+    assert.equal(supervisor.status().state, 'configuration_required')
+    assert.equal(retries.length, 0)
+    control.close()
+    await supervisor.stop()
+  }
+})
+
+test('non-configuration capability status does not suppress backend reconnects', () => {
+  for (const status of [null, {state: 'running', toolCount: 2, toolBudget: 1},
+    {state: 'startup_failed', toolCount: 1, toolBudget: 24},
+    {state: 'startup_failed', toolCount: null, toolBudget: 0, reason: 'configuration_required'}]) {
+    const diagnostic = createBackendDiagnosticCollector()
+    diagnostic.pushCapabilityStatus(status)
+    assert.equal(diagnostic.failure().kind, 'recoverable')
+  }
+})
+
 test('recoverable starts reconnect with deterministic jitter and then connect', async () => {
   const scheduled = []
   const statuses = []

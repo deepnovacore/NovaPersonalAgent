@@ -306,7 +306,15 @@ export function classifyBackendFailure(code) {
 export function createBackendDiagnosticCollector() {
   let buffer = ''
   let code = null
+  let startupFailure = null
   return Object.freeze({
+    pushCapabilityStatus(value) {
+      const status = publicRuntimeCapabilityStatus(value)
+      if (status?.state === 'startup_failed' && (status.reason === 'configuration_required'
+        || (status.toolCount !== null && status.toolCount > status.toolBudget))) {
+        startupFailure = classifyBackendFailure('configuration_required')
+      }
+    },
     push(chunk) {
       buffer = `${buffer}${String(chunk)}`.slice(-1024)
       for (const match of buffer.matchAll(LINE)) {
@@ -315,7 +323,9 @@ export function createBackendDiagnosticCollector() {
       return code
     },
     failure(fallback = 'backend_disconnected') {
-      return classifyBackendFailure(code !== null && RUNTIME_CODES.has(code) ? code : fallback)
+      // Utility exit can arrive before stderr; structured configuration failures
+      // must not become reconnect loops just because their log line arrives late.
+      return startupFailure ?? classifyBackendFailure(code !== null && RUNTIME_CODES.has(code) ? code : fallback)
     },
     code: () => code,
   })
