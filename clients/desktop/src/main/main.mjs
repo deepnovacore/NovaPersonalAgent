@@ -29,6 +29,7 @@ import {
   utilityProcess,
 } from 'electron'
 import {
+  describeMissingBlockingEnvironment,
   inspectProjectNativeHostFromResources,
   ManagedWorkspaceMaintenanceService,
 } from '@nova-audio-agent/runtime/desktop'
@@ -115,8 +116,11 @@ import {
   resolveCameraPermission,
   resolveMicrophonePermission,
   settingsWindowOptions,
+  setupWindowOptions,
   validateBootstrap,
 } from './security.mjs'
+import {probeApiKey} from './key-probe.mjs'
+import {SETUP_KEYS, setupCommit} from './setup-choice.mjs'
 import { validReleaseCameraResult } from '../renderer/release-camera-contract.mjs'
 
 configureDesktopIdentity(app)
@@ -173,6 +177,7 @@ let mainWindow = null
 let boardWindow = null
 let clearingConversation = null
 let settingsWindow = null
+let setupWindow = null
 let pendingSettingsCategory = null
 let wakeWord = null
 let tray = null
@@ -228,6 +233,37 @@ function sendToOrb(channel, ...args) {
 
 function sendToSettings(channel, ...args) {
   sendToWindow(settingsWindow, channel, ...args)
+  if (channel === 'nova:settings:changed') sendToWindow(setupWindow, 'nova:setup:changed', setupView())
+}
+
+// First-run projection: which pipeline is chosen, which of its keys exist, and what the last launch lacked.
+function setupView() {
+  const {secretsPresent: present} = settingsView()
+  return Object.freeze({
+    pipelineMode: currentSettings.pipelineMode,
+    cascadedLlmProvider: currentSettings.cascadedLlmProvider,
+    secretsPresent: Object.fromEntries(SETUP_KEYS.map(key => [key, present[key] === true])),
+    missing: runtimeCapabilities?.reason === 'configuration_required' ? runtimeCapabilities.missing ?? [] : [],
+    backendStatus: backendStatus.state,
+  })
+}
+
+function openSetupWindow() {
+  if (!activeLaunchId) return
+  if (setupWindow) {
+    setupWindow.show()
+    setupWindow.focus()
+    return
+  }
+  const window = new BrowserWindow(localizedWindowOptions(setupWindowOptions(preload, activeLaunchId)))
+  window.webContents.setWindowOpenHandler(apiKeyWindowOpenHandler(url => shell.openExternal(url)))
+  window.webContents.on('will-navigate', (event, url) => {
+    if (!allowRendererNavigation(url)) event.preventDefault()
+  })
+  window.once('ready-to-show', () => window.show())
+  window.on('closed', () => { setupWindow = null })
+  setupWindow = window
+  return window.loadURL('nova://orb/setup.html')
 }
 
 function windowPositionFile() {
@@ -523,7 +559,7 @@ const managedPhone = createManagedPhoneService({
     await mkdir(phoneRoot(), {recursive: true, mode: 0o700})
     const tokenFile = resolve(phoneRoot(), 'host.token')
     try { initializeServerToken(tokenFile) } catch (error) { if (error.code !== 'EEXIST') throw error }
-    const environment = {NOVA_AUDIO_AGENT_SERVER_PORT: '19876', NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: tokenFile}
+    const environment = {SERVER_PORT: '19876', SERVER_TOKEN_FILE: tokenFile}
     phoneConfig = loadServerConfig(environment)
     const spec = backendLaunchSpec({backend: 'node', nodeEntry: entry,
       nodeResourcesPath: app.isPackaged ? process.resourcesPath : resolve(packageRoot, 'build'),
@@ -534,10 +570,10 @@ const managedPhone = createManagedPhoneService({
     if (app.isQuitting || !currentSettings.phoneConnectionEnabled) throw new Error('service_unavailable')
     return utilityProcess.fork(resolve(dirname(entry), 'desktop/phone-desktop-entry.js'), [], {
       cwd: desktopConfig?.workspace || process.cwd(), stdio: 'pipe', serviceName: 'Nova iPhone Service',
-      env: {...spec.env, ...environment, NOVA_AUDIO_AGENT_SERVER_MEDIA_MODE: 'relay',
-        NOVA_AUDIO_AGENT_BLACKBOARD_PATH: resolve(phoneRoot(), 'blackboard.sqlite'),
-        NOVA_AUDIO_AGENT_BLACKBOARD_OWNER_ID: 'phone',
-        NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT: resolve(phoneRoot(), 'projects')},
+      env: {...spec.env, ...environment, SERVER_MEDIA_MODE: 'relay',
+        BLACKBOARD_PATH: resolve(phoneRoot(), 'blackboard.sqlite'),
+        BLACKBOARD_OWNER_ID: 'phone',
+        CODEX_PROJECT_STATE_ROOT: resolve(phoneRoot(), 'projects')},
     })
   },
 })
@@ -568,8 +604,8 @@ async function phoneAction(action, deviceId, epoch = phoneEpoch) {
       await managedPhone.stop()
       const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
       const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
-      const external = loadServerConfig({NOVA_AUDIO_AGENT_SERVER_PORT: String(currentSettings.phoneServerPort),
-        NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile})
+      const external = loadServerConfig({SERVER_PORT: String(currentSettings.phoneServerPort),
+        SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile})
       if (phoneConfig?.port !== external.port || phoneConfig?.token !== external.token) await cancelPhonePairing(false)
       phoneConfig = external
     } else {
@@ -936,10 +972,11 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
   try { launchDocument = readCapabilityDocument(currentSettings, process.env) }
   catch { throw classifyBackendFailure('configuration_required') }
   const codingEnabled = launchDocument?.modules?.coding?.enabled !== false
-  const configurationCode = codingEnabled ? desktopConfig?.codexConfigurationError
-    ?? desktopConfig?.modelConfigurationError : desktopConfig?.modelConfigurationError
-  if (configurationCode) throw classifyBackendFailure(configurationCode)
-  if (codingEnabled && codexStatus.status !== 'ready') throw classifyBackendFailure('codex_unavailable')
+  if (desktopConfig?.modelConfigurationError) throw classifyBackendFailure(desktopConfig.modelConfigurationError)
+  // Coding is optional: without a usable Codex CLI, including an unfinished manual path,
+  // the runtime starts with the coding module off.
+  const codingUnavailable = codingEnabled
+    && (Boolean(desktopConfig?.codexConfigurationError) || codexStatus.status !== 'ready')
   const token = randomBytes(16).toString('hex')
   const workspace = desktopConfig?.workspace || process.cwd()
   let spawnedBackend = null
@@ -988,6 +1025,14 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
       resolvedConfig: desktopConfig,
       searchProxyUrl,
     })
+    if (codingUnavailable) spec.env.CODING_MODULE_ENABLED = 'false'
+    const blocking = describeMissingBlockingEnvironment(spec.env)
+    if (blocking && blocking.missing.length > 0) {
+      runtimeCapabilities = Object.freeze({state: 'startup_failed', toolCount: null, toolBudget: 24,
+        reason: 'configuration_required', pipeline: blocking.pipeline, missing: blocking.missing, generation, diskGeneration})
+      if (smokeChannel === null) void openSetupWindow()
+      throw classifyBackendFailure('configuration_required')
+    }
     spawnedBackend = utilityProcess.fork(spec.entry, spec.argv, {
       cwd: workspace,
       env: spec.env,
@@ -1049,7 +1094,7 @@ function initializeDesktopBootstrap(cameraSource) {
   nativeAudio?.setCaptureEpoch(wakeWord?.epoch ?? 0)
   bootstrap = Object.freeze({
     audioMode: 'inactive',
-    startMuted: !app.isPackaged && process.env.NOVA_AUDIO_AGENT_DEV_START_MUTED === '1',
+    startMuted: !app.isPackaged && process.env.DEV_START_MUTED === '1',
     nativeAvailable,
     platform: process.platform,
     opaque,
@@ -1203,6 +1248,26 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   })
   ipcMain.on('nova:pairing:open', (event, ...args) => {
     if (settingsWindow && event.sender === settingsWindow.webContents && args.length === 0) void openPairingWindow(launchId)
+  })
+  ipcMain.on('nova:setup:open', event => {
+    if (mainWindow && event.sender === mainWindow.webContents) void openSetupWindow()
+  })
+  ipcMain.handle('nova:setup:status', event => {
+    if (!setupWindow || event.sender !== setupWindow.webContents) throw new Error('setup request rejected')
+    return setupView()
+  })
+  ipcMain.handle('nova:setup:test-key', (event, key, value) => {
+    if (!setupWindow || event.sender !== setupWindow.webContents) throw new Error('setup request rejected')
+    if (!SETUP_KEYS.includes(key)) throw new Error('setup request rejected')
+    return probeApiKey(key, value)
+  })
+  ipcMain.handle('nova:setup:save', async (event, choice) => {
+    if (!setupWindow || event.sender !== setupWindow.webContents) throw new Error('setup request rejected')
+    const result = await applyDesktopSettings(setupCommit(choice), true)
+    return Object.freeze({
+      saved: result?.saved !== false,
+      rejectedSecrets: Array.isArray(result?.rejectedSecrets) ? result.rejectedSecrets.filter(key => SETUP_KEYS.includes(key)) : [],
+    })
   })
   ipcMain.on('nova:settings:open', event => {
     if (mainWindow && event.sender === mainWindow.webContents) openSettingsWindow(launchId)
@@ -1731,9 +1796,9 @@ function finishInstalledFileCameraSmoke(result) {
 }
 
 const installedFileCameraSmoke = app.isPackaged
-  && process.env.NOVA_AUDIO_AGENT_RELEASE_CAMERA_SMOKE === RELEASE_CAMERA_SMOKE_MODE
+  && process.env.RELEASE_CAMERA_SMOKE === RELEASE_CAMERA_SMOKE_MODE
 const packagedSourceRollbackUnavailable = app.isPackaged
-  && process.env.NOVA_AUDIO_AGENT_BACKEND === 'python'
+  && process.env.BACKEND === 'python'
 const sourceStartupSmoke = !app.isPackaged
   && process.argv.includes('--nova-source-startup-smoke-v1')
 

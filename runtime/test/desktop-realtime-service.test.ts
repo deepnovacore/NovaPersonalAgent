@@ -1281,10 +1281,10 @@ test('selected integrated Qwen assembly uses the authenticated provider-neutral 
     buildRealtime: output => {
       callbacks = output
       return buildProductionRealtimeAssembly({
-        settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-          NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
+        settings: loadSettings({MEMORY_CONNECTION: 'disabled',
+          PIPELINE_MODE: 'integrated',
           DASHSCOPE_API_KEY: 'dash-key',
-          NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+          MODEL_API_KEY: 'model-key',
           TAVILY_API_KEY: 'search-key',
         }),
         connector: () => Promise.resolve(providerSocket),
@@ -1404,9 +1404,9 @@ test('selected cascaded production assembly falls back before ASR on the same au
     buildRealtime: output => {
       callbacks = output
       return buildProductionRealtimeAssembly({
-        settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-          NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
-          NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
+        settings: loadSettings({MEMORY_CONNECTION: 'disabled',
+          PIPELINE_MODE: 'cascaded',
+          CASCADE_LLM_PROVIDER: 'ark',
           ARK_API_KEY: 'ark-key',
           DOUBAO_BIGMODEL_API_KEY: 'doubao-key',
           TAVILY_API_KEY: 'search-key',

@@ -103,6 +103,27 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   assert.equal(typeof exposed.settings.onChanged(null), 'function')
 })
 
+test('preload exposes first-run setup as a fixed set of channels', async () => {
+  const { exposed, ipcRenderer, invokes, sends } = await loadPreload()
+
+  assert.deepEqual(Object.keys(exposed.setup).sort(), ['onChanged', 'open', 'save', 'status', 'testKey'])
+  assert.ok(Object.isFrozen(exposed.setup))
+  exposed.setup.open()
+  await exposed.setup.status()
+  await exposed.setup.testKey('dashscopeApiKey', 'sk-1')
+  await exposed.setup.save({pipelineMode: 'integrated'})
+  assert.deepEqual(sends, [{ channel: 'nova:setup:open', payload: undefined }])
+  assert.deepEqual(invokes.map(entry => entry.channel), ['nova:setup:status', 'nova:setup:test-key', 'nova:setup:save'])
+
+  const seen = []
+  const unsubscribe = exposed.setup.onChanged(next => seen.push(next))
+  ipcRenderer.emit('nova:setup:changed', {}, { backendStatus: 'starting' })
+  unsubscribe()
+  ipcRenderer.emit('nova:setup:changed', {}, { backendStatus: 'connected' })
+  assert.deepEqual(seen, [{ backendStatus: 'starting' }])
+  assert.equal(typeof exposed.setup.onChanged(null), 'function')
+})
+
 test('preload exposes a bounded microphone permission lifecycle', async () => {
   const { exposed, ipcRenderer, invokes, sends } = await loadPreload()
 

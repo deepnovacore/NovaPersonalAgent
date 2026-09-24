@@ -1,4 +1,5 @@
 import {inspectCapabilities} from './capability-registry.mjs'
+import {probeApiKey} from './key-probe.mjs'
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import {
@@ -415,11 +416,59 @@ function findCodex(platform = process.platform) {
   return result.status === 0 && String(result.stdout).trim() !== ''
 }
 
+// Mirrors the desktop settings keys each voice pipeline cannot start without.
+const VOICE_KEYS = Object.freeze({
+  dashscopeApiKey: 'DASHSCOPE_API_KEY',
+  deepseekApiKey: 'DEEPSEEK_API_KEY',
+  arkApiKey: 'ARK_API_KEY',
+  doubaoBigmodelApiKey: 'DOUBAO_BIGMODEL_API_KEY',
+})
+const CASCADED_LLM_KEYS = Object.freeze({qwen: 'dashscopeApiKey', deepseek: 'deepseekApiKey', ark: 'arkApiKey'})
+
+function voiceRequirement(document) {
+  const pipeline = document?.pipelineMode === 'cascaded' ? 'cascaded' : 'integrated'
+  const llm = Object.hasOwn(CASCADED_LLM_KEYS, document?.cascadedLlmProvider) ? document.cascadedLlmProvider : 'deepseek'
+  return {pipeline, keys: pipeline === 'integrated' ? ['dashscopeApiKey'] : [CASCADED_LLM_KEYS[llm], 'doubaoBigmodelApiKey']}
+}
+
+const DASHSCOPE_COMPATIBLE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/u
+
+// Matches settings-store's validSecretEntry: anything else is dropped by the desktop and does not count as saved.
+function savedSecret(document, key) {
+  const entry = document?.secrets?.[key]
+  return entry !== null && typeof entry === 'object' && ['safeStorage', 'none'].includes(entry.enc)
+    && typeof entry.data === 'string' && entry.data !== '' && entry.data.length % 4 === 0 && BASE64.test(entry.data)
+}
+
+// Saved keys win over the environment in the desktop, and stay encrypted, so only environment keys can be probed here.
+async function inspectVoiceKeys(document, environment, {online, fetchImpl}) {
+  const {pipeline, keys} = voiceRequirement(document)
+  const sourceOf = (key, name) => savedSecret(document, key) ? 'settings' : environment[name]?.trim() ? 'environment' : null
+  const entries = []
+  for (const key of keys) {
+    let name = VOICE_KEYS[key]
+    let source = sourceOf(key, name)
+    // Integrated voice also accepts the generic model key while the model gateway stays on DashScope.
+    const modelBaseUrl = typeof document?.modelBaseUrl === 'string' ? document.modelBaseUrl.trim() : ''
+    if (source === null && key === 'dashscopeApiKey' && pipeline === 'integrated'
+      && (modelBaseUrl === '' || modelBaseUrl === DASHSCOPE_COMPATIBLE_BASE_URL) && sourceOf('modelApiKey', 'MODEL_API_KEY') !== null) {
+      name = 'MODEL_API_KEY'
+      source = sourceOf('modelApiKey', name)
+    }
+    const probe = online && source === 'environment' ? (await probeApiKey(key, environment[name], {fetch: fetchImpl})).status : undefined
+    entries.push(Object.freeze({name, source, ...(probe === undefined ? {} : {probe})}))
+  }
+  return Object.freeze({pipeline, keys: Object.freeze(entries)})
+}
+
 export async function inspectDoctor({
   platform = process.platform,
   arch = process.arch,
   home,
   environment = process.env,
+  online = false,
+  fetchImpl = globalThis.fetch,
 } = {}) {
   let target
   try {
@@ -432,8 +481,9 @@ export async function inspectDoctor({
   const settings = desktopSettingsPath({platform, home, environment})
   let secretKeys = []
   let capabilitiesConfigPath
+  let document
   try {
-    const document = JSON.parse(await readFile(settings, 'utf8'))
+    document = JSON.parse(await readFile(settings, 'utf8'))
     // Match settings-store v4 migration/string validation, then backendLaunchSpec's nonempty saved-path override.
     const acceptsV4Fields = document?.version === undefined || (typeof document.version === 'number' && document.version >= 4)
     const candidate = document?.capabilitiesConfigPath
@@ -451,10 +501,11 @@ export async function inspectDoctor({
     desktopReady: await cachedInstallation({root, executable, target, platform}) !== null,
     settingsPresent: await access(settings).then(() => true, () => false),
     configuredSecretKeys: Object.freeze(secretKeys),
+    voice: await inspectVoiceKeys(document, environment, {online, fetchImpl}),
     codexPresent: findCodex(platform),
     capabilities: inspectCapabilities({
       environment: capabilitiesConfigPath === undefined ? environment : {
-        ...environment, NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG: capabilitiesConfigPath,
+        ...environment, CAPABILITIES_CONFIG: capabilitiesConfigPath,
       },
       ...(home === undefined ? {} : {home}),
     }),

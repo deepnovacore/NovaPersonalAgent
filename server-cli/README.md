@@ -6,8 +6,8 @@ Run Nova without Electron on Ubuntu 22.04+ x64 using Node.js >=22.14.0.
 npm install --global nova-audio-agent-server
 mkdir -p "$HOME/.nova-remote"
 chmod 700 "$HOME/.nova-remote"
-export NOVA_AUDIO_AGENT_SERVER_PORT=19876
-export NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE="$HOME/.nova-remote/client-token"
+export SERVER_PORT=19876
+export SERVER_TOKEN_FILE="$HOME/.nova-remote/client-token"
 novaaudio-server token-init
 novaaudio-server --env-file "$HOME/.nova-remote/server.env" start
 ```

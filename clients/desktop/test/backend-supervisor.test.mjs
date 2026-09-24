@@ -236,6 +236,29 @@ test('private status projects only safe public fields and bounded exact counts',
   assert.equal(publicRuntimeCapabilityStatus({toolCount: -1, toolBudget: 24}), null)
 })
 
+test('first-run status keeps only known pipeline, blocking key names and missing-environment reasons', async () => {
+  const {publicRuntimeCapabilityStatus} = await import('../src/main/backend-supervisor.mjs')
+  const failed = publicRuntimeCapabilityStatus({state: 'startup_failed', toolCount: null, toolBudget: 24,
+    reason: 'configuration_required', pipeline: 'cascaded', missing: ['DEEPSEEK_API_KEY', 'sk-private-secret', 'DOUBAO_BIGMODEL_API_KEY']})
+  assert.equal(failed.reason, 'configuration_required')
+  assert.equal(failed.pipeline, 'cascaded')
+  assert.deepEqual(failed.missing, ['DEEPSEEK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
+  const odd = publicRuntimeCapabilityStatus({state: 'startup_failed', toolCount: null, toolBudget: 24, reason: 'configuration_required', pipeline: 'private-secret', missing: 'DASHSCOPE_API_KEY'})
+  assert.equal(odd.pipeline, undefined)
+  assert.deepEqual(odd.missing, [])
+  // A compiled runtime never carries a blocking reason.
+  assert.equal(publicRuntimeCapabilityStatus({toolCount: 3, toolBudget: 24, reason: 'configuration_required', missing: ['DASHSCOPE_API_KEY']}).reason, undefined)
+  const degraded = publicRuntimeCapabilityStatus({toolCount: 3, toolBudget: 24, overrides: ['CODING_MODULE_ENABLED', 'PRIVATE'], modules: {
+    search: {enabled: true, provider: 'mcp', fallback: 'bailian_mcp', reason: 'missing_environment:TAVILY_API_KEY'},
+    camera: {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY'},
+    coding: {enabled: false, reason: 'private-secret'},
+  }})
+  assert.deepEqual(degraded.modules.search, {enabled: true, reason: 'missing_environment:TAVILY_API_KEY', fallback: 'bailian_mcp', provider: 'mcp'})
+  assert.deepEqual(degraded.modules.camera, {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY'})
+  assert.deepEqual(degraded.modules.coding, {enabled: false})
+  assert.deepEqual(degraded.overrides, ['CODING_MODULE_ENABLED'])
+})
+
 test('usage stays private, validates numbers and ignores closed children', () => {
   const child = new EventEmitter(), received = []
   const control = createBackendControl(child, {onUsage: report => received.push(report)})

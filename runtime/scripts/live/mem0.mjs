@@ -19,8 +19,8 @@ const root = resolve(import.meta.dirname, '../../..')
 const environment = {...parseEnv(await readFile(join(root, '.env'), 'utf8')), ...process.env}
 const output = resolve(environment.NOVA_LIVE_MEM0_REPORT ?? join(root, 'output/mem0-live/report.json'))
 await mkdir(resolve(output, '..'), {recursive: true})
-const settings = {...loadSettings({...environment, NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
-  NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'qwen', NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED: 'false'}), executors: []}
+const settings = {...loadSettings({...environment, PIPELINE_MODE: 'cascaded',
+  CASCADE_LLM_PROVIDER: 'qwen', CONVERSATION_VISION_ENABLED: 'false'}), executors: []}
 assert.equal(settings.memory_connection, 'local')
 assert.ok(settings.memory_provider === null || settings.memory_provider === 'mem0')
 const path = settings.memory_path.startsWith('~/') ? resolve(homedir(), settings.memory_path.slice(2)) : resolve(settings.memory_path)

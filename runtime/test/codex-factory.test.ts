@@ -294,9 +294,9 @@ function hostConfig(t: TestContext): ReturnType<typeof resolveCodexHostConfig> {
     homeDirectory: root,
   }
   return resolveCodexHostConfig(loadSettings({
-    NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
-    NOVA_AUDIO_AGENT_CODEX_WORKSPACE: workspace,
-    NOVA_AUDIO_AGENT_CODEX_API_KEY: 'opaque-secret',
+    EXECUTOR: 'codex',
+    CODEX_WORKSPACE: workspace,
+    CODEX_API_KEY: 'opaque-secret',
   }), catalog)
 }
 
@@ -318,11 +318,11 @@ function projectHostConfig(t: TestContext, workspaceName = 'workspace'): {
   }
   t.after(() => { rmSync(root, {recursive: true, force: true}) })
   const config = resolveCodexHostConfig(loadSettings({
-    NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
-    NOVA_AUDIO_AGENT_CODEX_WORKSPACE: workspace,
-    NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT: managedRoot,
-    NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT: stateRoot,
-    NOVA_AUDIO_AGENT_CODEX_PREWARM: 'false',
+    EXECUTOR: 'codex',
+    CODEX_WORKSPACE: workspace,
+    CODEX_MANAGED_ROOT: managedRoot,
+    CODEX_PROJECT_STATE_ROOT: stateRoot,
+    CODEX_PREWARM: 'false',
   }), {
     canonicalBinaries: [binary],
     canonicalWorkspaces: [workspace],

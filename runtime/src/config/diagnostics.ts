@@ -78,7 +78,7 @@ export function buildDiagnosticReport(options: {
   let capabilities: CapabilityRegistry
   try {
     settings = loadSettings(options.environment)
-    capabilities = options.environment === process.env || options.environment.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG
+    capabilities = options.environment === process.env || options.environment.CAPABILITIES_CONFIG
       ? loadCapabilityRegistry({environment: options.environment})
       : parseCapabilityRegistry({version: 1}, options.environment)
     checks.push(check('configuration.parse', 'pass', 'configuration_valid'))
@@ -142,7 +142,7 @@ function searchCheck(capabilities: CapabilityRegistry): DiagnosticCheck {
 }
 
 function cameraCheck(environment: NodeJS.ProcessEnv): DiagnosticCheck {
-  const configured = stripLikePython(environment.NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE ?? '')
+  const configured = stripLikePython(environment.DESKTOP_VIDEO_FILE ?? '')
   if (configured === '') return check('camera.source', 'pass', 'camera_local_selected')
   return isAbsolute(configured)
     ? check('camera.source', 'pass', 'camera_file_selected')

@@ -55,8 +55,8 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 export const SECRET_ENV_MAP = Object.freeze({
   dashscopeApiKey: 'DASHSCOPE_API_KEY',
   tavilyApiKey: 'TAVILY_API_KEY',
-  modelApiKey: 'NOVA_AUDIO_AGENT_MODEL_API_KEY',
-  codexApiKey: 'NOVA_AUDIO_AGENT_CODEX_API_KEY',
+  modelApiKey: 'MODEL_API_KEY',
+  codexApiKey: 'CODEX_API_KEY',
   arkApiKey: 'ARK_API_KEY',
   deepseekApiKey: 'DEEPSEEK_API_KEY',
   doubaoBigmodelApiKey: 'DOUBAO_BIGMODEL_API_KEY',
@@ -109,13 +109,13 @@ export const BACKEND_FORCE_EXIT_CONFIRM_MS = 2000
 
 export function selectedBackend(env = process.env, { isPackaged = false } = {}) {
   void isPackaged
-  const value = env?.NOVA_AUDIO_AGENT_BACKEND ?? 'node'
+  const value = env?.BACKEND ?? 'node'
   if (value === 'python') {
     const error = new Error('source_rollback_unavailable')
     error.code = 'source_rollback_unavailable'
     throw error
   }
-  if (value !== 'node') throw new Error('NOVA_AUDIO_AGENT_BACKEND must be node')
+  if (value !== 'node') throw new Error('BACKEND must be node')
   return value
 }
 
@@ -126,7 +126,7 @@ export function nodeRuntimeEntry({ isPackaged, appPath, packageRoot, environment
   if (typeof packageRoot !== 'string' || !isAbsolute(packageRoot)) {
     throw new Error('absolute desktop package root is required')
   }
-  const override = environment.NOVA_AUDIO_AGENT_DEV_BACKEND_ENTRY
+  const override = environment.DEV_BACKEND_ENTRY
   if (!isPackaged && override) {
     if (typeof override !== 'string' || !isAbsolute(override)) throw new Error('absolute development runtime entry is required')
     return override
@@ -199,47 +199,47 @@ export function backendLaunchSpec({
     ?? SETTINGS_DEFAULTS.codexHeartbeatSeconds
   const pipelineMode = settings?.pipelineMode ?? SETTINGS_DEFAULTS.pipelineMode
   const v4 = {
-    NOVA_AUDIO_AGENT_CODEX_APPROVAL_MODE: settings?.codexApprovalMode
+    CODEX_APPROVAL_MODE: settings?.codexApprovalMode
       ?? SETTINGS_DEFAULTS.codexApprovalMode,
-    NOVA_AUDIO_AGENT_CLARIFICATION_DEPTH: settings?.clarificationDepth
+    CLARIFICATION_DEPTH: settings?.clarificationDepth
       ?? SETTINGS_DEFAULTS.clarificationDepth,
-    NOVA_AUDIO_AGENT_GENERATE_PLAN: String(settings?.generatePlan ?? SETTINGS_DEFAULTS.generatePlan),
-    NOVA_AUDIO_AGENT_PLAN_READBACK: settings?.planReadback ?? SETTINGS_DEFAULTS.planReadback,
-    NOVA_AUDIO_AGENT_PROGRESS_BUBBLES: settings?.progressBubbles
+    GENERATE_PLAN: String(settings?.generatePlan ?? SETTINGS_DEFAULTS.generatePlan),
+    PLAN_READBACK: settings?.planReadback ?? SETTINGS_DEFAULTS.planReadback,
+    PROGRESS_BUBBLES: settings?.progressBubbles
       ?? SETTINGS_DEFAULTS.progressBubbles,
-    NOVA_AUDIO_AGENT_EMBEDDING_PROVIDER: settings?.embeddingProvider
+    EMBEDDING_PROVIDER: settings?.embeddingProvider
       ?? SETTINGS_DEFAULTS.embeddingProvider,
   }
   const env = {
     ...parentEnv,
-    NOVA_AUDIO_AGENT_DESKTOP_TOKEN: token,
-    NOVA_AUDIO_AGENT_DESKTOP_READY_ENDPOINT: readyEndpoint,
-    NOVA_AUDIO_AGENT_BACKEND: backend,
-    NOVA_AUDIO_AGENT_CODEX_WORKSPACE: effectiveWorkspace,
-    NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
-    NOVA_AUDIO_AGENT_PROACTIVITY_PRESET: proactivity,
-    NOVA_AUDIO_AGENT_CODING_PROGRESS_NARRATION: settings?.codingProgressNarration ?? 'smart',
-    NOVA_AUDIO_AGENT_CODEX_WORKING_INTERVAL: String(codexHeartbeatSeconds),
-    NOVA_AUDIO_AGENT_LANGUAGE: settings?.language ?? 'zh-CN',
-    NOVA_AUDIO_AGENT_PIPELINE_MODE: pipelineMode,
-    NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH: nodeResourcesPath,
+    DESKTOP_TOKEN: token,
+    DESKTOP_READY_ENDPOINT: readyEndpoint,
+    BACKEND: backend,
+    CODEX_WORKSPACE: effectiveWorkspace,
+    EXECUTOR: 'codex',
+    PROACTIVITY_PRESET: proactivity,
+    CODING_PROGRESS_NARRATION: settings?.codingProgressNarration ?? 'smart',
+    CODEX_WORKING_INTERVAL: String(codexHeartbeatSeconds),
+    LANGUAGE: settings?.language ?? 'zh-CN',
+    PIPELINE_MODE: pipelineMode,
+    CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,
-    NOVA_AUDIO_AGENT_CONVERSATION_VISION_ENABLED: String(settings?.conversationVisionEnabled ?? false),
-    NOVA_AUDIO_AGENT_MONITOR_CAMERA_DEVICE_ID: settings?.monitorCameraDeviceId ?? '',
+    CONVERSATION_VISION_ENABLED: String(settings?.conversationVisionEnabled ?? false),
+    MONITOR_CAMERA_DEVICE_ID: settings?.monitorCameraDeviceId ?? '',
   }
   for (const [name, value] of [
-    ['NOVA_AUDIO_AGENT_WATCH_MODEL', settings?.watchModel ?? ''],
-    ['NOVA_AUDIO_AGENT_PLANNER_MODEL', settings?.plannerModel ?? SETTINGS_DEFAULTS.plannerModel],
-    ['NOVA_AUDIO_AGENT_EMBEDDING_MODEL', settings?.embeddingModel
+    ['WATCH_MODEL', settings?.watchModel ?? ''],
+    ['PLANNER_MODEL', settings?.plannerModel ?? SETTINGS_DEFAULTS.plannerModel],
+    ['EMBEDDING_MODEL', settings?.embeddingModel
       ?? SETTINGS_DEFAULTS.embeddingModel],
-    ['NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG', settings?.capabilitiesConfigPath
+    ['CAPABILITIES_CONFIG', settings?.capabilitiesConfigPath
       ?? SETTINGS_DEFAULTS.capabilitiesConfigPath],
-    ['NOVA_AUDIO_AGENT_KNOWLEDGE_PATH', settings?.knowledgePath ?? SETTINGS_DEFAULTS.knowledgePath],
+    ['KNOWLEDGE_PATH', settings?.knowledgePath ?? SETTINGS_DEFAULTS.knowledgePath],
   ]) {
     if (typeof value === 'string' && value) env[name] = value
   }
-  if (env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG && !env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG.startsWith('~/')) {
-    env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG = resolve(env.NOVA_AUDIO_AGENT_CAPABILITIES_CONFIG)
+  if (env.CAPABILITIES_CONFIG && !env.CAPABILITIES_CONFIG.startsWith('~/')) {
+    env.CAPABILITIES_CONFIG = resolve(env.CAPABILITIES_CONFIG)
   }
   const inheritedProxy = parentEnv.HTTPS_PROXY
     ?? parentEnv.https_proxy
@@ -249,28 +249,28 @@ export function backendLaunchSpec({
     env.HTTPS_PROXY = searchProxyUrl
   }
   if (resolvedConfig && typeof resolvedConfig === 'object') {
-    delete env.NOVA_AUDIO_AGENT_CODEX_BIN
-    delete env.NOVA_AUDIO_AGENT_CODEX_PREFIX_ARGS
-    delete env.NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT
-    delete env.NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT
-    delete env.NOVA_AUDIO_AGENT_MODEL_BASE_URL
+    delete env.CODEX_BIN
+    delete env.CODEX_PREFIX_ARGS
+    delete env.CODEX_MANAGED_ROOT
+    delete env.CODEX_PROJECT_STATE_ROOT
+    delete env.MODEL_BASE_URL
     if (typeof resolvedConfig.codexBinaryPath === 'string' && resolvedConfig.codexBinaryPath) {
-      env.NOVA_AUDIO_AGENT_CODEX_BIN = resolvedConfig.codexBinaryPath
+      env.CODEX_BIN = resolvedConfig.codexBinaryPath
     }
     if (Array.isArray(resolvedConfig.codexBinaryPrefixArgs)
       && resolvedConfig.codexBinaryPrefixArgs.length > 0) {
-      env.NOVA_AUDIO_AGENT_CODEX_PREFIX_ARGS = JSON.stringify(
+      env.CODEX_PREFIX_ARGS = JSON.stringify(
         resolvedConfig.codexBinaryPrefixArgs,
       )
     }
     if (typeof resolvedConfig.managedRoot === 'string' && resolvedConfig.managedRoot) {
-      env.NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT = resolvedConfig.managedRoot
+      env.CODEX_MANAGED_ROOT = resolvedConfig.managedRoot
     }
     if (typeof resolvedConfig.stateRoot === 'string' && resolvedConfig.stateRoot) {
-      env.NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT = resolvedConfig.stateRoot
+      env.CODEX_PROJECT_STATE_ROOT = resolvedConfig.stateRoot
     }
     if (typeof resolvedConfig.modelBaseUrl === 'string' && resolvedConfig.modelBaseUrl) {
-      env.NOVA_AUDIO_AGENT_MODEL_BASE_URL = resolvedConfig.modelBaseUrl
+      env.MODEL_BASE_URL = resolvedConfig.modelBaseUrl
     }
   }
   if (pipelineMode === 'cascaded') {
@@ -281,30 +281,30 @@ export function backendLaunchSpec({
       ?? SETTINGS_DEFAULTS.cascadedLlmModels[llmProvider]
       ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen
     Object.assign(env, {
-      NOVA_AUDIO_AGENT_CASCADE_ENDPOINTING_PROVIDER: settings?.cascadedEndpointingProvider
+      CASCADE_ENDPOINTING_PROVIDER: settings?.cascadedEndpointingProvider
         ?? SETTINGS_DEFAULTS.cascadedEndpointingProvider,
-      NOVA_AUDIO_AGENT_CASCADE_ASR_PROVIDER: settings?.cascadedAsrProvider
+      CASCADE_ASR_PROVIDER: settings?.cascadedAsrProvider
         ?? SETTINGS_DEFAULTS.cascadedAsrProvider,
-      NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: llmProvider,
-      NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: activeModel,
-      NOVA_AUDIO_AGENT_CASCADE_TTS_PROVIDER: settings?.cascadedTtsProvider
+      CASCADE_LLM_PROVIDER: llmProvider,
+      CASCADE_LLM_MODEL: activeModel,
+      CASCADE_TTS_PROVIDER: settings?.cascadedTtsProvider
         ?? SETTINGS_DEFAULTS.cascadedTtsProvider,
-      NOVA_AUDIO_AGENT_DOUBAO_TTS_VOICE: settings?.cascadedTtsVoice
+      DOUBAO_TTS_VOICE: settings?.cascadedTtsVoice
         ?? SETTINGS_DEFAULTS.cascadedTtsVoice,
     })
   } else {
     Object.assign(env, {
-      NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER: settings?.integratedProvider
+      INTEGRATED_PROVIDER: settings?.integratedProvider
         ?? SETTINGS_DEFAULTS.integratedProvider,
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL: settings?.integratedModel
+      QWEN_REALTIME_MODEL: settings?.integratedModel
         ?? SETTINGS_DEFAULTS.integratedModel,
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE: settings?.integratedVoice
+      QWEN_REALTIME_VOICE: settings?.integratedVoice
         ?? SETTINGS_DEFAULTS.integratedVoice,
     })
   }
   // The inherited fd-3 readiness pipe is gone: stdio stops at stderr and the
   // backend dials back instead, so a stale parent value must never imply one.
-  delete env.NOVA_AUDIO_AGENT_DESKTOP_READY_FD
+  delete env.DESKTOP_READY_FD
   // Overrides only: an absent, empty, or whitespace-only decrypted value
   // leaves the key out of `env` entirely, so whatever the launcher's own
   // `.env`/parent env supplied keeps winning. Never a replacement with an
@@ -642,10 +642,10 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
       activeSecretKeys.add('dashscopeApiKey')
     }
     const search = document?.modules?.search
-    const provider = parentEnv.NOVA_AUDIO_AGENT_SEARCH_PROVIDER?.trim() || search?.provider || 'tavily'
+    const provider = parentEnv.SEARCH_PROVIDER?.trim() || search?.provider || 'tavily'
     const consumers = Object.values(document?.mcpServers ?? {}).filter(server => server?.enabled !== false)
     if (search?.enabled !== false && provider === 'mcp') {
-      const preset = !parentEnv.NOVA_AUDIO_AGENT_SEARCH_MCP_URL?.trim() && search?.mcp?.url === undefined
+      const preset = !parentEnv.SEARCH_MCP_URL?.trim() && search?.mcp?.url === undefined
       consumers.push({...search?.mcp, headers: search?.mcp?.headers ?? (preset ? {authorization: '${DASHSCOPE_API_KEY}'} : {})})
     }
     const references = JSON.stringify(consumers)

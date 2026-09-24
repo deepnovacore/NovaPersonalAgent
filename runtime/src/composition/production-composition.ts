@@ -5,7 +5,7 @@ import {prepareKnowledge} from '../knowledge/assembly.js'
 import {randomUUID} from 'node:crypto'
 import {loadCapabilityRegistry} from '../config/capability-registry.js'
 import {prepareExternalMcp} from '../executors/mcp.js'
-import {loadSettings, requireIntegratedRealtime} from '../config/config.js'
+import {loadSettings, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedModules} from '../config/config.js'
 import {requireSelectedCascadedRealtimeConfig} from '../config/cascaded-realtime-config.js'
 import {remoteClientMedia} from '../server/server-config.js'
 import type {ClientMedia} from '../server/client-protocol.js'
@@ -33,10 +33,11 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
 }) {
   const loadedSettings = loadSettings(environment)
   const media = remote ? remoteClientMedia(loadedSettings) : undefined
+  requireBlockingCredentials(loadedSettings)
   if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
   else requireSelectedCascadedRealtimeConfig(loadedSettings)
-  const externalMcp = await prepareExternalMcp(loadCapabilityRegistry({environment: remote
-      ? {...environment, NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false'} : environment}), stop.signal)
+  const externalMcp = await prepareExternalMcp(withoutUncredentialedModules(loadCapabilityRegistry({environment: remote
+      ? {...environment, CAMERA_MODULE_ENABLED: 'false'} : environment}), loadedSettings), stop.signal)
   const releaseExternal = ownership.own(() => externalMcp.close())
   const capabilities = externalMcp.capabilities
   // This entry owns the concrete Codex package; core gates injected adapters by their declared role.
@@ -66,7 +67,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     ? null
     : await (async () => {
       const {createCodexAssemblyResource, createProductionCodexHost, resolveCodexHostConfig, prepareManagedCodexMcp} = await import('../executors/codex/host.js')
-      const sourceResourcesPath = environment.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH
+      const sourceResourcesPath = environment.CODEX_RESOURCES_PATH
       const codexHost = createProductionCodexHost(settings, {
         ...(sourceResourcesPath === undefined ? {} : {resourcesPath: sourceResourcesPath}),
         onDiagnostic: code => onDiagnostic(`[runtime-diagnostic] ${code}`),

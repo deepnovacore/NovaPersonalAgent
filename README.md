@@ -16,6 +16,8 @@
 
 ## News
 
+- **2026-09-24 · 🎉 [v0.2.3 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.3)** — A guided first run: one DashScope API Key is enough to start talking, a setup window tests the key before saving, and search, camera and memory switch themselves on once their key is present.
+
 - **2026-09-21 · 🎉 [v0.2.2 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — Ubuntu 22.04+ x64 joins macOS and Windows, with npm desktop installation and the new `nova-audio-agent-server` package for headless hosting and terminal QR pairing.
 
 - **2026-09-21 ·** **🎉 [v0.2.0 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)**
@@ -129,11 +131,11 @@ Besides the shipped app from releases, you can also install using npm
 
 ```bash
 npm install --global nova-audio-agent@0.2.2
-# open the shipped app
+# open the shipped app; the first launch asks for one DashScope API key
 novaaudio
 # open the settings panel in the app
-# get api key from dashscope and tavily to fill up
 novaaudio config
+# list the keys your voice pipeline needs; --online tests them
 novaaudio doctor
 ```
 
@@ -147,7 +149,7 @@ cd nova-audio-agent
 npm ci && cp .env.example .env
 ```
 
-Get API key from [DashScope](https://platform.qianwenai.com) and [Tavily](https://docs.tavily.com) . And then set `DASHSCOPE_API_KEY` and `TAVILY_API_KEY`.
+Get an API key from [DashScope](https://platform.qianwenai.com) and set `DASHSCOPE_API_KEY`. That one key runs voice, memory, the camera and web search. Search goes through Bailian until you add a [Tavily](https://docs.tavily.com) `TAVILY_API_KEY`.
 
 ```bash
 npm run start:client
