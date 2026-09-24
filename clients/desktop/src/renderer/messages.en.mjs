@@ -295,6 +295,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "正在配置…": "Configuring…",
   "正在准备…": "Preparing…",
   "通用": "General",
+  "主题": "Themes",
   "用量": "Usage",
   "语音管线": "Voice pipeline",
   "执行器与 MCP": "Executors & MCP",

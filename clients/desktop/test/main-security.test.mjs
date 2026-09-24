@@ -61,6 +61,10 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:settings:get',
     'nova:settings:open',
     'nova:settings:set',
+    'nova:visor:configure',
+    'nova:visor:get',
+    'nova:visor:refresh',
+    'nova:visor:state',
     'nova:wake-word:activity',
     'nova:wake-word:audio',
     'nova:wake-word:changed',
@@ -724,7 +728,7 @@ test('delays window creation on linux only, via an injectable wait rather than a
 test('warns instead of silently failing when the global shortcut cannot register', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 
-  const registration = source.slice(source.indexOf('globalShortcut.register('))
+  const registration = source.slice(source.indexOf("globalShortcut.register('CommandOrControl+Shift+Space'"))
   assert.match(
     registration.slice(0, 400),
     /console\.warn\('\[nova-audio-agent-desktop\] global shortcut unavailable on this session'\)/,
@@ -825,7 +829,7 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
       quit() { quits++; beforeQuit(event) },
       exit() { assert.fail('normal shutdown must close windows before quitting') },
     },
-    wakeWord: null, releaseSmokeChannel: null, globalShortcut: {unregisterAll() {}}, nativeAudio: null,
+    visor: null, wakeWord: null, releaseSmokeChannel: null, globalShortcut: {unregisterAll() {}}, nativeAudio: null,
     backendSupervisor: hasBackend ? {stop: () => { backendStops++; return new Promise(resolve => { releaseBackend = resolve }) }} : null, backend: null,
     managedWorkspaceMaintenance: {close: () => new Promise(() => {})}, quitDrain: null, quitDrained: false,
     wait: milliseconds => { timeout = milliseconds; return new Promise(resolve => { releaseMaintenanceDeadline = resolve }) },

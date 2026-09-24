@@ -41,3 +41,15 @@
 - Issue handling: #10 implementation submitted for review, not merged/released. #11 planning is consolidated into the fork's `docs/DESKTOP_VISOR_DEMO.md` and the PR follow-up checklist; closing it does not claim the desktop HUD has been implemented.
 - Validation: reuse prior 329 passing focused tests, runtime build and isolated Electron UI smoke; current changes are documentation only, with diff/whitespace and staged sensitive-data checks. No new live API or GUI tests.
 - Existing upstream branch is retained; no force push, history rewrite, branch deletion or deployment.
+
+## 2026-09-25 04:32 CST — Implement and locally install Nova Visor v1
+
+- Request: implement first usable desktop HUD on the local Nova, iterate and test before delivery.
+- Branch: `codex/orb-skins`; local changes only in this turn. No new issues, issue closure, upstream merge or release.
+- Added data-only preferences, real hardware sampler, mouse-through primary-display HUD, separate controls, staged frame assembly/collapse, reduced motion, state core, live Nova status and reported session usage. Added Themes below General and moved existing skin manager there. Scoped IPC never exposes keys.
+- Iteration evidence: production Electron smoke passes real telemetry, transparent majority pixels, Focus/Showcase, saved preferences, rapid lifecycle and cleanup. 255 targeted Node tests pass. Full desktop build and packaged import/native resource checks pass. Local ad-hoc signature validates.
+- Real desktop validation before lock: underlying button clicked and text edited while HUD was visible. Window dragging was attempted but not confirmed. An unsigned verification installation reached the existing voice-ready state. Later ad-hoc/hardened runtime Team-ID launch failure was found and fixed through a local-preview signer; production signing configuration is untouched.
+- Installed the corrected app at the existing CLI-managed app location and selected Visor Focus plus Jarvis orb skin; original app and complete profile are backed up in the user-local Nova backup directory. No credential values copied into source/logs.
+- Blocker: Mac locked during final live GUI check; CUA explicitly requested manual unlock. User was asked asynchronously. Corrected installed process runs without the earlier dyld error, but installed HUD/settings/shortcut and backend readiness after corrected signing still require final observation. Do not equate passing automated smoke with completed product acceptance.
+- Evidence and limitations: `docs/VISOR_V1.md`; screenshots/metrics in ignored local output. Voice phrase switching, full-desktop skin packages, multiple monitors/fullscreen certification and long soak are not in v1.
+- Additional actual-main startup probe with an isolated profile emitted `settings_ready` (settings renderer and sidebar check passed), but timed out awaiting the native window-shown stage while the Mac was locked. The probe was shut down cleanly; not recorded as a full startup pass.

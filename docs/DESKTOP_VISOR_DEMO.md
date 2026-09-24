@@ -1,8 +1,8 @@
 # Nova Visor：透明可交互桌面 HUD
 
-状态：**分支目标与静态 Demo，桌面叠加功能尚未实现。**
+状态：**已增加单屏透明 HUD 的本地 macOS v1 实现；安装版最终 GUI 验收待解锁电脑。** 具体功能、验证和限制见 [VISOR_V1.md](VISOR_V1.md)。下图仍是概念参考，不能作为运行截图。
 
-关联：[Issue #11](https://github.com/deepnovacore/NovaAudioAgent/issues/11)。当前 `codex/orb-skins` 已实现的是 #10 的悬浮球换肤；本文记录下一阶段的产品方向和首个可运行 Demo 验收。
+关联：[Issue #11](https://github.com/deepnovacore/NovaAudioAgent/issues/11)。`codex/orb-skins` 包含 #10 的悬浮球换肤及本地 Visor v1；本文保留最初产品方向与验收目标，实际实现范围以 VISOR_V1.md 为准。
 
 ## 已选定的视觉基准
 

@@ -388,8 +388,11 @@ function render() {
     || axes.cameraSource !== 'local'
     || axes.camera === 'requesting'
   cameraToggle.setAttribute('aria-label', t("视觉设置"))
+  window.novaAudioAgentDesktop?.visor?.report({state:state.name,muted:axes.muted,activated:axes.activated})
   visual.setState(state.name, { codexWorking: axes.codex === 'working' })
 }
+
+window.novaAudioAgentDesktop?.visor?.onRefresh(()=>render())
 
 function confirmationDeadline(seconds) {
   return seconds === null ? null : performance.now() + (seconds * 1_000)

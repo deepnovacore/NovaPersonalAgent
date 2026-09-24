@@ -23,6 +23,8 @@ const RENDERER_ENTRY_PATHS = Object.freeze([
   '/capture-worklet.mjs',
   '/memory-board.html',
   '/settings.html',
+  '/visor.html',
+  '/visor-controls.html',
 ])
 
 function relativeRendererRoute(from, specifier) {
