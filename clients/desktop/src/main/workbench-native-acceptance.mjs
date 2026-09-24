@@ -40,6 +40,13 @@ export function acceptanceWakeSettings(settings,enabled){
  return enabled?{...settings,wakeWordEnabled:false}:settings
 }
 
+export function acceptanceBackendSettings(settings,manifest){
+ if(!manifest)return settings
+ const allowed=manifest.providers?.some(provider=>provider.origin==='https://dashscope.aliyuncs.com'&&provider.models.includes('qwen3-vl-plus'))
+ if(!allowed)throw Error('acceptance_text_model_missing')
+ return {...settings,pipelineMode:'cascaded',cascadedLlmProvider:'qwen',cascadedLlmModels:{...settings.cascadedLlmModels,qwen:'qwen3-vl-plus'}}
+}
+
 export function waitForAcceptanceRuntimeGate(child,expected,timeoutMs=10000){
  return new Promise((resolve,reject)=>{
   const finish=error=>{clearTimeout(timer);child.off('message',message);child.off('exit',exit);error?reject(error):resolve()}

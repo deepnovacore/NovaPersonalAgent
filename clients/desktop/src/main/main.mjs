@@ -1,5 +1,5 @@
 import {probeAcceptanceGate,acceptanceRuntimeHash,appendAcceptanceCounts, allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-audio-agent/runtime/desktop'
-import {captureNativeWorkbench,waitForNativeWorkbench,installAcceptanceWindowGate,installAcceptanceSessionGate,acceptanceWakeSettings,waitForAcceptanceRuntimeGate} from './workbench-native-acceptance.mjs'
+import {captureNativeWorkbench,waitForNativeWorkbench,installAcceptanceWindowGate,installAcceptanceSessionGate,acceptanceWakeSettings,acceptanceBackendSettings,waitForAcceptanceRuntimeGate} from './workbench-native-acceptance.mjs'
 import {writeFileSync as writeAcceptanceFile} from 'node:fs'
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
@@ -1014,7 +1014,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
       token,
       readyEndpoint: await listener.endpoint,
       parentEnv: process.env,
-      settings: currentSettings,
+      settings: acceptanceBackendSettings(currentSettings,acceptance),
       decryptedSecrets,
       capabilitiesDocument,
       resolvedConfig: desktopConfig,

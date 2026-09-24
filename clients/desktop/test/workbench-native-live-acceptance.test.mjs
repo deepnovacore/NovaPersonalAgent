@@ -64,6 +64,19 @@ test('initial acceptance wake configuration starts no worker and does not change
  assert.equal(workers,0);assert.equal(wake.status,'off');assert.equal(saved.wakeWordEnabled,true)
  assert.equal(acceptanceWakeSettings(saved,false),saved)
 })
+test('acceptance text backend uses only the granted Dashscope model without changing saved settings',async()=>{
+ const {acceptanceBackendSettings}=await import('../src/main/workbench-native-acceptance.mjs')
+ const saved=Object.freeze({pipelineMode:'cascaded',cascadedLlmProvider:'deepseek',cascadedLlmModels:Object.freeze({deepseek:'deepseek-flash',qwen:'qwen3.8-max'})})
+ const grant={providers:[{origin:'https://dashscope.aliyuncs.com',models:['qwen3-vl-plus']}],allowedIdentities:['granted']}
+ const projected=acceptanceBackendSettings(saved,grant)
+ assert.equal(projected.pipelineMode,'cascaded')
+ assert.equal(projected.cascadedLlmProvider,'qwen')
+ assert.equal(projected.cascadedLlmModels.qwen,'qwen3-vl-plus')
+ assert.equal(saved.cascadedLlmProvider,'deepseek')
+ assert.equal(saved.cascadedLlmModels.qwen,'qwen3.8-max')
+ assert.equal(acceptanceBackendSettings(saved,null),saved)
+ assert.throws(()=>acceptanceBackendSettings(saved,{providers:[]}),/acceptance_text_model_missing/)
+})
 
 test('partial lsof errors still reject an observed owner PID',async()=>{
  const {preflightLocks}=await import('../scripts/workbench-native-live-acceptance.mjs')
