@@ -107,3 +107,13 @@ export class GitActivityCache{
     try{await this.#store.write({version:1,roots})}catch{this.#dirty=true}
   }
 }
+
+/** Directories a repository ignores (build output, data, dependencies), listed once without descending into them. */
+export async function gitIgnoredDirectories(root:string):Promise<Set<string>>{
+  try{
+    const {stdout}=await run('git',['-C',root,'ls-files','--others','--ignored','--exclude-standard','--directory','--no-empty-directory','-z'],{timeout:2000,maxBuffer:512*1024})
+    const dirs=new Set<string>()
+    for(const entry of stdout.split('\0'))if(entry.endsWith('/')&&dirs.size<5000)dirs.add(join(root,entry.slice(0,-1)))
+    return dirs
+  }catch{return new Set()/* Without Git the walk falls back to its name exclusions. */}
+}

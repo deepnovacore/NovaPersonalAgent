@@ -119,6 +119,22 @@ test('source state with a legacy 51st failure still opens and keeps the failure 
  }finally{await f.close()}
 })
 
+test('computer scan does not descend into directories a repository ignores',async()=>{
+ const f=await fixture()
+ try{
+  const repo=join(f.folder,'project');await mkdir(join(repo,'outputs','run1'),{recursive:true})
+  execFileSync('git',['init','-q',repo])
+  await writeFile(join(repo,'.gitignore'),'outputs/\n');await writeFile(join(repo,'plan.md'),'Tracked plan')
+  await writeFile(join(repo,'outputs','run1','report.md'),'Generated report')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  for(let n=0;n<40&&(f.sources.list()[0]!.scan_pending||!(await f.knowledge.listSources()).length);n++)await f.sources.command('sources.sync',{id})
+  const locators=(await f.knowledge.listSources()).map(source=>source.locator)
+  assert.ok(locators.some(locator=>locator.endsWith('plan.md')),locators.join())
+  assert.ok(!locators.some(locator=>locator.includes('outputs')),'ignored output is never read')
+  assert.ok((f.sources.list()[0]!.reasons.git_ignored??0)>=1)
+ }finally{await f.close()}
+})
+
 test('computer scan settles files larger than its total byte budget without retrying them',async()=>{
  const f=await fixture()
  try{

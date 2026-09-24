@@ -3,7 +3,7 @@ import {homedir} from 'node:os'
 import {watch, type FSWatcher} from 'node:fs'
 import {processingGrantSchema,type ProcessingGrant} from '../memory-substrate/source-state.js'
 import {interleave} from './sampling.js'
-import {GitActivityCache,nextComputerRoot} from './source-priority.js'
+import {GitActivityCache,gitIgnoredDirectories,nextComputerRoot} from './source-priority.js'
 import {scanDirectory} from './source-walk.js'
 import type {ContextInput} from './context-candidates.js'
 import {randomUUID} from 'node:crypto'
@@ -141,6 +141,7 @@ export class LocalDirectorySources {
   #hintTimers=new Map<string,ReturnType<typeof setTimeout>>()
   /** Outlives a scan so pause, removal, and withdrawal also stop background embedding. */
   #lifecycles=new Map<string,AbortController>()
+  #ignored=new Map<string,{dirs:Promise<Set<string>>;checked:number}>()
 
   constructor(options: LocalDirectorySourceOptions) {this.#options = options}
   async open(): Promise<void> {
@@ -468,6 +469,7 @@ export class LocalDirectorySources {
         if(await realpath(directory.path)!==directory.path)throw Error('changed_path')
         const marker=await lstat(join(directory.path,'.git')).catch(()=>null)
         if(marker&&(marker.isDirectory()||marker.isFile())&&!marker.isSymbolicLink())directory.unit=directory.path
+        const ignored=directory.unit?await this.#ignoredIn(directory.unit):undefined
         const safetyCap=this.#options.directorySafetyCap??20_000
         const passCap=Math.min(safetyCap,20_000-metadataSeen)
         const result=await scanDirectory(directory.path,signal,async entry=>{
@@ -477,6 +479,7 @@ export class LocalDirectorySources {
           if(isAutoHiddenPath(record.view.path,path,record.view.priority_dirs)||excluded.has(entry.name.toLowerCase())||!policy.allows(path)||entry.isSymbolicLink()){record.view.skipped++;return}
           if(entry.isDirectory()){
             if(this.#records.some(r=>r!==record&&within(r.view.path,path))||record.view.priority_dirs.includes(path))return
+            if(ignored?.has(path)&&!record.view.priority_dirs.some(dir=>within(path,dir))){record.view.skipped++;record.view.reasons.git_ignored=(record.view.reasons.git_ignored??0)+1;return}
             enqueue(path,directory.unit)
           }else if(entry.isFile()){
             record.view.scanned++
@@ -534,6 +537,15 @@ export class LocalDirectorySources {
       if (this.#closed) return
       if (record.view.state === 'connected' || record.view.state === 'error') await this.#sync(record)
     }
+  }
+  /** One bounded Git listing per repository per ten minutes; the walk never descends into what it ignores. */
+  #ignoredIn(root:string):Promise<Set<string>>{
+    const cached=this.#ignored.get(root)
+    if(cached&&Date.now()-cached.checked<600_000)return cached.dirs
+    const dirs=gitIgnoredDirectories(root)
+    this.#ignored.set(root,{dirs,checked:Date.now()})
+    if(this.#ignored.size>256)this.#ignored.delete(this.#ignored.keys().next().value!)
+    return dirs
   }
   #lifecycle(record: SourceRecord): AbortController {
     let lifecycle=this.#lifecycles.get(record.view.id)
