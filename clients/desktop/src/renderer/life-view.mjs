@@ -1,4 +1,5 @@
 import {renderInterests,renderWarmup} from './profile-preferences.mjs'
+import {attachSources} from './source-popover.mjs'
 const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n}
 const labels={todo:'待办',idea:'想法',goal:'目标'}
 const statuses={todo:{open:'待办',doing:'进行中',waiting:'等待他人',done:'已完成',cancelled:'已取消'},idea:{active:'保留',archived:'已归档'},goal:{active:'推进中',paused:'已暂停',completed:'已达成',archived:'已归档'}}
@@ -9,7 +10,9 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
  const formKey=kind+':form';const draft=local[formKey]??={title:'',note:'',goal_id:'',due:'',success_criteria:''}
  const field=(parent,key,label,multiline=false)=>{const wrapper=el('label',label),input=el(multiline?'textarea':'input');input.value=draft[key]??'';input.maxLength=key==='title'?200:key==='success_criteria'?2000:4000;input.setAttribute('aria-label',label);if(key==='due')input.type='date';input.addEventListener('input',()=>{draft[key]=input.value});wrapper.append(input);parent.append(wrapper);return input}
  const openKey=kind+':formOpen',formOpen=Boolean(local[openKey])||Boolean(draft.id)
- button(formOpen&&!draft.id?'收起表单':`添加${labels[kind]}`,()=>{local[openKey]=!formOpen;if(!local[openKey])delete local[formKey];rerender()},panel).className='page-add'
+ const toolbar=el('div');toolbar.className='page-toolbar';panel.append(toolbar)
+ button(formOpen&&!draft.id?'收起表单':`添加${labels[kind]}`,()=>{local[openKey]=!formOpen;if(!local[openKey])delete local[formKey];rerender()},toolbar).className='page-add'
+ button(local[kind+':all']?'隐藏已完成／归档':'显示已完成／归档',()=>{local[kind+':all']=!local[kind+':all'];rerender()},toolbar).className='quiet'
  const form=el('div');form.className='life-form';form.hidden=!formOpen;panel.append(form)
  field(form,'title',`${labels[kind]}标题`);field(form,'note',kind==='goal'?'为什么重要':'补充说明',true)
  if(kind==='todo')field(form,'due','到期日期')
@@ -17,7 +20,6 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
  else{const wrapper=el('label','关联目标'),select=el('select');select.setAttribute('aria-label','关联目标');for(const g of [{id:'',title:'不关联'},...(state?.goals??[])]){const opt=el('option',g.title);opt.value=g.id;select.append(opt)}select.value=draft.goal_id??'';select.addEventListener('change',()=>{draft.goal_id=select.value});wrapper.append(select);form.append(wrapper)}
  button(draft.id?'保存修改':'保存',async()=>{const params={op:draft.id?'update':'create',kind,title:draft.title,note:draft.note};if(draft.id)Object.assign(params,{id:draft.id,expected_version:draft.version});if(kind==='todo')params.due=draft.due||null;if(kind==='goal')params.success_criteria=draft.success_criteria;else params.goal_id=draft.goal_id||null;await command('life.mutate',params);delete local[formKey];delete local[openKey];rerender()},form)
  if(draft.id)button('取消编辑',()=>{delete local[formKey];delete local[openKey];rerender()},form)
- button(local[kind+':all']?'隐藏已完成／归档':'显示已完成／归档',()=>{local[kind+':all']=!local[kind+':all'];rerender()},panel)
  const visible=rows.filter(r=>local[kind+':all']||!['done','cancelled','archived','completed'].includes(r.status))
  if(!visible.length){const empty=el('section');empty.className='workbench-empty';const copy=!state?['正在读取已保存的内容','稍后会在这里显示你的记录。']:rows.length?{todo:['当前没有进行中的待办','已完成的记录可以从上方展开。'],idea:['当前没有保留的想法','已归档的想法可以从上方展开。'],goal:['当前没有推进中的目标','已归档的目标可以从上方展开。']}[kind]:{todo:['还没有待办','想起一件要做的事，可以随时记在这里。'],idea:['还没有保存想法','有个念头时，先用一句话记下来就好。'],goal:['还没有设定目标','可以先写下想推进的方向，以及怎样算达成。']}[kind];empty.append(el('h3',copy[0]),el('p',copy[1]));panel.append(empty)}
  for(const row of visible){const card=el('article');card.className='personal-card';card.dataset.lifeId=row.id;card.append(el('h3',row.title),el('p',row.note));panel.append(card)
@@ -39,14 +41,7 @@ export function renderProfile(panel,{state,news,warmup,command,button,local,pref
  const confirmed=state?.profile?.about??'',suggested=state?.profile?.version>0?'':warmup?.draft?.about?.text??'',about=confirmed||suggested
  const work=state?.profile?.version>0?[]:warmup?.draft?.work??[]
  const sources=new Map((warmup?.sources??[]).map(source=>[source.id,source.label]))
- const sourceDetails=(host,refs)=>{
-  if(!refs?.length)return
-  const labels=[...new Set(refs.map(ref=>sources.get(ref.entry_id)).filter(Boolean))]
-  if(!labels.length)return
-  const details=el('details');details.className='profile-sources';details.append(el('summary','查看来源'))
-  const list=el('ul');for(const label of labels)list.append(el('li',label))
-  details.append(list);host.append(details)
- }
+ const sourceDetails=(host,refs)=>attachSources(host,refs?.map(ref=>sources.get(ref.entry_id)),{title:'查看来源'})
  card.append(el('h3','关于我'))
  if(local.profile){
   const draft=local.profile,input=el('textarea');input.value=draft.about;input.maxLength=5000;input.setAttribute('aria-label','关于我');input.addEventListener('input',()=>{draft.about=input.value});card.append(input)
@@ -55,9 +50,8 @@ export function renderProfile(panel,{state,news,warmup,command,button,local,pref
   button('取消编辑',()=>{delete local.profile;rerender()},actions)
  }else{
   const caption=el('p',confirmed?'你写下的介绍':state?.profile?.version>0?'你已清空个人介绍，可以随时重新写一段。':suggested||work.length?'根据近期工作整理，可随时修改':'还没有个人概览。资料整理完成后会逐步出现，也可以自己写一段。');caption.className='preference-caption';card.append(caption)
-  if(about){const preview=el('p',about);preview.className='profile-preview';card.append(preview)}
-  if(state?.profile?.version===0&&warmup?.draft?.about)sourceDetails(card,warmup.draft.about.refs)
-  for(const item of work){const block=el('article');block.className='profile-work-item';block.append(el('h4',item.title),el('p',item.text));sourceDetails(block,item.refs);card.append(block)}
+  if(about){const holder=el('div');holder.className='profile-about';const preview=el('p',about);preview.className='profile-preview';holder.append(preview);card.append(holder);if(state?.profile?.version===0&&warmup?.draft?.about)sourceDetails(holder,warmup.draft.about.refs)}
+  if(work.length){const grid=el('div');grid.className='profile-work';card.append(grid);for(const item of work){const block=el('article');block.className='profile-work-item';block.append(el('h4',item.title),el('p',item.text));sourceDetails(block,item.refs);grid.append(block)}}
   const actions=el('div');actions.className='preference-actions';card.append(actions)
   button(about||work.length?'编辑概览':'自己写一段',()=>{local.profile={about:confirmed||[suggested,...work.map(item=>`${item.title}：${item.text}`)].filter(Boolean).join('\n\n'),version:state?.profile?.version??0};rerender()},actions)
   if(delegate)button('和 Nova 聊聊',()=>delegate('我想完善个人介绍，请根据已有资料和我一起调整。'),actions)

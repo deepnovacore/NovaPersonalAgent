@@ -79,7 +79,7 @@ test('read-only project entries have no correction or forget controls',async()=>
  const articles=body.querySelectorAll('article')
  const buttons=topic=>articles.find(article=>article.querySelector('h4')?.textContent===topic).querySelectorAll('button').map(button=>button.textContent)
  assert.deepEqual(buttons('只读项目'),['接着聊'])
- assert.deepEqual(buttons('个人记忆'),['纠正','忘记','接着聊'])
+ assert.deepEqual(buttons('个人记忆'),['接着聊','纠正','忘记'])
  const expiredToggle=()=>body.querySelectorAll('label').find(label=>label.children.some(child=>child.text==='包含已过期')).children[0]
  const toggle=expiredToggle();assert.equal(toggle.checked,false)
  toggle.checked=true;const pending=toggle.listeners.change();const request=sent.at(-1)

@@ -1,3 +1,4 @@
+import {attachSources} from './source-popover.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
 /** Renders the Todo recap and grounded suggestions; these cards never become Life objects automatically. */
 export function renderSourceSuggestions(panel,{tab,context,sources=[],button,command,continueChat,delegate=continueChat,openSettings,connected=true}){
@@ -7,7 +8,7 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
   const recap=el('section',undefined,'workbench-recap');recap.setAttribute('aria-label','近况');panel.append(recap)
   recap.append(el('h2','近况'))
   if(context.recap.text)recap.append(el('p',context.recap.text))
-  if(projects.length){const list=el('ul');for(const project of projects)list.append(el('li',`${project.name} · ${project.line}`));recap.append(list)}
+  if(projects.length){const list=el('ul',undefined,'recap-projects');for(const project of projects){const row=el('li');row.append(el('strong',project.name),el('span',project.line));row.setAttribute('aria-label',`${project.name} · ${project.line}`);list.append(row)}recap.append(list)}
  }
  const heading=tab==='todos'?'值得关注':'Nova 的建议'
  const section=el('section',undefined,'workbench-suggestions');section.setAttribute('aria-label',heading);panel.append(section)
@@ -16,10 +17,11 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  for(const item of cards){const card=el('article',undefined,'card');card.append(el('h3',item.title));section.append(card)
   if(tab==='todos'&&(item.why||item.next)){if(item.why)card.append(el('p',item.why));if(item.next)card.append(el('p',`下一步：${item.next}`,'workbench-next'))}
   else card.append(el('p',item.body))
-  if(item.refs?.length){const refs=el('details');refs.append(el('summary','查看依据'));for(const ref of item.refs)refs.append(el('p',ref.label??ref.entry_id));card.append(refs)}
-  if(tab==='todos'&&item.next)button('交给 Nova',()=>delegate(`请帮我推进「${item.title}」：${item.next}`),card)
-  else button('继续讨论',()=>continueChat(`${item.title}：${item.body}`),card)
-  button('隐藏',()=>command('context.dismiss',{id:item.id}),card)
+  attachSources(card,item.refs?.map(ref=>ref.label??ref.entry_id))
+  const actions=el('div',undefined,'card-actions');card.append(actions)
+  if(tab==='todos'&&item.next)button('交给 Nova',()=>delegate(`请帮我推进「${item.title}」：${item.next}`),actions)
+  else button('继续讨论',()=>continueChat(`${item.title}：${item.body}`),actions)
+  button('隐藏',()=>command('context.dismiss',{id:item.id}),actions).className='quiet'
  }
  const failed=sources.filter(source=>source.state==='error'),sourceName=source=>source.scope==='computer'?'整机资料':source.path?.split(/[\\/]/u).filter(Boolean).pop()??'已连接目录'
  if(cards.length){if(failed.length){const note=el('p',`${failed.map(sourceName).join('、')}尚未读完；已显示可用内容。`,'hint');section.append(note);if(openSettings)button('查看来源',()=>openSettings('connections'),section)}return}
