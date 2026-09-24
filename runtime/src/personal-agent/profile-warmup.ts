@@ -16,6 +16,7 @@ export interface ProfileOutcome {outcome:'ok'|'timeout'|'aborted'|'schema'|'evid
 export interface ProfileWarmupOptions {report?:(outcome:ProfileOutcome)=>void;timeoutMs?:number;backoffMs?:readonly number[];minIntervalMs?:number}
 const diskSchema=z.object({key:z.string(),draft:profileDraftSchema.nullable()})
 interface Ref {entry_id:string;version:ProfileInput['version']}
+const inputKey=(entries:readonly ProfileInput[])=>entries.length?createHash('sha256').update(JSON.stringify(entries)).digest('hex'):''
 const factCount=(draft:ProfileDraft)=>(draft.about?1:0)+draft.work.length+draft.interests.length
 const classify=(error:unknown,signal:AbortSignal,controller:AbortController):ProfileOutcome['outcome']=>{
  if(controller.signal.aborted)return 'aborted'
@@ -29,7 +30,7 @@ export class ProfileWarmup{
  #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#cache:z.infer<typeof diskSchema>={key:'',draft:null}
  #entries:ProfileInput[]=[];#key='';#opened=false
  #abort=new AbortController();#run:Promise<void>|undefined;#runEntries:ProfileInput[]=[];#writes:Promise<void>=Promise.resolve()
- #timer:ReturnType<typeof setTimeout>|undefined;#firstChangeAt=0;#lastRunAt=0;#failures=0;#failedKey=''
+ #timer:ReturnType<typeof setTimeout>|undefined;#firstChangeAt=0;#lastRunAt=0;#failures=0;#failedKey='';#withdrawals=0
  readonly #timeoutMs:number;readonly #backoffMs:readonly number[];readonly #minIntervalMs:number;readonly #report:((outcome:ProfileOutcome)=>void)|undefined
  constructor(path:string,readonly generate:ProfileGenerator|undefined,readonly changed:()=>void,options:ProfileWarmupOptions={}){
   this.#store=new BoundedJsonStore(path,diskSchema);this.#report=options.report
@@ -57,7 +58,7 @@ export class ProfileWarmup{
   const usable=entries.filter(e=>e.version!==null&&e.content.trim())
   const selected=[...usable.filter(e=>!e.source).slice(-16),...usable.filter(e=>e.source).slice(0,24)]
    .map(e=>({id:e.id,version:e.version,content:e.content.slice(0,1500),origin:e.origin,...(e.source?{source:e.source}:{})})).sort((a,b)=>a.id.localeCompare(b.id))
-  const key=selected.length?createHash('sha256').update(JSON.stringify(selected)).digest('hex'):''
+  const key=inputKey(selected)
   if(key!==this.#key){
    this.#key=key;this.#entries=selected
    // Nothing the running call can cite is still eligible, so its answer would be discarded anyway.
@@ -71,7 +72,7 @@ export class ProfileWarmup{
   * superseded memory refresh cannot leave stale eligibility). Facts it grounded leave disk as well as the view.
   */
  async forgetUnavailable(eligibleSources:ReadonlySet<string>){
-  this.#entries=this.#entries.filter(entry=>!entry.source||eligibleSources.has(entry.id))
+  this.#entries=this.#entries.filter(entry=>!entry.source||eligibleSources.has(entry.id));this.#key=inputKey(this.#entries);this.#withdrawals++
   const draft=this.#cache.draft
   const pruned=draft&&this.#prune(draft,this.#entries)
   if(draft&&(!pruned||factCount(pruned)!==factCount(draft)))this.#cache={key:pruned?this.#cache.key:'',draft:pruned}
@@ -118,8 +119,12 @@ export class ProfileWarmup{
     if(!this.#opened)return
     if(!current){this.#failures=0;this.#failedKey='';return}
     // Installed before the write so a withdrawal arriving mid-write prunes this draft and queues its own write after it.
-    const previous=this.#cache,cache={key,draft:current};this.#cache=cache
-    try{await this.#persist(cache)}catch{if(this.#cache===cache)this.#cache=previous;throw Error('profile_persist_failed')}
+    const previous=this.#cache,cache={key,draft:current},withdrawals=this.#withdrawals;this.#cache=cache
+    try{await this.#persist(cache)}catch{
+     // A rollback must not bring back facts withdrawn since the previous draft was captured.
+     if(this.#cache===cache){const kept=withdrawals===this.#withdrawals?previous.draft:previous.draft&&this.#prune(previous.draft,this.#entries);this.#cache={key:kept?previous.key:'',draft:kept}}
+     throw Error('profile_persist_failed')
+    }
     this.#failures=0;this.#failedKey=''
    }catch(error){
     outcome={...outcome,outcome:classify(error,signal,controller)}

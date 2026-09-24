@@ -1,6 +1,6 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,realpath} from 'node:fs/promises'
+import {mkdtemp,rm,realpath,chmod} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {ProfileWarmup,type ProfileOutcome} from '../src/personal-agent/profile-warmup.js'
@@ -111,4 +111,29 @@ test('a withdrawal during generation or during the draft write never leaves the 
    assert.deepEqual(service.snapshot().draft,{...fileDraft,interests:[]},when)
   }finally{await service.close();await rm(dir,{recursive:true,force:true})}
  }
+})
+test('a failed draft write after a withdrawal never restores the withdrawn facts',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-')),fileA2={...fileA,version:'f2'};let resolve!:(v:typeof fileDraft)=>void,calls=0
+ const aOnly={about:{text:'Ships the voice agent',refs:[{entry_id:fileA2.id,version:fileA2.version}]},work:[],interests:[]}
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>++calls===1?Promise.resolve(fileDraft):new Promise(r=>{resolve=r}),()=>{/* observer fixture */})
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh();assert.equal(service.snapshot().draft?.interests.length,1)
+  service.update([fileA2,fileB]);await chmod(dir,0o500);const run=service.refresh()
+  resolve(aOnly)
+  // Withdraw B after the A-only draft is installed and before its write fails.
+  for(let i=0;i<50&&service.snapshot().draft?.about?.text!==aOnly.about.text;i++)await new Promise(r=>setImmediate(r))
+  assert.equal(service.snapshot().status,'working','the withdrawal lands while the draft write is pending')
+  await service.forgetUnavailable(new Set([fileA.id])).catch(()=>{/* the directory is read-only */});await run
+  await chmod(dir,0o700);service.update([fileA2,{...fileB,version:'f2'}])
+  assert.deepEqual(service.snapshot().draft?.interests??[],[],'resuming the source does not bring back its withdrawn facts')
+ }finally{await chmod(dir,0o700);await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('a source resumed with unchanged content is read again',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'))
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve(fileDraft),()=>{/* observer fixture */})
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh()
+  await service.forgetUnavailable(new Set([fileA.id]));assert.deepEqual(service.snapshot().sources.map(s=>s.id),[fileA.id])
+  service.update([fileA,fileB]);assert.deepEqual(service.snapshot().sources.map(s=>s.id),[fileA.id,fileB.id])
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
