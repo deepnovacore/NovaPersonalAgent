@@ -492,6 +492,7 @@ export class LocalDirectorySources {
     const projects = new Set<string>()
     let complete = true, visited = 0
     let currentReadFailure=false, currentObserveFailure=false
+    let observationPaths = new Set<string>()
     let stage:z.infer<typeof scanStageSchema>='recover_pending'
     try {
       // Finish an interrupted replacement before metadata discovery can
@@ -557,6 +558,7 @@ export class LocalDirectorySources {
         return true
       })
       const selectedPaths = new Set(selected.map(file => file.path))
+      observationPaths=selectedPaths
       let rechecks=0
       // Budgeting must not keep a changed, no-longer-selected version authoritative.
       for (const file of files) {
@@ -673,7 +675,8 @@ export class LocalDirectorySources {
       stage='on_change'
       await this.#options.onChange?.(false)
       stage='observe'
-      for (const file of balanced(record.files.filter(file => file.valid && !file.observed && representativeDocument(file.path) && (view.scope==='computer'||selectedPaths.has(file.path))), view.path).slice(0, 8)) {
+      for (const file of balanced(record.files.filter(file => file.valid && !file.observed && !!file.excerpt && representativeDocument(file.path) && (view.scope==='computer'||observationPaths.has(file.path))), view.path)
+        .filter(file=>(file.observe_retry_at??0)<=Date.now()).slice(0, 8)) {
         signal.throwIfAborted()
         if (file.observed || !file.excerpt || !this.#options.onObserve) continue
         if ((file.observe_retry_at??0)>Date.now()) {currentObserveFailure=true;continue}
@@ -699,12 +702,13 @@ export class LocalDirectorySources {
       if (!signal.aborted) {view.state = 'error';view.health='error';view.coverage='partial';view.failures.splice(0,Math.max(0,view.failures.length-49));view.failures.push({path: '', code: errorCode(error),stage})}
     }
     view.indexed=record.files.filter(f=>f.valid).length
-    const observationPending=!!this.#options.onObserve&&record.files.some(f=>f.valid&&!f.observed&&f.excerpt&&representativeDocument(f.path))
+    const observationPending=!!this.#options.onObserve&&record.files.some(f=>f.valid&&!f.observed&&f.excerpt&&representativeDocument(f.path)&&(view.scope==='computer'||observationPaths.has(f.path)))
     if(record.walk){view.scan_pending=!!(record.walk.queue.length||record.walk.pending.length||record.walk.deferred.length||record.walk.ledger.some(item=>item.status==='partial')||observationPending);if(!view.scan_pending&&view.scope!=='computer')record.walk=null}
     else view.scan_pending=observationPending
     stage='finalize';await this.#save()
     stage='on_change_final'
-    await this.#options.onChange?.(beforeEvidence !== record.files.filter(file => file.valid).map(refFor).sort().join() || beforeObservation !== record.observation)
+    try{await this.#options.onChange?.(beforeEvidence !== record.files.filter(file => file.valid).map(refFor).sort().join() || beforeObservation !== record.observation)}
+    catch(error){view.failures.splice(0,Math.max(0,view.failures.length-49));view.failures.push({path:'',code:errorCode(error),stage});await this.#save();throw error}
   }
   async #recoverPending(record: SourceRecord): Promise<void> {
     const pending = record.pending

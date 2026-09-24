@@ -13,7 +13,7 @@ import {scanDirectory} from '../src/personal-agent/source-walk.js'
 import {KnowledgeService, type KnowledgeEvidenceLedger} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
 
-async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string|null>, directorySafetyCap?:number, contentRecheckMs?:number) {
+async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string|null>, directorySafetyCap?:number, contentRecheckMs?:number, observationRetryMs=100) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-directory-'))
   const folder = join(root, 'allowed'); await mkdir(folder)
   let failEmbedding = false, failInvalidation = false, failConsent=false
@@ -28,9 +28,11 @@ async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string
   const invalidated: string[] = []
   const observations: {content: string; source_ref: {ref: string}}[] = []
   let observeHook:(value:{content:string;source_ref:{type:'file';ref:string;observed_at:string};topic?:string})=>void|Promise<void>=()=>undefined
+  let changeHook:()=>void|Promise<void>=()=>undefined
   const options = {computerRoot:folder,...(priorityWorkspace?{priorityWorkspace}:{}),...(directorySafetyCap?{directorySafetyCap}:{}),...(contentRecheckMs!==undefined?{contentRecheckMs}:{}),processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),path: join(root, 'db', 'sources.json'), knowledge, pollMs: 0,
     onProcessingConsent:()=>failConsent?Promise.reject(Error('grant_write_failed')):Promise.resolve(),
-    observationRetryMs:100,
+    onChange: async()=>{await changeHook()},
+    observationRetryMs,
     onObserve: async (value: {content: string; source_ref: {type:'file'; ref: string; observed_at:string}; topic?:string}) => {
       await observeHook(value)
       if (!memoryAvailable) throw new Error('memory_unavailable')
@@ -43,6 +45,7 @@ async function fixture(realMemory = false, priorityWorkspace?:()=>Promise<string
   return {root, folder, knowledge, invalidated, observations, memory, setFailConsent(value:boolean){failConsent=value},setMemoryAvailable(value:boolean) {memoryAvailable=value}, setEmbeddingHook(hook: () => Promise<void>) {embeddingHook = hook}, setFail(value: boolean) {failEmbedding = value}, setFailInvalidation(value: boolean) {failInvalidation = value}, get sources() {return sources},
     reopen: async () => {await sources.close(); sources = new LocalDirectorySources(options); await sources.open()},
     setObserveHook(hook:typeof observeHook){observeHook=hook},
+    setChangeHook(hook:typeof changeHook){changeHook=hook},
     close: async () => {await sources.close(); await knowledge.close(); await native?.close(); await rm(root, {recursive: true, force: true})}}
 }
 
@@ -276,6 +279,49 @@ test('observation callback failures preserve indexed excerpts, continue, and ret
   assert.equal(f.sources.list()[0]!.indexed,2)
   assert.equal(f.sources.list()[0]!.scan_pending,false)
   assert.equal(f.observations.length,2)
+ }finally{await f.close()}
+})
+
+test('cooled-down observations do not consume the per-scan batch limit',async()=>{
+ const f=await fixture(false,undefined,undefined,undefined,60_000);let calls=0
+ f.setObserveHook(value=>{calls++;if(/(?:0[0-7])\.md/u.test(value.content))throw Error('retry this file later')})
+ try{
+  for(let i=0;i<10;i++){const path=join(f.folder,`${String(i).padStart(2,'0')}.md`);await writeFile(path,`source excerpt ${i}`);await utimes(path,new Date('2020-01-01'),new Date('2020-01-01'))}
+  const {id}=await f.sources.command('sources.add',{path:f.folder,consent:true}) as {id:string}
+  assert.equal(calls,8)
+  assert.equal(f.observations.length,0)
+  assert.equal(f.sources.list()[0]!.scan_pending,true)
+  await f.sources.command('sources.sync',{id})
+  assert.equal(calls,10,'the next two eligible files progress while the earlier eight cool down')
+  assert.equal(f.observations.length,2)
+ }finally{await f.close()}
+})
+
+test('directory scan pending ignores unselected files',async()=>{
+ const f=await fixture()
+ try{
+  for(const name of ['a','b','c','d','e','f','g','h','i']){const path=join(f.folder,`${name}.md`);await writeFile(path,`notes ${name}`);await utimes(path,new Date('2020-01-01'),new Date('2020-01-01'))}
+  const {id}=await f.sources.command('sources.add',{path:f.folder,consent:true}) as {id:string}
+  assert.equal(f.observations.length,8)
+  await mkdir(join(f.folder,'.git'))
+  await f.sources.command('sources.consent',{id,consent:true})
+  await f.sources.command('sources.sync',{id})
+  assert.equal(f.observations.length,16)
+  assert.equal(f.sources.list()[0]!.scan_pending,false)
+ }finally{await f.close()}
+})
+
+test('final onChange errors persist a safe stage diagnostic and still reject the sync',async()=>{
+ const f=await fixture();let calls=0
+ f.setChangeHook(()=>{if(++calls===2)throw Error('private observer projection failure')})
+ try{
+  await writeFile(join(f.folder,'notes.md'),'a source note')
+  await assert.rejects(f.sources.command('sources.add',{path:f.folder,consent:true}),/private observer projection failure/u)
+  const source=f.sources.list()[0]!
+  assert.equal(source.failures.at(-1)?.path,'')
+  assert.equal(source.failures.at(-1)?.stage,'on_change_final')
+  assert.equal(source.failures.at(-1)?.code,'source_unavailable')
+  assert.ok(!JSON.stringify(source).includes('private observer projection failure'))
  }finally{await f.close()}
 })
 
