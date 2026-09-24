@@ -51,6 +51,10 @@ test('with project digests, todos come from own projects with a focus or next st
  assert.doesNotMatch(todos[0]!.excerpt,/\//u)
  assert.ok(selectContextCandidates(inputs).some(c=>c.tab==='todos'),'without digests the old document path still works')
 })
+test('a document excerpt sent to the model stops at 400 characters',()=>{
+ const [candidate]=selectContextCandidates([file('long','plan.md','An idea for a simpler workflow. '+'细'.repeat(900),3)])
+ assert.equal(candidate?.excerpt.length,400);assert.equal(candidate?.content.length,400)
+})
 test('own projects, and only own projects, offer at most one long-term direction each and three overall',()=>{
  const digest=(key:string,role:'own'|'third_party'|'sample')=>({project_key:key,name:key,role,summary:`${key} 是一个长期在做的项目`,focus:null,next_step:null,refs:[{entry_id:`source:${key}`,version:'v1'}]})
  const selected=selectContextCandidates([],[digest('a','own'),digest('lib','third_party'),digest('demo','sample'),digest('b','own'),digest('c','own'),digest('d','own')])

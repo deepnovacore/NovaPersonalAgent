@@ -285,6 +285,21 @@ test('complete parses one choice and reports usage', async () => {
 })
 
 
+test('max_tokens travels only when a caller sets a ceiling', async () => {
+  const bodies: Record<string, unknown>[] = []
+  const gateway = new OpenAIModelGateway({
+    baseUrl: 'https://example.invalid/v1', apiKey: 'k', clock: new VirtualClock(), metrics: {record: () => undefined},
+    fetch: (_url, init) => {
+      bodies.push(JSON.parse(init!.body as string) as Record<string, unknown>)
+      return Promise.resolve(Response.json({choices: [{message: {content: '{}'}}]}))
+    },
+  })
+  await gateway.complete({model: 'm', system: 's', prompt: 'p'})
+  await gateway.complete({model: 'm', system: 's', prompt: 'p', maxTokens: 4000})
+  assert.equal(Object.hasOwn(bodies[0]!, 'max_tokens'), false)
+  assert.equal(bodies[1]!.max_tokens, 4000)
+})
+
 test('support transport leaves thinking to downstream configuration in complete and stream', async () => {
   for (const baseUrl of [
     'https://dashscope.aliyuncs.com/compatible-mode/v1',

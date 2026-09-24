@@ -26,6 +26,8 @@ const ideaEvidence=(text:string)=>/\b(?:proposal|idea)\b|想法|提议|建议|�
 const genericOverview=(path:string)=>/^readme(?:[._-][a-z]+)?\.(?:md|markdown|txt)$/iu.test(basename(path))
 
 const GOAL_PROJECTS=3
+/** Enough for the paragraph a keyword matched; the whole candidate set goes into one prompt, so longer excerpts mostly add latency. */
+const EXCERPT_CHARS=400
 /**
  * One todo candidate per own project with a stated focus or next step; the digest already read the project's documents.
  * The most active own projects also offer one long-term direction as a goal candidate; it is only a suggestion until the user adopts it.
@@ -56,7 +58,7 @@ export function selectContextCandidates(inputs:readonly ContextInput[],digests?:
   if(input.kind==='memory'&&!/\bidea\b|想法|可以考虑|建议/u.test(input.content))continue
   for(const tab of tabs){
    const candidate_id=candidateId(tab,primaryId,version)
-   const item:ContextCandidate={candidate_id,id:candidate_id,version,content:input.content.slice(0,700),tab,primaryFileId:input.kind==='file'?input.file_id:null,refs:[{entry_id:input.id,version:input.version}],excerpt:input.content.slice(0,700),reason_code:input.kind==='memory'?'stated_idea':tab==='todos'?'document_action':'document_idea',root,priority:input.kind==='file'?input.priority:2,mtime_ms:input.kind==='file'?input.mtime_ms:0}
+   const item:ContextCandidate={candidate_id,id:candidate_id,version,content:input.content.slice(0,EXCERPT_CHARS),tab,primaryFileId:input.kind==='file'?input.file_id:null,refs:[{entry_id:input.id,version:input.version}],excerpt:input.content.slice(0,EXCERPT_CHARS),reason_code:input.kind==='memory'?'stated_idea':tab==='todos'?'document_action':'document_idea',root,priority:input.kind==='file'?input.priority:2,mtime_ms:input.kind==='file'?input.mtime_ms:0}
    const group=groups.get(root)??[]
    if(group.filter(c=>c.tab===tab).length>=2)continue
    group.push(item);groups.set(root,group)
