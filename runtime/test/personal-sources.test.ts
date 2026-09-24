@@ -84,6 +84,24 @@ test('snapshot open reads indexed file context without starting a scan',async()=
  }finally{await f.close()}
 })
 
+test('legacy retry fields on indexed files do not block source startup',async()=>{
+ const f=await fixture()
+ try{
+  await writeFile(join(f.folder,'readme.md'),'Next step: review the local note.')
+  await f.sources.command('sources.add',{path:f.folder,consent:true})
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json')
+  const state=JSON.parse(await readFile(path,'utf8')) as {sources:{files:Record<string,unknown>[]}[]}
+  assert.ok(state.sources[0]!.files.length)
+  Object.assign(state.sources[0]!.files[0]!,{attempts:1,eligible_at:Date.now(),reason:'retry'})
+  await writeFile(path,JSON.stringify(state))
+  await f.reopen()
+  assert.equal(f.sources.contextEntries().length,1)
+  const migrated=JSON.parse(await readFile(path,'utf8')) as {sources:{files:Record<string,unknown>[]}[]}
+  assert.equal('attempts' in migrated.sources[0]!.files[0]!,false)
+ }finally{await f.close()}
+})
+
 test('source state with a legacy 51st failure still opens and keeps the failure cap',async()=>{
  const f=await fixture()
  try{

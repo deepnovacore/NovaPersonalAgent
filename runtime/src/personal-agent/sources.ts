@@ -152,6 +152,14 @@ export class LocalDirectorySources {
       if(!item||typeof item!=='object'||!('view' in item))continue
       const view=item.view
       if(view&&typeof view==='object'&&'failures' in view&&Array.isArray(view.failures)&&view.failures.length>50)view.failures=(view.failures as unknown[]).slice(-50)
+      // Older scan writes copied retry metadata from a pending item into an
+      // indexed file. It has no meaning once the file is indexed.
+      if('files' in item&&Array.isArray(item.files))for(const file of item.files as unknown[]){
+        if(!file||typeof file!=='object')continue
+        if('attempts' in file)delete file.attempts
+        if('eligible_at' in file)delete file.eligible_at
+        if('reason' in file)delete file.reason
+      }
     }
     this.#records = diskSchema.parse(raw).sources
     assertAcceptanceGrant(this.#options.processingGrant?.(true,1,0),this.#records.filter(record=>!record.deleting&&['connected','error'].includes(record.view.state)).map(record=>record.processing_consent??{extraction_provider:null,embedding_provider:null}))
@@ -685,7 +693,7 @@ export class LocalDirectorySources {
           const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent)
           const indexed = (await this.#options.knowledge.listSources()).find(item => item.id === result.id)
           if (!indexed) throw new Error('ingest_failed')
-          const tracked = {...file, id: result.id, fingerprint: indexed.fingerprint, checked_at: Date.now(), owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
+          const tracked = {path:file.path,unit:file.unit,size:file.size,mtime:file.mtime,id: result.id, fingerprint: indexed.fingerprint, checked_at: Date.now(), owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
           record.files = record.files.filter(old => old.path !== file.path); record.files.push(tracked); record.pending = null
           settlePending(record,file.path)
           bytes += file.size; view.read++
