@@ -3,7 +3,7 @@ import {homedir} from 'node:os'
 import {watch, type FSWatcher} from 'node:fs'
 import {processingGrantSchema,type ProcessingGrant} from '../memory-substrate/source-state.js'
 import {interleave} from './sampling.js'
-import {nextComputerRoot,rootActivity} from './source-priority.js'
+import {GitActivityCache,nextComputerRoot} from './source-priority.js'
 import {scanDirectory} from './source-walk.js'
 import type {ContextInput} from './context-candidates.js'
 import {randomUUID} from 'node:crypto'
@@ -134,7 +134,7 @@ export class LocalDirectorySources {
   #writes: Promise<void> = Promise.resolve()
   #commands: Promise<unknown> = Promise.resolve()
   #workspacePath:string|null=null
-  #activityCache=new Map<string,{value:Awaited<ReturnType<typeof rootActivity>>;checked:number}>()
+  #activity:GitActivityCache|undefined
   #activityWarmup:Promise<void>|undefined
   #watchers:FSWatcher[]=[]
   #dirtyHints=new Map<string,Set<string>>()
@@ -177,10 +177,11 @@ export class LocalDirectorySources {
     })
     void this.#options.knowledge.resumeVectors?.().catch(()=>undefined)
     const roots=[...new Set(this.#records.filter(record=>!record.deleting&&['connected','error'].includes(record.view.state)).flatMap(record=>record.files.filter(file=>file.valid&&file.excerpt).map(file=>file.unit??computerUnit(record.view.path,file.path))))].slice(0,64)
+    const activity=this.#activity=new GitActivityCache(join(dirname(this.#path),basename(this.#path,'.json')+'.activity.json'))
     this.#activityWarmup=(async()=>{
-      for(let i=0;i<roots.length&&!this.#closed;i+=8)await Promise.all(roots.slice(i,i+8).map(async root=>{
-        this.#activityCache.set(root,{value:await rootActivity(root),checked:Date.now()})
-      }))
+      await activity.open()
+      for(let i=0;i<roots.length&&!this.#closed;i+=8)await Promise.all(roots.slice(i,i+8).map(root=>activity.get(root,0)))
+      await activity.flush()
       if(!this.#closed&&roots.length)await this.#options.onChange?.(true)
     })().catch(()=>{/* Scan refreshes these optional hints later. */})
     if(this.#options.scanOnOpen===false)return
@@ -196,6 +197,7 @@ export class LocalDirectorySources {
   async close(): Promise<void> {
     this.#closed = true
     await this.#activityWarmup
+    await this.#activity?.flush()
     for(const watcher of this.#watchers)watcher.close()
     this.#watchers=[]
     for(const timer of this.#hintTimers.values())clearTimeout(timer)
@@ -257,7 +259,7 @@ export class LocalDirectorySources {
   }
   contextEntries():ContextInput[]{
     const expected=this.#options.processingGrant?.(true,1,0)
-    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isComputerExcludedPath(record.view,f.path))).map(file=>{const root=file.unit??computerUnit(record.view.path,file.path),activity=this.#activityCache.get(root)?.value,gitMs=activity?.lastGitCommitMs;return {last_commit_ms:gitMs??null,own_commits:activity?.ownCommits??0,kind:'file' as const,id:'source:'+file.id,version:file.fingerprint,content:file.excerpt!,source_id:record.view.id,file_id:file.id,root,rel_path:record.view.scope==='computer'?relative(record.view.path,file.path):join(basename(record.view.path),relative(record.view.path,file.path)),role:/\.(?:md|markdown|txt|pdf|docx)$/iu.test(file.path)?'document' as const:/\.(?:json|yaml|yml|csv)$/iu.test(file.path)?'config' as const:'code' as const,mtime_ms:file.mtime,hidden_prefix_depth:hiddenPrefixDepth(record.view,file.path),priority:record.view.priority_dirs.some(dir=>within(dir,file.path))?3:record.view.scope==='directory'?2:this.#workspacePath&&within(this.#workspacePath,file.path)?1:gitMs!==null&&gitMs!==undefined&&Date.now()-gitMs<30*86_400_000?1:0}}))
+    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isComputerExcludedPath(record.view,f.path))).map(file=>{const root=file.unit??computerUnit(record.view.path,file.path),activity=this.#activity?.peek(root),gitMs=activity?.lastGitCommitMs;return {last_commit_ms:gitMs??null,own_commits:activity?.ownCommits??0,kind:'file' as const,id:'source:'+file.id,version:file.fingerprint,content:file.excerpt!,source_id:record.view.id,file_id:file.id,root,rel_path:record.view.scope==='computer'?relative(record.view.path,file.path):join(basename(record.view.path),relative(record.view.path,file.path)),role:/\.(?:md|markdown|txt|pdf|docx)$/iu.test(file.path)?'document' as const:/\.(?:json|yaml|yml|csv)$/iu.test(file.path)?'config' as const:'code' as const,mtime_ms:file.mtime,hidden_prefix_depth:hiddenPrefixDepth(record.view,file.path),priority:record.view.priority_dirs.some(dir=>within(dir,file.path))?3:record.view.scope==='directory'?2:this.#workspacePath&&within(this.#workspacePath,file.path)?1:gitMs!==null&&gitMs!==undefined&&Date.now()-gitMs<30*86_400_000?1:0}}))
   }
   evidenceSnapshot(): {ref: string; summary: string}[] {
     const fingerprints = new Set<string>()
@@ -421,9 +423,7 @@ export class LocalDirectorySources {
       }
     }
     const signalFor=async(path:string)=>{
-      let cached=this.#activityCache.get(path)
-      if(!cached||Date.now()-cached.checked>300_000){cached={value:await rootActivity(path),checked:Date.now()};this.#activityCache.set(path,cached)}
-      const recent=cached.value
+      const recent=await (this.#activity??=new GitActivityCache()).get(path)
       // Only already-indexed eligible files can add a file-activity clue. This avoids
       // using generated or unreadable files to promote an otherwise inactive tree.
       const indexedFileMtime=indexedActivity.get(path)??0
@@ -547,6 +547,7 @@ export class LocalDirectorySources {
     const abort = new AbortController()
     const done=this.#scan(record,abort.signal,force).finally(()=>{
       this.#active=undefined
+      void this.#activity?.flush()
       if(record.view.scope!=='computer'||!record.view.scan_pending||this.#closed||!['connected','error'].includes(record.view.state))return
       const walk=record.walk,now=Date.now()
       const duePending=!!walk?.pending.some(item=>(item.eligible_at??0)<=now)

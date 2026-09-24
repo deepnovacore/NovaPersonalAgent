@@ -2,6 +2,8 @@ import {execFile} from 'node:child_process'
 import {lstat} from 'node:fs/promises'
 import {join} from 'node:path'
 import {promisify} from 'node:util'
+import {z} from 'zod'
+import {BoundedJsonStore} from '../storage/bounded-json.js'
 
 export interface RootSignal {path:string; selected:boolean; currentWorkspace:boolean; lastGitCommitMs:number|null; mtimeMs:number}
 
@@ -58,4 +60,50 @@ export async function rootActivity(path:string):Promise<{lastGitCommitMs:number|
     }catch{/* A missing or unavailable Git history is only an absent ranking clue. */}
   }
   return {lastGitCommitMs,ownCommits,mtimeMs:stat?.mtimeMs??0}
+}
+
+export type RootActivity=Awaited<ReturnType<typeof rootActivity>>
+/** Cheap metadata that changes whenever a commit, checkout, or identity change could alter the Git clues. */
+export async function activityKey(path:string):Promise<string>{
+  const stamp=async(target:string)=>{const info=await lstat(target).catch(()=>null);return info?`${info.mtimeMs}:${info.size}`:'-'}
+  const git=join(path,'.git')
+  return (await Promise.all([path,git,join(git,'HEAD'),join(git,'logs','HEAD'),join(git,'config')].map(stamp))).join('|')
+}
+
+const activitySchema=z.object({lastGitCommitMs:z.number().nullable(),ownCommits:z.number().int().nonnegative(),mtimeMs:z.number()})
+const cacheSchema=z.object({version:z.literal(1),roots:z.record(z.string().max(4096),z.object({key:z.string().max(512),checked:z.number(),value:activitySchema}))})
+type CacheState=z.infer<typeof cacheSchema>
+
+/** Git activity survives restarts: an unchanged repository costs a few lstats, not two Git processes. */
+export class GitActivityCache{
+  readonly #store:BoundedJsonStore<CacheState>|undefined
+  readonly #memory=new Map<string,{key:string;checked:number;value:RootActivity;verified:number}>()
+  readonly #probe:(path:string)=>Promise<RootActivity>
+  #dirty=false
+  constructor(path?:string,probe:(path:string)=>Promise<RootActivity>=rootActivity){
+    this.#store=path?new BoundedJsonStore(path,cacheSchema,2*1024*1024):undefined;this.#probe=probe
+  }
+  async open():Promise<void>{
+    const state=await this.#store?.read({version:1,roots:{}}).catch(()=>undefined)
+    // A scan may already have probed a root while the file was being read; its result is newer.
+    for(const [path,entry] of Object.entries(state?.roots??{}))if(!this.#memory.has(path))this.#memory.set(path,{...entry,verified:0})
+  }
+  peek(path:string):RootActivity|undefined{return this.#memory.get(path)?.value}
+  /** Rechecks metadata at most every `recheckMs`; runs Git only when the key moved or the record is a day old. */
+  async get(path:string,recheckMs=300_000):Promise<RootActivity>{
+    const now=Date.now(),cached=this.#memory.get(path)
+    if(cached&&now-cached.verified<recheckMs)return cached.value
+    const key=await activityKey(path)
+    if(cached?.key===key&&now-cached.checked<86_400_000){cached.verified=now;return cached.value}
+    const value=await this.#probe(path)
+    this.#memory.set(path,{key,checked:now,value,verified:now});this.#dirty=true
+    return value
+  }
+  async flush():Promise<void>{
+    if(!this.#store||!this.#dirty)return
+    this.#dirty=false
+    // Newest 256 roots; older entries only cost a Git probe if they return.
+    const roots=Object.fromEntries([...this.#memory].sort((a,b)=>b[1].checked-a[1].checked).slice(0,256).map(([path,{key,checked,value}])=>[path,{key,checked,value}]))
+    try{await this.#store.write({version:1,roots})}catch{this.#dirty=true}
+  }
 }

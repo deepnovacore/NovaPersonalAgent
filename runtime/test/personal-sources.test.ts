@@ -8,7 +8,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import test from 'node:test'
 import {LocalDirectorySources} from '../src/personal-agent/sources.js'
-import {nextComputerRoot,orderComputerRoots,rootActivity} from '../src/personal-agent/source-priority.js'
+import {GitActivityCache,nextComputerRoot,orderComputerRoots,rootActivity} from '../src/personal-agent/source-priority.js'
 import {scanDirectory} from '../src/personal-agent/source-walk.js'
 import {KnowledgeService, type KnowledgeEvidenceLedger} from '../src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../src/knowledge/store-client.js'
@@ -1122,6 +1122,22 @@ test('recent commits by someone else do not promote a cloned repository',async()
   await writeFile(join(root,'README.md'),'owner work')
   execFileSync('git',['-C',root,'commit','-qam','owner work'])
   assert.ok((await rootActivity(root)).lastGitCommitMs)
+ }finally{await rm(root,{recursive:true,force:true})}
+})
+test('persisted Git activity skips the Git probe for an unchanged repository after reopening',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-git-cache-')),repo=join(root,'repo'),cachePath=join(root,'state','sources.activity.json')
+ await mkdir(join(root,'state'),{mode:0o700})
+ let probes=0;const probe=(path:string)=>{probes++;return rootActivity(path)}
+ try{
+  execFileSync('git',['init','-q',repo])
+  execFileSync('git',['-C',repo,'config','user.name','Owner']);execFileSync('git',['-C',repo,'config','user.email','owner@example.test'])
+  await writeFile(join(repo,'notes.md'),'first');execFileSync('git',['-C',repo,'add','notes.md']);execFileSync('git',['-C',repo,'commit','-qm','first'])
+  const first=new GitActivityCache(cachePath,probe);await first.open()
+  const value=await first.get(repo,0);assert.equal(probes,1);assert.equal(value.ownCommits,1);await first.flush()
+  const reopened=new GitActivityCache(cachePath,probe);await reopened.open()
+  assert.deepEqual(await reopened.get(repo,0),value);assert.equal(probes,1,'unchanged HEAD, reflog, and config reuse the stored clue')
+  await writeFile(join(repo,'notes.md'),'second');execFileSync('git',['-C',repo,'commit','-qam','second'])
+  assert.equal((await reopened.get(repo,0)).ownCommits,2);assert.equal(probes,2,'a new commit moves the key and reprobes')
  }finally{await rm(root,{recursive:true,force:true})}
 })
 test('weighted root turns include lower tiers while rotating peers',()=>{
