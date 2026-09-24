@@ -409,7 +409,7 @@ export class PersonalAgentHost {
         const allowed=await Promise.all(entries.map(async entry=>entry.evidence_refs?.length&&entry.evidence_refs.length<=256&&(await Promise.all(entry.evidence_refs.map(id=>memory.canProcessEvidence!(id,'extraction')))).every(Boolean)));
         return entries.filter((_,index)=>allowed[index]);
     }
-    #stated:MemoryEntry[]=[];
+    #stated:MemoryEntry[]=[];#discoveryMemory:MemoryEntry[]=[];
     /** Profile input: stated memories plus the user's own project digests, or raw documents when digests are unavailable. */
     #updateProfileInputs():void{
         const files=this.#sources?.contextEntries?.()??[];
@@ -419,8 +419,11 @@ export class PersonalAgentHost {
     #updateProfileWarmup(files:readonly ContextEntry[]):void{
         this.profileWarmup.update([...this.#stated,...(this.projectDigests.generate?profileInputsFromDigests(this.projectDigests.digests()):selectProfileSources(files))]);
     }
-    /** A digest landed or left: only the profile input moves; the digest set itself is already current. */
-    #digestsChanged():void{if(this.#opened){this.#updateProfileWarmup(this.#sources?.contextEntries?.()??[]);this.#notify()}}
+    #updateContext(files:readonly ContextEntry[]):void{
+        this.workbenchContext.update([...this.#discoveryMemory,...files],this.projectDigests.generate?{items:this.projectDigests.digests(),pending:this.projectDigests.pending()}:undefined);
+    }
+    /** A digest landed or left: the profile input and todo candidates move; the digest set itself is already current. */
+    #digestsChanged():void{if(this.#opened){const files=this.#sources?.contextEntries?.()??[];this.#updateProfileWarmup(files);this.#updateContext(files);this.#notify()}}
     async refreshMemory(cursor?: string, limit = 100, includeExpired=this.#includeExpired): Promise<void> {
         await this.life.refresh();
         this.#includeExpired=includeExpired;
@@ -435,7 +438,8 @@ export class PersonalAgentHost {
         if(refresh!==this.#memoryRefresh||!this.#opened)return;
         this.#stated=authorized.filter(entry=>memoryEligibleForDiscovery(entry)&&entry.origin==='stated').slice(-16);
         this.#updateProfileInputs();
-        this.workbenchContext.update([...authorized.filter(memoryEligibleForDiscovery),...(this.#sources?.contextEntries?.()??[])]);
+        this.#discoveryMemory=authorized.filter(memoryEligibleForDiscovery);
+        this.#updateContext(this.#sources?.contextEntries?.()??[]);
         const key = hash(page);
         this.#overviewAbort.abort();
         this.#overviewKey = key;

@@ -1,12 +1,13 @@
 import {createHash} from 'node:crypto'
 import {basename,extname} from 'node:path'
 import {interleave} from './sampling.js'
+import type {ProjectDigest} from './project-digests.js'
 
 interface Ref {entry_id:string;version:string|number}
 export type ContextInput=
  | {kind:'file';id:string;version:string;content:string;source_id:string;file_id:string;root:string;rel_path:string;role:'document'|'code'|'config'|'cache';mtime_ms:number;priority:number;hidden_prefix_depth?:number;last_commit_ms?:number|null;own_commits?:number}
  | {kind:'memory';id:string;version:string|number;content:string;origin:'stated'|'inferred'}
-export interface ContextCandidate {candidate_id:string;id:string;version:string;content:string;tab:'todos'|'ideas';primaryFileId:string|null;refs:Ref[];excerpt:string;reason_code:'document_action'|'document_idea'|'stated_idea';root:string;priority:number;mtime_ms:number}
+export interface ContextCandidate {candidate_id:string;id:string;version:string;content:string;tab:'todos'|'ideas';primaryFileId:string|null;refs:Ref[];excerpt:string;reason_code:'document_action'|'document_idea'|'stated_idea'|'project_focus';root:string;priority:number;mtime_ms:number}
 
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
 export const candidateId=(tab:string,primaryId:string,fingerprint:string)=>hash([tab,primaryId,fingerprint])
@@ -24,8 +25,18 @@ const actionLine=(text:string)=>text.split(/\r?\n/u).some(line=>/^\s*(?:[-*]\s*)
 const ideaEvidence=(text:string)=>/\b(?:proposal|idea)\b|想法|提议|建议|可以考虑|计划|替代|改进方向|设计方案/iu.test(text)
 const genericOverview=(path:string)=>/^readme(?:[._-][a-z]+)?\.(?:md|markdown|txt)$/iu.test(basename(path))
 
-export function selectContextCandidates(inputs:readonly ContextInput[]):ContextCandidate[] {
+/** One todo candidate per own project with a stated focus or next step; the digest already read the project's documents. */
+function digestCandidates(digests:readonly ProjectDigest[]):ContextCandidate[]{
+ return digests.filter(d=>d.role==='own'&&(d.focus??d.next_step)).slice(0,6).map(d=>{
+  const excerpt=[`项目：${d.name}`,`概况：${d.summary}`,...(d.focus?[`近期：${d.focus}`]:[]),...(d.next_step?[`写明的下一步：${d.next_step}`]:[])].join('\n')
+  const version=hash([excerpt,d.refs]).slice(0,32),candidate_id=candidateId('todos','project:'+d.project_key,version)
+  return {candidate_id,id:candidate_id,version,content:excerpt,tab:'todos',primaryFileId:null,refs:d.refs.map(r=>({...r})),excerpt,reason_code:'project_focus',root:'project:'+d.project_key,priority:3,mtime_ms:0}
+ })
+}
+/** With digests, todos come from the user's own projects instead of keyword-matched excerpts; ideas are unchanged. */
+export function selectContextCandidates(inputs:readonly ContextInput[],digests?:readonly ProjectDigest[]):ContextCandidate[] {
  const groups=new Map<string,ContextCandidate[]>()
+ if(digests)for(const candidate of digestCandidates(digests))groups.set(candidate.root,[candidate])
  const sorted=[...inputs].sort((a,b)=>(b.kind==='file'?b.priority:0)-(a.kind==='file'?a.priority:0)||(b.kind==='file'?b.mtime_ms:0)-(a.kind==='file'?a.mtime_ms:0)||a.id.localeCompare(b.id))
  for(const input of sorted){
   if(!input.content.trim())continue
@@ -34,7 +45,7 @@ export function selectContextCandidates(inputs:readonly ContextInput[]):ContextC
   const root=input.kind==='file'?input.root:'stated-memory'
   const version=String(input.version),primaryId=input.kind==='file'?input.file_id:input.id
   const tabs:('todos'|'ideas')[]=input.kind==='file'?
-   [...(input.priority>=2&&actionLine(input.content)?['todos' as const]:[]),...(input.priority>=1&&!genericOverview(input.rel_path)&&ideaEvidence(input.content)?['ideas' as const]:[])]:['ideas']
+   [...(!digests&&input.priority>=2&&actionLine(input.content)?['todos' as const]:[]),...(input.priority>=1&&!genericOverview(input.rel_path)&&ideaEvidence(input.content)?['ideas' as const]:[])]:['ideas']
   if(input.kind==='memory'&&!/\bidea\b|想法|可以考虑|建议/u.test(input.content))continue
   for(const tab of tabs){
    const candidate_id=candidateId(tab,primaryId,version)

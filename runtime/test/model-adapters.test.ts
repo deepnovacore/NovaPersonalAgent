@@ -236,7 +236,7 @@ test('workbench generation includes its schema in the provider-visible prompt',a
 test('workbench generation allows no candidates and makes no model call',async()=>{
  const gateway=new ScriptedGateway([],JSON.stringify({cards:[]}))
  const surrogate=new GatewaySurrogate({gateway,model:'same',proactivityPreset:'balanced'})
- assert.deepEqual(await surrogate.generateContext([],new AbortController().signal),{cards:[]})
+ assert.deepEqual(await surrogate.generateContext([],new AbortController().signal),{recap:null,cards:[]})
  assert.equal(gateway.completions.length,0)
 })
 test('a queued digest batch re-checks consent when it leaves the lane, and never sends after revocation',async()=>{

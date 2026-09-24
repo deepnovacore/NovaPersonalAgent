@@ -138,3 +138,23 @@ test('automatic failures retry with backoff and retain the hourly cap after reop
   t.mock.timers.tick(1);await until(()=>calls===7&&reopened.snapshot().status==='failed');await reopened.close()
  }finally{t.mock.timers.reset();await context.close();await rm(dir,{recursive:true,force:true})}
 })
+test('the todo page gets a grounded recap, action cards with why and next, and one line per own project',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-'))
+ const refs=[{entry_id:'source:nova',version:'v1'}]
+ const digests=[{project_key:'k',name:'nova',role:'own' as const,summary:'Voice agent',focus:'Fixing workbench content',next_step:'Ship the digest layer',refs}]
+ let recapRefs=refs
+ const generate=(candidates:readonly {candidate_id:string}[])=>Promise.resolve({recap:{text:'Mostly on the voice agent workbench.',refs:recapRefs},cards:[{candidate_id:candidates[0]!.candidate_id,tab:'todos' as const,title:'Finish the digest layer',body:'Profile now reads project digests.',why:'The next step is written down',next:'Run the native acceptance',refs}]})
+ const context=new WorkbenchContext(join(dir,'cards.json'),generate,()=>undefined)
+ try{
+  await context.open()
+  context.update([],{items:[],pending:2});assert.equal(context.snapshot().empty_reason,'digests_pending','an empty page while projects are still read says so')
+  context.update([],{items:digests,pending:0});await context.refresh()
+  const snapshot=context.snapshot()
+  assert.equal(snapshot.recap.text,'Mostly on the voice agent workbench.')
+  assert.deepEqual(snapshot.recap.projects,[{name:'nova',line:'Fixing workbench content'}])
+  assert.equal(snapshot.cards[0]!.why,'The next step is written down');assert.equal(snapshot.cards[0]!.next,'Run the native acceptance')
+  context.update([],{items:[],pending:0});assert.equal(context.snapshot().recap.text,null,'the recap leaves with its evidence')
+  recapRefs=[{entry_id:'source:invented',version:'v1'}];await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+  assert.equal(context.snapshot().recap.text,null,'an ungrounded recap is dropped');assert.equal(context.snapshot().cards.length,1)
+ }finally{await context.close();await rm(dir,{recursive:true,force:true})}
+})

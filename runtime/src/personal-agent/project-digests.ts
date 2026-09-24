@@ -44,7 +44,11 @@ export class ProjectDigests{
   this.#store=new BoundedJsonStore(path,diskSchema);this.#idleMs=options.idleMs??30_000;this.#batch=options.batch??4
   this.#hourly=options.hourlyProjects??24;this.#timeoutMs=options.timeoutMs??60_000;this.#now=options.now??Date.now
  }
- async open(){this.#disk=await this.#store.read(this.#disk);this.#opened=true}
+ async open(){
+  const disk=await this.#store.read(this.#disk)
+  // A record that does not list what it read cannot be retired on withdrawal; recompute it instead.
+  this.#disk={projects:Object.fromEntries(Object.entries(disk.projects).filter(([,hit])=>hit.inputs.length))};this.#opened=true
+ }
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#abort.abort();await this.#run;await this.#writes}
  async clear(){clearTimeout(this.#timer);this.#abort.abort();await this.#run;this.#projects.clear();this.#failures.clear();this.#disk={projects:{}};await this.#persist()}
  #persist(){const snapshot=structuredClone(this.#disk),write=this.#writes.then(()=>this.#store.write(snapshot));this.#writes=write.catch(()=>{/* The next change writes again. */});return write}

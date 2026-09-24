@@ -41,3 +41,13 @@ test('an explicitly selected hidden notes folder may contribute its documents on
  assert.equal(selectContextCandidates([selected]).length,1)
  assert.deepEqual(selectContextCandidates([{...selected,rel_path:'.notes/.nested/idea.md'}]),[])
 })
+test('with project digests, todos come from own projects with a focus or next step instead of keyword lines',()=>{
+ const digest=(key:string,role:'own'|'third_party',focus:string|null,next_step:string|null)=>({project_key:key,name:key,role,summary:`${key} summary`,focus,next_step,refs:[{entry_id:`source:${key}`,version:'v1'}]})
+ const inputs=[file('note','project-notes.md','Next step: compare two recording flows.',2,1)]
+ const selected=selectContextCandidates(inputs,[digest('nova','own','修复工作台内容',null),digest('lib','third_party','x','y'),digest('idle','own',null,null)])
+ const todos=selected.filter(c=>c.tab==='todos')
+ assert.deepEqual(todos.map(c=>c.reason_code),['project_focus'])
+ assert.deepEqual(todos[0]!.refs,[{entry_id:'source:nova',version:'v1'}])
+ assert.doesNotMatch(todos[0]!.excerpt,/\//u)
+ assert.ok(selectContextCandidates(inputs).some(c=>c.tab==='todos'),'without digests the old document path still works')
+})
