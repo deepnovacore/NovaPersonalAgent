@@ -17,7 +17,7 @@ export type ContextEntry=ContextInput | (Pick<MemoryEntry,'id'|'version'|'conten
 export type ContextGenerator=(candidates:readonly ContextCandidate[],signal:AbortSignal)=>Promise<z.input<typeof contextCardsSchema>>
 const keyOf=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const generationRevision='project-digest-v4'
-const stateSchema=contextCardsSchema.extend({recap_basis:z.array(z.string().max(128)).max(20).default([]),version:z.literal(2),key:z.string(),automatic_call_times:z.array(z.number().int().nonnegative()).max(6).default([]),retry_key:z.string().default(''),retry_not_before:z.number().int().nonnegative().default(0),dismissed:z.array(z.string()).max(1000),legacyDismissed:z.array(z.object({tab:z.string(),refs:z.array(refSchema)}).strict()).max(1000)})
+const stateSchema=contextCardsSchema.extend({recap_basis:z.array(z.string().max(128)).max(20).default([]),card_basis:z.record(z.string().max(128),z.object({root:z.string().max(512),entries:z.array(z.string().max(512)).max(64)}).strict()).default({}),version:z.literal(2),key:z.string(),automatic_call_times:z.array(z.number().int().nonnegative()).max(6).default([]),retry_key:z.string().default(''),retry_not_before:z.number().int().nonnegative().default(0),dismissed:z.array(z.string()).max(1000),legacyDismissed:z.array(z.object({tab:z.string(),refs:z.array(refSchema)}).strict()).max(1000)})
 type State=z.infer<typeof stateSchema>
 const diskSchema=z.preprocess(value=>{
  if(!value||typeof value!=='object'||'version' in value)return value
@@ -26,7 +26,7 @@ const diskSchema=z.preprocess(value=>{
  if(!legacy.success)return emptyState()
  return {version:2,recap:null,recap_basis:[],cards:[],key:'',dismissed:[],legacyDismissed:legacy.data.cards.filter(card=>legacy.data.dismissed.includes(keyOf(card))).map(card=>({tab:card.tab,refs:card.refs}))}
 },stateSchema)
-const emptyState=():State=>({version:2,recap:null,recap_basis:[],cards:[],key:'',automatic_call_times:[],retry_key:'',retry_not_before:0,dismissed:[],legacyDismissed:[]})
+const emptyState=():State=>({version:2,recap:null,recap_basis:[],card_basis:{},cards:[],key:'',automatic_call_times:[],retry_key:'',retry_not_before:0,dismissed:[],legacyDismissed:[]})
 const sameRef=(a:{entry_id:string;version:string|number},b:{entry_id:string;version:string|number})=>a.entry_id===b.entry_id&&a.version===b.version
 const leaksRawText=(text:string)=>/(?:^|[^\w.])\/[\w.-]+\/[\w.-]|\b[A-Za-z]:[\\/]|\\\\[\w.$-]+\\|~[\\/]|\b(?:source|file):[\w-]+|\b(?:src|config|docs|runtime|clients)\/[\w./-]+|\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\b|\b(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=：]|\b[a-f\d]{40,}\b/iu.test(text)
 const leaksRawField=(card:ContextCards['cards'][number])=>leaksRawText([card.title,card.body,card.why??'',card.next??''].join(' '))
@@ -39,6 +39,17 @@ export class WorkbenchContext{
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#timer=undefined;this.#manualPending=false;this.#abort.abort();await this.#run;await this.#tail}
  async clear(){const reopen=this.#opened;await this.close();this.#inputs=[];this.#candidates=[];this.#digests=undefined;this.#digestsPending=0;await this.#write(next=>Object.assign(next,emptyState()));this.#abort=new AbortController();this.#opened=reopen;this.#status='idle'}
  #candidate(card:ContextCards['cards'][number]){return this.#candidates.find(candidate=>candidate.candidate_id===card.candidate_id&&candidate.tab===card.tab&&card.refs.every(ref=>candidate.refs.some(allowed=>sameRef(ref,allowed))))}
+ /**
+  * A project card outlives a digest rewrite until the next generation replaces it: during a first scan digests are rewritten far more often than cards are regenerated.
+  * The successor must still draw on every source the card was written from, so withdrawn material never resurfaces; the card then cites the successor's current refs.
+  * Document cards keep an exact match.
+  */
+ #shownRefs(card:ContextCards['cards'][number]){
+  if(this.#candidate(card))return card.refs
+  const basis=this.#state.card_basis[card.candidate_id]
+  if(!basis?.root.startsWith('project:'))return null
+  return this.#candidates.find(candidate=>candidate.root===basis.root&&candidate.tab===card.tab&&basis.entries.every(id=>candidate.refs.some(ref=>ref.entry_id===id)))?.refs??null
+ }
  #recapGrounded(recap:{refs:readonly {entry_id:string;version:string|number}[]},candidates:readonly ContextCandidate[]=this.#candidates){return recap.refs.every(ref=>candidates.some(c=>c.tab==='todos'&&c.refs.some(allowed=>sameRef(ref,allowed))))}
  /** Todo candidates a recap draws on; any of them changing or leaving retires the recap, even if its cited refs survive. */
  #recapBasis(recap:{refs:readonly {entry_id:string;version:string|number}[]},candidates:readonly ContextCandidate[]){return candidates.filter(c=>c.tab==='todos'&&c.refs.some(allowed=>recap.refs.some(ref=>sameRef(ref,allowed)))).map(c=>c.candidate_id)}
@@ -48,7 +59,7 @@ export class WorkbenchContext{
  /** Active own projects, one line each, straight from their digests; no model call. */
  #projects(){return (this.#digests??[]).filter(d=>d.role==='own').slice(0,4).map(d=>({name:d.name,line:d.focus??d.summary})).filter(p=>!leaksRawText(p.name+' '+p.line))}
  snapshot(){
-  const recap=this.#recapCurrent()?this.#state.recap!.text:null,cards=this.#state.cards.filter(card=>this.#candidate(card)&&!this.#state.dismissed.includes(card.candidate_id)).map(card=>({...structuredClone(card),id:card.candidate_id,refs:card.refs.map(ref=>({...ref,label:this.#inputs.find(input=>input.id===ref.entry_id)?.content.slice(0,700)??ref.entry_id}))}))
+  const recap=this.#recapCurrent()?this.#state.recap!.text:null,cards=this.#state.cards.flatMap(card=>{const refs=this.#shownRefs(card);return refs&&!this.#state.dismissed.includes(card.candidate_id)?[{card,refs}]:[]}).map(({card,refs})=>({...structuredClone(card),id:card.candidate_id,refs:refs.map(ref=>({...ref,label:this.#inputs.find(input=>input.id===ref.entry_id)?.content.slice(0,700)??ref.entry_id}))}))
   const empty_reasons={todos:this.#emptyReason('todos',cards.filter(card=>card.tab==='todos').length),ideas:this.#emptyReason('ideas',cards.filter(card=>card.tab==='ideas').length),goals:this.#emptyReason('goals',cards.filter(card=>card.tab==='goals').length)}
   return {status:this.#status,candidate_count:this.#candidates.length,recap:{text:recap,projects:this.#projects()},empty_reason:this.#candidates.length===0?this.#digestsPending?'digests_pending':'no_eligible_sources':cards.length===0&&this.#status==='ready'?'model_abstained':cards.length===0&&this.#status==='failed'?'generation_failed':null,empty_reasons,cards}
  }
@@ -92,7 +103,8 @@ export class WorkbenchContext{
    const cards=result.cards.filter(card=>{if(seen.has(card.candidate_id)||leaksRawField(card)||!this.#candidate(card)||!card.refs.every(ref=>candidates.some(candidate=>candidate.candidate_id===card.candidate_id&&candidate.refs.some(allowed=>sameRef(ref,allowed)))))return false;seen.add(card.candidate_id);return true})
    const basis=result.recap?this.#recapBasis(result.recap,candidates):[]
    const recap=result.recap&&basis.length&&!leaksRawText(result.recap.text)&&this.#recapGrounded(result.recap,candidates)?result.recap:null
-   await this.#write(next=>{next.recap=recap;next.recap_basis=recap?basis:[];next.cards=cards;next.key=key;next.retry_key='';next.retry_not_before=0});this.#status='ready'
+   const cardBasis=Object.fromEntries(cards.map(card=>{const candidate=candidates.find(c=>c.candidate_id===card.candidate_id)!;return [card.candidate_id,{root:candidate.root,entries:[...new Set(candidate.refs.map(ref=>ref.entry_id))]}]}))
+   await this.#write(next=>{next.recap=recap;next.recap_basis=recap?basis:[];next.card_basis=cardBasis;next.cards=cards;next.key=key;next.retry_key='';next.retry_not_before=0});this.#status='ready'
   }catch(error){failedAt=Date.now();if(this.#opened&&!signal.aborted)await this.#write(next=>{next.retry_key=key;next.retry_not_before=failedAt+300000}).catch(()=>undefined);this.#status='failed';console.error('[workbench-context] generation_failed',error instanceof z.ZodError?JSON.stringify(error.issues.map(i=>({code:i.code,path:i.path}))):error instanceof Error?error.name:'unknown')}finally{this.#run=undefined;this.changed();if(this.#opened){if(this.#manualPending){this.#manualPending=false;void this.refresh()}else if(key!==this.#key())this.update(this.#inputs,this.#digests&&{items:this.#digests,pending:this.#digestsPending});else if(this.#status==='failed'){this.#firstChangeAt=failedAt;this.#lastChangeAt=failedAt;this.#pendingKey=key;this.#schedule()}}}})();this.#run=run;await run
  }
 }
