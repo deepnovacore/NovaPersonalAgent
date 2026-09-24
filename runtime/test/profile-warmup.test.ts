@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {ProfileWarmup} from '../src/personal-agent/profile-warmup.js'
+import {ProfileWarmup,type ProfileOutcome} from '../src/personal-agent/profile-warmup.js'
 const entries=[{id:'a',version:1,content:'I study voice interfaces',origin:'stated' as const}]
 const draft={about:{text:'I study voice interfaces',refs:[{entry_id:'a',version:1}]},work:[],interests:[{text:'Voice interfaces',refs:[{entry_id:'a',version:1}]}]}
 test('warmup caches grounded drafts without repeating generation on reopen',async()=>{
@@ -21,13 +21,6 @@ test('revoked evidence and an abort-ignoring provider cannot restore a stale dra
  try{await service.open();service.update(entries);const run=service.refresh();assert.equal(service.snapshot().status,'working');service.update([]);resolve(draft);await run;assert.equal(service.snapshot().draft,null);assert.equal(service.snapshot().status,'idle')}
  finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
-test('invalid model references fail safely and explicit retry recovers',async()=>{
- const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let invalid=true
- const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve(invalid?{...draft,about:{text:'Invented',refs:[{entry_id:'unknown',version:1}]}}:draft),()=>{/* observer fixture */})
- try{await service.open();service.update(entries);await service.refresh();assert.equal(service.snapshot().status,'failed');assert.equal(service.snapshot().draft,null);invalid=false;await service.refresh(true);assert.equal(service.snapshot().status,'ready')}
- finally{await service.close();await rm(dir,{recursive:true,force:true})}
-})
-
 test('close terminates warmup even when a provider ignores its signal',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'))
  const service=new ProfileWarmup(join(dir,'draft.json'),()=>new Promise(()=>{/* observer fixture */}),()=>{/* observer fixture */})
@@ -37,4 +30,70 @@ test('inferred memories may suggest topics but cannot supply personal facts',asy
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'))
  const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve(draft),()=>{/* observer fixture */})
  try{await service.open();service.update(entries.map(e=>({...e,origin:'inferred'})));await service.refresh();assert.equal(service.snapshot().status,'failed');assert.equal(service.snapshot().draft,null)}finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+const fileA={id:'source:a',version:'f1',content:'Active voice project',origin:'inferred' as const,source:{project:'Nova',document:'README.md'}}
+const fileB={id:'source:b',version:'f1',content:'Reads papers on speech models',origin:'inferred' as const,source:{project:'Notes',document:'papers.md'}}
+const fileDraft={about:{text:'Builds a voice agent',refs:[{entry_id:fileA.id,version:fileA.version}]},work:[],interests:[{text:'Speech models',refs:[{entry_id:fileB.id,version:fileB.version}]}]}
+const until=async(check:()=>boolean)=>{for(let i=0;i<200&&!check();i++)await new Promise(r=>setTimeout(r,5));assert.ok(check())}
+test('a source change during generation keeps the in-flight answer and only the uncited facts disappear',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let resolve!:(v:typeof fileDraft)=>void
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>new Promise(r=>{resolve=r}),()=>{/* observer fixture */},{minIntervalMs:60_000})
+ try{
+  await service.open();service.update([fileA,fileB]);const run=service.refresh()
+  service.update([fileA,{...fileB,id:'source:c'}]);assert.equal(service.snapshot().status,'working')
+  resolve(fileDraft);await run
+  assert.equal(service.snapshot().status,'ready');assert.deepEqual(service.snapshot().draft,{...fileDraft,interests:[]})
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('re-reading a cited file keeps the draft visible and waits before regenerating',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let calls=0
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>{calls++;return Promise.resolve(fileDraft)},()=>{/* observer fixture */},{minIntervalMs:60_000})
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh()
+  service.update([{...fileA,version:'f2',content:'Active voice project, now with a workbench'},fileB])
+  assert.equal(service.snapshot().status,'ready');assert.deepEqual(service.snapshot().draft,fileDraft)
+  service.update([]);assert.equal(service.snapshot().draft,null)
+  service.update([fileA,fileB]);assert.deepEqual(service.snapshot().draft,fileDraft,'a root that is briefly absent does not delete its facts');assert.equal(calls,1)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('a withdrawn source leaves disk while the rest of the draft survives',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'))
+ const make=()=>new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve(fileDraft),()=>{/* observer fixture */},{minIntervalMs:60_000})
+ let service=make()
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh()
+  service.update([fileA]);await service.forgetUnavailable();await service.close()
+  service=make();await service.open();service.update([fileA,fileB])
+  assert.deepEqual(service.snapshot().draft,{...fileDraft,interests:[]})
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('invented references are dropped, and a draft with nothing grounded fails as evidence',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let invent=true;const outcomes:ProfileOutcome['outcome'][]=[]
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve(invent?{...draft,about:{text:'Invented',refs:[{entry_id:'unknown',version:1}]},interests:[]}:{...draft,about:{text:'Invented',refs:[{entry_id:'unknown',version:1}]}}),()=>{/* observer fixture */},{report:r=>outcomes.push(r.outcome),backoffMs:[60_000]})
+ try{
+  await service.open();service.update(entries);await service.refresh()
+  assert.equal(service.snapshot().status,'failed');assert.equal(service.snapshot().draft,null)
+  invent=false;await service.refresh(true)
+  assert.equal(service.snapshot().status,'ready');assert.deepEqual(service.snapshot().draft,{...draft,about:null})
+  await until(()=>outcomes.length===2);assert.deepEqual(outcomes,['evidence','ok'])
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('a timed-out generation retries on its own with backoff',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let calls=0;const outcomes:ProfileOutcome['outcome'][]=[]
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>++calls===1?new Promise(()=>{/* ignores its signal */}):Promise.resolve(draft),()=>{/* observer fixture */},{timeoutMs:20,backoffMs:[20],report:r=>outcomes.push(r.outcome)})
+ try{
+  await service.open();service.update(entries)
+  await until(()=>service.snapshot().status==='ready')
+  assert.equal(calls,2);assert.deepEqual(outcomes,['timeout','ok'])
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('automatic retries stop once the backoff ladder is spent',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let calls=0
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>{calls++;return Promise.reject(Error('provider_down'))},()=>{/* observer fixture */},{backoffMs:[5,5]})
+ try{
+  await service.open();service.update(entries)
+  await until(()=>calls===3);await new Promise(r=>setTimeout(r,50))
+  assert.equal(calls,3);assert.equal(service.snapshot().status,'failed')
+  await service.refresh(true);assert.equal(calls,4)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })

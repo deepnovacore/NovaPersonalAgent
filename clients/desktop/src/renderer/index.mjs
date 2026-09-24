@@ -1306,7 +1306,9 @@ async function boot() {
     })
     axes.booting = false
     if (bootstrap.backend) connectBackend(bootstrap.backend)
-    else handleBackendExit()
+    // 'stopped' covers the initial, never-started state as well as an explicit
+    // stop; 'starting' means it is still on its way up. Neither is a real exit.
+    else if (axes.backendState !== 'stopped' && axes.backendState !== 'starting') handleBackendExit()
     axes.microphone = 'not_requested'
   } catch {
     axes.booting = false

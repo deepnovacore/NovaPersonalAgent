@@ -6,11 +6,12 @@ export function initialInterests(news,warmup){
  return warmup?.draft?.interests?.length?warmup.draft.interests.map(i=>i.text):topics.slice(0,3)
 }
 export function renderWarmup(parent,{warmup,command,button}){
- if(warmup?.status!=='working'&&warmup?.status!=='failed')return
+ // A draft on screen is refreshed silently; the status box is only for the first draft.
+ if(warmup?.status!=='working'&&warmup?.status!=='failed'||warmup.draft)return
  const busy=warmup.status==='working',box=el('section',undefined,'warmup-status');box.setAttribute('role','status');box.setAttribute('aria-live','polite');box.setAttribute('aria-busy',String(busy));parent.append(box)
  if(busy){const spinner=el('span',undefined,'warmup-spinner');spinner.setAttribute('aria-hidden','true');box.append(spinner)}
- box.append(el('p',busy?'正在根据已授权资料准备初稿…':'初稿暂未生成，你仍可使用现有内容和通用主题。'))
- if(busy&&!warmup.draft){const skeleton=el('div',undefined,'warmup-skeleton');skeleton.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)skeleton.append(el('span'));box.append(skeleton)}
+ box.append(el('p',busy?'正在根据近期工作整理…':'初稿暂未生成，你仍可使用现有内容和通用主题。'))
+ if(busy){const skeleton=el('div',undefined,'warmup-skeleton');skeleton.setAttribute('aria-hidden','true');for(let i=0;i<3;i++)skeleton.append(el('span'));box.append(skeleton)}
  if(!busy)button('重新生成',()=>command('profile.refresh',{}),box)
 }
 export function renderInterests(parent,{news,warmup,command,button,local,rerender,delegate}){

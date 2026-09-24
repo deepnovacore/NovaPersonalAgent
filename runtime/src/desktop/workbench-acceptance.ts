@@ -8,6 +8,7 @@ import http from 'node:http'
 import https from 'node:https'
 import {syncBuiltinESMExports} from 'node:module'
 import {z} from 'zod'
+import {currentModelPurpose} from '../model/model-purpose.js'
 import type {CapabilityRegistry} from '../config/capability-registry.js'
 import {Dispatcher,getGlobalDispatcher,setGlobalDispatcher} from 'undici'
 
@@ -115,7 +116,11 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
    if(typeof body!=='string')rejectEgress('acceptance_model_body_required')
    let model:unknown;try{model=(JSON.parse(body) as {model?:unknown}).model}catch{rejectEgress('acceptance_model_body_invalid')}
    if(typeof model!=='string'||!manifest.providers.some(item=>item.origin===new URL(url).origin&&item.models.includes(model)))rejectEgress('acceptance_unknown_model')
-   calls++;appendAcceptanceCounts('model_call',{model_calls:calls})
+   calls++
+   // One row per call, written when the response headers settle: purpose, endpoint, and time to first byte.
+   const labels={model_calls:calls,['purpose_'+currentModelPurpose()]:1,[new URL(url).pathname.endsWith('/embeddings')?'endpoint_embeddings':'endpoint_chat']:1},started=performance.now()
+   try{const response=await fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}));appendAcceptanceCounts('model_call',{...labels,latency_ms:Math.round(performance.now()-started),ok:Number(response.ok),status:response.status});return response}
+   catch(error){appendAcceptanceCounts('model_call',{...labels,latency_ms:Math.round(performance.now()-started),ok:0,[error instanceof Error&&error.name==='AbortError'||error instanceof Error&&error.name==='TimeoutError'?'aborted':'network_error']:1});throw error}
   }
   return fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}))
  }

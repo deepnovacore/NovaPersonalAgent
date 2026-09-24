@@ -564,6 +564,22 @@ test('renderer accepts both supervised disconnect and reconnect events', async (
   assert.match(source, /if \(bootstrap\.backend\) connectBackend\(bootstrap\.backend\)/)
 })
 
+test('a cold start with no backend yet never fires the disconnect path', async () => {
+  const source = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
+
+  // 'stopped' is the initial, never-started state; 'starting' is on its way up.
+  // Only a real exit (any other state) may call handleBackendExit here.
+  assert.match(source, /else if \(axes\.backendState !== 'stopped' && axes\.backendState !== 'starting'\) handleBackendExit\(\)/)
+})
+
+test('main does not raise the backend-exit banner before the backend has ever started', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+
+  const load = source.slice(source.indexOf('void rendererLoaded.then'))
+  const body = load.slice(0, load.indexOf('}).catch('))
+  assert.match(body, /else if \(backendStatus\.state !== 'starting' && backendStatus\.state !== 'stopped'\) sendToOrb\('nova:backend-exit'\)/)
+})
+
 test('every renderer push is guarded against a destroyed orb window', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 

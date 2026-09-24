@@ -139,7 +139,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
   dictate.disabled=!c.presentationReady||!c.connected||!c.selectedId||Boolean(c.voiceId)||(c.mode!=='text'&&c.dictationConversationId!==c.selectedId)||c.mode==='transcribing'||!c.capabilities.includes('dictation')
   voice.disabled=!c.presentationReady||!c.connected||!c.selectedId||(Boolean(c.voiceId)&&!c.isVoiceConversation)||(c.mode!=='text'&&!c.isVoiceConversation)
   voice.textContent=c.isVoiceConversation?'结束语音':'持续对话';voice.setAttribute('aria-pressed',String(c.isVoiceConversation))
-  hint.textContent=!c.connected?'连接已断开，草稿已保留':c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 松开后生成草稿'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行'
+  hint.textContent=!c.connected?(c.everConnected?'连接已断开，草稿已保留':'正在连接…'):c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 松开后生成草稿'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行'
   renderTarget();renderConversations();renderHistory();deliverPresented();read()
  }
  async function focusDraft(text){if(!c.selectedId||c.isVoiceConversation)await c.create();if(text!==undefined)c.draft=text;setOpen(true);update();draft.focus()}

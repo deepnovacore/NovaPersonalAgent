@@ -86,7 +86,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  function update(){
   document.body.dataset.personalCollapsed=String(c.collapsed)
   document.body.dataset.presentationMode=c.presentationMode;presentation.value=c.presentationMode;presentation.disabled=c.presentationPending
-  const active=activeTaskCount(tasks());status.textContent=c.connected?`运行中 · ${active} 个后台任务`:'已断开 · 草稿保留';status.dataset.state=c.connected?'connected':'disconnected'
+  const active=activeTaskCount(tasks());status.textContent=c.connected?`运行中 · ${active} 个后台任务`:c.everConnected?'已断开 · 草稿保留':'正在连接';status.dataset.state=c.connected?'connected':c.everConnected?'disconnected':'connecting'
   rail.badge('tasks',active)
   error.textContent=c.error;error.hidden=!c.error;orbError.textContent=c.error;orbError.hidden=!c.error
   orbVoice.textContent=c.mode==='voice'?'结束语音':c.voiceId?'恢复语音':'开始语音';orbVoice.disabled=!c.connected||!c.presentationReady||c.mode==='starting'

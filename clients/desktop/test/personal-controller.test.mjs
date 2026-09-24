@@ -42,6 +42,13 @@ test('reconnect replays every pending request with original conversation and hos
  c.receive({type:'input.text_result',request_id:a.request_id,conversation_id:'a',ok:true});assert.equal(c.state('a').draft,'')
  c.receive({type:'input.text_result',request_id:b.request_id,conversation_id:'b',ok:false,error:'outcome_unknown'});assert.equal(c.state('b').draft,'B request');assert.match(c.state('b').error,/无法确认/)
 })
+test('a cold-start disconnect before any connection never raises the alarming error',()=>{
+ const c=new PersonalController({send:()=>true,start:async()=>{},stop:async()=>{}})
+ c.disconnect();assert.equal(c.error,'');assert.equal(c.everConnected,false)
+})
+test('a real exit after connect still raises the disconnect error',()=>{
+ const {c}=harness();c.disconnect();assert.equal(c.error,'连接已断开，草稿已保留');assert.equal(c.everConnected,true)
+})
 test('rejected command remains an observable failure',async()=>{
  const {c,sent}=harness();const pending=c.command('memory.forget',{id:'x',expected_version:1});c.receive({type:'personal.result',request_id:sent.at(-1).request_id,ok:false,error:'version_conflict'});await assert.rejects(pending,/version_conflict/)
 })

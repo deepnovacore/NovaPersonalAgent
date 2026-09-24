@@ -1746,7 +1746,9 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (smokeChannel === null
       && backendStatus.state === 'connected' && backendStatus.connection) {
       sendToOrb('nova:backend-ready', backendStatus.connection)
-    } else if (backendStatus.state !== 'starting') sendToOrb('nova:backend-exit')
+    // 'stopped' also covers "never started yet" (the module's initial value);
+    // neither that nor 'starting' is a real exit, so neither raises the banner.
+    } else if (backendStatus.state !== 'starting' && backendStatus.state !== 'stopped') sendToOrb('nova:backend-exit')
   }).catch(() => {
     console.error('Nova Audio Agent Desktop renderer failed to load')
     app.quit()

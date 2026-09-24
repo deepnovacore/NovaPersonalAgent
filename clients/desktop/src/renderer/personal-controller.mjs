@@ -1,7 +1,7 @@
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,changed=()=>{}}) {
-    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,connected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
+    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
@@ -12,7 +12,7 @@ export class PersonalController {
   get submittedDraft(){return this.state().submission?.text??null}
   get isVoiceConversation(){return Boolean(this.selectedId&&(this.voiceId===this.selectedId||(!this.dictationId&&['starting','voice'].includes(this.mode)&&this.captureConversationId===this.selectedId)))}
   async connect(){
-    this.connected=true;this.error='';this.capabilities=[];this.snapshot=null
+    this.connected=true;this.everConnected=true;this.error='';this.capabilities=[];this.snapshot=null
     if(this.applyPresentation){
       this.presentationReady=false
       for(let attempt=0;attempt<2&&!this.presentationReady&&this.connected;attempt++){
@@ -27,10 +27,13 @@ export class PersonalController {
   }
   sendSubmission(id,value){return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id})}
   disconnect(){
+    const wasConnected=this.everConnected
     for(const state of this.drafts.values())if(state.submission&&!state.submission.restored){state.draft=[state.submission.text,state.draft].filter(Boolean).join('\n');state.submission.restored=true}
     this.connected=false;this.capabilities=[];this.generation++;this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
     for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
-    this.pending.clear();void this.stop();this.error='连接已断开，草稿已保留';this.changed()
+    // Only a real exit after a connection ever succeeded is alarming; a cold-start
+    // "never connected" disconnect() call must stay quiet.
+    this.pending.clear();void this.stop();if(wasConnected)this.error='连接已断开，草稿已保留';this.changed()
   }
   async setPresentation(mode,{activate=true}={}){
     if(!['background','workbench','orb'].includes(mode))throw new Error('无效的显示模式')

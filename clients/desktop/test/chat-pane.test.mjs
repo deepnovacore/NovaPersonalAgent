@@ -46,6 +46,17 @@ test('asking for task progress through a feed opens the chat pane', async()=>{
  assert.equal(all().find(n=>n.id==='chat-pane').hidden,false,'pane revealed after the feed conversation opens')
 })
 
+test('a cold start before any connection shows a neutral connecting state, not the disconnect banner',()=>{
+ const body=new Node('body'),shell=new Node('div');body.append(shell)
+ globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,visibilityState:'visible',hasFocus:()=>true,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),createTextNode:text=>new Node('#text',text),querySelector:()=>shell}
+ const v=mountPersonalView({send:()=>true,start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],openResults(){},api:{orbMenu:{},personal:{setUnread(){},openArticle:async()=>{}}}})
+ const all=()=>[body].flatMap(function walk(n){return [n,...n.children.flatMap(walk)]})
+ const hint=all().find(n=>n.className==='hint composer-hint'),status=all().find(n=>n.className==='workbench-status')
+ assert.equal(hint.textContent,'正在连接…');assert.equal(status.textContent,'正在连接');assert.equal(status.dataset.state,'connecting')
+ v.controller.connect()
+ v.controller.disconnect()
+ assert.equal(hint.textContent,'连接已断开，草稿已保留');assert.equal(status.textContent,'已断开 · 草稿保留');assert.equal(status.dataset.state,'disconnected')
+})
 test('hidden or unfocused windows defer presented receipts until visible and focused',()=>{
  const m=mount();document.visibilityState='hidden';m.view.receive(feedState(1));assert.deepEqual(m.receipts(),[])
  document.visibilityState='visible';document.hasFocus=()=>false;m.view.refresh();assert.deepEqual(m.receipts(),[])

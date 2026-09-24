@@ -11,6 +11,7 @@ import type {EmbeddingProvider} from './embeddings.js'
 import type {KnowledgeStoreClient} from './store-client.js'
 import {KnowledgeStoreClientError} from './store-client.js'
 import type {KnowledgeSource} from './types.js'
+import {withModelPurpose} from '../model/model-purpose.js'
 import type {PersonalMemoryResource} from '../memory/personal-memory.js'
 
 export interface KnowledgeEvidenceLedger {
@@ -112,7 +113,7 @@ export class KnowledgeService {
     this.#queries++
     try {
       if ((await this.#store.listSources()).length === 0) return []
-      const [vector] = await this.#embedding.embed([input.query], abort)
+      const [vector] = await withModelPurpose('recall',()=>this.#embedding.embed([input.query], abort))
       abort.throwIfAborted()
       if (vector === undefined) throw failure('embedding_invalid_result')
       const hits = await this.#store.recall(input.query, [...vector], this.#embedding.id, input.k)
@@ -243,7 +244,7 @@ export class KnowledgeService {
       const allowed=async()=>{if(this.#ledger)return evidenceIds.length>0&&(await Promise.all(evidenceIds.map(async id=>id?await (this.#ledger?.canProcess?.(id,'embedding')??Promise.resolve(false)):false))).every(Boolean);return active.processingAuthorized===true||processingConsent?.embedding_provider===this.#embedding.id}
       const stamp=this.#ledger?await this.#ledger.processingStamp?.(evidenceIds.filter((id):id is string=>id!==undefined))??null:'standalone'
       stage = 'embedding'
-      const vectors = stamp!==null&&await allowed()?await this.#embedding.embed(chunks.map(chunk => chunk.text), signal):null
+      const vectors = stamp!==null&&await allowed()?await withModelPurpose('embedding',()=>this.#embedding.embed(chunks.map(chunk => chunk.text), signal)):null
       signal.throwIfAborted()
       if (vectors!==null&&vectors.length !== chunks.length) throw failure('embedding_invalid_result')
       const keepVectors=vectors!==null&&await allowed()&&(!this.#ledger||stamp===await this.#ledger.processingStamp?.(evidenceIds.filter((id):id is string=>id!==undefined)))

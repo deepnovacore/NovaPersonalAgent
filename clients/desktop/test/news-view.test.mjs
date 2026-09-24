@@ -101,3 +101,13 @@ test('generated work is readable and its sources stay behind disclosure',t=>{
  assert.ok(nodes.some(n=>n.textContent==='NovaAudioAgent/README.md'))
  assert.equal(h.buttons.some(b=>b.textContent==='确认介绍'),false)
 })
+test('a background profile refresh keeps the draft on screen without a status box or skeleton',t=>{
+ const h=harness(t),flatten=node=>[node,...node.children.flatMap(flatten)]
+ const draft={about:{text:'Builds audio software',refs:[{entry_id:'s',version:'v'}]},work:[],interests:[]},base={...h,state:{profile:{version:0,about:''}},news:{enabled:false,explore:true,profile_version:0,interests:[]}}
+ renderProfile(h.panel,{...base,warmup:{status:'working',draft,sources:[{id:'s',version:'v',label:'Nova/README.md'}]}})
+ let nodes=flatten(h.panel)
+ assert.ok(nodes.some(n=>n.textContent==='Builds audio software'))
+ assert.ok(!nodes.some(n=>n.className==='warmup-status'||n.className==='warmup-skeleton'))
+ const first=harness(t);renderProfile(first.panel,{...base,...first,warmup:{status:'working',draft:null,sources:[]}});nodes=flatten(first.panel)
+ assert.ok(nodes.some(n=>n.className==='warmup-status'));assert.ok(nodes.some(n=>n.className==='warmup-skeleton'))
+})
