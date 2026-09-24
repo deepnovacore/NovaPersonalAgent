@@ -48,6 +48,10 @@ const exitCode = await runDesktopEntryWithStopSources({
   ),
   onDiagnostic,
   onStartupFailure: error => {
+    if(acceptance){
+      const detail=error instanceof Error?`${error.name}: ${error.message}`:typeof error
+      onDiagnostic(`[acceptance-startup-error] ${detail.replace(/[\r\n]/gu,' ').slice(0,300)}`)
+    }
     const status = desktopBudgetFailure(error)
     capabilityView = () => status
     control.publish()
