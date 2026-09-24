@@ -22,7 +22,7 @@ jobs:
     # Opt in only after creating a dedicated, capped OpenRouter key.
     if: vars.PR_REVIEW_ENABLED == 'true' && github.event.repository.visibility == 'public'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
     permissions:
       contents: read
       pull-requests: read
@@ -72,7 +72,7 @@ jobs:
       - name: Review diff and its wider impact through OpenRouter
         if: steps.prepare.outputs.run == 'true'
         id: codex
-        timeout-minutes: 10
+        timeout-minutes: 45
         uses: openai/codex-action@86365089eb2b84e0a8fb0717b304f8bdcb13b20e
         with:
           codex-version: '0.156.1'

@@ -51,7 +51,7 @@ whole-repository audit, automatic approval or merge gate.
 - One agent run produces both sections. New PR revisions cancel older runs;
   successful base/head/model combinations are deduplicated using the bot comment.
   Delete that comment to deliberately review the same revision/model again.
-- The review step has a 10-minute timeout, the job 15 minutes. The prompt asks
+- The review step has a 45-minute timeout, the job 60 minutes. The prompt asks
   for about 20 inspection commands and at most three distinct root-cause findings.
   These are time/prompt controls, **not a per-run dollar or token cap**.
   Codex/provider retries and repeated context can still incur additional usage.
