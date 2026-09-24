@@ -62,6 +62,7 @@ interface Pending<Result> {
 }
 
 export class KnowledgeStoreClient {
+  readonly maxSources: number
   readonly #worker: KnowledgeStoreWorker
   readonly #pending = new Map<number, Pending<unknown>>()
   #nextRequestId = 1
@@ -76,6 +77,7 @@ export class KnowledgeStoreClient {
   #rejectClosing: ((error: KnowledgeStoreClientError) => void) | undefined
 
   constructor(options: KnowledgeStoreClientOptions) {
+    this.maxSources=options.maxSources??100
     const workerUrl = new URL('./store-worker.js', import.meta.url)
     const workerOptions: WorkerOptions = {workerData: {path: options.path, maxSources: options.maxSources, forceLexical: options.forceLexical}}
     this.#worker = new Worker(workerUrl, workerOptions)

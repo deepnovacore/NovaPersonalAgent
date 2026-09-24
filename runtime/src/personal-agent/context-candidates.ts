@@ -34,7 +34,7 @@ export function selectContextCandidates(inputs:readonly ContextInput[]):ContextC
   const root=input.kind==='file'?input.root:'stated-memory'
   const version=String(input.version),primaryId=input.kind==='file'?input.file_id:input.id
   const tabs:('todos'|'ideas')[]=input.kind==='file'?
-   [...(input.priority>=2&&actionLine(input.content)?['todos' as const]:[]),...(!genericOverview(input.rel_path)&&ideaEvidence(input.content)?['ideas' as const]:[])]:['ideas']
+   [...(input.priority>=2&&actionLine(input.content)?['todos' as const]:[]),...(input.priority>=1&&!genericOverview(input.rel_path)&&ideaEvidence(input.content)?['ideas' as const]:[])]:['ideas']
   if(input.kind==='memory'&&!/\bidea\b|想法|可以考虑|建议/u.test(input.content))continue
   for(const tab of tabs){
    const candidate_id=candidateId(tab,primaryId,version)

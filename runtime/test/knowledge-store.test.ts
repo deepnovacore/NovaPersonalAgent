@@ -201,6 +201,14 @@ test('maxSources refuses a second source but permits reindexing the existing sou
   assert.equal((await client.recall('updated', [0, 1], 'embed-a', 1))[0]?.text, 'updated durable result')
 })
 
+test('a whole-computer store can open with a source limit above the generic default',async t=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-knowledge-computer-limit-'))
+ const client=new KnowledgeStoreClient({path:join(directory,'knowledge.sqlite'),maxSources:2000})
+ t.after(async()=>{await client.close();await rm(directory,{recursive:true,force:true})})
+ await client.open()
+ assert.deepEqual(await client.listSources(),[])
+})
+
 test('transactionally replaces a source at capacity and preserves the old source on replacement failure', async t => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-knowledge-capacity-replace-'))
   const client = new KnowledgeStoreClient({path: join(directory, 'knowledge.sqlite'), maxSources: 1})

@@ -9,6 +9,7 @@ import {acceptanceManifest} from '../desktop/workbench-acceptance.js'
 import {chunkKnowledgeText, fetchKnowledgeUrl, readKnowledgeFile, knowledgeExcerpt, KnowledgeDocumentFailure} from './documents.js'
 import type {EmbeddingProvider} from './embeddings.js'
 import type {KnowledgeStoreClient} from './store-client.js'
+import {KnowledgeStoreClientError} from './store-client.js'
 import type {KnowledgeSource} from './types.js'
 import type {PersonalMemoryResource} from '../memory/personal-memory.js'
 
@@ -25,6 +26,7 @@ const idSchema = z.string().regex(/^[a-zA-Z0-9_-]{1,80}$/u)
 const ingestSchema = z.object({kind: z.enum(['file', 'url', 'folder']), locator: z.string().min(1).max(4096), consent: z.literal(true)}).strict()
 const failure = (code: string): Error => new Error(code)
 function ingestionCode(cause: unknown, stage: 'read' | 'evidence' | 'embedding' | 'store'): string {
+  if(cause instanceof KnowledgeStoreClientError&&cause.code==='STORE_CAPACITY')return 'index_capacity'
   if (cause instanceof KnowledgeDocumentFailure) {
     if (['sensitive_content', 'path_denied'].includes(cause.code)) return 'screening_rejected'
     if (['unsupported_mime', 'invalid_file', 'file_too_large', 'empty_text', 'invalid_text', 'parse_failed', 'parse_timeout'].includes(cause.code)) return 'unsupported_file'
@@ -138,7 +140,9 @@ export class KnowledgeService {
     const cancel = () => active.abort.abort()
     signal.addEventListener('abort', cancel, {once: true})
     try {
-      const old = (await this.#store.listSources()).find(source => source.locator === locator)
+      const known=await this.#store.listSources()
+      const old = known.find(source => source.locator === locator)
+      if(!old&&known.length>=this.#store.maxSources)throw failure('index_capacity')
       signal.throwIfAborted()
       if (sourceId !== undefined && this.#ledger) {
         if (old && old.id !== sourceId) throw failure('source_changed')
@@ -156,7 +160,7 @@ export class KnowledgeService {
       return {id: active.id, excerpt, ...(evidence_ids.length ? {evidence_ids} : {})}
     } catch (cause) {
       signal.throwIfAborted()
-      const code = cause instanceof Error && /^(?:screening_rejected|unsupported_file|file_changed|file_unavailable|embedding_failed|store_failed|knowledge_busy|ingest_failed)$/u.test(cause.message)
+      const code = cause instanceof Error && /^(?:screening_rejected|unsupported_file|file_changed|file_unavailable|embedding_failed|store_failed|knowledge_busy|ingest_failed|index_capacity)$/u.test(cause.message)
         ? cause.message : 'store_failed'
       throw failure(code)
     } finally {

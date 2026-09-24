@@ -1,6 +1,6 @@
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
 /** Renders suggestions after saved records; these cards never become Life objects automatically. */
-export function renderSourceSuggestions(panel,{tab,context,sources=[],button,command,continueChat,openSettings}){
+export function renderSourceSuggestions(panel,{tab,context,sources=[],button,command,continueChat,openSettings,connected=true}){
  if(!['todos','ideas'].includes(tab))return
  const section=el('section',undefined,'workbench-suggestions');section.setAttribute('aria-label','Nova 的建议');panel.append(section)
  section.append(el('h2','Nova 的建议'))
@@ -14,7 +14,8 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  if(cards.length){if(failed.length){const note=el('p',`${failed.map(sourceName).join('、')}尚未读完；已显示可用内容。`,'hint');section.append(note);if(openSettings)button('查看来源',()=>openSettings('connections'),section)}return}
  const empty=el('div',undefined,'workbench-empty');section.append(empty)
  let title='目前没有新的建议',body='你仍可以查询已连接的资料。'
- if(!sources.length){title='还没有连接资料';body='连接后，Nova 才能根据这些资料提供建议。'}
+ if(!sources.length&&!connected){title='资料来源状态暂不可用';body='工作台连接后，可以查看已连接的资料和建议。'}
+ else if(!sources.length){title='还没有连接资料';body='连接后，Nova 才能根据这些资料提供建议。'}
  else if(sources.every(source=>source.state==='paused'||source.state==='disconnected')){title='资料来源已暂停';body='恢复来源后，Nova 才会继续读取。'}
  else if(sources.some(source=>source.processing_consent_required)&&context?.candidate_count===0){title='资料还不能用于生成建议';body='可在来源设置中检查处理授权。'}
  else if(failed.length){title=`${failed.map(sourceName).join('、')}暂时无法完整读取`;body='已获取的内容仍可使用；可在来源设置查看详情。'}

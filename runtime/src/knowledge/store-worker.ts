@@ -547,7 +547,7 @@ function db(): DatabaseSync {
 
 function parseWorkerData(value: unknown): Required<WorkerData> {
   if (!isRecord(value) || typeof value.path !== 'string') throw new Error('invalid knowledge worker data')
-  const maxSources = value.maxSources === undefined ? DEFAULT_MAX_SOURCES : positiveInteger(value.maxSources, DEFAULT_MAX_SOURCES)
+  const maxSources = value.maxSources === undefined ? DEFAULT_MAX_SOURCES : positiveInteger(value.maxSources, MAX_CHUNKS)
   if (value.forceLexical !== undefined && typeof value.forceLexical !== 'boolean') throw new Error('invalid knowledge worker data')
   return {path: value.path, maxSources, forceLexical: value.forceLexical === true}
 }

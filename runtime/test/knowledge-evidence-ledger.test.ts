@@ -56,6 +56,10 @@ test('ledger-backed sync replaces at maxSources one and retains prior evidence a
     await service.open(); await service.bindEvidenceLedger(authority.value)
     const first = await service.syncFile(file, directory, new AbortController().signal, undefined, grant)
     const original = (await store.listChunks(first.id))[0]!.evidence_id!
+    const extra=join(directory,'extra.md')
+    await writeFile(extra,'A separate verified note')
+    await assert.rejects(service.syncFile(extra,directory,new AbortController().signal,undefined,grant),/^Error: index_capacity$/u)
+    assert.deepEqual((await service.listSources()).map(item=>item.id),[first.id])
     await writeFile(file, 'Replacement verified content')
     failEmbedding = true
     await assert.rejects(service.syncFile(file, directory, new AbortController().signal, first.id, grant), /embedding_failed/u)

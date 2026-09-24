@@ -66,10 +66,10 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
   if(['todos','ideas','goals'].includes(selected)){
    renderLife(panel,{kind:({todos:'todo',ideas:'idea',goals:'goal'})[selected],state:s?.life,openArticle:url=>api.personal.openArticle(url),command:(m,p)=>c.command(m,p),button,run,local:lifeLocal,rerender:renderPanel,delegate:text=>chat.focusDraft(text)})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
-   renderSourceSuggestions(panel,{tab:selected,context:s?.workbench_context,sources:s?.sources??[],button,command:(m,p)=>c.command(m,p),continueChat,openSettings})
+   renderSourceSuggestions(panel,{tab:selected,context:s?.workbench_context,sources:s?.sources??[],button,command:(m,p)=>c.command(m,p),continueChat,openSettings,connected:c.connected})
    if(selected==='todos')button('查看 Agent 执行任务',()=>{selected='tasks';renderPanel()},panel).className='link-button'
   }else if(selected==='feeds'){
-   renderNews(panel,{news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings})
+   renderNews(panel,{news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings,connected:c.connected})
   }else if(selected==='tasks'){
    renderTasksPage(panel,{tasks,taskAction,results,openResults,card,chips,button,askProgress:task=>{const feed=c.snapshot?.feed?.find(item=>item.task_ref?.work_id===task.work_id);if(!feed)return continueChat(`${task.title} · ${task.work_id}`);return c.openFeed(feed.id,'询问任务进展').then(result=>{chat.reveal();return result})}})
    button('任务控制与结果',openResults,panel).className='link-button'

@@ -61,7 +61,7 @@ function balanced<T extends {path: string; unit?: string | undefined}>(files: T[
   return interleave(groups.values(), files.length)
 }
 const refFor = (file: SourceRecord['files'][number]) => `file:${file.id}:${file.fingerprint}`
-const errorCode = (error: unknown) => error instanceof Error && /^(?:screening_rejected|unsupported_file|file_changed|file_unavailable|embedding_failed|store_failed|knowledge_busy|ingest_failed|source_busy)$/u.test(error.message) ? error.message : 'source_unavailable'
+const errorCode = (error: unknown) => error instanceof Error && /^(?:screening_rejected|unsupported_file|file_changed|file_unavailable|embedding_failed|store_failed|knowledge_busy|ingest_failed|source_busy|index_capacity)$/u.test(error.message) ? error.message : 'source_unavailable'
 function isAutoHiddenPath(root: string, path: string, selected: readonly string[] = []): boolean {
   const parts = relative(root, path).split(sep)
   if (parts.includes('.git')) return true
@@ -235,7 +235,7 @@ export class LocalDirectorySources {
   }
   contextEntries():ContextInput[]{
     const expected=this.#options.processingGrant?.(true,1,0)
-    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isComputerExcludedPath(record.view,f.path))).map(file=>({kind:'file' as const,id:'source:'+file.id,version:file.fingerprint,content:file.excerpt!,source_id:record.view.id,file_id:file.id,root:file.unit??computerUnit(record.view.path,file.path),rel_path:record.view.scope==='computer'?relative(record.view.path,file.path):join(basename(record.view.path),relative(record.view.path,file.path)),role:/\.(?:md|markdown|txt|pdf|docx)$/iu.test(file.path)?'document' as const:/\.(?:json|yaml|yml|csv)$/iu.test(file.path)?'config' as const:'code' as const,mtime_ms:file.mtime,hidden_prefix_depth:hiddenPrefixDepth(record.view,file.path),priority:record.view.priority_dirs.some(dir=>within(dir,file.path))?3:record.view.scope==='directory'?2:this.#workspacePath&&within(this.#workspacePath,file.path)?1:0})))
+    return this.#records.filter(r=>!r.deleting&&['connected','error'].includes(r.view.state)&&!!r.processing_consent?.extraction_provider&&r.processing_consent.extraction_provider===expected?.extraction_provider&&r.processing_consent.embedding_provider===expected?.embedding_provider).flatMap(record=>record.files.filter(f=>f.valid&&f.excerpt&&(record.view.scope!=='computer'||!isComputerExcludedPath(record.view,f.path))).map(file=>{const root=file.unit??computerUnit(record.view.path,file.path),gitMs=this.#activityCache.get(root)?.value.lastGitCommitMs;return {kind:'file' as const,id:'source:'+file.id,version:file.fingerprint,content:file.excerpt!,source_id:record.view.id,file_id:file.id,root,rel_path:record.view.scope==='computer'?relative(record.view.path,file.path):join(basename(record.view.path),relative(record.view.path,file.path)),role:/\.(?:md|markdown|txt|pdf|docx)$/iu.test(file.path)?'document' as const:/\.(?:json|yaml|yml|csv)$/iu.test(file.path)?'config' as const:'code' as const,mtime_ms:file.mtime,hidden_prefix_depth:hiddenPrefixDepth(record.view,file.path),priority:record.view.priority_dirs.some(dir=>within(dir,file.path))?3:record.view.scope==='directory'?2:this.#workspacePath&&within(this.#workspacePath,file.path)?1:gitMs!==null&&gitMs!==undefined&&Date.now()-gitMs<30*86_400_000?1:0}}))
   }
   evidenceSnapshot(): {ref: string; summary: string}[] {
     const fingerprints = new Set<string>()
@@ -702,8 +702,8 @@ export class LocalDirectorySources {
           await this.#recoverPending(record)
           signal.throwIfAborted()
           settlePending(record,file.path)
-          skip('read_failed')
           const code=errorCode(error)
+          skip(code==='index_capacity'?'index_capacity':'read_failed')
           currentReadFailure=true
           if (view.failures.length < 50) view.failures.push({path: relative(view.path, file.path), code})
           if (previous && view.scope==='directory' && ['screening_rejected','unsupported_file'].includes(code)) {
@@ -720,7 +720,7 @@ export class LocalDirectorySources {
       stage='health_update'
       if(view.state!=='paused'&&view.state!=='disconnected')view.state='connected'
       const cleanupPending=view.scope==='computer'&&record.files.some(file=>isComputerExcludedPath(view,file.path))
-      const partial=cleanupPending||[record.walk?.queue.length,record.walk?.pending.length,record.walk?.deferred.length].some(count=>!!count)||!!record.walk?.ledger.some(item=>item.status==='partial')||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','metadata_limit','project_metadata_limit','depth_limit','directory_capacity'].includes(reason))
+      const partial=cleanupPending||[record.walk?.queue.length,record.walk?.pending.length,record.walk?.deferred.length].some(count=>!!count)||!!record.walk?.ledger.some(item=>item.status==='partial')||Object.entries(view.reasons).some(([reason,count])=>count>0&&['body_budget','index_limit','index_capacity','metadata_limit','project_metadata_limit','depth_limit','directory_capacity'].includes(reason))
       view.health=partial||currentReadFailure||currentCleanupFailure?'degraded':'healthy'
       view.coverage=partial||currentReadFailure||currentCleanupFailure?'partial':'complete'
       view.last_sync = new Date().toISOString()

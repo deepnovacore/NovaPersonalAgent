@@ -35,6 +35,12 @@ test('unloaded Life data and paused sources never claim an empty list or active 
  assert.match(text(h.panel),/资料来源已暂停/u)
  assert.doesNotMatch(text(h.panel),/正在整理已授权的资料/u)
 })
+test('disconnected source state does not claim that no sources are connected',t=>{
+ const h=harness(t)
+ renderSourceSuggestions(h.panel,{tab:'ideas',context:null,sources:[],button:h.button,command:h.command,continueChat:()=>{},connected:false})
+ assert.match(text(h.panel),/资料来源状态暂不可用/u)
+ assert.doesNotMatch(text(h.panel),/还没有连接资料/u)
+})
 test('a partial source failure remains visible beside available suggestions',t=>{
  const h=harness(t)
  renderSourceSuggestions(h.panel,{tab:'ideas',context:{status:'ready',cards:[{id:'card',tab:'ideas',title:'Simplify setup',body:'The note suggests a shorter setup.',refs:[]}]},sources:[{scope:'computer',state:'error'}],button:h.button,command:h.command,continueChat:()=>{},openSettings:()=>{}})

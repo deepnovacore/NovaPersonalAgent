@@ -30,7 +30,7 @@ export function renderMemorySection(parent,{snapshot:s,caps,el,button,chips,comm
   }
   return records
  }
- if(!caps.memory?.list)card('当前后端不支持记忆列表','连接支持此能力的记忆后端后可查看。')
+ if(!caps.memory?.list)card('暂时无法查看记忆','此工作台当前无法显示记忆记录。')
  else{
   const hero=card('记忆总览');hero.classList.add('memory-hero')
   hero.append(el('p',overview.summary,'memory-overview-copy'))

@@ -1,9 +1,9 @@
 import {renderInterests,renderWarmup} from './profile-preferences.mjs'
 const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n}
-export function renderNews(panel,{news,warmup,command,button,local,preferencesLocal=local,rerender,profile,openArticle,delegate}){
+export function renderNews(panel,{news,warmup,command,button,local,preferencesLocal=local,rerender,profile,openArticle,delegate,connected=true}){
  panel.append(el('h2','Feeds · 为你发现'))
  renderWarmup(panel,{warmup,command,button})
- if(!news){const pending=el('p','正在连接资讯…');pending.setAttribute('role','status');panel.append(pending);return}
+ if(!news){const pending=el('p',connected?'正在准备资讯状态…':'资讯暂不可用。工作台连接后，可查看资讯设置和内容。');pending.setAttribute('role','status');panel.append(pending);return}
  const bar=el('div');bar.className='news-toolbar';panel.append(bar)
  const tabs=el('div');tabs.className='preference-segments';tabs.setAttribute('role','group');tabs.setAttribute('aria-label','资讯视图');bar.append(tabs)
  for(const [saved,label]of [[false,'为你推荐'],[true,'收藏']]){const b=button(label,()=>{local.saved=saved;rerender()},tabs);b.setAttribute('aria-pressed',String(Boolean(local.saved)===saved))}

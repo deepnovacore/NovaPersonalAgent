@@ -41,6 +41,12 @@ test('disabled feeds can be enabled in place without a settings detour',async t=
  const h=harness(t);renderNews(h.panel,{...h,news:{enabled:false,mode:'timeline',pending:0,profile_version:0,sources:[],interests:[],items:[],saved:[]}})
  assert.ok(h.buttons.find(b=>b.textContent==='开启资讯'));assert.equal(h.buttons.find(b=>b.textContent==='前往设置'),undefined);assert.equal(h.calls.length,0)
 })
+test('disconnected Feeds does not present a false news-loading state',t=>{
+ const h=harness(t);renderNews(h.panel,{...h,news:undefined,connected:false})
+ const copy=h.panel.children.map(node=>node.textContent).join(' ')
+ assert.match(copy,/资讯暂不可用/u)
+ assert.doesNotMatch(copy,/正在连接资讯/u)
+})
 test('life forms start collapsed behind an add button and reopen for edits',async t=>{
  const h=harness(t);renderLife(h.panel,{...h,kind:'todo',state:{todos:[{id:'t',kind:'todo',title:'A',note:'',version:1,status:'open'}],ideas:[],goals:[]},delegate(){}})
  const flatten=node=>[node,...node.children.flatMap(flatten)];const form=()=>flatten(h.panel).find(n=>n.className==='life-form')

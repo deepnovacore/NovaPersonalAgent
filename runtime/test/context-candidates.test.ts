@@ -29,9 +29,12 @@ test('README content alone never turns a cloned repository into a personal sugge
  assert.deepEqual(selectContextCandidates([file('config','config.yaml','key: value')]),[])
 })
 test('an explicit proposal in a project note remains a candidate',()=>{
- const selected=selectContextCandidates([file('proposal','notes.md','摘要：建议用会话替代一次性派发。',0)])
+ const selected=selectContextCandidates([file('proposal','notes.md','摘要：建议用会话替代一次性派发。',1)])
  assert.equal(selected.length,1)
  assert.equal(selected[0]!.tab,'ideas')
+})
+test('an unselected whole-computer document does not become an automatic suggestion',()=>{
+ assert.deepEqual(selectContextCandidates([file('intake','Documents/onboarding/notes.md','摘要：建议用会话替代一次性派发。',0,Date.now())]),[])
 })
 test('an explicitly selected hidden notes folder may contribute its documents only',()=>{
  const selected={...file('hidden','.notes/idea.md','An idea for a simpler workflow.',3),hidden_prefix_depth:1} as Extract<ContextInput,{kind:'file'}>
