@@ -119,8 +119,8 @@ export class ProfileWarmup{
     if(!draft)throw Error('invalid_profile_evidence')
     outcome.items=factCount(draft)
     const current=this.#prune(draft,this.#entries)
-    // A reply that leaves about out keeps the previous one while everything it cites is still current; a withdrawal has already pruned it from the cache.
-    const kept=this.#cache.draft?.about&&this.#prune({about:this.#cache.draft.about,work:[],interests:[]},this.#entries)?.about
+    // A reply that leaves about out keeps the previous one only while every entry it cites is unchanged; a re-read source may now say something else.
+    const previousAbout=this.#cache.draft?.about,kept=previousAbout?.refs.every(ref=>this.#entries.some(e=>e.id===ref.entry_id&&e.version===ref.version))?previousAbout:null
     if(current&&!current.about&&kept)current.about=kept
     if(!this.#opened)return
     if(!current){this.#failures=0;this.#failedKey='';return}

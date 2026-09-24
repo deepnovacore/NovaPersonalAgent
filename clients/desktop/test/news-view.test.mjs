@@ -144,6 +144,7 @@ test('a news card keeps its actions in one row and its recommendation basis out 
  assert.ok(flatten(h.panel).some(n=>/先按时间给你看/u.test(n.textContent??'')),'without interests the page says it is a timeline for now')
  h.panel.children.length=0;renderNews(h.panel,{...h,news:{...news,interests_seeded:true,items:[]}})
  assert.ok(flatten(h.panel).some(n=>/从你的 Profile 里猜的/u.test(n.textContent??'')),'guessed interests ask to be saved before they rank')
+ assert.ok(flatten(h.panel).some(n=>/猜的：AI。/u.test(n.textContent??'')),'the note lists exactly what the button keeps')
  h.calls.length=0;await h.buttons.findLast(b=>b.textContent==='就用这些').action()
  assert.deepEqual(h.calls,[['news.configure',{enabled:true,explore:true,interests:['AI'],expected_version:0}]],'keeping the guesses saves them unchanged')
 })

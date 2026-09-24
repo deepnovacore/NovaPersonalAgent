@@ -12,7 +12,7 @@ export function renderNews(panel,{news,warmup,command,button,local,preferencesLo
   const refresh=button(news.refreshing?'正在更新…':'刷新',()=>command('news.refresh'),bar);refresh.disabled=news.refreshing
  }
  if(!news.enabled||local.preferences)renderInterests(panel,{news,warmup,command,button,local:preferencesLocal,rerender,delegate})
- if(news.enabled&&!local.preferences&&(!news.interests?.length||news.interests_seeded)){const note=el('p',news.interests?.length?'这几个兴趣是我从你的 Profile 里猜的，先按时间给你看；点“就用这些”确认一下，我就按它们来排。':'还不清楚你关心什么，先按时间给你看；等我整理好你的 Profile，就按你的兴趣来排。');note.className='hint';panel.append(note)
+ if(news.enabled&&!local.preferences&&(!news.interests?.length||news.interests_seeded)){const note=el('p',news.interests?.length?`这几个兴趣是我从你的 Profile 里猜的：${news.interests.map(i=>i.text).join('、')}。先按时间给你看；点“就用这些”确认一下，我就按它们来排。`:'还不清楚你关心什么，先按时间给你看；等我整理好你的 Profile，就按你的兴趣来排。');note.className='hint';panel.append(note)
   if(news.interests?.length)button('就用这些',()=>command('news.configure',confirmedInterests(news)),note)}
  if(!news.enabled&&(news.items.length||news.saved.length)){const note=el('p','资讯更新已暂停，已获取的内容和收藏仍可阅读。');note.className='hint';panel.append(note)}
  if(news.refreshing){const loading=el('div');loading.className='warmup-status';loading.setAttribute('role','status');const spinner=el('span');spinner.className='warmup-spinner';spinner.setAttribute('aria-hidden','true');loading.append(spinner,el('p',news.items.length?'正在更新，已有内容仍可阅读。':'正在准备第一批资讯…'));panel.append(loading)}

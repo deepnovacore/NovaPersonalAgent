@@ -177,3 +177,18 @@ test('a corrected statement does not keep the about it grounded, on screen or on
   assert.equal((JSON.parse(await readFile(path,'utf8')) as {draft:{about:unknown}}).draft.about,null)
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
+test('a re-read source that now says something else does not keep the about it grounded, even after reopening',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-')),path=join(dir,'draft.json')
+ let reply:unknown=fileDraft
+ const make=()=>new ProfileWarmup(path,()=>Promise.resolve(reply) as never,()=>{/* observer fixture */})
+ let service=make()
+ const fileA2={...fileA,version:'f2',content:'Voice project cancelled; now a text editor'}
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh()
+  reply={about:null,work:[{title:'Text editor',text:'Building a text editor',refs:[{entry_id:fileA.id,version:'f2'}]}],interests:[]}
+  service.update([fileA2,fileB]);await service.refresh()
+  assert.equal(service.snapshot().draft?.about,null)
+  await service.close();service=make();await service.open();service.update([fileA2,fileB])
+  assert.equal(service.snapshot().draft?.about,null,'the stale about is not on disk either')
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
