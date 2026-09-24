@@ -1359,7 +1359,7 @@ export function composeRealtime(
     let opened=false
     return {open:async()=>{await memory.open();opened=true},close:async()=>{opened=false;await memory.close()},
       recall:(_query,queryOptions)=>opened?Promise.resolve({source:'personal',state:'empty',scope:queryOptions?.scope??'any',hits:[],degraded:false}):Promise.reject(Error('memory_unavailable')),
-      processingStamp:ids=>memory.processingStamp(ids),canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),
+      processingStamp:ids=>memory.processingStamp(ids),canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),...(memory.forgetSources?{forgetSources:(refs:readonly string[])=>memory.forgetSources(refs)}:{}),
     } satisfies PersonalMemoryResource
   } : options.createPersonalMemory
   const memoryConsumerFingerprint = options.memoryConsumerFingerprint ?? configuredMemoryConsumer(options.settings,options.memoryReadMode ?? 'voice')

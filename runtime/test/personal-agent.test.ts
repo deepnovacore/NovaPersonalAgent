@@ -167,6 +167,24 @@ test('memory correction race rejects admission and invalidates pending delivery'
 finally {
     await f.close();
 } });
+test('batch evidence invalidation commits only on change and retracts dependent suggestions',async()=>{
+ const f=await fixture()
+ try{
+  const refs=['task:first','task:second'];const snapshot={...await f.host.discoverySnapshot(),evidence_refs:refs}
+  assert.equal(await f.host.admit({...proposal(),evidence_refs:refs},snapshot),'admitted')
+  const item=f.host.snapshot().feed[0]!,pool=f.host.options.pool
+  assert.equal(pool.get(item.suggestion_id!)?.status,'pending')
+  const before=f.host.snapshot().revision
+  await f.host.invalidateEvidenceMany(['task:first','task:first','unrelated'])
+  assert.equal(f.host.snapshot().revision,before+1)
+  assert.equal(f.host.snapshot().feed[0]!.lifecycle,'invalidated')
+  assert.equal(pool.get(item.suggestion_id!)?.status,'withdrawn')
+  const invalidated=f.host.snapshot().revision
+  await f.host.invalidateEvidenceMany(['task:first','task:second'])
+  await f.host.invalidateEvidenceMany([])
+  assert.equal(f.host.snapshot().revision,invalidated,'repeated and empty batches do not write the feed')
+ }finally{await f.close()}
+})
 test('delivery types remain independent and act requires explicit configured authorization', async () => { const f = await fixture(); try {
     await f.host.admit(proposal(), await f.host.discoverySnapshot());
     const id = f.host.snapshot().feed[0]!.id;

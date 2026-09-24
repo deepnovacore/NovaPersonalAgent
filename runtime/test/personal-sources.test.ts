@@ -127,27 +127,36 @@ test('legacy excluded computer files clean in bounded batches and retry invalid 
   await f.sources.close()
   const path=join(f.root,'db','sources.json'),disk=JSON.parse(await readFile(path,'utf8')) as {sources:{files:unknown[];walk:{queue:{path:string;offset?:number}[];ledger:unknown[];generation:number;turn:number;cursors:number[];pending:unknown[];deferred:unknown[]}}[]}
   const hidden=join(f.folder,'.worktrees','legacy');await mkdir(hidden,{recursive:true})
+  await writeFile(join(f.folder,'fresh.md'),'A current project note with a concrete idea.')
   const entries=Array.from({length:65},(_,i)=>({path:join(hidden,`legacy-${i}.md`),size:1,mtime:1,unit:f.folder,id:`legacy-${i}`,fingerprint:'old',owned:true,valid:true,excerpt:null,observed:false,observation_ref:`observation-${i}`}))
   disk.sources[0]!.files=entries
   disk.sources[0]!.walk={queue:[{path:f.folder,offset:0}],ledger:[],generation:1,turn:0,cursors:[0,0,0],pending:[],deferred:[]}
   await writeFile(path,JSON.stringify(disk))
-  let shouldFail=true
+  const invalidated:(readonly string[])[]=[]
+  const hiddenBatches:(readonly string[])[]=[]
   const handle=(method:string,args:unknown)=>{assert.equal(method,'knowledge.remove');removed.push((args as {id:string}).id);return Promise.resolve({})}
   const removed:string[]=[]
   const knowledge={listSources:()=>Promise.resolve([]),handle:async(method:string,args:unknown)=>handle(method,args),syncFile:(...args:Parameters<typeof f.knowledge.syncFile>)=>f.knowledge.syncFile(...args)}
-  const options={path,computerRoot:f.folder,pollMs:0,scanOnOpen:false,knowledge,processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),onInvalidate:(ref:string)=>{if(shouldFail&&ref==='legacy-5')throw Error('interrupted_cleanup')}}
+  const options={path,computerRoot:f.folder,pollMs:0,scanOnOpen:false,knowledge,processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),onHideEvidenceMany:(refs:readonly string[])=>{hiddenBatches.push(refs)},onInvalidateMany:(refs:readonly string[])=>{invalidated.push(refs);throw Error('poisoned_batch_ref')},onInvalidate:(ref:string)=>{if(ref==='legacy-5')throw Error('poisoned_file_ref')}}
   let sources=new LocalDirectorySources(options)
   try{
-   await sources.open();assert.equal(sources.list()[0]!.state,'connected');await sources.command('sources.sync',{id});assert.equal(sources.list()[0]!.state,'error')
+   await sources.open();assert.equal(sources.list()[0]!.state,'connected');await sources.command('sources.sync',{id});assert.equal(sources.list()[0]!.state,'connected')
    const interrupted=JSON.parse(await readFile(path,'utf8')) as {sources:{files:{id:string;valid:boolean}[];walk:{queue:{path:string}[]}}[]}
-   assert.deepEqual(removed,['legacy-0','legacy-1','legacy-2','legacy-3','legacy-4'])
-   assert.equal(interrupted.sources[0]!.files.filter(file=>!file.valid).length,27)
-   assert.equal(interrupted.sources[0]!.files.filter(file=>file.valid).length,33)
-   assert.deepEqual(interrupted.sources[0]!.walk.queue,[{path:f.folder,offset:0}])
-   shouldFail=false;await sources.close();sources=new LocalDirectorySources(options);await sources.open();await sources.command('sources.sync',{id})
-   const recovered=JSON.parse(await readFile(path,'utf8')) as {sources:{files:{id:string}[]}[]}
-   assert.equal(recovered.sources[0]!.files.length,0)
-   assert.equal(removed.length,65)
+   assert.equal(removed.length,7,'per-file fallback cleans healthy neighbors around the poison record')
+   assert.equal(interrupted.sources[0]!.files.filter(file=>!file.valid).length,58)
+   assert.ok(sources.list()[0]!.scanned>=1,'visible discovery continues despite cleanup failure')
+   assert.equal(sources.list()[0]!.scan_pending,true)
+   assert.ok(invalidated.length>=1)
+   assert.equal(hiddenBatches.length,1,'all legacy evidence refs are hidden in one persisted pass')
+   await sources.close();sources=new LocalDirectorySources(options);await sources.open()
+   for(let i=0;i<12;i++)await sources.command('sources.sync',{id})
+   const recovered=JSON.parse(await readFile(path,'utf8')) as {sources:{files:{id:string;valid:boolean;cleanup_retry_at?:number}[]}[]}
+   const legacy=recovered.sources[0]!.files.filter(file=>file.id.startsWith('legacy-'))
+   assert.deepEqual(legacy.map(file=>file.id),['legacy-5'],'only the poison record remains after later batches drain')
+   assert.equal(legacy[0]!.valid,false)
+   assert.ok(legacy[0]!.cleanup_retry_at!>Date.now(),'poison record receives a retry deadline')
+   assert.equal(removed.length,64)
+   assert.equal(hiddenBatches.length,1,'restart does not resubmit already-hidden evidence refs')
   }finally{await sources.close()}
  }finally{await f.close()}
 })
@@ -1068,6 +1077,17 @@ test('weighted root turns include lower tiers while rotating peers',()=>{
  const chosen=Array.from({length:7},(_,turn)=>nextComputerRoot(roots,turn,cursors)!.path)
  assert.deepEqual(chosen,['/selected-a','/selected-b','/selected-a','/selected-b','/active','/active','/other'])
 })
+test('recent mtime is a bounded tier below recent Git and selected roots',()=>{
+ const now=Date.now(),roots=[
+  {path:'/selected',selected:true,currentWorkspace:false,lastGitCommitMs:null,mtimeMs:now},
+  {path:'/git',selected:false,currentWorkspace:false,lastGitCommitMs:now-86_400_000,mtimeMs:1},
+  {path:'/recent-mtime',selected:false,currentWorkspace:false,lastGitCommitMs:null,mtimeMs:now-60_000},
+  {path:'/old',selected:false,currentWorkspace:false,lastGitCommitMs:null,mtimeMs:now-30*86_400_000},
+ ]
+ const cursors=[0,0,0,0],chosen=Array.from({length:8},(_,turn)=>nextComputerRoot(roots,turn,cursors)!.path)
+ assert.deepEqual(chosen,['/selected','/selected','/selected','/selected','/git','/git','/recent-mtime','/old'])
+ assert.deepEqual(orderComputerRoots(roots).map(root=>root.path),['/selected','/git','/recent-mtime','/old'])
+})
 test('first computer batches include more than one visible project root',async()=>{
  const f=await fixture()
  try{
@@ -1308,6 +1328,33 @@ test('stat budget counts work across directory yields in one batch',async()=>{
    assert.equal(statCalls,12)
    const saved=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{queue:{path:string}[]}}[]}
    assert.ok(saved.sources[0]!.walk.queue.length>0)
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
+test('rotating tail probe admits a recently active deep project while old roots progress',async()=>{
+ const f=await fixture()
+ try{
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const oldTime=new Date('2020-01-01'),oldRoots:string[]=[]
+  for(let i=0;i<80;i++){
+   const dir=join(f.folder,`old-${String(i).padStart(2,'0')}`)
+   await mkdir(dir);await utimes(dir,oldTime,oldTime);oldRoots.push(dir)
+  }
+  const active=join(f.folder,'tail-active');await mkdir(active)
+  const document=join(active,'README.md');await writeFile(document,'Recently edited project notes')
+  const path=join(f.root,'db','sources.json'),disk=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:unknown;files:unknown[]}[]}
+  disk.sources[0]!.files=[]
+  disk.sources[0]!.walk={queue:[...oldRoots,active].map(path=>({path})),ledger:[],generation:1,turn:0,cursors:[0,0,0],probe_cursor:0,pending:[],deferred:[]}
+  await writeFile(path,JSON.stringify(disk))
+  const sources=new LocalDirectorySources({path,computerRoot:f.folder,knowledge:f.knowledge,pollMs:0,scanOnOpen:false})
+  try{
+   await sources.open();await sources.command('sources.sync',{id})
+   assert.ok((await f.knowledge.listSources()).some(item=>item.locator===document),'deep recent project should be indexed in its first batch')
+   const saved=JSON.parse(await readFile(path,'utf8')) as {sources:{walk:{queue:{path:string}[];ledger:{path:string;status:string}[]}}[]}
+   assert.ok(saved.sources[0]!.walk.ledger.some(item=>oldRoots.includes(item.path)&&item.status==='done'),'older roots should continue making progress')
+   assert.ok(saved.sources[0]!.walk.queue.length>0,'the scan should remain bounded and resumable')
   }finally{await sources.close()}
  }finally{await f.close()}
 })

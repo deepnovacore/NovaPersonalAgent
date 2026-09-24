@@ -168,6 +168,15 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
       onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
       onChange: changed => changed ? host.sourceChanged({phase:'ready',revision:++sourceRevision}) : host.sourceProgressChanged(),
+      onHideEvidenceMany: refs => host.invalidateEvidenceMany(refs),
+      onInvalidateMany: async refs => {
+        await host.invalidateEvidenceMany(refs)
+        const memory = composition.realtime.personalMemory
+        if (memory?.forgetSources) await memory.forgetSources(refs)
+        else for (const ref of refs) await memory?.forgetSource?.(ref)
+        await host.revalidate()
+        await host.refreshMemory()
+      },
       onInvalidate: async ref => {
         await host.invalidateEvidence(ref)
         await composition.realtime.personalMemory?.forgetSource?.(ref)

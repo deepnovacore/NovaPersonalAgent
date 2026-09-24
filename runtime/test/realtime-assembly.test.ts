@@ -3349,6 +3349,11 @@ test('knowledge-only composition opens canonical originals without enabling pers
     assert.equal(memory.responseAdaptation,undefined)
     const saved=await memory.recordEvidence({sourceId:'knowledge:document',locator:'notes/demo',text:'Demo notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
     assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence?.text,'Demo notes')
+    const second=await memory.recordEvidence({sourceId:'knowledge:document-two',locator:'notes/second',text:'More notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
+    assert.ok(memory.forgetSources,'knowledge-only facade exposes batched source erasure')
+    await memory.forgetSources(['knowledge:document','knowledge:document-two'])
+    assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence,null)
+    assert.equal((await realtime.retrieval.evidence(second.evidence_id)).evidence,null)
     assert.deepEqual((await memory.recall('demo')).hits,[])
   } finally {await realtime.stop();await knowledge.close();await rm(directory,{recursive:true,force:true})}
 })

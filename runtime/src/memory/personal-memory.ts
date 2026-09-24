@@ -112,6 +112,8 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly completePurgeIndex?: (id:string,operationId:string)=>Promise<PersonalMemoryPurgeResult>
   readonly pendingPurges?: ()=>Promise<(PersonalMemoryPurgeResult & {entry_id:string;expected_revision:number})[]>
   readonly forgetSource?: (ref: string) => Promise<void>
+  /** Delete a batch of source refs and refresh the derived memory view once. */
+  readonly forgetSources?: (refs: readonly string[]) => Promise<void>
   /** Read-only host inspection; never exposed as an LLM tool. */
   readonly inspect?: (query: MemoryInspectionQuery) => Promise<MemoryInspection>
   open(): Promise<void>

@@ -12,6 +12,7 @@ export type ContextCards=z.infer<typeof contextCardsSchema>
 export type ContextEntry=ContextInput | (Pick<MemoryEntry,'id'|'version'|'content'> & {origin?:'stated'|'inferred'})
 export type ContextGenerator=(candidates:readonly ContextCandidate[],signal:AbortSignal)=>Promise<ContextCards>
 const keyOf=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
+const generationRevision='direct-source-copy-v2'
 const stateSchema=contextCardsSchema.extend({version:z.literal(2),key:z.string(),automatic_call_times:z.array(z.number().int().nonnegative()).max(6).default([]),retry_key:z.string().default(''),retry_not_before:z.number().int().nonnegative().default(0),dismissed:z.array(z.string()).max(1000),legacyDismissed:z.array(z.object({tab:z.string(),refs:z.array(refSchema)}).strict()).max(1000)})
 type State=z.infer<typeof stateSchema>
 const diskSchema=z.preprocess(value=>{
@@ -33,7 +34,7 @@ export class WorkbenchContext{
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#timer=undefined;this.#manualPending=false;this.#abort.abort();await this.#run;await this.#tail}
  async clear(){const reopen=this.#opened;await this.close();this.#inputs=[];this.#candidates=[];await this.#write(next=>Object.assign(next,emptyState()));this.#abort=new AbortController();this.#opened=reopen;this.#status='idle'}
  #candidate(card:ContextCards['cards'][number]){return this.#candidates.find(candidate=>candidate.candidate_id===card.candidate_id&&candidate.tab===card.tab&&card.refs.every(ref=>candidate.refs.some(allowed=>sameRef(ref,allowed))))}
- #key(){return keyOf(this.#candidates.map(candidate=>[candidate.candidate_id,candidate.version]))}
+ #key(){return keyOf([generationRevision,this.#candidates.map(candidate=>[candidate.candidate_id,candidate.version])])}
  snapshot(){const cards=this.#state.cards.filter(card=>this.#candidate(card)&&!this.#state.dismissed.includes(card.candidate_id)).map(card=>({...structuredClone(card),id:card.candidate_id,refs:card.refs.map(ref=>({...ref,label:this.#inputs.find(input=>input.id===ref.entry_id)?.content.slice(0,700)??ref.entry_id}))}));return {status:this.#status,candidate_count:this.#candidates.length,empty_reason:this.#candidates.length===0?'no_eligible_sources':cards.length===0&&this.#status==='ready'?'model_abstained':cards.length===0&&this.#status==='failed'?'generation_failed':null,cards}}
  #write(fn:(next:State)=>void){const run=this.#tail.then(async()=>{const next=structuredClone(this.#state);fn(next);await this.#store.write(next);this.#state=next;this.changed()});this.#tail=run.catch(()=>undefined);return run}
  dismiss(id:string){if(!this.#state.cards.some(card=>card.candidate_id===id))throw Error('card_not_found');return this.#write(next=>{next.dismissed=[...new Set([...next.dismissed,id])].slice(-1000)})}

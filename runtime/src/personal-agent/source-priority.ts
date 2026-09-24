@@ -5,19 +5,30 @@ import {promisify} from 'node:util'
 
 export interface RootSignal {path:string; selected:boolean; currentWorkspace:boolean; lastGitCommitMs:number|null; mtimeMs:number}
 
+const recentGit=(root:RootSignal,now:number)=>root.lastGitCommitMs!==null&&now-root.lastGitCommitMs<30*86_400_000
+const recentMtime=(root:RootSignal,now:number)=>now-root.mtimeMs<7*86_400_000
+
 export function orderComputerRoots<T extends RootSignal>(roots: readonly T[]): T[] {
+  const now=Date.now()
   return [...roots].sort((a,b)=>Number(b.selected)-Number(a.selected)
     || Number(b.currentWorkspace)-Number(a.currentWorkspace)
+    || Number(recentGit(b,now))-Number(recentGit(a,now))
     || (b.lastGitCommitMs??0)-(a.lastGitCommitMs??0)
-    || b.mtimeMs-a.mtimeMs || a.path.localeCompare(b.path))
+    || Number(recentMtime(b,now))-Number(recentMtime(a,now))
+    || (recentMtime(b,now)?b.mtimeMs-a.mtimeMs:0) || a.path.localeCompare(b.path))
 }
 
-/** Four high-priority, two active, then one other turn; cursors rotate within tiers. */
+/** Four selected/current, two recent-Git, one recent-mtime, then one other turn. */
 export function nextComputerRoot<T extends RootSignal>(roots:readonly T[],turn:number,cursors:number[],skipped:ReadonlySet<string>=new Set()):T|undefined {
   const now=Date.now()
-  const tiers=[roots.filter(root=>root.selected||root.currentWorkspace),roots.filter(root=>!root.selected&&!root.currentWorkspace&&root.lastGitCommitMs!==null&&now-root.lastGitCommitMs<30*86_400_000),roots.filter(root=>!root.selected&&!root.currentWorkspace&&(root.lastGitCommitMs===null||now-root.lastGitCommitMs>=30*86_400_000))]
-  const preferred=[0,0,0,0,1,1,2][turn%7]!
-  for(const tier of [preferred,(preferred+1)%3,(preferred+2)%3]){
+  const tiers=[
+    roots.filter(root=>root.selected||root.currentWorkspace),
+    roots.filter(root=>!root.selected&&!root.currentWorkspace&&recentGit(root,now)),
+    roots.filter(root=>!root.selected&&!root.currentWorkspace&&!recentGit(root,now)&&recentMtime(root,now)),
+    roots.filter(root=>!root.selected&&!root.currentWorkspace&&!recentGit(root,now)&&!recentMtime(root,now)),
+  ]
+  const preferred=[0,0,0,0,1,1,2,3][turn%8]!
+  for(const tier of [preferred,(preferred+1)%4,(preferred+2)%4,(preferred+3)%4]){
     const available=tiers[tier]!.filter(root=>!skipped.has(root.path))
     if(!available.length)continue
     const cursor=cursors[tier]??0

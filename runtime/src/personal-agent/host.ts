@@ -503,13 +503,15 @@ export class PersonalAgentHost {
         }
     } if (changed)
         await this.#commit(next); }); }
-    async invalidateEvidence(ref: string): Promise<void> { await this.#serial(async () => { const next = structuredClone(this.#state); for (const item of next.feed)
-        if (item.evidence_refs.includes(ref) && item.lifecycle === 'active') {
+    async invalidateEvidence(ref: string): Promise<void> { await this.invalidateEvidenceMany([ref]); }
+    async invalidateEvidenceMany(refs: readonly string[]): Promise<void> { const invalidRefs = new Set(refs); if (!invalidRefs.size) return; await this.#serial(async () => { const next = structuredClone(this.#state); let changed = false; for (const item of next.feed)
+        if (item.lifecycle === 'active' && item.evidence_refs.some(ref => invalidRefs.has(ref))) {
             item.lifecycle = 'invalidated';
             item.updated_at = this.#now().toISOString();
             if (item.suggestion_id)
                 this.options.pool.withdraw(item.suggestion_id);
-        } await this.#commit(next); }); }
+            changed = true;
+        } if (changed) await this.#commit(next); }); }
     sourceProgressChanged():void{
         if(!this.#opened)return;
         const now=Date.now();

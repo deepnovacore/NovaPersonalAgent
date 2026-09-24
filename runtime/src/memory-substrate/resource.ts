@@ -444,6 +444,18 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(results.some(result=>!result.entry_id.startsWith(this.prefix)||result.status!=='incomplete'))throw Error('STORE_INVALID_RESULT')
     return results
   }
-  async forgetSource(ref:string):Promise<void>{this.#ready();await this.options.client.memory('delete_source',{source_id:this.prefix+ref});await this.#refresh()}
+  async forgetSource(ref:string):Promise<void>{await this.forgetSources([ref])}
+  async forgetSources(refs:readonly string[]):Promise<void>{
+    this.#ready()
+    const unique=[...new Set(refs)]
+    let deleted=0
+    try{
+      for(const ref of unique){await this.options.client.memory('delete_source',{source_id:this.prefix+ref});deleted++}
+    }catch(error){
+      if(deleted)await this.#refresh().catch(()=>undefined)
+      throw error
+    }
+    if(deleted)await this.#refresh()
+  }
   async forget(sourceId:string){await this.forgetSource(sourceId);return {sourceId,state:'deleted' as const}}
 }

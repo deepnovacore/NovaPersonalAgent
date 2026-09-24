@@ -171,6 +171,25 @@ test('shared worker creates a private database and rejects symlink targets',asyn
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
 
+test('batch source forget deduplicates refs and refreshes once after all deletes',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-memory-forget-batch-'))
+ const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const resource=new SubstrateMemoryResource({client,userId:'batch-forget',gateway:{async *stream(){await Promise.resolve();yield* []},complete(){return Promise.resolve({text:'{"entries":[]}'})}},model:'fixture'})
+ const calls:{operation:string;input:unknown}[]=[];const original=client.memory.bind(client);let rejectSecond=true
+ client.memory=async(operation,input)=>{calls.push({operation,input});if(operation==='delete_source'&&rejectSecond&&String((input as {source_id:string}).source_id).endsWith('second'))throw Error('transient_delete_failure');return original(operation,input)}
+ try{
+  await resource.open();calls.length=0
+  await assert.rejects(resource.forgetSources(['first','second','first']),/transient_delete_failure/)
+  assert.deepEqual(calls.filter(call=>call.operation==='delete_source').map(call=>String((call.input as {source_id:string}).source_id).split(':').at(-1)),['first','second'])
+  assert.equal(calls.filter(call=>call.operation==='list').length,1,'a partial failure refreshes the successfully deleted sources')
+  rejectSecond=false;calls.length=0
+  await resource.forgetSources(['first','second','first'])
+  assert.deepEqual(calls.filter(call=>call.operation==='delete_source').map(call=>String((call.input as {source_id:string}).source_id).split(':').at(-1)),['first','second'])
+  assert.equal(calls.filter(call=>call.operation==='list').length,1,'successful batch refreshes the snapshot once')
+  calls.length=0;await resource.forgetSources([]);assert.equal(calls.length,0)
+ }finally{await resource.close();await rm(root,{recursive:true,force:true})}
+})
+
 test('connector admission resolves while model extraction is still pending',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-memory-admit-'))
  let start!:()=>void;const started=new Promise<void>(resolve=>{start=resolve})
