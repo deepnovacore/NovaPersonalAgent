@@ -5,6 +5,8 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {WorkbenchContext,contextCardSchema} from '../src/personal-agent/workbench-context.js'
 import {candidateId,type ContextInput} from '../src/personal-agent/context-candidates.js'
+/** The documents a digest fixture cites, fed back as the eligible inputs they would be in production. */
+const refFile=(ref:{entry_id:string;version:string}):ContextInput=>({kind:'file',id:ref.entry_id,version:ref.version,content:'Project notes.',source_id:'s',file_id:ref.entry_id,root:'/nova',rel_path:'notes.md',role:'document',mtime_ms:1,priority:1})
 test('generated suggestion copy stays short enough for a single readable card',()=>{
  const card={candidate_id:'c',tab:'ideas',title:'具体提议',body:'一句简短的说明。',refs:[{entry_id:'source:doc',version:'v1'}]}
  assert.equal(contextCardSchema.safeParse(card).success,true)
@@ -18,11 +20,11 @@ test('a goal suggestion is kept only against a goal candidate from the same proj
  const generate=(candidates:readonly {candidate_id:string;tab:string}[])=>Promise.resolve({recap:null,cards:candidates.map(c=>({candidate_id:c.candidate_id,tab:tabFor(c.tab),title:c.tab==='goals'?'让 Nova 成为每天在用的助手':'Finish the digest layer',body:'一周里大部分事情都交给它。',why:null,next:c.tab==='goals'?'先把待办页跑顺':null,refs}))})
  const context=new WorkbenchContext(join(dir,'cards.json'),generate,()=>undefined)
  try{
-  await context.open();context.update([],{items:digests,pending:0});await context.refresh()
+  await context.open();context.update(digests.flatMap(d=>d.refs.map(refFile)),{items:digests,pending:0});await context.refresh()
   const goal=context.snapshot().cards.find(card=>card.tab==='goals')
   assert.equal(goal?.title,'让 Nova 成为每天在用的助手');assert.equal(goal?.next,'先把待办页跑顺')
   assert.equal(context.snapshot().empty_reasons.goals,null)
-  tabFor=()=>'goals';await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+  tabFor=()=>'goals';await context.clear();context.update(digests.flatMap(d=>d.refs.map(refFile)),{items:digests,pending:0});await context.refresh()
   assert.deepEqual(context.snapshot().cards.map(card=>card.tab),['goals'],'a todo candidate relabelled as a goal is dropped')
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
 })
@@ -55,6 +57,25 @@ test('project cards survive a digest rewrite until regenerated, but never once a
   assert.equal(context.snapshot().cards.length,0,'B was read uncited; a card written from it must not outlive it even behind a safe successor')
   context.update([file(a2),file(c)],{items:digest([a2],['source:a','source:c'],'A only'),pending:0})
   context.update([file(a2),file(b),file(c)],{items:[],pending:0});assert.equal(context.snapshot().cards.length,0,'no successor, no card')
+  // An exact match is no exemption: the unchanged digest must not keep showing once an uncited input goes.
+  await context.clear();context.update([file(a),file(b),file(c)],{items:digest([a],['source:a','source:b','source:c'],'A with B'),pending:0});await context.refresh()
+  assert.equal(context.snapshot().cards.length,2)
+  context.update([file(a),file(c)],{items:digest([a],['source:a','source:b','source:c'],'A with B'),pending:0})
+  assert.equal(context.snapshot().cards.length,0,'B left the eligible inputs, so cards derived from it go even when their candidate is unchanged')
+ }finally{await context.close();await rm(dir,{recursive:true,force:true})}
+})
+test('refs-only provenance written by an earlier build is dropped, so it cannot revive a card',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-legacy-')),path=join(dir,'cards.json')
+ const a={entry_id:'source:a',version:'v1'}
+ const file=(ref:typeof a):ContextInput=>({kind:'file',id:ref.entry_id,version:ref.version,content:'Project notes.',source_id:'s',file_id:ref.entry_id,root:'/nova',rel_path:'notes.md',role:'document',mtime_ms:1,priority:1})
+ const card={candidate_id:'old-card',tab:'goals',title:'Old goal',body:'Written from A and B.',why:null,next:'Keep going',refs:[a]}
+ await writeFile(path,JSON.stringify({version:2,recap:null,recap_basis:[],card_basis:{'old-card':{root:'project:k',entries:['source:a']}},cards:[card],key:'',automatic_call_times:[],retry_key:'',retry_not_before:0,dismissed:['kept'],legacyDismissed:[]}),{mode:0o600})
+ const context=new WorkbenchContext(path,undefined,()=>undefined)
+ try{
+  await context.open()
+  context.update([file(a)],{items:[{project_key:'k',name:'nova',role:'own' as const,summary:'Voice agent',focus:null,next_step:null,refs:[a],inputs:['source:a']}],pending:0})
+  assert.equal(context.snapshot().cards.length,0,'a same-project successor does not revive a card with untrusted provenance')
+  await context.dismiss('old-card');assert.ok((JSON.parse(await readFile(path,'utf8')) as {dismissed:string[]}).dismissed.includes('kept'),'the rest of the state survives the upgrade')
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
 })
 test('automatic cards are grounded, persistent, dismissible, and disappear after source invalidation',async()=>{
@@ -195,13 +216,13 @@ test('the todo page gets a grounded recap, action cards with why and next, and o
  try{
   await context.open()
   context.update([],{items:[],pending:2});assert.equal(context.snapshot().empty_reason,'digests_pending','an empty page while projects are still read says so')
-  context.update([],{items:digests,pending:0});await context.refresh()
+  context.update(digests.flatMap(d=>d.refs.map(refFile)),{items:digests,pending:0});await context.refresh()
   const snapshot=context.snapshot()
   assert.equal(snapshot.recap.text,'Mostly on the voice agent workbench.')
   assert.deepEqual(snapshot.recap.projects,[{name:'nova',line:'Fixing workbench content'}])
   assert.equal(snapshot.cards[0]!.why,'The next step is written down');assert.equal(snapshot.cards[0]!.next,'Run the native acceptance')
   context.update([],{items:[],pending:0});assert.equal(context.snapshot().recap.text,null,'the recap leaves with its evidence')
-  recapRefs=[{entry_id:'source:invented',version:'v1'}];await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+  recapRefs=[{entry_id:'source:invented',version:'v1'}];await context.clear();context.update(digests.flatMap(d=>d.refs.map(refFile)),{items:digests,pending:0});await context.refresh()
   assert.equal(context.snapshot().recap.text,null,'an ungrounded recap is dropped');assert.equal(context.snapshot().cards.length,1)
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
 })
@@ -213,9 +234,9 @@ test('a recap retires when a digest it drew on is replaced, even if its cited re
  const generate=(candidates:readonly {candidate_id:string}[])=>Promise.resolve({recap:{text:recapText,refs:[a]},cards:[{candidate_id:candidates[0]!.candidate_id,tab:'todos' as const,title:'Continue A',body:'A is in progress.',refs:[a]}]})
  const context=new WorkbenchContext(join(dir,'cards.json'),generate,()=>undefined)
  try{
-  await context.open();context.update([],{items:digest([a,b],'A and B'),pending:0});await context.refresh()
+  await context.open();context.update([refFile(a),refFile(b)],{items:digest([a,b],'A and B'),pending:0});await context.refresh()
   assert.equal(context.snapshot().recap.text,'Working on A and the private B plan.')
-  context.update([],{items:digest([a],'A only'),pending:0})
+  context.update([refFile(a),refFile(b)],{items:digest([a],'A only'),pending:0})
   assert.equal(context.snapshot().recap.text,null,'B was withdrawn, so a recap written from it must not return')
   recapText='Working on A.';await context.refresh();assert.equal(context.snapshot().recap.text,'Working on A.')
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
@@ -231,14 +252,14 @@ test('recap and action text reject Windows, UNC, and general absolute paths',asy
   await context.open()
   for(const leak of ['C:\\Users\\someone\\private\\plan.md','\\\\server\\share\\plan.md','/private/tmp/private-plan.md','see /opt/app/config now']){
    text=`Recap ${leak}`;why=`Because ${leak}`;next=null
-   await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+   await context.clear();context.update(digests.flatMap(d=>d.refs.map(refFile)),{items:digests,pending:0});await context.refresh()
    assert.equal(context.snapshot().recap.text,null,leak);assert.equal(context.snapshot().cards.length,0,leak)
    text='Plain recap.';why=null;next=`Open ${leak}`
-   await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+   await context.clear();context.update(digests.flatMap(d=>d.refs.map(refFile)),{items:digests,pending:0});await context.refresh()
    assert.equal(context.snapshot().cards.length,0,leak)
   }
   text='前端/后端 都在推进。';why=null;next='比较 A/B 两种流程'
-  await context.clear();context.update([],{items:digests,pending:0});await context.refresh()
+  await context.clear();context.update(digests.flatMap(d=>d.refs.map(refFile)),{items:digests,pending:0});await context.refresh()
   assert.equal(context.snapshot().recap.text,'前端/后端 都在推进。');assert.equal(context.snapshot().cards.length,1,'relative slashes are ordinary prose')
  }finally{await context.close();await rm(dir,{recursive:true,force:true})}
 })

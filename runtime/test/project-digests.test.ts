@@ -45,6 +45,16 @@ test('batches respect the hourly project budget',async()=>{
   assert.deepEqual(t.calls.map(c=>c.length),[2,1]);assert.equal(service.pending(),2)
  }finally{await service.close();await rm(t.dir,{recursive:true,force:true})}
 })
+test('a digest is withheld as soon as an uncited document it read stops being eligible',async()=>{
+ const t=await setup(p=>Promise.resolve(answer(p)));const service=t.make()
+ try{
+  const a=file('/r/nova','README.md'),b=file('/r/nova','plan.md')
+  await service.open();service.update([a,b]);await until(()=>service.digests().length===1)
+  assert.equal(service.digests()[0]!.refs.length,1,'the fixture digest cites one document of the two it read')
+  service.update([a]);assert.equal(service.digests().length,0,'text drawn from the dropped document is not shown')
+  await until(()=>service.digests().length===1);assert.deepEqual(service.digests()[0]!.inputs,[a.id],'a fresh digest from what remains replaces it')
+ }finally{await service.close();await rm(t.dir,{recursive:true,force:true})}
+})
 test('withdrawn files remove their digests from disk',async()=>{
  const t=await setup(p=>Promise.resolve(answer(p)));let service=t.make()
  try{

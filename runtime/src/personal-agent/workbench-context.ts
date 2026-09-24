@@ -17,16 +17,18 @@ export type ContextEntry=ContextInput | (Pick<MemoryEntry,'id'|'version'|'conten
 export type ContextGenerator=(candidates:readonly ContextCandidate[],signal:AbortSignal)=>Promise<z.input<typeof contextCardsSchema>>
 const keyOf=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const generationRevision='project-digest-v4'
-const stateSchema=contextCardsSchema.extend({recap_basis:z.array(z.string().max(128)).max(20).default([]),card_basis:z.record(z.string().max(128),z.object({root:z.string().max(512),entries:z.array(z.string().max(512)).max(64)}).strict()).default({}),version:z.literal(2),key:z.string(),automatic_call_times:z.array(z.number().int().nonnegative()).max(6).default([]),retry_key:z.string().default(''),retry_not_before:z.number().int().nonnegative().default(0),dismissed:z.array(z.string()).max(1000),legacyDismissed:z.array(z.object({tab:z.string(),refs:z.array(refSchema)}).strict()).max(1000)})
+const stateSchema=contextCardsSchema.extend({recap_basis:z.array(z.string().max(128)).max(20).default([]),card_sources:z.record(z.string().max(128),z.object({root:z.string().max(512),entries:z.array(z.string().max(512)).max(64)}).strict()).default({}),version:z.literal(2),key:z.string(),automatic_call_times:z.array(z.number().int().nonnegative()).max(6).default([]),retry_key:z.string().default(''),retry_not_before:z.number().int().nonnegative().default(0),dismissed:z.array(z.string()).max(1000),legacyDismissed:z.array(z.object({tab:z.string(),refs:z.array(refSchema)}).strict()).max(1000)})
 type State=z.infer<typeof stateSchema>
 const diskSchema=z.preprocess(value=>{
+ // An earlier local build recorded only cited refs under card_basis; that is not complete provenance, so it is dropped rather than trusted.
+ if(value&&typeof value==='object'&&'card_basis' in value){const rest={...value as Record<string,unknown>};delete rest.card_basis;value=rest}
  if(!value||typeof value!=='object'||'version' in value)return value
  const old=value as {cards?:unknown;dismissed?:unknown}
  const legacy=z.object({cards:z.array(z.object({tab:z.string(),title:z.string(),body:z.string(),refs:z.array(refSchema)}).passthrough()),dismissed:z.array(z.string()),key:z.string()}).safeParse(old)
  if(!legacy.success)return emptyState()
  return {version:2,recap:null,recap_basis:[],cards:[],key:'',dismissed:[],legacyDismissed:legacy.data.cards.filter(card=>legacy.data.dismissed.includes(keyOf(card))).map(card=>({tab:card.tab,refs:card.refs}))}
 },stateSchema)
-const emptyState=():State=>({version:2,recap:null,recap_basis:[],card_basis:{},cards:[],key:'',automatic_call_times:[],retry_key:'',retry_not_before:0,dismissed:[],legacyDismissed:[]})
+const emptyState=():State=>({version:2,recap:null,recap_basis:[],card_sources:{},cards:[],key:'',automatic_call_times:[],retry_key:'',retry_not_before:0,dismissed:[],legacyDismissed:[]})
 const sameRef=(a:{entry_id:string;version:string|number},b:{entry_id:string;version:string|number})=>a.entry_id===b.entry_id&&a.version===b.version
 const leaksRawText=(text:string)=>/(?:^|[^\w.])\/[\w.-]+\/[\w.-]|\b[A-Za-z]:[\\/]|\\\\[\w.$-]+\\|~[\\/]|\b(?:source|file):[\w-]+|\b(?:src|config|docs|runtime|clients)\/[\w./-]+|\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\b|\b(?:api[_-]?key|access[_-]?token|secret|password)\s*[:=：]|\b[a-f\d]{40,}\b/iu.test(text)
 const leaksRawField=(card:ContextCards['cards'][number])=>leaksRawText([card.title,card.body,card.why??'',card.next??''].join(' '))
@@ -45,10 +47,10 @@ export class WorkbenchContext{
   * Document cards keep an exact match.
   */
  #shownRefs(card:ContextCards['cards'][number]){
+  const basis=this.#state.card_sources[card.candidate_id]
+  if(basis&&!basis.entries.every(id=>this.#inputs.some(input=>input.id===id)))return null
   if(this.#candidate(card))return card.refs
-  const basis=this.#state.card_basis[card.candidate_id]
   if(!basis?.root.startsWith('project:'))return null
-  if(!basis.entries.every(id=>this.#inputs.some(input=>input.id===id)))return null
   return this.#candidates.find(candidate=>candidate.root===basis.root&&candidate.tab===card.tab)?.refs??null
  }
  #recapGrounded(recap:{refs:readonly {entry_id:string;version:string|number}[]},candidates:readonly ContextCandidate[]=this.#candidates){return recap.refs.every(ref=>candidates.some(c=>c.tab==='todos'&&c.refs.some(allowed=>sameRef(ref,allowed))))}
@@ -105,7 +107,7 @@ export class WorkbenchContext{
    const basis=result.recap?this.#recapBasis(result.recap,candidates):[]
    const recap=result.recap&&basis.length&&!leaksRawText(result.recap.text)&&this.#recapGrounded(result.recap,candidates)?result.recap:null
    const cardBasis=Object.fromEntries(cards.map(card=>{const candidate=candidates.find(c=>c.candidate_id===card.candidate_id)!;return [card.candidate_id,{root:candidate.root,entries:[...(candidate.sources??new Set(candidate.refs.map(ref=>ref.entry_id)))]}]}))
-   await this.#write(next=>{next.recap=recap;next.recap_basis=recap?basis:[];next.card_basis=cardBasis;next.cards=cards;next.key=key;next.retry_key='';next.retry_not_before=0});this.#status='ready'
+   await this.#write(next=>{next.recap=recap;next.recap_basis=recap?basis:[];next.card_sources=cardBasis;next.cards=cards;next.key=key;next.retry_key='';next.retry_not_before=0});this.#status='ready'
   }catch(error){failedAt=Date.now();if(this.#opened&&!signal.aborted)await this.#write(next=>{next.retry_key=key;next.retry_not_before=failedAt+300000}).catch(()=>undefined);this.#status='failed';console.error('[workbench-context] generation_failed',error instanceof z.ZodError?JSON.stringify(error.issues.map(i=>({code:i.code,path:i.path}))):error instanceof Error?error.name:'unknown')}finally{this.#run=undefined;this.changed();if(this.#opened){if(this.#manualPending){this.#manualPending=false;void this.refresh()}else if(key!==this.#key())this.update(this.#inputs,this.#digests&&{items:this.#digests,pending:this.#digestsPending});else if(this.#status==='failed'){this.#firstChangeAt=failedAt;this.#lastChangeAt=failedAt;this.#pendingKey=key;this.#schedule()}}}})();this.#run=run;await run
  }
 }

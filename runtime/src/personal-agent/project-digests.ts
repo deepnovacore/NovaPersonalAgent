@@ -38,7 +38,8 @@ export const projectKey=(root:string)=>createHash('sha256').update(root).digest(
  */
 export class ProjectDigests{
  #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#disk:z.infer<typeof diskSchema>={projects:{}};#opened=false
- #projects=new Map<string,Project>();#failures=new Map<string,{key:string;count:number;at:number}>();#blocked=new Map<string,string>();#spent:number[]=[]
+ /** Every document id currently eligible for a digest; a digest that read anything outside it is withheld until regenerated. */
+ #eligible=new Set<string>();#projects=new Map<string,Project>();#failures=new Map<string,{key:string;count:number;at:number}>();#blocked=new Map<string,string>();#spent:number[]=[]
  #timer:ReturnType<typeof setTimeout>|undefined;#run:Promise<void>|undefined;#runBatch:Project[]=[];#abort=new AbortController();#writes:Promise<void>=Promise.resolve()
  readonly #idleMs:number;readonly #batch:number;readonly #hourly:number;readonly #timeoutMs:number;readonly #now:()=>number
  constructor(path:string,readonly generate:DigestGenerator|undefined,readonly changed:()=>void,readonly options:ProjectDigestOptions={}){
@@ -60,14 +61,15 @@ export class ProjectDigests{
    // Refs keep their file ids across re-reads; the version is refreshed to the current one so downstream evidence checks still pass.
    const versions=new Map(project.input.documents.map(d=>[d.entry_id,d.version]))
    const refs=hit?.digest.refs.flatMap(r=>{const version=versions.get(r.entry_id);return version?[{entry_id:r.entry_id,version}]:[]})??[]
-   return hit&&refs.length?[{...hit.digest,name:project.input.name,refs,inputs:[...hit.inputs]}]:[]
+   return hit&&refs.length&&hit.inputs.every(id=>this.#eligible.has(id))?[{...hit.digest,name:project.input.name,refs,inputs:[...hit.inputs]}]:[]
   })
  }
  pending(){return [...this.#projects.values()].filter(p=>this.#disk.projects[p.input.project_key]?.key!==p.key).length}
  update(entries:readonly ContextEntry[]){
-  const now=this.#now(),groups=new Map<string,FileInput[]>()
+  const now=this.#now(),groups=new Map<string,FileInput[]>(),eligible=new Set<string>()
   for(const entry of entries){
    if(!('kind' in entry)||entry.kind!=='file'||entry.priority<1||!entry.content.trim()||!eligibleDocument(entry.rel_path,entry.role,entry.hidden_prefix_depth))continue
+   eligible.add(entry.id)
    const group=groups.get(entry.root)??[];group.push(entry);groups.set(entry.root,group)
   }
   const next=new Map<string,Project>()
@@ -83,7 +85,7 @@ export class ProjectDigests{
    const previous=this.#projects.get(project_key)
    next.set(project_key,{input,key,priority,recent,changedAt:previous?.key===key?previous.changedAt:now})
   }
-  const before=JSON.stringify(this.digests());this.#projects=next
+  const before=JSON.stringify(this.digests());this.#projects=next;this.#eligible=eligible
   if(JSON.stringify(this.digests())!==before)this.changed()
   this.#schedule()
  }
