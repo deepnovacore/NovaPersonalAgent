@@ -22,7 +22,7 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
   else card.append(el('p',item.body))
   attachSources(card,item.refs?.map(ref=>ref.label??ref.entry_id))
   const actions=el('div',undefined,'card-actions');card.append(actions)
-  if(tab==='goals')button('设为目标',()=>Promise.resolve(command('life.mutate',{op:'create',kind:'goal',title:item.title,note:item.next?`先从：${item.next}`:'',success_criteria:item.body})).then(()=>command('context.dismiss',{id:item.id})),actions)
+  if(tab==='goals'){const adopt=button('设为目标',()=>{adopt.disabled=true;return Promise.resolve(command('context.adopt',{id:item.id})).finally(()=>{adopt.disabled=false})},actions)}
   else if(tab==='todos'&&item.next)button('帮我做',()=>delegate(`请帮我推进「${item.title}」：${item.next}`),actions)
   else button('聊聊这个',()=>continueChat(`${item.title}：${item.body}`),actions)
   button('隐藏',()=>command('context.dismiss',{id:item.id}),actions).className='quiet'

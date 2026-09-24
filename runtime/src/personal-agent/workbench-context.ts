@@ -11,7 +11,7 @@ const line=(max:number)=>z.string().trim().min(1).max(max).nullable().default(nu
 /** A todo card says what, why now, and one concrete next step; a goal card names a state to reach, how to tell it is reached, and a first step; ideas leave why/next null. */
 export const contextCardSchema=z.object({candidate_id:z.string().min(1).max(128),tab:z.enum(['todos','ideas','goals']),title:z.string().trim().min(1).max(80),body:z.string().trim().min(1).max(120),why:line(80),next:line(80),refs:z.array(refSchema).min(1).max(8)}).strict()
 export const recapSchema=z.object({text:z.string().trim().min(1).max(160),refs:z.array(refSchema).min(1).max(8)}).strict()
-export const contextCardsSchema=z.object({recap:recapSchema.nullable().default(null),cards:z.array(contextCardSchema).max(20)}).strict()
+export const contextCardsSchema=z.object({recap:recapSchema.nullable().default(null),cards:z.array(contextCardSchema).max(9)}).strict()
 export type ContextCards=z.infer<typeof contextCardsSchema>
 export type ContextEntry=ContextInput | (Pick<MemoryEntry,'id'|'version'|'content'> & {origin?:'stated'|'inferred'})
 export type ContextGenerator=(candidates:readonly ContextCandidate[],signal:AbortSignal)=>Promise<z.input<typeof contextCardsSchema>>

@@ -74,7 +74,7 @@ test('unrelated provider descriptors cannot piggyback on a source identity allow
 test('acceptance host disables unrelated profile and understanding generators',()=>{
  const f=fixture();try{
  const gate=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href,host=new URL('../src/personal-agent/host.js',import.meta.url).href
- const code=`import assert from 'node:assert/strict';import {installAcceptanceGate} from ${JSON.stringify(gate)};import {PersonalAgentHost} from ${JSON.stringify(host)};installAcceptanceGate();const subject=new PersonalAgentHost({path:${JSON.stringify(f.manifest.originalBlackboardPath+'.personal.json')},userScope:'synthetic',memory:()=>undefined,pool:{},evidence:()=>null,generateProfile:()=>{throw Error('unrelated model')},understand:{}});assert.equal(subject.profileWarmup.generate,undefined);assert.equal(subject.understanding.options.pipeline,undefined);`
+ const code=`import assert from 'node:assert/strict';import {installAcceptanceGate} from ${JSON.stringify(gate)};import {PersonalAgentHost} from ${JSON.stringify(host)};installAcceptanceGate();const subject=new PersonalAgentHost({path:${JSON.stringify(f.manifest.originalBlackboardPath+'.personal.json')},userScope:'synthetic',memory:()=>undefined,pool:{},evidence:()=>null,generateProfile:()=>{throw Error('unrelated model')},understand:{},rankNews:()=>{throw Error('unrelated ranker')}});assert.equal(subject.profileWarmup.generate,undefined);assert.equal(subject.understanding.options.pipeline,undefined);assert.equal(subject.news.options.rank,undefined,'news stays a timeline under the gate');assert.equal(subject.news.options.firstRefreshMs,null,'no automatic feed reads unless the manifest turns news on');`
  const child=spawnSync(process.execPath,['--input-type=module','-e',code],{env:f.env,encoding:'utf8'})
  assert.equal(child.status,0,child.stderr)
  }finally{f.close()}
@@ -130,5 +130,38 @@ test('fetch probe cannot certify a stub error without an actual blocked counter 
  const code=`import assert from 'node:assert/strict';import {installAcceptanceGate,probeAcceptanceGate} from ${JSON.stringify(gate)};installAcceptanceGate();globalThis.fetch=async()=>{throw Error('acceptance_unknown_outbound')};await assert.rejects(probeAcceptanceGate(),/gate_probe_failed/);`
  const child=spawnSync(process.execPath,['--input-type=module','-e',code],{env:f.env,encoding:'utf8'})
  assert.equal(child.status,0,child.stderr)
+ }finally{f.close()}
+})
+test('news feeds pass the gate only when the manifest turns news on, and only as plain GETs',()=>{
+ const f=fixture();try{
+ const moduleUrl=new URL('../src/desktop/workbench-acceptance.js',import.meta.url).href
+ const run=(news:boolean,body:string)=>{
+  writeFileSync(f.manifestPath,JSON.stringify({...f.manifest,news}))
+  const code=`import assert from 'node:assert/strict';import net from 'node:net';import {installAcceptanceGate,acceptanceNewsEnabled} from ${JSON.stringify(moduleUrl)};
+ net.Socket.prototype.connect=function(){return this};
+ const seen=[];globalThis.fetch=async (input,init)=>{seen.push(String(input)+' '+JSON.stringify(init?.headers??null));net.connect({host:new URL(String(input)).hostname,port:443});return new Response('<rss/>')};
+ installAcceptanceGate();const feed='https://feeds.bbci.co.uk/news/rss.xml';${body}`
+  const child=spawnSync(process.execPath,['--input-type=module','-e',code],{env:f.env,encoding:'utf8'})
+  assert.equal(child.status,0,child.stderr)
+  const rows=readFileSync(f.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT,'utf8').trim().split('\n').map(line=>JSON.parse(line) as {kind:string;counts:Record<string,number>})
+  rmSync(f.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT);return rows
+ }
+ const off=run(false,`assert.equal(acceptanceNewsEnabled(),false);await assert.rejects(fetch(feed),/unknown_outbound/);`)
+ assert.equal(off.find(row=>row.kind==='disabled_modules')?.counts.news,1)
+ const on=run(true,`assert.equal(acceptanceNewsEnabled(),true);
+ assert.equal((await fetch(feed)).status,200);assert.equal((await fetch('https://www.ithome.com/rss/',{method:'get'})).status,200);
+ await assert.rejects(fetch(feed,{method:'POST',body:'{}'}),/news_get_only/);
+ await assert.rejects(fetch(feed,{method:'PUT'}),/news_get_only/);
+ await assert.rejects(fetch(feed+'?q=secret-query'),/news_get_only/,'no query data rides on a feed read');
+ await assert.rejects(fetch('https://feeds.bbci.co.uk/other.xml'),/news_get_only/,'only the built-in feed paths');
+ await assert.rejects(fetch(new Request(feed)),/news_get_only/,'a Request object would carry its own headers');
+ assert.equal((await fetch(feed,{headers:{Authorization:'secret-token','X-Private':'secret-header'}})).status,200);
+ assert.equal(seen.length,3);assert.ok(seen.every(line=>line.includes('NovaAudioAgent-News')&&!line.includes('secret')),seen.join('|'));
+ await assert.rejects(fetch('https://feeds.bbci.co.uk.invalid/rss.xml'),/unknown_outbound/);
+ await assert.rejects(fetch('http://feeds.bbci.co.uk/news/rss.xml'),/unknown_outbound/);
+ assert.throws(()=>net.connect({host:'feeds.bbci.co.uk',port:443}),/unknown_socket/);`)
+ assert.equal(on.find(row=>row.kind==='disabled_modules')?.counts.news,0)
+ assert.equal(on.filter(row=>row.kind==='news_fetch'&&row.counts.ok===1).length,3)
+ assert.ok(!JSON.stringify(on).includes('bbc'),'counts carry no feed identity')
  }finally{f.close()}
 })

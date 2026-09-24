@@ -21,13 +21,29 @@ export function eligibleDocument(path:string,role:string,hiddenPrefixDepth=0):bo
  if(excludedNames.test(basename(path))||generatedNames.test(basename(path)))return false
  return new Set(['.md','.markdown','.txt','.pdf','.docx']).has(extname(path).toLowerCase())
 }
-const actionLine=(text:string)=>text.split(/\r?\n/u).some(line=>/^\s*(?:[-*]\s*)?(?:next step|todo|待办|下一步|下一步行动|行动项)\s*[:：-]\s*\S/iu.test(line))
-const ideaEvidence=(text:string)=>/\b(?:proposal|idea)\b|想法|提议|建议|可以考虑|计划|替代|改进方向|设计方案/iu.test(text)
+const ACTION_LINE=/^\s*(?:[-*]\s*)?(?:next step|todo|待办|下一步|下一步行动|行动项)\s*[:：-]\s*\S/imu
+const IDEA_EVIDENCE=/\b(?:proposal|idea)\b|想法|提议|建议|可以考虑|计划|替代|改进方向|设计方案/iu
+const actionLine=(text:string)=>ACTION_LINE.test(text)
+const ideaEvidence=(text:string)=>IDEA_EVIDENCE.test(text)
 const genericOverview=(path:string)=>/^readme(?:[._-][a-z]+)?\.(?:md|markdown|txt)$/iu.test(basename(path))
 
 const GOAL_PROJECTS=3
 /** Enough for the paragraph a keyword matched; the whole candidate set goes into one prompt, so longer excerpts mostly add latency. */
 const EXCERPT_CHARS=400
+/** The model must see the line that admitted the candidate: past the prefix, keep the first line and a window around the evidence line. */
+function excerptFor(text:string,tab:'todos'|'ideas'):string{
+ const prefix=text.slice(0,EXCERPT_CHARS),match=(tab==='todos'?ACTION_LINE:IDEA_EVIDENCE).exec(text)
+ if(!match)return prefix
+ const at=match.index+match[0].length-1,lineStart=text.lastIndexOf('\n',at)+1,next=text.indexOf('\n',at),lineEnd=next<0?text.length:next
+ // The whole line fits in the prefix, or it is longer than any window and its evidence already shows there.
+ if(lineEnd<=EXCERPT_CHARS||lineEnd-lineStart>=EXCERPT_CHARS&&at<EXCERPT_CHARS)return prefix
+ const newline=text.indexOf('\n'),title=newline>0?text.slice(0,Math.min(newline,80))+'\n…\n':'…\n',budget=EXCERPT_CHARS-title.length
+ // End on the evidence line when it fits, else start at it; begin on a line boundary when one is in reach.
+ let from=lineEnd-lineStart>budget?lineStart:Math.max(0,lineEnd-budget)
+ const boundary=text.indexOf('\n',from)
+ if(from<lineStart&&boundary>=from&&boundary<lineStart)from=boundary+1
+ return title+text.slice(from,from+budget)
+}
 /**
  * One todo candidate per own project with a stated focus or next step; the digest already read the project's documents.
  * The most active own projects also offer one long-term direction as a goal candidate; it is only a suggestion until the user adopts it.
@@ -58,7 +74,7 @@ export function selectContextCandidates(inputs:readonly ContextInput[],digests?:
   if(input.kind==='memory'&&!/\bidea\b|想法|可以考虑|建议/u.test(input.content))continue
   for(const tab of tabs){
    const candidate_id=candidateId(tab,primaryId,version)
-   const item:ContextCandidate={candidate_id,id:candidate_id,version,content:input.content.slice(0,EXCERPT_CHARS),tab,primaryFileId:input.kind==='file'?input.file_id:null,refs:[{entry_id:input.id,version:input.version}],excerpt:input.content.slice(0,EXCERPT_CHARS),reason_code:input.kind==='memory'?'stated_idea':tab==='todos'?'document_action':'document_idea',root,priority:input.kind==='file'?input.priority:2,mtime_ms:input.kind==='file'?input.mtime_ms:0}
+   const item:ContextCandidate={candidate_id,id:candidate_id,version,content:excerptFor(input.content,tab),tab,primaryFileId:input.kind==='file'?input.file_id:null,refs:[{entry_id:input.id,version:input.version}],excerpt:excerptFor(input.content,tab),reason_code:input.kind==='memory'?'stated_idea':tab==='todos'?'document_action':'document_idea',root,priority:input.kind==='file'?input.priority:2,mtime_ms:input.kind==='file'?input.mtime_ms:0}
    const group=groups.get(root)??[]
    if(group.filter(c=>c.tab===tab).length>=2)continue
    group.push(item);groups.set(root,group)

@@ -55,6 +55,14 @@ test('a document excerpt sent to the model stops at 400 characters',()=>{
  const [candidate]=selectContextCandidates([file('long','plan.md','An idea for a simpler workflow. '+'细'.repeat(900),3)])
  assert.equal(candidate?.excerpt.length,400);assert.equal(candidate?.content.length,400)
 })
+test('evidence past the first 400 characters stays in the excerpt, with the first line as a title',()=>{
+ const filler=Array.from({length:12},(_,i)=>`第 ${i} 段背景说明，写了一些与行动无关的细节。`.repeat(2)).join('\n')
+ const [todo]=selectContextCandidates([file('t','notes.md','发布清单\n'+filler+'\n下一步：把原生验收跑完\n尾注',3)])
+ assert.equal(todo?.tab,'todos');assert.ok(todo.excerpt.length<=400);assert.equal(todo.content,todo.excerpt)
+ assert.match(todo.excerpt,/^发布清单\n…\n第 \d+ 段/u,'the window starts on a line boundary');assert.match(todo.excerpt,/下一步：把原生验收跑完/u)
+ const [idea]=selectContextCandidates([file('i','design.md','设计笔记\n'+filler+'\n可以考虑把来源收进右键菜单',3)])
+ assert.equal(idea?.tab,'ideas');assert.ok(idea.excerpt.length<=400);assert.match(idea.excerpt,/可以考虑把来源收进右键菜单$/u)
+})
 test('own projects, and only own projects, offer at most one long-term direction each and three overall',()=>{
  const digest=(key:string,role:'own'|'third_party'|'sample')=>({project_key:key,name:key,role,summary:`${key} 是一个长期在做的项目`,focus:null,next_step:null,refs:[{entry_id:`source:${key}`,version:'v1'}]})
  const selected=selectContextCandidates([],[digest('a','own'),digest('lib','third_party'),digest('demo','sample'),digest('b','own'),digest('c','own'),digest('d','own')])

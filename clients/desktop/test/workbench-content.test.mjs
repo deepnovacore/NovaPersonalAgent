@@ -138,6 +138,10 @@ test('a goal suggestion becomes a goal only when the user sets it, and the page 
  const actions=nodes.find(node=>node.className==='card-actions')
  assert.deepEqual(actions.children.map(node=>node.textContent),['设为目标','隐藏'])
  assert.equal(calls.length,0,'nothing is saved by rendering')
- await actions.children[0].action()
- assert.deepEqual(calls,[['life.mutate',{op:'create',kind:'goal',title:'让 Nova 成为每天在用的助手',note:'先从：先把待办页跑顺',success_criteria:'一周里大部分事情都交给它。'}],['context.dismiss',{id:'g'}]])
+ let settle;const pending=new Promise(resolve=>{settle=resolve})
+ h.panel.children.length=0;renderSourceSuggestions(h.panel,{tab:'goals',context,sources:[{state:'connected'}],button:h.button,command:(method,params)=>{calls.push([method,params]);return pending},continueChat:()=>{}})
+ const adopt=all(h.panel).find(node=>node.className==='card-actions').children[0]
+ const done=adopt.action();assert.equal(adopt.disabled,true,'a pending adoption cannot be clicked again')
+ settle();await done;assert.equal(adopt.disabled,false)
+ assert.deepEqual(calls,[['context.adopt',{id:'g'}]],'adoption is one backend command keyed by the suggestion')
 })

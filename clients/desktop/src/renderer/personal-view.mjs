@@ -6,6 +6,7 @@ import {mountChatPane} from './chat-pane.mjs'
 import {renderMemorySection} from './memory-page.mjs'
 import {renderTasksPage,activeTaskCount} from './tasks-page.mjs'
 import {renderSourceSuggestions} from './workbench-suggestions.mjs'
+import {disposeSources} from './source-popover.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 const PAGE_TITLE=Object.fromEntries(RAIL_ITEMS.map(item=>[item.id,`${item.label} · ${item.title}`]))
 /** The workbench: icon rail, personal-object pages in the middle, Nova as a collapsible pane on the right. */
@@ -56,7 +57,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
   const fields=[...panel.querySelectorAll('input,textarea,select')],focusIndex=focused?fields.indexOf(focused):-1
   const edit=focusIndex>=0?{index:focusIndex,key:focused.getAttribute?.('data-editor-key'),tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
   const panelScroll=panel.scrollTop
-  panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
+  disposeSources();panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
   const s=c.snapshot;const caps=s?.capabilities??{}
   const candidateKind=({todos:'todo',ideas:'idea',goals:'goal',profile:'profile'})[selected]
   const pending=el('section',undefined,'pending-group');pending.setAttribute('aria-label','待确认')

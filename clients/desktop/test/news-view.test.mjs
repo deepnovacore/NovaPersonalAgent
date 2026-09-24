@@ -115,3 +115,24 @@ test('a background profile refresh keeps the draft on screen without a status bo
  const first=harness(t);renderProfile(first.panel,{...base,...first,warmup:{status:'working',draft:null,sources:[]}});nodes=flatten(first.panel)
  assert.ok(nodes.some(n=>n.className==='warmup-status'));assert.ok(nodes.some(n=>n.className==='warmup-skeleton'))
 })
+test('a news card keeps its actions in one row and its recommendation basis out of the reading flow',t=>{
+ const h=harness(t),flatten=node=>[node,...node.children.flatMap(flatten)]
+ const news={enabled:true,mode:'personalized',pending:0,sources:[{id:'bbc',name:'BBC'}],interests:[{id:'ai',text:'AI',weight:1}],saved:[],items:[
+  {id:'a',source_id:'bbc',title:'Ranked',summary:'x',url:'https://www.bbc.com/news/a',content_hash:'h',ranking:{reason:'与你关注的 AI 相关',matches:[{interest_id:'ai',score:0.9,quote:'voice models'}]}},
+  {id:'b',source_id:'bbc',title:'Unranked',summary:'y',url:'https://www.bbc.com/news/b',content_hash:'h',ranking:null},
+ ]}
+ renderNews(h.panel,{...h,news})
+ const [ranked,plain]=h.panel.children.filter(n=>n.dataset?.articleId)
+ const row=card=>card.children.find(n=>n.className==='card-actions')
+ assert.deepEqual(row(ranked).children.map(n=>n.textContent),['阅读原文','收藏','转为个人事项','多看「AI」','少看「AI」'])
+ assert.ok(row(ranked).children.slice(3).every(n=>n.className==='quiet'))
+ const popover=ranked.children.find(n=>n.className==='source-popover');assert.equal(popover.hidden,true)
+ assert.ok(flatten(popover).some(n=>n.textContent==='AI：voice models'))
+ assert.ok(!flatten(h.panel).some(n=>n.tag==='details'&&n.children.some(c=>c.textContent==='推荐依据')))
+ assert.ok(!plain.children.some(n=>n.className==='source-info'),'no basis, no icon')
+ assert.ok(!flatten(h.panel).some(n=>/先按时间给你看/u.test(n.textContent??'')),'interests exist, so no timeline note')
+ h.panel.children.length=0;renderNews(h.panel,{...h,news:{...news,interests:[],items:[]}})
+ assert.ok(flatten(h.panel).some(n=>/先按时间给你看/u.test(n.textContent??'')),'without interests the page says it is a timeline for now')
+ h.panel.children.length=0;renderNews(h.panel,{...h,news:{...news,interests_seeded:true,items:[]}})
+ assert.ok(flatten(h.panel).some(n=>/从你的 Profile 里猜的/u.test(n.textContent??'')),'guessed interests ask to be saved before they rank')
+})

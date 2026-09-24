@@ -60,3 +60,12 @@ test('only one source layer is open, and a nested host owns its own right-click'
  bubble(inner,'contextmenu',{clientX:1,clientY:1});assert.equal(b.menu.hidden,false);assert.equal(a.menu.hidden,true)
  bubble(a.info,'click');assert.equal(a.popover.hidden,false);assert.equal(b.menu.hidden,true,'opening another closes the first')
 })
+
+test('a panel rebuild disposes the open layer, and focus never returns to a detached node',async t=>{
+ const doc=dom(t),{disposeSources}=await import('../src/renderer/source-popover.mjs')
+ const host=new Node('article'),s=attachSources(host,['notes.md'])
+ bubble(s.info,'click');assert.equal(doc.listeners.keydown.size,1)
+ disposeSources();assert.equal(s.popover.hidden,true);assert.equal(doc.listeners.keydown.size,0);assert.equal(doc.listeners.pointerdown.size,0)
+ const again=attachSources(new Node('article'),['a.md']);bubble(again.info,'click');again.info.isConnected=false;doc.activeElement=null
+ docFire(doc,'keydown',{key:'Escape'});assert.equal(again.popover.hidden,true);assert.equal(doc.activeElement,null,'a detached trigger is not focused')
+})

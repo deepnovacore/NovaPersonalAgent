@@ -2,6 +2,8 @@
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
 let current=null
 const closeCurrent=restore=>{const open=current;current=null;open?.close(restore)}
+/** Call before a panel rebuild: the open layer's document listeners and its detached subtree go with the old DOM. */
+export function disposeSources(){closeCurrent(false)}
 export function attachSources(host,labels,{title='查看依据'}={}){
  const items=[...new Set((labels??[]).filter(Boolean))]
  if(!items.length)return null
@@ -17,7 +19,7 @@ export function attachSources(host,labels,{title='查看依据'}={}){
  const onKey=event=>{if(event.key==='Escape'){event.preventDefault();closeCurrent(true)}}
  const onPointer=event=>{if(!popover.contains(event.target)&&!menu.contains(event.target)&&event.target!==info)closeCurrent(false)}
  const listen=on=>{const method=on?'addEventListener':'removeEventListener';document[method]?.('keydown',onKey,true);document[method]?.('pointerdown',onPointer,true)}
- const entry={close(restore){popover.hidden=true;menu.hidden=true;info.setAttribute('aria-expanded','false');listen(false);if(restore)returnFocus?.focus?.()}}
+ const entry={close(restore){popover.hidden=true;menu.hidden=true;info.setAttribute('aria-expanded','false');listen(false);if(restore&&returnFocus?.isConnected!==false)returnFocus?.focus?.()}}
  const take=()=>{if(current!==entry){closeCurrent(false);current=entry;listen(true)}}
  const open=()=>{take();menu.hidden=true;popover.hidden=false;info.setAttribute('aria-expanded','true');popover.focus?.()}
  const openMenu=(x,y)=>{take();popover.hidden=true;menu.hidden=false;menu.style.left=`${Math.round(x)}px`;menu.style.top=`${Math.round(y)}px`;item.focus?.()}

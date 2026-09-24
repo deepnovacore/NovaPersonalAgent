@@ -11,8 +11,9 @@ import {z} from 'zod'
 import {currentModelPurpose} from '../model/model-purpose.js'
 import type {CapabilityRegistry} from '../config/capability-registry.js'
 import {Dispatcher,getGlobalDispatcher,setGlobalDispatcher} from 'undici'
+import {FEED_HEADERS,NEWS_SOURCES} from '../news/feeds.js'
 
-const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300),profileGeneration:z.boolean().default(false)}).strict()
+const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300),profileGeneration:z.boolean().default(false),news:z.boolean().default(false)}).strict()
 export type AcceptanceManifest=z.infer<typeof manifestSchema>
 let active:AcceptanceManifest|undefined
 let calls=0,blocked=0,probeVerified=false
@@ -27,6 +28,10 @@ export function assertOriginalProfilePaths(actual:{userData?:string;blackboardPa
 }
 export function acceptanceEnabled():boolean{return !!process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT}
 export function acceptanceProfileGenerationEnabled():boolean{return active?.profileGeneration===true}
+/** Public RSS reads are allowed only when the manifest turns news on, and only as plain GETs to the built-in feed origins. */
+export function acceptanceNewsEnabled():boolean{return active?.news===true}
+const newsOrigins=new Set(NEWS_SOURCES.map(source=>new URL(source.url).origin)),newsUrls=new Set(NEWS_SOURCES.map(source=>new URL(source.url).href))
+const newsOrigin=(origin:string)=>active?.news===true&&newsOrigins.has(origin)
 export function acceptanceManifest():AcceptanceManifest|undefined{return active}
 export function loadAcceptanceManifest(environment:NodeJS.ProcessEnv=process.env):AcceptanceManifest|undefined{
  if(!environment.NOVA_WORKBENCH_ACCEPTANCE_REPORT)return undefined
@@ -52,6 +57,7 @@ export function assertAcceptanceUrl(input:string,allowProvider=false):void{
  if(['file:','nova:','devtools:'].includes(url.protocol))return
  if(url.protocol==='ws:'&&loopback.has(url.host))return
  if(allowProvider&&url.protocol==='https:'&&active.providers.some(provider=>provider.origin===url.origin))return
+ if(allowProvider&&url.protocol==='https:'&&newsOrigin(url.origin))return
  blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error('acceptance_unknown_outbound')
 }
 /** Install in EACH process before opening any profile. Socket guard also covers undici/ws. */
@@ -76,7 +82,7 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
   const host=typeof options==='object'?options.host:typeof args[1]==='string'?args[1]:undefined
   const port=typeof options==='object'?options.port:options
   // Unix sockets and arbitrary local proxies could bypass provider enforcement.
-  const permitted=host!==undefined&&(loopback.has(host+':'+String(port))||manifest.providers.some(provider=>{const url=new URL(provider.origin);return fetchOrigin.getStore()===provider.origin&&url.hostname===host&&String(port)===String(url.port||443)}))
+  const permitted=host!==undefined&&(loopback.has(host+':'+String(port))||manifest.providers.some(provider=>{const url=new URL(provider.origin);return fetchOrigin.getStore()===provider.origin&&url.hostname===host&&String(port)===String(url.port||443)})||[...newsOrigins].some(origin=>{const url=new URL(origin);return newsOrigin(origin)&&fetchOrigin.getStore()===origin&&url.hostname===host&&String(port)==='443'}))
   if(!permitted){blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error('acceptance_unknown_socket')}
   return Reflect.apply(originalConnect,this,args)
  } as Socket['connect']
@@ -122,9 +128,16 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
    try{const response=await fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}));appendAcceptanceCounts('model_call',{...labels,latency_ms:Math.round(performance.now()-started),ok:Number(response.ok),status:response.status});return response}
    catch(error){appendAcceptanceCounts('model_call',{...labels,latency_ms:Math.round(performance.now()-started),ok:0,[error instanceof Error&&error.name==='AbortError'||error instanceof Error&&error.name==='TimeoutError'?'aborted':'network_error']:1});throw error}
   }
+  if(newsOrigin(new URL(url).origin)){
+   // A feed read sends nothing: exactly a built-in feed URL, GET with no body, and fixed public headers in place of the caller's.
+   if(typeof input!=='string'&&!(input instanceof URL)||!newsUrls.has(new URL(url).href)||init?.body!==undefined&&init.body!==null||(init?.method??'GET').toUpperCase()!=='GET')rejectEgress('acceptance_news_get_only')
+   const started=performance.now(),href=new URL(url).href
+   try{const response=await fetchOrigin.run(new URL(url).origin,()=>originalFetch(href,{method:'GET',headers:FEED_HEADERS,redirect:'error',...(init?.signal?{signal:init.signal}:{})}));appendAcceptanceCounts('news_fetch',{fetches:1,latency_ms:Math.round(performance.now()-started),ok:Number(response.ok),status:response.status});return response}
+   catch(error){appendAcceptanceCounts('news_fetch',{fetches:1,latency_ms:Math.round(performance.now()-started),ok:0,network_error:1});throw error}
+  }
   return fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}))
  }
- appendAcceptanceCounts('disabled_modules',{news:1,proactive:1,connectors:1,phone:1,external_mcp:1,coding:1,voice_activation:1,profile_generation:Number(!manifest.profileGeneration),understanding:1,memory_overview:1,search:1,camera_capability:1,wake_word:1})
+ appendAcceptanceCounts('disabled_modules',{news:Number(!manifest.news),proactive:1,connectors:1,phone:1,external_mcp:1,coding:1,voice_activation:1,profile_generation:Number(!manifest.profileGeneration),understanding:1,memory_overview:1,search:1,camera_capability:1,wake_word:1})
  return manifest
 }
 export function acceptanceProfileHash(path:string):string{return createHash('sha256').update(canonical(path)).digest('hex')}

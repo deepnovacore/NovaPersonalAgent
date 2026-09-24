@@ -438,11 +438,13 @@ test('a stated idea and an authorized file can generate together without rejecti
  finally{await host.close();await f.close()}
 })
 
-test('profile warmup generates grounded suggestions without writing facts or enabling news',async()=>{
+test('profile warmup generates grounded suggestions without writing facts, and seeds news interests once',async()=>{
  const f=await fixture();await f.host.close();let calls=0
  f.entries.set('plan',{...entry(),evidence_refs:['e:plan']});const memory={...f.host.options.memory()!,canProcessEvidence:()=>Promise.resolve(true)}
  const host=new PersonalAgentHost({...f.host.options,memory:()=>memory,generateProfile:entries=>{calls++;return Promise.resolve({about:null,interests:[{text:'Product design',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]}]})}})
- try{await host.open();await host.profileWarmup.refresh();const state=host.snapshot();assert.equal(state.profile_preparation.status,'ready');assert.equal(state.life.profile.about,'');assert.equal(state.news.enabled,false);assert.deepEqual(state.news.interests,[])
+ try{await host.open();await host.profileWarmup.refresh();const state=host.snapshot();assert.equal(state.profile_preparation.status,'ready');assert.equal(state.life.profile.about,'');assert.equal(state.news.enabled,true,'news is on by default')
+  for(let i=0;i<100&&!host.snapshot().news.interests.length;i++)await new Promise(r=>setTimeout(r,5))
+  assert.deepEqual(host.snapshot().news.interests.map(i=>i.text),['Product design'],'Profile interests seed an unconfigured feed')
   await host.refreshMemory();await host.profileWarmup.refresh();assert.equal(calls,1,'ordinary snapshot reads do not restart warmup')
   f.entries.clear();await host.sourceChanged();await host.profileWarmup.refresh();assert.equal(host.snapshot().profile_preparation.draft,null)
  }finally{await host.close();await f.close()}
@@ -466,4 +468,25 @@ test('active authorized project documents can ground a profile draft without bec
  const host=new PersonalAgentHost({...f.host.options,generateProfile:entries=>{calls++;assert.equal(entries[0]!.origin,'inferred');return Promise.resolve({about:{text:'Design systems',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]},work:[{title:'Design',text:'Builds design systems',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]}],interests:[]})}});
  host.setSources({list:()=>[],contextEntries:()=>available?[{kind:'file',id:'source:document',version:'v1',content:'Product design notes',source_id:'s',file_id:'f',root:'/project',rel_path:'project/notes.md',role:'document',mtime_ms:Date.now(),priority:2}]:[],command:()=>Promise.resolve({})});
  try{await host.open();const existing=host.snapshot().memory.entries.length;await host.profileWarmup.refresh();assert.equal(calls,1);assert.equal(host.profileWarmup.snapshot().draft?.work.length,1);assert.equal(host.snapshot().memory.entries.length,existing);available=false;await host.sourceChanged();assert.equal(host.profileWarmup.snapshot().draft,null)}finally{await host.close();await f.close()}
+})
+
+test('adopting a goal suggestion creates one goal even across retries and a failed dismiss',async()=>{
+ const f=await fixture()
+ try{
+  const card={id:'goal-card',candidate_id:'goal-card',tab:'goals' as const,title:'让 Nova 成为每天在用的助手',body:'一周里大部分事情都交给它。',why:null,next:'先把待办页跑顺',refs:[]}
+  const context=f.host.workbenchContext as unknown as {snapshot:()=>unknown;dismiss:(id:string)=>Promise<void>};const real=context.snapshot.bind(context)
+  let failures=1;const dismissed:string[]=[]
+  context.snapshot=()=>({...(real() as object),cards:[card,{...card,id:'todo-card',tab:'todos'}]})
+  context.dismiss=id=>{if(failures-->0)return Promise.reject(Error('disk_full'));dismissed.push(id);return Promise.resolve()}
+  const adopt=(request_id:string,id='goal-card')=>f.host.command({type:'personal.command',request_id,method:'context.adopt',params:{id}}) as Promise<{ok:boolean;error?:string}>
+  assert.equal((await adopt('first')).ok,false,'the dismiss failure surfaces')
+  assert.equal((await adopt('second')).ok,true);assert.equal((await adopt('third')).ok,true)
+  const goals=f.host.life.snapshot().goals
+  assert.equal(goals.length,1);assert.equal(goals[0]!.title,card.title);assert.equal(goals[0]!.note,'先从：先把待办页跑顺');assert.equal(goals[0]!.success_criteria,card.body)
+  card.title='让 Nova 真正成为每天在用的助手'
+  assert.equal((await adopt('reworded')).ok,true,'a regenerated card with the same id is already adopted')
+  assert.equal(f.host.life.snapshot().goals.length,1)
+  assert.deepEqual(dismissed,['goal-card','goal-card','goal-card'])
+  assert.equal((await adopt('todo','todo-card')).ok,false,'only a goal suggestion can be adopted')
+ }finally{await f.close()}
 })

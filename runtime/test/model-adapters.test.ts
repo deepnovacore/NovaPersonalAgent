@@ -233,7 +233,19 @@ test('workbench generation includes its schema in the provider-visible prompt',a
  assert.doesNotMatch(gateway.completions[0]!.prompt,/\/project/u)
  assert.match(gateway.completions[0]!.system,/正文只写一句话/u)
  assert.match(gateway.completions[0]!.system,/每类最多三张/u)
- assert.equal(gateway.completions[0]!.maxTokens,4000,'the reply has a ceiling that only stops runaway output')
+ assert.equal(gateway.completions[0]!.maxTokens,8000,'nine full cards fit under the ceiling')
+})
+test('a cut-off context reply retries once with half the candidates, and each tab keeps at most three cards',async()=>{
+ const candidate=(id:string)=>({candidate_id:id,id,version:'v1',content:'A project document',tab:'todos' as const,primaryFileId:id,refs:[{entry_id:'source:'+id,version:'v1'}],excerpt:'A project document',reason_code:'document_action' as const,root:'/project',priority:0,mtime_ms:1})
+ const card=(id:string,tab:string)=>({candidate_id:id,tab,title:'T'+id,body:'B',why:null,next:null,refs:[{entry_id:'source:'+id,version:'v1'}]})
+ const replies=['{"recap":null,"cards":[{"candidate_id":"a","tab":"todos","title":"cut',JSON.stringify({recap:null,cards:[card('a','todos'),card('b','todos'),card('c','todos'),card('d','todos'),card('e','ideas')]})]
+ const prompts:string[]=[]
+ const gateway={complete:(request:CompleteRequest)=>{prompts.push(request.prompt);return Promise.resolve({text:replies.shift()!})}} as unknown as ModelGateway
+ const result=await new GatewaySurrogate({gateway,model:'m',proactivityPreset:'balanced'}).generateContext(['a','b','c','d','e'].map(candidate),new AbortController().signal)
+ assert.equal(prompts.length,2);assert.equal((JSON.parse(prompts[1]!) as {candidates:unknown[]}).candidates.length,3)
+ assert.deepEqual(result.cards.map(item=>item.candidate_id),['a','b','c','e'])
+ const broken={complete:()=>Promise.resolve({text:'{'})} as unknown as ModelGateway
+ await assert.rejects(new GatewaySurrogate({gateway:broken,model:'m',proactivityPreset:'balanced'}).generateContext([candidate('a'),candidate('b')],new AbortController().signal),SyntaxError,'a second failure surfaces for the backoff')
 })
 test('workbench generation allows no candidates and makes no model call',async()=>{
  const gateway=new ScriptedGateway([],JSON.stringify({cards:[]}))
