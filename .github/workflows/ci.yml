@@ -10,6 +10,16 @@ permissions:
   contents: read
 
 jobs:
+  review-automation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test .github/scripts/pr-review.test.cjs
+
   electron:
     strategy:
       fail-fast: false
