@@ -18,6 +18,16 @@ test('populated saved Todos have no saved-empty copy beside suggestions',t=>{
  assert.match(output,/Call supplier/u);assert.match(output,/Compare flows/u)
  assert.doesNotMatch(output,/还没有待办/u)
 })
+test('an empty saved list beside suggestions says whose list it is instead of claiming nothing is there',t=>{
+ for(const [kind,tab] of [['todo','todos'],['idea','ideas'],['goal','goals']]){
+  const h=harness(t)
+  renderLife(h.panel,{...h,kind,state:{todos:[],ideas:[],goals:[]},suggested:1})
+  assert.doesNotMatch(text(h.panel),/还没有(待办|保存想法|设定目标)/u,tab)
+  assert.match(text(h.panel),/不会自动加进来/u)
+  const bare=harness(t);renderLife(bare.panel,{...bare,kind,state:{todos:[],ideas:[],goals:[]}})
+  assert.match(text(bare.panel),/还没有(待办|保存想法|设定目标)/u,'without suggestions the empty state stays')
+ }
+})
 test('the Todo top shows a recap and action cards that hand a prepared request to Nova',t=>{
  const h=harness(t),drafts=[],chats=[]
  const context={status:'ready',candidate_count:2,recap:{text:'最近主要在做语音 Agent 的工作台。',projects:[{name:'nova',line:'正在修工作台内容'}]},cards:[

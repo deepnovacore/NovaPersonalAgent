@@ -3,7 +3,7 @@ import {attachSources} from './source-popover.mjs'
 const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n}
 const labels={todo:'待办',idea:'想法',goal:'目标'}
 const statuses={todo:{open:'待办',doing:'进行中',waiting:'等待他人',done:'已完成',cancelled:'已取消'},idea:{active:'保留',archived:'已归档'},goal:{active:'推进中',paused:'已暂停',completed:'已达成',archived:'已归档'}}
-export function renderLife(panel,{kind,state,command,button,local,rerender,delegate,openArticle,run=action=>action()}){
+export function renderLife(panel,{kind,state,command,button,local,rerender,delegate,openArticle,suggested=0,run=action=>action()}){
  const rows=state?.[kind==='todo'?'todos':kind==='idea'?'ideas':'goals']??[]
  panel.append(el('h2',`${{todo:'Todos',idea:'Ideas',goal:'Goals'}[kind]} · ${labels[kind]}`))
  panel.append(el('p',{todo:'你要做的、在等别人回的，都放这里。要帮忙就叫我。',idea:'想到什么先放这里，想动手了再转成待办或目标。',goal:'写下想去的方向和怎样算到了，再挂几件待办一步步走。'}[kind]))
@@ -21,7 +21,9 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
  button(draft.id?'保存修改':'保存',async()=>{const params={op:draft.id?'update':'create',kind,title:draft.title,note:draft.note};if(draft.id)Object.assign(params,{id:draft.id,expected_version:draft.version});if(kind==='todo')params.due=draft.due||null;if(kind==='goal')params.success_criteria=draft.success_criteria;else params.goal_id=draft.goal_id||null;await command('life.mutate',params);delete local[formKey];delete local[openKey];rerender()},form)
  if(draft.id)button('取消编辑',()=>{delete local[formKey];delete local[openKey];rerender()},form)
  const visible=rows.filter(r=>local[kind+':all']||!['done','cancelled','archived','completed'].includes(r.status))
- if(!visible.length){const empty=el('section');empty.className='workbench-empty';const copy=!state?['正在读取已保存的内容','稍后会在这里显示你的记录。']:rows.length?{todo:['当前没有进行中的待办','已完成的记录可以从上方展开。'],idea:['当前没有保留的想法','已归档的想法可以从上方展开。'],goal:['当前没有推进中的目标','已归档的目标可以从上方展开。']}[kind]:{todo:['还没有待办','想起一件要做的事，可以随时记在这里。'],idea:['还没有保存想法','有个念头时，先用一句话记下来就好。'],goal:['还没有设定目标','可以先写下想推进的方向，以及怎样算达成。']}[kind];empty.append(el('h3',copy[0]),el('p',copy[1]));panel.append(empty)}
+ // With Nova's suggestions on the page, a large empty box reads as "nothing here"; one quiet line says whose list this is.
+ if(!visible.length&&state&&!rows.length&&suggested){const note=el('p',{todo:'你自己记下的待办会放在这里；上面的建议不会自动加进来。',idea:'你自己记下的想法会放在这里；下面的建议不会自动加进来。',goal:'你自己定下的目标会放在这里；下面的方向不会自动加进来。'}[kind]);note.className='hint';panel.append(note)}
+ else if(!visible.length){const empty=el('section');empty.className='workbench-empty';const copy=!state?['正在读取已保存的内容','稍后会在这里显示你的记录。']:rows.length?{todo:['当前没有进行中的待办','已完成的记录可以从上方展开。'],idea:['当前没有保留的想法','已归档的想法可以从上方展开。'],goal:['当前没有推进中的目标','已归档的目标可以从上方展开。']}[kind]:{todo:['还没有待办','想起一件要做的事，可以随时记在这里。'],idea:['还没有保存想法','有个念头时，先用一句话记下来就好。'],goal:['还没有设定目标','可以先写下想推进的方向，以及怎样算达成。']}[kind];empty.append(el('h3',copy[0]),el('p',copy[1]));panel.append(empty)}
  for(const row of visible){const card=el('article');card.className='personal-card';card.dataset.lifeId=row.id;card.append(el('h3',row.title),el('p',row.note));panel.append(card)
   if(row.news_source){card.append(el('p',`由你从公开资讯保存：${row.news_source.title}`),el('p',row.news_source.url));if(openArticle)button('查看资讯原文',()=>openArticle(row.news_source.url),card)}
   if(row.due)card.append(el('p',`到期：${row.due}`))
