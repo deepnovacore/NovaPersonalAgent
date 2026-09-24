@@ -119,6 +119,9 @@ export class ProfileWarmup{
     if(!draft)throw Error('invalid_profile_evidence')
     outcome.items=factCount(draft)
     const current=this.#prune(draft,this.#entries)
+    // A reply that leaves about out keeps the previous one while everything it cites is still current; a withdrawal has already pruned it from the cache.
+    const kept=this.#cache.draft?.about&&this.#prune({about:this.#cache.draft.about,work:[],interests:[]},this.#entries)?.about
+    if(current&&!current.about&&kept)current.about=kept
     if(!this.#opened)return
     if(!current){this.#failures=0;this.#failedKey='';return}
     // Installed before the write so a withdrawal arriving mid-write prunes this draft and queues its own write after it.

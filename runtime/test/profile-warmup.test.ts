@@ -1,6 +1,6 @@
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,realpath,chmod} from 'node:fs/promises'
+import {mkdtemp,rm,realpath,chmod,readFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {ProfileWarmup,type ProfileOutcome} from '../src/personal-agent/profile-warmup.js'
@@ -148,5 +148,32 @@ test('a profile answer citing a withdrawn project digest is dropped even when th
   resolve({about:{text:'Works on secret notes',refs:[{entry_id:project.id,version:project.version}]},work:[],interests:[{text:'Speech models',refs:[{entry_id:fileB.id,version:fileB.version}]}]})
   await run
   assert.equal(service.snapshot().draft?.about??null,null,'the fact grounded in the withdrawn digest never lands')
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('a reply without about keeps the previous about only while its evidence is current and was not withdrawn',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'))
+ const withoutAbout={about:null,work:[],interests:[{text:'Speech models',refs:[{entry_id:fileB.id,version:'f2'}]}]}
+ let reply:()=>Promise<unknown>=()=>Promise.resolve(fileDraft)
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>reply() as never,()=>{/* observer fixture */},{minIntervalMs:60_000})
+ const fileB2={...fileB,version:'f2',content:'Reads papers on speech models and codecs'}
+ try{
+  await service.open();service.update([fileA,fileB]);await service.refresh()
+  reply=()=>Promise.resolve(withoutAbout);service.update([fileA,fileB2]);await service.refresh()
+  assert.deepEqual(service.snapshot().draft,{...withoutAbout,about:fileDraft.about},'the new work and interests replace the old; the missing about is kept')
+  reply=()=>service.forgetUnavailable(new Set([fileB2.id])).then(()=>{service.update([fileA,{...fileB2,version:'f3'}]);return withoutAbout})
+  service.update([fileA,{...fileB2,version:'f4'}]);await service.refresh()
+  assert.equal(service.snapshot().draft?.about??null,null,'an about whose source was withdrawn during the call is not kept, even when the source returns')
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('a corrected statement does not keep the about it grounded, on screen or on disk',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-')),path=join(dir,'draft.json')
+ let reply:unknown=draft
+ const service=new ProfileWarmup(path,()=>Promise.resolve(reply) as never,()=>{/* observer fixture */})
+ try{
+  await service.open();service.update(entries);await service.refresh()
+  reply={about:null,work:[],interests:[{text:'Speech',refs:[{entry_id:'a',version:2}]}]}
+  service.update([{...entries[0]!,version:2,content:'I study speech models'}]);await service.refresh()
+  assert.equal(service.snapshot().draft?.about,null)
+  assert.equal((JSON.parse(await readFile(path,'utf8')) as {draft:{about:unknown}}).draft.about,null)
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
