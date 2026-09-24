@@ -113,6 +113,38 @@ test('computer scan settles files larger than its total byte budget without retr
  }finally{await f.close()}
 })
 
+test('legacy excluded computer files clean in bounded batches and retry invalid records after restart',async()=>{
+ const f=await fixture()
+ try{
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.close()
+  const path=join(f.root,'db','sources.json'),disk=JSON.parse(await readFile(path,'utf8')) as {sources:{files:unknown[];walk:{queue:{path:string;offset?:number}[];ledger:unknown[];generation:number;turn:number;cursors:number[];pending:unknown[];deferred:unknown[]}}[]}
+  const hidden=join(f.folder,'.worktrees','legacy');await mkdir(hidden,{recursive:true})
+  const entries=Array.from({length:65},(_,i)=>({path:join(hidden,`legacy-${i}.md`),size:1,mtime:1,unit:f.folder,id:`legacy-${i}`,fingerprint:'old',owned:true,valid:true,excerpt:null,observed:false,observation_ref:`observation-${i}`}))
+  disk.sources[0]!.files=entries
+  disk.sources[0]!.walk={queue:[{path:f.folder,offset:0}],ledger:[],generation:1,turn:0,cursors:[0,0,0],pending:[],deferred:[]}
+  await writeFile(path,JSON.stringify(disk))
+  let shouldFail=true
+  const handle=(method:string,args:unknown)=>{assert.equal(method,'knowledge.remove');removed.push((args as {id:string}).id);return Promise.resolve({})}
+  const removed:string[]=[]
+  const knowledge={listSources:()=>Promise.resolve([]),handle:async(method:string,args:unknown)=>handle(method,args),syncFile:(...args:Parameters<typeof f.knowledge.syncFile>)=>f.knowledge.syncFile(...args)}
+  const options={path,computerRoot:f.folder,pollMs:0,scanOnOpen:false,knowledge,processingGrant:(consent:boolean,revision:number,scope_revision:number)=>({revision,scope_revision,extraction_provider:consent?'test':null,embedding_provider:consent?'test':null}),onInvalidate:(ref:string)=>{if(shouldFail&&ref==='legacy-5')throw Error('interrupted_cleanup')}}
+  let sources=new LocalDirectorySources(options)
+  try{
+   await sources.open();assert.equal(sources.list()[0]!.state,'connected');await sources.command('sources.sync',{id});assert.equal(sources.list()[0]!.state,'error')
+   const interrupted=JSON.parse(await readFile(path,'utf8')) as {sources:{files:{id:string;valid:boolean}[];walk:{queue:{path:string}[]}}[]}
+   assert.deepEqual(removed,['legacy-0','legacy-1','legacy-2','legacy-3','legacy-4'])
+   assert.equal(interrupted.sources[0]!.files.filter(file=>!file.valid).length,27)
+   assert.equal(interrupted.sources[0]!.files.filter(file=>file.valid).length,33)
+   assert.deepEqual(interrupted.sources[0]!.walk.queue,[{path:f.folder,offset:0}])
+   shouldFail=false;await sources.close();sources=new LocalDirectorySources(options);await sources.open();await sources.command('sources.sync',{id})
+   const recovered=JSON.parse(await readFile(path,'utf8')) as {sources:{files:{id:string}[]}[]}
+   assert.equal(recovered.sources[0]!.files.length,0)
+   assert.equal(removed.length,65)
+  }finally{await sources.close()}
+ }finally{await f.close()}
+})
+
 test('computer snapshots migrate legacy failures and clear current health after a clean batch',async()=>{
  const f=await fixture()
  try{

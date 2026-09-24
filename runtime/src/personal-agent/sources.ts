@@ -495,11 +495,7 @@ export class LocalDirectorySources {
       await this.#recoverPending(record)
       if (view.scope!=='computer'&&await realpath(view.path) !== view.path) throw new Error('path_denied')
       if(view.scope==='computer'){
-        for(const previous of [...record.files].filter(file=>isComputerExcludedPath(view,file.path))){
-          signal.throwIfAborted()
-          if(previous.valid){previous.valid=false;await this.#save()}
-          await this.#removeFile(record,previous)
-        }
+        await this.#cleanupExcludedFiles(record,signal)
         if(record.walk){record.walk.pending=record.walk.pending.filter(file=>!isComputerExcludedPath(view,file.path));record.walk.deferred=record.walk.deferred.filter(file=>!isComputerExcludedPath(view,file.path))}
       }
       if(view.scope==='computer'){files.push(...await this.#computerBatch(record,signal,force));directories.length=0;complete=false}
@@ -700,6 +696,28 @@ export class LocalDirectorySources {
   }
   async #invalidateFile(file: SourceRecord['files'][number]): Promise<void> {
     for (const ref of new Set([refFor(file), file.id, ...(file.observation_ref ? [file.observation_ref] : [])])) await this.#options.onInvalidate?.(ref)
+  }
+  async #cleanupExcludedFiles(record:SourceRecord,signal:AbortSignal):Promise<void>{
+    const excluded=record.files.filter(file=>isComputerExcludedPath(record.view,file.path))
+    for(let offset=0;offset<excluded.length;offset+=32){
+      signal.throwIfAborted()
+      const chunk=excluded.slice(offset,offset+32)
+      for(const file of chunk)file.valid=false
+      await this.#save()
+      try{
+        for(const file of chunk){
+          signal.throwIfAborted()
+          await this.#invalidateFile(file)
+          if(file.owned)await this.#options.knowledge.handle('knowledge.remove',{id:file.id})
+          record.files=record.files.filter(item=>item!==file)
+        }
+      }catch(error){
+        // Persist completed removals while leaving every unfinished record invalid for retry.
+        await this.#save()
+        throw error
+      }
+      await this.#save()
+    }
   }
   async #removeFile(record: SourceRecord, file: SourceRecord['files'][number]): Promise<void> {
     await this.#invalidateFile(file)
