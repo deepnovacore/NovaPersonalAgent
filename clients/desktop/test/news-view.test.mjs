@@ -14,6 +14,15 @@ test('profile adjustments use canonical news interests without copying collectio
  h.buttons.length=0;renderProfile(h.panel,args);await h.buttons.find(b=>b.textContent==='完成调整').action()
  assert.deepEqual(h.calls,[['news.configure',{enabled:true,explore:false,interests:['AI'],expected_version:3}]])
 })
+test('guessed interests read as unconfirmed on the profile page until the user keeps them',async t=>{
+ const h=harness(t),flatten=node=>[node,...node.children.flatMap(flatten)],news={enabled:true,explore:false,profile_version:1,interests_seeded:true,interests:[{id:'ai',text:'AI',weight:1},{id:'d',text:'设计',weight:1}]}
+ renderProfile(h.panel,{...h,state:{profile:{version:2,about:'Me'}},news})
+ assert.ok(flatten(h.panel).some(n=>n.textContent==='从 Profile 猜的 · 待确认'));assert.ok(!flatten(h.panel).some(n=>n.textContent==='已保存'))
+ await h.buttons.find(b=>b.textContent==='就用这些').action()
+ assert.deepEqual(h.calls,[['news.configure',{enabled:true,explore:false,interests:['AI','设计'],expected_version:1}]])
+ h.panel.children.length=0;h.buttons.length=0;renderProfile(h.panel,{...h,state:{profile:{version:2,about:'Me'}},news:{...news,interests_seeded:false,profile_version:2}})
+ assert.ok(flatten(h.panel).some(n=>n.textContent==='已保存'));assert.ok(!h.buttons.some(b=>b.textContent==='就用这些'))
+})
 test('news conversion previews editable fields and writes only after explicit save',async t=>{
  const h=harness(t),news={enabled:true,mode:'timeline',pending:0,sources:[],interests:[],items:[{id:'a',source_id:'bbc',title:'Article title',summary:'Public excerpt',url:'https://www.bbc.com/news/a',content_hash:'hash',ranking:null}],saved:[]}
  renderNews(h.panel,{...h,news});await h.buttons.find(b=>b.textContent==='转为个人事项')?.action()
@@ -115,7 +124,7 @@ test('a background profile refresh keeps the draft on screen without a status bo
  const first=harness(t);renderProfile(first.panel,{...base,...first,warmup:{status:'working',draft:null,sources:[]}});nodes=flatten(first.panel)
  assert.ok(nodes.some(n=>n.className==='warmup-status'));assert.ok(nodes.some(n=>n.className==='warmup-skeleton'))
 })
-test('a news card keeps its actions in one row and its recommendation basis out of the reading flow',t=>{
+test('a news card keeps its actions in one row and its recommendation basis out of the reading flow',async t=>{
  const h=harness(t),flatten=node=>[node,...node.children.flatMap(flatten)]
  const news={enabled:true,mode:'personalized',pending:0,sources:[{id:'bbc',name:'BBC'}],interests:[{id:'ai',text:'AI',weight:1}],saved:[],items:[
   {id:'a',source_id:'bbc',title:'Ranked',summary:'x',url:'https://www.bbc.com/news/a',content_hash:'h',ranking:{reason:'与你关注的 AI 相关',matches:[{interest_id:'ai',score:0.9,quote:'voice models'}]}},
@@ -135,4 +144,6 @@ test('a news card keeps its actions in one row and its recommendation basis out 
  assert.ok(flatten(h.panel).some(n=>/先按时间给你看/u.test(n.textContent??'')),'without interests the page says it is a timeline for now')
  h.panel.children.length=0;renderNews(h.panel,{...h,news:{...news,interests_seeded:true,items:[]}})
  assert.ok(flatten(h.panel).some(n=>/从你的 Profile 里猜的/u.test(n.textContent??'')),'guessed interests ask to be saved before they rank')
+ h.calls.length=0;await h.buttons.findLast(b=>b.textContent==='就用这些').action()
+ assert.deepEqual(h.calls,[['news.configure',{enabled:true,explore:true,interests:['AI'],expected_version:0}]],'keeping the guesses saves them unchanged')
 })

@@ -5,6 +5,8 @@ export function initialInterests(news,warmup){
  if(news?.interests?.length||news?.profile_version>0)return (news.interests??[]).map(i=>i.text)
  return warmup?.draft?.interests?.length?warmup.draft.interests.map(i=>i.text):topics.slice(0,3)
 }
+/** Interests guessed from the profile rank nothing until the user keeps them; this keeps them as they are. */
+export function confirmedInterests(news){return {enabled:news?.enabled??false,explore:news?.explore??true,interests:(news?.interests??[]).map(i=>i.text),expected_version:news?.profile_version??0}}
 export function renderWarmup(parent,{warmup,command,button}){
  // A draft on screen is refreshed silently; the status box is only for the first draft.
  if(warmup?.status!=='working'&&warmup?.status!=='failed'||warmup.draft)return
@@ -15,9 +17,9 @@ export function renderWarmup(parent,{warmup,command,button}){
  if(!busy)button('重新生成',()=>command('profile.refresh',{}),box)
 }
 export function renderInterests(parent,{news,warmup,command,button,local,rerender,delegate}){
- const texts=initialInterests(news,warmup),configured=Boolean(news?.interests?.length||news?.profile_version>0)
+ const texts=initialInterests(news,warmup),seeded=Boolean(news?.interests_seeded&&news.interests?.length),configured=!seeded&&Boolean(news?.interests?.length||news?.profile_version>0)
  const card=el('section',undefined,'preference-card');card.setAttribute('aria-label','资讯兴趣');parent.append(card)
- const heading=el('div',undefined,'preference-heading');heading.append(el('h3','你的资讯兴趣'),el('span',configured?'已保存':warmup?.draft?.interests?.length?'为你生成 · 可调整':'通用起点 · 可调整','preference-caption'));card.append(heading)
+ const heading=el('div',undefined,'preference-heading');heading.append(el('h3','你的资讯兴趣'),el('span',configured?'已保存':seeded?'从 Profile 猜的 · 待确认':warmup?.draft?.interests?.length?'为你生成 · 可调整':'通用起点 · 可调整','preference-caption'));card.append(heading)
  const draft=local.interestEdit
  const save=async(value)=>{
   if(local.interestSaving)return
@@ -45,6 +47,7 @@ export function renderInterests(parent,{news,warmup,command,button,local,rerende
   for(const text of texts)chips.append(el('span',text,'interest-tag'))
   if(!texts.length)card.append(el('p','尚未选择兴趣，可以随时添加。','preference-caption'))
   const actions=el('div',undefined,'preference-actions');card.append(actions)
+  if(seeded)button('就用这些',()=>save(confirmedInterests(news)),actions).disabled=local.interestSaving
   button('调整兴趣',()=>{local.interestEdit={...settings(),version:news?.profile_version??0,interests:[...texts],custom:''};rerender()},actions).disabled=local.interestSaving
   if(delegate)button('和 Nova 聊聊这些兴趣',()=>delegate(`我想调整资讯兴趣，目前是：${texts.join('、')}。请先和我讨论适合的主题。`),actions)
  }
