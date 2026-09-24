@@ -130,7 +130,7 @@ Codex transport).
 Besides the shipped app from releases, you can also install using npm
 
 ```bash
-npm install --global nova-audio-agent@0.2.2
+npm install --global nova-audio-agent@0.2.3
 # open the shipped app; the first launch asks for one DashScope API key
 novaaudio
 # open the settings panel in the app

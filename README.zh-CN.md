@@ -129,7 +129,7 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 
 ```bash
 # 全局安装
-npm install --global nova-audio-agent@0.2.2
+npm install --global nova-audio-agent@0.2.3
 # 启动客户端；首次启动会弹出设置窗口，填一个 DashScope 密钥即可
 novaaudio
 # 打开设置面板
