@@ -403,6 +403,22 @@ test('successful retry clears current degraded health while retaining read failu
  }finally{await f.close()}
 })
 
+test('pausing a source stops its background embedding and resuming finishes it',async()=>{
+ const f=await fixture();let calls=0,release!:()=>void
+ const held=new Promise<void>(resolve=>{release=resolve})
+ try{
+  await writeFile(join(f.folder,'a.md'),'First note');await writeFile(join(f.folder,'b.md'),'Second note')
+  f.setEmbeddingHook(()=>{calls++;return calls===1?held:Promise.resolve()})
+  const {id}=await f.sources.command('sources.add',{path:f.folder,consent:true}) as {id:string}
+  await f.sources.command('sources.pause',{id});release();await f.knowledge.vectorsSettled()
+  assert.equal(calls,1,'the file queued behind the in-flight batch is not uploaded after the pause')
+  const store=(await f.knowledge.listSources()).map(source=>source.id).sort()
+  assert.equal(store.length,2)
+  await f.sources.command('sources.resume',{id});for(let n=0;n<50&&calls<3;n++)await new Promise(resolve=>setTimeout(resolve,20));await f.knowledge.vectorsSettled()
+  assert.ok(calls>=3,`resume embeds what the pause left pending (calls=${calls})`)
+ }finally{release();await f.close()}
+})
+
 test('legacy directory state without processing consent reads locally without embedding',async()=>{
  const f=await fixture();let embeddings=0
  try{

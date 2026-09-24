@@ -219,6 +219,36 @@ test('scan-time sync commits before embedding and a stale backfill cannot write 
   } finally {release(); await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
 
+test('background embedding stops at the next provider batch once the source owner withdraws it', async () => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-vector-gate-'))
+  const file = join(directory, 'notes.md'), busy = join(directory, 'busy.md'), queued = join(directory, 'queued.md')
+  const store = new KnowledgeStoreClient({path: join(directory, 'db', 'knowledge.sqlite')})
+  const batches: string[][] = []
+  let withdrawn = false, hold: Promise<void> | undefined
+  const service = new KnowledgeService({store, embedding: {id: 'fake-v1', dims: 2, embed: async texts => {
+    batches.push([...texts]); withdrawn = true; await hold
+    return texts.map(() => new Float32Array([1, 0]))}}})
+  const grant = {revision: 1, scope_revision: 0, extraction_provider: 'fake-v1', embedding_provider: 'fake-v1'}
+  try {
+    await service.open()
+    service.setVectorGate(() => withdrawn ? null : undefined)
+    await writeFile(file, Array.from({length: 14}, (_, n) => `# Section ${n}\nParagraph ${n} about the plan.`).join('\n\n'))
+    const {id} = await service.syncFile(file, directory, new AbortController().signal, undefined, grant)
+    await service.vectorsSettled()
+    assert.deepEqual(batches.map(batch => batch.length), [10], 'no upload starts after the withdrawal that followed the first batch')
+    assert.deepEqual(await store.unembeddedSources('fake-v1', 2), [id])
+    service.setVectorGate(() => undefined); batches.length = 0
+    let release!: () => void
+    hold = new Promise<void>(resolve => {release = resolve})
+    await writeFile(busy, 'Embedding while the pause arrives'); await writeFile(queued, 'Queued before the pause')
+    await service.syncFile(busy, directory, new AbortController().signal, undefined, grant)
+    const paused = new AbortController()
+    await service.syncFile(queued, directory, new AbortController().signal, undefined, grant, paused.signal)
+    paused.abort(); release(); await service.vectorsSettled()
+    assert.ok(batches.length >= 1 && batches.every(batch => !batch.includes('Queued before the pause')), 'a file queued by a source that was then paused is never uploaded')
+  } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
+})
+
 test('vector writes require the embedded source fingerprint and chunk digest', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-set-vectors-'))
   const file = join(directory, 'notes.md')

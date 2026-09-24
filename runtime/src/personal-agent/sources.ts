@@ -110,7 +110,7 @@ export interface LocalDirectorySourceOptions {
   readonly observationRetryMs?:number
   readonly onMetadataStat?: () => void
   readonly path: string
-  readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'>
+  readonly knowledge: Pick<KnowledgeService, 'listSources' | 'handle' | 'syncFile'> & Partial<Pick<KnowledgeService, 'setVectorGate' | 'resumeVectors'>>
   readonly pollMs?: number
   readonly onChange?: (changed: boolean) => void | Promise<void>
   readonly onInvalidate?: (ref: string) => void | Promise<void>
@@ -139,6 +139,8 @@ export class LocalDirectorySources {
   #watchers:FSWatcher[]=[]
   #dirtyHints=new Map<string,Set<string>>()
   #hintTimers=new Map<string,ReturnType<typeof setTimeout>>()
+  /** Outlives a scan so pause, removal, and withdrawal also stop background embedding. */
+  #lifecycles=new Map<string,AbortController>()
 
   constructor(options: LocalDirectorySourceOptions) {this.#options = options}
   async open(): Promise<void> {
@@ -167,6 +169,13 @@ export class LocalDirectorySources {
     assertAcceptanceGrant(this.#options.processingGrant?.(true,1,0),this.#records.filter(record=>!record.deleting&&['connected','error'].includes(record.view.state)).map(record=>record.processing_consent??{extraction_provider:null,embedding_provider:null}))
     appendAcceptanceCounts('sources_open',{sources:this.#records.length,indexed:this.#records.reduce((sum,record)=>sum+record.files.filter(file=>file.valid).length,0)})
     this.#closed = false
+    this.#options.knowledge.setVectorGate?.(id=>{
+      const record=this.#records.find(item=>item.files.some(file=>file.id===id))
+      if(!record)return undefined
+      if(this.#closed||record.deleting||!['connected','error'].includes(record.view.state))return null
+      return {signal:this.#lifecycle(record).signal,grant:record.processing_consent}
+    })
+    void this.#options.knowledge.resumeVectors?.().catch(()=>undefined)
     const roots=[...new Set(this.#records.filter(record=>!record.deleting&&['connected','error'].includes(record.view.state)).flatMap(record=>record.files.filter(file=>file.valid&&file.excerpt).map(file=>file.unit??computerUnit(record.view.path,file.path))))].slice(0,64)
     this.#activityWarmup=(async()=>{
       for(let i=0;i<roots.length&&!this.#closed;i+=8)await Promise.all(roots.slice(i,i+8).map(async root=>{
@@ -192,6 +201,8 @@ export class LocalDirectorySources {
     for(const timer of this.#hintTimers.values())clearTimeout(timer)
     this.#hintTimers.clear()
     clearInterval(this.#timer)
+    for(const lifecycle of this.#lifecycles.values())lifecycle.abort()
+    this.#lifecycles.clear()
     this.#active?.abort.abort()
     await this.#active?.done
     await this.#commands.catch(() => undefined)
@@ -264,6 +275,7 @@ export class LocalDirectorySources {
     if (['sources.pause', 'sources.disconnect', 'sources.delete','sources.consent'].includes(method)) {
       const parsed = z.object({id: idSchema,consent:z.boolean().optional()}).strict().safeParse(params)
       if (parsed.success && this.#active?.id === parsed.data.id) this.#active.abort.abort()
+      if (parsed.success && (method !== 'sources.consent' || parsed.data.consent === false)) this.#lifecycles.get(parsed.data.id)?.abort()
     }
     const result = this.#commands.then(async () => {await this.#active?.done; return this.#command(method, params)})
     this.#commands = result.catch(() => undefined)
@@ -323,7 +335,9 @@ export class LocalDirectorySources {
       await this.#options.onProcessingConsent?.(record.files.flatMap(f=>['knowledge:'+f.id,...(f.observation_ref?[f.observation_ref]:[])]),grant)
       record.processing_consent=grant
       for(const file of record.files)file.observed=false
-      await this.#save();await this.#options.onChange?.(false);return {ok:true}
+      await this.#save()
+      if(q.consent)void this.#options.knowledge.resumeVectors?.().catch(()=>undefined)
+      await this.#options.onChange?.(false);return {ok:true}
     }
     const parsed = z.object({id: idSchema}).strict().safeParse(params)
     if (!parsed.success) throw new Error('invalid_request')
@@ -337,6 +351,7 @@ export class LocalDirectorySources {
       try {await this.#save()} catch (error) {record.view.state = before; throw error}
     } else if (method === 'sources.resume') {
       record.view.state = 'connected'; await this.#save(); await this.#sync(record)
+      void this.#options.knowledge.resumeVectors?.().catch(()=>undefined)
     } else if (method === 'sources.sync') {
       if (record.view.state === 'connected' || record.view.state === 'error') await this.#sync(record,true)
     } else throw new Error('invalid_request')
@@ -520,8 +535,15 @@ export class LocalDirectorySources {
       if (record.view.state === 'connected' || record.view.state === 'error') await this.#sync(record)
     }
   }
+  #lifecycle(record: SourceRecord): AbortController {
+    let lifecycle=this.#lifecycles.get(record.view.id)
+    if(!lifecycle){lifecycle=new AbortController();this.#lifecycles.set(record.view.id,lifecycle)}
+    return lifecycle
+  }
   async #sync(record: SourceRecord,force=false): Promise<void> {
     if (this.#closed || this.#active) return
+    // A scan only runs while the source is connected, so it may renew a fence left by a failed pause.
+    if(this.#lifecycles.get(record.view.id)?.signal.aborted)this.#lifecycles.delete(record.view.id)
     const abort = new AbortController()
     const done=this.#scan(record,abort.signal,force).finally(()=>{
       this.#active=undefined
@@ -701,7 +723,7 @@ export class LocalDirectorySources {
           if (await realpath(file.path) !== file.path) {await discardStaleIndex();skip('changed_path');settlePending(record,file.path);continue}
           record.pending = {path: file.path, size: file.size, mtime: file.mtime, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
           await this.#save()
-          const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent)
+          const result = await this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent,this.#lifecycle(record).signal)
           const indexed = (await this.#options.knowledge.listSources()).find(item => item.id === result.id)
           if (!indexed) throw new Error('ingest_failed')
           const tracked = {path:file.path,unit:file.unit,size:file.size,mtime:file.mtime,id: result.id, fingerprint: indexed.fingerprint, checked_at: Date.now(), owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
