@@ -52,7 +52,7 @@ whole-repository audit, automatic approval or merge gate.
   successful base/head/model combinations are deduplicated using the bot comment.
   Delete that comment to deliberately review the same revision/model again.
 - The review step has a 10-minute timeout, the job 15 minutes. The prompt asks
-  for about 20 inspection commands and at most five meaningful findings.
+  for about 20 inspection commands and at most three distinct root-cause findings.
   These are time/prompt controls, **not a per-run dollar or token cap**.
   Codex/provider retries and repeated context can still incur additional usage.
   The OpenRouter key credit limit is the spending backstop; already running

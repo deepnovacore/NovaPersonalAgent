@@ -30,15 +30,19 @@ Return concise Markdown with these sections, English followed by a short Chinese
 translation (do not duplicate code):
 
 ### Line-level findings / 行级问题
-Up to five meaningful findings, highest impact first. For each, include P1 or P2,
-a precise GitHub permalink `https://github.com/OWNER/REPO/blob/HEAD_SHA/path#L123`,
-and a short explanation of the trigger, consequence, and suggested correction.
+Up to three distinct root causes, highest impact first. Merge all symptoms and
+test failures caused by the same bug into ONE finding. Do not report an unchanged
+test as a separate issue when fixing the production bug also fixes the test.
+For each finding, include P0/P1/P2, a clickable Markdown link such as
+`[src/file.ts:123](https://github.com/OWNER/REPO/blob/HEAD_SHA/src/file.ts#L123)`,
+and at most two short English sentences plus one short Chinese sentence covering
+the trigger, consequence, and correction. Avoid extended call-chain narration.
 Use a base/merge-base permalink for deleted code. Verify paths and actual line
 numbers. If none, say no high-confidence actionable issues were found within the
 reviewed scope; do not describe the whole PR as safe or approved.
 
 ### Overall summary / 总体总结
-Two to four short bullets: overall impact, cross-module concerns, and any important
+Two or three short bullets: overall impact, cross-module concerns, and any important
 verification gap. Include what was inspected and any coverage limits. Keep the
-entire response below 8,000 characters. Do not include hidden HTML markers,
+entire response below 3,000 characters. Do not repeat the findings in the summary. Do not include hidden HTML markers,
 user/team mentions, or approval commands.
