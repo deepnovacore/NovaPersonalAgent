@@ -62,7 +62,7 @@ test('a withdrawn source leaves disk while the rest of the draft survives',async
  let service=make()
  try{
   await service.open();service.update([fileA,fileB]);await service.refresh()
-  service.update([fileA]);await service.forgetUnavailable();await service.close()
+  await service.forgetUnavailable(new Set([fileA.id]));await service.close()
   service=make();await service.open();service.update([fileA,fileB])
   assert.deepEqual(service.snapshot().draft,{...fileDraft,interests:[]})
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
@@ -96,4 +96,19 @@ test('automatic retries stop once the backoff ladder is spent',async()=>{
   assert.equal(calls,3);assert.equal(service.snapshot().status,'failed')
   await service.refresh(true);assert.equal(calls,4)
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('a withdrawal during generation or during the draft write never leaves the withdrawn facts on disk',async()=>{
+ for(const when of ['generating','writing'] as const){
+  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let resolve!:(v:typeof fileDraft)=>void
+  const make=(generate:()=>Promise<typeof fileDraft>)=>new ProfileWarmup(join(dir,'draft.json'),generate,()=>{/* observer fixture */},{minIntervalMs:60_000})
+  let service=make(()=>new Promise(r=>{resolve=r}))
+  try{
+   await service.open();service.update([fileA,fileB]);const run=service.refresh()
+   if(when==='generating'){await service.forgetUnavailable(new Set([fileA.id]));resolve(fileDraft)}
+   else{resolve(fileDraft);await until(()=>service.snapshot().draft!==null);await service.forgetUnavailable(new Set([fileA.id]))}
+   await run;await service.close()
+   service=make(()=>new Promise(()=>{/* never regenerates */}));await service.open();service.update([fileA,fileB])
+   assert.deepEqual(service.snapshot().draft,{...fileDraft,interests:[]},when)
+  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+ }
 })

@@ -737,7 +737,7 @@ export class PersonalAgentHost {
             if (!this.#sources)
                 throw Error('unsupported');
             data = await this.#sources.command(command.method, p);
-            if(['sources.delete','sources.pause','sources.disconnect','sources.consent'].includes(command.method)){await this.refreshMemory();await this.profileWarmup.forgetUnavailable();}
+            if(['sources.delete','sources.pause','sources.disconnect','sources.consent'].includes(command.method)){await this.profileWarmup.forgetUnavailable(new Set((this.#sources?.contextEntries?.()??[]).map(entry=>entry.id)));void this.refreshMemory().catch(()=>{/* sourceChanged refreshes again */});}
         }
         result = { type: 'personal.result', request_id: command.request_id, ok: true, ...(data === undefined ? {} : { data }) };
     }

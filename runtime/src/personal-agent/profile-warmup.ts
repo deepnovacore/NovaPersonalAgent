@@ -66,11 +66,17 @@ export class ProfileWarmup{
   // Facts whose evidence is momentarily absent (a root still warming up, a file mid re-read) are hidden by snapshot(), not deleted.
   this.#schedule()
  }
- /** Called after the user withdraws a source: facts it grounded must leave disk too, not only the view. */
- async forgetUnavailable(){
-  const draft=this.#cache.draft;if(!draft)return
-  const pruned=this.#prune(draft,this.#entries);if(pruned&&factCount(pruned)===factCount(draft))return
-  this.#cache={key:pruned?this.#cache.key:'',draft:pruned};await this.#persist(this.#cache);this.changed()
+ /**
+  * Called after the user withdraws a source, with every source id that is still eligible (read synchronously, so a
+  * superseded memory refresh cannot leave stale eligibility). Facts it grounded leave disk as well as the view.
+  */
+ async forgetUnavailable(eligibleSources:ReadonlySet<string>){
+  this.#entries=this.#entries.filter(entry=>!entry.source||eligibleSources.has(entry.id))
+  const draft=this.#cache.draft
+  const pruned=draft&&this.#prune(draft,this.#entries)
+  if(draft&&(!pruned||factCount(pruned)!==factCount(draft)))this.#cache={key:pruned?this.#cache.key:'',draft:pruned}
+  // Queued behind any in-flight draft write, so the pruned cache is what stays on disk.
+  await this.#persist(this.#cache);this.changed()
  }
  #schedule(){
   clearTimeout(this.#timer);this.#timer=undefined
@@ -111,10 +117,10 @@ export class ProfileWarmup{
     const current=this.#prune(draft,this.#entries)
     if(!this.#opened)return
     if(!current){this.#failures=0;this.#failedKey='';return}
-    const cache={key,draft:current}
-    try{await this.#persist(cache)}catch{throw Error('profile_persist_failed')}
-    if(!this.#opened||controller.signal.aborted)return
-    this.#cache=cache;this.#failures=0;this.#failedKey=''
+    // Installed before the write so a withdrawal arriving mid-write prunes this draft and queues its own write after it.
+    const previous=this.#cache,cache={key,draft:current};this.#cache=cache
+    try{await this.#persist(cache)}catch{if(this.#cache===cache)this.#cache=previous;throw Error('profile_persist_failed')}
+    this.#failures=0;this.#failedKey=''
    }catch(error){
     outcome={...outcome,outcome:classify(error,signal,controller)}
     if(this.#opened&&outcome.outcome!=='aborted'){this.#failures++;this.#failedKey=key}
