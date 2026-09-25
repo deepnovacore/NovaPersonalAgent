@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { acceptanceWakeSettings } from '../src/main/workbench-native-acceptance.mjs'
 import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import { createContext, runInContext } from 'node:vm'
 
@@ -506,7 +507,7 @@ test('the bootstrap payload carries only orb-owned settings', async () => {
 
 test('quitting drains the backend on the stdin sentinel instead of killing it', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
-  const beforeQuit = source.slice(source.indexOf("app.on('before-quit'"))
+  const beforeQuit = source.slice(source.indexOf("app.on('before-quit'"), source.indexOf("app.on('window-all-closed'"))
 
   assert.match(beforeQuit, /event\.preventDefault\(\)/)
   assert.match(beforeQuit, /shutdownBackendBestEffort\(backend\)/)
@@ -1184,17 +1185,19 @@ test('unsupported embedding in recovery reaches startup diagnostics without muta
   } finally {await rm(root, {recursive: true, force: true})}
 })
 
-test('presentation IPC validates sender and modes and hides without changing conversation state',async()=>{
+for (const acceptance of [null, {}]) test(`presentation IPC validates sender and modes and restores wake settings (acceptance=${!!acceptance})`,async()=>{
  const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
  const start=source.indexOf("ipcMain.handle('nova:personal:presentation',")
  const body=source.slice(start,source.indexOf('\n  })',start)+5)
- const sender={},calls=[];let handler
+ const sender={},calls=[],wakeSettings=[];let handler
+ const currentSettings={wakeWordEnabled:true}
  const background=source.slice(source.indexOf('function enterBackground(){'),source.indexOf('const requestPresentation ='))
- const install=new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord','nativeAudio','currentSettings',`let presentationMode='workbench';${background};${body};return ()=>presentationMode`)
- const mode=install({handle:(_name,callback)=>{handler=callback}},{webContents:sender,hide:()=>calls.push('hide'),show:()=>calls.push('show'),focus:()=>calls.push('focus')},value=>calls.push(value),{stop(){},reset(){},configure(){}},null,{})
+ const install=new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord','nativeAudio','currentSettings','acceptance','acceptanceWakeSettings',`let presentationMode='workbench';${background};${body};return ()=>presentationMode`)
+ const mode=install({handle:(_name,callback)=>{handler=callback}},{webContents:sender,hide:()=>calls.push('hide'),show:()=>calls.push('show'),focus:()=>calls.push('focus')},value=>calls.push(value),{stop(){},reset(){},configure:settings=>wakeSettings.push(settings)},null,currentSettings,acceptance,acceptanceWakeSettings)
  assert.throws(()=>handler({sender:{}},'background'),/rejected/);assert.throws(()=>handler({sender},'invalid'),/rejected/)
  handler({sender},'background');assert.equal(mode(),'background');assert.deepEqual(calls,['hide'])
  calls.length=0;handler({sender},'orb');assert.deepEqual(calls,[true,'show','focus'])
+ assert.deepEqual(wakeSettings,[{wakeWordEnabled:!acceptance}]);assert.equal(currentSettings.wakeWordEnabled,true)
  calls.length=0;handler({sender},'workbench',false);assert.deepEqual(calls,[false]);assert.throws(()=>handler({sender},'orb','yes'),/rejected/)
 })
 test('background wake IPC cannot reactivate capture or show the window',async()=>{

@@ -21,7 +21,7 @@ test('actual main prelaunch registry failures stop the supervisor without schedu
   for (const bytes of ['invalid json', ' '.repeat(256 * 1024 + 1), null]) {
     if (bytes === null) await rm(path)
     else await writeFile(path, bytes)
-    const context = vm.createContext({readCapabilityDocument, classifyBackendFailure, currentSettings: {capabilitiesConfigPath: path}, process: {env: {}}, desktopConfig: {}, codexStatus: {status: 'ready'}})
+    const context = vm.createContext({acceptance: null, readCapabilityDocument, classifyBackendFailure, currentSettings: {capabilitiesConfigPath: path}, process: {env: {}}, desktopConfig: {}, codexStatus: {status: 'ready'}})
     vm.runInContext(launch, context)
     let retries = 0
     const supervisor = createBackendSupervisor({start: () => context.launchBackend(), stopBackend: async () => {}, onStatus: () => {}, schedule: () => {retries++; return 1}})
@@ -32,11 +32,17 @@ test('actual main prelaunch registry failures stop the supervisor without schedu
     await supervisor.stop()
   }
 })
-test('actual main keeps invalid model configuration visible when Coding is disabled', async () => {
-  const context = vm.createContext({readCapabilityDocument: () => ({modules: {coding: {enabled: false}}}), classifyBackendFailure,
+for (const acceptance of [null, {}]) test(`actual main preserves model errors with Coding disabled (acceptance=${!!acceptance})`, async () => {
+  const context = vm.createContext({acceptance, readCapabilityDocument: () => ({modules: {coding: {enabled: false}}}), classifyBackendFailure,
     currentSettings: {}, process: {env: {}}, desktopConfig: {modelConfigurationError: 'model_base_url_invalid', codexConfigurationError: 'manual_path_required'}, codexStatus: {status: 'unavailable'}})
   vm.runInContext(launch, context)
   await assert.rejects(context.launchBackend(), error => error.kind === 'configuration_required' && error.code === 'model_base_url_invalid')
+})
+for (const acceptance of [null, {}]) test(`actual main gates Coding configuration errors (acceptance=${!!acceptance})`, async () => {
+  const context = vm.createContext({acceptance, readCapabilityDocument: () => ({modules: {coding: {enabled: true}}}), classifyBackendFailure,
+    currentSettings: {}, process: {env: {}}, desktopConfig: {modelConfigurationError: 'model_base_url_invalid', codexConfigurationError: 'manual_path_required'}, codexStatus: {status: 'unavailable'}})
+  vm.runInContext(launch, context)
+  await assert.rejects(context.launchBackend(), error => error.code === (acceptance ? 'model_base_url_invalid' : 'manual_path_required'))
 })
 test('actual settings view decrypts only for an open panel and caches the public generation', () => {
   let decrypts = 0
@@ -63,7 +69,7 @@ test('actual main refreshes a hand-edited registry while the panel is open and o
   const root = await mkdtemp(join(tmpdir(), 'nova-task4-cache-'))
   t.after(() => rm(root, {recursive: true, force: true}))
   const path = join(root, 'capabilities.json')
-  const context = vm.createContext({createManagedPhoneService: () => ({}), VISION_MODELS: {}, resolveSecretConfiguration, developmentEnv: {}, frontendUsage: {snapshot: () => ({})}, wakeWord: null, settingsWindow: {show() {}, focus() {}}, refreshManagedWorkspaceCapabilities: () => Promise.resolve(), sendToSettings: () => {}, capabilityEditorCache: null, settingsGeneration: 0,
+  const context = vm.createContext({acceptance: null, createManagedPhoneService: () => ({}), VISION_MODELS: {}, resolveSecretConfiguration, developmentEnv: {}, frontendUsage: {snapshot: () => ({})}, wakeWord: null, settingsWindow: {show() {}, focus() {}}, refreshManagedWorkspaceCapabilities: () => Promise.resolve(), sendToSettings: () => {}, capabilityEditorCache: null, settingsGeneration: 0,
     currentSettings: {capabilitiesConfigPath: path}, process: {env: {}}, readCapabilityDocument, classifyBackendFailure,
     decryptSecretsForSpawn: () => ({}), capabilityEnvironment: () => ({}),
     readCapabilityEditor: settings => ({document: readCapabilityDocument(settings, {}), revision: 'test-revision', problems: []}), capabilityPath, capabilityDocumentRevision,
