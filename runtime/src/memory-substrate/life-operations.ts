@@ -11,12 +11,12 @@ import {processingGrantSchema,type ProcessingGrant} from './source-state.js'
 type Run=(operation:MemoryOperation,input:unknown)=>unknown
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex')
 const namespaceSchema=z.string().min(1).max(256).endsWith(':life:')
-const metaSchema=z.object({revision:z.number().int().nonnegative(),receipts:lifeStateSchema.shape.receipts,signature:z.string(),migrated:z.literal(true),legacy_path:z.string().min(1).max(4096).optional()})
+const metaSchema=z.object({revision:z.number().int().nonnegative(),receipts:lifeStateSchema.shape.receipts,signature:z.string(),migrated:z.literal(true),profile_version:z.number().int().nonnegative().optional(),legacy_path:z.string().min(1).max(4096).optional()})
 type Meta=z.infer<typeof metaSchema>
 const provenanceSchema=z.object({type:z.enum(['accepted_candidate','explicit_candidate']),row:z.object({source:sourceSchema,candidate:z.unknown(),decision:decisionSchema,status:z.enum(['proposed','withheld']),reasons:z.array(z.string())}),resolution:lifeResolutionSchema.optional()}).strict()
 interface LifeObject {kind:'todo'|'idea'|'goal'|'profile';id:string;data:Record<string,unknown>}
 
-/** Only operation receipts, aggregate CAS and a completed migration marker live here. */
+/** Operation receipts, aggregate CAS, Profile version watermark and completed migration marker. */
 export function initializeLife(db:GraphDatabase):void{
  db.exec('CREATE TABLE IF NOT EXISTS memory_life_meta(namespace TEXT PRIMARY KEY,payload_json TEXT NOT NULL)')
 }
@@ -64,11 +64,13 @@ function objects(state:LifeState):LifeObject[]{return [
 ]}
 const entryId=(namespace:string,object:LifeObject)=>namespace+object.kind+':'+object.id
 function persist(run:Run,namespace:string,before:EntryRevision[],state:LifeState,evidenceId:string,now:string,legacy=false,processingGrant?:ProcessingGrant):void{
- const current=new Map(before.map(row=>[row.entry_id,row])),next=objects(state),ids=new Set(next.map(item=>entryId(namespace,item)))
+ const profile=before.find(row=>row.kind==='profile'&&row.op!=='tombstone')
+ const storageId=(item:LifeObject)=>item.kind==='profile'?(profile?.entry_id??(legacy?entryId(namespace,item):namespace+'profile:'+hash(evidenceId))):entryId(namespace,item)
+ const current=new Map(before.map(row=>[row.entry_id,row])),next=objects(state).filter(item=>item.kind!=='profile'||profile!==undefined||item.data.about!==''||item.data.version!==0),ids=new Set(next.map(storageId))
  const nextOrder=new Map<string,number>()
  for(const row of before)nextOrder.set(row.kind,Math.max(nextOrder.get(row.kind)??0,Number(row.content.life_order??-1)+1))
  for(const item of next){
-  const id=entryId(namespace,item),old=current.get(id)
+  const id=storageId(item),old=current.get(id)
   if(old?.op!=='tombstone'&&canonicalJson(old?.content.life_data??null)===canonicalJson(item.data))continue
   const text=item.kind==='profile'?String(item.data.about):[item.data.title,item.data.note].filter(Boolean).join('\n')
   const objectEvidenceId=legacy?evidenceId+':'+hash(id):evidenceId
@@ -104,12 +106,14 @@ export function lifeOperation(db:GraphDatabase,operation:'life_load'|'life_mutat
    const now=new Date().toISOString(),id=q.namespace+'e:legacy'
    persist(run,q.namespace,[],q.legacy,id,now,true,q.processingGrant)
    entries=rows(run,q.namespace)
-   meta={revision:0,receipts:q.legacy.receipts,signature:signature(entries),migrated:true,...(q.hostMigrationPath?{legacy_path:q.hostMigrationPath}: {})};saveMeta(db,q.namespace,meta)
+   meta={revision:0,receipts:q.legacy.receipts,signature:signature(entries),migrated:true,profile_version:q.legacy.profile.version,...(q.hostMigrationPath?{legacy_path:q.hostMigrationPath}: {})};saveMeta(db,q.namespace,meta)
   }else if(meta.signature!==signature(entries)){
    meta={...meta,revision:meta.revision+1,signature:signature(entries)};saveMeta(db,q.namespace,meta)
   }
   if(!meta.legacy_path&&q.hostMigrationPath){meta={...meta,legacy_path:q.hostMigrationPath};saveMeta(db,q.namespace,meta)}
-  return {state:stateFrom(entries,meta.receipts),revision:meta.revision}
+  const state=stateFrom(entries,meta.receipts)
+  if((meta.profile_version??0)<state.profile.version){meta={...meta,profile_version:state.profile.version};saveMeta(db,q.namespace,meta)}
+  return {state,revision:meta.revision}
  }
  const q=z.object({namespace:namespaceSchema,input:lifeInputSchema,requestId:z.string().min(1).max(512),expectedRevision:z.number().int().nonnegative(),provenance:provenanceSchema.optional(),processingGrant:processingGrantSchema.optional()}).strict().parse(value)
  const meta=readMeta(db,q.namespace);if(!meta)throw Error('life_not_initialized')
@@ -149,10 +153,12 @@ export function lifeOperation(db:GraphDatabase,operation:'life_load'|'life_mutat
 
  }
  const now=new Date().toISOString(),next=applyLifeMutation(state,q.input,q.requestId,now),evidenceId=q.namespace+'e:'+hash(q.requestId)
+ // Empty UI state remains version zero; a new incarnation cannot reuse an old editor's version.
+ if(q.input.op==='profile'){const version=Math.max(next.state.profile.version,(meta.profile_version??0)+1);next.state.profile.version=version;next.result.version=version;next.state.receipts[q.requestId]!.result.version=version}
  run('append_evidence',EvidenceRecordSchema.parse({id:evidenceId,source_id:q.namespace+'event:'+hash(q.requestId),source_kind:'user_correction',locator:evaluated?'host-source:'+evaluated.source.id:'life-command:'+q.requestId,observed_at:evaluated?.source.observed_at??now,recorded_at:now,raw_text:evaluated?.source.text??canonicalJson(q.input),hash:hash(canonicalJson({namespace:q.namespace,input:q.input,requestId:q.requestId,provenance:q.provenance??null})),trust:'trusted_user',extracted:{event:q.provenance?.type??'life_command',command:q.input,...(evaluated?{source:evaluated.source,candidate:evaluated.candidate,decision:evaluated.decision}: {})}}))
  if(q.processingGrant)run('source_grant',{source_id:q.namespace+'event:'+hash(q.requestId),expected_revision:0,grant:q.processingGrant})
  persist(run,q.namespace,entries,next.state,evidenceId,now)
- const updated=rows(run,q.namespace),updatedMeta:Meta={...meta,revision:meta.revision+1,receipts:next.state.receipts,signature:signature(updated),migrated:true}
+ const updated=rows(run,q.namespace),updatedMeta:Meta={...meta,profile_version:Math.max(meta.profile_version??0,next.state.profile.version),revision:meta.revision+1,receipts:next.state.receipts,signature:signature(updated),migrated:true}
  saveMeta(db,q.namespace,updatedMeta)
  return {state:stateFrom(updated,updatedMeta.receipts),revision:updatedMeta.revision,result:next.result}
 }

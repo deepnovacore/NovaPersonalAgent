@@ -423,6 +423,8 @@ export type WorkspaceGraphStoreErrorCode =
   | 'STORE_MIGRATION_FAILED'
   | 'STORE_NOT_FOUND'
   | 'STORE_INVALID_OPERATION'
+  | 'STORE_PURGED_ID'
+  | 'STORE_STATED_EVIDENCE_REQUIRED'
   | 'STORE_OPERATION_CONFLICT'
   | 'STORE_READ_FAILED'
   | 'STORE_SCHEMA_UNSUPPORTED'
@@ -442,6 +444,8 @@ const storeErrorMessages: Readonly<Record<WorkspaceGraphStoreErrorCode, string>>
   STORE_MIGRATION_FAILED: 'workspace graph schema migration failed',
   STORE_NOT_FOUND: 'workspace graph record was not found',
   STORE_INVALID_OPERATION: 'workspace graph operation is invalid',
+  STORE_PURGED_ID: 'memory identifier was permanently purged',
+  STORE_STATED_EVIDENCE_REQUIRED: 'stated memory requires trusted user evidence',
   STORE_OPERATION_CONFLICT: 'workspace graph operation replay conflict',
   STORE_READ_FAILED: 'workspace graph read failed',
   STORE_SCHEMA_UNSUPPORTED: 'workspace graph schema version is unsupported',
@@ -551,7 +555,7 @@ export class WorkspaceGraphStore {
         const message = error instanceof Error ? error.message : ''
         const code=({version_conflict:'STORE_STALE_REVISION',request_id_conflict:'STORE_IDEMPOTENCY_CONFLICT',item_not_found:'STORE_NOT_FOUND'} as Record<string,string>)[message]??message
         if(message.startsWith('MEMORY_MARKDOWN_'))throw new WorkspaceGraphStoreError('STORE_MEMORY_CONFLICT')
-        if (['STORE_STALE_REVISION','STORE_NOT_FOUND','STORE_INVALID_OPERATION','STORE_IDEMPOTENCY_CONFLICT'].includes(code)) throw new WorkspaceGraphStoreError(code as WorkspaceGraphStoreErrorCode)
+        if (['STORE_STALE_REVISION','STORE_NOT_FOUND','STORE_INVALID_OPERATION','STORE_PURGED_ID','STORE_STATED_EVIDENCE_REQUIRED','STORE_IDEMPOTENCY_CONFLICT'].includes(code)) throw new WorkspaceGraphStoreError(code as WorkspaceGraphStoreErrorCode)
         throw new WorkspaceGraphStoreError('STORE_WRITE_FAILED')
       }
     })

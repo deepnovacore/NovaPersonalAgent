@@ -43,6 +43,15 @@ test('whole-computer authorization is explicit and never accepts a renderer supp
  assert.equal(whole.disabled,false);await whole.listeners.click();await new Promise(r=>setImmediate(r))
  assert.deepEqual(h.calls.at(-2),['sources.authorize_computer',{consent:true}])
 })
+test('choosing a directory under a computer grant adds a removable priority',async()=>{
+ const h=harness(()=>snapshot({sources:[{id:'computer',scope:'computer',path:'/',priority_dirs:['/tmp/older'],state:'connected',scanned:2,read:1,skipped:0}]}))
+ await h.panel.load()
+ const check=all(h.root).find(n=>n.tag==='input'&&n.type==='checkbox');check.checked=true;check.listeners.change()
+ await h.button('选择优先整理的目录').listeners.click();await new Promise(r=>setImmediate(r))
+ assert.deepEqual(h.calls.at(-2),['sources.priority.add',{path:'/tmp/docs'}])
+ await h.button('移除优先目录').listeners.click();await new Promise(r=>setImmediate(r))
+ assert.deepEqual(h.calls.at(-2),['sources.priority.remove',{path:'/tmp/older'}])
+})
 test('English connections settings use secondary tabs without translating source data',async()=>{
  const {setLanguage}=await import('../src/renderer/locale.mjs');setLanguage('en')
  try{

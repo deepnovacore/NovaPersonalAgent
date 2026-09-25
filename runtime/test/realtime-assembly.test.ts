@@ -1,3 +1,6 @@
+import {hostWorkspacePath} from '../src/executors/codex/process-owner.js'
+import {CodingTargetController} from '../src/personal-agent/coding-targets.js'
+import {fixture as projectFixture} from './fixtures/codex/project-adapter-fixture.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import assert from 'node:assert/strict'
 import {mkdtemp, realpath, rm, writeFile, readFile} from 'node:fs/promises'
@@ -1395,6 +1398,121 @@ test('callbacks route once through the single playback, session, bridge, and ser
   assert.deepEqual(diagnostics, [])
 
   await settleNamed('callback assembly stop', realtime.stop())
+})
+
+for (const scenario of ['direct', 'changed', 'unbound'] as const) {
+  test(`conversation-bound direct start ${scenario}`, async () => {
+    const value = await projectFixture({preexistingSession: true})
+    await value.adapter.initialize()
+    const targets = new CodingTargetController(value.adapter.targetPort)
+    const original = (await targets.list()).find(target => target.session_id !== null)!
+    if (scenario !== 'unbound') await targets.setTarget(original)
+    const beta = await value.store.createManaged('beta')
+    const assessmentGate = deferred<void>()
+    const assessmentEntered = deferred<void>()
+    let controller!: CodexAgentController
+    const provider = new WorkspaceContextProvider()
+    const core = buildAssembly({settings: settingsSchema.parse({executors: ['codex']}), clock: value.clock,
+      gateway: new NeverCalledGateway(), searchTransport: new NeverCalledSearch(), executors: [value.adapter]})
+    const realtime = buildRealtimeAssembly({core, provider, projectAdapter: value.adapter, codingTarget: targets,
+      codingAgentControllerFactory: {create: context => {
+        controller = new CodexAgentController({channel: context.channel, intake: context.intake!, dispatchPort: context.dispatchPort, resolveCancelTarget: context.resolveCancelTarget})
+        return controller
+      }},
+      intake: {settings: {clarification_depth: 'balanced', plan_readback: 'confirm'}, models: {
+        assess: async input => {
+          assessmentEntered.resolve(); await assessmentGate.promise
+          return {intake_id: input.intake_id, revision: input.revision, kind: 'work', project: '当前项目', project_evidence: null,
+            session: {mode: 'latest'}, execution_mode: 'direct', intent_to_proceed: true, candidate_question: null,
+            discovery: [], early_exit: true, abandon: false, readiness: 1,
+            slots: Object.fromEntries(['goal', 'scope', 'acceptance', 'constraints'].map(key => [key, {state: 'stated', note: key === 'goal' ? 'Fix button' : key}]))}
+        }, plan: () => Promise.reject(Error('direct work must not plan')), resolveCancelTarget: () => Promise.resolve(null),
+      }},
+    })
+    await realtime.start()
+    try {
+      await realtime.service.handleEvent({kind: 'user_speech_started', session_epoch: 1, speech_id: 'bound', provider_item_id: 'bound-user'})
+      await realtime.service.handleEvent({kind: 'user_speech_ended', session_epoch: 1, speech_id: 'bound', provider_item_id: 'bound-user'})
+      await realtime.service.handleEvent({kind: 'user_transcript_final', session_epoch: 1, item_id: 'bound-user', text: '在当前项目修复按钮，直接开始'})
+      await realtime.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'bound-response'})
+      const call = {kind: 'tool_call_ready', session_epoch: 1, call_id: 'bound-call', item_id: 'bound-function', response_id: 'bound-response',
+        name: 'dispatch', arguments: {executor: 'codex', instruction: '修复按钮', origin_ref: 'conversation:1'}} as const
+      await realtime.service.handleEvent(call)
+      await assessmentEntered.promise
+      const revision = targets.revision
+      if (scenario === 'changed') await targets.setTarget({workspace_id: beta.workspace_id, session_id: null})
+      assessmentGate.resolve()
+      await controller.settleIntakeForTest()
+      if (scenario === 'unbound') {
+        assert.equal(controller.inspectIntakeForTest()?.outcome, 'routed', 'unbound current workspace must request selection, never use global active')
+        assert.equal(value.factory.calls.length, 0)
+        assert.equal(value.confirmation.pending, false)
+      } else if (scenario === 'changed') {
+        assert.equal(controller.inspectIntakeForTest()?.outcome, 'cancelled')
+        assert.equal(value.factory.calls.length, 0)
+        assert.equal(value.confirmation.pending, false)
+      } else {
+        assert.equal(controller.inspectIntakeForTest()?.outcome, 'dispatched')
+        await waitNamed('real bound adapter execution', () => value.factory.calls.length === 1)
+        assert.equal(hostWorkspacePath(value.factory.bindings[0]!.workspace), (await value.store.resolveWorkspace('alpha')).canonical_path)
+        assert.equal(value.factory.bindings[0]?.resumeThreadId, null, 'an independent task starts new despite remembered session')
+        assert.ok(targets.revision > revision, 'accepted target persistence advanced the binding revision')
+        await realtime.service.handleEvent(call)
+        await controller.settleIntakeForTest()
+        assert.equal(value.factory.calls.length, 1, 'the existing epoch/call ledger suppresses replay')
+      }
+    } finally {assessmentGate.resolve(); await realtime.stop(); await rm(value.root, {recursive: true, force: true})}
+  })
+}
+
+test('review boundary: two conversation assemblies independently resolve current workspace and new sessions', async () => {
+  const value = await projectFixture({preexistingSession: true})
+  await value.adapter.initialize()
+  const alpha = await value.store.resolveWorkspace('alpha')
+  const beta = await value.store.createManaged('beta')
+  await value.store.createManaged('global-third')
+  const graphs: ReturnType<typeof buildRealtimeAssembly>[] = []
+  try {
+    for (const workspace of [alpha, beta]) {
+      const targets = new CodingTargetController(value.adapter.targetPort)
+      await targets.setTarget({workspace_id: workspace.workspace_id, session_id: null})
+      let controller!: CodexAgentController
+      const core = buildAssembly({settings: settingsSchema.parse({executors: ['codex']}), clock: value.clock,
+        gateway: new NeverCalledGateway(), searchTransport: new NeverCalledSearch(), executors: [value.adapter]})
+      const graph = buildRealtimeAssembly({core, provider: new WorkspaceContextProvider(), projectAdapter: value.adapter, codingTarget: targets,
+        codingAgentControllerFactory: {create: context => {
+          controller = new CodexAgentController({channel: context.channel, intake: context.intake!, dispatchPort: context.dispatchPort, resolveCancelTarget: context.resolveCancelTarget})
+          return controller
+        }},
+        intake: {settings: {clarification_depth: 'balanced', plan_readback: 'confirm'}, models: {
+          assess: input => Promise.resolve({intake_id: input.intake_id, revision: input.revision, kind: 'work', project: '当前工作区', project_evidence: null,
+            session: {mode: 'new'}, execution_mode: 'direct', intent_to_proceed: true, candidate_question: null,
+            discovery: [], early_exit: true, abandon: false, readiness: 1,
+            slots: Object.fromEntries(['goal', 'scope', 'acceptance', 'constraints'].map(key => [key, {state: 'stated', note: key}]))}),
+          plan: () => Promise.reject(Error('direct work must not plan')), resolveCancelTarget: () => Promise.resolve(null),
+        }},
+      })
+      graphs.push(graph)
+      await graph.start()
+      await value.store.selectWorkspace('global-third')
+      await graph.service.handleEvent({kind: 'user_speech_started', session_epoch: 1, speech_id: 'bound', provider_item_id: 'bound-user'})
+      await graph.service.handleEvent({kind: 'user_speech_ended', session_epoch: 1, speech_id: 'bound', provider_item_id: 'bound-user'})
+      await graph.service.handleEvent({kind: 'user_transcript_final', session_epoch: 1, item_id: 'bound-user', text: '在当前工作区修复按钮，直接开始'})
+      await graph.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'bound-response'})
+      const call = {kind: 'tool_call_ready', session_epoch: 1, call_id: 'same-call', item_id: 'bound-function', response_id: 'bound-response',
+        name: 'dispatch', arguments: {executor: 'codex', instruction: '修复按钮', origin_ref: 'conversation:1'}} as const
+      await graph.service.handleEvent(call)
+      await controller.settleIntakeForTest()
+      assert.equal(controller.inspectIntakeForTest()?.outcome, 'dispatched')
+      await waitNamed('independent conversation execution', () => value.factory.calls.length === graphs.length)
+      assert.equal(hostWorkspacePath(value.factory.bindings.at(-1)!.workspace), workspace.canonical_path)
+      assert.equal(value.factory.bindings.at(-1)!.resumeThreadId, null)
+      await graph.service.handleEvent(call)
+      await controller.settleIntakeForTest()
+      assert.equal(value.factory.calls.length, graphs.length)
+    }
+    assert.equal(value.factory.calls.length, 2)
+  } finally {for (const graph of graphs) await graph.stop(); await rm(value.root, {recursive: true, force: true})}
 })
 
 test('project proposal reaches provider and desktop before confirmation', async () => {
@@ -3349,6 +3467,11 @@ test('knowledge-only composition opens canonical originals without enabling pers
     assert.equal(memory.responseAdaptation,undefined)
     const saved=await memory.recordEvidence({sourceId:'knowledge:document',locator:'notes/demo',text:'Demo notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
     assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence?.text,'Demo notes')
+    const second=await memory.recordEvidence({sourceId:'knowledge:document-two',locator:'notes/second',text:'More notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
+    assert.ok(memory.forgetSources,'knowledge-only facade exposes batched source erasure')
+    await memory.forgetSources(['knowledge:document','knowledge:document-two'])
+    assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence,null)
+    assert.equal((await realtime.retrieval.evidence(second.evidence_id)).evidence,null)
     assert.deepEqual((await memory.recall('demo')).hits,[])
   } finally {await realtime.stop();await knowledge.close();await rm(directory,{recursive:true,force:true})}
 })

@@ -52,9 +52,9 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
     selectedId = (visible.find(task => RUNNING.has(task.phase) && task.project === activeProject)
       ?? visible.find(task => RUNNING.has(task.phase)) ?? visible[0])?.work_id ?? null
   }
-  function state() {
+  function state({includeExpired = false} = {}) {
     const item = selected()
-    return {tasks: tasks.filter(task => !expired.has(task.work_id)).map(task => ({...task, cancelling: cancelling.has(task.work_id), opening: [...pending.values()].some(p => p.work_id === task.work_id && p.action === 'open'), error: errors.get(task.work_id) ?? ''})), selected: item ? {...item} : null,
+    return {tasks: tasks.filter(task => includeExpired || !expired.has(task.work_id)).map(task => ({...task, cancelling: cancelling.has(task.work_id), opening: [...pending.values()].some(p => p.work_id === task.work_id && p.action === 'open'), error: errors.get(task.work_id) ?? ''})), selected: item ? {...item} : null,
       visible: !suspended && !hidden && item !== null, connected, runningCount: tasks.filter(task => RUNNING.has(task.phase)).length,
       cancelling: cancelling.has(selectedId), opening: [...pending.values()].some(p => p.work_id === selectedId && p.action === 'open'),
       error: errors.get(selectedId) ?? ''}
@@ -87,8 +87,8 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
     expired.delete(id); selectedId = id; hidden = false
     armTerminal(); emit(); return true
   }
-  function action(action) {
-    const item = selected()
+  function action(action, id = selectedId) {
+    const item = tasks.find(task => task.work_id === id)
     if (!connected || !item || !['open', 'cancel'].includes(action)
       || (action === 'cancel' && (!RUNNING.has(item.phase) || cancelling.has(item.work_id)))
       || [...pending.values()].some(p => p.work_id === item.work_id && p.action === action)) return false

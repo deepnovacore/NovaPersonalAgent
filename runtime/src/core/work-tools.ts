@@ -25,7 +25,8 @@ const SENTENCE_BREAK = /[。！？!?;；\n]|\. /u
 /** First sentence of the objective, stripped, ≤20 code points; `uniqueSessionTitle` disambiguates later. */
 export function deriveSessionTitle(objective: string): string {
   const first = stripLikePython(objective.split(SENTENCE_BREAK, 1)[0] ?? '')
-  return [...first].slice(0, MAX_SESSION_TITLE_CODE_POINTS).join('')
+  const points = [...first]
+  return points.length > MAX_SESSION_TITLE_CODE_POINTS ? points.slice(0, MAX_SESSION_TITLE_CODE_POINTS - 1).join('') + '…' : first
 }
 
 export interface HostToolSpec {

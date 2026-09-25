@@ -79,7 +79,7 @@ test('read-only project entries have no correction or forget controls',async()=>
  const articles=body.querySelectorAll('article')
  const buttons=topic=>articles.find(article=>article.querySelector('h4')?.textContent===topic).querySelectorAll('button').map(button=>button.textContent)
  assert.deepEqual(buttons('只读项目'),['接着聊'])
- assert.deepEqual(buttons('个人记忆'),['纠正','忘记','接着聊'])
+ assert.deepEqual(buttons('个人记忆'),['接着聊','纠正','忘记'])
  const expiredToggle=()=>body.querySelectorAll('label').find(label=>label.children.some(child=>child.text==='包含已过期')).children[0]
  const toggle=expiredToggle();assert.equal(toggle.checked,false)
  toggle.checked=true;const pending=toggle.listeners.change();const request=sent.at(-1)
@@ -245,22 +245,36 @@ test('Feishu processing consent is independent and provider changes require a fr
  assert.equal(label.children[0].checked,false);assert.equal(label.children[0].disabled,true)
 })
 
-test('coding target picker keeps exact host pairs and ignores stale conversation loads',async()=>{
+test('coding target picker separates workspace from continuation session and ignores stale conversation loads',async()=>{
  const body=new Node('body'),shell=new Node('div');body.append(shell)
  globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),visibilityState:'hidden',hasFocus:()=>false,createTextNode:text=>new Node('text',text),querySelector:()=>shell}
  const sent=[];const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}});await view.controller.connect()
- const snapshot=(revision,id)=>view.receive({type:'personal.state',revision,conversations:{selected_id:id,voice_id:null,items:[{id:'a',kind:'chat',title:'A'},{id:'b',kind:'chat',title:'B'}],messages:[]},memory:{entries:[]}})
+ const snapshot=(revision,id,target=null)=>view.receive({type:'personal.state',revision,conversations:{selected_id:id,voice_id:null,items:[{id:'a',kind:'chat',title:'A'},{id:'b',kind:'chat',title:'B',coding_target:target}],messages:[]},memory:{entries:[]}})
  const reply=data=>{const request=sent.at(-1);view.receive({type:'personal.result',request_id:request.request_id,ok:true,data})}
  const flush=async()=>{await Promise.resolve();await Promise.resolve();await Promise.resolve()}
  snapshot(1,'a')
- const load=body.querySelectorAll('button').find(node=>node.textContent==='选择项目会话')
- const select=body.querySelectorAll('select').find(node=>node['aria-label']==='此对话的编程目标')
+ const load=body.querySelectorAll('button').find(node=>node.textContent==='刷新工作区')
+ const workspace=body.querySelectorAll('select').find(node=>node['aria-label']==='执行工作区')
+ const session=body.querySelectorAll('select').find(node=>node['aria-label']==='Codex 会话（续接目标）')
+ assert.ok(workspace);assert.ok(session);assert.ok(load)
  const target={workspace_id:'ws-1',session_id:'session-7',project:'Project',title:'Session',executor:'codex'}
- load.listeners.click();assert.equal(sent.at(-1).method,'conversations.targets');snapshot(2,'b');reply({targets:[target]});await flush();assert.equal(select.children.length,1)
- load.listeners.click();reply({targets:[target]});await flush();assert.equal(select.children.length,2)
- select.value=select.children[1].value;select.listeners.change();assert.deepEqual(sent.at(-1).params,{id:'b',target:{workspace_id:'ws-1',session_id:'session-7'}})
- snapshot(3,'a');reply({});await flush();assert.equal(select.value,'');assert.equal(select.children.length,1)
- assert.equal(sent.filter(frame=>frame.method==='conversations.target').length,1)
+ const other={workspace_id:'ws-2',session_id:'session-8',project:'Other',title:'Other Session',executor:'codex'}
+ const catalog=[{...target,session_id:null,directory:'/registered/one'},{...target,directory:'/registered/one'},{...other,directory:'/registered/two'}]
+ load.listeners.click();assert.equal(sent.at(-1).method,'conversations.targets');snapshot(2,'b');reply({targets:catalog});await flush();assert.equal(workspace.children.length,1)
+ load.listeners.click();reply({targets:catalog});await flush();assert.equal(workspace.children.length,3);assert.equal(session.disabled,true);assert.ok(workspace.children[1].textContent.includes('/registered/one'))
+ workspace.value='ws-1';workspace.listeners.change();assert.deepEqual(sent.at(-1).params,{id:'b',target:{workspace_id:'ws-1',session_id:null}})
+ reply({});snapshot(3,'b',{...target,session_id:null});await flush()
+ assert.equal(session.children.length,2);assert.equal(session.value,'');assert.equal(session.disabled,false)
+ session.value='session-7';session.listeners.change();assert.deepEqual(sent.at(-1).params,{id:'b',target:{workspace_id:'ws-1',session_id:'session-7'}})
+ reply({});snapshot(4,'b',target);await flush()
+ workspace.value='ws-2';workspace.listeners.change();assert.deepEqual(sent.at(-1).params,{id:'b',target:{workspace_id:'ws-2',session_id:null}})
+ const pendingCount=sent.length
+ assert.equal(workspace.disabled,true);assert.equal(session.disabled,true)
+ session.value='session-7';session.listeners.change();workspace.listeners.change();assert.equal(sent.length,pendingCount,'pending mutation blocks stale-workspace followup')
+ reply({});snapshot(5,'b',{...other,session_id:null});await flush();assert.equal(session.value,'');assert.equal(session.children.length,2)
+ const aged={...target,workspace_id:'aged-workspace',session_id:'aged-session',project:'Aged',title:'Aged session'}
+ snapshot(6,'b',aged);assert.equal(workspace.value,'aged-workspace');assert.equal(session.value,'aged-session');assert.equal(session.children.length,2)
+ load.listeners.click();snapshot(7,'a');reply({targets:catalog});await flush();assert.equal(workspace.value,'');assert.equal(session.disabled,true);assert.equal(workspace.children.length,1)
 })
 
 test('opening a waiting approval never acknowledges an unseen card',async()=>{

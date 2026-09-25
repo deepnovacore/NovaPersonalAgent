@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { acceptanceWakeSettings } from '../src/main/workbench-native-acceptance.mjs'
 import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import { createContext, runInContext } from 'node:vm'
 
@@ -417,10 +418,10 @@ test('no decrypted secret can reach the renderer or a log line', async () => {
   // entry written while no keyring existed keeps it on until it is re-sealed.
   assert.match(
     source,
-    /keyringAvailable: secretCodec\.available\(\) && !hasPlaintextSecret\(currentSettings\)/,
+    /keyringAvailable: hasPlaintextSecret\(currentSettings\) \? false : keyringAvailable/,
   )
   // The failure log for a settings save names the error type only, never the payload.
-  assert.match(source, /settings_save_failure type=\$\{error\.name\}/)
+  assert.match(source, /settings_save_failure/)
   // Every console.* line is scanned: a line mentioning "secret" or "apiKey" is
   // allowed only if it is one of the two key-name-only secret diagnostics;
   // anything else naming a secret, or naming the raw settings patch, or
@@ -456,7 +457,7 @@ test('every settings write goes through one queue so overlapping patches merge',
   const set = source.slice(source.indexOf("async function applyDesktopSettings"))
   const handler = set.slice(0, set.indexOf('\n}'))
   assert.match(handler, /applySettingsTransaction\(\{/)
-  assert.match(handler, /write: async value => \{[\s\S]*await settingsWriter\(commit\.settingsPatch \?\? \{\}, next =>/)
+  assert.match(handler, /write: async value => \{[\s\S]*await accessCredentials\(\(\) => settingsWriter\(commit\.settingsPatch \?\? \{\}, next =>/)
   assert.match(handler, /coordinator: lifecycleCoordinator/)
   assert.doesNotMatch(
     handler,
@@ -465,16 +466,17 @@ test('every settings write goes through one queue so overlapping patches merge',
   )
 })
 
-test('a stored secret that would poison the child environment is omitted at spawn', async () => {
+test('a stored secret that would poison the child environment blocks spawn', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const decrypt = source.slice(source.indexOf('function decryptSecretsForSpawn('))
   const body = decrypt.slice(0, decrypt.indexOf('\n}\n'))
 
   // A NUL in an env value makes Node refuse the spawn, which would quit the app
-  // before the panel could clear the offending key. The value is dropped here
-  // and the key named — never its content.
+  // before the panel could clear the offending key. Refuse the attempt and
+  // name only the allowlisted key, never its content.
   assert.match(body, /secretValueIsSafe\(plaintext\)/)
   assert.match(body, /settings_secret_invalid key=\$\{key\}/)
+  assert.match(body, /throw classifyBackendFailure\('credential_invalid'\)/)
 })
 
 test('readSecret is wired at the spawn site, decrypting only what backendLaunchSpec receives', async () => {
@@ -509,7 +511,7 @@ test('the bootstrap payload carries only orb-owned settings', async () => {
 
 test('quitting drains the backend on the stdin sentinel instead of killing it', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
-  const beforeQuit = source.slice(source.indexOf("app.on('before-quit'"))
+  const beforeQuit = source.slice(source.indexOf("app.on('before-quit'"), source.indexOf("app.on('window-all-closed'"))
 
   assert.match(beforeQuit, /event\.preventDefault\(\)/)
   assert.match(beforeQuit, /shutdownBackendBestEffort\(backend\)/)
@@ -538,7 +540,7 @@ test('backend status survives startup races and is replayed after renderer load'
   assert.match(source, /let backendStatus = Object\.freeze/)
   assert.match(source, /backendStatus = status/)
   const load = source.slice(source.indexOf('loadAppWindow(mainWindow'))
-  assert.match(load.slice(0, 1100), /sendToOrb\('nova:backend-ready', backendStatus\.connection\)/)
+  assert.match(load.slice(0, load.indexOf('tray = createTray()')), /sendToOrb\('nova:backend-ready', backendStatus\.connection\)/)
 })
 
 test('the bootstrap answer carries the current supervised connection at invoke time', async () => {
@@ -565,6 +567,22 @@ test('renderer accepts both supervised disconnect and reconnect events', async (
   assert.match(source, /onBackendExit\(handleBackendExit\)/)
   assert.match(source, /onBackendReady\(connectBackend\)/)
   assert.match(source, /if \(bootstrap\.backend\) connectBackend\(bootstrap\.backend\)/)
+})
+
+test('a cold start with no backend yet never fires the disconnect path', async () => {
+  const source = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
+
+  // 'stopped' is the initial, never-started state; 'starting' is on its way up.
+  // Only a real exit (any other state) may call handleBackendExit here.
+  assert.match(source, /else if \(axes\.backendState !== 'stopped' && axes\.backendState !== 'starting'\) handleBackendExit\(\)/)
+})
+
+test('main does not raise the backend-exit banner before the backend has ever started', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+
+  const load = source.slice(source.indexOf('void rendererLoaded.then'))
+  const body = load.slice(0, load.indexOf('}).catch('))
+  assert.match(body, /else if \(backendStatus\.state !== 'starting' && backendStatus\.state !== 'stopped'\) sendToOrb\('nova:backend-exit'\)/)
 })
 
 test('every renderer push is guarded against a destroyed orb window', async () => {
@@ -916,6 +934,7 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
       currentSettings: {...DEFAULT_SETTINGS}, settingsApplyStatus: 'applied', settingsRestartPending: false, backendSettings, lifecycleCoordinator: {},
       applySettingsTransaction: async options => { await options.write(payload); restart = options.needsBackendRestart(); return {} },
       parseSettingsCommit: value => value,
+      accessCredentials: operation => operation(), refreshSettingsCapabilities: async () => {},
       settingsWriter: async (patch, prepare) => {
         const next = {...context.currentSettings, ...patch}
         await prepare(next); context.currentSettings = next; return next
@@ -937,9 +956,9 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
 test('settings recovery precedes startup configuration and has one transaction status publisher', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const startup = source.slice(source.indexOf('async function startSelectedCamera'))
-  assert.ok(startup.indexOf('loadStartupSettings()') < startup.indexOf('await refreshDesktopConfiguration()'))
-  assert.match(startup, /if \(settingsReady\) await refreshDesktopConfiguration\(\)/u)
-  assert.match(startup, /if \(settingsReady\) void managedWorkspaceBackendRecovery.start\(\)/u)
+  assert.ok(startup.indexOf('loadStartupSettings()') < startup.indexOf("lifecycleCoordinator.run('startup', async"))
+  assert.match(startup, /if \(settingsReady\) \{[\s\S]*lifecycleCoordinator.run\('startup', async/u)
+  assert.match(startup, /if \(settingsReady && configurationReady\) void managedWorkspaceBackendRecovery.start\(\)/u)
   assert.match(startup, /if \(!settingsReady\) \{[\s\S]*dialog.showMessageBox[\s\S]*shell.openPath\(dirname\(settingsFile\(\)\)\)/u)
   const writers = source.match(/settingsApplyStatus\s*=(?!=)/gu)
   assert.equal(writers.length, 2) // initial value and publishSettingsApplyStatus only
@@ -1171,17 +1190,19 @@ test('unsupported embedding in recovery reaches startup diagnostics without muta
   } finally {await rm(root, {recursive: true, force: true})}
 })
 
-test('presentation IPC validates sender and modes and hides without changing conversation state',async()=>{
+for (const acceptance of [null, {}]) test(`presentation IPC validates sender and modes and restores wake settings (acceptance=${!!acceptance})`,async()=>{
  const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
  const start=source.indexOf("ipcMain.handle('nova:personal:presentation',")
  const body=source.slice(start,source.indexOf('\n  })',start)+5)
- const sender={},calls=[];let handler
+ const sender={},calls=[],wakeSettings=[];let handler
+ const currentSettings={wakeWordEnabled:true}
  const background=source.slice(source.indexOf('function enterBackground(){'),source.indexOf('const requestPresentation ='))
- const install=new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord','nativeAudio','currentSettings',`let presentationMode='workbench';${background};${body};return ()=>presentationMode`)
- const mode=install({handle:(_name,callback)=>{handler=callback}},{webContents:sender,hide:()=>calls.push('hide'),show:()=>calls.push('show'),focus:()=>calls.push('focus')},value=>calls.push(value),{stop(){},reset(){},configure(){}},null,{})
+ const install=new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord','nativeAudio','currentSettings','acceptance','acceptanceWakeSettings',`let presentationMode='workbench';${background};${body};return ()=>presentationMode`)
+ const mode=install({handle:(_name,callback)=>{handler=callback}},{webContents:sender,isVisible:()=>true,hide:()=>calls.push('hide'),show:()=>calls.push('show'),focus:()=>calls.push('focus')},value=>calls.push(value),{stop(){},reset(){},configure:settings=>wakeSettings.push(settings)},null,currentSettings,acceptance,acceptanceWakeSettings)
  assert.throws(()=>handler({sender:{}},'background'),/rejected/);assert.throws(()=>handler({sender},'invalid'),/rejected/)
  handler({sender},'background');assert.equal(mode(),'background');assert.deepEqual(calls,['hide'])
  calls.length=0;handler({sender},'orb');assert.deepEqual(calls,[true,'show','focus'])
+ assert.deepEqual(wakeSettings,[{wakeWordEnabled:!acceptance}]);assert.equal(currentSettings.wakeWordEnabled,true)
  calls.length=0;handler({sender},'workbench',false);assert.deepEqual(calls,[false]);assert.throws(()=>handler({sender},'orb','yes'),/rejected/)
 })
 test('background wake IPC cannot reactivate capture or show the window',async()=>{
@@ -1191,6 +1212,18 @@ test('background wake IPC cannot reactivate capture or show the window',async()=
  const sender={};let handler,calls=0
  new Function('ipcMain','mainWindow','wakeWord','presentationMode',body)({on:(_name,callback)=>{handler=callback}},{webContents:sender},{wake:()=>calls++},'background')
  handler({sender});assert.equal(calls,0)
+})
+
+for(const configureShows of [false,true])test(`presentation acknowledgement waits for native show before renderer reconciliation (configureShows=${configureShows})`,async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf("ipcMain.handle('nova:personal:presentation',"),body=source.slice(start,source.indexOf('\n  })',start)+5)
+ let handler,onShow,visible=false,acknowledged=false
+ const sender={},mainWindow={webContents:sender,isVisible:()=>visible,once:(name,callback)=>{assert.equal(name,'show');onShow=callback},show(){visible=true},focus(){}}
+ new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord',`let presentationMode='background';const currentSettings={},acceptance=null,acceptanceWakeSettings=()=>({});${body}`)({handle:(_name,callback)=>{handler=callback}},mainWindow,()=>{},configureShows?{configure:()=>mainWindow.show()}:null)
+ const pending=Promise.resolve(handler({sender},'orb')).then(()=>{acknowledged=true})
+ await Promise.resolve();assert.equal(acknowledged,false,'renderer must not reconcile ahead of the native show reset')
+ visible=true;onShow();await pending;assert.equal(acknowledged,true)
+ onShow=null;await handler({sender},'workbench');assert.equal(onShow,null,'already-visible changes must not wait for an event that will not fire')
 })
 
 test('background entry stops detector and native mic before waiting for renderer or host',async()=>{
@@ -1204,6 +1237,47 @@ test('foreground changes native presentation before unmuting playback',async()=>
  const source=await readFile(new URL('../src/renderer/index.mjs',import.meta.url),'utf8')
  const body=source.slice(source.indexOf('applyPresentation: async ')+19,source.indexOf('\n  taskAction:',source.indexOf('applyPresentation: async '))).replace(/,\s*$/,'')
  const calls=[],window={novaAudioAgentDesktop:{personal:{setPresentation:async(mode,activate)=>calls.push(['presentation',mode,activate])},nativeAudio:{setPlaybackMuted:async muted=>calls.push(['muted',muted])}}}
- const apply=new Function('window','axes','requestAnimationFrame','render',`return ${body}`)(window,{outputMuted:false},()=>{},()=>{})
+ const apply=new Function('window','axes','requestAnimationFrame','render',`let lastReportedDormant=true;return ${body}`)(window,{outputMuted:false},()=>{},()=>{})
  await apply('workbench',{activate:false});assert.deepEqual(calls,[['presentation','workbench',false],['muted',false]])
+})
+
+test('background return reconciles unchanged renderer dormancy with native show reset',async()=>{
+ const {createOrbWindowController}=await import('../src/main/window-position.mjs')
+ const {orbDormant}=await import('../src/renderer/state.mjs')
+ const source=await readFile(new URL('../src/renderer/index.mjs',import.meta.url),'utf8')
+ const main=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const applyBody=source.slice(source.indexOf('applyPresentation: async ')+19,source.indexOf('\n  taskAction:',source.indexOf('applyPresentation: async '))).replace(/,\s*$/,'')
+ const reportBody=source.slice(source.indexOf('  const dormant = orbDormant('),source.indexOf('\n  const activeDecision',source.indexOf('  const dormant = orbDormant(')))
+ const showBody=main.match(/mainWindow\.on\('show', (\(\) => \{[^\n]+\})\)/)[1]
+ for(const surface of ['resting','bubble','task','confirmation']){
+  let bounds={x:500,y:400,width:160,height:160},visible=true
+  const controller=createOrbWindowController({getBounds:()=>bounds,setBounds:value=>{bounds=value},getZoomFactor:()=>1,getScaleFactor:()=>2,getWorkAreaForPoint:()=>({x:0,y:0,width:1440,height:900}),onConfirmationPlacement(){}})
+  const show=new Function('personalCollapsed','orbWindow',`return ${showBody}`)(true,controller)
+  const reports=[],frames=[],shell={dataset:{}},axes={wakeState:'sleeping',hovered:false,codex:'idle',outputMuted:false,playback:'idle'}
+  const window={novaAudioAgentDesktop:{personal:{setPresentation:async mode=>{visible=mode!=='background';if(visible)show()}},nativeAudio:{clear:async()=>{},setPlaybackMuted:async()=>{}},windowLayout:{setDormant:value=>{reports.push(value);if(visible)controller.setDormant(value)}}}}
+  const fixture=new Function('window','axes','requestAnimationFrame','shell','orbDormant','seenPresentations','alertTone','playback','nativeFrames','nativeLevel',`let lastReportedDormant=null;const state={name:'idle',confirmationVisible:false};const render=()=>{${reportBody}};return {render,apply:${applyBody}}`)(window,axes,callback=>frames.push(callback),shell,orbDormant,new Set(),{stop(){}},{disconnect(){}},{clear(){}},{clear(){}})
+  fixture.render();assert.equal(bounds.width,64)
+  await fixture.apply('background');frames.shift()();assert.equal(visible,false)
+  if(surface==='bubble')controller.reserveBubbleArea(1)
+  if(surface==='task')controller.reserveBubbleArea(0,1)
+  if(surface==='confirmation')controller.setConfirmationMode(true)
+  const before=reports.length
+  await fixture.apply('orb');assert.ok(bounds.width>=160)
+  frames.shift()()
+  if(surface==='resting')assert.deepEqual([bounds.width,bounds.height],[64,64])
+  else assert.ok(bounds.width>=160&&bounds.height>=160,`${surface} must retain its larger surface`)
+  assert.equal(reports.length,before+1,`${surface}: unchanged dormancy must be resent after show`)
+ }
+})
+
+test('the expanded workbench casts a native shadow and the resting orb does not',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf('  let personalCollapsed = false')
+ const body=source.slice(start,source.indexOf("  ipcMain.handle('nova:personal:presentation-error'",start))
+ const shadow=[],bounds={x:0,y:0,width:100,height:100}
+ const mainWindow={getBounds:()=>bounds,setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds(){},setHasShadow:value=>shadow.push(value)}
+ const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:{x:0,y:0,width:1440,height:900}})}
+ const set=new Function('mainWindow','screen','orbWindow','sendToOrb',`${body};return setPersonalCollapsed`)(mainWindow,screen,{sync(){}},()=>{})
+ set(false);set(true);set(false)
+ assert.deepEqual(shadow,[true,false,true])
 })

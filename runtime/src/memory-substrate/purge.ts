@@ -26,15 +26,26 @@ export function isPermanentlyPurged(db:GraphDatabase,id:string):boolean{return d
 /** Validate every ancestor and SQLite sidecar before opening any host-registered backup. */
 function safePath(path:string,sidecars=false):void {
  if(!isAbsolute(path))throw Error('unregistered_backup_path')
- const root=parse(path).root;let cursor=root
- for(const component of path.slice(root.length).split(/[\\/]/).filter(Boolean)){
-  cursor=join(cursor,component);const stat=lstatSync(cursor,{throwIfNoEntry:false});if(!stat)throw Error('backup_missing')
+ const root=parse(path).root,components=path.slice(root.length).split(/[\\/]/).filter(Boolean);let cursor=root
+ for(const [index,component] of components.entries()){
+  cursor=join(cursor,component);const stat=lstatSync(cursor,{throwIfNoEntry:false});if(!stat)throw Error(index===components.length-1?'backup_missing':'backup_parent_missing')
   if(process.platform==='darwin'&&['/tmp','/var','/etc'].includes(cursor))continue
   if(stat.isSymbolicLink()||(!stat.isDirectory()&&(!stat.isFile()||stat.nlink!==1)))throw Error('unsafe_backup_path')
  }
  if(sidecars)for(const suffix of ['-wal','-shm','-journal']){const stat=lstatSync(path+suffix,{throwIfNoEntry:false});if(stat&&(stat.isSymbolicLink()||!stat.isFile()||stat.nlink!==1))throw Error('unsafe_backup_sidecar')}
 }
 function readPrivate(path:string):string {safePath(path);const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{if(fstatSync(fd).size>16*1024*1024)throw Error('backup_too_large');return readFileSync(fd,'utf8')}finally{closeSync(fd)}}
+/** Only the historical fixed-ID empty initializer can waive a specifically missing Life backup. */
+function emptyLegacyProfile(db:GraphDatabase,namespace:string,row:Selected):boolean{
+ if(row.entry_id!==namespace+'profile:profile'||row.kind!=='profile'||row.content.legacy!==true||row.content.life_id!=='profile'||row.content.legacy_id!==undefined)return false
+ const fingerprint=hash(canonicalJson({entry_id:row.entry_id,legacy:{about:'',version:0}}))
+ const record=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(namespace+'e:legacy:'+hash(row.entry_id))
+ if(!record)return db.prepare('SELECT 1 FROM memory_suppressed WHERE hash=?').get(fingerprint)!==undefined
+ const parsed=EvidenceRecordSchema.safeParse(JSON.parse(String(record.payload_json)))
+ if(!parsed.success)return false
+ const evidence=parsed.data
+ return evidence.id===namespace+'e:legacy:'+hash(row.entry_id)&&evidence.hash===fingerprint&&evidence.source_id===namespace+'migration:'+hash(row.entry_id)&&evidence.source_kind==='task_result'&&evidence.locator==='legacy-life-json:profile'&&evidence.trust==='trusted_system'&&evidence.raw_text===null&&evidence.extracted.event==='legacy_import'&&evidence.extracted.legacy===true&&evidence.extracted.original_evidence_available===false
+}
 function backupPlan(db:GraphDatabase,selected:Selected[]):{backups:Backup[];unresolved:string[]}{
  const backups:Backup[]=[],unresolved:string[]=[]
  for(const record of db.prepare('SELECT namespace,payload_json FROM memory_life_meta').all()){
@@ -50,7 +61,7 @@ function backupPlan(db:GraphDatabase,selected:Selected[]):{backups:Backup[];unre
    if(entries.some(row=>row.kind==='profile'))state.profile={about:'',version:state.profile.version+1}
    state.receipts=Object.fromEntries(Object.entries(state.receipts).filter(([,receipt])=>!ids.has(receipt.result.id)))
    const after=JSON.stringify(state,null,2)+'\n';backups.push({kind:'life',path:meta.legacy_path,before:hash(bytes),after:hash(after),bytes:after})
-  }catch{unresolved.push('life_backup_unverified')}
+  }catch(error){if(!(error instanceof Error&&error.message==='backup_missing'&&entries.every(row=>emptyLegacyProfile(db,namespace,row))))unresolved.push('life_backup_unverified')}
  }
  const legacy=selected.filter(row=>typeof row.content.legacy_id==='string')
  const mappings=db.prepare('SELECT * FROM memory_migration_paths').all()
@@ -164,7 +175,12 @@ export function purgeEntry(db:GraphDatabase,path:string,input:unknown):PurgeResu
  try{
   for(const id of selectedIds){db.prepare('INSERT OR IGNORE INTO memory_purged_ids VALUES(?)').run(hash(id));db.prepare('DELETE FROM memory_revisions WHERE entry_id=?').run(id);db.prepare('DELETE FROM memory_vectors WHERE entry_id=?').run(id)}
   for(const record of evidence){db.prepare('INSERT OR IGNORE INTO memory_purged_ids VALUES(?)').run(hash(record.id));db.prepare('INSERT OR IGNORE INTO memory_suppressed VALUES(?)').run(record.hash);db.prepare('DELETE FROM memory_evidence WHERE id=?').run(record.id);db.prepare('DELETE FROM memory_extractions WHERE evidence_id=?').run(record.id);db.prepare("DELETE FROM source_extractions WHERE json_extract(payload_json,'$.ticket.evidence_id')=?").run(record.id)}
-  for(const row of db.prepare('SELECT namespace,payload_json FROM memory_life_meta').all()){const meta=JSON.parse(String(row.payload_json)) as {receipts:Record<string,{result:{id:string}}>};const selectedLife=new Set(selected.filter(entry=>entry.entry_id.startsWith(String(row.namespace))).map(entry=>entry.content.life_id));meta.receipts=Object.fromEntries(Object.entries(meta.receipts).filter(([,receipt])=>!selectedLife.has(receipt.result.id)));db.prepare('UPDATE memory_life_meta SET payload_json=? WHERE namespace=?').run(canonicalJson(meta),String(row.namespace))}
+  for(const row of db.prepare('SELECT namespace,payload_json FROM memory_life_meta').all()){
+   const meta=JSON.parse(String(row.payload_json)) as {profile_version?:number;receipts:Record<string,{result:{id:string}}>},selectedHere=selected.filter(entry=>entry.entry_id.startsWith(String(row.namespace))),selectedLife=new Set(selectedHere.map(entry=>entry.content.life_id))
+   // selected retains the pre-purge revisions, including legacy versions higher than aggregate CAS.
+   for(const entry of selectedHere)if(entry.kind==='profile'&&entry.content.life_data!==undefined)meta.profile_version=Math.max(meta.profile_version??0,lifeStateSchema.shape.profile.parse(entry.content.life_data).version)
+   meta.receipts=Object.fromEntries(Object.entries(meta.receipts).filter(([,receipt])=>!selectedLife.has(receipt.result.id)));db.prepare('UPDATE memory_life_meta SET payload_json=? WHERE namespace=?').run(canonicalJson(meta),String(row.namespace))
+  }
   rebuildWorkspaceProjections(db,intent.revisions);save(db,intent);db.exec('COMMIT')
  }catch(error){db.exec('ROLLBACK');throw error}
  return finish(db,path,intent)

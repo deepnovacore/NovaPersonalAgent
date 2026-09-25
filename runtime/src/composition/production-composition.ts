@@ -1,3 +1,4 @@
+import {acceptanceCapabilityRegistry} from '../desktop/workbench-acceptance.js'
 import type {ProjectExecutorAdapter} from '../executors/coding-executor.js'
 import {MacMailClient} from '../connectors/macos/mail.js'
 import {MacCalendarClient} from '../connectors/macos/calendar.js'
@@ -49,8 +50,9 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   if (!remote) requireSelectedCascadedLlmConfig(loadedSettings)
   else if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
   else requireSelectedCascadedRealtimeConfig(loadedSettings)
-  const externalMcp = await prepareExternalMcp(loadCapabilityRegistry({environment: remote
-      ? {...environment, NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false'} : environment}), stop.signal)
+  const configuredCapabilities=loadCapabilityRegistry({environment:remote?{...environment,NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED:'false'}:environment})
+  const acceptanceCapabilities=acceptanceCapabilityRegistry(configuredCapabilities)
+  const externalMcp = await prepareExternalMcp(acceptanceCapabilities, stop.signal)
   const releaseExternal = ownership.own(() => externalMcp.close())
   const capabilities = externalMcp.capabilities
   // This entry owns the concrete Codex package; core gates injected adapters by their declared role.
@@ -157,21 +159,29 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   })
   if (knowledge !== undefined) {
     const host = composition.realtime.personalAgent
+    let sourceRevision=0
     host.setSources(new LocalDirectorySources({
       path: host.path + '.sources.json', knowledge: knowledge.service,
+      priorityWorkspace: async () => codexResource?.mode==='project'
+        ? (await (codexResource.adapter as ProjectExecutorAdapter).activeCommittedWorkspace())?.canonical_path??null
+        : null,
       processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
       onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
-      onChange: () => host.sourceChanged(),
+      onChange: changed => changed ? host.sourceChanged({phase:'ready',revision:++sourceRevision}) : host.sourceProgressChanged(),
+      onHideEvidenceMany: refs => host.invalidateEvidenceMany(refs),
+      onInvalidateMany: async refs => {
+        await host.invalidateEvidenceMany(refs)
+        const memory = composition.realtime.personalMemory
+        if (memory?.forgetSources) await memory.forgetSources(refs)
+        else for (const ref of refs) await memory?.forgetSource?.(ref)
+        await host.revalidate()
+        await host.refreshMemory()
+      },
       onInvalidate: async ref => {
         await host.invalidateEvidence(ref)
         await composition.realtime.personalMemory?.forgetSource?.(ref)
         await host.revalidate()
         await host.refreshMemory()
-      },
-      onObserve: async observation => {
-        const memory = composition.realtime.personalMemory
-        if (!memory?.observeSource) return // Knowledge-only mode indexes A without enabling personal extraction.
-        await memory.observeSource(observation)
       },
     }))
   }
@@ -191,7 +201,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     if(mode!=='background'&&seen?.proposal_id&&!seen.conversation_id&&projectAdapter?.confirmationController.view.pending_confirmation_id===seen.proposal_id)projectAdapter.confirmationController.setBackground(false)
     if(!seen){const paused=mode==='background';if(paused||presentationPaused)await composition.realtime.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
   }))
-  host.setConversationRuntime(conversationRuntimeFactory({settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
+  host.setConversationRuntime(conversationRuntimeFactory({settings:composition.realtime.core.settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
     ...(onUsage===undefined?{}:{onUsage}),
     ...(composition.realtime.core.frameSource?{frameSource:composition.realtime.core.frameSource}:{}),
     blackboard:blackboardOptionsFromSettings(settings),clock,gateway:composition.realtime.core.gateway,

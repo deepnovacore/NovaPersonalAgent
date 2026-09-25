@@ -56,6 +56,8 @@ export interface IntakeSession {
   missing_goal_grace: number | null
   kind: IntakeKind | null
   execution_mode?: 'direct' | 'plan'
+  direct_start_revision?: number | undefined
+  bound_target?: {workspace_id: string | null; revision: number}
   decision: CoordinatorDecision | null
   target: IntakeTarget | null
   work_order: string | null
@@ -72,6 +74,8 @@ export interface IntakeOptions {
   readonly roster: () => readonly RosterEntry[]
   readonly running: () => readonly RunningWork[]
   readonly activeProject: () => string | null
+  /** Conversation-owned IDs only; captured before asynchronous intake work. */
+  readonly boundTarget?: () => {workspace_id: string | null; revision: number}
   readonly resolveTarget: (decision: CoordinatorDecision) => Promise<IntakeTarget>
   /** Open the project-confirmation proposal for `session.target`; the confirmed commit is the only side effect. */
   readonly prepare: (session: Readonly<IntakeSession>) => ProjectProposal
@@ -129,6 +133,34 @@ function evidenceOccurs(evidence: string, project: string, utterances: readonly 
   return named.length === 1 && named[0] === normalize(project)
 }
 
+// ponytail: recognize explicit directive clauses only; uncertain paraphrases retain confirmation.
+const directiveText = (text: string): string => text.replace(/"[^"]*"|“[^”]*”|‘[^’]*’|「[^」]*」|`[^`]*`|(?<![\p{L}\p{N}])'[^']*'(?![\p{L}\p{N}])/gu, '')
+const directStartRequested = (text: string): boolean => {
+  const plain = directiveText(text)
+  if (/[?？]|先(?:问|确认)|不允许|不准|禁止|\b(?:before|forbidden|not allowed)\b/iu.test(plain)) return false
+  return plain.split(/[，,。.!！;；\n]/u).some(clause => /^(?:请|现在|这次|那就)?(?:(?:直接开始|直接做)(?:(?:吧|即可|就行)|(?:修复|修改|实现|处理|执行).*)?|不用再确认|无需再确认|go ahead|start directly|proceed without confirmation)$/iu.test(clause.trim()))
+}
+// A later session directive replaces earlier authority; ordinary factual answers preserve it.
+const latestSessionDirective = (texts: readonly string[]): string => {
+  let latest = ''
+  for (const text of texts.map(directiveText)) {
+    if (/继续|接着|会话|\b(?:continue|resume|session|thread)\b/iu.test(text)
+      || (latest && /先(?:问|确认)|不确定/iu.test(text))) latest = text
+  }
+  return latest
+}
+const continuationIntent = (texts: readonly string[]): 'none' | 'new' | 'latest' | 'unclear' => {
+  const plain = latestSessionDirective(texts)
+  if (/(?:不要|别|不再|不是|不)(?:再)?继续|(?:新开|重新开|另开).{0,6}会话|新会话|\b(?:new|fresh) (?:session|thread)\b|\b(?:do not|don't) (?:continue|resume)\b/iu.test(plain)) return 'new'
+  if (/继续|接着|先(?:问|确认)|不确定|\b(?:continue|resume)\b/iu.test(plain)) {
+    return !/[?？]|之前|先(?:问|确认)|不允许|不确定|是否/iu.test(plain)
+      && /(?:^|[，,。.!！;；\n])\s*(?:请|现在|那就)?(?:在(?:当前项目|当前工作区|本项目|这个项目)(?:里|中)?\s*)?(?:(?:继续|接着)(?=[^，,。.!！;；\n]*(?:任务|会话|工作区))|(?:continue|resume)\b)/iu.test(plain) ? 'latest' : 'unclear'
+  }
+  return 'none'
+}
+const currentWorkspaceReference = (project: string | null): string | null => project !== null
+  && /^(?:当前项目|当前工作区|本项目|这个项目|current project|current workspace)$/iu.test(stripLikePython(project)) ? null : project
+
 /** Missing/misbound model fields are service failures, never additional user questions. */
 function projectConfirmationProblem(result: z.infer<typeof assessSchema>, snapshot: IntakeSession, active: string | null, roster: readonly string[]): string | null {
   const turns = snapshot.turns
@@ -176,6 +208,8 @@ export function renderResolutionError(error: ProjectResolutionError): string {
       ? `${text(item.project)}/${text(item.title)}`
       : text(item)).join('、')
     : ''
+  if (error.code === 'unknown_session' && detail.reason === 'continuation_target_required') return 'code=unknown_session：请在“Codex 会话（续接目标）”里选择要继续的会话，或明确说出会话名称。任务尚未执行。'
+  if (error.code === 'unknown_project' && detail.reason === 'explicit_project_required') return 'code=unknown_project：这个对话还没有选择执行工作区，请在“执行工作区”里选择已注册目录，或明确说出项目名。任务尚未执行。'
   if (error.code === 'unknown_session') return `code=unknown_session：没有找到“${text(detail.title)}”这个可继续的会话，请明确项目和会话名称。任务尚未执行。`
   if (error.code === 'unknown_project') {
     const suggestions = list(detail.suggestions)
@@ -259,9 +293,10 @@ export class IntakeController {
     this.#userInputPending = false
     this.#failedUserInput = false
     if (this.active && this.#session!.session_id !== sessionId) this.cancel()
+    if (this.active && (this.#session!.state === 'committing' || this.#session!.state === 'dispatch_unknown')) return 'intake_in_progress'
+    if (this.active && !this.#bindingCurrent(this.#session!)) this.cancel()
     if (this.active) {
       const current = this.#session!
-      if (current.state === 'committing' || current.state === 'dispatch_unknown') return 'intake_in_progress'
       // A provider repeats the draft for an already-ingested answer: one content revision per turn.
       if (current.origin_ref !== originRef) this.#revise(text, originRef, sessionId)
       return 'intake_in_progress'
@@ -269,6 +304,7 @@ export class IntakeController {
     this.#session = {
       intake_id: this.#options.idFactory(), revision: 1, plan_revision: null, proposal_id: null,
       workspace: null, session_id: sessionId,
+      ...(this.#options.boundTarget ? {bound_target: {...this.#options.boundTarget()}} : {}),
       origin_ref: originRef, state: 'open', outcome: null, delegate_id: null,
       request: structuredClone(request), opening: limit(text, 4000), turns: [], slots: emptySlots(), discovery: [],
       questions_asked: 0, intent_to_proceed: false, stop_asking: false, pending_question: null, pending_project_question: null, confirmed_project: null,
@@ -315,6 +351,7 @@ export class IntakeController {
     if (this.#userInputPending || current?.state !== 'readback' || current.proposal_id !== operation.proposal_id
       || current.plan_revision !== current.revision || operation.intake_id !== current.intake_id
       || operation.plan_revision !== current.plan_revision || operation.work_order !== current.work_order) return false
+    if (!this.#bindingCurrent(current)) { this.cancel(); return false }
     current.state = 'committing'
     this.#options.onStateChanged?.()
     return true
@@ -344,8 +381,13 @@ export class IntakeController {
 
   #current(id: string, revision: number): IntakeSession | null {
     const current = this.#live(id, revision)
+    if (current && current.state !== 'committing' && !this.#bindingCurrent(current)) { this.cancel(); return null }
     if (current === null) this.#options.diagnostic('intake_stale_result')
     return current
+  }
+
+  #bindingCurrent(current: IntakeSession): boolean {
+    return current.bound_target === undefined || current.bound_target.revision === this.#options.boundTarget?.().revision
   }
 
   #userEvidence(current: IntakeSession): string[] {
@@ -390,7 +432,7 @@ export class IntakeController {
     let stage: IntakeStage = 'assess'
     try {
       const input = this.#input(snapshot)
-      const result = await this.#model(snapshot, 'assess', assessSchema.superRefine((result, ctx) => {
+      const result = await this.#model(snapshot, 'assess', assessSchema.transform(result => ({...result, project: currentWorkspaceReference(result.project)})).superRefine((result, ctx) => {
         const problem = projectConfirmationProblem(result, snapshot, input.active_project as string | null, (input.roster as readonly RosterEntry[]).map(entry => entry.name))
         if (problem !== null) ctx.addIssue({code: 'custom', message: problem, path: ['project_confirmation']})
       }), input, abort)
@@ -405,6 +447,7 @@ export class IntakeController {
       this.#options.record(current, 'intake.assess', {...result, input_active_project: input.active_project as string | null})
       current.slots = result.slots
       current.execution_mode = result.execution_mode
+      current.direct_start_revision = result.early_exit && directStartRequested(current.turns.at(-1)?.answer ?? current.opening) ? current.revision : undefined
       current.intent_to_proceed = result.intent_to_proceed || result.early_exit
       current.discovery = [...new Set([...current.discovery, ...result.discovery,
         ...(result.candidate_question?.owner === 'repo' ? [result.candidate_question.text] : [])])].slice(0, 12)
@@ -436,16 +479,19 @@ export class IntakeController {
         question = `是在 ${project} 里做吗？`
         projectQuestion = project ?? undefined
       }
+      const namedSessionEvidence = project !== null && this.#namedSessionEvidence(project, sessionTitle, current)
       if (kind !== 'create' && kind !== 'unclear' && project !== null && project !== active && !affirmed
         && !evidenceOccurs(result.project_evidence ?? '', project,
           this.#userEvidence(current), this.#options.roster().map(entry => entry.name))
-          && !this.#namedSessionEvidence(project, sessionTitle, current)) {
+          && !namedSessionEvidence) {
         this.#options.diagnostic('intake_project_evidence_missing')
         kind = 'unclear'
         question = `是在 ${project} 里做吗？`
         projectQuestion = project
       }
-      if (sessionTitle && project !== null && !this.#namedSessionEvidence(project, sessionTitle, current)) {
+      const continuation = continuationIntent([current.opening, ...current.turns.map(turn => turn.answer)])
+      if ((kind === 'work' && ((continuation === 'unclear' && result.session.mode !== 'new' && !namedSessionEvidence) || (continuation === 'latest' && result.session.mode === 'new')))
+        || (sessionTitle && project !== null && (continuation === 'new' || !namedSessionEvidence))) {
         kind = 'unclear'
         question = '请明确要继续的项目和会话名称。'
         projectQuestion = undefined
@@ -478,7 +524,7 @@ export class IntakeController {
           : `code=steer_failed：追加要求未送达：${admission.problem ?? admission.code ?? 'runtime_rejected'}。`)
         return
       }
-      const decision: CoordinatorDecision = {kind: kind === 'switch' ? 'switch' : kind === 'create' ? 'create' : 'work', project, session: result.session.mode === 'new' ? 'new' : 'latest', ...(sessionTitle ? {session_title: sessionTitle} : {})}
+      const decision: CoordinatorDecision = {kind: kind === 'switch' ? 'switch' : kind === 'create' ? 'create' : 'work', project, session: sessionTitle || (result.session.mode === 'latest' && continuation === 'latest') ? 'latest' : 'new', ...(sessionTitle ? {session_title: sessionTitle} : {})}
       let target: IntakeTarget
       stage = 'resolve'
       try {
@@ -537,10 +583,15 @@ export class IntakeController {
   #namedSessionEvidence(project: string, title: string | null | undefined, current: IntakeSession): boolean {
     if (!title) return false
     const roster = this.#options.roster()
-    const namedProject = this.#userEvidence(current).some(text => text.includes(project))
+    const evidence = [current.opening, ...current.turns.map(turn => turn.answer)].map(directiveText)
+    const namedProject = evidence.some(text => text.includes(project))
     if (!namedProject && roster.filter(entry => entry.sessions?.includes(title)).length !== 1) return false
-    return roster.some(entry => entry.name === project && entry.sessions?.includes(title))
-      && this.#userEvidence(current).some(text => text.includes(title))
+    const text = latestSessionDirective(evidence), index = text.indexOf(title)
+    if (!roster.some(entry => entry.name === project && entry.sessions?.includes(title))
+      || index < 0 || /[?？]|不允许|不要|别|不准|禁止|不确定|是否|之前|先(?:问|确认)|\b(?:do not|don't|not sure|before)\b/iu.test(text)) return false
+    const before = text.slice(0, index).trimEnd(), after = text.slice(index + title.length).trimStart()
+    return /(?:继续|接着|\bcontinue|\bresume)\s*$/iu.test(before)
+      || (/(?:在|用|使用|切换到|\bin(?: the)?)\s*$/iu.test(before) && /^(?:(?:这个)?会话|session\b)/iu.test(after))
   }
 
   async #plan(snapshot: IntakeSession): Promise<void> {
@@ -589,7 +640,10 @@ export class IntakeController {
       const project = current.target?.workspace_display_name ?? ''
       // The readback line always names the project. A plan that changes the active project (create, or
       // work quoted into another project) is confirmed under every `plan_readback` (decision 2026-09-04).
-      if (this.#options.settings.plan_readback === 'confirm' || project !== this.#options.activeProject()) {
+      const direct = current.direct_start_revision === current.revision && current.kind === 'work'
+        && current.bound_target?.workspace_id != null && current.bound_target.workspace_id === current.target?.workspace_id
+        && (current.target.action === 'reuse' || current.target.action === 'resume')
+      if ((this.#options.settings.plan_readback === 'confirm' && !direct) || project !== this.#options.activeProject()) {
         stage = 'prepare'
         this.#propose(current, `计划（项目 ${project}）：${limit(order.objective, 200)}`)
         return

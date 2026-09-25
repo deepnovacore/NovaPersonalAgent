@@ -1,5 +1,5 @@
 import {z} from 'zod'
-import {EntryRevisionSchema,retrievalEvidence,effectiveEvidence,processingStamp,type EntryRevision} from './store.js'
+import {EntryRevisionSchema,retrievalEvidence,effectiveEvidence,processingStamp,fileDerivedInference,type EntryRevision} from './store.js'
 import type {GraphDatabase} from '../workspace-graph/store.js'
 
 const vectorSchema=z.array(z.number().finite()).min(1).max(4096).refine(vector=>vector.some(value=>value!==0),'zero embedding')
@@ -31,11 +31,13 @@ export function memoryRetrieval(db:GraphDatabase,operation:'pending_vectors'|'wr
   return count
  }
  const limit=operation==='pending_vectors'?z.number().int().min(1).max(100).parse(value.limit??100):value.scope==='recent'?200:5000
+ const excludeFileInferences=z.boolean().parse(value.exclude_file_inferences??false)
+ const fileClause=excludeFileInferences?`AND NOT (json_extract(r.payload_json,'$.origin')='inferred' AND json_extract(r.payload_json,'$.written_by')<>'user_correction' AND EXISTS (SELECT 1 FROM json_each(r.payload_json,'$.evidence_refs') ref JOIN memory_evidence e ON e.id=ref.value WHERE json_extract(e.payload_json,'$.source_kind')='file'))`:''
  // ponytail: scan the bounded current namespace in the existing Worker; add ANN only beyond 5000 active entries.
- const candidates=db.prepare(`SELECT r.payload_json,v.vector_json FROM (${latest}) r LEFT JOIN memory_vectors v ON v.entry_id=r.entry_id AND v.revision=r.revision AND v.provider=? WHERE substr(r.entry_id,1,length(?))=? AND json_extract(r.payload_json,'$.op')<>'tombstone' AND (json_extract(r.payload_json,'$.valid_until') IS NULL OR julianday(json_extract(r.payload_json,'$.valid_until'))>julianday(?)) ${operation==='pending_vectors'?'AND v.entry_id IS NULL':''} ORDER BY json_extract(r.payload_json,'$.recorded_at') DESC,r.entry_id LIMIT ?`).all(provider,prefix,prefix,new Date().toISOString(),limit+1)
+ const candidates=db.prepare(`SELECT r.payload_json,v.vector_json FROM (${latest}) r LEFT JOIN memory_vectors v ON v.entry_id=r.entry_id AND v.revision=r.revision AND v.provider=? WHERE substr(r.entry_id,1,length(?))=? AND json_extract(r.payload_json,'$.op')<>'tombstone' AND (json_extract(r.payload_json,'$.valid_until') IS NULL OR julianday(json_extract(r.payload_json,'$.valid_until'))>julianday(?)) ${fileClause} ${operation==='pending_vectors'?'AND v.entry_id IS NULL':''} ORDER BY json_extract(r.payload_json,'$.recorded_at') DESC,r.entry_id LIMIT ?`).all(provider,prefix,prefix,new Date().toISOString(),limit+1)
  const extractionProvider=value.extraction_provider===undefined?null:key.parse(value.extraction_provider)
  const kind=value.kind===undefined?null:key.parse(value.kind)
- const usable=candidates.slice(0,limit).map(row=>({entry:EntryRevisionSchema.parse(JSON.parse(String(row.payload_json))),vector:row.vector_json===null?null:vectorSchema.parse(JSON.parse(String(row.vector_json)))})).filter(row=>row.entry.kind!=='memory_summary'&&hasEvidence(db,row.entry)&&(kind===null||row.entry.kind===kind)).map(row=>({...row,extraction_stamp:extractionProvider?processingStamp(db,row.entry.evidence_refs,'extraction',extractionProvider):null})).filter(row=>extractionProvider===null||row.extraction_stamp!==null)
+ const usable=candidates.slice(0,limit).map(row=>({entry:EntryRevisionSchema.parse(JSON.parse(String(row.payload_json))),vector:row.vector_json===null?null:vectorSchema.parse(JSON.parse(String(row.vector_json)))})).filter(row=>row.entry.kind!=='memory_summary'&&hasEvidence(db,row.entry)&&(kind===null||row.entry.kind===kind)&&(!excludeFileInferences||!fileDerivedInference(db,row.entry))).map(row=>({...row,extraction_stamp:extractionProvider?processingStamp(db,row.entry.evidence_refs,'extraction',extractionProvider):null})).filter(row=>extractionProvider===null||row.extraction_stamp!==null)
  if(operation==='pending_vectors')return usable.filter(row=>consented(db,row.entry,provider)).map(row=>row.entry)
  const query=z.string().min(1).max(4000).parse(value.query);const k=z.number().int().min(1).max(20).parse(value.limit??8)
  const queryVector=value.vector===null?null:vectorSchema.parse(value.vector)

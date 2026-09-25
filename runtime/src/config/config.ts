@@ -246,7 +246,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
   // StepFun support chat defaults to its own model. fast_model keeps its DashScope default
   // because local memory extraction reaches it through the DashScope embedding connection;
   // an empty watch or planner model would fall back to it, so empty counts as unset there.
-  const stepfunSupport = integratedProvider === 'stepfun'
+  const stepfunSupport = !textConversations && integratedProvider === 'stepfun'
     && (optionalSecret(environment.NOVA_AUDIO_AGENT_MODEL_API_KEY) ?? '').trim() === ''
   const supportDefault = (value: string | undefined): string | undefined =>
     value ?? (stepfunSupport ? STEPFUN_SUPPORT_MODEL : undefined)

@@ -67,6 +67,8 @@ const clientErrorMessages: Readonly<Record<WorkspaceGraphStoreClientErrorCode, s
   STORE_MIGRATION_FAILED: 'workspace graph schema migration failed',
   STORE_NOT_FOUND: 'workspace graph record was not found',
   STORE_INVALID_OPERATION: 'workspace graph operation is invalid',
+  STORE_PURGED_ID: 'memory identifier was permanently purged',
+  STORE_STATED_EVIDENCE_REQUIRED: 'stated memory requires trusted user evidence',
   STORE_OPERATION_CONFLICT: 'workspace graph operation replay conflict',
   STORE_READ_FAILED: 'workspace graph read failed',
   STORE_SCHEMA_UNSUPPORTED: 'workspace graph schema version is unsupported',

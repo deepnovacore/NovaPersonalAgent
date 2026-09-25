@@ -131,17 +131,38 @@ body[data-opaque="1"] .workbench{border-radius:0}
 .workbench .personal-card{flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 8px}
 .workbench .personal-card>h3,.workbench .personal-card>p,.workbench .personal-card>.life-form,.workbench .personal-card>details{flex-basis:100%}
 .workbench .personal-card>select{width:auto;margin-right:4px}
+.workbench-suggestions{display:grid;gap:10px;margin-top:12px}
+.workbench-suggestions>h2{font-size:14px;color:var(--ink-dim);font-weight:600}
+.workbench-recap{display:grid;gap:8px;margin-bottom:14px;padding:16px 18px;background:var(--surface-raised);border:1px solid var(--line);border-radius:var(--radius)}
+.workbench-recap>h2{font-size:14px;color:var(--ink-dim);font-weight:600}
+.workbench-recap>p{font-size:14px;line-height:1.7;color:var(--ink)}
+.workbench-recap ul{margin:4px 0 0;padding:0;list-style:none;display:grid;gap:6px;font-size:13px;color:var(--ink-dim)}
+.recap-projects li{display:grid;grid-template-columns:minmax(96px,max-content) 1fr;gap:4px 14px;padding-top:6px;border-top:1px solid var(--line)}
+.recap-projects strong{font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+@media(max-width:600px){.recap-projects li{grid-template-columns:1fr}}
+.workbench-suggestions:first-child{margin-top:0}
+.workbench-next{font-size:13px;color:var(--ink-dim)}
+.workbench-empty{border:1px dashed var(--line);border-radius:var(--radius);padding:24px;display:grid;gap:8px;color:var(--ink-dim)}
+.workbench-empty h3{font-size:15px;color:var(--ink);font-weight:600}
+.workbench-empty p{font-size:13px;line-height:1.6}
+.workbench-empty button{justify-self:start}
 .workbench-page>button{align-self:flex-start}
 .workbench-page>h2{display:none}
 .workbench label:has(>input[type=checkbox]),.workbench label:has(>input[type=radio]){display:flex;align-items:center;gap:8px;color:var(--ink)}
 .workbench label:has(>input[type=checkbox])>input{width:auto;margin:0}
 .workbench-page>p:has(>button){display:flex;align-items:center;gap:8px}
 .workbench .card-actions,.workbench .feed-actions{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.workbench button.quiet{border-color:transparent;background:transparent;color:var(--ink-faint)}
+.workbench button.quiet:hover:not(:disabled){color:var(--ink);border-color:var(--line)}
+.workbench button.danger:hover:not(:disabled){color:var(--warn);border-color:var(--warn-wash)}
 .workbench .card select{width:auto}
 .workbench .card details{font-size:12px;color:var(--ink-dim)}
 .chips{display:flex;flex-wrap:wrap;gap:4px}
 .chips span{font:11px/1.4 var(--mono);padding:2px 7px;border-radius:var(--radius-sm);background:var(--surface-inset);color:var(--ink-dim);border:1px solid var(--line)}
 .news-card small{display:block}
+.workbench .news-card{flex-direction:column;flex-wrap:nowrap;align-items:stretch}
+/* In a column, the shared 100% basis would be a height and wrap each child into its own column. */
+.workbench .personal-card.news-card>*{flex-basis:auto}
 .news-excerpt{display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
 .memory-section{margin-top:18px;border-top:1px solid var(--line);padding-top:12px;display:flex;flex-direction:column;gap:10px}
 .memory-section>summary{font-size:15px;font-weight:600;color:var(--ink)}
@@ -151,7 +172,7 @@ body[data-opaque="1"] .workbench{border-radius:0}
 .memory-entry-details{padding:10px 12px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-raised);display:flex;flex-direction:column;gap:6px}
 .memory-entry-details h4{font-size:13px;font-weight:600}
 .memory-entry-details p{font-size:13px;color:var(--ink-dim)}
-.memory-entry-details button{align-self:flex-start;margin-right:6px}
+.memory-entry-details>button{align-self:flex-start}
 .memory-pager{display:flex;gap:6px}
 
 /* Chat pane */
@@ -282,3 +303,23 @@ body[data-personal-collapsed="true"] .workbench{display:none}
 @keyframes warmup-pulse{50%{opacity:.35}}
 @media(prefers-reduced-motion:reduce){.warmup-spinner,.warmup-skeleton span{animation:none}}
 @media(max-width:600px){.workbench .preference-card{padding:16px}.preference-row{gap:10px}.preference-heading{gap:4px}.preference-segments{flex-wrap:wrap}}
+
+/* Body copy: CJK and Latin mixed, so wrap at words but never overflow */
+.workbench .card p,.workbench .personal-card p,.workbench-recap p,.profile-preview,.profile-work-item p,.memory-entry-details p{text-wrap:pretty;word-break:normal;line-height:1.65;max-width:72ch}
+.profile-about{position:relative}
+.profile-work{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.profile-work-item{position:relative;display:grid;gap:4px;padding:12px 14px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+.profile-work-item h4{font-size:13px;font-weight:600;color:var(--ink)}
+.profile-work-item p{font-size:13px;color:var(--ink-dim)}
+/* Sources: hidden until hover, focus, right-click or Shift+F10 */
+.workbench [data-sources="true"]{position:relative}
+.workbench .source-info{position:absolute;top:8px;right:8px;width:22px;height:22px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--ink-faint);font-size:13px;line-height:22px;opacity:0;transition:opacity .12s}
+.workbench [data-sources="true"]:hover>.source-info,.workbench [data-sources="true"]:focus-within>.source-info,.workbench .source-info[aria-expanded="true"]{opacity:1}
+.workbench .source-info:hover{background:var(--surface-inset);color:var(--ink)}
+.workbench .source-popover{position:absolute;top:34px;right:8px;z-index:20;min-width:200px;max-width:min(360px,90%);padding:10px 12px;background:var(--surface-raised);border:1px solid var(--line-strong);border-radius:var(--radius);box-shadow:0 6px 20px rgba(0,0,0,.12);font-size:12px;color:var(--ink-dim)}
+.workbench .source-popover:focus{outline:none}
+.source-popover-title{font-size:11px;color:var(--ink-faint);margin-bottom:4px}
+.source-popover ul{margin:0;padding-left:16px;display:grid;gap:2px;overflow-wrap:anywhere}
+.workbench .source-menu{position:fixed;z-index:30;padding:4px;background:var(--surface-raised);border:1px solid var(--line-strong);border-radius:var(--radius-sm);box-shadow:0 6px 20px rgba(0,0,0,.14)}
+.workbench .source-menu button{border:0;background:transparent;width:100%;text-align:left}
+.workbench .source-menu button:hover,.workbench .source-menu button:focus-visible{background:var(--accent-wash)}

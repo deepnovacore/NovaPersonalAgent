@@ -37,14 +37,14 @@ test('second-instance launch wakes sleeping or blocked audio before settings dis
         assert.equal(s.runtime.state, state)
         const epoch = s.runtime.epoch, shown = s.shown(), muted = s.runtime.muted
         const opened = []
-        const requested = new Function('wakeWord', 'argv', 'shouldOpenSettings', 'activeLaunchId', 'openSettingsWindow', `
+        const requested = new Function('wakeWord', 'argv', 'shouldOpenSettings', 'activeLaunchId', 'openSettingsWindow', 'requestPresentation', 'mainWindow', `
           let openSettingsRequested = false
           ;(() => {${body}})()
           return openSettingsRequested
         `)(s.runtime, argv, shouldOpenSettings, activeLaunchId, id => {
           assert.equal(s.runtime.state, 'active')
           opened.push(id)
-        })
+        }, () => {}, {show() {}, focus() {}})
         assert.equal(s.runtime.state, 'active')
         assert.equal(s.runtime.epoch, epoch + 1)
         assert.equal(s.shown(), shown + 1)

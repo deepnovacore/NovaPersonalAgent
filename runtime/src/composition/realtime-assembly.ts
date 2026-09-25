@@ -290,6 +290,7 @@ export class RealtimeAssembly {
     canProcess:(id,purpose)=>this.#personalMemory?.canProcessEvidence?.(id,purpose)??Promise.resolve(false),
     processingStamp:ids=>this.#personalMemory?.processingStamp?.(ids)??Promise.resolve(null),
     record:input=>this.#personalMemory?.recordEvidence?.(input)??Promise.reject(Error('memory_unavailable')),
+    recordBatch:async inputs=>{const memory=this.#personalMemory;if(memory?.recordEvidenceBatch)return await memory.recordEvidenceBatch(inputs);const out=[];for(const input of inputs)out.push(await this.#knowledgeLedger.record(input));return out},
     read:id=>this.#personalMemory?.readEvidence?.(id)??Promise.resolve(null),
     remove:id=>this.#personalMemory?.forgetSource?.(id)??Promise.reject(Error('memory_unavailable')),
   }
@@ -355,7 +356,7 @@ export class RealtimeAssembly {
       context:()=>{const view=compileContextView(input.core.runtime.memory,input.core.runtime.core.floor.state,input.core.runtime.clock.now(),{suggestions:input.core.runtime.core.suggestions.all(),triggerKind:'discovery_tick'});return {...view,channels:view.channels.slice(-8),affordances:view.affordances.slice(-8),in_flight:view.in_flight.slice(-8)}},
       onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}})},
       evidenceRefs:()=>[...input.core.runtime.memory.channels.values()].flatMap(channel=>channel.items.slice(-4).map(item=>`${item.channel}:${item.seq}`)).slice(-16),
-      ...(input.core.personalAgentConfig?{generateProfile:input.core.personalAgentConfig.surrogate.generateProfile,generateContext:input.core.personalAgentConfig.surrogate.generateContext,rankNews:input.core.personalAgentConfig.surrogate.rankNews,understand:input.core.personalAgentConfig.surrogate.understand,prepareBrief:(snapshot,slot,signal)=>input.core.personalAgentConfig!.surrogate.prepareBrief(snapshot,slot,signal),prepareProposal:(snapshot,proposal,signal)=>input.core.personalAgentConfig!.surrogate.prepareProposal(snapshot,proposal,signal),summarizeMemory:(entries,signal)=>input.core.personalAgentConfig!.surrogate.summarizeMemory(entries,signal),discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
+      ...(input.core.personalAgentConfig?{generateProfile:input.core.personalAgentConfig.surrogate.generateProfile,generateDigests:input.core.personalAgentConfig.surrogate.generateDigests,generateContext:input.core.personalAgentConfig.surrogate.generateContext,rankNews:input.core.personalAgentConfig.surrogate.rankNews,understand:input.core.personalAgentConfig.surrogate.understand,prepareBrief:(snapshot,slot,signal)=>input.core.personalAgentConfig!.surrogate.prepareBrief(snapshot,slot,signal),prepareProposal:(snapshot,proposal,signal)=>input.core.personalAgentConfig!.surrogate.prepareProposal(snapshot,proposal,signal),summarizeMemory:(entries,signal)=>input.core.personalAgentConfig!.surrogate.summarizeMemory(entries,signal),discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
     })
     if (!this.#sharedPersonal) this.personalAgent.setRetrieval(input.retrieval)
@@ -1012,11 +1013,15 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       )) satisfies NonNullable<IntakeOptions['attachEvidence']>}),
       roster: () => projectAdapter.roster(),
       running: () => projectAdapter.running().filter(work=>options.sharedPersonal===undefined||core.runtime.inFlightDelegate(work.work_id)!==undefined),
-      activeProject: () => options.codingTarget?.activeProject() ?? (options.sharedPersonal ? null : projectAdapter.publicProjectView(false).workspace_display_name),
+      ...(options.codingTarget ? {boundTarget: () => ({workspace_id: options.codingTarget!.target?.workspace_id ?? null, revision: options.codingTarget!.revision})} : {}),
+      activeProject: () => options.codingTarget ? options.codingTarget.activeProject() : (options.sharedPersonal ? null : projectAdapter.publicProjectView(false).workspace_display_name),
       resolveTarget: (decision: CoordinatorDecision) => {if(options.codingTarget)return options.codingTarget.resolveTarget(decision);if(options.sharedPersonal&&decision.project===null)throw new ProjectResolutionError('unknown_project',{reason:'explicit_project_required'});return projectAdapter.resolveIntakeTarget(decision)},
       // Spec 08: the coordinator's decision rides with the work order; the adapter re-resolves at run time.
       dispatch: async (intake: IntakeSession, stillWanted?: () => boolean) => {
-        const targetRevision = options.codingTarget?.revision
+        const targetRevision = intake.bound_target?.revision
+        let admitted = false
+        const wanted = () => (stillWanted?.() ?? true) && (admitted || targetRevision === undefined || targetRevision === options.codingTarget?.revision)
+        if (!wanted()) return {accepted: false, code: 'superseded'}
         const admission = await core.runtime.dispatchExternal({
         executor: projectAdapter.manifest.name, op: 'run', origin_ref: intake.origin_ref,
         request: {
@@ -1024,7 +1029,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
           ...(intake.target?.session_id ? {session_id: intake.target.session_id} : {}),
           session: options.codingTarget && !intake.target?.session_id ? 'new' : intake.decision?.session ?? 'latest', ...(intake.title === null ? {} : {title: intake.title}),
         },
-      }, USER_AWAITED_TOOL, undefined, stillWanted)
+      }, USER_AWAITED_TOOL, undefined, wanted)
+        // Admission transfers ownership before accepted() advances the remembered target revision.
+        admitted = admission.accepted
         if (admission.accepted && options.codingTarget && targetRevision !== undefined) {
           const selection = intake.target?.workspace_id ? {workspace_id: intake.target.workspace_id, session_id: intake.target.session_id} : null
           try { await options.codingTarget.accepted(selection, admission.delegate_id ?? undefined, targetRevision) }
@@ -1359,7 +1366,7 @@ export function composeRealtime(
     let opened=false
     return {open:async()=>{await memory.open();opened=true},close:async()=>{opened=false;await memory.close()},
       recall:(_query,queryOptions)=>opened?Promise.resolve({source:'personal',state:'empty',scope:queryOptions?.scope??'any',hits:[],degraded:false}):Promise.reject(Error('memory_unavailable')),
-      processingStamp:ids=>memory.processingStamp(ids),canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),
+      processingStamp:ids=>memory.processingStamp(ids),canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),recordEvidenceBatch:inputs=>memory.recordEvidenceBatch(inputs),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),...(memory.forgetSources?{forgetSources:(refs:readonly string[])=>memory.forgetSources(refs)}:{}),
     } satisfies PersonalMemoryResource
   } : options.createPersonalMemory
   const memoryConsumerFingerprint = options.memoryConsumerFingerprint ?? configuredMemoryConsumer(options.settings,options.memoryReadMode ?? 'voice')
