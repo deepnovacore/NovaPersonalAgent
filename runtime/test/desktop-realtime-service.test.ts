@@ -724,7 +724,7 @@ test('entry construction emits only stable failure classes without raw messages'
     {error: Object.assign(new Error('private binary'), {code: 'codex_host_unavailable'}), code: 'backend_unavailable'},
     ...['state_permissions', 'state_busy', 'state_lock_failed', 'workspace_not_found'].map(code => ({error: Object.assign(new Error('private path'), {code}), code})),
     {error: new Error('personal_store_locked'), code: 'personal_store_locked'},
-    ...['EACCES', 'EPERM', 'EROFS'].map(code => ({error: Object.assign(new Error('private path'), {code}), code: 'state_permissions'})),
+    ...['EACCES', 'EPERM', 'EROFS'].map(code => ({error: Object.assign(new Error('private path'), {code}), code: 'filesystem_permissions'})),
     {error: new Error('private unknown'), code: 'assembly_failed'},
   ]) {
     const diagnostics: string[] = []

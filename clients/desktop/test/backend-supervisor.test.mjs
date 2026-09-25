@@ -199,10 +199,10 @@ test('assembly cleanup failure on explicit stop or restart never schedules an ex
       await supervisor.start()
       if (mode === 'unexpected') child.failCleanup()
       else await supervisor[mode]()
-      assert.equal(scheduled.length, 0, mode)
+      assert.equal(scheduled.length, mode === 'unexpected' ? 1 : 0, mode)
       assert.equal(starts, mode === 'restart' ? 2 : 1, mode)
       assert.equal(supervisor.status().state,
-        mode === 'unexpected' ? 'unavailable' : mode === 'stop' ? 'stopped' : 'connected', mode)
+        mode === 'unexpected' ? 'reconnecting' : mode === 'stop' ? 'stopped' : 'connected', mode)
     } finally {
       await supervisor.stop()
     }

@@ -210,8 +210,8 @@ const MESSAGE_CODES = new Set([
 ])
 
 export function startupFailureCode(error) {
-  if (['embedding_provider_invalid', 'credential_access_failed', 'workspace_not_found', 'workspace_invalid', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked'].includes(error?.code)) return error.code
-  if (['EACCES', 'EPERM', 'EROFS'].includes(error?.code)) return 'state_permissions'
+  if (['embedding_provider_invalid', 'credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'workspace_not_found', 'workspace_invalid', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked'].includes(error?.code)) return error.code
+  if (['EACCES', 'EPERM', 'EROFS'].includes(error?.code)) return 'filesystem_permissions'
   if (MESSAGE_CODES.has(error?.message)) return error.message
   if (error?.name === 'MainCameraConfigurationError') return 'camera_configuration_invalid'
   if (error?.message === 'NOVA_AUDIO_AGENT_BACKEND must be node') {

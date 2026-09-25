@@ -332,36 +332,45 @@ function publishStartup(stage, code = null) {
 
 async function paintStartup(stage) {
   publishStartup(stage)
-  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('startup_renderer_unavailable')
-  requestPresentation('workbench')
-  mainWindow.showInactive()
+  const visible = window => window && !window.isDestroyed() && window.isVisible() && !window.isMinimized()
+  const window = visible(settingsWindow) ? settingsWindow
+    : presentationMode === 'workbench' && visible(mainWindow) ? mainWindow : null
+  if (!window) throw classifyBackendFailure('startup_presentation_required')
+  const selector = window === settingsWindow ? '#startup-status' : '#startup-notice'
   // Bound only the asynchronous paint fence, never the synchronous OS credential call.
   let timer
   try {
     const painted = await Promise.race([
-      mainWindow.webContents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.querySelector('#startup-notice')?.dataset.stage === ${JSON.stringify(stage)}))))`),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('startup_paint_timeout')), 1500) }),
+      window.webContents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => {
+        const notice = document.querySelector(${JSON.stringify(selector)})
+        resolve(document.visibilityState === 'visible' && notice?.dataset.stage === ${JSON.stringify(stage)} && notice.getClientRects().length > 0)
+      })))`),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(classifyBackendFailure('startup_presentation_required')), 1500) }),
     ])
-    if (painted !== true) throw new Error('startup_paint_unconfirmed')
-  } finally { clearTimeout(timer) }
+    if (painted !== true || !visible(window) || (window === mainWindow && presentationMode !== 'workbench')) throw classifyBackendFailure('startup_presentation_required')
+  } catch { throw classifyBackendFailure('startup_presentation_required') }
+  finally { clearTimeout(timer) }
 }
 
-async function accessCredentials(operation, {retry = false} = {}) {
+async function accessCredentials(operation, {retry = false, startupAttempt = false} = {}) {
   const run = credentialQueue.then(async () => {
     if (retry) credentialFailure = null
     if (credentialFailure) throw credentialFailure
     const previous = startup
-    await paintStartup('credentials')
     try {
+      await paintStartup('credentials')
       try { keyringAvailable = secretCodec.available() }
       catch { throw classifyBackendFailure('credential_access_failed') }
       const result = await operation()
-      if (previous.stage === 'failed' && backendStatus.state !== 'starting') publishStartup('failed', previous.code)
-      else publishStartup(backendStatus.state === 'connected' ? 'ready' : 'backend')
+      if (startup.stage === 'credentials') {
+        if (startupAttempt && backendStatus.state === 'starting') publishStartup('backend')
+        else if (backendStatus.state === 'connected') publishStartup('ready')
+        else publishStartup(previous.stage, previous.code)
+      }
       return result
     } catch (error) {
-      if (error?.code === 'credential_access_failed') credentialFailure = error
-      publishStartup('failed', startupFailureCode(error))
+      if (['credential_access_failed', 'credential_invalid'].includes(error?.code)) credentialFailure = error
+      if (startup.stage === 'credentials') publishStartup(previous.stage, previous.code)
       throw error
     }
   })
@@ -843,9 +852,11 @@ function decryptSecretsForSpawn(settings, codec) {
     if (!present[key]) continue
     const plaintext = readSecret(settings, key, codec)
     if (typeof plaintext !== 'string' || !plaintext) {
+      console.error(`[desktop-diagnostic] settings_secret_unreadable key=${key}`)
       throw classifyBackendFailure('credential_access_failed')
     } else if (!secretValueIsSafe(plaintext)) {
-      throw classifyBackendFailure('credential_access_failed')
+      console.error(`[desktop-diagnostic] settings_secret_invalid key=${key}`)
+      throw classifyBackendFailure('credential_invalid')
     } else {
       decrypted[key] = plaintext
     }
@@ -854,7 +865,6 @@ function decryptSecretsForSpawn(settings, codec) {
 }
 
 async function prepareDesktopConfiguration() {
-  await paintStartup('configuration')
   if (projectNativeHost === undefined) {
     const projectNativeLoad = inspectProjectNativeHostFromResources({
       resourcesPath: app.isPackaged ? process.resourcesPath : resolve(packageRoot, 'build'),
@@ -924,6 +934,7 @@ async function commitDesktopConfiguration(prepared) {
   await refreshManagedWorkspaceCapabilities()
   configurationReady = true
   settingsReady = true
+  if (!acceptance && currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
   return Object.freeze({
     externalWorkspaceReset: reconciliation?.status === 'reconciled'
       && reconciliation.active_workspace_reset === true,
@@ -1040,7 +1051,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
   let ready
   const diagnostic = createBackendDiagnosticCollector()
   try {
-    const decryptedSecrets = await accessCredentials(() => decryptSecretsForSpawn(currentSettings, secretCodec))
+    const decryptedSecrets = await accessCredentials(() => decryptSecretsForSpawn(currentSettings, secretCodec), {startupAttempt: true})
     refreshCapabilityEditor(decryptedSecrets)
     const capabilitiesDocument = launchDocument
     const diskGeneration = settingsGeneration
@@ -1509,7 +1520,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (settingsRecoveryAvailable) {
       const applied = await applySettingsTransaction({
         coordinator: lifecycleCoordinator, patch: null,
-        write: async () => { await rollbackSettings(); return currentSettings },
+        write: async () => { await credentialQueue; credentialFailure = null; await rollbackSettings(); return currentSettings },
         publishCommitted: publishCommittedSettings,
         prepareConfiguration: prepareDesktopConfiguration,
         commitConfiguration: commitDesktopConfiguration,
@@ -1523,9 +1534,13 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     const recovery = await coordinateBackendRetry({
       coordinator: lifecycleCoordinator,
       retry: async () => {
+        await credentialQueue
         credentialFailure = null
         try {
-          if (!configurationReady) await refreshDesktopConfiguration()
+          if (!configurationReady) {
+            await paintStartup('configuration')
+            await refreshDesktopConfiguration()
+          }
           return await managedWorkspaceBackendRecovery.retry()
         } catch (error) {
           publishStartup('failed', reportStartupFailure(error))
@@ -1801,7 +1816,10 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   await rendererLoaded
   activeLaunchId = launchId
   if (settingsReady) {
-    try { await lifecycleCoordinator.run('startup', refreshDesktopConfiguration) }
+    try { await lifecycleCoordinator.run('startup', async () => {
+      await paintStartup('configuration')
+      await refreshDesktopConfiguration()
+    }) }
     catch (error) {
       publishStartup('failed', reportStartupFailure(error))
       if (sourceStartupSmoke || smokeChannel !== null || acceptance) throw error
@@ -1862,6 +1880,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       if (runtimeCapabilities?.state === 'running' && status.state !== 'connected') runtimeCapabilities = {...runtimeCapabilities, state: 'stopped'}
       sendToSettings('nova:settings:changed', settingsView())
       if (status.state === 'connected') publishStartup('ready')
+      else if (status.state === 'reconnecting') publishStartup('reconnecting')
       else if (!['starting', 'stopped'].includes(status.state)) publishStartup('failed', status.diagnostic)
       sendToOrb('nova:backend-status', {...status, startup})
       if (smokeChannel === null && status.state === 'connected' && status.connection) {
@@ -1871,9 +1890,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       }
     },
   })
-  if (settingsReady && configurationReady) void managedWorkspaceBackendRecovery.start().then(() => {
-    if (backendStatus.state === 'connected' && !acceptance && currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) return managedPhone.start()
-  }).catch(error => publishStartup('failed', startupFailureCode(error)))
+  if (settingsReady && configurationReady) void managedWorkspaceBackendRecovery.start()
+    .catch(error => publishStartup('failed', startupFailureCode(error)))
   if (openSettingsRequested) {
     openSettingsRequested = false
     await openSettingsWindow(launchId)

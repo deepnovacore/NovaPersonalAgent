@@ -1,4 +1,9 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "后台已连接": "Backend connected",
+  "后台连接已断开，正在自动重连。": "Backend disconnected. Reconnecting automatically.",
+  "请打开工作台或设置后重试，以便显示凭据授权提示。": "Open the workbench or Settings, then retry so the credential authorization prompt can be shown.",
+  "已保存的凭据格式无效。请在设置中更新对应密钥后重试。": "A saved credential has an invalid format. Update the affected key in Settings, then retry.",
+  "无法访问启动所需的文件或目录。请检查相关目录权限后重试。": "A file or directory required for startup cannot be accessed. Check the relevant directory permissions, then retry.",
   "启动失败": "Startup failed",
   "正在读取凭据，请查看系统授权弹窗。": "Reading credentials. Check the system authorization dialog.",
   "正在检查工作区和启动配置。": "Checking workspace and startup settings.",

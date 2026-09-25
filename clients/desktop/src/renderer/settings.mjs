@@ -1,4 +1,4 @@
-import {startupMessage} from './startup-notice.mjs'
+import {createStartupNotice, startupMessage} from './startup-notice.mjs'
 import {createImPanel} from './im-panel.mjs'
 import {createConnectionsPanel} from './connections-panel.mjs'
 import {t} from './locale.mjs'
@@ -82,6 +82,7 @@ let restarting = false
 const workspaceOpenCurrent = document.querySelector('#workspace-open-current')
 const workspaceClearCurrent = document.querySelector('#workspace-clear-current')
 const workspaceClearAll = document.querySelector('#workspace-clear-all')
+const startupNotice = createStartupNotice({render: text => { document.querySelector('#startup-status').textContent = text }})
 const workspaceRetryRecovery = document.querySelector('#workspace-retry-recovery')
 const workspaceActionStatus = document.querySelector('#workspace-action-status')
 const wakeEnabled = document.querySelector('#wake-word-enabled')
@@ -426,7 +427,8 @@ function render(view, _drafts, state) {
   renderPreset(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
   renderBadges(view.secretsPresent, view.secretSources)
   renderKeyUsage(view)
-  document.querySelector('#startup-status').textContent = startupMessage(view.startup)
+  document.querySelector('#startup-status').dataset.stage = view.startup?.stage ?? ''
+  startupNotice.update(view.startup)
   document.querySelector('#startup-retry').hidden = view.startup?.stage !== 'failed'
   warning.hidden = view.keyringAvailable !== false
   const recoveryStatus = view.managedWorkspaces?.recoveryStatus ?? 'idle'
@@ -690,11 +692,15 @@ workspaceClearCurrent.addEventListener('click', () => {
 workspaceClearAll.addEventListener('click', () => {
   void runWorkspaceAction(() => api.clearAllManagedWorkspaces())
 })
-document.querySelector('#startup-retry').addEventListener('click', () => {
-  void runWorkspaceAction(async () => {
+document.querySelector('#startup-retry').addEventListener('click', async () => {
+  workspaceBusy = true
+  updateButtons()
+  try {
     const view = await api.retryBackend()
-    return {status: view.backendStatus === 'connected' ? 'recovered' : 'recovery_failed', view}
-  })
+    controller.syncView(view, {trackRestart: false})
+    statusLabel.textContent = view.backendStatus === 'connected' ? t("后台已连接") : startupMessage(view.startup) || t("操作未完成")
+  } catch { statusLabel.textContent = t("操作未完成") }
+  finally { workspaceBusy = false; updateButtons() }
 })
 
 workspaceRetryRecovery.addEventListener('click', () => {

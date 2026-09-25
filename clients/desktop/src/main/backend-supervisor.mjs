@@ -251,7 +251,7 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
 
 const RUNTIME_CODES = new Set([
   'configuration_required', 'authentication_failed', 'backend_unavailable', 'assembly_failed',
-  'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid',
+  'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid',
 ])
 const CODEX_DIAGNOSTIC_CODES = new Set([
   'codex_login_status_nonzero',
@@ -278,7 +278,7 @@ const CODEX_DIAGNOSTIC_CODES = new Set([
 const LINE = /\[runtime-diagnostic\]\s+([a-z0-9_]{1,64})/g
 
 export function classifyBackendFailure(code) {
-  if (['credential_access_failed', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid', 'assembly_failed'].includes(code)) return Object.freeze({kind: 'unavailable', code})
+  if (['credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid'].includes(code)) return Object.freeze({kind: 'unavailable', code})
   if (code === 'backend_start_timeout') {
     return Object.freeze({kind: 'recoverable', code})
   }

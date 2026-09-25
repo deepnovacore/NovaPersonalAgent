@@ -469,10 +469,11 @@ test('a stored secret that would poison the child environment blocks spawn', asy
   const body = decrypt.slice(0, decrypt.indexOf('\n}\n'))
 
   // A NUL in an env value makes Node refuse the spawn, which would quit the app
-  // before the panel could clear the offending key. The value is dropped here
-  // and the key named — never its content.
+  // before the panel could clear the offending key. Refuse the attempt and
+  // name only the allowlisted key, never its content.
   assert.match(body, /secretValueIsSafe\(plaintext\)/)
-  assert.match(body, /throw classifyBackendFailure\('credential_access_failed'\)/)
+  assert.match(body, /settings_secret_invalid key=\$\{key\}/)
+  assert.match(body, /throw classifyBackendFailure\('credential_invalid'\)/)
 })
 
 test('readSecret is wired at the spawn site, decrypting only what backendLaunchSpec receives', async () => {
@@ -952,8 +953,8 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
 test('settings recovery precedes startup configuration and has one transaction status publisher', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const startup = source.slice(source.indexOf('async function startSelectedCamera'))
-  assert.ok(startup.indexOf('loadStartupSettings()') < startup.indexOf("lifecycleCoordinator.run('startup', refreshDesktopConfiguration)"))
-  assert.match(startup, /if \(settingsReady\) \{[\s\S]*lifecycleCoordinator.run\('startup', refreshDesktopConfiguration\)/u)
+  assert.ok(startup.indexOf('loadStartupSettings()') < startup.indexOf("lifecycleCoordinator.run('startup', async"))
+  assert.match(startup, /if \(settingsReady\) \{[\s\S]*lifecycleCoordinator.run\('startup', async/u)
   assert.match(startup, /if \(settingsReady && configurationReady\) void managedWorkspaceBackendRecovery.start\(\)/u)
   assert.match(startup, /if \(!settingsReady\) \{[\s\S]*dialog.showMessageBox[\s\S]*shell.openPath\(dirname\(settingsFile\(\)\)\)/u)
   const writers = source.match(/settingsApplyStatus\s*=(?!=)/gu)

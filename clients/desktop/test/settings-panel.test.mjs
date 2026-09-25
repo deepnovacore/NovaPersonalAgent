@@ -1,4 +1,4 @@
-import {startupMessage} from '../src/renderer/startup-notice.mjs'
+import {createStartupNotice, startupMessage} from '../src/renderer/startup-notice.mjs'
 import {t, localizeDocument} from '../src/renderer/locale.mjs'
 import {createPhonePanel} from '../src/renderer/phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from '../src/renderer/frontend-usage.mjs'
@@ -73,7 +73,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    t, startupMessage, localizeDocument, createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    t, createStartupNotice, startupMessage, localizeDocument, createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createConnectionsPanel: () => ({load: () => Promise.resolve()}),
@@ -1409,4 +1409,17 @@ test('phone settings stage together and open pairing only after persistence succ
   failed.node('#phone-server-port').listeners.input()
   await failed.click('#phone-pairing-open')
   assert.equal(opened, 1)
+})
+
+test('startup retry reports backend status without managed workspace recovery wording', async () => {
+  const failed=publicView({backendStatus:'stopped',startup:{stage:'failed',code:'workspace_not_found'}})
+  const connected=publicView({startup:{stage:'ready'}})
+  const panel=await mountSettingsPanel(failed,{retryBackend:async()=>connected})
+  assert.equal(panel.node('#startup-retry').hidden,false)
+  await panel.click('#startup-retry')
+  assert.equal(panel.node('#startup-retry').hidden,true)
+  assert.equal(panel.node('#status').textContent,'后台已连接')
+  assert.doesNotMatch(panel.node('#workspace-action-status').textContent,/工作区恢复/)
+  panel.push(publicView({backendStatus:'reconnecting',startup:{stage:'reconnecting'}}))
+  assert.equal(panel.node('#startup-retry').hidden,true)
 })
