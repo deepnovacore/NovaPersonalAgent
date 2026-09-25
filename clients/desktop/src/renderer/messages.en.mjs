@@ -1,4 +1,5 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "保存并重启后生效。": "Save and restart the app to apply.",
   "声纹验证": "Voiceprint verification",
   "声纹功能仅支持火山引擎 ASR。": "Voiceprints are supported only by Volcengine ASR.",
   "声纹上传服务地址": "Voiceprint upload service URL",
@@ -724,9 +725,6 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "{0} 秒内有效": "Valid for {0} seconds",
   "环境嘈杂时调高；轻声说话时调低。当前阈值 {0}。": "Increase in noisy environments; decrease for quiet speech. Current threshold: {0}.",
   "语言 / Language": "Language / 语言",
-  "首次按系统首选语言设置；之后保留你的选择。界面语言将在重新打开 App 后生效。": "Initially uses your preferred system language, then remembers your choice. Reopen the app to apply the interface language.",
-  "AI 仅切换 system prompt 的语言，不保证回复始终使用该语言；不自动识别或切换语言，也不更换语音模型或音色。": "For AI, this only changes the system prompt language. Replies are not guaranteed to stay in that language. There is no automatic language detection or switching, and voice models and voices stay unchanged.",
-  "AI 提示词在保存并重启后台后生效。": "AI prompts take effect after saving and restarting the backend.",
   "语言": "Language",
   "休眠（Ctrl+L）；点击或说“你好星核 / Hi Nova”唤醒": "Sleep (Ctrl+L); click or say \"你好星核 / Hi Nova\" to wake",
   "启用“你好星核 / Hi Nova”唤醒": "Enable \"你好星核 / Hi Nova\" wake word",

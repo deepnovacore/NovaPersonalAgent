@@ -2,7 +2,7 @@ import {createVoiceprintPanel} from './voiceprint-panel.mjs'
 import {createStartupNotice, startupMessage} from './startup-notice.mjs'
 import {createImPanel} from './im-panel.mjs'
 import {createConnectionsPanel} from './connections-panel.mjs'
-import {t} from './locale.mjs'
+import {t, currentLanguage} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
 import {createPhonePanel} from './phone-panel.mjs'
@@ -367,6 +367,7 @@ for (const scope of ['history', 'session']) document.getElementById(`usage-${sco
 function render(view, drafts, state) {
   if (!view) return
   document.getElementById('language').value = view.language ?? 'zh-CN'
+  document.getElementById('language-restart-hint').hidden = (view.language ?? 'zh-CN') === currentLanguage()
   currentView = view
   renderUsage()
   renderVision(view)

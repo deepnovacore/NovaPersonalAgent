@@ -818,6 +818,7 @@ footer {
 /* Form layout: long descriptions wrap, controls have a consistent touch target. */
 main :is(p, small, label, span, summary, td, th) { overflow-wrap: anywhere; }
 main :is(p, small) { line-height: 1.65; }
+#language-restart-hint { color: var(--accent-strong); }
 .hint { margin: 8px 0 18px; color: var(--ink-dim); font-size: 12px; }
 .setting-section > h2 { font-size: 14px; letter-spacing: 0; color: var(--ink); margin-bottom: 14px; }
 .toggle-row { align-items: center; justify-content: space-between; line-height: 1.6; padding: 14px; background: var(--surface); border-radius: var(--radius); }
