@@ -8,6 +8,28 @@ import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import {PersonalStore,initialState} from '../src/personal-agent/store.js'
 
+test('default conversation names avoid occupied numbers without rewriting historical titles or messages',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-conversation-names-'))
+ const make=()=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let host=make(),request=0
+ const create=(title?:string)=>host.command({type:'personal.command',request_id:`name-${request++}`,method:'conversations.create',params:title===undefined?{}:{title}})
+ try{
+  await host.open();assert.equal(host.conversationSnapshot().items[0]!.title,'新对话 1')
+  host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'kept reply'}),close:()=>Promise.resolve()}),()=>{ /* no transport */ })
+  await host.submitConversationText('chat:main','kept message');await host.waitConversation('chat:main')
+  await create('新对话 2');await create('新对话');await create('新对话');await create(' Custom {0} ')
+  const historical=host.conversationSnapshot().items
+  await Promise.all([create(),create()])
+  const before=host.conversationSnapshot()
+  assert.deepEqual(before.items.slice(-2).map(item=>item.title),['新对话 3','新对话 4'])
+  assert.deepEqual(before.items.slice(0,historical.length),historical)
+  await host.close();host=make();await host.open()
+  assert.deepEqual(host.conversationSnapshot(),before)
+  await host.command({type:'personal.command',request_id:'select-main',method:'conversations.select',params:{id:'chat:main'}})
+  assert.deepEqual(host.conversationSnapshot().messages.map(message=>message.text),['kept message','kept reply'])
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
 test('conversation pool permits parallel conversations and orders one conversation',async()=>{
  const calls:string[]=[],releases:(()=>void)[]=[]
  const pool=new ConversationRuntimePool(conversation=>Promise.resolve({runTurn:async(text)=>{calls.push(conversation.id+text);await new Promise<void>(resolve=>releases.push(resolve));return {assistant:text}},close:()=>Promise.resolve()}),()=>{ /* no transport in this test */ })

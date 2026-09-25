@@ -1333,6 +1333,7 @@ personalView = mountPersonalView({send,
   stop: deactivateCapture,
   applyPresentation: async (mode,{activate=false}={}) => {
     await window.novaAudioAgentDesktop.personal.setPresentation(mode,activate)
+    lastReportedDormant = null
     if(mode === 'background'){
       seenPresentations.clear();alertTone.stop();playback.disconnect();nativeFrames.clear();nativeLevel.clear();await window.novaAudioAgentDesktop.nativeAudio.clear();axes.playback='idle'
       await window.novaAudioAgentDesktop.nativeAudio.setPlaybackMuted(true)

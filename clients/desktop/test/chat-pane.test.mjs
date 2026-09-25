@@ -17,6 +17,57 @@ function mount(options={}){
  return {body,sent,view,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
 const feedState=(revision,selected='chat:proactive',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:proactive',kind:'proactive',title:'主动提醒',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'T\n## 前瞻\n- 一条'}]},...extra})
+test('duplicate historical conversation labels distinguish dates and ties while selecting unchanged IDs',async()=>{
+ const m=mount(),items=[
+  {id:'a',kind:'chat',title:'新对话',created_at:'2025-01-01T12:00:00Z'},
+  {id:'b',kind:'chat',title:'新对话',created_at:'2025-02-01T12:00:00Z'},
+  {id:'c',kind:'chat',title:'新对话',created_at:'2025-02-01T12:00:00Z'},
+  {id:'d',kind:'chat',title:'Custom {1}',created_at:'2025-02-01T12:00:00Z'},
+  {id:'e',kind:'chat',title:'Custom {1}',created_at:'2025-03-01T12:00:00Z'},
+  {id:'f',kind:'chat',title:'Unique {1}',created_at:'2025-03-01T12:00:00Z'},
+ ],original=structuredClone(items)
+ try{
+  m.view.receive(feedState(1,'a',{feed:[],conversations:{selected_id:'a',voice_id:'b',items,messages:[]}}))
+  const buttons=m.all().filter(n=>n.className==='conversation-item')
+  assert.equal(new Set(buttons.slice(0,3).map(n=>n.textContent)).size,3)
+  assert.match(buttons[0].textContent,/2025/);assert.notEqual(buttons[0].textContent,buttons[1].textContent)
+  assert.ok(buttons[1].attrs['aria-label'].startsWith(buttons[1].textContent))
+  assert.ok(buttons[3].textContent.startsWith('Custom {1} · '));assert.ok(buttons[4].textContent.startsWith('Custom {1} · '))
+  assert.notEqual(buttons[3].textContent,buttons[4].textContent);assert.equal(buttons[5].textContent,'Unique {1}')
+  assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,'新对话')
+  for(const [i,b]of buttons.entries()){
+   b.listeners.click();const request=m.sent.at(-1)
+   assert.equal(request.method,'conversations.select');assert.deepEqual(request.params,{id:items[i].id})
+   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await tick()
+  }
+  assert.deepEqual(items,original)
+ }finally{m.view.controller.disconnect();await tick()}
+})
+test('new conversation and target picker controls explicitly translate dynamic UI without translating custom titles',async()=>{
+ const {setLanguage}=await import('../src/renderer/locale.mjs');setLanguage('en')
+ const m=mount()
+ try{
+  m.view.receive(feedState(1,'c',{feed:[]}))
+  assert.ok(m.all().some(n=>n.attrs['aria-label']==='Execution workspace'))
+  assert.ok(m.all().some(n=>n.attrs['aria-label']==='Codex session (continuation target)'))
+  for(const label of ['Execution workspace','Codex session (continuation target)','Refresh workspaces','No workspace selected','New session (default for new tasks)','New conversation'])assert.ok(m.all().some(n=>n.textContent===label),label)
+  assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,'C')
+ }finally{m.view.controller.disconnect();await tick();setLanguage('zh-CN')}
+})
+test('dropdown and sidebar orb entry wait for the same host acknowledgement and preserve conversation drafts',async()=>{
+ for(const route of ['dropdown','sidebar']){
+  const applied=[],m=mount({applyPresentation:async mode=>{applied.push(mode)}}),c=m.view.controller
+  try{
+   let request=m.sent.findLast(f=>f.method==='presentation.set');m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{mode:'workbench'}});await tick()
+   m.view.receive(feedState(1,'c',{feed:[]}));c.draft='kept draft'
+   if(route==='dropdown'){const select=m.all().find(n=>n.attrs['aria-label']==='显示模式');select.value='orb';select.listeners.change()}
+   else m.all().find(n=>n.title==='收起 · 收起为悬浮球').listeners.click()
+   request=m.sent.at(-1);assert.equal(request.method,'presentation.set');assert.equal(request.params.mode,'orb');assert.deepEqual(applied,['workbench'])
+   m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{mode:'orb'}});await tick()
+   assert.deepEqual(applied,['workbench','orb']);assert.equal(c.presentationMode,'orb');assert.equal(c.collapsed,true);assert.equal(c.selectedId,'c');assert.equal(c.draft,'kept draft')
+  }finally{c.disconnect();await tick()}
+ }
+})
 test('feed messages render as cards with the prepared body as markdown, and receipts follow visibility',()=>{
  const m=mount();m.view.controller.collapse(true);m.view.receive(feedState(1))
  const card=m.all().find(n=>n.className==='feed-card');assert.ok(card);assert.ok(m.all().some(n=>n.tag==='h2'&&n.text===undefined&&n.children.some(c=>c.text==='前瞻')),'prepared markdown heading rendered')

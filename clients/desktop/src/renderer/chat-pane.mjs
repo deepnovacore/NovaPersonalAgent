@@ -1,5 +1,6 @@
 import {renderMarkdown} from './markdown.mjs'
 import {renderFeedCard,sendPresented} from './feed-card.mjs'
+import {currentLanguage,t} from './locale.mjs'
 
 /**
  * Confirms the proactive conversation as read only when the newest message is
@@ -28,11 +29,11 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
  const conversationList=el('nav');conversationList.setAttribute('aria-label','会话列表');switcher.append(conversationList);head.append(switcher)
  const closeButton=button('收起对话栏',()=>setOpen(false),head);closeButton.className='chat-close';closeButton.setAttribute('aria-label','收起对话栏');closeButton.setAttribute('aria-controls',pane.id)
  const targetRow=el('div',undefined,'chat-target')
- const workspaceSelect=el('select');workspaceSelect.setAttribute('aria-label','执行工作区');targetRow.append(el('span','执行工作区'),workspaceSelect);pane.append(targetRow)
- const sessionRow=el('div',undefined,'chat-target'),sessionSelect=el('select');sessionSelect.setAttribute('aria-label','Codex 会话（续接目标）');sessionRow.append(el('span','Codex 会话（续接目标）'),sessionSelect);pane.append(sessionRow)
+ const workspaceSelect=el('select');workspaceSelect.setAttribute('aria-label',t('执行工作区'));targetRow.append(el('span',t('执行工作区')),workspaceSelect);pane.append(targetRow)
+ const sessionRow=el('div',undefined,'chat-target'),sessionSelect=el('select');sessionSelect.setAttribute('aria-label',t('Codex 会话（续接目标）'));sessionRow.append(el('span',t('Codex 会话（续接目标）')),sessionSelect);pane.append(sessionRow)
  let targetConversation=null,targetOptions=null,targetKey='',targetLoading=false,targetPending=false
  const currentTarget=()=>c.snapshot?.conversations?.items?.find(item=>item.id===c.selectedId)?.coding_target??null
- const loadTargets=button('刷新工作区',async()=>{
+ const loadTargets=button(t('刷新工作区'),async()=>{
   const id=c.selectedId;if(!id)return;targetLoading=true;update()
   try{const data=await c.command('conversations.targets',{});if(c.selectedId===id){targetOptions=data.targets;targetKey=''}}finally{targetLoading=false;update()}
  },targetRow)
@@ -49,8 +50,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
   const key=JSON.stringify([targetConversation,current,targetOptions])
   if(key!==targetKey){
    targetKey=key;workspaceSelect.replaceChildren();sessionSelect.replaceChildren()
-   const empty=el('option','未选择工作区');empty.value='';workspaceSelect.append(empty)
-   const fresh=el('option','新会话（新任务默认）');fresh.value='';sessionSelect.append(fresh)
+   const empty=el('option',t('未选择工作区'));empty.value='';workspaceSelect.append(empty)
+   const fresh=el('option',t('新会话（新任务默认）'));fresh.value='';sessionSelect.append(fresh)
    const options=[...(targetOptions??[])];if(current&&!options.some(item=>item.workspace_id===current.workspace_id&&item.session_id===current.session_id))options.unshift(current)
    const workspaces=new Set()
    for(const item of options){
@@ -92,15 +93,25 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
   const navKey=JSON.stringify([c.connected,c.selectedId,c.voiceId,items,waiting,items.map(item=>Boolean(c.state(item.id).submission))])
   if(navKey!==renderedNavigation){
    renderedNavigation=navKey;conversationList.replaceChildren()
+   const groups=new Map(),labels=new Map()
+   for(const item of items){const title=conversationTitle(item);if(!groups.has(title))groups.set(title,[]);groups.get(title).push(item);labels.set(item.id,title)}
+   for(const [title,group]of groups){
+    if(group.length<2)continue
+    const times=group.map(item=>new Date(item.created_at).toLocaleString(currentLanguage(),{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}))
+    for(const [index,item]of group.entries()){
+     const label=t('{0} · {1}',title,times[index])
+     labels.set(item.id,times.indexOf(times[index])===times.lastIndexOf(times[index])?label:t('{0} ({1})',label,index+1))
+    }
+   }
    for(const item of [...items].sort((a,b)=>Number(b.kind==='proactive')-Number(a.kind==='proactive'))){
-    const b=button(conversationTitle(item),()=>{switcher.open=false;return c.select(item.id)},conversationList)
+    const label=labels.get(item.id),b=button(label,()=>{switcher.open=false;return c.select(item.id)},conversationList)
     b.className='conversation-item';b.setAttribute('aria-current',String(item.id===c.selectedId));b.disabled=!c.connected
     if(waiting.some(row=>row.conversation_id===item.id))b.append(el('span','待确认','conversation-badge'))
     if(item.unread_count)b.append(el('span',String(item.unread_count),'unread-badge'))
-    if(item.id===c.voiceId){b.append(el('span','语音中','conversation-badge'));b.setAttribute('aria-label',`${conversationTitle(item)}，语音中`)}
+    if(item.id===c.voiceId){b.append(el('span','语音中','conversation-badge'));b.setAttribute('aria-label',t('{0}，语音中',label))}
     else if(c.state(item.id).submission)b.append(el('span','发送中','conversation-badge'))
    }
-   const create=button('新对话',()=>{switcher.open=false;return c.create()},conversationList);create.className='conversation-item conversation-new';create.disabled=!c.connected
+   const create=button(t('新对话'),()=>{switcher.open=false;return c.create()},conversationList);create.className='conversation-item conversation-new';create.disabled=!c.connected
    if(!items.length)conversationList.append(el('p',c.connected?'正在加载会话…':'尚未连接','hint'))
   }
   const active=items.find(item=>item.id===c.selectedId)

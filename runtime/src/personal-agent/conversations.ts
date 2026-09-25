@@ -11,7 +11,8 @@ export type ConversationMessage=z.infer<typeof conversationMessageSchema>
 export const conversationsStateSchema=z.object({selected_id:z.string(),voice_id:z.string().nullable(),items:z.array(conversationSchema).min(2).max(128),work_owners:z.record(z.string(),z.string()),approval_owners:z.record(z.string(),z.string())}).strict()
 export type ConversationsState=z.infer<typeof conversationsStateSchema>
 export function createConversation(kind:Conversation['kind'],title:string,subject_key:string|null=null,id:string=randomUUID()):Conversation {const at=new Date().toISOString();return {id,kind,title,subject_key,coding_target:null,created_at:at,updated_at:at,generation:0,messages:[],feed_ids:[],read_through_id:null,prepared:null}}
-export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat','新对话',null,'chat:main'),createConversation('proactive','主动提醒',null,'chat:proactive')],work_owners:{},approval_owners:{}}}
+export function nextConversationTitle(items:readonly Pick<Conversation,'title'>[]):string{const titles=new Set(items.map(item=>item.title));let number=1;while(titles.has(`新对话 ${number}`))number++;return `新对话 ${number}`}
+export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat',nextConversationTitle([]),null,'chat:main'),createConversation('proactive','主动提醒',null,'chat:proactive')],work_owners:{},approval_owners:{}}}
 export interface ConversationRuntime {
  runTurn(text:string,signal:AbortSignal):Promise<{assistant:string;turn_id?:string}>
  parkVoice?():Promise<void>

@@ -1251,11 +1251,13 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   ipcMain.handle('nova:personal:presentation', (event, mode, activate=true) => {
     if(event.sender !== mainWindow.webContents || !['background','workbench','orb'].includes(mode) || typeof activate!=='boolean') throw new Error('presentation request rejected')
     if(mode === 'background'){enterBackground();return}
+    // configure() can show too; fence before any path can trigger the native reset.
+    const shown=activate&&!mainWindow.isVisible()?new Promise(resolve=>mainWindow.once('show',()=>resolve())):undefined
     const wasBackground=presentationMode==='background'
     presentationMode=mode
     setPersonalCollapsed(mode === 'orb')
     if(wasBackground)wakeWord?.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
-    if(activate){mainWindow.show();mainWindow.focus()}
+    if(activate){mainWindow.show();mainWindow.focus();return shown}
   })
   ipcMain.handle('nova:personal:collapse', (event, value) => {
     if (event.sender !== mainWindow.webContents || typeof value !== 'boolean') throw new Error('window request rejected')

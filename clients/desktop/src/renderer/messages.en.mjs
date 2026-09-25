@@ -1,4 +1,8 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "新对话": "New conversation",
+  "{0} · {1}": "{0} · {1}",
+  "{0} ({1})": "{0} ({1})",
+  "{0}，语音中": "{0}, voice active",
   "后台已连接": "Backend connected",
   "后台连接已断开，正在自动重连。": "Backend disconnected. Reconnecting automatically.",
   "请打开工作台或设置后重试，以便显示凭据授权提示。": "Open the workbench or Settings, then retry so the credential authorization prompt can be shown.",

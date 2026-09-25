@@ -1195,7 +1195,7 @@ for (const acceptance of [null, {}]) test(`presentation IPC validates sender and
  const currentSettings={wakeWordEnabled:true}
  const background=source.slice(source.indexOf('function enterBackground(){'),source.indexOf('const requestPresentation ='))
  const install=new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord','nativeAudio','currentSettings','acceptance','acceptanceWakeSettings',`let presentationMode='workbench';${background};${body};return ()=>presentationMode`)
- const mode=install({handle:(_name,callback)=>{handler=callback}},{webContents:sender,hide:()=>calls.push('hide'),show:()=>calls.push('show'),focus:()=>calls.push('focus')},value=>calls.push(value),{stop(){},reset(){},configure:settings=>wakeSettings.push(settings)},null,currentSettings,acceptance,acceptanceWakeSettings)
+ const mode=install({handle:(_name,callback)=>{handler=callback}},{webContents:sender,isVisible:()=>true,hide:()=>calls.push('hide'),show:()=>calls.push('show'),focus:()=>calls.push('focus')},value=>calls.push(value),{stop(){},reset(){},configure:settings=>wakeSettings.push(settings)},null,currentSettings,acceptance,acceptanceWakeSettings)
  assert.throws(()=>handler({sender:{}},'background'),/rejected/);assert.throws(()=>handler({sender},'invalid'),/rejected/)
  handler({sender},'background');assert.equal(mode(),'background');assert.deepEqual(calls,['hide'])
  calls.length=0;handler({sender},'orb');assert.deepEqual(calls,[true,'show','focus'])
@@ -1211,6 +1211,18 @@ test('background wake IPC cannot reactivate capture or show the window',async()=
  handler({sender});assert.equal(calls,0)
 })
 
+for(const configureShows of [false,true])test(`presentation acknowledgement waits for native show before renderer reconciliation (configureShows=${configureShows})`,async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const start=source.indexOf("ipcMain.handle('nova:personal:presentation',"),body=source.slice(start,source.indexOf('\n  })',start)+5)
+ let handler,onShow,visible=false,acknowledged=false
+ const sender={},mainWindow={webContents:sender,isVisible:()=>visible,once:(name,callback)=>{assert.equal(name,'show');onShow=callback},show(){visible=true},focus(){}}
+ new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord',`let presentationMode='background';const currentSettings={},acceptance=null,acceptanceWakeSettings=()=>({});${body}`)({handle:(_name,callback)=>{handler=callback}},mainWindow,()=>{},configureShows?{configure:()=>mainWindow.show()}:null)
+ const pending=Promise.resolve(handler({sender},'orb')).then(()=>{acknowledged=true})
+ await Promise.resolve();assert.equal(acknowledged,false,'renderer must not reconcile ahead of the native show reset')
+ visible=true;onShow();await pending;assert.equal(acknowledged,true)
+ onShow=null;await handler({sender},'workbench');assert.equal(onShow,null,'already-visible changes must not wait for an event that will not fire')
+})
+
 test('background entry stops detector and native mic before waiting for renderer or host',async()=>{
  const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
  const body=source.slice(source.indexOf('function enterBackground(){'),source.indexOf('const requestPresentation ='))
@@ -1222,8 +1234,37 @@ test('foreground changes native presentation before unmuting playback',async()=>
  const source=await readFile(new URL('../src/renderer/index.mjs',import.meta.url),'utf8')
  const body=source.slice(source.indexOf('applyPresentation: async ')+19,source.indexOf('\n  taskAction:',source.indexOf('applyPresentation: async '))).replace(/,\s*$/,'')
  const calls=[],window={novaAudioAgentDesktop:{personal:{setPresentation:async(mode,activate)=>calls.push(['presentation',mode,activate])},nativeAudio:{setPlaybackMuted:async muted=>calls.push(['muted',muted])}}}
- const apply=new Function('window','axes','requestAnimationFrame','render',`return ${body}`)(window,{outputMuted:false},()=>{},()=>{})
+ const apply=new Function('window','axes','requestAnimationFrame','render',`let lastReportedDormant=true;return ${body}`)(window,{outputMuted:false},()=>{},()=>{})
  await apply('workbench',{activate:false});assert.deepEqual(calls,[['presentation','workbench',false],['muted',false]])
+})
+
+test('background return reconciles unchanged renderer dormancy with native show reset',async()=>{
+ const {createOrbWindowController}=await import('../src/main/window-position.mjs')
+ const {orbDormant}=await import('../src/renderer/state.mjs')
+ const source=await readFile(new URL('../src/renderer/index.mjs',import.meta.url),'utf8')
+ const main=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ const applyBody=source.slice(source.indexOf('applyPresentation: async ')+19,source.indexOf('\n  taskAction:',source.indexOf('applyPresentation: async '))).replace(/,\s*$/,'')
+ const reportBody=source.slice(source.indexOf('  const dormant = orbDormant('),source.indexOf('\n  const activeDecision',source.indexOf('  const dormant = orbDormant(')))
+ const showBody=main.match(/mainWindow\.on\('show', (\(\) => \{[^\n]+\})\)/)[1]
+ for(const surface of ['resting','bubble','task','confirmation']){
+  let bounds={x:500,y:400,width:160,height:160},visible=true
+  const controller=createOrbWindowController({getBounds:()=>bounds,setBounds:value=>{bounds=value},getZoomFactor:()=>1,getScaleFactor:()=>2,getWorkAreaForPoint:()=>({x:0,y:0,width:1440,height:900}),onConfirmationPlacement(){}})
+  const show=new Function('personalCollapsed','orbWindow',`return ${showBody}`)(true,controller)
+  const reports=[],frames=[],shell={dataset:{}},axes={wakeState:'sleeping',hovered:false,codex:'idle',outputMuted:false,playback:'idle'}
+  const window={novaAudioAgentDesktop:{personal:{setPresentation:async mode=>{visible=mode!=='background';if(visible)show()}},nativeAudio:{clear:async()=>{},setPlaybackMuted:async()=>{}},windowLayout:{setDormant:value=>{reports.push(value);if(visible)controller.setDormant(value)}}}}
+  const fixture=new Function('window','axes','requestAnimationFrame','shell','orbDormant','seenPresentations','alertTone','playback','nativeFrames','nativeLevel',`let lastReportedDormant=null;const state={name:'idle',confirmationVisible:false};const render=()=>{${reportBody}};return {render,apply:${applyBody}}`)(window,axes,callback=>frames.push(callback),shell,orbDormant,new Set(),{stop(){}},{disconnect(){}},{clear(){}},{clear(){}})
+  fixture.render();assert.equal(bounds.width,64)
+  await fixture.apply('background');frames.shift()();assert.equal(visible,false)
+  if(surface==='bubble')controller.reserveBubbleArea(1)
+  if(surface==='task')controller.reserveBubbleArea(0,1)
+  if(surface==='confirmation')controller.setConfirmationMode(true)
+  const before=reports.length
+  await fixture.apply('orb');assert.ok(bounds.width>=160)
+  frames.shift()()
+  if(surface==='resting')assert.deepEqual([bounds.width,bounds.height],[64,64])
+  else assert.ok(bounds.width>=160&&bounds.height>=160,`${surface} must retain its larger surface`)
+  assert.equal(reports.length,before+1,`${surface}: unchanged dormancy must be resent after show`)
+ }
 })
 
 test('the expanded workbench casts a native shadow and the resting orb does not',async()=>{
