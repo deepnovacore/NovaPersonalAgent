@@ -124,9 +124,12 @@ export class GatewaySurrogate {
       const {title,body,why,next}=result.data
       return [{candidate_id:candidate.candidate_id,tab:candidate.tab,title,body,why,next,refs:candidate.refs.slice(0,8).map(ref=>({...ref}))}]
     })
-    // Only todo candidates may ground a recap; taking each cited candidate's refs in turn keeps every one of them in its basis.
+    // Every cited key must be fully grounded by todo refs before retaining any of the recap's text.
     const recapReply=contextReplyRecapSchema.safeParse(raw.recap)
-    const cited=recapReply.success?[...new Set(recapReply.data.keys)].flatMap(key=>{const candidate=byKey.get(key);return candidate?.tab==='todos'?[candidate.refs]:[]}):[]
+    const keyed=recapReply.success?[...new Set(recapReply.data.keys)].map(key=>byKey.get(key)):[]
+    const todoRefs=candidates.filter(candidate=>candidate.tab==='todos').flatMap(candidate=>candidate.refs)
+    const grounded=keyed.every(candidate=>candidate?.refs.length&&candidate.refs.every(ref=>todoRefs.some(allowed=>allowed.entry_id===ref.entry_id&&allowed.version===ref.version)))
+    const cited=grounded?keyed.map(candidate=>candidate!.refs):[]
     const recapRefs=Array.from({length:Math.max(0,...cited.map(refs=>refs.length))},(_,index)=>cited.flatMap(refs=>refs[index]?[refs[index]]:[])).flat()
       .filter((ref,index,all)=>all.findIndex(other=>other.entry_id===ref.entry_id&&other.version===ref.version)===index).slice(0,8).map(ref=>({...ref}))
     const recap=recapReply.success&&recapRefs.length?{text:recapReply.data.text,refs:recapRefs}:null

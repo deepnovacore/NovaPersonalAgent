@@ -246,9 +246,26 @@ test('context cards cite short keys, and the adapter restores each candidate, it
  const result=await new GatewaySurrogate({gateway,model:'m',proactivityPreset:'balanced'}).generateContext(candidates,new AbortController().signal)
  assert.deepEqual(result.cards.map(item=>[item.candidate_id,item.tab,item.title]),[['long-todo-a','todos','a'],['long-idea','ideas','idea'],['long-goal','goals','goal'],['long-todo-b','todos','b']],'a forged key or an unknown field drops only that card')
  assert.deepEqual(result.cards[2]!.refs,candidates[3]!.refs)
- assert.deepEqual(result.recap?.refs.map(ref=>ref.entry_id),['source:long-todo-a0','source:long-todo-b0','source:long-todo-a1','source:long-todo-b1','source:long-todo-a2','source:long-todo-b2','source:long-todo-a3','source:long-todo-b3'],'the recap takes todo refs in turn, at most eight, and ignores non-todo and forged keys')
+ assert.equal(result.recap,null,'one forged or ungrounded key rejects the whole recap')
+ const valid=await new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({...reply,recap:{text:'近况',keys:['c1','c2']}})),model:'m',proactivityPreset:'balanced'}).generateContext(candidates,new AbortController().signal)
+ assert.deepEqual(valid.recap?.refs.map(ref=>ref.entry_id),['source:long-todo-a0','source:long-todo-b0','source:long-todo-a1','source:long-todo-b1','source:long-todo-a2','source:long-todo-b2','source:long-todo-a3','source:long-todo-b3'],'the recap takes todo refs in turn, at most eight')
  const onlyIdea=await new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({recap:{text:'近况',keys:['c3']},cards:[]})),model:'m',proactivityPreset:'balanced'}).generateContext(candidates,new AbortController().signal)
  assert.equal(onlyIdea.recap,null,'a recap citing no todo candidate is withheld')
+})
+test('recap keys must all resolve and every non-todo ref must have exact todo grounding',async()=>{
+ const a={entry_id:'source:a',version:'v1'},b={entry_id:'source:b',version:'v1'},privateRef={entry_id:'memory:private',version:'v1'}
+ const candidate=(id:string,tab:'todos'|'ideas'|'goals',refs:typeof a[])=>({candidate_id:id,id,version:'v1',content:'x',tab,primaryFileId:null,refs,excerpt:'x',reason_code:tab==='todos'?'project_focus' as const:tab==='goals'?'project_direction' as const:'stated_idea' as const,root:'project:nova',priority:3,mtime_ms:0})
+ const candidates=[candidate('todo','todos',[a,b]),candidate('goal','goals',[a,b]),candidate('partial-goal','goals',[a,privateRef]),candidate('stale-goal','goals',[a,{...b,version:'v2'}]),candidate('idea','ideas',[privateRef]),candidate('empty-goal','goals',[])]
+ for(const keys of [['c1','c9'],['c1','c3'],['c1','c4'],['c1','c5'],['c1','c6'],['c5']]){
+  const gateway=new ScriptedGateway([],JSON.stringify({recap:{text:'工作台和私人计划。',keys},cards:[]}))
+  const result=await new GatewaySurrogate({gateway,model:'m',proactivityPreset:'balanced'}).generateContext(candidates,new AbortController().signal)
+  assert.equal(result.recap,null,`reject the entire recap for ${keys.join(',')}`)
+ }
+ for(const keys of [['c2'],['c1','c2','c2']]){
+  const gateway=new ScriptedGateway([],JSON.stringify({recap:{text:'这周主要在做工作台。',keys},cards:[]}))
+  const result=await new GatewaySurrogate({gateway,model:'m',proactivityPreset:'balanced'}).generateContext(candidates,new AbortController().signal)
+  assert.deepEqual(result.recap,{text:'这周主要在做工作台。',refs:[a,b]},'same-project goal refs are fully backed by a todo, with duplicates removed')
+ }
 })
 test('a cut-off context reply retries once with half the candidates, and each tab keeps at most three cards',async()=>{
  const candidate=(id:string)=>({candidate_id:id,id,version:'v1',content:'A project document',tab:'todos' as const,primaryFileId:id,refs:[{entry_id:'source:'+id,version:'v1'}],excerpt:'A project document',reason_code:'document_action' as const,root:'/project',priority:0,mtime_ms:1})
