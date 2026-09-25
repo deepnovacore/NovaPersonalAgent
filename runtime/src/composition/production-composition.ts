@@ -201,7 +201,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     if(mode!=='background'&&seen?.proposal_id&&!seen.conversation_id&&projectAdapter?.confirmationController.view.pending_confirmation_id===seen.proposal_id)projectAdapter.confirmationController.setBackground(false)
     if(!seen){const paused=mode==='background';if(paused||presentationPaused)await composition.realtime.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
   }))
-  host.setConversationRuntime(conversationRuntimeFactory({settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
+  host.setConversationRuntime(conversationRuntimeFactory({settings:composition.realtime.core.settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
     ...(onUsage===undefined?{}:{onUsage}),
     ...(composition.realtime.core.frameSource?{frameSource:composition.realtime.core.frameSource}:{}),
     blackboard:blackboardOptionsFromSettings(settings),clock,gateway:composition.realtime.core.gateway,
