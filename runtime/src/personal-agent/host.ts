@@ -154,6 +154,7 @@ export class PersonalAgentHost {
 
     conversationSnapshot(){const c=this.#state.conversations;return {selected_id:c.selected_id,voice_id:c.voice_id,unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(c.items.find(item=>item.id===c.selected_id)?.messages??[])}}
     async submitConversationText(id:string,text:string,requestId?:string):Promise<void>{
+        if(!this.#opened)throw Error('unavailable');
         if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');
         let conversation=this.#state.conversations.items.find(item=>item.id===id);
         if(!conversation)throw Error('conversation_not_found');
@@ -163,7 +164,7 @@ export class PersonalAgentHost {
         if(!this.#conversationPool.acceptsText(id))throw Error('conversation_busy');
         if(requestId&&conversation.messages.some(message=>message.request_id===requestId))return;
         const userMessageId=randomUUID();
-        await this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(this.#clearingConversations.has(id))throw Error('conversation_clearing');if(requestId&&item.messages.some(message=>message.request_id===requestId))return;item.messages.push({id:userMessageId,conversation_id:id,role:'user',generation_status:'pending',text,created_at:this.#now().toISOString(),...(requestId?{request_id:requestId}:{})});item.messages=item.messages.slice(-512);item.updated_at=this.#now().toISOString();await this.#commit(next)});
+        await this.#serial(async()=>{if(!this.#opened)throw Error('unavailable');const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(this.#clearingConversations.has(id))throw Error('conversation_clearing');if(requestId&&item.messages.some(message=>message.request_id===requestId))return;item.messages.push({id:userMessageId,conversation_id:id,role:'user',generation_status:'pending',text,created_at:this.#now().toISOString(),...(requestId?{request_id:requestId}:{})});item.messages=item.messages.slice(-512);item.updated_at=this.#now().toISOString();await this.#commit(next)});
         conversation=this.#state.conversations.items.find(item=>item.id===id)!;
         if(!conversation.messages.some(message=>message.id===userMessageId))return;
         const generation=conversation.generation;

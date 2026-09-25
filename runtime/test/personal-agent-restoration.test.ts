@@ -135,3 +135,22 @@ test('a repeated open immediately followed by close remains idempotent',async()=
  try{await host.open();await Promise.all([host.open(),host.close()]);f.preserved(await f.store.read());const release=await acquirePersonalLock(f.path);await release()}
  finally{await host.close();await f.cleanup()}
 });
+
+test('text submitted while closing is rejected before it is persisted or run',async t=>{
+ const f=await fixture(),gate=deferred(),entered=deferred();let runs=0;
+ const host=f.make();
+ t.after(async()=>{gate.resolve();await host.close();await f.cleanup()});
+ host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>{runs++;return Promise.resolve({assistant:'reply'})},close:()=>Promise.resolve()}),()=>{/* no renderer */});
+ host.setSources({list:()=>[],command:()=>Promise.resolve(null),close:()=>{entered.resolve();return gate.promise}});
+ await host.open();
+ // Queued behind the lifecycle flip: admission checks passed, the write had not started.
+ const queued=host.submitConversationText('chat:main','queued before close','queued');
+ const closing=host.close();
+ await assert.rejects(queued,/unavailable/u);
+ await entered.promise;
+ await assert.rejects(host.submitConversationText('chat:main','late message','late'),/unavailable/u);
+ gate.resolve();await closing;
+ const saved=(await f.store.read()).conversations.items.flatMap(item=>item.messages);
+ assert.equal(saved.some(message=>message.request_id==='queued'||message.request_id==='late'),false);
+ assert.equal(runs,0);
+});
