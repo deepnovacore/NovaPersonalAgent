@@ -175,7 +175,12 @@ export function purgeEntry(db:GraphDatabase,path:string,input:unknown):PurgeResu
  try{
   for(const id of selectedIds){db.prepare('INSERT OR IGNORE INTO memory_purged_ids VALUES(?)').run(hash(id));db.prepare('DELETE FROM memory_revisions WHERE entry_id=?').run(id);db.prepare('DELETE FROM memory_vectors WHERE entry_id=?').run(id)}
   for(const record of evidence){db.prepare('INSERT OR IGNORE INTO memory_purged_ids VALUES(?)').run(hash(record.id));db.prepare('INSERT OR IGNORE INTO memory_suppressed VALUES(?)').run(record.hash);db.prepare('DELETE FROM memory_evidence WHERE id=?').run(record.id);db.prepare('DELETE FROM memory_extractions WHERE evidence_id=?').run(record.id);db.prepare("DELETE FROM source_extractions WHERE json_extract(payload_json,'$.ticket.evidence_id')=?").run(record.id)}
-  for(const row of db.prepare('SELECT namespace,payload_json FROM memory_life_meta').all()){const meta=JSON.parse(String(row.payload_json)) as {receipts:Record<string,{result:{id:string}}>};const selectedLife=new Set(selected.filter(entry=>entry.entry_id.startsWith(String(row.namespace))).map(entry=>entry.content.life_id));meta.receipts=Object.fromEntries(Object.entries(meta.receipts).filter(([,receipt])=>!selectedLife.has(receipt.result.id)));db.prepare('UPDATE memory_life_meta SET payload_json=? WHERE namespace=?').run(canonicalJson(meta),String(row.namespace))}
+  for(const row of db.prepare('SELECT namespace,payload_json FROM memory_life_meta').all()){
+   const meta=JSON.parse(String(row.payload_json)) as {profile_version?:number;receipts:Record<string,{result:{id:string}}>},selectedHere=selected.filter(entry=>entry.entry_id.startsWith(String(row.namespace))),selectedLife=new Set(selectedHere.map(entry=>entry.content.life_id))
+   // selected retains the pre-purge revisions, including legacy versions higher than aggregate CAS.
+   for(const entry of selectedHere)if(entry.kind==='profile'&&entry.content.life_data!==undefined)meta.profile_version=Math.max(meta.profile_version??0,lifeStateSchema.shape.profile.parse(entry.content.life_data).version)
+   meta.receipts=Object.fromEntries(Object.entries(meta.receipts).filter(([,receipt])=>!selectedLife.has(receipt.result.id)));db.prepare('UPDATE memory_life_meta SET payload_json=? WHERE namespace=?').run(canonicalJson(meta),String(row.namespace))
+  }
   rebuildWorkspaceProjections(db,intent.revisions);save(db,intent);db.exec('COMMIT')
  }catch(error){db.exec('ROLLBACK');throw error}
  return finish(db,path,intent)

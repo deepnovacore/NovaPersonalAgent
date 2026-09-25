@@ -1,11 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,readFile,realpath,readdir} from 'node:fs/promises'
+import {mkdtemp,rm,readFile,realpath,readdir,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {DatabaseSync} from 'node:sqlite'
+import {LifeService,emptyLifeState} from '../src/personal-agent/life.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import type {EntryRevision} from '../src/memory-substrate/store.js'
 
@@ -42,7 +44,10 @@ test('purged Profile stays absent across Life and news commands, recreates once,
   const rejected=attempts.find(result=>result.status==='rejected') as PromiseRejectedResult;assert.match(String(rejected.reason),/version_conflict/)
   await host.life.refresh();const second=(await rows()).find(row=>row.kind==='profile')!
   assert.notEqual(second.entry_id,first.entry_id)
-  await command('life.mutate',{op:'profile',expected_version:1,about:'SECOND EDITED PROFILE'},'edit-recreated')
+  await assert.rejects(host.life.mutate({op:'profile',expected_version:1,about:'OLD EDITOR CONTENT'},'fresh-stale-request'),/version_conflict/)
+  assert.equal(host.life.snapshot().profile.version,2)
+  assert.equal((attempts.find(result=>result.status==='fulfilled') as PromiseFulfilledResult<{result:{version:number}}>).value.result.version,2)
+  await command('life.mutate',{op:'profile',expected_version:2,about:'SECOND EDITED PROFILE'},'edit-recreated')
   assert.equal((await rows()).filter(row=>row.kind==='profile').length,1)
   const updated=(await rows()).find(row=>row.kind==='profile')!;assert.equal(updated.entry_id,second.entry_id)
   await command('life.mutate',{op:'profile',expected_version:0,about:'FIRST PRIVATE PROFILE'},'first-profile')
@@ -77,4 +82,37 @@ test('worker distinguishes purged identifiers, stated evidence trust and stale r
   await assert.rejects(client.memory('merge',candidate),code('STORE_PURGED_ID'))
   await assert.rejects(client.memory('append_evidence',evidence),code('STORE_PURGED_ID'))
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('legacy Profile version watermark survives purge before Life load, old metadata, restart and idempotent edits',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-life-legacy-version-')),path=join(root,'memory.sqlite'),legacyPath=join(root,'life.json')
+ let client=new WorkspaceGraphStoreClient(path)
+ const makeResource=()=>new SubstrateMemoryResource({client,userId:'legacy-version',model:'unused',gateway:{async *stream(){throw Error('unexpected model call')},async complete(){throw Error('unexpected model call')}}})
+ let resource=makeResource(),life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend())
+ const restart=async()=>{await life.close();await resource.close();client=new WorkspaceGraphStoreClient(path);resource=makeResource();life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend());await resource.open()}
+ try{
+  await writeFile(legacyPath,JSON.stringify({...emptyLifeState(),profile:{about:'LEGACY PROFILE',version:41}}))
+  await resource.open();await life.open();assert.equal(life.snapshot().profile.version,41)
+  await life.close();await resource.close()
+  const db=new DatabaseSync(path)
+  try{db.exec("UPDATE memory_life_meta SET payload_json=json_remove(payload_json,'$.profile_version')")}finally{db.close()}
+  client=new WorkspaceGraphStoreClient(path);resource=makeResource();life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend());await resource.open()
+  // No Life peek/load occurs after the old-metadata fixture opens and before purge.
+  const old=(await resource.list()).entries.find(row=>row.kind==='profile')!
+  assert.equal((await resource.purgeEntry(old.id,old.version,'purge-legacy')).status,'complete')
+  await restart();await life.open();assert.deepEqual(life.snapshot().profile,{about:'',version:0})
+  const input={op:'profile',expected_version:0,about:'NEW LEGACY SUCCESSOR'}
+  const created=await life.mutate(input,'recreate-legacy');assert.deepEqual(created,{id:'profile',version:42})
+  assert.deepEqual(life.snapshot().profile,{about:'NEW LEGACY SUCCESSOR',version:42})
+  assert.deepEqual(await life.mutate(input,'recreate-legacy'),created)
+  await assert.rejects(life.mutate({op:'profile',expected_version:41,about:'STALE LEGACY EDITOR'},'new-stale-request'),/version_conflict/)
+  const updated=await life.mutate({op:'profile',expected_version:42,about:'NEW EDIT'},'edit-new');assert.equal(updated.version,43)
+  await restart();await life.open();assert.equal(life.snapshot().profile.version,43)
+  assert.deepEqual(await life.mutate({op:'profile',expected_version:42,about:'NEW EDIT'},'edit-new'),updated)
+  const current=(await resource.list()).entries.find(row=>row.kind==='profile')!;assert.notEqual(current.id,old.id)
+  assert.equal((await resource.purgeEntry(current.id,current.version,'purge-new')).status,'complete')
+  await life.refresh();assert.deepEqual(life.snapshot().profile,{about:'',version:0})
+  assert.equal((await life.mutate({op:'profile',expected_version:0,about:''},'third-profile')).version,44)
+ }finally{await life.close();await resource.close();await rm(root,{recursive:true,force:true})}
 })
