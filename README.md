@@ -14,7 +14,7 @@
 > **An always-on voice agent with restrained proactivity and the capability of workspace management.**
 
 
-> **Branch preview — Nova Visor:** [Approved transparent desktop HUD concept and demo goals](docs/DESKTOP_VISOR_DEMO.md). A Jarvis-style interactive desktop layer that keeps normal apps visible and usable. Static concept only; the desktop overlay is not implemented yet.
+> **Branch preview · Nova Visor:** A primary-display transparent HUD and Themes settings are implemented as a local macOS preview. [Usage and architecture (中文)](docs/VISOR_GUIDE.zh-CN.md) · [Validation and limitations](docs/VISOR_V1.md) · [Visual reference](docs/DESKTOP_VISOR_DEMO.md). Final installed GUI acceptance and cross-platform certification remain pending.
 
 ## News
 

@@ -16,7 +16,7 @@
 
 https://github.com/user-attachments/assets/061697f3-fff6-47d6-924b-8a29eef4ab45
 
-> **分支预览 · Nova Visor：** [已选定的透明桌面 HUD 效果与 Demo 目标](docs/DESKTOP_VISOR_DEMO.md)。面向“可交互桌面壁纸”的 Jarvis 体验，保留正常电脑操作。当前为静态概念展示，桌面叠加层尚未实现。
+> **分支预览 · Nova Visor：** 已增加主显示器透明 HUD 和“主题”设置。[使用说明与架构扩展](docs/VISOR_GUIDE.zh-CN.md) · [验证结果与限制](docs/VISOR_V1.md) · [视觉参考](docs/DESKTOP_VISOR_DEMO.md)。当前为本地 macOS 预览，安装版最终 GUI 验收及跨平台认证尚未完成。
 
 ## News
 

@@ -1,12 +1,14 @@
 # Nova Visor v1 — local macOS preview
 
+[中文使用说明与架构扩展](VISOR_GUIDE.zh-CN.md)
+
 Entry: Settings → Themes → Nova Visor. The orb-skin manager is now in Themes, directly below General.
 
 ## Implemented
 
 - Primary-display transparent, non-focusable, mouse-through HUD above ordinary application windows. Menu bar and Dock work area are respected. No wallpaper replacement or desktop capture is needed for operation.
 - Separate compact controls: show the existing Nova orb, Focus / Showcase, collapse. Tray and orb menu also toggle the HUD. `Cmd/Ctrl+Shift+J` toggles it; registration failure is logged and menus remain available.
-- Four independently moving frame sections assemble, followed by instruments. Reverse collapse; motion toggle and OS reduced-motion preference. Core animation capped at 15 fps in Focus / 30 fps in Showcase; hidden/destroyed HUD stops animation and sampling.
+- Four independently moving frame sections assemble, followed by instruments. Reverse collapse; motion toggle and OS reduced-motion preference. Core animation capped at 15 fps in Focus / 30 fps in Showcase; collapsing/destroying the HUD stops sampling; renderer visibility also gates core animation. OS occlusion/lock power behavior remains unverified.
 - CPU interval utilization, used physical RAM including caches, home-volume occupancy, macOS battery/charging. Fast sampling every 2 seconds; disk and battery every 30 seconds. Unavailable metrics show a dash.
 - Actual orb state, microphone state, configured active model, and current client-lifetime provider usage. Unsupported/missing usage is not fabricated. Costs show known priced portion and indicate incomplete pricing. The core is state animation, not a simulated microphone waveform.
 - Independent persisted `nova-visor.json`; appearance changes do not restart the voice backend. Skin selection remains on the existing settings save flow. Imported skins remain data-only v1 orb skins; arbitrary full-desktop skin packages are not implemented.

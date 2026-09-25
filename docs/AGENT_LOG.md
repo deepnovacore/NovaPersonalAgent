@@ -53,3 +53,11 @@
 - Blocker: Mac locked during final live GUI check; CUA explicitly requested manual unlock. User was asked asynchronously. Corrected installed process runs without the earlier dyld error, but installed HUD/settings/shortcut and backend readiness after corrected signing still require final observation. Do not equate passing automated smoke with completed product acceptance.
 - Evidence and limitations: `docs/VISOR_V1.md`; screenshots/metrics in ignored local output. Voice phrase switching, full-desktop skin packages, multiple monitors/fullscreen certification and long soak are not in v1.
 - Additional actual-main startup probe with an isolated profile emitted `settings_ready` (settings renderer and sidebar check passed), but timed out awaiting the native window-shown stage while the Mac was locked. The probe was shut down cleanly; not recorded as a full startup pass.
+
+## 2026-09-25 13:34 CST — Document Visor usage/architecture and update upstream PR
+
+- Request: include activation/desktop-companion usage and integration with the existing Nova architecture in the submission, push the branch, and submit a PR.
+- Added `docs/VISOR_GUIDE.zh-CN.md`: settings/menu/shortcut entry points, normal-window behavior and limits, preferences/defaults, telemetry semantics, module map, IPC authorization, lifecycle and pending acceptance. Linked from both READMEs and the detailed validation record; removed outdated static-only claims.
+- Publish the preceding local implementation commit `4f182739` plus this documentation commit to personal-fork `origin/codex/orb-skins`. Existing upstream PR #12 is OPEN from that same fork branch; update its title/body to the implemented Themes/Visor scope instead of creating a duplicate. No merge, new issue closure or release requested.
+- Checks this turn: clean starting tree, branch divergence 0 behind / 1 ahead before this documentation commit; relative Markdown links, diff whitespace, staged secret-pattern scan. This is a documentation/publication turn: reuse the recorded 255-test implementation result and Electron/build/signing evidence; no new live GUI, provider requests or screenshots.
+- Limitations remain explicit: final corrected installed GUI/backend/shortcut acceptance, full-screen/Spaces/multi-monitor certification and soak pending. Voice phrase switching and desktop skin-package import are not implemented.
