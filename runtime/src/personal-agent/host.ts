@@ -235,6 +235,9 @@ export class PersonalAgentHost {
     #briefing: Promise<void> | undefined;
     #nextDiscovery=0;
     #opened = false;
+    #loaded = false;
+    #sourceReady = false;
+    #lifecycle:Promise<void> = Promise.resolve();
     #sourceSignature = '';
     #sourcePending={invalidated:0,ready:new Set<number>(),legacy:false};
     #sourceSeen={invalidated:0,ready:new Set<number>()};
@@ -290,8 +293,13 @@ export class PersonalAgentHost {
     subscribe(listener: () => void): () => void { this.#listeners.add(listener); return () => this.#listeners.delete(listener); }
     #now(): Date { return this.options.now?.() ?? new Date(); }
     #serial<T>(fn: () => Promise<T>): Promise<T> { const run = this.#tail.then(fn); this.#tail = run.catch(() => { /* optional observer or cleanup already reported */ }); return run; }
-    async open(): Promise<void> {
-        if (this.#opened) return;
+    open(): Promise<void> {
+        const run=this.#lifecycle.then(()=>this.#open());
+        this.#lifecycle=run.catch(()=>{ /* callers receive startup failures */ });
+        return run;
+    }
+    async #open(): Promise<void> {
+        if (this.#release && this.#loaded) return;
         assertPersistedAcceptanceGrant(this.options.memory()?.processingGrant?.(true,1,0),this.options.path);
         this.#release = await acquirePersonalLock(this.options.path);
         try {
@@ -299,6 +307,7 @@ export class PersonalAgentHost {
             this.#state.conversations.voice_id=null;
             if (this.#state.user_scope !== null && this.#state.user_scope !== this.options.userScope) throw Error('scope_mismatch');
             this.#state.user_scope = this.options.userScope;
+            this.#loaded = true;
             let recovered=false;for(const conversation of this.#state.conversations.items)for(const message of conversation.messages)if(message.generation_status==='pending'){message.generation_status='interrupted';recovered=true;}
             if(recovered){this.#state.revision++;await this.#store.write(this.#state);}
 
@@ -317,18 +326,27 @@ export class PersonalAgentHost {
             if(!acceptanceEnabled())await this.#connectors?.open();
             await this.refreshMemory();
             await this.revalidate();
+            this.#sourceReady = true;
+            await this.#drainSources();
             for (const item of this.#state.feed) {
                 if (item.lifecycle === 'active' && item.user_state !== 'dismissed' && (!item.snooze_until || Date.parse(item.snooze_until) <= this.#now().getTime())) this.#pool(item);
             }
             this.#schedule();
         } catch (error) {
-            await this.close().catch(() => { /* preserve primary lifecycle failure */ });
+            await this.#close().catch(() => { /* preserve primary lifecycle failure */ });
             throw error;
         }
     }
-    async close(): Promise<void> {
-        await this.#conversationPool?.close();
+    close(): Promise<void> {
         this.#opened = false;
+        this.#sourceReady = false;
+        const run=this.#lifecycle.then(()=>this.#close());
+        this.#lifecycle=run.catch(()=>{ /* callers receive shutdown failures */ });
+        return run;
+    }
+    async #close(): Promise<void> {
+        this.#opened = false;
+        this.#sourceReady = false;
         this.#prefetched=undefined;
         this.#invalidateOverview();
         this.#overviewCache = undefined;
@@ -339,6 +357,8 @@ export class PersonalAgentHost {
         this.#abort.abort();
         for (const item of this.#state.feed) if (item.suggestion_id) this.options.pool.withdraw(item.suggestion_id);
         try {
+            await this.#conversationPool?.close();
+            await this.#sourceDrain?.catch(() => { /* source caller receives the failure; still close resources */ });
             await this.workbenchContext.close();
             await this.understanding.close();
             await this.news.close();
@@ -350,9 +370,12 @@ export class PersonalAgentHost {
             await this.#sources?.close?.();
             await this.#briefing?.catch(()=>{/* aborted preparation */});
             await this.#discovery?.catch(() => { /* preserve primary lifecycle failure */ });
+        } finally {
+            // A failed resource close must not release ownership ahead of queued writes.
+            await this.#sourceDrain?.catch(() => { /* caller receives the source failure */ });
             await this.#commands;
             await this.#tail;
-        } finally {
+            this.#loaded = false;
             const release=this.#release;
             this.#release=undefined;
             await release?.();
@@ -452,6 +475,7 @@ export class PersonalAgentHost {
     snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, workbench_context:this.workbenchContext.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), conversations:this.conversationSnapshot(), news:this.news.snapshot(),profile_preparation:this.profileWarmup.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
+        if (!this.#release || !this.#loaded) throw Error('personal_store_not_ready');
         const selected=next.conversations.items.find(c=>c.id===next.conversations.selected_id),latest=selected?.messages.findLast(m=>m.role==='user');
         const isNew=!!latest&&!this.#state.conversations.items.find(c=>c.id===selected?.id)?.messages.some(m=>m.id===latest.id);
         next.revision = this.#state.revision + 1; await this.#store.write(next); this.#state = next;
@@ -547,9 +571,13 @@ export class PersonalAgentHost {
     sourceChanged(change?:SourceChange):Promise<void>{
         this.#notify();
         if(change){const q=z.object({revision:z.number().int().positive(),phase:z.enum(['invalidated','ready'])}).strict().parse(change);if(q.phase==='invalidated')this.#sourcePending.invalidated=Math.max(this.#sourcePending.invalidated,q.revision);else if(!this.#sourceSeen.ready.has(q.revision))this.#sourcePending.ready.add(q.revision)}else this.#sourcePending.legacy=true;
+        return this.#drainSources();
+    }
+    #drainSources():Promise<void>{
+        if(!this.#opened||!this.#sourceReady)return Promise.resolve();
         if(this.#sourceDrain)return this.#sourceDrain;
         const work=Promise.resolve().then(async()=>{
-            while(this.#sourcePending.legacy||this.#sourcePending.invalidated>this.#sourceSeen.invalidated||this.#sourcePending.ready.size){
+            while(this.#opened&&(this.#sourcePending.legacy||this.#sourcePending.invalidated>this.#sourceSeen.invalidated||this.#sourcePending.ready.size)){
                 const next={...this.#sourcePending,ready:[...this.#sourcePending.ready]};this.#sourcePending.legacy=false;
                 try{
                     await this.refreshMemory();await this.revalidate();await this.#serial(()=>this.#commit(structuredClone(this.#state)));
