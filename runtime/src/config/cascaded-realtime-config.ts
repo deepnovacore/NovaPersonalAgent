@@ -96,7 +96,7 @@ export function requireSelectedCascadedLlmConfig(settings:Settings):SelectedCasc
         baseUrl: secureEndpoint(
           settings.volcengine_ark_base_url,
           'https',
-          'NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL',
+          'VOLCENGINE_ARK_BASE_URL',
         ),
         apiKey: apiKey,
         model: selection.llmModel,
@@ -106,7 +106,7 @@ export function requireSelectedCascadedLlmConfig(settings:Settings):SelectedCasc
 
 function resolveEndpointingConfig(settings: Settings): AutoEndpointingConfig {
   if (!(settings.volcengine_vad_threshold > 0 && settings.volcengine_vad_threshold <= 1)) {
-    throw new ConfigurationError('NOVA_AUDIO_AGENT_VOLCENGINE_VAD_THRESHOLD 必须在 (0, 1] 内')
+    throw new ConfigurationError('VOLCENGINE_VAD_THRESHOLD 必须在 (0, 1] 内')
   }
   if (settings.volcengine_vad_pre_roll_ms < 0 || settings.volcengine_vad_speech_pad_ms < 0) {
     throw new ConfigurationError('火山 VAD pre-roll 与 speech pad 不能为负数')
@@ -135,7 +135,7 @@ export function requireSelectedCascadedAsrConfig(settings:Settings):VolcengineAs
 
 function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConfig {
   if (settings.doubao_asr_chunk_ms <= 0) {
-    throw new ConfigurationError('NOVA_AUDIO_AGENT_DOUBAO_ASR_CHUNK_MS 必须为正整数')
+    throw new ConfigurationError('DOUBAO_ASR_CHUNK_MS 必须为正整数')
   }
   const voiceprint = settings.doubao_asr_voiceprint_enabled
     ? {id: settings.doubao_asr_voiceprint_id, name: settings.doubao_asr_voiceprint_name} : undefined
@@ -146,15 +146,15 @@ function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConf
   }
   return Object.freeze({
     ...(voiceprint ? {voiceprint} : {}),
-    ...(settings.doubao_asr_voiceprint_health_url ? {voiceprintHealthUrl:secureEndpoint(settings.doubao_asr_voiceprint_health_url, 'https', 'NOVA_AUDIO_AGENT_DOUBAO_ASR_VOICEPRINT_HEALTH_URL')} : {}),
+    ...(settings.doubao_asr_voiceprint_health_url ? {voiceprintHealthUrl:secureEndpoint(settings.doubao_asr_voiceprint_health_url, 'https', 'DOUBAO_ASR_VOICEPRINT_HEALTH_URL')} : {}),
     endpoint: secureEndpoint(
       settings.doubao_asr_endpoint,
       'wss',
-      'NOVA_AUDIO_AGENT_DOUBAO_ASR_ENDPOINT',
+      'DOUBAO_ASR_ENDPOINT',
     ),
     resourceId: requiredSetting(
       settings.doubao_asr_resource_id,
-      'NOVA_AUDIO_AGENT_DOUBAO_ASR_RESOURCE_ID',
+      'DOUBAO_ASR_RESOURCE_ID',
     ),
     apiKey,
     chunkMs: settings.doubao_asr_chunk_ms,
@@ -163,19 +163,19 @@ function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConf
 
 function resolveTtsConfig(settings: Settings, apiKey: string): VolcengineTtsConfig {
   if (settings.doubao_tts_output_sample_rate !== 24_000) {
-    throw new ConfigurationError('NOVA_AUDIO_AGENT_DOUBAO_TTS_OUTPUT_SAMPLE_RATE 必须为 24000')
+    throw new ConfigurationError('DOUBAO_TTS_OUTPUT_SAMPLE_RATE 必须为 24000')
   }
   return Object.freeze({
     endpoint: secureEndpoint(
       settings.doubao_tts_endpoint,
       'wss',
-      'NOVA_AUDIO_AGENT_DOUBAO_TTS_ENDPOINT',
+      'DOUBAO_TTS_ENDPOINT',
     ),
     resourceId: requiredSetting(
       settings.doubao_tts_resource_id,
-      'NOVA_AUDIO_AGENT_DOUBAO_TTS_RESOURCE_ID',
+      'DOUBAO_TTS_RESOURCE_ID',
     ),
-    voice: requiredSetting(settings.doubao_tts_voice, 'NOVA_AUDIO_AGENT_DOUBAO_TTS_VOICE'),
+    voice: requiredSetting(settings.doubao_tts_voice, 'DOUBAO_TTS_VOICE'),
     apiKey,
     outputSampleRate: 24_000,
   })

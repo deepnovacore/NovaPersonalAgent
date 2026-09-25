@@ -1,6 +1,7 @@
 import {personalCommandSchema} from './personal-agent/contracts.js'
 import {parsePromptLanguage, type PromptLanguage} from './realtime/prompt-language.js'
 export {VISION_MODELS, supportsVision} from './model/vision-capability.js'
+export {describeMissingBlockingEnvironment} from './config/config.js'
 import {taskActionSchema} from './desktop/desktop-tasks.js'
 import { timingSafeEqual } from 'node:crypto'
 import { createConnection } from 'node:net'

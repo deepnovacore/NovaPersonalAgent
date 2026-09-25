@@ -38,11 +38,40 @@ for (const acceptance of [null, {}]) test(`actual main preserves model errors wi
   vm.runInContext(launch, context)
   await assert.rejects(context.launchBackend(), error => error.kind === 'configuration_required' && error.code === 'model_base_url_invalid')
 })
-for (const acceptance of [null, {}]) test(`actual main gates Coding configuration errors (acceptance=${!!acceptance})`, async () => {
-  const context = vm.createContext({acceptance, readCapabilityDocument: () => ({modules: {coding: {enabled: true}}}), classifyBackendFailure,
-    currentSettings: {}, process: {env: {}}, desktopConfig: {modelConfigurationError: 'model_base_url_invalid', codexConfigurationError: 'manual_path_required'}, codexStatus: {status: 'unavailable'}})
+test('actual main turns Coding off instead of blocking on an unfinished manual Codex path', async () => {
+  const specs = []
+  const context = vm.createContext({acceptance: null, readCapabilityDocument: () => ({version: 1}), classifyBackendFailure,
+    accessCredentials: fn => fn(), refreshCapabilityEditor() {}, preferredLanguage: () => 'en', acceptanceBackendSettings: value => value,
+    currentSettings: {}, process: {env: {}, cwd: () => '/tmp'}, desktopConfig: {codexConfigurationError: 'manual_path_required'}, codexStatus: {status: 'ready'},
+    randomBytes: () => Buffer.alloc(16), createReadinessListener: () => ({endpoint: Promise.resolve('ep'), close() {}}), createBackendDiagnosticCollector: () => ({}),
+    decryptSecretsForSpawn: () => ({}), secretCodec: {}, settingsGeneration: 0, launchGeneration: 0, mainWindow: null, app: {isPackaged: false, getAppPath: () => '/app', getPreferredSystemLanguages: () => ['en']},
+    nodeRuntimeEntry: () => 'entry', packageRoot: '/pkg', resolve: (...parts) => parts.join('/'), openSetupWindow: () => {},
+    backendLaunchSpec: () => { const spec = {env: {}}; specs.push(spec); return spec },
+    // Stop right after the spawn environment is built; the fork itself is not under test.
+    describeMissingBlockingEnvironment: (_environment, textConversations) => {assert.equal(textConversations, true); return {pipeline: 'cascaded', missing: ['DASHSCOPE_API_KEY']}}})
   vm.runInContext(launch, context)
-  await assert.rejects(context.launchBackend(), error => error.code === (acceptance ? 'model_base_url_invalid' : 'manual_path_required'))
+  await assert.rejects(context.launchBackend('node', {}), error => error.kind === 'configuration_required' && error.code !== 'manual_path_required')
+  assert.equal(specs[0].env.CODING_MODULE_ENABLED, 'false')
+})
+test('actual settings view never decrypts while projecting startup and panel state', () => {
+  let decrypts = 0
+  const context = vm.createContext({createManagedPhoneService: () => ({}), VISION_MODELS: {}, resolveSecretConfiguration, developmentEnv: {}, frontendUsage: {snapshot: () => ({})}, wakeWord: null, settingsWindow: null, capabilityEditorCache: null, settingsGeneration: 0, currentSettings: {}, process: {env: {}},
+    readCapabilityDocument: () => ({version: 1}), decryptSecretsForSpawn: () => {decrypts++; return {}},
+    readCapabilityEditor: () => ({document: {version: 1}, revision: 'test-revision', problems: []}), capabilityEnvironment: () => ({}), capabilityPath, statSync, capabilityDocumentRevision: () => 'fixed',
+    runtimeCapabilities: null, publicSettings: () => ({}), codexStatus: {}, backendStatus: {}, settingsApplyStatus: 'idle', settingsRecoveryAvailable: false, managedWorkspacesView: () => ({}),
+    startup: {}, keyringAvailable: true, microphoneStatus: 'unknown', desktopConfig: null, secretsPresent: () => ({}), secretCodec: {available: () => true}, hasPlaintextSecret: () => false})
+  vm.runInContext(view, context)
+  context.settingsView(); context.settingsView()
+  assert.equal(decrypts, 0)
+  context.settingsWindow = {}
+  context.settingsView(); context.settingsView()
+  assert.equal(decrypts, 0)
+  context.settingsGeneration++
+  context.settingsView()
+  assert.equal(decrypts, 0)
+  context.settingsWindow = null
+  context.settingsView()
+  assert.equal(decrypts, 0)
 })
 test('explicit settings refresh reads hand edits without IO in the public projection', async t => {
   const root = await mkdtemp(join(tmpdir(), 'nova-task6-cache-'))

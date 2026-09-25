@@ -1427,3 +1427,13 @@ test('startup retry reports backend status without managed workspace recovery wo
   panel.push(publicView({backendStatus:'reconnecting',startup:{stage:'reconnecting'}}))
   assert.equal(panel.node('#startup-retry').hidden,true)
 })
+
+test('language restart hint follows the applied language across live updates', async () => {
+  const language = currentLanguage()
+  const panel = await mountSettingsPanel(publicView({language}))
+  assert.equal(panel.node('#language-restart-hint').hidden, true)
+  panel.push(publicView({language: language === 'en' ? 'zh-CN' : 'en'}))
+  assert.equal(panel.node('#language-restart-hint').hidden, false)
+  panel.push(publicView({language}))
+  assert.equal(panel.node('#language-restart-hint').hidden, true)
+})

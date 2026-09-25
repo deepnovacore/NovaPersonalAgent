@@ -54,6 +54,44 @@ test('readiness cleanup preserves explicit permanent failures and refuses unconf
   {kind: 'unavailable', code: 'backend_stop_failed'})
 })
 
+test('structured startup failures stay permanent when utility exit precedes stderr', async () => {
+  for (const status of [
+    {state: 'startup_failed', toolCount: 2, toolBudget: 1},
+    {state: 'startup_failed', toolCount: null, toolBudget: 24, reason: 'configuration_required', pipeline: 'integrated', missing: ['DASHSCOPE_API_KEY']},
+  ]) {
+    const diagnostic = createBackendDiagnosticCollector()
+    const child = new EventEmitter()
+    const control = createBackendControl(child, {onStatus: value => diagnostic.pushCapabilityStatus(value)})
+    const retries = []
+    const supervisor = createBackendSupervisor({
+      start: async onExit => {
+        child.once('exit', () => onExit(diagnostic.failure()))
+        child.emit('message', {type: 'nova.capabilities', status})
+        child.emit('exit', 2)
+        throw diagnostic.failure('backend_start_timeout')
+      },
+      stopBackend: async () => {},
+      onStatus: () => {},
+      schedule: callback => { retries.push(callback); return callback },
+    })
+    await supervisor.start()
+    assert.equal(supervisor.status().state, 'configuration_required')
+    assert.equal(retries.length, 0)
+    control.close()
+    await supervisor.stop()
+  }
+})
+
+test('non-configuration capability status does not suppress backend reconnects', () => {
+  for (const status of [null, {state: 'running', toolCount: 2, toolBudget: 1},
+    {state: 'startup_failed', toolCount: 1, toolBudget: 24},
+    {state: 'startup_failed', toolCount: null, toolBudget: 0, reason: 'configuration_required'}]) {
+    const diagnostic = createBackendDiagnosticCollector()
+    diagnostic.pushCapabilityStatus(status)
+    assert.equal(diagnostic.failure().kind, 'recoverable')
+  }
+})
+
 test('recoverable starts reconnect with deterministic jitter and then connect', async () => {
   const scheduled = []
   const statuses = []
@@ -234,6 +272,29 @@ test('private status projects only safe public fields and bounded exact counts',
   assert.equal(projected.state, 'startup_failed')
   assert.ok(!JSON.stringify(projected).includes('private-secret'))
   assert.equal(publicRuntimeCapabilityStatus({toolCount: -1, toolBudget: 24}), null)
+})
+
+test('first-run status keeps only known pipeline, blocking key names and missing-environment reasons', async () => {
+  const {publicRuntimeCapabilityStatus} = await import('../src/main/backend-supervisor.mjs')
+  const failed = publicRuntimeCapabilityStatus({state: 'startup_failed', toolCount: null, toolBudget: 24,
+    reason: 'configuration_required', pipeline: 'cascaded', missing: ['DEEPSEEK_API_KEY', 'sk-private-secret', 'DOUBAO_BIGMODEL_API_KEY']})
+  assert.equal(failed.reason, 'configuration_required')
+  assert.equal(failed.pipeline, 'cascaded')
+  assert.deepEqual(failed.missing, ['DEEPSEEK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
+  const odd = publicRuntimeCapabilityStatus({state: 'startup_failed', toolCount: null, toolBudget: 24, reason: 'configuration_required', pipeline: 'private-secret', missing: 'DASHSCOPE_API_KEY'})
+  assert.equal(odd.pipeline, undefined)
+  assert.deepEqual(odd.missing, [])
+  // A compiled runtime never carries a blocking reason.
+  assert.equal(publicRuntimeCapabilityStatus({toolCount: 3, toolBudget: 24, reason: 'configuration_required', missing: ['DASHSCOPE_API_KEY']}).reason, undefined)
+  const degraded = publicRuntimeCapabilityStatus({toolCount: 3, toolBudget: 24, overrides: ['CODING_MODULE_ENABLED', 'PRIVATE'], modules: {
+    search: {enabled: true, provider: 'mcp', fallback: 'bailian_mcp', reason: 'missing_environment:TAVILY_API_KEY'},
+    camera: {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY'},
+    coding: {enabled: false, reason: 'private-secret'},
+  }})
+  assert.deepEqual(degraded.modules.search, {enabled: true, reason: 'missing_environment:TAVILY_API_KEY', fallback: 'bailian_mcp', provider: 'mcp'})
+  assert.deepEqual(degraded.modules.camera, {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY'})
+  assert.deepEqual(degraded.modules.coding, {enabled: false})
+  assert.deepEqual(degraded.overrides, ['CODING_MODULE_ENABLED'])
 })
 
 test('usage stays private, validates numbers and ignores closed children', () => {

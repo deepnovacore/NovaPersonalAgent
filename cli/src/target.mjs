@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const PRODUCT_VERSION = '0.2.2'
+export const PRODUCT_VERSION = '0.2.3'
 export const RELEASE_REPOSITORY = 'deepnovacore/NovaAudioAgent'
 
 const DEFINITIONS = Object.freeze({

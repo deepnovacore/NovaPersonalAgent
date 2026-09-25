@@ -3,6 +3,13 @@ const PRESET = {url: 'https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp',
 const DESCRIPTIONS = {[t("搜索")]: t("查找网络信息，为回答补充资料"), [t("视觉监控")]: t("观察摄像头画面，在符合条件时通知你"), [t("编程")]: t("执行编程任务与项目操作"), [t("知识库")]: t("检索已导入的本地资料"), [t("向编程执行器开放知识库")]: t("允许编程执行器检索已导入的资料")}
 const DEFAULT_TOOL = {enabled: false, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2}
 const node = (tag, text, parent) => {const element = document.createElement(tag); if (text) element.textContent = text; parent?.append(element); return element}
+// Why the running module is off or switched: only the bounded runtime reasons reach this far.
+export function moduleStatusNote(module) {
+  const key = /^missing_environment:([A-Z][A-Z0-9_]{0,63})$/u.exec(module?.reason ?? '')?.[1]
+  if (module?.fallback === 'bailian_mcp') return key ? t("未配置 {0}，改用百炼联网搜索", key) : t("改用百炼联网搜索")
+  if (module?.enabled === false && key) return t("未配置 · 需要 {0}", key)
+  return ''
+}
 
 /** Native controls over the existing controller's one draft; probe metadata never enables a tool. */
 export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problemsLabel, stage, probe}) {
@@ -60,6 +67,10 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
     catch { probes.set(name, {status: 'failed', reason: 'unavailable', tools: []}) }
     finally {probeBusy = false; signature = ''; render(current)}
   }
+  function moduleNote(parent, module) {
+    const text = moduleStatusNote(module)
+    if (text) node('p', text, parent).className = 'hint module-status'
+  }
   function render(view) {
     current = view
     const state = view.capabilities ?? {}
@@ -91,9 +102,11 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
       field(target, label, modules[name]?.enabled ?? true, enabled => update(next => {
         next.modules ??= {}; next.modules[name] = {...next.modules[name], enabled}
       }), {type: 'checkbox'})
+      moduleNote(target, running?.modules?.[name])
     }
     const searchGroup = node('section', '', root); searchGroup.className = 'mcp-module'; searchGroup.dataset.module = 'search'
     field(searchGroup, t("搜索"), modules.search?.enabled ?? true, enabled => update(next => {next.modules ??= {}; next.modules.search = {...next.modules.search, enabled}}), {type: 'checkbox'})
+    moduleNote(searchGroup, running?.modules?.search)
     const search = node('div', '', searchGroup); search.className = 'mcp-module-config'
     const changeSearch = patch => update(next => {next.modules ??= {}; next.modules.search = {...next.modules.search, ...patch}})
     field(search, t("搜索服务"), modules.search?.provider ?? 'tavily', provider => changeSearch({provider}), {options: ['tavily', 'mcp']})
@@ -111,6 +124,7 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
     const statuses = running?.servers ?? state.status?.servers ?? []
     const knowledge = node('section', '', root); knowledge.className = 'mcp-module'; knowledge.dataset.module = 'knowledge'
     field(knowledge, t("知识库"), modules.knowledge?.enabled ?? false, enabled => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, enabled}}), {type: 'checkbox'})
+    moduleNote(knowledge, running?.modules?.knowledge)
     const knowledgeConfig = node('div', '', knowledge); knowledgeConfig.className = 'mcp-module-config secondary-toggle'
     field(knowledgeConfig, t("向编程执行器开放知识库"), modules.knowledge?.exposeToCodex ?? false, exposeToCodex => update(next => {next.modules ??= {}; next.modules.knowledge = {...next.modules.knowledge, exposeToCodex}}), {type: 'checkbox'})
     for (const [name, server] of Object.entries(doc.mcpServers ?? {})) {

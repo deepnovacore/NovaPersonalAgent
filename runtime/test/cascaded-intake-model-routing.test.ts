@@ -83,17 +83,17 @@ test('host and desktop text/voice children keep resolved support models paired a
       return Promise.resolve(new Response(JSON.stringify({choices: [{message: {content: '{}'}}]}), {status: 200}))
     }
     const configured = loadSettings({
-      NOVA_AUDIO_AGENT_PIPELINE_MODE: scenario.integrated ? 'integrated' : 'cascaded',
-      ...(scenario.integrated ? {NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER: 'stepfun', STEPFUN_API_KEY: 'fixture'} : {}),
-      NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: scenario.provider,
-      NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: scenario.model,
-      NOVA_AUDIO_AGENT_EXECUTORS: 'workspace_coder',
-      NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false',
-      NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
+      PIPELINE_MODE: scenario.integrated ? 'integrated' : 'cascaded',
+      ...(scenario.integrated ? {INTEGRATED_PROVIDER: 'stepfun', STEPFUN_API_KEY: 'fixture'} : {}),
+      CASCADE_LLM_PROVIDER: scenario.provider,
+      CASCADE_LLM_MODEL: scenario.model,
+      EXECUTORS: 'workspace_coder',
+      CAMERA_MODULE_ENABLED: 'false',
+      MEMORY_CONNECTION: 'disabled',
       DEEPSEEK_API_KEY: 'fixture', ARK_API_KEY: 'fixture', DASHSCOPE_API_KEY: 'fixture',
       DOUBAO_BIGMODEL_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture',
-      ...(scenario.generic ? {NOVA_AUDIO_AGENT_MODEL_API_KEY: 'fixture', NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://generic.example/v1'} : {}),
-      ...(scenario.planner ? {NOVA_AUDIO_AGENT_PLANNER_MODEL: scenario.planner} : {}),
+      ...(scenario.generic ? {MODEL_API_KEY: 'fixture', MODEL_BASE_URL: 'https://generic.example/v1'} : {}),
+      ...(scenario.planner ? {PLANNER_MODEL: scenario.planner} : {}),
     }, !!scenario.integrated)
     const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-support-routing-'))
     let realtime: ReturnType<typeof buildCascadedRealtimeAssembly> | undefined

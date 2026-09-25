@@ -48,9 +48,9 @@ async function launch(manifestPath){
  const report=resolve(manifest.outputDirectory,'counts.ndjson')
  if(existsSync(report))throw Error('acceptance_fresh_output_required')
  const runtime=await import(pathToFileURL(resolve(repository,'runtime/dist/src/desktop/workbench-acceptance.js')).href)
- const environment={...process.env,NOVA_WORKBENCH_ACCEPTANCE_MANIFEST:resolve(manifestPath),NOVA_WORKBENCH_ACCEPTANCE_REPORT:report,NOVA_AUDIO_AGENT_BLACKBOARD_PATH:manifest.originalBlackboardPath}
+ const environment={...process.env,NOVA_WORKBENCH_ACCEPTANCE_MANIFEST:resolve(manifestPath),NOVA_WORKBENCH_ACCEPTANCE_REPORT:report,BLACKBOARD_PATH:manifest.originalBlackboardPath}
  manifest=runtime.loadAcceptanceManifest(environment)
- if(environment.NOVA_AUDIO_AGENT_DEV_BACKEND_ENTRY&&realpathSync(environment.NOVA_AUDIO_AGENT_DEV_BACKEND_ENTRY)!==realpathSync(resolve(repository,'runtime/dist/src/desktop-entry.js')))throw Error('acceptance_wrong_runtime_entry')
+ if(environment.DEV_BACKEND_ENTRY&&realpathSync(environment.DEV_BACKEND_ENTRY)!==realpathSync(resolve(repository,'runtime/dist/src/desktop-entry.js')))throw Error('acceptance_wrong_runtime_entry')
  const electron=(await import('electron')).default
  preflightLocks(manifest)
  assertFreshArtifacts(manifest.outputDirectory)

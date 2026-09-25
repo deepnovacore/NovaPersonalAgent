@@ -16,7 +16,7 @@
       "requires": [
         [
           "DASHSCOPE_API_KEY",
-          "NOVA_AUDIO_AGENT_MODEL_API_KEY"
+          "MODEL_API_KEY"
         ]
       ],
       "timeoutMs": 240000,
@@ -60,7 +60,7 @@
       "requires": [
         [
           "DASHSCOPE_API_KEY",
-          "NOVA_AUDIO_AGENT_MODEL_API_KEY"
+          "MODEL_API_KEY"
         ]
       ],
       "timeoutMs": 120000,
@@ -81,7 +81,7 @@
       "requires": [
         [
           "DASHSCOPE_API_KEY",
-          "NOVA_AUDIO_AGENT_MODEL_API_KEY"
+          "MODEL_API_KEY"
         ]
       ],
       "timeoutMs": 180000,

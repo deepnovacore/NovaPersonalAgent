@@ -77,6 +77,11 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:settings:personal',
     'nova:settings:set',
     'nova:settings:voiceprint',
+    'nova:setup:changed',
+    'nova:setup:open',
+    'nova:setup:save',
+    'nova:setup:status',
+    'nova:setup:test-key',
     'nova:voiceprint:gate-ready',
     'nova:voiceprint:recording',
     'nova:wake-word:activity',
@@ -691,7 +696,7 @@ test('backend mode is admitted before camera selection or permission work', asyn
   )
   assert.match(source, /releaseSmokeSourceRollbackExitCode\(\{/u)
   assert.match(source, /app\.exit\(sourceRollbackExitCode\)/u)
-  const rollbackPreflight = source.indexOf("process.env.NOVA_AUDIO_AGENT_BACKEND === 'python'")
+  const rollbackPreflight = source.indexOf("process.env.BACKEND === 'python'")
   assert.ok(rollbackPreflight >= 0 && rollbackPreflight < source.indexOf('app.requestSingleInstanceLock()'))
 })
 
@@ -739,7 +744,7 @@ test('camera bootstrap and protocol wiring catch canonical path disclosure or re
   assert.match(bootstrapBody, /cameraSource/)
   assert.doesNotMatch(
     bootstrapBody,
-    /camera\.file|cameraPath|NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE|file:|nova:\/\/orb\/camera-source/u,
+    /camera\.file|cameraPath|DESKTOP_VIDEO_FILE|file:|nova:\/\/orb\/camera-source/u,
   )
 
   const load = main.slice(main.indexOf('loadAppWindow(mainWindow'))
@@ -752,7 +757,7 @@ test('camera bootstrap and protocol wiring catch canonical path disclosure or re
   const mode = boot.indexOf('cameraController.setSourceMode(bootstrap.cameraSource)')
   const socket = boot.indexOf('connectBackend(bootstrap.backend)')
   assert.ok(mode >= 0 && socket > mode, 'immutable mode is installed before any host request can arrive')
-  assert.doesNotMatch(boot.slice(0, socket), /cameraPath|camera\.file|NOVA_AUDIO_AGENT_DESKTOP_VIDEO_FILE/u)
+  assert.doesNotMatch(boot.slice(0, socket), /cameraPath|camera\.file|DESKTOP_VIDEO_FILE/u)
 })
 
 test('pins X11/XWayland and transparent visuals on linux before the app is ready', async () => {

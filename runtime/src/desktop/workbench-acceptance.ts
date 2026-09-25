@@ -65,8 +65,8 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
  if(active)return active
  const manifest=loadAcceptanceManifest(environment);if(!manifest)return undefined
  active=manifest
- if(environment.NOVA_AUDIO_AGENT_DESKTOP_READY_ENDPOINT)allowAcceptanceLoopback(environment.NOVA_AUDIO_AGENT_DESKTOP_READY_ENDPOINT)
- assertOriginalProfilePaths({blackboardPath:environment.NOVA_AUDIO_AGENT_BLACKBOARD_PATH??''},{userData:manifest.originalUserData,blackboardPath:manifest.originalBlackboardPath})
+ if(environment.DESKTOP_READY_ENDPOINT)allowAcceptanceLoopback(environment.DESKTOP_READY_ENDPOINT)
+ assertOriginalProfilePaths({blackboardPath:environment.BLACKBOARD_PATH??''},{userData:manifest.originalUserData,blackboardPath:manifest.originalBlackboardPath})
  const source=JSON.parse(readFileSync(manifest.originalBlackboardPath+'.personal.json.sources.json','utf8')) as {sources?:{deleting?:boolean;view?:{state?:string};processing_consent?:{extraction_provider?:string|null;embedding_provider?:string|null}}[]}
  const grants=source.sources?.filter(record=>!record.deleting&&['connected','error'].includes(record.view?.state??''))??[]
  if(!grants.length)throw Error('acceptance_no_active_sources')

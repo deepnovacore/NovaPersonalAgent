@@ -145,7 +145,7 @@ export async function prepareDesktopStartup({
     pathApi,
     canonicalize: canonicalizePath,
   })
-  if (settings.codexWorkspace?.trim() || environment.NOVA_AUDIO_AGENT_CODEX_WORKSPACE?.trim()) {
+  if (settings.codexWorkspace?.trim() || environment.CODEX_WORKSPACE?.trim()) {
     let workspace
     try { workspace = await inspectWorkspace(config.workspace) }
     catch (error) {
@@ -214,7 +214,7 @@ export function startupFailureCode(error) {
   if (['EACCES', 'EPERM', 'EROFS'].includes(error?.code)) return 'filesystem_permissions'
   if (MESSAGE_CODES.has(error?.message)) return error.message
   if (error?.name === 'MainCameraConfigurationError') return 'camera_configuration_invalid'
-  if (error?.message === 'NOVA_AUDIO_AGENT_BACKEND must be node') {
+  if (error?.message === 'BACKEND must be node') {
     return 'backend_selection_invalid'
   }
   return 'startup_failed'

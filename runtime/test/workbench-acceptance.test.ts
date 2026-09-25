@@ -13,7 +13,7 @@ function fixture(){
  writeFileSync(blackboard+'.personal.json.sources.json',JSON.stringify({sources:[{view:{state:'connected'},processing_consent:{extraction_provider:'known',embedding_provider:'known'}}]}))
  const manifest={version:1,originalUserData:join(root,'electron'),originalBlackboardPath:blackboard,repository:join(root,'repo'),outputDirectory:join(root,'output'),buildCommit:'a'.repeat(40),providers:[{identity:'known',origin:'https://provider.invalid',models:['model']}],allowedIdentities:['known'],runCapSeconds:10}
  const manifestPath=join(root,'manifest.json');writeFileSync(manifestPath,JSON.stringify(manifest))
- const env={...process.env,NOVA_WORKBENCH_ACCEPTANCE_MANIFEST:manifestPath,NOVA_WORKBENCH_ACCEPTANCE_REPORT:join(root,'output/counts.ndjson'),NOVA_AUDIO_AGENT_BLACKBOARD_PATH:blackboard}
+ const env={...process.env,NOVA_WORKBENCH_ACCEPTANCE_MANIFEST:manifestPath,NOVA_WORKBENCH_ACCEPTANCE_REPORT:join(root,'output/counts.ndjson'),BLACKBOARD_PATH:blackboard}
  return {root,manifest,manifestPath,env,close:()=>rmSync(root,{recursive:true,force:true})}
 }
 test('canonical Electron and blackboard boundaries are independently enforced',()=>{
@@ -103,7 +103,7 @@ test('acceptance capability projection removes actual search and camera assembly
  const {parseCapabilityRegistry}=await import('../src/config/capability-registry.js')
  const {settingsSchema}=await import('../src/config/config.js')
  const {buildAssembly}=await import('../src/composition/assembly.js')
- const configured=parseCapabilityRegistry({version:1,modules:{search:{enabled:true},camera:{enabled:true}}})
+ const configured=parseCapabilityRegistry({version:1,modules:{search:{enabled:true},camera:{enabled:true}}},{TAVILY_API_KEY:'synthetic'})
  const capabilities=acceptanceCapabilityRegistry(configured,true)
  const core=buildAssembly({settings:settingsSchema.parse({memory_connection:'disabled',executors:[],model_api_key:'synthetic'}),capabilities})
  try{

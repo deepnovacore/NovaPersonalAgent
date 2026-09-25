@@ -15,7 +15,7 @@
 - Current user request authorizes implementation of the existing approved layout and M5–M7 scope; M8/M9 are explicitly v0.4.0.
 - Public branch: no internal services/data/configuration; no push or main merge.
 - All work under .worktrees/v0.3.0dev; preserve main checkout's uncommitted edits.
-- Test databases are temporary; set NOVA_AUDIO_AGENT_BLACKBOARD_PATH to a temporary file for production tests.
+- Test databases are temporary; set BLACKBOARD_PATH to a temporary file for production tests.
 - Node >=22.13.0; no new runtime dependency or replacement parser/retrieval engine.
 - Pure text must not initialize microphone. One backend connection and audio owner, including collapsed state.
 - Explicit input is the only execution authorization; generated proposals/source contents never dispatch work.

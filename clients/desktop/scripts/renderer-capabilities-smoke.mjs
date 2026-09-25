@@ -169,7 +169,7 @@ try {
     await page.locator('#settings-save').click()
     assert.equal(await page.locator('#status').textContent(), expected)
   }
-  await page.evaluate(() => window.__push({capabilities: {diskGeneration: 7, status: {modules: {search: {provider: 'mcp'}}, overrides: ['NOVA_AUDIO_AGENT_SEARCH_PROVIDER']}, problems: [], runtime: {state: 'startup_failed', diskGeneration: 7, generation: 4, toolCount: 27, toolBudget: 24}}}))
+  await page.evaluate(() => window.__push({capabilities: {diskGeneration: 7, status: {modules: {search: {provider: 'mcp'}}, overrides: ['SEARCH_PROVIDER']}, problems: [], runtime: {state: 'startup_failed', diskGeneration: 7, generation: 4, toolCount: 27, toolBudget: 24}}}))
   assert.equal(await page.locator('#capabilities-state').count(), 0)
   await page.evaluate(() => scrollTo(0, 0))
   await page.screenshot({path: `${output}/capability-budget-failure.png`, fullPage: true})

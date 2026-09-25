@@ -86,7 +86,7 @@ AOQ requests a fresh credential only after Start voice and microphone permission
 
 所有连接模式（Relay、AOQ Chat、AOQ Runtime）共用同一套扫码配对。手机打开连接设置 → **扫码连接主机** → 确认二维码中的 WSS 地址；配对后自动连接，仍需点击“开始对话”才会请求麦克风并开始音频。
 
-Mac 启动本 worktree 的新版 headless 服务后，在使用相同 `NOVA_AUDIO_AGENT_SERVER_PORT`、`NOVA_AUDIO_AGENT_SERVER_TOKEN_FILE` 环境配置的终端运行：
+Mac 启动本 worktree 的新版 headless 服务后，在使用相同 `SERVER_PORT`、`SERVER_TOKEN_FILE` 环境配置的终端运行：
 
 ```sh
 npm run server:pair --workspace @nova-audio-agent/runtime -- wss://你的主机.ts.net

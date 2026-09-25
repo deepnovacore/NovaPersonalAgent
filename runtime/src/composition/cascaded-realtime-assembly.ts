@@ -196,8 +196,8 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
       const capability = input.capability
         ?? createEndpointingCapabilityFactory({
           clock: input.clock,
-          ...(process.env.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH === undefined ? {}
-            : {resourcesPath: process.env.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH}),
+          ...(process.env.CODEX_RESOURCES_PATH === undefined ? {}
+            : {resourcesPath: process.env.CODEX_RESOURCES_PATH}),
           ...(input.liveKitExecutor === undefined
             ? {}
             : {executor: input.liveKitExecutor}),
@@ -633,7 +633,7 @@ export function buildIntegratedRealtimeAssembly(
   const provider = options.settings.integrated_provider
   const factory = Object.hasOwn(registry, provider) ? registry[provider] : undefined
   if (factory === undefined) {
-    throw new ConfigurationError('NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER 无效')
+    throw new ConfigurationError('INTEGRATED_PROVIDER 无效')
   }
   const config = Object.freeze({...requireIntegratedRealtime(options.settings)})
   const clock = options.clock ?? new RealClock()
@@ -688,7 +688,7 @@ export function buildProductionRealtimeAssembly(
   if (options.settings.pipeline_mode === 'cascaded') {
     return (builders.cascaded ?? buildCascadedRealtimeAssembly)(composition)
   }
-  throw new ConfigurationError('NOVA_AUDIO_AGENT_PIPELINE_MODE 无效')
+  throw new ConfigurationError('PIPELINE_MODE 无效')
 }
 
 function productionCodingComposition(
