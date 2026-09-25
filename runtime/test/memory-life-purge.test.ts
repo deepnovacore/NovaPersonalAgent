@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,readFile,realpath} from 'node:fs/promises'
+import {mkdtemp,rm,readFile,realpath,readdir} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
@@ -22,6 +22,7 @@ test('purged Profile stays absent across Life and news commands, recreates once,
   await resource.open();await host.open()
   await command('life.mutate',{op:'profile',expected_version:0,about:'FIRST PRIVATE PROFILE'},'first-profile')
   const first=(await rows()).find(row=>row.kind==='profile')!
+  const savedEvidence=[await client.memory('evidence',{id:first.evidence_refs[0]})]
   await command('memory.purge',{id:first.entry_id,expected_version:first.revision},'first-purge')
   assert.deepEqual(host.life.snapshot().profile,{about:'',version:0})
   await host.close();await resource.close();client=new WorkspaceGraphStoreClient(path);resource=makeResource();await resource.open();host=make();await host.open()
@@ -34,7 +35,7 @@ test('purged Profile stays absent across Life and news commands, recreates once,
   assert.equal((await rows()).filter(row=>row.kind==='profile').length,0)
   assert.equal(host.life.snapshot().ideas.length,2)
   assert.equal(host.life.snapshot().ideas.find(row=>row.title==='News idea')!.news_source!.article_id,article.id)
-  await assert.rejects(host.life.mutate({op:'profile',expected_version:0,about:'FIRST PRIVATE PROFILE'},'first-profile'))
+  await assert.rejects(host.life.mutate({op:'profile',expected_version:0,about:'FIRST PRIVATE PROFILE'},'first-profile'),{code:'STORE_PURGED_ID'})
   const backend=resource.lifeBackend(),snapshot=(await backend.peek!())!
   const attempts=await Promise.allSettled(['recreated','racing'].map(requestId=>backend.mutate({requestId,expectedRevision:snapshot.revision,input:{op:'profile',expected_version:0,about:'SECOND PRIVATE PROFILE'}})))
   assert.equal(attempts.filter(result=>result.status==='fulfilled').length,1)
@@ -47,13 +48,18 @@ test('purged Profile stays absent across Life and news commands, recreates once,
   await command('life.mutate',{op:'profile',expected_version:0,about:'FIRST PRIVATE PROFILE'},'first-profile')
   assert.equal(host.life.snapshot().profile.about,'SECOND EDITED PROFILE','old host receipt cannot edit the new incarnation')
   const evidence=[...first.evidence_refs,...second.evidence_refs,...updated.evidence_refs]
+  for(const id of [...second.evidence_refs,...updated.evidence_refs])savedEvidence.push(await client.memory('evidence',{id}))
   await command('memory.purge',{id:updated.entry_id,expected_version:updated.revision},'second-purge')
   assert.equal((await rows()).filter(row=>row.kind==='profile').length,0)
   assert.equal(host.life.snapshot().todos.length,1);assert.equal(host.life.snapshot().ideas.length,2);assert.equal(host.life.snapshot().goals.length,1)
   for(const id of evidence)assert.equal(await client.memory('evidence',{id}),null)
-  for(const row of [first,updated])await assert.rejects(client.memory('merge',{entry_id:row.entry_id,expected_revision:0,kind:'profile',origin:'stated',written_by:'user_correction',evidence_refs:row.evidence_refs,content:row.content,recorded_at:new Date().toISOString()}))
+  for(const row of [first,updated])await assert.rejects(client.memory('merge',{entry_id:row.entry_id,expected_revision:0,kind:'profile',origin:'stated',written_by:'user_correction',evidence_refs:row.evidence_refs,content:row.content,recorded_at:new Date().toISOString()}),{code:'STORE_PURGED_ID'})
+  for(const record of savedEvidence){assert.ok(record);await assert.rejects(client.memory('append_evidence',record),{code:'STORE_PURGED_ID'})}
   await assert.rejects(readFile(join(root,'personal.json.life.json')),{code:'ENOENT'})
-  assert.equal((await readFile(path)).includes(Buffer.from('PRIVATE PROFILE')),false)
+  await host.close();await resource.close()
+  const files=[path,...(await readdir(path+'.memory',{recursive:true,withFileTypes:true})).filter(entry=>entry.isFile()).map(entry=>join(entry.parentPath,entry.name))]
+  for(const suffix of ['-wal','-journal'])if((await readdir(root)).includes('memory.sqlite'+suffix))files.push(path+suffix)
+  for(const file of files){const bytes=await readFile(file);for(const secret of ['FIRST PRIVATE PROFILE','SECOND PRIVATE PROFILE','SECOND EDITED PROFILE'])assert.equal(bytes.includes(Buffer.from(secret)),false,file+' retains '+secret)}
  }finally{await host.close();await resource.close();await rm(root,{recursive:true,force:true})}
 })
 

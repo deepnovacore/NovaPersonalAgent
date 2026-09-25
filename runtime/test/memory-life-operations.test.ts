@@ -148,7 +148,7 @@ test('failed Life revision insert rolls back evidence, processing grant and rece
   const loaded=run('life_load',{namespace,legacy:empty()})
   const snapshot=()=>['memory_evidence','source_grants','memory_revisions','memory_life_meta'].map(table=>db.prepare('SELECT * FROM '+table).all())
   const before=snapshot();let injected=false
-  const faulty={exec:db.exec.bind(db),close:db.close.bind(db),prepare:(sql:string)=>{if(sql==='INSERT INTO memory_revisions VALUES(?,?,?)'){injected=true;throw Error('synthetic revision failure')}return db.prepare(sql)}}
+  const faulty={exec:db.exec.bind(db),close:db.close.bind(db),prepare:(sql:string)=>{if(sql==='INSERT INTO memory_revisions VALUES(?,?,?)'){assert.equal(db.prepare('SELECT COUNT(*) n FROM memory_evidence').get()!.n,1,'evidence is already in the transaction');assert.equal(db.prepare('SELECT COUNT(*) n FROM source_grants').get()!.n,1,'grant is already in the transaction');injected=true;throw Error('synthetic revision failure')}return db.prepare(sql)}}
   const request={namespace,expectedRevision:loaded.revision,requestId:'atomic-profile',input:{op:'profile',expected_version:0,about:'retry me'},processingGrant}
   assert.throws(()=>memoryOperation(faulty,'life_mutate',request),/synthetic revision failure/)
   assert.equal(injected,true);assert.deepEqual(snapshot(),before)
