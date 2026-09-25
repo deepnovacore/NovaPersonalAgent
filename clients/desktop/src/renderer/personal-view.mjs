@@ -1,3 +1,5 @@
+import {createStartupNotice} from './startup-notice.mjs'
+import {t} from './locale.mjs'
 import {renderLife,renderProfile} from './life-view.mjs'
 import {renderNews} from './news-view.mjs'
 import {PersonalController} from './personal-controller.mjs'
@@ -31,6 +33,9 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  const chatToggle=el('button','收起对话栏','chat-toggle');chatToggle.type='button';chatToggle.setAttribute('aria-controls','chat-pane');chatToggle.addEventListener('click',()=>chat.setOpen(!chat.open))
  const presentation=el('select');presentation.setAttribute('aria-label','显示模式');for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','后台']]){const option=el('option',label);option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
  pageHead.append(pageTitle,status,presentation,chatToggle);workspace.append(pageHead)
+ const startupNotice=el('p','','page-error');startupNotice.id='startup-notice';startupNotice.setAttribute('role','status');startupNotice.hidden=true;workspace.append(startupNotice)
+ const startupText=el('span');startupNotice.append(startupText);button(t('打开设置'),()=>openSettings(),startupNotice)
+ const startup=createStartupNotice({render:text=>{startupText.textContent=text;startupNotice.hidden=!text}})
  const error=el('p','','page-error');error.setAttribute('role','alert');error.hidden=true;workspace.append(error)
  const waiting=el('div',undefined,'presentation-waiting');workspace.append(waiting)
  const panel=el('div',undefined,'workbench-page');workspace.append(panel)
@@ -106,5 +111,5 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
  async function collapse(value){await c.setPresentation(value?'orb':'workbench')}
  function receive(frame){chat.receive(frame);c.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.(mode=>run(()=>c.setPresentation(mode)));
- api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update}
+ api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update,startup:value=>{startupNotice.dataset.stage=value?.stage??'';startup.update(value)}}
 }

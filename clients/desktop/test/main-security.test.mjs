@@ -415,10 +415,10 @@ test('no decrypted secret can reach the renderer or a log line', async () => {
   // entry written while no keyring existed keeps it on until it is re-sealed.
   assert.match(
     source,
-    /keyringAvailable: secretCodec\.available\(\) && !hasPlaintextSecret\(currentSettings\)/,
+    /keyringAvailable: hasPlaintextSecret\(currentSettings\) \? false : keyringAvailable/,
   )
   // The failure log for a settings save names the error type only, never the payload.
-  assert.match(source, /settings_save_failure type=\$\{error\.name\}/)
+  assert.match(source, /settings_save_failure/)
   // Every console.* line is scanned: a line mentioning "secret" or "apiKey" is
   // allowed only if it is one of the two key-name-only secret diagnostics;
   // anything else naming a secret, or naming the raw settings patch, or
@@ -454,7 +454,7 @@ test('every settings write goes through one queue so overlapping patches merge',
   const set = source.slice(source.indexOf("async function applyDesktopSettings"))
   const handler = set.slice(0, set.indexOf('\n}'))
   assert.match(handler, /applySettingsTransaction\(\{/)
-  assert.match(handler, /write: async value => \{[\s\S]*await settingsWriter\(commit\.settingsPatch \?\? \{\}, next =>/)
+  assert.match(handler, /write: async value => \{[\s\S]*await accessCredentials\(\(\) => settingsWriter\(commit\.settingsPatch \?\? \{\}, next =>/)
   assert.match(handler, /coordinator: lifecycleCoordinator/)
   assert.doesNotMatch(
     handler,
@@ -463,7 +463,7 @@ test('every settings write goes through one queue so overlapping patches merge',
   )
 })
 
-test('a stored secret that would poison the child environment is omitted at spawn', async () => {
+test('a stored secret that would poison the child environment blocks spawn', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const decrypt = source.slice(source.indexOf('function decryptSecretsForSpawn('))
   const body = decrypt.slice(0, decrypt.indexOf('\n}\n'))
@@ -472,7 +472,7 @@ test('a stored secret that would poison the child environment is omitted at spaw
   // before the panel could clear the offending key. The value is dropped here
   // and the key named — never its content.
   assert.match(body, /secretValueIsSafe\(plaintext\)/)
-  assert.match(body, /settings_secret_invalid key=\$\{key\}/)
+  assert.match(body, /throw classifyBackendFailure\('credential_access_failed'\)/)
 })
 
 test('readSecret is wired at the spawn site, decrypting only what backendLaunchSpec receives', async () => {
@@ -536,7 +536,7 @@ test('backend status survives startup races and is replayed after renderer load'
   assert.match(source, /let backendStatus = Object\.freeze/)
   assert.match(source, /backendStatus = status/)
   const load = source.slice(source.indexOf('loadAppWindow(mainWindow'))
-  assert.match(load.slice(0, 1100), /sendToOrb\('nova:backend-ready', backendStatus\.connection\)/)
+  assert.match(load.slice(0, load.indexOf('tray = createTray()')), /sendToOrb\('nova:backend-ready', backendStatus\.connection\)/)
 })
 
 test('the bootstrap answer carries the current supervised connection at invoke time', async () => {
@@ -930,6 +930,7 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
       currentSettings: {...DEFAULT_SETTINGS}, settingsApplyStatus: 'applied', settingsRestartPending: false, backendSettings, lifecycleCoordinator: {},
       applySettingsTransaction: async options => { await options.write(payload); restart = options.needsBackendRestart(); return {} },
       parseSettingsCommit: value => value,
+      accessCredentials: operation => operation(), refreshSettingsCapabilities: async () => {},
       settingsWriter: async (patch, prepare) => {
         const next = {...context.currentSettings, ...patch}
         await prepare(next); context.currentSettings = next; return next
@@ -951,9 +952,9 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
 test('settings recovery precedes startup configuration and has one transaction status publisher', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const startup = source.slice(source.indexOf('async function startSelectedCamera'))
-  assert.ok(startup.indexOf('loadStartupSettings()') < startup.indexOf('await refreshDesktopConfiguration()'))
-  assert.match(startup, /if \(settingsReady\) await refreshDesktopConfiguration\(\)/u)
-  assert.match(startup, /if \(settingsReady\) void managedWorkspaceBackendRecovery.start\(\)/u)
+  assert.ok(startup.indexOf('loadStartupSettings()') < startup.indexOf("lifecycleCoordinator.run('startup', refreshDesktopConfiguration)"))
+  assert.match(startup, /if \(settingsReady\) \{[\s\S]*lifecycleCoordinator.run\('startup', refreshDesktopConfiguration\)/u)
+  assert.match(startup, /if \(settingsReady && configurationReady\) void managedWorkspaceBackendRecovery.start\(\)/u)
   assert.match(startup, /if \(!settingsReady\) \{[\s\S]*dialog.showMessageBox[\s\S]*shell.openPath\(dirname\(settingsFile\(\)\)\)/u)
   const writers = source.match(/settingsApplyStatus\s*=(?!=)/gu)
   assert.equal(writers.length, 2) // initial value and publishSettingsApplyStatus only

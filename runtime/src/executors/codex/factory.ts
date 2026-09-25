@@ -371,6 +371,7 @@ async function createProjectResource(
     await store?.close().catch(() => undefined)
     if (error instanceof CodexHostConfigurationError) throw error
     if (error instanceof ProjectStateError) {
+      if (['state_busy', 'state_lock_failed', 'state_permissions', 'workspace_not_found', 'workspace_invalid'].includes(error.code)) throw error
       throw new CodexHostConfigurationError('codex_project_state_invalid')
     }
     throw new CodexHostConfigurationError('codex_host_unavailable')

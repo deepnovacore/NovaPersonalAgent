@@ -5,7 +5,7 @@ import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
-import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure} from './desktop-startup.mjs'
+import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
 import {FeishuConnector, VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
@@ -216,6 +216,12 @@ let releaseSmokeChannel = null
 // Settings and debug boards are main-owned IPC surfaces. Neither relays through
 // the orb renderer or shares the realtime voice socket.
 const frontendUsage = createFrontendUsage({file: resolve(app.getPath('userData'), 'frontend-usage.json')})
+let startup = Object.freeze({stage: 'configuration', code: null})
+let settingsReady = false
+let configurationReady = false
+let keyringAvailable = null
+let credentialFailure = null
+let credentialQueue = Promise.resolve()
 let currentSettings = null
 let desktopConfig = null
 let codexStatus = Object.freeze({
@@ -280,22 +286,7 @@ function managedWorkspacesView() {
 // while no keyring existed is still readable by anyone, so the warning stays up
 // until the next save re-seals it.
 function settingsView() {
-  let capabilities = capabilityEditorCache?.view ?? {document: null, problems: []}
-  let capabilityDiskVersion = null
-  if (settingsWindow) {
-    try { capabilityDiskVersion = capabilityDocumentRevision(currentSettings, process.env) }
-    catch { capabilityDiskVersion = 'unreadable' }
-  }
-  if (settingsWindow && (capabilityEditorCache?.generation !== settingsGeneration
-    || capabilityEditorCache?.diskVersion !== capabilityDiskVersion)) {
-    try {
-      const document = readCapabilityDocument(currentSettings, process.env)
-      const secrets = decryptSecretsForSpawn(currentSettings, secretCodec)
-      capabilities = readCapabilityEditor(currentSettings, capabilityEnvironment(currentSettings, secrets, process.env, document), Object.values(secrets))
-    } catch { capabilities = {document: null, problems: ['file_unreadable_or_invalid_json']} }
-    // Cache only this examined public projection, never decrypted values or a resolved registry.
-    capabilityEditorCache = {generation: settingsGeneration, diskVersion: capabilityDiskVersion, view: capabilities}
-  }
+  const capabilities = capabilityEditorCache?.view ?? {document: null, problems: ['credentials_not_checked']}
   const {secretsPresent: effectivePresence, secretSources} = resolveSecretConfiguration(
     {}, process.env, developmentEnv)
   for (const [key, present] of Object.entries(secretsPresent(currentSettings))) {
@@ -316,6 +307,7 @@ function settingsView() {
     backendStatus: backendStatus.state,
     backendDiagnostic: backendStatus.diagnostic,
     backendRetryInMs: backendStatus.retryInMs,
+    startup,
     settingsApplyStatus,
     settingsRecoveryAvailable,
     managedWorkspaces: managedWorkspacesView(),
@@ -328,8 +320,67 @@ function settingsView() {
     }) : null,
     secretsPresent: effectivePresence,
     secretSources,
-    keyringAvailable: secretCodec.available() && !hasPlaintextSecret(currentSettings),
+    keyringAvailable: hasPlaintextSecret(currentSettings) ? false : keyringAvailable,
   }
+}
+
+function publishStartup(stage, code = null) {
+  startup = Object.freeze({stage, code})
+  sendToOrb('nova:backend-status', {...backendStatus, startup})
+  sendToSettings('nova:settings:changed', settingsView())
+}
+
+async function paintStartup(stage) {
+  publishStartup(stage)
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('startup_renderer_unavailable')
+  requestPresentation('workbench')
+  mainWindow.showInactive()
+  // Bound only the asynchronous paint fence, never the synchronous OS credential call.
+  let timer
+  try {
+    const painted = await Promise.race([
+      mainWindow.webContents.executeJavaScript(`new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve(document.querySelector('#startup-notice')?.dataset.stage === ${JSON.stringify(stage)}))))`),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('startup_paint_timeout')), 1500) }),
+    ])
+    if (painted !== true) throw new Error('startup_paint_unconfirmed')
+  } finally { clearTimeout(timer) }
+}
+
+async function accessCredentials(operation, {retry = false} = {}) {
+  const run = credentialQueue.then(async () => {
+    if (retry) credentialFailure = null
+    if (credentialFailure) throw credentialFailure
+    const previous = startup
+    await paintStartup('credentials')
+    try {
+      try { keyringAvailable = secretCodec.available() }
+      catch { throw classifyBackendFailure('credential_access_failed') }
+      const result = await operation()
+      if (previous.stage === 'failed' && backendStatus.state !== 'starting') publishStartup('failed', previous.code)
+      else publishStartup(backendStatus.state === 'connected' ? 'ready' : 'backend')
+      return result
+    } catch (error) {
+      if (error?.code === 'credential_access_failed') credentialFailure = error
+      publishStartup('failed', startupFailureCode(error))
+      throw error
+    }
+  })
+  credentialQueue = run.then(() => undefined, () => undefined)
+  return run
+}
+
+async function refreshSettingsCapabilities() {
+  if (backendStatus.state === 'starting' || credentialFailure) return
+  try { await accessCredentials(() => refreshCapabilityEditor(decryptSecretsForSpawn(currentSettings, secretCodec))) }
+  catch { /* The bounded credential failure remains visible; never project unread secrets. */ }
+}
+
+function refreshCapabilityEditor(secrets) {
+  try {
+    const document = readCapabilityDocument(currentSettings, process.env)
+    const view = readCapabilityEditor(currentSettings, capabilityEnvironment(currentSettings, secrets, process.env, document), Object.values(secrets))
+    capabilityEditorCache = {view}
+  } catch { capabilityEditorCache = {view: {document: null, problems: ['file_unreadable_or_invalid_json']}} }
 }
 
 async function loadMemoryBoardExport() {
@@ -468,11 +519,10 @@ function openMemoryBoard(launchId) {
 }
 
 function openSettingsWindow(launchId, { category } = {}) {
-  capabilityEditorCache = null
   if (settingsWindow) {
     settingsWindow.show()
     settingsWindow.focus()
-    void refreshManagedWorkspaceCapabilities().then(() => {
+    void refreshManagedWorkspaceCapabilities().then(refreshSettingsCapabilities).then(() => {
       sendToSettings('nova:settings:changed', settingsFocusView(category))
     })
     return
@@ -545,6 +595,7 @@ let phoneQueue = Promise.resolve()
 const managedPhone = createManagedPhoneService({
   shutdown: child => shutdownBackend(child),
   launch: async () => {
+    if (!configurationReady) throw classifyBackendFailure('configuration_required')
     const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
     const {initializeServerToken, loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
     await mkdir(phoneRoot(), {recursive: true, mode: 0o700})
@@ -557,7 +608,7 @@ const managedPhone = createManagedPhoneService({
       nodeResourcesPath: app.isPackaged ? process.resourcesPath : resolve(packageRoot, 'build'),
       workspace: desktopConfig?.workspace || process.cwd(), token: phoneConfig.token,
       readyEndpoint: '127.0.0.1:1', parentEnv: process.env, settings: currentSettings,
-      decryptedSecrets: decryptSecretsForSpawn(currentSettings, secretCodec), resolvedConfig: desktopConfig,
+      decryptedSecrets: await accessCredentials(() => decryptSecretsForSpawn(currentSettings, secretCodec)), resolvedConfig: desktopConfig,
       capabilitiesDocument: readCapabilityDocument(currentSettings, process.env)})
     if (app.isQuitting || !currentSettings.phoneConnectionEnabled) throw new Error('service_unavailable')
     return utilityProcess.fork(resolve(dirname(entry), 'desktop/phone-desktop-entry.js'), [], {
@@ -585,11 +636,11 @@ async function phoneAction(action, deviceId, epoch = phoneEpoch) {
   if (action === 'login') { await shell.openPath('/Applications/Tailscale.app'); return {state: 'needs_login', service: true} }
   if (action === 'help') { await shell.openExternal('https://tailscale.com/docs/features/tailscale-serve'); return {state: 'needs_serve'} }
   if (action === 'disable') {
-    await settingsWriter({phoneConnectionEnabled: false})
+    await accessCredentials(() => settingsWriter({phoneConnectionEnabled: false}), {retry: true})
     await cancelPhonePairing(); await managedPhone.stop()
     return {state: 'idle'}
   }
-  if (action === 'enable') await settingsWriter({phoneConnectionEnabled: true})
+  if (action === 'enable') await accessCredentials(() => settingsWriter({phoneConnectionEnabled: true}), {retry: true})
   if (!currentSettings.phoneConnectionEnabled) return {state: 'idle'}
   try {
     if (process.platform !== 'darwin') return {state: 'unsupported'}
@@ -665,7 +716,7 @@ async function applyDesktopSettings(payload, restart = false) {
         if (settingsRecoveryAvailable) await rollbackSettings(false)
         const commit = parseSettingsCommit(value)
         capabilitiesChanged = commit.capabilitiesDocument !== undefined
-        return await settingsWriter(commit.settingsPatch ?? {}, next => {
+        return await accessCredentials(() => settingsWriter(commit.settingsPatch ?? {}, next => {
           validatePreparedSettings(commit.settingsPatch, publicSettings(next))
           if ([resolve(settingsFile()), resolve(`${settingsFile()}.recovery`)].includes(capabilityPath(next, process.env))) throw invalidCommit('capability_settings_path_conflict')
           const document = commit.capabilitiesDocument ?? readCapabilityDocument(next, process.env)
@@ -676,9 +727,9 @@ async function applyDesktopSettings(payload, restart = false) {
               await saveSettingsRecovery(settingsFile(), currentSettings, capability)
               settingsRecoveryAvailable = true
             }})
-        })
+        }), {retry: true})
       } catch (error) {
-        console.error(`[desktop-diagnostic] settings_save_failure type=${error.name}`)
+        console.error('[desktop-diagnostic] settings_save_failure')
         throw error
       }
     },
@@ -700,6 +751,7 @@ async function applyDesktopSettings(payload, restart = false) {
   })
   if (applied.operationStatus === 'pending_restart') settingsRestartPending = true
   else if (applied.operationStatus === 'applied') settingsRestartPending = false
+  if (['applied', 'pending_restart'].includes(applied.operationStatus)) await refreshSettingsCapabilities()
   return {...settingsView(), ...applied}
 }
 
@@ -780,9 +832,9 @@ function createTray() {
 }
 
 // Main-only decryption for launch, prepared-save validation, explicit probes,
-// and a settings panel's public projection. Plaintext stays local to those calls;
+// and an explicitly refreshed settings projection. Plaintext stays local to those calls;
 // the panel projection caches only examined public data for its settings generation.
-// Unreadable or invalid entries are diagnosed by key name and omitted.
+// Unreadable or invalid entries stop the attempt with a bounded, non-retrying error.
 function decryptSecretsForSpawn(settings, codec) {
   const present = secretsPresent(settings)
   const decrypted = {}
@@ -791,9 +843,9 @@ function decryptSecretsForSpawn(settings, codec) {
     if (!present[key]) continue
     const plaintext = readSecret(settings, key, codec)
     if (typeof plaintext !== 'string' || !plaintext) {
-      console.error(`[desktop-diagnostic] settings_secret_unreadable key=${key}`)
+      throw classifyBackendFailure('credential_access_failed')
     } else if (!secretValueIsSafe(plaintext)) {
-      console.error(`[desktop-diagnostic] settings_secret_invalid key=${key}`)
+      throw classifyBackendFailure('credential_access_failed')
     } else {
       decrypted[key] = plaintext
     }
@@ -802,6 +854,7 @@ function decryptSecretsForSpawn(settings, codec) {
 }
 
 async function prepareDesktopConfiguration() {
+  await paintStartup('configuration')
   if (projectNativeHost === undefined) {
     const projectNativeLoad = inspectProjectNativeHostFromResources({
       resourcesPath: app.isPackaged ? process.resourcesPath : resolve(packageRoot, 'build'),
@@ -869,6 +922,8 @@ async function commitDesktopConfiguration(prepared) {
   managedWorkspaceMaintenance = prepared.maintenance
   if (previousMaintenance !== null) await previousMaintenance.close().catch(() => undefined)
   await refreshManagedWorkspaceCapabilities()
+  configurationReady = true
+  settingsReady = true
   return Object.freeze({
     externalWorkspaceReset: reconciliation?.status === 'reconciled'
       && reconciliation.active_workspace_reset === true,
@@ -985,7 +1040,8 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
   let ready
   const diagnostic = createBackendDiagnosticCollector()
   try {
-    const decryptedSecrets = decryptSecretsForSpawn(currentSettings, secretCodec)
+    const decryptedSecrets = await accessCredentials(() => decryptSecretsForSpawn(currentSettings, secretCodec))
+    refreshCapabilityEditor(decryptedSecrets)
     const capabilitiesDocument = launchDocument
     const diskGeneration = settingsGeneration
     const generation = ++launchGeneration
@@ -1114,9 +1170,8 @@ async function loadStartupSettings() {
 }
 
 async function startSelectedCamera(camera, backendKind, smokeChannel) {
-  const settingsReady = await loadStartupSettings()
+  settingsReady = await loadStartupSettings()
   setLanguage(currentSettings.language)
-  if (settingsReady) await refreshDesktopConfiguration()
   initializeDesktopBootstrap(camera.source)
   const launchId = randomBytes(8).toString('hex')
   if (process.platform === 'linux') await wait(LINUX_WINDOW_DELAY_MS)
@@ -1408,7 +1463,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       throw new Error('settings request rejected')
     }
     await refreshManagedWorkspaceCapabilities()
-    capabilityEditorCache = null
+    await refreshSettingsCapabilities()
     // A cold open cannot be told which category to show by a push: the panel
     // subscribes only after its module evaluates, and this reply is the first
     // thing it is guaranteed to receive. Consumed once so a later plain open
@@ -1467,7 +1522,16 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     }
     const recovery = await coordinateBackendRetry({
       coordinator: lifecycleCoordinator,
-      retry: () => managedWorkspaceBackendRecovery.retry(),
+      retry: async () => {
+        credentialFailure = null
+        try {
+          if (!configurationReady) await refreshDesktopConfiguration()
+          return await managedWorkspaceBackendRecovery.retry()
+        } catch (error) {
+          publishStartup('failed', reportStartupFailure(error))
+          return {status: 'failed'}
+        }
+      },
     })
     return recovery.status === 'busy'
       ? {...settingsView(), operationStatus: 'busy'}
@@ -1567,7 +1631,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('capability probe rejected')
     try {
       if (!payload || typeof payload !== 'object' || Object.keys(payload).sort().join(',') !== 'document,server' || typeof payload.server !== 'string') throw new Error('invalid')
-      const secrets = decryptSecretsForSpawn(currentSettings, secretCodec)
+      const secrets = await accessCredentials(() => decryptSecretsForSpawn(currentSettings, secretCodec), {retry: true})
       assertEditorSafe(payload.document, Object.values(secrets))
       const environment = capabilityEnvironment(currentSettings, secrets, process.env, payload.document)
       const registry = parseCapabilityRegistry(payload.document, environment)
@@ -1613,6 +1677,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       wakeWord: wakeWord?.snapshot(),
       backend: backendStatus.connection,
       backendStatus: backendStatus.state,
+      startup,
     }
   })
   ipcMain.handle('nova:native-audio:capture', async (event, enabled) => {
@@ -1735,6 +1800,13 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   // launch id or open them until the asynchronous asset graph is registered.
   await rendererLoaded
   activeLaunchId = launchId
+  if (settingsReady) {
+    try { await lifecycleCoordinator.run('startup', refreshDesktopConfiguration) }
+    catch (error) {
+      publishStartup('failed', reportStartupFailure(error))
+      if (sourceStartupSmoke || smokeChannel !== null || acceptance) throw error
+    }
+  } else publishStartup('failed', 'settings_recovery_failed')
   if (sourceStartupSmoke) {
     await openSettingsWindow(launchId)
     await verifySettingsRenderer()
@@ -1766,7 +1838,6 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   if (!shortcutRegistered) {
     console.warn('[nova-audio-agent-desktop] global shortcut unavailable on this session')
   }
-  if (!acceptance && currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
   for (const [key, action] of [
     ['Control+M', () => sendToOrb('nova:microphone:toggle')],
     ['Control+L', sleepOrb],
@@ -1790,7 +1861,9 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       }
       if (runtimeCapabilities?.state === 'running' && status.state !== 'connected') runtimeCapabilities = {...runtimeCapabilities, state: 'stopped'}
       sendToSettings('nova:settings:changed', settingsView())
-      sendToOrb('nova:backend-status', status)
+      if (status.state === 'connected') publishStartup('ready')
+      else if (!['starting', 'stopped'].includes(status.state)) publishStartup('failed', status.diagnostic)
+      sendToOrb('nova:backend-status', {...status, startup})
       if (smokeChannel === null && status.state === 'connected' && status.connection) {
         sendToOrb('nova:backend-ready', status.connection)
       } else if (status.state !== 'starting' && status.state !== 'stopped') {
@@ -1798,7 +1871,9 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       }
     },
   })
-  if (settingsReady) void managedWorkspaceBackendRecovery.start()
+  if (settingsReady && configurationReady) void managedWorkspaceBackendRecovery.start().then(() => {
+    if (backendStatus.state === 'connected' && !acceptance && currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) return managedPhone.start()
+  }).catch(error => publishStartup('failed', startupFailureCode(error)))
   if (openSettingsRequested) {
     openSettingsRequested = false
     await openSettingsWindow(launchId)
@@ -1912,6 +1987,9 @@ if (packagedSourceRollbackUnavailable) {
 } else {
   app.on('second-instance', (_event, argv) => {
     wakeWord?.wake()
+    requestPresentation('workbench')
+    mainWindow?.show()
+    mainWindow?.focus()
     if (!shouldOpenSettings(argv)) return
     if (activeLaunchId === null) {
       openSettingsRequested = true
@@ -1942,7 +2020,7 @@ if (packagedSourceRollbackUnavailable) {
     // one message that matters most is not stuck in the default language. Never write here.
     try { setLanguage((await loadSettings(settingsFile(), app.getPreferredSystemLanguages(), {initialize: false})).language) } catch { /* keep the default */ }
     reportStartupFailure(error, {
-      showError: message => dialog.showErrorBox(t("向量服务配置不受支持"), t("{0}\n设置文件：{1}（如有 .recovery 文件也需检查）", message, settingsFile())),
+      showError: sourceStartupSmoke || acceptance || releaseSmokeChannel !== null ? undefined : message => dialog.showErrorBox(t("启动失败"), t("{0}\n设置文件：{1}（如有 .recovery 文件也需检查）", message, settingsFile())),
     })
     app.quit()
   })

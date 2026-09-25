@@ -40,7 +40,7 @@ import {VirtualClock} from '../src/core/clock.js'
 import {loadSettings} from '../src/config/config.js'
 import type {ProjectCodexAdapter} from '../src/executors/codex/adapter-project.js'
 import type {NativeFileLockAuthority, NativeFileLockResult} from '../src/storage/native-file-lock.js'
-import type {PublicProjectView} from '../src/projects/project-store.js'
+import {ProjectStore, ProjectStateError, type PublicProjectView} from '../src/projects/project-store.js'
 import type {
   ProjectFileIdentity,
   ProjectRootFileAuthority,
@@ -572,4 +572,21 @@ test('failed optional project prewarm is closed without failing certified startu
     assert.equal(transport.closes, 1)
     assert.ok(diagnostics.includes('project_prewarm_failed'))
   } finally { await resource.close() }
+})
+
+
+test('project construction preserves actionable state failures after transport cleanup', async t => {
+  const {config, stateRoot, managedRoot} = projectHostConfig(t)
+  assert.ok(config !== null)
+  for (const code of ['state_busy', 'state_lock_failed', 'state_permissions', 'workspace_not_found'] as const) {
+    const transport = new RecordingTransport()
+    const open = t.mock.method(ProjectStore, 'open', async () => {throw new ProjectStateError(code)})
+    try {
+      await assert.rejects(createCodexAssemblyResource({config, composition: 'realtime',
+        projectHost: {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRootFileAuthority([stateRoot, managedRoot])},
+        transportFactory: {available: true, create: () => transport}, clock: new VirtualClock(), idFactory: () => 'startup-error',
+      }), error => error instanceof ProjectStateError && error.code === code)
+      assert.equal(transport.closes, 1)
+    } finally {open.mock.restore()}
+  }
 })

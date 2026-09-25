@@ -83,6 +83,7 @@ test('closing the panel during revoke or pre-create lookup cannot create another
       phoneEpoch: 0, phoneConfig: {port: 19876, token: 'private'}, phoneImage: 'old', phoneIssuedDevices: new Set(),
       phonePayload: deferredType === 'pair.revoke' ? {code: 'a'.repeat(32), server: 'wss://host.example/client/v1'} : undefined,
       managedPhone: {running: true, start: async () => {}},
+      accessCredentials: operation => operation(),
       settingsWriter: () => new Promise(resolve => {release = resolve}),
       requestPhonePairing: async (_config, frame) => {
         if (frame.type === 'pair.create') creates++

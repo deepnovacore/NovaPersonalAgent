@@ -1,4 +1,17 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "启动失败": "Startup failed",
+  "正在读取凭据，请查看系统授权弹窗。": "Reading credentials. Check the system authorization dialog.",
+  "正在检查工作区和启动配置。": "Checking workspace and startup settings.",
+  "正在启动后台。": "Starting the backend.",
+  "凭据访问未完成。请检查系统授权弹窗或更新凭据，再在设置中重试。": "Credential access did not complete. Check the system dialog or update credentials, then retry in Settings.",
+  "工作区不存在或不是目录。请在设置中选择有效工作区。": "The workspace is missing or is not a directory. Choose a valid workspace in Settings.",
+  "无法写入状态目录。请检查目录权限后在设置中重试。": "The state directory is not writable. Check directory permissions, then retry in Settings.",
+  "状态目录正被其他进程占用。请关闭占用它的实例后在设置中重试。": "Another process is using the state directory. Close that instance, then retry in Settings.",
+  "设置恢复未完成。请在设置中恢复上次可用配置。": "Settings recovery did not complete. Restore the previous configuration in Settings.",
+  "后台启动失败，请打开设置检查配置后重试。": "Backend startup failed. Check the configuration in Settings, then retry.",
+  "仍在等待系统返回；可在系统弹窗中允许或取消。": "Still waiting for the system. You can allow or cancel in the system dialog.",
+  "启动失败，请打开设置检查配置后重试。": "Startup failed. Check the configuration in Settings, then retry.",
+
   "尚未同步": "Not synced yet",
   "工作台": "Workbench",
   "悬浮球": "Voice orb",

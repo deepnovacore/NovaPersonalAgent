@@ -2063,7 +2063,10 @@ export async function runDesktopEntry(options: DesktopEntryOptions): Promise<0 |
 
 function desktopEntryFailureCode(error: unknown): string {
   if (error !== null && typeof error === 'object') {
-    const value = error as {readonly name?: unknown; readonly code?: unknown}
+    const value = error as {readonly name?: unknown; readonly code?: unknown; readonly message?: unknown}
+    if (value.message === 'personal_store_locked') return 'personal_store_locked'
+    if (['EACCES', 'EPERM', 'EROFS'].includes(String(value.code))) return 'state_permissions'
+    if (['state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid'].includes(String(value.code))) return String(value.code)
     if (value.code === 'frontbrain_tool_budget_exceeded') return 'configuration_required'
     if (value.code === 'credential_missing') return 'authentication_failed'
     if (new Set([

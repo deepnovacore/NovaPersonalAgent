@@ -1217,6 +1217,14 @@ async function retryMicrophonePermission() {
 }
 
 async function boot() {
+  let receivedStatus = false
+  window.novaAudioAgentDesktop.onBackendStatus?.(status => {
+    if (!status || typeof status.state !== 'string') return
+    receivedStatus = true
+    axes.backendState = status.state
+    personalView.startup(status.startup)
+    render()
+  })
   try {
     const bootstrap = await window.novaAudioAgentDesktop.bootstrap()
     cameraController.setSourceMode(bootstrap.cameraSource)
@@ -1228,7 +1236,8 @@ async function boot() {
     bubbleMode = bootstrap.settings?.progressBubbles ?? 'milestones'
     axes.platform = bootstrap.platform
     taskBanner.setPlatform(bootstrap.platform)
-    axes.backendState = typeof bootstrap.backendStatus === 'string'
+    if (!receivedStatus) personalView.startup(bootstrap.startup)
+    if (!receivedStatus) axes.backendState = typeof bootstrap.backendStatus === 'string'
       ? bootstrap.backendStatus
       : 'stopped'
     // Only the renderer-owned subset reaches the orb; credentials, executable
@@ -1244,11 +1253,6 @@ async function boot() {
     }
     window.novaAudioAgentDesktop.onBackendExit(handleBackendExit)
     window.novaAudioAgentDesktop.onBackendReady(connectBackend)
-    window.novaAudioAgentDesktop.onBackendStatus?.(status => {
-      if (!status || typeof status.state !== 'string') return
-      axes.backendState = status.state
-      render()
-    })
     window.novaAudioAgentDesktop.microphone.onToggle(toggleMute)
     window.novaAudioAgentDesktop.microphone.onRetry(() => {
       void retryMicrophonePermission()

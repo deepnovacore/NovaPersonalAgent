@@ -1,3 +1,4 @@
+import {startupMessage} from './startup-notice.mjs'
 import {createImPanel} from './im-panel.mjs'
 import {createConnectionsPanel} from './connections-panel.mjs'
 import {t} from './locale.mjs'
@@ -262,6 +263,7 @@ function updateButtons() {
   workspaceOpenCurrent.disabled = state.currentDisabled
   workspaceClearCurrent.disabled = state.currentDisabled
   workspaceClearAll.disabled = state.workspaceDisabled
+  document.querySelector('#startup-retry').disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
   workspaceRetryRecovery.disabled = state.recoveryDisabled
   settingsRestore.disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
 }
@@ -424,6 +426,8 @@ function render(view, _drafts, state) {
   renderPreset(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
   renderBadges(view.secretsPresent, view.secretSources)
   renderKeyUsage(view)
+  document.querySelector('#startup-status').textContent = startupMessage(view.startup)
+  document.querySelector('#startup-retry').hidden = view.startup?.stage !== 'failed'
   warning.hidden = view.keyringAvailable !== false
   const recoveryStatus = view.managedWorkspaces?.recoveryStatus ?? 'idle'
   const recoveryRequired = recoveryStatus !== 'idle'
@@ -686,6 +690,13 @@ workspaceClearCurrent.addEventListener('click', () => {
 workspaceClearAll.addEventListener('click', () => {
   void runWorkspaceAction(() => api.clearAllManagedWorkspaces())
 })
+document.querySelector('#startup-retry').addEventListener('click', () => {
+  void runWorkspaceAction(async () => {
+    const view = await api.retryBackend()
+    return {status: view.backendStatus === 'connected' ? 'recovered' : 'recovery_failed', view}
+  })
+})
+
 workspaceRetryRecovery.addEventListener('click', () => {
   void runWorkspaceAction(async () => {
     const view = await api.retryBackend()
