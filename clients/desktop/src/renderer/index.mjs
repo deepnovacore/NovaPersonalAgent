@@ -1047,6 +1047,7 @@ async function handleControl(message) {
     if (Object.keys(message).length === 1) {
       retainedResults.clear()
       updateResultButton()
+      personalView.refresh()
     }
   } else if (message.type === EXECUTOR_RESULT) {
     const result = parseLastResultFrame(message)
@@ -1054,6 +1055,7 @@ async function handleControl(message) {
       if (result === null) retainedResults.delete(message.work_id)
       else if (retainedResults.has(message.work_id) || retainedResults.size < 64) retainedResults.set(message.work_id, result)
       updateResultButton()
+      personalView.refresh()
     }
   }
   render()
@@ -1337,9 +1339,8 @@ personalView = mountPersonalView({send,
     }else await window.novaAudioAgentDesktop.nativeAudio.setPlaybackMuted(axes.outputMuted)
     requestAnimationFrame(()=>render())
   },
-  taskAction: (id, action) => { taskBanner.select(id); taskBanner.action(action) },
-  tasks: () => taskBanner?.state(), results: () => [...retainedResults.values()],
-  openResults: () => window.novaAudioAgentDesktop.executorResult.open({results: [...retainedResults.values()], roster: projectRoster}),
+  taskAction: (id, action) => taskBanner.action(action, id),
+  tasks: () => taskBanner?.state({includeExpired:true}), results: () => [...retainedResults.values()],
   api: window.novaAudioAgentDesktop,
 })
 

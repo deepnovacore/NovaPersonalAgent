@@ -12,8 +12,8 @@ import {disposeSources} from './source-popover.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 const PAGE_TITLE=Object.fromEntries(RAIL_ITEMS.map(item=>[item.id,`${item.label} · ${item.title}`]))
 /** The workbench: icon rail, personal-object pages in the middle, Nova as a collapsible pane on the right. */
-export function mountPersonalView({send,start,stop,tasks,taskAction,results,openResults,api,applyPresentation}) {
- const lifeLocal={},newsLocal={},preferencesLocal={}
+export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,applyPresentation}) {
+ const lifeLocal={},newsLocal={},preferencesLocal={},taskLocal=new Map()
  let unreadProjection=null
  const root=el('main',undefined,'workbench personal-workspace');root.id='personal-workspace';document.body.prepend(root)
  const run=async(action)=>{try{c.error='';await action()}catch(e){c.error=e.message;if(c.presentationMode==='background')void api.personal.showPresentationError?.(e.message);if(/conflict|version/i.test(e.message)&&c.connected)await c.command('state').catch(()=>{})}update()}
@@ -54,14 +54,15 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
   const s=c.snapshot,sourceStates=s?.sources?.map(source=>[source.id,source.state,source.health,source.processing_consent_required])
   if(['todos','ideas','goals'].includes(selected))return JSON.stringify([selected,s?.life,s?.understanding,s?.workbench_context,sourceStates,c.connected])
   if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.profile_preparation,c.connected])
-  if(selected==='tasks')return JSON.stringify([selected,tasks(),s?.feed,c.connected])
+  if(selected==='tasks')return JSON.stringify([selected,tasks(),results(),c.connected])
   return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.news,s?.capabilities,c.connected])
  }
  function renderPanel(){
-  const focused=panel.contains?.(document.activeElement)?document.activeElement:null,focusLabel=focused?.getAttribute?.('aria-label'),focusText=focused?.tagName==='BUTTON'?focused.textContent:null
+  const focused=panel.contains?.(document.activeElement)?document.activeElement:null,focusLabel=focused?.getAttribute?.('aria-label'),focusWorkId=focused?.getAttribute?.('data-task-result'),focusText=focused?.tagName==='BUTTON'?focused.textContent:null
   const fields=[...panel.querySelectorAll('input,textarea,select')],focusIndex=focused?fields.indexOf(focused):-1
   const edit=focusIndex>=0?{index:focusIndex,key:focused.getAttribute?.('data-editor-key'),tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
   const panelScroll=panel.scrollTop
+  for(const details of panel.querySelectorAll('details')){const local=taskLocal.get(details.dataset.workId);if(local)local.expanded=details.open}
   disposeSources();panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
   const s=c.snapshot;const caps=s?.capabilities??{}
   const candidateKind=({todos:'todo',ideas:'idea',goals:'goal',profile:'profile'})[selected]
@@ -79,8 +80,14 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
   }else if(selected==='feeds'){
    renderNews(panel,{news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings,connected:c.connected})
   }else if(selected==='tasks'){
-   renderTasksPage(panel,{tasks,taskAction,results,openResults,card,chips,button,askProgress:task=>{const feed=c.snapshot?.feed?.find(item=>item.task_ref?.work_id===task.work_id);if(!feed)return continueChat(`${task.title} · ${task.work_id}`);return c.openFeed(feed.id,'询问任务进展').then(result=>{chat.reveal();return result})}})
-   button('任务控制与结果',openResults,panel).className='link-button'
+   renderTasksPage(panel,{tasks,taskAction,results,card,chips,button,local:taskLocal,rerender:renderPanel,askProgress:async task=>{
+    const result=await c.command('conversations.open_work',{work_id:task.work_id}),id=result?.selected_id
+    if(typeof id!=='string'||!id||!Array.isArray(result?.items)||!result.items.some(item=>item?.id===id))throw Error(t('原任务对话未确认，请刷新后重试。'))
+    const target=c.state(id),prompt=t('请告诉我「{0}」（任务 {1}）的最新进展。',task.title,task.work_id)
+    const draft=target.draft.endsWith(prompt)?target.draft:[target.draft,prompt].filter(Boolean).join('\n')
+    if(draft.length>4000)throw Error(t('追加后草稿超过 4000 字符，原有草稿已保留，请先缩短内容。'))
+    target.draft=draft;chat.reveal()
+   }})
   }else if(selected==='profile'){
    renderProfile(panel,{state:s?.life,news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
@@ -88,7 +95,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,open
   }
   for(const b of panel.querySelectorAll('button'))if(!c.connected)b.disabled=true
   if(edit){const next=[...panel.querySelectorAll('input,textarea,select')],target=edit.key?next.find(node=>node.getAttribute?.('data-editor-key')===edit.key):next[edit.index];if(target&&(target.tagName??target.tag)===edit.tag&&target.getAttribute?.('aria-label')===edit.label&&!target.disabled){target.value=edit.value;if(typeof edit.start==='number'&&typeof target.setSelectionRange==='function')target.setSelectionRange(edit.start,edit.end);else{target.selectionStart=edit.start;target.selectionEnd=edit.end}target.scrollTop=edit.scrollTop;target.focus?.({preventScroll:true})}}
-  else if(focusLabel||focusText){const target=[...panel.querySelectorAll('button,input,textarea,select')].find(node=>focusLabel?node.getAttribute('aria-label')===focusLabel:node.textContent===focusText);if(target&&!target.disabled)target.focus?.({preventScroll:true})}
+  else if(focusWorkId||focusLabel||focusText){const target=[...panel.querySelectorAll('button,input,textarea,select,summary')].find(node=>focusWorkId?node.getAttribute('data-task-result')===focusWorkId:focusLabel?node.getAttribute('aria-label')===focusLabel:node.textContent===focusText);if(target&&!target.disabled)target.focus?.({preventScroll:true})}
   panel.scrollTop=panelScroll;renderedPageKey=pageKey()
  }
  function update(){

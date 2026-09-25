@@ -6,6 +6,7 @@ import {join} from 'node:path'
 import {ConversationRuntimePool,createConversation} from '../src/personal-agent/conversations.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
+import {PersonalStore,initialState} from '../src/personal-agent/store.js'
 
 test('conversation pool permits parallel conversations and orders one conversation',async()=>{
  const calls:string[]=[],releases:(()=>void)[]=[]
@@ -258,14 +259,59 @@ test('review boundary: target command closes idle clarification runtime before n
  const events:string[]=[]
  try{await host.open()
   host.setCodingTargets({list:()=>Promise.resolve([target]),validate:()=>Promise.resolve(target),resolve:()=>Promise.reject(Error('unused'))})
-  host.setConversationRuntime(async conversation=>{
+  host.setConversationRuntime(conversation=>{
    events.push('create:'+String(conversation.coding_target?.workspace_id))
-   return {runTurn:async(text:string)=>{events.push('turn:'+text);return{assistant:'哪个文件？'}},canSwitch:()=>true,close:async()=>{events.push('close')}}
-  },()=>{})
+   return Promise.resolve({runTurn:(text:string)=>{events.push('turn:'+text);return Promise.resolve({assistant:'哪个文件？'})},canSwitch:()=>true,close:()=>{events.push('close');return Promise.resolve()}})
+  },()=>{ /* no renderer */ })
   await host.submitConversationText('chat:main','旧需求');await host.waitConversation('chat:main')
   const result=await host.command({type:'personal.command',request_id:'switch',method:'conversations.target',params:{id:'chat:main',target:{workspace_id:'workspace-b',session_id:null}}}) as {ok:boolean}
   assert.equal(result.ok,true)
   await host.submitConversationText('chat:main','新需求');await host.waitConversation('chat:main')
   assert.deepEqual(events,['create:undefined','turn:旧需求','close','create:workspace-b','turn:新需求'])
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('open_work selects the persisted original conversation across task and feed lifecycles without sending',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-open-work-')),path=join(dir,'personal.json')
+ const state=initialState();state.user_scope='test'
+ state.conversations.items.push(createConversation('chat','Other',null,'other'))
+ state.conversations.selected_id='other'
+ for(const work of ['working','active','failed','completed','cancelled'])state.conversations.work_owners[work]='chat:main'
+ state.conversations.work_owners['runtime-owned']='other'
+ state.feed=['active','failed','completed','cancelled'].map(work=>({id:work,kind:'task_result',title:work,why_now:'Task update',evidence_refs:[],memory_refs:[],source:{type:'task',ref:work},subject_key:work,task_ref:{work_id:work},suggestion_id:null,priority:40,created_at:'2026-09-20T00:00:00Z',updated_at:'2026-09-20T00:00:00Z',expires_at:work==='active'?null:'2026-09-20T00:00:00Z',user_state:work==='active'?'new':'dismissed',snooze_until:null,lifecycle:work==='active'?'active':'resolved',delivery:{presented_at:null,notified_at:null,spoken_at:null}}))
+ await new PersonalStore(path).write(state)
+ const make=()=>new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let host=make(),turns=0
+ const command=(method:string,params:Record<string,unknown>)=>host.command({type:'personal.command',request_id:crypto.randomUUID(),method,params}) as Promise<{ok:boolean;error?:string;data?:{selected_id:string}}>
+ try{await host.open()
+  host.setConversationRuntime(()=>Promise.resolve({ownsWork:id=>id==='runtime-owned',runTurn:()=>{turns++;return Promise.resolve({assistant:'unexpected'})},close:()=>Promise.resolve()}),()=>{ /* no renderer */ })
+  assert.equal((await command('conversations.voice',{id:'chat:main',enabled:true})).ok,true)
+  for(const work of ['working','active','failed','completed','cancelled','runtime-owned']){
+   await command('conversations.select',{id:'other'})
+   const result=await command('conversations.open_work',{work_id:work})
+   assert.equal(result.ok,true,work);assert.equal(result.data?.selected_id,'chat:main')
+   assert.equal(host.conversationSnapshot().voice_id,'chat:main');assert.deepEqual(host.conversationSnapshot().messages,[])
+  }
+  assert.equal(turns,0);assert.equal(host.conversationSnapshot().items.length,3)
+  await command('conversations.voice',{id:'chat:main',enabled:false})
+  await command('conversations.clear',{id:'chat:main'})
+  await command('conversations.select',{id:'other'})
+  await host.close();host=make();await host.open()
+  assert.equal((await command('conversations.open_work',{work_id:'completed'})).data?.selected_id,'chat:main','owner survives clear and reopen')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('open_work rejects invalid parameters and absent or stale owners without changing selection',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-open-work-invalid-')),path=join(dir,'personal.json')
+ const state=initialState();state.user_scope='test';state.conversations.work_owners.stale='removed';state.conversations.work_owners.valid='chat:proactive'
+ await new PersonalStore(path).write(state)
+ const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{await host.open()
+  for(const params of [{},{work_id:''},{work_id:'x'.repeat(129)},{work_id:1},{work_id:'valid',extra:true},{work_id:'missing'},{work_id:'stale'}]){
+   const result=await host.command({type:'personal.command',request_id:crypto.randomUUID(),method:'conversations.open_work',params}) as {ok:boolean;error?:string}
+   assert.equal(result.ok,false);if(['missing','stale'].includes(String(params.work_id)))assert.equal(result.error,'conversation_not_found')
+   assert.equal(host.conversationSnapshot().selected_id,'chat:main');assert.equal(host.conversationSnapshot().items.length,2)
+  }
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
