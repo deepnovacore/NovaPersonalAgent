@@ -249,3 +249,23 @@ test('a failing playback listener cannot prevent another runtime from parking it
   assert.equal(result.ok,false);assert.deepEqual(seen,['background']);assert.equal(host.presentationMode,'background')
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+
+test('review boundary: target command closes idle clarification runtime before next turn', async () => {
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-target-restart-'))
+ const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const target={workspace_id:'workspace-b',session_id:null,project:'Beta',title:'New session',executor:'codex' as const}
+ const events:string[]=[]
+ try{await host.open()
+  host.setCodingTargets({list:()=>Promise.resolve([target]),validate:()=>Promise.resolve(target),resolve:()=>Promise.reject(Error('unused'))})
+  host.setConversationRuntime(async conversation=>{
+   events.push('create:'+String(conversation.coding_target?.workspace_id))
+   return {runTurn:async(text:string)=>{events.push('turn:'+text);return{assistant:'哪个文件？'}},canSwitch:()=>true,close:async()=>{events.push('close')}}
+  },()=>{})
+  await host.submitConversationText('chat:main','旧需求');await host.waitConversation('chat:main')
+  const result=await host.command({type:'personal.command',request_id:'switch',method:'conversations.target',params:{id:'chat:main',target:{workspace_id:'workspace-b',session_id:null}}}) as {ok:boolean}
+  assert.equal(result.ok,true)
+  await host.submitConversationText('chat:main','新需求');await host.waitConversation('chat:main')
+  assert.deepEqual(events,['create:undefined','turn:旧需求','close','create:workspace-b','turn:新需求'])
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})

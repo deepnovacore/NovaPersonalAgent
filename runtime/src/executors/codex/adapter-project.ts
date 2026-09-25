@@ -237,13 +237,13 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     resolve: (decision, selection) => this.resolveIntakeTarget(decision, selection),
   }
 
-  async #listCodingTargets(): Promise<readonly CodingTarget[]> {
+  async #listCodingTargets(): ReturnType<CodingTargetPort['list']> {
     await this.#refreshLocalSessions()
     const snapshot = await this.#store.snapshot()
-    const targets: CodingTarget[] = []
+    const targets: (CodingTarget & {directory: string})[] = []
     for (const workspace of [...snapshot.workspaces].sort((a, b) => b.last_used_at - a.last_used_at).slice(0, MAX_ROSTER)) {
       try { await this.#store.revalidateWorkspace(workspace.workspace_id) } catch { continue }
-      const base = {workspace_id: workspace.workspace_id, project: workspace.display_name, executor: 'codex' as const}
+      const base = {workspace_id: workspace.workspace_id, project: workspace.display_name, executor: 'codex' as const, directory: workspace.canonical_path}
       targets.push({...base, session_id: null, title: workspace.display_name})
       for (const session of snapshot.sessions.filter(item => item.workspace_id === workspace.workspace_id
         && item.state === 'ready' && item.codex_thread_id !== null

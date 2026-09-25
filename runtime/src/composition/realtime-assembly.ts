@@ -1013,11 +1013,15 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       )) satisfies NonNullable<IntakeOptions['attachEvidence']>}),
       roster: () => projectAdapter.roster(),
       running: () => projectAdapter.running().filter(work=>options.sharedPersonal===undefined||core.runtime.inFlightDelegate(work.work_id)!==undefined),
-      activeProject: () => options.codingTarget?.activeProject() ?? (options.sharedPersonal ? null : projectAdapter.publicProjectView(false).workspace_display_name),
+      ...(options.codingTarget ? {boundTarget: () => ({workspace_id: options.codingTarget!.target?.workspace_id ?? null, revision: options.codingTarget!.revision})} : {}),
+      activeProject: () => options.codingTarget ? options.codingTarget.activeProject() : (options.sharedPersonal ? null : projectAdapter.publicProjectView(false).workspace_display_name),
       resolveTarget: (decision: CoordinatorDecision) => {if(options.codingTarget)return options.codingTarget.resolveTarget(decision);if(options.sharedPersonal&&decision.project===null)throw new ProjectResolutionError('unknown_project',{reason:'explicit_project_required'});return projectAdapter.resolveIntakeTarget(decision)},
       // Spec 08: the coordinator's decision rides with the work order; the adapter re-resolves at run time.
       dispatch: async (intake: IntakeSession, stillWanted?: () => boolean) => {
-        const targetRevision = options.codingTarget?.revision
+        const targetRevision = intake.bound_target?.revision
+        let admitted = false
+        const wanted = () => (stillWanted?.() ?? true) && (admitted || targetRevision === undefined || targetRevision === options.codingTarget?.revision)
+        if (!wanted()) return {accepted: false, code: 'superseded'}
         const admission = await core.runtime.dispatchExternal({
         executor: projectAdapter.manifest.name, op: 'run', origin_ref: intake.origin_ref,
         request: {
@@ -1025,7 +1029,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
           ...(intake.target?.session_id ? {session_id: intake.target.session_id} : {}),
           session: options.codingTarget && !intake.target?.session_id ? 'new' : intake.decision?.session ?? 'latest', ...(intake.title === null ? {} : {title: intake.title}),
         },
-      }, USER_AWAITED_TOOL, undefined, stillWanted)
+      }, USER_AWAITED_TOOL, undefined, wanted)
+        // Admission transfers ownership before accepted() advances the remembered target revision.
+        admitted = admission.accepted
         if (admission.accepted && options.codingTarget && targetRevision !== undefined) {
           const selection = intake.target?.workspace_id ? {workspace_id: intake.target.workspace_id, session_id: intake.target.session_id} : null
           try { await options.codingTarget.accepted(selection, admission.delegate_id ?? undefined, targetRevision) }

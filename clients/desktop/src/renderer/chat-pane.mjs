@@ -27,31 +27,43 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,onOpenChange=()
  const switcher=el('details',undefined,'conversation-switcher');const summary=el('summary');summary.setAttribute('aria-label','切换会话');const summaryTitle=el('span','对话','switcher-title');const unreadBadge=el('span','','unread-badge');unreadBadge.hidden=true;summary.append(summaryTitle,unreadBadge);switcher.append(summary)
  const conversationList=el('nav');conversationList.setAttribute('aria-label','会话列表');switcher.append(conversationList);head.append(switcher)
  const closeButton=button('收起对话栏',()=>setOpen(false),head);closeButton.className='chat-close';closeButton.setAttribute('aria-label','收起对话栏');closeButton.setAttribute('aria-controls',pane.id)
- const targetRow=el('div',undefined,'chat-target');const targetLabel=el('span','未绑定项目会话');targetRow.append(targetLabel)
- const targetSelect=el('select');targetSelect.setAttribute('aria-label','此对话的编程目标');targetRow.append(targetSelect);pane.append(targetRow)
- let targetConversation=null,targetOptions=null,targetKey='',targetLoading=false
- const targetValue=target=>target?JSON.stringify({workspace_id:target.workspace_id,session_id:target.session_id}):''
- const loadTargets=button('选择项目会话',async()=>{
+ const targetRow=el('div',undefined,'chat-target')
+ const workspaceSelect=el('select');workspaceSelect.setAttribute('aria-label','执行工作区');targetRow.append(el('span','执行工作区'),workspaceSelect);pane.append(targetRow)
+ const sessionRow=el('div',undefined,'chat-target'),sessionSelect=el('select');sessionSelect.setAttribute('aria-label','Codex 会话（续接目标）');sessionRow.append(el('span','Codex 会话（续接目标）'),sessionSelect);pane.append(sessionRow)
+ let targetConversation=null,targetOptions=null,targetKey='',targetLoading=false,targetPending=false
+ const currentTarget=()=>c.snapshot?.conversations?.items?.find(item=>item.id===c.selectedId)?.coding_target??null
+ const loadTargets=button('刷新工作区',async()=>{
   const id=c.selectedId;if(!id)return;targetLoading=true;update()
   try{const data=await c.command('conversations.targets',{});if(c.selectedId===id){targetOptions=data.targets;targetKey=''}}finally{targetLoading=false;update()}
  },targetRow)
- targetSelect.addEventListener('change',()=>{
-  const id=targetConversation,value=targetSelect.value;if(!id||id!==c.selectedId)return
-  void run(async()=>{try{await c.command('conversations.target',{id,target:value?JSON.parse(value):null})}finally{targetKey='';update()}})
- })
+ const setTarget=target=>{
+  const id=targetConversation;if(!id||id!==c.selectedId||targetPending)return
+  targetPending=true;update()
+  void run(async()=>{try{await c.command('conversations.target',{id,target})}finally{targetPending=false;targetKey='';update()}})
+ }
+ workspaceSelect.addEventListener('change',()=>setTarget(workspaceSelect.value?{workspace_id:workspaceSelect.value,session_id:null}:null))
+ sessionSelect.addEventListener('change',()=>{const current=currentTarget();if(current)setTarget({workspace_id:current.workspace_id,session_id:sessionSelect.value||null})})
  function renderTarget(){
-  const current=c.snapshot?.conversations?.items?.find(item=>item.id===c.selectedId)?.coding_target??null
+  const current=currentTarget()
   if(targetConversation!==c.selectedId){targetConversation=c.selectedId;targetOptions=null;targetKey=''}
-  targetLabel.textContent=current?`${current.project} / ${current.title} · ${current.executor}`:'未绑定项目会话'
   const key=JSON.stringify([targetConversation,current,targetOptions])
   if(key!==targetKey){
-   targetKey=key;targetSelect.replaceChildren();const empty=el('option','不绑定项目会话');empty.value='';targetSelect.append(empty)
-   const options=[...(targetOptions??[])];if(current&&!options.some(item=>targetValue(item)===targetValue(current)))options.unshift(current)
-   for(const item of options){const option=el('option',`${item.project} / ${item.title} · ${item.executor}`);option.value=targetValue(item);targetSelect.append(option)}
-   targetSelect.value=targetValue(current)
+   targetKey=key;workspaceSelect.replaceChildren();sessionSelect.replaceChildren()
+   const empty=el('option','未选择工作区');empty.value='';workspaceSelect.append(empty)
+   const fresh=el('option','新会话（新任务默认）');fresh.value='';sessionSelect.append(fresh)
+   const options=[...(targetOptions??[])];if(current&&!options.some(item=>item.workspace_id===current.workspace_id&&item.session_id===current.session_id))options.unshift(current)
+   const workspaces=new Set()
+   for(const item of options){
+    if(!workspaces.has(item.workspace_id)){workspaces.add(item.workspace_id);const option=el('option',item.directory?`${item.project} — ${item.directory}`:item.project);option.value=item.workspace_id;workspaceSelect.append(option)}
+    if(item.workspace_id===current?.workspace_id&&item.session_id){const option=el('option',item.title);option.value=item.session_id;sessionSelect.append(option)}
+   }
+   workspaceSelect.value=current?.workspace_id??'';sessionSelect.value=current?.session_id??''
+   workspaceSelect.title=options.find(item=>item.workspace_id===current?.workspace_id&&item.directory)?.directory??''
   }
-  targetSelect.disabled=!c.connected||!c.presentationReady||!targetConversation||targetLoading||(!targetOptions&&!current)
-  loadTargets.disabled=!c.connected||!c.presentationReady||!c.selectedId||targetLoading
+  const disabled=!c.connected||!c.presentationReady||!targetConversation||targetLoading||targetPending
+  workspaceSelect.disabled=disabled||(!targetOptions&&!current)
+  sessionSelect.disabled=disabled||!current
+  loadTargets.disabled=disabled
  }
  const voiceLine=el('div',undefined,'chat-voice');const voiceStatus=el('span','','conversation-voice-status');voiceLine.append(voiceStatus);const resumeVoice=button('恢复语音',()=>c.resumeVoice(),voiceLine);resumeVoice.hidden=true;const endVoice=button('结束语音',()=>c.stopVoice(),voiceLine);endVoice.hidden=true;pane.append(voiceLine)
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1','有什么需要帮忙？'),el('p','交办一件事、问一个问题，或从左侧的待办与资讯里「接着聊」。','hint'))
