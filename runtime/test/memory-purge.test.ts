@@ -209,7 +209,7 @@ test('empty migration exemption fails closed for actual backups, unsafe paths an
    enableMemoryFiles(db,path+'.memory')
    const result=purgeEntry(db,path,fixture.input)
    assert.equal(result.status,variant==='present'?'complete':'incomplete',variant)
-   if(variant==='present')assert.equal(JSON.parse(await readFile(backup,'utf8')).profile.about,'','a proven empty import still scrubs a present backup')
+   if(variant==='present')assert.equal((JSON.parse(await readFile(backup,'utf8')) as {profile:{about:string}}).profile.about,'','a proven empty import still scrubs a present backup')
    if(variant==='symlink')assert.equal(await readFile(external,'utf8'),JSON.stringify(legacyLife()))
   }finally{db.close();await rm(root,{recursive:true,force:true})}
  }

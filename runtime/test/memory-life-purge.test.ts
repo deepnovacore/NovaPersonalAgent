@@ -14,9 +14,9 @@ import type {EntryRevision} from '../src/memory-substrate/store.js'
 // Real host -> LifeService -> resource -> worker/SQLite/Markdown. Only the public feed is synthetic.
 test('purged Profile stays absent across Life and news commands, recreates once, and purges again',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-life-purge-')),path=join(root,'memory.sqlite');let client=new WorkspaceGraphStoreClient(path)
- const makeResource=()=>new SubstrateMemoryResource({client,userId:'life-purge',model:'unused',gateway:{async *stream(){throw Error('unexpected model call')},async complete(){throw Error('unexpected model call')}}})
+ const makeResource=()=>new SubstrateMemoryResource({client,userId:'life-purge',model:'unused',gateway:{stream(){throw Error('unexpected model call')},complete(){return Promise.reject(Error('unexpected model call'))}}})
  let resource=makeResource()
- const make=()=>{const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'life-purge',memory:()=>resource,pool:new SuggestionPool(),evidence:()=>null});host.news.options.firstRefreshMs=null;host.news.options.fetcher=async()=>new Response('<rss><channel><item><title>Synthetic news</title><link>https://example.com/synthetic</link><description>Public article</description></item></channel></rss>');return host}
+ const make=()=>{const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'life-purge',memory:()=>resource,pool:new SuggestionPool(),evidence:()=>null});host.news.options.firstRefreshMs=null;host.news.options.fetcher=()=>Promise.resolve(new Response('<rss><channel><item><title>Synthetic news</title><link>https://example.com/synthetic</link><description>Public article</description></item></channel></rss>'));return host}
  let host=make()
  const rows=async()=>await client.memory('list',{include_history:true}) as EntryRevision[]
  const command=async(method:string,params:Record<string,unknown>,request_id:string)=>{const result=await host.command({type:'personal.command',method,params,request_id}) as {ok:boolean;data:unknown;error?:string};assert.equal(result.ok,true,JSON.stringify(result));return result}
@@ -41,7 +41,7 @@ test('purged Profile stays absent across Life and news commands, recreates once,
   const backend=resource.lifeBackend(),snapshot=(await backend.peek!())!
   const attempts=await Promise.allSettled(['recreated','racing'].map(requestId=>backend.mutate({requestId,expectedRevision:snapshot.revision,input:{op:'profile',expected_version:0,about:'SECOND PRIVATE PROFILE'}})))
   assert.equal(attempts.filter(result=>result.status==='fulfilled').length,1)
-  const rejected=attempts.find(result=>result.status==='rejected') as PromiseRejectedResult;assert.match(String(rejected.reason),/version_conflict/)
+  const rejected=attempts.find(result=>result.status==='rejected')!;assert.match(String(rejected.reason),/version_conflict/)
   await host.life.refresh();const second=(await rows()).find(row=>row.kind==='profile')!
   assert.notEqual(second.entry_id,first.entry_id)
   await assert.rejects(host.life.mutate({op:'profile',expected_version:1,about:'OLD EDITOR CONTENT'},'fresh-stale-request'),/version_conflict/)
@@ -88,7 +88,7 @@ test('worker distinguishes purged identifiers, stated evidence trust and stale r
 test('legacy Profile version watermark survives purge before Life load, old metadata, restart and idempotent edits',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-life-legacy-version-')),path=join(root,'memory.sqlite'),legacyPath=join(root,'life.json')
  let client=new WorkspaceGraphStoreClient(path)
- const makeResource=()=>new SubstrateMemoryResource({client,userId:'legacy-version',model:'unused',gateway:{async *stream(){throw Error('unexpected model call')},async complete(){throw Error('unexpected model call')}}})
+ const makeResource=()=>new SubstrateMemoryResource({client,userId:'legacy-version',model:'unused',gateway:{stream(){throw Error('unexpected model call')},complete(){return Promise.reject(Error('unexpected model call'))}}})
  let resource=makeResource(),life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend())
  const restart=async()=>{await life.close();await resource.close();client=new WorkspaceGraphStoreClient(path);resource=makeResource();life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend());await resource.open()}
  try{

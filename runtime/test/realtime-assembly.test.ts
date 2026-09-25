@@ -1485,7 +1485,7 @@ test('review boundary: two conversation assemblies independently resolve current
           return controller
         }},
         intake: {settings: {clarification_depth: 'balanced', plan_readback: 'confirm'}, models: {
-          assess: async input => ({intake_id: input.intake_id, revision: input.revision, kind: 'work', project: '当前工作区', project_evidence: null,
+          assess: input => Promise.resolve({intake_id: input.intake_id, revision: input.revision, kind: 'work', project: '当前工作区', project_evidence: null,
             session: {mode: 'new'}, execution_mode: 'direct', intent_to_proceed: true, candidate_question: null,
             discovery: [], early_exit: true, abandon: false, readiness: 1,
             slots: Object.fromEntries(['goal', 'scope', 'acceptance', 'constraints'].map(key => [key, {state: 'stated', note: key}]))}),

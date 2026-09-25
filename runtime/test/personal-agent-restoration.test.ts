@@ -24,7 +24,7 @@ async function fixture(){
  state.dedupe=['saved-dedupe'];state.receipts.saved={payload:'saved-payload',result:{ok:true}};
  const store=new PersonalStore(path);await store.write(state);
  const make=()=>new PersonalAgentHost({path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:ref=>ref==='fixture-evidence'?{subject_key:'fixture',source:{type:'file',ref}}:null});
- const preserved=(actual:PersonalState)=>{const {revision:_,...content}=actual;const {revision:__,...expected}=state;assert.deepEqual(content,expected)};
+ const preserved=(actual:PersonalState)=>{assert.deepEqual({...actual,revision:0},{...state,revision:0})};
  return {dir,path,state,store,make,preserved,cleanup:()=>rm(dir,{recursive:true,force:true})};
 }
 
@@ -40,11 +40,11 @@ test('source notifications before restore preserve conversations, bindings, feed
 });
 
 test('notifications during disk read stay pending until restored state is available',async t=>{
- const f=await fixture(),host=f.make(),entered=deferred(),resume=deferred();const read=PersonalStore.prototype.read;
+ const f=await fixture(),host=f.make(),entered=deferred(),resume=deferred();const read=Reflect.get(PersonalStore.prototype,'read');
  const mock=t.mock.method(PersonalStore.prototype,'read',async function(this:PersonalStore){if(this.path===f.path){entered.resolve();await resume.promise}return read.call(this)});
  const opening=host.open();
  try{await entered.promise;await host.sourceChanged({revision:1,phase:'ready'});f.preserved(JSON.parse(await readFile(f.path,'utf8')) as PersonalState);resume.resolve();await opening;assert.ok((await read.call(f.store)).revision>12);f.preserved(await read.call(f.store))}
- finally{resume.resolve();await opening.catch(()=>{});mock.mock.restore();await host.close();await f.cleanup()}
+ finally{resume.resolve();await opening.catch(()=>undefined);mock.mock.restore();await host.close();await f.cleanup()}
 });
 
 test('direct persistence before open and after close cannot bypass ownership and restoration',async()=>{
@@ -67,7 +67,7 @@ test('failed ownership acquisition cannot write through pending source notificat
 
 test('close drains an in-flight source refresh and write before releasing ownership',async t=>{
  const f=await fixture(),host=f.make(),refreshEntered=deferred(),refreshResume=deferred(),writeEntered=deferred(),writeResume=deferred();await host.open();
- const refresh=host.refreshMemory.bind(host),write=PersonalStore.prototype.write;let refreshes=0,closingDone=false;
+ const refresh=host.refreshMemory.bind(host),write=Reflect.get(PersonalStore.prototype,'write');let refreshes=0,closingDone=false;
  host.refreshMemory=async()=>{refreshes++;refreshEntered.resolve();await refreshResume.promise;await refresh()};
  const mock=t.mock.method(PersonalStore.prototype,'write',async function(this:PersonalStore,state:PersonalState){if(this.path===f.path){writeEntered.resolve();await writeResume.promise}await write.call(this,state)});
  const changing=host.sourceChanged({revision:1,phase:'ready'});await refreshEntered.promise;
@@ -76,19 +76,19 @@ test('close drains an in-flight source refresh and write before releasing owners
   const late=host.sourceChanged({revision:2,phase:'ready'});await assert.rejects(acquirePersonalLock(f.path),/personal_store_locked/);assert.equal(closingDone,false);
   refreshResume.resolve();await writeEntered.promise;await assert.rejects(acquirePersonalLock(f.path),/personal_store_locked/);assert.equal(closingDone,false);
   writeResume.resolve();await changing;await late;await closing;assert.equal(refreshes,1);f.preserved(await f.store.read());const release=await acquirePersonalLock(f.path);await release();
- }finally{refreshResume.resolve();writeResume.resolve();await changing.catch(()=>{});await closing;mock.mock.restore();await host.close();await f.cleanup()}
+ }finally{refreshResume.resolve();writeResume.resolve();await changing.catch(()=>undefined);await closing;mock.mock.restore();await host.close();await f.cleanup()}
 });
 
 test('substrate startup callbacks registered before memory open preserve personal state',async()=>{
  const f=await fixture(),host=f.make(),notices:Promise<void>[]=[];
- const resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(f.dir,'memory.sqlite')),userId:'fixture',model:'fixture',gateway:{async *stream(){throw Error('unexpected model call')},async complete(){throw Error('unexpected model call')}}});
+ const resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(f.dir,'memory.sqlite')),userId:'fixture',model:'fixture',gateway:{stream(){throw Error('unexpected model call')},complete(){return Promise.reject(Error('unexpected model call'))}}});
  resource.setOnChange(()=>{notices.push(host.sourceChanged())});resource.setOnSourceChange(change=>host.sourceChanged(change));
  try{await resource.open();await Promise.all(notices);assert.ok(notices.length>0);f.preserved(await f.store.read());await host.open();f.preserved(await f.store.read())}
  finally{await host.close();await resource.close();await f.cleanup()}
 });
 
 test('close requested during restoration waits for open before releasing ownership',async t=>{
- const f=await fixture(),host=f.make(),entered=deferred(),resume=deferred();const read=PersonalStore.prototype.read;
+ const f=await fixture(),host=f.make(),entered=deferred(),resume=deferred();const read=Reflect.get(PersonalStore.prototype,'read');
  const mock=t.mock.method(PersonalStore.prototype,'read',async function(this:PersonalStore){if(this.path===f.path){entered.resolve();await resume.promise}return read.call(this)});
  const opening=host.open();await entered.promise;let closed=false;
  const closing=host.close().then(()=>{closed=true});
@@ -98,13 +98,13 @@ test('close requested during restoration waits for open before releasing ownersh
   resume.resolve();await opening;await closing;f.preserved(await read.call(f.store));
   await assert.rejects(host.taskResult('after-close','Must not persist'),/personal_store_not_ready/);
   const release=await acquirePersonalLock(f.path);await release();
- }finally{resume.resolve();await opening.catch(()=>{});await closing;mock.mock.restore();await host.close();await f.cleanup()}
+ }finally{resume.resolve();await opening.catch(()=>undefined);await closing;mock.mock.restore();await host.close();await f.cleanup()}
 });
 
 test('source open can await a notification without processing unrestored companion state',async()=>{
  const f=await fixture(),host=f.make();let sourcesOpening=false,refreshes=0;
  const refresh=host.refreshMemory.bind(host);host.refreshMemory=async()=>{assert.equal(sourcesOpening,false);refreshes++;await refresh()};
- host.setSources({list:()=>[],command:async()=>null,open:async()=>{sourcesOpening=true;await host.sourceChanged({revision:1,phase:'ready'});sourcesOpening=false}});
+ host.setSources({list:()=>[],command:()=>Promise.resolve(null),open:async()=>{sourcesOpening=true;await host.sourceChanged({revision:1,phase:'ready'});sourcesOpening=false}});
  try{await host.open();assert.ok(refreshes>=2);f.preserved(await f.store.read())}
  finally{await host.close();await f.cleanup()}
 });
@@ -113,7 +113,7 @@ test('read and scope errors retain the original bytes and reject subsequent writ
  const f=await fixture(),before=await readFile(f.path,'utf8');
  for(const fail of ['read','scope']){
   const host=fail==='scope'?new PersonalAgentHost({path:f.path,userScope:'wrong-scope',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null}):f.make();
-  const mock=fail==='read'?t.mock.method(PersonalStore.prototype,'read',async()=>{throw Error('disk read failed')}):undefined;
+  const mock=fail==='read'?t.mock.method(PersonalStore.prototype,'read',()=>Promise.reject(Error('disk read failed'))):undefined;
   try{await assert.rejects(host.open(),fail==='read'?/disk read failed/:/scope_mismatch/);await host.sourceChanged();await assert.rejects(host.taskResult('after-failure','Must not persist'),/personal_store_not_ready/);assert.equal(await readFile(f.path,'utf8'),before)}
   finally{mock?.mock.restore();await host.close()}
  }
@@ -122,7 +122,7 @@ test('read and scope errors retain the original bytes and reject subsequent writ
 
 test('failed source drain still closes resources and releases ownership',async()=>{
  const f=await fixture(),host=f.make(),entered=deferred(),resume=deferred();let sourcesClosed=false;
- host.setSources({list:()=>[],command:async()=>null,close:async()=>{sourcesClosed=true}});await host.open();
+ host.setSources({list:()=>[],command:()=>Promise.resolve(null),close:()=>{sourcesClosed=true;return Promise.resolve()}});await host.open();
  host.refreshMemory=async()=>{entered.resolve();await resume.promise;throw Error('source refresh failed')};
  const changing=assert.rejects(host.sourceChanged({revision:1,phase:'ready'}),/source refresh failed/);await entered.promise;
  const closing=host.close();const outcome=closing.catch(error=>error as unknown);

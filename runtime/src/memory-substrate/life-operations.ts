@@ -66,7 +66,7 @@ const entryId=(namespace:string,object:LifeObject)=>namespace+object.kind+':'+ob
 function persist(run:Run,namespace:string,before:EntryRevision[],state:LifeState,evidenceId:string,now:string,legacy=false,processingGrant?:ProcessingGrant):void{
  const profile=before.find(row=>row.kind==='profile'&&row.op!=='tombstone')
  const storageId=(item:LifeObject)=>item.kind==='profile'?(profile?.entry_id??(legacy?entryId(namespace,item):namespace+'profile:'+hash(evidenceId))):entryId(namespace,item)
- const current=new Map(before.map(row=>[row.entry_id,row])),next=objects(state).filter(item=>item.kind!=='profile'||profile||item.data.about!==''||item.data.version!==0),ids=new Set(next.map(storageId))
+ const current=new Map(before.map(row=>[row.entry_id,row])),next=objects(state).filter(item=>item.kind!=='profile'||profile!==undefined||item.data.about!==''||item.data.version!==0),ids=new Set(next.map(storageId))
  const nextOrder=new Map<string,number>()
  for(const row of before)nextOrder.set(row.kind,Math.max(nextOrder.get(row.kind)??0,Number(row.content.life_order??-1)+1))
  for(const item of next){
