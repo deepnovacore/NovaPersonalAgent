@@ -98,10 +98,10 @@ export class LifeService{
   const current=await this.#backend.peek?.()
   if(current){this.#state=lifeStateSchema.parse(current.state);this.#revision=current.revision;return}
   // Migration input is read-only: do not create, chmod or rewrite the old file.
-  let legacy=emptyLifeState()
-  try{const file=await open(this.path,constants.O_RDONLY|constants.O_NOFOLLOW);try{if((await file.stat()).size>8*1024*1024)throw Error('store_capacity');const text=await file.readFile('utf8');if(text)legacy=lifeStateSchema.parse(JSON.parse(text))}finally{await file.close()}}
+  let legacy=emptyLifeState(),legacyRead=false
+  try{const file=await open(this.path,constants.O_RDONLY|constants.O_NOFOLLOW);try{if((await file.stat()).size>8*1024*1024)throw Error('store_capacity');const text=await file.readFile('utf8');legacyRead=true;if(text)legacy=lifeStateSchema.parse(JSON.parse(text))}finally{await file.close()}}
   catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
-  const loaded=await this.#backend.load(legacy,{legacyPath:this.path});this.#state=lifeStateSchema.parse(loaded.state);this.#revision=loaded.revision
+  const loaded=await this.#backend.load(legacy,legacyRead?{legacyPath:this.path}:undefined);this.#state=lifeStateSchema.parse(loaded.state);this.#revision=loaded.revision
  }
  async close(){await this.#tail}
  async refresh():Promise<void>{const run=this.#tail.then(async()=>{

@@ -111,14 +111,14 @@ export function processingStamp(db:GraphDatabase,ids:readonly string[],purpose:'
 }
 export const retrievalEvidence=(db:GraphDatabase,id:string):EvidenceRecord|null=>effectiveEvidence(db,id)
 function write(db:GraphDatabase,candidate:Candidate,deleted=false):EntryRevision|null {
-  if(isPermanentlyPurged(db,candidate.entry_id))throw Error('STORE_INVALID_OPERATION')
+  if(isPermanentlyPurged(db,candidate.entry_id))throw Error('STORE_PURGED_ID')
   const previous=current(db,candidate.entry_id)
   if(candidate.expected_revision!==undefined&&candidate.expected_revision!==(previous?.revision??0))throw Error('STORE_STALE_REVISION')
   const refs=candidate.evidence_refs.map(ref=>evidence(db,ref))
   if(!deleted&&candidate.written_by!=='user_correction'&&refs.some(ref=>ref&&db.prepare('SELECT 1 FROM memory_suppressed WHERE hash=?').get(ref.hash)))return previous
   if(!deleted&&refs.some(ref=>ref!==null&&!retrievalEvidence(db,ref.id)))throw Error('STORE_NOT_FOUND')
   if (!deleted && (refs.every(ref=>ref===null)||refs.some((ref,index)=>ref===null&&!previous?.evidence_refs.includes(candidate.evidence_refs[index]!)))) throw new Error('STORE_NOT_FOUND')
-  if (candidate.origin==='stated' && refs.every(ref=>ref?.trust!=='trusted_user')) throw new Error('STORE_INVALID_OPERATION')
+  if (candidate.origin==='stated' && refs.every(ref=>ref?.trust!=='trusted_user')) throw new Error('STORE_STATED_EVIDENCE_REQUIRED')
   const redactions:string[]=[]
   candidate=CandidateSchema.parse({...candidate,content:candidate.op==='tombstone'?scrub(candidate.content,redactions):normalizeWorkspaceContent(candidate.kind,normalizeLifeContent(candidate.kind,scrub(candidate.content,redactions) as Candidate['content'],previous?.content),previous?.content,candidate.written_by==='user_correction')})
   const next=merge(previous,candidate,{suppressed:refs.some(ref=>ref && (db.prepare('SELECT hash FROM memory_suppressed WHERE hash=?').get(ref.hash)!==undefined || (ref.raw_text!==null && db.prepare('SELECT hash FROM memory_legacy_suppressed WHERE hash=? AND substr(?,1,length(scope))=scope').get(createHash('sha256').update(ref.raw_text.normalize('NFKC').trim().toLowerCase()).digest('hex'),ref.source_id)!==undefined))),evidenceDeleted:deleted})
@@ -166,7 +166,7 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
       case 'pending_vectors':case 'write_vectors':case 'search':result=memoryRetrieval(db,operation,input);break
       case 'append_evidence': {
         const parsed=EvidenceRecordSchema.parse(value)
-        if(isPermanentlyPurged(db,parsed.id))throw Error('STORE_INVALID_OPERATION')
+        if(isPermanentlyPurged(db,parsed.id))throw Error('STORE_PURGED_ID')
         if(db.prepare('SELECT source_id FROM memory_deleted_sources WHERE source_id=?').get(parsed.source_id))throw new Error('STORE_INVALID_OPERATION')
         if (['file','mail','calendar','im'].includes(parsed.source_kind) && parsed.trust!=='untrusted_external')throw new Error('STORE_INVALID_OPERATION')
         const redactions=[...parsed.sensitivity.redactions]

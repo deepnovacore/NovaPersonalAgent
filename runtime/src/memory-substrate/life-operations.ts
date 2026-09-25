@@ -64,11 +64,13 @@ function objects(state:LifeState):LifeObject[]{return [
 ]}
 const entryId=(namespace:string,object:LifeObject)=>namespace+object.kind+':'+object.id
 function persist(run:Run,namespace:string,before:EntryRevision[],state:LifeState,evidenceId:string,now:string,legacy=false,processingGrant?:ProcessingGrant):void{
- const current=new Map(before.map(row=>[row.entry_id,row])),next=objects(state),ids=new Set(next.map(item=>entryId(namespace,item)))
+ const profile=before.find(row=>row.kind==='profile'&&row.op!=='tombstone')
+ const storageId=(item:LifeObject)=>item.kind==='profile'?(profile?.entry_id??(legacy?entryId(namespace,item):namespace+'profile:'+hash(evidenceId))):entryId(namespace,item)
+ const current=new Map(before.map(row=>[row.entry_id,row])),next=objects(state).filter(item=>item.kind!=='profile'||profile||item.data.about!==''||item.data.version!==0),ids=new Set(next.map(storageId))
  const nextOrder=new Map<string,number>()
  for(const row of before)nextOrder.set(row.kind,Math.max(nextOrder.get(row.kind)??0,Number(row.content.life_order??-1)+1))
  for(const item of next){
-  const id=entryId(namespace,item),old=current.get(id)
+  const id=storageId(item),old=current.get(id)
   if(old?.op!=='tombstone'&&canonicalJson(old?.content.life_data??null)===canonicalJson(item.data))continue
   const text=item.kind==='profile'?String(item.data.about):[item.data.title,item.data.note].filter(Boolean).join('\n')
   const objectEvidenceId=legacy?evidenceId+':'+hash(id):evidenceId
