@@ -606,6 +606,7 @@ button:disabled { cursor: default; opacity: .45; }
 }
 
 .secret-content {
+  container-type: inline-size;
   padding: 0 10px 10px;
   border-top: 1px solid var(--line);
 }
@@ -621,11 +622,8 @@ button:disabled { cursor: default; opacity: .45; }
 
 .secret {
   display: grid;
-  grid-template-columns: var(--label-col) auto minmax(0, 1fr) auto;
-  grid-template-areas:
-    "name badge usage clear"
-    "input input input input"
-    "link link link link";
+  grid-template-columns: minmax(100px, 140px) auto minmax(120px, 1fr) minmax(60px, 120px) auto auto;
+  grid-template-areas: "name badge input usage clear link";
   align-items: center;
   gap: 6px 8px;
   padding: 9px 2px;
@@ -635,7 +633,7 @@ button:disabled { cursor: default; opacity: .45; }
 .secret > label { grid-area: name; color: var(--ink-dim); }
 .secret > .badge { grid-area: badge; justify-self: start; }
 .secret > .key-usage { grid-area: usage; }
-.secret > input { grid-area: input; }
+.secret > input { grid-area: input; min-width: 0; width: 100%; }
 .secret > button { grid-area: clear; }
 
 .badge {
@@ -825,7 +823,7 @@ main :is(p, small) { line-height: 1.65; }
 .toggle-row input { order: 1; margin-left: auto; }
 button { min-height: 36px; padding: 7px 12px; }
 #status { flex-shrink: 1; line-height: 1.5; }
-.secret { padding: 18px 2px; gap: 10px; }
+.secret { padding: 12px 2px; gap: 10px; }
 .secret:last-child { border-bottom: 0; }
 .key-usage { font-size: 11px; text-align: right; }
 #capabilities-editor .field { grid-template-columns: minmax(0, 1fr); gap: 7px; margin-bottom: 16px; }
@@ -858,7 +856,14 @@ button { min-height: 36px; padding: 7px 12px; }
 #frontend-usage-section details { border-top: 1px solid var(--line); padding-top: 12px; }
 #frontend-usage-section summary { color: var(--ink-dim); font-size: 12px; cursor: pointer; }
 #frontend-usage-details { padding: 14px 16px; border-radius: 10px; background: var(--surface); font-size: 12px; line-height: 1.8; }
-.secret:has(input[hidden]) { grid-template-areas: "name badge usage clear" "link link link link"; }
+@container (max-width: 760px) {
+  .secret {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "name badge usage" "input input clear" "link link link";
+  }
+  .secret:has(input[hidden]) { grid-template-areas: "name badge clear" "usage usage link"; }
+}
+
 
 #frontend-usage-details { display: grid; gap: 14px; padding: 14px 0 0; background: transparent; white-space: normal; }
 .usage-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }

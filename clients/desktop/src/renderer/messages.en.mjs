@@ -1,4 +1,7 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "密钥分类": "API key categories",
+  "模型与语音": "Models & voice",
+  "搜索与应用连接": "Search & app connections",
   "保存并重启后生效。": "Save and restart the app to apply.",
   "声纹验证": "Voiceprint verification",
   "声纹功能仅支持火山引擎 ASR。": "Voiceprints are supported only by Volcengine ASR.",

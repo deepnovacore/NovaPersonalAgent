@@ -196,6 +196,27 @@ function populatePresetOptions(select, presets, customLabel = t("自定义音色
 populatePresetOptions(integratedVoicePreset, QWEN_VOICES)
 populatePresetOptions(cascadedTtsVoicePreset, VOLCENGINE_TTS_VOICES)
 
+const secretTabs = ['models', 'connections']
+function selectSecretTab(selected) {
+  for (const id of secretTabs) {
+    const tab = document.querySelector(`#secret-tab-${id}`)
+    tab.setAttribute('aria-selected', String(id === selected))
+    tab.tabIndex = id === selected ? 0 : -1
+    document.querySelector(`#secret-panel-${id}`).hidden = id !== selected
+  }
+}
+for (const id of secretTabs) {
+  const tab = document.querySelector(`#secret-tab-${id}`)
+  tab.addEventListener('click', () => selectSecretTab(id))
+  tab.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const next = event.key === 'Home' ? secretTabs[0] : event.key === 'End' ? secretTabs[1] : secretTabs.find(other => other !== id)
+    selectSecretTab(next)
+    document.querySelector(`#secret-tab-${next}`).focus()
+  })
+}
+
 function secretInput(key) { return document.querySelector(`#${key}`) }
 function secretClearButton(key) { return document.querySelector(`button.clear[data-key="${key}"]`) }
 

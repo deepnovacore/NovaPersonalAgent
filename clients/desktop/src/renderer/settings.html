@@ -364,13 +364,11 @@
         </summary>
         <div class="secret-content">
           <p id="keyring-warning" class="warning" hidden>密钥将以明文保存(系统未提供钥匙串)</p>
-          <div class="secret" data-key="composioApiKey">
-            <label for="composioApiKey">Composio</label>
-            <span class="badge" id="badge-composioApiKey">未设置</span>
-            <span class="key-usage" id="usage-composioApiKey">应用连接；修改后重启运行时</span>
-            <input type="password" id="composioApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
-            <button type="button" class="clear" data-key="composioApiKey">清除并停用</button>
+          <div class="connections-tabs secret-tabs" role="tablist" aria-label="密钥分类">
+            <button type="button" id="secret-tab-models" role="tab" aria-selected="true" aria-controls="secret-panel-models">模型与语音</button>
+            <button type="button" id="secret-tab-connections" role="tab" aria-selected="false" aria-controls="secret-panel-connections" tabindex="-1">搜索与应用连接</button>
           </div>
+          <div id="secret-panel-models" role="tabpanel" aria-labelledby="secret-tab-models">
           <div class="secret" data-key="dashscopeApiKey">
             <label for="dashscopeApiKey">DashScope</label>
             <span class="badge" id="badge-dashscopeApiKey">未设置</span>
@@ -386,14 +384,6 @@
             <input type="password" id="stepfunApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
             <button type="button" class="clear" data-key="stepfunApiKey">清除</button>
             <a class="key-link" href="https://platform.stepfun.com/interface-key" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
-          </div>
-          <div class="secret" data-key="tavilyApiKey">
-            <label for="tavilyApiKey">Tavily</label>
-            <span class="badge" id="badge-tavilyApiKey">未设置</span>
-            <span class="key-usage" id="usage-tavilyApiKey">当前未使用</span>
-            <input type="password" id="tavilyApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
-            <button type="button" class="clear" data-key="tavilyApiKey">清除</button>
-            <a class="key-link" href="https://app.tavily.com/" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
           </div>
           <div class="secret" data-key="openrouterApiKey">
             <label for="openrouterApiKey">OpenRouter · Jev</label>
@@ -426,6 +416,24 @@
             <input type="password" id="doubaoBigmodelApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
             <button type="button" class="clear" data-key="doubaoBigmodelApiKey">清除</button>
             <a class="key-link" href="https://console.volcengine.com/speech/new/setting/apikeys" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
+          </div>
+          </div>
+          <div id="secret-panel-connections" role="tabpanel" aria-labelledby="secret-tab-connections" hidden>
+          <div class="secret" data-key="composioApiKey">
+            <label for="composioApiKey">Composio</label>
+            <span class="badge" id="badge-composioApiKey">未设置</span>
+            <span class="key-usage" id="usage-composioApiKey">应用连接；修改后重启运行时</span>
+            <input type="password" id="composioApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
+            <button type="button" class="clear" data-key="composioApiKey">清除并停用</button>
+          </div>
+          <div class="secret" data-key="tavilyApiKey">
+            <label for="tavilyApiKey">Tavily</label>
+            <span class="badge" id="badge-tavilyApiKey">未设置</span>
+            <span class="key-usage" id="usage-tavilyApiKey">当前未使用</span>
+            <input type="password" id="tavilyApiKey" placeholder="输入新密钥；留空保持不变" autocomplete="off" spellcheck="false">
+            <button type="button" class="clear" data-key="tavilyApiKey">清除</button>
+            <a class="key-link" href="https://app.tavily.com/" target="_blank" rel="noopener noreferrer">获取密钥 ↗</a>
+          </div>
           </div>
         </div>
       </details>

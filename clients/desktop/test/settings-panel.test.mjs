@@ -1065,7 +1065,7 @@ test('the sidebar renders one button per category with the first current', () =>
   }
   assert.match(html, /id="category-general" data-category="general" aria-current="true">/)
   assert.equal((html.match(/class="nav-item"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length)
-  assert.equal((html.match(/tabindex="-1"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length - 1)
+  assert.equal((html.match(/class="nav-item"[^>]*tabindex="-1"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length - 1)
 })
 
 test('sidebar navigation cycles vertically and passes other keys through', () => {
@@ -1436,4 +1436,18 @@ test('language restart hint follows the applied language across live updates', a
   assert.equal(panel.node('#language-restart-hint').hidden, false)
   panel.push(publicView({language}))
   assert.equal(panel.node('#language-restart-hint').hidden, true)
+})
+
+
+test('secret category tabs preserve unsaved keys and support keyboard navigation', async () => {
+  const panel = await mountSettingsPanel(publicView())
+  panel.node('#dashscopeApiKey').value = 'unsaved-fixture'
+  panel.click('#secret-tab-connections')
+  assert.equal(panel.node('#secret-panel-models').hidden, true)
+  assert.equal(panel.node('#secret-tab-connections').attributes['aria-selected'], 'true')
+  panel.node('#secret-tab-connections').listeners.keydown({key: 'ArrowLeft', preventDefault() {}})
+  assert.equal(panel.node('#secret-panel-models').hidden, false)
+  assert.equal(panel.node('#secret-tab-models').focused, 1)
+  assert.equal(panel.node('#secret-tab-connections').tabIndex, -1)
+  assert.equal(panel.node('#dashscopeApiKey').value, 'unsaved-fixture')
 })
