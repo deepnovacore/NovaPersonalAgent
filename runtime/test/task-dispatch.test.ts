@@ -636,3 +636,19 @@ test('production conversation links only selected declarations and clears Todo s
  await host.submitConversationText('chat:main','Unrelated next turn','next');await host.waitConversation('chat:main');assert.equal(host.tasks.list().length,2)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('a selected Todo stays linkable after a confirmation turn and expires after a few unrelated turns',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-source-followup-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});let responses=0;const declareAt=new Set([2,8])
+ try{await host.open()
+  for(const title of ['Confirmed','Expired'])await host.command({type:'personal.command',request_id:title,method:'life.mutate',params:{op:'create',kind:'todo',title,note:''}})
+  const ref=(title:string)=>{const todo=host.life.snapshot().todos.find(todo=>todo.title===title)!;return {id:todo.id,version:todo.version}},confirmed=ref('Confirmed'),expired=ref('Expired')
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),searchTransport:{search:async()=>{throw Error('unused')}},gateway:{complete:async()=>{throw Error('leave waiting')},async *stream(){throw Error('unused')}},createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({async *stream(){const n=++responses,r='followup:'+n;yield {kind:'response_started',response_id:r};if(declareAt.has(n))yield {kind:'tool_call',item_id:'d'+n,call_id:'d'+n,name:'task',arguments:{operation:'declare',goal:'goal '+n,acceptance:[],source_refs:[],link_source_todo:true,origin_ref:'conversation:'+n}};else yield {kind:'text_delta',text:'Shall I start?'};yield {kind:'response_completed',response_id:r}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{}})})}})}),()=>{})
+  await host.submitConversationText('chat:main','Please help with this Todo','ask',confirmed);await host.waitConversation('chat:main');assert.equal(host.tasks.list().length,0)
+  await host.submitConversationText('chat:main','Yes, go ahead','yes');await host.waitConversation('chat:main')
+  assert.deepEqual(host.tasks.list().find(task=>task.goal==='goal 2')?.todo_ref,confirmed,'the confirmation turn links the Todo selected one turn earlier')
+  await host.submitConversationText('chat:main','Another Todo','other',expired);await host.waitConversation('chat:main')
+  for(const id of ['a','b','c','d']){await host.submitConversationText('chat:main','Unrelated '+id,id);await host.waitConversation('chat:main')}
+  await host.submitConversationText('chat:main','Now do it','late');await host.waitConversation('chat:main')
+  assert.equal(host.tasks.list().some(task=>task.todo_ref?.id===expired.id),false,'a stale selection is not linked after it expires')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})

@@ -26,7 +26,9 @@ import type {ConversationRuntimeFactory} from './conversations.js'
 import {scopeApprovalController} from './approval-scope.js'
 import {deliveryToEvent,executorApprovalMessage,projectStateMessage} from '../desktop/desktop-wire.js'
 
+const SOURCE_TODO_TURNS=4
 /** Prepared topic text must retain evidence authorization for the actual model recipient. */
+
 export async function maySendPreparedMemory(memory: PersonalMemoryResource|undefined, consumer: string|undefined, refs: readonly string[]): Promise<boolean> {
  if (!memory?.canReadConversationEvidence || !consumer || refs.length === 0) return false
  for (const ref of refs) if (!await memory.canReadConversationEvidence(ref, consumer)) return false
@@ -115,7 +117,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    }catch{options.onDiagnostic?.('[runtime-diagnostic] task_delivery_or_check_failed')}
   }
   const projectConfirmation=options.codexResource?.mode==='project'?new ProjectConfirmationController({clock:core.runtime.clock,idFactory:()=>randomUUID(),onChange:view=>{notifyWaiting();options.host.recordConfirmation(conversation.id,view);emit(JSON.parse(projectStateMessage(view)) as Record<string,unknown>)}}):undefined
-  let sourceTodo:{id:string;version:number}|undefined,sourceOrigin:string|undefined
+  // A selected Todo stays linked for a few follow-up turns so "confirm first, then run" still links it; history restores it after restart.
+  let sourceTodo:{id:string;version:number}|undefined,sourceOrigin:string|undefined,sourceTodoTurns=0
+  {const users=conversation.messages.filter(message=>message.role==='user').slice(-SOURCE_TODO_TURNS),index=users.findLastIndex(message=>message.source_todo);if(index>=0){sourceTodo={...users[index]!.source_todo!};sourceTodoTurns=SOURCE_TODO_TURNS-(users.length-index)}}
+  const sourceTodoCurrent=()=>{if(!sourceTodo)return false;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);return todo?.version===sourceTodo.version&&todo.status!=='done'&&todo.status!=='cancelled'&&!options.host.tasks.list().some(task=>task.todo_ref?.id===sourceTodo!.id)}
   const graph=buildRealtimeAssembly({core,provider,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
@@ -224,7 +229,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    ownsWork:id=>core.runtime.inFlightDelegate(id)!==undefined,bridgeService:graph.service,sendAudio:(pcm)=>graph.service.sendAudio(pcm),
    runTurn:async(text,callerSignal,context)=>{
     const deadline=createTurnDeadline({clock:core.runtime.clock,parent:callerSignal,isWaiting:()=>(approval?.pending===true||projectConfirmation?.pending===true),subscribe:listener=>{waitingListeners.add(listener);return()=>waitingListeners.delete(listener)}})
-    const signal=deadline.signal;signal.throwIfAborted();sourceTodo=context?.source_todo;sourceOrigin=undefined;assistant='';assistantTurnId=undefined
+    const signal=deadline.signal;signal.throwIfAborted();if(context?.source_todo){sourceTodo={...context.source_todo};sourceTodoTurns=SOURCE_TODO_TURNS}else if(sourceTodoTurns>1)sourceTodoTurns--;else sourceTodo=undefined;if(sourceTodo&&!sourceTodoCurrent())sourceTodo=undefined;sourceOrigin=undefined;assistant='';assistantTurnId=undefined
     const done=new Promise<{assistant:string;turn_id?:string}>((resolve,reject)=>{pending={resolve,reject}}),current=pending
     const abort=()=>{
      pending?.reject(signal.reason??Error('conversation_cleared'));pending=undefined
@@ -235,8 +240,8 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
      else void graph.service.clearConversation().catch(()=>{ /* clear installs its epoch fence before asynchronous teardown */ })
     }
     signal.addEventListener('abort',abort,{once:true})
-    try{if(sourceTodo)await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({purpose:'selected_todo_context',linked_todo_available:true,instruction:'The upcoming user text has a selected Todo source. Only declarations explicitly handling that Todo should set link_source_todo=true. Independent tasks must omit it. This context does not authorize execution.'})},{confirmationTimeout:null,asUserActivation:false,signal});const [,result]=await Promise.all([graph.service.submitText(text),done]);return result}
-    finally{sourceTodo=undefined;sourceOrigin=undefined;deadline.close();if(pending===current)pending=undefined;signal.removeEventListener('abort',abort)}
+    try{if(sourceTodo)await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({purpose:'selected_todo_context',linked_todo_available:true,instruction:(context?.source_todo?'The upcoming user text has a selected Todo source.':'An earlier user turn in this conversation selected a Todo source and no task has handled it yet.')+' Only declarations explicitly handling that Todo should set link_source_todo=true. Independent tasks must omit it. This context does not authorize execution.'})},{confirmationTimeout:null,asUserActivation:false,signal});const [,result]=await Promise.all([graph.service.submitText(text),done]);return result}
+    finally{sourceOrigin=undefined;deadline.close();if(pending===current)pending=undefined;signal.removeEventListener('abort',abort)}
    },
    close,
    approvalDecision:(id,approved)=>approval?.acceptDecision({approvalId:id,decision:approved?'accept':'decline'})?Promise.resolve():Promise.reject(Error('approval_not_owned')),

@@ -229,10 +229,9 @@ function urlCarriesCredentials(value: string): boolean {
   try {
     const url = new URL(value)
     if (url.username !== '' || url.password !== '') return true
-    return [...url.searchParams.entries()].some(([key, param]) => {
-      const normalized = key.replace(/[_-]/gu, '').toLowerCase()
-      return credentialQueryName.has(normalized) && param !== REDACTED_QUERY_VALUE
-    })
+    const credential = (key: string) => credentialQueryName.has(key.replace(/[_-]/gu, '').toLowerCase())
+    if ([...new URLSearchParams(url.hash.slice(1)).keys()].some(credential)) return true
+    return [...url.searchParams.entries()].some(([key, param]) => credential(key) && param !== REDACTED_QUERY_VALUE)
   } catch {
     return false
   }
@@ -240,11 +239,19 @@ function urlCarriesCredentials(value: string): boolean {
 
 const REDACTED_QUERY_VALUE = '[REDACTED]'
 
-/** Replace only credential query values so benign fields in a public URL stay readable. */
+/**
+ * Replace only credential query values so benign fields in a public URL stay readable.
+ * URLs with userinfo, a fragment, or encoded keys are left whole for scrub() to redact entirely.
+ */
 export function redactUrlQueryCredentials(text: string): string {
-  return text.replace(/https?:\/\/[^\s<>"']+/giu, match => match.replace(/([?&])([^=&#]+)=([^&#]*)/gu, (pair, separator: string, key: string) => (
-    credentialQueryName.has(key.replace(/[_-]/gu, '').toLowerCase()) ? `${separator}${key}=${REDACTED_QUERY_VALUE}` : pair
-  )))
+  return text.replace(/https?:\/\/[^\s<>"']+/giu, match => {
+    let url: URL
+    try { url = new URL(match) } catch { return match }
+    if (url.username !== '' || url.password !== '' || match.includes('#') || /[?&][^=&]*%/u.test(match)) return match
+    return match.replace(/([?&])([^=&]+)=([^&]*)/gu, (pair, separator: string, key: string) => (
+      credentialQueryName.has(key.replace(/[_-]/gu, '').toLowerCase()) ? `${separator}${key}=${REDACTED_QUERY_VALUE}` : pair
+    ))
+  })
 }
 
 function replaceAll(value: string, pattern: RegExp, replacement: () => string): string {
