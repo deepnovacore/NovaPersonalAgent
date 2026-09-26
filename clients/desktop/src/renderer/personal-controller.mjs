@@ -181,4 +181,12 @@ export class PersonalController {
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';this.changed();return false}
     state.submission=request;state.draft='';state.source_todo=null;state.error='';this.changed();return true
   }
+  /** Sends a host-composed user message (e.g. a changed execution place) without touching the draft. */
+  submitText(text){
+    const id=this.selectedId,state=this.state(id)
+    if(!this.presentationReady||!id||state.submission||this.isVoiceConversation||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!text.trim()||text.length>4000)return false
+    const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false}
+    if(!this.sendSubmission(id,request)){state.error='发送失败';this.changed();return false}
+    state.submission=request;state.error='';this.changed();return true
+  }
 }

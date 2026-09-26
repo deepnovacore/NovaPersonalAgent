@@ -2,6 +2,7 @@ import {TASK_PHASE_LABEL,taskNextStep} from './tasks-page.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {renderFeedCard,sendPresented} from './feed-card.mjs'
 import {currentLanguage,t} from './locale.mjs'
+import {mountExecutionCard} from './execution-card.mjs'
 
 /**
  * Confirms the proactive conversation as read only when the newest message is
@@ -71,6 +72,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1','有什么需要帮忙？'),el('p','交办一件事、问一个问题，或从左侧的待办与资讯里「接着聊」。','hint'))
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
  const taskCards=el('section',undefined,'conversation-task-cards');taskCards.setAttribute('aria-label',t('此对话的任务'));pane.append(taskCards);const cardNodes=new Map()
+ const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:text=>c.submitText(text),run})
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder='输入消息…';draft.maxLength=4000;draft.setAttribute('aria-label','消息草稿');draft.rows=3
  draft.addEventListener('input',()=>{c.draft=draft.value;if(!draft.value.trim())c.state().source_todo=null;renderSource()})
  draft.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void run(()=>c.submit())}})
@@ -171,7 +173,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
   voice.disabled=!c.presentationReady||!c.connected||!c.selectedId||(Boolean(c.voiceId)&&!c.isVoiceConversation)||(c.mode!=='text'&&!c.isVoiceConversation)
   voice.textContent=c.isVoiceConversation?'结束语音':'持续对话';voice.setAttribute('aria-pressed',String(c.isVoiceConversation))
   hint.textContent=!c.connected?(c.everConnected?'连接已断开，草稿已保留':'正在连接…'):c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 松开后生成草稿'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行'
-  renderTarget();renderConversations();renderHistory();deliverPresented();read()
+  renderTarget();executionCard.update((c.snapshot?.pending_confirmations??[]).find(item=>item.proposal_id&&item.workspace&&item.conversation_id===c.selectedId)??null,c.selectedId);renderConversations();renderHistory();deliverPresented();read()
  }
  async function focusDraft(text,source=null){if(!c.selectedId||c.isVoiceConversation)await c.create();if(text!==undefined)c.draft=text;c.state().source_todo=source;setOpen(true);update();draft.focus()}
  function reveal(){setOpen(true);update();draft.focus()}

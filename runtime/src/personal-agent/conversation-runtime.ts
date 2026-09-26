@@ -244,6 +244,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     finally{sourceOrigin=undefined;deadline.close();if(pending===current)pending=undefined;signal.removeEventListener('abort',abort)}
    },
    close,
+   confirmationDecision:(id,confirmed)=>projectConfirmation?.view.pending_confirmation_id===id?graph.service.projectConfirmationDecision(id,confirmed):Promise.reject(Error('confirmation_not_owned')),
    approvalDecision:(id,approved)=>approval?.acceptDecision({approvalId:id,decision:approved?'accept':'decline'})?Promise.resolve():Promise.reject(Error('approval_not_owned')),
   }
  }

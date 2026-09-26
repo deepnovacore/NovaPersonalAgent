@@ -364,6 +364,19 @@ test('authenticated task approval retains original ID and routes to retired runt
 })
 
 
+test('workbench confirmation routes an owned proposal to its conversation runtime and rejects unauthenticated or foreign ids',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-confirm-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});const decisions:unknown[]=[]
+ try{await host.open();host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'ack'}),confirmationDecision:(id,confirmed)=>{decisions.push({id,confirmed});return Promise.resolve()},close:()=>Promise.resolve()}),()=>{/* no renderer transport */})
+ await host.submitConversationText('chat:main','Start');await host.waitConversation('chat:main')
+ host.recordConfirmation('chat:main',{pending_confirmation:true,pending_confirmation_busy:true,pending_confirmation_id:'p1',workspace_display_name:null,session_title:null,pending_action:'resume_session',pending_workspace_display_name:'counter',pending_session_title:'Add tests',pending_expires_in_seconds:60})
+ assert.deepEqual(host.snapshot().pending_confirmations[0],{proposal_id:'p1',conversation_id:'chat:main',summary:'counter',action:'resume_session',workspace:'counter',session:'Add tests',busy:true})
+ const raw=(proposal_id:string,request_id:string)=>({type:'personal.command',request_id,method:'conversations.confirm',params:{id:'chat:main',proposal_id,confirmed:true}})
+ assert.equal((await host.command(raw('p1','anon')) as {ok:boolean}).ok,false)
+ assert.equal((await host.command(raw('other','foreign'),{client_id:'A'}) as {error?:string}).error,'confirmation_not_owned')
+ assert.equal((await host.command(raw('p1','ok'),{client_id:'A'}) as {ok:boolean}).ok,true);assert.deepEqual(decisions,[{id:'p1',confirmed:true}])
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
 test('review boundary: target command closes idle clarification runtime before next turn', async () => {
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-target-restart-'))
  const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})

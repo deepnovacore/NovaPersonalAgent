@@ -11,6 +11,10 @@ export interface CodingTarget extends CodingTargetSelection {
   readonly project: string
   readonly title: string
   readonly executor: 'codex'
+  /** Epoch ms of the executor's last use; sessions only. */
+  readonly last_active?: number
+  /** Title of the work holding this target's resources, when the executor's lock policy blocks it. */
+  readonly running?: string
 }
 
 export interface CodingTargetPort {

@@ -273,13 +273,15 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
     const targets: (CodingTarget & {directory: string})[] = []
     for (const workspace of [...snapshot.workspaces].sort((a, b) => b.last_used_at - a.last_used_at).slice(0, MAX_ROSTER)) {
       try { await this.#store.revalidateWorkspace(workspace.workspace_id) } catch { continue }
-      const base = {workspace_id: workspace.workspace_id, project: workspace.display_name, executor: 'codex' as const, directory: workspace.canonical_path}
+      // Exclusive workspace concurrency: a running work blocks every session of its workspace.
+      const holder = this.#slots.get(workspace.workspace_id)?.work.title
+      const base = {workspace_id: workspace.workspace_id, project: workspace.display_name, executor: 'codex' as const, directory: workspace.canonical_path, ...(holder === undefined ? {} : {running: holder})}
       targets.push({...base, session_id: null, title: workspace.display_name})
       for (const session of snapshot.sessions.filter(item => item.workspace_id === workspace.workspace_id
         && item.state === 'ready' && item.codex_thread_id !== null
         && (!item.executor_home || item.origin === 'nova' || (this.#catalogHealthy && this.#localSessionIds.has(item.session_id))))
         .sort((a, b) => b.last_used_at - a.last_used_at).slice(0, 20)) {
-        if (await this.#rolloutAvailable(session)) targets.push({...base, session_id: session.session_id, title: session.display_title})
+        if (await this.#rolloutAvailable(session)) targets.push({...base, session_id: session.session_id, title: session.display_title, last_active: session.last_used_at})
       }
     }
     return targets
