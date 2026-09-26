@@ -20,6 +20,11 @@ test('two text conversations send concurrently and receipts affect only their ow
  c.receive({type:'input.text_result',request_id:b.request_id,conversation_id:'a',ok:true});assert.ok(c.state('b').submission)
  c.receive({type:'input.text_result',request_id:b.request_id,conversation_id:'b',ok:true});assert.equal(c.state('b').submission,null)
 })
+test('text sent for a named conversation goes there; text that cannot be sent is kept in that draft',()=>{
+ const h=harness();h.snapshot('b');h.c.draft='B draft'
+ assert.equal(h.c.submitText('switch place','a'),true);assert.equal(h.sent.at(-1).conversation_id,'a');assert.equal(h.c.state('b').draft,'B draft')
+ assert.equal(h.c.submitText('second','a'),false,'a pending submission blocks the next');assert.equal(h.c.state('a').draft,'second')
+})
 test('voice owner blocks own text and all dictation, other text does not stop or steal capture',async()=>{
  const h=harness();await h.c.voice();assert.equal(h.starts,1);assert.equal(h.c.voiceId,'a');h.c.draft='blocked';assert.equal(await h.c.submit(),false)
  h.snapshot('b','a');h.c.draft='parallel text';const stops=h.stops;assert.equal(await h.c.submit(),true);assert.equal(h.stops,stops);assert.equal(h.c.mode,'voice')

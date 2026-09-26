@@ -15,10 +15,10 @@ const targets=[
 ]
 const proposal={proposal_id:'p1',conversation_id:'chat',action:'resume_session',workspace:'counter',session:'Add tests',busy:false}
 function mount(reply=async()=>({accepted:true})){
- const root=el('div'),calls=[],sent=[]
- const card=mountExecutionCard(root,{el,command:async(method,params)=>{calls.push([method,params]);return method==='conversations.targets'?{targets}:reply(method,params)},submitText:text=>sent.push(text),run:action=>action()})
+ const root=el('div'),calls=[],sent=[],owners=[]
+ const card=mountExecutionCard(root,{el,command:async(method,params)=>{calls.push([method,params]);return method==='conversations.targets'?{targets}:reply(method,params)},submitText:(text,id)=>{sent.push(text);owners.push(id)},run:action=>action()})
  const all=()=>[root].flatMap(function walk(n){return [n,...n.children.flatMap(walk)]})
- return {card,calls,sent,find:label=>all().find(n=>n['aria-label']===label||n.textContent===label)}
+ return {card,calls,sent,owners,find:label=>all().find(n=>n['aria-label']===label||n.textContent===label)}
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve))
 
@@ -51,4 +51,12 @@ test('a proposal already decided elsewhere says so and sends no change',async()=
  m.find('会话').value='Old fix';m.find('会话').listeners.change();await m.find('改为此位置执行').listeners.click()
  assert.ok(m.find('这个提议已在另一端处理'));assert.deepEqual(m.sent,[])
  m.card.update(null,'chat');assert.equal(m.find('执行位置').hidden,true)
+})
+
+test('a changed place goes to the conversation that owned the proposal, even after switching away',async()=>{
+ let release;const m=mount(()=>new Promise(resolve=>{release=resolve}));m.card.update(proposal,'chat');await settle()
+ m.find('会话').value='';m.find('会话').listeners.change()
+ const clicked=m.find('改为此位置执行').listeners.click();await settle()
+ m.card.update({...proposal,proposal_id:'p2',conversation_id:'other'},'other');release({accepted:true});await clicked
+ assert.deepEqual(m.owners,['chat'])
 })

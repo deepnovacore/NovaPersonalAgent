@@ -72,7 +72,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1','有什么需要帮忙？'),el('p','交办一件事、问一个问题，或从左侧的待办与资讯里「接着聊」。','hint'))
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
  const taskCards=el('section',undefined,'conversation-task-cards');taskCards.setAttribute('aria-label',t('此对话的任务'));pane.append(taskCards);const cardNodes=new Map()
- const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:text=>c.submitText(text),run})
+ const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:(text,id)=>c.submitText(text,id),run})
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder='输入消息…';draft.maxLength=4000;draft.setAttribute('aria-label','消息草稿');draft.rows=3
  draft.addEventListener('input',()=>{c.draft=draft.value;if(!draft.value.trim())c.state().source_todo=null;renderSource()})
  draft.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void run(()=>c.submit())}})

@@ -674,7 +674,7 @@ test('an input the executor accepted while control was handed back is labelled a
   assert.equal(tasks.events(task.id,0).items.filter(event=>event.text.includes('input_before_handback')).length,1,'in-fence sends are not labelled')
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })
-test('finished tasks beyond the retention cap leave the store with their receipts, while unresolved ones stay',async()=>{
+test('finished tasks beyond the retention cap leave the store, their requests stay spent, and unresolved ones stay',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'task-retention-'))
  const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
  try{
@@ -690,6 +690,10 @@ test('finished tasks beyond the retention cap leave the store with their receipt
   assert.ok(kept.has(unresolved.id),'a task with an unknown effect is never retired')
   await tasks.close();const restored=new TaskService(tasks.path);await restored.open()
   assert.equal(restored.list().length,201);assert.throws(()=>restored.get(ids[0]!),/task_not_found/)
+  await assert.rejects(restored.delegate('d0',{conversation_id:'c',goal:'Goal 0',acceptance:[],origin_ref:'conversation:0'}),/task_retired/,'replaying a retired delegation never starts it again')
+  await assert.rejects(restored.cancel('c0',fence(ids[0]!),{kind:'nova'}),/task_retired/)
+  await assert.rejects(restored.delegate('d0',{conversation_id:'c',goal:'Other',acceptance:[],origin_ref:'conversation:0'}),/request_conflict/)
+  assert.equal(restored.list().length,201)
   const retried=await restored.delegate('d203',{conversation_id:'c',goal:'Fresh',acceptance:[],origin_ref:'conversation:203'});assert.equal(restored.get(retried.id).goal,'Fresh')
   await restored.close()
  }finally{await rm(dir,{recursive:true,force:true})}

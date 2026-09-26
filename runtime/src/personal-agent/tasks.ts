@@ -106,7 +106,7 @@ const stateSchema = z.object({
   }).strict()).default({}), tasks: z.array(recordSchema), receipts: z.record(z.string(), z.object({ hash: z.string(), task_id: id, result: recordSchema.optional() }).strict()), handbacks: z.record(z.string(), z.object({ hash: z.string(), command: z.string().max(16384).optional(), result: z.array(recordSchema).optional() }).strict()).default({})
 }).strict()
 type TaskState = z.infer<typeof stateSchema>
-const RETAINED_FINISHED_TASKS = 200, RETAINED_HANDBACKS = 256
+const RETAINED_FINISHED_TASKS = 200, RETAINED_HANDBACKS = 256, RETAINED_TOMBSTONES = 20000
 const empty = (): TaskState => ({
   instruction_work_ids: [], outcomes: [], work_fences: {}, pending_effects: {}, replay_incomplete: [], events: [], event_keys: {}, event_seq: 0, truncated: {}, tasks: [], receipts: {}, handbacks: {}, effects: {}
 })
@@ -324,7 +324,7 @@ export class TaskService {
         if (prior.hash !== payload)
           throw Error('request_conflict')
         if (!prior.result)
-          throw Error('receipt_invalid')
+          throw Error('task_retired')
         return structuredClone(prior.result) as TaskRecord
       }
       const task: TaskRecord & {
@@ -355,6 +355,8 @@ export class TaskService {
       if (prior) {
         if (prior.hash !== body)
           throw Error('request_conflict')
+        if (!prior.result)
+          throw Error('task_retired')
         return structuredClone(prior.result) as TaskRecord
       }
       if (!stillWanted())
@@ -778,7 +780,7 @@ export class TaskService {
         if (prior.hash !== body)
           throw Error('request_conflict')
         if (!prior.result)
-          throw Error('receipt_invalid')
+          throw Error('task_retired')
         return structuredClone(prior.result) as TaskRecord
       }
       const task = next.tasks.find(item => item.id === parsed.fence.task_id)
@@ -832,9 +834,10 @@ export class TaskService {
       next.outcomes = next.outcomes.filter(outcome => !retired.has(outcome.task_id))
       next.instruction_work_ids = next.instruction_work_ids.filter(work => !works.has(work))
       next.replay_incomplete = next.replay_incomplete.filter(taskId => !retired.has(taskId))
-      for (const [key, value] of Object.entries(next.receipts))
+      // A retired task's receipts become tombstones, so replaying its request cannot start the work again.
+      for (const value of Object.values(next.receipts))
         if (retired.has(value.task_id))
-          delete next.receipts[key]
+          delete value.result
       for (const [key, value] of Object.entries(next.effects))
         if (value.task_id && retired.has(value.task_id))
           delete next.effects[key]
@@ -850,6 +853,9 @@ export class TaskService {
       for (const taskId of retired)
         delete next.truncated[taskId]
     }
+    const tombstones = Object.entries(next.receipts).filter(([, receipt]) => !receipt.result).map(([key]) => key)
+    for (const key of tombstones.slice(0, Math.max(0, tombstones.length - RETAINED_TOMBSTONES)))
+      delete next.receipts[key]
     const handbacks = Object.keys(next.handbacks)
     for (const key of handbacks.slice(0, Math.max(0, handbacks.length - RETAINED_HANDBACKS)))
       delete next.handbacks[key]

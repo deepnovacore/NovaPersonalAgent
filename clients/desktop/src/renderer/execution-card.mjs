@@ -47,8 +47,8 @@ export function mountExecutionCard(parent,{el,command,submitText,run}){
  go.addEventListener('click',()=>run(async()=>{
   if(!current)return
   if(!changed()){await decide(true);return}
-  const project=workspaceSelect.value,session=sessionSelect.value
-  if(await decide(false))submitText(session?t('改为在工作区「{0}」的会话「{1}」中继续执行。',project,session):t('改为在工作区「{0}」新开会话执行。',project))
+  const project=workspaceSelect.value,session=sessionSelect.value,owner=conversation
+  if(await decide(false))submitText(session?t('改为在工作区「{0}」的会话「{1}」中继续执行。',project,session):t('改为在工作区「{0}」新开会话执行。',project),owner)
  }))
  cancel.addEventListener('click',()=>run(()=>current&&decide(false)))
  workspaceSelect.addEventListener('change',()=>{fillSessions();render()})

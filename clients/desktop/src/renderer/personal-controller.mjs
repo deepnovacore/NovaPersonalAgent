@@ -182,11 +182,13 @@ export class PersonalController {
     state.submission=request;state.draft='';state.source_todo=null;state.error='';this.changed();return true
   }
   /** Sends a host-composed user message (e.g. a changed execution place) without touching the draft. */
-  submitText(text){
-    const id=this.selectedId,state=this.state(id)
-    if(!this.presentationReady||!id||state.submission||this.isVoiceConversation||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!text.trim()||text.length>4000)return false
+  /** Sends text to conversation `id` without touching its draft; text that cannot be sent is left in that draft instead. */
+  submitText(text,id=this.selectedId){
+    const state=this.state(id),keep=()=>{if(!state.draft)state.draft=text;this.changed();return false}
+    if(!id||!text.trim()||text.length>4000)return false
+    if(!this.presentationReady||state.submission||(id===this.selectedId?this.isVoiceConversation:this.voiceId===id)||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input'))return keep()
     const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false}
-    if(!this.sendSubmission(id,request)){state.error='发送失败';this.changed();return false}
+    if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';return keep()}
     state.submission=request;state.error='';this.changed();return true
   }
 }
