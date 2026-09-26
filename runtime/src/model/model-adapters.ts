@@ -173,7 +173,7 @@ export class GatewaySurrogate {
     }
     const coding=task.execution_route==='codex'||currentEvidence.some(item=>{try{return item.kind==='work'&&(JSON.parse(item.content) as {worker?:unknown}|null)?.worker==='codex'}catch{return false}})
     if(decision.kind==='complete'&&coding
-      &&!currentEvidence.some(item=>(decision.criteria??[]).some(criterion=>criterion.evidence_refs.includes(item.ref))&&hasBoundCheck(task,item))){
+      &&!currentEvidence.some(item=>(task.acceptance.length?(decision.criteria??[]).flatMap(criterion=>criterion.evidence_refs):decision.evidence_refs).includes(item.ref)&&hasBoundCheck(task,item))){
       return {kind:'wait',reason:'Actual command results or MCP readback are missing, incomplete, or not bound to this task work/session.',evidence_refs:[]}
     }
     return decision
@@ -318,11 +318,19 @@ export class GatewayCompressor {
 
 
 /** Listing or printing files proves nothing about behaviour, so it cannot be the task's hard check. */
-const INSPECT_ONLY=new Set(['ls','pwd','cat','echo','head','tail','wc','find','tree','stat','file','which','true','printf','env','date','whoami'])
+const INSPECT_ONLY=new Set(['ls','pwd','cat','echo','head','tail','wc','find','tree','stat','file','which','true',':','printf','env','date','whoami'])
+const COMMAND_WRAPPERS=new Set(['command','env','exec','time','nohup','builtin'])
 function inspectsOnly(command:string):boolean {
   const script=command.replace(/^(?:\/\S*\/)?(?:ba|z)?sh\s+-l?c\s+/,'').replace(/^['"]|['"]$/g,'')
-  const steps=script.split(/&&|\|\||;|\|/).map(step=>step.trim()).filter(Boolean)
-  return steps.every(step=>{const [first='',second='']=step.split(/\s+/);if(first==='cd')return true;if(first==='git')return ['status','log','diff','show','branch'].includes(second);return INSPECT_ONLY.has(first.replace(/^.*\//,''))})
+  const steps=script.split(/&&|\|\||;|\||\n/).map(step=>step.trim()).filter(Boolean)
+  return steps.every(step=>{
+    const words=step.split(/\s+/)
+    while(words.length>1&&(COMMAND_WRAPPERS.has(words[0]!.replace(/^.*\//,''))||/^\w+=/.test(words[0]!)||(words[0]!.startsWith('-')&&words.length>1)))words.shift()
+    const [first='',second='']=words;const name=first.replace(/^.*\//,'')
+    if(name==='cd'||/^\w+=/.test(first))return true
+    if(name==='git')return ['status','log','diff','show','branch'].includes(second)
+    return INSPECT_ONLY.has(name)
+  })
 }
 function hasBoundCheck(task:TaskRecord,evidence:TaskEvidence):boolean {
   if(evidence.kind!=='work'||evidence.outcome!=='ok'||evidence.task_id!==task.id||!evidence.work_id

@@ -397,3 +397,24 @@ test('a verifier completion must map every criterion to evidence, and listing fi
   assert.equal((await run({kind:'complete',evidence_refs:[ref],criteria:[{index:0,evidence_refs:[ref]},{index:1,evidence_refs:[ref]}]})).kind,'wait','ls is not a check')
  }finally{await rm(dir,{recursive:true,force:true})}
 })
+
+test('a coding task without criteria completes on a bound check, and wrapped no-ops are not checks',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js')
+ const verdict=async(command:string)=>{
+  const dir=await mkdtemp(join(await realpath(tmpdir()),'task-check-')),tasks=new TaskService(join(dir,'tasks.json'))
+  try{
+   await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Fix and test',acceptance:[],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+   await tasks.bindWork(fence,'work','session')
+   await tasks.appendEvent({task_id:task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',kind:'tool',stage:'completed',refs:[],item_id:'check',text:JSON.stringify({type:'commandExecution',status:'completed',command,output:'ok',exit_code:0})},'check')
+   await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'Done'})
+   const ref=tasks.evidence(task.id)[0]!.ref
+   return (await new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({kind:'complete',evidence_refs:[ref]})),model:'test',proactivityPreset:'balanced'}).evaluateTask(tasks.get(task.id),tasks.evidence(task.id),new AbortController().signal)).kind
+  }finally{await rm(dir,{recursive:true,force:true})}
+ }
+ assert.equal(await verdict('node --test'),'complete')
+ assert.equal(await verdict('env CI=1 node --test'),'complete')
+ assert.equal(await verdict('cat README.md\nnode --test'),'complete')
+ assert.equal(await verdict('command true'),'wait')
+ assert.equal(await verdict('env'),'wait')
+ assert.equal(await verdict("/bin/zsh -lc 'cd app && ls'"),'wait')
+})
