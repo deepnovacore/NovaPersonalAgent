@@ -128,3 +128,20 @@ test('real command-state-inspector feedback settles control actions and refreshe
   m.view.dispose();controller.disconnect();socket.terminate();await realtime.server.close()
  }
 })
+test('while Nova holds control the user can stop, reconcile an unknown step and continue without taking over',async()=>{
+ const m=mount(async(method,params)=>method==='tasks.get'?task({phase:'waiting',waiting_reason:'user_reconciled'}):task({phase:'waiting',waiting_reason:'user_reconciled',...params}))
+ m.view.update(task({phase:'running'}));assert.equal(m.find('停止任务').disabled,false);assert.equal(m.find('已核对：已执行').hidden,true)
+ m.view.update(task({phase:'waiting',waiting_reason:'task_effect_unknown',capabilities:{detail:'conversation',input:true,reconcile:true}}))
+ const done=m.find('已核对：已执行'),notRun=m.find('已核对：未执行'),resume=m.find('继续任务')
+ assert.equal(done.hidden,false);assert.equal(notRun.disabled,false);assert.equal(resume.disabled,true,'continue waits for the user to reconcile')
+ await notRun.listeners.click();assert.deepEqual(m.calls.find(([method])=>method==='tasks.reconcile')[1],{task_id:'t',control_revision:0,goal_revision:0,resolution:'not_run'})
+ assert.equal(m.find('已核对：已执行').hidden,true);assert.equal(resume.disabled,false)
+ m.view.update(task({phase:'waiting',controller:{kind:'user',client_id:'other'},capabilities:{detail:'conversation',input:true,reconcile:true}}))
+ assert.equal(m.find('停止任务').disabled,true);assert.equal(m.find('已核对：已执行').disabled,true)
+})
+test('a completed task whose Todo changed offers an explicit Todo completion',async()=>{
+ const m=mount(async()=>task({phase:'completed',todo_sync:'synced'}))
+ m.view.update(task({phase:'completed',todo_sync:'conflict',capabilities:{detail:'conversation',input:true,todo_conflict:true}}))
+ const close=m.find('标记 Todo 完成');assert.equal(close.hidden,false);await close.listeners.click()
+ assert.deepEqual(m.calls.find(([method])=>method==='tasks.complete_todo')[1],{task_id:'t',control_revision:0,goal_revision:0});assert.equal(close.hidden,true)
+})

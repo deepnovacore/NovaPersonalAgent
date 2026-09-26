@@ -963,4 +963,9 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "第 {0} 次执行": "Run {0}",
   "停止本次执行": "Stop this run",
   "任务需要你处理": "This task needs you",
+  "已核对：已执行": "Checked: it ran",
+  "标记 Todo 完成": "Mark Todo done",
+  "已核对：未执行": "Checked: it did not run",
+  "Nova 无法确认上一步是否已执行；请在项目中核对后选择": "Nova could not confirm whether the last step ran. Check the project, then choose.",
+  "已核对执行结果，可以继续任务": "Execution checked. You can continue the task.",
 })

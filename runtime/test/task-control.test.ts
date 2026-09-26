@@ -186,3 +186,49 @@ test('input acknowledgement settling after handback wakes reconciliation even wi
  assert.equal(f.host.tasks.get(task.id).phase,'completed');assert.equal(f.host.tasks.get(task.id).goal_revision,0)
  }finally{accept?.('accepted');await f.close()}
 })
+
+test('a user unblocks a waiting task without taking over: reconcile unknown work, continue, or stop',async()=>{
+ const f=await fixture();try{
+  const task=await f.delegate('unknown-effect');assert.equal(task.phase,'waiting');assert.deepEqual(task.controller,{kind:'nova'})
+  await f.host.tasks.bindWork(f.fence(f.host.tasks.get(task.id)),'lost','session');await f.host.tasks.recordWorkOutcome('lost','unknown',{result:'transport closed'})
+  await f.host.tasks.wait(f.fence(f.host.tasks.get(task.id)),'task_effect_unknown')
+  let current=f.host.tasks.get(task.id)
+  const caps=await f.command('tasks.get',{task_id:task.id}) as unknown as {data:{capabilities:{reconcile:boolean}}};assert.equal(caps.data.capabilities.reconcile,true)
+  assert.equal((await f.command('tasks.continue',f.fence(current))).error,'task_effect_unknown')
+  const reconciled=await f.command('tasks.reconcile',{...f.fence(current),resolution:'not_run'},'reconcile')
+  assert.equal(reconciled.ok,true);assert.equal(reconciled.data.waiting_reason,'user_reconciled');assert.deepEqual(reconciled.data.controller,{kind:'nova'})
+  assert.equal(f.host.tasks.hasUnknownWork(task.id),false);assert.equal(f.host.tasks.needsReconcile(task.id),false)
+  assert.equal((await f.command('tasks.reconcile',{...f.fence(reconciled.data),resolution:'done'})).error,'nothing_to_reconcile')
+  current=f.host.tasks.get(task.id)
+  const continued=await f.command('tasks.continue',f.fence(current))
+  assert.equal(continued.ok,true);assert.deepEqual(continued.data.controller,{kind:'nova'});assert.notEqual(continued.data.phase,'waiting')
+  const stopped=await f.command('tasks.cancel',f.fence(f.host.tasks.get(task.id)))
+  assert.equal(stopped.ok,true);assert.equal(stopped.data.phase,'cancelled')
+ }finally{await f.close()}
+})
+
+test('another client that holds control still blocks stop, continue and reconcile',async()=>{
+ const f=await fixture();try{
+  const queued=await f.host.tasks.delegate('queued',{conversation_id:'chat:main',goal:'Queued',acceptance:['Checked'],origin_ref:'conversation:test'})
+  assert.equal(queued.phase,'queued');assert.equal((await f.command('tasks.continue',f.fence(queued))).error,'not_controller','continue only unblocks a waiting task')
+  const task=await f.delegate('held'),owned=await f.take(task,'B')
+  for(const [method,params] of [['tasks.cancel',f.fence(owned)],['tasks.continue',f.fence(owned)],['tasks.reconcile',{...f.fence(owned),resolution:'done'}]] as const)
+   assert.equal((await f.command(method,params,crypto.randomUUID(),'A')).error,'not_controller',method)
+ }finally{await f.close()}
+})
+
+test('a user closes a Todo whose task scope changed; nothing else can complete it',async()=>{
+ const f=await fixture();try{
+  const todo=await f.host.life.mutate({op:'create',kind:'todo',title:'Ship login'},'todo')
+  const task=await f.host.tasks.delegate('scoped',{conversation_id:'chat:main',goal:'Ship login',acceptance:['Checked'],origin_ref:'conversation:test',todo_ref:{id:todo.id,version:todo.version}})
+  assert.equal((await f.command('tasks.complete_todo',f.fence(task))).error,'todo_not_in_conflict')
+  await f.host.tasks.bindWork(f.fence(task),'w','session');await f.host.tasks.recordWorkOutcome('w','ok',{result:'done'})
+  await f.host.tasks.applyDecision(f.fence(f.host.tasks.get(task.id)),{kind:'complete',evidence_refs:['task-work:w']})
+  await f.host.life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,note:'edited elsewhere'},'edit')
+  const done=f.host.tasks.get(task.id);await f.host.tasks.markTodoSync(task.id,done.goal_revision,'conflict')
+  const caps=await f.command('tasks.get',{task_id:task.id}) as unknown as {data:{capabilities:{todo_conflict:boolean}}};assert.equal(caps.data.capabilities.todo_conflict,true)
+  const resolved=await f.command('tasks.complete_todo',f.fence(done))
+  assert.equal(resolved.ok,true);assert.equal(resolved.data.todo_sync,'synced')
+  assert.equal(f.host.life.snapshot().todos.find(item=>item.id===todo.id)?.status,'done')
+ }finally{await f.close()}
+})

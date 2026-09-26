@@ -149,7 +149,7 @@ export class PersonalAgentHost {
     #taskRuntimes=new Map<string,TaskRuntimePort>();
     attachTaskRuntime(conversationId:string,generation:number,port:TaskRuntimePort):()=>void{const key=conversationId+':'+generation;this.#taskRuntimes.set(key,port);return()=>{if(this.#taskRuntimes.get(key)===port)this.#taskRuntimes.delete(key)}}
     taskRuntime(taskId:string):TaskRuntimePort{const task=this.tasks.get(taskId),port=this.#taskRuntimes.get(task.conversation_id+':'+(task.conversation_generation??0));if(!port)throw Error('task_runtime_unavailable');return port}
-    taskCapabilities(taskId:string){try{const port=this.taskRuntime(taskId);return {detail:port.detail??'summary-only',input:port.detail!=='summary-only'&&!this.#recovering&&!this.#recoveryBlocked.has(taskId),todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}catch{return {detail:'summary-only' as const,input:false,todo_retry:this.tasks.get(taskId).todo_sync==='pending'}}}
+    taskCapabilities(taskId:string){try{const port=this.taskRuntime(taskId);return {detail:port.detail??'summary-only',input:port.detail!=='summary-only'&&!this.#recovering&&!this.#recoveryBlocked.has(taskId),todo_retry:this.tasks.get(taskId).todo_sync==='pending',todo_conflict:this.tasks.get(taskId).todo_sync==='conflict',reconcile:this.tasks.needsReconcile(taskId)}}catch{return {detail:'summary-only' as const,input:false,todo_retry:this.tasks.get(taskId).todo_sync==='pending',todo_conflict:this.tasks.get(taskId).todo_sync==='conflict',reconcile:this.tasks.needsReconcile(taskId)}}}
     continueTask(grant:TaskDispatchContext,instruction:string,sessionId?:string):Promise<unknown>{this.tasks.validateContinuation(grant);const task=this.tasks.get(grant.fence.task_id),inputs=this.tasks.acceptedUserInputs(task.id).map(({request_id,text})=>({request_id,text}));return this.taskRuntime(task.id).dispatch(grant,inputs.length?JSON.stringify({purpose:'continue_authorized_task',goal:task.goal,acceptance:task.acceptance,accepted_user_inputs:inputs,instruction}):instruction,sessionId)}
 
     #codingTargets:CodingTargetPort|undefined;
@@ -765,12 +765,21 @@ export class PersonalAgentHost {
                 const {action,...fence}=q;
                 if(action==='takeover'&&context?.can_takeover===false)throw Error('task_control_unavailable');
                 data=await this.tasks.controlClient(receiptId,fence,client!,action);
-            }else if(command.method==='tasks.continue'&&this.tasks.get(taskFenceSchema.parse(p).task_id).phase==='completed'){
+            }else if(command.method==='tasks.complete_todo'){
+                // The scope changed after delegation, so only the user can say the finished task also finishes the Todo.
+                const fence=taskFenceSchema.parse(p),task=this.tasks.get(fence.task_id);this.tasks.assertCurrent(fence,task.controller)
+                if(task.phase!=='completed'||task.todo_sync!=='conflict'||!task.todo_ref)throw Error('todo_not_in_conflict')
+                await this.life.refresh();const todo=this.life.snapshot().todos.find(item=>item.id===task.todo_ref!.id)
+                if(!todo||todo.status==='cancelled')throw Error('todo_not_found')
+                if(todo.status!=='done')await this.life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,status:'done'},'task-todo-manual:'+task.id)
+                await this.tasks.markTodoSync(task.id,task.goal_revision,'synced');data=this.tasks.get(task.id)
+}else if(command.method==='tasks.continue'&&this.tasks.get(taskFenceSchema.parse(p).task_id).phase==='completed'){
                 const fence=taskFenceSchema.parse(p),task=this.tasks.get(fence.task_id);this.tasks.assertCurrent(fence,task.controller);if(task.todo_sync==='pending')await this.wakeTask(task.id);data=this.tasks.get(task.id);
             }else{
-                const q=command.method==='tasks.input'?taskFenceSchema.extend({session_id:z.string().trim().min(1).max(512),text:z.string().trim().min(1).max(16000)}).strict().parse(p):taskFenceSchema.parse(p);
+                const q=command.method==='tasks.input'?taskFenceSchema.extend({session_id:z.string().trim().min(1).max(512),text:z.string().trim().min(1).max(16000)}).strict().parse(p):command.method==='tasks.reconcile'?taskFenceSchema.extend({resolution:z.enum(['done','not_run'])}).strict().parse(p):taskFenceSchema.parse(p);
                 const fence={task_id:q.task_id,control_revision:q.control_revision,goal_revision:q.goal_revision};
-                this.tasks.assertCurrent(fence,{kind:'user',client_id:client!});
+                // Stop, continue and reconcile authorize in TaskService: a user may unblock a waiting task without taking over.
+                if(command.method==='tasks.input')this.tasks.assertCurrent(fence,{kind:'user',client_id:client!});
                 if('session_id' in q&&typeof q.session_id==='string'&&!this.tasks.get(q.task_id).session_ids.includes(q.session_id))throw Error('session_not_found');
                 if(command.method==='tasks.input'&&'session_id' in q&&typeof q.session_id==='string'&&'text' in q&&typeof q.text==='string'){
                     if(!this.#taskRuntimes.size)throw Error('task_input_unavailable');const port=this.taskRuntime(q.task_id),session=q.session_id,text=q.text;
@@ -778,7 +787,8 @@ export class PersonalAgentHost {
                 }else if(command.method==='tasks.cancel'){
                     const task=await this.cancelTask(receiptId,fence,{kind:'user',client_id:client!});
                     data=task;
-                }else if(command.method==='tasks.continue'){data=await this.tasks.continue(receiptId,fence,{kind:'user',client_id:client!});void this.wakeTask(q.task_id)}else throw Error('task_execution_unavailable');
+                }else if(command.method==='tasks.continue'){data=await this.tasks.continue(receiptId,fence,{kind:'user',client_id:client!});void this.wakeTask(q.task_id)}
+                else if(command.method==='tasks.reconcile'&&'resolution' in q&&(q.resolution==='done'||q.resolution==='not_run')){data=await this.tasks.reconcile(receiptId,fence,{kind:'user',client_id:client!},q.resolution)}else throw Error('task_execution_unavailable');
             }
             if(!taskRead)this.#notify();
             if(command.method==='tasks.control'&&(p as {action?:string}).action==='return')void this.wakeTask((data as TaskRecord).id);

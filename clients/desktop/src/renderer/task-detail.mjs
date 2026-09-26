@@ -36,6 +36,9 @@ export function mountTaskDetail(root,{command,onClose,onViewed=()=>{},after=0,hi
  const handback=button('交还 Nova',()=>act('tasks.control',{...fence(),action:'return'}))
  const stop=button('停止任务',()=>act('tasks.cancel',fence()))
  const resume=button('继续任务',()=>act('tasks.continue',fence()))
+ const markDone=button('已核对：已执行',()=>act('tasks.reconcile',{...fence(),resolution:'done'})),markNotRun=button('已核对：未执行',()=>act('tasks.reconcile',{...fence(),resolution:'not_run'}))
+ const closeTodo=button('标记 Todo 完成',()=>act('tasks.complete_todo',fence()))
+ markDone.title=markNotRun.title=t('Nova 无法确认上一步是否已执行；请在项目中核对后选择')
  const more=button('加载更多活动',()=>refresh().catch(e=>{error.textContent=e.message}),activityMore);more.hidden=true
  const reconcile=button('刷新发送状态',()=>refresh().catch(e=>{error.textContent=e.message}))
  const submit=button('发送给执行器',async()=>{
@@ -56,7 +59,11 @@ export function mountTaskDetail(root,{command,onClose,onViewed=()=>{},after=0,hi
   recipient.textContent=t('发送至执行器会话：{0}{1}',session||t('尚无会话'),draftState.text&&draftState.control_revision!==detail.control_revision?t(' · 上一控制期间的草稿（不会自动发送）'):'')
   draft.disabled=busy||!owned()||!detail.viewer?.client_id||!session||!caps.input||terminal||Boolean(draftState.pending);submit.disabled=draft.disabled||!draft.value?.trim()
   take.hidden=owned()||terminal;take.disabled=busy||!detail.viewer?.can_takeover;handback.hidden=!owned();handback.disabled=busy
-  stop.hidden=terminal;stop.disabled=busy||!owned();resume.hidden=!(detail.phase==='waiting'||(detail.phase==='completed'&&caps.todo_retry));resume.disabled=busy||(!owned()&&!caps.todo_retry)
+  // While Nova holds control, the user may still stop the task or decide how a waiting task moves on.
+  const decide=owned()||detail.controller.kind==='nova'
+  stop.hidden=terminal;stop.disabled=busy||!decide;resume.hidden=!(detail.phase==='waiting'||(detail.phase==='completed'&&caps.todo_retry));resume.disabled=busy||Boolean(caps.reconcile)||(!decide&&!caps.todo_retry)
+  closeTodo.hidden=!(detail.phase==='completed'&&caps.todo_conflict);closeTodo.disabled=busy
+  markDone.hidden=markNotRun.hidden=!(detail.phase==='waiting'&&caps.reconcile);markDone.disabled=markNotRun.disabled=busy||!decide
   more.disabled=Boolean(refreshing);reconcile.hidden=!draftState.pending;select.disabled=busy||!(detail.session_ids??[]).length
  }
  function update(next){

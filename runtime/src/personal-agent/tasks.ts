@@ -44,7 +44,7 @@ export class TaskService{
  #store:BoundedJsonStore<TaskState>;#state:TaskState=empty();#tail:Promise<unknown>=Promise.resolve()
  constructor(readonly path:string,readonly changed:()=>void=()=>{ /* optional projection observer */ },readonly admitExecution:(taskId:string)=>void=()=>{/* standalone task service */}){this.#store=new BoundedJsonStore(path,stateSchema,16*1024*1024)}
  async open():Promise<void>{try{this.#state=await this.#store.read(empty());for(const task of this.#state.tasks)task.original_goal??=Object.values(this.#state.receipts).find(receipt=>receipt.task_id===task.id&&receipt.result?.goal_revision===0)?.result?.goal??(task.goal_revision===0?task.goal:'Original goal unavailable')}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}if(Object.values(this.#state.pending_effects).some(effect=>effect.status==='pending')||this.#state.tasks.some(task=>task.work_ids.some(work=>!this.#state.work_fences[work])))await this.#mutate(next=>{for(const effect of Object.values(next.pending_effects))if(effect.status==='pending')effect.status=effect.write_started===false?'failed':'unknown';for(const task of next.tasks)if(task.work_ids.some(work=>!next.work_fences[work])&&task.phase!=='completed'&&task.phase!=='cancelled'){task.phase='waiting';task.waiting_reason='work_fence_unavailable'}})}
- cancel(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{return this.#change(requestId,{fence:taskFenceSchema.parse(fence),actor:actorSchema.parse(actor),operation:'cancel'},task=>{if(task.phase==='completed')throw Error('task_terminal');task.phase='cancelled';task.waiting_reason=this.hasUnresolvedExecution(task.id)?'cancellation_pending':null})}
+ cancel(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{return this.#change(requestId,{fence:taskFenceSchema.parse(fence),actor:actorSchema.parse(actor),operation:'cancel'},task=>{if(task.phase==='completed')throw Error('task_terminal');task.phase='cancelled';task.waiting_reason=this.hasUnresolvedExecution(task.id)?'cancellation_pending':null},task=>this.#assertDecider(task,fence,actor,false))}
  async input(requestId:string,fence:TaskFence,actor:TaskActor,sessionId:string,text:string,send:(grant:TaskDispatchContext)=>Promise<'accepted'|'failed'|'unknown'>):Promise<'accepted'|'failed'|'unknown'>{
   const request=id.parse(requestId),session=id.parse(sessionId),instruction=z.string().trim().min(1).max(16000).parse(text),body=hash({fence,actor,session,instruction})
   const prior=await this.#mutate(next=>{
@@ -146,7 +146,20 @@ export class TaskService{
   })
  }
  recordDelivery(fence:TaskFence,deliveryId:string,text:string):Promise<void>{return this.#mutate(next=>{this.assertWritable(fence,{kind:'nova'});const task=next.tasks.find(task=>task.id===fence.task_id)!;task.execution_route??='nova';const ref='task-delivery:'+id.parse(deliveryId);const prior=next.outcomes.find(item=>item.ref===ref);if(prior){if(prior.task_id!==fence.task_id||prior.content!==text)throw Error('evidence_conflict');return}next.outcomes.push(evidenceSchema.parse({ref,task_id:fence.task_id,goal_revision:fence.goal_revision,kind:'delivery',outcome:'delivered',content:text,refs:[]}))})}
- continue(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{return this.#change(requestId,{fence,actor,operation:'continue'},task=>{if(task.phase==='cancelled'||task.phase==='completed')throw Error('task_terminal');this.assertExecutionAllowed(task.id);task.controller={kind:'nova'};task.corrections=0;task.waiting_reason=null;task.phase=task.work_ids.length?'verifying':'queued';task.control_revision++})}
+ continue(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{return this.#change(requestId,{fence,actor,operation:'continue'},task=>{if(task.phase==='cancelled'||task.phase==='completed')throw Error('task_terminal');this.assertExecutionAllowed(task.id);task.controller={kind:'nova'};task.corrections=0;task.waiting_reason=null;task.phase=task.work_ids.length?'verifying':'queued';task.control_revision++},task=>this.#assertDecider(task,fence,actor,true))}
+ /** A user attests what happened to execution whose outcome Nova could not observe, so a waiting task can move on. */
+ reconcile(requestId:string,fence:TaskFence,actor:TaskActor,resolution:'done'|'not_run'):Promise<TaskRecord>{
+  const parsed={fence:taskFenceSchema.parse(fence),actor:actorSchema.parse(actor),operation:'reconcile',resolution:z.enum(['done','not_run']).parse(resolution)}
+  return this.#change(requestId,parsed,(task,next)=>{
+   const done=parsed.resolution==='done';let changed=false
+   for(const item of next.outcomes)if(item.task_id===task.id&&item.work_id&&!['ok','failed','refused','cancelled'].includes(item.outcome)){item.outcome=done?'ok':'cancelled';changed=true}
+   for(const effect of Object.values(next.pending_effects))if(effect.task_id===task.id&&(effect.status==='pending'||effect.status==='unknown')){effect.status=done?'accepted':'failed';changed=true}
+   for(const receipt of Object.values(next.effects))if(receipt.task_id===task.id&&receipt.status==='unknown'){receipt.status=done?'accepted':'failed';changed=true}
+   if(!changed)throw Error('nothing_to_reconcile')
+   task.waiting_reason='user_reconciled';task.control_revision++
+  },task=>{this.#assertDecider(task,parsed.fence,parsed.actor,true);if(parsed.actor.kind!=='user')throw Error('not_controller')})
+ }
+ needsReconcile(taskId:string):boolean{const task=this.get(taskId);return task.phase==='waiting'&&(this.hasUnknownWork(taskId)||this.pendingEffect(taskId)!==null||this.inputReceipts(taskId).some(receipt=>receipt.status==='unknown'))}
  wait(fence:TaskFence,reason:string):Promise<TaskRecord>{return this.applyDecision(fence,{kind:'wait',reason,evidence_refs:[]})}
  applyDecision(fence:TaskFence,raw:TaskDecision):Promise<TaskRecord>{const decision=taskDecisionSchema.parse(raw);return this.#mutate(next=>{
   this.assertWritable(fence,{kind:'nova'});const task=next.tasks.find(task=>task.id===fence.task_id)!
@@ -180,10 +193,17 @@ export class TaskService{
  resourceState(taskId:string,reason:string|null):Promise<void>{return this.#mutate(next=>{const task=next.tasks.find(task=>task.id===taskId);if(!task||task.phase==='completed'||task.phase==='cancelled')return;task.waiting_reason=reason;task.phase=reason?'waiting':'running'})}
  settleEffect(effectId:string,status:'accepted'|'failed'|'unknown'):Promise<void>{return this.#mutate(next=>{const effect=next.pending_effects[effectId];if(!effect)throw Error('effect_not_found');effect.status=status})}
  markTodoSync(taskId:string,goalRevision:number,status:'synced'|'conflict'):Promise<void>{return this.#mutate(next=>{const task=next.tasks.find(task=>task.id===taskId);if(task?.phase!=='completed'||task.goal_revision!==goalRevision)throw Error('stale_task');task.todo_sync=status})}
- #change(requestId:string,parsed:{fence:TaskFence;actor:TaskActor}&Record<string,unknown>,change:(task:StoredTask)=>void,authorize?:(task:StoredTask)=>void):Promise<TaskRecord>{const request=id.parse(requestId),body=hash(parsed);return this.#mutate(next=>{
+ #change(requestId:string,parsed:{fence:TaskFence;actor:TaskActor}&Record<string,unknown>,change:(task:StoredTask,next:TaskState)=>void,authorize?:(task:StoredTask)=>void):Promise<TaskRecord>{const request=id.parse(requestId),body=hash(parsed);return this.#mutate(next=>{
   const prior=next.receipts[request];if(prior){if(prior.hash!==body)throw Error('request_conflict');if(!prior.result)throw Error('receipt_invalid');return structuredClone(prior.result) as TaskRecord}
-  const task=next.tasks.find(item=>item.id===parsed.fence.task_id);if(!task)throw Error('task_not_found');if(authorize)authorize(task);else this.#assert(task,parsed.fence,parsed.actor);change(task);next.events.push({seq:++next.event_seq,task_id:task.id,kind:'control',text:JSON.stringify({operation:parsed.operation??parsed.action??('nextActor' in parsed?'controller_changed':'goal_revised'),controller:task.controller,control_revision:task.control_revision,goal_revision:task.goal_revision}),refs:[]});const result=structuredClone(task);next.receipts[request]={hash:body,task_id:task.id,result};return result as TaskRecord
+  const task=next.tasks.find(item=>item.id===parsed.fence.task_id);if(!task)throw Error('task_not_found');if(authorize)authorize(task);else this.#assert(task,parsed.fence,parsed.actor);change(task,next);next.events.push({seq:++next.event_seq,task_id:task.id,kind:'control',text:JSON.stringify({operation:parsed.operation??parsed.action??('nextActor' in parsed?'controller_changed':'goal_revised'),...(parsed.resolution?{resolution:parsed.resolution}:{}),controller:task.controller,control_revision:task.control_revision,goal_revision:task.goal_revision}),refs:[]});const result=structuredClone(task);next.receipts[request]={hash:body,task_id:task.id,result};return result as TaskRecord
  })}
+ /** The controller may always decide; a user may also stop, or unblock a waiting task, while Nova holds control. */
+ #assertDecider(task:StoredTask,fence:TaskFence,actor:TaskActor,waitingOnly:boolean):void{
+  this.#assertFence(task,fence)
+  if(JSON.stringify(task.controller)===JSON.stringify(actor))return
+  if(actor.kind==='user'&&task.controller.kind==='nova'&&(!waitingOnly||task.phase==='waiting'))return
+  throw Error('not_controller')
+ }
  #assert(task:StoredTask,fence:TaskFence,actor:TaskActor):void{this.#assertFence(task,fence);if(JSON.stringify(task.controller)!==JSON.stringify(actor))throw Error('not_controller')}
  #assertFence(task:StoredTask,fence:TaskFence):void{if(task.control_revision!==fence.control_revision||task.goal_revision!==fence.goal_revision)throw Error('stale_task')}
  #pruneDisplay(next:TaskState):void{
