@@ -1,4 +1,5 @@
-import {t, localizeDocument} from '../src/renderer/locale.mjs'
+import {createStartupNotice, startupMessage} from '../src/renderer/startup-notice.mjs'
+import {t, localizeDocument, currentLanguage} from '../src/renderer/locale.mjs'
 import {createPhonePanel} from '../src/renderer/phone-panel.mjs'
 import {frontendUsageText, renderFrontendUsage} from '../src/renderer/frontend-usage.mjs'
 import assert from 'node:assert/strict'
@@ -72,11 +73,12 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    t, localizeDocument, createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createConnectionsPanel: () => ({load: () => Promise.resolve()}),
     createKnowledgePanel: () => ({render() {}}),
+    createVoiceprintPanel: () => ({render() {}}),
     document: {
       documentElement: {}, createTreeWalker: () => ({nextNode: () => null}),
       querySelector: node, querySelectorAll: () => [], getElementById: id => node(`#${id}`),
@@ -564,7 +566,7 @@ test('common choices use compact segmented groups without losing radio semantics
 test('the heartbeat slider and model fields carry Main-compatible bounds', () => {
   assert.match(html, /编程执行器播报间隔/)
   assert.match(html, /<input type="range" id="heartbeat" min="15" max="120" step="1"/)
-  assert.match(html, /Qwen 实时模型/)
+  assert.match(html, /<label for="integratedModel">实时模型<\/label>/)
   assert.match(html, /<select id="integratedModel"/)
   assert.match(html, /<input type="text" id="cascadedLlmModel"[^>]*maxlength="64"/)
 })
@@ -591,6 +593,7 @@ test('every API key is a password field with a badge, hint, and clear button', (
   for (const key of [
     'composioApiKey',
     'dashscopeApiKey',
+    'stepfunApiKey',
     'tavilyApiKey',
     'openrouterApiKey',
     'arkApiKey',
@@ -603,11 +606,12 @@ test('every API key is a password field with a badge, hint, and clear button', (
     assert.match(html, new RegExp(`<button type="button" class="clear" data-key="${key}">清除(?:并停用)?</button>`))
   }
   assert.match(html, /DashScope/)
+  assert.match(html, /StepFun/)
   assert.match(html, /Tavily/)
   assert.match(html, /Codex/)
   assert.match(html, /Ark/)
   assert.match(html, /火山语音/)
-  assert.equal((html.match(/type="password"/g) || []).length, 7)
+  assert.equal((html.match(/type="password"/g) || []).length, 8)
 })
 
 test('API keys live in a collapsed semantic disclosure with a readable summary', () => {
@@ -658,7 +662,8 @@ test('the active cascaded model follows its provider and preserves the other mod
 
 test('key usage labels are derived from public pipeline selection only', () => {
   assert.match(script, /function keyUsage\(view\)/)
-  assert.match(script, /dashscopeApiKey: view\.pipelineMode === 'integrated'/)
+  assert.match(script, /dashscopeApiKey: \(view\.pipelineMode === 'integrated' && view\.integratedProvider === 'qwen'\)/)
+  assert.match(script, /stepfunApiKey: view\.pipelineMode === 'integrated' && view\.integratedProvider === 'stepfun'/)
   assert.match(script, /arkApiKey: view\.pipelineMode === 'cascaded'/)
   assert.match(script, /doubaoBigmodelApiKey: view\.pipelineMode === 'cascaded'/)
   assert.doesNotMatch(script, /\.secrets\b|ciphertext|decrypt/)
@@ -1060,7 +1065,7 @@ test('the sidebar renders one button per category with the first current', () =>
   }
   assert.match(html, /id="category-general" data-category="general" aria-current="true">/)
   assert.equal((html.match(/class="nav-item"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length)
-  assert.equal((html.match(/tabindex="-1"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length - 1)
+  assert.equal((html.match(/class="nav-item"[^>]*tabindex="-1"/g) || []).length, settingsCategories.SETTINGS_CATEGORIES.length - 1)
 })
 
 test('sidebar navigation cycles vertically and passes other keys through', () => {
@@ -1408,4 +1413,41 @@ test('phone settings stage together and open pairing only after persistence succ
   failed.node('#phone-server-port').listeners.input()
   await failed.click('#phone-pairing-open')
   assert.equal(opened, 1)
+})
+
+test('startup retry reports backend status without managed workspace recovery wording', async () => {
+  const failed=publicView({backendStatus:'stopped',startup:{stage:'failed',code:'workspace_not_found'}})
+  const connected=publicView({startup:{stage:'ready'}})
+  const panel=await mountSettingsPanel(failed,{retryBackend:async()=>connected})
+  assert.equal(panel.node('#startup-retry').hidden,false)
+  await panel.click('#startup-retry')
+  assert.equal(panel.node('#startup-retry').hidden,true)
+  assert.equal(panel.node('#status').textContent,'后台已连接')
+  assert.doesNotMatch(panel.node('#workspace-action-status').textContent,/工作区恢复/)
+  panel.push(publicView({backendStatus:'reconnecting',startup:{stage:'reconnecting'}}))
+  assert.equal(panel.node('#startup-retry').hidden,true)
+})
+
+test('language restart hint follows the applied language across live updates', async () => {
+  const language = currentLanguage()
+  const panel = await mountSettingsPanel(publicView({language}))
+  assert.equal(panel.node('#language-restart-hint').hidden, true)
+  panel.push(publicView({language: language === 'en' ? 'zh-CN' : 'en'}))
+  assert.equal(panel.node('#language-restart-hint').hidden, false)
+  panel.push(publicView({language}))
+  assert.equal(panel.node('#language-restart-hint').hidden, true)
+})
+
+
+test('secret category tabs preserve unsaved keys and support keyboard navigation', async () => {
+  const panel = await mountSettingsPanel(publicView())
+  panel.node('#dashscopeApiKey').value = 'unsaved-fixture'
+  panel.click('#secret-tab-connections')
+  assert.equal(panel.node('#secret-panel-models').hidden, true)
+  assert.equal(panel.node('#secret-tab-connections').attributes['aria-selected'], 'true')
+  panel.node('#secret-tab-connections').listeners.keydown({key: 'ArrowLeft', preventDefault() {}})
+  assert.equal(panel.node('#secret-panel-models').hidden, false)
+  assert.equal(panel.node('#secret-tab-models').focused, 1)
+  assert.equal(panel.node('#secret-tab-connections').tabIndex, -1)
+  assert.equal(panel.node('#dashscopeApiKey').value, 'unsaved-fixture')
 })

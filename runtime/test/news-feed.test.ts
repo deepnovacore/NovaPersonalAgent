@@ -1,7 +1,7 @@
 import type {ModelGateway} from '../src/model/model-gateway.js'
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,realpath} from 'node:fs/promises'
+import {mkdtemp,readFile,rm,realpath,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {parseFeed} from '../src/news/feeds.js'
@@ -21,7 +21,7 @@ test('real service persists explicit interests, dedupes refresh, applies idempot
  const make=()=>new NewsService({path:join(dir,'news.json'),sources:[source],fetcher:()=>{calls++;return Promise.resolve(new Response(broken?'<html>blocked</html>':xml))},rank:(interests,articles)=>Promise.resolve(articles.map(a=>({id:a.id,matches:[{interest_id:interests[0]!.id,score:0.9,quote:'AI research'}],reason:'与你关注的 AI 研究相关'})))})
  let service=make();await service.open()
  try{
-  await service.refresh();assert.equal(calls,0,'no silent fetch before explicit enable')
+  await service.refresh();assert.equal(calls,1,'news is on before any configuration');assert.equal(service.snapshot().mode,'timeline');assert.equal(service.snapshot().items[0]!.ranking,null,'no interests, no ranking call')
   await service.configure({enabled:true,interests:['AI'],explore:false});await service.refresh()
   const row=service.snapshot().items[0]!;assert.equal(row.ranking?.reason,'与你关注的 AI 研究相关')
   await service.refresh();assert.equal(service.snapshot().items.length,1)
@@ -94,5 +94,28 @@ test('first explicit empty preference save is durable and advances its version',
  try{await service.open();await service.configure({enabled:false,explore:true,interests:[],expected_version:0});assert.equal(service.snapshot().profile_version,1);assert.deepEqual(service.snapshot().interests,[])
   await service.close();await service.open();assert.equal(service.snapshot().profile_version,1);assert.deepEqual(service.snapshot().interests,[])
   await assert.rejects(service.configure({enabled:true,explore:true,interests:['AI'],expected_version:0}),/version_conflict/)
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+test('news starts on as a timeline, takes Profile interests once, and an explicit off stays off',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-news-default-'));let calls=0;const ranked:string[][]=[]
+ const make=(firstRefreshMs?:number|null)=>new NewsService({path:join(dir,'news.json'),sources:[source],...(firstRefreshMs===undefined?{}:{firstRefreshMs}),fetcher:()=>{calls++;return Promise.resolve(new Response(xml))},rank:(interests,articles)=>{ranked.push(interests.map(i=>i.text));return Promise.resolve(articles.map(a=>({id:a.id,matches:[],reason:''})))}})
+ let service=make(null)
+ try{
+  await service.open();assert.equal(service.snapshot().enabled,true);await service.refresh();assert.equal(calls,1);assert.deepEqual(ranked,[],'a timeline needs no ranker')
+  assert.equal(await service.seedInterests([' AI ','AI','Design','']),true);assert.deepEqual(service.snapshot().interests.map(i=>i.text),['AI','Design']);assert.equal(service.snapshot().profile_version,1)
+  assert.equal(await service.seedInterests(['Travel']),false,'a seeded profile is not reseeded');assert.deepEqual(service.snapshot().interests.map(i=>i.text),['AI','Design'])
+  assert.equal(service.snapshot().interests_seeded,true)
+  await service.refresh();assert.deepEqual(ranked,[],'guessed interests are not sent to the ranker');assert.equal(service.snapshot().mode,'timeline');assert.equal(service.snapshot().rank_error,null)
+  await service.configure({enabled:true,interests:['AI','Design'],explore:true});assert.equal(service.snapshot().interests_seeded,false)
+  await service.refresh();assert.deepEqual(ranked,[['AI','Design']],'once the user saves them, they rank')
+  await service.configure({enabled:false,interests:['AI'],explore:false});await service.close();service=make(null);await service.open()
+  assert.equal(service.snapshot().enabled,false,'an explicit off survives reopen');const before=calls;await service.refresh();assert.equal(calls,before)
+  assert.equal(await service.seedInterests(['Travel']),false)
+  await service.close();const file=JSON.parse(await readFile(join(dir,'news.json'),'utf8')) as Record<string,unknown>
+  await writeFile(join(dir,'news.json'),JSON.stringify({...file,enabled:false,profile_version:0,interests:[]}))
+  service=make(null);await service.open();assert.equal(service.snapshot().enabled,true,'the old never-configured default reads as on')
+  await service.close();calls=0;service=make(5);await service.open();await service.refreshSoon();assert.equal(calls,0,'the first automatic refresh waits for launch work')
+  for(let i=0;i<100&&!calls;i++)await new Promise(r=>setTimeout(r,10))
+  assert.equal(calls,1,'then it runs on its own');await service.refreshSoon();assert.equal(calls,2,'afterwards a seed refreshes at once')
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })

@@ -26,7 +26,9 @@ export async function prepareKnowledge(
     apiKey: resolveModelApiKey(settings) ?? '', model: settings.embedding_model})
   const configured = settings.knowledge_path
   const path = resolve(configured.startsWith('~/') ? resolve(homedir(), configured.slice(2)) : configured)
-  const service = new KnowledgeService({store: new KnowledgeStoreClient({path}), embedding, requireEvidenceLedger: true})
+  // Whole-computer sources share this store with manually added knowledge.
+  // The generic 100-source default would make every later scan import fail.
+  const service = new KnowledgeService({store: new KnowledgeStoreClient({path,maxSources:2000}), embedding, requireEvidenceLedger: true})
   const adapter = new KnowledgeMcpAdapter(service)
   let http: Awaited<ReturnType<typeof startKnowledgeMcpHttpServer>> | undefined
   let closing: Promise<void> | undefined

@@ -722,6 +722,9 @@ test('entry construction emits only stable failure classes without raw messages'
     }), code: 'configuration_required'},
     {error: Object.assign(new Error('private credential'), {code: 'credential_missing'}), code: 'authentication_failed'},
     {error: Object.assign(new Error('private binary'), {code: 'codex_host_unavailable'}), code: 'backend_unavailable'},
+    ...['state_permissions', 'state_busy', 'state_lock_failed', 'workspace_not_found'].map(code => ({error: Object.assign(new Error('private path'), {code}), code})),
+    {error: new Error('personal_store_locked'), code: 'personal_store_locked'},
+    ...['EACCES', 'EPERM', 'EROFS'].map(code => ({error: Object.assign(new Error('private path'), {code}), code: 'filesystem_permissions'})),
     {error: new Error('private unknown'), code: 'assembly_failed'},
   ]) {
     const diagnostics: string[] = []
@@ -1284,10 +1287,10 @@ test('selected integrated Qwen assembly uses the authenticated provider-neutral 
     buildRealtime: output => {
       callbacks = output
       return buildProductionRealtimeAssembly({
-        settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-          NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
+        settings: loadSettings({MEMORY_CONNECTION: 'disabled',
+          PIPELINE_MODE: 'integrated',
           DASHSCOPE_API_KEY: 'dash-key',
-          NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+          MODEL_API_KEY: 'model-key',
           TAVILY_API_KEY: 'search-key',
         }),
         connector: () => Promise.resolve(providerSocket),
@@ -1407,9 +1410,9 @@ test('selected cascaded production assembly falls back before ASR on the same au
     buildRealtime: output => {
       callbacks = output
       return buildProductionRealtimeAssembly({
-        settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-          NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
-          NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
+        settings: loadSettings({MEMORY_CONNECTION: 'disabled',
+          PIPELINE_MODE: 'cascaded',
+          CASCADE_LLM_PROVIDER: 'ark',
           ARK_API_KEY: 'ark-key',
           DOUBAO_BIGMODEL_API_KEY: 'doubao-key',
           TAVILY_API_KEY: 'search-key',

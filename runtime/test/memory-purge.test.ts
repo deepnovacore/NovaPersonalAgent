@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,readFile,writeFile,rename,unlink,symlink} from 'node:fs/promises'
+import {createHash} from 'node:crypto'
+import {canonicalJson} from '../src/text/canonical-json.js'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {DatabaseSync} from 'node:sqlite'
@@ -145,4 +147,70 @@ test('purge remains incomplete until the host confirms evidence-linked index cle
   const completed=await client.memory('purge_index_complete',{entry_prefix:prefix,entry_id:prefix+'one',operation_id:result.operation_id}) as {status:string;index_evidence_ids:string[]}
   assert.equal(completed.status,'complete');assert.deepEqual(completed.index_evidence_ids,[])
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
+})
+
+
+// Reproduce the old importer directly: the fixed importer must never manufacture this row again.
+function historicalEmptyProfile(db:DatabaseSync,backup:string|undefined,profile={about:'',version:0},namespace=prefix+'life:'){
+ initializeMemory(db)
+ const digest=(text:string)=>createHash('sha256').update(text).digest('hex'),id=namespace+'profile:profile',evidenceId=namespace+'e:legacy:'+digest(id)
+ const fingerprint=digest(canonicalJson({entry_id:id,legacy:profile}))
+ memoryOperation(db,'append_evidence',{id:evidenceId,source_id:namespace+'migration:'+digest(id),source_kind:'task_result',locator:'legacy-life-json:profile',observed_at:now,recorded_at:now,raw_text:null,hash:fingerprint,trust:'trusted_system',extracted:{event:'legacy_import',legacy:true,original_evidence_available:false}})
+ memoryOperation(db,'merge',{entry_id:id,kind:'profile',origin:'inferred',written_by:'merge',evidence_refs:[evidenceId],content:{life_id:'profile',life_data:profile,life_order:0,text:profile.about,section:'explicit',legacy:true},recorded_at:now})
+ db.prepare('INSERT INTO memory_life_meta VALUES(?,?)').run(namespace,canonicalJson({revision:0,receipts:{},signature:digest(canonicalJson(memoryOperation(db,'list',{}))),migrated:true,...(backup?{legacy_path:backup}:{})}))
+ return {id,evidenceId,fingerprint,input:{request_id:'historical',entry_prefix:prefix,selection:{kind:'entry',id,expected_revision:1}}}
+}
+
+test('historical empty default Profile does not require a missing backup, including after an explicit edit',async()=>{
+ for(const edited of [false,true]){
+  const root=await mkdtemp(join(tmpdir(),'nova-purge-old-empty-')),path=join(root,'ledger.sqlite'),db=new DatabaseSync(path)
+  try{
+   const fixture=historicalEmptyProfile(db,join(root,'life.json'))
+   if(edited){memoryOperation(db,'life_load',{namespace:prefix+'life:'});memoryOperation(db,'life_mutate',{namespace:prefix+'life:',expectedRevision:0,requestId:'edit',input:{op:'profile',expected_version:0,about:'LATER PRIVATE PROFILE'}});fixture.input.selection.expected_revision=2}
+   enableMemoryFiles(db,path+'.memory')
+   assert.equal(purgeEntry(db,path,fixture.input).status,'complete')
+   assert.deepEqual(memoryOperation(db,'list',{}),[])
+   assert.equal(memoryOperation(db,'evidence',{id:fixture.evidenceId}),null)
+   assert.equal(purgeEntry(db,path,fixture.input).status,'complete')
+   assert.throws(()=>memoryOperation(db,'append_evidence',{id:fixture.evidenceId,source_id:'replay',source_kind:'conversation',locator:'replay',observed_at:now,recorded_at:now,raw_text:'replay',hash:'replay',trust:'trusted_user'}))
+  }finally{db.close();await rm(root,{recursive:true,force:true})}
+ }
+})
+
+test('old incomplete empty-Profile purge retries from stripped mappings and suppressed fingerprint after restart',async()=>{
+ for(const proof of ['same-entry','other-namespace','missing']){
+  const root=await mkdtemp(join(tmpdir(),'nova-purge-old-incomplete-')),path=join(root,'ledger.sqlite');let db=new DatabaseSync(path)
+  try{
+   const fixture=historicalEmptyProfile(db,join(root,'life.json')),digest=(text:string)=>createHash('sha256').update(text).digest('hex')
+   db.exec('DELETE FROM memory_revisions; DELETE FROM memory_evidence')
+   for(const id of [fixture.id,fixture.evidenceId])db.prepare('INSERT INTO memory_purged_ids VALUES(?)').run(digest(id))
+   if(proof!=='missing')db.prepare('INSERT INTO memory_suppressed VALUES(?)').run(proof==='same-entry'?fixture.fingerprint:digest(canonicalJson({entry_id:'personal:other:life:profile:profile',legacy:{about:'',version:0}})))
+   const intent={selected:[{entry_id:fixture.id,kind:'profile',content:{legacy:true,life_id:'profile'}}],operation_id:'old-operation',entry_id:fixture.id,expected_revision:1,request_ids:['historical'],revisions:[],baselines:{},removed_entries:1,removed_evidence:1,removed_entry_ids:[fixture.id],removed_evidence_ids:[fixture.evidenceId],pending_index_evidence_ids:[],backups:[],unresolved:['life_backup_unverified'],repository_done:true,result:{status:'incomplete',operation_id:'old-operation',backup_cleanup:{status:'incomplete',unresolved:['life_backup_unverified']}}}
+   db.prepare('INSERT INTO memory_purges VALUES(?,?)').run(fixture.id,canonicalJson(intent));db.close();db=new DatabaseSync(path);initializeMemory(db)
+   const retried=purgeEntry(db,path,{...fixture.input,request_id:'retry'})
+   assert.equal(retried.status,proof==='same-entry'?'complete':'incomplete',proof);assert.equal(retried.operation_id,'old-operation')
+   assert.equal(db.prepare('SELECT COUNT(*) n FROM memory_purged_ids').get()!.n,2)
+  }finally{db.close();await rm(root,{recursive:true,force:true})}
+ }
+})
+
+test('empty migration exemption fails closed for actual backups, unsafe paths and nonempty historical Profiles',async()=>{
+ for(const variant of ['present','invalid-json','symlink','missing-parent','no-path','versioned-blank','nonempty-cleared','missing-proof','voicemem-mapping']){
+  const root=await mkdtemp(join(tmpdir(),'nova-purge-proof-boundary-')),path=join(root,'ledger.sqlite'),backup=join(root,'life.json'),external=join(root,'external.json'),db=new DatabaseSync(path)
+  try{
+   const profile=variant==='versioned-blank'?{about:'',version:1}:variant==='nonempty-cleared'?{about:'ACTUAL OLD PRIVATE TEXT',version:1}:{about:'',version:0}
+   const fixture=historicalEmptyProfile(db,variant==='no-path'?undefined:variant==='missing-parent'?join(root,'absent','life.json'):backup,profile)
+   if(variant==='present')await writeFile(backup,JSON.stringify(legacyLife()))
+   if(variant==='invalid-json')await writeFile(backup,'not JSON')
+   if(variant==='symlink'){await writeFile(external,JSON.stringify(legacyLife()));await symlink(external,backup)}
+   if(variant==='missing-proof')db.prepare("UPDATE memory_evidence SET payload_json=json_set(payload_json,'$.hash','unproved') WHERE id=?").run(fixture.evidenceId)
+   if(variant==='voicemem-mapping')db.exec("UPDATE memory_revisions SET payload_json=json_set(payload_json,'$.content.legacy_id','old-voice')")
+   if(variant==='nonempty-cleared'){memoryOperation(db,'life_load',{namespace:prefix+'life:'});memoryOperation(db,'life_mutate',{namespace:prefix+'life:',expectedRevision:0,requestId:'clear',input:{op:'profile',expected_version:1,about:''}});fixture.input.selection.expected_revision=2}
+   enableMemoryFiles(db,path+'.memory')
+   const result=purgeEntry(db,path,fixture.input)
+   assert.equal(result.status,variant==='present'?'complete':'incomplete',variant)
+   if(variant==='present')assert.equal((JSON.parse(await readFile(backup,'utf8')) as {profile:{about:string}}).profile.about,'','a proven empty import still scrubs a present backup')
+   if(variant==='symlink')assert.equal(await readFile(external,'utf8'),JSON.stringify(legacyLife()))
+  }finally{db.close();await rm(root,{recursive:true,force:true})}
+ }
 })

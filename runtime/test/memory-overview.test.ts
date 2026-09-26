@@ -9,7 +9,7 @@ import {validateMemoryOverview, type MemoryOverview} from '../src/personal-agent
 import type {MemoryEntry} from '../src/memory/entry.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
-const entry: MemoryEntry = {id:'one',version:1,content:'Nova supports voice conversations.',kind:'fact',origin:'inferred',topic:'Nova',status:'active',corrected_to:null,confidence_note:null,source_refs:[{type:'file',ref:'README.md',observed_at:'2026-09-11T00:00:00Z'}],observed_at:'2026-09-11T00:00:00Z',recorded_at:'2026-09-11T00:00:00Z'}
+const entry: MemoryEntry = {id:'one',version:1,content:'Nova supports voice conversations.',kind:'fact',origin:'stated',topic:'Nova',status:'active',corrected_to:null,confidence_note:null,source_refs:[{type:'file',ref:'README.md',observed_at:'2026-09-11T00:00:00Z'}],observed_at:'2026-09-11T00:00:00Z',recorded_at:'2026-09-11T00:00:00Z'}
 const overview = (version=1): MemoryOverview => ({summary:'Nova supports voice conversations.',sections:[{title:'Nova',summary:'Voice conversations.',keywords:['voice'],refs:[{entry_id:'one',version}]}]})
 const tick = () => new Promise(resolve => setImmediate(resolve))
 test('overview requires bounded sections and exact active source versions', () => {
@@ -50,7 +50,7 @@ test('two-stage synthesis uses the existing model and preserves facts before gro
   const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
   const requests:CompleteRequest[]=[]
   const facts={facts:[{entry_id:entry.id,version:entry.version,fact:'Nova supports voice conversations.'}]}
-  const grouping={summary:overview().summary,sections:[{title:'Nova',keywords:['voice'],refs:[{entry_id:'one',version:1}]}]}
+  const grouping={summary:overview().summary,sections:[{title:'Nova',summary:'Nova supports voice conversations.',keywords:['voice'],refs:[{entry_id:'one',version:1}]}]}
   const outputs=[facts,grouping]
   const gateway={complete:(request:CompleteRequest)=>{requests.push(request);return Promise.resolve({text:JSON.stringify(outputs.shift())})}} as unknown as ModelGateway
   const surrogate=new GatewaySurrogate({gateway,model:'existing-model',proactivityPreset:'balanced'})
@@ -119,17 +119,16 @@ test('cancellation between extraction and grouping does not start another reques
  const surrogate=new GatewaySurrogate({gateway,model:'existing-model',proactivityPreset:'balanced'})
  assert.equal(await surrogate.summarizeMemory([entry],controller.signal),null);assert.equal(calls,1)
 })
-test('grouping assembles every fact verbatim and rejects oversized cards instead of truncating',async()=>{
+test('grouping keeps a concise summary without stitching raw facts into the card',async()=>{
  const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
  const second={...entry,id:'two',topic:'EEG',content:'An EEG demonstration proposal.'}
  for(const long of [false,true]){
   const facts={facts:[{entry_id:'one',version:1,fact:long?'A'.repeat(300):'Nova supports voice conversations.'},{entry_id:'two',version:1,fact:long?'B'.repeat(300):'EEG is a demonstration proposal.'}]}
-  const grouping={summary:'Two documented projects.',sections:[{title:'Projects',keywords:[],refs:[{entry_id:'one',version:1},{entry_id:'two',version:1}]}]}
+  const grouping={summary:'Two documented topics.',sections:[{title:'Topics',summary:'The records mention voice conversation and an EEG proposal.',keywords:[],refs:[{entry_id:'one',version:1},{entry_id:'two',version:1}]}]}
   const outputs=[facts,grouping]
   const gateway={complete:()=>Promise.resolve({text:JSON.stringify(outputs.shift())})} as unknown as ModelGateway
   const surrogate=new GatewaySurrogate({gateway,model:'existing-model',proactivityPreset:'balanced'})
   const result=await surrogate.summarizeMemory([entry,second],new AbortController().signal)
-  if(long)assert.equal(result,null)
-  else assert.equal(result?.sections[0]?.summary,'Nova supports voice conversations. EEG is a demonstration proposal.')
+  assert.equal(result?.sections[0]?.summary,'The records mention voice conversation and an EEG proposal.')
  }
 })

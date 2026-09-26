@@ -332,7 +332,7 @@ test('coordinator: work on the active project resolves without evidence; a non-a
   const active = harness()
   active.intake.open(request, '修一下登录', 'u1', 'e')
   await active.intake.settled()
-  assert.deepEqual(active.decisions, [{kind: 'work', project: 'Project', session: 'latest'}])
+  assert.deepEqual(active.decisions, [{kind: 'work', project: 'Project', session: 'new'}])
   assert.equal(active.intake.view?.outcome, 'dispatched')
 
   // The quoted span must occur in the utterance *and* overlap exactly one roster name (either contains the other).
@@ -378,7 +378,7 @@ test('coordinator: work on the active project resolves without evidence; a non-a
   const verbatim = harness({roster: twoPricing, models: {assess: input => Promise.resolve(assessment(input, {project: 'pricing-page', project_evidence: 'pricing-page'}))}})
   verbatim.intake.open(request, '改 pricing-page 的按钮', 'u1', 'e')
   await verbatim.intake.settled()
-  assert.deepEqual(verbatim.decisions, [{kind: 'work', project: 'pricing-page', session: 'latest'}])
+  assert.deepEqual(verbatim.decisions, [{kind: 'work', project: 'pricing-page', session: 'new'}])
 
   // Missing, not in the utterance, or a filler ("改") that is in the utterance but does not name the project.
   for (const evidence of [null, '博客', '改']) {
@@ -473,7 +473,7 @@ test('coordinator: an affirmed host question is the only host-authored project e
     assert.equal(alias.intake.view?.kind, 'unclear', answer)
     alias.intake.open(request, answer, 'u2', 'e')
     await alias.intake.settled()
-    assert.deepEqual(alias.decisions, dispatched ? [{kind: 'work', project: 'blog', session: 'latest'}] : [], answer)
+    assert.deepEqual(alias.decisions, dispatched ? [{kind: 'work', project: 'blog', session: 'new'}] : [], answer)
     assert.equal(alias.intake.view?.kind, dispatched ? 'work' : 'unclear', answer)
   }
 })
@@ -555,7 +555,7 @@ test('coordinator: create always confirms — with a goal it plans first, bare c
   })
   withGoal.intake.open(request, '新建一个 shop 项目，先做登录', 'u1', 'e')
   await withGoal.intake.settled()
-  assert.deepEqual(withGoal.decisions, [{kind: 'create', project: 'shop', session: 'latest'}])
+  assert.deepEqual(withGoal.decisions, [{kind: 'create', project: 'shop', session: 'new'}])
   assert.equal(withGoal.planned(), 1)
   assert.equal(withGoal.intake.view?.state, 'readback')
   assert.equal(withGoal.confirmation.view.pending_action, 'create_workspace')
@@ -590,7 +590,7 @@ test('coordinator: switch proposes without a plan cycle and activates only throu
   const switched = harness({models: switchModels, resolveTarget: () => Promise.resolve(selectTarget)})
   switched.intake.open(request, '切到 blog', 'u1', 'e')
   await switched.intake.settled()
-  assert.deepEqual(switched.decisions, [{kind: 'switch', project: 'blog', session: 'latest'}])
+  assert.deepEqual(switched.decisions, [{kind: 'switch', project: 'blog', session: 'new'}])
   assert.equal(switched.planned(), 0)
   assert.equal(switched.intake.view?.state, 'readback')
   assert.equal(switched.intake.view?.work_order, null)
@@ -811,7 +811,7 @@ test('dispatch-selected user quotes preserve the current clarification chain pro
   const h = harness({models: {assess: input => Promise.resolve(assessment(input, {project: 'blog', project_evidence: 'blog'}))}})
   h.intake.open({...request, source_quotes: ['在 blog 项目里写贪吃蛇']}, '网页，方向键控制', 'u3', 'e')
   await h.intake.settled()
-  assert.deepEqual(h.decisions, [{kind: 'work', project: 'blog', session: 'latest'}])
+  assert.deepEqual(h.decisions, [{kind: 'work', project: 'blog', session: 'new'}])
 })
 
 test('preparation state spans assessment and stops at a concrete question or cancellation', async () => {
@@ -1416,3 +1416,264 @@ test('an explicit redirect names its new project in the same answer', async () =
     assert.equal(h.intake.view?.state, evidence === null ? 'failed' : 'closed')
   }
 })
+
+
+const boundWorkspace = {workspace_id: 'w1', revision: 1}
+const boundOptions = {boundTarget: () => boundWorkspace}
+const confirmSettings = {clarification_depth: 'balanced', plan_readback: 'confirm'} as const
+
+test('current-workspace aliases use the bound target without rewriting the user objective', async () => {
+  for (const alias of ['当前项目', ' 当前工作区 ', 'current workspace']) {
+    const h = harness({...boundOptions, models: {assess: input => Promise.resolve(assessment(input, {project: alias}))}})
+    h.intake.open(request, '把标题改为“当前项目”', 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.decisions[0]?.project, 'Project')
+    assert.equal(h.intake.view?.opening, '把标题改为“当前项目”')
+    assert.equal(h.dispatched.length, 1)
+  }
+  const h = harness({activeProject: () => null, resolveTarget: () => Promise.reject(new ProjectResolutionError('unknown_project', {reason: 'explicit_project_required'})),
+    models: {assess: input => Promise.resolve(assessment(input, {project: '当前项目'}))}})
+  h.intake.open(request, '在当前项目修复按钮', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.dispatched.length, 0)
+  assert.ok(h.facts.some(fact => fact.includes('执行工作区')))
+})
+
+test('new work ignores inferred continuity, old source quotes and remembered model session defaults', async () => {
+  for (const text of ['修复按钮', '把标题改为“继续刚才的任务”', '把标题改为 \"\n继续刚才的任务\n\"', '不要继续旧会话，修复按钮']) {
+    const h = harness()
+    h.intake.open({...request, source_quotes: ['继续刚才的任务，直接开始']}, text, 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.decisions[0]?.session, 'new', text)
+  }
+})
+
+test('explicit continuation survives a same-intake clarification but a later new-session directive wins', async () => {
+  for (const answer of ['login.ts', '新开一个会话，修改 login.ts']) {
+    const h = harness({models: {assess: input => Promise.resolve(assessment(input, (input.turns as unknown[]).length ? {} : {
+      slots: {...slots, scope: missing, acceptance: missing, constraints: missing}, candidate_question: {owner: 'user', text: '哪个文件？'},
+    }))}})
+    h.intake.open(request, '继续刚才的任务', 'u1', 'e')
+    await h.intake.settled()
+    h.intake.open(request, answer, 'u2', 'e')
+    await h.intake.settled()
+    assert.equal(h.decisions.at(-1)?.session, answer === 'login.ts' ? 'latest' : 'new')
+  }
+})
+
+test('only latest-revision explicit direct start in a bound workspace bypasses plan confirmation', async () => {
+  for (const [text, direct] of [
+    ['修复按钮，直接开始', true], ['直接开始修复按钮', true], ['Fix the button. Go ahead', true],
+    ['修复按钮', false], ['不要直接开始修复按钮', false], ['把标题改为“直接开始”', false],
+    ['把按钮文案设为直接开始', false], ['用户可能会说直接开始', false], ['直接开始之前先问我', false], ['直接开始了吗？', false],
+    ['直接开始是不允许的', false], ['把标题改为 \"\n直接开始\n\"', false], ["把标题改为 '\n直接开始\n'", false], ["Don't go ahead. Fix the label", false],
+  ] as const) {
+    const h = harness({...boundOptions, settings: confirmSettings,
+      models: {assess: input => Promise.resolve(assessment(input, {early_exit: true, execution_mode: 'direct'}))}})
+    h.intake.open({...request, source_quotes: ['直接开始']}, text, 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.dispatched.length, direct ? 1 : 0, text)
+    assert.equal(h.intake.view?.proposal_id !== null, !direct, text)
+  }
+  const unbound = harness({settings: confirmSettings, models: {assess: input => Promise.resolve(assessment(input, {early_exit: true}))}})
+  unbound.intake.open(request, '修复按钮，直接开始', 'u1', 'e')
+  await unbound.intake.settled()
+  assert.equal(unbound.dispatched.length, 0, 'global active project is not a conversation binding')
+})
+
+test('direct start never bypasses a different workspace or create/switch confirmation', async () => {
+  for (const [kind, action] of [['work', 'reuse'], ['create', 'create'], ['switch', 'select']] as const) {
+    const h = harness({...boundOptions, settings: confirmSettings,
+      models: {assess: input => Promise.resolve(assessment(input, {kind, project: 'blog', project_evidence: 'blog', early_exit: true}))},
+      resolveTarget: () => Promise.resolve({...target, action, workspace_id: action === 'create' ? null : 'other', workspace_display_name: 'blog'}),
+    })
+    h.intake.open(request, '在 blog 修复按钮，直接开始', 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.dispatched.length, 0, kind)
+    assert.ok(h.intake.view?.proposal_id, kind)
+  }
+})
+
+test('direct-start evidence expires on an amended revision before planning finishes', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => {release = resolve})
+  let entered!: () => void
+  const started = new Promise<void>(resolve => {entered = resolve})
+  const h = harness({...boundOptions, settings: confirmSettings, models: {
+    assess: input => Promise.resolve(assessment(input, {early_exit: true})),
+    plan: async input => {if (input.revision === 1) {entered(); await gate}; return plan(input)},
+  }})
+  h.intake.open(request, '修复按钮，直接开始', 'u1', 'e')
+  await started
+  h.intake.open(request, '改成只分析 login.ts', 'u2', 'e')
+  release()
+  await h.intake.settled()
+  assert.equal(h.dispatched.length, 0)
+  assert.ok(h.intake.view?.proposal_id)
+})
+
+for (const stage of ['assess', 'resolve', 'plan', 'evidence'] as const) {
+  test(`a changed conversation binding fences deferred ${stage} before proposal or dispatch`, async () => {
+    let binding = {...boundWorkspace}
+    let release!: () => void
+    const gate = new Promise<void>(resolve => {release = resolve})
+    let entered!: () => void
+    const started = new Promise<void>(resolve => {entered = resolve})
+    const pause = async (here: string) => {if (here === stage) {entered(); await gate}}
+    const options = {boundTarget: () => binding}
+    const h = harness({...options, settings: confirmSettings,
+      models: {assess: async input => {await pause('assess'); return assessment(input, {early_exit: true})}, plan: async input => {await pause('plan'); return plan(input)}},
+      resolveTarget: async () => {await pause('resolve'); return target},
+      attachEvidence: async () => {await pause('evidence'); return {}},
+    })
+    h.intake.open(request, '修复按钮，直接开始', 'u1', 'e')
+    await started
+    binding = {workspace_id: 'w2', revision: 2}
+    release()
+    await h.intake.settled()
+    assert.equal(h.dispatched.length, 0)
+    assert.equal(h.intake.view?.proposal_id, null)
+    assert.equal(h.intake.view?.outcome, 'cancelled')
+  })
+}
+
+test('binding change invalidates an existing proposal before confirmed admission', async () => {
+  let binding = {...boundWorkspace}
+  const options = {boundTarget: () => binding}
+  const h = harness({...options, settings: confirmSettings})
+  h.intake.open(request, '修复按钮', 'u1', 'e')
+  await h.intake.settled()
+  const operation = h.confirmation.acceptDirectDecision({proposalId: h.intake.view!.proposal_id!, confirmed: true}).operation!
+  binding = {workspace_id: 'w2', revision: 2}
+  assert.equal(h.intake.beginConfirmed(operation), false)
+})
+
+test('a named-session model guess cannot turn literal or historical title text into continuation authority', async () => {
+  for (const text of ['继续 Named task？', '不确定是否继续 Named task', '继续 Named task 之前先问我', '不要继续 Named task', '把标题改为“Named task”', '添加一个叫 Named task 的按钮', '修复按钮', '继续刚才的任务，把标题改为“Named task”']) {
+    const h = harness({roster: () => [{name: 'Project', last_used_at: 1, last_session_title: 'Named task', running: [], sessions: ['Named task']}],
+      models: {assess: input => Promise.resolve(assessment(input, {session: {mode: 'named', title: 'Named task'}}))}})
+    h.intake.open({...request, source_quotes: ['继续 Named task 会话']}, text, 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.dispatched.length, 0, text)
+    assert.ok(h.intake.view?.pending_question)
+  }
+})
+
+test('an explicit exact continuation can start directly in the bound workspace', async () => {
+  const h = harness({...boundOptions, settings: confirmSettings,
+    models: {assess: input => Promise.resolve(assessment(input, {early_exit: true}))},
+    resolveTarget: () => Promise.resolve({...target, action: 'resume', session_id: 'exact-session'}),
+  })
+  h.intake.open(request, '继续刚才的任务，直接开始', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.dispatched.length, 1)
+  assert.equal(h.decisions[0]?.session, 'latest')
+  assert.equal(h.intake.view?.target?.session_id, 'exact-session')
+})
+
+test('uncertain continuation or disagreement asks instead of silently choosing a session', async () => {
+  for (const [text, mode] of [['继续刚才的任务了吗？', 'latest'], ['我不确定是否继续刚才任务', 'latest'], ['继续刚才的任务', 'new']] as const) {
+    const h = harness({models: {assess: input => Promise.resolve(assessment(input, {session: {mode}}))}})
+    h.intake.open(request, text, 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.dispatched.length, 0, text)
+    assert.ok(h.intake.view?.pending_question, text)
+  }
+  const h = harness()
+  h.intake.open(request, '在当前工作区继续刚才的任务', 'u1', 'e')
+  await h.intake.settled()
+  assert.equal(h.decisions[0]?.session, 'latest')
+})
+
+
+test('review boundary: stale confirmation cannot cancel committing or unknown admission', async () => {
+  for (const unknown of [false, true]) {
+    let binding = {...boundWorkspace}
+    const h = harness({boundTarget: () => binding, settings: confirmSettings})
+    h.intake.open(request, '修复按钮', 'u1', 'e')
+    await h.intake.settled()
+    const operation = h.confirmation.acceptDirectDecision({proposalId: h.intake.view!.proposal_id!, confirmed: true}).operation!
+    assert.equal(h.intake.beginConfirmed(operation), true)
+    if (unknown) h.intake.settleConfirmed({accepted: false, code: 'callback_failed'})
+    const state = h.intake.view!.state
+    binding = {...binding, revision: 2}
+    assert.equal(h.intake.beginConfirmed(operation), false)
+    assert.equal(h.intake.view?.state, state)
+    assert.notEqual(h.intake.view?.outcome, 'cancelled')
+    h.intake.open(request, '再试一次', 'u2', 'e')
+    await h.intake.settled()
+    assert.equal(h.intake.view?.state, state)
+    assert.equal(h.dispatched.length, 0)
+  }
+})
+
+test('review boundary: idle clarification restarts after target change without old requirements', async () => {
+  let binding = {...boundWorkspace}
+  const inputs: Readonly<Record<string, unknown>>[] = []
+  const h = harness({boundTarget: () => binding, models: {assess: input => {
+    inputs.push(input)
+    return Promise.resolve(assessment(input, {kind: 'unclear', candidate_question: {owner: 'user', text: '哪个文件？'}}))
+  }}})
+  h.intake.open(request, '修复旧工作区按钮', 'u1', 'e')
+  await h.intake.settled()
+  const id = h.intake.view!.intake_id
+  binding = {workspace_id: 'w2', revision: 2}
+  h.intake.open(request, '新工作区的 login.ts', 'u2', 'e')
+  await h.intake.settled()
+  assert.notEqual(h.intake.view?.intake_id, id)
+  assert.equal(h.intake.view?.opening, '新工作区的 login.ts')
+  assert.deepEqual(h.intake.view?.turns, [])
+  assert.equal(JSON.stringify(inputs.at(-1)).includes('修复旧工作区按钮'), false)
+})
+
+test('review boundary: explicit named-session selection needs no literal continue verb', async () => {
+  for (const text of ['继续 Named task', '在 Named task 会话里修复按钮', '用 Named task 会话修复按钮', 'In the Named task session, fix the button']) {
+    const h = harness({roster: () => [{name: 'Project', last_used_at: 1, last_session_title: 'Named task', running: [], sessions: ['Named task']}],
+      models: {assess: input => Promise.resolve(assessment(input, {session: {mode: 'named', title: 'Named task'}}))}})
+    h.intake.open(request, text, 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.decisions[0]?.session_title, 'Named task', text)
+    assert.equal(h.dispatched.length, 1, text)
+  }
+})
+
+test('review boundary: ordinary continuation words with model new keep a new session', async () => {
+  for (const text of ['给播放器加一个继续播放按钮', '先修按钮，接着补测试', '把标题改为“继续刚才的任务”']) {
+    const h = harness({models: {assess: input => Promise.resolve(assessment(input, {session: {mode: 'new'}}))}})
+    h.intake.open(request, text, 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.decisions[0]?.session, 'new', text)
+    assert.equal(h.dispatched.length, 1, text)
+  }
+})
+
+
+for (const [answer, modelTitle, dispatched] of [
+  ['login.ts', 'Named task', true],
+  ['先问我是否继续 Named task', 'Named task', false],
+  ['先问我', 'Named task', false],
+  ['是否继续 Named task？', 'Named task', false],
+  ['不要继续 Named task', 'Named task', false],
+  ['新开一个会话', 'Named task', false],
+  ['在 Other task 会话里修复按钮', 'Named task', false],
+  ['在 Other task 会话里修复按钮', 'Other task', true],
+] as const) {
+  test(`latest session directive boundary: ${answer} / ${modelTitle}`, async () => {
+    const h = harness({roster: () => [{name: 'Project', last_used_at: 1, last_session_title: 'Named task', running: [], sessions: ['Named task', 'Other task']}],
+      models: {assess: input => Promise.resolve(assessment(input, {
+        session: {mode: 'named', title: (input.turns as unknown[]).length ? modelTitle : 'Named task'},
+        ...((input.turns as unknown[]).length ? {} : {
+          slots: {...slots, scope: missing, acceptance: missing, constraints: missing}, candidate_question: {owner: 'user', text: '哪个文件？'},
+        }),
+      }))}})
+    h.intake.open(request, '继续 Named task', 'u1', 'e')
+    await h.intake.settled()
+    assert.equal(h.dispatched.length, 0)
+    assert.ok(h.intake.view?.pending_question)
+    h.intake.open(request, answer, 'u2', 'e')
+    await h.intake.settled()
+    assert.equal(h.dispatched.length, dispatched ? 1 : 0)
+    if (dispatched) assert.equal(h.decisions.at(-1)?.session_title, modelTitle)
+    else assert.ok(h.intake.view?.pending_question)
+  })
+}

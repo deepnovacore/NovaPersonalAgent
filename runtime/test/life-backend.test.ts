@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,realpath,readFile,writeFile,rm} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
-import {LifeService,lifeStateSchema} from '../src/personal-agent/life.js'
+import {LifeService,lifeStateSchema,emptyLifeState} from '../src/personal-agent/life.js'
 import type {LifeBackend} from '../src/personal-agent/life.js'
 
 test('configured Life backend receives legacy state once and never rewrites the legacy JSON',async()=>{
@@ -12,7 +12,7 @@ test('configured Life backend receives legacy state once and never rewrites the 
   const old=new LifeService(path);await old.open();await old.mutate({op:'profile',expected_version:0,about:'用户手改的完整自由文本\n没有逐句来源'},'legacy-profile');await old.close()
   const before=await readFile(path,'utf8');let loads=0,mutations=0
   const state=lifeStateSchema.parse(JSON.parse(before))
-  const backend:LifeBackend={load:legacy=>{loads++;assert.deepEqual(legacy,state);return Promise.resolve({state,revision:4})},mutate:q=>{mutations++;assert.equal(q.expectedRevision,4);assert.equal(q.requestId,'new-profile');return Promise.resolve({state:{...state,profile:{about:'更新内容',version:2}},revision:5,result:{id:'profile',version:2}})}}
+  const backend:LifeBackend={load:(legacy,options)=>{loads++;assert.equal(options?.legacyPath,path);assert.deepEqual(legacy,state);return Promise.resolve({state,revision:4})},mutate:q=>{mutations++;assert.equal(q.expectedRevision,4);assert.equal(q.requestId,'new-profile');return Promise.resolve({state:{...state,profile:{about:'更新内容',version:2}},revision:5,result:{id:'profile',version:2}})}}
   const life=new LifeService(path,()=>undefined,backend)
   await life.open();assert.equal(loads,1)
   await life.mutate({op:'profile',expected_version:1,about:'更新内容'},'new-profile')
@@ -83,4 +83,17 @@ test('task Todo projection reconciles a committed backend update after its ackno
  const loop=new TaskLoop(tasks,{evaluate:()=>{checks++;return Promise.resolve({kind:'complete',evidence_refs:['task-delivery:reply']})},execute:()=>Promise.reject(Error('must not execute again')),syncTodo:task=>life.completeTaskTodo(task)})
  try{await loop.wake(task.id);assert.equal(tasks.get(task.id).todo_sync,'pending');assert.equal((await backend.peek!())!.state.todos[0]!.status,'done');await loop.wake(task.id);assert.equal(tasks.get(task.id).todo_sync,'synced');assert.equal(checks,1);assert.equal(mutations,1);assert.equal(life.snapshot().todos[0]!.version,2);assert.equal(life.snapshot().todos[0]!.note,'Keep note')}finally{await loop.close()}
  }finally{await life.close();await tasks.close();await resource.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('absent legacy JSON supplies no migration path and read errors never become empty migrations',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-life-absent-')),path=join(dir,'life.json')
+ let loads=0
+ const backend:LifeBackend={load:(legacy,options)=>{loads++;assert.deepEqual(legacy,emptyLifeState());assert.equal(options?.legacyPath,undefined);return Promise.resolve({state:legacy,revision:0})},mutate:()=>Promise.reject(Error('unused'))}
+ try{
+  const life=new LifeService(path,()=>undefined,backend);await life.open();await life.close();assert.equal(loads,1)
+  await assert.rejects(readFile(path),{code:'ENOENT'})
+  await writeFile(path,'invalid JSON');await assert.rejects(life.open(),SyntaxError);assert.equal(loads,1)
+  const directory=new LifeService(dir,()=>undefined,backend);await assert.rejects(directory.open());assert.equal(loads,1)
+ }finally{await rm(dir,{recursive:true,force:true})}
 })

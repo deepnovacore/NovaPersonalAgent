@@ -22,11 +22,11 @@ Explicit profile/Life changes and corrections merge immediately. Daily consolida
 
 The initial defaults are configurable implementation choices: daily at 00:00 UTC, with one catch-up when the application is running after the scheduled hour. At most one successful consolidation per local day; failed work can retry on maintenance. Environment settings:
 
-- `NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_ENABLED=true`
-- `NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_HOUR=0` (0–23)
-- `NOVA_AUDIO_AGENT_MEMORY_CONSOLIDATION_TIMEZONE=UTC` (IANA timezone)
+- `MEMORY_CONSOLIDATION_ENABLED=true`
+- `MEMORY_CONSOLIDATION_HOUR=0` (0–23)
+- `MEMORY_CONSOLIDATION_TIMEZONE=UTC` (IANA timezone)
 
-Text sessions use a bounded directory and explicit recall/evidence tools. Optional text prefetch is disabled by default (`NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED=false`). Realtime voice uses bounded facts/profile and the valid one-page summary, without automatic prerecall. Context is reference data, not authorization to act. The receiving conversation provider requires its own grant; extraction consent is not reused as consent for a different recipient. A send-time snapshot checks current revisions and grants, including edits or revocation from another client.
+Text sessions use a bounded directory and explicit recall/evidence tools. Optional text prefetch is disabled by default (`MEMORY_PRERECALL_ENABLED=false`). Realtime voice uses bounded facts/profile and the valid one-page summary, without automatic prerecall. Context is reference data, not authorization to act. The receiving conversation provider requires its own grant; extraction consent is not reused as consent for a different recipient. A send-time snapshot checks current revisions and grants, including edits or revocation from another client.
 
 ## Deletion boundaries
 

@@ -1,14 +1,23 @@
-import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, PERSONAL_SETTINGS_METHODS, desktopBudgetFailure, type DesktopCapabilityState} from './desktop/desktop-control.js'
+import {fileURLToPath} from 'node:url'
+import {writeFileSync} from 'node:fs'
+import {dirname, resolve} from 'node:path'
+import {installAcceptanceGate,probeAcceptanceGate,acceptanceRuntimeHash} from './desktop/workbench-acceptance.js'
+import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, PERSONAL_SETTINGS_METHODS, desktopBudgetFailure, desktopConfigurationFailure, type DesktopCapabilityState} from './desktop/desktop-control.js'
 import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop/desktop-session.js'
 import {announceReadiness} from './desktop.js'
 import {buildProductionComposition} from './composition/production-composition.js'
 
 type UtilityProcess = NodeJS.Process & {readonly parentPort?: DesktopStopParentSource & {postMessage(message: unknown): void}}
 
-const token = process.env.NOVA_AUDIO_AGENT_DESKTOP_TOKEN ?? ''
-const readyEndpoint = process.env.NOVA_AUDIO_AGENT_DESKTOP_READY_ENDPOINT ?? ''
+const acceptance=installAcceptanceGate()
+if(process.argv.includes('--nova-workbench-acceptance-required')&&!acceptance)throw Error('acceptance_gate_missing')
+
+const token = process.env.DESKTOP_TOKEN ?? ''
+const readyEndpoint = process.env.DESKTOP_READY_ENDPOINT ?? ''
 const stop = new AbortController()
 const parentPort = (process as UtilityProcess).parentPort
+const acceptanceProbe=acceptance?await probeAcceptanceGate():undefined
+if(acceptance&&acceptanceProbe)parentPort?.postMessage({type:'nova:acceptance:gate-ready',buildCommit:acceptance.buildCommit,runtimeHash:acceptanceRuntimeHash(fileURLToPath(import.meta.url)),...acceptanceProbe})
 
 let capabilityView: (() => DesktopCapabilityState | undefined) = () => undefined
 let knowledgeHandle: ((method: string, params: unknown) => Promise<unknown>) | undefined
@@ -41,7 +50,13 @@ const exitCode = await runDesktopEntryWithStopSources({
   ),
   onDiagnostic,
   onStartupFailure: error => {
-    const status = desktopBudgetFailure(error)
+    if(acceptance){
+      const detail=error instanceof Error?`${error.name}: ${error.message}`:typeof error
+      onDiagnostic(`[acceptance-startup-error] ${detail.replace(/[\r\n]/gu,' ').slice(0,300)}`)
+      const report=process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT
+      if(report)writeFileSync(resolve(dirname(report),'startup-error.json'),JSON.stringify({detail,stack:error instanceof Error?error.stack?.split('\n').slice(0,8):undefined})+'\n',{mode:0o600})
+    }
+    const status = desktopBudgetFailure(error) ?? desktopConfigurationFailure(error)
     capabilityView = () => status
     control.publish()
   },

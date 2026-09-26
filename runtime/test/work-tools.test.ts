@@ -17,7 +17,11 @@ test('deriveSessionTitle keeps the first sentence, stripped, at most 20 code poi
   assert.equal(deriveSessionTitle('Add tests. Then ship'), 'Add tests')
   assert.equal(deriveSessionTitle('v1.2 is broken'), 'v1.2 is broken', 'a dot without a following space is not a break')
   assert.equal(deriveSessionTitle('a;b；c'), 'a')
-  assert.equal([...deriveSessionTitle('😀'.repeat(30))].length, 20)
+  for (const character of ['a', '😀']) {
+    for (const length of [19, 20]) assert.equal(deriveSessionTitle(character.repeat(length)), character.repeat(length))
+    assert.equal(deriveSessionTitle(character.repeat(21)), character.repeat(19) + '…')
+    assert.equal(deriveSessionTitle(character.repeat(30) + '。more'), character.repeat(19) + '…')
+  }
   assert.equal(deriveSessionTitle('   '), '')
 })
 

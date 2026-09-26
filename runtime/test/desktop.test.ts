@@ -9,6 +9,8 @@ import {
   MAX_DESKTOP_JSON_BYTES,
   MAX_DESKTOP_OUTBOUND_BINARY_BYTES,
   MAX_DESKTOP_PENDING_SENDS,
+  MAX_DESKTOP_PERSONAL_JSON_BYTES,
+  DesktopPersonalFrameTooLargeError,
   MAX_DESKTOP_PCM_BYTES,
   NodeDesktopServer,
   announceReadiness,
@@ -1467,11 +1469,12 @@ test('desktop outbound applies size and pending-send bounds', async () => {
     )
     await settleWithin('accepted pending desktop sends', Promise.all(pending))
     await settleWithin('bounded pending desktop sends', delivered)
-    const personal = JSON.stringify({type:'personal.state', cards:'x'.repeat(32000)})
+    const personal = JSON.stringify({type:'personal.state', revision:1, cards:'x'.repeat(32000)})
     const personalFrames = nextFrames(socket, 1)
     await server.sendText(personal)
     assert.equal((await personalFrames)[0]?.bytes.length, Buffer.byteLength(personal))
-    await assert.rejects(server.sendText(JSON.stringify({type:'personal.state', cards:'x'.repeat(1024 * 1024)})), DesktopProtocolError)
+    await assert.rejects(server.sendText(JSON.stringify({type:'personal.state', cards:'x'.repeat(32000)})), DesktopProtocolError, 'large personal frames need their envelope')
+    await assert.rejects(server.sendText(JSON.stringify({type:'personal.state', revision:1, cards:'x'.repeat(MAX_DESKTOP_PERSONAL_JSON_BYTES)})), DesktopPersonalFrameTooLargeError)
     await assert.rejects(server.sendText(JSON.stringify({type:'other', cards:'x'.repeat(32000)})), DesktopProtocolError)
     await assert.rejects(
       settleWithin('oversized desktop text send', server.sendText('x'.repeat(MAX_DESKTOP_JSON_BYTES + 1))),

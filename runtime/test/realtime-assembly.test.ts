@@ -1,3 +1,6 @@
+import {hostWorkspacePath} from '../src/executors/codex/process-owner.js'
+import {CodingTargetController} from '../src/personal-agent/coding-targets.js'
+import {fixture as projectFixture} from './fixtures/codex/project-adapter-fixture.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import assert from 'node:assert/strict'
 import {mkdtemp, realpath, rm, writeFile, readFile} from 'node:fs/promises'
@@ -1398,6 +1401,121 @@ test('callbacks route once through the single playback, session, bridge, and ser
   assert.deepEqual(diagnostics, [])
 
   await settleNamed('callback assembly stop', realtime.stop())
+})
+
+for (const scenario of ['direct', 'changed', 'unbound'] as const) {
+  test(`conversation-bound direct start ${scenario}`, async () => {
+    const value = await projectFixture({preexistingSession: true})
+    await value.adapter.initialize()
+    const targets = new CodingTargetController(value.adapter.targetPort)
+    const original = (await targets.list()).find(target => target.session_id !== null)!
+    if (scenario !== 'unbound') await targets.setTarget(original)
+    const beta = await value.store.createManaged('beta')
+    const assessmentGate = deferred<void>()
+    const assessmentEntered = deferred<void>()
+    let controller!: CodexAgentController
+    const provider = new WorkspaceContextProvider()
+    const core = buildAssembly({settings: settingsSchema.parse({executors: ['codex']}), clock: value.clock,
+      gateway: new NeverCalledGateway(), searchTransport: new NeverCalledSearch(), executors: [value.adapter]})
+    const realtime = buildRealtimeAssembly({core, provider, projectAdapter: value.adapter, codingTarget: targets,
+      codingAgentControllerFactory: {create: context => {
+        controller = new CodexAgentController({channel: context.channel, intake: context.intake!, dispatchPort: context.dispatchPort, resolveCancelTarget: context.resolveCancelTarget})
+        return controller
+      }},
+      intake: {settings: {clarification_depth: 'balanced', plan_readback: 'confirm'}, models: {
+        assess: async input => {
+          assessmentEntered.resolve(); await assessmentGate.promise
+          return {intake_id: input.intake_id, revision: input.revision, kind: 'work', project: '当前项目', project_evidence: null,
+            session: {mode: 'latest'}, execution_mode: 'direct', intent_to_proceed: true, candidate_question: null,
+            discovery: [], early_exit: true, abandon: false, readiness: 1,
+            slots: Object.fromEntries(['goal', 'scope', 'acceptance', 'constraints'].map(key => [key, {state: 'stated', note: key === 'goal' ? 'Fix button' : key}]))}
+        }, plan: () => Promise.reject(Error('direct work must not plan')), resolveCancelTarget: () => Promise.resolve(null),
+      }},
+    })
+    await realtime.start()
+    try {
+      await realtime.service.handleEvent({kind: 'user_speech_started', session_epoch: 1, speech_id: 'bound', provider_item_id: 'bound-user'})
+      await realtime.service.handleEvent({kind: 'user_speech_ended', session_epoch: 1, speech_id: 'bound', provider_item_id: 'bound-user'})
+      await realtime.service.handleEvent({kind: 'user_transcript_final', session_epoch: 1, item_id: 'bound-user', text: '在当前项目修复按钮，直接开始'})
+      await realtime.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'bound-response'})
+      const call = {kind: 'tool_call_ready', session_epoch: 1, call_id: 'bound-call', item_id: 'bound-function', response_id: 'bound-response',
+        name: 'dispatch', arguments: {executor: 'codex', instruction: '修复按钮', origin_ref: 'conversation:1'}} as const
+      await realtime.service.handleEvent(call)
+      await assessmentEntered.promise
+      const revision = targets.revision
+      if (scenario === 'changed') await targets.setTarget({workspace_id: beta.workspace_id, session_id: null})
+      assessmentGate.resolve()
+      await controller.settleIntakeForTest()
+      if (scenario === 'unbound') {
+        assert.equal(controller.inspectIntakeForTest()?.outcome, 'routed', 'unbound current workspace must request selection, never use global active')
+        assert.equal(value.factory.calls.length, 0)
+        assert.equal(value.confirmation.pending, false)
+      } else if (scenario === 'changed') {
+        assert.equal(controller.inspectIntakeForTest()?.outcome, 'cancelled')
+        assert.equal(value.factory.calls.length, 0)
+        assert.equal(value.confirmation.pending, false)
+      } else {
+        assert.equal(controller.inspectIntakeForTest()?.outcome, 'dispatched')
+        await waitNamed('real bound adapter execution', () => value.factory.calls.length === 1)
+        assert.equal(hostWorkspacePath(value.factory.bindings[0]!.workspace), (await value.store.resolveWorkspace('alpha')).canonical_path)
+        assert.equal(value.factory.bindings[0]?.resumeThreadId, null, 'an independent task starts new despite remembered session')
+        assert.ok(targets.revision > revision, 'accepted target persistence advanced the binding revision')
+        await realtime.service.handleEvent(call)
+        await controller.settleIntakeForTest()
+        assert.equal(value.factory.calls.length, 1, 'the existing epoch/call ledger suppresses replay')
+      }
+    } finally {assessmentGate.resolve(); await realtime.stop(); await rm(value.root, {recursive: true, force: true})}
+  })
+}
+
+test('review boundary: two conversation assemblies independently resolve current workspace and new sessions', async () => {
+  const value = await projectFixture({preexistingSession: true})
+  await value.adapter.initialize()
+  const alpha = await value.store.resolveWorkspace('alpha')
+  const beta = await value.store.createManaged('beta')
+  await value.store.createManaged('global-third')
+  const graphs: ReturnType<typeof buildRealtimeAssembly>[] = []
+  try {
+    for (const workspace of [alpha, beta]) {
+      const targets = new CodingTargetController(value.adapter.targetPort)
+      await targets.setTarget({workspace_id: workspace.workspace_id, session_id: null})
+      let controller!: CodexAgentController
+      const core = buildAssembly({settings: settingsSchema.parse({executors: ['codex']}), clock: value.clock,
+        gateway: new NeverCalledGateway(), searchTransport: new NeverCalledSearch(), executors: [value.adapter]})
+      const graph = buildRealtimeAssembly({core, provider: new WorkspaceContextProvider(), projectAdapter: value.adapter, codingTarget: targets,
+        codingAgentControllerFactory: {create: context => {
+          controller = new CodexAgentController({channel: context.channel, intake: context.intake!, dispatchPort: context.dispatchPort, resolveCancelTarget: context.resolveCancelTarget})
+          return controller
+        }},
+        intake: {settings: {clarification_depth: 'balanced', plan_readback: 'confirm'}, models: {
+          assess: input => Promise.resolve({intake_id: input.intake_id, revision: input.revision, kind: 'work', project: '当前工作区', project_evidence: null,
+            session: {mode: 'new'}, execution_mode: 'direct', intent_to_proceed: true, candidate_question: null,
+            discovery: [], early_exit: true, abandon: false, readiness: 1,
+            slots: Object.fromEntries(['goal', 'scope', 'acceptance', 'constraints'].map(key => [key, {state: 'stated', note: key}]))}),
+          plan: () => Promise.reject(Error('direct work must not plan')), resolveCancelTarget: () => Promise.resolve(null),
+        }},
+      })
+      graphs.push(graph)
+      await graph.start()
+      await value.store.selectWorkspace('global-third')
+      await graph.service.handleEvent({kind: 'user_speech_started', session_epoch: 1, speech_id: 'bound', provider_item_id: 'bound-user'})
+      await graph.service.handleEvent({kind: 'user_speech_ended', session_epoch: 1, speech_id: 'bound', provider_item_id: 'bound-user'})
+      await graph.service.handleEvent({kind: 'user_transcript_final', session_epoch: 1, item_id: 'bound-user', text: '在当前工作区修复按钮，直接开始'})
+      await graph.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'bound-response'})
+      const call = {kind: 'tool_call_ready', session_epoch: 1, call_id: 'same-call', item_id: 'bound-function', response_id: 'bound-response',
+        name: 'dispatch', arguments: {executor: 'codex', instruction: '修复按钮', origin_ref: 'conversation:1'}} as const
+      await graph.service.handleEvent(call)
+      await controller.settleIntakeForTest()
+      assert.equal(controller.inspectIntakeForTest()?.outcome, 'dispatched')
+      await waitNamed('independent conversation execution', () => value.factory.calls.length === graphs.length)
+      assert.equal(hostWorkspacePath(value.factory.bindings.at(-1)!.workspace), workspace.canonical_path)
+      assert.equal(value.factory.bindings.at(-1)!.resumeThreadId, null)
+      await graph.service.handleEvent(call)
+      await controller.settleIntakeForTest()
+      assert.equal(value.factory.calls.length, graphs.length)
+    }
+    assert.equal(value.factory.calls.length, 2)
+  } finally {for (const graph of graphs) await graph.stop(); await rm(value.root, {recursive: true, force: true})}
 })
 
 test('project proposal reaches provider and desktop before confirmation', async () => {
@@ -3512,6 +3630,11 @@ test('knowledge-only composition opens canonical originals without enabling pers
     assert.equal(memory.responseAdaptation,undefined)
     const saved=await memory.recordEvidence({sourceId:'knowledge:document',locator:'notes/demo',text:'Demo notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
     assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence?.text,'Demo notes')
+    const second=await memory.recordEvidence({sourceId:'knowledge:document-two',locator:'notes/second',text:'More notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
+    assert.ok(memory.forgetSources,'knowledge-only facade exposes batched source erasure')
+    await memory.forgetSources(['knowledge:document','knowledge:document-two'])
+    assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence,null)
+    assert.equal((await realtime.retrieval.evidence(second.evidence_id)).evidence,null)
     assert.deepEqual((await memory.recall('demo')).hits,[])
   } finally {await realtime.stop();await knowledge.close();await rm(directory,{recursive:true,force:true})}
 })
@@ -3660,7 +3783,7 @@ function recordingConnector(options: {readonly failFirstWith?: Error} = {}): Rec
 }
 
 function settings(environment: NodeJS.ProcessEnv = {}): Settings {
-  return loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
+  return loadSettings({MEMORY_CONNECTION: 'disabled',
     TAVILY_API_KEY: 'tavily-test-key',
     ...environment,
   })
@@ -3717,7 +3840,7 @@ async function exerciseGateway(gateway: ModelGateway): Promise<void> {
 test('Qwen factory and plain assembly both leave the fast slot to the realtime owner', () => {
   const connector = recordingConnector()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    settings({MODEL_API_KEY: 'model-key'}),
     connector.connector,
   ))
   const qwenBindings = realtime.tools.bindings
@@ -3732,7 +3855,7 @@ test('Qwen factory and plain assembly both leave the fast slot to the realtime o
   // There is no second mode left: plain assembly wires no text front brain either, so a
   // user turn cannot take the fast slot out from under the realtime provider.
   const ordinary = buildAssembly({
-    settings: settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    settings: settings({MODEL_API_KEY: 'model-key'}),
     gateway: new NeverGateway(),
     searchTransport: new NeverSearch(),
   })
@@ -3761,8 +3884,8 @@ test('Qwen production composition derives cameraModuleEnabled from Settings', ()
   const connector = recordingConnector()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
     settings({
-      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
-      NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false',
+      MODEL_API_KEY: 'model-key',
+      CAMERA_MODULE_ENABLED: 'false',
     }), connector.connector,
   ))
   const names = [...realtime.core.runtime.executors.keys()]
@@ -3776,7 +3899,7 @@ test('Qwen production composition forwards the personal memory owner', async () 
   let created = 0
   let closed = 0
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    settings({MODEL_API_KEY: 'model-key'}),
     recordingConnector().connector,
     {createPersonalMemory: () => {
       created += 1
@@ -3799,7 +3922,7 @@ test('Qwen factory construction does not invoke an unrelated LiveKit agents load
   let agentsLoaderCalls = 0
   const input = {
     ...qwenOptions(
-      settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+      settings({MODEL_API_KEY: 'model-key'}),
       connector.connector,
     ),
     agentsLoader: () => {
@@ -3869,8 +3992,8 @@ test('Qwen composition exposes approval only for the exact controller-bearing re
   }
   const input = {
     ...qwenOptions(settings({
-      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
-      NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
+      MODEL_API_KEY: 'model-key',
+      EXECUTOR: 'codex',
     }), connector.connector),
     codexResource: resource,
     codingAgentControllerFactory: testCodingAgentControllerFactory,
@@ -3903,8 +4026,8 @@ test('Qwen composition exposes approval only for the exact controller-bearing re
   }
   const neverRealtime = buildQwenRealtimeAssembly({
     ...qwenOptions(settings({
-      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
-      NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
+      MODEL_API_KEY: 'model-key',
+      EXECUTOR: 'codex',
     }), neverConnector.connector),
     codexResource: neverResource,
     codingAgentControllerFactory: testCodingAgentControllerFactory,
@@ -3936,8 +4059,8 @@ test('Qwen realtime composition rejects a live Codex fallback', () => {
 
   assert.throws(() => buildQwenRealtimeAssembly({
     ...qwenOptions(settings({
-      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
-      NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
+      MODEL_API_KEY: 'model-key',
+      EXECUTOR: 'codex',
     }), recordingConnector().connector),
     codexResource: resource,
   }), error => error instanceof AssemblyError
@@ -3956,14 +4079,14 @@ test('Qwen factory preserves resource identity, explicit Guard settings, and one
   const ids = new RecordingIds()
   const frame = new RecordingFrameSource()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(settings({
-    NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+    MODEL_API_KEY: 'model-key',
     DASHSCOPE_API_KEY: 'dash-key',
-    NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
-    NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL: 'qwen-test',
-    NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE: 'voice-test',
-    NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
-    NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY: 'packed',
-    NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS: '1',
+    QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
+    QWEN_REALTIME_MODEL: 'qwen-test',
+    QWEN_REALTIME_VOICE: 'voice-test',
+    QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
+    QWEN_GUARD_HISTORY_RECOVERY: 'packed',
+    QWEN_GUARD_HISTORY_PAIRS: '1',
   }), connector.connector, {clock, ids, frameSource: frame}))
 
   assert.ok(realtime.provider instanceof QwenAudioRealtimeAdapter)
@@ -4041,7 +4164,7 @@ test('desktop Qwen composition shares one clock, Chromium source, and camera ser
     buildRealtime: (callbacks, transport) => {
       source = new ChromiumFrameSource({source: 'file', transport, clock})
       return buildQwenRealtimeAssembly(qwenOptions(
-        settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+        settings({MODEL_API_KEY: 'model-key'}),
         connector.connector,
         {clock, frameSource: source, ...callbacks},
       ))
@@ -4064,7 +4187,7 @@ test('desktop Qwen composition shares one clock, Chromium source, and camera ser
 
 test('Qwen factory maps legacy history settings to the generic preemptive-alert service seam', () => {
   const defaults = buildQwenRealtimeAssembly(qwenOptions(
-    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    settings({MODEL_API_KEY: 'model-key'}),
     recordingConnector().connector,
   ))
   assert.deepEqual(defaults.service.preemptiveAlertConfiguration, {
@@ -4074,10 +4197,10 @@ test('Qwen factory maps legacy history settings to the generic preemptive-alert 
   })
   for (const pairs of ['1', '2', '4']) {
     const realtime = buildQwenRealtimeAssembly(qwenOptions(settings({
-      NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
-      NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
-      NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY: 'packed',
-      NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS: pairs,
+      MODEL_API_KEY: 'model-key',
+      QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
+      QWEN_GUARD_HISTORY_RECOVERY: 'packed',
+      QWEN_GUARD_HISTORY_PAIRS: pairs,
     }), recordingConnector().connector))
     assert.deepEqual(realtime.service.preemptiveAlertConfiguration, {
       controlledReconnect: true,
@@ -4093,14 +4216,14 @@ test('Qwen factory keeps websocket and model-gateway credential priorities disti
       name: 'both',
       environment: {
         DASHSCOPE_API_KEY: 'dash-key',
-        NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+        MODEL_API_KEY: 'model-key',
       },
       websocket: 'dash-key',
       gateway: 'model-key',
     },
     {
       name: 'model only',
-      environment: {NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'},
+      environment: {MODEL_API_KEY: 'model-key'},
       websocket: 'model-key',
       gateway: 'model-key',
     },
@@ -4114,7 +4237,7 @@ test('Qwen factory keeps websocket and model-gateway credential priorities disti
       name: 'Python-whitespace DashScope',
       environment: {
         DASHSCOPE_API_KEY: '\u001c\u0085',
-        NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key',
+        MODEL_API_KEY: 'model-key',
       },
       websocket: 'model-key',
       gateway: 'model-key',
@@ -4149,7 +4272,7 @@ test('integrated Qwen support requests never send DashScope credentials to a gen
         name: 'DashScope fallback',
         environment: {
           DASHSCOPE_API_KEY: 'dash-support-key',
-          NOVA_AUDIO_AGENT_MODEL_BASE_URL: `https://hostile.example/private?sentinel=${sentinel}`,
+          MODEL_BASE_URL: `https://hostile.example/private?sentinel=${sentinel}`,
         },
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
         authorization: 'Bearer dash-support-key',
@@ -4158,8 +4281,8 @@ test('integrated Qwen support requests never send DashScope credentials to a gen
         name: 'generic override',
         environment: {
           DASHSCOPE_API_KEY: 'dash-provider-key',
-          NOVA_AUDIO_AGENT_MODEL_API_KEY: 'generic-support-key',
-          NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://generic.example/compatible/v9',
+          MODEL_API_KEY: 'generic-support-key',
+          MODEL_BASE_URL: 'https://generic.example/compatible/v9',
         },
         endpoint: 'https://generic.example/compatible/v9/chat/completions',
         authorization: 'Bearer generic-support-key',
@@ -4207,7 +4330,7 @@ test('integrated Qwen support requests never send DashScope credentials to a gen
 test('Qwen factory forwards only the reviewed provider tool subset', async () => {
   const connector = recordingConnector()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    settings({MODEL_API_KEY: 'model-key'}),
     connector.connector,
     {providerToolView: tools => ({...tools, schemas: tools.schemas.slice(0, 2)})},
   ))
@@ -4225,7 +4348,7 @@ test('Qwen factory forwards only the reviewed provider tool subset', async () =>
   })
   assert.throws(
     () => buildQwenRealtimeAssembly(qwenOptions(
-      settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+      settings({MODEL_API_KEY: 'model-key'}),
       connector.connector,
       {providerToolView: copiedBindings},
     )),
@@ -4239,11 +4362,11 @@ test('Qwen factory validates synchronously without connecting or leaking secrets
   const sentinel = 'synchronous-sentinel-secret'
   assert.throws(
     () => buildQwenRealtimeAssembly(qwenOptions(settings({
-      NOVA_AUDIO_AGENT_MODEL_API_KEY: sentinel,
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: `https://invalid/?secret=${sentinel}`,
+      MODEL_API_KEY: sentinel,
+      QWEN_REALTIME_URL: `https://invalid/?secret=${sentinel}`,
     }), connector.connector)),
     error => error instanceof ConfigurationError
-      && error.message === 'NOVA_AUDIO_AGENT_QWEN_REALTIME_URL 必须使用 wss://'
+      && error.message === 'QWEN_REALTIME_URL 必须使用 wss://'
       && !error.message.includes(sentinel),
   )
   assert.equal(connector.calls.length, 0)
@@ -4256,7 +4379,7 @@ test('Qwen connector failure rolls core back safely and permits one later retry'
   )})
   const frame = new RecordingFrameSource()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({NOVA_AUDIO_AGENT_MODEL_API_KEY: 'model-key'}),
+    settings({MODEL_API_KEY: 'model-key'}),
     connector.connector,
     {frameSource: frame},
   ))
@@ -4277,8 +4400,8 @@ test('Qwen connector failure rolls core back safely and permits one later retry'
 })
 
 test('qwen rejects the final tool budget after evaluating the provider view once', () => {
-  const configured = loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
+  const configured = loadSettings({MEMORY_CONNECTION: 'disabled',
+    PIPELINE_MODE: 'integrated',
     DASHSCOPE_API_KEY: 'fixture-only', DOUBAO_BIGMODEL_API_KEY: 'fixture-only',
   })
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
@@ -4292,9 +4415,9 @@ test('qwen rejects the final tool budget after evaluating the provider view once
 
 {
 function settings(environment: NodeJS.ProcessEnv = {}): Settings {
-  return loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
-    NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
+  return loadSettings({MEMORY_CONNECTION: 'disabled',
+    PIPELINE_MODE: 'cascaded',
+    CASCADE_LLM_PROVIDER: 'ark',
     ARK_API_KEY: 'ark-test-key',
     DOUBAO_BIGMODEL_API_KEY: 'doubao-test-key',
     TAVILY_API_KEY: 'tavily-test-key',
@@ -4574,8 +4697,8 @@ function recordingRegistries(calls: string[]): CascadedProviderRegistries {
 test('cascaded defaults resolve endpointing, ASR, Qwen LLM, and TTS in order', () => {
   const calls: string[] = []
   buildCascadedRealtimeAssembly({
-    settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+    settings: loadSettings({MEMORY_CONNECTION: 'disabled',
+      PIPELINE_MODE: 'cascaded',
       DASHSCOPE_API_KEY: 'dash-secret',
       DOUBAO_BIGMODEL_API_KEY: 'doubao-secret',
       TAVILY_API_KEY: 'search-secret',
@@ -4589,10 +4712,10 @@ test('cascaded defaults resolve endpointing, ASR, Qwen LLM, and TTS in order', (
 test('explicit Ark resolves no Qwen factory', () => {
   const calls: string[] = []
   buildCascadedRealtimeAssembly({
-    settings: loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
-      NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'ark',
-      NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-explicit',
+    settings: loadSettings({MEMORY_CONNECTION: 'disabled',
+      PIPELINE_MODE: 'cascaded',
+      CASCADE_LLM_PROVIDER: 'ark',
+      CASCADE_LLM_MODEL: 'ark-explicit',
       ARK_API_KEY: 'ark-secret',
       DOUBAO_BIGMODEL_API_KEY: 'doubao-secret',
       TAVILY_API_KEY: 'search-secret',
@@ -4608,10 +4731,10 @@ test('cascaded assembly never reads unselected LLM credentials or config', () =>
     const inaccessible = provider === 'qwen'
       ? new Set<PropertyKey>(['ark_api_key', 'volcengine_ark_base_url'])
       : new Set<PropertyKey>(['dashscope_api_key'])
-    const base = loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
-      NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: provider,
-      ...(provider === 'ark' ? {NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-explicit'} : {}),
+    const base = loadSettings({MEMORY_CONNECTION: 'disabled',
+      PIPELINE_MODE: 'cascaded',
+      CASCADE_LLM_PROVIDER: provider,
+      ...(provider === 'ark' ? {CASCADE_LLM_MODEL: 'ark-explicit'} : {}),
       ...(provider === 'qwen' ? {DASHSCOPE_API_KEY: 'dash-secret'} : {ARK_API_KEY: 'ark-secret'}),
       DOUBAO_BIGMODEL_API_KEY: 'doubao-secret',
       TAVILY_API_KEY: 'search-secret',
@@ -4838,11 +4961,11 @@ test('cascaded assembly preserves one graph, shared resources, and frozen Guard 
   const mediaStore = new MediaStore()
   let telemetryCloses = 0
   const configured = settings({
-    NOVA_AUDIO_AGENT_MODEL_API_KEY: 'generic-model-key',
-    NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-realtime-distinct',
-    NOVA_AUDIO_AGENT_QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
-    NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_RECOVERY: 'packed',
-    NOVA_AUDIO_AGENT_QWEN_GUARD_HISTORY_PAIRS: '1',
+    MODEL_API_KEY: 'generic-model-key',
+    CASCADE_LLM_MODEL: 'ark-realtime-distinct',
+    QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
+    QWEN_GUARD_HISTORY_RECOVERY: 'packed',
+    QWEN_GUARD_HISTORY_PAIRS: '1',
   })
   const realtime = buildCascadedRealtimeAssembly(assemblyOptions(configured, {
     clock, ids, frameSource, mediaStore,
@@ -4899,7 +5022,7 @@ test('cascaded assembly preserves one graph, shared resources, and frozen Guard 
 
 test('cascaded production composition derives cameraModuleEnabled from Settings', () => {
   const realtime = buildCascadedRealtimeAssembly(assemblyOptions(settings({
-    NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false',
+    CAMERA_MODULE_ENABLED: 'false',
   })))
   const names = [...realtime.core.runtime.executors.keys()]
   assert.deepEqual(names, ['search'])
@@ -4928,7 +5051,7 @@ test('cascaded production composition forwards the personal memory owner', async
 
 
 test('cascaded realtime composition rejects a matching live coding resource by project mode', () => {
-  const configured = settings({NOVA_AUDIO_AGENT_EXECUTORS: 'fast_sim'})
+  const configured = settings({EXECUTORS: 'fast_sim'})
   const resource: CodexAssemblyResource = {
     adapter: modelProbeAdapter,
     mode: 'live',
@@ -4995,7 +5118,7 @@ test('cascaded composition forwards an explicit generic controller for a renamed
   }
   const gatewayRequests: Readonly<Record<string, unknown>>[] = []
   const realtime = buildCascadedRealtimeAssembly(assemblyOptions(settings({
-    NOVA_AUDIO_AGENT_EXECUTORS: 'workspace_coder',
+    EXECUTORS: 'workspace_coder',
   }), {
     codexResource: resource,
     agentDescriptors: [codexAgentDescriptor('workspace_coder')],
@@ -5028,8 +5151,8 @@ test('core gateway preserves generic models or applies all Ark support overrides
       {
         name: 'generic',
         environment: {
-          NOVA_AUDIO_AGENT_MODEL_API_KEY: 'generic-safe-key',
-          NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://generic.example/v9',
+          MODEL_API_KEY: 'generic-safe-key',
+          MODEL_BASE_URL: 'https://generic.example/v9',
         },
         endpoint: 'https://generic.example/v9/chat/completions',
         authorization: 'Bearer generic-safe-key',
@@ -5038,8 +5161,8 @@ test('core gateway preserves generic models or applies all Ark support overrides
       {
         name: 'Python-whitespace Ark fallback',
         environment: {
-          NOVA_AUDIO_AGENT_MODEL_API_KEY: '\u001c\u0085',
-          NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://generic.example/v9',
+          MODEL_API_KEY: '\u001c\u0085',
+          MODEL_BASE_URL: 'https://generic.example/v9',
         },
         endpoint: 'https://ark-support.example/api/v3/chat/completions',
         authorization: 'Bearer ark-test-key',
@@ -5048,10 +5171,10 @@ test('core gateway preserves generic models or applies all Ark support overrides
       {
         name: 'Qwen fallback',
         environment: {
-          NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: 'qwen',
-          NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'qwen-flash',
+          CASCADE_LLM_PROVIDER: 'qwen',
+          CASCADE_LLM_MODEL: 'qwen-flash',
           DASHSCOPE_API_KEY: 'dash-support-key',
-          NOVA_AUDIO_AGENT_MODEL_API_KEY: '\u001c\u0085',
+          MODEL_API_KEY: '\u001c\u0085',
         },
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
         authorization: 'Bearer dash-support-key',
@@ -5062,13 +5185,13 @@ test('core gateway preserves generic models or applies all Ark support overrides
       const records: GatewayRequest[] = []
       const restoreFetch = installRecordingFetch(records)
       const configured = settings({
-        NOVA_AUDIO_AGENT_EXECUTOR: 'fast_sim',
-        NOVA_AUDIO_AGENT_FAST_MODEL: 'fast-original',
-        NOVA_AUDIO_AGENT_WATCH_MODEL: 'watch-original',
-        NOVA_AUDIO_AGENT_SURROGATE_MODEL: 'surrogate-original',
-        NOVA_AUDIO_AGENT_COMPRESSOR_MODEL: 'compressor-original',
-        NOVA_AUDIO_AGENT_VOLCENGINE_ARK_BASE_URL: 'https://ark-support.example/api/v3',
-        NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: 'ark-selected',
+        EXECUTOR: 'fast_sim',
+        FAST_MODEL: 'fast-original',
+        WATCH_MODEL: 'watch-original',
+        SURROGATE_MODEL: 'surrogate-original',
+        COMPRESSOR_MODEL: 'compressor-original',
+        VOLCENGINE_ARK_BASE_URL: 'https://ark-support.example/api/v3',
+        CASCADE_LLM_MODEL: 'ark-selected',
         ...scenario.environment,
       })
       const beforeModels = {
@@ -5107,8 +5230,8 @@ test('core gateway preserves generic models or applies all Ark support overrides
   })
 
 test('cascaded rejects the final tool budget after evaluating the provider view once', () => {
-  const configured = loadSettings({NOVA_AUDIO_AGENT_MEMORY_CONNECTION: 'disabled',
-    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+  const configured = loadSettings({MEMORY_CONNECTION: 'disabled',
+    PIPELINE_MODE: 'cascaded',
     DASHSCOPE_API_KEY: 'fixture-only', DOUBAO_BIGMODEL_API_KEY: 'fixture-only',
   })
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})

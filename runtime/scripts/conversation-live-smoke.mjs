@@ -30,9 +30,9 @@ for(const mode of ['text','integrated']){
  const signal=AbortSignal.timeout(45000),events=[]
  try{
   const secret='松果'+String(Math.floor(Math.random()*900000)+100000)
-  const settings=loadSettings({...environment,NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'qwen',NOVA_AUDIO_AGENT_PIPELINE_MODE:mode==='text'?'cascaded':'integrated'})
+  const settings=loadSettings({...environment,CASCADE_LLM_PROVIDER:'qwen',PIPELINE_MODE:mode==='text'?'cascaded':'integrated'})
   provider=(mode==='text'?buildCascadedTextProvider:buildConversationVoiceProvider)({settings,clock:new RealClock(),idFactory:randomUUID,history:[{user:'本次测试的代号是'+secret+'。',assistant:'记住了这个代号。'}]})
-  const input=mode==='integrated'?await questionAudio(loadSettings({...environment,NOVA_AUDIO_AGENT_PIPELINE_MODE:'cascaded',NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER:'qwen'}),signal):null
+  const input=mode==='integrated'?await questionAudio(loadSettings({...environment,PIPELINE_MODE:'cascaded',CASCADE_LLM_PROVIDER:'qwen'}),signal):null
   const started=Date.now()
   await provider.connect({tools:[],signal})
   let answer='',audioBytes=0,userTranscript=false

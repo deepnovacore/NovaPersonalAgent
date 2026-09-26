@@ -173,7 +173,7 @@ embedding 外发仍须显式同意，并绑定授权范围与 provider。没有�
 
 > 历史实现说明：以下预检索段落记录此前已验收的路径。2026-09-21 的新读取策略以 07 卷为准：文本默认目录＋按需工具（可显式开启文本预检索），实时语音默认 profile＋一页纸；`MEMORY_PRERECALL_ENABLED` 默认改为 `false`。新实现及验收进度见 [MEMORY-ARCHITECTURE-IMPLEMENTATION.md](MEMORY-ARCHITECTURE-IMPLEMENTATION.md)。
 
-一级预检索仅用于 cascaded：每轮用户输入在 LLM 开口前读取 §5.1 的有界结果，最多 3 条并限制总上下文预算；低于相关性门槛、超时或失败不注入。以可替换、低信任的上下文拼入本轮 system，明确“可能相关，不确定时忽略”，不写入对话历史，不覆盖回复偏好。用户可设置 `NOVA_AUDIO_AGENT_MEMORY_PRERECALL_ENABLED=false` 关闭预检索，退回显式回忆。默认开启；桌面设置的“回答前查找相关记忆”也可关闭，保存并重启生效。
+一级预检索仅用于 cascaded：每轮用户输入在 LLM 开口前读取 §5.1 的有界结果，最多 3 条并限制总上下文预算；低于相关性门槛、超时或失败不注入。以可替换、低信任的上下文拼入本轮 system，明确“可能相关，不确定时忽略”，不写入对话历史，不覆盖回复偏好。用户可设置 `MEMORY_PRERECALL_ENABLED=false` 关闭预检索，退回显式回忆。默认开启；桌面设置的“回答前查找相关记忆”也可关闭，保存并重启生效。
 
 二级为模型按需调用 `memory__recall` / `memory__evidence`，接受一次工具往返。integrated 按 D2 保持纯语音低延迟模式，只使用二级，不向下一轮异步塞入本轮检索结果。
 

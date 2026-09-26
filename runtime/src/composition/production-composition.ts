@@ -1,3 +1,4 @@
+import {acceptanceCapabilityRegistry} from '../desktop/workbench-acceptance.js'
 import type {ProjectExecutorAdapter} from '../executors/coding-executor.js'
 import {MacMailClient} from '../connectors/macos/mail.js'
 import {MacCalendarClient} from '../connectors/macos/calendar.js'
@@ -18,7 +19,7 @@ import {prepareKnowledge} from '../knowledge/assembly.js'
 import {randomUUID} from 'node:crypto'
 import {loadCapabilityRegistry} from '../config/capability-registry.js'
 import {prepareExternalMcp} from '../executors/mcp.js'
-import {loadSettings, requireIntegratedRealtime} from '../config/config.js'
+import {loadSettings, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedModules} from '../config/config.js'
 import {requireSelectedCascadedLlmConfig, requireSelectedCascadedRealtimeConfig} from '../config/cascaded-realtime-config.js'
 import {remoteClientMedia} from '../server/server-config.js'
 import type {ClientMedia} from '../server/client-protocol.js'
@@ -49,8 +50,10 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   if (!remote) requireSelectedCascadedLlmConfig(loadedSettings)
   else if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
   else requireSelectedCascadedRealtimeConfig(loadedSettings)
-  const externalMcp = await prepareExternalMcp(loadCapabilityRegistry({environment: remote
-      ? {...environment, NOVA_AUDIO_AGENT_CAMERA_MODULE_ENABLED: 'false'} : environment}), stop.signal)
+  if (remote) requireBlockingCredentials(loadedSettings)
+  const configuredCapabilities=loadCapabilityRegistry({environment:remote?{...environment,CAMERA_MODULE_ENABLED:'false'}:environment})
+  const acceptanceCapabilities=acceptanceCapabilityRegistry(configuredCapabilities)
+  const externalMcp = await prepareExternalMcp(withoutUncredentialedModules(acceptanceCapabilities, loadedSettings), stop.signal)
   const releaseExternal = ownership.own(() => externalMcp.close())
   const capabilities = externalMcp.capabilities
   // This entry owns the concrete Codex package; core gates injected adapters by their declared role.
@@ -71,7 +74,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     provider: settings.pipeline_mode === 'cascaded' ? settings.cascade_llm_provider : settings.integrated_provider,
     model: settings.pipeline_mode === 'cascaded'
       ? requireSelectedCascadedLlmConfig(settings).config.model
-      : settings.qwen_realtime_model,
+      : settings.integrated_provider === 'stepfun' ? settings.stepfun_realtime_model : settings.qwen_realtime_model,
     asr: settings.cascade_asr_provider, tts: settings.cascade_tts_provider,
     vision: settings.conversation_vision_enabled,
   })
@@ -80,7 +83,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     ? null
     : await (async () => {
       const {createCodexAssemblyResource, createProductionCodexHost, resolveCodexHostConfig, prepareManagedCodexMcp} = await import('../executors/codex/host.js')
-      const sourceResourcesPath = environment.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH
+      const sourceResourcesPath = environment.CODEX_RESOURCES_PATH
       const codexHost = createProductionCodexHost(settings, {
         ...(sourceResourcesPath === undefined ? {} : {resourcesPath: sourceResourcesPath}),
         onDiagnostic: code => onDiagnostic(`[runtime-diagnostic] ${code}`),
@@ -157,21 +160,29 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   })
   if (knowledge !== undefined) {
     const host = composition.realtime.personalAgent
+    let sourceRevision=0
     host.setSources(new LocalDirectorySources({
       path: host.path + '.sources.json', knowledge: knowledge.service,
+      priorityWorkspace: async () => codexResource?.mode==='project'
+        ? (await (codexResource.adapter as ProjectExecutorAdapter).activeCommittedWorkspace())?.canonical_path??null
+        : null,
       processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
       onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
-      onChange: () => host.sourceChanged(),
+      onChange: changed => changed ? host.sourceChanged({phase:'ready',revision:++sourceRevision}) : host.sourceProgressChanged(),
+      onHideEvidenceMany: refs => host.invalidateEvidenceMany(refs),
+      onInvalidateMany: async refs => {
+        await host.invalidateEvidenceMany(refs)
+        const memory = composition.realtime.personalMemory
+        if (memory?.forgetSources) await memory.forgetSources(refs)
+        else for (const ref of refs) await memory?.forgetSource?.(ref)
+        await host.revalidate()
+        await host.refreshMemory()
+      },
       onInvalidate: async ref => {
         await host.invalidateEvidence(ref)
         await composition.realtime.personalMemory?.forgetSource?.(ref)
         await host.revalidate()
         await host.refreshMemory()
-      },
-      onObserve: async observation => {
-        const memory = composition.realtime.personalMemory
-        if (!memory?.observeSource) return // Knowledge-only mode indexes A without enabling personal extraction.
-        await memory.observeSource(observation)
       },
     }))
   }
@@ -191,7 +202,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     if(mode!=='background'&&seen?.proposal_id&&!seen.conversation_id&&projectAdapter?.confirmationController.view.pending_confirmation_id===seen.proposal_id)projectAdapter.confirmationController.setBackground(false)
     if(!seen){const paused=mode==='background';if(paused||presentationPaused)await composition.realtime.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
   }))
-  host.setConversationRuntime(conversationRuntimeFactory({settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
+  host.setConversationRuntime(conversationRuntimeFactory({settings:composition.realtime.core.settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
     ...(onUsage===undefined?{}:{onUsage}),
     ...(composition.realtime.core.frameSource?{frameSource:composition.realtime.core.frameSource}:{}),
     blackboard:blackboardOptionsFromSettings(settings),clock,gateway:composition.realtime.core.gateway,
@@ -200,9 +211,9 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     onExecutorProgress:(progress,result)=>composition.desktop.bridge.onExecutorProgress(progress,result),
     onAudioFrame:frame=>composition.desktop.bridge.onAudioFrame(frame),onAudioClear:(id,epoch)=>composition.desktop.bridge.onAudioClear(id,epoch),onAudioAlert:(id,epoch)=>composition.desktop.bridge.onAudioAlert(id,epoch),onAudioTerminal:(id,epoch)=>composition.desktop.bridge.onAudioTerminal(id,epoch),
   }),frame=>composition.desktop.bridge.onPersonalFrame(frame))
-  host.setConnectors(new ComposioConnector({...(process.platform==='darwin'&&environment.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH?{local:new MacCalendarClient(environment.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH),mail:new MacMailClient(environment.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH)}:{}),memory:()=>{const memory=composition.realtime.personalMemory;return memory instanceof SubstrateMemoryResource?memory:undefined},client:environment.COMPOSIO_API_KEY?new ComposioClient(environment.COMPOSIO_API_KEY):null,onChange:()=>{void host.connectionChanged()}}))
+  host.setConnectors(new ComposioConnector({...(process.platform==='darwin'&&environment.CODEX_RESOURCES_PATH?{local:new MacCalendarClient(environment.CODEX_RESOURCES_PATH),mail:new MacMailClient(environment.CODEX_RESOURCES_PATH)}:{}),memory:()=>{const memory=composition.realtime.personalMemory;return memory instanceof SubstrateMemoryResource?memory:undefined},client:environment.COMPOSIO_API_KEY?new ComposioClient(environment.COMPOSIO_API_KEY):null,onChange:()=>{void host.connectionChanged()}}))
   const feishu = new FeishuConnector({
-    executable: environment.NOVA_AUDIO_AGENT_FEISHU_CLI_PATH ?? 'lark-cli',
+    executable: environment.FEISHU_CLI_PATH ?? 'lark-cli',
     credentialRoot: join(host.path + '.feishu', 'credentials'),
     statePath: join(host.path + '.feishu', 'state.json'),
     onChange:()=>host.connectionChanged(),

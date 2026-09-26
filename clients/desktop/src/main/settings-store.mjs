@@ -1,3 +1,4 @@
+import {validUploadUrl} from './voiceprint.mjs'
 import {preferredLanguage} from '../renderer/locale.mjs'
 import { randomBytes } from 'node:crypto'
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
@@ -10,6 +11,7 @@ export const SETTINGS_VERSION = 4
 export const SECRET_KEYS = Object.freeze([
   'composioApiKey',
   'dashscopeApiKey',
+  'stepfunApiKey',
   'tavilyApiKey',
   'openrouterApiKey',
   'modelApiKey',
@@ -23,7 +25,7 @@ export const SECRET_KEYS = Object.freeze([
 export const PALETTES = Object.freeze(['ember', 'graphite'])
 export const PROACTIVITY_LEVELS = Object.freeze(['conservative', 'balanced', 'eager'])
 export const PIPELINE_MODES = Object.freeze(['integrated', 'cascaded'])
-export const INTEGRATED_PROVIDERS = Object.freeze(['qwen'])
+export const INTEGRATED_PROVIDERS = Object.freeze(['qwen', 'stepfun'])
 export const CASCADED_ENDPOINTING_PROVIDERS = Object.freeze(['auto'])
 export const CASCADED_ASR_PROVIDERS = Object.freeze(['volcengine'])
 export const CASCADED_LLM_PROVIDERS = Object.freeze(['qwen', 'ark', 'deepseek'])
@@ -58,6 +60,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   integratedVoice: 'longanqian',
   cascadedEndpointingProvider: 'auto',
   cascadedAsrProvider: 'volcengine',
+  voiceprintEnabled: false,
+  voiceprintId: '',
+  voiceprintName: '',
+  voiceprintUploadUrl: '',
   cascadedLlmProvider: 'deepseek',
   cascadedLlmModels: Object.freeze({
     qwen: 'qwen-plus',
@@ -275,6 +281,10 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     integratedVoice: pick(source.integratedVoice, fallback.integratedVoice, DEFAULT_SETTINGS.integratedVoice, validModelOrVoice),
     cascadedEndpointingProvider: pick(source.cascadedEndpointingProvider, fallback.cascadedEndpointingProvider, DEFAULT_SETTINGS.cascadedEndpointingProvider, validCascadedEndpointingProvider),
     cascadedAsrProvider: pick(source.cascadedAsrProvider, fallback.cascadedAsrProvider, DEFAULT_SETTINGS.cascadedAsrProvider, validCascadedAsrProvider),
+    voiceprintEnabled: pick(source.voiceprintEnabled, fallback.voiceprintEnabled, false, validBoolean),
+    voiceprintId: pick(source.voiceprintId, fallback.voiceprintId, '', value => typeof value === 'string' && (value === '' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) ? value : null),
+    voiceprintName: pick(source.voiceprintName, fallback.voiceprintName, '', value => typeof value === 'string' && value.length <= 128 && !CONTROL_CHARACTERS.test(value) && !/^\d+$/.test(value) ? value : null),
+    voiceprintUploadUrl: pick(source.voiceprintUploadUrl, fallback.voiceprintUploadUrl, '', validUploadUrl),
     cascadedLlmProvider: pick(source.cascadedLlmProvider, fallback.cascadedLlmProvider, DEFAULT_SETTINGS.cascadedLlmProvider, validCascadedLlmProvider),
     cascadedLlmModels: normalizeCascadedLlmModels(
       source.cascadedLlmModels,
@@ -334,6 +344,10 @@ export function publicSettings(settings) {
     integratedVoice: normalized.integratedVoice,
     cascadedEndpointingProvider: normalized.cascadedEndpointingProvider,
     cascadedAsrProvider: normalized.cascadedAsrProvider,
+    voiceprintEnabled: normalized.voiceprintEnabled,
+    voiceprintId: normalized.voiceprintId,
+    voiceprintName: normalized.voiceprintName,
+    voiceprintUploadUrl: normalized.voiceprintUploadUrl,
     cascadedLlmProvider: normalized.cascadedLlmProvider,
     cascadedLlmModels: { ...normalized.cascadedLlmModels },
     cascadedTtsProvider: normalized.cascadedTtsProvider,

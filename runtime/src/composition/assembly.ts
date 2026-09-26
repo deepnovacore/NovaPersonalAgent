@@ -93,6 +93,7 @@ export interface AssemblyOptions {
 }
 
 export interface Assembly {
+  readonly settings: Settings
   readonly personalAgentConfig?: {path:string;userScope:string;surrogate:GatewaySurrogate;newsLanguage:string}
 
   readonly capabilities: CapabilityRegistry
@@ -148,7 +149,7 @@ function requireApiKey(settings: Settings): string {
   const key = stripLikePython(resolveModelApiKey(settings) ?? '')
   if (key === '') {
     // Never echo configuration values; the name is enough to act on.
-    throw new AssemblyError('缺少 DASHSCOPE_API_KEY 或 NOVA_AUDIO_AGENT_MODEL_API_KEY')
+    throw new AssemblyError('缺少 DASHSCOPE_API_KEY 或 MODEL_API_KEY')
   }
   return key
 }
@@ -372,6 +373,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     return pending
   }
   return {
+    settings,
     ...(options.blackboard===undefined?{}:{personalAgentConfig: {path: options.blackboard.path + '.personal.json', userScope: settings.blackboard_owner_id, newsLanguage: settings.news_language, surrogate}}),
     capabilities,
     capabilityStatus: capabilityStatus(capabilities, tools.schemas.length),

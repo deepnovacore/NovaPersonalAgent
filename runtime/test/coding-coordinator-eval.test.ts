@@ -2,7 +2,7 @@
  * Live coordinator eval (spec 08): the real `surrogate_model` on DashScope decides kind / project /
  * session for a fixed roster. Gated like the Qwen live smokes: skipped without a DashScope key.
  *
- *   NOVA_LIVE_TESTS=1 NOVA_AUDIO_AGENT_MODEL_API_KEY=… node --test dist/test/coding-coordinator-eval.test.js
+ *   NOVA_LIVE_TESTS=1 MODEL_API_KEY=… node --test dist/test/coding-coordinator-eval.test.js
  */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
@@ -11,10 +11,10 @@ import {DASHSCOPE_COMPATIBLE_BASE_URL} from '../src/config/config.js'
 import {assessSchema, intakeModels, type IntakeKind} from '../src/executors/coding/intake-model.js'
 import {OpenAIModelGateway} from '../src/model/model-gateway.js'
 
-const apiKey = process.env.DASHSCOPE_API_KEY ?? process.env.NOVA_AUDIO_AGENT_MODEL_API_KEY
+const apiKey = process.env.DASHSCOPE_API_KEY ?? process.env.MODEL_API_KEY
 const skip = process.env.NOVA_LIVE_TESTS !== '1' ? 'run through the live acceptance runner (NOVA_LIVE_TESTS=1)'
-  : apiKey === undefined ? 'set DASHSCOPE_API_KEY or NOVA_AUDIO_AGENT_MODEL_API_KEY for the live coordinator eval' : false
-const model = process.env.NOVA_AUDIO_AGENT_SURROGATE_MODEL ?? 'qwen-flash'
+  : apiKey === undefined ? 'set DASHSCOPE_API_KEY or MODEL_API_KEY for the live coordinator eval' : false
+const model = process.env.SURROGATE_MODEL ?? 'qwen-flash'
 
 const active = 'nova-audio-agent'
 const running = [{work_id: 'w-blog', project: '博客', title: '暗色模式'}]
@@ -70,7 +70,7 @@ const holdout: readonly Case[] = [
 
 function models() {
   const gateway = new OpenAIModelGateway({
-    baseUrl: process.env.NOVA_AUDIO_AGENT_MODEL_BASE_URL ?? DASHSCOPE_COMPATIBLE_BASE_URL,
+    baseUrl: process.env.MODEL_BASE_URL ?? DASHSCOPE_COMPATIBLE_BASE_URL,
     apiKey: apiKey ?? '', clock: new RealClock(), metrics: {record: () => undefined},
   })
   return intakeModels(gateway, model, model)

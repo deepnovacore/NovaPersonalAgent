@@ -42,7 +42,7 @@ test('accepted adapter input followed by unclassified status persistence error r
 
 test('single-panel task inspection uses the same breakpoint as the chat overlay drawer',async()=>{
  const {readFile}=await import('node:fs/promises'),css=await readFile(new URL('../src/renderer/workbench.css',import.meta.url),'utf8')
- const drawer=css.match(/@media\s*\(max-width:\s*(\d+)px\)\{[\s\S]*?\.chat-pane\{position:absolute/)[1]
+ const drawer=css.match(/@media\s*\(max-width:\s*(\d+)px\)\{(?:(?!@media)[\s\S])*?\.chat-pane\{position:absolute/)[1]
  const detail=css.match(/@media\s*\(max-width:\s*(\d+)px\)\s*\{\s*\.workbench\[data-task-detail/)[1]
  assert.equal(detail,drawer);assert.ok(Number(detail)>=959)
 })

@@ -12,7 +12,7 @@ const fields={news_source:newsSourceSchema.optional(),id:z.string(),version:z.nu
 const todoSchema=z.object({...fields,status:z.enum(['open','doing','waiting','done','cancelled']),due:z.string().date().nullable(),goal_id:z.string().nullable(),idea_id:z.string().nullable()})
 const ideaSchema=z.object({...fields,status:z.enum(['active','archived']),goal_id:z.string().nullable()})
 const goalSchema=z.object({...fields,status:z.enum(['active','paused','completed','archived']),success_criteria:z.string().max(2000),idea_id:z.string().nullable()})
-export const lifeStateSchema=z.object({todos:z.array(todoSchema).max(1000),ideas:z.array(ideaSchema).max(1000),goals:z.array(goalSchema).max(200),profile:z.object({about:z.string().max(4000),version:z.number().int().nonnegative()}),receipts:z.record(z.string(),z.object({hash:z.string(),result:z.object({id:z.string(),version:z.number()})}))})
+export const lifeStateSchema=z.object({todos:z.array(todoSchema).max(1000),ideas:z.array(ideaSchema).max(1000),goals:z.array(goalSchema).max(200),profile:z.object({about:z.string().max(5000),version:z.number().int().nonnegative()}),receipts:z.record(z.string(),z.object({hash:z.string(),result:z.object({id:z.string(),version:z.number()})}))})
 export type LifeState=z.infer<typeof lifeStateSchema>
 export interface LifeProvenance {type:'accepted_candidate'|'explicit_candidate';row:EvaluatedCandidate;resolution?:LifeResolution}
 export interface LifeSnapshot {state:LifeState;revision:number}
@@ -30,7 +30,7 @@ export const lifeInputSchema=z.discriminatedUnion('op',[
  z.object({op:z.literal('update'),kind,id:z.string(),expected_version:z.number().int().nonnegative(),title:z.string().trim().min(1).max(200).optional(),note:z.string().max(4000).optional(),status:z.string().optional(),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
  z.object({op:z.literal('convert'),id:z.string(),target:z.enum(['todo','goal']),expected_version:z.number().int().nonnegative()}).strict(),
  z.object({op:z.literal('undo_create'),id:z.string(),expected_version:z.literal(1)}).strict(),
- z.object({op:z.literal('profile'),about:z.string().max(4000),expected_version:z.number().int().nonnegative()}).strict(),
+ z.object({op:z.literal('profile'),about:z.string().max(5000),expected_version:z.number().int().nonnegative()}).strict(),
 ])
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex')
 /** Shared domain transition; persistence and evidence admission belong to the backend. */
@@ -99,10 +99,10 @@ export class LifeService{
   const current=await this.#backend.peek?.()
   if(current){this.#state=lifeStateSchema.parse(current.state);this.#revision=current.revision;return}
   // Migration input is read-only: do not create, chmod or rewrite the old file.
-  let legacy=emptyLifeState()
-  try{const file=await open(this.path,constants.O_RDONLY|constants.O_NOFOLLOW);try{if((await file.stat()).size>8*1024*1024)throw Error('store_capacity');const text=await file.readFile('utf8');if(text)legacy=lifeStateSchema.parse(JSON.parse(text))}finally{await file.close()}}
+  let legacy=emptyLifeState(),legacyRead=false
+  try{const file=await open(this.path,constants.O_RDONLY|constants.O_NOFOLLOW);try{if((await file.stat()).size>8*1024*1024)throw Error('store_capacity');const text=await file.readFile('utf8');legacyRead=true;if(text)legacy=lifeStateSchema.parse(JSON.parse(text))}finally{await file.close()}}
   catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
-  const loaded=await this.#backend.load(legacy,{legacyPath:this.path});this.#state=lifeStateSchema.parse(loaded.state);this.#revision=loaded.revision
+  const loaded=await this.#backend.load(legacy,legacyRead?{legacyPath:this.path}:undefined);this.#state=lifeStateSchema.parse(loaded.state);this.#revision=loaded.revision
  }
  async close(){await this.#tail}
  async refresh():Promise<void>{const run=this.#tail.then(async()=>{

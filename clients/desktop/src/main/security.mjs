@@ -106,6 +106,16 @@ export function settingsWindowOptions(preload, launchId) {
   })
 }
 
+export function setupWindowOptions(preload, launchId) {
+  return panelWindowOptions(preload, launchId, {
+    width: 720,
+    height: 640,
+    minWidth: 520,
+    minHeight: 520,
+    title: t("开始使用 Nova"),
+  })
+}
+
 export function createBootstrapAccess(bootstrap, renderer) {
   if (!bootstrap || !renderer) throw new Error('desktop bootstrap unavailable')
   return requester => {
@@ -146,12 +156,14 @@ export function allowsOrbMediaRequest({
     && [...unique].every(type => type === 'audio' || type === 'video')
 }
 
-export function configureWindowSecurity(window) {
+export function configureWindowSecurity(window, recordingRenderer = () => null) {
   const renderer = window.webContents
   renderer.setWindowOpenHandler(() => ({ action: 'deny' }))
   renderer.on('will-navigate', (event, url) => {
     if (!allowRendererNavigation(url)) event.preventDefault()
   })
+  const recordingAudio = (contents, permission, origin, type) => Boolean(contents) && contents === recordingRenderer()
+    && permission === 'media' && (origin === '' || isExactOrbOrigin(origin)) && type === 'audio'
   const electronSession = renderer.session
   electronSession.setPermissionCheckHandler((contents, permission, origin, details) => (
     allowsOrbMediaCheck({
@@ -160,7 +172,7 @@ export function configureWindowSecurity(window) {
       permission,
       origin,
       mediaType: details?.mediaType,
-    })
+    }) || recordingAudio(contents, permission, origin, details?.mediaType)
   ))
   electronSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     callback(allowsOrbMediaRequest({
@@ -169,7 +181,7 @@ export function configureWindowSecurity(window) {
       permission,
       origin: details?.securityOrigin,
       mediaTypes: details?.mediaTypes,
-    }))
+    }) || (details?.mediaTypes?.length === 1 && recordingAudio(contents, permission, details.securityOrigin, details.mediaTypes[0])))
   })
 }
 
@@ -208,6 +220,7 @@ export async function resolveMicrophonePermission({ platform, systemPreferences 
 const API_KEY_PAGES = new Set(['https://bailian.console.aliyun.com/?apiKey=1&tab=model',
   'https://platform.openai.com/api-keys',
   'https://platform.deepseek.com/api_keys',
+  'https://platform.stepfun.com/interface-key',
   'https://console.volcengine.com/ark/apiKey',
   'https://console.volcengine.com/speech/new/setting/apikeys',
   'https://app.tavily.com/',

@@ -160,7 +160,7 @@ export class SensitiveContentPolicy {
       matches += 1
       return `${prefix}[redacted]`
     })
-    scrubbed = replaceAll(scrubbed, /(?:\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token)\b|["'](?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token)["'])\s*(?:=|:)\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, () => {
+    scrubbed = replaceAll(scrubbed, /(?:\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token)\b|["'](?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token)["'])\s*(?:=|:)\s*(?!\[REDACTED\](?:[&#\s,;]|$))(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, () => {
       matches += 1
       return '[redacted]'
     })
@@ -229,13 +229,22 @@ function urlCarriesCredentials(value: string): boolean {
   try {
     const url = new URL(value)
     if (url.username !== '' || url.password !== '') return true
-    return [...url.searchParams.keys()].some(key => {
+    return [...url.searchParams.entries()].some(([key, param]) => {
       const normalized = key.replace(/[_-]/gu, '').toLowerCase()
-      return credentialQueryName.has(normalized)
+      return credentialQueryName.has(normalized) && param !== REDACTED_QUERY_VALUE
     })
   } catch {
     return false
   }
+}
+
+const REDACTED_QUERY_VALUE = '[REDACTED]'
+
+/** Replace only credential query values so benign fields in a public URL stay readable. */
+export function redactUrlQueryCredentials(text: string): string {
+  return text.replace(/https?:\/\/[^\s<>"']+/giu, match => match.replace(/([?&])([^=&#]+)=([^&#]*)/gu, (pair, separator: string, key: string) => (
+    credentialQueryName.has(key.replace(/[_-]/gu, '').toLowerCase()) ? `${separator}${key}=${REDACTED_QUERY_VALUE}` : pair
+  )))
 }
 
 function replaceAll(value: string, pattern: RegExp, replacement: () => string): string {

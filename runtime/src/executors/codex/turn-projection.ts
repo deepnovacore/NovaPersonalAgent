@@ -1,4 +1,4 @@
-import {SensitiveContentPolicy,SensitivePathPolicy} from '../../memory/sensitivity.js'
+import {SensitiveContentPolicy,SensitivePathPolicy,redactUrlQueryCredentials} from '../../memory/sensitivity.js'
 import {isAbsolute,relative,resolve} from 'node:path'
 import type {ExecutorProgress,ExecutorActivity} from '../../core/causal-runtime.js'
 import type {Clock} from '../../core/clock.js'
@@ -294,8 +294,9 @@ export class AppServerTurnProjection {
       kind='tool';text=String(item.type)+' '+stage+(typeof item.status==='string'&&['completed','failed','inProgress','declined'].includes(item.status)?': '+item.status:'')
     }else return
     let fieldTruncated=false
-    const publicField=(value:unknown):string|null=>{
-      if(typeof value!=='string')return null
+    const publicField=(raw:unknown):string|null=>{
+      if(typeof raw!=='string')return null
+      const value=redactUrlQueryCredentials(raw)
       const scrubbed=observationSensitivity.scrub('executor_observation',value)
       const safe=scrubbed.kind==='clean'?value:scrubbed.kind==='redacted'?scrubbed.value:'[redacted]'
       const sanitized=this.#sanitizePublicText?.(safe)??{text:safe,truncated:false}

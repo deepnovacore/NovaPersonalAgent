@@ -1,6 +1,8 @@
+import {createVoiceprintPanel} from './voiceprint-panel.mjs'
+import {createStartupNotice, startupMessage} from './startup-notice.mjs'
 import {createImPanel} from './im-panel.mjs'
 import {createConnectionsPanel} from './connections-panel.mjs'
-import {t} from './locale.mjs'
+import {t, currentLanguage} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
 import {createPhonePanel} from './phone-panel.mjs'
@@ -23,6 +25,8 @@ import {
 import {
   CUSTOM_VOICE_VALUE,
   QWEN_VOICES,
+  QWEN_31_VOICES,
+  STEPFUN_VOICES,
   VOLCENGINE_TTS_VOICES,
   resolveVoiceChoice,
 } from './voice-choice.mjs'
@@ -30,14 +34,16 @@ import {
 const api = window.novaAudioAgentDesktop.settings
 const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
+const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
 const SECRET_KEYS = [
   'composioApiKey',
-  'dashscopeApiKey', 'tavilyApiKey', 'openrouterApiKey',
+  'dashscopeApiKey', 'stepfunApiKey', 'tavilyApiKey', 'openrouterApiKey',
   'arkApiKey', 'deepseekApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
   composioApiKey: 'Composio',
   dashscopeApiKey: 'DashScope',
+  stepfunApiKey: 'StepFun',
   tavilyApiKey: 'Tavily',
   openrouterApiKey: 'OpenRouter · Jev',
   arkApiKey: 'Ark',
@@ -81,6 +87,7 @@ let restarting = false
 const workspaceOpenCurrent = document.querySelector('#workspace-open-current')
 const workspaceClearCurrent = document.querySelector('#workspace-clear-current')
 const workspaceClearAll = document.querySelector('#workspace-clear-all')
+const startupNotice = createStartupNotice({render: text => { document.querySelector('#startup-status').textContent = text }})
 const workspaceRetryRecovery = document.querySelector('#workspace-retry-recovery')
 const workspaceActionStatus = document.querySelector('#workspace-action-status')
 const wakeEnabled = document.querySelector('#wake-word-enabled')
@@ -189,6 +196,27 @@ function populatePresetOptions(select, presets, customLabel = t("自定义音色
 populatePresetOptions(integratedVoicePreset, QWEN_VOICES)
 populatePresetOptions(cascadedTtsVoicePreset, VOLCENGINE_TTS_VOICES)
 
+const secretTabs = ['models', 'connections']
+function selectSecretTab(selected) {
+  for (const id of secretTabs) {
+    const tab = document.querySelector(`#secret-tab-${id}`)
+    tab.setAttribute('aria-selected', String(id === selected))
+    tab.tabIndex = id === selected ? 0 : -1
+    document.querySelector(`#secret-panel-${id}`).hidden = id !== selected
+  }
+}
+for (const id of secretTabs) {
+  const tab = document.querySelector(`#secret-tab-${id}`)
+  tab.addEventListener('click', () => selectSecretTab(id))
+  tab.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const next = event.key === 'Home' ? secretTabs[0] : event.key === 'End' ? secretTabs[1] : secretTabs.find(other => other !== id)
+    selectSecretTab(next)
+    document.querySelector(`#secret-tab-${next}`).focus()
+  })
+}
+
 function secretInput(key) { return document.querySelector(`#${key}`) }
 function secretClearButton(key) { return document.querySelector(`button.clear[data-key="${key}"]`) }
 
@@ -210,8 +238,11 @@ function renderBadges(present, sources) {
 // These labels reflect selected public providers only, never any key material.
 function keyUsage(view) {
   return {
-    dashscopeApiKey: view.pipelineMode === 'integrated'
-      || view.cascadedLlmProvider === 'qwen' ? t("必需") : t("当前未使用"),
+    dashscopeApiKey: (view.pipelineMode === 'integrated' && view.integratedProvider === 'qwen')
+      || (view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'qwen') ? t("必需")
+      : view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun'
+        ? t("仅本地记忆嵌入需要") : t("当前未使用"),
+    stepfunApiKey: view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun' ? t("必需") : t("当前未使用"),
     deepseekApiKey: view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'deepseek' ? t("必需") : t("当前未使用"),
     arkApiKey: view.pipelineMode === 'cascaded'
       && view.cascadedLlmProvider === 'ark' ? t("必需") : t("当前未使用"),
@@ -262,6 +293,7 @@ function updateButtons() {
   workspaceOpenCurrent.disabled = state.currentDisabled
   workspaceClearCurrent.disabled = state.currentDisabled
   workspaceClearAll.disabled = state.workspaceDisabled
+  document.querySelector('#startup-retry').disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
   workspaceRetryRecovery.disabled = state.recoveryDisabled
   settingsRestore.disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
 }
@@ -353,9 +385,10 @@ for (const scope of ['history', 'session']) document.getElementById(`usage-${sco
   renderUsage()
 })
 
-function render(view, _drafts, state) {
+function render(view, drafts, state) {
   if (!view) return
   document.getElementById('language').value = view.language ?? 'zh-CN'
+  document.getElementById('language-restart-hint').hidden = (view.language ?? 'zh-CN') === currentLanguage()
   currentView = view
   renderUsage()
   renderVision(view)
@@ -399,13 +432,25 @@ function render(view, _drafts, state) {
   integratedSection.hidden = view.pipelineMode !== 'integrated'
   cascadedSection.hidden = view.pipelineMode !== 'cascaded'
   integratedProvider.value = view.integratedProvider
+  const integratedModels = view.integratedProvider === 'stepfun'
+    ? [{value: 'stepaudio-3-realtime-preview', label: 'StepAudio 3 Realtime Preview'}]
+    : [{value: 'qwen-audio-3.1-realtime-plus', label: 'Qwen Audio 3.1 Plus'},
+      {value: 'qwen-audio-3.0-realtime-plus', label: 'Qwen Audio 3.0 Plus'},
+      {value: 'qwen-audio-3.0-realtime-flash', label: 'Qwen Audio 3.0 Flash'},
+      {value: 'qwen3.5-omni-flash-realtime', label: 'Qwen3.5 Omni Flash Realtime'},
+      {value: 'qwen3.5-omni-plus-realtime', label: 'Qwen3.5 Omni Plus Realtime'}]
+  integratedModel.replaceChildren(...integratedModels.map(preset => {
+    const option = document.createElement('option'); option.value = preset.value; option.textContent = preset.label; return option
+  }))
   if (view.integratedModel && ![...integratedModel.children].some(option => option.value === view.integratedModel)) {
     const option = document.createElement('option'); option.value = view.integratedModel; option.textContent = view.integratedModel; integratedModel.append(option)
   }
   integratedModel.value = view.integratedModel ?? ''
-  const voices = view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : QWEN_VOICES
+  const voices = view.integratedProvider === 'stepfun' ? STEPFUN_VOICES
+    : view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : view.integratedModel === 'qwen-audio-3.1-realtime-plus' ? QWEN_31_VOICES : QWEN_VOICES
   populatePresetOptions(integratedVoicePreset, voices)
   renderPreset(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, voices)
+  voiceprintPanel.render(view, drafts)
   cascadedAsrProvider.value = view.cascadedAsrProvider
   cascadedLlmProvider.value = view.cascadedLlmProvider
   const modelPresets = ({
@@ -424,6 +469,9 @@ function render(view, _drafts, state) {
   renderPreset(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
   renderBadges(view.secretsPresent, view.secretSources)
   renderKeyUsage(view)
+  document.querySelector('#startup-status').dataset.stage = view.startup?.stage ?? ''
+  startupNotice.update(view.startup)
+  document.querySelector('#startup-retry').hidden = view.startup?.stage !== 'failed'
   warning.hidden = view.keyringAvailable !== false
   const recoveryStatus = view.managedWorkspaces?.recoveryStatus ?? 'idle'
   const recoveryRequired = recoveryStatus !== 'idle'
@@ -523,11 +571,15 @@ for (const input of codexModeInputs) bindStage(input, 'change', () => ({codexBin
 bindStage(codexBinaryPath, 'input', () => ({codexBinaryPath: codexBinaryPath.value}))
 bindStage(codexWorkspace, 'input', () => ({codexWorkspace: codexWorkspace.value}))
 bindStage(codexManagedRoot, 'input', () => ({codexManagedRoot: codexManagedRoot.value}))
-bindStage(integratedProvider, 'change', () => ({integratedProvider: integratedProvider.value}))
+bindStage(integratedProvider, 'change', () => ({
+  integratedProvider: integratedProvider.value,
+  integratedModel: integratedProvider.value === 'stepfun' ? 'stepaudio-3-realtime-preview' : 'qwen-audio-3.0-realtime-plus',
+  integratedVoice: integratedProvider.value === 'stepfun' ? 'default' : 'longanqian',
+}))
 bindStage(integratedModel, 'change', () => ({
   integratedModel: integratedModel.value,
-  ...(integratedModel.value.startsWith('qwen3.5-omni-') !== currentView?.integratedModel?.startsWith('qwen3.5-omni-')
-    ? {integratedVoice: integratedModel.value.startsWith('qwen3.5-omni-') ? 'Ethan' : 'longanqian'} : {}),
+  ...(integratedModel.value !== currentView?.integratedModel
+    ? {integratedVoice: integratedProvider.value === 'stepfun' ? 'default' : integratedModel.value.startsWith('qwen3.5-omni-') ? 'Ethan' : integratedModel.value === 'qwen-audio-3.1-realtime-plus' ? 'longanqian_v3.1' : 'longanqian'} : {}),
 }))
 bindStage(cascadedAsrProvider, 'change', () => ({cascadedAsrProvider: cascadedAsrProvider.value}))
 bindStage(cascadedLlmProvider, 'change', () => ({cascadedLlmProvider: cascadedLlmProvider.value}))
@@ -686,6 +738,17 @@ workspaceClearCurrent.addEventListener('click', () => {
 workspaceClearAll.addEventListener('click', () => {
   void runWorkspaceAction(() => api.clearAllManagedWorkspaces())
 })
+document.querySelector('#startup-retry').addEventListener('click', async () => {
+  workspaceBusy = true
+  updateButtons()
+  try {
+    const view = await api.retryBackend()
+    controller.syncView(view, {trackRestart: false})
+    statusLabel.textContent = view.backendStatus === 'connected' ? t("后台已连接") : startupMessage(view.startup) || t("操作未完成")
+  } catch { statusLabel.textContent = t("操作未完成") }
+  finally { workspaceBusy = false; updateButtons() }
+})
+
 workspaceRetryRecovery.addEventListener('click', () => {
   void runWorkspaceAction(async () => {
     const view = await api.retryBackend()

@@ -14,7 +14,8 @@ export interface CodingTarget extends CodingTargetSelection {
 }
 
 export interface CodingTargetPort {
-  list(): Promise<readonly CodingTarget[]>
+  /** Directory is picker-only display metadata; validate returns a path-free persistent target. */
+  list(): Promise<readonly (CodingTarget & {readonly directory?: string})[]>
   forWork?(workId: string): Promise<CodingTarget | null>
   validate(selection: CodingTargetSelection): Promise<CodingTarget>
   resolve(decision: CoordinatorDecision, selection?: CodingTargetSelection,taskContext?:TaskDispatchContext): Promise<IntakeTarget>
@@ -60,7 +61,7 @@ export class CodingTargetController {
   }
   get target(): CodingTarget | null { return this.#target === null ? null : {...this.#target} }
   activeProject(): string | null { return this.#target?.project ?? null }
-  list(): Promise<readonly CodingTarget[]> { return this.port.list() }
+  list(): ReturnType<CodingTargetPort['list']> { return this.port.list() }
   async setTarget(selection: CodingTargetSelection | null): Promise<CodingTarget | null> {
     const revision = ++this.#revision
     const target = selection === null ? null : await this.port.validate({...selection})
@@ -71,13 +72,17 @@ export class CodingTargetController {
   async resolveTarget(decision: CoordinatorDecision,taskContext?:TaskDispatchContext): Promise<IntakeTarget> {
     const target = this.#target
     if (decision.kind === 'create') return this.port.resolve(decision,undefined,taskContext)
-    if (target !== null && (decision.project === null || decision.project.toLowerCase() === target.project.toLowerCase())) {
+    const bound = target !== null && (decision.project === null || decision.project.toLowerCase() === target.project.toLowerCase())
+    if (!bound && decision.project === null) throw new ProjectResolutionError('unknown_project', {reason: 'explicit_project_required'})
+    if (decision.kind === 'work' && decision.session === 'latest' && !decision.session_title && (!bound || target.session_id === null)) {
+      throw new ProjectResolutionError('unknown_session', {reason: 'continuation_target_required'})
+    }
+    if (bound) {
       return this.port.resolve({...decision, project: target.project}, {
         workspace_id: target.workspace_id,
         session_id: decision.session === 'new' || decision.session_title ? null : target.session_id,
       },taskContext)
     }
-    if (decision.project === null) throw new ProjectResolutionError('unknown_project', {reason: 'explicit_project_required'})
     return this.port.resolve(decision,undefined,taskContext)
   }
 }

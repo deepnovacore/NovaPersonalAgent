@@ -14,6 +14,7 @@ import {
   type CascadedTtsProviderName,
   type Settings,
   DASHSCOPE_COMPATIBLE_BASE_URL,
+  STEPFUN_COMPATIBLE_BASE_URL,
   requireQwenRealtime,
   type QwenRealtimeConfig,
   ConfigurationError,
@@ -70,6 +71,7 @@ import {SilenceVolcEndpointing} from '../realtime/volcengine/silence-endpointing
 import {DoubaoTtsClient} from '../realtime/volcengine/tts.js'
 import {type RealtimeProvider} from '../realtime/protocol.js'
 import {QwenAudioRealtimeAdapter, type QwenConnector} from '../realtime/qwen.js'
+import {createStepFunWireProfile, type IntegratedWireProfile} from '../realtime/integrated-wire-profile.js'
 import {webSocketQwenConnector} from '../realtime/qwen-transport.js'
 
 export type {
@@ -194,8 +196,8 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
       const capability = input.capability
         ?? createEndpointingCapabilityFactory({
           clock: input.clock,
-          ...(process.env.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH === undefined ? {}
-            : {resourcesPath: process.env.NOVA_AUDIO_AGENT_CODEX_RESOURCES_PATH}),
+          ...(process.env.CODEX_RESOURCES_PATH === undefined ? {}
+            : {resourcesPath: process.env.CODEX_RESOURCES_PATH}),
           ...(input.liveKitExecutor === undefined
             ? {}
             : {executor: input.liveKitExecutor}),
@@ -443,6 +445,8 @@ const defaultAsrClient: CascadedAsrClientFactory = input => new DoubaoAsrClient(
   apiKey: input.config.apiKey,
   resourceId: input.config.resourceId,
   chunkMs: input.config.chunkMs,
+  ...(input.config.voiceprint ? {voiceprint: input.config.voiceprint} : {}),
+  ...(input.config.voiceprintHealthUrl ? {voiceprintHealthUrl: input.config.voiceprintHealthUrl} : {}),
   idFactory: input.idFactory,
 })
 
@@ -508,6 +512,24 @@ export interface BuildQwenRealtimeProviderOptions {
   readonly modules?: {readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean}
 }
 
+function buildIntegratedWireProvider(options: BuildQwenRealtimeProviderOptions, profile?: IntegratedWireProfile): QwenAudioRealtimeAdapter {
+  return new QwenAudioRealtimeAdapter({
+    ...(options.history===undefined?{}:{history:options.history}),
+    ...(options.language === undefined ? {} : {language: options.language}),
+    ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, options.config.url)!}),
+    ...(profile === undefined ? {} : {wireProfile: profile}),
+    url: options.config.url,
+    apiKey: options.config.apiKey,
+    model: options.config.model,
+    voice: options.config.voice,
+    connector: options.connector ?? webSocketQwenConnector,
+    idFactory: options.idFactory,
+    now: options.now,
+    executorApproval: options.executorApproval,
+    ...(options.modules === undefined ? {} : {modules: options.modules}),
+  })
+}
+
 /**
  * Build the narrow Qwen provider selected by a registry, or one complete ownership graph.
  *
@@ -524,30 +546,20 @@ export function buildQwenRealtimeAssembly(
   options: BuildQwenRealtimeAssemblyOptions | BuildQwenRealtimeProviderOptions,
 ): RealtimeAssembly | QwenAudioRealtimeAdapter {
   if ('config' in options) {
-    return new QwenAudioRealtimeAdapter({
-      ...(options.history===undefined?{}:{history:options.history}),
-      ...(options.language === undefined ? {} : {language: options.language}),
-      ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, options.config.url)!}),
-      url: options.config.url,
-      apiKey: options.config.apiKey,
-      model: options.config.model,
-      voice: options.config.voice,
-      connector: options.connector ?? webSocketQwenConnector,
-      idFactory: options.idFactory,
-      now: options.now,
-      executorApproval: options.executorApproval,
-      ...(options.modules === undefined ? {} : {modules: options.modules}),
-    })
+    return buildIntegratedWireProvider(options)
   }
   options = filterDisabledCoding(options)
   validateCodingResource(options)
   const qwen = options.qwenConfig ?? requireQwenRealtime(options.settings)
+  // StepFun support models default in loadSettings; only the endpoint is chosen here.
+  const stepfunOwnSupport = options.settings.integrated_provider === 'stepfun'
+    && (options.settings.model_api_key ?? '').trim() === ''
   const createPersonalMemory = options.createPersonalMemory
     ?? personalMemoryFactory(options.settings)
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   const support = resolveSupportModelConnection(options.settings, {
-    baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
+    baseUrl: stepfunOwnSupport ? STEPFUN_COMPATIBLE_BASE_URL : DASHSCOPE_COMPATIBLE_BASE_URL,
     apiKey: qwen.apiKey,
   })
   const gateway = new OpenAIModelGateway({
@@ -588,8 +600,10 @@ export function buildQwenRealtimeAssembly(
     ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
     idFactory: () => ids.next('realtime'),
   }, {
-    controlledPreemptiveAlertReconnect: options.settings.qwen_controlled_guard_reconnect,
-    preemptiveAlertHistoryRecovery: options.settings.qwen_guard_history_recovery,
+    controlledPreemptiveAlertReconnect: options.settings.integrated_provider === 'qwen'
+      && options.settings.qwen_controlled_guard_reconnect,
+    preemptiveAlertHistoryRecovery: options.settings.integrated_provider === 'qwen'
+      ? options.settings.qwen_guard_history_recovery : 'none',
     preemptiveAlertHistoryPairs: options.settings.qwen_guard_history_pairs,
   })
 }
@@ -601,13 +615,14 @@ export type BuildIntegratedRealtimeAssemblyOptions = Omit<
 
 export type IntegratedQwenFactoryInput = BuildQwenRealtimeProviderOptions
 
-export type IntegratedProviderRegistry = Readonly<Record<
+export type IntegratedProviderRegistry = Readonly<Partial<Record<
   IntegratedProviderName,
   (input: IntegratedQwenFactoryInput) => RealtimeProvider
->>
+>>>
 
-export const integratedProviderRegistry: IntegratedProviderRegistry = Object.freeze({
+export const integratedProviderRegistry: Required<IntegratedProviderRegistry> = Object.freeze({
   qwen: input => buildQwenRealtimeAssembly(input),
+  stepfun: input => buildIntegratedWireProvider(input, createStepFunWireProfile()),
 })
 
 export function buildIntegratedRealtimeAssembly(
@@ -616,19 +631,20 @@ export function buildIntegratedRealtimeAssembly(
 ): RealtimeAssembly {
   options = filterDisabledCoding(options)
   const provider = options.settings.integrated_provider
-  if (!Object.hasOwn(registry, provider)) {
-    throw new ConfigurationError('NOVA_AUDIO_AGENT_INTEGRATED_PROVIDER 无效')
+  const factory = Object.hasOwn(registry, provider) ? registry[provider] : undefined
+  if (factory === undefined) {
+    throw new ConfigurationError('INTEGRATED_PROVIDER 无效')
   }
   const config = Object.freeze({...requireIntegratedRealtime(options.settings)})
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   const capabilities = options.capabilities ?? capabilitiesFromSettings(options.settings)
-  const qwenProvider = registry[provider]({
+  const qwenProvider = factory({
     language: options.settings.language,
     ...(options.onUsage === undefined ? {} : {onUsage: options.onUsage}),
     config,
     ...(options.connector === undefined ? {} : {connector: options.connector}),
-    idFactory: () => ids.next('qwen'),
+    idFactory: () => ids.next(provider),
     now: () => clock.now(),
     modules: {
       search: capabilities.modules.search.enabled,
@@ -672,7 +688,7 @@ export function buildProductionRealtimeAssembly(
   if (options.settings.pipeline_mode === 'cascaded') {
     return (builders.cascaded ?? buildCascadedRealtimeAssembly)(composition)
   }
-  throw new ConfigurationError('NOVA_AUDIO_AGENT_PIPELINE_MODE 无效')
+  throw new ConfigurationError('PIPELINE_MODE 无效')
 }
 
 function productionCodingComposition(
