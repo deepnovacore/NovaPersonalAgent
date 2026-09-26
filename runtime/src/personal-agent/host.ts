@@ -742,7 +742,8 @@ export class PersonalAgentHost {
     command(raw: unknown, context?:PersonalCommandContext): Promise<unknown> { const parsed = personalCommandSchema.parse(raw); if (!this.#opened || this.#pendingCommands >= 8)
         return Promise.resolve({ type: 'personal.result', request_id: parsed.request_id, ok: false, error: 'unavailable' }); this.#pendingCommands++; const run = this.#commands.then(() => this.#executeCommand(parsed,context));if(parsed.method==='tasks.input'){this.#taskInputRuns.add(run);void run.finally(()=>{this.#taskInputRuns.delete(run);this.#pendingCommands--}).catch(()=>{ /* caller receives rejection */ });return run} this.#commands = run.catch(() => { /* optional observer or cleanup already reported */ }).finally(() => { this.#pendingCommands--; }); return run; }
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
-        if(this.#recovering&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};
+        // Recovery owns task execution only: presentation, state and non-task commands keep working, and a handback made now is woken when recovery ends.
+        if(this.#recovering&&(command.method.startsWith('tasks.')||command.method==='conversations.approve')&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};
         const taskCommand=command.method.startsWith('tasks.'),scoped=taskCommand||command.method==='presentation.set'||command.method==='conversations.approve';
         const client=context?.client_id;
         if((taskCommand||command.method==='conversations.approve')&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
@@ -793,7 +794,12 @@ export class PersonalAgentHost {
                 }else if(command.method==='tasks.cancel'){
                     const task=await this.cancelTask(receiptId,fence,{kind:'user',client_id:client!});
                     data=task;
-                }else if(command.method==='tasks.continue'){data=await this.tasks.continue(receiptId,fence,{kind:'user',client_id:client!});void this.wakeTask(q.task_id)}
+                }else if(command.method==='tasks.continue'){
+                    // A recovery block is re-checked first: once the user has reconciled, recovery itself releases and wakes the task.
+                    let released=false
+                    if(this.#recoveryBlocked.has(q.task_id)){this.tasks.assertCurrent(fence,this.tasks.get(q.task_id).controller);await this.recoverTasks();if(this.#recoveryBlocked.has(q.task_id))throw Error('task_recovery_blocked');released=this.tasks.get(q.task_id).phase!=='waiting'}
+                    if(released)data=this.tasks.get(q.task_id);else{data=await this.tasks.continue(receiptId,fence,{kind:'user',client_id:client!});void this.wakeTask(q.task_id)}
+                }
                 else if(command.method==='tasks.reconcile'&&'resolution' in q&&(q.resolution==='done'||q.resolution==='not_run')){data=await this.tasks.reconcile(receiptId,fence,{kind:'user',client_id:client!},q.resolution)}else throw Error('task_execution_unavailable');
             }
             if(!taskRead)this.#notify();

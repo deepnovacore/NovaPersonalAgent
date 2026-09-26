@@ -255,3 +255,21 @@ test('the spoken completion line keeps only a short form of a long goal',()=>{
  const long=announcedGoal('把'.repeat(80));assert.equal([...long].length,40);assert.ok(long.endsWith('…'))
  assert.equal(announcedGoal('Fix login'),'Fix login')
 })
+
+test('recovery leaves non-task commands open, and a reconciled uncertain task resumes after continue',async()=>{
+ const f=await fixture();let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve});let hold=true,evaluated=0
+ try{
+  const task=await f.delegate('recover');await f.host.tasks.bindWork(f.fence(task),'lost','session');await f.host.tasks.recordWorkOutcome('lost','unknown',{result:'transport closed'})
+  f.host.attachTaskRuntime('chat:main',0,{input:()=>Promise.resolve('accepted' as const),cancel:()=>undefined,dispatch:()=>Promise.reject(Error('must not dispatch')),recover:async()=>{if(hold)await held;return null},evaluate:()=>{evaluated++;return Promise.resolve({kind:'complete' as const,evidence_refs:['task-work:lost'],criteria:[{index:0,evidence_refs:['task-work:lost']}]})}})
+  const recovering=f.host.recoverTasks()
+  assert.equal((await f.command('state')).ok,true,'state stays available during recovery')
+  assert.equal((await f.command('presentation.set',{mode:'orb'})).ok,true,'presentation stays available during recovery')
+  assert.equal((await f.command('tasks.continue',f.fence(f.host.tasks.get(task.id)))).error,'task_recovery_in_progress')
+  hold=false;release();await recovering
+  let current=f.host.tasks.get(task.id);assert.equal(current.waiting_reason,'uncertain_recovery')
+  current=(await f.command('tasks.reconcile',{...f.fence(current),resolution:'done'})).data
+  const continued=await f.command('tasks.continue',f.fence(current));assert.equal(continued.error,undefined);assert.equal(continued.ok,true)
+  for(let i=0;i<50&&f.host.tasks.get(task.id).phase!=='completed';i++)await new Promise(resolve=>setTimeout(resolve,10))
+  assert.equal(f.host.tasks.get(task.id).phase,'completed');assert.ok(evaluated>=1)
+ }finally{release();await f.close()}
+})
