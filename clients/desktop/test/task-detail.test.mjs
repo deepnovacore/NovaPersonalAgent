@@ -153,3 +153,7 @@ test('task detail shows readable errors and positional session names instead of 
  await m.find('停止任务').listeners.click();assert.ok(m.all().some(n=>n.textContent==='任务已在别处更新，已刷新，请重试'))
  assert.equal(m.all().some(n=>n.textContent==='stale_task'),false)
 })
+test('verified criteria show which kind of evidence proved each one',()=>{
+ const m=mount();m.view.update(task({phase:'completed',acceptance:['Bug fixed','Docs updated'],criteria_evidence:[{index:0,evidence_refs:['task-work:w1','task-work:w2']},{index:1,evidence_refs:['task-delivery:r']}]}))
+ const items=m.all().filter(n=>n.tagName==='LI');assert.equal(items[0].children[0].textContent,' · 依据：执行结果');assert.equal(items[0].children[0].title,'task-work:w1\ntask-work:w2');assert.equal(items[1].children[0].textContent,' · 依据：Nova 交付')
+})

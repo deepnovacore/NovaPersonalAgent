@@ -2,7 +2,8 @@ import {z} from 'zod'
 import type {TaskFence,TaskRecord,TaskService} from './tasks.js'
 export const taskDecisionSchema=z.discriminatedUnion('kind',[
  z.object({kind:z.literal('reconcile'),input_refs:z.array(z.string().min(1).max(512)).min(1),goal_change:z.object({goal:z.string().trim().min(1).max(16000),acceptance:z.array(z.string().trim().min(1).max(2000)).max(64)}).strict().nullable()}).strict(),
- z.object({kind:z.literal('complete'),evidence_refs:z.array(z.string().min(1)).max(128)}).strict(),
+ // criteria maps each acceptance criterion (by index) to the evidence that proves it.
+ z.object({kind:z.literal('complete'),evidence_refs:z.array(z.string().min(1)).max(128),criteria:z.array(z.object({index:z.number().int().nonnegative(),evidence_refs:z.array(z.string().min(1)).min(1).max(32)}).strict()).max(64).optional()}).strict(),
  z.object({kind:z.literal('correct'),instruction:z.string().trim().min(1).max(16000),evidence_refs:z.array(z.string().min(1)).max(128)}).strict(),
  z.object({kind:z.literal('wait'),reason:z.string().trim().min(1).max(4000),evidence_refs:z.array(z.string().min(1)).max(128)}).strict(),
 ])

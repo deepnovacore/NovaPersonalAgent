@@ -7,6 +7,10 @@ const TASK_ERROR={stale_task:'任务已在别处更新，已刷新，请重试',
 export const taskErrorText=message=>t(Object.hasOwn(TASK_ERROR,message)?TASK_ERROR[message]:/^[a-z0-9_]+$/.test(message??'')?'操作未完成，请刷新后重试':message)
 /** Sessions are shown by position until executors report titles; the raw id stays in the tooltip. */
 const sessionLabel=(ids,id)=>{const index=(ids??[]).indexOf(id);return index<0?t('尚无会话'):t('会话 {0}',index+1)}
+const EVIDENCE_KIND={'task-work':'执行结果','task-delivery':'Nova 交付','task-attested':'你已核对','task-input':'你的回复'}
+const evidenceLabel=ref=>{const kind=String(ref).split(':')[0];return t(Object.hasOwn(EVIDENCE_KIND,kind)?EVIDENCE_KIND[kind]:'依据')}
+/** A criterion with the evidence Nova cited for it once the task is verified. */
+function criterionItem(text,refs){const item=el('li',text);if(refs?.length){const proof=el('small',' · '+t('依据：{0}',[...new Set(refs.map(evidenceLabel))].join('、')));proof.title=refs.join('\n');item.append(proof)}return item}
 const artifactLabel=ref=>String(ref).split(/[\\/]/).filter(Boolean).at(-1)??String(ref)
 function publicEventSummary(event){
  if(event.kind==='status')return taskWaitingLabel(event.text)
@@ -60,7 +64,7 @@ export function mountTaskDetail(root,{command,onClose,onViewed=()=>{},after=0,hi
  function render(){
   if(!detail)return
   const caps=detail.capabilities??{},terminal=['completed','cancelled'].includes(detail.phase)
-  goal.textContent=detail.goal;summary.replaceChildren(...(detail.acceptance??[]).map(text=>el('li',text)));summary.hidden=criteriaTitle.hidden=!(detail.acceptance??[]).length;const statusText=`${t(TASK_PHASE_LABEL[detail.phase]??detail.phase)} · ${owned()?t('由你控制'):detail.controller.kind==='nova'?t('Nova 控制'):t('由另一客户端控制')}${detail.waiting_reason?` · ${taskWaitingLabel(detail.waiting_reason)}`:''}${detail.todo_sync==='conflict'?t(' · Todo 已变更，未自动完成'):''}`;if(status.textContent!==statusText)status.textContent=statusText
+  goal.textContent=detail.goal;summary.replaceChildren(...(detail.acceptance??[]).map((text,index)=>criterionItem(text,detail.criteria_evidence?.find(item=>item.index===index)?.evidence_refs)));summary.hidden=criteriaTitle.hidden=!(detail.acceptance??[]).length;const statusText=`${t(TASK_PHASE_LABEL[detail.phase]??detail.phase)} · ${owned()?t('由你控制'):detail.controller.kind==='nova'?t('Nova 控制'):t('由另一客户端控制')}${detail.waiting_reason?` · ${taskWaitingLabel(detail.waiting_reason)}`:''}${detail.todo_sync==='conflict'?t(' · Todo 已变更，未自动完成'):''}`;if(status.textContent!==statusText)status.textContent=statusText
   const noSession=!(detail.session_ids??[]).length;select.hidden=noSession;composer.hidden=noSession;take.textContent=t(noSession?'接管任务':'接管并回复')
   notice.textContent=noSession&&detail.execution_route==='nova'?t('此任务由 Nova 直接交付，无执行器会话。'):caps.detail==='summary-only'?t('此执行器仅提供任务摘要。'):caps.input===false?t('执行器输入暂不可用，请先确认恢复状态。'):''
   recipient.textContent=t('发送至执行器会话：{0}{1}',session?sessionLabel(detail.session_ids,session):t('尚无会话'),draftState.text&&draftState.control_revision!==detail.control_revision?t(' · 上一控制期间的草稿（不会自动发送）'):'')

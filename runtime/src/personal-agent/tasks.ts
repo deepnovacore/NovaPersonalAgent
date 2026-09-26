@@ -9,7 +9,7 @@ export type TaskPhase='queued'|'running'|'verifying'|'waiting'|'completed'|'canc
 export type TaskActor={kind:'nova'}|{kind:'user';client_id:string}
 export interface TaskFence{task_id:string;control_revision:number;goal_revision:number}
 export interface TaskInput{execution_route?:string|undefined;conversation_generation?:number|undefined;conversation_id:string;goal:string;acceptance:string[];origin_ref:string;todo_ref?:{id:string;version:number}}
-export interface TaskRecord extends TaskInput{reconciled_inputs?:string[];pending_delivery?:string;original_goal?:string;execution_route?:string|undefined;id:string;phase:TaskPhase;controller:TaskActor;control_revision:number;goal_revision:number;corrections:number;work_ids:string[];session_ids:string[];evidence_refs:string[];artifact_refs:string[];waiting_reason:string|null;todo_sync:'none'|'pending'|'synced'|'conflict'}
+export interface TaskRecord extends TaskInput{reconciled_inputs?:string[];pending_delivery?:string;original_goal?:string;execution_route?:string|undefined;id:string;phase:TaskPhase;controller:TaskActor;control_revision:number;goal_revision:number;corrections:number;work_ids:string[];session_ids:string[];evidence_refs:string[];criteria_evidence?:{index:number;evidence_refs:string[]}[];artifact_refs:string[];waiting_reason:string|null;todo_sync:'none'|'pending'|'synced'|'conflict'}
 
 export interface TaskEvent {seq:number;task_id:string;work_id?:string;session_id?:string;thread_id?:string;turn_id?:string;item_id?:string;stage?:'started'|'completed';kind:'message'|'tool'|'artifact'|'control'|'verification'|'status';sender?:'nova'|'user-to-executor'|'executor';text:string;refs:string[];text_truncated?:boolean}
 const eventSchema=z.object({thread_id:z.string().min(1).max(512).optional(),turn_id:z.string().min(1).max(512).optional(),item_id:z.string().min(1).max(512).optional(),stage:z.enum(['started','completed']).optional(),seq:z.number().int().positive(),task_id:z.string().min(1).max(512),work_id:z.string().min(1).max(512).optional(),session_id:z.string().min(1).max(512).optional(),kind:z.enum(['message','tool','artifact','control','verification','status']),sender:z.enum(['nova','user-to-executor','executor']).optional(),text:z.string().max(16000),refs:z.array(z.string().min(1).max(512)).max(128),text_truncated:z.boolean().optional()}).strict().refine(event=>event.kind!=='message'||event.sender!==undefined,'message_sender_required')
@@ -20,7 +20,7 @@ export const taskFenceSchema=z.object({task_id:id,control_revision:z.number().in
 const goalSchema=taskInputSchema.pick({goal:true,acceptance:true})
 const controlChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,nextActor:actorSchema}).strict()
 const goalChangeSchema=z.object({fence:taskFenceSchema,actor:actorSchema,goal:goalSchema.shape.goal,acceptance:goalSchema.shape.acceptance}).strict()
-const recordSchema=taskInputSchema.extend({reconciled_inputs:z.array(id).default([]),pending_delivery:id.optional(),original_goal:z.string().optional(),execution_route:z.string().optional(),id,phase:z.enum(['queued','running','verifying','waiting','completed','cancelled']),controller:actorSchema,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative(),corrections:z.number().int().nonnegative(),work_ids:z.array(id),session_ids:z.array(id),evidence_refs:z.array(id),artifact_refs:z.array(id).default([]),waiting_reason:z.string().trim().min(1).max(4000).nullable(),todo_sync:z.enum(['none','pending','synced','conflict'])}).strict()
+const recordSchema=taskInputSchema.extend({reconciled_inputs:z.array(id).default([]),pending_delivery:id.optional(),original_goal:z.string().optional(),execution_route:z.string().optional(),id,phase:z.enum(['queued','running','verifying','waiting','completed','cancelled']),controller:actorSchema,control_revision:z.number().int().nonnegative(),goal_revision:z.number().int().nonnegative(),corrections:z.number().int().nonnegative(),work_ids:z.array(id),session_ids:z.array(id),evidence_refs:z.array(id),criteria_evidence:z.array(z.object({index:z.number().int().nonnegative(),evidence_refs:z.array(id)}).strict()).optional(),artifact_refs:z.array(id).default([]),waiting_reason:z.string().trim().min(1).max(4000).nullable(),todo_sync:z.enum(['none','pending','synced','conflict'])}).strict()
 type StoredTask=z.infer<typeof recordSchema>
 const evidenceSchema=z.object({observations:z.array(eventSchema).max(32).default([]),observations_truncated:z.boolean().default(false),ref:id,task_id:id,goal_revision:z.number().int().nonnegative(),kind:z.enum(['work','delivery','input']),work_id:id.optional(),outcome:z.string(),content:z.string().max(131072),refs:z.array(id).max(128)}).strict()
 export type TaskEvidence=z.infer<typeof evidenceSchema>
@@ -188,7 +188,11 @@ export class TaskService{
   if(decision.evidence_refs.some(ref=>!evidence.some(item=>item.ref===ref)))throw Error('invalid_evidence')
   if(decision.kind==='complete'&&!decision.evidence_refs.length)throw Error('missing_evidence')
   if(decision.kind!=='wait'&&(this.pendingEffect(task.id)||this.inputReceipts(task.id).some(receipt=>receipt.status==='unknown')))throw Error('task_effect_unknown')
+  if(decision.kind==='complete'&&decision.criteria){
+   if(decision.criteria.some(item=>item.index>=task.acceptance.length||item.evidence_refs.some(ref=>!evidence.some(entry=>entry.ref===ref))))throw Error('invalid_evidence')
+  }
   task.evidence_refs=decision.evidence_refs
+  if(decision.kind==='complete'&&decision.criteria)task.criteria_evidence=decision.criteria.map(item=>({index:item.index,evidence_refs:[...item.evidence_refs]}))
   if(decision.kind==='complete'){task.phase='completed';task.waiting_reason=null;task.todo_sync=task.todo_ref?'pending':'none'}
   else if(decision.kind==='wait'){task.phase='waiting';task.waiting_reason=decision.reason}
   else if(task.corrections>=3){task.phase='waiting';task.waiting_reason='correction_limit'}

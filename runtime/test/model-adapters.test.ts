@@ -335,7 +335,7 @@ test('coding evaluator cannot complete from prose, truncated checks, or another 
   await tasks.bindWork(fence,'work','session')
   await tasks.appendEvent({task_id:task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',item_id:'check',kind:'tool',stage:'completed',text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'1 passed',exit_code:0}),refs:[]},'check')
   await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'All tests and UI passed'})
-  const current=tasks.get(task.id),valid=tasks.evidence(task.id),decision={kind:'complete',evidence_refs:[valid[0]!.ref]}
+  const current=tasks.get(task.id),valid=tasks.evidence(task.id),decision={kind:'complete',evidence_refs:[valid[0]!.ref],criteria:[{index:0,evidence_refs:[valid[0]!.ref]}]}
   for(const invalid of [
    {...valid[0]!,observations:[]},
    {...valid[0]!,outcome:'failed'},
@@ -369,7 +369,7 @@ test('coding evaluator can use complete later checks despite an unrelated trunca
   await tasks.appendEvent({...identity,item_id:'docs',text_truncated:true,text:'Truncated tool documentation'},'docs')
   await tasks.appendEvent({...identity,item_id:'test',text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'1 passed',exit_code:0})},'test')
   await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'Done'})
-  const current=tasks.get(task.id),evidence=tasks.evidence(task.id),decision={kind:'complete',evidence_refs:[evidence[0]!.ref]}
+  const current=tasks.get(task.id),evidence=tasks.evidence(task.id),decision={kind:'complete',evidence_refs:[evidence[0]!.ref],criteria:[{index:0,evidence_refs:[evidence[0]!.ref]}]}
   assert.equal(evidence[0]!.observations_truncated,true)
   const gateway=new ScriptedGateway([],JSON.stringify(decision)),verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'})
   assert.deepEqual(await verifier.evaluateTask(current,evidence,new AbortController().signal),decision)
@@ -381,4 +381,19 @@ test('coding evaluator can use complete later checks despite an unrelated trunca
    assert.equal((await verifier.evaluateTask(current,incomplete,new AbortController().signal)).kind,'wait')
   }
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a verifier completion must map every criterion to evidence, and listing files is not a check',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-criteria-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Fix and test',acceptance:['bug fixed','tests pass'],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await tasks.bindWork(fence,'work','session')
+  const identity={task_id:task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',kind:'tool' as const,stage:'completed' as const,refs:[]}
+  await tasks.appendEvent({...identity,item_id:'ls',text:JSON.stringify({type:'commandExecution',status:'completed',command:"/bin/zsh -lc 'cd app && ls -la'",output:'a b',exit_code:0})},'ls')
+  await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'Done'})
+  const current=tasks.get(task.id),ref=tasks.evidence(task.id)[0]!.ref,run=async(decision:object)=>new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify(decision)),model:'test',proactivityPreset:'balanced'}).evaluateTask(current,tasks.evidence(task.id),new AbortController().signal)
+  assert.equal((await run({kind:'complete',evidence_refs:[ref],criteria:[{index:0,evidence_refs:[ref]}]})).kind,'wait','criterion 1 has no evidence')
+  assert.equal((await run({kind:'complete',evidence_refs:[ref]})).kind,'wait','no mapping at all')
+  assert.equal((await run({kind:'complete',evidence_refs:[ref],criteria:[{index:0,evidence_refs:[ref]},{index:1,evidence_refs:[ref]}]})).kind,'wait','ls is not a check')
+ }finally{await rm(dir,{recursive:true,force:true})}
 })
