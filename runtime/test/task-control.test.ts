@@ -221,14 +221,31 @@ test('a user closes a Todo whose task scope changed; nothing else can complete i
  const f=await fixture();try{
   const todo=await f.host.life.mutate({op:'create',kind:'todo',title:'Ship login'},'todo')
   const task=await f.host.tasks.delegate('scoped',{conversation_id:'chat:main',goal:'Ship login',acceptance:['Checked'],origin_ref:'conversation:test',todo_ref:{id:todo.id,version:todo.version}})
-  assert.equal((await f.command('tasks.complete_todo',f.fence(task))).error,'todo_not_in_conflict')
+  assert.equal((await f.command('tasks.complete_todo',{...f.fence(task),todo_version:todo.version})).error,'todo_not_in_conflict')
   await f.host.tasks.bindWork(f.fence(task),'w','session');await f.host.tasks.recordWorkOutcome('w','ok',{result:'done'})
   await f.host.tasks.applyDecision(f.fence(f.host.tasks.get(task.id)),{kind:'complete',evidence_refs:['task-work:w']})
   await f.host.life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,note:'edited elsewhere'},'edit')
   const done=f.host.tasks.get(task.id);await f.host.tasks.markTodoSync(task.id,done.goal_revision,'conflict')
   const caps=await f.command('tasks.get',{task_id:task.id}) as unknown as {data:{capabilities:{todo_conflict:boolean}}};assert.equal(caps.data.capabilities.todo_conflict,true)
-  const resolved=await f.command('tasks.complete_todo',f.fence(done))
+  const reviewed=f.host.life.snapshot().todos.find(item=>item.id===todo.id)!
+  await f.host.life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:reviewed.version,note:'expanded after review'},'expand')
+  assert.equal((await f.command('tasks.complete_todo',{...f.fence(done),todo_version:reviewed.version})).error,'todo_changed','an unseen revision needs a fresh review')
+  const current=f.host.life.snapshot().todos.find(item=>item.id===todo.id)!
+  const resolved=await f.command('tasks.complete_todo',{...f.fence(done),todo_version:current.version})
   assert.equal(resolved.ok,true);assert.equal(resolved.data.todo_sync,'synced')
   assert.equal(f.host.life.snapshot().todos.find(item=>item.id===todo.id)?.status,'done')
+ }finally{await f.close()}
+})
+
+test('reconcile refuses execution still in flight and a late settle cannot overwrite the user',async()=>{
+ const f=await fixture();try{
+  const task=await f.host.tasks.delegate('live',{conversation_id:'chat:main',goal:'Live',acceptance:['Checked'],origin_ref:'conversation:test'})
+  const effect=await f.host.tasks.reserveInitial(f.fence(task));await f.host.tasks.markEffectDispatching(effect);await f.host.tasks.resourceState(task.id,'waiting_for_resource')
+  const waiting=f.host.tasks.get(task.id);assert.equal(waiting.phase,'waiting')
+  assert.equal((await f.command('tasks.reconcile',{...f.fence(waiting),resolution:'not_run'})).error,'execution_in_flight')
+  await f.host.tasks.settleEffect(effect,'unknown');await f.host.tasks.wait(f.fence(waiting),'task_execution_unconfirmed')
+  const settled=await f.command('tasks.reconcile',{...f.fence(f.host.tasks.get(task.id)),resolution:'done'});assert.equal(settled.ok,true)
+  await f.host.tasks.settleEffect(effect,'unknown');assert.equal(f.host.tasks.pendingEffect(task.id),null,'a late settle keeps the user resolution')
+  assert.ok(f.host.tasks.evidence(task.id).some(item=>item.ref==='task-attested:'+effect&&item.outcome==='ok'),'a confirmed step is verified, not re-dispatched')
  }finally{await f.close()}
 })

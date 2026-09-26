@@ -2,6 +2,8 @@ import {t} from './locale.mjs'
 export const TASK_PHASE_LABEL={queued:'已排队',running:'进行中',verifying:'验证中',waiting:'等待处理',started:'已开始',working:'进行中',completed:'已完成',cancelled:'已停止',failed:'失败',refused:'已拒绝',unknown:'待确认'}
 const WAITING_LABEL={task_check_unavailable:'暂时无法验证任务结果，请稍后重试',correction_limit:'自动修正次数已用完，请决定是否继续',task_effect_unknown:'操作结果待确认，请核对后继续',uncertain_recovery:'恢复结果待确认，请核对已有操作',task_delivery_uncertain:'上次交付状态待确认',delivery_interrupted:'交付已中断，请决定是否继续',task_executor_unavailable:'执行器暂不可用',task_runtime_unavailable:'任务执行服务暂不可用',task_runtime_recovery_unavailable:'任务执行服务尚未恢复',task_session_recovery_unavailable:'执行器会话尚未恢复',task_work_recovery_unavailable:'执行状态尚未恢复',task_recovery_blocked:'任务恢复待处理',task_execution_rejected:'本次执行未获接收，请核对任务状态',task_execution_unconfirmed:'执行是否开始仍待确认',task_initial_pending:'正在确认任务启动',executor_admission_pending:'正在等待执行器接收',execution_route_required:'请选择任务的执行方式',user_reconciled:'已核对执行结果，可以继续任务'}
 export const taskWaitingLabel=reason=>reason?t(Object.hasOwn(WAITING_LABEL,reason)?WAITING_LABEL[reason]:'任务需要你处理'):''
+/** Who acts next on a delegated task, in one short phrase for cards. */
+export const taskNextStep=task=>task.phase==='waiting'?t('需要你：{0}',taskWaitingLabel(task.waiting_reason)||t('任务需要你处理')):task.controller?.kind==='user'?t('你在控制'):['completed','cancelled'].includes(task.phase)?t('无需操作'):t('Nova 在推进')
 const DURABLE_ACTIVE=['queued','running','verifying','waiting'],WORK_ACTIVE=['started','working']
 /** Counts delegated tasks plus executor work that no delegated task owns. */
 export const activeTaskCount=(durable,work)=>{
@@ -21,7 +23,7 @@ export function renderTasksPage(panel,{tasks,durableTasks,openTask,taskAction,re
  if(!records.length&&!unowned.length){const empty=document.createElement('section');empty.className='empty-state';for(const [tag,text]of [['h3','暂无任务'],['p','开始对话后可在这里查看任务进展。']]){const node=document.createElement(tag);node.textContent=text;empty.append(node)}panel.append(empty)}
  for(const task of records){
   const a=card(task.goal,task.waiting_reason?taskWaitingLabel(task.waiting_reason):task.summary);a.dataset.phase=task.phase;a.dataset.taskId=task.id
-  chips(a,[TASK_PHASE_LABEL[task.phase]||task.phase,task.controller?.kind==='user'?t('你在控制'):t('Nova 在推进')])
+  chips(a,[TASK_PHASE_LABEL[task.phase]||task.phase,task.phase==='waiting'?t('需要你处理'):task.controller?.kind==='user'?t('你在控制'):t('Nova 在推进')])
   button(t('查看任务与结果'),()=>openTask(task.id),a)
   const runs=works.filter(work=>(task.work_ids??[]).includes(work.work_id))
   if(runs.length){const list=document.createElement('div');list.className='task-runs';list.setAttribute('aria-label',t('本任务的执行记录'));a.append(list);runs.forEach((work,index)=>renderWork(list,work,{index,state,taskAction,results,chips,button,askProgress:null,local,rerender}))}

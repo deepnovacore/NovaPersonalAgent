@@ -45,6 +45,7 @@ export class TaskService{
  constructor(readonly path:string,readonly changed:()=>void=()=>{ /* optional projection observer */ },readonly admitExecution:(taskId:string)=>void=()=>{/* standalone task service */}){this.#store=new BoundedJsonStore(path,stateSchema,16*1024*1024)}
  async open():Promise<void>{try{this.#state=await this.#store.read(empty());for(const task of this.#state.tasks)task.original_goal??=Object.values(this.#state.receipts).find(receipt=>receipt.task_id===task.id&&receipt.result?.goal_revision===0)?.result?.goal??(task.goal_revision===0?task.goal:'Original goal unavailable')}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}if(Object.values(this.#state.pending_effects).some(effect=>effect.status==='pending')||this.#state.tasks.some(task=>task.work_ids.some(work=>!this.#state.work_fences[work])))await this.#mutate(next=>{for(const effect of Object.values(next.pending_effects))if(effect.status==='pending')effect.status=effect.write_started===false?'failed':'unknown';for(const task of next.tasks)if(task.work_ids.some(work=>!next.work_fences[work])&&task.phase!=='completed'&&task.phase!=='cancelled'){task.phase='waiting';task.waiting_reason='work_fence_unavailable'}})}
  cancel(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{return this.#change(requestId,{fence:taskFenceSchema.parse(fence),actor:actorSchema.parse(actor),operation:'cancel'},task=>{if(task.phase==='completed')throw Error('task_terminal');task.phase='cancelled';task.waiting_reason=this.hasUnresolvedExecution(task.id)?'cancellation_pending':null},task=>this.#assertDecider(task,fence,actor,false))}
+ readonly #liveInputs=new Set<string>()
  async input(requestId:string,fence:TaskFence,actor:TaskActor,sessionId:string,text:string,send:(grant:TaskDispatchContext)=>Promise<'accepted'|'failed'|'unknown'>):Promise<'accepted'|'failed'|'unknown'>{
   const request=id.parse(requestId),session=id.parse(sessionId),instruction=z.string().trim().min(1).max(16000).parse(text),body=hash({fence,actor,session,instruction})
   const prior=await this.#mutate(next=>{
@@ -56,9 +57,12 @@ export class TaskService{
   let status:'accepted'|'failed'|'unknown'='unknown'
   let grant:TaskDispatchContext|undefined
   try{grant=this.instructionContext(fence,actor)}catch{status='failed'}
+  this.#liveInputs.add(request)
+  try{
   if(grant)try{status=await send(grant)}catch{status='unknown'}
   await this.#mutate(next=>{next.effects[request]={...next.effects[request]!,hash:body,status};next.events.push({seq:++next.event_seq,task_id:fence.task_id,session_id:session,kind:'control',text:'Input delivery: '+status,refs:[]})})
   return status
+  }finally{this.#liveInputs.delete(request)}
  }
  async close():Promise<void>{await this.#tail}
  get(taskId:string):TaskRecord{const task=this.#state.tasks.find(item=>item.id===id.parse(taskId));if(!task)throw Error('task_not_found');return structuredClone(task) as TaskRecord}
@@ -151,9 +155,15 @@ export class TaskService{
  reconcile(requestId:string,fence:TaskFence,actor:TaskActor,resolution:'done'|'not_run'):Promise<TaskRecord>{
   const parsed={fence:taskFenceSchema.parse(fence),actor:actorSchema.parse(actor),operation:'reconcile',resolution:z.enum(['done','not_run']).parse(resolution)}
   return this.#change(requestId,parsed,(task,next)=>{
+   // Only durably uncertain execution is the user's to settle; a reserved or in-flight effect or send still reports its own result.
+   if(Object.values(next.pending_effects).some(effect=>effect.task_id===task.id&&effect.status==='pending')||[...this.#liveInputs].some(request=>next.effects[request]?.task_id===task.id))throw Error('execution_in_flight')
    const done=parsed.resolution==='done';let changed=false
    for(const item of next.outcomes)if(item.task_id===task.id&&item.work_id&&!['ok','failed','refused','cancelled'].includes(item.outcome)){item.outcome=done?'ok':'cancelled';changed=true}
-   for(const effect of Object.values(next.pending_effects))if(effect.task_id===task.id&&(effect.status==='pending'||effect.status==='unknown')){effect.status=done?'accepted':'failed';changed=true}
+   for(const effect of Object.values(next.pending_effects))if(effect.task_id===task.id&&effect.status==='unknown'){
+    effect.status=done?'accepted':'failed';changed=true
+    // A confirmed step becomes evidence, so the loop verifies it instead of dispatching it again.
+    if(done)next.outcomes.push({observations:[],observations_truncated:false,ref:'task-attested:'+effect.id,task_id:task.id,goal_revision:task.goal_revision,kind:'work',outcome:'ok',content:'The user checked and confirmed this step ran, although Nova did not observe its result: '+effect.instruction.slice(0,4000),refs:[]})
+   }
    for(const receipt of Object.values(next.effects))if(receipt.task_id===task.id&&receipt.status==='unknown'){receipt.status=done?'accepted':'failed';changed=true}
    if(!changed)throw Error('nothing_to_reconcile')
    task.waiting_reason='user_reconciled';task.control_revision++
@@ -191,7 +201,7 @@ export class TaskService{
  markEffectDispatching(effectId:string):Promise<void>{return this.#mutate(next=>{const effect=next.pending_effects[effectId];if(effect?.status!=='pending')throw Error('effect_not_pending');this.assertWritable(effect.fence,{kind:'nova'});this.assertExecutionAllowed(effect.task_id);if(this.pendingUserInputs(effect.task_id).length)throw Error('task_input_reconciliation_required');effect.write_started=true})}
  recoveryWait(taskId:string,reason:string|null):Promise<void>{return this.#mutate(next=>{const task=next.tasks.find(task=>task.id===taskId);if(!task)throw Error('task_not_found');if(task.phase==='completed'||task.phase==='cancelled')return;task.waiting_reason=reason;if(reason)task.phase='waiting';else if(task.phase==='waiting')task.phase=task.work_ids.length?'verifying':'queued'})}
  resourceState(taskId:string,reason:string|null):Promise<void>{return this.#mutate(next=>{const task=next.tasks.find(task=>task.id===taskId);if(!task||task.phase==='completed'||task.phase==='cancelled')return;task.waiting_reason=reason;task.phase=reason?'waiting':'running'})}
- settleEffect(effectId:string,status:'accepted'|'failed'|'unknown'):Promise<void>{return this.#mutate(next=>{const effect=next.pending_effects[effectId];if(!effect)throw Error('effect_not_found');effect.status=status})}
+ settleEffect(effectId:string,status:'accepted'|'failed'|'unknown'):Promise<void>{return this.#mutate(next=>{const effect=next.pending_effects[effectId];if(!effect)throw Error('effect_not_found');if(effect.status==='pending')effect.status=status})}
  markTodoSync(taskId:string,goalRevision:number,status:'synced'|'conflict'):Promise<void>{return this.#mutate(next=>{const task=next.tasks.find(task=>task.id===taskId);if(task?.phase!=='completed'||task.goal_revision!==goalRevision)throw Error('stale_task');task.todo_sync=status})}
  #change(requestId:string,parsed:{fence:TaskFence;actor:TaskActor}&Record<string,unknown>,change:(task:StoredTask,next:TaskState)=>void,authorize?:(task:StoredTask)=>void):Promise<TaskRecord>{const request=id.parse(requestId),body=hash(parsed);return this.#mutate(next=>{
   const prior=next.receipts[request];if(prior){if(prior.hash!==body)throw Error('request_conflict');if(!prior.result)throw Error('receipt_invalid');return structuredClone(prior.result) as TaskRecord}

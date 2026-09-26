@@ -141,7 +141,15 @@ test('while Nova holds control the user can stop, reconcile an unknown step and 
 })
 test('a completed task whose Todo changed offers an explicit Todo completion',async()=>{
  const m=mount(async()=>task({phase:'completed',todo_sync:'synced'}))
- m.view.update(task({phase:'completed',todo_sync:'conflict',capabilities:{detail:'conversation',input:true,todo_conflict:true}}))
+ m.view.update(task({phase:'completed',todo_sync:'conflict',capabilities:{detail:'conversation',input:true,todo_conflict:true,todo:{title:'Ship',version:3,status:'open'}}}))
  const close=m.find('标记 Todo 完成');assert.equal(close.hidden,false);await close.listeners.click()
- assert.deepEqual(m.calls.find(([method])=>method==='tasks.complete_todo')[1],{task_id:'t',control_revision:0,goal_revision:0});assert.equal(close.hidden,true)
+ assert.deepEqual(m.calls.find(([method])=>method==='tasks.complete_todo')[1],{task_id:'t',control_revision:0,goal_revision:0,todo_version:3});assert.equal(close.hidden,true)
+})
+test('task detail shows readable errors and positional session names instead of raw identifiers',async()=>{
+ const m=mount(async method=>{if(method==='tasks.cancel')throw Error('stale_task');if(method==='tasks.continue')throw Error('weird_internal_code');return task()})
+ m.view.update(task({session_ids:['thread-abc','thread-def'],artifact_refs:['/tmp/work/out/report.md']}))
+ const labels=m.find('执行器会话').children.map(option=>option.textContent);assert.deepEqual(labels,['会话 1','会话 2']);assert.equal(m.find('执行器会话').children[0].title,'thread-abc')
+ assert.ok(m.all().some(n=>n.textContent==='report.md'));assert.equal(m.all().some(n=>n.textContent==='/tmp/work/out/report.md'),false)
+ await m.find('停止任务').listeners.click();assert.ok(m.all().some(n=>n.textContent==='任务已在别处更新，已刷新，请重试'))
+ assert.equal(m.all().some(n=>n.textContent==='stale_task'),false)
 })

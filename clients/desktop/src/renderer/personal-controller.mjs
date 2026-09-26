@@ -43,11 +43,14 @@ export class PersonalController {
   async changePresentation(mode,{activate=true,request,reconcileOnly=false}={}){
     if(!['background','workbench','orb'].includes(mode))throw new Error('无效的显示模式')
     if(this.presentationPending&&mode!=='background')throw new Error('正在切换模式，请稍候')
+    // A fresh return to the workbench retires the last handback notice; reconciling an earlier exit may post a new one.
+    if(!request&&mode==='workbench'&&!this.presentationPending)this.taskNotice=''
     if(!request&&!this.presentationPending&&mode!=='background'){const outstanding=[...this.presentationRequests.values()];for(const prior of outstanding)if(prior.mode!==mode)await this.setPresentation(prior.mode,{activate:false,request:prior})}
     request??=[...this.presentationRequests.values()].findLast(value=>value.mode===mode)??{mode,request_id:crypto.randomUUID()}
     this.presentationRequests.set(request.request_id,request)
     const sequence=++this.presentationSequence
-    if(!reconcileOnly)this.desiredPresentation=mode;this.presentationPending=true;if(mode!=='workbench')this.taskNotice='交还状态待确认，草稿已保留';this.presentationReady=false;this.changed()
+    if(!reconcileOnly)this.desiredPresentation=mode;this.presentationPending=true;// Only a client that may hold a task has anything to hand back.
+    if(mode!=='workbench'&&this.snapshot?.tasks?.some(task=>task.controller?.kind==='user'))this.taskNotice='交还状态待确认，草稿已保留';this.presentationReady=false;this.changed()
     try{
       const local=mode==='background'?this.applyMode(mode,{activate:false}):null
       if(!this.connected){if(local)await local;else await this.applyMode(mode,{activate});this.presentationReady=false;return}
