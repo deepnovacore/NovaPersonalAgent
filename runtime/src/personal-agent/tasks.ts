@@ -60,7 +60,9 @@ export class TaskService{
   this.#liveInputs.add(request)
   try{
   if(grant)try{status=await send(grant)}catch{status='unknown'}
-  await this.#mutate(next=>{next.effects[request]={...next.effects[request]!,hash:body,status};next.events.push({seq:++next.event_seq,task_id:fence.task_id,session_id:session,kind:'control',text:'Input delivery: '+status,refs:[]})})
+  await this.#mutate(next=>{next.effects[request]={...next.effects[request]!,hash:body,status};next.events.push({seq:++next.event_seq,task_id:fence.task_id,session_id:session,kind:'control',text:'Input delivery: '+status,refs:[]})
+   // A handback can land while the send is in flight; the executor still got the message, so say so in the activity feed.
+   const now=next.tasks.find(task=>task.id===fence.task_id);if(status==='accepted'&&now&&now.control_revision!==fence.control_revision)next.events.push({seq:++next.event_seq,task_id:fence.task_id,session_id:session,kind:'control',text:JSON.stringify({operation:'input_before_handback',control_revision:now.control_revision}),refs:[]})})
   return status
   }finally{this.#liveInputs.delete(request)}
  }

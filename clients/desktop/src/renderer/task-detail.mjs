@@ -21,7 +21,7 @@ function publicEventSummary(event){
    if(value.kind==='correct'&&typeof value.instruction==='string')return t('需要修正：{0}',value.instruction)
    if(value.kind==='wait'&&typeof value.reason==='string')return t('等待处理：{0}',taskWaitingLabel(value.reason))
   }
-  const label={takeover:'已接管任务',return:'已交还 Nova',continue:'已继续任务',cancel:'任务已停止',goal_revised:'任务目标已更新',controller_changed:'任务控制已更新'}[value.operation]
+  const label={takeover:'已接管任务',return:'已交还 Nova',continue:'已继续任务',cancel:'任务已停止',reconcile:'已核对执行结果',input_before_handback:'交还前已发送的消息已送达执行器',goal_revised:'任务目标已更新',controller_changed:'任务控制已更新'}[value.operation]
   return label?t(label):null
  }catch{return null}
 }

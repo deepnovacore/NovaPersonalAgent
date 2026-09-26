@@ -157,3 +157,7 @@ test('verified criteria show which kind of evidence proved each one',()=>{
  const m=mount();m.view.update(task({phase:'completed',acceptance:['Bug fixed','Docs updated'],criteria_evidence:[{index:0,evidence_refs:['task-work:w1','task-work:w2']},{index:1,evidence_refs:['task-delivery:r']}]}))
  const items=m.all().filter(n=>n.tagName==='LI');assert.equal(items[0].children[0].textContent,' · 依据：执行结果');assert.equal(items[0].children[0].title,'task-work:w1\ntask-work:w2');assert.equal(items[1].children[0].textContent,' · 依据：Nova 交付')
 })
+test('a message delivered after handback and a user reconciliation read as plain activity',()=>{
+ const m=mount();m.view.update(task({events:{items:[{seq:1,kind:'control',text:JSON.stringify({operation:'input_before_handback',control_revision:2})},{seq:2,kind:'control',text:JSON.stringify({operation:'reconcile',resolution:'done'})}],next:2}}))
+ assert.ok(m.all().some(n=>n.textContent==='交还前已发送的消息已送达执行器'));assert.ok(m.all().some(n=>n.textContent==='已核对执行结果'))
+})

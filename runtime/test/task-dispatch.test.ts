@@ -655,3 +655,22 @@ test('a selected Todo stays linkable after a confirmation turn and expires after
   assert.equal(host.tasks.list().some(task=>task.todo_ref?.id===expired.id),false,'a stale selection is not linked after it expires')
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+test('an input the executor accepted while control was handed back is labelled as sent before handback',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-input-late-'))
+ const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
+ try{
+  const task=await tasks.delegate('delegate',{conversation_id:'c',goal:'Goal',acceptance:[],origin_ref:'conversation:1'})
+  const fence={task_id:task.id,control_revision:0,goal_revision:0},actor={kind:'user' as const,client_id:'client'}
+  await tasks.bindWork(fence,'work','session');await tasks.controlClient('take',fence,'client','takeover');fence.control_revision=1
+  let release!:()=>void,entered!:()=>void
+  const waiting=new Promise<void>(resolve=>{entered=resolve}),gate=new Promise<void>(resolve=>{release=resolve})
+  const pending=tasks.input('late',fence,actor,'session','written already',async()=>{entered();await gate;return 'accepted'})
+  await waiting;await tasks.returnClientTasks('mode-exit','client');release()
+  assert.equal(await pending,'accepted')
+  const late=tasks.events(task.id,0).items.filter(event=>event.kind==='control'&&event.text.includes('input_before_handback'))
+  assert.equal(late.length,1)
+  await tasks.controlClient('retake',{...fence,control_revision:2},'client','takeover')
+  assert.equal(await tasks.input('prompt',{...fence,control_revision:3},actor,'session','in fence',async()=>'accepted'),'accepted')
+  assert.equal(tasks.events(task.id,0).items.filter(event=>event.text.includes('input_before_handback')).length,1,'in-fence sends are not labelled')
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})

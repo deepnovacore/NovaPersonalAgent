@@ -28,6 +28,8 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "已交还 Nova": "Returned to Nova",
   "已继续任务": "Task continued",
   "任务已停止": "Task stopped",
+  "已核对执行结果": "Execution result checked",
+  "交还前已发送的消息已送达执行器": "A message sent before handback reached the executor",
   "任务目标已更新": "Task goal updated",
   "任务控制已更新": "Task control updated",
   "公开回执与依据": "Public receipt and evidence",
