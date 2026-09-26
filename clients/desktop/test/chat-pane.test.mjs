@@ -88,6 +88,9 @@ test('durable cards browse a persistent central detail through snapshots, execut
  const m=mount(),task={id:'t1',goal:'Task one',conversation_id:'c',phase:'running',controller:{kind:'nova'},control_revision:0,goal_revision:0,session_ids:['s1'],events:{items:[]},capabilities:{input:true},viewer:{client_id:'a',can_takeover:true}}
  m.view.receive(feedState(1,'c',{feed:[],tasks:[task,{...task,id:'t2',goal:'Task two'}],conversations:{selected_id:'c',items:[{id:'c',title:'C'}],messages:[]}}))
  const cards=m.all().filter(n=>n.className==='task-card');assert.equal(cards.length,2)
+ assert.equal(cards[0].textContent,'Task one · 进行中 · Nova 在推进')
+ m.view.receive(feedState(2,'c',{feed:[],tasks:[{...task,phase:'waiting',waiting_reason:'correction_limit',acceptance:['Tests pass','Docs updated']},{...task,id:'t2',goal:'Task two'}],conversations:{selected_id:'c',items:[{id:'c',title:'C'}],messages:[]}}))
+ assert.equal(cards[0].textContent,'Task one · 等待处理 · 需要你：自动修正次数已用完，请决定是否继续 · 验收 2 条');assert.match(cards[0].title,/• Tests pass\n• Docs updated/)
  cards[0].focus();const opening=cards[0].listeners.click(),req=m.sent.findLast(f=>f.method==='tasks.get');m.view.receive({type:'personal.result',request_id:req.request_id,ok:true,data:task});await opening
  assert.equal(document.activeElement.textContent,'返回任务卡片');document.activeElement.dispatchEvent({type:'keydown',key:'Escape',bubbles:true,preventDefault(){}});assert.equal(document.activeElement,cards[0]);const reopened=cards[0].listeners.click(),again=m.sent.findLast(f=>f.method==='tasks.get');m.view.receive({type:'personal.result',request_id:again.request_id,ok:true,data:task});await reopened
  const draft=m.all().find(n=>n['aria-label']==='回复执行器'),panel=m.all().find(n=>n.className==='workbench-page');draft.value='keep';draft.focus();panel.scrollTop=88

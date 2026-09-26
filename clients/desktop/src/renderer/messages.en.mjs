@@ -965,6 +965,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "任务需要你处理": "This task needs you",
   "已核对：已执行": "Checked: it ran",
   "标记 Todo 完成": "Mark Todo done",
+  "验收 {0} 条": "{0} criteria",
   "需要你：{0}": "Needs you: {0}",
   "无需操作": "No action needed",
   "需要你处理": "Needs you",

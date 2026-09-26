@@ -162,7 +162,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
   renderSource()
   const tasks=(c.snapshot?.tasks??[]).filter(t=>t.conversation_id===c.selectedId)
   for(const [id,node]of cardNodes)if(!tasks.some(t=>t.id===id)){node.remove?.();cardNodes.delete(id)}
-  for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}node.title=task.goal;node.textContent=`${task.goal.length>60?task.goal.slice(0,59)+'…':task.goal} · ${t(TASK_PHASE_LABEL[task.phase]??task.phase)} · ${taskNextStep(task)}`}
+  for(const task of tasks){let node=cardNodes.get(task.id);if(!node){node=button('',()=>openTask?.(task.id),taskCards);node.className='task-card';cardNodes.set(task.id,node)}const criteria=task.acceptance??[];node.title=[task.goal,...(criteria.length?[t('验收条件'),...criteria.map(item=>'• '+item)]:[])].join('\n');node.textContent=`${task.goal.length>60?task.goal.slice(0,59)+'…':task.goal} · ${t(TASK_PHASE_LABEL[task.phase]??task.phase)} · ${taskNextStep(task)}${criteria.length?' · '+t('验收 {0} 条',criteria.length):''}`}
   if(draft.value!==c.draft)draft.value=c.draft
   const localDictation=c.dictationConversationId===c.selectedId&&Boolean(c.dictationId)
   draft.disabled=!c.presentationReady||!c.connected||!c.selectedId||!c.inputInstance||Boolean(c.submittedRequestId)||c.isVoiceConversation||localDictation||!c.capabilities.includes('text_input')

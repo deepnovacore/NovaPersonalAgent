@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath,rename,mkdir} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {PersonalAgentHost,announcedGoal} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import type {TaskRecord} from '../src/personal-agent/tasks.js'
 
@@ -248,4 +248,10 @@ test('reconcile refuses execution still in flight and a late settle cannot overw
   await f.host.tasks.settleEffect(effect,'unknown');assert.equal(f.host.tasks.pendingEffect(task.id),null,'a late settle keeps the user resolution')
   assert.ok(f.host.tasks.evidence(task.id).some(item=>item.ref==='task-attested:'+effect&&item.outcome==='ok'),'a confirmed step is verified, not re-dispatched')
  }finally{await f.close()}
+})
+
+test('the spoken completion line keeps only a short form of a long goal',()=>{
+ assert.equal(announcedGoal('修复登录页。然后补测试并更新文档'),'修复登录页')
+ const long=announcedGoal('把'.repeat(80));assert.equal([...long].length,40);assert.ok(long.endsWith('…'))
+ assert.equal(announcedGoal('Fix login'),'Fix login')
 })
