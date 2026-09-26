@@ -25,8 +25,9 @@ type StoredTask=z.infer<typeof recordSchema>
 const evidenceSchema=z.object({observations:z.array(eventSchema).max(32).default([]),observations_truncated:z.boolean().default(false),ref:id,task_id:id,goal_revision:z.number().int().nonnegative(),kind:z.enum(['work','delivery','input']),work_id:id.optional(),outcome:z.string(),content:z.string().max(131072),refs:z.array(id).max(128)}).strict()
 export type TaskEvidence=z.infer<typeof evidenceSchema>
 const pendingSchema=z.object({id,task_id:id,fence:taskFenceSchema,instruction:z.string().max(16000),write_started:z.boolean().optional(),status:z.enum(['pending','accepted','failed','unknown'])}).strict()
-const stateSchema=z.object({instruction_work_ids:z.array(id).default([]),outcomes:z.array(evidenceSchema).default([]),work_fences:z.record(z.string(),taskFenceSchema).default({}),pending_effects:z.record(z.string(),pendingSchema).default({}),replay_incomplete:z.array(id).default([]),events:z.array(eventSchema).default([]),event_keys:z.record(z.string(),z.object({seq:z.number().int().positive(),hash:z.string()})).default({}),event_seq:z.number().int().nonnegative().default(0),truncated:z.record(z.string(),z.number().int().nonnegative()).default({}),effects:z.record(z.string(),z.object({hash:z.string(),status:z.enum(['accepted','failed','unknown']),task_id:id.optional(),session_id:id.optional(),fence:taskFenceSchema.optional(),actor:actorSchema.optional(),text:z.string().max(16000).optional()}).strict()).default({}),tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict()),handbacks:z.record(z.string(),z.object({hash:z.string(),command:z.string().max(16384).optional(),result:z.array(recordSchema).optional()}).strict()).default({})}).strict()
+const stateSchema=z.object({instruction_work_ids:z.array(id).default([]),outcomes:z.array(evidenceSchema).default([]),work_fences:z.record(z.string(),taskFenceSchema).default({}),pending_effects:z.record(z.string(),pendingSchema).default({}),replay_incomplete:z.array(id).default([]),events:z.array(eventSchema).default([]),event_keys:z.record(z.string(),z.object({seq:z.number().int().positive(),hash:z.string(),task_id:id.optional()}).strict()).default({}),event_seq:z.number().int().nonnegative().default(0),truncated:z.record(z.string(),z.number().int().nonnegative()).default({}),effects:z.record(z.string(),z.object({hash:z.string(),status:z.enum(['accepted','failed','unknown']),task_id:id.optional(),session_id:id.optional(),fence:taskFenceSchema.optional(),actor:actorSchema.optional(),text:z.string().max(16000).optional()}).strict()).default({}),tasks:z.array(recordSchema),receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id,result:recordSchema.optional()}).strict()),handbacks:z.record(z.string(),z.object({hash:z.string(),command:z.string().max(16384).optional(),result:z.array(recordSchema).optional()}).strict()).default({})}).strict()
 type TaskState=z.infer<typeof stateSchema>
+const RETAINED_FINISHED_TASKS=200,RETAINED_HANDBACKS=256
 const empty=():TaskState=>({instruction_work_ids:[],outcomes:[],work_fences:{},pending_effects:{},replay_incomplete:[],events:[],event_keys:{},event_seq:0,truncated:{},tasks:[],receipts:{},handbacks:{},effects:{}})
 const hash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex')
 const sameGoal=(task:Pick<TaskInput,'goal'|'acceptance'>,goal:string,acceptance:readonly string[])=>task.goal===goal&&task.acceptance.length===acceptance.length&&task.acceptance.every((criterion,index)=>criterion===acceptance[index])
@@ -77,7 +78,7 @@ export class TaskService{
    if(parsed.session_id&&!task.session_ids.includes(parsed.session_id))throw Error('session_not_found')
    const body=hash(parsed),prior=next.event_keys[key]
    if(prior){if(prior.hash!==body)throw Error('event_conflict');return {...parsed,seq:prior.seq} as TaskEvent}
-   const item={...parsed,seq:++next.event_seq};next.events.push(item);next.event_keys[key]={seq:item.seq,hash:body}
+   const item={...parsed,seq:++next.event_seq};next.events.push(item);next.event_keys[key]={seq:item.seq,hash:body,task_id:parsed.task_id}
    for(const ref of item.refs)if(!task.artifact_refs.includes(ref))task.artifact_refs.push(ref)
    return structuredClone(item) as TaskEvent
   })
@@ -222,6 +223,25 @@ export class TaskService{
  }
  #assert(task:StoredTask,fence:TaskFence,actor:TaskActor):void{this.#assertFence(task,fence);if(JSON.stringify(task.controller)!==JSON.stringify(actor))throw Error('not_controller')}
  #assertFence(task:StoredTask,fence:TaskFence):void{if(task.control_revision!==fence.control_revision||task.goal_revision!==fence.goal_revision)throw Error('stale_task')}
+ /** Finished tasks beyond the newest RETAINED_FINISHED_TASKS leave the store with everything keyed to them; unresolved ones stay. */
+ #pruneRetired(next:TaskState):void{
+  const unresolved=(taskId:string)=>Object.values(next.pending_effects).some(effect=>effect.task_id===taskId&&(effect.status==='pending'||effect.status==='unknown'))||Object.values(next.effects).some(effect=>effect.task_id===taskId&&effect.status==='unknown')
+  const finished=next.tasks.filter(task=>(task.phase==='completed'||task.phase==='cancelled')&&!task.pending_delivery&&!task.waiting_reason&&!unresolved(task.id))
+  if(finished.length>RETAINED_FINISHED_TASKS){
+   const last=new Map<string,number>();for(const event of next.events)last.set(event.task_id,event.seq)
+   const retired=new Set(finished.map((task,order)=>({id:task.id,rank:last.get(task.id)??order})).sort((a,b)=>a.rank-b.rank).slice(0,finished.length-RETAINED_FINISHED_TASKS).map(task=>task.id))
+   const works=new Set(next.tasks.filter(task=>retired.has(task.id)).flatMap(task=>task.work_ids))
+   next.tasks=next.tasks.filter(task=>!retired.has(task.id));next.events=next.events.filter(event=>!retired.has(event.task_id));next.outcomes=next.outcomes.filter(outcome=>!retired.has(outcome.task_id))
+   next.instruction_work_ids=next.instruction_work_ids.filter(work=>!works.has(work));next.replay_incomplete=next.replay_incomplete.filter(taskId=>!retired.has(taskId))
+   for(const [key,value] of Object.entries(next.receipts))if(retired.has(value.task_id))delete next.receipts[key]
+   for(const [key,value] of Object.entries(next.effects))if(value.task_id&&retired.has(value.task_id))delete next.effects[key]
+   for(const [key,value] of Object.entries(next.pending_effects))if(retired.has(value.task_id))delete next.pending_effects[key]
+   for(const [key,value] of Object.entries(next.work_fences))if(retired.has(value.task_id)||works.has(key))delete next.work_fences[key]
+   for(const [key,value] of Object.entries(next.event_keys))if(value.task_id&&retired.has(value.task_id))delete next.event_keys[key]
+   for(const taskId of retired)delete next.truncated[taskId]
+  }
+  const handbacks=Object.keys(next.handbacks);for(const key of handbacks.slice(0,Math.max(0,handbacks.length-RETAINED_HANDBACKS)))delete next.handbacks[key]
+ }
  #pruneDisplay(next:TaskState):void{
   // ponytail: bounded linear retention; move display history to indexed storage if task volume grows.
   const counts=new Map<string,number>(),bytes=new Map<string,number>();let total=0
@@ -233,5 +253,5 @@ export class TaskService{
    const size=Buffer.byteLength(JSON.stringify(event));counts.set(event.task_id,counts.get(event.task_id)!-1);bytes.set(event.task_id,bytes.get(event.task_id)!-size);total-=size;next.truncated[event.task_id]=Math.max(next.truncated[event.task_id]??0,event.seq);return false
   })
  }
- #mutate<T>(change:(next:TaskState)=>Promise<T>|T):Promise<T>{const run=this.#tail.then(async()=>{const next=structuredClone(this.#state),result=await change(next);for(const taskId of this.#incompleteReplay)if(!next.replay_incomplete.includes(taskId))next.replay_incomplete.push(taskId);this.#pruneDisplay(next);await this.#store.write(next);this.#state=next;this.changed();return result});this.#tail=run.catch(()=>{/* keep mutation queue available */});return run}
+ #mutate<T>(change:(next:TaskState)=>Promise<T>|T):Promise<T>{const run=this.#tail.then(async()=>{const next=structuredClone(this.#state),result=await change(next);for(const taskId of this.#incompleteReplay)if(!next.replay_incomplete.includes(taskId))next.replay_incomplete.push(taskId);this.#pruneRetired(next);this.#pruneDisplay(next);await this.#store.write(next);this.#state=next;this.changed();return result});this.#tail=run.catch(()=>{/* keep mutation queue available */});return run}
 }

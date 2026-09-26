@@ -674,3 +674,23 @@ test('an input the executor accepted while control was handed back is labelled a
   assert.equal(tasks.events(task.id,0).items.filter(event=>event.text.includes('input_before_handback')).length,1,'in-fence sends are not labelled')
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })
+test('finished tasks beyond the retention cap leave the store with their receipts, while unresolved ones stay',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-retention-'))
+ const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
+ try{
+  const fence=(taskId:string)=>({task_id:taskId,control_revision:0,goal_revision:0})
+  const unresolved=await tasks.delegate('unresolved',{conversation_id:'c',goal:'Held',acceptance:[],origin_ref:'conversation:0'})
+  await tasks.bindWork(fence(unresolved.id),'held-work','held-session');await tasks.controlClient('take',fence(unresolved.id),'client','takeover')
+  assert.equal(await tasks.input('held-input',{...fence(unresolved.id),control_revision:1},{kind:'user',client_id:'client'},'held-session','hi',async()=>'unknown'),'unknown')
+  await tasks.cancel('held-cancel',{...fence(unresolved.id),control_revision:1},{kind:'user',client_id:'client'})
+  const ids:string[]=[]
+  for(let index=0;index<203;index++){const task=await tasks.delegate('d'+index,{conversation_id:'c',goal:'Goal '+index,acceptance:[],origin_ref:'conversation:'+index});ids.push(task.id);await tasks.appendEvent({task_id:task.id,kind:'message',sender:'nova',text:'note',refs:[]},'note');await tasks.cancel('c'+index,fence(task.id),{kind:'nova'})}
+  const kept=new Set(tasks.list().map(task=>task.id))
+  assert.ok(!kept.has(ids[0]!)&&!kept.has(ids[2]!),'oldest finished tasks are retired');assert.ok(kept.has(ids[3]!)&&kept.has(ids[202]!))
+  assert.ok(kept.has(unresolved.id),'a task with an unknown effect is never retired')
+  await tasks.close();const restored=new TaskService(tasks.path);await restored.open()
+  assert.equal(restored.list().length,201);assert.throws(()=>restored.get(ids[0]!),/task_not_found/)
+  const retried=await restored.delegate('d203',{conversation_id:'c',goal:'Fresh',acceptance:[],origin_ref:'conversation:203'});assert.equal(restored.get(retried.id).goal,'Fresh')
+  await restored.close()
+ }finally{await rm(dir,{recursive:true,force:true})}
+})
