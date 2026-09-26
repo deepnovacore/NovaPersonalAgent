@@ -337,7 +337,7 @@ function hasBoundCheck(task:TaskRecord,evidence:TaskEvidence):boolean {
     ||!task.work_ids.includes(evidence.work_id))return false
   return evidence.observations.some(event=>{
     if(event.task_id!==task.id||event.work_id!==evidence.work_id||!event.session_id
-      ||!task.session_ids.includes(event.session_id)||!event.thread_id||!event.turn_id||!event.item_id
+      ||!task.session_ids.includes(event.session_id)||task.works?.some(work=>work.work_id===evidence.work_id&&work.session_id!==undefined&&work.session_id!==event.session_id)||!event.thread_id||!event.turn_id||!event.item_id
       ||event.kind!=='tool'||event.stage!=='completed'||event.text_truncated)return false
     let check:Record<string,unknown>
     try{check=JSON.parse(event.text) as Record<string,unknown>}catch{return false}

@@ -161,3 +161,7 @@ test('a message delivered after handback and a user reconciliation read as plain
  const m=mount();m.view.update(task({events:{items:[{seq:1,kind:'control',text:JSON.stringify({operation:'input_before_handback',control_revision:2})},{seq:2,kind:'control',text:JSON.stringify({operation:'reconcile',resolution:'done'})}],next:2}}))
  assert.ok(m.all().some(n=>n.textContent==='交还前已发送的消息已送达执行器'));assert.ok(m.all().some(n=>n.textContent==='已核对执行结果'))
 })
+test('sessions name their executor, the primary one is marked default and preselected',()=>{
+ const m=mount();m.view.update(task({session_ids:['s1','s2'],primary_session_id:'s2',works:[{work_id:'w1',executor:'codex',session_id:'s1'},{work_id:'w2',executor:'midscene',session_id:'s2'}]}))
+ const select=m.find('执行器会话');assert.deepEqual(select.children.map(option=>option.textContent),['Codex 会话 1','Midscene 会话 2（默认）']);assert.equal(select.value,'s2')
+})

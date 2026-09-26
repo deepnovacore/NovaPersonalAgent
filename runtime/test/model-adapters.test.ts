@@ -418,3 +418,15 @@ test('a coding task without criteria completes on a bound check, and wrapped no-
  assert.equal(await verdict('env'),'wait')
  assert.equal(await verdict("/bin/zsh -lc 'cd app && ls'"),'wait')
 })
+
+test('a check observed in another session of the same task does not prove a work bound to a different session',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-work-session-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Fix and test',acceptance:[],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await tasks.bindWork(fence,'work','session-a');await tasks.bindWork(fence,'other','session-b')
+  await tasks.appendEvent({task_id:task.id,work_id:'work',session_id:'session-b',thread_id:'thread',turn_id:'turn',kind:'tool',stage:'completed',refs:[],item_id:'check',text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'ok',exit_code:0})},'check')
+  await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'Done'})
+  const ref=tasks.evidence(task.id)[0]!.ref
+  assert.equal((await new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({kind:'complete',evidence_refs:[ref]})),model:'test',proactivityPreset:'balanced'}).evaluateTask(tasks.get(task.id),tasks.evidence(task.id),new AbortController().signal)).kind,'wait')
+ }finally{await rm(dir,{recursive:true,force:true})}
+})

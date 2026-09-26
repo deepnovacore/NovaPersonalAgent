@@ -200,8 +200,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    cancel:workId=>{core.runtime.cancelPendingDispatch(workId);adapter?.taskPort?.cancelTask(workId)},
    dispatch:async(grant,instruction,sessionId)=>{
     try{options.host.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}
-    const sessions=options.host.tasks.get(grant.fence.task_id).session_ids
-    const target=sessionId??(sessions.length===1?sessions[0]:undefined)
+    const bound=options.host.tasks.get(grant.fence.task_id),sessions=bound.session_ids
+    // Continue where the task already runs; switching sessions has to be explicit.
+    const sameExecutor=(session:string)=>!bound.execution_route||(bound.works??[]).some(work=>work.session_id===session&&work.executor===bound.execution_route)
+    const target=sessionId??(bound.primary_session_id&&sessions.includes(bound.primary_session_id)&&sameExecutor(bound.primary_session_id)?bound.primary_session_id:sessions.length===1&&sameExecutor(sessions[0]!)?sessions[0]:undefined)
     if(target){const result=await dispatchTarget(grant,target,instruction);if(!result.accepted)throw new TaskExecutionRejected('executor_admission_refused');return result}
     const task=options.host.tasks.get(grant.fence.task_id)
     if(task.execution_route&&task.execution_route!=='nova'){

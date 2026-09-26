@@ -694,3 +694,21 @@ test('finished tasks beyond the retention cap leave the store with their receipt
   await restored.close()
  }finally{await rm(dir,{recursive:true,force:true})}
 })
+test('each work records its executor and one session; the first session becomes primary and follows the session when it moves',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-works-'))
+ const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
+ try{
+  const task=await tasks.delegate('a',{conversation_id:'c',goal:'A',acceptance:[],origin_ref:'conversation:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await tasks.setRoute(fence,'codex');await tasks.bindWork(fence,'w1');await tasks.bindWork(fence,'w1','s1');await tasks.bindWork(fence,'w2','s2')
+  await tasks.setRoute(fence,'midscene');await tasks.bindWork(fence,'w3','s3')
+  const bound=tasks.get(task.id)
+  assert.deepEqual(bound.works,[{work_id:'w1',executor:'codex',session_id:'s1'},{work_id:'w2',executor:'codex',session_id:'s2'},{work_id:'w3',executor:'midscene',session_id:'s3'}])
+  assert.equal(bound.primary_session_id,'s1')
+  await assert.rejects(tasks.bindWork(fence,'w1','s2'),/work_session_conflict/)
+  for(const work of ['w1','w2','w3'])await tasks.recordWorkOutcome(work,'ok',{worker:'test',final_message:'Done'})
+  await tasks.cancel('stop',fence,{kind:'nova'})
+  const other=await tasks.delegate('b',{conversation_id:'c',goal:'B',acceptance:[],origin_ref:'conversation:2'})
+  await tasks.bindWork({task_id:other.id,control_revision:0,goal_revision:0},'w4','s1')
+  assert.equal(tasks.get(task.id).primary_session_id,undefined);assert.equal(tasks.get(other.id).primary_session_id,'s1')
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})

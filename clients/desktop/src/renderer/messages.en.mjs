@@ -997,6 +997,8 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "执行仍在进行，请等待结果后再核对": "Execution is still running. Wait for its result before checking.",
   "接管后由你直接给执行器发消息，Nova 暂停自动修正；交还后 Nova 继续推进。": "Taking over lets you message the executor directly and pauses Nova's automatic corrections. Hand back to let Nova continue.",
   "会话 {0}": "Session {0}",
+  "{0} 会话 {1}": "{0} session {1}",
+  "{0}（默认）": "{0} (default)",
   "任务已在别处更新，已刷新，请重试": "The task changed elsewhere. It has been refreshed; try again.",
   "该任务正由另一客户端控制": "Another client controls this task.",
   "任务已结束": "The task has ended.",
