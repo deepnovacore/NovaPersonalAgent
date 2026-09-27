@@ -1297,3 +1297,25 @@ test('the expanded workbench casts a native shadow and the resting orb does not'
  set(false);set(true);set(false)
  assert.deepEqual(shadow,[true,false,true])
 })
+
+test('keyboard activation wakes a sleeping orb and expands an awake one', async () => {
+  const source = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
+  const start = source.indexOf("orb.addEventListener('keydown',")
+  const body = source.slice(start, source.indexOf('\n})', start) + 3)
+  assert.match(source, /setAttribute\(orb, 'tabindex', '0'\)/)
+  const calls = []
+  let handler
+  const orb = {addEventListener: (_name, callback) => { handler = callback }}
+  const window = {novaAudioAgentDesktop: {wakeWord: {wake: () => calls.push('wake')}}}
+  const axes = {wakeState: 'sleeping'}
+  const personalView = {controller: {presentationMode: 'orb'}, expand: () => calls.push('expand')}
+  new Function('orb', 'axes', 'window', 'personalView', body)(orb, axes, window, personalView)
+  const press = (key, repeat = false) => { const event = {key, repeat, prevented: false, preventDefault() { this.prevented = true } }; handler(event); return event.prevented }
+  assert.equal(press('Enter'), true); assert.deepEqual(calls, ['wake'])
+  axes.wakeState = 'active'
+  assert.equal(press(' '), true); assert.deepEqual(calls, ['wake', 'expand'])
+  assert.equal(press('Enter', true), false, 'a held key must not expand repeatedly')
+  assert.equal(press('a'), false)
+  personalView.controller.presentationMode = 'workbench'; press('Enter')
+  assert.deepEqual(calls, ['wake', 'expand'])
+})

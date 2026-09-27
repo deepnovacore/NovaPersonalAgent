@@ -343,8 +343,9 @@ function render() {
   const setupAction = !sleeping && state.statusAction === 'setup'
   stateLabel.dataset.action = setupAction ? 'setup' : ''
   setAttribute(stateLabel, 'tabindex', setupAction ? '0' : '-1')
-  setAttribute(orb, 'role', sleeping ? 'button' : 'img')
-  setAttribute(orb, 'tabindex', sleeping ? '0' : '-1')
+  // A sleeping orb activates to wake and an awake one to expand, so the orb stays keyboard-reachable either way.
+  setAttribute(orb, 'role', 'button')
+  setAttribute(orb, 'tabindex', '0')
   setText(codexSummary, state.projectLabel)
   setAttribute(codexSummary, 'title', state.projectLabel)
   setText(codexOperation, state.confirmationOperation)
@@ -384,7 +385,7 @@ function render() {
   confirmationAllowSession.disabled = !decisionEnabled
   confirmationCancel.disabled = !decisionEnabled
   setText(aecLabel, state.aecLabel)
-  setAttribute(orb, 'aria-label', sleeping ? t("已休眠，点击唤醒") : `${state.label}；${state.accessibleCodexLabel}`)
+  setAttribute(orb, 'aria-label', sleeping ? t("已休眠，点击唤醒") : `${state.label}；${state.accessibleCodexLabel}；${t("双击或按 Enter 展开工作台")}`)
   orb.dataset.captureActive = String(axes.activated)
   muteToggle.disabled = !axes.activated
   muteToggle.setAttribute('aria-pressed', String(axes.muted))
@@ -1395,10 +1396,10 @@ function finishDrag(cancelled = false) {
 }
 
 orb.addEventListener('keydown', event => {
-  if (axes.wakeState === 'sleeping' && ['Enter', ' '].includes(event.key)) {
-    event.preventDefault()
-    window.novaAudioAgentDesktop.wakeWord.wake()
-  }
+  if (!['Enter', ' '].includes(event.key) || event.repeat) return
+  event.preventDefault()
+  if (axes.wakeState === 'sleeping') window.novaAudioAgentDesktop.wakeWord.wake()
+  else if (personalView?.controller.presentationMode === 'orb') personalView.expand()
 })
 stateLabel.addEventListener('click', () => {
   if (stateLabel.dataset.action === 'setup') window.novaAudioAgentDesktop.setup.open()

@@ -262,6 +262,8 @@ body[data-opaque="1"] {
   transition: opacity 140ms ease;
 }
 
+#orb:focus-visible { outline: 2px solid #a6d6ff; outline-offset: 2px; }
+
 /* Keyboard focus (:focus-visible) keeps the rail open; plain click focus must
    not, or one click would pin the rail visible after the pointer leaves. */
 body:hover #orb-rail,
