@@ -18,7 +18,7 @@ Creating or switching projects requires confirmation. Recognition failure is not
 
 - **Workbench** is the desktop main window: an icon rail for Todos, Ideas, Goals, Feeds, Tasks and Profile beside a collapsible chat pane. See [Workbench](workbench.md).
 - **Tasks** delegate work with acceptance criteria you set; watch progress, take over to steer it directly, and hand it back to Nova. See [Tasks](tasks.md).
-- **Todos, Ideas and Goals** collect candidates Nova notices in conversation; you confirm, edit or skip each one before it is recorded.
+- **Todos, Ideas and Goals** collect what Nova notices in conversation: a todo you state explicitly is recorded right away and can be undone, while other candidates wait for you to confirm, edit or skip them.
 - **Profile** holds facts about you, including the personal memory view.
 - **Feeds** surfaces a news feed tuned to your interests.
 - Project pages show a recap card summarizing recent activity.

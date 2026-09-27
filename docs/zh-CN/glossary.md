@@ -50,7 +50,7 @@
 | Task | 由宿主持久跟踪的委派工作单元，带有目标与验收标准；与临时的 executor delegate 不同 |
 | Handback / takeover | 在 Nova 与用户之间转移 Task 的控制权：takeover 后用户可直接向执行器发消息，Nova 暂停自动修正；handback 后控制权交还给 Nova |
 | Acceptance criterion | Task 的目标必须满足的一条陈述，Nova 才能将其标记为完成；每条标准分别记录证据 |
-| Candidate | Nova 在对话中留意到、尚未确认的 Todo、Idea、Goal 或 Profile 候选内容，仅在用户确认后才会被记录 |
+| Candidate | Nova 在对话中留意到、尚未确认的 Todo、Idea、Goal 或 Profile 候选内容，在用户确认后记录；明确说出的待办会直接记下，可以撤销 |
 | Source | 个人记忆与建议可以引用的、已获授权的文档、账号或信息流 |
 | Connector | 通过用户授予的只读范围暴露某个 Source 的集成（例如 Google、macOS 日历、Apple Mail 或飞书） |
 
