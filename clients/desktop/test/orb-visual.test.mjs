@@ -1063,6 +1063,13 @@ test('the orb rail carries the mute toggle and leaves settings to the context me
   assert.match(fixture, /id="orb-rail"/)
 })
 
+test('the orb task summary only displaces the project label and steps aside for a confirmation', async () => {
+  const css = await readFile(new URL('../src/renderer/workbench.css', import.meta.url), 'utf8')
+  assert.match(css, /#shell:has\(\.personal-orb-task:not\(\[hidden\]\)\) #codex-label\[data-mode="project"\]\{display:none\}/)
+  assert.doesNotMatch(css, /personal-orb-task:not\(\[hidden\]\)\) #codex-label\{/)
+  assert.match(css, /#shell:has\(#codex-label\[data-mode="confirmation"\]\) \.personal-orb-task\{display:none\}/)
+})
+
 test('the stylesheet drops the gradient sphere but keeps the accessibility overrides', async () => {
   const css = await readFile(new URL('../src/renderer/index.css', import.meta.url), 'utf8')
 

@@ -1327,6 +1327,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       })
     }
     if(wasBackground)wakeWord?.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
+    // Sleep is an orb state: a workbench reached from a sleeping orb must hear its voice session, not the wake detector.
+    if(mode==='workbench'&&['sleeping','blocked'].includes(wakeWord?.state))wakeWord.wake({show:false})
     if(activate){mainWindow.show();mainWindow.focus();return shown}
   })
   ipcMain.handle('nova:personal:collapse', (event, value) => {

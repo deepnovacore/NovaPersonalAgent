@@ -459,3 +459,21 @@ test('late sleeping audio after stop cannot reach a terminated wake worker', () 
   assert.equal(s.runtime.status, 'off')
   assert.equal(s.runtime.pending, false)
 })
+
+test('a workbench reached from a sleeping orb wakes the detector without re-showing, while the orb stays asleep', async () => {
+  const source = readFileSync(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const start = source.indexOf("ipcMain.handle('nova:personal:presentation',")
+  const body = source.slice(start, source.indexOf('\n  })', start) + 5)
+  for (const [mode, expected] of [['orb', 'sleeping'], ['workbench', 'active']]) {
+    const s = setup()
+    s.report()
+    assert.equal(s.runtime.sleep('bubble'), true)
+    const shown = s.shown(), sender = {}
+    let handler
+    new Function('ipcMain', 'mainWindow', 'setPersonalCollapsed', 'wakeWord', `let presentationMode='orb';const settingsReady=false,settingsWriter=null,currentSettings={},acceptance=null,acceptanceWakeSettings=()=>({});${body}`)(
+      {handle: (_name, callback) => { handler = callback }}, {webContents: sender, isVisible: () => true, show() {}, focus() {}}, () => {}, s.runtime)
+    await handler({sender}, mode, false)
+    assert.equal(s.runtime.state, expected, mode)
+    assert.equal(s.shown(), shown, 'an unactivated presentation change must not raise the window')
+  }
+})
