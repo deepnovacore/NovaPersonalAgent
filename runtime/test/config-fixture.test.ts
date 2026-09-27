@@ -70,7 +70,7 @@ function evaluateConfigFixture(fixture: ConfigCase): unknown {
 
 function loadPythonOwnedFixtureSettings(environment: NodeJS.ProcessEnv): Settings {
   // Pin the retired Python default; Nova now uses Plus for progress/coordinator reliability.
-  environment = {SURROGATE_MODEL: 'qwen-flash', ...environment}
+  environment = {...environment, SUPPORT_MODEL: environment.SURROGATE_MODEL ?? 'qwen-flash'}
   const legacyProvider = stripLikePython(environment.REALTIME_PROVIDER ?? '')
   if (legacyProvider !== 'volcengine') return loadSettings(environment)
 
@@ -182,7 +182,7 @@ function projectSettings(settings: Settings): Readonly<Record<string, unknown>> 
     qwen_realtime_voice: settings.qwen_realtime_voice,
     realtime_provider: settings.pipeline_mode === 'integrated' ? 'qwen' : 'volcengine',
     suggestion_cooldown: settings.suggestion_cooldown,
-    surrogate_model: settings.surrogate_model,
+    surrogate_model: settings.support_model,
     tavily_api_key_present: secretPresent(settings.tavily_api_key),
     volcengine_ark_base_url: settings.volcengine_ark_base_url,
     volcengine_ark_model: settings.volcengine_ark_model,
@@ -238,5 +238,5 @@ function secretPresent(value: string | null): boolean {
 }
 
  test('Node defaults to Plus for progress and coordinator assessment', () => {
-  assert.equal(loadSettings({}).surrogate_model, 'qwen-plus')
+  assert.equal(loadSettings({}).support_model, 'qwen-plus')
 })

@@ -414,7 +414,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     // creates a fresh model turn that can accidentally replay an older acknowledgement.
     if (isMonitorPolicy(manifest.policy) && payload.phase === 'working') return
     if (payload.phase === 'working') {
-      if (this.ports.codingProgressNarration.viaSurrogate(coding, manifest.policy.progress_via_surrogate === true)) return
+      if (this.ports.codingProgressNarration.viaProactive(coding, manifest.policy.progress_via_surrogate === true)) return
       if (coding && this.ports.codingProgressNarration.mode === 'continuous' && summary === null) return
     }
 

@@ -77,7 +77,7 @@ export interface CancelContext {
   readonly workIds?: ReadonlySet<string>
   /** Host-resolved exact work id. When set, the adapter may cancel only that running work. */
   readonly targetWorkId?: string
-  /** Same `surrogate_model` as `intake.assess`; `null` when the model could not pick one of `running`. */
+  /** Same `support_model` as `intake.assess`; `null` when the model could not pick one of `running`. */
   readonly resolveCancelTarget?: CancelTargetResolver
   /** Re-checked after the model call, before any slot is aborted; `false` means the request was superseded. */
   readonly stillWanted?: () => boolean

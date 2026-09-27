@@ -47,16 +47,16 @@ test('empty memory and absent model stay available without model calls',async()=
   try {await host.open();await tick();assert.equal(calls,0);assert.equal(host.snapshot().memory.overview,null)} finally {await host.close();await rm(dir,{recursive:true,force:true})}
 })
 test('two-stage synthesis uses the existing model and preserves facts before grouping',async()=>{
-  const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
+  const {GatewayPersonalWriter}=await import('../src/model/personal-writer.js')
   const requests:CompleteRequest[]=[]
   const facts={facts:[{entry_id:entry.id,version:entry.version,fact:'Nova supports voice conversations.'}]}
   const grouping={summary:overview().summary,sections:[{title:'Nova',summary:'Nova supports voice conversations.',keywords:['voice'],refs:[{entry_id:'one',version:1}]}]}
   const outputs=[facts,grouping]
   const gateway={complete:(request:CompleteRequest)=>{requests.push(request);return Promise.resolve({text:JSON.stringify(outputs.shift())})}} as unknown as ModelGateway
-  const surrogate=new GatewaySurrogate({gateway,model:'existing-model',proactivityPreset:'balanced'})
+  const writer=new GatewayPersonalWriter({gateway,model:'existing-model'})
   const signal=new AbortController().signal
-  assert.equal(await surrogate.summarizeMemory([],signal),null);assert.equal(requests.length,0)
-  assert.deepEqual(await surrogate.summarizeMemory([entry],signal),{...overview(),sections:[{...overview().sections[0],summary:facts.facts[0]!.fact}]});assert.equal(requests.length,2)
+  assert.equal(await writer.summarizeMemory([],signal),null);assert.equal(requests.length,0)
+  assert.deepEqual(await writer.summarizeMemory([entry],signal),{...overview(),sections:[{...overview().sections[0],summary:facts.facts[0]!.fact}]});assert.equal(requests.length,2)
   for(const request of requests){assert.equal(request.model,'existing-model');assert.equal(request.signal,signal)}
   const first=JSON.parse(requests[0]!.prompt) as {entries:unknown;output_schema:unknown}
   const second=JSON.parse(requests[1]!.prompt) as {facts:unknown;entries?:unknown;output_schema:unknown}
@@ -88,47 +88,47 @@ test('source observation refreshes memory while discovery is disabled and eviden
 })
 
 test('missing, duplicate or wrong-version extracted facts fail before grouping',async()=>{
- const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
+ const {GatewayPersonalWriter}=await import('../src/model/personal-writer.js')
  const second={...entry,id:'two',topic:'EEG',content:'An EEG demonstration proposal.'}
  const one={entry_id:'one',version:1,fact:'Nova supports voice conversations.'}
  const two={entry_id:'two',version:1,fact:'EEG is a demonstration proposal.'}
  for(const facts of [[one],[one,one],[one,{...two,version:9}],[one,{...two,entry_id:'outside'}]]){
   let calls=0
   const gateway={complete:()=>{calls++;return Promise.resolve({text:JSON.stringify({facts})})}} as unknown as ModelGateway
-  const surrogate=new GatewaySurrogate({gateway,model:'existing-model',proactivityPreset:'balanced'})
-  assert.equal(await surrogate.summarizeMemory([entry,second],new AbortController().signal),null)
+  const writer=new GatewayPersonalWriter({gateway,model:'existing-model'})
+  assert.equal(await writer.summarizeMemory([entry,second],new AbortController().signal),null)
   assert.equal(calls,1)
  }
 })
 test('grouping with missing or wrong references falls back after exactly two calls',async()=>{
- const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
+ const {GatewayPersonalWriter}=await import('../src/model/personal-writer.js')
  const second={...entry,id:'two',topic:'EEG',content:'An EEG demonstration proposal.'}
  const facts={facts:[{entry_id:'one',version:1,fact:'Nova supports voice conversations.'},{entry_id:'two',version:1,fact:'EEG is a demonstration proposal.'}]}
  for(const result of [overview(),overview(9)].map(value=>({...value,sections:value.sections.map(section=>({title:section.title,keywords:section.keywords,refs:section.refs}))}))){
   let calls=0
   const gateway={complete:()=>Promise.resolve({text:JSON.stringify(++calls===1?facts:result)})} as unknown as ModelGateway
-  const surrogate=new GatewaySurrogate({gateway,model:'existing-model',proactivityPreset:'balanced'})
-  assert.equal(await surrogate.summarizeMemory([entry,second],new AbortController().signal),null)
+  const writer=new GatewayPersonalWriter({gateway,model:'existing-model'})
+  assert.equal(await writer.summarizeMemory([entry,second],new AbortController().signal),null)
   assert.equal(calls,2)
  }
 })
 test('cancellation between extraction and grouping does not start another request',async()=>{
- const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
+ const {GatewayPersonalWriter}=await import('../src/model/personal-writer.js')
  const controller=new AbortController();let calls=0
  const gateway={complete:()=>{calls++;controller.abort();return Promise.resolve({text:JSON.stringify({facts:[{entry_id:'one',version:1,fact:'Nova supports voice conversations.'}]})})}} as unknown as ModelGateway
- const surrogate=new GatewaySurrogate({gateway,model:'existing-model',proactivityPreset:'balanced'})
- assert.equal(await surrogate.summarizeMemory([entry],controller.signal),null);assert.equal(calls,1)
+ const writer=new GatewayPersonalWriter({gateway,model:'existing-model'})
+ assert.equal(await writer.summarizeMemory([entry],controller.signal),null);assert.equal(calls,1)
 })
 test('grouping keeps a concise summary without stitching raw facts into the card',async()=>{
- const {GatewaySurrogate}=await import('../src/model/model-adapters.js')
+ const {GatewayPersonalWriter}=await import('../src/model/personal-writer.js')
  const second={...entry,id:'two',topic:'EEG',content:'An EEG demonstration proposal.'}
  for(const long of [false,true]){
   const facts={facts:[{entry_id:'one',version:1,fact:long?'A'.repeat(300):'Nova supports voice conversations.'},{entry_id:'two',version:1,fact:long?'B'.repeat(300):'EEG is a demonstration proposal.'}]}
   const grouping={summary:'Two documented topics.',sections:[{title:'Topics',summary:'The records mention voice conversation and an EEG proposal.',keywords:[],refs:[{entry_id:'one',version:1},{entry_id:'two',version:1}]}]}
   const outputs=[facts,grouping]
   const gateway={complete:()=>Promise.resolve({text:JSON.stringify(outputs.shift())})} as unknown as ModelGateway
-  const surrogate=new GatewaySurrogate({gateway,model:'existing-model',proactivityPreset:'balanced'})
-  const result=await surrogate.summarizeMemory([entry,second],new AbortController().signal)
+  const writer=new GatewayPersonalWriter({gateway,model:'existing-model'})
+  const result=await writer.summarizeMemory([entry,second],new AbortController().signal)
   assert.equal(result?.sections[0]?.summary,'The records mention voice conversation and an EEG proposal.')
  }
 })

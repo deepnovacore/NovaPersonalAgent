@@ -52,3 +52,11 @@ DASHSCOPE_API_KEY=你的百炼密钥
 选择远程记忆或关闭记忆时，移除本地 provider 配置。远程记忆设置见[个人记忆](personal-memory.md)；手机连接见[iPhone 指南](iphone.md)。
 
 [返回上手指南](getting-started.md)
+
+### 辅助模型命名
+
+`SUPPORT_MODEL` 选择主动沟通、编码接入/取消目标判断、任务验收、个人记录提取和个人内容生成共用的辅助 LLM。这是模型选型，不是包揽所有功能的业务角色。`GatewayProactivity`、`GatewayTaskVerifier` 和 `GatewayPersonalWriter` 各自承担独立职责；理解和新闻复用已有工厂。Jev 判断、规划、压缩和视觉维持原有路由。
+
+请在环境配置中将 `SURROGATE_MODEL` 改为 `SUPPORT_MODEL`。旧变量不再读取，不提供兼容别名；只有新变量参与选型。原有 provider 默认值、级联模型与端点配对规则保持不变。
+
+TypeScript API 变化：`Settings.surrogate_model` 改为 `support_model`；原来的宽接口 `GatewaySurrogate` 由上述三个适配器替代。原 `watch()` 调用改为 `GatewayProactivity.select()`，其他功能迁移到各自模块。本次不切换 Jev，也不迁移事件协议；既有序列化 `surrogate` 标识和模型可见提示词保留历史拼写。

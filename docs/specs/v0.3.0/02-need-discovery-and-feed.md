@@ -31,7 +31,7 @@ Suggestion Pool、Host 与 Floor 是 Nova 的具体设计。
   （`fast_brain | surrogate | executor`）、`kind`（`question | notify | followup`）、`content`、
   `evidence_refs`、`condition_key`、`delivery_policy`（`once | while_condition_true`）、
   `cooldown_until`、`expires_at`、`status`（`pending | fired | withdrawn | expired`）。
-- Surrogate 输出契约（`runtime/src/core/ports.ts`、`runtime/src/model/model-adapters.ts`）：
+- Surrogate 输出契约（`runtime/src/core/ports.ts`、`runtime/src/model/proactivity.ts`）：
   `{speak, suggestion_id, progress_class, reason}`。主机只接受本次提供给它的 suggestion ID。
 - `runtime/src/model/prompting.ts` 的 `SURROGATE_SYSTEM`：Surrogate 不生成给用户听的话、不调用工具，
   只决定此刻是否值得开口、选桌上哪一条。coding progress 有专门的分类路径（`progress_class`）。

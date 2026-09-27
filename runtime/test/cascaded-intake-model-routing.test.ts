@@ -150,7 +150,7 @@ test('host and desktop text/voice children keep resolved support models paired a
         await realtime.stop()
         realtime = undefined
       }
-      assert.equal(configured.surrogate_model, 'qwen-plus', 'source settings remain unchanged')
+      assert.equal(configured.support_model, 'qwen-plus', 'source settings remain unchanged')
     } finally {
       globalThis.fetch = previous
       await realtime?.stop()

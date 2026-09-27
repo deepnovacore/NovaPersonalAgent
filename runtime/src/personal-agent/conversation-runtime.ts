@@ -1,7 +1,7 @@
 import {quarantineTaskResources} from '../executors/task-resources.js'
 import {access} from 'node:fs/promises'
 import {parseMemoryRef} from '../core/memory.js'
-import {GatewaySurrogate} from '../model/model-adapters.js'
+import {GatewayTaskVerifier} from '../model/task-verifier.js'
 import type {TaskFence} from './tasks.js'
 import {TaskExecutionRejected} from './task-loop.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
@@ -178,7 +178,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(!grant.stillWanted())return {accepted:false,delegate_id:null}
    return core.runtime.dispatchTaskExternal({executor:adapter.manifest.name,op:target.active?'steer':'run',origin_ref:grant.origin_ref,request:target.active?{instruction:text,project:target.project,session_id:target.session_id,work_id:target.work_id!}:{work_order:text,project:target.project,session_id:target.session_id,session:'latest'}},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant,receipt)
   }
-  const taskVerifier=core.personalAgentConfig?.surrogate??new GatewaySurrogate({gateway:core.gateway,model:options.settings.surrogate_model,proactivityPreset:options.settings.proactivity_preset})
+  const taskVerifier=core.personalAgentConfig?.taskVerifier??new GatewayTaskVerifier({gateway:core.gateway,model:options.settings.support_model})
   const detachTaskRuntime=options.host.attachTaskRuntime(conversation.id,conversation.generation,{
    recover:async task=>{
     const [channel,sequence]=parseMemoryRef(task.origin_ref);if(!core.runtime.memory.channels.get(channel)?.getBySeq(sequence))return 'task_origin_unavailable';

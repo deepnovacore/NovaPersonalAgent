@@ -276,21 +276,21 @@ test('StepFun support models default to Step 3.7 Flash while memory extraction s
   const base = {INTEGRATED_PROVIDER: 'stepfun', STEPFUN_API_KEY: 'step-secret',
     DASHSCOPE_API_KEY: 'support-secret', MEMORY_CONNECTION: 'local'}
   const step = loadSettings(base)
-  assert.deepEqual([step.surrogate_model, step.compressor_model, step.watch_model, step.planner_model],
+  assert.deepEqual([step.support_model, step.compressor_model, step.watch_model, step.planner_model],
     ['step-3.7-flash', 'step-3.7-flash', 'step-3.7-flash', 'step-3.7-flash'])
   // Extraction is sent through the DashScope embedding connection, so its model must stay there.
   assert.equal(step.fast_model, 'qwen3-vl-plus')
   const memory = requirePersonalMemory(step)
   assert.equal(memory?.connection === 'local' && memory.extractionModel, 'qwen3-vl-plus')
   assert.equal(memory?.connection === 'local' && memory.embedding.baseUrl, 'https://dashscope.aliyuncs.com/compatible-mode/v1')
-  const explicit = loadSettings({...base, SURROGATE_MODEL: 'qwen-plus',
+  const explicit = loadSettings({...base, SUPPORT_MODEL: 'qwen-plus',
     WATCH_MODEL: '', PLANNER_MODEL: ''})
-  assert.equal(explicit.surrogate_model, 'qwen-plus', 'an explicit model is never rewritten')
+  assert.equal(explicit.support_model, 'qwen-plus', 'an explicit model is never rewritten')
   assert.equal(explicit.watch_model, 'step-3.7-flash', 'empty watch would fall back to a DashScope model')
   assert.equal(explicit.planner_model, 'step-3.7-flash')
   const gateway = loadSettings({...base, MODEL_API_KEY: 'gateway-secret'})
-  assert.equal(gateway.surrogate_model, 'qwen-plus', 'a custom gateway keeps the generic defaults')
-  assert.equal(loadSettings({DASHSCOPE_API_KEY: 'qwen-secret'}).surrogate_model, 'qwen-plus')
+  assert.equal(gateway.support_model, 'qwen-plus', 'a custom gateway keeps the generic defaults')
+  assert.equal(loadSettings({DASHSCOPE_API_KEY: 'qwen-secret'}).support_model, 'qwen-plus')
 })
 
 test('Codex direct argv prefix is parsed only as a bounded JSON string array', () => {

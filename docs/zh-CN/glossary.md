@@ -9,7 +9,7 @@
 |---|---|
 | FastBrain | 面向用户的推理路径的历史名称；实时实现中这一角色由 FrontBrain 承担 |
 | FrontBrain | 语音链路上承担 FastBrain 职责的实时模型 |
-| Surrogate | 判断后台建议是否值得提醒用户；只选择建议池中的已有条目，不生成回复文字 |
+| Proactive | 主动沟通：发现有依据的建议并选择值得告知的信息；不执行任务，不控制话轮 |
 | Runtime spine | 运行时事件循环，按事件顺序更新状态并协调各项工作 |
 | Memory | 按通道记录观测、已接受的执行结果，以及绑定需求修订号的 intake 状态 |
 | Personal memory | 跨会话事实；默认使用本地 mem0，也可选用 VoiceMem 或远程资源；不具备执行权限 |
@@ -56,8 +56,8 @@
 5. 模型看到的是有界 ContextView，绝不是不受限的 memory。
 6. Delegate 的身份与操作必须和 progress、终态事件一致。
 7. 终态完成至多被接受一次。
-8. 用户等待的工作不依赖 Surrogate 来交付。
-9. 环境建议不能绕过 Surrogate 和 Floor。
+8. 用户等待的工作不依赖 Proactive 来交付。
+9. 环境建议不能绕过 Proactive 和 Floor。
 10. 外部文本和图片按证据处理，不按指令处理。
 11. 只有配置过的 manifest 才会成为面向模型的工具。
 12. 日志和配置错误中不含密钥值。

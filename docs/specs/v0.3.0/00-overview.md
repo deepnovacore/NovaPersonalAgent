@@ -134,7 +134,7 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
   status `pending | fired | withdrawn | expired`；`evidence_refs`、`expires_at`、`cooldown_until`、
   `delivery_policy`）→ Surrogate（`runtime/src/model/prompting.ts` 的 `SURROGATE_SYSTEM`，只选择不生成、
   不调用工具；输出契约 `speak / suggestion_id / progress_class / reason` 在 `runtime/src/core/ports.ts`
-  与 `runtime/src/model/model-adapters.ts`）→ `runtime/src/realtime/floor.ts` 仲裁 allow / preempt / defer。
+  与 `runtime/src/model/proactivity.ts`）→ `runtime/src/realtime/floor.ts` 仲裁 allow / preempt / defer。
   runtime 有黑板维护等内部定时器，但**没有用于需求发现的低频检查**；主动行为全部由执行器进度与
   观察事件触发。
 - **记忆**：`runtime/src/core/memory.ts`、`runtime/src/core/context-view.ts`（唯一面向模型的有界投影）、
