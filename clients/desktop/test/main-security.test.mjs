@@ -877,7 +877,17 @@ test('the mute toggle drops microphone input at both ingress points', async () =
   // Deactivation discards the session's mute, and the rail buttons are wired.
   assert.match(renderer, /axes\.muted = false/)
   assert.match(renderer, /muteToggle\.addEventListener\('click', \(\) => toggleMute\(\)\)/)
-  assert.match(renderer, /openSettingsButton\.addEventListener\('click', \(\) => window\.novaAudioAgentDesktop\.orbMenu\.openSettings\?\.\(\)\)/)
+  assert.doesNotMatch(renderer, /openSettingsButton/)
+  // Opening the orb's voice conversation keeps a sleeping orb asleep; only an explicit start wakes it.
+  assert.match(renderer, /start: async \(\{wake = true\} = \{\}\) => \{/)
+  assert.match(renderer, /if \(wake\) await window\.novaAudioAgentDesktop\.personal\.wake\(\)/)
+  // Sleep belongs to the orb: neither the idle timer nor Ctrl+L puts the workbench to sleep.
+  assert.match(renderer, /idle: personalView\?\.controller\.presentationMode === 'orb' && canAutoSleep\(/)
+  const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  assert.match(main, /function sleepOrb\(\) \{\n  if \(presentationMode === 'orb'\) wakeWord\?\.sleep\('bubble'\)/)
+  // Double-click is the orb's way back to the workbench, and a drag that ends on the orb does not count.
+  assert.match(renderer, /orb\.addEventListener\('dblclick'/)
+  assert.match(renderer, /if \(lastPointerDragged \|\| personalView\?\.controller\.presentationMode !== 'orb'\) return/)
 })
 
 for (const hasBackend of [true, false]) test(`quit drains once before normal window shutdown (backend=${hasBackend})`, async () => {
@@ -1286,4 +1296,26 @@ test('the expanded workbench casts a native shadow and the resting orb does not'
  const set=new Function('mainWindow','screen','orbWindow','sendToOrb',`${body};return setPersonalCollapsed`)(mainWindow,screen,{sync(){}},()=>{})
  set(false);set(true);set(false)
  assert.deepEqual(shadow,[true,false,true])
+})
+
+test('keyboard activation wakes a sleeping orb and expands an awake one', async () => {
+  const source = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
+  const start = source.indexOf("orb.addEventListener('keydown',")
+  const body = source.slice(start, source.indexOf('\n})', start) + 3)
+  assert.match(source, /setAttribute\(orb, 'tabindex', '0'\)/)
+  const calls = []
+  let handler
+  const orb = {addEventListener: (_name, callback) => { handler = callback }}
+  const window = {novaAudioAgentDesktop: {wakeWord: {wake: () => calls.push('wake')}}}
+  const axes = {wakeState: 'sleeping'}
+  const personalView = {controller: {presentationMode: 'orb'}, expand: () => calls.push('expand')}
+  new Function('orb', 'axes', 'window', 'personalView', body)(orb, axes, window, personalView)
+  const press = (key, repeat = false) => { const event = {key, repeat, prevented: false, preventDefault() { this.prevented = true } }; handler(event); return event.prevented }
+  assert.equal(press('Enter'), true); assert.deepEqual(calls, ['wake'])
+  axes.wakeState = 'active'
+  assert.equal(press(' '), true); assert.deepEqual(calls, ['wake', 'expand'])
+  assert.equal(press('Enter', true), false, 'a held key must not expand repeatedly')
+  assert.equal(press('a'), false)
+  personalView.controller.presentationMode = 'workbench'; press('Enter')
+  assert.deepEqual(calls, ['wake', 'expand'])
 })

@@ -239,7 +239,6 @@ body[data-personal-collapsed="false"] #shell{position:fixed!important;bottom:2px
 body[data-personal-collapsed="false"] #shell>*{display:none!important}
 body[data-personal-collapsed="false"] #shell #codex-label[data-mode="confirmation"]{display:flex!important;position:fixed!important;top:56px;bottom:auto;left:72px;right:28px;width:auto;transform:none;background:var(--surface-raised,#fff);color:var(--ink,#1b2027);border:1px solid var(--line-strong,#ccd);pointer-events:auto;z-index:10}
 body[data-personal-collapsed="true"] .workbench{display:none}
-#personal-expand{position:absolute;bottom:0;left:50%;transform:translateX(-50%);white-space:nowrap;z-index:20;font:10px/1.2 var(--font,system-ui);padding:4px 8px;background:#273b39;color:#bfe4d9;border:1px solid #3c5751;border-radius:8px;cursor:pointer}
 
 /* Narrow windows: the chat pane becomes an overlay drawer instead of a third column. */
 @media(max-width:959px){
@@ -250,9 +249,18 @@ body[data-personal-collapsed="true"] .workbench{display:none}
 }
 @media(prefers-reduced-motion:reduce){.workbench *{transition:none!important;animation:none!important;scroll-behavior:auto}}
 
-.personal-orb-modes{position:absolute;bottom:0;left:4px;right:4px;display:flex;gap:2px;white-space:nowrap;z-index:20}
-.personal-orb-modes #personal-expand{position:static;transform:none;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;padding:4px;font-size:9px}
-.personal-orb-modes button{min-width:0;overflow:hidden;text-overflow:ellipsis;font:9px/1.2 system-ui;padding:4px;border-radius:8px}
+/* The orb keeps only what needs attention: a task summary and a handback notice, stacked at the bottom edge when present. */
+.personal-orb-extras{position:absolute;bottom:2px;left:6px;right:6px;display:flex;flex-direction:column;align-items:center;gap:2px;z-index:20;pointer-events:none}
+.personal-orb-extras>*{pointer-events:auto}
+.personal-orb-extras [hidden]{display:none}
+.personal-orb-extras .personal-orb-task{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:10px/1.3 system-ui;padding:3px 8px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:rgba(23,23,29,.88);color:#f5f5f7;cursor:pointer}
+.personal-orb-extras [role="status"]{margin:0;max-width:100%;font:10px/1.3 system-ui;text-align:center;color:rgba(245,245,247,.8)}
+body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) #codex-label[data-mode="project"]{display:none}
+/* A confirmation outranks the task summary: the summary steps aside until it is answered. */
+#shell:has(#codex-label[data-mode="confirmation"]) .personal-orb-task{display:none}
+/* Unread replies: a dot mirroring the capture indicator instead of a counted button label. */
+.unread-indicator{position:absolute;left:7px;top:7px;width:11px;height:11px;border:2px solid #10182d;border-radius:50%;background:#ff6a6a;pointer-events:none}
+.unread-indicator[hidden],#shell[data-dormant='true']:not([data-bubbles='true']) .unread-indicator{display:none}
 .personal-orb-error{position:absolute;bottom:30px;left:8px;right:8px;color:#ffbaba;font:11px/1.3 system-ui;z-index:21}
 .presentation-waiting{display:flex;gap:8px;flex-wrap:wrap;padding:0 20px}
 .presentation-waiting:empty{display:none}
@@ -283,8 +291,6 @@ body[data-personal-collapsed="true"] .workbench{display:none}
 .task-card { text-align: left; overflow-wrap: anywhere; }
 @media (max-width: 959px) { .workbench[data-task-detail="true"] .chat-pane { display: none; } }
 
-.personal-orb-modes .personal-orb-task{position:absolute;bottom:28px;left:0;right:0;width:100%;font-size:10px}
-.personal-orb-modes [role="status"]{position:absolute;bottom:48px;left:0;right:0;margin:0;white-space:normal;font:10px/1.3 system-ui;text-align:center}
 /* Generated starting points, with controls revealed only when adjusting. */
 .workbench .preference-card{display:flex;flex-direction:column;gap:16px;background:var(--surface-raised);border:1px solid var(--line);border-radius:14px;padding:22px;min-width:0}
 .workbench .preference-card h3{font-size:16px;font-weight:600}

@@ -75,11 +75,11 @@ export class PersonalController {
     }else await this.applyPresentation?.(mode,{activate})
     this.changed()
   }
-  async resumeVoice(){
+  async resumeVoice({wake=true}={}){
     const id=this.voiceId
     if(!id||!this.connected||!this.presentationReady||this.presentationMode==='background'||this.capturePending||this.mode!=='text')return
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.changed()
-    try{await this.startCapture();if(generation!==this.generation){await this.stop();return}if(!this.send({type:'input.audio',conversation_id:id}))throw new Error('连接已断开');this.mode='voice'}
+    try{await this.startCapture({wake});if(generation!==this.generation){await this.stop();return}if(!this.send({type:'input.audio',conversation_id:id}))throw new Error('连接已断开');this.mode='voice'}
     catch(error){this.captureConversationId=null;this.mode='text';await this.stop();throw error}
     finally{this.changed()}
   }
@@ -143,8 +143,9 @@ export class PersonalController {
     if(id&&this.connected)await this.command('conversations.voice',{id,enabled:false})
     this.changed()
   }
-  async startCapture(){this.capturePending=true;try{await this.start()}finally{this.capturePending=false}}
-  async voice(){
+  // `wake:false` opens the microphone without leaving sleep, so a sleeping orb keeps listening for its wake word.
+  async startCapture(options){this.capturePending=true;try{await this.start(options)}finally{this.capturePending=false}}
+  async voice({wake=true}={}){
     const id=this.selectedId
     if(!this.presentationReady||this.presentationMode==='background')throw new Error('请先切换到工作台或悬浮球')
     if(!id||!this.connected)throw new Error('尚未选择会话')
@@ -153,7 +154,7 @@ export class PersonalController {
     try{
       await this.command('conversations.voice',{id,enabled:true})
       if(generation!==this.generation)return
-      await this.startCapture()
+      await this.startCapture({wake})
       if(generation!==this.generation){await this.stop();return}
       if(!this.send({type:'input.audio',conversation_id:id}))throw new Error('连接已断开')
       this.mode='voice'

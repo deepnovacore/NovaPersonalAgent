@@ -56,7 +56,6 @@ const muteToggle = document.querySelector('#mute-toggle')
 const speakerToggle = document.querySelector('#speaker-toggle')
 const cameraToggle = document.querySelector('#camera-toggle')
 const sleepButton = document.querySelector('#sleep-orb')
-const openSettingsButton = document.querySelector('#open-settings')
 const stateLabel = document.querySelector('#state-label')
 const codexLabel = document.querySelector('#codex-label')
 const codexSummary = document.querySelector('#codex-summary')
@@ -344,8 +343,9 @@ function render() {
   const setupAction = !sleeping && state.statusAction === 'setup'
   stateLabel.dataset.action = setupAction ? 'setup' : ''
   setAttribute(stateLabel, 'tabindex', setupAction ? '0' : '-1')
-  setAttribute(orb, 'role', sleeping ? 'button' : 'img')
-  setAttribute(orb, 'tabindex', sleeping ? '0' : '-1')
+  // A sleeping orb activates to wake and an awake one to expand, so the orb stays keyboard-reachable either way.
+  setAttribute(orb, 'role', 'button')
+  setAttribute(orb, 'tabindex', '0')
   setText(codexSummary, state.projectLabel)
   setAttribute(codexSummary, 'title', state.projectLabel)
   setText(codexOperation, state.confirmationOperation)
@@ -385,7 +385,7 @@ function render() {
   confirmationAllowSession.disabled = !decisionEnabled
   confirmationCancel.disabled = !decisionEnabled
   setText(aecLabel, state.aecLabel)
-  setAttribute(orb, 'aria-label', sleeping ? t("已休眠，点击唤醒") : `${state.label}；${state.accessibleCodexLabel}`)
+  setAttribute(orb, 'aria-label', sleeping ? t("已休眠，点击唤醒") : `${state.label}；${state.accessibleCodexLabel}；${t("双击或按 Enter 展开工作台")}`)
   orb.dataset.captureActive = String(axes.activated)
   muteToggle.disabled = !axes.activated
   muteToggle.setAttribute('aria-pressed', String(axes.muted))
@@ -631,7 +631,8 @@ let backendIdleAt = -Infinity
 function reportWakeActivity() {
   window.novaAudioAgentDesktop.wakeWord.report({
     epoch: wakeAudio.epoch, activated: axes.activated, muted: axes.muted,
-    idle: canAutoSleep(axes, backendIdle, backendIdleAt, performance.now()),
+    // Only the orb sleeps: the workbench has no bubble to rest in, and a sleeping workbench would silently reroute its voice to wake detection.
+    idle: personalView?.controller.presentationMode === 'orb' && canAutoSleep(axes, backendIdle, backendIdleAt, performance.now()),
   })
 }
 function applyWakeState(value) {
@@ -1343,9 +1344,9 @@ async function boot() {
 }
 
 personalView = mountPersonalView({send,
-  start: async () => {
+  start: async ({wake = true} = {}) => {
     if (await refreshMicrophonePermission() !== 'granted') throw new Error('麦克风权限不可用，原有草稿已保留')
-    await window.novaAudioAgentDesktop.personal.wake()
+    if (wake) await window.novaAudioAgentDesktop.personal.wake()
     if (!axes.activated) await activateCapture()
     if (!axes.activated) throw new Error('麦克风启动失败')
   },
@@ -1385,17 +1386,20 @@ orb.addEventListener('pointermove', event => {
   if (delta) window.novaAudioAgentDesktop.windowDrag.move(delta.dx, delta.dy)
 })
 
+// A drag that ends on the orb still fires dblclick when two drags land close together.
+let lastPointerDragged = false
 function finishDrag(cancelled = false) {
   const result = cancelled ? dragGesture.cancel() : dragGesture.finish()
+  if (result.active) lastPointerDragged = cancelled || result.dragged
   if (result.active) window.novaAudioAgentDesktop.windowDrag.end()
   if (result.active && !cancelled && !result.dragged && axes.wakeState === 'sleeping') window.novaAudioAgentDesktop.wakeWord.wake()
 }
 
 orb.addEventListener('keydown', event => {
-  if (axes.wakeState === 'sleeping' && ['Enter', ' '].includes(event.key)) {
-    event.preventDefault()
-    window.novaAudioAgentDesktop.wakeWord.wake()
-  }
+  if (!['Enter', ' '].includes(event.key) || event.repeat) return
+  event.preventDefault()
+  if (axes.wakeState === 'sleeping') window.novaAudioAgentDesktop.wakeWord.wake()
+  else if (personalView?.controller.presentationMode === 'orb') personalView.expand()
 })
 stateLabel.addEventListener('click', () => {
   if (stateLabel.dataset.action === 'setup') window.novaAudioAgentDesktop.setup.open()
@@ -1410,6 +1414,12 @@ orb.addEventListener('pointerup', () => finishDrag(false))
 orb.addEventListener('pointercancel', () => finishDrag(true))
 orb.addEventListener('pointerenter', () => paletteHover.enter())
 orb.addEventListener('pointerleave', () => paletteHover.leave())
+// Double-click is the orb's only way back to the workbench; the first click of a sleeping orb still wakes it.
+orb.addEventListener('dblclick', event => {
+  event.preventDefault()
+  if (lastPointerDragged || personalView?.controller.presentationMode !== 'orb') return
+  personalView.expand()
+})
 orb.addEventListener('contextmenu', event => {
   event.preventDefault()
   window.novaAudioAgentDesktop.orbMenu.show()
@@ -1433,7 +1443,6 @@ muteToggle.addEventListener('click', () => toggleMute())
 speakerToggle.addEventListener('click', () => { void toggleOutputMuted() })
 cameraToggle.addEventListener('click', () => window.novaAudioAgentDesktop.orbMenu.openSettings())
 sleepButton.addEventListener('click', () => window.novaAudioAgentDesktop.wakeWord.sleep())
-openSettingsButton.addEventListener('click', () => window.novaAudioAgentDesktop.orbMenu.openSettings?.())
 confirmationConfirm.addEventListener('click', () => {
   if (!confirmationUnexpired()) return
   const decision = axes.pendingConfirmationKind === 'codex'

@@ -751,8 +751,9 @@ function openPairingWindow(launchId = activeLaunchId) {
   openSettingsWindow(launchId, {category: 'phone'})
 }
 
+// Sleep is an orb state; the workbench has no bubble to rest in.
 function sleepOrb() {
-  wakeWord?.sleep('bubble')
+  if (presentationMode === 'orb') wakeWord?.sleep('bubble')
 }
 
 async function applyDesktopSettings(payload, restart = false) {
@@ -831,6 +832,8 @@ function showOrbMenu(launchId) {
       }
     } },
     { type: 'separator' },
+    // Hiding is the quiet end of the orb: no window, no microphone, no wake word.
+    { label: t("隐藏"), click: () => requestPresentation('background') },
     { label: t("退出 Nova Audio Agent"), click: () => app.quit() },
   ]).popup({ window: mainWindow })
 }
@@ -882,7 +885,7 @@ function createTray() {
   const next = new Tray(trayImage())
   next.setToolTip('Nova Audio Agent Desktop')
   next.setContextMenu(Menu.buildFromTemplate([
-    ...[['workbench','工作台'],['orb','悬浮球'],['background','后台']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
+    ...[['workbench','工作台'],['orb','悬浮球'],['background','隐藏']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
     { type: 'separator' },
     { label: t("退出"), click: () => app.quit() },
   ]))
@@ -1325,6 +1328,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       })
     }
     if(wasBackground)wakeWord?.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
+    // Sleep is an orb state: a workbench reached from a sleeping orb must hear its voice session, not the wake detector.
+    if(mode==='workbench'&&['sleeping','blocked'].includes(wakeWord?.state))wakeWord.wake({show:false})
     if(activate){mainWindow.show();mainWindow.focus();return shown}
   })
   ipcMain.handle('nova:personal:collapse', (event, value) => {
