@@ -1,5 +1,5 @@
 /**
- * Credential-gated live smoke for the real Qwen Surrogate model.
+ * Credential-gated live smoke for the real Qwen Proactive model.
  *
  * This is deliberately separate from deterministic tests: it calls the configured
  * OpenAI-compatible endpoint and fails loudly when credentials are absent. It records
@@ -10,7 +10,7 @@ import {readFileSync} from 'node:fs'
 import {resolve} from 'node:path'
 import {VirtualClock} from '../../dist/src/core/clock.js'
 import {DASHSCOPE_COMPATIBLE_BASE_URL} from '../../dist/src/config/config.js'
-import {GatewaySurrogate} from '../../dist/src/model/model-adapters.js'
+import {GatewayProactivity} from '../../dist/src/model/proactivity.js'
 import {OpenAIModelGateway} from '../../dist/src/model/model-gateway.js'
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
@@ -42,9 +42,9 @@ const gateway = new OpenAIModelGateway({
   requestTimeout: 45,
   metrics: {record: () => undefined},
 })
-const surrogate = new GatewaySurrogate({
+const proactive = new GatewayProactivity({
   gateway,
-  model: setting('SURROGATE_MODEL') ?? 'qwen-plus',
+  model: setting('SUPPORT_MODEL') ?? 'qwen-plus',
   proactivityPreset: 'eager',
 })
 
@@ -138,7 +138,7 @@ function view(testCase) {
 
 const failures = []
 for (const testCase of cases) {
-  const verdict = await surrogate.watch(view(testCase))
+  const verdict = await proactive.select(view(testCase))
   if (verdict.progress_class !== testCase.expectedClass || verdict.speak !== testCase.expectedSpeak) {
     failures.push(`${testCase.id}: unexpected classification or speech decision: ${JSON.stringify(verdict)}`)
   }
@@ -152,4 +152,4 @@ for (const testCase of cases) {
 }
 
 if (failures.length) throw new Error(failures.join('\n'))
-console.log('Qwen Surrogate progress smoke passed')
+console.log('Qwen Proactive progress smoke passed')

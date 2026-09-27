@@ -41,7 +41,7 @@ const rows: readonly Row[] = [
   ['MODEL_API_KEY', 'core', true, true, 'never', null, 'Optional generic support-model API credential override.', '可选的通用辅助模型 API 凭据覆盖。'],
   ['FAST_MODEL', 'core', false, true, 'never', 'qwen3-vl-plus', 'FastBrain model.', 'FastBrain 模型。'],
   ['WATCH_MODEL', 'core', false, true, 'never', 'fast model', 'Watch model override.', 'Watch 模型覆盖。'],
-  ['SURROGATE_MODEL', 'core', false, true, 'never', 'qwen-plus', 'Surrogate model.', 'Surrogate 模型。'],
+  ['SUPPORT_MODEL', 'core', false, true, 'never', 'qwen-plus', 'Shared support LLM for proactive communication, intake, task verification and personal content.', '主动沟通、任务接入、任务验收和个人内容共用的辅助 LLM。'],
   ['COMPRESSOR_MODEL', 'core', false, true, 'never', 'qwen-flash', 'Memory compressor model.', '记忆压缩模型。'],
   ['PIPELINE_MODE', 'core', false, true, 'never', 'integrated', 'Product pipeline shape: integrated or cascaded.', '产品管线形态：集成或级联。'],
   ['NEWS_LANGUAGE', 'core', false, true, 'never', 'en', 'Native RSS language: zh-CN or en. Desktop supplies OS language independently of UI preference; applied at runtime start.', '原生 RSS 语言：zh-CN 或 en；桌面传入系统语言，独立于界面偏好，运行时启动时生效。'],

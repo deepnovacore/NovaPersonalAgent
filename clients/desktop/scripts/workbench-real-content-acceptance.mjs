@@ -10,7 +10,7 @@ import {SubstrateMemoryResource} from '../../../runtime/dist/src/memory-substrat
 import {WorkspaceGraphStoreClient} from '../../../runtime/dist/src/workspace-graph/store-client.js'
 import {SuggestionPool} from '../../../runtime/dist/src/core/suggestions.js'
 import {LocalDirectorySources} from '../../../runtime/dist/src/personal-agent/sources.js'
-import {GatewaySurrogate} from '../../../runtime/dist/src/model/model-adapters.js'
+import {GatewayPersonalWriter} from '../../../runtime/dist/src/model/personal-writer.js'
 import {selectContextCandidates} from '../../../runtime/dist/src/personal-agent/context-candidates.js'
 import {KnowledgeService} from '../../../runtime/dist/src/knowledge/service.js'
 import {KnowledgeStoreClient} from '../../../runtime/dist/src/knowledge/store-client.js'
@@ -82,12 +82,12 @@ async function main(){
  let modelError=null
  const modelFailures=[]
  const modelGateway={complete:async request=>{for(let attempt=0;attempt<3;attempt++){request.signal?.throwIfAborted();modelCalls++;try{return await claudeCompletion(request)}catch(error){const message=error instanceof Error?error.message:String(error);modelFailures.push(message);if(!/API Error: 400 Upstream request error|ENOTFOUND|Can't reach the API server/u.test(message)||attempt===2){modelError=message;console.error('acceptance_model_failed',modelError);throw error}await sleep(1000*(attempt+1))}}throw Error('unreachable_model_retry')},stream:()=>{throw Error('model_stream_unavailable')}}
- const surrogate=new GatewaySurrogate({gateway:modelGateway,model:'claude-opus-5-5',proactivityPreset:'balanced'})
+ const writer=new GatewayPersonalWriter({gateway:modelGateway,model:'claude-opus-5-5'})
  const grant=sourceRecords[0]?.processing_consent
  const localSources=new LocalDirectorySources({path:sourcePath,pollMs:0,scanOnOpen:false,
   processingGrant:()=>grant,
   knowledge:{listSources:async()=>[],handle:async()=>{throw Error('snapshot_read_only')},syncFile:async()=>{throw Error('snapshot_read_only')}}})
- host=new PersonalAgentHost({path:personalPath,userScope:owner.user_scope,memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateContext:surrogate.generateContext})
+ host=new PersonalAgentHost({path:personalPath,userScope:owner.user_scope,memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateContext:writer.generateContext})
  host.setSources(localSources)
   await app.whenReady();await memory.open();await host.open()
   const sourceEntries=localSources.contextEntries()

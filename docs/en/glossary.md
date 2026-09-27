@@ -4,7 +4,7 @@
 |---|---|
 | FastBrain | Historical name for the user-facing reasoning path; the realtime implementation calls this the FrontBrain |
 | FrontBrain | The realtime provider model filling the FastBrain role on the voice path |
-| Surrogate | A bounded attention policy for unsolicited suggestions; it selects pooled entries and never generates words |
+| Proactive | Proactive communication: discovers grounded proposals and selects optional updates; never executes tasks or controls the floor |
 | Runtime spine | The event loop that applies state and coordinates work |
 | Memory | Canonical per-channel observations, accepted handoffs, and revision-bound intake facts |
 | Personal memory | Cross-session facts stored by default in the unified local memory ledger; mem0 remains an explicit alternative; never execution authority |
@@ -58,8 +58,8 @@
 5. A model sees a bounded ContextView, never unrestricted memory.
 6. Delegate identity and operation must match progress and terminal events.
 7. Terminal completion is accepted at most once.
-8. User-awaited work does not depend on Surrogate for delivery.
-9. Ambient suggestions cannot bypass Surrogate and Floor.
+8. User-awaited work does not depend on Proactive for delivery.
+9. Ambient suggestions cannot bypass Proactive and Floor.
 10. External text and images are treated as evidence, not instructions.
 11. Only configured manifests become model-facing tools.
 12. Secret values are not included in logs or configuration errors.

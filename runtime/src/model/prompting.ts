@@ -65,7 +65,7 @@ const SURROGATE_ORACLE_OUTPUT = '只输出 JSON：{"speak": true|false, "suggest
 const SURROGATE_NODE_OUTPUT = '先在 reason 中概括用户已要求的功能，再指出 summary 中超出这些要求和 previous_summary 的新增信息；若没有新增，必须说明没有新增并保持沉默。若用户明确要求静默则说明其适用范围。最后按档位分类并决定是否播报。只输出 JSON：{"reason": "一句内部理由", "progress_class": "routine_delta"|"milestone"|"blocker"|"action_required"|null, "speak": true|false, "suggestion_id": "s-N"|null}。'
 
 /** Apply the user's proactivity choice at the model decision boundary. */
-export function surrogateSystemPrompt(preset: ProactivityPreset): string {
+export function proactivitySystemPrompt(preset: ProactivityPreset): string {
   const policyStart = SURROGATE_SYSTEM.indexOf(SURROGATE_DEFAULT_POLICY_START)
   const policyEnd = SURROGATE_SYSTEM.indexOf(SURROGATE_DEFAULT_POLICY_END)
   if (policyStart < 0 || policyEnd <= policyStart) {

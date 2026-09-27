@@ -54,3 +54,11 @@ A few more variables round out less common setups. `COMPOSIO_API_KEY` authorizes
 Remove the local provider setting when disabling memory or selecting a remote service. See [personal memory](personal-memory.md) for remote settings and the [iPhone guide](iphone.md) for phone connections.
 
 [Back to getting started](getting-started.md)
+
+### Support model naming
+
+`SUPPORT_MODEL` selects the shared auxiliary LLM used by Proactive communication, coding intake/cancel selection, task verification, personal-record extraction and personal content generation. It is model selection, not a catch-all runtime role. `GatewayProactivity`, `GatewayTaskVerifier` and `GatewayPersonalWriter` own separate responsibilities; understanding and news reuse their existing factories. Jev judgments, planning, compression and vision retain their existing routing.
+
+Rename `SURROGATE_MODEL` to `SUPPORT_MODEL` in your environment. The old variable is no longer read and has no compatibility alias. Only the new variable selects the model; existing provider-specific defaults and cascaded model/endpoint pairing remain unchanged.
+
+TypeScript API change: `Settings.surrogate_model` becomes `support_model`; the broad `GatewaySurrogate` export is replaced by the three adapters above. Use `GatewayProactivity.select()` for the former `watch()` call; other operations belong to their new owners. This is not a wire/event migration or a switch to Jev. Existing serialized `surrogate` identifiers and model-visible prompts retain their historical spelling.

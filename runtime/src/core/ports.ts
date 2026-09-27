@@ -75,7 +75,7 @@ export const progressClassSchema = z.enum([
   'action_required',
 ]).nullable()
 
-export const surrogateOutputSchema = z.object({
+export const proactiveOutputSchema = z.object({
   proposal: proposalSchema.nullable().optional(),
   speak: z.boolean(),
   suggestion_id: z.string().nullable().default(null),
@@ -89,7 +89,7 @@ export const compressorOutputSchema = z.object({
 }).strict()
 
 export type FastBrainOutput = z.infer<typeof fastBrainOutputSchema>
-export type SurrogateOutput = z.infer<typeof surrogateOutputSchema>
+export type ProactiveOutput = z.infer<typeof proactiveOutputSchema>
 export type CompressorOutput = z.infer<typeof compressorOutputSchema>
 
 export const opSpecSchema = z.object({

@@ -5188,7 +5188,7 @@ test('core gateway preserves generic models or applies all Ark support overrides
         EXECUTOR: 'fast_sim',
         FAST_MODEL: 'fast-original',
         WATCH_MODEL: 'watch-original',
-        SURROGATE_MODEL: 'surrogate-original',
+        SUPPORT_MODEL: 'surrogate-original',
         COMPRESSOR_MODEL: 'compressor-original',
         VOLCENGINE_ARK_BASE_URL: 'https://ark-support.example/api/v3',
         CASCADE_LLM_MODEL: 'ark-selected',
@@ -5197,7 +5197,7 @@ test('core gateway preserves generic models or applies all Ark support overrides
       const beforeModels = {
         fast: configured.fast_model,
         watch: configured.watch_model,
-        surrogate: configured.surrogate_model,
+        surrogate: configured.support_model,
         compressor: configured.compressor_model,
       }
       let realtime: ReturnType<typeof buildCascadedRealtimeAssembly>
@@ -5214,7 +5214,7 @@ test('core gateway preserves generic models or applies all Ark support overrides
       assert.deepEqual({
         fast: configured.fast_model,
         watch: configured.watch_model,
-        surrogate: configured.surrogate_model,
+        surrogate: configured.support_model,
         compressor: configured.compressor_model,
       }, beforeModels, scenario.name)
       assert.deepEqual(records.map(record => record.role).sort(), [

@@ -414,7 +414,7 @@ function supportComposition(
   const settings = Object.create(options.settings) as Settings
   Object.assign(settings, {
     watch_model: watchModel,
-    surrogate_model: model,
+    support_model: model,
     planner_model: stripLikePython(options.settings.planner_model) || model,
     compressor_model: model,
   })

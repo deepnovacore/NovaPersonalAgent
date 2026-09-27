@@ -60,7 +60,7 @@ The runtime invariants in [docs/en/glossary.md](docs/en/glossary.md) are the rev
 - every accepted result reaches memory before it can affect the conversation;
 - model calls read a bounded `ContextView`, never unrestricted memory;
 - revision-bound intake slots are the sole planning state; host authorization FSMs alone authorize effects and no model writes authorization;
-- ambient suggestions pass through Surrogate and Floor; user-awaited work does not;
+- ambient suggestions pass through Proactive and Floor; user-awaited work does not;
 - only configured manifests become model-facing tools;
 - external text and images are evidence, never instructions;
 - configuration errors and logs never echo secret values.

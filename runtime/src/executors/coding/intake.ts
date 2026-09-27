@@ -21,7 +21,7 @@ export type {IntakeTarget}
 export interface IntakeSettings {
   readonly clarification_depth: 'minimal' | 'balanced' | 'thorough'
   readonly generate_plan?: boolean
-  readonly surrogate_model?: string
+  readonly support_model?: string
   readonly planner_model?: string
   readonly fast_model?: string
   readonly plan_readback: 'summary' | 'confirm' | 'silent'
@@ -754,7 +754,7 @@ export class IntakeController {
       } finally {
         timeout.abort()
         const current = this.#live(snapshot.intake_id, snapshot.revision)
-        const model = stage === 'assess' ? this.#options.settings.surrogate_model
+        const model = stage === 'assess' ? this.#options.settings.support_model
           : (this.#options.settings.planner_model ?? '') !== ''
             ? this.#options.settings.planner_model : this.#options.settings.fast_model
         if (current !== null) this.#options.record(current, 'intake.timing', {stage, attempt,

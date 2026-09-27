@@ -76,10 +76,10 @@ import type {CodingAgentControllerFactory} from '../executors/coding-executor.js
 export function defaultIntake(
   core: Assembly,
   gateway: ModelGateway,
-  settings: IntakeSettings & {readonly surrogate_model: string; readonly planner_model: string; readonly fast_model: string},
+  settings: IntakeSettings & {readonly support_model: string; readonly planner_model: string; readonly fast_model: string},
 ): RealtimeAssemblyOptions['intake'] {
   if (executorWithRole([...core.runtime.executors.values()].map(adapter => adapter.manifest), 'coding') === null) return undefined
-  return {models: intakeModels(gateway, settings.surrogate_model, settings.planner_model || settings.fast_model), settings}
+  return {models: intakeModels(gateway, settings.support_model, settings.planner_model || settings.fast_model), settings}
 }
 
 export const REALTIME_ASSEMBLY_SHUTDOWN_GRACE_MS = 1_000
@@ -367,7 +367,7 @@ export class RealtimeAssembly {
       context:()=>{const view=compileContextView(input.core.runtime.memory,input.core.runtime.core.floor.state,input.core.runtime.clock.now(),{suggestions:input.core.runtime.core.suggestions.all(),triggerKind:'discovery_tick'});return {...view,channels:view.channels.slice(-8),affordances:view.affordances.slice(-8),in_flight:view.in_flight.slice(-8)}},
       onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}})},
       evidenceRefs:()=>[...input.core.runtime.memory.channels.values()].flatMap(channel=>channel.items.slice(-4).map(item=>`${item.channel}:${item.seq}`)).slice(-16),
-      ...(input.core.personalAgentConfig?{generateProfile:input.core.personalAgentConfig.surrogate.generateProfile,generateDigests:input.core.personalAgentConfig.surrogate.generateDigests,generateContext:input.core.personalAgentConfig.surrogate.generateContext,rankNews:input.core.personalAgentConfig.surrogate.rankNews,understand:input.core.personalAgentConfig.surrogate.understand,prepareBrief:(snapshot,slot,signal)=>input.core.personalAgentConfig!.surrogate.prepareBrief(snapshot,slot,signal),prepareProposal:(snapshot,proposal,signal)=>input.core.personalAgentConfig!.surrogate.prepareProposal(snapshot,proposal,signal),summarizeMemory:(entries,signal)=>input.core.personalAgentConfig!.surrogate.summarizeMemory(entries,signal),discover:(snapshot,signal)=>input.core.personalAgentConfig!.surrogate.discover(snapshot,signal)}:{}),
+      ...input.core.personalAgentConfig?.models,
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
     })
     if (!this.#sharedPersonal) this.personalAgent.setRetrieval(input.retrieval)
