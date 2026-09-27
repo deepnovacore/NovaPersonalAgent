@@ -1046,13 +1046,13 @@ test('the orb markup hosts the particle canvas instead of gradient spans', async
   assert.match(html, /id="state-label"/)
 })
 
-test('the orb rail carries the mute toggle and settings buttons', async () => {
+test('the orb rail carries the mute toggle and leaves settings to the context menu', async () => {
   const html = await readFile(new URL('../src/renderer/index.html', import.meta.url), 'utf8')
   assert.match(html, /<nav id="orb-rail" aria-label="快捷操作">/)
   assert.match(html, /<button id="mute-toggle" title="切换闭麦（Ctrl\+M）" type="button" aria-label="闭麦" aria-pressed="false" disabled>/)
   assert.match(html, /<button id="speaker-toggle" type="button" aria-label="关闭 Nova 声音" aria-pressed="true"/)
   assert.match(html, /<button id="camera-toggle" type="button" aria-label="打开摄像头" aria-pressed="false" disabled>/)
-  assert.match(html, /<button id="open-settings" type="button" aria-label="设置">/)
+  assert.doesNotMatch(html, /id="open-settings"/)
 
   const css = await readFile(new URL('../src/renderer/index.css', import.meta.url), 'utf8')
   assert.match(css, /#orb-rail \{/)
@@ -1089,7 +1089,7 @@ test('the stylesheet drops the gradient sphere but keeps the accessibility overr
   assert.match(contrast, /#orb::after \{/)
   assert.match(contrast, /\[data-state="error"\] #orb::after/)
   assert.match(contrast, /\[data-state="permission-denied"\] #orb::after/)
-  assert.match(contrast, /\.capture-indicator \{ z-index: 1/)
+  assert.match(contrast, /\.capture-indicator, \.unread-indicator \{ z-index: 1/)
 })
 
 test('the renderer feeds the visual from the same render pass as data-state', async () => {

@@ -877,7 +877,17 @@ test('the mute toggle drops microphone input at both ingress points', async () =
   // Deactivation discards the session's mute, and the rail buttons are wired.
   assert.match(renderer, /axes\.muted = false/)
   assert.match(renderer, /muteToggle\.addEventListener\('click', \(\) => toggleMute\(\)\)/)
-  assert.match(renderer, /openSettingsButton\.addEventListener\('click', \(\) => window\.novaAudioAgentDesktop\.orbMenu\.openSettings\?\.\(\)\)/)
+  assert.doesNotMatch(renderer, /openSettingsButton/)
+  // Opening the orb's voice conversation keeps a sleeping orb asleep; only an explicit start wakes it.
+  assert.match(renderer, /start: async \(\{wake = true\} = \{\}\) => \{/)
+  assert.match(renderer, /if \(wake\) await window\.novaAudioAgentDesktop\.personal\.wake\(\)/)
+  // Sleep belongs to the orb: neither the idle timer nor Ctrl+L puts the workbench to sleep.
+  assert.match(renderer, /idle: personalView\?\.controller\.presentationMode === 'orb' && canAutoSleep\(/)
+  const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  assert.match(main, /function sleepOrb\(\) \{\n  if \(presentationMode === 'orb'\) wakeWord\?\.sleep\('bubble'\)/)
+  // Double-click is the orb's way back to the workbench, and a drag that ends on the orb does not count.
+  assert.match(renderer, /orb\.addEventListener\('dblclick'/)
+  assert.match(renderer, /if \(lastPointerDragged \|\| personalView\?\.controller\.presentationMode !== 'orb'\) return/)
 })
 
 for (const hasBackend of [true, false]) test(`quit drains once before normal window shutdown (backend=${hasBackend})`, async () => {

@@ -45,6 +45,27 @@ test('orb restart applies saved settings through the shared transaction and repo
   }
 })
 
+test('the orb menu hides Nova to the tray, right before quitting', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const start = source.indexOf('function showOrbMenu(launchId) {')
+  const menuSource = source.slice(start, source.indexOf('\n}', start) + 2)
+  let rows
+  const requested = []
+  const context = {
+    t: value => value,
+    Menu: {buildFromTemplate: value => { rows = value; return {popup() {}} }},
+    mainWindow: {}, settingsReady: true, lifecycleCoordinator: {busy: false},
+    activeMcpSubmenu: () => [],
+    requestPresentation: mode => requested.push(mode),
+  }
+  runInNewContext(`${menuSource}\nshowOrbMenu('test')`, context)
+  const labels = rows.map(row => row.label ?? row.type)
+  assert.deepEqual([...labels.slice(-3)], ['separator', '隐藏', '退出 Nova Audio Agent'])
+  assert.ok(labels.includes('设置…'))
+  rows.find(row => row.label === '隐藏').click()
+  assert.deepEqual(requested, ['background'])
+})
+
 // The shape backend-supervisor.mjs sanitizes into, with main's own state overlay.
 function runtime(overrides = {}) {
   return {

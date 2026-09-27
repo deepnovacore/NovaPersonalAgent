@@ -731,7 +731,7 @@ body:hover #orb-rail,
     color: white;
     border: 2px solid white;
   }
-  .capture-indicator { z-index: 1; }
+  .capture-indicator, .unread-indicator { z-index: 1; }
   #state-label, #codex-label, #aec-label, #caption {
     color: white;
     background: black;

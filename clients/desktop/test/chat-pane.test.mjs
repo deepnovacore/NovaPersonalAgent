@@ -70,6 +70,37 @@ test('dropdown and sidebar orb entry wait for the same host acknowledgement and 
   }finally{c.disconnect();await tick()}
  }
 })
+const enterOrb=async m=>{
+ let request=m.sent.findLast(f=>f.method==='presentation.set');m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{mode:'workbench'}});await tick()
+ m.view.receive(feedState(1,'c',{feed:[]}))
+ m.all().find(n=>n.title==='收起 · 收起为悬浮球').listeners.click()
+ request=m.sent.findLast(f=>f.method==='presentation.set');m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{mode:'orb'}});await tick()
+}
+const ackVoice=async(m,revision)=>{
+ const request=m.sent.findLast(f=>f.method==='conversations.voice');const state=feedState(revision,'c',{feed:[]});state.conversations.voice_id=request.params.enabled?request.params.id:null
+ m.view.receive(state);m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{}});await tick();await tick()
+}
+test('an orb opens its voice conversation without waking a sleeping orb, and reopens one the host ends',async()=>{
+ const starts=[],m=mount({applyPresentation:async()=>{},start:async options=>{starts.push(options)}}),c=m.view.controller
+ try{
+  await enterOrb(m);await ackVoice(m,2)
+  assert.deepEqual(starts,[{wake:false}]);assert.equal(c.mode,'voice')
+  assert.equal(m.sent.filter(f=>f.method==='conversations.voice').length,1)
+  // The host ends the session (a purge, another device): the orb must not stay deaf.
+  m.view.receive(feedState(3,'c',{feed:[]}));await tick();await ackVoice(m,4)
+  assert.equal(c.mode,'voice');assert.deepEqual(starts,[{wake:false},{wake:false}])
+  assert.equal(m.sent.filter(f=>f.method==='conversations.voice').length,2)
+ }finally{c.disconnect();await tick()}
+})
+test('a refused microphone reports once on the orb instead of retrying',async()=>{
+ let attempts=0
+ const m=mount({applyPresentation:async()=>{},start:async()=>{attempts++;throw new Error('麦克风权限不可用，原有草稿已保留')}}),c=m.view.controller
+ try{
+  await enterOrb(m);await ackVoice(m,2);await ackVoice(m,3)
+  for(let revision=4;revision<7;revision++){m.view.receive(feedState(revision,'c',{feed:[]}));await tick()}
+  assert.equal(attempts,1);assert.equal(c.mode,'text');assert.match(c.error,/麦克风权限不可用/)
+ }finally{c.disconnect();await tick()}
+})
 test('feed messages render as cards with the prepared body as markdown, and receipts follow visibility',()=>{
  const m=mount();m.view.controller.collapse(true);m.view.receive(feedState(1))
  const card=m.all().find(n=>n.className==='feed-card');assert.ok(card);assert.ok(m.all().some(n=>n.tag==='h2'&&n.text===undefined&&n.children.some(c=>c.text==='前瞻')),'prepared markdown heading rendered')

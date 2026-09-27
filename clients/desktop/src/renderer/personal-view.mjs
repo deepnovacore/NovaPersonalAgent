@@ -40,7 +40,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const workspace=el('section',undefined,'workspace');workspace.setAttribute('aria-label','工作区');root.append(workspace)
  const pageHead=el('header',undefined,'page-head');const pageTitle=el('h2','','page-title');const status=el('span','正在连接','workbench-status');status.setAttribute('role','status')
  const chatToggle=el('button','收起对话栏','chat-toggle');chatToggle.type='button';chatToggle.setAttribute('aria-controls','chat-pane');chatToggle.addEventListener('click',()=>chat.setOpen(!chat.open))
- const presentation=el('select');presentation.setAttribute('aria-label','显示模式');for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','后台']]){const option=el('option',label);option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
+ const presentation=el('select');presentation.setAttribute('aria-label','显示模式');for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','隐藏']]){const option=el('option',label);option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
  pageHead.append(pageTitle,status,presentation,chatToggle);workspace.append(pageHead)
  const startupNotice=el('p','','page-error');startupNotice.id='startup-notice';startupNotice.setAttribute('role','status');startupNotice.hidden=true;workspace.append(startupNotice)
  const startupText=el('span');startupNotice.append(startupText);button(t('打开设置'),()=>openSettings(),startupNotice)
@@ -52,11 +52,19 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  // Chat pane
  const chat=mountChatPane(root,{c,el,button,run,api,chips,openTask,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.title=chatToggle.textContent;chatToggle.setAttribute('aria-expanded',String(value))}})
  chat.setOpen(true)
- const expand=el('button','展开 Nova');expand.id='personal-expand';expand.type='button';expand.addEventListener('click',()=>run(()=>collapse(false)));const orbModes=el('div',undefined,'personal-orb-modes');orbModes.append(expand);document.querySelector('#shell').append(orbModes)
- const orbVoice=button('开始语音',()=>c.mode==='voice'?c.stopVoice():c.voiceId?c.resumeVoice():c.voice(),orbModes)
- button('后台',()=>c.setPresentation('background'),orbModes)
- const orbTask=button('',()=>openTask(orbTask.dataset.taskId),orbModes);orbTask.className='personal-orb-task'
- const orbNotice=el('p');orbNotice.setAttribute('role','status');orbNotice.setAttribute('aria-live','polite');orbModes.append(orbNotice)
+ // The orb carries no mode buttons: double-click expands, the context menu hides, and sleep is the only voice switch.
+ const orbExtras=el('div',undefined,'personal-orb-extras');document.querySelector('#shell').append(orbExtras)
+ const orbTask=button('',()=>openTask(orbTask.dataset.taskId),orbExtras);orbTask.className='personal-orb-task'
+ const orbNotice=el('p');orbNotice.setAttribute('role','status');orbNotice.setAttribute('aria-live','polite');orbExtras.append(orbNotice)
+ // An orb is a voice conversation; sleep only reroutes its audio to wake detection, so opening it must not wake the orb.
+ // A failed attempt holds until the orb is re-entered or reconnects, so a refused microphone reports once;
+ // an established session releases the guard, so a session the host ends is reopened.
+ let orbVoiceTried=false
+ const syncOrbVoice=()=>{
+  if(c.presentationMode!=='orb'||!c.connected||c.mode==='voice'){orbVoiceTried=false;return}
+  if(orbVoiceTried||!c.presentationReady||c.presentationPending||!c.selectedId||c.mode!=='text'||c.capturePending)return
+  orbVoiceTried=true;void run(()=>c.voiceId?c.resumeVoice({wake:false}):c.voice({wake:false}))
+ }
  const orbError=el('p','','personal-orb-error');orbError.setAttribute('role','alert');document.querySelector('#shell').append(orbError)
  panel.addEventListener('focusout',()=>setTimeout(()=>{if(!panel.contains?.(document.activeElement))update()},0))
  // A semantic button lets keyboard and screen-reader users expand long bodies.
@@ -125,11 +133,11 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   for(const node of [taskNotice,orbNotice]){const text=t(c.taskNotice);if(node.textContent!==text)node.textContent=text;node.hidden=!text}
   const aggregate=summarizeTasks(c.snapshot?.tasks??[],[...viewedResults]),decision=(c.snapshot?.pending_approvals??[]).find(item=>item.task_id);orbTask.dataset.taskId=decision?.task_id??aggregate.task_id??'';orbTask.hidden=!orbTask.dataset.taskId;orbTask.disabled=!c.connected;orbTask.textContent=t('任务：{0} 进行中 · {1} 待处理 · {2} 新结果',aggregate.active,Math.max(aggregate.decisions,decision?1:0),aggregate.results)
   error.textContent=c.error;error.hidden=!c.error||c.presentationMode!=='workbench';orbError.textContent=c.error;orbError.hidden=!c.error||c.presentationMode!=='orb'
-  orbVoice.textContent=c.mode==='voice'?'结束语音':c.voiceId?'恢复语音':'开始语音';orbVoice.disabled=!c.connected||!c.presentationReady||c.mode==='starting'
+  syncOrbVoice()
   const pending=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
   waiting.replaceChildren();for(const item of pending){const b=button(`处理审批：${item.summary}`,async()=>{if(item.task_id){await openTask(item.task_id,true);return}if(item.conversation_id&&item.conversation_id!==c.selectedId)await c.select(item.conversation_id);await c.setPresentation('orb')},waiting);b.disabled=!c.connected}
   const unreadTotal=(c.snapshot?.conversations?.items??[]).reduce((sum,item)=>sum+(item.unread_count??0),0)
-  expand.textContent=`展开 Nova${c.voiceId?' · 语音中':unreadTotal?` · ${unreadTotal} 条提醒`:''}`
+  const unreadDot=document.querySelector('#unread-indicator');if(unreadDot)unreadDot.hidden=!unreadTotal
   chat.update()
   if(!c.connected)unreadProjection=null
   const unread=c.connected&&c.snapshot?((c.snapshot.conversations?.unread_count??0)+pending.reduce((sum,item)=>sum+1+(item.queued??0),0)):undefined
@@ -139,5 +147,5 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  async function collapse(value){await c.setPresentation(value?'orb':'workbench')}
  function receive(frame){chat.receive(frame);c.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.(mode=>run(()=>c.setPresentation(mode)));
- api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update,openTask:id=>run(()=>openTask(id)),startup:value=>{startupNotice.dataset.stage=value?.stage??'';startup.update(value)}}
+ api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update,expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{startupNotice.dataset.stage=value?.stage??'';startup.update(value)}}
 }

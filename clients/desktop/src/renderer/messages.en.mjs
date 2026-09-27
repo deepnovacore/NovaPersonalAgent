@@ -153,6 +153,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "工作台": "Workbench",
   "悬浮球": "Voice orb",
   "后台": "Background",
+  "隐藏": "Hide",
   "IM 渠道": "IM channels",
   "连接与权限": "Connections & permissions",
   "工作区": "Workspace",

@@ -204,7 +204,7 @@ test('confirmation capsule keeps a natural orb and compact controls visible thro
 
   for (const layout of result.confirmationLayouts) {
     const tolerance = 0.75
-    assert.equal(layout.controls.length, 5)
+    assert.equal(layout.controls.length, 4)
     for (const button of layout.controls) {
       assert.ok(button.top >= -tolerance && button.bottom <= layout.viewport.height + tolerance, `${button.id} clipped vertically`)
       assert.ok(button.left >= -tolerance && button.right <= layout.viewport.width + tolerance, `${button.id} clipped horizontally`)
