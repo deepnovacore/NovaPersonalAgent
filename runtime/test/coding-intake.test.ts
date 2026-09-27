@@ -629,7 +629,7 @@ test('intake model ports use selected models, bounded JSON and explicit ownershi
 
 test('intake labelled multi-turn fixtures exercise user questions, inference, readiness and abandonment', async () => {
   interface Turn {utterance: string; label: string; goal?: string; scope?: string; acceptance?: string; constraints?: string; question?: {owner: string; text: string}}
-  const fixture = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../fixtures/realtime/qwen/v1/codex-clarification.json'), 'utf8')) as {intake_cases: {id: string; depth: 'balanced' | 'thorough'; turns: Turn[]}[]}
+  const fixture = JSON.parse(readFileSync(resolve(import.meta.dirname, '../../../tests/fixtures/realtime/qwen/v1/codex-clarification.json'), 'utf8')) as {intake_cases: {id: string; depth: 'balanced' | 'thorough'; turns: Turn[]}[]}
   for (const scenario of fixture.intake_cases) {
     let turn: Turn = scenario.turns[0]!
     const h = harness({settings: {clarification_depth: scenario.depth, plan_readback: 'silent'}, models: {

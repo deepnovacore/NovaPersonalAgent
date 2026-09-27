@@ -18,7 +18,7 @@ const env = {...parseEnv(await readFile(resolve(root, '.env'), 'utf8')), ...proc
 const ids = ['greeting', 'coding', 'coding-steer', 'coding-cancel', 'confirm-yes', 'confirm-no',
   'confirm-ambiguous', 'confirm-question', 'coding-discussion', 'coding-clarify-before-dispatch',
   'coding-clarification-still-unresolved', 'weekly-report-after-clarification']
-const fixtures = JSON.parse(await readFile(resolve(root, 'fixtures/live/text-tools.json'), 'utf8')).cases
+const fixtures = JSON.parse(await readFile(resolve(root, 'tests/fixtures/live/text-tools.json'), 'utf8')).cases
 const cases = ids.map(id => {const c = fixtures.find(item => item.id === id); assert.ok(c); return c})
 const supportedModels = ['qwen3.8-max', 'qwen-plus', 'qwen-flash', 'qwen3.8-flash', 'deepseek-v4-pro', 'deepseek-flash']
 const models = values.models?.split(',') ?? supportedModels.slice(0, 4)

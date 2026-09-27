@@ -20,7 +20,7 @@ interface ConfigCase {
 }
 
 const repositoryRoot = resolve(import.meta.dirname, '../../..')
-const fixtureRoot = resolve(repositoryRoot, 'fixtures/config/v1')
+const fixtureRoot = resolve(repositoryRoot, 'tests/fixtures/config/v1')
 
 test('Node consumes every Python-owned configuration fixture exactly', async () => {
   const casesDocument = JSON.parse(await readFile(resolve(fixtureRoot, 'cases.json'), 'utf8')) as {

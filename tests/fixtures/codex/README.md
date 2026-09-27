@@ -4,7 +4,7 @@
 installed `codex-cli 0.152.0`:
 
 ```sh
-codex app-server generate-json-schema --experimental --out fixtures/codex/app-server-schema/0.152.0
+codex app-server generate-json-schema --experimental --out tests/fixtures/codex/app-server-schema/0.152.0
 ```
 
 `approval-examples-0.152.0.json` covers launch profiles and approval responses.

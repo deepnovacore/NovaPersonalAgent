@@ -3,7 +3,7 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises'
 import {createInterface} from 'node:readline'
 const rl=createInterface({input:process.stdin,terminal:false});const key=await new Promise(resolve=>rl.once('line',resolve));rl.close()
 if(!key)throw Error('missing_credential')
-const fixture=JSON.parse(await readFile(new URL('../../../fixtures/understanding/dense-life-state.json',import.meta.url),'utf8'))
+const fixture=JSON.parse(await readFile(new URL('../../../tests/fixtures/understanding/dense-life-state.json',import.meta.url),'utf8'))
 const output=process.env.UNDERSTANDING_OUTPUT??'/tmp/nova-jev-dense';await mkdir(output,{recursive:true})
 const results=[]
 for(const size of [1,8,32,64])for(let repeat=0;repeat<3;repeat++)for(const provider of repeat%2?['gpt','jev']:['jev','gpt']){

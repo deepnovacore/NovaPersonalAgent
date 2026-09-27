@@ -35,7 +35,7 @@ import {RealtimeService, type ServiceProvider} from '../../src/realtime/service.
 import {RealtimeSession, type SessionProvider} from '../../src/realtime/session.js'
 import {compileToolSchema} from '../../src/core/tool-schema.js'
 
-export const fixtureRoot = resolve(import.meta.dirname, '../../../../fixtures/realtime/service/v1')
+export const fixtureRoot = resolve(import.meta.dirname, '../../../../tests/fixtures/realtime/service/v1')
 
 export interface Step {
   readonly kind: string

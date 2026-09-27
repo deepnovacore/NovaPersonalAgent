@@ -18,7 +18,7 @@ import {
   compressorPrompt,
 } from '../src/model/model-adapters.js'
 
-const fixtureRoot = resolve(import.meta.dirname, '../../../fixtures/adapters/v1')
+const fixtureRoot = resolve(import.meta.dirname, '../../../tests/fixtures/adapters/v1')
 
 function loadJson<T>(name: string): T {
   return JSON.parse(readFileSync(resolve(fixtureRoot, name), 'utf8')) as T

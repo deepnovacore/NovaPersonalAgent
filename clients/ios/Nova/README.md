@@ -22,7 +22,7 @@ xcodebuild test -project clients/ios/Nova/Nova.xcodeproj -scheme Nova \
   -derivedDataPath /private/tmp/nova-ios-build CODE_SIGNING_ALLOWED=NO
 ```
 
-`NovaTests` and the standalone Swift package share the protocol/playback checks; `NovaTests` also contains an iOS-only stop/connection lifecycle regression. After the review fixes, 9 Swift-package tests passed and all 10 iOS tests compiled successfully (not executed here without a simulator runtime). Unsigned device SDK compilation also passed. The former bundles the repository's shared `fixtures/client-protocol/v1/vectors.json`; the latter reads that exact file directly. No tests start audio or request microphone permission.
+`NovaTests` and the standalone Swift package share the protocol/playback checks; `NovaTests` also contains an iOS-only stop/connection lifecycle regression. After the review fixes, 9 Swift-package tests passed and all 10 iOS tests compiled successfully (not executed here without a simulator runtime). Unsigned device SDK compilation also passed. The former bundles the repository's shared `tests/fixtures/client-protocol/v1/vectors.json`; the latter reads that exact file directly. No tests start audio or request microphone permission.
 
 On this Mac (2026-09-05), Xcode 16.4 includes the 18.5 SDK but has no available simulator runtime. Destination-based builds report “iOS 18.5 is not installed.” Direct SDK compilation verifies both app and tests without a runnable simulator:
 

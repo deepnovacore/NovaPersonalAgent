@@ -2911,7 +2911,7 @@ test('an owner-controlled 0750 managed root is accepted while group-writable roo
 
 test('strict v1 decode rejects key, type, cap, reference, and normalized-identity mutations', async () => {
   const fixture = JSON.parse(await readFile(
-    join(import.meta.dirname, '../../../fixtures/runtime/codex-project-state-v1.json'),
+    join(import.meta.dirname, '../../../tests/fixtures/runtime/codex-project-state-v1.json'),
     'utf8',
   )) as {readonly input_utf8_base64: string}
   const valid = JSON.parse(Buffer.from(fixture.input_utf8_base64, 'base64').toString('utf8')) as {
@@ -4106,7 +4106,7 @@ test('thread identity uses Python code-point bounds and exact returned text', as
 
 test('live recovery reads Python v1 bytes and writes byte-identical Python canonical JSON', async () => {
   const fixture = JSON.parse(await readFile(
-    join(import.meta.dirname, '../../../fixtures/runtime/codex-project-state-v1.json'),
+    join(import.meta.dirname, '../../../tests/fixtures/runtime/codex-project-state-v1.json'),
     'utf8',
   )) as {readonly input_utf8_base64: string; readonly recovered_utf8_base64: string}
   const storeFixture = await projectStoreFixture('nova-codex-project-python-bytes-')

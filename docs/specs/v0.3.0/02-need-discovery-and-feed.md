@@ -97,7 +97,7 @@ proposal (nullable):
   都视为无效。
 - coding progress 走原 `progress_class` 路径，本卷不改其语义，也不让 proposal 混入该路径。
 
-这是接口内容，不是已发布 wire schema。落地时以 zod schema 与 `fixtures/` 下的 golden 向量钉住，
+这是接口内容，不是已发布 wire schema。落地时以 zod schema 与 `tests/fixtures/` 下的 golden 向量钉住，
 且 `SURROGATE_SYSTEM` 的增量文案在 Node 适配器测试里断言（沿用现有做法）。
 
 ### 2.4 主机准入：校验、去重、入池

@@ -11,7 +11,7 @@
  * authority. **Epoch** scopes provider-allocated identity: a reconnect starts a new one, and an id
  * from the old session must never satisfy a check in the new one.
  *
- * Every guard here is pinned by a scenario in `fixtures/realtime/session/v1/`, exported from the
+ * Every guard here is pinned by a scenario in `tests/fixtures/realtime/session/v1/`, exported from the
  * Python oracle. When changing one, delete it and confirm a named scenario goes red; a guard no
  * scenario distinguishes is either dead or a hole in the fixture set.
  */

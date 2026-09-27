@@ -27,7 +27,7 @@ import {
 } from '../src/realtime/volcengine/protocol.js'
 import { TextChunker } from '../src/realtime/volcengine/tts.js'
 
-const fixtureRoot = resolve(import.meta.dirname, '../../../fixtures/realtime/volcengine/v1')
+const fixtureRoot = resolve(import.meta.dirname, '../../../tests/fixtures/realtime/volcengine/v1')
 const fixture = JSON.parse(readFileSync(resolve(fixtureRoot, 'protocol.json'), 'utf8')) as Fixture
 const expected = JSON.parse(
   readFileSync(resolve(fixtureRoot, 'protocol-expected.json'), 'utf8'),

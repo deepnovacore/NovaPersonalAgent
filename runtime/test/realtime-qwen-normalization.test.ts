@@ -14,7 +14,7 @@ import {
   type QwenSocket,
 } from '../src/realtime/qwen.js'
 
-const fixtureRoot = resolve(import.meta.dirname, '../../../fixtures/realtime/qwen/v1')
+const fixtureRoot = resolve(import.meta.dirname, '../../../tests/fixtures/realtime/qwen/v1')
 
 interface Scenario {
   readonly id: string

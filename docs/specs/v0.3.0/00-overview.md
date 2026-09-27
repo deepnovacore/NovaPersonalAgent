@@ -113,7 +113,7 @@ M5-A proposal 闭环 ┘   memory_entry 钉住 ────┼── M6-A 记忆
 | `evidence_record` | 实际读到了什么、从哪来、什么时候 | 主机；账本行，只追加，存原文 | [06 卷](06-memory-substrate.md) |
 | `entry_revision` | 一条理解的某次修订：谁写的、依据什么、替代了哪次 | 主机；只经 merge 写入 | [06 卷](06-memory-substrate.md) |
 
-两者都是**接口内容，不是已发布的 wire schema**。落地时以 zod schema 与 `fixtures/` 下的
+两者都是**接口内容，不是已发布的 wire schema**。落地时以 zod schema 与 `tests/fixtures/` 下的
 golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `client.command` /
 `client.command_result` 承载方式。UI 不维护权威副本；重新打开界面从主机恢复。
 
@@ -150,7 +150,7 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
   Home Assistant、AutoGLM 在源码中不存在；`thirdparty/Open-AutoGLM` 仅为参考副本，未被引用。
 - **客户端**：桌面为 Electron（`clients/desktop/src/main/*.mjs`、`clients/desktop/src/renderer/*.mjs`，
   含 `task-banner.mjs` 解析 `EXECUTOR_TASKS`）；iOS 为 SwiftUI；
-  没有统一客户端 SDK，靠 `docs/protocols/client-v1.md` 与 `fixtures/client-protocol/v1/` 保持一致。
+  没有统一客户端 SDK，靠 `docs/protocols/client-v1.md` 与 `tests/fixtures/client-protocol/v1/` 保持一致。
 
 ## 部署边界
 
