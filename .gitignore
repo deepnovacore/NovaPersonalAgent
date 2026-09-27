@@ -85,3 +85,6 @@ clients/desktop/~/
 /runtime/dist-independent-review/
 
 references/
+
+# Self-operated services are kept local, outside the public source tree.
+/services/
