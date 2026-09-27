@@ -153,6 +153,8 @@ Get an API key from [DashScope](https://platform.qianwenai.com) and set `DASHSCO
 
 ```bash
 npm run start:client
+# Open Workbench for this launch, overriding the saved startup preference
+npm run start:workbench
 ```
 The client includes microphone, camera, sound, settings, and external MCP controls. Try hovering over the desktop orb to get surprised :) Also you
 may try build or run demo locally:

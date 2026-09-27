@@ -123,8 +123,8 @@ export function planClientLaunch({
   dependenciesInstalled,
   homeDirectory,
 }) {
-  if (!Array.isArray(argv) || argv.length !== 0) {
-    throw new Error('this launcher does not accept arguments')
+  if (!Array.isArray(argv) || !(argv.length === 0 || argv.length === 1 && argv[0] === '--workbench')) {
+    throw new Error('this launcher does not accept arguments other than --workbench')
   }
   if (!SUPPORTED_PLATFORMS.has(platform)) {
     throw new Error('the Nova Audio Agent Desktop client requires macOS, Linux, or Windows')
@@ -182,7 +182,7 @@ export function planClientLaunch({
   }
   steps.push({...npm(['run', 'build']), cwd: rootDir, env})
   steps.push({
-    ...npm(['run', 'start:built', '--workspace', DESKTOP_WORKSPACE]),
+    ...npm(['run', 'start:built', '--workspace', DESKTOP_WORKSPACE, ...(argv.length ? ['--', ...argv] : [])]),
     cwd: rootDir,
     env: clientEnv,
   })

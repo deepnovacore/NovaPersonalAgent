@@ -78,6 +78,8 @@ async function withTempDirectory(run) {
 test('the default settings are the documented schema', () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
     version: 4,
+    startupView: 'workbench',
+    lastPresentation: 'workbench',
     language: 'zh-CN',
     palette: 'ember',
     proactivity: 'balanced',
@@ -257,6 +259,8 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
 
   assert.deepEqual(normalized, {
     version: 4,
+    startupView: 'workbench',
+    lastPresentation: 'workbench',
     language: 'zh-CN',
     palette: 'graphite',
     proactivity: 'balanced',
@@ -363,6 +367,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'integratedVoice',
     'knowledgePath',
     'language',
+    'lastPresentation',
     'memoryPrerecallEnabled',
     'modelBaseUrl',
     'monitorCameraDeviceId',
@@ -375,6 +380,7 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'progressBubbles',
     'secrets',
     'startListeningOnLaunch',
+    'startupView',
     'version',
     'voiceprintEnabled', 'voiceprintId', 'voiceprintName', 'voiceprintUploadUrl',
     'wakeWordEnabled',
@@ -577,6 +583,7 @@ test('publicSettings never carries the secrets object', () => {
     'proactivity',
     'progressBubbles',
     'startListeningOnLaunch',
+    'startupView',
     'version',
     'voiceprintEnabled', 'voiceprintId', 'voiceprintName', 'voiceprintUploadUrl',
     'wakeWordEnabled',
@@ -1255,4 +1262,34 @@ test('unsupported embedding settings never become cloud defaults during normaliz
       assert.equal(JSON.parse(await readFile(file, 'utf8')).embeddingProvider, embeddingProvider)
     }
   } finally {await rm(directory, {recursive: true, force: true})}
+})
+
+test('startup presentation persists, validates and does not restart the backend', async () => {
+  const {startupPresentation} = await import('../src/main/settings-store.mjs')
+  assert.equal(startupPresentation({}), 'workbench')
+  assert.equal(startupPresentation({startupView: 'orb'}), 'orb')
+  assert.equal(startupPresentation({startupView: 'last', lastPresentation: 'orb'}), 'orb')
+  assert.equal(startupPresentation({startupView: 'last', lastPresentation: 'background'}), 'workbench')
+  assert.equal(startupPresentation({startupView: 'orb'}, ['--workbench']), 'workbench')
+  const next = applySettingsUpdate(DEFAULT_SETTINGS, {startupView: 'last', lastPresentation: 'orb'}, fakeCodec())
+  assert.equal(next.startupView, 'last')
+  assert.equal(next.lastPresentation, 'orb')
+  assert.deepEqual(backendSettings(next), backendSettings(DEFAULT_SETTINGS))
+  await withTempDirectory(async directory => {
+    const file = join(directory, 'settings.json')
+    await saveSettings(file, next)
+    assert.equal(startupPresentation(await loadSettings(file)), 'orb')
+  })
+})
+
+test('presentation writes preserve secrets without opening the keychain and remain ordered', async () => {
+  let current = normalizeSettings({secrets: {modelApiKey: plaintextEntry('keep')}})
+  const original = current.secrets
+  const write = createSettingsWriter({getCurrent: () => current, commit: next => {current = next}, save: async () => {}, codec: {available() {assert.fail('presentation opened keychain')}}})
+  await Promise.all([
+    write({lastPresentation: 'orb'}, undefined, {preserveSecrets: true}),
+    write({lastPresentation: 'workbench'}, undefined, {preserveSecrets: true}),
+  ])
+  assert.equal(current.lastPresentation, 'workbench')
+  assert.deepEqual(current.secrets, original)
 })

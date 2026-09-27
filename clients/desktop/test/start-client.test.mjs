@@ -304,3 +304,8 @@ test('client launch plan fails before side effects for an invalid invocation', (
     dependenciesInstalled: true,
   }), /npm CLI unavailable/u)
 })
+
+test('workbench launcher forwards a one-time presentation override to Electron', () => {
+  const steps = planClientLaunch({argv: ['--workbench'], env: {}, platform: 'linux', rootDir: '/repo', nodeExecutable: '/usr/bin/node', npmCli: '/npm/bin/npm-cli.js', dependenciesInstalled: true})
+  assert.deepEqual(steps.at(-1).args.slice(-2), ['--', '--workbench'])
+})

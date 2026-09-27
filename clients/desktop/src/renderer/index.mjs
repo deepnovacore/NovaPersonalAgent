@@ -1246,6 +1246,7 @@ async function boot() {
   })
   try {
     const bootstrap = await window.novaAudioAgentDesktop.bootstrap()
+    personalView.controller.desiredPresentation = bootstrap.startupPresentation ?? 'workbench'
     cameraController.setSourceMode(bootstrap.cameraSource)
     cameraController.setConversationEnabled(bootstrap.settings?.conversationVisionEnabled === true)
     axes.cameraSource = bootstrap.cameraSource

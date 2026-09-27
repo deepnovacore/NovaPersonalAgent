@@ -152,3 +152,18 @@ test('failed background synchronization cannot be undone by a stale foreground s
  h.c.receive({type:'personal.state',revision:1,presentation_mode:'workbench',conversations:{selected_id:'a',voice_id:null,items:[]}})
  assert.equal(h.c.presentationMode,'background');assert.equal(h.c.presentationReady,false)
 })
+
+test('startup Orb selection is acknowledged before native presentation and survives reconnect', async () => {
+ const h=presentationHarness()
+ h.c.desiredPresentation='orb'
+ const ready=h.c.connect()
+ assert.equal(h.sent.at(-1).params.mode,'orb')
+ assert.deepEqual(h.applied,[])
+ h.ack();await ready
+ assert.equal(h.c.presentationMode,'orb')
+ assert.equal(h.c.collapsed,true)
+ assert.equal(h.starts,0)
+ h.c.disconnect()
+ const reconnect=h.c.connect();h.ack();await reconnect
+ assert.equal(h.c.presentationMode,'orb')
+})

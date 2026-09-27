@@ -1199,16 +1199,17 @@ for (const acceptance of [null, {}]) test(`presentation IPC validates sender and
  const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
  const start=source.indexOf("ipcMain.handle('nova:personal:presentation',")
  const body=source.slice(start,source.indexOf('\n  })',start)+5)
- const sender={},calls=[],wakeSettings=[];let handler
+ const sender={},calls=[],wakeSettings=[],saved=[];let handler
  const currentSettings={wakeWordEnabled:true}
  const background=source.slice(source.indexOf('function enterBackground(){'),source.indexOf('const requestPresentation ='))
- const install=new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord','nativeAudio','currentSettings','acceptance','acceptanceWakeSettings',`let presentationMode='workbench';${background};${body};return ()=>presentationMode`)
- const mode=install({handle:(_name,callback)=>{handler=callback}},{webContents:sender,isVisible:()=>true,hide:()=>calls.push('hide'),show:()=>calls.push('show'),focus:()=>calls.push('focus')},value=>calls.push(value),{stop(){},reset(){},configure:settings=>wakeSettings.push(settings)},null,currentSettings,acceptance,acceptanceWakeSettings)
- assert.throws(()=>handler({sender:{}},'background'),/rejected/);assert.throws(()=>handler({sender},'invalid'),/rejected/)
- handler({sender},'background');assert.equal(mode(),'background');assert.deepEqual(calls,['hide'])
- calls.length=0;handler({sender},'orb');assert.deepEqual(calls,[true,'show','focus'])
+ const install=new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord','nativeAudio','currentSettings','acceptance','acceptanceWakeSettings','settingsWriter',`const settingsReady=true;let presentationMode='workbench';${background};${body};return ()=>presentationMode`)
+ const mode=install({handle:(_name,callback)=>{handler=callback}},{webContents:sender,isVisible:()=>true,hide:()=>calls.push('hide'),show:()=>calls.push('show'),focus:()=>calls.push('focus')},value=>calls.push(value),{stop(){},reset(){},configure:settings=>wakeSettings.push(settings)},null,currentSettings,acceptance,acceptanceWakeSettings,async patch=>{saved.push(patch.lastPresentation)})
+ await assert.rejects(()=>handler({sender:{}},'background'),/rejected/);await assert.rejects(()=>handler({sender},'invalid'),/rejected/)
+ await handler({sender},'background');assert.equal(mode(),'background');assert.deepEqual(calls,['hide'])
+ calls.length=0;await handler({sender},'orb');assert.deepEqual(calls,[true,'show','focus'])
  assert.deepEqual(wakeSettings,[{wakeWordEnabled:!acceptance}]);assert.equal(currentSettings.wakeWordEnabled,true)
- calls.length=0;handler({sender},'workbench',false);assert.deepEqual(calls,[false]);assert.throws(()=>handler({sender},'orb','yes'),/rejected/)
+ calls.length=0;await handler({sender},'workbench',false);assert.deepEqual(calls,[false]);await assert.rejects(()=>handler({sender},'orb','yes'),/rejected/)
+ assert.deepEqual(saved,['orb','workbench'])
 })
 test('background wake IPC cannot reactivate capture or show the window',async()=>{
  const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
@@ -1224,7 +1225,7 @@ for(const configureShows of [false,true])test(`presentation acknowledgement wait
  const start=source.indexOf("ipcMain.handle('nova:personal:presentation',"),body=source.slice(start,source.indexOf('\n  })',start)+5)
  let handler,onShow,visible=false,acknowledged=false
  const sender={},mainWindow={webContents:sender,isVisible:()=>visible,once:(name,callback)=>{assert.equal(name,'show');onShow=callback},show(){visible=true},focus(){}}
- new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord',`let presentationMode='background';const currentSettings={},acceptance=null,acceptanceWakeSettings=()=>({});${body}`)({handle:(_name,callback)=>{handler=callback}},mainWindow,()=>{},configureShows?{configure:()=>mainWindow.show()}:null)
+ new Function('ipcMain','mainWindow','setPersonalCollapsed','wakeWord',`let presentationMode='background';const settingsReady=true,settingsWriter=async()=>{},currentSettings={},acceptance=null,acceptanceWakeSettings=()=>({});${body}`)({handle:(_name,callback)=>{handler=callback}},mainWindow,()=>{},configureShows?{configure:()=>mainWindow.show()}:null)
  const pending=Promise.resolve(handler({sender},'orb')).then(()=>{acknowledged=true})
  await Promise.resolve();assert.equal(acknowledged,false,'renderer must not reconcile ahead of the native show reset')
  visible=true;onShow();await pending;assert.equal(acknowledged,true)

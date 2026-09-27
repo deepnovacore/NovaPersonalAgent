@@ -152,6 +152,8 @@ npm ci && cp .env.example .env
 启动桌面应用：
 ```bash
 npm run start:client
+# 本次直接打开 Workbench，覆盖已保存的启动偏好
+npm run start:workbench
 ```
 客户端包含麦克风、摄像头、声音开关等按钮，以及设置面板和外部 MCP 设置。你也可以试试把鼠标悬在桌面 orb 上，会有惊喜）
 

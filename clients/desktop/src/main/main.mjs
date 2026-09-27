@@ -88,6 +88,7 @@ import {
   saveSettingsRecovery, restoreSettingsRecovery, clearSettingsRecovery,
   hasPlaintextSecret,
   loadSettings,
+  startupPresentation,
   orbSettings,
   publicSettings,
   readSecret,
@@ -1211,6 +1212,7 @@ function initializeDesktopBootstrap(cameraSource) {
   }) : null
   nativeAudio?.setCaptureEpoch(wakeWord?.epoch ?? 0)
   bootstrap = Object.freeze({
+    startupPresentation: sourceStartupSmoke || acceptance ? 'workbench' : startupPresentation(currentSettings, process.argv),
     audioMode: 'inactive',
     startMuted: !app.isPackaged && process.env.DEV_START_MUTED === '1',
     nativeAvailable,
@@ -1308,7 +1310,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if(event.sender !== mainWindow.webContents || typeof message !== 'string' || message.length > 2000) throw new Error('presentation error rejected')
     return dialog.showMessageBox({type:'error',title:'Nova',message})
   })
-  ipcMain.handle('nova:personal:presentation', (event, mode, activate=true) => {
+  ipcMain.handle('nova:personal:presentation', async (event, mode, activate=true) => {
     if(event.sender !== mainWindow.webContents || !['background','workbench','orb'].includes(mode) || typeof activate!=='boolean') throw new Error('presentation request rejected')
     if(mode === 'background'){enterBackground();return}
     // configure() can show too; fence before any path can trigger the native reset.
@@ -1316,6 +1318,11 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     const wasBackground=presentationMode==='background'
     presentationMode=mode
     setPersonalCollapsed(mode === 'orb')
+    if (settingsReady) {
+      await settingsWriter({lastPresentation: mode}, undefined, {preserveSecrets: true}).catch(error => {
+        console.error(`[desktop-diagnostic] presentation_save_failure type=${error.name}`)
+      })
+    }
     if(wasBackground)wakeWord?.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
     if(activate){mainWindow.show();mainWindow.focus();return shown}
   })

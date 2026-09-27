@@ -1,4 +1,10 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "启动时打开": "Open on startup",
+  "默认界面": "Default view",
+  "Orb（悬浮球）": "Orb",
+  "Workbench（工作台）": "Workbench",
+  "上次使用": "Last used",
+  "下次启动时生效；上次使用会记住最后打开的悬浮球或工作台。": "Applies on the next launch. Last used remembers the most recent Orb or Workbench view.",
   "密钥分类": "API key categories",
   "模型与语音": "Models & voice",
   "搜索与应用连接": "Search & app connections",

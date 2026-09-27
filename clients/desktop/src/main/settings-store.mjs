@@ -42,6 +42,8 @@ const MAX_CIPHERTEXT_BASE64 = 8192
 export const DEFAULT_SETTINGS = Object.freeze({
   version: SETTINGS_VERSION,
   language: 'zh-CN',
+  startupView: 'workbench',
+  lastPresentation: 'workbench',
   palette: 'ember',
   proactivity: 'balanced',
   codingProgressNarration: 'smart',
@@ -256,6 +258,8 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
   return {
     version: SETTINGS_VERSION,
     language: pick(source.language, fallback.language, DEFAULT_SETTINGS.language, value => ['zh-CN', 'en'].includes(value) ? value : null),
+    startupView: pick(source.startupView, fallback.startupView, DEFAULT_SETTINGS.startupView, value => ['orb', 'workbench', 'last'].includes(value) ? value : null),
+    lastPresentation: pick(source.lastPresentation, fallback.lastPresentation, DEFAULT_SETTINGS.lastPresentation, value => ['orb', 'workbench'].includes(value) ? value : null),
     palette: pick(source.palette, fallback.palette, DEFAULT_SETTINGS.palette, validPalette),
     codingProgressNarration: pick(source.codingProgressNarration, fallback.codingProgressNarration, DEFAULT_SETTINGS.codingProgressNarration, value => value === 'smart' || value === 'continuous' ? value : null),
     proactivity: pick(source.proactivity, fallback.proactivity, DEFAULT_SETTINGS.proactivity, validProactivity),
@@ -314,8 +318,14 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
   }
 }
 
+export function startupPresentation(settings, argv = []) {
+  const normalized = normalizeSettings(settings)
+  if (argv.includes('--workbench')) return 'workbench'
+  return normalized.startupView === 'last' ? normalized.lastPresentation : normalized.startupView
+}
+
 export function backendSettings(settings) {
-  const {palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
+  const {startupView, lastPresentation, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -326,6 +336,7 @@ export function publicSettings(settings) {
   return {
     version: normalized.version,
     language: normalized.language,
+    startupView: normalized.startupView,
     palette: normalized.palette,
     proactivity: normalized.proactivity,
     codingProgressNarration: normalized.codingProgressNarration,
@@ -535,9 +546,10 @@ export function applySettingsUpdate(current, patch, codec) {
 // nothing, and leaves the queue usable for whatever is behind it.
 export function createSettingsWriter({ getCurrent, commit, save, codec }) {
   let queue = Promise.resolve()
-  return (patch, prepare) => {
+  return (patch, prepare, {preserveSecrets = false} = {}) => {
     const write = queue.then(async () => {
-      const next = applySettingsUpdate(getCurrent(), patch, codec)
+      // Window-state persistence must not prompt for or migrate credentials.
+      const next = applySettingsUpdate(getCurrent(), preserveSecrets ? {...patch, secrets: undefined} : patch, preserveSecrets ? undefined : codec)
       const prepared = await prepare?.(next)
       try {
         await save(next)

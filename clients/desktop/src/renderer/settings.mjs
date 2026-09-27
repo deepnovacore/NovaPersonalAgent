@@ -387,6 +387,7 @@ for (const scope of ['history', 'session']) document.getElementById(`usage-${sco
 
 function render(view, drafts, state) {
   if (!view) return
+  document.getElementById('startup-view').value = view.startupView ?? 'workbench'
   document.getElementById('language').value = view.language ?? 'zh-CN'
   document.getElementById('language-restart-hint').hidden = (view.language ?? 'zh-CN') === currentLanguage()
   currentView = view
@@ -781,3 +782,5 @@ void (async () => {
     statusLabel.textContent = t("读取设置失败")
   }
 })()
+
+bindStage(document.getElementById('startup-view'), 'change', () => ({startupView: document.getElementById('startup-view').value}))
