@@ -16,18 +16,15 @@
 
 ## News
 
-- **2026-09-24 · 🎉 [v0.2.3 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.3)** — A guided first run: one DashScope API Key is enough to start talking, a setup window tests the key before saving, and search, camera and memory switch themselves on once their key is present.
-
-- **2026-09-21 · 🎉 [v0.2.2 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — Ubuntu 22.04+ x64 joins macOS and Windows, with npm desktop installation and the new `nova-audio-agent-server` package for headless hosting and terminal QR pairing.
-
-- **2026-09-21 ·** **🎉 [v0.2.0 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)**
-  Configurable voice pipelines, personal memory, and a bilingual desktop experience, now available for macOS and Windows.
-  - Cross-platform approvals for sandbox network access and command execution.
-  - A leaner voice layer; workspace/session scheduling moves into the coding executor.
-  - Pluggable ASR / LLM / TTS pipelines, decoupled from QwenAudioRealtime.
-  - Custom MCP servers for search and RAG; wake words “你好星核” and “Hi Nova”. Chinese/English interface and system prompts.
-  - Personal memory with mem0 / VoiceMem.
-  - An iPhone client connected to your PC runtime over Tailscale.
+- **2026-09-27 · [v0.3.0 Preview](https://github.com/deepnovacore/NovaAudioAgent/tree/v0.3.0preview)** — Nova grows from a voice assistant into a personal agent.
+  - **Workbench main window**: Todos, Ideas, Goals, Feeds, Tasks and Profile on the left, the conversation with Nova on the right; the orb stays as the collapsed form.
+  - **Tasks you can check**: delegated work carries acceptance criteria, and Nova verifies the evidence before calling it done; you can take over a task and hand it back at any time.
+  - **Memory grounded in your sources**: Nova proposes candidates from authorized folders, email, calendars and Feishu, and you decide what to keep; every entry can be traced, corrected or forgotten.
+  - **News and project recaps**: an interest-ranked feed and recap cards built from your project files, each with its sources.
+  - **More voice options**: StepAudio 3 integrated provider (preview), Qwen Audio 3.1, and Volcengine voiceprint verification.
+- **2026-09-24 · [v0.2.3](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.3)** — Guided first run: one DashScope API Key is enough to start talking.
+- **2026-09-21 · [v0.2.2](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — Ubuntu 22.04+ x64 desktop, plus the headless `nova-audio-agent-server` with QR pairing.
+- **2026-09-21 · [v0.2.0](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)** — Configurable ASR / LLM / TTS pipelines, personal memory, custom MCP, wake words, bilingual desktop on macOS and Windows, and an iPhone client over Tailscale.
 - **2026-08-31 · v0.1.0** — Always-on voice, background Codex tasks, live steering, workspace/session management, and selective progress updates.
 
 ## 1. Highlights
@@ -45,6 +42,8 @@ worth it at all** (see the [design article](docs/en/blog/2026-08-proactive-voice
 - **Voice-run workspaces.** Create and switch workspaces and sessions by voice, with your confirmation.
 - **Clarify before acting.** Nova asks about unclear requirements before handing work to the background executor.
 - **Steer while it runs.** Add requirements and constraints by voice while a task is in progress.
+- **One window for your day.** Todos, goals, news and delegated tasks sit beside the conversation in the Workbench, grounded in the sources you authorize.
+- **Done means verified.** Each task carries acceptance criteria; Nova checks the evidence before it reports completion, and you can take over at any point.
 
 ## 2. Architecture
 
@@ -106,7 +105,7 @@ For more details about the architecture, check [Architecture](docs/en/architectu
   <tr>
     <td width="50%" valign="top">
       <h3>Memory that stays with you</h3>
-      <p>mem0 recalls personal context across conversations, with source text you can inspect.</p>
+      <p>Nova recalls personal context across conversations; every memory shows where it came from and can be corrected or forgotten.</p>
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="assets/features/mem0-dark.en.png">
         <img src="assets/features/mem0.en.png" alt="Four local mem0 memories with source details" width="100%">
@@ -127,7 +126,7 @@ For more details about the architecture, check [Architecture](docs/en/architectu
 Requirements: Node.js 22+, npm, Git, a logged-in `codex` executable (app-server is the only
 Codex transport).
 
-Besides the shipped app from releases, you can also install using npm
+Besides the shipped app from releases, you can also install using npm. The v0.3.0 Preview runs from source on the `v0.3.0preview` branch.
 
 ```bash
 npm install --global nova-audio-agent@0.2.3
@@ -178,6 +177,7 @@ wake-word Worker; explicit mute stops wake detection. See
 | [Architecture](docs/en/architecture.md) | Modules and boundaries |
 | [Glossary and invariants](docs/en/glossary.md) | Vocabulary and rules |
 | [Getting started](docs/en/getting-started.md) | Setup and integrations |
+| [Workbench](docs/en/workbench.md) · [Tasks](docs/en/tasks.md) · [Sources and connectors](docs/en/sources-and-connectors.md) | The main window, delegated work, and what Nova may read |
 | [When should a voice agent speak?](docs/en/blog/2026-08-proactive-voice-agent-design-space.md) | Voice interaction design |
 | [Node runtime migration archive](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
 
@@ -185,7 +185,7 @@ wake-word Worker; explicit mute stops wake detection. See
 
 Ongoing development uses `v0.3.0dev`; `main` remains the released baseline.
 
-- [ ] **v0.3.0:** bring text and voice into one main window with conversation, activity, task and memory views; add memory-grounded suggestions and follow-up; make personal memories traceable, correctable and removable; connect user-authorized folders, email, calendars and Feishu conversations.
+- [x] **v0.3.0:** one main window for text and voice with Todos, Ideas, Goals, Feeds, Tasks and Profile; tasks with acceptance criteria, verified completion and takeover; memory-grounded suggestions; traceable, correctable and removable personal memory; user-authorized folders, email, calendars and Feishu conversations.
 - [ ] **v0.4.0:** expand coding backends with Kimi Code and pi agent; add a GUI executor with AutoGLM as the first example, enabling collaboration across specialist agents.
 
 Releases require feature and supported-platform acceptance. Ubuntu 22.04+ x64 desktop and headless npm packages are included in the candidate release checks.

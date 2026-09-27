@@ -49,6 +49,8 @@ DASHSCOPE_API_KEY=你的百炼密钥
 
 `ask` 保留权限确认；`yolo` 允许 Codex 无审批执行，请按信任范围选择。
 
+还有几个变量用于较少见的配置。`COMPOSIO_API_KEY` 用于通过 Composio 授权 Google 连接器（Gmail 与 Calendar）。`OPENROUTER_API_KEY` 提供 Jev 判定模型，用于给个人记忆候选内容（Todo、Idea、Goal、Profile）打分，以及给资讯排序相关性；缺少此密钥时，这两项功能都会保持关闭。`DOUBAO_ASR_VOICEPRINT_ENABLED` 与 `DOUBAO_ASR_VOICEPRINT_ID`、`DOUBAO_ASR_VOICEPRINT_NAME`、`DOUBAO_ASR_VOICEPRINT_HEALTH_URL` 搭配使用，开启可选的 ASR 声纹校验。`NEWS_LANGUAGE` 独立于界面语言设置资讯流的语言。`MEMORY_LEDGER_PATH` 可覆盖统一记忆账本 SQLite 文件的存放位置（默认 `~/.nova-audio-agent/workspace-graph.sqlite`）。
+
 选择远程记忆或关闭记忆时，移除本地 provider 配置。远程记忆设置见[个人记忆](personal-memory.md)；手机连接见[iPhone 指南](iphone.md)。
 
 [返回上手指南](getting-started.md)

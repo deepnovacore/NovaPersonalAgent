@@ -64,6 +64,8 @@ npm run start:client
 | 集成 `integrated` | 一个模型直接处理语音，配置较少 | Qwen `qwen-audio-3.0-realtime-plus`，音色 `longanqian` |
 | 级联 `cascaded` | 分别配置识别、语言模型和合成 | 火山 ASR -> DeepSeek `deepseek-flash` -> 火山 TTS |
 
+集成模式也可选择 StepFun（`INTEGRATED_PROVIDER=stepfun`，预览特性），需配置 `STEPFUN_API_KEY`。
+
 每个平台使用一把密钥，在选中的服务间复用：DeepSeek 使用 `DEEPSEEK_API_KEY`，Qwen 使用 `DASHSCOPE_API_KEY`，火山语音使用 `DOUBAO_BIGMODEL_API_KEY`。可通过 `DOUBAO_ASR_API_KEY` 单独指定识别密钥；未填写时，ASR 回退到 `DOUBAO_BIGMODEL_API_KEY`。
 
 Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板只显示当前模式需要的配置；密钥只写并返回存在状态。服务配置在后台下次启动时生效，不会自动切换到其他供应商。
@@ -76,9 +78,13 @@ Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板�
 
 待机时，麦克风输入交给本地唤醒检测。主动静音会停止检测，需要手动解除静音。
 
+### 选择主窗口
+
+桌面启动时会进入三种界面之一，由 `startupView` 设置决定：`orb` 以悬浮球启动，`workbench` 打开完整窗口（默认），`last` 恢复上次关闭时的界面。运行 `npm run start:workbench` 可在本次启动时打开 Workbench，不受已保存设置影响。详见[Workbench](workbench.md)。
+
 ## 5. 记忆、知识库与手机
 
-- **个人记忆**默认使用本地 mem0。右键悬浮球打开「记忆面板」，可查看原话与整理结果。详见[个人记忆](personal-memory.md)。
+- **个人记忆**默认开启，使用本地统一账本保存；可在 Workbench 的「Profile」页查看、纠正或忘记条目，也可显式选择 mem0。详见[个人记忆](personal-memory.md)。
 - **文档知识库**需在能力设置中启用。导入文件前会说明数据处理方式；生成向量会把文本发送给配置的模型服务。
 - **连接 iPhone**：macOS 桌面右键悬浮球，选择「连接 iPhone…」，启用手机连接后按页面提示设置网络并扫码。详见[手机连接与远程服务](iphone.md)。
 

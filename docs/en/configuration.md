@@ -49,6 +49,8 @@ Set only what you need to change. Keep credentials out of Git.
 
 `ask` retains permission prompts; `yolo` lets Codex execute without approval. Choose according to your trust requirements.
 
+A few more variables round out less common setups. `COMPOSIO_API_KEY` authorizes the Google connector (Gmail and Calendar) through Composio. `OPENROUTER_API_KEY` feeds the Jev judgment model that scores personal-memory candidates (Todo, Idea, Goal, Profile) and ranks news relevance; both stay off without it. `DOUBAO_ASR_VOICEPRINT_ENABLED`, together with `DOUBAO_ASR_VOICEPRINT_ID`, `DOUBAO_ASR_VOICEPRINT_NAME` and `DOUBAO_ASR_VOICEPRINT_HEALTH_URL`, turns on opt-in speaker verification for ASR. `NEWS_LANGUAGE` sets the news feed's language independently of the UI language. `MEMORY_LEDGER_PATH` overrides where the unified memory ledger's SQLite file lives (default `~/.nova-audio-agent/workspace-graph.sqlite`).
+
 Remove the local provider setting when disabling memory or selecting a remote service. See [personal memory](personal-memory.md) for remote settings and the [iPhone guide](iphone.md) for phone connections.
 
 [Back to getting started](getting-started.md)

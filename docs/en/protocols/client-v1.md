@@ -87,7 +87,7 @@ A cascaded host advertises `text_input` and `dictation` in `client.ready.capabil
 
 Recognition returns `input.transcription` with the matching `id` and `text`, or only `error: recognition_failed` on failure. A draft is not a user turn and does not trigger an LLM or tools. The client must explicitly submit the edited `input.text`.
 
-### v0.3 personal host and reliable text acceptance
+### Personal host and reliable text acceptance
 
 The authenticated desktop socket accepts `personal.command` directly. Remote clients wrap the same payload in `client.command`; outer `client.command_result` acknowledges delivery to the control handler, while `personal.result` reports the domain operation:
 

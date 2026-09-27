@@ -18,18 +18,15 @@ https://github.com/user-attachments/assets/061697f3-fff6-47d6-924b-8a29eef4ab45
 
 ## News
 
-- **2026-09-24 · 🎉 [v0.2.3 已发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.3)** — 首次启动更顺手：只要一个 DashScope API Key 就能开始对话，设置窗口会先测试密钥再保存；搜索、摄像头与记忆在配好对应密钥后自动启用。
-
-- **2026-09-21 · 🎉 [v0.2.2 已发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — 新增 Ubuntu 22.04+ x64 桌面 npm 安装与启动，以及支持终端二维码配对的无头服务包 `nova-audio-agent-server`；继续支持 macOS 和 Windows。
-
-- **2026-09-21 ·** **🎉 [v0.2.0 正式发布！](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)**
-  可配置语音管线、个人记忆与双语桌面体验，现已提供 macOS 和 Windows 版本。
-  - 完善跨平台审批：沙箱网络访问、命令执行等请求转交前台确认。
-  - 精简快脑工具，将 workspace/session 调度下沉至编码执行器。
-  - 接入可配置 ASR / LLM / TTS 的级联管线，协议与 QwenAudioRealtime 解耦。
-  - 支持自定义 MCP、搜索与 RAG，中英双语界面与系统提示词，以及“你好星核” / “Hi Nova”唤醒词。
-  - 接入 mem0 / VoiceMem 个人记忆
-  - 新增 iPhone 客户端，通过 Tailscale 连接电脑上的 runtime。
+- **2026-09-27 · [v0.3.0 Preview](https://github.com/deepnovacore/NovaAudioAgent/tree/v0.3.0preview)** — 小诺从语音助手长成了个人 Agent。
+  - **Workbench 主窗口**：左侧是待办、想法、目标、资讯、Agent 执行和「关于我」，右侧是与小诺的对话；悬浮球作为收起后的形态保留。
+  - **任务可验收**：交出去的活带着验收标准，小诺核对证据后才说完成；随时可以接手，再交还给它。
+  - **记忆有据可查**：从你授权的目录、邮件、日历和飞书里整理候选，留不留由你决定；每一条都能溯源、纠正或删除。
+  - **资讯与项目回顾**：按兴趣排序的资讯流，以及根据项目文件生成、附带出处的回顾卡片。
+  - **更多语音选择**：新增 StepAudio 3 集成模型（预览）、Qwen Audio 3.1，以及火山声纹验证。
+- **2026-09-24 · [v0.2.3](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.3)** — 首次启动引导：一个 DashScope API Key 即可开始对话。
+- **2026-09-21 · [v0.2.2](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — 支持 Ubuntu 22.04+ x64 桌面端，新增可扫码配对的无头服务包 `nova-audio-agent-server`。
+- **2026-09-21 · [v0.2.0](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)** — 可配置 ASR / LLM / TTS 管线、个人记忆、自定义 MCP、唤醒词、中英双语桌面端（macOS / Windows），以及经 Tailscale 连接的 iPhone 客户端。
 - **2026-08-31 · v0.1.0** — 常驻语音、Codex 后台执行、途中补充需求、工作区与会话管理，以及按需播报进度。
 
 ## 1. 核心特性
@@ -45,6 +42,8 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 - **语音管理工作区。** 创建、切换工作区与会话，由你确认。
 - **先问清，再动手。** 需求不明确时先澄清，再交给后台执行。
 - **执行中随时调整。** 任务进行中，通过语音补充要求和约束。
+- **一个窗口装下一天。** 待办、目标、资讯和交出去的任务都在 Workbench 里，就在对话旁边，依据是你授权的资料。
+- **完成要经得起验收。** 每个任务带验收标准，小诺核对证据后才汇报完成；你随时可以接手。
 
 ## 2. 设计架构
 
@@ -107,7 +106,7 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
   <tr>
     <td width="50%" valign="top">
       <h3>记住与你有关的事</h3>
-      <p>mem0 跨对话回忆个人信息，随时查看记忆与原话。</p>
+      <p>跨对话记住与你有关的事；每条记忆都能看到出处，也能纠正或删除。</p>
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="assets/features/mem0-dark.png">
         <img src="assets/features/mem0.png" alt="mem0 本机记忆及原话入口" width="100%">
@@ -126,6 +125,8 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 ## 3. 快速开始
 
 环境要求：Node.js 22+、npm、Git、已登录的 `codex` 可执行文件（Codex 只走 app-server）
+
+v0.3.0 Preview 需在 `v0.3.0preview` 分支从源码运行；稳定版可直接用 npm 安装：
 
 ```bash
 # 全局安装
@@ -176,14 +177,15 @@ Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia`
 | [架构](docs/zh-CN/architecture.md) | 模块与边界 |
 | [术语与不变量](docs/zh-CN/glossary.md) | 核心常量 |
 | [上手指南](docs/zh-CN/getting-started.md) | 安装与集成 |
-| [语音助手什么时候该开口？](docs/en/blog/2026-08-proactive-voice-agent-design-space.md) | 语音交互设计 |
+| [Workbench](docs/zh-CN/workbench.md) · [任务](docs/zh-CN/tasks.md) · [资料来源与连接器](docs/zh-CN/sources-and-connectors.md) | 主窗口、交办的任务，以及小诺能读取哪些资料 |
+| [语音助手什么时候该开口？](docs/zh-CN/blog/2026-08-proactive-voice-agent-design-space.md) | 语音交互设计 |
 | [Node runtime 迁移归档](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | `v0.1.0` tag 历史中的迁移期计划 |
 
 ## 5. 路线图
 
 后续开发以 `v0.3.0dev` 为主；`main` 保持已发布基线。
 
-- [ ] **v0.3.0：** 将文字与语音整合进主窗口，提供对话、动态、任务和记忆视图；围绕记忆发现需求、提出建议并持续跟进；让个人记忆可追溯、可纠正、可删除；接入用户授权的目录、邮件、日历和飞书会话。
+- [x] **v0.3.0：** 文字与语音整合进同一个主窗口，含待办、想法、目标、资讯、Agent 执行和「关于我」；任务带验收标准、核验完成并可随时接手；基于记忆提出建议；个人记忆可追溯、可纠正、可删除；接入用户授权的目录、邮件、日历和飞书会话。
 - [ ] **v0.4.0：** 扩展 Kimi Code、pi agent 等 coding 后端；以 AutoGLM 为首个示例接入 GUI 执行器，支持专长 Agent 之间的协作。
 
 发布前须完成功能与支持平台验收。Ubuntu 22.04+ x64 桌面端与无头 npm 包纳入候选发布验收。

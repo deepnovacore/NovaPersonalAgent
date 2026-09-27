@@ -64,6 +64,8 @@ Keys are write-only: the panel shows presence, not their values. Edit `.env` to 
 | `integrated` | One model handles speech directly | Qwen `qwen-audio-3.0-realtime-plus`, voice `longanqian` |
 | `cascaded` | Separate recognition, language model and speech synthesis | Volcengine ASR -> DeepSeek `deepseek-flash` -> Volcengine TTS |
 
+Integrated mode can also use StepFun (`INTEGRATED_PROVIDER=stepfun`, preview) with `STEPFUN_API_KEY`.
+
 One key per platform is reused across selected services: DeepSeek uses `DEEPSEEK_API_KEY`; Qwen uses `DASHSCOPE_API_KEY`; Volcengine speech uses `DOUBAO_BIGMODEL_API_KEY`. An optional `DOUBAO_ASR_API_KEY` overrides recognition credentials; the ASR fallback is `DOUBAO_BIGMODEL_API_KEY`.
 
 Ark is an explicit cascaded LLM option using `ARK_API_KEY`. The conditional Settings Panel shows only the selected mode's controls. Service settings take effect on the backend's next launch. Nova does not automatically fail over to another provider.
@@ -74,9 +76,13 @@ Local wake-word detection is off by default. Enabling it downloads the model on 
 
 While asleep, microphone input goes to local wake detection. Explicit mute stops detection too; unmute manually to resume.
 
+### Choose the main window
+
+Desktop launches into one of three views, controlled by the `startupView` setting: `orb` starts hidden as a floating orb, `workbench` opens the full window (the default), and `last` reopens whichever view was active when Nova last closed. Run `npm run start:workbench` to open Workbench for a single launch regardless of the saved setting. See [Workbench](workbench.md).
+
 ## 5. Memory, documents and iPhone
 
-- **Personal memory** uses local mem0 by default. Open the memory panel from the orb menu to inspect original wording and learned facts. See [personal memory](personal-memory.md).
+- **Personal memory** is on by default and stored locally in the unified memory ledger; inspect, correct or forget entries from the Workbench's Profile page. mem0 remains available as an explicit alternative. See [personal memory](personal-memory.md).
 - **Document knowledge** is enabled in capability settings. Review the data-processing notice before importing files; embedding sends text to your configured model service.
 - **iPhone connection**: on macOS, choose “连接 iPhone…” from the orb menu, enable the phone service, and follow the network and QR-code instructions. See [remote service and pairing](iphone.md).
 
