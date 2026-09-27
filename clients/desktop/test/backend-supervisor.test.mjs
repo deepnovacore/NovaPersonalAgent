@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {EventEmitter} from 'node:events'
 import test from 'node:test'
 import {shutdownBackend, waitForBackendReadiness} from '../src/main/backend.mjs'
-import {createBackendDiagnosticCollector, createBackendSupervisor, createBackendControl, classifyBackendFailure} from '../src/main/backend-supervisor.mjs'
+import {configWarnings, createBackendDiagnosticCollector, createBackendSupervisor, createBackendControl, classifyBackendFailure} from '../src/main/backend-supervisor.mjs'
 function deferred() {
   let resolve
   const promise = new Promise(next => { resolve = next })
@@ -347,4 +347,12 @@ test('collector surfaces safe Codex detail but does not promote it to a startup 
     kind: 'recoverable', code: 'backend_disconnected',
   })
   assert.equal(JSON.stringify(collector.failure()).includes('private'), false)
+})
+
+test('runtime config warnings are echoed line by line and never become a failure code', () => {
+  const chunk = 'noise\n[config-warning] SURROGATE_MODEL is no longer read; rename it to SUPPORT_MODEL\nmore\n'
+  assert.deepEqual(configWarnings(chunk), ['[config-warning] SURROGATE_MODEL is no longer read; rename it to SUPPORT_MODEL'])
+  assert.deepEqual(configWarnings('[runtime-diagnostic] assembly_failed\n'), [])
+  const diagnostic = createBackendDiagnosticCollector()
+  assert.equal(diagnostic.push(chunk), null)
 })

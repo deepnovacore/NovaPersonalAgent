@@ -202,12 +202,12 @@ Human-centric 与 Work-centric 是同一张修订表上的 kind，不是两个�
 | 半 | 何时 | 属于 | 输入 → 输出 |
 |---|---|---|---|
 | 发现即抽取 | 入库时，每条 `evidence_record` 写入后 | A → B 写路径 | 原文 → `extracted`（候选 `commitment` / `fact` / `entity` / 日期）→ 逐条 merge |
-| 发现即筛选 | 02 卷的 `tick` 与来源变化机会 | C 视图 → 02 卷 | 当前态 + 时钟 + 近期交付 → 少量值得此刻提的条目，交给 Surrogate |
+| 发现即筛选 | 02 卷的 `tick` 与来源变化机会 | C 视图 → 02 卷 | 当前态 + 时钟 + 近期交付 → 少量值得此刻提的条目，交给 Proactive |
 
 - 抽取是有界的一次模型调用，输出经 zod 校验后才进 `extracted`；校验失败记录并跳过，不阻塞入账。
 - 抽取结果全部是 `origin = inferred`，除非来源本身是用户在对话中的明确表达（`user_confirmed`，
   非 ASR 原始转写，沿用 历史存储规格 的 `user_transcript` vs `user_confirmed` 区分）。
-- 筛选不调用工具、不新增条目，只是 02 卷 §2.2 快照的供给方；02 卷 Surrogate 的职责不变。
+- 筛选不调用工具、不新增条目，只是 02 卷 §2.2 快照的供给方；02 卷 Proactive 的职责不变。
 - 同事架构图上的 "Discovery" 框只是后一半；前一半画进 Memory 框内（改图意见见对照记录）。
 
 ## 8. 执行器结果入账规则
@@ -215,7 +215,7 @@ Human-centric 与 Work-centric 是同一张修订表上的 kind，不是两个�
 右侧来源"任务与工具结果"只在**有可核验产物**时产生 `evidence_record`：文件被修改（路径 + 哈希）、
 PR / commit 已创建（URL 或 SHA）、命令返回码与截断输出、`EXECUTOR_TASKS` 里主机确认的
 `completed` 事实。`source_kind = task_result`，`locator` 指向产物。模型对"我做了什么"的叙述、
-进度气泡文案、Surrogate 的 reason 一律不入账。这是 mycontext "agent 输出不作证据"在 Nova 的落点。
+进度气泡文案、Proactive 的 reason 一律不入账。这是 mycontext "agent 输出不作证据"在 Nova 的落点。
 
 ## 9. 不做
 
@@ -249,7 +249,7 @@ PR / commit 已创建（URL 或 SHA）、命令返回码与截断输出、`EXECU
 - **14 重抽取不改历史**：对同一段账本用新抽取器重跑；产生的新修订 `supersedes` 指向旧修订；
   旧修订与其 `evidence_refs` 不变；内容等价的候选为 NOOP，不产生行。
 - **15 承诺从飞书消息抽出并被筛选**：fixture 里一条飞书消息"周五前把评审意见发我"；入库抽取出
-  `commitment{owed_by_me, due=本周五, counterparty=发送者}`；周四的 `tick` 筛选把它交给 Surrogate；
+  `commitment{owed_by_me, due=本周五, counterparty=发送者}`；周四的 `tick` 筛选把它交给 Proactive；
   用户在对话中说"已经发了"后，merge 写 `status: done` 修订，下次 tick 不再筛出。
 - **16 有时效条目过期**：`valid_until` 已过的条目不出现在回复偏好、回忆、proposal 候选三种投影；
   记忆页"已过期"筛选可见，修订历史完整。

@@ -231,6 +231,16 @@ export class BlockingConfigurationError extends ConfigurationError {
   }
 }
 
+/** Environment names that were renamed without an alias; the old name is ignored, so its presence deserves a startup warning. */
+export const RENAMED_ENVIRONMENT: Readonly<Record<string, string>> = {SURROGATE_MODEL: 'SUPPORT_MODEL'}
+
+/** One `[config-warning]` line per renamed variable still set in the environment. */
+export function renamedEnvironmentWarnings(environment: NodeJS.ProcessEnv): readonly string[] {
+  return Object.entries(RENAMED_ENVIRONMENT)
+    .filter(([removed]) => environment[removed] !== undefined)
+    .map(([removed, current]) => `[config-warning] ${removed} is no longer read; rename it to ${current}`)
+}
+
 export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textConversations = false): Settings {
   const pipelineMode = parsePipelineMode(environment.PIPELINE_MODE)
   const integratedProvider = pipelineMode === 'integrated'

@@ -5,7 +5,7 @@ import {writeFileSync as writeAcceptanceFile} from 'node:fs'
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
-import {createBackendControl, classifyBackendFailure, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
+import {createBackendControl, classifyBackendFailure, configWarnings, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
 import {FeishuConnector, VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
@@ -1167,6 +1167,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
       sendToSettings('nova:settings:changed', settingsView())
     }})
     spawnedBackend.stderr?.on('data', chunk => {
+      for (const warning of configWarnings(chunk.toString('utf8'))) console.error(warning)
       const code = diagnostic.push(chunk.toString('utf8'))
       if (code) console.error(`[backend-diagnostic] ${code}`)
     })

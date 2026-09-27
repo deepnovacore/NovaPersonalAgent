@@ -6,6 +6,7 @@ import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, PER
 import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop/desktop-session.js'
 import {announceReadiness} from './desktop.js'
 import {buildProductionComposition} from './composition/production-composition.js'
+import {renamedEnvironmentWarnings} from './config/config.js'
 
 type UtilityProcess = NodeJS.Process & {readonly parentPort?: DesktopStopParentSource & {postMessage(message: unknown): void}}
 
@@ -38,6 +39,7 @@ const control = installDesktopControl({...(parentPort === undefined ? {} : {pare
 const onDiagnostic = (line: string): void => {
   process.stderr.write(`${line}\n`)
 }
+for (const warning of renamedEnvironmentWarnings(process.env)) onDiagnostic(warning)
 
 const exitCode = await runDesktopEntryWithStopSources({
   token,

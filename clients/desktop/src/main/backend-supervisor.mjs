@@ -286,6 +286,12 @@ const CODEX_DIAGNOSTIC_CODES = new Set([
   ].map(code => `codex_project_view_refresh_${code}`),
 ])
 const LINE = /\[runtime-diagnostic\]\s+([a-z0-9_]{1,64})/g
+const CONFIG_WARNING = /\[config-warning\] [\x20-\x7e]{1,160}/g
+
+/** Runtime configuration warnings name only variables, never values, so the main process can echo them verbatim. */
+export function configWarnings(chunk) {
+  return String(chunk).match(CONFIG_WARNING) ?? []
+}
 
 export function classifyBackendFailure(code) {
   if (['credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid'].includes(code)) return Object.freeze({kind: 'unavailable', code})

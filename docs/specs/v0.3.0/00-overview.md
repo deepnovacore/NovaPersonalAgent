@@ -19,7 +19,7 @@ here propose deltas and never silently rewrite those volumes.
 | Volume | Topic | 轨道 |
 |---|---|---|
 | [01 多入口与主窗口](01-multi-entry-and-main-window.md) | 文字 / 全双工语音 / 长按草稿共用一个输入框；主窗口从现有桌面长出，悬浮窗为收起态；共享主机状态 | B |
-| [02 需求发现与动态页](02-need-discovery-and-feed.md) | 扩展 Surrogate 输出 proposal；低频检查；主机校验、入池、去重、交付记账；`feed_item` 契约 | A |
+| [02 需求发现与动态页](02-need-discovery-and-feed.md) | 扩展 Proactive 输出 proposal；低频检查；主机校验、入池、去重、交付记账；`feed_item` 契约 | A |
 | [03 用户视角记忆](03-user-memory-view.md) | `memory_entry` 投影；来源、stated/inferred；纠正与忘记的回写与传播；概览段落的覆盖声明 | A 与 B 交界 |
 | [04 来源与 connector](04-sources-and-connectors.md) | 用户配置的本地目录；一个邮件/日历 provider；飞书 IM 作为来源与投递渠道；授权、暂停、断开、删除；MCP 作为暴露方式 | C |
 | [06 记忆底座](06-memory-substrate.md) | 账本 / 条目 / 视图三阶段；`evidence_record` 与 `entry_revision` 契约；merge 唯一写入口；Discovery 拆为抽取与筛选 | A 与 C 交界 |
@@ -132,7 +132,7 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
   真机验收未完成。
 - **主动机制**：`runtime/src/core/suggestions.ts`（`SuggestionPool`；kind `question | notify | followup`；
   status `pending | fired | withdrawn | expired`；`evidence_refs`、`expires_at`、`cooldown_until`、
-  `delivery_policy`）→ Surrogate（`runtime/src/model/prompting.ts` 的 `SURROGATE_SYSTEM`，只选择不生成、
+  `delivery_policy`）→ Proactive（`runtime/src/model/prompting.ts` 的 `SURROGATE_SYSTEM`，只选择不生成、
   不调用工具；输出契约 `speak / suggestion_id / progress_class / reason` 在 `runtime/src/core/ports.ts`
   与 `runtime/src/model/proactivity.ts`）→ `runtime/src/realtime/floor.ts` 仲裁 allow / preempt / defer。
   runtime 有黑板维护等内部定时器，但**没有用于需求发现的低频检查**；主动行为全部由执行器进度与
@@ -162,7 +162,7 @@ golden 向量钉住，沿用 [client-v1](../../protocols/client-v1.md) 的 `clie
 ## Invariants that must not regress
 
 - FrontBrain 前台工具面不因本系列扩大；新增能力通过执行器端口、直接 MCP 或主机内部路径接入。
-- Surrogate 只决定"是否值得开口、选哪条"，可以提出 proposal，但不生成给用户听的话、不调用工具、
+- Proactive 只决定"是否值得开口、选哪条"，可以提出 proposal，但不生成给用户听的话、不调用工具、
   不扩大自身权限或提高打扰等级。
 - 外部内容（文件正文、邮件、日历、MCP 返回）始终是低信任证据，不是系统指令，也不是用户授权。
 - 推断不升级为授权。记忆里的"用户可能想要"不能触发任何写操作或执行。
