@@ -50,7 +50,7 @@ export const featureCards = [
   {
     "lang": "en",
     "title": "Memory that stays with you",
-    "description": "mem0 recalls personal context across conversations, with source text you can inspect.",
+    "description": "Nova recalls personal context across conversations; every memory shows where it came from and can be corrected or forgotten.",
     "alt": "Four local mem0 memories with source details",
     "image": "/doc-assets/assets/features/mem0-dark.en.png",
     "caption": ""
@@ -114,7 +114,7 @@ export const featureCards = [
   {
     "lang": "zh-CN",
     "title": "记住与你有关的事",
-    "description": "mem0 跨对话回忆个人信息，随时查看记忆与原话。",
+    "description": "跨对话记住与你有关的事；每条记忆都能看到出处，也能纠正或删除。",
     "alt": "mem0 本机记忆及原话入口",
     "image": "/doc-assets/assets/features/mem0-dark.png",
     "caption": ""
