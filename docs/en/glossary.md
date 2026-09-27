@@ -45,7 +45,7 @@
 | Task | A durable, host-tracked unit of delegated work with a goal and acceptance criteria; distinct from an ad hoc executor delegate |
 | Handback / takeover | Transferring a Task's controller between Nova and the user; takeover lets the user message the executor directly and pauses Nova's automatic corrections, handback returns control to Nova |
 | Acceptance criterion | One statement a Task's goal must satisfy before Nova marks it complete; evidence is recorded per criterion |
-| Candidate | An unconfirmed Todo, Idea, Goal or Profile fact Nova notices in conversation; recorded only after the user confirms it |
+| Candidate | An unconfirmed Todo, Idea, Goal or Profile fact Nova notices in conversation; recorded once the user confirms it, except that an explicitly stated todo is recorded right away and can be undone |
 | Source | An authorized document, account or feed that personal memory and suggestions may draw on |
 | Connector | An integration (for example Google, macOS Calendar, Apple Mail or Feishu) that exposes a Source through a read scope the user grants |
 

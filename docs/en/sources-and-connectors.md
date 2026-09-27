@@ -9,12 +9,12 @@ Nova only reads what you explicitly connect — local folders, mail and calendar
 | Connect | Grants access to a source: a folder, an account, or a set of chats |
 | Consent to processing | A separate switch letting the configured model service read the content; a source can be connected without it |
 | Pause | Keeps the connection and everything already collected; just stops new reads |
-| Disconnect | Stops collection and revokes access, but keeps already-collected data (and, for Feishu, your app configuration) |
+| Disconnect | Stops local collection but keeps already-collected data (and, for Feishu, your app configuration). For services connected through Composio it does not revoke the OAuth grant you gave; revoke that separately in Composio or the service itself if you need to |
 | Delete history / local data | Removes what was already collected, as a separate step from disconnecting |
 
 ## Local files
 
-In settings, under local files, the consent checkbox has to be checked before "choose folder" or "authorize all accessible local files" can be used. Each source can be capped between 1 and 200 files and up to 20 MB. Supported types: text, Markdown, JSON, YAML, CSV, common source-code extensions, PDF and Word (`.docx`).
+In settings, under local files, the consent checkbox has to be checked before "choose folder" or "authorize all accessible local files" can be used. Each sync pass reads at most 1 to 200 files and up to 20 MB per source; anything beyond that is deferred to later passes, so this is a per-pass budget, not a lifetime cap. Supported types: text, Markdown, JSON, YAML, CSV, common source-code extensions, PDF and Word (`.docx`).
 
 Version-control, build, dependency and cache directories, and browser profile folders, are excluded automatically. Hidden files and folders are skipped unless you pick them by name; anything your project already ignores in Git is skipped too. Whole-computer access also excludes system and application directories, still respects OS file permissions, processes in batches, and stops reading as soon as you pause it.
 

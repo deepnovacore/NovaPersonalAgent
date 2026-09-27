@@ -17,7 +17,8 @@ Each item on the Tasks page also carries a short next-step summary: needing you,
 | Take over task | You now message the executor directly; Nova pauses automatic correction |
 | Take over and reply | Same, and sends your message immediately |
 | Return to Nova | Hands control back so Nova resumes deciding and correcting |
-| Stop task / Continue task | Pauses or resumes the work |
+| Stop task | Cancels the task. Cancellation is final: the task cannot be continued afterwards, so redoing the work means creating a new task |
+| Continue task | Hands a waiting task back to Nova to drive, resetting its correction count; it has no effect on a completed or cancelled task |
 | Checked: it ran / Checked: it did not run | Appears only when Nova cannot confirm whether a previous step actually ran, and needs you to say so |
 | Mark Todo done | Appears only when the Task is complete but its linked Todo has since changed elsewhere, to resolve the conflict by hand |
 

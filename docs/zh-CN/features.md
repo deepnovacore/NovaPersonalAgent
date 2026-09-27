@@ -18,7 +18,7 @@ Nova 是运行在电脑上的语音助手。你可以直接交办编码任务、
 
 - **Workbench** 是桌面主窗口：图标导航栏包含 Todos、Ideas、Goals、Feeds、Tasks 和 Profile，右侧是可收起的对话栏。详见[Workbench](workbench.md)。
 - **Tasks** 用于委派工作，你可以设定验收标准；随时查看进度，也可以接管任务直接指挥执行器，完成后交还给 Nova。详见[Tasks](tasks.md)。
-- **Todos、Ideas、Goals** 收集 Nova 在对话中留意到的候选内容，经你确认、编辑或跳过后才会被记录。
+- **Todos、Ideas、Goals** 收集 Nova 在对话中留意到的内容：你明确说出的待办会直接记下，并可以撤销；其余候选需要你确认、编辑或跳过。
 - **Profile** 保存关于你的信息，包含个人记忆视图。
 - **Feeds** 展示按你的兴趣整理的资讯流。
 - 项目页面提供概览卡片，汇总最近的活动。
