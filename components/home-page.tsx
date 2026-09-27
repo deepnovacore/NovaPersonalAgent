@@ -155,7 +155,7 @@ export function HomePage({ en = false }: { en?: boolean }) {
                 <strong>
                   {en ? 'Consider the value' : '判断是否值得告知'}
                 </strong>
-                <span>Surrogate</span>
+                <span>Proactive</span>
               </div>
               <span className="flow-arrow">→</span>
               <div>
