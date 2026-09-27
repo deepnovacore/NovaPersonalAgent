@@ -1013,6 +1013,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "执行器暂不接受输入": "The executor is not accepting input right now.",
   "请求冲突，请刷新后重试": "The request conflicted. Refresh and try again.",
   "该任务已归档": "This task has been archived.",
+  "该会话正被另一个未完成的任务使用": "Another unfinished task is using this session.",
   "Nova 暂不可用，请稍后重试": "Nova is unavailable. Try again shortly.",
   "操作未完成，请刷新后重试": "The action did not finish. Refresh and try again.",
   "已核对：未执行": "Checked: it did not run",

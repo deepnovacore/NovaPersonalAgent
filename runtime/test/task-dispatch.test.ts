@@ -2,7 +2,7 @@
 /* eslint-disable @typescript-eslint/no-empty-function -- inert fake callbacks and disabled providers */
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,realpath,rm} from 'node:fs/promises'
+import {stat,mkdtemp,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import type {RealtimeService} from '../src/realtime/service.js'
@@ -697,6 +697,32 @@ test('finished tasks beyond the retention cap leave the store, their requests st
   const retried=await restored.delegate('d203',{conversation_id:'c',goal:'Fresh',acceptance:[],origin_ref:'conversation:203'});assert.equal(restored.get(retried.id).goal,'Fresh')
   await restored.close()
  }finally{await rm(dir,{recursive:true,force:true})}
+})
+test('the store retires old finished tasks by size before large results fill it',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-bytes-'))
+ const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
+ try{
+  const ids:string[]=[]
+  for(let index=0;index<60;index++){
+   const task=await tasks.delegate('d'+index,{conversation_id:'c',goal:'Goal '+index,acceptance:[],origin_ref:'conversation:'+index,execution_route:'codex'}),fence={task_id:task.id,control_revision:0,goal_revision:0};ids.push(task.id)
+   await tasks.bindWork(fence,'w'+index,'s'+index);const ref=await tasks.recordWorkOutcome('w'+index,'ok',{output:'结'.repeat(131072)})
+   await tasks.applyDecision(fence,{kind:'complete',evidence_refs:[ref!]})
+  }
+  const kept=new Set(tasks.list().map(task=>task.id))
+  assert.ok(kept.size<60&&kept.has(ids[59]!)&&!kept.has(ids[0]!),'the oldest large tasks were retired and the newest kept')
+  assert.ok((await stat(tasks.path)).size<=12*1024*1024)
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+test('an unfinished task keeps its session between works; only a finished one gives it up',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-session-hold-'))
+ const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
+ try{
+  const a=await tasks.delegate('a',{conversation_id:'c',goal:'A',acceptance:[],origin_ref:'conversation:1',execution_route:'codex'}),fa={task_id:a.id,control_revision:0,goal_revision:0}
+  await tasks.bindWork(fa,'wa','session');await tasks.recordWorkOutcome('wa','ok',{});await tasks.wait(fa,'Needs user check')
+  const b=await tasks.delegate('b',{conversation_id:'c',goal:'B',acceptance:[],origin_ref:'conversation:2',execution_route:'codex'}),fb={task_id:b.id,control_revision:0,goal_revision:0}
+  await assert.rejects(tasks.bindWork(fb,'wb','session'),/session_active/)
+  assert.deepEqual(tasks.get(a.id).session_ids,['session']);assert.equal(tasks.get(a.id).primary_session_id,'session')
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })
 test('each work records its executor and one session; the first session becomes primary and follows the session when it moves',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'task-works-'))

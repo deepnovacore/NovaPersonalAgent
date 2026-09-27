@@ -106,7 +106,7 @@ const stateSchema = z.object({
   }).strict()).default({}), tasks: z.array(recordSchema), receipts: z.record(z.string(), z.object({ hash: z.string(), task_id: id, result: recordSchema.optional() }).strict()), handbacks: z.record(z.string(), z.object({ hash: z.string(), command: z.string().max(16384).optional(), result: z.array(recordSchema).optional() }).strict()).default({})
 }).strict()
 type TaskState = z.infer<typeof stateSchema>
-const RETAINED_FINISHED_TASKS = 200, RETAINED_HANDBACKS = 256, RETAINED_TOMBSTONES = 20000
+const RETAINED_FINISHED_TASKS = 200, RETAINED_HANDBACKS = 256, RETAINED_TOMBSTONES = 20000, PRUNE_ABOVE_BYTES = 12 * 1024 * 1024, PRUNE_TO_BYTES = 8 * 1024 * 1024
 const empty = (): TaskState => ({
   instruction_work_ids: [], outcomes: [], work_fences: {}, pending_effects: {}, replay_incomplete: [], events: [], event_keys: {}, event_seq: 0, truncated: {}, tasks: [], receipts: {}, handbacks: {}, effects: {}
 })
@@ -440,7 +440,8 @@ export class TaskService {
         throw Error('work_active')
       if (session)
         for (const previous of next.tasks.filter(item => item.id !== task.id && item.session_ids.includes(session))) {
-          if (this.hasUnresolvedExecution(previous.id))
+          // An unfinished task keeps its session even between works, so its corrections continue where they started.
+          if (active(previous) || this.hasUnresolvedExecution(previous.id))
             throw Error('session_active')
           previous.session_ids = previous.session_ids.filter(id => id !== session)
           if (previous.primary_session_id === session)
@@ -819,15 +820,45 @@ export class TaskService {
     if (task.control_revision !== fence.control_revision || task.goal_revision !== fence.goal_revision)
       throw Error('stale_task')
   }
-  /** Finished tasks beyond the newest RETAINED_FINISHED_TASKS leave the store with everything keyed to them; unresolved ones stay. */
+  /**
+   * Finished tasks beyond the newest RETAINED_FINISHED_TASKS leave the store with everything keyed to them, and so do the oldest
+   * ones while the store is above PRUNE_ABOVE_BYTES, down to PRUNE_TO_BYTES; unresolved ones stay.
+   */
   #pruneRetired(next: TaskState): void {
     const unresolved = (taskId: string) => Object.values(next.pending_effects).some(effect => effect.task_id === taskId && (effect.status === 'pending' || effect.status === 'unknown')) || Object.values(next.effects).some(effect => effect.task_id === taskId && effect.status === 'unknown')
     const finished = next.tasks.filter(task => (task.phase === 'completed' || task.phase === 'cancelled') && !task.pending_delivery && !task.waiting_reason && !unresolved(task.id))
-    if (finished.length > RETAINED_FINISHED_TASKS) {
-      const last = new Map<string, number>()
+    const last = new Map<string, number>()
+    for (const event of next.events)
+      last.set(event.task_id, event.seq)
+    const oldest = finished.map((task, order) => ({ id: task.id, rank: last.get(task.id) ?? order })).sort((a, b) => a.rank - b.rank).map(task => task.id)
+    const retired = new Set(oldest.slice(0, Math.max(0, oldest.length - RETAINED_FINISHED_TASKS)))
+    let size = Buffer.byteLength(JSON.stringify(next))
+    if (size > PRUNE_ABOVE_BYTES) {
+      // Large results can fill the store long before the count cap, so retire by footprint too.
+      const footprint = new Map<string, number>(oldest.map(taskId => [taskId, 0]))
+      const add = (taskId: string | undefined, value: unknown) => { if (taskId && footprint.has(taskId)) footprint.set(taskId, footprint.get(taskId)! + Buffer.byteLength(JSON.stringify(value ?? null))) }
+      for (const task of next.tasks)
+        add(task.id, task)
       for (const event of next.events)
-        last.set(event.task_id, event.seq)
-      const retired = new Set(finished.map((task, order) => ({ id: task.id, rank: last.get(task.id) ?? order })).sort((a, b) => a.rank - b.rank).slice(0, finished.length - RETAINED_FINISHED_TASKS).map(task => task.id))
+        add(event.task_id, event)
+      for (const outcome of next.outcomes)
+        add(outcome.task_id, outcome)
+      for (const receipt of Object.values(next.receipts))
+        add(receipt.task_id, receipt.result)
+      for (const effect of Object.values(next.effects))
+        add(effect.task_id, effect)
+      for (const taskId of retired)
+        size -= footprint.get(taskId)!
+      for (const taskId of oldest) {
+        if (size <= PRUNE_TO_BYTES)
+          break
+        if (!retired.has(taskId)) {
+          retired.add(taskId)
+          size -= footprint.get(taskId)!
+        }
+      }
+    }
+    if (retired.size) {
       const works = new Set(next.tasks.filter(task => retired.has(task.id)).flatMap(task => task.work_ids))
       next.tasks = next.tasks.filter(task => !retired.has(task.id))
       next.events = next.events.filter(event => !retired.has(event.task_id))

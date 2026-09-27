@@ -23,9 +23,9 @@ test('cancellation without original runtime persists and reports pending physica
  try{await host.open();const task=await host.tasks.delegate('first',input);await host.tasks.bindWork(fence(task.id),'work:1','session:1');const cancelled=await host.cancelTask('cancel',fence(task.id),{kind:'nova'});assert.equal(cancelled.phase,'cancelled');assert.equal(cancelled.waiting_reason,'cancellation_pending');await host.close();await host.open();assert.equal(host.tasks.get(task.id).waiting_reason,'cancellation_pending')}
  finally{await host.close();await rm(root,{recursive:true,force:true})}
 })
-test('idle session binding transfers only after all original work is terminal',async()=>{
+test('a session transfers only after the original task has finished',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'task-recovery-')),tasks=new TaskService(join(root,'tasks.json'))
- try{await tasks.open();const first=await tasks.delegate('first',input),second=await tasks.delegate('second',input);await tasks.bindWork(fence(first.id),'work:1','session:1');await assert.rejects(tasks.bindWork(fence(second.id),'work:2','session:1'),/session_active/);await tasks.recordWorkOutcome('work:1','ok',{text:'done'});await tasks.bindWork(fence(second.id),'work:2','session:1');assert.deepEqual(tasks.get(first.id).session_ids,[]);assert.deepEqual(tasks.get(second.id).session_ids,['session:1'])}
+ try{await tasks.open();const first=await tasks.delegate('first',input),second=await tasks.delegate('second',input);await tasks.bindWork(fence(first.id),'work:1','session:1');await assert.rejects(tasks.bindWork(fence(second.id),'work:2','session:1'),/session_active/);await tasks.recordWorkOutcome('work:1','ok',{text:'done'});await assert.rejects(tasks.bindWork(fence(second.id),'work:2','session:1'),/session_active/,'an idle but unfinished task keeps its session');await tasks.cancel('stop-first',fence(first.id),{kind:'nova'});await tasks.bindWork(fence(second.id),'work:2','session:1');assert.deepEqual(tasks.get(first.id).session_ids,[]);assert.deepEqual(tasks.get(second.id).session_ids,['session:1'])}
  finally{await tasks.close();await rm(root,{recursive:true,force:true})}
 })
 test('startup reconstructs original task generation before admission and preserves cleared foreground',async()=>{

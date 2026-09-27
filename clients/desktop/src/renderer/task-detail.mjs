@@ -8,7 +8,7 @@ const el = (tag, text) => {
   return n
 }
 const TASK_ERROR = {
-  stale_task: '任务已在别处更新，已刷新，请重试', not_controller: '该任务正由另一客户端控制', task_terminal: '任务已结束', task_effect_unknown: '上一步执行结果待核对', task_input_reconciliation_required: '有尚未处理的回复，请稍后重试', task_recovery_in_progress: '任务正在恢复，请稍后重试', task_control_unavailable: '此客户端不能接管任务', nothing_to_reconcile: '没有需要核对的执行', todo_not_in_conflict: 'Todo 已处理', todo_not_found: 'Todo 已删除或取消', todo_changed: 'Todo 刚被修改，请重新核对后再标记', execution_in_flight: '执行仍在进行，请等待结果后再核对', session_not_found: '该会话已不可用', task_input_unavailable: '执行器暂不接受输入', task_execution_unavailable: '执行器暂不可用', request_conflict: '请求冲突，请刷新后重试', task_retired: '该任务已归档', unavailable: 'Nova 暂不可用，请稍后重试'
+  stale_task: '任务已在别处更新，已刷新，请重试', not_controller: '该任务正由另一客户端控制', task_terminal: '任务已结束', task_effect_unknown: '上一步执行结果待核对', task_input_reconciliation_required: '有尚未处理的回复，请稍后重试', task_recovery_in_progress: '任务正在恢复，请稍后重试', task_control_unavailable: '此客户端不能接管任务', nothing_to_reconcile: '没有需要核对的执行', todo_not_in_conflict: 'Todo 已处理', todo_not_found: 'Todo 已删除或取消', todo_changed: 'Todo 刚被修改，请重新核对后再标记', execution_in_flight: '执行仍在进行，请等待结果后再核对', session_not_found: '该会话已不可用', task_input_unavailable: '执行器暂不接受输入', task_execution_unavailable: '执行器暂不可用', request_conflict: '请求冲突，请刷新后重试', task_retired: '该任务已归档', session_active: '该会话正被另一个未完成的任务使用', unavailable: 'Nova 暂不可用，请稍后重试'
 };
 /** Host failures arrive as codes; show a readable sentence and never the raw code. */
 export const taskErrorText = message => t(Object.hasOwn(TASK_ERROR, message) ? TASK_ERROR[message] : /^[a-z0-9_]+$/.test(message ?? '') ? '操作未完成，请刷新后重试' : message);
