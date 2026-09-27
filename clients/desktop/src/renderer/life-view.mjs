@@ -34,7 +34,7 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
   if(kind==='goal'){card.append(el('p',`达成标准：${row.success_criteria||'尚未填写'}`),el('p',row.progress.total?`行动进度：${row.progress.done}/${row.progress.total}（不含已取消待办；目标是否达成由你确认）`:'尚未关联待办；不代表目标已达成'))}
   const select=el('select');select.setAttribute('aria-label',`${row.title}状态`);for(const [value,label]of Object.entries(statuses[kind])){const opt=el('option',label);opt.value=value;select.append(opt)}select.value=row.status;select.addEventListener('change',()=>{const value=select.value;select.value=row.status;void run(()=>command('life.mutate',{op:'update',kind,id:row.id,expected_version:row.version,status:value}))});footer.append(select,actions)
   if(kind==='idea'){const converted=[...(state?.todos??[]),...(state?.goals??[])].filter(r=>r.idea_id===row.id);for(const target of ['todo','goal']){const existing=converted.find(r=>r.kind===target);if(existing)card.append(el('p',`已转为${labels[target]}：${existing.title}`));else if(row.status!=='archived')button(`转为${labels[target]}`,()=>command('life.mutate',{op:'convert',id:row.id,target,expected_version:row.version}),actions).className='ghost'}}
-  if(kind==='todo'&&!['done','cancelled'].includes(row.status))button('请 Nova 协助',()=>delegate(`请帮我处理待办「${row.title}」。${row.note}。先和我确认处理方式。`),actions).className='soft'
+  if(kind==='todo'&&!['done','cancelled'].includes(row.status))button('请 Nova 协助',()=>delegate(`请帮我处理待办「${row.title}」。${row.note}。先和我确认处理方式。`,{id:row.id,version:row.version}),actions).className='soft'
   button('编辑',()=>{local[formKey]={...row};rerender()},actions).className='ghost'
   card.append(footer)
  }

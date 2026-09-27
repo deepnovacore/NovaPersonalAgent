@@ -124,6 +124,9 @@ import {
 import {CodexLiveAdapter} from '../src/executors/codex/adapter-live.js'
 import {MediaStore} from '../src/core/media-store.js'
 import {handoffPolicySchema} from '../src/core/memory.js'
+import {SuggestionPool} from '../src/core/suggestions.js'
+import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {TaskExecutionRejected} from '../src/personal-agent/task-loop.js'
 import {createArkCascadedLlmSession} from '../src/realtime/cascaded/ark-llm.js'
 import {type CascadedLlmFactory} from '../src/realtime/cascaded/llm.js'
 import {CascadedRealtimeError} from '../src/realtime/cascaded/adapter.js'
@@ -1922,6 +1925,166 @@ test('project adapter wiring carries one confirmed identity through the real rea
     await realtime.stop()
   }
   assert.equal(closeCalls, 1)
+})
+
+test('confirmed project dispatch preserves task routing for new and existing tasks', async () => {
+  for (const existing of [false, true]) {
+    const directory = await realpath(await mkdtemp(join(tmpdir(), `nova-confirmed-route-${existing ? 'existing' : 'new'}-`)))
+    const clock = new VirtualClock(0)
+    const confirmation = new ProjectConfirmationController({
+      clock,
+      idFactory: () => `confirmed-route-${existing ? 'existing' : 'new'}`,
+    })
+    const host = new PersonalAgentHost({
+      path: join(directory, 'personal.json'), userScope: 'test', memory: () => undefined,
+      pool: new SuggestionPool(), evidence: () => null,
+    })
+    const effect = deferred<void>()
+    let routeBeforeEffect: string | undefined
+    let taskIdBeforeEffect: string | undefined
+    const adapterShape: ExecutorAdapter & Record<string, unknown> = {
+      manifest: CODEX_PROJECT_MANIFEST,
+      confirmationController: confirmation,
+      roster: () => [],
+      running: () => [],
+      cancel: () => Promise.resolve({code: 'not_running'}),
+      resolveIntakeTarget: () => Promise.resolve({
+        workspace: 'beta', action: 'create', workspace_display_name: 'beta', workspace_id: null,
+        session_title: 'confirmed goal', session_id: null,
+      }),
+      dispatch: (_op: string, _request: Readonly<Record<string, JsonValue>>, context: ExecutorDispatchContext) => {
+        const task = host.tasks.list().find(task => task.origin_ref === context.delegate.origin_ref)
+        taskIdBeforeEffect = task?.id
+        routeBeforeEffect = task?.execution_route
+        effect.resolve()
+        return Promise.resolve({
+          outcome: 'failed', trust: 'trusted_system', content: {code: 'synthetic_failure'}, refs: [],
+        })
+      },
+      commitConfirmed: async (operation: ConfirmedProjectOperation, runtimeDispatch: (
+        request: Readonly<Record<string, unknown>>, reason: Readonly<Record<string, unknown>>,
+        capability: object, launchAuthorized: () => boolean,
+      ) => Promise<{accepted: boolean; delegate_id: string | null}>) => {
+        let launchAuthorized = false
+        const admission = await runtimeDispatch({
+          executor: 'codex', op: 'run', request: {work_order: operation.work_order ?? ''},
+          origin_ref: operation.origin_ref,
+        }, {kind: 'realtime_tool', priority: 100, routing_class: 'user_awaited', origin: null, selected_suggestion: null}, operation, () => launchAuthorized)
+        if (!admission.accepted || admission.delegate_id === null) {
+          confirmation.rollbackConfirmed(operation)
+          return {accepted: false, code: 'runtime_rejected'}
+        }
+        if (!confirmation.recordRuntimeAdmission(operation) || !confirmation.claimConfirmed(operation)) {
+          return {accepted: false, code: 'confirmation_invalid'}
+        }
+        launchAuthorized = true
+        return {accepted: true, code: 'accepted', delegate_id: admission.delegate_id}
+      },
+      publicProjectView: () => ({
+        workspace_display_name: null, session_title: null, roster: [],
+        pending_confirmation: false, pending_confirmation_busy: false,
+      }),
+      publicProjectContext: () => ({
+        workspace_id: null,
+        view: {workspace_display_name: null, session_title: null, roster: [], pending_confirmation: false, pending_confirmation_busy: false},
+      }),
+      initialize: () => Promise.resolve(),
+      activeCommittedWorkspace: () => Promise.resolve(null),
+      observeProjectView: () => () => undefined,
+      observeProjectContext: () => () => undefined,
+      close: () => Promise.resolve(),
+    }
+    const core = buildAssembly({
+      settings: settingsSchema.parse({executors: ['codex']}), clock,
+      gateway: new NeverCalledGateway(), searchTransport: new NeverCalledSearch(), executors: [adapterShape],
+    })
+    const slots = {
+      goal: {state: 'stated' as const, note: 'confirmed goal'},
+      scope: {state: 'inferred' as const, note: 'confirmed scope'},
+      acceptance: {state: 'inferred' as const, note: 'confirmed acceptance'},
+      constraints: {state: 'missing' as const, note: ''},
+    }
+    const intake = {
+      models: {
+        assess: (input: Readonly<Record<string, unknown>>) => Promise.resolve({
+          intake_id: input.intake_id, revision: input.revision, slots, readiness: 0.75,
+          kind: 'create' as const, project: 'beta', project_evidence: 'beta', session: {mode: 'latest' as const},
+          intent_to_proceed: true, candidate_question: null, discovery: [], early_exit: false, abandon: false,
+        }),
+        plan: (input: Readonly<Record<string, unknown>>) => Promise.resolve({
+          intake_id: input.intake_id, revision: input.revision,
+          work_order: {objective: slots.goal.note, scope_in: [slots.scope.note], acceptance: [slots.acceptance.note]},
+        }),
+        resolveCancelTarget: () => Promise.resolve(null),
+      },
+      settings: {clarification_depth: 'balanced' as const, plan_readback: 'summary' as const},
+    }
+    let realtime: ReturnType<typeof buildRealtimeAssembly> | undefined
+    try {
+      await host.open()
+      const prior = existing ? await host.tasks.delegate('existing-task', {
+        conversation_id: 'conversation:test', conversation_generation: 1,
+        goal: 'existing goal', acceptance: ['existing acceptance'], origin_ref: 'conversation:1',
+      }) : undefined
+      realtime = buildRealtimeAssembly({
+        core, provider: new WorkspaceContextProvider(), projectAdapter: adapterShape as never,
+        projectConfirmation: confirmation, intake, sharedPersonal: {host, memory: undefined},
+        taskConversationId: 'conversation:test', taskConversationGeneration: 1,
+      })
+      await realtime.start()
+      await realtime.service.handleEvent({kind: 'user_speech_started', session_epoch: 1, speech_id: 'speech-work', provider_item_id: 'item-work'})
+      await realtime.service.handleEvent({kind: 'user_speech_ended', session_epoch: 1, speech_id: 'speech-work', provider_item_id: 'item-work'})
+      await realtime.service.handleEvent({kind: 'user_transcript_final', session_epoch: 1, item_id: 'item-work', text: 'create beta and do the confirmed work'})
+      await realtime.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'response-work'})
+      await realtime.service.handleEvent({
+        kind: 'tool_call_ready', session_epoch: 1, call_id: 'call-work', item_id: 'function-work', response_id: 'response-work', name: 'dispatch',
+        arguments: {executor: 'codex', instruction: 'create beta and do the confirmed work', origin_ref: 'conversation:1', ...(prior ? {task_id: prior.id} : {})},
+      })
+      await realtime.service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: 'response-work', status: 'completed', reason: 'done'})
+      await waitNamed('confirmed route proposal', () => confirmation.pending)
+      for (let i = 0; i < 5 && !realtime.service.session.providerIdle; i++) {
+        await realtime.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: `readback-${i}`})
+        await realtime.service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: `readback-${i}`, status: 'completed', reason: 'done'})
+      }
+      await realtime.service.handleEvent({kind: 'user_speech_started', session_epoch: 1, speech_id: 'speech-confirm', provider_item_id: 'item-confirm'})
+      await realtime.service.handleEvent({kind: 'user_speech_ended', session_epoch: 1, speech_id: 'speech-confirm', provider_item_id: 'item-confirm'})
+      await realtime.service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'response-confirm'})
+      await realtime.service.handleEvent({kind: 'user_transcript_final', session_epoch: 1, item_id: 'item-confirm', text: 'confirm'})
+      await realtime.service.handleEvent({
+        kind: 'tool_call_ready', session_epoch: 1, call_id: 'call-confirm', item_id: 'function-confirm', response_id: 'response-confirm', name: 'confirm',
+        arguments: {id: `confirmed-route-${existing ? 'existing' : 'new'}`, accepted: true},
+      })
+      await settleNamed('confirmed route effect', effect.promise)
+      assert.equal(routeBeforeEffect, 'codex')
+      const tasks = host.tasks.list()
+      assert.equal(tasks.length, 1)
+      const task = tasks[0]!
+      assert.equal(task.id, taskIdBeforeEffect)
+      if (prior) assert.equal(task.id, prior.id)
+      assert.equal(task.execution_route, 'codex')
+      assert.equal(task.conversation_id, 'conversation:test')
+      assert.equal(task.conversation_generation, 1)
+      assert.equal(task.origin_ref, 'conversation:1')
+      assert.equal(task.goal, existing ? 'existing goal' : 'confirmed goal')
+      assert.deepEqual(task.acceptance, existing ? ['existing acceptance'] : ['confirmed acceptance'])
+      await waitNamed('failed task outcome', () => host.tasks.evidence(task.id).some(item => item.outcome === 'failed'))
+      const continued = await realtime.service.dispatchTask(host.tasks.continuationContext({
+        task_id: task.id, control_revision: task.control_revision, goal_revision: task.goal_revision,
+      }), 'continue with the same executor')
+      assert.equal(continued.code, 'intake_opened')
+
+      const staleGoal = host.tasks.continuationContext({task_id: task.id, control_revision: task.control_revision, goal_revision: task.goal_revision})
+      const revised = await host.tasks.reviseGoal(`revise-${existing}`, staleGoal.fence, {kind: 'nova'}, 'revised goal', ['revised acceptance'])
+      await assert.rejects(realtime.service.dispatchTask(staleGoal, 'stale goal'), TaskExecutionRejected)
+      const staleControl = host.tasks.continuationContext({task_id: task.id, control_revision: revised.control_revision, goal_revision: revised.goal_revision})
+      await host.tasks.control(`control-${existing}`, staleControl.fence, {kind: 'nova'}, {kind: 'user', client_id: 'workbench'})
+      await assert.rejects(realtime.service.dispatchTask(staleControl, 'stale control'), TaskExecutionRejected)
+    } finally {
+      await realtime?.stop()
+      await host.close()
+      await rm(directory, {recursive: true, force: true})
+    }
+  }
 })
 
 test('active project views replace one provider context without publishing history', async () => {

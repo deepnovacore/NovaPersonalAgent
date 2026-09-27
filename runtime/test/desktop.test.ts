@@ -9,6 +9,8 @@ import {
   MAX_DESKTOP_JSON_BYTES,
   MAX_DESKTOP_OUTBOUND_BINARY_BYTES,
   MAX_DESKTOP_PENDING_SENDS,
+  MAX_DESKTOP_PERSONAL_JSON_BYTES,
+  DesktopPersonalFrameTooLargeError,
   MAX_DESKTOP_PCM_BYTES,
   NodeDesktopServer,
   announceReadiness,
@@ -1418,6 +1420,38 @@ test('configured bootstrap frames precede the authenticated notification', async
   }
 })
 
+test('personal outbound allowance is bounded and cannot relax inbound or unrelated frames', async () => {
+  const server = new NodeDesktopServer({token: TOKEN})
+  const readiness = await startDesktopServer(server)
+  const socket = await connectDesktopClient(server, readiness.port)
+  const limit = 8 * 1024 * 1024
+  try {
+    await authenticate(socket)
+    for (const envelope of [
+      {type: 'personal.state', revision: 1},
+      {type: 'personal.result', request_id: 'detail', ok: true},
+    ]) {
+      const empty = JSON.stringify({...envelope, data: ''})
+      const raw = JSON.stringify({...envelope, data: 'x'.repeat(limit - Buffer.byteLength(empty))})
+      assert.equal(Buffer.byteLength(raw), limit)
+      const received = nextTextFrames(socket, 1)
+      const [, frames] = await Promise.all([server.sendText(raw), received])
+      assert.equal(frames[0], raw)
+      await assert.rejects(server.sendText(raw + ' '), /too large/u)
+    }
+    for (const envelope of [
+      {type: 'unrelated'}, {type: 'memory.board'},
+      {type: 'personal.state', revision: -1}, {type: 'personal.state', revision: '1'},
+      {type: 'personal.result', request_id: '', ok: true},
+      {type: 'personal.result', request_id: 'detail', ok: 'yes'},
+      {type: 'personal.result', request_id: 'x'.repeat(129), ok: true},
+    ]) await assert.rejects(server.sendText(JSON.stringify({...envelope, data: 'x'.repeat(16384)})), /too large/u)
+    assert.throws(() => parseDesktopControl(JSON.stringify({type: 'personal.command', request_id: 'oversized', method: 'state', params: {data: 'x'.repeat(16384)}})), /too large/u)
+  } finally {
+    await closeDesktopClientAndServer(socket, server)
+  }
+})
+
 test('desktop outbound applies size and pending-send bounds', async () => {
   const server = new NodeDesktopServer({token: TOKEN})
   const readiness = await startDesktopServer(server)
@@ -1435,11 +1469,12 @@ test('desktop outbound applies size and pending-send bounds', async () => {
     )
     await settleWithin('accepted pending desktop sends', Promise.all(pending))
     await settleWithin('bounded pending desktop sends', delivered)
-    const personal = JSON.stringify({type:'personal.state', cards:'x'.repeat(32000)})
+    const personal = JSON.stringify({type:'personal.state', revision:1, cards:'x'.repeat(32000)})
     const personalFrames = nextFrames(socket, 1)
     await server.sendText(personal)
     assert.equal((await personalFrames)[0]?.bytes.length, Buffer.byteLength(personal))
-    await assert.rejects(server.sendText(JSON.stringify({type:'personal.state', cards:'x'.repeat(1024 * 1024)})), DesktopProtocolError)
+    await assert.rejects(server.sendText(JSON.stringify({type:'personal.state', cards:'x'.repeat(32000)})), DesktopProtocolError, 'large personal frames need their envelope')
+    await assert.rejects(server.sendText(JSON.stringify({type:'personal.state', revision:1, cards:'x'.repeat(MAX_DESKTOP_PERSONAL_JSON_BYTES)})), DesktopPersonalFrameTooLargeError)
     await assert.rejects(server.sendText(JSON.stringify({type:'other', cards:'x'.repeat(32000)})), DesktopProtocolError)
     await assert.rejects(
       settleWithin('oversized desktop text send', server.sendText('x'.repeat(MAX_DESKTOP_JSON_BYTES + 1))),

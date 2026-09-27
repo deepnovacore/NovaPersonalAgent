@@ -1,3 +1,4 @@
+import type {TaskDispatchContext} from '../core/task-tools.js'
 import {ProjectResolutionError, type CoordinatorDecision, type IntakeTarget} from '../executors/coding-executor.js'
 
 export interface CodingTargetSelection {
@@ -10,6 +11,10 @@ export interface CodingTarget extends CodingTargetSelection {
   readonly project: string
   readonly title: string
   readonly executor: 'codex'
+  /** Epoch ms of the executor's last use; sessions only. */
+  readonly last_active?: number
+  /** Title of the work holding this target's resources, when the executor's lock policy blocks it. */
+  readonly running?: string
 }
 
 export interface CodingTargetPort {
@@ -17,7 +22,7 @@ export interface CodingTargetPort {
   list(): Promise<readonly (CodingTarget & {readonly directory?: string})[]>
   forWork?(workId: string): Promise<CodingTarget | null>
   validate(selection: CodingTargetSelection): Promise<CodingTarget>
-  resolve(decision: CoordinatorDecision, selection?: CodingTargetSelection): Promise<IntakeTarget>
+  resolve(decision: CoordinatorDecision, selection?: CodingTargetSelection,taskContext?:TaskDispatchContext): Promise<IntakeTarget>
 }
 
 /** Owned by one conversation. Global project/session focus is never a default here. */
@@ -68,9 +73,9 @@ export class CodingTargetController {
     this.#target = target === null ? null : {...target}
     return this.target
   }
-  async resolveTarget(decision: CoordinatorDecision): Promise<IntakeTarget> {
+  async resolveTarget(decision: CoordinatorDecision,taskContext?:TaskDispatchContext): Promise<IntakeTarget> {
     const target = this.#target
-    if (decision.kind === 'create') return this.port.resolve(decision)
+    if (decision.kind === 'create') return this.port.resolve(decision,undefined,taskContext)
     const bound = target !== null && (decision.project === null || decision.project.toLowerCase() === target.project.toLowerCase())
     if (!bound && decision.project === null) throw new ProjectResolutionError('unknown_project', {reason: 'explicit_project_required'})
     if (decision.kind === 'work' && decision.session === 'latest' && !decision.session_title && (!bound || target.session_id === null)) {
@@ -80,8 +85,8 @@ export class CodingTargetController {
       return this.port.resolve({...decision, project: target.project}, {
         workspace_id: target.workspace_id,
         session_id: decision.session === 'new' || decision.session_title ? null : target.session_id,
-      })
+      },taskContext)
     }
-    return this.port.resolve(decision)
+    return this.port.resolve(decision,undefined,taskContext)
   }
 }

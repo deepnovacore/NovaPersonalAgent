@@ -3,6 +3,7 @@
  * `ProjectConfirmationController`, and a recording fake transport factory (one fake per run).
  */
 import assert from 'node:assert/strict'
+import type {ManagedCodexMcp} from '../../../src/executors/codex/managed-mcp.js'
 import {
   chmodSync,
   fstatSync,
@@ -320,6 +321,7 @@ export class ProjectTransport implements CodexAppServerTransport {
     completionDeadline?: TransportDeadline | null,
   ): Promise<TransportOutcome> {
     assert.equal(completionDeadline, null, 'project transport must forward the explicit unbounded completion policy')
+    deadline.beforeWrite?.()
     this.workOrders.push(input.workOrder)
     this.runInputs.push(input)
     this.observers.push(observer)
@@ -339,7 +341,8 @@ export class ProjectTransport implements CodexAppServerTransport {
     })])
   }
 
-  steer(): Promise<SteerTransportResult> {
+  steer(_input:unknown,deadline:TransportDeadline): Promise<SteerTransportResult> {
+    deadline.beforeWrite?.()
     return Promise.resolve({code: 'accepted', written: true})
   }
 
@@ -397,6 +400,7 @@ export interface Fixture {
 }
 
 export async function fixture(options: {
+  readonly managedMcp?: ManagedCodexMcp
   readonly localCodexHome?: string
   readonly preexistingSession?: boolean
   readonly decorateStore?: (store: ProjectStore) => ProjectStore
@@ -436,6 +440,7 @@ export async function fixture(options: {
   })
   const factory = new RecordingProjectTransportFactory()
   const adapter = new ProjectCodexAdapter({
+    ...(options.managedMcp?{managedMcp:options.managedMcp}:{}),
     ...(options.localCodexHome ? {localCodexHome: options.localCodexHome} : {}),
     store: options.decorateStore?.(store) ?? store,
     confirmation,

@@ -1,3 +1,5 @@
+import type {TaskFence} from '../../personal-agent/tasks.js'
+import type {TaskDispatchContext} from '../../core/task-tools.js'
 import type {JsonValue} from '../../core/events.js'
 import {z} from 'zod'
 import {RealClock, raceDeadline, type Clock} from '../../core/clock.js'
@@ -31,6 +33,8 @@ export interface IntakeAdmission {
   readonly problem?: string | null
 }
 export interface IntakeSession {
+  input_origin_ref?: string
+  task_fence?: TaskFence
   intake_id: string
   revision: number
   plan_revision: number | null
@@ -76,7 +80,7 @@ export interface IntakeOptions {
   readonly activeProject: () => string | null
   /** Conversation-owned IDs only; captured before asynchronous intake work. */
   readonly boundTarget?: () => {workspace_id: string | null; revision: number}
-  readonly resolveTarget: (decision: CoordinatorDecision) => Promise<IntakeTarget>
+  readonly resolveTarget: (decision: CoordinatorDecision,taskContext?:TaskDispatchContext) => Promise<IntakeTarget>
   /** Open the project-confirmation proposal for `session.target`; the confirmed commit is the only side effect. */
   readonly prepare: (session: Readonly<IntakeSession>) => ProjectProposal
   readonly dispatch: (session: Readonly<IntakeSession>, stillWanted?: () => boolean) => IntakeAdmission | Promise<IntakeAdmission>
@@ -99,7 +103,6 @@ const emptySlots = (): IntakeSlots => ({
   acceptance: {state: 'missing', note: ''}, constraints: {state: 'missing', note: ''},
 })
 const limit = (value: string, count: number): string => [...value].slice(0, count).join('')
-const MAX_ROSTER = 10
 type IntakeStage = 'assess' | 'plan' | 'resolve' | 'prepare' | 'evidence' | 'dispatch' | 'steer'
 
 /** Only fixed classifications enter memory or speech; never provider bodies or error messages. */
@@ -226,6 +229,8 @@ export function renderResolutionError(error: ProjectResolutionError): string {
 
 /** Two controller-owned single-flight slots; latest revision replaces pending work, never active work. */
 export class IntakeController {
+  #taskContext:TaskDispatchContext|undefined
+  #taskAuthority: (()=>boolean)|undefined
   readonly #options: IntakeOptions
   readonly #clock: Clock
   #session: IntakeSession | null = null
@@ -289,7 +294,11 @@ export class IntakeController {
       && (!eventId.endsWith(':accepted') || (this.preparing && intake.plan_revision === null && intake.state !== 'committing' && !this.#userInputPending))
   }
 
-  open(request: Readonly<Record<string, JsonValue>>, text: string, originRef: string, sessionId: string): 'intake_opened' | 'intake_in_progress' {
+  open(request: Readonly<Record<string, JsonValue>>, text: string, originRef: string, sessionId: string, taskContext?: TaskDispatchContext,inputOriginRef=originRef): 'intake_opened' | 'intake_in_progress' {
+    const previous=this.#session?.task_fence
+    if(this.active&&taskContext&&(previous?.task_id!==taskContext.fence.task_id||previous.goal_revision!==taskContext.fence.goal_revision||previous.control_revision!==taskContext.fence.control_revision))this.cancel()
+    this.#taskContext=taskContext
+    this.#taskAuthority=taskContext?.stillWanted
     this.#userInputPending = false
     this.#failedUserInput = false
     if (this.active && this.#session!.session_id !== sessionId) this.cancel()
@@ -298,14 +307,15 @@ export class IntakeController {
     if (this.active) {
       const current = this.#session!
       // A provider repeats the draft for an already-ingested answer: one content revision per turn.
-      if (current.origin_ref !== originRef) this.#revise(text, originRef, sessionId)
+      if ((current.input_origin_ref??current.origin_ref) !== inputOriginRef) this.#revise(text, inputOriginRef, sessionId)
       return 'intake_in_progress'
     }
     this.#session = {
+      ...(taskContext ? {task_fence:{...taskContext.fence}} : {}),
       intake_id: this.#options.idFactory(), revision: 1, plan_revision: null, proposal_id: null,
       workspace: null, session_id: sessionId,
       ...(this.#options.boundTarget ? {bound_target: {...this.#options.boundTarget()}} : {}),
-      origin_ref: originRef, state: 'open', outcome: null, delegate_id: null,
+      origin_ref: originRef, input_origin_ref:inputOriginRef, state: 'open', outcome: null, delegate_id: null,
       request: structuredClone(request), opening: limit(text, 4000), turns: [], slots: emptySlots(), discovery: [],
       questions_asked: 0, intent_to_proceed: false, stop_asking: false, pending_question: null, pending_project_question: null, confirmed_project: null,
       missing_goal_grace: null, kind: null, decision: null, target: null, work_order: null, title: null,
@@ -320,7 +330,7 @@ export class IntakeController {
     const current = this.#session
     if (current === null || !this.active) return
     if (current.session_id !== sessionId) { this.cancel(); return }
-    if (current.origin_ref === originRef) return
+    if ((current.input_origin_ref??current.origin_ref) === originRef) return
     if (stripLikePython(text) === '') { this.cancel(); return }
     current.turns.push({question: current.pending_question, answer: limit(text, 2000),
       ...(current.pending_project_question === null ? {} : {project_question: current.pending_project_question})})
@@ -329,7 +339,8 @@ export class IntakeController {
     this.#modelBudgets.clear()
     current.revision += 1
     for (const abort of this.#abort) abort.abort()
-    current.origin_ref = originRef
+    current.input_origin_ref=originRef
+    if(!current.task_fence)current.origin_ref = originRef
     current.plan_revision = null
     current.work_order = null
     current.title = null
@@ -348,7 +359,7 @@ export class IntakeController {
 
   beginConfirmed(operation: ConfirmedProjectOperation): boolean {
     const current = this.#session
-    if (this.#userInputPending || current?.state !== 'readback' || current.proposal_id !== operation.proposal_id
+    if (this.#taskAuthority?.()===false || this.#userInputPending || current?.state !== 'readback' || current.proposal_id !== operation.proposal_id
       || current.plan_revision !== current.revision || operation.intake_id !== current.intake_id
       || operation.plan_revision !== current.plan_revision || operation.work_order !== current.work_order) return false
     if (!this.#bindingCurrent(current)) { this.cancel(); return false }
@@ -376,7 +387,7 @@ export class IntakeController {
 
   #live(id: string, revision: number): IntakeSession | null {
     const current = this.#session
-    return current?.intake_id === id && current.revision === revision && current.state !== 'closed' ? current : null
+    return (this.#taskAuthority?.()??true) && current?.intake_id === id && current.revision === revision && current.state !== 'closed' ? current : null
   }
 
   #current(id: string, revision: number): IntakeSession | null {
@@ -405,7 +416,7 @@ export class IntakeController {
       turns: structuredClone(current.turns), confirmed_project: structuredClone(current.confirmed_project), slots: structuredClone(current.slots),
       discovery: [...current.discovery], intent_to_proceed: current.intent_to_proceed,
       questions_asked: current.questions_asked, question_budget: this.#budget(),
-      roster: this.#options.roster().slice(0, MAX_ROSTER), active_project: this.#options.activeProject(),
+      roster: this.#options.roster(), active_project: this.#options.activeProject(),
       running: this.#options.running(),
     }
   }
@@ -528,7 +539,7 @@ export class IntakeController {
       let target: IntakeTarget
       stage = 'resolve'
       try {
-        target = await raceDeadline(this.#options.resolveTarget(decision), this.#clock, 30, abort.signal,
+        target = await raceDeadline(this.#options.resolveTarget(decision,this.#taskContext), this.#clock, 30, abort.signal,
           () => new DOMException('resolution deadline', 'TimeoutError'))
       } catch (error) {
         current = this.#current(snapshot.intake_id, snapshot.revision)
@@ -683,7 +694,8 @@ export class IntakeController {
   #launchWanted(current: IntakeSession): () => boolean {
     const revision = current.revision
     // Admission transfers ownership to the delegate. Completing intake does not cancel it.
-    return () => current.revision === revision && (
+    const taskAuthority=this.#taskAuthority
+    return () => (taskAuthority?.()??true) && current.revision === revision && (
       current.outcome === 'dispatched' || current.outcome === 'routed'
       || (this.#session === current && current.state !== 'closed' && !this.#userInputPending)
     )

@@ -28,7 +28,7 @@ import {
   MAX_CONTINUATION_TASK_SUMMARY,
   MAX_PENDING_HOST_EVENTS
 } from './session-state.js'
-import {RealtimeDeliveryError, type RealtimeSession} from './session.js'
+import {RealtimeDeliveryError, ResponseRequestUncertainError, type RealtimeSession} from './session.js'
 import type {RealtimeTelemetry} from './telemetry.js'
 
 import {Mutex, diagnosticName, isAbort} from './service-state.js'
@@ -329,6 +329,7 @@ export class HostDelivery {
   }
 
   resetDelivery(): void {
+    for(const queued of this.#hostItems)void this.#notDelivered(queued)
     this.#hostItems.length = 0
     this.#hostItemSeq = 0
     this.#pendingPreemptPriority = null
@@ -392,6 +393,8 @@ export class HostDelivery {
   readonly #codingProgressHostEventIds = new Set<string>()
 
   /** A binary min-heap ordered by `compareQueuedHostResponses`, matching the oracle's `heapq`. */
+  readonly #uncertainQueuedDeliveries=new WeakSet<QueuedHostResponse>()
+  async #notDelivered(queued:QueuedHostResponse):Promise<void>{if(!this.#uncertainQueuedDeliveries.has(queued))try{await queued.onNotDelivered?.()}catch{this.#ports.onDiagnostic('[realtime-diagnostic] hostitem_disposition_failed')}}
   #hostItems: QueuedHostResponse[] = []
 
   #hostItemSeq = 0
@@ -473,7 +476,7 @@ export class HostDelivery {
     intent: HostResponseIntent,
     options: HostItemOptions = {},
   ): void {
-    if (this.#ports.clearingConversation()) return
+    if (this.#ports.clearingConversation()){void options.onNotDelivered?.().catch(()=>this.#ports.onDiagnostic('[realtime-diagnostic] hostitem_disposition_failed'));return}
     const priority = options.priority ?? 50
     const preemptive = options.preemptive ?? false
     const preemptiveAlert = options.preemptiveAlert ?? false
@@ -489,6 +492,8 @@ export class HostDelivery {
     this.#ports.telemetry?.record('hostitem.queued', {event_id: intent.item.event_id})
     this.#hostItemSeq += 1
     const queued: QueuedHostResponse = {
+      ...(options.stillWanted?{stillWanted:options.stillWanted}:{}),
+      ...(options.onNotDelivered?{onNotDelivered:options.onNotDelivered}:{}),
       sortKey: [-effectivePriority, preemptive ? -1 : 0, this.#hostItemSeq],
       intent,
       priority: effectivePriority,
@@ -618,7 +623,7 @@ export class HostDelivery {
       const queued = this.#hostItems[0]!
       if (this.#executorApprovalBlocksSemanticAcknowledgement(queued)) break
       if (!this.#queuedHostItemEligible(queued)) {
-        heapPop(this.#hostItems)
+        heapPop(this.#hostItems);await this.#notDelivered(queued)
         if (queued.preemptive) this.#recomputePreemptPriority()
         continue
       }
@@ -662,9 +667,11 @@ export class HostDelivery {
           delivery = await this.session.deliverHostResponse(queued.intent, {responseAllowed})
         }
       } catch (cause) {
-        // Put it back before propagating: a delivery that threw has not been delivered, and dropping
-        // it here would lose a fact the model was supposed to receive.
-        heapPush(this.#hostItems, queued)
+        // Preserve the item after transport failure; a response may already have been requested.
+        // Later queue invalidation must not claim this uncertain delivery was never sent.
+        this.#uncertainQueuedDeliveries.add(queued)
+        if(queued.intent.kind!=='task_continuation'||!(cause instanceof ResponseRequestUncertainError))heapPush(this.#hostItems, queued)
+        else if(queued.preemptive)this.#recomputePreemptPriority()
         throw cause
       }
       const delivered = delivery.accepted
@@ -674,6 +681,7 @@ export class HostDelivery {
         && delivery.injectionEpoch === this.session.sessionEpoch
       ) {
         await this.retireProviderHostEventNow(queued.intent.item.event_id)
+        await this.#notDelivered(queued)
       }
       if (delivered && userActivation) {
         this.#providerEpochNeedingActivation = null
@@ -713,6 +721,7 @@ export class HostDelivery {
 
   /** Revalidate lifecycle eligibility at the final provider boundary. */
   #queuedHostItemEligible(queued: QueuedHostResponse): boolean {
+    if(queued.stillWanted&&!queued.stillWanted())return false
     const eventId = queued.intent.item.event_id
     if (this.#codingProgressQueued.has(queued) && !this.#codingProgressHostEventIds.has(eventId)) return false
     if (eventId.startsWith('intake:') && this.#ports.intakeFactEligible(eventId, this.session.sessionEpoch) !== true) return false

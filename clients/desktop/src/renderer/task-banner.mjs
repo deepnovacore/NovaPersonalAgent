@@ -191,3 +191,9 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
   container.addEventListener('focusout', event => {focused = container.contains(event.relatedTarget); syncPause()})
   return Object.freeze({...controller, applyLayout, setPlatform(value) {platform = value; render(controller.state())}})
 }
+
+/** Durable task progress; decisions and unviewed results outrank tool activity. */
+export function summarizeTasks(tasks,viewedResults=[]){
+ const active=tasks.filter(task=>!['completed','cancelled'].includes(task.phase)),decisions=tasks.filter(task=>task.phase==='waiting'),results=tasks.filter(task=>task.phase==='completed'&&!viewedResults.includes(task.id))
+ return {active:active.length,decisions:decisions.length,results:results.length,task_id:(decisions[0]??results[0]??active[0])?.id??null}
+}

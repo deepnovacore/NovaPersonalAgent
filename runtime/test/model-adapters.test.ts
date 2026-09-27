@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve,join } from 'node:path'
+import {mkdtemp,rm,realpath} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
 import { test } from 'node:test'
 import { VirtualClock } from '../src/core/clock.js'
 import type { ContextView } from '../src/core/context-view.js'
@@ -224,6 +226,33 @@ test('Surrogate receives the actual progress trigger, not an unlabelled snapshot
   assert.match(gateway.completions[0]!.prompt, /当前触发事件：progress/u)
 })
 
+test('task verifier sends its actual decision schema through the JSON-object gateway and applies a correction',async()=>{
+ const {OpenAIModelGateway}=await import('../src/model/model-gateway.js'),{TaskService}=await import('../src/personal-agent/tasks.js'),{taskDecisionSchema}=await import('../src/personal-agent/task-loop.js'),{z}=await import('zod')
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-verifier-schema-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',goal:'Three steps',acceptance:['three distinct steps'],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await tasks.recordDelivery(fence,'first','Step one only');const evidence=tasks.evidence(task.id)
+  const decision={kind:'correct' as const,instruction:'Provide all three distinct steps',evidence_refs:[evidence[0]!.ref]};let requests=0,receivedSchema:unknown,receivedFormat:unknown
+  const gateway=new OpenAIModelGateway({baseUrl:'https://example.invalid/v1',apiKey:'test',clock:new VirtualClock(),metrics:{record:()=>undefined},fetch:(_url,init)=>{
+   assert.ok(typeof init?.body==='string')
+   const body=JSON.parse(init.body) as {messages:{role:string;content:string}[];response_format:unknown},prompt=JSON.parse(body.messages.find(message=>message.role==='user')!.content) as {output_schema:unknown}
+   requests++;receivedFormat=body.response_format;receivedSchema=prompt.output_schema
+   return Promise.resolve(new Response(JSON.stringify({choices:[{message:{content:JSON.stringify(decision)}}]}),{status:200}))
+  }})
+  const verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'}),actual=await verifier.evaluateTask(task,evidence,new AbortController().signal)
+  assert.deepEqual(receivedFormat,{type:'json_object'});assert.deepEqual(receivedSchema,z.toJSONSchema(taskDecisionSchema));assert.deepEqual(actual,decision);const corrected=await tasks.applyDecision(fence,actual);assert.equal(corrected.corrections,1);assert.equal(corrected.phase,'queued');assert.equal(requests,1)
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('task evaluation separates accepted user steering from executor evidence and requests durable reconciliation',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-input-verifier-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{await tasks.open();let task=await tasks.delegate('declare',{conversation_id:'c',goal:'red',acceptance:['red observed'],origin_ref:'user:1'});let fence={task_id:task.id,control_revision:0,goal_revision:0};await tasks.bindWork(fence,'work','session');task=await tasks.controlClient('take',fence,'client','takeover');fence={...fence,control_revision:task.control_revision};await tasks.input('blue',fence,task.controller,'session','Change goal to blue',()=>Promise.resolve('accepted'));task=await tasks.controlClient('return',fence,'client','return')
+ const decision={kind:'reconcile',input_refs:['blue'],goal_change:{goal:'blue',acceptance:['blue observed']}},gateway=new ScriptedGateway([],JSON.stringify(decision)),verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'})
+ const evaluate=verifier.evaluateTask.bind(verifier) as (...args:unknown[])=>Promise<unknown>;assert.deepEqual(await evaluate(task,[],new AbortController().signal,tasks.inputReceipts(task.id)),decision)
+ const prompt=JSON.parse(gateway.completions[0]!.prompt) as {accepted_user_inputs:{request_id:string;text:string}[]};assert.deepEqual(prompt.accepted_user_inputs.map(x=>({request_id:x.request_id,text:x.text})),[{request_id:'blue',text:'Change goal to blue'}])
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+
 test('workbench generation includes its schema in the provider-visible prompt',async()=>{
  const gateway=new ScriptedGateway([],JSON.stringify({cards:[]}))
  const surrogate=new GatewaySurrogate({gateway,model:'same',proactivityPreset:'balanced'})
@@ -296,4 +325,108 @@ test('a queued digest batch re-checks consent when it leaves the lane, and never
  await new Promise(r=>setImmediate(r));assert.equal(gateway.completions.length,1,'the digest waits behind foreground work')
  consented=false;gateway.release();await foreground
  await assert.rejects(digest,/processing_consent_required/u);assert.equal(gateway.completions.length,1,'no digest request was sent')
+})
+
+
+test('coding evaluator cannot complete from prose, truncated checks, or another work/session',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-proof-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Run checks',acceptance:['actual check output'],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await tasks.bindWork(fence,'work','session')
+  await tasks.appendEvent({task_id:task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',item_id:'check',kind:'tool',stage:'completed',text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'1 passed',exit_code:0}),refs:[]},'check')
+  await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'All tests and UI passed'})
+  const current=tasks.get(task.id),valid=tasks.evidence(task.id),decision={kind:'complete',evidence_refs:[valid[0]!.ref],criteria:[{index:0,evidence_refs:[valid[0]!.ref]}]}
+  for(const invalid of [
+   {...valid[0]!,observations:[]},
+   {...valid[0]!,outcome:'failed'},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'test failed',exit_code:1})}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text_truncated:true}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,thread_id:undefined}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text:JSON.stringify({type:'mcpToolCall',server:'cua_live',tool:'js',status:'completed',is_error:true,readback:'tool failed'})}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,work_id:'other'}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,session_id:'other'}]},
+   {...valid[0]!,observations:[{...valid[0]!.observations[0]!,text:'commandExecution completed'}]},
+  ]){
+   const gateway=new ScriptedGateway([],JSON.stringify(decision)),verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'})
+   assert.equal((await verifier.evaluateTask(current,[invalid],new AbortController().signal)).kind,'wait')
+   assert.equal((await verifier.evaluateTask({...current,execution_route:undefined},[invalid],new AbortController().signal)).kind,'wait')
+  }
+  const gateway=new ScriptedGateway([],JSON.stringify(decision)),verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'})
+  assert.deepEqual(await verifier.evaluateTask(current,valid,new AbortController().signal),decision)
+  assert.deepEqual((JSON.parse(gateway.completions[0]!.prompt) as {evidence:{observations:unknown}[]}).evidence[0]!.observations,valid[0]!.observations)
+  const mcp=structuredClone(valid);mcp[0]!.observations[0]!.text=JSON.stringify({type:'mcpToolCall',server:'cua_live',tool:'js',status:'completed',is_error:false,readback:'Counter value: 1'})
+  assert.deepEqual(await verifier.evaluateTask(current,mcp,new AbortController().signal),decision)
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('coding evaluator can use complete later checks despite an unrelated truncated observation',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-partial-proof-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Verify the fix',acceptance:['actual check output'],origin_ref:'user:1'})
+  await tasks.bindWork({task_id:task.id,control_revision:0,goal_revision:0},'work','session')
+  const identity={task_id:task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',kind:'tool' as const,stage:'completed' as const,refs:[]}
+  await tasks.appendEvent({...identity,item_id:'docs',text_truncated:true,text:'Truncated tool documentation'},'docs')
+  await tasks.appendEvent({...identity,item_id:'test',text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'1 passed',exit_code:0})},'test')
+  await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'Done'})
+  const current=tasks.get(task.id),evidence=tasks.evidence(task.id),decision={kind:'complete',evidence_refs:[evidence[0]!.ref],criteria:[{index:0,evidence_refs:[evidence[0]!.ref]}]}
+  assert.equal(evidence[0]!.observations_truncated,true)
+  const gateway=new ScriptedGateway([],JSON.stringify(decision)),verifier=new GatewaySurrogate({gateway,model:'test',proactivityPreset:'balanced'})
+  assert.deepEqual(await verifier.evaluateTask(current,evidence,new AbortController().signal),decision)
+  assert.equal((JSON.parse(gateway.completions[0]!.prompt) as {evidence:{observations_truncated:boolean}[]}).evidence[0]!.observations_truncated,true)
+  const mcp=structuredClone(evidence);mcp[0]!.observations[1]!.text=JSON.stringify({type:'mcpToolCall',server:'cua_live',tool:'js',status:'completed',is_error:false,readback:'Counter value: 2'})
+  assert.deepEqual(await verifier.evaluateTask(current,mcp,new AbortController().signal),decision)
+  for(const incomplete of [evidence,mcp]){
+   incomplete[0]!.observations[1]!.text_truncated=true
+   assert.equal((await verifier.evaluateTask(current,incomplete,new AbortController().signal)).kind,'wait')
+  }
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a verifier completion must map every criterion to evidence, and listing files is not a check',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-criteria-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Fix and test',acceptance:['bug fixed','tests pass'],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await tasks.bindWork(fence,'work','session')
+  const identity={task_id:task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',kind:'tool' as const,stage:'completed' as const,refs:[]}
+  await tasks.appendEvent({...identity,item_id:'ls',text:JSON.stringify({type:'commandExecution',status:'completed',command:"/bin/zsh -lc 'cd app && ls -la'",output:'a b',exit_code:0})},'ls')
+  await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'Done'})
+  const current=tasks.get(task.id),ref=tasks.evidence(task.id)[0]!.ref,run=async(decision:object)=>new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify(decision)),model:'test',proactivityPreset:'balanced'}).evaluateTask(current,tasks.evidence(task.id),new AbortController().signal)
+  assert.equal((await run({kind:'complete',evidence_refs:[ref],criteria:[{index:0,evidence_refs:[ref]}]})).kind,'wait','criterion 1 has no evidence')
+  assert.equal((await run({kind:'complete',evidence_refs:[ref]})).kind,'wait','no mapping at all')
+  assert.equal((await run({kind:'complete',evidence_refs:[ref],criteria:[{index:0,evidence_refs:[ref]},{index:1,evidence_refs:[ref]}]})).kind,'wait','ls is not a check')
+ }finally{await rm(dir,{recursive:true,force:true})}
+})
+
+test('a coding task without criteria completes on a bound check, and wrapped no-ops are not checks',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js')
+ const verdict=async(command:string)=>{
+  const dir=await mkdtemp(join(await realpath(tmpdir()),'task-check-')),tasks=new TaskService(join(dir,'tasks.json'))
+  try{
+   await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Fix and test',acceptance:[],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+   await tasks.bindWork(fence,'work','session')
+   await tasks.appendEvent({task_id:task.id,work_id:'work',session_id:'session',thread_id:'thread',turn_id:'turn',kind:'tool',stage:'completed',refs:[],item_id:'check',text:JSON.stringify({type:'commandExecution',status:'completed',command,output:'ok',exit_code:0})},'check')
+   await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'Done'})
+   const ref=tasks.evidence(task.id)[0]!.ref
+   return (await new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({kind:'complete',evidence_refs:[ref]})),model:'test',proactivityPreset:'balanced'}).evaluateTask(tasks.get(task.id),tasks.evidence(task.id),new AbortController().signal)).kind
+  }finally{await rm(dir,{recursive:true,force:true})}
+ }
+ assert.equal(await verdict('node --test'),'complete')
+ assert.equal(await verdict('env CI=1 node --test'),'complete')
+ assert.equal(await verdict('cat README.md\nnode --test'),'complete')
+ assert.equal(await verdict('command true'),'wait')
+ assert.equal(await verdict('env'),'wait')
+ assert.equal(await verdict("/bin/zsh -lc 'cd app && ls'"),'wait')
+})
+
+test('a check observed in another session of the same task does not prove a work bound to a different session',async()=>{
+ const {TaskService}=await import('../src/personal-agent/tasks.js'),dir=await mkdtemp(join(await realpath(tmpdir()),'task-work-session-')),tasks=new TaskService(join(dir,'tasks.json'))
+ try{
+  await tasks.open();const task=await tasks.delegate('declare',{conversation_id:'c',execution_route:'codex',goal:'Fix and test',acceptance:[],origin_ref:'user:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
+  await tasks.bindWork(fence,'work','session-a');await tasks.bindWork(fence,'other','session-b')
+  await tasks.appendEvent({task_id:task.id,work_id:'work',session_id:'session-b',thread_id:'thread',turn_id:'turn',kind:'tool',stage:'completed',refs:[],item_id:'check',text:JSON.stringify({type:'commandExecution',status:'completed',command:'node --test',output:'ok',exit_code:0})},'check')
+  await tasks.recordWorkOutcome('work','ok',{worker:'codex',final_message:'Done'})
+  const ref=tasks.evidence(task.id)[0]!.ref
+  assert.equal((await new GatewaySurrogate({gateway:new ScriptedGateway([],JSON.stringify({kind:'complete',evidence_refs:[ref]})),model:'test',proactivityPreset:'balanced'}).evaluateTask(tasks.get(task.id),tasks.evidence(task.id),new AbortController().signal)).kind,'wait')
+ }finally{await rm(dir,{recursive:true,force:true})}
 })

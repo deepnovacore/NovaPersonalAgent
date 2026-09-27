@@ -317,6 +317,7 @@ async function createProjectResource(
       idFactory: options.idFactory,
     })
     const adapter = new ProjectCodexAdapter({
+      ...(options.managedMcp?{managedMcp:options.managedMcp}:{}),
       store,
       ...(options.config.localCodexHome === undefined ? {} : {localCodexHome: options.config.localCodexHome}),
       confirmation,

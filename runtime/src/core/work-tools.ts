@@ -13,7 +13,7 @@ import {stripLikePython} from '../text/python-text.js'
 export const DISPATCH_TOOL = 'dispatch'
 export const CANCEL_TOOL = 'cancel'
 export const CONFIRM_TOOL = 'confirm'
-export const HOST_TOOL_NAMES: ReadonlySet<string> = new Set([DISPATCH_TOOL, CANCEL_TOOL, CONFIRM_TOOL])
+export const HOST_TOOL_NAMES: ReadonlySet<string> = new Set([DISPATCH_TOOL, CANCEL_TOOL, CONFIRM_TOOL, 'task'])
 
 // ponytail: one app-server child per CODEX_HOME, i.e. per workspace; a settings key is the upgrade
 // path once real usage shows the need.
@@ -50,6 +50,7 @@ export function dispatchToolSpec(agents: readonly AgentDescriptor[]): HostToolSp
     params: {
       type: 'object',
       properties: {
+        task_id: {type: 'string', minLength: 1, maxLength: 512},
         executor: {type: 'string', enum: agents.map(agent => agent.name)},
         instruction: {...INSTRUCTION, description: '本次任务已明确的完整目标、约束和验收，合并最新纠正，不只传最后一句、不添加未要求的约束'},
         source_refs: {type: 'array', maxItems: 8, items: {type: 'string'}, description: '从用户原话引用目录选择本次任务相关的 ref，包含多轮澄清中的最初目标和指定项目；不引用助手建议或无关旧任务。只有当前一句足够时省略。'},
@@ -68,6 +69,7 @@ export function cancelToolSpec(agents: readonly AgentDescriptor[]): HostToolSpec
     params: {
       type: 'object',
       properties: {
+        task_id: {type: 'string', minLength: 1, maxLength: 512},
         executor: {type: 'string', enum: agents.map(agent => agent.name)},
         instruction: {...INSTRUCTION, description: '同时有多个任务在跑时，用户对要停哪一个的描述'},
       },

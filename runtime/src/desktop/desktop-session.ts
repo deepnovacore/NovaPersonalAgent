@@ -1,3 +1,4 @@
+import type {PersonalCommandContext} from '../personal-agent/host.js'
 import {randomUUID,createHash} from 'node:crypto'
 import type {PromptLanguage} from '../realtime/prompt-language.js'
 import {
@@ -38,6 +39,8 @@ import {
   playbackTelemetrySchema,
   type DesktopControl,
   DesktopOutboundValidationError,
+  DesktopPersonalFrameTooLargeError,
+  MAX_DESKTOP_PERSONAL_JSON_BYTES,
   DesktopProtocolError,
   NodeDesktopServer,
   type DesktopReadiness,
@@ -119,7 +122,7 @@ export interface DesktopBridgeOptions {
   readonly conversationService?:(id:string)=>BridgeService|undefined
   readonly voiceService?:()=>BridgeService|undefined
   readonly sendConversationAudio?: (id:string,pcm:Uint8Array)=>Promise<void>
-  readonly submitConversationText?: (id:string,text:string,requestId?:string)=>Promise<void>
+  readonly submitConversationText?: (id:string,text:string,requestId?:string,sourceTodo?:{id:string;version:number})=>Promise<void>
   readonly validateConversationInput?: (kind:'audio'|'dictation',id:string|undefined)=>void
   readonly token: string
   readonly service: BridgeService
@@ -539,7 +542,7 @@ export class DesktopSocketBridge {
     if (control.type === 'input.text') {
       const submit=async()=>{
         if (this.#dictation) throw new Error('dictation active')
-        if(control.conversation_id){if(!this.#submitConversationText)throw Error('conversation_runtime_unavailable');await this.#submitConversationText(control.conversation_id,control.text,control.request_id);return}
+        if(control.conversation_id){if(!this.#submitConversationText)throw Error('conversation_runtime_unavailable');await this.#submitConversationText(control.conversation_id,control.text,control.request_id,control.source_todo);return}
         if (!this.#service.submitText) throw new Error('text input unavailable')
         await this.#service.submitText(control.text)
       }
@@ -547,7 +550,7 @@ export class DesktopSocketBridge {
       const id=control.request_id
       const result=(ok:boolean,error?:string)=>({type:'input.text_result' as const,request_id:id,ok,...(control.conversation_id?{conversation_id:control.conversation_id}:{}),...(error===undefined?{}:{error})})
       let receipt:ReturnType<typeof result>
-      const hash=createHash('sha256').update(JSON.stringify([control.conversation_id??null,control.text])).digest('hex')
+      const hash=createHash('sha256').update(JSON.stringify([control.conversation_id??null,control.text,control.source_todo??null])).digest('hex')
       const prior=this.#textReceipts.get(id)
       if(control.input_instance_id!==undefined&&control.input_instance_id!==this.#inputInstanceId)receipt=result(false,'outcome_unknown')
       else if(prior)receipt=prior.hash===hash?await prior.result:result(false,'request_id_conflict')
@@ -1294,7 +1297,7 @@ export interface DesktopServerTransport {
 }
 
 export interface DesktopRealtimeOptions extends DesktopBridgeOptions {
-  readonly personalCommand?: (command: unknown) => Promise<unknown>
+  readonly personalCommand?: (command: unknown,context?:PersonalCommandContext) => Promise<unknown>
   readonly personalSnapshot?: () => unknown
   readonly taskPort?: CodingTaskPort
   readonly openTaskDirectory?: (path: string) => Promise<void>
@@ -1361,12 +1364,16 @@ export class DesktopRealtime {
         return memoryBoard(request.request_id, request.detail, request)
       },
       onAudio: pcm => this.bridge.receiveAudio(pcm),
-      onControl: async control => {
+      onControl: async (control,context) => {
         const generation = this.#activeGeneration
         if (generation === null) throw new DesktopProtocolError('desktop control is unauthenticated')
         if (control.type === 'personal.command') {
-          const result = options.personalCommand ? await options.personalCommand(control) : {type:'personal.result',request_id:control.request_id,ok:false,error:'unavailable'}
-          if (this.#activeGeneration === generation) { this.bridge.onPersonalFrame(result); if (options.personalSnapshot) this.bridge.onPersonalFrame(options.personalSnapshot()) }
+          const result = options.personalCommand ? await options.personalCommand(control,context??(transportFailure==='disconnect'?undefined:{client_id:'desktop:local'})) : {type:'personal.result',request_id:control.request_id,ok:false,error:'unavailable'}
+          if (this.#activeGeneration === generation) {
+            this.bridge.onPersonalFrame(result)
+            // Inspector reads must not publish state and trigger another inspector read.
+            if (options.personalSnapshot && !['tasks.get', 'tasks.list'].includes(control.method)) this.bridge.onPersonalFrame(options.personalSnapshot())
+          }
           return
         }
         if (control.type === 'coding.progress_narration') { options.service.setCodingProgressNarration?.(control.mode); return }
@@ -1439,6 +1446,19 @@ export class DesktopRealtime {
             await this.#send(delivery)
           } catch (error) {
             if (this.#activeGeneration !== generation) break
+            if (error instanceof DesktopPersonalFrameTooLargeError) {
+              this.#telemetry?.record('desktop.personal_frame_rejected', {
+                frame_type: error.frameType, bytes: error.bytes, limit: MAX_DESKTOP_PERSONAL_JSON_BYTES,
+              })
+              try {
+                // A command may already have committed. Reject its response without replaying it.
+                await this.server.sendText(JSON.stringify(error.frameType === 'personal.result'
+                  ? {type: 'personal.result', request_id: error.requestId, ok: false, error: 'personal_frame_too_large', input_status: 'unknown'}
+                  : {type: 'personal.error', error: 'personal_frame_too_large'}))
+                continue
+              } catch { /* A failed error delivery still follows the transport failure policy. */ }
+              if (this.#activeGeneration !== generation) break
+            }
             if (delivery.policy === 'required' && this.#transportFailure === 'abort') this.#stop.abort()
             else if (delivery.policy !== 'required' && error instanceof DesktopOutboundValidationError) {
               this.#telemetry?.record('desktop.outbound_validation_dropped', {
@@ -1610,11 +1630,11 @@ export function buildDesktopRealtimeComposition(
     conversationService:id=>realtime.personalAgent.conversationService(id),
     voiceService:()=>realtime.personalAgent.voiceService(),
     sendConversationAudio:(id,pcm)=>realtime.personalAgent.sendConversationAudio(id,pcm),
-    submitConversationText:(id,text,requestId)=>realtime.personalAgent.submitConversationText(id,text,requestId),
+    submitConversationText:(id,text,requestId,sourceTodo)=>realtime.personalAgent.submitConversationText(id,text,requestId,sourceTodo),
     validateConversationInput:(kind,id)=>{if(realtime.personalAgent.presentationMode==='background')throw Error('presentation_hidden');const state=realtime.personalAgent.conversationSnapshot();if(id!==undefined&&!state.items.some(item=>item.id===id))throw Error('conversation_not_found');if(kind==='audio'&&((id!==undefined&&state.voice_id!==id)||(id===undefined&&state.voice_id!==null)))throw Error('voice_not_owned');if(kind==='dictation'&&state.voice_id!==null)throw Error('voice_active')},
-    personalCommand: command => realtime.personalAgent.command(command),
+    personalCommand: (command,context) => realtime.personalAgent.command(command,context),
     personalSnapshot: () => realtime.personalAgent.snapshot(),
-    onConnectionReleased:()=>{if(realtime.personalAgent.presentationMode!==null)void realtime.personalAgent.command({type:'personal.command',request_id:randomUUID(),method:'presentation.set',params:{mode:'background'}}).catch(()=>{ /* pending decisions remain fail-closed during shutdown */ })},
+    onConnectionReleased:()=>{if(realtime.personalAgent.presentationMode!==null)void realtime.personalAgent.disconnectPresentation().catch(()=>{ /* pending decisions remain fail-closed during shutdown */ })},
     executor: codingExecutorIdentity(realtime) ?? options.approvalExecutor ?? null,
     ...(() => {
       const adapter = [...realtime.runtime.executors.values()].find(adapter => adapter.manifest.roles.includes('coding'))

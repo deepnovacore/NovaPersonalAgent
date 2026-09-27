@@ -8,6 +8,7 @@ import {join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import {ProjectCodexAdapter} from '../src/executors/codex/adapter-project.js'
 import {sharedHomeOverrides} from '../src/executors/codex/shared-home.js'
+import {prepareManagedCodexMcp} from '../src/executors/codex/managed-mcp.js'
 import {readLocalCodexSessions} from '../src/executors/codex/local-sessions.js'
 
 test('local catalog reads named top-level sessions and excludes archived, agents and missing workspaces', async () => {
@@ -70,25 +71,43 @@ test('a discovered title resolves to and resumes the original thread/home, not t
 
 test('shared config overrides disable inherited tools without replacing the home configuration', () => {
   const args = sharedHomeOverrides({config: {
-    features: {js_repl: true}, mcp_servers: {external: {enabled: true}, managed: {}},
+    features: {js_repl: true}, mcp_servers: {external: {enabled: true}},
     shell_environment_policy: {set: {EXTERNAL_VALUE: 'private'}},
-  }}, ['managed'])
+  }}, undefined)
   assert.ok(args.includes('features.js_repl=false'))
   assert.ok(args.includes('mcp_servers={ "external" = { "enabled" = false } }'))
   assert.ok(args.includes('shell_environment_policy.set.EXTERNAL_VALUE=""'))
   assert.equal(args.includes('mcp_servers={}'), false)
-  assert.equal(args.some(arg => arg.includes('managed')), false)
 })
 
 test('shared config disables quoted MCP names without admitting inherited tools or copying their secrets', () => {
   const args = sharedHomeOverrides({config: {mcp_servers: {
     'corp.tools': {enabled: false, command: 'private-command'},
-    'quoted"name': {enabled: true}, managed: {enabled: true},
-  }}}, ['managed'])
+    'quoted"name': {enabled: true},
+  }}}, undefined)
   assert.deepEqual(args.filter(value => value.startsWith('mcp_servers=')), [
     'mcp_servers={ "corp.tools" = { "enabled" = false }, "quoted\\"name" = { "enabled" = false } }',
   ])
-  assert.equal(args.some(value => value.includes('private-command') || value.includes('managed')), false)
+  assert.equal(args.some(value => value.includes('private-command')), false)
+})
+
+test('shared config keeps managed MCP entries in the final table while disabling external entries', () => {
+  const managed = prepareManagedCodexMcp({
+    modules: {coding: {enabled: true}},
+    mcpServers: {},
+    serverStatuses: [],
+  } as never, {managed: {
+    enabled: true, transport: 'stdio', command: '/usr/bin/false', args: ['managed'],
+    tools: {read: {enabled: true, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2}}, exposeTo: {frontbrain: false, codex: true},
+  }})
+  const args = sharedHomeOverrides({config: {mcp_servers: {
+    external: {enabled: true, command: 'private-command'}, managed: {enabled: true},
+  }}}, managed)
+
+  assert.deepEqual(args.filter(value => value.startsWith('mcp_servers=')), [
+    'mcp_servers={ "external" = { "enabled" = false }, "managed" = { "enabled" = true, "enabled_tools" = ["read"], "disabled_tools" = [], "startup_timeout_sec" = 15, "tool_timeout_sec" = 8, "default_tools_approval_mode" = "auto", "command" = "/usr/bin/false", "args" = ["managed"] } }',
+  ])
+  assert.equal(args.some(value => value.includes('private-command')), false)
 })
 
 

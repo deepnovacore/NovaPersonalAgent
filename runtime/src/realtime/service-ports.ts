@@ -1,3 +1,6 @@
+import type {IntakeSession} from '../executors/coding/intake.js'
+import type {ProjectProposal} from '../projects/project-confirmation.js'
+import type {TaskToolHost} from '../core/task-tools.js'
 import type {PromptLanguage} from './prompt-language.js'
 import {
 type AgentController
@@ -102,6 +105,8 @@ export interface ServiceRuntime {
   }
 }
 export interface HostItemOptions {
+      readonly stillWanted?:()=>boolean
+  readonly onNotDelivered?:()=>Promise<void>
       readonly semanticEventId?: string | null
       readonly priority?: number
       readonly preemptive?: boolean
@@ -167,6 +172,8 @@ export interface ServiceProvider {
 }
 
 export interface RealtimeServiceOptions {
+  readonly onIntakePrepared?:(intake:Readonly<IntakeSession>,proposal:ProjectProposal)=>void
+  readonly taskHost?: TaskToolHost
   readonly onProviderEvent?: (event: RealtimeProviderEvent) => void
   readonly intake?: Pick<
     IntakeOptions,

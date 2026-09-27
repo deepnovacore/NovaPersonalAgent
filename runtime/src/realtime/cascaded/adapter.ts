@@ -3,7 +3,7 @@ export type PreparedMemoryContext = (signal: AbortSignal) => Promise<string | nu
 import {abortable} from '../../core/camera-session.js'
 import type {PromptLanguage} from '../prompt-language.js'
 import {dispatchSourceContext} from '../history.js'
-import {cascadedResponseGuidance, validateOriginalImage} from './llm.js'
+import {cascadedResponseGuidance, validateOriginalImage,TASK_CONTINUATION_INSTRUCTIONS} from './llm.js'
 import type {Frame} from '../../executors/watcher.js'
 import { randomUUID } from 'node:crypto'
 import {jsonValueSchema} from '../../core/events.js'
@@ -661,7 +661,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       throwIfAborted(combineSignals(owner.controller.signal, signal))
       for (const id of hostIds) owner.pending.delete(id)
       this.#startResponse(owner, inputs, {kind: 'host_request', host_item_id: intent.item.host_item_id},
-        intent.item.kind === 'tool_output')
+        intent.item.kind === 'tool_output',intent.kind==='task_continuation')
       await Promise.resolve()
     })
   }
@@ -967,14 +967,14 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
   }
 
   #startResponse(owner: EpochOwner, inputs: readonly CascadedLlmInput[], origin: ResponseOrigin,
-    allowTools = true): void {
+    allowTools = true,taskContinuation=false): void {
     const controller = new AbortController()
     const active: ActiveResponse = {
       controller, origin, id: `cascaded-response-${owner.epoch}-${++owner.responseSequence}`,
       task: Promise.resolve(), terminal: false, tts: null,
     }
     owner.response = active
-    active.task = Promise.resolve().then(() => this.#runResponse(owner, active, inputs, allowTools))
+    active.task = Promise.resolve().then(() => this.#runResponse(owner, active, inputs, allowTools,taskContinuation))
     void active.task.catch(() => undefined)
   }
 
@@ -1018,7 +1018,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     owner: EpochOwner,
     active: ActiveResponse,
     inputs: readonly CascadedLlmInput[],
-    allowTools: boolean,
+    allowTools: boolean,taskContinuation=false,
   ): Promise<void> {
     const language = this.#language
     let llmResponseId: string | null = null
@@ -1076,7 +1076,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           allowTools ? [...owner.pending.values()].filter(pending => pending.item.speech_content !== undefined)
             .map(pending => pending.item.content).join('\n') : null,
           allowTools ? dispatchSourceContext(owner.responseAdaptation?.user_sources) : null,
-          cascadedResponseGuidance(allowTools, language),
+          taskContinuation?TASK_CONTINUATION_INSTRUCTIONS:cascadedResponseGuidance(allowTools, language),
         ].filter(Boolean).join('\n'),
         signal,
       })) {

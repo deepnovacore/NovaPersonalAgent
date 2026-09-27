@@ -44,6 +44,8 @@ import {
 
 /** A host response the session asked for and could not deliver. */
 export class RealtimeDeliveryError extends Error {}
+/** The response request may have reached the provider before its acknowledgement failed. */
+export class ResponseRequestUncertainError extends RealtimeDeliveryError {}
 
 /** What a fence took away from the host, so the caller can put it back in the queue. */
 export interface FenceInterruption {
@@ -272,6 +274,10 @@ export class RealtimeSession {
   responseIsToolContinuation(responseId: string): boolean {
     const items = this.#responseItems.get(this.#turnKey(responseId))
     return items !== undefined && items.length > 0 && items.every(item => item.kind === 'tool_output')
+  }
+
+  responseHostItemIds(responseId: string): readonly string[] {
+    return (this.#responseItems.get(this.#turnKey(responseId)) ?? []).map(item => item.host_item_id)
   }
 
   responseEventIds(responseId: string): readonly string[] {
@@ -888,7 +894,7 @@ export class RealtimeSession {
       await this.#provider.createResponse(intent)
     } catch (cause) {
       this.#state.discardPendingResponse(pending)
-      throw new RealtimeDeliveryError(`response request failed: ${String(cause)}`)
+      throw new ResponseRequestUncertainError(`response request failed: ${String(cause)}`)
     }
     for (const eventId of eventIds) this.#state.markEventResponded(eventId)
     this.#state.pruneHostEventLedgers(eventIds)

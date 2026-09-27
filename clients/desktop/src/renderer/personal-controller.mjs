@@ -1,12 +1,12 @@
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,changed=()=>{}}) {
-    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
+    Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
   state(id=this.selectedId){if(!this.drafts.has(id))this.drafts.set(id,{draft:'',error:'',submission:null});return this.drafts.get(id)}
-  get draft(){return this.state().draft} set draft(value){this.state().draft=value}
+  get draft(){return this.state().draft} set draft(value){this.state().draft=value;if(!value.trim())this.state().source_todo=null}
   get error(){return this.state().error} set error(value){this.state().error=value}
   get submittedRequestId(){return this.state().submission?.request_id??null}
   get submittedDraft(){return this.state().submission?.text??null}
@@ -16,7 +16,7 @@ export class PersonalController {
     if(this.applyPresentation){
       this.presentationReady=false
       for(let attempt=0;attempt<2&&!this.presentationReady&&this.connected;attempt++){
-        try{await this.setPresentation(this.desiredPresentation,{activate:false})}
+        try{const desired=this.desiredPresentation;for(const request of [...this.presentationRequests.values()])await this.setPresentation(request.mode,{activate:false,request,reconcileOnly:request.mode!==desired});if(this.presentationMode!==desired||!this.presentationReady)await this.setPresentation(desired,{activate:false})}
         catch(error){this.error=error.message}
       }
       if(!this.presentationReady&&this.connected)await this.applyMode('background',{activate:false})
@@ -25,27 +25,42 @@ export class PersonalController {
     if(this.presentationReady)for(const [id,state]of this.drafts)if(state.submission)this.sendSubmission(id,state.submission)
     this.changed()
   }
-  sendSubmission(id,value){return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id})}
+  sendSubmission(id,value){return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id,...(value.source_todo?{source_todo:value.source_todo}:{})})}
   disconnect(){
     const wasConnected=this.everConnected
-    for(const state of this.drafts.values())if(state.submission&&!state.submission.restored){state.draft=[state.submission.text,state.draft].filter(Boolean).join('\n');state.submission.restored=true}
+    for(const state of this.drafts.values())if(state.submission&&!state.submission.restored){state.draft=[state.submission.text,state.draft].filter(Boolean).join('\n');state.source_todo=state.submission.source_todo??null;state.submission.restored=true}
     this.connected=false;this.capabilities=[];this.generation++;this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
     for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
     // Only a real exit after a connection ever succeeded is alarming; a cold-start
     // "never connected" disconnect() call must stay quiet.
     this.pending.clear();void this.stop();if(wasConnected)this.error='连接已断开，草稿已保留';this.changed()
   }
-  async setPresentation(mode,{activate=true}={}){
+  setPresentation(mode,options={}){
+    if(this.presentationInFlight.has(mode))return this.presentationInFlight.get(mode)
+    const pending=this.changePresentation(mode,options).finally(()=>{if(this.presentationInFlight.get(mode)===pending)this.presentationInFlight.delete(mode)})
+    this.presentationInFlight.set(mode,pending);return pending
+  }
+  async changePresentation(mode,{activate=true,request,reconcileOnly=false}={}){
     if(!['background','workbench','orb'].includes(mode))throw new Error('无效的显示模式')
     if(this.presentationPending&&mode!=='background')throw new Error('正在切换模式，请稍候')
+    // A fresh return to the workbench retires the last handback notice; reconciling an earlier exit may post a new one.
+    if(!request&&mode==='workbench'&&!this.presentationPending)this.taskNotice=''
+    if(!request&&!this.presentationPending&&mode!=='background'){const outstanding=[...this.presentationRequests.values()];for(const prior of outstanding)if(prior.mode!==mode)await this.setPresentation(prior.mode,{activate:false,request:prior})}
+    request??=[...this.presentationRequests.values()].findLast(value=>value.mode===mode)??{mode,request_id:crypto.randomUUID()}
+    this.presentationRequests.set(request.request_id,request)
     const sequence=++this.presentationSequence
-    this.desiredPresentation=mode;this.presentationPending=true;if(mode==='background')this.presentationReady=false;this.changed()
+    if(!reconcileOnly)this.desiredPresentation=mode;this.presentationPending=true;// Only a client that may hold a task has anything to hand back.
+    if(mode!=='workbench'&&this.snapshot?.tasks?.some(task=>task.controller?.kind==='user'))this.taskNotice='交还状态待确认，草稿已保留';this.presentationReady=false;this.changed()
     try{
       const local=mode==='background'?this.applyMode(mode,{activate:false}):null
       if(!this.connected){if(local)await local;else await this.applyMode(mode,{activate});this.presentationReady=false;return}
-      const [,result]=await Promise.all([local,this.command('presentation.set',{mode})])
-      if(sequence!==this.presentationSequence)return
+      const [,result]=await Promise.all([local,this.command('presentation.set',{mode},{request_id:request.request_id})])
       if(result?.mode!==mode)throw new Error('显示模式未确认，请重试')
+      this.presentationRequests.delete(request.request_id)
+      if(result.returned_task_ids?.length&&result.returned_task_ids.every(id=>Number.isSafeInteger(result.task_control_revisions?.[id])))this.taskNotice='已交还 Nova，未发送的草稿已保留'
+      else if(mode!=='workbench')this.taskNotice=''
+      if(sequence!==this.presentationSequence)return
+      if(reconcileOnly)return
       if(mode!=='background')await this.applyMode(mode,{activate})
       this.presentationReady=true
     }catch(error){if(sequence===this.presentationSequence)this.error=error.message;throw error}
@@ -75,8 +90,8 @@ export class PersonalController {
     if(frame.type==='input.text_result')for(const [id,state]of this.drafts){
       const request=state.submission
       if(!request||request.request_id!==frame.request_id||(frame.conversation_id&&frame.conversation_id!==id))continue
-      if(!frame.ok){if(!request.restored)state.draft=[request.text,state.draft].filter(Boolean).join('\n');state.error=frame.error==='outcome_unknown'?'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。':frame.error||'文字发送失败，草稿已保留'}
-      else if(request.restored&&state.draft===request.text)state.draft=''
+      if(!frame.ok){state.source_todo=request.source_todo??null;if(!request.restored)state.draft=[request.text,state.draft].filter(Boolean).join('\n');state.error=frame.error==='outcome_unknown'?'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。':frame.error||'文字发送失败，草稿已保留'}
+      else if(request.restored&&state.draft===request.text){state.draft='';state.source_todo=null}
       state.submission=null
     }
     if(['client.ready','desktop.capabilities'].includes(frame.type)){this.capabilities=frame.capabilities??[];this.inputInstance=frame.input_instance_id??null}
@@ -87,9 +102,13 @@ export class PersonalController {
       if(this.voiceId&&this.dictationId)void this.text()
       if(!previous&&this.selectedId&&this.drafts.has(null)){const scratch=this.drafts.get(null);if(scratch.draft&&!this.state().draft)this.state().draft=scratch.draft;this.drafts.delete(null)}
     }
+    if(['personal.error','personal.result'].includes(frame.type)&&frame.error==='personal_frame_too_large'){
+      frame={...frame,error:'个人状态或任务详情过大，暂时无法显示。操作可能已完成，请先刷新状态核对，再决定是否重试。'}
+      this.error=frame.error
+    }
     if(frame.type==='personal.result'){
       const entry=this.pending.get(frame.request_id)
-      if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(new Error(frame.error||'操作失败'));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
+      if(entry){clearTimeout(entry.timer);this.pending.delete(frame.request_id);frame.ok?entry.resolve(frame.data):entry.reject(Object.assign(new Error(frame.error||'操作失败'),{input_status:frame.input_status}));if(frame.reload_required)void this.command('state').catch(error=>{this.error=error.message;this.changed()})}
     }
     if(frame.type==='input.transcription'&&frame.id===this.dictationId&&(!frame.conversation_id||frame.conversation_id===this.dictationConversationId)){
       const state=this.state(this.dictationConversationId)
@@ -98,15 +117,16 @@ export class PersonalController {
     }
     this.changed()
   }
-  async command(method,params={}){
-    if(!this.connected)throw new Error('尚未连接')
-    if(this.applyPresentation&&!this.presentationReady&&!['presentation.set','state'].includes(method))throw new Error('正在恢复显示模式，请稍候')
-    if(this.pending.size>=32)throw new Error('请等待当前操作完成')
-    const request_id=crypto.randomUUID()
+  async command(method,params={},options={}){
+    const notSent=message=>Object.assign(new Error(message),method==='tasks.input'?{input_status:'failed'}:{})
+    if(!this.connected)throw notSent('尚未连接')
+    if(this.applyPresentation&&!this.presentationReady&&!['presentation.set','state','tasks.get','tasks.list','conversations.approve'].includes(method))throw notSent('正在恢复显示模式，请稍候')
+    if(this.pending.size>=32)throw notSent('请等待当前操作完成')
+    const request_id=options.request_id??crypto.randomUUID()
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{this.pending.delete(request_id);reject(new Error('操作超时，请刷新状态后重试'))},30000)
       this.pending.set(request_id,{resolve,reject,timer})
-      if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(new Error('发送失败'))}
+      if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(notSent('发送失败'))}
     })
   }
   select(id){return this.command('conversations.select',{id})}
@@ -157,8 +177,18 @@ export class PersonalController {
   async submit(){
     const id=this.selectedId,state=this.state(id)
     if(!this.presentationReady||!id||state.submission||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
-    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false}
+    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false,...(state.source_todo?{source_todo:{...state.source_todo}}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';this.changed();return false}
-    state.submission=request;state.draft='';state.error='';this.changed();return true
+    state.submission=request;state.draft='';state.source_todo=null;state.error='';this.changed();return true
+  }
+  /** Sends a host-composed user message (e.g. a changed execution place) without touching the draft. */
+  /** Sends text to conversation `id` without touching its draft; text that cannot be sent is left in that draft instead. */
+  submitText(text,id=this.selectedId){
+    const state=this.state(id),keep=()=>{if(!state.draft)state.draft=text;this.changed();return false}
+    if(!id||!text.trim()||text.length>4000)return false
+    if(!this.presentationReady||state.submission||(id===this.selectedId?this.isVoiceConversation:this.voiceId===id)||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input'))return keep()
+    const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false}
+    if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';return keep()}
+    state.submission=request;state.error='';this.changed();return true
   }
 }

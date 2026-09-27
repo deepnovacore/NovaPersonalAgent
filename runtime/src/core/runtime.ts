@@ -1,3 +1,5 @@
+import {taskGrantService} from '../personal-agent/tasks.js'
+import type {TaskDispatchContext} from './task-tools.js'
 import {CodingProgressNarrationState, codingProgressSummary} from '../realtime/coding-progress-narration.js'
 import {createHash, randomUUID} from 'node:crypto'
 import { canonicalJson, compareCodePoints } from '../text/canonical-json.js'
@@ -651,6 +653,12 @@ export class CoreRuntime {
    * caller cite a memory item that has aged out of the recent window -- the one check that turns
    * "may only reference what it has actually seen" into something enforceable.
    */
+  dispatchTaskExternal(request:DelegateRequest,reason:WakeReason,grant:TaskDispatchContext):RuntimeDispatchResult {
+    taskGrantService(grant)
+    if(request.origin_ref!==grant.origin_ref)throw Error('invalid_origin_ref')
+    const admission=this.#dispatch(request,reason,new Set([grant.origin_ref]),grant)
+    return {accepted:admission.accepted,delegate_id:admission.delegate_id,problem:admission.problem}
+  }
   dispatchExternal(request: DelegateRequest, reason: WakeReason): RuntimeDispatchResult {
     const admission = this.#dispatch(request, reason, this.#visibleMemoryRefs())
     return {
@@ -670,6 +678,7 @@ export class CoreRuntime {
     request: unknown,
     reason: WakeReason,
     capability: object,
+    taskGrant?:TaskDispatchContext,
   ): RuntimeDispatchResult {
     const parsed = delegateRequestSchema.safeParse(request)
     const coding = executorWithRole(this.#manifests.values(), 'coding')
@@ -689,7 +698,7 @@ export class CoreRuntime {
     try {
       // The capability pins only its exact origin. #dispatch still validates that the Memory item
       // exists and applies duplicate, executor, operation and deadline guards normally.
-      const admission = this.#dispatch(parsed.data, reason, new Set([parsed.data.origin_ref]))
+      const admission = this.#dispatch(parsed.data, reason, new Set([parsed.data.origin_ref]),taskGrant)
       accepted = admission.accepted
       return {
         accepted: admission.accepted,
@@ -774,6 +783,7 @@ export class CoreRuntime {
     request: DelegateRequest,
     reason: WakeReason,
     visibleRefs?: ReadonlySet<string>,
+    taskGrant?:TaskDispatchContext,
   ): DelegateAdmission {
     const result = delegateRequestSchema.safeParse(request)
     if (!result.success) return this.#refuseDelegate(request, 'invalid_delegate_request', reason)
@@ -812,7 +822,7 @@ export class CoreRuntime {
         )
       }
     }
-    const originProblem = this.#originProblem(parsed.origin_ref, visibleRefs)
+    const originProblem = this.#originProblem(parsed.origin_ref, visibleRefs,taskGrant)
     if (originProblem !== null) return this.#refuseDelegate(parsed, originProblem, reason)
     const dispatchedAt = this.appliedEvents.at(-1)?.ts ?? 0
     const delegate = delegateSchema.parse({
@@ -1585,7 +1595,7 @@ export class CoreRuntime {
     }
   }
 
-  #originProblem(reference: string, visibleRefs?: ReadonlySet<string>): string | null {
+  #originProblem(reference: string, visibleRefs?: ReadonlySet<string>,grant?:TaskDispatchContext): string | null {
     try {
       parseMemoryRef(reference)
     } catch {
@@ -1593,7 +1603,10 @@ export class CoreRuntime {
     }
     if (!this.#memoryItemExists(reference)) return 'origin_not_found'
     const [channel, seq] = parseMemoryRef(reference)
-    if (this.memory.isHistorical({channel, seq})) return 'historical_origin'
+    if (this.memory.isHistorical({channel, seq})){
+      const task=grant?taskGrantService(grant).get(grant.fence.task_id):undefined
+      if(!task||grant?.origin_ref!==reference||task.conversation_generation===undefined||this.memory.scope.conversation_id!==task.conversation_id+':'+task.conversation_generation)return 'historical_origin'
+    }
     if (visibleRefs !== undefined && !visibleRefs.has(reference)) return 'origin_not_visible'
     return null
   }
