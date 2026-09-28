@@ -51,3 +51,5 @@ export * from './core/tool-schema.js'
 export * from './core/trace.js'
 
 export * from './config/capability-registry.js'
+
+export * from './executors/coding/target-resolution.js'

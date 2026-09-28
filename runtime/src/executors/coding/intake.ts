@@ -444,6 +444,8 @@ export class IntakeController {
     try {
       const input = this.#input(snapshot)
       const result = await this.#model(snapshot, 'assess', assessSchema.transform(result => ({...result, project: currentWorkspaceReference(result.project)})).superRefine((result, ctx) => {
+        // A stale binding cannot answer this revision's project question; discard it below.
+        if (result.intake_id !== snapshot.intake_id || result.revision !== snapshot.revision) return
         const problem = projectConfirmationProblem(result, snapshot, input.active_project as string | null, (input.roster as readonly RosterEntry[]).map(entry => entry.name))
         if (problem !== null) ctx.addIssue({code: 'custom', message: problem, path: ['project_confirmation']})
       }), input, abort)

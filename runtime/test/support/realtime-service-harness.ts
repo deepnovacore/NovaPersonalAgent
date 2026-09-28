@@ -701,7 +701,7 @@ export function intakePorts(
     settings: {clarification_depth: 'balanced', plan_readback: 'silent'},
     roster: () => [], running: () => [], activeProject: () => 'alpha',
     resolveTarget: unexpected,
-    models: {assess: unexpected, plan: unexpected, resolveCancelTarget: unexpected},
+    models: {assess: unexpected, plan: unexpected, targets: {resolveIntake: () => Promise.reject(new Error('unexpected target call')), resolveWork: unexpected}},
     dispatch: unexpected, steer: unexpected,
     record: () => undefined,
     ...overrides,

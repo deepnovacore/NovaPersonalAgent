@@ -142,7 +142,7 @@ test(`coordinator assess on ${model}: holdout ≥7/10 exact`, {skip}, async t =>
 
 test(`resolveCancelTarget on ${model} picks the named work out of two`, {skip}, async t => {
   const both = [...running, {work_id: 'w-pricing', project: 'pricing-page', title: '价格表响应式'}]
-  const target = await models().resolveCancelTarget('取消博客那个', both)
+  const target = await models().targets.resolveWork('取消博客那个', both, AbortSignal.timeout(15_000))
   t.diagnostic(`resolveCancelTarget("取消博客那个") → ${target}`)
   assert.equal(target, 'w-blog')
 })

@@ -961,7 +961,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const resolvedIntakeModels = options.intake?.models
   const resolveCancelTarget: CancelTargetResolver = resolvedIntakeModels === undefined
     ? () => Promise.resolve(null)
-    : (instruction, running) => resolvedIntakeModels.resolveCancelTarget(instruction, running)
+    : (instruction, running) => resolvedIntakeModels.targets.resolveWork(instruction, running, AbortSignal.timeout(15_000))
   const agentDispatchPort = {
     cancelPendingDispatch: (id: string) => core.runtime.cancelPendingDispatch(id),
     dispatch: async (request: {

@@ -61,4 +61,12 @@ DASHSCOPE_API_KEY=你的百炼密钥
 
 TypeScript API 变化：`Settings.surrogate_model` 改为 `support_model`；原来的宽接口 `GatewaySurrogate` 由上述三个适配器替代。原 `watch()` 调用改为 `GatewayProactivity.select()`，其他功能迁移到各自模块。本次不切换 Jev，也不迁移事件协议；既有序列化 `surrogate` 标识和模型可见提示词保留历史拼写。
 
+### 目标解析
+
+`GatewayTargetResolver` 将工作区/session 识别（`resolveIntake`）和运行任务选择（`resolveWork`）从需求提取中独立出来。`intakeModels` 的第四个参数可注入目标解析器，通过 `models.targets` 暴露；取消路径调用同一个解析器。需求提取与目标解析共用 `SUPPORT_MODEL` 及其 gateway，规划保持原有模型选型。
+
+一次正常评估现在依次调用需求模型和目标模型，两步共用原来的评估截止时间；放弃需求时跳过目标解析。宿主仍在执行动作前校验原话证据、明确的 session 延续意图、确认与过期结果。新工作区名称和目标澄清句仍由 LLM 生成，因此该边界尚不能直接替换成 Jev。本次不新增模型配置。
+
+目标校验失败后，当前重试会重跑两个阶段；最多四次模型调用共用原来的两次尝试、30 秒评估预算。
+
 [返回上手指南](getting-started.md)

@@ -1220,7 +1220,7 @@ test('intake without a coding executor fails assembly instead of silently droppi
         models: {
           assess: () => Promise.reject(new Error('not used')),
           plan: () => Promise.reject(new Error('not used')),
-          resolveCancelTarget: () => Promise.reject(new Error('not used')),
+          targets: {resolveIntake: () => Promise.reject(new Error('unexpected target call')), resolveWork: () => Promise.reject(new Error('not used'))},
         },
         settings: {clarification_depth: 'balanced', plan_readback: 'summary'},
       },
@@ -1429,7 +1429,7 @@ for (const scenario of ['direct', 'changed', 'unbound'] as const) {
             session: {mode: 'latest'}, execution_mode: 'direct', intent_to_proceed: true, candidate_question: null,
             discovery: [], early_exit: true, abandon: false, readiness: 1,
             slots: Object.fromEntries(['goal', 'scope', 'acceptance', 'constraints'].map(key => [key, {state: 'stated', note: key === 'goal' ? 'Fix button' : key}]))}
-        }, plan: () => Promise.reject(Error('direct work must not plan')), resolveCancelTarget: () => Promise.resolve(null),
+        }, plan: () => Promise.reject(Error('direct work must not plan')), targets: {resolveIntake: () => Promise.reject(new Error('unexpected target call')), resolveWork: () => Promise.resolve(null)},
       }},
     })
     await realtime.start()
@@ -1492,7 +1492,7 @@ test('review boundary: two conversation assemblies independently resolve current
             session: {mode: 'new'}, execution_mode: 'direct', intent_to_proceed: true, candidate_question: null,
             discovery: [], early_exit: true, abandon: false, readiness: 1,
             slots: Object.fromEntries(['goal', 'scope', 'acceptance', 'constraints'].map(key => [key, {state: 'stated', note: key}]))}),
-          plan: () => Promise.reject(Error('direct work must not plan')), resolveCancelTarget: () => Promise.resolve(null),
+          plan: () => Promise.reject(Error('direct work must not plan')), targets: {resolveIntake: () => Promise.reject(new Error('unexpected target call')), resolveWork: () => Promise.resolve(null)},
         }},
       })
       graphs.push(graph)
@@ -1586,7 +1586,7 @@ test('project proposal reaches provider and desktop before confirmation', async 
         intake_id: input.intake_id, revision: input.revision,
         work_order: {objective: slots.goal.note, scope_in: ['单页小游戏'], acceptance: ['可以玩']},
       }),
-      resolveCancelTarget: () => Promise.resolve(null),
+      targets: {resolveIntake: () => Promise.reject(new Error('unexpected target call')), resolveWork: () => Promise.resolve(null)},
     },
     settings: {clarification_depth: 'balanced', plan_readback: 'summary'},
   } as const
@@ -2015,7 +2015,7 @@ test('confirmed project dispatch preserves task routing for new and existing tas
           intake_id: input.intake_id, revision: input.revision,
           work_order: {objective: slots.goal.note, scope_in: [slots.scope.note], acceptance: [slots.acceptance.note]},
         }),
-        resolveCancelTarget: () => Promise.resolve(null),
+        targets: {resolveIntake: () => Promise.reject(new Error('unexpected target call')), resolveWork: () => Promise.resolve(null)},
       },
       settings: {clarification_depth: 'balanced' as const, plan_readback: 'summary' as const},
     }

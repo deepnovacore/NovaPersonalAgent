@@ -77,10 +77,17 @@ test('host and desktop text/voice children keep resolved support models paired a
     const previous = globalThis.fetch
     globalThis.fetch = (url, init) => {
       assert.equal(typeof init?.body, 'string')
-      const body = JSON.parse(init!.body as string) as {model: string; thinking?: unknown}
+      const body = JSON.parse(init!.body as string) as {model: string; thinking?: unknown; messages: {role:string;content:string}[]}
       assert.deepEqual(body.thinking, scenario.provider === 'deepseek' && !scenario.generic ? {type: 'disabled'} : undefined)
       records.push({endpoint: typeof url === 'string' ? url : url instanceof URL ? url.href : url.url, model: body.model})
-      return Promise.resolve(new Response(JSON.stringify({choices: [{message: {content: '{}'}}]}), {status: 200}))
+      const system = body.messages.find(message=>message.role==='system')?.content ?? ''
+      const missing = {state:'missing',note:''}
+      const value = system.includes('target.resolve slot')
+        ? {intake_id:'routing',revision:1,kind:'work',project:null,project_evidence:null,session:{mode:'new'},question:null}
+        : system.includes('intake.assess slot')
+          ? {intake_id:'routing',revision:1,slots:{goal:missing,scope:missing,acceptance:missing,constraints:missing},readiness:0,intent_to_proceed:false,candidate_question:null,discovery:[],early_exit:false,abandon:false}
+          : {target_work_id:'running-work'}
+      return Promise.resolve(new Response(JSON.stringify({choices: [{message: {content: JSON.stringify(value)}}]}), {status: 200}))
     }
     const configured = loadSettings({
       PIPELINE_MODE: scenario.integrated ? 'integrated' : 'cascaded',
@@ -112,11 +119,14 @@ test('host and desktop text/voice children keep resolved support models paired a
           records.length = 0
           const models = contexts.at(-1)?.intake?.models
           assert.ok(models)
-          await models.assess({running: []}, new AbortController().signal)
+          await models.assess({intake_id:'routing',revision:1,running: []}, new AbortController().signal)
           await models.plan({}, new AbortController().signal)
+          assert.equal(await models.targets.resolveWork('stop task',[{work_id:'running-work',project:'project',title:'task'}],new AbortController().signal),'running-work')
           assert.deepEqual(records, [
             {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
             {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen3-vl-plus' : scenario.planner ?? scenario.model},
+            {endpoint: scenario.endpoint, model: scenario.generic ? 'qwen-plus' : scenario.model},
           ], scenario.provider)
         }
         await checkRequests()

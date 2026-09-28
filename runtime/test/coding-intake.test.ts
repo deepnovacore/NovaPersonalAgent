@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {VirtualClock} from '../src/core/clock.js'
 import {IntakeController, type IntakeOptions} from '../src/executors/coding/intake.js'
-import {assessSchema, assessSchemaFor, intakeModels, type IntakeModels, type IntakeSlots} from '../src/executors/coding/intake-model.js'
+import {assessSchema, assessSchemaFor, requirementsSchema, intakeModels, type IntakeModels, type IntakeSlots} from '../src/executors/coding/intake-model.js'
 import {ProjectConfirmationController} from '../src/projects/project-confirmation.js'
 import {renderWorkOrder, workOrderSchema} from '../src/executors/coding/work-order.js'
 import {ProjectResolutionError, type CoordinatorDecision, type IntakeTarget} from '../src/executors/coding-executor.js'
@@ -77,7 +77,7 @@ function harness(options: HarnessOptions = {}) {
     models: {
       assess: input => Promise.resolve(assessment(input)),
       plan: input => { planned++; return Promise.resolve(plan(input)) },
-      resolveCancelTarget: () => Promise.resolve(null),
+      targets: {resolveIntake: () => Promise.reject(new Error('unexpected target call')), resolveWork: () => Promise.resolve(null)},
       ...models,
     },
     roster: () => [
@@ -682,15 +682,22 @@ test('intake model ports use selected models, bounded JSON and explicit ownershi
   const requests: {model: string; system: string; prompt: string}[] = []
   const models: IntakeModels = intakeModels({
     async *stream() { await Promise.resolve();  throw new Error('not used') },
-    complete: request => { requests.push(request); return Promise.resolve({text: '{}'}) },
+    complete: request => {
+      requests.push(request)
+      const value = request.system.includes('target.resolve slot')
+        ? {intake_id:'i1',revision:1,kind:'work',project:null,project_evidence:null,project_confirmation:null,session:{mode:'new'},question:null}
+        : request.system.includes('intake.assess slot') ? requirementsSchema.strip().parse(assessment({intake_id:'i1',revision:1})) : {}
+      return Promise.resolve({text:JSON.stringify(value)})
+    },
   }, 'cheap-assessor', 'chosen-planner')
   await models.assess({intake_id: 'i1', revision: 1}, new AbortController().signal)
   await models.plan({intake_id: 'i1', revision: 1}, new AbortController().signal)
-  assert.deepEqual(requests.map(value => value.model), ['cheap-assessor', 'chosen-planner'])
+  assert.deepEqual(requests.map(value => value.model), ['cheap-assessor', 'cheap-assessor', 'chosen-planner'])
   assert.match(requests[0]!.system, /ask only when the answer would change the implementation or the acceptance; otherwise prefer inferring and marking the inference\./)
   assert.match(requests[0]!.system, /Preserve an earlier request to proceed unless the user retracts it/)
   assert.match(requests[0]!.system, /Set abandon on explicit cancellation/)
-  assert.match(requests[1]!.system, /anything guessed goes under assumptions/i)
+  assert.match(requests[1]!.system, /target.resolve slot/)
+  assert.match(requests[2]!.system, /anything guessed goes under assumptions/i)
 })
 
 
@@ -1677,3 +1684,92 @@ for (const [answer, modelTitle, dispatched] of [
     else assert.ok(h.intake.view?.pending_question)
   })
 }
+
+
+test('independent target resolver drives switch confirmation without requirement target fields',async()=>{
+ let targetCalls=0
+ const models=intakeModels({stream:()=>{throw Error('unused')},complete:request=>{
+  const input=JSON.parse(request.prompt) as Record<string,unknown>
+  const base=assessment(input,{slots:{goal:missing,scope:missing,acceptance:missing,constraints:missing}})
+  const requirements=requirementsSchema.strip().parse(base)
+  return Promise.resolve({text:JSON.stringify(requirements)})
+ }},'support','planner',{
+  resolveIntake:input=>{targetCalls++;return Promise.resolve({intake_id:input.intake_id,revision:input.revision,
+   kind:'switch',project:'blog',project_evidence:'blog',session:{mode:'new'},question:null})},
+  resolveWork:()=>Promise.resolve(null),
+ })
+ const h=harness({models,resolveTarget:()=>Promise.resolve({...target,workspace_display_name:'blog',action:'select'})})
+ h.intake.open(request,'切到 blog','u1','e')
+ await h.intake.settled()
+ assert.equal(targetCalls,1)
+ assert.equal(h.intake.view?.kind,'switch')
+ assert.ok(h.intake.view?.proposal_id)
+ assert.equal(h.dispatched.length,0)
+ assert.equal(h.planned(),0)
+})
+
+test('a target result delayed across a new user revision cannot select or ask for the old target',async()=>{
+ let started!:()=>void, release!:()=>void
+ const entered=new Promise<void>(resolve=>{started=resolve}),gate=new Promise<void>(resolve=>{release=resolve})
+ let targets=0
+ const models=intakeModels({stream:()=>{throw Error('unused')},complete:request=>{
+  const input=JSON.parse(request.prompt) as Record<string,unknown>
+  const requirements=requirementsSchema.strip().parse(assessment(input))
+  return Promise.resolve({text:JSON.stringify(requirements)})
+ }},'support','planner',{
+  resolveIntake:async input=>{targets++;if(targets===1){started();await gate}
+   return {intake_id:input.intake_id,revision:input.revision,kind:'unclear',project:null,project_evidence:null,session:{mode:'new'},question:input.revision===1?'STALE TARGET':'CURRENT TARGET'}},
+  resolveWork:()=>Promise.resolve(null),
+ })
+ const h=harness({models})
+ h.intake.open(request,'Original work','u1','e');await entered
+ h.intake.open(request,'Different work','u2','e');release();await h.intake.settled()
+ assert.equal(targets,2)
+ assert.equal(h.dispatched.length,0)
+ assert.ok(!h.facts.some(text=>text.includes('STALE TARGET')))
+ assert.ok(h.facts.some(text=>text.includes('CURRENT TARGET')))
+})
+
+for(const stage of ['requirements','target'] as const){
+ test(`two-stage intake sends ${stage} validation feedback only to its owning model`,async()=>{
+  const requirementInputs:Record<string,unknown>[]=[],targetInputs:Readonly<Record<string,unknown>>[]=[]
+  const models=intakeModels({stream:()=>{throw Error('unused')},complete:request=>{
+   const input=JSON.parse(request.prompt) as Record<string,unknown>;requirementInputs.push(input)
+   const output=requirementsSchema.strip().parse(assessment(input,{execution_mode:'direct'}))
+   return Promise.resolve({text:JSON.stringify(stage==='requirements'&&requirementInputs.length===1?{...output,kind:'work'}:output)})
+  }},'support','planner',{
+   resolveIntake:input=>{
+    targetInputs.push(input)
+    return Promise.resolve({intake_id:input.intake_id,revision:input.revision,kind:'work',project:null,project_evidence:null,
+     ...(stage==='target'&&targetInputs.length===1?{}:{session:{mode:'new'}}),question:null})
+   },resolveWork:()=>Promise.resolve(null),
+  })
+  const h=harness({models});h.intake.open(request,'Fix button','u1','e');await h.intake.settled()
+  assert.equal(h.dispatched.length,1)
+  if(stage==='requirements'){
+   assert.match(String(requirementInputs[1]?.validation_feedback),/requirements/)
+   assert.ok(targetInputs.every(input=>input.validation_feedback===undefined))
+  }else{
+   assert.ok(requirementInputs.every(input=>input.validation_feedback===undefined))
+   assert.match(String(targetInputs[1]?.validation_feedback),/target/)
+  }
+ })
+}
+
+test('stale requirements after a project question are discarded before confirmation validation',async()=>{
+ let selections=0
+ const models=intakeModels({stream:()=>{throw Error('unused')},complete:request=>{
+  const input=JSON.parse(request.prompt) as Record<string,unknown>
+  return Promise.resolve({text:JSON.stringify(requirementsSchema.strip().parse(assessment({...input,revision:1})))})
+ }},'support','planner',{
+  resolveIntake:input=>{selections++;return Promise.resolve({intake_id:input.intake_id,revision:input.revision,kind:'work',project:'blog',project_evidence:null,session:{mode:'new'},question:null})},
+  resolveWork:()=>Promise.resolve(null),
+ })
+ const h=harness({models});h.intake.open(request,'改一下博客的暗色模式','u1','e');await h.intake.settled()
+ assert.equal(h.intake.view?.pending_project_question,'blog')
+ h.intake.open(request,'对','u2','e');await h.intake.settled()
+ assert.equal(selections,1)
+ assert.equal(h.dispatched.length,0)
+ assert.ok(h.diagnostics.includes('intake_stale_result'))
+ assert.ok(!h.diagnostics.includes('intake_assess_invalid_output'))
+})
