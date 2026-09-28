@@ -28,11 +28,11 @@ For source use, edit `.env` and restart Nova. No changes are needed for the defa
 
 | Choice | Configuration |
 |---|---|
-| Local mem0 (default) | `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local`; omit provider |
-| Local VoiceMem | `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=local` and `NOVA_AUDIO_AGENT_MEMORY_PROVIDER=voicemem` |
-| Disable memory | `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=disabled`; remove provider |
-| Remote service | `NOVA_AUDIO_AGENT_MEMORY_CONNECTION=remote`; configure the service URL and token below; remove provider |
+| Local mem0 (default) | `MEMORY_CONNECTION=local`; omit provider |
+| Local VoiceMem | `MEMORY_CONNECTION=local` and `MEMORY_PROVIDER=voicemem` |
+| Disable memory | `MEMORY_CONNECTION=disabled`; remove provider |
+| Remote service | `MEMORY_CONNECTION=remote`; configure the service URL and token below; remove provider |
 
-Remote connections require `NOVA_AUDIO_AGENT_MEMORY_URL` and `NOVA_AUDIO_AGENT_MEMORY_TOKEN`. The service must implement Nova's memory interface; an arbitrary mem0 endpoint is not compatible. Connection failure reports unavailable rather than switching to local storage.
+Remote connections require `MEMORY_URL` and `MEMORY_TOKEN`. The service must implement Nova's memory interface; an arbitrary mem0 endpoint is not compatible. Connection failure reports unavailable rather than switching to local storage.
 
 Changing engines does not migrate existing memories. Disabling memory does not delete stored data. See [configuration](configuration.md) for common settings.

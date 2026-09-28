@@ -69,7 +69,7 @@ test('production selector constructs only the integrated branch', () => {
   const expected = {kind: 'integrated'} as unknown as RealtimeAssembly
   let selected: SelectedCodingComposition | undefined
   const actual = buildProductionRealtimeAssembly(options(loadSettings({
-    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
+    PIPELINE_MODE: 'integrated',
   })), {
     integrated: input => { selected = input; return expected },
     cascaded: () => { throw new Error('unselected') },
@@ -84,7 +84,7 @@ test('production selector supplies the paired coding factory and descriptor only
     const expected = {kind: mode} as unknown as RealtimeAssembly
     let selected: SelectedCodingComposition | undefined
     const actual = buildProductionRealtimeAssembly({
-      ...options(loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: mode})),
+      ...options(loadSettings({PIPELINE_MODE: mode})),
       codexResource: {adapter: {manifest: {name: 'workspace_coder'}}, agentDescriptor: codexAgentDescriptor('workspace_coder'), agentControllerFactory: codingAgentControllerFactory},
     } as never, {
       integrated: input => {
@@ -110,11 +110,11 @@ test('production selector supplies the paired coding factory and descriptor only
 test('production integrated composition registers the default coding controller with its paired descriptor', async () => {
   const realtime = buildProductionRealtimeAssembly({
     settings: loadSettings({
-      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated',
-      NOVA_AUDIO_AGENT_EXECUTOR: 'codex',
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_MODEL: 'qwen-audio-test',
-      NOVA_AUDIO_AGENT_QWEN_REALTIME_VOICE: 'voice-test',
+      PIPELINE_MODE: 'integrated',
+      EXECUTOR: 'codex',
+      QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
+      QWEN_REALTIME_MODEL: 'qwen-audio-test',
+      QWEN_REALTIME_VOICE: 'voice-test',
       DASHSCOPE_API_KEY: 'dash-secret', TAVILY_API_KEY: 'search-secret',
     }),
     codexResource: projectResource(),
@@ -136,7 +136,7 @@ test('production integrated composition registers the default coding controller 
 
 test('production composition rejects descriptors that collide with the coding controller', () => {
   const base: BuildProductionRealtimeAssemblyOptions = {
-    ...options(loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: 'integrated'})),
+    ...options(loadSettings({PIPELINE_MODE: 'integrated'})),
     codexResource: {adapter: {manifest: {name: 'workspace_coder'}}, agentDescriptor: codexAgentDescriptor('workspace_coder'), agentControllerFactory: codingAgentControllerFactory} as never,
   }
   for (const descriptor of [
@@ -155,7 +155,7 @@ test('production composition rejects descriptors that collide with the coding co
 test('production selector constructs only the cascaded branch', () => {
   const expected = {kind: 'cascaded'} as unknown as RealtimeAssembly
   const actual = buildProductionRealtimeAssembly(options(loadSettings({
-    NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+    PIPELINE_MODE: 'cascaded',
   })), {
     integrated: () => { throw new Error('unselected') },
     cascaded: () => expected,
@@ -167,7 +167,7 @@ test('production selector preserves cameraModuleEnabled for either selected comp
   for (const mode of ['integrated', 'cascaded'] as const) {
     const selected: boolean[] = []
     buildProductionRealtimeAssembly({
-      settings: loadSettings({NOVA_AUDIO_AGENT_PIPELINE_MODE: mode}),
+      settings: loadSettings({PIPELINE_MODE: mode}),
       cameraModuleEnabled: false,
     }, {
       integrated: options => {
@@ -219,7 +219,7 @@ test('selected branch failures never fail over and invalid modes are credential-
   const failure = new Error('selected branch failed')
   assert.throws(
     () => buildProductionRealtimeAssembly(options(loadSettings({
-      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
+      PIPELINE_MODE: 'cascaded',
     })), {
       integrated: () => { throw new Error('unselected') },
       cascaded: () => { throw failure },
@@ -236,7 +236,7 @@ test('selected branch failures never fail over and invalid modes are credential-
       cascaded: () => { throw new Error('unselected') },
     }),
     error => error instanceof ConfigurationError
-      && error.message === 'NOVA_AUDIO_AGENT_PIPELINE_MODE 无效'
+      && error.message === 'PIPELINE_MODE 无效'
       && !error.message.includes('renderer-controlled-value'),
   )
 })
@@ -247,7 +247,7 @@ test('registry Coding/Vision gates compose all four controller combinations', as
     for (const camera of [false, true]) {
       const resource = projectResource()
       const assembly = buildProductionRealtimeAssembly({
-        settings: loadSettings({DASHSCOPE_API_KEY: 'test-only', NOVA_AUDIO_AGENT_EXECUTORS: 'codex'}),
+        settings: loadSettings({DASHSCOPE_API_KEY: 'test-only', EXECUTORS: 'codex'}),
         capabilities: parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, coding: {enabled: coding}, camera: {enabled: camera}}}),
         codexResource: resource,
       })

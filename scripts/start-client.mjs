@@ -138,30 +138,30 @@ export function planClientLaunch({
   const npm = args => ({command: nodeExecutable, args: [npmCli, ...args]})
   const configuredEnv = parseClientEnvironment({contents: envFileContents, shellEnv: env})
   const workspace = expandHomePath(
-    configuredEnv.NOVA_AUDIO_AGENT_CODEX_WORKSPACE || rootDir,
+    configuredEnv.CODEX_WORKSPACE || rootDir,
     homeDirectory,
     pathApi,
   )
   const clientEnv = {
     ...configuredEnv,
-    NOVA_AUDIO_AGENT_BACKEND: 'node',
-    NOVA_AUDIO_AGENT_CODEX_WORKSPACE: workspace,
-    ...(configuredEnv.NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT === undefined
+    BACKEND: 'node',
+    CODEX_WORKSPACE: workspace,
+    ...(configuredEnv.CODEX_MANAGED_ROOT === undefined
       ? {}
-      : {NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT: expandHomePath(
-          configuredEnv.NOVA_AUDIO_AGENT_CODEX_MANAGED_ROOT,
+      : {CODEX_MANAGED_ROOT: expandHomePath(
+          configuredEnv.CODEX_MANAGED_ROOT,
           homeDirectory,
           pathApi,
         )}),
-    ...(configuredEnv.NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT === undefined
+    ...(configuredEnv.CODEX_PROJECT_STATE_ROOT === undefined
       ? {}
-      : {NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT: expandHomePath(
-          configuredEnv.NOVA_AUDIO_AGENT_CODEX_PROJECT_STATE_ROOT,
+      : {CODEX_PROJECT_STATE_ROOT: expandHomePath(
+          configuredEnv.CODEX_PROJECT_STATE_ROOT,
           homeDirectory,
           pathApi,
         )}),
-    ...(hasCodexBinary ? { NOVA_AUDIO_AGENT_CODEX_BIN: codexBinary } : {}),
-    ...(envFileExists ? { NOVA_AUDIO_AGENT_ENV_FILE: pathApi.join(rootDir, '.env') } : {}),
+    ...(hasCodexBinary ? { CODEX_BIN: codexBinary } : {}),
+    ...(envFileExists ? { ENV_FILE: pathApi.join(rootDir, '.env') } : {}),
   }
   const steps = []
   if (!dependenciesInstalled) {
@@ -254,7 +254,7 @@ export async function main({
     nodeExecutable: process.execPath,
     npmCli: env.npm_execpath,
     codexBinary: resolveClientCodexBinary({
-      configured: configuredEnv.NOVA_AUDIO_AGENT_CODEX_BIN,
+      configured: configuredEnv.CODEX_BIN,
       platform,
       arch: process.arch,
       home: homedir(),

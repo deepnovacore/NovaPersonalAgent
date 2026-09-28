@@ -202,7 +202,7 @@ export function startupFailureCode(error) {
   if (error?.code === 'embedding_provider_invalid') return error.code
   if (MESSAGE_CODES.has(error?.message)) return error.message
   if (error?.name === 'MainCameraConfigurationError') return 'camera_configuration_invalid'
-  if (error?.message === 'NOVA_AUDIO_AGENT_BACKEND must be node') {
+  if (error?.message === 'BACKEND must be node') {
     return 'backend_selection_invalid'
   }
   return 'startup_failed'

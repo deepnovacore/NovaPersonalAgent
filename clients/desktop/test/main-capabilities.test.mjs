@@ -38,6 +38,20 @@ test('actual main keeps invalid model configuration visible when Coding is disab
   vm.runInContext(launch, context)
   await assert.rejects(context.launchBackend(), error => error.kind === 'configuration_required' && error.code === 'model_base_url_invalid')
 })
+test('actual main turns Coding off instead of blocking on an unfinished manual Codex path', async () => {
+  const specs = []
+  const context = vm.createContext({readCapabilityDocument: () => ({version: 1}), classifyBackendFailure,
+    currentSettings: {}, process: {env: {}, cwd: () => '/tmp'}, desktopConfig: {codexConfigurationError: 'manual_path_required'}, codexStatus: {status: 'ready'},
+    randomBytes: () => Buffer.alloc(16), createReadinessListener: () => ({endpoint: Promise.resolve('ep'), close() {}}), createBackendDiagnosticCollector: () => ({}),
+    decryptSecretsForSpawn: () => ({}), secretCodec: {}, settingsGeneration: 0, launchGeneration: 0, mainWindow: null, app: {isPackaged: false, getAppPath: () => '/app'},
+    nodeRuntimeEntry: () => 'entry', packageRoot: '/pkg', resolve: (...parts) => parts.join('/'), openSetupWindow: () => {},
+    backendLaunchSpec: () => { const spec = {env: {}}; specs.push(spec); return spec },
+    // Stop right after the spawn environment is built; the fork itself is not under test.
+    describeMissingBlockingEnvironment: () => ({pipeline: 'integrated', missing: ['DASHSCOPE_API_KEY']})})
+  vm.runInContext(launch, context)
+  await assert.rejects(context.launchBackend('node', {}), error => error.kind === 'configuration_required' && error.code !== 'manual_path_required')
+  assert.equal(specs[0].env.CODING_MODULE_ENABLED, 'false')
+})
 test('actual settings view decrypts only for an open panel and caches the public generation', () => {
   let decrypts = 0
   const context = vm.createContext({createManagedPhoneService: () => ({}), VISION_MODELS: {}, resolveSecretConfiguration, developmentEnv: {}, frontendUsage: {snapshot: () => ({})}, wakeWord: null, settingsWindow: null, capabilityEditorCache: null, settingsGeneration: 0, currentSettings: {}, process: {env: {}},

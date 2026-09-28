@@ -74,14 +74,14 @@ test('cascaded intake binds assessment and planning models to the selected suppo
       return Promise.resolve(new Response(JSON.stringify({choices: [{message: {content: '{}'}}]}), {status: 200}))
     }
     const configured = loadSettings({
-      NOVA_AUDIO_AGENT_PIPELINE_MODE: 'cascaded',
-      NOVA_AUDIO_AGENT_CASCADE_LLM_PROVIDER: scenario.provider,
-      NOVA_AUDIO_AGENT_CASCADE_LLM_MODEL: scenario.model,
-      NOVA_AUDIO_AGENT_EXECUTORS: 'workspace_coder',
+      PIPELINE_MODE: 'cascaded',
+      CASCADE_LLM_PROVIDER: scenario.provider,
+      CASCADE_LLM_MODEL: scenario.model,
+      EXECUTORS: 'workspace_coder',
       DEEPSEEK_API_KEY: 'fixture', ARK_API_KEY: 'fixture', DASHSCOPE_API_KEY: 'fixture',
       DOUBAO_BIGMODEL_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture',
-      ...(scenario.generic ? {NOVA_AUDIO_AGENT_MODEL_API_KEY: 'fixture', NOVA_AUDIO_AGENT_MODEL_BASE_URL: 'https://generic.example/v1'} : {}),
-      ...(scenario.planner ? {NOVA_AUDIO_AGENT_PLANNER_MODEL: scenario.planner} : {}),
+      ...(scenario.generic ? {MODEL_API_KEY: 'fixture', MODEL_BASE_URL: 'https://generic.example/v1'} : {}),
+      ...(scenario.planner ? {PLANNER_MODEL: scenario.planner} : {}),
     })
     let realtime: ReturnType<typeof buildCascadedRealtimeAssembly> | undefined
     try {

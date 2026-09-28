@@ -8,7 +8,7 @@ const root=resolve(import.meta.dirname, '../../..');
 const current=await import(root+'/runtime/dist/src/realtime/frontend-instructions.js');
 const currentTools=await import(root+'/runtime/dist/src/core/work-tools.js');
 let envText='';
-try{envText=readFileSync(process.env.NOVA_AUDIO_AGENT_ENV_FILE??resolve(root,'.env'),'utf8')}catch(error){if(error.code!=='ENOENT')throw error}
+try{envText=readFileSync(process.env.ENV_FILE??resolve(root,'.env'),'utf8')}catch(error){if(error.code!=='ENOENT')throw error}
 const values={};for(const line of envText.split('\n')){const m=/^([A-Z_]+)=(.*)$/.exec(line.trim());if(m)values[m[1]]=m[2].replace(/^["']|["']$/g,'');}
 const key=process.env.DEEPSEEK_API_KEY??values.DEEPSEEK_API_KEY;if(!key)throw Error('missing credential');
 const cases=[['always-confirm','始终确认。','session'],['always-allow','始终允许。','session'],['forever-confirm','永远确认。','session'],['once-confirm','确认。','once'],['once-allow','允许。','once'],['negated-always','不要始终允许，只允许这一次。','once'],['question','始终允许是什么意思？','none'],['decline','不允许。','decline'],['unsupported','始终允许。','session',false],['keep-asking','始终都要让我确认，不要自动允许。','none'],['en-keep-asking','Always ask me to confirm.','none',true,'en'],['ambiguous','我再想想。','none'],['en-always','Always allow.','session',true,'en']];

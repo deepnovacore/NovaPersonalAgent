@@ -61,3 +61,11 @@
 - Publish the preceding local implementation commit `4f182739` plus this documentation commit to personal-fork `origin/codex/orb-skins`. Existing upstream PR #12 is OPEN from that same fork branch; update its title/body to the implemented Themes/Visor scope instead of creating a duplicate. No merge, new issue closure or release requested.
 - Checks this turn: clean starting tree, branch divergence 0 behind / 1 ahead before this documentation commit; relative Markdown links, diff whitespace, staged secret-pattern scan. This is a documentation/publication turn: reuse the recorded 255-test implementation result and Electron/build/signing evidence; no new live GUI, provider requests or screenshots.
 - Limitations remain explicit: final corrected installed GUI/backend/shortcut acceptance, full-screen/Spaces/multi-monitor certification and soak pending. Voice phrase switching and desktop skin-package import are not implemented.
+
+## 2026-09-28 — Sync HUD PR with upstream main
+
+- Request: resolve PR #12 merge conflicts while preserving upstream behavior.
+- Merged upstream/main at 2dcaa9011bca5c8db0769e422bd992d1b597d52f into the HUD branch in an isolated worktree. Original working tree and uncommitted companion assets remain untouched; local patch/archive backups saved outside Git.
+- Retained both upstream setup routes and HUD routes, plus both sets of bounded IPC channels. Updated two isolated menu/tray test contexts to provide the HUD callback. No runtime, CLI, server CLI, dependency or lockfile changes relative to upstream/main.
+- Validation: npm run check passed; desktop build passed; desktop suite 934 tests: initially 929 pass, 3 skipped, 2 missing mock callbacks; both corrected and their 33-test files passed. Runtime suite initially 2519 pass, 5 mem0 failures; after rebuilding native dependencies the complete 9-test mem0 file passed. Electron Visor smoke passed including close, persistence, rapid lifecycle and no renderer errors. Source startup smoke skipped by its platform/environment gate; no claim of installed-app/real voice validation.
+- GitHub: update existing PR https://github.com/deepnovacore/NovaAudioAgent/pull/12 by pushing only origin codex/orb-skins. No direct push to upstream main; no installed application replacement.

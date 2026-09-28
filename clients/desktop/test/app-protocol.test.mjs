@@ -36,6 +36,7 @@ test('renderer protocol serves the complete reachable static import graph and no
   assert.ok(Object.isFrozen(rendererFiles))
   assert.ok(rendererFiles.includes('/camera.mjs'), 'index.mjs camera import is reachable')
   assert.ok(rendererFiles.includes('/orb-visual.mjs'), 'index.mjs orb visual import is reachable')
+  for (const path of ['/setup.html', '/setup.css', '/setup.mjs']) assert.ok(rendererFiles.includes(path), `first-run ${path} is reachable`)
 
   let handler
   const fetched = []
@@ -63,6 +64,7 @@ test('renderer graph follows future module re-exports and stylesheet imports wit
     ['/capture-worklet.mjs', "export { capture } from './audio.mjs'"],
     ['/memory-board.html', '<link href="./memory-board.css">'],
     ['/settings.html', '<link href="./settings.css"><script src="./settings.mjs"></script>'],
+    ['/setup.html', '<link href="./setup.css"><script src="./setup.mjs"></script>'],
     ['/visor.html', ''],
     ['/visor-controls.html', ''],
     ['/index.css', '@import "./theme.css";'],
@@ -71,6 +73,8 @@ test('renderer graph follows future module re-exports and stylesheet imports wit
     ['/memory-board.css', ''],
     ['/settings.css', ''],
     ['/settings.mjs', ''],
+    ['/setup.css', ''],
+    ['/setup.mjs', ''],
     ['/theme.css', ''],
     ['/camera.mjs', ''],
     ['/orb-visual.mjs', 'export const visual = true'],
