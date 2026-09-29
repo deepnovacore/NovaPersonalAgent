@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { acceptanceWakeSettings } from '../src/main/workbench-native-acceptance.mjs'
+import { createWorkbenchFrame } from '../src/main/workbench-frame.mjs'
 import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import { createContext, runInContext } from 'node:vm'
 
@@ -94,6 +95,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:window-drag:end',
     'nova:window-drag:move',
     'nova:window-drag:start',
+    'nova:window:control',
     'nova:workspaces:clear-all',
     'nova:workspaces:clear-current',
     'nova:workspaces:open-current',
@@ -1293,7 +1295,7 @@ test('the expanded workbench casts a native shadow and the resting orb does not'
  const shadow=[],bounds={x:0,y:0,width:100,height:100}
  const mainWindow={getBounds:()=>bounds,setResizable(){},setMinimumSize(){},setMaximumSize(){},setAlwaysOnTop(){},setBounds(){},setHasShadow:value=>shadow.push(value)}
  const screen={getCursorScreenPoint:()=>({x:0,y:0}),getDisplayNearestPoint:()=>({workArea:{x:0,y:0,width:1440,height:900}})}
- const set=new Function('mainWindow','screen','orbWindow','sendToOrb',`${body};return setPersonalCollapsed`)(mainWindow,screen,{sync(){}},()=>{})
+ const set=new Function('mainWindow','screen','orbWindow','sendToOrb','createWorkbenchFrame',`${body};return setPersonalCollapsed`)(mainWindow,screen,{sync(){}},()=>{},createWorkbenchFrame)
  set(false);set(true);set(false)
  assert.deepEqual(shadow,[true,false,true])
 })

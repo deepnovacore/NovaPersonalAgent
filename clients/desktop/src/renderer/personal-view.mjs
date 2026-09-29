@@ -5,6 +5,7 @@ import {renderLife,renderProfile} from './life-view.mjs'
 import {renderNews} from './news-view.mjs'
 import {PersonalController} from './personal-controller.mjs'
 import {mountRail,RAIL_ITEMS} from './workbench-rail.mjs'
+import {mountWindowChrome} from './window-chrome.mjs'
 import {mountChatPane} from './chat-pane.mjs'
 import {renderMemorySection} from './memory-page.mjs'
 import {mountTaskDetail} from './task-detail.mjs'
@@ -41,7 +42,8 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const pageHead=el('header',undefined,'page-head');const pageTitle=el('h2','','page-title');const status=el('span','正在连接','workbench-status');status.setAttribute('role','status')
  const chatToggle=el('button','收起对话栏','chat-toggle');chatToggle.type='button';chatToggle.setAttribute('aria-controls','chat-pane');chatToggle.addEventListener('click',()=>chat.setOpen(!chat.open))
  const presentation=el('select');presentation.setAttribute('aria-label','显示模式');for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','隐藏']]){const option=el('option',label);option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
- pageHead.append(pageTitle,status,presentation,chatToggle);workspace.append(pageHead)
+ const chrome=mountWindowChrome(root,{api,el})
+ pageHead.append(pageTitle,chrome.grip,status,presentation,chatToggle);workspace.append(pageHead)
  // Startup progress reads as loading; only a failed start turns into an error with a way into settings.
  const startupNotice=el('p','','page-notice');startupNotice.id='startup-notice';startupNotice.setAttribute('role','status');startupNotice.hidden=true;workspace.append(startupNotice)
  const startupText=el('span');startupNotice.append(startupText);const startupSettings=button(t('打开设置'),()=>openSettings(),startupNotice);startupSettings.hidden=true

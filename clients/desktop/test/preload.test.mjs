@@ -185,6 +185,20 @@ test('preload reports confirmation mode as a strict boolean and sanitizes placem
   assert.deepEqual(placements, ['above', 'below'])
 })
 
+test('preload window controls send only their three fixed actions', async () => {
+  const {exposed, sends} = await loadPreload()
+
+  assert.deepEqual(Object.keys(exposed.windowControls).sort(), ['close', 'minimize', 'toggleMaximize'])
+  exposed.windowControls.minimize()
+  exposed.windowControls.toggleMaximize()
+  exposed.windowControls.close()
+  assert.deepEqual(sends, [
+    {channel: 'nova:window:control', payload: 'minimize'},
+    {channel: 'nova:window:control', payload: 'toggleMaximize'},
+    {channel: 'nova:window:control', payload: 'close'},
+  ])
+})
+
 test('preload exposes board reads and explicit memory clear', async () => {
   const { exposed, invokes, sends } = await loadPreload()
 
@@ -209,7 +223,7 @@ test('preload exposes board reads and explicit memory clear', async () => {
 test('preload declares each bridge namespace exactly once', async () => {
   const { source } = await loadPreload()
 
-  for (const namespace of ['orbMenu', 'releaseCamera', 'microphone', 'memoryBoard', 'nativeAudio', 'windowDrag', 'windowLayout', 'settings']) {
+  for (const namespace of ['orbMenu', 'releaseCamera', 'microphone', 'memoryBoard', 'nativeAudio', 'windowDrag', 'windowControls', 'windowLayout', 'settings']) {
     const declarations = source.match(new RegExp(`^  ${namespace}: `, 'gm')) || []
     assert.equal(declarations.length, 1, `${namespace} is declared once`)
   }

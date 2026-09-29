@@ -207,11 +207,15 @@ test('supervisor reconnecting status is nonterminal and does not offer competing
   const start=source.lastIndexOf('    onStatus: status => {')
   const handler=source.slice(start+'    onStatus: '.length,source.indexOf('\n    },\n  })',start)+6)
   const context=vm.createContext({resetTrayUnreadForBackend:()=>{},tray:null,backendStatus:{state:'connected'},backendGeneration:0,runtimeCapabilities:null,
-    sendToSettings:()=>{},settingsView:()=>({}),sendToOrb:()=>{},smokeChannel:null,
+    sendToSettings:()=>{},settingsView:()=>({}),sendToOrb:()=>{},smokeChannel:null,backendEverConnected:false,
     publishStartup:(stage,code)=>{context.startup={stage,code}},startup:{stage:'ready'}})
   const receive=vm.runInContext(`(${handler})`,context)
+  receive({state:'reconnecting',diagnostic:'assembly_failed'})
+  assert.equal(context.startup.stage,'backend','a launch that never connected is still starting, not reconnecting')
+  receive({state:'connected'})
+  assert.equal(context.startup.stage,'ready')
   receive({state:'reconnecting',diagnostic:'backend_disconnected'})
-  assert.equal(context.startup.stage,'reconnecting')
+  assert.equal(context.startup.stage,'reconnecting','only a lost connection is a reconnect')
 })
 
 test('recovery retry clears a prior credential failure before restarting restored settings', async () => {

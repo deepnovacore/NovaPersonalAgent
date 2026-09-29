@@ -59,7 +59,17 @@ body[data-opaque="1"] .workbench{border-radius:0}
 .workbench details>summary::-webkit-details-marker{display:none}
 
 /* Rail */
-.rail{display:flex;flex-direction:column;align-items:center;padding:10px 0;border-right:1px solid var(--line);background:var(--surface)}
+.rail{display:flex;flex-direction:column;align-items:center;padding:38px 0 10px;border-right:1px solid var(--line);background:var(--surface)}
+.window-controls{position:absolute;top:12px;left:4px;z-index:20;display:flex;gap:6px;-webkit-app-region:no-drag}
+.workbench .window-control{position:relative;width:12px;height:12px;padding:0;border:0;border-radius:50%;font-size:0;line-height:0;-webkit-app-region:no-drag}
+.workbench .window-control::before{content:'';position:absolute;inset:-4px -2px}
+.workbench .window-control::after{position:absolute;inset:0;display:grid;place-items:center;font:700 9px/1 var(--font);color:rgba(0,0,0,.55);opacity:0}
+.workbench .window-controls:hover .window-control::after,.workbench .window-control:focus-visible::after{opacity:1}
+.workbench .window-close{background:#ff5f57}.window-close::after{content:'×'}
+.workbench .window-minimize{background:#febc2e}.window-minimize::after{content:'−'}
+.workbench .window-zoom{background:#28c840}.window-zoom::after{content:'+'}
+.workbench .window-control:hover:not(:disabled){filter:brightness(.92)}
+.window-grip{flex:1 1 auto;align-self:stretch;min-width:24px;margin:-8px 0;-webkit-app-region:no-drag}
 .rail-pages{display:flex;flex-direction:column;gap:2px}
 .rail-footer{margin-top:auto;display:flex;flex-direction:column;gap:2px}
 .rail .rail-item{position:relative;width:38px;height:38px;padding:0;display:grid;place-items:center;border:0;background:transparent;border-radius:var(--radius);color:var(--ink-dim)}
@@ -74,7 +84,7 @@ body[data-opaque="1"] .workbench{border-radius:0}
 /* Workspace */
 .workspace{display:flex;flex-direction:column;min-width:0;min-height:0}
 .page-head{display:flex;align-items:center;gap:8px;min-height:49px;padding:8px 14px 8px 28px;border-bottom:1px solid var(--line)}
-.workbench .page-title{font-size:17px;font-weight:600;letter-spacing:-.2px;white-space:nowrap;margin-right:auto}
+.workbench .page-title{font-size:17px;font-weight:600;letter-spacing:-.2px;white-space:nowrap}
 .workbench-status{font:11px/1 var(--mono);color:var(--ink-faint);white-space:nowrap;padding:6px 10px;border-radius:999px;background:var(--surface-inset)}
 .workbench-status::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:7px;background:var(--ink-faint);vertical-align:0}
 .workbench-status[data-state="connected"]::before{background:var(--ok)}
