@@ -9,6 +9,7 @@ import {realpath} from 'node:fs/promises'
 import {readLocalCodexSessions, localRolloutAvailable} from './local-sessions.js'
 import {hostPersistentHomeFromConfig, hostWorkspaceFromConfig} from '../../projects/host-paths.js'
 import {hostWorkspacePath} from '../../projects/host-paths.js'
+import {MAX_PROJECT_SESSION_TITLE, normalizeProjectSessionTitle} from '../../projects/project-state.js'
 import type {
   CodexAppServerTransport,
   RunInput,
@@ -74,6 +75,16 @@ import {
 
 /** Recent-project budget for display, local discovery and rich session history. */
 const MAX_ROSTER = 10
+
+/** Whether a stored title is what importing `catalogTitle` produces: normalized, or normalized plus a ` (n)` uniqueness suffix. */
+function sameSessionTitle(stored: string, catalogTitle: string): boolean {
+  try {
+    const expected = normalizeProjectSessionTitle([...catalogTitle].slice(0, MAX_PROJECT_SESSION_TITLE).join('')).display
+    if (stored === expected) return true
+    const suffixed = /^(.+) \(\d+\)$/u.exec(stored)
+    return suffixed !== null && expected.startsWith(suffixed[1]!)
+  } catch { return false }
+}
 
 export interface ProjectTransportBinding {
   readonly preserveHome?: boolean
@@ -236,9 +247,22 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
         // Discover at most ten local projects; registered projects remain in the intake roster.
         const paths = new Set<string>()
         for (const item of catalog) { if (paths.size < MAX_ROSTER) paths.add(item.cwd) }
+        // Each import is a locked read-parse-validate-write transaction (~50 ms on a real store), so only
+        // entries the store does not already hold identically go through one.
+        const held = await this.#store.snapshot()
+        const workspacesByPath = new Map(held.workspaces.map(workspace => [workspace.canonical_path, workspace]))
+        const sessionsByThread = new Map(held.sessions.flatMap(session => session.codex_thread_id === null ? [] : [[`${session.executor_home ?? ''}\0${session.codex_thread_id}`, session] as const]))
         for (const item of [...catalog].reverse()) {
           if (this.#closed) return
           if (!paths.has(item.cwd)) continue
+          const workspace = workspacesByPath.get(item.cwd)
+          const existing = workspace === undefined ? undefined : sessionsByThread.get(`${home}\0${item.threadId}`)
+          if (workspace !== undefined && existing !== undefined && existing.workspace_id === workspace.workspace_id && existing.state === 'ready'
+            && (existing.origin === 'nova' || (existing.last_used_at >= item.updatedAt && workspace.last_used_at >= item.updatedAt
+              && sameSessionTitle(existing.display_title, item.title)))) {
+            ids.add(existing.session_id)
+            continue
+          }
           try {
             const workspace = await this.#store.ensureImported([...basename(item.cwd)].slice(0, 80).join('') || 'workspace', hostWorkspaceFromConfig(item.cwd, [item.cwd]))
             const session = await this.#store.importSession(workspace.workspace_id, {

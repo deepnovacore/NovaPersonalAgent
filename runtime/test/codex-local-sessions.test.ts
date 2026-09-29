@@ -248,3 +248,44 @@ test('an indexed thread with a missing rollout is not imported or selected for l
     await rm(home, {recursive: true, force: true})
   }
 })
+
+test('listing coding targets does not re-import a catalog the store already holds', async () => {
+  const configuredHome = await mkdtemp(join(tmpdir(), 'nova-target-list-'))
+  const home = await realpath(configuredHome)
+  const calls: string[] = []
+  const value = await fixture({localCodexHome: configuredHome, decorateStore: store => new Proxy(store, {
+    get(target, property) {
+      const member: unknown = Reflect.get(target, property, target)
+      if (typeof member !== 'function') return member
+      return (...args: unknown[]) => { calls.push(String(property)); return (member as (...values: unknown[]) => unknown).apply(target, args) }
+    },
+  })})
+  try {
+    const db = new DatabaseSync(join(home, 'state_5.sqlite'))
+    db.exec('CREATE TABLE threads (id TEXT, name TEXT, title TEXT, cwd TEXT, source TEXT, archived INTEGER, updated_at INTEGER)')
+    const insert = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)')
+    for (let index = 0; index < 5; index++) insert.run(`thread-${index}`, `会话 ${index}`, 'x', home, 'vscode', 0, 100 + index)
+    db.close()
+    await value.adapter.initialize()
+    const first = await value.adapter.targetPort.list()
+    assert.equal(first.filter(item => item.session_id !== null).length, 5)
+    calls.length = 0
+    const again = await value.adapter.targetPort.list()
+    assert.deepEqual(again.map(item => [item.workspace_id, item.session_id]), first.map(item => [item.workspace_id, item.session_id]))
+    assert.deepEqual(calls.filter(name => name === 'ensureImported' || name === 'importSession'), [], 'an unchanged catalog costs no store transaction')
+
+    const later = new DatabaseSync(join(home, 'state_5.sqlite'))
+    later.prepare('UPDATE threads SET updated_at = 500 WHERE id = ?').run('thread-2')
+    later.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-new', '新会话', 'x', home, 'vscode', 0, 400)
+    later.close()
+    calls.length = 0
+    const changed = await value.adapter.targetPort.list()
+    assert.ok(changed.some(item => item.title === '新会话'), 'a new codex session appears on the next open')
+    assert.equal(changed.filter(item => item.session_id !== null)[0]?.title, '会话 2', 'a touched session moves to the front')
+    assert.equal(calls.filter(name => name === 'importSession').length, 2, 'only the two changed sessions are imported')
+  } finally {
+    await value.adapter.close()
+    await rm(value.root, {recursive: true, force: true})
+    await rm(home, {recursive: true, force: true})
+  }
+})
