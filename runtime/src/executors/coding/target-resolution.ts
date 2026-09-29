@@ -1,6 +1,7 @@
 import {z} from 'zod'
 import type {ModelGateway} from '../../model/model-gateway.js'
 import type {RunningWork} from '../coding-executor.js'
+import {completeJson} from './json-completion.js'
 
 export const intakeKindSchema = z.enum(['work', 'steer', 'switch', 'create', 'unclear'])
 export type IntakeKind = z.infer<typeof intakeKindSchema>
@@ -55,14 +56,8 @@ export class GatewayTargetResolver {
     return running.some(work => work.work_id === parsed.data.target_work_id) ? parsed.data.target_work_id : null
   }
 
-  private async complete(system:string, schema:z.ZodType, input:Readonly<Record<string,unknown>>, signal:AbortSignal):Promise<unknown> {
-    signal.throwIfAborted()
-    const result = await this.gateway.complete({model:this.model,
-      system:`${system}\nSchema: ${JSON.stringify(z.toJSONSchema(schema))}`,
-      prompt:JSON.stringify(input),jsonSchema:{type:'object'},reasoning:'disabled',signal})
-    signal.throwIfAborted()
-    if(result.text.length>32000)throw new TypeError('intake_output_too_large')
-    return JSON.parse(result.text) as unknown
+  private complete(system:string, schema:z.ZodType, input:Readonly<Record<string,unknown>>, signal:AbortSignal):Promise<unknown> {
+    return completeJson(this.gateway, this.model, system, schema, input, signal)
   }
 }
 export type TargetResolver = Pick<GatewayTargetResolver,'resolveIntake'|'resolveWork'>
