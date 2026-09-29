@@ -96,6 +96,8 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "验证中": "Verifying",
   "已排队": "Queued",
   "发送状态待确认，草稿已保留。": "Delivery is unconfirmed. Your draft is preserved.",
+  "没有录到声音，请按住说话后再松开 · 原有草稿已保留": "No sound was recorded. Hold to speak, then release · your draft is unchanged",
+  "没有听清，请再说一次 · 原有草稿已保留": "Couldn't make that out. Please try again · your draft is unchanged",
   "无法保存本地草稿，请保留此窗口。": "Unable to save the local draft. Keep this window open.",
   "发送给执行器": "Send to executor",
   "刷新发送状态": "Refresh delivery status",

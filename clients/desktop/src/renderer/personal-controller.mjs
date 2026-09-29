@@ -1,4 +1,8 @@
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
+const DICTATION_FAILURES={
+  no_audio:'没有录到声音，请按住说话后再松开 · 原有草稿已保留',
+  no_speech:'没有听清，请再说一次 · 原有草稿已保留',
+}
 export class PersonalController {
   constructor({send,start,stop,applyPresentation,changed=()=>{}}) {
     Object.assign(this,{send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
@@ -112,7 +116,7 @@ export class PersonalController {
     }
     if(frame.type==='input.transcription'&&frame.id===this.dictationId&&(!frame.conversation_id||frame.conversation_id===this.dictationConversationId)){
       const state=this.state(this.dictationConversationId)
-      if(typeof frame.text==='string'&&frame.text.trim()&&[state.draft,frame.text].filter(Boolean).join('\n').length<=4000)state.draft=[state.draft,frame.text].filter(Boolean).join('\n');else state.error='recognition_failed · 原有草稿已保留'
+      if(typeof frame.text==='string'&&frame.text.trim()&&[state.draft,frame.text].filter(Boolean).join('\n').length<=4000)state.draft=[state.draft,frame.text].filter(Boolean).join('\n');else state.error=DICTATION_FAILURES[frame.error]||'recognition_failed · 原有草稿已保留'
       this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
     }
     this.changed()
