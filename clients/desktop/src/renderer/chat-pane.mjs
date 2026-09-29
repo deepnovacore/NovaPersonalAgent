@@ -4,6 +4,8 @@ import {renderFeedCard,sendPresented} from './feed-card.mjs'
 import {currentLanguage,t} from './locale.mjs'
 import {mountExecutionCard} from './execution-card.mjs'
 import {mountCodingTargetMenu} from './coding-target-menu.mjs'
+import {createOrbVisualSafe} from './orb-visual.mjs'
+import {ORB_STATE_NAMES} from './state.mjs'
 
 /**
  * Confirms the proactive conversation as read only when the newest message is
@@ -21,6 +23,7 @@ export function markVisibleRead({c,document,history,readMessages,chatOpen=true})
  void c.command('conversations.read',{id:c.selectedId,through_message_id:message.id}).catch(()=>readMessages.delete(message.id))
 }
 
+const STAGE_ORB_SIZE=96
 const SVG_NS='http://www.w3.org/2000/svg'
 const GLYPH={
  mic:'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
@@ -34,7 +37,7 @@ function glyph(path){const svg=document.createElementNS(SVG_NS,'svg');svg.setAtt
 export const conversationTitle=item=>item?.kind==='proactive'?'主动提醒':item?.title??'对话'
 
 /** The right-hand Nova pane: conversation switcher, transcript, three-state composer. */
-export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpenChange=()=>{}}){
+export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpenChange=()=>{},speakingLevel=null}){
  const pane=el('aside',undefined,'chat-pane');pane.id='chat-pane';pane.setAttribute('aria-label','Nova 对话');columns.append(pane)
  const head=el('header',undefined,'chat-head');pane.append(head)
  head.append(el('span','✦ Nova','chat-brand'))
@@ -44,6 +47,9 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
  const voiceLine=el('div',undefined,'chat-voice');const voiceStatus=el('span','','conversation-voice-status');voiceLine.append(voiceStatus);const resumeVoice=button('恢复语音',()=>c.resumeVoice(),voiceLine);resumeVoice.hidden=true;const endVoice=button('结束语音',()=>c.stopVoice(),voiceLine);endVoice.hidden=true;pane.append(voiceLine)
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1','有什么需要帮忙？'),el('p','交办一件事、问一个问题，或从左侧的待办与资讯里「接着聊」。','hint'))
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
+ const stage=el('div',undefined,'voice-stage');stage.hidden=true
+ const stageCanvas=el('canvas',undefined,'voice-stage-orb');stageCanvas.setAttribute('aria-hidden','true')
+ const stageLabel=el('p','','voice-stage-label');stageLabel.setAttribute('role','status');stage.append(stageCanvas,stageLabel);pane.append(stage)
  const taskCards=el('section',undefined,'conversation-task-cards');taskCards.setAttribute('aria-label',t('此对话的任务'));pane.append(taskCards);const cardNodes=new Map()
  const executionCard=mountExecutionCard(pane,{el,command:(m,p)=>c.command(m,p),submitText:(text,id)=>c.submitText(text,id),run})
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder='输入消息…';draft.maxLength=4000;draft.setAttribute('aria-label','消息草稿');draft.rows=3
@@ -70,8 +76,24 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
  function renderSource(){const source=c.state().source_todo;sourceChip.hidden=!source;sourceChip.textContent=source?t('关联待办 · {0}（移除）',c.snapshot?.life?.todos?.find(t=>t.id===source.id)?.title??source.id):''}
  const hint=el('p','','hint composer-hint');composer.append(draft,inputActions,hint);pane.append(composer)
 
+ /** The floating orb of a continuous conversation lives only while it is visible: a hidden pane must not keep an animation loop running. */
+ let orb=null,orbState={name:'idle',statusLine:'',codexWorking:false}
+ const media=query=>Boolean(globalThis.matchMedia?.(query)?.matches)
+ function syncStage(){
+  const show=open&&!c.collapsed&&c.isVoiceConversation
+  stage.hidden=!show
+  if(show&&!orb){orb=createOrbVisualSafe(stageCanvas,{size:STAGE_ORB_SIZE,palette:'ember',reducedMotion:media('(prefers-reduced-motion: reduce)'),highContrast:media('(prefers-contrast: more)'),...(speakingLevel?{getSpeakingLevel:speakingLevel}:{})});orb.setState(orbState.name,{codexWorking:orbState.codexWorking})}
+  else if(!show&&orb){orb.destroy();orb=null}
+ }
+ function setOrb({name,statusLine,codexWorking}={}){
+  orbState={name:ORB_STATE_NAMES.includes(name)?name:'idle',statusLine:typeof statusLine==='string'?statusLine:'',codexWorking:codexWorking===true}
+  stageLabel.textContent=orbState.statusLine
+  orb?.setState(orbState.name,{codexWorking:orbState.codexWorking})
+ }
+ const setOrbLevel=level=>orb?.setLevel(level)
+
  let open=true
- function setOpen(value){open=value;pane.hidden=!value;onOpenChange(value);if(value){renderHistory(true);deliverPresented();read()}}
+ function setOpen(value){open=value;pane.hidden=!value;onOpenChange(value);syncStage();if(value){renderHistory(true);deliverPresented();read()}}
  const readMessages=new Set(),presented=new Set(),liveCaptions=new Map()
  const read=()=>markVisibleRead({c,document,history,readMessages,chatOpen:open})
  history.addEventListener('scroll',read);const visible=()=>{deliverPresented();read()};document.addEventListener('visibilitychange',visible);window.addEventListener('focus',visible)
@@ -155,7 +177,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
   submit.disabled=draft.disabled
   dictate.disabled=!c.presentationReady||!c.connected||!c.selectedId||Boolean(c.voiceId)||(c.mode!=='text'&&c.dictationConversationId!==c.selectedId)||c.mode==='transcribing'||!c.capabilities.includes('dictation')
   voice.disabled=!c.presentationReady||!c.connected||!c.selectedId||(Boolean(c.voiceId)&&!c.isVoiceConversation)||(c.mode!=='text'&&!c.isVoiceConversation)
-  syncActions()
+  syncActions();syncStage()
   hint.textContent=!c.connected?(c.everConnected?'连接已断开，草稿已保留':'正在连接…'):c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 松开后生成草稿'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行'
   targetMenu.update();executionCard.update((c.snapshot?.pending_confirmations??[]).find(item=>item.proposal_id&&item.workspace&&item.conversation_id===c.selectedId)??null,c.selectedId);renderConversations();renderHistory();deliverPresented();read()
  }
@@ -170,5 +192,5 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
   }
   if(frame.type==='personal.state')for(const message of frame.conversations?.messages??[])if(message.turn_id)liveCaptions.delete(`${message.conversation_id}:${message.turn_id}`)
  }
- return {element:pane,update,receive,focusDraft,reveal,setOpen,get open(){return open},history}
+ return {element:pane,update,receive,focusDraft,reveal,setOpen,setOrb,setOrbLevel,get open(){return open},history}
 }

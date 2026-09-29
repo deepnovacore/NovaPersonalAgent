@@ -434,3 +434,18 @@ test('the round composer action is voice until there is a draft, then send; voic
   assert.equal(voice.attrs['aria-label'],'结束语音');assert.equal(voice.attrs['aria-pressed'],'true')
  }finally{m.view.controller.disconnect();await tick()}
 })
+test('continuous voice shows the orb stage with its status line and removes it when voice ends',async()=>{
+ const m=mount()
+ try{
+  m.view.receive(feedState(1,'c',{feed:[]}))
+  const stage=m.all().find(n=>n.className==='voice-stage'),label=m.all().find(n=>n.className==='voice-stage-label')
+  assert.equal(stage.hidden,true)
+  m.view.setOrb({name:'listening',statusLine:'正在听'});m.view.setOrb({name:'not-a-state',statusLine:'x'});m.view.setOrbLevel(0.5)
+  m.view.receive(feedState(2,'c',{feed:[],conversations:{selected_id:'c',voice_id:'c',items:[{id:'c',kind:'chat',title:'C'}],messages:[]}}))
+  assert.equal(stage.hidden,false)
+  m.view.setOrb({name:'speaking',statusLine:'正在说'});m.view.setOrbLevel(0.2)
+  assert.equal(label.textContent,'正在说')
+  m.view.receive(feedState(3,'c',{feed:[]}))
+  assert.equal(stage.hidden,true)
+ }finally{m.view.controller.disconnect();await tick()}
+})

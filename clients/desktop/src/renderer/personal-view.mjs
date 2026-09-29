@@ -14,7 +14,7 @@ import {disposeSources} from './source-popover.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=String(text);if(className)node.className=className;return node}
 const PAGE_TITLE=Object.fromEntries(RAIL_ITEMS.map(item=>[item.id,`${item.label} · ${item.title}`]))
 /** The workbench: icon rail, personal-object pages in the middle, Nova as a collapsible pane on the right. */
-export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,applyPresentation}) {
+export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,applyPresentation,speakingLevel}) {
  const lifeLocal={},newsLocal={},preferencesLocal={},taskLocal=new Map()
  let unreadProjection=null
  const root=el('main',undefined,'workbench personal-workspace');root.id='personal-workspace';document.body.prepend(root)
@@ -51,7 +51,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const waiting=el('div',undefined,'presentation-waiting');workspace.append(waiting)
  const panel=el('div',undefined,'workbench-page');workspace.append(panel)
  // Chat pane
- const chat=mountChatPane(root,{c,el,button,run,api,chips,openTask,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.title=chatToggle.textContent;chatToggle.setAttribute('aria-expanded',String(value))}})
+ const chat=mountChatPane(root,{c,el,button,run,api,chips,openTask,speakingLevel,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.title=chatToggle.textContent;chatToggle.setAttribute('aria-expanded',String(value))}})
  chat.setOpen(true)
  // The orb carries no mode buttons: double-click expands, the context menu hides, and sleep is the only voice switch.
  const orbExtras=el('div',undefined,'personal-orb-extras');document.querySelector('#shell').append(orbExtras)
@@ -148,5 +148,5 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  async function collapse(value){await c.setPresentation(value?'orb':'workbench')}
  function receive(frame){chat.receive(frame);c.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.(mode=>run(()=>c.setPresentation(mode)));
- api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update,expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
+ api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
 }

@@ -262,6 +262,7 @@ const onsetTracker = new OnsetTracker({
   onInactive: () => {
     axes.capture = 'idle'
     visual.setLevel(0)
+    personalView?.setOrbLevel(0)
     render()
   },
 })
@@ -399,6 +400,7 @@ function render() {
     || axes.camera === 'requesting'
   cameraToggle.setAttribute('aria-label', t("视觉设置"))
   visual.setState(state.name, { codexWorking: axes.codex === 'working' })
+  personalView?.setOrb({ name: state.name, statusLine: sleeping ? t('已休眠 · 点击唤醒') : state.statusLine, codexWorking: axes.codex === 'working' })
   acknowledgeVisibleConfirmation(state)
 }
 
@@ -573,7 +575,9 @@ async function ensurePlaybackContext() {
 function detectLocalOnset(pcm) {
   const now = performance.now()
   const verdict = observePcmOnset(pcm, onsetTracker, now)
-  visual.setLevel(measurePcmLevel(pcm))
+  const level = measurePcmLevel(pcm)
+  visual.setLevel(level)
+  personalView?.setOrbLevel(level)
   // Three-way, not two: the tracker's 50 ms attack window is what 'candidate'
   // names, so a syllable that has not held long enough to mint a speech id
   // still lights the orb instead of leaving it idle.
@@ -1344,6 +1348,7 @@ async function boot() {
 }
 
 personalView = mountPersonalView({send,
+  speakingLevel: () => getPlaybackLevel(),
   start: async ({wake = true} = {}) => {
     if (await refreshMicrophonePermission() !== 'granted') throw new Error('麦克风权限不可用，原有草稿已保留')
     if (wake) await window.novaAudioAgentDesktop.personal.wake()
