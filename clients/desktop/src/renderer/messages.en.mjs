@@ -1,4 +1,6 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "正在连接后台": "Connecting to the backend",
+  "连上之后，我就来看看你的资料。": "I'll look through your sources once connected.",
   "启动时打开": "Open on startup",
   "默认界面": "Default view",
   "Orb（悬浮球）": "Orb",

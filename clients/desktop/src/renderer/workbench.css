@@ -85,6 +85,8 @@ body[data-opaque="1"] .workbench{border-radius:0}
 .workbench .chat-toggle:hover:not(:disabled){border-color:transparent;background:var(--surface-inset);color:var(--ink)}
 .workbench .chat-toggle[aria-expanded="true"]{color:var(--accent)}
 .page-error{margin:10px 20px 0;padding:8px 12px;border-radius:var(--radius-sm);background:var(--warn-wash);color:var(--warn);font-size:12px}
+.page-notice{margin:10px 20px 0;padding:8px 12px;border-radius:var(--radius-sm);background:var(--surface-inset);color:var(--ink-faint);font-size:12px}
+.page-notice::before{content:'';display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:8px;background:var(--ink-faint);vertical-align:0;animation:warmup-pulse 1.4s ease-in-out infinite}
 .workbench-page{flex:1;min-height:0;overflow:auto;padding:20px 28px 40px;display:flex;flex-direction:column;gap:12px}
 /* Centre the column on wide windows (chat pane collapsed) while the scrollbar stays at the workspace edge. */
 .workbench-page>*{width:100%;max-width:760px;margin-inline:auto}
@@ -326,7 +328,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .warmup-skeleton span:nth-child(2){width:110px}.warmup-skeleton span:nth-child(3){width:70px}
 @keyframes warmup-spin{to{transform:rotate(360deg)}}
 @keyframes warmup-pulse{50%{opacity:.35}}
-@media(prefers-reduced-motion:reduce){.warmup-spinner,.warmup-skeleton span{animation:none}}
+@media(prefers-reduced-motion:reduce){.page-notice::before,.warmup-spinner,.warmup-skeleton span{animation:none}}
 @media(max-width:600px){.workbench .preference-card{padding:16px}.preference-row{gap:10px}.preference-heading{gap:4px}.preference-segments{flex-wrap:wrap}}
 
 /* Body copy: CJK and Latin mixed, so wrap at words but never overflow */
