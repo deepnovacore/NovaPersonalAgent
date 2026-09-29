@@ -42,8 +42,9 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const chatToggle=el('button','收起对话栏','chat-toggle');chatToggle.type='button';chatToggle.setAttribute('aria-controls','chat-pane');chatToggle.addEventListener('click',()=>chat.setOpen(!chat.open))
  const presentation=el('select');presentation.setAttribute('aria-label','显示模式');for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','隐藏']]){const option=el('option',label);option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
  pageHead.append(pageTitle,status,presentation,chatToggle);workspace.append(pageHead)
- const startupNotice=el('p','','page-error');startupNotice.id='startup-notice';startupNotice.setAttribute('role','status');startupNotice.hidden=true;workspace.append(startupNotice)
- const startupText=el('span');startupNotice.append(startupText);button(t('打开设置'),()=>openSettings(),startupNotice)
+ // Startup progress reads as loading; only a failed start turns into an error with a way into settings.
+ const startupNotice=el('p','','page-notice');startupNotice.id='startup-notice';startupNotice.setAttribute('role','status');startupNotice.hidden=true;workspace.append(startupNotice)
+ const startupText=el('span');startupNotice.append(startupText);const startupSettings=button(t('打开设置'),()=>openSettings(),startupNotice);startupSettings.hidden=true
  const startup=createStartupNotice({render:text=>{startupText.textContent=text;startupNotice.hidden=!text}})
  const error=el('p','','page-error');error.setAttribute('role','alert');error.hidden=true;workspace.append(error)
  const taskNotice=el('p');taskNotice.setAttribute('role','status');taskNotice.setAttribute('aria-live','polite');workspace.append(taskNotice)
@@ -97,7 +98,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const pageLinks=()=>{const links=el('div',undefined,'page-links');panel.append(links);return links}
   for(const item of s?.understanding?.items??[]){if(item.kind!==candidateKind)continue;const a=el('article',undefined,'card pending');a.append(el('h3','可能想记下'),el('p',item.text),el('p',`依据：${item.quote}`,'hint'));if(item.kind==='profile')a.append(el('p','确认后将追加到个人介绍，不会替换已有内容。','hint'));const edit=el('textarea');edit.value=lifeLocal['candidate:'+item.id]??item.text;edit.maxLength=1000;edit.setAttribute('aria-label','候选内容');edit.setAttribute('data-editor-key',`candidate:${item.id}:content`);edit.addEventListener('input',()=>{lifeLocal['candidate:'+item.id]=edit.value});a.append(edit);button('记下来',()=>c.command('understanding.action',{id:item.id,action:'accept',text:edit.value,...(item.kind==='profile'?{expected_profile_version:s.life.profile.version}:{})}),a);button('略过',()=>c.command('understanding.action',{id:item.id,action:'dismiss'}),a);pending.append(a)}
   if(['todos','ideas','goals'].includes(selected)){
-   const suggestions=()=>renderSourceSuggestions(panel,{clampable,tab:selected,context:s?.workbench_context,sources:s?.sources??[],button,command:(m,p)=>c.command(m,p),continueChat,delegate:text=>chat.focusDraft(text),openSettings,connected:c.connected})
+   const suggestions=()=>renderSourceSuggestions(panel,{clampable,tab:selected,context:s?.workbench_context,sources:s?.sources??[],button,command:(m,p)=>c.command(m,p),continueChat,delegate:text=>chat.focusDraft(text),openSettings,connected:c.connected,everConnected:c.everConnected,startupFailed:startupNotice.dataset.stage==='failed'})
    if(selected==='todos')suggestions()
    renderLife(panel,{kind:({todos:'todo',ideas:'idea',goals:'goal'})[selected],state:s?.life,clampable,suggested:(s?.workbench_context?.cards??[]).filter(card=>card.tab===selected).length,openArticle:url=>api.personal.openArticle(url),command:(m,p)=>c.command(m,p),button,run,local:lifeLocal,rerender:renderPanel,delegate:(text,source)=>chat.focusDraft(text,source)})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
@@ -127,7 +128,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  function update(){
   document.body.dataset.personalCollapsed=String(c.collapsed)
   document.body.dataset.presentationMode=c.presentationMode;presentation.value=c.presentationMode;presentation.disabled=c.presentationPending
-  const active=activeTaskCount(durableTasks(),tasks());status.textContent=c.connected?`运行中 · ${active} 个后台任务`:c.everConnected?'已断开 · 草稿保留':'正在连接';status.dataset.state=c.connected?'connected':c.everConnected?'disconnected':'connecting'
+  const startupFailed=startupNotice.dataset.stage==='failed',active=activeTaskCount(durableTasks(),tasks());status.textContent=startupFailed?t('启动失败'):c.connected?`运行中 · ${active} 个后台任务`:c.everConnected?'已断开 · 草稿保留':'正在连接';status.dataset.state=startupFailed?'disconnected':c.connected?'connected':c.everConnected?'disconnected':'connecting'
   rail.badge('tasks',active)
   inspector?.setVisible(c.presentationMode==='workbench')
   for(const node of [taskNotice,orbNotice]){const text=t(c.taskNotice);if(node.textContent!==text)node.textContent=text;node.hidden=!text}
@@ -147,5 +148,5 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  async function collapse(value){await c.setPresentation(value?'orb':'workbench')}
  function receive(frame){chat.receive(frame);c.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.(mode=>run(()=>c.setPresentation(mode)));
- api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update,expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{startupNotice.dataset.stage=value?.stage??'';startup.update(value)}}
+ api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update,expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
 }

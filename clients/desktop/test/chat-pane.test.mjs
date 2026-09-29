@@ -394,3 +394,25 @@ test('task progress accepts the command owner snapshot before a later state broa
   assert.equal(m.sent.some(f=>f.type==='input.text'||['conversations.select','conversations.create'].includes(f.method)),false)
  }finally{c.disconnect();await tick()}
 })
+test('startup progress reads as loading; only a failed start shows an error with settings',()=>{
+ const m=mount(),notice=m.all().find(n=>n.id==='startup-notice'),settings=notice.children[1]
+ m.view.startup({stage:'backend'})
+ assert.equal(notice.className,'page-notice');assert.equal(notice.attrs.role,'status');assert.equal(notice.hidden,false);assert.equal(settings.hidden,true)
+ m.view.startup({stage:'failed',code:'workspace_not_found'})
+ assert.equal(notice.className,'page-error');assert.equal(notice.attrs.role,'alert');assert.equal(settings.hidden,false)
+ m.view.startup({stage:'ready'})
+ assert.equal(notice.hidden,true);assert.equal(settings.hidden,true)
+})
+test('a failed first start stops claiming to connect, and retry restores loading',()=>{
+ const m=mount();m.view.controller.everConnected=false;m.view.controller.disconnect()
+ const text=()=>m.all().map(n=>n.textContent).join('\n')
+ m.view.startup({stage:'backend'})
+ assert.match(text(),/正在连接后台/u)
+ m.view.startup({stage:'failed',code:'workspace_not_found'})
+ assert.doesNotMatch(text(),/正在连接后台/u);assert.match(text(),/暂时连不上后台/u)
+ assert.equal(m.all().find(n=>n.className==='workbench-status').textContent,'启动失败')
+ assert.equal(m.all().find(n=>n.className==='workbench-status').dataset.state,'disconnected')
+ m.view.startup({stage:'backend'})
+ assert.match(text(),/正在连接后台/u);assert.doesNotMatch(text(),/暂时连不上后台/u)
+ assert.equal(m.all().find(n=>n.className==='workbench-status').dataset.state,'connecting')
+})

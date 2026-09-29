@@ -80,9 +80,9 @@ For more details about the architecture, check [Architecture](docs/en/architectu
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>Manage workspaces by voice</h3>
-      <p>Create a workspace, switch projects, or resume a session—with your confirmation.</p>
-      <img src="assets/features/workspace.en.png" alt="Nova asks to create the Pet Manager workspace" width="100%">
+      <h3>Your personal workbench</h3>
+      <p>Keep Todos, Ideas and Goals beside your conversation. Review recent project activity and suggested next steps, then ask Nova to help.</p>
+      <img src="assets/features/workbench.en.png" alt="Workbench project recaps and next-step suggestions" width="100%">
     </td>
     <td width="50%" valign="top">
       <h3>You control permissions</h3>
@@ -104,12 +104,9 @@ For more details about the architecture, check [Architecture](docs/en/architectu
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>Memory that stays with you</h3>
-      <p>Nova recalls personal context across conversations; every memory shows where it came from and can be corrected or forgotten.</p>
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="assets/features/mem0-dark.en.png">
-        <img src="assets/features/mem0.en.png" alt="Four local mem0 memories with source details" width="100%">
-      </picture>
+      <h3>Personal context, in your control</h3>
+      <p>Review your Profile and personal memories in one place. Inspect recorded context, correct it or ask Nova to forget it.</p>
+      <img src="assets/features/profile-memory.en.png" alt="Profile overview and personal memory controls" width="100%">
     </td>
     <td width="50%" valign="top">
       <h3>Take Nova with you</h3>
@@ -118,8 +115,6 @@ For more details about the architecture, check [Architecture](docs/en/architectu
     </td>
   </tr>
 </table>
-
-<sub>Demo data; screenshots cleaned up, composited and translated for presentation.</sub>
 
 ## 3. Quickstart
 

@@ -1,7 +1,8 @@
+import {t} from './locale.mjs'
 import {attachSources} from './source-popover.mjs'
 const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(className)node.className=className;return node}
 /** Renders the Todo recap and grounded suggestions; these cards never become Life objects automatically, and a goal suggestion is saved only when the user adopts it. */
-export function renderSourceSuggestions(panel,{tab,context,sources=[],button,command,continueChat,delegate=continueChat,openSettings,connected=true,clampable}){
+export function renderSourceSuggestions(panel,{tab,context,sources=[],button,command,continueChat,delegate=continueChat,openSettings,connected=true,everConnected=true,startupFailed=false,clampable}){
  if(!['todos','ideas','goals'].includes(tab))return
  // The goal list above has its own empty state; a goal suggestion appears only when there is one.
  if(tab==='goals'&&!(context?.cards??[]).some(item=>item.tab==='goals'))return
@@ -33,7 +34,9 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  const empty=el('div',undefined,'workbench-empty');section.append(empty)
  const reason=context?.empty_reasons?.[tab]??context?.empty_reason
  let title='暂时没什么要提的',body='想查资料里的东西，直接问我就行。'
- if(!sources.length&&!connected){title='暂时连不上后台';body='连上之后，我再看看你的资料。'}
+ // Before the first connection this is ordinary startup, not an outage.
+ if(!sources.length&&!connected&&!everConnected&&!startupFailed){title=t('正在连接后台');body=t('连上之后，我就来看看你的资料。')}
+ else if(!sources.length&&!connected){title='暂时连不上后台';body='连上之后，我再看看你的资料。'}
  else if(!sources.length){title='还没给我看过资料';body='连一个文件夹进来，我读过之后就能帮你理出要做的事。'}
  else if(sources.every(source=>source.state==='paused'||source.state==='disconnected')){title='资料来源已暂停';body='恢复之后我再接着读。'}
  else if(sources.some(source=>source.processing_consent_required)&&context?.candidate_count===0){title='这些资料我还不能用';body='去来源设置里看看处理授权，允许之后我再读。'}
@@ -45,6 +48,6 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  else if(reason==='model_abstained'){title='暂时没什么要提的';body='资料我都看过了，没找到有把握的建议。'}
  else if(reason==='no_eligible_sources'){title='暂时没什么要提的';body='现有的资料里还没有适合放这里的事。'}
  empty.append(el('h3',title),el('p',body))
- if(!sources.length&&openSettings)button('连接资料',()=>openSettings('connections'),empty)
+ if(!sources.length&&connected&&openSettings)button('连接资料',()=>openSettings('connections'),empty)
  else if(sources.some(source=>source.state==='error'||source.processing_consent_required)&&openSettings)button('查看来源',()=>openSettings('connections'),empty)
 }

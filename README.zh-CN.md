@@ -81,9 +81,9 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>用语音管理工作区</h3>
-      <p>用语音创建工作区、切换项目或恢复会话，关键变更由你确认。</p>
-      <img src="assets/features/workspace.png" alt="Nova 请求确认创建宠物管理系统工作区" width="100%">
+      <h3>Workbench：待办、想法与目标</h3>
+      <p>待办、想法和目标就在对话旁边。查看最近的项目动态与下一步建议，随时请 Nova 帮忙。</p>
+      <img src="assets/features/workbench.png" alt="Workbench 中的项目回顾与下一步建议" width="100%">
     </td>
     <td width="50%" valign="top">
       <h3>操作权限，由你决定</h3>
@@ -105,12 +105,9 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>记住与你有关的事</h3>
-      <p>跨对话记住与你有关的事；每条记忆都能看到出处，也能纠正或删除。</p>
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="assets/features/mem0-dark.png">
-        <img src="assets/features/mem0.png" alt="mem0 本机记忆及原话入口" width="100%">
-      </picture>
+      <h3>Profile 与个人记忆</h3>
+      <p>在同一处查看个人概述与记忆，检查已记录的上下文，随时纠正或让 Nova 忘记。</p>
+      <img src="assets/features/profile-memory.png" alt="Profile 个人概述与记忆管理操作" width="100%">
     </td>
     <td width="50%" valign="top">
       <h3>把 Nova 带在身边</h3>
@@ -119,8 +116,6 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
     </td>
   </tr>
 </table>
-
-<sub>图中使用演示数据，部分截图已抠图、拼接。</sub>
 
 ## 3. 快速开始
 

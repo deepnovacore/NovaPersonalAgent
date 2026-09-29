@@ -78,9 +78,22 @@ test('unloaded Life data and paused sources never claim an empty list or active 
 })
 test('disconnected source state does not claim that no sources are connected',t=>{
  const h=harness(t)
- renderSourceSuggestions(h.panel,{tab:'ideas',context:null,sources:[],button:h.button,command:h.command,continueChat:()=>{},connected:false})
+ renderSourceSuggestions(h.panel,{tab:'ideas',context:null,sources:[],button:h.button,command:h.command,continueChat:()=>{},connected:false,everConnected:true})
  assert.match(text(h.panel),/暂时连不上后台/u)
  assert.doesNotMatch(text(h.panel),/还没给我看过资料/u)
+})
+test('first connection reads as loading, not an outage, and offers no dead source button',t=>{
+ const h=harness(t)
+ renderSourceSuggestions(h.panel,{tab:'todos',context:null,sources:[],button:h.button,command:h.command,continueChat:()=>{},openSettings:()=>{},connected:false,everConnected:false})
+ assert.match(text(h.panel),/正在连接后台/u)
+ assert.doesNotMatch(text(h.panel),/暂时连不上后台|连接资料/u)
+})
+test('first connection copy is translated in English',async t=>{
+ const {setLanguage}=await import('../src/renderer/locale.mjs');setLanguage('en');t.after(()=>setLanguage('zh-CN'))
+ const h=harness(t)
+ renderSourceSuggestions(h.panel,{tab:'todos',sources:[],button:h.button,command:h.command,connected:false,everConnected:false})
+ assert.match(text(h.panel),/Connecting to the backend/u)
+ assert.match(text(h.panel),/I'll look through your sources once connected\./u)
 })
 test('a partial source failure remains visible beside available suggestions',t=>{
  const h=harness(t)
