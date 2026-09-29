@@ -67,7 +67,6 @@ body[data-opaque="1"] .workbench{border-radius:0}
 .workbench .window-controls:hover .window-control::after,.workbench .window-control:focus-visible::after{opacity:1}
 .workbench .window-close{background:#ff5f57}.window-close::after{content:'×'}
 .workbench .window-minimize{background:#febc2e}.window-minimize::after{content:'−'}
-.workbench .window-zoom{background:#28c840}.window-zoom::after{content:'+'}
 .workbench .window-control:hover:not(:disabled){filter:brightness(.92)}
 .window-grip{flex:1 1 auto;align-self:stretch;min-width:24px;margin:-8px 0;-webkit-app-region:no-drag}
 .rail-pages{display:flex;flex-direction:column;gap:2px}

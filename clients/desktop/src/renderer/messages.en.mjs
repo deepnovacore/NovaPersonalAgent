@@ -41,7 +41,6 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "关闭窗口": "Close window",
   "关闭（转入后台）": "Close (keep running in the background)",
   "最小化": "Minimize",
-  "最大化 / 还原": "Maximize / Restore",
   "Nova 建议的执行位置": "Where Nova suggests running this",
   "会话": "Session",
   "按此执行": "Run here",

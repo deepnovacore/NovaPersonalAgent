@@ -24,12 +24,12 @@ function mount(){
  return {calls,chrome,root}
 }
 
-test('three buttons map to close, minimize and toggleMaximize in traffic-light order', () => {
+test('two buttons map to close and minimize; maximize is only the topbar double-click', () => {
  const {calls,chrome}=mount()
  const buttons=chrome.controls.children
- assert.deepEqual(buttons.map(b=>b.className),['window-control window-close','window-control window-minimize','window-control window-zoom'])
+ assert.deepEqual(buttons.map(b=>b.className),['window-control window-close','window-control window-minimize'])
  for(const b of buttons)b.listeners.click()
- assert.deepEqual(calls,['close','minimize','toggleMaximize'])
+ assert.deepEqual(calls,['close','minimize'])
  assert.ok(buttons.every(b=>b.attrs['aria-label']))
 })
 
