@@ -289,3 +289,31 @@ test('listing coding targets does not re-import a catalog the store already hold
     await rm(home, {recursive: true, force: true})
   }
 })
+
+test('renaming a duplicate-titled catalog session refreshes it even when its timestamp did not change', async () => {
+  const configuredHome = await mkdtemp(join(tmpdir(), 'nova-target-rename-'))
+  const home = await realpath(configuredHome)
+  const value = await fixture({localCodexHome: configuredHome})
+  try {
+    const db = new DatabaseSync(join(home, 'state_5.sqlite'))
+    db.exec('CREATE TABLE threads (id TEXT, name TEXT, title TEXT, cwd TEXT, source TEXT, archived INTEGER, updated_at INTEGER)')
+    const insert = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)')
+    insert.run('thread-a', 'Fix', 'x', home, 'vscode', 0, 100)
+    insert.run('thread-b', 'Fix', 'x', home, 'vscode', 0, 101)
+    db.close()
+    await value.adapter.initialize()
+    const first = await value.adapter.targetPort.list()
+    assert.deepEqual(first.filter(item => item.session_id !== null).map(item => item.title).sort(), ['Fix', 'Fix (2)'])
+
+    const later = new DatabaseSync(join(home, 'state_5.sqlite'))
+    later.prepare('UPDATE threads SET name = ? WHERE id = ?').run('Fix authentication', 'thread-a')
+    later.prepare('UPDATE threads SET name = ? WHERE id = ?').run('Fix rollout', 'thread-b')
+    later.close()
+    const renamed = await value.adapter.targetPort.list()
+    assert.deepEqual(renamed.filter(item => item.session_id !== null).map(item => item.title).sort(), ['Fix authentication', 'Fix rollout'])
+  } finally {
+    await value.adapter.close()
+    await rm(value.root, {recursive: true, force: true})
+    await rm(home, {recursive: true, force: true})
+  }
+})

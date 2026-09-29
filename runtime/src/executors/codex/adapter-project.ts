@@ -5,6 +5,7 @@ import {managedMcpResources,type ManagedCodexMcp} from './managed-mcp.js'
 import type {CodingTarget, CodingTargetPort, CodingTargetSelection} from '../../personal-agent/coding-targets.js'
 import {basename} from 'node:path'
 import {compareCodePoints} from '../../text/canonical-json.js'
+import {stripLikePython} from '../../text/python-text.js'
 import {realpath} from 'node:fs/promises'
 import {readLocalCodexSessions, localRolloutAvailable} from './local-sessions.js'
 import {hostPersistentHomeFromConfig, hostWorkspaceFromConfig} from '../../projects/host-paths.js'
@@ -81,8 +82,10 @@ function sameSessionTitle(stored: string, catalogTitle: string): boolean {
   try {
     const expected = normalizeProjectSessionTitle([...catalogTitle].slice(0, MAX_PROJECT_SESSION_TITLE).join('')).display
     if (stored === expected) return true
-    const suffixed = /^(.+) \(\d+\)$/u.exec(stored)
-    return suffixed !== null && expected.startsWith(suffixed[1]!)
+    const suffixed = /^(.+) \((\d+)\)$/u.exec(stored)
+    if (suffixed === null) return false
+    const room = Math.max(1, MAX_PROJECT_SESSION_TITLE - [...` (${suffixed[2]})`].length)
+    return suffixed[1] === stripLikePython([...expected].slice(0, room).join(''))
   } catch { return false }
 }
 
