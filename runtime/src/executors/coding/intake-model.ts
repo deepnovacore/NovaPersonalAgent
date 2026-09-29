@@ -2,6 +2,7 @@ import {z} from 'zod'
 import type {ModelGateway} from '../../model/model-gateway.js'
 import {GatewayTargetResolver, targetSelectionSchema, targetResolutionSchema, intakeKindSchema, type TargetResolver} from './target-resolution.js'
 export {intakeKindSchema, type IntakeKind} from './target-resolution.js'
+import {completeJson} from './json-completion.js'
 import {workOrderSchema} from './work-order.js'
 
 export const intakeBindingSchema = z.object({
@@ -58,16 +59,8 @@ function parseStage<T>(stage:'requirements'|'target', schema:z.ZodType<T>, value
 }
 
 export function intakeModels(gateway: ModelGateway, assessModel: string, plannerModel: string, targets: TargetResolver = new GatewayTargetResolver(gateway, assessModel)): IntakeModels {
-  const complete = async (model: string, system: string, schema: z.ZodType, input: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<unknown> => {
-    signal.throwIfAborted()
-    const result = await gateway.complete({
-      model, system: `${system}\nSchema: ${JSON.stringify(z.toJSONSchema(schema))}`,
-      prompt: JSON.stringify(input), jsonSchema: {type: 'object'}, reasoning: 'disabled', signal,
-    })
-    signal.throwIfAborted()
-    if (result.text.length > 32000) throw new TypeError('intake_output_too_large')
-    return JSON.parse(result.text) as unknown
-  }
+  const complete = (model: string, system: string, schema: z.ZodType, input: Readonly<Record<string, unknown>>, signal: AbortSignal) =>
+    completeJson(gateway, model, system, schema, input, signal)
   return {
     targets,
     assess: async (originalInput, signal) => {
