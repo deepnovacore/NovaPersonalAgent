@@ -45,14 +45,14 @@ test('duplicate historical conversation labels distinguish dates and ties while 
   assert.deepEqual(items,original)
  }finally{m.view.controller.disconnect();await tick()}
 })
-test('new conversation and target picker controls explicitly translate dynamic UI without translating custom titles',async()=>{
+test('new conversation and target menu controls explicitly translate dynamic UI without translating custom titles',async()=>{
  const {setLanguage}=await import('../src/renderer/locale.mjs');setLanguage('en')
  const m=mount()
  try{
   m.view.receive(feedState(1,'c',{feed:[]}))
-  assert.ok(m.all().some(n=>n.attrs['aria-label']==='Execution workspace'))
-  assert.ok(m.all().some(n=>n.attrs['aria-label']==='Codex session (continuation target)'))
-  for(const label of ['Execution workspace','Codex session (continuation target)','Refresh workspaces','No workspace selected','New session (default for new tasks)','New conversation'])assert.ok(m.all().some(n=>n.textContent===label),label)
+  m.view.receive({type:'executor.state',state:'idle'})
+  assert.ok(m.all().some(n=>n.attrs['aria-label']==='Execution place'))
+  for(const label of ['Choose workspace','New conversation'])assert.ok(m.all().some(n=>n.textContent===label),label)
   assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,'C')
  }finally{m.view.controller.disconnect();await tick();setLanguage('zh-CN')}
 })
@@ -415,4 +415,22 @@ test('a failed first start stops claiming to connect, and retry restores loading
  m.view.startup({stage:'backend'})
  assert.match(text(),/正在连接后台/u);assert.doesNotMatch(text(),/暂时连不上后台/u)
  assert.equal(m.all().find(n=>n.className==='workbench-status').dataset.state,'connecting')
+})
+test('the round composer action is voice until there is a draft, then send; voice shows a stop cross while running',async()=>{
+ const m=mount()
+ try{
+  m.view.receive(feedState(1,'c',{feed:[]}))
+  const byClass=name=>m.all().find(n=>n.className===name)
+  const voice=byClass('composer-voice'),submit=byClass('composer-submit'),draft=m.all().find(n=>n.attrs['aria-label']==='消息草稿')
+  assert.equal(voice.hidden,false);assert.equal(submit.hidden,true)
+  assert.equal(voice.attrs['aria-label'],'持续对话');assert.equal(voice.attrs['aria-pressed'],'false')
+  draft.value='hello';draft.listeners.input()
+  assert.equal(voice.hidden,true);assert.equal(submit.hidden,false)
+  draft.value='   ';draft.listeners.input()
+  assert.equal(voice.hidden,false);assert.equal(submit.hidden,true)
+  assert.equal(byClass('composer-dictate').attrs['aria-label'],'按住说话')
+  assert.ok(voice.children[0].tag==='svg'&&submit.children[0].tag==='svg'&&byClass('composer-dictate').children[0].tag==='svg')
+  m.view.receive(feedState(2,'c',{feed:[],conversations:{selected_id:'c',voice_id:'c',items:[{id:'c',kind:'chat',title:'C'}],messages:[]}}))
+  assert.equal(voice.attrs['aria-label'],'结束语音');assert.equal(voice.attrs['aria-pressed'],'true')
+ }finally{m.view.controller.disconnect();await tick()}
 })
