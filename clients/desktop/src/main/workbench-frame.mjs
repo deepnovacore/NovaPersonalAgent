@@ -7,7 +7,12 @@ const sameBounds=(a,b)=>!!a&&!!b&&a.x===b.x&&a.y===b.y&&a.width===b.width&&a.hei
  */
 export function createWorkbenchFrame({getBounds,setBounds,getWorkArea}){
  let restoreBounds=null,maximizedBounds=null
- const maximized=()=>restoreBounds!==null&&sameBounds(getBounds(),maximizedBounds)
+ // A display change can make the OS re-fit a maximized window; one that still fills its work area is still maximized.
+ const maximized=()=>{
+  if(restoreBounds===null)return false
+  const current=getBounds()
+  return sameBounds(current,maximizedBounds)||sameBounds(current,getWorkArea(current))
+ }
  return {
   get maximized(){return maximized()},
   toggleMaximize(){

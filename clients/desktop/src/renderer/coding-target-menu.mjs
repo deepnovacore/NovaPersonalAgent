@@ -29,7 +29,7 @@ export function mountCodingTargetMenu(parent,{c,el,run}){
  const panel=el('div',undefined,'target-panel');panel.hidden=true;panel.setAttribute('role','menu');panel.setAttribute('aria-label',t('执行位置'))
  const workspaceColumn=el('div',undefined,'target-column'),sessionColumn=el('div',undefined,'target-column')
  panel.append(workspaceColumn,sessionColumn);root.append(chip,panel);parent.append(root)
- let available=false,wasConnected=false,conversation=null,catalog=null,status='idle',browsing=null,pending=false,opened=false,renderedKey='',nodes=new Map()
+ let available=false,wasConnected=false,conversation=null,catalog=null,status='idle',browsing=null,pending=false,queued=null,opened=false,renderedKey='',nodes=new Map()
  const current=()=>c.snapshot?.conversations?.items?.find(item=>item.id===c.selectedId)?.coding_target??null
 
  async function load(){
@@ -54,9 +54,18 @@ export function mountCodingTargetMenu(parent,{c,el,run}){
   render();void load()
  }
  function choose(target,{keepOpen=false}={}){
-  const id=conversation;if(!id||id!==c.selectedId||pending)return
+  const id=conversation;if(!id||id!==c.selectedId)return
+  if(pending){queued={id,target};if(!keepOpen)close(true);return}
   pending=true;render()
-  void run(async()=>{try{await c.command('conversations.target',{id,target})}finally{pending=false;render()}})
+  void run(async()=>{
+   try{await c.command('conversations.target',{id,target})}
+   finally{
+    pending=false
+    const next=queued;queued=null
+    if(next&&next.id===c.selectedId&&next.id===conversation)choose(next.target,{keepOpen:true})
+    else render()
+   }
+  })
   if(!keepOpen)close(true)
  }
  chip.addEventListener('click',()=>opened?close(true):open())

@@ -21,11 +21,11 @@ const catalog=[
  {workspace_id:'ws-2',session_id:null,project:'Beta',title:'',directory:'/two'},
 ]
 
-function mount({targets=catalog,fail=false}={}){
+function mount({targets=catalog,fail=false,gate=null}={}){
  globalThis.document={addEventListener(){},removeEventListener(){},activeElement:null}
  const parent=el('div'),commands=[]
  const c={connected:true,presentationReady:true,selectedId:'a',snapshot:{conversations:{items:[{id:'a'},{id:'b'}]}},
-  command:async(method,params)=>{commands.push([method,params]);if(fail&&method==='conversations.targets')throw new Error('x');return method==='conversations.targets'?{targets}:{}}}
+  command:async(method,params)=>{commands.push([method,params]);if(fail&&method==='conversations.targets')throw new Error('x');if(gate&&method==='conversations.target')await gate;return method==='conversations.targets'?{targets}:{}}}
  const menu=mountCodingTargetMenu(parent,{c,el,run:action=>action()})
  menu.update()
  const chip=()=>all(menu.element).find(n=>n.className==='target-chip')
@@ -117,6 +117,18 @@ test('a re-render keeps keyboard focus on the same item and never disables items
  const after=m.byText('Beta')
  assert.notEqual(after,before,'the menu was rebuilt')
  assert.equal(document.activeElement,after,'focus followed the item across the rebuild')
+})
+
+test('a session picked while the workspace change is still pending is applied afterwards, not dropped', async () => {
+ let release;const gate=new Promise(resolve=>{release=resolve})
+ const m=mount({gate});m.menu.receive({type:'executor.state'})
+ m.chip().listeners.click();await flush()
+ m.byText('Alpha').listeners.click();await flush()
+ m.byText('Fix audio').listeners.click();await flush()
+ assert.equal(m.menu.open,false,'the pick still closes the menu')
+ assert.equal(m.commands.filter(([method])=>method==='conversations.target').length,1,'only one change in flight')
+ release();await flush();await flush()
+ assert.deepEqual(m.commands.at(-1),['conversations.target',{id:'a',target:{workspace_id:'ws-1',session_id:'s-1'}}])
 })
 
 test('label and levels project the current target even before the catalog loads', () => {
