@@ -589,7 +589,11 @@ export class DesktopSocketBridge {
     const pcm = Buffer.concat(draft.chunks); draft.chunks = []
     void this.#service.transcribeDraft(pcm, AbortSignal.any([draft.controller.signal, AbortSignal.timeout(30000)]))
       .then(text => { if (this.#dictation === draft) this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), text})) })
-      .catch(() => { if (this.#dictation === draft) this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), error: 'recognition_failed'})) })
+      .catch((error: unknown) => {
+        if (this.#dictation !== draft) return
+        this.#telemetry?.record('dictation.failed', {bytes: pcm.length, error: (error instanceof Error ? error.message : String(error)).replace(/[\r\n]/gu, ' ').slice(0, 200)})
+        this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), error: 'recognition_failed'}))
+      })
       .finally(() => { if (this.#dictation === draft) this.#cancelDictation() })
   }
 

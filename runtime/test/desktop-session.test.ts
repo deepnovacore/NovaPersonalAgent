@@ -1042,6 +1042,22 @@ test('dictation buffers audio without sending it to the model; only explicit edi
   bridge.release()
 })
 
+test('a failed dictation reports recognition_failed to the client and the real cause to telemetry only', async () => {
+  const {bridge, service, telemetry} = harness()
+  service.transcribeDraft = () => Promise.reject(new Error('empty transcript'))
+  bridge.markAuthenticated(); drainJsonFrames(bridge)
+  await bridge.receiveControl({type: 'input.dictation', id: 'd2', action: 'start'})
+  await bridge.receiveAudio(new Uint8Array(6))
+  await bridge.receiveControl({type: 'input.dictation', id: 'd2', action: 'finish'})
+  await new Promise(resolve => setImmediate(resolve))
+  const frame = findJsonFrame(drainJsonFrames(bridge), 'input.transcription') as unknown as {error?: string}
+  assert.equal(frame.error, 'recognition_failed')
+  const failed = telemetry.records.filter(record => record.kind === 'dictation.failed')
+  assert.equal(failed.length, 1)
+  assert.deepEqual(failed[0]?.payload, {bytes: 6, error: 'empty transcript'})
+  bridge.release()
+})
+
 test('cancelled dictation drops a late transcript and release aborts recognition', async () => {
   const {bridge, service} = harness()
   let finish!: (text: string) => void

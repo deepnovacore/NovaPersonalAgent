@@ -52,8 +52,10 @@ const exitCode = await runDesktopEntryWithStopSources({
   ),
   onDiagnostic,
   onStartupFailure: error => {
+    const code=error instanceof Error?(error as {code?:unknown}).code:undefined
+    const detail=error instanceof Error?`${error.name}${typeof code==='string'?` [${code}]`:''}: ${error.message}`:typeof error
+    onDiagnostic(`[runtime-startup-error] ${detail.replace(/[\r\n]/gu,' ').slice(0,296)}`)
     if(acceptance){
-      const detail=error instanceof Error?`${error.name}: ${error.message}`:typeof error
       onDiagnostic(`[acceptance-startup-error] ${detail.replace(/[\r\n]/gu,' ').slice(0,300)}`)
       const report=process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT
       if(report)writeFileSync(resolve(dirname(report),'startup-error.json'),JSON.stringify({detail,stack:error instanceof Error?error.stack?.split('\n').slice(0,8):undefined})+'\n',{mode:0o600})
