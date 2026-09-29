@@ -18,6 +18,7 @@ import type { EvidenceRef, Observation, RelationCard } from './models.js'
 interface StoreWorkerData {
   readonly path: string
   readonly deniedRoots: readonly string[]
+  readonly memoryLockWaitMs?: number
   readonly publicationRevisionFloor?: number
   readonly testHooks?: {
     readonly exitAfterCommitBeforeResponse?: string
@@ -50,6 +51,7 @@ const store = new WorkspaceGraphStore(
   },
   {
     deniedRoots: data.deniedRoots,
+    ...(data.memoryLockWaitMs === undefined ? {} : {memoryLockWaitMs: data.memoryLockWaitMs}),
     ...(data.publicationRevisionFloor === undefined
       ? {}
       : {publicationRevisionFloor: data.publicationRevisionFloor}),
@@ -242,6 +244,12 @@ function parseWorkerData(value: unknown): StoreWorkerData {
   ) {
     throw new Error('invalid workspace graph worker configuration')
   }
+  if (
+    value.memoryLockWaitMs !== undefined
+    && (typeof value.memoryLockWaitMs !== 'number' || !Number.isSafeInteger(value.memoryLockWaitMs) || value.memoryLockWaitMs < 0)
+  ) {
+    throw new Error('invalid workspace graph worker configuration')
+  }
   let testHooks: StoreWorkerData['testHooks']
   if (value.testHooks !== undefined) {
     if (!isRecord(value.testHooks)) throw new Error('invalid workspace graph worker configuration')
@@ -269,6 +277,7 @@ function parseWorkerData(value: unknown): StoreWorkerData {
   return {
     path: value.path,
     deniedRoots: value.deniedRoots,
+    ...(value.memoryLockWaitMs === undefined ? {} : {memoryLockWaitMs: value.memoryLockWaitMs}),
     ...(value.publicationRevisionFloor === undefined
       ? {}
       : {publicationRevisionFloor: value.publicationRevisionFloor}),

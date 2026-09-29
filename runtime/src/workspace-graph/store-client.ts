@@ -43,6 +43,7 @@ export interface WorkspaceGraphWorker {
 
 export interface WorkspaceGraphStoreClientOptions {
   readonly deniedRoots?: readonly string[]
+  readonly memoryLockWaitMs?: number
   readonly workerFactory?: (url: URL, options: WorkerOptions) => WorkspaceGraphWorker
 }
 
@@ -186,6 +187,7 @@ export class WorkspaceGraphStoreClient {
   readonly #workerData: {
     readonly path: string
     readonly deniedRoots: readonly string[]
+    readonly memoryLockWaitMs?: number
   }
   #worker: WorkspaceGraphWorker
   readonly #pending = new Map<number, PendingRequest>()
@@ -202,6 +204,7 @@ export class WorkspaceGraphStoreClient {
     this.#workerData = {
       path,
       deniedRoots: options.deniedRoots === undefined ? [] : [...options.deniedRoots],
+      ...(options.memoryLockWaitMs === undefined ? {} : {memoryLockWaitMs: options.memoryLockWaitMs}),
     }
     this.#workerFactory = options.workerFactory
       ?? ((url: URL, configured: WorkerOptions) => new Worker(url, configured))

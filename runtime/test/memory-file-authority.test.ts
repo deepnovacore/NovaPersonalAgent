@@ -130,9 +130,17 @@ test('a second already-open client automatically joins file authority before wri
  }finally{await first.close();await second.close();await reopened?.close();await rm(root,{recursive:true,force:true})}
 })
 
+test('two workers opening the same ledger together both start instead of failing on the path lock',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-file-concurrent-open-')),path=join(root,'ledger.sqlite')
+ const first=new WorkspaceGraphStoreClient(path),second=new WorkspaceGraphStoreClient(path)
+ try{
+  await Promise.all([first,second].map(async client=>{await client.open();await enable(client)}))
+ }finally{await first.close();await second.close();await rm(root,{recursive:true,force:true})}
+})
+
 test('first file enable respects a live path lock before migrating any documents',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-file-first-lock-')),path=join(root,'ledger.sqlite')
- const client=new WorkspaceGraphStoreClient(path);const lock=join(path+'.memory','.nova-memory.lock')
+ const client=new WorkspaceGraphStoreClient(path,{memoryLockWaitMs:0});const lock=join(path+'.memory','.nova-memory.lock')
  try{
   await client.open();await client.memory('append_evidence',evidence);await client.memory('merge',candidate)
   await writeFile(lock,JSON.stringify({pid:process.pid,token:'synthetic-live-owner'}))

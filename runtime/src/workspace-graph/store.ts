@@ -50,6 +50,7 @@ import {
 
 export const WORKSPACE_GRAPH_SCHEMA_VERSION = 4
 const DERIVED_TABLE_ROW_CAP = 128
+const MEMORY_LOCK_WAIT_MS = 10_000
 const OBSERVATION_ROW_CAP_PER_WORKSPACE = 512
 const OBSERVATION_ROW_CAP_GLOBAL = 4_096
 const PROJECTION_RECORD_CAP = 512
@@ -216,6 +217,7 @@ export const PublishedGraphSnapshotSchema = z.object({
 
 export interface WorkspaceGraphStoreOptions {
   readonly deniedRoots?: readonly string[]
+  readonly memoryLockWaitMs?: number
   readonly publicationRevisionFloor?: number
   readonly afterRelationStatement?: () => void
 }
@@ -483,7 +485,7 @@ export class WorkspaceGraphStore {
     options: WorkspaceGraphStoreOptions = {},
   ) {
     this.#path = path
-    this.#fileRepository = new MarkdownRepository(path+'.memory')
+    this.#fileRepository = new MarkdownRepository(path+'.memory',{lockWaitMs:options.memoryLockWaitMs??MEMORY_LOCK_WAIT_MS})
     this.#databaseFactory = databaseFactory
     this.#pathPolicy = new SensitivePathPolicy(
       options.deniedRoots === undefined ? {} : {deniedRoots: options.deniedRoots},
