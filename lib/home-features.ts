@@ -17,10 +17,10 @@ export const featureCards = [
   },
   {
     "lang": "en",
-    "title": "Manage workspaces by voice",
-    "description": "Create a workspace, switch projects, or resume a session—with your confirmation.",
-    "alt": "Nova asks to create the Pet Manager workspace",
-    "image": "/doc-assets/assets/features/workspace.en.png",
+    "title": "Your personal workbench",
+    "description": "Keep Todos, Ideas and Goals beside your conversation. Review recent project activity and suggested next steps, then ask Nova to help.",
+    "alt": "Workbench project recaps and next-step suggestions",
+    "image": "/doc-assets/assets/features/workbench.en.png",
     "caption": ""
   },
   {
@@ -49,10 +49,10 @@ export const featureCards = [
   },
   {
     "lang": "en",
-    "title": "Memory that stays with you",
-    "description": "Nova recalls personal context across conversations; every memory shows where it came from and can be corrected or forgotten.",
-    "alt": "Four local mem0 memories with source details",
-    "image": "/doc-assets/assets/features/mem0-dark.en.png",
+    "title": "Personal context, in your control",
+    "description": "Review your Profile and personal memories in one place. Inspect recorded context, correct it or ask Nova to forget it.",
+    "alt": "Profile overview and personal memory controls",
+    "image": "/doc-assets/assets/features/profile-memory.en.png",
     "caption": ""
   },
   {
@@ -81,10 +81,10 @@ export const featureCards = [
   },
   {
     "lang": "zh-CN",
-    "title": "用语音管理工作区",
-    "description": "用语音创建工作区、切换项目或恢复会话，关键变更由你确认。",
-    "alt": "Nova 请求确认创建宠物管理系统工作区",
-    "image": "/doc-assets/assets/features/workspace.png",
+    "title": "Workbench：待办、想法与目标",
+    "description": "待办、想法和目标就在对话旁边。查看最近的项目动态与下一步建议，随时请 Nova 帮忙。",
+    "alt": "Workbench 中的项目回顾与下一步建议",
+    "image": "/doc-assets/assets/features/workbench.png",
     "caption": ""
   },
   {
@@ -113,10 +113,10 @@ export const featureCards = [
   },
   {
     "lang": "zh-CN",
-    "title": "记住与你有关的事",
-    "description": "跨对话记住与你有关的事；每条记忆都能看到出处，也能纠正或删除。",
-    "alt": "mem0 本机记忆及原话入口",
-    "image": "/doc-assets/assets/features/mem0-dark.png",
+    "title": "Profile 与个人记忆",
+    "description": "在同一处查看个人概述与记忆，检查已记录的上下文，随时纠正或让 Nova 忘记。",
+    "alt": "Profile 个人概述与记忆管理操作",
+    "image": "/doc-assets/assets/features/profile-memory.png",
     "caption": ""
   },
   {

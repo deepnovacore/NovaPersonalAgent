@@ -91,7 +91,7 @@ export function generateDocs() {
     const relative = `assets/features/coding${suffix}.svg`;
     assets.set(relative, path.join(repoRoot, relative));
   }
-  for (const name of ['conversation', 'vision', 'permission', 'workspace', 'knowledge', 'mem0', 'iphone']) {
+  for (const name of ['conversation', 'vision', 'permission', 'workspace', 'knowledge', 'mem0', 'iphone', 'workbench', 'profile-memory']) {
     for (const suffix of ['', '.en']) {
       const relative = `assets/features/${name}${suffix}.png`;
       assets.set(relative, path.join(repoRoot, relative));
