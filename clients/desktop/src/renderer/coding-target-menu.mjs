@@ -29,7 +29,7 @@ export function mountCodingTargetMenu(parent,{c,el,run}){
  const panel=el('div',undefined,'target-panel');panel.hidden=true;panel.setAttribute('role','menu');panel.setAttribute('aria-label',t('执行位置'))
  const workspaceColumn=el('div',undefined,'target-column'),sessionColumn=el('div',undefined,'target-column')
  panel.append(workspaceColumn,sessionColumn);root.append(chip,panel);parent.append(root)
- let available=false,wasConnected=false,conversation=null,catalog=null,status='idle',browsing=null,pending=false,opened=false,renderedKey=''
+ let available=false,wasConnected=false,conversation=null,catalog=null,status='idle',browsing=null,pending=false,opened=false,renderedKey='',nodes=new Map()
  const current=()=>c.snapshot?.conversations?.items?.find(item=>item.id===c.selectedId)?.coding_target??null
 
  async function load(){
@@ -69,8 +69,8 @@ export function mountCodingTargetMenu(parent,{c,el,run}){
   const at=items.indexOf(document.activeElement);items[(at+move+items.length)%items.length].focus?.()
  })
 
- function item(column,text,{selected=false,disabled=false,title='',onClick}){
-  const node=el('button',text,'target-item');node.type='button';node.setAttribute('role','menuitemradio');node.setAttribute('aria-checked',String(selected));node.disabled=disabled
+ function item(column,key,text,{selected=false,title='',onClick}){
+  const node=el('button',text,'target-item');node.type='button';node.setAttribute('role','menuitemradio');node.setAttribute('aria-checked',String(selected));nodes.set(key,node)
   if(title)node.title=title
   node.addEventListener('click',onClick);column.append(node);return node
  }
@@ -82,9 +82,11 @@ export function mountCodingTargetMenu(parent,{c,el,run}){
   if(!opened)return
   const key=JSON.stringify([conversation,now,catalog,status,browsing,pending])
   if(key===renderedKey)return
-  renderedKey=key;workspaceColumn.replaceChildren();sessionColumn.replaceChildren()
-  item(workspaceColumn,t('不指定工作区'),{selected:!now,disabled:pending,onClick:()=>{browsing=null;choose(null)}})
-  for(const entry of levels)item(workspaceColumn,entry.project,{selected:entry.workspace_id===now?.workspace_id,disabled:pending,title:entry.directory,
+  renderedKey=key
+  const focused=[...nodes].find(([,node])=>node===document.activeElement)?.[0]
+  nodes=new Map();workspaceColumn.replaceChildren();sessionColumn.replaceChildren()
+  item(workspaceColumn,'w:none',t('不指定工作区'),{selected:!now,onClick:()=>{browsing=null;choose(null)}})
+  for(const entry of levels)item(workspaceColumn,`w:${entry.workspace_id}`,entry.project,{selected:entry.workspace_id===now?.workspace_id,title:entry.directory,
    onClick:()=>{browsing=entry.workspace_id;if(entry.workspace_id===now?.workspace_id)render();else choose({workspace_id:entry.workspace_id,session_id:null},{keepOpen:true})}})
   if(status==='loading')workspaceColumn.append(el('p',t('正在加载工作区…'),'hint target-note'))
   else if(status==='error'){const retry=el('button',t('加载失败，点击重试'),'target-item');retry.type='button';retry.addEventListener('click',()=>void load());workspaceColumn.append(retry)}
@@ -92,9 +94,10 @@ export function mountCodingTargetMenu(parent,{c,el,run}){
   const entry=levels.find(level=>level.workspace_id===browsing)
   sessionColumn.hidden=!entry
   if(entry){
-   item(sessionColumn,t('新会话'),{selected:now?.workspace_id===entry.workspace_id&&!now.session_id,disabled:pending,onClick:()=>choose({workspace_id:entry.workspace_id,session_id:null})})
-   for(const session of entry.sessions)item(sessionColumn,session.title,{selected:now?.workspace_id===entry.workspace_id&&now.session_id===session.session_id,disabled:pending,onClick:()=>choose({workspace_id:entry.workspace_id,session_id:session.session_id})})
+   item(sessionColumn,'s:new',t('新会话'),{selected:now?.workspace_id===entry.workspace_id&&!now.session_id,onClick:()=>choose({workspace_id:entry.workspace_id,session_id:null})})
+   for(const session of entry.sessions)item(sessionColumn,`s:${session.session_id}`,session.title,{selected:now?.workspace_id===entry.workspace_id&&now.session_id===session.session_id,onClick:()=>choose({workspace_id:entry.workspace_id,session_id:session.session_id})})
   }
+  if(focused)(nodes.get(focused)??nodes.get('s:new')??nodes.get('w:none'))?.focus?.()
  }
  return {
   element:root,

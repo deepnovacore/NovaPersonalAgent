@@ -1058,6 +1058,20 @@ test('a failed dictation reports recognition_failed to the client and the real c
   bridge.release()
 })
 
+test('a failed dictation still reports recognition_failed when the telemetry disk cannot be written', async () => {
+  const {bridge, service, telemetry} = harness()
+  telemetry.record = () => { throw new Error('ENOSPC') }
+  service.transcribeDraft = () => Promise.reject(new Error('empty transcript'))
+  bridge.markAuthenticated(); drainJsonFrames(bridge)
+  await bridge.receiveControl({type: 'input.dictation', id: 'd3', action: 'start'})
+  await bridge.receiveAudio(new Uint8Array(6))
+  await bridge.receiveControl({type: 'input.dictation', id: 'd3', action: 'finish'})
+  await new Promise(resolve => setImmediate(resolve))
+  const frame = findJsonFrame(drainJsonFrames(bridge), 'input.transcription') as unknown as {error?: string}
+  assert.equal(frame.error, 'recognition_failed')
+  bridge.release()
+})
+
 test('cancelled dictation drops a late transcript and release aborts recognition', async () => {
   const {bridge, service} = harness()
   let finish!: (text: string) => void

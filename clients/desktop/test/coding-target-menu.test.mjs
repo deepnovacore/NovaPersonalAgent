@@ -107,6 +107,18 @@ test('Escape closes the menu and returns focus to the chip', async () => {
  assert.equal(m.menu.open,false);assert.equal(document.activeElement,m.chip())
 })
 
+test('a re-render keeps keyboard focus on the same item and never disables items while a change is pending', async () => {
+ const m=mount();m.menu.receive({type:'executor.state'})
+ m.chip().listeners.click();await flush()
+ const before=m.byText('Beta');before.focus()
+ before.listeners.click()
+ assert.ok(m.items().every(n=>!n.disabled),'pending must not disable focusable items')
+ await flush()
+ const after=m.byText('Beta')
+ assert.notEqual(after,before,'the menu was rebuilt')
+ assert.equal(document.activeElement,after,'focus followed the item across the rebuild')
+})
+
 test('label and levels project the current target even before the catalog loads', () => {
  const target={workspace_id:'w',session_id:'s',project:'P',title:'Session',directory:'/d'}
  assert.equal(targetLabel(target),'P / Session')

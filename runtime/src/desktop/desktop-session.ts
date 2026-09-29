@@ -591,7 +591,8 @@ export class DesktopSocketBridge {
       .then(text => { if (this.#dictation === draft) this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), text})) })
       .catch((error: unknown) => {
         if (this.#dictation !== draft) return
-        this.#telemetry?.record('dictation.failed', {bytes: pcm.length, error: (error instanceof Error ? error.message : String(error)).replace(/[\r\n]/gu, ' ').slice(0, 200)})
+        try { this.#telemetry?.record('dictation.failed', {bytes: pcm.length, error: (error instanceof Error ? error.message : String(error)).replace(/[\r\n]/gu, ' ').slice(0, 200)}) }
+        catch { /* the failure frame below must reach the client even when the telemetry disk cannot be written */ }
         this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), error: 'recognition_failed'}))
       })
       .finally(() => { if (this.#dictation === draft) this.#cancelDictation() })
