@@ -252,12 +252,19 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
         for (const item of catalog) { if (paths.size < MAX_ROSTER) paths.add(item.cwd) }
         // Each import is a locked read-parse-validate-write transaction (~50 ms on a real store), so only
         // entries the store does not already hold identically go through one.
-        const held = await this.#store.snapshot()
-        const workspacesByPath = new Map(held.workspaces.map(workspace => [workspace.canonical_path, workspace]))
-        const sessionsByThread = new Map(held.sessions.flatMap(session => session.codex_thread_id === null ? [] : [[`${session.executor_home ?? ''}\0${session.codex_thread_id}`, session] as const]))
+        let workspacesByPath = new Map<string, WorkspaceRecord>()
+        let sessionsByThread = new Map<string, ProjectSessionRecord>()
+        let stale = true
         for (const item of [...catalog].reverse()) {
           if (this.#closed) return
           if (!paths.has(item.cwd)) continue
+          // An import can evict other sessions at capacity, so re-read the store after one before trusting a skip.
+          if (stale) {
+            const held = await this.#store.snapshot()
+            workspacesByPath = new Map(held.workspaces.map(workspace => [workspace.canonical_path, workspace]))
+            sessionsByThread = new Map(held.sessions.flatMap(session => session.codex_thread_id === null ? [] : [[`${session.executor_home ?? ''}\0${session.codex_thread_id}`, session] as const]))
+            stale = false
+          }
           const workspace = workspacesByPath.get(item.cwd)
           const existing = workspace === undefined ? undefined : sessionsByThread.get(`${home}\0${item.threadId}`)
           if (workspace !== undefined && existing !== undefined && existing.workspace_id === workspace.workspace_id && existing.state === 'ready'
@@ -266,6 +273,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
             ids.add(existing.session_id)
             continue
           }
+          stale = true
           try {
             const workspace = await this.#store.ensureImported([...basename(item.cwd)].slice(0, 80).join('') || 'workspace', hostWorkspaceFromConfig(item.cwd, [item.cwd]))
             const session = await this.#store.importSession(workspace.workspace_id, {

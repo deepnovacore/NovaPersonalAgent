@@ -290,6 +290,35 @@ test('listing coding targets does not re-import a catalog the store already hold
   }
 })
 
+test('a session evicted by an earlier import in the same refresh is imported again, not skipped', async () => {
+  const configuredHome = await mkdtemp(join(tmpdir(), 'nova-target-evict-'))
+  const home = await realpath(configuredHome)
+  const value = await fixture({localCodexHome: configuredHome})
+  try {
+    const db = new DatabaseSync(join(home, 'state_5.sqlite'))
+    db.exec('CREATE TABLE threads (id TEXT, name TEXT, title TEXT, cwd TEXT, source TEXT, archived INTEGER, updated_at INTEGER)')
+    const insert = db.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)')
+    for (let index = 0; index < 200; index++) insert.run(`thread-${index}`, `会话 ${index}`, 'x', home, 'vscode', 0, 100 + index)
+    db.close()
+    await value.adapter.initialize()
+    await value.adapter.targetPort.list()
+
+    // The workspace is full; an older session appears and the newest one leaves the catalog.
+    const later = new DatabaseSync(join(home, 'state_5.sqlite'))
+    later.prepare('DELETE FROM threads WHERE id = ?').run('thread-199')
+    later.prepare('INSERT INTO threads VALUES (?, ?, ?, ?, ?, ?, ?)').run('thread-old', '旧会话', 'x', home, 'vscode', 0, 50)
+    later.close()
+    await value.adapter.targetPort.list()
+    const titles = new Set((await value.store.snapshot()).sessions.map(session => session.display_title))
+    const missing = Array.from({length: 199}, (_, index) => `会话 ${index}`).filter(title => !titles.has(title))
+    assert.deepEqual(missing, [], 'current catalog sessions must survive an older import')
+  } finally {
+    await value.adapter.close()
+    await rm(value.root, {recursive: true, force: true})
+    await rm(home, {recursive: true, force: true})
+  }
+})
+
 test('renaming a duplicate-titled catalog session refreshes it even when its timestamp did not change', async () => {
   const configuredHome = await mkdtemp(join(tmpdir(), 'nova-target-rename-'))
   const home = await realpath(configuredHome)
