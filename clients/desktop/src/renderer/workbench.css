@@ -242,6 +242,7 @@ body[data-opaque="1"] .workbench{border-radius:0}
 .composer-actions [hidden]{display:none}
 .composer-actions .composer-dictate{flex:0 0 32px;width:32px;height:32px;padding:0;margin-left:auto;display:grid;place-items:center;color:var(--ink-dim);border-radius:50%}
 .composer-actions .composer-dictate:hover:not(:disabled){color:var(--ink)}
+.composer-actions .composer-dictate[aria-pressed="true"]{background:var(--accent-wash);color:var(--accent)}
 .composer-actions .composer-voice,.composer-actions .composer-submit{flex:0 0 32px;width:32px;height:32px;padding:0;display:grid;place-items:center;border-radius:50%;background:var(--accent);color:var(--accent-ink)}
 .composer-actions .composer-voice:hover:not(:disabled),.composer-actions .composer-submit:hover:not(:disabled){filter:brightness(1.08);background:var(--accent)}
 .composer-actions .composer-voice[aria-pressed="true"]{background:var(--warn);color:#fff}

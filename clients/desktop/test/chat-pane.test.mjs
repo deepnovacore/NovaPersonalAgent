@@ -416,6 +416,22 @@ test('a failed first start stops claiming to connect, and retry restores loading
  assert.match(text(),/正在连接后台/u);assert.doesNotMatch(text(),/暂时连不上后台/u)
  assert.equal(m.all().find(n=>n.className==='workbench-status').dataset.state,'connecting')
 })
+test('the mic starts dictation on one click and finishes it on the next',async()=>{
+ let stops=0
+ const m=mount({stop:async()=>{stops++}})
+ try{
+  m.view.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input','dictation']})
+  m.view.receive(feedState(1,'c',{feed:[]}))
+  const mic=m.all().find(n=>n.className==='composer-dictate')
+  assert.equal(mic.attrs['aria-pressed'],'false')
+  await mic.listeners.click();await tick()
+  const start=m.sent.find(f=>f.type==='input.dictation'&&f.action==='start')
+  assert.ok(start);assert.equal(mic.attrs['aria-label'],'停止录音');assert.equal(mic.attrs['aria-pressed'],'true')
+  await mic.listeners.click();await tick()
+  assert.ok(m.sent.some(f=>f.type==='input.dictation'&&f.action==='finish'&&f.id===start.id))
+  assert.equal(m.sent.filter(f=>f.type==='input.dictation'&&f.action==='start').length,1)
+ }finally{m.view.controller.disconnect();await tick()}
+})
 test('the round composer action is voice until there is a draft, then send; voice shows a stop cross while running',async()=>{
  const m=mount()
  try{
@@ -428,7 +444,7 @@ test('the round composer action is voice until there is a draft, then send; voic
   assert.equal(voice.hidden,true);assert.equal(submit.hidden,false)
   draft.value='   ';draft.listeners.input()
   assert.equal(voice.hidden,false);assert.equal(submit.hidden,true)
-  assert.equal(byClass('composer-dictate').attrs['aria-label'],'按住说话')
+  assert.equal(byClass('composer-dictate').attrs['aria-label'],'语音输入')
   assert.ok(voice.children[0].tag==='svg'&&submit.children[0].tag==='svg'&&byClass('composer-dictate').children[0].tag==='svg')
   m.view.receive(feedState(2,'c',{feed:[],conversations:{selected_id:'c',voice_id:'c',items:[{id:'c',kind:'chat',title:'C'}],messages:[]}}))
   assert.equal(voice.attrs['aria-label'],'结束语音');assert.equal(voice.attrs['aria-pressed'],'true')

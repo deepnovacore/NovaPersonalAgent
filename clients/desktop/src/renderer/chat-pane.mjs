@@ -56,11 +56,9 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
  draft.addEventListener('input',()=>{c.draft=draft.value;if(!draft.value.trim())c.state().source_todo=null;renderSource();syncActions()})
  draft.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();void run(()=>c.submit())}})
  const inputActions=el('div',undefined,'composer-actions');const targetMenu=mountCodingTargetMenu(inputActions,{c,el,run})
- const dictate=el('button',undefined,'composer-dictate');dictate.type='button';dictate.append(glyph(GLYPH.mic));dictate.setAttribute('aria-label','按住说话');dictate.title='按住说话';inputActions.append(dictate)
- dictate.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();dictate.setPointerCapture(e.pointerId);void run(()=>c.dictate())})
- dictate.addEventListener('pointerup',()=>run(()=>c.finish()));dictate.addEventListener('pointercancel',()=>run(()=>c.text()))
- dictate.addEventListener('keydown',e=>{if([' ','Enter'].includes(e.key)&&!e.repeat){e.preventDefault();void run(()=>c.dictate())}})
- dictate.addEventListener('keyup',e=>{if([' ','Enter'].includes(e.key)){e.preventDefault();void run(()=>c.finish())}})
+ const dictate=el('button',undefined,'composer-dictate');dictate.type='button';dictate.append(glyph(GLYPH.mic));inputActions.append(dictate)
+ const recordingHere=()=>Boolean(c.dictationId)&&c.dictationConversationId===c.selectedId
+ dictate.addEventListener('click',()=>run(()=>recordingHere()?c.finish():c.dictate()))
  const voice=el('button',undefined,'composer-voice');voice.type='button';voice.addEventListener('click',()=>run(()=>c.isVoiceConversation?c.stopVoice():c.voice()));inputActions.append(voice)
  const submit=el('button',undefined,'composer-submit');submit.type='button';submit.append(glyph(GLYPH.send));submit.setAttribute('aria-label','发送消息');submit.title='发送消息';submit.addEventListener('click',()=>run(()=>c.submit()));inputActions.append(submit)
  /** The round action is the send arrow once there is a draft, otherwise continuous voice (its stop cross while voice runs). */
@@ -71,6 +69,8 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
   const stop=c.isVoiceConversation,label=stop?'结束语音':'持续对话'
   if(voiceGlyph!==stop){voiceGlyph=stop;voice.replaceChildren(glyph(stop?GLYPH.stop:GLYPH.wave))}
   voice.setAttribute('aria-label',label);voice.title=label;voice.setAttribute('aria-pressed',String(stop))
+  const recording=recordingHere(),dictateLabel=recording?'停止录音':'语音输入'
+  dictate.setAttribute('aria-label',dictateLabel);dictate.title=dictateLabel;dictate.setAttribute('aria-pressed',String(recording))
  }
  const sourceChip=button(t('移除关联待办'),()=>{c.state().source_todo=null;renderSource()},composer)
  function renderSource(){const source=c.state().source_todo;sourceChip.hidden=!source;sourceChip.textContent=source?t('关联待办 · {0}（移除）',c.snapshot?.life?.todos?.find(t=>t.id===source.id)?.title??source.id):''}
@@ -178,7 +178,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
   dictate.disabled=!c.presentationReady||!c.connected||!c.selectedId||Boolean(c.voiceId)||(c.mode!=='text'&&c.dictationConversationId!==c.selectedId)||c.mode==='transcribing'||!c.capabilities.includes('dictation')
   voice.disabled=!c.presentationReady||!c.connected||!c.selectedId||(Boolean(c.voiceId)&&!c.isVoiceConversation)||(c.mode!=='text'&&!c.isVoiceConversation)
   syncActions();syncStage()
-  hint.textContent=!c.connected?(c.everConnected?'连接已断开，草稿已保留':'正在连接…'):c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 松开后生成草稿'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行'
+  hint.textContent=!c.connected?(c.everConnected?'连接已断开，草稿已保留':'正在连接…'):c.submittedRequestId?'正在确认发送状态…':c.isVoiceConversation?'此会话正在语音对话，结束后可输入文字。':localDictation?(c.mode==='transcribing'?'正在识别，草稿不会自动发送':'正在录音 · 再点一下麦克风结束'):c.voiceId?'另一会话正在语音对话；这里可以输入文字。':!c.capabilities.includes('text_input')?'正在确认文字输入能力…':'Enter 发送 · Shift + Enter 换行'
   targetMenu.update();executionCard.update((c.snapshot?.pending_confirmations??[]).find(item=>item.proposal_id&&item.workspace&&item.conversation_id===c.selectedId)??null,c.selectedId);renderConversations();renderHistory();deliverPresented();read()
  }
  async function focusDraft(text,source=null){if(!c.selectedId||c.isVoiceConversation)await c.create();if(text!==undefined)c.draft=text;c.state().source_todo=source;setOpen(true);update();draft.focus()}

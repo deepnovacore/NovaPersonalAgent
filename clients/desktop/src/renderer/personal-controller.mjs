@@ -1,6 +1,6 @@
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 const DICTATION_FAILURES={
-  no_audio:'没有录到声音，请按住说话后再松开 · 原有草稿已保留',
+  no_audio:'没有录到声音，请检查麦克风后再试 · 原有草稿已保留',
   no_speech:'没有听清，请再说一次 · 原有草稿已保留',
 }
 export class PersonalController {
