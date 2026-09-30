@@ -3,7 +3,7 @@ import {LogicalWorkspaceSchema,WorkspaceInstanceSchema,RelationCardSchema} from 
 import {SensitivePathPolicy} from '../memory/sensitivity.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {contentHash,type EntryRevision} from './store.js'
-type GraphSqlInput=Parameters<ReturnType<LedgerDatabase['prepare']>['run']>[number]
+type LedgerSqlInput=Parameters<ReturnType<LedgerDatabase['prepare']>['run']>[number]
 const changed=new WeakSet<LedgerDatabase>()
 export function consumeWorkspaceProjectionChange(db:LedgerDatabase):boolean{const result=changed.has(db);changed.delete(db);return result}
 
@@ -50,7 +50,7 @@ function validate(row:EntryRevision,previous?:EntryRevision|null):Record<string,
 }
 function write(db:LedgerDatabase,kind:Kind,content:Record<string,unknown>):void{
  const {table,columns,keys}=definitions[kind],all=[...columns,'payload_json']
- db.prepare(`INSERT INTO ${table}(${all.join(',')}) VALUES(${all.map(()=>'?').join(',')}) ON CONFLICT(${keys.join(',')}) DO UPDATE SET ${all.filter(field=>!keys.includes(field)).map(field=>`${field}=excluded.${field}`).join(',')}`).run(...columns.map(field=>content[field] as GraphSqlInput),canonicalJson(content))
+ db.prepare(`INSERT INTO ${table}(${all.join(',')}) VALUES(${all.map(()=>'?').join(',')}) ON CONFLICT(${keys.join(',')}) DO UPDATE SET ${all.filter(field=>!keys.includes(field)).map(field=>`${field}=excluded.${field}`).join(',')}`).run(...columns.map(field=>content[field] as LedgerSqlInput),canonicalJson(content))
  if(kind==='RelationCard'){
   const relation=RelationCardSchema.parse(content)
   db.prepare('DELETE FROM relation_evidence WHERE source_logical_id=? AND target_logical_id=? AND relation_type=?').run(relation.source_logical_id,relation.target_logical_id,relation.relation_type)
@@ -66,7 +66,7 @@ export function projectWorkspaceRevision(db:LedgerDatabase,next:EntryRevision,pr
  const content=validate(previous),{table,keys}=definitions[next.kind]
  if(next.kind!==previous.kind||next.entry_id!==previous.entry_id)throw Error('STORE_WORKSPACE_IDENTITY')
  if(next.kind==='RelationCard')db.prepare('DELETE FROM relation_evidence WHERE source_logical_id=? AND target_logical_id=? AND relation_type=?').run(content.source_logical_id as string,content.target_logical_id as string,content.relation_type as string)
- db.prepare(`DELETE FROM ${table} WHERE ${keys.map(field=>`${field}=?`).join(' AND ')}`).run(...keys.map(field=>content[field] as GraphSqlInput))
+ db.prepare(`DELETE FROM ${table} WHERE ${keys.map(field=>`${field}=?`).join(' AND ')}`).run(...keys.map(field=>content[field] as LedgerSqlInput))
  if(stamp!==projectionStamp(db))changed.add(db)
 }
 /** Rebuild all typed projections from accepted current revisions inside the index transaction. */
