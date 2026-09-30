@@ -58,12 +58,15 @@ export class PersonalStore {
         }
         try {
             await rename(tmp, this.path);
-            const directory = await open(dirname(this.path), constants.O_RDONLY);
-            try {
-                await directory.sync();
-            }
-            finally {
-                await directory.close();
+            // Node cannot fsync directories on Windows; the file was synced before rename.
+            if (process.platform !== 'win32') {
+                const directory = await open(dirname(this.path), constants.O_RDONLY);
+                try {
+                    await directory.sync();
+                }
+                finally {
+                    await directory.close();
+                }
             }
         }
         catch (e) {
