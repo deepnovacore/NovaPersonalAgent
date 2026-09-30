@@ -6,7 +6,7 @@ import {mkdtemp,rm,stat,writeFile,symlink,realpath} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {createHash} from 'node:crypto'
-import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
 import {connectorSourceId,type SourceConnection,type SourceChange} from '../src/memory-substrate/source-state.js'
@@ -17,7 +17,7 @@ test('legacy file fact cannot enter chat context or block a new stated memory wi
  const root=await mkdtemp(join(tmpdir(),'nova-file-memory-boundary-'))
  const item={key:'plan',text:'我在写项目报告',topic:'工作',kind:'fact',due:null,direction:null,status:null,valid_until:null}
  const gateway:ModelGateway={async *stream(){/* unused */},complete(){return Promise.resolve({text:JSON.stringify({entries:[item]})})}}
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'))
  const resource=new SubstrateMemoryResource({client,userId:'boundary',gateway,model:'fixture',inputConsent:true,conversationProviders:['consumer']})
  try{
   await resource.open()
@@ -45,7 +45,7 @@ test('delayed extraction cannot replace a revision written while the model was r
   if(++calls===2){started();await gate}
   return {text:JSON.stringify({entries:[{key:'spicy',text:calls===1?'我不吃辣':'最近可以吃一点',topic:'饮食',kind:'preference',due:null,direction:null,status:null,valid_until:null}]})}
  }}
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'))
  const resource=new SubstrateMemoryResource({client,userId:'race',gateway,model:'fixture',inputConsent:true})
  try{
   await resource.open();await resource.remember({sourceId:'first',sessionId:'session',sequence:1,occurredAt:new Date().toISOString(),text:'我不吃辣'});await resource.flush()
@@ -64,7 +64,7 @@ test('duplicate extraction targets reject the whole batch without a completion r
  const root=await mkdtemp(join(tmpdir(),'nova-extraction-duplicates-'))
  const entry={key:'spicy',text:'我不吃辣',topic:'饮食',kind:'preference',due:null,direction:null,status:null,valid_until:null}
  const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){return Promise.resolve({text:JSON.stringify({entries:[entry,{...entry,text:'我喜欢吃辣'}]})})}}
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'))
  const resource=new SubstrateMemoryResource({client,userId:'duplicate',gateway,model:'fixture',inputConsent:true})
  try{
   await resource.open();await resource.remember({sourceId:'first',sessionId:'session',sequence:1,occurredAt:new Date().toISOString(),text:'我不吃辣'});await resource.flush()
@@ -77,7 +77,7 @@ test('a forgotten target stays forgotten without blocking other candidates in a 
  const root=await mkdtemp(join(tmpdir(),'nova-extraction-forgotten-'));let calls=0
  const entry={key:'spicy',text:'我不吃辣',topic:'饮食',kind:'preference',due:null,direction:null,status:null,valid_until:null}
  const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){return Promise.resolve({text:JSON.stringify({entries:++calls===1?[entry]:[entry,{...entry,key:'travel',text:'我喜欢海边旅行',topic:'旅行'}]})})}}
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'))
  const resource=new SubstrateMemoryResource({client,userId:'forget',gateway,model:'fixture',inputConsent:true})
  try{
   await resource.open();await resource.remember({sourceId:'first',sessionId:'session',sequence:1,occurredAt:new Date().toISOString(),text:'我不吃辣'});await resource.flush()
@@ -93,7 +93,7 @@ test('a forgotten target stays forgotten without blocking other candidates in a 
 test('external ingestion without processing consent stays local even with conversation consent',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-no-processing-'));let calls=0
  const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){calls++;return Promise.resolve({text:'{"entries":[]}'})}}
- const resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),userId:'test',gateway,model:'fixture',inputConsent:true})
+ const resource=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'test',gateway,model:'fixture',inputConsent:true})
  try{
   await resource.open();await resource.ingestEvidence({sourceId:'old-im',locator:'one',text:'周五交报告',observedAt:new Date().toISOString(),kind:'im',embeddingConsent:true})
   await resource.flush();assert.equal(calls,0)
@@ -103,14 +103,14 @@ test('external ingestion without processing consent stays local even with conver
 test('revocation survives late admission and provider changes require fresh processing consent',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-revoke-processing-'));const path=join(root,'memory.sqlite');let calls=0
  const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){calls++;return Promise.resolve({text:'{"entries":[]}'})}}
- let resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(path),userId:'test',gateway,model:'fixture',extractionFingerprint:'provider-a'})
+ let resource=new SubstrateMemoryResource({client:new MemoryLedgerClient(path),userId:'test',gateway,model:'fixture',extractionFingerprint:'provider-a'})
  try{
   await resource.open();const grant=resource.processingGrant(true)
   const input={sourceId:'im',locator:'one',text:'第一条',observedAt:new Date().toISOString(),kind:'im' as const,processingConsent:grant}
   await resource.ingestEvidence(input);await resource.flush();assert.equal(calls,1)
   await resource.setProcessingConsent('im',resource.processingGrant(false,2))
   await resource.ingestEvidence({...input,locator:'two',text:'撤销后的条目'});await resource.flush();assert.equal(calls,1)
-  await resource.close();resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(path),userId:'test',gateway,model:'fixture',extractionFingerprint:'provider-b'})
+  await resource.close();resource=new SubstrateMemoryResource({client:new MemoryLedgerClient(path),userId:'test',gateway,model:'fixture',extractionFingerprint:'provider-b'})
   await resource.open();await resource.ingestEvidence({...input,locator:'three',text:'新服务商'});await resource.flush();assert.equal(calls,1)
  }finally{await resource.close();await rm(root,{recursive:true,force:true})}
 })
@@ -119,7 +119,7 @@ test('model reply after consent revocation never commits partial candidates or a
  const root=await mkdtemp(join(tmpdir(),'nova-late-processing-'));let begin!:()=>void,finish!:(r:{text:string})=>void
  const started=new Promise<void>(r=>{begin=r}),response=new Promise<{text:string}>(r=>{finish=r})
  const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete(){begin();return response}}
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'test',gateway,model:'fixture'})
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'test',gateway,model:'fixture'})
  try{
   await resource.open();await resource.ingestEvidence({sourceId:'im',locator:'one',text:'给你报告',observedAt:new Date().toISOString(),kind:'im',processingConsent:resource.processingGrant(true)})
   await started;await resource.setProcessingConsent('im',resource.processingGrant(false,2))
@@ -133,7 +133,7 @@ test('two hundred connector objects emit one invalidation and one ready notifica
  const root=await mkdtemp(join(tmpdir(),'nova-batch-events-'));let calls=0,begin!:()=>void,release!:()=>void
  const started=new Promise<void>(r=>{begin=r}),gate=new Promise<void>(r=>{release=r})
  const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },async complete(){calls++;begin();await gate;return {text:'{"entries":[]}'}}}
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'batch',gateway,model:'fixture'})
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'batch',gateway,model:'fixture'})
  const events:SourceChange[]=[]
  try{
   await resource.open();resource.setOnSourceChange(e=>{events.push(e);return Promise.resolve()})
@@ -156,7 +156,7 @@ test('substrate resource keeps identity, correction, restart and source deletion
  const root=await mkdtemp(join(tmpdir(),'nova-substrate-'));const path=join(root,'memory.sqlite')
  let calls=0
  const gateway:ModelGateway={async *stream(){ /* unused by extraction */ },complete(){calls++;return Promise.resolve({text:JSON.stringify({entries:[{key:'weekly-report',text:'周五交报告',topic:'报告',kind:'commitment',due:'2026-09-18T10:00:00Z',direction:'owed_by_me',status:'open',valid_until:null}]})})}}
- let resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(path),userId:'test',gateway,model:'test'})
+ let resource=new SubstrateMemoryResource({client:new MemoryLedgerClient(path),userId:'test',gateway,model:'test'})
  try{
   await resource.open()
   await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'chat:one',locator:'message:one',text:'我周五给你报告',observedAt:'2026-09-12T10:00:00Z',kind:'im',senderId:'sender',accountId:'account'})
@@ -175,7 +175,7 @@ test('substrate resource keeps identity, correction, restart and source deletion
   assert.equal(corrected.entry.id,first.id);assert.equal(corrected.entry.version,2);assert.equal(corrected.entry.origin,'stated')
   await assert.rejects(resource.correct(first.id,1,'旧修改',{type:'conversation',ref:'correction:stale',observed_at:'2026-09-12T11:00:00Z'}),/CONFLICT/)
   await resource.forgetSource('chat:one');assert.equal((await resource.list()).entries[0]?.content,'改到下周一交报告')
-  await resource.close();resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(path),userId:'test',gateway,model:'test'});await resource.open()
+  await resource.close();resource=new SubstrateMemoryResource({client:new MemoryLedgerClient(path),userId:'test',gateway,model:'test'});await resource.open()
   await resource.flush();assert.equal(calls,2,'correction evidence is never extracted after restart')
   assert.equal((await resource.get(first.id))?.version,2)
   await resource.forgetEntry(first.id,2);assert.equal((await resource.list()).entries.length,0)
@@ -185,20 +185,20 @@ test('substrate resource keeps identity, correction, restart and source deletion
 
 test('shared worker creates a private database and rejects symlink targets',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-private-memory-'));const path=join(root,'new','memory.sqlite')
- const client=new WorkspaceGraphStoreClient(path)
+ const client=new MemoryLedgerClient(path)
  try {
   await client.open();await client.open()
   if(process.platform!=='win32'){assert.equal((await stat(path)).mode&0o777,0o600);assert.equal((await stat(join(root,'new'))).mode&0o777,0o700)}
   await client.close()
   const target=join(root,'other.sqlite');await writeFile(target,'',{mode:0o644});const linked=join(root,'linked.sqlite');await symlink(target,linked)
-  const rejected=new WorkspaceGraphStoreClient(linked)
+  const rejected=new MemoryLedgerClient(linked)
   try{await assert.rejects(rejected.open());if(process.platform!=='win32')assert.equal((await stat(target)).mode&0o777,0o644)}finally{await rejected.close()}
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
 
 test('batch source forget deduplicates refs and refreshes once after all deletes',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-memory-forget-batch-'))
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'))
  const resource=new SubstrateMemoryResource({client,userId:'batch-forget',gateway:{async *stream(){await Promise.resolve();yield* []},complete(){return Promise.resolve({text:'{"entries":[]}'})}},model:'fixture'})
  const calls:{operation:string;input:unknown}[]=[];const original=client.memory.bind(client);let rejectSecond=true
  client.memory=async(operation,input)=>{calls.push({operation,input});if(operation==='delete_source'&&rejectSecond&&String((input as {source_id:string}).source_id).endsWith('second'))throw Error('transient_delete_failure');return original(operation,input)}
@@ -220,7 +220,7 @@ test('connector admission resolves while model extraction is still pending',asyn
  let start!:()=>void;const started=new Promise<void>(resolve=>{start=resolve})
  let finish!:(value:{text:string})=>void;const response=new Promise<{text:string}>(resolve=>{finish=resolve})
  const gateway:ModelGateway={async *stream(){ /* unused */ },complete(){start();return response}}
- const resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),userId:'test',gateway,model:'test'})
+ const resource=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'test',gateway,model:'test'})
  try {
   await resource.open();let admitted=false
   const admission=resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'chat',locator:'one',text:'待提取消息',observedAt:new Date().toISOString(),kind:'im'}).then(()=>{admitted=true})
@@ -230,7 +230,7 @@ test('connector admission resolves while model extraction is still pending',asyn
 })
 
 test('semantic memory retrieval finds paraphrases and hydrates only current evidence',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-memory-semantic-'));const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const root=await mkdtemp(join(tmpdir(),'nova-memory-semantic-'));const client=new MemoryLedgerClient(join(root,'memory.sqlite'))
  let release!:(vectors:Float32Array[])=>void;let markStarted!:()=>void
  const started=new Promise<void>(resolve=>{markStarted=resolve})
  const embedding={id:'fixture',dims:2,embed(texts:readonly string[]){if(texts[0]==='延迟查询'){markStarted();return new Promise<Float32Array[]>(resolve=>{release=resolve})}return Promise.resolve(texts.map(text=>new Float32Array(text.includes('旅行')||text.includes('假期')?[1,0]:[0,1])))}}
@@ -258,7 +258,7 @@ test('semantic memory retrieval finds paraphrases and hydrates only current evid
 test('missing embeddings report lexical degradation explicitly',async()=>{
  const root=await mkdtemp(join(tmpdir(),'nova-memory-lexical-'))
  const gateway:ModelGateway={async *stream(){ /* unused */ },complete(){return Promise.resolve({text:'{"entries":[]}'})}}
- const resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),userId:'lexical',gateway,model:'fixture'})
+ const resource=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'lexical',gateway,model:'fixture'})
  try{await resource.open();assert.equal((await resource.recall('旅行')).degraded,true)}finally{await resource.close();await rm(root,{recursive:true,force:true})}
 })
 
@@ -266,7 +266,7 @@ test('A backs document originals and denies automatic embedding without consent'
  const root=await mkdtemp(join(tmpdir(),'nova-memory-consent-'));let embeddings=0;let extractions=0
  const embedding={id:'consent',dims:2,embed(texts:readonly string[]){embeddings+=texts.length;return Promise.resolve(texts.map(()=>new Float32Array([1,0])))}}
  const gateway:ModelGateway={async *stream(){ /* unused */ },complete(){extractions++;return Promise.resolve({text:'{"entries":[{"key":"private","text":"本地笔记","topic":"生活","kind":"fact","due":null,"direction":null,"status":null,"valid_until":null}]}'})}}
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'));const resource=new SubstrateMemoryResource({client,userId:'consent',gateway,model:'fixture',embedding})
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'));const resource=new SubstrateMemoryResource({client,userId:'consent',gateway,model:'fixture',embedding})
  try{
   await resource.open();await resource.observeSource({source_ref:{type:'file',ref:'local',observed_at:new Date().toISOString()},content:'本地笔记'});await resource.flush()
   assert.equal(embeddings,0,'merge alone does not authorize uploading a derived entry')
@@ -284,7 +284,7 @@ test('indexed files remain in knowledge without creating personal facts',async()
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-canonical-directory-'))
  let calls=0
  const gateway:ModelGateway={async *stream(){ /* extraction is non-streaming */ },complete(){calls++;return Promise.resolve({text:JSON.stringify({entries:[{key:'plan',text:calls<3?'旧计划':'新计划',topic:'计划',kind:'fact',due:null,direction:null,status:null,valid_until:null}]})})}}
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'))
  const resource=new SubstrateMemoryResource({client,userId:'directory',gateway,model:'fixture'})
  const knowledge=new KnowledgeService({store:new KnowledgeStoreClient({path:join(root,'index','knowledge.sqlite')}),embedding:{id:'fixture',dims:2,embed:texts=>Promise.resolve(texts.map(()=>new Float32Array([1,0])))}})
  try{
@@ -310,7 +310,7 @@ test('indexed files remain in knowledge without creating personal facts',async()
 
 test('a multi-chunk document lands in one batch with markers, in order, under a single source grant',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-evidence-batch-'))
- const client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite'))
+ const client=new MemoryLedgerClient(join(root,'memory.sqlite'))
  const embedding={id:'fixture',dims:2,embed:(texts:readonly string[])=>Promise.resolve(texts.map(()=>new Float32Array([1,0])))}
  const gateway:ModelGateway={async *stream(){ /* unused */ },complete(){throw new Error('file content never enters extraction')}}
  const resource=new SubstrateMemoryResource({client,userId:'batch',gateway,model:'fixture',embedding})

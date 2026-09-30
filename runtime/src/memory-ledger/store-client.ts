@@ -29,11 +29,11 @@ import {
   type WorkspaceGraphBatchInput,
   type WorkspaceGraphBatchResult,
   type WorkspaceGraphPrivateState,
-  type WorkspaceGraphStoreDiagnostics,
-  type WorkspaceGraphStoreErrorCode,
+  type MemoryLedgerStoreDiagnostics,
+  type MemoryLedgerStoreErrorCode,
 } from './store.js'
 
-export interface WorkspaceGraphWorker {
+export interface MemoryLedgerWorker {
   postMessage(value: unknown): void
   on(event: 'message', listener: (message: unknown) => void): unknown
   on(event: 'error', listener: (error: Error) => void): unknown
@@ -41,58 +41,58 @@ export interface WorkspaceGraphWorker {
   terminate(): Promise<number>
 }
 
-export interface WorkspaceGraphStoreClientOptions {
+export interface MemoryLedgerClientOptions {
   readonly deniedRoots?: readonly string[]
   readonly memoryLockWaitMs?: number
-  readonly workerFactory?: (url: URL, options: WorkerOptions) => WorkspaceGraphWorker
+  readonly workerFactory?: (url: URL, options: WorkerOptions) => MemoryLedgerWorker
 }
 
-export type WorkspaceGraphStoreClientErrorCode =
-  | WorkspaceGraphStoreErrorCode
+export type MemoryLedgerClientErrorCode =
+  | MemoryLedgerStoreErrorCode
   | 'CLIENT_CLOSED'
   | 'WORKER_ERROR'
   | 'WORKER_EXITED'
   | 'WORKER_PROTOCOL_FAILURE'
 
-const clientErrorMessages: Readonly<Record<WorkspaceGraphStoreClientErrorCode, string>> = {
-  CLIENT_CLOSED: 'workspace graph store client is closed',
-  WORKER_ERROR: 'workspace graph worker failed',
-  WORKER_EXITED: 'workspace graph worker exited',
-  WORKER_PROTOCOL_FAILURE: 'workspace graph worker protocol failure',
-  STORE_ALREADY_OPEN: 'workspace graph store is already open',
-  STORE_CLOSED: 'workspace graph store is closed',
-  STORE_IDEMPOTENCY_CONFLICT: 'workspace graph observation replay conflict',
-  STORE_INVALID_CARD: 'invalid workspace graph card',
-  STORE_INVALID_OBSERVATION: 'invalid workspace graph observation',
-  STORE_INVALID_RELATION: 'invalid workspace graph relation',
-  STORE_MIGRATION_FAILED: 'workspace graph schema migration failed',
-  STORE_NOT_FOUND: 'workspace graph record was not found',
-  STORE_INVALID_OPERATION: 'workspace graph operation is invalid',
+const clientErrorMessages: Readonly<Record<MemoryLedgerClientErrorCode, string>> = {
+  CLIENT_CLOSED: 'memory ledger store client is closed',
+  WORKER_ERROR: 'memory ledger worker failed',
+  WORKER_EXITED: 'memory ledger worker exited',
+  WORKER_PROTOCOL_FAILURE: 'memory ledger worker protocol failure',
+  STORE_ALREADY_OPEN: 'memory ledger store is already open',
+  STORE_CLOSED: 'memory ledger store is closed',
+  STORE_IDEMPOTENCY_CONFLICT: 'memory ledger observation replay conflict',
+  STORE_INVALID_CARD: 'invalid memory ledger card',
+  STORE_INVALID_OBSERVATION: 'invalid memory ledger observation',
+  STORE_INVALID_RELATION: 'invalid memory ledger relation',
+  STORE_MIGRATION_FAILED: 'memory ledger schema migration failed',
+  STORE_NOT_FOUND: 'memory ledger record was not found',
+  STORE_INVALID_OPERATION: 'memory ledger operation is invalid',
   STORE_PURGED_ID: 'memory identifier was permanently purged',
   STORE_STATED_EVIDENCE_REQUIRED: 'stated memory requires trusted user evidence',
-  STORE_OPERATION_CONFLICT: 'workspace graph operation replay conflict',
-  STORE_READ_FAILED: 'workspace graph read failed',
-  STORE_SCHEMA_UNSUPPORTED: 'workspace graph schema version is unsupported',
-  STORE_SENSITIVE_CONTENT_REJECTED: 'workspace graph sensitive content was rejected',
-  STORE_SENSITIVE_PATH_DENIED: 'workspace graph sensitive path was denied',
-  STORE_STALE_REVISION: 'workspace graph revision is stale',
+  STORE_OPERATION_CONFLICT: 'memory ledger operation replay conflict',
+  STORE_READ_FAILED: 'memory ledger read failed',
+  STORE_SCHEMA_UNSUPPORTED: 'memory ledger schema version is unsupported',
+  STORE_SENSITIVE_CONTENT_REJECTED: 'memory ledger sensitive content was rejected',
+  STORE_SENSITIVE_PATH_DENIED: 'memory ledger sensitive path was denied',
+  STORE_STALE_REVISION: 'memory ledger revision is stale',
   STORE_MEMORY_CONFLICT: 'memory documents conflict; user edits were preserved',
-  STORE_WRITE_FAILED: 'workspace graph write failed',
+  STORE_WRITE_FAILED: 'memory ledger write failed',
 }
 
-export class WorkspaceGraphStoreClientError extends Error {
-  readonly code: WorkspaceGraphStoreClientErrorCode
+export class MemoryLedgerClientError extends Error {
+  readonly code: MemoryLedgerClientErrorCode
 
-  constructor(code: WorkspaceGraphStoreClientErrorCode) {
+  constructor(code: MemoryLedgerClientErrorCode) {
     super(clientErrorMessages[code])
-    this.name = 'WorkspaceGraphStoreClientError'
+    this.name = 'MemoryLedgerClientError'
     this.code = code
   }
 }
 
 interface PendingRequest {
   readonly resolve: (value: unknown) => void
-  readonly reject: (error: WorkspaceGraphStoreClientError) => void
+  readonly reject: (error: MemoryLedgerClientError) => void
   readonly expectsPublication: boolean
   readonly validateResult: RpcResultValidator<unknown>
   readonly request: StoreRequest
@@ -120,7 +120,7 @@ interface WorkerFailure {
   readonly kind: 'response'
   readonly request_id: number
   readonly ok: false
-  readonly error_code: WorkspaceGraphStoreErrorCode
+  readonly error_code: MemoryLedgerStoreErrorCode
 }
 
 type WorkerResponse = WorkerSuccess | WorkerFailure
@@ -181,15 +181,15 @@ function schemaResult<Schema extends z.ZodType>(schema: Schema): RpcResultValida
   return value => schema.parse(value)
 }
 
-export class WorkspaceGraphStoreClient {
-  readonly #workerFactory: (url: URL, options: WorkerOptions) => WorkspaceGraphWorker
+export class MemoryLedgerClient {
+  readonly #workerFactory: (url: URL, options: WorkerOptions) => MemoryLedgerWorker
   readonly #workerUrl = new URL('./store-worker.js', import.meta.url)
   readonly #workerData: {
     readonly path: string
     readonly deniedRoots: readonly string[]
     readonly memoryLockWaitMs?: number
   }
-  #worker: WorkspaceGraphWorker
+  #worker: MemoryLedgerWorker
   readonly #pending = new Map<number, PendingRequest>()
   #nextRequestId = 1
   #publishedSnapshot = initialSnapshot()
@@ -200,7 +200,7 @@ export class WorkspaceGraphStoreClient {
   #closing: Promise<void> | null = null
   #opening: Promise<void> | null = null
 
-  constructor(path: string, options: WorkspaceGraphStoreClientOptions = {}) {
+  constructor(path: string, options: MemoryLedgerClientOptions = {}) {
     this.#workerData = {
       path,
       deniedRoots: options.deniedRoots === undefined ? [] : [...options.deniedRoots],
@@ -220,7 +220,7 @@ export class WorkspaceGraphStoreClient {
   }
 
   async open(): Promise<void> {
-    if (this.#closed || this.#failed) throw new WorkspaceGraphStoreClientError('CLIENT_CLOSED')
+    if (this.#closed || this.#failed) throw new MemoryLedgerClientError('CLIENT_CLOSED')
     this.#opening ??= this.#request('open', {}, nullResult)
     await this.#opening
   }
@@ -250,7 +250,7 @@ export class WorkspaceGraphStoreClient {
     } catch {
       // A worker that already exited is closed for client lifecycle purposes.
     }
-    const error = new WorkspaceGraphStoreClientError('CLIENT_CLOSED')
+    const error = new MemoryLedgerClientError('CLIENT_CLOSED')
     for (const pending of this.#pending.values()) pending.reject(error)
     this.#pending.clear()
   }
@@ -398,7 +398,7 @@ export class WorkspaceGraphStoreClient {
     )
   }
 
-  diagnostics(): Promise<WorkspaceGraphStoreDiagnostics> {
+  diagnostics(): Promise<MemoryLedgerStoreDiagnostics> {
     return this.#request('diagnostics', {}, schemaResult(diagnosticsSchema))
   }
 
@@ -408,7 +408,7 @@ export class WorkspaceGraphStoreClient {
     validateResult: RpcResultValidator<Result>,
   ): Promise<Result> {
     if (this.#closed || this.#failed) {
-      return Promise.reject(new WorkspaceGraphStoreClientError('CLIENT_CLOSED'))
+      return Promise.reject(new MemoryLedgerClientError('CLIENT_CLOSED'))
     }
     return this.#send(operation, payload, validateResult)
   }
@@ -418,7 +418,7 @@ export class WorkspaceGraphStoreClient {
     payload: Readonly<Record<string, unknown>>,
     validateResult: RpcResultValidator<Result>,
   ): Promise<Result> {
-    if (this.#failed) return Promise.reject(new WorkspaceGraphStoreClientError('CLIENT_CLOSED'))
+    if (this.#failed) return Promise.reject(new MemoryLedgerClientError('CLIENT_CLOSED'))
     return this.#send(operation, payload, validateResult)
   }
 
@@ -443,12 +443,12 @@ export class WorkspaceGraphStoreClient {
         this.#worker.postMessage(request)
       } catch {
         this.#pending.delete(requestId)
-        reject(new WorkspaceGraphStoreClientError('WORKER_PROTOCOL_FAILURE'))
+        reject(new MemoryLedgerClientError('WORKER_PROTOCOL_FAILURE'))
       }
     })
   }
 
-  #handleMessage(worker: WorkspaceGraphWorker, message: unknown): void {
+  #handleMessage(worker: MemoryLedgerWorker, message: unknown): void {
     if (worker !== this.#worker) return
     const response = parseWorkerResponse(message)
     if (response === undefined) {
@@ -462,7 +462,7 @@ export class WorkspaceGraphStoreClient {
     }
     if (!response.ok) {
       this.#pending.delete(response.request_id)
-      pending.reject(new WorkspaceGraphStoreClientError(response.error_code))
+      pending.reject(new MemoryLedgerClientError(response.error_code))
       return
     }
     const hasPublicationOutcome = response.snapshot !== undefined
@@ -498,16 +498,16 @@ export class WorkspaceGraphStoreClient {
     pending.resolve(result)
   }
 
-  #fail(code: Extract<WorkspaceGraphStoreClientErrorCode, `WORKER_${string}`>): void {
+  #fail(code: Extract<MemoryLedgerClientErrorCode, `WORKER_${string}`>): void {
     if (this.#failed || this.#expectedExit) return
     this.#failed = true
     this.#publishedSnapshot = deepFreeze({...this.#publishedSnapshot, degraded: true})
-    const error = new WorkspaceGraphStoreClientError(code)
+    const error = new MemoryLedgerClientError(code)
     for (const pending of this.#pending.values()) pending.reject(error)
     this.#pending.clear()
   }
 
-  #spawnWorker(publicationRevisionFloor?: number): WorkspaceGraphWorker {
+  #spawnWorker(publicationRevisionFloor?: number): MemoryLedgerWorker {
     const workerData = {
       ...this.#workerData,
       ...(publicationRevisionFloor === undefined ? {} : {publicationRevisionFloor}),
@@ -522,7 +522,7 @@ export class WorkspaceGraphStoreClient {
   }
 
   #handleWorkerFailure(
-    worker: WorkspaceGraphWorker,
+    worker: MemoryLedgerWorker,
     code: 'WORKER_ERROR' | 'WORKER_EXITED',
   ): void {
     if (worker !== this.#worker || this.#failed || this.#expectedExit) return
@@ -540,7 +540,7 @@ export class WorkspaceGraphStoreClient {
   async #recover(code: 'WORKER_ERROR' | 'WORKER_EXITED'): Promise<void> {
     this.#recovering = true
     this.#publishedSnapshot = deepFreeze({...this.#publishedSnapshot, degraded: true})
-    const stableError = new WorkspaceGraphStoreClientError(code)
+    const stableError = new MemoryLedgerClientError(code)
     const recoverable = [...this.#pending.entries()].filter(([, pending]) => pending.recoverable)
     for (const [requestId, pending] of this.#pending.entries()) {
       if (pending.recoverable) continue
@@ -605,7 +605,7 @@ function parseWorkerResponse(message: unknown): WorkerResponse | undefined {
   return undefined
 }
 
-function isStoreErrorCode(value: unknown): value is WorkspaceGraphStoreErrorCode {
+function isStoreErrorCode(value: unknown): value is MemoryLedgerStoreErrorCode {
   return typeof value === 'string' && value in clientErrorMessages && value.startsWith('STORE_')
 }
 

@@ -7,11 +7,11 @@ import { isMainThread, parentPort, workerData } from 'node:worker_threads'
 import { DatabaseSync } from 'node:sqlite'
 
 import {
-  WorkspaceGraphStore,
-  WorkspaceGraphStoreError,
+  MemoryLedgerStore,
+  MemoryLedgerStoreError,
   type WorkspaceGraphBatchInput,
   type WorkspaceCard,
-  type WorkspaceGraphStoreErrorCode,
+  type MemoryLedgerStoreErrorCode,
 } from './store.js'
 import type { EvidenceRef, Observation, RelationCard } from './models.js'
 
@@ -35,13 +35,13 @@ interface StoreRequest {
 }
 
 if (isMainThread || parentPort === null) {
-  throw new Error('workspace graph store worker cannot run on the main thread')
+  throw new Error('memory ledger worker cannot run on the main thread')
 }
 
 const port = parentPort
 const data = parseWorkerData(workerData)
 let relationHookUsed = false
-const store = new WorkspaceGraphStore(
+const store = new MemoryLedgerStore(
   data.path,
   path => {
     const prepared=privateGraphPath(path)
@@ -223,16 +223,16 @@ function execute(request: StoreRequest): {readonly result: unknown; readonly pub
     case 'diagnostics':
       return {result: store.diagnostics(), publish: false}
     default:
-      throw new WorkspaceGraphStoreError('STORE_READ_FAILED')
+      throw new MemoryLedgerStoreError('STORE_READ_FAILED')
   }
 }
 
 function parseWorkerData(value: unknown): StoreWorkerData {
   if (!isRecord(value) || typeof value.path !== 'string' || !Array.isArray(value.deniedRoots)) {
-    throw new Error('invalid workspace graph worker configuration')
+    throw new Error('invalid memory ledger worker configuration')
   }
   if (!value.deniedRoots.every(root => typeof root === 'string')) {
-    throw new Error('invalid workspace graph worker configuration')
+    throw new Error('invalid memory ledger worker configuration')
   }
   if (
     value.publicationRevisionFloor !== undefined
@@ -242,31 +242,31 @@ function parseWorkerData(value: unknown): StoreWorkerData {
       || value.publicationRevisionFloor < 0
     )
   ) {
-    throw new Error('invalid workspace graph worker configuration')
+    throw new Error('invalid memory ledger worker configuration')
   }
   if (
     value.memoryLockWaitMs !== undefined
     && (typeof value.memoryLockWaitMs !== 'number' || !Number.isSafeInteger(value.memoryLockWaitMs) || value.memoryLockWaitMs < 0)
   ) {
-    throw new Error('invalid workspace graph worker configuration')
+    throw new Error('invalid memory ledger worker configuration')
   }
   let testHooks: StoreWorkerData['testHooks']
   if (value.testHooks !== undefined) {
-    if (!isRecord(value.testHooks)) throw new Error('invalid workspace graph worker configuration')
+    if (!isRecord(value.testHooks)) throw new Error('invalid memory ledger worker configuration')
     const hook = value.testHooks.exitAfterCommitBeforeResponse
     if (hook !== undefined && typeof hook !== 'string') {
-      throw new Error('invalid workspace graph worker configuration')
+      throw new Error('invalid memory ledger worker configuration')
     }
     const fail = value.testHooks.failAfterFirstRelationStatement
     if (fail !== undefined && typeof fail !== 'boolean') {
-      throw new Error('invalid workspace graph worker configuration')
+      throw new Error('invalid memory ledger worker configuration')
     }
     const hold = value.testHooks.holdAfterFirstRelationStatement
     if (
       hold !== undefined
       && (!(hold instanceof SharedArrayBuffer) || hold.byteLength < Int32Array.BYTES_PER_ELEMENT)
     ) {
-      throw new Error('invalid workspace graph worker configuration')
+      throw new Error('invalid memory ledger worker configuration')
     }
     testHooks = {
       ...(hook === undefined ? {} : {exitAfterCommitBeforeResponse: hook}),
@@ -298,19 +298,19 @@ function parseRequest(value: unknown): StoreRequest | undefined {
 
 function stringField(request: StoreRequest, key: string): string {
   const value = request[key]
-  if (typeof value !== 'string') throw new WorkspaceGraphStoreError('STORE_READ_FAILED')
+  if (typeof value !== 'string') throw new MemoryLedgerStoreError('STORE_READ_FAILED')
   return value
 }
 
 function optionalStringField(request: StoreRequest, key: string): string | undefined {
   const value = request[key]
   if (value === undefined) return undefined
-  if (typeof value !== 'string') throw new WorkspaceGraphStoreError('STORE_READ_FAILED')
+  if (typeof value !== 'string') throw new MemoryLedgerStoreError('STORE_READ_FAILED')
   return value
 }
 
-function safeErrorCode(error: unknown): WorkspaceGraphStoreErrorCode {
-  return error instanceof WorkspaceGraphStoreError ? error.code : error instanceof Error&&error.message.startsWith('MEMORY_MARKDOWN_')?'STORE_MEMORY_CONFLICT':'STORE_WRITE_FAILED'
+function safeErrorCode(error: unknown): MemoryLedgerStoreErrorCode {
+  return error instanceof MemoryLedgerStoreError ? error.code : error instanceof Error&&error.message.startsWith('MEMORY_MARKDOWN_')?'STORE_MEMORY_CONFLICT':'STORE_WRITE_FAILED'
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

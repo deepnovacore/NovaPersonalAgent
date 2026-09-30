@@ -7,7 +7,7 @@ import type {JsonValue} from '../core/events.js'
 import {createHash, randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {ModelGateway} from '../model/model-gateway.js'
-import {WorkspaceGraphStoreClientError,type WorkspaceGraphStoreClient} from '../workspace-graph/store-client.js'
+import {MemoryLedgerClientError,type MemoryLedgerClient} from '../memory-ledger/store-client.js'
 import {MemoryObservationSchema, MemoryListOptionsSchema, MemorySourceRefSchema, LifeMemorySchema, type MemoryEntry, type MemoryObservation, type MemorySourceRef, type MemoryVersion} from '../memory/entry.js'
 import type {PersonalMemoryResource, PersonalMemoryRememberTurn, PersonalMemoryResponseAdaptation, PersonalMemoryPurgeResult} from '../memory/personal-memory.js'
 import {CandidateSchema, EntryRevisionSchema, EvidenceRecordSchema, contentHash, type Candidate,type EntryRevision, type EvidenceRecord} from './store.js'
@@ -86,7 +86,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #preparedSignatures=new Map<string,{signature:string;revision:number}>()
   #consolidating:Promise<void>|null=null
   #adaptation:PersonalMemoryResponseAdaptation={revision:0,replyPreferences:[]}
-  constructor(readonly options:{client:WorkspaceGraphStoreClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];personalMemoryEnabled?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
+  constructor(readonly options:{client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];personalMemoryEnabled?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
     this.prefix='personal:'+digest(options.userId)+':'
   }
   async open():Promise<void>{if(this.#opened)return;await this.options.client.open();await this.options.migrate?.();await this.options.client.memory('enable_files',{});this.#opened=true;this.#abort=new AbortController();await this.#maintain();this.#maintenance=setInterval(()=>{void this.#maintain().catch(()=>{ /* retry on the next maintenance tick */ })},60000);this.#maintenance.unref();await this.#refresh()}
@@ -424,7 +424,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const grant=()=>this.options.inputConsent===true?{processingGrant:this.processingGrant(true)}:{}
     const run=async(operation:'life_load'|'life_mutate',input:unknown):Promise<unknown>=>{
       try{return await this.options.client.memory(operation,input)}catch(error){
-        if(error instanceof WorkspaceGraphStoreClientError){const code=({STORE_STALE_REVISION:'version_conflict',STORE_IDEMPOTENCY_CONFLICT:'request_id_conflict',STORE_NOT_FOUND:'item_not_found'} as Record<string,string>)[error.code];if(code)throw Error(code)}
+        if(error instanceof MemoryLedgerClientError){const code=({STORE_STALE_REVISION:'version_conflict',STORE_IDEMPOTENCY_CONFLICT:'request_id_conflict',STORE_NOT_FOUND:'item_not_found'} as Record<string,string>)[error.code];if(code)throw Error(code)}
         throw error
       }
     }

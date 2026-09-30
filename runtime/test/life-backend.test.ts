@@ -68,12 +68,12 @@ test('Life refresh updates the synchronous UI snapshot after an external correct
  }finally{await rm(dir,{recursive:true,force:true})}
 })
 
-import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import {TaskService} from '../src/personal-agent/tasks.js'
 import {TaskLoop} from '../src/personal-agent/task-loop.js'
 test('task Todo projection reconciles a committed backend update after its acknowledgement is lost',async()=>{
- const dir=await mkdtemp(join(await realpath(tmpdir()),'task-life-ack-')),client=new WorkspaceGraphStoreClient(join(dir,'memory.sqlite'))
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-life-ack-')),client=new MemoryLedgerClient(join(dir,'memory.sqlite'))
  const resource=new SubstrateMemoryResource({client,userId:'task-life',gateway:{complete:()=>Promise.reject(Error('unused')),async *stream(){await Promise.reject(Error('unused'))}},model:'fixture',extractionFingerprint:'fixture',inputConsent:true})
  const tasks=new TaskService(join(dir,'tasks.json'));let mutations=0,checks=0
  await resource.open();const backend=resource.lifeBackend(),mutate=backend.mutate.bind(backend)

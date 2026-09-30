@@ -8,7 +8,7 @@ import {PersonalStore,initialState,acquirePersonalLock,type PersonalState} from 
 import {createConversation} from '../src/personal-agent/conversations.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js';
-import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js';
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js';
 
 const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done});return {promise,resolve}};
 async function fixture(){
@@ -81,7 +81,7 @@ test('close drains an in-flight source refresh and write before releasing owners
 
 test('substrate startup callbacks registered before memory open preserve personal state',async()=>{
  const f=await fixture(),host=f.make(),notices:Promise<void>[]=[];
- const resource=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(f.dir,'memory.sqlite')),userId:'fixture',model:'fixture',gateway:{stream(){throw Error('unexpected model call')},complete(){return Promise.reject(Error('unexpected model call'))}}});
+ const resource=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(f.dir,'memory.sqlite')),userId:'fixture',model:'fixture',gateway:{stream(){throw Error('unexpected model call')},complete(){return Promise.reject(Error('unexpected model call'))}}});
  resource.setOnChange(()=>{notices.push(host.sourceChanged())});resource.setOnSourceChange(change=>host.sourceChanged(change));
  try{await resource.open();await Promise.all(notices);assert.ok(notices.length>0);f.preserved(await f.store.read());await host.open();f.preserved(await f.store.read())}
  finally{await host.close();await resource.close();await f.cleanup()}

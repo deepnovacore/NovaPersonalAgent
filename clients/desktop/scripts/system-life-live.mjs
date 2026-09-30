@@ -10,7 +10,7 @@ import {loadSettings,settingsSchema,resolveModelApiKey} from '../../../runtime/d
 import {parseCapabilityRegistry} from '../../../runtime/dist/src/config/capability-registry.js'
 import {OpenAIModelGateway} from '../../../runtime/dist/src/model/model-gateway.js'
 import {RealClock} from '../../../runtime/dist/src/core/clock.js'
-import {WorkspaceGraphStoreClient} from '../../../runtime/dist/src/workspace-graph/store-client.js'
+import {MemoryLedgerClient} from '../../../runtime/dist/src/memory-ledger/store-client.js'
 import {SubstrateMemoryResource} from '../../../runtime/dist/src/memory-substrate/resource.js'
 import {PersonalAgentHost} from '../../../runtime/dist/src/personal-agent/host.js'
 import {SuggestionPool} from '../../../runtime/dist/src/core/suggestions.js'
@@ -38,7 +38,7 @@ async function main(){
  async function shot(name){await new Promise(r=>setTimeout(r,200));const path=output+'.'+name+'.png';await writeFile(path,(await window.webContents.capturePage()).toPNG(),{mode:0o600});report.screenshots.push(path);await persist()}
  const command=async(method,params={})=>{const r=await host.command({type:'personal.command',request_id:randomUUID(),method,params});assert.equal(r.ok,true,JSON.stringify(r));return r.data}
  async function open(){
-  memory=new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(join(dir,'ledger.sqlite')),userId:'synthetic-system',gateway,model:settings.fast_model,inputConsent:true,conversationProviders:[configuredMemoryConsumer(settings,'text')],consolidation:{enabled:false}});await memory.open()
+  memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(dir,'ledger.sqlite')),userId:'synthetic-system',gateway,model:settings.fast_model,inputConsent:true,conversationProviders:[configuredMemoryConsumer(settings,'text')],consolidation:{enabled:false}});await memory.open()
   host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'synthetic-system',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,understand:pipeline});await host.open()
   await command('discovery.configure',{enabled:false,timezone:'Asia/Shanghai',briefing_outlook_enabled:false,briefing_review_enabled:false})
   const factory=conversationRuntimeFactory({settings,host,memory:()=>memory,gateway,telemetry,createTextProvider:options=>{const provider=buildCascadedTextProvider(options),events=provider.events.bind(provider),inject=provider.injectHostItem.bind(provider);provider.events=async function*(signal){for await(const event of events(signal)){if(event.kind==='tool_call_ready')report.events.push({kind:'provider.tool_call',name:event.name,arguments:event.arguments});yield event}};provider.injectHostItem=async(item,options)=>{if(item.kind==='tool_output')report.events.push({kind:'provider.tool_result',item});return inject(item,options)};return provider},capabilities:parseCapabilityRegistry({version:1,modules:{search:{enabled:false},camera:{enabled:false},coding:{enabled:false},knowledge:{enabled:false}}},{}),searchTransport:{search:()=>Promise.reject(Error('unexpected external search'))}})

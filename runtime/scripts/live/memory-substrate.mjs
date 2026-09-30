@@ -7,7 +7,7 @@ import {loadSettings, resolveModelApiKey} from '../../dist/src/config/config.js'
 import {OpenAIModelGateway} from '../../dist/src/model/model-gateway.js'
 import {RealClock} from '../../dist/src/core/clock.js'
 import {DashScopeEmbeddingProvider} from '../../dist/src/knowledge/embeddings.js'
-import {WorkspaceGraphStoreClient} from '../../dist/src/workspace-graph/store-client.js'
+import {MemoryLedgerClient} from '../../dist/src/memory-ledger/store-client.js'
 import {SubstrateMemoryResource} from '../../dist/src/memory-substrate/resource.js'
 
 // Only synthetic facts leave this process. Never opens the user's memory database.
@@ -19,7 +19,7 @@ const gateway=new OpenAIModelGateway({baseUrl:settings.model_base_url,apiKey,clo
 const embedding=new DashScopeEmbeddingProvider({baseUrl:settings.model_base_url,apiKey,model:settings.embedding_model})
 let shutdown
 async function create() {
- if(!process.argv.includes('--production'))return new SubstrateMemoryResource({client:new WorkspaceGraphStoreClient(path),userId:'synthetic-live',gateway,model:settings.fast_model,embedding})
+ if(!process.argv.includes('--production'))return new SubstrateMemoryResource({client:new MemoryLedgerClient(path),userId:'synthetic-live',gateway,model:settings.fast_model,embedding})
  const {buildProductionComposition}=await import('../../dist/src/composition/production-composition.js')
  const capabilities=join(directory,'capabilities.json')
  await writeFile(capabilities,JSON.stringify({version:1,modules:{search:{enabled:false},coding:{enabled:false},camera:{enabled:false},knowledge:{enabled:false}}}))

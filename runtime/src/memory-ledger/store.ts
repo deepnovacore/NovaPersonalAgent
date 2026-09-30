@@ -175,13 +175,13 @@ export interface GraphStatement {
   run(...parameters: GraphSqlInput[]): {readonly changes: number | bigint}
 }
 
-export interface GraphDatabase {
+export interface LedgerDatabase {
   exec(sql: string): void
   prepare(sql: string): GraphStatement
   close(): void
 }
 
-export type GraphDatabaseFactory = (path: string) => GraphDatabase
+export type LedgerDatabaseFactory = (path: string) => LedgerDatabase
 export type WorkspaceCard = LogicalWorkspace | WorkspaceInstance
 
 export interface PublishedGraphAlias {
@@ -215,14 +215,14 @@ export const PublishedGraphSnapshotSchema = z.object({
   }).strict()),
 }).strict()
 
-export interface WorkspaceGraphStoreOptions {
+export interface MemoryLedgerStoreOptions {
   readonly deniedRoots?: readonly string[]
   readonly memoryLockWaitMs?: number
   readonly publicationRevisionFloor?: number
   readonly afterRelationStatement?: () => void
 }
 
-export interface WorkspaceGraphStoreDiagnostics {
+export interface MemoryLedgerStoreDiagnostics {
   readonly schema_version: number
   readonly journal_mode: string
   readonly foreign_keys: boolean
@@ -415,7 +415,7 @@ export type OperationReceipt = z.infer<typeof OperationReceiptSchema>
 type OperationReceiptResult = z.infer<typeof OperationReceiptResultSchema>
 type OperationType = z.infer<typeof operationTypeSchema>
 
-export type WorkspaceGraphStoreErrorCode =
+export type MemoryLedgerStoreErrorCode =
   | 'STORE_ALREADY_OPEN'
   | 'STORE_CLOSED'
   | 'STORE_IDEMPOTENCY_CONFLICT'
@@ -436,53 +436,53 @@ export type WorkspaceGraphStoreErrorCode =
   | 'STORE_MEMORY_CONFLICT'
   | 'STORE_WRITE_FAILED'
 
-const storeErrorMessages: Readonly<Record<WorkspaceGraphStoreErrorCode, string>> = {
-  STORE_ALREADY_OPEN: 'workspace graph store is already open',
-  STORE_CLOSED: 'workspace graph store is closed',
-  STORE_IDEMPOTENCY_CONFLICT: 'workspace graph observation replay conflict',
-  STORE_INVALID_CARD: 'invalid workspace graph card',
-  STORE_INVALID_OBSERVATION: 'invalid workspace graph observation',
-  STORE_INVALID_RELATION: 'invalid workspace graph relation',
-  STORE_MIGRATION_FAILED: 'workspace graph schema migration failed',
-  STORE_NOT_FOUND: 'workspace graph record was not found',
-  STORE_INVALID_OPERATION: 'workspace graph operation is invalid',
+const storeErrorMessages: Readonly<Record<MemoryLedgerStoreErrorCode, string>> = {
+  STORE_ALREADY_OPEN: 'memory ledger store is already open',
+  STORE_CLOSED: 'memory ledger store is closed',
+  STORE_IDEMPOTENCY_CONFLICT: 'memory ledger observation replay conflict',
+  STORE_INVALID_CARD: 'invalid memory ledger card',
+  STORE_INVALID_OBSERVATION: 'invalid memory ledger observation',
+  STORE_INVALID_RELATION: 'invalid memory ledger relation',
+  STORE_MIGRATION_FAILED: 'memory ledger schema migration failed',
+  STORE_NOT_FOUND: 'memory ledger record was not found',
+  STORE_INVALID_OPERATION: 'memory ledger operation is invalid',
   STORE_PURGED_ID: 'memory identifier was permanently purged',
   STORE_STATED_EVIDENCE_REQUIRED: 'stated memory requires trusted user evidence',
-  STORE_OPERATION_CONFLICT: 'workspace graph operation replay conflict',
-  STORE_READ_FAILED: 'workspace graph read failed',
-  STORE_SCHEMA_UNSUPPORTED: 'workspace graph schema version is unsupported',
-  STORE_SENSITIVE_CONTENT_REJECTED: 'workspace graph sensitive content was rejected',
-  STORE_SENSITIVE_PATH_DENIED: 'workspace graph sensitive path was denied',
-  STORE_STALE_REVISION: 'workspace graph revision is stale',
+  STORE_OPERATION_CONFLICT: 'memory ledger operation replay conflict',
+  STORE_READ_FAILED: 'memory ledger read failed',
+  STORE_SCHEMA_UNSUPPORTED: 'memory ledger schema version is unsupported',
+  STORE_SENSITIVE_CONTENT_REJECTED: 'memory ledger sensitive content was rejected',
+  STORE_SENSITIVE_PATH_DENIED: 'memory ledger sensitive path was denied',
+  STORE_STALE_REVISION: 'memory ledger revision is stale',
   STORE_MEMORY_CONFLICT: 'memory documents conflict; user edits were preserved',
-  STORE_WRITE_FAILED: 'workspace graph write failed',
+  STORE_WRITE_FAILED: 'memory ledger write failed',
 }
 
-export class WorkspaceGraphStoreError extends Error {
-  readonly code: WorkspaceGraphStoreErrorCode
+export class MemoryLedgerStoreError extends Error {
+  readonly code: MemoryLedgerStoreErrorCode
 
-  constructor(code: WorkspaceGraphStoreErrorCode) {
+  constructor(code: MemoryLedgerStoreErrorCode) {
     super(storeErrorMessages[code])
-    this.name = 'WorkspaceGraphStoreError'
+    this.name = 'MemoryLedgerStoreError'
     this.code = code
   }
 }
 
-export class WorkspaceGraphStore {
+export class MemoryLedgerStore {
   readonly #path: string
-  readonly #databaseFactory: GraphDatabaseFactory
+  readonly #databaseFactory: LedgerDatabaseFactory
   readonly #pathPolicy: SensitivePathPolicy
   readonly #contentPolicy = new SensitiveContentPolicy()
   readonly #afterRelationStatement: (() => void) | undefined
-  #database: GraphDatabase | undefined
+  #database: LedgerDatabase | undefined
   #publicationRevision = 0
   #memoryLockHeld = false
   readonly #fileRepository: MarkdownRepository
 
   constructor(
     path: string,
-    databaseFactory: GraphDatabaseFactory,
-    options: WorkspaceGraphStoreOptions = {},
+    databaseFactory: LedgerDatabaseFactory,
+    options: MemoryLedgerStoreOptions = {},
   ) {
     this.#path = path
     this.#fileRepository = new MarkdownRepository(path+'.memory',{lockWaitMs:options.memoryLockWaitMs??MEMORY_LOCK_WAIT_MS})
@@ -497,8 +497,8 @@ export class WorkspaceGraphStore {
   open(): void {this.withMemoryFilesLock(()=>this.#openLocked())}
 
   #openLocked(): void {
-    if (this.#database !== undefined) throw new WorkspaceGraphStoreError('STORE_ALREADY_OPEN')
-    let database: GraphDatabase | undefined
+    if (this.#database !== undefined) throw new MemoryLedgerStoreError('STORE_ALREADY_OPEN')
+    let database: LedgerDatabase | undefined
     try {
       database = this.#databaseFactory(this.#path)
       database.exec('PRAGMA busy_timeout=1000')
@@ -535,13 +535,13 @@ export class WorkspaceGraphStore {
       } catch {
         // The stable migration error below is the only failure exposed across RPC.
       }
-      if (error instanceof WorkspaceGraphStoreError) throw error
-      if(error instanceof Error&&error.message.startsWith('MEMORY_MARKDOWN_'))throw new WorkspaceGraphStoreError('STORE_MEMORY_CONFLICT')
-      throw new WorkspaceGraphStoreError('STORE_MIGRATION_FAILED')
+      if (error instanceof MemoryLedgerStoreError) throw error
+      if(error instanceof Error&&error.message.startsWith('MEMORY_MARKDOWN_'))throw new MemoryLedgerStoreError('STORE_MEMORY_CONFLICT')
+      throw new MemoryLedgerStoreError('STORE_MIGRATION_FAILED')
     }
   }
 
-  memory(operation: MemoryOperation, input: unknown, openLegacy?: GraphDatabaseFactory): unknown {
+  memory(operation: MemoryOperation, input: unknown, openLegacy?: LedgerDatabaseFactory): unknown {
     return this.withMemoryFilesLock(()=>{
       if(operation==='enable_files'){
         enableMemoryFiles(this.#requireDatabase(),this.#path+'.memory',{alreadyLocked:true})
@@ -556,9 +556,9 @@ export class WorkspaceGraphStore {
       catch (error) {
         const message = error instanceof Error ? error.message : ''
         const code=({version_conflict:'STORE_STALE_REVISION',request_id_conflict:'STORE_IDEMPOTENCY_CONFLICT',item_not_found:'STORE_NOT_FOUND'} as Record<string,string>)[message]??message
-        if(message.startsWith('MEMORY_MARKDOWN_'))throw new WorkspaceGraphStoreError('STORE_MEMORY_CONFLICT')
-        if (['STORE_STALE_REVISION','STORE_NOT_FOUND','STORE_INVALID_OPERATION','STORE_PURGED_ID','STORE_STATED_EVIDENCE_REQUIRED','STORE_IDEMPOTENCY_CONFLICT'].includes(code)) throw new WorkspaceGraphStoreError(code as WorkspaceGraphStoreErrorCode)
-        throw new WorkspaceGraphStoreError('STORE_WRITE_FAILED')
+        if(message.startsWith('MEMORY_MARKDOWN_'))throw new MemoryLedgerStoreError('STORE_MEMORY_CONFLICT')
+        if (['STORE_STALE_REVISION','STORE_NOT_FOUND','STORE_INVALID_OPERATION','STORE_PURGED_ID','STORE_STATED_EVIDENCE_REQUIRED','STORE_IDEMPOTENCY_CONFLICT'].includes(code)) throw new MemoryLedgerStoreError(code as MemoryLedgerStoreErrorCode)
+        throw new MemoryLedgerStoreError('STORE_WRITE_FAILED')
       }
     })
   }
@@ -584,13 +584,13 @@ export class WorkspaceGraphStore {
     try {
       database.close()
     } catch {
-      throw new WorkspaceGraphStoreError('STORE_WRITE_FAILED')
+      throw new MemoryLedgerStoreError('STORE_WRITE_FAILED')
     }
   }
 
   appendObservation(input: Observation, operationId: string): EvidenceRef {
     const parsed = ObservationSchema.safeParse(input)
-    if (!parsed.success) throw new WorkspaceGraphStoreError('STORE_INVALID_OBSERVATION')
+    if (!parsed.success) throw new MemoryLedgerStoreError('STORE_INVALID_OBSERVATION')
     const observation = this.#sanitizeObservation(parsed.data)
     const payload = canonicalJson(observation)
     const database = this.#requireDatabase()
@@ -601,7 +601,7 @@ export class WorkspaceGraphStore {
     } satisfies EvidenceRef
 
     return this.#writeWithReceipt(database, operationId, 'append_observation', observation, receipt => {
-      if (receipt.kind !== 'observation') throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+      if (receipt.kind !== 'observation') throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
       return receipt.evidence
     }, () => {
       const inserted = database.prepare(`
@@ -630,7 +630,7 @@ export class WorkspaceGraphStore {
           SELECT payload_json FROM observations WHERE source = ? AND ref = ?
         `).get(evidence.source, evidence.ref)
         if (existing === undefined || stringColumn(existing, 'payload_json') !== payload) {
-          throw new WorkspaceGraphStoreError('STORE_IDEMPOTENCY_CONFLICT')
+          throw new MemoryLedgerStoreError('STORE_IDEMPOTENCY_CONFLICT')
         }
       }
       return {result: evidence, receipt: {kind: 'observation', evidence}}
@@ -639,7 +639,7 @@ export class WorkspaceGraphStore {
 
   applyGraphBatch(input: WorkspaceGraphBatchInput, operationId: string): WorkspaceGraphBatchResult {
     const parsed = workspaceGraphBatchInputSchema.safeParse(input)
-    if (!parsed.success) throw new WorkspaceGraphStoreError('STORE_INVALID_OPERATION')
+    if (!parsed.success) throw new MemoryLedgerStoreError('STORE_INVALID_OPERATION')
     const observation = this.#sanitizeObservation(parsed.data.observation)
     const identityDeltas = parsed.data.identity_deltas
     const projectionDeltas = parsed.data.projection_deltas.map(delta => delta.kind === 'upsert_relation'
@@ -648,7 +648,7 @@ export class WorkspaceGraphStore {
     if (
       canonicalJson(observation) !== canonicalJson(parsed.data.observation)
       || canonicalJson(projectionDeltas) !== canonicalJson(parsed.data.projection_deltas)
-    ) throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+    ) throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
     this.#assertProjectionProvenance(observation, projectionDeltas)
     this.#assertBatchStringsSafe(identityDeltas, projectionDeltas)
     const evidence = EvidenceRefSchema.parse({
@@ -669,7 +669,7 @@ export class WorkspaceGraphStore {
       {observation, identity_deltas: identityDeltas, projection_deltas: projectionDeltas},
       receipt => {
         if (receipt.kind !== 'graph_batch') {
-          throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+          throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
         }
         return WorkspaceGraphBatchResultSchema.parse({
           evidence: receipt.evidence,
@@ -696,9 +696,9 @@ export class WorkspaceGraphStore {
           }, projectionDeltas)
         } catch (error) {
           if (isRevisionConflict(error)) {
-            throw new WorkspaceGraphStoreError('STORE_STALE_REVISION')
+            throw new MemoryLedgerStoreError('STORE_STALE_REVISION')
           }
-          throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+          throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
         }
         this.#persistIdentityState(database, identityState)
         this.#persistProjectionState(database, projectionState)
@@ -715,10 +715,10 @@ export class WorkspaceGraphStore {
   replaceCard(input: WorkspaceCard, operationId: string): void {
     if (isLogicalWorkspaceInput(input)) {
       const parsed = LogicalWorkspaceSchema.safeParse(input)
-      if (!parsed.success) throw new WorkspaceGraphStoreError('STORE_INVALID_CARD')
+      if (!parsed.success) throw new MemoryLedgerStoreError('STORE_INVALID_CARD')
       const database = this.#requireDatabase()
       this.#writeWithReceipt(database, operationId, 'replace_card', parsed.data, receipt => {
-        if (receipt.kind !== 'none') throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+        if (receipt.kind !== 'none') throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
       }, () => {
         this.#replaceLogicalWorkspace(database, parsed.data)
         return {result: undefined, receipt: {kind: 'none'}}
@@ -726,10 +726,10 @@ export class WorkspaceGraphStore {
       return
     }
     const parsed = WorkspaceInstanceSchema.safeParse(input)
-    if (!parsed.success) throw new WorkspaceGraphStoreError('STORE_INVALID_CARD')
+    if (!parsed.success) throw new MemoryLedgerStoreError('STORE_INVALID_CARD')
     const database = this.#requireDatabase()
     this.#writeWithReceipt(database, operationId, 'replace_card', parsed.data, receipt => {
-      if (receipt.kind !== 'none') throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+      if (receipt.kind !== 'none') throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
     }, () => {
       this.#replaceWorkspaceInstance(database, parsed.data)
       return {result: undefined, receipt: {kind: 'none'}}
@@ -739,7 +739,7 @@ export class WorkspaceGraphStore {
   upsertRelation(input: RelationCard, expectedRevision: number | undefined, operationId: string): RelationCard {
     const relation = this.#sanitizeRelation(input)
     if (expectedRevision !== undefined && (!Number.isInteger(expectedRevision) || expectedRevision < 0)) {
-      throw new WorkspaceGraphStoreError('STORE_STALE_REVISION')
+      throw new MemoryLedgerStoreError('STORE_STALE_REVISION')
     }
     const database = this.#requireDatabase()
     return this.#writeWithReceipt(
@@ -751,14 +751,14 @@ export class WorkspaceGraphStore {
       () => {
       const existing = this.#relationRow(database, relation)
       if (existing !== undefined && expectedRevision === undefined) {
-        throw new WorkspaceGraphStoreError('STORE_STALE_REVISION')
+        throw new MemoryLedgerStoreError('STORE_STALE_REVISION')
       }
       if (expectedRevision !== undefined) {
         if (existing === undefined || numberColumn(existing, 'revision') !== expectedRevision) {
-          throw new WorkspaceGraphStoreError('STORE_STALE_REVISION')
+          throw new MemoryLedgerStoreError('STORE_STALE_REVISION')
         }
         if (relation.revision !== expectedRevision + 1) {
-          throw new WorkspaceGraphStoreError('STORE_STALE_REVISION')
+          throw new MemoryLedgerStoreError('STORE_STALE_REVISION')
         }
       }
       this.#writeRelation(database, relation)
@@ -778,7 +778,7 @@ export class WorkspaceGraphStore {
     const parsedEvidence = EvidenceRefSchema.safeParse(input)
     const parsedType = relationTypeSchema.safeParse(relationType)
     if (!parsedEvidence.success || !parsedType.success) {
-      throw new WorkspaceGraphStoreError('STORE_INVALID_RELATION')
+      throw new MemoryLedgerStoreError('STORE_INVALID_RELATION')
     }
     this.#assertSafeIdentity('source_logical_id', sourceId)
     this.#assertSafeIdentity('target_logical_id', targetId)
@@ -796,7 +796,7 @@ export class WorkspaceGraphStore {
         SELECT payload_json FROM relation_cards
         WHERE source_logical_id = ? AND target_logical_id = ? AND relation_type = ?
       `).get(sourceId, targetId, parsedType.data)
-      if (row === undefined) throw new WorkspaceGraphStoreError('STORE_NOT_FOUND')
+      if (row === undefined) throw new MemoryLedgerStoreError('STORE_NOT_FOUND')
       const current = this.#parseRelationPayload(stringColumn(row, 'payload_json'))
       const evidence = parsedEvidence.data
       const hasEvidence = current.evidence_refs.some(item => (
@@ -821,7 +821,7 @@ export class WorkspaceGraphStore {
   compact(operationId: string): WorkspaceGraphCompactionResult {
     const database = this.#requireDatabase()
     return this.#writeWithReceipt(database, operationId, 'compact', {}, receipt => {
-      if (receipt.kind !== 'compaction') throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+      if (receipt.kind !== 'compaction') throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
       return {
         derived_rows_before: receipt.derived_rows_before,
         derived_rows_after: receipt.derived_rows_after,
@@ -848,7 +848,7 @@ export class WorkspaceGraphStore {
 
   getOperationReceipt(operationId: string): OperationReceipt | undefined {
     const parsedId = z.string().uuid().safeParse(operationId)
-    if (!parsedId.success) throw new WorkspaceGraphStoreError('STORE_INVALID_OPERATION')
+    if (!parsedId.success) throw new MemoryLedgerStoreError('STORE_INVALID_OPERATION')
     const database = this.#requireDatabase()
     return this.#read(() => this.#operationReceipt(database, parsedId.data)?.receipt)
   }
@@ -889,7 +889,7 @@ export class WorkspaceGraphStore {
       })
     } catch {
       rollback(database)
-      throw new WorkspaceGraphStoreError('STORE_READ_FAILED')
+      throw new MemoryLedgerStoreError('STORE_READ_FAILED')
     }
   }
 
@@ -971,7 +971,7 @@ export class WorkspaceGraphStore {
     relationType: RelationCard['relation_type'],
   ): RelationCard | undefined {
     const parsedType = relationTypeSchema.safeParse(relationType)
-    if (!parsedType.success) throw new WorkspaceGraphStoreError('STORE_INVALID_RELATION')
+    if (!parsedType.success) throw new MemoryLedgerStoreError('STORE_INVALID_RELATION')
     const database = this.#requireDatabase()
     return this.#read(() => {
       const row = database.prepare(`
@@ -988,7 +988,7 @@ export class WorkspaceGraphStore {
     relationType: RelationCard['relation_type'],
   ): readonly EvidenceRef[] {
     const parsedType = relationTypeSchema.safeParse(relationType)
-    if (!parsedType.success) throw new WorkspaceGraphStoreError('STORE_INVALID_RELATION')
+    if (!parsedType.success) throw new MemoryLedgerStoreError('STORE_INVALID_RELATION')
     const database = this.#requireDatabase()
     return this.#read(() => database.prepare(`
       SELECT evidence_json FROM relation_evidence
@@ -999,7 +999,7 @@ export class WorkspaceGraphStore {
     )))
   }
 
-  diagnostics(): WorkspaceGraphStoreDiagnostics {
+  diagnostics(): MemoryLedgerStoreDiagnostics {
     const database = this.#requireDatabase()
     return this.#read(() => ({
       schema_version: this.#schemaVersion(database),
@@ -1014,7 +1014,7 @@ export class WorkspaceGraphStore {
     }))
   }
 
-  #migrate(database: GraphDatabase): void {
+  #migrate(database: LedgerDatabase): void {
     database.exec('BEGIN IMMEDIATE')
     try {
       database.exec(`
@@ -1029,11 +1029,11 @@ export class WorkspaceGraphStore {
       ])
       let version = this.#schemaVersion(database)
       if (version > WORKSPACE_GRAPH_SCHEMA_VERSION) {
-        throw new WorkspaceGraphStoreError('STORE_SCHEMA_UNSUPPORTED')
+        throw new MemoryLedgerStoreError('STORE_SCHEMA_UNSUPPORTED')
       }
       if (version === 0) {
         if (Object.keys(V3_TABLE_SHAPES).some(table => this.#tableExists(database, table))) {
-          throw new Error('unversioned workspace graph tables')
+          throw new Error('unversioned memory ledger tables')
         }
         this.#createV1Schema(database)
         this.#createV2Schema(database)
@@ -1065,12 +1065,12 @@ export class WorkspaceGraphStore {
       database.exec('COMMIT')
     } catch (error) {
       rollback(database)
-      if (error instanceof WorkspaceGraphStoreError) throw error
-      throw new WorkspaceGraphStoreError('STORE_MIGRATION_FAILED')
+      if (error instanceof MemoryLedgerStoreError) throw error
+      throw new MemoryLedgerStoreError('STORE_MIGRATION_FAILED')
     }
   }
 
-  #createV1Schema(database: GraphDatabase): void {
+  #createV1Schema(database: LedgerDatabase): void {
     database.exec(`
         CREATE TABLE IF NOT EXISTS observations(
           observation_id TEXT NOT NULL UNIQUE,
@@ -1147,7 +1147,7 @@ export class WorkspaceGraphStore {
     `)
   }
 
-  #createV2Schema(database: GraphDatabase): void {
+  #createV2Schema(database: LedgerDatabase): void {
     database.exec(`
         CREATE TABLE IF NOT EXISTS operation_receipts(
           receipt_sequence INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1160,7 +1160,7 @@ export class WorkspaceGraphStore {
     `)
   }
 
-  #createV3Schema(database: GraphDatabase): void {
+  #createV3Schema(database: LedgerDatabase): void {
     database.exec(`
         CREATE TABLE IF NOT EXISTS identity_bindings(
           binding_id TEXT PRIMARY KEY,
@@ -1188,7 +1188,7 @@ export class WorkspaceGraphStore {
     `)
   }
 
-  #createIndexes(database: GraphDatabase): void {
+  #createIndexes(database: LedgerDatabase): void {
     database.exec(`
       CREATE INDEX IF NOT EXISTS observations_scope_time
         ON observations(logical_workspace_id, occurred_at);
@@ -1203,13 +1203,13 @@ export class WorkspaceGraphStore {
     `)
   }
 
-  #recordMigration(database: GraphDatabase, version: number): void {
+  #recordMigration(database: LedgerDatabase, version: number): void {
     database.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?)')
       .run(version, Date.now())
   }
 
   #assertSchemaShape(
-    database: GraphDatabase,
+    database: LedgerDatabase,
     shapes: Readonly<Record<string, readonly SchemaColumn[]>>,
   ): void {
     for (const [table, columns] of Object.entries(shapes)) {
@@ -1218,13 +1218,13 @@ export class WorkspaceGraphStore {
   }
 
   #assertTableShape(
-    database: GraphDatabase,
+    database: LedgerDatabase,
     table: string,
     expected: readonly SchemaColumn[],
   ): void {
     const rawColumns = database.prepare(`PRAGMA table_xinfo("${table}")`).all()
     if (rawColumns.some(row => numberColumn(row, 'hidden') !== 0)) {
-      throw new Error(`invalid workspace graph hidden column: ${table}`)
+      throw new Error(`invalid memory ledger hidden column: ${table}`)
     }
     const actual = rawColumns.map(row => ({
       name: stringColumn(row, 'name'),
@@ -1239,11 +1239,11 @@ export class WorkspaceGraphStore {
       tableInfo === undefined
       || numberColumn(tableInfo, 'strict') !== 1
       || canonicalJson(actual) !== canonicalJson(expected)
-    ) throw new Error(`invalid workspace graph table shape: ${table}`)
+    ) throw new Error(`invalid memory ledger table shape: ${table}`)
     this.#assertTableConstraints(database, table)
   }
 
-  #assertTableConstraints(database: GraphDatabase, table: string): void {
+  #assertTableConstraints(database: LedgerDatabase, table: string): void {
     const uniqueKeys = database.prepare(`
       SELECT name FROM pragma_index_list(?)
       WHERE "unique" = 1 AND origin = 'u'
@@ -1255,7 +1255,7 @@ export class WorkspaceGraphStore {
       .map(key => [...key])
       .sort(compareSchemaKeys)
     if (canonicalJson(uniqueKeys) !== canonicalJson(expectedUniqueKeys)) {
-      throw new Error(`invalid workspace graph unique constraints: ${table}`)
+      throw new Error(`invalid memory ledger unique constraints: ${table}`)
     }
 
     const foreignKeys = database.prepare(`
@@ -1277,7 +1277,7 @@ export class WorkspaceGraphStore {
       ? RELATION_EVIDENCE_FOREIGN_KEYS
       : []
     if (canonicalJson(foreignKeys) !== canonicalJson(expectedForeignKeys)) {
-      throw new Error(`invalid workspace graph foreign keys: ${table}`)
+      throw new Error(`invalid memory ledger foreign keys: ${table}`)
     }
 
     const createRow = database.prepare(
@@ -1286,17 +1286,17 @@ export class WorkspaceGraphStore {
     const hasAutoincrement = createRow !== undefined
       && /\bAUTOINCREMENT\b/iu.test(stringColumn(createRow, 'sql'))
     if (hasAutoincrement !== (table === 'operation_receipts')) {
-      throw new Error(`invalid workspace graph autoincrement: ${table}`)
+      throw new Error(`invalid memory ledger autoincrement: ${table}`)
     }
   }
 
-  #tableExists(database: GraphDatabase, table: string): boolean {
+  #tableExists(database: LedgerDatabase, table: string): boolean {
     return database.prepare(
       "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
     ).get(table) !== undefined
   }
 
-  #schemaVersion(database: GraphDatabase): number {
+  #schemaVersion(database: LedgerDatabase): number {
     const row = database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()
     if (row === undefined || row.version === null) return 0
     return numberColumn(row, 'version')
@@ -1335,7 +1335,7 @@ export class WorkspaceGraphStore {
     })
   }
 
-  #insertObservation(database: GraphDatabase, observation: Observation, evidence: EvidenceRef): void {
+  #insertObservation(database: LedgerDatabase, observation: Observation, evidence: EvidenceRef): void {
     const payload = canonicalJson(observation)
     const inserted = database.prepare(`
       INSERT INTO observations(
@@ -1363,7 +1363,7 @@ export class WorkspaceGraphStore {
         SELECT payload_json FROM observations WHERE source = ? AND ref = ?
       `).get(evidence.source, evidence.ref)
       if (existing === undefined || stringColumn(existing, 'payload_json') !== payload) {
-        throw new WorkspaceGraphStoreError('STORE_IDEMPOTENCY_CONFLICT')
+        throw new MemoryLedgerStoreError('STORE_IDEMPOTENCY_CONFLICT')
       }
     }
   }
@@ -1410,7 +1410,7 @@ export class WorkspaceGraphStore {
     }
   }
 
-  #loadGraphState(database: GraphDatabase): WorkspaceGraphPrivateState {
+  #loadGraphState(database: LedgerDatabase): WorkspaceGraphPrivateState {
     const logicalWorkspaces = this.#parseRows(
       database.prepare('SELECT payload_json FROM logical_workspaces ORDER BY logical_workspace_id').all(),
       LogicalWorkspaceSchema,
@@ -1452,7 +1452,7 @@ export class WorkspaceGraphStore {
     })
   }
 
-  #persistIdentityState(database: GraphDatabase, state: WorkspaceIdentityState): void {
+  #persistIdentityState(database: LedgerDatabase, state: WorkspaceIdentityState): void {
     for (const workspace of state.logical_workspaces) this.#replaceLogicalWorkspace(database, workspace)
     for (const instance of state.workspace_instances) this.#replaceWorkspaceInstance(database, instance)
     for (const binding of state.bindings) {
@@ -1476,7 +1476,7 @@ export class WorkspaceGraphStore {
     }
   }
 
-  #persistProjectionState(database: GraphDatabase, state: WorkspaceGraphProjectionState): void {
+  #persistProjectionState(database: LedgerDatabase, state: WorkspaceGraphProjectionState): void {
     for (const relation of state.relations) {
       this.#writeRelation(database, relation)
       this.#syncRelationEvidence(database, relation)
@@ -1514,7 +1514,7 @@ export class WorkspaceGraphStore {
       relations.length !== records.length
       || relationKeys.size !== relations.length
       || recordKeys.size !== records.length
-    ) throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+    ) throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
     for (const delta of records) {
       const record = delta.record
       const relation = relations.find(candidate => (
@@ -1556,7 +1556,7 @@ export class WorkspaceGraphStore {
           && candidate.ref === evidence.ref
           && candidate.observed_at === evidence.observed_at
         )))
-      ) throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+      ) throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
     }
   }
 
@@ -1590,26 +1590,26 @@ export class WorkspaceGraphStore {
         },
       })
       if (canonicalJson(expected.deltas) !== canonicalJson(deltas)) {
-        throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+        throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
       }
     } catch (error) {
-      if (error instanceof WorkspaceGraphStoreError) throw error
-      throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+      if (error instanceof MemoryLedgerStoreError) throw error
+      throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
     }
   }
 
   #assertSafeIdentity(field: string, value: string): void {
     if (this.#contentPolicy.scrub(field, value).kind !== 'clean') {
-      throw new WorkspaceGraphStoreError('STORE_SENSITIVE_CONTENT_REJECTED')
+      throw new MemoryLedgerStoreError('STORE_SENSITIVE_CONTENT_REJECTED')
     }
     if (this.#pathPolicy.scrubText(field, value).kind !== 'clean') {
-      throw new WorkspaceGraphStoreError('STORE_SENSITIVE_PATH_DENIED')
+      throw new MemoryLedgerStoreError('STORE_SENSITIVE_PATH_DENIED')
     }
   }
 
   #sanitizeRelation(input: RelationCard): RelationCard {
     const parsed = RelationCardSchema.safeParse(input)
-    if (!parsed.success) throw new WorkspaceGraphStoreError('STORE_INVALID_RELATION')
+    if (!parsed.success) throw new MemoryLedgerStoreError('STORE_INVALID_RELATION')
     this.#assertSafeIdentity('source_logical_id', parsed.data.source_logical_id)
     this.#assertSafeIdentity('target_logical_id', parsed.data.target_logical_id)
     for (const evidence of parsed.data.evidence_refs) {
@@ -1622,7 +1622,7 @@ export class WorkspaceGraphStore {
     })
     const content = this.#contentPolicy.scrub('reason', bounded.reason)
     if (content.kind === 'rejected') {
-      throw new WorkspaceGraphStoreError('STORE_SENSITIVE_CONTENT_REJECTED')
+      throw new MemoryLedgerStoreError('STORE_SENSITIVE_CONTENT_REJECTED')
     }
     const contentSafe = content.kind === 'redacted' ? content.value : bounded.reason
     const path = this.#pathPolicy.scrubText('reason', contentSafe)
@@ -1634,11 +1634,11 @@ export class WorkspaceGraphStore {
         ? '[redacted]'
         : scrubbed ?? '[redacted]',
     })
-    if (!redacted.success) throw new WorkspaceGraphStoreError('STORE_INVALID_RELATION')
+    if (!redacted.success) throw new MemoryLedgerStoreError('STORE_INVALID_RELATION')
     return redacted.data
   }
 
-  #replaceLogicalWorkspace(database: GraphDatabase, workspace: LogicalWorkspace): void {
+  #replaceLogicalWorkspace(database: LedgerDatabase, workspace: LogicalWorkspace): void {
     workspace = recordWorkspaceRevision(database, 'LogicalWorkspace', workspace)
       database.prepare(`
         INSERT INTO logical_workspaces(
@@ -1663,7 +1663,7 @@ export class WorkspaceGraphStore {
       )
   }
 
-  #replaceWorkspaceInstance(database: GraphDatabase, instance: WorkspaceInstance): void {
+  #replaceWorkspaceInstance(database: LedgerDatabase, instance: WorkspaceInstance): void {
     instance = recordWorkspaceRevision(database, 'WorkspaceInstance', instance)
       database.prepare(`
         INSERT INTO workspace_instances(
@@ -1696,14 +1696,14 @@ export class WorkspaceGraphStore {
       )
   }
 
-  #relationRow(database: GraphDatabase, relation: RelationCard): Record<string, GraphSqlOutput> | undefined {
+  #relationRow(database: LedgerDatabase, relation: RelationCard): Record<string, GraphSqlOutput> | undefined {
     return database.prepare(`
       SELECT revision FROM relation_cards
       WHERE source_logical_id = ? AND target_logical_id = ? AND relation_type = ?
     `).get(relation.source_logical_id, relation.target_logical_id, relation.relation_type)
   }
 
-  #writeRelation(database: GraphDatabase, relation: RelationCard): void {
+  #writeRelation(database: LedgerDatabase, relation: RelationCard): void {
     relation = recordWorkspaceRevision(database, 'RelationCard', relation)
     database.prepare(`
       INSERT INTO relation_cards(
@@ -1733,7 +1733,7 @@ export class WorkspaceGraphStore {
     this.#afterRelationStatement?.()
   }
 
-  #writeRelationEvidence(database: GraphDatabase, relation: RelationCard, evidence: EvidenceRef): void {
+  #writeRelationEvidence(database: LedgerDatabase, relation: RelationCard, evidence: EvidenceRef): void {
     database.prepare(`
       INSERT OR IGNORE INTO relation_evidence(
         source_logical_id, target_logical_id, relation_type,
@@ -1750,7 +1750,7 @@ export class WorkspaceGraphStore {
     )
   }
 
-  #syncRelationEvidence(database: GraphDatabase, relation: RelationCard): void {
+  #syncRelationEvidence(database: LedgerDatabase, relation: RelationCard): void {
     database.prepare(`
       DELETE FROM relation_evidence
       WHERE source_logical_id = ? AND target_logical_id = ? AND relation_type = ?
@@ -1761,7 +1761,7 @@ export class WorkspaceGraphStore {
   }
 
   #compactTable(
-    database: GraphDatabase,
+    database: LedgerDatabase,
     table: 'workspace_instances',
     key: 'instance_id',
     predicate: string,
@@ -1777,7 +1777,7 @@ export class WorkspaceGraphStore {
     `).run(remove)
   }
 
-  #compactRelations(database: GraphDatabase): void {
+  #compactRelations(database: LedgerDatabase): void {
     const count = this.#tableCount(database, 'relation_cards')
     const remove = Math.max(0, count - DERIVED_TABLE_ROW_CAP)
     if (remove === 0) return
@@ -1793,7 +1793,7 @@ export class WorkspaceGraphStore {
     `).run(remove)
   }
 
-  #compactRelationEvidence(database: GraphDatabase): void {
+  #compactRelationEvidence(database: LedgerDatabase): void {
     const relations = this.#parseRows(
       database.prepare('SELECT payload_json FROM relation_cards').all(),
       RelationCardSchema,
@@ -1808,7 +1808,7 @@ export class WorkspaceGraphStore {
     }
   }
 
-  #compactObservations(database: GraphDatabase): void {
+  #compactObservations(database: LedgerDatabase): void {
     database.prepare(`
       DELETE FROM observations WHERE observation_id IN (
         SELECT observation_id FROM (
@@ -1836,7 +1836,7 @@ export class WorkspaceGraphStore {
     `).run(remove)
   }
 
-  #compactProjectionRecords(database: GraphDatabase): void {
+  #compactProjectionRecords(database: LedgerDatabase): void {
     const records = this.#parseRows(
       database.prepare('SELECT payload_json FROM projection_records').all(),
       projectionRecordSchema,
@@ -1872,7 +1872,7 @@ export class WorkspaceGraphStore {
     }
   }
 
-  #compactAliasObservations(database: GraphDatabase): void {
+  #compactAliasObservations(database: LedgerDatabase): void {
     const observations = this.#parseRows(
       database.prepare('SELECT payload_json FROM alias_observations').all(),
       workspaceAliasObservationSchema,
@@ -1889,7 +1889,7 @@ export class WorkspaceGraphStore {
     }
   }
 
-  #compactOperationReceipts(database: GraphDatabase): void {
+  #compactOperationReceipts(database: LedgerDatabase): void {
     const count = this.#tableCount(database, 'operation_receipts')
     const remove = Math.max(0, count - (OPERATION_RECEIPT_CAP - 1))
     if (remove === 0) return
@@ -1902,7 +1902,7 @@ export class WorkspaceGraphStore {
     `).run(Date.now() - OPERATION_RECEIPT_MIN_AGE_MS, remove)
   }
 
-  #derivedRowCount(database: GraphDatabase): number {
+  #derivedRowCount(database: LedgerDatabase): number {
     return this.#tableCount(database, 'logical_workspaces')
       + this.#tableCount(database, 'workspace_instances')
       + this.#tableCount(database, 'relation_cards')
@@ -1912,7 +1912,7 @@ export class WorkspaceGraphStore {
       + this.#tableCount(database, 'alias_observations')
   }
 
-  #tableCount(database: GraphDatabase, table: string): number {
+  #tableCount(database: LedgerDatabase, table: string): number {
     return numberColumn(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get(), 'count')
   }
 
@@ -1932,7 +1932,7 @@ export class WorkspaceGraphStore {
   }
 
   #writeWithReceipt<Result>(
-    database: GraphDatabase,
+    database: LedgerDatabase,
     operationId: string,
     operationType: OperationType,
     input: unknown,
@@ -1940,14 +1940,14 @@ export class WorkspaceGraphStore {
     operation: () => {readonly result: Result; readonly receipt: OperationReceiptResult},
   ): Result {
     const parsedId = z.string().uuid().safeParse(operationId)
-    if (!parsedId.success) throw new WorkspaceGraphStoreError('STORE_INVALID_OPERATION')
+    if (!parsedId.success) throw new MemoryLedgerStoreError('STORE_INVALID_OPERATION')
     const inputDigest = createHash('sha256').update(canonicalJson(input)).digest('hex')
     try {
       database.exec('BEGIN IMMEDIATE')
       const existing = this.#operationReceipt(database, parsedId.data)
       if (existing !== undefined) {
         if (existing.receipt.operation_type !== operationType || existing.inputDigest !== inputDigest) {
-          throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+          throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
         }
         const result = replay(existing.receipt.result)
         database.exec('COMMIT')
@@ -1974,13 +1974,13 @@ export class WorkspaceGraphStore {
       return completed.result
     } catch (error) {
       rollback(database)
-      if (error instanceof WorkspaceGraphStoreError) throw error
-      throw new WorkspaceGraphStoreError('STORE_WRITE_FAILED')
+      if (error instanceof MemoryLedgerStoreError) throw error
+      throw new MemoryLedgerStoreError('STORE_WRITE_FAILED')
     }
   }
 
   #operationReceipt(
-    database: GraphDatabase,
+    database: LedgerDatabase,
     operationId: string,
   ): {readonly receipt: OperationReceipt; readonly inputDigest: string} | undefined {
     const row = database.prepare(`
@@ -2005,7 +2005,7 @@ export class WorkspaceGraphStore {
   }
 
   #hydrateLegacyRelationReceipt(
-    database: GraphDatabase,
+    database: LedgerDatabase,
     legacy: z.infer<typeof legacyRelationOperationReceiptSchema>,
   ): OperationReceipt {
     const result = legacy.result
@@ -2013,10 +2013,10 @@ export class WorkspaceGraphStore {
       SELECT payload_json FROM relation_cards
       WHERE source_logical_id = ? AND target_logical_id = ? AND relation_type = ?
     `).get(result.source_logical_id, result.target_logical_id, result.relation_type)
-    if (row === undefined) throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+    if (row === undefined) throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
     const relation = this.#parseRelationPayload(stringColumn(row, 'payload_json'))
     if (relation.revision !== result.revision || relation.status !== result.status) {
-      throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+      throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
     }
     return OperationReceiptSchema.parse({
       operation_id: legacy.operation_id,
@@ -2026,11 +2026,11 @@ export class WorkspaceGraphStore {
   }
 
   #relationFromReceipt(receipt: OperationReceiptResult): RelationCard {
-    if (receipt.kind !== 'relation') throw new WorkspaceGraphStoreError('STORE_OPERATION_CONFLICT')
+    if (receipt.kind !== 'relation') throw new MemoryLedgerStoreError('STORE_OPERATION_CONFLICT')
     return receipt.relation
   }
 
-  #latestReceiptSequence(database: GraphDatabase): number {
+  #latestReceiptSequence(database: LedgerDatabase): number {
     const row = database.prepare('SELECT MAX(receipt_sequence) AS sequence FROM operation_receipts').get()
     if (row === undefined || row.sequence === null) return 0
     return numberColumn(row, 'sequence')
@@ -2040,18 +2040,18 @@ export class WorkspaceGraphStore {
     try {
       return operation()
     } catch (error) {
-      if (error instanceof WorkspaceGraphStoreError) throw error
-      throw new WorkspaceGraphStoreError('STORE_READ_FAILED')
+      if (error instanceof MemoryLedgerStoreError) throw error
+      throw new MemoryLedgerStoreError('STORE_READ_FAILED')
     }
   }
 
-  #requireDatabase(): GraphDatabase {
-    if (this.#database === undefined) throw new WorkspaceGraphStoreError('STORE_CLOSED')
+  #requireDatabase(): LedgerDatabase {
+    if (this.#database === undefined) throw new MemoryLedgerStoreError('STORE_CLOSED')
     return this.#database
   }
 }
 
-function rollback(database: GraphDatabase): void {
+function rollback(database: LedgerDatabase): void {
   try {
     database.exec('ROLLBACK')
   } catch {
@@ -2098,7 +2098,7 @@ function stringColumn(
   key: string,
 ): string {
   const value = row?.[key]
-  if (typeof value !== 'string') throw new WorkspaceGraphStoreError('STORE_READ_FAILED')
+  if (typeof value !== 'string') throw new MemoryLedgerStoreError('STORE_READ_FAILED')
   return value
 }
 
@@ -2109,7 +2109,7 @@ function numberColumn(
   const value = row?.[key]
   if (typeof value === 'number') return value
   if (typeof value === 'bigint') return Number(value)
-  throw new WorkspaceGraphStoreError('STORE_READ_FAILED')
+  throw new MemoryLedgerStoreError('STORE_READ_FAILED')
 }
 
 function compareAliases(left: PublishedGraphAlias, right: PublishedGraphAlias): number {
