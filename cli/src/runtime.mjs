@@ -93,6 +93,23 @@ export function parseChecksum(text, artifact) {
   throw new Error('release checksum rejected')
 }
 
+// Retry transport failures only; HTTP, checksum, size and filesystem failures stay fatal.
+async function retryReleaseDownload(download) {
+  for (let attempt = 1; ; attempt += 1) {
+    try { return await download() } catch (error) {
+      const code = error?.cause?.code ?? error?.code
+      if (!['UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT',
+        'UND_ERR_BODY_TIMEOUT', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT',
+        'EAI_AGAIN', 'ENETUNREACH'].includes(code)) throw error
+      if (attempt === 3) throw new Error(
+        'release download failed after 3 attempts: connection interrupted. Check access to GitHub release downloads and retry `novaaudio`.',
+        {cause: error},
+      )
+      await wait(250 * attempt)
+    }
+  }
+}
+
 async function expectedChecksum(url, artifact, options) {
   const response = await request(`${url}.sha256`, options)
   const body = await responseBytes(response, MAX_CHECKSUM_BYTES)
@@ -312,11 +329,11 @@ export async function ensureDesktop({
   const cached = await cachedInstallation({root, executable, target, platform})
   let expected
   try {
-    expected = await expectedChecksum(
+    expected = await retryReleaseDownload(() => expectedChecksum(
       `${baseUrl}/${target.artifact}`,
       target.artifact,
       {fetchImpl},
-    )
+    ))
   } catch (error) {
     if (cached !== null) return Object.freeze({target, root, executable})
     throw error
@@ -335,7 +352,7 @@ export async function ensureDesktop({
     try {
       const artifact = join(temporary, target.artifact)
       const artifactUrl = `${baseUrl}/${target.artifact}`
-      const actual = await downloadArtifact(artifactUrl, artifact, {fetchImpl})
+      const actual = await retryReleaseDownload(() => downloadArtifact(artifactUrl, artifact, {fetchImpl}))
       if (!sameDigest(expected, actual)) throw new Error('release checksum mismatch')
       const payload = join(temporary, 'payload')
       await extractImpl({artifact, payload, target, platform})
