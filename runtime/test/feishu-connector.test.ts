@@ -4,6 +4,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { assertFeishuCommand, createFeishuRunner, FeishuAppNotConfigured, parseFeishuJson } from '../src/connectors/feishu/cli.js';
+
+test('unsupported CLI stays unavailable on subsequent status requests without accessing credentials', async () => {
+  const directory=await mkdtemp(join(tmpdir(),'nova-feishu-old-cli-'));
+  const calls:string[][]=[];
+  const connector=new FeishuConnector({bootstrapOnly:true,executable:'unused',credentialRoot:directory,statePath:join(directory,'state.json'),run:async args=>{calls.push(args);if(args[0]==='--version')return '1.0.35';throw Error('credential initialization should not run');}});
+  try {
+    await connector.open();
+    const state=await connector.command('feishu.status');
+    assert.equal(state.available,false);assert.match(state.error!,/1\.0\.69/);
+    await assert.rejects(connector.command('feishu.login'),/1\.0\.69/);
+    assert.ok(calls.every(args=>args[0]==='--version'));
+  } finally {await connector.close();await rm(directory,{recursive:true,force:true});}
+});
 import {abortable} from '../src/core/camera-session.js';
 import { FEISHU_SCOPES, FeishuConnector, type FeishuMessage } from '../src/connectors/feishu/index.js';
 

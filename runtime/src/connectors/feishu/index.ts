@@ -183,6 +183,8 @@ export class FeishuConnector {
     });
   }
   async status(signal?: AbortSignal): Promise<FeishuSnapshot> {
+    // Preserve the preflight error instead of attempting credential access with an unsupported CLI.
+    if (!this.view.available) return this.snapshot();
     let data: Record<string, unknown>;
     try {data = signal ? parseFeishuJson(await this.run(['auth', 'status', '--json', '--verify'], {signal})) : await this.json(['auth', 'status', '--json', '--verify']);}
     catch (error) {if (!(error instanceof FeishuAppNotConfigured)) throw error; data = {};}
@@ -456,6 +458,7 @@ export class FeishuConnector {
     return true;
   }
   async command(method: string, params: Record<string, unknown> = {}): Promise<FeishuSnapshot> {
+    if (!this.view.available && method !== 'feishu.status') throw new Error(this.view.error || '飞书 CLI 不可用');
     if (this.options.bootstrapOnly && !['feishu.status', 'feishu.app.start', 'feishu.app.status', 'feishu.app.cancel', 'feishu.app.bind', 'feishu.login', 'feishu.complete'].includes(method)) throw new Error('飞书同步需要运行中的模型服务');
     switch (method) {
       case 'feishu.app.bind':
