@@ -64,26 +64,47 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 
 
 
+## 使用场景
+
+<table>
+  <tr>
+    <td valign="top">
+      <h3>Voice Vibe Coding</h3>
+      <p>用语音描述功能、调整需求，Codex 在后台编码与测试。关键进展主动告知，琐碎过程保持安静。</p>
+      <p align="center"><img src="assets/features/coding.svg" alt="语音需求交给 Codex，完成编码与测试的流程示意" width="480"></p>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>你的个人工作台</h3>
+      <p>待办、想法、目标、资讯和「关于我」在左侧，和小诺的对话在右侧。从任意一条待办发起任务，小诺对照验收标准核对结果；中途你随时可以接管，也可以交还给它。</p>
+      <p align="center"><img src="assets/features/workbench-window.png" alt="Workbench 窗口：左侧待办，右侧与小诺的对话" width="820"></p>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>视觉监控与主动提醒</h3>
+      <p>告诉 Nova 要关注的画面变化，条件触发时主动提醒。</p>
+      <p align="center"><img src="assets/features/vision-camera.png" alt="摄像头观察结果与主动播报" width="820"></p>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>把 Nova 带在身边</h3>
+      <p>iPhone 通过 Tailscale 连接电脑，随时对话和审批。</p>
+      <p align="center"><img src="assets/features/iphone.png" alt="iPhone 主界面与连接设置" width="480"></p>
+    </td>
+  </tr>
+</table>
+
 ## 核心功能
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>Voice Vibe Coding</h3>
-      <p>用语音描述功能、调整需求，Codex 在后台编码与测试。关键进展主动告知，琐碎过程保持安静。</p>
-      <img src="assets/features/coding.svg" alt="语音需求交给 Codex，完成编码与测试的流程示意" width="100%">
-    </td>
-    <td width="50%" valign="top">
       <h3>理解意图，问清再做</h3>
       <p>自然描述目标，Nova 理解你的意图，问清缺失信息后再开始任务。</p>
       <img src="assets/features/conversation.png" alt="Nova 在开始任务前澄清应用形式与需求" width="100%">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Workbench：待办、想法与目标</h3>
-      <p>待办、想法和目标就在对话旁边。查看最近的项目动态与下一步建议，随时请 Nova 帮忙。</p>
-      <img src="assets/features/workbench.png" alt="Workbench 中的项目回顾与下一步建议" width="100%">
     </td>
     <td width="50%" valign="top">
       <h3>操作权限，由你决定</h3>
@@ -93,9 +114,9 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>视觉监控与主动提醒</h3>
-      <p>告诉 Nova 要关注的画面变化，条件触发时主动提醒。</p>
-      <img src="assets/features/vision-camera.png" alt="摄像头观察结果与主动播报" width="100%">
+      <h3>语音管理工作区</h3>
+      <p>用语音创建、切换工作区和会话；新建工作区前，先等你点头。</p>
+      <img src="assets/features/workspace.png" alt="Nova 等待你确认创建工作区" width="100%">
     </td>
     <td width="50%" valign="top">
       <h3>接入工具与知识</h3>
@@ -103,16 +124,33 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
       <img src="assets/features/knowledge.png" alt="基于 CN-27 演示资料的知识库回答" width="100%">
     </td>
   </tr>
+</table>
+
+### v0.3 新功能
+
+<table>
   <tr>
     <td width="50%" valign="top">
-      <h3>Profile 与个人记忆</h3>
-      <p>在同一处查看个人概述与记忆，检查已记录的上下文，随时纠正或让 Nova 忘记。</p>
-      <img src="assets/features/profile-memory.png" alt="Profile 个人概述与记忆管理操作" width="100%">
+      <h3>待办与项目回顾</h3>
+      <p>根据最近的项目动态生成回顾卡片和下一步建议，每条都带出处；挑一条，就能让小诺接着做。</p>
+      <img src="assets/features/workbench.png" alt="Workbench 中的项目回顾与下一步建议" width="100%">
     </td>
     <td width="50%" valign="top">
-      <h3>把 Nova 带在身边</h3>
-      <p>iPhone 通过 Tailscale 连接电脑，随时对话和审批。</p>
-      <img src="assets/features/iphone.png" alt="iPhone 主界面与连接设置" width="100%">
+      <h3>想法与目标</h3>
+      <p>想法随手记，目标慢慢定。小诺会从你的资料里补充建议，但不会自作主张加进来。</p>
+      <img src="assets/features/ideas-goals.png" alt="想法和目标页面，以及小诺给出的建议" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>按兴趣排序的资讯</h3>
+      <p>从「关于我」推断你关心的方向，给公开资讯排序；看到有用的，可以收藏，或转成自己的想法、待办和目标。</p>
+      <img src="assets/features/feeds.png" alt="按兴趣排序的资讯流" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>「关于我」与个人记忆</h3>
+      <p>小诺对你的了解，每条都标明是你说过的还是来自资料；可以接着聊、纠正、忘记，也可以彻底删除。</p>
+      <img src="assets/features/profile-memory.png" alt="Profile 个人概述与记忆管理操作" width="100%">
     </td>
   </tr>
 </table>

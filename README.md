@@ -63,26 +63,47 @@ For more details about the architecture, check [Architecture](docs/en/architectu
 
 
 
+## Use Cases
+
+<table>
+  <tr>
+    <td valign="top">
+      <h3>Voice Vibe Coding</h3>
+      <p>Describe a feature and refine it by voice while Codex writes and tests the code. Nova reports key milestones and keeps routine progress quiet.</p>
+      <p align="center"><img src="assets/features/coding.en.svg" alt="Voice requests flow to Codex for coding and testing" width="480"></p>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Your personal workbench</h3>
+      <p>Todos, Ideas, Goals, Feeds and your Profile sit on the left, the conversation with Nova on the right. Start a task from any todo; Nova checks the result against its acceptance criteria, and you can take over or hand it back at any time.</p>
+      <p align="center"><img src="assets/features/workbench-window.png" alt="Workbench window with todos on the left and the conversation with Nova on the right" width="820"></p>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Camera monitoring and timely alerts</h3>
+      <p>Ask Nova to watch for a condition and tell you when it occurs.</p>
+      <p align="center"><img src="assets/features/vision-camera.png" alt="Camera observation and spoken alert" width="820"></p>
+    </td>
+  </tr>
+  <tr>
+    <td valign="top">
+      <h3>Take Nova with you</h3>
+      <p>Connect your iPhone over Tailscale to talk and approve tasks on your PC.</p>
+      <p align="center"><img src="assets/features/iphone.en.png" alt="iPhone home and connection settings" width="480"></p>
+    </td>
+  </tr>
+</table>
+
 ## Main Features
 
 <table>
   <tr>
     <td width="50%" valign="top">
-      <h3>Voice Vibe Coding</h3>
-      <p>Describe a feature and refine it by voice while Codex writes and tests the code. Nova reports key milestones and keeps routine progress quiet.</p>
-      <img src="assets/features/coding.en.svg" alt="Voice requests flow to Codex for coding and testing" width="100%">
-    </td>
-    <td width="50%" valign="top">
       <h3>Understands what you mean</h3>
       <p>Describe your goal naturally. Nova asks for the missing details before turning it into a task.</p>
       <img src="assets/features/conversation.en.png" alt="Nova clarifies the requested application before starting" width="100%">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Your personal workbench</h3>
-      <p>Keep Todos, Ideas and Goals beside your conversation. Review recent project activity and suggested next steps, then ask Nova to help.</p>
-      <img src="assets/features/workbench.en.png" alt="Workbench project recaps and next-step suggestions" width="100%">
     </td>
     <td width="50%" valign="top">
       <h3>You control permissions</h3>
@@ -92,9 +113,9 @@ For more details about the architecture, check [Architecture](docs/en/architectu
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>Camera monitoring and timely alerts</h3>
-      <p>Ask Nova to watch for a condition and tell you when it occurs.</p>
-      <img src="assets/features/vision-camera.png" alt="Camera observation and spoken alert" width="100%">
+      <h3>Voice-run workspaces</h3>
+      <p>Create and switch workspaces and sessions by voice. A new workspace waits for your confirmation.</p>
+      <img src="assets/features/workspace.en.png" alt="Nova waits for approval to create a workspace" width="100%">
     </td>
     <td width="50%" valign="top">
       <h3>Bring your tools and knowledge</h3>
@@ -102,16 +123,33 @@ For more details about the architecture, check [Architecture](docs/en/architectu
       <img src="assets/features/knowledge.en.png" alt="Knowledge-base answer using the CN-27 demo documents" width="100%">
     </td>
   </tr>
+</table>
+
+### New in v0.3
+
+<table>
   <tr>
     <td width="50%" valign="top">
-      <h3>Personal context, in your control</h3>
-      <p>Review your Profile and personal memories in one place. Inspect recorded context, correct it or ask Nova to forget it.</p>
-      <img src="assets/features/profile-memory.en.png" alt="Profile overview and personal memory controls" width="100%">
+      <h3>Todos and project recaps</h3>
+      <p>Recent project activity becomes recap cards and suggested next steps, each with its sources. Pick one and ask Nova to help.</p>
+      <img src="assets/features/workbench.en.png" alt="Workbench project recaps and next-step suggestions" width="100%">
     </td>
     <td width="50%" valign="top">
-      <h3>Take Nova with you</h3>
-      <p>Connect your iPhone over Tailscale to talk and approve tasks on your PC.</p>
-      <img src="assets/features/iphone.en.png" alt="iPhone home and connection settings" width="100%">
+      <h3>Ideas and goals</h3>
+      <p>Jot down ideas and set goals. Nova suggests more from your sources, and nothing is added without you.</p>
+      <img src="assets/features/ideas-goals.png" alt="Ideas and Goals pages with suggestions from Nova" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Feeds ranked by your interests</h3>
+      <p>Nova infers your interests from your Profile and ranks public news by them. Save an item, or turn it into an idea, todo or goal of your own.</p>
+      <img src="assets/features/feeds.png" alt="Interest-ranked news feed" width="100%">
+    </td>
+    <td width="50%" valign="top">
+      <h3>Profile and personal memory</h3>
+      <p>See what Nova knows about you, each entry marked as something you said or something from your sources. Continue, correct, forget or purge any of it.</p>
+      <img src="assets/features/profile-memory.en.png" alt="Profile overview and personal memory controls" width="100%">
     </td>
   </tr>
 </table>
