@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
-import {EventEmitter} from 'node:events'
+import {EventEmitter, once} from 'node:events'
+import {createServer} from 'node:http'
 import {mkdir, mkdtemp, readFile, writeFile, rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {dirname, join} from 'node:path'
@@ -264,3 +265,38 @@ test('doctor never probes a custom gateway key against DashScope', async t => {
   assert.deepEqual(report.voice.keys, [{name: 'DASHSCOPE_API_KEY', source: null}])
   assert.deepEqual(calls, [])
 })
+
+// Exercise Node fetch's real "terminated" response-body failure, not a mocked error.
+for (const failure of ['checksum', 'artifact', 'persistent']) {
+  test(`release download recovers or explains a truncated ${failure} response`, async t => {
+    const home = await mkdtemp(join(tmpdir(), 'novaaudio-truncated-'))
+    t.after(() => rm(home, {recursive: true, force: true}))
+    const bytes = Buffer.from('verified portable desktop payload')
+    const digest = createHash('sha256').update(bytes).digest('hex')
+    let interruptions = 0
+    const server = createServer((req, res) => {
+      const checksum = req.url.endsWith('.sha256')
+      const body = checksum ? Buffer.from(`${digest}  ${ARTIFACT}\n`) : bytes
+      res.writeHead(200, {'content-length': body.length})
+      if ((failure === 'checksum' ? checksum : !checksum) && (interruptions === 0 || failure === 'persistent')) {
+        interruptions += 1
+        res.write(body.subarray(0, 4))
+        setTimeout(() => res.destroy(), 10)
+      } else res.end(body)
+    })
+    server.listen(0, '127.0.0.1')
+    await once(server, 'listening')
+    t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)) })
+    const fetchImpl = (url, options) => fetch(`http://127.0.0.1:${server.address().port}/${new URL(url).pathname.split('/').at(-1)}`, options)
+    const install = ensureDesktop({...TARGET_OPTIONS, home, fetchImpl, extractImpl: extractFixture})
+    if (failure === 'persistent') {
+      await assert.rejects(install, error => /download.*failed.*3 attempts/i.test(error.message) && /retry/i.test(error.message) && error.cause?.message === 'terminated')
+      assert.equal(interruptions, 3)
+      await assert.rejects(readFile(join(home, '.nova-audio-agent/cli/releases/0.2.3/win32-x64/novaaudio-install.json')))
+    } else {
+      const installed = await install
+      assert.deepEqual(await readFile(installed.executable), bytes)
+      assert.equal(JSON.parse(await readFile(join(installed.root, 'novaaudio-install.json'), 'utf8')).sha256, digest)
+    }
+  })
+}
