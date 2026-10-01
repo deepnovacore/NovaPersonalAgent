@@ -83,7 +83,7 @@ export function generateDocs() {
   const userSlugs = ['', 'getting-started', 'features', 'support-matrix', 'knowledge-base', 'personal-memory', 'iphone', 'configuration', 'architecture'];
   const index = pages.map(p => ({ title: p.title, url: p.url, lang: p.lang, section: userSlugs.includes(p.slug) ? 'users' : 'developers', headings: p.toc.map(h => h.title).join(' '), text: plain(p.html) }));
   fs.writeFileSync(path.join(site, 'generated/search.json'), JSON.stringify(index));
-  for (const name of ['vision-camera.png', 'mem0-dark.png', 'mem0-dark.en.png']) {
+  for (const name of ['vision-camera.png', 'mem0-dark.png', 'mem0-dark.en.png', 'workbench-window.png', 'ideas-goals.png', 'feeds.png']) {
     const relative = `assets/features/${name}`;
     assets.set(relative, path.join(repoRoot, relative));
   }
