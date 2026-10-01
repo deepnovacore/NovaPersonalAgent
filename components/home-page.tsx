@@ -30,7 +30,7 @@ export function HomePage({ en = false }: { en?: boolean }) {
   ];
   const cards = featureCards.filter(card => card.lang === (en ? 'en' : 'zh-CN'));
   const tile = (card: (typeof featureCards)[number]) => (
-    <article className={card.group === 'use-case' ? 'feature-tile use-case-tile' : 'feature-tile'} key={card.image}>
+    <article className="feature-tile" key={card.image}>
       <div className="feature-tile-copy"><h3>{card.title}</h3><p>{card.description}</p></div>
       <a className="feature-image-stage" style={{ aspectRatio: `${card.width} / ${card.height}` }} href={sitePath(card.image)} target="_blank" rel="noreferrer" aria-label={card.alt}><img src={sitePath(card.image)} alt={card.alt} loading="lazy" width={card.width} height={card.height} /></a>
       {card.caption && <p className="feature-caption">{card.caption}</p>}
@@ -120,7 +120,7 @@ export function HomePage({ en = false }: { en?: boolean }) {
         </section>
         <section className="main-features wrap" id="features">
           <div className="main-features-heading"><p className="section-label">{en ? 'Use cases' : '使用场景'}</p><h2>{en ? 'More ways to work with Nova.' : '从一句话，到更多可能。'}</h2></div>
-          <div className="use-case-gallery">{cards.filter(card => card.group === 'use-case').map(tile)}</div>
+          <div className="feature-gallery">{cards.filter(card => card.group === 'use-case').map(tile)}</div>
           <div className="main-features-heading feature-group-heading"><p className="section-label">{en ? 'Main features' : '核心功能'}</p><h2>{en ? 'You stay in control.' : '每一步，都由你做主。'}</h2></div>
           <div className="feature-gallery">{cards.filter(card => card.group === 'feature').map(tile)}</div>
           <div className="main-features-heading feature-group-heading"><p className="section-label">{en ? 'New in v0.3' : 'v0.3 新功能'}</p><h2>{en ? 'Your day, on one Workbench.' : '一天的事，都在工作台上。'}</h2></div>

@@ -5,17 +5,6 @@ export const featureCards: { lang: "en" | "zh-CN"; group: FeatureGroup; title: s
   {
     "lang": "en",
     "group": "use-case",
-    "title": "Voice Vibe Coding",
-    "description": "Describe a feature and refine it by voice while Codex writes and tests the code. Nova reports key milestones and keeps routine progress quiet.",
-    "alt": "Voice requests flow to Codex for coding and testing",
-    "image": "/doc-assets/assets/features/coding.en.svg",
-    "width": 887,
-    "height": 887,
-    "caption": ""
-  },
-  {
-    "lang": "en",
-    "group": "use-case",
     "title": "Your personal workbench",
     "description": "Todos, Ideas, Goals, Feeds and your Profile sit on the left, the conversation with Nova on the right. Start a task from any todo; Nova checks the result against its acceptance criteria, and you can take over or hand it back at any time.",
     "alt": "Workbench window with todos on the left and the conversation with Nova on the right",
@@ -34,6 +23,17 @@ export const featureCards: { lang: "en" | "zh-CN"; group: FeatureGroup; title: s
     "width": 1280,
     "height": 720,
     "caption": "Camera observation: a tabby cat has climbed onto the sofa."
+  },
+  {
+    "lang": "en",
+    "group": "use-case",
+    "title": "Voice Vibe Coding",
+    "description": "Describe a feature and refine it by voice while Codex writes and tests the code. Nova reports key milestones and keeps routine progress quiet.",
+    "alt": "Voice requests flow to Codex for coding and testing",
+    "image": "/doc-assets/assets/features/coding.en.svg",
+    "width": 887,
+    "height": 887,
+    "caption": ""
   },
   {
     "lang": "en",
@@ -137,17 +137,6 @@ export const featureCards: { lang: "en" | "zh-CN"; group: FeatureGroup; title: s
   {
     "lang": "zh-CN",
     "group": "use-case",
-    "title": "Voice Vibe Coding",
-    "description": "用语音描述功能、调整需求，Codex 在后台编码与测试。关键进展主动告知，琐碎过程保持安静。",
-    "alt": "语音需求交给 Codex，完成编码与测试的流程示意",
-    "image": "/doc-assets/assets/features/coding.svg",
-    "width": 887,
-    "height": 887,
-    "caption": ""
-  },
-  {
-    "lang": "zh-CN",
-    "group": "use-case",
     "title": "你的个人工作台",
     "description": "待办、想法、目标、资讯和「关于我」在左侧，和小诺的对话在右侧。从任意一条待办发起任务，小诺对照验收标准核对结果；中途你随时可以接管，也可以交还给它。",
     "alt": "Workbench 窗口：左侧待办，右侧与小诺的对话",
@@ -166,6 +155,17 @@ export const featureCards: { lang: "en" | "zh-CN"; group: FeatureGroup; title: s
     "width": 1280,
     "height": 720,
     "caption": "画面观察：虎斑猫已爬上沙发。"
+  },
+  {
+    "lang": "zh-CN",
+    "group": "use-case",
+    "title": "Voice Vibe Coding",
+    "description": "用语音描述功能、调整需求，Codex 在后台编码与测试。关键进展主动告知，琐碎过程保持安静。",
+    "alt": "语音需求交给 Codex，完成编码与测试的流程示意",
+    "image": "/doc-assets/assets/features/coding.svg",
+    "width": 887,
+    "height": 887,
+    "caption": ""
   },
   {
     "lang": "zh-CN",
