@@ -4,6 +4,7 @@ import {dirname, resolve} from 'node:path'
 import {installAcceptanceGate,probeAcceptanceGate,acceptanceRuntimeHash} from './desktop/workbench-acceptance.js'
 import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, PERSONAL_SETTINGS_METHODS, desktopBudgetFailure, desktopConfigurationFailure, type DesktopCapabilityState} from './desktop/desktop-control.js'
 import {runDesktopEntryWithStopSources, type DesktopStopParentSource} from './desktop/desktop-session.js'
+import {describeStartupError} from './desktop/startup-error.js'
 import {announceReadiness} from './desktop.js'
 import {buildProductionComposition} from './composition/production-composition.js'
 import {renamedEnvironmentWarnings} from './config/config.js'
@@ -52,8 +53,10 @@ const exitCode = await runDesktopEntryWithStopSources({
   ),
   onDiagnostic,
   onStartupFailure: error => {
+    const code=error instanceof Error?(error as {code?:unknown}).code:undefined
+    const detail=error instanceof Error?`${error.name}${typeof code==='string'?` [${code}]`:''}: ${error.message}`:typeof error
+    onDiagnostic(`[runtime-startup-error] ${describeStartupError(error)}`)
     if(acceptance){
-      const detail=error instanceof Error?`${error.name}: ${error.message}`:typeof error
       onDiagnostic(`[acceptance-startup-error] ${detail.replace(/[\r\n]/gu,' ').slice(0,300)}`)
       const report=process.env.NOVA_WORKBENCH_ACCEPTANCE_REPORT
       if(report)writeFileSync(resolve(dirname(report),'startup-error.json'),JSON.stringify({detail,stack:error instanceof Error?error.stack?.split('\n').slice(0,8):undefined})+'\n',{mode:0o600})

@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto'
 import {z} from 'zod'
 import {canonicalJson} from '../text/canonical-json.js'
 import {trustSchema} from '../core/events.js'
-import type {GraphDatabase} from '../workspace-graph/store.js'
+import type {LedgerDatabase} from '../memory-ledger/store.js'
 import {initializeSourceState,correctionProcessingGrant,isCurrentEvidence,allowsProcessing,readProcessingGrant,sourceObjectFor,readConnection,sha256} from './source-state.js'
 import {sourceOperation} from './source-operations.js'
 import {SensitiveContentPolicy} from '../memory/sensitivity.js'
@@ -68,7 +68,7 @@ export function merge(current:EntryRevision|null,candidate:Candidate,policy:{sup
   return EntryRevisionSchema.parse({...fields,revision:(current?.revision??0)+1,supersedes:current?.revision??null,op:candidate.op === 'tombstone'?'tombstone':current?'update':'add'})
 }
 
-export function initializeMemory(database:GraphDatabase):void {
+export function initializeMemory(database:LedgerDatabase):void {
   initializePurge(database)
   initializeLife(database)
   initializeSourceState(database)
@@ -89,14 +89,14 @@ function scrub(value:unknown, redactions:string[],path='content'):unknown {
   if (value && typeof value==='object')return Object.fromEntries(Object.entries(value).map(([key,item])=>[key,scrub(item,redactions,`${path}.${key}`)]))
   return value
 }
-function rows(db:GraphDatabase,sql:string,...args:string[]):unknown[] {return db.prepare(sql).all(...args).map(row=>JSON.parse(String(row.payload_json)) as unknown)}
-function current(db:GraphDatabase,entryId:string):EntryRevision|null {const row=db.prepare('SELECT payload_json FROM memory_revisions WHERE entry_id=? ORDER BY revision DESC LIMIT 1').get(entryId);return row?EntryRevisionSchema.parse(JSON.parse(String(row.payload_json))):null}
-function all(db:GraphDatabase):EntryRevision[]{return rows(db,'SELECT r.payload_json FROM memory_revisions r JOIN (SELECT entry_id,MAX(revision) revision FROM memory_revisions GROUP BY entry_id) latest USING(entry_id,revision) ORDER BY r.entry_id').map(row=>EntryRevisionSchema.parse(row))}
-export function fileDerivedInference(db:GraphDatabase,row:EntryRevision):boolean{
+function rows(db:LedgerDatabase,sql:string,...args:string[]):unknown[] {return db.prepare(sql).all(...args).map(row=>JSON.parse(String(row.payload_json)) as unknown)}
+function current(db:LedgerDatabase,entryId:string):EntryRevision|null {const row=db.prepare('SELECT payload_json FROM memory_revisions WHERE entry_id=? ORDER BY revision DESC LIMIT 1').get(entryId);return row?EntryRevisionSchema.parse(JSON.parse(String(row.payload_json))):null}
+function all(db:LedgerDatabase):EntryRevision[]{return rows(db,'SELECT r.payload_json FROM memory_revisions r JOIN (SELECT entry_id,MAX(revision) revision FROM memory_revisions GROUP BY entry_id) latest USING(entry_id,revision) ORDER BY r.entry_id').map(row=>EntryRevisionSchema.parse(row))}
+export function fileDerivedInference(db:LedgerDatabase,row:EntryRevision):boolean{
   return row.origin==='inferred'&&row.written_by!=='user_correction'&&row.evidence_refs.some(ref=>evidence(db,ref)?.source_kind==='file')
 }
-function evidence(db:GraphDatabase,evidenceId:string):EvidenceRecord|null {const row=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(evidenceId);return row?EvidenceRecordSchema.parse(JSON.parse(String(row.payload_json))):null}
-export function effectiveEvidence(db:GraphDatabase,evidenceId:string,options:{purpose:'local'|'extraction'|'embedding'|'conversation';provider?:string}={purpose:'local'}):EvidenceRecord|null {
+function evidence(db:LedgerDatabase,evidenceId:string):EvidenceRecord|null {const row=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(evidenceId);return row?EvidenceRecordSchema.parse(JSON.parse(String(row.payload_json))):null}
+export function effectiveEvidence(db:LedgerDatabase,evidenceId:string,options:{purpose:'local'|'extraction'|'embedding'|'conversation';provider?:string}={purpose:'local'}):EvidenceRecord|null {
   const ref=evidence(db,evidenceId);if(!ref)return null
   if(!isCurrentEvidence(db,ref.id,ref.source_id))return null
   if(ref.retention_until!==null&&Date.parse(ref.retention_until)<=Date.now())return null
@@ -105,12 +105,12 @@ export function effectiveEvidence(db:GraphDatabase,evidenceId:string,options:{pu
   if(ref.raw_text!==null&&db.prepare('SELECT hash FROM memory_legacy_suppressed WHERE hash=? AND substr(?,1,length(scope))=scope').get(createHash('sha256').update(ref.raw_text.normalize('NFKC').trim().toLowerCase()).digest('hex'),ref.source_id))return null
   return ref
 }
-export function processingStamp(db:GraphDatabase,ids:readonly string[],purpose:'extraction'|'embedding'|'conversation',provider:string):string|null{
+export function processingStamp(db:LedgerDatabase,ids:readonly string[],purpose:'extraction'|'embedding'|'conversation',provider:string):string|null{
   const records=ids.map(id=>effectiveEvidence(db,id,{purpose,provider}));if(!records.length||records.some(e=>e===null))return null
   return sha256(canonicalJson(records.map(e=>{const object=sourceObjectFor(db,e!.source_id);return {id:e!.id,grant:readProcessingGrant(db,e!.source_id),activation:object?.activation_revision??null,fence:object?readConnection(db,object.connection_id)?.fence:null}})))
 }
-export const retrievalEvidence=(db:GraphDatabase,id:string):EvidenceRecord|null=>effectiveEvidence(db,id)
-function write(db:GraphDatabase,candidate:Candidate,deleted=false):EntryRevision|null {
+export const retrievalEvidence=(db:LedgerDatabase,id:string):EvidenceRecord|null=>effectiveEvidence(db,id)
+function write(db:LedgerDatabase,candidate:Candidate,deleted=false):EntryRevision|null {
   if(isPermanentlyPurged(db,candidate.entry_id))throw Error('STORE_PURGED_ID')
   const previous=current(db,candidate.entry_id)
   if(candidate.expected_revision!==undefined&&candidate.expected_revision!==(previous?.revision??0))throw Error('STORE_STALE_REVISION')
@@ -135,7 +135,7 @@ function write(db:GraphDatabase,candidate:Candidate,deleted=false):EntryRevision
   return next??current(db,candidate.entry_id)
 }
 export type MemoryOperation = 'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
-export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
+export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   const ledgerOnly=isLedgerOnlyOperation(operation,value)
   if(transaction&&!ledgerOnly)reconcileMemoryFiles(db)
@@ -262,7 +262,7 @@ export function memoryOperation(db:GraphDatabase,operation:MemoryOperation,input
 }
 
 /** Hand edits become normal user corrections, never an untracked authoritative override. */
-export function reconcileMemoryFiles(db:GraphDatabase):void {
+export function reconcileMemoryFiles(db:LedgerDatabase):void {
  const snapshot=readMemoryFiles(db);if(!snapshot?.edits.length)return
  db.exec('BEGIN IMMEDIATE');let committed=false
  try{

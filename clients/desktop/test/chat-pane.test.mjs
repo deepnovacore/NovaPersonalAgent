@@ -45,14 +45,14 @@ test('duplicate historical conversation labels distinguish dates and ties while 
   assert.deepEqual(items,original)
  }finally{m.view.controller.disconnect();await tick()}
 })
-test('new conversation and target picker controls explicitly translate dynamic UI without translating custom titles',async()=>{
+test('new conversation and target menu controls explicitly translate dynamic UI without translating custom titles',async()=>{
  const {setLanguage}=await import('../src/renderer/locale.mjs');setLanguage('en')
  const m=mount()
  try{
   m.view.receive(feedState(1,'c',{feed:[]}))
-  assert.ok(m.all().some(n=>n.attrs['aria-label']==='Execution workspace'))
-  assert.ok(m.all().some(n=>n.attrs['aria-label']==='Codex session (continuation target)'))
-  for(const label of ['Execution workspace','Codex session (continuation target)','Refresh workspaces','No workspace selected','New session (default for new tasks)','New conversation'])assert.ok(m.all().some(n=>n.textContent===label),label)
+  m.view.receive({type:'executor.state',state:'idle'})
+  assert.ok(m.all().some(n=>n.attrs['aria-label']==='Execution place'))
+  for(const label of ['Choose workspace','New conversation'])assert.ok(m.all().some(n=>n.textContent===label),label)
   assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,'C')
  }finally{m.view.controller.disconnect();await tick();setLanguage('zh-CN')}
 })
@@ -415,4 +415,53 @@ test('a failed first start stops claiming to connect, and retry restores loading
  m.view.startup({stage:'backend'})
  assert.match(text(),/正在连接后台/u);assert.doesNotMatch(text(),/暂时连不上后台/u)
  assert.equal(m.all().find(n=>n.className==='workbench-status').dataset.state,'connecting')
+})
+test('the mic starts dictation on one click and finishes it on the next',async()=>{
+ let stops=0
+ const m=mount({stop:async()=>{stops++}})
+ try{
+  m.view.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input','dictation']})
+  m.view.receive(feedState(1,'c',{feed:[]}))
+  const mic=m.all().find(n=>n.className==='composer-dictate')
+  assert.equal(mic.attrs['aria-pressed'],'false')
+  await mic.listeners.click();await tick()
+  const start=m.sent.find(f=>f.type==='input.dictation'&&f.action==='start')
+  assert.ok(start);assert.equal(mic.attrs['aria-label'],'停止录音');assert.equal(mic.attrs['aria-pressed'],'true')
+  await mic.listeners.click();await tick()
+  assert.ok(m.sent.some(f=>f.type==='input.dictation'&&f.action==='finish'&&f.id===start.id))
+  assert.equal(m.sent.filter(f=>f.type==='input.dictation'&&f.action==='start').length,1)
+ }finally{m.view.controller.disconnect();await tick()}
+})
+test('the round composer action is voice until there is a draft, then send; voice shows a stop cross while running',async()=>{
+ const m=mount()
+ try{
+  m.view.receive(feedState(1,'c',{feed:[]}))
+  const byClass=name=>m.all().find(n=>n.className===name)
+  const voice=byClass('composer-voice'),submit=byClass('composer-submit'),draft=m.all().find(n=>n.attrs['aria-label']==='消息草稿')
+  assert.equal(voice.hidden,false);assert.equal(submit.hidden,true)
+  assert.equal(voice.attrs['aria-label'],'持续对话');assert.equal(voice.attrs['aria-pressed'],'false')
+  draft.value='hello';draft.listeners.input()
+  assert.equal(voice.hidden,true);assert.equal(submit.hidden,false)
+  draft.value='   ';draft.listeners.input()
+  assert.equal(voice.hidden,false);assert.equal(submit.hidden,true)
+  assert.equal(byClass('composer-dictate').attrs['aria-label'],'语音输入')
+  assert.ok(voice.children[0].tag==='svg'&&submit.children[0].tag==='svg'&&byClass('composer-dictate').children[0].tag==='svg')
+  m.view.receive(feedState(2,'c',{feed:[],conversations:{selected_id:'c',voice_id:'c',items:[{id:'c',kind:'chat',title:'C'}],messages:[]}}))
+  assert.equal(voice.attrs['aria-label'],'结束语音');assert.equal(voice.attrs['aria-pressed'],'true')
+ }finally{m.view.controller.disconnect();await tick()}
+})
+test('continuous voice shows the orb stage with its status line and removes it when voice ends',async()=>{
+ const m=mount()
+ try{
+  m.view.receive(feedState(1,'c',{feed:[]}))
+  const stage=m.all().find(n=>n.className==='voice-stage'),label=m.all().find(n=>n.className==='voice-stage-label')
+  assert.equal(stage.hidden,true)
+  m.view.setOrb({name:'listening',statusLine:'正在听'});m.view.setOrb({name:'not-a-state',statusLine:'x'});m.view.setOrbLevel(0.5)
+  m.view.receive(feedState(2,'c',{feed:[],conversations:{selected_id:'c',voice_id:'c',items:[{id:'c',kind:'chat',title:'C'}],messages:[]}}))
+  assert.equal(stage.hidden,false)
+  m.view.setOrb({name:'speaking',statusLine:'正在说'});m.view.setOrbLevel(0.2)
+  assert.equal(label.textContent,'正在说')
+  m.view.receive(feedState(3,'c',{feed:[]}))
+  assert.equal(stage.hidden,true)
+ }finally{m.view.controller.disconnect();await tick()}
 })

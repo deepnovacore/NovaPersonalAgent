@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import {EventEmitter} from 'node:events'
 import test from 'node:test'
 import {shutdownBackend, waitForBackendReadiness} from '../src/main/backend.mjs'
-import {configWarnings, createBackendDiagnosticCollector, createBackendSupervisor, createBackendControl, classifyBackendFailure} from '../src/main/backend-supervisor.mjs'
+import {configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor, createBackendControl, classifyBackendFailure} from '../src/main/backend-supervisor.mjs'
 function deferred() {
   let resolve
   const promise = new Promise(next => { resolve = next })
@@ -347,6 +347,16 @@ test('collector surfaces safe Codex detail but does not promote it to a startup 
     kind: 'recoverable', code: 'backend_disconnected',
   })
   assert.equal(JSON.stringify(collector.failure()).includes('private'), false)
+})
+
+test('runtime startup errors are echoed for the terminal but never become a failure code', () => {
+  const chunk = 'noise\n[runtime-startup-error] Error: EBUSY: resource busy\n[runtime-diagnostic] assembly_failed\n'
+  assert.deepEqual(startupErrors(chunk), ['[runtime-startup-error] Error: EBUSY: resource busy'])
+  assert.deepEqual(startupErrors('[runtime-diagnostic] assembly_failed\n'), [])
+  assert.deepEqual(startupErrors(`[runtime-startup-error] ${'x'.repeat(400)}\n`).map(line => line.length), [320])
+  const diagnostic = createBackendDiagnosticCollector()
+  assert.equal(diagnostic.push('[runtime-startup-error] Error: EBUSY\n'), null)
+  assert.equal(diagnostic.push(chunk), 'assembly_failed')
 })
 
 test('runtime config warnings are echoed line by line and never become a failure code', () => {

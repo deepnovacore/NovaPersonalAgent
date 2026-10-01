@@ -5,7 +5,7 @@ import {writeFileSync as writeAcceptanceFile} from 'node:fs'
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
-import {createBackendControl, classifyBackendFailure, configWarnings, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
+import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
 import {FeishuConnector, VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
@@ -70,6 +70,7 @@ import {
 import { installAppProtocol, loadAppWindow, registerAppScheme } from './app-protocol.mjs'
 import { startWithSelectedCamera } from './camera-source.mjs'
 import { createDragController } from './drag-controller.mjs'
+import { createWorkbenchFrame } from './workbench-frame.mjs'
 import { executorResultDialogOptions, executorResultMenuTemplate } from './executor-result.mjs'
 import { shouldOpenSettings } from './launch-command.mjs'
 import { createNativeAudioManager } from './native-audio.mjs'
@@ -236,6 +237,8 @@ let releaseSmokeChannel = null
 // the orb renderer or shares the realtime voice socket.
 const frontendUsage = createFrontendUsage({file: resolve(app.getPath('userData'), 'frontend-usage.json')})
 let startup = Object.freeze({stage: 'configuration', code: null})
+// "Connection lost" is only true after a connection existed; a backend that keeps failing to start is still starting.
+let backendEverConnected = false
 let settingsReady = false
 let configurationReady = false
 let keyringAvailable = null
@@ -1171,6 +1174,7 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
     }})
     spawnedBackend.stderr?.on('data', chunk => {
       for (const warning of configWarnings(chunk.toString('utf8'))) console.error(warning)
+      for (const failure of startupErrors(chunk.toString('utf8'))) console.error(failure)
       const code = diagnostic.push(chunk.toString('utf8'))
       if (code) console.error(`[backend-diagnostic] ${code}`)
     })
@@ -1281,10 +1285,16 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
   let personalCollapsed = false
   let personalBounds = null
   let initialOrbBounds = mainWindow.getBounds()
+  const workbenchFrame = createWorkbenchFrame({
+    getBounds: () => mainWindow.getBounds(),
+    setBounds: bounds => mainWindow.setBounds(bounds),
+    getWorkArea: bounds => screen.getDisplayMatching(bounds).workArea,
+  })
   const setPersonalCollapsed = value => {
     if (value === personalCollapsed && personalBounds !== null) return
     if (value) {
-      personalBounds = mainWindow.getBounds()
+      personalBounds = workbenchFrame.naturalBounds()
+      workbenchFrame.forget()
       personalCollapsed = true
       mainWindow.setResizable(false)
       mainWindow.setMinimumSize(1, 1)
@@ -1395,6 +1405,17 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     setWindowPosition: position => mainWindow.setPosition(position.x, position.y),
     clamp: candidate => orbWindow.clampDragPosition(candidate),
   })
+  // The workbench strip drags through the same cursor-poll math but must not touch the orb's clamp or saved position.
+  const workbenchDragController = createDragController({
+    getCursor: () => screen.getCursorScreenPoint(),
+    getWindowPosition: () => {
+      const [x, y] = mainWindow.getPosition()
+      return { x, y }
+    },
+    setWindowPosition: position => mainWindow.setPosition(position.x, position.y),
+    clamp: candidate => ({ x: candidate.x, y: Math.max(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea.y, candidate.y) }),
+  })
+  let activeDrag = null
   mainWindow.webContents.on('zoom-changed', () => {
     setTimeout(() => orbWindow.sync(), 0)
   })
@@ -1955,9 +1976,17 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     Menu.buildFromTemplate(template).popup({window: mainWindow})
     return true
   })
+  ipcMain.on('nova:window:control', (event, action) => {
+    if (!mainWindow || event.sender !== mainWindow.webContents || personalCollapsed) return
+    if (action === 'minimize') mainWindow.minimize()
+    else if (action === 'toggleMaximize') workbenchFrame.toggleMaximize()
+    else if (action === 'close') requestPresentation('background')
+  })
   ipcMain.on('nova:window-drag:start', event => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return
-    dragController.start()
+    if (!personalCollapsed && workbenchFrame.maximized) return
+    activeDrag = personalCollapsed ? dragController : workbenchDragController
+    activeDrag.start()
   })
   ipcMain.on('nova:window-drag:move', (event, payload) => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return
@@ -1967,12 +1996,15 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     // never from renderer-reported coordinates, which drift under mixed-DPI
     // scaling and don't exist at all on Wayland.
     if (!validDragDelta(payload?.dx, payload?.dy)) return
-    dragController.tick()
+    activeDrag?.tick()
   })
   ipcMain.on('nova:window-drag:end', event => {
     if (!mainWindow || event.sender !== mainWindow.webContents) return
-    const { moved, position } = dragController.end()
-    if (!moved || !position) return
+    const finished = activeDrag
+    activeDrag = null
+    if (!finished) return
+    const { moved, position } = finished.end()
+    if (finished !== dragController || !moved || !position) return
     const naturalPosition = orbWindow.finishDrag(position)
     void saveWindowPosition(windowPositionFile(), naturalPosition).catch(error => {
       console.error(`[desktop-diagnostic] window_position_save_failure type=${error.name}`)
@@ -2052,8 +2084,8 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
       }
       if (runtimeCapabilities?.state === 'running' && status.state !== 'connected') runtimeCapabilities = {...runtimeCapabilities, state: 'stopped'}
       sendToSettings('nova:settings:changed', settingsView())
-      if (status.state === 'connected') publishStartup('ready')
-      else if (status.state === 'reconnecting') publishStartup('reconnecting')
+      if (status.state === 'connected') { backendEverConnected = true; publishStartup('ready') }
+      else if (status.state === 'reconnecting') publishStartup(backendEverConnected ? 'reconnecting' : 'backend')
       else if (!['starting', 'stopped'].includes(status.state)) publishStartup('failed', status.diagnostic)
       sendToOrb('nova:backend-status', {...status, startup})
       if (smokeChannel === null && status.state === 'connected' && status.connection) {

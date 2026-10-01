@@ -10,7 +10,7 @@ import {UnifiedRetrieval} from '../memory/retrieval.js'
 import {DashScopeEmbeddingProvider} from '../knowledge/embeddings.js'
 import {createHash as embeddingHash} from 'node:crypto'
 import {SubstrateMemoryResource} from '../memory-substrate/resource.js'
-import {WorkspaceGraphStoreClient} from '../workspace-graph/store-client.js'
+import {MemoryLedgerClient} from '../memory-ledger/store-client.js'
 import {homedir as memoryHome} from 'node:os'
 import {resolve as memoryPath} from 'node:path'
 import {compileContextView} from '../core/context-view.js'
@@ -1384,8 +1384,8 @@ export function composeRealtime(
   providerTuning: Required<Pick<RealtimeAssemblyOptions, 'controlledPreemptiveAlertReconnect' | 'preemptiveAlertHistoryRecovery' | 'preemptiveAlertHistoryPairs'>>,
 ): RealtimeAssembly {
   const local = (options.createPersonalMemory as {localMemoryConfig?:{path:string;userId:string;extractionModel:string;embedding:{baseUrl:string;apiKey:string;model:string}}} | undefined)?.localMemoryConfig
-  let sharedClient: WorkspaceGraphStoreClient | undefined
-  const getClient = () => sharedClient ??= new WorkspaceGraphStoreClient(memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
+  let sharedClient: MemoryLedgerClient | undefined
+  const getClient = () => sharedClient ??= new MemoryLedgerClient(memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
   const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
   const memoryGateway=local?new OpenAIModelGateway({baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,clock:new RealClock()}):core.gateway
   const useLocalLedger=local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)

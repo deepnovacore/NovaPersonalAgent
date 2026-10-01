@@ -7,7 +7,7 @@ import {basename,dirname,isAbsolute,join,relative,resolve} from 'node:path'
 import {fileURLToPath,pathToFileURL} from 'node:url'
 import {PersonalAgentHost} from '../../../runtime/dist/src/personal-agent/host.js'
 import {SubstrateMemoryResource} from '../../../runtime/dist/src/memory-substrate/resource.js'
-import {WorkspaceGraphStoreClient} from '../../../runtime/dist/src/workspace-graph/store-client.js'
+import {MemoryLedgerClient} from '../../../runtime/dist/src/memory-ledger/store-client.js'
 import {SuggestionPool} from '../../../runtime/dist/src/core/suggestions.js'
 
 const require=createRequire(import.meta.url),Database=require('better-sqlite3')
@@ -34,7 +34,7 @@ async function main(){
  const sources=(sourceFile.sources??[]).map(record=>record.view)
  const tasksFile=JSON.parse(await readFile(personalPath+'.tasks.json','utf8').catch(()=>'{"tasks":[]}'))
  const gateway={complete:()=>Promise.reject(Error('offline_capture_model_disabled')),stream:()=>{throw Error('offline_capture_model_disabled')}}
- const client=new WorkspaceGraphStoreClient(join(profile,'workspace-graph.sqlite'))
+ const client=new MemoryLedgerClient(join(profile,'workspace-graph.sqlite'))
  const memory=new SubstrateMemoryResource({client,userId:owner.user_scope,gateway,model:'disabled',inputConsent:false,consolidation:{enabled:false}})
  const host=new PersonalAgentHost({path:personalPath,userScope:owner.user_scope,memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
  let window

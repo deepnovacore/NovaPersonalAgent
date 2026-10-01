@@ -1,6 +1,6 @@
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
-import type {GraphDatabase} from '../workspace-graph/store.js'
+import type {LedgerDatabase} from '../memory-ledger/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {applyLifeMutation,emptyLifeState,lifeInputSchema,lifeStateSchema,type LifeState} from '../personal-agent/life.js'
 import {assertAcceptable,decisionSchema,sourceSchema,validateCandidate,type EvaluatedCandidate} from '../understanding/candidates.js'
@@ -17,14 +17,14 @@ const provenanceSchema=z.object({type:z.enum(['accepted_candidate','explicit_can
 interface LifeObject {kind:'todo'|'idea'|'goal'|'profile';id:string;data:Record<string,unknown>}
 
 /** Operation receipts, aggregate CAS, Profile version watermark and completed migration marker. */
-export function initializeLife(db:GraphDatabase):void{
+export function initializeLife(db:LedgerDatabase):void{
  db.exec('CREATE TABLE IF NOT EXISTS memory_life_meta(namespace TEXT PRIMARY KEY,payload_json TEXT NOT NULL)')
 }
-function readMeta(db:GraphDatabase,namespace:string):Meta|null{
+function readMeta(db:LedgerDatabase,namespace:string):Meta|null{
  const row=db.prepare('SELECT payload_json FROM memory_life_meta WHERE namespace=?').get(namespace)
  return row?metaSchema.parse(JSON.parse(String(row.payload_json))):null
 }
-function saveMeta(db:GraphDatabase,namespace:string,meta:Meta):void{
+function saveMeta(db:LedgerDatabase,namespace:string,meta:Meta):void{
  db.prepare('INSERT OR REPLACE INTO memory_life_meta(namespace,payload_json) VALUES(?,?)').run(namespace,canonicalJson(meta))
 }
 function rows(run:Run,namespace:string):EntryRevision[]{return z.array(EntryRevisionSchema).parse(run('list',{include_history:true})).filter(row=>row.entry_id.startsWith(namespace)&&['todo','idea','goal','profile'].includes(row.kind))}
@@ -95,7 +95,7 @@ function checkResolution(run:Run,namespace:string,resolution:LifeResolution):Ent
 }
 
 /** The caller's enclosing memory worker transaction owns evidence, merge and receipts atomically. */
-export function lifeOperation(db:GraphDatabase,operation:'life_load'|'life_mutate',value:unknown,run:Run):unknown{
+export function lifeOperation(db:LedgerDatabase,operation:'life_load'|'life_mutate',value:unknown,run:Run):unknown{
  if(operation==='life_load'){
   const q=z.object({namespace:namespaceSchema,legacy:lifeStateSchema.optional(),processingGrant:processingGrantSchema.optional(),hostMigrationPath:z.string().min(1).max(4096).optional(),resolution:lifeResolutionSchema.optional()}).strict().parse(value)
   if(q.resolution)checkResolution(run,q.namespace,q.resolution)

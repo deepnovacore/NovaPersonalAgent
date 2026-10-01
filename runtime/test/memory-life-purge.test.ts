@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm,readFile,realpath,readdir,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {DatabaseSync} from 'node:sqlite'
@@ -13,7 +13,7 @@ import type {EntryRevision} from '../src/memory-substrate/store.js'
 
 // Real host -> LifeService -> resource -> worker/SQLite/Markdown. Only the public feed is synthetic.
 test('purged Profile stays absent across Life and news commands, recreates once, and purges again',async()=>{
- const root=await mkdtemp(join(await realpath(tmpdir()),'nova-life-purge-')),path=join(root,'memory.sqlite');let client=new WorkspaceGraphStoreClient(path)
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-life-purge-')),path=join(root,'memory.sqlite');let client=new MemoryLedgerClient(path)
  const makeResource=()=>new SubstrateMemoryResource({client,userId:'life-purge',model:'unused',gateway:{stream(){throw Error('unexpected model call')},complete(){return Promise.reject(Error('unexpected model call'))}}})
  let resource=makeResource()
  const make=()=>{const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'life-purge',memory:()=>resource,pool:new SuggestionPool(),evidence:()=>null});host.news.options.firstRefreshMs=null;host.news.options.fetcher=()=>Promise.resolve(new Response('<rss><channel><item><title>Synthetic news</title><link>https://example.com/synthetic</link><description>Public article</description></item></channel></rss>'));return host}
@@ -27,7 +27,7 @@ test('purged Profile stays absent across Life and news commands, recreates once,
   const savedEvidence=[await client.memory('evidence',{id:first.evidence_refs[0]})]
   await command('memory.purge',{id:first.entry_id,expected_version:first.revision},'first-purge')
   assert.deepEqual(host.life.snapshot().profile,{about:'',version:0})
-  await host.close();await resource.close();client=new WorkspaceGraphStoreClient(path);resource=makeResource();await resource.open();host=make();await host.open()
+  await host.close();await resource.close();client=new MemoryLedgerClient(path);resource=makeResource();await resource.open();host=make();await host.open()
   for(const kind of ['todo','idea','goal']){
    const input={op:'create',kind,title:'Retained '+kind};await command('life.mutate',input,'create-'+kind);await command('life.mutate',input,'create-'+kind)
   }
@@ -69,7 +69,7 @@ test('purged Profile stays absent across Life and news commands, recreates once,
 })
 
 test('worker distinguishes purged identifiers, stated evidence trust and stale revisions without leaking content',async()=>{
- const root=await mkdtemp(join(await realpath(tmpdir()),'nova-life-errors-')),client=new WorkspaceGraphStoreClient(join(root,'memory.sqlite')),prefix='personal:errors:',now=new Date().toISOString()
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-life-errors-')),client=new MemoryLedgerClient(join(root,'memory.sqlite')),prefix='personal:errors:',now=new Date().toISOString()
  const evidence={id:prefix+'e',source_id:prefix+'source',source_kind:'task_result',locator:'fixture',observed_at:now,recorded_at:now,raw_text:'PRIVATE DIAGNOSTIC TEXT',hash:'fixture',trust:'trusted_system'}
  const candidate={entry_id:prefix+'profile',expected_revision:0,kind:'profile',origin:'stated',written_by:'merge',evidence_refs:[evidence.id],content:{text:'PRIVATE DIAGNOSTIC TEXT'},recorded_at:now}
  const code=(expected:string)=>(error:unknown)=>{assert.equal((error as {code:string}).code,expected);assert.doesNotMatch(String(error),/PRIVATE DIAGNOSTIC TEXT/);return true}
@@ -87,17 +87,17 @@ test('worker distinguishes purged identifiers, stated evidence trust and stale r
 
 test('legacy Profile version watermark survives purge before Life load, old metadata, restart and idempotent edits',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-life-legacy-version-')),path=join(root,'memory.sqlite'),legacyPath=join(root,'life.json')
- let client=new WorkspaceGraphStoreClient(path)
+ let client=new MemoryLedgerClient(path)
  const makeResource=()=>new SubstrateMemoryResource({client,userId:'legacy-version',model:'unused',gateway:{stream(){throw Error('unexpected model call')},complete(){return Promise.reject(Error('unexpected model call'))}}})
  let resource=makeResource(),life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend())
- const restart=async()=>{await life.close();await resource.close();client=new WorkspaceGraphStoreClient(path);resource=makeResource();life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend());await resource.open()}
+ const restart=async()=>{await life.close();await resource.close();client=new MemoryLedgerClient(path);resource=makeResource();life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend());await resource.open()}
  try{
   await writeFile(legacyPath,JSON.stringify({...emptyLifeState(),profile:{about:'LEGACY PROFILE',version:41}}))
   await resource.open();await life.open();assert.equal(life.snapshot().profile.version,41)
   await life.close();await resource.close()
   const db=new DatabaseSync(path)
   try{db.exec("UPDATE memory_life_meta SET payload_json=json_remove(payload_json,'$.profile_version')")}finally{db.close()}
-  client=new WorkspaceGraphStoreClient(path);resource=makeResource();life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend());await resource.open()
+  client=new MemoryLedgerClient(path);resource=makeResource();life=new LifeService(legacyPath,()=>undefined,resource.lifeBackend());await resource.open()
   // No Life peek/load occurs after the old-metadata fixture opens and before purge.
   const old=(await resource.list()).entries.find(row=>row.kind==='profile')!
   assert.equal((await resource.purgeEntry(old.id,old.version,'purge-legacy')).status,'complete')

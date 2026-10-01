@@ -1,20 +1,20 @@
 import {z} from 'zod'
 import {EntryRevisionSchema,retrievalEvidence,effectiveEvidence,processingStamp,fileDerivedInference,type EntryRevision} from './store.js'
-import type {GraphDatabase} from '../workspace-graph/store.js'
+import type {LedgerDatabase} from '../memory-ledger/store.js'
 
 const vectorSchema=z.array(z.number().finite()).min(1).max(4096).refine(vector=>vector.some(value=>value!==0),'zero embedding')
 const key=z.string().min(1).max(512)
 const latest=`SELECT r.entry_id,r.revision,r.payload_json FROM memory_revisions r JOIN (SELECT entry_id,MAX(revision) revision FROM memory_revisions GROUP BY entry_id) l USING(entry_id,revision)`
-export function initializeRetrieval(db:GraphDatabase):void {
+export function initializeRetrieval(db:LedgerDatabase):void {
  db.exec('CREATE TABLE IF NOT EXISTS memory_vectors(entry_id TEXT NOT NULL,revision INTEGER NOT NULL,provider TEXT NOT NULL,vector_json TEXT NOT NULL,PRIMARY KEY(entry_id,provider))')
 }
 function active(entry:EntryRevision):boolean{return entry.op!=='tombstone'&&(entry.valid_until===null||Date.parse(entry.valid_until)>Date.now())}
-function hasEvidence(db:GraphDatabase,entry:EntryRevision):boolean{return entry.evidence_refs.some(id=>retrievalEvidence(db,id)!==null)}
-function consented(db:GraphDatabase,entry:EntryRevision,provider:string):boolean {
+function hasEvidence(db:LedgerDatabase,entry:EntryRevision):boolean{return entry.evidence_refs.some(id=>retrievalEvidence(db,id)!==null)}
+function consented(db:LedgerDatabase,entry:EntryRevision,provider:string):boolean {
  const live=entry.evidence_refs.map(id=>retrievalEvidence(db,id)).filter(value=>value!==null)
  return live.length===entry.evidence_refs.length&&live.every(value=>effectiveEvidence(db,value.id,{purpose:'embedding',provider})!==null)
 }
-export function memoryRetrieval(db:GraphDatabase,operation:'pending_vectors'|'write_vectors'|'search',input:unknown):unknown {
+export function memoryRetrieval(db:LedgerDatabase,operation:'pending_vectors'|'write_vectors'|'search',input:unknown):unknown {
  const value=z.record(z.string(),z.unknown()).parse(input)
  const prefix=key.parse(value.entry_prefix);const provider=key.parse(value.provider)
  if(operation==='write_vectors'){

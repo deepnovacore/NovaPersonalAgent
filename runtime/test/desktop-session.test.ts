@@ -18,6 +18,7 @@ import {
   WIRE_FRAME_TYPES,
 } from '../src/desktop/desktop-wire.js'
 import {type ExecutorState} from '../src/realtime/service-state.js'
+import {DictationError} from '../src/realtime/dictation.js'
 import {type JsonValue} from '../src/core/events.js'
 import {type RealtimeTelemetry, JsonlTelemetry} from '../src/realtime/telemetry.js'
 import {WebSocket, type RawData} from 'ws'
@@ -1039,6 +1040,53 @@ test('dictation buffers audio without sending it to the model; only explicit edi
   assert.deepEqual(calls, [], 'late draft audio must not fall through to live ASR')
   await bridge.receiveControl({type: 'input.text', text: 'edited draft'})
   assert.deepEqual(calls, ['text:edited draft'])
+  bridge.release()
+})
+
+test('a failed dictation reports recognition_failed to the client and the real cause to telemetry only', async () => {
+  const {bridge, service, telemetry} = harness()
+  service.transcribeDraft = () => Promise.reject(new Error('empty transcript'))
+  bridge.markAuthenticated(); drainJsonFrames(bridge)
+  await bridge.receiveControl({type: 'input.dictation', id: 'd2', action: 'start'})
+  await bridge.receiveAudio(new Uint8Array(6))
+  await bridge.receiveControl({type: 'input.dictation', id: 'd2', action: 'finish'})
+  await new Promise(resolve => setImmediate(resolve))
+  const frame = findJsonFrame(drainJsonFrames(bridge), 'input.transcription') as unknown as {error?: string}
+  assert.equal(frame.error, 'recognition_failed')
+  const failed = telemetry.records.filter(record => record.kind === 'dictation.failed')
+  assert.equal(failed.length, 1)
+  assert.deepEqual(failed[0]?.payload, {bytes: 6, peak: 0, rms: 0, error: 'empty transcript'})
+  bridge.release()
+})
+
+test('a dictation failure with a known cause reports that cause to the client and its input level to telemetry', async () => {
+  const {bridge, service, telemetry} = harness()
+  service.transcribeDraft = () => Promise.reject(new DictationError('no_speech', 'empty transcript'))
+  bridge.markAuthenticated(); drainJsonFrames(bridge)
+  await bridge.receiveControl({type: 'input.dictation', id: 'd4', action: 'start'})
+  const pcm = new Uint8Array(4), view = new DataView(pcm.buffer)
+  view.setInt16(0, 1200, true); view.setInt16(2, -3000, true)
+  await bridge.receiveAudio(pcm)
+  await bridge.receiveControl({type: 'input.dictation', id: 'd4', action: 'finish'})
+  await new Promise(resolve => setImmediate(resolve))
+  const frame = findJsonFrame(drainJsonFrames(bridge), 'input.transcription') as unknown as {error?: string}
+  assert.equal(frame.error, 'no_speech')
+  const failed = telemetry.records.filter(record => record.kind === 'dictation.failed')
+  assert.deepEqual(failed[0]?.payload, {bytes: 4, peak: 3000, rms: 2285, error: 'empty transcript'})
+  bridge.release()
+})
+
+test('a failed dictation still reports recognition_failed when the telemetry disk cannot be written', async () => {
+  const {bridge, service, telemetry} = harness()
+  telemetry.record = () => { throw new Error('ENOSPC') }
+  service.transcribeDraft = () => Promise.reject(new Error('empty transcript'))
+  bridge.markAuthenticated(); drainJsonFrames(bridge)
+  await bridge.receiveControl({type: 'input.dictation', id: 'd3', action: 'start'})
+  await bridge.receiveAudio(new Uint8Array(6))
+  await bridge.receiveControl({type: 'input.dictation', id: 'd3', action: 'finish'})
+  await new Promise(resolve => setImmediate(resolve))
+  const frame = findJsonFrame(drainJsonFrames(bridge), 'input.transcription') as unknown as {error?: string}
+  assert.equal(frame.error, 'recognition_failed')
   bridge.release()
 })
 

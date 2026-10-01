@@ -412,10 +412,9 @@ export async function fixture(options: {
   await mkdir(stateRoot, {mode: 0o700})
   await mkdir(managedRoot, {mode: 0o700})
   await mkdir(workspace, {mode: 0o700})
-  const identifiers = Array.from(
-    {length: 100},
-    (_unused, index) => `${index % 2 === 0 ? 'workspace' : 'session'}-${String(index).padStart(4, '0')}`,
-  )[Symbol.iterator]()
+  const identifiers = (function* () {
+    for (let index = 0; ; index++) yield `${index % 2 === 0 ? 'workspace' : 'session'}-${String(index).padStart(4, '0')}`
+  })()
   const store = await ProjectStore.open({
     stateRoot: hostProjectRootForTest(await realpath(stateRoot)),
     managedRoot: hostManagedProjectRootForTest(await realpath(managedRoot)),

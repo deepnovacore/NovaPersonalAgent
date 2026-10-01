@@ -7,19 +7,19 @@ import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {DatabaseSync} from 'node:sqlite'
 import {execFileSync} from 'node:child_process'
-import {WorkspaceGraphStoreClient} from '../src/workspace-graph/store-client.js'
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 import {initializeMemory,memoryOperation} from '../src/memory-substrate/store.js'
 import {enableMemoryFiles} from '../src/memory-substrate/file-authority.js'
 import {purgeEntry} from '../src/memory-substrate/purge.js'
 import type {EntryRevision} from '../src/memory-substrate/store.js'
 
 const now='2026-09-21T00:00:00Z',prefix='personal:purge:'
-async function add(client:WorkspaceGraphStoreClient,id:string,text:string){
+async function add(client:MemoryLedgerClient,id:string,text:string){
  await client.memory('append_evidence',{id:prefix+'e:'+id,source_id:prefix+'s:'+id,source_kind:'conversation',locator:id,observed_at:now,recorded_at:now,raw_text:'RAW '+text,hash:id,trust:'trusted_user'})
  await client.memory('merge',{entry_id:prefix+id,kind:'fact',origin:'stated',written_by:'merge',evidence_refs:[prefix+'e:'+id],content:{text},recorded_at:now})
 }
 test('entry purge erases ledger evidence and Git history, preserves another object, and retries after restart',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-purge-')),path=join(root,'ledger.sqlite');let client=new WorkspaceGraphStoreClient(path)
+ const root=await mkdtemp(join(tmpdir(),'nova-purge-')),path=join(root,'ledger.sqlite');let client=new MemoryLedgerClient(path)
  try{
   await client.open();await client.memory('enable_files',{});await add(client,'one','SYNTHETIC DELETE SECRET');await add(client,'two','SYNTHETIC KEEP')
   const input={request_id:'purge-1',entry_prefix:prefix,selection:{kind:'entry',id:prefix+'one',expected_revision:1}}
@@ -28,7 +28,7 @@ test('entry purge erases ledger evidence and Git history, preserves another obje
   assert.deepEqual((await client.memory('list',{}) as EntryRevision[]).map(row=>row.entry_id),[prefix+'two'])
   assert.equal(await client.memory('evidence',{id:prefix+'e:one'}),null)
   assert.equal(execFileSync('git',['-C',path+'.memory','rev-list','--count','HEAD'],{encoding:'utf8'}).trim(),'1')
-  await client.close();client=new WorkspaceGraphStoreClient(path);await client.open()
+  await client.close();client=new MemoryLedgerClient(path);await client.open()
   assert.equal((await client.memory('purge',{...input,request_id:'purge-retry'}) as {status:string}).status,'complete')
   assert.equal((await readFile(path)).includes(Buffer.from('SYNTHETIC DELETE SECRET')),false)
   assert.equal((await client.memory('purge',{request_id:'purge-2',entry_prefix:prefix,selection:{kind:'entry',id:prefix+'two',expected_revision:1}}) as {status:string}).status,'complete')
@@ -38,7 +38,7 @@ test('entry purge erases ledger evidence and Git history, preserves another obje
 
 const legacyLife=()=>({todos:[],ideas:[],goals:[],profile:{about:'SYNTHETIC LEGACY DELETE',version:3},receipts:{}})
 test('purge cleans only the selected Life migration object and retries a temporarily missing registered backup',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-purge-life-')),path=join(root,'ledger.sqlite'),backup=join(root,'life.json'),hidden=join(root,'temporarily-unavailable.json'),namespace=prefix+'life:';let client=new WorkspaceGraphStoreClient(path)
+ const root=await mkdtemp(join(tmpdir(),'nova-purge-life-')),path=join(root,'ledger.sqlite'),backup=join(root,'life.json'),hidden=join(root,'temporarily-unavailable.json'),namespace=prefix+'life:';let client=new MemoryLedgerClient(path)
  try{
   const legacy=legacyLife();await writeFile(backup,JSON.stringify(legacy));await client.open();await client.memory('enable_files',{})
   await client.memory('life_load',{namespace,legacy,hostMigrationPath:backup});await add(client,'keep','KEEP SEPARATE OBJECT')
@@ -48,7 +48,7 @@ test('purge cleans only the selected Life migration object and retries a tempora
   assert.equal((await client.memory('purge',input) as {status:string}).status,'incomplete')
   assert.equal((await client.memory('purge_status',{entry_prefix:prefix}) as unknown[]).length,1)
   await assert.rejects(client.memory('purge',{request_id:'cannot-overlap',entry_prefix:prefix,selection:{kind:'entry',id:prefix+'keep',expected_revision:1}}))
-  await client.close();await rename(hidden,backup);client=new WorkspaceGraphStoreClient(path);await client.open()
+  await client.close();await rename(hidden,backup);client=new MemoryLedgerClient(path);await client.open()
   assert.equal((await client.memory('purge',{...input,request_id:'retry-backup'}) as {status:string}).status,'complete')
   assert.equal((JSON.parse(await readFile(backup,'utf8')) as {profile:{about:string}}).profile.about,'')
   assert.deepEqual((await client.memory('list',{}) as EntryRevision[]).map(row=>row.entry_id),[prefix+'keep'])
@@ -56,7 +56,7 @@ test('purge cleans only the selected Life migration object and retries a tempora
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
 test('purge does not claim completion for an old Life migration with no registered backup path',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-purge-unregistered-')),path=join(root,'ledger.sqlite'),client=new WorkspaceGraphStoreClient(path)
+ const root=await mkdtemp(join(tmpdir(),'nova-purge-unregistered-')),path=join(root,'ledger.sqlite'),client=new MemoryLedgerClient(path)
  try{
   await client.open();await client.memory('enable_files',{});await client.memory('life_load',{namespace:prefix+'life:',legacy:legacyLife()})
   const row=(await client.memory('list',{}) as EntryRevision[])[0]!
@@ -66,7 +66,7 @@ test('purge does not claim completion for an old Life migration with no register
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
 test('purge cleans a registered legacy VoiceMem backup without deleting another user or remaining object',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-purge-legacy-')),path=join(root,'ledger.sqlite'),backup=join(root,'legacy.sqlite'),client=new WorkspaceGraphStoreClient(path)
+ const root=await mkdtemp(join(tmpdir(),'nova-purge-legacy-')),path=join(root,'ledger.sqlite'),backup=join(root,'legacy.sqlite'),client=new MemoryLedgerClient(path)
  const legacy=new DatabaseSync(backup)
  legacy.exec('CREATE TABLE vm_memories(user_id TEXT,scope TEXT,id TEXT,payload TEXT);CREATE TABLE vm_sources(user_id TEXT,scope TEXT,id TEXT,payload TEXT,state TEXT)')
  const insert=(user:string,id:string,text:string)=>{
@@ -84,19 +84,19 @@ test('purge cleans a registered legacy VoiceMem backup without deleting another 
 })
 
 test('purge Git failure stays incomplete and restart finishes the same operation before rebuilding',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-purge-recover-')),path=join(root,'ledger.sqlite');let client=new WorkspaceGraphStoreClient(path)
+ const root=await mkdtemp(join(tmpdir(),'nova-purge-recover-')),path=join(root,'ledger.sqlite');let client=new MemoryLedgerClient(path)
  try{
   await client.open();await client.memory('enable_files',{});await add(client,'one','CRASH SELECTED SECRET')
   const lock=join(path+'.memory','.git','HEAD.lock');await writeFile(lock,'synthetic Git failure')
   const input={request_id:'failed-git',entry_prefix:prefix,selection:{kind:'entry',id:prefix+'one',expected_revision:1}}
   const failed=await client.memory('purge',input) as {status:string;operation_id:string};assert.equal(failed.status,'incomplete')
-  await client.close();await unlink(lock);client=new WorkspaceGraphStoreClient(path);await client.open()
+  await client.close();await unlink(lock);client=new MemoryLedgerClient(path);await client.open()
   assert.equal((await client.memory('list',{}) as unknown[]).length,0)
   const recovered=await client.memory('purge',{...input,request_id:'retry-git'}) as {status:string;operation_id:string};assert.equal(recovered.status,'complete');assert.equal(recovered.operation_id,failed.operation_id)
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
 test('purge refuses a symlink migration backup and keeps the external file unchanged',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-purge-symlink-')),path=join(root,'ledger.sqlite'),backup=join(root,'life.json'),external=join(root,'external.json'),client=new WorkspaceGraphStoreClient(path),legacy=legacyLife()
+ const root=await mkdtemp(join(tmpdir(),'nova-purge-symlink-')),path=join(root,'ledger.sqlite'),backup=join(root,'life.json'),external=join(root,'external.json'),client=new MemoryLedgerClient(path),legacy=legacyLife()
  try{
   await writeFile(external,JSON.stringify(legacy));await symlink(external,backup);await client.open();await client.memory('enable_files',{})
   await client.memory('life_load',{namespace:prefix+'life:',legacy,hostMigrationPath:backup})
@@ -106,7 +106,7 @@ test('purge refuses a symlink migration backup and keeps the external file uncha
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
 test('purging one entry removes dependent summaries but preserves independent raw evidence and gates shared evidence',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-purge-summary-')),path=join(root,'ledger.sqlite'),client=new WorkspaceGraphStoreClient(path)
+ const root=await mkdtemp(join(tmpdir(),'nova-purge-summary-')),path=join(root,'ledger.sqlite'),client=new MemoryLedgerClient(path)
  try{
   await client.open();await client.memory('enable_files',{});await add(client,'one','SELECTED');await add(client,'two','RETAINED')
   for(const id of ['one','two'])await client.memory('source_grant',{source_id:prefix+'s:'+id,expected_revision:0,grant:{revision:1,scope_revision:0,extraction_provider:null,embedding_provider:null,conversation_providers:['consumer']}})
@@ -137,7 +137,7 @@ test('a failure after saving compaction intent cannot leave a durable complete r
 })
 
 test('purge remains incomplete until the host confirms evidence-linked index cleanup',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-purge-index-')),path=join(root,'ledger.sqlite'),client=new WorkspaceGraphStoreClient(path)
+ const root=await mkdtemp(join(tmpdir(),'nova-purge-index-')),path=join(root,'ledger.sqlite'),client=new MemoryLedgerClient(path)
  try{
   await client.open();await client.memory('enable_files',{});await add(client,'one','INDEXED SELECTED SECRET')
   await client.memory('record_extraction',{evidence_id:prefix+'e:one',attempt_id:'knowledge-index',extracted:{}})

@@ -287,10 +287,16 @@ const CODEX_DIAGNOSTIC_CODES = new Set([
 ])
 const LINE = /\[runtime-diagnostic\]\s+([a-z0-9_]{1,64})/g
 const CONFIG_WARNING = /\[config-warning\] [\x20-\x7e]{1,160}/g
+const STARTUP_ERROR = /\[runtime-startup-error\] [^\r\n]{1,296}/g
 
 /** Runtime configuration warnings name only variables, never values, so the main process can echo them verbatim. */
 export function configWarnings(chunk) {
   return String(chunk).match(CONFIG_WARNING) ?? []
+}
+
+/** The runtime's sanitised startup exception; terminal-only, never a failure code. */
+export function startupErrors(chunk) {
+  return String(chunk).match(STARTUP_ERROR) ?? []
 }
 
 export function classifyBackendFailure(code) {

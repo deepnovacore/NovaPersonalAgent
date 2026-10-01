@@ -160,6 +160,11 @@ contextBridge.exposeInMainWorld('novaAudioAgentDesktop', Object.freeze({
     move: (dx, dy) => ipcRenderer.send('nova:window-drag:move', { dx, dy }),
     end: () => ipcRenderer.send('nova:window-drag:end'),
   }),
+  windowControls: Object.freeze({
+    minimize: () => ipcRenderer.send('nova:window:control', 'minimize'),
+    toggleMaximize: () => ipcRenderer.send('nova:window:control', 'toggleMaximize'),
+    close: () => ipcRenderer.send('nova:window:control', 'close'),
+  }),
   windowLayout: Object.freeze({
     setConfirmationMode: value => {
       if (typeof value !== 'boolean') return false

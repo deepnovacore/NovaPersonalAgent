@@ -3,7 +3,7 @@ import {closeSync,constants,fstatSync,fsyncSync,lstatSync,openSync,readFileSync,
 import {dirname,isAbsolute,join,parse} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import {z} from 'zod'
-import type {GraphDatabase} from '../workspace-graph/store.js'
+import type {LedgerDatabase} from '../memory-ledger/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {lifeStateSchema} from '../personal-agent/life.js'
 import {MarkdownRepository} from './markdown-repository.js'
@@ -17,12 +17,12 @@ export interface PurgeResult {status:'complete'|'incomplete';operation_id:string
 type Backup={kind:'life';path:string;before:string;after:string;bytes:string}|{kind:'legacy';path:string;dev:number;ino:number;user_id:string;ids:string[];sources:string[];preimages:Record<string,string>}
 type Selected=Pick<EntryRevision,'entry_id'|'kind'|'content'>
 interface Intent {selected:Selected[];operation_id:string;entry_id:string;expected_revision:number;request_ids:string[];revisions:EntryRevision[];baselines:Record<string,string>;removed_entries:number;removed_evidence:number;removed_entry_ids:string[];removed_evidence_ids:string[];pending_index_evidence_ids:string[];backups:Backup[];unresolved:string[];repository_done:boolean;result?:PurgeResult}
-export function initializePurge(db:GraphDatabase):void{
+export function initializePurge(db:LedgerDatabase):void{
  db.exec('CREATE TABLE IF NOT EXISTS memory_purges(entry_id TEXT PRIMARY KEY,payload_json TEXT NOT NULL); CREATE TABLE IF NOT EXISTS memory_purged_ids(hash TEXT PRIMARY KEY); CREATE TABLE IF NOT EXISTS memory_migration_paths(path TEXT NOT NULL,user_id TEXT NOT NULL,entry_prefix TEXT NOT NULL,source_prefix TEXT NOT NULL,dev INTEGER NOT NULL,ino INTEGER NOT NULL,PRIMARY KEY(path,user_id))')
 }
-function save(db:GraphDatabase,intent:Intent):void{db.prepare('INSERT OR REPLACE INTO memory_purges VALUES(?,?)').run(intent.entry_id,canonicalJson(intent))}
-function intents(db:GraphDatabase):Intent[]{return db.prepare('SELECT payload_json FROM memory_purges').all().map(row=>JSON.parse(String(row.payload_json)) as Intent)}
-export function isPermanentlyPurged(db:GraphDatabase,id:string):boolean{return db.prepare('SELECT 1 FROM memory_purged_ids WHERE hash=?').get(hash(id))!==undefined}
+function save(db:LedgerDatabase,intent:Intent):void{db.prepare('INSERT OR REPLACE INTO memory_purges VALUES(?,?)').run(intent.entry_id,canonicalJson(intent))}
+function intents(db:LedgerDatabase):Intent[]{return db.prepare('SELECT payload_json FROM memory_purges').all().map(row=>JSON.parse(String(row.payload_json)) as Intent)}
+export function isPermanentlyPurged(db:LedgerDatabase,id:string):boolean{return db.prepare('SELECT 1 FROM memory_purged_ids WHERE hash=?').get(hash(id))!==undefined}
 /** Validate every ancestor and SQLite sidecar before opening any host-registered backup. */
 function safePath(path:string,sidecars=false):void {
  if(!isAbsolute(path))throw Error('unregistered_backup_path')
@@ -36,7 +36,7 @@ function safePath(path:string,sidecars=false):void {
 }
 function readPrivate(path:string):string {safePath(path);const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{if(fstatSync(fd).size>16*1024*1024)throw Error('backup_too_large');return readFileSync(fd,'utf8')}finally{closeSync(fd)}}
 /** Only the historical fixed-ID empty initializer can waive a specifically missing Life backup. */
-function emptyLegacyProfile(db:GraphDatabase,namespace:string,row:Selected):boolean{
+function emptyLegacyProfile(db:LedgerDatabase,namespace:string,row:Selected):boolean{
  if(row.entry_id!==namespace+'profile:profile'||row.kind!=='profile'||row.content.legacy!==true||row.content.life_id!=='profile'||row.content.legacy_id!==undefined)return false
  const fingerprint=hash(canonicalJson({entry_id:row.entry_id,legacy:{about:'',version:0}}))
  const record=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(namespace+'e:legacy:'+hash(row.entry_id))
@@ -46,7 +46,7 @@ function emptyLegacyProfile(db:GraphDatabase,namespace:string,row:Selected):bool
  const evidence=parsed.data
  return evidence.id===namespace+'e:legacy:'+hash(row.entry_id)&&evidence.hash===fingerprint&&evidence.source_id===namespace+'migration:'+hash(row.entry_id)&&evidence.source_kind==='task_result'&&evidence.locator==='legacy-life-json:profile'&&evidence.trust==='trusted_system'&&evidence.raw_text===null&&evidence.extracted.event==='legacy_import'&&evidence.extracted.legacy===true&&evidence.extracted.original_evidence_available===false
 }
-function backupPlan(db:GraphDatabase,selected:Selected[]):{backups:Backup[];unresolved:string[]}{
+function backupPlan(db:LedgerDatabase,selected:Selected[]):{backups:Backup[];unresolved:string[]}{
  const backups:Backup[]=[],unresolved:string[]=[]
  for(const record of db.prepare('SELECT namespace,payload_json FROM memory_life_meta').all()){
   const namespace=String(record.namespace),entries=selected.filter(row=>row.entry_id.startsWith(namespace)&&row.content.legacy===true)
@@ -79,7 +79,7 @@ function backupPlan(db:GraphDatabase,selected:Selected[]):{backups:Backup[];unre
  }
  return {backups,unresolved:[...new Set(unresolved)]}
 }
-function compact(db:GraphDatabase):void{
+function compact(db:LedgerDatabase):void{
  db.exec('PRAGMA secure_delete=ON')
  const checkpoint=db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').get();if(checkpoint&&Number(checkpoint.busy)>0)throw Error('checkpoint_busy')
  db.exec('VACUUM')
@@ -125,7 +125,7 @@ function cleanBackup(backup:Backup):void{
   compact(db)
  }finally{db.close()}
 }
-function finish(db:GraphDatabase,path:string,intent:Intent):PurgeResult{
+function finish(db:LedgerDatabase,path:string,intent:Intent):PurgeResult{
  if(intent.result?.status==='complete')return intent.result
  let unresolved=[...intent.unresolved]
  try{
@@ -146,11 +146,11 @@ function finish(db:GraphDatabase,path:string,intent:Intent):PurgeResult{
  intent.result=result;save(db,intent);return result
 }
 /** Runs before Markdown rebuilding; a pending purge must never resurrect removed SQL revisions. */
-export function recoverMemoryPurges(db:GraphDatabase,path:string):void{
+export function recoverMemoryPurges(db:LedgerDatabase,path:string):void{
  for(const intent of intents(db))if(!intent.repository_done||intent.result?.backup_cleanup.unresolved.includes('ledger_compaction_pending')){finish(db,path,intent);if(!intent.repository_done)throw Error('MEMORY_MARKDOWN_PURGE_PENDING')}
 }
-export function purgeStatus(db:GraphDatabase,prefix:string):unknown[]{return intents(db).filter(intent=>intent.entry_id.startsWith(prefix)&&intent.result?.status==='incomplete').map(intent=>({...intent.result,entry_id:intent.entry_id,expected_revision:intent.expected_revision}))}
-export function purgeEntry(db:GraphDatabase,path:string,input:unknown):PurgeResult{
+export function purgeStatus(db:LedgerDatabase,prefix:string):unknown[]{return intents(db).filter(intent=>intent.entry_id.startsWith(prefix)&&intent.result?.status==='incomplete').map(intent=>({...intent.result,entry_id:intent.entry_id,expected_revision:intent.expected_revision}))}
+export function purgeEntry(db:LedgerDatabase,path:string,input:unknown):PurgeResult{
  const q=inputSchema.parse(input);if(!q.selection.id.startsWith(q.entry_prefix))throw Error('STORE_INVALID_OPERATION')
  const saved=intents(db);if(saved.some(intent=>intent.entry_id!==q.selection.id&&intent.request_ids.includes(q.request_id)))throw Error('STORE_IDEMPOTENCY_CONFLICT')
  const previous=saved.find(intent=>intent.entry_id===q.selection.id)
@@ -187,7 +187,7 @@ export function purgeEntry(db:GraphDatabase,path:string,input:unknown):PurgeResu
 }
 
 /** Only the host calls this after the evidence-linked index has durably removed its copies. */
-export function completePurgeIndex(db:GraphDatabase,path:string,input:unknown):PurgeResult{
+export function completePurgeIndex(db:LedgerDatabase,path:string,input:unknown):PurgeResult{
  const q=z.object({entry_prefix:z.string().min(1).max(512),entry_id:z.string().min(1).max(512),operation_id:z.string().min(1).max(128)}).strict().parse(input)
  if(!q.entry_id.startsWith(q.entry_prefix))throw Error('STORE_INVALID_OPERATION')
  const intent=intents(db).find(row=>row.entry_id===q.entry_id)

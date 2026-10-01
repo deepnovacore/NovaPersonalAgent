@@ -1739,7 +1739,7 @@ test('the renderer feeds microphone and playback amplitude into the visual', asy
 
   // Both capture paths land in detectLocalOnset, so one call covers browser and
   // native microphones alike.
-  assert.match(source, /visual\.setLevel\(measurePcmLevel\(pcm\)\)/)
+  assert.match(source, /const level = measurePcmLevel\(pcm\)\n  visual\.setLevel\(level\)/)
   assert.match(source, /getSpeakingLevel: \(\) => getPlaybackLevel\(\)/)
   assert.match(source, /new PlaybackMeter\(/)
   assert.match(source, /new NativeLevelEnvelope\(/)

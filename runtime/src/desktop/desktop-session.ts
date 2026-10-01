@@ -56,6 +56,7 @@ import {type CaptionFrame} from '../realtime/session-state.js'
 import {type ExecutorState} from '../realtime/service-state.js'
 import {type ApprovalView as ExecutorApprovalView} from '../core/approval-port.js'
 import {type RealtimeTelemetry} from '../realtime/telemetry.js'
+import {DictationError, pcmLevel} from '../realtime/dictation.js'
 import {codePointLengthLikePython, stripLikePython} from '../text/python-text.js'
 import {
   executorProgressSchema,
@@ -589,7 +590,13 @@ export class DesktopSocketBridge {
     const pcm = Buffer.concat(draft.chunks); draft.chunks = []
     void this.#service.transcribeDraft(pcm, AbortSignal.any([draft.controller.signal, AbortSignal.timeout(30000)]))
       .then(text => { if (this.#dictation === draft) this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), text})) })
-      .catch(() => { if (this.#dictation === draft) this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), error: 'recognition_failed'})) })
+      .catch((error: unknown) => {
+        if (this.#dictation !== draft) return
+        const level = pcmLevel(pcm)
+        try { this.#telemetry?.record('dictation.failed', {bytes: pcm.length, peak: level.peak, rms: level.rms, error: (error instanceof Error ? error.message : String(error)).replace(/[\r\n]/gu, ' ').slice(0, 200)}) }
+        catch { /* the failure frame below must reach the client even when the telemetry disk cannot be written */ }
+        this.#enqueue(JSON.stringify({type: 'input.transcription', id,...(draft.conversationId?{conversation_id:draft.conversationId}:{}), error: error instanceof DictationError ? error.code : 'recognition_failed'}))
+      })
       .finally(() => { if (this.#dictation === draft) this.#cancelDictation() })
   }
 

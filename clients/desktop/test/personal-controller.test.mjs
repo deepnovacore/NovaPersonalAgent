@@ -71,6 +71,12 @@ test('dictation rejects wrong conversation and preserves draft when finish canno
 test('empty transcription cannot erase the editable draft',async()=>{
  const {c}=harness();c.draft='keep';await c.dictate();const id=c.dictationId;await c.finish();c.receive({type:'input.transcription',id,text:''});assert.equal(c.draft,'keep');assert.match(c.error,/recognition_failed/)
 })
+test('dictation failures with a known cause say what went wrong and keep the draft',async()=>{
+ for(const [error,expected] of [['no_audio',/没有录到声音/],['no_speech',/没有听清/]]){
+  const {c}=harness();c.draft='keep';await c.dictate();const id=c.dictationId;await c.finish();c.receive({type:'input.transcription',id,error})
+  assert.equal(c.draft,'keep');assert.match(c.error,expected);assert.match(c.error,/原有草稿已保留/);assert.doesNotMatch(c.error,/recognition_failed/)
+ }
+})
 
 test('late microphone permission cannot stop a newer capture',async()=>{
  let release;const h=harness({start:()=>new Promise(resolve=>{release=resolve})});const pending=h.c.dictate();await Promise.resolve();await h.c.text();await assert.rejects(h.c.dictate(),/结束持续对话/);release();await pending;assert.equal(h.c.mode,'text');assert.equal(h.starts,1)
