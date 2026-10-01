@@ -1,3 +1,4 @@
+import {onButton} from '../src/renderer/button-action.mjs'
 import {createStartupNotice, startupMessage} from '../src/renderer/startup-notice.mjs'
 import {t, localizeDocument, currentLanguage} from '../src/renderer/locale.mjs'
 import {createPhonePanel} from '../src/renderer/phone-panel.mjs'
@@ -73,7 +74,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
   }
   let push
   runInNewContext(script.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''), {
-    t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
+    onButton, t, currentLanguage, createStartupNotice, startupMessage, localizeDocument, createPhonePanel, ...settingsController, ...settingsCategories, ...voiceChoice, createSecretRevisions, frontendUsageText, renderFrontendUsage,
     createCapabilitiesEditor: () => ({render() {}}),
     createImPanel: () => ({load: () => Promise.resolve()}),
     createConnectionsPanel: () => ({load: () => Promise.resolve()}),
@@ -694,7 +695,7 @@ test('settings preserve approval, planning, and progress controls alongside the 
     assert.match(html, new RegExp(`<input type="radio" name="planReadback" value="${value}"`))
   }
   assert.doesNotMatch(html, /id="plannerModel"/)
-  assert.match(html, /<input type="checkbox" id="generatePlan">/)
+  assert.match(html, /<input type="checkbox" role="switch" id="generatePlan">/)
   for (const value of ['off', 'milestones', 'all']) {
     assert.match(html, new RegExp(`<input type="radio" name="progressBubbles" value="${value}"`))
   }
@@ -1019,7 +1020,7 @@ test('failed application exposes recovery without clearing unsaved drafts or acc
   assert.equal(controller.snapshot().view.settingsRecoveryAvailable, true)
   assert.equal(controller.snapshot().view.integratedModel, 'bad-model')
   assert.match(html, /id="settings-restore" hidden>恢复上次可用设置/)
-  assert.match(script, /settingsRestore\.addEventListener\('click',[\s\S]*api\.retryBackend\(\)/)
+  assert.match(script, /onButton\(settingsRestore,[\s\S]*api\.retryBackend\(\)/)
 })
 
 
@@ -1366,10 +1367,13 @@ test('pairing polling keeps the QR and regenerate button stable while manual ref
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(imageWrites, 0)
   pending = deferred()
-  await panel.click('#phone-primary')
+  const refresh = panel.click('#phone-primary')
+  assert.equal(button.attributes['aria-busy'], 'true')
   assert.equal(button.disabled, true)
   assert.equal(button.textContent, '正在准备…')
   pending.resolve({...ready, image: 'data:image/png;base64,new'})
+  await refresh
+  assert.equal(button.attributes['aria-busy'], 'false')
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(qr.src, 'data:image/png;base64,new')
   assert.equal(button.disabled, false)

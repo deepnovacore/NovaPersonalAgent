@@ -1,3 +1,4 @@
+import {onButton} from './button-action.mjs'
 import {createVoiceprintPanel} from './voiceprint-panel.mjs'
 import {createStartupNotice, startupMessage} from './startup-notice.mjs'
 import {createImPanel} from './im-panel.mjs'
@@ -346,7 +347,7 @@ monitorCamera.addEventListener('change', () => controller.stage({monitorCameraDe
 document.getElementById('watch-model').addEventListener('change', event => {
   if (!event.target.disabled && event.target.value) controller.stage({watchModel: event.target.value})
 })
-document.getElementById('camera-refresh').addEventListener('click', async () => {
+onButton(document.getElementById('camera-refresh'), async () => {
   const status = document.getElementById('camera-devices-status')
   try {
     cameraDevices = await window.novaAudioAgentDesktop.camera.listDevices()
@@ -546,7 +547,7 @@ bindStage(autoHideSeconds, 'change', () => {
   autoHideSeconds.reportValidity()
   return valid ? {autoHideSeconds: value} : {}
 })
-wakeRetry.addEventListener('click', () => { void window.novaAudioAgentDesktop.wakeWord.retry() })
+onButton(wakeRetry, () => window.novaAudioAgentDesktop.wakeWord.retry(), () => {statusLabel.textContent=t('操作未完成')})
 for (const event of ['pointerdown', 'keydown']) {
   document.addEventListener(event, () => window.novaAudioAgentDesktop.wakeWord.activity())
 }
@@ -658,8 +659,8 @@ async function saveAll() {
   return result
 }
 
-settingsSave.addEventListener('click', () => { void saveAll() })
-settingsRestart.addEventListener('click', async () => {
+onButton(settingsSave, saveAll, () => {statusLabel.textContent=t('保存失败，请重试')})
+onButton(settingsRestart, async () => {
   if (restarting) return
   restarting = true
   updateButtons()
@@ -672,7 +673,7 @@ settingsRestart.addEventListener('click', async () => {
   finally { restarting = false; updateButtons() }
 })
 
-codexRescan.addEventListener('click', async () => {
+onButton(codexRescan, async () => {
   codexRescan.disabled = true
   codexRescan.setAttribute('aria-busy', 'true')
   statusLabel.textContent = t("正在刷新 Codex…")
@@ -690,7 +691,7 @@ codexRescan.addEventListener('click', async () => {
     codexRescan.setAttribute('aria-busy', 'false')
   }
 })
-document.querySelector('#projects-repair').addEventListener('click', async () => {
+onButton(document.querySelector('#projects-repair'), async () => {
   statusLabel.textContent = t("正在修复 Projects 目录权限…")
   try {
     const results = await Promise.all(['state', 'managed', 'workspace'].map(root => api.repairProjects(root)))
@@ -718,7 +719,7 @@ async function runWorkspaceAction(action) {
   }
 }
 
-settingsRestore.addEventListener('click', async () => {
+onButton(settingsRestore, async () => {
   workspaceBusy = true
   updateButtons()
   try {
@@ -730,16 +731,16 @@ settingsRestore.addEventListener('click', async () => {
   finally { workspaceBusy = false; updateButtons() }
 })
 
-workspaceOpenCurrent.addEventListener('click', () => {
-  void runWorkspaceAction(() => api.openCurrentManagedWorkspace())
+onButton(workspaceOpenCurrent, () => {
+  return runWorkspaceAction(() => api.openCurrentManagedWorkspace())
 })
-workspaceClearCurrent.addEventListener('click', () => {
-  void runWorkspaceAction(() => api.clearCurrentManagedWorkspace())
+onButton(workspaceClearCurrent, () => {
+  return runWorkspaceAction(() => api.clearCurrentManagedWorkspace())
 })
-workspaceClearAll.addEventListener('click', () => {
-  void runWorkspaceAction(() => api.clearAllManagedWorkspaces())
+onButton(workspaceClearAll, () => {
+  return runWorkspaceAction(() => api.clearAllManagedWorkspaces())
 })
-document.querySelector('#startup-retry').addEventListener('click', async () => {
+onButton(document.querySelector('#startup-retry'), async () => {
   workspaceBusy = true
   updateButtons()
   try {
@@ -750,8 +751,8 @@ document.querySelector('#startup-retry').addEventListener('click', async () => {
   finally { workspaceBusy = false; updateButtons() }
 })
 
-workspaceRetryRecovery.addEventListener('click', () => {
-  void runWorkspaceAction(async () => {
+onButton(workspaceRetryRecovery, () => {
+  return runWorkspaceAction(async () => {
     const view = await api.retryBackend()
     return {
       status: view?.managedWorkspaces?.recoveryStatus === 'idle'

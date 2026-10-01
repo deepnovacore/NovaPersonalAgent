@@ -174,7 +174,7 @@
             <option value="thorough" title="澄清时最多提出 5 个问题。">充分（最多 5 个问题）</option>
           </select>
         </div>
-        <label class="field"><input type="checkbox" id="generatePlan"> 执行前生成计划</label>
+        <label class="toggle-row"><input type="checkbox" role="switch" id="generatePlan"> 执行前生成计划</label>
         <p class="hint">关闭后直接整理工作单，仍保留必要的澄清和操作确认。</p>
         <fieldset id="plan-readback" class="segmented compact-segmented segmented-readback">
           <legend>规划回读</legend>
@@ -320,7 +320,7 @@
                 <blockquote id="voiceprint-reading" aria-labelledby="voiceprint-reading-label">今天的天气很晴朗，窗外的树叶随风轻轻摇动。我准备好开始新的工作，也愿意慢慢讲清楚自己的想法。</blockquote>
                 <p class="hint">保持平时说话的语速和音量，不要耳语或模仿音色。读完后如仍在录音，可从头再读一遍。</p>
                 <p id="voiceprint-identity" class="hint"></p>
-                <label><input id="voiceprint-enabled" type="checkbox">只接收已注册说话人的语音</label>
+                <label class="toggle-row"><input id="voiceprint-enabled" type="checkbox" role="switch">只接收已注册说话人的语音</label>
                 <div class="actions"><button id="voiceprint-register" type="button">录制 12 秒并注册</button><button id="voiceprint-cancel" type="button" hidden>取消录音</button></div>
               </div>
               <p id="voiceprint-status" class="hint" role="status" aria-live="polite"></p>

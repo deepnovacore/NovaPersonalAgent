@@ -1,4 +1,11 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "已授权的来源列在下方；新增来源时单独确认读取和模型处理权限。": "Authorized sources are listed below. Confirm access and model processing separately when adding a source.",
+  "添加授权来源": "Add a source",
+  "已授权来源": "Authorized sources",
+  "已授权当前模型处理": "Processing by the current models is authorized",
+  "需要确认当前模型处理权限": "Model processing permission needs confirmation",
+  "保存失败，请重试": "Could not save. Please try again.",
+
   "正在连接后台": "Connecting to the backend",
   "连上之后，我就来看看你的资料。": "I'll look through your sources once connected.",
   "启动时打开": "Open on startup",

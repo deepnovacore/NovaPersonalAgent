@@ -29,7 +29,7 @@ test('Feishu does not authorize reading or bot delivery by rendering and keeps d
  const v=view({available:true,configured:true,state:'ready',chats:[{id:'chat-1',name:'测试会话'}]})
  assert.deepEqual(v.commands,[])
  const checks=v.nodes.filter(node=>node.tag==='input')
- assert.ok(checks.every(node=>node.checked===false&&node.role==='switch'))
+ assert.ok(checks.every(node=>node.checked===false));assert.equal(checks[0].role,undefined);assert.equal(checks.at(-1).role,'switch')
  const save=v.button('完成配置');assert.equal(save.disabled,true)
  checks[0].checked=true;checks[0].listeners.change();checks[1].checked=true;checks[1].listeners.change()
  assert.equal(save.disabled,false);await save.action()

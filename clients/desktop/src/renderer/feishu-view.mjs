@@ -12,7 +12,7 @@ export function renderFeishu({state={},local,card,el,button,command,refresh,api}
  button=(label,action,parent)=>{const b=originalButton(label,action,parent===a&&guideActions?guideActions:parent);if(primaryLabels.has(label))b.classList.add('im-guide-primary');return b}
  const note=text=>a.append(el('p',text,'personal-hint'))
  const call=async(method,params={})=>{const result=await command(`feishu.${method}`,params);refresh();return result}
- const check=(text,checked,parent=a)=>{const label=el('label',undefined,'personal-consent toggle-row'),input=el('input');input.type='checkbox';input.setAttribute('role','switch');input.checked=checked;label.append(input,document.createTextNode(text));parent.append(label);return input}
+ const check=(text,checked,parent=a,switchControl=true)=>{const label=el('label',undefined,'personal-consent toggle-row'),input=el('input');input.type='checkbox';if(switchControl)input.setAttribute('role','switch');else label.className='selection-row';input.checked=checked;label.append(input,document.createTextNode(text));parent.append(label);return input}
  if(!state.available){note(state.error||'当前运行环境尚未启用飞书连接。');note('需要安装 lark-cli 1.0.69 或更高版本，再重新打开 Nova。');return}
  const connected=['ready','connected','paused'].includes(state.state)
  const completed=connected&&state.scope_configured===true
@@ -83,8 +83,8 @@ export function renderFeishu({state={},local,card,el,button,command,refresh,api}
    const setAll=value=>{for(const {chat,input}of choices){input.checked=value;if(value)selected.add(chat.id);else selected.delete(chat.id)}}
    button('全选',()=>setAll(true),bulk);button('取消全选',()=>setAll(false),bulk)
    group.append(el('p','最近活跃优先','personal-hint'))
-   for(const chat of chats){const input=check(chat.name||'未命名会话',selected.has(chat.id),list);choices.push({chat,input});input.addEventListener('change',()=>input.checked?selected.add(chat.id):selected.delete(chat.id))}
-   const consent=check('允许读取所选会话并保存在本机',false)
+   for(const chat of chats){const input=check(chat.name||'未命名会话',selected.has(chat.id),list,false);choices.push({chat,input});input.addEventListener('change',()=>input.checked?selected.add(chat.id):selected.delete(chat.id))}
+   const consent=check('允许读取所选会话并保存在本机',false,a,false)
    const save=button('完成配置',async()=>{await call('configure',{chat_ids:[...selected],consent:true});local.chats=null;local.editScope=false;refresh()},a);save.disabled=true
    consent.addEventListener('change',()=>{save.disabled=!consent.checked})
   }else if(local.chats)note('没有可选会话。请确认账号权限后重新加载。')

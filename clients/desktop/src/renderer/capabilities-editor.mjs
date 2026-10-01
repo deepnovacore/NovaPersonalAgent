@@ -118,7 +118,7 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
       field(search, t("MCP 地址"), mcp.url, url => changeMcp({url}))
       field(search, t("原始搜索工具名"), mcp.tool, tool => changeMcp({tool}))
       mapping(search, t("搜索请求头（每行 key=${ENV}）"), mcp.headers, headers => changeMcp({headers}))
-      button(search, t("检测搜索连接（仅 tools/list）"), () => runProbe('$search')).disabled = probeBusy
+      const searchProbe=button(search, t("检测搜索连接（仅 tools/list）"), () => runProbe('$search'));searchProbe.disabled=probeBusy;searchProbe.setAttribute('aria-busy',String(probes.get('$search')?.status==='checking'))
       node('p', probes.get('$search')?.status ?? t("未检测"), search)
     }
     const statuses = running?.servers ?? state.status?.servers ?? []
@@ -153,7 +153,7 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
         mapping(details, t("{0} 请求头（每行 key=${ENV}）", name), server.headers, headers => change({headers}))
       }
       for (const consumer of ['frontbrain', 'codex']) field(details, t("{0} 对 {1} 开放", name, consumer === 'frontbrain' ? t("前台") : 'Codex'), server.exposeTo?.[consumer] ?? consumer === 'codex', enabled => change({exposeTo: {...{frontbrain: false, codex: true}, ...server.exposeTo, [consumer]: enabled}}), {type: 'checkbox'})
-      button(details, t("检测连接与工具（仅 tools/list）"), () => runProbe(name)).disabled = probeBusy
+      const serverProbe=button(details, t("检测连接与工具（仅 tools/list）"), () => runProbe(name));serverProbe.disabled=probeBusy;serverProbe.setAttribute('aria-busy',String(probes.get(name)?.status==='checking'))
       const discovered = probes.get(name)
       node('p', discovered ? t("上次检测 {0}{1} · 修改连接后请重新检测", discovered.status, discovered.reason ? ' · ' + discovered.reason : '') : t("尚未检测连接"), details)
       const allTools = new Set([...Object.keys(server.tools ?? {}), ...(discovered?.tools ?? []).map(tool => tool.name)])
