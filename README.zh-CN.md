@@ -68,31 +68,27 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 
 <table>
   <tr>
-    <td valign="top">
-      <h3>Voice Vibe Coding</h3>
-      <p>用语音描述功能、调整需求，Codex 在后台编码与测试。关键进展主动告知，琐碎过程保持安静。</p>
-      <p align="center"><img src="assets/features/coding.svg" alt="语音需求交给 Codex，完成编码与测试的流程示意" width="480"></p>
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>你的个人工作台</h3>
       <p>待办、想法、目标、资讯和「关于我」在左侧，和小诺的对话在右侧。从任意一条待办发起任务，小诺对照验收标准核对结果；中途你随时可以接管，也可以交还给它。</p>
-      <p align="center"><img src="assets/features/workbench-window.png" alt="Workbench 窗口：左侧待办，右侧与小诺的对话" width="820"></p>
+      <img src="assets/features/workbench-window.png" alt="Workbench 窗口：左侧待办，右侧与小诺的对话" width="100%">
     </td>
-  </tr>
-  <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>视觉监控与主动提醒</h3>
       <p>告诉 Nova 要关注的画面变化，条件触发时主动提醒。</p>
-      <p align="center"><img src="assets/features/vision-camera.png" alt="摄像头观察结果与主动播报" width="820"></p>
+      <img src="assets/features/vision-camera.png" alt="摄像头观察结果与主动播报" width="100%">
     </td>
   </tr>
   <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
+      <h3>Voice Vibe Coding</h3>
+      <p>用语音描述功能、调整需求，Codex 在后台编码与测试。关键进展主动告知，琐碎过程保持安静。</p>
+      <img src="assets/features/coding.svg" alt="语音需求交给 Codex，完成编码与测试的流程示意" width="100%">
+    </td>
+    <td width="50%" valign="top">
       <h3>把 Nova 带在身边</h3>
       <p>iPhone 通过 Tailscale 连接电脑，随时对话和审批。</p>
-      <p align="center"><img src="assets/features/iphone.png" alt="iPhone 主界面与连接设置" width="480"></p>
+      <img src="assets/features/iphone.png" alt="iPhone 主界面与连接设置" width="100%">
     </td>
   </tr>
 </table>

@@ -67,31 +67,27 @@ For more details about the architecture, check [Architecture](docs/en/architectu
 
 <table>
   <tr>
-    <td valign="top">
-      <h3>Voice Vibe Coding</h3>
-      <p>Describe a feature and refine it by voice while Codex writes and tests the code. Nova reports key milestones and keeps routine progress quiet.</p>
-      <p align="center"><img src="assets/features/coding.en.svg" alt="Voice requests flow to Codex for coding and testing" width="480"></p>
-    </td>
-  </tr>
-  <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>Your personal workbench</h3>
       <p>Todos, Ideas, Goals, Feeds and your Profile sit on the left, the conversation with Nova on the right. Start a task from any todo; Nova checks the result against its acceptance criteria, and you can take over or hand it back at any time.</p>
-      <p align="center"><img src="assets/features/workbench-window.png" alt="Workbench window with todos on the left and the conversation with Nova on the right" width="820"></p>
+      <img src="assets/features/workbench-window.png" alt="Workbench window with todos on the left and the conversation with Nova on the right" width="100%">
     </td>
-  </tr>
-  <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
       <h3>Camera monitoring and timely alerts</h3>
       <p>Ask Nova to watch for a condition and tell you when it occurs.</p>
-      <p align="center"><img src="assets/features/vision-camera.png" alt="Camera observation and spoken alert" width="820"></p>
+      <img src="assets/features/vision-camera.png" alt="Camera observation and spoken alert" width="100%">
     </td>
   </tr>
   <tr>
-    <td valign="top">
+    <td width="50%" valign="top">
+      <h3>Voice Vibe Coding</h3>
+      <p>Describe a feature and refine it by voice while Codex writes and tests the code. Nova reports key milestones and keeps routine progress quiet.</p>
+      <img src="assets/features/coding.en.svg" alt="Voice requests flow to Codex for coding and testing" width="100%">
+    </td>
+    <td width="50%" valign="top">
       <h3>Take Nova with you</h3>
       <p>Connect your iPhone over Tailscale to talk and approve tasks on your PC.</p>
-      <p align="center"><img src="assets/features/iphone.en.png" alt="iPhone home and connection settings" width="480"></p>
+      <img src="assets/features/iphone.en.png" alt="iPhone home and connection settings" width="100%">
     </td>
   </tr>
 </table>
