@@ -206,8 +206,6 @@ export const workspaceContextInjectionSchema = workspaceContextDeliveryRecordSch
   },
 )
 
-export type WorkspaceContextDeliveryCapability = z.infer<typeof workspaceContextDeliveryCapabilitySchema>
-export type WorkspaceContextDelivery = z.infer<typeof workspaceContextDeliverySchema>
 export type WorkspaceContextDeliveryRecord = z.infer<typeof workspaceContextDeliveryRecordSchema>
 
 export const hostResponseKindSchema = z.enum([

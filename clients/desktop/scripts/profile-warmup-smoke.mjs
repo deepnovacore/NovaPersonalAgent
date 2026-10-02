@@ -1,7 +1,7 @@
 // Run after the runtime build: electron clients/desktop/scripts/profile-warmup-smoke.mjs
 // Real renderer + host; generation and RSS are deterministic fixtures, no personal data or network.
 import {app,BrowserWindow,ipcMain,nativeTheme} from 'electron'
-import {mkdtemp,realpath,writeFile,mkdir,rm} from 'node:fs/promises'
+import {mkdtemp,realpath,writeFile,mkdir} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join,resolve} from 'node:path'
 import {fileURLToPath,pathToFileURL} from 'node:url'

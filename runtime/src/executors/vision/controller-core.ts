@@ -15,11 +15,6 @@ export const VISION_AGENT_DESCRIPTOR = Object.freeze({
 })
 
 export type VisionChannel = 'watch' | 'guard'
-export type VisionStartRequest = Readonly<{
-  condition: string
-  interval_s: number
-  duration_s: number
-}>
 
 export interface VisionRuntimeOpPort {
   dispatch(request: {
