@@ -20,7 +20,7 @@ const entryPath=(id:string)=>`entries/${digest(id)}.md`
 const failure=(code:string)=>new Error(`MEMORY_MARKDOWN_${code}`)
 const journalSchema=z.object({version:z.literal(1),operationId:z.string().regex(/^[A-Za-z0-9_-]{1,128}$/),baseCommit:z.string().regex(/^[a-f0-9]{40,64}$/).nullable(),files:z.array(z.object({path:z.string().regex(/^(entries\/[a-f0-9]{64}\.md|\.nova-memory\.json)$/),beforeHash:z.string().regex(/^[a-f0-9]{64}$/).nullable(),after:z.string().max(MAX_FILE)}).strict()).max(MAX_ENTRIES+1)}).strict()
 type Journal=z.infer<typeof journalSchema>
-type LockOwner={owner:{pid:number;token:string};bytes:string;ino:number;dev:number}
+interface LockOwner {owner:{pid:number;token:string};bytes:string;ino:number;dev:number}
 export interface MarkdownEdit {entry_id:string;expected_revision:number;content:EntryRevision['content'];path:string;hash:string}
 export type ApprovedMarkdownEdit=Pick<MarkdownEdit,'entry_id'|'expected_revision'|'path'|'hash'>
 export interface MarkdownSnapshot {revisions:EntryRevision[];edits:MarkdownEdit[];baselines:Record<string,string>}

@@ -8,7 +8,7 @@ import { assertFeishuCommand, createFeishuRunner, FeishuAppNotConfigured, parseF
 test('unsupported CLI stays unavailable on subsequent status requests without accessing credentials', async () => {
   const directory=await mkdtemp(join(tmpdir(),'nova-feishu-old-cli-'));
   const calls:string[][]=[];
-  const connector=new FeishuConnector({bootstrapOnly:true,executable:'unused',credentialRoot:directory,statePath:join(directory,'state.json'),run:async args=>{calls.push(args);if(args[0]==='--version')return '1.0.35';throw Error('credential initialization should not run');}});
+  const connector=new FeishuConnector({bootstrapOnly:true,executable:'unused',credentialRoot:directory,statePath:join(directory,'state.json'),run:args=>{calls.push(args);return args[0]==='--version'?Promise.resolve('1.0.35'):Promise.reject(Error('credential initialization should not run'));}});
   try {
     await connector.open();
     const state=await connector.command('feishu.status');

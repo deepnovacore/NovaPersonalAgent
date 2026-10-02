@@ -267,7 +267,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
           }
           const workspace = workspacesByPath.get(item.cwd)
           const existing = workspace === undefined ? undefined : sessionsByThread.get(`${home}\0${item.threadId}`)
-          if (workspace !== undefined && existing !== undefined && existing.workspace_id === workspace.workspace_id && existing.state === 'ready'
+          if (workspace !== undefined && existing?.workspace_id === workspace.workspace_id && existing.state === 'ready'
             && (existing.origin === 'nova' || (existing.last_used_at >= item.updatedAt && workspace.last_used_at >= item.updatedAt
               && sameSessionTitle(existing.display_title, item.title)))) {
             ids.add(existing.session_id)

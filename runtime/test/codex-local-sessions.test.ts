@@ -281,7 +281,7 @@ test('listing coding targets does not re-import a catalog the store already hold
     calls.length = 0
     const changed = await value.adapter.targetPort.list()
     assert.ok(changed.some(item => item.title === '新会话'), 'a new codex session appears on the next open')
-    assert.equal(changed.filter(item => item.session_id !== null)[0]?.title, '会话 2', 'a touched session moves to the front')
+    assert.equal(changed.find(item => item.session_id !== null)?.title, '会话 2', 'a touched session moves to the front')
     assert.equal(calls.filter(name => name === 'importSession').length, 2, 'only the two changed sessions are imported')
   } finally {
     await value.adapter.close()
