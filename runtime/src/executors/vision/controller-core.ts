@@ -348,15 +348,12 @@ export class VisionAgentControllerCore {
     const granted = this.#machine.grant({...identity})
     return granted.code === 'active' || granted.code === 'already_active'
   }
-  onPermissionGranted(identity: VisionIdentity): boolean { return this.permissionGranted(identity) }
 
   /** Host callback for an executor terminal. Cleanup is exact-identity and idempotent. */
   terminal(identity: VisionIdentity): void { this.#cleanupTerminal({...identity}) }
-  onTerminal(identity: VisionIdentity): void { this.terminal(identity) }
 
   /** Reports do not release the single active monitor reservation. */
   hit(identity: VisionIdentity): void { this.#machine.hit({...identity}) }
-  onHit(identity: VisionIdentity): void { this.hit(identity) }
 
   async #assess(identity: VisionIdentity, request: VisionControllerDispatchRequest): Promise<unknown> {
     const controller = new AbortController()

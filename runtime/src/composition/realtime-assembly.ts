@@ -230,10 +230,6 @@ export interface RealtimeAssemblyOptions {
   readonly controlledPreemptiveAlertReconnect?: boolean
   readonly preemptiveAlertHistoryRecovery?: PreemptiveAlertHistoryRecovery
   readonly preemptiveAlertHistoryPairs?: number
-  /** @deprecated Compatibility options for existing environment/configuration keys. */
-  readonly controlledGuardReconnect?: boolean
-  readonly guardHistoryRecovery?: PreemptiveAlertHistoryRecovery
-  readonly guardHistoryPairs?: number
   readonly codingTarget?: CodingTargetController
   readonly projectConfirmation?: ProjectConfirmationController
   readonly projectAdapter?: ProjectExecutorAdapter
@@ -1106,17 +1102,15 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       options.onCaption?.(frame)
     }}),
     ...(options.telemetry === undefined ? {} : {telemetry: options.telemetry}),
-    ...(options.controlledPreemptiveAlertReconnect === undefined && options.controlledGuardReconnect === undefined
+    ...(options.controlledPreemptiveAlertReconnect === undefined
       ? {}
-      : {controlledPreemptiveAlertReconnect: options.controlledPreemptiveAlertReconnect
-        ?? options.controlledGuardReconnect}),
-    ...(options.preemptiveAlertHistoryRecovery === undefined && options.guardHistoryRecovery === undefined
+      : {controlledPreemptiveAlertReconnect: options.controlledPreemptiveAlertReconnect}),
+    ...(options.preemptiveAlertHistoryRecovery === undefined
       ? {}
-      : {preemptiveAlertHistoryRecovery: options.preemptiveAlertHistoryRecovery
-        ?? options.guardHistoryRecovery}),
-    ...(options.preemptiveAlertHistoryPairs === undefined && options.guardHistoryPairs === undefined
+      : {preemptiveAlertHistoryRecovery: options.preemptiveAlertHistoryRecovery}),
+    ...(options.preemptiveAlertHistoryPairs === undefined
       ? {}
-      : {preemptiveAlertHistoryPairs: options.preemptiveAlertHistoryPairs ?? options.guardHistoryPairs}),
+      : {preemptiveAlertHistoryPairs: options.preemptiveAlertHistoryPairs}),
     ...(projectConfirmation === undefined
       ? {}
       : {projectConfirmation}),
