@@ -48,7 +48,6 @@ const SETTINGS_V2 = Object.freeze({
 
 function nodeLaunchSpec(options) {
   return backendLaunchSpec({
-    backend: 'node',
     nodeEntry: '/repo/runtime/dist/src/desktop-entry.js',
     nodeResourcesPath: '/repo/clients/desktop/build',
     ...options,
@@ -182,22 +181,10 @@ test('packaged backend selection refuses explicit Python before resolving an int
   )
 })
 
-test('launch spec cannot construct the retired Python process', () => {
-  assert.throws(() => nodeLaunchSpec({
-    backend: 'python',
-    python: '/private/poison/python',
-    workspace: '/workspace',
-    token: TOKEN,
-    readyEndpoint: '127.0.0.1:49152',
-    parentEnv: {},
-  }), /backend kind is invalid/)
-})
-
 test('Node launch uses the compiled utility-process entry and no writable stdin', () => {
   const nodeEntry = '/repo/runtime/dist/src/desktop-entry.js'
   const nodeResourcesPath = '/repo/clients/desktop/build'
   const spec = nodeLaunchSpec({
-    backend: 'node',
     nodeEntry,
     nodeResourcesPath,
     workspace: '/workspace',
@@ -215,7 +202,6 @@ test('Node launch uses the compiled utility-process entry and no writable stdin'
   assert.equal(JSON.stringify(spec).includes(TOKEN), true)
   assert.equal(JSON.stringify(spec.argv).includes(TOKEN), false)
   assert.throws(() => nodeLaunchSpec({
-    backend: 'node',
     nodeEntry: 'relative-entry.js',
     nodeResourcesPath,
     workspace: '/workspace',
@@ -224,7 +210,6 @@ test('Node launch uses the compiled utility-process entry and no writable stdin'
     parentEnv: {},
   }), /absolute Node runtime entry/)
   assert.throws(() => nodeLaunchSpec({
-    backend: 'node',
     nodeEntry,
     nodeResourcesPath: 'relative-resources',
     workspace: '/workspace',
@@ -236,7 +221,6 @@ test('Node launch uses the compiled utility-process entry and no writable stdin'
 
 test('resolved desktop settings override inherited Codex and model configuration', () => {
   const spec = nodeLaunchSpec({
-    backend: 'node',
     nodeEntry: '/repo/runtime/dist/src/desktop-entry.js',
     nodeResourcesPath: '/repo/clients/desktop/build',
     workspace: '/environment/workspace',
@@ -365,7 +349,6 @@ test('the runtime receives the exact state root resolved for desktop maintenance
 
 test('resolved desktop configuration removes an invalid inherited Codex binary', () => {
   const spec = nodeLaunchSpec({
-    backend: 'node',
     nodeEntry: '/repo/runtime/dist/src/desktop-entry.js',
     nodeResourcesPath: '/repo/clients/desktop/build',
     workspace: '/workspace',

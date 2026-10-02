@@ -673,7 +673,7 @@ test('main starts without camera permission and exposes only an explicit sender-
   assert.doesNotMatch(start.slice(0, start.indexOf('\n}')), /CameraPermission|camera:permission/u)
   assert.match(
     start,
-    /start: camera => startSelectedCamera\(camera, backendKind, releaseSmokeChannel\)/u,
+    /start: camera => startSelectedCamera\(camera, releaseSmokeChannel\)/u,
   )
   assert.match(source, /ipcMain\.handle\('nova:camera:permission', async event => \{\n\s*if \(\(!mainWindow \|\| event\.sender !== mainWindow\.webContents\) && \(!settingsWindow \|\| event\.sender !== settingsWindow\.webContents\)\)/u)
   assert.match(source, /resolveCameraPermission\(camera\.source, \{/u)
@@ -689,7 +689,7 @@ test('backend mode is admitted before camera selection or permission work', asyn
 
   assert.ok(selection >= 0 && camera > selection)
   assert.match(body, /createReleaseSmokeChannel\(\{/u)
-  assert.match(body, /start: camera => startSelectedCamera\(camera, backendKind, releaseSmokeChannel\)/u)
+  assert.match(body, /start: camera => startSelectedCamera\(camera, releaseSmokeChannel\)/u)
   assert.match(
     source,
     /process\.stderr\.write\(\s*'\[desktop-diagnostic\] source_rollback_unavailable\\n',\s*\(\) => app\.exit\(0\),?\s*\)/u,

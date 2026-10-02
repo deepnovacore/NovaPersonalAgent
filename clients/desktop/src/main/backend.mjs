@@ -125,7 +125,6 @@ export function searchProxyUrlFromRules(rules) {
 }
 
 export function backendLaunchSpec({
-  backend = 'node',
   nodeEntry,
   nodeResourcesPath,
   workspace,
@@ -139,7 +138,6 @@ export function backendLaunchSpec({
   newsLanguage = 'en',
   capabilitiesDocument,
 }) {
-  if (backend !== 'node') throw new Error('backend kind is invalid')
   if (typeof nodeEntry !== 'string' || !isAbsolute(nodeEntry)) {
     throw new Error('absolute Node runtime entry is required')
   }
@@ -181,7 +179,7 @@ export function backendLaunchSpec({
     ...parentEnv,
     DESKTOP_TOKEN: token,
     DESKTOP_READY_ENDPOINT: readyEndpoint,
-    BACKEND: backend,
+    BACKEND: 'node',
     CODEX_WORKSPACE: effectiveWorkspace,
     EXECUTOR: 'codex',
     PROACTIVITY_PRESET: proactivity,
