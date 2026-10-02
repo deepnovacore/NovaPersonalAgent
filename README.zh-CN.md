@@ -155,7 +155,7 @@ Nova Audio Agent **常驻通用语音 agent**：小诺（Nova）保持前台对�
 
 环境要求：Node.js 22+、npm、Git、已登录的 `codex` 可执行文件（Codex 只走 app-server）
 
-v0.3.0 Preview 需在 `v0.3.0preview` 分支从源码运行；稳定版可直接用 npm 安装：
+可直接用 npm 安装稳定版；预览版安装方式见下方 Preview 通道。
 
 ```bash
 # 全局安装
@@ -169,6 +169,24 @@ novaaudio doctor
 ```
 
 无头 Ubuntu 22.04+：通过 npm 安装 `nova-audio-agent-server`，完成配置与凭据初始化后运行 `novaaudio-server start`；另开终端运行 `novaaudio-server pair wss://your-host.ts.net` 显示一次性配对二维码。配置见[远程服务指南](docs/zh-CN/deployment/remote-server.md)。
+
+### Preview 预览通道
+
+v0.3 预览版使用 npm 的 `preview` 标签；`latest` 保持为稳定版。
+
+```bash
+# 安装或更新预览版
+npm install --global nova-audio-agent@preview
+novaaudio
+# 固定安装本次预览版
+npm install --global nova-audio-agent@0.3.0-preview.1
+# 将 CLI 切回稳定版
+npm install --global nova-audio-agent@latest
+```
+
+切换通道前请退出 Nova。两个通道共用本地设置与数据；切换 CLI 不会回滚数据变化，试用前请备份 Nova 数据。
+
+Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-audio-agent-server@preview`；稳定版使用 `@latest`。
 
 从源码开发时：
 

@@ -16,6 +16,26 @@ Nova 运行在电脑上，通过语音与你交流，并调用 Codex 完成编�
 
 ## 2. 安装和启动
 
+### Preview 预览通道
+
+v0.3 预览版使用 npm 的 `preview` 标签；`latest` 保持为稳定版。
+
+```bash
+# 安装或更新预览版
+npm install --global nova-audio-agent@preview
+novaaudio
+# 固定安装本次预览版
+npm install --global nova-audio-agent@0.3.0-preview.1
+# 将 CLI 切回稳定版
+npm install --global nova-audio-agent@latest
+```
+
+切换通道前请退出 Nova。两个通道共用本地设置与数据；切换 CLI 不会回滚数据变化，试用前请备份 Nova 数据。
+
+Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-audio-agent-server@preview`；稳定版使用 `@latest`。
+
+从源码开发：
+
 ```bash
 git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
 cd nova-audio-agent

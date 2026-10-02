@@ -22,6 +22,9 @@ test('release version gate rejects stale candidate inputs and divergent package 
   try {
     for (const [candidate, cli, desktop, accepted] of [
       ['1.2.3', '1.2.3', '1.2.3', true],
+      ['0.3.0-preview.1', '0.3.0-preview.1', '0.3.0-preview.1', true],
+      ['0.3.0-preview.01', '0.3.0-preview.01', '0.3.0-preview.01', false],
+      ['0.3.0-beta.1', '0.3.0-beta.1', '0.3.0-beta.1', false],
       ['0.1.1', '1.2.3', '1.2.3', false],
       ['1.2.3', '1.2.4', '1.2.3', false],
       ['1.2.3', '1.2.3', '1.2.4', false],

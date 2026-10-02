@@ -111,19 +111,24 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: |
           set -euo pipefail
+          npm_tag="$(node clients/desktop/scripts/release-channel.mjs "$RELEASE_VERSION")"
+          release_flags=(--latest)
+          if test "$npm_tag" = preview; then
+            release_flags=(--prerelease --latest=false)
+          fi
           gh release create "v$RELEASE_VERSION" release-artifacts/* \
             --target "$EXPECTED_COMMIT" \
             --title "Nova Audio Agent v$RELEASE_VERSION" \
-            --notes "Nova Audio Agent v$RELEASE_VERSION makes the first run guided: one DashScope API Key is enough to start, a setup window tests the key before saving, novaaudio doctor --online checks keys against their providers, and search, camera and memory turn off instead of blocking startup when their key is missing. Available for macOS arm64, Windows x64 and Ubuntu 22.04+ x64. Desktop applications are unsigned; macOS Gatekeeper and Windows SmartScreen may display security warnings." \
-            --latest
+            --notes "Nova Audio Agent v$RELEASE_VERSION. Install with npm install --global nova-audio-agent@$npm_tag. Available for macOS arm64, Windows x64 and Ubuntu 22.04+ x64. Desktop applications are unsigned; macOS Gatekeeper and Windows SmartScreen may display security warnings. See the README for features and setup." \
+            "${release_flags[@]}"
           tarball="$(find npm-package -maxdepth 1 -name '*.tgz' -type f)"
           tarball="$(realpath "$tarball")"
-          npm publish "./release-artifacts/nova-audio-agent-server-$RELEASE_VERSION.tgz" --access public
-          npm publish "$tarball" --access public
+          npm publish "./release-artifacts/nova-audio-agent-server-$RELEASE_VERSION.tgz" --access public --tag "$npm_tag"
+          npm publish "$tarball" --access public --tag "$npm_tag"
           published=''
           for attempt in $(seq 1 12); do
-            if test "$(npm view "nova-audio-agent@$RELEASE_VERSION" version 2>/dev/null || true)" = "$RELEASE_VERSION" \
-              && test "$(npm view "nova-audio-agent-server@$RELEASE_VERSION" version 2>/dev/null || true)" = "$RELEASE_VERSION"; then
+            if test "$(npm view "nova-audio-agent@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION" \
+              && test "$(npm view "nova-audio-agent-server@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION"; then
               published=1
               break
             fi

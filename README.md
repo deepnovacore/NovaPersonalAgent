@@ -155,7 +155,7 @@ For more details about the architecture, check [Architecture](docs/en/architectu
 Requirements: Node.js 22+, npm, Git, a logged-in `codex` executable (app-server is the only
 Codex transport).
 
-Besides the shipped app from releases, you can also install using npm. The v0.3.0 Preview runs from source on the `v0.3.0preview` branch.
+Install the stable release with npm, or choose the preview channel below.
 
 ```bash
 npm install --global nova-audio-agent@0.2.3
@@ -168,6 +168,24 @@ novaaudio doctor
 ```
 
 Headless Ubuntu 22.04+: install `nova-audio-agent-server` with npm, configure it and initialize credentials; run `novaaudio-server start` and, in a second terminal, `novaaudio-server pair wss://your-host.ts.net` for a one-use QR. See the [configuration guide](docs/en/deployment/remote-server.md).
+
+### Preview channel
+
+The v0.3 preview uses npm's `preview` tag; `latest` stays on the stable release.
+
+```bash
+# Install or update the preview
+npm install --global nova-audio-agent@preview
+novaaudio
+# Pin this preview exactly
+npm install --global nova-audio-agent@0.3.0-preview.1
+# Switch back to the stable CLI
+npm install --global nova-audio-agent@latest
+```
+
+Quit Nova before switching channels. Both channels use the same local settings and data; switching the CLI does not roll back data changes. Back up your Nova data before trying a preview.
+
+For headless Ubuntu 22.04+ x64, use `npm install --global nova-audio-agent-server@preview` (or `@latest` for stable).
 
 For development from source:
 
