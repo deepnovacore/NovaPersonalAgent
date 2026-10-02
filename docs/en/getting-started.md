@@ -18,7 +18,7 @@ Desktop targets macOS arm64, Windows x64, and Ubuntu 22.04+ x64.
 
 ### Preview channel
 
-The v0.3 preview uses npm's `preview` tag; `latest` stays on the stable release.
+The preview uses npm's `preview` tag; `latest` stays on the stable release.
 
 ```bash
 # Install or update the preview

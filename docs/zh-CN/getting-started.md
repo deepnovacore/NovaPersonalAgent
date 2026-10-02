@@ -18,7 +18,7 @@ Nova 运行在电脑上，通过语音与你交流，并调用 Codex 完成编�
 
 ### Preview 预览通道
 
-v0.3 预览版使用 npm 的 `preview` 标签；`latest` 保持为稳定版。
+预览版使用 npm 的 `preview` 标签；`latest` 保持为稳定版。
 
 ```bash
 # 安装或更新预览版
