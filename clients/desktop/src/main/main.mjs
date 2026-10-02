@@ -1342,10 +1342,6 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if(mode==='workbench'&&['sleeping','blocked'].includes(wakeWord?.state))wakeWord.wake({show:false})
     if(activate){mainWindow.show();mainWindow.focus();return shown}
   })
-  ipcMain.handle('nova:personal:collapse', (event, value) => {
-    if (event.sender !== mainWindow.webContents || typeof value !== 'boolean') throw new Error('window request rejected')
-    requestPresentation(value ? 'orb' : 'workbench')
-  })
   ipcMain.handle('nova:personal:unread', (event, value) => {
     if (event.sender !== mainWindow.webContents || !Number.isSafeInteger(value) || value < 0 || value > 1000000) throw new Error('unread request rejected')
     updateTrayUnread(tray, backendStatus.state === 'connected' ? value : 0)
@@ -1478,9 +1474,6 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     const result = phoneQueue.then(() => phoneAction(action, deviceId, epoch))
     phoneQueue = result.catch(() => {})
     return result
-  })
-  ipcMain.on('nova:pairing:open', (event, ...args) => {
-    if (settingsWindow && event.sender === settingsWindow.webContents && args.length === 0) void openPairingWindow(launchId)
   })
   ipcMain.on('nova:setup:open', event => {
     if (mainWindow && event.sender === mainWindow.webContents) void openSetupWindow()

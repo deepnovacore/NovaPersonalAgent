@@ -56,9 +56,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:native-audio:terminal',
     'nova:orb-menu:show',
     'nova:orb:dormant',
-    'nova:pairing:open',
     'nova:personal:article',
-    'nova:personal:collapse',
     'nova:personal:collapsed',
     'nova:personal:connector-authorization',
     'nova:personal:directory',
@@ -1132,7 +1130,7 @@ test('workspace cleanup cannot restart a backend while settings recovery is pend
 
 test('personal directory and window controls are bound to main renderer',async()=>{
  const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
- for(const channel of ['directory','collapse','wake']){
+ for(const channel of ['directory','wake']){
   const begin=source.indexOf(`ipcMain.handle('nova:personal:${channel}'`)
   assert.ok(begin>=0)
   const body=source.slice(begin,source.indexOf("\n  })",begin))
@@ -1162,7 +1160,7 @@ test('sleep and wake IPC reject other windows and unexpected arguments', async (
 test('phone actions require the settings sender and restrict actions and device identifiers', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const {default: vm} = await import('node:vm')
-  const body = source.slice(source.indexOf("  ipcMain.handle('nova:phone:action'"), source.indexOf("  ipcMain.on('nova:pairing:open'"))
+  const body = source.slice(source.indexOf("  ipcMain.handle('nova:phone:action'"), source.indexOf("  ipcMain.on('nova:setup:open'"))
   let handler
   const sender = {}, calls = []
   vm.runInNewContext(body, {ipcMain: {handle: (_channel, fn) => {handler = fn}}, settingsWindow: {webContents: sender},
