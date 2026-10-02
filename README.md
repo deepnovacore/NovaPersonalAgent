@@ -217,6 +217,25 @@ capture when available; Windows, Linux source runs, and macOS fallback use Chrom
 wake-word Worker; explicit mute stops wake detection. See
 [wake-word setup](docs/en/getting-started.md#enable-a-wake-word).
 
+### Support matrix
+
+| Platform | Desktop app | Headless server | Connect iPhone |
+|---|---|---|---|
+| macOS arm64 | Yes, with native echo-cancelled capture | From source | From the desktop app |
+| Windows x64 | Yes | — | — |
+| Ubuntu 22.04+ x64 | Yes | npm package | Through the headless server |
+
+| Layer | Providers | Default |
+|---|---|---|
+| Integrated voice | Qwen realtime, StepFun (preview) | Qwen `qwen-audio-3.0-realtime-plus` |
+| Cascaded ASR / TTS | Volcengine Speech | `volc.seedasr.sauc.duration` / `seed-tts-2.0` |
+| Cascaded LLM | DeepSeek, Qwen / DashScope, Volcengine Ark | DeepSeek `deepseek-flash` |
+| Vision | Qwen-VL family, Doubao Seed | Off in conversation; Loop Camera uses its own model |
+| Coding executor | Codex | Codex |
+| Sources | Local folders, Google via Composio, Apple Mail and Calendar (macOS), Feishu | None until you authorize them |
+
+Models, credentials and per-provider limits: [support matrix](docs/en/support-matrix.md).
+
 ## 4. Documentation
 
 | Read this | For |

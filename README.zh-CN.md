@@ -217,6 +217,25 @@ node runtime/dist/src/cli.js demo all
 Windows、Linux 源码运行及 macOS 回退路径使用 Chromium `getUserMedia` + AudioWorklet。
 休眠时麦克风帧仅送入本地唤醒 Worker，闭麦会停止唤醒检测。详见[本地唤醒设置](docs/zh-CN/getting-started.md#本地唤醒词)。
 
+### 支持矩阵
+
+| 平台 | 桌面应用 | 无头服务 | 连接 iPhone |
+|---|---|---|---|
+| macOS arm64 | 支持，含原生回声消除采集 | 源码运行 | 在桌面应用中配对 |
+| Windows x64 | 支持 | — | — |
+| Ubuntu 22.04+ x64 | 支持 | npm 包 | 通过无头服务 |
+
+| 层 | 可选服务 | 默认 |
+|---|---|---|
+| 集成语音 | Qwen realtime、StepFun（预览） | Qwen `qwen-audio-3.0-realtime-plus` |
+| 级联 ASR / TTS | 火山语音 | `volc.seedasr.sauc.duration` / `seed-tts-2.0` |
+| 级联 LLM | DeepSeek、Qwen / DashScope、火山方舟 | DeepSeek `deepseek-flash` |
+| 视觉 | Qwen-VL 系列、Doubao Seed | 对话中默认关闭；Loop Camera 使用独立模型 |
+| 编码 executor | Codex | Codex |
+| 数据源 | 本地文件夹、Google（经 Composio）、Apple 邮件与日历（macOS）、飞书 | 经你授权后才接入 |
+
+各模型、凭据与服务商限制见[支持矩阵](docs/zh-CN/support-matrix.md)。
+
 ## 4. 文档
 
 | 读这篇 | 目的 |
