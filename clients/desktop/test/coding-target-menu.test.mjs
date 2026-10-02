@@ -131,6 +131,21 @@ test('a session picked while the workspace change is still pending is applied af
  assert.deepEqual(m.commands.at(-1),['conversations.target',{id:'a',target:{workspace_id:'ws-1',session_id:'s-1'}}])
 })
 
+test('returning to the current workspace while another selection is pending keeps the last choice', async () => {
+ let release;const gate=new Promise(resolve=>{release=resolve})
+ const m=mount({gate});m.menu.receive({type:'executor.state'})
+ m.c.snapshot.conversations.items[0].coding_target=catalog[0]
+ m.menu.update();m.chip().listeners.click();await flush()
+ m.byText('Beta').listeners.click()
+ m.byText('Alpha').listeners.click()
+ assert.equal(m.commands.filter(([method])=>method==='conversations.target').length,1,'only one change in flight')
+ release();await flush();await flush()
+ assert.deepEqual(m.commands.filter(([method])=>method==='conversations.target'),[
+  ['conversations.target',{id:'a',target:{workspace_id:'ws-2',session_id:null}}],
+  ['conversations.target',{id:'a',target:{workspace_id:'ws-1',session_id:null}}],
+ ])
+})
+
 test('label and levels project the current target even before the catalog loads', () => {
  const target={workspace_id:'w',session_id:'s',project:'P',title:'Session',directory:'/d'}
  assert.equal(targetLabel(target),'P / Session')

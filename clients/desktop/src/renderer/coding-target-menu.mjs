@@ -96,7 +96,7 @@ export function mountCodingTargetMenu(parent,{c,el,run}){
   nodes=new Map();workspaceColumn.replaceChildren();sessionColumn.replaceChildren()
   item(workspaceColumn,'w:none',t('不指定工作区'),{selected:!now,onClick:()=>{browsing=null;choose(null)}})
   for(const entry of levels)item(workspaceColumn,`w:${entry.workspace_id}`,entry.project,{selected:entry.workspace_id===now?.workspace_id,title:entry.directory,
-   onClick:()=>{browsing=entry.workspace_id;if(entry.workspace_id===now?.workspace_id)render();else choose({workspace_id:entry.workspace_id,session_id:null},{keepOpen:true})}})
+   onClick:()=>{browsing=entry.workspace_id;if(!pending&&entry.workspace_id===now?.workspace_id)render();else choose({workspace_id:entry.workspace_id,session_id:null},{keepOpen:true})}})
   if(status==='loading')workspaceColumn.append(el('p',t('正在加载工作区…'),'hint target-note'))
   else if(status==='error'){const retry=el('button',t('加载失败，点击重试'),'target-item');retry.type='button';retry.addEventListener('click',()=>void load());workspaceColumn.append(retry)}
   else if(!levels.length)workspaceColumn.append(el('p',t('还没有工作区'),'hint target-note'))
