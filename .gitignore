@@ -41,6 +41,7 @@ clients/desktop/resources/generated/
 # Internal working material (demo video production)
 docs/demos/
 docs/superpowers/
+docs/research/
 docs/internal/
 .superpowers/
 assets/demos/cat-sofa-guard/*-preroll.mp4
