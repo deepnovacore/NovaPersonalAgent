@@ -40,7 +40,7 @@ test('a held Electron singleton is rejected using a synthetic profile directory'
  try{
   mkdirSync(join(root,'electron'))
   symlinkSync('synthetic-owner',join(root,'electron/SingletonLock'))
-  assert.throws(()=>preflightLocks({originalUserData:join(root,'electron'),originalBlackboardPath:join(root,'blackboard.sqlite')}),/profile_locked/)
+  assert.throws(()=>preflightLocks({originalUserData:join(root,'electron'),originalBlackboardPath:join(root,'blackboard.sqlite')},()=>''),/profile_locked/)
  }finally{rmSync(root,{recursive:true,force:true})}
 })
 
