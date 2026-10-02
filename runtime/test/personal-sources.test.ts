@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import {randomUUID} from 'node:crypto'
 import {execFileSync} from 'node:child_process'
+import fs from 'node:fs'
+import {syncBuiltinESMExports} from 'node:module'
 import {VoiceMem} from 'voicemem'
 import {VersionedMemory} from '../src/voicemem/versioned-memory.js'
 import {mkdtemp, mkdir, writeFile, rm, realpath, symlink, rename, readFile, utimes, stat, chmod} from 'node:fs/promises'
@@ -142,6 +144,46 @@ test('a failed ignore probe reports no answer instead of an empty repository',as
   execFileSync('git',['init','-q',root]);await mkdir(join(root,'out'));await writeFile(join(root,'out','x.md'),'x');await writeFile(join(root,'.gitignore'),'out/\n')
   assert.deepEqual([...(await gitIgnoredDirectories(root))!],[join(root,'out')])
  }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('watch hints cannot enter an ignored repository subtree directly',async t=>{
+ const originalWatch=fs.watch
+ t.mock.method(fs,'watch',(path:string,options:fs.WatchOptions,listener:fs.WatchListener<string|Buffer>)=>{
+  const watcher=originalWatch(path,options,listener)
+  queueMicrotask(()=>listener('change','project/outputs/run1/report.md'))
+  return watcher
+ })
+ syncBuiltinESMExports()
+ const f=await fixture()
+ try{
+  const repo=join(f.folder,'project');await mkdir(join(repo,'outputs','run1'),{recursive:true})
+  execFileSync('git',['init','-q',repo])
+  await writeFile(join(repo,'.gitignore'),'outputs/\n');await writeFile(join(repo,'plan.md'),'Tracked plan')
+  await writeFile(join(repo,'outputs','run1','report.md'),'Generated report')
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  for(let n=0;n<40&&(f.sources.list()[0]!.scan_pending||!(await f.knowledge.listSources()).length);n++)await f.sources.command('sources.sync',{id})
+  const locators=(await f.knowledge.listSources()).map(source=>source.locator)
+  assert.ok(locators.some(locator=>locator.endsWith('plan.md')),locators.join())
+  assert.ok(!locators.some(locator=>locator.includes('outputs')),'watch hints must honor repository ignores')
+ }finally{await f.close();t.mock.restoreAll();syncBuiltinESMExports()}
+})
+
+test('failed repository ignore lookup defers scanning and can be retried',async()=>{
+ const f=await fixture(),previous=process.env.GIT_CONFIG_COUNT
+ try{
+  execFileSync('git',['init','-q',f.folder]);await writeFile(join(f.folder,'plan.md'),'A plan')
+  process.env.GIT_CONFIG_COUNT='invalid'
+  const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
+  await f.sources.command('sources.sync',{id})
+  assert.equal((await f.knowledge.listSources()).length,0)
+  assert.ok((f.sources.list()[0]!.reasons.directory_unavailable??0)>0)
+  if(previous===undefined)delete process.env.GIT_CONFIG_COUNT;else process.env.GIT_CONFIG_COUNT=previous
+  await f.sources.command('sources.sync',{id})
+  assert.ok((await f.knowledge.listSources()).some(source=>source.locator.endsWith('plan.md')))
+ }finally{
+  if(previous===undefined)delete process.env.GIT_CONFIG_COUNT;else process.env.GIT_CONFIG_COUNT=previous
+  await f.close()
+ }
 })
 
 test('computer scan settles files larger than its total byte budget without retrying them',async()=>{
@@ -1067,7 +1109,7 @@ test('project overview favors the root README over newer nested README files',as
 test('whole-computer grant resumes batches past the directory overview budget without admitting credentials',async()=>{
  const f=await fixture()
  try{
-  await mkdir(join(f.folder,'.git'))
+  execFileSync('git',['init','-q',f.folder])
   for(let n=0;n<19;n++)await writeFile(join(f.folder,`note-${String(n).padStart(2,'0')}.md`),`Distinct project document ${n}: implementation notes.`)
   await writeFile(join(f.folder,'.env'),'SECRET=never-read')
   await assert.rejects(f.sources.command('sources.authorize_computer',{consent:true,path:'/'}))
@@ -1148,7 +1190,7 @@ test('computer candidates keep nested Git repositories separate',async()=>{
  const f=await fixture()
  try{
   const code=join(f.folder,'code');await mkdir(code)
-  for(const name of ['active','older']){const repo=join(code,name);await mkdir(repo);await mkdir(join(repo,'.git'));await writeFile(join(repo,'README.md'),`An idea for ${name} setup.`)}
+  for(const name of ['active','older']){const repo=join(code,name);execFileSync('git',['init','-q',repo]);await writeFile(join(repo,'README.md'),`An idea for ${name} setup.`)}
   const {id}=await f.sources.command('sources.authorize_computer',{consent:true}) as {id:string}
   for(let i=0;i<4&&(await f.knowledge.listSources()).length<2;i++)await f.sources.command('sources.sync',{id})
   assert.deepEqual(new Set(f.sources.contextEntries().flatMap(item=>item.kind==='file'?[item.root]:[])),new Set([join(code,'active'),join(code,'older')]))

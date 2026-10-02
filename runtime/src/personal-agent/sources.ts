@@ -141,7 +141,7 @@ export class LocalDirectorySources {
   #hintTimers=new Map<string,ReturnType<typeof setTimeout>>()
   /** Outlives a scan so pause, removal, and withdrawal also stop background embedding. */
   #lifecycles=new Map<string,AbortController>()
-  #ignored=new Map<string,{dirs:Promise<Set<string>>;checked:number}>()
+  #ignored=new Map<string,{dirs:Promise<Set<string>|null>;checked:number}>()
   // Cumulative scan time per stage, reported in acceptance counts.
   #stageTimes=new Map<string,{ms:number;n:number}>()
   async #timed<T>(key:string,run:()=>Promise<T>):Promise<T>{const at=performance.now();try{return await run()}finally{const row=this.#stageTimes.get(key)??{ms:0,n:0};row.ms+=performance.now()-at;row.n++;this.#stageTimes.set(key,row)}}
@@ -403,7 +403,25 @@ export class LocalDirectorySources {
       if(due.length){walk.generation++;for(const item of due){item.generation=walk.generation;item.status='queued';walk.queue.push({path:item.path,...(item.unit?{unit:item.unit}:{})})}}
     }
     const hints=this.#dirtyHints.get(record.view.id)
-    if(hints?.size){walk.generation++;const existing=new Set(walk.queue.map(item=>item.path));for(const path of [...hints].slice(0,64)){const old=ledger.get(path);if(!old&&ledger.size>=20000||!existing.has(path)&&walk.queue.length>=20000){record.view.reasons.directory_capacity=(record.view.reasons.directory_capacity??0)+1;hints.delete(path);continue}ledger.set(path,{...old,path,generation:walk.generation,status:'queued',attempts:old?.attempts??0});if(!existing.has(path)){walk.queue.push({path,...(old?.unit?{unit:old.unit}:{})});existing.add(path)}hints.delete(path)}}
+    if(hints?.size){
+      walk.generation++;const existing=new Set(walk.queue.map(item=>item.path))
+      for(const path of [...hints].slice(0,64)){
+        const old=ledger.get(path)
+        if(!old&&ledger.size>=20000||!existing.has(path)&&walk.queue.length>=20000){record.view.reasons.directory_capacity=(record.view.reasons.directory_capacity??0)+1;hints.delete(path);continue}
+        // Watch events can name subtrees that the normal walk deliberately never entered.
+        let unit:string|undefined
+        for(let ancestor=path;within(record.view.path,ancestor);ancestor=dirname(ancestor)){
+          const marker=await lstat(join(ancestor,'.git')).catch(()=>null)
+          if(marker&&(marker.isDirectory()||marker.isFile())&&!marker.isSymbolicLink()){unit=ancestor;break}
+          if(ancestor===record.view.path)break
+        }
+        ledger.set(path,{...old,path,unit,generation:walk.generation,status:'queued',attempts:old?.attempts??0})
+        const queued=walk.queue.find(item=>item.path===path)
+        if(queued)queued.unit=unit
+        else{walk.queue.push({path,...(unit?{unit}:{})});existing.add(path)}
+        hints.delete(path)
+      }
+    }
     const now=Date.now()
     const eligible=walk.deferred.filter(item=>item.eligible_at<=now).slice(0,Math.max(0,200-walk.pending.length))
     const eligiblePaths=new Set(eligible.map(item=>item.path))
@@ -483,7 +501,12 @@ export class LocalDirectorySources {
         if(await realpath(directory.path)!==directory.path)throw Error('changed_path')
         const marker=await lstat(join(directory.path,'.git')).catch(()=>null)
         if(marker&&(marker.isDirectory()||marker.isFile())&&!marker.isSymbolicLink())directory.unit=directory.path
+        item.unit=directory.unit
         const ignored=directory.unit?await this.#ignoredIn(directory.unit):undefined
+        if(ignored===null)throw Error('git_ignore_unavailable')
+        if(ignored&&[...ignored].some(path=>within(path,directory.path)&&!record.view.priority_dirs.some(dir=>within(path,dir)))){
+          ledger.delete(directory.path);record.view.skipped++;record.view.reasons.git_ignored=(record.view.reasons.git_ignored??0)+1;continue
+        }
         const safetyCap=this.#options.directorySafetyCap??20_000
         const passCap=Math.min(safetyCap,20_000-metadataSeen)
         const result=await scanDirectory(directory.path,signal,async entry=>{
@@ -553,11 +576,11 @@ export class LocalDirectorySources {
     }
   }
   /** One bounded Git listing per repository per ten minutes; the walk never descends into what it ignores. */
-  #ignoredIn(root:string):Promise<Set<string>>{
+  #ignoredIn(root:string):Promise<Set<string>|null>{
     const cached=this.#ignored.get(root)
     if(cached&&Date.now()-cached.checked<600_000)return cached.dirs
     // A timed-out or failed probe is not cached, so the next batch asks Git again.
-    const entry={dirs:gitIgnoredDirectories(root).then(found=>{if(!found&&this.#ignored.get(root)===entry)this.#ignored.delete(root);return found??new Set<string>()}),checked:Date.now()}
+    const entry={dirs:gitIgnoredDirectories(root).then(found=>{if(!found&&this.#ignored.get(root)===entry)this.#ignored.delete(root);return found}),checked:Date.now()}
     this.#ignored.set(root,entry)
     if(this.#ignored.size>256)this.#ignored.delete(this.#ignored.keys().next().value!)
     return entry.dirs
