@@ -116,6 +116,7 @@ export function HomePage({ en = false }: { en?: boolean }) {
         </section>
         <section className="main-features wrap" id="preview">
           <div className="main-features-heading"><p className="section-label">{en ? 'New in v0.3.0 Preview' : 'v0.3.0 Preview 新功能'}</p><h2>{en ? 'Understands what you mean. Helps with what you need.' : '懂你所想，帮你所需。'}</h2></div>
+          <p>{en ? 'Install or update the preview: ' : '安装或更新预览版：'}<code>npm install --global nova-audio-agent@preview</code>{en ? '. The latest tag stays stable.' : '。latest 标签保持为稳定版。'}</p>
           <div className="home-highlights preview-grid">{preview.map(([title, body]) => <article key={title}><h3>{title}</h3><p>{body}</p></article>)}</div>
         </section>
         <section className="main-features wrap" id="features">
