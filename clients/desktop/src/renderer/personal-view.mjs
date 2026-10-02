@@ -77,7 +77,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  // Chat pane
  const chat=mountChatPane(root,{c,el,button,run,api,chips,openTask,speakingLevel,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.title=chatToggle.textContent;chatToggle.setAttribute('aria-expanded',String(value))}})
  chat.setOpen(true)
- // The orb carries no mode buttons: double-click expands, the context menu hides, and sleep is the only voice switch.
+ // The orb carries no mode buttons: double-click expands, the context menu switches modes, and sleep is the only voice switch.
  const orbExtras=el('div',undefined,'personal-orb-extras');document.querySelector('#shell').append(orbExtras)
  const orbTask=button('',()=>openTask(orbTask.dataset.taskId),orbExtras);orbTask.className='personal-orb-task'
  const orbNotice=el('p');orbNotice.setAttribute('role','status');orbNotice.setAttribute('aria-live','polite');orbExtras.append(orbNotice)

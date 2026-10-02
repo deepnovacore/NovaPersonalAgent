@@ -1321,3 +1321,25 @@ test('keyboard activation wakes a sleeping orb and expands an awake one', async 
   personalView.controller.presentationMode = 'workbench'; press('Enter')
   assert.deepEqual(calls, ['wake', 'expand'])
 })
+
+test('closing the workbench stays in background and macOS activation reopens it without waking a visible orb',async()=>{
+ const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
+ let close,activate,control,prevented=0,visible=true,destroyed=false
+ const app={isQuitting:false,on:(_name,handler)=>{activate=handler}},sender={},requests=[]
+ const mainWindow={webContents:sender,on:(_name,handler)=>{close=handler},isVisible:()=>visible,isDestroyed:()=>destroyed}
+ const requestPresentation=mode=>{requests.push(mode);if(mode==='background')visible=false}
+ const closeStart=source.indexOf("  mainWindow.on('close', event => {")
+ new Function('app','mainWindow','requestPresentation',source.slice(closeStart,source.indexOf('\n  })',closeStart)+5))(app,mainWindow,requestPresentation)
+ const activateStart=source.indexOf("  app.on('activate', () => {")
+ new Function('app','mainWindow','requestPresentation',source.slice(activateStart,source.indexOf('\n  })',activateStart)+5))(app,mainWindow,requestPresentation)
+ const controlStart=source.indexOf("  ipcMain.on('nova:window:control',")
+ new Function('ipcMain','mainWindow','requestPresentation',`const personalCollapsed=false;${source.slice(controlStart,source.indexOf('\n  })',controlStart)+5)}`)({on:(_name,handler)=>{control=handler}},mainWindow,requestPresentation)
+ activate();assert.deepEqual(requests,[],'focusing a visible orb must not expand it')
+ control({sender:{}},'close');assert.deepEqual(requests,[])
+ control({sender},'close');assert.deepEqual(requests.splice(0),['background'])
+ activate();assert.deepEqual(requests.splice(0),['workbench'])
+ visible=true;close({preventDefault(){prevented++}});assert.equal(prevented,1);assert.deepEqual(requests.splice(0),['background'])
+ activate();assert.deepEqual(requests.splice(0),['workbench'])
+ destroyed=true;activate();assert.deepEqual(requests,[])
+ destroyed=false;app.isQuitting=true;activate();assert.deepEqual(requests,[]);close({preventDefault(){prevented++}});assert.equal(prevented,1,'real Quit still closes the window')
+})
