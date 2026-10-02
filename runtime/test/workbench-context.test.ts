@@ -190,7 +190,7 @@ test('candidate changes during generation queue one trailing automatic call',asy
  let calls=0,release:()=>void=()=>undefined
  const blocked=new Promise<void>(resolve=>{release=resolve})
  const context=new WorkbenchContext(path,async()=>{calls++;if(calls===1)await blocked;return {cards:[]}},()=>undefined)
- const until=async(check:()=>boolean)=>{for(let n=0;n<10000&&!check();n++)await new Promise<void>(resolve=>setImmediate(resolve));assert.ok(check(),`calls=${calls}`)}
+ const until=async(check:()=>boolean)=>{const deadline=performance.now()+5000;while(!check()&&performance.now()<deadline)await new Promise<void>(resolve=>setImmediate(resolve));assert.ok(check(),`calls=${calls}`)}
  try{
   await context.open();context.update([input]);t.mock.timers.tick(3000);await until(()=>calls===1)
   context.update([{...input,version:'v1'}]);context.update([{...input,version:'v2'}]);t.mock.timers.tick(120_000);assert.equal(calls,1)
@@ -202,7 +202,7 @@ test('automatic failures retry with backoff and retain the hourly cap after reop
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-context-retry-')),path=join(dir,'cards.json')
  const input:ContextInput={kind:'file',id:'source:doc',version:'v0',content:'Next step: review the launch plan.',source_id:'s',file_id:'doc',root:'/project',rel_path:'plan.md',role:'document',mtime_ms:1,priority:2}
  let calls=0;const generate=()=>{calls++;return Promise.reject(Error('offline'))}
- const until=async(check:()=>boolean)=>{for(let n=0;n<10000&&!check();n++)await new Promise<void>(resolve=>setImmediate(resolve));assert.ok(check(),`calls=${calls}`)}
+ const until=async(check:()=>boolean)=>{const deadline=performance.now()+5000;while(!check()&&performance.now()<deadline)await new Promise<void>(resolve=>setImmediate(resolve));assert.ok(check(),`calls=${calls}`)}
  const context=new WorkbenchContext(path,generate,()=>undefined)
  try{
   await context.open();context.update([input]);t.mock.timers.tick(3000);await until(()=>calls===1&&context.snapshot().status==='failed')
