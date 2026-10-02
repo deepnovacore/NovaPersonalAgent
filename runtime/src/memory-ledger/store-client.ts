@@ -83,8 +83,6 @@ interface WorkerFailure {
 
 type WorkerResponse = WorkerSuccess | WorkerFailure
 
-const WORKER_CLOSE_GRACE_MS = 250
-
 const nullResult: RpcResultValidator<void> = value => {
   if (value !== null) throw new TypeError('invalid null RPC result')
 }
@@ -135,15 +133,10 @@ export class MemoryLedgerClient {
 
   async #closeFresh(): Promise<void> {
     this.#closed = true
-    let timer: ReturnType<typeof setTimeout> | undefined
     if (!this.#failed) {
-      const graceful = this.#requestWhileClosing('close', {}, nullResult).catch(() => undefined)
-      await Promise.race([
-        graceful,
-        new Promise<void>(resolve => { timer = setTimeout(resolve, WORKER_CLOSE_GRACE_MS) }),
-      ])
+      // Drain queued work and its lock cleanup before termination; worker errors/exits reject this RPC.
+      await this.#requestWhileClosing('close', {}, nullResult).catch(() => undefined)
     }
-    if (timer !== undefined) clearTimeout(timer)
     this.#expectedExit = true
     try {
       await this.#worker.terminate()
@@ -286,4 +279,3 @@ function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[])
   const allowedKeys = new Set(allowed)
   return Object.keys(value).every(key => allowedKeys.has(key))
 }
-
