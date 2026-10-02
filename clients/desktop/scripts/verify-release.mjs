@@ -10,6 +10,7 @@ import {WebSocket, WebSocketServer} from 'ws'
 import {generateSmokeCertificate} from './smoke-tls.mjs'
 import {expectedNativeResources} from './native-resource-contract.mjs'
 import {candidateScratchParent, prepareWindowsSmokeHomeOwnership} from './windows-smoke-home.mjs'
+import {normalizeSettings, saveSettings} from '../src/main/settings-store.mjs'
 
 const product = 'Nova Audio Agent Desktop'
 const native = /\.(node|dylib|dll|so(?:\.\d+)*)$/u
@@ -123,10 +124,15 @@ async function authenticate({endpoint, token}) {
   } finally { socket.terminate() }
 }
 
-async function smoke(executable, scratch) {
-  const home = resolve(scratch, 'home')
+export async function prepareSmokeHome(home) {
   await mkdir(home, {mode: 0o700})
   prepareWindowsSmokeHomeOwnership({home, environment: process.env})
+  await saveSettings(resolve(home, 'ambient-orb-settings.json'), normalizeSettings({pipelineMode: 'integrated', cascadedLlmProvider: 'qwen'}))
+}
+
+async function smoke(executable, scratch) {
+  const home = resolve(scratch, 'home')
+  await prepareSmokeHome(home)
   // Installed-backend acceptance uses only the loopback provider, never a host Codex or external tools.
   const capabilities = resolve(home, 'capabilities.json')
   await writeFile(capabilities, JSON.stringify({version: 1, modules: {

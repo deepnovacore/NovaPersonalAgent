@@ -7,7 +7,10 @@ import test from 'node:test'
 import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import {createPackageWithOptions, uncache} from '@electron/asar'
-import {inspectApplication, readReadiness} from '../scripts/verify-release.mjs'
+import {inspectApplication, readReadiness, prepareSmokeHome} from '../scripts/verify-release.mjs'
+import {loadSettings} from '../src/main/settings-store.mjs'
+import {backendLaunchSpec} from '../src/main/backend.mjs'
+import {describeMissingBlockingEnvironment} from '@nova-audio-agent/runtime/desktop'
 import {expectedNativeResources} from '../scripts/native-resource-contract.mjs'
 import {stageReleaseApplication} from '../scripts/stage-release-app.mjs'
 
@@ -15,6 +18,19 @@ async function file(root, name, body = 'fixture') {
   await mkdir(dirname(join(root, name)), {recursive: true})
   await writeFile(join(root, name), body)
 }
+
+test('installed smoke selects the controlled provider without requiring unrelated credentials', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'nova-smoke-settings-')), home = join(root, 'home')
+  try {
+    await prepareSmokeHome(home)
+    const settings = await loadSettings(join(home, 'ambient-orb-settings.json'))
+    const spec = backendLaunchSpec({nodeEntry: join(home, 'entry.js'), nodeResourcesPath: home,
+      workspace: home, token: 'a'.repeat(32), readyEndpoint: '127.0.0.1:1234', settings,
+      parentEnv: {DASHSCOPE_API_KEY: 'public-release-smoke-key', QWEN_REALTIME_URL: 'wss://127.0.0.1:1234'}})
+    assert.equal(spec.env.PIPELINE_MODE, 'integrated')
+    assert.deepEqual(describeMissingBlockingEnvironment(spec.env, true)?.missing ?? [], [])
+  } finally { await rm(root, {recursive: true, force: true}) }
+})
 
 test('release version gate rejects stale candidate inputs and divergent package versions', async () => {
   const root = await mkdtemp(join(tmpdir(), 'nova-release-version-'))
