@@ -16,7 +16,7 @@ import {resolve as memoryPath} from 'node:path'
 import {compileContextView} from '../core/context-view.js'
 import {PersonalAgentHost} from '../personal-agent/host.js'
 import {tmpdir} from 'node:os'
-import {realpathSync} from 'node:fs'
+import {mkdtempSync, realpathSync} from 'node:fs'
 import {join} from 'node:path'
 import type {MemoryInspectionQuery} from '../memory/personal-memory-inspection.js'
 import type {UsageReporter} from '../realtime/usage.js'
@@ -360,7 +360,7 @@ export class RealtimeAssembly {
     this.#sharedPersonal = input.sharedPersonal !== undefined
     this.personalAgent = input.sharedPersonal?.host ?? new PersonalAgentHost({
       newsLanguage: input.core.personalAgentConfig?.newsLanguage ?? 'en',
-      path: input.core.personalAgentConfig?.path ?? join(realpathSync(tmpdir()), `nova-personal-${randomUUID()}.json`),
+      path: input.core.personalAgentConfig?.path ?? join(mkdtempSync(join(realpathSync(tmpdir()), 'nova-personal-')), 'personal.json'),
       userScope: input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
       pool: input.core.runtime.core.suggestions,
       evidence: ref => { try {const [channel,seq]=parseMemoryRef(ref);const item=input.core.runtime.memory.channels.get(channel)?.items.find(item=>item.seq===seq);if(!item)return null;const work=item.content.work_id??item.content.delegate_id;return {subject_key:typeof work==='string'?'task:'+work:ref,source:{type:typeof work==='string'?'task':'conversation',ref},...(typeof work==='string'?{task_ref:{work_id:work}}:{})}}catch{return null}},

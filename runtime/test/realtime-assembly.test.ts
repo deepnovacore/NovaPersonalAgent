@@ -3,12 +3,12 @@ import {CodingTargetController} from '../src/personal-agent/coding-targets.js'
 import {fixture as projectFixture} from './fixtures/codex/project-adapter-fixture.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import assert from 'node:assert/strict'
-import {mkdtemp, realpath, rm, writeFile, readFile} from 'node:fs/promises'
+import {mkdtemp, realpath, rm, writeFile, readFile, stat} from 'node:fs/promises'
 import {once} from 'node:events'
 import {setTimeout as delay, setImmediate as yieldImmediate} from 'node:timers/promises'
 import {type BlackboardSessionOptions} from '../src/memory/blackboard-session.js'
 import {tmpdir} from 'node:os'
-import {join, resolve} from 'node:path'
+import {dirname, join, resolve} from 'node:path'
 import {test} from 'node:test'
 import {Worker} from 'node:worker_threads'
 import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
@@ -630,6 +630,19 @@ test('one provider session supports the realtime session connect and reconnect c
     assert.equal(provider.closeCalls, 1)
   } finally {
     await providerSession.close().catch(() => undefined)
+  }
+})
+
+test('unconfigured personal storage uses a private temporary directory', async () => {
+  const realtime = buildRealtimeAssembly({core: realCore(), provider: new WorkspaceContextProvider()})
+  const directory = dirname(realtime.personalAgent.options.path)
+  try {
+    assert.notEqual(directory, await realpath(tmpdir()))
+    if (process.platform !== 'win32') assert.equal((await stat(directory)).mode & 0o777, 0o700)
+    await realtime.start()
+  } finally {
+    await realtime.stop()
+    if (directory !== await realpath(tmpdir())) await rm(directory, {recursive: true, force: true})
   }
 })
 
