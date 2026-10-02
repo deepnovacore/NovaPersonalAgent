@@ -583,8 +583,8 @@ test('launch spec falls back to the settings-store defaults when settings is mis
   assert.equal(spec.env.PROACTIVITY_PRESET, 'balanced')
   assert.equal(spec.env.CODEX_WORKING_INTERVAL, '30')
   assert.equal(spec.env.PIPELINE_MODE, 'cascaded')
-  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'qwen')
-  assert.equal(spec.env.CASCADE_LLM_MODEL, 'qwen-plus')
+  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'deepseek')
+  assert.equal(spec.env.CASCADE_LLM_MODEL, 'deepseek-flash')
   assert.equal(spec.env.DOUBAO_TTS_VOICE, 'zh_female_vv_uranus_bigtts')
 })
 
@@ -600,8 +600,8 @@ test('launch spec falls back per-field for a partially-populated settings object
   assert.equal(spec.env.PROACTIVITY_PRESET, 'conservative')
   assert.equal(spec.env.CODEX_WORKING_INTERVAL, '30')
   assert.equal(spec.env.PIPELINE_MODE, 'cascaded')
-  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'qwen')
-  assert.equal(spec.env.CASCADE_LLM_MODEL, 'qwen-plus')
+  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'deepseek')
+  assert.equal(spec.env.CASCADE_LLM_MODEL, 'deepseek-flash')
   assert.equal(spec.env.DOUBAO_TTS_VOICE, 'zh_female_vv_uranus_bigtts')
 })
 
