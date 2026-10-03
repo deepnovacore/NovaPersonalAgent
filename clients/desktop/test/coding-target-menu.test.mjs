@@ -167,3 +167,13 @@ test('a loaded project catalog does not resurrect a previously selected scratch 
  const stale={workspace_id:'scratch',session_id:null,project:'Old scratch',title:''}
  assert.deepEqual(targetLevels(catalog,stale).map(level=>level.workspace_id),['ws-1','ws-2'])
 })
+
+test('clicking the highlighted project of a worktree session browses it instead of retargeting',async()=>{
+ const targets=[catalog[0],{workspace_id:'tree',session_id:'branch',title:'Branch',project:'Worktree',directory:'/tree',group_workspace_id:'ws-1',group_project:'Alpha',group_directory:'/one'}]
+ const m=mount({targets});m.menu.receive({type:'executor.state'})
+ m.c.snapshot.conversations.items[0].coding_target={workspace_id:'tree',session_id:'branch',project:'Worktree',title:'Branch'}
+ m.menu.update();await m.chip().listeners.click();await flush()
+ m.byText('Alpha').listeners.click();await flush()
+ assert.equal(m.commands.some(([method])=>method==='conversations.target'),false)
+ assert.ok(m.byText('Branch'))
+})
