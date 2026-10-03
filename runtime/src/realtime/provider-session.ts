@@ -225,9 +225,12 @@ export class RealtimeProviderSession {
     const owned = pcm.slice()
     const owner = this.#requiredConnectionOwner()
     try {
-      if (this.#responseAdaptationRequired?.() === true) {
+      // Requested-response providers only transcribe PCM here. Their model sees memory at
+      // createResponse/ensureResponse, which revalidate authorization before generating.
+      // Automatic providers can generate directly from PCM and still need the input fence.
+      if (this.userResponseMode === 'automatic' && this.#responseAdaptationRequired?.() === true) {
         await this.#refreshResponseAdaptation(owner, signal)
-      } else if (this.#audioAdaptationRefresh === undefined) {
+      } else if (this.userResponseMode === 'automatic' && this.#audioAdaptationRefresh === undefined) {
         const refresh = this.#refreshResponseAdaptation(owner, signal).catch(() => undefined).finally(() => {
           if (this.#audioAdaptationRefresh === refresh) this.#audioAdaptationRefresh = undefined
         })

@@ -820,6 +820,11 @@ async function applyDesktopSettings(payload, restart = false) {
 
 function showOrbMenu(launchId) {
   Menu.buildFromTemplate([
+    { label: t("显示模式"), submenu: [
+      { label: t("工作台"), type: 'radio', checked: presentationMode === 'workbench', click: () => requestPresentation('workbench') },
+      { label: t("悬浮球"), type: 'radio', checked: presentationMode === 'orb', click: () => requestPresentation('orb') },
+      { label: t("隐藏"), type: 'radio', checked: presentationMode === 'background', click: () => requestPresentation('background') },
+    ] },
     { label: t("连接 iPhone…"), click: () => { void openPairingWindow() } },
     { label: t("记忆面板"), click: () => openMemoryBoard(launchId) },
     { label: t("设置…"), click: () => openSettingsWindow(launchId) },
@@ -835,8 +840,6 @@ function showOrbMenu(launchId) {
       }
     } },
     { type: 'separator' },
-    // Hiding is the quiet end of the orb: no window, no microphone, no wake word.
-    { label: t("隐藏"), click: () => requestPresentation('background') },
     { label: t("退出 Nova Audio Agent"), click: () => app.quit() },
   ]).popup({ window: mainWindow })
 }
@@ -2208,6 +2211,10 @@ if (packagedSourceRollbackUnavailable) {
     () => finishInstalledFileCameraSmoke('capture_failed'),
   )
 } else {
+  // macOS reopens the existing process through activate, not second-instance.
+  app.on('activate', () => {
+    if (!app.isQuitting && mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) requestPresentation('workbench')
+  })
   app.on('second-instance', (_event, argv) => {
     wakeWord?.wake()
     requestPresentation('workbench')

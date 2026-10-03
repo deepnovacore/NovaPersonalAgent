@@ -1419,7 +1419,7 @@ orb.addEventListener('pointerup', () => finishDrag(false))
 orb.addEventListener('pointercancel', () => finishDrag(true))
 orb.addEventListener('pointerenter', () => paletteHover.enter())
 orb.addEventListener('pointerleave', () => paletteHover.leave())
-// Double-click is the orb's only way back to the workbench; the first click of a sleeping orb still wakes it.
+// Double-click opens the workbench; the context menu also offers all presentation modes.
 orb.addEventListener('dblclick', event => {
   event.preventDefault()
   if (lastPointerDragged || personalView?.controller.presentationMode !== 'orb') return

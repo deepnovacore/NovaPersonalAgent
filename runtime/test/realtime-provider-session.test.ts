@@ -589,3 +589,14 @@ for (const mode of ['text','audio'] as const) {
   assert.equal(sentText,0);assert.equal(provider.sentAudio.length,0)
  })
 }
+
+
+test('requested-response audio does not read memory per frame but response admission revalidates it',async()=>{
+ const provider=Object.assign(new FakeProvider(),{userResponseMode:'requested' as const})
+ let reads=0,fail=false
+ const session=new RealtimeProviderSession(provider,{responseAdaptationRequired:()=>true,responseAdaptation:()=>{reads++;if(fail)throw Error('revoked');return {revision:1,content:'allowed'}}})
+ await session.connect();const before=reads;fail=true
+ for(let i=0;i<50;i++)await session.sendAudio(new Uint8Array(640))
+ assert.equal(provider.sentAudio.length,50);assert.equal(reads,before)
+ await assert.rejects(session.ensureResponse());assert.equal(provider.ensured,0);assert.equal(session.state,'closed')
+})
