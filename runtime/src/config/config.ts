@@ -108,7 +108,6 @@ export const settingsSchema = z.object({
   generate_plan: z.boolean().default(true),
   planner_model: z.string().default(''),
   progress_bubbles: progressBubblesSchema.default('milestones'),
-  capabilities_config_path: z.string().default('~/.nova-audio-agent/capabilities.json'),
   search_provider: searchProviderSchema.default('tavily'),
   search_mcp_url: z.string().default(''),
   search_mcp_tool: z.string().default('web_search'),
@@ -386,9 +385,6 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     generate_plan: optionalBoolean(environment.GENERATE_PLAN),
     planner_model: supportDefault(emptyAsUnset(optionalString(environment.PLANNER_MODEL))),
     progress_bubbles: parseProgressBubbles(environment.PROGRESS_BUBBLES),
-    capabilities_config_path: optionalString(
-      environment.CAPABILITIES_CONFIG,
-    ),
     search_provider: parseSearchProvider(environment.SEARCH_PROVIDER),
     search_mcp_url: optionalString(environment.SEARCH_MCP_URL),
     search_mcp_tool: optionalString(environment.SEARCH_MCP_TOOL),

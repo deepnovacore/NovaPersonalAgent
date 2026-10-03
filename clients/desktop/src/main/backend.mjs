@@ -1,52 +1,12 @@
 import { createServer } from 'node:net'
 import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute, resolve } from 'node:path'
+import { CONTROL_CHARACTERS, RUNTIME_DEFAULTS as SETTINGS_DEFAULTS } from './settings-defaults.mjs'
 
 const MAX_READINESS_BYTES = 4096
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/
 const READY_ENDPOINT_PATTERN = /^127\.0\.0\.1:([0-9]{1,5})$/
 const NEWLINE = 0x0a
-
-// Mirrors settings-store.mjs's DEFAULT_SETTINGS for the runtime-facing fields
-// this module injects. Duplicated rather than imported: backend.mjs stays importable
-// without the settings-store module (and its node:fs/node:crypto surface) ever
-// loading, and a missing/corrupt settings file must never produce the literal
-// string "undefined" in a child's environment.
-const SETTINGS_DEFAULTS = Object.freeze({
-  proactivity: 'balanced',
-  codexHeartbeatSeconds: 30,
-  pipelineMode: 'cascaded',
-  integratedProvider: 'qwen',
-  integratedModel: 'qwen-audio-3.0-realtime-plus',
-  integratedVoice: 'longanqian',
-  cascadedEndpointingProvider: 'auto',
-  cascadedAsrProvider: 'volcengine',
-  cascadedLlmProvider: 'qwen',
-  cascadedLlmModels: Object.freeze({
-    qwen: 'qwen-plus',
-    ark: 'doubao-seed-2-0-pro-260215',
-    deepseek: 'deepseek-flash',
-  }),
-  cascadedTtsProvider: 'volcengine',
-  cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
-  codexApprovalMode: 'ask',
-  clarificationDepth: 'balanced',
-  planReadback: 'summary',
-  generatePlan: true,
-  plannerModel: '',
-  progressBubbles: 'milestones',
-  embeddingProvider: 'dashscope',
-  embeddingModel: 'text-embedding-v4',
-  capabilitiesConfigPath: '',
-  knowledgePath: '',
-})
-
-// Duplicated from settings-store.mjs for the same reason SETTINGS_DEFAULTS is:
-// this module stays importable on its own. Node refuses a C0 control character
-// in a child's environment value and throws out of `spawn`, so a stored secret
-// that somehow carries one must be dropped here rather than take the launch —
-// and with it the app — down before the panel can clear it.
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 
 // decryptedSecrets key -> env var name. Only a non-empty decrypted string maps
 // to an override; an absent/empty key is omitted entirely so the user's own
@@ -165,7 +125,6 @@ export function searchProxyUrlFromRules(rules) {
 }
 
 export function backendLaunchSpec({
-  backend = 'node',
   nodeEntry,
   nodeResourcesPath,
   workspace,
@@ -179,7 +138,6 @@ export function backendLaunchSpec({
   newsLanguage = 'en',
   capabilitiesDocument,
 }) {
-  if (backend !== 'node') throw new Error('backend kind is invalid')
   if (typeof nodeEntry !== 'string' || !isAbsolute(nodeEntry)) {
     throw new Error('absolute Node runtime entry is required')
   }
@@ -221,7 +179,7 @@ export function backendLaunchSpec({
     ...parentEnv,
     DESKTOP_TOKEN: token,
     DESKTOP_READY_ENDPOINT: readyEndpoint,
-    BACKEND: backend,
+    BACKEND: 'node',
     CODEX_WORKSPACE: effectiveWorkspace,
     EXECUTOR: 'codex',
     PROACTIVITY_PRESET: proactivity,

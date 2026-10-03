@@ -572,20 +572,6 @@ export class RealtimeSession {
     return outcome
   }
 
-  /** @deprecated Compatibility alias for callers still using the legacy environment terminology. */
-  reconnectForGuard(options: {
-    readonly tools: readonly Record<string, unknown>[]
-    readonly oldGeneration: PlaybackGeneration
-    readonly confirmationTimeout?: number | null
-    readonly history?: readonly RecoveryTurn[]
-    readonly historyMode?: 'none' | 'packed'
-  }): Promise<'none' | 'empty' | 'packed' | 'degraded' | 'uncertain'> {
-    if (options.historyMode !== undefined && options.historyMode !== 'none' && options.historyMode !== 'packed') {
-      return Promise.reject(new TypeError(`unknown Guard history recovery arm: ${String(options.historyMode)}`))
-    }
-    return this.reconnectForPreemptiveAlert(options)
-  }
-
   async #replaceProviderSession(
     tools: readonly Record<string, unknown>[],
   ): Promise<{readonly epoch: number}> {
@@ -1587,11 +1573,6 @@ export class RealtimeSession {
     this.#floor = this.#floor.onSpeakEnd(generation.utterance_id)
     this.#state.advanceSnapshot()
     return true
-  }
-
-  /** @deprecated Compatibility alias for callers still using the legacy environment terminology. */
-  alertGuardHandoff(generation: PlaybackGeneration): boolean {
-    return this.alertPreemptiveAlertHandoff(generation)
   }
 
   /**

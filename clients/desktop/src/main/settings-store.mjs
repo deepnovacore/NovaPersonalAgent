@@ -1,4 +1,5 @@
 import {validUploadUrl} from './voiceprint.mjs'
+import {CONTROL_CHARACTERS, RUNTIME_DEFAULTS} from './settings-defaults.mjs'
 import {preferredLanguage} from '../renderer/locale.mjs'
 import { randomBytes } from 'node:crypto'
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
@@ -40,14 +41,13 @@ export const MAX_SECRET_LENGTH = 4096
 const MAX_CIPHERTEXT_BASE64 = 8192
 
 export const DEFAULT_SETTINGS = Object.freeze({
+  ...RUNTIME_DEFAULTS,
   version: SETTINGS_VERSION,
   language: 'zh-CN',
   startupView: 'workbench',
   lastPresentation: 'workbench',
   palette: 'ember',
-  proactivity: 'balanced',
   codingProgressNarration: 'smart',
-  codexHeartbeatSeconds: 30,
   codexBinaryMode: 'auto',
   codexBinaryPath: '',
   codexWorkspace: '',
@@ -56,30 +56,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   startListeningOnLaunch: false,
   wakeWordEnabled: false,
   autoHideSeconds: 60,
-  pipelineMode: 'cascaded',
-  integratedProvider: 'qwen',
-  integratedModel: 'qwen-audio-3.0-realtime-plus',
-  integratedVoice: 'longanqian',
-  cascadedEndpointingProvider: 'auto',
-  cascadedAsrProvider: 'volcengine',
   voiceprintEnabled: false,
   voiceprintId: '',
   voiceprintName: '',
   voiceprintUploadUrl: '',
-  cascadedLlmProvider: 'deepseek',
-  cascadedLlmModels: Object.freeze({
-    qwen: 'qwen-plus',
-    ark: 'doubao-seed-2-0-pro-260215',
-    deepseek: 'deepseek-flash',
-  }),
-  cascadedTtsProvider: 'volcengine',
-  cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
-  codexApprovalMode: 'ask',
-  clarificationDepth: 'balanced',
-  planReadback: 'summary',
-  generatePlan: true,
-  plannerModel: '',
-  progressBubbles: 'milestones',
   conversationVisionEnabled: false,
   monitorCameraDeviceId: '',
   watchModel: '',
@@ -87,10 +67,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
   phoneServerPort: 0,
   phoneServerTokenFile: '',
   phoneServerUrl: '',
-  embeddingProvider: 'dashscope',
-  embeddingModel: 'text-embedding-v4',
-  capabilitiesConfigPath: '',
-  knowledgePath: '',
   memoryPrerecallEnabled: false,
   secrets: Object.freeze({}),
 })
@@ -111,7 +87,6 @@ const PLAN_READBACK_MODES = new Set(['summary', 'confirm', 'silent'])
 const PROGRESS_BUBBLE_MODES = new Set(['off', 'milestones', 'all'])
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/
 // Control characters would survive into an env value handed to a child process.
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
 // Files are JSON and Electron IPC structured-clones settings patches.
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value)

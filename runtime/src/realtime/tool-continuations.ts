@@ -128,10 +128,6 @@ export class ToolContinuations {
     return matching
   }
   continuationOrder(): readonly string[] {return [...this.#continuationFifo]}
-  callsForTest(): ReadonlyMap<string, ToolCallState> {return this.#toolCalls}
-  overflowCallsForTest(): ReadonlyMap<string, ToolCallState> {return this.#overflowToolCalls}
-  batchesForTest(): ReadonlyMap<string, ContinuationBatch> {return this.#continuationBatches}
-  continuationOrderForTest(): readonly string[] {return this.#continuationFifo}
   responseCarriesPersonalRecall(responseId: string): boolean {
     for (const state of this.#toolCalls.values()) {
       if (

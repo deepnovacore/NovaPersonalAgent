@@ -117,9 +117,6 @@ export interface BuildCascadedRealtimeAssemblyOptions
     | 'controlledPreemptiveAlertReconnect'
     | 'preemptiveAlertHistoryRecovery'
     | 'preemptiveAlertHistoryPairs'
-    | 'controlledGuardReconnect'
-    | 'guardHistoryRecovery'
-    | 'guardHistoryPairs'
   > {
   readonly registries?: CascadedProviderRegistries
   readonly supportGateway?: ModelGateway
@@ -483,9 +480,6 @@ export interface BuildQwenRealtimeAssemblyOptions
     | 'controlledPreemptiveAlertReconnect'
     | 'preemptiveAlertHistoryRecovery'
     | 'preemptiveAlertHistoryPairs'
-    | 'controlledGuardReconnect'
-    | 'guardHistoryRecovery'
-    | 'guardHistoryPairs'
   > {
   /** Deterministic test seam; production uses the bounded WebSocket connector. */
   readonly connector?: QwenConnector

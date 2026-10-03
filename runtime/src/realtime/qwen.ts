@@ -61,7 +61,7 @@ export const MAX_TIMED_OUT_ITEM_IDS = 256
  */
 export const MAX_QWEN_EVENT_QUEUE = 4_096
 
-export {HOST_ACTIVATION_PREFIX, GUARD_ACTIVATION_PREFIX} from './frontend-instructions.js'
+export {HOST_ACTIVATION_PREFIX} from './frontend-instructions.js'
 
 const NO_ACTIVE_RESPONSE_MESSAGES: ReadonlySet<string> = new Set([
   'conversation has no active response',

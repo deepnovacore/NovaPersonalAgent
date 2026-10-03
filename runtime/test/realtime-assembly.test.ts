@@ -683,9 +683,9 @@ test('factory exposes one ordered object graph with shared tools, ids, and provi
     core,
     provider,
     idFactory: () => `factory-${++id}`,
-    controlledGuardReconnect: true,
-    guardHistoryRecovery: 'packed',
-    guardHistoryPairs: 2,
+    controlledPreemptiveAlertReconnect: true,
+    preemptiveAlertHistoryRecovery: 'packed',
+    preemptiveAlertHistoryPairs: 2,
     onDiagnostic: () => undefined,
   })
 

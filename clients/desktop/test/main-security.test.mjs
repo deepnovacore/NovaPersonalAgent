@@ -56,9 +56,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:native-audio:terminal',
     'nova:orb-menu:show',
     'nova:orb:dormant',
-    'nova:pairing:open',
     'nova:personal:article',
-    'nova:personal:collapse',
     'nova:personal:collapsed',
     'nova:personal:connector-authorization',
     'nova:personal:directory',
@@ -675,7 +673,7 @@ test('main starts without camera permission and exposes only an explicit sender-
   assert.doesNotMatch(start.slice(0, start.indexOf('\n}')), /CameraPermission|camera:permission/u)
   assert.match(
     start,
-    /start: camera => startSelectedCamera\(camera, backendKind, releaseSmokeChannel\)/u,
+    /start: camera => startSelectedCamera\(camera, releaseSmokeChannel\)/u,
   )
   assert.match(source, /ipcMain\.handle\('nova:camera:permission', async event => \{\n\s*if \(\(!mainWindow \|\| event\.sender !== mainWindow\.webContents\) && \(!settingsWindow \|\| event\.sender !== settingsWindow\.webContents\)\)/u)
   assert.match(source, /resolveCameraPermission\(camera\.source, \{/u)
@@ -691,7 +689,7 @@ test('backend mode is admitted before camera selection or permission work', asyn
 
   assert.ok(selection >= 0 && camera > selection)
   assert.match(body, /createReleaseSmokeChannel\(\{/u)
-  assert.match(body, /start: camera => startSelectedCamera\(camera, backendKind, releaseSmokeChannel\)/u)
+  assert.match(body, /start: camera => startSelectedCamera\(camera, releaseSmokeChannel\)/u)
   assert.match(
     source,
     /process\.stderr\.write\(\s*'\[desktop-diagnostic\] source_rollback_unavailable\\n',\s*\(\) => app\.exit\(0\),?\s*\)/u,
@@ -1132,7 +1130,7 @@ test('workspace cleanup cannot restart a backend while settings recovery is pend
 
 test('personal directory and window controls are bound to main renderer',async()=>{
  const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
- for(const channel of ['directory','collapse','wake']){
+ for(const channel of ['directory','wake']){
   const begin=source.indexOf(`ipcMain.handle('nova:personal:${channel}'`)
   assert.ok(begin>=0)
   const body=source.slice(begin,source.indexOf("\n  })",begin))
@@ -1162,7 +1160,7 @@ test('sleep and wake IPC reject other windows and unexpected arguments', async (
 test('phone actions require the settings sender and restrict actions and device identifiers', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const {default: vm} = await import('node:vm')
-  const body = source.slice(source.indexOf("  ipcMain.handle('nova:phone:action'"), source.indexOf("  ipcMain.on('nova:pairing:open'"))
+  const body = source.slice(source.indexOf("  ipcMain.handle('nova:phone:action'"), source.indexOf("  ipcMain.on('nova:setup:open'"))
   let handler
   const sender = {}, calls = []
   vm.runInNewContext(body, {ipcMain: {handle: (_channel, fn) => {handler = fn}}, settingsWindow: {webContents: sender},

@@ -129,10 +129,6 @@ body[data-opaque="1"] .workbench{border-radius:0}
 .workbench button.card-body[data-expanded="true"]{display:block}
 .workbench button.card-body:disabled{opacity:1;cursor:text}
 .card-footer{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;margin-top:6px;padding-top:10px;border-top:1px solid var(--line)}
-.card-meta{display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px;flex:1;min-width:0}
-.card-meta details[open]{flex-basis:100%}
-.card-meta details>p{margin:4px 0 0 14px}
-.workbench .card-meta .hint{font-size:11px}
 .workbench .card-footer .card-actions{margin:0 0 0 auto}
 .workbench .card-footer>select{width:auto;font-size:12px;padding:4px 24px 4px 8px}
 .workbench .personal-card.life-card{flex-direction:column;flex-wrap:nowrap;align-items:stretch}

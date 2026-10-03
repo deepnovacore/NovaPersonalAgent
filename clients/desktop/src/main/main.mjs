@@ -1084,7 +1084,7 @@ const workspaceActions = createWorkspaceActions({
   },
 })
 
-async function launchBackend(backendKind, smokeChannel, onExit) {
+async function launchBackend(smokeChannel, onExit) {
   capabilityEditorCache = null
   let launchDocument
   try { launchDocument = readCapabilityDocument(currentSettings, process.env) }
@@ -1128,7 +1128,6 @@ async function launchBackend(backendKind, smokeChannel, onExit) {
     }
     const spec = backendLaunchSpec({
       newsLanguage: preferredLanguage(app.getPreferredSystemLanguages()),
-      backend: backendKind,
       nodeEntry: nodeRuntimeEntry({
         isPackaged: app.isPackaged,
         appPath: app.getAppPath(),
@@ -1252,7 +1251,7 @@ async function loadStartupSettings() {
   }
 }
 
-async function startSelectedCamera(camera, backendKind, smokeChannel) {
+async function startSelectedCamera(camera, smokeChannel) {
   settingsReady = await loadStartupSettings()
   setLanguage(currentSettings.language)
   initializeDesktopBootstrap(camera.source)
@@ -1344,10 +1343,6 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     // Sleep is an orb state: a workbench reached from a sleeping orb must hear its voice session, not the wake detector.
     if(mode==='workbench'&&['sleeping','blocked'].includes(wakeWord?.state))wakeWord.wake({show:false})
     if(activate){mainWindow.show();mainWindow.focus();return shown}
-  })
-  ipcMain.handle('nova:personal:collapse', (event, value) => {
-    if (event.sender !== mainWindow.webContents || typeof value !== 'boolean') throw new Error('window request rejected')
-    requestPresentation(value ? 'orb' : 'workbench')
   })
   ipcMain.handle('nova:personal:unread', (event, value) => {
     if (event.sender !== mainWindow.webContents || !Number.isSafeInteger(value) || value < 0 || value > 1000000) throw new Error('unread request rejected')
@@ -1481,9 +1476,6 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     const result = phoneQueue.then(() => phoneAction(action, deviceId, epoch))
     phoneQueue = result.catch(() => {})
     return result
-  })
-  ipcMain.on('nova:pairing:open', (event, ...args) => {
-    if (settingsWindow && event.sender === settingsWindow.webContents && args.length === 0) void openPairingWindow(launchId)
   })
   ipcMain.on('nova:setup:open', event => {
     if (mainWindow && event.sender === mainWindow.webContents) void openSetupWindow()
@@ -2071,7 +2063,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
     if (!globalShortcut.register(key, action)) console.warn(`[nova-audio-agent-desktop] shortcut unavailable: ${key}`)
   }
   backendSupervisor = createBackendSupervisor({
-    start: onExit => launchBackend(backendKind, smokeChannel, onExit),
+    start: onExit => launchBackend(smokeChannel, onExit),
     stopBackend: async child => {
       backendControl?.close()
       await shutdownBackend(child)
@@ -2117,7 +2109,7 @@ async function startSelectedCamera(camera, backendKind, smokeChannel) {
 }
 
 async function start() {
-  const backendKind = selectedBackend(process.env, { isPackaged: app.isPackaged })
+  selectedBackend(process.env, { isPackaged: app.isPackaged })
   releaseSmokeChannel = createReleaseSmokeChannel({
     environment: process.env,
     isPackaged: app.isPackaged,
@@ -2125,7 +2117,7 @@ async function start() {
   })
   return startWithSelectedCamera({
     environment: process.env,
-    start: camera => startSelectedCamera(camera, backendKind, releaseSmokeChannel),
+    start: camera => startSelectedCamera(camera, releaseSmokeChannel),
   })
 }
 
