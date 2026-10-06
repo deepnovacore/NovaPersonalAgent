@@ -225,6 +225,12 @@ export class RealtimeService {
   #awaitingUserOrigin = false
   #userOriginPreexistingResponseId: string | null = null
 
+  readonly #providerNotifications = new WeakSet<object>()
+  #notifyProviderEvent(event: RealtimeProviderEvent): void {
+    if (this.#providerNotifications.has(event)) return
+    this.#providerNotifications.add(event)
+    this.#onProviderEvent?.(event)
+  }
   readonly #onProviderEvent: ((event:RealtimeProviderEvent)=>void)|undefined
   constructor(options: RealtimeServiceOptions) {
     this.#onProviderEvent=options.onProviderEvent
@@ -947,8 +953,9 @@ export class RealtimeService {
         received = true
         try {
           await this.handleEvent(event)
-          this.#onProviderEvent?.(event)
+          this.#notifyProviderEvent(event)
         } catch (cause) {
+          if (event.kind === 'response_terminal') this.#notifyProviderEvent(event)
           if (cause instanceof ItemDeliveryUncertainError) {
             await this.#recoverUncertainDelivery(cause)
           } else if (cause instanceof RealtimeDeliveryError) {
@@ -1109,14 +1116,16 @@ export class RealtimeService {
     // session sees it: letting it through would have the model acting inside the very turn whose answer
     // it is supposed to be waiting for.
     const confirmTarget = event.kind === 'tool_call_ready' ? this.#confirmation.confirmTarget(event) : null
+    const toolBinding = event.kind === 'tool_call_ready' ? this.#tools.bindings.get(event.name) : undefined
+    const stoppingTask = event.kind === 'tool_call_ready' && toolBinding?.kind === 'host' && (event.name === 'cancel' || (event.name === 'task' && event.arguments.operation === 'cancel'))
     const isConfirmationDecision = confirmTarget === 'project'
     const blockedConfirmationTool = event.kind === 'tool_call_ready'
       && this.#confirmation.blocksProjectConfirmationTool(event)
-      && !isConfirmationDecision
+      && !isConfirmationDecision && !stoppingTask
     const isExecutorApprovalDecision = confirmTarget === 'approval'
     const blockedExecutorApprovalTool = event.kind === 'tool_call_ready'
       && this.#approvalHost.blocksExecutorApprovalTool(event)
-      && !isExecutorApprovalDecision
+      && !isExecutorApprovalDecision && !stoppingTask
     // An automatic provider may create the response that will emit the confirmation function before VAD reports
     // speech end. That response is an authorization carrier, not an audible assistant turn. Let it
     // acquire an origin while the user still owns the floor, but never bypass the one-shot fence for
@@ -1232,6 +1241,8 @@ export class RealtimeService {
       }
       this.#continuations.finishContinuation({response_id:event.response_id,status:'yielded'})
       this.#continuations.finishOrigin(event.response_id)
+      // Notify lifecycle owners before a follow-up delivery can fail.
+      this.#notifyProviderEvent(event)
     }
 
     if (event.kind === 'response_terminal' && accepted) {
@@ -1248,6 +1259,8 @@ export class RealtimeService {
       this.#host.finishSemanticAcknowledgement(event)
       this.#continuations.finishContinuation(event)
       this.#continuations.finishOrigin(event.response_id)
+      // Notify lifecycle owners before a follow-up delivery can fail.
+      this.#notifyProviderEvent(event)
       const itemId = this.#userOrigins.itemForResponse(event.session_epoch, event.response_id)
       if (event.status === 'completed' && itemId !== undefined
         && this.#userOrigins.revisionForItem(event.session_epoch, itemId) === this.session.userInputRevision
@@ -1341,6 +1354,14 @@ export class RealtimeService {
         call_id: event.call_id, outcome: accepted ? 'received' : 'rejected',
       })
       if (!accepted) {
+        // Approval carriers suppress ordinary tools; stopping still passes the user-origin fences.
+        if (stoppingTask && event.session_epoch === this.session.sessionEpoch && event.response_id !== null
+          && this.session.providerTurnPhase(event.response_id) === 'active'
+          && !this.session.providerTurnWasFenced(event.response_id)
+          && this.#approvalHost.blocksExecutorApprovalTool(event)) {
+          await this.#continuations.routeToolCall(event)
+          return
+        }
         // A refused confirmation tool still owes the provider a terminal result, or the protocol stalls
         // waiting for one that will never come.
         if (blockedConfirmationTool) await this.#confirmation.closeProjectConfirmationTool(event)
@@ -1363,6 +1384,7 @@ export class RealtimeService {
       await this.#confirmation.resumeProjectConfirmationCarrierRecoveryAfterUser()
     }
     if (event.kind === 'response_terminal') {
+      if (!accepted) this.#notifyProviderEvent(event)
       this.#confirmation.clearTerminal(event)
       this.#approvalHost.clearTerminal(event)
     }

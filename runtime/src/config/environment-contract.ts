@@ -1,6 +1,6 @@
 export type EnvironmentOwner =
   | 'openai' | 'gemini' | 'core' | 'qwen' | 'stepfun' | 'ark' | 'deepseek' | 'volcengine' | 'codex' | 'search' | 'camera'
-  | 'mobile' | 'autoglm' | 'telemetry' | 'host_private'
+  | 'browser' | 'computer' | 'mobile' | 'autoglm' | 'telemetry' | 'host_private'
 
 export interface EnvironmentVariableContract {
   readonly name: string
@@ -157,6 +157,25 @@ const rows: readonly Row[] = [
   ['DEVELOPER_DIR', 'host_private', false, false, 'never', null, 'Host Xcode developer directory used when binding an iOS Simulator.', '绑定 iOS 模拟器时使用的宿主 Xcode 开发者目录。'],
   ['CODEX_HOME', 'host_private', false, false, 'never', null, 'Host Codex credential home.', '主机 Codex 凭据目录。'],
   ['HOME', 'host_private', false, false, 'never', null, 'Host home directory.', '主机用户目录。'],
+  ['BROWSER_ENGINE', 'browser', false, true, 'never', 'chromium', 'Managed engine: chromium, firefox or webkit.', '专用引擎：chromium、firefox 或 webkit。'],
+  ['BROWSER_URL', 'browser', false, true, 'when_selected', null, 'Explicit starting URL; HTTPS or localhost HTTP.', '明确的起始 URL；HTTPS 或本机 HTTP。'],
+  ['BROWSER_HEADLESS', 'browser', false, true, 'never', 'true', 'Run the dedicated browser without occupying the foreground.', '专用浏览器是否在后台运行。'],
+  ['BROWSER_BASE_URL', 'browser', false, true, 'when_selected', null, 'Screenshot model endpoint.', '截图模型地址。'],
+  ['BROWSER_MODEL', 'browser', false, true, 'when_selected', null, 'Screenshot model identifier.', '截图模型名称。'],
+  ['BROWSER_MODEL_FAMILY', 'browser', false, true, 'when_selected', null, 'Verified screenshot model family.', '已核实的截图模型系列。'],
+  ['BROWSER_API_KEY', 'browser', true, true, 'when_selected', null, 'Screenshot model credential.', '截图模型凭据。'],
+  ['BROWSER_MAX_STEPS', 'browser', false, true, 'never', '30', 'Supervised browser action limit (1-100).', '受监督浏览器动作上限（1-100）。'],
+  ['BROWSER_TIMEOUT_SECONDS', 'browser', false, true, 'never', '600', 'Browser task deadline (1-1800 seconds).', '浏览器任务时限（1-1800 秒）。'],
+  ['BROWSER_SETTLE_MS', 'browser', false, true, 'never', '1000', 'Wait before observation and after actions.', '观察前和动作后稳定等待。'],
+  ['COMPUTER_DISPLAY_ID', 'computer', false, true, 'when_selected', null, 'Exact local display ID (Mac index or Windows DISPLAY name); requires one display.', '明确的本机显示器 ID（Mac 索引或 Windows DISPLAY 名）；仅支持单显示器。'],
+  ['COMPUTER_BASE_URL', 'computer', false, true, 'when_selected', null, 'GUI model endpoint receiving desktop screenshots.', '接收桌面截图的 GUI 模型地址。'],
+  ['COMPUTER_MODEL', 'computer', false, true, 'when_selected', null, 'Desktop GUI model identifier.', '桌面 GUI 模型名称。'],
+  ['COMPUTER_MODEL_FAMILY', 'computer', false, true, 'when_selected', null, 'Verified SDK GUI model family: auto-glm, auto-glm-multilingual or qwen3-vl.', '已核实的 GUI 模型系列：auto-glm、auto-glm-multilingual 或 qwen3-vl。'],
+  ['COMPUTER_API_KEY', 'computer', true, true, 'when_selected', null, 'Desktop GUI model credential.', '桌面 GUI 模型凭据。'],
+  ['COMPUTER_MAX_STEPS', 'computer', false, true, 'never', '30', 'Supervised desktop action limit (1-100).', '受监督桌面动作上限（1-100）。'],
+  ['COMPUTER_TIMEOUT_SECONDS', 'computer', false, true, 'never', '600', 'Desktop task deadline (1-1800 seconds).', '桌面任务时限（1-1800 秒）。'],
+  ['COMPUTER_CLICK_HOLD_MS', 'computer', false, true, 'never', '100', 'Mouse click hold duration (10-1000 milliseconds).', '鼠标点击按住时长（10-1000 毫秒）。'],
+  ['COMPUTER_SETTLE_MS', 'computer', false, true, 'never', '4000', 'Wait before observation and after actions (0-30000 milliseconds).', '观察前和动作后稳定等待（0-30000 毫秒）。'],
   ['MOBILE_ENGINE', 'mobile', false, true, 'never', 'midscene', 'Phone execution engine; currently midscene only.', '手机执行引擎；当前仅支持 midscene。'],
   ['MOBILE_DEVICE_TYPE', 'mobile', false, true, 'never', 'ios-simulator', 'Phone platform: android, ios or ios-simulator; native execution supports Android ADB and iOS Simulator.', '手机平台：android、ios 或 ios-simulator；原生执行支持 Android ADB 和 iOS 模拟器。'],
   ['MOBILE_DEVICE_ID', 'mobile', false, true, 'when_selected', null, 'Exact iOS device or Simulator UDID, or Android ADB serial.', '明确的 iOS 设备或模拟器 UDID，或 Android ADB 序列号。'],

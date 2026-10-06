@@ -975,8 +975,8 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       // immediately adjacent to dispatchExternal so a superseding user turn cannot start work.
       if (!request.stillWanted()) return {accepted: false, delegate_id: null}
       let taskContext=request.taskContext
-      if(!taskContext&&options.sharedPersonal&&options.taskConversationId&&request.op==='run'&&typeof request.request.work_order==='string'){
-        const task=await options.sharedPersonal.host.tasks.delegate('dispatch:'+idFactory(),{conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration}),goal:request.request.work_order,acceptance:[],origin_ref:request.origin_ref})
+      if(!taskContext&&options.sharedPersonal&&options.taskConversationId&&request.op==='run'&&(typeof request.request.work_order==='string'||(['browser','computer','mobile'].includes(request.channel)&&typeof request.request.instruction==='string'))){
+        const task=await options.sharedPersonal.host.tasks.delegate('dispatch:'+idFactory(),{conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration}),goal:(request.request.work_order??request.request.instruction) as string,acceptance:[],origin_ref:request.origin_ref})
         taskContext=options.sharedPersonal.host.tasks.continuationContext({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})
       }
       if(!request.stillWanted())return {accepted:false,delegate_id:null}

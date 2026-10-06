@@ -784,6 +784,7 @@ function playbackPorts(idFactory: () => string, onClear: ConstructorParameters<t
 }
 
 interface PipelineOptions {
+  readonly onProviderEvent?: ConstructorParameters<typeof RealtimeService>[0]["onProviderEvent"]
   readonly userResponseMode?: 'automatic' | 'requested'
   readonly intake?: ConstructorParameters<typeof RealtimeService>[0]['intake']
   readonly toolResult?: {readonly accepted: boolean; readonly delegateId: string | null}
@@ -1125,6 +1126,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
         // Spread rather than assigned: `exactOptionalPropertyTypes` distinguishes an absent optional from
         // one explicitly set to undefined, and the service's contract is the former.
         ...(options.onCaption === undefined ? {} : {onCaption: options.onCaption}),
+        ...(options.onProviderEvent ? {onProviderEvent: options.onProviderEvent} : {}),
         ...(options.onUserTranscriptAccepted === undefined ? {} : {onUserTranscriptAccepted: options.onUserTranscriptAccepted}),
         onDiagnostic: line => diagnostics.push(line),
         telemetry: {

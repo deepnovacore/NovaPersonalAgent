@@ -201,6 +201,7 @@ projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
       summary: this.#delegateSummary(delegateId, this.executorDisplayName(channel)),
       state: event.kind === 'deadline'
         ? 'unknown'
+        : event.payload.content.code === 'model_finished' && event.payload.content.verified === false ? 'unknown'
         : event.payload.outcome === 'ok'
           ? 'completed'
           : event.payload.outcome === 'refused'
@@ -473,7 +474,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       && !directSuggestionHandoff
     this.ports.session.registerDelegate(payload.delegate_id, {
       summary: this.#delegateSummary(payload.delegate_id, displayName),
-      state: payload.outcome === 'ok'
+      state: payload.content.code === 'model_finished' && payload.content.verified === false ? 'unknown' : payload.outcome === 'ok'
         ? 'completed'
         : payload.outcome === 'refused'
           ? 'refused'

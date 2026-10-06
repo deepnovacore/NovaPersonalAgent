@@ -6,8 +6,8 @@ import {ENGLISH_SYSTEM_PROMPTS} from '../src/realtime/system-prompts.en.js'
 import {parsePromptLanguage} from '../src/realtime/prompt-language.js'
 
 test('both prompt languages cover every capability branch without changing protocol identifiers', () => {
-  for (const enabled of [true, false]) {
-    const modules = {coding: enabled, camera: enabled, search: enabled, knowledge: enabled}
+  for (const enabled of [true, false]) for (const gui of [true, false]) {
+    const modules = {coding: enabled, camera: enabled, search: enabled, knowledge: enabled, gui}
     const zh = frontendInstructions(modules, true)
     const en = frontendInstructions(modules, true, 'en')
     for (const line of zh.split('\n')) assert.equal(typeof ENGLISH_SYSTEM_PROMPTS[line], 'string', line)

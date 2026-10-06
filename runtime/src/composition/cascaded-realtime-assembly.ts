@@ -251,7 +251,7 @@ export function buildTextRealtimeAssembly(
   const selected=requireSelectedCascadedLlmConfig(options.settings)
   const clock=options.clock??new RealClock(),ids=options.ids??new MonotonicIdFactory()
   const capabilities=options.capabilities??capabilitiesFromSettings(options.settings)
-  const instructions=frontendInstructions({search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,knowledge:capabilities.modules.knowledge.enabled},(options.executorApproval??options.codexResource?.approvalController)!=null)
+  const instructions=frontendInstructions({search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled},(options.executorApproval??options.codexResource?.approvalController)!=null)
   const common={clock,ids,instructions,...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!})}
   const llmFactory=selected.provider!=='ark'
     ?registry.llm.qwen({...common,config:selected.config,...(options.qwenLlmFactory===undefined?{}:{factory:options.qwenLlmFactory})})
@@ -291,6 +291,7 @@ export function buildCascadedRealtimeAssembly(
     search: capabilities.modules.search.enabled,
     camera: options.cameraModuleEnabled ?? capabilities.modules.camera.enabled,
     coding: capabilities.modules.coding.enabled,
+    gui: options.settings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)),
     knowledge: capabilities.modules.knowledge.enabled,
   }, (options.executorApproval ?? options.codexResource?.approvalController) != null)
 
@@ -503,7 +504,7 @@ export interface BuildQwenRealtimeProviderOptions {
   readonly idFactory: () => string
   readonly now: () => number
   readonly executorApproval: boolean
-  readonly modules?: {readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean}
+  readonly modules?: {readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean; readonly gui?: boolean}
 }
 
 function buildIntegratedWireProvider(options: BuildQwenRealtimeProviderOptions, profile?: IntegratedWireProfile): QwenAudioRealtimeAdapter {
@@ -584,6 +585,7 @@ export function buildQwenRealtimeAssembly(
       search: core.capabilities.modules.search.enabled,
       camera: options.cameraModuleEnabled ?? core.capabilities.modules.camera.enabled,
       coding: core.capabilities.modules.coding.enabled,
+      gui: core.settings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)),
       knowledge: core.capabilities.modules.knowledge.enabled,
     },
     executorApproval: (options.executorApproval ?? options.codexResource?.approvalController) != null,
@@ -647,6 +649,7 @@ export function buildIntegratedRealtimeAssembly(
       search: capabilities.modules.search.enabled,
       camera: options.cameraModuleEnabled ?? capabilities.modules.camera.enabled,
       coding: capabilities.modules.coding.enabled,
+    gui: options.settings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)),
       knowledge: capabilities.modules.knowledge.enabled,
     },
     executorApproval: (options.executorApproval ?? options.codexResource?.approvalController) != null,

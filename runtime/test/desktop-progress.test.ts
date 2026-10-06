@@ -142,3 +142,14 @@ test('an immediate terminal retains the admitted target before intake metadata r
   assert.equal(projected.progress.title, 'Requested title')
   assert.equal(projected.result?.title, 'Requested title')
 })
+
+test('GUI execution completion with an observation still waits for task verification in desktop status', () => {
+  const gui = {...delegate, executor: 'browser', op: 'run'}
+  const event: EventRecord = {seq: 2, ts: 3, kind: 'handoff', payload: {channel: 'browser', delegate_id: 'd', origin_ref: 'conversation:1',
+    outcome: 'ok', trust: 'untrusted_external', content: {code: 'model_finished', verified: false}, refs: []}}
+  const result = projectExecutorEvent(event, {...evidence, claimedHandoff: () => gui,
+    executors: new Map([['browser', {manifest: {display_name: 'Browser'}}]])})!
+  assert.equal(result.progress.phase, 'unknown')
+  assert.equal(result.result?.outcome, 'unknown')
+  assert.doesNotMatch(result.result.summary, /已完成任务/u)
+})

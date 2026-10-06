@@ -29,3 +29,13 @@ test('uncertain device write overrides cancellation and timeout', async () => {
   assert.equal(mobileWriteFailure(new Error('needs_user_action'), true), 'needs_user_action')
   assert.equal(mobileWriteFailure(new Error('action_failed'), true, 'cancelled'), 'cancelled')
 })
+
+test('physical iOS identity requires an exact USB iproxy UDID and WDA port mapping', async () => {
+  const {validIosUsbForwarder} = await import('../src/executors/mobile-ios.js')
+  const udid = '00000000-1111222233334444'
+  assert.equal(validIosUsbForwarder('/opt/homebrew/bin/iproxy', `iproxy -u ${udid} 8101:8100`, udid, 8101), true)
+  assert.equal(validIosUsbForwarder('iproxy', `iproxy --udid ${udid} --local --source 127.0.0.1 8101:8100`, udid, 8101), true)
+  for (const args of [`iproxy 8101:8100`, `iproxy -u other 8101:8100`, `iproxy -u ${udid} --network 8101:8100`,
+    `iproxy -u ${udid} 8101:9000`, `iproxy -u ${udid} -s 0.0.0.0 8101:8100`, `iproxy -u ${udid} -u other 8101:8100`])
+    assert.equal(validIosUsbForwarder('iproxy', args, udid, 8101), false)
+})

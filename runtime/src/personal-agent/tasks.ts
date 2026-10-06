@@ -31,6 +31,7 @@ export interface TaskInput {
 /** One dispatch: the executor that ran it and the one executor session it ran in. */
 export interface TaskWork {
   work_id: string
+  target?: string
   executor: string
   session_id?: string
 }
@@ -90,7 +91,7 @@ const goalChangeSchema = z.object({
   fence: taskFenceSchema, actor: actorSchema, goal: goalSchema.shape.goal, acceptance: goalSchema.shape.acceptance
 }).strict()
 const recordSchema = taskInputSchema.extend({
-  reconciled_inputs: z.array(id).default([]), pending_delivery: id.optional(), original_goal: z.string().optional(), execution_route: z.string().optional(), id, phase: z.enum(['queued', 'running', 'verifying', 'waiting', 'completed', 'cancelled']), controller: actorSchema, control_revision: z.number().int().nonnegative(), goal_revision: z.number().int().nonnegative(), corrections: z.number().int().nonnegative(), work_ids: z.array(id), session_ids: z.array(id), works: z.array(z.object({ work_id: id, executor: id, session_id: id.optional() }).strict()).default([]), primary_session_id: id.optional(), evidence_refs: z.array(id), criteria_evidence: z.array(z.object({ index: z.number().int().nonnegative(), evidence_refs: z.array(id) }).strict()).optional(), artifact_refs: z.array(id).default([]), waiting_reason: z.string().trim().min(1).max(4000).nullable(), todo_sync: z.enum(['none', 'pending', 'synced', 'conflict'])
+  reconciled_inputs: z.array(id).default([]), pending_delivery: id.optional(), original_goal: z.string().optional(), execution_route: z.string().optional(), id, phase: z.enum(['queued', 'running', 'verifying', 'waiting', 'completed', 'cancelled']), controller: actorSchema, control_revision: z.number().int().nonnegative(), goal_revision: z.number().int().nonnegative(), corrections: z.number().int().nonnegative(), work_ids: z.array(id), session_ids: z.array(id), works: z.array(z.object({ work_id: id, executor: id, session_id: id.optional(), target: id.optional() }).strict()).default([]), primary_session_id: id.optional(), evidence_refs: z.array(id), criteria_evidence: z.array(z.object({ index: z.number().int().nonnegative(), evidence_refs: z.array(id) }).strict()).optional(), artifact_refs: z.array(id).default([]), waiting_reason: z.string().trim().min(1).max(4000).nullable(), todo_sync: z.enum(['none', 'pending', 'synced', 'conflict'])
 }).strict()
 type StoredTask = z.infer<typeof recordSchema>
 const evidenceSchema = z.object({
@@ -426,7 +427,7 @@ export class TaskService {
       throw Error('task_not_found')
     this.#assert(task, parsed, actorSchema.parse(actor))
   }
-  bindWork(fence: TaskFence, workId: string, sessionId?: string, primary = true): Promise<void> {
+  bindWork(fence: TaskFence, workId: string, sessionId?: string, primary = true, targetId?: string): Promise<void> {
     const parsed = taskFenceSchema.parse(fence), work = id.parse(workId), session = sessionId === undefined ? undefined : id.parse(sessionId)
     return this.#mutate(next => {
       const task = next.tasks.find(item => item.id === parsed.task_id)
@@ -460,6 +461,11 @@ export class TaskService {
         task.session_ids.push(session);
       // Each work runs on exactly one executor session; the first bound session is where continuations go by default.
       const entry = task.works.find(item => item.work_id === work) ?? (task.works.push({ work_id: work, executor: task.execution_route ?? 'unknown' }), task.works.at(-1)!)
+      if (targetId !== undefined) {
+        const target = id.parse(targetId)
+        if (entry.target && entry.target !== target) throw Error('work_target_conflict')
+        entry.target = target
+      }
       if (session) {
         if (entry.session_id && entry.session_id !== session)
           throw Error('work_session_conflict')

@@ -71,7 +71,7 @@ export interface ExecutorDispatchContext {
   readonly resourceWaiting?: (reason:string|null)=>Promise<void>
   readonly instructionAccepted?: ()=>void
   readonly beforeWrite?: () => void
-  readonly bindSession?: (sessionId:string)=>Promise<void>
+  readonly bindSession?: (sessionId:string,target?:string)=>Promise<void>
   readonly clock: Clock
   readonly delegate: Delegate
   readonly signal: AbortSignal
@@ -93,6 +93,7 @@ export interface ExecutorAdapter {
    * branches) or whose synchronous-result decision depends on the arguments. Absent or `null`:
    * the op's `params` schema and `sync_result` flag apply.
    */
+  cancelWork?(workId: string): void
   taskResource?():string|null
   admitRequest?(op: string, request: Readonly<Record<string, JsonValue>>): ExecutorAdmission | null
   dispatch(
@@ -343,6 +344,12 @@ export class CausalRuntime {
     await this.flushMemory()
     return admission
   }
+  cancelWork(delegateId: string): void {
+    this.cancelPendingDispatch(delegateId)
+    const delegate = this.inFlightDelegate(delegateId)
+    if (delegate) this.#executors.get(delegate.executor)?.cancelWork?.(delegateId)
+  }
+
   cancelPendingDispatch(delegateId: string): boolean {
     if (!this.#launchChecks.has(delegateId)) return false
     this.#launchChecks.set(delegateId, null)
@@ -585,7 +592,7 @@ export class CausalRuntime {
         ...(activityTasks?{resourceWaiting:(reason:string|null)=>activityTasks.resourceState(grant!.fence.task_id,reason)}:{}),
         ...(activityTasks?{activity:(item:ExecutorActivity)=>{void Promise.resolve().then(()=>activityTasks.appendEvent({task_id:grant!.fence.task_id,work_id:delegate.delegate_id,thread_id:item.thread_id,turn_id:item.turn_id,item_id:item.item_id,stage:item.stage,...(activitySession?{session_id:activitySession}:{}),kind:item.kind,...(item.sender?{sender:item.sender}:{}),text:item.text,refs:item.refs,...(item.text_truncated?{text_truncated:true}:{})},JSON.stringify([delegate.delegate_id,item.thread_id,item.turn_id,item.item_id,item.stage]))).catch(()=>{this.core.diagnostics.push({code:'task_event_persistence_failed',details:{task_id:grant!.fence.task_id,work_id:delegate.delegate_id}});activityTasks.markReplayIncomplete(grant!.fence.task_id)})}}:{}),
         instructionAccepted:()=>{this.#instructionReceipts.get(delegate.delegate_id)?.('accepted');this.#instructionReceipts.delete(delegate.delegate_id)},
-        ...(grant?{bindSession:async(sessionId:string)=>{const tasks=taskGrantService(grant);await tasks.bindWork(grant.fence,delegate.delegate_id,sessionId);activitySession=sessionId}}:{}),
+        ...(grant?{bindSession:async(sessionId:string,target?:string)=>{const tasks=taskGrantService(grant);await tasks.bindWork(grant.fence,delegate.delegate_id,sessionId,true,target);activitySession=sessionId}}:{}),
         ...(wanted === undefined ? {} : {beforeWrite:()=>{if(!wanted())throw Error('superseded')}}),
         ...(userTurn === undefined ? {} : {userTurn}),
         clock: this.#clock,

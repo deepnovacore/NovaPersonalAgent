@@ -89,11 +89,11 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     vision: settings.conversation_vision_enabled,
   })
   let publishExecutorApproval: (view: ExecutorApprovalView) => void = () => undefined
-  const phoneNames = settings.executors.filter(name => name === 'autoglm' || name === 'mobile')
-  // Each phone executor runs one task at a time, so it adds one approval slot instead of taking Codex's.
-  const sharedApproval = phoneNames.length > 0
-    ? new HostApprovalController({clock, idFactory: () => randomUUID(), capacity: MAX_CONCURRENT_WORK + phoneNames.length}) : undefined
-  let closeSharedApproval = () => { /* No shared resource when phone executors are disabled. */ }
+  const guiNames = settings.executors.filter(name => name === 'autoglm' || name === 'mobile' || name === 'computer' || name === 'browser')
+  // Each supervised GUI executor runs one task at a time, so it adds one approval slot instead of taking Codex's.
+  const sharedApproval = guiNames.length > 0
+    ? new HostApprovalController({clock, idFactory: () => randomUUID(), capacity: MAX_CONCURRENT_WORK + guiNames.length}) : undefined
+  let closeSharedApproval = () => { /* No shared resource when GUI executors are disabled. */ }
   if (sharedApproval !== undefined) {
     const unsubscribe = sharedApproval.observe(view => publishExecutorApproval(view))
     closeSharedApproval = () => { sharedApproval.invalidate('shutdown'); unsubscribe() }
@@ -109,7 +109,18 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     return new MobileExecutor(loadMobileConfig(environment), sharedApproval!)
   })()
   if (mobile !== undefined) ownership.own(() => mobile.close())
-  const phoneExecutors = [...(autoglm === undefined ? [] : [autoglm]), ...(mobile === undefined ? [] : [mobile])]
+  const computer = !settings.executors.includes('computer') ? undefined : await (async () => {
+    const {ComputerExecutor, loadComputerConfig} = await import('../executors/computer.js')
+    return new ComputerExecutor(loadComputerConfig(environment), sharedApproval!)
+  })()
+  if (computer !== undefined) ownership.own(() => computer.close())
+  const browser = !settings.executors.includes('browser') ? undefined : await (async () => {
+    const {BrowserExecutor, loadBrowserConfig} = await import('../executors/browser.js')
+    return new BrowserExecutor(loadBrowserConfig(environment), sharedApproval!)
+  })()
+  if (browser !== undefined) ownership.own(() => browser.close())
+  const guiExecutors = [...(autoglm === undefined ? [] : [autoglm]), ...(mobile === undefined ? [] : [mobile]),
+    ...(computer === undefined ? [] : [computer]), ...(browser === undefined ? [] : [browser])]
   const codexResource = !capabilities.modules.coding.enabled || !settings.executors.includes('codex')
     ? null
     : await (async () => {
@@ -186,8 +197,8 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         clock,
         ...(frameSource === undefined ? {} : {frameSource}),
         ...(codexResource === null ? {} : {codexResource}),
-        ...(phoneExecutors.length === 0 ? {} : {executors: phoneExecutors, agentDescriptors: phoneExecutors.map(phone => phone.descriptor),
-          additionalAgentControllers: port => phoneExecutors.map(phone => phone.controller(port)), executorApproval: sharedApproval!}),
+        ...(guiExecutors.length === 0 ? {} : {executors: guiExecutors, agentDescriptors: guiExecutors.map(executor => executor.descriptor),
+          additionalAgentControllers: port => guiExecutors.map(executor => executor.controller(port)), executorApproval: sharedApproval!}),
         ...callbacks,
         ...(codexResource?.approvalController?{executorApproval:scopeApprovalController(codexResource.approvalController,view=>!view.work||!conversationOwner.host?.workConversation(view.work.work_id))}:{}),
       }
@@ -244,7 +255,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     if(mode!=='background'&&seen?.proposal_id&&!seen.conversation_id&&projectAdapter?.confirmationController.view.pending_confirmation_id===seen.proposal_id)projectAdapter.confirmationController.setBackground(false)
     if(!seen){const paused=mode==='background';if(paused||presentationPaused)await composition.realtime.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
   }))
-  host.setConversationRuntime(conversationRuntimeFactory({settings:composition.realtime.core.settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
+  host.setConversationRuntime(conversationRuntimeFactory({...(guiExecutors.length ? {executors: guiExecutors, agentDescriptors: guiExecutors.map(executor => executor.descriptor), additionalAgentControllers: port => guiExecutors.map(executor => executor.controller(port)), executorApproval: sharedApproval!} : {}),settings:composition.realtime.core.settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
     ...(onUsage===undefined?{}:{onUsage}),
     ...(composition.realtime.core.frameSource?{frameSource:composition.realtime.core.frameSource}:{}),
     blackboard:blackboardOptionsFromSettings(settings),clock,gateway:composition.realtime.core.gateway,
@@ -332,7 +343,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     ...composition,
     phoneControl,
     closeAuxiliary: async () => {
-      try { await phoneQueue; await closePhone(); await Promise.all(phoneExecutors.map(phone => phone.close())) } finally { closeSharedApproval(); telemetry.close() }
+      try { await phoneQueue; await closePhone(); await Promise.all(guiExecutors.map(phone => phone.close())) } finally { closeSharedApproval(); telemetry.close() }
     },
   }
 }

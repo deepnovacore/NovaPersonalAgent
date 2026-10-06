@@ -303,7 +303,7 @@ test('Qwen instructions clarify before submitting coding actions through host to
   assert.match(FRONTEND_INSTRUCTIONS, /用户明确要求停止、取消或暂不执行已经派发的任务（包括正在准备的任务）时调用 cancel；instruction 只在用户点名了要停哪个任务时传/u)
   assert.match(FRONTEND_INSTRUCTIONS, /code=intake_opened \/ intake_in_progress 是内部接收回执，尚未派单/u)
   assert.match(FRONTEND_INSTRUCTIONS, /unknown_project \/ ambiguous_project \/ busy_project \/ capacity 表示任务尚未执行，按事实转述可选项/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /同意、拒绝或取消都必须调用 confirm.*不得只做口头回应/su)
+  assert.match(FRONTEND_INSTRUCTIONS, /同意或拒绝该操作必须调用 confirm.*停止整个任务则调用 cancel.*不得只做口头回应/su)
   assert.match(FRONTEND_INSTRUCTIONS, /id 从该宿主事实原样复制，accepted 用 JSON boolean 表示决定/u)
   assert.match(FRONTEND_INSTRUCTIONS, /同意 accepted=true，明确拒绝或取消 accepted=false；尚未决定、需要考虑或追问原因不代表拒绝/u)
   assert.match(FRONTEND_INSTRUCTIONS, /<active_project_context> 是 authoritative host state，描述当前工作区、Session 和可继续的会话目录/u)
