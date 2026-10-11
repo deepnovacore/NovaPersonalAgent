@@ -1,16 +1,26 @@
 <!-- Keep in sync with README.zh-CN.md -->
 
+<div align="center">
+
+**English** · [简体中文](README.zh-CN.md)
+
 # NAA (Your Personal Agent and Voice Assistant)
 
-**English** | [简体中文](README.zh-CN.md)
+**Your personal agent and always-on voice assistant — aware of your context, with dual brains and restrained proactivity.**
 
 [![CI](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
-[![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaAudioAgent/)
+[![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
-> **Your personal agent and always-on voice assistant — aware of your context, with dual brains and restrained proactivity.**
+**[Website](https://deepnovacore.github.io/NovaAudioAgent/) · [Documentation](docs/en/README.md) · [Video demo](https://youtu.be/t1c-2O-QsxE)**
+
+[Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [Use cases](#23-use-cases) · [Roadmap](#5-roadmap)
+
+</div>
+
+---
 
 ## News
 

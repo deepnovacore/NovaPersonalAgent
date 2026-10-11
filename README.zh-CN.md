@@ -1,8 +1,12 @@
 <!-- Keep in sync with README.md -->
 
+<div align="center">
+
+[English](README.md) · **简体中文**
+
 # NAA (Your Personal Agent and Voice Assistant)
 
-[English](README.md) | **简体中文**
+**你的个人 Agent 与常驻语音助手：理解上下文，前后双脑协作，主动有分寸。**
 
 [![CI](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
@@ -10,7 +14,13 @@
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaAudioAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
-> **你的个人 Agent 与常驻语音助手：理解上下文，前后双脑协作，主动有分寸。**
+**[官网](https://deepnovacore.github.io/NovaAudioAgent/) · [文档](docs/zh-CN/README.md) · [视频演示](https://youtu.be/t1c-2O-QsxE)**
+
+[快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [使用案例](#23-使用案例) · [路线图](#5-路线图)
+
+</div>
+
+---
 
 ## News
 
