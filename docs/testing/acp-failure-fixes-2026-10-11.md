@@ -51,6 +51,8 @@ node runtime/scripts/patch-pi-acp.mjs "$(npm root -g)/pi-acp"
 
 ### 原会话恢复与模型行为
 
+本节保留 `8b665192` 阶段的失败证据；后续已核对实际 CLI 入口和原生内部消息并修复，见 [同会话恢复修复](acp-resume-recovery-2026-10-11.md)。以下不是最新结论。
+
 脱敏 ACP 帧和原生日志证明新 work order 已写出并持久化，没有协议丢消息。
 Pi 会丢弃 error/aborted assistant，DeepSeek 的失败回合可能没有 assistant；
 前后用户请求因此缺少失败边界。续做提示保留项目、安全和权限约束，明确当前请求。

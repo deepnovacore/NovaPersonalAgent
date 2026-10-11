@@ -28,7 +28,9 @@
     "scripts/patch-pi-acp.mjs",
     "scripts/patch-acp-recovery.mjs",
     "dist/src",
-    "dist/eval"
+    "dist/eval",
+    "scripts/opencode-recovery.mjs",
+    "scripts/install-opencode-recovery.mjs"
   ],
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json",

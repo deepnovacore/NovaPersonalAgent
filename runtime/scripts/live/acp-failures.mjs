@@ -18,6 +18,7 @@ catch {
     return '';
 } };
 import { mkdir, readFile, writeFile, cp, stat, chmod } from 'node:fs/promises';
+import {constants as fsConstants} from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { parseEnv } from 'node:util';
@@ -53,6 +54,18 @@ if (backendId === 'opencode') {
     await writeFile(path, JSON.stringify({ model: `dashscope/${openCodeModel}`, small_model: `dashscope/${openCodeModel}`, provider: { dashscope: { npm: '@ai-sdk/openai-compatible', options: { baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: env.DASHSCOPE_API_KEY }, models: { [openCodeModel]: { name: openCodeModel, limit: { context: 262144, output: 4096 } } } } }, permission: { external_directory: 'deny' }, mcp: {} }), { mode: 0o600 });
     childEnv.OPENCODE_CONFIG = path;
     childEnv.OPENCODE_CONFIG_DIR = join(home, '.config/opencode');
+    if (process.env.ACP_FAILURE_OPENCODE_PLUGIN) {
+        await mkdir(join(home, '.config/opencode/plugins'), {recursive:true});
+        await cp(process.env.ACP_FAILURE_OPENCODE_PLUGIN, join(home, '.config/opencode/plugins/nova-recovery.js'));
+        if (process.env.ACP_FAILURE_OPENCODE_PLUGIN_CACHE) {
+            const cache = resolve(process.env.ACP_FAILURE_OPENCODE_PLUGIN_CACHE);
+            assert(cache.startsWith(resolve('output')+'/'));
+            const metadata = JSON.parse(await readFile(join(cache,'node_modules/@opencode-ai/plugin/package.json'),'utf8'));
+            assert.equal(metadata.version,'1.19.0');
+            for (const name of ['node_modules','package.json','package-lock.json']) await cp(join(cache,name),join(home,'.config/opencode',name),{recursive:true,mode:fsConstants.COPYFILE_FICLONE});
+            childEnv.XDG_CACHE_HOME=resolve(cache,'../../.cache');
+        }
+    }
 }
 else if (backendId === 'pi') {
     await mkdir(join(home, '.pi/agent'), { recursive: true });
@@ -61,6 +74,10 @@ else if (backendId === 'pi') {
     const settings = JSON.parse(await readFile(join(homedir(), '.pi/agent/settings.json'), 'utf8'));
     await writeFile(join(home, '.pi/agent/settings.json'), JSON.stringify({ defaultProvider: settings.defaultProvider, defaultModel: settings.defaultModel, defaultThinkingLevel: 'off' }));
     childEnv.PI_CODING_AGENT_DIR = join(home, '.pi/agent');
+    if (process.env.ACP_FAILURE_PI_EXTENSION) {
+        await mkdir(join(home, '.pi/agent/extensions'), {recursive:true});
+        await cp(process.env.ACP_FAILURE_PI_EXTENSION, join(home, '.pi/agent/extensions/recovery-diagnostic.ts'));
+    }
 }
 else if (backendId === 'deepseek') {
     await copy('.dsh/settings.yaml');
@@ -81,6 +98,9 @@ async function runCase(name, instruction, { decline = false, cancel = false, cra
     const factory = new PosixCodexProcessOwnerFactory();
     const processFactory = { spawn: async (...args) => {
         owner = await factory.spawn(...args);
+        if (process.env.ACP_FAILURE_NATIVE_TRACE === '1') owner.stderr.on('data', chunk => {
+            for(const match of Buffer.from(chunk).toString('utf8').matchAll(/NOVA_RECOVERY_TRACE (\{"archived":\d+\})/gu)) { report.nativeRecoveryTrace ??= []; report.nativeRecoveryTrace.push(JSON.parse(match[1])); }
+        });
         if (process.env.ACP_FAILURE_TRACE === '1') {
             report.wire ??= [];
             const capture = (direction) => {
@@ -204,12 +224,14 @@ if (!onlyCase || onlyCase === 'credentials') {
         badEnv.CODEBUDDY_API_KEY = 'nova-deliberately-invalid';
     if (backendId === 'deepseek')
         badEnv.DEEPSEEK_API_KEY = 'nova-deliberately-invalid';
-    const bad = await runCase('invalid-credential', 'Reply exactly AUTH_OK. No tools or files.', { environment: badEnv });
+    const marker = 'recovery-' + randomUUID() + '.txt', token = randomUUID();
+    const retryPrevious = process.env.ACP_FAILURE_RETRY_PREVIOUS === '1';
+    const fileInstruction = `Create only ${marker} in the current directory with exactly ${token}. Do not read outside this directory. Then stop.`;
+    const bad = await runCase('invalid-credential', retryPrevious ? fileInstruction : 'Reply exactly AUTH_OK. No tools or files.', { environment: badEnv });
     await record(bad, bad.turnWritten && bad.classification === 'uncertain' && ['server_rejected', 'turn_failed'].includes(bad.code) && report.lastOwnerGroupGone);
     if (credentialFile)
         await writeFile(credentialFile, original, { mode: 0o600 });
-    const marker = 'recovery-' + randomUUID() + '.txt', token = randomUUID();
-    const restored = await runCase('credential-restored', `${process.env.ACP_FAILURE_EXPLICIT_TURN === '1' ? 'This is a new work order. The previous AUTH_OK-only response instruction applied to the previous turn and is now finished. Execute this new instruction instead.\n\n' : ''}Create only ${marker} in the current directory with exactly ${token}. Do not read outside this directory. Then stop.`, { resumeSessionId: bad.session });
+    const restored = await runCase('credential-restored', `${process.env.ACP_FAILURE_EXPLICIT_TURN === '1' ? 'This is a new work order. The previous AUTH_OK-only response instruction applied to the previous turn and is now finished. Execute this new instruction instead.\n\n' : ''}${retryPrevious ? 'Retry the previous failed request now, keeping its original constraints.' : fileInstruction}`, { resumeSessionId: bad.session });
     restored.markerMatches = await readFile(join(ws, marker), 'utf8').then(s => s.trim() === token, () => false);
     restored.sameSession = bad.session ? restored.session === bad.session : null;
     await record(restored, restored.classification === 'completed' && restored.markerMatches && report.lastOwnerGroupGone && (!bad.session || restored.sameSession));

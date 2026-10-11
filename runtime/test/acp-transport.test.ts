@@ -688,7 +688,7 @@ test('ACP root crash reaps a scoped tool in a separate POSIX process group', {sk
 })
 
 
-test('ACP resume separates the current work order from previous turn-only restrictions', async () => {
+test('ACP resume keeps the current request authoritative without breaking retries or project constraints', async () => {
   const f = await fixture('capture-work-order')
   const transport = new AcpTransport({...f,backendId:'deepseek',permissionMode:'full',resumeSessionId:'existing'})
   const workOrder='Create result.txt; preserve the project restrictions.'
@@ -696,7 +696,8 @@ test('ACP resume separates the current work order from previous turn-only restri
     const result=await transport.run({workOrder},{},deadline())
     assert.equal(result.classification,'completed')
     const written=await readFile(join(f.cwd,'work-order'),'utf8')
-    assert.match(written,/Previous turn-specific/u)
+    assert.match(written,/retry or continue earlier work/u)
+    assert.match(written,/retain its applicable constraints/u)
     assert.match(written,/Keep project-wide instructions/u)
     assert.ok(written.endsWith(workOrder))
   } finally {await transport.close();await rm(f.cwd,{recursive:true,force:true})}

@@ -281,7 +281,7 @@ export class AcpTransport implements CodexAppServerTransport {
       method = 'session/prompt'
       const result = await this.#bounded<acp.PromptResponse>(connection.agent.request<acp.PromptResponse, acp.PromptRequest>('session/prompt', {
         sessionId, prompt: [{type: 'text', text: this.#resume === null ? input.workOrder :
-          `New work order for the resumed session:\nComplete the current work order below. Treat this as the current request, whether it retries earlier work or starts a follow-up. Do not repeat a previous token-only answer or acknowledgment unless explicitly requested below. Previous turn-specific response formats do not apply unless this work order repeats them. Safety and permission constraints remain in force. Keep project-wide instructions and existing workspace state.\n\n${input.workOrder}`}],
+          `Current work order for the resumed session:\nRespond to the current work order below. Earlier failed requests are history, not automatically pending work. If this request asks to retry or continue earlier work, use that history and retain its applicable constraints. Keep project-wide instructions, safety, permissions, and existing workspace state.\n\n${input.workOrder}`}],
       }), promptDeadline, deadline.signal)
       if (this.#failure) throw this.#failure
       if (this.#permissionDenied) throw new CodexTransportError('turn_failed', {method: 'session/request_permission', server_code: null, message: 'permission_denied'})
