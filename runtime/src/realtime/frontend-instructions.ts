@@ -50,8 +50,13 @@ const CODING_INSTRUCTIONS_BEFORE = [
   'dispatch 和 cancel 的结果只是宿主事实：code=intake_opened / intake_in_progress 是内部接收回执，尚未派单；不要播报这类回执，不说已转交宿主或正在整理需求；',
   'unknown_project / ambiguous_project / busy_project / capacity 表示任务尚未执行，按事实转述可选项。',
 ] as const
+const GUI_AGENT_INSTRUCTIONS = [
+  '用户明确委托界面操作时，通过 dispatch 交给对应 browser、computer 或 mobile 执行器；instruction 保留完整目标、约束和验收。前台没有直接操作工具不代表下游无法操作。',
+  '用户已经明确目标或授权自行决定后，立即实际调用 dispatch，不先口头承诺、不再询问是否开始。只有目标、设备或页面存在必要歧义时才澄清。调用工具的同一 response 不输出普通文本或音频。',
+  '用户明确停止或取消整个已派发任务时调用 cancel，executor 选择对应执行器；task_id 只有宿主实际提供时才传，不猜测。取消不需要批准待定的操作。仅拒绝当前权限请求时用 confirm(id, accepted=false)。',
+] as const
 const HOST_CONFIRM_INSTRUCTIONS = [
-  '当前存在待确认事项（宿主事实里给出 id）时，优先处理用户对该事项的决定：明确同意、拒绝或取消都必须调用 confirm，',
+  '当前存在待确认事项（宿主事实里给出 id）时，用户明确同意或拒绝该操作必须调用 confirm；用户要求停止整个任务则调用 cancel，不能只拒绝当前操作或继续询问授权。',
   '不得只做口头回应；id 从该宿主事实原样复制，accepted 用 JSON boolean 表示决定：',
   '对当前权限请求，用户表达同意并明确说“始终允许”“始终确认”“永远确认”或“后面同类操作不用再问”，表示请求该事项的会话内授权：调用 confirm(id, accepted=true, scope=session)，不要求用户说出“本会话”。scope 表达用户请求的范围；是否支持由宿主依据 allowed_decisions 中的 acceptForSession 校验。不支持时也不能省略 scope 降级为本次允许，等待宿主返回 approval_scope_unsupported 后说明限制并询问是否仅允许本次。这不代表跨会话永久授权或允许所有操作；宿主确认成功后，如说明结果，只说明该请求支持的会话范围，不承诺所有后续命令免审批。普通“确认/允许”只批准本次，省略 scope；项目操作不得会话授权。“每次都要问我/始终让我确认”表示保留逐次审批，既不是同意也不是拒绝当前操作，不调用 confirm，保持待审批。否定、引用这些说法或询问其含义不构成授权。',
   '同意 accepted=true，明确拒绝或取消 accepted=false；尚未决定、需要考虑或追问原因不代表拒绝，不要调用，也不要声称已确认或已取消。',
@@ -65,7 +70,7 @@ const CODEX_APPROVAL_INSTRUCTIONS = [
   'id 必须从该 host 事实原样复制。',
   '用户表达含糊、询问信息或尚未决定时不得调用，也不得输出普通音频或文本；等待 host 发起澄清；不得朗读 id。',
   '对当前权限请求，明确同意或拒绝时只调用一次 confirm；',
-  '这个 function 是唯一的授权动作；同一 response 不得输出普通音频或文本，也不得调用其他工具，随后等待 host 结果。',
+  '这个 function 是唯一的授权动作；同一 response 不得输出普通音频或文本，也不得调用其他工具，随后等待 host 结果。用户取消整个任务属于停止执行，不是授权：只调用 cancel，不调用 confirm，也不要求再次同意或拒绝。',
 ] as const
 
 const CODING_INSTRUCTIONS_AFTER = [
@@ -135,14 +140,16 @@ export interface FrontendModuleSelection {
   readonly camera?: boolean
   readonly coding?: boolean
   readonly knowledge?: boolean
+  readonly gui?: boolean
 }
 export function frontendInstructions(modules: FrontendModuleSelection = {}, executorApproval = false, language: PromptLanguage = 'zh-CN'): string {
   return [
     NOVA_VOICE_IDENTITY,
     ...FRONTEND_INSTRUCTIONS_BEFORE_CODEX_APPROVAL,
     ...(modules.coding === false ? [] : CODING_INSTRUCTIONS_BEFORE),
-    ...(modules.coding === false && modules.camera === false ? [] : HOST_CONFIRM_INSTRUCTIONS),
-    ...(executorApproval && modules.coding !== false ? CODEX_APPROVAL_INSTRUCTIONS : []),
+    ...(modules.gui === true ? GUI_AGENT_INSTRUCTIONS : []),
+    ...(modules.coding === false && modules.camera === false && modules.gui !== true ? [] : HOST_CONFIRM_INSTRUCTIONS),
+    ...(executorApproval && (modules.coding !== false || modules.gui === true) ? CODEX_APPROVAL_INSTRUCTIONS : []),
     ...(modules.coding === false ? [] : CODING_INSTRUCTIONS_AFTER),
     ...(modules.camera === false ? [] : VISION_INSTRUCTIONS),
     ...FRONTEND_INSTRUCTIONS_AFTER_CODEX_APPROVAL,

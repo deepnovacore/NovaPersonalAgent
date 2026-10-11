@@ -20,7 +20,7 @@ const user = () => ({instruction: 'Open settings', originalUserText: 'Open setti
   sessionEpoch: 1, acceptedUserInputRevision: 1, stillWanted: () => true})
 async function setup(t: TestContext, runner: typeof runMobileIos) {
   const root = await mkdtemp(join(tmpdir(), 'nova-mobile-test-'))
-  const config = {...loadMobileConfig(env), lockRoot: root}
+  const config = {...loadMobileConfig(env), lockRoot: root, deviceId: root}
   const clock = new RealClock()
   const approvals = new HostApprovalController({clock, idFactory: randomUUID})
   const executor = new MobileExecutor(config, approvals, runner)
@@ -111,13 +111,13 @@ for (const decision of ['accept', 'decline', 'revoke'] as const) test(`mobile ${
   const active = h.executor.dispatch('run', request, h.context)
   const approvalId = await pending(h.approvals)
   assert.equal(h.approvals.view.executorIdentity?.executor, 'mobile')
-  assert.equal(h.approvals.view.work?.work_id, request.run_id)
+  assert.equal(h.approvals.view.work?.work_id, h.context.delegate.delegate_id)
   assert.equal(writes, 0)
   h.approvals.acceptDecision({approvalId, decision: decision === 'decline' ? 'decline' : 'accept'})
   if (decision === 'revoke') h.approvals.invalidate('changed')
   const result = await active
   assert.equal(writes, decision === 'accept' ? 1 : 0)
-  assert.equal(result.outcome, decision === 'accept' ? 'ok' : 'refused')
+  assert.equal(result.outcome, decision === 'accept' ? 'unknown' : 'refused')
   assert.equal(result.trust, 'untrusted_external')
   assert.equal(result.content.verified, false)
   assert.equal(result.content.effects, 'unknown')

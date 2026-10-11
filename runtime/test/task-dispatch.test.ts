@@ -63,7 +63,7 @@ test('deferred task planning survives foreground clear but takeover fences every
  }
 })
 
-import {dispatchTurn,realtimeServiceHarness} from './support/realtime-service-harness.js'
+import {dispatchTurn,realtimeServiceHarness,offerCodexCommand,finishExecutorApprovalQuestion,beginExecutorApprovalCarrier} from './support/realtime-service-harness.js'
 test('production task tool declares Nova-only work from final user input and validates selected sources',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'task-model-'))
  const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
@@ -741,4 +741,62 @@ test('each work records its executor and one session; the first session becomes 
   await tasks.bindWork({task_id:other.id,control_revision:0,goal_revision:0},'w4','s1')
   assert.equal(tasks.get(task.id).primary_session_id,undefined);assert.equal(tasks.get(other.id).primary_session_id,'s1')
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('public cancel persists the unique scoped task and refuses ambiguous or foreign tasks', async () => {
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-public-cancel-'))
+ const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
+ const invoke=async(name:'cancel'|'task',args:Parameters<typeof dispatchTurn>[2],id:string)=>{
+  const {service}=realtimeServiceHarness('pipeline',{agent:true,taskHost:{tasks,conversation_id:'chat:main',cancel:async(request,fence)=>tasks.cancel(request,fence,{kind:'nova'})}})
+  await service.connect();try{return await dispatchTurn(service,name,args,id)}finally{await service.close()}
+ }
+ try{
+  const declare=(id:string,conversation_id='chat:main')=>tasks.delegate(id,{conversation_id,execution_route:'codex',goal:id,acceptance:[],origin_ref:'conversation:1'})
+  const first=await declare('first')
+  assert.equal((await invoke('cancel',{executor:'codex'},'stop-first')).accepted,true)
+  assert.equal(tasks.get(first.id).phase,'cancelled')
+  const second=await declare('second'),third=await declare('third'),foreign=await declare('foreign','chat:other')
+  assert.equal((await invoke('cancel',{executor:'codex'},'ambiguous')).accepted,false)
+  assert.equal((await invoke('cancel',{executor:'codex',task_id:foreign.id},'foreign')).accepted,false)
+  assert.equal((await invoke('cancel',{executor:'codex',task_id:second.id},'stop-second')).accepted,true)
+  assert.equal(tasks.get(second.id).phase,'cancelled');assert.equal(tasks.get(third.id).phase,'queued');assert.equal(tasks.get(foreign.id).phase,'queued')
+  await tasks.cancel('finish-third',{task_id:third.id,control_revision:0,goal_revision:0},{kind:'nova'})
+  assert.equal((await invoke('cancel',{executor:'codex'},'no-owned-task')).accepted,false)
+  assert.equal(tasks.get(foreign.id).phase,'queued')
+  const old=await tasks.delegate('old-generation',{conversation_id:'chat:main',conversation_generation:7,execution_route:'codex',goal:'old',acceptance:[],origin_ref:'conversation:1'})
+  assert.equal((await invoke('task',{operation:'cancel',task_id:old.id,source_refs:[]},'old-task-cancel')).accepted,false)
+  assert.equal((await invoke('cancel',{executor:'codex'},'old-public-cancel')).accepted,false)
+  assert.equal(tasks.get(old.id).phase,'queued')
+ }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('GUI-only frontend retains dispatch, approval and whole-task cancellation rules', async () => {
+ const {frontendInstructions}=await import('../src/realtime/frontend-instructions.js')
+ const prompt=frontendInstructions({coding:false,camera:false,gui:true},true)
+ assert.match(prompt,/立即实际调用 dispatch/u)
+ assert.match(prompt,/只有本轮用户明确同意/u)
+ assert.match(prompt,/取消整个任务属于停止执行/u)
+ assert.match(prompt,/当前代码执行能力不可用/u)
+})
+
+test('a pending approval does not block a user-origin whole-task cancellation', async () => {
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'task-approval-cancel-'))
+ const tasks=new TaskService(join(dir,'tasks.json'));await tasks.open()
+ const task=await tasks.delegate('pending',{conversation_id:'chat:main',execution_route:'codex',goal:'pending',acceptance:[],origin_ref:'conversation:1'})
+ const fixture=realtimeServiceHarness('pipeline',{withExecutorApproval:true,taskHost:{tasks,conversation_id:'chat:main',cancel:async(request,fence)=>{await tasks.cancel(request,fence,{kind:'nova'});fixture.executorApproval!.invalidate('task_cancelled')}}})
+ const {service,executorApproval}=fixture;assert.ok(executorApproval)
+ try{
+  await service.connect();const waiting=offerCodexCommand(executorApproval)
+  await finishExecutorApprovalQuestion(service,'approval-question')
+  await beginExecutorApprovalCarrier(service,{itemId:'stop-user',responseId:'stop-response'})
+  await service.handleEvent({kind:'user_transcript_final',session_epoch:1,item_id:'stop-user',text:'取消整个任务'})
+  await service.handleEvent({kind:'tool_call_ready',session_epoch:1,response_id:'stop-response',call_id:'stop-call',item_id:'stop-tool',name:'cancel',arguments:{executor:'codex'}})
+  await service.handleEvent({kind:'response_terminal',session_epoch:1,response_id:'stop-response',status:'completed',reason:''})
+  assert.equal(service.toolCallAcceptances().find(item=>item.call_id==='stop-call')?.acceptance.accepted,true,JSON.stringify({calls:service.toolCallAcceptances(),diagnostics:fixture.diagnostics,telemetry:fixture.telemetry}))
+  assert.equal(tasks.get(task.id).phase,'cancelled');assert.deepEqual(await waiting,{decision:'decline'})
+  const next=await tasks.delegate('next',{conversation_id:'chat:main',execution_route:'codex',goal:'next',acceptance:[],origin_ref:'conversation:1'})
+  await service.handleEvent({kind:'tool_call_ready',session_epoch:1,response_id:'stop-response',call_id:'late-stop',item_id:'late-tool',name:'cancel',arguments:{executor:'codex'}})
+  assert.equal(service.toolCallAcceptances().find(item=>item.call_id==='late-stop'),undefined)
+  assert.equal(tasks.get(next.id).phase,'queued')
+ }finally{await service.close();await tasks.close();await rm(dir,{recursive:true,force:true})}
 })

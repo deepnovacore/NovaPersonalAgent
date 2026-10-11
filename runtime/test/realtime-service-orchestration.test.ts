@@ -753,3 +753,14 @@ test('fatal provider errors settle an admitted user response through the service
     assert.equal(session.providerIdle, true)
   } finally { await service.close() }
 })
+ test('terminal lifecycle notification survives a failed continuation delivery', async () => {
+  const notifications: string[] = []
+  const {service} = realtimeServiceHarness('pipeline', {onProviderEvent: event => {notifications.push(event.kind)}})
+  await service.connect()
+  await twoTurns(service)
+  await service.handleEvent({kind: 'response_started', session_epoch: 1, response_id: 'finished'})
+  await service.handleEvent({kind: 'user_transcript_final', session_epoch: 1, item_id: 'user-item-1', text: 'test'})
+  service.driveContinuations = () => Promise.reject(new Error('continuation delivery failed'))
+  await assert.rejects(service.handleEvent({kind: 'response_terminal', session_epoch: 1, response_id: 'finished', status: 'completed', reason: ''}), /continuation delivery failed/u)
+  assert.deepEqual(notifications, ['response_terminal'])
+})

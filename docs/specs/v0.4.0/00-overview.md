@@ -3,7 +3,7 @@
 > 本系列描述的是下一个版本的计划，不在 v0.3.0 发布范围内。
 
 2026-09-11 版本拆分：M8 及之后从 v0.3.0 移入本版。**2026-09-12 调整**：M8 邮件/日历与飞书 IM 拉回 v0.3.0
-（见 [v0.3.0 04 卷](../v0.3.0/04-sources-and-connectors.md) 的 M8-Mail / M8-IM）；本版只保留 M9 执行器。当前只有规划，不声明实现或发布。
+（见 [v0.3.0 04 卷](../v0.3.0/04-sources-and-connectors.md) 的 M8-Mail / M8-IM）；本版只保留 M9 执行器。当前已有开发实现与部分验收记录，整体退出条件尚未完成，不声明正式发布。
 
 - M9-C：Kimi Code + pi agent；见 [02](02-coding-and-gui-executors.md)。
 - M9-G：GUI / AutoGLM example；见 [02](02-coding-and-gui-executors.md)。

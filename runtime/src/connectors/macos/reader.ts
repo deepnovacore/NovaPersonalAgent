@@ -5,9 +5,9 @@ import {z} from 'zod'
 import {snapshotRegularFile} from '../../storage/native-resource-snapshot.js'
 import {ComposioFailure} from '../composio/client.js'
 const record=z.record(z.string(),z.unknown())
-/** Fixed desktop resources only; callers validate their readonly command protocol. */
+/** Fixed native resources only; callers validate their command protocol. */
 export class MacNativeReader {
- constructor(readonly resourcesRoot:string,readonly resource:'macos_calendar'|'macos_mail'){}
+ constructor(readonly resourcesRoot:string,readonly resource:'macos_calendar'|'macos_mail'|'macos_gui'){}
  #executable():string {
   if(process.platform!=='darwin'||!isAbsolute(this.resourcesRoot)||realpathSync(this.resourcesRoot)!==this.resourcesRoot)throw new ComposioFailure('native_unavailable')
   const manifest=z.object({schema_version:z.literal(1),target:z.literal('darwin-'+process.arch),resources:z.array(record).max(256)}).parse(JSON.parse(snapshotRegularFile(resolve(this.resourcesRoot,'native-resources-v1.json'),1024*1024).bytes.toString('utf8')))
@@ -22,10 +22,10 @@ export class MacNativeReader {
   const body=JSON.stringify(input);if(Buffer.byteLength(body)>65536)throw new ComposioFailure('request_too_large')
   const executable=this.#executable()
   return new Promise((resolve,reject)=>{
-   const child=spawn(executable,[],{shell:false,stdio:['pipe','pipe','ignore'],signal:AbortSignal.any([signal,AbortSignal.timeout(30000)])})
+   const child=spawn(executable,[],{shell:false,stdio:['pipe','pipe','ignore'],...(this.resource==='macos_gui'?{env:{PATH:process.env.PATH,HOME:process.env.HOME}}:{}),signal:AbortSignal.any([signal,AbortSignal.timeout(30000)])})
    let bytes=0;const chunks:Buffer[]=[]
    child.on('error',()=>reject(new ComposioFailure('native_unavailable')))
-   child.stdout.on('data',(chunk:Buffer)=>{bytes+=chunk.length;if(bytes>2*1024*1024){child.kill();reject(new ComposioFailure('response_too_large'))}else chunks.push(chunk)})
+   child.stdout.on('data',(chunk:Buffer)=>{bytes+=chunk.length;if(bytes>(this.resource==='macos_gui'?50:2)*1024*1024){child.kill();reject(new ComposioFailure('response_too_large'))}else chunks.push(chunk)})
    child.on('close',code=>{try{if(code!==0)throw new ComposioFailure('native_unavailable');const result=record.parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));if(result.error)throw new ComposioFailure(z.enum(['native_unavailable','permission_denied','calendar_unavailable','mailbox_unavailable','snapshot_expired','response_too_large','timeout','scope_denied','invalid_request']).catch('native_unavailable').parse(result.error));resolve(result)}catch(error){reject(error instanceof ComposioFailure?error:new ComposioFailure('invalid_contract'))}})
    child.stdin.on('error',()=>{ /* child failure is reported on close/error */ });child.stdin.end(body)
   })

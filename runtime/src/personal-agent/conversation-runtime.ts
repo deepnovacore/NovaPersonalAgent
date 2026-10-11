@@ -36,7 +36,7 @@ export async function maySendPreparedMemory(memory: PersonalMemoryResource|undef
 }
 
 /** Reuses deployment resources while allocating a separate causal runtime, provider and session. */
-export function conversationRuntimeFactory(options:AssemblyOptions & Pick<RealtimeAssemblyOptions,'codexResource'|'onDiagnostic'|'onAudioFrame'|'onAudioClear'|'onAudioAlert'|'onAudioTerminal'|'nextPlaybackGeneration'|'onUsage'> & {
+export function conversationRuntimeFactory(options:AssemblyOptions & Pick<RealtimeAssemblyOptions,'codexResource'|'onDiagnostic'|'onAudioFrame'|'onAudioClear'|'onAudioAlert'|'onAudioTerminal'|'nextPlaybackGeneration'|'onUsage'|'additionalAgentControllers'|'executorApproval'> & {
  onExecutorProgress?:(progress:ExecutorProgress,result?:ExecutorResult)=>void;
  createTextProvider?:typeof buildCascadedTextProvider;
  createVoiceProvider?:typeof buildConversationVoiceProvider;
@@ -72,15 +72,15 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const core=buildAssembly({...options,taskHost:true,sharedResources:true,cameraModuleEnabled:false,conversationId:conversation.id+':'+conversation.generation,
    ...(options.blackboard?{blackboard:{...options.blackboard,path:options.blackboard.path+'.conversation-'+suffix}}:{}),
    ids:{next:namespace=>namespace+'-'+randomUUID()},
-   ...(options.codexResource?{executors:[options.codexResource.adapter],agentDescriptors:options.codexResource.agentDescriptor?[options.codexResource.agentDescriptor]:[]}:{}),
+   ...(options.codexResource?{executors:[...(options.executors??[]),options.codexResource.adapter],agentDescriptors:[...(options.agentDescriptors??[]),...(options.codexResource.agentDescriptor?[options.codexResource.agentDescriptor]:[])]}:{}),
   })
   const refreshCodingTarget=()=>{if(!lifetime.aborted)void codingTarget?.refreshWork().catch(()=>options.onDiagnostic?.('[runtime-diagnostic] coding_target_update_failed'))}
   const unsubscribeTarget=targetPort?(options.codexResource!.adapter as ProjectExecutorAdapter).observeProjectView(refreshCodingTarget):undefined
   const waitingListeners=new Set<()=>void>()
   const notifyWaiting=()=>{for(const listener of waitingListeners)listener()}
-  const broker=options.codexResource?.approvalController
+  const broker=options.executorApproval??options.codexResource?.approvalController
   const approval=broker?scopeApprovalController(broker,view=>!!view.work&&core.runtime.inFlightDelegate(view.work.work_id)!==undefined):undefined
-  const unsubscribeApproval=approval?.observe(view=>{options.host.recordTaskApproval(conversation.id,conversation.generation,view);notifyWaiting();if(view.work)void options.host.rememberWorkOwner(view.work.work_id,conversation.id,view.pending_approval_id).catch(()=>{ /* durable projection retried on work event */ });const manifest=options.codexResource!.adapter.manifest;emit(JSON.parse(executorApprovalMessage(view,core.runtime.clock.now(),{executor:manifest.name,display_name:manifest.display_name})) as Record<string,unknown>)})
+  const unsubscribeApproval=approval?.observe(view=>{options.host.recordTaskApproval(conversation.id,conversation.generation,view);notifyWaiting();if(view.work)void options.host.rememberWorkOwner(view.work.work_id,conversation.id,view.pending_approval_id).catch(()=>{ /* durable projection retried on work event */ });const identity=view.executorIdentity??{executor:options.codexResource?.adapter.manifest.name??'agent',display_name:options.codexResource?.adapter.manifest.display_name??'Agent'};emit(JSON.parse(executorApprovalMessage(view,core.runtime.clock.now(),identity)) as Record<string,unknown>)})
   const memoryConsumerFingerprint=configuredMemoryConsumer(options.settings,mode)
   const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings:options.settings,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,...(captureFrame?{captureFrame}:{}),executorApproval:approval!==undefined,...(options.onUsage?{onUsage:options.onUsage}:{}),...(options.telemetry?{telemetry:options.telemetry}:{}),...(mode==='text'&&options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await graph.retrieval.recall(query,{scope:'any',limit:3,signal,consumer:memoryConsumerFingerprint??''});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await graph.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();return prerecallContext(query,current)}}}:{})})
   let pending:{resolve:(result:{assistant:string;turn_id?:string})=>void;reject:(error:unknown)=>void}|undefined
@@ -121,7 +121,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   let sourceTodo:{id:string;version:number}|undefined,sourceOrigin:string|undefined,sourceTodoTurns=0
   {const users=conversation.messages.filter(message=>message.role==='user').slice(-SOURCE_TODO_TURNS),index=users.findLastIndex(message=>message.source_todo);if(index>=0){sourceTodo={...users[index]!.source_todo!};sourceTodoTurns=SOURCE_TODO_TURNS-(users.length-index)}}
   const sourceTodoCurrent=()=>{if(!sourceTodo)return false;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);return todo?.version===sourceTodo.version&&todo.status!=='done'&&todo.status!=='cancelled'&&!options.host.tasks.list().some(task=>task.todo_ref?.id===sourceTodo!.id)}
-  const graph=buildRealtimeAssembly({core,provider,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
+  const graph=buildRealtimeAssembly({core,provider,...(options.additionalAgentControllers?{additionalAgentControllers:options.additionalAgentControllers}:{}),memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
    ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(conversation.id!=='chat:proactive'||options.host.conversationSnapshot().voice_id===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
@@ -178,7 +178,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(!grant.stillWanted())return {accepted:false,delegate_id:null}
    return core.runtime.dispatchTaskExternal({executor:adapter.manifest.name,op:target.active?'steer':'run',origin_ref:grant.origin_ref,request:target.active?{instruction:text,project:target.project,session_id:target.session_id,work_id:target.work_id!}:{work_order:text,project:target.project,session_id:target.session_id,session:'latest'}},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant,receipt)
   }
-  const taskVerifier=core.personalAgentConfig?.taskVerifier??new GatewayTaskVerifier({gateway:core.gateway,model:options.settings.support_model})
+  const taskVerifier=core.taskVerifier??core.personalAgentConfig?.taskVerifier??new GatewayTaskVerifier({gateway:core.gateway,model:options.settings.support_model})
   const detachTaskRuntime=options.host.attachTaskRuntime(conversation.id,conversation.generation,{
    recover:async task=>{
     const [channel,sequence]=parseMemoryRef(task.origin_ref);if(!core.runtime.memory.channels.get(channel)?.getBySeq(sequence))return 'task_origin_unavailable';
@@ -197,14 +197,16 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     return acknowledged
    },
    cancelTask:taskId=>{for(const [itemId,fence] of taskHostItems)if(fence.task_id===taskId)taskHostItems.delete(itemId);for(const [responseId,tasks] of taskResponses)if(tasks.has(taskId))void provider.cancelResponse(responseId,new AbortController().signal).catch(()=>options.onDiagnostic?.('[runtime-diagnostic] task_response_cancel_failed'))},
-   cancel:workId=>{core.runtime.cancelPendingDispatch(workId);adapter?.taskPort?.cancelTask(workId)},
+   cancel:workId=>{core.runtime.cancelWork(workId);adapter?.taskPort?.cancelTask(workId)},
    dispatch:async(grant,instruction,sessionId)=>{
     try{options.host.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}
     const bound=options.host.tasks.get(grant.fence.task_id),sessions=bound.session_ids
     // Continue where the task already runs; switching sessions has to be explicit.
     const sameExecutor=(session:string)=>!bound.execution_route||(bound.works??[]).some(work=>work.session_id===session&&work.executor===bound.execution_route)
     const target=sessionId??(bound.primary_session_id&&sessions.includes(bound.primary_session_id)&&sameExecutor(bound.primary_session_id)?bound.primary_session_id:sessions.length===1&&sameExecutor(sessions[0]!)?sessions[0]:undefined)
-    if(target){const result=await dispatchTarget(grant,target,instruction);if(!result.accepted)throw new TaskExecutionRejected('executor_admission_refused');return result}
+    const guiRoute = ['browser', 'computer', 'mobile'].includes(bound.execution_route ?? '')
+    if (guiRoute && sessionId) throw new TaskExecutionRejected('executor_session_unavailable')
+    if(target && !guiRoute){const result=await dispatchTarget(grant,target,instruction);if(!result.accepted)throw new TaskExecutionRejected('executor_admission_refused');return result}
     const task=options.host.tasks.get(grant.fence.task_id)
     if(task.execution_route&&task.execution_route!=='nova'){
      if(!graph.service.taskRoutes().includes(task.execution_route))throw new TaskExecutionRejected('task_executor_unavailable')

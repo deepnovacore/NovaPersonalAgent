@@ -1203,6 +1203,7 @@ export class ToolContinuations {
         else {
           task=host.tasks.get(args.task_id)
           if(task.conversation_id!==host.conversation_id)throw Error('task_not_owned')
+          if(args.operation==='cancel'&&(task.conversation_generation??0)!==(host.conversation_generation??0))throw Error('task_not_owned')
           const fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
           if(args.operation==='revise')task=await host.tasks.reviseGoal(event.call_id,fence,{kind:'nova'},args.goal,args.acceptance)
           else if(args.operation==='return'){task=await host.tasks.returnFromUserOrigin(event.call_id,fence,{conversation_id:host.conversation_id,conversation_generation:host.conversation_generation??0,origin_ref:user.origin_ref},()=>authority.stillWanted()&&(host.isCurrent?.()??true));void host.wake?.(task.id)}
@@ -1249,6 +1250,23 @@ export class ToolContinuations {
     const authority = this.#ports.currentUserTurn(event, originRef)
     if (authority === null) return this.#refusalAcceptance(event, 'superseded', '{"code":"superseded"}')
     const revision = authority.acceptedUserInputRevision
+    if (event.name === CANCEL_TOOL && this.#ports.taskHost) {
+      const host = this.#ports.taskHost
+      if (host.isCurrent?.() === false) return this.#refusalAcceptance(event, 'task_frontend_stale', '{"code":"task_frontend_stale"}')
+      const candidates = host.tasks.list().filter(task => task.conversation_id === host.conversation_id
+        && (task.conversation_generation ?? 0) === (host.conversation_generation ?? 0) && task.execution_route === executor
+        && task.phase !== 'completed' && task.phase !== 'cancelled')
+      const selected = event.arguments.task_id === undefined ? candidates.length === 1 ? candidates[0] : undefined
+        : candidates.find(task => task.id === event.arguments.task_id)
+      if (selected) {
+        if (!host.cancel) return this.#refusalAcceptance(event, 'task_execution_unavailable', '{"code":"task_execution_unavailable"}')
+        try {await host.cancel(event.call_id, {task_id: selected.id, control_revision: selected.control_revision, goal_revision: selected.goal_revision})}
+        catch {return this.#refusalAcceptance(event, 'task_cancel_unconfirmed', '{"code":"task_cancel_unconfirmed"}')}
+        return {...this.#refusalAcceptance(event, 'accepted', canonicalJson({code: 'accepted', task_id: selected.id})), accepted: true, inline_fulfilled: true}
+      }
+      if (event.arguments.task_id !== undefined || candidates.length > 1) return this.#refusalAcceptance(event, 'ambiguous_task', canonicalJson({code: 'ambiguous_task', task_ids: candidates.map(task => task.id)}))
+      return this.#refusalAcceptance(event, 'not_running', '{"code":"not_running"}')
+    }
     let taskContext:TaskDispatchContext|undefined
     if(event.name===DISPATCH_TOOL&&event.arguments.task_id!==undefined){
       try{

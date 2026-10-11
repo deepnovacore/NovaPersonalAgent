@@ -39,6 +39,8 @@ async function reclaimable(path: string): Promise<string | null> {
     const raw = await readFile(join(path, OWNER), 'utf8')
     const owner = record(JSON.parse(raw))
     if (!validPid(owner.hostPid) || alive(owner.hostPid)) return null
+    // Windows has no POSIX process-group probe; orphaned drivers require explicit recovery.
+    if (process.platform === 'win32' && owner.devicePid !== undefined) return null
     if (owner.devicePid !== undefined && (!validPid(owner.devicePid) || alive(owner.devicePid, true))) return null
     return raw
   } catch {

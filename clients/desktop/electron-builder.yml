@@ -83,6 +83,8 @@ mac:
   extraResources:
     - from: ../../runtime/scripts/pair-device.swift
       to: pair-device.swift
+    - from: build/native/macos_gui
+      to: native/macos_gui
     - from: build/native/macos_mail
       to: native/macos_mail
     - from: build/native/macos_calendar

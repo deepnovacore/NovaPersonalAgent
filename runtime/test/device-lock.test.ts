@@ -59,3 +59,12 @@ test('concurrent contenders for one stale lock produce exactly one owner', async
   assert.equal(await releaseDeviceLock(winner.lock), true)
   assert.deepEqual(await readdir(dir), [])
 })
+
+test('a Windows orphan cannot reclaim a recorded driver using a POSIX group probe', async t => {
+  const dir = await root(t)
+  await staleLock(dir, {devicePid: DEAD_PID})
+  const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!
+  Object.defineProperty(process, 'platform', {...descriptor, value: 'win32'})
+  try {assert.deepEqual(await acquireDeviceLock(dir, 'android', 'serial', 'new'), {ok: false, reason: 'device_busy'})}
+  finally {Object.defineProperty(process, 'platform', descriptor)}
+})

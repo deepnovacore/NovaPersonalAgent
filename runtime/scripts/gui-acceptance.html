@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>Nova GUI Live Acceptance</title>
+<style>body{font:24px system-ui;margin:70px auto;max-width:900px;color:#163044;background:#f2f7fa}input,button{font:24px system-ui;padding:16px;border:2px solid #50798c;border-radius:10px}button{background:#0b6876;color:white;margin-left:20px}#status{margin:30px 0;padding:25px;background:white;border-radius:10px}.spacer{height:1200px}#bottom{padding:35px;background:#d1ede2}</style>
+<h1>Nova GUI Live Acceptance</h1><p>按钮仅更新本机测试状态；截图由配置的视觉模型处理。</p>
+<label>验收文本：<input id="entry" placeholder="输入 Nova 实机验收" autocomplete="off"></label><button id="confirm">确认</button>
+<div id="status">等待操作</div><div class="spacer"><p style="padding-top:500px">继续向下滚动，完成验收按钮在页面底部。</p></div><div id="bottom">滚动验收目标<button id="finish">完成验收</button></div>
+<script>
+const clicks=[];document.addEventListener('pointerdown',e=>{clicks.push({x:e.clientX,y:e.clientY,target:e.target.id});if(clicks.length>12)clicks.shift();report()});
+const report=()=>fetch('/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:entry.value,confirmed:statusBox.dataset.confirmed==='yes',finished:statusBox.dataset.finished==='yes',scrollY,clicks})});
+const statusBox=document.getElementById('status'),entry=document.getElementById('entry');
+entry.addEventListener('input',report);document.getElementById('confirm').onclick=()=>{statusBox.textContent='已确认：'+entry.value;statusBox.dataset.confirmed='yes';report()};document.getElementById('finish').onclick=()=>{statusBox.dataset.finished='yes';document.getElementById('bottom').firstChild.textContent='验收完成：'+entry.value;report()};addEventListener('scroll',report);report();
+</script>

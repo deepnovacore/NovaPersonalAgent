@@ -100,6 +100,7 @@ export interface AssemblyOptions {
 }
 
 export interface Assembly {
+  readonly taskVerifier?: Pick<GatewayTaskVerifier, 'evaluateTask'>
   readonly settings: Settings
   readonly personalAgentConfig?: {
     path: string
@@ -243,7 +244,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     throw new AssemblyError(`built-in executor cannot be overridden: ${suppliedReserved?.manifest.name ?? configuredReserved}`)
   }
   const watchModel = stripLikePython(settings.watch_model ?? '') || settings.fast_model
-  const watchConnection = cameraModuleEnabled ? resolveWatchModelConnection(settings) : null
+  const watchConnection = cameraModuleEnabled || settings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)) ? resolveWatchModelConnection(settings) : null
   const watchGateway = watchConnection === null ? gateway : new OpenAIModelGateway({
     ...watchConnection, clock, ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })
@@ -311,7 +312,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     proactivityPreset: settings.proactivity_preset,
   })
   const writer = new GatewayPersonalWriter({gateway,model:settings.support_model})
-  const taskVerifier = new GatewayTaskVerifier({gateway,model:settings.support_model})
+  const taskVerifier = new GatewayTaskVerifier({gateway,model:settings.support_model,vision:{gateway:watchGateway,model:watchModel}})
   const jev = {apiKey:settings.openrouter_api_key ?? ''}
   const compressor = new GatewayCompressor({gateway, model: settings.compressor_model})
 
@@ -390,7 +391,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
     return pending
   }
   return {
-    settings,
+    settings, taskVerifier,
     ...(options.blackboard===undefined?{}:{personalAgentConfig: {path: options.blackboard.path + '.personal.json', userScope: settings.blackboard_owner_id, newsLanguage: settings.news_language, taskVerifier, models: {
       generateProfile: writer.generateProfile,
       generateDigests: writer.generateDigests,

@@ -105,7 +105,8 @@ export function projectExecutorEvent(
     level = monitorHitProgressLevel(policy)
     text = `${label} 发现需要关注的变化。`
   } else {
-    const outcome = event.kind === 'deadline' ? 'unknown' : event.payload.outcome
+    const awaitingVerification = event.kind === 'handoff' && event.payload.content.code === 'model_finished' && event.payload.content.verified === false
+    const outcome = event.kind === 'deadline' || awaitingVerification ? 'unknown' : event.payload.outcome
     phase = outcome === 'ok' ? 'completed' : outcome
     const content = event.kind === 'handoff' ? event.payload.content : {}
     const superseded = outcome === 'refused' && content !== null && typeof content === 'object' && !Array.isArray(content)
@@ -114,7 +115,7 @@ export function projectExecutorEvent(
       && content.code === 'resume_unavailable'
     const usageLimited = content !== null && typeof content === 'object' && !Array.isArray(content)
       && (content.code === 'usage_limit_exceeded' || content.error === 'usage_limit_exceeded')
-    const fallback = outcome === 'ok'
+    const fallback = awaitingVerification ? `${label} 执行已结束，等待任务验证。` : outcome === 'ok'
       ? `${label} ${monitor ? '监控已停止' : '已完成任务'}。`
       : resumeFailed ? `${label} 原会话无法恢复，任务未启动。`
       : usageLimited

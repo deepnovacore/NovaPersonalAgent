@@ -4,12 +4,9 @@ import {execFile} from 'node:child_process'
 import {basename} from 'node:path'
 import {promisify} from 'node:util'
 import {setTimeout as delay} from 'node:timers/promises'
-import {Agent, z, type DeviceAction} from '@midscene/core'
+import {z, type DeviceAction} from '@midscene/core'
 import {actionTapParamSchema, actionScrollParamSchema, type AbstractInterface} from '@midscene/core/device'
-import {setLogDirectoryResolver} from '@midscene/shared/logger'
-
-// The SDK writes raw model traffic even with reports disabled. Its public resolver disables these file sinks.
-setLogDirectoryResolver(() => '/dev/null')
+import {runGui, validGuiConfig, logicalSwipeDistance, type GuiProgress} from './gui-runner.js'
 
 export interface MobileIosConfig {
   deviceId: string
@@ -24,12 +21,10 @@ export interface MobileIosConfig {
   settleMs?: number
   lockRoot: string
 }
-export interface MobileIosProgress {
-  phase: 'planning' | 'action_pending' | 'action_returned' | 'model_finished'
-  steps: number
-  actionName?: string
-}
+export type MobileIosProgress = GuiProgress
 interface RunOptions {
+  beforeWrite?: () => void
+  capture?: (image: string, steps: number) => void
   signal: AbortSignal
   approve: (actionName: string, params: unknown) => Promise<boolean>
   progress: (event?: MobileIosProgress) => void
@@ -38,12 +33,7 @@ const exec = promisify(execFile)
 const record = (value: unknown): Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
 
-/** AutoGLM emits distance in screenshot pixels; the SDK only rescales locator centers. */
-export function logicalSwipeDistance(distance: number, screenshotToLogicalRatio: number): number {
-  if (!Number.isFinite(distance) || distance <= 0 || !Number.isFinite(screenshotToLogicalRatio)
-    || screenshotToLogicalRatio <= 0) throw new Error('needs_user_action')
-  return distance / screenshotToLogicalRatio
-}
+export {logicalSwipeDistance} from './gui-runner.js'
 
 /** Only positively acknowledged ADB refusals are safe to release; transport ambiguity wins over cancellation. */
 export function mobileWriteFailure(error: unknown, android: boolean, stopped?: string): string {
@@ -69,27 +59,19 @@ export async function runMobileIos(config: MobileIosConfig, instruction: string,
   const emit = (phase: MobileIosProgress['phase'], actionName?: string) => {
     options.progress({phase, steps, ...(actionName ? {actionName} : {})})
   }
-  let agent: Agent | undefined
   let configured = false
   try {
     check()
     const settleMs = config.settleMs ?? 4000
     if (!Number.isSafeInteger(settleMs) || settleMs < 0 || settleMs > 30_000) stop('invalid_configuration')
     const endpoint = new URL(config.wdaUrl)
-    const modelEndpoint = new URL(config.baseUrl)
-    // ponytail: simulator identity is verifiable locally; physical iOS needs a verified USB/WDA binding first.
+    // Borrow only a verified simulator runner or explicit USB iproxy binding.
     const android = config.deviceType === 'android'
-    if ((!android && (config.deviceType !== 'ios-simulator' || process.platform !== 'darwin'
-      || !/^[A-Fa-f0-9-]{36}$/u.test(config.deviceId)
+    if ((!android && (!['ios-simulator', 'ios'].includes(config.deviceType) || process.platform !== 'darwin'
+      || !(config.deviceType === 'ios-simulator' ? /^[A-Fa-f0-9-]{36}$/u : /^(?:[A-Fa-f0-9]{40}|[A-Fa-f0-9]{8}-[A-Fa-f0-9]{16})$/u).test(config.deviceId)
       || endpoint.protocol !== 'http:' || !['localhost', '127.0.0.1'].includes(endpoint.hostname)
       || endpoint.pathname !== '/' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash))
-      || modelEndpoint.username || modelEndpoint.password || modelEndpoint.search || modelEndpoint.hash
-      || (modelEndpoint.protocol !== 'https:' && !(modelEndpoint.protocol === 'http:'
-        && ['localhost', '127.0.0.1', '[::1]'].includes(modelEndpoint.hostname)))
-      || !['auto-glm', 'auto-glm-multilingual'].includes(config.modelFamily)
-      || !config.model.trim() || !config.apiKey || !instruction.trim() || instruction.length > 4000
-      || !Number.isSafeInteger(config.maxSteps) || config.maxSteps < 1 || config.maxSteps > 100
-      || !Number.isSafeInteger(config.budgetMs) || config.budgetMs < 1 || config.budgetMs > 1_800_000) stop('invalid_configuration')
+      || !validGuiConfig(config, instruction)) stop('invalid_configuration')
     const adb = android ? await createAndroidDevice(config.deviceId, controller.signal) : undefined
     const ios = android ? undefined : await (async () => {
       const port = Number(endpoint.port || 80)
@@ -97,17 +79,25 @@ export async function runMobileIos(config: MobileIosConfig, instruction: string,
         check()
         return (await exec(file, args, {timeout: 5000, signal: controller.signal, maxBuffer: 1024 * 1024})).stdout.trim()
       }
+      const simulator = config.deviceType === 'ios-simulator'
+      if (simulator) {
       const listing = record(JSON.parse(await command('/usr/bin/xcrun', ['simctl', 'list', 'devices', 'booted', '-j'])))
       const devices = Object.values(record(listing.devices)).flatMap(group => Array.isArray(group) ? group as unknown[] : [])
       if (devices.filter(value => { const item = record(value); return item.udid === config.deviceId
         && item.state === 'Booted' && item.isAvailable !== false }).length !== 1) stop('invalid_configuration')
+      }
       const identity = async () => {
         const listeners = await command('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp'])
         const pids = [...new Set(listeners.split('\n').filter(line => /^p\d+$/u.test(line)).map(line => line.slice(1)))]
         if (pids.length !== 1) stop('invalid_configuration')
         const pid = pids[0]!
         const executable = await command('/bin/ps', ['-p', pid, '-o', 'comm='])
-        if (!['WebDriverAgentRunner-Runner', 'WebDriverAgentRunner'].includes(basename(executable))) stop('invalid_configuration')
+        if (simulator && !['WebDriverAgentRunner-Runner', 'WebDriverAgentRunner'].includes(basename(executable))) stop('invalid_configuration')
+        if (!simulator) {
+          const args = await command('/bin/ps', ['-p', pid, '-o', 'args='])
+          if (!validIosUsbForwarder(executable, args, config.deviceId, port) || !(await command('idevice_id', ['-l'])).split('\n').includes(config.deviceId)) stop('invalid_configuration')
+          return `${pid}:${await command('/bin/ps', ['-p', pid, '-o', 'lstart='])}`
+        }
         const environment = await command('/bin/ps', ['eww', '-p', pid, '-o', 'command='])
         const ids = [...environment.matchAll(/(?:^|\s)SIMULATOR_UDID=([^\s]+)(?=\s|$)/gu)].map(match => match[1])
         if (ids.length !== 1 || ids[0] !== config.deviceId) stop('invalid_configuration')
@@ -191,6 +181,7 @@ export async function runMobileIos(config: MobileIosConfig, instruction: string,
         await fresh()
         await verify()
         check()
+        options.beforeWrite?.()
         steps++
         // Cancellation cannot undo a dispatched action. Await its bounded acknowledgement, including the body.
         let rejected = false
@@ -210,6 +201,8 @@ export async function runMobileIos(config: MobileIosConfig, instruction: string,
         }
         if (rejected) stop('action_failed')
         planned = undefined
+        const observed = await capture()
+        options.capture?.(observed.image, steps)
         emit('action_returned', name)
         check()
       } catch (error) {
@@ -230,14 +223,14 @@ export async function runMobileIos(config: MobileIosConfig, instruction: string,
       {name: 'AndroidHomeButton', description: 'Press the Home button.', call: async () => {
         await write('Home', {}, '/wda/pressButton', {name: 'home'})
       }},
-      {name: 'Scroll', paramSchema: actionScrollParamSchema, call: async (raw: unknown, context) => {
+      {name: 'Scroll', paramSchema: actionScrollParamSchema.extend({scrollType: z.literal('singleAction'), distance: z.number().finite().positive(), locate: actionTapParamSchema.shape.locate}), call: async (raw: unknown, context) => {
         const param = record(raw)
         if (param.scrollType !== 'singleAction' || typeof param.distance !== 'number' || !Number.isFinite(param.distance)
           || param.distance <= 0 || typeof param.direction !== 'string') stop('needs_user_action')
         const [fromX, fromY] = point(record(param.locate).center)
         const offset = ({down: [0, -1], up: [0, 1], right: [-1, 0], left: [1, 0]} as Record<string, number[]>)[param.direction as string]
         if (!offset) stop('needs_user_action')
-        const distance = logicalSwipeDistance(param.distance as number, context?.uiContext?.shrunkShotToLogicalRatio ?? NaN)
+        const distance = config.modelFamily.startsWith('auto-glm') ? logicalSwipeDistance(param.distance as number, context?.uiContext?.shrunkShotToLogicalRatio ?? NaN) : param.distance as number
         const [toX, toY] = point([fromX + offset![0]! * distance, fromY + offset![1]! * distance])
         await write('Swipe', {fromX, fromY, toX, toY, durationMs: 500}, '/actions', {actions: [{type: 'pointer', id: 'finger1',
           parameters: {pointerType: 'touch'}, actions: [{type: 'pointerMove', duration: 0, x: fromX, y: fromY},
@@ -264,37 +257,26 @@ export async function runMobileIos(config: MobileIosConfig, instruction: string,
         catch (error) { return stop(error instanceof Error && error.message === 'screen_changed' ? 'screen_changed' : 'action_failed') }
       },
       actionSpace: () => actions}
-    agent = new Agent(guarded, {modelConfig: {MIDSCENE_MODEL_FAMILY: config.modelFamily, MIDSCENE_MODEL_NAME: config.model,
-      MIDSCENE_MODEL_BASE_URL: config.baseUrl, MIDSCENE_MODEL_API_KEY: config.apiKey, MIDSCENE_MODEL_RETRY_COUNT: 0,
-      MIDSCENE_MODEL_TIMEOUT: Math.min(config.budgetMs, 60_000)},
-    waitAfterAction: settleMs, replanningCycleLimit: config.maxSteps, cache: false,
-    generateReport: false, persistExecutionDump: false, autoPrintReportMsg: false})
-    let finished = false
-    agent.addProgressListener(event => {
-      if (event.scope !== 'aiAct') return
-      if (event.phase === 'plan_thinking') { planned = latest; emit('planning') }
-      if (event.phase === 'complete' && !controller.signal.aborted) finished = true
-      if (event.phase === 'failed' && steps >= config.maxSteps) code ??= 'step_limit'
-    })
     configured = true
-    // Midscene owns visual planning. Nova binds each approved action to the same device/window, not frozen pixels.
-    await delay(settleMs, undefined, {signal: controller.signal})
-    await agent.aiAct(instruction, {abortSignal: controller.signal, cacheable: false,
+    const returned = await runGui(instruction, guarded, {...config, signal: controller.signal,
+      steps: () => steps, planning: () => { planned = latest }, progress: options.progress, ...(options.capture ? {capture: options.capture} : {}),
       context: android
         ? 'Use only the available actions. Launch requires an exact installed Android package name. Input appends text to the focused field. Never guess package names or execute shell commands.'
         : 'Only Tap, Type into an already focused field, one Swipe, Home, and finish are available. Never launch apps or use other actions.'})
-    check()
-    const lastTask = agent.dump.executions.at(-1)?.tasks.at(-1)
-    finished &&= lastTask?.type === 'Action Space' && lastTask.subType === 'Finished'
-      && lastTask.status === 'finished' && !lastTask.error
-    if (finished) emit('model_finished')
-    return {code: code ?? (finished ? 'model_finished' : 'model_failed'), steps}
+    return {code: code ?? returned, steps}
   } catch {
     return {code: code ?? (configured ? 'model_failed' : 'invalid_configuration'), steps}
   } finally {
     clearTimeout(timer)
     options.signal.removeEventListener('abort', cancelled)
-    // The guarded interface has no destroy hook: the host owns the existing WDA session.
-    await agent?.destroy()
   }
+}
+
+/** Only an explicit USB tunnel to this UDID/port is eligible; never borrow a default or network device. */
+export function validIosUsbForwarder(executable: string, args: string, deviceId: string, port: number): boolean {
+  if (basename(executable) !== 'iproxy' || /(?:^|\s)(?:-n|--network)(?:\s|$)/u.test(args)) return false
+  const ids = [...args.matchAll(/(?:^|\s)(?:-u|--udid)\s+(\S+)/gu)].map(match => match[1])
+  const sources = [...args.matchAll(/(?:^|\s)(?:-s|--source)\s+(\S+)/gu)].map(match => match[1])
+  return ids.length === 1 && ids[0] === deviceId && sources.every(source => source === '127.0.0.1')
+    && args.split(/\s+/u).includes(`${port}:8100`)
 }
