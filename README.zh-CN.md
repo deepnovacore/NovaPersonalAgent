@@ -4,7 +4,7 @@
 
 [English](README.md) · **简体中文**
 
-# NAA (Your Personal Agent and Voice Assistant)
+# NAA: Your Personal Agent and Voice Assistant
 
 **你的个人 Agent 与常驻语音助手：理解上下文，前后双脑协作，主动有分寸。**
 
