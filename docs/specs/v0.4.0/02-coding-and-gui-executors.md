@@ -1,6 +1,6 @@
 # 05 Coding 与 GUI 执行器
 
-> 轨道 D。v0.4.0 明确目标：接入 Kimi Code 与 pi agent；接入 GUI 执行器，
+> 轨道 D。v0.4.0 明确目标：接入 OpenCode、CodeBuddy、Pi 与 DeepSeek Harness；接入 GUI 执行器，
 > 以 AutoGLM 作为首个 example；用真实闭环展示 agent2agent 协作。
 > 状态：开发实现与部分验收已进行，整体未验收；当前后端与原始计划的差异见 [进度](STATUS.zh-CN.md)。里程碑 M9 保留编号，移自 v0.3.0；不等待 M8。
 
@@ -11,13 +11,13 @@
 主机持有工作身份、授权与交付；coding controller 拥有 workspace/session 选择与调度。
 不得把后端的原生工具、会话状态机或具体 API 暴露成一组新的快脑原生工具。
 
-现有 Codex 实现是参考，不是假定其他后端有同样能力的依据。Kimi Code、pi agent 的
+现有 Codex 实现是参考，不是假定其他后端有同样能力的依据。各 coding 后端的
 具体仓库/发行版本、接入方式与许可证在实现前固定；本规划不预设其支持 app-server、
 steer、resume 或网络审批回调。AutoGLM 参考副本也不等于可运行集成。
 
-## 2. Kimi Code 与 pi agent（M9-C）
+## 2. 多 coding 后端（M9-C）
 
-两个后端分别交付适配器，复用既有 coding 角色与 WorkOrder，不另造调度器。
+各后端分别交付适配器，复用既有 coding 角色与 WorkOrder，不另造调度器。
 
 - 用户在设置中选择 coding 后端；活动工作绑定启动时的后端与会话。切换默认后端不迁移正在运行的工作。
 - 同一工作区的并发/互斥仍由已有调度规则管理。不同后端的 session ID 必须按后端隔离；
@@ -60,10 +60,12 @@ agent2agent 指 Nova 委派工作给 coding/GUI 专长 agent，并接收受约�
 
 演示使用合成数据，保留自然语言请求、授权记录、执行片段、最终结果和失败路径：
 
-1. Nova → Kimi Code / pi agent → 示例仓库产物，每个后端单独演示。
+1. Nova → OpenCode / CodeBuddy / Pi / DeepSeek Harness → 示例仓库产物，每个后端单独演示。
 2. Nova → AutoGLM → 指定设备上的可回滚操作，包含必要确认与可验证结果。
 3. 可选联动：用户确认记忆驱动的建议后才进入执行；不把“主动发现需求”剪辑成“未经授权自动执行”。
 
 发布材料包括后端/模型版本、平台、配置说明、真实录屏、复现步骤、支持矩阵与限制。
 M9-Demo 依赖 M9-C 和 M9-G 各自验收；宣传文案不得先于对应能力。
 Home Assistant 和更多后端留作后续扩展，不占本版三项主线的验收名额。
+
+2026-10-11 范围确认：按用户决定，本版不接入 Kimi Code；M9-C 以以上四个 ACP 后端为验收范围。
