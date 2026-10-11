@@ -16,20 +16,50 @@ export function timelineGroups(snapshot,now=new Date()){
 }
 export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,openArticle,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
  const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}`);parent.append(root)
- const groups=timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed')
+ const groups=timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),currentDate=timelineDate(snapshot,now)
+ const formatDate=date=>new Date(date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{...(date.slice(0,4)!==currentDate.slice(0,4)?{year:'numeric'}:{}),month:'short',day:'numeric',timeZone:'UTC'})
  const intro=el('p',t('按真实截止日期整理；未设时间的事项单独保留。'),'timeline-description');if(!compact)root.append(intro)
  if(!snapshot?.life){const status=el('p',t(connected?'正在读取事项…':'连接后可查看安排。'),'hint');status.setAttribute('role','status');root.append(status);return}
  const dated=groups.flatMap(group=>group.items).filter(item=>item.date&&item.status!=='done'),counts=new Map()
  for(const item of dated)counts.set(item.date,(counts.get(item.date)??0)+1)
- const cluster=[...counts].find(([date,count])=>date>=timelineDate(snapshot,now)&&count>1)
+ const cluster=[...counts].find(([date,count])=>date>=currentDate&&count>1)
  if(cluster&&!compact){const notice=el('p',t('{0} 有 {1} 项到期，建议安排推进顺序。',new Date(cluster[0]+'T12:00:00Z').toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',timeZone:'UTC'}),cluster[1]),'timeline-cluster');root.append(notice)}
- if(!groups.length){const empty=el('div',undefined,'timeline-empty');empty.append(el('h3',t('安排留有余地')),el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,empty);root.append(empty)}
- for(const group of groups){
-  const section=el('section',undefined,'timeline-group');section.dataset.group=group.id;section.append(el('h3',`${t(group.label)} · ${group.items.length}`,'timeline-group-title'));root.append(section)
+ if(!groups.length&&compact){const empty=el('div',undefined,'timeline-empty');empty.append(el('h3',t('安排留有余地')),el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,empty);root.append(empty)}
+ let displayGroups=groups,axis,pastAxis
+ if(!compact){
+  const dates=new Map([[currentDate,{id:'current',date:currentDate,items:[]}]])
+  for(const group of groups)if(['overdue','current','soon','later'].includes(group.id))for(const item of group.items){
+   if(!dates.has(item.date))dates.set(item.date,{id:group.id,date:item.date,items:[]})
+   dates.get(item.date).items.push(item)
+  }
+  const dateGroups=[...dates.values()].sort((a,b)=>a.date.localeCompare(b.date))
+  displayGroups=[...dateGroups,...groups.filter(group=>['waiting','unscheduled','completed'].includes(group.id))]
+  const overdue=groups.find(group=>group.id==='overdue')
+  if(overdue){
+   const past=el('details',undefined,'timeline-past');past.open=expanded.has('timeline:past-due');past.addEventListener('toggle',()=>{past.open?expanded.add('timeline:past-due'):expanded.delete('timeline:past-due')})
+   past.append(el('summary',`${t(overdue.label)} · ${overdue.items.length}`,'timeline-past-title'));pastAxis=el('div',undefined,'timeline-axis');past.append(pastAxis);root.append(past)
+  }
+  axis=el('div',undefined,'timeline-axis');axis.setAttribute('aria-label',t('待办截止日期'));root.append(axis)
+ }
+ for(const group of displayGroups){
+  const section=el('section',undefined,`timeline-group${group.date?' timeline-date-group'+(group.id==='current'?' timeline-current':''):compact?'':' timeline-undated'}`);section.dataset.group=group.id
+  let cards=section
+  if(group.date){
+   section.dataset.date=group.date
+   const marker=el('h3',undefined,'timeline-date-marker'),time=el('time',formatDate(group.date));time.dateTime=group.date
+   if(group.id==='current')marker.append(el('span','Today','timeline-current-label'))
+   marker.append(time,el('span',new Date(group.date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{weekday:'short',timeZone:'UTC'}),'timeline-weekday'))
+   if(group.items.length)marker.append(el('span',t('{0} 项到期',group.items.length),'timeline-date-count'))
+   cards=el('div',undefined,'timeline-day-cards');section.append(marker,cards);(group.id==='overdue'?pastAxis:axis).append(section)
+   if(!group.items.length){
+    cards.append(el('p',t('今天没有到期事项'),'timeline-day-empty'))
+    if(!groups.length){cards.append(el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,cards)}
+   }
+  }else{section.append(el('h3',`${t(group.label)} · ${group.items.length}`,'timeline-group-title'));root.append(section)}
   for(const item of group.items){
-   const card=el('article',undefined,'timeline-card');card.dataset.objectId=item.id;section.append(card)
+   const card=el('article',undefined,'timeline-card');card.dataset.objectId=item.id;cards.append(card)
    const meta=el('div',t('待办'),'timeline-meta');card.append(meta)
-   const dateLabel=item.date?new Date(item.date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{...(item.date.slice(0,4)!==timelineDate(snapshot,now).slice(0,4)?{year:'numeric'}:{}),month:'short',day:'numeric',timeZone:'UTC'}):null
+   const dateLabel=item.date?formatDate(item.date):null
    const title=button(item.title,()=>item.status==='done'?openTodos(item.id):discuss([item.reference]),card,`timeline-discuss:${item.id}`);title.className='timeline-title'
    const tags=[]
    if(item.date)tags.push({label:item.status==='done'?t('原截止 {0}',dateLabel):group.id==='overdue'?t('已过截止 · {0}',dateLabel):t('截止 {0}',dateLabel),tone:group.id==='overdue'?'attention':'time'})
