@@ -10,7 +10,7 @@
 
 ## 通过 npm 安装
 
-使用 Node.js >=22.14.0，运行 `npm install --global nova-audio-agent-server`。按下文配置环境后，运行 `novaaudio-server token-init`，再运行 `novaaudio-server --env-file /absolute/path/server.env start`。另开交互终端，使用相同配置运行 `novaaudio-server --env-file /absolute/path/server.env pair wss://your-host.ts.net` 显示一次性二维码（SSH 需加 `-t`）。无需 Electron 或图形会话。
+使用 Node.js >=22.14.0，运行 `npm install --global nova-personal-agent-server`。按下文配置环境后，运行 `novapersonal-server token-init`，再运行 `novapersonal-server --env-file /absolute/path/server.env start`。另开交互终端，使用相同配置运行 `novapersonal-server --env-file /absolute/path/server.env pair wss://your-host.ts.net` 显示一次性二维码（SSH 需加 `-t`）。无需 Electron 或图形会话。
 
 Ubuntu 下直接使用已安装的 `tailscale` 命令完成下文的私有 WSS 配置；服务可在前台运行，也可由进程管理器以相同用户和显式环境文件托管。
 
@@ -19,9 +19,9 @@ Ubuntu 下直接使用已安装的 `tailscale` 命令完成下文的私有 WSS �
 使用 Node >=22.13，并确保检出目录已安装常规工作区依赖。构建需与桌面端串行执行，因为两者都会写入 `runtime/dist`：
 
 ```sh
-cd /absolute/path/to/nova-audio-agent
+cd /absolute/path/to/nova-personal-agent
 npm ci
-npm run build --workspace @nova-audio-agent/runtime
+npm run build --workspace @nova-personal-agent/runtime
 ```
 
 在检出目录之外创建私有目录。以下两个变量必须设置；端口无默认值，取值须为 1–65535。缺失或非法取值会在构造模型、MCP、Codex 资源之前报错。
@@ -31,7 +31,7 @@ mkdir -p "$HOME/.nova-remote"
 chmod 700 "$HOME/.nova-remote"
 export SERVER_PORT=19876
 export SERVER_TOKEN_FILE="$HOME/.nova-remote/client-token"
-npm run server:token-init --workspace @nova-audio-agent/runtime
+npm run server:token-init --workspace @nova-personal-agent/runtime
 ```
 
 初始化会生成一个随机的 128 位小写十六进制 token，权限为 0600，并拒绝覆盖任何已存在的文件。加载器拒绝相对路径、符号链接、非普通文件、非本用户属主，以及 0600 以外的权限。设备独立凭据请使用下方二维码配对。手动兜底方式是在本机读取该文件，再把 token 填入手机端由 Keychain 支持的连接设置；不要把它放进 URL、shell 参数、日志或 Git。
@@ -82,9 +82,9 @@ TAILSCALE_BE_CLI=1 /Applications/Tailscale.app/Contents/MacOS/Tailscale serve --
   <key>ProgramArguments</key><array>
     <string>/absolute/path/to/node</string>
     <string>--env-file=/Users/your-user/.nova-remote/server.env</string>
-    <string>/absolute/path/to/nova-audio-agent/runtime/dist/src/server-entry.js</string>
+    <string>/absolute/path/to/nova-personal-agent/runtime/dist/src/server-entry.js</string>
   </array>
-  <key>WorkingDirectory</key><string>/absolute/path/to/nova-audio-agent</string>
+  <key>WorkingDirectory</key><string>/absolute/path/to/nova-personal-agent</string>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>/Users/your-user/.nova-remote/server.log</string>
   <key>StandardErrorPath</key><string>/Users/your-user/.nova-remote/server.log</string>
@@ -107,7 +107,7 @@ LaunchAgent 在用户登录会话中运行，出错后不会自动重启。排�
 保持服务运行，在同一台 Mac 的另一个交互终端中加载相同的端口和认证文件配置，然后执行：
 
 ```sh
-npm run server:pair --workspace @nova-audio-agent/runtime -- wss://你的主机.ts.net
+npm run server:pair --workspace @nova-personal-agent/runtime -- wss://你的主机.ts.net
 ```
 
 在 iPhone 中选择“扫码连接主机”，确认地址后保存连接。终端显示一次性二维码，其中不包含主机长期 token。WSS 地址需要事先通过 Tailscale Serve 转发到该服务。通过 SSH 操作时使用 `ssh -t`；配对命令不接受管道、重定向输出或宽度不足的终端。
@@ -117,7 +117,7 @@ npm run server:pair --workspace @nova-audio-agent/runtime -- wss://你的主机.
 macOS 上可使用窗口模式进行配对和设备撤销，此模式需要 Xcode Command Line Tools：
 
 ```sh
-npm run server:pair --workspace @nova-audio-agent/runtime -- --window wss://你的主机.ts.net
+npm run server:pair --workspace @nova-personal-agent/runtime -- --window wss://你的主机.ts.net
 ```
 
 将 token 文件及 `${SERVER_TOKEN_FILE}.devices.json` 保存在 0700 私有目录中，两个文件都应仅允许服务用户访问。设备存储最多支持 32 台设备，只能由一个进程写入，不要在服务运行时编辑。

@@ -11,7 +11,7 @@ npm run test:runtime
 npm run test:desktop
 npm run test:cli
 npm run test:server-cli
-npm run lint --workspace @nova-audio-agent/runtime
+npm run lint --workspace @nova-personal-agent/runtime
 npm run check
 ```
 

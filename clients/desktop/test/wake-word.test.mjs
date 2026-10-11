@@ -105,7 +105,7 @@ test('browser and native ingress handlers gate stale and muted PCM before the sh
   const source = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
   const browserStart = source.indexOf('nextProcessor.port.onmessage = event => {')
   const browserEnd = source.indexOf('\n    }\n    nextSource.connect', browserStart)
-  const nativeStart = source.indexOf('window.novaAudioAgentDesktop.nativeAudio.onEvent(event => {')
+  const nativeStart = source.indexOf('window.novaPersonalAgentDesktop.nativeAudio.onEvent(event => {')
   const nativeAudioStart = source.indexOf("if (event.type === 'audio') {", nativeStart)
   const nativeAudioEnd = source.indexOf("\n      } else if (event.type === 'playback.started')", nativeAudioStart)
   assert.ok(browserStart >= 0 && browserEnd >= 0, 'browser ingress extraction succeeded')

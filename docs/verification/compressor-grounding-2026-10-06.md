@@ -34,7 +34,7 @@ Raw accepted evidence is stored alongside this document. Reports record dist has
 ## Reproduce
 
 ```sh
-npm run build --workspace @nova-audio-agent/runtime
+npm run build --workspace @nova-personal-agent/runtime
 NOVA_LIVE_COMPRESSOR_VALUE=1 NOVA_ACP_AFTER_DIST="$PWD/runtime/dist" \
   node --env-file=/path/to/private.env runtime/scripts/live/compressor-value.mjs
 ```

@@ -175,7 +175,7 @@ test('news feeds pass the gate only when the manifest turns news on, and only as
  await assert.rejects(fetch('https://feeds.bbci.co.uk/other.xml'),/news_get_only/,'only the built-in feed paths');
  await assert.rejects(fetch(new Request(feed)),/news_get_only/,'a Request object would carry its own headers');
  assert.equal((await fetch(feed,{headers:{Authorization:'secret-token','X-Private':'secret-header'}})).status,200);
- assert.equal(seen.length,3);assert.ok(seen.every(line=>line.includes('NovaAudioAgent-News')&&!line.includes('secret')),seen.join('|'));
+ assert.equal(seen.length,3);assert.ok(seen.every(line=>line.includes('NovaPersonalAgent-News')&&!line.includes('secret')),seen.join('|'));
  await assert.rejects(fetch('https://feeds.bbci.co.uk.invalid/rss.xml'),/unknown_outbound/);
  await assert.rejects(fetch('http://feeds.bbci.co.uk/news/rss.xml'),/unknown_outbound/);
  assert.throws(()=>net.connect({host:'feeds.bbci.co.uk',port:443}),/unknown_socket/);`)

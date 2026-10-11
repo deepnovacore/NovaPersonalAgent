@@ -30,7 +30,7 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
-      - run: npm run test:live:contract --workspace @nova-audio-agent/runtime
+      - run: npm run test:live:contract --workspace @nova-personal-agent/runtime
       - name: Run selected acceptance suite
         env:
           LIVE_TARGET: ${{ inputs.target }}

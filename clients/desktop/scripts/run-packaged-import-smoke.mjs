@@ -6,7 +6,7 @@ export function runPackagedImportSmoke({appOutDir, resourcesRoot, platform, prod
     ? resolve(appOutDir, `${productFilename}.app/Contents/MacOS/${productFilename}`)
     : platform === 'win32'
       ? resolve(appOutDir, `${productFilename}.exe`)
-      : resolve(appOutDir, 'nova-audio-agent-desktop')
+      : resolve(appOutDir, 'nova-personal-agent-desktop')
   const harness = resolve(import.meta.dirname, 'packaged-runtime-import-smoke.cjs')
   const result = spawnSync(executable, [harness, resourcesRoot], {
     encoding: 'utf8',

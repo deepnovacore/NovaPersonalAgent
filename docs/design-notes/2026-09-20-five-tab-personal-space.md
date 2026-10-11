@@ -24,7 +24,7 @@ Same-candidate requests are idempotent within the bounded receipt history. Re-ex
 
 ## Reproducible verification
 
-- Runtime: `npm run build --workspace @nova-audio-agent/runtime`, then `node --test --test-concurrency=4 runtime/dist/test/*.test.js`.
+- Runtime: `npm run build --workspace @nova-personal-agent/runtime`, then `node --test --test-concurrency=4 runtime/dist/test/*.test.js`.
 - Desktop: `node --test clients/desktop/test/*.test.mjs`.
 - Real RSS + configured model: `node --env-file=/absolute/private.env runtime/scripts/live/news-feed.mjs /absolute/isolated/output`.
 - Real host automatic capture and candidate lifecycle: `node --env-file=/absolute/private.env runtime/scripts/live/personal-understanding.mjs /absolute/isolated/output`.

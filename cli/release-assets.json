@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "repository": "deepnovacore/NovaAudioAgent",
+  "repository": "deepnovacore/nova-personal-agent",
   "targets": {
     "darwin-arm64": {
       "artifact": "nova-audio-agent-0.3.1-macos-arm64-app.zip",

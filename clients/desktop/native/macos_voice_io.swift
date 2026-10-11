@@ -1,6 +1,6 @@
-// Adapted for Nova Audio Agent from qwen-audio-agent's macOS VoiceProcessingIO helper.
+// Adapted for Nova Personal Agent from qwen-audio-agent's macOS VoiceProcessingIO helper.
 // Original: Copyright 2026 qwen-audio-agent contributors, Apache-2.0.
-// Changes: Nova Audio Agent generation identity, bounded protocol, and delivery events.
+// Changes: Nova Personal Agent generation identity, bounded protocol, and delivery events.
 
 import AudioToolbox
 import Foundation
@@ -24,7 +24,7 @@ private struct Command: Decodable {
 private func check(_ status: OSStatus, _ operation: String) throws {
     guard status == noErr else {
         throw NSError(
-            domain: "NovaAudioAgentVoiceIO",
+            domain: "NovaPersonalAgentVoiceIO",
             code: Int(status),
             userInfo: [NSLocalizedDescriptionKey: "\(operation) failed (CoreAudio \(status))"]
         )
@@ -67,7 +67,7 @@ private func convert(
 private final class VoiceIO {
     private let playback = PlaybackQueue()
     private let captureLock = NSLock()
-    private let output = DispatchQueue(label: "nova-audio-agent.voice-io.output")
+    private let output = DispatchQueue(label: "nova-personal-agent.voice-io.output")
     private var captureEnabled = false
     private var captureEpoch = 0
     private var unit: AudioUnit?
@@ -84,14 +84,14 @@ private final class VoiceIO {
         )
         guard let component = AudioComponentFindNext(nil, &description) else {
             throw NSError(
-                domain: "NovaAudioAgentVoiceIO",
+                domain: "NovaPersonalAgentVoiceIO",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "VoiceProcessingIO unavailable"]
             )
         }
         var created: AudioUnit?
         try check(AudioComponentInstanceNew(component, &created), "create VoiceProcessingIO")
-        guard let created else { throw NSError(domain: "NovaAudioAgentVoiceIO", code: 2) }
+        guard let created else { throw NSError(domain: "NovaPersonalAgentVoiceIO", code: 2) }
         unit = created
 
         var enabled: UInt32 = 1

@@ -36,13 +36,13 @@ jobs:
       - run: npm run test:desktop
       - run: npm run build
       - name: Build unsigned native package bytes
-        run: npm run ${{ matrix.package_script }} --workspace @nova-audio-agent/desktop
-      - run: npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned
+        run: npm run ${{ matrix.package_script }} --workspace @nova-personal-agent/desktop
+      - run: npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned
       - name: Verify installed NSIS candidate
         shell: pwsh
         run: |
           $installer = (Get-ChildItem clients/desktop/dist/*.exe).FullName
-          npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned --artifact "$installer"
+          npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned --artifact "$installer"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:

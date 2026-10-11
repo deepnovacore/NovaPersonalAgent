@@ -13,7 +13,7 @@ import {replacePackagedAsar, refreshSignedAsar, refreshMacAsarIntegrity} from '.
 import {inspectApplication, inspectMacAsarIntegrity, readReadiness, prepareSmokeHome, redactSmokeOutput} from '../scripts/verify-release.mjs'
 import {loadSettings} from '../src/main/settings-store.mjs'
 import {backendLaunchSpec} from '../src/main/backend.mjs'
-import {describeMissingBlockingEnvironment} from '@nova-audio-agent/runtime/desktop'
+import {describeMissingBlockingEnvironment} from '@nova-personal-agent/runtime/desktop'
 import {expectedNativeResources} from '../scripts/native-resource-contract.mjs'
 import {stageReleaseApplication} from '../scripts/stage-release-app.mjs'
 
@@ -150,11 +150,11 @@ test('staging preserves nested dependency versions and omits development files',
 
 test('staging keeps the runtime CLI evaluation imports executable', async () => {
   const root = await mkdtemp(join(tmpdir(), 'nova-stage-runtime-'))
-  const runtime = 'node_modules/@nova-audio-agent/runtime'
+  const runtime = 'node_modules/@nova-personal-agent/runtime'
   try {
-    await file(root, 'package.json', JSON.stringify({dependencies: {'@nova-audio-agent/runtime': '1'}}))
+    await file(root, 'package.json', JSON.stringify({dependencies: {'@nova-personal-agent/runtime': '1'}}))
     for (const name of ['src/main.mjs', 'LICENSES/MIT', 'THIRD_PARTY_NOTICES.md']) await file(root, name)
-    await file(root, `${runtime}/package.json`, JSON.stringify({name: '@nova-audio-agent/runtime', type: 'module', files: ['dist/src', 'dist/eval']}))
+    await file(root, `${runtime}/package.json`, JSON.stringify({name: '@nova-personal-agent/runtime', type: 'module', files: ['dist/src', 'dist/eval']}))
     await file(root, `${runtime}/dist/src/cli.js`, "import {marker} from '../eval/probe.js'; console.log(marker)")
     await file(root, `${runtime}/dist/eval/probe.js`, "export const marker = 'evaluation-ready'")
     await file(root, `${runtime}/scripts/autoglm-bridge.py`, '# supervised bridge')

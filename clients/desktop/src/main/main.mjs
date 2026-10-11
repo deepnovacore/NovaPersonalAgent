@@ -1,6 +1,6 @@
 import {parseVoicePreset, exportVoicePreset, MAX_PRESET_BYTES} from '../renderer/voice-preset.mjs'
 import {deleteVoiceprint, registerVoiceprint, voiceprintHealth} from './voiceprint.mjs'
-import {probeAcceptanceGate,acceptanceRuntimeHash,appendAcceptanceCounts, allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-audio-agent/runtime/desktop'
+import {probeAcceptanceGate,acceptanceRuntimeHash,appendAcceptanceCounts, allowAcceptanceLoopback, installAcceptanceGate, assertOriginalProfilePaths, assertAcceptanceUrl} from '@nova-personal-agent/runtime/desktop'
 import {captureNativeWorkbench,waitForNativeWorkbench,installAcceptanceWindowGate,installAcceptanceSessionGate,acceptanceWakeSettings,acceptanceBackendSettings,waitForAcceptanceRuntimeGate} from './workbench-native-acceptance.mjs'
 import {writeFileSync as writeAcceptanceFile} from 'node:fs'
 import {updateTrayUnread, resetTrayUnreadForBackend} from './tray-unread.mjs'
@@ -9,14 +9,14 @@ import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/lo
 import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
 import {codingBackendStatus} from './coding-settings.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
-import {FeishuConnector, VISION_MODELS} from '@nova-audio-agent/runtime/desktop'
+import {FeishuConnector, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
 import {configureDesktopIdentity} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
 import {phoneNetwork, requestPhonePairing, renderPhoneQr} from './phone-connection.mjs'
 import {activeMcpMenuRows} from './orb-menu.mjs'
 import {parseSettingsCommit, validatePreparedSettings, prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, assertEditorSafe, referencedCapabilitySecrets, capabilityPath, capabilityDocumentRevision, invalidCommit} from './capabilities-settings.mjs'
-import {parseCapabilityRegistry} from '@nova-audio-agent/runtime/desktop'
+import {parseCapabilityRegistry} from '@nova-personal-agent/runtime/desktop'
 import { WakeWordRuntime } from './wake-word/runtime.mjs'
 import {
   app,
@@ -41,7 +41,7 @@ import {
   describeMissingBlockingEnvironment,
   inspectProjectNativeHostFromResources,
   ManagedWorkspaceMaintenanceService,
-} from '@nova-audio-agent/runtime/desktop'
+} from '@nova-personal-agent/runtime/desktop'
 import { randomBytes } from 'node:crypto'
 import { mkdir, rename, unlink, writeFile, open } from 'node:fs/promises'
 import { spawnSync } from 'node:child_process'
@@ -634,9 +634,9 @@ function openSettingsWindow(launchId, { category } = {}) {
 async function verifySettingsRenderer() {
   const ready = await settingsWindow.webContents.executeJavaScript(`(async () => {
     if (location.href !== 'nova://orb/settings.html'
-      || typeof window.novaAudioAgentDesktop?.settings?.get !== 'function'
+      || typeof window.novaPersonalAgentDesktop?.settings?.get !== 'function'
       || document.querySelectorAll('#language option').length !== 2) return false
-    const view = await window.novaAudioAgentDesktop.settings.get()
+    const view = await window.novaPersonalAgentDesktop.settings.get()
     if (!['en', 'zh-CN'].includes(view.language)) return false
     const general = document.querySelector('#category-general')
     const usage = document.querySelector('#category-usage')
@@ -868,7 +868,7 @@ function showOrbMenu(launchId) {
       }
     } },
     { type: 'separator' },
-    { label: t("退出 Nova Audio Agent"), click: () => app.quit() },
+    { label: t("退出 Nova Personal Agent"), click: () => app.quit() },
   ]).popup({ window: mainWindow })
 }
 
@@ -905,7 +905,7 @@ function trayImage() {
     const image = nativeImage.createFromPath(file)
     if (!image.isEmpty()) return image
   }
-  console.warn(`[nova-audio-agent-desktop] tray icon unreadable, falling back to a blank pixel: ${file}`)
+  console.warn(`[nova-personal-agent-desktop] tray icon unreadable, falling back to a blank pixel: ${file}`)
   return nativeImage.createFromDataURL(
     'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL6WQAAAABJRU5ErkJggg==',
   )
@@ -917,7 +917,7 @@ function hideOrb() {
 
 function createTray() {
   const next = new Tray(trayImage())
-  next.setToolTip('Nova Audio Agent Desktop')
+  next.setToolTip('Nova Personal Agent Desktop')
   next.setContextMenu(Menu.buildFromTemplate([
     ...[['workbench','工作台'],['orb','悬浮球'],['background','隐藏']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
     { type: 'separator' },
@@ -1188,7 +1188,7 @@ async function launchBackend(smokeChannel, onExit) {
       cwd: workspace,
       env: spec.env,
       stdio: spec.stdio,
-      serviceName: 'Nova Audio Agent Runtime',
+      serviceName: 'Nova Personal Agent Runtime',
     })
     const acceptanceProof=acceptance?waitForAcceptanceRuntimeGate(spawnedBackend,{buildCommit:acceptance.buildCommit,runtimeHash:acceptanceRuntimeHash(spec.entry)}):Promise.resolve()
     backend = spawnedBackend
@@ -2096,7 +2096,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     // neither that nor 'starting' is a real exit, so neither raises the banner.
     } else if (backendStatus.state !== 'starting' && backendStatus.state !== 'stopped') sendToOrb('nova:backend-exit')
   }).catch(() => {
-    console.error('Nova Audio Agent Desktop renderer failed to load')
+    console.error('Nova Personal Agent Desktop renderer failed to load')
     app.quit()
   })
   tray = createTray()
@@ -2106,13 +2106,13 @@ async function startSelectedCamera(camera, smokeChannel) {
   // Wayland/XWayland sessions may silently refuse global shortcuts; surface
   // that instead of leaving the user to wonder why the hotkey never fires.
   if (!shortcutRegistered) {
-    console.warn('[nova-audio-agent-desktop] global shortcut unavailable on this session')
+    console.warn('[nova-personal-agent-desktop] global shortcut unavailable on this session')
   }
   for (const [key, action] of [
     ['Control+M', () => sendToOrb('nova:microphone:toggle')],
     ['Control+L', sleepOrb],
   ]) {
-    if (!globalShortcut.register(key, action)) console.warn(`[nova-audio-agent-desktop] shortcut unavailable: ${key}`)
+    if (!globalShortcut.register(key, action)) console.warn(`[nova-personal-agent-desktop] shortcut unavailable: ${key}`)
   }
   backendSupervisor = createBackendSupervisor({
     start: onExit => launchBackend(smokeChannel, onExit),

@@ -100,7 +100,7 @@ export async function discoverCodex({ candidates, canonicalize, inspect }) {
   if (!Array.isArray(candidates)) return missing()
   // Candidate enumeration also runs before the source launcher builds runtime.
   const {admitCodexCliVersion} = await import(
-    '@nova-audio-agent/runtime/executors/codex/version',
+    '@nova-personal-agent/runtime/executors/codex/version',
   )
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== 'object' || !SOURCES.has(candidate.source)) continue

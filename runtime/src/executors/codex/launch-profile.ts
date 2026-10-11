@@ -2,7 +2,7 @@ export type CodexApprovalMode = 'ask' | 'yolo'
 export type CodexLaunchProfileId = 'ask' | 'ask_headless' | 'yolo'
 
 type CodexThreadLaunch =
-  | {readonly approvalPolicy: 'on-request' | 'never'; readonly approvalsReviewer: 'user'; readonly permissions: 'nova_audio_agent'}
+  | {readonly approvalPolicy: 'on-request' | 'never'; readonly approvalsReviewer: 'user'; readonly permissions: 'nova_personal_agent'}
   | {readonly approvalPolicy: 'never'; readonly approvalsReviewer: 'user'; readonly sandbox: 'danger-full-access'}
 
 export interface CodexLaunchProfile {
@@ -14,12 +14,12 @@ export interface CodexLaunchProfile {
 const ASK = Object.freeze({
   id: 'ask' as const,
   controller: 'present' as const,
-  thread: Object.freeze({approvalPolicy: 'on-request' as const, approvalsReviewer: 'user' as const, permissions: 'nova_audio_agent' as const}),
+  thread: Object.freeze({approvalPolicy: 'on-request' as const, approvalsReviewer: 'user' as const, permissions: 'nova_personal_agent' as const}),
 })
 const ASK_HEADLESS = Object.freeze({
   id: 'ask_headless' as const,
   controller: 'absent' as const,
-  thread: Object.freeze({approvalPolicy: 'never' as const, approvalsReviewer: 'user' as const, permissions: 'nova_audio_agent' as const}),
+  thread: Object.freeze({approvalPolicy: 'never' as const, approvalsReviewer: 'user' as const, permissions: 'nova_personal_agent' as const}),
 })
 const YOLO = Object.freeze({
   id: 'yolo' as const,
@@ -38,7 +38,7 @@ export function resolveCodexLaunchProfile(input: {
 
 export function codexAppServerArgv(profile: CodexLaunchProfile, managedMcp = false): readonly string[] {
   const sandbox = 'permissions' in profile.thread
-    ? ['-c', 'default_permissions="nova_audio_agent"', '-c', 'permissions.nova_audio_agent={ filesystem = { ":root" = "read", ":workspace_roots" = { "." = "write", ".git" = "read", ".agents" = "read", ".codex" = "read" } }, network = { enabled = false } }']
+    ? ['-c', 'default_permissions="nova_personal_agent"', '-c', 'permissions.nova_personal_agent={ filesystem = { ":root" = "read", ":workspace_roots" = { "." = "write", ".git" = "read", ".agents" = "read", ".codex" = "read" } }, network = { enabled = false } }']
     : ['-c', 'sandbox_mode="danger-full-access"']
   return Object.freeze([
     '-a', profile.thread.approvalPolicy,

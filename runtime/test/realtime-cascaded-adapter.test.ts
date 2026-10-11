@@ -2156,7 +2156,7 @@ test('pending recovery and tool items are ordered once and consumed targets stay
   await waitFor('pending user response', () => watching.events.some(event => event.kind === 'response_terminal'))
   assert.deepEqual(llm.calls[0]?.inputs, [
     {kind: 'tool_result', call_id: 'call-1', output: {ok: true}},
-    {kind: 'host_context', content: 'Nova Audio Agent 恢复摘要：恢复事实'},
+    {kind: 'host_context', content: 'Nova Personal Agent 恢复摘要：恢复事实'},
     {kind: 'user_text', text: '继续'},
   ])
   await adapter.createResponse({kind: 'host_fact', item: recovery, task_summary: null, origin_spoken: false}, new AbortController().signal)

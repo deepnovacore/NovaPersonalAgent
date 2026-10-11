@@ -4,10 +4,10 @@
 
 [English](README.md) | **简体中文**
 
-[![CI](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml)
+[![CI](https://github.com/deepnovacore/nova-personal-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/nova-personal-agent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
-[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaAudioAgent/)
+[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/nova-personal-agent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
 > **你的个人 Agent 与常驻语音助手：理解上下文，前后双脑协作，主动有分寸。**
@@ -147,30 +147,33 @@
 
 ```bash
 # 全局安装
-npm install --global nova-audio-agent@latest
+npm install --global nova-personal-agent@latest
 # 启动客户端；首次启动会弹出设置窗口，填一个 DashScope 密钥即可
-novaaudio
+novapersonal
 # 打开设置面板
-novaaudio config
+novapersonal config
 # 查看当前语音管线需要哪些密钥；加 --online 在线验证
-novaaudio doctor
+novapersonal doctor
 ```
+
+改名从 v0.4 开始生效，新 npm 包需在首次发布后才能安装。已发布的 v0.3.x 仍使用旧包名和 `novaaudio`；新包保留该命令别名，并继续读取原有数据与设置。迁移已有全局安装时，先运行 `npm uninstall --global nova-audio-agent nova-audio-agent-server`，避免命令链接冲突；这不会删除用户数据。
+
 
 升级前先退出 Nova，再运行上面的安装命令。如需固定版本，使用 `nova-audio-agent@0.3.1`。升级保留设置与数据；降级前请备份 Nova 数据。
 
 Ubuntu 22.04+ x64 无头服务：
 
-1. 运行 `npm install --global nova-audio-agent-server@latest` 安装或升级，按[远程服务指南](docs/zh-CN/deployment/remote-server.md)完成配置与凭据初始化。
-2. 运行 `novaaudio-server start` 启动服务。
-3. 另开终端运行 `novaaudio-server pair wss://your-host.ts.net`，显示一次性配对二维码。
+1. 运行 `npm install --global nova-personal-agent-server@latest` 安装或升级，按[远程服务指南](docs/zh-CN/deployment/remote-server.md)完成配置与凭据初始化。
+2. 运行 `novapersonal-server start` 启动服务。
+3. 另开终端运行 `novapersonal-server pair wss://your-host.ts.net`，显示一次性配对二维码。
 
 ### 3.2 从源码开发
 
 从源码开发时：
 
 ```bash
-git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
-cd nova-audio-agent
+git clone https://github.com/deepnovacore/nova-personal-agent.git nova-personal-agent
+cd nova-personal-agent
 npm ci && cp .env.example .env
 # 在 .env 中填入 DASHSCOPE_API_KEY
 ```
@@ -183,7 +186,7 @@ npm run start:client
 # 本次直接打开 Workbench，覆盖已保存的启动偏好
 npm run start:workbench
 # 构建、诊断或运行本地演示
-npm run build --workspace @nova-audio-agent/runtime
+npm run build --workspace @nova-personal-agent/runtime
 node runtime/dist/src/cli.js diagnose --json
 node runtime/dist/src/cli.js demo all
 ```
@@ -218,7 +221,7 @@ node runtime/dist/src/cli.js demo all
 | [上手指南](docs/zh-CN/getting-started.md) | 安装与集成 |
 | [Workbench](docs/zh-CN/workbench.md) · [任务](docs/zh-CN/tasks.md) · [资料来源与连接器](docs/zh-CN/sources-and-connectors.md) | 主窗口、交办的任务，以及 Nova 能读取哪些资料 |
 | [语音助手什么时候该开口？](docs/zh-CN/blog/2026-08-proactive-voice-agent-design-space.md) | 语音交互设计 |
-| [Node runtime 迁移归档](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | `v0.1.0` tag 历史中的迁移期计划 |
+| [Node runtime 迁移归档](https://github.com/deepnovacore/nova-personal-agent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | `v0.1.0` tag 历史中的迁移期计划 |
 
 ## 5. 路线图
 

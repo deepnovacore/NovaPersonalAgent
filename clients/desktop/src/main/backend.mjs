@@ -110,7 +110,7 @@ export function nodeRuntimeEntry({ isPackaged, appPath, packageRoot, environment
   return isPackaged
     ? resolve(
       appPath,
-      'node_modules/@nova-audio-agent/runtime/dist/src/desktop-entry.js',
+      'node_modules/@nova-personal-agent/runtime/dist/src/desktop-entry.js',
     )
     : resolve(packageRoot, '../../runtime/dist/src/desktop-entry.js')
 }

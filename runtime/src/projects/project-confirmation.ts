@@ -2,7 +2,7 @@ import {PendingDecision} from '../core/pending-decision.js'
 /**
  * Host confirmation for a Codex project boundary change.
  *
- * Ported from `src/nova_audio_agent/realtime/project_confirmation.py`. Changing which workspace or
+ * Ported from `src/nova_personal_agent/realtime/project_confirmation.py`. Changing which workspace or
  * Session the agent is operating in is not something a model may do on its own say-so, so the host
  * proposes, the *user* makes a structured decision, and only then is there authority to commit.
  * Everything here exists to make that authority unforgeable: one proposal at a time, one reserved

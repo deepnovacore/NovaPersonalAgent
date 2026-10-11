@@ -70,7 +70,7 @@ test('the orb menu offers all presentation modes through the shared transition',
       row.click()
     }
     assert.deepEqual(requested.splice(0),['workbench','orb','background'])
-    assert.equal(rows.at(-1).label,'退出 Nova Audio Agent')
+    assert.equal(rows.at(-1).label,'退出 Nova Personal Agent')
     assert.ok(rows.some(row=>row.label==='设置…'))
   }
 })

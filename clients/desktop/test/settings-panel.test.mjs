@@ -86,7 +86,7 @@ async function mountSettingsPanel(initialView, apiOverrides = {}) {
       querySelector: node, querySelectorAll: () => [], getElementById: id => node(`#${id}`),
       createElement: () => ({children: [], append(...items) {this.children.push(...items)}}), addEventListener() {},
     },
-    window: {novaAudioAgentDesktop: {settings: {
+    window: {novaPersonalAgentDesktop: {settings: {
       phoneAction: async () => ({state: 'idle'}), get: async () => initialView, onChanged: listener => { push = listener }, ...apiOverrides,
     }}},
   })
@@ -799,7 +799,7 @@ test('the panel omits the connection and microphone block while launch listening
 })
 
 test('the panel talks to main only through the settings bridge', () => {
-  assert.match(script, /window\.novaAudioAgentDesktop\.settings/)
+  assert.match(script, /window\.novaPersonalAgentDesktop\.settings/)
   assert.doesNotMatch(script, /fetch\(|WebSocket|memoryBoard|bootstrap/)
   assert.doesNotMatch(html, /<script(?![^>]*src="\.\/settings\.mjs")/)
 })

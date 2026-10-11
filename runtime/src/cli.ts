@@ -95,7 +95,7 @@ export async function main(
     }
     return results.every(result => result.passed) ? 0 : 1
   }
-  io.write('Usage: nova-audio-agent-node fixture check | fixture replay <scenario> | demo [async|dual-axis|timeout|proactive|all] | scorecard fixture check | diagnose --json\n')
+  io.write('Usage: nova-personal-agent-node fixture check | fixture replay <scenario> | demo [async|dual-axis|timeout|proactive|all] | scorecard fixture check | diagnose --json\n')
   return 2
 }
 

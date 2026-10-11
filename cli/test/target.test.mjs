@@ -38,6 +38,9 @@ test('published package and release metadata use strict public allowlists', asyn
   const packageJson = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
   const assets = JSON.parse(await readFile(new URL('../release-assets.json', import.meta.url), 'utf8'))
   assert.equal(packageJson.version, PRODUCT_VERSION)
+  assert.equal(packageJson.name, 'nova-personal-agent')
+  assert.equal(packageJson.bin.novapersonal, './bin/novapersonal.mjs')
+  assert.equal(packageJson.bin.novaaudio, packageJson.bin.novapersonal)
   assert.deepEqual(packageJson.files, ['bin/', 'src/', 'release-assets.json', 'README.md', 'LICENSE'])
   assert.deepEqual(Object.keys(assets.targets).sort(), [
     'darwin-arm64', 'linux-x64', 'win32-x64',
@@ -47,4 +50,11 @@ test('published package and release metadata use strict public allowlists', asyn
     assert.equal(resolvedId, id)
     assert.deepEqual(entry, definition)
   }
+})
+
+test('v0.4 targets use the new brand while published v0.3 downloads retain their filenames', () => {
+  assert.equal(resolveTarget('darwin', 'arm64', '0.4.0').artifact, 'nova-personal-agent-0.4.0-macos-arm64-app.zip')
+  assert.equal(resolveTarget('win32', 'x64', '0.4.0-preview.1').executable, 'Nova Personal Agent Desktop.exe')
+  assert.equal(resolveTarget('linux', 'x64', '0.4.0').artifact, 'nova-personal-agent-0.4.0-linux-x64.AppImage')
+  assert.equal(releaseBaseUrl('0.4.0'), 'https://github.com/deepnovacore/nova-personal-agent/releases/download/v0.4.0')
 })

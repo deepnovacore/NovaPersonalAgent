@@ -33,8 +33,8 @@
 #define O_NOFOLLOW 0
 #endif
 
-static const char* NOVA_SIBLING_PREFIX = ".nova-audio-agent-codex-preflight-";
-static const char* NOVA_MARKER_PREFIX = ".nova-audio-agent-codex-preflight-";
+static const char* NOVA_SIBLING_PREFIX = ".nova-personal-agent-codex-preflight-";
+static const char* NOVA_MARKER_PREFIX = ".nova-personal-agent-codex-preflight-";
 
 static int nova_starts_with(const char* value, const char* prefix) {
   return strncmp(value, prefix, strlen(prefix)) == 0;
@@ -212,7 +212,7 @@ static int nova_main(int argc, char** argv) {
   char resolved_current[PATH_MAX];
   int cwd_matches = getcwd(current, sizeof(current)) != NULL &&
       realpath(current, resolved_current) != NULL && strcmp(resolved_current, workspace) == 0;
-  int inside_write = nova_attempt_write(argv[4], "nova-audio-agent-preflight", 1);
+  int inside_write = nova_attempt_write(argv[4], "nova-personal-agent-preflight", 1);
   int inside_remove = unlink(argv[4]) == 0;
   int outside_write_denied = !nova_attempt_write(canary, "outside-write-succeeded", 0);
   int child_outside_write_denied = nova_child_denied(canary);

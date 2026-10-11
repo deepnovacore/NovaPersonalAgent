@@ -16,7 +16,7 @@ const skip = process.env.NOVA_LIVE_TESTS !== '1' ? 'run through the live accepta
   : apiKey === undefined ? 'set DASHSCOPE_API_KEY or MODEL_API_KEY for the live coordinator eval' : false
 const model = process.env.SUPPORT_MODEL ?? 'qwen-flash'
 
-const active = 'nova-audio-agent'
+const active = 'nova-personal-agent'
 const running = [{work_id: 'w-blog', project: '博客', title: '暗色模式'}]
 const roster = [
   {name: active, last_used_at: 4, last_session_title: '修复空密码登录', running: []},

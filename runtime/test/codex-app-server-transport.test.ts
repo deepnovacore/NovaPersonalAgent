@@ -2293,7 +2293,7 @@ test('persistent resume uses exact host identity and rejection is pre-effect res
     assert.deepEqual(resume?.params, {
       approvalPolicy: 'never',
       approvalsReviewer: 'user',
-      permissions: 'nova_audio_agent',
+      permissions: 'nova_personal_agent',
       developerInstructions: 'bounded instructions',
       modelProvider: 'nova_api_key',
       cwd: workspace,
@@ -2868,10 +2868,10 @@ function effectiveConfig(workspace: string, widened = false, managed?: ManagedCo
       model_providers: {nova_api_key: {base_url: 'https://api.openai.com/v1', env_key: 'NOVA_CODEX_API_KEY', wire_api: 'responses', requires_openai_auth: false}},
       approval_policy: 'never',
       approvals_reviewer: 'user',
-      default_permissions: 'nova_audio_agent',
+      default_permissions: 'nova_personal_agent',
       web_search: 'disabled',
       cwd: workspace,
-      permissions: {nova_audio_agent: {
+      permissions: {nova_personal_agent: {
         filesystem: {
           ':root': 'read',
           ':workspace_roots': {'.': 'write', '.git': 'read', '.agents': 'read', '.codex': 'read'},
@@ -2901,7 +2901,7 @@ function threadResponse(
     cwd: workspace,
     sandbox: {},
     approvalsReviewer: 'user',
-    activePermissionProfile: {id: 'nova_audio_agent'},
+    activePermissionProfile: {id: 'nova_personal_agent'},
     ...(persistent ? {runtimeWorkspaceRoots: [workspace]} : {}),
     thread: {
       modelProvider: 'nova_api_key',

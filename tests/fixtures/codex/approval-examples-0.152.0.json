@@ -4,7 +4,7 @@
     "schema": "v2/ThreadStartParams.json",
     "value": {
       "approvalPolicy": "on-request",
-      "permissions": "nova_audio_agent",
+      "permissions": "nova_personal_agent",
       "approvalsReviewer": "user"
     }
   },
@@ -13,7 +13,7 @@
     "schema": "v2/ThreadResumeParams.json",
     "value": {
       "approvalPolicy": "on-request",
-      "permissions": "nova_audio_agent",
+      "permissions": "nova_personal_agent",
       "approvalsReviewer": "user",
       "threadId": "thread-1"
     }
@@ -23,7 +23,7 @@
     "schema": "v2/ThreadStartParams.json",
     "value": {
       "approvalPolicy": "never",
-      "permissions": "nova_audio_agent",
+      "permissions": "nova_personal_agent",
       "approvalsReviewer": "user"
     }
   },
@@ -32,7 +32,7 @@
     "schema": "v2/ThreadResumeParams.json",
     "value": {
       "approvalPolicy": "never",
-      "permissions": "nova_audio_agent",
+      "permissions": "nova_personal_agent",
       "approvalsReviewer": "user",
       "threadId": "thread-1"
     }

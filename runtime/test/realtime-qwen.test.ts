@@ -432,7 +432,7 @@ test('a host response disables tools and targets only the injected fact', async 
     response: {
       modalities: ['audio', 'text'],
       tool_choice: 'none',
-      instructions: 'Nova Audio Agent host 已注入一条新事实。只转述最后一条尚未转述的 host 事实一次；不得调用工具，不得重复更早的提交、启动、进度或确认结果。',
+      instructions: 'Nova Personal Agent host 已注入一条新事实。只转述最后一条尚未转述的 host 事实一次；不得调用工具，不得重复更早的提交、启动、进度或确认结果。',
     },
   })
 

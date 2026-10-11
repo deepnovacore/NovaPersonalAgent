@@ -166,7 +166,7 @@ browser 也遵循截图与坐标路线：Midscene 看页面截图，Playwright �
 
 ## 2026-10-06 执行记录与适用调整
 
-- 起点：本工作树 `/Users/fishwowater/.codex/worktrees/7885/nova-audio-agent`，detached HEAD `c0abf248`，与 `v0.4.0dev` 相等；工作树干净。未修改其他工作树或使用主目录 v0.3.0dev。
+- 起点：本工作树 `/Users/fishwowater/.codex/worktrees/7885/nova-personal-agent`，detached HEAD `c0abf248`，与 `v0.4.0dev` 相等；工作树干净。未修改其他工作树或使用主目录 v0.3.0dev。
 - 基线：锁定依赖安装完成，既有 mobile/Android/iOS/设备锁聚焦检查 37/37 通过（本地脚本模型与伪 ADB，不是真实设备）。受限环境的 localhost/process EPERM 重跑后消除。
 - 版本：npm 公共包 `@midscene/computer@1.12.9` 与 core/shared 1.12.9 匹配；读取安装 tarball 的公开类型与实现。未升级 Midscene。
 - 共享 runner：提取 Agent 配置、视觉规划、进度与结束状态；平台守卫保留审批、目标、步数、预算和回执。MobileIosConfig/runMobileIos 保持兼容。日志路径改为 Node `os.devNull`。

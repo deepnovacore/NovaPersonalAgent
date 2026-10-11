@@ -383,7 +383,7 @@ test('runtime entry resolves inside the workspace for dev and the asar for packa
     isPackaged: true,
     appPath: packagedApp,
     packageRoot: '/unused/desktop',
-  }), resolve(packagedApp, 'node_modules/@nova-audio-agent/runtime/dist/src/desktop-entry.js'))
+  }), resolve(packagedApp, 'node_modules/@nova-personal-agent/runtime/dist/src/desktop-entry.js'))
 })
 
 test('launch spec strips a stale inherited readiness pipe', () => {

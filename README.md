@@ -4,11 +4,11 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-[![CI](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml)
+[![CI](https://github.com/deepnovacore/nova-personal-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/nova-personal-agent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
-[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaAudioAgent/)
+[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/nova-personal-agent/)
 
 > **Your personal agent and always-on voice assistant — aware of your context, with dual brains and restrained proactivity.**
 
@@ -147,30 +147,33 @@ Codex transport).
 Install the release with npm.
 
 ```bash
-npm install --global nova-audio-agent@latest
+npm install --global nova-personal-agent@latest
 # open the shipped app; the first launch asks for one DashScope API key
-novaaudio
+novapersonal
 # open the settings panel in the app
-novaaudio config
+novapersonal config
 # list the keys your voice pipeline needs; --online tests them
-novaaudio doctor
+novapersonal doctor
 ```
+
+The rename takes effect in v0.4; the new npm packages become installable after their first release. Published v0.3.x versions retain the old package names and `novaaudio` command. The new package keeps that command alias and reuses existing data and settings. When migrating an existing global install, first run `npm uninstall --global nova-audio-agent nova-audio-agent-server` to avoid command-link collisions; this leaves user data intact.
+
 
 Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-audio-agent@0.3.1`. Upgrades keep your settings and data; back up your Nova data before downgrading.
 
 Headless Ubuntu 22.04+ x64:
 
-1. Install or upgrade with `npm install --global nova-audio-agent-server@latest`, then configure the service and initialize credentials using the [configuration guide](docs/en/deployment/remote-server.md).
-2. Start the service with `novaaudio-server start`.
-3. In a second terminal, run `novaaudio-server pair wss://your-host.ts.net` to display a one-use pairing QR code.
+1. Install or upgrade with `npm install --global nova-personal-agent-server@latest`, then configure the service and initialize credentials using the [configuration guide](docs/en/deployment/remote-server.md).
+2. Start the service with `novapersonal-server start`.
+3. In a second terminal, run `novapersonal-server pair wss://your-host.ts.net` to display a one-use pairing QR code.
 
 ### 3.2 Develop from source
 
 For development from source:
 
 ```bash
-git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
-cd nova-audio-agent
+git clone https://github.com/deepnovacore/nova-personal-agent.git nova-personal-agent
+cd nova-personal-agent
 npm ci && cp .env.example .env
 ```
 
@@ -181,7 +184,7 @@ npm run start:client
 # Open Workbench for this launch, overriding the saved startup preference
 npm run start:workbench
 # Build, diagnose or run the local demos
-npm run build --workspace @nova-audio-agent/runtime
+npm run build --workspace @nova-personal-agent/runtime
 node runtime/dist/src/cli.js diagnose --json
 node runtime/dist/src/cli.js demo all
 ```
@@ -216,7 +219,7 @@ Models, credentials and per-provider limits: [support matrix](docs/en/support-ma
 | [Getting started](docs/en/getting-started.md) | Setup and integrations |
 | [Workbench](docs/en/workbench.md) · [Tasks](docs/en/tasks.md) · [Sources and connectors](docs/en/sources-and-connectors.md) | The main window, delegated work, and what Nova may read |
 | [When should a voice agent speak?](docs/en/blog/2026-08-proactive-voice-agent-design-space.md) | Voice interaction design |
-| [Node runtime migration archive](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
+| [Node runtime migration archive](https://github.com/deepnovacore/nova-personal-agent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
 
 ## 5. Roadmap
 

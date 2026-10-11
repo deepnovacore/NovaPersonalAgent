@@ -314,7 +314,7 @@
     {
       "id": "confirm-yes",
       "text": "同意，继续。",
-      "context": "Nova Audio Agent 任务确认事实：当前项目操作待确认，id=\"proposal-live-1\"，操作：新建 demo 项目。尚未获得用户决定。",
+      "context": "Nova Personal Agent 任务确认事实：当前项目操作待确认，id=\"proposal-live-1\"，操作：新建 demo 项目。尚未获得用户决定。",
       "steps": [
         {
           "expect": {
@@ -335,7 +335,7 @@
     {
       "id": "confirm-no",
       "text": "不，取消这次操作。",
-      "context": "Nova Audio Agent 任务确认事实：当前项目操作待确认，id=\"proposal-live-1\"，操作：新建 demo 项目。尚未获得用户决定。",
+      "context": "Nova Personal Agent 任务确认事实：当前项目操作待确认，id=\"proposal-live-1\"，操作：新建 demo 项目。尚未获得用户决定。",
       "steps": [
         {
           "expect": {
@@ -356,7 +356,7 @@
     {
       "id": "confirm-ambiguous",
       "text": "我还没想好。",
-      "context": "Nova Audio Agent 任务确认事实：当前项目操作待确认，id=\"proposal-live-1\"，操作：新建 demo 项目。尚未获得用户决定。",
+      "context": "Nova Personal Agent 任务确认事实：当前项目操作待确认，id=\"proposal-live-1\"，操作：新建 demo 项目。尚未获得用户决定。",
       "steps": [
         {
           "expect": {
@@ -749,7 +749,7 @@
     {
       "id": "confirm-question",
       "text": "为什么需要新建这个项目？我还没有决定。",
-      "context": "Nova Audio Agent 任务确认事实：当前项目操作待确认，id=\"proposal-live-1\"，操作：新建 demo 项目。尚未获得用户决定。",
+      "context": "Nova Personal Agent 任务确认事实：当前项目操作待确认，id=\"proposal-live-1\"，操作：新建 demo 项目。尚未获得用户决定。",
       "steps": [
         {
           "expect": {

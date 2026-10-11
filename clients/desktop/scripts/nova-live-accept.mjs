@@ -1,4 +1,4 @@
-// Live GUI acceptance of an INSTALLED Nova Audio Agent desktop build.
+// Live GUI acceptance of an INSTALLED Nova Personal Agent desktop build.
 // Launches the real executable with an isolated profile and drives its real windows through the
 // Chromium remote-debugging port: Workbench pages, Settings categories, language control. Screenshots
 // are the renderer's own frames. --guided-key-env/--chat explicitly enable real-provider acceptance.
@@ -192,7 +192,7 @@ try {
   if (settings) {
     if (opt.attachDelay) await sleep(opt.attachDelay)
     const c = await attach(settings)
-    const bridge = await evaluate(c, `({api: typeof window.novaAudioAgentDesktop, settings: typeof window.novaAudioAgentDesktop?.settings, get: typeof window.novaAudioAgentDesktop?.settings?.get})`)
+    const bridge = await evaluate(c, `({api: typeof window.novaPersonalAgentDesktop, settings: typeof window.novaPersonalAgentDesktop?.settings, get: typeof window.novaPersonalAgentDesktop?.settings?.get})`)
     step('Settings preload bridge is present in the window', bridge.api === 'object' && bridge.settings === 'object', JSON.stringify(bridge))
     const nav = await waitFor(() => evaluate(c, `document.querySelectorAll('.nav-item[data-category]').length`).then(n => n === 10 && n), 30000)
     step('Settings cold start loads: ten categories present', nav === 10, `categories: ${nav}`)

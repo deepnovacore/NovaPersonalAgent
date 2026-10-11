@@ -193,7 +193,7 @@ test('microphone permission starts from the ready orb and every IPC edge is send
   assert.match(main, /ipcMain\.handle\('nova:microphone:retry', event => \{\n\s*if \(!settingsWindow \|\| event\.sender !== settingsWindow\.webContents\)/)
   assert.match(preload, /requestPermission: \(\) => ipcRenderer\.invoke\('nova:microphone:permission'\)/)
   assert.match(preload, /report: status => ipcRenderer\.send\('nova:microphone:status', status\)/)
-  assert.match(renderer, /await window\.novaAudioAgentDesktop\.microphone\.requestPermission\(\)/)
+  assert.match(renderer, /await window\.novaPersonalAgentDesktop\.microphone\.requestPermission\(\)/)
   assert.match(renderer, /preflightMicrophone\(\{[\s\S]*systemStatus:/)
 })
 
@@ -202,7 +202,7 @@ test('main owns the fixed orb menu and validates every menu and board sender', a
 
   assert.match(source, /ipcMain\.on\('nova:orb-menu:show', event => \{\n\s*if \(mainWindow && event\.sender === mainWindow\.webContents\)/)
   assert.match(source, /记忆面板/)
-  assert.match(source, /退出 Nova Audio Agent/)
+  assert.match(source, /退出 Nova Personal Agent/)
   assert.match(source, /click: \(\) => app\.quit\(\)/)
   assert.match(source, /event\.sender !== boardWindow\.webContents/)
   assert.match(source, /event\.sender === mainWindow\.webContents/)
@@ -298,7 +298,7 @@ test('the orb menu opens the settings panel above the quit separator', async () 
     'the settings entry sits above the separator',
   )
   assert.ok(
-    body.indexOf("{ type: 'separator' }") < body.indexOf('退出 Nova Audio Agent'),
+    body.indexOf("{ type: 'separator' }") < body.indexOf('退出 Nova Personal Agent'),
     'quit still sits below the separator',
   )
 })
@@ -790,7 +790,7 @@ test('warns instead of silently failing when the global shortcut cannot register
   const registration = source.slice(source.indexOf('globalShortcut.register('))
   assert.match(
     registration.slice(0, 500),
-    /console\.warn\('\[nova-audio-agent-desktop\] global shortcut unavailable on this session'\)/,
+    /console\.warn\('\[nova-personal-agent-desktop\] global shortcut unavailable on this session'\)/,
   )
 })
 
@@ -828,11 +828,11 @@ test('drag and orb menu paths stay sender validated and bounded', async () => {
   assert.match(mainSource, /validDragDelta/)
   assert.match(mainSource, /ipcMain\.on\('nova:confirmation-mode', \(event, active\) => \{\n\s*if \(!mainWindow \|\| event\.sender !== mainWindow\.webContents\) return\n\s*if \(typeof active !== 'boolean'\) return/u)
   assert.match(mainSource, /orbWindow\.finishDrag\(position\)/u)
-  assert.match(mainSource, /label: t\("退出 Nova Audio Agent"\)/)
+  assert.match(mainSource, /label: t\("退出 Nova Personal Agent"\)/)
   assert.match(mainSource, /click: \(\) => app\.quit\(\)/)
   assert.doesNotMatch(rendererSource, /orb\.addEventListener\('click'/)
   assert.match(rendererSource, /event\.preventDefault\(\)/)
-  assert.match(rendererSource, /window\.novaAudioAgentDesktop\.orbMenu\.show\(\)/)
+  assert.match(rendererSource, /window\.novaPersonalAgentDesktop\.orbMenu\.show\(\)/)
 })
 
 test('renderer text startup avoids microphone and explicit voice entry requires preflight', async () => {
@@ -857,7 +857,7 @@ test('speaker output state serializes native mute and disables concurrent toggle
   const renderer = await readFile(new URL('../src/renderer/index.mjs', import.meta.url), 'utf8')
 
   assert.match(renderer, /new OutputMuteController\(/)
-  assert.match(renderer, /apply: muted => window\.novaAudioAgentDesktop\.nativeAudio\.setPlaybackMuted\(muted\)/)
+  assert.match(renderer, /apply: muted => window\.novaPersonalAgentDesktop\.nativeAudio\.setPlaybackMuted\(muted\)/)
   assert.match(renderer, /axes\.outputMutePending = pending/)
   assert.match(renderer, /speakerToggle\.disabled = axes\.outputMutePending/)
   assert.match(renderer, /speakerToggle\.addEventListener\('click', \(\) => \{ void toggleOutputMuted\(\) \}\)/)
@@ -881,7 +881,7 @@ test('the mute toggle drops microphone input at both ingress points', async () =
   assert.doesNotMatch(renderer, /openSettingsButton/)
   // Opening the orb's voice conversation keeps a sleeping orb asleep; only an explicit start wakes it.
   assert.match(renderer, /start: async \(\{wake = true\} = \{\}\) => \{/)
-  assert.match(renderer, /if \(wake\) await window\.novaAudioAgentDesktop\.personal\.wake\(\)/)
+  assert.match(renderer, /if \(wake\) await window\.novaPersonalAgentDesktop\.personal\.wake\(\)/)
   // Sleep belongs to the orb: neither the idle timer nor Ctrl+L puts the workbench to sleep.
   assert.match(renderer, /idle: personalView\?\.controller\.presentationMode === 'orb' && canAutoSleep\(/)
   const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
@@ -1253,7 +1253,7 @@ test('background entry stops detector and native mic before waiting for renderer
 test('foreground changes native presentation before unmuting playback',async()=>{
  const source=await readFile(new URL('../src/renderer/index.mjs',import.meta.url),'utf8')
  const body=source.slice(source.indexOf('applyPresentation: async ')+19,source.indexOf('\n  taskAction:',source.indexOf('applyPresentation: async '))).replace(/,\s*$/,'')
- const calls=[],window={novaAudioAgentDesktop:{personal:{setPresentation:async(mode,activate)=>calls.push(['presentation',mode,activate])},nativeAudio:{setPlaybackMuted:async muted=>calls.push(['muted',muted])}}}
+ const calls=[],window={novaPersonalAgentDesktop:{personal:{setPresentation:async(mode,activate)=>calls.push(['presentation',mode,activate])},nativeAudio:{setPlaybackMuted:async muted=>calls.push(['muted',muted])}}}
  const apply=new Function('window','axes','requestAnimationFrame','render',`let lastReportedDormant=true;return ${body}`)(window,{outputMuted:false},()=>{},()=>{})
  await apply('workbench',{activate:false});assert.deepEqual(calls,[['presentation','workbench',false],['muted',false]])
 })
@@ -1271,7 +1271,7 @@ test('background return reconciles unchanged renderer dormancy with native show 
   const controller=createOrbWindowController({getBounds:()=>bounds,setBounds:value=>{bounds=value},getZoomFactor:()=>1,getScaleFactor:()=>2,getWorkAreaForPoint:()=>({x:0,y:0,width:1440,height:900}),onConfirmationPlacement(){}})
   const show=new Function('personalCollapsed','orbWindow',`return ${showBody}`)(true,controller)
   const reports=[],frames=[],shell={dataset:{}},axes={wakeState:'sleeping',hovered:false,codex:'idle',outputMuted:false,playback:'idle'}
-  const window={novaAudioAgentDesktop:{personal:{setPresentation:async mode=>{visible=mode!=='background';if(visible)show()}},nativeAudio:{clear:async()=>{},setPlaybackMuted:async()=>{}},windowLayout:{setDormant:value=>{reports.push(value);if(visible)controller.setDormant(value)}}}}
+  const window={novaPersonalAgentDesktop:{personal:{setPresentation:async mode=>{visible=mode!=='background';if(visible)show()}},nativeAudio:{clear:async()=>{},setPlaybackMuted:async()=>{}},windowLayout:{setDormant:value=>{reports.push(value);if(visible)controller.setDormant(value)}}}}
   const fixture=new Function('window','axes','requestAnimationFrame','shell','orbDormant','seenPresentations','alertTone','playback','nativeFrames','nativeLevel',`let lastReportedDormant=null;const state={name:'idle',confirmationVisible:false};const render=()=>{${reportBody}};return {render,apply:${applyBody}}`)(window,axes,callback=>frames.push(callback),shell,orbDormant,new Set(),{stop(){}},{disconnect(){}},{clear(){}},{clear(){}})
   fixture.render();assert.equal(bounds.width,64)
   await fixture.apply('background');frames.shift()();assert.equal(visible,false)
@@ -1307,7 +1307,7 @@ test('keyboard activation wakes a sleeping orb and expands an awake one', async 
   const calls = []
   let handler
   const orb = {addEventListener: (_name, callback) => { handler = callback }}
-  const window = {novaAudioAgentDesktop: {wakeWord: {wake: () => calls.push('wake')}}}
+  const window = {novaPersonalAgentDesktop: {wakeWord: {wake: () => calls.push('wake')}}}
   const axes = {wakeState: 'sleeping'}
   const personalView = {controller: {presentationMode: 'orb'}, expand: () => calls.push('expand')}
   new Function('orb', 'axes', 'window', 'personalView', body)(orb, axes, window, personalView)

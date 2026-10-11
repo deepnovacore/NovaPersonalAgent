@@ -9,7 +9,7 @@ import { parseEnv } from 'node:util'
 
 import { codexCandidates } from '../clients/desktop/src/main/codex-discovery.mjs'
 
-const DESKTOP_WORKSPACE = '@nova-audio-agent/desktop'
+const DESKTOP_WORKSPACE = '@nova-personal-agent/desktop'
 const SUPPORTED_PLATFORMS = new Set(['darwin', 'linux', 'win32'])
 
 export function parseClientEnvironment({contents, shellEnv}) {
@@ -127,7 +127,7 @@ export function planClientLaunch({
     throw new Error('this launcher does not accept arguments other than --workbench')
   }
   if (!SUPPORTED_PLATFORMS.has(platform)) {
-    throw new Error('the Nova Audio Agent Desktop client requires macOS, Linux, or Windows')
+    throw new Error('the Nova Personal Agent Desktop client requires macOS, Linux, or Windows')
   }
   const pathApi = platform === 'win32' ? win32 : posix
   if (typeof npmCli !== 'string' || !pathApi.isAbsolute(npmCli)) {

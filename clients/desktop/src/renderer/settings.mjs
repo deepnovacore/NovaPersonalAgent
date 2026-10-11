@@ -33,7 +33,7 @@ import {
   resolveVoiceChoice,
 } from './voice-choice.mjs'
 
-const api = window.novaAudioAgentDesktop.settings
+const api = window.novaPersonalAgentDesktop.settings
 const imPanel = createImPanel({document, api})
 const connectionsPanel = createConnectionsPanel({document, api})
 const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
@@ -389,7 +389,7 @@ function renderVision(view) {
 conversationVision.addEventListener('change', async () => {
   const enabled = conversationVision.checked
   if (enabled) {
-    try { if (await window.novaAudioAgentDesktop.camera.requestPermission() !== 'granted') throw Error('permission') }
+    try { if (await window.novaPersonalAgentDesktop.camera.requestPermission() !== 'granted') throw Error('permission') }
     catch { conversationVision.checked = false; document.getElementById('conversation-vision-status').textContent = t("摄像头权限未授予"); return }
   }
   if (conversationVision.checked !== enabled || conversationVision.disabled) return
@@ -402,7 +402,7 @@ document.getElementById('watch-model').addEventListener('change', event => {
 onButton(document.getElementById('camera-refresh'), async () => {
   const status = document.getElementById('camera-devices-status')
   try {
-    cameraDevices = await window.novaAudioAgentDesktop.camera.listDevices()
+    cameraDevices = await window.novaPersonalAgentDesktop.camera.listDevices()
     status.textContent = cameraDevices.length ? '' : t("未检测到摄像头；授权并连接设备后重试")
     renderVision(currentView)
   } catch { status.textContent = t("无法获取摄像头列表") }
@@ -619,9 +619,9 @@ bindStage(autoHideSeconds, 'change', () => {
   autoHideSeconds.reportValidity()
   return valid ? {autoHideSeconds: value} : {}
 })
-onButton(wakeRetry, () => window.novaAudioAgentDesktop.wakeWord.retry(), () => {statusLabel.textContent=t('操作未完成')})
+onButton(wakeRetry, () => window.novaPersonalAgentDesktop.wakeWord.retry(), () => {statusLabel.textContent=t('操作未完成')})
 for (const event of ['pointerdown', 'keydown']) {
-  document.addEventListener(event, () => window.novaAudioAgentDesktop.wakeWord.activity())
+  document.addEventListener(event, () => window.novaPersonalAgentDesktop.wakeWord.activity())
 }
 bindStage(codingProgressNarrationInput, 'change', () => ({codingProgressNarration: codingProgressNarrationInput.value}))
 for (const input of proactivityInputs) bindStage(input, 'change', () => ({proactivity: input.value}))

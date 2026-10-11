@@ -61,13 +61,13 @@ jobs:
           test "$(jq '[.jobs[] | select(.name | startswith("platform-candidate (windows-latest, win32, win32-x64")) | select(.conclusion == "success")] | length' candidate-run.json)" = "1"
           test "$(jq '[.jobs[] | select(.name | startswith("platform-candidate (ubuntu-22.04, linux, linux-x64")) | select(.conclusion == "success")] | length' candidate-run.json)" = "1"
           npm whoami
-          if npm view "nova-audio-agent@$RELEASE_VERSION" version > existing-version.txt 2> npm-view-error.txt; then
-            echo "nova-audio-agent@$RELEASE_VERSION already exists" >&2
+          if npm view "nova-personal-agent@$RELEASE_VERSION" version > existing-version.txt 2> npm-view-error.txt; then
+            echo "nova-personal-agent@$RELEASE_VERSION already exists" >&2
             exit 1
           fi
           grep -q 'E404' npm-view-error.txt
-          if npm view "nova-audio-agent-server@$RELEASE_VERSION" version > existing-server-version.txt 2> npm-server-view-error.txt; then
-            echo "nova-audio-agent-server@$RELEASE_VERSION already exists" >&2
+          if npm view "nova-personal-agent-server@$RELEASE_VERSION" version > existing-server-version.txt 2> npm-server-view-error.txt; then
+            echo "nova-personal-agent-server@$RELEASE_VERSION already exists" >&2
             exit 1
           fi
           grep -q 'E404' npm-server-view-error.txt
@@ -101,8 +101,8 @@ jobs:
           test -n "$tarball"
           tarball="$(realpath "$tarball")"
           npm install --prefix npm-smoke --ignore-scripts "$tarball"
-          test "$(npm-smoke/node_modules/.bin/novaaudio --version)" = "${{ inputs.release_version }}"
-          npm-smoke/node_modules/.bin/novaaudio --help
+          test "$(npm-smoke/node_modules/.bin/novapersonal --version)" = "${{ inputs.release_version }}"
+          npm-smoke/node_modules/.bin/novapersonal --help
       - name: Create GitHub release, publish npm package, and verify propagation
         env:
           GH_TOKEN: ${{ github.token }}
@@ -118,17 +118,17 @@ jobs:
           fi
           gh release create "v$RELEASE_VERSION" release-artifacts/* \
             --target "$EXPECTED_COMMIT" \
-            --title "Nova Audio Agent v$RELEASE_VERSION" \
-            --notes "Nova Audio Agent v$RELEASE_VERSION. Install with npm install --global nova-audio-agent@$npm_tag. Available for macOS arm64, Windows x64 and Ubuntu 22.04+ x64. Desktop applications are unsigned; macOS Gatekeeper and Windows SmartScreen may display security warnings. See the README for features and setup." \
+            --title "Nova Personal Agent v$RELEASE_VERSION" \
+            --notes "Nova Personal Agent v$RELEASE_VERSION. Install with npm install --global nova-personal-agent@$npm_tag. Available for macOS arm64, Windows x64 and Ubuntu 22.04+ x64. Desktop applications are unsigned; macOS Gatekeeper and Windows SmartScreen may display security warnings. See the README for features and setup." \
             "${release_flags[@]}"
           tarball="$(find npm-package -maxdepth 1 -name '*.tgz' -type f)"
           tarball="$(realpath "$tarball")"
-          npm publish "./release-artifacts/nova-audio-agent-server-$RELEASE_VERSION.tgz" --access public --tag "$npm_tag"
+          npm publish "./release-artifacts/nova-personal-agent-server-$RELEASE_VERSION.tgz" --access public --tag "$npm_tag"
           npm publish "$tarball" --access public --tag "$npm_tag"
           published=''
           for attempt in $(seq 1 60); do
-            if test "$(npm view "nova-audio-agent@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION" \
-              && test "$(npm view "nova-audio-agent-server@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION"; then
+            if test "$(npm view "nova-personal-agent@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION" \
+              && test "$(npm view "nova-personal-agent-server@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION"; then
               published=1
               break
             fi
@@ -136,10 +136,10 @@ jobs:
           done
           test "$published" = "1"
           prefix="$(mktemp -d)"
-          npm install --global --prefix "$prefix" "nova-audio-agent@$RELEASE_VERSION" "nova-audio-agent-server@$RELEASE_VERSION"
-          test "$("$prefix/bin/novaaudio" --version)" = "$RELEASE_VERSION"
-          "$prefix/bin/novaaudio" --help
-          "$prefix/bin/novaaudio-server" --help
+          npm install --global --prefix "$prefix" "nova-personal-agent@$RELEASE_VERSION" "nova-personal-agent-server@$RELEASE_VERSION"
+          test "$("$prefix/bin/novapersonal" --version)" = "$RELEASE_VERSION"
+          "$prefix/bin/novapersonal" --help
+          "$prefix/bin/novapersonal-server" --help
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -1,7 +1,7 @@
 /**
  * Compile executor manifests into provider-safe function schemas.
  *
- * Ported from `src/nova_audio_agent/tool_schema.py`. The logical tool name stays
+ * Ported from `src/nova_personal_agent/tool_schema.py`. The logical tool name stays
  * `<executor>.<op>`; DashScope's OpenAI-compatible wire format forbids dots, so the
  * provider sees `<executor>__<op>` and the immutable binding table restores the
  * logical identity.

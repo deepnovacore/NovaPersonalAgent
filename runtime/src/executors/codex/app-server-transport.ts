@@ -974,7 +974,7 @@ export class OwnedCodexAppServerTransport implements CodexAppServerTransport {
     try {
       if (this.#closed) throw new CodexTransportError('transport_lost')
       await this.#requestWithin(session, 'initialize', {
-        clientInfo: {name: 'nova-audio-agent', title: 'Nova Audio Agent', version: '1'},
+        clientInfo: {name: 'nova-personal-agent', title: 'Nova Personal Agent', version: '1'},
         // 0.152.0 rejects thread/start.permissions (named profile) unless the client opts in.
         capabilities: {experimentalApi: true},
       }, deadline)

@@ -17,8 +17,8 @@
 #define NOVA_CHILD_TIMEOUT_MS 2000UL
 #define NOVA_NETWORK_TIMEOUT_MS 1000L
 
-static const WCHAR *NOVA_SIBLING_PREFIX = L".nova-audio-agent-codex-preflight-";
-static const WCHAR *NOVA_MARKER_PREFIX = L".nova-audio-agent-codex-preflight-";
+static const WCHAR *NOVA_SIBLING_PREFIX = L".nova-personal-agent-codex-preflight-";
+static const WCHAR *NOVA_MARKER_PREFIX = L".nova-personal-agent-codex-preflight-";
 
 static int nova_starts_with(const WCHAR *value, const WCHAR *prefix) {
   return wcsncmp(value, prefix, wcslen(prefix)) == 0;
@@ -337,7 +337,7 @@ static int nova_main(int argc, WCHAR **argv) {
                     nova_canonical_existing(current, 1, current_canonical) &&
                     _wcsicmp(current_canonical, workspace) == 0;
   int inside_write =
-      nova_attempt_write(argv[4], "nova-audio-agent-preflight", 1);
+      nova_attempt_write(argv[4], "nova-personal-agent-preflight", 1);
   int inside_remove = DeleteFileW(argv[4]) != FALSE;
   int outside_write_denied =
       !nova_attempt_write(canary, "outside-write-succeeded", 0);

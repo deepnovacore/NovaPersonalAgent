@@ -142,11 +142,11 @@ export class AppServerTurnProjection {
         if (requireObject(envelope.sandbox).type !== 'dangerFullAccess') throw new TypeError('sandbox')
         if (envelope.activePermissionProfile !== null && envelope.activePermissionProfile !== undefined) {
           const profile = requireObject(envelope.activePermissionProfile)
-          if (profile.id === 'nova_audio_agent') throw new TypeError('profile')
+          if (profile.id === 'nova_personal_agent') throw new TypeError('profile')
         }
       } else {
         const profile = requireObject(envelope.activePermissionProfile)
-        if (profile.id !== 'nova_audio_agent') throw new TypeError('profile')
+        if (profile.id !== 'nova_personal_agent') throw new TypeError('profile')
       }
       this.#workspace=options.workspace
       this.#threadId = threadId

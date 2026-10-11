@@ -2,7 +2,7 @@ import {localizeDocument, t} from './locale.mjs'
 localizeDocument(document)
 
 // First run asks only for the chosen pipeline's keys; everything else stays in Settings.
-const api = window.novaAudioAgentDesktop.setup
+const api = window.novaPersonalAgentDesktop.setup
 const LLM_KEYS = Object.freeze({qwen: 'dashscopeApiKey', deepseek: 'deepseekApiKey', ark: 'arkApiKey'})
 const PROBE_TEXT = Object.freeze({
   ok: () => t("密钥有效"),

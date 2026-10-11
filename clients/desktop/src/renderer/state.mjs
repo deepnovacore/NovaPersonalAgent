@@ -1,11 +1,11 @@
 import {t} from './locale.mjs'
 const LABELS = Object.freeze({
-  booting: t("Nova Audio Agent 正在启动"),
+  booting: t("Nova Personal Agent 正在启动"),
   inactive: t("语音未启用"),
   idle: t("语音已启用，等待输入"),
   candidate: t("检测到可能的语音"),
   listening: t("正在聆听"),
-  speaking: t("Nova Audio Agent 正在说话"),
+  speaking: t("Nova Personal Agent 正在说话"),
   muted: t("已闭麦，暂停接收麦克风输入"),
   'permission-denied': t("麦克风权限被拒绝"),
   'microphone-restricted': t("麦克风被系统策略限制"),
@@ -13,12 +13,12 @@ const LABELS = Object.freeze({
   'microphone-busy': t("麦克风正被其他应用占用"),
   'microphone-unavailable': t("当前环境的麦克风采集不可用"),
   'audio-pipeline-error': t("麦克风音频管线启动失败"),
-  disconnected: t("Nova Audio Agent 已断开"),
-  reconnecting: t("Nova Audio Agent 正在重新连接"),
-  'configuration-required': t("Nova Audio Agent 需要补全配置"),
-  'authentication-failed': t("Nova Audio Agent 鉴权失败"),
-  'backend-unavailable': t("Nova Audio Agent 后台不可用"),
-  error: t("Nova Audio Agent 发生错误"),
+  disconnected: t("Nova Personal Agent 已断开"),
+  reconnecting: t("Nova Personal Agent 正在重新连接"),
+  'configuration-required': t("Nova Personal Agent 需要补全配置"),
+  'authentication-failed': t("Nova Personal Agent 鉴权失败"),
+  'backend-unavailable': t("Nova Personal Agent 后台不可用"),
+  error: t("Nova Personal Agent 发生错误"),
 })
 
 // The compact line is the only status text the transparent orb still shows, so

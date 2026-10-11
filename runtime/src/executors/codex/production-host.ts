@@ -407,11 +407,11 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
   ): Promise<Readonly<Record<string, string>>> {
     const materialized = this.#materializeProbe()
     const parent = dirname(workspace)
-    const sibling = mkdtempSync(join(parent, '.nova-audio-agent-codex-preflight-'))
+    const sibling = mkdtempSync(join(parent, '.nova-personal-agent-codex-preflight-'))
     const canary = join(sibling, 'canary')
     const marker = join(
       workspace,
-      `.nova-audio-agent-codex-preflight-${randomUUID().replaceAll('-', '')}`,
+      `.nova-personal-agent-codex-preflight-${randomUUID().replaceAll('-', '')}`,
     )
     chmodSync(sibling, 0o700)
     writeFileSync(canary, 'host-created-canary', {encoding: 'utf8', mode: 0o600, flag: 'wx'})
@@ -420,8 +420,8 @@ export class NativeCodexHostPreflightRunner implements CodexHostPreflightRunner 
     try {
       const port = await listenLoopback(server, Math.max(1, deadline - Date.now()))
       const result = await this.#command(binary, [...prefixArgs,
-        'sandbox', '-P', 'nova_audio_agent', '-C', workspace,
-        '-c', `permissions.nova_audio_agent=${PERMISSION_PROFILE}`,
+        'sandbox', '-P', 'nova_personal_agent', '-C', workspace,
+        '-c', `permissions.nova_personal_agent=${PERMISSION_PROFILE}`,
         '-c', 'shell_environment_policy.inherit="core"',
         '-c', 'shell_environment_policy.include_only=["PATH","LANG","LC_ALL","TERM"]',
         materialized.path,

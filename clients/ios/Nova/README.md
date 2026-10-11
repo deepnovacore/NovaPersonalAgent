@@ -89,7 +89,7 @@ AOQ requests a fresh credential only after Start voice and microphone permission
 Mac 启动本 worktree 的新版 headless 服务后，在使用相同 `SERVER_PORT`、`SERVER_TOKEN_FILE` 环境配置的终端运行：
 
 ```sh
-npm run server:pair --workspace @nova-audio-agent/runtime -- wss://你的主机.ts.net
+npm run server:pair --workspace @nova-personal-agent/runtime -- wss://你的主机.ts.net
 ```
 
 原生 Mac 窗口显示 120 秒内有效的一次性二维码，并可刷新二维码、查看和撤销设备。刷新会让上一张码失效；关窗会尝试取消当前码，强制退出时最迟到期失效。配对后二维码自动隐藏。二维码使用 macOS CoreImage，扫码使用 iOS VisionKit，没有新增第三方依赖；Mac 运行窗口需要 Xcode Command Line Tools。

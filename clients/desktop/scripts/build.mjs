@@ -22,7 +22,7 @@ const runtimeBuild = spawnSync(process.execPath, [
   'run',
   'build',
   '--workspace',
-  '@nova-audio-agent/runtime',
+  '@nova-personal-agent/runtime',
 ], {
   cwd: root,
   encoding: 'utf8',
@@ -119,4 +119,4 @@ if (process.platform === 'darwin') {
   assert.equal(native.status, 0, native.stderr)
 }
 
-process.stdout.write('nova-audio-agent-desktop build validation passed\n')
+process.stdout.write('nova-personal-agent-desktop build validation passed\n')

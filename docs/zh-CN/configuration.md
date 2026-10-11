@@ -1,6 +1,6 @@
 # 核心配置
 
-环境变量已移除原来的 `NOVA_AUDIO_AGENT_` 前缀，例如 `PIPELINE_MODE`、`CODEX_WORKSPACE`。升级前请同步修改已有 `.env`、服务和 CI 配置中的键名；旧名称不再读取。`DASHSCOPE_API_KEY` 等供应商密钥名称不变。桌面偏好设置会覆盖管线、语言等部分非密钥变量；这些环境变量也供直接启动运行时使用。
+环境变量已移除原来的 `NOVA_PERSONAL_AGENT_` 前缀，例如 `PIPELINE_MODE`、`CODEX_WORKSPACE`。升级前请同步修改已有 `.env`、服务和 CI 配置中的键名；旧名称不再读取。`DASHSCOPE_API_KEY` 等供应商密钥名称不变。桌面偏好设置会覆盖管线、语言等部分非密钥变量；这些环境变量也供直接启动运行时使用。
 
 通常在桌面设置中选择模型和填写密钥即可。源码运行也可以在项目 `.env` 中配置；修改后重启桌面应用。
 
@@ -12,7 +12,7 @@
 DASHSCOPE_API_KEY=你的百炼密钥
 ```
 
-只有所选语音管线的密钥是必填的。搜索、摄像头监控、记忆和知识库缺少密钥时自动关闭，设置页和 `novaaudio doctor` 会写明各自需要的密钥。配置了 `TAVILY_API_KEY` 时用 Tavily 搜索，否则用百炼 MCP 搜索。桌面切换级联模式时，默认使用火山识别、DeepSeek 和火山合成，需要 `DOUBAO_BIGMODEL_API_KEY`、`DEEPSEEK_API_KEY`。个人记忆等辅助模型仍使用百炼，保留 `DASHSCOPE_API_KEY`。
+只有所选语音管线的密钥是必填的。搜索、摄像头监控、记忆和知识库缺少密钥时自动关闭，设置页和 `novapersonal doctor` 会写明各自需要的密钥。配置了 `TAVILY_API_KEY` 时用 Tavily 搜索，否则用百炼 MCP 搜索。桌面切换级联模式时，默认使用火山识别、DeepSeek 和火山合成，需要 `DOUBAO_BIGMODEL_API_KEY`、`DEEPSEEK_API_KEY`。个人记忆等辅助模型仍使用百炼，保留 `DASHSCOPE_API_KEY`。
 
 选择 Qwen Audio 3.1 时使用 `qwen-audio-3.1-realtime-plus` 和配套音色 `longanqian_v3.1`。StepAudio 3 为预览接入，尚待真实环境验收。选择 StepAudio 3 时，`STEPFUN_API_KEY` 同时用于实时语音和默认辅助对话、视觉模型 Step 3.7 Flash。本地记忆嵌入仍需单独配置嵌入服务；不使用本地记忆时可关闭它。如需自定义辅助模型网关，设置 `MODEL_API_KEY` 和 `MODEL_BASE_URL`。
 

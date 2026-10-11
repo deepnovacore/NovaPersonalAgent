@@ -56,20 +56,20 @@ jobs:
       - run: npm install --global npm@11.6.0
       - run: npm ci --ignore-scripts
       # The verification scripts import the built runtime (output redaction).
-      - run: npm run build --workspace @nova-audio-agent/runtime
+      - run: npm run build --workspace @nova-personal-agent/runtime
       - name: Install Linux display dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb libasound2 libgtk-3-0 libnss3 libgbm1 libsecret-1-0
       - name: Install the published desktop CLI
-        run: npm install --prefix npm-smoke nova-audio-agent@${{ inputs.release_version }}
+        run: npm install --prefix npm-smoke nova-personal-agent@${{ inputs.release_version }}
       - name: Verify public download and installed application
-        run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} node scripts/verify-npm-desktop.mjs npm-smoke/node_modules/nova-audio-agent
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} node scripts/verify-npm-desktop.mjs npm-smoke/node_modules/nova-personal-agent
       - name: Verify the published headless package
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          bash scripts/install-published-package.sh "nova-audio-agent-server@$RELEASE_VERSION" server-smoke
-          node scripts/verify-server-package.mjs server-smoke/node_modules/.bin/novaaudio-server
+          bash scripts/install-published-package.sh "nova-personal-agent-server@$RELEASE_VERSION" server-smoke
+          node scripts/verify-server-package.mjs server-smoke/node_modules/.bin/novapersonal-server
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

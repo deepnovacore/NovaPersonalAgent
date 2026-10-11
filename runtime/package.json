@@ -1,5 +1,5 @@
 {
-  "name": "@nova-audio-agent/runtime",
+  "name": "@nova-personal-agent/runtime",
   "version": "0.3.1",
   "private": true,
   "type": "module",
@@ -21,7 +21,7 @@
     }
   },
   "bin": {
-    "nova-audio-agent-node": "./dist/src/cli.js"
+    "nova-personal-agent-node": "./dist/src/cli.js"
   },
   "files": [
     "scripts/autoglm-bridge.py",

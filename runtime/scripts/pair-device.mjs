@@ -91,7 +91,7 @@ async function main() {
   const args = process.argv.slice(2)
   const window = args[0] === '--window'
   if (window) args.shift()
-  if (args.length !== 1 || args[0].startsWith('-')) throw new Error('用法：npm run server:pair --workspace @nova-audio-agent/runtime -- [--window] wss://你的主机')
+  if (args.length !== 1 || args[0].startsWith('-')) throw new Error('用法：npm run server:pair --workspace @nova-personal-agent/runtime -- [--window] wss://你的主机')
   if (window && process.platform !== 'darwin') throw new Error('--window 仅支持 macOS；请使用默认终端模式。')
   let config
   try { config = {...loadServerConfig(), server: pairingEndpoint(args[0])} }

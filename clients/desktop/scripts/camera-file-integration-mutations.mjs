@@ -7,7 +7,7 @@ const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../.
 const node = process.execPath
 const runtimeBuild = Object.freeze({
   command: 'npm',
-  args: ['run', 'build', '--workspace', '@nova-audio-agent/runtime'],
+  args: ['run', 'build', '--workspace', '@nova-personal-agent/runtime'],
 })
 
 const mutations = Object.freeze([

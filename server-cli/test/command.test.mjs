@@ -38,7 +38,7 @@ test('env file is loaded before runtime composition', async () => {
 
 test('CLI failures do not expose private file paths', () => {
   const privatePath = fileURLToPath(new URL('..', import.meta.url))
-  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../bin/novaaudio-server.mjs', import.meta.url)), 'start'], {encoding: 'utf8'})
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL('../bin/novapersonal-server.mjs', import.meta.url)), 'start'], {encoding: 'utf8'})
   assert.equal(result.status, 2)
   assert.match(result.stderr, /runtime-diagnostic.*command_failed/u)
   assert.ok(!result.stderr.includes(privatePath))

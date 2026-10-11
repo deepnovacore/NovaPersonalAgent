@@ -8,15 +8,15 @@ import {verifyCandidateArtifacts} from '../scripts/verify-candidate-artifacts.mj
 
 for (const version of ['0.2.0', '0.3.0-preview.1']) test(`candidate ${version} assets require exact names and matching checksums`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'nova-candidate-'))
-  const name = `nova-audio-agent-${version}-macos-arm64-app.zip`
+  const name = `nova-personal-agent-${version}-macos-arm64-app.zip`
   try {
     for (const suffix of ['macos-arm64-app.zip', 'macos-arm64.dmg', 'windows-x64-portable.zip', 'windows-x64.exe', 'linux-x64.AppImage', 'linux-x64.deb']) {
-      const file = `nova-audio-agent-${version}-${suffix}`
+      const file = `nova-personal-agent-${version}-${suffix}`
       await writeFile(join(root, file), 'candidate')
       const mode = suffix.startsWith('windows-') ? '*' : ' '
       await writeFile(join(root, `${file}.sha256`), `${createHash('sha256').update('candidate').digest('hex')} ${mode}${file}\n`)
     }
-    const server = `nova-audio-agent-server-${version}.tgz`
+    const server = `nova-personal-agent-server-${version}.tgz`
     await writeFile(join(root, server), 'server')
     await writeFile(join(root, `${server}.sha256`), `${createHash('sha256').update('server').digest('hex')}  ${server}\n`)
     await verifyCandidateArtifacts(root, version)

@@ -1129,7 +1129,7 @@ test('the renderer applies the bootstrap palette and future settings pushes', as
   // Future live pushes swap the palette the same way, guarded the same way.
   assert.match(
     source,
-    /window\.novaAudioAgentDesktop\.settings\?\.onChanged\?\.\(next => \{\s*paletteHover\.reset\(next\.palette\)/,
+    /window\.novaPersonalAgentDesktop\.settings\?\.onChanged\?\.\(next => \{\s*paletteHover\.reset\(next\.palette\)/,
   )
 })
 

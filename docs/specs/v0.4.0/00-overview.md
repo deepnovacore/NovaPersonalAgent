@@ -1,4 +1,4 @@
-# Nova Audio Agent v0.4.0 Spec Series
+# Nova Personal Agent v0.4.0 Spec Series
 
 > 本系列描述的是下一个版本的计划，不在 v0.3.0 发布范围内。
 

@@ -2,37 +2,27 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 export const PRODUCT_VERSION = '0.3.1'
-export const RELEASE_REPOSITORY = 'deepnovacore/NovaAudioAgent'
+export const RELEASE_REPOSITORY = 'deepnovacore/nova-personal-agent'
 
-const DEFINITIONS = Object.freeze({
-  'linux-x64': Object.freeze({
-    artifact: `nova-audio-agent-${PRODUCT_VERSION}-linux-x64.AppImage`,
-    executable: 'nova-audio-agent.AppImage',
-    archive: 'file',
-  }),
-  'darwin-arm64': Object.freeze({
-    artifact: `nova-audio-agent-${PRODUCT_VERSION}-macos-arm64-app.zip`,
-    executable: 'Nova Audio Agent Desktop.app/Contents/MacOS/Nova Audio Agent Desktop',
-    archive: 'zip',
-  }),
-  'win32-x64': Object.freeze({
-    artifact: `nova-audio-agent-${PRODUCT_VERSION}-windows-x64-portable.zip`,
-    executable: 'Nova Audio Agent Desktop.exe',
-    archive: 'zip',
-  }),
-})
-
-export function resolveTarget(platform = process.platform, arch = process.arch) {
-  const id = `${platform}-${arch}`
-  const definition = DEFINITIONS[id]
-  if (definition === undefined) {
-    throw new Error(`unsupported platform: ${platform}-${arch}`)
+export function resolveTarget(platform = process.platform, arch = process.arch, version = PRODUCT_VERSION) {
+  // Published releases retain their original asset and executable names.
+  const legacy = /^0\.[0-3]\./u.test(version)
+  const prefix = legacy ? 'nova-audio-agent' : 'nova-personal-agent'
+  const desktop = legacy ? 'Nova Audio Agent Desktop' : 'Nova Personal Agent Desktop'
+  const definitions = {
+    'linux-x64': {artifact: `${prefix}-${version}-linux-x64.AppImage`, executable: `${prefix}.AppImage`, archive: 'file'},
+    'darwin-arm64': {artifact: `${prefix}-${version}-macos-arm64-app.zip`, executable: `${desktop}.app/Contents/MacOS/${desktop}`, archive: 'zip'},
+    'win32-x64': {artifact: `${prefix}-${version}-windows-x64-portable.zip`, executable: `${desktop}.exe`, archive: 'zip'},
   }
+  const id = `${platform}-${arch}`
+  const definition = definitions[id]
+  if (definition === undefined) throw new Error(`unsupported platform: ${platform}-${arch}`)
   return Object.freeze({id, ...definition})
 }
 
 export function releaseBaseUrl(version = PRODUCT_VERSION) {
-  return `https://github.com/${RELEASE_REPOSITORY}/releases/download/v${version}`
+  const repository = /^0\.[0-3]\./u.test(version) ? 'deepnovacore/NovaAudioAgent' : RELEASE_REPOSITORY
+  return `https://github.com/${repository}/releases/download/v${version}`
 }
 
 export function releaseRoot({

@@ -1,4 +1,4 @@
-# Nova Audio Agent v0.3.0 Spec Series
+# Nova Personal Agent v0.3.0 Spec Series
 
 > 状态（2026-10-07）：v0.3.0 已发布。本系列是设计记录；各卷中「规划」「尚未实施」等标注反映撰写当时的状态，
 > 实际行为以代码和 [用户文档](../../zh-CN/README.md) 为准。

@@ -51,7 +51,7 @@ A further merge of the public `v0.3.0dev` updates (`ecb7d1e7`) retained these ch
 
 ## Reproduce
 
-Build an isolated checkout of baseline `d425dcb5` and this branch with their declared dependencies (`npm run build --workspace @nova-audio-agent/runtime`). Keep credentials in a private env file, outside this repository.
+Build an isolated checkout of baseline `d425dcb5` and this branch with their declared dependencies (`npm run build --workspace @nova-personal-agent/runtime`). Keep credentials in a private env file, outside this repository.
 
 ```sh
 NOVA_LIVE_ACP_COST=1 NOVA_ACP_BASELINE_DIST=/absolute/baseline/runtime/dist \

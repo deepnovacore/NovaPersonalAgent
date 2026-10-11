@@ -21,19 +21,19 @@ Nova 运行在电脑上，通过语音与你交流，并调用 Codex 完成编�
 ### 安装或升级
 
 ```bash
-npm install --global nova-audio-agent@latest
-novaaudio
+npm install --global nova-personal-agent@latest
+novapersonal
 ```
 
 升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-audio-agent@0.3.1`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。
 
-Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-audio-agent-server@latest`。
+Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-personal-agent-server@latest`。
 
 从源码开发：
 
 ```bash
-git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
-cd nova-audio-agent
+git clone https://github.com/deepnovacore/nova-personal-agent.git nova-personal-agent
+cd nova-personal-agent
 npm ci
 cp .env.example .env
 ```
@@ -109,7 +109,7 @@ Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板�
 
 | 问题 | 检查方式 |
 |---|---|
-| macOS 提示应用「已损坏」 | 应用未签名，浏览器下载的文件带有隔离标记。拖到「应用程序」后运行 `xattr -dr com.apple.quarantine "/Applications/Nova Audio Agent Desktop.app"`，再重新打开 |
+| macOS 提示应用「已损坏」 | 应用未签名，浏览器下载的文件带有隔离标记。拖到「应用程序」后运行 `xattr -dr com.apple.quarantine "/Applications/Nova Personal Agent Desktop.app"`，再重新打开 |
 | 语音连接失败 | 检查所选模式的密钥、服务权限和网络连接 |
 | Codex 无法执行 | 确认 Codex 已登录，项目目录可访问 |
 | 保存后没有变化 | 查看是否提示「待重启」，点击重启后台 |

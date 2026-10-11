@@ -1,7 +1,7 @@
 /**
  * One Proactive selection, run to completion.
  *
- * Ports the historical Surrogate half of `src/nova_audio_agent/calls.py`. The FastBrain half left
+ * Ports the historical Surrogate half of `src/nova_personal_agent/calls.py`. The FastBrain half left
  * with the text front brain: the realtime provider owns the user turn, so nothing in
  * this module streams or arbitrates the Floor any more.
  */

@@ -15,4 +15,4 @@ npm test
 
 OpenCode、CodeBuddy、Pi 与 DeepSeek Harness 会话通过 ACP 接入。自动化测试用脚本化的代理进程驱动 ACP 传输；每个真实执行器的验收另行在线检查：先 `npm run build`，再运行 `node runtime/scripts/live/acp-backends.mjs <backend>`。
 
-供应商验证使用可选的在线 smoke：`npm run test:live --workspace @nova-audio-agent/runtime`。它使用你配置的凭据，可能产生服务费用；普通测试通过不代表麦克风、扬声器或在线供应商已验收。
+供应商验证使用可选的在线 smoke：`npm run test:live --workspace @nova-personal-agent/runtime`。它使用你配置的凭据，可能产生服务费用；普通测试通过不代表麦克风、扬声器或在线供应商已验收。

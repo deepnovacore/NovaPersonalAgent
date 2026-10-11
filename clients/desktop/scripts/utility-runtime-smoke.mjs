@@ -1,5 +1,5 @@
 import {createBackendControl, createBackendSupervisor, classifyBackendFailure, createBackendDiagnosticCollector, configWarnings, startupErrors} from '../src/main/backend-supervisor.mjs'
-import {describeMissingBlockingEnvironment, allowAcceptanceLoopback} from '@nova-audio-agent/runtime/desktop'
+import {describeMissingBlockingEnvironment, allowAcceptanceLoopback} from '@nova-personal-agent/runtime/desktop'
 import {resetTrayUnreadForBackend} from '../src/main/tray-unread.mjs'
 import {acceptanceBackendSettings} from '../src/main/workbench-native-acceptance.mjs'
 import {preferredLanguage} from '../src/renderer/locale.mjs'

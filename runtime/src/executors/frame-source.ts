@@ -1,7 +1,7 @@
 /**
  * The camera port the Watch/Guard executors observe through, and its disabled implementation.
  *
- * Ported from the parts of `src/nova_audio_agent/executors/camera.py` that Watch depends on. The
+ * Ported from the parts of `src/nova_personal_agent/executors/camera.py` that Watch depends on. The
  * capturing sources -- `OpenCVFrameSource`, `VideoFileFrameSource`, and the `resolve_camera_source`
  * policy that picks between them -- are **not** here: they land with the Camera executor. What is
  * here is the seam and the honest no-camera answer, which is what a host without a configured

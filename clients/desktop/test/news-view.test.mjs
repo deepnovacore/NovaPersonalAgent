@@ -102,7 +102,7 @@ test('a user-cleared profile and interests are not repopulated by generated defa
  assert.equal(h.buttons.find(b=>b.textContent==='开启资讯').disabled,true)
 })
 test('generated work is readable and its sources stay hidden until asked for',t=>{
- const h=harness(t);renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},news:{enabled:false,explore:true,profile_version:0,interests:[]},warmup:{status:'ready',draft:{about:{text:'Builds audio software',refs:[{entry_id:'s',version:'v'}]},work:[{title:'Audio Agent',text:'Works on voice interaction',refs:[{entry_id:'s',version:'v'}]}],interests:[]},sources:[{id:'s',version:'v',label:'NovaAudioAgent/README.md'}]}})
+ const h=harness(t);renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},news:{enabled:false,explore:true,profile_version:0,interests:[]},warmup:{status:'ready',draft:{about:{text:'Builds audio software',refs:[{entry_id:'s',version:'v'}]},work:[{title:'Audio Agent',text:'Works on voice interaction',refs:[{entry_id:'s',version:'v'}]}],interests:[]},sources:[{id:'s',version:'v',label:'NovaPersonalAgent/README.md'}]}})
  const flatten=node=>[node,...node.children.flatMap(flatten)],nodes=flatten(h.panel)
  assert.ok(nodes.some(n=>n.textContent==='Builds audio software'))
  assert.ok(nodes.some(n=>n.className==='profile-work-item'))
@@ -110,7 +110,7 @@ test('generated work is readable and its sources stay hidden until asked for',t=
  assert.equal(popovers.length,2,'about and the work item each carry their sources')
  assert.ok(popovers.every(n=>n.hidden===true),'sources are not part of the reading flow')
  assert.ok(!nodes.some(n=>n.tag==='details'||n.textContent==='查看来源'&&n.tag==='summary'))
- assert.ok(popovers[0].children.flatMap(flatten).some(n=>n.textContent==='NovaAudioAgent/README.md'))
+ assert.ok(popovers[0].children.flatMap(flatten).some(n=>n.textContent==='NovaPersonalAgent/README.md'))
  assert.equal(nodes.filter(n=>n.className==='source-info'&&n['aria-label']==='查看来源').length,2)
  assert.equal(h.buttons.some(b=>b.textContent==='确认介绍'),false)
 })

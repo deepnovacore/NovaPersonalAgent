@@ -1,13 +1,13 @@
 import { ensureDesktop, inspectDoctor, launchDesktop } from './runtime.mjs'
 import { PRODUCT_VERSION } from './target.mjs'
 
-export const HELP_TEXT = `Usage: novaaudio [start|config|doctor|--version|--help]
+export const HELP_TEXT = `Usage: novapersonal [start|config|doctor|--version|--help]
 
-  novaaudio          Install if needed and launch Nova Audio Agent
-  novaaudio start    Install if needed and launch Nova Audio Agent
-  novaaudio config   Open the desktop settings window
-  novaaudio doctor   Inspect local installation and configuration status
-  novaaudio doctor --online
+  novapersonal          Install if needed and launch Nova Personal Agent
+  novapersonal start    Install if needed and launch Nova Personal Agent
+  novapersonal config   Open the desktop settings window
+  novapersonal doctor   Inspect local installation and configuration status
+  novapersonal doctor --online
                      Also test voice keys set in the environment against their provider`
 
 const VOICE_KEY_SOURCES = Object.freeze({settings: 'saved in settings', environment: 'set in environment', missing: 'missing'})
@@ -35,7 +35,7 @@ export async function main(argv, {
   }
   if (command === 'doctor') {
     const report = await doctor({online})
-    stdout.write(`Nova Audio Agent ${PRODUCT_VERSION}\n`)
+    stdout.write(`Nova Personal Agent ${PRODUCT_VERSION}\n`)
     stdout.write(`Platform: ${report.platform} (${report.supported ? 'supported' : 'unsupported'})\n`)
     if (report.supported) {
       stdout.write(`Desktop cache: ${report.desktopReady ? 'ready' : 'missing'}\n`)
@@ -50,8 +50,8 @@ export async function main(argv, {
       for (const key of report.voice.keys) stdout.write(`  ${key.name}: ${VOICE_KEY_SOURCES[key.source ?? 'missing']}${key.probe ? ` (${VOICE_KEY_PROBES[key.probe] ?? key.probe})` : ''}\n`)
       if (online && report.voice.keys.some(key => key.source === 'settings')) stdout.write('  Saved keys are encrypted; test them in the desktop setup window.\n')
       if (missingVoiceKeys.length > 0) stdout.write(report.voice.pipeline === 'integrated'
-        ? 'First run: start `novaaudio` and paste a DashScope API Key into the setup window that opens.\n'
-        : 'First run: start `novaaudio` and fill in the missing keys in the setup window that opens.\n')
+        ? 'First run: start `novapersonal` and paste a DashScope API Key into the setup window that opens.\n'
+        : 'First run: start `novapersonal` and fill in the missing keys in the setup window that opens.\n')
     }
     if (report.capabilities !== undefined) {
       const status = report.capabilities

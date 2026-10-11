@@ -208,7 +208,7 @@ test('client launch plan installs when needed, builds once, and forces the Node 
         'run',
         'start:built',
         '--workspace',
-        '@nova-audio-agent/desktop',
+        '@nova-personal-agent/desktop',
       ],
     },
   ])
@@ -257,7 +257,7 @@ test('client launch plan is Windows-safe and skips an unnecessary install', () =
         'run',
         'start:built',
         '--workspace',
-        '@nova-audio-agent/desktop',
+        '@nova-personal-agent/desktop',
       ],
     },
   ])

@@ -1,8 +1,8 @@
 {
-  "name": "@nova-audio-agent/desktop",
+  "name": "@nova-personal-agent/desktop",
   "version": "0.3.1",
   "description": "Local-first ambient voice agent desktop client",
-  "homepage": "https://github.com/deepnovacore/NovaAudioAgent",
+  "homepage": "https://github.com/deepnovacore/nova-personal-agent",
   "author": {
     "name": "DeepNova Core",
     "email": "opensource@deepnovacore.ai"
@@ -12,7 +12,7 @@
   "main": "src/main/main.mjs",
   "scripts": {
     "test": "npm run build && node --test && node scripts/source-startup-smoke.mjs",
-    "test:camera-file": "npm run build --workspace @nova-audio-agent/runtime && electron scripts/camera-file-integration.mjs",
+    "test:camera-file": "npm run build --workspace @nova-personal-agent/runtime && electron scripts/camera-file-integration.mjs",
     "test:camera-file:mutations": "node scripts/camera-file-integration-mutations.mjs",
     "smoke:node-backend": "npm run build && electron scripts/utility-runtime-smoke.mjs",
     "smoke:capability-status": "npm run build && electron scripts/utility-runtime-smoke.mjs --capability-status",
@@ -28,12 +28,12 @@
     "package:mac:candidate": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --config.mac.identity=- --config.mac.notarize=false --config.mac.hardenedRuntime=false --mac dmg --publish never",
     "package:mac:release": "npm run build && electron-builder --config electron-builder.yml --mac dmg --publish never",
     "package:win": "npm run build && electron-builder --config electron-builder.yml --win nsis --publish never",
-    "package:linux": "npm run build && electron-builder --config electron-builder.yml --config.productName=NovaAudioAgentDesktop --linux AppImage deb --publish never",
+    "package:linux": "npm run build && electron-builder --config electron-builder.yml --config.productName=NovaPersonalAgentDesktop --linux AppImage deb --publish never",
     "smoke:wake-word": "node scripts/wake-word-smoke.mjs",
     "verify:release": "node scripts/verify-release.mjs"
   },
   "dependencies": {
-    "@nova-audio-agent/runtime": "0.3.1",
+    "@nova-personal-agent/runtime": "0.3.1",
     "sherpa-onnx": "1.13.4",
     "tar-stream": "3.1.7",
     "unbzip2-stream": "1.4.3"
@@ -44,5 +44,5 @@
     "node-api-headers": "1.9.0",
     "ws": "8.21.3"
   },
-  "productName": "Nova Audio Agent Desktop"
+  "productName": "Nova Personal Agent Desktop"
 }

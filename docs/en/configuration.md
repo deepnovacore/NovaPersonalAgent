@@ -1,6 +1,6 @@
 # Core configuration
 
-Environment names now omit the former `NOVA_AUDIO_AGENT_` prefix: for example, `PIPELINE_MODE` and `CODEX_WORKSPACE`. Rename existing `.env`, service and CI configuration keys before upgrading; old names are no longer read. Provider keys such as `DASHSCOPE_API_KEY` are unchanged. Desktop preferences override several non-secret values (including pipeline and language); these environment options also serve direct runtime launches.
+Environment names now omit the former `NOVA_PERSONAL_AGENT_` prefix: for example, `PIPELINE_MODE` and `CODEX_WORKSPACE`. Rename existing `.env`, service and CI configuration keys before upgrading; old names are no longer read. Provider keys such as `DASHSCOPE_API_KEY` are unchanged. Desktop preferences override several non-secret values (including pipeline and language); these environment options also serve direct runtime launches.
 
 Use desktop Settings to select models and enter credentials. When running from source, you can also edit the project `.env`; restart the desktop afterwards.
 
@@ -12,7 +12,7 @@ The default Qwen realtime pipeline needs one key:
 DASHSCOPE_API_KEY=your-dashscope-key
 ```
 
-Only the selected voice pipeline's keys are required. Search, camera watch, memory and knowledge turn off when their key is missing, and Settings and `novaaudio doctor` name the key each one needs. Search uses Tavily when `TAVILY_API_KEY` is set and Bailian MCP search otherwise. Desktop cascaded mode defaults to Volcengine recognition, DeepSeek and Volcengine synthesis, requiring `DOUBAO_BIGMODEL_API_KEY` and `DEEPSEEK_API_KEY`. Keep `DASHSCOPE_API_KEY` for supporting models such as personal-memory processing.
+Only the selected voice pipeline's keys are required. Search, camera watch, memory and knowledge turn off when their key is missing, and Settings and `novapersonal doctor` name the key each one needs. Search uses Tavily when `TAVILY_API_KEY` is set and Bailian MCP search otherwise. Desktop cascaded mode defaults to Volcengine recognition, DeepSeek and Volcengine synthesis, requiring `DOUBAO_BIGMODEL_API_KEY` and `DEEPSEEK_API_KEY`. Keep `DASHSCOPE_API_KEY` for supporting models such as personal-memory processing.
 
 Direct runtime launches default to Qwen for the cascaded LLM. Set `CASCADE_LLM_PROVIDER=deepseek` explicitly to match the desktop default.
 

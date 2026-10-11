@@ -1,7 +1,7 @@
 /**
  * The realtime session: one provider conversation, reduced.
  *
- * Ported from `src/nova_audio_agent/realtime/session.py`. The state half lives in
+ * Ported from `src/nova_personal_agent/realtime/session.py`. The state half lives in
  * `session-state.ts`; this file is the decisions. `accept` is the centre of it -- a reducer over
  * normalized provider events whose guards decide, for each event, whether it may take the provider
  * slot, reach the renderer, or count as user input at all.

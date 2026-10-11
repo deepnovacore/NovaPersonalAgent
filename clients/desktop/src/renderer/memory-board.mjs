@@ -31,7 +31,7 @@ const diagnosticsRoot = document.querySelector('#diagnostics')
 
 const personalTab = document.querySelector('#personal-tab')
 const personalPanel = document.querySelector('#personal-panel')
-const personalBoard = personalMemoryBoard(personalPanel, query => window.novaAudioAgentDesktop.memoryBoard.request(query))
+const personalBoard = personalMemoryBoard(personalPanel, query => window.novaPersonalAgentDesktop.memoryBoard.request(query))
 
 let latestPayload = null
 let inFlight = false
@@ -304,7 +304,7 @@ async function load() {
   statusLabel.textContent = t("加载中…")
   refreshButton.disabled = true
   try {
-    const payload = await window.novaAudioAgentDesktop.memoryBoard.request()
+    const payload = await window.novaPersonalAgentDesktop.memoryBoard.request()
     if (owner !== loadOwnership || document.hidden) return
     if (!payload || payload.error || !Array.isArray(payload.channels) || !validDiagnostics(payload)) {
       statusLabel.textContent = payload?.error === 'timeout' ? t("后端无响应") : t("加载失败")
@@ -319,7 +319,7 @@ async function load() {
       const last = previous.items.at(-1)?.seq
       const collected = [...recent.items]
       while (last !== undefined && cursor > last + 1) {
-        const page = await window.novaAudioAgentDesktop.memoryBoard.request({channel: 'conversation', before_seq: cursor})
+        const page = await window.novaPersonalAgentDesktop.memoryBoard.request({channel: 'conversation', before_seq: cursor})
         if (!page || page.error || !Array.isArray(page.channels)) throw new Error('history_page_failed')
         if (owner !== loadOwnership || (page?.backend_generation !== payload.backend_generation || page?.conversation_epoch !== payload.conversation_epoch)) return
         const channel = page.channels?.find(c => c.name === 'conversation')
@@ -379,7 +379,7 @@ async function loadEarlier() {
   const cursor = channel.next_before_seq
   pageInFlight = true
   try {
-    const payload = await window.novaAudioAgentDesktop.memoryBoard.request({channel: 'conversation', before_seq: cursor})
+    const payload = await window.novaPersonalAgentDesktop.memoryBoard.request({channel: 'conversation', before_seq: cursor})
     if (owner !== loadOwnership || payload?.backend_generation !== generation || latestPayload?.backend_generation !== generation || payload?.conversation_epoch !== epoch || latestPayload?.conversation_epoch !== epoch) return
     const page = payload.channels?.find(c => c.name === 'conversation')
     if (!page) { statusLabel.textContent = t("历史记录加载失败，向上滚动重试"); return }
@@ -400,7 +400,7 @@ async function copyBoardJson() {
   copyInFlight = true
   copyJsonButton.disabled = true
   try {
-    const result = await window.novaAudioAgentDesktop.memoryBoard.copyJson()
+    const result = await window.novaPersonalAgentDesktop.memoryBoard.copyJson()
     statusLabel.textContent = result?.copied ? t("已复制 JSON") : t("复制失败")
   } catch {
     statusLabel.textContent = t("复制失败")
@@ -415,7 +415,7 @@ async function exportBoard() {
   exportInFlight = true
   exportButton.disabled = true
   try {
-    const result = await window.novaAudioAgentDesktop.memoryBoard.export()
+    const result = await window.novaPersonalAgentDesktop.memoryBoard.export()
     if (result?.saved) statusLabel.textContent = t("已导出：{0}", result.saved)
     else if (result?.error) statusLabel.textContent = t("导出失败")
   } catch {
@@ -435,7 +435,7 @@ async function clearConversation() {
   exportButton.disabled = true
   statusLabel.textContent = t("等待清除确认…")
   try {
-    const result = await window.novaAudioAgentDesktop.memoryBoard.clear()
+    const result = await window.novaPersonalAgentDesktop.memoryBoard.clear()
     if (result?.cleared) {
       latestPayload = null
       channelsRoot.replaceChildren()

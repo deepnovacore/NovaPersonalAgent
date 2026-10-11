@@ -34,7 +34,7 @@ void (async () => {
     resourcesRoot,
     'app.asar',
     'node_modules',
-    '@nova-audio-agent',
+    '@nova-personal-agent',
     'runtime',
     'dist',
     'src',

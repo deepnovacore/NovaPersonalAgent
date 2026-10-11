@@ -1,7 +1,7 @@
 /**
  * The desktop wire format: audio frames, control messages, and the delivery report.
  *
- * Ported from the codec half of `src/nova_audio_agent/realtime/desktop.py`. Everything here is
+ * Ported from the codec half of `src/nova_personal_agent/realtime/desktop.py`. Everything here is
  * byte-exact by requirement rather than by preference -- a renderer built against one runtime has to
  * work against the other, and a header that differs by a separator or a field order is a renderer that
  * silently drops audio.

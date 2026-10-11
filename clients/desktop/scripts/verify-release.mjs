@@ -13,9 +13,9 @@ import {generateSmokeCertificate} from './smoke-tls.mjs'
 import {expectedNativeResources} from './native-resource-contract.mjs'
 import {candidateScratchParent, prepareWindowsSmokeHomeOwnership} from './windows-smoke-home.mjs'
 import {normalizeSettings, saveSettings} from '../src/main/settings-store.mjs'
-import {SensitiveContentPolicy} from '@nova-audio-agent/runtime/desktop'
+import {SensitiveContentPolicy} from '@nova-personal-agent/runtime/desktop'
 
-const product = 'Nova Audio Agent Desktop'
+const product = 'Nova Personal Agent Desktop'
 const native = /\.(node|dylib|dll|so(?:\.\d+)*)$/u
 const timeoutMs = 30_000
 
@@ -232,7 +232,7 @@ async function smoke(executable, scratch, diagnosticsDir) {
 async function findApp(directory, depth = 0) {
   if (process.platform === 'darwin' && directory.endsWith('.app')) return directory
   const entries = await readdir(directory, {withFileTypes: true})
-  const executable = process.platform === 'win32' ? `${product}.exe` : 'nova-audio-agent-desktop'
+  const executable = process.platform === 'win32' ? `${product}.exe` : 'nova-personal-agent-desktop'
   if (process.platform !== 'darwin' && entries.some(entry => entry.name === executable)) return directory
   if (depth < 3) {
     for (const entry of entries.filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))) {
@@ -280,7 +280,7 @@ export async function verifyRelease({app, artifact, distRoot, unsigned = false, 
     }
     assert.ok(app, 'installed application not found')
     const resources = resolve(app, process.platform === 'darwin' ? 'Contents/Resources' : 'resources')
-    const executable = resolve(app, process.platform === 'darwin' ? `Contents/MacOS/${product}` : process.platform === 'win32' ? `${product}.exe` : 'nova-audio-agent-desktop')
+    const executable = resolve(app, process.platform === 'darwin' ? `Contents/MacOS/${product}` : process.platform === 'win32' ? `${product}.exe` : 'nova-personal-agent-desktop')
     const targetId = `${process.platform}-${process.arch}${process.platform === 'linux' ? '-gnu' : ''}`
     await inspectApplication(resources, targetId)
     if (process.platform === 'darwin') await inspectMacAsarIntegrity(resources)

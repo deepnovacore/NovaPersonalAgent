@@ -5,7 +5,7 @@ import {mkdtemp, readFile, writeFile, rm} from 'node:fs/promises'
 import {join} from 'node:path'
 import {createSettingsWriter, DEFAULT_SETTINGS as SETTINGS_DEFAULTS} from '../src/main/settings-store.mjs'
 import {prepareCapabilityCommit, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, capabilityDocumentRevision} from '../src/main/capabilities-settings.mjs'
-import {parseCapabilityRegistry} from '@nova-audio-agent/runtime/desktop'
+import {parseCapabilityRegistry} from '@nova-personal-agent/runtime/desktop'
 
 const codec = {available: () => false}
 const document = {version: 1, modules: {search: {enabled: false}}, mcpServers: {}}

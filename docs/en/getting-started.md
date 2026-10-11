@@ -21,19 +21,19 @@ Desktop targets macOS arm64, Windows x64, and Ubuntu 22.04+ x64.
 ### Install or upgrade
 
 ```bash
-npm install --global nova-audio-agent@latest
-novaaudio
+npm install --global nova-personal-agent@latest
+novapersonal
 ```
 
 To upgrade, quit Nova and run the same command. Pin a version with `nova-audio-agent@0.3.1`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
 
-For headless Ubuntu 22.04+ x64, use `npm install --global nova-audio-agent-server@latest`.
+For headless Ubuntu 22.04+ x64, use `npm install --global nova-personal-agent-server@latest`.
 
 For development from source:
 
 ```bash
-git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
-cd nova-audio-agent
+git clone https://github.com/deepnovacore/nova-personal-agent.git nova-personal-agent
+cd nova-personal-agent
 npm ci
 cp .env.example .env
 ```
@@ -107,7 +107,7 @@ Desktop launches into one of three views, controlled by the `startupView` settin
 
 | Problem | What to check |
 |---|---|
-| macOS says the app is "damaged" | The app is unsigned and a browser download carries a quarantine flag. Move it to Applications, run `xattr -dr com.apple.quarantine "/Applications/Nova Audio Agent Desktop.app"`, then open it again |
+| macOS says the app is "damaged" | The app is unsigned and a browser download carries a quarantine flag. Move it to Applications, run `xattr -dr com.apple.quarantine "/Applications/Nova Personal Agent Desktop.app"`, then open it again |
 | Voice cannot connect | Credentials, service access and connectivity for the selected mode |
 | Codex cannot run | Codex sign-in and access to the project directory |
 | Saved settings have no effect | Look for the pending-restart notice and restart the backend |

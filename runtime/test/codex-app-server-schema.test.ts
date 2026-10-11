@@ -545,10 +545,10 @@ function effectiveConfig(): Record<string, unknown> {
     config: {
       approval_policy: 'on-request',
       approvals_reviewer: 'user',
-      default_permissions: 'nova_audio_agent',
+      default_permissions: 'nova_personal_agent',
       web_search: 'disabled',
       permissions: {
-        nova_audio_agent: {
+        nova_personal_agent: {
           filesystem: {
             ':root': 'read',
             ':workspace_roots': {
@@ -582,7 +582,7 @@ function effectiveConfig(): Record<string, unknown> {
 function effectiveConfig147(): Record<string, unknown> {
   const value = effectiveConfig()
   const config = nested(value, 'config')
-  const profile = nested(config, 'permissions', 'nova_audio_agent')
+  const profile = nested(config, 'permissions', 'nova_personal_agent')
   Object.assign(profile, {description: null, extends: null, workspace_roots: null})
   Object.assign(nested(profile, 'filesystem'), {glob_scan_max_depth: null})
   Object.assign(nested(profile, 'network'), {
@@ -621,7 +621,7 @@ test('effective config returns only the fixed credential-free isolation report',
     allowReplacementInstructions: false,
   })
   assert.deepEqual(report, {
-    default_permissions: 'nova_audio_agent',
+    default_permissions: 'nova_personal_agent',
     filesystem: 'workspace_only',
     network: 'blocked',
     web_search: 'disabled',
@@ -691,7 +691,7 @@ test('effective config rejects each other launch profile approval binding', () =
 
 test('Codex 0.147 inert config expansion preserves the isolation report', () => {
   const expected = {
-    default_permissions: 'nova_audio_agent',
+    default_permissions: 'nova_personal_agent',
     filesystem: 'workspace_only',
     network: 'blocked',
     web_search: 'disabled',
@@ -714,13 +714,13 @@ test('Codex 0.147 inert config expansion preserves the isolation report', () => 
 
 test('expanded config fields still fail closed when they activate host capabilities', () => {
   const mutations: ((value: Record<string, unknown>) => void)[] = [
-    value => { nested(value, 'config', 'permissions', 'nova_audio_agent').workspace_roots = {} },
+    value => { nested(value, 'config', 'permissions', 'nova_personal_agent').workspace_roots = {} },
     value => {
-      nested(value, 'config', 'permissions', 'nova_audio_agent', 'filesystem')
+      nested(value, 'config', 'permissions', 'nova_personal_agent', 'filesystem')
         .glob_scan_max_depth = 8
     },
     value => {
-      nested(value, 'config', 'permissions', 'nova_audio_agent', 'network').proxy_url = 'private'
+      nested(value, 'config', 'permissions', 'nova_personal_agent', 'network').proxy_url = 'private'
     },
     value => { nested(value, 'config', 'shell_environment_policy').set = {TOKEN: 'private'} },
     value => { nested(value, 'config', 'features').future_capability = true },
@@ -739,15 +739,15 @@ test('every capability widening, warning, requirement, and replacement fails pri
     value => { (value.config as Record<string, unknown>).web_search = 'live' },
     value => { (value.config as Record<string, unknown>).default_permissions = 'danger' },
     value => {
-      nested(value, 'config', 'permissions', 'nova_audio_agent', 'filesystem')[':root'] = 'write'
+      nested(value, 'config', 'permissions', 'nova_personal_agent', 'filesystem')[':root'] = 'write'
     },
     value => {
       nested(
-        value, 'config', 'permissions', 'nova_audio_agent', 'filesystem', ':workspace_roots',
+        value, 'config', 'permissions', 'nova_personal_agent', 'filesystem', ':workspace_roots',
       ).tmp = 'write'
     },
     value => {
-      nested(value, 'config', 'permissions', 'nova_audio_agent', 'network').enabled = true
+      nested(value, 'config', 'permissions', 'nova_personal_agent', 'network').enabled = true
     },
     value => {
       const shell = nested(value, 'config', 'shell_environment_policy')
@@ -759,7 +759,7 @@ test('every capability widening, warning, requirement, and replacement fails pri
     value => { nested(value, 'config', 'features').remote_control = true },
     value => { nested(value, 'config', 'features').future_capability = true },
     value => { nested(value, 'config', 'permissions').danger = {} },
-    value => { nested(value, 'config', 'permissions', 'nova_audio_agent').device = 'write' },
+    value => { nested(value, 'config', 'permissions', 'nova_personal_agent').device = 'write' },
     value => { nested(value, 'config', 'shell_environment_policy').extra = false },
     value => { nested(value, 'config').mcp_servers = {private: {}} },
     value => { nested(value, 'config').model_instructions_file = '/PRIVATE/PATH' },
@@ -784,7 +784,7 @@ test('every capability widening, warning, requirement, and replacement fails pri
 test('workspace roots require the exact expected key set even when an extra value is undefined', () => {
   const value = effectiveConfig()
   const roots = nested(
-    value, 'config', 'permissions', 'nova_audio_agent', 'filesystem', ':workspace_roots',
+    value, 'config', 'permissions', 'nova_personal_agent', 'filesystem', ':workspace_roots',
   )
   delete roots['.codex']
   roots.evil = undefined
@@ -800,7 +800,7 @@ test('workspace roots require own keys even when Object prototype supplies the m
   try {
     const value = effectiveConfig()
     const roots = nested(
-      value, 'config', 'permissions', 'nova_audio_agent', 'filesystem', ':workspace_roots',
+      value, 'config', 'permissions', 'nova_personal_agent', 'filesystem', ':workspace_roots',
     )
     delete roots['.codex']
     roots.evil = 'read'

@@ -418,8 +418,8 @@ test('the emitted session.update matches the pinned outbound payload', async () 
   assert.ok((instructions as string).split('\n').length >= 50,
     'the session instructions must carry the full behavioral contract')
   for (const required of [
-    'Nova Audio Agent 任务',
-    'Nova Audio Agent 宿主激活事实：',
+    'Nova Personal Agent 任务',
+    'Nova Personal Agent 宿主激活事实：',
     'dispatch',
     'cancel',
     'confirm',

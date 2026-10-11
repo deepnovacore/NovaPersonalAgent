@@ -1,7 +1,7 @@
 /**
  * Bounded Tavily Search adapter.
  *
- * Ported from `src/nova_audio_agent/executors/search.py`. Search is an optional readonly executor:
+ * Ported from `src/nova_personal_agent/executors/search.py`. Search is an optional readonly executor:
  * the transport owns one bounded HTTP request, the adapter owns the executor contract and evidence
  * normalization, and neither writes Memory or speaks to the user.
  *

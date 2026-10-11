@@ -4,8 +4,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve Nova Audio Agent. You may answer in English or Chinese.
-        感谢帮助改进 Nova Audio Agent，可以使用中文或英文填写。
+        Thanks for helping improve Nova Personal Agent. You may answer in English or Chinese.
+        感谢帮助改进 Nova Personal Agent，可以使用中文或英文填写。
 
         Please search existing issues first. Remove API keys, personal information and private endpoints from attachments. Do not upload raw voice recordings or private runtime traces. Report vulnerabilities using SECURITY.md.
         请先搜索已有 issue。附件请移除 API key、个人信息和私有地址，不要上传原始录音或私有运行轨迹。安全漏洞请按 SECURITY.md 中的方式反馈。

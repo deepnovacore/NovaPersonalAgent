@@ -1662,7 +1662,7 @@ function hostInput(item: HostContextItem, asUserActivation: boolean): CascadedLl
   }
   const content = asUserActivation
     ? item.speech_content ?? item.content
-    : `Nova Audio Agent ${labels[item.kind]}：${item.content}`
+    : `Nova Personal Agent ${labels[item.kind]}：${item.content}`
   return item.kind === 'dialogue_context'
     ? {kind: 'packed_history', content}
     : {kind: asUserActivation ? 'host_activation' : 'host_context', content}

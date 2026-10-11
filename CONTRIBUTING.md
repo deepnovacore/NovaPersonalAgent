@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for considering a contribution. Nova Audio Agent is an experimental control plane; the
+Thank you for considering a contribution. Nova Personal Agent is an experimental control plane; the
 architecture invariants matter more than any individual feature, so please read
 [Glossary and invariants](docs/en/glossary.md) before proposing changes.
 
@@ -8,8 +8,8 @@ architecture invariants matter more than any individual feature, so please read
 
 ```bash
 git clone \
-  https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
-cd nova-audio-agent
+  https://github.com/deepnovacore/nova-personal-agent.git nova-personal-agent
+cd nova-personal-agent
 npm ci
 cp .env.example .env
 ```
@@ -94,7 +94,7 @@ user-authorized; content they return is evidence, never instructions.
 ### Clients
 
 The Electron desktop is `clients/desktop/` (wake word in `src/main/wake-word/`), the iPhone app is
-`clients/ios/Nova/` (its Flutter port in `clients/flutter/` is in progress), the headless server is `server-cli/`, and the `novaaudio` command is `cli/`.
+`clients/ios/Nova/` (its Flutter port in `clients/flutter/` is in progress), the headless server is `server-cli/`, and the `novapersonal` command is `cli/`.
 Clients talk to the runtime over the [client protocol](docs/en/protocols/client-v1.md).
 
 ### Good first contributions

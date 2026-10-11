@@ -371,7 +371,7 @@ app.whenReady().then(async () => {
     const isolation = { fixtureRoot, paths, persistent: session.isPersistent(), credentialMethods, permissionChecks, permissionCheckDetails, denied,
       preferences: { ...Object.fromEntries(['sandbox', 'contextIsolation', 'nodeIntegration', 'webSecurity'].map(key => [key, preferences[key]])),
         backgroundThrottling: window.webContents.getBackgroundThrottling(),
-        preloadLoaded: await window.webContents.executeJavaScript("typeof window.novaAudioAgentDesktop?.windowLayout?.setDormant === 'function'") } }
+        preloadLoaded: await window.webContents.executeJavaScript("typeof window.novaPersonalAgentDesktop?.windowLayout?.setDormant === 'function'") } }
     for (const [name, path] of Object.entries(paths)) assert.equal(app.getPath(name), path)
     assert.deepEqual(denied, { credentials: 0, network: 0, permissions: 0, windows: 0, navigation: 0 })
     await new Promise((resolve, reject) => {

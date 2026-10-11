@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please do not open a public issue for security problems. Instead, use
-[GitHub private vulnerability reporting](https://github.com/deepnovacore/NovaAudioAgent/security/advisories/new)
+[GitHub private vulnerability reporting](https://github.com/deepnovacore/nova-personal-agent/security/advisories/new)
 for this repository. If that channel is unavailable, open an issue that only asks a maintainer to
 get in touch — without any technical detail — and we will move the exchange to a private channel.
 

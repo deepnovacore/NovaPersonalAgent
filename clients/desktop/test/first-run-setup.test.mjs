@@ -76,7 +76,7 @@ async function loadSetupPage(t, api) {
     querySelector: selector => nodes[selector] ?? (selector === 'input[name="pipeline"]:checked' ? radios.find(radio => radio.checked)
       : radios.find(radio => selector === `input[name="pipeline"][value="${radio.value}"]`) ?? null),
     querySelectorAll: selector => lists[selector] ?? []}
-  globalThis.window = {close: () => { closed++ }, novaAudioAgentDesktop: {setup: api}}
+  globalThis.window = {close: () => { closed++ }, novaPersonalAgentDesktop: {setup: api}}
   t.after(() => {
     for (const [name, value] of Object.entries(previous)) if (value === undefined) delete globalThis[name]; else globalThis[name] = value
   })

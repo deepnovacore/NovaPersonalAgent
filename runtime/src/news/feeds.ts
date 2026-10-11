@@ -45,7 +45,7 @@ export function parseFeed(xml:string,source:NewsSource,now:Date):Article[]{
  return [...new Map(articles.map(a=>[a.id,a])).values()]
 }
 /** The only headers a feed read sends; the acceptance gate re-sends feed reads with exactly these. */
-export const FEED_HEADERS:Readonly<Record<string,string>>={Accept:'application/rss+xml, application/atom+xml, application/xml, text/xml','User-Agent':'NovaAudioAgent-News/0.3'}
+export const FEED_HEADERS:Readonly<Record<string,string>>={Accept:'application/rss+xml, application/atom+xml, application/xml, text/xml','User-Agent':'NovaPersonalAgent-News/0.3'}
 export async function fetchFeed(source:NewsSource,signal:AbortSignal,fetcher:typeof fetch=fetch,now=new Date()):Promise<Article[]>{
  const response=await fetcher(source.url,{signal,redirect:'error',headers:FEED_HEADERS})
  if(!response.ok)throw Error('source_http_'+response.status)

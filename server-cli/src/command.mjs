@@ -1,5 +1,5 @@
 import {fileURLToPath} from 'node:url'
-const HELP = `Usage: novaaudio-server [--env-file PATH] [start|token-init|pair WSS_URL|--help]
+const HELP = `Usage: novapersonal-server [--env-file PATH] [start|token-init|pair WSS_URL|--help]
 
   start          Run the headless service in the foreground
   token-init     Create the configured private host credential file

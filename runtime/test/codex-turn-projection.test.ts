@@ -15,7 +15,7 @@ function ephemeralThread(
     cwd: '/workspace',
     approvalPolicy,
     approvalsReviewer: 'user',
-    activePermissionProfile: {id: 'nova_audio_agent'},
+    activePermissionProfile: {id: 'nova_personal_agent'},
   }
 }
 
@@ -31,7 +31,7 @@ function persistentThread(): Record<string, unknown> {
     runtimeWorkspaceRoots: ['/workspace'],
     approvalPolicy: 'never',
     approvalsReviewer: 'user',
-    activePermissionProfile: {id: 'nova_audio_agent'},
+    activePermissionProfile: {id: 'nova_personal_agent'},
   }
 }
 

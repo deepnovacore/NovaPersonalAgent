@@ -2,7 +2,7 @@
  * The state model behind `RealtimeService`.
  *
  * Ported from the constants and private dataclasses at the head of
- * `src/nova_audio_agent/realtime/service.py`. These live apart from the orchestration for the same
+ * `src/nova_personal_agent/realtime/service.py`. These live apart from the orchestration for the same
  * reason `session-state.ts` does: the service is a single coupled state machine with around seventy
  * mutable fields, and the only way to read it is to be able to see what each field *is* before
  * following what changes it.

@@ -27,7 +27,7 @@ test('checksum parser binds a digest to the requested asset', () => {
 })
 
 test('desktop install verifies, atomically caches, and reuses a portable file', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const bytes = Buffer.from('#!/bin/sh\nexit 0\n')
   const digest = createHash('sha256').update(bytes).digest('hex')
   let requests = 0
@@ -48,7 +48,7 @@ test('desktop install verifies, atomically caches, and reuses a portable file', 
 })
 
 test('an online cache is reused only while its receipt matches the current release digest', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   let bytes = Buffer.from('#!/bin/sh\nexit 1\n')
   let digest = createHash('sha256').update(bytes).digest('hex')
   const fetchImpl = async url => String(url).endsWith('.sha256')
@@ -65,7 +65,7 @@ test('an online cache is reused only while its receipt matches the current relea
 })
 
 test('a receipt-validated cache remains available when the release host is offline', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const bytes = Buffer.from('#!/bin/sh\nexit 0\n')
   const digest = createHash('sha256').update(bytes).digest('hex')
   const online = async url => String(url).endsWith('.sha256')
@@ -78,7 +78,7 @@ test('a receipt-validated cache remains available when the release host is offli
 })
 
 test('checksum failure leaves no runnable installation', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const fetchImpl = async url => String(url).endsWith('.sha256')
     ? new Response(`${'0'.repeat(64)}  ${ARTIFACT}\n`)
     : new Response('changed')
@@ -91,7 +91,7 @@ test('checksum failure leaves no runnable installation', async () => {
 })
 
 test('a failed replacement preserves an existing cache directory', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const root = join(home, '.nova-audio-agent/cli/releases/0.3.1/win32-x64')
   await mkdir(root, {recursive: true})
   await writeFile(join(root, 'previous-cache'), 'keep')
@@ -106,7 +106,7 @@ test('a failed replacement preserves an existing cache directory', async () => {
 })
 
 test('concurrent installs serialize and reuse the first verified result', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const bytes = Buffer.from('#!/bin/sh\nexit 0\n')
   const digest = createHash('sha256').update(bytes).digest('hex')
   let requests = 0
@@ -125,7 +125,7 @@ test('concurrent installs serialize and reuse the first verified result', async 
 })
 
 test('an interrupted download leaves no partial executable', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const bytes = Buffer.from('partial')
   const digest = createHash('sha256').update(bytes).digest('hex')
   const fetchImpl = async url => {
@@ -146,7 +146,7 @@ test('an interrupted download leaves no partial executable', async () => {
 })
 
 test('doctor exposes only configured secret key names', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const appData = join(home, 'appdata')
   const settings = join(appData, 'Nova Audio Agent Ambient Orb/ambient-orb-settings.json')
   await mkdir(join(settings, '..'), {recursive: true})
@@ -160,7 +160,7 @@ test('desktop launch waits for spawn success and enables no-FUSE AppImage execut
   const child = new EventEmitter()
   child.unref = () => { child.unrefCalled = true }
   let launch
-  const started = launchDesktop('/tmp/NovaAudioAgent.AppImage', {
+  const started = launchDesktop('/tmp/nova-personal-agent.AppImage', {
     platform: 'linux',
     environment: {PATH: '/usr/bin'},
     openSettings: true,
@@ -172,7 +172,7 @@ test('desktop launch waits for spawn success and enables no-FUSE AppImage execut
     },
   })
   await started
-  assert.equal(launch.executable, '/tmp/NovaAudioAgent.AppImage')
+  assert.equal(launch.executable, '/tmp/nova-personal-agent.AppImage')
   assert.deepEqual(launch.args, ['--open-settings'])
   assert.equal(launch.options.env.APPIMAGE_EXTRACT_AND_RUN, '1')
   assert.equal(child.unrefCalled, true)
@@ -181,7 +181,7 @@ test('desktop launch waits for spawn success and enables no-FUSE AppImage execut
 test('desktop launch rejects a process that exits unsuccessfully during startup grace', async () => {
   const child = new EventEmitter()
   child.unref = () => assert.fail('failed launch must not detach')
-  const launch = launchDesktop('/tmp/NovaAudioAgent.AppImage', {
+  const launch = launchDesktop('/tmp/nova-personal-agent.AppImage', {
     launchGraceMs: 100,
     spawnImpl: () => {
       queueMicrotask(() => {
@@ -207,7 +207,7 @@ test('desktop launch reports an executable spawn failure', async () => {
 })
 
 test('doctor names the voice pipeline keys and probes only environment keys when online', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const appData = join(home, 'appdata')
   const settings = join(appData, 'Nova Audio Agent Ambient Orb/ambient-orb-settings.json')
   await mkdir(join(settings, '..'), {recursive: true})
@@ -232,7 +232,7 @@ test('doctor names the voice pipeline keys and probes only environment keys when
 })
 
 test('doctor counts only saved keys the desktop can load, and the DashScope-gateway model key', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const appData = join(home, 'appdata')
   const settings = join(appData, 'Nova Audio Agent Ambient Orb/ambient-orb-settings.json')
   await mkdir(join(settings, '..'), {recursive: true})
@@ -249,13 +249,13 @@ test('doctor counts only saved keys the desktop can load, and the DashScope-gate
 })
 
 test('doctor defaults a fresh install to the integrated DashScope key', async () => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const report = await inspectDoctor({...TARGET_OPTIONS, home, environment: {APPDATA: join(home, 'appdata')}})
   assert.deepEqual(report.voice, {pipeline: 'integrated', keys: [{name: 'DASHSCOPE_API_KEY', source: null}]})
 })
 
 test('doctor never probes a custom gateway key against DashScope', async t => {
-  const home = await mkdtemp(join(tmpdir(), 'novaaudio-cli-'))
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   t.after(() => rm(home, {recursive: true, force: true}))
   const calls = []
   const report = await inspectDoctor({...TARGET_OPTIONS, home, online: true,
@@ -269,7 +269,7 @@ test('doctor never probes a custom gateway key against DashScope', async t => {
 // Exercise Node fetch's real "terminated" response-body failure, not a mocked error.
 for (const failure of ['checksum', 'artifact', 'persistent']) {
   test(`release download recovers or explains a truncated ${failure} response`, async t => {
-    const home = await mkdtemp(join(tmpdir(), 'novaaudio-truncated-'))
+    const home = await mkdtemp(join(tmpdir(), 'novapersonal-truncated-'))
     t.after(() => rm(home, {recursive: true, force: true}))
     const bytes = Buffer.from('verified portable desktop payload')
     const digest = createHash('sha256').update(bytes).digest('hex')

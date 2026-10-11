@@ -2,7 +2,7 @@ import type {UnifiedRetrieval} from '../memory/retrieval.js'
 /**
  * Translate admitted realtime tool proposals into existing Runtime dispatch.
  *
- * Ported from `src/nova_audio_agent/realtime/bridge.py`. This is the *only* route by which a
+ * Ported from `src/nova_personal_agent/realtime/bridge.py`. This is the *only* route by which a
  * provider's tool calls and user transcripts reach the reducer, which is what makes it the place
  * where evidence and authority are checked. Two invariants live here and nowhere else:
  *

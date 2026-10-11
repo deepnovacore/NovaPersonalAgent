@@ -1,7 +1,7 @@
 /**
  * Bounded ledgers and per-response bookkeeping for the realtime session.
  *
- * Ported from the state half of `src/nova_audio_agent/realtime/session.py`. This layer is
+ * Ported from the state half of `src/nova_personal_agent/realtime/session.py`. This layer is
  * deliberately pure: no provider, no transport, no clock. It owns the questions the
  * session's event reducer keeps asking -- has this user turn already been counted, has
  * this response spoken, was this host event already answered -- and every answer is

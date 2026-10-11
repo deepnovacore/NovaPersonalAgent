@@ -1,7 +1,7 @@
 /**
  * Provider-neutral model gateway plus the OpenAI-compatible implementation.
  *
- * Ported from `src/nova_audio_agent/model_gateway.py`. The request body is
+ * Ported from `src/nova_personal_agent/model_gateway.py`. The request body is
  * model-visible, so its exact shape is pinned by a Python-exported golden.
  *
  * Python builds this through the `openai` SDK; Node uses `fetch` and parses the SSE
