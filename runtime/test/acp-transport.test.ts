@@ -32,8 +32,8 @@ const wire = acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(pro
 const writer = wire.writable.getWriter();
 if(mode === 'ignore-cancel') setInterval(() => {}, 1000);
 writeFileSync(${JSON.stringify(join(cwd, 'pid'))}, String(process.pid));
-if(mode === 'descendant') {
- const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {stdio: 'ignore'});
+if(mode === 'descendant' || mode === 'detached-descendant') {
+ const child = spawn(process.execPath, ['-e', mode === 'detached-descendant' ? "setTimeout(()=>require('node:fs').writeFileSync('detached-late','late'), 1500)" : 'setInterval(() => {}, 1000)'], {stdio: 'ignore', ...(mode === 'detached-descendant' ? {detached:true} : {})});
  writeFileSync(${JSON.stringify(join(cwd, 'descendant-pid'))}, String(child.pid));
 }
 acp.agent()
@@ -58,6 +58,7 @@ acp.agent()
  if(mode !== 'ignore-cancel') process.exit(0);
 })
 .onRequest('session/prompt', async ({params, client}) => {
+ if(mode === 'capture-work-order') writeFileSync(${JSON.stringify(join(cwd, 'work-order'))}, params.prompt[0].text);
  if(mode.startsWith('prompt-error:')) throw new acp.RequestError(-32603, mode.slice('prompt-error:'.length));
  if(mode === 'long-stream') for(let i=0;i<140;i++) await client.notify('session/update',{sessionId:params.sessionId,update:{sessionUpdate:'agent_thought_chunk',content:{type:'text',text:'x'.repeat(65536)}}});
  if(mode === 'oversized-frame') {process.stdout.write('x'.repeat(9*1024*1024));return await new Promise(()=>{});}
@@ -244,7 +245,8 @@ test('ACP full permissions select offered allow_once; ask without broker denies'
     for(const permissionMode of ['full', 'ask'] as const) {
       const transport = new AcpTransport({...f, backendId: 'opencode', permissionMode})
       const result = await transport.run({workOrder: 'hello'}, {}, deadline())
-      assert.equal(result.completion?.final_text, permissionMode === 'full' ? '{"outcome":"selected","optionId":"yes"}' : '{"outcome":"cancelled"}')
+      if(permissionMode === 'full') assert.equal(result.completion?.final_text, '{"outcome":"selected","optionId":"yes"}')
+      else {assert.equal(result.classification,'uncertain');assert.equal(result.diagnostic?.message,'permission_denied')}
     }
   } finally {await f.clean()}
 })
@@ -275,7 +277,8 @@ test('ACP never maps host session approval to a persistent allow_always choice',
         consume: () => 'decline', invalidate: () => false,
       }})
       const result = await transport.run({workOrder: 'hello'}, {}, deadline())
-      assert.equal(result.completion?.final_text, '{"outcome":"cancelled"}')
+      assert.equal(result.classification,'uncertain')
+      assert.equal(result.diagnostic?.message,'permission_denied')
     }
   } finally {await f.clean()}
 })
@@ -296,7 +299,7 @@ test('ACP closes its long-lived descendant process group', {skip: process.platfo
   try {
     const result = await transport.run({workOrder: 'hello'}, {}, deadline())
     assert.equal(result.classification, 'completed')
-    assert.deepEqual(result.process, {exit_code: 0, stop: 'none'})
+    assert.deepEqual(result.process, {exit_code: 0, stop: 'terminate'})
     const pid = Number(await readFile(join(f.cwd, 'descendant-pid'), 'utf8'))
     assert.throws(() => process.kill(pid, 0), {code: 'ESRCH'})
   } finally {await transport.close(); await f.clean()}
@@ -350,7 +353,7 @@ test('ACP injected guardian owner verifies tree closure and reports observed exi
     const result = await transport.run({workOrder: 'hello'}, {}, deadline())
     assert.equal(result.classification, 'completed')
     assert.deepEqual(result.process, {exit_code: 143, stop: 'terminate'})
-    assert.deepEqual(calls, ['closeStdin', 'waitTreeGone', 'terminateTree', 'waitTreeGone', 'dispose'])
+    assert.deepEqual(calls, ['waitTreeGone', 'closeStdin', 'waitTreeGone', 'terminateTree', 'waitTreeGone', 'dispose'])
   } finally {await transport.close(); connection.close(); stdin.destroy(); stdout.destroy(); stderr.destroy()}
 })
 test('ACP explicit null completion deadline permits a long prompt beyond startup', async () => {
@@ -382,8 +385,11 @@ test('ACP close joins late returned and failed-spawn owners before reporting cle
     const spawned = new Promise<OwnedCodexProcess>((resolve, reject) => {
       releaseSpawn = () => {if(failed) reject(unconfirmedCodexProcessOwnerError(owner)); else resolve(owner)}
     })
-    const transport = new AcpTransport({cwd: tmpdir(), backendId: 'opencode', permissionMode: 'ask', processFactory: {spawn: () => spawned}})
+    let enteredSpawn!: () => void
+    const entered = new Promise<void>(resolve => {enteredSpawn = resolve})
+    const transport = new AcpTransport({cwd: tmpdir(), backendId: 'opencode', permissionMode: 'ask', processFactory: {spawn: () => {enteredSpawn(); return spawned}}})
     const preflight = assert.rejects(transport.preflight(deadline()))
+    await entered
     let closed = false
     const closing = transport.close().then(() => {closed = true})
     try {
@@ -426,7 +432,7 @@ test('ACP redacts MCP header credentials and shows bounded structured approval d
     }})
     try {
       const result = await transport.run({workOrder: 'hello'}, {}, deadline())
-      assert.equal(result.classification, 'completed')
+      assert.equal(result.classification, mode === 'permission-details' ? 'uncertain' : 'completed')
       assert.equal(JSON.stringify(result).includes('mcp-private-token'), false)
       assert.equal(JSON.stringify(result).includes('session=mcp-private-cookie'), false)
       if(mode === 'permission-details') {
@@ -476,7 +482,7 @@ test('ACP preflight retains reported agent version without confusing protocol ve
     const report = await transport.preflight(deadline())
     assert.equal(report.version, '1')
     assert.equal(report.agent_version, '1.12.0')
-    assert.equal(report.tested_version, '1.18.31')
+    assert.equal(report.tested_version, '1.19.0')
     assert.equal(sanitizeAcpPreflightReport(report)?.agent_version, '1.12.0')
     assert.equal(sanitizeAcpPreflightReport({...report, agent_version: 'bad\nversion'}), null)
   } finally { await transport.close(); await f.clean() }
@@ -660,4 +666,51 @@ test('ACP observation text redacts sensitive paths and keeps a late tool delta f
     assert.equal(result.code, 'completed')
     assert.equal(result.completion?.final_text, 'Final answer.')
   } finally { await lateTransport.close(); await late.clean() }
+})
+
+
+test('ACP root crash reaps a scoped tool in a separate POSIX process group', {skip:process.platform === 'win32'}, async () => {
+  const f = await fixture('detached-descendant')
+  const transport = new AcpTransport({...f, backendId:'opencode', permissionMode:'full'})
+  let toolPid = 0
+  try {
+    await transport.preflight(deadline())
+    const agentPid = Number(await readFile(join(f.cwd, 'pid'), 'utf8'))
+    toolPid = Number(await readFile(join(f.cwd, 'descendant-pid'), 'utf8'))
+    const result = await transport.run({workOrder:'synthetic crash'}, {onTurnStartWritten:()=>process.kill(agentPid,'SIGKILL')}, deadline())
+    assert.equal(result.classification, 'uncertain')
+    await new Promise(resolve=>setTimeout(resolve,1600))
+    assert.equal(existsSync(join(f.cwd,'detached-late')),false)
+  } finally {
+    if(toolPid>0) {try {process.kill(-toolPid,'SIGKILL')} catch { /* test-owned group already exited */ }}
+    await transport.close(); await rm(f.cwd,{recursive:true,force:true})
+  }
+})
+
+
+test('ACP resume separates the current work order from previous turn-only restrictions', async () => {
+  const f = await fixture('capture-work-order')
+  const transport = new AcpTransport({...f,backendId:'deepseek',permissionMode:'full',resumeSessionId:'existing'})
+  const workOrder='Create result.txt; preserve the project restrictions.'
+  try {
+    const result=await transport.run({workOrder},{},deadline())
+    assert.equal(result.classification,'completed')
+    const written=await readFile(join(f.cwd,'work-order'),'utf8')
+    assert.match(written,/Previous turn-specific/u)
+    assert.match(written,/Keep project-wide instructions/u)
+    assert.ok(written.endsWith(workOrder))
+  } finally {await transport.close();await rm(f.cwd,{recursive:true,force:true})}
+})
+
+test('ACP never reports completion after an explicit host permission denial', async () => {
+  const f=await fixture('permission')
+  const transport=new AcpTransport({...f,backendId:'deepseek',permissionMode:'ask',approvalController:{
+    offer:()=>Promise.resolve({decision:'decline'}), consume:()=> 'decline',invalidate:()=>false,
+  }})
+  try {
+    const result=await transport.run({workOrder:'write a file'},{},deadline())
+    assert.equal(result.classification,'uncertain')
+    assert.equal(result.code,'turn_failed')
+    assert.equal(result.diagnostic?.message,'permission_denied')
+  } finally {await transport.close();await f.clean()}
 })

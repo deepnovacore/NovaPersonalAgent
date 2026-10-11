@@ -18,21 +18,22 @@ export interface AcpBackendDefinition {
 }
 
 const definitions: AcpBackendDefinition[] = [
-  {id: 'opencode', displayName: 'OpenCode', packageName: 'opencode-ai', packageVersion: '1.18.31', command: 'opencode',
+  {id: 'opencode', displayName: 'OpenCode', packageName: 'opencode-ai', packageVersion: '1.19.0', command: 'opencode',
     perToolApproval: true, mcpInjection: true,
     limitations: ['Native configuration and negotiated session capabilities require live verification.']},
-  {id: 'codebuddy', displayName: 'CodeBuddy', packageName: '@tencent-ai/codebuddy-code', packageVersion: '2.154.0', command: 'codebuddy',
+  {id: 'codebuddy', displayName: 'CodeBuddy', packageName: '@tencent-ai/codebuddy-code', packageVersion: '2.164.0', command: 'codebuddy',
     perToolApproval: true, mcpInjection: true,
     limitations: ['Full mode can still request confirmation for dangerous commands. Multitask is not enabled.']},
-  {id: 'pi', displayName: 'Pi', packageName: 'pi-acp', packageVersion: '0.0.33', command: 'pi-acp',
+  {id: 'pi', displayName: 'Pi', packageName: 'pi-acp', packageVersion: '0.0.34', command: 'pi-acp',
     perToolApproval: false, mcpInjection: false,
     limitations: ['No per-tool approval; ask mode is unsupported.',
       'ACP MCP injection is unsupported; granted MCP servers are refused before session creation.',
-      'Requires a separately installed Pi executable.']},
-  {id: 'deepseek', displayName: 'DeepSeek Harness', packageName: '@deepseek-ai/dsh', packageVersion: '0.1.5-rc.2', command: 'dsh',
+      'Requires a separately installed Pi executable.',
+      'pi-acp 0.0.34 needs the bundled patch-pi-acp.mjs compatibility patch to report native model errors.']},
+  {id: 'deepseek', displayName: 'DeepSeek Harness', packageName: '@deepseek-ai/dsh', packageVersion: '0.2.0-rc.2', command: 'dsh',
     perToolApproval: true, mcpInjection: true,
     limitations: ['Resume and MCP exist in the matching published ACP package; transcript replay does not.',
-      'Host must enforce permission intent through ACP permission replies.']},
+      'Ask starts the stock profile read-only; permission replies control native escalation, not arbitrary custom profiles.']},
 ]
 
 export const ACP_BACKENDS: readonly AcpBackendDefinition[] = Object.freeze(definitions.map(backend => Object.freeze({
@@ -113,6 +114,7 @@ export function resolveAcpLaunch(input: AcpLaunchInput): {command: string; args:
       break
     case 'deepseek':
       args = ['--profile', 'acp']
+      result.DSH_PERMISSION_MODE = input.permissionMode === 'full' ? 'danger-full-access' : 'read-only'
       break
   }
   return {command: input.binaryPath ?? backend.command, args, env: result}

@@ -1,4 +1,3 @@
-import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process'
 import {randomUUID} from 'node:crypto'
 import {SensitiveContentPolicy, SensitivePathPolicy, redactUrlQueryCredentials} from '../../memory/sensitivity.js'
 import {Readable, Writable} from 'node:stream'
@@ -31,6 +30,8 @@ import {
   type TransportOutcome,
 } from '../codex/app-server-transport.js'
 import type {AcpPreflightReport} from './preflight.js'
+import {scopedAcpProcessFactory} from './process-owner.js'
+import {PosixCodexProcessOwnerFactory} from '../codex/process-owner.js'
 import {acpBackend, resolveAcpLaunch, type AcpLaunchInput} from './backends.js'
 import {prepareAcpMcp, type PreparedAcpMcp} from './mcp.js'
 
@@ -81,7 +82,6 @@ export class AcpTransport implements CodexAppServerTransport {
   #cwd: string
   #resume: string | null
   #approval: ApprovalPort | null
-  #child: ChildProcessWithoutNullStreams | null = null
   #owner: OwnedCodexProcess | null = null
   #pendingSpawn: Promise<void> | null = null
   #ownerStop: 'none' | 'terminate' | 'kill' = 'none'
@@ -95,6 +95,7 @@ export class AcpTransport implements CodexAppServerTransport {
   #observer: TransportObserver | null = null
   #running = false
   #written = false
+  #permissionDenied = false
   #text = ''
   #activity = 0
   #reportedActivity = 0
@@ -120,7 +121,7 @@ export class AcpTransport implements CodexAppServerTransport {
   bindProject(binding: ProjectConnectionBinding): void {
     if (this.#running || this.#session !== null) throw new CodexTransportError('busy')
     const cwd = hostWorkspacePath(binding.workspace)
-    if ((this.#child || this.#owner) && cwd !== this.#cwd) throw new CodexTransportError('workspace_root_mismatch')
+    if (this.#owner && cwd !== this.#cwd) throw new CodexTransportError('workspace_root_mismatch')
     this.#cwd = cwd
     this.#resume = binding.resumeThreadId
     this.#approval = binding.approvalController
@@ -144,8 +145,9 @@ export class AcpTransport implements CodexAppServerTransport {
       }
       const launch = resolveAcpLaunch({...this.#options, cwd: this.#cwd, env: this.#options.env ?? process.env})
       if (process.platform === 'win32' && !this.#options.processFactory) throw new CodexTransportError('unsupported_protocol')
-      if (this.#options.processFactory) {
-        const spawning = this.#options.processFactory.spawn({binary: launch.command, argv: launch.args,
+      const processFactory = scopedAcpProcessFactory(this.#options.processFactory ?? new PosixCodexProcessOwnerFactory())
+      {
+        const spawning = processFactory.spawn({binary: launch.command, argv: launch.args,
           cwd: this.#cwd, environment: Object.fromEntries(Object.entries(launch.env).filter((entry): entry is [string, string] => typeof entry[1] === 'string')),
           shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true,
         }, {expiresAtMs: deadline.expiresAtMs, signal: AbortSignal.any([this.#lifetime.signal, ...(deadline.signal ? [deadline.signal] : [])])})
@@ -159,12 +161,8 @@ export class AcpTransport implements CodexAppServerTransport {
         this.#assertLive(deadline)
         const owner = this.#owner!
         void owner.exit.then(() => this.#fail('transport_lost'), () => this.#fail('transport_lost'))
-      } else {
-        this.#child = spawn(launch.command, [...launch.args], {cwd: this.#cwd, env: launch.env, shell: false, detached: true, stdio: ['pipe', 'pipe', 'pipe']})
-        this.#child.on('error', () => this.#fail('spawn_failed'))
-        this.#child.on('exit', () => this.#fail('transport_lost'))
       }
-      const streams = this.#owner ?? this.#child!
+      const streams = this.#owner!
       streams.stdin.on('error', () => this.#fail('transport_lost'))
       streams.stdout.on('error', () => this.#fail('transport_lost'))
       streams.stderr.on('error', () => this.#fail('transport_lost'))
@@ -282,9 +280,11 @@ export class AcpTransport implements CodexAppServerTransport {
       deadline.beforeWrite?.()
       method = 'session/prompt'
       const result = await this.#bounded<acp.PromptResponse>(connection.agent.request<acp.PromptResponse, acp.PromptRequest>('session/prompt', {
-        sessionId, prompt: [{type: 'text', text: input.workOrder}],
+        sessionId, prompt: [{type: 'text', text: this.#resume === null ? input.workOrder :
+          `New work order for the resumed session:\nComplete the current work order below. Treat this as the current request, whether it retries earlier work or starts a follow-up. Do not repeat a previous token-only answer or acknowledgment unless explicitly requested below. Previous turn-specific response formats do not apply unless this work order repeats them. Safety and permission constraints remain in force. Keep project-wide instructions and existing workspace state.\n\n${input.workOrder}`}],
       }), promptDeadline, deadline.signal)
       if (this.#failure) throw this.#failure
+      if (this.#permissionDenied) throw new CodexTransportError('turn_failed', {method: 'session/request_permission', server_code: null, message: 'permission_denied'})
       this.#emitProgress(true)
       if (result.stopReason !== 'end_turn') throw new CodexTransportError('turn_failed', {method, server_code: null, message: `stop_reason=${String(result.stopReason).replace(/[^a-z_]/gu, '').slice(0, 32)}`})
       // Match the existing public evidence format: bounded, NFC, printable text.
@@ -466,7 +466,7 @@ export class AcpTransport implements CodexAppServerTransport {
     const options = params.options
     let kind = 'allow_once'
     if (this.#options.permissionMode === 'ask') {
-      if (!this.#approval) return cancelled
+      if (!this.#approval) {this.#permissionDenied = true; return cancelled}
       const allowed: ApprovalDecision[] = []
       if (options.some(option => option.kind === 'allow_once')) allowed.push('accept')
       allowed.push('decline')
@@ -475,6 +475,7 @@ export class AcpTransport implements CodexAppServerTransport {
       const locations = tool.locations ? this.#safeText(JSON.stringify(tool.locations)) : null
       // Do not hide an unreviewed tail behind truncation: an oversized request is refused, never shortened.
       if ((input?.length ?? 0) > 2500 || (locations?.length ?? 0) > 1000) {
+        this.#permissionDenied = true
         const reject = options.find(option => option.kind === 'reject_once')
         return reject ? {outcome: {outcome: 'selected', optionId: reject.optionId}} : cancelled
       }
@@ -488,13 +489,15 @@ export class AcpTransport implements CodexAppServerTransport {
         local_detail: {kind: 'permissions', scope},
         operation_summary: '编码代理请求执行操作', allowed_decisions: allowed,
       }, AbortSignal.any([signal, this.#lifetime.signal]))
-      if (!resolution) return cancelled
+      if (!resolution) {this.#permissionDenied = true; return cancelled}
       const decision = this.#approval.consume(resolution)
       // ACP allow_always may persist beyond this session; it is not acceptForSession authority.
+      this.#permissionDenied ||= decision !== 'accept'
       kind = decision === 'accept' ? 'allow_once' : 'reject_once'
     }
     if (signal.aborted || this.#lifetime.signal.aborted) return cancelled
     const selected = options.find(option => option.kind === kind)
+    if (!selected) this.#permissionDenied = true
     return selected ? {outcome: {outcome: 'selected', optionId: selected.optionId}} : cancelled
   }
 
@@ -545,10 +548,9 @@ export class AcpTransport implements CodexAppServerTransport {
         })])
       } finally { clearTimeout(timer) }
     }
-    const child = this.#child
     if (this.#session && this.#connection && this.#running) {
       await Promise.race([this.#connection.agent.notify('session/cancel', {sessionId: this.#session}).catch(() => undefined), new Promise(resolve => setTimeout(resolve, 50))])
-      if (child) await waitForExit(child, 100)
+      if (this.#owner) await this.#owner.waitTreeGone(100)
     }
     this.#connection?.close()
     if (this.#owner) {
@@ -558,41 +560,18 @@ export class AcpTransport implements CodexAppServerTransport {
         this.#ownerStop = 'terminate'
         await owner.terminateTree()
       }
-      if (!await owner.waitTreeGone(200)) throw new CodexTransportError('transport_lost')
+      if (!await owner.waitTreeGone(200)) {
+        this.#ownerStop = 'kill'
+        await owner.killTree()
+        if (!await owner.waitTreeGone(1000)) throw new CodexTransportError('transport_lost')
+      }
       const exitCode = await owner.exit
       await owner.dispose()
       this.#process = {exit_code: exitCode, stop: this.#ownerStop}
       this.#owner = null
       return
     }
-    if (!child) return
-    if (child.pid) {
-      const kill = (signal: NodeJS.Signals): void => {
-        try { process.kill(-child.pid!, signal) }
-        catch (error) {
-          // macOS can report EPERM for a dying orphan group. Only the exit/group checks below
-          // may establish cleanup success; an actual permission denial keeps ownership alive.
-          if (!['ESRCH', 'EPERM'].includes((error as NodeJS.ErrnoException).code ?? '')) throw new CodexTransportError('transport_lost')
-        }
-      }
-      kill('SIGTERM')
-      await waitForExit(child, 100)
-      kill('SIGKILL')
-    }
-    await waitForExit(child, 200)
-    if (child.pid && child.exitCode === null && child.signalCode === null) throw new CodexTransportError('transport_lost')
-    if (child.pid) {
-      const expires = Date.now() + 750
-      while (groupExists(child.pid)) {
-        if (Date.now() >= expires) throw new CodexTransportError('transport_lost')
-        await new Promise(resolve => setTimeout(resolve, 25))
-      }
-    }
-    this.#process = {exit_code: child.exitCode, stop: child.signalCode === null ? 'none' : child.signalCode === 'SIGKILL' ? 'kill' : 'terminate'}
-    child.stdin.destroy()
-    child.stdout.destroy()
-    child.stderr.destroy()
-    this.#child = null
+
   }
 }
 
@@ -613,23 +592,7 @@ function acpErrorCode(error: unknown, fallback: 'preflight_failed' | 'server_rej
   return error instanceof acp.RequestError && error.code === -32000 ? 'credential_missing' : fallback
 }
 
-function groupExists(pid: number): boolean {
-  try { process.kill(-pid, 0); return true }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
-    if ((error as NodeJS.ErrnoException).code === 'EPERM') return true
-    throw new CodexTransportError('transport_lost')
-  }
-}
 
-function waitForExit(child: ChildProcessWithoutNullStreams, ms: number): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve()
-  return new Promise(resolve => {
-    const finish = (): void => { clearTimeout(timer); child.removeListener('exit', finish); resolve() }
-    const timer = setTimeout(finish, ms)
-    child.once('exit', finish)
-  })
-}
 
 /** Joins lazy MCP preparation and process ownership into the existing per-work transport lifetime. */
 export class PreparedAcpTransport implements CodexAppServerTransport {

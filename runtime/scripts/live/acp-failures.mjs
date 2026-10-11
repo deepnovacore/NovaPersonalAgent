@@ -21,11 +21,12 @@ import { mkdir, readFile, writeFile, cp, stat, chmod } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { parseEnv } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AcpTransport } from '../../dist/src/executors/acp/transport.js';
 import { ACP_BACKENDS } from '../../dist/src/executors/acp/backends.js';
 import { PosixCodexProcessOwnerFactory } from '../../dist/src/executors/codex/process-owner.js';
+const openCodeModel = process.env.ACP_FAILURE_OPENCODE_MODEL ?? 'qwen-flash';
 const [backendId, output, envFile] = process.argv.slice(2), backend = ACP_BACKENDS.find(b => b.id === backendId);
 assert(backend && output, 'Usage: acp-failures.mjs BACKEND PRIVATE_OUTPUT [ENV_FILE]');
 const root = resolve(output), home = join(root, 'home'), ws = join(root, 'workspace');
@@ -49,7 +50,7 @@ catch (error) {
 if (backendId === 'opencode') {
     await mkdir(join(home, '.config/opencode'), { recursive: true });
     const path = join(home, '.config/opencode/opencode.json');
-    await writeFile(path, JSON.stringify({ model: 'dashscope/qwen-flash', small_model: 'dashscope/qwen-flash', provider: { dashscope: { npm: '@ai-sdk/openai-compatible', options: { baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: env.DASHSCOPE_API_KEY }, models: { 'qwen-flash': { name: 'Qwen Flash', limit: { context: 1000000, output: 2048 } } } } }, permission: { external_directory: 'deny' }, mcp: {} }), { mode: 0o600 });
+    await writeFile(path, JSON.stringify({ model: `dashscope/${openCodeModel}`, small_model: `dashscope/${openCodeModel}`, provider: { dashscope: { npm: '@ai-sdk/openai-compatible', options: { baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', apiKey: env.DASHSCOPE_API_KEY }, models: { [openCodeModel]: { name: openCodeModel, limit: { context: 262144, output: 4096 } } } } }, permission: { external_directory: 'deny' }, mcp: {} }), { mode: 0o600 });
     childEnv.OPENCODE_CONFIG = path;
     childEnv.OPENCODE_CONFIG_DIR = join(home, '.config/opencode');
 }
@@ -72,15 +73,45 @@ else {
     await writeFile(join(home, '.codebuddy/settings.json'), JSON.stringify({ model: 'hy4-preview' }));
     await writeFile(join(home, '.codebuddy/mcp.json'), '{}');
 }
-const report = { backend: backendId, baselineVersion: backend.packageVersion, scope: 'Real AcpTransport and installed CLI, isolated synthetic cwd; not desktop UI or durable Task acceptance.', steps: [] };
+const report = { backend: backendId, baselineVersion: backend.packageVersion, configuredModel: backendId === 'opencode' ? openCodeModel : backendId === 'codebuddy' ? 'hy4-preview' : 'deepseek-v4-flash', scope: 'Real AcpTransport and installed CLI, isolated synthetic cwd; not desktop UI or durable Task acceptance.', steps: [] };
 const save = () => writeFile(join(root, 'report.json'), JSON.stringify(report, null, 2), { mode: 0o600 });
 const exists = async (name) => stat(join(ws, name)).then(() => true, () => false);
 async function runCase(name, instruction, { decline = false, cancel = false, crash = false, environment = childEnv, resumeSessionId } = {}) {
     let owner, permissions = 0, session, triggered = false, closed = false, commandStarted = false, snapshotBefore = null, snapshotAfter = null;
     const factory = new PosixCodexProcessOwnerFactory();
-    const processFactory = { spawn: async (...args) => { owner = await factory.spawn(...args); return owner; } };
+    const processFactory = { spawn: async (...args) => {
+        owner = await factory.spawn(...args);
+        if (process.env.ACP_FAILURE_TRACE === '1') {
+            report.wire ??= [];
+            const capture = (direction) => {
+                let pending = '';
+                return chunk => {
+                    pending += typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8');
+                    if(pending.length > 8*1024*1024) {report.traceDropped=true;pending='';return}
+                    let end;
+                    while((end=pending.indexOf('\n'))>=0) {
+                        const line=pending.slice(0,end);pending=pending.slice(end+1);
+                        try {
+                            const frame=JSON.parse(line), row={name,direction,at:Date.now(),id:frame.id,method:frame.method};
+                            if(direction==='out' && ['session/prompt','session/load','session/resume'].includes(frame.method)) {
+                                row.params=frame.params;report.wire.push(row);
+                            } else if(direction==='in' && frame.method==='session/update') {
+                                const update=frame.params.update;row.update=update.sessionUpdate;
+                                if(update.content?.type==='text') {row.textSha256=createHash('sha256').update(update.content.text).digest('hex');row.authOk=update.content.text.includes('AUTH_OK')}
+                                report.wire.push(row);
+                            } else if(direction==='in' && frame.id!==undefined) {row.stopReason=frame.result?.stopReason;row.errorCode=frame.error?.code;report.wire.push(row)}
+                        } catch {report.traceDropped=true}
+                    }
+                }
+            };
+            const outgoing=capture('out'), nativeWrite=owner.stdin.write;
+            owner.stdin.write=function(...writeArgs) {outgoing(writeArgs[0]);return Reflect.apply(nativeWrite,this,writeArgs)};
+            owner.stdout.on('data',capture('in'));
+        }
+        return owner;
+    } };
     const approvalController = { offer: () => { permissions++; return Promise.resolve({ decision: decline ? 'decline' : 'accept' }); }, consume: d => d.decision, invalidate: () => false };
-    const controller = new AbortController(), transport = new AcpTransport({ backendId, cwd: ws, permissionMode: backendId === 'pi' && !decline ? 'full' : decline ? 'ask' : 'full', env: environment, approvalController, processFactory, ...(resumeSessionId ? { resumeSessionId } : {}) });
+    const controller = new AbortController(), transport = new AcpTransport({ backendId, cwd: ws, ...(process.env.ACP_FAILURE_BIN_DIR ? {binaryPath:resolve(process.env.ACP_FAILURE_BIN_DIR, backend.command)} : {}), ...(backendId==='pi' && process.env.ACP_FAILURE_PI_PARENT ? {parentExecutable:resolve(process.env.ACP_FAILURE_PI_PARENT)} : {}), permissionMode: backendId === 'pi' && !decline ? 'full' : decline ? 'ask' : 'full', env: environment, approvalController, processFactory, ...(resumeSessionId ? { resumeSessionId } : {}) });
     const started = Date.now(), deadline = { expiresAtMs: Date.now() + 60000, signal: controller.signal };
     let monitor;
     try {
@@ -127,7 +158,7 @@ async function record(row, ok) { report.steps.push({ ...row, ok, ownerGroupGone:
 const onlyCase = process.env.ACP_FAILURE_CASE;
 const forbidden = 'rejected-' + randomUUID() + '.txt';
 if (!onlyCase || onlyCase === 'reject') {
-    const reject = await runCase('reject', `This is a synthetic test. Create only ${forbidden} in the current working directory with the text forbidden. Do not read other directories. If permission is refused, stop.`, { decline: true });
+    const reject = await runCase('reject', `This is a synthetic approval-rejection test. Request a one-time native write permission before creating ${forbidden} in the current working directory with the text forbidden. Use Bash with native sandbox escalation when necessary; do not bypass approval. If approval is rejected, stop. Do not read other directories.`, { decline: true });
     await record(reject, backendId === 'pi' ? reject.classification === 'refused' && reject.code === 'unsupported_protocol' && !reject.turnWritten : reject.permissions > 0 && !await exists(forbidden) && reject.classification !== 'completed');
     report.steps.at(-1).forbiddenAbsent = !await exists(forbidden);
     await save();
@@ -178,7 +209,7 @@ if (!onlyCase || onlyCase === 'credentials') {
     if (credentialFile)
         await writeFile(credentialFile, original, { mode: 0o600 });
     const marker = 'recovery-' + randomUUID() + '.txt', token = randomUUID();
-    const restored = await runCase('credential-restored', `Create only ${marker} in the current directory with exactly ${token}. Do not read outside this directory. Then stop.`, { resumeSessionId: bad.session });
+    const restored = await runCase('credential-restored', `${process.env.ACP_FAILURE_EXPLICIT_TURN === '1' ? 'This is a new work order. The previous AUTH_OK-only response instruction applied to the previous turn and is now finished. Execute this new instruction instead.\n\n' : ''}Create only ${marker} in the current directory with exactly ${token}. Do not read outside this directory. Then stop.`, { resumeSessionId: bad.session });
     restored.markerMatches = await readFile(join(ws, marker), 'utf8').then(s => s.trim() === token, () => false);
     restored.sameSession = bad.session ? restored.session === bad.session : null;
     await record(restored, restored.classification === 'completed' && restored.markerMatches && report.lastOwnerGroupGone && (!bad.session || restored.sameSession));

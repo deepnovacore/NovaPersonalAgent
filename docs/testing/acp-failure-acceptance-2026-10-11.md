@@ -1,6 +1,8 @@
 # ACP 异常路径实跑：2026-10-11
 
-结论：**未整体验收通过**。按用户决定，v0.4.0 不接入 Kimi Code；本轮覆盖四个已接入 ACP 后端。
+本文件保留首轮失败证据；后续升级与修复见 [修复记录](acp-failure-fixes-2026-10-11.md)。
+
+首轮结论：**未整体验收通过**。按用户决定，v0.4.0 不接入 Kimi Code；本轮覆盖四个已接入 ACP 后端。
 运行代码为 `v0.4.0dev@9ec6e6ec`；新增的实跑脚本与本文不修改生产 transport。
 平台为本机 macOS，实际调用已安装 CLI 和真实提供商，并使用生产 `AcpTransport`、
 `PosixCodexProcessOwnerFactory`。覆盖传输层和后端真实执行，不覆盖桌面 UI 或 durable Task 收口。

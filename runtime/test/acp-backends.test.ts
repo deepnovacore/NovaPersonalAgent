@@ -80,3 +80,10 @@ test('environment projection preserves native homes but excludes other backend a
   }
   assert.deepEqual(env, original)
 })
+
+test('DeepSeek binds Nova Ask to native read-only and Full to native full access', () => {
+  for (const [permissionMode, mode] of [['ask','read-only'],['full','danger-full-access']] as const) {
+    const launch=resolveAcpLaunch({backendId:'deepseek',cwd:process.cwd(),permissionMode,env:{DSH_PERMISSION_MODE:'danger-full-access'}})
+    assert.equal(launch.env.DSH_PERMISSION_MODE,mode)
+  }
+})

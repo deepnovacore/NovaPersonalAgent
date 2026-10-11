@@ -46,7 +46,7 @@ GPT-6 Astra 审查发现的 Connect 授权复查、非文本剪贴板丢失及�
 当前剩余事项：
 
 - **计划范围已确认：** 2026-10-11 用户明确不接入 Kimi Code；M9-C 以 OpenCode、CodeBuddy、Pi 和 DeepSeek Harness 四个 ACP 后端为范围。
-- **M9-C 异常路径实跑：** 已有四后端文本 Task 完成、默认切换后的原会话续做、重启续做记录；本轮已真实覆盖拒绝、运行中取消、崩溃及凭据恢复，发现未通过项，详见 [异常路径实跑](../../testing/acp-failure-acceptance-2026-10-11.md)。CodeBuddy 四项通过；OpenCode/Pi/DeepSeek 崩溃后仍有工具副作用，Pi 401 误报完成，DeepSeek 普通写入无审批且凭据恢复后的新任务未生效。M9-C 整体仍未通过。
+- **M9-C 异常路径实跑：** 已有四后端文本 Task 完成、默认切换后的原会话续做、重启续做记录；本轮已升级 CLI/ACP SDK 并修复跨组进程清理、Pi 结构化错误、DeepSeek 原生权限映射与拒绝收口，四后端均有真实异常场景通过记录，见 [升级与修复](../../testing/acp-failure-fixes-2026-10-11.md)。OpenCode/Qwen Flash 和 Pi/DeepSeek V4 Pro 的恢复后新任务执行仍有模型波动，transport 通过不替代 Task/产物核验；M9-C 整体仍未签收。首轮失败证据见 [原始实跑](../../testing/acp-failure-acceptance-2026-10-11.md)。
 - **模型与权限边界：** 已有成功记录依赖 `qwen3-max`；较弱模型的派发与验证稳定性未被重新签收。ACP Ask 模式没有 Codex 等价的文件/网络沙箱，Pi 无逐项审批，ACP 不支持运行中追加要求；这些限制已明确展示，不算新增后端的等价能力。
 - **M9-G 真机与完整任务：** browser、computer、mobile 已接入共享审批、取消、截图证据和 Task 核验；浏览器完整任务及部分 Mac 读回有历史 live 证据。后台 Safari 原生动作链通过，但完整真实模型 Task 曾受 TLS 失败阻塞；手机真机、Windows、麦克风语音取消及签名安装包/TCC 验收仍未完成。
 - **M9-Demo：** 缺按后端/设备独立制作的合成数据演示、授权与失败路径录屏、复现配置及最终支持矩阵；既有测试记录不等于交付完整演示材料。

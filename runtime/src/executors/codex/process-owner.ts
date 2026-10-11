@@ -289,6 +289,8 @@ class PosixOwnedCodexProcess implements OwnedCodexProcess {
     this.#groupOperations = groupOperations
     this.#killLeader = () => { child.kill('SIGKILL') }
     this.stdin = child.stdin
+    // Teardown can outlive its temporary end listener; retain a sink for a late EPIPE.
+    this.stdin.on('error', () => undefined)
     this.stdout = child.stdout
     this.stderr = child.stderr
     const pid = child.pid
@@ -304,9 +306,19 @@ class PosixOwnedCodexProcess implements OwnedCodexProcess {
   async closeStdin(): Promise<void> {
     if (this.#stdinClosed) return
     this.#stdinClosed = true
+    if (this.stdin.destroyed || this.stdin.writableEnded) return
     await new Promise<void>(resolve => {
-      this.stdin.end(() => { resolve() })
-      this.stdin.once('error', () => { resolve() })
+      const done = (): void => {
+        clearTimeout(timer)
+        this.stdin.off('close', done)
+        this.stdin.off('error', done)
+        resolve()
+      }
+      // A dead pipe may never invoke end's callback; tree teardown is verified separately.
+      const timer = setTimeout(done, 250)
+      this.stdin.once('close', done)
+      this.stdin.once('error', done)
+      this.stdin.end(done)
     })
   }
 
