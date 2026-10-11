@@ -148,3 +148,12 @@ test('a news card keeps its actions in one row and its recommendation basis out 
  h.calls.length=0;await h.buttons.findLast(b=>b.textContent==='就用这些').action()
  assert.deepEqual(h.calls,[['news.configure',{enabled:true,explore:true,interests:['AI'],expected_version:0}]],'keeping the guesses saves them unchanged')
 })
+
+test('article discussion carries exact article identity and only a user-selected personal relation',async t=>{
+ const h=harness(t),discussions=[],flatten=node=>[node,...node.children.flatMap(flatten)],news={enabled:false,interests:[],items:[{id:'a',content_hash:'h1',source_id:'s',title:'A',summary:'B',url:'https://example.org/a',ranking:null}],saved:[],sources:[]}
+ renderNews(h.panel,{...h,news,life:{todos:[{id:'t',version:4,title:'Prototype',status:'open'}],goals:[]},discuss:async(...args)=>discussions.push(args)})
+ await h.buttons.find(b=>b.textContent==='接着聊').action();assert.deepEqual(discussions,[[[{kind:'news',id:'a',content_hash:'h1'}]]])
+ const select=flatten(h.panel).find(n=>n['aria-label']==='结合哪个事项');select.value='todo:t';select.listeners.change();
+ await h.buttons.find(b=>b.textContent==='整理应用思路').action();assert.deepEqual(discussions[1][0],[{kind:'news',id:'a',content_hash:'h1'},{kind:'todo',id:'t',version:4}]);assert.match(discussions[1][1],/Prototype/)
+ assert.equal(h.calls.length,0)
+})

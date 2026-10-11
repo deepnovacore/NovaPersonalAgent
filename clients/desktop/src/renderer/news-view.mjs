@@ -1,7 +1,9 @@
+import {t} from './locale.mjs'
+import {renderCardTags} from './card-tags.mjs'
 import {confirmedInterests,renderInterests,renderWarmup} from './profile-preferences.mjs'
 import {attachSources} from './source-popover.mjs'
 const el=(tag,text)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;return n}
-export function renderNews(panel,{news,warmup,command,button,local,preferencesLocal=local,rerender,profile,openArticle,delegate,connected=true,lead=[]}){
+export function renderNews(panel,{news,warmup,command,button,local,preferencesLocal=local,rerender,profile,openArticle,delegate,discuss,life,connected=true,lead=[]}){
  panel.append(el('h2','Feeds · 为你发现'))
  renderWarmup(panel,{warmup,command,button})
  if(!news){const pending=el('p',connected?'正在准备资讯状态…':'资讯暂不可用。工作台连接后，可查看资讯设置和内容。');pending.setAttribute('role','status');panel.append(pending,...lead);return}
@@ -31,9 +33,24 @@ export function renderNews(panel,{news,warmup,command,button,local,preferencesLo
   card.append(el('small',`${news.sources.find(s=>s.id===item.source_id)?.name??item.source_id} · ${item.published_at?new Date(item.published_at).toLocaleString():'来源未提供发布时间'}${item.read?' · 已读':''}${item.exploration?' · 探索':''}`),el('h3',item.title));const excerpt=el('p',item.summary);excerpt.className='news-excerpt';card.append(excerpt)
   if(item.ranking?.reason)card.append(el('p',`推荐理由：${item.ranking.reason}`))
   attachSources(card,(item.ranking?.matches??[]).map(m=>`${news.interests.find(i=>i.id===m.interest_id)?.text??''}：${m.quote}`),{title:'推荐依据'})
+  const interests=(item.ranking?.matches??[]).map(match=>news.interests.find(interest=>interest.id===match.interest_id)?.text).filter(Boolean).slice(0,2)
+  renderCardTags(card,[...interests.map(label=>({label,tone:'context'})),...(item.read?[{label:'已读',tone:'progress'}]:[])],{el})
   const actions=el('div');actions.className='card-actions';card.append(actions)
   button('阅读原文',async()=>{await openArticle(item.url);await command('news.action',{action:'read',id:item.id,value:true})},actions)
   button(item.saved?'取消收藏':'收藏',()=>command('news.action',{action:'save',id:item.id,value:!item.saved}),actions,`news-save:${item.id}`)
+  if(discuss&&item.content_hash){
+   const details=el('details');details.className='news-discussion';details.append(el('summary',t('在 Nova 讨论')));card.append(details)
+   const select=el('select');select.setAttribute('aria-label',t('结合哪个事项'))
+   const options=[{value:'',title:t('只讨论这篇资讯')},...(life?.todos??[]).filter(row=>!['done','cancelled'].includes(row.status)).map(row=>({value:'todo:'+row.id,title:row.title,reference:{kind:'todo',id:row.id,version:row.version}})),...(life?.goals??[]).filter(row=>['active','paused'].includes(row.status)).map(row=>({value:'goal:'+row.id,title:row.title,reference:{kind:'goal',id:row.id,version:row.version}}))]
+   for(const option of options){const node=el('option',option.title);node.value=option.value;select.append(node)}
+   const key='discuss:'+item.id;select.value=local[key]??''
+   const selected=()=>options.find(option=>option.value===select.value)
+   const references=()=>[{kind:'news',id:item.id,content_hash:item.content_hash},...(selected()?.reference?[selected().reference]:[])]
+   details.append(el('p',t('可选择一个事项，看看这篇资讯如何用于你的实践。'),'hint'),select)
+   button(t('接着聊'),()=>discuss(references()),details,`news-discuss:${item.id}`).className='ghost'
+   const plan=button(t('整理应用思路'),()=>discuss(references(),t('请结合资讯「{0}」和我选择的事项「{1}」，整理可应用的思路，区分事实、推断与建议。',item.title,selected()?.title)),details,`news-plan:${item.id}`);plan.className='soft';plan.hidden=!selected()?.reference
+   select.addEventListener('change',()=>{local[key]=select.value;plan.hidden=!selected()?.reference})
+  }
   const conversionKey='convert:'+item.id,draft=local[conversionKey]
   if(!draft)button('转为个人事项',()=>{local[conversionKey]={id:item.id,content_hash:item.content_hash,kind:'idea',title:item.title.slice(0,200),note:''};rerender()},actions)
   else{

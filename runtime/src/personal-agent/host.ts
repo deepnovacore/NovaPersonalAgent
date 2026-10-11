@@ -19,7 +19,7 @@ import type {NewsRanker} from '../news/ranking.js';
 import type {SourceChange} from '../memory-substrate/source-state.js'
 import type {WakeReason} from '../core/slots.js';
 import {dailyBriefSettings,dueDailyBriefs,isQuietTime,type DailyBriefSlot} from './daily-brief.js';
-import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool,nextConversationTitle,sourceTodoSchema, type ConversationRuntimeFactory,type ConversationRuntime} from './conversations.js';
+import {markConversationRead,conversationUnreadCount,createConversation, ConversationRuntimePool,nextConversationTitle,sourceTodoSchema, type ConversationRuntimeFactory,type ConversationRuntime,type ConversationTurnContext} from './conversations.js';
 import type {UnifiedRetrieval,UnifiedRetrievalResult} from '../memory/retrieval.js';
 import {validateMemoryOverview, type MemoryOverview} from './memory-overview.js';
 import type { ContextView } from '../core/context-view.js';
@@ -29,7 +29,7 @@ import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
 import { memoryRefSchema } from '../core/memory.js';
 import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
-import { personalCommandSchema, personalSettingsSchema, preparedContentSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
+import { personalCommandSchema, personalSettingsSchema, preparedContentSchema, discussionReferenceSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
 import {canonicalJson} from '../text/canonical-json.js';
@@ -218,8 +218,19 @@ export class PersonalAgentHost {
         });
     }
 
-    conversationSnapshot(){const c=this.#state.conversations;return {selected_id:c.selected_id,voice_id:c.voice_id,unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(c.items.find(item=>item.id===c.selected_id)?.messages??[])}}
-    async submitConversationText(id:string,text:string,requestId?:string,sourceTodo?:{id:string;version:number}):Promise<void>{
+    conversationSnapshot(maxHomeBytes=256*1024){
+        const c=this.#state.conversations,selected=c.items.find(item=>item.id===c.selected_id),home=c.items.filter(item=>['chat:main','chat:proactive'].includes(item.id)).flatMap(item=>item.messages);
+        const receipts=this.#state.feed.filter(feed=>feed.task_ref&&!home.some(message=>message.id==='feed:'+feed.id||message.turn_id==='task:'+feed.task_ref!.work_id)).map(feed=>({id:'feed:'+feed.id,conversation_id:c.work_owners[feed.task_ref!.work_id]??'chat:main',role:'assistant' as const,text:feed.title,created_at:feed.updated_at}));
+        const result={selected_id:c.selected_id,voice_id:c.voice_id,unread_count:c.items.reduce((count,item)=>count+conversationUnreadCount(item),0),items:c.items.map(item=>({id:item.id,kind:item.kind,unread_count:conversationUnreadCount(item),title:item.title,coding_target:item.coding_target,subject_key:item.subject_key,created_at:item.created_at,updated_at:item.updated_at,generation:item.generation})),messages:structuredClone(selected?.messages??[]),home_messages:[] as typeof home,home_truncated:false};
+        const selectedIds=new Set(result.messages.map(message=>message.id)),candidates=[...home,...receipts].filter(message=>!selectedIds.has(message.id)).sort((a,b)=>a.created_at.localeCompare(b.created_at));
+        const budget=Math.max(0,Math.min(maxHomeBytes,1024*1024-Buffer.byteLength(JSON.stringify(result))-4096));let bytes=2;
+        for(const message of candidates.slice(-512).reverse()){
+            const size=Buffer.byteLength(JSON.stringify(message))+1;if(bytes+size>budget)break;
+            result.home_messages.unshift(structuredClone(message));bytes+=size;
+        }
+        result.home_truncated=result.home_messages.length<candidates.length;return result;
+    }
+    async submitConversationText(id:string,text:string,requestId?:string,sourceTodo?:{id:string;version:number},context:ConversationTurnContext={}):Promise<void>{
         if(!this.#opened)throw Error('unavailable');
         if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');
         if(sourceTodo)sourceTodo=sourceTodoSchema.parse(sourceTodo);
@@ -229,16 +240,37 @@ export class PersonalAgentHost {
         if(this.#state.conversations.voice_id===id||this.#voiceTransition)throw Error('voice_active');
         if(id==='chat:proactive'&&this.#conversationPool.hasVoice(id)){this.#voiceTransition=true;try{await this.#announcementTail;await this.#conversationPool.stopVoice(id)}finally{this.#voiceTransition=false}}
         if(!this.#conversationPool.acceptsText(id))throw Error('conversation_busy');
-        if(requestId){const prior=conversation.messages.find(message=>message.request_id===requestId);if(prior){if(prior.text!==text||canonicalJson(prior.source_todo??null)!==canonicalJson(sourceTodo??null))throw Error('request_id_conflict');return}}
+        if(requestId){const prior=conversation.messages.find(message=>message.request_id===requestId);if(prior){if(prior.text!==text||canonicalJson(prior.source_todo??null)!==canonicalJson(sourceTodo??null)||canonicalJson(prior.references??null)!==canonicalJson(context.references??null))throw Error('request_id_conflict');return}}
         if(sourceTodo){const todo=this.life.snapshot().todos.find(todo=>todo.id===sourceTodo.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict')}
         const userMessageId=randomUUID();
-        await this.#serial(async()=>{if(!this.#opened)throw Error('unavailable');const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(this.#clearingConversations.has(id))throw Error('conversation_clearing');if(requestId){const prior=item.messages.find(message=>message.request_id===requestId);if(prior){if(prior.text!==text||canonicalJson(prior.source_todo??null)!==canonicalJson(sourceTodo??null))throw Error('request_id_conflict');return}}item.messages.push({id:userMessageId,conversation_id:id,role:'user',generation_status:'pending',text,...(sourceTodo?{source_todo:sourceTodo}:{}),created_at:this.#now().toISOString(),...(requestId?{request_id:requestId}:{})});item.messages=item.messages.slice(-512);item.updated_at=this.#now().toISOString();await this.#commit(next)});
+        await this.#serial(async()=>{if(!this.#opened)throw Error('unavailable');const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(this.#clearingConversations.has(id))throw Error('conversation_clearing');if(requestId){const prior=item.messages.find(message=>message.request_id===requestId);if(prior){if(prior.text!==text||canonicalJson(prior.source_todo??null)!==canonicalJson(sourceTodo??null)||canonicalJson(prior.references??null)!==canonicalJson(context.references??null))throw Error('request_id_conflict');return}}item.messages.push({id:userMessageId,conversation_id:id,role:'user',generation_status:'pending',text,...(sourceTodo?{source_todo:sourceTodo}:{}),...(context.references?{references:context.references}:{}),created_at:this.#now().toISOString(),...(requestId?{request_id:requestId}:{})});item.messages=item.messages.slice(-512);item.updated_at=this.#now().toISOString();await this.#commit(next)});
         conversation=this.#state.conversations.items.find(item=>item.id===id)!;
         if(!conversation.messages.some(message=>message.id===userMessageId))return;
         const generation=conversation.generation;
-        const operation=this.#conversationPool.run(conversation,text,sourceTodo?{source_todo:sourceTodo}:{}).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';item.messages.push({id:randomUUID(),conversation_id:id,role:'assistant',reply_to:userMessageId,text:result.assistant.slice(0,16000),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{})});item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed'})});
+        const operation=this.#conversationPool.run(conversation,text,{...context,...(sourceTodo?{source_todo:sourceTodo}:{}),...(context.references?{refresh:()=>this.discussionContext(context.references!)}:{})}).then(result=>this.#serial(async()=>{const next=structuredClone(this.#state);const item=next.conversations.items.find(item=>item.id===id)!;if(item.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(admitted)admitted.generation_status='completed';item.messages.push({id:randomUUID(),conversation_id:id,role:'assistant',reply_to:userMessageId,text:result.assistant.slice(0,16000),created_at:this.#now().toISOString(),...(result.turn_id?{turn_id:result.turn_id}:{})});item.messages=item.messages.slice(-512);await this.#commit(next)})).catch(async(error:unknown)=>{if(!this.#opened||this.#clearingConversations.has(id))return;await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation)return;const admitted=item.messages.find(message=>message.id===userMessageId);if(!admitted)return;admitted.generation_status=error instanceof Error&&/conversation_(?:cleared|closed)/u.test(error.message)?'interrupted':'failed';await this.#commit(next)});this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'response_failed'})});
         this.#conversationRuns.set(id,operation);
         void operation.catch(()=>{this.#conversationEmit?.({type:'conversation.error',conversation_id:id,error:'status_persistence_failed'})});
+    }
+    async discussionContext(references:NonNullable<ConversationTurnContext['references']>):Promise<ConversationTurnContext>{
+        const material:string[]=[],evidenceRefs:string[]=[];let sourceTodo:{id:string;version:number}|undefined;
+        for(const ref of references){
+            if(ref.kind==='todo'||ref.kind==='goal'){
+                const row=(ref.kind==='todo'?this.life.snapshot().todos:this.life.snapshot().goals).find(row=>row.id===ref.id);
+                if(row?.version!==ref.version||['done','cancelled','completed','archived'].includes(row.status))throw Error('stale_reference');
+                material.push(JSON.stringify({kind:ref.kind,title:row.title,note:row.note,status:row.status,...('due' in row?{due:row.due}:{success_criteria:row.success_criteria})}));
+                if(ref.kind==='todo'&&references.filter(item=>item.kind==='todo').length===1)sourceTodo={id:ref.id,version:ref.version};
+            }else if(ref.kind==='news'){
+                const input=this.news.conversionInput({id:ref.id,content_hash:ref.content_hash,kind:'idea',title:'Discussion'});
+                material.push(JSON.stringify({kind:'news',...input.article}));
+            }else{
+                const feed=this.#state.feed.find(item=>item.id===ref.id);
+                if(feed?.updated_at!==ref.updated_at||feed.lifecycle!=='active'||feed.user_state==='dismissed'||(feed.expires_at&&Date.parse(feed.expires_at)<=this.#now().getTime())||!await this.#valid(feed))throw Error('stale_reference');
+                material.push(JSON.stringify({kind:'feed',title:feed.title,why_now:feed.why_now,text:feed.prepared?.text?.slice(0,6000)}));evidenceRefs.push(...feed.evidence_refs,...(feed.prepared?.evidence_refs??[]));
+                for(const memoryRef of feed.memory_refs){const entry=await this.options.memory()?.get?.(memoryRef.entry_id);evidenceRefs.push(...(entry?.evidence_refs??[]))}
+            }
+        }
+        if(new Set(evidenceRefs).size>16)throw Error('reference_evidence_limit');
+        return {references, ...(sourceTodo?{source_todo:sourceTodo}:{}),prepared:{trust:'untrusted_external',text:material.join('\n').slice(0,12000),evidence_refs:[...new Set(evidenceRefs)]}};
     }
     conversationService(id:string){return this.#conversationPool?.service(id)}
     workConversation(id:string){return this.#conversationPool?.workConversation(id)??this.#state.conversations.work_owners[id]}
@@ -575,7 +607,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, workbench_context:this.workbenchContext.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), profile_preparation:this.profileWarmup.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    snapshot() { const m = this.options.memory(); const snapshot={ type: 'personal.state' as const, workbench_context:this.workbenchContext.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(0), news:this.news.snapshot(), profile_preparation:this.profileWarmup.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; snapshot.conversations=this.conversationSnapshot(Math.max(0,Math.min(256*1024,1024*1024-Buffer.byteLength(JSON.stringify(snapshot))-1024)));return snapshot; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         if (!this.#release || !this.#loaded) throw Error('personal_store_not_ready');
@@ -878,6 +910,13 @@ export class PersonalAgentHost {
         else if(command.method==='presentation.seen'){const q=z.object({approval_id:z.string().min(1).max(128).optional(),conversation_id:z.string().min(1).max(128).optional(),proposal_id:z.string().min(1).max(128).optional()}).strict().parse(p);if(!this.#presentationMode)throw Error('presentation_unavailable');await this.#setPresentation(this.#presentationMode,q);data={mode:this.#presentationMode}}
         else if(command.method==='conversations.confirm'){if(!client)throw Error('unauthenticated');const q=z.object({id:z.string().min(1).max(128),proposal_id:z.string().min(1).max(128),confirmed:z.boolean()}).strict().parse(p);if(!this.#pendingDecisions().pending_confirmations.some(item=>item.proposal_id===q.proposal_id&&item.conversation_id===q.id))throw Error('confirmation_not_owned');if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');await this.#conversationPool.confirm(q.id,q.proposal_id,q.confirmed);data={accepted:true}}
         else if(command.method==='conversations.approve'){if(!client)throw Error('unauthenticated');const q=z.object({id:z.string().min(1).max(128),approval_id:z.string().min(1).max(128),approved:z.boolean()}).strict().parse(p);if(!this.#pendingDecisions().pending_approvals.some(a=>a.approval_id===q.approval_id&&a.conversation_id===q.id))throw Error('approval_not_owned');if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');await this.#conversationPool.approve(q.id,q.approval_id,q.approved);data={accepted:true}}
+        else if(command.method==='conversations.discuss'){
+            const q=z.object({text:z.string().trim().min(1).max(4000),references:z.array(discussionReferenceSchema).min(1).max(2)}).strict().parse(p);
+            if(new Set(q.references.map(ref=>`${ref.kind}:${ref.id}`)).size!==q.references.length)throw Error('duplicate_reference');
+            const context=await this.discussionContext(q.references);
+            await this.submitConversationText('chat:main',q.text,receiptId,context.source_todo,context);
+            data={accepted:true,conversation_id:'chat:main'};
+        }
         else if(command.method.startsWith('conversations.')) {data=await this.#conversationCommand(command.method,p);if(command.method==='conversations.open_feed'&&this.#conversationPool){const id=this.#state.conversations.selected_id;const label=typeof p.label==='string'?p.label:'聊聊这条建议';await this.submitConversationText(id,label,'feed:'+String(p.feed_id))}}
         else if (command.method === 'state') {
             await this.revalidate();
@@ -954,7 +993,7 @@ export class PersonalAgentHost {
             data=purged;
             const removedEvidence=new Set(purged.removed_evidence_ids??[]),removedEntries=new Set([q.id,...(purged.removed_entry_ids??[])]);
             const removedFeeds=new Set(this.#state.feed.filter(item=>item.memory_refs.some(ref=>removedEntries.has(ref.entry_id))||[...item.evidence_refs,...(item.prepared?.evidence_refs??[])].some(ref=>removedEvidence.has(ref))).map(item=>item.id));
-            const affectedConversations=new Set(this.#state.conversations.items.filter(item=>item.feed_ids.some(id=>removedFeeds.has(id))||(item.prepared?.evidence_refs.some(ref=>removedEvidence.has(ref))??false)||item.messages.some(message=>removedFeeds.has(message.id.replace(/^feed:/u,'')))).map(item=>item.id));
+            const affectedConversations=new Set(this.#state.conversations.items.filter(item=>item.feed_ids.some(id=>removedFeeds.has(id))||(item.prepared?.evidence_refs.some(ref=>removedEvidence.has(ref))??false)||item.messages.some(message=>removedFeeds.has(message.id.replace(/^feed:/u,''))||message.references?.some(ref=>ref.kind==='feed'&&removedFeeds.has(ref.id)))).map(item=>item.id));
             for(const id of affectedConversations)await this.#conversationPool?.clear(id);
             // Host-owned cached suggestions and command receipts must not retain the selected memory.
             await this.#serial(async()=>{
@@ -962,7 +1001,7 @@ export class PersonalAgentHost {
                 const removed=removedFeeds;
                 for(const item of next.feed)if(removed.has(item.id)&&item.suggestion_id)this.options.pool.withdraw(item.suggestion_id);
                 next.feed=next.feed.filter(item=>!removed.has(item.id));
-                for(const conversation of next.conversations.items){if(affectedConversations.has(conversation.id)){conversation.prepared=null;conversation.generation++;if(next.conversations.voice_id===conversation.id)next.conversations.voice_id=null;}conversation.messages=conversation.messages.filter(message=>!removed.has(message.id.replace(/^feed:/u,'')));conversation.feed_ids=conversation.feed_ids.filter(id=>!removed.has(id));}
+                for(const conversation of next.conversations.items){if(affectedConversations.has(conversation.id)){conversation.prepared=null;conversation.generation++;if(next.conversations.voice_id===conversation.id)next.conversations.voice_id=null;}const selectedTurns=new Set(conversation.messages.filter(message=>message.references?.some(ref=>ref.kind==='feed'&&removed.has(ref.id))).map(message=>message.id));const firstAffected=conversation.messages.findIndex(message=>selectedTurns.has(message.id));conversation.messages=conversation.messages.filter((message,index)=>!removed.has(message.id.replace(/^feed:/u,''))&&!selectedTurns.has(message.id)&&!(firstAffected>=0&&index>=firstAffected&&message.role==='assistant'));conversation.feed_ids=conversation.feed_ids.filter(id=>!removed.has(id));}
                 const references=(value:unknown):boolean=>{if(Array.isArray(value))return value.some(references);if(value&&typeof value==='object'){const record=value as Record<string,unknown>;return (typeof record.id==='string'&&removedEntries.has(record.id))||(typeof record.entry_id==='string'&&removedEntries.has(record.entry_id))||Object.values(record).some(references)}return false};
                 for(const [id,receipt] of Object.entries(next.receipts))if(references(receipt.result))delete next.receipts[id];
                 await this.#commit(next);

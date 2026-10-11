@@ -742,3 +742,21 @@ test('each work records its executor and one session; the first session becomes 
   assert.equal(tasks.get(task.id).primary_session_id,undefined);assert.equal(tasks.get(other.id).primary_session_id,'s1')
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })
+
+
+for(const restored of [false,true])test(`explicit references clear an old Todo source in a ${restored?'restored':'running'} production conversation`,async()=>{
+  const dir=await mkdtemp(join(await realpath(tmpdir()),'task-reference-source-')),host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null}),selected:string[]=[]
+  let native:Awaited<ReturnType<ReturnType<typeof conversationRuntimeFactory>>>|undefined,response=0
+  try{
+   await host.open();const a=await host.life.mutate({op:'create',kind:'todo',title:'Item A'},'a'),b=await host.life.mutate({op:'create',kind:'todo',title:'Item B'},'b'),references=[{kind:'todo' as const,...a},{kind:'todo' as const,...b}],conversation=createConversation('chat','Test',null,'chat:main')
+   if(restored)conversation.messages=[{id:'first',conversation_id:conversation.id,role:'user',text:'Help with A',source_todo:a,created_at:new Date().toISOString()},{id:'second',conversation_id:conversation.id,role:'user',text:'Compare both',references,created_at:new Date().toISOString()}]
+   const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),searchTransport:{search:async()=>{throw Error('unused')}},gateway:{complete:async()=>{throw Error('unused')},async *stream(){throw Error('unused')}},createTextProvider:options=>{
+    const provider=buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({async *stream(){const id='reference:'+ ++response;yield {kind:'response_started',response_id:id};yield {kind:'text_delta',text:'Plan'};yield {kind:'response_completed',response_id:id}},restoreHistory:async()=>{},abandonPendingResponse:async()=>{},close:async()=>{}})})}}),inject=provider.injectHostItem.bind(provider)
+    provider.injectHostItem=async(...args)=>{if(args[0].kind==='dialogue_context'&&(JSON.parse(args[0].content) as {purpose?:string}).purpose==='selected_todo_context')selected.push(args[0].content);return inject(...args)};return provider
+   }})
+   native=await factory(conversation,()=>{})
+   if(!restored){await native.runTurn('Help with A',new AbortController().signal,{source_todo:a});assert.equal(selected.length,1);await native.runTurn('Compare both',new AbortController().signal,{references,prepared:{trust:'untrusted_external',text:'Item A and Item B',evidence_refs:[]}})}
+   await native.runTurn('Follow up',new AbortController().signal)
+   assert.equal(selected.length,restored?0:1,'explicit references must replace the earlier single-Todo task context')
+  }finally{await native?.close();await host.close();await rm(dir,{recursive:true,force:true})}
+})

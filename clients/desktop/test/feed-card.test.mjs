@@ -16,7 +16,7 @@ test('actions follow kind and lifecycle',()=>{
  assert.deepEqual(buttons(renderFeedCard(h.parent,item(),h)),['讨论这个建议','稍后','忽略'])
  assert.deepEqual(buttons(renderFeedCard(h.parent,item({kind:'question',lifecycle:'resolved'}),h)),['回复这个问题'])
  assert.equal(feedActionLabel(item({kind:'task_result',task_ref:{work_id:'w'}})),'查看任务结果');assert.equal(feedActionLabel(item({task_ref:{work_id:'w'}})),'查看任务进展');assert.equal(feedActionLabel(item({kind:'change'})),'查看变化')
- const card=h.parent.children[0];assert.equal(card.dataset.feedId,'f1');assert.deepEqual(card.children[2].children.map(n=>n.textContent),['建议','待处理'])
+ const card=h.parent.children[0];assert.equal(card.dataset.feedId,'f1');assert.deepEqual(card.children[2].children.map(n=>n.textContent),['Nova 建议'])
 })
 test('dismissed cards keep content but expose no actions',()=>{
  const h=harness();const card=renderFeedCard(h.parent,item({user_state:'dismissed'}),h)
@@ -48,4 +48,12 @@ test('sendPresented is independent of rendering and retries after failure',async
  h.setFail(true);const other=item({id:'f9'});sendPresented(other,h);await new Promise(r=>setImmediate(r));assert.equal(h.presented.has('f9'),false)
  h.setFail(false);assert.equal(sendPresented(other,h),true)
  assert.equal(sendPresented(item({id:'done',delivery:{presented_at:'x'}}),h),false);assert.equal(sendPresented(it,{presented:undefined,command:h.command}),false)
+})
+
+
+test('feed user feedback is distinct from task lifecycle',()=>{
+ const h=harness(),tags=card=>card.children.flatMap(n=>n.className==='card-tags'?n.children.map(tag=>tag.textContent):[])
+ assert.deepEqual(tags(renderFeedCard(h.parent,item({user_state:'snoozed',snooze_until:new Date(Date.now()+3600000).toISOString()}),h)),['Nova 建议','稍后提醒'])
+ assert.deepEqual(tags(renderFeedCard(h.parent,item({user_state:'dismissed'}),h)),['Nova 建议','已忽略'])
+ assert.deepEqual(tags(renderFeedCard(h.parent,item({user_state:'snoozed',snooze_until:'2000-01-01T00:00:00Z'}),h)),['Nova 建议'])
 })

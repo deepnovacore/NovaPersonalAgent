@@ -205,3 +205,18 @@ test('oversized personal projections show an error without replacing retained st
  await assert.rejects(pending,error=>error.input_status==='unknown'&&/过大/.test(error.message))
  assert.equal(sent.length,count);assert.equal(c.snapshot,retained)
 })
+
+test('referenced main requests recover with the same command identity and preserve other drafts',async()=>{
+ const h=harness();h.snapshot('chat:main');h.c.state('b').draft='Other draft';h.c.draft='Make a plan';h.c.state().references=[{kind:'todo',id:'t',version:2}]
+ await h.c.submit();const first=h.sent.at(-1);assert.equal(first.method,'conversations.discuss');assert.deepEqual(first.params.references,[{kind:'todo',id:'t',version:2}])
+ assert.equal(h.c.state('b').draft,'Other draft');h.c.disconnect();await Promise.resolve();await h.c.connect();const replay=h.sent.at(-1)
+ assert.equal(replay.request_id,first.request_id);assert.deepEqual(replay.params,first.params)
+ h.c.receive({type:'personal.result',request_id:first.request_id,ok:true,data:{accepted:true}});await Promise.resolve();await Promise.resolve()
+ assert.equal(h.c.state('chat:main').draft,'');assert.equal(h.c.state('chat:main').submission,null);assert.deepEqual(h.c.state('chat:main').references,[]);h.c.disconnect()
+})
+
+test('a failed independent card request never replaces an existing draft reference',async()=>{
+ const h=harness();h.snapshot('chat:main');const a={kind:'todo',id:'a',version:1},b={kind:'todo',id:'b',version:2};h.c.draft='Draft about A';h.c.state().references=[a]
+ assert.equal(h.c.submitText('Plan B','chat:main',[b]),true);const request=h.sent.at(-1);h.c.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'stale_reference'});await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(h.c.draft,'Draft about A');assert.deepEqual(h.c.state().references,[a]);assert.equal(h.c.state().failed_card.text,'Plan B');assert.deepEqual(h.c.state().failed_card.references,[b]);h.c.disconnect()
+})

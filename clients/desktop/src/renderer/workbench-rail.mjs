@@ -1,6 +1,9 @@
+import {t} from './locale.mjs'
 // The workbench's left icon rail. Item order and keyboard mapping are plain
 // data so tests and the live scripts can address pages by their visible label.
 export const RAIL_ITEMS=Object.freeze([
+ Object.freeze({id:'nova',label:'Nova',title:'主对话',icon:'M4 5h16v11H9l-5 4zM8 9h8M8 12h5'}),
+ Object.freeze({id:'timeline',label:'Timeline',title:'时间线',icon:'M7 3v18M7 6h10M7 12h7M7 18h10M4 6h0M4 12h0M4 18h0'}),
  Object.freeze({id:'todos',label:'Todos',title:'待办',icon:'M9 11l3 3 8-8M20 12v6a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9'}),
  Object.freeze({id:'ideas',label:'Ideas',title:'想法',icon:'M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.6.6 1 1.3 1 2.5h6c0-1.2.4-1.9 1-2.5A6 6 0 0 0 12 3z'}),
  Object.freeze({id:'goals',label:'Goals',title:'目标',icon:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'}),
@@ -24,7 +27,7 @@ export function mountRail(root,{document=globalThis.document,onSelect,footer=[]}
  const list=document.createElement('div');list.className='rail-pages';list.setAttribute('role','tablist');list.setAttribute('aria-orientation','vertical');nav.append(list)
  const buttons=new Map(),badges=new Map();let active=null
  const make=(item,parent)=>{
-  const b=document.createElement('button');b.type='button';b.className='rail-item';b.title=`${item.label} · ${item.title}`;b.setAttribute('aria-label',b.title)
+  const b=document.createElement('button');b.type='button';b.className='rail-item';b.title=t(`${item.label} · ${item.title}`);b.setAttribute('aria-label',b.title)
   b.append(icon(document,item.icon));const label=document.createElement('span');label.className='rail-label';label.textContent=item.label;b.append(label)
   parent.append(b);return b
  }

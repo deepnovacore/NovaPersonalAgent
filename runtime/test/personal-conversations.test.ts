@@ -440,3 +440,66 @@ test('open_work rejects invalid parameters and absent or stale owners without ch
   }
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('home transcript projects main and proactive messages without merging task history or ownership',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-home-'))
+ const path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState()
+ const add=(id:string,text:string)=>state.conversations.items.find(item=>item.id===id)!.messages.push({id:text,conversation_id:id,role:'assistant',text,created_at:'2026-10-11T08:00:00Z'})
+ add('chat:main','main');add('chat:proactive','reminder')
+ const task=createConversation('topic','Scoped task',null,'task-chat');task.messages.push({id:'private-task-turn',conversation_id:task.id,role:'user',text:'scoped',created_at:'2026-10-11T08:00:00Z'});state.conversations.items.push(task);state.conversations.selected_id=task.id;state.conversations.work_owners.work=task.id
+ await store.write(state)
+ const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{await host.open();const snapshot=host.conversationSnapshot();assert.deepEqual(snapshot.messages.map(m=>m.text),['scoped']);assert.deepEqual(snapshot.home_messages.map(m=>m.text),['main','reminder']);assert.equal(host.workConversation('work'),'task-chat');assert.equal(snapshot.home_messages[1]!.conversation_id,'chat:proactive')}
+ finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('card discussion validates current identity, retains selected source and admits one scoped main turn',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-discuss-'))
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const contexts:unknown[]=[],texts:string[]=[]
+ try{
+  await host.open();host.setConversationRuntime(conversation=>Promise.resolve({runTurn:(text,_signal,context)=>{assert.equal(conversation.id,'chat:main');contexts.push(context);texts.push(text);return Promise.resolve({assistant:'Plan ready'})},close:()=>Promise.resolve()}),()=>{ /* no transport */ })
+  const todo=await host.life.mutate({op:'create',kind:'todo',title:'Prepare release',due:'2026-10-12',note:'Use approved brief'},'source-create')
+  const references=[{kind:'todo',id:todo.id,version:todo.version}],command={type:'personal.command' as const,request_id:'plan-once',method:'conversations.discuss' as const,params:{text:'Draft a plan',references}}
+  const result=await host.command(command) as {ok:boolean};assert.equal(result.ok,true);await host.waitConversation('chat:main');await host.command(command)
+  assert.deepEqual(texts,['Draft a plan']);assert.deepEqual((contexts[0] as {source_todo:unknown}).source_todo,todo)
+  assert.match((contexts[0] as {prepared:{text:string}}).prepared.text,/Prepare release/)
+  assert.equal((contexts[0] as {prepared:{trust:string}}).prepared.trust,'untrusted_external')
+  assert.deepEqual(host.conversationSnapshot().messages[0]!.references,references)
+  await host.life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,status:'cancelled'},'cancel')
+  const stale=await host.command({...command,request_id:'stale-plan'}) as {ok:boolean;error?:string};assert.equal(stale.ok,false);assert.match(stale.error??'',/stale/)
+  const malformed=await host.command({...command,request_id:'missing-version',params:{text:'Draft',references:[{kind:'todo',id:todo.id}]}}) as {ok:boolean};assert.equal(malformed.ok,false)
+  await host.submitConversationText('chat:main','An unrelated question');await host.waitConversation('chat:main');assert.equal((contexts[1] as {prepared?:unknown}).prepared,undefined)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('home projection fits a previously valid mobile-sized snapshot without duplicating main history',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-home-budget-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState();state.user_scope='test'
+ const main=state.conversations.items[0]!,proactive=state.conversations.items[1]!
+ for(let i=0;i<40;i++){main.messages.push({id:'main-'+i,conversation_id:main.id,role:'assistant',text:'M'.repeat(16000),created_at:'2026-10-11T08:00:00Z'});proactive.messages.push({id:'notice-'+i,conversation_id:proactive.id,role:'assistant',text:'N'.repeat(16000),created_at:'2026-10-11T08:00:00Z'})}
+ await store.write(state);const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{await host.open();const snapshot=host.snapshot();assert.equal(snapshot.conversations.messages.length,40);assert.ok(Buffer.byteLength(JSON.stringify(snapshot))<1024*1024);assert.equal(snapshot.conversations.home_messages.some(m=>m.conversation_id==='chat:main'),false);assert.equal((snapshot.conversations as unknown as {home_truncated:boolean}).home_truncated,true)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a queued card request revalidates source versions after runtime startup',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-queued-reference-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve}),texts:string[]=[]
+ try{await host.open();host.setConversationRuntime(async()=>{await gate;return {runTurn:text=>{texts.push(text);return Promise.resolve({assistant:'Should not run'})},close:()=>Promise.resolve()}},()=>{ /* no transport */ });const todo=await host.life.mutate({op:'create',kind:'todo',title:'Original'},'create');await host.command({type:'personal.command',request_id:'queued',method:'conversations.discuss',params:{text:'Plan it',references:[{kind:'todo',...todo}]}});await host.life.mutate({op:'update',kind:'todo',id:todo.id,expected_version:todo.version,status:'cancelled'},'cancel');release();await host.waitConversation('chat:main');assert.deepEqual(texts,[]);assert.equal(host.conversationSnapshot().messages[0]!.generation_status,'failed')}finally{release();await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a scoped task result projects a stable main receipt without exposing its scoped transcript',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-receipt-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState();state.user_scope='test';const owner=createConversation('topic','Task',null,'task-owner');owner.messages.push({id:'private-turn',conversation_id:owner.id,role:'user',text:'Private execution detail',created_at:new Date().toISOString()});state.conversations.items.push(owner);state.conversations.work_owners.work='task-owner';await store.write(state)
+ const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{await host.open();await host.taskResult('work','First result');await host.taskResult('work','Updated result');const messages=host.conversationSnapshot().home_messages;assert.equal(messages.length,1);assert.equal(messages[0]!.text,'Updated result');assert.ok(messages[0]!.id.startsWith('feed:'));assert.equal(messages.some(m=>m.text==='Private execution detail'),false)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+test('two selected Todos do not assign either as the automatic task source',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-two-references-')),host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null}),contexts:unknown[]=[]
+ try{
+  await host.open();host.setConversationRuntime(()=>Promise.resolve({runTurn:(_text,_signal,context)=>{contexts.push(context);return Promise.resolve({assistant:'Plan'})},close:()=>Promise.resolve()}),()=>{ /* no transport */ })
+  const a=await host.life.mutate({op:'create',kind:'todo',title:'Item A'},'a'),b=await host.life.mutate({op:'create',kind:'todo',title:'Item B'},'b'),references=[{kind:'todo',...a},{kind:'todo',...b}]
+  const result=await host.command({type:'personal.command',request_id:'two',method:'conversations.discuss',params:{text:'Compare both',references}}) as {ok:boolean};assert.equal(result.ok,true);await host.waitConversation('chat:main')
+  assert.equal((contexts[0] as {source_todo?:unknown}).source_todo,undefined);assert.deepEqual(host.conversationSnapshot().messages[0]!.references,references)
+  const duplicate=await host.command({type:'personal.command',request_id:'duplicate',method:'conversations.discuss',params:{text:'Compare',references:[references[0],references[0]]}}) as {ok:boolean;error?:string};assert.equal(duplicate.ok,false);assert.match(duplicate.error??'',/duplicate_reference/)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})

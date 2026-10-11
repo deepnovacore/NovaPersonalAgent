@@ -572,3 +572,9 @@ test('source invalidation hides generated cards even when memory refresh fails',
   assert.equal(host.snapshot().workbench_context.cards.length,0)
  }finally{await host.close();await f.close()}
 })
+
+test('purge retires main runtime and removes a selected feed turn while preserving unrelated user history',async()=>{
+ const f=await fixture();let closed=0,erased=false
+ Object.assign(f.host.options.memory()!,{purgeEntry:()=>{erased=true;f.entries.delete('plan');return Promise.resolve({status:'complete',operation_id:'purge-selected',removed_entries:1,removed_evidence:0,removed_entry_ids:['plan'],removed_evidence_ids:[],backup_cleanup:{status:'complete',unresolved:[]}})}})
+ try{f.host.setConversationRuntime(()=>Promise.resolve({runTurn:text=>Promise.resolve({assistant:'Reply '+text}),close:()=>{closed++;return Promise.resolve()}}),()=>{ /* no transport */ });await f.host.submitConversationText('chat:main','Unrelated history');await f.host.waitConversation('chat:main');assert.equal(await f.host.admit(proposal(),await f.host.discoverySnapshot()),'admitted');const feed=f.host.snapshot().feed[0]!;await f.host.command({type:'personal.command',request_id:'selected-feed',method:'conversations.discuss',params:{text:'Use this material',references:[{kind:'feed',id:feed.id,updated_at:feed.updated_at}]}});await f.host.waitConversation('chat:main');assert.equal(f.host.conversationSnapshot().messages.length,4);await f.host.command({type:'personal.command',request_id:'purge-selected',method:'memory.purge',params:{id:'plan',expected_version:1}});assert.equal(erased,true);assert.equal(closed,1);assert.deepEqual(f.host.conversationSnapshot().messages.map(m=>m.text),['Unrelated history','Reply Unrelated history'])}finally{await f.close()}
+})

@@ -1,3 +1,4 @@
+import {renderTimeline,timelineDate} from './timeline-view.mjs'
 import {summarizeTasks} from './task-banner.mjs'
 import {createStartupNotice} from './startup-notice.mjs'
 import {t} from './locale.mjs'
@@ -16,7 +17,7 @@ const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!=
 const PAGE_TITLE=Object.fromEntries(RAIL_ITEMS.map(item=>[item.id,`${item.label} · ${item.title}`]))
 /** The workbench: icon rail, personal-object pages in the middle, Nova as a collapsible pane on the right. */
 export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,applyPresentation,speakingLevel}) {
- const lifeLocal={},newsLocal={},preferencesLocal={},taskLocal=new Map()
+ const timelineExpanded=new Set(),lifeLocal={},newsLocal={},preferencesLocal={},taskLocal=new Map()
  let unreadProjection=null
  const root=el('main',undefined,'workbench personal-workspace');root.id='personal-workspace';document.body.prepend(root)
  const pendingActions=new Set()
@@ -47,25 +48,26 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const c=new PersonalController({send,start,stop,applyPresentation,changed:update})
  const openSettings=category=>api.orbMenu.openSettings?.(category)
  // Rail
- let selected='todos',inspector=null,inspectedId=null,returnFocus=null,openSequence=0
+ let selected='nova',timelineOpen=!globalThis.matchMedia?.('(max-width:959px)')?.matches,initialHome=false,inspector=null,inspectedId=null,returnFocus=null,openSequence=0
  // Viewed results survive restarts so an already-read result is not counted as new again.
  const VIEWED_KEY='nova:viewed-task-results',viewedStore=globalThis.localStorage
  const viewedCursors=new Map(),viewedResults=new Set((()=>{try{const saved=JSON.parse(viewedStore?.getItem(VIEWED_KEY)??'[]');return Array.isArray(saved)?saved.filter(id=>typeof id==='string').slice(-200):[]}catch{return []}})()),taskHistories=new Map()
  const saveViewed=()=>{try{viewedStore?.setItem(VIEWED_KEY,JSON.stringify([...viewedResults].slice(-200)))}catch{/* the count only resets on restart */}}
  const durableTasks=()=>({tasks:c.snapshot?.tasks??[]})
  function closeTask(){openSequence++;inspector?.dispose();inspector=null;const originId=inspectedId;inspectedId=null;root.dataset.taskDetail='false';renderPanel();if(returnFocus?.isConnected!==false)returnFocus?.focus();else panel.querySelector?.(`[data-task-id="${originId}"] button`)?.focus()}
- async function openTask(id,approval=false){const sequence=++openSequence,originFocus=document.activeElement;if(c.presentationMode!=='workbench')await c.setPresentation('workbench');if(!taskHistories.has(id))taskHistories.set(id,{items:new Map(),cursor:0,incomplete:false,truncated:false});const history=taskHistories.get(id);const next=await c.command('tasks.get',{task_id:id,after:history.cursor});if(sequence!==openSequence)return;if(inspectedId!==id){inspector?.dispose();returnFocus=originFocus;panel.replaceChildren();const holder=el('section');panel.append(holder);inspector=mountTaskDetail(holder,{command:(...args)=>c.command(...args),onClose:closeTask,history,after:viewedCursors.get(id)??0,onViewed:(taskId,cursor,phase)=>{if(c.presentationMode==='workbench'&&taskId&&Number.isSafeInteger(cursor)){viewedCursors.set(taskId,cursor);if(phase==='completed'&&!viewedResults.has(taskId)){viewedResults.add(taskId);saveViewed();update()}}}});inspectedId=id}root.dataset.taskDetail='true';pageTitle.textContent=t('任务详情');inspector.setVisible(c.presentationMode==='workbench');inspector.update(next);if(c.presentationMode==='workbench'){if(next.phase==='completed')viewedResults.add(id);saveViewed();if(approval)inspector.focusApproval();else inspector.focus()}}
- const rail=mountRail(root,{onSelect:id=>{selected=id;closeTask()},footer:[
+ async function openTask(id,approval=false){const sequence=++openSequence,originFocus=document.activeElement;if(c.presentationMode!=='workbench')await c.setPresentation('workbench');if(!taskHistories.has(id))taskHistories.set(id,{items:new Map(),cursor:0,incomplete:false,truncated:false});const history=taskHistories.get(id);const next=await c.command('tasks.get',{task_id:id,after:history.cursor});if(sequence!==openSequence)return;if(inspectedId!==id){inspector?.dispose();returnFocus=originFocus;panel.replaceChildren();const holder=el('section');panel.append(holder);inspector=mountTaskDetail(holder,{command:(...args)=>c.command(...args),onClose:closeTask,history,after:viewedCursors.get(id)??0,onViewed:(taskId,cursor,phase)=>{if(c.presentationMode==='workbench'&&taskId&&Number.isSafeInteger(cursor)){viewedCursors.set(taskId,cursor);if(phase==='completed'&&!viewedResults.has(taskId)){viewedResults.add(taskId);saveViewed();update()}}}});inspectedId=id}root.dataset.taskDetail='true';syncLayout();pageTitle.textContent=t('任务详情');inspector.setVisible(c.presentationMode==='workbench');inspector.update(next);if(c.presentationMode==='workbench'){if(next.phase==='completed')viewedResults.add(id);saveViewed();if(approval)inspector.focusApproval();else inspector.focus()}}
+ const rail=mountRail(root,{onSelect:id=>run(async()=>{selected=id;closeTask();if(id!=='nova'&&globalThis.matchMedia?.('(max-width:959px)')?.matches)chat.setOpen(false);if(id==='nova')await showHome()}),footer:[
   {label:'收起',title:'收起为悬浮球',icon:'M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7',onClick:()=>run(()=>collapse(true))},
   {label:'设置',title:'打开设置',icon:'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',onClick:()=>openSettings()},
  ]})
  // Workspace
  const workspace=el('section',undefined,'workspace');workspace.setAttribute('aria-label','工作区');root.append(workspace)
  const pageHead=el('header',undefined,'page-head');const pageTitle=el('h2','','page-title');const status=el('span','正在连接','workbench-status');status.setAttribute('role','status')
+ const timelineToggle=el('button',t('收起 Timeline'),'timeline-toggle');timelineToggle.type='button';timelineToggle.setAttribute('aria-controls','timeline-sidebar');timelineToggle.addEventListener('click',()=>setTimelineOpen(!timelineOpen))
  const chatToggle=el('button','收起对话栏','chat-toggle');chatToggle.type='button';chatToggle.setAttribute('aria-controls','chat-pane');chatToggle.addEventListener('click',()=>chat.setOpen(!chat.open))
  const presentation=el('select');presentation.setAttribute('aria-label','显示模式');for(const [value,label]of [['workbench','工作台'],['orb','悬浮球'],['background','隐藏']]){const option=el('option',label);option.value=value;presentation.append(option)}presentation.addEventListener('change',()=>run(()=>c.setPresentation(presentation.value)))
  const chrome=mountWindowChrome(root,{api,el})
- pageHead.append(pageTitle,chrome.grip,status,presentation,chatToggle);workspace.append(pageHead)
+ pageHead.append(pageTitle,chrome.grip,status,presentation,chatToggle,timelineToggle);workspace.append(pageHead)
  // Startup progress reads as loading; only a failed start turns into an error with a way into settings.
  const startupNotice=el('p','','page-notice');startupNotice.id='startup-notice';startupNotice.setAttribute('role','status');startupNotice.hidden=true;workspace.append(startupNotice)
  const startupText=el('span');startupNotice.append(startupText);const startupSettings=button(t('打开设置'),()=>openSettings(),startupNotice);startupSettings.hidden=true
@@ -75,8 +77,25 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const waiting=el('div',undefined,'presentation-waiting');workspace.append(waiting)
  const panel=el('div',undefined,'workbench-page');workspace.append(panel)
  // Chat pane
- const chat=mountChatPane(root,{c,el,button,run,api,chips,openTask,speakingLevel,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.title=chatToggle.textContent;chatToggle.setAttribute('aria-expanded',String(value))}})
+ const chat=mountChatPane(root,{c,el,button,run,api,chips,openTask,speakingLevel,onHome:showHome,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.title=chatToggle.textContent;chatToggle.setAttribute('aria-expanded',String(value))}})
  chat.setOpen(true)
+ const timelineSidebar=el('aside',undefined,'timeline-sidebar');timelineSidebar.id='timeline-sidebar';timelineSidebar.setAttribute('aria-label',t('Timeline 时间线'));root.append(timelineSidebar)
+ const timelineHead=el('header',undefined,'timeline-head');timelineHead.append(el('h2','Timeline'));button(t('展开时间线'),()=>{selected='timeline';closeTask();if(globalThis.matchMedia?.('(max-width:959px)')?.matches)chat.setOpen(false)},timelineHead).className='ghost';button(t('收起'),()=>{setTimelineOpen(false);timelineToggle.focus()},timelineHead).className='ghost timeline-close';timelineSidebar.append(timelineHead);timelineSidebar.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();setTimelineOpen(false);timelineToggle.focus()}})
+ const timelineBody=el('div',undefined,'timeline-body');timelineSidebar.append(timelineBody)
+ let timelineKey=''
+ function setTimelineOpen(value){const opening=value&&!timelineOpen;timelineOpen=value;root.dataset.timelineOpen=String(value);timelineToggle.textContent=t(value?'收起 Timeline':'展开 Timeline');timelineToggle.setAttribute('aria-expanded',String(value));timelineSidebar.hidden=selected!=='nova'||Boolean(inspector)||!value;if(opening&&globalThis.matchMedia?.('(max-width:959px)')?.matches)timelineSidebar.querySelector('button')?.focus()}
+ async function showHome(){selected='nova';closeTask();chat.setOpen(true);if(c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main'))await c.home();chat.update()}
+ async function discuss(references,text){await showHome();if(text){if(!c.submitText(text,'chat:main',references))throw Error(t('主对话暂时无法发送，原有草稿已保留，请稍后重试。'));chat.reveal()}else await chat.focusReference(references)}
+ function openTodos(id){selected='todos';closeTask();if(id){lifeLocal['todo:all']=true;renderPanel();const node=[...panel.querySelectorAll('article')].find(node=>node.dataset.lifeId===id);node?.scrollIntoView?.({block:'center'});node?.querySelector?.('button')?.focus?.()}}
+ function syncLayout(){
+  const home=selected==='nova'&&!inspector;root.dataset.home=String(home);chatToggle.hidden=home;timelineToggle.hidden=!home;panel.hidden=home
+  if(home){if(chat.element.parentElement!==workspace)workspace.append(chat.element);if(!chat.open)chat.setOpen(true)}
+  else if(chat.element.parentElement!==root)root.append(chat.element)
+  setTimelineOpen(timelineOpen)
+  const key=JSON.stringify([c.snapshot?.life,c.snapshot?.settings?.timezone,c.connected,timelineDate(c.snapshot)])
+  if(key!==timelineKey){timelineKey=key;const scroll=timelineBody.scrollTop;timelineBody.replaceChildren();renderTimeline(timelineBody,{snapshot:c.snapshot,el,button,discuss,openTodos,openArticle:url=>api.personal.openArticle(url),compact:true,connected:c.connected});timelineBody.scrollTop=scroll}
+ }
+
  // The orb carries no mode buttons: double-click expands, the context menu switches modes, and sleep is the only voice switch.
  const orbExtras=el('div',undefined,'personal-orb-extras');document.querySelector('#shell').append(orbExtras)
  const orbTask=button('',()=>openTask(orbTask.dataset.taskId),orbExtras);orbTask.className='personal-orb-task'
@@ -102,18 +121,19 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const pageKey=()=>{
   const s=c.snapshot,sourceStates=s?.sources?.map(source=>[source.id,source.state,source.health,source.processing_consent_required])
   if(['todos','ideas','goals'].includes(selected))return JSON.stringify([selected,s?.life,s?.understanding,s?.workbench_context,sourceStates,c.connected])
-  if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.profile_preparation,c.connected])
+  if(selected==='nova'||selected==='timeline')return JSON.stringify([selected,s?.life,s?.settings?.timezone,c.connected,timelineDate(c.snapshot)])
+  if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.life,s?.profile_preparation,c.connected])
   if(selected==='tasks')return JSON.stringify([selected,durableTasks(),tasks(),results(),c.connected])
   return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.news,s?.capabilities,c.connected])
  }
  function renderPanel(){
-  if(inspector)return
+  syncLayout();if(inspector)return
   const focused=panel.contains?.(document.activeElement)?document.activeElement:null,focusLabel=focused?.getAttribute?.('aria-label'),focusBodyId=focused?.dataset?.cardBodyId,focusWorkId=focused?.getAttribute?.('data-task-result'),focusText=focused?.tagName==='BUTTON'?focused.textContent:null
   const fields=[...panel.querySelectorAll('input,textarea,select')],focusIndex=focused?fields.indexOf(focused):-1
   const edit=focusIndex>=0?{index:focusIndex,key:focused.getAttribute?.('data-editor-key'),tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
   const panelScroll=panel.scrollTop
   for(const details of panel.querySelectorAll('details')){const local=taskLocal.get(details.dataset.workId);if(local)local.expanded=details.open}
-  bodyObserver?.disconnect();disposeSources();panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
+  bodyObserver?.disconnect();disposeSources();panel.replaceChildren();rail.select(selected);pageTitle.textContent=t(selected==='nova'&&c.selectedId&&c.selectedId!=='chat:main'?'Nova · 专用对话':PAGE_TITLE[selected]??selected)
   const s=c.snapshot;const caps=s?.capabilities??{}
   const candidateKind=({todos:'todo',ideas:'idea',goals:'goal',profile:'profile'})[selected]
   const pending=el('section',undefined,'pending-group');pending.setAttribute('aria-label','待确认')
@@ -128,8 +148,10 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
    if(selected!=='todos')suggestions()
    if(selected==='todos')button('查看 Agent 执行任务',()=>{selected='tasks';renderPanel()},pageLinks()).className='link-button'
+  }else if(selected==='timeline'){
+   renderTimeline(panel,{snapshot:s,el,button,discuss,openTodos,openArticle:url=>api.personal.openArticle(url),command:(...args)=>c.command(...args),expanded:timelineExpanded,connected:c.connected})
   }else if(selected==='feeds'){
-   renderNews(panel,{news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings,connected:c.connected})
+   renderNews(panel,{news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings,connected:c.connected})
   }else if(selected==='tasks'){
    renderTasksPage(panel,{tasks,durableTasks,openTask,taskAction,results,card,chips,button,local:taskLocal,rerender:renderPanel,askProgress:async task=>{
     const result=await c.command('conversations.open_work',{work_id:task.work_id}),id=result?.selected_id
@@ -140,7 +162,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
     target.draft=draft;chat.reveal()
    }})
   }else if(selected==='profile'){
-   renderProfile(panel,{state:s?.life,news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
+   renderProfile(panel,{state:s?.life,news:s?.news,life:s?.life,discuss,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:lifeLocal,rerender:renderPanel})
    if(pending.children?.length||pending.childElementCount)panel.append(pending)
    renderMemorySection(panel,{snapshot:s,caps,el,button,chips,command:(m,p)=>c.command(m,p),continueChat,bindPending,connected:c.connected,local:lifeLocal})
   }
@@ -164,15 +186,16 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   waiting.replaceChildren();for(const item of pending){const b=button(`处理审批：${item.summary}`,async()=>{if(item.task_id){await openTask(item.task_id,true);return}if(item.conversation_id&&item.conversation_id!==c.selectedId)await c.select(item.conversation_id);await c.setPresentation('orb')},waiting);b.disabled=!c.connected}
   const unreadTotal=(c.snapshot?.conversations?.items??[]).reduce((sum,item)=>sum+(item.unread_count??0),0)
   const unreadDot=document.querySelector('#unread-indicator');if(unreadDot)unreadDot.hidden=!unreadTotal
-  chat.update()
+  if(!initialHome&&c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main')){initialHome=true;void run(()=>c.home())}
+  syncLayout();chat.update()
   if(!c.connected)unreadProjection=null
   const unread=c.connected&&c.snapshot?((c.snapshot.conversations?.unread_count??0)+pending.reduce((sum,item)=>sum+1+(item.queued??0),0)):undefined
   if(Number.isSafeInteger(unread)&&unread>=0&&unreadProjection!==unread){unreadProjection=unread;void api.personal.setUnread?.(unread)}
   if(renderedPageKey!==pageKey())renderPanel()
   syncPending()
  }
- async function collapse(value){await c.setPresentation(value?'orb':'workbench')}
+ async function collapse(value){await c.setPresentation(value?'orb':'workbench');if(!value)await showHome()}
  function receive(frame){chat.receive(frame);c.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
  api.personal.onPresentationRequest?.(mode=>run(()=>c.setPresentation(mode)));
- api.personal.onCollapsed?.(value=>c.collapse(value));update();renderPanel();return {controller:c,receive,refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
+ api.personal.onCollapsed?.(value=>c.collapse(value));const dateClock=setInterval(()=>{if(c.presentationMode==='workbench')update()},60000);dateClock.unref?.();update();renderPanel();return {controller:c,receive,refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
 }

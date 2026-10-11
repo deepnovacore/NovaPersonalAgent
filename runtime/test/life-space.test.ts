@@ -60,3 +60,9 @@ test('news conversion IDs cannot collide with a normal create request ID',async(
   assert.equal(todos.find(todo=>todo.id===converted.id)?.news_source?.article_id,article.article_id)
  }finally{await life.close();await rm(dir,{recursive:true,force:true})}
 })
+
+
+test('importance is an explicit personal choice independent of deadline and survives restart',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-importance-')),path=join(dir,'life.json');let life=new LifeService(path)
+ try{await life.open();const row=await life.mutate({op:'create',kind:'todo',title:'Long term',due:'2026-12-20'},'create');await life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,importance:'high'},'mark');assert.equal(life.snapshot().todos[0]!.due,'2026-12-20');life=new LifeService(path);await life.open();assert.equal(life.snapshot().todos[0]!.importance,'high');await assert.rejects(async()=>life.mutate({op:'update',kind:'todo',id:row.id,expected_version:2,importance:'urgent'},'invalid'))}finally{await rm(dir,{recursive:true,force:true})}
+})

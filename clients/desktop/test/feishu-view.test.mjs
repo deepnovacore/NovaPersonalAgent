@@ -9,8 +9,8 @@ import {setLanguage} from '../src/renderer/locale.mjs'
 
 class Node {
  constructor(tag,text){this.tag=tag;this.text=text;this.children=[];this.listeners={};this.dataset={};this.classList={add:()=>{}}}
- append(...children){this.children.push(...children)}
- prepend(...children){this.children.unshift(...children)}
+ append(...children){for(const child of children){if(child.parentElement)child.parentElement.children=child.parentElement.children.filter(node=>node!==child);child.parentElement=this}this.children.push(...children)}
+ prepend(...children){for(const child of children){if(child.parentElement)child.parentElement.children=child.parentElement.children.filter(node=>node!==child);child.parentElement=this}this.children.unshift(...children)}
  replaceChildren(...children){this.children=children}
  setAttribute(key,value){this[key]=value}
  addEventListener(name,fn){this.listeners[name]=fn}
@@ -189,13 +189,14 @@ test('the Nova pane starts open and collapses locally with accessible state',asy
  const body=new Node('body'),shell=new Node('div');body.append(shell)
  globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),visibilityState:'hidden',hasFocus:()=>false,createTextNode:text=>new Node('text',text),querySelector:()=>shell}
  const calls=[];mountPersonalView({send:frame=>(calls.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}})
+ body.querySelectorAll('button').find(node=>node.dataset.page==='todos').listeners.click()
  const pane=body.querySelectorAll('aside').find(node=>node.id==='chat-pane'),root=body.querySelector('main'),toggle=body.querySelectorAll('button').find(node=>node.className==='chat-toggle')
  assert.equal(body.querySelectorAll('select').find(node=>node['aria-label']==='显示模式').disabled,false);assert.equal(pane.hidden,false);assert.equal(root.dataset.chatOpen,'true');assert.equal(toggle['aria-expanded'],'true');assert.equal(toggle.textContent,'收起对话栏')
  await toggle.listeners.click();assert.equal(pane.hidden,true);assert.equal(root.dataset.chatOpen,'false');assert.equal(toggle['aria-expanded'],'false');assert.equal(toggle.textContent,'展开对话栏')
  const close=body.querySelectorAll('button').find(node=>node.className==='chat-close')
  await toggle.listeners.click();assert.equal(pane.hidden,false);await close.listeners.click();assert.equal(pane.hidden,true);assert.equal(calls.length,0)
  const rail=body.querySelectorAll('button').filter(node=>node.className==='rail-item').map(node=>node.children.find(c=>c.className==='rail-label')?.textContent)
- assert.deepEqual(rail,['Todos','Ideas','Goals','Feeds','任务','Profile','收起','设置'])
+ assert.deepEqual(rail,['Nova','Timeline','Todos','Ideas','Goals','Feeds','任务','Profile','收起','设置'])
 })
 
 test('guide progress follows actual application and OAuth state, with an explicit waiting handoff',()=>{

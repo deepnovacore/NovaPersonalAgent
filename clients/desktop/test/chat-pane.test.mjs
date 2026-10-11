@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {mountPersonalView} from '../src/renderer/personal-view.mjs'
 class Node{
  constructor(tag,text){this.tag=tag;this.tagName=tag.toUpperCase();this.text=text;this.children=[];this.listeners={};this.dataset=new Proxy({},{set:(object,key,value)=>{object[key]=String(value);return true}});this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
- append(...c){for(const n of c)n.parentElement=this;this.children.push(...c)}prepend(...c){for(const n of c)n.parentElement=this;this.children.unshift(...c)}replaceChildren(...c){this.children=[];this.append(...c)}setAttribute(k,v){this[k]=v;this.attrs[k]=v}getAttribute(k){return this.attrs[k]}addEventListener(n,f){this.listeners[n]=f}
+ append(...c){for(const n of c){if(n.parentElement)n.parentElement.children=n.parentElement.children.filter(child=>child!==n);n.parentElement=this}this.children.push(...c)}prepend(...c){for(const n of c){if(n.parentElement)n.parentElement.children=n.parentElement.children.filter(child=>child!==n);n.parentElement=this}this.children.unshift(...c)}replaceChildren(...c){this.children=[];this.append(...c)}setAttribute(k,v){this[k]=v;this.attrs[k]=v}getAttribute(k){return this.attrs[k]}addEventListener(n,f){this.listeners[n]=f}
  querySelectorAll(sel){const tags=sel.split(',');return this.children.flatMap(n=>[...(tags.includes(n.tag)?[n]:[]),...n.querySelectorAll(sel)])}querySelector(sel){return this.querySelectorAll(sel)[0]}focus(){this.focused=(this.focused??0)+1;document.activeElement=this}contains(node){return this===node||this.children.some(child=>child.contains?.(node))}
  dispatchEvent(event){this.listeners[event.type]?.(event);if(event.bubbles)this.parentElement?.dispatchEvent(event)}
  get childElementCount(){return this.children.length}
@@ -16,6 +16,7 @@ function mount(options={}){
  const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],api:{orbMenu:{},personal:{setUnread(){},openArticle:async()=>{},onPresentationRequest:fn=>{callbacks.presentation=fn},onCollapsed:fn=>{callbacks.collapsed=fn}}},...options})
  controllers.push(view.controller);view.controller.connect();view.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input']})
  const all=n=>[n,...n.children.flatMap(all)]
+ if(!options.defaultHome)all(body).find(n=>n.dataset.page==='todos').listeners.click()
  return {body,sent,view,callbacks,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
 const feedState=(revision,selected='chat:proactive',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:proactive',kind:'proactive',title:'主动提醒',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'T\n## 前瞻\n- 一条'}]},...extra})
@@ -507,4 +508,48 @@ test('goal adoption and status changes use the shared pending guard; conflicts r
  assert.match(m.view.controller.error,/核对最新状态/);const refresh=m.sent.at(-1);assert.equal(refresh.method,'state')
  m.view.receive({type:'personal.result',request_id:refresh.request_id,ok:true,data:{}});await tick()
  assert.equal(select().disabled,false);assert.equal(select().value,'active')
+})
+
+ test('Nova opens by default with a shared Timeline and keeps reminder identity in home projection',async()=>{
+ const m=mount({defaultHome:true});const main={id:'chat:main',kind:'chat',title:'Historical main',unread_count:0};
+ m.view.receive(feedState(1,'chat:main',{life:{todos:[],goals:[]},conversations:{selected_id:'chat:main',items:[main,{id:'chat:proactive',kind:'proactive',unread_count:1}],messages:[],home_messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'Reminder'}]}}));
+ assert.equal(m.all().find(n=>n.dataset.page==='nova').attrs['aria-selected'],'true');
+ assert.ok(m.all().some(n=>n.className==='timeline-sidebar'));assert.ok(m.all().some(n=>n.className==='feed-card'));
+ assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,'主对话');
+ const request=m.sent.find(f=>f.method==='conversations.read');assert.equal(request.params.id,'chat:proactive');
+ assert.equal(request.params.through_message_id,'feed:f1');
+ })
+
+test('article reference choices refresh when personal objects change while Feeds remains open',async()=>{
+ const m=mount(),news={enabled:false,interests:[],items:[{id:'article',content_hash:'hash',source_id:'s',title:'Article',summary:'Summary',url:'https://example.org/a',ranking:null}],saved:[],sources:[]}
+ const snapshot=(revision,version,status='open')=>feedState(revision,'chat:main',{news,feed:[],life:{todos:[{id:'todo',title:'Current item',version,status}],goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat',title:'Main'}],messages:[],home_messages:[]}})
+ m.view.receive(snapshot(1,1));await m.all().find(n=>n.dataset.page==='feeds').listeners.click();const choice=()=>m.all().find(n=>n.attrs['aria-label']==='结合哪个事项');const first=choice();first.value='todo:todo';first.listeners.change()
+ m.view.receive(snapshot(2,2));assert.notEqual(choice(),first);assert.equal(choice().value,'todo:todo');await m.all().find(n=>n.textContent==='整理应用思路').listeners.click();await tick();const request=m.sent.findLast(f=>f.method==='conversations.discuss');assert.equal(request.params.references.find(ref=>ref.kind==='todo').version,2)
+ m.view.receive(snapshot(3,3,'done'));await m.all().find(n=>n.dataset.page==='feeds').listeners.click();assert.equal(choice().children.some(n=>n.value==='todo:todo'),false)
+})
+
+test('task receipt cards open durable task IDs for work IDs and versioned result references',async()=>{
+ for(const work of ['execution-work','verified:durable:2']){
+  const m=mount(),task={id:'durable',goal:'Goal',work_ids:['execution-work'],goal_revision:2,phase:'completed',conversation_id:'scoped'}
+  m.view.receive(feedState(1,'chat:main',{tasks:[task],feed:[{id:'f1',kind:'task_result',title:'Result',why_now:'Done',lifecycle:'resolved',task_ref:{work_id:work},delivery:{presented_at:'done'}}],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[{id:'feed:f1',role:'assistant',conversation_id:'scoped',text:'Result'}]}}));m.all().find(n=>n.textContent==='查看任务结果').listeners.click();await tick();const request=m.sent.findLast(f=>f.method==='tasks.get');assert.equal(request.params.task_id,'durable');m.view.controller.disconnect();await tick()
+ }
+})
+
+
+test('adding a Timeline reference preserves the draft and earlier references; limit rejection is atomic',async()=>{
+ const m=mount({defaultHome:true}),c=m.view.controller,todos=['a','b','c'].map(id=>({id,title:'Item '+id,status:'open',due:'2026-10-12',version:1,note:''}))
+ m.view.receive(feedState(1,'chat:main',{feed:[],life:{todos,goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+ c.draft='Existing draft';c.state().references=[{kind:'todo',id:'a',version:1}]
+ await m.all().find(n=>n.textContent==='Item b').listeners.click();await tick()
+ assert.equal(c.draft,'Existing draft');assert.deepEqual(c.state().references.map(ref=>ref.id),['a','b'])
+ await m.all().find(n=>n.textContent==='Item c').listeners.click();await tick()
+ assert.deepEqual(c.state().references.map(ref=>ref.id),['a','b']);assert.equal(c.draft,'Existing draft');assert.match(c.error,/2/)
+})
+
+test('an oversized Todo assistance append leaves draft references unchanged',async()=>{
+ const m=mount(),c=m.view.controller,todos=['a','b'].map(id=>({id,title:'Item '+id,status:'open',due:null,version:1,note:''}))
+ m.view.receive(feedState(1,'chat:main',{feed:[],life:{todos,goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+ c.draft='x'.repeat(4000);c.state().references=[{kind:'todo',id:'a',version:1}]
+ await m.all().filter(n=>n.textContent==='请 Nova 协助')[1].listeners.click();await tick()
+ assert.equal(c.draft,'x'.repeat(4000));assert.deepEqual(c.state().references,[{kind:'todo',id:'a',version:1}]);assert.equal(c.state().source_todo??null,null)
 })
