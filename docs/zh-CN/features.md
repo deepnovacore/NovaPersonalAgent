@@ -4,6 +4,8 @@ Nova 是运行在电脑上的语音助手。你可以直接交办编码任务、
 
 ## 对话与任务
 
+[![与 Nova 语音悬浮球对话](../../assets/features/conversation-polished.png)](../../assets/features/conversation-polished.png)
+
 | 能力 | 使用方式 |
 |---|---|
 | 实时语音 | 直接说出需求，也可以在 Nova 说话时打断 |
@@ -15,6 +17,8 @@ Nova 是运行在电脑上的语音助手。你可以直接交办编码任务、
 切换项目或创建项目需要确认。识别失败不会被当作同意、拒绝或取消任务；断开手机连接也不会自动取消电脑上的编码任务。
 
 ## Workbench
+
+[![Nova 工作台中的待办建议与项目近况](../../assets/features/workbench-original.png)](../../assets/features/workbench-original.png)
 
 - **Workbench** 是桌面主窗口：图标导航栏包含 Todos、Ideas、Goals、Feeds、Tasks 和 Profile，右侧是可收起的对话栏。详见[Workbench](workbench.md)。
 - **Tasks** 用于委派工作，你可以设定验收标准；随时查看进度，也可以接管任务直接指挥执行器，完成后交还给 Nova。详见[Tasks](tasks.md)。
@@ -34,7 +38,7 @@ Nova 是运行在电脑上的语音助手。你可以直接交办编码任务、
 
 ## 语音、视觉与手机
 
-默认使用 Qwen 实时语音。也可选择级联模式，分别配置语音识别、语言模型和语音合成。
+默认使用 Qwen 实时语音，也可选择 OpenAI 或 Gemini 实时语音。级联模式可分别配置语音识别、语言模型和语音合成，使用云端服务或你自己运行的模型（见[支持矩阵](support-matrix.md)）。
 
 对话视觉默认关闭，需选择支持图像的级联模型后开启。独立监控可按指定条件观察摄像头画面。相机权限和设备可用性会影响这两项功能。
 

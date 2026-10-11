@@ -111,6 +111,9 @@ nsis:
   perMachine: false
 
 linux:
+  desktop:
+    entry:
+      Name: Nova Audio Agent Desktop
   target:
     - AppImage
     - deb
@@ -124,5 +127,6 @@ linux:
       to: native/codex-sandbox-probe
 
 deb:
+  packageName: nova-audio-agent-desktop
   recommends:
     - fonts-noto-cjk

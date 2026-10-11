@@ -18,23 +18,16 @@ Desktop targets macOS arm64, Windows x64, and Ubuntu 22.04+ x64.
 
 ## 2. Install and start
 
-### Preview channel
-
-The preview uses npm's `preview` tag; `latest` stays on the stable release.
+### Install or upgrade
 
 ```bash
-# Install or update the preview
-npm install --global nova-audio-agent@preview
-novaaudio
-# Pin this preview exactly
-npm install --global nova-audio-agent@0.3.0-preview.1
-# Switch back to the stable CLI
 npm install --global nova-audio-agent@latest
+novaaudio
 ```
 
-Quit Nova before switching channels. Both channels use the same local settings and data; switching the CLI does not roll back data changes. Back up your Nova data before trying a preview.
+To upgrade, quit Nova and run the same command. Pin a version with `nova-audio-agent@0.3.1`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
 
-For headless Ubuntu 22.04+ x64, use `npm install --global nova-audio-agent-server@preview` (or `@latest` for stable).
+For headless Ubuntu 22.04+ x64, use `npm install --global nova-audio-agent-server@latest`.
 
 For development from source:
 
@@ -60,6 +53,8 @@ npm run start:client
 When running from source, the project `.env` takes precedence over matching shell variables. Restart the desktop after editing it.
 
 ## 3. Give Nova a task
+
+[![Nova clarifies a request before starting a task](../../assets/features/conversation-polished.en.png)](../../assets/features/conversation-polished.en.png)
 
 Try: “Create a webpage to showcase my work.” Nova asks for any missing information, requests confirmation when creating or switching projects, and sends the task to Codex.
 
@@ -112,6 +107,7 @@ Desktop launches into one of three views, controlled by the `startupView` settin
 
 | Problem | What to check |
 |---|---|
+| macOS says the app is "damaged" | The app is unsigned and a browser download carries a quarantine flag. Move it to Applications, run `xattr -dr com.apple.quarantine "/Applications/Nova Audio Agent Desktop.app"`, then open it again |
 | Voice cannot connect | Credentials, service access and connectivity for the selected mode |
 | Codex cannot run | Codex sign-in and access to the project directory |
 | Saved settings have no effect | Look for the pending-restart notice and restart the backend |

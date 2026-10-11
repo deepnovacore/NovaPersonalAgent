@@ -2,7 +2,7 @@ import { createServer } from 'node:net'
 import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute, resolve } from 'node:path'
 import {codingProfileRegistry} from './coding-settings.mjs'
-import { CONTROL_CHARACTERS, RUNTIME_DEFAULTS as SETTINGS_DEFAULTS } from './settings-defaults.mjs'
+import { CONTROL_CHARACTERS, RUNTIME_DEFAULTS as SETTINGS_DEFAULTS, selectedTextLlmProvider } from './settings-defaults.mjs'
 
 const MAX_READINESS_BYTES = 4096
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/
@@ -14,6 +14,9 @@ const NEWLINE = 0x0a
 // `.env` (or parent environment) keeps winning. Names match the Settings
 // aliases accepted by the Node runtime configuration contract exactly.
 export const SECRET_ENV_MAP = Object.freeze({
+  selfHostedAsrApiKey: 'SELF_HOSTED_ASR_API_KEY',
+  selfHostedLlmApiKey: 'SELF_HOSTED_LLM_API_KEY',
+  selfHostedTtsApiKey: 'SELF_HOSTED_TTS_API_KEY',
   composioApiKey: 'COMPOSIO_API_KEY',
   dashscopeApiKey: 'DASHSCOPE_API_KEY',
   stepfunApiKey: 'STEPFUN_API_KEY',
@@ -33,8 +36,12 @@ export const SECRET_ENV_MAP = Object.freeze({
 export function resolveSecretConfiguration(saved = {}, environment = {}, developmentEnv = {}) {
   const secrets = {}, secretsPresent = {}, secretSources = {}
   for (const [key, name] of Object.entries(SECRET_ENV_MAP)) {
-    if (key === 'composioApiKey' && saved[key] === '') { secrets[key]=''; secretsPresent[key]=false; secretSources[key]='cleared'; continue }
-    const candidates = key === 'composioApiKey' ? [['settings',saved[key]],['dotenv',developmentEnv[name]],['environment',environment[name]]] : [['dotenv', developmentEnv[name]], ['settings', saved[key]], ['environment', environment[name]]]
+    if ((key === 'composioApiKey' || key.startsWith('selfHosted')) && saved[key] === '') { secrets[key]=''; secretsPresent[key]=false; secretSources[key]='cleared'; continue }
+    const fromFile = developmentEnv[name]
+    const fromEnvironment = environment[name]
+    const candidates = key === 'composioApiKey' || key.startsWith('selfHosted')
+      ? [['settings', saved[key]], ['dotenv', fromFile], ['environment', fromEnvironment]]
+      : [['dotenv', fromFile], ['settings', saved[key]], ['environment', fromEnvironment]]
     const selected = candidates.find(([, value]) => typeof value === 'string' && value.trim() && !CONTROL_CHARACTERS.test(value))
     secretsPresent[key] = Boolean(selected)
     if (selected) {
@@ -245,13 +252,15 @@ export function backendLaunchSpec({
       env.MODEL_BASE_URL = resolvedConfig.modelBaseUrl
     }
   }
-  if (pipelineMode === 'cascaded') {
-    const llmProvider = settings?.cascadedLlmProvider
-      ?? SETTINGS_DEFAULTS.cascadedLlmProvider
-    const rememberedModels = settings?.cascadedLlmModels
-    const activeModel = rememberedModels?.[llmProvider]
+  const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
+  Object.assign(env, {
+    CASCADE_LLM_PROVIDER: llmProvider,
+    CASCADE_LLM_MODEL: settings?.cascadedLlmModels?.[llmProvider]
       ?? SETTINGS_DEFAULTS.cascadedLlmModels[llmProvider]
-      ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen
+      ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen,
+    SELF_HOSTED_LLM_BASE_URL: settings?.selfHostedLlmBaseUrl ?? '',
+  })
+  if (pipelineMode === 'cascaded') {
     Object.assign(env, {
       DOUBAO_ASR_VOICEPRINT_ENABLED: String(settings?.voiceprintEnabled === true && Boolean(settings?.voiceprintUploadUrl)),
       DOUBAO_ASR_VOICEPRINT_HEALTH_URL: settings?.voiceprintUploadUrl ? `${settings.voiceprintUploadUrl}/healthz` : '',
@@ -259,13 +268,13 @@ export function backendLaunchSpec({
       DOUBAO_ASR_VOICEPRINT_NAME: settings?.voiceprintName ?? '',
       CASCADE_ENDPOINTING_PROVIDER: settings?.cascadedEndpointingProvider
         ?? SETTINGS_DEFAULTS.cascadedEndpointingProvider,
+      SELF_HOSTED_ASR_URL: settings?.selfHostedAsrUrl ?? '',
+      SELF_HOSTED_TTS_URL: settings?.selfHostedTtsUrl ?? '',
       GEMINI_ASR_MODEL: settings?.geminiAsrModel ?? SETTINGS_DEFAULTS.geminiAsrModel,
       GEMINI_TTS_MODEL: settings?.geminiTtsModel ?? SETTINGS_DEFAULTS.geminiTtsModel,
       GEMINI_TTS_VOICE: settings?.geminiTtsVoice ?? SETTINGS_DEFAULTS.geminiTtsVoice,
       CASCADE_ASR_PROVIDER: settings?.cascadedAsrProvider
         ?? SETTINGS_DEFAULTS.cascadedAsrProvider,
-      CASCADE_LLM_PROVIDER: llmProvider,
-      CASCADE_LLM_MODEL: activeModel,
       CASCADE_TTS_PROVIDER: settings?.cascadedTtsProvider
         ?? SETTINGS_DEFAULTS.cascadedTtsProvider,
       DOUBAO_TTS_VOICE: settings?.cascadedTtsVoice
@@ -612,14 +621,13 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
   const pipelineMode = settings?.pipelineMode ?? SETTINGS_DEFAULTS.pipelineMode
   if (decryptedSecrets && typeof decryptedSecrets === 'object') {
     const activeSecretKeys = new Set(ALWAYS_ACTIVE_SECRET_KEYS)
+    const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
+    activeSecretKeys.add(llmProvider === 'self-hosted' ? 'selfHostedLlmApiKey' : llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
     if (pipelineMode === 'cascaded') {
-      const llmProvider = settings?.cascadedLlmProvider
-        ?? SETTINGS_DEFAULTS.cascadedLlmProvider
-      activeSecretKeys.add(llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
-      activeSecretKeys.add((settings?.cascadedTtsProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
+      activeSecretKeys.add(settings?.cascadedTtsProvider === 'self-hosted' ? 'selfHostedTtsApiKey' : (settings?.cascadedTtsProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
       // Optional override only. When absent, the runtime falls back to the
       // big-model key; Main does not synthesize a duplicate secret value.
-      activeSecretKeys.add((settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoAsrApiKey')
+      activeSecretKeys.add(settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoAsrApiKey')
       if ((settings?.cascadedAsrProvider ?? 'volcengine') === 'volcengine') activeSecretKeys.add('doubaoBigmodelApiKey')
     } else {
       const integrated = settings?.integratedProvider ?? 'qwen'
@@ -643,7 +651,7 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
     for (const [secretKey, envName] of Object.entries(SECRET_ENV_MAP)) {
       if (!activeSecretKeys.has(secretKey)) continue
       const value = decryptedSecrets[secretKey]
-      if (secretKey === 'composioApiKey' && value === '') { env[envName]=''; continue }
+      if ((secretKey === 'composioApiKey' || secretKey.startsWith('selfHosted')) && value === '') { env[envName]=''; continue }
       if (typeof value !== 'string') continue
       if (CONTROL_CHARACTERS.test(value)) continue
       const trimmed = value.trim()

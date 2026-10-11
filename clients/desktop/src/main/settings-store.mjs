@@ -1,3 +1,4 @@
+import {SELF_HOSTED_STAGES, validSelfHostedUrl, endpointOrigin} from '../renderer/voice-preset.mjs'
 import {validUploadUrl} from './voiceprint.mjs'
 import {CONTROL_CHARACTERS, RUNTIME_DEFAULTS} from './settings-defaults.mjs'
 import {preferredLanguage} from '../renderer/locale.mjs'
@@ -12,6 +13,9 @@ export {CODING_BACKENDS} from './coding-settings.mjs'
 export const SETTINGS_VERSION = 4
 
 export const SECRET_KEYS = Object.freeze([
+  'selfHostedAsrApiKey',
+  'selfHostedLlmApiKey',
+  'selfHostedTtsApiKey',
   'composioApiKey',
   'dashscopeApiKey',
   'stepfunApiKey',
@@ -32,9 +36,9 @@ export const PROACTIVITY_LEVELS = Object.freeze(['conservative', 'balanced', 'ea
 export const PIPELINE_MODES = Object.freeze(['integrated', 'cascaded'])
 export const INTEGRATED_PROVIDERS = Object.freeze(['qwen', 'stepfun', 'openai', 'gemini'])
 export const CASCADED_ENDPOINTING_PROVIDERS = Object.freeze(['auto'])
-export const CASCADED_ASR_PROVIDERS = Object.freeze(['volcengine','gemini'])
-export const CASCADED_LLM_PROVIDERS = Object.freeze(['qwen', 'ark', 'deepseek', 'openai', 'gemini'])
-export const CASCADED_TTS_PROVIDERS = Object.freeze(['volcengine','gemini'])
+export const CASCADED_ASR_PROVIDERS = Object.freeze(['volcengine','gemini','self-hosted'])
+export const CASCADED_LLM_PROVIDERS = Object.freeze(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted'])
+export const CASCADED_TTS_PROVIDERS = Object.freeze(['volcengine','gemini','self-hosted'])
 export const HEARTBEAT_MIN_SECONDS = 15
 export const HEARTBEAT_MAX_SECONDS = 120
 export const MAX_MODEL_OR_VOICE_LENGTH = 64
@@ -196,6 +200,7 @@ function normalizeCascadedLlmModels(raw, base) {
   const source = isRecord(raw) ? raw : {}
   const fallback = isRecord(base) ? base : DEFAULT_SETTINGS.cascadedLlmModels
   return {
+    'self-hosted': pick(source['self-hosted'], fallback['self-hosted'], '', validModelOrVoice),
     qwen: pick(source.qwen, fallback.qwen, DEFAULT_SETTINGS.cascadedLlmModels.qwen, validModelOrVoice),
     deepseek: pick(source.deepseek, fallback.deepseek, DEFAULT_SETTINGS.cascadedLlmModels.deepseek, validModelOrVoice),
     openai: pick(source.openai, fallback.openai, DEFAULT_SETTINGS.cascadedLlmModels.openai, validModelOrVoice),
@@ -221,7 +226,7 @@ function normalizeSecrets(raw) {
   const secrets = {}
   if (!isRecord(raw)) return secrets
   for (const key of SECRET_KEYS) {
-    if (key === 'composioApiKey' && raw[key]?.enc === 'cleared') { secrets[key] = {enc:'cleared',data:''}; continue }
+    if ((key === 'composioApiKey' || key.startsWith('selfHosted')) && raw[key]?.enc === 'cleared') { secrets[key] = {enc:'cleared',data:''}; continue }
     const entry = validSecretEntry(raw[key])
     if (entry) secrets[key] = entry
   }
@@ -277,6 +282,9 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     geminiAsrModel: pick(source.geminiAsrModel, fallback.geminiAsrModel, DEFAULT_SETTINGS.geminiAsrModel, validModelOrVoice),
     geminiTtsModel: pick(source.geminiTtsModel, fallback.geminiTtsModel, DEFAULT_SETTINGS.geminiTtsModel, validModelOrVoice),
     geminiTtsVoice: pick(source.geminiTtsVoice, fallback.geminiTtsVoice, DEFAULT_SETTINGS.geminiTtsVoice, validModelOrVoice),
+    selfHostedAsrUrl: pick(source.selfHostedAsrUrl, fallback.selfHostedAsrUrl, '', value => validSelfHostedUrl(value, 'asr')),
+    selfHostedLlmBaseUrl: pick(source.selfHostedLlmBaseUrl, fallback.selfHostedLlmBaseUrl, '', value => validSelfHostedUrl(value, 'llm')),
+    selfHostedTtsUrl: pick(source.selfHostedTtsUrl, fallback.selfHostedTtsUrl, '', value => validSelfHostedUrl(value, 'tts')),
     cascadedAsrProvider: pick(source.cascadedAsrProvider, fallback.cascadedAsrProvider, DEFAULT_SETTINGS.cascadedAsrProvider, validCascadedAsrProvider),
     voiceprintEnabled: pick(source.voiceprintEnabled, fallback.voiceprintEnabled, false, validBoolean),
     voiceprintId: pick(source.voiceprintId, fallback.voiceprintId, '', value => typeof value === 'string' && (value === '' || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) ? value : null),
@@ -352,6 +360,9 @@ export function publicSettings(settings) {
     geminiAsrModel: normalized.geminiAsrModel,
     geminiTtsModel: normalized.geminiTtsModel,
     geminiTtsVoice: normalized.geminiTtsVoice,
+    selfHostedAsrUrl: normalized.selfHostedAsrUrl,
+    selfHostedLlmBaseUrl: normalized.selfHostedLlmBaseUrl,
+    selfHostedTtsUrl: normalized.selfHostedTtsUrl,
     cascadedAsrProvider: normalized.cascadedAsrProvider,
     voiceprintEnabled: normalized.voiceprintEnabled,
     voiceprintId: normalized.voiceprintId,
@@ -474,7 +485,7 @@ function updatedSecrets(stored, updates, codec) {
       continue
     }
     if (value === '') {
-      if (key === 'composioApiKey') secrets[key] = {enc:'cleared',data:''}
+      if (key === 'composioApiKey' || key.startsWith('selfHosted')) secrets[key] = {enc:'cleared',data:''}
       else delete secrets[key]
       continue
     }
@@ -529,11 +540,13 @@ export function applySettingsUpdate(current, patch, codec) {
   const next = normalizeSettings({...source, version: stored.version}, stored)
   // Profiles are main-owned history: a renderer patch can add the current paths but never rewrite old ones.
   next.codingBackendProfiles = codingProfileRegistry({...next, codingBackendProfiles: stored.codingBackendProfiles}).profiles
-  const { secrets, rejected } = updatedSecrets(
-    stored.secrets,
-    source.secrets,
-    codec,
-  )
+  const previousSecrets = {...stored.secrets}
+  for (const {endpoint, secret, stage} of SELF_HOSTED_STAGES) {
+    if (Object.hasOwn(source, endpoint) && validSelfHostedUrl(source[endpoint], stage) === null) throw Object.assign(new Error('invalid_self_hosted_url'), {code: 'invalid_settings_commit', problems: ['invalid_self_hosted_url']})
+    if (endpointOrigin(stored[endpoint]) !== endpointOrigin(next[endpoint])) previousSecrets[secret] = {enc: 'cleared', data: ''}
+  }
+  // Bind explicit new credentials to the new origin; never retain the old token.
+  const {secrets, rejected} = updatedSecrets(previousSecrets, source.secrets, codec)
   next.secrets = resealPlaintext(secrets, codec)
   next.rejectedSecrets = rejected
   return next

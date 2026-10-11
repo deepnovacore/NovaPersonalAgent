@@ -213,6 +213,8 @@ const completionSchema = z.object({
 }).loose()
 
 export interface OpenAIGatewayOptions {
+  readonly allowAnonymous?: boolean
+  readonly redirect?: 'error' | 'follow'
   readonly baseUrl: string
   readonly apiKey: string
   readonly clock: Clock
@@ -226,6 +228,7 @@ export interface OpenAIGatewayOptions {
 
 /** OpenAI-compatible transport. Prompts and outputs never enter metrics or logs. */
 export class OpenAIModelGateway implements ModelGateway {
+  readonly #redirect: 'error' | 'follow'
   readonly #endpoint: string
   readonly #apiKey: string
   readonly #clock: Clock
@@ -236,10 +239,11 @@ export class OpenAIModelGateway implements ModelGateway {
   readonly #streamIdleTimeout: number
 
   constructor(options: OpenAIGatewayOptions) {
-    if (!options.baseUrl || !options.apiKey) {
+    if (!options.baseUrl || (!options.apiKey && !options.allowAnonymous)) {
       throw new TypeError('baseUrl and apiKey are required')
     }
     this.#endpoint = `${options.baseUrl.replace(/\/+$/u, '')}/chat/completions`
+    this.#redirect = options.redirect ?? 'follow'
     this.#apiKey = options.apiKey
     this.#clock = options.clock
     this.#metrics = options.metrics ?? new LoggingMetrics()
@@ -351,9 +355,10 @@ export class OpenAIModelGateway implements ModelGateway {
     try {
       const response = await this.#fetch(this.#endpoint, {
         method: 'POST',
+        redirect: this.#redirect,
         headers: {
           // The credential rides in the header and never in a log line or metric.
-          authorization: `Bearer ${this.#apiKey}`,
+          ...(this.#apiKey ? {authorization: `Bearer ${this.#apiKey}`} : {}),
           'content-type': 'application/json',
           accept: body.stream === true ? 'text/event-stream' : 'application/json',
         },

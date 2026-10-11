@@ -9,9 +9,9 @@ const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
 const promptLanguageSchema = z.enum(['zh-CN', 'en'])
 const integratedProviderNameSchema = z.enum(['qwen', 'stepfun', 'openai', 'gemini'])
 const cascadedEndpointingProviderNameSchema = z.enum(['auto'])
-const cascadedAsrProviderNameSchema = z.enum(['volcengine', 'gemini'])
-const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark', 'deepseek', 'openai', 'gemini'])
-const cascadedTtsProviderNameSchema = z.enum(['volcengine', 'gemini'])
+const cascadedAsrProviderNameSchema = z.enum(['volcengine', 'gemini', 'self-hosted'])
+const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted'])
+const cascadedTtsProviderNameSchema = z.enum(['volcengine', 'gemini', 'self-hosted'])
 const qwenGuardHistoryRecoverySchema = z.enum(['none', 'packed'])
 const qwenGuardHistoryPairsSchema = z.union([z.literal(1), z.literal(2), z.literal(4)])
 /** Validity of a name is decided by assembly (`resolveExecutors`), which knows the registered adapters. */
@@ -50,6 +50,12 @@ export const settingsSchema = z.object({
   cascade_asr_provider: cascadedAsrProviderNameSchema.default('volcengine'),
   cascade_llm_provider: cascadedLlmProviderNameSchema.default('deepseek'),
   cascade_llm_model: z.string().nullable().default(null),
+  self_hosted_asr_url: z.string().default(''),
+  self_hosted_llm_base_url: z.string().default(''),
+  self_hosted_tts_url: z.string().default(''),
+  self_hosted_asr_api_key: z.string().nullable().default(null),
+  self_hosted_llm_api_key: z.string().nullable().default(null),
+  self_hosted_tts_api_key: z.string().nullable().default(null),
   cascade_tts_provider: cascadedTtsProviderNameSchema.default('volcengine'),
   camera_module_enabled: z.boolean().default(true),
   qwen_realtime_url: z.string().default('wss://dashscope.aliyuncs.com/api-ws/v1/realtime'),
@@ -285,6 +291,13 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     value ?? (stepfunSupport ? STEPFUN_SUPPORT_MODEL : !textConversations && !(environment.MODEL_API_KEY ?? '').trim() && integratedProvider === 'openai' ? 'gpt-6-luna' : !textConversations && !(environment.MODEL_API_KEY ?? '').trim() && integratedProvider === 'gemini' ? 'gemini-3.5-flash-lite' : undefined)
   const candidate = {
     coding_backend: optionalString(environment.CODING_BACKEND),
+    self_hosted_asr_url: optionalString(environment.SELF_HOSTED_ASR_URL),
+    self_hosted_llm_base_url: optionalString(environment.SELF_HOSTED_LLM_BASE_URL),
+    self_hosted_tts_url: optionalString(environment.SELF_HOSTED_TTS_URL),
+    self_hosted_asr_api_key: optionalSecret(environment.SELF_HOSTED_ASR_API_KEY),
+    self_hosted_llm_api_key: optionalSecret(environment.SELF_HOSTED_LLM_API_KEY),
+    self_hosted_tts_api_key: optionalSecret(environment.SELF_HOSTED_TTS_API_KEY),
+
     openai_api_key: optionalSecret(environment.OPENAI_API_KEY),
     gemini_api_key: optionalSecret(environment.GEMINI_API_KEY),
     gemini_asr_model: optionalString(environment.GEMINI_ASR_MODEL),
@@ -626,9 +639,9 @@ export function describeMissingBlockingCredentials(settings: Settings, textConve
   }
   const llmField = cascadedCredentialField(settings.cascade_llm_provider)
   return {pipeline: 'cascaded', missing: [...new Set([
-    ...(present(settings[llmField]) ? [] : [configurationFieldName(llmField)]),
-    ...(textConversations ? [] : settings.cascade_asr_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_asr_api_key) || present(settings.doubao_bigmodel_api_key) || settings.cascade_tts_provider === 'volcengine' ? [] : ['DOUBAO_ASR_API_KEY'])),
-    ...(textConversations ? [] : settings.cascade_tts_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
+    ...(settings.cascade_llm_provider === 'self-hosted' || present(settings[llmField]) ? [] : [configurationFieldName(llmField)]),
+    ...(textConversations || settings.cascade_asr_provider === 'self-hosted' ? [] : settings.cascade_asr_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_asr_api_key) || present(settings.doubao_bigmodel_api_key) || settings.cascade_tts_provider === 'volcengine' ? [] : ['DOUBAO_ASR_API_KEY'])),
+    ...(textConversations || settings.cascade_tts_provider === 'self-hosted' ? [] : settings.cascade_tts_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
   ])]}
 }
 
@@ -671,6 +684,7 @@ export function resolveSupportModelConnection(
 }
 
 export function resolveCascadedSelection(settings: Settings): CascadedSelection {
+  if (settings.cascade_llm_provider === 'self-hosted' && !settings.cascade_llm_model?.trim()) throw new ConfigurationError('缺少 CASCADE_LLM_MODEL')
   const llmModel = settings.cascade_llm_model === null
     ? (settings.cascade_llm_provider === 'qwen'
       ? 'qwen-plus'
@@ -690,9 +704,9 @@ export function requireCascadedCredentials(
   selection: CascadedSelection,
 ): CascadedCredentials {
   const field = cascadedCredentialField(selection.llmProvider)
-  const llmApiKey = requiredCredential(settings[field], field.toUpperCase())
-  const ttsApiKey = selection.ttsProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(settings.doubao_bigmodel_api_key, 'DOUBAO_BIGMODEL_API_KEY')
-  const asrApiKey = selection.asrProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(stripLikePython(settings.doubao_asr_api_key ?? '') || settings.doubao_bigmodel_api_key, 'DOUBAO_ASR_API_KEY')
+  const llmApiKey = selection.llmProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_llm_api_key ?? '') : requiredCredential(settings[field], field.toUpperCase())
+  const ttsApiKey = selection.ttsProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_tts_api_key ?? '') : selection.ttsProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(settings.doubao_bigmodel_api_key, 'DOUBAO_BIGMODEL_API_KEY')
+  const asrApiKey = selection.asrProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_asr_api_key ?? '') : selection.asrProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(stripLikePython(settings.doubao_asr_api_key ?? '') || settings.doubao_bigmodel_api_key, 'DOUBAO_ASR_API_KEY')
   return Object.freeze({llmApiKey, asrApiKey, ttsApiKey})
 }
 
@@ -1031,6 +1045,6 @@ export function capabilitiesFromSettings(settings: Settings): CapabilityRegistry
   }), settings)
 }
 
-export function cascadedCredentialField(provider: CascadedLlmProviderName): 'dashscope_api_key' | 'ark_api_key' | 'deepseek_api_key' | 'openai_api_key' | 'gemini_api_key' {
-  return provider === 'qwen' ? 'dashscope_api_key' : `${provider}_api_key`
+export function cascadedCredentialField(provider: CascadedLlmProviderName): 'dashscope_api_key' | 'ark_api_key' | 'deepseek_api_key' | 'openai_api_key' | 'gemini_api_key' | 'self_hosted_llm_api_key' {
+  return provider === 'self-hosted' ? 'self_hosted_llm_api_key' : provider === 'qwen' ? 'dashscope_api_key' : `${provider}_api_key`
 }
