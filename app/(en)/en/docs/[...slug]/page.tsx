@@ -10,5 +10,5 @@ export default async function Page({ params }: { params: Promise<{ slug: string[
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string[] }> }) {
  const { slug } = await params; const page = pages.find(p => p.lang === 'en' && p.slug === slug.join('/'));
- return { title: `${page?.title || 'Docs'} · Nova Audio Agent`, alternates: { languages: page ? { 'zh-CN': sitePath(page.lang === 'zh-CN' ? page.url : page.alternate), en: sitePath(page.lang === 'en' ? page.url : page.alternate) } : {} } };
+ return { title: `${page?.title || 'Docs'} · Nova Personal Agent`, alternates: { languages: page ? { 'zh-CN': sitePath(page.lang === 'zh-CN' ? page.url : page.alternate), en: sitePath(page.lang === 'en' ? page.url : page.alternate) } : {} } };
 }

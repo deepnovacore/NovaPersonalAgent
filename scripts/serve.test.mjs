@@ -17,7 +17,7 @@ test('static preview serves full files and single video byte ranges', async t =>
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   const child = spawn(process.execPath, [fileURLToPath(new URL('./serve.mjs', import.meta.url))], {
-    cwd: dir, env: { ...process.env, PORT: String(port), NEXT_PUBLIC_BASE_PATH: '/NovaAudioAgent' },
+    cwd: dir, env: { ...process.env, PORT: String(port), NEXT_PUBLIC_BASE_PATH: '/nova-personal-agent' },
   });
   t.after(async () => {
     const exited = once(child, 'exit');
@@ -26,7 +26,7 @@ test('static preview serves full files and single video byte ranges', async t =>
     fs.rmSync(dir, { recursive: true, force: true });
   });
   await once(child.stdout, 'data');
-  const url = `http://127.0.0.1:${port}/NovaAudioAgent/demo.mp4`;
+  const url = `http://127.0.0.1:${port}/nova-personal-agent/demo.mp4`;
   const full = await fetch(url);
   assert.equal(full.status, 200);
   assert.equal(full.headers.get('content-type'), 'video/mp4');

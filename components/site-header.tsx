@@ -6,7 +6,7 @@ import { ThemeToggle } from './theme-toggle';
 function NovaMark() {
   return <img className="nova-mark" src={sitePath('/brand/deepnovacore-mark.png')} alt="" aria-hidden="true" width={256} height={127} />;
 }
-export const repo = 'https://github.com/deepnovacore/NovaAudioAgent';
+export const repo = 'https://github.com/deepnovacore/nova-personal-agent';
 export function Header({
   en = false,
   docs = false,
@@ -30,7 +30,7 @@ export function Header({
       </a>
       <header className={hero ? 'header theme-dark' : 'header'}>
         <div className="header-leading">
-        <a href={home} className="brand" aria-label="Nova Audio Agent">
+        <a href={home} className="brand" aria-label="Nova Personal Agent">
           <NovaMark />
           <span className="brand-name">nova</span>
           <span className="brand-caption">{en ? 'by DeepNovaCore' : '深穹星核'}</span>

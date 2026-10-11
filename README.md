@@ -1,6 +1,6 @@
 # Nova website
 
-The product homepage and documentation site are built with React and Next.js, exported as static files for GitHub Pages. The original product design comes from the sibling `nova-audio-agent-website` prototype; that directory is preserved.
+The product homepage and documentation site are built with React and Next.js, exported as static files for GitHub Pages. The original product design comes from the sibling `nova-personal-agent-website` prototype; that directory is preserved.
 
 The site root serves English by default. The Chinese homepage is at `/zh/`; `/en/` remains an English homepage alias. Existing English (`/en/docs/`) and Chinese (`/docs/`) documentation URLs stay available. Language switches preserve the current page or homepage section.
 
@@ -24,20 +24,20 @@ Open `http://127.0.0.1:3108/` or `/en/docs/`. Changes to Markdown regenerate the
 ## Preview the exact GitHub Pages output
 
 ```sh
-NEXT_PUBLIC_BASE_PATH=/NovaAudioAgent npm run build
-NEXT_PUBLIC_BASE_PATH=/NovaAudioAgent npm run check:links
-NEXT_PUBLIC_BASE_PATH=/NovaAudioAgent npm start
+NEXT_PUBLIC_BASE_PATH=/nova-personal-agent npm run build
+NEXT_PUBLIC_BASE_PATH=/nova-personal-agent npm run check:links
+NEXT_PUBLIC_BASE_PATH=/nova-personal-agent npm start
 # verify byte ranges used by video players
 node --test scripts/serve.test.mjs
 ```
 
-Open `http://127.0.0.1:3108/NovaAudioAgent/`. The server binds only to loopback. Set `PORT` to choose another port. Rebuild after editing source when using this static preview.
+Open `http://127.0.0.1:3108/nova-personal-agent/`. The server binds only to loopback. Set `PORT` to choose another port. Rebuild after editing source when using this static preview.
 
 ## GitHub Pages
 
 The root `.github/workflows/website.yml` builds relevant pull requests and deploys changes from the public `main` branch only. It never publishes from `internal` or the internal repository. Enable **Settings → Pages → Build and deployment → Source: GitHub Actions** before the first deployment.
 
-The workflow defaults to `/NovaAudioAgent`. For a custom domain hosted at its root, change `NEXT_PUBLIC_BASE_PATH` in the workflow to an empty string and configure the domain in GitHub Pages. The generated `out/` directory is the deployment artifact; no generated-content Git branch is needed.
+The workflow derives its base path from the GitHub repository name (`/nova-personal-agent` after renaming). For a custom domain hosted at its root, change `NEXT_PUBLIC_BASE_PATH` in the workflow to an empty string and configure the domain in GitHub Pages. The generated `out/` directory is the deployment artifact; no generated-content Git branch is needed.
 
 The website build is independent of the application's npm workspaces and does not build or modify the application runtime.
 

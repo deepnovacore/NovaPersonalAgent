@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { ThemeScript } from '../../components/theme-script';
 import '../globals.css';
 export const metadata: Metadata = {
-  title: 'NovaAudioAgent — Your Personal Agent and Voice Assistant',
+  title: 'Nova Personal Agent — Your Personal Agent and Voice Assistant',
   description: 'Your personal agent and voice assistant: todos, ideas and goals on one workbench, memory you can trace, and tasks checked against evidence.',
   icons: { icon: { url: sitePath('/brand/deepnovacore-mark.png'), type: 'image/png' }, apple: sitePath('/brand/deepnovacore-mark.png') },
   alternates: { languages: { en: sitePath('/'), 'zh-CN': sitePath('/zh'), 'x-default': sitePath('/') } },
