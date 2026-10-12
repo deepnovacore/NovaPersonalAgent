@@ -539,7 +539,7 @@ export class TaskService {
       return ref
     })
   }
-  recordDelivery(fence: TaskFence, deliveryId: string, text: string): Promise<void> {
+  recordDelivery(fence: TaskFence, deliveryId: string, text: string, outcome: 'delivered'|'generated' = 'delivered'): Promise<void> {
     return this.#mutate(next => {
       this.assertWritable(fence, { kind: 'nova' })
       const task = next.tasks.find(task => task.id === fence.task_id)!
@@ -552,7 +552,7 @@ export class TaskService {
         return
       }
       next.outcomes.push(evidenceSchema.parse({
-        ref, task_id: fence.task_id, goal_revision: fence.goal_revision, kind: 'delivery', outcome: 'delivered', content: text, refs: []
+        ref, task_id: fence.task_id, goal_revision: fence.goal_revision, kind: 'delivery', outcome, content: text, refs: []
       }))
     })
   }

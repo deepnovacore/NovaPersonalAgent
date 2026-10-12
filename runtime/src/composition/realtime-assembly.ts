@@ -371,8 +371,8 @@ export class RealtimeAssembly {
       if(current===false)return
       if(event.kind==='handoff'&&input.core.runtime.claimedHandoff(event.seq)){
         const boundTask=this.personalAgent.tasks.list().find(task=>task.work_ids.includes(event.payload.delegate_id));if(boundTask){void this.personalAgent.taskOutcome(event.payload.delegate_id,event.payload.outcome,event.payload.content,event.payload.refs).catch(()=>this.#diagnose('task_outcome_persistence_failed'));return}
-        const title=event.payload.outcome==='ok'?'任务已完成':`任务结束：${event.payload.outcome}`
-        void this.personalAgent.taskResult(event.payload.delegate_id,title).catch(()=>{ /* optional host projection failure */ })
+        // ProviderProjection owns unbound result notification; task state remains independently recorded.
+        // Unbound outcomes have one notification owner: ProviderProjection.
         if (event.payload.outcome === 'ok' && this.#personalMemory instanceof SubstrateMemoryResource) {
           void this.#personalMemory.ingestEvidence({sourceId:'task:'+event.payload.delegate_id,locator:'task:'+event.payload.delegate_id,
             kind:'task_result',observedAt:new Date(input.wallClockNow()*1000).toISOString(),
@@ -890,7 +890,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const playback = new PlaybackRegistry({
     idFactory,
     ...(options.nextPlaybackGeneration?{nextGenerationEpoch:options.nextPlaybackGeneration}:{}),
-    onFrame: options.onAudioFrame ?? noop,
+    onFrame: frame=>{const response=playback.current?.response_id;if(response&&assemblyHolder.current&&!assemblyHolder.current.personalAgent.localNotifications&&(service.isProactiveResponse(response)||service.isTaskContinuationResponse(response)))return;options.onAudioFrame?.(frame)},
     onClear: options.onAudioClear ?? noop,
     ...(options.onAudioAlert === undefined ? {} : {onAlert: options.onAudioAlert}),
   })
@@ -997,7 +997,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       }),
   }
   const agentControllers = core.visionController === undefined ? [] : [core.visionController]
+  const notificationInstance=randomUUID()
   const service = new RealtimeService({
+    proactiveRouting:{local:()=>assemblyHolder.current?.personalAgent.localNotifications??true,publish:async notice=>{const host=assemblyHolder.current?.personalAgent;if(!host)return;const now=Date.now();const task=notice.work_id?host.tasks.list().find(t=>t.work_ids.includes(notice.work_id!)):undefined;await host.publishNotification({guard:{requires_runtime:true,evidence_refs:(notice.evidence_refs??[]).filter(ref=>{try{parseMemoryRef(ref);return false}catch{return true}}),...(task?{task_id:task.id,goal_revision:task.goal_revision,work_id:notice.work_id}:{})},event_key:notificationInstance+':'+notice.event_id,revision:'1',occurrence:'initial',kind:notice.kind,title:notice.kind==='task_progress'?'任务进展':notice.kind==='task_result'?'任务结果':notice.kind==='alert'?'监控提醒':'Nova 提醒',body:notice.body,source:options.taskConversationId?{type:'conversation_runtime',id:options.taskConversationId,version:String(options.taskConversationGeneration??0)}:{type:'runtime',id:notificationInstance+':'+notice.event_id},created_at:now,expires_at:now+(notice.expires_in_ms??(notice.kind==='task_progress'?3600000:86400000)),not_before:0,priority:notice.priority,coalesce_key:notice.work_id?notificationInstance+':'+notice.work_id:null,feedback:[]},notice.valid)}},
     ...((options.createPersonalMemory === undefined && options.sharedPersonal?.memory === undefined) ? {} : {onUserTranscriptAccepted: (turn: {
       readonly confirmed?: boolean; readonly text: string; readonly originRef: string; readonly sessionEpoch: number
       readonly userInputRevision: number

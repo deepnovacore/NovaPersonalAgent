@@ -153,7 +153,7 @@ test('setup polling opens the link once and preserves controls while progress is
 test('settings waits for status without claiming CLI is missing',async()=>{
  const root=new Node('main'),error=new Node('p');let respond
  const document={querySelector:selector=>selector==='#im-connection'?root:error,createElement:tag=>new Node(tag)}
- const panel=createImPanel({document,api:{feishuCommand:()=>new Promise(resolve=>{respond=resolve})}})
+ const panel=createImPanel({document,api:{feishuCommand:method=>method==='notifications.status'?Promise.resolve(null):new Promise(resolve=>{respond=resolve})}})
  const text=()=>root.querySelectorAll('p').map(node=>node.textContent??node.text).join(' ')
  assert.match(text(),/正在读取/);assert.doesNotMatch(text(),/安装|lark-cli/)
  const pending=panel.load();assert.match(text(),/正在读取/)
@@ -297,11 +297,16 @@ test('coding target menu lives in the composer, appears only with a coding execu
  const item=text=>body.querySelectorAll('button').find(node=>node.className==='target-item'&&node.textContent===text)
  item('Project').listeners.click();assert.deepEqual(sent.at(-1).params,{id:'a',target:{workspace_id:'ws-1',session_id:null}})
  reply({});snapshot(2,'a',{...target,session_id:null});await flush()
- item('Session').listeners.click();assert.deepEqual(sent.at(-1).params,{id:'a',target:{workspace_id:'ws-1',session_id:'session-7'}})
+ item('Session').listeners.click();assert.deepEqual(sent.at(-1).params,{id:'a',target:{workspace_id:'ws-1',session_id:'session-7'}});reply({});await flush()
 })
 
 test('opening a waiting approval never acknowledges an unseen card',async()=>{
  const source=await readFile(new URL('../src/renderer/personal-view.mjs',import.meta.url),'utf8')
  assert.equal(source.includes("c.command('presentation.seen'"),false)
  assert.match(source,/item.conversation_id!==c.selectedId\)await c.select\(item.conversation_id\);await c.setPresentation\('orb'\)/)
+})
+
+test('notification route remains recoverable when Feishu CLI is unavailable',async()=>{
+ const root=new Node('main'),error=new Node('p'),calls=[];const document={querySelector:selector=>selector==='#im-connection'?root:error,createElement:tag=>new Node(tag),createTextNode:text=>new Node('text',text)};globalThis.document=document;
+ const panel=createImPanel({document,api:{feishuCommand:async method=>{calls.push(method);return method==='notifications.status'?{primary_binding_id:'feishu',local:false,counts:{blocked:1},deliveries:[]}:{available:false}}}});await panel.load();assert(calls.includes('notifications.status'));assert(root.querySelectorAll('button').some(n=>n.textContent==='改为在 Nova 接收'))
 })

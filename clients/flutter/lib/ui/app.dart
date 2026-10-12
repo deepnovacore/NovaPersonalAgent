@@ -473,7 +473,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         (snapshot?.rows('pending_approvals').length ?? 0) +
         (snapshot?.rows('pending_confirmations').length ?? 0);
     final unread =
-        decisions +
+        (snapshot?.object('notifications')['local'] == false ? 0 : decisions) +
         (snapshot?.object('conversations')['unread_count'] as int? ?? 0);
     const names = ['Nova', 'Feeds', 'Todos', 'Ideas', 'Goals'];
     return Scaffold(

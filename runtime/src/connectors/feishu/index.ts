@@ -1,3 +1,4 @@
+import type {ChannelBinding,PreparedPart,SendContext,SendOutcome} from '../../notifications/contracts.js';
 import {processingGrantSchema,type ProcessingGrant} from '../../memory-substrate/source-state.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -17,6 +18,8 @@ export interface FeishuSnapshot {
   account_name?: string; account_id?: string; chats: { id: string; name: string; selected: boolean }[];
   last_sync?: string; error?: string; bot_enabled: boolean; retention_days: 30; verification_url?: string;
   app_id?: string;
+  notification_ready?: boolean;
+  notification_enabled?: boolean;
   scope_configured?: boolean;
   auth_issue?: 'expired' | 'missing_scopes' | 'login_required';
   processing_consent_required?: boolean;
@@ -27,6 +30,9 @@ interface Saved {
   account?: string; openId?: string; name?: string; paused: boolean; connected: boolean;
   scopeConfigured?: boolean;
   processingConsent?: ProcessingGrant;
+  outbound?: boolean;
+  outboundIdentity?: {account:string;openId:string;generation:number;valid:boolean};
+  outboundReceipts?: Record<string,{proposal:string;nonce:string;message:string;chat:string;generation:number;revision?:string;occurrence?:string;feedback?:string[]}>;
   bot: boolean; selected: string[]; cursors: Record<string, Cursor>; lastSync?: string;
   deliveries: Record<string, { nonce: string; message?: string; chat?: string }>;
   actions: string[];
@@ -42,7 +48,7 @@ export interface FeishuOptions {
   onProcessingConsent?: (sources:string[],grant:ProcessingGrant)=>Promise<void>;
   ingest?: (message: FeishuMessage) => Promise<void>;
   deleteSource?: (sourceId: string) => Promise<void>;
-  onAction?: (action: { proposal_id: string; action: 'open' | 'snooze' | 'ignore'; event_id: string }) => Promise<void>;
+  onAction?: (action: { proposal_id: string; action: 'open' | 'snooze' | 'ignore'; event_id: string; notification?:{revision:string;occurrence:string} }) => Promise<void>;
   onChange?: (snapshot: FeishuSnapshot) => void;
   now?: () => Date;
 }
@@ -113,6 +119,9 @@ function readSaved(value: unknown): Saved {
   if (data.scopeConfigured !== undefined && typeof data.scopeConfigured !== 'boolean') throw new Error('Invalid Feishu scope state');
   if (data.consentSince !== undefined && !Number.isFinite(Date.parse(str(data.consentSince)))) throw new Error('Invalid Feishu consent state');
   for (const from of Object.values(object(data.captureFrom))) if (!Number.isFinite(Date.parse(str(from)))) throw new Error('Invalid Feishu capture state');
+  if(data.outbound!==undefined&&typeof data.outbound!=='boolean')throw Error('Invalid outbound state');
+  if(data.outboundIdentity!==undefined){const row=object(data.outboundIdentity);if(!str(row.account)||!str(row.openId)||!Number.isSafeInteger(row.generation)||Number(row.generation)<0||typeof row.valid!=='boolean')throw Error('Invalid outbound identity');}
+  for(const value of Object.values(object(data.outboundReceipts))){const row=object(value);if(['proposal','nonce','message','chat'].some(key=>!str(row[key]))||!Number.isSafeInteger(row.generation))throw Error('Invalid outbound receipt');}
   if(data.processingConsent!==undefined)processingGrantSchema.parse(data.processingConsent);
   return data as unknown as Saved;
 }
@@ -123,6 +132,7 @@ export class FeishuConnector {
   private view: FeishuSnapshot = { available: false, configured: false, state: 'unauthorized', chats: [], bot_enabled: false, retention_days: 30 };
   private deviceCode: string | undefined;
   private deviceExpiry = 0;
+  private notificationLogin = false;
   private active: AbortController | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private busy = false;
@@ -205,9 +215,9 @@ export class FeishuConnector {
     this.timer.unref();
   }
   private startListener(): void {
-    if (this.options.bootstrapOnly || this.listener || this.listenerRetry || this.closed || !this.saved.bot || !this.saved.connected || this.saved.paused) return;
+    if (this.options.bootstrapOnly || this.listener || this.listenerRetry || this.closed || !this.callbackReady()) return;
     void this.consumeActions().catch(() => { if (!this.closed && !this.saved.paused) { this.view.error = '飞书提醒连接中断，正在重连'; this.publish(); } }).finally(() => {
-      if (this.closed || !this.saved.bot || !this.saved.connected || this.saved.paused) return;
+      if (this.closed || !this.callbackReady()) return;
       this.listenerRetry = setTimeout(() => { this.listenerRetry = undefined; this.startListener(); }, 5_000);
       this.listenerRetry.unref();
     });
@@ -229,13 +239,19 @@ export class FeishuConnector {
     // CLI --verify may refresh successfully while retaining the pre-refresh status.
     const valid = data.verified !== false && user.verified !== false && (user.status === 'authenticated' || user.tokenStatus === 'valid' || user.authenticated === true
       || user.status === 'needs_refresh' && user.verified === true);
+    const priorIdentity=this.saved.outboundIdentity;
+    const identityAccount=app&&id&&valid?hash(JSON.stringify([app,user.tenantKey??user.tenant_key??null,id])):null;
+    if(identityAccount){this.saved.outboundIdentity={account:identityAccount,openId:id,generation:(priorIdentity?.generation??0)+Number(!!priorIdentity&&priorIdentity.account!==identityAccount),valid:true};if(priorIdentity&&priorIdentity.account!==identityAccount)this.saved.outbound=false;}
+    else if(priorIdentity)this.saved.outboundIdentity={...priorIdentity,valid:false};
+    this.view.notification_enabled=this.saved.outbound===true;
+    this.view.notification_ready=!!this.saved.outboundIdentity?.valid;
     if (!app || !id || !valid || !FEISHU_SCOPES.every((scope) => (scopes as unknown[]).includes(scope))) {
       if (app) this.view.auth_issue = user.tokenStatus === 'expired' ? 'expired' : valid && id ? 'missing_scopes' : 'login_required';
       else delete this.view.auth_issue;
       if(this.saved.processingConsent?.extraction_provider)await this.setProcessingConsent(false);
       this.view.state = 'unauthorized'; this.view.bot_enabled = false;
       this.saved.connected = false; this.saved.bot = false;
-      this.listenerController?.abort(); await this.listener?.catch(() => { /* Authorization is no longer valid. */ });
+      if(!this.saved.outbound){this.listenerController?.abort(); await this.listener?.catch(() => { /* Collection authorization is no longer valid. */ });}
       await this.save();
       return this.snapshot();
     }
@@ -245,8 +261,8 @@ export class FeishuConnector {
       await this.setProcessingConsent(false);
       this.listenerController?.abort(); await this.listener?.catch(() => { /* Fence the old identity. */ });
       await this.stopOwnedBus();
-      const { sources, generation } = this.saved;
-      this.saved = { ...fresh(), sources, generation: generation + 1 };
+      const { sources, generation, outboundIdentity } = this.saved;
+      this.saved = { ...fresh(), sources, generation: generation + 1, ...(outboundIdentity?{outboundIdentity}: {}) };
       this.view.chats = [];
     }
     this.saved.mentionCaptureSince ??= this.now().toISOString();
@@ -259,10 +275,11 @@ export class FeishuConnector {
     await this.save();
     return this.snapshot();
   }
-  async beginLogin(): Promise<FeishuSnapshot> {
+  async beginLogin(notificationOnly=false): Promise<FeishuSnapshot> {
     if (this.setupController) throw new Error('请先完成应用配置');
     await this.pause();
-    const data = await this.json(['auth', 'login', '--scope', FEISHU_SCOPES.join(','), '--no-wait', '--json']);
+    this.notificationLogin=notificationOnly;
+    const data = await this.json(['auth', 'login', '--scope', notificationOnly?'offline_access':FEISHU_SCOPES.join(','), '--no-wait', '--json']);
     const url = str(data.verification_url ?? data.verification_uri_complete ?? data.verificationUrl);
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' || !['feishu.cn', 'larksuite.com'].some((domain) => parsed.hostname === domain || parsed.hostname.endsWith(`.${domain}`))) throw new Error('Invalid Feishu verification URL');
@@ -319,6 +336,7 @@ export class FeishuConnector {
     await this.json(['auth', 'login', '--device-code', this.deviceCode, '--json']);
     this.deviceCode = undefined; delete this.view.verification_url;
     await this.status();
+    if(this.notificationLogin){this.notificationLogin=false;if(!this.saved.outboundIdentity?.valid)throw Error('飞书身份未验证');await this.save();return this.snapshot();}
     if (this.view.state === 'unauthorized') throw new Error('飞书授权缺少所需权限');
     this.saved.connected = true; this.saved.paused = true;
     this.view.state = 'paused'; await this.save();
@@ -433,10 +451,11 @@ export class FeishuConnector {
   }
   async pause(): Promise<void> {
     this.saved.paused = true; this.view.state = 'paused'; this.active?.abort();
-    this.listenerController?.abort(); await this.listener?.catch(() => { /* Cancellation is expected. */ });
+    if(!this.saved.outbound){this.listenerController?.abort(); await this.listener?.catch(() => { /* Cancellation is expected. */ });}
     await this.pending?.catch(() => { /* Cancellation is expected while draining. */ }); await this.save();
   }
   async disconnect(): Promise<void> {
+    this.saved.outbound=false;if(this.saved.outboundIdentity){this.saved.outboundIdentity.valid=false;this.saved.outboundIdentity.generation++;}this.view.notification_enabled=false;this.view.notification_ready=false;
     await this.pause(); await this.setProcessingConsent(false); this.saved.connected = false; this.saved.bot = false; this.view.bot_enabled = false; this.view.state = 'disconnected';
     this.deviceCode = undefined; delete this.view.verification_url; await this.save();
     try { await this.stopOwnedBus(); } finally { await this.json(['auth', 'logout', '--json']); }
@@ -447,11 +466,33 @@ export class FeishuConnector {
     const sources = [...this.saved.sources];
     // Persist the new generation before deletion so a crash cannot resume into a fenced source.
     this.saved.generation++;
-    this.saved.cursors = {}; this.saved.deliveries = {}; this.saved.actions = []; delete this.saved.lastSync; delete this.view.last_sync; await this.save();
+    this.saved.cursors = {}; this.saved.outboundReceipts = {}; this.saved.deliveries = {}; this.saved.actions = []; delete this.saved.lastSync; delete this.view.last_sync; await this.save();
     for (const source of sources) {
       await this.options.deleteSource!(source);
       this.saved.sources = this.saved.sources.filter((item) => item !== source); await this.save();
     }
+  }
+  private callbackReady():boolean{return !!(this.saved.outbound&&this.saved.outboundIdentity?.valid)||this.saved.bot&&this.saved.connected&&!this.saved.paused;}
+  notificationBinding(userScope:string):ChannelBinding|null {
+    const identity=this.saved.outboundIdentity;if(!identity)return null;
+    return {id:'feishu',provider:'feishu',user_scope:userScope,generation:identity.generation,identity:identity.account,status:identity.valid&&(this.saved.outbound||this.saved.bot)?'ready':'unavailable'};
+  }
+  async inspectNotificationBinding(binding:ChannelBinding,signal:AbortSignal):Promise<boolean>{
+    await this.status(signal);const current=this.notificationBinding(binding.user_scope);
+    return !!current&&current.status==='ready'&&current.identity===binding.identity&&current.generation===binding.generation;
+  }
+  async sendNotificationPart(part:PreparedPart,context:SendContext):Promise<SendOutcome>{
+    try{if(!await this.inspectNotificationBinding(context.binding,context.signal))return {kind:'blocked',reason:'binding_changed'};}catch{return {kind:'blocked',reason:'identity_unavailable'};}
+    const identity=this.saved.outboundIdentity!;const nonce=hash(context.idempotency_key).slice(0,40);
+    const actions=context.notification.feedback.map(action=>({tag:'button',text:{tag:'plain_text',content:action==='open'?'标为已查看':action==='snooze'?'稍后提醒':'忽略'},value:{nonce,proposal_id:context.notification.source.id,action:action==='dismiss'?'ignore':action}}));
+    const card={config:{wide_screen_mode:true},header:{title:{tag:'plain_text',content:part.title}},elements:[{tag:'div',text:{tag:'plain_text',content:part.body}},...(actions.length?[{tag:'action',actions}]:[])]};
+    if(context.signal.aborted)return {kind:'retryable',definitelyNotAccepted:true};
+    try{
+      const result=parseFeishuJson(await this.run(['im','+messages-send','--as','bot','--user-id',identity.openId,'--msg-type','interactive','--content',JSON.stringify(card),'--idempotency-key',nonce,'--format','json'],{signal:context.signal}));
+      const message=str(result.message_id),chat=str(result.chat_id);if(!message||!chat)return {kind:'unknown',reason:'missing_receipt'};
+      this.saved.outboundReceipts??={};this.saved.outboundReceipts[nonce]={proposal:context.notification.source.id,nonce,message,chat,generation:identity.generation,revision:context.notification.revision,occurrence:context.notification.occurrence,feedback:[...context.notification.feedback]};for(const key of Object.keys(this.saved.outboundReceipts).slice(0,-10000))delete this.saved.outboundReceipts[key];await this.save();
+      return {kind:'accepted',receipt:{message_id:message,chat_id:chat}};
+    }catch{return {kind:'unknown',reason:'feishu_send_uncertain'};}
   }
   async sendReminder(proposal: { id: string; title: string; body: string }): Promise<boolean> {
     if (this.pending || this.closed) return false;
@@ -478,7 +519,7 @@ export class FeishuConnector {
   }
   async consumeActions(): Promise<void> {
     if (this.options.bootstrapOnly) throw new Error('Feishu collection unavailable during setup');
-    if (this.listener || this.closed || !this.saved.bot || !this.saved.connected || this.saved.paused) return;
+    if (this.listener || this.closed || !this.callbackReady()) return;
     const controller = new AbortController(); this.listenerController = controller;
     this.listenerApp = this.currentApp;
     let callbacks = Promise.resolve(); let queued = 0;
@@ -500,14 +541,15 @@ export class FeishuConnector {
     }
   }
   async acceptAction(event: Record<string, unknown>): Promise<boolean> {
-    if (this.closed || !this.saved.bot || !this.saved.connected || this.saved.paused || event.operator_id !== this.saved.openId || event.type !== 'card.action.trigger') return false;
+    if(this.closed||!this.callbackReady()||event.operator_id!==(this.saved.outbound?this.saved.outboundIdentity?.openId:this.saved.openId)||event.type!=='card.action.trigger')return false;
     const action = jsonObject(str(event.action_value));
-    const proposalId = str(action.proposal_id); const delivery = this.saved.deliveries[proposalId]; const eventId = str(event.event_id);
+    const proposalId = str(action.proposal_id);const outbound=this.saved.outboundReceipts?.[str(action.nonce)];if(outbound&&(outbound.generation!==this.saved.outboundIdentity?.generation||outbound.proposal!==proposalId))return false;const delivery=outbound??this.saved.deliveries[proposalId];const eventId=str(event.event_id);
     if (!delivery || !eventId || this.saved.actions.includes(eventId) || action.nonce !== delivery.nonce || event.message_id !== delivery.message || event.chat_id !== delivery.chat) return false;
     if (action.action !== 'open' && action.action !== 'snooze' && action.action !== 'ignore') return false;
+    if(outbound&&(!outbound.revision||!outbound.occurrence||!outbound.feedback?.includes(action.action==='ignore'?'dismiss':action.action)))return false;
     // Host must reuse its feed action ledger; 'open' is navigation, never execution authorization.
     const account = this.saved.account; const generation = this.saved.generation;
-    await this.options.onAction!({ proposal_id: proposalId, action: action.action, event_id: eventId });
+    await this.options.onAction!({ proposal_id: proposalId, action: action.action, event_id: eventId,...(outbound?{notification:{revision:outbound.revision!,occurrence:outbound.occurrence!}}:{}) });
     if (!this.closed && this.saved.account === account && this.saved.generation === generation) { this.saved.actions.push(eventId); await this.save(); }
     return true;
   }
@@ -523,6 +565,9 @@ export class FeishuConnector {
         if (Object.keys(params).length) throw new Error('Invalid app setup request');
         return method === 'feishu.app.start' ? this.beginAppSetup() : method === 'feishu.app.cancel' ? this.cancelAppSetup() : this.setupSnapshot();
       case 'feishu.status': await this.status(); return this.setupSnapshot();
+      case 'feishu.notification.login': return this.beginLogin(true);
+      case 'feishu.notification.configure':
+        if(typeof params.enabled!=='boolean')throw Error('invalid_request');await this.status();if(params.enabled&&!this.saved.outboundIdentity?.valid)throw Error('飞书身份未验证');this.saved.outbound=params.enabled;this.view.notification_enabled=params.enabled;if(!this.callbackReady()){this.listenerController?.abort();await this.listener?.catch(()=>{/* caller owns the result */});}await this.save();break;
       case 'feishu.login': return this.beginLogin();
       case 'feishu.complete': case 'feishu.auth.complete': return this.completeLogin();
       case 'feishu.chats': return this.listChats();

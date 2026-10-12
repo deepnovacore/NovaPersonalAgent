@@ -119,7 +119,7 @@ export async function handlePersonalSettings(command: (input: unknown) => Promis
 
 /** Settings may configure IM; they cannot read memory or authorize tasks through this port. */
 export async function handleFeishuSettings(command: (input: unknown) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
-  if (!method.startsWith('feishu.')) return {error: 'unsupported'}
+  if (!method.startsWith('feishu.') && !['notifications.status','notifications.configure','notifications.retry'].includes(method)) return {error: 'unsupported'}
   const parsed = personalCommandSchema.safeParse({type: 'personal.command', request_id: randomUUID(), method, params})
   if (!parsed.success) return {error: 'invalid_request'}
   const result = await command(parsed.data) as {ok?: boolean; data?: unknown; error?: string}

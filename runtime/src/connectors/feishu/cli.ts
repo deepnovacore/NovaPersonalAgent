@@ -60,7 +60,7 @@ export function assertFeishuCommand(args: readonly string[]): void {
   if (key === 'auth login') {
     const device = seen.has('--device-code');
     if (!seen.has('--json') || (device ? seen.has('--scope') || seen.has('--no-wait') : !seen.has('--scope') || !seen.has('--no-wait'))) throw new Error('Invalid Feishu login command');
-    if (!device && args[args.indexOf('--scope') + 1] !== 'offline_access,im:chat:read,im:message:readonly,im:message.reactions:read') throw new Error('Unsupported Feishu scope');
+    if (!device && !['offline_access','offline_access,im:chat:read,im:message:readonly,im:message.reactions:read'].includes(args[args.indexOf('--scope') + 1]??'')) throw new Error('Unsupported Feishu scope');
   }
 }
 
