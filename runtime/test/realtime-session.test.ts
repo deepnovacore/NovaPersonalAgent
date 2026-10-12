@@ -1176,3 +1176,16 @@ test('revisable ASR hypotheses replace captions while ordinary deltas append', a
   assert.equal(session.captionFor({...event,text:'a correction',replace:true})?.text,'a correction')
   assert.equal(session.captionFor({...event,text:' appended'})?.text,'a correction appended')
 })
+
+test('only a host-bound scheduled activation admits tools without a user turn',async()=>{
+ for(const requested of [true,false]){
+  const {session}=makeSession({requested});await session.connect({tools:[]})
+  const item:HostContextItem={kind:'scheduled_task',host_item_id:'schedule-root',event_id:'schedule-root',call_id:null,content:JSON.stringify({purpose:'run_scheduled_task'})}
+  await session.deliverHostResponse({kind:'scheduled_task',item,task_summary:null,origin_spoken:false})
+  assert.equal(await session.accept({kind:'response_started',session_epoch:1,response_id:'scheduled',origin:{kind:'host_request',host_item_id:item.host_item_id}}),true)
+  const call={kind:'tool_call_ready' as const,session_epoch:1,response_id:'scheduled',call_id:'context',item_id:'context',name:'app__context',arguments:{section:'todos',cursor:null}}
+  assert.equal(await session.accept(call),true)
+  await session.accept({kind:'response_terminal',session_epoch:1,response_id:'scheduled',status:'completed',reason:'completed'})
+  assert.equal(await session.accept(call),false,'late tools are still rejected')
+ }
+})

@@ -963,16 +963,19 @@ export class RealtimeSession {
 
   #acceptToolCall(eventResponseId: string | null): boolean {
     const responseId = eventResponseId ?? this.#providerResponseId
+    // Only session-owned request items can identify a scheduled activation. The scoped tool
+    // runtime still validates its run authority and read-only policy before any read.
+    const scheduled = responseId !== null && this.#responseItems.get(this.#turnKey(responseId))?.some(item => item.kind === 'scheduled_task') === true
     if (this.#provider.userResponseMode === 'requested' && responseId === null) return false
     if (responseId !== null) {
       const turn = this.#state.providerTurn(responseId)
       if (this.#provider.userResponseMode === 'requested' && turn?.origin === undefined) return false
       if (turn !== undefined && (turn.locally_fenced || turn.phase !== 'active')) return false
       if (turn?.origin?.kind === 'unknown') return false
-      if (turn?.origin?.kind === 'host_request' && !this.responseIsToolContinuation(responseId)) return false
+      if (turn?.origin?.kind === 'host_request' && !scheduled && !this.responseIsToolContinuation(responseId)) return false
     }
     if (responseId !== null && this.#responseItems.has(this.#turnKey(responseId))
-      && !this.responseIsToolContinuation(responseId)) {
+      && !scheduled && !this.responseIsToolContinuation(responseId)) {
       // Host factual narration cannot propose tools. Continuations still need host authorization.
       return false
     }

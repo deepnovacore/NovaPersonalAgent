@@ -112,7 +112,7 @@ function readSaved(value: unknown): Saved {
   }
   if (data.scopeConfigured !== undefined && typeof data.scopeConfigured !== 'boolean') throw new Error('Invalid Feishu scope state');
   if (data.consentSince !== undefined && !Number.isFinite(Date.parse(str(data.consentSince)))) throw new Error('Invalid Feishu consent state');
-  for (const from of Object.values(object(data.captureFrom))) if (!Number.isFinite(Date.parse(str(from)))) throw new Error('Invalid Feishu capture state');
+  for (const from of Object.values(data.captureFrom === undefined ? {} : object(data.captureFrom))) if (!Number.isFinite(Date.parse(str(from)))) throw new Error('Invalid Feishu capture state');
   if(data.processingConsent!==undefined)processingGrantSchema.parse(data.processingConsent);
   return data as unknown as Saved;
 }

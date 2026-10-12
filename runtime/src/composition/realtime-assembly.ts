@@ -201,6 +201,7 @@ async function responseAdaptationFor(
 }
 
 export interface RealtimeAssemblyOptions {
+  readonly conversationContext?:()=>Promise<string|null>
   readonly suppressMemoryAdaptation?:boolean
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
@@ -864,12 +865,13 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     responseAdaptationRequired: () => !options.suppressMemoryAdaptation&&personalMemoryHolder.current?.prepareResponseAdaptation !== undefined,
     responseAdaptation: async signal => {
       const preferences = options.suppressMemoryAdaptation?undefined:await responseAdaptationFor(personalMemoryHolder.current, options.memoryReadMode, options.memoryConsumerFingerprint, signal)
+      const conversationContext=await options.conversationContext?.()
       signal?.throwIfAborted()
       const conversation = core.runtime.memory.channels.get('conversation')
       const sources = recentDispatchSources(conversation?.items ?? [])
       const recovery = provider.responseAdaptationMode === 'session_setup' ? undefined : sessionHolder.current?.deliveryRecoveryContext()
       const context = {
-        content: [preferences?.content, recovery?.content,options.scheduleHost?canonicalJson({schedule_calendar:{timezone:options.sharedPersonal?.host.snapshot().settings.timezone??'UTC',now:new Date(wallClockNow()*1000).toISOString()}}):null].filter(Boolean).join('\n') || null,
+        content: [preferences?.content, recovery?.content,conversationContext,options.scheduleHost?canonicalJson({schedule_calendar:{timezone:options.sharedPersonal?.host.snapshot().settings.timezone??'UTC',now:new Date(wallClockNow()*1000).toISOString()}}):null].filter(Boolean).join('\n') || null,
         ...(recovery?.content ? {delivery_version: recovery.version} : {}),
         ...(sources.length === 0 ? {} : {user_sources: sources}),
       }

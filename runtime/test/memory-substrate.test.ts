@@ -10,7 +10,7 @@ import {initializeMemory,memoryOperation,contentHash,CandidateSchema,type Eviden
 test('memory revisions preserve correction, deletion, suppression and retention',()=>{
  assert.equal(contentHash(' ＲＥＶＩＥＷ\u00a0说明 '),contentHash('review 说明'))
  const db=new DatabaseSync(':memory:');initializeMemory(db)
- const now='2026-09-12T00:00:00.000Z'
+ const now=new Date().toISOString()
  const source=(id:string,kind:EvidenceRecord['source_kind']='im'):EvidenceRecord=>({id,source_id:id,source_kind:kind,locator:id,cursor:null,observed_at:now,recorded_at:now,raw_text:'Review by Friday',extracted:{},hash:contentHash(id),sensitivity:{policy_version:'1',redactions:[]},retention_until:null,trust:kind==='user_correction'?'trusted_user':'untrusted_external'})
  const run=(op:Parameters<typeof memoryOperation>[1],input:unknown)=>memoryOperation(db,op,input)
  run('append_evidence',source('im'));run('append_evidence',source('second'))
@@ -28,7 +28,7 @@ test('memory revisions preserve correction, deletion, suppression and retention'
  run('forget',{entry_id:'one',candidate:{...candidate,origin:'stated',written_by:'user_correction',evidence_refs:['correction'],op:'tombstone',expected_revision:2}})
  assert.equal((run('list',{}) as EntryRevision[]).length,0)
  assert.equal(run('merge',{...candidate,entry_id:'resurrection',evidence_refs:['correction']}),null)
- run('append_evidence',source('expiry'));assert.equal(run('expire',{now:'2026-11-01T00:00:00.000Z'}),2)
+ run('append_evidence',source('expiry'));assert.equal(run('expire',{now:new Date(Date.parse(now)+50*86400000).toISOString()}),2)
  assert.equal((run('evidence',{id:'expiry'}) as EvidenceRecord).raw_text,null)
  run('append_evidence',source('third'));run('merge',{...candidate,entry_id:'delete',evidence_refs:['third']});run('delete_source',{source_id:'third'})
  assert.equal((run('history',{entry_id:'delete'}) as EntryRevision[]).at(-1)!.op,'tombstone')
@@ -37,7 +37,7 @@ test('memory revisions preserve correction, deletion, suppression and retention'
 
 test('expired entries and replay fences never enter current projections',()=>{
  const db=new DatabaseSync(':memory:');initializeMemory(db)
- const now='2026-09-12T00:00:00.000Z'
+ const now=new Date().toISOString()
  const raw={id:'user:e:1',source_id:'user:im',source_kind:'im',locator:'chat/message',observed_at:now,recorded_at:now,raw_text:'password=secret123 useful review',hash:contentHash('review'),trust:'untrusted_external'}
  const saved=memoryOperation(db,'append_evidence',raw) as EvidenceRecord
  assert.ok(!saved.raw_text!.includes('secret123'));assert.ok(saved.sensitivity.redactions.length)

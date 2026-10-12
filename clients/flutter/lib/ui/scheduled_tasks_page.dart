@@ -253,7 +253,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
               children: [
                 Icon(Icons.schedule, size: 34, color: colors.primary),
                 const SizedBox(height: 12),
-                Text(t('Start with a preset or create your own schedule.')),
+                Text(t('Choose a suggested task, or create your own schedule.')),
               ],
             ),
           ),
@@ -302,7 +302,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
           ),
         const SizedBox(height: 10),
         Text(
-          t('Start with a preset'),
+          t('Suggested tasks'),
           style: Theme.of(context).textTheme.titleMedium,
         ),
         const SizedBox(height: 14),
@@ -344,7 +344,7 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
                 ),
                 const SizedBox(height: 10),
                 _button(
-                  'Use preset',
+                  'Set up task',
                   () => _editor(Map<String, dynamic>.from(preset['input'])),
                   icon: Icons.add,
                 ),

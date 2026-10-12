@@ -430,3 +430,11 @@ test('mentions from before a chat was selected or consent was granted are never 
   assert.equal(capture().oc_b_before,false);assert.equal(capture().oc_b_after,true)
  }finally{await connector.close();await rm(directory,{recursive:true,force:true})}
 })
+
+test('a fresh paused connector reopens before any capture scope has been configured',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'nova-feishu-reopen-'))
+ const make=()=>new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:()=>Promise.reject(Error('unconfigured'))})
+ let connector=make()
+ try{await connector.open();await connector.pause();await connector.close();connector=make();await connector.open();assert.equal(connector.snapshot().state,'error')}
+ finally{await connector.close();await rm(directory,{recursive:true,force:true})}
+})

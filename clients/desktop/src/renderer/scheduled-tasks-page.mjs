@@ -57,11 +57,11 @@ export function renderScheduledTasksPage(panel,{snapshot,command,openTask,openRe
  }
  const header=el('header',undefined,'schedule-heading'),copy=el('div');copy.append(el('h2','留给 Nova，按时完成'),el('p','为反复需要的整理和跟进，安排一个固定时间。','schedule-muted'));header.append(copy);button('创建定时任务',()=>edit({rule:{kind:'daily',time:'09:00',timezone:snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone},acceptance:[t('完成任务并说明依据与不确定性。')]}),header,'primary');root.append(header)
  if(schedules.length){const grid=el('div',undefined,'schedule-list');root.append(grid);for(const item of schedules){const card=el('article',undefined,'schedule-card');card.dataset.scheduleId=item.id;card.dataset.enabled=String(item.enabled);grid.append(card);const icon=el('span','◷','schedule-emblem'),body=el('div',undefined,'schedule-card-copy');body.append(el('h3',item.title),el('p',scheduleRuleLabel(item.rule),'schedule-muted'),el('small',item.enabled?t('下次 {0}',when(item.next_slot?.scheduled_at,item.rule.timezone)):t('已暂停')));card.append(icon,body);button('查看',()=>load(item.id),card,'ghost')}}
- else{const empty=el('div',undefined,'schedule-empty');empty.append(el('span','◷','schedule-emblem'),el('h3','把重复的事安排好'),el('p','从下面的预设开始，或创建自己的定时任务。','schedule-muted'));root.append(empty)}
- root.append(el('h3','为你准备的预设','schedule-section-heading'))
+ else{const empty=el('div',undefined,'schedule-empty');empty.append(el('span','◷','schedule-emblem'),el('h3','把重复的事安排好'),el('p','选择下面的常用任务，或创建自己的定时任务。','schedule-muted'));root.append(empty)}
+ root.append(el('h3','常用任务','schedule-section-heading'))
  if(!local.presets&&!local.loadingPresets){local.loadingPresets=true;void command('schedules.presets',{}).then(result=>{local.presets=result.items}).catch(error=>{local.presets=[];local.error=scheduleError(error)}).finally(()=>{local.loadingPresets=false;rerender()})}
  const presets=el('div',undefined,'schedule-presets');root.append(presets)
- for(const [index,preset]of(local.presets??[]).entries()){const card=el('article',undefined,'schedule-preset');card.dataset.tone=index%2?'violet':'blue';card.append(el('span',index?'▤':'☷','schedule-emblem'),el('h3',preset.input.title),el('p',preset.description,'schedule-muted'),el('small',scheduleRuleLabel(preset.input.rule)));button('使用预设',()=>edit(preset.input),card,'soft');presets.append(card)}
+ for(const [index,preset]of(local.presets??[]).entries()){const card=el('article',undefined,'schedule-preset');card.dataset.tone=index%2?'violet':'blue';card.append(el('span',index?'▤':'☷','schedule-emblem'),el('h3',preset.input.title),el('p',preset.description,'schedule-muted'),el('small',scheduleRuleLabel(preset.input.rule)));button('安排这个任务',()=>edit(preset.input),card,'soft');presets.append(card)}
  root.append(el('p','Runtime 在线时自动执行；桌面可在后台运行，手机无需保持打开。','schedule-footnote'))
  return {dispose(){}}
 }

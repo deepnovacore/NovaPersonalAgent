@@ -120,10 +120,10 @@ const _zh = <String, String>{
   "Next {0}": "下次 {0}",
   "Paused": "已暂停",
   "Make room for what matters": "把重复的事安排好",
-  "Start with a preset below or create your own schedule.":
-      "从下面的预设开始，或创建自己的定时任务。",
-  "Start with a preset": "为你准备的预设",
-  "Use preset": "使用预设",
+  "Choose a suggested task, or create your own schedule.":
+      "选择下面的常用任务，或创建自己的定时任务。",
+  "Suggested tasks": "常用任务",
+  "Set up task": "安排这个任务",
   "Runs while the Runtime is online. The desktop can stay in the background; your phone can be closed.":
       "Runtime 在线时自动执行；桌面可在后台运行，手机无需保持打开。",
   "Save as a personal item": "保存为个人事项",
@@ -156,7 +156,6 @@ const _zh = <String, String>{
   "Results become personal items only when you save them.":
       "只有你选择保存，结果才会转为个人事项。",
   "Set a regular time for reviews and follow-ups.": "为定期整理和跟进，安排一个固定时间。",
-  "Start with a preset or create your own schedule.": "从预设开始，或创建自己的定时任务。",
   "Next run": "下次运行",
   "Runs while the Runtime is online. Your phone can be closed.":
       "Runtime 在线时自动执行，手机无需保持打开。",

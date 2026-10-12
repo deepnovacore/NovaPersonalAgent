@@ -24,7 +24,7 @@ test('presets remain editable drafts; pausing and stopping are visibly distinct 
  const root=new Node('div'),calls=[],input={title:'Daily',goal:'Review',acceptance:['Summary'],rule:{kind:'daily',time:'09:00',timezone:'UTC'},context:{todos:true}},local={presets:[{input,description:'Review priorities'}]}
  const options={snapshot:{schedules:{items:[]}},command:async(...args)=>{calls.push(args);return {items:[]}},openTask:()=>{},openResult:()=>{},local,rerender:()=>{}}
  renderScheduledTasksPage(root,options)
- const all=node=>[node,...node.children.flatMap(all)],use=all(root).find(node=>node.textContent==='使用预设');await use.listeners.click()
+ const all=node=>[node,...node.children.flatMap(all)],use=all(root).find(node=>node.textContent==='安排这个任务');await use.listeners.click()
  assert.equal(local.editor,true);assert.equal(local.draft.value.title,'Daily');assert.equal(calls.length,0)
  const detailRoot=new Node('div'),item={...input,id:'s',revision:1,enabled:true};Object.assign(local,{editor:false,selected:'s',detail:item,history:{items:[]}})
  renderScheduledTasksPage(detailRoot,{...options,snapshot:{schedules:{items:[item],active_runs:[{schedule_id:'s',task_id:'task'}]},tasks:[{id:'task',control_revision:0,goal_revision:0}]}})
