@@ -7,13 +7,13 @@ import 'schedule_editor.dart';
 import 'strings.dart';
 
 String scheduleRuleText(Map<String, dynamic> rule, String language) {
-  final days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  final days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   final repeat = rule['kind'] == 'once'
       ? rule['date']
       : rule['kind'] == 'daily'
       ? tr(language, 'Daily')
       : (rule['weekdays'] as List? ?? [])
-            .map((day) => tr(language, days[day as int]))
+            .map((day) => tr(language, days[(day as int) - 1]))
             .join(', ');
   return '$repeat · ${rule['time']} · ${rule['timezone']}';
 }
@@ -253,7 +253,9 @@ class _ScheduledTasksPageState extends State<ScheduledTasksPage> {
               children: [
                 Icon(Icons.schedule, size: 34, color: colors.primary),
                 const SizedBox(height: 12),
-                Text(t('Choose a suggested task, or create your own schedule.')),
+                Text(
+                  t('Choose a suggested task, or create your own schedule.'),
+                ),
               ],
             ),
           ),

@@ -369,19 +369,19 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
               Wrap(
                 spacing: 6,
                 children: [
-                  for (final day in [1, 2, 3, 4, 5, 6, 0])
+                  for (final day in [1, 2, 3, 4, 5, 6, 7])
                     FilterChip(
                       label: Text(
                         t(
                           [
-                            'Sun',
                             'Mon',
                             'Tue',
                             'Wed',
                             'Thu',
                             'Fri',
                             'Sat',
-                          ][day],
+                            'Sun',
+                          ][day - 1],
                         ),
                       ),
                       selected: days.contains(day),

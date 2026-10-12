@@ -34,7 +34,8 @@ export class ScheduleService{
  async close(){await this.#tail}
  list(){return structuredClone(this.#state.items.filter(item=>!item.archived))}
  get(scheduleId:string):Schedule{const item=this.#state.items.find(item=>item.id===id.parse(scheduleId));if(!item)throw Error('schedule_not_found');return structuredClone(item)}
- getRun(runId:string):ScheduleRun{const run=this.#state.runs.find(run=>run.run_id===id.parse(runId));if(!run)throw Error('schedule_run_not_found');return structuredClone(run)}
+ findRun(runId:string):ScheduleRun|null{const run=this.#state.runs.find(run=>run.run_id===id.parse(runId));return run?structuredClone(run):null}
+ getRun(runId:string):ScheduleRun{const run=this.findRun(runId);if(!run)throw Error('schedule_run_not_found');return run}
  runForTask(taskId:string):ScheduleRun|null{const run=this.#state.runs.find(run=>run.task_id===taskId);return run?structuredClone(run):null}
  activeRuns(){return structuredClone(this.#state.runs.filter(run=>run.stage!=='terminal'))}
  terminalRuns(){return structuredClone(this.#state.runs.filter(run=>run.stage==='terminal'))}
@@ -114,6 +115,7 @@ export class ScheduleService{
   const parsed=summarySchema.parse(summary)
   return this.#changeRun(runId,run=>{if(run.terminal_summary){if(scheduleHash({...run.terminal_summary,published:false})!==scheduleHash({...parsed,published:false}))throw Error('run_result_conflict');return}run.stage='terminal';run.terminal_summary=parsed})
  }
+ markWithheld(runId:string){return this.#changeRun(runId,run=>{if(run.terminal_summary?.published)return;run.stage='terminal';run.terminal_summary={outcome:'failed',text:'相关资料已变化，本次结果未发送。请重新运行以读取最新资料。',evidence_refs:[],published:true}})}
  markPublished(runId:string){return this.#changeRun(runId,run=>{if(!run.terminal_summary)throw Error('run_not_terminal');run.terminal_summary.published=true})}
  #run(item:Schedule,slot:ScheduleSlot|null,trigger:ScheduleRun['trigger'],run_id:string):ScheduleRun{
   const frozen=definition(item),definition_hash=scheduleHash(frozen)

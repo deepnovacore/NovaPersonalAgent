@@ -142,6 +142,72 @@ void main() {
     );
     expect(write['params']['input']['title'], 'Daily priorities');
   });
+  testWidgets('ISO Sunday is displayed and saved as weekday 7', (tester) async {
+    expect(
+      scheduleRuleText({
+        'kind': 'weekly',
+        'weekdays': [7],
+        'time': '09:00',
+        'timezone': 'UTC',
+      }, 'en'),
+      contains('Sun'),
+    );
+    final calls = <Map<String, dynamic>>[];
+    late PersonalStore store;
+    store = PersonalStore(
+      send: (frame) {
+        calls.add(frame);
+        scheduleMicrotask(
+          () => store.receive({
+            'type': 'personal.result',
+            'request_id': frame['request_id'],
+            'ok': true,
+            'data': frame['method'] == 'schedules.preview'
+                ? {
+                    'next_slot': {'scheduled_at': '2026-10-18T09:00:00Z'},
+                  }
+                : {'id': 's', 'revision': 1},
+          }),
+        );
+        return true;
+      },
+    );
+    addTearDown(store.dispose);
+    store.setConnected(true, instance: 'test');
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ScheduleEditor(
+            store: store,
+            value: {
+              ...sample,
+              'rule': {
+                'kind': 'weekly',
+                'weekdays': [1],
+                'time': '09:00',
+                'timezone': 'UTC',
+              },
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Mon'));
+    await tester.tap(find.text('Mon'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Sun'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Save schedule'));
+    await tester.tap(find.text('Save schedule'));
+    await tester.pumpAndSettle();
+    expect(
+      calls.singleWhere(
+        (row) => row['method'] == 'schedules.create',
+      )['params']['input']['rule']['weekdays'],
+      [7],
+    );
+  });
   test('schedule metadata survives transcript replacement', () {
     final state = ConversationState();
     state.receive(
@@ -271,11 +337,33 @@ void main() {
     expect(calls.any((call) => call['method'] == 'schedules.pause'), true);
     expect(calls.any((call) => call['method'] == 'tasks.cancel'), false);
   });
- testWidgets('schedule navigation fits a phone at large text sizes',(tester)async{
-  await tester.binding.setSurfaceSize(const Size(390,844));addTearDown(()=>tester.binding.setSurfaceSize(null));
-  final store=PersonalStore(send:(_)=>false);addTearDown(store.dispose);store.receive({'type':'personal.state','revision':1,'capabilities':{'schedules':true},'schedules':{'items':[],'active_runs':[]}});
-  await tester.pumpWidget(MaterialApp(builder:(context,child)=>MediaQuery(data:MediaQuery.of(context).copyWith(textScaler:const TextScaler.linear(2)),child:child!),home:WorkbenchPage(store:store,page:0,onSettings:(){})));
-  expect(tester.takeException(),isNull);await tester.tap(find.text('Scheduled tasks'));await tester.pumpAndSettle();expect(tester.takeException(),isNull);
- });
-
+  testWidgets('schedule navigation fits a phone at large text sizes', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(390, 844));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final store = PersonalStore(send: (_) => false);
+    addTearDown(store.dispose);
+    store.receive({
+      'type': 'personal.state',
+      'revision': 1,
+      'capabilities': {'schedules': true},
+      'schedules': {'items': [], 'active_runs': []},
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: WorkbenchPage(store: store, page: 0, onSettings: () {}),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.text('Scheduled tasks'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 }

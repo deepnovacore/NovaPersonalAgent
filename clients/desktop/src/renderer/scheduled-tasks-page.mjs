@@ -1,6 +1,6 @@
 import {t,currentLanguage} from './locale.mjs'
 import {ScheduleDraft,mountScheduleEditor,scheduleError} from './schedule-editor.mjs'
-export function scheduleRuleLabel(rule){const days=['周日','周一','周二','周三','周四','周五','周六'];return [rule.kind==='once'?rule.date:rule.kind==='daily'?t('每天'):(rule.weekdays??[]).map(day=>t(days[day])).join('、'),rule.time,rule.timezone].filter(Boolean).join(' · ')}
+export function scheduleRuleLabel(rule){const days=['周一','周二','周三','周四','周五','周六','周日'];return [rule.kind==='once'?rule.date:rule.kind==='daily'?t('每天'):(rule.weekdays??[]).map(day=>t(days[day-1])).join('、'),rule.time,rule.timezone].filter(Boolean).join(' · ')}
 export async function scheduleMutation(local,command,operation,params){
  local.requests??=new Map();const key=JSON.stringify([operation,params.id??params.run_id]);let pending=local.requests.get(key)
  if(!pending){pending={request_id:crypto.randomUUID(),params:structuredClone(params)};local.requests.set(key,pending)}

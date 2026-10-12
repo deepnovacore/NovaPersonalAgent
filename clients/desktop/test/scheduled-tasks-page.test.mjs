@@ -30,3 +30,19 @@ test('presets remain editable drafts; pausing and stopping are visibly distinct 
  renderScheduledTasksPage(detailRoot,{...options,snapshot:{schedules:{items:[item],active_runs:[{schedule_id:'s',task_id:'task'}]},tasks:[{id:'task',control_revision:0,goal_revision:0}]}})
  assert.ok(all(detailRoot).some(node=>node.textContent==='暂停定时'));assert.ok(all(detailRoot).some(node=>node.textContent==='停止当前任务'));assert.equal(all(detailRoot).find(node=>node.textContent==='现在运行').disabled,true)
 })
+
+test('ISO Sunday renders and the editor previews and saves weekday 7',async()=>{
+ const {ScheduleDraft,mountScheduleEditor}=await import('../src/renderer/schedule-editor.mjs')
+ const {scheduleRuleSchema}=await import('../../../runtime/dist/src/personal-agent/scheduled-time.js')
+ assert.match(scheduleRuleLabel({kind:'weekly',weekdays:[7],time:'09:00',timezone:'UTC'}),/周日.*09:00/)
+ globalThis.document={createElement:tag=>new Node(tag)}
+ const calls=[],value={title:'Sunday review',goal:'Review',acceptance:['Summary'],rule:{kind:'weekly',weekdays:[1],time:'09:00',timezone:'UTC'},context:{todos:true,goals:false,tasks:false,memory:false,knowledge:false,search:false}}
+ const command=async(method,params)=>{calls.push({method,params});scheduleRuleSchema.parse(method==='schedules.preview'?params.rule:params.input.rule);return method==='schedules.preview'?{next_slot:{scheduled_at:'2026-10-18T09:00:00Z'}}:{id:'s'}}
+ const model=new ScheduleDraft(value,command),root=new Node('div')
+ mountScheduleEditor(root,{model,onSaved:()=>{},onCancel:()=>{}})
+ const all=node=>[node,...node.children.flatMap(all)]
+ all(root).find(node=>node.tagName==='BUTTON'&&node.textContent==='周一').listeners.click()
+ all(root).find(node=>node.tagName==='BUTTON'&&node.textContent==='周日').listeners.click()
+ await model.preview();await model.save()
+ assert.deepEqual(calls.at(-1).params.input.rule.weekdays,[7])
+})
