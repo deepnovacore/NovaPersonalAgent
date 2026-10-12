@@ -1,3 +1,4 @@
+import {SOURCE_PROCESSING_TOOL_SPEC} from './source-processing-tools.js'
 /**
  * Compile executor manifests into provider-safe function schemas.
  *
@@ -58,7 +59,8 @@ export class ToolSchemaError extends Error {
 
 export function compileToolSchema(
   manifests: readonly ExecutorManifest[],
-  options: {readonly includeSchedules?:boolean; readonly includeAppContext?:boolean; readonly includeTasks?: boolean; readonly includeMemoryRecall?: boolean; readonly agentDescriptors?: readonly AgentDescriptor[]} = {},
+  options: {readonly includeSchedules?:boolean; readonly includeSourceProcessing?: boolean
+  readonly includeAppContext?:boolean; readonly includeTasks?: boolean; readonly includeMemoryRecall?: boolean; readonly agentDescriptors?: readonly AgentDescriptor[]} = {},
 ): CompiledTools {
   const schemas: Readonly<Record<string, JsonValue>>[] = []
   const bindings = new Map<string, ToolBinding>()
@@ -104,6 +106,7 @@ export function compileToolSchema(
     bindings.set('memory__evidence', toolBindingSchema.parse({kind: 'query', logical_name: 'memory.evidence'}))
   }
 
+  if(options.includeSourceProcessing){schemas.push(compileHostTool(SOURCE_PROCESSING_TOOL_SPEC));bindings.set('source__process',toolBindingSchema.parse({kind:'query',logical_name:'source.process'}))}
   if(options.includeAppContext){schemas.push(compileHostTool(APP_CONTEXT_TOOL_SPEC));bindings.set('app__context',toolBindingSchema.parse({kind:'query',logical_name:'app.context'}))}
   const seen = new Set<string>()
   const hidden = new Set<string>()

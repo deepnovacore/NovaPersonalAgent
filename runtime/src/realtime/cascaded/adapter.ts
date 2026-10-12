@@ -60,6 +60,7 @@ export const CASCADED_PREEMPTIVE_ALERT_POLICY = Object.freeze({
 })
 
 export interface CascadedRealtimeAdapterOptions {
+  readonly scheduledTask?: boolean
   readonly textOnly?: boolean
   readonly history?: readonly CommittedConversationPair[]
   readonly endpointing?: EndpointingPort
@@ -291,6 +292,7 @@ class BoundedEventQueue {
 
 export class CascadedRealtimeAdapter implements RealtimeProvider {
   readonly userResponseMode = 'requested' as const
+  readonly #scheduledTask:boolean
   readonly #textOnly:boolean
   readonly #initialHistory:readonly CommittedConversationPair[]|undefined
   readonly #endpointing: EndpointingPort|undefined
@@ -319,6 +321,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
   setLanguage(language: PromptLanguage = this.#defaultLanguage): Promise<void> { this.#language = language; return Promise.resolve() }
 
   constructor(options: CascadedRealtimeAdapterOptions) {
+    this.#scheduledTask=options.scheduledTask===true
     this.#textOnly=options.textOnly===true
     this.#initialHistory=options.history===undefined?undefined:committedConversationPairsSchema.parse(options.history)
     if(!this.#textOnly&&(!options.endpointing||!options.asr||!options.tts))throw new CascadedRealtimeError('configuration')
@@ -1077,7 +1080,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           allowTools ? [...owner.pending.values()].filter(pending => pending.item.speech_content !== undefined)
             .map(pending => pending.item.content).join('\n') : null,
           allowTools ? dispatchSourceContext(owner.responseAdaptation?.user_sources) : null,
-          taskContinuation==='content'?TASK_CONTINUATION_INSTRUCTIONS:taskContinuation==='scheduled'?SCHEDULED_TASK_INSTRUCTIONS:cascadedResponseGuidance(allowTools, language),
+          taskContinuation==='content'?TASK_CONTINUATION_INSTRUCTIONS:taskContinuation==='scheduled'||this.#scheduledTask?SCHEDULED_TASK_INSTRUCTIONS:cascadedResponseGuidance(allowTools, language),
         ].filter(Boolean).join('\n'),
         signal,
       })) {
@@ -1446,7 +1449,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       const include = pending.item.kind === 'recovery' || pending.item.kind === 'dialogue_context'
         || pending.item.kind === 'tool_output' || hostId === intent?.item.host_item_id
       if (!include) continue
-      const input = intent?.kind === 'host_fact' && hostId === intent.item.host_item_id
+      const input:CascadedLlmInput = intent?.kind==='scheduled_task'&&hostId===intent.item.host_item_id ? {kind:'host_task',content:pending.item.content} : intent?.kind === 'host_fact' && hostId === intent.item.host_item_id
         && (pending.item.kind === 'progress' || pending.item.kind === 'final')
         ? hostInput(pending.item, true) : structuredClone(pending.input)
       if (input.kind === 'tool_result') inputs.unshift(input)

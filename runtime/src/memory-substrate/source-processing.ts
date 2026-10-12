@@ -14,21 +14,22 @@ export const processingTopicSchema=z.object({title:z.string().trim().min(1).max(
 const batchSchema=z.object({id,prefix:id,provider:id,items:z.array(processingRefSchema).min(1).max(8),end:cursorSchema,status:z.enum(['claimed','bound','completed','failed','invalidated']),task_id:id.nullable(),run_id:id.nullable(),created_at:z.string(),result_hash:id.nullable()}).strict()
 export type ProcessingBatch=z.infer<typeof batchSchema>
 const stateSchema=z.object({cursor:cursorSchema,completed_batches:z.number().int().nonnegative(),processed_chars:z.number().int().nonnegative(),last_success:z.string().nullable()}).strict()
-export const SOURCE_PROCESSING_VERSION='source-processing-v1'
+export const SOURCE_PROCESSING_VERSION='source-processing-v2'
 const base=z.object({prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,recipe:id.default(SOURCE_PROCESSING_VERSION)})
 const owner={batch_id:id,task_id:id,run_id:id}
 export const processingRequestSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('claim')}).strict(),
  z.object({action:z.literal('status')}).strict(),
+ z.object({action:z.literal('batch'),batch_id:id}).strict(),
  z.object({action:z.literal('bind'),...owner}).strict(),
  z.object({action:z.literal('read'),batch_id:id}).strict(),
  z.object({action:z.literal('commit'),...owner,topics:z.array(processingTopicSchema).max(8)}).strict(),
  z.object({action:z.literal('fail'),...owner}).strict(),
  // Host reconciliation only: caller must first verify the Task/Run ledger, never infer termination from a timeout.
  z.object({action:z.literal('retire'),batch_id:id,task_id:id.nullable(),run_id:id.nullable(),reason:z.enum(['task_terminal','no_task_dispatched'])}).strict(),
- z.object({action:z.literal('topics'),after:z.number().int().nonnegative().default(0),limit:z.number().int().min(1).max(100).default(20),query:z.string().trim().max(200).default('')}).strict(),
+ z.object({action:z.literal('topics'),batch_id:id.optional(),after:z.number().int().nonnegative().default(0),limit:z.number().int().min(1).max(100).default(20),query:z.string().trim().max(200).default('')}).strict(),
  z.object({action:z.literal('evidence'),...owner,refs:z.array(processingRefSchema).min(1).max(8).refine(refs=>refs.reduce((sum,ref)=>sum+ref.end-ref.start,0)<=16000)}).strict(),
- z.object({action:z.literal('profile')}).strict(),
+ z.object({action:z.literal('profile'),batch_id:id.optional()}).strict(),
  z.object({action:z.literal('publish'),...owner,expected_revision:z.number().int().nonnegative(),draft:profileDraftSchema,refs:z.array(processingRefSchema).min(1).max(64)}).strict(),
 ])
 export type ProcessingRequest=z.input<typeof processingRequestSchema>
@@ -54,6 +55,7 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
  CREATE TRIGGER IF NOT EXISTS processing_head_update AFTER UPDATE ON memory_message_heads WHEN OLD.evidence_id<>NEW.evidence_id BEGIN
  INSERT INTO processing_heads VALUES(NEW.key,1) ON CONFLICT(key) DO UPDATE SET revision=revision+1;
  INSERT INTO processing_events(prefix,evidence_id) SELECT substr(source_id,1,9+instr(substr(source_id,10),':')),id FROM memory_evidence WHERE id=NEW.evidence_id; END;`)
+ if(!db.prepare('PRAGMA table_info(processing_reads)').all().some(column=>column.name==='payload_json'))db.exec('ALTER TABLE processing_reads ADD COLUMN payload_json TEXT')
  // Pre-release ledgers without evidence-linked receipts must conservatively reprocess their affected input.
  if(!db.prepare('PRAGMA table_info(processing_receipts)').all().some(column=>column.name==='evidence_id')){
   db.exec("ALTER TABLE processing_receipts ADD COLUMN evidence_id TEXT NOT NULL DEFAULT ''; DELETE FROM processing_receipts; DELETE FROM processing_state;")
@@ -145,7 +147,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const row=db.prepare('SELECT count(*) count,max(seq) high FROM processing_events WHERE prefix=? AND seq>=?').get(prefix,state.cursor.seq+Number(state.cursor.offset===0))!
   const prior=db.prepare("SELECT payload_json FROM processing_batches WHERE prefix=? AND status IN ('claimed','bound')").get(prefix)
   const blocking=prior?batchSchema.parse(JSON.parse(String(prior.payload_json))):null
-  return {...state,active_batch:blocking,reconciliation_required:!!blocking&&blocking.provider!==provider,pending_changes:Number(row.count),high_watermark:Number(row.high??state.cursor.seq)}
+  return {...state,recipe:provider,active_batch:blocking,reconciliation_required:!!blocking&&blocking.provider!==provider,pending_changes:Number(row.count),high_watermark:Number(row.high??state.cursor.seq)}
  }
  if(q.action==='claim'){
   const existing=active();if(existing)return existing
@@ -173,10 +175,11 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const batch:ProcessingBatch={id:randomUUID(),prefix,provider,items,end,status:'claimed',task_id:null,run_id:null,created_at:new Date().toISOString(),result_hash:null}
   saveBatch(db,batch);return batch
  }
+ const track=(batchId:string,refs:ProcessingRef[])=>{for(const ref of refs)db.prepare('INSERT INTO processing_reads(batch_id,ref_key,payload_json) VALUES(?,?,?) ON CONFLICT(batch_id,ref_key) DO UPDATE SET payload_json=excluded.payload_json').run(batchId,sha256(canonicalJson(ref)),canonicalJson(ref))}
  if(q.action==='topics'){
   const rows=db.prepare("SELECT seq,payload_json FROM processing_topics WHERE prefix=? AND provider=? AND seq>? AND (?='' OR instr(lower(json_extract(payload_json,'$.title')||' '||json_extract(payload_json,'$.summary')),lower(?))>0) ORDER BY seq LIMIT ?").all(prefix,provider,q.after,q.query,q.query,q.limit+1)
   const page=rows.slice(0,q.limit)
-  return {items:page.flatMap(row=>{const topic=processingTopicSchema.parse(JSON.parse(String(row.payload_json)));return readRefs(db,prefix,consumer,topic.refs,recipe)?[{id:Number(row.seq),...topic}]:[]}),next:rows.length>q.limit?Number(page.at(-1)!.seq):null}
+  return {items:page.flatMap(row=>{const topic=processingTopicSchema.parse(JSON.parse(String(row.payload_json)));if(!readRefs(db,prefix,consumer,topic.refs,recipe))return [];if(q.batch_id)track(q.batch_id,topic.refs);return [{id:Number(row.seq),...topic}]}),next:rows.length>q.limit?Number(page.at(-1)!.seq):null}
  }
  if(q.action==='profile'){
   const saved=db.prepare('SELECT revision,payload_json FROM processing_profiles WHERE prefix=? AND provider=?').get(prefix,provider)
@@ -186,6 +189,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
    const refs=content.refs.filter(item=>item.evidence_id===ref.entry_id)
    return refs.length>0&&readRefs(db,prefix,consumer,refs,recipe)!==null
   })
+  if(q.batch_id)track(q.batch_id,content.refs.filter(ref=>readRefs(db,prefix,consumer,[ref],recipe)!==null))
   const draft={...content.draft,about:content.draft.about&&valid(content.draft.about)?content.draft.about:null,work:content.draft.work.filter(valid),interests:content.draft.interests.filter(valid)}
   return {revision:Number(saved.revision),draft:draft.about||draft.work.length||draft.interests.length?draft:null}
  }
@@ -194,9 +198,10 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
  const batch=batchSchema.parse(JSON.parse(String(row.payload_json)))
  const read=(refs:ProcessingRef[])=>{
   const result=readRefs(db,prefix,consumer,refs,recipe)
-  if(result)for(const ref of refs)db.prepare('INSERT OR IGNORE INTO processing_reads VALUES(?,?)').run(batch.id,sha256(canonicalJson(ref)))
+  if(result)track(batch.id,refs)
   return result
  }
+ if(q.action==='batch'){const reads=db.prepare('SELECT payload_json FROM processing_reads WHERE batch_id=?').all(batch.id);return {batch,valid:readRefs(db,prefix,consumer,batch.items,recipe)!==null&&reads.every(row=>row.payload_json&&readRefs(db,prefix,consumer,[processingRefSchema.parse(JSON.parse(String(row.payload_json)))],recipe)!==null)}}
  if(q.action==='read')return ['claimed','bound'].includes(batch.status)?read(batch.items):null
  if(q.action==='bind'){
   if(batch.task_id===q.task_id&&batch.run_id===q.run_id)return batch

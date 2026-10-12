@@ -820,3 +820,9 @@ test('cascaded English translates conversation and narration prompts but preserv
   assert.match(requests[1]!.messages[1]!.content, /任务已完成/)
   await llm.close()
 })
+
+test('scheduled host task uses a marked provider activation without becoming user authority or narration',async()=>{
+ let body:{messages:{role:string;content:string}[]}|undefined
+ const session=createQwenCascadedLlmFactory({baseUrl:'https://example.test',apiKey:'synthetic',model:'test',instructions:'scheduled',fetchImpl:(_url,init)=>{assert.equal(typeof init?.body,'string');body=JSON.parse(init?.body as string) as typeof body;return Promise.resolve(new Response('data: {"id":"r","choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}}))}}).open()
+ try{await collect(session.stream({inputs:[{kind:'host_task',content:'{"run_id":"real-run","goal":"read authorized batch"}'}],tools:[],signal:new AbortController().signal}));const activation=body!.messages.find(message=>message.role==='user')!;assert.match(activation.content,/host_scheduled_task/u);assert.match(activation.content,/real-run/u);assert.doesNotMatch(activation.content,/text_to_say/u)}finally{await session.close()}
+})

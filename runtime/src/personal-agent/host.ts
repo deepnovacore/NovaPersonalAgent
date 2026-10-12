@@ -1,3 +1,4 @@
+import {SourceProcessingAgent} from './source-processing-agent.js';
 import {TaskLoop,TaskExecutionRejected,type TaskDecision} from './task-loop.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
 import {acceptanceEnabled,acceptanceNewsEnabled,acceptanceProfileGenerationEnabled,appendAcceptanceCounts,assertPersistedAcceptanceGrant} from '../desktop/workbench-acceptance.js'
@@ -153,6 +154,7 @@ export class PersonalAgentHost {
     }
     async publishScheduledResult(runId:string):Promise<void>{
         let run=this.schedules.getRun(runId)
+        if(run.processing){await this.sourceProcessingAgent.finished(run);return}
         if(run.terminal_summary?.published)return
         // The main-message/feed commit is the delivery receipt even if its ledger acknowledgement was interrupted.
         if(run.terminal_summary&&this.#state.feed.some(item=>item.id==='scheduled-result:'+runId)){await this.schedules.markPublished(runId);return}
@@ -230,6 +232,9 @@ export class PersonalAgentHost {
         const result=await this.life.mutate({op:'create',kind:parsed.kind,title:parsed.title,note:parsed.note,...(parsed.goal_id?{goal_id:parsed.goal_id}:{})},lifeRequest)
         return this.schedules.finishAdoption(receipt.key,result)
     }
+    readonly sourceProcessingAgent=new SourceProcessingAgent(this);
+    sourceProcessingNow():number{return this.#now().getTime()}
+    sourceProcessingForegroundBusy():boolean{return this.#state.conversations.items.some(c=>c.kind!=='schedule'&&(this.#conversationPool?.hasVoice(c.id)===true||this.#conversationPool?.canChangeTarget(c.id)===false))}
     #scheduledTimer:NodeJS.Timeout|undefined;
     #scheduledTail:Promise<unknown>=Promise.resolve();
     scheduledRunGrant(runId:string,lifetime:AbortSignal,consumer:string|null=null):ScheduledRunGrant{
@@ -241,6 +246,7 @@ export class PersonalAgentHost {
             let task=this.tasks.findByRun(run.run_id)
             task??=await this.tasks.delegate('scheduled:'+run.run_id,{...run.input,execution_route:'nova'})
             if(run.task_id!==task.id)await this.schedules.bindTask(run.run_id,task.id)
+            await this.sourceProcessingAgent.bind(run,task)
         }
         await this.#syncScheduleConversations();
     }
@@ -268,11 +274,12 @@ export class PersonalAgentHost {
     scheduledTaskTick():Promise<void>{
         const operation=this.#scheduledTail.then(async()=>{
             if(!this.#opened||this.#recovering)return
-            await this.schedules.claimDue();await this.#reconcileScheduledRuns()
+            await this.sourceProcessingAgent.tick();await this.schedules.claimDue();await this.#reconcileScheduledRuns()
             for(const run of this.schedules.activeRuns()){
                 const task=run.task_id?this.tasks.get(run.task_id):null
                 if(task&&(task.phase==='completed'||task.phase==='cancelled')&&!task.pending_delivery&&!this.tasks.hasUnresolvedExecution(task.id)){
                     if(task.phase==='completed'){try{await this.publishScheduledResult(run.run_id)}catch{/* this run retries without blocking unrelated work or startup */}try{await this.#conversationPool?.clear(task.conversation_id)}catch{/* completed execution must not block another run */}continue}
+                    if(run.processing){await this.sourceProcessingAgent.finished(run);await this.#conversationPool?.clear(task.conversation_id);continue}
                     const text=this.tasks.evidence(task.id).filter(item=>item.kind==='delivery').at(-1)?.content??task.waiting_reason??''
                     await this.#conversationPool?.clear(task.conversation_id)
                     await this.schedules.markFinished(run.run_id,{outcome:task.phase,text:text.slice(0,16000),evidence_refs:task.evidence_refs.slice(0,128),published:false})
@@ -287,7 +294,7 @@ export class PersonalAgentHost {
                     await this.tasks.cancel('schedule-missed:'+run.run_id,{task_id:task.id,goal_revision:task.goal_revision,control_revision:task.control_revision},{kind:'nova'})
                     await this.schedules.markFinished(run.run_id,{outcome:'missed',text:'Runtime capacity was unavailable within the catchup window',evidence_refs:[],published:true});continue
                 }
-                if(prepared>=2)continue
+                if(prepared>=2||run.processing&&this.sourceProcessingForegroundBusy())continue
                 try{await this.prepareScheduledRun(run.run_id);prepared++;void this.wakeTask(run.task_id)}catch(error){this.#recoveryBlocked.add(run.task_id);await this.tasks.recoveryWait(run.task_id,error instanceof Error&&error.message.startsWith('task_')?error.message:'task_runtime_unavailable')}
             }
             await this.#syncScheduleConversations()
@@ -913,6 +920,7 @@ export class PersonalAgentHost {
         if(this.#opened)this.#updateContext(this.#sources?.contextEntries?.()??[]);
         this.#notify();
         if(change){const q=z.object({revision:z.number().int().positive(),phase:z.enum(['invalidated','ready'])}).strict().parse(change);if(q.phase==='invalidated')this.#sourcePending.invalidated=Math.max(this.#sourcePending.invalidated,q.revision);else if(!this.#sourceSeen.ready.has(q.revision))this.#sourcePending.ready.add(q.revision)}else this.#sourcePending.legacy=true;
+        void this.scheduledTaskTick().catch(()=>{/* periodic scheduler retries durable changes */});
         return this.#drainSources();
     }
     #drainSources():Promise<void>{

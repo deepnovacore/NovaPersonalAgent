@@ -8,7 +8,7 @@
 
 每次最多扫描 200 个变化记录，模型批次最多 8 块、16000 个 UTF-16 字符，每块最多 4000 字符。超过一页的无权限记录可以返回 null 但 pending_changes 仍非零；调度方下一次继续检查，不能把 null 当成全库处理完成。每批完成后才推进成功断点；无效或已处理记录可在无模型调用时推进扫描位置。processed_chars 是累计处理量，pending_changes 是变化记录数，均不冒称唯一文档覆盖率。
 
-缓存键包含模型处理指纹、host recipe、内置算法版本、原文/元数据、来源版本和授权状态。接入时 sourceProcessingRecipe 必须包含实际 Agent 任务提示词及画像处理算法版本的稳定 hash；修改提示词不能继续使用旧 recipe。recipe 或模型切换时不覆盖旧的未决运行，status 暴露旧批次和 reconciliation_required。
+缓存键包含模型处理指纹、host recipe、内置算法版本、原文/元数据、来源版本和授权状态。resource 自动将实际 Agent 任务目标、系统指令和画像处理算法版本纳入稳定 hash；sourceProcessingRecipe 可追加部署级版本，修改提示词会切换 recipe。recipe 或模型切换时不覆盖旧的未决运行，status 暴露旧批次和 reconciliation_required。
 
 ## Host API
 
@@ -30,26 +30,28 @@
 
 来源删除会在同一事务删除相关主题正文，裁剪相关 Profile 条目并保留无关条目；混合主题的仍有效输入重新排队。永久 purge 使用同一触发器清除派生正文，再沿用现有压缩流程。旧消息没有 head 时采用已有 profile_evidence 的 rowid 回退规则；A→B→A 的新激活也不会复活旧摘要。
 
-## 尚未完成的 Scheduler 整合
+## 已接入的 Scheduler 与 Agent 生命周期
 
-只读核查的 ScheduleService 当前 authority 是 ui/user_turn，trigger 是 scheduled/manual，日历规则是 once/daily/weekly。缺少默认注册 built-in authority、资料变化合并唤醒、固定周期维护与无变化 preflight。这里没有拷贝对方未完成代码、伪造用户来源、另造计时器或自动启用第二个 Profile 生成器。
+使用已提交的 ScheduleService / TaskService / conversationRuntimeFactory。默认注册 host-only built-in“资料增量整理”，不伪造 ui/user_turn authority。来源变更回调立即唤醒现有 scheduledTaskTick；同一个 60 秒调度 timer 提供兜底，没有新增资料处理 timer。claim 前检查前台忙碌、未终态运行及持久退避，无资料变化不创建 Task、不调用模型。内置维护不向主聊天或 feed 发布每轮状态。
 
-整合方应在同一个调度系统中增加 source-maintenance built-in：默认注册启用，只有来源范围和模型处理配置有效时工作。资料变化先落盘再唤醒；周期兜底先做 preflight。claim 产生批次后，用 batch.id 作为稳定幂等键冻结 ScheduleRun，复用 TaskService 的真实后台 runtime；先反查旧 run/task，再创建和 bind。重启时先核对 batch/run/task 三者关系，再恢复原 namespace；未决任务不重新派发。
+批次 ID 和 recipe 冻结进入运行目标与 definition hash。先持久 ScheduleRun、创建真实 Task，再绑定批次；恢复时反查同一 run，沿用同一运行 namespace。未知执行或未交付结果仍交共享恢复逻辑处理，不能凭超时重新派发。已确认失败记录终态，保留成功断点和好草稿，1 分钟起指数退避、最多 1 小时。旧 recipe 绑定与完成后撤权有专门恢复测试。
 
-Agent 负责读取索引、选择原文、判断归属和写作，Scheduler 只决定执行时机。每轮一个有限预算批次；前台优先、全局后台并发、超时、失败退避及任务终止核验复用共享 Task 调度层。语义失败不能通过 fail 立即无限循环重试。无变化不调用模型，不为每条消息建 Task，不在每轮发送状态消息。
+只在 built-in runtime 中注册 source__process。Agent 自行读取本批原文、检索主题、选择历史原文、决定是否 compose，最后提交 topics。最多 24 个工具调用、一轮 compose；拒绝第 25 个新调用时停止续轮，但第 24 个已接受结果仍可交付。每次原文读取仍为 8 块 / 16000 字符。compose 调用与 extraction 相同端点和模型的 GatewayPersonalWriter，复用父任务“自然成文→最终原文复核”流程；来源到 ProfileInput 的作者、本人身份、thread 和回复映射与普通 profileSources 共用。只有经本批原文读取、当前授权与版本检查、CAS 的草稿可发布。
 
-正式 UI 状态、默认任务启用、真实后台 Task 触发、Task 重启恢复和 Profile 正式替换尚未接通。因此本分支不能被标为完整内置任务交付。
+所有模型轮次重新核查已读取的批次、历史原文、主题及旧画像来源；撤权后不能带着旧 provider 上下文继续。任务完成由持久批次回执及真实 Task evidence 判定，不依赖另一个模型声称成功。画像仍存为可审核的 processing_profiles 草稿，不改写已接受的正式 Profile。
+
+Qwen 的流式接口要求至少一条 user 角色 wire message。后台使用明确标记 host_scheduled_task 的宿主激活 envelope 满足传输协议；内部仍是 host_task，不创建用户聊天记录，不生成用户授权 receipt。普通聊天、播报和任务来源仍分开验证。
 
 ## 验收及限制
 
-确定性测试包含长文尾部、多批资料、增量追加、无变化、重启、绑定去重、伪造 refs、撤销/重授、消息 A→B→A、旧库版本、recipe 切换恢复、CAS 发布、永久 purge 字节检查、删除后保留无关内容，以及真实 worker 的身份隔离。Runtime 构建通过，专项测试 13/13、相关回归合计 179/179 通过；新增模块和专项测试 ESLint 通过。
+持久化专项覆盖长文、多批、增量、空闲、重启、去重、授权变化、旧消息版本、recipe 切换、CAS、删除/purge、历史原文撤权。新增 Scheduler 集成覆盖默认注册、真实 Task/Run 工具循环、静默完成、重启不重复、持久预算/退避、换配置恢复、完成后撤权与作者归属。最终构建、变更 TypeScript lint 与 215 项相关测试通过，日志随交付保存；完整仓库测试未作通过声明。
 
-隔离 live 使用真实 DashScope qwen3-vl-plus，仅提交脚本内的合成本人消息。2 个批次、8 次真实模型请求完成主题索引、原文回查及独立草稿发布；重启空闲与撤销检查通过，原 Profile 和飞书配置哈希未变。第一次沙箱网络请求报 TransportError，经批准的网络执行后通过。
+真实后台合成验收脚本为 runtime/scripts/live/source-processing-background.mjs，使用真实 SQLite worker、Host、ScheduleService、TaskLoop、conversationRuntimeFactory 和 DashScope qwen3-vl-plus。它检查来源事件触发、重启空闲、现有 60 秒 timer 触发增量以及下一次空闲 tick 无模型请求，输出真实 task/run IDs。脚本已得到 status=passed：来源事件与真实定时器各完成一个批次，重启不重做，后续空闲 tick 零模型调用，原本机文件校验值不变。报告分别记录草稿发布与调度完成；通过的是合成资料后台生命周期，不等于画像语义或真实业务资料验收通过。此前 substrate-only live 的 fixture IDs 不能替代这项验收。
 
-此 live 的 task/run ID 是明确标注的 fixture，不是实际 ScheduleService/TaskLoop 运行。真实后台触发未验收。首次生成正文夹带内部引用别名；最终复跑虽没有这些别名，仍将未直接支持的“团队或助手产出”扩写进个人描述，因此画像语义与文风未通过验收；沿用父任务待交付的写作改进，不以字符串规则硬删来冒充文风修复。
+父画像增量补丁已合入：允许有依据的主题归纳与适度扩写，最后一步仍核对具体人物、名称、归属及计划/完成状态；不能把独立的父画像验收或文风评价冒称为此后台验收结果。
 
-公开仓库只保存合成 live harness；数据库、模型输出、日志和恢复资料保存在工作区外。没有提交真实飞书消息、邮件正文、文件正文或模型凭据。未推送、未部署。
+公开仓库仅保存合成 harness。真实消息、数据库、模型输出、日志及恢复资料在工作区外；本任务不推送、不部署，原本机 Profile/飞书配置只读校验。
 
 ## 合并顺序
 
-父任务冻结状态单独保存为 `9fe112e6`。后续增量提交只包含 source_processing 实现、resource 接口、测试、合成 live harness、设计与本接入说明，并恢复初始化 checkout 自带的飞书状态回归测试。父任务已有同等冻结改动时不要重复合并基线提交；在处理父任务之后的小修订冲突后，只合入后续增量提交。
+父任务冻结状态单独保存为 `9fe112e6`。后续独立提交包含 source_processing、选择性 Scheduler 后端依赖、父画像 delta 和 built-in 集成；未导入桌面/Flutter 的 Scheduler 管理 UI 提交。并保留初始化 checkout 自带的飞书状态回归测试。父任务已有同等冻结改动时不要重复合并基线提交；在处理父任务之后的小修订冲突后，只合入后续增量提交。

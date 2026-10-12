@@ -11,9 +11,9 @@ import type {ScheduledRunGrant} from './scheduled-run-authority.js'
 import type {ScheduledResponseScope} from './scheduled-response-scope.js'
 const recallSchema=z.object({query:z.string().trim().min(1).max(512),scope:z.enum(['recent','any']),source:z.literal('personal').optional()}).strict()
 const evidenceSchema=z.object({evidence_id:z.string().min(1).max(512)}).strict()
-export function scheduledToolResult(call:ToolCallReady,data:unknown,code='ok',accepted=true):ToolAcceptance{
+export function scheduledToolResult(call:ToolCallReady,data:unknown,code='ok',accepted=true,maxBytes=32768):ToolAcceptance{
  const content=JSON.stringify(data)
- if(Buffer.byteLength(content)>32768)throw Error('context_capacity')
+ if(Buffer.byteLength(content)>maxBytes)throw Error('context_capacity')
  const item={kind:'tool_output' as const,context_read:true as const,host_item_id:randomUUID(),event_id:randomUUID(),call_id:call.call_id,content}
  return {accepted,code,host_item:item,response_intent:{kind:'tool_result',item,task_summary:null,origin_spoken:false},delegate_id:null,sync_result:false,executor:null,op:null,inline_fulfilled:accepted,telemetry:null}
 }
@@ -21,7 +21,7 @@ export class ScheduledToolRuntime{
  constructor(readonly options:{host:PersonalAgentHost;grant:ScheduledRunGrant;scope:ScheduledResponseScope;tools:CompiledTools;retrieval:UnifiedRetrieval;session:()=>Pick<RealtimeSession,'sessionEpoch'|'activeProviderResponseId'|'providerTurnPhase'|'providerTurnWasFenced'>;readonlyOperation:(executor:string,op:string)=>boolean;dispatch:(binding:ToolBinding,args:Readonly<Record<string,JsonValue>>)=>Promise<{accepted:boolean;delegate_id:string|null}>}){}
  async validateContext():Promise<boolean>{
   const {host,grant}=this.options
-  try{host.scheduledAuthority.assert(grant,grant.fence);if(await host.appContext.validateTask(grant.task_id,grant.consumer))return true}catch{/* stale authority is never usable */}
+  try{host.scheduledAuthority.assert(grant,grant.fence);if(host.schedules.getRun(grant.run_id).processing){if(!host.schedules.getRun(grant.run_id).processing!.exhausted&&await host.sourceProcessingAgent.validate(grant))return true;throw Error('processing_context_unavailable')}if(await host.appContext.validateTask(grant.task_id,grant.consumer))return true}catch{/* stale authority is never usable */}
   try{const task=host.tasks.get(grant.task_id);if(task.pending_delivery)await host.tasks.finishDelivery(task.id,task.pending_delivery);await host.tasks.wait(grant.fence,'context_authorization_changed')}catch{/* a newer owner or terminal state wins */}
   return false
  }
@@ -31,7 +31,8 @@ export class ScheduledToolRuntime{
    if(!responseId)throw Error('scheduled_response_unbound')
    scope.acceptCall(call.session_epoch,responseId,call.call_id,call.session_epoch===session.sessionEpoch&&session.activeProviderResponseId===responseId&&session.providerTurnPhase(responseId)==='active'&&!session.providerTurnWasFenced(responseId))
    if(!await this.validateContext())throw Error('context_authorization_changed')
-   const context=host.schedules.getRun(grant.run_id).definition.context,binding=tools.bindings.get(call.name)
+   const run=host.schedules.getRun(grant.run_id),context=run.definition.context,binding=tools.bindings.get(call.name)
+   if(run.processing){if(call.name!=='source__process')throw Error('scheduled_tool_readonly');return scheduledToolResult(call,await host.sourceProcessingAgent.call(grant,call.call_id,call.arguments),'ok',true,131072)}
    if(call.name==='app__context'){
     const args=appContextArguments.parse(call.arguments)
     return scheduledToolResult(call,await host.readAppContext(args.section,args.cursor,grant))

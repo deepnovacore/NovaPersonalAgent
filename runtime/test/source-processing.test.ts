@@ -1,3 +1,4 @@
+import type {ModelGateway} from '../src/model/model-gateway.js'
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {DatabaseSync} from 'node:sqlite'
@@ -215,4 +216,34 @@ test('resource port fixes identity and provider on the host and uses the real wo
   await assert.rejects(memory.sourceProcessing(Object.assign({action:'status' as const},{prefix:'personal:other:',provider:'other'})))
   assert.equal(modelCalls,0)
  }finally{await memory.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('batch context revalidation includes prior originals read through topic search',()=>{
+ const {db,process,add,commit,bind}=setup()
+ try{
+  add('old');const prior=process({action:'claim'})!;commit(prior)
+  add('current');const current=process({action:'claim'})!;bind(current)
+  process({action:'topics',batch_id:current.id})
+  assert.equal((process({action:'batch',batch_id:current.id}) as {valid:boolean}).valid,true)
+  memoryOperation(db,'source_grant',{source_id:prefix+'source:old',expected_revision:1,grant:{revision:2,scope_revision:0,extraction_provider:null,embedding_provider:null,conversation_providers:[]}})
+  assert.equal((process({action:'batch',batch_id:current.id}) as {valid:boolean}).valid,false)
+ }finally{db.close()}
+})
+
+test('profile writer retries revalidate authorization before sending original text again',async()=>{
+ let allowed=true,calls=0
+ const gateway={complete:()=>{calls++;allowed=false;return Promise.resolve({text:'invalid-json'})},stream(){throw Error('unused')}} as unknown as ModelGateway
+ const resource=new SubstrateMemoryResource({client:{} as MemoryLedgerClient,userId:'test',gateway,model:'qwen3-vl-plus'})
+ await assert.rejects(resource.sourceProcessingProfile([{id:'personal:test:e',version:'v',origin:'inferred',content:'synthetic original',source:{project:'synthetic',document:'self',kind:'im',relation:'self',sender_id:'self'}}],new AbortController().signal,()=>allowed?Promise.resolve():Promise.reject(Error('revoked'))),/revoked/)
+ assert.equal(calls,1)
+})
+
+ test('incremental topic commits reject historical refs and preserve earlier topics',()=>{
+ const {db,process,add,commit,bind}=setup()
+ try{
+  add('prior');const prior=process({action:'claim'})!;commit(prior)
+  add('next');const next=process({action:'claim'})!;bind(next)
+  assert.throws(()=>process({action:'commit',batch_id:next.id,task_id:'task:'+next.id,run_id:'run:'+next.id,topics:[{title:'mixed',summary:'mixed',refs:[...prior.items,...next.items]}]}),/STORE_INVALID_OPERATION/)
+  commit(next);assert.equal(process({action:'topics'}).items.length,2)
+ }finally{db.close()}
 })

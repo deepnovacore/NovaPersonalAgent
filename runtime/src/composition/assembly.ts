@@ -73,6 +73,7 @@ export class AssemblyError extends Error {
 export interface AssemblyOptions {
   readonly taskHost?: boolean
   readonly includeSchedules?: boolean
+  readonly sourceProcessingContext?: boolean
   readonly scheduledContext?: boolean
   /** Borrow deployment resources; this scoped core closes only its own state. */
   readonly sharedResources?: boolean
@@ -306,7 +307,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       || !descriptor.ownedChannels.some(channel => (options.executors ?? []).some(adapter => adapter.manifest.name === channel && adapter.manifest.roles.includes('coding')))),
     ...(cameraModuleEnabled ? [VISION_AGENT_DESCRIPTOR] : []),
   ]
-  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true})
+  const tools = compileToolSchema(manifests.filter(manifest => manifest.name !== 'mcp__nova_knowledge'), {includeMemoryRecall: true, agentDescriptors, includeTasks: options.taskHost === true, includeSchedules:options.includeSchedules===true, includeAppContext:options.scheduledContext===true,includeSourceProcessing:options.sourceProcessingContext===true})
 
   const proactive = new GatewayProactivity({
     gateway,

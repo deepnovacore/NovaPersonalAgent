@@ -18,6 +18,7 @@ export class ScheduledRunAuthority{
   if(scheduleHash(fence)!==scheduleHash(grant.fence))throw Error('invalid_scheduled_fence')
   this.tasks.assertExecutionAllowed(grant.task_id,{kind:'nova'})
  }
+ signal(grant:ScheduledRunGrant):AbortSignal{this.validate(grant);return this.#grants.get(grant)!.lifetime}
  validate(grant:ScheduledRunGrant):void{
   const registered=this.#grants.get(grant);if(!registered)throw Error('invalid_scheduled_grant')
   if(registered.lifetime.aborted)throw Error('scheduled_run_closed')

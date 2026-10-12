@@ -1,3 +1,4 @@
+import {SOURCE_PROCESSING_INSTRUCTIONS} from './core/source-processing-instructions.js'
 import {cascadedProviderRegistries,type CascadedProviderRegistries} from './composition/cascaded-realtime-assembly.js'
 import {requireSelectedCascadedLlmConfig} from './config/cascaded-realtime-config.js'
 import {capabilitiesFromSettings,type Settings} from './config/config.js'
@@ -17,15 +18,16 @@ export function buildCascadedTextProvider(options:{
   readonly history?:readonly CommittedConversationPair[]
   readonly executorApproval?:boolean
   readonly schedules?:boolean
+  readonly sourceProcessingTask?:boolean
   readonly scheduledTask?:boolean
 }&Pick<CascadedRealtimeAdapterOptions,'prerecall'|'captureFrame'|'telemetry'>,registry:CascadedProviderRegistries=cascadedProviderRegistries):RealtimeProvider {
   const selected=requireSelectedCascadedLlmConfig(options.settings)
   const capabilities=capabilitiesFromSettings(options.settings)
-  const input={config:selected.config,clock:options.clock,ids:{next:options.idFactory},instructions:options.scheduledTask?scheduledTaskInstructions(options.settings.language):frontendInstructions({
+  const input={config:selected.config,clock:options.clock,ids:{next:options.idFactory},instructions:options.sourceProcessingTask?SOURCE_PROCESSING_INSTRUCTIONS:options.scheduledTask?scheduledTaskInstructions(options.settings.language):frontendInstructions({
     schedules:options.schedules===true,search:capabilities.modules.search.enabled,camera:options.captureFrame!==undefined,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled,
   },options.executorApproval===true),...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!})}
   const factory=registry.llm[selected.provider === 'ark' ? 'ark' : 'qwen'](input)
-  return new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,llm:factory.open(),llmFactory:factory,idFactory:options.idFactory,...(options.prerecall===undefined?{}:{prerecall:options.prerecall}),...(options.captureFrame===undefined?{}:{captureFrame:options.captureFrame}),...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),...(options.history===undefined?{}:{history:options.history})})
+  return new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,scheduledTask:options.scheduledTask===true,llm:factory.open(),llmFactory:factory,idFactory:options.idFactory,...(options.prerecall===undefined?{}:{prerecall:options.prerecall}),...(options.captureFrame===undefined?{}:{captureFrame:options.captureFrame}),...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),...(options.history===undefined?{}:{history:options.history})})
 }
 
 function scheduledTaskInstructions(language:'zh-CN'|'en'):string {
