@@ -6,7 +6,7 @@ import {homedir} from 'node:os'
 import {createHash} from 'node:crypto'
 import {MemoryLedgerClient} from '../../dist/src/memory-ledger/store-client.js'
 import {OpenAIModelGateway} from '../../dist/src/model/model-gateway.js'
-import {GatewayPersonalWriter} from '../../dist/src/model/personal-writer.js'
+import {SubstrateMemoryResource} from '../../dist/src/memory-substrate/resource.js'
 import {PersonalAgentHost} from '../../dist/src/personal-agent/host.js'
 import {conversationRuntimeFactory} from '../../dist/src/personal-agent/conversation-runtime.js'
 import {buildCascadedTextProvider} from '../../dist/src/cascaded-text-provider.js'
@@ -22,21 +22,22 @@ globalThis.fetch=async(...args)=>{const response=await originalFetch(...args);if
 const originalPaths=['blackboard.sqlite.personal.json.profile-draft.json','blackboard.sqlite.personal.json.feishu/state.json'].map(p=>join(homedir(),'.nova-audio-agent',p))
 const digest=async p=>createHash('sha256').update(await readFile(p).catch(()=>Buffer.from('absent'))).digest('hex'),before=await Promise.all(originalPaths.map(digest))
 const settings=settingsSchema.parse({executors:[],camera_module_enabled:false,pipeline_mode:'cascaded',cascade_llm_provider:'qwen',cascade_llm_model:model,dashscope_api_key:apiKey,model_base_url:baseUrl,fast_model:model,support_model:model})
-const consumer=createHash('sha256').update(baseUrl+'|'+model).digest('hex'),prefix='personal:synthetic-background:',source_id=prefix+'messages'
-let host,client,modelCalls=0,writerCalls=0
+const consumer=createHash('sha256').update(baseUrl+'|'+model).digest('hex'),prefix='personal:'+createHash('sha256').update('synthetic-background').digest('hex')+':',source_id=prefix+'messages'
+let host,client,resource,modelCalls=0,writerCalls=0
 const gateway=new OpenAIModelGateway({baseUrl,apiKey,clock:new RealClock(),requestTimeout:120,redirect:'error',metrics:{record(){}}}),complete=gateway.complete.bind(gateway)
 gateway.complete=async request=>{writerCalls++;console.log('PROFILE_CALL',writerCalls);return complete(request)}
-const report={synthetic:true,real_agent_task:true,real_background_trigger:true,model,endpoint:baseUrl,trigger_modes:['source_change','existing_scheduler_timer'],source:'Only synthetic self-authored messages; isolated host/factory/SQLite runtime',runs:[],checks:[],profile_publications:[],semantic_acceptance:'not_evaluated_by_harness'}
+const report={synthetic:true,real_agent_task:true,real_background_trigger:true,model,endpoint:baseUrl,trigger_modes:['source_change','existing_scheduler_timer'],source:'Only synthetic self-authored messages; isolated host/factory/resource/SQLite runtime',runs:[],checks:[],profile_publications:[],semantic_acceptance:'not_evaluated_by_harness'}
 const save=async()=>writeFile(join(directory,'report.json'),JSON.stringify({...report,model_calls:modelCalls,writer_calls:writerCalls},null,2),{mode:0o600})
-const op=async request=>{try{const result=await client.memory('source_processing',{prefix,provider:consumer,...request});if(request.action==='publish')report.profile_publications.push({run_id:request.run_id,applied:result.applied,revision:result.revision});return result}catch(error){if(request.action==='publish')report.profile_publications.push({run_id:request.run_id,applied:false,error:error.message});await appendFile(join(directory,'operation-errors.jsonl'),JSON.stringify({request,error:error.message})+'\n',{mode:0o600});throw error}}
+const op=async request=>{try{const result=await resource.sourceProcessing(request);if(request.action==='publish')report.profile_publications.push({run_id:request.run_id,applied:result.applied,revision:result.revision});return result}catch(error){if(request.action==='publish')report.profile_publications.push({run_id:request.run_id,applied:false,error:error.message});await appendFile(join(directory,'operation-errors.jsonl'),JSON.stringify({request,error:error.message})+'\n',{mode:0o600});throw error}}
 const start=async()=>{
  client=new MemoryLedgerClient(join(directory,'ledger.sqlite'));await client.open()
- const memory={sourceProcessing:op,sourceProcessingConsumer:()=>consumer,sourceProcessingLlm:()=>({baseUrl,apiKey,model}),sourceProcessingProfile:(entries,signal,authorize)=>new GatewayPersonalWriter({model,gateway:{stream:gateway.stream.bind(gateway),complete:async request=>{await authorize();const result=await gateway.complete(request);await authorize();return result}}}).generateProfile(entries,signal)}
+ resource=new SubstrateMemoryResource({client,userId:'synthetic-background',gateway,model,extractionFingerprint:consumer,sourceProcessingLlm:{baseUrl,apiKey},personalMemoryEnabled:false,closeClient:false});await resource.open();assert.equal(resource.prefix,prefix)
+ const memory={sourceProcessing:op,sourceProcessingConsumer:resource.sourceProcessingConsumer.bind(resource),sourceProcessingLlm:resource.sourceProcessingLlm.bind(resource),sourceProcessingProfile:resource.sourceProcessingProfile.bind(resource)}
  host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'synthetic-background',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>memory,gateway,settings,blackboard:{path:join(directory,'blackboard.sqlite'),ownerId:'synthetic'},searchTransport:{search:async()=>{throw Error('unexpected_search')}},createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:input=>{const factory=cascadedProviderRegistries.llm.qwen(input);return {open:(...args)=>{const port=factory.open(...args),stream=port.stream.bind(port);port.stream=async function*(request){modelCalls++;console.log('AGENT_CALL',modelCalls);try{yield* stream(request)}catch(error){console.log('STREAM_FAILURE',error.code,error.message);throw error}};return port}}}}})}),()=>{})
  await host.open()
 }
-const stop=async()=>{await host?.close();await client?.close()}
+const stop=async()=>{await host?.close();await resource?.close();await client?.close()}
 const wait=async(predicate,label,ms=240000)=>{const end=Date.now()+ms;let next=0;while(Date.now()<end){const result=await predicate();if(result)return result;if(host.tasks.list().some(task=>task.phase==='cancelled'||task.phase==='waiting'&&task.waiting_reason==='delivery_interrupted'))throw Error('task_failed:'+host.tasks.list().filter(task=>task.phase==='cancelled'||task.waiting_reason==='delivery_interrupted').map(task=>task.waiting_reason??task.phase).join(','));if(Date.now()>next){console.log('WAIT',label);next=Date.now()+20000;await writeFile(join(directory,'progress.json'),JSON.stringify({runs:host.schedules.activeRuns(),tasks:host.tasks.list()},null,2),{mode:0o600})}await new Promise(r=>setTimeout(r,500))}throw Error('timeout_'+label)}
 const add=async(n,text)=>{const at=new Date().toISOString();await client.memory('append_evidence',{id:prefix+'e:'+n,source_id,source_kind:'im',locator:'synthetic:'+n,raw_text:text,hash:'v'+n,observed_at:at,recorded_at:at,trust:'untrusted_external',source_metadata:{sender_id:'self',recipient_id:'self',account_id:'synthetic',message_id:String(n),chat_id:'synthetic'}})}
 try{
