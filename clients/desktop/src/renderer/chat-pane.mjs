@@ -53,14 +53,13 @@ function glyph(path){const svg=document.createElementNS(SVG_NS,'svg');svg.setAtt
 
 export const conversationTitle=item=>item?.id==='chat:main'?t('主对话'):item?.kind==='proactive'?'主动提醒':item?.title??'对话'
 
-/** The right-hand Nova pane: conversation switcher, transcript, three-state composer. */
+/** The persistent Nova pane: conversation switcher, transcript, three-state composer. */
 export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpenChange=()=>{},onHome=()=>{},speakingLevel=null}){
  const pane=el('aside',undefined,'chat-pane');pane.id='chat-pane';pane.setAttribute('aria-label','Nova 对话');columns.append(pane)
  const head=el('header',undefined,'chat-head');pane.append(head)
  const homeButton=button('✦ Nova',onHome,head);homeButton.className='chat-brand';homeButton.title=t('返回主对话')
  const switcher=el('details',undefined,'conversation-switcher');const summary=el('summary');summary.setAttribute('aria-label','切换会话');const summaryTitle=el('span','对话','switcher-title');const unreadBadge=el('span','','unread-badge');unreadBadge.hidden=true;summary.append(summaryTitle,unreadBadge);switcher.append(summary)
  const conversationList=el('nav');conversationList.setAttribute('aria-label','会话列表');switcher.append(conversationList);head.append(switcher)
- const closeButton=button('收起对话栏',()=>setOpen(false),head);closeButton.className='chat-close';closeButton.setAttribute('aria-label','收起对话栏');closeButton.setAttribute('aria-controls',pane.id)
  const voiceLine=el('div',undefined,'chat-voice');const voiceStatus=el('span','','conversation-voice-status');voiceLine.append(voiceStatus);const resumeVoice=button('恢复语音',()=>c.resumeVoice(),voiceLine);resumeVoice.hidden=true;const endVoice=button('结束语音',()=>c.stopVoice(),voiceLine);endVoice.hidden=true;pane.append(voiceLine)
  const intro=el('div',undefined,'chat-intro');intro.append(el('h1','有什么需要帮忙？'),el('p',t('你的安排、想法和新发现，都可以从这里接着聊。'),'hint'))
  const history=el('div',undefined,'chat-history');history.setAttribute('role','log');history.append(intro);pane.append(history)
