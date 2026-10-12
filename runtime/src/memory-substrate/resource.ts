@@ -112,7 +112,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   async sourceProcessing(request:ProcessingRequest):Promise<unknown>{
     this.#ready()
     const parsed=processingRequestSchema.parse(request)
-    return this.options.client.memory('source_processing',{...parsed,prefix:this.prefix,provider:this.#extractionFingerprint(),recipe:digest(JSON.stringify({recipe:this.options.sourceProcessingRecipe??SOURCE_PROCESSING_VERSION,agent:SOURCE_PROCESSING_GOAL,instructions:SOURCE_PROCESSING_INSTRUCTIONS,profile:'sender-grounded-prose-v3',model:this.options.model}))})
+    return this.options.client.memory('source_processing',{...parsed,prefix:this.prefix,provider:this.#extractionFingerprint(),recipe:digest(JSON.stringify({recipe:this.options.sourceProcessingRecipe??SOURCE_PROCESSING_VERSION,agent:SOURCE_PROCESSING_GOAL,instructions:SOURCE_PROCESSING_INSTRUCTIONS,profile:'sender-grounded-prose-v4',model:this.options.model}))})
   }
   async invalidateMessage(sourceId:string,locator:string):Promise<void>{
     this.#ready()

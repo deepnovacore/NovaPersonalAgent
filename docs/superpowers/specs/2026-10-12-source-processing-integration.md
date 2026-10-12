@@ -36,7 +36,7 @@
 
 批次 ID 和 recipe 冻结进入运行目标与 definition hash。先持久 ScheduleRun、创建真实 Task，再绑定批次；恢复时反查同一 run，沿用同一运行 namespace。未知执行或未交付结果仍交共享恢复逻辑处理，不能凭超时重新派发。已确认失败记录终态，保留成功断点和好草稿，1 分钟起指数退避、最多 1 小时。旧 recipe 绑定与完成后撤权有专门恢复测试。
 
-只在 built-in runtime 中注册 source__process。Agent 自行读取本批原文、检索主题、选择历史原文、决定是否 compose，最后提交 topics。最多 24 个工具调用、一轮 compose；拒绝第 25 个新调用时停止续轮，但第 24 个已接受结果仍可交付。每次原文读取仍为 8 块 / 16000 字符。compose 调用与 extraction 相同端点和模型的 GatewayPersonalWriter，复用父任务“一次自然成文→整份原证据编辑复核”流程；来源到 ProfileInput 的作者、本人身份、thread 和回复映射与普通 profileSources 共用。只有经本批原文读取、当前授权与版本检查、CAS 的草稿可发布。
+只在 built-in runtime 中注册 source__process。Agent 自行读取本批原文、检索主题、选择历史原文、决定是否 compose，最后提交 topics。最多 24 个工具调用、一轮 compose；拒绝第 25 个新调用时停止续轮，但第 24 个已接受结果仍可交付。每次原文读取仍为 8 块 / 16000 字符。compose 调用与 extraction 相同端点和模型的 GatewayPersonalWriter，复用父任务“一次自然成文→整份原证据审查→按审查反馈编辑”流程；来源到 ProfileInput 的作者、本人身份、thread 和回复映射与普通 profileSources 共用。只有经本批原文读取、当前授权与版本检查、CAS 的草稿可发布。
 
 所有模型轮次重新核查已读取的批次、历史原文、主题及旧画像来源；撤权后不能带着旧 provider 上下文继续。任务完成由持久批次回执及真实 Task evidence 判定，不依赖另一个模型声称成功。画像仍存为可审核的 processing_profiles 草稿，不改写已接受的正式 Profile。
 
@@ -44,11 +44,11 @@ Qwen 的流式接口要求至少一条 user 角色 wire message。后台使用�
 
 ## 验收及限制
 
-持久化专项覆盖长文、多批、增量、空闲、重启、去重、授权变化、旧消息版本、recipe 切换、CAS、删除/purge、历史原文撤权。新增 Scheduler 集成覆盖默认注册、真实 Task/Run 工具循环、静默完成、重启不重复、持久预算/退避、换配置恢复、完成后撤权与作者归属。第三轮整合构建、变更 TypeScript lint 与 183 项相关测试通过，日志随交付保存；完整仓库测试未作通过声明。
+持久化专项覆盖长文、多批、增量、空闲、重启、去重、授权变化、旧消息版本、recipe 切换、CAS、删除/purge、历史原文撤权。新增 Scheduler 集成覆盖默认注册、真实 Task/Run 工具循环、静默完成、重启不重复、持久预算/退避、换配置恢复、完成后撤权与作者归属。第四轮整合构建、变更 TypeScript lint 与 184 项相关测试通过，日志随交付保存；完整仓库测试未作通过声明。
 
 真实后台合成验收脚本为 runtime/scripts/live/source-processing-background.mjs，使用真实 SubstrateMemoryResource、SQLite worker、Host、ScheduleService、TaskLoop、conversationRuntimeFactory 和 DashScope qwen3-vl-plus。它检查来源事件触发、重启空闲、现有 60 秒 timer 触发增量以及下一次空闲 tick 无模型请求，输出真实 task/run IDs。脚本已得到 status=passed：来源事件与真实定时器各完成一个批次，重启不重做，后续空闲 tick 零模型调用，原本机文件校验值不变。报告分别记录草稿发布与调度完成；通过的是合成资料后台生命周期，不等于画像语义或真实业务资料验收通过。此前 substrate-only live 的 fixture IDs 不能替代这项验收。
 
-父画像第三轮增量补丁已合入：批次索引仅选原文，大样本最多选 40 条，正文作者与平台发送者分开。编辑说明不进入正文，普通画像与后台 recipe 均含新生成版本。通用 profileReviewer 注入未配置时仍使用同一模型，不自动引入第二个服务。允许有依据的主题归纳与适度扩写，最后一步仍核对具体人物、名称、归属及计划/完成状态；不能把独立的父画像验收或文风评价冒称为此后台验收结果。
+父画像第四轮增量补丁已合入：整份审查先返回隐藏的 review_notes，随后整份编辑；审查和编辑均经逐请求授权检查。批次索引仅选原文，大样本最多选 40 条，正文作者与平台发送者分开。编辑说明不进入正文，普通画像与后台 recipe 均含新生成版本。通用 profileReviewer 注入未配置时仍使用同一模型，不自动引入第二个服务。允许有依据的主题归纳与适度扩写，最后一步仍核对具体人物、名称、归属及计划/完成状态；不能把独立的父画像验收或文风评价冒称为此后台验收结果。
 
 公开仓库仅保存合成 harness。真实消息、数据库、模型输出、日志及恢复资料在工作区外；本任务不推送、不部署，原本机 Profile/飞书配置只读校验。
 
