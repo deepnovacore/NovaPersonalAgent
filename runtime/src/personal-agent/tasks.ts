@@ -17,6 +17,7 @@ export interface TaskFence {
   goal_revision: number
 }
 export interface TaskInput {
+  trigger?: TaskTrigger | undefined
   execution_route?: string | undefined
   conversation_generation?: number | undefined
   conversation_id: string
@@ -26,7 +27,7 @@ export interface TaskInput {
   todo_ref?: {
     id: string
     version: number
-  }
+  } | undefined
 }
 /** One dispatch: the executor that ran it and the one executor session it ran in. */
 export interface TaskWork {
@@ -77,9 +78,12 @@ const eventSchema = z.object({
   thread_id: z.string().min(1).max(512).optional(), turn_id: z.string().min(1).max(512).optional(), item_id: z.string().min(1).max(512).optional(), stage: z.enum(['started', 'completed']).optional(), seq: z.number().int().positive(), task_id: z.string().min(1).max(512), work_id: z.string().min(1).max(512).optional(), session_id: z.string().min(1).max(512).optional(), kind: z.enum(['message', 'tool', 'artifact', 'control', 'verification', 'status']), sender: z.enum(['nova', 'user-to-executor', 'executor']).optional(), text: z.string().max(16000), refs: z.array(z.string().min(1).max(512)).max(128), text_truncated: z.boolean().optional()
 }).strict().refine(event => event.kind !== 'message' || event.sender !== undefined, 'message_sender_required')
 const id = z.string().trim().min(1).max(512)
+export const taskTriggerSchema=z.object({kind:z.literal('schedule'),schedule_id:id,run_id:id,definition_revision:z.number().int().positive(),definition_hash:z.string().regex(/^[a-f0-9]{64}$/)}).strict()
+export type TaskTrigger=z.infer<typeof taskTriggerSchema>
 export const taskInputSchema = z.object({
   execution_route: id.optional(), conversation_generation: z.number().int().nonnegative().optional(), conversation_id: id, goal: z.string().trim().min(1).max(16000), acceptance: z.array(z.string().trim().min(1).max(2000)).max(64), origin_ref: id, todo_ref: z.object({ id, version: z.number().int().nonnegative() }).strict().optional()
 }).strict()
+export const internalTaskInputSchema=taskInputSchema.extend({trigger:taskTriggerSchema.optional()}).strict().refine(input=>!input.trigger||(input.origin_ref==='schedule-run:'+input.trigger.run_id&&input.conversation_id==='schedule:'+input.trigger.schedule_id&&input.conversation_generation===0),'invalid_schedule_origin')
 const actorSchema = z.union([z.object({ kind: z.literal('nova') }).strict(), z.object({ kind: z.literal('user'), client_id: id }).strict()])
 export const taskFenceSchema = z.object({
   task_id: id, control_revision: z.number().int().nonnegative(), goal_revision: z.number().int().nonnegative()
@@ -89,7 +93,7 @@ const controlChangeSchema = z.object({ fence: taskFenceSchema, actor: actorSchem
 const goalChangeSchema = z.object({
   fence: taskFenceSchema, actor: actorSchema, goal: goalSchema.shape.goal, acceptance: goalSchema.shape.acceptance
 }).strict()
-const recordSchema = taskInputSchema.extend({
+const recordSchema = taskInputSchema.extend({trigger:taskTriggerSchema.optional(),
   reconciled_inputs: z.array(id).default([]), pending_delivery: id.optional(), original_goal: z.string().optional(), execution_route: z.string().optional(), id, phase: z.enum(['queued', 'running', 'verifying', 'waiting', 'completed', 'cancelled']), controller: actorSchema, control_revision: z.number().int().nonnegative(), goal_revision: z.number().int().nonnegative(), corrections: z.number().int().nonnegative(), work_ids: z.array(id), session_ids: z.array(id), works: z.array(z.object({ work_id: id, executor: id, session_id: id.optional() }).strict()).default([]), primary_session_id: id.optional(), evidence_refs: z.array(id), criteria_evidence: z.array(z.object({ index: z.number().int().nonnegative(), evidence_refs: z.array(id) }).strict()).optional(), artifact_refs: z.array(id).default([]), waiting_reason: z.string().trim().min(1).max(4000).nullable(), todo_sync: z.enum(['none', 'pending', 'synced', 'conflict'])
 }).strict()
 type StoredTask = z.infer<typeof recordSchema>
@@ -101,6 +105,7 @@ const pendingSchema = z.object({
   id, task_id: id, fence: taskFenceSchema, instruction: z.string().max(16000), write_started: z.boolean().optional(), status: z.enum(['pending', 'accepted', 'failed', 'unknown'])
 }).strict()
 const stateSchema = z.object({
+  run_receipts:z.record(z.string(),z.object({hash:z.string(),task_id:id}).strict()).default({}),
   instruction_work_ids: z.array(id).default([]), outcomes: z.array(evidenceSchema).default([]), work_fences: z.record(z.string(), taskFenceSchema).default({}), pending_effects: z.record(z.string(), pendingSchema).default({}), replay_incomplete: z.array(id).default([]), events: z.array(eventSchema).default([]), event_keys: z.record(z.string(), z.object({ seq: z.number().int().positive(), hash: z.string(), task_id: id.optional() }).strict()).default({}), event_seq: z.number().int().nonnegative().default(0), truncated: z.record(z.string(), z.number().int().nonnegative()).default({}), effects: z.record(z.string(), z.object({
     hash: z.string(), status: z.enum(['accepted', 'failed', 'unknown']), task_id: id.optional(), session_id: id.optional(), fence: taskFenceSchema.optional(), actor: actorSchema.optional(), text: z.string().max(16000).optional()
   }).strict()).default({}), tasks: z.array(recordSchema), receipts: z.record(z.string(), z.object({ hash: z.string(), task_id: id, result: recordSchema.optional() }).strict()), handbacks: z.record(z.string(), z.object({ hash: z.string(), command: z.string().max(16384).optional(), result: z.array(recordSchema).optional() }).strict()).default({})
@@ -108,6 +113,7 @@ const stateSchema = z.object({
 type TaskState = z.infer<typeof stateSchema>
 const RETAINED_FINISHED_TASKS = 200, RETAINED_HANDBACKS = 256, RETAINED_TOMBSTONES = 20000, PRUNE_ABOVE_BYTES = 12 * 1024 * 1024, PRUNE_TO_BYTES = 8 * 1024 * 1024
 const empty = (): TaskState => ({
+  run_receipts:{},
   instruction_work_ids: [], outcomes: [], work_fences: {}, pending_effects: {}, replay_incomplete: [], events: [], event_keys: {}, event_seq: 0, truncated: {}, tasks: [], receipts: {}, handbacks: {}, effects: {}
 })
 const hash = (value: unknown) => createHash('sha256').update(canonicalJson(value)).digest('hex')
@@ -316,9 +322,26 @@ export class TaskService {
     return Object.entries(this.#state.effects).filter(([, receipt]) => receipt.task_id === taskId).map(([request_id, receipt]) => ({ request_id, ...structuredClone(receipt) }))
   }
   list(): TaskRecord[] { return structuredClone(this.#state.tasks) as TaskRecord[]; }
+  findByRun(runId:string):TaskRecord|null{
+    const receipt=this.#state.run_receipts[id.parse(runId)]
+    if(!receipt)return null
+    const task=this.#state.tasks.find(item=>item.id===receipt.task_id)
+    if(!task)throw Error('task_retired')
+    return structuredClone(task) as TaskRecord
+  }
   delegate(requestId: string, input: TaskInput): Promise<TaskRecord> {
-    const request = id.parse(requestId), parsed = taskInputSchema.parse(input), payload = hash(parsed)
+    const request = id.parse(requestId), parsed = internalTaskInputSchema.parse(input), payload = hash(parsed)
     return this.#mutate<TaskRecord>(next => {
+      if(parsed.trigger){
+        const prior=next.run_receipts[parsed.trigger.run_id]
+        if(prior){
+          if(prior.hash!==payload)throw Error('run_conflict')
+          const task=next.tasks.find(item=>item.id===prior.task_id)
+          if(!task)throw Error('task_retired')
+          return structuredClone(task) as TaskRecord
+        }
+        if(Object.keys(next.run_receipts).length>=RETAINED_TOMBSTONES)throw Error('task_capacity')
+      }
       const prior = next.receipts[request]
       if (prior) {
         if (prior.hash !== payload)
@@ -331,10 +354,11 @@ export class TaskService {
         reconciled_inputs: string[]
         works: TaskWork[]
       } = {
-        reconciled_inputs: [], works: [], ...(parsed.execution_route ? { execution_route: parsed.execution_route } : {}), original_goal: parsed.goal, ...(parsed.conversation_generation === undefined ? {} : { conversation_generation: parsed.conversation_generation }), conversation_id: parsed.conversation_id, goal: parsed.goal, acceptance: parsed.acceptance, origin_ref: parsed.origin_ref, ...(parsed.todo_ref ? { todo_ref: parsed.todo_ref } : {}), id: randomUUID(), phase: 'queued', controller: { kind: 'nova' }, control_revision: 0, goal_revision: 0, corrections: 0, work_ids: [], session_ids: [], evidence_refs: [], artifact_refs: [], waiting_reason: null, todo_sync: 'none'
+        ...(parsed.trigger?{trigger:parsed.trigger}:{}),reconciled_inputs: [], works: [], ...(parsed.execution_route ? { execution_route: parsed.execution_route } : {}), original_goal: parsed.goal, ...(parsed.conversation_generation === undefined ? {} : { conversation_generation: parsed.conversation_generation }), conversation_id: parsed.conversation_id, goal: parsed.goal, acceptance: parsed.acceptance, origin_ref: parsed.origin_ref, ...(parsed.todo_ref ? { todo_ref: parsed.todo_ref } : {}), id: randomUUID(), phase: 'queued', controller: { kind: 'nova' }, control_revision: 0, goal_revision: 0, corrections: 0, work_ids: [], session_ids: [], evidence_refs: [], artifact_refs: [], waiting_reason: null, todo_sync: 'none'
       }
       next.tasks.push(task)
       next.receipts[request] = { hash: payload, task_id: task.id, result: structuredClone(task) }
+      if(parsed.trigger)next.run_receipts[parsed.trigger.run_id]={hash:payload,task_id:task.id}
       return structuredClone(task)
     })
   }
