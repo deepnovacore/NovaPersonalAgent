@@ -553,3 +553,17 @@ test('an oversized Todo assistance append leaves draft references unchanged',asy
  await m.all().filter(n=>n.textContent==='请 Nova 协助')[1].listeners.click();await tick()
  assert.equal(c.draft,'x'.repeat(4000));assert.deepEqual(c.state().references,[{kind:'todo',id:'a',version:1}]);assert.equal(c.state().source_todo??null,null)
 })
+
+
+test('Timeline starts open at desktop widths, folds on small windows, and respects a manual toggle',()=>{
+ const previous=globalThis.matchMedia
+ try{
+  for(const [width,open] of [[900,true],[720,true],[719,false]]){
+   globalThis.matchMedia=query=>({matches:width<=Number(query.match(/max-width:\s*(\d+)px/)?.[1]??0)})
+   const m=mount({defaultHome:true}),root=m.all().find(n=>n.id==='personal-workspace'),sidebar=m.all().find(n=>n.className==='timeline-sidebar'),toggle=m.all().find(n=>n.className==='timeline-toggle')
+   assert.equal(root.dataset.timelineOpen,String(open),String(width));assert.equal(sidebar.hidden,!open)
+   toggle.listeners.click();m.view.refresh()
+   assert.equal(root.dataset.timelineOpen,String(!open));assert.equal(sidebar.hidden,open);assert.equal(toggle.attrs['aria-expanded'],String(!open))
+  }
+ }finally{globalThis.matchMedia=previous}
+})

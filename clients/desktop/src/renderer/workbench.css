@@ -386,6 +386,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench[data-home="true"] .workspace{background:linear-gradient(160deg,var(--surface-raised) 25%,color-mix(in srgb,var(--timeline-cool) 40%,var(--surface)) 72%,color-mix(in srgb,var(--timeline-warm) 35%,var(--surface)));overflow:hidden}
 .workbench[data-home="true"] .chat-pane{flex:1;min-height:0;border-left:0;background:transparent;position:relative;inset:auto;width:auto;box-shadow:none}
 .workbench[data-home="true"] .chat-close{display:none}
+.workbench[data-home="true"] .page-head{flex-wrap:wrap}
 .workbench[data-home="true"] .chat-head{padding:12px 24px;border-bottom:0}
 .workbench[data-home="true"] .chat-history{padding:20px 32px;gap:24px;scrollbar-gutter:stable}
 .workbench[data-home="true"] .message{width:min(100%,760px);align-self:center;font-size:14px;line-height:1.8}
@@ -502,7 +503,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .news-discussion{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}
 .news-discussion[open]{display:grid;gap:10px}
 @media(prefers-color-scheme:dark){.workbench{--timeline-cool:#162331;--timeline-warm:#231d25;--timeline-card:#1a2028;--timeline-inset:#202832;--timeline-shadow:0 8px 24px rgba(0,0,0,.12);--tag-time-ink:#99c2ff;--tag-time-wash:#1c2f49;--tag-importance-ink:#efabc1;--tag-importance-wash:#3d2531;--tag-waiting-ink:#c9b2f0;--tag-waiting-wash:#30263f;--tag-progress-ink:#91d5b4;--tag-progress-wash:#19372c;--tag-attention-ink:#ebc187;--tag-attention-wash:#3a2c1b}}
-@media(max-width:959px){
+@media(max-width:719px){
  .workbench[data-home="true"],.workbench[data-home="true"][data-timeline-open="false"]{grid-template-columns:var(--rail-w) minmax(0,1fr)}
  .workbench[data-home="true"] .chat-pane{position:relative;width:auto;box-shadow:none}
  .timeline-sidebar{position:absolute;top:50px;right:0;bottom:0;width:min(360px,calc(100% - var(--rail-w)));z-index:9;border-left:1px solid var(--line-strong);box-shadow:-12px 0 32px color-mix(in srgb,var(--ink) 15%,transparent)}
@@ -520,6 +521,6 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .message-date{align-self:center;font-size:11px;color:var(--ink-dim);margin:4px 0}
 
 .tag-project{background:transparent;border-color:var(--line-strong)}
-@media(min-width:960px){.timeline-close{display:none}}
+@media(min-width:720px){.timeline-close{display:none}}
 
 @media(prefers-reduced-motion:reduce){.timeline-card{transition:none}}

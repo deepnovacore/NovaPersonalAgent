@@ -48,7 +48,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const c=new PersonalController({send,start,stop,applyPresentation,changed:update})
  const openSettings=category=>api.orbMenu.openSettings?.(category)
  // Rail
- let selected='nova',timelineOpen=!globalThis.matchMedia?.('(max-width:959px)')?.matches,initialHome=false,inspector=null,inspectedId=null,returnFocus=null,openSequence=0
+ let selected='nova',timelineOpen=!globalThis.matchMedia?.('(max-width:719px)')?.matches,initialHome=false,inspector=null,inspectedId=null,returnFocus=null,openSequence=0
  // Viewed results survive restarts so an already-read result is not counted as new again.
  const VIEWED_KEY='nova:viewed-task-results',viewedStore=globalThis.localStorage
  const viewedCursors=new Map(),viewedResults=new Set((()=>{try{const saved=JSON.parse(viewedStore?.getItem(VIEWED_KEY)??'[]');return Array.isArray(saved)?saved.filter(id=>typeof id==='string').slice(-200):[]}catch{return []}})()),taskHistories=new Map()
@@ -83,7 +83,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const timelineHead=el('header',undefined,'timeline-head');timelineHead.append(el('h2','Timeline'));button(t('展开时间线'),()=>{selected='timeline';closeTask();if(globalThis.matchMedia?.('(max-width:959px)')?.matches)chat.setOpen(false)},timelineHead).className='ghost';button(t('收起'),()=>{setTimelineOpen(false);timelineToggle.focus()},timelineHead).className='ghost timeline-close';timelineSidebar.append(timelineHead);timelineSidebar.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();setTimelineOpen(false);timelineToggle.focus()}})
  const timelineBody=el('div',undefined,'timeline-body');timelineSidebar.append(timelineBody)
  let timelineKey=''
- function setTimelineOpen(value){const opening=value&&!timelineOpen;timelineOpen=value;root.dataset.timelineOpen=String(value);timelineToggle.textContent=t(value?'收起 Timeline':'展开 Timeline');timelineToggle.setAttribute('aria-expanded',String(value));timelineSidebar.hidden=selected!=='nova'||Boolean(inspector)||!value;if(opening&&globalThis.matchMedia?.('(max-width:959px)')?.matches)timelineSidebar.querySelector('button')?.focus()}
+ function setTimelineOpen(value){const opening=value&&!timelineOpen;timelineOpen=value;root.dataset.timelineOpen=String(value);timelineToggle.textContent=t(value?'收起 Timeline':'展开 Timeline');timelineToggle.setAttribute('aria-expanded',String(value));timelineSidebar.hidden=selected!=='nova'||Boolean(inspector)||!value;if(opening&&globalThis.matchMedia?.('(max-width:719px)')?.matches)timelineSidebar.querySelector('button')?.focus()}
  async function showHome(){selected='nova';closeTask();chat.setOpen(true);if(c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main'))await c.home();chat.update()}
  async function discuss(references,text){await showHome();if(text){if(!c.submitText(text,'chat:main',references))throw Error(t('主对话暂时无法发送，原有草稿已保留，请稍后重试。'));chat.reveal()}else await chat.focusReference(references)}
  function openTodos(id){selected='todos';closeTask();if(id){lifeLocal['todo:all']=true;renderPanel();const node=[...panel.querySelectorAll('article')].find(node=>node.dataset.lifeId===id);node?.scrollIntoView?.({block:'center'});node?.querySelector?.('button')?.focus?.()}}
