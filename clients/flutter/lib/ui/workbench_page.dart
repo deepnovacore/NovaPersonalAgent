@@ -1,3 +1,4 @@
+import 'scheduled_tasks_page.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -25,9 +26,17 @@ Future<void> showTaskSheet(
     store: store,
     task: task,
     onDiscuss: () async {
-      await store.command('conversations.select', {
-        'id': task['conversation_id'],
-      });
+      final trigger = task['trigger'];
+      if (trigger is Map && trigger['kind'] == 'schedule') {
+        await store.command('schedules.open_result', {
+          'run_id': trigger['run_id'],
+        });
+      } else {
+        await store.command('conversations.select', {
+          'id': task['conversation_id'],
+        });
+      }
+
       if (sheetContext.mounted &&
           ModalRoute.of(sheetContext)?.isCurrent == true) {
         Navigator.pop(sheetContext);
@@ -73,7 +82,10 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
   final _viewport = GlobalKey();
   final _feedKeys = <String, GlobalKey>{};
   final _evidenceOpen = <String>{};
-  bool _checking = false, _saved = false, _completedOpen = false;
+  bool _checking = false,
+      _saved = false,
+      _completedOpen = false,
+      _scheduled = false;
   PersonalStore get store => widget.store;
   String t(String text) => tr(widget.language, text);
   List<Map<String, dynamic>> _rows(Object? value) => (value as List? ?? [])
@@ -1149,7 +1161,56 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                     store.error!,
                     icon: CupertinoIcons.exclamationmark_circle,
                   ),
-                if (widget.page == 0) ...[
+                if (widget.page == 0 &&
+                    snapshot?.object('capabilities')['schedules'] == true) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    child: SegmentedButton<bool>(
+                      segments: [
+                        ButtonSegment(value: false, label: Text(t('Tasks'))),
+                        ButtonSegment(
+                          value: true,
+                          label: Text(t('Scheduled tasks')),
+                        ),
+                      ],
+                      selected: {_scheduled},
+                      onSelectionChanged: (value) =>
+                          setState(() => _scheduled = value.first),
+                    ),
+                  ),
+                  if (_scheduled)
+                    ScheduledTasksPage(
+                      store: store,
+                      language: widget.language,
+                      embedded: true,
+                      onOpenConversation: widget.onOpenConversation,
+                      onOpenTask: (id) async {
+                        final task =
+                            store.snapshot
+                                ?.rows('tasks')
+                                .where((row) => row['id'] == id)
+                                .firstOrNull ??
+                            Map<String, dynamic>.from(
+                              await store.command('tasks.get', {'task_id': id}),
+                            );
+                        if (context.mounted) {
+                          await showTaskSheet(
+                            context,
+                            store,
+                            task,
+                            onOpenConversation: widget.onOpenConversation,
+                          );
+                        }
+                      },
+                    ),
+                ],
+                if (widget.page == 0 &&
+                    !(_scheduled &&
+                        snapshot?.object('capabilities')['schedules'] ==
+                            true)) ...[
                   if (tasks.isNotEmpty)
                     NovaSection(
                       header: t('In progress'),

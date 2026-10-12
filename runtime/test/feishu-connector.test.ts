@@ -530,7 +530,7 @@ test('completed chats skip an unchanged live window while history is still pagin
   if(args[1]==='+chat-messages-list'){const chat=args[args.indexOf('--chat-id')+1]!;reads.push(chat);return JSON.stringify({messages:[],has_more:chat==='oc_history',page_token:'page-'+reads.length})}return '{}';
  }});
  try{await connector.open();await connector.listChats();await connector.configure(['oc_done','oc_history'],true);await assert.rejects(connector.sync(),/后续页/);assert.equal(reads.filter(id=>id==='oc_done').length,1);await assert.rejects(connector.sync(),/后续页/);assert.equal(reads.filter(id=>id==='oc_done').length,1);now=new Date(now.getTime()+2000);await assert.rejects(connector.sync(),/后续页/);assert.equal(reads.filter(id=>id==='oc_done').length,2)}finally{await connector.close();await rm(dir,{recursive:true,force:true})}
-
+})
 
 test('saved Feishu state accepts absent captureFrom and rejects malformed capture timestamps', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'nova-feishu-saved-'));
@@ -547,3 +547,12 @@ test('saved Feishu state accepts absent captureFrom and rejects malformed captur
   }
   await rm(directory, {recursive: true, force: true});
 });
+
+
+test('a fresh paused connector reopens before any capture scope has been configured',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'nova-feishu-reopen-'))
+ const make=()=>new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:()=>Promise.reject(Error('unconfigured'))})
+ let connector=make()
+ try{await connector.open();await connector.pause();await connector.close();connector=make();await connector.open();assert.equal(connector.snapshot().state,'error')}
+ finally{await connector.close();await rm(directory,{recursive:true,force:true})}
+})

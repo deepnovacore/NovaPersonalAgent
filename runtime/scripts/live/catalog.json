@@ -70,7 +70,11 @@
       "id": "stepfun",
       "layer": "provider",
       "entry": "scripts/live/stepfun.mjs",
-      "requires": [["STEPFUN_API_KEY"]],
+      "requires": [
+        [
+          "STEPFUN_API_KEY"
+        ]
+      ],
       "timeoutMs": 120000,
       "scope": "StepAudio 3 realtime connection and audio provider contract; no business tools."
     },
@@ -234,6 +238,15 @@
       ],
       "timeoutMs": 600000,
       "scope": "Real visible renderer, authenticated desktop WebSocket, production conversation runtime and actual conversation/Understanding/Jev models, isolated Life persistence, recall tool, UI correction and independent Electron process restart."
+    },
+    {
+      "id": "scheduled-tasks",
+      "layer": "end-to-end",
+      "entry": "scripts/live/scheduled-tasks.mjs",
+      "requires": [],
+      "timeoutMs": 600000,
+      "structuredReport": true,
+      "scope": "Production host/provider/factory, real wall-clock timer and isolated synthetic App data. Manual and Agent creation, two presets, result delivery and adoption. No private profile or external actions."
     }
   ]
 }

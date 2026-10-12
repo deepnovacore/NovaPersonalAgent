@@ -25,6 +25,7 @@ export const hostItemKindSchema = z.enum([
   'progress',
   'final',
   'recovery',
+  'scheduled_task',
   'dialogue_context',
   'tool_output',
   'workspace_context',
@@ -44,7 +45,8 @@ export const hostContextItemSchema = z.object({
   kind: hostItemKindSchema,
   host_item_id: realtimeIdentifierSchema,
   event_id: realtimeIdentifierSchema,
-  content: boundedText(),
+  content: z.string().refine(value=>!pythonWhitespaceOnly.test(value),'text must be non-empty'),
+  context_read:z.literal(true).optional(),
   /** Host-authored public wording; private context is never used as the narration payload. */
   speech_content: boundedText().optional(),
   /** Explicit host classification: control receipts are not recoverable results. */
@@ -55,6 +57,8 @@ export const hostContextItemSchema = z.object({
   workspace_instance_id: realtimeIdentifierSchema.optional(),
   revision: z.number().int().nonnegative().optional(),
 }).strict().superRefine((item, context) => {
+  if(item.context_read&&item.kind!=='tool_output')context.addIssue({code:'custom',path:['context_read'],message:'structured reads require tool output'})
+  if(item.context_read?Buffer.byteLength(item.content)>32768:[...item.content].length>(item.kind==='scheduled_task'?160000:MAX_REALTIME_TEXT))context.addIssue({code:'custom',path:['content'],message:'host context exceeds text limit'})
   if (item.speech_content !== undefined && item.kind !== 'progress' && item.kind !== 'final') {
     context.addIssue({code: 'custom', path: ['speech_content'], message: 'public narration requires a progress or final fact'})
   }
@@ -211,6 +215,7 @@ export type WorkspaceContextDeliveryRecord = z.infer<typeof workspaceContextDeli
 export const hostResponseKindSchema = z.enum([
   'host_fact',
   'task_continuation',
+  'scheduled_task',
   'tool_result',
   'delegation_acknowledgement',
 ])
@@ -221,6 +226,11 @@ export const hostResponseIntentSchema = z.object({
   task_summary: boundedText().nullable().default(null),
   origin_spoken: z.boolean().default(false),
 }).strict().superRefine((intent, context) => {
+  if(intent.kind==='scheduled_task'){
+    let purpose:unknown
+    try{purpose=(JSON.parse(intent.item.content) as {purpose?:unknown}).purpose}catch{/* invalid activation */}
+    if(intent.item.kind!=='scheduled_task'||purpose!=='run_scheduled_task')context.addIssue({code:'custom',path:['item'],message:'scheduled task requires host scheduled activation'})
+  }else if(intent.item.kind==='scheduled_task')context.addIssue({code:'custom',path:['item'],message:'scheduled activation requires scheduled task response'})
   if(intent.kind==='task_continuation'&&intent.item.kind!=='recovery')context.addIssue({code:'custom',path:['item'],message:'task continuation requires recovery context'})
   if (intent.item.kind === 'workspace_context') {
     context.addIssue({

@@ -128,7 +128,12 @@ class _TaskDetailsState extends State<TaskDetails> {
                   child: const Text('Load activity'),
                 ),
                 TextButton(
-                  onPressed: !busy && widget.store.connected
+                  onPressed:
+                      !busy &&
+                          widget.store.connected &&
+                          (!(current['trigger'] is Map &&
+                                  current['trigger']['kind'] == 'schedule') ||
+                              current['phase'] == 'completed')
                       ? () async {
                           try {
                             await widget.onDiscuss();

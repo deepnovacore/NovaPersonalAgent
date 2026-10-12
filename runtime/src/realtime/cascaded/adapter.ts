@@ -3,7 +3,7 @@ export type PreparedMemoryContext = (signal: AbortSignal) => Promise<string | nu
 import {abortable} from '../../core/camera-session.js'
 import type {PromptLanguage} from '../prompt-language.js'
 import {dispatchSourceContext} from '../history.js'
-import {cascadedResponseGuidance, validateOriginalImage,TASK_CONTINUATION_INSTRUCTIONS} from './llm.js'
+import {cascadedResponseGuidance, validateOriginalImage,TASK_CONTINUATION_INSTRUCTIONS,SCHEDULED_TASK_INSTRUCTIONS} from './llm.js'
 import type {Frame} from '../../executors/watcher.js'
 import { randomUUID } from 'node:crypto'
 import {jsonValueSchema} from '../../core/events.js'
@@ -661,7 +661,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
       throwIfAborted(combineSignals(owner.controller.signal, signal))
       for (const id of hostIds) owner.pending.delete(id)
       this.#startResponse(owner, inputs, {kind: 'host_request', host_item_id: intent.item.host_item_id},
-        intent.item.kind === 'tool_output',intent.kind==='task_continuation')
+        intent.item.kind === 'tool_output'||intent.kind==='scheduled_task',intent.kind==='task_continuation'?'content':intent.kind==='scheduled_task'?'scheduled':undefined)
       await Promise.resolve()
     })
   }
@@ -968,7 +968,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
   }
 
   #startResponse(owner: EpochOwner, inputs: readonly CascadedLlmInput[], origin: ResponseOrigin,
-    allowTools = true,taskContinuation=false): void {
+    allowTools = true,taskContinuation?:'content'|'scheduled'): void {
     const controller = new AbortController()
     const active: ActiveResponse = {
       controller, origin, id: `cascaded-response-${owner.epoch}-${++owner.responseSequence}`,
@@ -1019,7 +1019,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
     owner: EpochOwner,
     active: ActiveResponse,
     inputs: readonly CascadedLlmInput[],
-    allowTools: boolean,taskContinuation=false,
+    allowTools: boolean,taskContinuation?:'content'|'scheduled',
   ): Promise<void> {
     const language = this.#language
     let llmResponseId: string | null = null
@@ -1077,7 +1077,7 @@ export class CascadedRealtimeAdapter implements RealtimeProvider {
           allowTools ? [...owner.pending.values()].filter(pending => pending.item.speech_content !== undefined)
             .map(pending => pending.item.content).join('\n') : null,
           allowTools ? dispatchSourceContext(owner.responseAdaptation?.user_sources) : null,
-          taskContinuation?TASK_CONTINUATION_INSTRUCTIONS:cascadedResponseGuidance(allowTools, language),
+          taskContinuation==='content'?TASK_CONTINUATION_INSTRUCTIONS:taskContinuation==='scheduled'?SCHEDULED_TASK_INSTRUCTIONS:cascadedResponseGuidance(allowTools, language),
         ].filter(Boolean).join('\n'),
         signal,
       })) {
@@ -1658,6 +1658,7 @@ function hostInput(item: HostContextItem, asUserActivation: boolean): CascadedLl
     progress: '任务进度事实',
     final: '任务结果事实',
     recovery: '恢复摘要',
+    scheduled_task: '定时任务委托',
     dialogue_context: '只读历史对话',
   }
   const content = asUserActivation

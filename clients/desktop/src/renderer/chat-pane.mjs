@@ -37,7 +37,7 @@ function glyph(path){const svg=document.createElementNS(SVG_NS,'svg');svg.setAtt
 export const conversationTitle=item=>item?.kind==='proactive'?'主动提醒':item?.title??'对话'
 
 /** The right-hand Nova pane: conversation switcher, transcript, three-state composer. */
-export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpenChange=()=>{},speakingLevel=null}){
+export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSchedule,onOpenChange=()=>{},speakingLevel=null}){
  const pane=el('aside',undefined,'chat-pane');pane.id='chat-pane';pane.setAttribute('aria-label','Nova 对话');columns.append(pane)
  const head=el('header',undefined,'chat-head');pane.append(head)
  head.append(el('span','✦ Nova','chat-brand'))
@@ -142,6 +142,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
   if(feed){const holder=el('article',undefined,'message assistant message-feed');holder.append(el('small','Nova','message-role'));renderFeedCard(holder,feed,{el,button,chips,command:(m,p)=>c.command(m,p),openFeed:(id,label)=>run(()=>c.openFeed(id,label)),visible:false,presented,body:text=>renderMarkdown(text,{openLink})});return holder}
   const node=el('article',undefined,`message ${message.role==='user'?'user':'assistant'}`);node.append(el('small',message.role==='user'?'你':'Nova','message-role'))
   if(message.role==='user')node.append(el('p',message.text));else node.append(renderMarkdown(message.text,{openLink}))
+  if(message.schedule_ref&&openSchedule){const ref=message.schedule_ref,card=el('div',undefined,'message-schedule');card.dataset.scheduleId=ref.schedule_id;const schedule=c.snapshot?.schedules?.items?.find(item=>item.id===ref.schedule_id);card.append(el('span','◷','schedule-emblem'));button(schedule?.title??t('查看定时任务'),()=>openSchedule(ref.schedule_id),card);if(ref.task_id)button(t('查看任务'),()=>openTask(ref.task_id),card);node.append(card)}
   const generationLabel={pending:'正在回复…',failed:'回复失败，请重新发送',interrupted:'回复已中断，请重新发送'}[message.generation_status];if(generationLabel)node.append(el('small',generationLabel,'hint'))
   return node
  }

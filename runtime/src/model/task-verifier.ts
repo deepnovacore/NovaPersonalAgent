@@ -18,7 +18,10 @@ export class GatewayTaskVerifier {
     this.#model = options.model
     this.#vision = options.vision
   }
-  async evaluateTask(task:TaskRecord,evidence:TaskEvidence[],signal:AbortSignal,inputs:ReturnType<TaskService['inputReceipts']>=[]):Promise<TaskDecision>{
+  async evaluateTask(task:TaskRecord,evidence:TaskEvidence[],signal:AbortSignal,inputs:ReturnType<TaskService['inputReceipts']>=[],revalidate?:()=>Promise<boolean>):Promise<TaskDecision>{
+    const changed:TaskDecision={kind:'wait',reason:'context_authorization_changed',evidence_refs:[]}
+    if(revalidate&&!await revalidate())return changed
+    signal.throwIfAborted()
     const accepted=inputs.filter(input=>input.status==='accepted'&&input.actor?.kind==='user').map(({request_id,text})=>({request_id,text}))
     const pending=accepted.filter(input=>!task.reconciled_inputs?.includes(input.request_id)).map(input=>input.request_id)
     const currentEvidence=evidence.filter(item=>item.goal_revision===task.goal_revision&&item.kind!=='input')
@@ -83,6 +86,8 @@ export class GatewayTaskVerifier {
         ...(error.code&&hints[error.code]?{hint:hints[error.code]}:{}),
         valid_evidence_refs:valid,previous_response:lastReply.slice(0,2000)})
     }
+    if(revalidate&&!await revalidate())return changed
+    signal.throwIfAborted()
     if(decision.kind==='complete'&&task.acceptance.length){
       const covered=new Set((decision.criteria??[]).filter(item=>item.evidence_refs.every(ref=>currentEvidence.some(entry=>entry.ref===ref))).map(item=>item.index))
       if(task.acceptance.some((_,index)=>!covered.has(index)))

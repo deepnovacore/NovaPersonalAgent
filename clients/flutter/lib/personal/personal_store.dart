@@ -88,14 +88,26 @@ final class PersonalStore extends ChangeNotifier {
   Future<dynamic> command(
     String method, [
     Map<String, dynamic> params = const {},
-  ]) {
+  ]) => commandWithRequestId(method, params, requestId());
+
+  /// Reuse only for a retry of the exact same scheduled operation after a lost ACK.
+  Future<dynamic> commandWithRequestId(
+    String method,
+    Map<String, dynamic> params,
+    String id,
+  ) {
+    if (_pending.containsKey(id)) {
+      return Future.error(
+        const PersonalCommandError('Wait for pending operations'),
+      );
+    }
     if (!connected) return Future.error(const PersonalCommandError('Offline'));
     if (_pending.length >= 32) {
       return Future.error(
         const PersonalCommandError('Wait for pending operations'),
       );
     }
-    final id = requestId(), result = Completer<dynamic>();
+    final result = Completer<dynamic>();
     final timer = Timer(timeout, () {
       _pending.remove(id);
       result.completeError(

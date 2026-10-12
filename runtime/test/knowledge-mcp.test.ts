@@ -353,8 +353,10 @@ test('real file reindex keeps the original MCP reference stale until source remo
     const hit = hits[0]!
     const before = (await service.listSources())[0]!
     await writeFile(file, '# After\nUpdated content')
-    assert.deepEqual(await service.handle('knowledge.reindex', {id: hit.source_id, consent: true}), {ok: true, id: hit.source_id})
+    const reindexed = await service.handle('knowledge.reindex', {id: hit.source_id, consent: true}) as {ok?: boolean; id?: string; fingerprint?: string}
     const after = (await service.listSources())[0]!
+    assert.deepEqual({ok: reindexed.ok, id: reindexed.id}, {ok: true, id: hit.source_id})
+    assert.equal(reindexed.fingerprint, after.fingerprint)
     assert.equal(after.id, before.id)
     assert.notEqual(after.fingerprint, before.fingerprint)
     const current = structured(await peer.client.callTool({name: 'get_chunk', arguments: {locator: hit.locator}}))

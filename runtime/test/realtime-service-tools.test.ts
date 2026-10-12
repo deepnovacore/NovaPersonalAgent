@@ -1407,3 +1407,26 @@ test('dispatch refs retain interrupted users but cannot select assistant text', 
     } finally { await service.close() }
   }
 })
+
+test('schedule entry receives only the current host-bound user and cannot borrow an unrelated response',async()=>{
+ let called=0
+ const {service}=realtimeServiceHarness('pipeline',{scheduleHost:{invoke:(_raw,turn)=>{called++;assert.equal(turn.origin_ref,'conversation:1');assert.equal(turn.stillWanted(),true);assert.equal(turn.sources[0]?.text,'build timer');return Promise.resolve({id:'scheduled',revision:1});}}})
+ await service.connect()
+ try{const result=await dispatchTurn(service,'schedule',{operation:'list',origin_ref:'conversation:1'});assert.equal(result.accepted,true);assert.equal(called,1)
+ await service.handleEvent({kind:'response_started',session_epoch:1,response_id:'unrelated-schedule',origin:{kind:'unknown'}})
+ await service.handleEvent({kind:'tool_call_ready',session_epoch:1,response_id:'unrelated-schedule',item_id:'s2',call_id:'s2',name:'schedule',arguments:{operation:'list',origin_ref:'conversation:1'}})
+ assert.equal(called,1)
+ }finally{await service.close()}
+})
+test('revoked scheduled context is never injected or continued through the provider',async()=>{
+ const {scheduledToolResult}=await import('../src/personal-agent/scheduled-tool-runtime.js')
+ let reads=0
+ const {service,actions,injectedItems}=realtimeServiceHarness('pipeline',{scopedTool: event=>{reads++;return Promise.resolve(scheduledToolResult(event,{secret:'revoked context'}));},validateScopedContext:()=>Promise.resolve(false)})
+ await service.connect()
+ try{await speak(service,'scope-user','read app');await service.handleEvent({kind:'response_started',session_epoch:1,response_id:'scope-response',origin:{kind:'user_item',item_id:'scope-user'}})
+ await service.handleEvent({kind:'tool_call_ready',session_epoch:1,response_id:'scope-response',call_id:'scope-call',item_id:'scope-tool',name:'app__context',arguments:{section:'todos',cursor:null}})
+ const before=actions.length
+ await service.handleEvent({kind:'response_terminal',session_epoch:1,response_id:'scope-response',status:'completed',reason:''})
+ assert.equal(reads,1);assert.equal(injectedItems.some(item=>item.content.includes('revoked context')),false);assert.equal(actions.slice(before).some(action=>action.startsWith('response')),false)
+ }finally{await service.close()}
+})

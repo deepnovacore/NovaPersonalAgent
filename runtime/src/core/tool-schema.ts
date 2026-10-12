@@ -11,6 +11,7 @@
  */
 
 import { z } from 'zod'
+import {SCHEDULE_TOOL_SPEC,APP_CONTEXT_TOOL_SPEC} from './schedule-tools.js'
 import {TASK_TOOL_SPEC} from './task-tools.js'
 import type {AgentDescriptor} from '../executors/agent-controller.js'
 import type { JsonValue } from './events.js'
@@ -57,7 +58,7 @@ export class ToolSchemaError extends Error {
 
 export function compileToolSchema(
   manifests: readonly ExecutorManifest[],
-  options: {readonly includeTasks?: boolean; readonly includeMemoryRecall?: boolean; readonly agentDescriptors?: readonly AgentDescriptor[]} = {},
+  options: {readonly includeSchedules?:boolean; readonly includeAppContext?:boolean; readonly includeTasks?: boolean; readonly includeMemoryRecall?: boolean; readonly agentDescriptors?: readonly AgentDescriptor[]} = {},
 ): CompiledTools {
   const schemas: Readonly<Record<string, JsonValue>>[] = []
   const bindings = new Map<string, ToolBinding>()
@@ -103,6 +104,7 @@ export function compileToolSchema(
     bindings.set('memory__evidence', toolBindingSchema.parse({kind: 'query', logical_name: 'memory.evidence'}))
   }
 
+  if(options.includeAppContext){schemas.push(compileHostTool(APP_CONTEXT_TOOL_SPEC));bindings.set('app__context',toolBindingSchema.parse({kind:'query',logical_name:'app.context'}))}
   const seen = new Set<string>()
   const hidden = new Set<string>()
   const descriptors = options.agentDescriptors ?? []
@@ -138,7 +140,7 @@ export function compileToolSchema(
     }
   }
   {
-    for (const spec of [...(agents.length > 0 ? [dispatchToolSpec(agents), cancelToolSpec(agents), CONFIRM_TOOL_SPEC] : []), ...(options.includeTasks ? [TASK_TOOL_SPEC] : [])]) {
+    for (const spec of [...(agents.length > 0 ? [dispatchToolSpec(agents), cancelToolSpec(agents), CONFIRM_TOOL_SPEC] : []), ...(options.includeTasks ? [TASK_TOOL_SPEC] : []), ...(options.includeSchedules?[SCHEDULE_TOOL_SPEC]:[])]) {
       if (bindings.has(spec.name)) throw new ToolSchemaError(`工具 wire name 重复：${spec.name}`)
       schemas.push(compileHostTool(spec))
       bindings.set(spec.name, toolBindingSchema.parse({kind: 'host', logical_name: `host.${spec.name}`}))

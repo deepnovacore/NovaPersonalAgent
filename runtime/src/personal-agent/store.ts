@@ -26,6 +26,19 @@ const MAX_STORE_BYTES = 16 * 1024 * 1024;
 const stateSchema = z.object({ conversations:conversationsStateSchema.default(initialConversations), user_scope: z.string().max(512).nullable(), revision: z.number().int().nonnegative(), feed: z.array(feedItemSchema).max(10000), dedupe: z.array(z.string().max(128)).max(20000), brief_runs:z.record(z.string().max(128),z.object({status:z.enum(['processing','success','failed','empty']),attempts:z.number().int().min(1).max(3),last_attempt_at:z.iso.datetime()})).default({}), settings: personalSettingsSchema, receipts: z.record(z.string().max(128), z.object({ payload: z.string().max(16384), result: z.unknown() })).refine(r => Object.keys(r).length <= 256) }).strict();
 export class PersonalStore {
     constructor(readonly path: string) { }
+    async ensureScheduleBackup():Promise<void>{
+        const path=this.path+'.before-schedules.json'
+        try{const saved=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await saved.stat();if(info.size>MAX_STORE_BYTES||(process.platform!=='win32'&&(info.mode&0o777)!==0o600))throw Error('invalid_schedule_backup');stateSchema.parse(JSON.parse(await saved.readFile('utf8')));return}finally{await saved.close()}}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
+        const original=await open(this.path,constants.O_RDONLY|constants.O_NOFOLLOW)
+        let text:string
+        try{if((await original.stat()).size>MAX_STORE_BYTES)throw Error('personal_store_capacity');text=await original.readFile('utf8')}finally{await original.close()}
+        if(!text)text=JSON.stringify(initialState())
+        stateSchema.parse(JSON.parse(text))
+        const backup=await open(path,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600)
+        try{await backup.writeFile(text);await backup.sync()}finally{await backup.close()}
+        const check=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW)
+        try{if(await check.readFile('utf8')!==text)throw Error('schedule_backup_mismatch')}finally{await check.close()}
+    }
     async read(): Promise<PersonalState> {
         preparePrivateDatabasePath(this.path);
         const file = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW);

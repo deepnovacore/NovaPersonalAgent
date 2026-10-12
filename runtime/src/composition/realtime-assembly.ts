@@ -1,3 +1,5 @@
+import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
+import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import {admitIntakeTask} from '../personal-agent/intake-task.js'
 import type {RuntimeDispatchResult} from '../core/runtime.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
@@ -167,6 +169,9 @@ export function configuredMemoryConsumer(settings: AssemblyOptions['settings'], 
     return embeddingHash('sha256').update(JSON.stringify({provider:selected?.provider ?? settings.integrated_provider,endpoint:selected?.config.baseUrl ?? voice!.url,model:selected?.config.model ?? voice!.model})).digest('hex')
   } catch { return undefined }
 }
+export function configuredTaskVerifierConsumer(settings:AssemblyOptions['settings']):string {
+  return embeddingHash('sha256').update(JSON.stringify({provider:'openai-compatible',endpoint:settings.model_base_url,model:settings.support_model})).digest('hex')
+}
 
 async function responseAdaptationFor(
   resource: PersonalMemoryResource | undefined,
@@ -197,6 +202,11 @@ async function responseAdaptationFor(
 }
 
 export interface RealtimeAssemblyOptions {
+  readonly conversationContext?:()=>Promise<string|null>
+  readonly suppressMemoryAdaptation?:boolean
+  readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
+  readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
+  readonly validateScopedContext?:()=>Promise<boolean>
   readonly memoryReadMode?: 'text' | 'voice'
   readonly memoryConsumerFingerprint?: string
   readonly nextPlaybackGeneration?:()=>number
@@ -855,15 +865,16 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   let responseAdaptationRevision = 0
   let responseAdaptationSignature: string | undefined
   const providerSession = new RealtimeProviderSession(provider, {
-    responseAdaptationRequired: () => personalMemoryHolder.current?.prepareResponseAdaptation !== undefined,
+    responseAdaptationRequired: () => !options.suppressMemoryAdaptation&&personalMemoryHolder.current?.prepareResponseAdaptation !== undefined,
     responseAdaptation: async signal => {
-      const preferences = await responseAdaptationFor(personalMemoryHolder.current, options.memoryReadMode, options.memoryConsumerFingerprint, signal)
+      const preferences = options.suppressMemoryAdaptation?undefined:await responseAdaptationFor(personalMemoryHolder.current, options.memoryReadMode, options.memoryConsumerFingerprint, signal)
+      const conversationContext=await options.conversationContext?.()
       signal?.throwIfAborted()
       const conversation = core.runtime.memory.channels.get('conversation')
       const sources = recentDispatchSources(conversation?.items ?? [])
       const recovery = provider.responseAdaptationMode === 'session_setup' ? undefined : sessionHolder.current?.deliveryRecoveryContext()
       const context = {
-        content: [preferences?.content, recovery?.content].filter(Boolean).join('\n') || null,
+        content: [preferences?.content, recovery?.content,conversationContext,options.scheduleHost?canonicalJson({schedule_calendar:{timezone:options.sharedPersonal?.host.snapshot().settings.timezone??'UTC',now:new Date(wallClockNow()*1000).toISOString()}}):null].filter(Boolean).join('\n') || null,
         ...(recovery?.content ? {delivery_version: recovery.version} : {}),
         ...(sources.length === 0 ? {} : {user_sources: sources}),
       }
@@ -1095,6 +1106,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       },
     }}),
     idFactory,
+    ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
+    ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
+    ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
     ...(options.onProviderEvent ? {onProviderEvent: options.onProviderEvent}: {}),
     onProviderTerminal: generation => {
       options.onAudioTerminal?.(generation.utterance_id, generation.generation_epoch)
@@ -1398,7 +1412,7 @@ export function composeRealtime(
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?options.settings.model_base_url:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
       extractionFingerprint:embeddingHash('sha256').update((local?.embedding.baseUrl??options.settings.model_base_url)+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
       personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:false,
-      conversationProviders: [...new Set((['text','voice'] as const).map(mode=>configuredMemoryConsumer(options.settings,mode)).filter((value): value is string=>value!==undefined))],
+      conversationProviders: [...new Set([...(['text','voice'] as const).map(mode=>configuredMemoryConsumer(options.settings,mode)).filter((value): value is string=>value!==undefined),configuredTaskVerifierConsumer(options.settings)])],
       consolidation:{enabled:options.settings.memory_consolidation_enabled,timezone:options.settings.memory_consolidation_timezone,hour:options.settings.memory_consolidation_hour},
       gateway:memoryGateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},
       ...(local?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),

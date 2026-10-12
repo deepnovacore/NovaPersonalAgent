@@ -1,3 +1,4 @@
+import '../personal/models.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../connection/session.dart';
@@ -97,6 +98,7 @@ final class ConversationController extends ChangeNotifier {
           text: row['text'],
           finalText: true,
           id: row['id'] as String?,
+          scheduleRef: parseScheduleReference(row['schedule_ref']),
         );
       }
     }

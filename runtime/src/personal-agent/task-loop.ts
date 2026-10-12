@@ -27,6 +27,7 @@ export class TaskCheckError extends Error {
 export interface TaskLoopPorts {
   ready?(task: TaskRecord): boolean
   evaluate(task: TaskRecord, signal: AbortSignal): Promise<TaskDecision>
+  validateEvidence?(task:TaskRecord):Promise<boolean>
   execute(task: TaskRecord, instruction: string, fence: TaskFence): Promise<void>
   publish?(task: TaskRecord): Promise<void>
   syncTodo(task: TaskRecord): Promise<'synced' | 'conflict'>
@@ -99,7 +100,7 @@ export class TaskLoop {
       const decision = await this.ports.evaluate(task, this.#stop.signal)
       this.#stop.signal.throwIfAborted()
       applying = true
-      task = await this.tasks.applyDecision(fence, decision)
+      task = await this.tasks.applyDecision(fence, decision, undefined, this.ports.validateEvidence?()=>this.ports.validateEvidence!(task):undefined)
       if (decision.kind === 'reconcile') {
         this.#again.add(taskId)
         return

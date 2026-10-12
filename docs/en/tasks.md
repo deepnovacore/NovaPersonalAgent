@@ -39,3 +39,21 @@ From a Todo, "Send to executor" turns it into a Task. "View task and results" op
 Nova keeps roughly the last 200 finished Tasks in the Workbench; older ones are pruned automatically as new ones complete. Pruning only removes the Workbench record — it does not touch anything an executor already produced in your Workspace.
 
 [Workbench](workbench.md) · [Sources and connectors](sources-and-connectors.md) · [Glossary](glossary.md) · [Executors](executors/overview.md)
+
+## Scheduled Agent Tasks
+
+Open **Tasks → Scheduled tasks** to create a rule manually, or ask Nova to create one in chat. Both entry points use the same Runtime service. A rule stores the instruction, acceptance criteria, reading scope and timezone. Each occurrence creates its own Agent Task and isolated conversation; it does not inject a fabricated user message into your current chat.
+
+Two suggested tasks are available: **Daily priorities and risk reminders** (09:00 daily), and **Weekly key-project progress** (09:00 Monday). Choose “Set up task” to edit its content and timing; it becomes active only after you save. The weekly report distinguishes dated progress from a current snapshot and reports missing history explicitly.
+
+Choose once, daily or selected weekdays, with an IANA timezone such as `Asia/Shanghai`. The editor previews the first occurrence. Daylight-saving gaps are skipped for recurring rules and rejected for one-time rules; repeated local times run once, at their first occurrence. Moving the system clock backwards does not replay a slot.
+
+The Runtime must be online: a desktop running in the background or an online deployed server is enough; the phone need not stay open. The scheduler checks approximately once per minute, so execution can start after the displayed minute. After downtime, it catches up only the most recent occurrence within two hours, without replaying a backlog. A rule cannot overlap itself; at most two scheduled tasks are prepared at a time, including waiting tasks.
+
+Each run reads fresh authorized App data. It can use selected Todos, Goals, Agent Tasks and authorized memory or knowledge; web search is optional. These runs are read-only. A completed result can open an ordinary discussion, or you can explicitly save it as a Todo or Idea and link a Goal. The Agent does not automatically edit your App records or send messages to others. Revoked or changed evidence is rechecked before further model use and result adoption.
+
+**Pause schedule** stops future occurrences; **Stop active task** cancels the current Task. Editing a rule affects future runs, while an active run keeps its original instruction. If a restart leaves an execution outcome uncertain, Nova waits for reconciliation rather than blindly repeating it. Run history links the rule, occurrence and Task.
+
+The scheduler keeps a durable run ledger beside the personal store and a verified `*.before-schedules.json` backup before introducing hidden schedule conversations. To roll back, stop the Runtime first and preserve the personal, schedules, Tasks and per-run blackboards together. Do not delete the ledger to retry a run: doing so destroys its duplicate-execution protection. Older clients without the scheduling capability keep their existing Task interface.
+
+Verified scheduled reports are delivered as readable messages in the main conversation. Follow up there without opening a separate topic; the attached card leads to run history and schedule controls. Delivery does not switch your selected conversation. “Discuss result” returns to the main conversation, with source permissions checked again before supplying the report to its model.

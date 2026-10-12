@@ -511,7 +511,7 @@ export interface BuildQwenRealtimeProviderOptions {
   readonly idFactory: () => string
   readonly now: () => number
   readonly executorApproval: boolean
-  readonly modules?: {readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean; readonly gui?: boolean}
+  readonly modules?: {readonly schedules?: boolean; readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean; readonly gui?: boolean}
 }
 
 function buildIntegratedWireProvider(options: BuildQwenRealtimeProviderOptions, profile?: IntegratedWireProfile): QwenAudioRealtimeAdapter {

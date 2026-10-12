@@ -142,3 +142,19 @@ test('session transfer refuses unknown work and unknown input independently of t
  for(const uncertainty of ['work','input'] as const){const root=await mkdtemp(join(await realpath(tmpdir()),'task-review-')),tasks=new TaskService(join(root,'tasks.json'))
  try{await tasks.open();const first=await tasks.delegate('first',input),second=await tasks.delegate('second',input);await tasks.bindWork(fence(first.id),'work','session');await tasks.recordWorkOutcome('work',uncertainty==='work'?'unknown':'ok',{});if(uncertainty==='input')await tasks.input('unknown',fence(first.id),{kind:'nova'},'session','possibly sent',async()=> 'unknown');await tasks.cancel('cancel',fence(first.id),{kind:'nova'});await assert.rejects(tasks.bindWork(fence(second.id),'second-work','session'),/session_active/);assert.deepEqual(tasks.get(first.id).session_ids,['session']);assert.deepEqual(tasks.get(second.id).session_ids,[])}finally{await tasks.close();await rm(root,{recursive:true,force:true})}}
 })
+
+test('only a lost delivery can be explicitly reconciled after restart',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'task-lost-delivery-')),path=join(root,'tasks.json')
+ let tasks=new TaskService(path)
+ try{await tasks.open();const task=await tasks.delegate('create',input),f=fence(task.id)
+  await tasks.beginDelivery(f,'delivery');await tasks.wait(f,'task_delivery_uncertain')
+  assert.equal(tasks.needsReconcile(task.id),false)
+  await assert.rejects(tasks.reconcile('live',f,{kind:'user',client_id:'test'},'not_run'),/execution_in_flight/)
+  await tasks.close();tasks=new TaskService(path);await tasks.open();await tasks.recoveryWait(task.id,'task_delivery_uncertain')
+  assert.equal(tasks.needsReconcile(task.id),true)
+  const settled=await tasks.reconcile('lost',f,{kind:'user',client_id:'test'},'not_run')
+  assert.equal(settled.pending_delivery,undefined);assert.equal(tasks.hasUnresolvedExecution(task.id),false)
+  assert.equal((await tasks.reconcile('lost',f,{kind:'user',client_id:'test'},'not_run')).control_revision,settled.control_revision)
+  assert.equal((await tasks.continue('continue',{...f,control_revision:settled.control_revision},{kind:'user',client_id:'test'})).phase,'queued')
+ }finally{await tasks.close();await rm(root,{recursive:true,force:true})}
+})
