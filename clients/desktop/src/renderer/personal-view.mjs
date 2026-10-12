@@ -1,3 +1,4 @@
+import {renderScheduledTasksPage} from './scheduled-tasks-page.mjs'
 import {summarizeTasks} from './task-banner.mjs'
 import {createStartupNotice} from './startup-notice.mjs'
 import {t} from './locale.mjs'
@@ -16,7 +17,8 @@ const el=(tag,text,className)=>{const node=document.createElement(tag);if(text!=
 const PAGE_TITLE=Object.fromEntries(RAIL_ITEMS.map(item=>[item.id,`${item.label} · ${item.title}`]))
 /** The workbench: icon rail, personal-object pages in the middle, Nova as a collapsible pane on the right. */
 export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,applyPresentation,speakingLevel}) {
- const lifeLocal={},newsLocal={},preferencesLocal={},taskLocal=new Map()
+ const lifeLocal={},newsLocal={},preferencesLocal={},taskLocal=new Map(),scheduleLocal={}
+ let taskTab='tasks',scheduleView=null
  let unreadProjection=null
  const root=el('main',undefined,'workbench personal-workspace');root.id='personal-workspace';document.body.prepend(root)
  const pendingActions=new Set()
@@ -75,7 +77,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
  const waiting=el('div',undefined,'presentation-waiting');workspace.append(waiting)
  const panel=el('div',undefined,'workbench-page');workspace.append(panel)
  // Chat pane
- const chat=mountChatPane(root,{c,el,button,run,api,chips,openTask,speakingLevel,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.title=chatToggle.textContent;chatToggle.setAttribute('aria-expanded',String(value))}})
+ const chat=mountChatPane(root,{c,el,button,run,api,chips,openTask,openSchedule:id=>{selected='tasks';taskTab='schedules';scheduleLocal.selected=id;scheduleLocal.detail=null;renderPanel();void c.command('schedules.get',{id}).then(value=>{if(scheduleLocal.selected===id){scheduleLocal.detail=value;scheduleLocal.history=null;renderPanel()}}).catch(error=>{scheduleLocal.error=error.message;renderPanel()})},speakingLevel,onOpenChange:value=>{root.dataset.chatOpen=String(value);chatToggle.textContent=value?'收起对话栏':'展开对话栏';chatToggle.title=chatToggle.textContent;chatToggle.setAttribute('aria-expanded',String(value))}})
  chat.setOpen(true)
  // The orb carries no mode buttons: double-click expands, the context menu switches modes, and sleep is the only voice switch.
  const orbExtras=el('div',undefined,'personal-orb-extras');document.querySelector('#shell').append(orbExtras)
@@ -103,7 +105,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const s=c.snapshot,sourceStates=s?.sources?.map(source=>[source.id,source.state,source.health,source.processing_consent_required])
   if(['todos','ideas','goals'].includes(selected))return JSON.stringify([selected,s?.life,s?.understanding,s?.workbench_context,sourceStates,c.connected])
   if(selected==='feeds')return JSON.stringify([selected,s?.news,s?.profile_preparation,c.connected])
-  if(selected==='tasks')return JSON.stringify([selected,durableTasks(),tasks(),results(),c.connected])
+  if(selected==='tasks')return JSON.stringify([selected,taskTab,s?.schedules,s?.capabilities?.schedules,durableTasks(),tasks(),results(),c.connected])
   return JSON.stringify([selected,s?.life,s?.memory,s?.profile_preparation,s?.news,s?.capabilities,c.connected])
  }
  function renderPanel(){
@@ -113,7 +115,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const edit=focusIndex>=0?{index:focusIndex,key:focused.getAttribute?.('data-editor-key'),tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
   const panelScroll=panel.scrollTop
   for(const details of panel.querySelectorAll('details')){const local=taskLocal.get(details.dataset.workId);if(local)local.expanded=details.open}
-  bodyObserver?.disconnect();disposeSources();panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
+  bodyObserver?.disconnect();disposeSources();scheduleView?.dispose();scheduleView=null;panel.replaceChildren();rail.select(selected);pageTitle.textContent=PAGE_TITLE[selected]??selected
   const s=c.snapshot;const caps=s?.capabilities??{}
   const candidateKind=({todos:'todo',ideas:'idea',goals:'goal',profile:'profile'})[selected]
   const pending=el('section',undefined,'pending-group');pending.setAttribute('aria-label','待确认')
@@ -131,7 +133,9 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   }else if(selected==='feeds'){
    renderNews(panel,{news:s?.news,warmup:s?.profile_preparation,preferencesLocal,delegate:text=>chat.focusDraft(text),command:(m,p)=>c.command(m,p),button,local:newsLocal,rerender:renderPanel,profile:()=>{selected='profile';renderPanel()},openArticle:url=>api.personal.openArticle(url),openSettings,connected:c.connected})
   }else if(selected==='tasks'){
-   renderTasksPage(panel,{tasks,durableTasks,openTask,taskAction,results,card,chips,button,local:taskLocal,rerender:renderPanel,askProgress:async task=>{
+   if(caps.schedules){const tabs=el('div',undefined,'schedule-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label',t('任务类型'));for(const [key,label]of [['tasks','任务'],['schedules','定时任务']]){const tab=button(t(label),()=>{taskTab=key;renderPanel()},tabs);tab.setAttribute('role','tab');tab.setAttribute('aria-selected',String(taskTab===key))}panel.append(tabs)}
+   if(caps.schedules&&taskTab==='schedules')scheduleView=renderScheduledTasksPage(panel,{snapshot:s,command:(...args)=>c.command(...args),openTask,openResult:async run_id=>{await c.command('schedules.open_result',{run_id});chat.reveal()},local:scheduleLocal,connected:c.connected,rerender:renderPanel})
+   else renderTasksPage(panel,{tasks,durableTasks,openTask,taskAction,results,card,chips,button,local:taskLocal,rerender:renderPanel,askProgress:async task=>{
     const result=await c.command('conversations.open_work',{work_id:task.work_id}),id=result?.selected_id
     if(typeof id!=='string'||!id||!Array.isArray(result?.items)||!result.items.some(item=>item?.id===id))throw Error(t('原任务对话未确认，请刷新后重试。'))
     const target=c.state(id),prompt=t('请告诉我「{0}」（任务 {1}）的最新进展。',task.title,task.work_id)

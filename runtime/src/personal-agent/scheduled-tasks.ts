@@ -48,7 +48,7 @@ export class ScheduleService{
  }
  history(scheduleId:string,cursor:string|null=null,limit=20){
   this.get(scheduleId);z.number().int().min(1).max(100).parse(limit)
-  const runs=this.#state.runs.filter(run=>run.schedule_id===scheduleId),offset=cursor?runs.findIndex(run=>run.run_id===cursor)+1:0
+  const runs=this.#state.runs.filter(run=>run.schedule_id===scheduleId).reverse(),offset=cursor?runs.findIndex(run=>run.run_id===cursor)+1:0
   if(cursor&&offset===0)throw Error('history_cursor_expired')
   const items=structuredClone(runs.slice(offset,offset+limit))
   return {items,next_cursor:offset+limit<runs.length?items.at(-1)!.run_id:null}

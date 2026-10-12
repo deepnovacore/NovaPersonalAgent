@@ -34,7 +34,7 @@ test('parallel ticks claim one slot; edits freeze existing runs and active runs 
  await s.update('edit',created.id,1,{...input,goal:'New goal'})
  assert.equal(s.getRun(run.run_id).input.goal,input.goal)
  set('2026-10-13T02:30:00Z');assert.equal((await s.claimDue()).length,0)
- assert.equal(s.history(created.id).items.at(-1)?.terminal_summary?.outcome,'skipped')
+ assert.equal(s.history(created.id).items[0]?.terminal_summary?.outcome,'skipped')
  await s.delete('delete',created.id,2)
  assert.equal(s.getRun(run.run_id).stage,'claimed');assert.equal(s.get(created.id).archived,true)
 }))
