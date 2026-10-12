@@ -1,3 +1,5 @@
+import {t} from './locale.mjs'
+import {renderCardTags} from './card-tags.mjs'
 import {renderInterests,renderWarmup} from './profile-preferences.mjs'
 import {attachSources,attachSourceTags} from './source-popover.mjs'
 const el=(tag,text,className)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n}
@@ -16,15 +18,18 @@ export function renderLife(panel,{kind,state,command,button,local,rerender,deleg
  const form=el('div');form.className='life-form';form.hidden=!formOpen;panel.append(form)
  field(form,'title',`${labels[kind]}标题`);field(form,'note',kind==='goal'?'为什么重要':'补充说明',true)
  if(kind==='todo')field(form,'due','到期日期')
+ const importance=el('select');importance.setAttribute('aria-label',t('重要性'));importance.pendingKey=`life:${draft.id??kind+':new'}`
+ for(const [value,label]of [['normal','普通'],['high','重要']]){const option=el('option',t(label));option.value=value;importance.append(option)}importance.value=draft.importance??'normal';importance.addEventListener('change',()=>{draft.importance=importance.value});const importanceLabel=el('label',t('重要性'));importanceLabel.append(importance);form.append(importanceLabel)
  if(kind==='goal')field(form,'success_criteria','怎样算达成',true)
  else{const wrapper=el('label','关联目标'),select=el('select');select.pendingKey=`life:${draft.id??kind+':new'}`;select.setAttribute('aria-label','关联目标');for(const g of [{id:'',title:'不关联'},...(state?.goals??[])]){const opt=el('option',g.title);opt.value=g.id;select.append(opt)}select.value=draft.goal_id??'';select.addEventListener('change',()=>{draft.goal_id=select.value});wrapper.append(select);form.append(wrapper)}
- button(draft.id?'保存修改':'保存',async()=>{const params={op:draft.id?'update':'create',kind,title:draft.title,note:draft.note};if(draft.id)Object.assign(params,{id:draft.id,expected_version:draft.version});if(kind==='todo')params.due=draft.due||null;if(kind==='goal')params.success_criteria=draft.success_criteria;else params.goal_id=draft.goal_id||null;await command('life.mutate',params);delete local[formKey];delete local[openKey];rerender()},form,`life:${draft.id??kind+':new'}`)
+ button(draft.id?'保存修改':'保存',async()=>{const params={op:draft.id?'update':'create',kind,title:draft.title,note:draft.note};if(draft.id)Object.assign(params,{id:draft.id,expected_version:draft.version});if(kind==='todo')params.due=draft.due||null;if(draft.importance)params.importance=draft.importance;if(kind==='goal')params.success_criteria=draft.success_criteria;else params.goal_id=draft.goal_id||null;await command('life.mutate',params);delete local[formKey];delete local[openKey];rerender()},form,`life:${draft.id??kind+':new'}`)
  if(draft.id)button('取消编辑',()=>{delete local[formKey];delete local[openKey];rerender()},form,`life:${draft.id}`)
  const visible=rows.filter(r=>local[kind+':all']||!['done','cancelled','archived','completed'].includes(r.status))
  const group=el('section',undefined,'card-group');group.setAttribute('aria-label',`我的${labels[kind]}`);group.append(el('h3',`我的${labels[kind]} · ${visible.length}`,'section-label'));panel.append(group)
  if(!visible.length&&state&&!rows.length&&suggested)group.append(el('p',{todo:'你自己记下的待办会放在这里；上面的建议不会自动加进来。',idea:'你自己记下的想法会放在这里；下面的建议不会自动加进来。',goal:'你自己定下的目标会放在这里；下面的方向不会自动加进来。'}[kind],'hint'))
  else if(!visible.length){const empty=el('section',undefined,'workbench-empty empty-state');const copy=!state?['正在读取已保存的内容','稍后会在这里显示你的记录。']:rows.length?{todo:['当前没有进行中的待办','已完成的记录可以从上方展开。'],idea:['当前没有保留的想法','已归档的想法可以从上方展开。'],goal:['当前没有推进中的目标','已归档的目标可以从上方展开。']}[kind]:{todo:['还没有待办','想起一件要做的事，可以随时记在这里。'],idea:['还没有保存想法','有个念头时，先用一句话记下来就好。'],goal:['还没有设定目标','可以先写下想推进的方向，以及怎样算达成。']}[kind];empty.append(el('h3',copy[0]),el('p',copy[1]));group.append(empty)}
  for(const row of visible){const card=el('article');card.className='personal-card life-card';card.dataset.lifeId=row.id;const note=el(clampable&&row.note?'button':'p',row.note,clampable&&row.note?'card-body':undefined);if(clampable&&row.note)clampable(note,`life:${kind}:${row.id}`,row.title);card.append(el('h3',row.title),note);group.append(card)
+  if(row.importance==='high')renderCardTags(card,[{label:'重要',tone:'importance'}],{el})
   attachSourceTags(card,row.sources,{autoRecorded:row.auto_recorded===true,sourceChanged:row.source_changed===true,openArticle})
   const meta=el('div',undefined,'chips');card.append(meta)
   if(row.due)meta.append(el('span',`到期：${row.due}`))

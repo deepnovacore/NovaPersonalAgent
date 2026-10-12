@@ -40,13 +40,6 @@ test('accepted adapter input followed by unclassified status persistence error r
  m.view.update({...owned,input_receipt:{request_id:request,status:'accepted'}});assert.equal(draft.value,'')
 })
 
-test('single-panel task inspection uses the same breakpoint as the chat overlay drawer',async()=>{
- const {readFile}=await import('node:fs/promises'),css=await readFile(new URL('../src/renderer/workbench.css',import.meta.url),'utf8')
- const drawer=css.match(/@media\s*\(max-width:\s*(\d+)px\)\{(?:(?!@media)[\s\S])*?\.chat-pane\{position:absolute/)[1]
- const detail=css.match(/@media\s*\(max-width:\s*(\d+)px\)\s*\{\s*\.workbench\[data-task-detail/)[1]
- assert.equal(detail,drawer);assert.ok(Number(detail)>=959)
-})
-
 test('event refresh uses the exact received cursor and retains preceding public events',async()=>{
  const m=mount(async()=>task({events:{items:[{seq:9,text:'New result'}],next:9}}))
  m.view.update(task({events:{items:[{seq:7,text:'Viewed result'}],next:7}}));m.view.receive({type:'personal.state',tasks:[]});await new Promise(r=>setImmediate(r))

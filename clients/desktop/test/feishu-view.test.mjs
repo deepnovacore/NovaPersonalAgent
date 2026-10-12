@@ -9,13 +9,14 @@ import {setLanguage} from '../src/renderer/locale.mjs'
 
 class Node {
  constructor(tag,text){this.tag=tag;this.text=text;this.children=[];this.listeners={};this.dataset={};this.classList={add:()=>{}}}
- append(...children){this.children.push(...children)}
- prepend(...children){this.children.unshift(...children)}
+ append(...children){for(const child of children){if(child.parentElement)child.parentElement.children=child.parentElement.children.filter(node=>node!==child);child.parentElement=this}this.children.push(...children)}
+ prepend(...children){for(const child of children){if(child.parentElement)child.parentElement.children=child.parentElement.children.filter(node=>node!==child);child.parentElement=this}this.children.unshift(...children)}
  replaceChildren(...children){this.children=children}
  setAttribute(key,value){this[key]=value}
  addEventListener(name,fn){this.listeners[name]=fn}
  querySelectorAll(tag){return this.children.flatMap(node=>[...(node.tag===tag?[node]:[]),...node.querySelectorAll(tag)])}
  querySelector(tag){return this.querySelectorAll(tag)[0]}
+ contains(node){return this===node||this.children.some(child=>child.contains(node))}
  focus(){}
 }
 function view(state,overrides={}){
@@ -94,7 +95,7 @@ test('read-only project entries have no correction or forget controls',async()=>
  view.controller.connect()
  const entry=(id,editable)=>({id,editable,version:1,topic:id,content:'项目进展',kind:'topic',status:'active',source_refs:[]})
  view.receive({type:'personal.state',revision:1,memory:{entries:[entry('只读项目',false),entry('个人记忆',true)]},capabilities:{memory:{list:true,correct:true,forgetEntry:true}}})
- await body.querySelectorAll('button').find(button=>button.children.some(c=>c.className==='rail-label'&&c.textContent==='Profile')).listeners.click()
+ await body.querySelectorAll('button').find(button=>button.children.some(c=>c.className==='workspace-tab-label'&&c.textContent==='Profile')).listeners.click()
  assert.ok(body.querySelectorAll('details').some(node=>node.className==='memory-section'),'memory lives under Profile as a disclosure')
  const articles=body.querySelectorAll('article')
  const buttons=topic=>articles.find(article=>article.querySelector('h4')?.textContent===topic).querySelectorAll('button').map(button=>button.textContent)
@@ -185,17 +186,16 @@ test('text captions never duplicate persisted users; voice captions and generati
  assert.equal(body.querySelectorAll('p').filter(n=>n.textContent==='live voice').length,1)
 })
 
-test('the Nova pane starts open and collapses locally with accessible state',async()=>{
+test('Nova stays visible while all contextual tabs live in the right topbar',async()=>{
  const body=new Node('body'),shell=new Node('div');body.append(shell)
  globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),visibilityState:'hidden',hasFocus:()=>false,createTextNode:text=>new Node('text',text),querySelector:()=>shell}
  const calls=[];mountPersonalView({send:frame=>(calls.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}})
- const pane=body.querySelectorAll('aside').find(node=>node.id==='chat-pane'),root=body.querySelector('main'),toggle=body.querySelectorAll('button').find(node=>node.className==='chat-toggle')
- assert.equal(body.querySelectorAll('select').find(node=>node['aria-label']==='显示模式').disabled,false);assert.equal(pane.hidden,false);assert.equal(root.dataset.chatOpen,'true');assert.equal(toggle['aria-expanded'],'true');assert.equal(toggle.textContent,'收起对话栏')
- await toggle.listeners.click();assert.equal(pane.hidden,true);assert.equal(root.dataset.chatOpen,'false');assert.equal(toggle['aria-expanded'],'false');assert.equal(toggle.textContent,'展开对话栏')
- const close=body.querySelectorAll('button').find(node=>node.className==='chat-close')
- await toggle.listeners.click();assert.equal(pane.hidden,false);await close.listeners.click();assert.equal(pane.hidden,true);assert.equal(calls.length,0)
- const rail=body.querySelectorAll('button').filter(node=>node.className==='rail-item').map(node=>node.children.find(c=>c.className==='rail-label')?.textContent)
- assert.deepEqual(rail,['Todos','Ideas','Goals','Feeds','任务','Profile','收起','设置'])
+ const pane=body.querySelectorAll('aside').find(node=>node.id==='chat-pane'),parent=pane.parentElement
+ assert.equal(body.querySelectorAll('select').find(node=>node['aria-label']==='显示模式').disabled,false)
+ for(const page of ['todos','profile','timeline']){await body.querySelectorAll('button').find(node=>node.dataset.page===page).listeners.click();assert.equal(pane.hidden,false);assert.equal(pane.parentElement,parent)}
+ assert.equal(body.querySelectorAll('button').some(node=>node.className==='chat-toggle'||node.className==='chat-close'),false)
+ const tabs=body.querySelectorAll('button').filter(node=>node.className==='workspace-tab').map(node=>node.children.find(c=>c.className==='workspace-tab-label')?.textContent)
+ assert.deepEqual(tabs,['Timeline','Todos','Ideas','Goals','Feeds','任务','Profile']);assert.equal(calls.length,0)
 })
 
 test('guide progress follows actual application and OAuth state, with an explicit waiting handoff',()=>{
@@ -245,7 +245,7 @@ test('permanent memory deletion requires its own confirmation and reports incomp
  globalThis.window={addEventListener(){}};globalThis.document={addEventListener(){},body,createElement:tag=>new Node(tag),createElementNS:(_,tag)=>new Node(tag),visibilityState:'hidden',hasFocus:()=>false,createTextNode:text=>new Node('text',text),querySelector:()=>shell}
  const sent=[],view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[],api:{orbMenu:{},personal:{}}});view.controller.connect()
  view.receive({type:'personal.state',revision:1,memory:{entries:[{id:'selected',version:3,content:'合成记忆',kind:'preference',status:'active',source_refs:[]}]},capabilities:{memory:{list:true,purgeEntry:true}}})
- const click=label=>body.querySelectorAll('button').find(node=>node.textContent===label||node.children.some(c=>c.className==='rail-label'&&c.textContent===label)).listeners.click()
+ const click=label=>body.querySelectorAll('button').find(node=>node.textContent===label||node.children.some(c=>c.className==='workspace-tab-label'&&c.textContent===label)).listeners.click()
  await click('Profile');await click('彻底删除')
  assert.equal(sent.filter(frame=>frame.method==='memory.purge').length,0)
  const pending=click('确认彻底删除');const request=sent.at(-1)

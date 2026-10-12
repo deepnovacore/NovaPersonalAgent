@@ -1,6 +1,6 @@
 # Workbench
 
-The Workbench is Nova's main window: Todos, Ideas, Goals, Feeds, Tasks and Profile sit on the left, and the conversation with Nova sits on the right.
+Workbench is Nova's main window. It opens a wide, persistent Nova conversation with a collapsible Timeline sidebar. The rail also opens Todos, Ideas, Goals, Feeds, Tasks and Profile.
 
 ## Layout
 
@@ -8,6 +8,8 @@ The Workbench is Nova's main window: Todos, Ideas, Goals, Feeds, Tasks and Profi
 
 | Rail item | Holds |
 |---|---|
+| Nova | Persistent main conversation with proactive reminders and task receipts |
+| Timeline | Todo due dates and a separate group for undated items |
 | Todos | Things to do, each open, doing, waiting, done or cancelled |
 | Ideas | Loose thoughts you may later turn into a Todo or a Goal |
 | Goals | Outcomes you're tracking, with success criteria and progress from their linked Todos |
@@ -46,3 +48,13 @@ Articles ranked to your interests, split into "For you" and "Saved". Until Nova 
 A short free-text description of you, edited directly or filled in gradually as Nova proposes additions from conversation.
 
 [Tasks](tasks.md) · [Sources and connectors](sources-and-connectors.md) · [Personal memory](personal-memory.md) · [Features](features.md)
+
+## Nova main conversation and Timeline
+
+Workbench opens Nova by default. The main conversation persists and displays proactive reminders and task receipts. Task details, dedicated conversations and voice ownership stay independent. Collapse the Timeline sidebar or open the full Timeline from the rail.
+
+Timeline uses actual Todo due dates and separates undated waiting items. Blue labels indicate time, rose labels indicate importance explicitly marked by you, purple indicates waiting, green indicates progress and amber indicates conditions such as past due. Each color has a text label. Set importance in the Todo editor or full Timeline; it updates the original item. Calendar coverage has not been confirmed, so this view does not represent your complete schedule.
+
+Todo `due` is a nullable date (`YYYY-MM-DD`); creation and update timestamps are not deadlines. Direct-mention Todos from Feishu may carry extracted due dates and remain undated when no date is established. This view organizes dates and does not calculate conflicts between time slots.
+
+Select an item title to reference it in Nova. Draft plan and follow-up actions request a concrete deliverable using that item. References are removable and their versions are checked at send time; drafts and existing execution approvals are preserved. Discuss an article on its own or select a Todo or Goal to explore applications. Interest matching does not automatically create personal-item relationships.

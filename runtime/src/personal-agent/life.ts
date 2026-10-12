@@ -9,7 +9,8 @@ import type {EvaluatedCandidate} from '../understanding/candidates.js'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 export const newsArticleSchema=z.object({article_id:z.string().min(1).max(512),source_id:z.string().min(1).max(256),url:z.string().url().max(4096).refine(value=>['https:','http:'].includes(new URL(value).protocol),'news_web_url_required'),content_hash:z.string().min(1).max(256),title:z.string().max(300),summary:z.string().max(1500),published_at:z.string().nullable()}).strict()
 const newsSourceSchema=newsArticleSchema.extend({action:z.literal('user_conversion'),converted_at:z.string().datetime()})
-const fields={sources:z.array(sourceTagSchema).max(256).optional(),provenance_refs:z.array(z.string().max(600)).max(256).optional(),auto_recorded:z.boolean().optional(),source_changed:z.boolean().optional(),news_source:newsSourceSchema.optional(),id:z.string(),version:z.number().int().nonnegative(),title:z.string().trim().min(1).max(200),note:z.string().max(4000),created_at:z.string(),updated_at:z.string()}
+const importanceSchema=z.enum(['normal','high'])
+const fields={importance:importanceSchema.optional(),sources:z.array(sourceTagSchema).max(256).optional(),provenance_refs:z.array(z.string().max(600)).max(256).optional(),auto_recorded:z.boolean().optional(),source_changed:z.boolean().optional(),news_source:newsSourceSchema.optional(),id:z.string(),version:z.number().int().nonnegative(),title:z.string().trim().min(1).max(200),note:z.string().max(4000),created_at:z.string(),updated_at:z.string()}
 const todoSchema=z.object({...fields,status:z.enum(['open','doing','waiting','done','cancelled']),due:z.string().date().nullable(),goal_id:z.string().nullable(),idea_id:z.string().nullable()})
 const ideaSchema=z.object({...fields,status:z.enum(['active','archived']),goal_id:z.string().nullable()})
 const goalSchema=z.object({...fields,status:z.enum(['active','paused','completed','archived']),success_criteria:z.string().max(2000),idea_id:z.string().nullable()})
@@ -27,8 +28,8 @@ export const emptyLifeState=():LifeState=>({todos:[],ideas:[],goals:[],profile:{
 const kind=z.enum(['todo','idea','goal'])
 export const lifeInputSchema=z.discriminatedUnion('op',[
  z.object({op:z.literal('from_news'),kind,title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),article:newsArticleSchema}).strict(),
- z.object({op:z.literal('create'),kind,title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
- z.object({op:z.literal('update'),kind,id:z.string(),expected_version:z.number().int().nonnegative(),title:z.string().trim().min(1).max(200).optional(),note:z.string().max(4000).optional(),status:z.string().optional(),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
+ z.object({op:z.literal('create'),kind,importance:importanceSchema.optional(),title:z.string().trim().min(1).max(200),note:z.string().max(4000).default(''),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
+ z.object({op:z.literal('update'),kind,id:z.string(),expected_version:z.number().int().nonnegative(),importance:importanceSchema.optional(),title:z.string().trim().min(1).max(200).optional(),note:z.string().max(4000).optional(),status:z.string().optional(),goal_id:z.string().nullable().optional(),due:z.string().date().nullable().optional(),success_criteria:z.string().max(2000).optional()}).strict(),
  z.object({op:z.literal('convert'),id:z.string(),target:z.enum(['todo','goal']),expected_version:z.number().int().nonnegative()}).strict(),
  z.object({op:z.literal('undo_create'),id:z.string(),expected_version:z.literal(1)}).strict(),
  z.object({op:z.literal('profile'),about:z.string().max(5000),expected_version:z.number().int().nonnegative()}).strict(),
@@ -39,7 +40,7 @@ export function applyLifeMutation(state:LifeState,raw:unknown,requestId:string,n
  const p=lifeInputSchema.parse(raw),payload=hash(JSON.stringify(p)),next=structuredClone(state),prior=next.receipts[requestId]
  if(prior){if(prior.hash!==payload)throw Error('request_id_conflict');return {state:next,result:prior.result}}
   let result:{id:string;version:number}
-  const base=(title:string,note:string)=>({id:hash(requestId),title,note,version:1,created_at:now,updated_at:now})
+  const base=(title:string,note:string)=>({...('importance' in p&&p.importance?{importance:p.importance}:{}),id:hash(requestId),title,note,version:1,created_at:now,updated_at:now})
   if('kind'in p){
    if(p.kind!=='todo'&&'due'in p&&p.due)throw Error('due_only_for_todo')
    if(p.kind!=='goal'&&'success_criteria'in p&&p.success_criteria)throw Error('criteria_only_for_goal')

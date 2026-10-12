@@ -16,7 +16,7 @@ test('actions follow kind and lifecycle',()=>{
  assert.deepEqual(buttons(renderFeedCard(h.parent,item(),h)),['讨论这个建议','稍后','忽略'])
  assert.deepEqual(buttons(renderFeedCard(h.parent,item({kind:'question',lifecycle:'resolved'}),h)),['回复这个问题'])
  assert.equal(feedActionLabel(item({kind:'task_result',task_ref:{work_id:'w'}})),'查看任务结果');assert.equal(feedActionLabel(item({task_ref:{work_id:'w'}})),'查看任务进展');assert.equal(feedActionLabel(item({kind:'change'})),'查看变化')
- const card=h.parent.children[0];assert.equal(card.dataset.feedId,'f1');assert.deepEqual(card.children[2].children.map(n=>n.textContent),['建议','待处理'])
+ const card=h.parent.children[0];assert.equal(card.dataset.feedId,'f1');assert.equal(card.children.some(n=>n.className==='card-tags'),false)
 })
 test('dismissed cards keep content but expose no actions',()=>{
  const h=harness();const card=renderFeedCard(h.parent,item({user_state:'dismissed'}),h)
@@ -38,9 +38,9 @@ test('primary action opens the feed conversation with its label; snooze and dism
 })
 test('prepared briefing text is kept as the card body and differs from why_now',()=>{
  const h=harness();const bodies=[];const card=renderFeedCard(h.parent,item({kind:'briefing',prepared:{text:'## 今日前瞻\n- 10:00 评审',trust:'untrusted_external',evidence_refs:[]},why_now:'每日简报'}),{...h,body:text=>{bodies.push(text);return new Node('div',text,'md')}})
- assert.deepEqual(bodies,['## 今日前瞻\n- 10:00 评审']);assert.equal(card.children[1].className,'md');assert.equal(card.children[2].textContent,'每日简报')
+ assert.deepEqual(bodies,['## 今日前瞻\n- 10:00 评审']);assert.equal(card.children[1].textContent,'每日简报');assert.equal(card.children[2].className,'md')
  const same=renderFeedCard(h.parent,item({prepared:{text:'W'}}),h);assert.equal(same.children[1].className,'feed-why','identical prepared text is not duplicated')
- const plain=renderFeedCard(h.parent,item({prepared:{text:'plain body'}}),{...h,body:undefined});assert.equal(plain.children[1].className,'feed-body')
+ const plain=renderFeedCard(h.parent,item({prepared:{text:'plain body'}}),{...h,body:undefined});assert.equal(plain.children[2].className,'feed-body')
 })
 test('sendPresented is independent of rendering and retries after failure',async()=>{
  const h=harness();const it=item()
@@ -48,4 +48,28 @@ test('sendPresented is independent of rendering and retries after failure',async
  h.setFail(true);const other=item({id:'f9'});sendPresented(other,h);await new Promise(r=>setImmediate(r));assert.equal(h.presented.has('f9'),false)
  h.setFail(false);assert.equal(sendPresented(other,h),true)
  assert.equal(sendPresented(item({id:'done',delivery:{presented_at:'x'}}),h),false);assert.equal(sendPresented(it,{presented:undefined,command:h.command}),false)
+})
+
+
+test('feed user feedback is distinct from task lifecycle',()=>{
+ const h=harness(),tags=card=>card.children.flatMap(n=>n.className==='card-tags'?n.children.map(tag=>tag.textContent):[])
+ assert.deepEqual(tags(renderFeedCard(h.parent,item({user_state:'snoozed',snooze_until:new Date(Date.now()+3600000).toISOString()}),h)),['稍后提醒'])
+ assert.deepEqual(tags(renderFeedCard(h.parent,item({user_state:'dismissed'}),h)),['已忽略'])
+ assert.deepEqual(tags(renderFeedCard(h.parent,item({user_state:'snoozed',snooze_until:'2000-01-01T00:00:00Z'}),h)),[])
+})
+
+test('a repeated prepared paragraph is not duplicated even with surrounding whitespace',()=>{
+ const h=harness(),card=renderFeedCard(h.parent,item({why_now:'Same material',prepared:{text:'  Same material\n'}}),h)
+ assert.equal(card.children.filter(node=>node.className==='feed-body').length,0)
+ assert.equal(card.children.filter(node=>node.className==='feed-why').length,1)
+})
+test('inactive and expired suggestions explain their disabled action; task receipts still open results',()=>{
+ for(const overrides of [{lifecycle:'invalidated'},{lifecycle:'resolved'},{expires_at:'2000-01-01T00:00:00Z'}]){
+  const h=harness(),card=renderFeedCard(h.parent,item(overrides),h)
+  assert.ok(card.children.find(node=>node.className==='feed-unavailable')?.textContent)
+  assert.equal(card.children.find(node=>node.className==='feed-actions').children[0].disabled,true)
+ }
+ const h=harness(),card=renderFeedCard(h.parent,item({kind:'task_result',task_ref:{work_id:'w'},lifecycle:'resolved'}),h)
+ assert.equal(card.children.find(node=>node.className==='feed-actions').children[0].disabled,false)
+ assert.equal(card.children.some(node=>node.className==='feed-unavailable'),false)
 })

@@ -3,11 +3,12 @@ import type {Suggestion} from '../core/suggestions.js'
 import type {WakeReason} from '../core/slots.js'
 import type {BridgeService} from '../desktop/desktop-session.js'
 import {z} from 'zod'
+import {discussionReferenceSchema,type DiscussionReference,type PreparedContent} from './contracts.js'
 import {randomUUID} from 'node:crypto'
 import type {ScheduledRunGrant} from './scheduled-run-authority.js'
 export const sourceTodoSchema=z.object({id:z.string().min(1).max(512),version:z.number().int().nonnegative()}).strict()
-export interface ConversationTurnContext {source_todo?:z.infer<typeof sourceTodoSchema>}
-export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),schedule_ref:scheduleReferenceSchema.optional(),source_todo:sourceTodoSchema.optional(),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
+export interface ConversationTurnContext {source_todo?:z.infer<typeof sourceTodoSchema>; prepared?:PreparedContent; references?:DiscussionReference[]; refresh?:()=>Promise<ConversationTurnContext>}
+export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),schedule_ref:scheduleReferenceSchema.optional(),references:z.array(discussionReferenceSchema).max(2).optional(),source_todo:sourceTodoSchema.optional(),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
 export const codingTargetSchema=z.object({workspace_id:z.string().min(1).max(128),session_id:z.string().min(1).max(128).nullable(),project:z.string().min(1).max(120),title:z.string().max(120),executor:z.literal('codex')}).strict()
 export const conversationSchema=z.object({scheduled_result_focus:z.string().min(1).max(128).optional(),coding_target:codingTargetSchema.nullable().default(null),id:z.string().min(1).max(128),kind:z.enum(['chat','topic','proactive','schedule']),title:z.string().min(1).max(120),subject_key:z.string().max(512).nullable(),created_at:z.string().datetime(),updated_at:z.string().datetime(),generation:z.number().int().nonnegative(),messages:z.array(conversationMessageSchema).max(512),feed_ids:z.array(z.string().max(128)).max(256),read_through_id:z.string().nullable().default(null),prepared:z.object({trust:z.literal('untrusted_external'),text:z.string().max(12000),evidence_refs:z.array(z.string().max(512)).max(32)}).strict().nullable()}).strict()
 export type Conversation=z.infer<typeof conversationSchema>
@@ -67,7 +68,7 @@ export class ConversationRuntimePool {
    if(this.#modes.get(id)==='parked'){this.#lifetimes.get(id)?.abort();this.#lifetimes.delete(id);const previous=this.#ready.get(id);this.#ready.delete(id);this.#runtimes.delete(id);this.#modes.delete(id);await previous?.close()}
    let runtime=this.#runtimes.get(id)
    if(!runtime){this.#modes.set(id,'text');const lifetime=new AbortController();this.#lifetimes.set(id,lifetime);runtime=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal);this.#runtimes.set(id,runtime);void runtime.catch(()=>{lifetime.abort();if(this.#runtimes.get(id)===runtime){this.#runtimes.delete(id);this.#lifetimes.delete(id);this.#modes.delete(id)}})}
-   const ready=await runtime;this.#ready.set(id,ready);return ready.runTurn(text,controller.signal,context)
+   const ready=await runtime;this.#ready.set(id,ready);const current=context?.refresh?await context.refresh():context;controller.signal.throwIfAborted();return ready.runTurn(text,controller.signal,current)
   })
   this.#tails.set(id,operation.catch(()=>{ /* the next turn may retry after an explicit failure */ }))
   return operation.finally(()=>{const count=(this.#busy.get(id)??1)-1;if(count)this.#busy.set(id,count);else this.#busy.delete(id)})

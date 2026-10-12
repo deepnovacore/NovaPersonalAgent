@@ -127,6 +127,7 @@ test('scan progress preserves a focused Todo draft and material content refresh 
  globalThis.window={addEventListener(){}}
  globalThis.document={body,activeElement:null,visibilityState:'hidden',hasFocus:()=>false,addEventListener(){},createElement:tag=>new DomNode(tag),createElementNS:(_,tag)=>new DomNode(tag),createTextNode:()=>new DomNode('text'),querySelector:()=>shell}
  const view=mountPersonalView({send:()=>true,start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],openResults(){},api:{orbMenu:{},personal:{}}})
+ all(body).find(node=>node.dataset.page==='todos').listeners.click()
  view.controller.connect()
  const state=(revision,title,scanned)=>({type:'personal.state',revision,life:{todos:[{id:'t',kind:'todo',title,note:'',status:'open',version:title==='Updated'?2:1}],ideas:[],goals:[]},sources:[{state:'connected',scanned}],conversations:{items:[]},memory:{entries:[]}})
  view.receive(state(1,'Original',1))
@@ -182,7 +183,7 @@ test('Life and suggestion cards show only supplied source badges; old reference 
  const sources=[{type:'mail',evidence_id:'opaque',observed_at:'2026-10-04T00:00:00Z',summary:'确认的邮件'},{type:'im',provider:'feishu',mentioned_me:true,observed_at:'2026-10-04T00:00:00Z'}]
  const h=harness(t)
  renderLife(h.panel,{...h,kind:'todo',state:{todos:[{id:'t',title:'完成文档',note:'',version:1,status:'open',sources,auto_recorded:true,source_changed:true}],ideas:[],goals:[]}})
- assert.deepEqual(all(h.panel).find(n=>n.className==='source-tags').children.map(n=>n.textContent),['邮件','飞书','@我','自动记录','来源有更新'])
+ assert.deepEqual(all(h.panel).find(n=>n.className==='source-tags').children.map(n=>n.textContent),['@我','自动记录','来源有更新'])
  const suggestions=harness(t)
  renderSourceSuggestions(suggestions.panel,{...suggestions,tab:'ideas',context:{cards:[{id:'i',tab:'ideas',title:'讨论',body:'内容',sources,refs:[{entry_id:'opaque'}]},{id:'old',tab:'ideas',title:'旧建议',body:'内容',refs:[{entry_id:'private-id',label:'旧笔记'}]},{id:'unknown',tab:'ideas',title:'飞书邮件',body:'内容',refs:[{entry_id:'another-private-id'}]}]}})
  const nodes=all(suggestions.panel)

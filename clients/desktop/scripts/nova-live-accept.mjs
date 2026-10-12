@@ -140,16 +140,16 @@ try {
     }
   }
 
-  // Workbench: real clicks through the six pages.
+  // Workbench: real clicks through the seven pages.
   const wb = (await pages()).find(t => t.url.includes('/index.html')) ?? all.find(t => t.url.includes('/index.html'))
   if (wb && !opt.quick) {
     const c = await attach(wb)
-    const count = await waitFor(() => evaluate(c, `document.querySelectorAll('.rail-item[data-page]').length`).then(n => n === 6 && n), 30000)
-    step('Workbench shows its six pages in the rail', count === 6, `rail items: ${count}`)
-    for (const page of ['todos', 'ideas', 'goals', 'feeds', 'tasks', 'profile']) {
-      await evaluate(c, `document.querySelector('.rail-item[data-page="${page}"]')?.click()`)
+    const count = await waitFor(() => evaluate(c, `document.querySelectorAll('.workspace-tab[data-page]').length`).then(n => n === 7 && n), 30000)
+    step('Workbench shows its seven pages in the topbar', count === 7, `workspace tabs: ${count}`)
+    for (const page of ['timeline', 'todos', 'ideas', 'goals', 'feeds', 'tasks', 'profile']) {
+      await evaluate(c, `document.querySelector('.workspace-tab[data-page="${page}"]')?.click()`)
       await sleep(900)
-      const state = await evaluate(c, `({selected: document.querySelector('.rail-item[data-page="${page}"]')?.getAttribute('aria-selected'), text: (document.body.innerText || '').trim().length})`)
+      const state = await evaluate(c, `({selected: document.querySelector('.workspace-tab[data-page="${page}"]')?.getAttribute('aria-selected'), text: (document.body.innerText || '').trim().length})`)
       await shot(c, `workbench-${page}`)
       step(`Workbench page "${page}" opens and renders`, state.selected === 'true' && state.text > 0, JSON.stringify(state))
     }
@@ -164,7 +164,7 @@ try {
     const body = () => evaluate(c, `document.body.innerText`)
     const ready = await waitFor(async () => { const t = await body(); return !t.includes('启动失败') && !t.includes('Backend startup failed') && t.length > 0 && 'ready' }, 90000, 1000)
     step('Backend starts with the real credential (no startup-failure banner)', !!ready, ready ? 'banner gone' : (await body()).slice(0, 160).replace(/\s+/g, ' '))
-    await evaluate(c, `document.querySelector('.rail-item[data-page="todos"]')?.click()`)
+    await evaluate(c, `document.querySelector('.workspace-tab[data-page="todos"]')?.click()`)
     const todosLoaded = await waitFor(async () => !(await body()).includes('正在读取已保存的内容') && 'loaded', 40000, 1000)
     await shot(c, 'live-todos')
     step('Todos page finished reading saved content from the backend', !!todosLoaded, todosLoaded ? '' : 'still showing "reading saved content"')

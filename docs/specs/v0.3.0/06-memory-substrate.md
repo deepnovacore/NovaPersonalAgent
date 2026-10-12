@@ -9,7 +9,7 @@
 
 ## 0. 为什么要这一卷
 
-2026-09-12 对照 mem0、VoiceMem、OpenClaw、today.ai、mycontext 与同事的
+2026-09-12 对照 mem0、VoiceMem、OpenClaw、mycontext 与同事的
 "Human-centric × Work-centric" 架构图（对照记录见
 2026-09-12 记忆参考项目对照记录（已不在仓库）），
 得出三条结论：
@@ -188,7 +188,7 @@ embedding 外发仍须显式同意，并绑定授权范围与 provider。没有�
 | `fact` / `preference` / `plan` / `concern` | Human-centric | 沿用 03 卷 §2.2 定义 | 对话为主；VoiceMem / 原生 TS 双脑作为写入方 |
 | `commitment` | 两视角交界 | `direction: owed_by_me \| owed_to_me`、`due`（可空）、`counterparty` → `entity_refs`、`status: open \| done \| dropped` | 对话、IM、邮件；抽取规则 §7 |
 | `entity` | 共享 | `entity_kind: person \| project \| workspace`、别名列表 | `identity.ts` 已做 workspace；person 归一待评审 |
-| `topic` | Work-centric | 标签 + 出现范围 | 授权目录（today.ai 式关键词，证据指向文件） |
+| `topic` | Work-centric | 标签 + 出现范围 | 授权目录（关键词检索，证据指向文件） |
 | 历史工作区存储 的 `LogicalWorkspace` / `WorkspaceInstance` / `RelationCard` | Work-centric | 保持现有 schema | 现有 projector 改为经 merge 写修订 |
 
 Human-centric 与 Work-centric 是同一张修订表上的 kind，不是两个库。一条 `commitment` 的

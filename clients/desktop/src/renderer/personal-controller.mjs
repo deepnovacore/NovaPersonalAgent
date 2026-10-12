@@ -29,10 +29,21 @@ export class PersonalController {
     if(this.presentationReady)for(const [id,state]of this.drafts)if(state.submission)this.sendSubmission(id,state.submission)
     this.changed()
   }
-  sendSubmission(id,value){return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id,...(value.source_todo?{source_todo:value.source_todo}:{})})}
+  sendSubmission(id,value){
+    if(value.references?.length){
+      if(id!=='chat:main')return false
+      const generation=this.generation
+      void this.command('conversations.discuss',{text:value.text,references:value.references},{request_id:value.request_id}).then(()=>{if(generation===this.generation)this.receive({type:'input.text_result',request_id:value.request_id,conversation_id:id,ok:true})},error=>{if(generation===this.generation)this.receive({type:'input.text_result',request_id:value.request_id,conversation_id:id,ok:false,error:error.message})});return true
+    }
+    return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id,...(value.source_todo?{source_todo:value.source_todo}:{})})}
+  restoreSubmission(state,request){
+    if(request.independent&&state.draft.trim())state.failed_card={...request}
+    else{state.draft=[request.text,state.draft].filter(Boolean).join('\n');state.source_todo=request.source_todo??null;state.references=request.references??[];request.restored_into_draft=true}
+    request.restored=true
+  }
   disconnect(){
     const wasConnected=this.everConnected
-    for(const state of this.drafts.values())if(state.submission&&!state.submission.restored){state.draft=[state.submission.text,state.draft].filter(Boolean).join('\n');state.source_todo=state.submission.source_todo??null;state.submission.restored=true}
+    for(const state of this.drafts.values())if(state.submission&&!state.submission.restored){this.restoreSubmission(state,state.submission)}
     this.connected=false;this.capabilities=[];this.generation++;this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
     for(const {reject,timer}of this.pending.values()){clearTimeout(timer);reject(new Error('连接已断开，操作状态请刷新确认'))}
     // Only a real exit after a connection ever succeeded is alarming; a cold-start
@@ -94,8 +105,9 @@ export class PersonalController {
     if(frame.type==='input.text_result')for(const [id,state]of this.drafts){
       const request=state.submission
       if(!request||request.request_id!==frame.request_id||(frame.conversation_id&&frame.conversation_id!==id))continue
-      if(!frame.ok){state.source_todo=request.source_todo??null;if(!request.restored)state.draft=[request.text,state.draft].filter(Boolean).join('\n');state.error=frame.error==='outcome_unknown'?'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。':frame.error||'文字发送失败，草稿已保留'}
-      else if(request.restored&&state.draft===request.text){state.draft='';state.source_todo=null}
+      if(!frame.ok){if(!request.restored)this.restoreSubmission(state,request);state.error=frame.error==='stale_reference'?'引用事项已变化或不可用，请移除引用后重新选择。':frame.error==='reference_not_authorized'?'引用来源当前不允许用于对话，请核对来源权限。':frame.error==='outcome_unknown'?'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。':frame.error||'文字发送失败，草稿已保留'}
+      else if(request.restored_into_draft&&state.draft===request.text){state.draft='';state.source_todo=null;state.references=[]}
+      if(frame.ok&&state.failed_card?.request_id===request.request_id)state.failed_card=null
       state.submission=null
     }
     if(['client.ready','desktop.capabilities'].includes(frame.type)){this.capabilities=frame.capabilities??[];this.inputInstance=frame.input_instance_id??null}
@@ -133,7 +145,8 @@ export class PersonalController {
       if(!this.send({type:'personal.command',request_id,method,params})){clearTimeout(timer);this.pending.delete(request_id);reject(notSent('发送失败'))}
     })
   }
-  select(id){return this.command('conversations.select',{id})}
+  async select(id){const result=await this.command('conversations.select',{id});if(this.snapshot&&result?.selected_id===id){this.snapshot={...this.snapshot,conversations:result};this.changed()}return result}
+  async home(){if(this.selectedId!=='chat:main')await this.select('chat:main');if(this.selectedId!=='chat:main')throw Error('主对话尚未就绪，请稍后重试')}
   create(){return this.command('conversations.create',{})}
   openFeed(id,label){return this.command('conversations.open_feed',{feed_id:id,label})}
   async text(){
@@ -182,17 +195,17 @@ export class PersonalController {
   async submit(){
     const id=this.selectedId,state=this.state(id)
     if(!this.presentationReady||!id||state.submission||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
-    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false,...(state.source_todo?{source_todo:{...state.source_todo}}:{})}
+    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false,...(state.references?.length?{references:structuredClone(state.references)}:{}),...(state.source_todo?{source_todo:{...state.source_todo}}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';this.changed();return false}
-    state.submission=request;state.draft='';state.source_todo=null;state.error='';this.changed();return true
+    state.submission=request;state.draft='';state.source_todo=null;state.references=[];state.error='';this.changed();return true
   }
   /** Sends a host-composed user message (e.g. a changed execution place) without touching the draft. */
   /** Sends text to conversation `id` without touching its draft; text that cannot be sent is left in that draft instead. */
-  submitText(text,id=this.selectedId){
-    const state=this.state(id),keep=()=>{if(!state.draft)state.draft=text;this.changed();return false}
+  submitText(text,id=this.selectedId,references=[]){
+    const state=this.state(id),keep=()=>{if(!state.draft){state.draft=text;state.references=references;}this.changed();return false}
     if(!id||!text.trim()||text.length>4000)return false
     if(!this.presentationReady||state.submission||(id===this.selectedId?this.isVoiceConversation:this.voiceId===id)||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input'))return keep()
-    const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false}
+    const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false,independent:true,...(references.length?{references:structuredClone(references)}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';return keep()}
     state.submission=request;state.error='';this.changed();return true
   }

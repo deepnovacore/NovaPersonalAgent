@@ -1,9 +1,10 @@
 import test,{afterEach} from 'node:test'
 import assert from 'node:assert/strict'
+import {t} from '../src/renderer/locale.mjs'
 import {mountPersonalView} from '../src/renderer/personal-view.mjs'
 class Node{
  constructor(tag,text){this.tag=tag;this.tagName=tag.toUpperCase();this.text=text;this.children=[];this.listeners={};this.dataset=new Proxy({},{set:(object,key,value)=>{object[key]=String(value);return true}});this.classList={add:()=>{}};this.attrs={};this.scrollHeight=100;this.scrollTop=0;this.clientHeight=100}
- append(...c){for(const n of c)n.parentElement=this;this.children.push(...c)}prepend(...c){for(const n of c)n.parentElement=this;this.children.unshift(...c)}replaceChildren(...c){this.children=[];this.append(...c)}setAttribute(k,v){this[k]=v;this.attrs[k]=v}getAttribute(k){return this.attrs[k]}addEventListener(n,f){this.listeners[n]=f}
+ append(...c){for(const n of c){if(n.parentElement)n.parentElement.children=n.parentElement.children.filter(child=>child!==n);n.parentElement=this}this.children.push(...c)}prepend(...c){for(const n of c){if(n.parentElement)n.parentElement.children=n.parentElement.children.filter(child=>child!==n);n.parentElement=this}this.children.unshift(...c)}replaceChildren(...c){this.children=[];this.append(...c)}setAttribute(k,v){this[k]=v;this.attrs[k]=v}getAttribute(k){return this.attrs[k]}addEventListener(n,f){this.listeners[n]=f}
  querySelectorAll(sel){const tags=sel.split(',');return this.children.flatMap(n=>[...(tags.includes(n.tag)?[n]:[]),...n.querySelectorAll(sel)])}querySelector(sel){return this.querySelectorAll(sel)[0]}focus(){this.focused=(this.focused??0)+1;document.activeElement=this}contains(node){return this===node||this.children.some(child=>child.contains?.(node))}
  dispatchEvent(event){this.listeners[event.type]?.(event);if(event.bubbles)this.parentElement?.dispatchEvent(event)}
  get childElementCount(){return this.children.length}
@@ -16,6 +17,7 @@ function mount(options={}){
  const view=mountPersonalView({send:frame=>(sent.push(frame),true),start:async()=>{},stop:async()=>{},tasks:()=>({tasks:[]}),taskAction(){},results:()=>[],api:{orbMenu:{},personal:{setUnread(){},openArticle:async()=>{},onPresentationRequest:fn=>{callbacks.presentation=fn},onCollapsed:fn=>{callbacks.collapsed=fn}}},...options})
  controllers.push(view.controller);view.controller.connect();view.receive({type:'client.ready',input_instance_id:'i',capabilities:['text_input']})
  const all=n=>[n,...n.children.flatMap(all)]
+ if(!options.defaultHome)all(body).find(n=>n.dataset.page==='todos').listeners.click()
  return {body,sent,view,callbacks,all:()=>all(body),receipts:()=>sent.filter(f=>f.type==='personal.command'&&f.method==='feed.action'&&f.params.action==='presented').map(f=>f.params.id)}
 }
 const feedState=(revision,selected='chat:proactive',extra={})=>({type:'personal.state',revision,memory:{entries:[]},feed:[{id:'f1',kind:'suggestion',title:'T',why_now:'W',lifecycle:'active',user_state:'new',task_ref:null,delivery:{presented_at:null},prepared:{text:'## 前瞻\n- 一条',trust:'untrusted_external',evidence_refs:[]}}],conversations:{selected_id:selected,voice_id:null,unread_count:1,items:[{id:'chat:proactive',kind:'proactive',title:'主动提醒',unread_count:1},{id:'c',kind:'chat',title:'C'}],messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'T\n## 前瞻\n- 一条'}]},...extra})
@@ -108,10 +110,9 @@ test('feed messages render as cards with the prepared body as markdown, and rece
  m.view.controller.collapse(false);assert.deepEqual(m.receipts(),['f1'],'expanding delivers the receipt without a transcript change')
  m.view.receive({type:'personal.result',request_id:m.sent.at(-1).request_id,ok:false,error:'offline'})
 })
-test('collapsed chat pane defers receipts until it reopens, and failed receipts retry on the next update',async()=>{
- const m=mount();const toggle=m.all().find(n=>n.className==='chat-toggle');await toggle.listeners.click()
- m.view.receive(feedState(1));assert.deepEqual(m.receipts(),[])
- await toggle.listeners.click();assert.deepEqual(m.receipts(),['f1'])
+test('the permanent chat delivers visible receipts and retries failed receipts on the next update',async()=>{
+ const m=mount();m.view.receive(feedState(1));assert.deepEqual(m.receipts(),['f1'])
+ await m.all().find(n=>n.dataset.page==='profile').listeners.click()
  const request=m.sent.findLast(f=>f.method==='feed.action');m.view.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'offline'});await new Promise(r=>setImmediate(r))
  m.view.refresh();assert.deepEqual(m.receipts(),['f1','f1'],'a failed receipt is retried by a plain update')
 })
@@ -221,7 +222,7 @@ test('completion arriving in a visible inspector is already viewed in the orb ag
 
 const tick=()=>new Promise(resolve=>setImmediate(resolve))
 const taskRow=(id,phase='working')=>({work_id:id,title:'任务 '+id,phase,project:'Project',executor:'codex',summary:'执行中'})
-const selectPage=(m,label)=>m.all().find(n=>n.className==='rail-item'&&n.children.some(c=>c.className==='rail-label'&&c.textContent===label)).listeners.click()
+const selectPage=(m,label)=>m.all().find(n=>n.className==='workspace-tab'&&n.children.some(c=>c.className==='workspace-tab-label'&&c.textContent===t(label))).listeners.click()
 const taskCard=(m,id)=>m.all().find(n=>n.tag==='article'&&n.children.some(c=>c.tag==='h3'&&c.textContent==='任务 '+id))
 const descendants=n=>[n,...n.children.flatMap(descendants)]
 const clickProgress=(m,id)=>descendants(taskCard(m,id)).find(n=>n.tag==='button'&&n.textContent==='询问任务进展').listeners.click()
@@ -233,7 +234,7 @@ test('task progress fills only the original draft, preserves voice and pending s
  try{
   m.view.receive(feedState(1,'c',{feed:[]}));c.state('chat:proactive').draft='原有内容';c.state('c').draft='别的草稿'
   const pending={request_id:'kept',text:'sending'};c.state('chat:proactive').submission=pending
-  selectPage(m,'任务');m.all().find(n=>n.className==='chat-toggle').listeners.click()
+  selectPage(m,'任务')
   clickProgress(m,'a');const request=m.sent.findLast(f=>f.method==='conversations.open_work')
   assert.ok(request);assert.deepEqual(request.params,{work_id:'a'})
   const owner=feedState(2,'chat:proactive',{feed:[]});owner.conversations.voice_id='chat:proactive';m.view.receive(owner)
@@ -508,3 +509,112 @@ test('goal adoption and status changes use the shared pending guard; conflicts r
  m.view.receive({type:'personal.result',request_id:refresh.request_id,ok:true,data:{}});await tick()
  assert.equal(select().disabled,false);assert.equal(select().value,'active')
 })
+
+ test('the permanent Nova conversation opens beside the full Timeline and keeps reminder identity',async()=>{
+ const m=mount({defaultHome:true});const main={id:'chat:main',kind:'chat',title:'Historical main',unread_count:0};
+ m.view.receive(feedState(1,'chat:main',{life:{todos:[],goals:[]},conversations:{selected_id:'chat:main',items:[main,{id:'chat:proactive',kind:'proactive',unread_count:1}],messages:[],home_messages:[{id:'feed:f1',conversation_id:'chat:proactive',role:'assistant',text:'Reminder'}]}}));
+ assert.equal(m.all().find(n=>n.dataset.page==='timeline').attrs['aria-selected'],'true');
+ assert.ok(m.all().some(n=>n.className==='timeline-axis'),'default right pane renders a date axis');assert.ok(m.all().some(n=>n.className==='feed-card'));
+ assert.equal(m.all().some(n=>n.dataset.page==='nova'),false);
+ assert.equal(m.all().find(n=>n.className==='switcher-title').textContent,'主对话');
+ const request=m.sent.find(f=>f.method==='conversations.read');assert.equal(request.params.id,'chat:proactive');
+ assert.equal(request.params.through_message_id,'feed:f1');
+ })
+
+test('article reference choices refresh when personal objects change while Feeds remains open',async()=>{
+ const m=mount(),news={enabled:false,interests:[],items:[{id:'article',content_hash:'hash',source_id:'s',title:'Article',summary:'Summary',url:'https://example.org/a',ranking:null}],saved:[],sources:[]}
+ const snapshot=(revision,version,status='open')=>feedState(revision,'chat:main',{news,feed:[],life:{todos:[{id:'todo',title:'Current item',version,status}],goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat',title:'Main'}],messages:[],home_messages:[]}})
+ m.view.receive(snapshot(1,1));await m.all().find(n=>n.dataset.page==='feeds').listeners.click();const choice=()=>m.all().find(n=>n.attrs['aria-label']==='结合哪个事项');const first=choice();first.value='todo:todo';first.listeners.change()
+ m.view.receive(snapshot(2,2));assert.notEqual(choice(),first);assert.equal(choice().value,'todo:todo');await m.all().find(n=>n.textContent==='整理应用思路').listeners.click();await tick();const request=m.sent.findLast(f=>f.method==='conversations.discuss');assert.equal(request.params.references.find(ref=>ref.kind==='todo').version,2)
+ m.view.receive(snapshot(3,3,'done'));await m.all().find(n=>n.dataset.page==='feeds').listeners.click();assert.equal(choice().children.some(n=>n.value==='todo:todo'),false)
+})
+
+test('task receipt cards open durable task IDs for work IDs and versioned result references',async()=>{
+ for(const work of ['execution-work','verified:durable:2']){
+  const m=mount(),task={id:'durable',goal:'Goal',work_ids:['execution-work'],goal_revision:2,phase:'completed',conversation_id:'scoped'}
+  m.view.receive(feedState(1,'chat:main',{tasks:[task],feed:[{id:'f1',kind:'task_result',title:'Result',why_now:'Done',lifecycle:'resolved',task_ref:{work_id:work},delivery:{presented_at:'done'}}],conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[{id:'feed:f1',role:'assistant',conversation_id:'scoped',text:'Result'}]}}));m.all().find(n=>n.textContent==='查看任务结果').listeners.click();await tick();const request=m.sent.findLast(f=>f.method==='tasks.get');assert.equal(request.params.task_id,'durable');m.view.controller.disconnect();await tick()
+ }
+})
+
+
+test('adding a Timeline reference preserves the draft and earlier references; limit rejection is atomic',async()=>{
+ const m=mount({defaultHome:true}),c=m.view.controller,todos=['a','b','c'].map(id=>({id,title:'Item '+id,status:'open',due:'2026-10-12',version:1,note:''}))
+ m.view.receive(feedState(1,'chat:main',{feed:[],life:{todos,goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+ c.draft='Existing draft';c.state().references=[{kind:'todo',id:'a',version:1}]
+ await m.all().find(n=>n.textContent==='Item b').listeners.click();await tick()
+ assert.equal(c.draft,'Existing draft');assert.deepEqual(c.state().references.map(ref=>ref.id),['a','b'])
+ await m.all().find(n=>n.textContent==='Item c').listeners.click();await tick()
+ assert.deepEqual(c.state().references.map(ref=>ref.id),['a','b']);assert.equal(c.draft,'Existing draft');assert.match(c.error,/2/)
+})
+
+test('an oversized Todo assistance append leaves draft references unchanged',async()=>{
+ const m=mount(),c=m.view.controller,todos=['a','b'].map(id=>({id,title:'Item '+id,status:'open',due:null,version:1,note:''}))
+ m.view.receive(feedState(1,'chat:main',{feed:[],life:{todos,goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+ c.draft='x'.repeat(4000);c.state().references=[{kind:'todo',id:'a',version:1}]
+ await m.all().filter(n=>n.textContent==='请 Nova 协助')[1].listeners.click();await tick()
+ assert.equal(c.draft,'x'.repeat(4000));assert.deepEqual(c.state().references,[{kind:'todo',id:'a',version:1}]);assert.equal(c.state().source_todo??null,null)
+})
+
+
+test('right pane switches keep Nova mounted, visible, and preserve the main draft at every window width',async()=>{
+ const previous=globalThis.matchMedia
+ try{
+  for(const width of [1200,900,720,600]){
+   globalThis.matchMedia=query=>({matches:width<=Number(query.match(/max-width:\s*(\d+)px/)?.[1]??0)})
+   const m=mount({defaultHome:true}),c=m.view.controller
+   m.view.receive(feedState(1,'chat:main',{feed:[],life:{todos:[],goals:[]},conversations:{selected_id:'chat:main',items:[{id:'chat:main',kind:'chat'}],messages:[],home_messages:[]}}))
+   const pane=m.all().find(n=>n.id==='chat-pane'),parent=pane.parentElement,draft=m.all().find(n=>n.attrs['aria-label']==='消息草稿')
+   draft.value='Keep this thought';draft.listeners.input()
+   assert.equal(m.all().find(n=>n.dataset.page==='timeline').attrs['aria-selected'],'true')
+   assert.ok(m.all().some(n=>n.className==='timeline-axis'))
+   const commandCount=m.sent.length
+   for(const page of ['todos','ideas','profile','timeline']){
+    await m.all().find(n=>n.dataset.page===page).listeners.click()
+    assert.equal(pane.hidden,false,String(width));assert.equal(pane.parentElement,parent)
+    assert.equal(c.selectedId,'chat:main');assert.equal(c.draft,'Keep this thought')
+    assert.equal(m.all().find(n=>n.attrs['aria-label']==='消息草稿'),draft)
+    assert.equal(m.all().find(n=>n.dataset.page===page).attrs['aria-selected'],'true')
+   }
+   assert.equal(m.sent.length,commandCount,'page switches do not select or create conversations')
+   assert.equal(m.all().some(n=>n.className==='chat-toggle'||n.className==='timeline-toggle'),false)
+  }
+ }finally{globalThis.matchMedia=previous}
+})
+
+test('an unchanged Feed keeps its open evidence and focus when another message arrives',async()=>{
+ const m=mount(),state=feedState(1)
+ state.feed[0].updated_at='2026-10-12T00:00:00Z';state.feed[0].evidence_refs=['source-1']
+ m.view.receive(state)
+ const card=m.all().find(node=>node.className==='feed-card'),info=m.all().find(node=>node.className==='source-info')
+ info.listeners.click({stopPropagation(){}})
+ const popover=m.all().find(node=>node.className==='source-popover'),read=m.all().find(node=>node.className==='feed-evidence-read')
+ read.focus();const pending=read.listeners.click(),request=m.sent.findLast(frame=>frame.method==='memory.evidence')
+ const next=structuredClone(state);next.revision=2;next.memory.entries=[{id:'unrelated',version:1,status:'active',content:'New independent memory'}];next.conversations.messages.push({id:'new',conversation_id:'chat:proactive',role:'assistant',text:'New message'})
+ m.view.receive(next)
+ assert.ok(m.all().includes(card),'unchanged card survives transcript update')
+ assert.equal(popover.hidden,false);assert.equal(document.activeElement,read)
+ m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{state:'ok',evidence:{evidence_id:'source-1',text:'Current excerpt'}}});await pending
+ assert.ok(m.all().some(node=>node.textContent==='Current excerpt'))
+ const changed=structuredClone(next);changed.revision=3;changed.feed[0].updated_at='2026-10-12T01:00:00Z';changed.feed[0].lifecycle='invalidated';m.view.receive(changed)
+ assert.equal(m.all().includes(card),false);assert.equal(popover.hidden,true)
+ assert.equal(m.all().some(node=>node.textContent==='Current excerpt'),false)
+})
+
+ test('switching the right tab out of task details keeps focus on the chosen tab',async()=>{
+ const m=mount(),task={id:'t1',goal:'Task one',conversation_id:'c',phase:'running',controller:{kind:'nova'},control_revision:0,goal_revision:0,session_ids:[],events:{items:[]},capabilities:{},viewer:{client_id:'a'}}
+ m.view.receive(feedState(1,'c',{feed:[],life:{todos:[],goals:[]},tasks:[task],conversations:{selected_id:'c',items:[{id:'c',title:'C'}],messages:[]}}))
+ const origin=m.all().find(n=>n.className==='task-card');origin.focus();const opening=origin.listeners.click(),request=m.sent.findLast(f=>f.method==='tasks.get')
+ m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:task});await opening
+ const tab=m.all().find(n=>n.dataset.page==='timeline');tab.focus();await tab.listeners.click()
+ assert.ok(document.activeElement===tab);assert.equal(tab.attrs['aria-selected'],'true')
+ assert.ok(m.all().some(n=>n.className==='timeline-axis'));assert.equal(m.all().some(n=>n.className==='task-detail'),false)
+ })
+
+ test('right tab navigation keeps a conversation error visible and unchanged approval controls focused',async()=>{
+ const m=mount(),state=feedState(1,'c',{feed:[],life:{todos:[],goals:[]},pending_approvals:[{id:'a1',summary:'Run',conversation_id:'c'}]})
+ m.view.receive(state);const approval=m.all().find(n=>n.textContent==='处理审批：Run');approval.focus();m.view.refresh()
+ assert.ok(m.all().includes(approval));assert.ok(document.activeElement===approval)
+ m.view.controller.error='Send failed; draft kept';m.view.refresh();await m.all().find(n=>n.dataset.page==='profile').listeners.click()
+ assert.equal(m.view.controller.error,'Send failed; draft kept')
+ const error=m.all().find(n=>n.className==='page-error');assert.equal(error.textContent,'Send failed; draft kept');assert.equal(error.parentElement.className,'nova-column')
+ })

@@ -121,8 +121,8 @@ setInterval(() => {}, 1000);
       env: {...process.env, PATH: `${directory}${delimiter}${process.env.PATH ?? ''}`, NOVA_OPENER_TEST_PID: pidFile},
       encoding: 'utf8', timeout: 3000,
     })
-    // spawn success precedes the fixture's JS startup; always collect its PID for cleanup.
-    for (let attempt = 0; attempt < 100 && pid === undefined; attempt++) {
+    // Background fixture startup can lag the caller's independent 3s exit deadline under suite load.
+    for (let attempt = 0; attempt < 250 && pid === undefined; attempt++) {
       try {
         const value = Number(await readFile(pidFile, 'utf8'))
         if (!Number.isInteger(value) || value <= 0) throw new Error('fixture PID pending')
