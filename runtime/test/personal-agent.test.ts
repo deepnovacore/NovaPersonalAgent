@@ -532,6 +532,19 @@ test('profile warmup requires current consent for every evidence reference',asyn
  }finally{await host.close();await f.close()}
 })
 
+test('a profile response arriving after external consent withdrawal is never installed',async()=>{
+ const f=await fixture();await f.host.close();let allowed=true,release!:(value:unknown)=>void;
+ const input={id:'e:own',version:'v1',content:'I build voice agents',origin:'inferred' as const,source:{kind:'im' as const,project:'飞书',document:'本人消息'}};
+ const memory={...f.host.options.memory()!,profileSources:()=>Promise.resolve(allowed?[input]:[])};
+ const host=new PersonalAgentHost({...f.host.options,memory:()=>memory,generateProfile:()=>new Promise(resolve=>{release=resolve as typeof release})});
+ try{
+  await host.open();const run=host.profileWarmup.refresh();
+  for(let n=0;n<200&&!release;n++)await new Promise(resolve=>setTimeout(resolve,1));assert(release);
+  allowed=false;release({about:{text:'Builds voice agents',refs:[{entry_id:input.id,version:input.version}]},work:[],interests:[]});
+  await run;assert.equal(host.profileWarmup.snapshot().draft,null);
+ }finally{await host.close();await f.close()}
+});
+
 test('active authorized project documents can ground a profile draft without becoming memory',async()=>{
  const f=await fixture();await f.host.close();let available=true,calls=0;
  const host=new PersonalAgentHost({...f.host.options,generateProfile:entries=>{calls++;assert.equal(entries[0]!.origin,'inferred');return Promise.resolve({about:{text:'Design systems',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]},work:[{title:'Design',text:'Builds design systems',refs:[{entry_id:entries[0]!.id,version:entries[0]!.version!}]}],interests:[]})}});

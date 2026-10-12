@@ -17,7 +17,7 @@ export function normalizeGmailMessage(value:unknown,labels:readonly string[],win
  const timestamp=Date.parse(text(m.messageTimestamp,100)),actualLabels=array(m.labelIds).map(x=>text(x,256))
  if(!Number.isFinite(timestamp))throw new ComposioFailure('invalid_contract')
  const item=empty('mail',remoteId,'current')
- item.metadata={...item.metadata,labels:actualLabels,thread_id:text(m.threadId,256)}
+ item.metadata={...item.metadata,labels:actualLabels,thread_id:text(m.threadId,256),sender:text(m.sender,4000),recipients:text(m.to,10000)}
  if(timestamp<window.start||timestamp>=window.end||!labels.every(x=>actualLabels.includes(x)))return {...item,status:'coverage_removed'}
  item.text=[text(m.subject,10000),text(m.sender,4000),text(m.to,10000),text(m.messageText,2*1024*1024)].join('\n')
  item.observedAt=new Date(timestamp).toISOString();item.retentionUntil=new Date(timestamp+30*86400000).toISOString()
@@ -95,20 +95,30 @@ export class GoogleProvider {
   const objects:GoogleObject[]=[]
   const readWindow=c.phase==='history'?{start:now-scope.pastDays*86400000,end:now}:{start:c.start,end:c.end}
   // At most eight metadata/body pairs, leaving requests for route verification and the page itself.
-  for(let n=0;c.pending.length&&n<8&&budget.requests<18&&Date.now()<budget.deadline-15000;n++){
-   const item=c.pending[0]!
-   if(item.deleted)objects.push(empty('mail',item.id,'provider_deleted'))
+  for(let n=0;c.pending.length&&n<8&&budget.requests<18&&Date.now()<budget.deadline-15000;){
+   const batch=c.pending.slice(0,Math.min(4,8-n,Math.floor((18-budget.requests)/(c.phase==='history'?2:1))))
+   if(!batch.length)break
+   n+=batch.length
+   const settled=await Promise.allSettled(batch.map(async item=>{
+    const results:GoogleObject[]=[]
+   if(item.deleted)results.push(empty('mail',item.id,'provider_deleted'))
    else try{
     if(c.phase==='history'){
      const metadata=await read({kind:'gmail.message',messageId:item.id,format:'metadata'})
      const admitted=normalizeGmailMessage(metadata,scope.labels,readWindow)
-     if(admitted.status!=='current'){objects.push(admitted);c.pending.shift();continue}
+     if(admitted.status!=='current'){results.push(admitted);return results}
     }
     const full=await read({kind:'gmail.message',messageId:item.id,format:'full'})
     if(full.messageId!==item.id)throw new ComposioFailure('object_mismatch')
-    const normalized=normalizeGmailMessage(full,scope.labels,readWindow);normalized.locator='https://mail.google.com/mail/?authuser='+encodeURIComponent(verified.identity)+'#inbox/'+encodeURIComponent(item.id);objects.push(normalized)
-   }catch(error){if(error instanceof ComposioFailure&&error.code==='not_found')objects.push(empty('mail',item.id,'provider_deleted'));else throw error}
-   c.pending.shift()
+    const normalized=normalizeGmailMessage(full,scope.labels,readWindow);normalized.locator='https://mail.google.com/mail/?authuser='+encodeURIComponent(verified.identity)+'#inbox/'+encodeURIComponent(item.id);results.push(normalized)
+   }catch(error){if(error instanceof ComposioFailure&&error.code==='not_found')results.push(empty('mail',item.id,'provider_deleted'));else throw error}
+    return results
+   }))
+   // Only a wholly successful batch consumes IDs; a partial failure is safe to replay.
+   const failure=settled.find(result=>result.status==='rejected')
+   if(failure?.status==='rejected')throw failure.reason
+   for(const result of settled)if(result.status==='fulfilled')objects.push(...result.value)
+   c.pending.splice(0,batch.length)
   }
   let complete=false
   if(!c.pending.length){

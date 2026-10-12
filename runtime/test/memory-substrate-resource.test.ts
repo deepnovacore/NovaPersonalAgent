@@ -9,6 +9,43 @@ import {createHash} from 'node:crypto'
 import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
+
+test('profile sources include only authorized self-authored messages and mail before extraction finishes',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-profile-evidence-'));
+ const gateway:ModelGateway={async *stream(){/* extraction uses complete */},complete:()=>Promise.resolve({text:'{"entries":[]}'})};
+ const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'profile',gateway,model:'fixture',personalMemoryEnabled:false});
+ try{
+  await memory.open();const grant=memory.processingGrant(true),at=new Date().toISOString();
+  for(const [id,sender,recipient] of [['own','ou_self','ou_self'],['other','ou_other','ou_self']] as const)
+   await memory.ingestEvidence({sourceId:'im',locator:id,text:id,observedAt:at,kind:'im',im:{sender_id:sender,recipient_id:recipient,account_id:'opaque-account'},processingConsent:grant});
+  await memory.ingestEvidence({sourceId:'mail',locator:'sent',text:'I build voice agents',observedAt:at,kind:'mail',im:{sender_id:'self@example.test',account_id:'self@example.test',provider:'gmail'},processingConsent:grant});
+  const sources=await memory.profileSources();assert.equal(sources.length,2);assert(sources.some(input=>input.content==='own'));assert(!sources.some(input=>input.content==='other'));
+  await memory.setProcessingConsent('im',memory.processingGrant(false,2));assert.deepEqual((await memory.profileSources()).map(input=>input.source?.kind),['mail']);
+  await memory.forgetSource('mail');assert.deepEqual(await memory.profileSources(),[]);
+  await memory.setProcessingConsent('im',memory.processingGrant(true,3));
+  const before=(await memory.profileSources())[0]!;
+  await memory.ingestEvidence({sourceId:'im',locator:'own',text:'edited own statement',observedAt:at,kind:'im',im:{sender_id:'ou_self',recipient_id:'ou_self',account_id:'opaque-account'},processingConsent:memory.processingGrant(true,3)});
+  assert.deepEqual(await memory.profileSources([before.id]),[],'an observed edit retires the old Profile input');
+  assert.equal((await memory.profileSources())[0]?.content,'edited own statement');
+  await memory.ingestEvidence({sourceId:'im',locator:'own',text:'own',observedAt:at,kind:'im',im:{sender_id:'ou_self',recipient_id:'ou_self',account_id:'opaque-account'},processingConsent:memory.processingGrant(true,3)});
+  assert.equal((await memory.profileSources())[0]?.content,'own','A to B to A restores the currently observed version');
+  await memory.invalidateMessage('im','own');assert.deepEqual(await memory.profileSources(),[],'a provider deletion removes every version');
+ }finally{await memory.close();await rm(root,{recursive:true,force:true})}
+});
+
+test('pending extraction prioritizes direct mentions then newest evidence across channels',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-evidence-order-'));
+ const gateway:ModelGateway={async *stream(){/* unused */},complete:()=>Promise.resolve({text:'{"entries":[]}'})};
+ const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'ordering',gateway,model:'fixture',personalMemoryEnabled:false});
+ try{
+  await memory.open();await memory.setProcessingConsent('s',memory.processingGrant(true));
+  for(const [key,minutes,mention,kind] of [['a-old',3,'none','mail'],['z-new',1,'none','mail'],['m-mention',5,'direct','im']] as const){
+   await memory.options.client.memory('append_evidence',{id:memory.prefix+key,source_id:memory.prefix+'s',source_kind:kind,locator:key,observed_at:new Date(Date.now()-minutes*60_000).toISOString(),recorded_at:new Date().toISOString(),raw_text:key,hash:key,trust:'untrusted_external',source_metadata:{sender_id:'sender',account_id:'account',mention}});
+  }
+  const pending=await memory.options.client.memory('pending_evidence',{source_prefix:memory.prefix,provider:'fixture',limit:20}) as {raw_text:string}[];
+  assert.deepEqual(pending.map(row=>row.raw_text),['m-mention','z-new','a-old']);
+ }finally{await memory.close();await rm(root,{recursive:true,force:true})}
+});
 import {connectorSourceId,type SourceConnection,type SourceChange} from '../src/memory-substrate/source-state.js'
 import {EvidenceRecordSchema} from '../src/memory-substrate/store.js'
 import type {EntryRevision} from '../src/memory-substrate/store.js'
@@ -333,3 +370,75 @@ test('a multi-chunk document lands in one batch with markers, in order, under a 
   for(const id of ids)assert.equal(await resource.canProcessEvidence(id,'embedding'),true)
  }finally{await knowledge.close();await resource.close();await rm(root,{recursive:true,force:true})}
 })
+
+test('shared processing admits four concurrent model extractions across channel kinds',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-processing-concurrency-'));let active=0,peak=0,started=0;let release!:()=>void;
+ const gate=new Promise<void>(resolve=>{release=resolve});
+ const gateway:ModelGateway={async *stream(){/* unused */},async complete(){active++;peak=Math.max(peak,active);started++;await gate;active--;return {text:'{"entries":[]}'};}};
+ const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'parallel',gateway,model:'fixture'});
+ try{
+  await memory.open();for(let i=0;i<8;i++)await memory.ingestEvidence({sourceId:'channel-'+i,locator:'message-'+i,text:'资料 '+i,observedAt:new Date().toISOString(),kind:(['im','mail','calendar','task_result'] as const)[i%4]!,processingConsent:memory.processingGrant(true)});
+  for(let i=0;i<100&&started<4;i++)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(started,4);assert.equal(peak,4);
+  let flushed=false;const flush=memory.flush().then(()=>{flushed=true});await new Promise(resolve=>setImmediate(resolve));assert.equal(flushed,false);
+  release();await flush;assert.equal(started,8);assert.equal(peak,4);const pending=await memory.options.client.memory('pending_evidence',{source_prefix:memory.prefix,provider:'fixture',limit:20});assert.deepEqual(pending,[]);
+ }finally{release();await memory.close();await rm(root,{recursive:true,force:true})}
+});
+
+test('concurrent extraction conflicts remain pending and recover without overwriting a shared fact',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-processing-conflict-'));let started=0,gated=true;let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve});
+ const gateway:ModelGateway={async *stream(){/* unused */},async complete(request){const prompt=JSON.parse(request.prompt) as {candidates?:unknown[];existing?:{id:string}[]};if(prompt.candidates)return {text:JSON.stringify({decisions:prompt.candidates.map((_,candidate_index)=>({candidate_index,action:'no_change',target_id:prompt.existing![0]!.id}))})};if(gated){started++;await gate;}return {text:JSON.stringify({entries:[{key:'shared',text:'同一事项',topic:'工作',kind:'fact',due:null,direction:null,status:null,valid_until:null}]})};}};
+ const make=()=>new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'parallel-conflict',gateway,model:'fixture'});let memory=make();
+ try{
+  await memory.open();for(let i=0;i<4;i++)await memory.ingestEvidence({sourceId:'channel-'+i,locator:'message-'+i,text:'同一事项',observedAt:new Date().toISOString(),kind:'im',processingConsent:memory.processingGrant(true)});
+  for(let i=0;i<100&&started<4;i++)await new Promise(resolve=>setTimeout(resolve,5));assert.equal(started,4);release();await memory.flush();const first=(await memory.list()).entries;assert.equal(first.length,1);
+  const pending=await memory.options.client.memory('pending_evidence',{source_prefix:memory.prefix,provider:'fixture',limit:20}) as unknown[];assert.equal(pending.length,3,'conflicted replies receive no completion receipt');
+  await memory.close();gated=false;memory=make();await memory.open();await memory.flush();const current=(await memory.list()).entries;assert.equal(current.length,1);assert.equal(current[0]!.version,first[0]!.version,'duplicate evidence must not rewrite the existing fact');assert.deepEqual(await memory.options.client.memory('pending_evidence',{source_prefix:memory.prefix,provider:'fixture',limit:20}),[]);
+ }finally{release();await memory.close();await rm(root,{recursive:true,force:true})}
+});
+
+for(const method of ['flush','close'] as const)test(`${method} waits for direct extraction model cleanup`,async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-direct-drain-'));let start!:()=>void,release!:()=>void;const started=new Promise<void>(resolve=>{start=resolve}),gate=new Promise<void>(resolve=>{release=resolve});let cleaned=false;
+ const gateway:ModelGateway={async *stream(){/* unused */},async complete(){start();await gate;cleaned=true;return {text:'{"entries":[]}'};}};
+ const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'direct-drain',gateway,model:'fixture'});let observationError:unknown;
+ try{
+  await memory.open();await memory.flush();const observation=memory.observeSource({source_ref:{type:'im',ref:'direct',observed_at:new Date().toISOString()},content:'资料',processing_consent:memory.processingGrant(true)}).catch(error=>{observationError=error;return null;});await started;
+  let drained=false;const drain=memory[method]().then(()=>{drained=true});await new Promise(resolve=>setTimeout(resolve,50));assert.equal(drained,false);assert.equal(cleaned,false);release();await drain;await observation;assert.equal(cleaned,true);if(method==='flush')assert.equal(observationError,undefined);
+ }finally{release();await memory.close();await rm(root,{recursive:true,force:true})}
+});
+
+for(const method of ['flush','close'] as const)test(`${method} waits for direct extraction ticket cleanup after the model finishes`,async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-direct-ticket-drain-'));let start!:()=>void,release!:()=>void;const started=new Promise<void>(resolve=>{start=resolve}),gate=new Promise<void>(resolve=>{release=resolve});
+ const gateway:ModelGateway={async *stream(){/* unused */},complete:()=>Promise.resolve({text:'{"entries":[]}'})};const client=new MemoryLedgerClient(join(root,'memory.sqlite')),memory=new SubstrateMemoryResource({client,userId:'ticket-drain',gateway,model:'fixture'});let observationError:unknown;
+ try{
+  await memory.open();await memory.flush();const request=client.memory.bind(client);client.memory=async(operation,input)=>{const result=await request(operation,input);if(operation==='extraction_ticket'&&result===null&&(input as {force?:boolean}).force===undefined){start();await gate;}return result;};
+  const observation=memory.observeSource({source_ref:{type:'im',ref:'direct',observed_at:new Date().toISOString()},content:'资料',processing_consent:memory.processingGrant(true)}).catch(error=>{observationError=error;return null;});await started;
+  let drained=false;const drain=memory[method]().then(()=>{drained=true});await new Promise(resolve=>setTimeout(resolve,50));assert.equal(drained,false);release();await drain;await observation;if(method==='flush')assert.equal(observationError,undefined);
+ }finally{release();await memory.close();await rm(root,{recursive:true,force:true})}
+});
+
+ test('channel page admission batches persistence and grants without marking extraction complete',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-page-batch-'));const client=new MemoryLedgerClient(join(root,'memory.sqlite'));
+ const memory=new SubstrateMemoryResource({client,userId:'batch',gateway:{async *stream(){/* admission test disables extraction */},complete:()=>Promise.resolve({text:'{"entries":[]}'})},model:'fixture',personalMemoryEnabled:false});
+ try{await memory.open();const calls:string[]=[],original=client.memory.bind(client);client.memory=async(op,input)=>{calls.push(op);return original(op,input)};
+ const items=Array.from({length:50},(_,n)=>({sourceId:'chat',locator:'message:'+n,text:'self '+n,observedAt:new Date().toISOString(),kind:'im' as const,im:{sender_id:'self',recipient_id:'self',account_id:'account'},processingConsent:memory.processingGrant(true)}));
+ assert.equal(await memory.ingestEvidenceBatch(items),true);assert.equal(calls.filter(op=>op==='append_evidence_batch').length,1);assert.equal(calls.filter(op=>op==='append_evidence').length,0);assert.equal(calls.filter(op=>op==='source_grant').length,2);
+ assert.equal((await client.memory('pending_evidence',{source_prefix:memory.prefix,provider:'fixture',limit:100}) as unknown[]).length,50);
+ assert.equal(await memory.ingestEvidenceBatch(items),false);assert.equal((await client.memory('pending_evidence',{source_prefix:memory.prefix,provider:'fixture',limit:100}) as unknown[]).length,50);
+ assert.equal(await memory.ingestEvidenceBatch(items.map(item=>({...item,processingConsent:memory.processingGrant(false,2)}))),true);assert.deepEqual(await memory.profileSources(),[]);assert.equal(await memory.ingestEvidenceBatch(items.map(item=>({...item,processingConsent:memory.processingGrant(true,3)}))),true);
+ const before=await memory.profileSources();
+ const evidence=await client.memory('evidence',{id:before[0]!.id}) as Record<string,unknown>,rollbackId=memory.prefix+'rollback';
+ await assert.rejects(client.memory('append_evidence_batch',{items:[{...evidence,id:rollbackId,locator:'rollback'},{...evidence,source_id:memory.prefix+'conflict'}]}),/observation replay conflict/);
+ assert.equal(await client.memory('evidence',{id:rollbackId}),null,'a failed page transaction leaves no partial evidence');
+ await assert.rejects(memory.ingestEvidenceBatch([items[0]!,{...items[1]!,observedAt:'invalid'}]));assert.deepEqual(await memory.profileSources(),before);
+ }finally{await memory.close();await rm(root,{recursive:true,force:true})}
+ })
+
+
+test('Profile evidence preserves timestamp and author, admits only direct mentions, and redacts before projection',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-profile-attribution-'));const gateway:ModelGateway={async *stream(){/* unused by this read-only fixture */},complete:()=>Promise.resolve({text:'{"entries":[]}'})};const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'attribution',gateway,model:'fixture',personalMemoryEnabled:false});
+ try{await memory.open();const at=new Date(Date.now()-1000).toISOString(),grant=memory.processingGrant(true);
+  await memory.ingestEvidenceBatch(['direct','all','unknown'].map(mention=>({sourceId:'im',locator:mention,text:'Please test the UI. password=test-only-secret',observedAt:at,kind:'im' as const,processingConsent:grant,im:{sender_id:'ou_other',sender_name:'Alex',message_id:'om_fixture',parent_id:'om_parent',root_id:'om_root',upper_message_id:'om_container',recipient_id:'ou_self',account_id:'opaque',chat_id:'oc_fixture',mention:mention as 'direct'|'all'|'unknown',mention_ids:['ou_self']}})));
+  const inputs=await memory.profileSources();assert.equal(inputs.length,1);assert.equal(inputs[0]!.observed_at,at);assert.equal(inputs[0]!.source?.relation,'addressed');assert.equal(inputs[0]!.source?.sender_name,'Alex');assert.deepEqual(inputs[0]!.source?.mention_ids,['self']);assert(!inputs[0]!.content.includes('test-only-secret'));assert(!JSON.stringify(inputs).includes('ou_other'));assert.match(inputs[0]!.source.parent_id!,/^[a-f0-9]{12}$/u);assert(!JSON.stringify(inputs).includes('om_parent'));
+  await memory.setProcessingConsent('im',memory.processingGrant(false,2));assert.deepEqual(await memory.profileSources(),[]);
+ }finally{await memory.close();await rm(root,{recursive:true,force:true})}
+});

@@ -1,3 +1,4 @@
+import type {ProfileInput} from '../personal-agent/profile-warmup.js'
 import {type SourceTag,type ImMetadata} from '../memory/provenance.js'
 import {assertAcceptable,type EvaluatedCandidate} from '../understanding/candidates.js'
 import type {LifeBackend,LifeSnapshot} from '../personal-agent/life.js'
@@ -95,6 +96,20 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   async #maintain():Promise<void>{this.#wakeSources();await this.options.client.memory('expire',{});if(this.options.personalMemoryEnabled===false)return;await this.#refresh();this.#queueIndex();const pending=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('pending_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),limit:20}));for(const e of pending)this.#queue(e);this.#queueConsolidation()}
   #ready():void{if(!this.#opened)throw Error('personal_memory_unavailable')}
   capabilities(){return {list:true,get:true,correct:true,forgetEntry:true,forgetSource:true,observeSource:true}}
+  async profileSources(ids?:readonly string[]):Promise<ProfileInput[]>{
+    this.#ready()
+    const records=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('profile_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),...(ids?{ids:ids.filter(id=>id.startsWith(this.prefix))}: {})}))
+    return records.map(record=>{
+      const metadata=record.source_metadata!,own=record.source_kind==='im'?metadata.sender_id===metadata.recipient_id:metadata.sender_id===metadata.account_id
+      const alias=(value:string)=>digest(value).slice(0,12)
+      return {id:record.id,version:record.hash,content:record.raw_text!.slice(0,1500),observed_at:record.observed_at,origin:'inferred',source:{kind:record.source_kind as 'im'|'mail',project:record.source_kind==='im'?'飞书':'邮件',document:own?'本人发出的内容':'直接@本人的内容',relation:own?'self' as const:'addressed' as const,sender_id:own?'self':alias(metadata.sender_id),...(metadata.sender_name?{sender_name:metadata.sender_name}:{}),thread_id:alias(metadata.thread_id??metadata.chat_id??record.source_id),...Object.fromEntries(['message_id','parent_id','root_id','upper_message_id'].flatMap(key=>{const id=metadata[key as keyof typeof metadata];return typeof id==='string'?[[key,alias(id)]]:[]})),recipient_ids:(metadata.recipient_ids??[]).map(id=>id===metadata.account_id?'self':alias(id)),mention_ids:(metadata.mention_ids??(metadata.mention==='direct'&&metadata.recipient_id?[metadata.recipient_id]:[])).map(id=>id===metadata.recipient_id?'self':alias(id))}}
+    })
+  }
+  async invalidateMessage(sourceId:string,locator:string):Promise<void>{
+    this.#ready()
+    await this.options.client.memory('invalidate_message',{source_id:this.prefix+sourceId,locator})
+    await this.#refresh()
+  }
   responseAdaptation():PersonalMemoryResponseAdaptation{this.#ready();return structuredClone(this.#adaptation)}
   async prepareResponseAdaptation(consumer:string,signal?:AbortSignal):Promise<PersonalMemoryResponseAdaptation>{
     this.#ready();signal?.throwIfAborted()
@@ -204,12 +219,13 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   async canProcessEvidence(id:string,purpose:'extraction'|'embedding'):Promise<boolean>{return await this.options.client.memory('processing_evidence',{id,purpose,provider:purpose==='extraction'?this.#extractionFingerprint():this.#fingerprint()})!==null}
   async processingStamp(ids:string[]):Promise<string|null>{return await this.options.client.memory('processing_stamp',{ids,purpose:'embedding',provider:this.#fingerprint()}) as string|null}
   processingGrant(consent:boolean,revision=1,scopeRevision=0):ProcessingGrant{return processingGrantSchema.parse({revision,scope_revision:scopeRevision,extraction_provider:consent?this.#extractionFingerprint():null,embedding_provider:consent&&this.options.embedding?this.#fingerprint():null,conversation_providers:consent?[...new Set(this.options.conversationProviders??[])]:[]})}
-  async setProcessingConsent(sourceId:string,grant:ProcessingGrant):Promise<void>{
+  async setProcessingConsent(sourceId:string,grant:ProcessingGrant):Promise<void>{await this.#applyProcessingConsent(sourceId,grant)}
+  async #applyProcessingConsent(sourceId:string,grant:ProcessingGrant):Promise<boolean>{
     const source_id=sourceId.startsWith(this.prefix)?sourceId:this.prefix+sourceId
     const old=await this.options.client.memory('source_grant',{source_id,action:'get'})
     const previous=old===null?null:processingGrantSchema.parse(old)
-    if(previous&&previous.revision>=grant.revision)return
-    await this.options.client.memory('source_grant',{source_id,expected_revision:previous?.revision??0,grant});await this.#refresh()
+    if(previous&&previous.revision>=grant.revision)return false
+    await this.options.client.memory('source_grant',{source_id,expected_revision:previous?.revision??0,grant});await this.#refresh();return true
   }
   #fingerprint():string{return this.options.embeddingFingerprint??(this.options.embedding?this.options.embedding.id+':'+this.options.embedding.dims:'lexical')}
   #vector(value:Float32Array|undefined):number[]{if(!value||value.length!==this.options.embedding?.dims||!value.every(Number.isFinite)||!value.some(number=>number!==0))throw Error('invalid_embedding');return Array.from(value)}
@@ -296,16 +312,31 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     }else{const evidence=await this.#admit(q.source_ref,q.content,undefined,undefined,undefined,false,undefined,q.embedding_consent===true,q.processing_consent);await this.#extract(evidence,q.topic)}
     return (await this.list()).entries.find(e=>e.source_refs.some(ref=>ref.ref===q.source_ref.ref))??null
   }
-  async ingestEvidence(input:{sourceId:string;locator:string;text:string;observedAt:string;kind:'im'|'task_result'|'mail'|'calendar';im?:ImMetadata;retentionUntil?:string;senderId?:string;accountId?:string;provider?:string;embeddingConsent?:boolean;processingConsent?:ProcessingGrant}):Promise<void>{
-    const source=MemorySourceRefSchema.parse({type:input.kind==='task_result'?'task':input.kind,ref:input.locator,observed_at:input.observedAt});const record=await this.#admit(source,input.text,input.kind,input.sourceId,input.retentionUntil,false,input.im??(input.senderId&&input.accountId?{sender_id:input.senderId,account_id:input.accountId,provider:input.provider??(input.sourceId.startsWith('feishu:')?'feishu':input.kind==='im'?undefined:input.kind)}:undefined),input.embeddingConsent===true,input.processingConsent);this.#queue(record)
+  async ingestEvidence(input:{sourceId:string;locator:string;text:string;observedAt:string;kind:'im'|'task_result'|'mail'|'calendar';im?:ImMetadata;retentionUntil?:string;senderId?:string;accountId?:string;provider?:string;embeddingConsent?:boolean;processingConsent?:ProcessingGrant}):Promise<void>{await this.ingestEvidenceBatch([input])}
+  async ingestEvidenceBatch(inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'im'|'task_result'|'mail'|'calendar';im?:ImMetadata;retentionUntil?:string;senderId?:string;accountId?:string;provider?:string;embeddingConsent?:boolean;processingConsent?:ProcessingGrant}[]):Promise<boolean>{
+    if(!inputs.length)return false
+    if(inputs.length>256)throw Error('STORE_INVALID_INPUT')
+    const records=inputs.map(input=>{
+      const source=MemorySourceRefSchema.parse({type:input.kind==='task_result'?'task':input.kind,ref:input.locator,observed_at:input.observedAt})
+      return this.#evidenceRecord(source,input.text,input.kind,input.sourceId,input.retentionUntil,false,input.im??(input.senderId&&input.accountId?{sender_id:input.senderId,account_id:input.accountId,provider:input.provider??(input.sourceId.startsWith('feishu:')?'feishu':input.kind==='im'?undefined:input.kind)}:undefined),input.embeddingConsent===true)
+    })
+    const result=z.object({records:z.array(EvidenceRecordSchema),changed:z.boolean()}).strict().parse(await this.options.client.memory('append_evidence_batch',{items:records}))
+    const grants=new Map<string,ProcessingGrant>()
+    for(const input of inputs)if(input.processingConsent){const previous=grants.get(input.sourceId);if(!previous||previous.revision<input.processingConsent.revision)grants.set(input.sourceId,input.processingConsent)}
+    let changed=result.changed
+    for(const [sourceId,grant] of grants)changed=await this.#applyProcessingConsent(sourceId,grant)||changed
+    for(const record of result.records)this.#queue(record)
+    return changed
   }
   /** Wait for currently admitted extraction work; admission itself only waits for persistence. */
   async flush():Promise<void>{await this.#sourceWork;await this.#pending;await this.#notifySources();await this.#indexing;this.#queueIndex();await this.#indexing;await this.#consolidating}
-  #queue(evidence:EvidenceRecord):void{if(this.options.personalMemoryEnabled===false||this.#queued.has(evidence.id)||this.#queued.size>=20)return;this.#queued.add(evidence.id);this.#pending=this.#pending.then(async()=>{if(this.#opened)await this.#extract(evidence)}).catch(()=>{ /* durable pending evidence is retried by maintenance */ }).finally(()=>{this.#queued.delete(evidence.id)})}
+  #queue(evidence:EvidenceRecord):void{if(this.options.personalMemoryEnabled===false||this.#queued.has(evidence.id)||this.#queued.size>=20)return;this.#queued.add(evidence.id);const work=(async()=>{if(this.#opened)await this.#extract(evidence)})().catch(()=>{ /* durable pending evidence is retried by maintenance */ }).finally(()=>{this.#queued.delete(evidence.id)});this.#pending=Promise.all([this.#pending,work]).then(()=>undefined)}
   async #extract(evidence:EvidenceRecord,topic?:string,force=false):Promise<void>{
     const raw=await this.options.client.memory('extraction_ticket',{evidence_id:evidence.id,provider:this.#extractionFingerprint(),force})
     if(raw===null)return
     const ticket=extractionTicketSchema.parse(raw),key=JSON.stringify(ticket)
+    while(!this.#extracting.has(key)&&this.#extracting.size>=4&&this.#opened&&!this.#abort.signal.aborted)await Promise.race(this.#extracting.values()).catch(()=>{/* A failed extraction still releases its slot. */})
+    if(!this.#opened||this.#abort.signal.aborted)return
     const existing=this.#extracting.get(key);if(existing)return existing
     const work=this.#extractFresh(evidence,ticket,topic).finally(async()=>{
       this.#extracting.delete(key)
@@ -313,7 +344,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
       const next=await this.options.client.memory('extraction_ticket',{evidence_id:evidence.id,provider:this.#extractionFingerprint()})
       if(next!==null&&JSON.stringify(next)!==key)await this.#extract(evidence,topic)
     })
-    this.#extracting.set(key,work);return work
+    this.#extracting.set(key,work);this.#pending=Promise.all([this.#pending,work.catch(()=>undefined)]).then(()=>undefined);return work
   }
   async #extractFresh(evidence:EvidenceRecord,ticket:ExtractionTicket,topic?:string):Promise<void>{
     const workEpoch=this.#memoryWorkEpoch

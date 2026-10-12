@@ -140,6 +140,13 @@ export class SensitiveContentPolicy {
   scrub(_field: string, value: string): ScrubResult {
     let matches = 0
     let scrubbed = value
+    const lines=value.split('\n'),credentialLines=new Set<number>()
+    for(let index=0;index<lines.length;index++){
+      const token=lines[index]!.trim()
+      if(/^["']?(?:密码|口令|密钥|私钥|访问令牌)["']?\s*[:：=]?\s*$/u.test(token)&&/^[A-Za-z0-9!@#$%^&*_.+=\/-]{3,}$/u.test(lines[index+1]?.trim()??''))credentialLines.add(index+1)
+    }
+    scrubbed=lines.map((line,index)=>credentialLines.has(index)?(matches++,'[redacted]'):line).join('\n')
+
 
     // A pasted or truncated private key is sensitive regardless of its file name.
     scrubbed = scrubbed.replace(/-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/gu, () => {
@@ -160,18 +167,21 @@ export class SensitiveContentPolicy {
       matches += 1
       return `${prefix}[redacted]`
     })
-    scrubbed = replaceAll(scrubbed, /(?:\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token)\b|["'](?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token)["'])\s*(?:=|:)\s*(?!\[REDACTED\](?:[&#\s,;]|$))(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, () => {
+    scrubbed = replaceAll(scrubbed, /(?:\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key)\b|["'](?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key)["'])\s*(?:=|:)\s*(?!\[REDACTED\](?:[&#\s,;]|$))(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, () => {
       matches += 1
       return '[redacted]'
     })
-    scrubbed = replaceAll(scrubbed, /(?:密码|["']密码["'])\s*(?:=|:|：)\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gu, () => {
+    scrubbed = replaceAll(scrubbed, /["']?(?:密码|口令|密钥|私钥|访问令牌|CVC|CVV|PIN|安全码)["']?\s*(?:是|为|=|:|：)\s*(?:`[^`]*`|"[^"]*"|'[^']*'|[^\s,;]+)/gu, () => {
       matches += 1
       return '[redacted]'
     })
+    scrubbed = replaceAll(scrubbed, /(?:密码|口令|密钥|私钥|访问令牌|CVC|CVV|安全码)[ \t]+[`"']?[A-Za-z0-9!@#$%^&*_.+=\/-]{3,}[`"']?/giu,()=>{matches++;return '[redacted]'})
     scrubbed = replaceAll(scrubbed, /\b(?:sk|rk|pk|ak|xox[baprs]|ghp|github_pat)[_-][A-Za-z0-9][A-Za-z0-9_-]{11,}\b/giu, () => {
       matches += 1
       return '[redacted]'
     })
+    scrubbed = scrubbed.replace(/(?:银行卡号|信用卡号|卡号)\s*\d{0,2}\s*[:：=]?\s*(?:\d[ -]?){12,19}/gu, () => {matches += 1; return '[redacted]'})
+
     scrubbed = replaceAll(scrubbed, /\bBearer\s+[A-Za-z0-9._~+\/-]{8,}\b/giu, () => {
       matches += 1
       return '[redacted]'

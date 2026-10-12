@@ -2,6 +2,19 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {normalizeCalendarEvent,normalizeGmailMessage,GoogleProvider} from '../src/connectors/composio/google.js'
 const now=Date.now(),window={start:now-30*86400000,end:now+90*86400000}
+test('Gmail reads four bodies concurrently without dropping unfinished IDs',async()=>{
+ let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve}),started:string[]=[];
+ const provider=new GoogleProvider({read:async(_view,q)=>{
+  if(q.kind==='gmail.profile')return {historyId:'100'};
+  if(q.kind==='gmail.list')return {messages:['a','b','c','d'].map(messageId=>({messageId}))};
+  if(q.kind==='gmail.message'){started.push(q.messageId);await gate;return {messageId:q.messageId,messageTimestamp:new Date(now-1000).toISOString(),labelIds:['INBOX'],messageText:'body'};}
+  throw Error('unexpected read');
+ }});
+ const run=provider.page({identity:'fixture@example.test',scope:{kind:'gmail',labels:['INBOX'],pastDays:30}},null);
+ try{for(let n=0;n<50&&started.length<4;n++)await new Promise(resolve=>setTimeout(resolve,2));assert.deepEqual(started,['a','b','c','d']);}
+ finally{release();await run;}
+ assert.deepEqual((await run).objects.map(o=>o.metadata.remote_id),['a','b','c','d']);
+});
 test('mail label-only changes preserve semantics and out-of-scope mail is withdrawn',()=>{
  const message={messageId:'abc',subject:'Meeting',sender:'sender@example.test',messageText:'Tomorrow',messageTimestamp:new Date(now-1000).toISOString(),labelIds:['INBOX','UNREAD']}
  const first=normalizeGmailMessage(message,['INBOX'],window),second=normalizeGmailMessage({...message,labelIds:['INBOX']},['INBOX'],window)
@@ -53,3 +66,10 @@ test('oversized history requests a safe snapshot reset rather than retrying the 
  const provider=new GoogleProvider({read:()=>Promise.resolve({history:Array.from({length:3},(_,batch)=>({messagesAdded:Array.from({length:100},(_,n)=>({message:{id:(batch*100+n+1).toString(16)}}))})),historyId:'200'})})
  await assert.rejects(provider.page({identity:'fixture@example.test',scope:{kind:'gmail',labels:['INBOX'],pastDays:30}},null,undefined,{historyId:'100'}),/history_too_large/)
 })
+
+test('four-way Gmail batches shrink to the remaining metadata/body request budget',async()=>{
+ const {createComposioBudget}=await import('../src/connectors/composio/client.js');const budget=createComposioBudget();budget.requests=15;
+ const provider=new GoogleProvider({read:(_view,q,b)=>{b.requests++;if(q.kind!=='gmail.message')throw Error('unexpected read');return Promise.resolve({messageId:q.messageId,messageTimestamp:new Date(now-1000).toISOString(),labelIds:['INBOX'],messageText:'body'});}});
+ const cursor={phase:'history',start:now-86400000,end:now,calendar:0,baseline:'100',token:null,nextToken:null,nextBaseline:'101',loaded:true,pending:['a','b','c','d'].map(id=>({id,deleted:false})),seenTokens:[]};
+ const result=await provider.page({identity:'fixture@example.test',scope:{kind:'gmail',labels:['INBOX'],pastDays:30}},cursor,budget);assert.equal(result.objects.length,1);assert.equal(budget.requests,17);assert.equal(result.continuation?.pending.length,3);
+});

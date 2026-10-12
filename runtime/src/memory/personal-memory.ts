@@ -1,3 +1,4 @@
+import type {ProfileInput} from '../personal-agent/profile-warmup.js'
 import type {EvaluatedCandidate} from '../understanding/candidates.js'
 import type {ResolvedLifeCandidate} from '../memory-substrate/resolution.js'
 import type {LifeBackend} from '../personal-agent/life.js'
@@ -90,6 +91,7 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  readonly profileSources?: (ids?:readonly string[]) => Promise<ProfileInput[]>
   readonly resolveLifeCandidate?: (row:EvaluatedCandidate,signal:AbortSignal,guard:()=>void)=>Promise<ResolvedLifeCandidate>
   readonly lifeBackend?: () => LifeBackend
   readonly dailyBriefEvidence?: (input:{localDate:string;timezone:string;signal?:AbortSignal})=>Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}[]>

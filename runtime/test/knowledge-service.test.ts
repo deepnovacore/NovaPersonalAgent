@@ -79,10 +79,10 @@ test('syncFile bounds store failures before indexing and after commit', async ()
     embed: texts => Promise.resolve(texts.map(() => new Float32Array([1, 0])))}})
   try {
     await service.open()
-    const list = store.listSources.bind(store)
-    store.listSources = () => Promise.reject(Error('list credential=private-value'))
+    const list = store.sourceByLocator.bind(store)
+    store.sourceByLocator = () => Promise.reject(Error('list credential=private-value'))
     await assert.rejects(service.syncFile(file, directory, new AbortController().signal), /^Error: store_failed$/u)
-    store.listSources = list
+    store.sourceByLocator = list
     const first = await service.syncFile(file, directory, new AbortController().signal)
     const chunks = store.listChunks.bind(store)
     store.listChunks = () => Promise.reject(Error('chunks credential=private-value'))
@@ -266,3 +266,14 @@ test('vector writes require the embedded source fingerprint and chunk digest', a
     assert.deepEqual(await store.unembeddedSources('fake-v2', 2), [id], 'a provider change makes the chunk pending again')
   } finally {await service.close(); await rm(directory, {recursive: true, force: true, maxRetries: 10, retryDelay: 100})}
 })
+
+test('remove fences a fresh-ID replacement of the requested old source',async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'knowledge-remove-replacement-'));const file=join(directory,'note.md');
+ const store=new KnowledgeStoreClient({path:join(directory,'knowledge.sqlite')});const service=new KnowledgeService({store,embedding:{id:'fixture',dims:2,embed:texts=>Promise.resolve(texts.map(()=>new Float32Array([1,0])))}});
+ let release!:()=>void;const gate=new Promise<void>(r=>{release=r});let started=false;
+ try{await service.open();await service.bindEvidenceLedger({record:input=>Promise.resolve({evidence_id:input.sourceId+'-e'}),read:()=>Promise.resolve(null),remove:()=>Promise.resolve()});await writeFile(file,'Original synthetic note');const old=await service.syncFile(file,directory,new AbortController().signal);
+ const record=store.recordJob.bind(store);store.recordJob=async job=>{if(job.state==='running'){started=true;await gate}await record(job)};await writeFile(file,'Replacement synthetic note');
+ const replacement=service.syncFile(file,directory,new AbortController().signal,old.id).catch((error:unknown)=>error);for(let n=0;n<100&&!started;n++)await new Promise(r=>setTimeout(r,5));assert(started);
+ let removed=false;const removal=service.handle('knowledge.remove',{id:old.id}).then(()=>{removed=true});await new Promise(r=>setTimeout(r,10));assert.equal(removed,false);release();await replacement;await removal;assert.deepEqual(await service.listSources(),[]);
+ }finally{release();await service.close();await rm(directory,{recursive:true,force:true})}
+});

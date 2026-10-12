@@ -20,7 +20,7 @@ export function assertFeishuCommand(args: readonly string[]): void {
     [['auth', 'logout'], { '--json': true }],
     [['config', 'init'], { '--app-id': '*', '--app-secret-stdin': true, '--brand': 'feishu', '--new': true, '--lang': 'zh' }],
     [['im', '+chat-list'], { '--as': 'user', '--types': 'p2p,group', '--sort': 'active_time', '--format': 'json', '--page-size': '50', '--page-token': '*' }],
-    [['im', '+chat-messages-list'], { '--as': 'user', '--chat-id': '*', '--start': '*', '--end': '*', '--order': 'asc', '--page-size': '50', '--page-token': '*', '--format': 'json', '--no-reactions': true }],
+    [['im', '+chat-messages-list'], { '--as': 'user', '--chat-id': '*', '--start': '*', '--end': '*', '--order': '*', '--page-size': '50', '--page-token': '*', '--format': 'json', '--no-reactions': true }],
     [['im', '+messages-send'], { '--as': 'bot', '--user-id': '*', '--content': '*', '--msg-type': 'interactive', '--idempotency-key': '*', '--format': 'json' }],
     [['event', 'consume', 'card.action.trigger'], { '--as': 'bot', '--quiet': true, '--timeout': '0s', '--max-events': '0' }],
     [['event', 'stop'], { '--json': true, '--app-id': '*' }],
@@ -53,6 +53,7 @@ export function assertFeishuCommand(args: readonly string[]): void {
     'event consume card.action.trigger': ['--as', '--quiet', '--timeout', '--max-events'], 'event stop': ['--json', '--app-id'],
   };
   if (required[key]?.some((flag) => !seen.has(flag))) throw new Error('Missing Feishu command argument');
+  if (key === 'im +chat-messages-list' && !['asc', 'desc'].includes(args[args.indexOf('--order') + 1]!)) throw new Error('Invalid Feishu message order');
   if (key === 'config init') {
     const exact = seen.has('--new') ? ['--new', '--lang'] : ['--app-id', '--app-secret-stdin', '--brand'];
     if (seen.size !== exact.length || exact.some(flag => !seen.has(flag))) throw new Error('Invalid Feishu app configuration');

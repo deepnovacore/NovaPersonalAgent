@@ -329,3 +329,15 @@ test('support transport leaves thinking to downstream configuration in complete 
     }
   }
 })
+
+
+test('configured Qwen VL thinking keeps its bounded budget and answer ceiling, without guessing a generic endpoint', async () => {
+ const bodies: Record<string, unknown>[]=[]
+ const gateway=new OpenAIModelGateway({baseUrl:'https://example.invalid/v1',apiKey:'test',thinkingControl:'qwen',clock:new VirtualClock(),metrics:{record:()=>undefined},fetch:(_url,init)=>{bodies.push(JSON.parse(init!.body as string) as Record<string,unknown>);return Promise.resolve(Response.json({choices:[{message:{content:'{}',reasoning_content:'private reasoning'}}]}))}})
+ await gateway.complete({model:'qwen3-vl-plus',system:'s',prompt:'p',reasoning:'enabled',reasoningBudget:2048,maxTokens:8192,jsonSchema:{type:'object'}})
+ await gateway.complete({model:'qwen3-vl-plus',system:'s',prompt:'p',reasoning:'disabled',jsonSchema:{type:'object'}})
+ await gateway.complete({model:'qwen-vl-max',system:'s',prompt:'p',reasoning:'enabled',reasoningBudget:2048})
+ assert.equal(bodies[0]!.enable_thinking,true);assert.equal(bodies[0]!.thinking_budget,2048);assert.equal(bodies[0]!.max_tokens,8192)
+ assert.equal(Object.hasOwn(bodies[0]!,'response_format'),false);assert.deepEqual(bodies[1]!.response_format,{type:'json_object'});assert.equal(bodies[1]!.enable_thinking,false);assert.equal(Object.hasOwn(bodies[1]!,'thinking_budget'),false)
+ assert.equal(Object.hasOwn(bodies[2]!,'enable_thinking'),false)
+})

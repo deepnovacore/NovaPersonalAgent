@@ -34,7 +34,61 @@ test('inferred memories may suggest topics but cannot supply personal facts',asy
 const fileA={id:'source:a',version:'f1',content:'Active voice project',origin:'inferred' as const,source:{project:'Nova',document:'README.md'}}
 const fileB={id:'source:b',version:'f1',content:'Reads papers on speech models',origin:'inferred' as const,source:{project:'Notes',document:'papers.md'}}
 const fileDraft={about:{text:'Builds a voice agent',refs:[{entry_id:fileA.id,version:fileA.version}]},work:[],interests:[{text:'Speech models',refs:[{entry_id:fileB.id,version:fileB.version}]}]}
+test('incremental drafts retain grounded work and interests omitted by the next batch',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-incremental-'));let calls=0;
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve(++calls===1?{...fileDraft,work:[{title:'Nova',text:'Builds the agent',refs:[{entry_id:fileA.id,version:fileA.version}]}]}:{about:{text:'Works on speech',refs:[{entry_id:fileA.id,version:fileA.version}]},work:[],interests:[]}),()=>{/* snapshot observer */});
+ try{await service.open();service.update([fileA,fileB]);await service.refresh();service.update([fileA,fileB,{...fileB,id:'source:c'}]);await service.refresh();assert.equal(service.snapshot().draft?.work[0]?.title,'Nova');assert.equal(service.snapshot().draft?.interests[0]?.text,'Speech models');}
+ finally{await service.close();await rm(dir,{recursive:true,force:true})}
+});
+test('external message facts disappear when their exact version changes',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-external-'));
+ const own={...fileA,source:{project:'飞书',document:'本人消息',kind:'im' as const}};
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve({...fileDraft,interests:[]}),()=>{/* snapshot observer */});
+ try{await service.open();service.update([own]);await service.refresh();assert(service.snapshot().draft);service.update([{...own,version:'f2'}]);assert.equal(service.snapshot().draft,null);}
+ finally{await service.close();await rm(dir,{recursive:true,force:true})}
+});
+test('old facts keep authorized evidence outside the next generation sample',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-retained-'));
+ const own={...fileA,source:{project:'飞书',document:'本人消息',kind:'im' as const}};
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve({...fileDraft,interests:[]}),()=>{/* snapshot observer */});
+ try{
+  await service.open();service.update([own]);await service.refresh();
+  const newest=Array.from({length:24},(_,index)=>({...own,id:'recent:'+index}));
+  service.update([...newest,own]);assert.equal(service.snapshot().draft?.about?.text,'Builds a voice agent');
+  await service.forgetUnavailable(new Set(newest.map(input=>input.id)));assert.equal(service.snapshot().draft,null);
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+});
+test('stable inputs still reach the first three profile stages after reopening',async context=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-stable-'));let calls=0;
+ const make=()=>new ProfileWarmup(join(dir,'draft.json'),()=>{calls++;return Promise.resolve({...fileDraft,interests:[]})},()=>{/* snapshot observer */});
+ let service=make();
+ try{
+  await service.open();context.mock.timers.enable({apis:['Date','setTimeout'],now:Date.now()});service.update([fileA]);
+  context.mock.timers.tick(5*60_000);await service.refresh();assert.equal(calls,1);
+  await service.close();service=make();await service.open();service.update([fileA]);
+  context.mock.timers.tick(25*60_000);await service.refresh();assert.equal(calls,2);
+  context.mock.timers.tick(210*60_000);await service.refresh();assert.equal(calls,3);
+  await service.close();service=make();await service.open();service.update([{...fileA,version:'f2'}]);
+  context.mock.timers.tick(239*60_000);assert.equal(calls,3);
+  context.mock.timers.tick(60_000);await service.refresh();assert.equal(calls,4);
+ }finally{context.mock.timers.reset();await service.close();await rm(dir,{recursive:true,force:true})}
+});
 const until=async(check:()=>boolean)=>{for(let i=0;i<200&&!check();i++)await new Promise(r=>setTimeout(r,5));assert.ok(check())}
+test('ongoing source changes produce drafts at 5 minutes, 30 minutes and 4 hours',async context=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-stages-'));let calls=0;
+ const service=new ProfileWarmup(join(dir,'draft.json'),inputs=>{calls++;return Promise.resolve({about:{text:'Builds a voice agent',refs:[{entry_id:inputs[0]!.id,version:inputs[0]!.version!}]},work:[],interests:[]})},()=>{/* snapshot observer */});
+ try{
+  await service.open();context.mock.timers.enable({apis:['Date','setTimeout'],now:Date.now()});
+  service.update([fileA]);
+  context.mock.timers.tick(4*60_000);service.update([{...fileA,version:'f2'}]);assert.equal(calls,0);
+  context.mock.timers.tick(60_000);await service.refresh();assert.equal(calls,1);
+  service.update([{...fileA,version:'f3'}]);context.mock.timers.tick(24*60_000);assert.equal(calls,1);
+  context.mock.timers.tick(60_000);await service.refresh();assert.equal(calls,2);
+  service.update([{...fileA,version:'f4'}]);context.mock.timers.tick(209*60_000);assert.equal(calls,2);
+  context.mock.timers.tick(60_000);await service.refresh();assert.equal(calls,3);
+  context.mock.timers.tick(4*60*60_000);assert.equal(calls,3,'unchanged evidence does not trigger another request');
+ }finally{context.mock.timers.reset();await service.close();await rm(dir,{recursive:true,force:true})}
+});
 test('a source change during generation keeps the in-flight answer and only the uncited facts disappear',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-warmup-'));let resolve!:(v:typeof fileDraft)=>void
  const service=new ProfileWarmup(join(dir,'draft.json'),()=>new Promise(r=>{resolve=r}),()=>{/* observer fixture */},{minIntervalMs:60_000})
@@ -192,3 +246,11 @@ test('a re-read source that now says something else does not keep the about it g
   assert.equal(service.snapshot().draft?.about,null,'the stale about is not on disk either')
  }finally{await service.close();await rm(dir,{recursive:true,force:true})}
 })
+
+
+test('a verified newer message draft does not resurrect omitted historical plans',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-profile-retired-plan-'));let calls=0;
+ const old={id:'old-message',version:1,content:'Plan to deploy',origin:'inferred' as const,observed_at:'2026-10-01T00:00:00Z',source:{kind:'im' as const,project:'IM',document:'Message',relation:'self' as const}};
+ const service=new ProfileWarmup(join(dir,'draft.json'),()=>Promise.resolve(++calls===1?{about:{text:'Building a UI',refs:[{entry_id:old.id,version:1}]},work:[{title:'Deployment',text:'Plans deployment',refs:[{entry_id:old.id,version:1}]}],interests:[]}:{about:{text:'Working on the UI; deployment cancelled',refs:[{entry_id:'new-message',version:1}]},work:[],interests:[]}),()=>{/* observer */});
+ try{await service.open();service.update([old]);await service.refresh();service.update([old,{...old,id:'new-message',content:'Deployment cancelled',observed_at:'2026-10-10T00:00:00Z'}]);await service.refresh();assert.deepEqual(service.snapshot().draft?.work,[])}finally{await service.close();await rm(dir,{recursive:true,force:true})}
+});

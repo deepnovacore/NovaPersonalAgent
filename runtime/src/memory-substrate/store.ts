@@ -75,7 +75,9 @@ export function initializeMemory(database:LedgerDatabase):void {
   initializeSourceState(database)
   initializeRetrieval(database)
   database.exec(`CREATE TABLE IF NOT EXISTS memory_evidence(id TEXT PRIMARY KEY,source_id TEXT NOT NULL,hash TEXT NOT NULL,payload_json TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS memory_message_heads(key TEXT PRIMARY KEY,evidence_id TEXT NOT NULL REFERENCES memory_evidence(id) ON DELETE CASCADE);
     CREATE INDEX IF NOT EXISTS memory_evidence_source ON memory_evidence(source_id);
+    CREATE INDEX IF NOT EXISTS memory_evidence_profile_time ON memory_evidence(json_extract(payload_json,'$.observed_at') DESC,id DESC) WHERE json_extract(payload_json,'$.source_kind') IN ('im','mail');
     CREATE TABLE IF NOT EXISTS memory_revisions(entry_id TEXT NOT NULL,revision INTEGER NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(entry_id,revision));
     CREATE TABLE IF NOT EXISTS memory_suppressed(hash TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS memory_deleted_sources(source_id TEXT PRIMARY KEY);
@@ -135,7 +137,7 @@ function write(db:LedgerDatabase,candidate:Candidate,deleted=false):EntryRevisio
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
+export type MemoryOperation = 'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
 export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
   const ledgerOnly=isLedgerOnlyOperation(operation,value)
@@ -154,6 +156,27 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         break
       }
       case 'processing_stamp':result=processingStamp(db,z.array(id).min(1).max(256).parse(value.ids),z.enum(['extraction','embedding','conversation']).parse(value.purpose),id.parse(value.provider));break
+      case 'profile_evidence':{
+        const q=z.object({source_prefix:z.string().min(1).startsWith('personal:').endsWith(':'),provider:id,ids:z.array(id).max(256).optional()}).strict().parse(input)
+        const records:EvidenceRecord[]=[],counts=new Map<string,number>()
+        if(q.ids?.some(value=>!value.startsWith(q.source_prefix)))throw Error('STORE_INVALID_OPERATION')
+        const candidates=q.ids?q.ids.map(id=>({id})):db.prepare(`SELECT id FROM memory_evidence WHERE substr(source_id,1,?)=? AND json_extract(payload_json,'$.source_kind') IN ('im','mail') AND (
+          (json_extract(payload_json,'$.source_kind')='im' AND (json_extract(payload_json,'$.source_metadata.sender_id')=json_extract(payload_json,'$.source_metadata.recipient_id') OR json_extract(payload_json,'$.source_metadata.mention')='direct')) OR
+          (json_extract(payload_json,'$.source_kind')='mail' AND json_extract(payload_json,'$.source_metadata.sender_id')=json_extract(payload_json,'$.source_metadata.account_id')))
+          ORDER BY json_extract(payload_json,'$.observed_at') DESC,id DESC LIMIT 1024`).all(q.source_prefix.length,q.source_prefix)
+        for(const row of candidates){
+          const record=effectiveEvidence(db,String(row.id),{purpose:'extraction',provider:q.provider})
+          const metadata=record?.source_metadata
+          const own=record?.source_kind==='im'?metadata?.sender_id===metadata?.recipient_id:record?.source_kind==='mail'&&metadata?.sender_id===metadata?.account_id
+          const bucket=record?.source_kind+':'+(own?'self':'addressed')
+          const head=record&&db.prepare('SELECT evidence_id FROM memory_message_heads WHERE key=?').get(createHash('sha256').update(canonicalJson([record.source_id,record.locator])).digest('hex'))
+          const superseded=head?head.evidence_id!==record?.id:record&&db.prepare("SELECT 1 FROM memory_evidence WHERE source_id=? AND json_extract(payload_json,'$.locator')=? AND rowid>(SELECT rowid FROM memory_evidence WHERE id=?) LIMIT 1").get(record.source_id,record.locator,record.id)
+          if(superseded||!record?.raw_text||!metadata||(!own&&!(record.source_kind==='im'&&metadata.mention==='direct'))||Date.parse(record.observed_at)>Date.now()||(!q.ids&&(counts.get(bucket)??0)>=32))continue
+          records.push(record);counts.set(bucket,(counts.get(bucket)??0)+1)
+          if(!q.ids&&records.length===96)break
+        }
+        result=records;break
+      }
       case 'im_context':{
         const q=z.object({source_prefix:z.string().min(1).startsWith('personal:').endsWith(':'),provider:id,account_id:id,chat_id:id}).strict().parse(input)
         const context:EvidenceRecord[]=[],now=Date.now()
@@ -182,6 +205,13 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         });break
       }
       case 'processing_evidence':result=effectiveEvidence(db,id.parse(value.id),{purpose:z.enum(['extraction','embedding','conversation']).parse(value.purpose),provider:id.parse(value.provider)});break
+      case 'invalidate_message': {
+        const q=z.object({source_id:id,locator:z.string().min(1).max(4096)}).strict().parse(input)
+        const records=rows(db,"SELECT payload_json FROM memory_evidence WHERE source_id=? AND json_extract(payload_json,'$.source_kind')='im' AND json_extract(payload_json,'$.locator')=?",q.source_id,q.locator).map(row=>EvidenceRecordSchema.parse(row))
+        for(let offset=0;offset<records.length;offset+=256)memoryOperation(db,'invalidate_evidence',{ids:records.slice(offset,offset+256).map(record=>record.id)},false)
+        for(const record of records)db.prepare('UPDATE memory_evidence SET payload_json=? WHERE id=?').run(JSON.stringify({...record,raw_text:null}),record.id)
+        break
+      }
       case 'invalidate_evidence': {
         const ids=z.array(id).max(256).parse(value.ids)
         for(const entry of all(db))if(entry.op!=='tombstone'&&entry.origin==='inferred'&&entry.evidence_refs.some(ref=>ids.includes(ref))){
@@ -202,6 +232,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
         const existing=evidence(db,safe.id)
         if(existing && (existing.hash!==safe.hash || existing.source_id!==safe.source_id || existing.locator!==safe.locator))throw new Error('STORE_IDEMPOTENCY_CONFLICT')
         if(!existing)db.prepare('INSERT INTO memory_evidence VALUES(?,?,?,?)').run(safe.id,safe.source_id,safe.hash,canonicalJson(safe))
+        if(['im','mail'].includes(safe.source_kind))db.prepare('INSERT INTO memory_message_heads VALUES(?,?) ON CONFLICT(key) DO UPDATE SET evidence_id=excluded.evidence_id').run(createHash('sha256').update(canonicalJson([safe.source_id,safe.locator])).digest('hex'),safe.id)
         result=existing??safe;break
       }
       case 'commit_consolidation': {
@@ -243,7 +274,17 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
           AND NOT EXISTS (SELECT 1 FROM memory_extractions x WHERE x.evidence_id=e.id)
           AND NOT EXISTS (SELECT 1 FROM source_objects o JOIN source_connections c ON c.id=o.connection_id WHERE json_extract(o.payload_json,'$.source_id')=e.source_id AND
             (o.generation<>json_extract(c.payload_json,'$.fence.generation') OR NOT EXISTS (SELECT 1 FROM json_each(o.payload_json,'$.current_evidence_ids') r WHERE r.value=e.id)))
-          ORDER BY CASE WHEN json_extract(e.payload_json,'$.source_metadata.mention')='direct' THEN 0 ELSE 1 END, e.id LIMIT ?`,prefix,prefix,provider,provider,provider,provider,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null);break
+          ORDER BY CASE WHEN json_extract(e.payload_json,'$.source_metadata.mention')='direct' THEN 0 ELSE 1 END, json_extract(e.payload_json,'$.observed_at') DESC, e.id LIMIT ?`,prefix,prefix,provider,provider,provider,provider,String(limit)).map(row=>EvidenceRecordSchema.parse(row)).filter(row=>retrievalEvidence(db,row.id)!==null);break
+      }
+      case 'append_evidence_batch': {
+        const q=z.object({items:z.array(EvidenceRecordSchema).min(1).max(256)}).strict().parse(value)
+        let changed=false
+        const records=q.items.map(item=>{
+          const head=['im','mail'].includes(item.source_kind)?db.prepare('SELECT evidence_id FROM memory_message_heads WHERE key=?').get(createHash('sha256').update(canonicalJson([item.source_id,item.locator])).digest('hex')):undefined
+          if(!evidence(db,item.id)||(['im','mail'].includes(item.source_kind)&&head?.evidence_id!==item.id))changed=true
+          return memoryOperation(db,'append_evidence',item,false)
+        })
+        result={records,changed};break
       }
       case 'record_evidence_batch': {
         // One transaction for a document's chunks: each is admitted, then marked as already extracted.
@@ -312,7 +353,7 @@ export function reconcileMemoryFiles(db:LedgerDatabase):void {
 
 /** Raw admission and permission fences remain usable when editable documents need repair. */
 export function isLedgerOnlyOperation(operation:MemoryOperation,value:Record<string,unknown>):boolean {
- if(['append_evidence','evidence','retrieval_evidence','processing_evidence','processing_stamp','source_grant','expire','source_revision','extraction_ticket','source_pending','source_events'].includes(operation))return true
+ if(['append_evidence_batch','profile_evidence','append_evidence','evidence','retrieval_evidence','processing_evidence','processing_stamp','source_grant','expire','source_revision','extraction_ticket','source_pending','source_events'].includes(operation))return true
  // An extraction marker only records that an attempt ran; it never writes entries.
  if(operation==='record_extraction'||operation==='record_evidence_batch')return true
  return operation==='source_connection'&&['get','list','create','fence','sync_status','reset_sync'].includes(String(value.action))

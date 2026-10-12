@@ -51,7 +51,15 @@ export class ComposioConnector {
  async close():Promise<void>{this.#closed=true;clearTimeout(this.#timer);for(const a of this.#active.values())a.abort.abort();await Promise.allSettled([...this.#active.values()].map(x=>x.promise));await this.#commands}
  #schedule(delay:number):void{if(this.#closed||this.options.automatic===false)return;clearTimeout(this.#timer);this.#timer=setTimeout(()=>{void this.#tick()},delay);this.#timer.unref()}
  async #tick():Promise<void>{
-  try{for(const c of await this.#list()){if(this.#closed)break;if(c.deleting.length){await this.#deleteStep(c.fence.connection_id);await this.#refresh();continue}if(c.state==='connected'&&(c.sync_status?.retry_at??0)<=Date.now())await this.#run(c.fence.connection_id)}}catch{ /* unavailable memory retries at the next tick */ }
+  try{
+   const connections=await this.#list();let next=0
+   await Promise.all(Array.from({length:Math.min(4,connections.length)},async()=>{
+    while(next<connections.length&&!this.#closed){
+     const c=connections[next++]!
+     try{if(c.deleting.length){await this.#deleteStep(c.fence.connection_id);await this.#refresh()}else if(c.state==='connected'&&(c.sync_status?.retry_at??0)<=Date.now())await this.#run(c.fence.connection_id)}catch{ /* One unavailable connection must not block the others. */ }
+    }
+   }))
+  }catch{ /* unavailable memory retries at the next tick */ }
   this.#schedule(this.#rows.some(r=>r.has_pending)?1000:60000)
  }
  async #deleteStep(id:string):Promise<void>{await this.#memory().options.client.memory('source_connection',{action:'delete_step',id,limit:200})}
@@ -143,7 +151,9 @@ export class ComposioConnector {
   do{const page=await this.#objects(c,after);for(const o of page.objects)await m.setProcessingConsent(o.source_id,grant);after=page.next}while(after)
  }
  async #objects(c:SourceConnection,after:string|null){return z.object({objects:z.array(sourceObjectSchema),next:z.string().nullable()}).parse(await this.#memory().options.client.memory('source_pending',{id:c.fence.connection_id,...(after?{after}:{}),limit:200}))}
- #run(id:string):Promise<void>{
+ async #run(id:string):Promise<void>{
+  while(!this.#active.has(id)&&this.#active.size>=4&&!this.#closed)await Promise.race([...this.#active.values()].map(active=>active.promise)).catch(()=>{/* Failed workers still release their slots. */})
+  if(this.#closed)return
   const active=this.#active.get(id);if(active)return active.promise
   const abort=new AbortController(),promise=this.#sync(id,abort.signal).catch(async(error:unknown)=>{
    if(abort.signal.aborted)return
@@ -195,7 +205,11 @@ export class ComposioConnector {
  }
  #change(c:SourceConnection,o:GoogleObject,batch:number):ApplyPage['changes'][number]{
   const m=this.#memory(),source_id=connectorSourceId(c.namespace,c.fence.generation,o.key)
-  const evidence=o.status==='current'?[EvidenceRecordSchema.parse({id:m.prefix+'e:'+hash(source_id+':'+o.semanticHash),source_id,source_kind:o.kind,locator:o.locator,raw_text:o.text,hash:hash(o.text),observed_at:o.observedAt,recorded_at:new Date().toISOString(),retention_until:o.retentionUntil,trust:'untrusted_external'})]:[]
+  const config=configSchema.parse(c.scope),sender=typeof o.metadata.sender==='string'?o.metadata.sender.trim().toLowerCase():''
+  const address=/^(?:[^<>]*<)?([^<>\s]+@[^<>\s]+)>?$/.exec(sender)?.[1]
+  const recipients=typeof o.metadata.recipients==='string'?[...o.metadata.recipients.matchAll(/[A-Za-z0-9.!#$%&'*+\/=?^_`{|}~-]+@[A-Za-z0-9.-]+/gu)].map(match=>match[0].toLowerCase()).slice(0,50):[]
+  const ownMail=o.kind==='mail'&&Array.isArray(o.metadata.labels)&&o.metadata.labels.includes('SENT')&&config.provider==='composio'&&!!config.identity&&address===config.identity.toLowerCase()
+  const evidence=o.status==='current'?[EvidenceRecordSchema.parse({id:m.prefix+'e:'+hash(source_id+':'+o.semanticHash),source_id,source_kind:o.kind,...(ownMail?{source_metadata:{sender_id:address,account_id:config.identity!.toLowerCase(),provider:'gmail',...(typeof o.metadata.thread_id==='string'&&o.metadata.thread_id?{chat_id:o.metadata.thread_id}:{}),recipient_ids:recipients,...(sender.includes('<')?{sender_name:sender.slice(0,sender.indexOf('<')).trim().slice(0,120)}:{})}}:{}),locator:o.locator,raw_text:o.text,hash:hash(o.text),observed_at:o.observedAt,recorded_at:new Date().toISOString(),retention_until:o.retentionUntil,trust:'untrusted_external'})]:[]
   return {object_key:o.key,source_id,semantic_hash:o.semanticHash,metadata:{...o.metadata,scan_batch:batch},evidence,status:o.status}
  }
 }

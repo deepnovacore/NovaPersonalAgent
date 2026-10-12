@@ -67,7 +67,8 @@ export interface CompleteRequest {
   readonly prompt: string
   readonly jsonSchema?: Readonly<Record<string, JsonValue>> | null
   readonly images?: readonly GatewayImage[]
-  readonly reasoning?: 'disabled'
+  readonly reasoning?: 'disabled' | 'enabled'
+  readonly reasoningBudget?: number
   /** A ceiling on the reply, sent as max_tokens; callers size it well above a normal answer so it only stops runaway output. */
   readonly maxTokens?: number
   readonly signal?: AbortSignal
@@ -220,7 +221,7 @@ export interface OpenAIGatewayOptions {
   readonly clock: Clock
   readonly metrics?: MetricsSink
   readonly fetch?: typeof globalThis.fetch
-  readonly thinkingControl?: 'deepseek' | 'openai'
+  readonly thinkingControl?: 'deepseek' | 'openai' | 'qwen'
   readonly requestTimeout?: number
   /** Maximum silence between SSE body chunks, in seconds. */
   readonly streamIdleTimeout?: number
@@ -234,7 +235,7 @@ export class OpenAIModelGateway implements ModelGateway {
   readonly #clock: Clock
   readonly #metrics: MetricsSink
   readonly #fetch: typeof globalThis.fetch
-  readonly #thinkingControl: 'deepseek' | 'openai' | undefined
+  readonly #thinkingControl: 'deepseek' | 'openai' | 'qwen' | undefined
   readonly #requestTimeout: number
   readonly #streamIdleTimeout: number
 
@@ -317,7 +318,7 @@ export class OpenAIModelGateway implements ModelGateway {
     try {
       const body = completeRequestBody(request)
       const pending = await this.#post(this.#thinkingControl === 'deepseek' && request.reasoning === 'disabled'
-        ? {...body, thinking: {type: 'disabled'}} : this.#thinkingControl === 'openai' ? openAIBody(body) : body, request.signal)
+        ? {...body, thinking: {type: 'disabled'}} : this.#thinkingControl === 'openai' ? openAIBody(body) : this.#thinkingControl === 'qwen' ? qwenBody(body,request) : body, request.signal)
       let raw: unknown
       try {
         raw = await pending.response.json()
@@ -495,4 +496,14 @@ function dataOf(block: string): string | null {
 function openAIBody(body: Readonly<Record<string,JsonValue>>):Record<string,JsonValue> {
  const {max_tokens,...rest}=body
  return {...rest,reasoning_effort:'none',...(max_tokens === undefined ? {} : {max_completion_tokens:max_tokens})}
+}
+
+/** Qwen VL's legacy models do not accept the mixed-thinking controls. */
+function qwenBody(body: Readonly<Record<string, JsonValue>>, request: CompleteRequest): Readonly<Record<string, JsonValue>> {
+  const capable = ['qwen3-vl-plus','qwen3-vl-flash'].some(model => request.model === model || request.model.startsWith(model+'-'))
+  if (!capable || request.reasoning === undefined) return body
+  const controlled:Record<string,JsonValue>={...body,enable_thinking:request.reasoning === 'enabled',...(request.reasoning === 'enabled' && request.reasoningBudget !== undefined ? {thinking_budget:request.reasoningBudget} : {})}
+  // Qwen VL guarantees JSON mode only without thinking; mixed mode can emit scalar JSON instead of the requested object.
+  if(request.reasoning === 'enabled')delete controlled.response_format
+  return controlled
 }

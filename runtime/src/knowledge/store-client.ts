@@ -111,6 +111,8 @@ export class KnowledgeStoreClient {
     return this.#closing
   }
 
+  sourceByLocator(locator:string):Promise<KnowledgeSource|null>{return this.#request('source_by_locator',{locator})}
+
   listSources(): Promise<readonly KnowledgeSource[]> { return this.#request('list_sources', {}) }
 
   listChunks(sourceId: string, offset = 0): Promise<readonly KnowledgeIndexChunk[]> { return this.#request('list_chunks', {source_id: sourceId, offset}) }
