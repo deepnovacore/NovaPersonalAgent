@@ -530,4 +530,20 @@ test('completed chats skip an unchanged live window while history is still pagin
   if(args[1]==='+chat-messages-list'){const chat=args[args.indexOf('--chat-id')+1]!;reads.push(chat);return JSON.stringify({messages:[],has_more:chat==='oc_history',page_token:'page-'+reads.length})}return '{}';
  }});
  try{await connector.open();await connector.listChats();await connector.configure(['oc_done','oc_history'],true);await assert.rejects(connector.sync(),/后续页/);assert.equal(reads.filter(id=>id==='oc_done').length,1);await assert.rejects(connector.sync(),/后续页/);assert.equal(reads.filter(id=>id==='oc_done').length,1);now=new Date(now.getTime()+2000);await assert.rejects(connector.sync(),/后续页/);assert.equal(reads.filter(id=>id==='oc_done').length,2)}finally{await connector.close();await rm(dir,{recursive:true,force:true})}
+
+
+test('saved Feishu state accepts absent captureFrom and rejects malformed capture timestamps', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nova-feishu-saved-'));
+  const statePath = join(directory, 'state.json');
+  const saved = {paused: true, connected: false, bot: false, selected: [], cursors: {}, deliveries: {}, actions: [], generation: 0, sources: []};
+  for (const captureFrom of [undefined, {}, {fixture: 'invalid-date'}]) {
+    await writeFile(statePath, JSON.stringify({...saved, captureFrom}));
+    const connector = new FeishuConnector({bootstrapOnly: true, executable: 'unused', credentialRoot: directory, statePath,
+      run: () => Promise.reject(new Error('CLI unavailable'))});
+    try {
+      if (captureFrom && 'fixture' in captureFrom) await assert.rejects(connector.open(), /Cannot read Feishu state/);
+      else { await connector.open(); assert.equal(connector.snapshot().state, 'error'); }
+    } finally { await connector.close(); }
+  }
+  await rm(directory, {recursive: true, force: true});
 });
