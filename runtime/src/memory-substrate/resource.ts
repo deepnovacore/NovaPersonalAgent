@@ -1,4 +1,5 @@
 import type {ProfileInput} from '../personal-agent/profile-warmup.js'
+import {processingRequestSchema,SOURCE_PROCESSING_VERSION,type ProcessingRequest} from './source-processing.js'
 import {type SourceTag,type ImMetadata} from '../memory/provenance.js'
 import {assertAcceptable,type EvaluatedCandidate} from '../understanding/candidates.js'
 import type {LifeBackend,LifeSnapshot} from '../personal-agent/life.js'
@@ -88,7 +89,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #preparedSignatures=new Map<string,{signature:string;revision:number}>()
   #consolidating:Promise<void>|null=null
   #adaptation:PersonalMemoryResponseAdaptation={revision:0,replyPreferences:[]}
-  constructor(readonly options:{client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];personalMemoryEnabled?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
+  constructor(readonly options:{sourceProcessingRecipe?:string;client:MemoryLedgerClient;userId:string;gateway:ModelGateway;model:string;embedding?:EmbeddingProvider;embeddingFingerprint?:string;extractionFingerprint?:string;inputConsent?:boolean;conversationProviders?:string[];personalMemoryEnabled?:boolean;consolidation?:{enabled?:boolean;timezone?:string;hour?:number};closeClient?:boolean;includeWorkspaceGraph?:boolean;onClose?:()=>void;onChange?:()=>void; migrate?:()=>Promise<void>}) {
     this.prefix='personal:'+digest(options.userId)+':'
   }
   async open():Promise<void>{if(this.#opened)return;await this.options.client.open();await this.options.migrate?.();await this.options.client.memory('enable_files',{});this.#opened=true;this.#abort=new AbortController();await this.#maintain();this.#maintenance=setInterval(()=>{void this.#maintain().catch(()=>{ /* retry on the next maintenance tick */ })},60000);this.#maintenance.unref();await this.#refresh()}
@@ -104,6 +105,11 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
       const alias=(value:string)=>digest(value).slice(0,12)
       return {id:record.id,version:record.hash,content:record.raw_text!.slice(0,1500),observed_at:record.observed_at,origin:'inferred',source:{kind:record.source_kind as 'im'|'mail',project:record.source_kind==='im'?'飞书':'邮件',document:own?'本人发出的内容':'直接@本人的内容',relation:own?'self' as const:'addressed' as const,sender_id:own?'self':alias(metadata.sender_id),...(metadata.sender_name?{sender_name:metadata.sender_name}:{}),thread_id:alias(metadata.thread_id??metadata.chat_id??record.source_id),...Object.fromEntries(['message_id','parent_id','root_id','upper_message_id'].flatMap(key=>{const id=metadata[key as keyof typeof metadata];return typeof id==='string'?[[key,alias(id)]]:[]})),recipient_ids:(metadata.recipient_ids??[]).map(id=>id===metadata.account_id?'self':alias(id)),mention_ids:(metadata.mention_ids??(metadata.mention==='direct'&&metadata.recipient_id?[metadata.recipient_id]:[])).map(id=>id===metadata.recipient_id?'self':alias(id))}}
     })
+  }
+  async sourceProcessing(request:ProcessingRequest):Promise<unknown>{
+    this.#ready()
+    const parsed=processingRequestSchema.parse(request)
+    return this.options.client.memory('source_processing',{...parsed,prefix:this.prefix,provider:this.#extractionFingerprint(),recipe:digest(JSON.stringify({recipe:this.options.sourceProcessingRecipe??SOURCE_PROCESSING_VERSION,model:this.options.model}))})
   }
   async invalidateMessage(sourceId:string,locator:string):Promise<void>{
     this.#ready()

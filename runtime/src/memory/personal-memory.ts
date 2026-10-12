@@ -1,3 +1,4 @@
+import type {ProcessingRequest} from '../memory-substrate/source-processing.js'
 import type {ProfileInput} from '../personal-agent/profile-warmup.js'
 import type {EvaluatedCandidate} from '../understanding/candidates.js'
 import type {ResolvedLifeCandidate} from '../memory-substrate/resolution.js'
@@ -91,6 +92,8 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  /** Internal built-in maintenance port; identity and provider are supplied by the host. */
+  readonly sourceProcessing?: (request:ProcessingRequest)=>Promise<unknown>
   readonly profileSources?: (ids?:readonly string[]) => Promise<ProfileInput[]>
   readonly resolveLifeCandidate?: (row:EvaluatedCandidate,signal:AbortSignal,guard:()=>void)=>Promise<ResolvedLifeCandidate>
   readonly lifeBackend?: () => LifeBackend
