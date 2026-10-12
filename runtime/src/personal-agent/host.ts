@@ -35,6 +35,7 @@ import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFen
 import {ScheduleService} from './scheduled-tasks.js';
 import {ScheduledRunAuthority,type ScheduledRunGrant} from './scheduled-run-authority.js';
 import {SCHEDULE_CATCHUP_MS} from './scheduled-time.js';
+import {ScheduledAppContext,type AppContextSection} from './app-context.js';
 import {canonicalJson} from '../text/canonical-json.js';
 /** Supplied only by an authenticated transport, never command params. */
 export interface PersonalCommandContext {client_id:string;can_takeover?:boolean;presentation_mode?:'background'|'workbench'|'orb'}
@@ -113,6 +114,7 @@ export interface TaskRuntimePort {
  readonly detail?:'public-events'|'summary-only'
  ready?(task:TaskRecord):boolean
  evaluate?(task:TaskRecord,signal:AbortSignal):Promise<TaskDecision>
+ validateEvidence?(task:TaskRecord):Promise<boolean>
  input(grant:TaskDispatchContext,sessionId:string,text:string):Promise<'accepted'|'failed'|'unknown'>
  cancelTask?(taskId:string):void
  cancel(workId:string):void
@@ -123,11 +125,85 @@ export function announcedGoal(goal:string):string{const line=goal.trim().split(/
 export class PersonalAgentHost {
     readonly schedules:ScheduleService;
     readonly scheduledAuthority:ScheduledRunAuthority;
+    readonly appContext=new ScheduledAppContext(this);
+    readAppContext(section:AppContextSection,cursor:string|null,grant:ScheduledRunGrant){return this.appContext.read(section,cursor,grant)}
+    async recentScheduledSummaries(grant:ScheduledRunGrant){
+        this.scheduledAuthority.assert(grant,grant.fence)
+        const run=this.schedules.getRun(grant.run_id),summaries=[]
+        for(const prior of this.schedules.terminalRuns().filter(item=>item.schedule_id===run.schedule_id&&item.run_id!==run.run_id&&item.terminal_summary?.outcome==='completed').slice(-8)){
+            const summary=prior.terminal_summary!,refs=summary.evidence_refs
+            if(refs.some(ref=>{const section=/^app:(todos|goals|tasks):/.exec(ref)?.[1];return section?!run.definition.context[section as AppContextSection]:!run.definition.context.memory&&!run.definition.context.knowledge}))continue
+            if(!prior.task_id||!await this.appContext.validateRefs(refs,grant.consumer,prior.task_id)||!await this.appContext.validateRefs(refs,grant.consumer,grant.task_id))continue
+            summaries.push({run_id:prior.run_id,observed_at:prior.slot?.scheduled_at??prior.claimed_at,trust:'untrusted_external',text:summary.text.slice(0,2000),evidence_refs:refs})
+        }
+        this.scheduledAuthority.assert(grant,grant.fence)
+        if(summaries.length)await this.tasks.recordContextEvidence(grant.fence,randomUUID(),JSON.stringify({consumer:grant.consumer,history:summaries}),[...new Set(summaries.flatMap(item=>item.evidence_refs))])
+        return summaries
+    }
+    async publishScheduledResult(runId:string):Promise<void>{
+        let run=this.schedules.getRun(runId)
+        if(run.terminal_summary?.published)return
+        if(run.terminal_summary&&run.terminal_summary.outcome!=='completed'){await this.schedules.markPublished(runId);return}
+        if(!run.task_id)throw Error('run_task_unbound')
+        if(!run.terminal_summary){
+            const task=this.tasks.get(run.task_id)
+            if(task.phase!=='completed'||this.tasks.hasUnresolvedExecution(task.id))throw Error('scheduled_result_not_ready')
+            const evidence=this.tasks.evidence(task.id),context=evidence.filter(item=>item.kind==='context')
+            const consumer=context.length?(JSON.parse(context[0]!.content) as {consumer:string|null}).consumer:null
+            if(!await this.appContext.validateTask(task.id,consumer))throw Error('context_authorization_changed')
+            const text=evidence.filter(item=>item.kind==='delivery'&&item.goal_revision===task.goal_revision).at(-1)?.content
+            if(!text?.trim())throw Error('scheduled_result_empty')
+            const refs=[...new Set(context.flatMap(item=>item.refs))]
+            if(refs.length>128)throw Error('context_capacity')
+            run=await this.schedules.markFinished(runId,{outcome:'completed',text:text.slice(0,16000),evidence_refs:refs,consumer,published:false})
+        }
+        const summary=run.terminal_summary!
+        if(summary.outcome!=='completed'){await this.schedules.markPublished(runId);return}
+        if(!await this.appContext.validateRefs(summary.evidence_refs,summary.consumer??null,run.task_id!))throw Error('context_authorization_changed')
+        await this.#serial(async()=>{
+            const next=structuredClone(this.#state),key='scheduled-result:'+runId
+            if(next.feed.some(item=>item.id===key))return
+            if(!await this.appContext.validateRefs(summary.evidence_refs,summary.consumer??null,run.task_id!))throw Error('context_authorization_changed')
+            const at=this.#now().toISOString(),inbox=next.conversations.items.find(item=>item.kind==='proactive')!
+            next.feed.push({id:key,kind:'task_result',title:run.definition.title.slice(0,120),why_now:'定时 Agent 任务已验收',evidence_refs:summary.evidence_refs.slice(0,16),memory_refs:[],source:{type:'task',ref:run.task_id!},task_ref:{work_id:run.task_id!},subject_key:key,suggestion_id:null,priority:40,created_at:at,updated_at:at,expires_at:null,user_state:'new',snooze_until:null,lifecycle:'resolved',delivery:{presented_at:null,notified_at:null,spoken_at:null},prepared:{trust:'untrusted_external',text:summary.text.slice(0,12000),evidence_refs:summary.evidence_refs.slice(0,16)},action_label:'继续讨论'})
+            inbox.messages.push({id:key,conversation_id:inbox.id,role:'assistant',text:(run.definition.title+'\n'+summary.text).slice(0,16000),created_at:at,delivery:'completed'})
+            inbox.messages=inbox.messages.slice(-512);inbox.updated_at=at
+            await this.#commit(next)
+        })
+        await this.schedules.markPublished(runId)
+    }
+    async scheduledResultAuthorized(runId:string,consumer?:string|null):Promise<boolean>{
+        const run=this.schedules.getRun(runId),summary=run.terminal_summary
+        return !!summary&&summary.outcome==='completed'&&summary.published&&!!run.task_id&&await this.appContext.validateRefs(summary.evidence_refs,consumer===undefined?summary.consumer??null:consumer,run.task_id)
+    }
+    async openScheduledResult(runId:string){
+        if(!await this.scheduledResultAuthorized(runId))throw Error('context_authorization_changed')
+        return this.#serial(async()=>{
+            const run=this.schedules.getRun(runId),next=structuredClone(this.#state),key='scheduled-result:'+runId
+            let topic=next.conversations.items.find(item=>item.kind==='topic'&&item.subject_key===key)
+            if(!topic){if(next.conversations.items.filter(item=>item.kind!=='schedule').length>=128)throw Error('conversation_limit');topic=createConversation('topic',run.definition.title.slice(0,120),key);next.conversations.items.push(topic)}
+            topic.prepared={trust:'untrusted_external',text:run.terminal_summary!.text.slice(0,12000),evidence_refs:run.terminal_summary!.evidence_refs.slice(0,16)}
+            next.conversations.selected_id=topic.id
+            await this.#commit(next);return structuredClone(topic)
+        })
+    }
+    async adoptScheduledResult(requestId:string,input:{run_id:string;kind:'todo'|'idea';title:string;note:string;goal_id?:string|null;goal_version?:number}){
+        const parsed=z.object({run_id:z.string().min(1).max(128),kind:z.enum(['todo','idea']),title:z.string().trim().min(1).max(200),note:z.string().max(4000),goal_id:z.string().min(1).max(512).nullable().optional(),goal_version:z.number().int().nonnegative().optional()}).strict().parse(input)
+        const receipt=await this.schedules.reserveAdoption(requestId,parsed.run_id,parsed)
+        if(receipt.result)return receipt.result
+        const lifeRequest='scheduled-adopt:'+receipt.key,lifeId=createHash('sha256').update(lifeRequest).digest('hex')
+        const existing=this.life.snapshot()[parsed.kind==='todo'?'todos':'ideas'].find(item=>item.id===lifeId)
+        if(existing)return this.schedules.finishAdoption(receipt.key,{id:lifeId,version:1})
+        if(!await this.scheduledResultAuthorized(parsed.run_id))throw Error('context_authorization_changed')
+        if(parsed.goal_id){const goal=this.life.snapshot().goals.find(item=>item.id===parsed.goal_id);if(!goal||goal.version!==parsed.goal_version)throw Error('version_conflict')}
+        const result=await this.life.mutate({op:'create',kind:parsed.kind,title:parsed.title,note:parsed.note,...(parsed.goal_id?{goal_id:parsed.goal_id}:{})},lifeRequest)
+        return this.schedules.finishAdoption(receipt.key,result)
+    }
     #scheduledTimer:NodeJS.Timeout|undefined;
     #scheduledTail:Promise<unknown>=Promise.resolve();
-    scheduledRunGrant(runId:string,lifetime:AbortSignal):ScheduledRunGrant{
+    scheduledRunGrant(runId:string,lifetime:AbortSignal,consumer:string|null=null):ScheduledRunGrant{
         const run=this.schedules.getRun(runId);if(!run.task_id)throw Error('run_task_unbound');
-        return this.scheduledAuthority.issue(run,this.tasks.get(run.task_id),lifetime);
+        return this.scheduledAuthority.issue(run,this.tasks.get(run.task_id),lifetime,consumer);
     }
     async #reconcileScheduledRuns():Promise<void>{
         for(const run of this.schedules.activeRuns()){
@@ -165,11 +241,13 @@ export class PersonalAgentHost {
             for(const run of this.schedules.activeRuns()){
                 const task=run.task_id?this.tasks.get(run.task_id):null
                 if(task&&(task.phase==='completed'||task.phase==='cancelled')&&!task.pending_delivery&&!this.tasks.hasUnresolvedExecution(task.id)){
+                    if(task.phase==='completed'){await this.publishScheduledResult(run.run_id);await this.#conversationPool?.clear(task.conversation_id);continue}
                     const text=this.tasks.evidence(task.id).filter(item=>item.kind==='delivery').at(-1)?.content??task.waiting_reason??''
                     await this.#conversationPool?.clear(task.conversation_id)
                     await this.schedules.markFinished(run.run_id,{outcome:task.phase,text:text.slice(0,16000),evidence_refs:task.evidence_refs.slice(0,128),published:false})
                 }
             }
+            for(const run of this.schedules.terminalRuns())if(!run.terminal_summary?.published)await this.publishScheduledResult(run.run_id)
             let prepared=this.schedules.activeRuns().filter(run=>run.stage==='prepared').length
             for(const run of this.schedules.activeRuns()){
                 if(run.stage==='prepared'||!run.task_id)continue
@@ -186,7 +264,7 @@ export class PersonalAgentHost {
         this.#scheduledTail=operation.catch(()=>{/* durable runs retry on the next tick */});return operation
     }
     readonly taskLoop:TaskLoop;
-    wakeTask(taskId:string):Promise<void>{if(this.#recovering||this.#recoveryBlocked.has(taskId))return Promise.resolve();return this.taskLoop.wake(taskId).finally(()=>{if(this.#opened&&this.tasks.get(taskId).trigger)void this.scheduledTaskTick()})}
+    wakeTask(taskId:string):Promise<void>{if(this.#recovering||this.#recoveryBlocked.has(taskId))return Promise.resolve();return this.taskLoop.wake(taskId).finally(()=>{if(this.#opened&&this.tasks.get(taskId).trigger)void this.scheduledTaskTick().catch(()=>{/* the durable run retries on the next tick */})})}
     async taskOutcome(workId:string,outcome:string,content:unknown,refs:string[]=[]):Promise<void>{const task=this.tasks.list().find(task=>task.work_ids.includes(workId));if(!task)return;await this.tasks.recordWorkOutcome(workId,outcome,content,refs);if(this.#recoveryBlocked.has(task.id))await this.recoverTasks();else await this.wakeTask(task.id)}
     async cancelTask(requestId:string,fence:TaskFence,actor:TaskActor):Promise<TaskRecord>{const task=await this.tasks.cancel(requestId,fence,actor);try{const port=this.taskRuntime(task.id);port.cancelTask?.(task.id);for(const work of this.tasks.activeWork(task.id))port.cancel(work)}catch{/* durable cancellation intent remains pending until the original executor confirms stop */}return task}
     #recovering=false;
@@ -269,7 +347,7 @@ export class PersonalAgentHost {
         this.#recoveryFactory=factory;
         this.#conversationEmit=emit;
         this.#conversationPool=new ConversationRuntimePool(factory,frame=>{if(this.#state.conversations.items.some(item=>item.id===frame.conversation_id&&item.kind==='schedule'))return;emit(frame);void this.#persistConversationFrame(frame).catch(()=>{ /* retry via next snapshot */ })});
-        if(this.#opened&&this.tasks.list().length)void this.recoverTasks().then(()=>this.scheduledTaskTick());
+        if(this.#opened&&this.tasks.list().length)void this.recoverTasks().then(()=>this.scheduledTaskTick()).catch(()=>{/* durable recovery retries on next wake */});
     }
     async #persistConversationFrame(frame:Record<string,unknown>):Promise<void>{
         const background=frame.type==='conversation.completed';
@@ -423,7 +501,7 @@ export class PersonalAgentHost {
         this.#overviewRun = run;
         void run.finally(() => { this.#overviewRun = undefined; if (generation !== this.#memoryRefresh && this.#overviewCache?.key !== this.#overviewKey) this.#summarize(); });
     }
-    constructor(readonly options: HostOptions) { this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?async(entries,signal)=>{const memory=options.memory(),current=await Promise.all(entries.map(e=>memory?.get?.(e.id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])],digests=new Map(profileInputsFromDigests(this.projectDigests.digests()).map(input=>[input.id,input]));if(entries.some(e=>{const digest=digests.get(e.id);return digest?digest.version!==e.version||digest.refs.some(ref=>!allowed.some(a=>a.id===ref.entry_id&&a.version===ref.version)):!allowed.some(a=>a.id===e.id&&a.version===e.version)}))throw Error('processing_consent_required');signal.throwIfAborted();appendAcceptanceCounts('profile_model',{source_entries:entries.filter(entry=>!!entry.source).length,stated_entries:entries.filter(entry=>entry.origin==='stated').length,model_calls:1});return withModelPurpose('profile',()=>options.generateProfile!(entries,signal))}:undefined,()=>{this.#notify();this.#seedNews()},{report:result=>appendAcceptanceCounts('profile_result',{['outcome_'+result.outcome]:1,latency_ms:result.latency_ms,items:result.items})}); this.workbenchContext=new WorkbenchContext(options.path+'.context.json',options.generateContext?async(entries,signal)=>{const refs=[...new Set(entries.flatMap(entry=>entry.refs.map(ref=>ref.entry_id)))];const current=await Promise.all(refs.map(id=>options.memory()?.get?.(id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];const authorized=entries.filter(entry=>entry.refs.every(ref=>allowed.some(item=>item.id===ref.entry_id&&item.version===ref.version)));signal.throwIfAborted();appendAcceptanceCounts('context_model',{eligible_candidates:authorized.length,model_calls:1});return withModelPurpose('context',()=>options.generateContext!(authorized,signal))}:undefined,()=>this.#notify()); this.projectDigests=new ProjectDigests(options.path+'.project-digests.json',options.generateDigests&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?(projects,signal)=>{const authorize=()=>{const allowed=new Map((this.#sources?.contextEntries?.()??[]).map(entry=>[entry.id,entry.version]));if(projects.some(project=>project.documents.some(d=>allowed.get(d.entry_id)!==d.version)))throw Error('processing_consent_required')};try{authorize()}catch(error){return Promise.reject(error instanceof Error?error:Error('processing_consent_required'))}appendAcceptanceCounts('digest_model',{projects:projects.length,model_calls:1});return withModelPurpose('digest',()=>options.generateDigests!(projects,signal,authorize))}:undefined,()=>this.#digestsChanged(),{report:result=>appendAcceptanceCounts('digest_result',{['outcome_'+result.outcome]:1,projects:result.projects,digests:result.digests,latency_ms:result.latency_ms})}); this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify(),taskId=>{if(this.#recovering||this.#recoveryBlocked.has(taskId))throw new TaskExecutionRejected('task_recovery_blocked')}); this.schedules=new ScheduleService(options.path+'.schedules.json',()=>this.#notify(),()=>this.#now());this.scheduledAuthority=new ScheduledRunAuthority(this.schedules,this.tasks);this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{ready:task=>{if(this.#recovering||this.#recoveryBlocked.has(task.id))return false;try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}let grant:TaskDispatchContext;try{grant=this.tasks.continuationContext(fence);this.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}await this.continueTask(grant,instruction)},publish:task=>task.trigger?Promise.resolve():this.taskResult('verified:'+task.id+':'+task.goal_revision,'任务已完成：'+announcedGoal(task.goal),task),syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews&&!acceptanceEnabled()?{rank:options.rankNews}:{}),...(acceptanceEnabled()&&!acceptanceNewsEnabled()?{firstRefreshMs:null}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand&&!acceptanceEnabled()?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
+    constructor(readonly options: HostOptions) { this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?async(entries,signal)=>{const memory=options.memory(),current=await Promise.all(entries.map(e=>memory?.get?.(e.id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])],digests=new Map(profileInputsFromDigests(this.projectDigests.digests()).map(input=>[input.id,input]));if(entries.some(e=>{const digest=digests.get(e.id);return digest?digest.version!==e.version||digest.refs.some(ref=>!allowed.some(a=>a.id===ref.entry_id&&a.version===ref.version)):!allowed.some(a=>a.id===e.id&&a.version===e.version)}))throw Error('processing_consent_required');signal.throwIfAborted();appendAcceptanceCounts('profile_model',{source_entries:entries.filter(entry=>!!entry.source).length,stated_entries:entries.filter(entry=>entry.origin==='stated').length,model_calls:1});return withModelPurpose('profile',()=>options.generateProfile!(entries,signal))}:undefined,()=>{this.#notify();this.#seedNews()},{report:result=>appendAcceptanceCounts('profile_result',{['outcome_'+result.outcome]:1,latency_ms:result.latency_ms,items:result.items})}); this.workbenchContext=new WorkbenchContext(options.path+'.context.json',options.generateContext?async(entries,signal)=>{const refs=[...new Set(entries.flatMap(entry=>entry.refs.map(ref=>ref.entry_id)))];const current=await Promise.all(refs.map(id=>options.memory()?.get?.(id)??Promise.resolve(null)));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];const authorized=entries.filter(entry=>entry.refs.every(ref=>allowed.some(item=>item.id===ref.entry_id&&item.version===ref.version)));signal.throwIfAborted();appendAcceptanceCounts('context_model',{eligible_candidates:authorized.length,model_calls:1});return withModelPurpose('context',()=>options.generateContext!(authorized,signal))}:undefined,()=>this.#notify()); this.projectDigests=new ProjectDigests(options.path+'.project-digests.json',options.generateDigests&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?(projects,signal)=>{const authorize=()=>{const allowed=new Map((this.#sources?.contextEntries?.()??[]).map(entry=>[entry.id,entry.version]));if(projects.some(project=>project.documents.some(d=>allowed.get(d.entry_id)!==d.version)))throw Error('processing_consent_required')};try{authorize()}catch(error){return Promise.reject(error instanceof Error?error:Error('processing_consent_required'))}appendAcceptanceCounts('digest_model',{projects:projects.length,model_calls:1});return withModelPurpose('digest',()=>options.generateDigests!(projects,signal,authorize))}:undefined,()=>this.#digestsChanged(),{report:result=>appendAcceptanceCounts('digest_result',{['outcome_'+result.outcome]:1,projects:result.projects,digests:result.digests,latency_ms:result.latency_ms})}); this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#notify(),taskId=>{if(this.#recovering||this.#recoveryBlocked.has(taskId))throw new TaskExecutionRejected('task_recovery_blocked')}); this.schedules=new ScheduleService(options.path+'.schedules.json',()=>this.#notify(),()=>this.#now());this.scheduledAuthority=new ScheduledRunAuthority(this.schedules,this.tasks);this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{validateEvidence:task=>{if(!task.trigger)return Promise.resolve(true);return this.taskRuntime(task.id).validateEvidence?.(task)??Promise.resolve(false)},ready:task=>{if(this.#recovering||this.#recoveryBlocked.has(task.id))return false;try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}let grant:TaskDispatchContext;try{grant=this.tasks.continuationContext(fence);this.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}await this.continueTask(grant,instruction)},publish:task=>task.trigger?this.publishScheduledResult(task.trigger.run_id):this.taskResult('verified:'+task.id+':'+task.goal_revision,'任务已完成：'+announcedGoal(task.goal),task),syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews&&!acceptanceEnabled()?{rank:options.rankNews}:{}),...(acceptanceEnabled()&&!acceptanceNewsEnabled()?{firstRefreshMs:null}:{}),changed:()=>this.#notify()}); this.understanding=new PersonalUnderstanding({...(options.understand&&!acceptanceEnabled()?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),scope:()=>this.#state.conversations.selected_id,resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
     connectionChanged(): void { this.#notify(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
@@ -478,7 +556,7 @@ export class PersonalAgentHost {
             }
             this.#schedule();
             await this.scheduledTaskTick();
-            this.#scheduledTimer=setInterval(()=>{void this.scheduledTaskTick()},60000);this.#scheduledTimer.unref();
+            this.#scheduledTimer=setInterval(()=>{void this.scheduledTaskTick().catch(()=>{/* durable retry on next tick */})},60000);this.#scheduledTimer.unref();
         } catch (error) {
             await this.#close().catch(() => { /* preserve primary lifecycle failure */ });
             throw error;

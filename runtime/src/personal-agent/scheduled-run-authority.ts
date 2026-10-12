@@ -1,12 +1,12 @@
 import {scheduleHash,type ScheduleRun,ScheduleService} from './scheduled-tasks.js'
 import {TaskService,type TaskRecord,type TaskFence} from './tasks.js'
-export interface ScheduledRunGrant {readonly run_id:string;readonly task_id:string;readonly definition_hash:string;readonly namespace:string;readonly fence:Readonly<TaskFence>}
+export interface ScheduledRunGrant {readonly run_id:string;readonly task_id:string;readonly definition_hash:string;readonly namespace:string;readonly consumer:string|null;readonly fence:Readonly<TaskFence>}
 export class ScheduledRunAuthority{
  readonly #grants=new WeakMap<object,{lifetime:AbortSignal;run:ScheduleRun}>()
  constructor(readonly schedules:ScheduleService,readonly tasks:TaskService){}
- issue(run:ScheduleRun,task:TaskRecord,lifetime:AbortSignal):ScheduledRunGrant{
+ issue(run:ScheduleRun,task:TaskRecord,lifetime:AbortSignal,consumer:string|null=null):ScheduledRunGrant{
   this.#binding(run,task)
-  const grant=Object.freeze({run_id:run.run_id,task_id:task.id,definition_hash:run.definition_hash,namespace:'schedule-run:'+run.run_id,fence:Object.freeze({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})})
+  const grant=Object.freeze({run_id:run.run_id,task_id:task.id,definition_hash:run.definition_hash,namespace:'schedule-run:'+run.run_id,consumer,fence:Object.freeze({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision})})
   this.#grants.set(grant,{lifetime,run:structuredClone(run)})
   if(lifetime.aborted)throw Error('scheduled_run_closed')
   this.tasks.assertWritable(grant.fence,{kind:'nova'});return grant

@@ -19,6 +19,7 @@ export type TaskDecision = z.infer<typeof taskDecisionSchema>
 export interface TaskLoopPorts {
   ready?(task: TaskRecord): boolean
   evaluate(task: TaskRecord, signal: AbortSignal): Promise<TaskDecision>
+  validateEvidence?(task:TaskRecord):Promise<boolean>
   execute(task: TaskRecord, instruction: string, fence: TaskFence): Promise<void>
   publish?(task: TaskRecord): Promise<void>
   syncTodo(task: TaskRecord): Promise<'synced' | 'conflict'>
@@ -79,7 +80,7 @@ export class TaskLoop {
       }
       const decision = await this.ports.evaluate(task, this.#stop.signal)
       this.#stop.signal.throwIfAborted()
-      task = await this.tasks.applyDecision(fence, decision)
+      task = await this.tasks.applyDecision(fence, decision, this.ports.validateEvidence?()=>this.ports.validateEvidence!(task):undefined)
       if (decision.kind === 'reconcile') {
         this.#again.add(taskId)
         return

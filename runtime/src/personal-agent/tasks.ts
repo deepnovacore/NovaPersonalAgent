@@ -98,7 +98,7 @@ const recordSchema = taskInputSchema.extend({trigger:taskTriggerSchema.optional(
 }).strict()
 type StoredTask = z.infer<typeof recordSchema>
 const evidenceSchema = z.object({
-  observations: z.array(eventSchema).max(32).default([]), observations_truncated: z.boolean().default(false), ref: id, task_id: id, goal_revision: z.number().int().nonnegative(), kind: z.enum(['work', 'delivery', 'input']), work_id: id.optional(), outcome: z.string(), content: z.string().max(131072), refs: z.array(id).max(128)
+  observations: z.array(eventSchema).max(32).default([]), observations_truncated: z.boolean().default(false), ref: id, task_id: id, goal_revision: z.number().int().nonnegative(), kind: z.enum(['work', 'delivery', 'input','context']), work_id: id.optional(), outcome: z.string(), content: z.string().max(131072), refs: z.array(id).max(128)
 }).strict()
 export type TaskEvidence = z.infer<typeof evidenceSchema>
 const pendingSchema = z.object({
@@ -515,6 +515,16 @@ export class TaskService {
     this.get(taskId)
     return structuredClone(this.#state.outcomes.filter(item => item.task_id === taskId))
   }
+  recordContextEvidence(fence:TaskFence,readId:string,content:string,refs:string[]):Promise<string>{
+    const ref='task-context:'+id.parse(readId),parsed=evidenceSchema.parse({ref,task_id:fence.task_id,goal_revision:fence.goal_revision,kind:'context',outcome:'observed',content,refs})
+    return this.#mutate(next=>{
+      this.assertWritable(fence,{kind:'nova'});this.assertExecutionAllowed(fence.task_id,{kind:'nova'})
+      const prior=next.outcomes.find(item=>item.ref===ref)
+      if(prior){if(hash(prior)!==hash(parsed))throw Error('context_evidence_conflict');return ref}
+      next.outcomes.push(parsed);const task=next.tasks.find(item=>item.id===fence.task_id)!;if(!task.evidence_refs.includes(ref))task.evidence_refs.push(ref)
+      return ref
+    })
+  }
   assertExecutionAllowed(taskId: string, actor?: TaskActor): void {
     this.get(taskId)
     this.admitExecution(taskId)
@@ -638,9 +648,10 @@ export class TaskService {
     return task.phase === 'waiting' && (this.hasUnknownWork(taskId) || this.pendingEffect(taskId) !== null || this.inputReceipts(taskId).some(receipt => receipt.status === 'unknown'))
   }
   wait(fence: TaskFence, reason: string): Promise<TaskRecord> { return this.applyDecision(fence, { kind: 'wait', reason, evidence_refs: [] }); }
-  applyDecision(fence: TaskFence, raw: TaskDecision): Promise<TaskRecord> {
-    const decision = taskDecisionSchema.parse(raw)
-    return this.#mutate(next => {
+  applyDecision(fence: TaskFence, raw: TaskDecision, revalidate?:()=>Promise<boolean>): Promise<TaskRecord> {
+    let decision = taskDecisionSchema.parse(raw)
+    return this.#mutate(async next => {
+      if(decision.kind!=='wait'&&revalidate&&!await revalidate())decision={kind:'wait',reason:'context_authorization_changed',evidence_refs:[]}
       this.assertWritable(fence, { kind: 'nova' })
       const task = next.tasks.find(task => task.id === fence.task_id)!
       if (decision.kind !== 'wait' && this.hasUnknownWork(task.id))

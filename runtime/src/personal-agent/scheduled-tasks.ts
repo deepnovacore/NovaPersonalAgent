@@ -15,12 +15,13 @@ export type ScheduleCreateAuthority=z.infer<typeof authoritySchema>
 const slotSchema=z.object({scheduled_at:instant,local_date:z.string(),local_time:z.string(),slot_key:id}).strict()
 const definitionSchema=scheduleInputSchema.extend({id,revision:z.number().int().positive(),enabled:z.boolean(),archived:z.boolean(),authority:authoritySchema,cursor:instant,next_slot:slotSchema.nullable(),missed_count:z.number().int().nonnegative(),dst_gap_count:z.number().int().nonnegative()}).strict()
 export type Schedule=z.infer<typeof definitionSchema>
-const summarySchema=z.object({outcome:z.enum(['completed','cancelled','missed','skipped','failed']),text:z.string().max(16000),evidence_refs:z.array(id).max(128),published:z.boolean()}).strict()
+const summarySchema=z.object({outcome:z.enum(['completed','cancelled','missed','skipped','failed']),text:z.string().max(16000),evidence_refs:z.array(id).max(128),consumer:id.nullable().optional(),published:z.boolean()}).strict()
 const runSchema=z.object({run_id:id,schedule_id:id,definition_revision:z.number().int().positive(),definition_hash:id,definition:scheduleInputSchema,authority:authoritySchema,slot:slotSchema.nullable(),trigger:z.enum(['scheduled','manual']),claimed_at:instant,input:internalTaskInputSchema,stage:z.enum(['claimed','bound','prepared','terminal']),task_id:id.nullable(),prepared_namespace:id.nullable(),terminal_summary:summarySchema.nullable()}).strict()
 export type ScheduleRun=z.infer<typeof runSchema>
-const stateSchema=z.object({items:z.array(definitionSchema).max(4096),runs:z.array(runSchema).max(4096),receipts:z.record(z.string(),z.object({hash:id,kind:z.enum(['schedule','run']),id}).strict())}).strict()
+const adoptionResultSchema=z.object({id,version:z.number().int().positive()}).strict()
+const stateSchema=z.object({items:z.array(definitionSchema).max(4096),runs:z.array(runSchema).max(4096),receipts:z.record(z.string(),z.object({hash:id,kind:z.enum(['schedule','run']),id}).strict()),adoptions:z.record(z.string(),z.object({hash:id,run_id:id,result:adoptionResultSchema.nullable()}).strict()).default({})}).strict()
 type State=z.infer<typeof stateSchema>
-const empty=():State=>({items:[],runs:[],receipts:{}})
+const empty=():State=>({items:[],runs:[],receipts:{},adoptions:{}})
 export const scheduleHash=(value:unknown)=>createHash('sha256').update(canonicalJson(value)).digest('hex')
 const definition=(item:Schedule):ScheduleInput=>({title:item.title,goal:item.goal,acceptance:item.acceptance,rule:item.rule,context:item.context})
 
@@ -36,6 +37,15 @@ export class ScheduleService{
  getRun(runId:string):ScheduleRun{const run=this.#state.runs.find(run=>run.run_id===id.parse(runId));if(!run)throw Error('schedule_run_not_found');return structuredClone(run)}
  runForTask(taskId:string):ScheduleRun|null{const run=this.#state.runs.find(run=>run.task_id===taskId);return run?structuredClone(run):null}
  activeRuns(){return structuredClone(this.#state.runs.filter(run=>run.stage!=='terminal'))}
+ terminalRuns(){return structuredClone(this.#state.runs.filter(run=>run.stage==='terminal'))}
+ reserveAdoption(requestId:string,runId:string,input:unknown){
+  const run=this.getRun(runId),key=scheduleHash([run.authority.user_scope,id.parse(requestId)]),payload=scheduleHash({runId,input})
+  return this.#mutate(next=>{const prior=next.adoptions[key];if(prior){if(prior.hash!==payload)throw Error('request_conflict');return {key,result:structuredClone(prior.result)}}if(Object.keys(next.adoptions).length>=20000)throw Error('schedule_capacity');next.adoptions[key]={hash:payload,run_id:runId,result:null};return {key,result:null}})
+ }
+ finishAdoption(key:string,result:{id:string;version:number}){
+  const parsed=adoptionResultSchema.parse(result)
+  return this.#mutate(next=>{const prior=next.adoptions[id.parse(key)];if(!prior)throw Error('adoption_not_reserved');if(prior.result&&scheduleHash(prior.result)!==scheduleHash(parsed))throw Error('adoption_conflict');prior.result=parsed;return structuredClone(parsed)})
+ }
  history(scheduleId:string,cursor:string|null=null,limit=20){
   this.get(scheduleId);z.number().int().min(1).max(100).parse(limit)
   const runs=this.#state.runs.filter(run=>run.schedule_id===scheduleId),offset=cursor?runs.findIndex(run=>run.run_id===cursor)+1:0
