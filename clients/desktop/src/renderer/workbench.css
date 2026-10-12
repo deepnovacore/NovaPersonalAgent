@@ -439,6 +439,8 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 
 .timeline-card{background:var(--surface-raised);border:1px solid var(--line);border-radius:16px;padding:20px;display:grid;gap:12px;overflow-wrap:anywhere}
 .timeline-meta{display:flex;justify-content:space-between;gap:8px;color:var(--ink-dim);font-size:11px}
+.workbench .timeline-content:not(.timeline-compact) .timeline-card>.source-info{opacity:1;color:var(--ink-dim);top:12px;right:12px;width:24px;height:24px;line-height:24px}
+.timeline-content:not(.timeline-compact) .timeline-meta{padding-right:24px}
 .workbench .timeline-title{font-size:17px;font-weight:600;line-height:1.5;text-align:left;border:0;padding:0;background:none;color:var(--ink)}
 .workbench .timeline-title:hover:not(:disabled){color:var(--accent)}
 .timeline-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}

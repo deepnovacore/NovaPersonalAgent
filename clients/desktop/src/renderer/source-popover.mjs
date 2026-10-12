@@ -42,11 +42,11 @@ export function attachSources(host,labels,{title='查看依据',renderItem}={}){
 const channel=source=>new Map([['mail','邮件'],['calendar','日程'],['im',source.provider==='feishu'?'飞书':'IM'],['file','文件'],['conversation','对话'],['task','任务']]).get(source.type)
 const safeSourceUrl=value=>{try{const url=new URL(value);return ['https:','http:'].includes(url.protocol)&&!url.username&&!url.password?url.href:null}catch{return null}}
 /** Channel and mention badges come only from structured provenance, never from a title or reference ID. */
-export function attachSourceTags(host,sources,{autoRecorded=false,sourceChanged=false,openArticle}={}){
+export function attachSourceTags(host,sources,{autoRecorded=false,sourceChanged=false,openArticle,title='查看来源'}={}){
  const items=(Array.isArray(sources)?sources:[]).filter(source=>source&&channel(source))
  if(!items.length&&!autoRecorded&&!sourceChanged)return null
  const tags=el('div',undefined,'source-tags');host.append(tags)
- const details=attachSources(host,items,{title:'查看来源',renderItem(row,source){
+ const details=attachSources(host,items,{title,renderItem(row,source){
   row.append(el('strong',channel(source)))
   if(source.label)row.append(el('span',source.label,'source-label'))
   if(source.summary)row.append(el('p',source.summary))

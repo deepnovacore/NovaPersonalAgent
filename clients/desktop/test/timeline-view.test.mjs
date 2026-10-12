@@ -1,6 +1,7 @@
-import test from 'node:test'
+import test,{beforeEach,afterEach} from 'node:test'
 import assert from 'node:assert/strict'
 import {timelineGroups,renderTimeline} from '../src/renderer/timeline-view.mjs'
+import {disposeSources} from '../src/renderer/source-popover.mjs'
 const snapshot={settings:{timezone:'Asia/Shanghai'},life:{goals:[{id:'g',title:'Ship Nova'}],todos:[
  {id:'date',title:'Draft',status:'open',due:'2026-10-12',version:1,goal_id:'g'},
  {id:'wait',title:'Reply',status:'waiting',due:null,version:3,updated_at:'2026-09-01T00:00:00Z'},
@@ -23,12 +24,17 @@ test('same objects update once; completed and cancelled items leave active group
 })
 
 class Element{
- constructor(tag,text,className=''){this.tag=tag;this.textContent=text??'';this.className=className;this.children=[];this.dataset={};this.listeners={}}
+ constructor(tag,text,className=''){this.tag=tag;this.textContent=text??'';this.className=className;this.children=[];this.dataset={};this.listeners={};this.style={};this.hidden=false}
  append(...nodes){for(const node of nodes){node.parentElement=this;this.children.push(node)}}
  setAttribute(key,value){this[key]=value}
  addEventListener(event,handler){this.listeners[event]=handler}
+ contains(node){for(let current=node;current;current=current.parentElement)if(current===this)return true;return false}
+ focus(){document.activeElement=this}
  querySelectorAll(selector){return this.children.flatMap(node=>[...(selector.startsWith('.')?node.className.split(' ').includes(selector.slice(1)):node.tag===selector)?[node]:[],...node.querySelectorAll(selector)])}
 }
+const previousDocument=globalThis.document
+beforeEach(()=>{globalThis.document={activeElement:null,listeners:new Map(),createElement:tag=>new Element(tag),addEventListener(event,handler){if(!this.listeners.has(event))this.listeners.set(event,new Set());this.listeners.get(event).add(handler)},removeEventListener(event,handler){this.listeners.get(event)?.delete(handler)}}})
+afterEach(()=>{disposeSources();globalThis.document=previousDocument})
 function render(state,options={}){
  const parent=new Element('main'),calls=[],el=(...args)=>new Element(...args)
  const button=(text,click,host)=>{const node=el('button',text);node.addEventListener('click',click);host.append(node);return node}
@@ -69,4 +75,33 @@ test('compact sidebar retains its groups without date gutters or a current-day e
  assert.equal(parent.querySelectorAll('.timeline-current-label').length,0)
  assert.deepEqual(parent.querySelectorAll('.timeline-group').map(node=>node.dataset.group),['overdue','current','waiting'])
  assert.equal(parent.querySelectorAll('article').length,3)
+})
+
+test('the item info icon opens its version and Escape closes it with focus restored',()=>{
+ const {parent}=render(snapshot),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date'),info=card.querySelectorAll('.source-info')[0]
+ assert.ok(info)
+ assert.equal(info.textContent,'ⓘ');assert.equal(info['aria-label'],'事项依据')
+ assert.equal(card.querySelectorAll('summary').length,0)
+ const popover=card.querySelectorAll('.source-popover')[0];assert.equal(popover.hidden,true)
+ info.listeners.click({stopPropagation(){}})
+ assert.equal(popover.hidden,false);assert.equal(info['aria-expanded'],'true')
+ assert.ok(popover.querySelectorAll('li').some(node=>node.textContent==='来自待办 · 版本 1'))
+ for(const listener of document.listeners.get('keydown'))listener({key:'Escape',preventDefault(){}})
+ assert.equal(popover.hidden,true);assert.equal(document.activeElement,info)
+})
+test('a card with provenance uses one info icon for both the source and item details',()=>{
+ const state=structuredClone(snapshot);state.life.todos[0].sources=[{type:'mail',summary:'已确认的截止说明'}];state.life.todos[0].source_changed=true
+ const {parent}=render(state),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date')
+ assert.equal(card.querySelectorAll('.source-info').length,1)
+ const popover=card.querySelectorAll('.source-popover')[0]
+ assert.ok(popover.querySelectorAll('p').some(node=>node.textContent==='来自待办 · 版本 1'))
+ assert.ok(popover.querySelectorAll('p').some(node=>node.textContent==='已确认的截止说明'))
+ assert.ok(popover.querySelectorAll('p').some(node=>node.textContent==='来源内容已变化，请核对事项。'))
+ assert.equal(card.querySelectorAll('.source-tag').length,1)
+})
+test('stored item details remain readable offline while assistance actions are disabled',()=>{
+ const {parent}=render(snapshot,{connected:false}),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date'),info=card.querySelectorAll('.source-info')[0]
+ assert.ok(info)
+ assert.notEqual(info.disabled,true)
+ assert.equal(card.querySelectorAll('.timeline-title')[0].disabled,true)
 })

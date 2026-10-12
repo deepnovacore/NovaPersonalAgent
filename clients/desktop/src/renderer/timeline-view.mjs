@@ -1,4 +1,4 @@
-import {attachSourceTags} from './source-popover.mjs'
+import {attachSources,attachSourceTags} from './source-popover.mjs'
 import {t,currentLanguage} from './locale.mjs'
 import {renderCardTags} from './card-tags.mjs'
 const LABEL={overdue:'已过截止',current:'今天到期',soon:'接下来 7 天',later:'之后',waiting:'等待中 · 未设期限',unscheduled:'尚未安排',completed:'已完成'}
@@ -66,15 +66,20 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    if(item.importance==='high')tags.push({label:'重要',tone:'importance'})
    tags.push({label:item.status==='done'?'已完成':STATUS[item.status]??item.status,tone:item.status==='done'?'progress':item.status==='waiting'?'waiting':item.status==='doing'?'progress':'context'})
    if(item.goal)tags.push({label:item.goal,tone:'project'})
-   renderCardTags(card,tags,{el});attachSourceTags(card,item.sources,{autoRecorded:item.auto_recorded,sourceChanged:item.source_changed,openArticle})
+   renderCardTags(card,tags,{el});const sourceDetails=attachSourceTags(card,item.sources,{autoRecorded:item.auto_recorded,sourceChanged:item.source_changed,openArticle,title:compact?undefined:t('事项依据')})
    if(!compact&&item.note)card.append(el('p',item.note,'timeline-note'))
    const actions=el('div',undefined,'timeline-actions');card.append(actions)
    const primary=item.status==='done'?null:button(t(item.status==='waiting'?'起草跟进':'排一版方案'),()=>discuss([item.reference],t(item.status==='waiting'?'请针对「{0}」起草一条跟进消息，先给我草稿。':'请针对「{0}」排一版可执行方案，结合真实截止日期，说明建议顺序。',item.title)),actions,`timeline-plan:${item.id}`);if(primary)primary.className='soft'
    if(!compact)button(t('查看事项'),()=>openTodos(item.id),actions).className='ghost'
    if(!compact&&command&&item.status!=='done')button(t(item.importance==='high'?'取消重要标记':'标为重要'),()=>command('life.mutate',{op:'update',kind:'todo',id:item.id,expected_version:item.version,importance:item.importance==='high'?'normal':'high'}),actions,`life:${item.id}`).className='ghost'
-   if(!compact){const details=el('details');details.dataset.objectId=item.id;details.open=expanded.has(item.id);details.addEventListener('toggle',()=>{details.open?expanded.add(item.id):expanded.delete(item.id)});details.append(el('summary',t('事项依据')),el('p',t('来自待办 · 版本 {0}',item.version),'hint'));if(item.source_changed)details.append(el('p',t('来源内容已变化，请核对事项。'),'hint'));card.append(details)}
+   if(!compact){
+    const version=t('来自待办 · 版本 {0}',item.version),details=sourceDetails?.popover?sourceDetails:attachSources(card,[version],{title:t('事项依据')})
+    if(sourceDetails?.popover)details.popover.append(el('p',version,'hint'))
+    if(item.source_changed)details.popover.append(el('p',t('来源内容已变化，请核对事项。'),'hint'))
+    details.info.title=t('事项依据')
+   }
   }
  }
  root.append(el('p',t('这里展示待办安排；日历完整性尚未确认。'),'timeline-source-note'))
- for(const node of root.querySelectorAll('button'))if(!connected)node.disabled=true
+ for(const node of root.querySelectorAll('button'))if(!connected&&node.className!=='source-info')node.disabled=true
 }
