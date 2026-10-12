@@ -69,7 +69,8 @@ body[data-opaque="1"] .workbench{border-radius:0}
 .window-grip{flex:1 1 auto;align-self:stretch;min-width:24px;margin:-8px 0;-webkit-app-region:no-drag}
 .workspace-topbar{flex-shrink:0;min-width:0;border-bottom:1px solid var(--line);background:var(--surface-raised);padding:0 14px;min-height:49px;display:flex;align-items:center;-webkit-app-region:drag}
 .workspace-tabs{display:flex;align-items:center;gap:2px;overflow-x:auto;min-width:0;scrollbar-width:thin;-webkit-app-region:no-drag}
-.workbench .workspace-tab{display:flex;align-items:center;gap:5px;flex-shrink:0;border:0;border-radius:8px;background:transparent;color:var(--ink-dim);font-size:12px;padding:8px 11px;white-space:nowrap}
+.workbench .workspace-tab{display:flex;align-items:center;gap:6px;flex-shrink:0;border:0;border-radius:8px;background:transparent;color:var(--ink-dim);font-size:12px;padding:8px 8px;white-space:nowrap}
+.workspace-tab svg{width:15px;height:15px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 .workbench .workspace-tab:hover{background:var(--surface-inset)}
 .workbench .workspace-tab[aria-selected="true"]{background:var(--accent-wash);color:var(--accent);font-weight:600}
 .workspace-tab-badge,.unread-badge{font:600 10px/1 var(--mono);min-width:16px;height:16px;padding:0 4px;display:inline-grid;place-items:center;border-radius:8px;background:var(--accent);color:var(--accent-ink)}
