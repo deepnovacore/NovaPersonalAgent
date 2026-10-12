@@ -24,7 +24,11 @@ export class ScheduledAppContext{
   if(!this.host.schedules.getRun(grant.run_id).definition.context[section])throw Error('context_not_authorized')
   const projection=await this.#project(section,grant.consumer,grant.task_id),version=scheduleHash(projection)
   let offset=0
-  if(cursor){z.string().max(1024).parse(cursor);const parsed=z.object({section:sectionSchema,version:z.string(),offset:z.number().int().nonnegative()}).strict().parse(JSON.parse(Buffer.from(cursor,'base64url').toString('utf8')));if(parsed.section!==section||parsed.version!==version)throw Error('context_cursor_stale');offset=parsed.offset}
+  if(cursor){
+   let parsed:{section:AppContextSection;version:string;offset:number}
+   try{z.string().max(1024).parse(cursor);parsed=z.object({section:sectionSchema,version:z.string(),offset:z.number().int().nonnegative()}).strict().parse(JSON.parse(Buffer.from(cursor,'base64url').toString('utf8')))}catch{throw Error('context_cursor_invalid: start with cursor null; otherwise copy next_cursor unchanged')}
+   if(parsed.section!==section||parsed.version!==version)throw Error('context_cursor_stale');offset=parsed.offset
+  }
   if(offset>projection.items.length)throw Error('context_cursor_stale')
   const items=projection.items.slice(offset,offset+20),truncated=items.some(item=>item.truncated===true)
   const page:AppContextPage={section,owner_task_id:grant.task_id,consumer:grant.consumer,items,next_cursor:null,coverage:{complete:false,omitted:projection.omitted,truncated,collection_version:version},evidence_refs:['app:'+section+':'+version],observed_at:new Date().toISOString()}

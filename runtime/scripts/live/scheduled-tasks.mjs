@@ -37,6 +37,8 @@ export async function runScheduledLive(output){
    const gateway=composition.realtime.core.gateway,complete=gateway.complete.bind(gateway)
    gateway.complete=async request=>{modelCalls++;return complete(request)}
    await composition.realtime.start();host=composition.realtime.personalAgent
+   const readContext=host.readAppContext.bind(host)
+   host.readAppContext=async(section,cursor,grant)=>{try{return await readContext(section,cursor,grant)}catch(error){await writeFile(join(directory,'context-errors.jsonl'),JSON.stringify({section,cursor,error:error.message})+'\n',{flag:'a',mode:0o600});throw error}}
   }
   const restart=async()=>{
    stop.abort();await composition.realtime.stop();for(const close of [...cleanup].reverse())await Promise.resolve(close());cleanup.clear()

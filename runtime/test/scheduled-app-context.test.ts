@@ -21,6 +21,7 @@ test('App reads enumerate fresh authorized versions, detect changed pages and re
   await host.schedules.bindTask(run.run_id,task.id);await host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
   for(let i=0;i<22;i++)await host.life.mutate({op:'create',kind:'todo',title:'New item '+i,note:i===0?'x'.repeat(4000):''},'todo'+i)
   const grant=host.scheduledRunGrant(run.run_id,new AbortController().signal,'model-a')
+  await assert.rejects(host.readAppContext('todos','null',grant),/^Error: context_cursor_invalid: start with cursor null; otherwise copy next_cursor unchanged$/)
   const first=await host.readAppContext('todos',null,grant)
   assert.equal(first.items.length,20);assert.ok(first.next_cursor);assert.equal(first.coverage.truncated,true);assert.equal(first.coverage.complete,false);assert.ok(Buffer.byteLength(JSON.stringify(first))<=32768)
   const second=await host.readAppContext('todos',first.next_cursor,grant)
