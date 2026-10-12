@@ -1,7 +1,14 @@
 final class ChatMessage {
-  const ChatMessage(this.id, this.role, this.text, this.finalText);
+  const ChatMessage(
+    this.id,
+    this.role,
+    this.text,
+    this.finalText, {
+    this.scheduleRef,
+  });
   final String id, role, text;
   final bool finalText;
+  final Map<String, dynamic>? scheduleRef;
 }
 
 final class ConversationState {
@@ -14,6 +21,7 @@ final class ConversationState {
     required String text,
     required bool finalText,
     String? id,
+    Map<String, dynamic>? scheduleRef,
   }) {
     if (text.isEmpty || !['user', 'assistant'].contains(role)) return;
     final index = id == null ? -1 : _messages.indexWhere((m) => m.id == id);
@@ -25,6 +33,7 @@ final class ConversationState {
         previous.role,
         text,
         finalText,
+        scheduleRef: scheduleRef ?? previous.scheduleRef,
       );
     } else if (id == null &&
         _messages.isNotEmpty &&
@@ -38,7 +47,13 @@ final class ConversationState {
       );
     } else {
       _messages.add(
-        ChatMessage(id ?? 'local-${_serial++}', role, text, finalText),
+        ChatMessage(
+          id ?? 'local-${_serial++}',
+          role,
+          text,
+          finalText,
+          scheduleRef: scheduleRef,
+        ),
       );
     }
   }

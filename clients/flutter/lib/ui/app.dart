@@ -1,3 +1,4 @@
+import 'scheduled_tasks_page.dart';
 import 'dart:async';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
@@ -976,6 +977,7 @@ class _ConversationScreenState extends State<ConversationScreen>
     final snapshot = _session.personal.snapshot;
     final items = (snapshot?.object('conversations')['items'] as List? ?? [])
         .whereType<Map>()
+        .where((row) => row['kind'] != 'schedule')
         .toList();
     final canSwitch =
         _session.connected &&
@@ -1132,7 +1134,8 @@ class _ConversationScreenState extends State<ConversationScreen>
   Widget _conversationBar() {
     final snapshot = _session.personal.snapshot!;
     final items = (snapshot.object('conversations')['items'] as List? ?? [])
-        .whereType<Map>();
+        .whereType<Map>()
+        .where((row) => row['kind'] != 'schedule');
     final selected = items
         .where((r) => r['id'] == snapshot.selectedId)
         .firstOrNull;
@@ -1371,7 +1374,57 @@ class _ConversationScreenState extends State<ConversationScreen>
                     ),
                   ),
                 ),
-                Expanded(child: AssistantText(message.text)),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AssistantText(message.text),
+                      if (message.scheduleRef != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.schedule, size: 19),
+                            label: Text(t('View schedule')),
+                            onPressed: () => Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (page) => ScheduledTasksPage(
+                                  store: _session.personal,
+                                  language: _session.language,
+                                  initialId:
+                                      message.scheduleRef['schedule_id']
+                                          as String,
+                                  onOpenConversation: () => Navigator.pop(page),
+                                  onOpenTask: (id) async {
+                                    final task =
+                                        _session.personal.snapshot
+                                            ?.rows('tasks')
+                                            .where((row) => row['id'] == id)
+                                            .firstOrNull ??
+                                        Map<String, dynamic>.from(
+                                          await _session.personal.command(
+                                            'tasks.get',
+                                            {'task_id': id},
+                                          ),
+                                        );
+                                    if (page.mounted) {
+                                      await showTaskSheet(
+                                        page,
+                                        _session.personal,
+                                        task,
+                                        onOpenConversation: () =>
+                                            Navigator.pop(page),
+                                      );
+                                    }
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
               ],
             ),
     );
