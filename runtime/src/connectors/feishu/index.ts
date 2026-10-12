@@ -125,7 +125,7 @@ function readSaved(value: unknown): Saved {
   for (const from of Object.values(object(data.captureFrom ?? {}))) if (!Number.isFinite(Date.parse(str(from)))) throw new Error('Invalid Feishu capture state');
   if(data.outbound!==undefined&&typeof data.outbound!=='boolean')throw Error('Invalid outbound state');
   if(data.outboundIdentity!==undefined){const row=object(data.outboundIdentity);if(!str(row.account)||!str(row.openId)||!Number.isSafeInteger(row.generation)||Number(row.generation)<0||typeof row.valid!=='boolean')throw Error('Invalid outbound identity');}
-  for(const value of Object.values(object(data.outboundReceipts))){const row=object(value);if(['proposal','nonce','message','chat'].some(key=>!str(row[key]))||!Number.isSafeInteger(row.generation))throw Error('Invalid outbound receipt');}
+  for(const value of Object.values(object(data.outboundReceipts ?? {}))){const row=object(value);if(['proposal','nonce','message','chat'].some(key=>!str(row[key]))||!Number.isSafeInteger(row.generation))throw Error('Invalid outbound receipt');}
   if(data.processingConsent!==undefined)processingGrantSchema.parse(data.processingConsent);
   return data as unknown as Saved;
 }

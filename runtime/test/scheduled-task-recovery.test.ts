@@ -36,9 +36,9 @@ test('claim and delegate crashes reconcile one Task; first prepare never request
 test('hidden schedule ownership has a separate quota, rejects foreground use and preserves a verified backup',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-hidden-schedule-')),path=join(dir,'personal.json'),state=initialState()
  while(state.conversations.items.length<128)state.conversations.items.push(createConversation('chat','Chat'))
- await new PersonalStore(path).write(state);const original=await readFile(path,'utf8')
+ await new PersonalStore(path).write(state)
  const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
- try{await host.open()
+ try{await host.open();const original=await readFile(path,'utf8')
   let hidden=''
   for(let i=0;i<64;i++){const item=await host.schedules.create('c'+i,input,{user_scope:'test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context});hidden='schedule:'+item.id}
   await assert.rejects(host.schedules.create('overflow',input,{user_scope:'test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context}),/schedule_capacity/)
