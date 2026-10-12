@@ -72,3 +72,19 @@ test('only two scheduled runtimes prepare and hidden frames never reach the fore
   await host.scheduledTaskTick();assert.equal(prepared,2);assert.equal(host.schedules.activeRuns().filter(run=>run.stage==='bound').length,1);assert.equal(emitted,0)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
+
+test('stopping a recovered scheduled delivery releases its occurrence without guessing a result',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-recovered-stop-')),path=join(dir,'personal.json')
+ const make=()=>new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let host=make()
+ try{await host.open();const schedule=await host.schedules.create('create',input,{user_scope:'test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context}),run=await host.schedules.runNow('run',schedule.id,1),task=await host.tasks.delegate('scheduled:'+run.run_id,run.input)
+  await host.schedules.bindTask(run.run_id,task.id);await host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id);await host.tasks.beginDelivery({task_id:task.id,control_revision:0,goal_revision:0},'lost-response')
+  await host.close();host=make();await host.open()
+  assert.equal(host.tasks.get(task.id).waiting_reason,'task_delivery_uncertain')
+  const current=host.tasks.get(task.id);await host.cancelTask('stop',{task_id:task.id,control_revision:current.control_revision,goal_revision:current.goal_revision},{kind:'user',client_id:'test'})
+  await host.scheduledTaskTick()
+  assert.equal(host.tasks.hasUnresolvedExecution(task.id),false)
+  assert.equal(host.schedules.getRun(run.run_id).terminal_summary?.outcome,'cancelled')
+  assert.equal(host.conversationSnapshot().messages.length,0)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})

@@ -206,6 +206,7 @@ export class TaskService {
     }, task => this.#assertDecider(task, fence, actor, false))
   }
   readonly #liveInputs = new Set<string>()
+  readonly #liveDeliveries = new Set<string>()
   async input(requestId: string, fence: TaskFence, actor: TaskActor, sessionId: string, text: string, send: (grant: TaskDispatchContext) => Promise<'accepted' | 'failed' | 'unknown'>): Promise<'accepted' | 'failed' | 'unknown'> {
     const request = id.parse(requestId), session = id.parse(sessionId), instruction = z.string().trim().min(1).max(16000).parse(text), body = hash({ fence, actor, session, instruction })
     const prior = await this.#mutate(next => {
@@ -609,10 +610,11 @@ export class TaskService {
     }
     return this.#change(requestId, parsed, (task, next) => {
       // Only durably uncertain execution is the user's to settle; a reserved or in-flight effect or send still reports its own result.
-      if (Object.values(next.pending_effects).some(effect => effect.task_id === task.id && effect.status === 'pending') || [...this.#liveInputs].some(request => next.effects[request]?.task_id === task.id))
+      if (task.pending_delivery&&this.#liveDeliveries.has(task.pending_delivery) || Object.values(next.pending_effects).some(effect => effect.task_id === task.id && effect.status === 'pending') || [...this.#liveInputs].some(request => next.effects[request]?.task_id === task.id))
         throw Error('execution_in_flight')
       const done = parsed.resolution === 'done'
       let changed = false
+      if(task.pending_delivery&&task.waiting_reason==='task_delivery_uncertain'){delete task.pending_delivery;changed=true}
       for (const item of next.outcomes)
         if (item.task_id === task.id && item.work_id && !['ok', 'failed', 'refused', 'cancelled'].includes(item.outcome)) {
           item.outcome = done ? 'ok' : 'cancelled'
@@ -645,7 +647,7 @@ export class TaskService {
   }
   needsReconcile(taskId: string): boolean {
     const task = this.get(taskId)
-    return task.phase === 'waiting' && (this.hasUnknownWork(taskId) || this.pendingEffect(taskId) !== null || this.inputReceipts(taskId).some(receipt => receipt.status === 'unknown'))
+    return task.phase === 'waiting' && (Boolean(task.pending_delivery&&!this.#liveDeliveries.has(task.pending_delivery)&&task.waiting_reason==='task_delivery_uncertain') || this.hasUnknownWork(taskId) || this.pendingEffect(taskId) !== null || this.inputReceipts(taskId).some(receipt => receipt.status === 'unknown'))
   }
   wait(fence: TaskFence, reason: string): Promise<TaskRecord> { return this.applyDecision(fence, { kind: 'wait', reason, evidence_refs: [] }); }
   applyDecision(fence: TaskFence, raw: TaskDecision, revalidate?:()=>Promise<boolean>): Promise<TaskRecord> {
@@ -729,6 +731,7 @@ export class TaskService {
       if (task.pending_delivery)
         throw Error('task_delivery_pending')
       task.pending_delivery = id.parse(deliveryId)
+      this.#liveDeliveries.add(deliveryId)
     })
   }
   finishDelivery(taskId: string, deliveryId: string): Promise<void> {
@@ -736,6 +739,7 @@ export class TaskService {
       const task = next.tasks.find(task => task.id === taskId)
       if (task?.pending_delivery === deliveryId)
         delete task.pending_delivery
+      this.#liveDeliveries.delete(deliveryId)
     })
   }
   reserveInitial(fence: TaskFence): Promise<string> {

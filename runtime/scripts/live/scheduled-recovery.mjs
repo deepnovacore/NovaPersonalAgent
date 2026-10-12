@@ -19,7 +19,7 @@ export async function runScheduledCrashRecovery(directory,environment){
 async function worker(phase,directory){
  const {buildProductionComposition}=await import('../../dist/src/composition/production-composition.js')
  const environment={...process.env,BLACKBOARD_PATH:join(directory,'blackboard.sqlite'),REALTIME_TELEMETRY:join(directory,'telemetry.jsonl')},cleanup=new Set(),stop=new AbortController()
- const composition=await buildProductionComposition({token:randomUUID(),stop,ownership:{own:fn=>{cleanup.add(fn);return()=>cleanup.delete(fn)}},onDiagnostic:()=>{},environment})
+ const composition=await buildProductionComposition({token:randomUUID().replaceAll('-',''),stop,ownership:{own:fn=>{cleanup.add(fn);return()=>cleanup.delete(fn)}},onDiagnostic:()=>{},environment})
  try{
   await composition.realtime.start();const host=composition.realtime.personalAgent
   if(phase==='crash'){
@@ -50,4 +50,4 @@ async function worker(phase,directory){
   await writeFile(join(directory,'recovery.json'),JSON.stringify({...before,status:'passed',phase:task.phase,waiting_reason:task.waiting_reason,model_requests:requests,task_count:host.tasks.list().length}),{mode:0o600})
  }finally{stop.abort();await composition.realtime.stop();for(const close of [...cleanup].reverse())await Promise.resolve(close())}
 }
-if(process.argv[1]&&resolve(process.argv[1])===file)await worker(process.argv[2],resolve(process.argv[3]))
+if(process.argv[1]&&resolve(process.argv[1])===file)await worker(process.argv[2],resolve(process.argv[3])).catch(async error=>{await writeFile(join(resolve(process.argv[3]),'worker-failure.json'),JSON.stringify({phase:process.argv[2],error:error.message}),{mode:0o600});process.exitCode=1})

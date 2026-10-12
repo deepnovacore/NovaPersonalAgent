@@ -94,7 +94,7 @@ export async function runScheduledLive(output){
   if(host.schedules.list().length!==2)throw Error('agent_created_without_time')
   await host.submitConversationText(conversationId,'每天 09:00，时区 Asia/Shanghai。任务叫每日事项检查，只读取 App 事项，输出最多三项优先事项，缺少信息时明确说明。请现在创建这个定时任务。','agent-confirm')
   const agentSchedule=await wait(()=>host.schedules.list().find(row=>row.id!==schedule.id&&row.id!==weekly.id),'agent_creation')
-  if(agentSchedule.authority.source!=='agent'||agentSchedule.rule.time!=='09:00'||agentSchedule.rule.timezone!=='Asia/Shanghai')throw Error('agent_schedule_contract')
+  if(agentSchedule.authority.source!=='user_turn'||agentSchedule.rule.time!=='09:00'||agentSchedule.rule.timezone!=='Asia/Shanghai')throw Error('agent_schedule_contract')
   pass('real_agent_clarifies_then_creates_shared_schedule')
   const {runScheduledCrashRecovery}=await import('./scheduled-recovery.mjs')
   report.crash_recovery=await runScheduledCrashRecovery(join(directory,'crash-recovery'),environment);pass('real_process_kill_in_flight_recovers_without_reexecution')
