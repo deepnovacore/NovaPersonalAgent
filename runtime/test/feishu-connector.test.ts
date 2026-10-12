@@ -430,3 +430,20 @@ test('mentions from before a chat was selected or consent was granted are never 
   assert.equal(capture().oc_b_before,false);assert.equal(capture().oc_b_after,true)
  }finally{await connector.close();await rm(directory,{recursive:true,force:true})}
 })
+
+
+test('saved Feishu state accepts absent captureFrom and rejects malformed capture timestamps', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'nova-feishu-saved-'));
+  const statePath = join(directory, 'state.json');
+  const saved = {paused: true, connected: false, bot: false, selected: [], cursors: {}, deliveries: {}, actions: [], generation: 0, sources: []};
+  for (const captureFrom of [undefined, {}, {fixture: 'invalid-date'}]) {
+    await writeFile(statePath, JSON.stringify({...saved, captureFrom}));
+    const connector = new FeishuConnector({bootstrapOnly: true, executable: 'unused', credentialRoot: directory, statePath,
+      run: () => Promise.reject(new Error('CLI unavailable'))});
+    try {
+      if (captureFrom && 'fixture' in captureFrom) await assert.rejects(connector.open(), /Cannot read Feishu state/);
+      else { await connector.open(); assert.equal(connector.snapshot().state, 'error'); }
+    } finally { await connector.close(); }
+  }
+  await rm(directory, {recursive: true, force: true});
+});
