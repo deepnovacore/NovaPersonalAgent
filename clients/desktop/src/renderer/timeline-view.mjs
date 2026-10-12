@@ -18,12 +18,14 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
  const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}`);parent.append(root)
  const groups=timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),currentDate=timelineDate(snapshot,now)
  const formatDate=date=>new Date(date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{...(date.slice(0,4)!==currentDate.slice(0,4)?{year:'numeric'}:{}),month:'short',day:'numeric',timeZone:'UTC'})
- const intro=el('p',t('按真实截止日期整理；未设时间的事项单独保留。'),'timeline-description');if(!compact)root.append(intro)
  if(!snapshot?.life){const status=el('p',t(connected?'正在读取事项…':'连接后可查看安排。'),'hint');status.setAttribute('role','status');root.append(status);return}
- const dated=groups.flatMap(group=>group.items).filter(item=>item.date&&item.status!=='done'),counts=new Map()
- for(const item of dated)counts.set(item.date,(counts.get(item.date)??0)+1)
- const cluster=[...counts].find(([date,count])=>date>=currentDate&&count>1)
- if(cluster&&!compact){const notice=el('p',t('{0} 有 {1} 项到期，建议安排推进顺序。',new Date(cluster[0]+'T12:00:00Z').toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',timeZone:'UTC'}),cluster[1]),'timeline-cluster');root.append(notice)}
+ if(!compact){
+  const active=groups.flatMap(group=>group.items).filter(item=>item.status!=='done'),overview=el('header',undefined,'timeline-overview')
+  overview.append(el('p',t('安排与进展'),'timeline-overline'),el('h2',new Date(currentDate+'T12:00:00Z').toLocaleDateString(currentLanguage(),{month:'long',day:'numeric',weekday:'short',timeZone:'UTC'})))
+  const summary=el('div',undefined,'timeline-overview-summary');summary.append(el('span',t('{0} 项有截止日期',active.filter(item=>item.date).length)))
+  const waiting=active.filter(item=>item.status==='waiting').length;if(waiting)summary.append(el('span',t('{0} 项等待回复',waiting)))
+  overview.append(summary);root.append(overview)
+ }
  if(!groups.length&&compact){const empty=el('div',undefined,'timeline-empty');empty.append(el('h3',t('安排留有余地')),el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,empty);root.append(empty)}
  let displayGroups=groups,axis,pastAxis
  if(!compact){
@@ -49,8 +51,8 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    const marker=el('h3',undefined,'timeline-date-marker'),time=el('time',formatDate(group.date));time.dateTime=group.date
    if(group.id==='current')marker.append(el('span','Today','timeline-current-label'))
    marker.append(time,el('span',new Date(group.date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{weekday:'short',timeZone:'UTC'}),'timeline-weekday'))
-   if(group.items.length)marker.append(el('span',t('{0} 项到期',group.items.length),'timeline-date-count'))
-   cards=el('div',undefined,'timeline-day-cards');section.append(marker,cards);(group.id==='overdue'?pastAxis:axis).append(section)
+   if(group.items.length===1)marker.append(el('span',t('{0} 项到期',group.items.length),'timeline-date-count'))
+   cards=el('div',undefined,`timeline-day-cards${group.items.length>1?' timeline-shared-date':''}`);if(group.items.length>1)cards.append(el('p',t('{0} 项在同一天到期',group.items.length),'timeline-day-summary'));section.append(marker,cards);(group.id==='overdue'?pastAxis:axis).append(section)
    if(!group.items.length){
     cards.append(el('p',t('今天没有到期事项'),'timeline-day-empty'))
     if(!groups.length){cards.append(el('p',t('给待办设置截止日期后，会出现在这里。'),'hint'));button(t('查看待办'),openTodos,cards)}
@@ -58,28 +60,43 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
   }else{section.append(el('h3',`${t(group.label)} · ${group.items.length}`,'timeline-group-title'));root.append(section)}
   for(const item of group.items){
    const card=el('article',undefined,'timeline-card');card.dataset.objectId=item.id;cards.append(card)
-   const meta=el('div',t('待办'),'timeline-meta');card.append(meta)
+   const days=item.date?Math.round((Date.parse(item.date)-Date.parse(currentDate))/86400000):null
+   const pressure=item.status==='done'?t('已完成'):days===null?t(item.status==='waiting'?'等待回复 · 未设期限':'尚未安排'):days<0?t('已过截止 {0} 天',-days):days===0?t('今天到期'):days===1?t('明天到期'):t('还有 {0} 天',days)
+   card.dataset.tone=item.status==='done'?'progress':days!==null&&days<0?'attention':days!==null&&days<=1?'time':days===null&&item.status==='waiting'?'waiting':'context';card.dataset.period=days!==null&&days<=1&&item.status!=='done'?'near':'later'
+   const meta=el('div',pressure,'timeline-meta');card.append(meta)
    const dateLabel=item.date?formatDate(item.date):null
    const title=button(item.title,()=>item.status==='done'?openTodos(item.id):discuss([item.reference]),card,`timeline-discuss:${item.id}`);title.className='timeline-title'
+   if(item.source_changed)card.append(el('p',t('来源内容已变化，请先核对。'),'timeline-caution'))
+   const excerpt=item.note||item.sources?.find(source=>typeof source?.summary==='string'&&source.summary.trim())?.summary
+   if(excerpt){const context=el('div',undefined,'timeline-context');context.append(el('span',t(item.note?'当前记录':'来源摘录'),'timeline-context-label'),el('p',excerpt,'timeline-note'));card.append(context)}
+   if(compact&&item.date&&days!==0&&item.status!=='done'){
+    const range=el('div',undefined,'timeline-time-range'),endpoints=days<0?[[item.date,'原截止'],[currentDate,'现在']]:[[currentDate,'现在'],[item.date,'截止日期']]
+    for(const [date,label]of endpoints){const point=el('div',undefined,'timeline-time-point'),time=el('time',formatDate(date));time.dateTime=date;point.append(el('span',t(label)),time);range.append(point)}
+    card.append(range)
+   }
    const tags=[]
-   if(item.date)tags.push({label:item.status==='done'?t('原截止 {0}',dateLabel):group.id==='overdue'?t('已过截止 · {0}',dateLabel):t('截止 {0}',dateLabel),tone:group.id==='overdue'?'attention':'time'})
+   if(item.date&&item.status==='done')tags.push({label:t('原截止 {0}',dateLabel),tone:'context'})
    if(item.importance==='high')tags.push({label:'重要',tone:'importance'})
    tags.push({label:item.status==='done'?'已完成':STATUS[item.status]??item.status,tone:item.status==='done'?'progress':item.status==='waiting'?'waiting':item.status==='doing'?'progress':'context'})
    if(item.goal)tags.push({label:item.goal,tone:'project'})
-   renderCardTags(card,tags,{el});const sourceDetails=attachSourceTags(card,item.sources,{autoRecorded:item.auto_recorded,sourceChanged:item.source_changed,openArticle,title:compact?undefined:t('事项依据')})
-   if(!compact&&item.note)card.append(el('p',item.note,'timeline-note'))
+   renderCardTags(card,tags,{el});const sourceDetails=attachSourceTags(card,item.sources,{autoRecorded:item.auto_recorded,sourceChanged:false,openArticle,title:compact?undefined:t('事项依据')})
    const actions=el('div',undefined,'timeline-actions');card.append(actions)
-   const primary=item.status==='done'?null:button(t(item.status==='waiting'?'起草跟进':'排一版方案'),()=>discuss([item.reference],t(item.status==='waiting'?'请针对「{0}」起草一条跟进消息，先给我草稿。':'请针对「{0}」排一版可执行方案，结合真实截止日期，说明建议顺序。',item.title)),actions,`timeline-plan:${item.id}`);if(primary)primary.className='soft'
-   if(!compact)button(t('查看事项'),()=>openTodos(item.id),actions).className='ghost'
-   if(!compact&&command&&item.status!=='done')button(t(item.importance==='high'?'取消重要标记':'标为重要'),()=>command('life.mutate',{op:'update',kind:'todo',id:item.id,expected_version:item.version,importance:item.importance==='high'?'normal':'high'}),actions,`life:${item.id}`).className='ghost'
+   const action=item.source_changed?'核对来源':item.status==='waiting'?'起草跟进':item.status==='doing'?'整理下一步':'拆成行动步骤'
+   const prompt=item.source_changed?'请针对「{0}」核对已记录的来源内容，说明哪些已知、哪些需要进一步确认，再整理下一步行动。':item.status==='waiting'?'请针对「{0}」起草一条跟进消息，先给我草稿。':item.status==='doing'?'请针对「{0}」结合当前记录和真实截止日期，整理下一步行动和需要确认的问题。':'请针对「{0}」拆成可执行的行动步骤，结合真实截止日期，说明建议顺序。'
+   const primary=item.status==='done'?null:button(t(action),()=>discuss([item.reference],t(prompt,item.title)),actions,`timeline-plan:${item.id}`);if(primary)primary.className='soft'
+   button(t('查看事项'),()=>openTodos(item.id),actions).className='ghost'
+   if(!compact&&command&&item.status!=='done'){
+    const label=t(item.importance==='high'?'取消重要标记':'标为重要'),star=button(label,()=>command('life.mutate',{op:'update',kind:'todo',id:item.id,expected_version:item.version,importance:item.importance==='high'?'normal':'high'}),card,`life:${item.id}`)
+    star.className='timeline-importance';star.textContent=item.importance==='high'?'★':'☆';star.title=label;star.setAttribute('aria-label',label);star.setAttribute('aria-pressed',String(item.importance==='high'))
+   }
    if(!compact){
-    const version=t('来自待办 · 版本 {0}',item.version),details=sourceDetails?.popover?sourceDetails:attachSources(card,[version],{title:t('事项依据')})
+    const version=t('来自待办 · 版本 {0}',item.version),details=sourceDetails?.popover?sourceDetails:attachSources(card,[t('来自你的待办'),t('尚未关联外部来源'),version],{title:t('事项依据')})
     if(sourceDetails?.popover)details.popover.append(el('p',version,'hint'))
     if(item.source_changed)details.popover.append(el('p',t('来源内容已变化，请核对事项。'),'hint'))
     details.info.title=t('事项依据')
    }
   }
  }
- root.append(el('p',t('这里展示待办安排；日历完整性尚未确认。'),'timeline-source-note'))
+ root.append(el('p',t('这里只展示已记录的事项，不代表完整日程。'),'timeline-source-note'))
  for(const node of root.querySelectorAll('button'))if(!connected&&node.className!=='source-info')node.disabled=true
 }

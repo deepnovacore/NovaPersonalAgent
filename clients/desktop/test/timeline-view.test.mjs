@@ -47,6 +47,8 @@ test('dated cards share chronological date nodes while undated and completed car
  const {parent,calls}=render(state),dates=parent.querySelectorAll('.timeline-date-group')
  assert.deepEqual(dates.map(node=>node.dataset.date),['2026-10-10','2026-10-12','2026-10-14'])
  assert.deepEqual(dates[1].querySelectorAll('article').map(node=>node.dataset.objectId),['date','same-day'])
+ assert.equal(dates[1].querySelectorAll('.timeline-date-count').length,0)
+ assert.equal(dates[1].querySelectorAll('.timeline-day-summary')[0]?.textContent,'2 项在同一天到期')
  const timed=parent.querySelectorAll('.timeline-axis').flatMap(node=>node.querySelectorAll('article'))
  assert.deepEqual(timed.map(node=>node.dataset.objectId),['past','date','same-day','future'])
  assert.equal(parent.querySelectorAll('article').length,6)
@@ -75,6 +77,9 @@ test('compact sidebar retains its groups without date gutters or a current-day e
  assert.equal(parent.querySelectorAll('.timeline-current-label').length,0)
  assert.deepEqual(parent.querySelectorAll('.timeline-group').map(node=>node.dataset.group),['overdue','current','waiting'])
  assert.equal(parent.querySelectorAll('article').length,3)
+ const card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date')
+ assert.equal(card.querySelectorAll('.timeline-meta')[0]?.textContent,'今天到期')
+ assert.equal(card.querySelectorAll('.timeline-time-range').length,0)
 })
 
 test('the item info icon opens its version and Escape closes it with focus restored',()=>{
@@ -104,4 +109,31 @@ test('stored item details remain readable offline while assistance actions are d
  assert.ok(info)
  assert.notEqual(info.disabled,true)
  assert.equal(card.querySelectorAll('.timeline-title')[0].disabled,true)
+})
+
+test('cards express date-only pressure in the configured timezone without guessing hours or waiting age',()=>{
+ const state=structuredClone(snapshot);state.life.todos.push({id:'next',title:'Tomorrow',status:'open',due:'2026-10-13',version:1},{id:'later',title:'Later',status:'open',due:'2026-10-27',version:1},{id:'done',title:'Done',status:'done',due:'2026-10-01',version:1})
+ const {parent}=render(state),meta=id=>parent.querySelectorAll('article').find(node=>node.dataset.objectId===id).querySelectorAll('.timeline-meta')[0].textContent
+ assert.equal(meta('date'),'今天到期');assert.equal(meta('next'),'明天到期');assert.equal(meta('later'),'还有 15 天');assert.equal(meta('past'),'已过截止 2 天');assert.equal(meta('wait'),'等待回复 · 未设期限');assert.equal(meta('done'),'已完成')
+})
+test('compact cards retain user context and original dates without repeating the date as a chip',()=>{
+ const state=structuredClone(snapshot);state.life.todos[0].note='先整理用户已经确认的演示路径。';state.life.todos[0].due='2026-10-27'
+ const {parent}=render(state,{compact:true}),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date')
+ assert.equal(card.querySelectorAll('.timeline-note')[0]?.textContent,'先整理用户已经确认的演示路径。')
+ assert.deepEqual(card.querySelectorAll('time').map(node=>node.dateTime),['2026-10-12','2026-10-27'])
+ assert.equal(card.querySelectorAll('.tag-time').length,0)
+})
+test('changed sources get an explicit caution and source excerpts keep their provenance label',()=>{
+ const state=structuredClone(snapshot);state.life.todos[0].source_changed=true;state.life.todos[0].sources=[{type:'mail',summary:'来自原文的内容，不是用户自己的备注。'}]
+ const {parent}=render(state),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date')
+ assert.ok(card.querySelectorAll('.timeline-caution').length)
+ assert.equal(card.querySelectorAll('.timeline-context-label')[0]?.textContent,'来源摘录')
+ assert.equal(card.querySelectorAll('.timeline-note')[0]?.textContent,'来自原文的内容，不是用户自己的备注。')
+})
+test('importance stays an explicit versioned mutation and is separate from the main assistance action',()=>{
+ const commands=[],state=structuredClone(snapshot);state.life.todos[0].importance='high'
+ const {parent,calls}=render(state,{command:(...args)=>commands.push(args)}),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date'),star=card.querySelectorAll('.timeline-importance')[0]
+ assert.ok(star);assert.equal(star['aria-label'],'取消重要标记');assert.equal(star['aria-pressed'],'true')
+ star.listeners.click();assert.deepEqual(commands,[['life.mutate',{op:'update',kind:'todo',id:'date',expected_version:1,importance:'normal'}]])
+ const action=card.querySelectorAll('.timeline-actions')[0].querySelectorAll('button')[0];assert.equal(action.textContent,'拆成行动步骤');action.listeners.click();assert.deepEqual(calls[0][0],[{kind:'todo',id:'date',version:1}]);assert.match(calls[0][1],/Draft/)
 })
