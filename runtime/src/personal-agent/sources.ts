@@ -130,7 +130,8 @@ export class LocalDirectorySources {
   #path = ''
   #timer: ReturnType<typeof setInterval> | undefined
   #closed = true
-  #active: {id: string; abort: AbortController; done: Promise<void>} | undefined
+  #polling=false
+  #active = new Map<string,{abort: AbortController; done: Promise<void>}>()
   #writes: Promise<void> = Promise.resolve()
   #commands: Promise<unknown> = Promise.resolve()
   #workspacePath:string|null=null
@@ -196,8 +197,9 @@ export class LocalDirectorySources {
     resumeVectors()
     for (const record of [...this.#records]) {
       if (record.deleting) await this.#delete(record)
-      else if (record.view.state === 'connected' || record.view.state === 'error') {if(record.view.scope==='computer'){const timer=setTimeout(()=>{if(!this.#closed)void this.#sync(record).catch(()=>undefined)},0);timer.unref()}else await this.#sync(record)}
+      else if (record.view.state === 'connected' || record.view.state === 'error') {if(record.view.scope==='computer'){const timer=setTimeout(()=>{if(!this.#closed)void this.#sync(record).catch(()=>undefined)},0);timer.unref()}}
     }
+    await this.#poll(true)
     for(const record of this.#records)if(record.view.scope==='computer'&&record.view.state==='connected')this.#watchComputer(record)
     const pollMs = this.#options.pollMs ?? 300000
     if (pollMs > 0) {this.#timer = setInterval(() => {void this.#poll().catch(() => undefined)}, pollMs); this.#timer.unref()}
@@ -213,8 +215,8 @@ export class LocalDirectorySources {
     clearInterval(this.#timer)
     for(const lifecycle of this.#lifecycles.values())lifecycle.abort()
     this.#lifecycles.clear()
-    this.#active?.abort.abort()
-    await this.#active?.done
+    for(const active of this.#active.values())active.abort.abort()
+    await Promise.allSettled([...this.#active.values()].map(active=>active.done))
     await this.#commands.catch(() => undefined)
     await this.#writes
     await this.#release?.(); this.#release = undefined
@@ -246,7 +248,7 @@ export class LocalDirectorySources {
       const timer=setTimeout(()=>{
         this.#hintTimers.delete(record.view.id)
         if(this.#closed||!['connected','error'].includes(record.view.state))return
-        const active=this.#active
+        const active=this.#active.get(record.view.id)
         if(active)void active.done.catch(()=>undefined).then(()=>{if(!this.#closed&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)})
         else void this.#sync(record).catch(()=>undefined)
       },1000)
@@ -287,11 +289,16 @@ export class LocalDirectorySources {
     // Revocation fences the current ingestion immediately, before waiting for serialized commands.
     if (['sources.pause', 'sources.disconnect', 'sources.delete','sources.consent'].includes(method)) {
       const parsed = z.object({id: idSchema,consent:z.boolean().optional()}).strict().safeParse(params)
-      if (parsed.success && this.#active?.id === parsed.data.id) this.#active.abort.abort()
+      if (parsed.success) this.#active.get(parsed.data.id)?.abort.abort()
       if (parsed.success && (method !== 'sources.consent' || parsed.data.consent === false)) this.#lifecycles.get(parsed.data.id)?.abort()
     }
-    const result = this.#commands.then(async () => {await this.#active?.done; return this.#command(method, params)})
-    this.#commands = result.catch(() => undefined)
+    const result = this.#commands.then(async () => {
+      const target=z.object({id:idSchema}).passthrough().safeParse(params)
+      if(target.success)await this.#active.get(target.data.id)?.done.catch(()=>undefined)
+      else await Promise.allSettled([...this.#active.values()].map(active=>active.done))
+      return this.#command(method, params)
+    })
+    if(method!=='sources.sync')this.#commands = result.catch(() => undefined)
     return result
   }
   async #command(method: string, params: unknown): Promise<unknown> {
@@ -568,12 +575,14 @@ export class LocalDirectorySources {
     }
     return walk.pending.filter(item=>(item.eligible_at??0)<=Date.now())
   }
-  async #poll(): Promise<void> {
-    if (this.#closed || this.#active) return
-    for (const record of this.#records) {
-      if (this.#closed) return
-      if (record.view.state === 'connected' || record.view.state === 'error') await this.#sync(record)
-    }
+  async #poll(directoryOnly=false): Promise<void> {
+    if(this.#closed||this.#polling)return
+    this.#polling=true
+    const records=this.#records.filter(record=>(!directoryOnly||record.view.scope==='directory')&&['connected','error'].includes(record.view.state))
+    let next=0
+    try{await Promise.all(Array.from({length:Math.min(4,records.length)},async()=>{
+      while(next<records.length&&!this.#closed)await this.#sync(records[next++]!)
+    }))}finally{this.#polling=false}
   }
   /** One bounded Git listing per repository per ten minutes; the walk never descends into what it ignores. */
   #ignoredIn(root:string):Promise<Set<string>|null>{
@@ -591,12 +600,15 @@ export class LocalDirectorySources {
     return lifecycle
   }
   async #sync(record: SourceRecord,force=false): Promise<void> {
-    if (this.#closed || this.#active) return
+    if(this.#closed)return
+    while(this.#active.size>=4&&!this.#active.has(record.view.id)&&!this.#closed)await Promise.race([...this.#active.values()].map(active=>active.done)).catch(()=>undefined)
+    if(this.#closed||record.deleting||!['connected','error'].includes(record.view.state))return
+    const existing=this.#active.get(record.view.id);if(existing)return existing.done
     // A scan only runs while the source is connected, so it may renew a fence left by a failed pause.
     if(this.#lifecycles.get(record.view.id)?.signal.aborted)this.#lifecycles.delete(record.view.id)
     const abort = new AbortController()
     const done=this.#scan(record,abort.signal,force).finally(()=>{
-      this.#active=undefined
+      this.#active.delete(record.view.id)
       void this.#activity?.flush()
       if(record.view.scope!=='computer'||!record.view.scan_pending||this.#closed||!['connected','error'].includes(record.view.state))return
       const walk=record.walk,now=Date.now()
@@ -611,10 +623,10 @@ export class LocalDirectorySources {
       const cleanupDue=cleanupFiles.map(file=>file.cleanup_retry_at).filter((due):due is number=>due!==undefined&&due>now)
       const due=Math.min(...pendingDue,...deferredDue,...directoryDue,...cleanupDue,Infinity)
       const delay=immediate?(record.view.state==='error'?30000:1000):Number.isFinite(due)?Math.min(Math.max(1,due-now),6*60*60_000):30000
-      const timer=setTimeout(()=>{if(!this.#closed&&!this.#active&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},delay)
+      const timer=setTimeout(()=>{if(!this.#closed&&!this.#active.has(record.view.id)&&['connected','error'].includes(record.view.state))void this.#sync(record).catch(()=>undefined)},delay)
       timer.unref()
     })
-    this.#active = {id: record.view.id, abort, done}
+    this.#active.set(record.view.id,{abort,done})
     await done
   }
   async #scan(record: SourceRecord, signal: AbortSignal, force=false): Promise<void> {
@@ -699,10 +711,11 @@ export class LocalDirectorySources {
       })
       const selectedPaths = new Set(selected.map(file => file.path))
       observationPaths=selectedPaths
+      const trackedByPath=new Map(record.files.map(file=>[file.path,file]))
       let rechecks=0
       // Budgeting must not keep a changed, no-longer-selected version authoritative.
       for (const file of files) {
-        const previous = record.files.find(old => old.path === file.path)
+        const previous = trackedByPath.get(file.path)
         if (previous && !selectedPaths.has(file.path) && (previous.mtime !== file.mtime || previous.size !== file.size)) {
           signal.throwIfAborted(); previous.valid = false; await this.#save(); await this.#removeFile(record, previous)
         }
@@ -710,7 +723,7 @@ export class LocalDirectorySources {
       for (const file of balanced(selected, view.path)) {
         enter('recheck')
         signal.throwIfAborted()
-        const previous = record.files.find(old => old.path === file.path)
+        const previous = trackedByPath.get(file.path)
         if (previous) previous.unit = file.unit
         if (previous && view.scope === 'directory') {
           if (previous.mtime !== file.mtime || previous.size !== file.size) {
@@ -777,10 +790,9 @@ export class LocalDirectorySources {
           record.pending = {path: file.path, size: file.size, mtime: file.mtime, owned: previous?.owned ?? !known.has(file.path), previous_updated_at: known.get(file.path)?.updated_at ?? null}
           await this.#timed('ingest_save_pending',()=>this.#save())
           const result = await this.#timed('ingest_sync_file',()=>this.#options.knowledge.syncFile(file.path, view.path, signal, previous?.id,record.processing_consent,this.#lifecycle(record).signal))
-          const indexed = (await this.#timed('ingest_readback',()=>this.#options.knowledge.listSources())).find(item => item.id === result.id)
-          if (!indexed) throw new Error('ingest_failed')
-          const tracked = {path:file.path,unit:file.unit,size:file.size,mtime:file.mtime,id: result.id, fingerprint: indexed.fingerprint, checked_at: Date.now(), owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
-          record.files = record.files.filter(old => old.path !== file.path); record.files.push(tracked); record.pending = null
+
+          const tracked = {path:file.path,unit:file.unit,size:file.size,mtime:file.mtime,id: result.id, fingerprint: result.fingerprint, checked_at: Date.now(), owned: previous?.owned ?? !known.has(file.path), valid: true, excerpt: result.excerpt, observed: false, observation_ref: result.evidence_ids?.length ? `knowledge:${result.id}` : randomUUID(), ...(result.evidence_ids?.length ? {evidence_ids: result.evidence_ids} : {})}
+          record.files = record.files.filter(old => old.path !== file.path); record.files.push(tracked);trackedByPath.set(file.path,tracked); record.pending = null
           settlePending(record,file.path)
           bytes += file.size; view.read++
           await this.#timed('ingest_save_tracked',()=>this.#save())

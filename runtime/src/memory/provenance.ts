@@ -10,6 +10,9 @@ export const imMetadataSchema=z.object({
  sender_id:z.string().min(1).max(512),account_id:z.string().min(1).max(512),provider:z.string().min(1).max(512).optional(),
  message_id:z.string().min(1).max(256).optional(),chat_id:z.string().min(1).max(256).optional(),recipient_id:z.string().min(1).max(256).optional(),sender_name:z.string().max(120).optional(),
  source_url:z.string().max(4096).optional(),
+ recipient_ids:z.array(z.string().min(1).max(512)).max(50).optional(),
+ thread_id:z.string().min(1).max(256).optional(),parent_id:z.string().min(1).max(256).optional(),root_id:z.string().min(1).max(256).optional(),upper_message_id:z.string().min(1).max(256).optional(),
+ mention_ids:z.array(z.string().min(1).max(512)).max(50).optional(),
  mention:z.enum(['direct','all','none','unknown']).optional(),auto_capture:z.boolean().optional(),
 }).strict()
 export type ImMetadata=z.infer<typeof imMetadataSchema>

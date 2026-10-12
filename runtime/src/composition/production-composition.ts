@@ -272,10 +272,18 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     onChange:()=>host.connectionChanged(),
     processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
     onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
-    ingest: async message => {
+    ingestBatch: async (messages, signal) => {
       const memory = composition.realtime.personalMemory
       if (!(memory instanceof SubstrateMemoryResource)) throw Error('请先启用本地记忆')
-      await memory.ingestEvidence({sourceId:message.source_id,locator:message.locator,text:message.raw_text,observedAt:message.observed_at,kind:'im',...(message.sender_id?{im:{sender_id:message.sender_id,account_id:message.account_id,provider:'feishu',message_id:message.message_id,chat_id:message.chat_id,recipient_id:message.recipient_id,sender_name:message.sender_name,source_url:message.source_url,mention:message.mention,auto_capture:message.auto_capture}}:{}),...(message.processing_consent?{processingConsent:message.processing_consent}:{}),retentionUntil:message.retention_until,senderId:message.sender_id,accountId:message.account_id})
+      signal.throwIfAborted()
+      const changed=await memory.ingestEvidenceBatch(messages.map(message => ({sourceId:message.source_id,locator:message.locator,text:message.raw_text,observedAt:message.observed_at,kind:'im',...(message.sender_id?{im:{sender_id:message.sender_id,account_id:message.account_id,provider:'feishu',message_id:message.message_id,chat_id:message.chat_id,recipient_id:message.recipient_id,sender_name:message.sender_name,mention_ids:message.mention_ids,thread_id:message.thread_id,parent_id:message.parent_id,root_id:message.root_id,upper_message_id:message.upper_message_id,source_url:message.source_url,mention:message.mention,auto_capture:message.auto_capture}}:{}),...(message.processing_consent?{processingConsent:message.processing_consent}:{}),retentionUntil:message.retention_until,senderId:message.sender_id,accountId:message.account_id})))
+      signal.throwIfAborted()
+      if(changed)await host.sourceChanged()
+    },
+    deleteMessage: async (sourceId,locator) => {
+      const memory=composition.realtime.personalMemory
+      if(!(memory instanceof SubstrateMemoryResource))throw Error('memory_unavailable')
+      await memory.invalidateMessage(sourceId,locator)
       await host.sourceChanged()
     },
     deleteSource: async ref => {

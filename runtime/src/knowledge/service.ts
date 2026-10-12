@@ -49,6 +49,7 @@ export class KnowledgeService {
   readonly #embedding: EmbeddingProvider
   readonly #stop = new AbortController()
   #active: {id: string; abort: AbortController; root?: string} | undefined
+  readonly #syncing = new Map<string,{id:string;previousId:string|undefined;abort:AbortController;done:Promise<void>}>()
   #folderBusy = false
   #folderSignal: AbortSignal | undefined
   #queries = 0
@@ -72,6 +73,8 @@ export class KnowledgeService {
   async open(): Promise<void> {this.#fts = (await this.#store.open()).fts}
   async close(): Promise<void> {
     this.#stop.abort(); this.#active?.abort.abort()
+    for(const active of this.#syncing.values())active.abort.abort()
+    await Promise.allSettled([...this.#syncing.values()].map(active=>active.done))
     await this.#store.close()
   }
   purgeEvidence(ids:readonly string[]):Promise<void>{return this.#store.purgeEvidence(ids)}
@@ -229,27 +232,30 @@ export class KnowledgeService {
     try {return await run()} finally {const row = this.#timings.get(key) ?? {ms: 0, n: 0}; row.ms += performance.now() - at; row.n++; this.#timings.set(key, row)}
   }
 
-  async syncFile(locator: string, root: string, signal: AbortSignal, sourceId?: string,processingConsent?:ProcessingGrant,vectorSignal?:AbortSignal): Promise<{id: string; excerpt: string; evidence_ids?: string[]}> {
+  async syncFile(locator: string, root: string, signal: AbortSignal, sourceId?: string,processingConsent?:ProcessingGrant,vectorSignal?:AbortSignal): Promise<{id: string; excerpt: string; fingerprint:string; evidence_ids?: string[]}> {
     this.#assertLedger()
     signal.throwIfAborted()
     this.#stop.signal.throwIfAborted()
     if (this.#active || this.#folderBusy) throw failure('knowledge_busy')
+    while(this.#syncing.size>=4&&!this.#stop.signal.aborted&&!signal.aborted)await Promise.race([...this.#syncing.values()].map(active=>active.done))
+    signal.throwIfAborted();this.#stop.signal.throwIfAborted()
+    if(this.#syncing.has(locator)||this.#active||this.#folderBusy)throw failure('knowledge_busy')
     if (sourceId !== undefined && !idSchema.safeParse(sourceId).success) throw failure('invalid_request')
     const active = {id: sourceId ?? randomUUID(), abort: new AbortController(), root,...(processingConsent?{processingConsent}:{}),processingAuthorized:false,deferVectors:true}
-    this.#active = active
+    let release!:()=>void
+    const slot={...active,previousId:sourceId,done:new Promise<void>(resolve=>{release=resolve})}
+    this.#syncing.set(locator,slot)
     const cancel = () => active.abort.abort()
     signal.addEventListener('abort', cancel, {once: true})
     try {
-      const known=await this.#timed('ingest_list',()=>this.#store.listSources())
-      const old = known.find(source => source.locator === locator)
-      if(!old&&known.length>=this.#store.maxSources)throw failure('index_capacity')
+      const old=await this.#timed('ingest_lookup',()=>this.#store.sourceByLocator(locator))??undefined
       signal.throwIfAborted()
       if (sourceId !== undefined && this.#ledger) {
         if (old && old.id !== sourceId) throw failure('source_changed')
         // Build under a fresh ID. The old index stays queryable if reading,
         // embedding, or the atomic replacement fails.
-        active.id = randomUUID()
-      } else if (old !== undefined) active.id = old.id
+        active.id = randomUUID();slot.id=active.id
+      } else if (old !== undefined) {active.id = old.id;slot.id=active.id}
       let excerpt = ''
       const result = await this.#index('folder_child', locator, active, old, text => {excerpt = knowledgeExcerpt(text)})
       if ('error' in result) throw failure(result.error)
@@ -258,7 +264,7 @@ export class KnowledgeService {
       }
       this.#queueVectors(active.id, processingConsent, vectorSignal)
       const evidence_ids = (await this.#timed('ingest_list_chunks',()=>this.#store.listChunks(active.id, 0))).flatMap(chunk => chunk.evidence_id ? [chunk.evidence_id] : []).slice(0, 2)
-      return {id: active.id, excerpt, ...(evidence_ids.length ? {evidence_ids} : {})}
+      return {id: active.id, excerpt, fingerprint:result.fingerprint, ...(evidence_ids.length ? {evidence_ids} : {})}
     } catch (cause) {
       signal.throwIfAborted()
       const code = cause instanceof Error && /^(?:screening_rejected|unsupported_file|file_changed|file_unavailable|embedding_failed|store_failed|knowledge_busy|ingest_failed|index_capacity)$/u.test(cause.message)
@@ -266,7 +272,7 @@ export class KnowledgeService {
       throw failure(code)
     } finally {
       signal.removeEventListener('abort', cancel)
-      if (this.#active === active) this.#active = undefined
+      this.#syncing.delete(locator);release()
     }
   }
 
@@ -282,15 +288,20 @@ export class KnowledgeService {
       const parsed = z.object({id: idSchema}).strict().safeParse(params)
       if (!parsed.success) throw failure('invalid_request')
       if (this.#active?.id === parsed.data.id) this.#active.abort.abort()
-      await this.#ledger?.remove(`knowledge:${parsed.data.id}`)
-      await this.#store.removeSource(parsed.data.id)
+      const affected=[...this.#syncing.values()].filter(active=>active.id===parsed.data.id||active.previousId===parsed.data.id)
+      for(const active of affected)active.abort.abort()
+      await Promise.all(affected.map(active=>active.done))
+      for(const id of new Set([parsed.data.id,...affected.map(active=>active.id)])){
+        await this.#ledger?.remove(`knowledge:${id}`)
+        await this.#store.removeSource(id)
+      }
       return {ok: true}
     }
     if (method === 'knowledge.reindex') {
       this.#assertLedger()
       const parsed = z.object({id: idSchema, consent: z.literal(true)}).strict().safeParse(params)
       if (!parsed.success) throw failure('invalid_request')
-      if (this.#active || this.#folderBusy) return {error: 'knowledge_busy'}
+      if (this.#active || this.#folderBusy || this.#syncing.size) return {error: 'knowledge_busy'}
       // Claim the id before any asynchronous read, so remove can fence this reindex.
       const active = {id: parsed.data.id, abort: new AbortController(),processingAuthorized:parsed.data.consent}
       this.#active = active
@@ -304,7 +315,7 @@ export class KnowledgeService {
       this.#assertLedger()
       const parsed = ingestSchema.safeParse(params)
       if (!parsed.success) throw failure('invalid_request')
-      if (this.#active || this.#folderBusy) return {error: 'knowledge_busy'}
+      if (this.#active || this.#folderBusy || this.#syncing.size) return {error: 'knowledge_busy'}
       if (parsed.data.kind === 'folder') return this.#folder(parsed.data.locator)
       return this.#ingest(parsed.data.kind, parsed.data.locator)
     }
@@ -330,7 +341,7 @@ export class KnowledgeService {
       stage = 'read'
       const document = await this.#timed('ingest_read',()=>kind === 'url' ? fetchKnowledgeUrl(locator, signal) : readKnowledgeFile(locator, signal, active.root))
       signal.throwIfAborted()
-      if (old === undefined && (await this.#timed('ingest_list',()=>this.#store.listSources())).some(value => value.locator === document.locator)) throw failure('source_exists')
+      if (old === undefined && await this.#timed('ingest_lookup',()=>this.#store.sourceByLocator(document.locator))) throw failure('source_exists')
       const chunks = chunkKnowledgeText(document.text)
       const processingConsent=active.processingConsent??(active.processingAuthorized?this.#ledger?.processingGrant?.(true):undefined)
       const evidenceIds: (string | undefined)[] = []
@@ -379,7 +390,7 @@ export class KnowledgeService {
       committed = true
       await this.#store.recordJob({...job, updated_at: Date.now(), state: 'complete'}).catch(() => undefined)
       onIndexed?.(document.text)
-      return {ok: true, id: active.id}
+      return {ok: true, id: active.id, fingerprint:document.fingerprint}
     } catch (cause) {
       const code = signal.aborted ? 'ingest_cancelled' : ingestionCode(cause, stage)
       const acceptance=acceptanceManifest()

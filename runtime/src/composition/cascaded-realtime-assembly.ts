@@ -408,7 +408,7 @@ function supportComposition(
     apiKey: connection.apiKey,
     allowAnonymous: provider === 'self-hosted' && connection.source === 'selected_provider',
     redirect: provider === 'self-hosted' && connection.source === 'selected_provider' ? 'error' : 'follow',
-    ...(connection.source !== 'generic' && (provider === 'deepseek'||provider === 'openai') ? {thinkingControl: provider} : {}),
+    ...(connection.source !== 'generic' && (provider === 'deepseek'||provider === 'openai'||provider === 'qwen') ? {thinkingControl: provider} : {}),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })
@@ -567,7 +567,7 @@ export function buildQwenRealtimeAssembly(
   const gateway = new OpenAIModelGateway({
     baseUrl: support.baseUrl,
     apiKey: support.apiKey,
-    ...(support.source === 'selected_provider' && options.settings.integrated_provider === 'openai' ? {thinkingControl: 'openai' as const} : {}),
+    ...(support.source === 'selected_provider' && (options.settings.integrated_provider === 'openai' || options.settings.integrated_provider === 'qwen') ? {thinkingControl: options.settings.integrated_provider} : {}),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })

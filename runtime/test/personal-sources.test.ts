@@ -1570,3 +1570,15 @@ test('acceptance counts report cumulative scan time and entries per stage',async
   assert.ok(counts.scan_on_change_final_n!>=1,'the last stage is closed when the scan ends')
  }finally{await f.close()}
 })
+
+ test('five folder sources scan with four independent ingestion slots and durable checkpoints',async()=>{
+ const f=await fixture();let release!:()=>void;const gate=new Promise<void>(r=>{release=r});let active=0,peak=0,started=0;
+ try{const folders=[f.folder];for(let n=1;n<5;n++){const folder=join(f.root,'folder-'+n);await mkdir(folder);folders.push(folder)}
+ for(const path of folders)await f.sources.command('sources.add',{path,consent:true});
+ await f.sources.close();for(const path of folders)await writeFile(join(path,'readme.md'),'Synthetic local acceptance note.');
+ f.setIngestHook(async()=>{started++;active++;peak=Math.max(peak,active);try{await gate}finally{active--}});
+ const opening=f.reopen();try{for(let n=0;n<200&&started<4;n++)await new Promise(r=>setTimeout(r,5));assert.equal(started,4);assert.equal(peak,4)}finally{release();await opening}
+ assert.equal(started,5);assert.equal((await f.knowledge.listSources()).length,5);assert(f.sources.list().every(source=>source.read===1));
+ const disk=JSON.parse(await readFile(join(f.root,'db','sources.json'),'utf8')) as {sources:{pending:unknown;files:unknown[]}[]};assert(disk.sources.every((source:{pending:unknown;files:unknown[]})=>source.pending===null&&source.files.length===1));
+ }finally{release();await f.close()}
+ })

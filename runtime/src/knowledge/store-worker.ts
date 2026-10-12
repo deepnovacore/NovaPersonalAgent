@@ -87,6 +87,7 @@ function execute(request: Request): unknown {
     case 'open': return open()
     case 'close': return close()
     case 'list_sources': return listSources()
+    case 'source_by_locator': {const locator=boundedString(request.locator,4096);const row=db().prepare('SELECT * FROM sources WHERE locator=? ORDER BY updated_at DESC,id ASC LIMIT 1').get(locator);return row?sourceFrom(row as Row):null}
     case 'list_chunks': return listChunks(request.source_id, request.offset)
     case 'link_evidence': return linkEvidence(request.links)
     case 'replace_source': return replaceSource(request.input)
@@ -117,6 +118,7 @@ function open(): {readonly fts: boolean} {
         mime TEXT NOT NULL, fingerprint TEXT NOT NULL, bytes INTEGER NOT NULL,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, status TEXT NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS sources_locator ON sources(locator);
       CREATE TABLE IF NOT EXISTS chunks (
         id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
         heading_path TEXT NOT NULL, text TEXT NOT NULL, token_estimate INTEGER NOT NULL,
