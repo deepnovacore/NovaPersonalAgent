@@ -36,7 +36,7 @@ const control = installDesktopControl({...(parentPort === undefined ? {} : {pare
   },
   status: () => capabilityView(), handle: async (method, params) => {
     if (['phone.start','phone.stop','phone.status'].includes(method)) return phoneHandle?.(method,params)
-    if (method.startsWith('feishu.')) return feishuHandle?.(method, params)
+    if (method.startsWith('feishu.') || method.startsWith('notifications.')) return feishuHandle?.(method, params)
     if (PERSONAL_SETTINGS_METHODS.includes(method)) return personalSettingsHandle?.(method, params)
     if (method !== 'conversation.clear') return knowledgeHandle?.(method, params)
     if (clearConversation === undefined || params === null || typeof params !== 'object'

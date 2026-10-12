@@ -1,11 +1,12 @@
 import {t} from './locale.mjs'
 import {onButton} from './button-action.mjs'
+import {renderNotificationSettings} from './notification-settings.mjs'
 import {renderFeishu} from './feishu-view.mjs'
 
 /** The settings window uses a narrow private IPC bridge, without a conversation session. */
 export function createImPanel({document, api}) {
  const root=document.querySelector('#im-connection'),error=document.querySelector('#im-error')
- let state=null,busy=false,actionPending=false,setupTimer,openSetup=false,openedSetupUrl
+ let notifications=null,state=null,busy=false,actionPending=false,setupTimer,openSetup=false,openedSetupUrl
  let actionNeedsRender=false,pendingLabel=null
  const local={chats:null,verification_url:null,onError:caught=>{error.textContent=caught.message||t('连接暂时不可用')}}
  const el=(tag,text,cls)=>{const node=document.createElement(tag);if(text!==undefined)node.textContent=text;if(cls)node.className=cls;return node}
@@ -15,7 +16,8 @@ export function createImPanel({document, api}) {
   root.replaceChildren()
   const card=(title,description)=>{const node=el('article',undefined,'im-card');node.append(el('h3',title),el('p',description));root.append(node);return node}
   if(state===null){const loading=card(t('飞书'),t('正在读取连接状态…'));loading.setAttribute('aria-busy',String(busy));return}
-  renderFeishu({state,local,card,el,button,command,refresh:render,api:{personal:{openFeishuVerification:api.openFeishuVerification}}})
+  renderNotificationSettings({state:notifications,feishu:state,local,card,el,button,command,refresh:render,openVerification:api.openFeishuVerification})
+  renderFeishu({state,notifications,local,card,el,button,command,refresh:render,api:{personal:{openFeishuVerification:api.openFeishuVerification}}})
   if(busy)for(const input of root.querySelectorAll('button,input'))input.disabled=true
  }
  async function command(method,params={},quiet=false){
@@ -29,6 +31,7 @@ export function createImPanel({document, api}) {
    const result=await api.feishuCommand(method,params)
    if(result?.error&&typeof result.available!=='boolean')throw new Error(result.error)
    state=method==='feishu.status'?result:await api.feishuCommand('feishu.status',{})
+   const delivery=await api.feishuCommand('notifications.status',{}).catch(()=>null);notifications=delivery?.primary_binding_id?delivery:null
    const url=state?.app_setup?.verification_url
    if(openSetup&&url&&url!==openedSetupUrl){openedSetupUrl=url;await api.openFeishuVerification(url)}
    return result

@@ -1,6 +1,6 @@
 import {t} from './locale.mjs'
 /** Connection controls share the host's state; OAuth device codes never enter this view. */
-export function renderFeishu({state={},local,card,el,button,command,refresh,api}) {
+export function renderFeishu({state={},notifications,local,card,el,button,command,refresh,api}) {
  state??={}
  const accountKey=state.account_id??state.account_name??null
  if(local.accountKey!==accountKey){local.accountKey=accountKey;local.chats=null;local.verification_url=null;local.editScope=false}
@@ -100,9 +100,11 @@ export function renderFeishu({state={},local,card,el,button,command,refresh,api}
   button(state.state==='paused'?t('恢复同步'):t('暂停同步'),()=>call(state.state==='paused'?'resume':'pause'),a)
   button(t('断开（保留历史）'),async()=>{await call('disconnect');local.chats=null;local.verification_url=null;refresh()},a)
   const setupBot=el('details');setupBot.append(el('summary',t('设置 Nova 的飞书机器人')),el('p',t('在应用后台添加机器人能力，按页面提示配置权限、发布应用并确认你在可用范围内，再到飞书打开机器人私聊。完成后开启下方提醒。')));button(t('打开应用后台'),()=>api.personal.openFeishuVerification?.(state.app_id?`https://open.feishu.cn/app/${encodeURIComponent(state.app_id)}`:'https://open.feishu.cn/app'),setupBot);a.append(setupBot)
+  if(!notifications?.configured){
   const bot=check(t('在飞书私聊中接收 Nova 提醒'),state.bot_enabled===true)
   note(t('只发给你与机器人的私聊。可在卡片中稍后提醒或忽略；处理任务仍需回到 Nova 确认。'))
   bot.addEventListener('change',()=>{const enabled=bot.checked;bot.disabled=true;void call('bot.configure',{enabled}).catch(error=>{bot.checked=!enabled;local.onError(error)}).finally(()=>{bot.disabled=false})})
+  }
  }
  const deletion=el('div');deletion.hidden=true;deletion.setAttribute('role','group');deletion.setAttribute('aria-label',t('确认删除飞书历史'))
  deletion.append(el('p',t('删除本地已保存的飞书消息及其索引？依赖这些消息的记忆和建议会更新或撤回。飞书中的原消息不会被删除。')))

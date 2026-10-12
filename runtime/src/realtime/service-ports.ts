@@ -173,7 +173,10 @@ export interface ServiceProvider {
   close(): Promise<void>
 }
 
+export interface ProactiveNotice {event_id:string;kind:'task_progress'|'task_result'|'alert'|'suggestion';body:string;work_id?:string;priority:number;expires_in_ms:number|null;valid?:()=>boolean;evidence_refs?:readonly string[]}
 export interface RealtimeServiceOptions {
+  readonly proactiveRouting?: {local:()=>boolean;publish:(notice:ProactiveNotice)=>Promise<void>}
+
   readonly onIntakePrepared?:(intake:Readonly<IntakeSession>,proposal:ProjectProposal)=>void
   readonly taskHost?: TaskToolHost
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>

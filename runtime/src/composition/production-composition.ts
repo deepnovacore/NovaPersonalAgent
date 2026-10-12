@@ -1,3 +1,4 @@
+import {feishuNotificationAdapter} from '../notifications/adapters/feishu.js';
 import {ClientServer} from '../server/client-server.js'
 import {ClientPairing} from '../server/client-pairing.js'
 import {loadServerConfig} from '../server/server-config.js'
@@ -297,27 +298,21 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       // Card feedback is never an execution capability. 'open' only marks the item seen.
       const result = await host.command({type:'personal.command',request_id:'feishu:'+action.event_id,
         method:'feed.action',params:{id:action.proposal_id,action:action.action==='ignore'?'dismiss':action.action,
-          ...(action.action==='snooze'?{snooze_until:new Date(Date.now()+60*60000).toISOString()}:{})}})
+          ...(action.notification?{notification:action.notification}:{}),...(action.action==='snooze'?{snooze_until:new Date(Date.now()+60*60000).toISOString()}:{})}})
       if (!(result as {ok?:boolean}).ok) throw Error('feishu_action_rejected')
     },
   })
-  host.setFeishu({snapshot:()=>feishu.snapshot(),command:(method,params)=>feishu.command(method,z.record(z.string(),z.unknown()).parse(params)),open:()=>feishu.open(),close:async()=>{await feishu.close()}})
-  let delivering = false
-  const deliver = async () => {
-    if (delivering || stop.signal.aborted) return
-    delivering = true
-    try {
-      for (const item of host.snapshot().feed) {
-        if (stop.signal.aborted || item.delivery.im_sent_at || !await host.canDeliver(item.id)) continue
-        if (await feishu.sendReminder({id:item.id,title:item.title,body:item.why_now})) await host.imDelivered(item.id)
-      }
-    } catch { onDiagnostic('[runtime-diagnostic] feishu_delivery_unavailable') }
-    finally { delivering = false }
+  host.notifications.register(feishuNotificationAdapter(feishu))
+  const syncNotificationBinding=async()=>{
+    const binding=feishu.notificationBinding(host.options.userScope)
+    if(binding)await host.notifications.bind(binding)
   }
-  const unsubscribeFeishu = host.subscribe(() => { void deliver() })
-  const deliveryTimer=setInterval(()=>{void deliver()},30000)
-  deliveryTimer.unref()
-  ownership.own(() => {clearInterval(deliveryTimer);unsubscribeFeishu()})
+  host.setFeishu({
+    snapshot:()=>feishu.snapshot(),
+    command:async(method,params)=>{const result=await feishu.command(method,z.record(z.string(),z.unknown()).parse(params));await syncNotificationBinding();return result},
+    open:async()=>{await feishu.open();await syncNotificationBinding();await host.notifications.migrate(feishu.snapshot().bot_enabled?'feishu':null)},
+    close:async()=>{await feishu.close()},
+  })
   ownership.own(() => composition.desktop.server.close())
   publishExecutorApproval = view => { if(view.work&&host.workConversation(view.work.work_id))return;composition.desktop.bridge.onExecutorApproval(view) }
   let phone: ReturnType<typeof composition.createPhone> | undefined

@@ -827,6 +827,7 @@ interface PipelineOptions {
 }
 
 interface ProjectionOptions {
+  readonly proactiveRouting?: RealtimeServiceOptions['proactiveRouting']
   readonly delegate?: {readonly executor: string; readonly op: string; readonly routing_class: string}
   readonly suggest?: boolean
   readonly priority?: number
@@ -1269,6 +1270,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
         idFactory: nextId,
         ...(agentControllers.length === 0 ? {} : {agentControllers}),
         onDiagnostic: () => undefined,
+        ...(options.proactiveRouting?{proactiveRouting:options.proactiveRouting}:{}),
         ...(options.onActiveWorkChanged === undefined
           ? {}
           : {onActiveWorkChanged: options.onActiveWorkChanged}),

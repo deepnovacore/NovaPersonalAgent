@@ -1,3 +1,4 @@
+import {feedNotification,feedNotificationKey} from '../src/notifications/feed.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises';
@@ -24,7 +25,7 @@ async function fixture(){
  state.dedupe=['saved-dedupe'];state.receipts.saved={payload:'saved-payload',result:{ok:true}};
  const store=new PersonalStore(path);await store.write(state);
  const make=()=>new PersonalAgentHost({path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:ref=>ref==='fixture-evidence'?{subject_key:'fixture',source:{type:'file',ref}}:null});
- const preserved=(actual:PersonalState)=>{assert.deepEqual({...actual,revision:0},{...state,revision:0})};
+ const preserved=(actual:PersonalState)=>{assert.deepEqual({...actual,revision:0},{...state,revision:0,...(actual.notifications_initialized?{notifications_initialized:true,notification_fingerprints:Object.fromEntries(state.feed.map(item=>[item.id,feedNotificationKey(feedNotification(item))]))}:{})})};
  return {dir,path,state,store,make,preserved,cleanup:()=>rm(dir,{recursive:true,force:true})};
 }
 

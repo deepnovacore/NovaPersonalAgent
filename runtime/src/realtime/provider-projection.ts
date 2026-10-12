@@ -1,3 +1,4 @@
+import {notificationResultText} from '../notifications/content.js';
 import { canonicalJson } from '../text/canonical-json.js';
 import type { Clock } from '../core/clock.js';
 import type { CodingProgressNarrationState } from './coding-progress-narration.js';
@@ -54,7 +55,7 @@ interface ProviderProjectionPorts {
  readonly codingProgressNarration: CodingProgressNarrationState
  readonly telemetry: RealtimeTelemetry | undefined
  readonly idFactory: () => string
- queueHostItem(intent: HostResponseIntent, options?: HostItemOptions): void
+ queueHostItem(intent: HostResponseIntent, options?: HostItemOptions, notificationBody?: string, admittedFeed?: boolean, evidenceRefs?: readonly string[]): void
  readonly agentNameForChannel: (channel: string) => string | null
  readonly clearingConversation: () => boolean
  readonly onActiveWorkChanged: () => void
@@ -238,7 +239,8 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       priority: hit ? Math.max(reason.priority, HIT_ALERT_MIN_PRIORITY) : reason.priority,
       preemptive: false,
       ...(coding ? {owner: {delegate_id: reason.origin!, channel: delegate!.executor}, expiresAt: this.ports.clock.now() + PROGRESS_HOST_ITEM_TTL_S} : {}),
-    })
+      stillWanted:()=>suggestion.expires_at>this.ports.clock.now()&&suggestion.evidence_refs.every(ref=>{try{const [channel,seq]=parseMemoryRef(ref);return this.ports.runtime.memory?.channels.get(channel)?.items.some(item=>item.seq===seq)===true}catch{return true}}),
+    }, undefined, typeof suggestion.content.personal_feed_id==='string', suggestion.evidence_refs)
   }
 
 #isSelectedProgress(suggestion: Suggestion): boolean {
@@ -338,7 +340,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
         : manifest.policy.priority >= PREEMPT_MIN_PRIORITY,
       preemptiveAlert: isPreemptiveMonitorAlert(manifest.policy),
       preemptiveAlertDelegateId: isPreemptiveMonitorAlert(manifest.policy) ? event.payload.delegate_id : null,
-    })
+    }, undefined, false, event.payload.refs)
   }
 
 #observationDelegate(
@@ -532,7 +534,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
         : manifest.policy.priority >= PREEMPT_MIN_PRIORITY),
       preemptiveAlert: preemptiveMonitorHit,
       preemptiveAlertDelegateId: preemptiveMonitorHit ? payload.delegate_id : null,
-    })
+    }, notificationResultText(payload.content,finalView), false, payload.refs)
   }
 
 #workSource(delegateId: string, eventSeq?: number): HostWorkSource | undefined {

@@ -170,7 +170,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const unreadDot=document.querySelector('#unread-indicator');if(unreadDot)unreadDot.hidden=!unreadTotal
   chat.update()
   if(!c.connected)unreadProjection=null
-  const unread=c.connected&&c.snapshot?((c.snapshot.conversations?.unread_count??0)+pending.reduce((sum,item)=>sum+1+(item.queued??0),0)):undefined
+  const unread=c.connected&&c.snapshot?((c.snapshot.conversations?.unread_count??0)+(c.snapshot.notifications?.local===false?0:pending.reduce((sum,item)=>sum+1+(item.queued??0),0))):undefined
   if(Number.isSafeInteger(unread)&&unread>=0&&unreadProjection!==unread){unreadProjection=unread;void api.personal.setUnread?.(unread)}
   if(renderedPageKey!==pageKey())renderPanel()
   syncPending()

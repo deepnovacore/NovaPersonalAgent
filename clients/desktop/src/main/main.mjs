@@ -1815,7 +1815,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   ipcMain.handle('nova:settings:feishu', async (event, payload) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('IM request rejected')
-    const allowed = ['feishu.status', 'feishu.app.start', 'feishu.app.status', 'feishu.app.cancel', 'feishu.app.bind', 'feishu.login', 'feishu.complete', 'feishu.chats', 'feishu.configure', 'feishu.consent', 'feishu.sync', 'feishu.pause', 'feishu.resume', 'feishu.disconnect', 'feishu.delete', 'feishu.bot.configure']
+    const allowed = ['notifications.status', 'notifications.configure', 'notifications.retry', 'feishu.notification.login', 'feishu.notification.configure', 'feishu.status', 'feishu.app.start', 'feishu.app.status', 'feishu.app.cancel', 'feishu.app.bind', 'feishu.login', 'feishu.complete', 'feishu.chats', 'feishu.configure', 'feishu.consent', 'feishu.sync', 'feishu.pause', 'feishu.resume', 'feishu.disconnect', 'feishu.delete', 'feishu.bot.configure']
     if (!payload || Object.getPrototypeOf(payload) !== Object.prototype || Object.keys(payload).sort().join(',') !== 'method,params'
       || !allowed.includes(payload.method) || !payload.params || Object.getPrototypeOf(payload.params) !== Object.prototype
       || JSON.stringify(payload.params).length > 16384) throw new Error('IM request rejected')

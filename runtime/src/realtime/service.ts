@@ -1,3 +1,5 @@
+import {parseMemoryRef} from '../core/memory.js'
+import type {ProactiveNotice} from './service-ports.js'
 import {TaskExecutionRejected} from '../personal-agent/task-loop.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
 import {taskGrantService} from '../personal-agent/tasks.js'
@@ -156,7 +158,24 @@ export class RealtimeService {
   queueHostItem(
     intent: HostResponseIntent,
     options: HostItemOptions = {},
-  ): void { return this.#host.queueHostItem(intent, options) }
+  ): void {
+    const decision=intent.item.event_id.startsWith('approval:')||intent.item.event_id.startsWith('project-confirmation:');
+    if(decision&&this.#proactiveRouting){if(!this.#proactiveRouting.local())return;const prior=options.stillWanted;options={...options,stillWanted:()=>this.#proactiveRouting!.local()&&(!prior||prior())}}
+    return this.#host.queueHostItem(intent,options)
+  }
+  readonly #proactiveEvents=new Set<string>()
+  isTaskContinuationResponse(responseId:string):boolean{return this.session.responseHostItemIds(responseId).some(id=>id.startsWith('task-response:'))}
+  isProactiveResponse(responseId:string):boolean{return this.session.responseEventIds(responseId).some(id=>this.#proactiveEvents.has(id)||id.startsWith('approval:')||id.startsWith('project-confirmation:'))}
+  #queueProactive(intent:HostResponseIntent,options:HostItemOptions={},body=intent.item.content,admittedFeed=false,evidenceRefs:readonly string[]=[]):void {
+    const route=this.#proactiveRouting;if(!route){this.queueHostItem(intent,options);return}
+    this.#proactiveEvents.add(intent.item.event_id);if(this.#proactiveEvents.size>2048)this.#proactiveEvents.delete(this.#proactiveEvents.values().next().value!);
+    const work=intent.item.source?.work_id;const event=intent.item.event_id;
+    const notice:ProactiveNotice={event_id:event,kind:((event.startsWith('progress:')||intent.item.kind==='progress')?'task_progress':event.startsWith('observation:')?'alert':event.startsWith('suggestion:')?'suggestion':'task_result'),body,...(work?{work_id:work}:{}),priority:options.preemptiveAlert?100:options.priority??40,expires_in_ms:options.expiresAt==null?null:Math.max(0,(options.expiresAt-this.#clock.now())*1000)};
+    const signal=this.#stop.signal;notice.evidence_refs=evidenceRefs;notice.valid=()=>{if(signal.aborted)return false;for(const ref of evidenceRefs){try{const [channel,seq]=parseMemoryRef(ref);if(!this.#runtime.memory?.channels.get(channel)?.items.some(item=>item.seq===seq))return false}catch{/* Durable evidence is validated by the host. */}}if(options.stillWanted&&!options.stillWanted())return false;if(work&&notice.kind==='alert'&&!this.#runtime.inFlightDelegate(work))return false;if(options.owner){const state=this.session.delegateState(options.owner.delegate_id);if(state!=='running')return false;}return options.expiresAt==null||options.expiresAt>this.#clock.now()};
+    if(!admittedFeed)void route.publish(notice).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_admission_failed'));
+    if(!route.local()){void this.session.injectHostContext(intent.item).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_context_unavailable'));return}
+    const prior=options.stillWanted;this.queueHostItem(intent,{...options,stillWanted:()=>route.local()&&(!prior||prior())})
+  }
 
   semanticAcknowledgementFor(responseId: string): string | null { return this.#host.semanticAcknowledgementFor(responseId) }
 
@@ -232,7 +251,9 @@ export class RealtimeService {
     this.#onProviderEvent?.(event)
   }
   readonly #onProviderEvent: ((event:RealtimeProviderEvent)=>void)|undefined
+  readonly #proactiveRouting:RealtimeServiceOptions['proactiveRouting']
   constructor(options: RealtimeServiceOptions) {
+    this.#proactiveRouting=options.proactiveRouting
     this.#onProviderEvent=options.onProviderEvent
     // Preserve config capture order when custom controller factories invoke intake callbacks.
     let commitProjectOperation: RealtimeServiceOptions['commitProjectOperation'] = undefined
@@ -448,7 +469,7 @@ export class RealtimeService {
       codingProgressNarration: this.#codingProgressNarration,
       generatePlan: options.intake?.settings.generate_plan !== false, telemetry: this.#telemetry,
       idFactory: this.#idFactory,
-      queueHostItem: (intent, options) => this.queueHostItem(intent, options),
+      queueHostItem: (intent, options, body, admittedFeed, evidenceRefs) => this.#queueProactive(intent, options, body, admittedFeed, evidenceRefs),
       agentNameForChannel: channel => this.#agentRegistry.agentNameForChannel(channel),
       clearingConversation: () => this.#clearingConversation,
       onActiveWorkChanged,
@@ -1134,6 +1155,7 @@ export class RealtimeService {
     // acquire an origin while the user still owns the floor, but never bypass the one-shot fence for
     // a stale host-requested confirmation question.
     const {confirmationFencePendingAtStart, confirmationResponseStartsDuringSpeech} = this.#confirmation.beforeEvent(event)
+    if('response_id' in event&&typeof event.response_id==='string'&&this.#proactiveRouting&&!this.#proactiveRouting.local()&&this.isProactiveResponse(event.response_id))this.session.suppressResponse(event.response_id)
     const accepted = blockedConfirmationTool || blockedExecutorApprovalTool
       ? false
       : await this.session.accept(event, {

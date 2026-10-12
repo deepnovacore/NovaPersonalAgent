@@ -1,3 +1,4 @@
+import {notificationSchema,type NotificationInput} from '../notifications/contracts.js';
 import {conversationsStateSchema,initialConversations,type ConversationsState} from './conversations.js';
 import {Worker} from 'node:worker_threads';
 import { z } from 'zod';
@@ -8,6 +9,10 @@ import { randomUUID } from 'node:crypto';
 import { preparePrivateDatabasePath } from '../storage/private-database.js';
 import { feedItemSchema, personalSettingsSchema, type FeedItem, type PersonalSettings } from './contracts.js';
 export interface PersonalState {
+    notification_intents: Record<string,NotificationInput>;
+    notification_fingerprints: Record<string,string>;
+    notifications_initialized: boolean;
+    notification_task_baseline: string[];
     conversations:ConversationsState;
     user_scope: string | null;
     revision: number;
@@ -20,10 +25,10 @@ export interface PersonalState {
         result: unknown;
     }>;
 }
-export const initialState = (): PersonalState => ({ conversations:initialConversations(), user_scope: null, revision: 0, feed: [], dedupe: [], brief_runs: {}, settings: { discovery_enabled: true, discovery_interval_minutes: 30 }, receipts: {} });
+export const initialState = (): PersonalState => ({ notification_task_baseline:[],notification_intents:{},notification_fingerprints:{},notifications_initialized:false,conversations:initialConversations(), user_scope: null, revision: 0, feed: [], dedupe: [], brief_runs: {}, settings: { discovery_enabled: true, discovery_interval_minutes: 30 }, receipts: {} });
 // ponytail: bounded JSON ledger; move to the existing Worker if 10000 retained matters are needed.
 const MAX_STORE_BYTES = 16 * 1024 * 1024;
-const stateSchema = z.object({ conversations:conversationsStateSchema.default(initialConversations), user_scope: z.string().max(512).nullable(), revision: z.number().int().nonnegative(), feed: z.array(feedItemSchema).max(10000), dedupe: z.array(z.string().max(128)).max(20000), brief_runs:z.record(z.string().max(128),z.object({status:z.enum(['processing','success','failed','empty']),attempts:z.number().int().min(1).max(3),last_attempt_at:z.iso.datetime()})).default({}), settings: personalSettingsSchema, receipts: z.record(z.string().max(128), z.object({ payload: z.string().max(16384), result: z.unknown() })).refine(r => Object.keys(r).length <= 256) }).strict();
+const stateSchema = z.object({ notification_task_baseline:z.array(z.string()).default([]),notification_intents:z.record(z.string(),notificationSchema).default({}),notification_fingerprints:z.record(z.string(),z.string()).default({}),notifications_initialized:z.boolean().default(false),conversations:conversationsStateSchema.default(initialConversations), user_scope: z.string().max(512).nullable(), revision: z.number().int().nonnegative(), feed: z.array(feedItemSchema).max(10000), dedupe: z.array(z.string().max(128)).max(20000), brief_runs:z.record(z.string().max(128),z.object({status:z.enum(['processing','success','failed','empty']),attempts:z.number().int().min(1).max(3),last_attempt_at:z.iso.datetime()})).default({}), settings: personalSettingsSchema, receipts: z.record(z.string().max(128), z.object({ payload: z.string().max(16384), result: z.unknown() })).refine(r => Object.keys(r).length <= 256) }).strict();
 export class PersonalStore {
     constructor(readonly path: string) { }
     async ensureScheduleBackup():Promise<void>{
