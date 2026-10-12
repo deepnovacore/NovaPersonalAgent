@@ -1,3 +1,4 @@
+import type {UnifiedRetrievalResult,RetrievedEvidenceResult} from '../memory/retrieval.js'
 import {randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {JsonValue} from '../core/events.js'
@@ -39,8 +40,14 @@ export class ScheduledAppContext{
  }
  async validateTask(taskId:string,consumer:string|null,recipient=consumer):Promise<boolean>{
   for(const evidence of this.host.tasks.evidence(taskId).filter(item=>item.kind==='context')){
-   let page:AppContextPage
-   try{page=JSON.parse(evidence.content) as AppContextPage}catch{return false}
+   let page:AppContextPage & {projection?:UnifiedRetrievalResult|RetrievedEvidenceResult}
+   try{page=JSON.parse(evidence.content) as typeof page}catch{return false}
+   if(page.projection){
+    const memory=this.host.options.memory(),projection=page.projection
+    if(Array.isArray(projection.entries))for(const entry of (projection as UnifiedRetrievalResult).entries){const row=await memory?.get?.(entry.entry_id);if(row?.status!=='active'||row.version!==entry.revision||!row.content.startsWith(entry.text))return false}
+    const snippets=Array.isArray(projection.snippets)?(projection as UnifiedRetrievalResult).snippets:(projection as RetrievedEvidenceResult).evidence?[(projection as RetrievedEvidenceResult).evidence!]:[]
+    for(const snippet of snippets){const row=await memory?.readEvidence?.(snippet.evidence_id);if(!row||!row.text.startsWith(snippet.text)||row.locator!==snippet.locator||row.observed_at!==snippet.observed_at)return false}
+   }
    if(page.consumer!==consumer||!await this.validateRefs(evidence.refs,consumer,taskId)||recipient!==consumer&&!await this.validateRefs(evidence.refs,recipient,taskId))return false
   }
   return true
@@ -61,7 +68,7 @@ export class ScheduledAppContext{
   }else{
    for(const row of this.host.life.snapshot()[section]){
     const sources=[...new Set([...(row.provenance_refs??[]),...(row.sources??[]).map(source=>source.evidence_id)])]
-    if(row.source_changed||row.auto_recorded&&!sources.length||sources.length&&(!consumer||(await Promise.all(sources.map(ref=>this.host.options.memory()?.canReadConversationEvidence?.(ref,consumer)??false))).some(allowed=>!allowed))){omitted++;continue}
+    if(row.source_changed||row.auto_recorded&&!sources.length||sources.length&&(!consumer||(await Promise.all(sources.map(ref=>this.host.options.memory()?.canReadConversationEvidence?.(ref,consumer)??Promise.resolve(false)))).some(allowed=>!allowed))){omitted++;continue}
     const note=row.note.slice(0,900),criteria='success_criteria' in row?row.success_criteria.slice(0,600):null
     items.push({id:row.id,version:row.version,title:row.title,note,status:row.status,...('due'in row?{due:row.due,goal_id:row.goal_id}:{success_criteria:criteria}),truncated:note.length<row.note.length||('success_criteria'in row&&criteria!.length<row.success_criteria.length)})
    }

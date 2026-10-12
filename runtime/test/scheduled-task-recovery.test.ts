@@ -18,14 +18,14 @@ test('claim and delegate crashes reconcile one Task; first prepare never request
   try{await host.open();const schedule=await host.schedules.create('create',input,{user_scope:'test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context}),run=await host.schedules.runNow('run',schedule.id,1)
    if(crash!=='claim'){const task=await host.tasks.delegate('scheduled:'+run.run_id,run.input);if(crash==='prepared'){await host.schedules.bindTask(run.run_id,task.id);await host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)}}
    await host.close();host=make()
-   host.setConversationRuntime(async(conversation,_emit,_mode,_lifetime,recovery,execution)=>{
+   host.setConversationRuntime((conversation,_emit,_mode,_lifetime,recovery,execution)=>{
     assert.equal(conversation.kind,'schedule');prepared.push({recovery:recovery??false,namespace:execution!.namespace})
-    if(recovery)throw Error('task_blackboard_unavailable')
+    if(recovery)return Promise.reject(Error('task_blackboard_unavailable'));
     const task=host.tasks.findByRun(run.run_id)!
-    host.attachTaskRuntime(conversation.id,0,{routes:()=>['nova'],ready:()=>false,input:async()=> 'failed',cancel:()=>{},dispatch:async()=>{throw Error('no foreground turn')}})
+    host.attachTaskRuntime(conversation.id,0,{routes:()=>['nova'],ready:()=>false,input:()=>Promise.resolve('failed'),cancel:()=>{/* no observer */},dispatch:()=>Promise.reject(Error('no foreground turn'))})
     assert.equal(task.origin_ref,'schedule-run:'+run.run_id)
-    return {runTurn:async()=>{throw Error('scheduled execution cannot fabricate user text')},close:async()=>{}}
-   },()=>{})
+    return Promise.resolve({runTurn:()=>Promise.reject(Error('scheduled execution cannot fabricate user text')),close:()=>Promise.resolve()});
+   },()=>{/* no observer */})
    await host.open();await host.scheduledTaskTick()
    assert.equal(host.tasks.list().length,1);assert.equal(host.schedules.getRun(run.run_id).task_id,host.tasks.list()[0]!.id)
    assert.deepEqual(prepared,[{recovery:crash==='prepared',namespace:'schedule-run:'+run.run_id}])
@@ -56,7 +56,7 @@ test('an unknown dispatched effect survives recovery without a second attempt',a
   await host.schedules.bindTask(run.run_id,task.id);await host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
   const effect=await host.tasks.reserveInitial({task_id:task.id,control_revision:0,goal_revision:0});await host.tasks.markEffectDispatching(effect)
   await host.close();host=make()
-  host.setConversationRuntime(async conversation=>{host.attachTaskRuntime(conversation.id,0,{recover:async()=>null,ready:()=>true,input:async()=> 'failed',cancel:()=>{},dispatch:async()=>{dispatched++}});return {runTurn:async()=>{throw Error('no user turn')},close:async()=>{}}},()=>{})
+  host.setConversationRuntime( conversation=>{host.attachTaskRuntime(conversation.id,0,{recover:()=>Promise.resolve(null),ready:()=>true,input:()=>Promise.resolve('failed'),cancel:()=>{/* no observer */},dispatch:()=>{dispatched++;return Promise.resolve()}});return Promise.resolve({runTurn:()=>Promise.reject(Error('no user turn')),close:()=>Promise.resolve()});},()=>{/* no observer */})
   await host.open();await host.scheduledTaskTick();await host.wakeTask(task.id)
   assert.equal(host.tasks.get(task.id).phase,'waiting');assert.equal(host.tasks.get(task.id).waiting_reason,'uncertain_recovery');assert.equal(dispatched,0)
   assert.equal(host.tasks.list().length,1)
@@ -66,7 +66,7 @@ test('only two scheduled runtimes prepare and hidden frames never reach the fore
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-run-capacity-')),path=join(dir,'personal.json')
  const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  let prepared=0,emitted=0
- host.setConversationRuntime(async(conversation,emit)=>{prepared++;emit({type:'caption',role:'assistant',text:'Unverified private result',final:true});host.attachTaskRuntime(conversation.id,0,{ready:()=>false,input:async()=> 'failed',cancel:()=>{},dispatch:async()=>{throw Error('must not run')}});return {runTurn:async()=>{throw Error('no user turn')},close:async()=>{}}},()=>{emitted++})
+ host.setConversationRuntime((conversation,emit)=>{prepared++;emit({type:'caption',role:'assistant',text:'Unverified private result',final:true});host.attachTaskRuntime(conversation.id,0,{ready:()=>false,input:()=>Promise.resolve('failed'),cancel:()=>{/* no observer */},dispatch:()=>Promise.reject(Error('must not run'))});return Promise.resolve({runTurn:()=>Promise.reject(Error('no user turn')),close:()=>Promise.resolve()});},()=>{emitted++})
  try{await host.open()
   for(let i=0;i<3;i++){const s=await host.schedules.create('create'+i,input,{user_scope:'test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context});await host.schedules.runNow('run'+i,s.id,1)}
   await host.scheduledTaskTick();assert.equal(prepared,2);assert.equal(host.schedules.activeRuns().filter(run=>run.stage==='bound').length,1);assert.equal(emitted,0)

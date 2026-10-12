@@ -1,3 +1,5 @@
+import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
+import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import {admitIntakeTask} from '../personal-agent/intake-task.js'
 import type {RuntimeDispatchResult} from '../core/runtime.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
@@ -200,6 +202,9 @@ async function responseAdaptationFor(
 
 export interface RealtimeAssemblyOptions {
   readonly suppressMemoryAdaptation?:boolean
+  readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
+  readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
+  readonly validateScopedContext?:()=>Promise<boolean>
   readonly memoryReadMode?: 'text' | 'voice'
   readonly memoryConsumerFingerprint?: string
   readonly nextPlaybackGeneration?:()=>number
@@ -864,7 +869,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       const sources = recentDispatchSources(conversation?.items ?? [])
       const recovery = provider.responseAdaptationMode === 'session_setup' ? undefined : sessionHolder.current?.deliveryRecoveryContext()
       const context = {
-        content: [preferences?.content, recovery?.content].filter(Boolean).join('\n') || null,
+        content: [preferences?.content, recovery?.content,options.scheduleHost?canonicalJson({schedule_calendar:{timezone:options.sharedPersonal?.host.snapshot().settings.timezone??'UTC',now:new Date(wallClockNow()*1000).toISOString()}}):null].filter(Boolean).join('\n') || null,
         ...(recovery?.content ? {delivery_version: recovery.version} : {}),
         ...(sources.length === 0 ? {} : {user_sources: sources}),
       }
@@ -1089,6 +1094,9 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       },
     }}),
     idFactory,
+    ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
+    ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
+    ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
     ...(options.onProviderEvent ? {onProviderEvent: options.onProviderEvent}: {}),
     onProviderTerminal: generation => {
       options.onAudioTerminal?.(generation.utterance_id, generation.generation_epoch)

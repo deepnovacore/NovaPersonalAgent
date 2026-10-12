@@ -29,7 +29,7 @@ export class ScheduleService{
  #state:State=empty()
  #tail:Promise<unknown>=Promise.resolve()
  #store:BoundedJsonStore<State>
- constructor(readonly path:string,readonly changed:()=>void=()=>{},readonly now:()=>Date=()=>new Date()){this.#store=new BoundedJsonStore(path,stateSchema,16*1024*1024)}
+ constructor(readonly path:string,readonly changed:()=>void=()=>{/* no observer */},readonly now:()=>Date=()=>new Date()){this.#store=new BoundedJsonStore(path,stateSchema,16*1024*1024)}
  async open(){try{this.#state=await this.#store.read(empty())}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}}
  async close(){await this.#tail}
  list(){return structuredClone(this.#state.items.filter(item=>!item.archived))}
@@ -65,18 +65,20 @@ export class ScheduleService{
    next.items.push(item);return item
   })) as Promise<Schedule>
  }
- async update(requestId:string,scheduleId:string,expectedRevision:number,value:ScheduleInput):Promise<Schedule>{
+ async update(requestId:string,scheduleId:string,expectedRevision:number,value:ScheduleInput,source?:ScheduleCreateAuthority):Promise<Schedule>{
   const input=scheduleInputSchema.parse(value)
-  return this.#edit(requestId,scheduleId,expectedRevision,'update',input,item=>{
+  const authority=source?authoritySchema.parse(source):undefined
+  return this.#edit(requestId,scheduleId,expectedRevision,'update',authority?{input,authority}:input,item=>{
+   if(authority){if(authority.user_scope!==item.authority.user_scope)throw Error('schedule_not_owned');item.authority=authority}
    this.#context(input.context,item.authority)
-   const next_slot=nextOccurrence(input.rule,this.now());if(!next_slot)throw Error('schedule_in_past')
+   const next_slot=nextOccurrence(input.rule,new Date(Math.max(this.now().getTime(),Date.parse(item.cursor))));if(!next_slot)throw Error('schedule_in_past')
    Object.assign(item,input,{next_slot})
    // A changed calendar starts in the future; editing content alone preserves pending time slots.
-   if(scheduleHash(input.rule)!==scheduleHash(this.get(scheduleId).rule))item.cursor=this.now().toISOString()
+   if(scheduleHash(input.rule)!==scheduleHash(this.get(scheduleId).rule))item.cursor=new Date(Math.max(this.now().getTime(),Date.parse(item.cursor))).toISOString()
   })
  }
  pause(requestId:string,scheduleId:string,revision:number){return this.#edit(requestId,scheduleId,revision,'pause',null,item=>{item.enabled=false;item.next_slot=null})}
- resume(requestId:string,scheduleId:string,revision:number){return this.#edit(requestId,scheduleId,revision,'resume',null,item=>{item.enabled=true;item.cursor=this.now().toISOString();item.next_slot=nextOccurrence(item.rule,this.now());if(!item.next_slot)throw Error('schedule_in_past')})}
+ resume(requestId:string,scheduleId:string,revision:number){return this.#edit(requestId,scheduleId,revision,'resume',null,item=>{item.enabled=true;item.cursor=new Date(Math.max(this.now().getTime(),Date.parse(item.cursor))).toISOString();item.next_slot=nextOccurrence(item.rule,new Date(item.cursor));if(!item.next_slot)throw Error('schedule_in_past')})}
  delete(requestId:string,scheduleId:string,revision:number){return this.#edit(requestId,scheduleId,revision,'delete',null,item=>{item.archived=true;item.enabled=false;item.next_slot=null})}
  async runNow(requestId:string,scheduleId:string,expectedRevision:number):Promise<ScheduleRun>{
   const item=this.get(scheduleId)
@@ -142,6 +144,6 @@ export class ScheduleService{
    try{this.changed()}catch{/* persistence already committed */}
    return result
   })
-  this.#tail=pending.catch(()=>{});return pending
+  this.#tail=pending.catch(()=>{/* no observer */});return pending
  }
 }

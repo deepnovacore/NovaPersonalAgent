@@ -1,3 +1,5 @@
+import type {ToolAcceptance,ToolCallReady} from './bridge.js'
+import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import type {IntakeSession} from '../executors/coding/intake.js'
 import type {ProjectProposal} from '../projects/project-confirmation.js'
 import type {TaskToolHost} from '../core/task-tools.js'
@@ -174,6 +176,9 @@ export interface ServiceProvider {
 export interface RealtimeServiceOptions {
   readonly onIntakePrepared?:(intake:Readonly<IntakeSession>,proposal:ProjectProposal)=>void
   readonly taskHost?: TaskToolHost
+  readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
+  readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
+  readonly validateScopedContext?:()=>Promise<boolean>
   readonly onProviderEvent?: (event: RealtimeProviderEvent) => void
   readonly intake?: Pick<
     IntakeOptions,

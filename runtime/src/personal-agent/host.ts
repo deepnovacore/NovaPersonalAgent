@@ -32,6 +32,7 @@ import type { Suggestion, SuggestionPool } from '../core/suggestions.js';
 import { personalCommandSchema, personalSettingsSchema, preparedContentSchema, proposalSchema, versionSchema, type PreparedMaterial, type Proposal, type FeedItem } from './contracts.js';
 import { PersonalStore, acquirePersonalLock, initialState, type PersonalState } from './store.js';
 import {TaskService,taskInputSchema,taskFenceSchema,type TaskRecord,type TaskFence,type TaskActor} from './tasks.js';
+import {executeScheduleCommand,scheduleView,scheduleRunView} from './schedule-api.js';
 import {ScheduleService} from './scheduled-tasks.js';
 import {ScheduledRunAuthority,type ScheduledRunGrant} from './scheduled-run-authority.js';
 import {SCHEDULE_CATCHUP_MS} from './scheduled-time.js';
@@ -126,6 +127,16 @@ export class PersonalAgentHost {
     readonly schedules:ScheduleService;
     readonly scheduledAuthority:ScheduledRunAuthority;
     readonly appContext=new ScheduledAppContext(this);
+    async recordScheduleCreated(conversationId:string,generation:number,requestId:string,schedule:{id:string;revision:number;title:string}):Promise<void>{
+        await this.#serial(async()=>{
+            const next=structuredClone(this.#state),conversation=next.conversations.items.find(item=>item.id===conversationId)
+            if(!conversation||conversation.kind==='schedule'||conversation.generation!==generation)throw Error('conversation_stale')
+            const id='schedule-created:'+requestId
+            if(conversation.messages.some(message=>message.id===id))return
+            conversation.messages.push({id,conversation_id:conversationId,role:'assistant',text:'已创建定时任务：'+schedule.title,created_at:this.#now().toISOString(),delivery:'completed',schedule_ref:{schedule_id:schedule.id,revision:schedule.revision}})
+            conversation.messages=conversation.messages.slice(-512);await this.#commit(next)
+        })
+    }
     readAppContext(section:AppContextSection,cursor:string|null,grant:ScheduledRunGrant){return this.appContext.read(section,cursor,grant)}
     async recentScheduledSummaries(grant:ScheduledRunGrant){
         this.scheduledAuthority.assert(grant,grant.fence)
@@ -165,8 +176,8 @@ export class PersonalAgentHost {
             if(next.feed.some(item=>item.id===key))return
             if(!await this.appContext.validateRefs(summary.evidence_refs,summary.consumer??null,run.task_id!))throw Error('context_authorization_changed')
             const at=this.#now().toISOString(),inbox=next.conversations.items.find(item=>item.kind==='proactive')!
-            next.feed.push({id:key,kind:'task_result',title:run.definition.title.slice(0,120),why_now:'定时 Agent 任务已验收',evidence_refs:summary.evidence_refs.slice(0,16),memory_refs:[],source:{type:'task',ref:run.task_id!},task_ref:{work_id:run.task_id!},subject_key:key,suggestion_id:null,priority:40,created_at:at,updated_at:at,expires_at:null,user_state:'new',snooze_until:null,lifecycle:'resolved',delivery:{presented_at:null,notified_at:null,spoken_at:null},prepared:{trust:'untrusted_external',text:summary.text.slice(0,12000),evidence_refs:summary.evidence_refs.slice(0,16)},action_label:'继续讨论'})
-            inbox.messages.push({id:key,conversation_id:inbox.id,role:'assistant',text:(run.definition.title+'\n'+summary.text).slice(0,16000),created_at:at,delivery:'completed'})
+            next.feed.push({schedule_ref:{schedule_id:run.schedule_id,revision:run.definition_revision,run_id:run.run_id,task_id:run.task_id!},id:key,kind:'task_result',title:run.definition.title.slice(0,120),why_now:'定时 Agent 任务已验收',evidence_refs:summary.evidence_refs.slice(0,16),memory_refs:[],source:{type:'task',ref:run.task_id!},task_ref:{work_id:run.task_id!},subject_key:key,suggestion_id:null,priority:40,created_at:at,updated_at:at,expires_at:null,user_state:'new',snooze_until:null,lifecycle:'resolved',delivery:{presented_at:null,notified_at:null,spoken_at:null},prepared:{trust:'untrusted_external',text:summary.text.slice(0,12000),evidence_refs:summary.evidence_refs.slice(0,16)},action_label:'继续讨论'})
+            inbox.messages.push({schedule_ref:{schedule_id:run.schedule_id,revision:run.definition_revision,run_id:run.run_id,task_id:run.task_id!},id:key,conversation_id:inbox.id,role:'assistant',text:(run.definition.title+'\n'+summary.text).slice(0,16000),created_at:at,delivery:'completed'})
             inbox.messages=inbox.messages.slice(-512);inbox.updated_at=at
             await this.#commit(next)
         })
@@ -208,7 +219,7 @@ export class PersonalAgentHost {
     async #reconcileScheduledRuns():Promise<void>{
         for(const run of this.schedules.activeRuns()){
             let task=this.tasks.findByRun(run.run_id)
-            if(!task)task=await this.tasks.delegate('scheduled:'+run.run_id,{...run.input,execution_route:'nova'})
+            task??=await this.tasks.delegate('scheduled:'+run.run_id,{...run.input,execution_route:'nova'})
             if(run.task_id!==task.id)await this.schedules.bindTask(run.run_id,task.id)
         }
         await this.#syncScheduleConversations();
@@ -228,7 +239,7 @@ export class PersonalAgentHost {
         if(!this.#conversationPool)throw Error('task_runtime_unavailable')
         const run=this.schedules.getRun(runId);if(!run.task_id)throw Error('run_task_unbound')
         const task=this.tasks.get(run.task_id),conversation=this.#state.conversations.items.find(item=>item.id===task.conversation_id)
-        if(!conversation||conversation.kind!=='schedule')throw Error('task_origin_unavailable')
+        if(conversation?.kind!=='schedule')throw Error('task_origin_unavailable')
         const grant=this.scheduledRunGrant(runId,this.#abort.signal)
         if(run.stage==='prepared')await this.#conversationPool.restore(conversation,grant)
         else{await this.#conversationPool.prepare(conversation,grant);await this.schedules.markPrepared(runId,grant.namespace)}
@@ -729,7 +740,7 @@ export class PersonalAgentHost {
         this.#notify();
         if (this.#overviewCache?.key !== key) this.#summarize();
     }
-    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, workbench_context:this.workbenchContext.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), profile_preparation:this.profileWarmup.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
+    snapshot() { const m = this.options.memory(); return { type: 'personal.state' as const, workbench_context:this.workbenchContext.snapshot(), presentation_mode:this.#presentationMode, ...this.#pendingDecisions(), revision: Math.max(this.#projectionRevision, this.#state.revision), schedules:{items:this.schedules.list().map(item=>{const view=scheduleView(item);return {id:view.id,title:view.title,revision:view.revision,enabled:view.enabled,rule:view.rule,next_slot:view.next_slot,missed_count:view.missed_count,dst_gap_count:view.dst_gap_count}}),active_runs:this.schedules.activeRuns().map(scheduleRunView)}, tasks:this.tasks.list(), conversations:this.conversationSnapshot(), news:this.news.snapshot(), profile_preparation:this.profileWarmup.snapshot(), life:this.life.snapshot(), understanding:this.understanding.snapshot(), feed: structuredClone(this.#state.feed), memory: structuredClone(this.#memory), sources: this.#sources?.list() ?? [], feishu: this.#feishu?.snapshot() ?? null, connectors: this.#connectors?.snapshot() ?? null, capabilities: { schedules:this.#conversationPool!==undefined, tasks:{input:this.#taskRuntimes.size>0,cancel:true,continue:true}, memory: { list: !!m?.list, get: !!m?.get, correct: !!m?.correct, forgetEntry: !!m?.forgetEntry, forgetSource: !!m?.forgetSource, purgeEntry: !!m?.purgeEntry }, discovery: !!this.options.discover, sources: !!this.#sources }, settings: { ...this.#state.settings,...dailyBriefSettings(this.#state.settings) } }; }
     #understandingSource(){const c=this.#state.conversations.items.find(c=>c.id===this.#state.conversations.selected_id);const index=c?.messages.findLastIndex(m=>m.role==='user')??-1;const m=c?.messages[index];return c&&m?{id:c.id+':'+m.id,version:c.generation,text:m.text,observed_at:m.created_at,timezone:dailyBriefSettings(this.#state.settings).timezone,origin:'user' as const,context:c.messages.slice(Math.max(0,index-6),index).map(m=>`${m.role}: ${m.text.slice(0,2000)}`).join('\n').slice(-16000)}:null}
     async #commit(next: PersonalState): Promise<void> {
         if (!this.#release || !this.#loaded) throw Error('personal_store_not_ready');
@@ -953,11 +964,11 @@ export class PersonalAgentHost {
     async #executeCommand(raw: unknown,context?:PersonalCommandContext): Promise<unknown> { const command = personalCommandSchema.parse(raw);
         // Recovery owns task execution only: presentation, state and non-task commands keep working, and a handback made now is woken when recovery ends.
         if(this.#recovering&&(command.method.startsWith('tasks.')||command.method==='conversations.approve')&&!['tasks.list','tasks.get','tasks.cancel'].includes(command.method))return {type:'personal.result',request_id:command.request_id,ok:false,error:'task_recovery_in_progress'};
-        const taskCommand=command.method.startsWith('tasks.'),scoped=taskCommand||command.method==='presentation.set'||command.method==='conversations.approve'||command.method==='conversations.confirm';
+        const scheduleCommand=command.method.startsWith('schedules.'),taskCommand=command.method.startsWith('tasks.'),scoped=scheduleCommand||taskCommand||command.method==='presentation.set'||command.method==='conversations.approve'||command.method==='conversations.confirm';
         const client=context?.client_id;
-        if((taskCommand||command.method==='conversations.approve')&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
+        if((scheduleCommand||taskCommand||command.method==='conversations.approve')&&!client)return {type:'personal.result',request_id:command.request_id,ok:false,error:'unauthenticated'};
         const receiptId=scoped?hash({client:client??null,request:command.request_id}):command.request_id;
-        const taskRead=command.method==='tasks.get'||command.method==='tasks.list';
+        const taskRead=command.method==='tasks.get'||command.method==='tasks.list'||['schedules.list','schedules.get','schedules.history','schedules.presets','schedules.preview'].includes(command.method);
         const payload=scoped?hash(canonicalJson(command)):hash(command),prior=taskRead?undefined:this.#state.receipts[receiptId];if(prior)
         return prior.payload === payload ? prior.result : { type: 'personal.result', request_id: command.request_id, ok: false, error: scoped?'request_conflict':'request_id_conflict' }; let result: unknown,inputStatus:'failed'|'unknown'='failed'; try {
         let data: unknown;
@@ -970,7 +981,8 @@ export class PersonalAgentHost {
                 await this.#commit(next);
             });
         }
-        if(taskCommand){
+        if(scheduleCommand){data=await executeScheduleCommand(this,command.method,p,receiptId,{user_scope:this.options.userScope,source:'ui',origin_ref:'ui:'+client+':'+command.request_id,source_refs:[]})}
+        else if(taskCommand){
             if(command.method==='tasks.list'){z.object({}).strict().parse(p);data=this.tasks.list()}
             else if(command.method==='tasks.get'){const q=z.object({task_id:z.string().min(1).max(512),after:z.number().int().nonnegative().default(0),input_request_id:z.string().min(1).max(128).optional()}).strict().parse(p);const inputKey=q.input_request_id?hash({client,request:q.input_request_id}):undefined,commandReceipt=inputKey?this.#state.receipts[inputKey]?.result as {input_status?:string;input_task_id?:string}|undefined:undefined;const receipt=inputKey?this.tasks.inputReceipts(q.task_id).find(r=>r.request_id===inputKey)??(commandReceipt?.input_status==='failed'&&commandReceipt.input_task_id===q.task_id?{status:'failed'}:undefined):undefined;data={viewer:{client_id:client,can_takeover:context?.can_takeover!==false},...(receipt?{input_receipt:{request_id:q.input_request_id,status:receipt.status}}:{}),...this.tasks.get(q.task_id),events:this.tasks.events(q.task_id,q.after),approvals:this.taskApprovals(q.task_id),input_receipts:this.tasks.inputReceipts(q.task_id),capabilities:this.taskCapabilities(q.task_id)}}
             else if(command.method==='tasks.delegate'){const {todo_ref,...q}=taskInputSchema.parse(p);if(!this.#state.conversations.items.some(item=>item.id===q.conversation_id&&item.kind!=='schedule'))throw Error('conversation_not_found');data=await this.tasks.delegate(receiptId,{...q,conversation_generation:this.#state.conversations.items.find(item=>item.id===q.conversation_id)!.generation,...(todo_ref?{todo_ref}:{})});const task=data as TaskRecord;if(!q.execution_route)data=await this.tasks.wait({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision},'execution_route_required');else{let port:TaskRuntimePort|undefined;try{port=this.taskRuntime(task.id)}catch{/* original runtime unavailable */}if(!port?.routes?.().includes(q.execution_route)){data=await this.tasks.wait({task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision},'task_executor_unavailable')}else void this.wakeTask(task.id);}}

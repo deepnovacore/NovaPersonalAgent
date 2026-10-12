@@ -11,7 +11,7 @@ const authority:ScheduleCreateAuthority={user_scope:'local',source:'ui',origin_r
 async function fixture(run:(s:ScheduleService,t:TaskService,setNow:(iso:string)=>void,path:string)=>Promise<void>){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-schedules-')),path=join(dir,'schedules.json')
  let now=new Date('2026-10-12T02:29:00Z')
- const s=new ScheduleService(path,()=>{},()=>now),t=new TaskService(join(dir,'tasks.json'))
+ const s=new ScheduleService(path,()=>{/* no observer */},()=>now),t=new TaskService(join(dir,'tasks.json'))
  try{await s.open();await t.open();await run(s,t,iso=>{now=new Date(iso)},path)}finally{await s.close();await t.close();await rm(dir,{recursive:true,force:true})}
 }
 test('scoped create and manual run retries survive restart and reject different payloads',()=>fixture(async(s,t,_set,path)=>{
@@ -63,4 +63,12 @@ test('retired Task receipts prevent a second execution even after the detailed T
  }
  assert.throws(()=>t.findByRun(run.run_id),/task_retired/)
  await assert.rejects(t.delegate('new-request',run.input),/task_retired/)
+}))
+
+test('editing or resuming during a backward clock adjustment cannot rewind the consumed calendar',()=>fixture(async(s,_t,set)=>{
+ const item=await s.create('create',input,authority);set('2026-10-15T02:31:00Z');await s.claimDue();const cursor=s.get(item.id).cursor
+ set('2026-10-12T01:00:00Z');await s.pause('p',item.id,1);await s.resume('r',item.id,2)
+ assert.equal(s.get(item.id).cursor,cursor)
+ await s.update('edit',item.id,3,{...input,rule:{...input.rule,time:'11:30'}})
+ assert.equal(s.get(item.id).cursor,cursor);assert.ok(s.get(item.id).next_slot!.scheduled_at>cursor)
 }))

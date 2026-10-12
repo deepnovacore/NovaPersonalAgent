@@ -283,6 +283,9 @@ export class RealtimeSession {
   responseHostItemIds(responseId: string): readonly string[] {
     return (this.#responseItems.get(this.#turnKey(responseId)) ?? []).map(item => item.host_item_id)
   }
+  responseToolCallIds(responseId:string):readonly string[]{
+    return (this.#responseItems.get(this.#turnKey(responseId))??[]).flatMap(item=>item.kind==='tool_output'&&item.call_id?[item.call_id]:[])
+  }
 
   responseEventIds(responseId: string): readonly string[] {
     return (this.#responseItems.get(this.#turnKey(responseId)) ?? []).map(item => item.event_id)

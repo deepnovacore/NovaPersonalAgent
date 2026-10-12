@@ -387,6 +387,9 @@ export class RealtimeService {
       throw new TypeError('agent controller registry does not match compiled tool descriptors')
     }
     this.#continuations = new ToolContinuations({
+      ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
+      ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
+      ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
       ...(options.taskHost ? {taskHost:options.taskHost} : {}),
       session: this.session, host: this.#host, runtime: this.#runtime,
       bridge: this.#bridge, tools: this.#tools, intake: this.#intake, approvalHost: this.#approvalHost,

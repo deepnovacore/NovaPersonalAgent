@@ -11,8 +11,8 @@ test('scheduled response exposes query tools while ordinary task continuation re
   let sequence=0,tools:string[]=[],guidance=''
   const signal=new AbortController().signal,provider=buildCascadedTextProvider({settings:loadSettings({DASHSCOPE_API_KEY:'test',CASCADE_LLM_PROVIDER:'qwen'},true),clock:new VirtualClock(),idFactory:()=>String(++sequence)},{
    ...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({
-    async *stream(input){tools=input.tools.map(tool=>tool.name);guidance=input.responseAdaptation??'';yield {kind:'response_started',response_id:'r'};yield {kind:'text_delta',text:'Review'};yield {kind:'response_completed',response_id:'r'}},
-    abandonPendingResponse:async()=>{},close:async()=>{},
+    async *stream(input){await Promise.resolve();tools=input.tools.map(tool=>tool.name);guidance=input.responseAdaptation??'';yield {kind:'response_started',response_id:'r'};yield {kind:'text_delta',text:'Review'};yield {kind:'response_completed',response_id:'r'}},
+    abandonPendingResponse:()=>{return Promise.resolve();},close:()=>{return Promise.resolve();},
    })})},
   })
   try{

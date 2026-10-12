@@ -18,7 +18,7 @@ export function buildCascadedVoiceProvider(options:ConversationVoiceProviderOpti
   const selected=requireSelectedCascadedRealtimeConfig(options.settings),ids={next:options.idFactory}
   const capabilities=capabilitiesFromSettings(options.settings)
   const metering=(endpoint:string)=>options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,endpoint)!}
-  const instructions=frontendInstructions({search:capabilities.modules.search.enabled,camera:options.captureFrame!==undefined,coding:capabilities.modules.coding.enabled,knowledge:capabilities.modules.knowledge.enabled},options.executorApproval===true)
+  const instructions=frontendInstructions({schedules:options.schedules===true,search:capabilities.modules.search.enabled,camera:options.captureFrame!==undefined,coding:capabilities.modules.coding.enabled,knowledge:capabilities.modules.knowledge.enabled},options.executorApproval===true)
   const llm=registry.llm[selected.llm.provider === 'ark' ? 'ark' : 'qwen']({config:selected.llm.config,clock:options.clock,ids,instructions,...metering(selected.llm.config.baseUrl)})
   return new CascadedRealtimeProvider({
     language:options.settings.language,
@@ -39,7 +39,7 @@ export function buildConversationVoiceProvider(options:ConversationVoiceProvider
   return integratedProviderRegistry[options.settings.integrated_provider]({
     language:options.settings.language,config:requireIntegratedRealtime(options.settings),idFactory:options.idFactory,now:()=>options.clock.now(),
     executorApproval:options.executorApproval===true,
-    modules:{search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,knowledge:capabilities.modules.knowledge.enabled},
+    modules:{schedules:options.schedules===true,search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,knowledge:capabilities.modules.knowledge.enabled},
     ...(options.onUsage===undefined?{}:{onUsage:options.onUsage}),
     ...(options.history===undefined?{}:{history:options.history}),
   })

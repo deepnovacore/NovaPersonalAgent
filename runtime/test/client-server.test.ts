@@ -1,3 +1,4 @@
+import {SCHEDULE_METHODS} from '../src/core/schedule-tools.js'
 import {mkdtemp,rm,realpath} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
@@ -299,11 +300,11 @@ for (const personal of [false,true]) test(`shared workbench enforces mobile priv
   const client=await peer((await server.start()).port);t.after(()=>client.socket.terminate())
   client.socket.send(JSON.stringify({type:'hello',token:device.token,protocol_version:1,...(personal?{capabilities:['personal']}:{})}))
   const ready=await client.next()
-  for(const method of ['tasks.list','presentation.set','connector.status','feishu.status','sources.add']) {
+  for(const method of ['tasks.list','presentation.set',...SCHEDULE_METHODS,'connector.status','feishu.status','sources.add']) {
     client.socket.send(JSON.stringify({type:'client.command',request_id:method,connection_id:ready.connection_id,payload:{type:'personal.command',request_id:method,method,params:method==='presentation.set'?{mode:'workbench'}:{}}}))
-    assert.equal((await client.next()).status,['tasks.list','presentation.set'].includes(method)?'applied':'rejected')
+    assert.equal((await client.next()).status,(['tasks.list','presentation.set',...SCHEDULE_METHODS] as readonly string[]).includes(method)?'applied':'rejected')
   }
-  assert.deepEqual(contexts,[{client_id:'remote:master',can_takeover:false},{client_id:'remote:master',can_takeover:false}])
+  assert.deepEqual(contexts,Array.from({length:2+SCHEDULE_METHODS.length},()=>({client_id:'remote:master',can_takeover:false})))
   if(!personal){
     assert.deepEqual(controls[0],{type:'input.audio',conversation_id:'legacy-chat'})
     client.socket.send(Buffer.from([0,0]))

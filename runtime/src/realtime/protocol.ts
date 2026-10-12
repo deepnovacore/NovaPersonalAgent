@@ -46,6 +46,7 @@ export const hostContextItemSchema = z.object({
   host_item_id: realtimeIdentifierSchema,
   event_id: realtimeIdentifierSchema,
   content: z.string().refine(value=>!pythonWhitespaceOnly.test(value),'text must be non-empty'),
+  context_read:z.literal(true).optional(),
   /** Host-authored public wording; private context is never used as the narration payload. */
   speech_content: boundedText().optional(),
   /** Explicit host classification: control receipts are not recoverable results. */
@@ -56,7 +57,8 @@ export const hostContextItemSchema = z.object({
   workspace_instance_id: realtimeIdentifierSchema.optional(),
   revision: z.number().int().nonnegative().optional(),
 }).strict().superRefine((item, context) => {
-  if([...item.content].length>(item.kind==='scheduled_task'?160000:MAX_REALTIME_TEXT))context.addIssue({code:'custom',path:['content'],message:'host context exceeds text limit'})
+  if(item.context_read&&item.kind!=='tool_output')context.addIssue({code:'custom',path:['context_read'],message:'structured reads require tool output'})
+  if(item.context_read?Buffer.byteLength(item.content)>32768:[...item.content].length>(item.kind==='scheduled_task'?160000:MAX_REALTIME_TEXT))context.addIssue({code:'custom',path:['content'],message:'host context exceeds text limit'})
   if (item.speech_content !== undefined && item.kind !== 'progress' && item.kind !== 'final') {
     context.addIssue({code: 'custom', path: ['speech_content'], message: 'public narration requires a progress or final fact'})
   }

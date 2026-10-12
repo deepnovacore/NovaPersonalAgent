@@ -7,8 +7,7 @@ import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import {GatewayTaskVerifier} from '../src/model/task-verifier.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
-import type {TaskDecision} from '../src/personal-agent/task-loop.js'
-import {TaskService,type TaskRecord} from '../src/personal-agent/tasks.js'
+import {TaskService} from '../src/personal-agent/tasks.js'
 test('verified scheduled delivery is idempotent, reopens as an ordinary topic, and user adoption writes once',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-schedule-delivery-')),path=join(dir,'personal.json')
  const make=()=>new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
@@ -48,12 +47,12 @@ test('context is checked before and after verification and before the completion
   const task=await tasks.delegate('task',{conversation_id:'c',goal:'Prioritize current data',acceptance:['One action'],origin_ref:'c:1'}),fence={task_id:task.id,control_revision:0,goal_revision:0}
   const contextRef=await tasks.recordContextEvidence(fence,'read','{"items":[],"coverage":{"complete":true}}',['app:todos:version'])
   await tasks.recordDelivery(fence,'answer','One action')
-  const gateway={complete:async(input:{prompt:string})=>{calls++;const prompt=JSON.parse(input.prompt) as {evidence:{kind:string}[]};assert.deepEqual(prompt.evidence.map(item=>item.kind),['context','delivery']);allowed=false;return {text:JSON.stringify({kind:'complete',evidence_refs:[contextRef,'task-delivery:answer'],criteria:[{index:0,evidence_refs:['task-delivery:answer']}]})}}} as unknown as ModelGateway
-  const verifier=new GatewayTaskVerifier({gateway,model:'test'}),check=async()=>allowed
-  const evaluate=()=>Reflect.apply(verifier.evaluateTask,verifier,[task,tasks.evidence(task.id),new AbortController().signal,[],check]) as Promise<TaskDecision>
+  const gateway={complete:(input:{prompt:string})=>{calls++;const prompt=JSON.parse(input.prompt) as {evidence:{kind:string}[]};assert.deepEqual(prompt.evidence.map(item=>item.kind),['context','delivery']);allowed=false;return Promise.resolve({text:JSON.stringify({kind:'complete',evidence_refs:[contextRef,'task-delivery:answer'],criteria:[{index:0,evidence_refs:['task-delivery:answer']}]})});}} as unknown as ModelGateway
+  const verifier=new GatewayTaskVerifier({gateway,model:'test'}),check=()=>Promise.resolve(allowed)
+  const evaluate=()=>verifier.evaluateTask(task,tasks.evidence(task.id),new AbortController().signal,[],check)
   const revokedDuringCall=await evaluate();assert.equal(revokedDuringCall.kind,'wait');assert.equal(calls,1)
   assert.equal((await evaluate()).kind,'wait');assert.equal(calls,1,'revoked context never enters a model request')
-  const result=await Reflect.apply(tasks.applyDecision,tasks,[fence,{kind:'complete',evidence_refs:['task-delivery:answer']},check]) as TaskRecord
+  const result=await tasks.applyDecision(fence,{kind:'complete',evidence_refs:['task-delivery:answer']},check)
   assert.equal(result.phase,'waiting');assert.equal(result.waiting_reason,'context_authorization_changed')
  }finally{await tasks.close();await rm(dir,{recursive:true,force:true})}
 })

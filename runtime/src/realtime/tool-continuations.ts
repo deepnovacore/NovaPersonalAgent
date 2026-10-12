@@ -1,3 +1,5 @@
+import {scheduledToolResult} from '../personal-agent/scheduled-tool-runtime.js'
+import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import type {TaskToolHost} from '../core/task-tools.js'
 import {dispatchSources, projectRecoveryTurns, recentDispatchSources} from './history.js'
 import {taskToolArguments} from '../core/task-tools.js'
@@ -48,6 +50,9 @@ import type {UserOriginBindingLedger} from './user-origin-binding.js'
 const UNKNOWN_CONFIRMATION_TOOL_RESULT = JSON.stringify({code: 'unknown_confirmation', state: 'refused'})
 interface ToolContinuationPorts {
   readonly taskHost?: TaskToolHost
+  readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
+  readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
+  readonly validateScopedContext?:()=>Promise<boolean>
   readonly session: RealtimeSession
   readonly host: Pick<HostDelivery, 'bindContinuationAcknowledgement' | 'hasEligiblePreempt' | 'hasOriginDeliveryProof' | 'markOriginDelivered' | 'originCanReferenceProof' | 'originHasNonterminalReference' | 'releaseAcknowledgementReservation' | 'rendererPaused' | 'reserveSemanticAcknowledgement' | 'semanticAcknowledgement' | 'settleBackgroundAcknowledgement'>
   readonly runtime: ServiceRuntime
@@ -220,6 +225,10 @@ export class ToolContinuations {
    * Every `return` here leaves the batch where it is, to be retried when something changes. Every
    * `continue` has popped a batch that will never speak.
    */
+  #discardScopedBatch(batch:ContinuationBatch):void{
+    batch.phase='abandoned'
+    for(const key of batch.call_keys){const state=this.#toolCallState(key);if(state){state.continuation='terminal';state.final_disposition='abandoned'}}
+  }
   async #driveContinuationsLocked(): Promise<void> {
     if (
       this.#ports.host.hasEligiblePreempt()
@@ -254,6 +263,9 @@ export class ToolContinuations {
         }
       }
 
+      if(this.#ports.validateScopedContext&&!await this.#ports.validateScopedContext()){
+        this.#discardScopedBatch(batch);this.#continuationFifo.shift();continue
+      }
       // The provider is holding a slot for every tool result in this batch. They are injected before
       // the turn is requested, and before the abandon path too: an abandoned batch still owes the
       // provider its results, or the protocol stalls waiting for them.
@@ -284,6 +296,9 @@ export class ToolContinuations {
       }
       if (this.#continuationRequestIsBlocked()) return
 
+      if(this.#ports.validateScopedContext&&!await this.#ports.validateScopedContext()){
+        this.#discardScopedBatch(batch);this.#continuationFifo.shift();continue
+      }
       const requestResult = await this.session.requestToolContinuation(intents, {
         originSpoken: this.#batchOriginWasDelivered(batch),
       })
@@ -884,6 +899,8 @@ export class ToolContinuations {
       acceptance = this.#overCapacityAcceptance(event)
     } else if (hidden) {
       acceptance = this.#refusalAcceptance(event, 'unknown_tool', '{"code":"unknown_tool","state":"refused"}')
+    } else if (this.#ports.scopedTool) {
+      acceptance = await this.#ports.scopedTool(event)
     } else if (personalRecall) {
       // Classification does not start the read. The serialized receive loop installs its ledger first.
       acceptance = await this.#ports.bridge.acceptToolCall(event, {originRef})
@@ -1186,6 +1203,16 @@ export class ToolContinuations {
       return this.#refusalAcceptance(event, 'unknown_confirmation', UNKNOWN_CONFIRMATION_TOOL_RESULT)
     }
     if(this.#ports.taskHost?.isCurrent?.()===false)return this.#refusalAcceptance(event,'superseded','{"code":"superseded"}')
+    if(event.name==='schedule'){
+      const user=this.#ports.intakeUser(),authority=this.#ports.currentUserTurn(event,originRef),host=this.#ports.scheduleHost
+      if(!host)return this.#refusalAcceptance(event,'unsupported_tool','{"code":"unsupported_tool"}')
+      if(!authority||!user||event.session_epoch<=this.#ports.discardedInputEpoch()||user.epoch!==event.session_epoch||originRef!==user.origin_ref)return this.#refusalAcceptance(event,'missing_origin_ref','{"code":"missing_origin_ref"}')
+      const args={...event.arguments};delete args.origin_ref
+      try{
+        const result=await host.invoke(args,{request_id:event.session_epoch+':'+event.call_id,origin_ref:user.origin_ref,sources:dispatchSources(this.#ports.runtime.memory?.channels.get('conversation')?.items??[]),stillWanted:authority.stillWanted})
+        return scheduledToolResult(event,result)
+      }catch(error){const code=error instanceof Error?error.message:'schedule_failed';return scheduledToolResult(event,{code,state:'refused'},code,false)}
+    }
     if (event.name === 'task') {
       const host=this.#ports.taskHost,user=this.#ports.intakeUser()
       const authority=this.#ports.currentUserTurn(event,originRef)

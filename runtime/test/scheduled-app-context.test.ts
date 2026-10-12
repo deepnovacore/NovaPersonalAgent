@@ -11,7 +11,7 @@ const context={todos:true,goals:false,tasks:true,memory:false,knowledge:false,se
 test('App reads enumerate fresh authorized versions, detect changed pages and reject scope expansion',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-app-context-')),path=join(dir,'personal.json')
  let allowed=true
- const memory:PersonalMemoryResource={open:async()=>{},close:async()=>{},recall:async()=>{throw Error('not semantic recall')},canReadConversationEvidence:async(id,consumer)=>allowed&&id==='source:allowed'&&consumer==='model-a'}
+ const memory:PersonalMemoryResource={open:()=>{return Promise.resolve();},close:()=>{return Promise.resolve();},recall:()=>{return Promise.reject(Error('not semantic recall'));},canReadConversationEvidence:(id,consumer)=>Promise.resolve(allowed&&id==='source:allowed'&&consumer==='model-a')}
  const life=emptyLifeState(),now=new Date().toISOString()
  life.todos.push({id:'derived',version:1,title:'Authorized external item',note:'Source detail',status:'open',due:null,goal_id:null,idea_id:null,created_at:now,updated_at:now,auto_recorded:true,provenance_refs:['source:allowed']})
  await writeFile(path+'.life.json',JSON.stringify(life),{mode:0o600})
@@ -40,5 +40,19 @@ test('App reads enumerate fresh authorized versions, detect changed pages and re
   assert.equal(await host.appContext.validateTask(task.id,'model-a'),false)
   const wrong=host.scheduledRunGrant(run.run_id,new AbortController().signal,'model-b')
   assert.ok(!(await host.readAppContext('todos',null,wrong)).items.some(item=>item.id==='derived'))
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('stored retrieval evidence becomes unusable after a memory revision changes',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-scheduled-revision-'))
+ let revision=1
+ const memory={open:()=>{return Promise.resolve();},close:()=>{return Promise.resolve();},recall:()=>{return Promise.reject(Error('unused'));},canReadConversationEvidence:()=>Promise.resolve(true),get:()=>Promise.resolve(({status:'active',version:revision,content:'Original'}))} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(dir,'p.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
+ try{await host.open();const task=await host.tasks.delegate('t',{conversation_id:'chat:main',goal:'Read memory',acceptance:['Summary'],origin_ref:'conversation:1'})
+ const fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+ await host.tasks.recordContextEvidence(fence,'read',JSON.stringify({consumer:'model',projection:{entries:[{entry_id:'m',revision:1,text:'Original'}],snippets:[]}}),['source:1'])
+ assert.equal(await host.appContext.validateTask(task.id,'model'),true)
+ revision=2
+ assert.equal(await host.appContext.validateTask(task.id,'model'),false)
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })

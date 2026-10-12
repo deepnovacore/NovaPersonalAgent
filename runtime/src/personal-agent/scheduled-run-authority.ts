@@ -1,5 +1,7 @@
-import {scheduleHash,type ScheduleRun,ScheduleService} from './scheduled-tasks.js'
-import {TaskService,type TaskRecord,type TaskFence} from './tasks.js'
+import type {ScheduleService} from './scheduled-tasks.js';
+import {scheduleHash,type ScheduleRun} from './scheduled-tasks.js'
+import type {TaskService} from './tasks.js';
+import {type TaskRecord,type TaskFence} from './tasks.js'
 export interface ScheduledRunGrant {readonly run_id:string;readonly task_id:string;readonly definition_hash:string;readonly namespace:string;readonly consumer:string|null;readonly fence:Readonly<TaskFence>}
 export class ScheduledRunAuthority{
  readonly #grants=new WeakMap<object,{lifetime:AbortSignal;run:ScheduleRun}>()

@@ -1,3 +1,4 @@
+import {SCHEDULE_METHODS} from '../core/schedule-tools.js'
 import {parsePromptLanguage} from '../realtime/prompt-language.js'
 import type {ClientPairing} from './client-pairing.js'
 import {randomUUID} from 'node:crypto'
@@ -13,11 +14,11 @@ import {CLIENT_PATH, ClientCommands, clientReady, decodeClientAudioFrame, accept
 const MAX_BUFFERED_BYTES = 256 * 1024
 const MAX_PENDING_SENDS = 128
 const MAX_PERSONAL_BYTES = 1024 * 1024
-const MOBILE_METHODS = new Set(['state', 'life.mutate', 'feed.action', 'memory.list', 'memory.evidence', 'memory.correct', 'memory.forget', 'memory.purge', 'conversations.read', 'conversations.create', 'conversations.select', 'conversations.open_work', 'conversations.clear', 'conversations.confirm', 'conversations.open_feed', 'conversations.voice', 'conversations.approve', 'presentation.set', 'presentation.seen', 'tasks.list', 'tasks.get', 'tasks.delegate', 'tasks.control', 'tasks.input', 'tasks.cancel', 'tasks.continue', 'tasks.reconcile', 'tasks.complete_todo', 'context.adopt', 'context.dismiss'])
+const MOBILE_METHODS = new Set([...SCHEDULE_METHODS,'state', 'life.mutate', 'feed.action', 'memory.list', 'memory.evidence', 'memory.correct', 'memory.forget', 'memory.purge', 'conversations.read', 'conversations.create', 'conversations.select', 'conversations.open_work', 'conversations.clear', 'conversations.confirm', 'conversations.open_feed', 'conversations.voice', 'conversations.approve', 'presentation.set', 'presentation.seen', 'tasks.list', 'tasks.get', 'tasks.delegate', 'tasks.control', 'tasks.input', 'tasks.cancel', 'tasks.continue', 'tasks.reconcile', 'tasks.complete_todo', 'context.adopt', 'context.dismiss'])
 
 /** Explicit mobile projection: new desktop fields are private by default. */
 function mobileSnapshot(value: Record<string, unknown>): Record<string, unknown> {
-  const keys = ['type', 'revision', 'reload_required', 'life', 'tasks', 'conversations', 'feed', 'memory', 'pending_approvals', 'pending_confirmations']
+  const keys = ['type', 'revision', 'reload_required', 'life', 'schedules', 'tasks', 'conversations', 'feed', 'memory', 'pending_approvals', 'pending_confirmations']
   const result = Object.fromEntries(keys.filter(key => key in value).map(key => [key, value[key]]))
   // Mobile displays the same ranked/saved articles without source configuration.
   if (value.news && typeof value.news === 'object' && !Array.isArray(value.news)) {
@@ -51,7 +52,7 @@ function mobileSnapshot(value: Record<string, unknown>): Record<string, unknown>
   }
   if (value.capabilities && typeof value.capabilities === 'object') {
     const caps = value.capabilities as Record<string, unknown>
-    result.capabilities = Object.fromEntries(['tasks', 'memory'].filter(key => key in caps).map(key => [key, caps[key]]))
+    result.capabilities = Object.fromEntries(['schedules','tasks', 'memory'].filter(key => key in caps).map(key => [key, caps[key]]))
   }
   return result
 }
