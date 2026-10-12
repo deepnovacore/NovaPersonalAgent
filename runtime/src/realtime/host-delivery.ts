@@ -667,7 +667,7 @@ export class HostDelivery {
         // Preserve the item after transport failure; a response may already have been requested.
         // Later queue invalidation must not claim this uncertain delivery was never sent.
         this.#uncertainQueuedDeliveries.add(queued)
-        if(queued.intent.kind!=='task_continuation'||!(cause instanceof ResponseRequestUncertainError))heapPush(this.#hostItems, queued)
+        if(!['task_continuation','scheduled_task'].includes(queued.intent.kind)||!(cause instanceof ResponseRequestUncertainError))heapPush(this.#hostItems, queued)
         else if(queued.preemptive)this.#recomputePreemptPriority()
         throw cause
       }

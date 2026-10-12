@@ -105,7 +105,7 @@ export class ScheduleService{
  markPublished(runId:string){return this.#changeRun(runId,run=>{if(!run.terminal_summary)throw Error('run_not_terminal');run.terminal_summary.published=true})}
  #run(item:Schedule,slot:ScheduleSlot|null,trigger:ScheduleRun['trigger'],run_id:string):ScheduleRun{
   const frozen=definition(item),definition_hash=scheduleHash(frozen)
-  const input:TaskInput={conversation_id:'schedule:'+item.id,conversation_generation:0,goal:item.goal,acceptance:item.acceptance,origin_ref:'schedule-run:'+run_id,trigger:{kind:'schedule',schedule_id:item.id,run_id,definition_revision:item.revision,definition_hash}}
+  const input:TaskInput={execution_route:'nova',conversation_id:'schedule:'+item.id,conversation_generation:0,goal:item.goal,acceptance:item.acceptance,origin_ref:'schedule-run:'+run_id,trigger:{kind:'schedule',schedule_id:item.id,run_id,definition_revision:item.revision,definition_hash}}
   return {run_id,schedule_id:item.id,definition_revision:item.revision,definition_hash,definition:frozen,authority:structuredClone(item.authority),slot,trigger,claimed_at:this.now().toISOString(),input,stage:'claimed',task_id:null,prepared_namespace:null,terminal_summary:null}
  }
  #context(context:ScheduleContext,authority:ScheduleCreateAuthority){for(const key of Object.keys(context) as (keyof ScheduleContext)[])if(context[key]&&!authority.allowed_context[key])throw Error('context_not_authorized')}
