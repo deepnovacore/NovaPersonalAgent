@@ -54,3 +54,7 @@ DSH 内容按原生 readonly ContentBlock[] 类型处理，工具有进展时保
 
 这组凭据恢复复现已修复。有限次数通过不是所有模型行为的保证，Task 仍需产物核验。
 本轮不包含完整桌面 UI、Windows 真机、语音、签名安装包或 M9-C 整体验收。
+
+后续 [Windows ACP 实跑](acp-windows-acceptance-2026-10-11.md) 补充了平台结果：Pi、OpenCode、DeepSeek 的同会话恢复产物核验通过，但 CodeBuddy 在 Windows 仍回复旧 AUTH_OK、没有新文件；默认 Windows 启动也尚未修复。本报告中的本机修复结论不能外推为全部平台/后端均通过。
+
+Windows 的上述两项问题随后已修复，见 [Windows 修复复验](acp-windows-fixes-2026-10-11.md)；补丁和启动解析均限制在 Windows，macOS 回归通过。

@@ -46,8 +46,9 @@ GPT-6 Astra 审查发现的 Connect 授权复查、非文本剪贴板丢失及�
 当前剩余事项：
 
 - **计划范围已确认：** 2026-10-11 用户明确不接入 Kimi Code；M9-C 以 OpenCode、CodeBuddy、Pi 和 DeepSeek Harness 四个 ACP 后端为范围。
-- **M9-C 异常路径实跑：** 已有四后端文本 Task 完成、默认切换后的原会话续做、重启续做记录；本轮已升级 CLI/ACP SDK 并修复跨组进程清理、Pi 结构化错误、DeepSeek 原生权限映射与拒绝收口，四后端均有真实异常场景通过记录，见 [升级与修复](../../testing/acp-failure-fixes-2026-10-11.md)。凭据恢复沿用旧回复的问题已定位实际入口和历史投影缺陷，修正并重复实跑，见 [同会话恢复修复](../../testing/acp-resume-recovery-2026-10-11.md)；transport 通过不替代 Task/产物核验；M9-C 整体仍未签收。首轮失败证据见 [原始实跑](../../testing/acp-failure-acceptance-2026-10-11.md)。
+- **M9-C 异常路径实跑：** 已有四后端文本 Task 完成、默认切换后的原会话续做、重启续做记录；本轮已升级 CLI/ACP SDK 并修复跨组进程清理、Pi 结构化错误、DeepSeek 原生权限映射与拒绝收口，四后端均有真实异常场景通过记录，见 [升级与修复](../../testing/acp-failure-fixes-2026-10-11.md)。本机 Pi、OpenCode、DeepSeek 的凭据恢复沿用旧回复问题已定位实际入口和历史投影缺陷，修正并重复实跑，见 [同会话恢复修复](../../testing/acp-resume-recovery-2026-10-11.md)；transport 通过不替代 Task/产物核验；M9-C 整体仍未签收。首轮失败证据见 [原始实跑](../../testing/acp-failure-acceptance-2026-10-11.md)。
 - **模型与权限边界：** 已有成功记录依赖 `qwen3-max`；较弱模型的派发与验证稳定性未被重新签收。ACP Ask 模式没有 Codex 等价的文件/网络沙箱，Pi 无逐项审批，ACP 不支持运行中追加要求；这些限制已明确展示，不算新增后端的等价能力。
+- **Windows ACP 后续验收：** 四后端安装、登录成功；默认原生启动适配和 CodeBuddy 失败请求投影已修复。生产默认路径拒绝/取消/崩溃/凭据失败/同会话恢复 **20/20** 通过，CodeBuddy 新任务恢复独立 3 次通过且“重试上一条”通过。Windows-only 修复后 macOS ACP 回归 **83/83**、桌面相关 **26/26**，日常 Mac CodeBuddy 未改包且真实握手正常。见 [修复复验](../../testing/acp-windows-fixes-2026-10-11.md)；[首轮失败](../../testing/acp-windows-acceptance-2026-10-11.md) 保留。transport 场景不代表完整桌面 Task 或 M9-C 签收。
 - **M9-G 真机与完整任务：** browser、computer、mobile 已接入共享审批、取消、截图证据和 Task 核验；浏览器完整任务及部分 Mac 读回有历史 live 证据。后台 Safari 原生动作链通过，但完整真实模型 Task 曾受 TLS 失败阻塞；手机真机、Windows、麦克风语音取消及签名安装包/TCC 验收仍未完成。
 - **M9-Demo：** 缺按后端/设备独立制作的合成数据演示、授权与失败路径录屏、复现配置及最终支持矩阵；既有测试记录不等于交付完整演示材料。
 
@@ -61,4 +62,4 @@ GUI 边界与历史证据见 [通用执行](../../verification/gui-execution-202
 本轮验证：运行时完整回归 **3632 通过 / 0 失败 / 9 跳过**；电脑执行器相关 **24/24**。
 类型检查、runtime lint、环境契约与能力清单检查通过。桌面非 Swift 测试通过，
 Electron 首次解压竞争后的 orb 单独复跑 **7/7**；三项需要 Swift 构建的测试明确暂缓。
-未重跑真实模型 GUI、物理语音、Windows 或签名安装包验收。
+上述合并验证未重跑真实模型 GUI、物理语音或签名安装包；后续 Windows ACP 实跑见上方记录，完整 Windows 桌面验收仍未完成。

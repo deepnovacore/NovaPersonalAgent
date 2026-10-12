@@ -26,6 +26,7 @@
   "files": [
     "scripts/autoglm-bridge.py",
     "scripts/patch-pi-acp.mjs",
+    "scripts/patch-codebuddy-recovery.mjs",
     "scripts/patch-acp-recovery.mjs",
     "dist/src",
     "dist/eval",

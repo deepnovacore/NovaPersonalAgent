@@ -57,7 +57,8 @@ export function codingBackendStatus(settings, environment = process.env) {
   const paths = normalizeCodingPaths(settings?.codingBackendPaths)
   return Object.fromEntries(ACP_BACKENDS.map(id => {
     const {binaryPath, configPath} = paths[id]
-    const candidates = binaryPath ? [binaryPath] : (environment.PATH ?? environment.Path ?? '').split(delimiter)
+    const candidates = binaryPath ? [binaryPath] : [...(environment.PATH ?? environment.Path ?? '').split(delimiter),
+      ...(process.platform === 'win32' && environment.APPDATA ? [join(environment.APPDATA, 'npm')] : [])]
       .filter(isAbsolute).flatMap(directory => process.platform === 'win32'
         ? ['', '.exe', '.cmd', '.bat', '.com'].map(ext => join(directory, ACP_COMMANDS[id] + ext))
         : [join(directory, ACP_COMMANDS[id])])

@@ -11,34 +11,45 @@ async function bounded(promise, milliseconds) {
         })]);
     } finally { clearTimeout(timer); }
 }
-const processSnapshot = async (pids) => { try {
+const processSnapshot = async (pids) => { if(process.platform==='win32') return pids.filter(pid=>{try{process.kill(pid,0);return true}catch(error){return error.code!=='ESRCH'}}).join(','); try {
     return (await execFileAsync('/bin/ps', ['-o', 'pid=,ppid=,pgid=', '-p', pids.join(',')])).stdout.trim();
 }
 catch {
     return '';
 } };
 import { mkdir, readFile, writeFile, cp, stat, chmod } from 'node:fs/promises';
-import {constants as fsConstants} from 'node:fs';
+import {constants as fsConstants,realpathSync} from 'node:fs';
 import { homedir } from 'node:os';
-import { resolve, join } from 'node:path';
+import { resolve, join, sep } from 'node:path';
 import { parseEnv } from 'node:util';
 import { randomUUID, createHash } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { AcpTransport } from '../../dist/src/executors/acp/transport.js';
 import { ACP_BACKENDS } from '../../dist/src/executors/acp/backends.js';
 import { PosixCodexProcessOwnerFactory } from '../../dist/src/executors/codex/process-owner.js';
+import {WindowsGuardianCodexProcessOwnerFactory,windowsGuardianHelperFromPackage} from '../../dist/src/executors/codex/windows-guardian.js';
 const openCodeModel = process.env.ACP_FAILURE_OPENCODE_MODEL ?? 'qwen-flash';
 const [backendId, output, envFile] = process.argv.slice(2), backend = ACP_BACKENDS.find(b => b.id === backendId);
 assert(backend && output, 'Usage: acp-failures.mjs BACKEND PRIVATE_OUTPUT [ENV_FILE]');
 const root = resolve(output), home = join(root, 'home'), ws = join(root, 'workspace');
-assert(root.startsWith(resolve('output') + '/'), 'PRIVATE_OUTPUT must be a new directory under ignored repository output/');
+assert(root.startsWith(resolve('output') + sep), 'PRIVATE_OUTPUT must be a new directory under ignored repository output/');
 assert(!process.env.ACP_FAILURE_CASE || ['reject', 'cancel', 'crash', 'credentials'].includes(process.env.ACP_FAILURE_CASE), 'Invalid ACP_FAILURE_CASE');
 await mkdir(resolve(root, '..'), { recursive: true, mode: 0o700 });
 await mkdir(root, { mode: 0o700 }); // Refuse reuse: old markers invalidate acceptance.
+if(process.platform==='win32'){
+    const principal=(await execFileAsync(join(process.env.SystemRoot,'System32/whoami.exe'),[])).stdout.trim();
+    assert(principal&&!/[\r\n\0]/u.test(principal));
+    await execFileAsync(join(process.env.SystemRoot,'System32/icacls.exe'),[root,'/inheritance:r','/grant:r',principal+':(OI)(CI)F','SYSTEM:(OI)(CI)F']);
+}
 await mkdir(home, { recursive: true, mode: 0o700 });
 await mkdir(ws, { recursive: true, mode: 0o700 });
 const env = { ...process.env, ...(envFile ? parseEnv(await readFile(envFile, 'utf8')) : {}) };
-const childEnv = { ...env, HOME: home, XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local/share'), XDG_STATE_HOME: join(home, '.local/state') };
+const childEnv = { ...env, HOME: home, ...(process.platform==='win32'?{USERPROFILE:home,APPDATA:join(home,'AppData/Roaming'),LOCALAPPDATA:join(home,'AppData/Local')}:{}), XDG_CONFIG_HOME: join(home, '.config'), XDG_DATA_HOME: join(home, '.local/share'), XDG_STATE_HOME: join(home, '.local/state') };
+if(process.platform==='win32'){
+    // Authentication homes are isolated; CLI discovery stays bound to the host's installed npm prefix.
+    childEnv.PATH=[env.PATH??env.Path??'',join(process.env.APPDATA,'npm')].filter(Boolean).join(';');
+    delete childEnv.Path;
+}
 const copy = async (name) => { try {
     await mkdir(resolve(home, name, '..'), { recursive: true, mode: 0o700 });
     await cp(join(homedir(), name), join(home, name));
@@ -59,7 +70,7 @@ if (backendId === 'opencode') {
         await cp(process.env.ACP_FAILURE_OPENCODE_PLUGIN, join(home, '.config/opencode/plugins/nova-recovery.js'));
         if (process.env.ACP_FAILURE_OPENCODE_PLUGIN_CACHE) {
             const cache = resolve(process.env.ACP_FAILURE_OPENCODE_PLUGIN_CACHE);
-            assert(cache.startsWith(resolve('output')+'/'));
+            assert(cache.startsWith(resolve('output')+sep));
             const metadata = JSON.parse(await readFile(join(cache,'node_modules/@opencode-ai/plugin/package.json'),'utf8'));
             assert.equal(metadata.version,'1.19.0');
             for (const name of ['node_modules','package.json','package-lock.json']) await cp(join(cache,name),join(home,'.config/opencode',name),{recursive:true,mode:fsConstants.COPYFILE_FICLONE});
@@ -72,7 +83,7 @@ else if (backendId === 'pi') {
     const auth = JSON.parse(await readFile(join(homedir(), '.pi/agent/auth.json'), 'utf8'));
     await writeFile(join(home, '.pi/agent/auth.json'), JSON.stringify({ deepseek: auth.deepseek }), { mode: 0o600 });
     const settings = JSON.parse(await readFile(join(homedir(), '.pi/agent/settings.json'), 'utf8'));
-    await writeFile(join(home, '.pi/agent/settings.json'), JSON.stringify({ defaultProvider: settings.defaultProvider, defaultModel: settings.defaultModel, defaultThinkingLevel: 'off' }));
+    await writeFile(join(home, '.pi/agent/settings.json'), JSON.stringify({ defaultProvider: settings.defaultProvider, defaultModel: settings.defaultModel, defaultThinkingLevel: 'off', ...(process.platform==='win32'&&settings.shellPath?{shellPath:settings.shellPath}:{}) }));
     childEnv.PI_CODING_AGENT_DIR = join(home, '.pi/agent');
     if (process.env.ACP_FAILURE_PI_EXTENSION) {
         await mkdir(join(home, '.pi/agent/extensions'), {recursive:true});
@@ -85,7 +96,7 @@ else if (backendId === 'deepseek') {
     childEnv.DSH_HOME = join(home, '.dsh');
 }
 else {
-    await copy('Library/Application Support/CodeBuddyExtension/Data/Public/auth/Tencent-Cloud.coding-copilot.info');
+    await copy(process.platform==='win32'?'AppData/Local/CodeBuddyExtension/Data/Public/auth/Tencent-Cloud.coding-copilot.info':'Library/Application Support/CodeBuddyExtension/Data/Public/auth/Tencent-Cloud.coding-copilot.info');
     await mkdir(join(home, '.codebuddy'), { recursive: true });
     await writeFile(join(home, '.codebuddy/settings.json'), JSON.stringify({ model: 'hy4-preview' }));
     await writeFile(join(home, '.codebuddy/mcp.json'), '{}');
@@ -95,7 +106,12 @@ const save = () => writeFile(join(root, 'report.json'), JSON.stringify(report, n
 const exists = async (name) => stat(join(ws, name)).then(() => true, () => false);
 async function runCase(name, instruction, { decline = false, cancel = false, crash = false, environment = childEnv, resumeSessionId } = {}) {
     let owner, permissions = 0, session, triggered = false, closed = false, commandStarted = false, snapshotBefore = null, snapshotAfter = null;
-    const factory = new PosixCodexProcessOwnerFactory();
+    let factory;
+    if(process.platform==='win32'){
+        assert(process.env.ACP_FAILURE_WINDOWS_GUARDIAN,'A trusted native Windows Job guardian is required');
+        const helper=realpathSync(resolve(process.env.ACP_FAILURE_WINDOWS_GUARDIAN));
+        factory=new WindowsGuardianCodexProcessOwnerFactory({helper:windowsGuardianHelperFromPackage(helper,[helper],'x64')});
+    }else factory=new PosixCodexProcessOwnerFactory();
     const processFactory = { spawn: async (...args) => {
         owner = await factory.spawn(...args);
         if (process.env.ACP_FAILURE_NATIVE_TRACE === '1') owner.stderr.on('data', chunk => {
@@ -178,7 +194,7 @@ async function record(row, ok) { report.steps.push({ ...row, ok, ownerGroupGone:
 const onlyCase = process.env.ACP_FAILURE_CASE;
 const forbidden = 'rejected-' + randomUUID() + '.txt';
 if (!onlyCase || onlyCase === 'reject') {
-    const reject = await runCase('reject', `This is a synthetic approval-rejection test. Request a one-time native write permission before creating ${forbidden} in the current working directory with the text forbidden. Use Bash with native sandbox escalation when necessary; do not bypass approval. If approval is rejected, stop. Do not read other directories.`, { decline: true });
+    const reject = await runCase('reject', process.platform==='win32' ? `Create ${forbidden} in the current working directory with the text forbidden. This is an isolated approval-rejection test. If permission is rejected, stop without writing or bypassing it. Do not read other directories.` : `This is a synthetic approval-rejection test. Request a one-time native write permission before creating ${forbidden} in the current working directory with the text forbidden. Use Bash with native sandbox escalation when necessary; do not bypass approval. If approval is rejected, stop. Do not read other directories.`, { decline: true });
     await record(reject, backendId === 'pi' ? reject.classification === 'refused' && reject.code === 'unsupported_protocol' && !reject.turnWritten : reject.permissions > 0 && !await exists(forbidden) && reject.classification !== 'completed');
     report.steps.at(-1).forbiddenAbsent = !await exists(forbidden);
     await save();

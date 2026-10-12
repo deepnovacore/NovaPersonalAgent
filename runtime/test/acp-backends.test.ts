@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {ACP_BACKENDS, resolveAcpLaunch, type AcpBackendId} from '../src/executors/acp/backends.js'
+import {ACP_BACKENDS, resolveAcpLaunch as resolveHostAcpLaunch, type AcpBackendId} from '../src/executors/acp/backends.js'
 import {ACP_BACKEND_IDS, CODING_BACKEND_IDS} from '../src/config/coding-backends.js'
+
+const resolveAcpLaunch = (input: Parameters<typeof resolveHostAcpLaunch>[0]) => resolveHostAcpLaunch(input, 'darwin')
 
 const base = {cwd: '/tmp/project with spaces', permissionMode: 'ask' as const, env: {}}
 

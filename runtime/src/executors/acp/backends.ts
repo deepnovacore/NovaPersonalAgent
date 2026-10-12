@@ -1,4 +1,5 @@
-import {isAbsolute} from 'node:path'
+import {isAbsolute, join} from 'node:path'
+import {resolveWindowsAcpLaunch, verifyWindowsCodebuddyRecovery} from './windows-launch.js'
 
 import type {AcpBackendId} from '../../config/coding-backends.js'
 export type {AcpBackendId} from '../../config/coding-backends.js'
@@ -82,7 +83,7 @@ function assertAbsolutePath(value: string, field: string): void {
 }
 
 /** Caller must spawn with shell:false and cwd:input.cwd, and own permission callbacks. */
-export function resolveAcpLaunch(input: AcpLaunchInput): {command: string; args: readonly string[]; env: NodeJS.ProcessEnv} {
+export function resolveAcpLaunch(input: AcpLaunchInput, platform: NodeJS.Platform = process.platform): {command: string; args: readonly string[]; env: NodeJS.ProcessEnv} {
   const backend = acpBackend(input.backendId)
   if (input.permissionMode !== 'ask' && input.permissionMode !== 'full') throw new Error('Invalid permissionMode')
   assertAbsolutePath(input.cwd, 'cwd')
@@ -116,6 +117,14 @@ export function resolveAcpLaunch(input: AcpLaunchInput): {command: string; args:
       args = ['--profile', 'acp']
       result.DSH_PERMISSION_MODE = input.permissionMode === 'full' ? 'danger-full-access' : 'read-only'
       break
+  }
+  if (platform === 'win32') {
+    const launch = resolveWindowsAcpLaunch(backend, input.binaryPath, args, input.env)
+    if (backend.id === 'codebuddy') verifyWindowsCodebuddyRecovery(launch.args[0] ?? '')
+    // Pi's native RPC child also needs the standard npm prefix when it is absent from PATH.
+    result.PATH = [input.env.PATH ?? input.env.Path ?? '', ...(input.env.APPDATA ? [join(input.env.APPDATA, 'npm')] : [])].filter(Boolean).join(';')
+    delete result.Path
+    return {...launch, env: result}
   }
   return {command: input.binaryPath ?? backend.command, args, env: result}
 }
