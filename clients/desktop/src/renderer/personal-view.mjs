@@ -93,7 +93,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   else if(chat.element.parentElement!==root)root.append(chat.element)
   setTimelineOpen(timelineOpen)
   const key=JSON.stringify([c.snapshot?.life,c.snapshot?.settings?.timezone,c.connected,timelineDate(c.snapshot)])
-  if(key!==timelineKey){timelineKey=key;const scroll=timelineBody.scrollTop;timelineBody.replaceChildren();renderTimeline(timelineBody,{snapshot:c.snapshot,el,button,discuss,openTodos,openArticle:url=>api.personal.openArticle(url),compact:true,connected:c.connected});timelineBody.scrollTop=scroll}
+  if(key!==timelineKey){timelineKey=key;const scroll=timelineBody.scrollTop;disposeSources(timelineBody);timelineBody.replaceChildren();renderTimeline(timelineBody,{snapshot:c.snapshot,el,button,discuss,openTodos,openArticle:url=>api.personal.openArticle(url),compact:true,connected:c.connected});timelineBody.scrollTop=scroll}
  }
 
  // The orb carries no mode buttons: double-click expands, the context menu switches modes, and sleep is the only voice switch.
@@ -133,7 +133,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   const edit=focusIndex>=0?{index:focusIndex,key:focused.getAttribute?.('data-editor-key'),tag:focused.tagName??focused.tag,label:focusLabel,value:focused.value,start:focused.selectionStart,end:focused.selectionEnd,scrollTop:focused.scrollTop}:null
   const panelScroll=panel.scrollTop
   for(const details of panel.querySelectorAll('details')){const local=taskLocal.get(details.dataset.workId);if(local)local.expanded=details.open}
-  bodyObserver?.disconnect();disposeSources();panel.replaceChildren();rail.select(selected);pageTitle.textContent=t(selected==='nova'&&c.selectedId&&c.selectedId!=='chat:main'?'Nova · 专用对话':PAGE_TITLE[selected]??selected)
+  bodyObserver?.disconnect();disposeSources(panel);panel.replaceChildren();rail.select(selected);pageTitle.textContent=t(selected==='nova'&&c.selectedId&&c.selectedId!=='chat:main'?'Nova · 专用对话':PAGE_TITLE[selected]??selected)
   const s=c.snapshot;const caps=s?.capabilities??{}
   const candidateKind=({todos:'todo',ideas:'idea',goals:'goal',profile:'profile'})[selected]
   const pending=el('section',undefined,'pending-group');pending.setAttribute('aria-label','待确认')

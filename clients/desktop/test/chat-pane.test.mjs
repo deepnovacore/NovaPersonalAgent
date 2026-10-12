@@ -567,3 +567,22 @@ test('Timeline starts open at desktop widths, folds on small windows, and respec
   }
  }finally{globalThis.matchMedia=previous}
 })
+
+test('an unchanged Feed keeps its open evidence and focus when another message arrives',async()=>{
+ const m=mount(),state=feedState(1)
+ state.feed[0].updated_at='2026-10-12T00:00:00Z';state.feed[0].evidence_refs=['source-1']
+ m.view.receive(state)
+ const card=m.all().find(node=>node.className==='feed-card'),info=m.all().find(node=>node.className==='source-info')
+ info.listeners.click({stopPropagation(){}})
+ const popover=m.all().find(node=>node.className==='source-popover'),read=m.all().find(node=>node.className==='feed-evidence-read')
+ read.focus();const pending=read.listeners.click(),request=m.sent.findLast(frame=>frame.method==='memory.evidence')
+ const next=structuredClone(state);next.revision=2;next.memory.entries=[{id:'unrelated',version:1,status:'active',content:'New independent memory'}];next.conversations.messages.push({id:'new',conversation_id:'chat:proactive',role:'assistant',text:'New message'})
+ m.view.receive(next)
+ assert.ok(m.all().includes(card),'unchanged card survives transcript update')
+ assert.equal(popover.hidden,false);assert.equal(document.activeElement,read)
+ m.view.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{state:'ok',evidence:{evidence_id:'source-1',text:'Current excerpt'}}});await pending
+ assert.ok(m.all().some(node=>node.textContent==='Current excerpt'))
+ const changed=structuredClone(next);changed.revision=3;changed.feed[0].updated_at='2026-10-12T01:00:00Z';changed.feed[0].lifecycle='invalidated';m.view.receive(changed)
+ assert.equal(m.all().includes(card),false);assert.equal(popover.hidden,true)
+ assert.equal(m.all().some(node=>node.textContent==='Current excerpt'),false)
+})

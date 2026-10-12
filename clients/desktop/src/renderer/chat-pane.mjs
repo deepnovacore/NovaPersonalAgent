@@ -1,5 +1,6 @@
 import {TASK_PHASE_LABEL,taskNextStep} from './tasks-page.mjs'
 import {renderMarkdown} from './markdown.mjs'
+import {disposeSources} from './source-popover.mjs'
 import {renderFeedCard,sendPresented} from './feed-card.mjs'
 import {currentLanguage,t} from './locale.mjs'
 import {mountExecutionCard} from './execution-card.mjs'
@@ -127,6 +128,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
  const read=()=>markVisibleRead({c,document,history,readMessages,chatOpen:open})
  history.addEventListener('scroll',()=>{if(history.scrollHeight-history.scrollTop-history.clientHeight<24)newMessages.hidden=true;deliverPresented();read()});const visible=()=>{deliverPresented();read()};document.addEventListener('visibilitychange',visible);window.addEventListener('focus',visible)
 
+ const feedNodes=new Map()
  let renderedNavigation='',renderedMessages='',renderedConversation=null
  function renderConversations(){
   const items=c.snapshot?.conversations?.items??[]
@@ -168,7 +170,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
  function renderMessage(message){
   const feedId=typeof message.id==='string'&&message.id.startsWith('feed:')?message.id.slice(5):null
   const feed=feedId?c.snapshot?.feed?.find(item=>item.id===feedId):null
-  if(feed){const holder=el('article',undefined,'message assistant message-feed');holder.dataset.messageId=message.id;holder.append(el('small','Nova','message-role'));renderFeedCard(holder,feed,{el,button,chips,command:(m,p)=>c.command(m,p),openFeed:(id,label)=>run(async()=>{const feed=c.snapshot?.feed?.find(item=>item.id===id);if(feed?.task_ref){const work=feed.task_ref.work_id,task=c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work)||work.startsWith('verified:'+task.id+':'));if(!task)throw Error(t('任务记录暂不可用，请在任务页核对。'));await openTask?.(task.id);return}await onHome();await focusReference([{kind:'feed',id,updated_at:feed.updated_at}])}),visible:false,presented,body:text=>renderMarkdown(text,{openLink})});return holder}
+  if(feed){const {delivery,...content}=feed,memory=c.snapshot?.memory?.entries?.filter(entry=>feed.memory_refs?.some(ref=>ref.entry_id===entry.id)),key=JSON.stringify([message,content,memory,c.connected,Boolean(feed.expires_at&&Date.parse(feed.expires_at)<=Date.now()),Boolean(feed.snooze_until&&Date.parse(feed.snooze_until)>Date.now())]),cached=feedNodes.get(message.id);if(cached?.key===key)return cached.node;const holder=el('article',undefined,'message assistant message-feed');holder.dataset.messageId=message.id;holder.append(el('small','Nova','message-role'));renderFeedCard(holder,feed,{el,button,chips,command:(m,p)=>c.command(m,p),openFeed:(id,label)=>run(async()=>{const feed=c.snapshot?.feed?.find(item=>item.id===id);if(feed?.task_ref){const work=feed.task_ref.work_id,task=c.snapshot?.tasks?.find(task=>task.id===work||task.work_ids?.includes(work)||work.startsWith('verified:'+task.id+':'));if(!task)throw Error(t('任务记录暂不可用，请在任务页核对。'));await openTask?.(task.id);return}await onHome();await focusReference([{kind:'feed',id,updated_at:feed.updated_at}])}),visible:false,presented,memory:c.snapshot?.memory?.entries,connected:c.connected,currentItem:()=>c.snapshot?.feed?.find(item=>item.id===feed.id),body:text=>renderMarkdown(text,{openLink})});feedNodes.set(message.id,{key,node:holder});return holder}
   const node=el('article',undefined,`message ${message.role==='user'?'user':'assistant'}`);node.dataset.messageId=message.id;node.append(el('small',message.role==='user'?'你':'Nova','message-role'))
   if(message.role==='user')node.append(el('p',message.text));else node.append(renderMarkdown(message.text,{openLink}))
   if(message.references?.length)node.append(el('small',t('引用 {0} 个事项',message.references.length),'message-reference'));
@@ -179,10 +181,11 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
   const persisted=c.selectedId==='chat:main'?homeTranscript(c.snapshot?.conversations):(c.snapshot?.conversations?.messages??[]).filter(message=>message.conversation_id===c.selectedId)
   const turns=new Set(persisted.map(message=>message.turn_id).filter(Boolean))
   const live=[...liveCaptions.values()].filter(frame=>frame.conversation_id===c.selectedId&&(frame.role!=='user'||frame.conversation_id===c.voiceId)&&!turns.has(frame.turn_id))
-  const key=JSON.stringify([c.selectedId,persisted,live,c.snapshot?.feed,c.snapshot?.settings?.timezone])
+  const key=JSON.stringify([c.selectedId,persisted,live,c.snapshot?.feed,c.snapshot?.memory,c.connected,c.snapshot?.settings?.timezone])
   if(key===renderedMessages&&!force)return
   const changedConversation=renderedConversation!==c.selectedId,previousTop=history.scrollTop;const nearBottom=history.scrollHeight-history.scrollTop-history.clientHeight<80
   if(changedConversation&&renderedConversation)positions.set(renderedConversation,{top:previousTop,bottom:nearBottom})
+  const previousNodes=[...history.children],focused=history.contains(document.activeElement)?document.activeElement:null
   history.replaceChildren()
   if(c.selectedId==='chat:main'&&c.snapshot?.conversations?.home_truncated)history.append(el('p',t('部分提醒历史已收起，可从会话列表查看原对话。'),'hint'))
   if(!persisted.length&&!live.length)history.append(intro)
@@ -191,6 +194,9 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,onOpen
    if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
    history.append(renderMessage(message))
   }
+  for(const node of previousNodes)if(!history.contains(node))disposeSources(node)
+  for(const [id,{node}]of feedNodes)if(!history.contains(node))feedNodes.delete(id)
+  if(focused&&history.contains(focused))focused.focus()
   renderedMessages=key;renderedConversation=c.selectedId
   const position=changedConversation?positions.get(c.selectedId):null
   history.scrollTop=changedConversation?(position&&!position.bottom?position.top:history.scrollHeight):nearBottom?history.scrollHeight:previousTop

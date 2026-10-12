@@ -70,12 +70,12 @@ test('a panel rebuild disposes the open layer, and focus never returns to a deta
  docFire(doc,'keydown',{key:'Escape'});assert.equal(again.popover.hidden,true);assert.equal(doc.activeElement,null,'a detached trigger is not focused')
 })
 
-test('verified channels are deduplicated and limited; details retain evidence without IDs or unsafe links',async t=>{
+test('source channels stay in the info dialog; meaningful signals retain safe evidence access',async t=>{
  dom(t);const {attachSourceTags}=await import('../src/renderer/source-popover.mjs'),host=new Node('article')
  const sources=[{type:'mail',evidence_id:'private-id',observed_at:'2026-10-04T00:00:00Z',summary:'邮件摘要',url:'https://example.com/message',mentioned_me:true},{type:'mail',evidence_id:'second'},{type:'im',provider:'feishu',summary:'讨论',url:'javascript:alert(1)'},{type:'calendar',summary:'会议'},{type:'unknown',label:'虚构'}]
  const result=attachSourceTags(host,sources,{autoRecorded:true})
- assert.deepEqual(result.tags.children.map(n=>n.textContent),['邮件','飞书','@我','自动记录'])
- bubble(result.tags.children[0],'click');assert.equal(result.popover.hidden,false)
+ assert.deepEqual(result.tags.children.map(n=>n.textContent),['@我','自动记录'])
+ bubble(result.info,'click');assert.equal(result.popover.hidden,false)
  const all=n=>[n,...n.children.flatMap(all)],nodes=all(host)
  assert.equal(nodes.some(n=>n.textContent==='private-id'||n.textContent==='虚构'),false)
  assert.equal(nodes.filter(n=>n.tag==='a').length,1)
@@ -87,11 +87,18 @@ test('unknown origins get no invented channel and automatic recording is explici
  assert.equal(attachSourceTags(host,[{type:'unknown'}]),null)
  const result=attachSourceTags(host,[],{autoRecorded:true});assert.deepEqual(result.tags.children.map(n=>n.textContent),['自动记录'])
 })
-test('tag dialogs restore keyboard focus and original links use the desktop opener',async t=>{
+test('info dialogs restore keyboard focus and original links use the desktop opener',async t=>{
  const doc=dom(t),{attachSourceTags}=await import('../src/renderer/source-popover.mjs'),host=new Node('article'),opened=[]
  const result=attachSourceTags(host,[{type:'mail',url:'https://example.com/message',summary:'摘要'}],{openArticle:url=>opened.push(url)})
- const tag=result.tags.children[0];bubble(tag,'click')
+ const tag=result.info;bubble(tag,'click')
  const row=result.popover.children[1].children[0],link=row.children.find(n=>n.tag==='a')
  assert.equal(bubble(link,'click').defaultPrevented,true);assert.deepEqual(opened,['https://example.com/message'])
  docFire(doc,'keydown',{key:'Escape'});assert.equal(doc.activeElement,tag)
+})
+
+test('rebuilding an unrelated panel leaves the open source dialog intact',async t=>{
+ dom(t);const {disposeSources}=await import('../src/renderer/source-popover.mjs'),panel=new Node('section'),other=new Node('section'),host=new Node('article');panel.append(host)
+ const details=attachSources(host,['readable source']);bubble(details.info,'click')
+ disposeSources(other);assert.equal(details.popover.hidden,false)
+ disposeSources(panel);assert.equal(details.popover.hidden,true)
 })

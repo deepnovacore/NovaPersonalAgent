@@ -16,6 +16,7 @@ class Node {
  addEventListener(name,fn){this.listeners[name]=fn}
  querySelectorAll(tag){return this.children.flatMap(node=>[...(node.tag===tag?[node]:[]),...node.querySelectorAll(tag)])}
  querySelector(tag){return this.querySelectorAll(tag)[0]}
+ contains(node){return this===node||this.children.some(child=>child.contains(node))}
  focus(){}
 }
 function view(state,overrides={}){

@@ -78,7 +78,7 @@ test('compact sidebar retains its groups without date gutters or a current-day e
  assert.deepEqual(parent.querySelectorAll('.timeline-group').map(node=>node.dataset.group),['overdue','current','waiting'])
  assert.equal(parent.querySelectorAll('article').length,3)
  const card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date')
- assert.equal(card.querySelectorAll('.timeline-meta')[0]?.textContent,'今天到期')
+ assert.equal(card.querySelectorAll('.timeline-meta').length,0)
  assert.equal(card.querySelectorAll('.timeline-time-range').length,0)
 })
 
@@ -102,7 +102,7 @@ test('a card with provenance uses one info icon for both the source and item det
  assert.ok(popover.querySelectorAll('p').some(node=>node.textContent==='来自待办 · 版本 1'))
  assert.ok(popover.querySelectorAll('p').some(node=>node.textContent==='已确认的截止说明'))
  assert.ok(popover.querySelectorAll('p').some(node=>node.textContent==='来源内容已变化，请核对事项。'))
- assert.equal(card.querySelectorAll('.source-tag').length,1)
+ assert.equal(card.querySelectorAll('.source-tag').length,0)
 })
 test('stored item details remain readable offline while assistance actions are disabled',()=>{
  const {parent}=render(snapshot,{connected:false}),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date'),info=card.querySelectorAll('.source-info')[0]
@@ -113,14 +113,14 @@ test('stored item details remain readable offline while assistance actions are d
 
 test('cards express date-only pressure in the configured timezone without guessing hours or waiting age',()=>{
  const state=structuredClone(snapshot);state.life.todos.push({id:'next',title:'Tomorrow',status:'open',due:'2026-10-13',version:1},{id:'later',title:'Later',status:'open',due:'2026-10-27',version:1},{id:'done',title:'Done',status:'done',due:'2026-10-01',version:1})
- const {parent}=render(state),meta=id=>parent.querySelectorAll('article').find(node=>node.dataset.objectId===id).querySelectorAll('.timeline-meta')[0].textContent
- assert.equal(meta('date'),'今天到期');assert.equal(meta('next'),'明天到期');assert.equal(meta('later'),'还有 15 天');assert.equal(meta('past'),'已过截止 2 天');assert.equal(meta('wait'),'等待回复 · 未设期限');assert.equal(meta('done'),'已完成')
+ const {parent}=render(state),meta=id=>parent.querySelectorAll('article').find(node=>node.dataset.objectId===id).querySelectorAll('.timeline-meta')[0]?.textContent
+ assert.equal(meta('date'),undefined);assert.equal(meta('next'),'明天到期');assert.equal(meta('later'),'还有 15 天');assert.equal(meta('past'),'已过截止 2 天');assert.equal(meta('wait'),undefined);assert.equal(meta('done'),undefined)
 })
 test('compact cards retain user context and original dates without repeating the date as a chip',()=>{
  const state=structuredClone(snapshot);state.life.todos[0].note='先整理用户已经确认的演示路径。';state.life.todos[0].due='2026-10-27'
  const {parent}=render(state,{compact:true}),card=parent.querySelectorAll('article').find(node=>node.dataset.objectId==='date')
  assert.equal(card.querySelectorAll('.timeline-note')[0]?.textContent,'先整理用户已经确认的演示路径。')
- assert.deepEqual(card.querySelectorAll('time').map(node=>node.dateTime),['2026-10-12','2026-10-27'])
+ assert.deepEqual(card.querySelectorAll('time').map(node=>node.dateTime),['2026-10-27'])
  assert.equal(card.querySelectorAll('.tag-time').length,0)
 })
 test('changed sources get an explicit caution and source excerpts keep their provenance label',()=>{

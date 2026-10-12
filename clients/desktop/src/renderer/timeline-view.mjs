@@ -51,7 +51,6 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    const marker=el('h3',undefined,'timeline-date-marker'),time=el('time',formatDate(group.date));time.dateTime=group.date
    if(group.id==='current')marker.append(el('span','Today','timeline-current-label'))
    marker.append(time,el('span',new Date(group.date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{weekday:'short',timeZone:'UTC'}),'timeline-weekday'))
-   if(group.items.length===1)marker.append(el('span',t('{0} 项到期',group.items.length),'timeline-date-count'))
    cards=el('div',undefined,`timeline-day-cards${group.items.length>1?' timeline-shared-date':''}`);if(group.items.length>1)cards.append(el('p',t('{0} 项在同一天到期',group.items.length),'timeline-day-summary'));section.append(marker,cards);(group.id==='overdue'?pastAxis:axis).append(section)
    if(!group.items.length){
     cards.append(el('p',t('今天没有到期事项'),'timeline-day-empty'))
@@ -62,18 +61,14 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,openTodos,open
    const card=el('article',undefined,'timeline-card');card.dataset.objectId=item.id;cards.append(card)
    const days=item.date?Math.round((Date.parse(item.date)-Date.parse(currentDate))/86400000):null
    const pressure=item.status==='done'?t('已完成'):days===null?t(item.status==='waiting'?'等待回复 · 未设期限':'尚未安排'):days<0?t('已过截止 {0} 天',-days):days===0?t('今天到期'):days===1?t('明天到期'):t('还有 {0} 天',days)
-   card.dataset.tone=item.status==='done'?'progress':days!==null&&days<0?'attention':days!==null&&days<=1?'time':days===null&&item.status==='waiting'?'waiting':'context';card.dataset.period=days!==null&&days<=1&&item.status!=='done'?'near':'later'
-   const meta=el('div',pressure,'timeline-meta');card.append(meta)
+   card.dataset.tone=item.status==='done'?'progress':days!==null&&days<0?'attention':days!==null&&days<=1?'time':days===null&&item.status==='waiting'?'waiting':'context';card.dataset.period=days!==null&&days<=1&&item.importance==='high'&&item.status!=='done'?'near':'later'
+   const repeated=group.id==='current'||group.id==='waiting'||group.id==='completed'
+   if(!repeated){const meta=el('div',pressure,'timeline-meta');card.append(meta);if(compact&&item.date){const time=el('time',formatDate(item.date));time.dateTime=item.date;meta.append(time)}}
    const dateLabel=item.date?formatDate(item.date):null
    const title=button(item.title,()=>item.status==='done'?openTodos(item.id):discuss([item.reference]),card,`timeline-discuss:${item.id}`);title.className='timeline-title'
    if(item.source_changed)card.append(el('p',t('来源内容已变化，请先核对。'),'timeline-caution'))
    const excerpt=item.note||item.sources?.find(source=>typeof source?.summary==='string'&&source.summary.trim())?.summary
    if(excerpt){const context=el('div',undefined,'timeline-context');context.append(el('span',t(item.note?'当前记录':'来源摘录'),'timeline-context-label'),el('p',excerpt,'timeline-note'));card.append(context)}
-   if(compact&&item.date&&days!==0&&item.status!=='done'){
-    const range=el('div',undefined,'timeline-time-range'),endpoints=days<0?[[item.date,'原截止'],[currentDate,'现在']]:[[currentDate,'现在'],[item.date,'截止日期']]
-    for(const [date,label]of endpoints){const point=el('div',undefined,'timeline-time-point'),time=el('time',formatDate(date));time.dateTime=date;point.append(el('span',t(label)),time);range.append(point)}
-    card.append(range)
-   }
    const tags=[]
    if(item.date&&item.status==='done')tags.push({label:t('原截止 {0}',dateLabel),tone:'context'})
    if(item.importance==='high')tags.push({label:'重要',tone:'importance'})
