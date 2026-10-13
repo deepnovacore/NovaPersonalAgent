@@ -40,7 +40,7 @@ export function generateDocs() {
         assets.set(relative, target);
         return basePath + '/doc-assets/' + relative;
       }
-      return 'https://github.com/deepnovacore/NovaAudioAgent/blob/main/' + relative + (hash ? '#' + hash : '');
+      return 'https://github.com/deepnovacore/NovaPersonalAgent/blob/main/' + relative + (hash ? '#' + hash : '');
     };
     const marked = new Marked({ gfm: true, walkTokens(token) {
       if (token.type === 'link' || token.type === 'image') token.href = rewrite(token.href);
