@@ -10,17 +10,17 @@ import { HeroHeaderScope } from './hero-header-scope';
 export function HomePage({ en = false }: { en?: boolean }) {
   const doc = sitePath(en ? '/en/docs' : '/docs');
   const highlights = en ? [
-    ['Your proactive personal agent', 'Todos, Ideas, Goals, Feeds and Profile turn your context into suggestions you can act on.'],
-    ['Wide and unstructured context', 'Connect folders, mail, calendars, conversations and documents. Keep personal memory traceable, editable and removable.'],
-    ['Always-on voice, dual brains', 'The front brain stays in conversation while the back brain handles long-running work.'],
-    ['A thin frontend task coordinator', 'Clarify, authorize and delegate to a coding agent. Check evidence, take over and hand control back.'],
-    ['Restrained proactivity', 'Nova chooses what matters and when to speak. Routine updates stay quiet, and reminders respect your turn.'],
+    ['A persistent home and Timeline', 'Keep Nova beside your tabbed workspace. Revisit context, evidence and task results without leaving the conversation.'],
+    ['Scheduled Agent Tasks', 'Run work once, daily or weekly. Manage schedules on desktop or mobile and receive reports in your main conversation.'],
+    ['Understanding that grows', 'Authorized sources sync incrementally. Resumable processing builds an editable Profile with evidence you can check and withdraw.'],
+    ['Choose your coding agent', 'Codex, OpenCode, CodeBuddy, Pi or DeepSeek Harness: each session keeps its backend, with improved recovery and Windows support.'],
+    ['Control every step', 'Approvals, cancellation and evidence checks connect specialist execution. GUI and phone execution remain experimental.'],
   ] : [
-    ['你的主动式个人 Agent', '待办、想法、目标、资讯和 Profile，把 Nova 对你的了解变成可以行动的建议。'],
-    ['广泛、非结构化的上下文', '接入文件夹、邮件、日历、对话和文档。个人记忆可追溯、可编辑、可删除。'],
-    ['常驻语音，前后双脑协作', '前脑陪你交流，后脑处理长时间运行的工作。'],
-    ['薄而清晰的前台任务协调层', '问清目标、确认授权，再委派给 coding agent。按证据核验，随时接管和交还。'],
-    ['主动有分寸', '判断什么值得提醒、什么时候开口。琐碎更新保持安静，不抢你的话。'],
+    ['持续主会话与 Timeline', 'Nova 陪在标签工作区旁，随时回看上下文、来源证据和任务结果，不必离开对话。'],
+    ['定时 Agent 任务', '支持单次、每日、每周运行，在桌面端或手机端管理，报告回到主会话。'],
+    ['逐步积累对你的理解', '授权来源增量同步，可恢复的处理逐步更新画像；内容可编辑，引用可核对，来源可撤回。'],
+    ['选择你的编码代理', 'Codex、OpenCode、CodeBuddy、Pi 或 DeepSeek Harness，会话保留原后端，恢复流程和 Windows 支持持续完善。'],
+    ['执行有授权，结果有证据', '专长执行共享审批、取消和证据核验。GUI 与手机执行继续作为实验能力提供。'],
   ];
   const featureGroups = en ? [
     ['workbench', 'Your personal agent'],
@@ -74,8 +74,8 @@ export function HomePage({ en = false }: { en?: boolean }) {
             </h2>
             <p className="hero-description">
               {en
-                ? 'Todos, ideas and goals on one workbench, memory you can trace, and tasks checked against evidence.'
-                : '待办、想法与目标集中在一个工作台，记忆可追溯，任务按证据验收。'}
+                ? 'A persistent conversation, scheduled tasks and source-backed understanding, beside your everyday workspace.'
+                : '持续主会话、定时任务与有出处的理解，陪在日常工作区旁。'}
             </p>
             <div className="hero-actions">
               <a className="button primary" href={doc}>
@@ -92,7 +92,7 @@ export function HomePage({ en = false }: { en?: boolean }) {
           </div>
         </section>
         <section className="intro-section reading" id="demo">
-          <p className="section-label">{en ? 'Meet Nova' : '认识 Nova'}</p>
+          <p className="section-label">{en ? 'New in v0.4.0' : 'v0.4.0 新功能'}</p>
           <h2>
             {en ? <>Remembers what matters.</> : <>记住重要的事。</>}
           </h2>
@@ -167,9 +167,11 @@ export function HomePage({ en = false }: { en?: boolean }) {
               : '安装 Nova，配置 API Key，就可以开始对话。'}
           </p>
           <InstallCommand en={en} />
+          <p className="requirements">{en ? 'Upgrading from nova-audio-agent? Uninstall the old npm package before switching names; your local data stays in place.' : '从 nova-audio-agent 升级？切换包名前请先卸载旧 npm 包，本地数据保持不变。'}</p>
+          <a className="text-link" href={`${repo}/releases/tag/v0.4.0`}>{en ? 'Read the v0.4.0 release notes and support boundaries' : '查看 v0.4.0 发布说明与支持边界'} <ArrowUpRight size={16} /></a>
           <p className="requirements">
-            Node.js 22+ · npm ·{' '}
-            {en ? 'Codex required for coding tasks' : '编码任务需另行安装并登录 Codex'}
+            Node.js 22.13+ · npm ·{' '}
+            {en ? 'Install your chosen backend for coding tasks' : '编码任务需安装并登录所选后端'}
           </p>
           <div className="resource-links">
             <a href={doc}>

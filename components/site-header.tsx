@@ -6,7 +6,7 @@ import { ThemeToggle } from './theme-toggle';
 function NovaMark() {
   return <img className="nova-mark" src={sitePath('/brand/deepnovacore-mark.png')} alt="" aria-hidden="true" width={256} height={127} />;
 }
-export const repo = 'https://github.com/deepnovacore/nova-personal-agent';
+export const repo = 'https://github.com/deepnovacore/NovaAudioAgent';
 export function Header({
   en = false,
   docs = false,
