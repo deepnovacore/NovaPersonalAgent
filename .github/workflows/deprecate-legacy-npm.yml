@@ -36,5 +36,14 @@ jobs:
           server_message='Renamed to nova-personal-agent-server. Run npm uninstall -g nova-audio-agent-server, then npm install -g nova-personal-agent-server@latest. Existing data and settings are preserved.'
           npm deprecate 'nova-audio-agent@*' "$desktop_message"
           npm deprecate 'nova-audio-agent-server@*' "$server_message"
-          test "$(npm view nova-audio-agent@latest deprecated)" = "$desktop_message"
-          test "$(npm view nova-audio-agent-server@latest deprecated)" = "$server_message"
+          propagated=''
+          for attempt in $(seq 1 20); do
+            if test "$(npm view nova-audio-agent@latest deprecated --prefer-online)" = "$desktop_message" \
+              && test "$(npm view nova-audio-agent-server@latest deprecated --prefer-online)" = "$server_message"; then
+              propagated=1
+              break
+            fi
+            sleep 3
+          done
+          test "$propagated" = "1"
+          echo 'Both legacy package deprecation notices verified'
