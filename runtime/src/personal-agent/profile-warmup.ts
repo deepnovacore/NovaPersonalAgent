@@ -7,7 +7,7 @@ const refs=z.array(z.object({entry_id:z.string().min(1).max(256),version:version
 export const profileDraftSchema=z.object({
  about:z.object({text:z.string().trim().min(1).max(2600),refs:z.array(refs.element).min(1).max(64)}).strict().nullable(),
  work:z.array(z.object({title:z.string().trim().min(1).max(80),text:z.string().trim().min(1).max(500),refs}).strict()).max(6).default([]),
- interests:z.array(z.object({text:z.string().trim().min(1).max(160),refs}).strict()).max(8),
+ interests:z.array(z.object({text:z.string().trim().min(1).max(100),refs}).strict()).max(8),
 }).strict()
 export type ProfileDraft=z.infer<typeof profileDraftSchema>
 export type ProfileInput=Pick<MemoryEntry,'id'|'version'|'content'|'origin'> & {observed_at?:string;source?:{project:string;document:string;kind?:'im'|'mail';relation?:'self'|'addressed'|'participant';sender_id?:string;sender_name?:string;thread_id?:string;message_id?:string;parent_id?:string;root_id?:string;upper_message_id?:string;recipient_ids?:string[];mention_ids?:string[]}}

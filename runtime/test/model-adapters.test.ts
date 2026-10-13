@@ -1,6 +1,8 @@
 import {GatewayProactivity} from '../src/model/proactivity.js'
 import {GatewayPersonalWriter} from '../src/model/personal-writer.js'
 import {GatewayTaskVerifier} from '../src/model/task-verifier.js'
+import {ProfileWarmup} from '../src/personal-agent/profile-warmup.js'
+import {NewsService} from '../src/news/service.js'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve,join } from 'node:path'
@@ -548,13 +550,14 @@ test('rule-based selection gives every kind of observation a share across the wh
  assert.ok(kinds.length>60&&kinds.length<=120);assert.ok(Math.min(...numbers)<150&&Math.max(...numbers)>750,'the sample spans the whole history')
 })
 
-test('a composition that overruns its reference and item counts is normalized instead of rejected',async()=>{
- const entries=Array.from({length:14},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i})),refs=entries.map((_,i)=>'e'+i)
- const overrun={about:{paragraphs:[...Array.from({length:8},(_,i)=>({text:'你在设计语音助手 '+i+'。',refs})),{text:'没有引用的段落。',refs:[]}]},work:Array.from({length:9},(_,i)=>({title:'主题'+i,text:'你在做主题 '+i+'。',refs})).concat([{title:'没有引用',text:'不能保留。',refs:[]}]),interests:Array.from({length:14},(_,i)=>({text:'兴趣'+i+'，'.repeat(120),refs}))}
+test('a composition that overruns its reference and item counts keeps only items it can cite in full',async()=>{
+ const entries=Array.from({length:14},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i})),all=entries.map((_,i)=>'e'+i),few=['e0','e1','e2']
+ const overrun={about:{paragraphs:[...Array.from({length:8},(_,i)=>({text:'你在设计语音助手 '+i+'。',refs:few})),{text:'没有引用的段落。',refs:[]}]},work:[...Array.from({length:9},(_,i)=>({title:'主题'+i,text:'你在做主题 '+i+'。',refs:i%2?all:few})),{title:'没有引用',text:'不能保留。',refs:[]}],interests:Array.from({length:14},(_,i)=>({text:'兴趣'+i,refs:i%2?all:few}))}
  const gateway=profileFixtureGateway(()=>overrun,()=>overrun)
  const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile(entries,new AbortController().signal)
- assert.ok(result.about);assert.ok(result.about.refs.length<=64);assert.equal(result.about.text.split('\n\n').length,6)
- const work=result.work??[];assert.equal(work.length,6);assert.ok(work.every(item=>item.refs.length<=8&&item.refs.length>0));assert.equal(result.interests.length,8)
+ assert.ok(result.about);assert.equal(result.about.text.split('\n\n').length,6)
+ const work=result.work??[];assert.equal(work.length,5,'items citing more than 8 messages are dropped whole, never trimmed');assert.ok(work.every(item=>item.refs.length===3))
+ assert.equal(result.interests.length,7);assert.ok(result.interests.every(item=>item.refs.length===3))
 })
 
 test('internal message keys and sender aliases never reach the profile prose',async()=>{
@@ -565,6 +568,42 @@ test('internal message keys and sender aliases never reach the profile prose',as
  const all=[result.about!.text,...(result.work??[]).flatMap(item=>[item.title,item.text]),...result.interests.map(item=>item.text)].join('\n')
  assert.doesNotMatch(all,/\be\d+\b|\bp[0-9a-f]{8}\b|（[\s,，、–—-]*）|\(\s*\)|\d+\.\d+\.\d+\.\d+/u)
  assert.match(all,/王敏思/u);assert.match(all,/崔子庄/u);assert.match(all,/Qwen3/u);assert.match(all,/e2e/u);assert.match(all,/Pi5/u)
+})
+
+test('a profile item is never kept with fewer citations than its prose needs, so withdrawing any source retires it',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'profile-withdraw-'))
+ const entries=Array.from({length:9},(_,i)=>({id:'source-'+i,version:1,origin:'inferred' as const,content:i===8?'项目九只有这份资料支持':'我在做项目'+i,source:{project:'synthetic',document:'doc-'+i}}))
+ const draft={about:null,work:[{title:'项目组合',text:'你在做项目零到项目八，也在做项目九。',refs:entries.map((_,i)=>'e'+i)}],interests:[]}
+ const gateway=profileFixtureGateway(()=>draft,()=>draft)
+ const writer=new GatewayPersonalWriter({gateway,model:'m'}),service=new ProfileWarmup(join(dir,'draft.json'),(input,signal)=>writer.generateProfile(input,signal),()=>{/* observer fixture */})
+ try{
+  await service.open();service.update(entries);await service.refresh()
+  const kept=service.snapshot().draft?.work??[]
+  assert.equal(kept.length,0,'a nine-citation item exceeds the eight-citation limit and must not survive with eight citations')
+ }finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a profile interest at the generation limit is accepted by the news module',async()=>{
+ const entries=[{id:'one',version:1,origin:'stated' as const,content:'我关注AI系统设计'}]
+ const within='关'.repeat(100)
+ const reply={about:null,work:[],interests:[{text:within,refs:['e0']}]}
+ const result=await new GatewayPersonalWriter({gateway:profileFixtureGateway(()=>reply,()=>({about:null,work:[],interests:[{text:within,refs:['e0']}]})),model:'m'}).generateProfile(entries,new AbortController().signal)
+ assert.equal(result.interests.length,1);assert.ok(result.interests.every(item=>item.text.length<=100),'the profile stays inside the news module limit')
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'profile-news-')),news=new NewsService({path:join(dir,'news.json'),changed:()=>{/* observer fixture */},firstRefreshMs:null})
+ try{await news.open?.();assert.equal(await news.seedInterests(result.interests.map(item=>item.text)),true,'every generated interest can seed the news module')}finally{await news.close?.();await rm(dir,{recursive:true,force:true})}
+})
+
+test('selection spends its budget across the whole history even when each observation cites several messages',async()=>{
+ const entries=Array.from({length:900},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i+' '+'内容'.repeat(5)}));const seen:number[]=[]
+ const gateway=profileFixtureGateway(request=>{
+  const input=JSON.parse(request.prompt) as {messages?:{id:string;text:string}[];entries?:{id:string;text:string}[]}
+  if(input.messages){const m=input.messages;return {facts:Array.from({length:Math.floor(m.length/3)},(_,i)=>({text:['【人】','【风】','【事】'][i%3]+'索引',refs:[m[i*3]!.id,m[i*3+1]!.id,m[i*3+2]!.id]}))}}
+  seen.push(...input.entries!.map(entry=>Number(/语音助手 (\d+)/u.exec(entry.text)![1])));return profileProse('你在设计语音助手。',['e0'])
+ })
+ await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile(entries,new AbortController().signal)
+ assert.ok(seen.length>=60&&seen.length<=120);const sorted=[...seen].sort((a,b)=>a-b)
+ assert.ok(sorted[0]!<150&&sorted[sorted.length-1]!>750,'the sample reaches both ends of the history')
+ const thirds=[0,1,2].map(third=>seen.filter(n=>n>=third*300&&n<(third+1)*300).length);assert.ok(thirds.every(count=>count>=seen.length*0.2),'no third of the history is starved: '+thirds.join('/'))
 })
 
 test('a durable summary store lets a repeated profile run skip batches that already succeeded',async()=>{
@@ -627,7 +666,7 @@ test('natural topic paragraphs preserve multi-message provenance without automat
 
 test('an invalid short interest retries only the whole editing call and does not repeat composition',async()=>{
  let compositions=0,edits=0
- const gateway=profileFixtureGateway(()=>{compositions++;return {about:null,work:[],interests:[{text:'AI系统设计',refs:['e0']}] }},request=>{edits++;const schema=request.jsonSchema as {properties:{profile:{properties:{interests:{items:{properties:{text:{maxLength:number}}}}}}}};assert.equal(schema.properties.profile.properties.interests.items.properties.text.maxLength,160);return {about:null,work:[],interests:[{text:edits===1?'x'.repeat(161):'AI系统设计',refs:['e0']}]}})
+ const gateway=profileFixtureGateway(()=>{compositions++;return {about:null,work:[],interests:[{text:'AI系统设计',refs:['e0']}] }},request=>{edits++;const schema=request.jsonSchema as {properties:{profile:{properties:{interests:{items:{properties:{text:{maxLength:number}}}}}}}};assert.equal(schema.properties.profile.properties.interests.items.properties.text.maxLength,100);return {about:null,work:[],interests:[{text:edits===1?'x'.repeat(101):'AI系统设计',refs:['e0']}]}})
  const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([{id:'design',version:1,origin:'stated',content:'我关注AI系统设计'}],new AbortController().signal)
  assert.equal(result.interests[0]?.text,'AI系统设计');assert.equal(edits,2);assert.equal(compositions,1)
 })
