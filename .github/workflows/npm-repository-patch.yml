@@ -19,6 +19,27 @@ jobs:
           node-version: '22'
           registry-url: https://registry.npmjs.org
       - run: npm install --global npm@11.6.0
+      - name: Verify renamed current and historical release download endpoints
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {releaseBaseUrl, resolveTarget} from './cli/src/target.mjs';
+          for (const version of ['0.4.0', '0.3.1']) {
+            for (const platform of ['darwin', 'win32', 'linux']) {
+              const {artifact} = resolveTarget(platform, platform === 'darwin' ? 'arm64' : 'x64', version);
+              const url = releaseBaseUrl(version) + '/' + artifact;
+              const checksum = await fetch(url + '.sha256', {signal: AbortSignal.timeout(30000)});
+              assert.equal(checksum.status, 200, artifact);
+              const text = (await checksum.text()).trim();
+              const digest = text.slice(0, 64);
+              assert.match(digest, /^[0-9a-f]{64}$/);
+              assert.ok(text === `${digest}  ${artifact}` || text === `${digest} *${artifact}`);
+              const binary = await fetch(url, {method: 'HEAD', signal: AbortSignal.timeout(30000)});
+              assert.equal(binary.status, 200, artifact);
+              console.log(`Verified public artifact and checksum endpoint: ${artifact}`);
+            }
+          }
+          JS
       - name: Test launcher and prepare audited patches from published 0.4.0 packages
         run: |
           set -euo pipefail
