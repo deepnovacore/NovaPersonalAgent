@@ -1,0 +1,40 @@
+name: Deprecate legacy npm names
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deprecate-legacy-npm-names
+  cancel-in-progress: false
+
+jobs:
+  deprecate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm-release
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+      - name: Verify replacements before deprecating old package names
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(npm view nova-personal-agent@0.4.0 version)" = "0.4.0"
+          test "$(npm view nova-personal-agent-server@0.4.0 version)" = "0.4.0"
+          prefix="$(mktemp -d)"
+          npm install --prefix "$prefix" --ignore-scripts nova-personal-agent@0.4.0 nova-personal-agent-server@0.4.0
+          test "$("$prefix/node_modules/.bin/novapersonal" --version)" = "0.4.0"
+          "$prefix/node_modules/.bin/novapersonal-server" --help
+          desktop_message='Renamed to nova-personal-agent. Run npm uninstall -g nova-audio-agent, then npm install -g nova-personal-agent@latest. Existing data and settings are preserved.'
+          server_message='Renamed to nova-personal-agent-server. Run npm uninstall -g nova-audio-agent-server, then npm install -g nova-personal-agent-server@latest. Existing data and settings are preserved.'
+          npm deprecate 'nova-audio-agent@*' "$desktop_message"
+          npm deprecate 'nova-audio-agent-server@*' "$server_message"
+          test "$(npm view nova-audio-agent@latest deprecated)" = "$desktop_message"
+          test "$(npm view nova-audio-agent-server@latest deprecated)" = "$server_message"
