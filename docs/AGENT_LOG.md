@@ -1,5 +1,11 @@
 # Agent work log
 
+## 2026-10-13 — Document public character asset review boundary
+
+- Separate public character-system capabilities from individually reviewed character/IP assets. New/unreviewed assets default to confidential, including names, derived media, prompts, previews and historical copies.
+- Added generic contributor and publication guidance only. No character assets, internal catalogue, private identifiers or private branch history are imported.
+- Validation: documentation diff/whitespace and pre-publication asset-history audit. No runtime behavior change, installer rebuild, GUI run or media generation. Existing HUD PR remains a separate merge-review concern.
+
 ## 2026-09-23 18:14 CST — Add importable orb skins and Jarvis particle core
 
 - Request: make skin switching/import a supported Nova feature, provide the Jarvis skin package, create an issue and push a feature branch.
