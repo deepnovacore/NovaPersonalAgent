@@ -138,10 +138,14 @@ jobs:
           if test "$npm_tag" = preview; then
             release_flags=(--prerelease --latest=false)
           fi
+          release_notes=(--notes "Nova Personal Agent v$RELEASE_VERSION. Install with npm install --global nova-personal-agent@$npm_tag. macOS arm64, Windows x64 and Ubuntu 22.04+ x64. Desktop applications are unsigned. See the README for setup and support boundaries.")
+          if test -f "docs/releases/v$RELEASE_VERSION.md"; then
+            release_notes=(--notes-file "docs/releases/v$RELEASE_VERSION.md")
+          fi
           gh release create "v$RELEASE_VERSION" release-artifacts/* \
             --target "$EXPECTED_COMMIT" \
             --title "Nova Personal Agent v$RELEASE_VERSION" \
-            --notes-file "docs/releases/v$RELEASE_VERSION.md" \
+            "${release_notes[@]}" \
             "${release_flags[@]}"
           tarball="$(find npm-package -maxdepth 1 -name '*.tgz' -type f)"
           tarball="$(realpath "$tarball")"

@@ -12,8 +12,8 @@ test('release commands publish previews without moving stable npm or GitHub late
     const workflow=await readFile(new URL('../../../.github/workflows/release-publish.yml',import.meta.url),'utf8')
     const script=workflow.split('      - name: Create GitHub release, publish npm package, and verify propagation')[1].split('        run: |\n')[1].split("          published=''")[0].replace(/^          /gm,'')
     for(const tool of ['gh','npm'])await writeFile(join(root,tool),`#!/usr/bin/env node\nrequire('node:fs').appendFileSync(process.env.CALLS,JSON.stringify([${JSON.stringify(tool)},...process.argv.slice(2)])+'\\n')\n`,{mode:0o755})
-    for(const [version,tag] of [['0.3.0-preview.1','preview'],['0.3.0','latest']]) {
-      const calls=join(root,`${tag}.jsonl`)
+    for(const [version,tag] of [['0.3.0-preview.1','preview'],['0.3.0','latest'],['0.4.0','latest']]) {
+      const calls=join(root,`${version}.jsonl`)
       const result=spawnSync('bash',['-c',`find() { echo /tmp/nova-test.tgz; }; realpath() { echo "$1"; };\n${script}`],{
         cwd:fileURLToPath(new URL('../../../',import.meta.url)),encoding:'utf8',
         env:{...process.env,PATH:`${root}:${process.env.PATH}`,CALLS:calls,RELEASE_VERSION:version,EXPECTED_COMMIT:'a'.repeat(40)},
@@ -24,7 +24,10 @@ test('release commands publish previews without moving stable npm or GitHub late
       assert.equal(release.includes('--prerelease'),tag==='preview')
       assert.ok(release.includes(tag==='preview'?'--latest=false':'--latest'))
       const publishes=commands.filter(args=>args[0]==='npm'&&args[1]==='publish')
-      assert.equal(publishes.length,2)
+      assert.equal(publishes.length,3)
+      assert.ok(publishes.some(args=>args[2].startsWith('./legacy-package/')))
+      assert.equal(release.includes('--notes-file'),version==='0.4.0')
+      assert.equal(release.includes('--notes'),version!=='0.4.0')
       for(const args of publishes)assert.equal(args[args.indexOf('--tag')+1],tag)
     }
   } finally {await rm(root,{recursive:true,force:true})}
