@@ -20,7 +20,7 @@ env:
 
 jobs:
   build:
-    if: (github.repository == 'deepnovacore/nova-personal-agent' || github.repository == 'deepnovacore/NovaAudioAgent') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v0.2.0dev' || github.ref == 'refs/heads/v0.3.0dev' || github.ref == 'refs/heads/v0.4.0dev' || github.event_name == 'pull_request')
+    if: github.repository == 'deepnovacore/NovaAudioAgent' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v0.2.0dev' || github.ref == 'refs/heads/v0.3.0dev' || github.ref == 'refs/heads/v0.4.0dev' || github.event_name == 'pull_request')
     runs-on: ubuntu-latest
     defaults:
       run:

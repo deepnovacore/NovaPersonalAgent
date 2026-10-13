@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   publish:
-    if: (github.repository == 'deepnovacore/nova-personal-agent' || github.repository == 'deepnovacore/NovaAudioAgent') && github.ref == 'refs/heads/main'
+    if: github.repository == 'deepnovacore/NovaAudioAgent' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: npm-release
     steps:

@@ -1,8 +1,8 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const PRODUCT_VERSION = '0.3.1'
-export const RELEASE_REPOSITORY = 'deepnovacore/nova-personal-agent'
+export const PRODUCT_VERSION = '0.4.0'
+export const RELEASE_REPOSITORY = 'deepnovacore/NovaAudioAgent'
 
 export function resolveTarget(platform = process.platform, arch = process.arch, version = PRODUCT_VERSION) {
   // Published releases retain their original asset and executable names.

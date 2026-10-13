@@ -4,17 +4,17 @@
 
 **English** · [简体中文](README.zh-CN.md)
 
-# NAA: Your Personal Agent and Voice Assistant
+# Nova Personal Agent: Your Personal Agent and Voice Assistant
 
 **Your personal agent and always-on voice assistant — aware of your context, with dual brains and restrained proactivity.**
 
-[![CI](https://github.com/deepnovacore/nova-personal-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/nova-personal-agent/actions/workflows/ci.yml)
+[![CI](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
-[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/nova-personal-agent/)
+[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaAudioAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
-**[Website](https://deepnovacore.github.io/nova-personal-agent/) · [Documentation](docs/en/README.md) · [Video demo](https://youtu.be/t1c-2O-QsxE)**
+**[Website](https://deepnovacore.github.io/NovaAudioAgent/) · [Documentation](docs/en/README.md) · [Video demo](https://youtu.be/t1c-2O-QsxE)**
 
 [Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [Use cases](#23-use-cases) · [Roadmap](#5-roadmap)
 
@@ -23,6 +23,8 @@
 ---
 
 ## News
+
+- **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.4.0)** — **Continuous context, ongoing work:** a persistent home and Timeline, scheduled tasks, incremental sources and Profile, and more coding agents.
 
 - **2026-10-09 · [v0.3.1](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.3.1)** — **A smoother start:** ready-to-use text chat and easier desktop upgrades.
 - **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.3.0)** — **Your personal agent:** Todos, Ideas, Goals, Feeds and Profile, with source-backed memory and evidence-checked tasks.
@@ -36,6 +38,16 @@
 - **2026-09-21 · [v0.2.2](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — Ubuntu desktop and a headless server with QR pairing.
 
 </details>
+
+## New in v0.4.0
+
+- **A persistent home for your work.** Keep talking to Nova beside a tabbed workspace; revisit context, evidence and task results in the full Timeline.
+- **Scheduled Agent Tasks.** Run a task once, daily or weekly, manage it from desktop or mobile, and receive its report in the main conversation. Runs and recovery state survive restarts.
+- **Understanding that builds over time.** Incremental source sync and resumable processing update an editable Profile, with references retained for correction and source withdrawal.
+- **More coding agents.** Choose Codex, OpenCode, CodeBuddy, Pi or DeepSeek Harness. Existing sessions retain their backend; ACP recovery and Windows native launching are improved.
+- **Guarded specialist execution.** Browser, computer and phone executors share approval, cancellation, screenshot evidence and result verification. GUI/device support remains experimental; see the [support boundaries](docs/en/executors/coding.md).
+
+The default message scope remains your own messages and direct mentions. Model-written profiles can be wrong: review their references. ACP permissions and live steering differ from Codex; see the coding guide.
 
 ## 1. Highlights
 
@@ -151,14 +163,13 @@ The front brain handles conversation; the back brain does the work. Task events 
 
 ### 3.1 Install and run
 
-Requirements: Node.js 22.13+, npm, Git, a logged-in `codex` executable (app-server is the only
-Codex transport).
+Requirements: Node.js 22.13+ and npm. For coding tasks, install and authenticate your chosen coding backend; Codex uses its app-server transport.
 
 Install the release with npm.
 
 ```bash
 npm install --global nova-personal-agent@latest
-# open the shipped app; the first launch asks for one DashScope API key
+# open the shipped app; configure a provider to enable voice
 novapersonal
 # open the settings panel in the app
 novapersonal config
@@ -166,10 +177,10 @@ novapersonal config
 novapersonal doctor
 ```
 
-The rename takes effect in v0.4; the new npm packages become installable after their first release. Published v0.3.x versions retain the old package names and `novaaudio` command. The new package keeps that command alias and reuses existing data and settings. When migrating an existing global install, first run `npm uninstall --global nova-audio-agent nova-audio-agent-server` to avoid command-link collisions; this leaves user data intact.
+v0.4 introduces the Nova Personal Agent package names. Published v0.3.x versions retain the old package names and `novaaudio` command. The new package keeps that command alias and reuses existing data and settings. When migrating an existing global install, first run `npm uninstall --global nova-audio-agent nova-audio-agent-server` to avoid command-link collisions; this leaves user data intact.
 
 
-Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-audio-agent@0.3.1`. Upgrades keep your settings and data; back up your Nova data before downgrading.
+Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-personal-agent@0.4.0`. Upgrades keep your settings and data; back up your Nova data before downgrading.
 
 Headless Ubuntu 22.04+ x64:
 
@@ -182,7 +193,7 @@ Headless Ubuntu 22.04+ x64:
 For development from source:
 
 ```bash
-git clone https://github.com/deepnovacore/nova-personal-agent.git nova-personal-agent
+git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-personal-agent
 cd nova-personal-agent
 npm ci && cp .env.example .env
 ```
@@ -215,7 +226,7 @@ The client includes microphone, camera, sound, settings and external MCP control
 | Cascaded ASR / TTS | Volcengine Speech, Gemini, self-hosted (reference: Whisper / Breeze) |
 | Cascaded LLM | DeepSeek, Qwen / DashScope, Volcengine Ark, OpenAI, Gemini, self-hosted |
 | Vision | Qwen-VL family, Doubao Seed |
-| Coding agent | Codex (v0.3.1); more backends planned for v0.4.0 |
+| Coding agent | Codex, OpenCode, CodeBuddy, Pi, DeepSeek Harness |
 | Sources | Local folders, Google via Composio, Apple Mail and Calendar (macOS), Feishu |
 
 Models, credentials and per-provider limits: [support matrix](docs/en/support-matrix.md).
@@ -229,11 +240,11 @@ Models, credentials and per-provider limits: [support matrix](docs/en/support-ma
 | [Getting started](docs/en/getting-started.md) | Setup and integrations |
 | [Workbench](docs/en/workbench.md) · [Tasks](docs/en/tasks.md) · [Sources and connectors](docs/en/sources-and-connectors.md) | The main window, delegated work, and what Nova may read |
 | [When should a voice agent speak?](docs/en/blog/2026-08-proactive-voice-agent-design-space.md) | Voice interaction design |
-| [Node runtime migration archive](https://github.com/deepnovacore/nova-personal-agent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
+| [Node runtime migration archive](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
 
 ## 5. Roadmap
 
-- [ ] **v0.4.0 — Specialist agents (in development).** Expand coding backends with OpenCode, CodeBuddy, Pi and DeepSeek Harness; add supervised GUI execution and specialist-agent collaboration. Finish recovery, refusal, cancellation, voice and supported-platform acceptance before release.
+- [x] **v0.4.0 — Ongoing context and specialist agents.** Persistent home and Timeline, scheduled tasks, incremental Profile updates and multiple coding backends. GUI/device execution remains experimental.
 - [ ] **v1.0.0 — Stable release.** Establish stable core behavior across supported platforms, reliable installation and upgrades, predictable recovery, and complete user documentation.
 
 Development integrations are not release guarantees. Features ship after their supported configurations pass acceptance.

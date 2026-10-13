@@ -1,109 +1,56 @@
 # Nova Personal Agent
 
-![Nova Personal Agent chalkboard architecture](https://raw.githubusercontent.com/deepnovacore/nova-personal-agent/main/assets/ideas/v3/nova-personal-agent-runtime-chalkboard.png)
+**Your personal agent and voice assistant: remembers context, keeps work moving, and leaves you in control.**
 
-**An always-on voice agent with restrained proactivity and voice-controlled workspaces.**
+[Website](https://deepnovacore.github.io/NovaAudioAgent/) · [Documentation](https://deepnovacore.github.io/NovaAudioAgent/en/docs/) · [GitHub](https://github.com/deepnovacore/NovaAudioAgent) · [简体中文](https://github.com/deepnovacore/NovaAudioAgent/blob/main/README.zh-CN.md)
 
-[![npm](https://img.shields.io/npm/v/nova-personal-agent.svg)](https://www.npmjs.com/package/nova-personal-agent)
-[![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://github.com/deepnovacore/nova-personal-agent/blob/main/LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](https://nodejs.org)
+![Nova personal agent architecture](https://raw.githubusercontent.com/deepnovacore/NovaAudioAgent/main/assets/architecture/nova-personal-agent.en.png)
 
-[Website](https://deepnovacore.github.io/nova-personal-agent/en) ·
-[GitHub](https://github.com/deepnovacore/nova-personal-agent) ·
-[简体中文](https://github.com/deepnovacore/nova-personal-agent/blob/main/README.zh-CN.md) ·
-[Watch the demo (Chinese)](https://youtu.be/t1c-2O-QsxE)
+## New in 0.4.0
 
-Nova (小诺) keeps a conversation going while longer tasks run in the background.
-It reports useful milestones, clarifies requests, and lets you steer work through
-voice without narrating every small step.
+- **Persistent conversation and Timeline.** Stay with Nova beside a tabbed workspace and return to context, evidence and task results.
+- **Scheduled Agent Tasks.** Run work once, daily or weekly; manage schedules on desktop or mobile and receive reports in the main conversation.
+- **Incremental understanding.** Authorized sources sync incrementally. Resumable processing builds an editable, source-backed Profile over time.
+- **Your choice of coding agent.** Use Codex, OpenCode, CodeBuddy, Pi or DeepSeek Harness; existing sessions keep their backend.
+- **Guarded execution.** Browser, computer and phone executors share approval, cancellation and evidence-based result checks. GUI/device support remains experimental.
 
-![Nova in conversation](https://raw.githubusercontent.com/deepnovacore/nova-personal-agent/v0.2.0/assets/features/conversation.en.png)
+Model-written profiles can be wrong; review their references. The default message scope is your own messages and direct mentions. ACP agents have different permission controls from Codex and do not support live steering. Read the [coding support matrix](https://deepnovacore.github.io/NovaAudioAgent/en/docs/executors/coding/).
 
-This package provides the `novapersonal` command, which installs and launches the
-desktop application. You do not need to clone or build the repository.
+## Install and start
 
-## Install
-
-Requires **Node.js 22.13.0 or newer**, npm, and **macOS on Apple Silicon**,
-**Windows x64**, or **Ubuntu 22.04+ x64** with a desktop session. Intel Macs and
-Linux ARM64 are not covered. Linux requires Chromium user namespaces to be
-permitted by the host or container policy.
-The application is not yet signed, so macOS Gatekeeper and Windows SmartScreen
-will warn on first launch.
+Requires **Node.js 22.13+**, npm, and **macOS Apple Silicon**, **Windows x64**, or an **Ubuntu 22.04+ x64 desktop**. Linux requires Chromium user namespaces permitted by the host. Desktop apps are unsigned; macOS Gatekeeper and Windows SmartScreen may warn on first launch.
 
 ```bash
-npm install --global nova-personal-agent
-```
-
-### Upgrading
-
-Quit Nova, then run `npm install --global nova-personal-agent@latest`. Pin a version with `nova-audio-agent@0.3.1`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
-
-For headless Ubuntu 22.04+ x64, use `npm install --global nova-personal-agent-server@latest`.
-
-## Configure
-
-Run `novapersonal`. The first launch downloads the app and opens a setup window
-that asks for one key and tests it before you start:
-
-- **[DashScope](https://platform.qianwenai.com)** — the default Qwen realtime voice service, plus memory, the camera and web search. Required.
-- **[Tavily](https://docs.tavily.com)** — web search through Tavily instead of Bailian. Optional.
-- **Codex** — a logged-in Codex executable, for coding tasks. Optional. See the [setup guide](https://deepnovacore.github.io/nova-personal-agent/en/docs/getting-started).
-
-Allow microphone access when prompted.
-
-## Run
-
-```
-
-The rename takes effect in v0.4; the new npm packages become installable after their first release. Published v0.3.x versions retain the old package names and `novaaudio` command. The new package keeps that command alias and reuses existing data and settings. When migrating an existing global install, first run `npm uninstall --global nova-audio-agent nova-audio-agent-server` to avoid command-link collisions; this leaves user data intact.
-bash
+npm install --global nova-personal-agent@latest
 novapersonal
 ```
 
-Hover over the desktop orb to reach its controls.
+The CLI downloads the matching desktop application from [GitHub Releases](https://github.com/deepnovacore/NovaAudioAgent/releases), checks its SHA-256 digest and launches it. No source checkout or build is needed. Configure your model/voice provider in Settings; coding tasks additionally require an installed and authenticated coding backend.
 
-## Why Nova?
+For a headless Ubuntu server, use [nova-personal-agent-server](https://www.npmjs.com/package/nova-personal-agent-server).
 
-- **Talk while work continues.** Long-running tasks execute in the background while Nova stays available for conversation.
-- **Progress worth hearing.** Restrained proactivity surfaces meaningful updates instead of reading out every coding event.
-- **Manage workspaces by voice.** Create or switch workspaces and sessions through proposals you confirm.
-- **Steer ongoing work.** The Codex integration uses its native app-server transport, so you can redirect a task while it runs.
+## Upgrade from Nova Audio Agent
+
+Nova Personal Agent reuses existing local data and encrypted settings. Quit the app before upgrading. When switching package names, remove the old package first to avoid command-link collisions:
+
+```bash
+npm uninstall --global nova-audio-agent
+npm install --global nova-personal-agent@latest
+```
+
+`novaaudio` remains a command alias. The old `nova-audio-agent` npm entry also provides the same 0.4.0 launcher for existing installations; install only one package name. Pin this release with `nova-personal-agent@0.4.0`. Back up Nova data before downgrading; an older executable does not roll back data changes.
 
 ## Commands
 
-| Command | What it does |
+| Command | Purpose |
 | --- | --- |
-| `novapersonal` or `novapersonal start` | Download the desktop app if needed, then launch it |
-| `novapersonal config` | Download the app if needed, then open its settings |
-| `novapersonal doctor` | Inspect platform support, local installation, and which keys the voice pipeline needs |
-| `novapersonal doctor --online` | Also test keys set in the environment against their provider |
-| `novapersonal --version` | Print the desktop release version used by the CLI |
+| `novapersonal` or `novapersonal start` | Download and launch the desktop app |
+| `novapersonal config` | Open desktop settings |
+| `novapersonal doctor` | Inspect platform support, installation and required voice keys |
+| `novapersonal doctor --online` | Also test provider keys from the environment |
+| `novapersonal --version` | Show the bundled release version |
 | `novapersonal --help` | Show command help |
 
-## How it works
+Downloads remain under `~/.nova-audio-agent/cli/releases/`; the product rename does not move user data.
 
-The CLI downloads the matching desktop release from
-[GitHub Releases](https://github.com/deepnovacore/nova-personal-agent/releases) into
-`~/.nova-audio-agent/cli/releases/` and verifies its published SHA-256 digest
-before launching it. It reuses the desktop client's encrypted settings store and
-never reads or prints secret values.
-
-Run `novapersonal doctor` to see which release is installed and which voice keys
-are still missing. `novapersonal config` opens the full settings for the other
-features.
-
-For headless Ubuntu 22.04+, install `nova-personal-agent-server` and use `novapersonal-server start`; `novapersonal-server pair wss://your-host.ts.net` shows a terminal pairing QR after configuring the service.
-
-## Learn more
-
-- [Getting started and integrations](https://deepnovacore.github.io/nova-personal-agent/en/docs/getting-started)
-- [How Nova works](https://deepnovacore.github.io/nova-personal-agent/en/docs/architecture)
-- [Design: when should a proactive voice agent speak?](https://github.com/deepnovacore/nova-personal-agent/blob/main/docs/en/blog/2026-08-proactive-voice-agent-design-space.md)
-- [Report an issue](https://github.com/deepnovacore/nova-personal-agent/issues)
-- [Build from source and contribute](https://github.com/deepnovacore/nova-personal-agent/blob/main/CONTRIBUTING.md)
-
-## License
-
-Copyright 2026 DeepNovaCore.
-[Apache License 2.0](https://github.com/deepnovacore/nova-personal-agent/blob/main/LICENSE).
+[Release notes](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.4.0) · [Report an issue](https://github.com/deepnovacore/NovaAudioAgent/issues) · [Apache-2.0 license](https://github.com/deepnovacore/NovaAudioAgent/blob/main/LICENSE)

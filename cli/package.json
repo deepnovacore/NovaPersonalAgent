@@ -1,6 +1,6 @@
 {
   "name": "nova-personal-agent",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Install and launch the Nova Personal Agent desktop client from the command line.",
   "type": "module",
   "bin": {
@@ -26,11 +26,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/deepnovacore/nova-personal-agent.git"
+    "url": "git+https://github.com/deepnovacore/NovaAudioAgent.git"
   },
-  "homepage": "https://deepnovacore.github.io/nova-personal-agent/",
+  "homepage": "https://deepnovacore.github.io/NovaAudioAgent/",
   "bugs": {
-    "url": "https://github.com/deepnovacore/nova-personal-agent/issues"
+    "url": "https://github.com/deepnovacore/NovaAudioAgent/issues"
   },
   "keywords": [
     "nova",

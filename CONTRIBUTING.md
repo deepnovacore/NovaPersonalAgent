@@ -8,7 +8,7 @@ architecture invariants matter more than any individual feature, so please read
 
 ```bash
 git clone \
-  https://github.com/deepnovacore/nova-personal-agent.git nova-personal-agent
+  https://github.com/deepnovacore/NovaAudioAgent.git nova-personal-agent
 cd nova-personal-agent
 npm ci
 cp .env.example .env

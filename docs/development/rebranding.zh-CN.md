@@ -1,6 +1,6 @@
 # Nova Personal Agent 改名与兼容范围
 
-v0.4 将项目名称统一为 Nova Personal Agent，仓库目标为 `deepnovacore/nova-personal-agent`。
+v0.4 将项目名称统一为 Nova Personal Agent，仓库目标为 `deepnovacore/NovaAudioAgent`。
 
 - npm：`nova-personal-agent`、`nova-personal-agent-server`；内部工作区统一为 `@nova-personal-agent/*`。
 - 命令：`novapersonal`、`novapersonal-server`；仅保留 `novaaudio`、`novaaudio-server` 两个安装命令别名。
@@ -8,13 +8,7 @@ v0.4 将项目名称统一为 Nova Personal Agent，仓库目标为 `deepnovacor
 - 现有环境变量没有带旧品牌的 `NOVA_AUDIO_*`；`NOVA_*`、模型提供方、路径与密钥变量保留原名。`.env.example` 和环境变量契约继续核验。
 - v0.3.x Release 资产及可执行文件保持原名；从 v0.4 开始使用新文件名。历史版本与记录不重写。
 - DEB 新包替换并冲突声明旧桌面包，避免两个安装同时管理同一应用身份。
-- GitHub 改名全局影响所有分支。官网构建以实际仓库名生成 Pages 路径，仓库限制临时接受旧、新地址。
-
-仓库内修改不会自动发布 npm、部署官网或修改 GitHub 仓库名。正式改 GitHub 后更新本地远端：
-
-```sh
-git remote set-url origin git@github.com:deepnovacore/nova-personal-agent.git
-```
+- GitHub 仓库仍为 `deepnovacore/NovaAudioAgent`，官网仍使用 `/NovaAudioAgent/`。产品与 npm 改名不改变仓库地址。
 
 已安装旧 npm 包时，先运行 `npm uninstall --global nova-audio-agent nova-audio-agent-server` 再安装新包，以避免旧命令别名的全局链接冲突；用户数据不会随包卸载删除。
 

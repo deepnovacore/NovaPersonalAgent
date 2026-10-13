@@ -25,14 +25,14 @@ npm install --global nova-personal-agent@latest
 novapersonal
 ```
 
-To upgrade, quit Nova and run the same command. Pin a version with `nova-audio-agent@0.3.1`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
+To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@0.4.0`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
 
 For headless Ubuntu 22.04+ x64, use `npm install --global nova-personal-agent-server@latest`.
 
 For development from source:
 
 ```bash
-git clone https://github.com/deepnovacore/nova-personal-agent.git nova-personal-agent
+git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-personal-agent
 cd nova-personal-agent
 npm ci
 cp .env.example .env

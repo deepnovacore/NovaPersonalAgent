@@ -4,17 +4,17 @@
 
 [English](README.md) · **简体中文**
 
-# NAA: Your Personal Agent and Voice Assistant
+# Nova Personal Agent: Your Personal Agent and Voice Assistant
 
 **你的个人 Agent 与常驻语音助手：理解上下文，前后双脑协作，主动有分寸。**
 
-[![CI](https://github.com/deepnovacore/nova-personal-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/nova-personal-agent/actions/workflows/ci.yml)
+[![CI](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
-[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/nova-personal-agent/)
+[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaAudioAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
-**[官网](https://deepnovacore.github.io/nova-personal-agent/) · [文档](docs/zh-CN/README.md) · [视频演示](https://youtu.be/t1c-2O-QsxE)**
+**[官网](https://deepnovacore.github.io/NovaAudioAgent/) · [文档](docs/zh-CN/README.md) · [视频演示](https://youtu.be/t1c-2O-QsxE)**
 
 [快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [使用案例](#23-使用案例) · [路线图](#5-路线图)
 
@@ -24,6 +24,7 @@
 
 ## News
 
+- **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.4.0)** — **持续理解，持续行动：** 主会话与 Timeline、定时任务、增量来源与画像，以及更多编码代理。
 - **2026-10-09 · [v0.3.1](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.3.1)** — **上手更顺畅：** 文字对话开箱即用，桌面端升级更省心。
 - **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.3.0)** — **你的个人 Agent：** 待办、想法、目标、资讯和 Profile，配合有出处的记忆与按证据核验的任务。
 - **2026-09-21 · [v0.2.0](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)** — **按你的方式对话：** 可配置 ASR / LLM / TTS、个人记忆、MCP 与 iPhone 客户端。
@@ -36,6 +37,16 @@
 - **2026-09-21 · [v0.2.2](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — Ubuntu 桌面端与支持扫码配对的无头服务。
 
 </details>
+
+## v0.4.0 新功能
+
+- **持续陪伴的主会话。** Nova 对话与标签工作区并排，完整 Timeline 保留上下文、来源证据和任务结果。
+- **定时 Agent 任务。** 支持单次、每日、每周运行，在桌面端或手机端管理，结果回到主会话；任务与恢复状态持久保存。
+- **逐步积累的理解。** 来源增量同步与可恢复的后台处理持续更新可编辑画像，保留引用，支持纠正与来源撤回。
+- **更多编码代理。** 可选 Codex、OpenCode、CodeBuddy、Pi 和 DeepSeek Harness；已有会话保持原后端，改进 ACP 恢复及 Windows 原生启动。
+- **有授权和证据的专长执行。** 浏览器、电脑、手机执行共享审批、取消、截图证据和结果核验。GUI/设备支持仍属实验能力，详见[支持边界](docs/zh-CN/executors/coding.md)。
+
+画像默认仍只使用你发送的消息及直接 @ 你的消息；模型归纳可能有误，请核对引用。ACP 的权限与运行中追加要求能力不同于 Codex，详见编码文档。
 
 ## 1. 核心特性
 
@@ -151,14 +162,14 @@
 
 ### 3.1 安装与启动
 
-环境要求：Node.js 22.13+、npm、Git、已登录的 `codex` 可执行文件（Codex 只走 app-server）
+环境要求：Node.js 22.13+ 与 npm。编码任务需安装并登录所选编码后端；Codex 使用 app-server。
 
 可直接用 npm 安装。
 
 ```bash
 # 全局安装
 npm install --global nova-personal-agent@latest
-# 启动客户端；首次启动会弹出设置窗口，填一个 DashScope 密钥即可
+# 启动客户端；语音功能需在设置中配置服务商
 novapersonal
 # 打开设置面板
 novapersonal config
@@ -166,10 +177,10 @@ novapersonal config
 novapersonal doctor
 ```
 
-改名从 v0.4 开始生效，新 npm 包需在首次发布后才能安装。已发布的 v0.3.x 仍使用旧包名和 `novaaudio`；新包保留该命令别名，并继续读取原有数据与设置。迁移已有全局安装时，先运行 `npm uninstall --global nova-audio-agent nova-audio-agent-server`，避免命令链接冲突；这不会删除用户数据。
+v0.4 开始使用 Nova Personal Agent 新包名。已发布的 v0.3.x 仍使用旧包名和 `novaaudio`；新包保留该命令别名，并继续读取原有数据与设置。迁移已有全局安装时，先运行 `npm uninstall --global nova-audio-agent nova-audio-agent-server`，避免命令链接冲突；这不会删除用户数据。
 
 
-升级前先退出 Nova，再运行上面的安装命令。如需固定版本，使用 `nova-audio-agent@0.3.1`。升级保留设置与数据；降级前请备份 Nova 数据。
+升级前先退出 Nova，再运行上面的安装命令。如需固定版本，使用 `nova-personal-agent@0.4.0`。升级保留设置与数据；降级前请备份 Nova 数据。
 
 Ubuntu 22.04+ x64 无头服务：
 
@@ -182,7 +193,7 @@ Ubuntu 22.04+ x64 无头服务：
 从源码开发时：
 
 ```bash
-git clone https://github.com/deepnovacore/nova-personal-agent.git nova-personal-agent
+git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-personal-agent
 cd nova-personal-agent
 npm ci && cp .env.example .env
 # 在 .env 中填入 DASHSCOPE_API_KEY
@@ -217,7 +228,7 @@ node runtime/dist/src/cli.js demo all
 | 级联 ASR / TTS | 火山语音、Gemini、自托管（参考实现：Whisper / Breeze） |
 | 级联 LLM | DeepSeek、Qwen / DashScope、火山方舟、OpenAI、Gemini、自托管 |
 | 视觉 | Qwen-VL 系列、Doubao Seed |
-| 编码 Agent | Codex（v0.3.1）；v0.4.0 扩展更多后端 |
+| 编码 Agent | Codex、OpenCode、CodeBuddy、Pi、DeepSeek Harness |
 | 数据源 | 本地文件夹、Google（经 Composio）、Apple 邮件与日历（macOS）、飞书 |
 
 各模型、凭据与服务商限制见[支持矩阵](docs/zh-CN/support-matrix.md)。
@@ -231,11 +242,11 @@ node runtime/dist/src/cli.js demo all
 | [上手指南](docs/zh-CN/getting-started.md) | 安装与集成 |
 | [Workbench](docs/zh-CN/workbench.md) · [任务](docs/zh-CN/tasks.md) · [资料来源与连接器](docs/zh-CN/sources-and-connectors.md) | 主窗口、交办的任务，以及 Nova 能读取哪些资料 |
 | [语音助手什么时候该开口？](docs/zh-CN/blog/2026-08-proactive-voice-agent-design-space.md) | 语音交互设计 |
-| [Node runtime 迁移归档](https://github.com/deepnovacore/nova-personal-agent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | `v0.1.0` tag 历史中的迁移期计划 |
+| [Node runtime 迁移归档](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | `v0.1.0` tag 历史中的迁移期计划 |
 
 ## 5. 路线图
 
-- [ ] **v0.4.0 — 专长 Agent 协作（开发中）。** 扩展 OpenCode、CodeBuddy、Pi、DeepSeek Harness 等编码后端，接入受监督的 GUI 执行与专长 Agent 协作；发布前完成恢复、拒绝、取消、语音及支持平台验收。
+- [x] **v0.4.0 — 持续上下文与专长 Agent。** 持续主会话与 Timeline、定时任务、增量画像及多编码后端；GUI/设备执行继续作为实验能力。
 - [ ] **v1.0.0 — 稳定版。** 核心行为与支持平台完成稳定性验收，安装升级可靠，恢复行为明确，用户文档完整。
 
 开发分支中的接入不等于正式版支持；各项能力完成对应配置的验收后再发布。

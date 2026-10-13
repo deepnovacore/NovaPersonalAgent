@@ -71,6 +71,11 @@ jobs:
             exit 1
           fi
           grep -q 'E404' npm-server-view-error.txt
+          if npm view "nova-audio-agent@$RELEASE_VERSION" version > existing-legacy-version.txt 2> npm-legacy-view-error.txt; then
+            echo "nova-audio-agent@$RELEASE_VERSION already exists" >&2
+            exit 1
+          fi
+          grep -q 'E404' npm-legacy-view-error.txt
           if gh release view "v$RELEASE_VERSION" >/dev/null 2>&1; then
             echo "GitHub release v$RELEASE_VERSION already exists" >&2
             exit 1
@@ -103,6 +108,23 @@ jobs:
           npm install --prefix npm-smoke --ignore-scripts "$tarball"
           test "$(npm-smoke/node_modules/.bin/novapersonal --version)" = "${{ inputs.release_version }}"
           npm-smoke/node_modules/.bin/novapersonal --help
+      - name: Pack and verify the legacy npm entry with the same launcher
+        run: |
+          set -euo pipefail
+          mkdir legacy-cli legacy-package legacy-smoke
+          tar -xzf npm-package/*.tgz -C legacy-cli --strip-components=1
+          node --input-type=module <<'JS'
+          import {readFileSync, writeFileSync} from 'node:fs';
+          const file = 'legacy-cli/package.json';
+          const pkg = JSON.parse(readFileSync(file, 'utf8'));
+          pkg.name = 'nova-audio-agent';
+          writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
+          JS
+          npm pack ./legacy-cli --ignore-scripts --pack-destination legacy-package
+          npm install --prefix legacy-smoke --ignore-scripts ./legacy-package/*.tgz
+          test "$(legacy-smoke/node_modules/.bin/novaaudio --version)" = "${{ inputs.release_version }}"
+          legacy-smoke/node_modules/.bin/novaaudio --help
+          diff cli/README.md legacy-smoke/node_modules/nova-audio-agent/README.md
       - name: Create GitHub release, publish npm package, and verify propagation
         env:
           GH_TOKEN: ${{ github.token }}
@@ -119,16 +141,18 @@ jobs:
           gh release create "v$RELEASE_VERSION" release-artifacts/* \
             --target "$EXPECTED_COMMIT" \
             --title "Nova Personal Agent v$RELEASE_VERSION" \
-            --notes "Nova Personal Agent v$RELEASE_VERSION. Install with npm install --global nova-personal-agent@$npm_tag. Available for macOS arm64, Windows x64 and Ubuntu 22.04+ x64. Desktop applications are unsigned; macOS Gatekeeper and Windows SmartScreen may display security warnings. See the README for features and setup." \
+            --notes-file "docs/releases/v$RELEASE_VERSION.md" \
             "${release_flags[@]}"
           tarball="$(find npm-package -maxdepth 1 -name '*.tgz' -type f)"
           tarball="$(realpath "$tarball")"
           npm publish "./release-artifacts/nova-personal-agent-server-$RELEASE_VERSION.tgz" --access public --tag "$npm_tag"
           npm publish "$tarball" --access public --tag "$npm_tag"
+          npm publish ./legacy-package/*.tgz --access public --tag "$npm_tag"
           published=''
           for attempt in $(seq 1 60); do
             if test "$(npm view "nova-personal-agent@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION" \
-              && test "$(npm view "nova-personal-agent-server@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION"; then
+              && test "$(npm view "nova-personal-agent-server@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION" \
+              && test "$(npm view "nova-audio-agent@$npm_tag" version --registry https://registry.npmjs.org 2>/dev/null || true)" = "$RELEASE_VERSION"; then
               published=1
               break
             fi
