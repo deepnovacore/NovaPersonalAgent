@@ -2,7 +2,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 export const PRODUCT_VERSION = '0.4.0'
-export const RELEASE_REPOSITORY = 'deepnovacore/NovaAudioAgent'
+export const RELEASE_REPOSITORY = 'deepnovacore/NovaPersonalAgent'
 
 export function resolveTarget(platform = process.platform, arch = process.arch, version = PRODUCT_VERSION) {
   // Published releases retain their original asset and executable names.
@@ -21,8 +21,7 @@ export function resolveTarget(platform = process.platform, arch = process.arch, 
 }
 
 export function releaseBaseUrl(version = PRODUCT_VERSION) {
-  const repository = /^0\.[0-3]\./u.test(version) ? 'deepnovacore/NovaAudioAgent' : RELEASE_REPOSITORY
-  return `https://github.com/${repository}/releases/download/v${version}`
+  return `https://github.com/${RELEASE_REPOSITORY}/releases/download/v${version}`
 }
 
 export function releaseRoot({

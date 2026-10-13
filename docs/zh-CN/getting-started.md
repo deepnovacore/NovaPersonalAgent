@@ -34,7 +34,7 @@ Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-personal-agent-s
 从源码开发：
 
 ```bash
-git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-personal-agent
+git clone https://github.com/deepnovacore/NovaPersonalAgent.git nova-personal-agent
 cd nova-personal-agent
 npm ci
 cp .env.example .env

@@ -2,9 +2,9 @@
 
 **Your personal agent and voice assistant: remembers context, keeps work moving, and leaves you in control.**
 
-[Website](https://deepnovacore.github.io/NovaAudioAgent/) · [Documentation](https://deepnovacore.github.io/NovaAudioAgent/en/docs/) · [GitHub](https://github.com/deepnovacore/NovaAudioAgent) · [简体中文](https://github.com/deepnovacore/NovaAudioAgent/blob/main/README.zh-CN.md)
+[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](https://deepnovacore.github.io/NovaPersonalAgent/en/docs/) · [GitHub](https://github.com/deepnovacore/NovaPersonalAgent) · [简体中文](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/README.zh-CN.md)
 
-![Nova personal agent architecture](https://raw.githubusercontent.com/deepnovacore/NovaAudioAgent/main/assets/architecture/nova-personal-agent.en.png)
+![Nova personal agent architecture](https://raw.githubusercontent.com/deepnovacore/NovaPersonalAgent/main/assets/architecture/nova-personal-agent.en.png)
 
 ## New in 0.4.0
 
@@ -14,7 +14,7 @@
 - **Your choice of coding agent.** Use Codex, OpenCode, CodeBuddy, Pi or DeepSeek Harness; existing sessions keep their backend.
 - **Guarded execution.** Browser, computer and phone executors share approval, cancellation and evidence-based result checks. GUI/device support remains experimental.
 
-Model-written profiles can be wrong; review their references. The default message scope is your own messages and direct mentions. ACP agents have different permission controls from Codex and do not support live steering. Read the [coding support matrix](https://deepnovacore.github.io/NovaAudioAgent/en/docs/executors/coding/).
+Model-written profiles can be wrong; review their references. The default message scope is your own messages and direct mentions. ACP agents have different permission controls from Codex and do not support live steering. Read the [coding support matrix](https://deepnovacore.github.io/NovaPersonalAgent/en/docs/executors/coding/).
 
 ## Install and start
 
@@ -25,7 +25,7 @@ npm install --global nova-personal-agent@latest
 novapersonal
 ```
 
-The CLI downloads the matching desktop application from [GitHub Releases](https://github.com/deepnovacore/NovaAudioAgent/releases), checks its SHA-256 digest and launches it. No source checkout or build is needed. Configure your model/voice provider in Settings; coding tasks additionally require an installed and authenticated coding backend.
+The CLI downloads the matching desktop application from [GitHub Releases](https://github.com/deepnovacore/NovaPersonalAgent/releases), checks its SHA-256 digest and launches it. No source checkout or build is needed. Configure your model/voice provider in Settings; coding tasks additionally require an installed and authenticated coding backend.
 
 For a headless Ubuntu server, use [nova-personal-agent-server](https://www.npmjs.com/package/nova-personal-agent-server).
 
@@ -53,4 +53,4 @@ npm install --global nova-personal-agent@latest
 
 Downloads remain under `~/.nova-audio-agent/cli/releases/`; the product rename does not move user data.
 
-[Release notes](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.4.0) · [Report an issue](https://github.com/deepnovacore/NovaAudioAgent/issues) · [Apache-2.0 license](https://github.com/deepnovacore/NovaAudioAgent/blob/main/LICENSE)
+[Release notes](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0) · [Report an issue](https://github.com/deepnovacore/NovaPersonalAgent/issues) · [Apache-2.0 license](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/LICENSE)

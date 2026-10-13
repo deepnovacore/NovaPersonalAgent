@@ -2,7 +2,7 @@
   "name": "@nova-personal-agent/desktop",
   "version": "0.4.0",
   "description": "Local-first ambient voice agent desktop client",
-  "homepage": "https://github.com/deepnovacore/NovaAudioAgent",
+  "homepage": "https://github.com/deepnovacore/NovaPersonalAgent",
   "author": {
     "name": "DeepNova Core",
     "email": "opensource@deepnovacore.ai"

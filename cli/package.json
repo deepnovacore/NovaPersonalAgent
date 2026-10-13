@@ -26,11 +26,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/deepnovacore/NovaAudioAgent.git"
+    "url": "git+https://github.com/deepnovacore/NovaPersonalAgent.git"
   },
-  "homepage": "https://deepnovacore.github.io/NovaAudioAgent/",
+  "homepage": "https://deepnovacore.github.io/NovaPersonalAgent/",
   "bugs": {
-    "url": "https://github.com/deepnovacore/NovaAudioAgent/issues"
+    "url": "https://github.com/deepnovacore/NovaPersonalAgent/issues"
   },
   "keywords": [
     "nova",

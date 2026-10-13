@@ -31,7 +31,7 @@ test('release and settings paths use the documented local roots', () => {
     desktopSettingsPath({platform: 'linux', home: '/tmp/home', environment: {}}),
     join('/tmp/home', '.config', 'Nova Audio Agent Ambient Orb', 'ambient-orb-settings.json'),
   )
-  assert.equal(releaseBaseUrl(), 'https://github.com/deepnovacore/NovaAudioAgent/releases/download/v0.4.0')
+  assert.equal(releaseBaseUrl(), 'https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0')
 })
 
 test('published package and release metadata use strict public allowlists', async () => {
@@ -54,9 +54,9 @@ test('published package and release metadata use strict public allowlists', asyn
 
 test('v0.4 targets use the new brand while published v0.3 downloads retain their filenames', () => {
   assert.equal(resolveTarget('darwin', 'arm64', '0.3.1').artifact, 'nova-audio-agent-0.3.1-macos-arm64-app.zip')
-  assert.equal(releaseBaseUrl('0.3.1'), 'https://github.com/deepnovacore/NovaAudioAgent/releases/download/v0.3.1')
+  assert.equal(releaseBaseUrl('0.3.1'), 'https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.3.1')
   assert.equal(resolveTarget('darwin', 'arm64', '0.4.0').artifact, 'nova-personal-agent-0.4.0-macos-arm64-app.zip')
   assert.equal(resolveTarget('win32', 'x64', '0.4.0-preview.1').executable, 'Nova Personal Agent Desktop.exe')
   assert.equal(resolveTarget('linux', 'x64', '0.4.0').artifact, 'nova-personal-agent-0.4.0-linux-x64.AppImage')
-  assert.equal(releaseBaseUrl('0.4.0'), 'https://github.com/deepnovacore/NovaAudioAgent/releases/download/v0.4.0')
+  assert.equal(releaseBaseUrl('0.4.0'), 'https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.4.0')
 })

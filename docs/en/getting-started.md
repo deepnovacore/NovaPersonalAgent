@@ -34,7 +34,7 @@ For headless Ubuntu 22.04+ x64, use `npm install --global nova-personal-agent-se
 For development from source:
 
 ```bash
-git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-personal-agent
+git clone https://github.com/deepnovacore/NovaPersonalAgent.git nova-personal-agent
 cd nova-personal-agent
 npm ci
 cp .env.example .env

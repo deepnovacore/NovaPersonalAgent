@@ -1,6 +1,6 @@
 # Nova Personal Agent 改名与兼容范围
 
-v0.4 将项目名称统一为 Nova Personal Agent，仓库目标为 `deepnovacore/NovaAudioAgent`。
+v0.4 将项目名称统一为 Nova Personal Agent，仓库目标为 `deepnovacore/NovaPersonalAgent`。
 
 - npm：`nova-personal-agent`、`nova-personal-agent-server`；内部工作区统一为 `@nova-personal-agent/*`。
 - 命令：`novapersonal`、`novapersonal-server`；仅保留 `novaaudio`、`novaaudio-server` 两个安装命令别名。
@@ -8,13 +8,15 @@ v0.4 将项目名称统一为 Nova Personal Agent，仓库目标为 `deepnovacor
 - 现有环境变量没有带旧品牌的 `NOVA_AUDIO_*`；`NOVA_*`、模型提供方、路径与密钥变量保留原名。`.env.example` 和环境变量契约继续核验。
 - v0.3.x Release 资产及可执行文件保持原名；从 v0.4 开始使用新文件名。历史版本与记录不重写。
 - DEB 新包替换并冲突声明旧桌面包，避免两个安装同时管理同一应用身份。
-- GitHub 仓库仍为 `deepnovacore/NovaAudioAgent`，官网仍使用 `/NovaAudioAgent/`。产品与 npm 改名不改变仓库地址。
+- 2026-10-13：GitHub 公共仓库已改为 `deepnovacore/NovaPersonalAgent`，官网 base path 同步为 `/NovaPersonalAgent/`。历史 Release 标签和资产保留，下载地址统一使用新仓库。
 
 已安装旧 npm 包时，先运行 `npm uninstall --global nova-audio-agent nova-audio-agent-server` 再安装新包，以避免旧命令别名的全局链接冲突；用户数据不会随包卸载删除。
 
 现有本地 checkout/worktree 目录无需移动；`internal-origin` 与个人 fork 不随公共仓库改名。本次不合入公司试点或改写 Git 历史。
 
-## 本次验证（2026-10-11）
+npm `0.4.1` 是仓库改名修订版：桌面下载仍为已发布的 `v0.4.0` 产物，`novapersonal --version` 继续显示桌面版本 `0.4.0`；服务端复用已发布载荷，仅修改包元数据和文档链接。
+
+## 历史验证记录（2026-10-11，仓库改名前）
 
 - 运行时完整测试：3,647 项，3,638 通过、9 跳过、0 失败。
 - 桌面构建通过；桌面完整测试：1,257 项，1,253 通过、3 跳过。唯一失败是未修改的 `macos-gui-native.test.mjs` 编译 Swift 夹具超过 60 秒；隔离重跑仍超时，未宣称该原生测试通过。
