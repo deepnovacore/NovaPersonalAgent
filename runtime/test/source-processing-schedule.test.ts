@@ -67,6 +67,13 @@ test('shared source mapping preserves addressed author and reply context with a 
  assert.equal(input.source?.relation,'addressed');assert.notEqual(input.source?.sender_id,'self');assert.equal(input.source?.sender_name,'陈宁');assert.deepEqual(input.source?.mention_ids,['self']);assert.deepEqual(input.source?.recipient_ids,['self']);assert.ok(input.source?.parent_id);assert.ok(input.source?.thread_id)
 })
 
+test('profile input tells the author, a direct request and another participant apart',()=>{
+ const make=(sender:string,mention:'direct'|'none')=>profileSourceInput({id:'e'+sender,hash:'v',raw_text:'先把版本锁定',observed_at:new Date().toISOString(),source_kind:'im',source_id:'s',source_metadata:{sender_id:sender,sender_name:sender,recipient_id:'me',account_id:'acct',mention,mention_ids:mention==='direct'?['me']:[],thread_id:'t',message_id:'m'+sender}})
+ const own=make('me','none'),direct=make('colleague','direct'),other=make('colleague','none')
+ assert.deepEqual([own,direct,other].map(item=>item.source?.relation),['self','addressed','participant'])
+ assert.equal(own.source?.sender_id,'self');assert.notEqual(other.source?.sender_id,'self');assert.equal(other.source?.document,'会话中他人的发言')
+})
+
 for(const bound of [true,false])test(`recipe change across restart retires its Task (batch bound=${bound})`,async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'source-recipe-')),db=new DatabaseSync(':memory:');initializeMemory(db)
  const prefix='personal:test:',provider='provider';let recipe='one',memory:PersonalMemoryResource|undefined
