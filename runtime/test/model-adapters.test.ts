@@ -525,6 +525,59 @@ test('Profile carries time, author, recipients and reply links while screening e
  const input=JSON.parse(requests[0]!.prompt) as {entries:{sender:string;relation:string;targets:string[]}[]};assert.equal(input.entries[0]!.sender,'self');assert.equal(input.entries[0]!.relation,'self');assert.equal(input.entries[0]!.targets.length,1)
 })
 
+test('a summary reply that overruns its limit or cites another batch is trimmed instead of failing the profile',async()=>{
+ const entries=Array.from({length:30},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i})),composed:string[][]=[]
+ const gateway=profileFixtureGateway(request=>{
+  const input=JSON.parse(request.prompt) as {messages?:{id:string}[];entries?:{id:string}[]}
+  if(input.messages)return {facts:[...Array.from({length:30},(_,i)=>({text:'index '+i,refs:[input.messages![i%input.messages!.length]!.id]})),{text:'cites a message outside the batch',refs:['e99999']},{text:'x'.repeat(400),refs:input.messages.slice(0,12).map(message=>message.id)},{text:'no support',refs:[]},{text:'',refs:[input.messages[0]!.id]}]}
+  composed.push((input.entries??[]).map(entry=>entry.id));return profileProse('你在设计语音助手。',['e0'])
+ })
+ const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile(entries,new AbortController().signal)
+ assert.ok(result.about);assert.ok(composed[0]!.length>0&&composed[0]!.length<=24,'only the first 24 valid facts support evidence')
+})
+
+test('rule-based selection gives every kind of observation a share across the whole history',async()=>{
+ const entries=Array.from({length:900},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i+' '+'内容'.repeat(600)}));const kinds:string[]=[]
+ const gateway=profileFixtureGateway(request=>{
+  const input=JSON.parse(request.prompt) as {messages?:{id:string}[];entries?:{id:string;text:string}[]}
+  if(input.messages)return {facts:input.messages.map((message,i)=>({text:['【人】','【风】','【事】'][i%3]+'索引',refs:[message.id]}))}
+  const picked=input.entries!;assert.ok(picked.length<=120);kinds.push(...picked.map(entry=>entry.text));return profileProse('你在设计语音助手。',['e0'])
+ })
+ await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile(entries,new AbortController().signal)
+ const numbers=kinds.map(text=>Number(/语音助手 (\d+)/u.exec(text)![1]))
+ assert.ok(kinds.length>60&&kinds.length<=120);assert.ok(Math.min(...numbers)<150&&Math.max(...numbers)>750,'the sample spans the whole history')
+})
+
+test('a composition that overruns its reference and item counts is normalized instead of rejected',async()=>{
+ const entries=Array.from({length:14},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i})),refs=entries.map((_,i)=>'e'+i)
+ const overrun={about:{paragraphs:[...Array.from({length:8},(_,i)=>({text:'你在设计语音助手 '+i+'。',refs})),{text:'没有引用的段落。',refs:[]}]},work:Array.from({length:9},(_,i)=>({title:'主题'+i,text:'你在做主题 '+i+'。',refs})).concat([{title:'没有引用',text:'不能保留。',refs:[]}]),interests:Array.from({length:14},(_,i)=>({text:'兴趣'+i+'，'.repeat(120),refs}))}
+ const gateway=profileFixtureGateway(()=>overrun,()=>overrun)
+ const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile(entries,new AbortController().signal)
+ assert.ok(result.about);assert.ok(result.about.refs.length<=64);assert.equal(result.about.text.split('\n\n').length,6)
+ const work=result.work??[];assert.equal(work.length,6);assert.ok(work.every(item=>item.refs.length<=8&&item.refs.length>0));assert.equal(result.interests.length,8)
+})
+
+test('internal message keys and sender aliases never reach the profile prose',async()=>{
+ const entries=Array.from({length:3},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i}))
+ const leaky=(text:string)=>({about:{paragraphs:[{text,refs:['e0']}]},work:[{title:'部署 e5',text:'你和徐经纬（p19220cb4）协作（e14、e40、e91）。',refs:['e1']}],interests:[{text:'人脸融合妆造参考图（e50, e51），区间（e12–e15）、（e3–e5，e9）、本地服务（如192.168.2.219:8080、10.0.0.5）',refs:['e2']}]})
+ const gateway=profileFixtureGateway(()=>leaky('你与王敏思（p01f93e57）和崔子庄 p19220cb4 协作，口型驱动限制（e110）要先验证，参考 Qwen3 与 e2e 测试和 Pi5。'))
+ const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile(entries,new AbortController().signal)
+ const all=[result.about!.text,...(result.work??[]).flatMap(item=>[item.title,item.text]),...result.interests.map(item=>item.text)].join('\n')
+ assert.doesNotMatch(all,/\be\d+\b|\bp[0-9a-f]{8}\b|（[\s,，、–—-]*）|\(\s*\)|\d+\.\d+\.\d+\.\d+/u)
+ assert.match(all,/王敏思/u);assert.match(all,/崔子庄/u);assert.match(all,/Qwen3/u);assert.match(all,/e2e/u);assert.match(all,/Pi5/u)
+})
+
+test('a durable summary store lets a repeated profile run skip batches that already succeeded',async()=>{
+ const stored=new Map<string,{text:string;refs:string[]}[]>();let summaries=0
+ const store={get:(key:string)=>Promise.resolve(stored.get(key)),set:(key:string,value:{text:string;refs:string[]}[])=>{stored.set(key,value);return Promise.resolve()}}
+ const gateway=profileFixtureGateway(request=>{const input=JSON.parse(request.prompt) as {messages?:{id:string}[]};if(input.messages){summaries++;return {facts:[{text:'index only',refs:[input.messages[0]!.id]}]}}return profileProse('你在设计语音助手。',['e0'])})
+ const entries=Array.from({length:30},(_,i)=>({id:'message-'+i,version:1,origin:'stated' as const,content:'我设计语音助手 '+i}))
+ await new GatewayPersonalWriter({gateway,model:'m',profileSummaryStore:store}).generateProfile(entries,new AbortController().signal)
+ const first=summaries;assert.ok(first>=1);assert.equal(stored.size,first)
+ await new GatewayPersonalWriter({gateway,model:'m',profileSummaryStore:store}).generateProfile(entries,new AbortController().signal)
+ assert.equal(summaries,first)
+})
+
 test('large Profile inputs cache unchanged selection summaries without treating their text as facts',async()=>{
  let summaries=0,finals=0
  const gateway=profileFixtureGateway(request=>{const input=JSON.parse(request.prompt) as {messages?:{id:string}[]};if(input.messages){summaries++;return {facts:[{text:'UNSUPPORTED_SUMMARY_INTERPRETATION',refs:[input.messages[0]!.id]}]}}finals++;assert(!request.prompt.includes('UNSUPPORTED_SUMMARY_INTERPRETATION'));return profileProse('你在设计语音助手。',['e0'])},request=>{finals++;assert(!request.prompt.includes('UNSUPPORTED_SUMMARY_INTERPRETATION'));return (JSON.parse(request.prompt) as {profile:ProfileProse}).profile})
@@ -574,24 +627,26 @@ test('natural topic paragraphs preserve multi-message provenance without automat
 
 test('an invalid short interest retries only the whole editing call and does not repeat composition',async()=>{
  let compositions=0,edits=0
- const gateway=profileFixtureGateway(()=>{compositions++;return {about:null,work:[],interests:[{text:'AI系统设计',refs:['e0']}] }},request=>{edits++;const schema=request.jsonSchema as {properties:{profile:{properties:{interests:{items:{properties:{text:{maxLength:number}}}}}}}};assert.equal(schema.properties.profile.properties.interests.items.properties.text.maxLength,100);return {about:null,work:[],interests:[{text:edits===1?'x'.repeat(101):'AI系统设计',refs:['e0']}]}})
+ const gateway=profileFixtureGateway(()=>{compositions++;return {about:null,work:[],interests:[{text:'AI系统设计',refs:['e0']}] }},request=>{edits++;const schema=request.jsonSchema as {properties:{profile:{properties:{interests:{items:{properties:{text:{maxLength:number}}}}}}}};assert.equal(schema.properties.profile.properties.interests.items.properties.text.maxLength,160);return {about:null,work:[],interests:[{text:edits===1?'x'.repeat(161):'AI系统设计',refs:['e0']}]}})
  const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([{id:'design',version:1,origin:'stated',content:'我关注AI系统设计'}],new AbortController().signal)
  assert.equal(result.interests[0]?.text,'AI系统设计');assert.equal(edits,2);assert.equal(compositions,1)
 })
 
-test('large Profile selection bounds originals and rekeys sparse references without losing versions',async()=>{
- const entries=Array.from({length:60},(_,i)=>({id:'message-'+i,version:i+1,origin:'stated' as const,content:'original content '+i}))
- let selections=0
+test('large Profile selection bounds originals by rule and rekeys them without losing versions',async()=>{
+ const entries=Array.from({length:150},(_,i)=>({id:'message-'+i,version:i+1,origin:'stated' as const,content:'original content '+i}))
+ let selections=0,composed=0
  const gateway=profileFixtureGateway(request=>{
   const input=JSON.parse(request.prompt) as {messages?:{id:string}[];entries?:{id:string;text:string}[]}
-  if(input.messages)return {facts:Array.from({length:8},(_,i)=>({text:'selection index only',refs:input.messages!.slice(i*8,i*8+8).map(entry=>entry.id)})).filter(fact=>fact.refs.length)}
-  if(request.system.includes('只选择画像')){selections++;return {refs:['e59','e3','e24']}}
-  assert.deepEqual(input.entries?.map(entry=>entry.id),['e0','e1','e2']);assert.equal(input.entries?.[2]?.text,'original content 59');return profileProse('你在打磨自己的项目。',['e2'])
+  if(input.messages)return {facts:input.messages.map((entry,i)=>({text:(['【事】','【人】','【风】'][i%3])+'索引',refs:[entry.id]}))}
+  if(request.system.includes('只选择画像'))selections++
+  composed++;const ids=input.entries!.map(entry=>entry.id)
+  assert.ok(ids.length>0&&ids.length<=120);assert.deepEqual(ids,ids.map((_,i)=>'e'+i))
+  const last=input.entries![ids.length-1]!;return profileProse('你在打磨自己的项目。',[last.id])
  })
  const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile(entries,new AbortController().signal)
- assert.equal(selections,1);assert.deepEqual(result.about?.refs,[{entry_id:'message-59',version:60}])
+ assert.equal(selections,0,'selection no longer costs a model call');assert.equal(composed,1)
+ const ref=result.about!.refs[0]!;assert.match(ref.entry_id,/^message-\d+$/);assert.equal(ref.version,Number(ref.entry_id.slice(8))+1)
 })
-
 
 test('a configured independent Profile editor receives originals and does not replace composition or other writers',async()=>{
  let compositions=0,edits=0

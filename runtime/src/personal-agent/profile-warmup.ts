@@ -5,12 +5,12 @@ import {versionSchema} from './contracts.js'
 import type {MemoryEntry} from '../memory/entry.js'
 const refs=z.array(z.object({entry_id:z.string().min(1).max(256),version:versionSchema}).strict()).min(1).max(8)
 export const profileDraftSchema=z.object({
- about:z.object({text:z.string().trim().min(1).max(800),refs:z.array(refs.element).min(1).max(32)}).strict().nullable(),
+ about:z.object({text:z.string().trim().min(1).max(2600),refs:z.array(refs.element).min(1).max(64)}).strict().nullable(),
  work:z.array(z.object({title:z.string().trim().min(1).max(80),text:z.string().trim().min(1).max(500),refs}).strict()).max(6).default([]),
- interests:z.array(z.object({text:z.string().trim().min(1).max(100),refs}).strict()).max(8),
+ interests:z.array(z.object({text:z.string().trim().min(1).max(160),refs}).strict()).max(8),
 }).strict()
 export type ProfileDraft=z.infer<typeof profileDraftSchema>
-export type ProfileInput=Pick<MemoryEntry,'id'|'version'|'content'|'origin'> & {observed_at?:string;source?:{project:string;document:string;kind?:'im'|'mail';relation?:'self'|'addressed';sender_id?:string;sender_name?:string;thread_id?:string;message_id?:string;parent_id?:string;root_id?:string;upper_message_id?:string;recipient_ids?:string[];mention_ids?:string[]}}
+export type ProfileInput=Pick<MemoryEntry,'id'|'version'|'content'|'origin'> & {observed_at?:string;source?:{project:string;document:string;kind?:'im'|'mail';relation?:'self'|'addressed'|'participant';sender_id?:string;sender_name?:string;thread_id?:string;message_id?:string;parent_id?:string;root_id?:string;upper_message_id?:string;recipient_ids?:string[];mention_ids?:string[]}}
 export type ProfileGenerator=(entries:readonly ProfileInput[],signal:AbortSignal)=>Promise<z.input<typeof profileDraftSchema>>
 export interface ProfileOutcome {outcome:'ok'|'timeout'|'aborted'|'schema'|'evidence'|'consent'|'provider'|'persist';latency_ms:number;items:number}
 export interface ProfileWarmupOptions {report?:(outcome:ProfileOutcome)=>void;timeoutMs?:number;backoffMs?:readonly number[];minIntervalMs?:number}
