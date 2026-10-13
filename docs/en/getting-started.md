@@ -27,6 +27,8 @@ novapersonal
 
 To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@0.4.0`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
 
+When switching from `nova-audio-agent`, first run `npm uninstall --global nova-audio-agent` to avoid command-link collisions, then install the new package. This preserves your local data and settings.
+
 For headless Ubuntu 22.04+ x64, use `npm install --global nova-personal-agent-server@latest`.
 
 For development from source:

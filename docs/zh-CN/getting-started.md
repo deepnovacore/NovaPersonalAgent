@@ -27,6 +27,8 @@ novapersonal
 
 升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@0.4.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。
 
+从 `nova-audio-agent` 切换包名时，请先运行 `npm uninstall --global nova-audio-agent`，再安装新包，以免命令链接冲突；本地数据与设置会保留。
+
 Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-personal-agent-server@latest`。
 
 从源码开发：
