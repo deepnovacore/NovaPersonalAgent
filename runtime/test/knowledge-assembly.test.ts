@@ -12,13 +12,13 @@ import {prepareManagedCodexMcp, managedMcpConfigToml, managedMcpEnvironment} fro
 
 test('knowledge disabled allocates nothing', async () => {
   assert.ok(!frontendInstructions().includes('mcp__nova_knowledge__recall'))
-  assert.ok(frontendInstructions({knowledge: true}).includes('mcp__nova_knowledge__recall'))
+  assert.ok(frontendInstructions({knowledge: true}).includes('memory__evidence'))
   const capabilities = parseCapabilityRegistry({version: 1, modules: {knowledge: {enabled: false}}}, {})
   const settings = settingsSchema.parse({executors: []})
   assert.equal(await prepareKnowledge(settings, capabilities), undefined)
 })
 
-test('prepared knowledge contributes exactly its read-only MCP tool and closes with assembly', async () => {
+test('prepared knowledge contributes unified recall instead of a separate frontend storage tool and closes with assembly', async () => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-assembly-'))
   const capabilities = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: true}}}, {})
   const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', knowledge_path: join(directory, 'private', 'knowledge.sqlite')})
@@ -28,7 +28,9 @@ test('prepared knowledge contributes exactly its read-only MCP tool and closes w
     try {
       const assembly = buildAssembly({settings, capabilities, knowledge})
       const tools = [...assembly.tools.bindings.keys()]
-      assert.ok(tools.includes('mcp__nova_knowledge__recall'))
+      assert.ok(!tools.includes('mcp__nova_knowledge__recall'))
+      assert.ok(tools.includes('memory__recall'))
+      assert.ok(tools.includes('memory__evidence'))
       assert.ok(!tools.includes('knowledge__recall'))
       assert.ok(!tools.includes('mcp__nova_knowledge__get_chunk'))
       assert.deepEqual(knowledge.codexEntries, {})

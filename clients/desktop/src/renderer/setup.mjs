@@ -2,7 +2,7 @@ import {localizeDocument, t} from './locale.mjs'
 localizeDocument(document)
 
 // First run asks only for the chosen pipeline's keys; everything else stays in Settings.
-const api = window.novaAudioAgentDesktop.setup
+const api = window.novaPersonalAgentDesktop.setup
 const LLM_KEYS = Object.freeze({qwen: 'dashscopeApiKey', deepseek: 'deepseekApiKey', ark: 'arkApiKey'})
 const PROBE_TEXT = Object.freeze({
   ok: () => t("密钥有效"),
@@ -135,6 +135,7 @@ api.onChanged(update)
 
 const initial = await api.status()
 view = initial
-document.querySelector(`input[name="pipeline"][value="${initial.pipelineMode === 'cascaded' ? 'cascaded' : 'integrated'}"]`).checked = true
+const initialPipeline = initial.pipelineMode === 'cascaded' && ['deepseekApiKey', 'arkApiKey', 'doubaoBigmodelApiKey'].some(key => initial.secretsPresent?.[key]) ? 'cascaded' : 'integrated'
+document.querySelector(`input[name="pipeline"][value="${initialPipeline}"]`).checked = true
 if (Object.hasOwn(LLM_KEYS, initial.cascadedLlmProvider)) llmSelect.value = initial.cascadedLlmProvider
 render()

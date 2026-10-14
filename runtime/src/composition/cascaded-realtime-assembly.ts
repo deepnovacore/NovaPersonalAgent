@@ -1,3 +1,13 @@
+import {SelfHostedAsrClient} from '../realtime/cascaded/self-hosted-asr.js'
+import {SelfHostedTtsClient} from '../realtime/cascaded/self-hosted-tts.js'
+import type {SelfHostedSpeechConfig} from '../config/cascaded-realtime-config.js'
+import {createGeminiAsrFactory,createGeminiTtsFactory} from '../realtime/cascaded/gemini-speech.js'
+import type {GeminiSpeechConfig} from '../config/cascaded-realtime-config.js'
+import {createOpenAIWireProfile} from '../realtime/openai-wire-profile.js'
+import {GeminiLiveAdapter} from '../realtime/gemini.js'
+import {OPENAI_BASE_URL,GEMINI_BASE_URL} from '../config/config.js'
+import type {CommittedConversationPair} from '../realtime/history.js'
+import {transcribeDraft} from '../realtime/cascaded/transcribe.js'
 import type {PromptLanguage} from '../realtime/prompt-language.js'
 import type {RealtimeTelemetry} from '../realtime/telemetry.js'
 import {supportsVision} from '../model/vision-capability.js'
@@ -6,12 +16,11 @@ import {usageReporterForEndpoint, type UsageReporter} from '../realtime/usage.js
 import {
   capabilitiesFromSettings,
   resolveSupportModelConnection,
-  type CascadedAsrProviderName,
   type CascadedEndpointingProviderName,
   type CascadedLlmProviderName,
-  type CascadedTtsProviderName,
   type Settings,
   DASHSCOPE_COMPATIBLE_BASE_URL,
+  STEPFUN_COMPATIBLE_BASE_URL,
   requireQwenRealtime,
   type QwenRealtimeConfig,
   ConfigurationError,
@@ -21,6 +30,8 @@ import {
 import {buildAssembly, type AssemblyOptions} from './assembly.js'
 import {
   requireSelectedCascadedRealtimeConfig,
+  requireSelectedCascadedLlmConfig,
+  requireSelectedCascadedAsrConfig,
   type ArkCascadedLlmConfig,
   type AutoEndpointingConfig,
   type QwenCascadedLlmConfig,
@@ -50,7 +61,7 @@ import {
   type TtsClient,
   type TtsFactory,
 } from '../realtime/cascaded/ports.js'
-import {CascadedRealtimeError} from '../realtime/cascaded/adapter.js'
+import {CascadedRealtimeAdapter,CascadedRealtimeError} from '../realtime/cascaded/adapter.js'
 import {CascadedRealtimeProvider} from '../realtime/cascaded/provider.js'
 import {createQwenCascadedLlmFactory} from '../realtime/cascaded/qwen-llm.js'
 import {frontendInstructions} from '../realtime/frontend-instructions.js'
@@ -66,6 +77,7 @@ import {SilenceVolcEndpointing} from '../realtime/volcengine/silence-endpointing
 import {DoubaoTtsClient} from '../realtime/volcengine/tts.js'
 import {type RealtimeProvider} from '../realtime/protocol.js'
 import {QwenAudioRealtimeAdapter, type QwenConnector} from '../realtime/qwen.js'
+import {createStepFunWireProfile, type IntegratedWireProfile} from '../realtime/integrated-wire-profile.js'
 import {webSocketQwenConnector} from '../realtime/qwen-transport.js'
 
 export type {
@@ -111,9 +123,6 @@ export interface BuildCascadedRealtimeAssemblyOptions
     | 'controlledPreemptiveAlertReconnect'
     | 'preemptiveAlertHistoryRecovery'
     | 'preemptiveAlertHistoryPairs'
-    | 'controlledGuardReconnect'
-    | 'guardHistoryRecovery'
-    | 'guardHistoryPairs'
   > {
   readonly registries?: CascadedProviderRegistries
   readonly supportGateway?: ModelGateway
@@ -170,18 +179,12 @@ export interface CascadedProviderRegistries {
     CascadedEndpointingProviderName,
     (input: AutoEndpointingFactoryInput) => EndpointingFactory
   >>
-  readonly asr: Readonly<Record<
-    CascadedAsrProviderName,
-    (input: VolcengineAsrFactoryInput) => AsrFactory
-  >>
+  readonly asr: Readonly<{volcengine:(input:VolcengineAsrFactoryInput)=>AsrFactory; gemini:(input:GeminiSpeechFactoryInput)=>AsrFactory; 'self-hosted':(input:{config:SelfHostedSpeechConfig})=>AsrFactory}>
   readonly llm: Readonly<{
     readonly qwen: (input: QwenLlmFactoryInput) => CascadedLlmFactory
     readonly ark: (input: ArkLlmFactoryInput) => CascadedLlmFactory
   }>
-  readonly tts: Readonly<Record<
-    CascadedTtsProviderName,
-    (input: VolcengineTtsFactoryInput) => TtsFactory
-  >>
+  readonly tts: Readonly<{volcengine:(input:VolcengineTtsFactoryInput)=>TtsFactory; gemini:(input:GeminiSpeechFactoryInput)=>TtsFactory; 'self-hosted':(input:{config:SelfHostedSpeechConfig})=>TtsFactory}>
 }
 
 export const cascadedProviderRegistries: CascadedProviderRegistries = Object.freeze({
@@ -202,6 +205,8 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
     },
   }),
   asr: Object.freeze({
+    'self-hosted':(input:{config:SelfHostedSpeechConfig})=>({openClient:()=>new SelfHostedAsrClient(input.config)}),
+    gemini:(input:GeminiSpeechFactoryInput)=>createGeminiAsrFactory({...input.config,...(input.onUsage?{onUsage:input.onUsage}:{})}),
     volcengine: (input: VolcengineAsrFactoryInput) => ({
       openClient: () => (input.clientFactory ?? defaultAsrClient)({
         ...(input.onUsage === undefined ? {} : {onUsage: input.onUsage}),
@@ -229,6 +234,8 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
     }),
   }),
   tts: Object.freeze({
+    'self-hosted':(input:{config:SelfHostedSpeechConfig})=>({openClient:()=>new SelfHostedTtsClient(input.config)}),
+    gemini:(input:GeminiSpeechFactoryInput)=>createGeminiTtsFactory({...input.config,...(input.onUsage?{onUsage:input.onUsage}:{})}),
     volcengine: (input: VolcengineTtsFactoryInput) => ({
       openClient: () => (input.clientFactory ?? defaultTtsClient)({
         ...(input.onUsage === undefined ? {} : {onUsage: input.onUsage}),
@@ -238,6 +245,39 @@ export const cascadedProviderRegistries: CascadedProviderRegistries = Object.fre
     }),
   }),
 })
+
+/** Shared desktop host graph: text only; scoped voice graphs are constructed on explicit voice start. */
+export function buildTextRealtimeAssembly(
+  options:BuildCascadedRealtimeAssemblyOptions,
+  registry:CascadedProviderRegistries=options.registries??cascadedProviderRegistries,
+):RealtimeAssembly {
+  options=filterDisabledCoding(options)
+  validateCodingResource(options)
+  const selected=requireSelectedCascadedLlmConfig(options.settings)
+  const clock=options.clock??new RealClock(),ids=options.ids??new MonotonicIdFactory()
+  const capabilities=options.capabilities??capabilitiesFromSettings(options.settings)
+  const instructions=frontendInstructions({search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled},(options.executorApproval??options.codexResource?.approvalController)!=null)
+  const common={clock,ids,instructions,...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!})}
+  const llmFactory=selected.provider!=='ark'
+    ?registry.llm.qwen({...common,config:selected.config,...(options.qwenLlmFactory===undefined?{}:{factory:options.qwenLlmFactory})})
+    :registry.llm.ark({...common,config:selected.config,...(options.arkLlmFactory===undefined?{}:{factory:options.arkLlmFactory})})
+  const support=supportComposition(options,selected.provider,selected.config.model,selected.config.apiKey,selected.config.baseUrl,clock)
+  const core=buildAssembly({...options,settings:support.settings,clock,ids,gateway:support.gateway,...((options.executors===undefined&&options.codexResource===undefined)?{}:{executors:[...(options.executors??[]),...(options.codexResource===undefined?[]:[options.codexResource.adapter])]})})
+  const provider=Object.assign(new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,llm:llmFactory.open(),llmFactory,idFactory:()=>ids.next('text'),
+    ...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),
+  }),{
+    transcribeDraft:(pcm:Uint8Array,signal:AbortSignal)=>{
+      signal.throwIfAborted()
+      const config=requireSelectedCascadedAsrConfig(options.settings)
+      const factory=selectedAsrFactory(registry,{config,ids,...(options.asrClient===undefined?{}:{clientFactory:options.asrClient}),...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,config.endpoint)!})})
+      return transcribeDraft(factory.openClient(),pcm,signal)
+    },
+  })
+  const intake=options.intake??defaultIntake(core,support.gateway,support.settings)
+  const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
+  const composition=composeRealtime(core,provider,{...options,memoryReadMode:'voice',...(createPersonalMemory===undefined?{}:{createPersonalMemory}),...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4})
+  return composition
+}
 
 export function buildCascadedRealtimeAssembly(
   options: BuildCascadedRealtimeAssemblyOptions,
@@ -256,6 +296,7 @@ export function buildCascadedRealtimeAssembly(
     search: capabilities.modules.search.enabled,
     camera: options.cameraModuleEnabled ?? capabilities.modules.camera.enabled,
     coding: capabilities.modules.coding.enabled,
+    gui: options.settings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)),
     knowledge: capabilities.modules.knowledge.enabled,
   }, (options.executorApproval ?? options.codexResource?.approvalController) != null)
 
@@ -267,7 +308,7 @@ export function buildCascadedRealtimeAssembly(
       : {capability: options.endpointingCapability}),
     ...(options.liveKitExecutor === undefined ? {} : {liveKitExecutor: options.liveKitExecutor}),
   })
-  const asrFactory = registry.asr[selection.asrProvider]({
+  const asrFactory = selectedAsrFactory(registry,{
     ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, selected.asr.endpoint)!}),
     config: selected.asr,
     ids,
@@ -297,7 +338,7 @@ export function buildCascadedRealtimeAssembly(
     if (next !== instructions) { instructions = next; selectedLlmFactory = createLlmFactory() }
     return selectedLlmFactory.open()
   }}
-  const ttsFactory = registry.tts[selection.ttsProvider]({
+  const ttsFactory = selectedTtsFactory(registry,{
     ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, selected.tts.endpoint)!}),
     config: selected.tts,
     ids,
@@ -334,16 +375,17 @@ export function buildCascadedRealtimeAssembly(
     idFactory: () => ids.next('cascaded'),
   })
   const intake = options.intake ?? defaultIntake(core, support.gateway, support.settings)
-  return composeRealtime(core, provider, {
+  const composition = composeRealtime(core, provider, {
     ...options,
     ...(intake === undefined ? {} : {intake}),
+    ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
     idFactory: () => ids.next('realtime'),
   }, {
     controlledPreemptiveAlertReconnect: false,
     preemptiveAlertHistoryRecovery: 'none',
     preemptiveAlertHistoryPairs: 4,
-    ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
   })
+  return composition
 }
 
 function supportComposition(
@@ -364,7 +406,9 @@ function supportComposition(
   const gateway = new OpenAIModelGateway({
     baseUrl: connection.baseUrl,
     apiKey: connection.apiKey,
-    ...(connection.source !== 'generic' && provider === 'deepseek' ? {thinkingControl: 'deepseek' as const} : {}),
+    allowAnonymous: provider === 'self-hosted' && connection.source === 'selected_provider',
+    redirect: provider === 'self-hosted' && connection.source === 'selected_provider' ? 'error' : 'follow',
+    ...(connection.source !== 'generic' && (provider === 'deepseek'||provider === 'openai'||provider === 'qwen') ? {thinkingControl: provider} : {}),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })
@@ -374,9 +418,10 @@ function supportComposition(
   const settings = Object.create(options.settings) as Settings
   Object.assign(settings, {
     watch_model: watchModel,
-    surrogate_model: model,
+    support_model: model,
     planner_model: stripLikePython(options.settings.planner_model) || model,
-    compressor_model: model,
+    compressor_model: provider !== 'qwen' && options.settings.compressor_model === 'qwen-flash'
+      ? model : options.settings.compressor_model,
   })
   Object.freeze(settings)
   return {settings, gateway}
@@ -405,6 +450,8 @@ const defaultAsrClient: CascadedAsrClientFactory = input => new DoubaoAsrClient(
   apiKey: input.config.apiKey,
   resourceId: input.config.resourceId,
   chunkMs: input.config.chunkMs,
+  ...(input.config.voiceprint ? {voiceprint: input.config.voiceprint} : {}),
+  ...(input.config.voiceprintHealthUrl ? {voiceprintHealthUrl: input.config.voiceprintHealthUrl} : {}),
   idFactory: input.idFactory,
 })
 
@@ -441,9 +488,6 @@ export interface BuildQwenRealtimeAssemblyOptions
     | 'controlledPreemptiveAlertReconnect'
     | 'preemptiveAlertHistoryRecovery'
     | 'preemptiveAlertHistoryPairs'
-    | 'controlledGuardReconnect'
-    | 'guardHistoryRecovery'
-    | 'guardHistoryPairs'
   > {
   /** Deterministic test seam; production uses the bounded WebSocket connector. */
   readonly connector?: QwenConnector
@@ -457,6 +501,7 @@ export interface BuildQwenRealtimeAssemblyOptions
 
 /** Narrow provider-only form used by the integrated provider registry. */
 export interface BuildQwenRealtimeProviderOptions {
+  readonly history?:readonly CommittedConversationPair[]
   readonly language?: PromptLanguage
   readonly onUsage?: UsageReporter
 
@@ -466,7 +511,25 @@ export interface BuildQwenRealtimeProviderOptions {
   readonly idFactory: () => string
   readonly now: () => number
   readonly executorApproval: boolean
-  readonly modules?: {readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean}
+  readonly modules?: {readonly schedules?: boolean; readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean; readonly gui?: boolean}
+}
+
+function buildIntegratedWireProvider(options: BuildQwenRealtimeProviderOptions, profile?: IntegratedWireProfile): QwenAudioRealtimeAdapter {
+  return new QwenAudioRealtimeAdapter({
+    ...(options.history===undefined?{}:{history:options.history}),
+    ...(options.language === undefined ? {} : {language: options.language}),
+    ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, options.config.url)!}),
+    ...(profile === undefined ? {} : {wireProfile: profile}),
+    url: options.config.url,
+    apiKey: options.config.apiKey,
+    model: options.config.model,
+    voice: options.config.voice,
+    connector: options.connector ?? webSocketQwenConnector,
+    idFactory: options.idFactory,
+    now: options.now,
+    executorApproval: options.executorApproval,
+    ...(options.modules === undefined ? {} : {modules: options.modules}),
+  })
 }
 
 /**
@@ -485,34 +548,26 @@ export function buildQwenRealtimeAssembly(
   options: BuildQwenRealtimeAssemblyOptions | BuildQwenRealtimeProviderOptions,
 ): RealtimeAssembly | QwenAudioRealtimeAdapter {
   if ('config' in options) {
-    return new QwenAudioRealtimeAdapter({
-      ...(options.language === undefined ? {} : {language: options.language}),
-      ...(options.onUsage === undefined ? {} : {onUsage: usageReporterForEndpoint(options.onUsage, options.config.url)!}),
-      url: options.config.url,
-      apiKey: options.config.apiKey,
-      model: options.config.model,
-      voice: options.config.voice,
-      connector: options.connector ?? webSocketQwenConnector,
-      idFactory: options.idFactory,
-      now: options.now,
-      executorApproval: options.executorApproval,
-      ...(options.modules === undefined ? {} : {modules: options.modules}),
-    })
+    return buildIntegratedWireProvider(options)
   }
   options = filterDisabledCoding(options)
   validateCodingResource(options)
   const qwen = options.qwenConfig ?? requireQwenRealtime(options.settings)
+  // StepFun support models default in loadSettings; only the endpoint is chosen here.
+  const stepfunOwnSupport = options.settings.integrated_provider === 'stepfun'
+    && (options.settings.model_api_key ?? '').trim() === ''
   const createPersonalMemory = options.createPersonalMemory
     ?? personalMemoryFactory(options.settings)
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   const support = resolveSupportModelConnection(options.settings, {
-    baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
+    baseUrl: options.settings.integrated_provider === 'openai' ? OPENAI_BASE_URL : options.settings.integrated_provider === 'gemini' ? GEMINI_BASE_URL : stepfunOwnSupport ? STEPFUN_COMPATIBLE_BASE_URL : DASHSCOPE_COMPATIBLE_BASE_URL,
     apiKey: qwen.apiKey,
   })
   const gateway = new OpenAIModelGateway({
     baseUrl: support.baseUrl,
     apiKey: support.apiKey,
+    ...(support.source === 'selected_provider' && (options.settings.integrated_provider === 'openai' || options.settings.integrated_provider === 'qwen') ? {thinkingControl: options.settings.integrated_provider} : {}),
     clock,
     ...(options.metrics === undefined ? {} : {metrics: options.metrics}),
   })
@@ -537,6 +592,7 @@ export function buildQwenRealtimeAssembly(
       search: core.capabilities.modules.search.enabled,
       camera: options.cameraModuleEnabled ?? core.capabilities.modules.camera.enabled,
       coding: core.capabilities.modules.coding.enabled,
+      gui: core.settings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)),
       knowledge: core.capabilities.modules.knowledge.enabled,
     },
     executorApproval: (options.executorApproval ?? options.codexResource?.approvalController) != null,
@@ -545,12 +601,14 @@ export function buildQwenRealtimeAssembly(
   return composeRealtime(core, provider, {
     ...options,
     ...(intake === undefined ? {} : {intake}),
+    ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
     idFactory: () => ids.next('realtime'),
   }, {
-    controlledPreemptiveAlertReconnect: options.settings.qwen_controlled_guard_reconnect,
-    preemptiveAlertHistoryRecovery: options.settings.qwen_guard_history_recovery,
+    controlledPreemptiveAlertReconnect: options.settings.integrated_provider === 'qwen'
+      && options.settings.qwen_controlled_guard_reconnect,
+    preemptiveAlertHistoryRecovery: options.settings.integrated_provider === 'qwen'
+      ? options.settings.qwen_guard_history_recovery : 'none',
     preemptiveAlertHistoryPairs: options.settings.qwen_guard_history_pairs,
-    ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
   })
 }
 
@@ -561,13 +619,16 @@ export type BuildIntegratedRealtimeAssemblyOptions = Omit<
 
 export type IntegratedQwenFactoryInput = BuildQwenRealtimeProviderOptions
 
-export type IntegratedProviderRegistry = Readonly<Record<
+export type IntegratedProviderRegistry = Readonly<Partial<Record<
   IntegratedProviderName,
   (input: IntegratedQwenFactoryInput) => RealtimeProvider
->>
+>>>
 
-export const integratedProviderRegistry: IntegratedProviderRegistry = Object.freeze({
+export const integratedProviderRegistry: Required<IntegratedProviderRegistry> = Object.freeze({
   qwen: input => buildQwenRealtimeAssembly(input),
+  stepfun: input => buildIntegratedWireProvider(input, createStepFunWireProfile()),
+  openai: input => buildIntegratedWireProvider(input, createOpenAIWireProfile()),
+  gemini: input => new GeminiLiveAdapter({...input.config, ...input, connector:input.connector??webSocketQwenConnector}),
 })
 
 export function buildIntegratedRealtimeAssembly(
@@ -576,24 +637,26 @@ export function buildIntegratedRealtimeAssembly(
 ): RealtimeAssembly {
   options = filterDisabledCoding(options)
   const provider = options.settings.integrated_provider
-  if (!Object.hasOwn(registry, provider)) {
+  const factory = Object.hasOwn(registry, provider) ? registry[provider] : undefined
+  if (factory === undefined) {
     throw new ConfigurationError('INTEGRATED_PROVIDER 无效')
   }
   const config = Object.freeze({...requireIntegratedRealtime(options.settings)})
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   const capabilities = options.capabilities ?? capabilitiesFromSettings(options.settings)
-  const qwenProvider = registry[provider]({
+  const qwenProvider = factory({
     language: options.settings.language,
     ...(options.onUsage === undefined ? {} : {onUsage: options.onUsage}),
     config,
     ...(options.connector === undefined ? {} : {connector: options.connector}),
-    idFactory: () => ids.next('qwen'),
+    idFactory: () => ids.next(provider),
     now: () => clock.now(),
     modules: {
       search: capabilities.modules.search.enabled,
       camera: options.cameraModuleEnabled ?? capabilities.modules.camera.enabled,
       coding: capabilities.modules.coding.enabled,
+    gui: options.settings.executors.some(name => ['browser', 'computer', 'mobile'].includes(name)),
       knowledge: capabilities.modules.knowledge.enabled,
     },
     executorApproval: (options.executorApproval ?? options.codexResource?.approvalController) != null,
@@ -608,9 +671,10 @@ export function buildIntegratedRealtimeAssembly(
 }
 
 export type BuildProductionRealtimeAssemblyOptions =
-  BuildIntegratedRealtimeAssemblyOptions & BuildCascadedRealtimeAssemblyOptions
+  BuildIntegratedRealtimeAssemblyOptions & BuildCascadedRealtimeAssemblyOptions & {readonly textOnly?: boolean}
 
 export interface ProductionRealtimeAssemblyBuilders {
+  readonly text?: (options: BuildCascadedRealtimeAssemblyOptions) => RealtimeAssembly
   readonly integrated?: (
     options: BuildIntegratedRealtimeAssemblyOptions,
   ) => RealtimeAssembly
@@ -624,6 +688,7 @@ export function buildProductionRealtimeAssembly(
   builders: ProductionRealtimeAssemblyBuilders = {},
 ): RealtimeAssembly {
   const composition = productionCodingComposition(filterDisabledCoding(options))
+  if(options.textOnly)return (builders.text??buildTextRealtimeAssembly)(composition)
   if (options.settings.pipeline_mode === 'integrated') {
     return (builders.integrated ?? buildIntegratedRealtimeAssembly)(composition)
   }
@@ -652,4 +717,12 @@ function productionCodingComposition(
     codingAgentControllerFactory: factory,
     agentDescriptors: [...descriptors, descriptor],
   }
+}
+
+interface GeminiSpeechFactoryInput {readonly config:GeminiSpeechConfig;readonly onUsage?:UsageReporter}
+export function selectedAsrFactory(registry:CascadedProviderRegistries,input:Omit<VolcengineAsrFactoryInput,'config'>&{config:VolcengineAsrConfig|GeminiSpeechConfig|SelfHostedSpeechConfig}):AsrFactory {
+  return input.config.provider==='self-hosted'?registry.asr['self-hosted']({config:input.config}):input.config.provider==='gemini'?registry.asr.gemini({...input,config:input.config}):registry.asr.volcengine({...input,config:input.config})
+}
+export function selectedTtsFactory(registry:CascadedProviderRegistries,input:Omit<VolcengineTtsFactoryInput,'config'>&{config:VolcengineTtsConfig|GeminiSpeechConfig|SelfHostedSpeechConfig}):TtsFactory {
+  return input.config.provider==='self-hosted'?registry.tts['self-hosted']({config:input.config}):input.config.provider==='gemini'?registry.tts.gemini({...input,config:input.config}):registry.tts.volcengine({...input,config:input.config})
 }

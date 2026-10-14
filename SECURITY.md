@@ -3,7 +3,7 @@
 ## Reporting a vulnerability
 
 Please do not open a public issue for security problems. Instead, use
-[GitHub private vulnerability reporting](https://github.com/deepnovacore/NovaAudioAgent/security/advisories/new)
+[GitHub private vulnerability reporting](https://github.com/deepnovacore/NovaPersonalAgent/security/advisories/new)
 for this repository. If that channel is unavailable, open an issue that only asks a maintainer to
 get in touch — without any technical detail — and we will move the exchange to a private channel.
 
@@ -31,5 +31,8 @@ out of this configuration authority.
   validated before use; reports about bypasses of those validations are in scope.
 - Home Assistant and AutoGLM are retired: legacy settings for them fail closed before any client
   is constructed, and a configuration that still reaches one of those endpoints is a bug.
-- Live provider integrations (Qwen realtime, Volcengine, Tavily, Codex) run with the credentials
-  you configure locally; secure those credentials as you would for any other tool.
+- Live provider integrations (Qwen realtime, OpenAI, Gemini, Volcengine, Tavily, Codex) run with
+  the credentials you configure locally; secure those credentials as you would for any other tool.
+- The reference self-hosted voice services in `serving/` bind to loopback and do not authenticate
+  requests. Do not expose their ports beyond a trusted machine; use an SSH tunnel or an
+  authenticating reverse proxy.

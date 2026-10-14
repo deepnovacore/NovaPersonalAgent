@@ -14,6 +14,7 @@ const diagnosticIdSchema = z.enum([
   'node.version',
   'configuration.parse',
   'provider.qwen',
+  'provider.stepfun', 'provider.openai', 'provider.gemini',
   'provider.volcengine',
   'executors.contract',
   'search.credential',
@@ -26,6 +27,10 @@ const diagnosticCodeSchema = z.enum([
   'configuration_invalid',
   'qwen_configuration_valid',
   'qwen_configuration_invalid',
+  'stepfun_configuration_valid',
+  'stepfun_configuration_invalid',
+  'openai_configuration_valid', 'openai_configuration_invalid',
+  'gemini_configuration_valid', 'gemini_configuration_invalid',
   'volcengine_configuration_valid',
   'volcengine_configuration_invalid',
   'executor_configuration_valid',
@@ -113,9 +118,9 @@ function providerCheck(settings: Settings): DiagnosticCheck {
   if (settings.pipeline_mode === 'integrated') {
     try {
       requireIntegratedRealtime(settings)
-      return check('provider.qwen', 'pass', 'qwen_configuration_valid')
+      return check(`provider.${settings.integrated_provider}`, 'pass', `${settings.integrated_provider}_configuration_valid`)
     } catch {
-      return check('provider.qwen', 'fail', 'qwen_configuration_invalid')
+      return check(`provider.${settings.integrated_provider}`, 'fail', `${settings.integrated_provider}_configuration_invalid`)
     }
   }
   try {

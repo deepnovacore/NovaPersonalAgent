@@ -87,6 +87,70 @@ A cascaded host advertises `text_input` and `dictation` in `client.ready.capabil
 
 Recognition returns `input.transcription` with the matching `id` and `text`, or only `error: recognition_failed` on failure. A draft is not a user turn and does not trigger an LLM or tools. The client must explicitly submit the edited `input.text`.
 
+### Personal host and reliable text acceptance
+
+The authenticated desktop socket accepts `personal.command` directly. Remote clients wrap the same payload in `client.command`; outer `client.command_result` acknowledges delivery to the control handler, while `personal.result` reports the domain operation:
+
+```json
+{"type":"personal.command","request_id":"request-uuid","method":"state","params":{}}
+{"type":"personal.result","request_id":"request-uuid","ok":true}
+```
+
+Methods are `state`, `feed.action`, `memory.list`, `memory.correct`, `memory.forget`, `discovery.configure`, and `sources.add/pause/resume/disconnect/delete/sync`. Memory changes require `{id,expected_version}`; correction also requires `content`. Feed actions use `{id,action,snooze_until?}`. Actions are `open`, `act`, `snooze`, `dismiss`, `expand_evidence`, `presented`, and `notified`. Only explicit `act` requests enter the normal user authorization path. Discovery configuration accepts `{enabled?,interval_minutes?}` (5–1440 minutes, default 30). Directory admission requires explicit consent; clients cannot select the user scope or storage path.
+
+The host sends `personal.state` with `{revision,feed,memory:{entries,cursor,overview?},sources,capabilities,settings}`. Treat these as authoritative snapshots; capability booleans govern available operations. A domain failure has `ok:false,error`. Request IDs are deduplicated against a bounded durable receipt ledger. Private memory/snapshot bodies are not retained in that ledger: replay of such a receipt includes `reload_required:true`. Request a fresh `state` or `memory.list` with a new request ID instead of assuming missing `data` is a complete result.
+
+Text input retains compatibility with `{type:"input.text",text}`. New clients should use the correlated form:
+
+```json
+{"type":"desktop.capabilities","capabilities":["text_input","dictation"],"input_instance_id":"host-uuid"}
+{"type":"input.text","request_id":"text-uuid","input_instance_id":"host-uuid","text":"Please review my notes"}
+{"type":"input.text_result","request_id":"text-uuid","ok":true}
+```
+
+`input.text_result` is a required, non-droppable receipt. `ok:true` means the host's submission to the current provider resolved; it does not prove a task was completed. Captions, including identical final user text, never acknowledge input. Rejected submissions return `ok:false,error`, including `submission_failed`, `request_id_conflict`, `request_capacity`, or `outcome_unknown`.
+
+The bridge retains at most 256 text request receipts for its runtime lifetime, without evicting accepted requests. Identical request ID/text retries reuse the original operation and receipt, including across renderer reconnect. Keep the original `request_id` and `input_instance_id` when retrieving a lost receipt. A different backend instance rejects the stale instance with `outcome_unknown` and does not submit again; the client must preserve the draft and tell the user acceptance is uncertain before a new manual submission. Legacy clients omitting these optional fields retain their original uncorrelated behavior.
+
+Actual provider transcript captions now optionally carry an opaque `turn_id` derived from host service identity, provider epoch, role, and item/response identity. Caption deltas/finals for the same turn use the same ID; a new ID starts a new message even if a previous final was dropped. Existing role/text/final/sequence fields are unchanged. Empty final captions are reset signals and must close the displayed accumulation even when there is no text to append. Caption bodies remain speculative and droppable.
+
+`memory.overview` is optional/null while unavailable or refreshing. A valid value has `summary` and one to four `sections`, each containing `title`, `summary`, `keywords` (up to five), and `refs` (`entry_id`, exact `version`). References must resolve to active entries in the current page. Summaries are derived display data, not new authoritative memories. Source changes, correction and forgetting invalidate them; clients show source excerpts when unavailable and must reject stale references. Snapshot revision also advances for asynchronous summary projection changes.
+
+### Conversation-scoped desktop inputs
+
+`personal.state.conversations` contains `selected_id`, nullable `voice_id`,
+`unread_count`, `items` and the selected conversation's `messages`. Items expose
+`id`, `kind` (`chat`, `topic`, `proactive`), `title`, `subject_key`, timestamps,
+`generation` and `unread_count`. Messages expose `id`, `conversation_id`, `role`,
+`text`, `created_at`, and optional `turn_id` / `reply_to`. Selection does not
+transfer voice ownership. The fixed `chat:proactive` conversation receives proactive
+reminders; only that conversation may speak them while it owns voice.
+
+Authenticated `personal.command` methods:
+
+- `conversations.create {title?}` and `conversations.select {id}`.
+- `conversations.clear {id,expected_generation?}` clears only that conversation.
+- `conversations.open_feed {feed_id,label?}` opens the stable topic idempotently;
+  prepared source background remains untrusted and grants no execution authority.
+- `conversations.voice {id,enabled}` explicitly starts or ends the single voice
+  owner. Text is rejected in that conversation until voice ends; other conversations
+  may run text concurrently. Dictation requires voice to be ended first.
+- `conversations.read {id,through_message_id}` acknowledges only the displayed
+  prefix. Repeating an old acknowledgement does not read later arrivals.
+
+`input.text`, `input.audio`, and `input.dictation` accept `conversation_id`.
+Correlated `input.text_result` acknowledges durable host admission; model completion
+arrives through captions and updated state. A failed admitted response emits
+`conversation.error {conversation_id,error}`. Same-conversation text turns execute
+in order, with separate model history and causal state per conversation. Older
+clients may omit the ID and retain the original single-service input behavior.
+
+`caption`, `project.state`, and `executor.approval` may carry `conversation_id`.
+The existing `project.confirmation_decision` and `executor.approval_decision` controls
+accept that same ID. Clients must echo the ID from the approval frame, never infer
+it from the currently selected conversation. An unknown scoped target is rejected
+without falling back to the global service. Backend-instance and request-ID text
+replay rules above still apply.
 ## Conversation presentation
 
 The iOS UI starts in realtime mode. It offers text chat only when the host selects
@@ -101,3 +165,67 @@ partial caption as a new reply. This is client presentation, not a remote histor
 pagination API or a guarantee of persistence across app restart. Desktop memory
 history pagination uses its separate local host interface. Approval decisions
 continue through the existing connection-bound command contract.
+
+
+## Mobile personal workbench (opt-in)
+
+A v1 hello may include `capabilities: ["personal"]`. The host returns `personal`
+in `client.ready.capabilities` only for that connection. Legacy hellos retain
+their previous capabilities and 16 KiB JSON output budget. Commands and hellos
+remain bounded to 16 KiB; the negotiated **personal.state/personal.result output**
+budget is 1 MiB, measured as UTF-8 bytes. Other JSON output keeps its old budget.
+
+Mobile snapshots allow only `type`, `revision`, `reload_required`, `life`,
+`tasks`, `conversations`, `feed`, `memory`, `pending_approvals`,
+`pending_confirmations`, a read-only `news` projection, the reduced
+`workbench_context` and `profile_preparation` projections described below, and
+task/memory capabilities. Desktop sources, Feishu, connectors and other
+desktop-only projections are omitted, including snapshots nested in a command
+result.
+
+State changes coalesce in a fixed 250 ms window; the newest snapshot wins.
+Disconnect clears the queued snapshot. An oversized snapshot becomes
+`{"type":"personal.state","revision":9,"reload_required":true}`. An oversized
+result preserves its request ID and `ok`/error outcome, omits data and sets
+`reload_required:true`; it is never treated as permission to replay a write.
+Clients fetch `state` once, retain their last full offline snapshot, and stop
+retrying automatically if the fetched state is still oversized. A marker does
+not advance the accepted full-state revision. Server restart permits a fresh
+revision sequence; within one server instance only newer snapshots apply.
+
+Mobile personal commands use the existing `client.command` envelope. The
+transport supplies `client_id:"remote:master", can_takeover:false` even for a
+per-device pairing credential. Tokens remain device-specific for revocation.
+An allowlist admits workbench life/feed/memory/conversation/task operations;
+source, connector and Feishu management are not admitted. Existing approval
+and optimistic version checks remain authoritative. Text, dictation and voice
+controls name `conversation_id`; text additionally carries the bridge's
+`input_instance_id` and an idempotent request ID. A transport receipt alone does
+not prove successful text submission: wait for `input.text_result`.
+
+The built-in Mac phone endpoint runs in the desktop runtime and shares its
+PersonalAgentHost. Each connection has independent queues and dictation state.
+A single audio owner receives output audio and may submit PCM/playback ACKs;
+non-owner disconnects must not reset another endpoint's playback. Tailscale
+Serve remains the network boundary, and a second phone receives close 4009.
+Explicit external phone server settings select a separate host and do not
+promise synchronization with the local workbench. Windows pairing is M6.
+
+The first audio fixture in `tests/fixtures/client-protocol/v1/vectors.json` has
+an additive `personal_protocol` metadata object. Legacy audio-vector readers
+ignore this field; mobile tests use it for negotiation and reload examples.
+
+On the built-in shared Mac endpoint, the mobile command allowlist and remote identity
+apply even when hello omits `personal`. Legacy clients receive no personal frames;
+their text and PCM target the host-selected conversation, and voice ownership
+conflicts refuse the connection with 4009. Leaving the desktop orb releases its
+implicit audio ownership after draining input and playback.
+
+For negotiated personal clients, authenticated protocol faults close with 1002;
+4003 denotes authentication rejection or explicit device revocation. This prevents
+a malformed frame or transient host initialization failure from erasing pairing
+credentials. Legacy clients retain the previous close-code behavior.
+
+Mobile `news` contains `enabled`, `refreshing`, `items` and `saved`. Articles retain only id, source_id, title, summary, url, published_at, read and saved, plus `source_name` for built-in sources; source configuration and ranking internals are omitted. News mutations remain unavailable on mobile.
+
+Mobile `workbench_context` contains `status`, `recap {text, projects[{name, line}]}` and `cards[{id, tab, title, body, why, next, source_count}]`. Mobile `profile_preparation` contains `status` and `draft {about, work[{title, text}]}` or null. Source excerpts, labels and references are omitted; only the number of supporting sources is shared. `context.adopt` and `context.dismiss` are available to mobile clients.

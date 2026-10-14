@@ -38,8 +38,8 @@ const EXACT_APP_SERVER_ARGV = [
   '--disable', 'plugin_sharing',
   '--disable', 'tool_suggest',
   '-c', 'web_search="disabled"',
-  '-c', 'default_permissions="nova_audio_agent"',
-  '-c', 'permissions.nova_audio_agent={ filesystem = { ":root" = "read", ":workspace_roots" = { "." = "write", ".git" = "read", ".agents" = "read", ".codex" = "read" } }, network = { enabled = false } }',
+  '-c', 'default_permissions="nova_personal_agent"',
+  '-c', 'permissions.nova_personal_agent={ filesystem = { ":root" = "read", ":workspace_roots" = { "." = "write", ".git" = "read", ".agents" = "read", ".codex" = "read" } }, network = { enabled = false } }',
   '-c', 'shell_environment_policy.inherit="core"',
   '-c', 'shell_environment_policy.include_only=["PATH","LANG","LC_ALL","TERM"]',
   '-c', 'mcp_servers={}',
@@ -578,3 +578,23 @@ async function bounded<T>(work: Promise<T>, milliseconds: number, label: string)
     if (timer !== undefined) clearTimeout(timer)
   }
 }
+
+test('closing a POSIX owner joins an already destroyed stdin without hanging', {
+  skip: process.platform === 'win32',
+}, async () => {
+  const child = fakeChild(8123)
+  const factory = new PosixCodexProcessOwnerFactory({spawn: (() => child) as unknown as typeof spawn,
+    groupOperations: {signal: () => undefined, wait: async () => undefined, now: () => 0}})
+  const workspace = process.cwd()
+  const owner = await factory.spawn(createCodexSpawnSpec({binary: hostBinaryForTest(process.execPath),
+    workspace: hostWorkspaceForTest(workspace), codexHome: hostCodexHomeForTest(workspace, {ephemeral: true}),
+    environment: {PATH: '/safe', HOME: workspace, CODEX_HOME: workspace, CODEX_INTERNAL_APP_SERVER_REMOTE_CONTROL_DISABLED: '1'}}), spawnControl())
+  child.emit('exit', 0)
+  owner.stdin.destroy()
+  let timer: NodeJS.Timeout | undefined
+  try {
+    await Promise.race([owner.closeStdin(), new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('stdin close did not settle')), 500)
+    })])
+  } finally {clearTimeout(timer); await owner.dispose()}
+})

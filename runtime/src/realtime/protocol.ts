@@ -1,7 +1,7 @@
 import type {PromptLanguage} from './prompt-language.js'
 import { z } from 'zod'
 import { jsonValueSchema, type JsonValue } from '../core/events.js'
-import { MAX_PACKED_RECOVERY_CONTENT } from './history.js'
+import { MAX_PACKED_RECOVERY_CONTENT, type CommittedConversationPair } from './history.js'
 
 export const MAX_REALTIME_TEXT = 4_000
 export const MAX_REALTIME_PCM_BYTES = 64 * 1_024
@@ -25,6 +25,7 @@ export const hostItemKindSchema = z.enum([
   'progress',
   'final',
   'recovery',
+  'scheduled_task',
   'dialogue_context',
   'tool_output',
   'workspace_context',
@@ -44,7 +45,8 @@ export const hostContextItemSchema = z.object({
   kind: hostItemKindSchema,
   host_item_id: realtimeIdentifierSchema,
   event_id: realtimeIdentifierSchema,
-  content: boundedText(),
+  content: z.string().refine(value=>!pythonWhitespaceOnly.test(value),'text must be non-empty'),
+  context_read:z.literal(true).optional(),
   /** Host-authored public wording; private context is never used as the narration payload. */
   speech_content: boundedText().optional(),
   /** Explicit host classification: control receipts are not recoverable results. */
@@ -55,6 +57,8 @@ export const hostContextItemSchema = z.object({
   workspace_instance_id: realtimeIdentifierSchema.optional(),
   revision: z.number().int().nonnegative().optional(),
 }).strict().superRefine((item, context) => {
+  if(item.context_read&&item.kind!=='tool_output')context.addIssue({code:'custom',path:['context_read'],message:'structured reads require tool output'})
+  if(item.context_read?Buffer.byteLength(item.content)>32768:[...item.content].length>(item.kind==='scheduled_task'?160000:MAX_REALTIME_TEXT))context.addIssue({code:'custom',path:['content'],message:'host context exceeds text limit'})
   if (item.speech_content !== undefined && item.kind !== 'progress' && item.kind !== 'final') {
     context.addIssue({code: 'custom', path: ['speech_content'], message: 'public narration requires a progress or final fact'})
   }
@@ -206,12 +210,12 @@ export const workspaceContextInjectionSchema = workspaceContextDeliveryRecordSch
   },
 )
 
-export type WorkspaceContextDeliveryCapability = z.infer<typeof workspaceContextDeliveryCapabilitySchema>
-export type WorkspaceContextDelivery = z.infer<typeof workspaceContextDeliverySchema>
 export type WorkspaceContextDeliveryRecord = z.infer<typeof workspaceContextDeliveryRecordSchema>
 
 export const hostResponseKindSchema = z.enum([
   'host_fact',
+  'task_continuation',
+  'scheduled_task',
   'tool_result',
   'delegation_acknowledgement',
 ])
@@ -222,6 +226,12 @@ export const hostResponseIntentSchema = z.object({
   task_summary: boundedText().nullable().default(null),
   origin_spoken: z.boolean().default(false),
 }).strict().superRefine((intent, context) => {
+  if(intent.kind==='scheduled_task'){
+    let purpose:unknown
+    try{purpose=(JSON.parse(intent.item.content) as {purpose?:unknown}).purpose}catch{/* invalid activation */}
+    if(intent.item.kind!=='scheduled_task'||purpose!=='run_scheduled_task')context.addIssue({code:'custom',path:['item'],message:'scheduled task requires host scheduled activation'})
+  }else if(intent.item.kind==='scheduled_task')context.addIssue({code:'custom',path:['item'],message:'scheduled activation requires scheduled task response'})
+  if(intent.kind==='task_continuation'&&intent.item.kind!=='recovery')context.addIssue({code:'custom',path:['item'],message:'task continuation requires recovery context'})
   if (intent.item.kind === 'workspace_context') {
     context.addIssue({
       code: 'custom',
@@ -282,6 +292,8 @@ export const itemIdentitySchema = z.object({
   session_epoch: epochSchema,
   host_item_id: realtimeIdentifierSchema,
   provider_item_id: realtimeIdentifierSchema,
+  /** Omission preserves older adapters; staged means local ownership, not remote acknowledgment. */
+  delivery: z.enum(['staged', 'acknowledged']).optional(),
 }).strict()
 
 export type SessionIdentity = z.infer<typeof sessionIdentitySchema>
@@ -326,14 +338,16 @@ export const userSpeechEndedSchema = sessionEvent(z.literal('user_speech_ended')
 })
 export const userTranscriptDeltaSchema = sessionEvent(
   z.literal('user_transcript_delta'),
-  itemTextShape,
+  {...itemTextShape, replace: z.boolean().optional()},
 )
 export const userTranscriptFailedSchema = sessionEvent(z.literal('user_transcript_failed'), {
   item_id: realtimeIdentifierSchema,
 })
 export const userTranscriptFinalSchema = sessionEvent(
   z.literal('user_transcript_final'),
-  itemTextShape,
+  {...itemTextShape, input_kind:z.literal('text').optional(),
+    /** Independent transcription streams do not prove a new response is owed. */
+    response_expected:z.boolean().optional()},
 )
 /** Provider evidence, never a host turn identity or an authorization decision.
  * Omission preserves automatic-provider legacy correlation; explicit unknown must not claim a user item.
@@ -392,6 +406,14 @@ export const responseTerminalSchema = sessionEvent(z.literal('response_terminal'
   status: z.enum(['completed', 'cancelled', 'failed']),
   reason: boundedText(),
 })
+/** A generation segment yielded to tools. It is not a completed provider turn.
+ * All calls in this segment precede this event; continuation uses a new response id.
+ */
+export const responseYieldedSchema = sessionEvent(z.literal('response_yielded'), {
+  response_id: realtimeIdentifierSchema,
+  reason: z.literal('tool_calls'),
+  call_ids: z.array(realtimeIdentifierSchema).min(1).max(128).refine(ids => new Set(ids).size === ids.length),
+})
 export const responseCancelRejectedSchema = sessionEvent(z.literal('response_cancel_rejected'), {
   response_id: realtimeIdentifierSchema,
   cancel_request_id: realtimeIdentifierSchema,
@@ -415,6 +437,7 @@ export const realtimeProviderEventSchema = z.discriminatedUnion('kind', [
   toolCallReadySchema,
   itemConfirmedSchema,
   responseTerminalSchema,
+  responseYieldedSchema,
   responseCancelRejectedSchema,
   providerErrorEventSchema,
 ])
@@ -438,6 +461,9 @@ export const responseAdaptationContextSchema = z.object({
 }).strict()
 
 export interface RealtimeProvider {
+  /** Session-setup guidance cannot carry rolling source/recovery catalogs without interrupting live turns. */
+  readonly responseAdaptationMode?: 'mutable' | 'session_setup'
+  reportPlayback?(input: {readonly response_id:string; readonly played_ms:number | null; readonly disposition:string}, signal:AbortSignal):Promise<void>
   setLanguage?(language?: PromptLanguage): Promise<void>
 
   /** Automatic providers may start before transcript final; requested providers wait for the host.
@@ -445,6 +471,8 @@ export interface RealtimeProvider {
    */
   readonly userResponseMode?: 'automatic' | 'requested'
 
+  /** Fresh provider session only; rejects any attempt to replace an active conversation. */
+  restoreHistory?(history:readonly CommittedConversationPair[],signal:AbortSignal):Promise<void>
   submitText?(text: string, signal: AbortSignal): Promise<void>
   transcribeDraft?(pcm: Uint8Array, signal: AbortSignal): Promise<string>
   /** Absent and false both prohibit original-media injection. */
@@ -492,6 +520,9 @@ export class RealtimeProtocolError extends Error {
     this.name = 'RealtimeProtocolError'
   }
 }
+
+/** A response was rejected before any request bytes were sent. */
+export class ProviderResponseRejectedError extends RealtimeProtocolError {}
 
 export class ItemDeliveryUncertainError extends Error {
   readonly session_epoch: number

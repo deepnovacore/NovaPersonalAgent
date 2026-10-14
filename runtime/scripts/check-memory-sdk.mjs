@@ -10,7 +10,7 @@ const candidate = process.argv[2]
 if (!candidate) throw new Error('Usage: node runtime/scripts/check-memory-sdk.mjs /absolute/path/to/built-sdk')
 const root = resolve(candidate)
 const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-if (!['voicemem', '@deepnovacore/voicemem', '@nova-audio-agent/voicemem-ts'].includes(manifest.name)) {
+if (!['voicemem', '@deepnovacore/voicemem', '@nova-personal-agent/voicemem-ts'].includes(manifest.name)) {
   throw new Error('Candidate is not a recognized VoiceMem package')
 }
 const entry = manifest.exports?.['.']

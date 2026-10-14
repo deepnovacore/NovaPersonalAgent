@@ -65,7 +65,7 @@ const SURROGATE_ORACLE_OUTPUT = '只输出 JSON：{"speak": true|false, "suggest
 const SURROGATE_NODE_OUTPUT = '先在 reason 中概括用户已要求的功能，再指出 summary 中超出这些要求和 previous_summary 的新增信息；若没有新增，必须说明没有新增并保持沉默。若用户明确要求静默则说明其适用范围。最后按档位分类并决定是否播报。只输出 JSON：{"reason": "一句内部理由", "progress_class": "routine_delta"|"milestone"|"blocker"|"action_required"|null, "speak": true|false, "suggestion_id": "s-N"|null}。'
 
 /** Apply the user's proactivity choice at the model decision boundary. */
-export function surrogateSystemPrompt(preset: ProactivityPreset): string {
+export function proactivitySystemPrompt(preset: ProactivityPreset): string {
   const policyStart = SURROGATE_SYSTEM.indexOf(SURROGATE_DEFAULT_POLICY_START)
   const policyEnd = SURROGATE_SYSTEM.indexOf(SURROGATE_DEFAULT_POLICY_END)
   if (policyStart < 0 || policyEnd <= policyStart) {
@@ -90,9 +90,10 @@ export function surrogateSystemPrompt(preset: ProactivityPreset): string {
   if (!composed.includes(SURROGATE_ORACLE_OUTPUT)) {
     throw new Error('surrogate prompt output contract mismatch')
   }
-  return composed.replace(SURROGATE_ORACLE_OUTPUT, SURROGATE_NODE_OUTPUT)
+  return composed.replace(SURROGATE_ORACLE_OUTPUT, SURROGATE_NODE_OUTPUT) + '\nproposal 仅用于专门的需求发现快照；当前工作进展观察请省略或置 null。proposal 不授权执行，也不因 speak=true 自动朗读。'
 }
 
+/** Python oracle compatibility; serving uses the validated extractive selector in model-adapters. */
 export const COMPRESSOR_SYSTEM = [
   '你只生成摘要，不对用户说话、不调用工具、不改变事实。',
   '保留行动、结果、时间、来源 ref 和尚未解决的不确定性；只输出摘要正文。',
@@ -207,6 +208,7 @@ export function renderContextSnapshot(view: ContextView, includeTrigger = false)
     if (channel.historical_through_seq !== undefined) {
       lines.push(`序号 ≤ ${pythonNumber(channel.historical_through_seq)} 为重启前的历史记录，仅供回忆；当时的运行状态和授权均需重新核实，不得作为新动作的 origin_ref。历史 t 属于旧进程时钟。`)
     }
+    if (channel.uncompressed_omitted) lines.push(`注意：还有 ${channel.uncompressed_omitted} 条未压缩记录未展示；${channel.summary_through_seq === undefined ? '尚无摘要' : `摘要仅处理至序号 ${channel.summary_through_seq}`}。上下文不完整，不得据此断言没有更新、推算总数或确认执行。`)
     if (channel.summary) lines.push(`（更早的内容摘要）${channel.summary}`)
     for (const item of channel.recent) {
       const outcome = item.outcome === null ? '' : ` [${item.outcome}]`
@@ -286,40 +288,3 @@ function projectLiveProgress(
   return content
 }
 
-export function renderFastBrainContext(
-  view: ContextView,
-  states: Readonly<Record<string, string>>,
-  includeTrigger = false,
-): string {
-  const rendered = renderContextView(view, includeTrigger)
-  const lines = [rendered, '', '## 视觉可见性']
-  const labels: Readonly<Record<string, string>> = {
-    attached: '图片就在你眼前',
-    record_only: '仅有记录；当前看不到这张图片',
-    unavailable: '图片已不可用',
-  }
-  const capturedAt = new Map<string, number>()
-  for (const channel of view.channels) {
-    for (const item of channel.recent) {
-      const ref = item.content.media_ref
-      const at = item.content.captured_at
-      if (typeof ref === 'string' && typeof at === 'number') capturedAt.set(ref, at)
-    }
-  }
-  const entries = Object.entries(states)
-  if (entries.length > 0) {
-    for (const [ref, state] of entries) {
-      let line = `- ${ref}：${labels[state] ?? state}`
-      const at = capturedAt.get(ref)
-      if (at !== undefined) {
-        const age = Math.max(0, view.now - at)
-        // captured_at is a float in the oracle, so it renders like every timestamp.
-        line += `；约 ${pythonFixedOne(age)} 秒前（核对 token t=${pythonFloat(at)}）`
-      }
-      lines.push(line)
-    }
-  } else {
-    lines.push('- 无')
-  }
-  return lines.join('\n')
-}

@@ -14,7 +14,7 @@ import {
   type QwenSocket,
 } from '../src/realtime/qwen.js'
 
-const fixtureRoot = resolve(import.meta.dirname, '../../../fixtures/realtime/qwen/v1')
+const fixtureRoot = resolve(import.meta.dirname, '../../../tests/fixtures/realtime/qwen/v1')
 
 interface Scenario {
   readonly id: string
@@ -296,14 +296,14 @@ test('Qwen clarification fixture covers adaptive first-turn and merged multi-tur
 })
 
 test('Qwen instructions clarify before submitting coding actions through host tools (spec 08)', () => {
-  assert.match(FRONTEND_INSTRUCTIONS, /只有决定执行用户操作时，才通过 dispatch、cancel、confirm 三个宿主工具提交/u)
+  assert.match(FRONTEND_INSTRUCTIONS, /只有决定执行用户操作时，才通过当前可用的宿主工具提交/u)
   assert.match(FRONTEND_INSTRUCTIONS, /关键歧义已消除就立即派发，不重复提问/u)
   assert.match(FRONTEND_INSTRUCTIONS, /instruction 汇总本次任务多轮已经明确的目标、约束、验收及修改/u)
   assert.match(FRONTEND_INSTRUCTIONS, /由下游 coordinator 决定工作区和 Session 的选择、新建、切换/u)
   assert.match(FRONTEND_INSTRUCTIONS, /用户明确要求停止、取消或暂不执行已经派发的任务（包括正在准备的任务）时调用 cancel；instruction 只在用户点名了要停哪个任务时传/u)
   assert.match(FRONTEND_INSTRUCTIONS, /code=intake_opened \/ intake_in_progress 是内部接收回执，尚未派单/u)
   assert.match(FRONTEND_INSTRUCTIONS, /unknown_project \/ ambiguous_project \/ busy_project \/ capacity 表示任务尚未执行，按事实转述可选项/u)
-  assert.match(FRONTEND_INSTRUCTIONS, /同意、拒绝或取消都必须调用 confirm.*不得只做口头回应/su)
+  assert.match(FRONTEND_INSTRUCTIONS, /同意或拒绝该操作必须调用 confirm.*停止整个任务则调用 cancel.*不得只做口头回应/su)
   assert.match(FRONTEND_INSTRUCTIONS, /id 从该宿主事实原样复制，accepted 用 JSON boolean 表示决定/u)
   assert.match(FRONTEND_INSTRUCTIONS, /同意 accepted=true，明确拒绝或取消 accepted=false；尚未决定、需要考虑或追问原因不代表拒绝/u)
   assert.match(FRONTEND_INSTRUCTIONS, /<active_project_context> 是 authoritative host state，描述当前工作区、Session 和可继续的会话目录/u)
@@ -418,8 +418,8 @@ test('the emitted session.update matches the pinned outbound payload', async () 
   assert.ok((instructions as string).split('\n').length >= 50,
     'the session instructions must carry the full behavioral contract')
   for (const required of [
-    'Nova Audio Agent 任务',
-    'Nova Audio Agent 宿主激活事实：',
+    'Nova Personal Agent 任务',
+    'Nova Personal Agent 宿主激活事实：',
     'dispatch',
     'cancel',
     'confirm',

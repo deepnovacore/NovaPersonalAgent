@@ -6,6 +6,8 @@ Nova runs on your computer, talks with you by voice, and uses Codex to carry out
 
 To run from source, install Node.js 22.13 or later, npm, Git, and Codex. Sign in to Codex before starting Nova.
 
+To use OpenCode, CodeBuddy, Pi or DeepSeek Harness for coding instead, install it as well and pick it in Settings; see [Coding](executors/coding.md#choosing-an-agent).
+
 Native components also need a platform toolchain:
 
 - macOS: Xcode Command Line Tools (`xcode-select --install`).
@@ -16,9 +18,24 @@ Desktop targets macOS arm64, Windows x64, and Ubuntu 22.04+ x64.
 
 ## 2. Install and start
 
+### Install or upgrade
+
 ```bash
-git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
-cd nova-audio-agent
+npm install --global nova-personal-agent@latest
+novapersonal
+```
+
+To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@0.4.0`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
+
+When switching from `nova-audio-agent`, first run `npm uninstall --global nova-audio-agent` to avoid command-link collisions, then install the new package. This preserves your local data and settings.
+
+For headless Ubuntu 22.04+ x64, use `npm install --global nova-personal-agent-server@latest`.
+
+For development from source:
+
+```bash
+git clone https://github.com/deepnovacore/NovaPersonalAgent.git nova-personal-agent
+cd nova-personal-agent
 npm ci
 cp .env.example .env
 ```
@@ -38,6 +55,8 @@ npm run start:client
 When running from source, the project `.env` takes precedence over matching shell variables. Restart the desktop after editing it.
 
 ## 3. Give Nova a task
+
+[![Nova clarifies a request before starting a task](../../assets/features/conversation-polished.en.png)](../../assets/features/conversation-polished.en.png)
 
 Try: “Create a webpage to showcase my work.” Nova asks for any missing information, requests confirmation when creating or switching projects, and sends the task to Codex.
 
@@ -64,6 +83,8 @@ Keys are write-only: the panel shows presence, not their values. Edit `.env` to 
 | `integrated` | One model handles speech directly | Qwen `qwen-audio-3.0-realtime-plus`, voice `longanqian` |
 | `cascaded` | Separate recognition, language model and speech synthesis | Volcengine ASR -> DeepSeek `deepseek-flash` -> Volcengine TTS |
 
+Integrated mode can also use StepFun (`INTEGRATED_PROVIDER=stepfun`, preview) with `STEPFUN_API_KEY`.
+
 One key per platform is reused across selected services: DeepSeek uses `DEEPSEEK_API_KEY`; Qwen uses `DASHSCOPE_API_KEY`; Volcengine speech uses `DOUBAO_BIGMODEL_API_KEY`. An optional `DOUBAO_ASR_API_KEY` overrides recognition credentials; the ASR fallback is `DOUBAO_BIGMODEL_API_KEY`.
 
 Ark is an explicit cascaded LLM option using `ARK_API_KEY`. The conditional Settings Panel shows only the selected mode's controls. Service settings take effect on the backend's next launch. Nova does not automatically fail over to another provider.
@@ -74,9 +95,13 @@ Local wake-word detection is off by default. Enabling it downloads the model on 
 
 While asleep, microphone input goes to local wake detection. Explicit mute stops detection too; unmute manually to resume.
 
+### Choose the main window
+
+Desktop launches into one of three views, controlled by the `startupView` setting: `orb` starts hidden as a floating orb, `workbench` opens the full window (the default), and `last` reopens whichever view was active when Nova last closed. Run `npm run start:workbench` to open Workbench for a single launch regardless of the saved setting. See [Workbench](workbench.md).
+
 ## 5. Memory, documents and iPhone
 
-- **Personal memory** uses local mem0 by default. Open the memory panel from the orb menu to inspect original wording and learned facts. See [personal memory](personal-memory.md).
+- **Personal memory** is on by default and stored locally in the unified memory ledger; inspect, correct or forget entries from the Workbench's Profile page. mem0 remains available as an explicit alternative. See [personal memory](personal-memory.md).
 - **Document knowledge** is enabled in capability settings. Review the data-processing notice before importing files; embedding sends text to your configured model service.
 - **iPhone connection**: on macOS, choose “连接 iPhone…” from the orb menu, enable the phone service, and follow the network and QR-code instructions. See [remote service and pairing](iphone.md).
 
@@ -84,6 +109,7 @@ While asleep, microphone input goes to local wake detection. Explicit mute stops
 
 | Problem | What to check |
 |---|---|
+| macOS says the app is "damaged" | The app is unsigned and a browser download carries a quarantine flag. Move it to Applications, run `xattr -dr com.apple.quarantine "/Applications/Nova Personal Agent Desktop.app"`, then open it again |
 | Voice cannot connect | Credentials, service access and connectivity for the selected mode |
 | Codex cannot run | Codex sign-in and access to the project directory |
 | Saved settings have no effect | Look for the pending-restart notice and restart the backend |

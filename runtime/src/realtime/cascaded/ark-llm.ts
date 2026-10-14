@@ -1,3 +1,4 @@
+import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
 import type {PromptLanguage} from '../prompt-language.js'
 import {cascadedNarrationInstructions} from './llm.js'
 import {originalImageUrl, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
@@ -69,7 +70,7 @@ function inputItem(input: CascadedLlmInput): JsonObject {
   if (input.kind === 'tool_result') {
     return {type: 'function_call_output', call_id: input.call_id, output: JSON.stringify(input.output)}
   }
-  return {role: input.kind === 'user_text' || input.kind === 'host_activation' ? 'user' : 'system', content: input.kind === 'user_text' ? (input.image ? [{type: 'input_text', text: input.text}, {type: 'input_image', image_url: originalImageUrl(input.image)}] : input.text) : input.kind === 'host_activation' ? JSON.stringify({text_to_say: input.content}) : input.content}
+  return {role: input.kind === 'user_text' || input.kind === 'host_activation' || input.kind === 'host_task' ? 'user' : 'system', content: input.kind === 'user_text' ? (input.image ? [{type: 'input_text', text: input.text}, {type: 'input_image', image_url: originalImageUrl(input.image)}] : input.text) : input.kind === 'host_activation' ? JSON.stringify({text_to_say: input.content}) : input.kind === 'host_task' ? JSON.stringify({host_scheduled_task:input.content,authority:'host_schedule_run_not_a_user_message'}) : input.content}
 }
 
 function toolSchema(tool: CascadedLlmTool): JsonObject {
@@ -85,6 +86,8 @@ function toolSchema(tool: CascadedLlmTool): JsonObject {
 
 class Session implements CascadedLlmSession {
   readonly #gateway: ArkResponsesGateway
+  #started=false
+  #seeded=false
   #previousResponseId: string | null = null
   #pendingToolContinuation = false
   #closed = false
@@ -92,10 +95,20 @@ class Session implements CascadedLlmSession {
   #history: JsonObject[][] = []
   #turnItems: JsonObject[] = []
 
-  constructor(gateway: ArkResponsesGateway) {
+  constructor(gateway: ArkResponsesGateway,history?:readonly CommittedConversationPair[]) {
     this.#gateway = gateway
+    if(history!==undefined)this.#seed(history)
   }
 
+  restoreHistory(history:readonly CommittedConversationPair[],signal:AbortSignal):Promise<void> {
+    try {signal.throwIfAborted();if(this.#closed||this.#started||this.#seeded)throw fail('protocol');this.#seed(history);return Promise.resolve()}
+    catch(error){return Promise.reject(error instanceof Error?error:fail('protocol'))}
+  }
+  #seed(history:readonly CommittedConversationPair[]):void {
+    this.#history=committedConversationPairsSchema.parse(history).map(pair=>[{role:'user',content:pair.user},{role:'assistant',content:pair.assistant}])
+    this.#visualHistory=true
+    this.#seeded=true
+  }
   async *stream(input: {
     readonly language?: PromptLanguage
     readonly inputs: readonly CascadedLlmInput[]
@@ -106,6 +119,7 @@ class Session implements CascadedLlmSession {
   }): AsyncIterable<CascadedLlmEvent> {
     if (this.#closed) throw fail('closed')
     if (input.signal.aborted) throw fail('aborted')
+    this.#started=true
     const current = input.inputs.map(inputItem)
     const factOnly = input.inputs.some(item => item.kind === 'host_activation')
     if (input.inputs.some(item => item.kind === 'user_text' && item.image)) this.#visualHistory = true
@@ -209,5 +223,5 @@ export function createArkCascadedLlmSession(
 export function createArkCascadedLlmFactory(
   options: ArkCascadedLlmFactoryOptions,
 ): CascadedLlmFactory {
-  return {open: () => createArkCascadedLlmSession(createFetchArkResponsesGateway(options))}
+  return {open: input => new Session(createFetchArkResponsesGateway(options),input?.history)}
 }

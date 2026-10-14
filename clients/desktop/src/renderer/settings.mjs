@@ -1,5 +1,11 @@
 import {createSkinPanel} from './skin-panel.mjs'
-import {t} from './locale.mjs'
+import {SELF_HOSTED_STAGES, endpointOrigin} from './voice-preset.mjs'
+import {onButton} from './button-action.mjs'
+import {createVoiceprintPanel} from './voiceprint-panel.mjs'
+import {createStartupNotice, startupMessage} from './startup-notice.mjs'
+import {createImPanel} from './im-panel.mjs'
+import {createConnectionsPanel} from './connections-panel.mjs'
+import {t, currentLanguage} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
 import {createPhonePanel} from './phone-panel.mjs'
@@ -22,18 +28,35 @@ import {
 import {
   CUSTOM_VOICE_VALUE,
   QWEN_VOICES,
+  QWEN_31_VOICES,
+  STEPFUN_VOICES,
   VOLCENGINE_TTS_VOICES,
   resolveVoiceChoice,
 } from './voice-choice.mjs'
 
-const api = window.novaAudioAgentDesktop.settings
+const api = window.novaPersonalAgentDesktop.settings
+const imPanel = createImPanel({document, api})
+const connectionsPanel = createConnectionsPanel({document, api})
+const voiceprintPanel = createVoiceprintPanel({document, api, stage: patch => controller.stage(patch)})
 const SECRET_KEYS = [
-  'dashscopeApiKey', 'tavilyApiKey',
-  'arkApiKey', 'deepseekApiKey', 'doubaoBigmodelApiKey',
+  'selfHostedAsrApiKey',
+  'selfHostedLlmApiKey',
+  'selfHostedTtsApiKey',
+  'composioApiKey',
+  'dashscopeApiKey', 'stepfunApiKey', 'tavilyApiKey', 'openrouterApiKey',
+  'arkApiKey', 'deepseekApiKey', 'openaiApiKey', 'geminiApiKey', 'doubaoBigmodelApiKey',
 ]
 const SECRET_LABELS = {
+  selfHostedAsrApiKey: 'Self-hosted ASR',
+  selfHostedLlmApiKey: 'Self-hosted LLM',
+  selfHostedTtsApiKey: 'Self-hosted TTS',
+  composioApiKey: 'Composio',
   dashscopeApiKey: 'DashScope',
+  stepfunApiKey: 'StepFun',
+  openaiApiKey: 'OpenAI',
+  geminiApiKey: 'Google Gemini',
   tavilyApiKey: 'Tavily',
+  openrouterApiKey: 'OpenRouter · Jev',
   arkApiKey: 'Ark',
   deepseekApiKey: t("DeepSeek（官方）"),
   doubaoBigmodelApiKey: t("火山语音"),
@@ -75,6 +98,7 @@ let restarting = false
 const workspaceOpenCurrent = document.querySelector('#workspace-open-current')
 const workspaceClearCurrent = document.querySelector('#workspace-clear-current')
 const workspaceClearAll = document.querySelector('#workspace-clear-all')
+const startupNotice = createStartupNotice({render: text => { document.querySelector('#startup-status').textContent = text }})
 const workspaceRetryRecovery = document.querySelector('#workspace-retry-recovery')
 const workspaceActionStatus = document.querySelector('#workspace-action-status')
 const wakeEnabled = document.querySelector('#wake-word-enabled')
@@ -93,6 +117,18 @@ const heartbeatValue = document.querySelector('#heartbeat-value')
 const codexModeInputs = [...document.querySelectorAll('input[name="codexBinaryMode"]')]
 const codexBinaryPath = document.querySelector('#codexBinaryPath')
 const codexStatus = document.querySelector('#codex-status')
+const codingProvider = document.querySelector('#coding-provider')
+const codingPermissionNote = document.querySelector('#coding-permission-note')
+const codingAcpSettings = document.querySelector('#coding-acp-settings')
+const codingBinaryPath = document.querySelector('#coding-binary-path')
+const codingConfigPath = document.querySelector('#coding-config-path')
+// [title, native config label or '', setup guidance]; Codex keeps its own discovery controls.
+const CODING_GUIDANCE = {
+  opencode: ['OpenCode', '配置文件', '安装 opencode-ai，并用 OpenCode 自己的登录或配置文件设置模型与凭据。'],
+  codebuddy: ['CodeBuddy', '', '安装 @tencent-ai/codebuddy-code，并在 CodeBuddy 命令行中完成登录或密钥配置。'],
+  pi: ['Pi', '配置目录', '安装 Pi 与 pi-acp，并在 Pi 自己的配置中设置模型与登录。Pi 不支持逐项审批，询问模式下任务会被拒绝。'],
+  deepseek: ['DeepSeek Harness', '配置目录', '安装 @deepseek-ai/dsh，并在其配置中设置凭据；也可以使用服务配置里的 DeepSeek API Key。'],
+}
 const yoloWarning = document.querySelector('#codex-yolo-warning')
 const codexManualSettings = document.querySelector('#codex-manual-settings')
 const codexRescan = document.querySelector('#codex-rescan')
@@ -106,6 +142,9 @@ const integratedProvider = document.querySelector('#integratedProvider')
 const integratedModel = document.querySelector('#integratedModel')
 const integratedVoicePreset = document.querySelector('#integratedVoicePreset')
 const integratedVoiceCustom = document.querySelector('#integratedVoiceCustom')
+const geminiAsrModel = document.querySelector('#geminiAsrModel')
+const geminiTtsModel = document.querySelector('#geminiTtsModel')
+const GEMINI_TTS_VOICES = ['Kore','Puck','Aoede','Charon','Fenrir'].map(value=>({value,label:value}))
 const cascadedAsrProvider = document.querySelector('#cascadedAsrProvider')
 const cascadedLlmProvider = document.querySelector('#cascadedLlmProvider')
 const cascadedLlmModelPreset = document.querySelector('#cascadedLlmModelPreset')
@@ -126,6 +165,8 @@ const phonePanel = createPhonePanel({document, api, save: saveAll})
 function applyCategory(id) {
   if (!isValidCategory(id)) return
   activeCategory = id
+  if (id === 'im') void imPanel.load()
+  if (id === 'connections') void connectionsPanel.load()
   phonePanel.setActive(id === 'phone')
   document.querySelector('footer').hidden = id === 'phone'
   for (const category of SETTINGS_CATEGORIES) {
@@ -158,6 +199,7 @@ const capabilityEditor = createCapabilitiesEditor({root: document.querySelector(
   cameraRoot: document.querySelector('#camera-executor-toggle'), codingRoot: document.querySelector('#coding-executor-toggle'),
   problemsLabel: document.querySelector('#capabilities-problems'),
   stage: patch => controller.stage(patch), probe: payload => api.probeCapabilities(payload)})
+const memoryPrerecall = document.getElementById('memory-prerecall-enabled')
 document.getElementById('coding-executor-configure').addEventListener('click', () => {
   applyCategory('codex')
   document.getElementById('codex-projects').open = true
@@ -182,6 +224,27 @@ function populatePresetOptions(select, presets, customLabel = t("自定义音色
 populatePresetOptions(integratedVoicePreset, QWEN_VOICES)
 populatePresetOptions(cascadedTtsVoicePreset, VOLCENGINE_TTS_VOICES)
 
+const secretTabs = ['models', 'connections']
+function selectSecretTab(selected) {
+  for (const id of secretTabs) {
+    const tab = document.querySelector(`#secret-tab-${id}`)
+    tab.setAttribute('aria-selected', String(id === selected))
+    tab.tabIndex = id === selected ? 0 : -1
+    document.querySelector(`#secret-panel-${id}`).hidden = id !== selected
+  }
+}
+for (const id of secretTabs) {
+  const tab = document.querySelector(`#secret-tab-${id}`)
+  tab.addEventListener('click', () => selectSecretTab(id))
+  tab.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const next = event.key === 'Home' ? secretTabs[0] : event.key === 'End' ? secretTabs[1] : secretTabs.find(other => other !== id)
+    selectSecretTab(next)
+    document.querySelector(`#secret-tab-${next}`).focus()
+  })
+}
+
 function secretInput(key) { return document.querySelector(`#${key}`) }
 function secretClearButton(key) { return document.querySelector(`button.clear[data-key="${key}"]`) }
 
@@ -203,13 +266,20 @@ function renderBadges(present, sources) {
 // These labels reflect selected public providers only, never any key material.
 function keyUsage(view) {
   return {
-    dashscopeApiKey: view.pipelineMode === 'integrated'
-      || view.cascadedLlmProvider === 'qwen' ? t("必需") : t("当前未使用"),
-    deepseekApiKey: view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'deepseek' ? t("必需") : t("当前未使用"),
+    dashscopeApiKey: (view.pipelineMode === 'integrated' && view.integratedProvider === 'qwen')
+      || (view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'qwen') ? t("必需")
+      : view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun'
+        ? t("仅本地记忆嵌入需要") : t("当前未使用"),
+    stepfunApiKey: view.pipelineMode === 'integrated' && view.integratedProvider === 'stepfun' ? t("必需") : t("当前未使用"),
+    openaiApiKey: (view.pipelineMode === 'integrated' ? view.integratedProvider : view.cascadedLlmProvider) === 'openai' ? t('必需') : t('当前未使用'),
+    geminiApiKey: (view.pipelineMode === 'integrated' ? view.integratedProvider === 'gemini' : [view.cascadedAsrProvider,view.cascadedLlmProvider,view.cascadedTtsProvider].includes('gemini')) ? t('必需') : t('当前未使用'),
+    deepseekApiKey: view.pipelineMode === 'cascaded' && view.cascadedLlmProvider === 'deepseek' ? t("必需") : view.codingBackend === 'deepseek' ? t("编程执行器可使用") : t("当前未使用"),
     arkApiKey: view.pipelineMode === 'cascaded'
       && view.cascadedLlmProvider === 'ark' ? t("必需") : t("当前未使用"),
-    doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' ? t("必需") : t("当前未使用"),
+    doubaoBigmodelApiKey: view.pipelineMode === 'cascaded' && [view.cascadedAsrProvider,view.cascadedTtsProvider].includes('volcengine') ? t("必需") : t("当前未使用"),
+    composioApiKey: t('应用连接；修改后重启运行时'),
     tavilyApiKey: t("可选"),
+    openrouterApiKey: 'Jev',
   }
 }
 
@@ -224,6 +294,32 @@ function renderPreset(select, customInput, value, presets) {
   select.value = choice.selected
   customInput.hidden = choice.selected !== CUSTOM_VOICE_VALUE
   if (choice.selected === CUSTOM_VOICE_VALUE) customInput.value = choice.custom
+}
+
+function renderCodingBackend(view) {
+  const backendId = Object.hasOwn(CODING_GUIDANCE, view.codingBackend) ? view.codingBackend : 'codex'
+  codingProvider.value = backendId
+  const acp = backendId !== 'codex'
+  codingAcpSettings.hidden = !acp
+  codexStatus.hidden = acp
+  document.querySelector('#codex-discovery').hidden = acp
+  codingPermissionNote.textContent = backendId === 'pi'
+    ? t("Pi 不支持逐项审批：询问模式下任务会被拒绝，不会自动改为 YOLO。")
+    : acp ? t("审批由所选执行器在任务开始时协商；不支持当前审批模式时任务会被拒绝。") : ''
+  if (!acp) return
+  const [title, configLabel, guidance] = CODING_GUIDANCE[backendId]
+  document.querySelector('#coding-backend-title').textContent = t("{0} 配置", title)
+  document.querySelector('#coding-backend-guidance').textContent = t(guidance)
+  document.querySelector('#coding-config-field').hidden = !configLabel
+  document.querySelector('#coding-config-label').textContent = configLabel ? t(configLabel) : ''
+  codingBinaryPath.value = view.codingBackendPaths?.[backendId]?.binaryPath ?? ''
+  codingConfigPath.value = view.codingBackendPaths?.[backendId]?.configPath ?? ''
+  const status = view.codingBackends?.[backendId]
+  document.querySelector('#coding-backend-status').textContent = [
+    status?.binary === 'available' ? t("已找到 ACP 可执行文件") : status?.binary === 'missing' ? t("未找到 ACP 可执行文件，请安装或指定路径") : t("可执行文件待检测"),
+    status?.configuration === 'missing' ? t("配置路径不可用") : codingConfigPath.value ? t("使用指定的配置来源") : t("使用默认配置"),
+    t("登录与 ACP 能力尚未验证，会在任务开始时检查。"),
+  ].join(t("；"))
 }
 
 function renderCodexStatus(view) {
@@ -253,6 +349,7 @@ function updateButtons() {
   workspaceOpenCurrent.disabled = state.currentDisabled
   workspaceClearCurrent.disabled = state.currentDisabled
   workspaceClearAll.disabled = state.workspaceDisabled
+  document.querySelector('#startup-retry').disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
   workspaceRetryRecovery.disabled = state.recoveryDisabled
   settingsRestore.disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
 }
@@ -295,7 +392,7 @@ function renderVision(view) {
 conversationVision.addEventListener('change', async () => {
   const enabled = conversationVision.checked
   if (enabled) {
-    try { if (await window.novaAudioAgentDesktop.camera.requestPermission() !== 'granted') throw Error('permission') }
+    try { if (await window.novaPersonalAgentDesktop.camera.requestPermission() !== 'granted') throw Error('permission') }
     catch { conversationVision.checked = false; document.getElementById('conversation-vision-status').textContent = t("摄像头权限未授予"); return }
   }
   if (conversationVision.checked !== enabled || conversationVision.disabled) return
@@ -305,10 +402,10 @@ monitorCamera.addEventListener('change', () => controller.stage({monitorCameraDe
 document.getElementById('watch-model').addEventListener('change', event => {
   if (!event.target.disabled && event.target.value) controller.stage({watchModel: event.target.value})
 })
-document.getElementById('camera-refresh').addEventListener('click', async () => {
+onButton(document.getElementById('camera-refresh'), async () => {
   const status = document.getElementById('camera-devices-status')
   try {
-    cameraDevices = await window.novaAudioAgentDesktop.camera.listDevices()
+    cameraDevices = await window.novaPersonalAgentDesktop.camera.listDevices()
     status.textContent = cameraDevices.length ? '' : t("未检测到摄像头；授权并连接设备后重试")
     renderVision(currentView)
   } catch { status.textContent = t("无法获取摄像头列表") }
@@ -344,15 +441,18 @@ for (const scope of ['history', 'session']) document.getElementById(`usage-${sco
   renderUsage()
 })
 
-function render(view, _drafts, state) {
+function render(view, drafts, state) {
   if (!view) return
+  document.getElementById('startup-view').value = view.startupView ?? 'workbench'
   document.getElementById('language').value = view.language ?? 'zh-CN'
+  document.getElementById('language-restart-hint').hidden = (view.language ?? 'zh-CN') === currentLanguage()
   currentView = view
   skinPanel.render(view, state)
   renderUsage()
   renderVision(view)
   capabilityEditor.render(view)
   knowledgePanel.render(view)
+  memoryPrerecall.checked = view.memoryPrerecallEnabled === true
   for (const input of capabilitySettings) input.value = view[input.id] ?? ''
   for (const [key, input] of Object.entries(phoneFields)) input.value = String(view[key] || '')
   phonePairingOpen.disabled = state.busy
@@ -377,6 +477,7 @@ function render(view, _drafts, state) {
   heartbeat.value = String(view.codexHeartbeatSeconds)
   heartbeatValue.textContent = t("{0} 秒", view.codexHeartbeatSeconds)
   for (const input of codexModeInputs) input.checked = input.value === view.codexBinaryMode
+  renderCodingBackend(view)
   const codexVisibility = codexModeVisibility(view.codexBinaryMode)
   codexManualSettings.hidden = codexVisibility.manualConfigurationHidden
   codexRescan.hidden = codexVisibility.rescanHidden
@@ -389,15 +490,41 @@ function render(view, _drafts, state) {
   renderCodexStatus(view)
   integratedSection.hidden = view.pipelineMode !== 'integrated'
   cascadedSection.hidden = view.pipelineMode !== 'cascaded'
+  document.getElementById('gemini-live-limit').hidden = view.integratedProvider !== 'gemini'
   integratedProvider.value = view.integratedProvider
+  const integratedModels = view.integratedProvider === 'openai' ? ['gpt-realtime-2.1-mini','gpt-realtime-2.1'].map(value=>({value,label:value}))
+    : view.integratedProvider === 'gemini' ? [{value:'gemini-3.8-live',label:'Gemini 3.8 Live'}]
+    : view.integratedProvider === 'stepfun'
+    ? [{value: 'stepaudio-3-realtime-preview', label: 'StepAudio 3 Realtime Preview'}]
+    : [{value: 'qwen-audio-3.1-realtime-plus', label: 'Qwen Audio 3.1 Plus'},
+      {value: 'qwen-audio-3.0-realtime-plus', label: 'Qwen Audio 3.0 Plus'},
+      {value: 'qwen-audio-3.0-realtime-flash', label: 'Qwen Audio 3.0 Flash'},
+      {value: 'qwen3.5-omni-flash-realtime', label: 'Qwen3.5 Omni Flash Realtime'},
+      {value: 'qwen3.5-omni-plus-realtime', label: 'Qwen3.5 Omni Plus Realtime'}]
+  integratedModel.replaceChildren(...integratedModels.map(preset => {
+    const option = document.createElement('option'); option.value = preset.value; option.textContent = preset.label; return option
+  }))
   if (view.integratedModel && ![...integratedModel.children].some(option => option.value === view.integratedModel)) {
     const option = document.createElement('option'); option.value = view.integratedModel; option.textContent = view.integratedModel; integratedModel.append(option)
   }
   integratedModel.value = view.integratedModel ?? ''
-  const voices = view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : QWEN_VOICES
+  const voices = view.integratedProvider === 'openai' ? ['marin','cedar','alloy','coral'].map(value=>({value,label:value}))
+    : view.integratedProvider === 'gemini' ? ['Kore','Puck','Aoede','Charon','Fenrir'].map(value=>({value,label:value}))
+    : view.integratedProvider === 'stepfun' ? STEPFUN_VOICES
+    : view.integratedModel?.startsWith('qwen3.5-omni-') ? [{value: 'Ethan', label: t("Ethan（默认）")}] : view.integratedModel === 'qwen-audio-3.1-realtime-plus' ? QWEN_31_VOICES : QWEN_VOICES
   populatePresetOptions(integratedVoicePreset, voices)
   renderPreset(integratedVoicePreset, integratedVoiceCustom, view.integratedVoice, voices)
+  voiceprintPanel.render(view, drafts)
+  for (const {stage, provider, endpoint} of SELF_HOSTED_STAGES) {
+    document.querySelector(`#self-hosted-${stage}-settings`).hidden = view[provider] !== 'self-hosted'
+    const input = document.querySelector(`#${endpoint}`)
+    if (document.activeElement !== input) input.value = view[endpoint] ?? ''
+  }
   cascadedAsrProvider.value = view.cascadedAsrProvider
+  geminiAsrModel.value = view.geminiAsrModel
+  geminiTtsModel.value = view.geminiTtsModel
+  document.querySelector('#gemini-asr-settings').hidden = view.cascadedAsrProvider !== 'gemini'
+  document.querySelector('#gemini-tts-settings').hidden = view.cascadedTtsProvider !== 'gemini'
   cascadedLlmProvider.value = view.cascadedLlmProvider
   const modelPresets = ({
     qwen: [
@@ -406,15 +533,23 @@ function render(view, _drafts, state) {
       {value: 'qwen3.8-max', label: t("qwen3.8-max · 第二档 · ★★★★☆")},
       {value: 'qwen-plus', label: t("qwen-plus · 第三档 · ★★★☆☆")},
     ],
+    openai: [{value:'gpt-6-luna',label:'GPT-6 Luna'}],
+    gemini: ['gemini-3.5-flash-lite','gemini-3.8-flash'].map(value=>({value,label:value})),
     deepseek: [{value: 'deepseek-flash', label: t("deepseek-flash · 第一档 · ★★★★★")}],
     ark: [{value: 'doubao-seed-2-0-pro-260215', label: 'doubao-seed-2-0-pro-260215'}],
   }[view.cascadedLlmProvider] ?? [])
   populatePresetOptions(cascadedLlmModelPreset, modelPresets, t("自定义模型 ID…"))
   renderPreset(cascadedLlmModelPreset, cascadedLlmModel, view.cascadedLlmModels?.[view.cascadedLlmProvider], modelPresets)
+  document.querySelector('#cascaded-tts-voice-settings').hidden = view.cascadedTtsProvider === 'self-hosted'
   cascadedTtsProvider.value = view.cascadedTtsProvider
-  renderPreset(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsVoice, VOLCENGINE_TTS_VOICES)
+  const ttsVoices = view.cascadedTtsProvider === 'gemini' ? GEMINI_TTS_VOICES : VOLCENGINE_TTS_VOICES
+  populatePresetOptions(cascadedTtsVoicePreset, ttsVoices)
+  renderPreset(cascadedTtsVoicePreset, cascadedTtsVoiceCustom, view.cascadedTtsProvider === 'gemini' ? view.geminiTtsVoice : view.cascadedTtsVoice, ttsVoices)
   renderBadges(view.secretsPresent, view.secretSources)
   renderKeyUsage(view)
+  document.querySelector('#startup-status').dataset.stage = view.startup?.stage ?? ''
+  startupNotice.update(view.startup)
+  document.querySelector('#startup-retry').hidden = view.startup?.stage !== 'failed'
   warning.hidden = view.keyringAvailable !== false
   const recoveryStatus = view.managedWorkspaces?.recoveryStatus ?? 'idle'
   const recoveryRequired = recoveryStatus !== 'idle'
@@ -488,13 +623,16 @@ bindStage(autoHideSeconds, 'change', () => {
   autoHideSeconds.reportValidity()
   return valid ? {autoHideSeconds: value} : {}
 })
-wakeRetry.addEventListener('click', () => { void window.novaAudioAgentDesktop.wakeWord.retry() })
+onButton(wakeRetry, () => window.novaPersonalAgentDesktop.wakeWord.retry(), () => {statusLabel.textContent=t('操作未完成')})
 for (const event of ['pointerdown', 'keydown']) {
-  document.addEventListener(event, () => window.novaAudioAgentDesktop.wakeWord.activity())
+  document.addEventListener(event, () => window.novaPersonalAgentDesktop.wakeWord.activity())
 }
 bindStage(codingProgressNarrationInput, 'change', () => ({codingProgressNarration: codingProgressNarrationInput.value}))
 for (const input of proactivityInputs) bindStage(input, 'change', () => ({proactivity: input.value}))
 for (const input of pipelineModeInputs) bindStage(input, 'change', () => ({pipelineMode: input.value}))
+bindStage(codingProvider, 'change', () => ({codingBackend: codingProvider.value}))
+bindStage(codingBinaryPath, 'input', () => ({codingBackendPaths: {[codingProvider.value]: {binaryPath: codingBinaryPath.value}}}))
+bindStage(codingConfigPath, 'input', () => ({codingBackendPaths: {[codingProvider.value]: {configPath: codingConfigPath.value}}}))
 for (const input of codexApprovalModeInputs) {
   bindStage(input, 'change', () => ({codexApprovalMode: input.value}))
 }
@@ -504,6 +642,7 @@ for (const input of progressBubblesInputs) {
   bindStage(input, 'change', () => ({progressBubbles: input.value}))
 }
 bindStage(clarificationDepth, 'change', () => ({clarificationDepth: clarificationDepth.value}))
+bindStage(memoryPrerecall, 'change', () => ({memoryPrerecallEnabled: memoryPrerecall.checked}))
 for (const input of capabilitySettings) bindStage(input, 'change', () => ({[input.id]: input.value}))
 heartbeat.addEventListener('input', () => {
   heartbeatValue.textContent = t("{0} 秒", heartbeat.value)
@@ -513,12 +652,46 @@ for (const input of codexModeInputs) bindStage(input, 'change', () => ({codexBin
 bindStage(codexBinaryPath, 'input', () => ({codexBinaryPath: codexBinaryPath.value}))
 bindStage(codexWorkspace, 'input', () => ({codexWorkspace: codexWorkspace.value}))
 bindStage(codexManagedRoot, 'input', () => ({codexManagedRoot: codexManagedRoot.value}))
-bindStage(integratedProvider, 'change', () => ({integratedProvider: integratedProvider.value}))
+bindStage(integratedProvider, 'change', () => ({
+  integratedProvider: integratedProvider.value,
+  integratedModel: integratedProvider.value === 'openai' ? 'gpt-realtime-2.1-mini' : integratedProvider.value === 'gemini' ? 'gemini-3.8-live' : integratedProvider.value === 'stepfun' ? 'stepaudio-3-realtime-preview' : 'qwen-audio-3.0-realtime-plus',
+  integratedVoice: integratedProvider.value === 'openai' ? 'marin' : integratedProvider.value === 'gemini' ? 'Kore' : integratedProvider.value === 'stepfun' ? 'default' : 'longanqian',
+}))
 bindStage(integratedModel, 'change', () => ({
   integratedModel: integratedModel.value,
-  ...(integratedModel.value.startsWith('qwen3.5-omni-') !== currentView?.integratedModel?.startsWith('qwen3.5-omni-')
-    ? {integratedVoice: integratedModel.value.startsWith('qwen3.5-omni-') ? 'Ethan' : 'longanqian'} : {}),
+  ...(integratedModel.value !== currentView?.integratedModel
+    ? {integratedVoice: integratedProvider.value === 'openai' ? 'marin' : integratedProvider.value === 'gemini' ? 'Kore' : integratedProvider.value === 'stepfun' ? 'default' : integratedModel.value.startsWith('qwen3.5-omni-') ? 'Ethan' : integratedModel.value === 'qwen-audio-3.1-realtime-plus' ? 'longanqian_v3.1' : 'longanqian'} : {}),
 }))
+bindStage(geminiAsrModel, 'input', () => ({geminiAsrModel: geminiAsrModel.value}))
+bindStage(geminiTtsModel, 'input', () => ({geminiTtsModel: geminiTtsModel.value}))
+function stageSelfHostedPatch(patch) {
+  for (const {endpoint, secret} of SELF_HOSTED_STAGES) {
+    if (Object.hasOwn(patch, endpoint) && endpointOrigin(currentView?.[endpoint]) !== endpointOrigin(patch[endpoint])) {
+      secretInput(secret).value = ''
+      dirtySecretKeys.add(secret)
+      secretRevisions.noteInput(secret)
+    }
+  }
+  controller.stage(patch)
+}
+for (const {endpoint} of SELF_HOSTED_STAGES) {
+  const input = document.querySelector(`#${endpoint}`)
+  input.addEventListener('change', () => stageSelfHostedPatch({[endpoint]: input.value}))
+}
+for (const action of ['import', 'export']) {
+  document.querySelector(`#voice-preset-${action}`).addEventListener('click', async () => {
+    const status = document.querySelector('#voice-preset-status')
+    try {
+      const result = await api.voicePreset(action, action === 'export' ? controller.snapshot().view : undefined)
+      if (result.canceled) return
+      if (result.error) throw new Error(result.error)
+      if (result.patch) stageSelfHostedPatch(result.patch)
+      // Name where audio and context will go before the user commits to Save.
+      const hosts = [...new Set(SELF_HOSTED_STAGES.filter(({endpoint}) => result.patch?.[endpoint]).map(({endpoint}) => new URL(result.patch[endpoint]).host))]
+      status.textContent = t(action === 'import' ? '预设已导入，请保存。' : '语音预设已导出（不含密钥）。') + (hosts.length ? ` → ${hosts.join(', ')}` : '')
+    } catch { status.textContent = t('预设操作失败：请检查 JSON 版本、地址和模型；至少选择一个支持的完整阶段。') }
+  })
+}
 bindStage(cascadedAsrProvider, 'change', () => ({cascadedAsrProvider: cascadedAsrProvider.value}))
 bindStage(cascadedLlmProvider, 'change', () => ({cascadedLlmProvider: cascadedLlmProvider.value}))
 cascadedLlmModelPreset.addEventListener('change', () => {
@@ -542,13 +715,13 @@ function bindVoicePicker(field, select, customInput) {
       customInput.focus()
       return
     }
-    controller.stage({[field]: select.value})
+    controller.stage({[typeof field === 'function' ? field() : field]: select.value})
   })
-  customInput.addEventListener('input', () => { controller.stage({[field]: customInput.value}) })
+  customInput.addEventListener('input', () => { controller.stage({[typeof field === 'function' ? field() : field]: customInput.value}) })
 }
 
 bindVoicePicker('integratedVoice', integratedVoicePreset, integratedVoiceCustom)
-bindVoicePicker('cascadedTtsVoice', cascadedTtsVoicePreset, cascadedTtsVoiceCustom)
+bindVoicePicker(() => cascadedTtsProvider.value === 'gemini' ? 'geminiTtsVoice' : 'cascadedTtsVoice', cascadedTtsVoicePreset, cascadedTtsVoiceCustom)
 
 for (const key of SECRET_KEYS) {
   secretInput(key).addEventListener('input', () => {
@@ -595,8 +768,8 @@ async function saveAll() {
   return result
 }
 
-settingsSave.addEventListener('click', () => { void saveAll() })
-settingsRestart.addEventListener('click', async () => {
+onButton(settingsSave, saveAll, () => {statusLabel.textContent=t('保存失败，请重试')})
+onButton(settingsRestart, async () => {
   if (restarting) return
   restarting = true
   updateButtons()
@@ -609,7 +782,7 @@ settingsRestart.addEventListener('click', async () => {
   finally { restarting = false; updateButtons() }
 })
 
-codexRescan.addEventListener('click', async () => {
+onButton(codexRescan, async () => {
   codexRescan.disabled = true
   codexRescan.setAttribute('aria-busy', 'true')
   statusLabel.textContent = t("正在刷新 Codex…")
@@ -627,7 +800,7 @@ codexRescan.addEventListener('click', async () => {
     codexRescan.setAttribute('aria-busy', 'false')
   }
 })
-document.querySelector('#projects-repair').addEventListener('click', async () => {
+onButton(document.querySelector('#projects-repair'), async () => {
   statusLabel.textContent = t("正在修复 Projects 目录权限…")
   try {
     const results = await Promise.all(['state', 'managed', 'workspace'].map(root => api.repairProjects(root)))
@@ -655,7 +828,7 @@ async function runWorkspaceAction(action) {
   }
 }
 
-settingsRestore.addEventListener('click', async () => {
+onButton(settingsRestore, async () => {
   workspaceBusy = true
   updateButtons()
   try {
@@ -667,17 +840,28 @@ settingsRestore.addEventListener('click', async () => {
   finally { workspaceBusy = false; updateButtons() }
 })
 
-workspaceOpenCurrent.addEventListener('click', () => {
-  void runWorkspaceAction(() => api.openCurrentManagedWorkspace())
+onButton(workspaceOpenCurrent, () => {
+  return runWorkspaceAction(() => api.openCurrentManagedWorkspace())
 })
-workspaceClearCurrent.addEventListener('click', () => {
-  void runWorkspaceAction(() => api.clearCurrentManagedWorkspace())
+onButton(workspaceClearCurrent, () => {
+  return runWorkspaceAction(() => api.clearCurrentManagedWorkspace())
 })
-workspaceClearAll.addEventListener('click', () => {
-  void runWorkspaceAction(() => api.clearAllManagedWorkspaces())
+onButton(workspaceClearAll, () => {
+  return runWorkspaceAction(() => api.clearAllManagedWorkspaces())
 })
-workspaceRetryRecovery.addEventListener('click', () => {
-  void runWorkspaceAction(async () => {
+onButton(document.querySelector('#startup-retry'), async () => {
+  workspaceBusy = true
+  updateButtons()
+  try {
+    const view = await api.retryBackend()
+    controller.syncView(view, {trackRestart: false})
+    statusLabel.textContent = view.backendStatus === 'connected' ? t("后台已连接") : startupMessage(view.startup) || t("操作未完成")
+  } catch { statusLabel.textContent = t("操作未完成") }
+  finally { workspaceBusy = false; updateButtons() }
+})
+
+onButton(workspaceRetryRecovery, () => {
+  return runWorkspaceAction(async () => {
     const view = await api.retryBackend()
     return {
       status: view?.managedWorkspaces?.recoveryStatus === 'idle'
@@ -708,3 +892,5 @@ void (async () => {
     statusLabel.textContent = t("读取设置失败")
   }
 })()
+
+bindStage(document.getElementById('startup-view'), 'change', () => ({startupView: document.getElementById('startup-view').value}))

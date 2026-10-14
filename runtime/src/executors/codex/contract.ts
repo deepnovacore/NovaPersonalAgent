@@ -2,6 +2,7 @@ import {createHash} from 'node:crypto'
 import type {ExecutorProgress} from '../../core/causal-runtime.js'
 import type {JsonValue} from '../../core/events.js'
 import {snapshotJsonRecord} from './safe-json.js'
+import {sanitizeAcpPreflightReport} from '../acp/preflight.js'
 import {validProgressSummary} from '../../core/events.js'
 import {hasOtherCategory as hasPinnedOtherCategory} from '../../text/unicode-tables.js'
 import {normalizeNfcPinned} from '../../text/unicode-normalize.js'
@@ -103,6 +104,8 @@ const STEER_PROJECT: OpSpec = {
     properties: {
       instruction: {type: 'string', minLength: 1, maxLength: MAX_CODEX_STEER_INSTRUCTION},
       project: PROJECT,
+      session_id: {type:'string',minLength:1,maxLength:80},
+      work_id: {type:'string',minLength:1,maxLength:512},
     },
     required: ['instruction'],
     additionalProperties: false,
@@ -221,12 +224,13 @@ function validateProjectRun(request: Record<string, unknown>): CodexRequestValid
 }
 
 function validateProjectSteer(request: Record<string, unknown>): CodexRequestValidation {
-  const allowed = new Set(['instruction', 'project'])
+  const allowed = new Set(['instruction', 'project', 'session_id', 'work_id'])
   if (Object.keys(request).some(key => !allowed.has(key))) return failure('invalid_params', 'steer')
   const instruction = normalizedString(request.instruction, MAX_CODEX_STEER_INSTRUCTION)
   if (instruction === null) return failure('invalid_params', 'steer')
   const result: Record<string, unknown> = {instruction}
   if (!projectField(request, result)) return failure('invalid_params', 'steer')
+  for(const key of ['session_id','work_id'])if(Object.hasOwn(request,key)){const value=normalizedString(request[key],key==='work_id'?512:80);if(value===null)return failure('invalid_params','steer');result[key]=value}
   return success(result)
 }
 
@@ -359,6 +363,8 @@ function sanitizeCodexPreflightReportChecked(
   value: unknown,
 ): Readonly<Record<string, unknown>> | null {
   if (!isPlainObject(value)) return null
+  // An ACP handshake has its own exact shape and never borrows the sandbox fields below.
+  if (Object.hasOwn(value, 'protocol')) return sanitizeAcpPreflightReport(value)
   const result: Record<string, unknown> = {}
   if (Object.hasOwn(value, 'version')) {
     if (typeof value.version !== 'string' || !CODEX_VERSION.test(value.version)) return null

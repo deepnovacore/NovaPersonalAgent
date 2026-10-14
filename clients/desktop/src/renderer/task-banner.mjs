@@ -2,6 +2,10 @@ import {t} from './locale.mjs'
 import {EXECUTOR_TASKS, EXECUTOR_TASK_ACTION_RESULT} from './wire-frame-types.mjs'
 import {parseProgressFrame, validProjectLabel} from './bubbles.mjs'
 
+const BACKEND_NAMES = Object.freeze({codex: 'Codex', opencode: 'OpenCode', codebuddy: 'CodeBuddy', pi: 'Pi', deepseek: 'DeepSeek Harness'})
+/** The bound coding backend, shown only when the host names one (non-Codex sessions). */
+export const taskBackendLabel = task => task.backend_id === undefined ? null : BACKEND_NAMES[task.backend_id] ?? null
+
 const RUNNING = new Set(['started', 'working'])
 const AUTO_HIDE = new Set(['completed', 'cancelled'])
 const PHASES = new Set([...RUNNING, ...AUTO_HIDE, 'failed', 'refused', 'unknown'])
@@ -14,7 +18,7 @@ export function parseTaskSnapshot(frame) {
     || new TextEncoder().encode(JSON.stringify(frame)).length > 16384) return null
   const ids = new Set()
   for (const task of frame.tasks) {
-    if (!task || !validProjectLabel(task.project) || !validProjectLabel(task.title) || !PHASES.has(task.phase)
+    if (!task || (task.backend_id !== undefined && !Object.hasOwn(BACKEND_NAMES, task.backend_id)) || !validProjectLabel(task.project) || !validProjectLabel(task.title) || !PHASES.has(task.phase)
       || !parseProgressFrame({type: 'executor.progress', delegate_id: task.work_id, executor: task.executor,
         phase: task.phase, summary: task.summary, ts: task.ts, level: 'detail'}) || ids.has(task.work_id)) return null
     ids.add(task.work_id)
@@ -52,9 +56,9 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
     selectedId = (visible.find(task => RUNNING.has(task.phase) && task.project === activeProject)
       ?? visible.find(task => RUNNING.has(task.phase)) ?? visible[0])?.work_id ?? null
   }
-  function state() {
+  function state({includeExpired = false} = {}) {
     const item = selected()
-    return {tasks: tasks.filter(task => !expired.has(task.work_id)).map(task => ({...task, cancelling: cancelling.has(task.work_id), opening: [...pending.values()].some(p => p.work_id === task.work_id && p.action === 'open'), error: errors.get(task.work_id) ?? ''})), selected: item ? {...item} : null,
+    return {tasks: tasks.filter(task => includeExpired || !expired.has(task.work_id)).map(task => ({...task, cancelling: cancelling.has(task.work_id), opening: [...pending.values()].some(p => p.work_id === task.work_id && p.action === 'open'), error: errors.get(task.work_id) ?? ''})), selected: item ? {...item} : null,
       visible: !suspended && !hidden && item !== null, connected, runningCount: tasks.filter(task => RUNNING.has(task.phase)).length,
       cancelling: cancelling.has(selectedId), opening: [...pending.values()].some(p => p.work_id === selectedId && p.action === 'open'),
       error: errors.get(selectedId) ?? ''}
@@ -87,8 +91,8 @@ export function createTaskBannerController({send, onChange = () => {}, now = Dat
     expired.delete(id); selectedId = id; hidden = false
     armTerminal(); emit(); return true
   }
-  function action(action) {
-    const item = selected()
+  function action(action, id = selectedId) {
+    const item = tasks.find(task => task.work_id === id)
     if (!connected || !item || !['open', 'cancel'].includes(action)
       || (action === 'cancel' && (!RUNNING.has(item.phase) || cancelling.has(item.work_id)))
       || [...pending.values()].some(p => p.work_id === item.work_id && p.action === action)) return false
@@ -162,7 +166,8 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
       card.dataset.phase = task.phase
       const set = (selector, text) => { const node = card.querySelector(selector); node.textContent = text; node.title = text }
       set('[data-title]', task.title)
-      set('[data-project]', task.project)
+      const backend = taskBackendLabel(task)
+      set('[data-project]', backend === null ? task.project : `${task.project} · ${backend}`)
       set('[data-summary]', task.summary)
       set('[data-status]', !view.connected ? t("连接已断开") : task.cancelling ? t("正在停止") : STATUS[task.phase])
       set('[data-error]', task.error)
@@ -190,4 +195,10 @@ export function mountTaskBanner({container, send, reserveArea, onChange = () => 
   container.addEventListener('focusin', () => {focused = true; syncPause()})
   container.addEventListener('focusout', event => {focused = container.contains(event.relatedTarget); syncPause()})
   return Object.freeze({...controller, applyLayout, setPlatform(value) {platform = value; render(controller.state())}})
+}
+
+/** Durable task progress; decisions and unviewed results outrank tool activity. */
+export function summarizeTasks(tasks,viewedResults=[]){
+ const active=tasks.filter(task=>!['completed','cancelled'].includes(task.phase)),decisions=tasks.filter(task=>task.phase==='waiting'),results=tasks.filter(task=>task.phase==='completed'&&!viewedResults.includes(task.id))
+ return {active:active.length,decisions:decisions.length,results:results.length,task_id:(decisions[0]??results[0]??active[0])?.id??null}
 }

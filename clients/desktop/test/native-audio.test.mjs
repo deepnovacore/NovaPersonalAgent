@@ -278,7 +278,7 @@ test('macOS helper mute writes silence while preserving playback progress and re
   assert.match(render, /signals\.append\(\.done\(/)
 })
 
-test('uses VoiceProcessingIO readiness and preserves Nova Audio Agent generation identity', {
+test('uses VoiceProcessingIO readiness and preserves Nova Personal Agent generation identity', {
   skip: process.platform !== 'darwin',
 }, async () => {
   const child = new EventEmitter()

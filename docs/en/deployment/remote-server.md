@@ -10,7 +10,7 @@ Remote credential storage requires POSIX ownership and private file permissions.
 
 ## Install from npm
 
-Use Node.js >=22.14.0 and `npm install --global nova-audio-agent-server`. After setting the environment below, use `novaaudio-server token-init`, then `novaaudio-server --env-file /absolute/path/server.env start`. In a second interactive terminal with the same configuration, run `novaaudio-server --env-file /absolute/path/server.env pair wss://your-host.ts.net` for the one-use QR (SSH needs `-t`). No Electron or display session is needed.
+Use Node.js >=22.14.0 and `npm install --global nova-personal-agent-server`. After setting the environment below, use `novapersonal-server token-init`, then `novapersonal-server --env-file /absolute/path/server.env start`. In a second interactive terminal with the same configuration, run `novapersonal-server --env-file /absolute/path/server.env pair wss://your-host.ts.net` for the one-use QR (SSH needs `-t`). No Electron or display session is needed.
 
 On Ubuntu, invoke the installed `tailscale` CLI directly for the private WSS setup below. Run the service in the foreground or under your process supervisor with the same user and explicit environment file.
 
@@ -20,9 +20,9 @@ Use Node >=22.13 and a checkout with its normal workspace dependencies installed
 Run builds serially with desktop work because both builds write `runtime/dist`:
 
 ```sh
-cd /absolute/path/to/nova-audio-agent
+cd /absolute/path/to/nova-personal-agent
 npm ci
-npm run build --workspace @nova-audio-agent/runtime
+npm run build --workspace @nova-personal-agent/runtime
 ```
 
 Create a private directory outside the checkout. Set these two required variables;
@@ -34,7 +34,7 @@ mkdir -p "$HOME/.nova-remote"
 chmod 700 "$HOME/.nova-remote"
 export SERVER_PORT=19876
 export SERVER_TOKEN_FILE="$HOME/.nova-remote/client-token"
-npm run server:token-init --workspace @nova-audio-agent/runtime
+npm run server:token-init --workspace @nova-personal-agent/runtime
 ```
 
 Initialization creates a random 128-bit lowercase hexadecimal token with mode 0600
@@ -112,9 +112,9 @@ place credentials there, not in the plist. Create the log directory first.
   <key>ProgramArguments</key><array>
     <string>/absolute/path/to/node</string>
     <string>--env-file=/Users/your-user/.nova-remote/server.env</string>
-    <string>/absolute/path/to/nova-audio-agent/runtime/dist/src/server-entry.js</string>
+    <string>/absolute/path/to/nova-personal-agent/runtime/dist/src/server-entry.js</string>
   </array>
-  <key>WorkingDirectory</key><string>/absolute/path/to/nova-audio-agent</string>
+  <key>WorkingDirectory</key><string>/absolute/path/to/nova-personal-agent</string>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>/Users/your-user/.nova-remote/server.log</string>
   <key>StandardErrorPath</key><string>/Users/your-user/.nova-remote/server.log</string>
@@ -137,7 +137,7 @@ The LaunchAgent runs in your login session and does not automatically restart af
 With the service running, open an interactive terminal on the same Mac with the same server port and token-file settings:
 
 ```sh
-npm run server:pair --workspace @nova-audio-agent/runtime -- wss://YOUR-HOST.ts.net
+npm run server:pair --workspace @nova-personal-agent/runtime -- wss://YOUR-HOST.ts.net
 ```
 
 Use **Scan to connect** in the iPhone app and confirm the host address. The terminal displays a single-use QR code; the host's long-term token is never included. The WSS address must already route to this service through Tailscale Serve. Over SSH, use `ssh -t` so the command has an interactive terminal. Pipes, redirected output and terminals too narrow for the QR code are rejected.
@@ -147,7 +147,7 @@ Generating another code invalidates the previous one. Codes have no timed expiry
 On macOS, the windowed pairing and device-revocation interface requires Xcode Command Line Tools:
 
 ```sh
-npm run server:pair --workspace @nova-audio-agent/runtime -- --window wss://YOUR-HOST.ts.net
+npm run server:pair --workspace @nova-personal-agent/runtime -- --window wss://YOUR-HOST.ts.net
 ```
 
 Keep the token file and `${SERVER_TOKEN_FILE}.devices.json` in a private 0700 directory; both files must be private to the service user. The device store supports up to 32 devices and must have only one writer. Do not edit it while the service is running.

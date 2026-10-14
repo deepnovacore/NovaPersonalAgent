@@ -222,3 +222,13 @@ test('Windows rejects remote private storage before creating credentials or allo
   assert.equal(existsSync(tokenFile), false)
   assert.equal(existsSync(`${tokenFile}.devices.json`), false)
 })
+
+test('a leftover SURROGATE_MODEL is reported before the configuration check can stop startup', async () => {
+  const {runServerEntry} = await import('../src/server-entry.js')
+  const lines: string[] = []
+  assert.equal(await runServerEntry({environment: {SURROGATE_MODEL: 'old-model'}, onDiagnostic: line => { lines.push(line) }}), 2)
+  assert.deepEqual(lines, [
+    '[config-warning] SURROGATE_MODEL is no longer read; rename it to SUPPORT_MODEL',
+    '[runtime-diagnostic] configuration_required',
+  ])
+})

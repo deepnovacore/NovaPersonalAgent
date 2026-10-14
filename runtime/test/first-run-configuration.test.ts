@@ -128,3 +128,19 @@ test('desktop configuration failure carries only bounded key names', () => {
   assert.equal(desktopConfigurationFailure(new ConfigurationError('缺少 X')), undefined)
   assert.equal(desktopConfigurationFailure(new Error('other')), undefined)
 })
+
+test('StepFun startup requires its own credential without demanding a Qwen key', () => {
+  const selected = {INTEGRATED_PROVIDER: 'stepfun', MEMORY_CONNECTION: 'disabled'}
+  assert.deepEqual(describeMissingBlockingEnvironment(selected), {pipeline: 'integrated', missing: ['STEPFUN_API_KEY']})
+  assert.deepEqual(describeMissingBlockingEnvironment({...selected, STEPFUN_API_KEY: 'fixture'}), {pipeline: 'integrated', missing: []})
+  assert.deepEqual(describeMissingBlockingEnvironment({...selected, DASHSCOPE_API_KEY: 'fixture'}), {pipeline: 'integrated', missing: ['STEPFUN_API_KEY']})
+})
+
+
+test('desktop text preflight needs only the selected text model, independently of voice', () => {
+  for (const pipeline of ['integrated', 'cascaded']) {
+    const environment = {PIPELINE_MODE: pipeline, CASCADE_LLM_PROVIDER: 'deepseek', MEMORY_CONNECTION: 'disabled'}
+    assert.deepEqual(describeMissingBlockingEnvironment({...environment, DEEPSEEK_API_KEY: 'synthetic'}, true)?.missing, [])
+    assert.deepEqual(describeMissingBlockingEnvironment({...environment, DASHSCOPE_API_KEY: 'voice-only'}, true)?.missing, ['DEEPSEEK_API_KEY'])
+  }
+})

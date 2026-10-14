@@ -84,7 +84,7 @@ test('configuration guides share a concise public subset and env example stays c
     const block = generatedBlock(await readFile(resolve(repositoryRoot, file), 'utf8'))
     const names = [...block.matchAll(/^\| `([A-Z0-9_]+)` \|/gmu)].map(match => match[1]!)
     assert.equal(new Set(names).size, names.length, file)
-    assert.ok(names.length <= 20 && names.length > 0, file)
+    assert.ok(names.length <= 22 && names.length > 0, file)
     for (const name of names) assert.ok(publicNames.has(name), `${file}: ${name}`)
     for (const essential of ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'PIPELINE_MODE', 'MEMORY_CONNECTION']) {
       assert.ok(names.includes(essential), `${file}: ${essential}`)
@@ -152,6 +152,28 @@ test('current Node Codex transport claim remains exact', async () => {
     'utf8',
   )
   assert.match(gettingStarted, /Codex is app-server-only; JSONL is\s+fixture-parser-only/iu)
+})
+
+test('coding docs state that ACP ask mode is not sandboxed', async () => {
+  for (const [file, row] of [
+    ['docs/en/executors/coding.md', /\| Ask-mode sandbox \(workspace-only files, no network\) \| Yes \| No \| No \| No \| No \|/u],
+    ['docs/zh-CN/executors/coding.md', /\| 询问模式沙箱（仅限工作区文件、不联网） \| 支持 \| 不支持 \| 不支持 \| 不支持 \| 不支持 \|/u],
+  ] as const) {
+    assert.match(await readFile(resolve(repositoryRoot, file), 'utf8'), row, file)
+  }
+})
+
+test('ACP coding backend claims stay scoped to the non-Codex agents in both languages', async () => {
+  const read = (file: string): Promise<string> => readFile(resolve(repositoryRoot, file), 'utf8')
+  assert.match(await read('docs/en/archs/06-verification.md'), /OpenCode, CodeBuddy, Pi and DeepSeek Harness sessions use ACP\./u)
+  assert.match(await read('docs/zh-CN/archs/06-verification.md'), /OpenCode、CodeBuddy、Pi 与 DeepSeek Harness 会话通过 ACP 接入。/u)
+  const readme = await read('README.md')
+  assert.match(readme, /OpenCode, CodeBuddy, Pi or DeepSeek Harness over ACP[^\n]*Live steering stays a Codex feature\./u)
+  assert.match(await read('README.zh-CN.md'), /通过 ACP 交给 OpenCode、CodeBuddy、Pi 或 DeepSeek Harness[^\n]*执行中追加要求目前只有 Codex 支持。/u)
+  for (const [file, steer] of [['docs/en/executors/coding.md', /\| Add requirements while running \| Yes \| No \| No \| No \| No \|/u],
+    ['docs/zh-CN/executors/coding.md', /\| 执行中追加要求 \| 支持 \| 不支持 \| 不支持 \| 不支持 \| 不支持 \|/u]] as const) {
+    assert.match(await read(file), steer, file)
+  }
 })
 
 test('every production environment name is classified and private names stay private', async () => {

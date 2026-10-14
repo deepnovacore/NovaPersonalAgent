@@ -47,6 +47,8 @@ export interface ApprovalWork {
  * once they become head.
  */
 export interface ApprovalView {
+  /** Host-bound source of the current approval, independent of the coding executor. */
+  readonly executorIdentity?: {readonly executor: string; readonly display_name: string}
   readonly pending_approval: boolean
   readonly pending_approval_busy: boolean
   readonly pending_approval_id?: string
@@ -71,7 +73,7 @@ export interface ApprovalController {
   acceptDecision(input: {readonly approvalId: string; readonly decision: ApprovalDecision}): boolean
   invalidate(reason: string): boolean
   /** Park the head while something else holds the floor: its expiry timer stops, `pending` stays true. */
-  hold(): boolean
+  hold(reason?: 'project' | 'background'): boolean
   /** Un-park the head with a fresh full TTL, as if it had just become head. */
-  release(): boolean
+  release(reason?: 'project' | 'background', options?: {readonly awaitPresentation?: boolean}): boolean
 }

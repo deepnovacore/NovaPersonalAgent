@@ -1,7 +1,7 @@
 /**
  * Bounded recall over the conversation Memory: which past items a model gets to see.
  *
- * Ported from `src/nova_audio_agent/realtime/recall.py`. Pure -- it reads Memory and mutates
+ * Ported from `src/nova_personal_agent/realtime/recall.py`. Pure -- it reads Memory and mutates
  * nothing -- and every bound is part of the contract rather than a safety net, because the output is
  * what the model is shown. Two items scoring equally have to break the tie the same way on both
  * legs, or the two runtimes answer the same question differently.

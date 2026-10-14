@@ -1,7 +1,8 @@
+import {selfHostedEndpoint} from './self-hosted.js'
 /** Pure normalization and validation for one selected cascaded provider graph. */
 
 import {
-  ConfigurationError,
+  ConfigurationError, OPENAI_BASE_URL, GEMINI_BASE_URL, cascadedCredentialField,
   DASHSCOPE_COMPATIBLE_BASE_URL,
   requireCascadedCredentials,
   resolveCascadedSelection,
@@ -21,15 +22,32 @@ export interface AutoEndpointingConfig {
   readonly vadMaxUtteranceMs: number
 }
 
+export interface SelfHostedSpeechConfig {
+  readonly provider: 'self-hosted'
+  readonly endpoint: string
+  readonly apiKey: string
+}
+
+export interface GeminiSpeechConfig {
+  readonly provider: 'gemini'
+  readonly endpoint: string
+  readonly apiKey: string
+  readonly model: string
+  readonly voice: string
+}
+
 export interface VolcengineAsrConfig {
+  readonly provider?: 'volcengine'
   readonly endpoint: string
   readonly resourceId: string
   readonly apiKey: string
+  readonly voiceprintHealthUrl?: string
+  readonly voiceprint?: {readonly id: string; readonly name: string}
   readonly chunkMs: number
 }
 
 export interface QwenCascadedLlmConfig {
-  readonly provider?: 'qwen' | 'deepseek'
+  readonly provider?: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted'
   readonly baseUrl: string
   readonly apiKey: string
   readonly model: string
@@ -42,6 +60,7 @@ export interface ArkCascadedLlmConfig {
 }
 
 export interface VolcengineTtsConfig {
+  readonly provider?: 'volcengine'
   readonly endpoint: string
   readonly resourceId: string
   readonly voice: string
@@ -50,15 +69,15 @@ export interface VolcengineTtsConfig {
 }
 
 export type SelectedCascadedLlmConfig =
-  | {readonly provider: 'qwen' | 'deepseek'; readonly config: QwenCascadedLlmConfig}
+  | {readonly provider: 'qwen' | 'deepseek' | 'openai' | 'gemini' | 'self-hosted'; readonly config: QwenCascadedLlmConfig}
   | {readonly provider: 'ark'; readonly config: ArkCascadedLlmConfig}
 
 export interface SelectedCascadedRealtimeConfig {
   readonly selection: CascadedSelection
   readonly endpointing: AutoEndpointingConfig
-  readonly asr: VolcengineAsrConfig
+  readonly asr: VolcengineAsrConfig | GeminiSpeechConfig | SelfHostedSpeechConfig
   readonly llm: SelectedCascadedLlmConfig
-  readonly tts: VolcengineTtsConfig
+  readonly tts: VolcengineTtsConfig | GeminiSpeechConfig | SelfHostedSpeechConfig
 }
 
 export function requireSelectedCascadedRealtimeConfig(
@@ -68,13 +87,24 @@ export function requireSelectedCascadedRealtimeConfig(
   const credentials = requireCascadedCredentials(settings, selection)
   const endpointing = resolveEndpointingConfig(settings)
   const asr = resolveAsrConfig(settings, credentials.asrApiKey)
-  const llm: SelectedCascadedLlmConfig = selection.llmProvider !== 'ark'
+  const llm = requireSelectedCascadedLlmConfig(settings)
+  const tts = resolveTtsConfig(settings, credentials.ttsApiKey)
+  return Object.freeze({selection, endpointing, asr, llm, tts})
+}
+
+/** Text sessions require only their selected LLM, independent of speech configuration. */
+export function requireSelectedCascadedLlmConfig(settings:Settings):SelectedCascadedLlmConfig {
+  const selection=resolveCascadedSelection(settings)
+  const field = cascadedCredentialField(selection.llmProvider)
+  const apiKey=stripLikePython(settings[field]??'')
+  if(!apiKey && selection.llmProvider !== 'self-hosted')throw new ConfigurationError(`缺少 ${field.toUpperCase()}`)
+  return selection.llmProvider !== 'ark'
     ? Object.freeze({
       provider: selection.llmProvider,
       config: Object.freeze({
-        baseUrl: selection.llmProvider === 'deepseek' ? 'https://api.deepseek.com' : DASHSCOPE_COMPATIBLE_BASE_URL,
-        ...(selection.llmProvider === 'deepseek' ? {provider: 'deepseek' as const} : {}),
-        apiKey: credentials.llmApiKey,
+        baseUrl: selection.llmProvider === 'self-hosted' ? selfHostedEndpoint(settings.self_hosted_llm_base_url, 'http', 'SELF_HOSTED_LLM_BASE_URL') : selection.llmProvider === 'openai' ? OPENAI_BASE_URL : selection.llmProvider === 'gemini' ? GEMINI_BASE_URL : selection.llmProvider === 'deepseek' ? 'https://api.deepseek.com' : DASHSCOPE_COMPATIBLE_BASE_URL,
+        ...(selection.llmProvider !== 'qwen' ? {provider: selection.llmProvider} : {}),
+        apiKey: apiKey,
         model: selection.llmModel,
       }),
     })
@@ -86,12 +116,10 @@ export function requireSelectedCascadedRealtimeConfig(
           'https',
           'VOLCENGINE_ARK_BASE_URL',
         ),
-        apiKey: credentials.llmApiKey,
+        apiKey: apiKey,
         model: selection.llmModel,
       }),
     })
-  const tts = resolveTtsConfig(settings, credentials.ttsApiKey)
-  return Object.freeze({selection, endpointing, asr, llm, tts})
 }
 
 function resolveEndpointingConfig(settings: Settings): AutoEndpointingConfig {
@@ -117,11 +145,30 @@ function resolveEndpointingConfig(settings: Settings): AutoEndpointingConfig {
   })
 }
 
-function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConfig {
+export function requireSelectedCascadedAsrConfig(settings:Settings):VolcengineAsrConfig | GeminiSpeechConfig | SelfHostedSpeechConfig {
+  if(settings.cascade_asr_provider === 'self-hosted')return resolveAsrConfig(settings, stripLikePython(settings.self_hosted_asr_api_key ?? ''))
+  if(settings.cascade_asr_provider === 'gemini')return resolveGeminiSpeechConfig(settings, 'asr', stripLikePython(settings.gemini_api_key??''))
+  const key=stripLikePython(settings.doubao_asr_api_key??'')||stripLikePython(settings.doubao_bigmodel_api_key??'')
+  if(!key)throw new ConfigurationError('缺少 DOUBAO_ASR_API_KEY')
+  return resolveAsrConfig(settings,key)
+}
+
+function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConfig | GeminiSpeechConfig | SelfHostedSpeechConfig {
+  if(settings.cascade_asr_provider === 'self-hosted')return {provider:'self-hosted', endpoint:selfHostedEndpoint(settings.self_hosted_asr_url, 'ws', 'SELF_HOSTED_ASR_URL'), apiKey}
+  if(settings.cascade_asr_provider === 'gemini')return resolveGeminiSpeechConfig(settings, 'asr', apiKey)
   if (settings.doubao_asr_chunk_ms <= 0) {
     throw new ConfigurationError('DOUBAO_ASR_CHUNK_MS 必须为正整数')
   }
+  const voiceprint = settings.doubao_asr_voiceprint_enabled
+    ? {id: settings.doubao_asr_voiceprint_id, name: settings.doubao_asr_voiceprint_name} : undefined
+  if (voiceprint && (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(voiceprint.id)
+    || !voiceprint.name.trim() || /^\d+$/.test(voiceprint.name)
+    || voiceprint.name.length > 128 || /[\u0000-\u001f\u007f]/.test(voiceprint.name))) {
+    throw new ConfigurationError('请先注册有效声纹，再开启火山 ASR 声纹验证')
+  }
   return Object.freeze({
+    ...(voiceprint ? {voiceprint} : {}),
+    ...(settings.doubao_asr_voiceprint_health_url ? {voiceprintHealthUrl:secureEndpoint(settings.doubao_asr_voiceprint_health_url, 'https', 'DOUBAO_ASR_VOICEPRINT_HEALTH_URL')} : {}),
     endpoint: secureEndpoint(
       settings.doubao_asr_endpoint,
       'wss',
@@ -136,7 +183,9 @@ function resolveAsrConfig(settings: Settings, apiKey: string): VolcengineAsrConf
   })
 }
 
-function resolveTtsConfig(settings: Settings, apiKey: string): VolcengineTtsConfig {
+function resolveTtsConfig(settings: Settings, apiKey: string): VolcengineTtsConfig | GeminiSpeechConfig | SelfHostedSpeechConfig {
+  if(settings.cascade_tts_provider === 'self-hosted')return {provider:'self-hosted', endpoint:selfHostedEndpoint(settings.self_hosted_tts_url, 'http', 'SELF_HOSTED_TTS_URL'), apiKey}
+  if(settings.cascade_tts_provider === 'gemini')return resolveGeminiSpeechConfig(settings, 'tts', apiKey)
   if (settings.doubao_tts_output_sample_rate !== 24_000) {
     throw new ConfigurationError('DOUBAO_TTS_OUTPUT_SAMPLE_RATE 必须为 24000')
   }
@@ -176,4 +225,11 @@ function secureEndpoint(value: string, scheme: 'https' | 'wss', name: string): s
     && parsed.hash === ''
   if (!valid) throw new ConfigurationError(`${name} 必须是安全的 ${scheme}:// 地址`)
   return normalized
+}
+
+function resolveGeminiSpeechConfig(settings: Settings, service: 'asr' | 'tts', apiKey: string): GeminiSpeechConfig {
+  if(!apiKey)throw new ConfigurationError('缺少 GEMINI_API_KEY')
+  return {provider:'gemini', endpoint:'https://generativelanguage.googleapis.com/v1beta', apiKey,
+    model:requiredSetting(settings[service === 'asr' ? 'gemini_asr_model' : 'gemini_tts_model'], `GEMINI_${service.toUpperCase()}_MODEL`),
+    voice:service === 'tts' ? requiredSetting(settings.gemini_tts_voice, 'GEMINI_TTS_VOICE') : settings.gemini_tts_voice}
 }

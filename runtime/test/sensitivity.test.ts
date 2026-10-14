@@ -5,6 +5,19 @@ import {
   SensitivePathPolicy,
 } from '../src/memory/sensitivity.js'
 
+test('screens pasted private keys, including truncated blocks, without hiding public keys', () => {
+  const policy = new SensitiveContentPolicy()
+  for (const kind of ['PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY', 'OPENSSH PRIVATE KEY', 'ENCRYPTED PRIVATE KEY']) {
+    const block = `-----BEGIN ${kind}-----\nfixture-private-material\n-----END ${kind}-----`
+    assert.deepEqual(policy.scrub('detail', block), {kind: 'rejected'})
+    assert.deepEqual(policy.scrub('detail', `-----BEGIN ${kind}-----\nfixture-private-material`), {kind: 'rejected'})
+    const mixed = policy.scrub('detail', `Deployment note\n${block}\nFollow up tomorrow`)
+    assert.equal(mixed.kind, 'redacted')
+    if (mixed.kind === 'redacted') assert.equal(mixed.value, 'Deployment note\n[redacted]\nFollow up tomorrow')
+  }
+  assert.deepEqual(policy.scrub('detail', '-----BEGIN PUBLIC KEY-----\nfixture-public-material\n-----END PUBLIC KEY-----'), {kind: 'clean'})
+})
+
 test('denies sensitive paths without returning their labels', () => {
   const policy = new SensitivePathPolicy()
   const path = '/repo/.env.production'
@@ -329,3 +342,37 @@ test('does not redact the safe line after empty authorization headers', () => {
   assert.deepEqual(policy.scrub('detail', 'Authorization:\nafter'), {kind: 'clean'})
   assert.deepEqual(policy.scrub('detail', 'Proxy-Authorization:\nafter'), {kind: 'clean'})
 })
+
+test('query-level URL redaction never exposes a credential that whole-URL screening would catch', async () => {
+  const {redactUrlQueryCredentials} = await import('../src/memory/sensitivity.js')
+  const policy = new SensitiveContentPolicy()
+  const screened = (text: string) => {
+    const pre = redactUrlQueryCredentials(text), result = policy.scrub('executor_observation', pre)
+    return result.kind === 'clean' ? pre : result.kind === 'redacted' ? result.value : '[redacted]'
+  }
+  assert.equal(screened('see https://example.test/read?token=abc&view=summary now'), 'see https://example.test/read?token=[REDACTED]&view=summary now')
+  assert.equal(screened('https://example.test/?token=a&token=second-secret&view=1'), 'https://example.test/?token=[REDACTED]&token=[REDACTED]&view=1')
+  for (const leaky of [
+    'https://example.test/?token=first#access%5Ftoken=second-secret',
+    'https://example.test/?view=1#token=second-secret',
+    'https://example.test/?access%5Ftoken=second-secret',
+    'https://user:second-secret@example.test/?token=first',
+  ]) assert.doesNotMatch(screened(`result ${leaky} done`), /second-secret/u, leaky)
+})
+
+test('Chinese credential labels and formatted card numbers are redacted before model use',()=>{
+ const policy=new SensitiveContentPolicy();
+ for(const text of ['项目启动，密码是 `test-only-pass-123`','配置：密钥：test-only-key-123','备用金卡号：1234 5678 9012 3456，待登记','任务说明 client_secret="test-only-client-123"']){
+  const result=policy.scrub('content',text);assert.equal(result.kind,'redacted');if(result.kind==='redacted'){assert(!result.value.includes('test-only'));assert(!result.value.includes('1234 5678'))}
+ }
+ assert.equal(policy.scrub('content','讨论模型的密钥管理方案').kind,'clean');
+});
+
+
+test('document paths and SHA256 fingerprints are not opaque credentials',()=>{const policy=new SensitiveContentPolicy();assert.equal(policy.scrub('locator','/private/tmp/nova-canonical-directory-12345678901234567890/README.md').kind,'clean');assert.equal(policy.scrub('knowledge','a1'.repeat(32)).kind,'clean')});
+
+test('space-delimited credentials and card security codes are redacted',()=>{const policy=new SensitiveContentPolicy();for(const value of ['密码 TestOnly7!','CVC：123','CVV=123','安全码 123'])assert.notEqual(policy.scrub('profile',value).kind,'clean');assert.equal(policy.scrub('profile','讨论密码管理方案').kind,'clean')});
+
+test('explicit multiline credentials preserve safe context',()=>{const policy=new SensitiveContentPolicy();const result=policy.scrub('profile','项目讨论\n密码：\nTestOnly7!\n后续安排');assert.equal(result.kind,'redacted');if(result.kind==='redacted'){assert(result.value.includes('项目讨论'));assert(result.value.includes('后续安排'));assert(!result.value.includes('TestOnly'));assert.equal(policy.scrub('profile',result.value).kind,'clean')}});
+
+test('Profile preserves ordinary context without guessing credentials',()=>{const policy=new SensitiveContentPolicy();for(const text of ['发布服务 service.example.com/tool ，入口 https://example.test/project ，备用 10.2.3.4:8080 ，联系 person@example.test','aB7x'.repeat(30),'TestOnly7!Pass!'])assert.equal(policy.scrub('profile',text).kind,'clean');assert.notEqual(policy.scrub('profile','api_key=test-only-credential-123').kind,'clean')});

@@ -64,10 +64,7 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   const { exposed, ipcRenderer, invokes } = await loadPreload()
 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
-    'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'get', 'knowledgeAction', 'onChanged',
-    'openCurrentManagedWorkspace', 'openPairing',
-    'phoneAction', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend',
-    'retryMicrophone', 'set',
+    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'personalCommand', 'phoneAction', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'voicePreset', 'voiceprint',
   ])
   assert.ok(Object.isFrozen(exposed.settings))
 
@@ -127,7 +124,7 @@ test('preload exposes first-run setup as a fixed set of channels', async () => {
 test('preload exposes a bounded microphone permission lifecycle', async () => {
   const { exposed, ipcRenderer, invokes, sends } = await loadPreload()
 
-  assert.deepEqual(Object.keys(exposed.microphone).sort(), ['onRetry', 'onToggle', 'report', 'requestPermission'])
+  assert.deepEqual(Object.keys(exposed.microphone).sort(), ['onRetry', 'onToggle', 'onVoiceprintRecording', 'report', 'requestPermission'])
   await exposed.microphone.requestPermission()
   exposed.microphone.report('device_busy')
   const retries = []
@@ -188,6 +185,20 @@ test('preload reports confirmation mode as a strict boolean and sanitizes placem
   assert.deepEqual(placements, ['above', 'below'])
 })
 
+test('preload window controls send only their three fixed actions', async () => {
+  const {exposed, sends} = await loadPreload()
+
+  assert.deepEqual(Object.keys(exposed.windowControls).sort(), ['close', 'minimize', 'toggleMaximize'])
+  exposed.windowControls.minimize()
+  exposed.windowControls.toggleMaximize()
+  exposed.windowControls.close()
+  assert.deepEqual(sends, [
+    {channel: 'nova:window:control', payload: 'minimize'},
+    {channel: 'nova:window:control', payload: 'toggleMaximize'},
+    {channel: 'nova:window:control', payload: 'close'},
+  ])
+})
+
 test('preload exposes board reads and explicit memory clear', async () => {
   const { exposed, invokes, sends } = await loadPreload()
 
@@ -212,7 +223,7 @@ test('preload exposes board reads and explicit memory clear', async () => {
 test('preload declares each bridge namespace exactly once', async () => {
   const { source } = await loadPreload()
 
-  for (const namespace of ['orbMenu', 'releaseCamera', 'microphone', 'memoryBoard', 'nativeAudio', 'windowDrag', 'windowLayout', 'settings']) {
+  for (const namespace of ['orbMenu', 'releaseCamera', 'microphone', 'memoryBoard', 'nativeAudio', 'windowDrag', 'windowControls', 'windowLayout', 'settings']) {
     const declarations = source.match(new RegExp(`^  ${namespace}: `, 'gm')) || []
     assert.equal(declarations.length, 1, `${namespace} is declared once`)
   }

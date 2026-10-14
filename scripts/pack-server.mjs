@@ -19,9 +19,9 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     const runtime = JSON.parse(await readFile(join(root, 'runtime/package.json'), 'utf8'))
     const cli = JSON.parse(await readFile(join(root, 'cli/package.json'), 'utf8'))
     const manifest = {
-      name: 'nova-audio-agent-server', version: cli.version,
-      description: 'Headless Nova Audio Agent service and terminal device pairing.',
-      type: 'module', bin: {'novaaudio-server': 'bin/novaaudio-server.mjs'},
+      name: 'nova-personal-agent-server', version: cli.version,
+      description: 'Headless Nova Personal Agent service and terminal device pairing.',
+      type: 'module', bin: {'novapersonal-server': 'bin/novapersonal-server.mjs', 'novaaudio-server': 'bin/novapersonal-server.mjs'},
       engines: {node: '>=22.14.0'}, os: ['linux'], cpu: ['x64'],
       files: ['bin/', 'src/', 'runtime/dist/src/', 'runtime/dist/eval/', 'runtime/scripts/pair-device.mjs', 'resources/', 'README.md', 'LICENSE'],
       dependencies: runtime.dependencies, license: cli.license,
@@ -43,7 +43,7 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     const resources = nativeManifest.resources.map(record => record.logical_id === 'project_native_addon'
       ? {...record, electron_abi: null, node_api_version: 10} : record)
     await writeFile(join(resourcesRoot, 'native-resources-v1.json'), JSON.stringify({...nativeManifest, resources}) + '\n')
-    const executables = new Set(['bin/novaaudio-server.mjs', 'resources/native/codex-sandbox-probe'])
+    const executables = new Set(['bin/novapersonal-server.mjs', 'resources/native/codex-sandbox-probe'])
     for (const name of ['', ...await readdir(stage, {recursive: true})]) {
       const path = join(stage, name)
       await chmod(path, (await stat(path)).isDirectory() || executables.has(name) ? 0o755 : 0o644)
@@ -51,7 +51,7 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     const result = spawnSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['pack', stage, '--ignore-scripts', '--pack-destination', output, '--json'], {encoding: 'utf8'})
     if (result.status !== 0) throw new Error(result.stderr || 'server npm pack failed')
     const [{filename, files}] = JSON.parse(result.stdout)
-    const allowed = new Set(['package.json', 'README.md', 'LICENSE', 'bin/novaaudio-server.mjs', 'src/command.mjs',
+    const allowed = new Set(['package.json', 'README.md', 'LICENSE', 'bin/novapersonal-server.mjs', 'src/command.mjs',
       'runtime/scripts/pair-device.mjs', 'resources/native-resources-v1.json',
       'resources/native/project-native/nova_project_native.node', 'resources/native/codex-sandbox-probe',
       ...['MANIFEST.json', 'LICENSE.silero-vad.txt', 'speech-16k-s16le.pcm', 'silence-16k-s16le.pcm'].map(name => `resources/endpointing/volcengine-v1/${name}`)])

@@ -75,3 +75,11 @@
 - Retained both upstream setup routes and HUD routes, plus both sets of bounded IPC channels. Updated two isolated menu/tray test contexts to provide the HUD callback. No runtime, CLI, server CLI, dependency or lockfile changes relative to upstream/main.
 - Validation: npm run check passed; desktop build passed; desktop suite 934 tests: initially 929 pass, 3 skipped, 2 missing mock callbacks; both corrected and their 33-test files passed. Runtime suite initially 2519 pass, 5 mem0 failures; after rebuilding native dependencies the complete 9-test mem0 file passed. Electron Visor smoke passed including close, persistence, rapid lifecycle and no renderer errors. Source startup smoke skipped by its platform/environment gate; no claim of installed-app/real voice validation.
 - GitHub: update existing PR https://github.com/deepnovacore/NovaAudioAgent/pull/12 by pushing only origin codex/orb-skins. No direct push to upstream main; no installed application replacement.
+
+
+## 2026-10-14 — Synchronize public Themes / HUD with main 17408553
+
+- Merge current public main into the existing contribution branch without rewriting history or modifying main. Resolve 12 conflicting files while retaining current presentation modes, startup reconciliation, voice settings and IPC validation.
+- Adapt HUD settings/report calls to novaPersonalAgentDesktop and route its return-to-orb control through the shared presentation transition. Preserve theme normalization and exclude visual settings from backend configuration.
+- Verification: runtime build, desktop build, desktop Node suite (1311 passed, 3 skipped, no failures); targeted bridge regression added and checked separately. Whitespace and outgoing public-history IP audit required before push.
+- No app install, provider calls or new visual generation. Existing public feature scope remains Themes, orb skins and Visor HUD.

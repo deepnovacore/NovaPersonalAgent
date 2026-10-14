@@ -1,13 +1,19 @@
 import assert from 'node:assert/strict'
-import {mkdtemp, mkdir, writeFile, rm} from 'node:fs/promises'
+import {mkdtemp, mkdir, writeFile, appendFile, readFile, rm} from 'node:fs/promises'
+import {createHash} from 'node:crypto'
+import plist from 'plist'
 import {tmpdir} from 'node:os'
 import {dirname, join} from 'node:path'
 import {PassThrough} from 'node:stream'
 import test from 'node:test'
 import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
-import {createPackageWithOptions, uncache} from '@electron/asar'
-import {inspectApplication, readReadiness} from '../scripts/verify-release.mjs'
+import {createPackageWithOptions, extractFile, getRawHeader, statFile, uncache} from '@electron/asar'
+import {replacePackagedAsar, refreshSignedAsar, refreshMacAsarIntegrity} from '../scripts/build-owned-asar.mjs'
+import {inspectApplication, inspectMacAsarIntegrity, readReadiness, prepareSmokeHome, redactSmokeOutput} from '../scripts/verify-release.mjs'
+import {loadSettings} from '../src/main/settings-store.mjs'
+import {backendLaunchSpec} from '../src/main/backend.mjs'
+import {describeMissingBlockingEnvironment} from '@nova-personal-agent/runtime/desktop'
 import {expectedNativeResources} from '../scripts/native-resource-contract.mjs'
 import {stageReleaseApplication} from '../scripts/stage-release-app.mjs'
 
@@ -16,12 +22,66 @@ async function file(root, name, body = 'fixture') {
   await writeFile(join(root, name), body)
 }
 
+test('smoke diagnostics retain the error but remove tokens, keys and private paths', () => {
+  const text = redactSmokeOutput('Electron sandbox failed at /private/profile; key=private-key-123 token=0123456789abcdef0123456789abcdef',
+    ['private-key-123'], ['/private/profile'])
+  assert.match(text, /Electron sandbox failed/)
+  assert.ok(!text.includes('private-key-123'))
+  assert.ok(!text.includes('0123456789abcdef0123456789abcdef'))
+  assert.ok(!text.includes('/private/profile'))
+})
+
+test('signing growth refreshes unpacked ASAR metadata without replacing sealed bytes', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'nova-signed-asar-'))
+  const source = join(root, 'source'), archive = join(root, 'resources/app.asar')
+  const nativePath = join('node_modules', 'fixture', 'native.node')
+  try {
+    await file(source, 'src/main/main.mjs', 'entry')
+    await file(source, nativePath, 'native')
+    await mkdir(dirname(archive), {recursive: true})
+    await replacePackagedAsar({sourceRoot: source, archivePath: archive})
+    assert.equal(statFile(archive, nativePath).size, 6)
+    await appendFile(join(`${archive}.unpacked`, nativePath), '-signature')
+    await refreshSignedAsar(archive)
+    assert.equal(statFile(archive, nativePath).size, 16)
+    assert.equal(extractFile(archive, nativePath).toString(), 'native-signature')
+    assert.equal(extractFile(archive, join('src', 'main', 'main.mjs')).toString(), 'entry')
+    const plistPath = join(root, 'Info.plist')
+    await writeFile(plistPath, plist.build({CFBundleIdentifier: 'fixture', ElectronAsarIntegrity: {'Resources/other.asar': {hash: 'preserved'}}}))
+    await assert.rejects(inspectMacAsarIntegrity(dirname(archive)), /macOS ASAR integrity mismatch/)
+    await refreshMacAsarIntegrity(archive, plistPath)
+    await inspectMacAsarIntegrity(dirname(archive))
+    const info = plist.parse(await readFile(plistPath, 'utf8'))
+    assert.equal(info.CFBundleIdentifier, 'fixture')
+    assert.equal(info.ElectronAsarIntegrity['Resources/other.asar'].hash, 'preserved')
+    assert.deepEqual(info.ElectronAsarIntegrity['Resources/app.asar'], {
+      algorithm: 'SHA256', hash: createHash('sha256').update(getRawHeader(archive).headerString).digest('hex'),
+    })
+  } finally {uncache(archive); await rm(root, {recursive: true, force: true})}
+})
+
+test('installed smoke selects the controlled provider without requiring unrelated credentials', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'nova-smoke-settings-')), home = join(root, 'home')
+  try {
+    await prepareSmokeHome(home)
+    const settings = await loadSettings(join(home, 'ambient-orb-settings.json'))
+    const spec = backendLaunchSpec({nodeEntry: join(home, 'entry.js'), nodeResourcesPath: home,
+      workspace: home, token: 'a'.repeat(32), readyEndpoint: '127.0.0.1:1234', settings,
+      parentEnv: {DASHSCOPE_API_KEY: 'public-release-smoke-key', QWEN_REALTIME_URL: 'wss://127.0.0.1:1234'}})
+    assert.equal(spec.env.PIPELINE_MODE, 'integrated')
+    assert.deepEqual(describeMissingBlockingEnvironment(spec.env, true)?.missing ?? [], [])
+  } finally { await rm(root, {recursive: true, force: true}) }
+})
+
 test('release version gate rejects stale candidate inputs and divergent package versions', async () => {
   const root = await mkdtemp(join(tmpdir(), 'nova-release-version-'))
   const script = fileURLToPath(new URL('../scripts/check-release-version.mjs', import.meta.url))
   try {
     for (const [candidate, cli, desktop, accepted] of [
       ['1.2.3', '1.2.3', '1.2.3', true],
+      ['0.3.0-preview.1', '0.3.0-preview.1', '0.3.0-preview.1', true],
+      ['0.3.0-preview.01', '0.3.0-preview.01', '0.3.0-preview.01', false],
+      ['0.3.0-beta.1', '0.3.0-beta.1', '0.3.0-beta.1', false],
       ['0.1.1', '1.2.3', '1.2.3', false],
       ['1.2.3', '1.2.4', '1.2.3', false],
       ['1.2.3', '1.2.3', '1.2.4', false],
@@ -90,16 +150,21 @@ test('staging preserves nested dependency versions and omits development files',
 
 test('staging keeps the runtime CLI evaluation imports executable', async () => {
   const root = await mkdtemp(join(tmpdir(), 'nova-stage-runtime-'))
-  const runtime = 'node_modules/@nova-audio-agent/runtime'
+  const runtime = 'node_modules/@nova-personal-agent/runtime'
   try {
-    await file(root, 'package.json', JSON.stringify({dependencies: {'@nova-audio-agent/runtime': '1'}}))
+    await file(root, 'package.json', JSON.stringify({dependencies: {'@nova-personal-agent/runtime': '1'}}))
     for (const name of ['src/main.mjs', 'LICENSES/MIT', 'THIRD_PARTY_NOTICES.md']) await file(root, name)
-    await file(root, `${runtime}/package.json`, JSON.stringify({name: '@nova-audio-agent/runtime', type: 'module', files: ['dist/src', 'dist/eval']}))
+    await file(root, `${runtime}/package.json`, JSON.stringify({name: '@nova-personal-agent/runtime', type: 'module', files: ['dist/src', 'dist/eval']}))
     await file(root, `${runtime}/dist/src/cli.js`, "import {marker} from '../eval/probe.js'; console.log(marker)")
     await file(root, `${runtime}/dist/eval/probe.js`, "export const marker = 'evaluation-ready'")
+    await file(root, `${runtime}/scripts/autoglm-bridge.py`, '# supervised bridge')
+    await file(root, `${runtime}/scripts/test_autoglm_bridge.py`, '# excluded test')
     const staged = await stageReleaseApplication({packageRoot: root})
     const result = spawnSync(process.execPath, [join(staged, runtime, 'dist/src/cli.js')], {encoding: 'utf8'})
     assert.equal(result.status, 0, result.stderr)
     assert.equal(result.stdout.trim(), 'evaluation-ready')
+    const {readFile, access} = await import('node:fs/promises')
+    assert.equal(await readFile(join(staged, runtime, 'scripts/autoglm-bridge.py'), 'utf8'), '# supervised bridge')
+    await assert.rejects(access(join(staged, runtime, 'scripts/test_autoglm_bridge.py')), /ENOENT/u)
   } finally { await rm(root, {recursive: true, force: true}) }
 })

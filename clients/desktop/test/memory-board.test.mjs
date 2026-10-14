@@ -101,7 +101,7 @@ test('board auto-refresh is renderer-owned, guarded, and visibility-aware', asyn
   assert.match(source, /let inFlight = false/)
   assert.match(source, /if \(inFlight \|\| pageInFlight\) return/)
   assert.match(source, /async function load\(\) \{\n\s*if \(document\.hidden\) return/)
-  assert.match(source, /const owner = loadOwnership[\s\S]*await window\.novaAudioAgentDesktop\.memoryBoard\.request\(\)[\s\S]*owner !== loadOwnership/u)
+  assert.match(source, /const owner = loadOwnership[\s\S]*await window\.novaPersonalAgentDesktop\.memoryBoard\.request\(\)[\s\S]*owner !== loadOwnership/u)
   assert.match(source, /document\.hidden\) \{\s*loadOwnership \+= 1/u)
   assert.match(source, /addEventListener\('visibilitychange'/)
   assert.match(source, /let exportInFlight = false/)
@@ -148,7 +148,7 @@ test('copy JSON uses the sender-validated desktop bridge when web clipboard perm
   Object.defineProperties(globalThis, {
     document: {configurable: true, value: document},
     window: {configurable: true, value: {
-      novaAudioAgentDesktop: {
+      novaPersonalAgentDesktop: {
         memoryBoard: {request: async detail => {
           requestDetails.push(detail)
           return detail === 'full' ? full : compact
@@ -198,7 +198,7 @@ test('clearing fences a stale read, is single-flight, and blocks export', async 
   const stale = {backend_generation: 1, channels: [{name: 'conversation', summary: 'old', item_count: 1, items: [{seq: 1, trust: 'inferred', ts: 1, content: 'old'}]}], diagnostics: {version: 1, records: []}}
   Object.defineProperties(globalThis, {
     document: {configurable: true, value: document},
-    window: {configurable: true, value: {novaAudioAgentDesktop: {
+    window: {configurable: true, value: {novaPersonalAgentDesktop: {
       memoryBoard: {
         request: () => new Promise(resolve => { requests.push(resolve); if (!resolveRead) resolveRead = resolve }),
         clear: () => new Promise(resolve => { clears.push(resolve); resolveClear = resolve }),
@@ -415,7 +415,7 @@ test('the rail renders one tab per channel and mounts only the selected card', a
   }
   Object.defineProperties(globalThis, {
     document: {configurable: true, value: document},
-    window: {configurable: true, value: {novaAudioAgentDesktop: {
+    window: {configurable: true, value: {novaPersonalAgentDesktop: {
       memoryBoard: {
         request: async () => payload,
         clear: async () => ({canceled: true}),
@@ -505,7 +505,7 @@ test('a refresh reuses the channel buttons so keyboard focus survives it', async
   })
   Object.defineProperties(globalThis, {
     document: {configurable: true, value: document},
-    window: {configurable: true, value: {novaAudioAgentDesktop: {
+    window: {configurable: true, value: {novaPersonalAgentDesktop: {
       memoryBoard: {
         request: async () => payload(),
         clear: async () => ({canceled: true}),

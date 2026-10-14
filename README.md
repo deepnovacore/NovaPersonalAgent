@@ -1,153 +1,191 @@
 <!-- Keep in sync with README.zh-CN.md -->
 
-# Nova Audio Agent
+<div align="center">
 
-**English** | [简体中文](README.zh-CN.md)
+**English** · [简体中文](README.zh-CN.md)
 
-[![CI](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaAudioAgent/actions/workflows/ci.yml)
+# Nova Personal Agent: Your Personal Agent and Voice Assistant
+
+**Your personal agent and always-on voice assistant — aware of your context, with dual brains and restrained proactivity.**
+
+[![CI](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-339933.svg)](package.json)
-[![Architecture](https://img.shields.io/badge/Arch-ControlPlane-7B2CBF.svg)](#2-architecture)
-[![Blog](https://img.shields.io/badge/Blog-Design-0B7285.svg)](docs/en/blog/2026-08-proactive-voice-agent-design-space.md)
+[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
+[![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
+**[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Video demo](https://youtu.be/t1c-2O-QsxE)**
 
-> **An always-on voice agent with restrained proactivity and the capability of workspace management.**
+[Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [Use cases](#23-use-cases) · [Roadmap](#5-roadmap)
 
+</div>
+
+---
 
 > **Branch preview · Nova Visor:** A primary-display transparent HUD and Themes settings are implemented as a local macOS preview. [Usage and architecture (中文)](docs/VISOR_GUIDE.zh-CN.md) · [Validation and limitations](docs/VISOR_V1.md) · [Visual reference](docs/DESKTOP_VISOR_DEMO.md). Final installed GUI acceptance and cross-platform certification remain pending.
 
 ## News
 
-- **2026-09-24 · 🎉 [v0.2.3 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.3)** — A guided first run: one DashScope API Key is enough to start talking, a setup window tests the key before saving, and search, camera and memory switch themselves on once their key is present.
+- **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **Continuous context, ongoing work:** GUI-use across browser, computer and phone (experimental), Scheduled Agent Tasks, and a full Timeline for context, evidence and task results.
+- **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.0)** — **Your personal agent:** Todos, Ideas, Goals, Feeds and Profile, with source-backed memory and evidence-checked tasks.
+- **2026-09-21 · [v0.2.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.0)** — **Voice, your way:** configurable ASR / LLM / TTS, personal memory, MCP and an iPhone companion.
+- **2026-08-31 · [v0.1.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.1.0)** — **Always-on voice assistant with dual brains:** responsive frontend conversation and background agent execution, with live steering.
 
-- **2026-09-21 · 🎉 [v0.2.2 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.2)** — Ubuntu 22.04+ x64 joins macOS and Windows, with npm desktop installation and the new `nova-audio-agent-server` package for headless hosting and terminal QR pairing.
+<details>
+<summary>Earlier minor releases</summary>
 
-- **2026-09-21 ·** **🎉 [v0.2.0 Released!](https://github.com/deepnovacore/NovaAudioAgent/releases/tag/v0.2.0)**
-  Configurable voice pipelines, personal memory, and a bilingual desktop experience, now available for macOS and Windows.
-  - Cross-platform approvals for sandbox network access and command execution.
-  - A leaner voice layer; workspace/session scheduling moves into the coding executor.
-  - Pluggable ASR / LLM / TTS pipelines, decoupled from QwenAudioRealtime.
-  - Custom MCP servers for search and RAG; wake words “你好星核” and “Hi Nova”. Chinese/English interface and system prompts.
-  - Personal memory with mem0 / VoiceMem.
-  - An iPhone client connected to your PC runtime over Tailscale.
-- **2026-08-31 · v0.1.0** — Always-on voice, background Codex tasks, live steering, workspace/session management, and selective progress updates.
+- **2026-10-09 · [v0.3.1](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.1)** — **A smoother start:** ready-to-use text chat and easier desktop upgrades.
+- **2026-09-24 · [v0.2.3](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.3)** — Guided first run with one DashScope API key.
+- **2026-09-21 · [v0.2.2](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.2)** — Ubuntu desktop and a headless server with QR pairing.
+
+</details>
 
 ## 1. Highlights
 
-Nova Audio Agent is a **harness for an always-on, general-purpose voice agent**: Nova (小诺)
-keeps responsive while doing long-running tasks in the background, reporting
-**proper** progress at **proper** time.
+[![Nova personal agent architecture](assets/architecture/nova-personal-agent.en.png)](assets/architecture/nova-personal-agent.en.png)
 
-A concurrent work [qwen-audio-agent](https://github.com/QwenAudio/qwen-audio-agent) answers
-*how to keep an agent talking while it works*, while we ask a step further — **when is talking
-worth it at all** (see the [design article](docs/en/blog/2026-08-proactive-voice-agent-design-space.md) for more details).
+Your context informs the conversation; the front brain coordinates work with the back brain. Nova checks results and speaks when it matters.
 
+- **Your proactive personal agent.** Todos, Ideas, Goals, Feeds and Profile turn what Nova knows about you into suggestions you can act on.
+- **Wide and unstructured context.** Bring folders, mail, calendars, conversations and documents; keep personal memory traceable, editable and removable.
+- **Always-on voice assistant with dual brains.** The front brain stays in conversation while the back brain handles long-running work.
+- **A thin frontend task coordinator.** Clarify, authorize and delegate to a coding agent; check evidence against your criteria, take over and hand control back.
+- **Restrained proactivity.** Nova chooses what matters and when to speak. Routine updates stay quiet, and reminders respect your turn.
 
-- **Restrained proactivity.** Important progress gets reported; routine updates stay quiet, and reminders never interrupt you while you speak.
-- **Voice-run workspaces.** Create and switch workspaces and sessions by voice, with your confirmation.
-- **Clarify before acting.** Nova asks about unclear requirements before handing work to the background executor.
-- **Steer while it runs.** Add requirements and constraints by voice while a task is in progress.
+- **More coding agents.** New sessions can also run on OpenCode, CodeBuddy, Pi or DeepSeek Harness over ACP; each session keeps the agent it started with. Live steering stays a Codex feature. See [Coding](docs/en/executors/coding.md).
 
-## 2. Architecture
+[How Nova works](docs/en/architecture.md) · [Task controls](docs/en/tasks.md) · [Source permissions](docs/en/sources-and-connectors.md)
 
-[![Nova Audio Agent runtime architecture on a chalkboard](assets/ideas/v3/nova-audio-agent-runtime-chalkboard.png)](assets/ideas/v3/nova-audio-agent-runtime-chalkboard.png)
+## 2. Work with Nova
 
-*One event loop, two model ports reading one ContextView, Memory as the shared blackboard,
-Floor guarding the single speech path.*
+### 2.1 Your personal agent, with wide and unstructured context
 
-Essential roles and ideas:
+Connect the sources you choose: folders, mail, calendars and conversations. Personal memory and imported document knowledge help Nova understand your work; reading sources and model processing remain separate permissions.
 
-* **FrontBrain model**: the realtime model that interacts with users, using the minimal host/native surface to dispatch work, cancel it, confirm host proposals, recall memory, and search. Revision-bound intake slots remain host-owned.
-* **Surrogate model**: decides **when to speak**. When events get written into memory or suggestion pool, the surrogate model judges whether it worth reporting to the users.
-* **Memory and ContextView**: short-term events from different capabilities are stored in different channels. Only bounded evidence and intake facts are compiled into ContextView for FrontBrain.
-* **Executors and controllers**: role-based manifests run asynchronous work; an AgentController registry owns model-facing controllers and hidden Vision watch/guard channels. Camera frames go directly to the selected VLM; monitoring owns its complete loop.
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Your personal workbench</h3>
+      <p>Turn scattered context into source-backed recaps and suggested todos. Choose what to do next, then continue with Nova.</p>
+      <a href="assets/features/workbench-original.en.png"><img src="assets/features/workbench-original.en.png" alt="Nova workbench with project recaps, suggested todos and conversation" width="100%"></a>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Profile and personal memory</h3>
+      <p>Nova builds an editable picture of your work and interests. Trace personal memories to their sources, correct them or remove them.</p>
+      <a href="assets/features/profile-original.en.png"><img src="assets/features/profile-original.en.png" alt="Nova Profile showing a personal overview and recent projects" width="100%"></a>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Ideas and goals</h3>
+      <p>Keep an idea, choose a direction, and turn it into a todo when you are ready. Suggestions wait for you to adopt them.</p>
+      <a href="assets/features/ideas-goals-original.en.png"><img src="assets/features/ideas-goals-original.en.png" alt="Nova Ideas and Goals with actual suggestions and adoption controls" width="100%"></a>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Feeds that follow your interests</h3>
+      <p>Review public news ranked by your Profile. Save a story or turn it into an idea, todo or goal.</p>
+      <a href="assets/features/feeds-original.en.png"><img src="assets/features/feeds-original.en.png" alt="Nova interest-ranked news feed with save and personal-item controls" width="100%"></a>
+    </td>
+  </tr>
+</table>
 
-For more details about the architecture, check [Architecture](docs/en/architecture.md).
+### 2.2 Your voice assistant with restrained proactivity
 
+The front brain handles conversation; the back brain does the work. Task events and camera observations inform optional updates, while speaking has its own timing.
 
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Understands what you mean</h3>
+      <p>Describe your goal naturally. Nova asks for missing details before starting a task; keep talking and refining it while the back brain works.</p>
+      <a href="assets/features/conversation-polished.en.png"><img src="assets/features/conversation-polished.en.png" alt="Nova voice orb asking a clarifying question before starting a task" width="100%"></a>
+    </td>
+    <td width="50%" valign="top">
+      <h3>You set the boundaries</h3>
+      <p>Nova coordinates tasks and checks results against your criteria. Review permissions, take over when needed, and hear updates when they matter.</p>
+      <a href="assets/features/permission-polished.en.png"><img src="assets/features/permission-polished.en.png" alt="Nova asking for permission to access the network for a task" width="100%"></a>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3>Voice-run workspaces</h3>
+      <p>Create and switch workspaces and sessions by voice. A new workspace waits for your confirmation.</p>
+      <a href="assets/features/workspace-polished.en.png"><img src="assets/features/workspace-polished.en.png" alt="Nova waits for approval to create a workspace" width="100%"></a>
+    </td>
+    <td width="50%" valign="top">
+      <h3>Bring your tools and knowledge</h3>
+      <p>Configure ASR / LLM / TTS and MCP; ask questions across your documents.</p>
+      <a href="assets/features/knowledge-polished.en.png"><img src="assets/features/knowledge-polished.en.png" alt="Knowledge-base answer using the CN-27 demo documents" width="100%"></a>
+    </td>
+  </tr>
+</table>
 
-## Main Features
+### 2.3 Use cases
 
 <table>
   <tr>
     <td width="50%" valign="top">
       <h3>Voice Vibe Coding</h3>
-      <p>Describe a feature and refine it by voice while Codex writes and tests the code. Nova reports key milestones and keeps routine progress quiet.</p>
-      <img src="assets/features/coding.en.svg" alt="Voice requests flow to Codex for coding and testing" width="100%">
+      <p>Describe what you want, let a coding agent build and test it, and refine the work through conversation.</p>
+      <a href="assets/features/coding.en.svg"><img src="assets/features/coding.en.svg" alt="Voice requests delegated to a background coding agent" width="100%"></a>
     </td>
     <td width="50%" valign="top">
-      <h3>Understands what you mean</h3>
-      <p>Describe your goal naturally. Nova asks for the missing details before turning it into a task.</p>
-      <img src="assets/features/conversation.en.png" alt="Nova clarifies the requested application before starting" width="100%">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Manage workspaces by voice</h3>
-      <p>Create a workspace, switch projects, or resume a session—with your confirmation.</p>
-      <img src="assets/features/workspace.en.png" alt="Nova asks to create the Pet Manager workspace" width="100%">
-    </td>
-    <td width="50%" valign="top">
-      <h3>You control permissions</h3>
-      <p>Review requests to run commands or access the network, then allow or deny them.</p>
-      <img src="assets/features/permission.en.png" alt="Network permission request with allow and deny controls" width="100%">
+      <h3>Camera Monitoring</h3>
+      <p>Ask Nova to watch for a condition and tell you when it happens. Observation runs independently of coding tasks.</p>
+      <a href="assets/features/vision-camera.png"><img src="assets/features/vision-camera.png" alt="Camera monitoring a cat on a sofa" width="100%"></a>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
-      <h3>Camera monitoring and timely alerts</h3>
-      <p>Ask Nova to watch for a condition and tell you when it occurs.</p>
-      <img src="assets/features/vision-camera.png" alt="Camera observation and spoken alert" width="100%">
-    </td>
-    <td width="50%" valign="top">
-      <h3>Bring your tools and knowledge</h3>
-      <p>Configure ASR / LLM / TTS and MCP; ask questions across your documents.</p>
-      <img src="assets/features/knowledge.en.png" alt="Knowledge-base answer using the CN-27 demo documents" width="100%">
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Memory that stays with you</h3>
-      <p>mem0 recalls personal context across conversations, with source text you can inspect.</p>
-      <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="assets/features/mem0-dark.en.png">
-        <img src="assets/features/mem0.en.png" alt="Four local mem0 memories with source details" width="100%">
-      </picture>
+      <h3>Weekly Report</h3>
+      <p>Ask Nova to recall recent work and help organize a weekly report. Watch the original phone demo.</p>
+      <a href="assets/demos/weekly-report/weekly-report.mp4"><img src="assets/demos/weekly-report/poster.en.png" alt="Original phone demo of a conversation about recent work and a weekly report" width="225"></a>
+      <p><a href="assets/demos/weekly-report/weekly-report.mp4">▶ Watch the demo</a></p>
     </td>
     <td width="50%" valign="top">
       <h3>Take Nova with you</h3>
-      <p>Connect your iPhone over Tailscale to talk and approve tasks on your PC.</p>
-      <img src="assets/features/iphone.en.png" alt="iPhone home and connection settings" width="100%">
+      <p>Connect your iPhone over Tailscale to your desktop or headless server. Talk to Nova and approve tasks wherever you are.</p>
+      <a href="assets/features/iphone.en.png"><img src="assets/features/iphone.en.png" alt="Nova iPhone client and connection settings" width="100%"></a>
     </td>
   </tr>
 </table>
 
-<sub>Demo data; screenshots cleaned up, composited and translated for presentation.</sub>
-
 ## 3. Quickstart
 
-Requirements: Node.js 22+, npm, Git, a logged-in `codex` executable (app-server is the only
-Codex transport).
+### 3.1 Install and run
 
-Besides the shipped app from releases, you can also install using npm
+Requirements: Node.js 22.13+ and npm. For coding tasks, install and authenticate your chosen coding backend; Codex uses its app-server transport.
+
+Install the release with npm.
 
 ```bash
-npm install --global nova-audio-agent@0.2.3
-# open the shipped app; the first launch asks for one DashScope API key
-novaaudio
+npm install --global nova-personal-agent@latest
+# open the shipped app; configure a provider to enable voice
+novapersonal
 # open the settings panel in the app
-novaaudio config
+novapersonal config
 # list the keys your voice pipeline needs; --online tests them
-novaaudio doctor
+novapersonal doctor
 ```
 
-Headless Ubuntu 22.04+: install `nova-audio-agent-server` with npm, configure it and initialize credentials; run `novaaudio-server start` and, in a second terminal, `novaaudio-server pair wss://your-host.ts.net` for a one-use QR. See the [configuration guide](docs/en/deployment/remote-server.md).
+v0.4 introduces the Nova Personal Agent package names. Published v0.3.x versions retain the old package names and `novaaudio` command. The new package keeps that command alias and reuses existing data and settings. When migrating an existing global install, first run `npm uninstall --global nova-audio-agent nova-audio-agent-server` to avoid command-link collisions; this leaves user data intact.
+
+
+Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-personal-agent@0.4.0`. Upgrades keep your settings and data; back up your Nova data before downgrading.
+
+Headless Ubuntu 22.04+ x64:
+
+1. Install or upgrade with `npm install --global nova-personal-agent-server@latest`, then configure the service and initialize credentials using the [configuration guide](docs/en/deployment/remote-server.md).
+2. Start the service with `novapersonal-server start`.
+3. In a second terminal, run `novapersonal-server pair wss://your-host.ts.net` to display a one-use pairing QR code.
+
+### 3.2 Develop from source
 
 For development from source:
 
 ```bash
-git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
-cd nova-audio-agent
+git clone https://github.com/deepnovacore/NovaPersonalAgent.git nova-personal-agent
+cd nova-personal-agent
 npm ci && cp .env.example .env
 ```
 
@@ -155,21 +193,34 @@ Get an API key from [DashScope](https://platform.qianwenai.com) and set `DASHSCO
 
 ```bash
 npm run start:client
-```
-The client includes microphone, camera, sound, settings, and external MCP controls. Try hovering over the desktop orb to get surprised :) Also you
-may try build or run demo locally:
-
-```bash
-npm run build --workspace @nova-audio-agent/runtime
+# Open Workbench for this launch, overriding the saved startup preference
+npm run start:workbench
+# Build, diagnose or run the local demos
+npm run build --workspace @nova-personal-agent/runtime
 node runtime/dist/src/cli.js diagnose --json
 node runtime/dist/src/cli.js demo all
 ```
 
-Native echo-cancelled capture (VoiceProcessingIO) is macOS-only. Wake detection uses that
-capture when available; Windows, Linux source runs, and macOS fallback use Chromium
-`getUserMedia` + AudioWorklet. While sleeping, microphone frames go only to the local
-wake-word Worker; explicit mute stops wake detection. See
-[wake-word setup](docs/en/getting-started.md#enable-a-wake-word).
+The client includes microphone, camera, sound, settings and external MCP controls. Try hovering over the desktop orb for a surprise :)
+
+### 3.3 Support matrix
+
+| Platform | Desktop app | Headless server | Connect iPhone |
+|---|---|---|---|
+| macOS arm64 | ✅ Native echo cancellation | ✅ From source | ✅ Desktop pairing |
+| Windows x64 | ✅ | ❌ | ❌ |
+| Ubuntu 22.04+ x64 | ✅ | ✅ npm package | ✅ Headless pairing |
+
+| Layer | Providers |
+|---|---|
+| Integrated voice | Qwen realtime, OpenAI realtime, Gemini Live, StepFun (preview) |
+| Cascaded ASR / TTS | Volcengine Speech, Gemini, self-hosted (reference: Whisper / Breeze) |
+| Cascaded LLM | DeepSeek, Qwen / DashScope, Volcengine Ark, OpenAI, Gemini, self-hosted |
+| Vision | Qwen-VL family, Doubao Seed |
+| Coding agent | Codex, OpenCode, CodeBuddy, Pi, DeepSeek Harness |
+| Sources | Local folders, Google via Composio, Apple Mail and Calendar (macOS), Feishu |
+
+Models, credentials and per-provider limits: [support matrix](docs/en/support-matrix.md).
 
 ## 4. Documentation
 
@@ -178,15 +229,16 @@ wake-word Worker; explicit mute stops wake detection. See
 | [Architecture](docs/en/architecture.md) | Modules and boundaries |
 | [Glossary and invariants](docs/en/glossary.md) | Vocabulary and rules |
 | [Getting started](docs/en/getting-started.md) | Setup and integrations |
+| [Workbench](docs/en/workbench.md) · [Tasks](docs/en/tasks.md) · [Sources and connectors](docs/en/sources-and-connectors.md) | The main window, delegated work, and what Nova may read |
 | [When should a voice agent speak?](docs/en/blog/2026-08-proactive-voice-agent-design-space.md) | Voice interaction design |
-| [Node runtime migration archive](https://github.com/deepnovacore/NovaAudioAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
+| [Node runtime migration archive](https://github.com/deepnovacore/NovaPersonalAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
 
 ## 5. Roadmap
 
-- [ ] **v0.3.0:** bring text and voice into one main window with conversation, activity, task and memory views; add memory-grounded suggestions and follow-up; make personal memories traceable, correctable and removable; connect user-authorized folders, email, calendars and Feishu conversations.
-- [ ] **v0.4.0:** expand coding backends with Kimi Code and pi agent; add a GUI executor with AutoGLM as the first example, enabling collaboration across specialist agents.
+- [x] **v0.4.0 — Ongoing context and specialist agents.** Persistent home and Timeline, scheduled tasks, incremental Profile updates and multiple coding backends. GUI/device execution remains experimental.
+- [ ] **v1.0.0 — Stable release.** Establish stable core behavior across supported platforms, reliable installation and upgrades, predictable recovery, and complete user documentation.
 
-Releases require feature and supported-platform acceptance. Ubuntu 22.04+ x64 desktop and headless npm packages are included in the candidate release checks.
+Development integrations are not release guarantees. Features ship after their supported configurations pass acceptance.
 
 ## 6. Contribution
 

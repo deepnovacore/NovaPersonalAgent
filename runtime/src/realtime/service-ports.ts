@@ -1,3 +1,8 @@
+import type {ToolAcceptance,ToolCallReady} from './bridge.js'
+import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
+import type {IntakeSession} from '../executors/coding/intake.js'
+import type {ProjectProposal} from '../projects/project-confirmation.js'
+import type {TaskToolHost} from '../core/task-tools.js'
 import type {PromptLanguage} from './prompt-language.js'
 import {
 type AgentController
@@ -102,6 +107,8 @@ export interface ServiceRuntime {
   }
 }
 export interface HostItemOptions {
+      readonly stillWanted?:()=>boolean
+  readonly onNotDelivered?:()=>Promise<void>
       readonly semanticEventId?: string | null
       readonly priority?: number
       readonly preemptive?: boolean
@@ -166,7 +173,16 @@ export interface ServiceProvider {
   close(): Promise<void>
 }
 
+export interface ProactiveNotice {event_id:string;kind:'task_progress'|'task_result'|'alert'|'suggestion';body:string;work_id?:string;priority:number;expires_in_ms:number|null;valid?:()=>boolean;evidence_refs?:readonly string[]}
 export interface RealtimeServiceOptions {
+  readonly proactiveRouting?: {local:()=>boolean;publish:(notice:ProactiveNotice)=>Promise<void>}
+
+  readonly onIntakePrepared?:(intake:Readonly<IntakeSession>,proposal:ProjectProposal)=>void
+  readonly taskHost?: TaskToolHost
+  readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
+  readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
+  readonly validateScopedContext?:()=>Promise<boolean>
+  readonly onProviderEvent?: (event: RealtimeProviderEvent) => void
   readonly intake?: Pick<
     IntakeOptions,
     'models' | 'settings' | 'roster' | 'running' | 'activeProject' | 'resolveTarget' | 'dispatch' | 'steer' | 'record'
@@ -189,6 +205,7 @@ export interface RealtimeServiceOptions {
   readonly onCaption?: (frame: CaptionFrame) => void
   /** Receives a user transcript only after the core accepted its evidence; it must not block audio. */
   readonly onUserTranscriptAccepted?: (turn: {
+    readonly confirmed?: boolean
     readonly text: string
     readonly originRef: string
     readonly sessionEpoch: number
@@ -196,14 +213,9 @@ export interface RealtimeServiceOptions {
     readonly userInputRevision: number
   }) => void | Promise<void>
   readonly telemetry?: RealtimeTelemetry
-  /** Generic composition seam; the legacy Guard-named options below remain accepted. */
   readonly controlledPreemptiveAlertReconnect?: boolean
   readonly preemptiveAlertHistoryRecovery?: PreemptiveAlertHistoryRecovery
   readonly preemptiveAlertHistoryPairs?: number
-  /** @deprecated Compatibility options for existing environment/configuration keys. */
-  readonly controlledGuardReconnect?: boolean
-  readonly guardHistoryRecovery?: PreemptiveAlertHistoryRecovery
-  readonly guardHistoryPairs?: number
   /** Absent means project confirmation is off, and every branch of it is inert. */
   readonly projectConfirmation?: ProjectConfirmationController
   /** Independent one-shot Codex permission authority; absent on non-brokered transports. */

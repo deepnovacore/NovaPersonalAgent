@@ -4,7 +4,7 @@ import {mkdir, rename, unlink, writeFile} from 'node:fs/promises'
 import {dirname, join, resolve} from 'node:path'
 import {homedir} from 'node:os'
 import {createHmac, randomBytes, randomUUID} from 'node:crypto'
-import {parseCapabilityRegistry, capabilityStatus, probeMcpServer, SensitiveContentPolicy, MCP_NON_AUTH_HEADERS} from '@nova-audio-agent/runtime/desktop'
+import {parseCapabilityRegistry, capabilityStatus, probeMcpServer, SensitiveContentPolicy, MCP_NON_AUTH_HEADERS} from '@nova-personal-agent/runtime/desktop'
 export {capabilityEnvironment} from './backend.mjs'
 
 const MAX_BYTES = 256 * 1024

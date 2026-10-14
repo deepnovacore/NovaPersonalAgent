@@ -1,20 +1,20 @@
 {
   "schema_version": 1,
-  "repository": "deepnovacore/NovaAudioAgent",
+  "repository": "deepnovacore/NovaPersonalAgent",
   "targets": {
     "darwin-arm64": {
-      "artifact": "nova-audio-agent-0.2.3-macos-arm64-app.zip",
-      "executable": "Nova Audio Agent Desktop.app/Contents/MacOS/Nova Audio Agent Desktop",
+      "artifact": "nova-personal-agent-0.4.0-macos-arm64-app.zip",
+      "executable": "Nova Personal Agent Desktop.app/Contents/MacOS/Nova Personal Agent Desktop",
       "archive": "zip"
     },
     "win32-x64": {
-      "artifact": "nova-audio-agent-0.2.3-windows-x64-portable.zip",
-      "executable": "Nova Audio Agent Desktop.exe",
+      "artifact": "nova-personal-agent-0.4.0-windows-x64-portable.zip",
+      "executable": "Nova Personal Agent Desktop.exe",
       "archive": "zip"
     },
     "linux-x64": {
-      "artifact": "nova-audio-agent-0.2.3-linux-x64.AppImage",
-      "executable": "nova-audio-agent.AppImage",
+      "artifact": "nova-personal-agent-0.4.0-linux-x64.AppImage",
+      "executable": "nova-personal-agent.AppImage",
       "archive": "file"
     }
   }

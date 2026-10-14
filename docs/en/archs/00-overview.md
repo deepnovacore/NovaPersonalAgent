@@ -1,6 +1,6 @@
 # Architecture reference
 
-This series describes the architecture of Nova Audio Agent. Each volume owns one design
+This series describes the architecture of Nova Personal Agent. Each volume owns one design
 boundary and links to the implementation concepts that enforce it.
 
 1. [Runtime spine](01-spine.md)

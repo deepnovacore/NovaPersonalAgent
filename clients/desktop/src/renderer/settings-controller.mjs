@@ -46,19 +46,27 @@ export function settingsButtonState({
 // same names are legitimate boolean fields inside `secretsPresent`, so that
 // presence-only shape is sanitized separately instead of recursively denied.
 const SECRET_KEY_NAMES = [
+  'selfHostedAsrApiKey',
+  'selfHostedLlmApiKey',
+  'selfHostedTtsApiKey',
   'dashscopeApiKey',
   'tavilyApiKey',
+  'openrouterApiKey',
   'modelApiKey',
   'codexApiKey',
   'arkApiKey',
   'deepseekApiKey',
+  'openaiApiKey',
+  'geminiApiKey',
   'doubaoBigmodelApiKey',
   'doubaoAsrApiKey',
 ]
 const SECRET_KEYS = new Set(SECRET_KEY_NAMES)
 const MAIN_LIVE_VIEW_FIELDS = [
   'codexStatus',
+  'codingBackends',
   'frontendUsage',
+  'startup',
   'backendStatus',
   'backendDiagnostic',
   'backendRetryInMs',

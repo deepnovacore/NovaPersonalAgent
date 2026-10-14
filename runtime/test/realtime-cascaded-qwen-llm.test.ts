@@ -157,7 +157,7 @@ test('Qwen joins fragmented tool calls and retains a matched tool result with it
   })
   const answer = await collect(session.stream({
     inputs: [{kind: 'tool_result', call_id: 'call-1', output: {temperature: 20}},
-      {kind: 'host_activation', content: 'Nova Audio Agent 宿主激活事实：最新问题'}, {kind: 'packed_history', content: '只读历史'}],
+      {kind: 'host_activation', content: 'Nova Personal Agent 宿主激活事实：最新问题'}, {kind: 'packed_history', content: '只读历史'}],
     tools, signal: new AbortController().signal,
   }))
   assert.equal(answer.at(-1)?.kind, 'response_completed')
@@ -171,7 +171,7 @@ test('Qwen joins fragmented tool calls and retains a matched tool result with it
   assert.ok(messages.some(message => message.role === 'tool' && message.tool_call_id === 'call-1'))
   assert.equal(messages.some(message => message.content === '只读历史'), false)
   assert.equal(messages.at(-1)?.role, 'user')
-  assert.deepEqual(JSON.parse(messages.at(-1)?.content as string), {text_to_say: 'Nova Audio Agent 宿主激活事实：最新问题'})
+  assert.deepEqual(JSON.parse(messages.at(-1)?.content as string), {text_to_say: 'Nova Personal Agent 宿主激活事实：最新问题'})
 })
 
 for (const factOnly of [false, true]) test(`Qwen completes two sequential tool hops (factOnly=${factOnly})`, async () => {
@@ -614,7 +614,7 @@ test('Qwen bounds missing metering tail after terminal without changing complete
 
 
 test('captured Qwen null argument delta preserves a complete call but cannot supply missing JSON', async () => {
-  const captured = JSON.parse(readFileSync(new URL('../../../fixtures/realtime/qwen/v1/tool-null-delta.json', import.meta.url), 'utf8')) as Record<string, unknown>[]
+  const captured = JSON.parse(readFileSync(new URL('../../../tests/fixtures/realtime/qwen/v1/tool-null-delta.json', import.meta.url), 'utf8')) as Record<string, unknown>[]
   for (const nullOnly of [false, true]) {
     const chunks = nullOnly ? [{id: 'empty', choices: [{delta: {tool_calls: [{index: 0, id: 'empty',
       function: {name: 'search', arguments: null}}]}, finish_reason: 'tool_calls'}]}] : captured
@@ -635,7 +635,7 @@ test('captured Qwen null argument delta preserves a complete call but cannot sup
 })
 
 test('captured Max null id delta preserves the established id without accepting missing or changed ids', async () => {
-  const captured = JSON.parse(readFileSync(new URL('../../../fixtures/realtime/qwen/v1/tool-null-id-delta.json', import.meta.url), 'utf8')) as {choices?: {delta: {tool_calls?: {id?: string | null}[]}}[]}[]
+  const captured = JSON.parse(readFileSync(new URL('../../../tests/fixtures/realtime/qwen/v1/tool-null-id-delta.json', import.meta.url), 'utf8')) as {choices?: {delta: {tool_calls?: {id?: string | null}[]}}[]}[]
   for (const mode of ['captured', 'missing', 'changed'] as const) {
     const chunks = structuredClone(captured)
     for (const chunk of chunks) for (const choice of chunk.choices ?? []) for (const call of choice.delta.tool_calls ?? []) {
@@ -683,6 +683,25 @@ test('Qwen sends original pixels through tool continuations and strips them from
   assert.doesNotMatch(requests[2]!, /image_url|data:image/u)
   assert.match(requests[2]!, /call-1/u)
   await llm.close()
+})
+
+test('fresh sessions seed only committed pairs and reject reseeding after a pending tool', async () => {
+  const bodies:Record<string,unknown>[]=[]
+  const factory=createQwenCascadedLlmFactory({baseUrl:'https://example.invalid',apiKey:'test',model:'test',instructions:'system',fetchImpl:(_url,init)=>{
+    bodies.push(JSON.parse(init?.body as string) as Record<string,unknown>)
+    return Promise.resolve(sse([{id:'r',choices:[{delta:{tool_calls:[{index:0,id:'call',function:{name:'lookup',arguments:'{}'}}]},finish_reason:'tool_calls'}]}]))
+  }})
+  const first=factory.open(),second=factory.open(),signal=new AbortController().signal
+  try {
+    assert(typeof first.restoreHistory==='function');assert(typeof second.restoreHistory==='function')
+    await first.restoreHistory([{user:'first question',assistant:'first answer'}],signal)
+    await second.restoreHistory([{user:'other question',assistant:'other answer'}],signal)
+    await collect(first.stream({inputs:[{kind:'user_text',text:'next'}],tools:[],signal}))
+    await collect(second.stream({inputs:[{kind:'user_text',text:'other next'}],tools:[],signal}))
+    assert.match(JSON.stringify(bodies[0]),/first answer/u);assert.doesNotMatch(JSON.stringify(bodies[0]),/other answer/u)
+    assert.match(JSON.stringify(bodies[1]),/other answer/u);assert.doesNotMatch(JSON.stringify(bodies[1]),/first answer/u)
+    await assert.rejects(first.restoreHistory([{user:'bad',assistant:'overwrite'}],signal))
+  } finally {await first.close();await second.close()}
 })
 
 test('DeepSeek official stream keeps tool history, disables thinking and meters KV cache', async () => {
@@ -800,4 +819,10 @@ test('cascaded English translates conversation and narration prompts but preserv
   assert.doesNotMatch(requests[1]!.messages[0]!.content, /[\u3400-\u9fff]/u)
   assert.match(requests[1]!.messages[1]!.content, /任务已完成/)
   await llm.close()
+})
+
+test('scheduled host task uses a marked provider activation without becoming user authority or narration',async()=>{
+ let body:{messages:{role:string;content:string}[]}|undefined
+ const session=createQwenCascadedLlmFactory({baseUrl:'https://example.test',apiKey:'synthetic',model:'test',instructions:'scheduled',fetchImpl:(_url,init)=>{assert.equal(typeof init?.body,'string');body=JSON.parse(init?.body as string) as typeof body;return Promise.resolve(new Response('data: {"id":"r","choices":[{"delta":{"content":"done"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}}))}}).open()
+ try{await collect(session.stream({inputs:[{kind:'host_task',content:'{"run_id":"real-run","goal":"read authorized batch"}'}],tools:[],signal:new AbortController().signal}));const activation=body!.messages.find(message=>message.role==='user')!;assert.match(activation.content,/host_scheduled_task/u);assert.match(activation.content,/real-run/u);assert.doesNotMatch(activation.content,/text_to_say/u)}finally{await session.close()}
 })

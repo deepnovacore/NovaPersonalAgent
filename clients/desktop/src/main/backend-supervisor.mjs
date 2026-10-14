@@ -204,7 +204,7 @@ export function publicRuntimeCapabilityStatus(value) {
   return result
 }
 
-const BLOCKING_CREDENTIALS = new Set(['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
+const BLOCKING_CREDENTIALS = new Set(['OPENAI_API_KEY', 'GEMINI_API_KEY', 'STEPFUN_API_KEY', 'DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
 
 /** One private utility child owns every pending request; replacement closes this handle. */
 export function createBackendControl(child, {onStatus = () => {}, onUsage = () => {}} = {}) {
@@ -261,6 +261,7 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
 
 const RUNTIME_CODES = new Set([
   'configuration_required', 'authentication_failed', 'backend_unavailable', 'assembly_failed',
+  'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid',
 ])
 const CODEX_DIAGNOSTIC_CODES = new Set([
   'codex_login_status_nonzero',
@@ -285,8 +286,21 @@ const CODEX_DIAGNOSTIC_CODES = new Set([
   ].map(code => `codex_project_view_refresh_${code}`),
 ])
 const LINE = /\[runtime-diagnostic\]\s+([a-z0-9_]{1,64})/g
+const CONFIG_WARNING = /\[config-warning\] [\x20-\x7e]{1,160}/g
+const STARTUP_ERROR = /\[runtime-startup-error\] [^\r\n]{1,296}/g
+
+/** Runtime configuration warnings name only variables, never values, so the main process can echo them verbatim. */
+export function configWarnings(chunk) {
+  return String(chunk).match(CONFIG_WARNING) ?? []
+}
+
+/** The runtime's sanitised startup exception; terminal-only, never a failure code. */
+export function startupErrors(chunk) {
+  return String(chunk).match(STARTUP_ERROR) ?? []
+}
 
 export function classifyBackendFailure(code) {
+  if (['credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid'].includes(code)) return Object.freeze({kind: 'unavailable', code})
   if (code === 'backend_start_timeout') {
     return Object.freeze({kind: 'recoverable', code})
   }

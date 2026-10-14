@@ -10,7 +10,7 @@ of prompt text.
   FSMs are separate host state, never model-writable planning state. Entries carry time, trust,
   priority, outcome, and evidence references. Applying an event precedes any response derived from
   it. Only the causal runtime owns current task/executor state.
-- **Personal memory.** Local mem0 is enabled by default; VoiceMem, a host-managed remote
+- **Personal memory.** The unified local ledger is enabled by default through the VoiceMem-compatible selection; mem0, a host-managed remote
   connection, or disabled memory can be selected explicitly. Durable source admission and
   asynchronous extraction retain facts across conversations. Recall, host deletion and optional
   inspection are independent of live task state. See [personal memory](../personal-memory.md)
@@ -33,7 +33,7 @@ Three engines sit behind one port (`runtime/src/memory/personal-memory.ts`), sel
 `MEMORY_CONNECTION` and `MEMORY_PROVIDER`; `factory.ts` returns
 `undefined` when memory is disabled, so no store is allocated.
 
-**mem0 (default)** admits sources to its own ledger before any model sees them. Each source moves
+**mem0 (explicit alternative)** admits sources to its own ledger before any model sees them. Each source moves
 through `pending → learned`, or `forgotten` when deleted, and `recall()` returns only `learned`
 sources — re-checking state after its asynchronous extraction call so a concurrent `forget()` is
 never raced. Extraction drains in the background under a single-drainer lock
@@ -42,12 +42,11 @@ duplicating work. Admission is idempotent by source identity. Storage is per use
 `memory.sqlite.mem0/<sha256(userId)>/`, holding `ledger.db` alongside the mem0 SDK's own vector
 databases.
 
-**VoiceMem** is the alternative local engine, wrapping the `packages/voicemem-ts` SDK behind the
-same port. **Remote personal memory** (`remote-personal-memory.ts`) is a host-managed HTTP client
+**Unified local ledger (default)** is wired by production composition through `runtime/src/memory-substrate/`. It preserves source evidence, revision history, processing consent and unified retrieval. Legacy VoiceMem data can be imported read-only while retaining the original database. The `voicemem` provider name remains for configuration compatibility; `factory.ts` also retains the legacy adapter. **Remote personal memory** (`remote-personal-memory.ts`) is a host-managed HTTP client
 over `/v1/remember`, `/v1/forget`, `/v1/recall` and `/v1/preferences`; the URL must be HTTPS or
 loopback, and responses are size-capped.
 
-Each engine keeps its own database, so switching engines does not migrate existing memories.
+Explicitly switching to mem0 or remote memory does not migrate unified-ledger data. The legacy VoiceMem read-only import is a separate migration path.
 
 ## Separate document knowledge (K)
 

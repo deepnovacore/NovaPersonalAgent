@@ -6,7 +6,7 @@ on:
       release_version:
         description: Application version to validate
         required: true
-        default: 0.2.3
+        default: 0.4.0
         type: string
       candidate_scope:
         description: Full release evidence or a Windows-only repair run
@@ -22,6 +22,8 @@ permissions:
 
 jobs:
   platform-candidate:
+    env:
+      NOVA_SMOKE_DIAGNOSTICS: ${{ github.workspace }}/smoke-diagnostics
     timeout-minutes: 90
     strategy:
       fail-fast: false
@@ -91,43 +93,43 @@ jobs:
         if: inputs.candidate_scope == 'full'
       - name: Build unsigned candidate bytes
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
-        run: npm run ${{ matrix.package_script }} --workspace @nova-audio-agent/desktop
+        run: npm run ${{ matrix.package_script }} --workspace @nova-personal-agent/desktop
       - name: Verify installed application and backend
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
-        run: ${{ matrix.platform == 'linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned
+        run: ${{ matrix.platform == 'linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned
       - name: Archive macOS application with native tools
         if: matrix.platform == 'darwin' && inputs.candidate_scope == 'full'
         shell: bash
         run: |
           mkdir -p candidate
-          ditto -c -k --keepParent "clients/desktop/dist/mac-arm64/Nova Audio Agent Desktop.app" candidate/nova-audio-agent-${{ inputs.release_version }}-macos-arm64-app.zip
-          cp clients/desktop/dist/*.dmg candidate/nova-audio-agent-${{ inputs.release_version }}-macos-arm64.dmg
+          ditto -c -k --keepParent "clients/desktop/dist/mac-arm64/Nova Personal Agent Desktop.app" candidate/nova-personal-agent-${{ inputs.release_version }}-macos-arm64-app.zip
+          cp clients/desktop/dist/*.dmg candidate/nova-personal-agent-${{ inputs.release_version }}-macos-arm64.dmg
       - name: Archive Windows application with native tools
         if: matrix.platform == 'win32'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force candidate
-          tar.exe -a -c -f candidate/nova-audio-agent-${{ inputs.release_version }}-windows-x64-portable.zip -C clients/desktop/dist/win-unpacked .
+          tar.exe -a -c -f candidate/nova-personal-agent-${{ inputs.release_version }}-windows-x64-portable.zip -C clients/desktop/dist/win-unpacked .
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Copy-Item clients/desktop/dist/*.exe candidate/nova-audio-agent-${{ inputs.release_version }}-windows-x64.exe
+          Copy-Item clients/desktop/dist/*.exe candidate/nova-personal-agent-${{ inputs.release_version }}-windows-x64.exe
       - name: Verify macOS installer
         if: matrix.platform == 'darwin' && inputs.candidate_scope == 'full'
-        run: npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-audio-agent-${{ inputs.release_version }}-macos-arm64.dmg"
+        run: npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-personal-agent-${{ inputs.release_version }}-macos-arm64.dmg"
       - name: Verify Windows installer
         if: matrix.platform == 'win32'
-        run: npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-audio-agent-${{ inputs.release_version }}-windows-x64.exe"
+        run: npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-personal-agent-${{ inputs.release_version }}-windows-x64.exe"
       - name: Archive Linux desktop and headless packages
         if: matrix.platform == 'linux' && inputs.candidate_scope == 'full'
         run: |
           mkdir -p candidate
-          cp clients/desktop/dist/*.AppImage candidate/nova-audio-agent-${{ inputs.release_version }}-linux-x64.AppImage
-          cp clients/desktop/dist/*.deb candidate/nova-audio-agent-${{ inputs.release_version }}-linux-x64.deb
+          cp clients/desktop/dist/*.AppImage candidate/nova-personal-agent-${{ inputs.release_version }}-linux-x64.AppImage
+          cp clients/desktop/dist/*.deb candidate/nova-personal-agent-${{ inputs.release_version }}-linux-x64.deb
           node scripts/pack-server.mjs candidate
-          npm install --prefix server-smoke ./candidate/nova-audio-agent-server-${{ inputs.release_version }}.tgz
-          server-smoke/node_modules/.bin/novaaudio-server --help
-          node scripts/verify-server-package.mjs server-smoke/node_modules/.bin/novaaudio-server
-          xvfb-run -a npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-audio-agent-${{ inputs.release_version }}-linux-x64.AppImage"
-          xvfb-run -a npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-audio-agent-${{ inputs.release_version }}-linux-x64.deb"
+          npm install --prefix server-smoke ./candidate/nova-personal-agent-server-${{ inputs.release_version }}.tgz
+          server-smoke/node_modules/.bin/novapersonal-server --help
+          node scripts/verify-server-package.mjs server-smoke/node_modules/.bin/novapersonal-server
+          xvfb-run -a npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-personal-agent-${{ inputs.release_version }}-linux-x64.AppImage"
+          xvfb-run -a npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-personal-agent-${{ inputs.release_version }}-linux-x64.deb"
       - name: Write CLI download checksums
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         shell: bash
@@ -144,8 +146,14 @@ jobs:
         run: |
           mkdir -p candidate-cli
           npm pack ./cli --pack-destination candidate-cli
-          npm install --prefix cli-smoke --ignore-scripts ./candidate-cli/nova-audio-agent-${{ inputs.release_version }}.tgz
-          ${{ matrix.platform == 'linux' && 'xvfb-run -a' || '' }} node scripts/verify-npm-desktop.mjs cli-smoke/node_modules/nova-audio-agent candidate
+          npm install --prefix cli-smoke --ignore-scripts ./candidate-cli/nova-personal-agent-${{ inputs.release_version }}.tgz
+          ${{ matrix.platform == 'linux' && 'xvfb-run -a' || '' }} node scripts/verify-npm-desktop.mjs cli-smoke/node_modules/nova-personal-agent candidate
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: diagnostics-${{ matrix.target_id }}-${{ github.run_attempt }}
+          path: smoke-diagnostics/*
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         with:

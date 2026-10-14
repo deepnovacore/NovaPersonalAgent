@@ -1,4 +1,4 @@
-const api=window.novaAudioAgentDesktop?.visor,status=document.getElementById('visor-settings-status')
+const api=window.novaPersonalAgentDesktop?.visor,status=document.getElementById('visor-settings-status')
 const keys=['enabled','mode','opacity','motion','hardware','ai']
 const inputs=Object.fromEntries(keys.map(key=>[key,document.getElementById(`visor-${key}`)]))
 let busy=false

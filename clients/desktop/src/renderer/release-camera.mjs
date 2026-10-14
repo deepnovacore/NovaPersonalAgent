@@ -8,7 +8,7 @@ let reported = false
 const report = result => {
   if (reported) return
   reported = true
-  window.novaAudioAgentDesktop.releaseCamera.report(result)
+  window.novaPersonalAgentDesktop.releaseCamera.report(result)
 }
 
 async function probeDecode() {

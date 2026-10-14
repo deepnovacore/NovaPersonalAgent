@@ -1,7 +1,7 @@
 /**
  * Readonly camera monitoring for ordinary and urgent conditions.
  *
- * Ported from `src/nova_audio_agent/executors/watcher.py`. One adapter class serves two executors:
+ * Ported from `src/nova_personal_agent/executors/watcher.py`. One adapter class serves two executors:
  * `watch` announces through the Surrogate at priority 40, `guard` wakes the fast brain at priority 90
  * and is the only thing allowed to interrupt the agent mid-sentence. They differ by manifest alone,
  * which is deliberate -- the monitoring logic is identical and the urgency is a policy decision.

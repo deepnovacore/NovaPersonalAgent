@@ -6,6 +6,8 @@ Nova 运行在电脑上，通过语音与你交流，并调用 Codex 完成编�
 
 源码运行需要 Node.js 22.13 或更新版本、npm、Git，以及已安装并登录的 Codex。
 
+如果想改用 OpenCode、CodeBuddy、Pi 或 DeepSeek Harness 处理编码任务，另外安装它并在设置中选择即可，见 [Coding](executors/coding.md#选择执行器)。
+
 原生组件还需要对应平台的构建工具：
 
 - macOS：Xcode Command Line Tools，可运行 `xcode-select --install` 安装。
@@ -16,9 +18,24 @@ Nova 运行在电脑上，通过语音与你交流，并调用 Codex 完成编�
 
 ## 2. 安装和启动
 
+### 安装或升级
+
 ```bash
-git clone https://github.com/deepnovacore/NovaAudioAgent.git nova-audio-agent
-cd nova-audio-agent
+npm install --global nova-personal-agent@latest
+novapersonal
+```
+
+升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@0.4.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。
+
+从 `nova-audio-agent` 切换包名时，请先运行 `npm uninstall --global nova-audio-agent`，再安装新包，以免命令链接冲突；本地数据与设置会保留。
+
+Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-personal-agent-server@latest`。
+
+从源码开发：
+
+```bash
+git clone https://github.com/deepnovacore/NovaPersonalAgent.git nova-personal-agent
+cd nova-personal-agent
 npm ci
 cp .env.example .env
 ```
@@ -38,6 +55,8 @@ npm run start:client
 源码启动时，项目 `.env` 中的值优先于同名 shell 环境变量。修改 `.env` 后需重新启动桌面应用。
 
 ## 3. 交办第一个任务
+
+[![Nova 在执行任务前澄清需求](../../assets/features/conversation-polished.png)](../../assets/features/conversation-polished.png)
 
 直接说：“帮我创建一个展示个人作品的网页。”Nova 会询问必要的信息，并在需要新建或切换项目时请求确认，然后交给 Codex 执行。
 
@@ -64,6 +83,8 @@ npm run start:client
 | 集成 `integrated` | 一个模型直接处理语音，配置较少 | Qwen `qwen-audio-3.0-realtime-plus`，音色 `longanqian` |
 | 级联 `cascaded` | 分别配置识别、语言模型和合成 | 火山 ASR -> DeepSeek `deepseek-flash` -> 火山 TTS |
 
+集成模式也可选择 StepFun（`INTEGRATED_PROVIDER=stepfun`，预览特性），需配置 `STEPFUN_API_KEY`。
+
 每个平台使用一把密钥，在选中的服务间复用：DeepSeek 使用 `DEEPSEEK_API_KEY`，Qwen 使用 `DASHSCOPE_API_KEY`，火山语音使用 `DOUBAO_BIGMODEL_API_KEY`。可通过 `DOUBAO_ASR_API_KEY` 单独指定识别密钥；未填写时，ASR 回退到 `DOUBAO_BIGMODEL_API_KEY`。
 
 Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板只显示当前模式需要的配置；密钥只写并返回存在状态。服务配置在后台下次启动时生效，不会自动切换到其他供应商。
@@ -76,9 +97,13 @@ Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板�
 
 待机时，麦克风输入交给本地唤醒检测。主动静音会停止检测，需要手动解除静音。
 
+### 选择主窗口
+
+桌面启动时会进入三种界面之一，由 `startupView` 设置决定：`orb` 以悬浮球启动，`workbench` 打开完整窗口（默认），`last` 恢复上次关闭时的界面。运行 `npm run start:workbench` 可在本次启动时打开 Workbench，不受已保存设置影响。详见[Workbench](workbench.md)。
+
 ## 5. 记忆、知识库与手机
 
-- **个人记忆**默认使用本地 mem0。右键悬浮球打开「记忆面板」，可查看原话与整理结果。详见[个人记忆](personal-memory.md)。
+- **个人记忆**默认开启，使用本地统一账本保存；可在 Workbench 的「Profile」页查看、纠正或忘记条目，也可显式选择 mem0。详见[个人记忆](personal-memory.md)。
 - **文档知识库**需在能力设置中启用。导入文件前会说明数据处理方式；生成向量会把文本发送给配置的模型服务。
 - **连接 iPhone**：macOS 桌面右键悬浮球，选择「连接 iPhone…」，启用手机连接后按页面提示设置网络并扫码。详见[手机连接与远程服务](iphone.md)。
 
@@ -86,6 +111,7 @@ Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板�
 
 | 问题 | 检查方式 |
 |---|---|
+| macOS 提示应用「已损坏」 | 应用未签名，浏览器下载的文件带有隔离标记。拖到「应用程序」后运行 `xattr -dr com.apple.quarantine "/Applications/Nova Personal Agent Desktop.app"`，再重新打开 |
 | 语音连接失败 | 检查所选模式的密钥、服务权限和网络连接 |
 | Codex 无法执行 | 确认 Codex 已登录，项目目录可访问 |
 | 保存后没有变化 | 查看是否提示「待重启」，点击重启后台 |

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {EventEmitter} from 'node:events'
 import {test} from 'node:test'
-import {installDesktopControl, desktopBudgetFailure, type DesktopCapabilityState} from '../src/desktop/desktop-control.js'
+import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, connectionsProjection, PERSONAL_SETTINGS_METHODS, desktopBudgetFailure, type DesktopCapabilityState} from '../src/desktop/desktop-control.js'
 import {runDesktopEntry} from '../src/desktop/desktop-session.js'
 import {buildProductionRealtimeAssembly} from '../src/composition/cascaded-realtime-assembly.js'
 import {loadSettings} from '../src/config/config.js'
@@ -11,6 +11,20 @@ class Parent extends EventEmitter {
   readonly sent: unknown[] = []
   postMessage(message: unknown): void {this.sent.push(message)}
 }
+test('coding default host update accepts only exact backend frames and waits for update before ack', async () => {
+  const parentPort = new Parent(), stop = new AbortController(), updates: string[] = []
+  const control = installDesktopControl({parentPort, signal: stop.signal, status: () => undefined,
+    updateCodingBackend: backend => { updates.push(backend) }})
+  try {
+    for (const params of [{backend: 'pi'}, {backend: 'claude'}, {backend: 'codex', full: true}, null, ['pi']]) {
+      parentPort.emit('message', {data: {type: 'nova.control.request', id: String(parentPort.sent.length), method: 'coding.default.set', params}})
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    assert.deepEqual(updates, ['pi'])
+    assert.deepEqual(parentPort.sent[0], {type: 'nova.control.reply', id: '0', result: {backend: 'pi'}})
+    for (const reply of parentPort.sent.slice(1)) assert.equal((reply as {error: string}).error, 'unavailable')
+  } finally { control.dispose(); stop.abort() }
+})
 test('real final compilation failure preserves exact N/B over private startup status without a resource', async () => {
   const parentPort = new Parent(), stop = new AbortController()
   let status: DesktopCapabilityState | undefined
@@ -26,7 +40,7 @@ test('real final compilation failure preserves exact N/B over private startup st
       },
     })
     assert.equal(result, 2)
-    assert.deepEqual(parentPort.sent, [{type: 'nova.capabilities', status: {state: 'startup_failed', toolCount: 2, toolBudget: 1}}])
+    assert.deepEqual(parentPort.sent, [{type: 'nova.capabilities', status: {state: 'startup_failed', toolCount: 3, toolBudget: 1}}])
     assert.equal(desktopBudgetFailure({code: 'frontbrain_tool_budget_exceeded', toolCount: Infinity, toolBudget: 24}), undefined)
   } finally {control.dispose(); stop.abort()}
   assert.equal(parentPort.listenerCount('message'), 0)
@@ -61,4 +75,37 @@ test('private usage frames validate meters and preserve metering tails during sh
   stop.abort()
   control.publishUsage(report)
   assert.equal(parentPort.sent.length, 3)
+})
+
+
+test('settings IM port admits only bounded Feishu methods and unwraps no memory snapshot', async () => {
+  const calls: unknown[] = []
+  const command = (input: unknown) => {calls.push(input); return Promise.resolve({ok:true,data:{state:'unauthorized'}})}
+  assert.deepEqual(await handleFeishuSettings(command,'memory.list',{}),{error:'unsupported'})
+  assert.deepEqual(await handleFeishuSettings(command,'feishu.arbitrary',{}),{error:'invalid_request'})
+  assert.equal(calls.length,0)
+  assert.deepEqual(await handleFeishuSettings(command,'feishu.status',{}),{state:'unauthorized'})
+  assert.equal(calls.length,1)
+  assert.deepEqual(await handleFeishuSettings(()=>Promise.resolve({ok:false,error:'unavailable'}),'feishu.login',{}),{error:'unavailable'})
+})
+
+test('settings connections port admits only sources, connectors and discovery scheduling', async () => {
+  const calls: unknown[] = []
+  const command = (input: unknown) => {calls.push(input); return Promise.resolve({ok:true,data:{sources:[]}})}
+  for (const method of ['memory.list','feed.action','conversations.select','life.mutate','news.refresh','understanding.action','feishu.status'])
+    assert.deepEqual(await handlePersonalSettings(command,method,{}),{error:'unsupported'},method)
+  assert.deepEqual(await handlePersonalSettings(command,'discovery.configure','enabled'),{error:'invalid_request'})
+  assert.equal(calls.length,0)
+  assert.deepEqual(await handlePersonalSettings(command,'state',{}),{revision:undefined,sources:[],connectors:null,settings:{},capabilities:{sources:false,discovery:false}})
+  assert.equal(calls.length,1)
+  const full={revision:7,conversations:{messages:[{text:'SECRET-CONVERSATION'}]},memory:{entries:[{content:'SECRET-MEMORY'}]},feed:[{title:'SECRET-FEED'}],life:{todos:[{title:'SECRET-TODO'}]},news:{items:[]},understanding:{items:[]},feishu:{token:'SECRET'},sources:[{id:'s',path:'/p'}],connectors:{available:true},settings:{discovery_enabled:true,timezone:'Asia/Shanghai'},capabilities:{sources:true,discovery:true,memory:{list:true}}}
+  const projected=await handlePersonalSettings(()=>Promise.resolve({ok:true,data:full}),'state',{}) as Record<string,unknown>
+  assert.deepEqual(projected,{revision:7,sources:[{id:'s',path:'/p'}],connectors:{available:true},settings:{discovery_enabled:true,timezone:'Asia/Shanghai'},capabilities:{sources:true,discovery:true}})
+  assert.ok(!JSON.stringify(projected).includes('SECRET'))
+  assert.deepEqual(connectionsProjection(null).sources,[])
+  assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:true}),'discovery.configure',{enabled:false}),{ok:true},'payload-less success is not an error')
+  assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:true}),'sources.authorize_computer',{consent:true}),{ok:true})
+  assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:true}),'sources.consent',{id:'x',consent:false}),{ok:true})
+  assert.ok(PERSONAL_SETTINGS_METHODS.every(method => !method.startsWith('feishu.')))
+  assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:false,error:'unavailable'}),'sources.sync',{id:'s'}),{error:'unavailable'})
 })

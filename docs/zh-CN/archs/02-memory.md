@@ -11,7 +11,7 @@ Nova 的记忆分为若干层，分别承担会话状态恢复、跨对话记忆
 <a id="layers"></a>
 
 - **L0——会话运行状态。** `Memory` 频道、已分派的执行任务、已接受的交接，以及绑定当前需求修订号的收集状态，共同构成会话的当前状态，以运行时状态为准。宿主的授权与项目确认状态机属于宿主自身的状态，模型不能把它们当作可写的规划状态。黑板条目会记录时间、信任级别、优先级、结果和证据引用，状态按事件顺序更新，响应只能基于已生效的事件。当前任务和执行器状态只能由运行时更新。
-- **个人记忆。** 本地 mem0 默认开启，也可显式选择 VoiceMem、宿主管控的远程连接或关闭记忆。先保存来源，再异步提取其中的事实，让有用信息跨对话保留。检索、由宿主发起的删除和可选的查看功能都不依赖实时任务状态。配置方式、模型数据流向以及当前桌面视图的限制见[个人记忆](../personal-memory.md)。
+- **个人记忆。** 本地统一账本默认开启，沿用 voicemem 配置名称；也可显式选择 mem0、宿主管控的远程连接或关闭记忆。先保存来源，再异步提取其中的事实，让有用信息跨对话保留。检索、由宿主发起的删除和可选的查看功能都不依赖实时任务状态。配置方式、模型数据流向以及当前桌面视图的限制见[个人记忆](../personal-memory.md)。
 
 ## 会话恢复存储
 
@@ -27,11 +27,11 @@ L0 黑板由专用 SQLite Worker 持久化（`runtime/src/memory/blackboard-sess
 
 三个引擎通过统一接口接入（`runtime/src/memory/personal-memory.ts`），由 `MEMORY_CONNECTION` 和 `MEMORY_PROVIDER` 选择；记忆关闭时，`factory.ts` 返回 `undefined`，不会分配任何存储。
 
-**mem0（默认）** 会先把来源写入自身账本，再让模型看到它们。每个来源在 `pending → learned` 之间流转，被删除时变为 `forgotten`；`recall()` 只返回 `learned` 的来源，并在异步抽取调用之后再次检查状态，避免在用户同时删除记忆时返回已经失效的内容。待学习记录在后台异步处理，通过互斥锁保证只有一个进程执行抽取（`learning-lock.db`，`PRAGMA busy_timeout=0`），第二个进程会快速失败，而不会重复同样的工作。同一来源重复提交不会重复入库。存储按用户隔离：`memory.sqlite.mem0/<sha256(userId)>/`，其中 `ledger.db` 与 mem0 SDK 自带的向量数据库放在一起。
+**mem0（显式选择的替代引擎）** 会先把来源写入自身账本，再让模型看到它们。每个来源在 `pending → learned` 之间流转，被删除时变为 `forgotten`；`recall()` 只返回 `learned` 的来源，并在异步抽取调用之后再次检查状态，避免在用户同时删除记忆时返回已经失效的内容。待学习记录在后台异步处理，通过互斥锁保证只有一个进程执行抽取（`learning-lock.db`，`PRAGMA busy_timeout=0`），第二个进程会快速失败，而不会重复同样的工作。同一来源重复提交不会重复入库。存储按用户隔离：`memory.sqlite.mem0/<sha256(userId)>/`，其中 `ledger.db` 与 mem0 SDK 自带的向量数据库放在一起。
 
-**VoiceMem** 是另一套本地引擎，通过同一接口包装 `packages/voicemem-ts` SDK。**远程个人记忆**（`remote-personal-memory.ts`）是宿主管控的 HTTP 客户端，对接 `/v1/remember`、`/v1/forget`、`/v1/recall` 和 `/v1/preferences`；URL 必须是 HTTPS 或回环地址，响应体有大小上限。
+**统一本地账本（默认）** 由生产组装接入 `runtime/src/memory-substrate/`，保存来源原文、修订历史与处理同意，并提供统一检索。旧 VoiceMem 数据可只读迁入，原数据库保留。`voicemem` 名称继续用于配置兼容；`factory.ts` 仍保留旧适配器。**远程个人记忆**（`remote-personal-memory.ts`）是宿主管控的 HTTP 客户端，对接 `/v1/remember`、`/v1/forget`、`/v1/recall` 和 `/v1/preferences`；URL 必须是 HTTPS 或回环地址，响应体有大小上限。
 
-每个引擎维护自己的数据库，因此切换引擎不会迁移已有记忆。
+显式切换到 mem0 或远程记忆不会迁移统一账本数据；旧 VoiceMem 的只读迁入是独立迁移路径。
 
 ## 独立的文档知识（K）
 

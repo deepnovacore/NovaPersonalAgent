@@ -2,7 +2,7 @@ import {ENGLISH_MESSAGES} from './messages.en.mjs'
 export function preferredLanguage(languages = []) {
   return /^zh(?:[-_]|$)/i.test(languages[0] ?? '') ? 'zh-CN' : 'en'
 }
-let language = globalThis.window?.novaAudioAgentDesktop?.language ?? 'zh-CN'
+let language = globalThis.window?.novaPersonalAgentDesktop?.language ?? 'zh-CN'
 export function setLanguage(value) { language = value === 'en' ? 'en' : 'zh-CN' }
 export function currentLanguage() { return language }
 export function t(source, ...values) {

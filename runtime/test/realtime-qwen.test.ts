@@ -16,6 +16,8 @@ import {
 } from '../src/realtime/qwen.js'
 import { ItemDeliveryUncertainError, type RealtimeProviderEvent } from '../src/realtime/protocol.js'
 import { RealtimeProviderSession } from '../src/realtime/provider-session.js'
+import {createOpenAIWireProfile} from '../src/realtime/openai-wire-profile.js'
+import {createStepFunWireProfile} from '../src/realtime/integrated-wire-profile.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -150,6 +152,36 @@ test('connect performs the Qwen handshake and never logs the credential', async 
   assert.equal(session.instructions, FRONTEND_INSTRUCTIONS)
   // A credential must never ride along inside the session payload.
   assert.doesNotMatch(JSON.stringify(update), /secret-key-value/u)
+})
+
+test('StepFun profile uses the shared lifecycle with its own session and PCM boundary', async () => {
+  const scripted = scriptedSocket([...handshake])
+  const adapter = adapterFor(scripted, {model: 'stepaudio-3-realtime-preview', voice: '',
+    wireProfile: createStepFunWireProfile()})
+  await adapter.connect({tools: [{type: 'function', name: 'lookup', description: 'Look up',
+    parameters: {type: 'object', properties: {}}}], signal: new AbortController().signal})
+  const update = scripted.sent.find(frame => frame.type === 'session.update')
+  assert.ok(update)
+  const session = update.session as Record<string, unknown>
+  assert.deepEqual(session.turn_detection, {type: 'server_vad', prefix_padding_ms: 500})
+  assert.equal(session.input_audio_format, 'pcm16')
+  assert.deepEqual(session.tools, [{type: 'function', function: {name: 'lookup',
+    description: 'Look up', parameters: {type: 'object', properties: {}}}}])
+  await adapter.sendAudio(new Uint8Array(new Int16Array([0, 600, 1200, 1800]).buffer),
+    new AbortController().signal)
+  const append = scripted.sent.find(frame => frame.type === 'input_audio_buffer.append')
+  assert.ok(append)
+  assert.equal(Buffer.from(append.audio as string, 'base64').byteLength, 10)
+  const events = adapter.events(new AbortController().signal)[Symbol.asyncIterator]()
+  const next = events.next()
+  scripted.push({type: 'response.audio.delta', response_id: 'r1',
+    delta: Buffer.from(new Int16Array([0, 600, 1200, 1800]).buffer).toString('base64')})
+  const received = await next
+  assert.equal(received.done, false)
+  assert.equal(received.value?.kind, 'response_audio_delta')
+  if (received.value?.kind === 'response_audio_delta') assert.equal(received.value.pcm.byteLength, 8)
+  await events.return?.(undefined)
+  await adapter.close()
 })
 
 test('connect-time response adaptation ACK starts the reader without blocking later events', async () => {
@@ -400,7 +432,7 @@ test('a host response disables tools and targets only the injected fact', async 
     response: {
       modalities: ['audio', 'text'],
       tool_choice: 'none',
-      instructions: 'Nova Audio Agent host 已注入一条新事实。只转述最后一条尚未转述的 host 事实一次；不得调用工具，不得重复更早的提交、启动、进度或确认结果。',
+      instructions: 'Nova Personal Agent host 已注入一条新事实。只转述最后一条尚未转述的 host 事实一次；不得调用工具，不得重复更早的提交、启动、进度或确认结果。',
     },
   })
 
@@ -937,9 +969,9 @@ test('a transport close surfaces a recoverable disconnect', async () => {
   stop.abort()
 })
 
-test('a cancel with no active response becomes response_cancel_rejected', async () => {
+for(const vendor of ['qwen','openai'] as const) test(`${vendor} cancel rejection retains request identity`, async () => {
   const scripted = scriptedSocket([...handshake])
-  const adapter = adapterFor(scripted)
+  const adapter = adapterFor(scripted,vendor==='openai'?{wireProfile:createOpenAIWireProfile()}:{})
   await adapter.connect({tools: [], signal: new AbortController().signal})
   const stop = new AbortController()
 
@@ -951,8 +983,8 @@ test('a cancel with no active response becomes response_cancel_rejected', async 
   scripted.push({
     type: 'error',
     error: {
-      code: 'invalid_value',
-      message: '  Conversation has no active response. ',
+      code: vendor==='openai'?'response_cancel_not_active':'invalid_value',
+      message: vendor==='openai'?'任意服务端文案':'  Conversation has no active response. ',
       event_id: cancelRequestId,
     },
   })
@@ -1421,6 +1453,56 @@ test('Qwen realtime close without request has no usage; dispatched response miss
   assert.equal(reports[0]?.status, 'missing')
 })
 
+test('integrated restore confirms read-only history once and never triggers a new response', async () => {
+  const scripted=scriptedSocket(handshake)
+  const adapter=adapterFor(scripted)
+  const signal=new AbortController().signal
+  try {
+    await adapter.connect({tools:[],signal})
+    assert(typeof adapter.restoreHistory==='function')
+    const restored=adapter.restoreHistory([{user:'old question',assistant:'old delivered answer'}],signal)
+    await new Promise<void>(resolve=>setImmediate(resolve))
+    const create=scripted.sent.find(frame=>frame.type==='conversation.item.create')
+    assert(create)
+    const item=create.item as {id:string;role:string;content:unknown[]}
+    assert.equal(item.role,'system')
+    assert.match(JSON.stringify(item.content),/只读的历史对话数据/u)
+    assert.match(JSON.stringify(item.content),/old delivered answer/u)
+    await assert.rejects(adapter.ensureResponse(signal))
+    scripted.push({type:'conversation.item.created',item:{id:item.id}})
+    await restored
+    assert.equal(scripted.sent.some(frame=>frame.type==='response.create'),false)
+    await assert.rejects(adapter.restoreHistory([{user:'replace',assistant:'bad'}],signal))
+  }finally{await adapter.close()}
+})
+
+test('integrated history abort closes partial replay and over-budget history sends nothing', async () => {
+  const scripted=scriptedSocket(handshake),adapter=adapterFor(scripted)
+  const controller=new AbortController()
+  try {
+    await adapter.connect({tools:[],signal:controller.signal})
+    await assert.rejects(adapter.restoreHistory([{user:'u'.repeat(3000),assistant:'a'.repeat(3000)}],controller.signal),/budget/u)
+    assert.equal(scripted.sent.some(frame=>frame.type==='conversation.item.create'),false)
+    const restoring=adapter.restoreHistory([{user:'question',assistant:'answer'}],controller.signal)
+    const rejected=assert.rejects(restoring)
+    await new Promise<void>(resolve=>setImmediate(resolve));controller.abort()
+    await rejected
+    await assert.rejects(adapter.ensureResponse(new AbortController().signal))
+  }finally{await adapter.close()}
+})
+
+test('integrated constructor history gates connect until the read-only item is confirmed',async()=>{
+  const scripted=scriptedSocket(handshake),adapter=adapterFor(scripted,{history:[{user:'saved question',assistant:'saved answer'}]})
+  try {
+    let connected=false
+    const connecting=adapter.connect({tools:[],signal:new AbortController().signal}).then(()=>{connected=true})
+    await new Promise<void>(resolve=>setImmediate(resolve))
+    assert.equal(connected,false)
+    const item=scripted.sent.find(frame=>frame.type==='conversation.item.create')?.item as {id:string}|undefined
+    assert(item);scripted.push({type:'conversation.item.created',item:{id:item.id}})
+    await connecting;assert.equal(connected,true)
+  }finally{await adapter.close()}
+})
 for (const model of ['qwen3.5-omni-flash-realtime', 'qwen3.5-omni-plus-realtime']) {
   test(`${model} uses Omni session settings`, async () => {
     const scripted = scriptedSocket([...handshake])
@@ -1463,4 +1545,26 @@ test('language selected during provider handshake reaches the connected session'
   assert.equal(scripted.sent.length, 2)
   assert.match(String((scripted.sent[1]?.session as Record<string, unknown>).instructions), /^You are Nova/)
   await adapter.close()
+})
+
+
+test('OpenAI GA item added confirms host delivery and playback truncates the exact audio item',async()=>{
+  const scripted=scriptedSocket([...handshake])
+  const adapter=adapterFor(scripted,{wireProfile:createOpenAIWireProfile(),model:'gpt-realtime-2.1-mini',voice:'marin'})
+  const signal=new AbortController().signal
+  await adapter.connect({tools:[],signal})
+  const injection=adapter.injectHostItem({kind:'final',host_item_id:'fact',event_id:'event',call_id:null,content:'done'},{confirmationTimeout:1,asUserActivation:false,signal})
+  await until(()=>scripted.sent.some(frame=>frame.type==='conversation.item.create'))
+  const id=(scripted.sent.find(frame=>frame.type==='conversation.item.create')!.item as {id:string}).id
+  scripted.push({type:'conversation.item.added',item:{id}})
+  assert.equal((await injection).provider_item_id,id)
+  scripted.push({type:'response.created',response:{id:'r'}})
+  scripted.push({type:'response.output_audio.delta',response_id:'r',item_id:'audio-item',content_index:0,delta:Buffer.alloc(4800).toString('base64')})
+  for await(const event of adapter.events(signal)){if(event.kind==='response_audio_delta')break}
+  await adapter.reportPlayback({response_id:'r',played_ms:40,disposition:'interrupted'},signal)
+  assert.deepEqual(scripted.sent.at(-1),{event_id:scripted.sent.at(-1)!.event_id,type:'conversation.item.truncate',item_id:'audio-item',content_index:0,audio_end_ms:40})
+  const count=scripted.sent.length
+  await adapter.reportPlayback({response_id:'r',played_ms:40,disposition:'interrupted'},signal)
+  assert.equal(scripted.sent.length,count)
+  await adapter.close();scripted.end()
 })

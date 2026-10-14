@@ -23,6 +23,7 @@ export {
   type CodexTransportCode,
   type RunInput,
   type SafePreflightReport,
+  type CodingPreflightReport,
   type SteerInput,
   type SteerTransportResult,
   type TransportDeadline,
@@ -36,7 +37,6 @@ export {
   CodexCredentialError,
   type CredentialSnapshot,
 } from './credential-snapshot.js'
-export * from './jsonl.js'
 export * from './protocol.js'
 export * from './turn-projection.js'
 export * from './adapter-live.js'

@@ -22,7 +22,7 @@ const runtimeBuild = spawnSync(process.execPath, [
   'run',
   'build',
   '--workspace',
-  '@nova-audio-agent/runtime',
+  '@nova-personal-agent/runtime',
 ], {
   cwd: root,
   encoding: 'utf8',
@@ -62,6 +62,15 @@ await stageEndpointingProbeAssets({
   repositoryRoot: resolve(root, '../..'),
   outputRoot: resolve(root, 'build'),
 })
+if (process.platform === 'darwin') {
+  await mkdir(resolve(root, 'build/native'), {recursive:true})
+  const gui = spawnSync('/usr/bin/swiftc', ['-parse-as-library', resolve(root,'native/macos_gui.swift'), '-O', '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macosx14.0`, '-module-cache-path', resolve(root,'build/swift-cache'), '-o', resolve(root,'build/native/macos_gui')], {encoding:'utf8'})
+  assert.equal(gui.status,0,gui.stderr)
+  const calendar = spawnSync('/usr/bin/swiftc', ['-parse-as-library', resolve(root,'native/macos_calendar.swift'), '-O', '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macosx12.0`, '-framework', 'EventKit', '-module-cache-path', resolve(root,'build/swift-cache'), '-o', resolve(root,'build/native/macos_calendar')], {encoding:'utf8'})
+  assert.equal(calendar.status,0,calendar.stderr)
+  const mail = spawnSync('/usr/bin/swiftc', ['-parse-as-library', resolve(root,'native/macos_mail.swift'), '-O', '-target', `${process.arch === 'arm64' ? 'arm64' : 'x86_64'}-apple-macosx12.0`, '-framework', 'ScriptingBridge', '-framework', 'Carbon', '-module-cache-path', resolve(root,'build/swift-cache'), '-o', resolve(root,'build/native/macos_mail')], {encoding:'utf8'})
+  assert.equal(mail.status,0,mail.stderr)
+}
 const sourceManifest = await generateSourceHostResourceManifest({
   resourcesRoot: resolve(root, 'build'),
   targetId,
@@ -110,4 +119,4 @@ if (process.platform === 'darwin') {
   assert.equal(native.status, 0, native.stderr)
 }
 
-process.stdout.write('nova-audio-agent-desktop build validation passed\n')
+process.stdout.write('nova-personal-agent-desktop build validation passed\n')

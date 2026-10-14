@@ -676,7 +676,7 @@ function localReferenceTarget(reference: string, root: Record<string, unknown>):
 }
 
 export interface EffectiveCodexConfigReport {
-  readonly default_permissions: 'nova_audio_agent' | null
+  readonly default_permissions: 'nova_personal_agent' | null
   readonly filesystem: 'workspace_only' | 'full_access'
   readonly network: 'blocked' | 'unrestricted'
   readonly web_search: 'disabled'
@@ -720,7 +720,7 @@ export function validateEffectiveCodexConfig(
       throw new TypeError('approval')
     }
     if (yolo ? config.default_permissions !== null && config.default_permissions !== undefined
-      : config.default_permissions !== 'nova_audio_agent') throw new TypeError('permissions')
+      : config.default_permissions !== 'nova_personal_agent') throw new TypeError('permissions')
     if (config.web_search !== 'disabled') throw new TypeError('web')
     if (config.cwd !== undefined && (
       typeof config.cwd !== 'string' || resolve(config.cwd) !== resolve(workspace)
@@ -732,8 +732,8 @@ export function validateEffectiveCodexConfig(
         throw new TypeError('permission profiles')
       }
     } else {
-      if (!options.sharedHome && !exactKeys(permissions, ['nova_audio_agent'])) throw new TypeError('permission profiles')
-      const profile = requireObject(permissions.nova_audio_agent)
+      if (!options.sharedHome && !exactKeys(permissions, ['nova_personal_agent'])) throw new TypeError('permission profiles')
+      const profile = requireObject(permissions.nova_personal_agent)
       if (!requiredKeysWithNullExtras(profile, ['filesystem', 'network'])) throw new TypeError('profile')
       const filesystem = requireObject(profile.filesystem)
       if (!requiredKeysWithNullExtras(filesystem, [':root', ':workspace_roots'])) {
@@ -787,7 +787,7 @@ export function validateEffectiveCodexConfig(
       && replacement !== undefined
       && (typeof replacement !== 'string' || replacement === '')) throw new TypeError('instructions')
     return deepFreeze({
-      default_permissions: yolo ? null : 'nova_audio_agent',
+      default_permissions: yolo ? null : 'nova_personal_agent',
       filesystem: yolo ? 'full_access' : 'workspace_only',
       network: yolo ? 'unrestricted' : 'blocked',
       web_search: 'disabled',

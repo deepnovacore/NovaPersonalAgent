@@ -1,4 +1,5 @@
 import {parseCapabilityRegistry, type CapabilityRegistry} from './capability-registry.js'
+import {CODING_BACKEND_IDS} from './coding-backends.js'
 import { z } from 'zod'
 import { stripLikePython } from '../text/python-text.js'
 import {supportsVision} from '../model/vision-capability.js'
@@ -6,11 +7,11 @@ import {supportsVision} from '../model/vision-capability.js'
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
 const promptLanguageSchema = z.enum(['zh-CN', 'en'])
-const integratedProviderNameSchema = z.enum(['qwen'])
+const integratedProviderNameSchema = z.enum(['qwen', 'stepfun', 'openai', 'gemini'])
 const cascadedEndpointingProviderNameSchema = z.enum(['auto'])
-const cascadedAsrProviderNameSchema = z.enum(['volcengine'])
-const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark', 'deepseek'])
-const cascadedTtsProviderNameSchema = z.enum(['volcengine'])
+const cascadedAsrProviderNameSchema = z.enum(['volcengine', 'gemini', 'self-hosted'])
+const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted'])
+const cascadedTtsProviderNameSchema = z.enum(['volcengine', 'gemini', 'self-hosted'])
 const qwenGuardHistoryRecoverySchema = z.enum(['none', 'packed'])
 const qwenGuardHistoryPairsSchema = z.union([z.literal(1), z.literal(2), z.literal(4)])
 /** Validity of a name is decided by assembly (`resolveExecutors`), which knows the registered adapters. */
@@ -25,29 +26,56 @@ const searchProviderSchema = z.enum(['mcp', 'tavily'])
 const volcFloatSchema = z.custom<number>(value => typeof value === 'number')
 export const DASHSCOPE_COMPATIBLE_BASE_URL =
   'https://dashscope.aliyuncs.com/compatible-mode/v1'
+export const STEPFUN_COMPATIBLE_BASE_URL = 'https://api.stepfun.com/v1'
+export const OPENAI_BASE_URL = 'https://api.openai.com/v1'
+export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
+const STEPFUN_SUPPORT_MODEL = 'step-3.7-flash'
 
 export const settingsSchema = z.object({
   model_base_url: z.url().default(DASHSCOPE_COMPATIBLE_BASE_URL),
   model_api_key: z.string().nullable().default(null),
+  openrouter_api_key: z.string().nullable().default(null),
   tavily_api_key: z.string().nullable().default(null),
   fast_model: z.string().default('qwen3-vl-plus'),
   watch_model: z.string().nullable().default(null),
   conversation_vision_enabled: z.boolean().default(false),
   monitor_camera_device_id: z.string().max(256).refine(value => !/[\x00-\x1f]/u.test(value)).default(''),
-  surrogate_model: z.string().default('qwen-plus'),
+  support_model: z.string().default('qwen-plus'),
   compressor_model: z.string().default('qwen-flash'),
   language: promptLanguageSchema.default('zh-CN'),
+  news_language: promptLanguageSchema.default('en'),
   pipeline_mode: pipelineModeSchema.default('integrated'),
   integrated_provider: integratedProviderNameSchema.default('qwen'),
   cascade_endpointing_provider: cascadedEndpointingProviderNameSchema.default('auto'),
   cascade_asr_provider: cascadedAsrProviderNameSchema.default('volcengine'),
   cascade_llm_provider: cascadedLlmProviderNameSchema.default('deepseek'),
   cascade_llm_model: z.string().nullable().default(null),
+  self_hosted_asr_url: z.string().default(''),
+  self_hosted_llm_base_url: z.string().default(''),
+  self_hosted_tts_url: z.string().default(''),
+  self_hosted_asr_api_key: z.string().nullable().default(null),
+  self_hosted_llm_api_key: z.string().nullable().default(null),
+  self_hosted_tts_api_key: z.string().nullable().default(null),
   cascade_tts_provider: cascadedTtsProviderNameSchema.default('volcengine'),
   camera_module_enabled: z.boolean().default(true),
   qwen_realtime_url: z.string().default('wss://dashscope.aliyuncs.com/api-ws/v1/realtime'),
   qwen_realtime_model: z.string().default('qwen-audio-3.0-realtime-plus'),
   qwen_realtime_voice: z.string().default('longanqian'),
+  stepfun_realtime_url: z.string().default('wss://api.stepfun.com/v1/realtime'),
+  stepfun_realtime_model: z.string().default('stepaudio-3-realtime-preview'),
+  stepfun_realtime_voice: z.string().default(''),
+  openai_api_key: z.string().nullable().default(null),
+  gemini_api_key: z.string().nullable().default(null),
+  gemini_asr_model: z.string().default('gemini-3.5-flash'),
+  gemini_tts_model: z.string().default('gemini-3.8-flash-tts'),
+  gemini_tts_voice: z.string().default('Kore'),
+  openai_realtime_url: z.string().default('wss://api.openai.com/v1/realtime'),
+  openai_realtime_model: z.string().default('gpt-realtime-2.1-mini'),
+  openai_realtime_voice: z.string().default('marin'),
+  gemini_realtime_url: z.string().default('wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent'),
+  gemini_realtime_model: z.string().default('gemini-3.8-live'),
+  gemini_realtime_voice: z.string().default('Kore'),
+  stepfun_api_key: z.string().nullable().default(null),
   dashscope_api_key: z.string().nullable().default(null),
   ark_api_key: z.string().nullable().default(null),
   deepseek_api_key: z.string().nullable().default(null),
@@ -60,6 +88,10 @@ export const settingsSchema = z.object({
     'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel',
   ),
   doubao_asr_resource_id: z.string().default('volc.seedasr.sauc.duration'),
+  doubao_asr_voiceprint_enabled: z.boolean().default(false),
+  doubao_asr_voiceprint_id: z.string().default(''),
+  doubao_asr_voiceprint_name: z.string().default(''),
+  doubao_asr_voiceprint_health_url: z.string().default(''),
   doubao_asr_chunk_ms: z.number().int().default(200),
   doubao_tts_endpoint: z.string().default(
     'wss://openspeech.bytedance.com/api/v3/tts/bidirection',
@@ -78,6 +110,8 @@ export const settingsSchema = z.object({
   qwen_guard_history_pairs: qwenGuardHistoryPairsSchema.default(4),
   executor: executorNameSchema.nullable().default(null),
   executors: z.array(executorNameSchema),
+  /** Backend for new coding sessions; existing sessions keep their bound backend. */
+  coding_backend: z.enum(CODING_BACKEND_IDS).default('codex'),
   codex_workspace: z.string().nullable().default(null),
   codex_bin: z.string().default('codex'),
   codex_prefix_args: z.array(z.string().min(1).max(32_768)).max(1).default([]),
@@ -96,7 +130,6 @@ export const settingsSchema = z.object({
   generate_plan: z.boolean().default(true),
   planner_model: z.string().default(''),
   progress_bubbles: progressBubblesSchema.default('milestones'),
-  capabilities_config_path: z.string().default('~/.nova-audio-agent/capabilities.json'),
   search_provider: searchProviderSchema.default('tavily'),
   search_mcp_url: z.string().default(''),
   search_mcp_tool: z.string().default('web_search'),
@@ -105,12 +138,18 @@ export const settingsSchema = z.object({
   embedding_model: z.string().default('text-embedding-v4'),
   blackboard_path: z.string().min(1).default('~/.nova-audio-agent/blackboard.sqlite'),
   blackboard_owner_id: z.string().min(1).max(512).default('local'),
+  memory_prerecall_enabled: z.boolean().default(false),
+  memory_consolidation_enabled: z.boolean().default(true),
+  memory_consolidation_hour: z.number().int().min(0).max(23).default(0),
+  memory_consolidation_timezone: z.string().refine(value=>{try{new Intl.DateTimeFormat('en',{timeZone:value});return true}catch{return false}},'invalid timezone').default('UTC'),
   memory_connection: memoryConnectionSchema.default('local'),
   memory_provider: z.enum(['voicemem', 'mem0']).nullable().default(null),
   memory_url: z.string().default(''),
   memory_token: z.string().nullable().default(null),
   memory_path: z.string().min(1).default('~/.nova-audio-agent/memory.sqlite'),
   memory_user_id: z.string().min(1).default('local'),
+  // Existing v0.3 ledger location; the retired workspace graph is not enabled.
+  workspace_graph_path: z.string().min(1).default('~/.nova-audio-agent/workspace-graph.sqlite'),
 }).strict()
 
 export type Settings = z.infer<typeof settingsSchema>
@@ -152,10 +191,10 @@ export interface VolcengineRealtimeConfig {
 
 export interface CascadedSelection {
   readonly endpointingProvider: 'auto'
-  readonly asrProvider: 'volcengine'
-  readonly llmProvider: 'qwen' | 'ark' | 'deepseek'
+  readonly asrProvider: CascadedAsrProviderName
+  readonly llmProvider: CascadedLlmProviderName
   readonly llmModel: string
-  readonly ttsProvider: 'volcengine'
+  readonly ttsProvider: CascadedTtsProviderName
 }
 
 export interface CascadedCredentials {
@@ -213,7 +252,17 @@ export class BlockingConfigurationError extends ConfigurationError {
   }
 }
 
-export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Settings {
+/** Environment names that were renamed without an alias; the old name is ignored, so its presence deserves a startup warning. */
+export const RENAMED_ENVIRONMENT: Readonly<Record<string, string>> = {SURROGATE_MODEL: 'SUPPORT_MODEL'}
+
+/** One `[config-warning]` line per renamed variable still set in the environment. */
+export function renamedEnvironmentWarnings(environment: NodeJS.ProcessEnv): readonly string[] {
+  return Object.entries(RENAMED_ENVIRONMENT)
+    .filter(([removed]) => environment[removed] !== undefined)
+    .map(([removed, current]) => `[config-warning] ${removed} is no longer read; rename it to ${current}`)
+}
+
+export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textConversations = false): Settings {
   const pipelineMode = parsePipelineMode(environment.PIPELINE_MODE)
   const integratedProvider = pipelineMode === 'integrated'
     ? parseIntegratedProvider(environment.INTEGRATED_PROVIDER)
@@ -233,33 +282,71 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     ? null
     : configuredExecutor
   const executors = parseExecutors(environment.EXECUTORS, configuredExecutor ?? '')
+  // StepFun support chat defaults to its own model. fast_model keeps its DashScope default
+  // because local memory extraction reaches it through the DashScope embedding connection;
+  // an empty watch or planner model would fall back to it, so empty counts as unset there.
+  const stepfunSupport = !textConversations && integratedProvider === 'stepfun'
+    && (optionalSecret(environment.MODEL_API_KEY) ?? '').trim() === ''
+  const supportDefault = (value: string | undefined): string | undefined =>
+    value ?? (stepfunSupport ? STEPFUN_SUPPORT_MODEL : !textConversations && !(environment.MODEL_API_KEY ?? '').trim() && integratedProvider === 'openai' ? 'gpt-6-luna' : !textConversations && !(environment.MODEL_API_KEY ?? '').trim() && integratedProvider === 'gemini' ? 'gemini-3.5-flash-lite' : undefined)
   const candidate = {
+    coding_backend: optionalString(environment.CODING_BACKEND),
+    self_hosted_asr_url: optionalString(environment.SELF_HOSTED_ASR_URL),
+    self_hosted_llm_base_url: optionalString(environment.SELF_HOSTED_LLM_BASE_URL),
+    self_hosted_tts_url: optionalString(environment.SELF_HOSTED_TTS_URL),
+    self_hosted_asr_api_key: optionalSecret(environment.SELF_HOSTED_ASR_API_KEY),
+    self_hosted_llm_api_key: optionalSecret(environment.SELF_HOSTED_LLM_API_KEY),
+    self_hosted_tts_api_key: optionalSecret(environment.SELF_HOSTED_TTS_API_KEY),
+
+    openai_api_key: optionalSecret(environment.OPENAI_API_KEY),
+    gemini_api_key: optionalSecret(environment.GEMINI_API_KEY),
+    gemini_asr_model: optionalString(environment.GEMINI_ASR_MODEL),
+    gemini_tts_model: optionalString(environment.GEMINI_TTS_MODEL),
+    gemini_tts_voice: optionalString(environment.GEMINI_TTS_VOICE),
+    openai_realtime_url: optionalString(environment.OPENAI_REALTIME_URL),
+    openai_realtime_model: optionalString(environment.OPENAI_REALTIME_MODEL),
+    openai_realtime_voice: optionalString(environment.OPENAI_REALTIME_VOICE),
+    gemini_realtime_url: optionalString(environment.GEMINI_REALTIME_URL),
+    gemini_realtime_model: optionalString(environment.GEMINI_REALTIME_MODEL),
+    gemini_realtime_voice: optionalString(environment.GEMINI_REALTIME_VOICE),
     model_base_url: optionalString(environment.MODEL_BASE_URL),
     model_api_key: optionalSecret(environment.MODEL_API_KEY),
+    openrouter_api_key: optionalSecret(environment.OPENROUTER_API_KEY),
     tavily_api_key: optionalSecret(environment.TAVILY_API_KEY),
     fast_model: rawEnvironmentValue(environment.FAST_MODEL),
-    watch_model: rawEnvironmentValue(environment.WATCH_MODEL),
+    watch_model: supportDefault(emptyAsUnset(rawEnvironmentValue(environment.WATCH_MODEL))),
     ...(supportsVision('qwen', environment.WATCH_MODEL ?? '')
+      || environment.MEMORY_CONNECTION?.trim() === 'local'
       ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
     ...(supportsVision('ark', environment.WATCH_MODEL ?? '')
       ? {ark_api_key: optionalSecret(environment.ARK_API_KEY),
           volcengine_ark_base_url: rawEnvironmentValue(environment.VOLCENGINE_ARK_BASE_URL)} : {}),
     conversation_vision_enabled: optionalBoolean(environment.CONVERSATION_VISION_ENABLED),
     monitor_camera_device_id: optionalString(environment.MONITOR_CAMERA_DEVICE_ID),
-    surrogate_model: rawEnvironmentValue(environment.SURROGATE_MODEL),
-    compressor_model: rawEnvironmentValue(environment.COMPRESSOR_MODEL),
+    support_model: supportDefault(rawEnvironmentValue(environment.SUPPORT_MODEL)),
+    compressor_model: supportDefault(rawEnvironmentValue(environment.COMPRESSOR_MODEL)),
     language: parsePromptLanguageSetting(environment.PROMPT_LANGUAGE),
+    news_language: parseSelector(promptLanguageSchema, environment.NEWS_LANGUAGE, 'en', 'NEWS_LANGUAGE'),
     pipeline_mode: pipelineMode,
     camera_module_enabled: optionalBoolean(
       environment.CAMERA_MODULE_ENABLED,
     ),
     ...(pipelineMode === 'integrated' ? {
+      ...(textConversations ? {cascade_llm_provider: parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER),
+        cascade_llm_model: rawEnvironmentValue(environment.CASCADE_LLM_MODEL),
+        ark_api_key: optionalSecret(environment.ARK_API_KEY), deepseek_api_key: optionalSecret(environment.DEEPSEEK_API_KEY),
+        volcengine_ark_base_url: rawEnvironmentValue(environment.VOLCENGINE_ARK_BASE_URL)} : {}),
       integrated_provider: integratedProvider,
       qwen_realtime_url: optionalString(environment.QWEN_REALTIME_URL),
       qwen_realtime_model: optionalString(environment.QWEN_REALTIME_MODEL),
       qwen_realtime_voice: optionalString(environment.QWEN_REALTIME_VOICE)
-        ?? (environment.QWEN_REALTIME_MODEL?.startsWith('qwen3.5-omni-') ? 'Ethan' : undefined),
+        ?? (environment.QWEN_REALTIME_MODEL?.startsWith('qwen3.5-omni-') ? 'Ethan'
+          : environment.QWEN_REALTIME_MODEL === 'qwen-audio-3.1-realtime-plus' ? 'longanqian_v3.1' : undefined),
       dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY),
+      stepfun_realtime_url: optionalString(environment.STEPFUN_REALTIME_URL),
+      stepfun_realtime_model: optionalString(environment.STEPFUN_REALTIME_MODEL),
+      stepfun_realtime_voice: optionalString(environment.STEPFUN_REALTIME_VOICE),
+      stepfun_api_key: optionalSecret(environment.STEPFUN_API_KEY),
       qwen_controlled_guard_reconnect: optionalBoolean(
         environment.QWEN_CONTROLLED_GUARD_RECONNECT,
       ),
@@ -289,6 +376,10 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
       doubao_asr_resource_id: rawEnvironmentValue(
         environment.DOUBAO_ASR_RESOURCE_ID,
       ),
+      doubao_asr_voiceprint_enabled: optionalBoolean(environment.DOUBAO_ASR_VOICEPRINT_ENABLED),
+      doubao_asr_voiceprint_id: rawEnvironmentValue(environment.DOUBAO_ASR_VOICEPRINT_ID),
+      doubao_asr_voiceprint_name: rawEnvironmentValue(environment.DOUBAO_ASR_VOICEPRINT_NAME),
+      doubao_asr_voiceprint_health_url: rawEnvironmentValue(environment.DOUBAO_ASR_VOICEPRINT_HEALTH_URL),
       doubao_asr_chunk_ms: optionalPydanticInteger(
         environment.DOUBAO_ASR_CHUNK_MS,
       ),
@@ -333,11 +424,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     ),
     plan_readback: parsePlanReadback(environment.PLAN_READBACK),
     generate_plan: optionalBoolean(environment.GENERATE_PLAN),
-    planner_model: optionalString(environment.PLANNER_MODEL),
+    planner_model: supportDefault(emptyAsUnset(optionalString(environment.PLANNER_MODEL))),
     progress_bubbles: parseProgressBubbles(environment.PROGRESS_BUBBLES),
-    capabilities_config_path: optionalString(
-      environment.CAPABILITIES_CONFIG,
-    ),
     search_provider: parseSearchProvider(environment.SEARCH_PROVIDER),
     search_mcp_url: optionalString(environment.SEARCH_MCP_URL),
     search_mcp_tool: optionalString(environment.SEARCH_MCP_TOOL),
@@ -348,6 +436,10 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     embedding_model: optionalString(environment.EMBEDDING_MODEL),
     blackboard_path: optionalString(environment.BLACKBOARD_PATH),
     blackboard_owner_id: optionalString(environment.BLACKBOARD_OWNER_ID),
+    memory_prerecall_enabled: optionalBoolean(environment.MEMORY_PRERECALL_ENABLED),
+    memory_consolidation_enabled: optionalBoolean(environment.MEMORY_CONSOLIDATION_ENABLED),
+    memory_consolidation_hour: optionalPydanticInteger(environment.MEMORY_CONSOLIDATION_HOUR),
+    memory_consolidation_timezone: environment.MEMORY_CONSOLIDATION_TIMEZONE,
     memory_connection: optionalString(environment.MEMORY_CONNECTION),
     ...((optionalString(environment.MEMORY_CONNECTION) ?? 'local') === 'local'
       ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
@@ -356,6 +448,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env): Sett
     memory_token: optionalSecret(environment.MEMORY_TOKEN),
     memory_path: optionalString(environment.MEMORY_PATH),
     memory_user_id: optionalString(environment.MEMORY_USER_ID),
+    workspace_graph_path: optionalString(environment.MEMORY_LEDGER_PATH) ?? optionalString(environment.WORKSPACE_GRAPH_PATH),
   }
   const withoutUndefined = Object.fromEntries(
     Object.entries(candidate).filter(([, value]) => value !== undefined),
@@ -398,7 +491,7 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
   if (stripLikePython(resolveModelApiKey(settings) ?? '') === '') return null
   return Object.freeze({
     connection: 'local',
-    provider: settings.memory_provider ?? 'mem0',
+    provider: settings.memory_provider ?? 'voicemem',
     path: requiredSetting(settings.memory_path, 'MEMORY_PATH'),
     userId: requiredSetting(settings.memory_user_id, 'MEMORY_USER_ID'),
     extractionModel: requiredSetting(settings.fast_model, 'FAST_MODEL'),
@@ -441,6 +534,22 @@ export function requireQwenRealtime(settings: Settings): QwenRealtimeConfig {
 }
 
 export function requireIntegratedRealtime(settings: Settings): QwenRealtimeConfig {
+  const provider = settings.integrated_provider
+  if (provider === 'openai' || provider === 'gemini') return Object.freeze({
+    url: secureEndpoint(settings[`${provider}_realtime_url`], 'wss', `${provider.toUpperCase()}_REALTIME_URL`),
+    model: requiredSetting(settings[`${provider}_realtime_model`], `${provider.toUpperCase()}_REALTIME_MODEL`),
+    voice: requiredSetting(settings[`${provider}_realtime_voice`], `${provider.toUpperCase()}_REALTIME_VOICE`),
+    apiKey: requiredCredential(settings[`${provider}_api_key`], `${provider.toUpperCase()}_API_KEY`),
+  })
+  if (settings.integrated_provider === 'stepfun') {
+    const url = secureEndpoint(settings.stepfun_realtime_url, 'wss', 'STEPFUN_REALTIME_URL')
+    const model = stripLikePython(settings.stepfun_realtime_model)
+    const voice = stripLikePython(settings.stepfun_realtime_voice)
+    const apiKey = stripLikePython(settings.stepfun_api_key ?? '')
+    if (model === '') throw new ConfigurationError('STEPFUN_REALTIME_MODEL 不能为空')
+    if (apiKey === '') throw new ConfigurationError('缺少 STEPFUN_API_KEY')
+    return Object.freeze({url, model, voice, apiKey})
+  }
   const url = secureEndpoint(
     settings.qwen_realtime_url,
     'wss',
@@ -473,6 +582,10 @@ export function resolveModelApiKey(settings: Settings): string | null {
 /** Preset monitor models keep their credential on their own provider endpoint. */
 export function resolveWatchModelConnection(settings: Settings): {readonly baseUrl: string; readonly apiKey: string} | null {
   const model = stripLikePython(settings.watch_model ?? '')
+  if (supportsVision('stepfun', model)) return {
+    baseUrl: STEPFUN_COMPATIBLE_BASE_URL,
+    apiKey: requiredCredential(settings.stepfun_api_key, 'STEPFUN_API_KEY'),
+  }
   if (supportsVision('qwen', model)) return {
     baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
     apiKey: requiredCredential(settings.dashscope_api_key
@@ -516,24 +629,26 @@ export function withoutUncredentialedModules(registry: CapabilityRegistry, setti
 }
 
 /** Mirrors requireIntegratedRealtime and requireCascadedCredentials without throwing, for first-run guidance. */
-export function describeMissingBlockingCredentials(settings: Settings): {readonly pipeline: PipelineMode; readonly missing: readonly string[]} {
+export function describeMissingBlockingCredentials(settings: Settings, textConversations = false): {readonly pipeline: PipelineMode; readonly missing: readonly string[]} {
   const present = (value: string | null) => stripLikePython(value ?? '') !== ''
-  if (settings.pipeline_mode === 'integrated') {
+  if (!textConversations && settings.pipeline_mode === 'integrated') {
+    if (settings.integrated_provider === 'openai' || settings.integrated_provider === 'gemini') return {pipeline: 'integrated', missing: present(settings[`${settings.integrated_provider}_api_key`]) ? [] : [`${settings.integrated_provider.toUpperCase()}_API_KEY`]}
+    if (settings.integrated_provider === 'stepfun') return {pipeline: 'integrated', missing: present(settings.stepfun_api_key) ? [] : ['STEPFUN_API_KEY']}
     const compatibleGenericKey = settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null
     return {pipeline: 'integrated', missing: present(settings.dashscope_api_key) || present(compatibleGenericKey) ? [] : ['DASHSCOPE_API_KEY']}
   }
-  const llmField = settings.cascade_llm_provider === 'qwen'
-    ? 'dashscope_api_key' : settings.cascade_llm_provider === 'deepseek' ? 'deepseek_api_key' : 'ark_api_key'
-  return {pipeline: 'cascaded', missing: [
-    ...(present(settings[llmField]) ? [] : [configurationFieldName(llmField)]),
-    ...(present(settings.doubao_bigmodel_api_key) ? [] : ['DOUBAO_BIGMODEL_API_KEY']),
-  ]}
+  const llmField = cascadedCredentialField(settings.cascade_llm_provider)
+  return {pipeline: 'cascaded', missing: [...new Set([
+    ...(settings.cascade_llm_provider === 'self-hosted' || present(settings[llmField]) ? [] : [configurationFieldName(llmField)]),
+    ...(textConversations || settings.cascade_asr_provider === 'self-hosted' ? [] : settings.cascade_asr_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_asr_api_key) || present(settings.doubao_bigmodel_api_key) || settings.cascade_tts_provider === 'volcengine' ? [] : ['DOUBAO_ASR_API_KEY'])),
+    ...(textConversations || settings.cascade_tts_provider === 'self-hosted' ? [] : settings.cascade_tts_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
+  ])]}
 }
 
 /** Host preflight over a launch environment; other configuration errors stay the runtime's to report. */
-export function describeMissingBlockingEnvironment(environment: NodeJS.ProcessEnv): ReturnType<typeof describeMissingBlockingCredentials> | null {
+export function describeMissingBlockingEnvironment(environment: NodeJS.ProcessEnv, textConversations = false): ReturnType<typeof describeMissingBlockingCredentials> | null {
   try {
-    return describeMissingBlockingCredentials(loadSettings(environment))
+    return describeMissingBlockingCredentials(loadSettings(environment, textConversations), textConversations)
   } catch (error) {
     if (error instanceof ConfigurationError) return null
     throw error
@@ -569,10 +684,11 @@ export function resolveSupportModelConnection(
 }
 
 export function resolveCascadedSelection(settings: Settings): CascadedSelection {
+  if (settings.cascade_llm_provider === 'self-hosted' && !settings.cascade_llm_model?.trim()) throw new ConfigurationError('缺少 CASCADE_LLM_MODEL')
   const llmModel = settings.cascade_llm_model === null
     ? (settings.cascade_llm_provider === 'qwen'
       ? 'qwen-plus'
-      : settings.cascade_llm_provider === 'deepseek' ? 'deepseek-flash' : 'doubao-seed-2-0-pro-260215')
+      : settings.cascade_llm_provider === 'openai' ? 'gpt-6-luna' : settings.cascade_llm_provider === 'gemini' ? 'gemini-3.5-flash-lite' : settings.cascade_llm_provider === 'deepseek' ? 'deepseek-flash' : 'doubao-seed-2-0-pro-260215')
     : requiredSetting(settings.cascade_llm_model, 'CASCADE_LLM_MODEL')
   return Object.freeze({
     endpointingProvider: settings.cascade_endpointing_provider,
@@ -587,13 +703,10 @@ export function requireCascadedCredentials(
   settings: Settings,
   selection: CascadedSelection,
 ): CascadedCredentials {
-  const llmApiKey = selection.llmProvider === 'qwen'
-    ? requiredCredential(settings.dashscope_api_key, 'DASHSCOPE_API_KEY')
-    : selection.llmProvider === 'deepseek'
-      ? requiredCredential(settings.deepseek_api_key, 'DEEPSEEK_API_KEY')
-      : requiredCredential(settings.ark_api_key, 'ARK_API_KEY')
-  const ttsApiKey = requiredCredential(settings.doubao_bigmodel_api_key, 'DOUBAO_BIGMODEL_API_KEY')
-  const asrApiKey = stripLikePython(settings.doubao_asr_api_key ?? '') || ttsApiKey
+  const field = cascadedCredentialField(selection.llmProvider)
+  const llmApiKey = selection.llmProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_llm_api_key ?? '') : requiredCredential(settings[field], field.toUpperCase())
+  const ttsApiKey = selection.ttsProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_tts_api_key ?? '') : selection.ttsProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(settings.doubao_bigmodel_api_key, 'DOUBAO_BIGMODEL_API_KEY')
+  const asrApiKey = selection.asrProvider === 'self-hosted' ? stripLikePython(settings.self_hosted_asr_api_key ?? '') : selection.asrProvider === 'gemini' ? requiredCredential(settings.gemini_api_key, 'GEMINI_API_KEY') : requiredCredential(stripLikePython(settings.doubao_asr_api_key ?? '') || settings.doubao_bigmodel_api_key, 'DOUBAO_ASR_API_KEY')
   return Object.freeze({llmApiKey, asrApiKey, ttsApiKey})
 }
 
@@ -630,7 +743,7 @@ export function requireVolcengineRealtime(settings: Settings): VolcengineRealtim
     arkModel: requiredSetting(settings.volcengine_ark_model,
       'CASCADE_LLM_MODEL'),
     arkSupportModel: requiredSetting(settings.volcengine_ark_support_model,
-      'SURROGATE_MODEL'),
+      'SUPPORT_MODEL'),
     arkApiKey,
     asrEndpoint: secureEndpoint(settings.doubao_asr_endpoint, 'wss',
       'DOUBAO_ASR_ENDPOINT'),
@@ -857,6 +970,10 @@ function optionalPydanticFloat(value: string | undefined): number | string | und
   return Number.isNaN(parsed) && !/^[+-]?nan$/iu.test(normalized) ? value : parsed
 }
 
+function emptyAsUnset(value: string | undefined): string | undefined {
+  return value === '' ? undefined : value
+}
+
 function rawEnvironmentValue(value: string | undefined): string | undefined {
   return value
 }
@@ -907,6 +1024,7 @@ function configurationFieldName(field: string): string {
     doubao_asr_api_key: 'DOUBAO_ASR_API_KEY',
     doubao_bigmodel_api_key: 'DOUBAO_BIGMODEL_API_KEY',
     tavily_api_key: 'TAVILY_API_KEY',
+    openrouter_api_key: 'OPENROUTER_API_KEY',
   }
   return aliases[field] ?? field.toUpperCase()
 }
@@ -925,4 +1043,8 @@ export function capabilitiesFromSettings(settings: Settings): CapabilityRegistry
     ...(settings.search_provider !== 'tavily' || settings.tavily_api_key === null ? {} : {TAVILY_API_KEY: settings.tavily_api_key}),
     ...(settings.search_mcp_tool === 'web_search' ? {} : {SEARCH_MCP_TOOL: settings.search_mcp_tool}),
   }), settings)
+}
+
+export function cascadedCredentialField(provider: CascadedLlmProviderName): 'dashscope_api_key' | 'ark_api_key' | 'deepseek_api_key' | 'openai_api_key' | 'gemini_api_key' | 'self_hosted_llm_api_key' {
+  return provider === 'self-hosted' ? 'self_hosted_llm_api_key' : provider === 'qwen' ? 'dashscope_api_key' : `${provider}_api_key`
 }

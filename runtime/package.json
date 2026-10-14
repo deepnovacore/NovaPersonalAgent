@@ -1,6 +1,6 @@
 {
-  "name": "@nova-audio-agent/runtime",
-  "version": "0.2.3",
+  "name": "@nova-personal-agent/runtime",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -21,11 +21,17 @@
     }
   },
   "bin": {
-    "nova-audio-agent-node": "./dist/src/cli.js"
+    "nova-personal-agent-node": "./dist/src/cli.js"
   },
   "files": [
+    "scripts/autoglm-bridge.py",
+    "scripts/patch-pi-acp.mjs",
+    "scripts/patch-codebuddy-recovery.mjs",
+    "scripts/patch-acp-recovery.mjs",
     "dist/src",
-    "dist/eval"
+    "dist/eval",
+    "scripts/opencode-recovery.mjs",
+    "scripts/install-opencode-recovery.mjs"
   ],
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json",
@@ -39,8 +45,6 @@
     "lint": "eslint src eval test",
     "smoke:qwen": "npm run build && node scripts/live-smoke.mjs --target=qwen",
     "smoke:cascaded": "npm run build && node scripts/live-smoke.mjs --target=cascaded",
-    "smoke:qwen:clarification": "npm run build && node scripts/live-smoke.mjs --target=qwen-clarification-legacy",
-    "smoke:qwen:routing": "npm run build && node scripts/live-smoke.mjs --target=qwen-routing-legacy",
     "smoke:qwen:surrogate": "npm run build && node scripts/live-smoke.mjs --target=qwen-surrogate",
     "test": "npm run build && node --test dist/test/*.test.js",
     "test:win": "npm run build && node scripts/test-windows.mjs",
@@ -52,9 +56,14 @@
     "test:win:platform": "npm run build && node scripts/test-windows.mjs --platform-only"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.8.0",
+    "@computer-use/libnut": "4.2.0",
     "@livekit/agents": "1.6.4",
     "@livekit/local-inference": "0.2.7",
     "@livekit/rtc-node": "0.13.33",
+    "@midscene/computer": "1.12.9",
+    "@midscene/core": "1.12.9",
+    "@midscene/shared": "1.12.9",
     "@modelcontextprotocol/sdk": "1.30.0",
     "better-sqlite3": "12.11.1",
     "jszip": "3.10.1",
@@ -62,7 +71,9 @@
     "mem0ai": "3.2.0",
     "pdfjs-dist": "6.2.108",
     "pg": "8.11.3",
+    "playwright": "1.63.0",
     "qrcode": "1.5.4",
+    "saxes": "^6.0.0",
     "undici": "7.29.0",
     "voicemem": "0.0.1",
     "ws": "8.21.3",
@@ -70,6 +81,7 @@
   },
   "devDependencies": {
     "@types/node": "22.20.1",
-    "@types/ws": "8.18.1"
+    "@types/ws": "8.18.1",
+    "sharp": "0.35.3"
   }
 }

@@ -1,12 +1,31 @@
+import {feishuNotificationAdapter} from '../notifications/adapters/feishu.js';
+import {ClientServer} from '../server/client-server.js'
+import {ClientPairing} from '../server/client-pairing.js'
+import {loadServerConfig} from '../server/server-config.js'
+import {acceptanceCapabilityRegistry} from '../desktop/workbench-acceptance.js'
+import type {ProjectExecutorAdapter} from '../executors/coding-executor.js'
+import {MacMailClient} from '../connectors/macos/mail.js'
+import {MacCalendarClient} from '../connectors/macos/calendar.js'
+import {ComposioConnector} from '../connectors/composio/index.js'
+import {ComposioClient} from '../connectors/composio/client.js'
+import {scopeApprovalController} from '../personal-agent/approval-scope.js'
+import type {PersonalAgentHost} from '../personal-agent/host.js'
+import {conversationRuntimeFactory} from '../personal-agent/conversation-runtime.js'
+import {join} from 'node:path'
+import {FeishuConnector} from '../connectors/feishu/index.js'
+import {SubstrateMemoryResource} from '../memory-substrate/resource.js'
+import {z} from 'zod'
+import {LocalDirectorySources} from '../personal-agent/sources.js'
 import {blackboardOptionsFromSettings} from '../memory/blackboard-session.js'
 import type {UsageReporter} from '../realtime/usage.js'
 import {prepareKnowledge} from '../knowledge/assembly.js'
 /** Shared production graph for the Electron child and the headless remote service. */
 import {randomUUID} from 'node:crypto'
 import {loadCapabilityRegistry} from '../config/capability-registry.js'
+import type {CodingBackendId} from '../config/coding-backends.js'
 import {prepareExternalMcp} from '../executors/mcp.js'
 import {loadSettings, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedModules} from '../config/config.js'
-import {requireSelectedCascadedRealtimeConfig} from '../config/cascaded-realtime-config.js'
+import {requireSelectedCascadedLlmConfig, requireSelectedCascadedRealtimeConfig} from '../config/cascaded-realtime-config.js'
 import {remoteClientMedia} from '../server/server-config.js'
 import type {ClientMedia} from '../server/client-protocol.js'
 import {buildDesktopRealtimeComposition, type DesktopConstructionOwnership} from '../desktop/desktop-session.js'
@@ -14,12 +33,16 @@ import type {DesktopRealtimeOptions} from '../desktop/desktop-session.js'
 import {selectDesktopCameraSource} from '../desktop/desktop-camera-source.js'
 import {ChromiumFrameSource} from '../executors/chromium-frame-source.js'
 import {RealClock} from '../core/clock.js'
+import {HostApprovalController} from '../core/approval.js'
+import {MAX_CONCURRENT_WORK} from '../core/work-tools.js'
 import {buildProductionRealtimeAssembly, type BuildProductionRealtimeAssemblyOptions} from './cascaded-realtime-assembly.js'
 import {createRealtimeTelemetry} from '../realtime/telemetry.js'
 import type {ApprovalView as ExecutorApprovalView} from '../core/approval-port.js'
 import {buildIntegratedRealtimeAssembly, type IntegratedProviderRegistry} from './cascaded-realtime-assembly.js'
 
-export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onUsage, environment = process.env}: {
+export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage, environment = process.env}: {
+  /** Receives the live coding resource so the desktop host can change the new-session default. */
+  readonly onCoding?: (coding: {updateDefaultBackend?(backend: CodingBackendId): void}) => void
   readonly onUsage?: UsageReporter
   readonly token: string
   readonly stop: AbortController
@@ -31,13 +54,15 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   readonly integratedProviders?: IntegratedProviderRegistry
   readonly createServer?: (options: Parameters<NonNullable<DesktopRealtimeOptions['createServer']>>[0], media?: ClientMedia) => ReturnType<NonNullable<DesktopRealtimeOptions['createServer']>>
 }) {
-  const loadedSettings = loadSettings(environment)
+  const loadedSettings = loadSettings(environment, !remote)
   const media = remote ? remoteClientMedia(loadedSettings) : undefined
-  requireBlockingCredentials(loadedSettings)
-  if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
+  if (!remote) requireSelectedCascadedLlmConfig(loadedSettings)
+  else if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
   else requireSelectedCascadedRealtimeConfig(loadedSettings)
-  const externalMcp = await prepareExternalMcp(withoutUncredentialedModules(loadCapabilityRegistry({environment: remote
-      ? {...environment, CAMERA_MODULE_ENABLED: 'false'} : environment}), loadedSettings), stop.signal)
+  if (remote) requireBlockingCredentials(loadedSettings)
+  const configuredCapabilities=loadCapabilityRegistry({environment:remote?{...environment,CAMERA_MODULE_ENABLED:'false'}:environment})
+  const acceptanceCapabilities=acceptanceCapabilityRegistry(configuredCapabilities)
+  const externalMcp = await prepareExternalMcp(withoutUncredentialedModules(acceptanceCapabilities, loadedSettings), stop.signal)
   const releaseExternal = ownership.own(() => externalMcp.close())
   const capabilities = externalMcp.capabilities
   // This entry owns the concrete Codex package; core gates injected adapters by their declared role.
@@ -57,43 +82,89 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     pipeline: settings.pipeline_mode,
     provider: settings.pipeline_mode === 'cascaded' ? settings.cascade_llm_provider : settings.integrated_provider,
     model: settings.pipeline_mode === 'cascaded'
-      ? requireSelectedCascadedRealtimeConfig(settings).selection.llmModel
-      : settings.qwen_realtime_model,
+      ? requireSelectedCascadedLlmConfig(settings).config.model
+      : settings.integrated_provider === 'stepfun' ? settings.stepfun_realtime_model
+      : settings.integrated_provider === 'openai' ? settings.openai_realtime_model
+      : settings.integrated_provider === 'gemini' ? settings.gemini_realtime_model : settings.qwen_realtime_model,
     asr: settings.cascade_asr_provider, tts: settings.cascade_tts_provider,
     vision: settings.conversation_vision_enabled,
   })
   let publishExecutorApproval: (view: ExecutorApprovalView) => void = () => undefined
+  const guiNames = settings.executors.filter(name => name === 'autoglm' || name === 'mobile' || name === 'computer' || name === 'browser')
+  // Each supervised GUI executor runs one task at a time, so it adds one approval slot instead of taking Codex's.
+  const sharedApproval = guiNames.length > 0
+    ? new HostApprovalController({clock, idFactory: () => randomUUID(), capacity: MAX_CONCURRENT_WORK + guiNames.length}) : undefined
+  let closeSharedApproval = () => { /* No shared resource when GUI executors are disabled. */ }
+  if (sharedApproval !== undefined) {
+    const unsubscribe = sharedApproval.observe(view => publishExecutorApproval(view))
+    closeSharedApproval = () => { sharedApproval.invalidate('shutdown'); unsubscribe() }
+    ownership.own(closeSharedApproval)
+  }
+  const autoglm = !settings.executors.includes('autoglm') ? undefined : await (async () => {
+    const {AutoGlmExecutor, loadAutoGlmConfig} = await import('../executors/autoglm.js')
+    return new AutoGlmExecutor(loadAutoGlmConfig(environment), sharedApproval!)
+  })()
+  if (autoglm !== undefined) ownership.own(() => autoglm.close())
+  const mobile = !settings.executors.includes('mobile') ? undefined : await (async () => {
+    const {MobileExecutor, loadMobileConfig} = await import('../executors/mobile.js')
+    return new MobileExecutor(loadMobileConfig(environment), sharedApproval!)
+  })()
+  if (mobile !== undefined) ownership.own(() => mobile.close())
+  const computer = !settings.executors.includes('computer') ? undefined : await (async () => {
+    const {ComputerExecutor, loadComputerConfig} = await import('../executors/computer.js')
+    return new ComputerExecutor(loadComputerConfig(environment), sharedApproval!)
+  })()
+  if (computer !== undefined) ownership.own(() => computer.close())
+  const browser = !settings.executors.includes('browser') ? undefined : await (async () => {
+    const {BrowserExecutor, loadBrowserConfig} = await import('../executors/browser.js')
+    return new BrowserExecutor(loadBrowserConfig(environment), sharedApproval!)
+  })()
+  if (browser !== undefined) ownership.own(() => browser.close())
+  const guiExecutors = [...(autoglm === undefined ? [] : [autoglm]), ...(mobile === undefined ? [] : [mobile]),
+    ...(computer === undefined ? [] : [computer]), ...(browser === undefined ? [] : [browser])]
   const codexResource = !capabilities.modules.coding.enabled || !settings.executors.includes('codex')
     ? null
     : await (async () => {
-      const {createCodexAssemblyResource, createProductionCodexHost, resolveCodexHostConfig, prepareManagedCodexMcp} = await import('../executors/codex/host.js')
+      const {createCodexAssemblyResource, createProductionCodexHost, resolveCodexHostConfig, prepareManagedCodexMcp,
+        createAcpBackendRouting, loadWindowsGuardianFactoryFromResources} = await import('../executors/codex/host.js')
       const sourceResourcesPath = environment.CODEX_RESOURCES_PATH
       const codexHost = createProductionCodexHost(settings, {
         ...(sourceResourcesPath === undefined ? {} : {resourcesPath: sourceResourcesPath}),
         onDiagnostic: code => onDiagnostic(`[runtime-diagnostic] ${code}`),
       })
       const codexConfig = resolveCodexHostConfig(settings, codexHost.catalog)
-      return codexConfig === null
-        ? null
-        : await createCodexAssemblyResource({
-            managedMcp: prepareManagedCodexMcp(capabilities, knowledge?.codexEntries),
-            config: codexConfig,
-            composition: 'realtime',
-            transportFactory: codexHost.transportFactory,
-            clock,
-            idFactory: () => randomUUID().replaceAll('-', ''),
-            onDiagnostic: code => {
-              telemetry.record('executor.diagnostic', {code})
-              onDiagnostic(code)
-            },
-            codexApprovalBroker: {
-              publish: view => { publishExecutorApproval(view) },
-            },
-            ...(codexHost.projectHost === null ? {} : {projectHost: codexHost.projectHost}),
-          })
+      if (codexConfig === null) return null
+      const resourcesPath = sourceResourcesPath ?? (process as NodeJS.Process & {resourcesPath?: string}).resourcesPath
+      const acpProcessFactory = process.platform === 'win32' && resourcesPath !== undefined
+        ? loadWindowsGuardianFactoryFromResources({resourcesPath, platform: process.platform, arch: process.arch}) ?? undefined : undefined
+      return await createCodexAssemblyResource({
+        backends: createAcpBackendRouting({initialBackend: settings.coding_backend, environment, capabilities,
+          ...(knowledge === undefined ? {} : {knowledgeEntries: knowledge.codexEntries}),
+          approvalMode: settings.codex_approval_mode, workingInterval: codexConfig.workingInterval,
+          ...(acpProcessFactory === undefined ? {} : {processFactory: acpProcessFactory})}),
+        managedMcp: prepareManagedCodexMcp(capabilities, knowledge?.codexEntries),
+        config: codexConfig,
+        composition: 'realtime',
+        ...(sharedApproval === undefined ? {} : {sharedApprovalController: sharedApproval}),
+        transportFactory: codexHost.transportFactory,
+        clock,
+        idFactory: () => randomUUID().replaceAll('-', ''),
+        onDiagnostic: code => {
+          telemetry.record('executor.diagnostic', {code})
+          onDiagnostic(code)
+        },
+        codexApprovalBroker: {
+          publish: view => { publishExecutorApproval(view) },
+        },
+        ...(codexHost.projectHost === null ? {} : {projectHost: codexHost.projectHost}),
+      })
     })()
   const releaseCodex = codexResource === null ? undefined : ownership.own(() => codexResource.close())
+  if (codexResource !== null) onCoding?.(codexResource)
+  const conversationOwner:{host?:PersonalAgentHost}={}
   const camera = remote ? null : selectDesktopCameraSource(environment)
+  let playbackEpoch=0
+  const nextPlaybackGeneration=()=>++playbackEpoch
   const composition = buildDesktopRealtimeComposition({
     token,
     stop,
@@ -104,9 +175,9 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     ...(codexResource?.projectView === null || codexResource === null
       ? {}
       : {projectView: codexResource.projectView}),
-    ...(codexResource?.approvalController === null || codexResource === null
+    ...((sharedApproval ?? codexResource?.approvalController) == null
       ? {}
-      : {approvalView: codexResource.approvalController.view}),
+      : {approvalView: (sharedApproval ?? codexResource!.approvalController)!.view}),
     buildRealtime: (callbacks, transport) => {
       const frameSource = camera === null ? undefined : new ChromiumFrameSource({
         source: camera.source,
@@ -114,6 +185,8 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         clock,
       })
       const realtimeOptions: BuildProductionRealtimeAssemblyOptions = {
+        textOnly:!remote,
+        nextPlaybackGeneration,
         blackboard: blackboardOptionsFromSettings(settings),
         settings,
         ...(onUsage === undefined ? {} : {onUsage}),
@@ -125,7 +198,10 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         clock,
         ...(frameSource === undefined ? {} : {frameSource}),
         ...(codexResource === null ? {} : {codexResource}),
+        ...(guiExecutors.length === 0 ? {} : {executors: guiExecutors, agentDescriptors: guiExecutors.map(executor => executor.descriptor),
+          additionalAgentControllers: port => guiExecutors.map(executor => executor.controller(port)), executorApproval: sharedApproval!}),
         ...callbacks,
+        ...(codexResource?.approvalController?{executorApproval:scopeApprovalController(codexResource.approvalController,view=>!view.work||!conversationOwner.host?.workConversation(view.work.work_id))}:{}),
       }
       const realtime = buildProductionRealtimeAssembly(realtimeOptions, integratedProviders === undefined ? {} : {
         integrated: options => buildIntegratedRealtimeAssembly(options, integratedProviders),
@@ -136,10 +212,141 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       return realtime
     },
   })
+  if (knowledge !== undefined) {
+    const host = composition.realtime.personalAgent
+    let sourceRevision=0
+    host.setSources(new LocalDirectorySources({
+      path: host.path + '.sources.json', knowledge: knowledge.service,
+      priorityWorkspace: async () => codexResource?.mode==='project'
+        ? (await (codexResource.adapter as ProjectExecutorAdapter).activeCommittedWorkspace())?.canonical_path??null
+        : null,
+      processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
+      onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
+      onChange: changed => changed ? host.sourceChanged({phase:'ready',revision:++sourceRevision}) : host.sourceProgressChanged(),
+      onHideEvidenceMany: refs => host.invalidateEvidenceMany(refs),
+      onInvalidateMany: async refs => {
+        await host.invalidateEvidenceMany(refs)
+        const memory = composition.realtime.personalMemory
+        if (memory?.forgetSources) await memory.forgetSources(refs)
+        else for (const ref of refs) await memory?.forgetSource?.(ref)
+        await host.revalidate()
+        await host.refreshMemory()
+      },
+      onInvalidate: async ref => {
+        await host.invalidateEvidence(ref)
+        await composition.realtime.personalMemory?.forgetSource?.(ref)
+        await host.revalidate()
+        await host.refreshMemory()
+      },
+    }))
+  }
+  const host = composition.realtime.personalAgent
+  conversationOwner.host=host
+  const projectAdapter=codexResource?.mode==='project'?codexResource.adapter as ProjectExecutorAdapter:undefined
+  if(projectAdapter?.targetPort)host.setCodingTargets(projectAdapter.targetPort)
+  host.setApprovalView(()=>codexResource?.approvalController?.view)
+  if(codexResource?.approvalController)ownership.own(codexResource.approvalController.observe(()=>host.connectionChanged()))
+  if(projectAdapter)ownership.own(projectAdapter.observeProjectView(view=>host.recordConfirmation('',view)))
+  let presentationPaused=false
+  ownership.own(host.subscribePresentation(async(mode,seen)=>{
+    const broker=codexResource?.approvalController
+    if(mode==='background'){broker?.hold('background');projectAdapter?.confirmationController.setBackground(true)}
+    else if(!seen){broker?.release('background',{awaitPresentation:true});projectAdapter?.confirmationController.setBackground(false,{awaitPresentation:true})}
+    else if(seen?.approval_id&&broker?.view.pending_approval_id===seen.approval_id)broker.release('background')
+    if(mode!=='background'&&seen?.proposal_id&&!seen.conversation_id&&projectAdapter?.confirmationController.view.pending_confirmation_id===seen.proposal_id)projectAdapter.confirmationController.setBackground(false)
+    if(!seen){const paused=mode==='background';if(paused||presentationPaused)await composition.realtime.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
+  }))
+  host.setConversationRuntime(conversationRuntimeFactory({...(guiExecutors.length ? {executors: guiExecutors, agentDescriptors: guiExecutors.map(executor => executor.descriptor), additionalAgentControllers: port => guiExecutors.map(executor => executor.controller(port)), executorApproval: sharedApproval!} : {}),settings:composition.realtime.core.settings,capabilities,externalMcp,telemetry,mediaStore:composition.realtime.core.mediaStore,
+    ...(onUsage===undefined?{}:{onUsage}),
+    ...(composition.realtime.core.frameSource?{frameSource:composition.realtime.core.frameSource}:{}),
+    blackboard:blackboardOptionsFromSettings(settings),clock,gateway:composition.realtime.core.gateway,
+    ...(knowledge?{knowledge}:{}),...(codexResource?{codexResource}:{}),onDiagnostic,
+    host,memory:()=>composition.realtime.personalMemory,nextPlaybackGeneration,
+    onExecutorProgress:(progress,result)=>composition.desktop.bridge.onExecutorProgress(progress,result),
+    onAudioFrame:frame=>composition.audioBridge()?.onAudioFrame(frame),onAudioClear:(id,epoch)=>composition.audioBridge()?.onAudioClear(id,epoch),onAudioAlert:(id,epoch)=>composition.audioBridge()?.onAudioAlert(id,epoch),onAudioTerminal:(id,epoch)=>composition.audioBridge()?.onAudioTerminal(id,epoch),
+  }),frame=>composition.publishPersonal(frame))
+  host.setConnectors(new ComposioConnector({...(process.platform==='darwin'&&environment.CODEX_RESOURCES_PATH?{local:new MacCalendarClient(environment.CODEX_RESOURCES_PATH),mail:new MacMailClient(environment.CODEX_RESOURCES_PATH)}:{}),memory:()=>{const memory=composition.realtime.personalMemory;return memory instanceof SubstrateMemoryResource?memory:undefined},client:environment.COMPOSIO_API_KEY?new ComposioClient(environment.COMPOSIO_API_KEY):null,onChange:()=>{void host.connectionChanged()}}))
+  const feishu = new FeishuConnector({
+    executable: environment.FEISHU_CLI_PATH ?? 'lark-cli',
+    credentialRoot: join(host.path + '.feishu', 'credentials'),
+    statePath: join(host.path + '.feishu', 'state.json'),
+    onChange:()=>host.connectionChanged(),
+    processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
+    onProcessingConsent:async(ids,grant)=>{for(const id of ids)await composition.realtime.personalMemory?.setProcessingConsent?.(id,grant)},
+    ingestBatch: async (messages, signal) => {
+      const memory = composition.realtime.personalMemory
+      if (!(memory instanceof SubstrateMemoryResource)) throw Error('请先启用本地记忆')
+      signal.throwIfAborted()
+      const changed=await memory.ingestEvidenceBatch(messages.map(message => ({sourceId:message.source_id,locator:message.locator,text:message.raw_text,observedAt:message.observed_at,kind:'im',...(message.sender_id?{im:{sender_id:message.sender_id,account_id:message.account_id,provider:'feishu',message_id:message.message_id,chat_id:message.chat_id,recipient_id:message.recipient_id,sender_name:message.sender_name,mention_ids:message.mention_ids,thread_id:message.thread_id,parent_id:message.parent_id,root_id:message.root_id,upper_message_id:message.upper_message_id,source_url:message.source_url,mention:message.mention,auto_capture:message.auto_capture}}:{}),...(message.processing_consent?{processingConsent:message.processing_consent}:{}),retentionUntil:message.retention_until,senderId:message.sender_id,accountId:message.account_id})))
+      signal.throwIfAborted()
+      if(changed)await host.sourceChanged()
+    },
+    deleteMessage: async (sourceId,locator) => {
+      const memory=composition.realtime.personalMemory
+      if(!(memory instanceof SubstrateMemoryResource))throw Error('memory_unavailable')
+      await memory.invalidateMessage(sourceId,locator)
+      await host.sourceChanged()
+    },
+    deleteSource: async ref => {
+      const memory = composition.realtime.personalMemory
+      if (!memory?.forgetSource) throw Error('memory_unavailable')
+      await memory.forgetSource(ref)
+      await host.revalidate()
+      await host.refreshMemory()
+    },
+    onAction: async action => {
+      // Card feedback is never an execution capability. 'open' only marks the item seen.
+      const result = await host.command({type:'personal.command',request_id:'feishu:'+action.event_id,
+        method:'feed.action',params:{id:action.proposal_id,action:action.action==='ignore'?'dismiss':action.action,
+          ...(action.notification?{notification:action.notification}:{}),...(action.action==='snooze'?{snooze_until:new Date(Date.now()+60*60000).toISOString()}:{})}})
+      if (!(result as {ok?:boolean}).ok) throw Error('feishu_action_rejected')
+    },
+  })
+  host.notifications.register(feishuNotificationAdapter(feishu))
+  const syncNotificationBinding=async()=>{
+    const binding=feishu.notificationBinding(host.options.userScope)
+    if(binding)await host.notifications.bind(binding)
+  }
+  host.setFeishu({
+    snapshot:()=>feishu.snapshot(),
+    command:async(method,params)=>{const result=await feishu.command(method,z.record(z.string(),z.unknown()).parse(params));await syncNotificationBinding();return result},
+    open:async()=>{await feishu.open();await syncNotificationBinding();await host.notifications.migrate(feishu.snapshot().bot_enabled?'feishu':null)},
+    close:async()=>{await feishu.close()},
+  })
   ownership.own(() => composition.desktop.server.close())
-  publishExecutorApproval = view => { composition.desktop.bridge.onExecutorApproval(view) }
+  publishExecutorApproval = view => { if(view.work&&host.workConversation(view.work.work_id))return;composition.desktop.bridge.onExecutorApproval(view) }
+  let phone: ReturnType<typeof composition.createPhone> | undefined
+  let phoneQueue: Promise<unknown> = Promise.resolve()
+  const closePhone = async () => { const endpoint=phone;phone=undefined;await endpoint?.server.close() }
+  ownership.own(closePhone)
+  stop.signal.addEventListener('abort',()=>{void phoneQueue.then(closePhone).catch(()=>{ /* shutdown close is best effort */ })},{once:true})
+  const phoneControl = (method:string, params:unknown):Promise<unknown> => {
+    const operation=phoneQueue.then(async()=>{
+      if(process.platform!=='darwin'||remote)throw Error('unsupported')
+      if(method==='phone.start'){
+        const input=z.object({port:z.number().int().min(1).max(65535),tokenFile:z.string().min(1)}).strict().parse(params)
+        if(stop.signal.aborted)throw Error('stopped')
+        if(!phone){
+          const config=loadServerConfig({SERVER_PORT:String(input.port),SERVER_TOKEN_FILE:input.tokenFile})
+          const media=remoteClientMedia(settings)
+          const endpoint=composition.createPhone({token:config.token,createServer:serverOptions=>new ClientServer({...serverOptions,sharedWorkbench:true,prepareLegacyVoice:()=>composition.prepareLegacyPhoneVoice(),media,pairing:new ClientPairing(config.token,input.tokenFile+'.devices.json'),port:config.port})})
+          try{await endpoint.server.start();phone=endpoint}catch(error){await endpoint.server.close();throw error}
+        }
+      }else{
+        z.object({}).strict().parse(params)
+        if(method==='phone.stop')await closePhone()
+        else if(method!=='phone.status')throw Error('unavailable')
+      }
+      return {running:phone!==undefined}
+    })
+    phoneQueue=operation.catch(()=>{ /* the caller observes the failure through the returned operation */ })
+    return operation
+  }
   return {
     ...composition,
-    closeAuxiliary: () => telemetry.close(),
+    phoneControl,
+    closeAuxiliary: async () => {
+      try { await phoneQueue; await closePhone(); await Promise.all(guiExecutors.map(phone => phone.close())) } finally { closeSharedApproval(); telemetry.close() }
+    },
   }
 }

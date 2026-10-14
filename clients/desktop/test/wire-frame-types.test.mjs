@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import test from 'node:test'
-import {WIRE_FRAME_TYPES as runtimeTypes} from '@nova-audio-agent/runtime/desktop'
+import {WIRE_FRAME_TYPES as runtimeTypes} from '@nova-personal-agent/runtime/desktop'
 import * as renderer from '../src/renderer/wire-frame-types.mjs'
 import {wireFrameTypesSource} from '../scripts/build-contract.mjs'
 

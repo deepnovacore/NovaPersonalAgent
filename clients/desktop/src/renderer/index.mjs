@@ -1,3 +1,4 @@
+import {mountPersonalView} from './personal-view.mjs'
 import {t} from './locale.mjs'
 import {localizeDocument} from './locale.mjs'
 localizeDocument(document)
@@ -55,7 +56,6 @@ const muteToggle = document.querySelector('#mute-toggle')
 const speakerToggle = document.querySelector('#speaker-toggle')
 const cameraToggle = document.querySelector('#camera-toggle')
 const sleepButton = document.querySelector('#sleep-orb')
-const openSettingsButton = document.querySelector('#open-settings')
 const stateLabel = document.querySelector('#state-label')
 const codexLabel = document.querySelector('#codex-label')
 const codexSummary = document.querySelector('#codex-summary')
@@ -72,6 +72,7 @@ const lastResultButton = document.querySelector('#last-result')
 const retainedResults = new Map()
 let projectRoster = []
 let taskBanner = null
+let personalView = null
 let savedNarrationMode = 'smart'
 let bubbleMode = 'milestones'
 let pendingNarrationMode = null
@@ -98,7 +99,7 @@ const applyBubbleLayout = layout => {
   if (changed) render()
 }
 const taskArea = createTaskAreaReservation({
-  reserve: (rows, taskRows) => window.novaAudioAgentDesktop.windowLayout.reserveBubbleArea(rows, taskRows),
+  reserve: (rows, taskRows) => window.novaPersonalAgentDesktop.windowLayout.reserveBubbleArea(rows, taskRows),
   onLayout: layout => {
     applyBubbleLayout(layout)
     taskBanner?.applyLayout(layout)
@@ -112,10 +113,10 @@ const progressBubbles = mountProgressBubbles({
 taskBanner = mountTaskBanner({
   container: document.querySelector('#task-banner'), send,
   reserveArea: active => taskArea.reserveBanner(active),
-  onChange: updateResultButton,
+  onChange: () => { updateResultButton(); personalView?.refresh() },
 })
-const stopBubbleLayout = window.novaAudioAgentDesktop.windowLayout.onBubbleLayout(layout => taskArea.onNativeLayout(layout))
-const stopConfirmationPlacement = window.novaAudioAgentDesktop.windowLayout
+const stopBubbleLayout = window.novaPersonalAgentDesktop.windowLayout.onBubbleLayout(layout => taskArea.onNativeLayout(layout))
+const stopConfirmationPlacement = window.novaPersonalAgentDesktop.windowLayout
   .onConfirmationPlacement(placement => {
     shell.dataset.confirmationPlacement = placement
   })
@@ -149,8 +150,8 @@ function getPlaybackLevel() {
 // capture path, which already walks every PCM frame for onset detection; the
 // speaker is pulled by the visual's own loop, because only it knows when it is
 // about to draw a speaking frame.
-// The palette itself arrives later, from bootstrap.settings (a future task's
-// preload channel), so construction always starts on the 'ember' default and
+// The palette itself arrives later, from bootstrap.settings,
+// so construction always starts on the 'ember' default and
 // boot() below swaps it live once settings are known.
 // Guarded, not raw: the orb is the one decorative part of this renderer, and a
 // canvas it cannot acquire (or one that throws mid-draw) must not take the
@@ -232,7 +233,7 @@ const axes = {
   cameraSource: 'local',
 }
 
-window.novaAudioAgentDesktop.camera.onEnumerate?.(async () => (await navigator.mediaDevices.enumerateDevices()).filter(item => item.kind === 'videoinput').map((item, index) => ({deviceId: item.deviceId, label: item.label || t("摄像头 {0}", index + 1)})))
+window.novaPersonalAgentDesktop.camera.onEnumerate?.(async () => (await navigator.mediaDevices.enumerateDevices()).filter(item => item.kind === 'videoinput').map((item, index) => ({deviceId: item.deviceId, label: item.label || t("摄像头 {0}", index + 1)})))
 
 const confirmationCountdown = new ConfirmationCountdown({
   onTick: seconds => {
@@ -270,12 +271,13 @@ const onsetTracker = new OnsetTracker({
   onInactive: () => {
     axes.capture = 'idle'
     visual.setLevel(0)
+    personalView?.setOrbLevel(0)
     render()
   },
 })
 const alertTone = new AlertTone()
 const outputMuteController = new OutputMuteController({
-  apply: muted => window.novaAudioAgentDesktop.nativeAudio.setPlaybackMuted(muted),
+  apply: muted => window.novaPersonalAgentDesktop.nativeAudio.setPlaybackMuted(muted),
   onChange: (muted, pending) => {
     axes.outputMuted = muted
     axes.outputMutePending = pending
@@ -329,6 +331,20 @@ const backendRecovery = new BackendReconnectController({
   onConnectionReplaced: () => resetRendererConnection(true),
 })
 
+const seenPresentations = new Set()
+function acknowledgeVisibleConfirmation(state){
+  const c=personalView?.controller
+  if(!c?.presentationReady||c.presentationPending||c.presentationMode==='background'||!state.confirmationVisible||document.visibilityState!=='visible'||!document.hasFocus())return
+  const active=axes.pendingConfirmationKind==='codex'?latestCodexApproval:latestProjectConfirmation
+  if(!active?.id)return
+  const key=`${active.kind}:${active.id}`
+  if(seenPresentations.has(key))return
+  seenPresentations.add(key)
+  const params=active.kind==='codex'?{approval_id:active.id}:{proposal_id:active.id,...(active.conversationId?{conversation_id:active.conversationId}:{})}
+  void c.command('presentation.seen',params).catch(error=>{seenPresentations.delete(key);c.error=error.message;personalView.refresh()})
+}
+window.addEventListener('focus',()=>render())
+document.addEventListener('visibilitychange',()=>render())
 function render() {
   const state = deriveOrbState({...axes, tasks: taskBanner?.state().tasks ?? []})
   shell.dataset.state = state.name
@@ -337,8 +353,9 @@ function render() {
   const setupAction = !sleeping && state.statusAction === 'setup'
   stateLabel.dataset.action = setupAction ? 'setup' : ''
   setAttribute(stateLabel, 'tabindex', setupAction ? '0' : '-1')
-  setAttribute(orb, 'role', sleeping ? 'button' : 'img')
-  setAttribute(orb, 'tabindex', sleeping ? '0' : '-1')
+  // A sleeping orb activates to wake and an awake one to expand, so the orb stays keyboard-reachable either way.
+  setAttribute(orb, 'role', 'button')
+  setAttribute(orb, 'tabindex', '0')
   setText(codexSummary, state.projectLabel)
   setAttribute(codexSummary, 'title', state.projectLabel)
   setText(codexOperation, state.confirmationOperation)
@@ -348,7 +365,7 @@ function render() {
   codexLabel.dataset.working = String(state.sessionWorking)
   setAttribute(codexLabel, 'aria-label', state.codexLabel)
   if (lastReportedConfirmationMode !== state.confirmationVisible) {
-    window.novaAudioAgentDesktop.windowLayout.setConfirmationMode(state.confirmationVisible)
+    window.novaPersonalAgentDesktop.windowLayout.setConfirmationMode(state.confirmationVisible)
     lastReportedConfirmationMode = state.confirmationVisible
   }
   const dormant = orbDormant({
@@ -361,7 +378,7 @@ function render() {
   })
   shell.dataset.dormant = dormant ? 'true' : 'false'
   if (lastReportedDormant !== dormant) {
-    window.novaAudioAgentDesktop.windowLayout.setDormant?.(dormant)
+    window.novaPersonalAgentDesktop.windowLayout.setDormant?.(dormant)
     lastReportedDormant = dormant
   }
   const activeDecision = axes.pendingConfirmationKind === 'codex'
@@ -378,7 +395,7 @@ function render() {
   confirmationAllowSession.disabled = !decisionEnabled
   confirmationCancel.disabled = !decisionEnabled
   setText(aecLabel, state.aecLabel)
-  setAttribute(orb, 'aria-label', sleeping ? t("已休眠，点击唤醒") : `${state.label}；${state.accessibleCodexLabel}`)
+  setAttribute(orb, 'aria-label', sleeping ? t("已休眠，点击唤醒") : `${state.label}；${state.accessibleCodexLabel}；${t("双击或按 Enter 展开工作台")}`)
   orb.dataset.captureActive = String(axes.activated)
   muteToggle.disabled = !axes.activated
   muteToggle.setAttribute('aria-pressed', String(axes.muted))
@@ -391,11 +408,13 @@ function render() {
     || axes.cameraSource !== 'local'
     || axes.camera === 'requesting'
   cameraToggle.setAttribute('aria-label', t("视觉设置"))
-  window.novaAudioAgentDesktop?.visor?.report({state:state.name,muted:axes.muted,activated:axes.activated})
+  window.novaPersonalAgentDesktop?.visor?.report({state:state.name,muted:axes.muted,activated:axes.activated})
   visual.setState(state.name, { codexWorking: axes.codex === 'working' })
+  personalView?.setOrb({ name: state.name, statusLine: sleeping ? t('已休眠 · 点击唤醒') : state.statusLine, codexWorking: axes.codex === 'working' })
+  acknowledgeVisibleConfirmation(state)
 }
 
-window.novaAudioAgentDesktop?.visor?.onRefresh(()=>render())
+window.novaPersonalAgentDesktop?.visor?.onRefresh(()=>render())
 
 function confirmationDeadline(seconds) {
   return seconds === null ? null : performance.now() + (seconds * 1_000)
@@ -568,7 +587,9 @@ async function ensurePlaybackContext() {
 function detectLocalOnset(pcm) {
   const now = performance.now()
   const verdict = observePcmOnset(pcm, onsetTracker, now)
-  visual.setLevel(measurePcmLevel(pcm))
+  const level = measurePcmLevel(pcm)
+  visual.setLevel(level)
+  personalView?.setOrbLevel(level)
   // Three-way, not two: the tracker's 50 ms attack window is what 'candidate'
   // names, so a syllable that has not held long enough to mint a speech id
   // still lights the orb instead of leaving it idle.
@@ -593,7 +614,7 @@ function scheduleNativeFrames() {
     // Native PCM is played out of process, where there is no analyser to read,
     // so its amplitude is measured here and replayed on a wall-clock envelope.
     nativeLevel.push(frame.pcm, performance.now())
-    window.novaAudioAgentDesktop.nativeAudio.play(
+    window.novaPersonalAgentDesktop.nativeAudio.play(
       frame.pcm,
       frame.utteranceId,
       frame.generationEpoch,
@@ -617,16 +638,17 @@ const wakeAudio = new WakeAudioRouter({
   upload: pcm => {
     if (socket?.readyState !== WebSocket.OPEN) return
     socket.send(pcm)
-    detectLocalOnset(pcm)
+    if (personalView.controller.mode === 'voice') detectLocalOnset(pcm)
   },
-  detect: value => window.novaAudioAgentDesktop.wakeWord.audio(value),
+  detect: value => window.novaPersonalAgentDesktop.wakeWord.audio(value),
 })
 let backendIdle = false
 let backendIdleAt = -Infinity
 function reportWakeActivity() {
-  window.novaAudioAgentDesktop.wakeWord.report({
+  window.novaPersonalAgentDesktop.wakeWord.report({
     epoch: wakeAudio.epoch, activated: axes.activated, muted: axes.muted,
-    idle: canAutoSleep(axes, backendIdle, backendIdleAt, performance.now()),
+    // Only the orb sleeps: the workbench has no bubble to rest in, and a sleeping workbench would silently reroute its voice to wake detection.
+    idle: personalView?.controller.presentationMode === 'orb' && canAutoSleep(axes, backendIdle, backendIdleAt, performance.now()),
   })
 }
 function applyWakeState(value) {
@@ -651,8 +673,17 @@ function applyWakeState(value) {
   render()
 }
 
+let voiceprintRecording = false
+let pendingActivation = null
+async function applyVoiceprintRecording(active) {
+  voiceprintRecording = active
+  if (!active) return
+  // An in-flight activation would otherwise finish after the gate acknowledges.
+  await pendingActivation
+  await deactivateCapture()
+}
 function microphoneGated() {
-  return axes.muted || performance.now() < muteDrainUntil
+  return voiceprintRecording || !['dictation', 'voice'].includes(personalView.controller.mode) || axes.muted || performance.now() < muteDrainUntil
 }
 
 function toggleMute() {
@@ -673,31 +704,38 @@ function toggleOutputMuted() {
 }
 
 async function activateCapture() {
+  if (voiceprintRecording) return
+  if (personalView?.controller.presentationMode === 'background') return
   if (axes.activated) return deactivateCapture()
   if (axes.activationPending) return
   axes.activationPending = true
+  let settle
+  pendingActivation = new Promise(resolve => {settle = resolve})
   try {
     const result = await activateCaptureMode({
       nativeAvailable,
       activateNative: async () => {
-        const selected = await window.novaAudioAgentDesktop.nativeAudio.setCaptureEnabled(true)
+        const selected = await window.novaPersonalAgentDesktop.nativeAudio.setCaptureEnabled(true)
         nativeReady = selected.audioMode === 'voice_processing_io'
         return selected
       },
       activateBrowser: startBrowserCapture,
     })
+    if(personalView?.controller.presentationMode==='background'||voiceprintRecording){await window.novaPersonalAgentDesktop.nativeAudio.setCaptureEnabled(false);nativeReady=false;releaseBrowserCapture();return}
     axes.audioMode = result.audioMode
     axes.activated = true
     axes.microphone = 'granted'
-    window.novaAudioAgentDesktop.microphone.report(axes.microphone)
+    window.novaPersonalAgentDesktop.microphone.report(axes.microphone)
     axes.error = ''
   } catch (error) {
     nativeReady = false
     axes.microphone = error?.novaMicrophoneStatus
       ?? classifyMicrophoneFailure(error, microphoneSystemStatus)
-    window.novaAudioAgentDesktop.microphone.report(axes.microphone)
+    window.novaPersonalAgentDesktop.microphone.report(axes.microphone)
   } finally {
     axes.activationPending = false
+    pendingActivation = null
+    settle()
   }
   reportWakeActivity()
   render()
@@ -750,7 +788,7 @@ function stopCurrentNativePlayback() {
   const cleared = playback.clear(utteranceId, generationEpoch)
   nativeFrames.clear()
   nativeLevel.clear()
-  window.novaAudioAgentDesktop.nativeAudio.clear()
+  window.novaPersonalAgentDesktop.nativeAudio.clear()
   send({
     type: 'playback.stopped',
     utterance_id: utteranceId,
@@ -773,7 +811,7 @@ async function deactivateCapture() {
   try {
     if (nativeReady) {
       stopCurrentNativePlayback()
-      await window.novaAudioAgentDesktop.nativeAudio.setCaptureEnabled(false)
+      await window.novaPersonalAgentDesktop.nativeAudio.setCaptureEnabled(false)
     }
   } finally {
     nativeReady = false
@@ -803,13 +841,13 @@ async function fallBackAfterNativeFailure() {
     if (!result) return render()
     axes.audioMode = result.audioMode
     axes.microphone = 'granted'
-    window.novaAudioAgentDesktop.microphone.report(axes.microphone)
+    window.novaPersonalAgentDesktop.microphone.report(axes.microphone)
     axes.error = ''
   } catch (error) {
     if (axes.activated) {
       axes.microphone = error?.novaMicrophoneStatus
         ?? classifyMicrophoneFailure(error, microphoneSystemStatus)
-      window.novaAudioAgentDesktop.microphone.report(axes.microphone)
+      window.novaPersonalAgentDesktop.microphone.report(axes.microphone)
     }
   }
   render()
@@ -829,6 +867,7 @@ function clearCaption() {
 }
 
 async function handleControl(message) {
+  personalView.receive(message)
   if (message.type === PLAYBACK_CLEAR) {
     clearAssistantCaption()
     const backend = playback.current?.backend
@@ -838,7 +877,7 @@ async function handleControl(message) {
       if (backend === 'native') {
         nativeFrames.delete(`${message.utterance_id}:${message.generation_epoch}`)
         nativeLevel.clear()
-        nativeEvidence = await window.novaAudioAgentDesktop.nativeAudio.clear(
+        nativeEvidence = await window.novaPersonalAgentDesktop.nativeAudio.clear(
           message.utterance_id,
           message.generation_epoch,
         )
@@ -868,12 +907,13 @@ async function handleControl(message) {
   } else if (message.type === PLAYBACK_ALERT) {
     clearAssistantCaption()
     const hasIdentity = Object.hasOwn(message, 'utterance_id')
+    if(personalView.controller.presentationMode === 'background') return
     const result = await applyAlertCommand(playback, message, {
       startTone: startAlertTone,
       clearNative: (utteranceId, generationEpoch) => {
         nativeFrames.delete(`${utteranceId}:${generationEpoch}`)
         nativeLevel.clear()
-        return window.novaAudioAgentDesktop.nativeAudio.clear(utteranceId, generationEpoch)
+        return window.novaPersonalAgentDesktop.nativeAudio.clear(utteranceId, generationEpoch)
       },
     })
     if (result.cleared) markPlaybackCleared()
@@ -894,7 +934,7 @@ async function handleControl(message) {
     )
     if (acknowledgement) send(acknowledgement)
     if (backend === 'native') {
-      window.novaAudioAgentDesktop.nativeAudio.terminal(
+      window.novaPersonalAgentDesktop.nativeAudio.terminal(
         message.utterance_id,
         message.generation_epoch,
       )
@@ -945,6 +985,8 @@ async function handleControl(message) {
       'type',
       'workspace_display_name',
     ]
+    if (message.conversation_id !== undefined && (typeof message.conversation_id !== 'string' || !message.conversation_id || message.conversation_id.length > 128)) return
+    if (message.conversation_id !== undefined) {baseKeys.push('conversation_id');baseKeys.sort()}
     const validKeys = keys === baseKeys.join(',')
       || keys === [...baseKeys, 'pending_confirmation_id'].sort().join(',')
     const validConfirmationId = pendingConfirmationId === undefined
@@ -970,7 +1012,7 @@ async function handleControl(message) {
           && pendingExpires >= 0
           && pendingExpires <= PROJECT_CONFIRMATION_TTL_SECONDS))
       && (message.pending_confirmation
-        ? (!pendingMetadata || (pendingWorkspace !== null && pendingExpires !== null))
+        ? (!pendingMetadata || pendingWorkspace !== null)
         : !pendingMetadata)
     if (valid) {
       projectRoster = roster
@@ -983,6 +1025,7 @@ async function handleControl(message) {
         ? {
             kind: 'project',
             id: pendingConfirmationId ?? null,
+            conversationId: message.conversation_id,
             busy: pendingBusy,
             action: pendingAction,
             workspace: pendingWorkspace || '',
@@ -991,6 +1034,7 @@ async function handleControl(message) {
           }
         : null
       confirmationDecision.sync({
+        conversationId: message.conversation_id,
         pending: pillPending,
         proposalId: pillPending ? pendingConfirmationId ?? null : null,
         busy: pendingBusy,
@@ -1013,6 +1057,7 @@ async function handleControl(message) {
           }
         : null
       codexApprovalDecision.sync({
+        conversationId: approval.conversation_id,
         pending: approval.pending_approval,
         approvalId: approval.pending_approval ? approval.pending_approval_id : null,
         executor: approval.executor,
@@ -1024,8 +1069,10 @@ async function handleControl(message) {
     }
   } else if (message.type === EXECUTOR_TASKS) {
     taskBanner.receive(message)
+    personalView.refresh()
   } else if (message.type === EXECUTOR_TASK_ACTION_RESULT) {
     taskBanner.receiveActionResult(message)
+    personalView.refresh()
   } else if (message.type === EXECUTOR_PROGRESS) {
     const frame = parseProgressFrame(message)
     if (axes.wakeState !== 'sleeping' && frame !== null && (message.phase === 'alert' || (message.executor !== axes.executorId
@@ -1034,6 +1081,7 @@ async function handleControl(message) {
     if (Object.keys(message).length === 1) {
       retainedResults.clear()
       updateResultButton()
+      personalView.refresh()
     }
   } else if (message.type === EXECUTOR_RESULT) {
     const result = parseLastResultFrame(message)
@@ -1041,6 +1089,7 @@ async function handleControl(message) {
       if (result === null) retainedResults.delete(message.work_id)
       else if (retainedResults.has(message.work_id) || retainedResults.size < 64) retainedResults.set(message.work_id, result)
       updateResultButton()
+      personalView.refresh()
     }
   }
   render()
@@ -1051,7 +1100,7 @@ async function handleSocketMessage(event, delivery) {
     const permission = parseCameraPermissionRequest(event.data)
     if (permission !== null) {
       const status = axes.cameraSource === 'local'
-        ? await window.novaAudioAgentDesktop.camera.requestPermission()
+        ? await window.novaPersonalAgentDesktop.camera.requestPermission()
         : 'unavailable'
       if (delivery?.isCurrent?.()) {
         delivery.sendText(cameraPermissionResultMessage(permission.request_id, status))
@@ -1062,6 +1111,7 @@ async function handleSocketMessage(event, delivery) {
     await handleControl(JSON.parse(event.data))
     return
   }
+  if(personalView.controller.presentationMode === 'background') return
   alertTone.stop()
   const frame = decodeAudioFrame(new Uint8Array(event.data))
   const backend = playback.current?.backend || (nativeReady ? 'native' : 'browser')
@@ -1100,6 +1150,7 @@ function resetRendererConnection(processReplaced, {closeSocket = true} = {}) {
   activeConnection = null
   socket = undefined
   axes.connected = false
+  personalView.controller.disconnect()
   axes.error = ''
   confirmationDecision.deliveryLost()
   codexApprovalDecision.deliveryLost()
@@ -1122,7 +1173,7 @@ function resetRendererConnection(processReplaced, {closeSocket = true} = {}) {
   else playback.disconnect()
   nativeFrames.clear()
   nativeLevel.clear()
-  if (nativeReady) void window.novaAudioAgentDesktop.nativeAudio.clear().catch(() => {})
+  if (nativeReady) void window.novaPersonalAgentDesktop.nativeAudio.clear().catch(() => {})
   axes.playback = 'idle'
   clearCaption()
   render()
@@ -1152,8 +1203,8 @@ function openBackendSocket(connection) {
   nextSocket.onopen = () => {
     if (!nextConnection.isCurrent()) return
     nextConnection.delivery.sendText(JSON.stringify({ type: 'hello', token: connection.token }))
-    if (pendingNarrationMode && send({type: 'coding.progress_narration', mode: pendingNarrationMode})) pendingNarrationMode = null
     axes.connected = true
+    void personalView.controller.connect().then(()=>{if(pendingNarrationMode&&send({type:'coding.progress_narration',mode:pendingNarrationMode}))pendingNarrationMode=null;return personalView.controller.command('state')}).catch(error => {personalView.controller.error=error.message;personalView.refresh()})
     axes.error = ''
     backendRecovery.socketOpened()
     render()
@@ -1182,7 +1233,7 @@ async function refreshMicrophonePermission() {
   axes.microphone = 'checking'
   render()
   try {
-    const system = await window.novaAudioAgentDesktop.microphone.requestPermission()
+    const system = await window.novaPersonalAgentDesktop.microphone.requestPermission()
     microphoneSystemStatus = system?.status ?? 'unknown'
     const result = await preflightMicrophone({
       mediaDevices: navigator.mediaDevices,
@@ -1192,19 +1243,27 @@ async function refreshMicrophonePermission() {
   } catch {
     axes.microphone = 'capture_unavailable'
   }
-  window.novaAudioAgentDesktop.microphone.report(axes.microphone)
+  window.novaPersonalAgentDesktop.microphone.report(axes.microphone)
   render()
   return axes.microphone
 }
 
 async function retryMicrophonePermission() {
-  const microphone = await refreshMicrophonePermission()
-  if (microphone === 'granted' && !axes.activated) await activateCapture()
+  await refreshMicrophonePermission()
 }
 
 async function boot() {
+  let receivedStatus = false
+  window.novaPersonalAgentDesktop.onBackendStatus?.(status => {
+    if (!status || typeof status.state !== 'string') return
+    receivedStatus = true
+    axes.backendState = status.state
+    personalView.startup(status.startup)
+    render()
+  })
   try {
-    const bootstrap = await window.novaAudioAgentDesktop.bootstrap()
+    const bootstrap = await window.novaPersonalAgentDesktop.bootstrap()
+    personalView.controller.desiredPresentation = bootstrap.startupPresentation ?? 'workbench'
     cameraController.setSourceMode(bootstrap.cameraSource)
     cameraController.setConversationEnabled(bootstrap.settings?.conversationVisionEnabled === true)
     axes.cameraSource = bootstrap.cameraSource
@@ -1214,7 +1273,8 @@ async function boot() {
     bubbleMode = bootstrap.settings?.progressBubbles ?? 'milestones'
     axes.platform = bootstrap.platform
     taskBanner.setPlatform(bootstrap.platform)
-    axes.backendState = typeof bootstrap.backendStatus === 'string'
+    if (!receivedStatus) personalView.startup(bootstrap.startup)
+    if (!receivedStatus) axes.backendState = typeof bootstrap.backendStatus === 'string'
       ? bootstrap.backendStatus
       : 'stopped'
     // Only the renderer-owned subset reaches the orb; credentials, executable
@@ -1222,25 +1282,21 @@ async function boot() {
     applySkin(bootstrap.settings)
     if (bootstrap.opaque === true) document.body.dataset.opaque = '1'
     nativeAvailable = bootstrap.nativeAvailable === true
-    window.novaAudioAgentDesktop.wakeWord.onChanged(applyWakeState)
+    window.novaPersonalAgentDesktop.wakeWord.onChanged(applyWakeState)
     applyWakeState(bootstrap.wakeWord)
     setInterval(reportWakeActivity, 1000)
     for (const event of ['pointerdown', 'keydown']) {
-      document.addEventListener(event, () => window.novaAudioAgentDesktop.wakeWord.activity())
+      document.addEventListener(event, () => window.novaPersonalAgentDesktop.wakeWord.activity())
     }
-    window.novaAudioAgentDesktop.onBackendExit(handleBackendExit)
-    window.novaAudioAgentDesktop.onBackendReady(connectBackend)
-    window.novaAudioAgentDesktop.onBackendStatus?.(status => {
-      if (!status || typeof status.state !== 'string') return
-      axes.backendState = status.state
-      render()
-    })
-    window.novaAudioAgentDesktop.microphone.onToggle(toggleMute)
-    window.novaAudioAgentDesktop.microphone.onRetry(() => {
+    window.novaPersonalAgentDesktop.onBackendExit(handleBackendExit)
+    window.novaPersonalAgentDesktop.onBackendReady(connectBackend)
+    window.novaPersonalAgentDesktop.microphone.onVoiceprintRecording(applyVoiceprintRecording)
+    window.novaPersonalAgentDesktop.microphone.onToggle(toggleMute)
+    window.novaPersonalAgentDesktop.microphone.onRetry(() => {
       void retryMicrophonePermission()
     })
     // A narration preference is live host state; do not restart running work.
-    window.novaAudioAgentDesktop.settings?.onChanged?.(next => {
+    window.novaPersonalAgentDesktop.settings?.onChanged?.(next => {
       applySkin(next)
       cameraController.setConversationEnabled(next.conversationVisionEnabled === true)
       if (['off', 'milestones', 'all'].includes(next.progressBubbles)) {
@@ -1254,7 +1310,7 @@ async function boot() {
         if (send({type: 'coding.progress_narration', mode})) pendingNarrationMode = null
       }
     })
-    window.novaAudioAgentDesktop.nativeAudio.onEvent(event => {
+    window.novaPersonalAgentDesktop.nativeAudio.onEvent(event => {
       if (event.type === 'audio') {
         if (!nativeReady || microphoneGated() || event.wakeEpoch !== wakeAudio.epoch) return
         wakeAudio.accept(new Uint8Array(event.pcm), axes)
@@ -1292,18 +1348,39 @@ async function boot() {
     })
     axes.booting = false
     if (bootstrap.backend) connectBackend(bootstrap.backend)
-    else handleBackendExit()
-    const microphone = await refreshMicrophonePermission()
-    if (microphone === 'granted') {
-      axes.muted = bootstrap.startMuted === true
-      await activateCapture()
-    }
+    // 'stopped' covers the initial, never-started state as well as an explicit
+    // stop; 'starting' means it is still on its way up. Neither is a real exit.
+    else if (axes.backendState !== 'stopped' && axes.backendState !== 'starting') handleBackendExit()
+    axes.microphone = 'not_requested'
   } catch {
     axes.booting = false
     axes.error = 'bootstrap'
   }
   render()
 }
+
+personalView = mountPersonalView({send,
+  speakingLevel: () => getPlaybackLevel(),
+  start: async ({wake = true} = {}) => {
+    if (await refreshMicrophonePermission() !== 'granted') throw new Error('麦克风权限不可用，原有草稿已保留')
+    if (wake) await window.novaPersonalAgentDesktop.personal.wake()
+    if (!axes.activated) await activateCapture()
+    if (!axes.activated) throw new Error('麦克风启动失败')
+  },
+  stop: deactivateCapture,
+  applyPresentation: async (mode,{activate=false}={}) => {
+    await window.novaPersonalAgentDesktop.personal.setPresentation(mode,activate)
+    lastReportedDormant = null
+    if(mode === 'background'){
+      seenPresentations.clear();alertTone.stop();playback.disconnect();nativeFrames.clear();nativeLevel.clear();await window.novaPersonalAgentDesktop.nativeAudio.clear();axes.playback='idle'
+      await window.novaPersonalAgentDesktop.nativeAudio.setPlaybackMuted(true)
+    }else await window.novaPersonalAgentDesktop.nativeAudio.setPlaybackMuted(axes.outputMuted)
+    requestAnimationFrame(()=>render())
+  },
+  taskAction: (id, action) => taskBanner.action(action, id),
+  tasks: () => taskBanner?.state({includeExpired:true}), results: () => [...retainedResults.values()],
+  api: window.novaPersonalAgentDesktop,
+})
 
 orb.addEventListener('pointerdown', event => {
   if (event.button !== 0) return
@@ -1312,7 +1389,7 @@ orb.addEventListener('pointerdown', event => {
   // pointer stays put relative to the page, so these never drive movement.
   dragGesture.start(event.clientX, event.clientY)
   orb.setPointerCapture(event.pointerId)
-  window.novaAudioAgentDesktop.windowDrag.start()
+  window.novaPersonalAgentDesktop.windowDrag.start()
 })
 
 orb.addEventListener('pointermove', event => {
@@ -1323,37 +1400,46 @@ orb.addEventListener('pointermove', event => {
   // This gate stays open through a live drag only because move() returns a
   // truthy {dx: 0, dy: 0} once latched, even with unchanged coordinates;
   // main's cursor-poll ticks depend on that contract, not on dx/dy being nonzero.
-  if (delta) window.novaAudioAgentDesktop.windowDrag.move(delta.dx, delta.dy)
+  if (delta) window.novaPersonalAgentDesktop.windowDrag.move(delta.dx, delta.dy)
 })
 
+// A drag that ends on the orb still fires dblclick when two drags land close together.
+let lastPointerDragged = false
 function finishDrag(cancelled = false) {
   const result = cancelled ? dragGesture.cancel() : dragGesture.finish()
-  if (result.active) window.novaAudioAgentDesktop.windowDrag.end()
-  if (result.active && !cancelled && !result.dragged && axes.wakeState === 'sleeping') window.novaAudioAgentDesktop.wakeWord.wake()
+  if (result.active) lastPointerDragged = cancelled || result.dragged
+  if (result.active) window.novaPersonalAgentDesktop.windowDrag.end()
+  if (result.active && !cancelled && !result.dragged && axes.wakeState === 'sleeping') window.novaPersonalAgentDesktop.wakeWord.wake()
 }
 
 orb.addEventListener('keydown', event => {
-  if (axes.wakeState === 'sleeping' && ['Enter', ' '].includes(event.key)) {
-    event.preventDefault()
-    window.novaAudioAgentDesktop.wakeWord.wake()
-  }
+  if (!['Enter', ' '].includes(event.key) || event.repeat) return
+  event.preventDefault()
+  if (axes.wakeState === 'sleeping') window.novaPersonalAgentDesktop.wakeWord.wake()
+  else if (personalView?.controller.presentationMode === 'orb') personalView.expand()
 })
 stateLabel.addEventListener('click', () => {
-  if (stateLabel.dataset.action === 'setup') window.novaAudioAgentDesktop.setup.open()
+  if (stateLabel.dataset.action === 'setup') window.novaPersonalAgentDesktop.setup.open()
 })
 stateLabel.addEventListener('keydown', event => {
   if (stateLabel.dataset.action === 'setup' && ['Enter', ' '].includes(event.key)) {
     event.preventDefault()
-    window.novaAudioAgentDesktop.setup.open()
+    window.novaPersonalAgentDesktop.setup.open()
   }
 })
 orb.addEventListener('pointerup', () => finishDrag(false))
 orb.addEventListener('pointercancel', () => finishDrag(true))
 orb.addEventListener('pointerenter', () => paletteHover.enter())
 orb.addEventListener('pointerleave', () => paletteHover.leave())
+// Double-click opens the workbench; the context menu also offers all presentation modes.
+orb.addEventListener('dblclick', event => {
+  event.preventDefault()
+  if (lastPointerDragged || personalView?.controller.presentationMode !== 'orb') return
+  personalView.expand()
+})
 orb.addEventListener('contextmenu', event => {
   event.preventDefault()
-  window.novaAudioAgentDesktop.orbMenu.show()
+  window.novaPersonalAgentDesktop.orbMenu.show()
 })
 // Hover reveals controls in both sleep and inactive standby without waking audio. `mouseenter`/`mouseleave` rather than `mouseover`:
 // they do not bubble from the rail buttons, so crossing between the orb and a
@@ -1372,9 +1458,8 @@ document.body.addEventListener('mouseleave', () => {
 
 muteToggle.addEventListener('click', () => toggleMute())
 speakerToggle.addEventListener('click', () => { void toggleOutputMuted() })
-cameraToggle.addEventListener('click', () => window.novaAudioAgentDesktop.orbMenu.openSettings())
-sleepButton.addEventListener('click', () => window.novaAudioAgentDesktop.wakeWord.sleep())
-openSettingsButton.addEventListener('click', () => window.novaAudioAgentDesktop.orbMenu.openSettings?.())
+cameraToggle.addEventListener('click', () => window.novaPersonalAgentDesktop.orbMenu.openSettings())
+sleepButton.addEventListener('click', () => window.novaPersonalAgentDesktop.wakeWord.sleep())
 confirmationConfirm.addEventListener('click', () => {
   if (!confirmationUnexpired()) return
   const decision = axes.pendingConfirmationKind === 'codex'
@@ -1395,7 +1480,7 @@ confirmationAllowSession.addEventListener('click', () => {
 })
 lastResultButton.addEventListener('click', () => {
   if (!taskBanner.state().visible && taskBanner.restore()) return
-  void window.novaAudioAgentDesktop.executorResult.open({results: [...retainedResults.values()], roster: projectRoster})
+  void window.novaPersonalAgentDesktop.executorResult.open({results: [...retainedResults.values()], roster: projectRoster})
 })
 window.addEventListener('beforeunload', () => {
   taskBanner.dispose()

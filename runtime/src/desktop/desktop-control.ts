@@ -1,8 +1,11 @@
+import {randomUUID} from 'node:crypto'
+import {personalCommandSchema} from '../personal-agent/contracts.js'
 import {BlockingConfigurationError} from '../config/config.js'
 import {DEFAULT_FRONTBRAIN_TOOL_BUDGET} from '../config/capability-registry.js'
 import type {CapabilityStatus} from '../config/capability-registry.js'
 import type {DesktopStopParentSource} from './desktop-session.js'
 import {reportUsage, type UsageReport} from '../realtime/usage.js'
+import {CODING_BACKEND_IDS, type CodingBackendId} from '../config/coding-backends.js'
 
 type ParentPort = DesktopStopParentSource & {postMessage(message: unknown): void}
 export interface DesktopCapabilityState extends Partial<CapabilityStatus> {
@@ -19,6 +22,8 @@ export function installDesktopControl(options: {
   readonly signal: AbortSignal
   readonly status: () => DesktopCapabilityState | undefined
   readonly handle?: (method: string, params: unknown) => Promise<unknown>
+  /** Changes the default for new coding sessions only; it never touches running work. */
+  readonly updateCodingBackend?: (backend: CodingBackendId) => void
 }): {publish(): void; publishUsage: (report: UsageReport) => void; dispose(): void} {
   const port = options.parentPort
   let disposed = false
@@ -43,7 +48,17 @@ export function installDesktopControl(options: {
     pending += 1
     void (async () => {
       try {
-        const result = method === 'capabilities.status' ? options.status() : await options.handle?.(method, value.params)
+        let result: unknown
+        if (method === 'coding.default.set') {
+          const params = value.params as {backend?: unknown} | null
+          if (params === null || typeof params !== 'object' || Array.isArray(params)
+            || Object.keys(params).length !== 1 || !Object.hasOwn(params, 'backend')
+            || !CODING_BACKEND_IDS.includes(params.backend as CodingBackendId) || options.updateCodingBackend === undefined) {
+            throw new Error('invalid_coding_backend')
+          }
+          options.updateCodingBackend(params.backend as CodingBackendId)
+          result = {backend: params.backend}
+        } else result = method === 'capabilities.status' ? options.status() : await options.handle?.(method, value.params)
         if (!disposed) port?.postMessage({type: 'nova.control.reply', id, ...(result === undefined ? {error: 'unavailable'} : {result})})
       } catch {
         if (!disposed) port?.postMessage({type: 'nova.control.reply', id, error: 'unavailable'})
@@ -81,4 +96,45 @@ export function desktopBudgetFailure(error: unknown): DesktopCapabilityState | u
     || !Number.isSafeInteger(value.toolCount) || value.toolCount < 0 || value.toolCount > 100000
     || !Number.isSafeInteger(value.toolBudget) || value.toolBudget < 1 || value.toolBudget > 256) return undefined
   return {state: 'startup_failed', toolCount: value.toolCount, toolBudget: value.toolBudget}
+}
+
+
+/** The settings window may manage sources, connectors and discovery scheduling; nothing that reads memory, feeds or conversations. */
+export const PERSONAL_SETTINGS_METHODS: readonly string[] = Object.freeze([
+  'state', 'sources.add', 'sources.authorize_computer', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete',
+  'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent',
+  'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete',
+  'connector.local_status', 'connector.local_connect', 'connector.local_access',
+  'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure',
+])
+/** The only snapshot fields the settings window may see: no conversations, memory, feed, life, news or understanding. */
+export function connectionsProjection(snapshot: unknown): Record<string, unknown> {
+  const s = (snapshot ?? {}) as Record<string, unknown>
+  const capabilities = (s.capabilities ?? {}) as Record<string, unknown>
+  return {
+    revision: s.revision,
+    sources: Array.isArray(s.sources) ? s.sources : [],
+    connectors: s.connectors ?? null,
+    settings: s.settings ?? {},
+    capabilities: {sources: capabilities.sources === true, discovery: capabilities.discovery === true},
+  }
+}
+export async function handlePersonalSettings(command: (input: unknown) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
+  if (!PERSONAL_SETTINGS_METHODS.includes(method)) return {error: 'unsupported'}
+  const parsed = personalCommandSchema.safeParse({type: 'personal.command', request_id: randomUUID(), method, params})
+  if (!parsed.success) return {error: 'invalid_request'}
+  const result = await command(parsed.data) as {ok?: boolean; data?: unknown; error?: string}
+  if (result.ok !== true) return {error: result.error ?? 'unavailable'}
+  if (method === 'state') return connectionsProjection(result.data)
+  // Commands that persist without a payload (discovery.configure) must still read as success across the port.
+  return result.data === undefined ? {ok: true} : result.data
+}
+
+/** Settings may configure IM; they cannot read memory or authorize tasks through this port. */
+export async function handleFeishuSettings(command: (input: unknown) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
+  if (!method.startsWith('feishu.') && !['notifications.status','notifications.configure','notifications.retry'].includes(method)) return {error: 'unsupported'}
+  const parsed = personalCommandSchema.safeParse({type: 'personal.command', request_id: randomUUID(), method, params})
+  if (!parsed.success) return {error: 'invalid_request'}
+  const result = await command(parsed.data) as {ok?: boolean; data?: unknown; error?: string}
+  return result.ok === true ? result.data : {error: result.error ?? 'unavailable'}
 }

@@ -1,0 +1,65 @@
+name: Deprecate legacy npm names
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deprecate-legacy-npm-names
+  cancel-in-progress: false
+
+jobs:
+  deprecate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm-release
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+      - name: Verify replacements before deprecating old package names
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          test "$(npm view nova-personal-agent@0.4.0 version)" = "0.4.0"
+          test "$(npm view nova-personal-agent-server@0.4.0 version)" = "0.4.0"
+          prefix="$(mktemp -d)"
+          npm install --prefix "$prefix" --ignore-scripts nova-personal-agent@0.4.0 nova-personal-agent-server@0.4.0
+          test "$("$prefix/node_modules/.bin/novapersonal" --version)" = "0.4.0"
+          "$prefix/node_modules/.bin/novapersonal-server" --help
+          node --input-type=module <<'JS'
+          import {execFileSync} from 'node:child_process';
+          import {setTimeout as delay} from 'node:timers/promises';
+          const packages = [
+            ['nova-audio-agent', 'nova-personal-agent'],
+            ['nova-audio-agent-server', 'nova-personal-agent-server'],
+          ];
+          async function matches(name, message) {
+            const response = await fetch(`https://registry.npmjs.org/${name}`, {
+              headers: {'Cache-Control': 'no-cache'}, signal: AbortSignal.timeout(30000),
+            });
+            if (!response.ok) throw new Error(`${name}: registry status ${response.status}`);
+            const versions = Object.values((await response.json()).versions ?? {});
+            return versions.length > 0 && versions.every(pkg => pkg.deprecated === message);
+          }
+          for (const [name, replacement] of packages) {
+            const message = `Renamed to ${replacement}. Run npm uninstall -g ${name}, then npm install -g ${replacement}@latest. Existing data and settings are preserved.`;
+            if (await matches(name, message)) {
+              console.log(`${name}: all versions already have the correct deprecation notice`);
+              continue;
+            }
+            execFileSync('npm', ['deprecate', `${name}@*`, message], {stdio: 'inherit'});
+            let verified = false;
+            for (let attempt = 0; attempt < 20; attempt++) {
+              if (await matches(name, message)) { verified = true; break; }
+              await delay(3000);
+            }
+            if (!verified) throw new Error(`${name}: deprecation metadata did not propagate`);
+            console.log(`${name}: all versions verified`);
+          }
+          JS

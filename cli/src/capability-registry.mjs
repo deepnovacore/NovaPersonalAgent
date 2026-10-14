@@ -11,6 +11,16 @@ export const MCP_NON_AUTH_HEADERS = ['accept', 'content-type', 'user-agent'];
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/u;
 const SERVER_NAME = /^[a-z][a-z0-9_]{0,31}$/u;
 const MAX_CONFIG_BYTES = 256 * 1024;
+/** Legacy `exposeTo.codex` authorizes only Codex; every other backend needs an explicit grant. */
+export function mcpBackendAuthorized(config, backend) {
+    return config.enabled && (config.exposeTo.backends?.[backend] ?? (backend === 'codex' && config.exposeTo.codex));
+}
+function backendGrants(value, field) {
+    if (value === undefined)
+        return undefined;
+    const grants = object(value, field, ['codex', 'opencode', 'codebuddy', 'pi', 'deepseek']);
+    return Object.fromEntries(Object.entries(grants).map(([key, enabled]) => [key, bool(enabled, false, `${field}.${key}`)]));
+}
 export class CapabilityConfigurationError extends Error {
     reason;
     code = 'invalid_capabilities_configuration';
@@ -118,7 +128,9 @@ export function parseCapabilityRegistry(input, environment = {}) {
     const search = moduleConfig(modules.search, 'modules.search', ['provider', 'mcp', 'tavily']);
     const camera = moduleConfig(modules.camera, 'modules.camera', []);
     const coding = moduleConfig(modules.coding, 'modules.coding', []);
-    const knowledge = moduleConfig(modules.knowledge, 'modules.knowledge', ['exposeToCodex']);
+    const knowledge = moduleConfig(modules.knowledge, 'modules.knowledge', ['exposeToCodex', 'exposeToBackends']);
+    const knowledgeGrants = backendGrants(knowledge.exposeToBackends, 'modules.knowledge.exposeToBackends');
+    const legacyKnowledgeGrant = bool(knowledge.exposeToCodex, false, 'modules.knowledge.exposeToCodex');
     const requestedEnabled = bool(search.enabled, true, 'modules.search.enabled');
     const configuredProvider = omittedDefault(search.provider, 'tavily');
     if (configuredProvider !== 'tavily' && configuredProvider !== 'mcp')
@@ -209,18 +221,26 @@ export function parseCapabilityRegistry(input, environment = {}) {
             search: { enabled, provider, tavily: { apiKeyEnv, ...(environment[apiKeyEnv] === undefined ? {} : { apiKey: environment[apiKeyEnv] }) }, ...(mcp === undefined ? {} : { mcp }),
                 ...(fallback === undefined ? {} : { fallback }), ...(reason === undefined ? {} : { reason }) },
             camera: { enabled: cameraEnabled }, coding: { enabled: codingEnabled },
-            knowledge: { enabled: bool(knowledge.enabled, false, 'modules.knowledge.enabled'), exposeToCodex: bool(knowledge.exposeToCodex, false, 'modules.knowledge.exposeToCodex') },
+            knowledge: { enabled: bool(knowledge.enabled, false, 'modules.knowledge.enabled'),
+                exposeToCodex: knowledgeGrants?.codex ?? legacyKnowledgeGrant,
+                ...(knowledgeGrants === undefined ? {} : { exposeToBackends: knowledgeGrants }) },
         }, mcpServers, serverStatuses, overrides,
         frontbrainToolBudget: integer(document.frontbrainToolBudget, DEFAULT_FRONTBRAIN_TOOL_BUDGET, 256, 'frontbrainToolBudget') };
 }
 function parseServer(value, environment) {
-    const config = object(value, 'server', ['enabled', 'transport', 'url', 'headers', 'command', 'args', 'env', 'tools', 'exposeTo']);
+    const config = object(value, 'server', ['enabled', 'transport', 'url', 'headers', 'command', 'args', 'env', 'tools', 'exposeTo', 'computerUse']);
+    const physical = config.computerUse === undefined ? undefined : object(config.computerUse, 'server.computerUse', ['resource']);
+    const computerUse = physical === undefined ? {} : { computerUse: { resource: physical.resource === null ? null : string(physical.resource, 'server.computerUse.resource', 512).trim() } };
     const enabled = bool(config.enabled, true, 'server.enabled');
     const transport = config.transport;
     if (transport !== 'streamable-http' && transport !== 'stdio')
         invalid('server.transport');
-    const exposure = object(omittedDefault(config.exposeTo, {}), 'server.exposeTo', ['frontbrain', 'codex']);
-    const exposeTo = { frontbrain: bool(exposure.frontbrain, false, 'server.exposeTo.frontbrain'), codex: bool(exposure.codex, true, 'server.exposeTo.codex') };
+    const exposure = object(omittedDefault(config.exposeTo, {}), 'server.exposeTo', ['frontbrain', 'codex', 'backends']);
+    const grants = backendGrants(exposure.backends, 'server.exposeTo.backends');
+    const legacyCodexGrant = bool(exposure.codex, true, 'server.exposeTo.codex');
+    const exposeTo = { frontbrain: bool(exposure.frontbrain, false, 'server.exposeTo.frontbrain'),
+        codex: grants?.codex ?? legacyCodexGrant,
+        ...(grants === undefined ? {} : { backends: grants }) };
     const rawTools = object(omittedDefault(config.tools, {}), 'server.tools');
     if (Object.keys(rawTools).length > 32)
         invalid('server.tools:max_32');
@@ -241,7 +261,7 @@ function parseServer(value, environment) {
         const url = enabled ? interpolateCapabilityValue(rawUrl, environment) : rawUrl;
         if (enabled)
             validateMcpEndpoint(url, headers);
-        return { enabled, transport, url, urlInterpolated: /\$\{[A-Za-z_][A-Za-z0-9_]*\}/u.test(rawUrl), headers, tools, exposeTo };
+        return { ...computerUse, enabled, transport, url, urlInterpolated: /\$\{[A-Za-z_][A-Za-z0-9_]*\}/u.test(rawUrl), headers, tools, exposeTo };
     }
     if (config.url !== undefined || config.headers !== undefined)
         invalid('server.transport_fields');
@@ -252,7 +272,7 @@ function parseServer(value, environment) {
     const env = stringMap(config.env, 'server.env');
     if (Object.keys(env).some(key => !ENV_NAME.test(key)))
         invalid('server.env');
-    return { enabled, transport, command, args: args, env: enabled ? interpolateMap(env, environment) : env, tools, exposeTo };
+    return { ...computerUse, enabled, transport, command, args: args, env: enabled ? interpolateMap(env, environment) : env, tools, exposeTo };
 }
 export function loadCapabilityRegistry(options = {}) {
     const environment = options.environment ?? process.env;

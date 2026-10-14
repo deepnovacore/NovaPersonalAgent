@@ -8,6 +8,7 @@ import {KnowledgeService} from './service.js'
 import {KnowledgeMcpAdapter, startKnowledgeMcpHttpServer} from './mcp.js'
 
 export interface PreparedKnowledge {
+  readonly embedding:DashScopeEmbeddingProvider
   readonly service: KnowledgeService
   readonly adapter: KnowledgeMcpAdapter
   readonly capabilities: CapabilityRegistry
@@ -25,7 +26,9 @@ export async function prepareKnowledge(
     apiKey: resolveModelApiKey(settings) ?? '', model: settings.embedding_model})
   const configured = settings.knowledge_path
   const path = resolve(configured.startsWith('~/') ? resolve(homedir(), configured.slice(2)) : configured)
-  const service = new KnowledgeService({store: new KnowledgeStoreClient({path}), embedding})
+  // Whole-computer sources share this store with manually added knowledge.
+  // The generic 100-source default would make every later scan import fail.
+  const service = new KnowledgeService({store: new KnowledgeStoreClient({path,maxSources:2000}), embedding, requireEvidenceLedger: true})
   const adapter = new KnowledgeMcpAdapter(service)
   let http: Awaited<ReturnType<typeof startKnowledgeMcpHttpServer>> | undefined
   let closing: Promise<void> | undefined
@@ -36,14 +39,19 @@ export async function prepareKnowledge(
     await service.open()
     signal?.throwIfAborted()
     await adapter.connect()
-    if (capabilities.modules.knowledge.exposeToCodex && capabilities.modules.coding.enabled) http = await startKnowledgeMcpHttpServer(service)
+    const grants = capabilities.modules.knowledge
+    if ((grants.exposeToCodex || Object.values(grants.exposeToBackends ?? {}).some(Boolean))
+      && capabilities.modules.coding.enabled) http = await startKnowledgeMcpHttpServer(service)
     signal?.throwIfAborted()
     const tool = {enabled: true, timeoutMs: 8000, maxResultBytes: 32768, maxCallsPerTurn: 2}
+    // One loopback entry; Codex reads `exposeTo.codex`, ACP backends read their own grant.
     const codexEntries: Record<string, McpServerConfig> = http === undefined ? {} : {nova_knowledge: {
       enabled: true, transport: 'streamable-http', url: http.url, headers: {authorization: `Bearer ${http.token}`},
-      exposeTo: {frontbrain: false, codex: true}, tools: {recall: {...tool}, get_chunk: {...tool}},
+      exposeTo: {frontbrain: false, codex: grants.exposeToCodex,
+        ...(grants.exposeToBackends === undefined ? {} : {backends: grants.exposeToBackends})},
+      tools: {recall: {...tool}, get_chunk: {...tool}},
     }}
-    return {service, adapter, capabilities, codexEntries, close}
+    return {service, embedding, adapter, capabilities, codexEntries, close}
   } catch {
     await close()
     throw new Error('knowledge_startup_failed')

@@ -140,6 +140,19 @@ export class SensitiveContentPolicy {
   scrub(_field: string, value: string): ScrubResult {
     let matches = 0
     let scrubbed = value
+    const lines=value.split('\n'),credentialLines=new Set<number>()
+    for(let index=0;index<lines.length;index++){
+      const token=lines[index]!.trim()
+      if(/^["']?(?:密码|口令|密钥|私钥|访问令牌)["']?\s*[:：=]?\s*$/u.test(token)&&/^[A-Za-z0-9!@#$%^&*_.+=\/-]{3,}$/u.test(lines[index+1]?.trim()??''))credentialLines.add(index+1)
+    }
+    scrubbed=lines.map((line,index)=>credentialLines.has(index)?(matches++,'[redacted]'):line).join('\n')
+
+
+    // A pasted or truncated private key is sensitive regardless of its file name.
+    scrubbed = scrubbed.replace(/-----BEGIN ((?:[A-Z0-9]+ )*PRIVATE KEY)-----[\s\S]*?(?:-----END \1-----|$)/gu, () => {
+      matches += 1
+      return '[redacted]'
+    })
 
     scrubbed = scrubbed.replace(/https?:\/\/[^\s<>"']+/giu, match => {
       if (!urlCarriesCredentials(match)) return match
@@ -154,18 +167,21 @@ export class SensitiveContentPolicy {
       matches += 1
       return `${prefix}[redacted]`
     })
-    scrubbed = replaceAll(scrubbed, /(?:\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token)\b|["'](?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token)["'])\s*(?:=|:)\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, () => {
+    scrubbed = replaceAll(scrubbed, /(?:\b(?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key)\b|["'](?:password|passwd|secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key)["'])\s*(?:=|:)\s*(?!\[REDACTED\](?:[&#\s,;]|$))(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu, () => {
       matches += 1
       return '[redacted]'
     })
-    scrubbed = replaceAll(scrubbed, /(?:密码|["']密码["'])\s*(?:=|:|：)\s*(?:"[^"]*"|'[^']*'|[^\s,;]+)/gu, () => {
+    scrubbed = replaceAll(scrubbed, /["']?(?:密码|口令|密钥|私钥|访问令牌|CVC|CVV|PIN|安全码)["']?\s*(?:是|为|=|:|：)\s*(?:`[^`]*`|"[^"]*"|'[^']*'|[^\s,;]+)/gu, () => {
       matches += 1
       return '[redacted]'
     })
+    scrubbed = replaceAll(scrubbed, /(?:密码|口令|密钥|私钥|访问令牌|CVC|CVV|安全码)[ \t]+[`"']?[A-Za-z0-9!@#$%^&*_.+=\/-]{3,}[`"']?/giu,()=>{matches++;return '[redacted]'})
     scrubbed = replaceAll(scrubbed, /\b(?:sk|rk|pk|ak|xox[baprs]|ghp|github_pat)[_-][A-Za-z0-9][A-Za-z0-9_-]{11,}\b/giu, () => {
       matches += 1
       return '[redacted]'
     })
+    scrubbed = scrubbed.replace(/(?:银行卡号|信用卡号|卡号)\s*\d{0,2}\s*[:：=]?\s*(?:\d[ -]?){12,19}/gu, () => {matches += 1; return '[redacted]'})
+
     scrubbed = replaceAll(scrubbed, /\bBearer\s+[A-Za-z0-9._~+\/-]{8,}\b/giu, () => {
       matches += 1
       return '[redacted]'
@@ -223,13 +239,29 @@ function urlCarriesCredentials(value: string): boolean {
   try {
     const url = new URL(value)
     if (url.username !== '' || url.password !== '') return true
-    return [...url.searchParams.keys()].some(key => {
-      const normalized = key.replace(/[_-]/gu, '').toLowerCase()
-      return credentialQueryName.has(normalized)
-    })
+    const credential = (key: string) => credentialQueryName.has(key.replace(/[_-]/gu, '').toLowerCase())
+    if ([...new URLSearchParams(url.hash.slice(1)).keys()].some(credential)) return true
+    return [...url.searchParams.entries()].some(([key, param]) => credential(key) && param !== REDACTED_QUERY_VALUE)
   } catch {
     return false
   }
+}
+
+const REDACTED_QUERY_VALUE = '[REDACTED]'
+
+/**
+ * Replace only credential query values so benign fields in a public URL stay readable.
+ * URLs with userinfo, a fragment, or encoded keys are left whole for scrub() to redact entirely.
+ */
+export function redactUrlQueryCredentials(text: string): string {
+  return text.replace(/https?:\/\/[^\s<>"']+/giu, match => {
+    let url: URL
+    try { url = new URL(match) } catch { return match }
+    if (url.username !== '' || url.password !== '' || match.includes('#') || /[?&][^=&]*%/u.test(match)) return match
+    return match.replace(/([?&])([^=&]+)=([^&]*)/gu, (pair, separator: string, key: string) => (
+      credentialQueryName.has(key.replace(/[_-]/gu, '').toLowerCase()) ? `${separator}${key}=${REDACTED_QUERY_VALUE}` : pair
+    ))
+  })
 }
 
 function replaceAll(value: string, pattern: RegExp, replacement: () => string): string {
@@ -241,25 +273,4 @@ function hasMeaningfulContent(value: string): boolean {
     .replaceAll('[redacted]', '')
     .replace(/\b(?:set-cookie|cookie)\s*:/giu, '')
   return /[\p{L}\p{N}]/u.test(withoutRedactions)
-}
-
-/** Keeps a scrubbed label schema-valid without splitting a redaction marker or code point. */
-export function boundRedactedLabel(value: string, maxUtf16Units = 239): string | null {
-  const redaction = '[redacted]'
-  const redactionUtf16Units = 10
-  const crossingRedaction = value.lastIndexOf(redaction, maxUtf16Units - 1)
-  const bounded = crossingRedaction >= 0
-    && crossingRedaction + redactionUtf16Units > maxUtf16Units
-    ? `${truncateUtf16(value.slice(0, crossingRedaction), maxUtf16Units - redactionUtf16Units)}${redaction}`
-    : truncateUtf16(value, maxUtf16Units)
-  return /\S/u.test(bounded) ? bounded : null
-}
-
-function truncateUtf16(value: string, maxUnits: number): string {
-  let bounded = ''
-  for (const character of value) {
-    if (bounded.length + character.length > maxUnits) break
-    bounded += character
-  }
-  return bounded
 }

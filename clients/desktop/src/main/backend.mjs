@@ -1,60 +1,29 @@
 import { createServer } from 'node:net'
 import { timingSafeEqual } from 'node:crypto'
 import { isAbsolute, resolve } from 'node:path'
+import {codingProfileRegistry} from './coding-settings.mjs'
+import { CONTROL_CHARACTERS, RUNTIME_DEFAULTS as SETTINGS_DEFAULTS, selectedTextLlmProvider } from './settings-defaults.mjs'
 
 const MAX_READINESS_BYTES = 4096
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/
 const READY_ENDPOINT_PATTERN = /^127\.0\.0\.1:([0-9]{1,5})$/
 const NEWLINE = 0x0a
 
-// Mirrors settings-store.mjs's DEFAULT_SETTINGS for the runtime-facing fields
-// this module injects. Duplicated rather than imported: backend.mjs stays importable
-// without the settings-store module (and its node:fs/node:crypto surface) ever
-// loading, and a missing/corrupt settings file must never produce the literal
-// string "undefined" in a child's environment.
-const SETTINGS_DEFAULTS = Object.freeze({
-  proactivity: 'balanced',
-  codexHeartbeatSeconds: 30,
-  pipelineMode: 'integrated',
-  integratedProvider: 'qwen',
-  integratedModel: 'qwen-audio-3.0-realtime-plus',
-  integratedVoice: 'longanqian',
-  cascadedEndpointingProvider: 'auto',
-  cascadedAsrProvider: 'volcengine',
-  cascadedLlmProvider: 'qwen',
-  cascadedLlmModels: Object.freeze({
-    qwen: 'qwen-plus',
-    ark: 'doubao-seed-2-0-pro-260215',
-    deepseek: 'deepseek-flash',
-  }),
-  cascadedTtsProvider: 'volcengine',
-  cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
-  codexApprovalMode: 'ask',
-  clarificationDepth: 'balanced',
-  planReadback: 'summary',
-  generatePlan: true,
-  plannerModel: '',
-  progressBubbles: 'milestones',
-  embeddingProvider: 'dashscope',
-  embeddingModel: 'text-embedding-v4',
-  capabilitiesConfigPath: '',
-  knowledgePath: '',
-})
-
-// Duplicated from settings-store.mjs for the same reason SETTINGS_DEFAULTS is:
-// this module stays importable on its own. Node refuses a C0 control character
-// in a child's environment value and throws out of `spawn`, so a stored secret
-// that somehow carries one must be dropped here rather than take the launch —
-// and with it the app — down before the panel can clear it.
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
-
 // decryptedSecrets key -> env var name. Only a non-empty decrypted string maps
 // to an override; an absent/empty key is omitted entirely so the user's own
 // `.env` (or parent environment) keeps winning. Names match the Settings
 // aliases accepted by the Node runtime configuration contract exactly.
 export const SECRET_ENV_MAP = Object.freeze({
+  selfHostedAsrApiKey: 'SELF_HOSTED_ASR_API_KEY',
+  selfHostedLlmApiKey: 'SELF_HOSTED_LLM_API_KEY',
+  selfHostedTtsApiKey: 'SELF_HOSTED_TTS_API_KEY',
+  composioApiKey: 'COMPOSIO_API_KEY',
   dashscopeApiKey: 'DASHSCOPE_API_KEY',
+  stepfunApiKey: 'STEPFUN_API_KEY',
+  openaiApiKey: 'OPENAI_API_KEY',
+  geminiApiKey: 'GEMINI_API_KEY',
   tavilyApiKey: 'TAVILY_API_KEY',
+  openrouterApiKey: 'OPENROUTER_API_KEY',
   modelApiKey: 'MODEL_API_KEY',
   codexApiKey: 'CODEX_API_KEY',
   arkApiKey: 'ARK_API_KEY',
@@ -67,7 +36,12 @@ export const SECRET_ENV_MAP = Object.freeze({
 export function resolveSecretConfiguration(saved = {}, environment = {}, developmentEnv = {}) {
   const secrets = {}, secretsPresent = {}, secretSources = {}
   for (const [key, name] of Object.entries(SECRET_ENV_MAP)) {
-    const candidates = [['dotenv', developmentEnv[name]], ['settings', saved[key]], ['environment', environment[name]]]
+    if ((key === 'composioApiKey' || key.startsWith('selfHosted')) && saved[key] === '') { secrets[key]=''; secretsPresent[key]=false; secretSources[key]='cleared'; continue }
+    const fromFile = developmentEnv[name]
+    const fromEnvironment = environment[name]
+    const candidates = key === 'composioApiKey' || key.startsWith('selfHosted')
+      ? [['settings', saved[key]], ['dotenv', fromFile], ['environment', fromEnvironment]]
+      : [['dotenv', fromFile], ['settings', saved[key]], ['environment', fromEnvironment]]
     const selected = candidates.find(([, value]) => typeof value === 'string' && value.trim() && !CONTROL_CHARACTERS.test(value))
     secretsPresent[key] = Boolean(selected)
     if (selected) {
@@ -79,6 +53,8 @@ export function resolveSecretConfiguration(saved = {}, environment = {}, develop
 }
 
 const ALWAYS_ACTIVE_SECRET_KEYS = Object.freeze([
+  'openrouterApiKey',
+  'composioApiKey',
   'tavilyApiKey',
   'modelApiKey',
   'codexApiKey',
@@ -134,7 +110,7 @@ export function nodeRuntimeEntry({ isPackaged, appPath, packageRoot, environment
   return isPackaged
     ? resolve(
       appPath,
-      'node_modules/@nova-audio-agent/runtime/dist/src/desktop-entry.js',
+      'node_modules/@nova-personal-agent/runtime/dist/src/desktop-entry.js',
     )
     : resolve(packageRoot, '../../runtime/dist/src/desktop-entry.js')
 }
@@ -159,7 +135,6 @@ export function searchProxyUrlFromRules(rules) {
 }
 
 export function backendLaunchSpec({
-  backend = 'node',
   nodeEntry,
   nodeResourcesPath,
   workspace,
@@ -170,9 +145,9 @@ export function backendLaunchSpec({
   decryptedSecrets,
   resolvedConfig,
   searchProxyUrl,
+  newsLanguage = 'en',
   capabilitiesDocument,
 }) {
-  if (backend !== 'node') throw new Error('backend kind is invalid')
   if (typeof nodeEntry !== 'string' || !isAbsolute(nodeEntry)) {
     throw new Error('absolute Node runtime entry is required')
   }
@@ -214,16 +189,20 @@ export function backendLaunchSpec({
     ...parentEnv,
     DESKTOP_TOKEN: token,
     DESKTOP_READY_ENDPOINT: readyEndpoint,
-    BACKEND: backend,
+    BACKEND: 'node',
     CODEX_WORKSPACE: effectiveWorkspace,
     EXECUTOR: 'codex',
+    CODING_BACKEND: settings?.codingBackend ?? 'codex',
+    CODING_PROFILES: JSON.stringify(codingProfileRegistry(settings)),
     PROACTIVITY_PRESET: proactivity,
     CODING_PROGRESS_NARRATION: settings?.codingProgressNarration ?? 'smart',
     CODEX_WORKING_INTERVAL: String(codexHeartbeatSeconds),
     PROMPT_LANGUAGE: settings?.language ?? 'zh-CN',
+    NEWS_LANGUAGE: newsLanguage === 'zh-CN' ? 'zh-CN' : 'en',
     PIPELINE_MODE: pipelineMode,
     CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,
+    MEMORY_PRERECALL_ENABLED: String(settings?.memoryPrerecallEnabled ?? false),
     CONVERSATION_VISION_ENABLED: String(settings?.conversationVisionEnabled ?? false),
     MONITOR_CAMERA_DEVICE_ID: settings?.monitorCameraDeviceId ?? '',
   }
@@ -273,33 +252,45 @@ export function backendLaunchSpec({
       env.MODEL_BASE_URL = resolvedConfig.modelBaseUrl
     }
   }
-  if (pipelineMode === 'cascaded') {
-    const llmProvider = settings?.cascadedLlmProvider
-      ?? SETTINGS_DEFAULTS.cascadedLlmProvider
-    const rememberedModels = settings?.cascadedLlmModels
-    const activeModel = rememberedModels?.[llmProvider]
+  const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
+  Object.assign(env, {
+    CASCADE_LLM_PROVIDER: llmProvider,
+    CASCADE_LLM_MODEL: settings?.cascadedLlmModels?.[llmProvider]
       ?? SETTINGS_DEFAULTS.cascadedLlmModels[llmProvider]
-      ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen
+      ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen,
+    SELF_HOSTED_LLM_BASE_URL: settings?.selfHostedLlmBaseUrl ?? '',
+  })
+  if (pipelineMode === 'cascaded') {
     Object.assign(env, {
+      DOUBAO_ASR_VOICEPRINT_ENABLED: String(settings?.voiceprintEnabled === true && Boolean(settings?.voiceprintUploadUrl)),
+      DOUBAO_ASR_VOICEPRINT_HEALTH_URL: settings?.voiceprintUploadUrl ? `${settings.voiceprintUploadUrl}/healthz` : '',
+      DOUBAO_ASR_VOICEPRINT_ID: settings?.voiceprintId ?? '',
+      DOUBAO_ASR_VOICEPRINT_NAME: settings?.voiceprintName ?? '',
       CASCADE_ENDPOINTING_PROVIDER: settings?.cascadedEndpointingProvider
         ?? SETTINGS_DEFAULTS.cascadedEndpointingProvider,
+      SELF_HOSTED_ASR_URL: settings?.selfHostedAsrUrl ?? '',
+      SELF_HOSTED_TTS_URL: settings?.selfHostedTtsUrl ?? '',
+      GEMINI_ASR_MODEL: settings?.geminiAsrModel ?? SETTINGS_DEFAULTS.geminiAsrModel,
+      GEMINI_TTS_MODEL: settings?.geminiTtsModel ?? SETTINGS_DEFAULTS.geminiTtsModel,
+      GEMINI_TTS_VOICE: settings?.geminiTtsVoice ?? SETTINGS_DEFAULTS.geminiTtsVoice,
       CASCADE_ASR_PROVIDER: settings?.cascadedAsrProvider
         ?? SETTINGS_DEFAULTS.cascadedAsrProvider,
-      CASCADE_LLM_PROVIDER: llmProvider,
-      CASCADE_LLM_MODEL: activeModel,
       CASCADE_TTS_PROVIDER: settings?.cascadedTtsProvider
         ?? SETTINGS_DEFAULTS.cascadedTtsProvider,
       DOUBAO_TTS_VOICE: settings?.cascadedTtsVoice
         ?? SETTINGS_DEFAULTS.cascadedTtsVoice,
     })
   } else {
+    const provider = settings?.integratedProvider ?? SETTINGS_DEFAULTS.integratedProvider
+    const prefix = provider.toUpperCase()
+    const providerDefaults = {openai: ['gpt-realtime-2.1-mini','marin'], gemini: ['gemini-3.8-live','Kore']}[provider]
     Object.assign(env, {
       INTEGRATED_PROVIDER: settings?.integratedProvider
         ?? SETTINGS_DEFAULTS.integratedProvider,
-      QWEN_REALTIME_MODEL: settings?.integratedModel
-        ?? SETTINGS_DEFAULTS.integratedModel,
-      QWEN_REALTIME_VOICE: settings?.integratedVoice
-        ?? SETTINGS_DEFAULTS.integratedVoice,
+      [`${prefix}_REALTIME_MODEL`]:
+        settings?.integratedModel ?? providerDefaults?.[0] ?? SETTINGS_DEFAULTS.integratedModel,
+      [`${prefix}_REALTIME_VOICE`]:
+        settings?.integratedVoice ?? providerDefaults?.[1] ?? SETTINGS_DEFAULTS.integratedVoice,
     })
   }
   // The inherited fd-3 readiness pipe is gone: stdio stops at stderr and the
@@ -371,7 +362,7 @@ export function parseReadiness(raw, token) {
  */
 export function createReadinessListener({
   token,
-  timeoutMs = 15_000,
+  timeoutMs = 60_000,
   socketAuthTimeoutMs = READINESS_SOCKET_AUTH_TIMEOUT_MS,
   onTimeout = () => {},
 } = {}) {
@@ -630,16 +621,18 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
   const pipelineMode = settings?.pipelineMode ?? SETTINGS_DEFAULTS.pipelineMode
   if (decryptedSecrets && typeof decryptedSecrets === 'object') {
     const activeSecretKeys = new Set(ALWAYS_ACTIVE_SECRET_KEYS)
+    const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
+    activeSecretKeys.add(llmProvider === 'self-hosted' ? 'selfHostedLlmApiKey' : llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
     if (pipelineMode === 'cascaded') {
-      const llmProvider = settings?.cascadedLlmProvider
-        ?? SETTINGS_DEFAULTS.cascadedLlmProvider
-      activeSecretKeys.add(llmProvider === 'deepseek' ? 'deepseekApiKey' : llmProvider === 'ark' ? 'arkApiKey' : 'dashscopeApiKey')
-      activeSecretKeys.add('doubaoBigmodelApiKey')
+      activeSecretKeys.add(settings?.cascadedTtsProvider === 'self-hosted' ? 'selfHostedTtsApiKey' : (settings?.cascadedTtsProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoBigmodelApiKey')
       // Optional override only. When absent, the runtime falls back to the
       // big-model key; Main does not synthesize a duplicate secret value.
-      activeSecretKeys.add('doubaoAsrApiKey')
+      activeSecretKeys.add(settings?.cascadedAsrProvider === 'self-hosted' ? 'selfHostedAsrApiKey' : (settings?.cascadedAsrProvider ?? 'volcengine') === 'gemini' ? 'geminiApiKey' : 'doubaoAsrApiKey')
+      if ((settings?.cascadedAsrProvider ?? 'volcengine') === 'volcengine') activeSecretKeys.add('doubaoBigmodelApiKey')
     } else {
-      activeSecretKeys.add('dashscopeApiKey')
+      const integrated = settings?.integratedProvider ?? 'qwen'
+      activeSecretKeys.add(integrated === 'qwen' ? 'dashscopeApiKey' : `${integrated}ApiKey`)
+      if (settings?.integratedProvider === 'stepfun') activeSecretKeys.add('dashscopeApiKey')
     }
     const search = document?.modules?.search
     const provider = parentEnv.SEARCH_PROVIDER?.trim() || search?.provider || 'tavily'
@@ -649,14 +642,16 @@ export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}
       consumers.push({...search?.mcp, headers: search?.mcp?.headers ?? (preset ? {authorization: '${DASHSCOPE_API_KEY}'} : {})})
     }
     const references = JSON.stringify(consumers)
-    if (document?.modules?.knowledge?.enabled === true
-      && (settings?.embeddingProvider ?? 'dashscope') === 'dashscope') activeSecretKeys.add('dashscopeApiKey')
+    if ((parentEnv.MEMORY_CONNECTION?.trim() || 'local') === 'local'
+      || (document?.modules?.knowledge?.enabled === true
+      && (settings?.embeddingProvider ?? 'dashscope') === 'dashscope')) activeSecretKeys.add('dashscopeApiKey')
     for (const [key, name] of Object.entries(SECRET_ENV_MAP)) {
       if (references.includes('${' + name + '}') || (search?.enabled !== false && provider === 'tavily' && search?.tavily?.apiKeyEnv === name)) activeSecretKeys.add(key)
     }
     for (const [secretKey, envName] of Object.entries(SECRET_ENV_MAP)) {
       if (!activeSecretKeys.has(secretKey)) continue
       const value = decryptedSecrets[secretKey]
+      if ((secretKey === 'composioApiKey' || secretKey.startsWith('selfHosted')) && value === '') { env[envName]=''; continue }
       if (typeof value !== 'string') continue
       if (CONTROL_CHARACTERS.test(value)) continue
       const trimmed = value.trim()

@@ -64,6 +64,6 @@ export function wireFrameTypesSource(types) {
 }
 
 export async function generateWireFrameTypes(root) {
-  const {WIRE_FRAME_TYPES} = await import('@nova-audio-agent/runtime/desktop')
+  const {WIRE_FRAME_TYPES} = await import('@nova-personal-agent/runtime/desktop')
   await writeFile(resolve(root, 'src/renderer/wire-frame-types.mjs'), wireFrameTypesSource(WIRE_FRAME_TYPES))
 }

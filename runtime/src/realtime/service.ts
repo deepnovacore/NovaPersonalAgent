@@ -1,3 +1,8 @@
+import {parseMemoryRef} from '../core/memory.js'
+import type {ProactiveNotice} from './service-ports.js'
+import {TaskExecutionRejected} from '../personal-agent/task-loop.js'
+import type {TaskDispatchContext} from '../core/task-tools.js'
+import {taskGrantService} from '../personal-agent/tasks.js'
 import type {PromptLanguage} from './prompt-language.js'
 export type { AgentControllerFactory,DelegateLike,DeliverySnapshot,ExecutorManifestLike,RealtimeServiceOptions,ServiceProvider,ServiceRuntime } from './service-ports.js'
 export { formatSeconds } from './service-state.js'
@@ -52,13 +57,10 @@ MAX_TRACKED_TOOL_CALLS,
 PROJECT_EXPIRY_STEP_TIMEOUT_S,
 callKey,
 hostFactIntent,
-type ContinuationBatch,
 type ExecutorState,
 type PreemptiveAlertHistoryRecovery,
 type QueuedHostResponse,
-type SemanticAcknowledgement,
 type ToolCallAcceptanceSnapshot,
-type ToolCallState,
 type UrgentHostResponseOwner
 } from './service-state.js'
 import {
@@ -144,10 +146,36 @@ export class RealtimeService {
 
   playbackDone(utteranceId: string, generationEpoch: number, playedMs: number | null): boolean { return this.#host.playbackDone(utteranceId, generationEpoch, playedMs) }
 
+  taskRoutes():readonly string[]{return this.#agentRegistry.descriptors.map(item=>item.name)}
+  taskTurnOrigin():string|undefined{return this.#intakeUser?.origin_ref}
+  async dispatchTask(grant:TaskDispatchContext,instruction:string){
+    let tasks;try{tasks=taskGrantService(grant);tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}const task=tasks.get(grant.fence.task_id)
+    const controller=task.execution_route?this.#agentRegistry.controllers.get(task.execution_route):undefined
+    if(!controller)throw new TaskExecutionRejected('task_executor_unavailable')
+    return controller.dispatch({taskContext:grant,continuationGrant:grant,instruction,originalUserText:task.original_goal??task.goal,origin_ref:grant.origin_ref,sessionEpoch:this.session.sessionEpoch,acceptedUserInputRevision:0,stillWanted:grant.stillWanted})
+  }
+
   queueHostItem(
     intent: HostResponseIntent,
     options: HostItemOptions = {},
-  ): void { return this.#host.queueHostItem(intent, options) }
+  ): void {
+    const decision=intent.item.event_id.startsWith('approval:')||intent.item.event_id.startsWith('project-confirmation:');
+    if(decision&&this.#proactiveRouting){if(!this.#proactiveRouting.local())return;const prior=options.stillWanted;options={...options,stillWanted:()=>this.#proactiveRouting!.local()&&(!prior||prior())}}
+    return this.#host.queueHostItem(intent,options)
+  }
+  readonly #proactiveEvents=new Set<string>()
+  isTaskContinuationResponse(responseId:string):boolean{return this.session.responseHostItemIds(responseId).some(id=>id.startsWith('task-response:'))}
+  isProactiveResponse(responseId:string):boolean{return this.session.responseEventIds(responseId).some(id=>this.#proactiveEvents.has(id)||id.startsWith('approval:')||id.startsWith('project-confirmation:'))}
+  #queueProactive(intent:HostResponseIntent,options:HostItemOptions={},body=intent.item.content,admittedFeed=false,evidenceRefs:readonly string[]=[]):void {
+    const route=this.#proactiveRouting;if(!route){this.queueHostItem(intent,options);return}
+    this.#proactiveEvents.add(intent.item.event_id);if(this.#proactiveEvents.size>2048)this.#proactiveEvents.delete(this.#proactiveEvents.values().next().value!);
+    const work=intent.item.source?.work_id;const event=intent.item.event_id;
+    const notice:ProactiveNotice={event_id:event,kind:((event.startsWith('progress:')||intent.item.kind==='progress')?'task_progress':event.startsWith('observation:')?'alert':event.startsWith('suggestion:')?'suggestion':'task_result'),body,...(work?{work_id:work}:{}),priority:options.preemptiveAlert?100:options.priority??40,expires_in_ms:options.expiresAt==null?null:Math.max(0,(options.expiresAt-this.#clock.now())*1000)};
+    const signal=this.#stop.signal;notice.evidence_refs=evidenceRefs;notice.valid=()=>{if(signal.aborted)return false;for(const ref of evidenceRefs){try{const [channel,seq]=parseMemoryRef(ref);if(!this.#runtime.memory?.channels.get(channel)?.items.some(item=>item.seq===seq))return false}catch{/* Durable evidence is validated by the host. */}}if(options.stillWanted&&!options.stillWanted())return false;if(work&&notice.kind==='alert'&&!this.#runtime.inFlightDelegate(work))return false;if(options.owner){const state=this.session.delegateState(options.owner.delegate_id);if(state!=='running')return false;}return options.expiresAt==null||options.expiresAt>this.#clock.now()};
+    if(!admittedFeed)void route.publish(notice).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_admission_failed'));
+    if(!route.local()){void this.session.injectHostContext(intent.item).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_context_unavailable'));return}
+    const prior=options.stillWanted;this.queueHostItem(intent,{...options,stillWanted:()=>route.local()&&(!prior||prior())})
+  }
 
   semanticAcknowledgementFor(responseId: string): string | null { return this.#host.semanticAcknowledgementFor(responseId) }
 
@@ -178,6 +206,7 @@ export class RealtimeService {
   readonly #idFactory: () => string
   readonly #onProviderTerminal: (generation: PlaybackGeneration) => void
   readonly #onExecutorState: (state: ExecutorState) => void
+  readonly #captionScope = randomUUID()
   readonly #onCaption: ((frame: CaptionFrame) => void) | undefined
   readonly #onUserTranscriptAccepted: RealtimeServiceOptions['onUserTranscriptAccepted']
   readonly #telemetry: RealtimeTelemetry | undefined
@@ -215,17 +244,27 @@ export class RealtimeService {
   #awaitingUserOrigin = false
   #userOriginPreexistingResponseId: string | null = null
 
+  readonly #providerNotifications = new WeakSet<object>()
+  #notifyProviderEvent(event: RealtimeProviderEvent): void {
+    if (this.#providerNotifications.has(event)) return
+    this.#providerNotifications.add(event)
+    this.#onProviderEvent?.(event)
+  }
+  readonly #onProviderEvent: ((event:RealtimeProviderEvent)=>void)|undefined
+  readonly #proactiveRouting:RealtimeServiceOptions['proactiveRouting']
   constructor(options: RealtimeServiceOptions) {
+    this.#proactiveRouting=options.proactiveRouting
+    this.#onProviderEvent=options.onProviderEvent
     // Preserve config capture order when custom controller factories invoke intake callbacks.
     let commitProjectOperation: RealtimeServiceOptions['commitProjectOperation'] = undefined
     let onProjectView: RealtimeServiceOptions['onProjectView'] = undefined
     let projectViewProvider: RealtimeServiceOptions['projectViewProvider'] = undefined
     let projectExpiryStepTimeoutMs: number | undefined = undefined
-    const recovery = options.preemptiveAlertHistoryRecovery ?? options.guardHistoryRecovery ?? 'none'
+    const recovery = options.preemptiveAlertHistoryRecovery ?? 'none'
     if (recovery !== 'none' && recovery !== 'packed') {
       throw new TypeError('unknown preemptive-alert history recovery arm')
     }
-    const pairs = options.preemptiveAlertHistoryPairs ?? options.guardHistoryPairs ?? 4
+    const pairs = options.preemptiveAlertHistoryPairs ?? 4
     // 1, 2, or 4 rather than any positive number: these are the arms the recovery experiment has,
     // and an unlisted value would silently be a fifth arm nobody measured.
     if (pairs !== 1 && pairs !== 2 && pairs !== 4) {
@@ -253,9 +292,7 @@ export class RealtimeService {
     this.#onDiagnostic = options.onDiagnostic ?? ((line: string): void => {
       console.log(line)
     })
-    this.#controlledPreemptiveAlertReconnect = options.controlledPreemptiveAlertReconnect
-      ?? options.controlledGuardReconnect
-      ?? false
+    this.#controlledPreemptiveAlertReconnect = options.controlledPreemptiveAlertReconnect ?? false
     this.#preemptiveAlertHistoryRecovery = recovery
     this.#preemptiveAlertHistoryPairs = pairs
     const projectConfirmation = options.projectConfirmation
@@ -285,7 +322,9 @@ export class RealtimeService {
         this.#deliveryReady.set()
       },
       prepare: intake => {
-        return this.#confirmation.prepareIntake(intake)
+        const proposal=this.#confirmation.prepareIntake(intake)
+        options.onIntakePrepared?.(intake,proposal)
+        return proposal
       },
     }
     this.#approvalHost = new ApprovalHost({
@@ -367,6 +406,9 @@ export class RealtimeService {
       this.#intake = controller.intake
       controllers.unshift(controller)
     }
+    // Assembly factories may create controllers in a different order from the compiled roster.
+    controllers.sort((left, right) => options.tools.agent_descriptors.findIndex(value => value.name === left.descriptor.name)
+      - options.tools.agent_descriptors.findIndex(value => value.name === right.descriptor.name))
     this.#agentRegistry = createAgentControllerRegistry({
       controllers,
       manifests: [...options.runtime.executors.values()].map(adapter => adapter.manifest),
@@ -375,6 +417,10 @@ export class RealtimeService {
       throw new TypeError('agent controller registry does not match compiled tool descriptors')
     }
     this.#continuations = new ToolContinuations({
+      ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
+      ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
+      ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
+      ...(options.taskHost ? {taskHost:options.taskHost} : {}),
       session: this.session, host: this.#host, runtime: this.#runtime,
       bridge: this.#bridge, tools: this.#tools, intake: this.#intake, approvalHost: this.#approvalHost,
       coding: this.#coding, telemetry: this.#telemetry, idFactory: this.#idFactory,
@@ -416,13 +462,14 @@ export class RealtimeService {
       this.#approvalHost.syncExecutorApproval(view)
     }) ?? null
     if (options.executorApproval !== undefined) this.#approvalHost.syncExecutorApproval(options.executorApproval.view)
-  
+
     this.#projection = new ProviderProjection({
       session: this.session, runtime: this.#runtime, clock: this.#clock, coding: this.#coding,
+      ...(options.taskHost ? {taskOwnsWork: (workId: string) => options.taskHost!.tasks.list().some(task => task.work_ids.includes(workId))} : {}),
       codingProgressNarration: this.#codingProgressNarration,
       generatePlan: options.intake?.settings.generate_plan !== false, telemetry: this.#telemetry,
       idFactory: this.#idFactory,
-      queueHostItem: (intent, options) => this.queueHostItem(intent, options),
+      queueHostItem: (intent, options, body, admittedFeed, evidenceRefs) => this.#queueProactive(intent, options, body, admittedFeed, evidenceRefs),
       agentNameForChannel: channel => this.#agentRegistry.agentNameForChannel(channel),
       clearingConversation: () => this.#clearingConversation,
       onActiveWorkChanged,
@@ -644,6 +691,10 @@ export class RealtimeService {
   #discardedInputEpoch = -1
 
   /** Replace only the provider session; host work remains owned by the existing graph. */
+  detachTaskConversation():void{
+    this.#conversationClearRevision++
+    this.#intakeUser=null
+  }
   discardInputAudio(): Promise<void> {
     // A phone-owned provider may still be awaiting its first successful SDK handshake.
     if (!this.#connected) return Promise.resolve()
@@ -663,6 +714,8 @@ export class RealtimeService {
     void ready.catch(() => undefined)
     return ready
   }
+
+  get inputCapabilities(): readonly string[] { return [...(this.#provider.submitText ? ['text_input'] : []), ...(this.#provider.transcribeDraft ? ['dictation'] : [])] }
 
   async transcribeDraft(pcm: Uint8Array, signal: AbortSignal): Promise<string> {
     if (!this.#provider.transcribeDraft) throw new Error('dictation unavailable')
@@ -924,7 +977,9 @@ export class RealtimeService {
         received = true
         try {
           await this.handleEvent(event)
+          this.#notifyProviderEvent(event)
         } catch (cause) {
+          if (event.kind === 'response_terminal') this.#notifyProviderEvent(event)
           if (cause instanceof ItemDeliveryUncertainError) {
             await this.#recoverUncertainDelivery(cause)
           } else if (cause instanceof RealtimeDeliveryError) {
@@ -1085,19 +1140,22 @@ export class RealtimeService {
     // session sees it: letting it through would have the model acting inside the very turn whose answer
     // it is supposed to be waiting for.
     const confirmTarget = event.kind === 'tool_call_ready' ? this.#confirmation.confirmTarget(event) : null
+    const toolBinding = event.kind === 'tool_call_ready' ? this.#tools.bindings.get(event.name) : undefined
+    const stoppingTask = event.kind === 'tool_call_ready' && toolBinding?.kind === 'host' && (event.name === 'cancel' || (event.name === 'task' && event.arguments.operation === 'cancel'))
     const isConfirmationDecision = confirmTarget === 'project'
     const blockedConfirmationTool = event.kind === 'tool_call_ready'
       && this.#confirmation.blocksProjectConfirmationTool(event)
-      && !isConfirmationDecision
+      && !isConfirmationDecision && !stoppingTask
     const isExecutorApprovalDecision = confirmTarget === 'approval'
     const blockedExecutorApprovalTool = event.kind === 'tool_call_ready'
       && this.#approvalHost.blocksExecutorApprovalTool(event)
-      && !isExecutorApprovalDecision
+      && !isExecutorApprovalDecision && !stoppingTask
     // An automatic provider may create the response that will emit the confirmation function before VAD reports
     // speech end. That response is an authorization carrier, not an audible assistant turn. Let it
     // acquire an origin while the user still owns the floor, but never bypass the one-shot fence for
     // a stale host-requested confirmation question.
     const {confirmationFencePendingAtStart, confirmationResponseStartsDuringSpeech} = this.#confirmation.beforeEvent(event)
+    if('response_id' in event&&typeof event.response_id==='string'&&this.#proactiveRouting&&!this.#proactiveRouting.local()&&this.isProactiveResponse(event.response_id))this.session.suppressResponse(event.response_id)
     const accepted = blockedConfirmationTool || blockedExecutorApprovalTool
       ? false
       : await this.session.accept(event, {
@@ -1160,7 +1218,10 @@ export class RealtimeService {
         event,
         event.kind === 'user_transcript_final' ? {accepted} : undefined,
       )
-      if (caption !== null) this.#onCaption(caption)
+      if (caption !== null) {
+        const sourceId='item_id' in event?event.item_id:'response_id' in event?event.response_id:null
+        this.#onCaption({...caption,...(typeof sourceId==='string'?{turn_id:`${this.#captionScope}:${event.session_epoch}:${caption.role}:${sourceId}`}:{})})
+      }
     }
 
     if (event.kind === 'user_speech_started' && accepted) {
@@ -1197,6 +1258,18 @@ export class RealtimeService {
       await this.#approvalHost.maybeRequestFreshExecutorApprovalResponse()
     }
 
+    if (event.kind === 'response_yielded' && accepted) {
+      this.#audioStarted.delete(event.response_id)
+      const generation = this.session.currentGeneration
+      if (generation?.response_id === event.response_id && generation.session_epoch === event.session_epoch) {
+        this.#onProviderTerminal(generation)
+      }
+      this.#continuations.finishContinuation({response_id:event.response_id,status:'yielded'})
+      this.#continuations.finishOrigin(event.response_id)
+      // Notify lifecycle owners before a follow-up delivery can fail.
+      this.#notifyProviderEvent(event)
+    }
+
     if (event.kind === 'response_terminal' && accepted) {
       this.#approvalHost.noteTerminal(event)
       this.#host.recordPreemptiveAlertCancelTerminal(event)
@@ -1211,6 +1284,8 @@ export class RealtimeService {
       this.#host.finishSemanticAcknowledgement(event)
       this.#continuations.finishContinuation(event)
       this.#continuations.finishOrigin(event.response_id)
+      // Notify lifecycle owners before a follow-up delivery can fail.
+      this.#notifyProviderEvent(event)
       const itemId = this.#userOrigins.itemForResponse(event.session_epoch, event.response_id)
       if (event.status === 'completed' && itemId !== undefined
         && this.#userOrigins.revisionForItem(event.session_epoch, itemId) === this.session.userInputRevision
@@ -1259,7 +1334,7 @@ export class RealtimeService {
         const originRef = await this.#bridge.acceptUserTranscript(event.text)
         if (event.session_epoch <= this.#discardedInputEpoch) return
         this.#notifyAcceptedUserTranscript({
-          text: event.text, originRef, sessionEpoch: event.session_epoch, itemId: event.item_id, userInputRevision: inputRevision,
+          text: event.text, originRef, sessionEpoch: event.session_epoch, itemId: event.item_id, userInputRevision: inputRevision, ...(event.input_kind==='text'?{confirmed:true}:{}),
         })
         this.#rememberUserOriginRef(event.session_epoch, event.item_id, originRef)
         this.#intakeUser = {text: event.text, origin_ref: originRef, epoch: event.session_epoch, inputRevision, localOnsetRevision}
@@ -1304,6 +1379,14 @@ export class RealtimeService {
         call_id: event.call_id, outcome: accepted ? 'received' : 'rejected',
       })
       if (!accepted) {
+        // Approval carriers suppress ordinary tools; stopping still passes the user-origin fences.
+        if (stoppingTask && event.session_epoch === this.session.sessionEpoch && event.response_id !== null
+          && this.session.providerTurnPhase(event.response_id) === 'active'
+          && !this.session.providerTurnWasFenced(event.response_id)
+          && this.#approvalHost.blocksExecutorApprovalTool(event)) {
+          await this.#continuations.routeToolCall(event)
+          return
+        }
         // A refused confirmation tool still owes the provider a terminal result, or the protocol stalls
         // waiting for one that will never come.
         if (blockedConfirmationTool) await this.#confirmation.closeProjectConfirmationTool(event)
@@ -1326,6 +1409,7 @@ export class RealtimeService {
       await this.#confirmation.resumeProjectConfirmationCarrierRecoveryAfterUser()
     }
     if (event.kind === 'response_terminal') {
+      if (!accepted) this.#notifyProviderEvent(event)
       this.#confirmation.clearTerminal(event)
       this.#approvalHost.clearTerminal(event)
     }
@@ -1335,6 +1419,7 @@ export class RealtimeService {
   }
 
   #notifyAcceptedUserTranscript(turn: {
+    readonly confirmed?: boolean
     readonly text: string
     readonly originRef: string
     readonly sessionEpoch: number
@@ -1678,11 +1763,6 @@ export class RealtimeService {
     return this.#userOrigins.boundResponses
   }
 
-  /** The runtime's delegate lookups, for a projection test that needs one to be in flight. */
-  get sessionForTest(): RealtimeSession {
-    return this.session
-  }
-
   /** How many responses hold a user turn as their evidence. */
   get boundOriginCountForTest(): number {
     return this.#userOrigins.boundResponseCount
@@ -1706,62 +1786,21 @@ export class RealtimeService {
     }
   }
 
-  /** @deprecated Compatibility view for legacy configuration assertions. */
-  get guardConfiguration(): {
-    readonly controlledReconnect: boolean
-    readonly historyRecovery: PreemptiveAlertHistoryRecovery
-    readonly historyPairs: number
-  } {
-    return this.preemptiveAlertConfiguration
-  }
-
   /** Existing test compatibility views; production owners communicate through semantic methods. */
   get internals(): {
     readonly reconnectLock: Mutex
-    readonly requeueHostItem: (queued: QueuedHostResponse) => void
-    readonly nextUrgentDeliveryToken: () => number
-    readonly nextPreemptiveAlertToken: () => number
     readonly bridge: RealtimeRuntimeBridge
     readonly tools: CompiledTools
     readonly runtime: ServiceRuntime
     readonly idFactory: () => string
-    readonly toolCalls: ReadonlyMap<string, ToolCallState>
-    readonly overflowToolCalls: ReadonlyMap<string, ToolCallState>
-    readonly continuationBatches: ReadonlyMap<string, ContinuationBatch>
-    readonly continuationFifo: readonly string[]
-    readonly semanticAcknowledgements: ReadonlyMap<string, SemanticAcknowledgement>
-    readonly audioStarted: ReadonlySet<string>
-    readonly onProviderTerminal: (generation: PlaybackGeneration) => void
-    readonly onExecutorState: (state: ExecutorState) => void
-    readonly clearCaptions: () => void
     readonly setExecutorState: (state: ExecutorState) => void
   } {
     return {
       reconnectLock: this.#reconnectLock,
-      requeueHostItem: (queued: QueuedHostResponse) => {
-        this.#host.requeueHostItem(queued)
-      },
-      nextUrgentDeliveryToken: () => {
-        return this.#host.nextUrgentDeliveryToken()
-      },
-      nextPreemptiveAlertToken: () => {
-        return this.#host.nextPreemptiveAlertToken()
-      },
       bridge: this.#bridge,
       tools: this.#tools,
       runtime: this.#runtime,
       idFactory: this.#idFactory,
-      toolCalls: this.#continuations.callsForTest(),
-      overflowToolCalls: this.#continuations.overflowCallsForTest(),
-      continuationBatches: this.#continuations.batchesForTest(),
-      continuationFifo: this.#continuations.continuationOrderForTest(),
-      semanticAcknowledgements: this.#host.acknowledgementsForTest(),
-      audioStarted: this.#audioStarted,
-      onProviderTerminal: this.#onProviderTerminal,
-      onExecutorState: this.#onExecutorState,
-      clearCaptions: () => {
-        this.#clearCaptions()
-      },
       setExecutorState: (state: ExecutorState) => {
         this.#projection.setExecutorStateForTest(state)
       },

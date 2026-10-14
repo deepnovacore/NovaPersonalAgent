@@ -1,0 +1,121 @@
+name: Publish npm repository rename patch
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: npm-repository-rename-patch
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.repository == 'deepnovacore/NovaPersonalAgent' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: https://registry.npmjs.org
+      - run: npm install --global npm@11.6.0
+      - name: Verify renamed current and historical release download endpoints
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {releaseBaseUrl, resolveTarget} from './cli/src/target.mjs';
+          for (const version of ['0.4.0', '0.3.1']) {
+            for (const platform of ['darwin', 'win32', 'linux']) {
+              const {artifact} = resolveTarget(platform, platform === 'darwin' ? 'arm64' : 'x64', version);
+              const url = releaseBaseUrl(version) + '/' + artifact;
+              const checksum = await fetch(url + '.sha256', {signal: AbortSignal.timeout(30000)});
+              assert.equal(checksum.status, 200, artifact);
+              const text = (await checksum.text()).trim();
+              const digest = text.slice(0, 64);
+              assert.match(digest, /^[0-9a-f]{64}$/);
+              assert.ok(text === `${digest}  ${artifact}` || text === `${digest} *${artifact}`);
+              const binary = await fetch(url, {method: 'HEAD', signal: AbortSignal.timeout(30000)});
+              assert.equal(binary.status, 200, artifact);
+              console.log(`Verified public artifact and checksum endpoint: ${artifact}`);
+            }
+          }
+          JS
+      - name: Test launcher and prepare audited patches from published 0.4.0 packages
+        run: |
+          set -euo pipefail
+          npm test --prefix cli
+          for name in nova-personal-agent nova-personal-agent-server nova-audio-agent; do
+            mkdir -p "previous/$name" "packed/$name" "unpacked/$name"
+            npm pack "$name@0.4.0" --pack-destination "previous/$name"
+            tar -xzf "previous/$name/$name-0.4.0.tgz" -C "previous/$name"
+            node .github/scripts/prepare-repository-npm-patch.mjs "previous/$name/package" "candidate/$name"
+            npm pack "./candidate/$name" --ignore-scripts --pack-destination "packed/$name"
+            tar -xzf "packed/$name/$name-0.4.1.tgz" -C "unpacked/$name"
+            diff -r "candidate/$name" "unpacked/$name/package"
+            npm install --prefix "smoke/$name" --ignore-scripts "./packed/$name/$name-0.4.1.tgz"
+            if test "$name" = nova-personal-agent-server; then
+              "smoke/$name/node_modules/.bin/novapersonal-server" --help
+            else
+              test "$("smoke/$name/node_modules/.bin/novapersonal" --version)" = 0.4.0
+              "smoke/$name/node_modules/.bin/novaaudio" --help
+            fi
+          done
+      - name: Publish or verify each immutable patch version
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {execFileSync} from 'node:child_process';
+          import {readFileSync} from 'node:fs';
+          import {createHash} from 'node:crypto';
+          for (const name of ['nova-personal-agent', 'nova-personal-agent-server', 'nova-audio-agent']) {
+            const tarball = `packed/${name}/${name}-0.4.1.tgz`;
+            const response = await fetch(`https://registry.npmjs.org/${name}/0.4.1?rename_check=${Date.now()}`, {signal: AbortSignal.timeout(30000)});
+            if (response.status === 404) {
+              execFileSync('npm', ['publish', tarball, '--access', 'public', '--tag', 'latest'], {stdio: 'inherit'});
+            } else {
+              assert.equal(response.status, 200);
+              const integrity = 'sha512-' + createHash('sha512').update(readFileSync(tarball)).digest('base64');
+              assert.equal((await response.json()).dist.integrity, integrity, `${name}: existing version differs`);
+              console.log(`${name}@0.4.1 already published with identical bytes`);
+            }
+          }
+          JS
+      - name: Preserve the legacy package warning and verify public metadata
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {readFileSync} from 'node:fs';
+          import {execFileSync} from 'node:child_process';
+          import {setTimeout as delay} from 'node:timers/promises';
+          const warning = 'Renamed to nova-personal-agent. Run npm uninstall -g nova-audio-agent, then npm install -g nova-personal-agent@latest. Existing data and settings are preserved.';
+          for (const name of ['nova-personal-agent', 'nova-personal-agent-server', 'nova-audio-agent']) {
+            let verified = false;
+            let deprecated = false;
+            for (let attempt = 0; attempt < 30; attempt++) {
+              const response = await fetch(`https://registry.npmjs.org/${name}?rename_check=${Date.now()}`, {headers: {'Cache-Control': 'no-cache'}, signal: AbortSignal.timeout(30000)});
+              assert.equal(response.status, 200);
+              const registry = await response.json();
+              const pkg = registry.versions['0.4.1'];
+              if (pkg && name === 'nova-audio-agent' && pkg.deprecated !== warning && !deprecated) {
+                execFileSync('npm', ['deprecate', `${name}@0.4.1`, warning], {stdio: 'inherit'});
+                deprecated = true;
+              }
+              if (registry['dist-tags'].latest === '0.4.1'
+                && pkg.homepage === 'https://deepnovacore.github.io/NovaPersonalAgent/'
+                && pkg.repository.url === 'git+https://github.com/deepnovacore/NovaPersonalAgent.git'
+                && registry.readme === readFileSync(`candidate/${name}/README.md`, 'utf8')
+                && (name !== 'nova-audio-agent' || pkg.deprecated === warning)) {
+                verified = true; break;
+              }
+              await delay(5000);
+            }
+            assert.ok(verified, `${name}: public metadata did not propagate`);
+            console.log(`${name}@0.4.1: public README, repository, homepage and migration status verified`);
+          }
+          JS

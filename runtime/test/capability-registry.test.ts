@@ -11,7 +11,7 @@ import {buildQwenRealtimeAssembly} from '../src/composition/cascaded-realtime-as
 import {frontendInstructions} from '../src/realtime/qwen.js'
 import {CODEX_PROJECT_MANIFEST} from '../src/executors/codex/contract.js'
 
-const settings = () => settingsSchema.parse({executors: [], model_api_key: 'test-only', dashscope_api_key: 'test-only'})
+const settings = () => settingsSchema.parse({memory_connection: 'disabled', executors: [], model_api_key: 'test-only', dashscope_api_key: 'test-only'})
 const server = {transport: 'streamable-http', url: 'https://example.test/mcp', tools: {lookup: {enabled: true}}}
 
 test('registry default file absent is optional; explicit unreadable, malformed and invalid envelope fail redacted', () => {
@@ -111,7 +111,7 @@ test('production disables Coding by role and preserves Vision host tools; all co
     assert.equal(assembly.runtime.executors.has('codex'), false)
     assert.equal(assembly.core.visionController !== undefined, camera)
     for (const tool of ['dispatch', 'cancel', 'confirm']) assert.equal(assembly.tools.bindings.has(tool), camera)
-    assert.equal(assembly.tools.schemas.length, camera ? 4 : 1)
+    assert.equal(assembly.tools.schemas.length, camera ? 5 : 2)
     await assembly.core.stop()
   }
 })
@@ -120,7 +120,7 @@ test('final provider tool composition enforces exact N/B without partial exposur
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
   assert.throws(() => buildQwenRealtimeAssembly({settings: settings(), capabilities}), error => {
     assert.equal((error as {code: string}).code, 'frontbrain_tool_budget_exceeded')
-    assert.match(String(error), /4\/1/u)
+    assert.match(String(error), /5\/1/u)
     return true
   })
   assert.throws(() => parseCapabilityRegistry({version: 1, frontbrainToolBudget: 0}), /frontbrainToolBudget/u)

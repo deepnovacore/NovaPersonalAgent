@@ -1,6 +1,7 @@
 import {ClientPairing} from './server/client-pairing.js'
 /** Headless production service. No Electron, parent-port, or stdin lifecycle dependency. */
 import {pathToFileURL} from 'node:url'
+import {renamedEnvironmentWarnings} from './config/config.js'
 import {initializeServerToken, loadServerConfig, type ServerConfig} from './server/server-config.js'
 import type {DesktopEntryOptions, DesktopStopEventSource} from './desktop/desktop-session.js'
 
@@ -12,6 +13,8 @@ export async function runServerEntry(options: {
   readonly onDiagnostic?: (line: string) => void
 } = {}): Promise<0 | 2> {
   const onDiagnostic = options.onDiagnostic ?? (line => { process.stderr.write(`${line}\n`) })
+  // Before the configuration check, so a stale name is reported even when it is the reason startup fails.
+  for (const warning of renamedEnvironmentWarnings(options.environment ?? process.env)) onDiagnostic(warning)
   let config: ServerConfig
   let pairing: ClientPairing
   try {

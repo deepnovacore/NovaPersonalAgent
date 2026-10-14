@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["main", "v0.2.0dev"]
+    branches: ["main", "v0.2.0dev", "v0.3.0dev", "v0.3.0post.dev", "v0.4.0dev"]
     tags: ["v*"]
   pull_request:
 
@@ -43,9 +43,12 @@ jobs:
       # coverage plus the desktop/native/installer acceptance below.
       - run: npm run test:runtime:win:platform
         if: runner.os == 'Windows'
-      - run: npm run test:live:contract --workspace @nova-audio-agent/runtime
+      - run: npm run test:live:contract --workspace @nova-personal-agent/runtime
       - run: npm run test:server-cli
       - run: npm run test:cli
+      # The self-hosted serving launcher's tests need no models or GPU; its process checks are Linux-only.
+      - run: python3 -m unittest discover -s serving
+        if: runner.os == 'Linux'
       # npm may restore the Electron package without its platform binary from
       # cache. The pinned install script is idempotent and closes that gap.
       - run: node clients/desktop/node_modules/electron/install.js
@@ -53,7 +56,7 @@ jobs:
         if: runner.os == 'Linux'
         run: echo "CXXFLAGS=-UV8_DEPRECATION_WARNINGS" >> "$GITHUB_ENV"
       - run: npm run test:desktop
-      - run: npm run smoke:capability-status --workspace @nova-audio-agent/desktop
+      - run: npm run smoke:capability-status --workspace @nova-personal-agent/desktop
         if: runner.os == 'macOS'
       - run: npm run build
       - name: Verify installed headless npm package
@@ -62,7 +65,7 @@ jobs:
           umask 077
           tarball="$(node scripts/pack-server.mjs server-candidate)"
           npm install --prefix server-smoke "$tarball"
-          node scripts/verify-server-package.mjs server-smoke/node_modules/.bin/novaaudio-server
+          node scripts/verify-server-package.mjs server-smoke/node_modules/.bin/novapersonal-server
 
   package:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -74,13 +77,13 @@ jobs:
         include:
           - os: macos-latest
             script: package:mac:candidate
-            artifact: nova-audio-agent-desktop-mac
+            artifact: nova-personal-agent-desktop-mac
           - os: windows-latest
             script: package:win
-            artifact: nova-audio-agent-desktop-win
+            artifact: nova-personal-agent-desktop-win
           - os: ubuntu-22.04
             script: package:linux
-            artifact: nova-audio-agent-desktop-linux
+            artifact: nova-personal-agent-desktop-linux
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     steps:
@@ -99,7 +102,7 @@ jobs:
           echo "CXX=g++-12" >> "$GITHUB_ENV"
           echo "CXXFLAGS=-UV8_DEPRECATION_WARNINGS" >> "$GITHUB_ENV"
       - run: npm run ${{ matrix.script }}
-      - run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-audio-agent/desktop -- --unsigned
+      - run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

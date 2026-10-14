@@ -150,7 +150,7 @@ if (scenario === 'descendant-leader-first' || scenario === 'descendant-ignore-te
     if (message.method === 'thread/start' || message.method === 'thread/resume') {
       const approvalScenario = isApprovalScenario()
       if (params.approvalPolicy !== (approvalScenario ? 'on-request' : 'never')) fail('invalid_thread')
-      if (params.approvalsReviewer !== 'user' || params.permissions !== 'nova_audio_agent') {
+      if (params.approvalsReviewer !== 'user' || params.permissions !== 'nova_personal_agent') {
         fail('invalid_thread_profile')
       }
       if (message.method === 'thread/resume') {
@@ -381,8 +381,8 @@ function effectiveConfig(workspace, approvalPolicy) {
       model_provider: 'nova_api_key',
       model_providers: {nova_api_key: {base_url: 'https://api.openai.com/v1', env_key: 'NOVA_CODEX_API_KEY', wire_api: 'responses', requires_openai_auth: false}},
       approval_policy: approvalPolicy, approvals_reviewer: 'user',
-      default_permissions: 'nova_audio_agent', web_search: 'disabled', cwd: workspace,
-      permissions: {nova_audio_agent: {
+      default_permissions: 'nova_personal_agent', web_search: 'disabled', cwd: workspace,
+      permissions: {nova_personal_agent: {
         filesystem: {':root': 'read', ':workspace_roots': {
           '.': 'write', '.git': 'read', '.agents': 'read', '.codex': 'read',
         }},
@@ -402,7 +402,7 @@ function effectiveConfig(workspace, approvalPolicy) {
 function threadResponse(workspace, id, persistent, approvalPolicy = 'never') {
   return {
     modelProvider: 'nova_api_key', approvalPolicy, approvalsReviewer: 'user', cwd: workspace, sandbox: {},
-    activePermissionProfile: {id: 'nova_audio_agent'},
+    activePermissionProfile: {id: 'nova_personal_agent'},
     ...(persistent ? {runtimeWorkspaceRoots: [workspace]} : {}),
     thread: {
       modelProvider: 'nova_api_key',

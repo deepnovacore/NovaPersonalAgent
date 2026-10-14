@@ -208,7 +208,7 @@ test('client launch plan installs when needed, builds once, and forces the Node 
         'run',
         'start:built',
         '--workspace',
-        '@nova-audio-agent/desktop',
+        '@nova-personal-agent/desktop',
       ],
     },
   ])
@@ -257,7 +257,7 @@ test('client launch plan is Windows-safe and skips an unnecessary install', () =
         'run',
         'start:built',
         '--workspace',
-        '@nova-audio-agent/desktop',
+        '@nova-personal-agent/desktop',
       ],
     },
   ])
@@ -303,4 +303,9 @@ test('client launch plan fails before side effects for an invalid invocation', (
     envFileExists: true,
     dependenciesInstalled: true,
   }), /npm CLI unavailable/u)
+})
+
+test('workbench launcher forwards a one-time presentation override to Electron', () => {
+  const steps = planClientLaunch({argv: ['--workbench'], env: {}, platform: 'linux', rootDir: '/repo', nodeExecutable: '/usr/bin/node', npmCli: '/npm/bin/npm-cli.js', dependenciesInstalled: true})
+  assert.deepEqual(steps.at(-1).args.slice(-2), ['--', '--workbench'])
 })

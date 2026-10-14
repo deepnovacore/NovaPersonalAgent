@@ -1,3 +1,5 @@
+import type {RealtimeServiceOptions} from '../../src/realtime/service-ports.js'
+import type {TaskToolHost} from '../../src/core/task-tools.js'
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 import {resolve} from 'node:path'
@@ -35,7 +37,7 @@ import {RealtimeService, type ServiceProvider} from '../../src/realtime/service.
 import {RealtimeSession, type SessionProvider} from '../../src/realtime/session.js'
 import {compileToolSchema} from '../../src/core/tool-schema.js'
 
-export const fixtureRoot = resolve(import.meta.dirname, '../../../../fixtures/realtime/service/v1')
+export const fixtureRoot = resolve(import.meta.dirname, '../../../../tests/fixtures/realtime/service/v1')
 
 export interface Step {
   readonly kind: string
@@ -400,7 +402,7 @@ export function progressEvent(input: {
 /** Spec 08 host tools on the pipeline fixture: `dispatch` / `cancel` / `confirm` are the only coding tools the model sees. */
 export async function dispatchTurn(
   service: RealtimeService,
-  name: 'dispatch' | 'cancel' | 'confirm' | `codex__${string}`,
+  name: 'schedule' | 'task' | 'dispatch' | 'cancel' | 'confirm' | `codex__${string}`,
   arguments_: Readonly<Record<string, JsonValue>>,
   responseId = 'origin',
 ): Promise<ToolAcceptance> {
@@ -700,7 +702,7 @@ export function intakePorts(
     settings: {clarification_depth: 'balanced', plan_readback: 'silent'},
     roster: () => [], running: () => [], activeProject: () => 'alpha',
     resolveTarget: unexpected,
-    models: {assess: unexpected, plan: unexpected, resolveCancelTarget: unexpected},
+    models: {assess: unexpected, plan: unexpected, targets: {resolveIntake: () => Promise.reject(new Error('unexpected target call')), resolveWork: unexpected}},
     dispatch: unexpected, steer: unexpected,
     record: () => undefined,
     ...overrides,
@@ -783,10 +785,12 @@ function playbackPorts(idFactory: () => string, onClear: ConstructorParameters<t
 }
 
 interface PipelineOptions {
+  readonly onProviderEvent?: ConstructorParameters<typeof RealtimeService>[0]["onProviderEvent"]
   readonly userResponseMode?: 'automatic' | 'requested'
   readonly intake?: ConstructorParameters<typeof RealtimeService>[0]['intake']
   readonly toolResult?: {readonly accepted: boolean; readonly delegateId: string | null}
   readonly onCaption?: (frame: {
+    readonly turn_id?: string
     readonly role: string
     readonly text: string
     readonly final: boolean
@@ -815,10 +819,15 @@ interface PipelineOptions {
   readonly beforeTranscriptIngest?: () => Promise<void>
   readonly clearConversation?: () => Promise<void>
   /** Fold the ops into the spec 08 host tools; a raw `codex__*` from the provider is then refused. */
+  readonly taskHost?: TaskToolHost
+  readonly scheduleHost?: RealtimeServiceOptions['scheduleHost']
+  readonly scopedTool?: RealtimeServiceOptions['scopedTool']
+  readonly validateScopedContext?: ()=>Promise<boolean>
   readonly agent?: boolean
 }
 
 interface ProjectionOptions {
+  readonly proactiveRouting?: RealtimeServiceOptions['proactiveRouting']
   readonly delegate?: {readonly executor: string; readonly op: string; readonly routing_class: string}
   readonly suggest?: boolean
   readonly priority?: number
@@ -1052,6 +1061,10 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
         async settleIntakeForTest(): Promise<void> {await codingController?.settleIntakeForTest()}
       }
       const service = new TestService({
+        ...(options.taskHost?{taskHost:options.taskHost}:{}),
+        ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
+        ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
+        ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
         provider,
         runtime: {
           clock,
@@ -1069,7 +1082,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
           }),
           clearConversation: options.clearConversation ?? (() => Promise.resolve()),
         },
-        tools: compileToolSchema([manifest], {includeMemoryRecall: options.includeRecall ?? false, agentDescriptors}),
+        tools: compileToolSchema([manifest], {includeSchedules:!!options.scheduleHost,includeAppContext:!!options.scopedTool,includeTasks:!!options.taskHost,includeMemoryRecall: options.includeRecall ?? false, agentDescriptors}),
         session,
         bridge: new RealtimeRuntimeBridge({
           runtime: {
@@ -1093,7 +1106,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
               delegate_id: scripted.delegateId,
             }),
           },
-          tools: compileToolSchema([manifest], {includeMemoryRecall: options.includeRecall ?? false, agentDescriptors}),
+          tools: compileToolSchema([manifest], {includeSchedules:!!options.scheduleHost,includeAppContext:!!options.scopedTool,includeTasks:!!options.taskHost,includeMemoryRecall: options.includeRecall ?? false, agentDescriptors}),
           idFactory: nextId,
           ...(options.personalMemory === undefined ? {} : {personalMemory: options.personalMemory}),
         }),
@@ -1121,6 +1134,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
         // Spread rather than assigned: `exactOptionalPropertyTypes` distinguishes an absent optional from
         // one explicitly set to undefined, and the service's contract is the former.
         ...(options.onCaption === undefined ? {} : {onCaption: options.onCaption}),
+        ...(options.onProviderEvent ? {onProviderEvent: options.onProviderEvent} : {}),
         ...(options.onUserTranscriptAccepted === undefined ? {} : {onUserTranscriptAccepted: options.onUserTranscriptAccepted}),
         onDiagnostic: line => diagnostics.push(line),
         telemetry: {
@@ -1256,6 +1270,7 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
         idFactory: nextId,
         ...(agentControllers.length === 0 ? {} : {agentControllers}),
         onDiagnostic: () => undefined,
+        ...(options.proactiveRouting?{proactiveRouting:options.proactiveRouting}:{}),
         ...(options.onActiveWorkChanged === undefined
           ? {}
           : {onActiveWorkChanged: options.onActiveWorkChanged}),
@@ -1372,12 +1387,12 @@ export function realtimeServiceHarness(profile: 'queue' | 'pipeline' | 'projecti
           idFactory: nextId,
         }),
         idFactory: nextId,
-        controlledGuardReconnect: options.controlledReconnect ?? false,
+        controlledPreemptiveAlertReconnect: options.controlledReconnect ?? false,
         ...(options.recoveryTexts === undefined
           ? {}
           : {
-            guardHistoryRecovery: 'packed' as const,
-            guardHistoryPairs: 1,
+            preemptiveAlertHistoryRecovery: 'packed' as const,
+            preemptiveAlertHistoryPairs: 1,
             telemetry: {
               record: (kind: string, payload: Readonly<Record<string, JsonValue>>) => {
                 telemetry.push({kind, payload})

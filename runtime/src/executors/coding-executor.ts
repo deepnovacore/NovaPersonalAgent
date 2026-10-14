@@ -1,3 +1,5 @@
+import type {CodingBackendId} from '../config/coding-backends.js'
+import type {TaskDispatchContext} from '../core/task-tools.js'
 /**
  * Port between the host and whichever executor carries the `coding` role.
  *
@@ -14,6 +16,7 @@ import type {JsonValue} from '../core/events.js'
 import type {DelegateRequest, ExecutorManifest} from '../core/ports.js'
 import type {ConfirmedProjectOperation, ProjectAction, ProjectConfirmationController} from '../projects/project-confirmation.js'
 import type {PublicProjectContext, PublicProjectView, WorkspaceRecord} from '../projects/project-store.js'
+import type {CodingTargetPort,CodingTargetSelection} from '../personal-agent/coding-targets.js'
 import type {WakeReason} from '../core/slots.js'
 
 /** Where a work order will run, as resolved by the project adapter for the intake FSM; `select` is a bare switch. */
@@ -30,6 +33,8 @@ export interface IntakeTarget {
 export interface RunningWork {
   /** The delegate id of the run. */
   readonly work_id: string
+  /** Set for non-Codex backends so surfaces can name the agent actually running the work. */
+  readonly backend_id?: CodingBackendId
   readonly project: string
   readonly title: string
 }
@@ -41,7 +46,7 @@ export interface RosterEntry {
   readonly name: string
   readonly last_used_at: number
   readonly last_session_title: string | null
-  readonly running: readonly Pick<RunningWork, 'work_id' | 'title'>[]
+  readonly running: readonly Pick<RunningWork, 'work_id' | 'title' | 'backend_id'>[]
 }
 
 /** What `assess` decided about where an objective goes; `project` is a verbatim roster name (or the new name for `create`). */
@@ -71,9 +76,11 @@ export type CancelResult =
 export type CancelTargetResolver = (instruction: string, running: readonly RunningWork[]) => Promise<string | null>
 
 export interface CancelContext {
+  /** Host-owned conversation boundary; an empty set authorizes no cancellation. */
+  readonly workIds?: ReadonlySet<string>
   /** Host-resolved exact work id. When set, the adapter may cancel only that running work. */
   readonly targetWorkId?: string
-  /** Same `surrogate_model` as `intake.assess`; `null` when the model could not pick one of `running`. */
+  /** Same `support_model` as `intake.assess`; `null` when the model could not pick one of `running`. */
   readonly resolveCancelTarget?: CancelTargetResolver
   /** Re-checked after the model call, before any slot is aborted; `false` means the request was superseded. */
   readonly stillWanted?: () => boolean
@@ -87,7 +94,7 @@ export interface CancelContext {
  * and dispatch. The adapter side of the port is below.
  */
 export interface AgentExecutor {
-  /** ≤10 entries, most recently used first; `running` merged from the adapter's run slots. */
+  /** Complete bounded registry, most recently used first; recent entries include session history. */
   roster(): readonly RosterEntry[]
   running(): readonly RunningWork[]
   /** Async: >1 running works with an instruction needs one `resolveCancelTarget` call. */
@@ -97,7 +104,7 @@ export interface AgentExecutor {
    * Every change of the active project (`switch`, `work` elsewhere, `create`) is then confirmed by the
    * user through the project-confirmation FSM and committed by `commitConfirmed` (decision 2026-09-04).
    */
-  resolveIntakeTarget(decision: CoordinatorDecision): Promise<IntakeTarget>
+  resolveIntakeTarget(decision: CoordinatorDecision,selection?:CodingTargetSelection,taskContext?:TaskDispatchContext): Promise<IntakeTarget>
 }
 
 export type ProjectRuntimeDispatch = (
@@ -116,21 +123,27 @@ export interface ProjectCommitResult {
 
 /** Optional exact host action surface, independent of voice cancellation resolution. */
 export interface CodingTaskPort {
+  quarantineResources?():void
+  inspectSession?(sessionId:string):Promise<string|null>
+  resolveSession?(sessionId:string):Promise<{project:string;session_id:string;active:boolean;work_id?:string}>
   cancelTask(workId: string): 'cancelling' | 'not_running'
   taskDirectory(workId: string): Promise<string | null>
 }
 
 /** A coding executor that also owns project (workspace + session) bookkeeping. */
 export interface ProjectExecutorAdapter extends ExecutorAdapter, AgentExecutor {
+  readonly targetPort?: CodingTargetPort
   readonly taskPort?: CodingTaskPort
   readonly confirmationController: ProjectConfirmationController
   initialize(): Promise<void>
   activeCommittedWorkspace(): Promise<WorkspaceRecord | null>
   observeProjectView(observer: (view: PublicProjectView) => void | Promise<void>): () => void
   observeProjectContext(observer: (context: PublicProjectContext) => void | Promise<void>): () => void
-  commitConfirmed(operation: ConfirmedProjectOperation, dispatch: ProjectRuntimeDispatch): Promise<ProjectCommitResult>
+  commitConfirmed(operation: ConfirmedProjectOperation, dispatch: ProjectRuntimeDispatch, confirmation?: ProjectConfirmationController): Promise<ProjectCommitResult>
   publicProjectView(pendingConfirmation: boolean): PublicProjectView
   publicProjectContext(pendingConfirmation: boolean): PublicProjectContext
+  /** Backend a resumed session is bound to, or the current default for a new session. */
+  codingBackendFor?(sessionId: string | null): Promise<CodingBackendId>
   close(): Promise<void>
 }
 

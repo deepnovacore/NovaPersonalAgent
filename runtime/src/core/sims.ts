@@ -1,7 +1,7 @@
 /**
  * Two simulators: one fast, one slow.
  *
- * Ports `src/nova_audio_agent/executors/sims.py`. They are the only thing that makes
+ * Ports `src/nova_personal_agent/executors/sims.py`. They are the only thing that makes
  * "async does not block" and "speak on timeout" reproducible: a real executor's delay is
  * uncontrollable, so those two core behaviors could never otherwise reach CI.
  *

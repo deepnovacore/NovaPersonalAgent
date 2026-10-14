@@ -1,3 +1,4 @@
+import {notificationResultText} from '../notifications/content.js';
 import { canonicalJson } from '../text/canonical-json.js';
 import type { Clock } from '../core/clock.js';
 import type { CodingProgressNarrationState } from './coding-progress-narration.js';
@@ -54,11 +55,12 @@ interface ProviderProjectionPorts {
  readonly codingProgressNarration: CodingProgressNarrationState
  readonly telemetry: RealtimeTelemetry | undefined
  readonly idFactory: () => string
- queueHostItem(intent: HostResponseIntent, options?: HostItemOptions): void
+ queueHostItem(intent: HostResponseIntent, options?: HostItemOptions, notificationBody?: string, admittedFeed?: boolean, evidenceRefs?: readonly string[]): void
  readonly agentNameForChannel: (channel: string) => string | null
  readonly clearingConversation: () => boolean
  readonly onActiveWorkChanged: () => void
  readonly preparing: () => boolean
+ readonly taskOwnsWork?: (workId: string) => boolean
  readonly onExecutorState: (state: ExecutorState) => void
  readonly onDiagnostic: (line: string) => void
  resolveSyncResult(event: Extract<EventRecord, {kind: 'handoff'}>): boolean
@@ -200,6 +202,7 @@ projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
       summary: this.#delegateSummary(delegateId, this.executorDisplayName(channel)),
       state: event.kind === 'deadline'
         ? 'unknown'
+        : event.payload.content.code === 'model_finished' && event.payload.content.verified === false ? 'unknown'
         : event.payload.outcome === 'ok'
           ? 'completed'
           : event.payload.outcome === 'refused'
@@ -236,7 +239,8 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       priority: hit ? Math.max(reason.priority, HIT_ALERT_MIN_PRIORITY) : reason.priority,
       preemptive: false,
       ...(coding ? {owner: {delegate_id: reason.origin!, channel: delegate!.executor}, expiresAt: this.ports.clock.now() + PROGRESS_HOST_ITEM_TTL_S} : {}),
-    })
+      stillWanted:()=>suggestion.expires_at>this.ports.clock.now()&&suggestion.evidence_refs.every(ref=>{try{const [channel,seq]=parseMemoryRef(ref);return this.ports.runtime.memory?.channels.get(channel)?.items.some(item=>item.seq===seq)===true}catch{return true}}),
+    }, undefined, typeof suggestion.content.personal_feed_id==='string', suggestion.evidence_refs)
   }
 
 #isSelectedProgress(suggestion: Suggestion): boolean {
@@ -336,7 +340,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
         : manifest.policy.priority >= PREEMPT_MIN_PRIORITY,
       preemptiveAlert: isPreemptiveMonitorAlert(manifest.policy),
       preemptiveAlertDelegateId: isPreemptiveMonitorAlert(manifest.policy) ? event.payload.delegate_id : null,
-    })
+    }, undefined, false, event.payload.refs)
   }
 
 #observationDelegate(
@@ -413,7 +417,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     // creates a fresh model turn that can accidentally replay an older acknowledgement.
     if (isMonitorPolicy(manifest.policy) && payload.phase === 'working') return
     if (payload.phase === 'working') {
-      if (this.ports.codingProgressNarration.viaSurrogate(coding, manifest.policy.progress_via_surrogate === true)) return
+      if (this.ports.codingProgressNarration.viaProactive(coding, manifest.policy.progress_via_surrogate === true)) return
       if (coding && this.ports.codingProgressNarration.mode === 'continuous' && summary === null) return
     }
 
@@ -472,7 +476,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       && !directSuggestionHandoff
     this.ports.session.registerDelegate(payload.delegate_id, {
       summary: this.#delegateSummary(payload.delegate_id, displayName),
-      state: payload.outcome === 'ok'
+      state: payload.content.code === 'model_finished' && payload.content.verified === false ? 'unknown' : payload.outcome === 'ok'
         ? 'completed'
         : payload.outcome === 'refused'
           ? 'refused'
@@ -483,6 +487,8 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
     this.#lastProgressSummary.delete(payload.delegate_id)
     this.#startedDelegates.delete(payload.delegate_id)
     this.publishExecutorState()
+    // Tracked tasks publish only after host verification, never from executor terminal prose.
+    if (this.ports.taskOwnsWork?.(payload.delegate_id)) return
     if (manifest.ops.find(op => op.name === claimed.op)?.sync_result === true
       || (manifest.roles.includes('coding') && claimed.op === 'steer')) return
     if (
@@ -528,7 +534,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
         : manifest.policy.priority >= PREEMPT_MIN_PRIORITY),
       preemptiveAlert: preemptiveMonitorHit,
       preemptiveAlertDelegateId: preemptiveMonitorHit ? payload.delegate_id : null,
-    })
+    }, notificationResultText(payload.content,finalView), false, payload.refs)
   }
 
 #workSource(delegateId: string, eventSeq?: number): HostWorkSource | undefined {

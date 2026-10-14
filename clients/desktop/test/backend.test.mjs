@@ -20,6 +20,11 @@ import {
 } from '../src/main/backend.mjs'
 import { resolveDesktopConfig } from '../src/main/platform-config.mjs'
 
+test('local memory injects its saved DashScope key independently of conversation provider',()=>{
+  const env=capabilityEnvironment({pipelineMode:'cascaded',cascadedLlmProvider:'deepseek'},{dashscopeApiKey:'memory-key'},{MEMORY_CONNECTION:'local'},{modules:{knowledge:{enabled:false},search:{enabled:false}}})
+  assert.equal(env.DASHSCOPE_API_KEY,'memory-key')
+})
+
 const TOKEN = 'b'.repeat(32)
 const SETTINGS_V2 = Object.freeze({
   version: 2,
@@ -43,7 +48,6 @@ const SETTINGS_V2 = Object.freeze({
 
 function nodeLaunchSpec(options) {
   return backendLaunchSpec({
-    backend: 'node',
     nodeEntry: '/repo/runtime/dist/src/desktop-entry.js',
     nodeResourcesPath: '/repo/clients/desktop/build',
     ...options,
@@ -177,22 +181,10 @@ test('packaged backend selection refuses explicit Python before resolving an int
   )
 })
 
-test('launch spec cannot construct the retired Python process', () => {
-  assert.throws(() => nodeLaunchSpec({
-    backend: 'python',
-    python: '/private/poison/python',
-    workspace: '/workspace',
-    token: TOKEN,
-    readyEndpoint: '127.0.0.1:49152',
-    parentEnv: {},
-  }), /backend kind is invalid/)
-})
-
 test('Node launch uses the compiled utility-process entry and no writable stdin', () => {
   const nodeEntry = '/repo/runtime/dist/src/desktop-entry.js'
   const nodeResourcesPath = '/repo/clients/desktop/build'
   const spec = nodeLaunchSpec({
-    backend: 'node',
     nodeEntry,
     nodeResourcesPath,
     workspace: '/workspace',
@@ -210,7 +202,6 @@ test('Node launch uses the compiled utility-process entry and no writable stdin'
   assert.equal(JSON.stringify(spec).includes(TOKEN), true)
   assert.equal(JSON.stringify(spec.argv).includes(TOKEN), false)
   assert.throws(() => nodeLaunchSpec({
-    backend: 'node',
     nodeEntry: 'relative-entry.js',
     nodeResourcesPath,
     workspace: '/workspace',
@@ -219,7 +210,6 @@ test('Node launch uses the compiled utility-process entry and no writable stdin'
     parentEnv: {},
   }), /absolute Node runtime entry/)
   assert.throws(() => nodeLaunchSpec({
-    backend: 'node',
     nodeEntry,
     nodeResourcesPath: 'relative-resources',
     workspace: '/workspace',
@@ -231,7 +221,6 @@ test('Node launch uses the compiled utility-process entry and no writable stdin'
 
 test('resolved desktop settings override inherited Codex and model configuration', () => {
   const spec = nodeLaunchSpec({
-    backend: 'node',
     nodeEntry: '/repo/runtime/dist/src/desktop-entry.js',
     nodeResourcesPath: '/repo/clients/desktop/build',
     workspace: '/environment/workspace',
@@ -360,7 +349,6 @@ test('the runtime receives the exact state root resolved for desktop maintenance
 
 test('resolved desktop configuration removes an invalid inherited Codex binary', () => {
   const spec = nodeLaunchSpec({
-    backend: 'node',
     nodeEntry: '/repo/runtime/dist/src/desktop-entry.js',
     nodeResourcesPath: '/repo/clients/desktop/build',
     workspace: '/workspace',
@@ -395,7 +383,7 @@ test('runtime entry resolves inside the workspace for dev and the asar for packa
     isPackaged: true,
     appPath: packagedApp,
     packageRoot: '/unused/desktop',
-  }), resolve(packagedApp, 'node_modules/@nova-audio-agent/runtime/dist/src/desktop-entry.js'))
+  }), resolve(packagedApp, 'node_modules/@nova-personal-agent/runtime/dist/src/desktop-entry.js'))
 })
 
 test('launch spec strips a stale inherited readiness pipe', () => {
@@ -447,19 +435,34 @@ test('integrated launch injects all active public settings and only its platform
   assert.equal(spec.env.QWEN_REALTIME_MODEL, 'qwen-integrated-custom')
   assert.equal(spec.env.QWEN_REALTIME_VOICE, 'longxiaochun')
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'dash-key')
+  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'ark')
+  assert.equal(spec.env.ARK_API_KEY, 'ark-key')
   for (const name of [
     'CASCADE_ENDPOINTING_PROVIDER',
     'CASCADE_ASR_PROVIDER',
-    'CASCADE_LLM_PROVIDER',
-    'CASCADE_LLM_MODEL',
     'CASCADE_TTS_PROVIDER',
     'DOUBAO_TTS_VOICE',
-    'ARK_API_KEY',
     'DOUBAO_BIGMODEL_API_KEY',
     'DOUBAO_ASR_API_KEY',
   ]) {
     assert.equal(name in spec.env, false, `${name} is inactive for integrated mode`)
   }
+})
+
+test('StepFun launch selects its model and credential without leaking inactive provider keys', () => {
+  const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN,
+    readyEndpoint: '127.0.0.1:49152', parentEnv: {},
+    settings: {...SETTINGS_V2, integratedProvider: 'stepfun',
+      integratedModel: 'stepaudio-3-realtime-preview', integratedVoice: 'default'},
+    decryptedSecrets: {stepfunApiKey: 'step-key', dashscopeApiKey: 'support-key', arkApiKey: 'unused-key'},
+  })
+  assert.equal(spec.env.INTEGRATED_PROVIDER, 'stepfun')
+  assert.equal(spec.env.STEPFUN_REALTIME_MODEL, 'stepaudio-3-realtime-preview')
+  assert.equal(spec.env.STEPFUN_REALTIME_VOICE, 'default')
+  assert.equal(spec.env.STEPFUN_API_KEY, 'step-key')
+  assert.equal(spec.env.DASHSCOPE_API_KEY, 'support-key')
+  assert.equal('QWEN_REALTIME_MODEL' in spec.env, false)
+  assert.equal('ARK_API_KEY' in spec.env, false)
 })
 
 test('cascaded Qwen launch injects active selectors, remembered model, and Doubao credentials', () => {
@@ -515,7 +518,7 @@ test('cascaded Ark launch selects the remembered Ark model without injecting Das
     workspace: '/workspace',
     token: TOKEN,
     readyEndpoint: '127.0.0.1:49152',
-    parentEnv: {},
+    parentEnv: {MEMORY_CONNECTION: 'disabled'},
     settings,
     decryptedSecrets: {
       dashscopeApiKey: 'dash-key',
@@ -561,10 +564,10 @@ test('launch spec falls back to the settings-store defaults when settings is mis
 
   assert.equal(spec.env.PROACTIVITY_PRESET, 'balanced')
   assert.equal(spec.env.CODEX_WORKING_INTERVAL, '30')
-  assert.equal(spec.env.PIPELINE_MODE, 'integrated')
-  assert.equal(spec.env.INTEGRATED_PROVIDER, 'qwen')
-  assert.equal(spec.env.QWEN_REALTIME_MODEL, 'qwen-audio-3.0-realtime-plus')
-  assert.equal(spec.env.QWEN_REALTIME_VOICE, 'longanqian')
+  assert.equal(spec.env.PIPELINE_MODE, 'cascaded')
+  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'deepseek')
+  assert.equal(spec.env.CASCADE_LLM_MODEL, 'deepseek-flash')
+  assert.equal(spec.env.DOUBAO_TTS_VOICE, 'zh_female_vv_uranus_bigtts')
 })
 
 test('launch spec falls back per-field for a partially-populated settings object', () => {
@@ -578,10 +581,19 @@ test('launch spec falls back per-field for a partially-populated settings object
 
   assert.equal(spec.env.PROACTIVITY_PRESET, 'conservative')
   assert.equal(spec.env.CODEX_WORKING_INTERVAL, '30')
-  assert.equal(spec.env.PIPELINE_MODE, 'integrated')
-  assert.equal(spec.env.INTEGRATED_PROVIDER, 'qwen')
-  assert.equal(spec.env.QWEN_REALTIME_MODEL, 'qwen-audio-3.0-realtime-plus')
-  assert.equal(spec.env.QWEN_REALTIME_VOICE, 'longanqian')
+  assert.equal(spec.env.PIPELINE_MODE, 'cascaded')
+  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'deepseek')
+  assert.equal(spec.env.CASCADE_LLM_MODEL, 'deepseek-flash')
+  assert.equal(spec.env.DOUBAO_TTS_VOICE, 'zh_female_vv_uranus_bigtts')
+})
+
+test('integrated quick start supplies Qwen text settings without unused speech keys', () => {
+  const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152', parentEnv: {},
+    settings: {pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek'}, decryptedSecrets: {dashscopeApiKey: 'dash-key'}})
+  assert.equal(spec.env.CASCADE_LLM_PROVIDER, 'qwen')
+  assert.equal(spec.env.CASCADE_LLM_MODEL, 'qwen-plus')
+  assert.equal(spec.env.DASHSCOPE_API_KEY, 'dash-key')
+  assert.equal('DOUBAO_BIGMODEL_API_KEY' in spec.env, false)
 })
 
 test('launch spec injects decrypted secrets as env overrides when present', () => {
@@ -590,6 +602,7 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
     token: TOKEN,
     readyEndpoint: '127.0.0.1:49152',
     parentEnv: {},
+    settings: {pipelineMode:'integrated'},
     decryptedSecrets: {
       dashscopeApiKey: 'dash-key',
       tavilyApiKey: 'tavily-key',
@@ -1368,6 +1381,13 @@ test('dev dotenv keys override saved keys in both public metadata and runtime co
   assert.doesNotMatch(JSON.stringify({secretsPresent: resolved.secretsPresent, secretSources: resolved.secretSources}), /repo-key|speech-key|stored-key/)
 })
 
+test('memory prerecall switch overrides inherited env and defaults off', () => {
+  for (const enabled of [undefined, false, true]) {
+    const spec=nodeLaunchSpec({workspace:'/workspace',token:TOKEN,readyEndpoint:'127.0.0.1:49152',parentEnv:{MEMORY_PRERECALL_ENABLED:'stale'},settings:{...SETTINGS_V2,...(enabled===undefined?{}:{memoryPrerecallEnabled:enabled})}})
+    assert.equal(spec.env.MEMORY_PRERECALL_ENABLED,String(enabled??false))
+  }
+})
+
 test('DeepSeek cascade injects only its selected official model credential', () => {
   const env = capabilityEnvironment({pipelineMode: 'cascaded', cascadedLlmProvider: 'deepseek'}, {deepseekApiKey: 'deepseek-test', arkApiKey: 'unused-ark'}, {}, {modules: {search: {enabled: false}, camera: {enabled: false}}})
   assert.equal(env.DEEPSEEK_API_KEY, 'deepseek-test')
@@ -1375,4 +1395,31 @@ test('DeepSeek cascade injects only its selected official model credential', () 
   const view = resolveSecretConfiguration({}, {}, {DEEPSEEK_API_KEY: 'deepseek-dotenv-test'})
   assert.equal(view.secretsPresent.deepseekApiKey, true)
   assert.equal(view.secretSources.deepseekApiKey, 'dotenv')
+})
+
+test('Composio saved key overrides dotenv and explicit clear disables inherited credentials', () => {
+  const environment={COMPOSIO_API_KEY:'parent-fixture'},dev={COMPOSIO_API_KEY:'dotenv-fixture'}
+  assert.equal(resolveSecretConfiguration({composioApiKey:'saved-fixture'},environment,dev).secrets.composioApiKey,'saved-fixture')
+  const cleared=resolveSecretConfiguration({composioApiKey:''},environment,dev)
+  assert.equal(cleared.secretsPresent.composioApiKey,false)
+  assert.equal(capabilityEnvironment({},cleared.secrets,environment).COMPOSIO_API_KEY,'')
+  assert.equal(resolveSecretConfiguration({},environment,dev).secrets.composioApiKey,'dotenv-fixture')
+})
+
+test('OpenRouter secret reaches runtime independently of conversation provider', () => {
+  const environment = capabilityEnvironment({}, {openrouterApiKey:'synthetic-openrouter'}, {})
+  assert.equal(environment.OPENROUTER_API_KEY, 'synthetic-openrouter')
+})
+
+test('RSS language uses the system signal independently of saved UI language',()=>{
+ for(const [newsLanguage,language] of [['zh-CN','en'],['en','zh-CN']]){
+  const spec=nodeLaunchSpec({workspace:'/workspace',token:TOKEN,readyEndpoint:'127.0.0.1:12345',parentEnv:{},settings:{...SETTINGS_V2,language},newsLanguage})
+  assert.equal(spec.env.NEWS_LANGUAGE,newsLanguage)
+  assert.equal(spec.env.PROMPT_LANGUAGE,language)
+ }
+})
+
+test('Gemini speech settings reach the runtime without borrowing the Volcengine voice',()=>{
+ const env=nodeLaunchSpec({workspace:'/workspace',token:TOKEN,readyEndpoint:'127.0.0.1:49152',parentEnv:{},settings:{pipelineMode:'cascaded',cascadedAsrProvider:'gemini',cascadedTtsProvider:'gemini',geminiAsrModel:'asr-custom',geminiTtsModel:'tts-custom',geminiTtsVoice:'Puck'},decryptedSecrets:{geminiApiKey:'synthetic-gemini'}}).env
+ assert.equal(env.GEMINI_API_KEY,'synthetic-gemini');assert.equal(env.GEMINI_ASR_MODEL,'asr-custom');assert.equal(env.GEMINI_TTS_MODEL,'tts-custom');assert.equal(env.GEMINI_TTS_VOICE,'Puck')
 })

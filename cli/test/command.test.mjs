@@ -11,7 +11,7 @@ function output() {
 test('help, version, and invalid commands do not install the desktop', async () => {
   for (const [argv, code, expected] of [
     [['--help'], 0, HELP_TEXT],
-    [['--version'], 0, '0.2.3'],
+    [['--version'], 0, '0.4.0'],
     [['unknown'], 2, HELP_TEXT],
     [['start', 'extra'], 2, HELP_TEXT],
   ]) {
@@ -61,7 +61,7 @@ test('doctor lists voice keys, guides a first run, and fails while one is missin
   const code = await main(['doctor'], {stdout: sink.stream, doctor: doctorReport({pipeline: 'integrated', keys: [{name: 'DASHSCOPE_API_KEY', source: null}]})})
   assert.equal(code, 1)
   assert.match(sink.read(), /Voice pipeline: integrated\n {2}DASHSCOPE_API_KEY: missing\n/u)
-  assert.match(sink.read(), /First run: start `novaaudio` and paste a DashScope API Key/u)
+  assert.match(sink.read(), /First run: start `novapersonal` and paste a DashScope API Key/u)
 
   const ready = output()
   assert.equal(await main(['doctor'], {stdout: ready.stream, doctor: doctorReport({pipeline: 'integrated', keys: [{name: 'DASHSCOPE_API_KEY', source: 'settings'}]})}), 0)

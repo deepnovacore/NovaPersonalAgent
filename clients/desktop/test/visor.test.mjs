@@ -37,3 +37,14 @@ test('Visor IPC admits only its exact windows/main frames and excludes settings 
  report(event(settings),{state:'speaking'});assert.equal(context.visorAI,null)
  report(event(orb),{state:'speaking',muted:true});assert.equal(context.visorAI.state,'speaking')
 })
+
+
+test('Visor settings and reports use the published desktop bridge after the app rename',async()=>{
+ const {readFile}=await import('node:fs/promises')
+ const read=path=>readFile(new URL(path,import.meta.url),'utf8')
+ const [preload,settings,orb,main]=await Promise.all([read('../src/preload/preload.cjs'),read('../src/renderer/visor-settings.mjs'),read('../src/renderer/index.mjs'),read('../src/main/main.mjs')])
+ assert.match(preload,/exposeInMainWorld\('novaPersonalAgentDesktop'/)
+ assert.match(settings,/window\.novaPersonalAgentDesktop\?\.visor/)
+ assert.match(orb,/window\.novaPersonalAgentDesktop\?\.visor\?\.report/)
+ assert.match(main,/onOrb:\(\)=>requestPresentation\('orb'\)/)
+})

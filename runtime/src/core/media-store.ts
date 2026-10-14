@@ -1,7 +1,7 @@
 /**
  * Bounded in-process image storage.
  *
- * Ported from the store half of `src/nova_audio_agent/media.py`. Frames are large and arrive
+ * Ported from the store half of `src/nova_personal_agent/media.py`. Frames are large and arrive
  * continuously, so this is an LRU bounded by *compressed payload bytes* rather than entry count: a
  * hundred thumbnails and one full-resolution capture are not the same load, and counting entries would
  * treat them as if they were.
