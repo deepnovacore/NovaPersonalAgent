@@ -157,3 +157,16 @@ test('article discussion carries exact article identity and only a user-selected
  await h.buttons.find(b=>b.textContent==='整理应用思路').action();assert.deepEqual(discussions[1][0],[{kind:'news',id:'a',content_hash:'h1'},{kind:'todo',id:'t',version:4}]);assert.match(discussions[1][1],/Prototype/)
  assert.equal(h.calls.length,0)
 })
+
+test('the profile draft can be updated on demand, and the button is disabled while an update runs',async t=>{
+ const h=harness(t),draft={about:{text:'Draft',refs:[]},work:[],interests:[]}
+ renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},warmup:{status:'ready',draft,sources:[]}})
+ const update=h.buttons.find(b=>b.textContent==='立即更新');assert.ok(update);assert.notEqual(update.disabled,true)
+ await update.action();assert.deepEqual(h.calls,[['profile.refresh',{}]])
+ h.panel.children.length=0;h.buttons.length=0;renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},warmup:{status:'working',draft,sources:[]}})
+ const busy=h.buttons.find(b=>b.textContent==='正在更新…');assert.ok(busy);assert.equal(busy.disabled,true);assert.ok(!h.buttons.some(b=>b.textContent==='立即更新'))
+ h.panel.children.length=0;h.buttons.length=0;renderProfile(h.panel,{...h,state:{profile:{version:0,about:''}},warmup:{status:'working',draft:null,sources:[]}})
+ assert.ok(!h.buttons.some(b=>b.textContent==='立即更新'||b.textContent==='正在更新…'),'a first draft still being written has its own status box')
+ h.buttons.length=0;h.panel.children.length=0;renderProfile(h.panel,{...h,state:{profile:{version:2,about:'Mine'}},warmup:{status:'ready',draft,sources:[]}})
+ assert.ok(!h.buttons.some(b=>b.textContent==='立即更新'),'a profile the user wrote is not replaced by a draft')
+})
